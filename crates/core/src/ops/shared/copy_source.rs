@@ -466,11 +466,15 @@ fn split_version(raw: &str) -> Result<(&str, Option<String>), CopySourceRejectio
 
 /// Parses `bucket/key`, with or without the leading slash AWS also accepts.
 ///
-/// The bucket and the key are separated on the still-encoded value, so a key containing an encoded
-/// slash keeps it rather than being cut at a separator the client escaped on purpose.
+/// The separator is the first `/` of the *decoded* value, whether the client sent it literally or
+/// as `%2F`: aws-sdk-dotnet percent-encodes the whole `bucket/key` value (rustfs/gateway#926). A
+/// bucket name cannot contain `/`, so the first decoded slash is always the separator and every
+/// later one — literal or encoded — is key bytes. The split is found on the raw value rather than
+/// by decoding it whole, so the key half still reaches [`key_of`] undecoded and is decoded exactly
+/// once: decoding the whole value first would decode the key a second time.
 fn parse_path(path: &str) -> Result<SourceResource, CopySourceRejection> {
     let path = path.strip_prefix('/').unwrap_or(path);
-    let Some((bucket, key)) = path.split_once('/') else {
+    let Some((bucket, key)) = split_bucket_key(path) else {
         return Err(CopySourceRejection::new(
             ErrorCode::INVALID_ARGUMENT,
             "x-amz-copy-source must name a key as well as a bucket",
@@ -484,6 +488,20 @@ fn parse_path(path: &str) -> Result<SourceResource, CopySourceRejection> {
         key: key_of(key)?,
         version_id: None,
     })
+}
+
+/// Splits the raw `bucket/key` value at the first byte sequence that decodes to `/`.
+///
+/// A decoded `/` can only come from a literal `/` or from `%2F`/`%2f` — percent decoding is one
+/// octet per escape, and no byte of a multi-byte UTF-8 sequence is `0x2F` — so the first of those
+/// in the raw value is exactly the first slash of the decoded value. Both halves are returned still
+/// encoded.
+fn split_bucket_key(path: &str) -> Option<(&str, &str)> {
+    ["/", "%2F", "%2f"]
+        .into_iter()
+        .filter_map(|separator| path.find(separator).map(|at| (at, separator.len())))
+        .min_by_key(|&(at, _)| at)
+        .map(|(at, len)| (&path[..at], &path[at + len..]))
 }
 
 /// Parses the two S3 ARN spellings, and refuses every other ARN.

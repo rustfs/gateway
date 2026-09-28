@@ -2240,12 +2240,18 @@ fn split_source_version(raw: &str) -> Result<(&str, Option<String>), HandlerErro
 
 /// Parses `bucket/key`, with or without the leading slash AWS also accepts.
 ///
-/// The two halves are separated on the still-encoded value, so a key containing `%2F` keeps it
-/// rather than being cut at a separator the client escaped on purpose.
+/// The separator is the first slash of the decoded value, literal or `%2F` (rustfs/gateway#926): a
+/// bucket name cannot contain `/`, so every later slash is key bytes. It is found on the raw value
+/// so the key is still decoded exactly once — the shared parser's rule.
 #[cfg(test)]
 fn parse_source_path(path: &str) -> Result<(String, String), HandlerError> {
     let path = path.strip_prefix('/').unwrap_or(path);
-    let Some((bucket, key)) = path.split_once('/') else {
+    let Some((bucket, key)) = ["/", "%2F", "%2f"]
+        .into_iter()
+        .filter_map(|separator| path.find(separator).map(|at| (at, separator.len())))
+        .min_by_key(|&(at, _)| at)
+        .map(|(at, len)| (&path[..at], &path[at + len..]))
+    else {
         return Err(bad_copy_source("x-amz-copy-source must name a key as well as a bucket"));
     };
     Ok((decode_source(bucket)?, decode_source(key)?))
@@ -6006,8 +6012,30 @@ mod tests {
             "bucket/a?b",
             "bucket/a?versionId=",
             "bucket/%FF%FE%FD",
+            // An encoded separator relaxes none of these (rustfs/gateway#926).
+            "bucket%2F",
+            "/%2Fkey",
+            "bucket%252Fkey",
+            "bucket%2F..%2F..%2Fetc%2Fpasswd",
         ] {
             assert!(parse_copy_source(raw).is_err(), "{raw}");
+        }
+    }
+
+    /// rustfs/gateway#926 — the mirror's separator is the first slash of the decoded value, as
+    /// the shared parser's is: aws-sdk-dotnet's `bucket%2Fkey` names `key`, a later `%2F` is key
+    /// bytes, and the key is still decoded exactly once.
+    #[test]
+    fn a_copy_source_separator_may_be_percent_encoded() {
+        let cases = [
+            ("bucket%2Fkey", "key"),
+            ("/bucket%2fkey", "key"),
+            ("bucket%2Fa%2Fc", "a/c"),
+            ("bucket%2Fa%2541", "a%41"),
+        ];
+        for (raw, key) in cases {
+            let source = parse_copy_source(raw).expect("parses");
+            assert_eq!((source.bucket.as_str(), source.key.as_str()), ("bucket", key), "{raw}");
         }
     }
 
