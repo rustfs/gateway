@@ -34,7 +34,7 @@ fn the_named_h2_corpus_runs_all_cases_on_production_hyper() {
     let ids: Vec<_> = report.outcomes.iter().map(|outcome| outcome.id.clone()).collect();
     assert_eq!(
         ids,
-        (1..=21).map(|index| format!("c-h2-{index:04}")).collect::<Vec<_>>(),
+        (1..=24).map(|index| format!("c-h2-{index:04}")).collect::<Vec<_>>(),
         "missing or unexecuted named case"
     );
     for outcome in &report.outcomes {

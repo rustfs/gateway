@@ -1,0 +1,59 @@
+# c-h2-0022 — more than one stream on one HTTP/2 connection.
+
+[case]
+id = "c-h2-0022"
+schema_version = 4
+title = "A second request on stream 3 is answered on the same connection"
+rationale = "Two requests share one connection and the observed stream 3 must carry its own 403, so a second stream on a used connection is served. Stream 1 is read but not observed; this case does not show that it was answered."
+polarity = "positive"
+tags = ["framing"]
+timeout_ms = 1500
+quirks = []
+applies_to = { http_versions = ["h2"], tls = "forbidden" }
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9113.html#section-5.1.1"
+summary = "A client opens streams with odd identifiers, each numerically greater than every stream it opened before; an unexpected identifier is a connection PROTOCOL_ERROR."
+kind = "rfc"
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9113.html#section-4.3"
+summary = "Every field block is decompressed in order, even on a stream the receiver discards, because each one can change the shared compression context."
+kind = "rfc"
+
+[[setup.buckets]]
+name = "conf-cors-rt"
+
+[request]
+method = "GET"
+target = "/"
+http_version = "h2"
+
+[[request.h2_frames]]
+type = "settings"
+
+# Stream 1 is read but not observed: the observation is the last stream a HEADERS frame opens.
+
+[[request.h2_frames]]
+type = "headers"
+stream_id = 1
+flags = ["end_headers", "end_stream"]
+payload_hex = "02074f5054494f4e538604152f636f6e662d636f72732d72742f6b65792e747874410e73332e6578616d706c652e636f6d"
+
+# Written after stream 1's response has had time to arrive, on the same connection.
+
+[[request.h2_frames]]
+type = "headers"
+stream_id = 3
+flags = ["end_headers", "end_stream"]
+payload_hex = "828684410e73332e6578616d706c652e636f6d"
+delay_ms = 100
+
+[expect]
+kind = "response"
+status = 403
+h2_control_frames = [{ type = "window_update", stream_id = 0, increment = 2031617 }]
+socket_read_after = "no_termination_observed"
+
+[expect.body]
+contains_utf8 = ["<Code>AccessDenied</Code>"]

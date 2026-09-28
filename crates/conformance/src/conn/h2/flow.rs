@@ -73,11 +73,14 @@ impl Flow {
         }
     }
 
-    /// DATA consumes send credit as its payload bytes are actually written, including padding.
-    pub(super) fn sent_data(&mut self, count: usize) {
+    /// DATA consumes send credit as its payload bytes are actually written, including padding; only
+    /// the observed stream's own credit is tracked, connection credit is shared by every stream.
+    pub(super) fn sent_data(&mut self, count: usize, stream: u32) {
         let count = i64::try_from(count).unwrap_or(i64::MAX);
         self.send_connection -= count;
-        self.send_stream -= count;
+        if stream == self.stream_id {
+            self.send_stream -= count;
+        }
     }
 
     pub(super) fn received_settings(&mut self, payload: &[u8], flags: u8) -> Result<(), SutError> {
@@ -109,15 +112,34 @@ impl Flow {
         Ok(())
     }
 
-    pub(super) fn received_update(&mut self, stream: u32, increment: u32) -> Result<(), SutError> {
+    /// `opened` names another stream the script opened: its credit is not tracked, so the grant
+    /// is accepted without being accounted for.
+    pub(super) fn received_update(&mut self, stream: u32, increment: u32, opened: bool) -> Result<(), SutError> {
         let credit = if stream == 0 {
             &mut self.send_connection
         } else if stream == self.stream_id {
             &mut self.send_stream
+        } else if opened {
+            return Ok(());
         } else {
             return Err(refused("WINDOW_UPDATE for an untracked stream cannot be accounted for".to_owned()));
         };
         add(credit, increment)
+    }
+
+    /// Another opened stream's DATA: it spends the shared connection window, whose limit still holds.
+    pub(super) fn received_other_data(&mut self, count: usize) -> Result<(), SutError> {
+        if !self.receive_valid {
+            return Err(refused("flow-control DATA credit is unknown after an invalid authored grant".to_owned()));
+        }
+        let count = i64::try_from(count).unwrap_or(i64::MAX);
+        if count > self.receive_connection {
+            return Err(refused(
+                "flow-control DATA payload exceeds received connection or stream credit".to_owned(),
+            ));
+        }
+        self.receive_connection -= count;
+        Ok(())
     }
 
     pub(super) fn received_data(&mut self, count: usize) -> Result<(), SutError> {

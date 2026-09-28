@@ -311,13 +311,9 @@ fn request_fields_the_frames_would_replace_are_refused() {
 }
 
 #[test]
-fn a_script_must_open_exactly_one_stream() {
+fn a_script_must_open_a_stream() {
     let none = compile_error(&format!("{HEAD}[[h2_frames]]\ntype = \"settings\"\n"));
     assert!(none.contains("declares no HEADERS frame"), "{none}");
-    let two = compile_error(&format!(
-        "{HEAD}[[h2_frames]]\ntype = \"headers\"\nstream_id = 1\n[[h2_frames]]\ntype = \"data\"\nstream_id = 3\n"
-    ));
-    assert!(two.contains("on stream 3 after the script opened stream 1"), "{two}");
 }
 
 /// Positive — every envelope is fixed as declared: order, type, flags, stream id, length, payload,
@@ -620,3 +616,5 @@ fn a_slow_listener_start_does_not_forgive_a_silent_peer() {
 mod h2_client_control_tests;
 
 mod h2_ping_tests;
+
+mod h2_streams_tests;

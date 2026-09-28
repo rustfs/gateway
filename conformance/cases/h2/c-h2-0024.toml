@@ -1,0 +1,45 @@
+# c-h2-0024 — more than one stream on one HTTP/2 connection.
+
+[case]
+id = "c-h2-0024"
+schema_version = 4
+title = "A header block interrupted by another stream's HEADERS is a connection error"
+rationale = "A field block must arrive as one contiguous sequence; a HEADERS frame from another stream in the middle of it must end the connection rather than be interleaved."
+polarity = "negative"
+tags = ["framing"]
+timeout_ms = 1500
+quirks = []
+applies_to = { http_versions = ["h2"], tls = "forbidden" }
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9113.html#section-6.10"
+summary = "Between a HEADERS frame without END_HEADERS and its final CONTINUATION, any other frame type or a frame on a different stream is a connection PROTOCOL_ERROR."
+kind = "rfc"
+
+[request]
+method = "GET"
+target = "/"
+http_version = "h2"
+
+[[request.h2_frames]]
+type = "settings"
+
+# Stream 1's block lacks END_HEADERS; it is written 100 ms after SETTINGS for the grant's order.
+
+[[request.h2_frames]]
+type = "headers"
+stream_id = 1
+flags = ["end_stream"]
+payload_hex = "828684410e73332e6578616d706c652e636f6d"
+delay_ms = 100
+
+[[request.h2_frames]]
+type = "headers"
+stream_id = 3
+flags = ["end_headers", "end_stream"]
+payload_hex = "828684410e73332e6578616d706c652e636f6d"
+
+[expect]
+kind = "connection_reset"
+h2_control_frames = [{ type = "window_update", stream_id = 0, increment = 2031617 }, { type = "goaway", last_stream_id = 0, error_code = 1 }]
+socket_read_after = "eof"

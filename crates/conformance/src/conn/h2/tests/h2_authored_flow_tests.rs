@@ -149,7 +149,11 @@ fn observing_literal_flow_violations_does_not_enable_multiple_streams() {
     let source = format!(
         "{HEAD}[[h2_frames]]\ntype='headers'\nstream_id=1\npayload_hex='{ANONYMOUS_GET_ROOT_HPACK}'\n[[h2_frames]]\ntype='data'\nstream_id=3\npayload_hex='78'\n"
     );
-    assert!(compile_error(&source).contains("more than one stream"));
+    // DATA on a stream no HEADERS opened is a literal idle-stream violation, not a second observed
+    // stream: the observation stays on stream 1 and stream 3 is not read as an opened stream.
+    let script = compile(&read(&block(&source))).expect("the literal violation compiles");
+    assert_eq!(script.stream_id, 1);
+    assert_eq!(script.opened, [1]);
 }
 
 #[test]
@@ -223,9 +227,12 @@ fn settings_stream_id_received_nonzero_is_refused_without_granting_credit() {
             }
             let result = receiver.accept(frame, &script, &mut flow);
             assert!(result.is_err(), "nonzero peer SETTINGS stream {stream}, ACK={ack} must be refused");
-            flow.received_update(1, MAX_STREAM_ID)
+            flow.received_update(1, MAX_STREAM_ID, false)
                 .expect("refused SETTINGS must not alter the zero send window");
-            assert!(flow.received_update(1, 1).is_err(), "the maximum remains a real bounded credit ledger");
+            assert!(
+                flow.received_update(1, 1, false).is_err(),
+                "the maximum remains a real bounded credit ledger"
+            );
         }
     }
 }
@@ -245,10 +252,10 @@ fn settings_stream_id_received_zero_updates_actual_send_credit() {
             .accept(peer_initial_window(0, 1), &script, &mut flow)
             .expect("valid one-byte grant")
     );
-    flow.received_update(1, MAX_STREAM_ID - 1)
+    flow.received_update(1, MAX_STREAM_ID - 1, false)
         .expect("the valid grant leaves exactly this much headroom");
     assert!(
-        flow.received_update(1, 1).is_err(),
+        flow.received_update(1, 1, false).is_err(),
         "the valid SETTINGS grant must consume one byte of headroom"
     );
 }
@@ -270,9 +277,12 @@ fn settings_stream_id_received_zero_ack_preserves_send_credit() {
         payload: Vec::new(),
     };
     assert!(!receiver.accept(ack, &script, &mut flow).expect("valid stream-zero ACK"));
-    flow.received_update(1, MAX_STREAM_ID)
+    flow.received_update(1, MAX_STREAM_ID, false)
         .expect("ACK must leave the zero send window unchanged");
-    assert!(flow.received_update(1, 1).is_err(), "the maximum remains a real bounded credit ledger");
+    assert!(
+        flow.received_update(1, 1, false).is_err(),
+        "the maximum remains a real bounded credit ledger"
+    );
 }
 
 fn malformed_settings_payloads() -> [&'static str; 4] {
@@ -318,9 +328,12 @@ fn settings_length_received_malformed_is_refused_before_changing_credit() {
             receiver.accept(malformed, &script, &mut flow).is_err(),
             "malformed peer SETTINGS payload {payload} must be refused"
         );
-        flow.received_update(1, MAX_STREAM_ID - 1)
+        flow.received_update(1, MAX_STREAM_ID - 1, false)
             .expect("refused SETTINGS must preserve the one-byte window");
-        assert!(flow.received_update(1, 1).is_err(), "malformed SETTINGS must not reduce existing credit");
+        assert!(
+            flow.received_update(1, 1, false).is_err(),
+            "malformed SETTINGS must not reduce existing credit"
+        );
     }
 }
 
@@ -346,9 +359,9 @@ fn settings_length_empty_payload_preserves_valid_credit() {
         payload: Vec::new(),
     };
     assert!(!receiver.accept(empty, &script, &mut flow).expect("valid empty SETTINGS"));
-    flow.received_update(1, MAX_STREAM_ID - 1)
+    flow.received_update(1, MAX_STREAM_ID - 1, false)
         .expect("empty SETTINGS leaves the existing window unchanged");
-    assert!(flow.received_update(1, 1).is_err(), "the existing window remains accounted for");
+    assert!(flow.received_update(1, 1, false).is_err(), "the existing window remains accounted for");
 }
 
 fn invalid_settings_ack_payloads() -> [&'static str; 4] {
@@ -374,9 +387,9 @@ fn settings_ack_nonempty_payload_is_refused_without_changing_credit() {
             .accept(frame, &script, &mut flow)
             .expect_err("nonempty SETTINGS ACK must be refused");
         assert!(error.to_string().contains("SETTINGS ACK payload must be empty"), "{error}");
-        flow.received_update(1, MAX_STREAM_ID - 1)
+        flow.received_update(1, MAX_STREAM_ID - 1, false)
             .expect("rejected ACK must not raise stream credit");
-        assert!(flow.received_update(1, 1).is_err(), "rejected ACK must not reduce stream credit");
+        assert!(flow.received_update(1, 1, false).is_err(), "rejected ACK must not reduce stream credit");
     }
 }
 
@@ -407,9 +420,9 @@ fn settings_ack_empty_payload_preserves_credit_and_a_real_response() {
         payload: Vec::new(),
     };
     assert!(!receiver.accept(frame, &script, &mut flow).expect("valid empty ACK"));
-    flow.received_update(1, MAX_STREAM_ID - 1)
+    flow.received_update(1, MAX_STREAM_ID - 1, false)
         .expect("empty ACK preserves existing credit");
-    assert!(flow.received_update(1, 1).is_err(), "empty ACK preserves bounded credit");
+    assert!(flow.received_update(1, 1, false).is_err(), "empty ACK preserves bounded credit");
     let seen = measured("", "", "000000 04 01 00000000 000001 01 04 00000001 88 000001 00 01 00000001 78");
     assert_eq!(seen.outcome, Outcome::Response);
     assert_eq!(seen.status, Some(200));
