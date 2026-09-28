@@ -26,8 +26,11 @@
 //!
 //! RustFS's evaluator is MinIO's: principal, action, resource and a condition language of some
 //! forty keys. This one matches principal, action and resource with the same `*`/`?` wildcards,
-//! and evaluates `StringEquals` on `s3:x-amz-acl`: exact case-sensitive values, a string or
-//! an OR-list of strings, and no match when the request header is absent. Any condition block
+//! and evaluates three operators on two request-header keys, `s3:x-amz-acl` and
+//! `s3:x-amz-server-side-encryption` (rustfs/gateway#979): `StringEquals` (exact, case-sensitive,
+//! a string or an OR-list, no match on an absent header), `StringNotEquals` (its negation, so an
+//! absent header matches, as AWS evaluates a negated operator) and `Null` (`true` matches an
+//! absent header, `false` a present one). Every clause of a block must match. Any condition block
 //! containing another key or operator remains unsupported as a whole and neither grants nor
 //! denies. That preserves the existing limitation: unsupported Allow is fail-closed, unsupported
 //! Deny is fail-open. This is not a complete IAM condition evaluator or validator.
@@ -66,8 +69,55 @@ struct Statement {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Condition {
     None,
-    AclEquals(Vec<String>),
+    /// Every clause must match.
+    Clauses(Vec<Clause>),
     Unsupported,
+}
+
+/// A condition key this evaluator reads, in RustFS's canonical spelling.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ConditionKey {
+    Acl,
+    ServerSideEncryption,
+}
+
+impl ConditionKey {
+    fn parse(name: &str) -> Option<Self> {
+        match name {
+            "s3:x-amz-acl" => Some(Self::Acl),
+            "s3:x-amz-server-side-encryption" => Some(Self::ServerSideEncryption),
+            _ => None,
+        }
+    }
+
+    fn value<'a>(self, facts: RequestFacts<'a>) -> Option<&'a str> {
+        match self {
+            Self::Acl => facts.acl,
+            Self::ServerSideEncryption => facts.server_side_encryption,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Clause {
+    Equals(ConditionKey, Vec<String>),
+    NotEquals(ConditionKey, Vec<String>),
+    /// `true`: the key is absent from the request; `false`: it is present.
+    Null(ConditionKey, bool),
+}
+
+impl Clause {
+    fn matches(&self, facts: RequestFacts<'_>) -> bool {
+        match self {
+            Self::Equals(key, values) => key
+                .value(facts)
+                .is_some_and(|actual| values.iter().any(|value| value == actual)),
+            Self::NotEquals(key, values) => !key
+                .value(facts)
+                .is_some_and(|actual| values.iter().any(|value| value == actual)),
+            Self::Null(key, absent) => key.value(facts).is_none() == *absent,
+        }
+    }
 }
 
 impl Condition {
@@ -77,28 +127,43 @@ impl Condition {
         if operators.is_empty() {
             return Self::None;
         }
-        if operators.len() != 1 {
-            return Self::Unsupported;
+        let mut clauses = Vec::new();
+        for (operator, keys) in operators {
+            let Some(keys) = keys.as_object().filter(|keys| !keys.is_empty()) else {
+                return Self::Unsupported;
+            };
+            for (name, value) in keys {
+                let Some(key) = ConditionKey::parse(name) else { return Self::Unsupported };
+                let clause = match operator.as_str() {
+                    "StringEquals" | "StringNotEquals" => {
+                        let Ok(values) = strings(Some(value)) else { return Self::Unsupported };
+                        if values.is_empty() {
+                            return Self::Unsupported;
+                        }
+                        if operator == "StringEquals" {
+                            Clause::Equals(key, values)
+                        } else {
+                            Clause::NotEquals(key, values)
+                        }
+                    }
+                    "Null" => match value {
+                        Value::Bool(absent) => Clause::Null(key, *absent),
+                        Value::String(text) if text == "true" => Clause::Null(key, true),
+                        Value::String(text) if text == "false" => Clause::Null(key, false),
+                        _ => return Self::Unsupported,
+                    },
+                    _ => return Self::Unsupported,
+                };
+                clauses.push(clause);
+            }
         }
-        let Some(keys) = operators.get("StringEquals").and_then(Value::as_object) else {
-            return Self::Unsupported;
-        };
-        if keys.len() != 1 {
-            return Self::Unsupported;
-        }
-        let Some(value) = keys.get("s3:x-amz-acl") else {
-            return Self::Unsupported;
-        };
-        match strings(Some(value)) {
-            Ok(values) if !values.is_empty() => Self::AclEquals(values),
-            _ => Self::Unsupported,
-        }
+        Self::Clauses(clauses)
     }
 
-    fn matches(&self, acl: Option<&str>) -> bool {
+    fn matches(&self, facts: RequestFacts<'_>) -> bool {
         match self {
             Self::None => true,
-            Self::AclEquals(values) => acl.is_some_and(|acl| values.iter().any(|value| value == acl)),
+            Self::Clauses(clauses) => clauses.iter().all(|clause| clause.matches(facts)),
             Self::Unsupported => false,
         }
     }
@@ -155,6 +220,19 @@ pub struct PolicyRequest<'a> {
     pub key: Option<&'a str>,
 }
 
+/// The request headers a condition may read, each `None` when the request did not send it.
+///
+/// A header the request sent more than once, or not as text, is not a fact the caller may pass as
+/// absent: that is the caller's to refuse before evaluating (`compat-sut`'s authorizer answers it
+/// as indeterminate).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct RequestFacts<'a> {
+    /// `x-amz-acl`.
+    pub acl: Option<&'a str>,
+    /// `x-amz-server-side-encryption`.
+    pub server_side_encryption: Option<&'a str>,
+}
+
 impl BucketPolicy {
     /// Parses a document the shared `validate_policy` already accepted as a JSON object.
     ///
@@ -182,21 +260,20 @@ impl BucketPolicy {
     /// needs a matching `Allow`.
     #[must_use]
     pub fn allows(&self, request: PolicyRequest<'_>) -> bool {
-        self.allows_with_acl(request, None)
+        self.allows_with_facts(request, RequestFacts::default())
     }
 
-    /// Evaluates the request with its supplied `x-amz-acl` header.
+    /// Evaluates the request with the header facts its conditions may read.
     ///
-    /// Only `StringEquals` on `s3:x-amz-acl` is supported: values match exactly and case
-    /// sensitively, a string array matches any member, and `None` never matches. Condition
-    /// keys use RustFS's canonical spelling. A block containing any other key or operator remains
-    /// unsupported as a whole. This does not store or enforce ACL grants.
+    /// See the module documentation for the supported operators and keys; a block containing any
+    /// other key or operator remains unsupported as a whole. This does not store or enforce ACL
+    /// grants.
     #[must_use]
-    pub fn allows_with_acl(&self, request: PolicyRequest<'_>, acl: Option<&str>) -> bool {
+    pub fn allows_with_facts(&self, request: PolicyRequest<'_>, facts: RequestFacts<'_>) -> bool {
         if self
             .statements
             .iter()
-            .any(|statement| !statement.allow && statement.matches(request, acl))
+            .any(|statement| !statement.allow && statement.matches(request, facts))
         {
             return false;
         }
@@ -205,7 +282,7 @@ impl BucketPolicy {
         }
         self.statements
             .iter()
-            .any(|statement| statement.allow && statement.matches(request, acl))
+            .any(|statement| statement.allow && statement.matches(request, facts))
     }
 
     /// Whether any `Allow` statement names every principal, RustFS's test for a policy the
@@ -249,8 +326,8 @@ impl Statement {
         })
     }
 
-    fn matches(&self, request: PolicyRequest<'_>, acl: Option<&str>) -> bool {
-        if !self.condition.matches(acl) {
+    fn matches(&self, request: PolicyRequest<'_>, facts: RequestFacts<'_>) -> bool {
+        if !self.condition.matches(facts) {
             return false;
         }
         let principal_matches = match (&self.principals, request.account) {

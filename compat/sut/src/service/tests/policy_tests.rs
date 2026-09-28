@@ -53,7 +53,7 @@ fn anonymous(method: http::Method, target: &str) -> http::Request<Bytes> {
         .expect("a valid unsigned request")
 }
 
-async fn put_policy(service: &S3Service, document: &'static str, md5: &str) -> WireResponse {
+pub(super) async fn put_policy(service: &S3Service, document: &'static str, md5: &str) -> WireResponse {
     let request = signed(
         MAIN_KEY,
         MAIN_SECRET,
@@ -71,7 +71,7 @@ async fn status(service: &S3Service) -> String {
     body_of(&response)
 }
 
-async fn policed(service: &S3Service) {
+pub(super) async fn policed(service: &S3Service) {
     assert_eq!(
         exchange(service, as_main(http::Method::PUT, "/policed", Bytes::new()))
             .await
