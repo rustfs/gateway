@@ -25,6 +25,7 @@
 //! failures are invisible, and the failure it hides here is an irreversible repository leak.
 
 use crate::base64;
+use crate::form;
 use crate::framing;
 use crate::schema::{Chunk, Entry};
 
@@ -317,6 +318,9 @@ fn text_findings(text: &str) -> Vec<Reason> {
     if has_sigv4_signature(text) || framing::has_live_trailer_signature(text) {
         reasons.push(Reason::SigV4Signature);
     }
+    if form::has_live_form_credential(text) {
+        reasons.push(Reason::LiveCredentialField);
+    }
     reasons
 }
 
@@ -428,6 +432,9 @@ fn redaction_claim_holds(entry: &Entry, claimed: &str) -> bool {
     if framing::is_body_carrier(claimed) {
         return framing::claim_holds(entry, claimed);
     }
+    if form::is_form_record(claimed) {
+        return form::claim_holds(entry, claimed);
+    }
     let header = entry
         .headers
         .iter()
@@ -459,8 +466,9 @@ pub fn admit(entry: &Entry) -> Result<(), Refusal> {
 /// there is no structure-independent way to replace a secret inside a payload without
 /// changing what the payload proves, so a body finding stays a refusal under every mode.
 /// The one exception is the signature carriers aws-chunked framing puts at fixed places in
-/// the body of a request whose head declares that framing (`framing`); rewriting those
-/// changes no data byte and no chunk-size line.
+/// the body of a request whose head declares that framing (`framing`), and the credential
+/// fields of a declared `multipart/form-data` upload form (`form`); rewriting those changes no
+/// data byte, no chunk-size line and no other form field.
 ///
 /// Calling this does not admit the entry. Run [`admit`] afterwards — that is what makes
 /// the sanitizer auditable rather than trusted.
@@ -501,6 +509,7 @@ pub fn sanitize(entry: &mut Entry) -> Vec<String> {
     }
 
     touched.extend(framing::sanitize_body(entry));
+    touched.extend(form::sanitize_body(entry));
 
     touched.sort_unstable();
     touched.dedup();

@@ -37,6 +37,12 @@ JWT = re.compile(r"eyJ[A-Za-z0-9_-]{5,}\.eyJ[A-Za-z0-9_-]{5,}")
 SIGV4 = re.compile(r"(?i)signature=[0-9a-f]{64}")
 # The aws-chunked trailer line spells its signature with a colon, which SIGV4 does not match.
 TRAILER_SIGNATURE = re.compile(r"(?i)x-amz-trailer-signature:[ \t]*[0-9a-f]{64}")
+# A browser-upload form carries its signature, credential scope or token as a multipart field:
+# `name="x-amz-signature"`, the rest of the part head, a blank line, then the value.
+FORM_CREDENTIAL = re.compile(
+    r'(?i)name="(awsaccesskeyid|signature|x-amz-credential|x-amz-security-token|x-amz-signature)"'
+    r"[^\r\n]*\r\n(?:[^\r\n]+\r\n)*\r\n([^\r\n]*)"
+)
 BASE64_RUN = re.compile(r"(?<![A-Za-z0-9/+=])[A-Za-z0-9/+=]{40}(?![A-Za-z0-9/+=])")
 ASSIGNMENT = re.compile(
     r"(?i)(aws_secret_access_key|secret_access_key|secretaccesskey|secretkey|session_token"
@@ -55,6 +61,10 @@ def text_hits(text: str) -> list[str]:
         hits.append("a SigV4 signature")
     if TRAILER_SIGNATURE.search(text):
         hits.append("a trailer signature")
+    for _, value in FORM_CREDENTIAL.findall(text):
+        if value and value != PLACEHOLDER:
+            hits.append("a live form credential field")
+            break
     for run in BASE64_RUN.findall(text):
         lower = any(character.islower() for character in run)
         upper = any(character.isupper() for character in run)

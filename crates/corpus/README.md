@@ -17,3 +17,9 @@ head declares aws-chunked framing, the `chunk-signature` extension and the
 with `__REDACTED__` and recorded as `chunk-signature` / `x-amz-trailer-signature` in `redacted`.
 No data byte and no chunk-size line changes, which is what keeps a recorded signed-chunk body a
 real example of that framing. The same text in an unframed body is user data and stays a refusal.
+
+Likewise, a declared `multipart/form-data` upload form (`PostObject`) has its credential fields
+— `x-amz-signature`, `x-amz-credential`, `signature`, `awsaccesskeyid`, `x-amz-security-token` —
+rewritten and recorded as `form:<field>`. Those fields are invisible to the text rules (no
+`Signature=`, and a SigV2 signature is far shorter than a secret key), so they have a rule of
+their own in both scanners.
