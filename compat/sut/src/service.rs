@@ -28,7 +28,8 @@ use std::io;
 use std::sync::Arc;
 
 use rustfs_gateway::{
-    Credentials, RegionSet, S3Service, SecurityFloor, ServiceBuilder, SigV4Authenticator, StaticCredentials, dto,
+    Credentials, RegionMatchPolicy, RegionSet, S3Service, SecurityFloor, ServiceBuilder, SigV4Authenticator, StaticCredentials,
+    dto,
 };
 use rustfs_gateway_fs::FsBackend;
 
@@ -50,6 +51,10 @@ pub(crate) fn open_backend(options: &Options) -> io::Result<FsBackend> {
     let (owner_id, display_name) = options.accounts.data_root_owner();
     let backend = FsBackend::open(&options.data)?
         .with_region(&options.region)?
+        // RustFS creates a bucket whose `CreateBucketConfiguration` writes us-east-1 out, as
+        // minio-java's `makeBucket` always does, and so must the launcher that stands for it
+        // (rustfs/gateway#914).
+        .with_region_match_policy(RegionMatchPolicy::AcceptExplicitUsEast1)
         .with_owner(owner_id, display_name);
     match options.lifecycle_debug_interval {
         Some(interval) => backend.with_lifecycle_debug_interval(interval),
@@ -783,6 +788,10 @@ mod tests {
     /// The MinIO-client checksum waiver the RustFS profile installs (rustfs/gateway#916).
     #[path = "minio_checksum_tests.rs"]
     mod minio_checksum_tests;
+
+    /// The explicit us-east-1 constraint the RustFS profile accepts (rustfs/gateway#914).
+    #[path = "location_constraint_tests.rs"]
+    mod location_constraint_tests;
 
     /// Bucket-policy conditions on the request's encryption header (rustfs/gateway#979).
     #[path = "sse_condition_tests.rs"]

@@ -40,8 +40,8 @@ use rustfs_gateway::dto::{
     HeadBucket, HeadBucketOutput, ListBuckets, ListBucketsOutput, LocationConstraint,
 };
 use rustfs_gateway::{
-    BucketName, CursorSpec, ErrorCode, Handler, HandlerError, HandlerErrorContext, HandlerResult, REGION_MATCH_POLICY, Req, Resp,
-    Timestamp, US_EAST_1, resolve_location_constraint,
+    BucketName, CursorSpec, ErrorCode, Handler, HandlerError, HandlerErrorContext, HandlerResult, Req, Resp, Timestamp,
+    US_EAST_1, resolve_location_constraint,
 };
 use sha2::{Digest as _, Sha256};
 
@@ -166,7 +166,7 @@ impl Handler<CreateBucket> for FsBackend {
                 .and_then(|configuration| configuration.location_constraint.as_ref())
                 .map(LocationConstraint::as_str),
             &self.regions,
-            REGION_MATCH_POLICY,
+            self.region_match_policy,
         )?;
         let bucket = input.bucket.as_str();
         let path = self.bucket_path(bucket);

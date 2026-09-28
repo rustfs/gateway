@@ -36,8 +36,8 @@ use rustfs_gateway::dto::{
 };
 use rustfs_gateway::{
     BucketName, ByteStream, Clock, ETag, ErrorCode, Handler, HandlerError, HandlerErrorContext, HandlerResult, MissingObject,
-    ObjectKey, RegionSet, Req, ResourceVisibility, Resp, Timestamp, US_EAST_1, UploadIdClaim, collect,
-    normalize_location_constraint, resolve_upload, system_clock,
+    ObjectKey, REGION_MATCH_POLICY, RegionMatchPolicy, RegionSet, Req, ResourceVisibility, Resp, Timestamp, US_EAST_1,
+    UploadIdClaim, collect, normalize_location_constraint, resolve_upload, system_clock,
 };
 use sha2::Sha256;
 use tokio::io::AsyncWriteExt as _;
@@ -148,6 +148,7 @@ pub struct FsBackend {
     root: PathBuf,
     region: String,
     regions: RegionSet,
+    region_match_policy: RegionMatchPolicy,
     owner: Option<Owner>,
     temporary_id: AtomicU64,
     upload_id_lock: tokio::sync::Mutex<()>,
@@ -192,6 +193,7 @@ impl FsBackend {
             root: std::fs::canonicalize(root.as_ref())?,
             region: US_EAST_1.to_owned(),
             regions,
+            region_match_policy: REGION_MATCH_POLICY,
             owner: None,
             temporary_id: AtomicU64::new(0),
             upload_id_lock: tokio::sync::Mutex::new(()),
@@ -247,6 +249,18 @@ impl FsBackend {
         self.regions = RegionSet::new([normalized]).map_err(|_| invalid())?;
         self.region = normalized.to_owned();
         Ok(self)
+    }
+
+    /// Matches a `CreateBucket`'s `LocationConstraint` under `policy` instead of the operation's
+    /// default [`REGION_MATCH_POLICY`].
+    ///
+    /// The served region is unchanged: a relaxed posture accepts another spelling of it, never
+    /// another region. The RustFS-profile launcher uses
+    /// [`RegionMatchPolicy::AcceptExplicitUsEast1`] (rustfs/gateway#914).
+    #[must_use]
+    pub const fn with_region_match_policy(mut self, policy: RegionMatchPolicy) -> Self {
+        self.region_match_policy = policy;
+        self
     }
 
     /// Reports one fixed owner for every object stored in this backend.
