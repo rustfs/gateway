@@ -142,3 +142,26 @@ captured separately for signature expiry. A custom wall clock can only be instal
 `clock_with_skew_ack` and its explicit replay-risk acknowledgement, whatever its reading at
 assembly: a source that is correct at `build()` and then freezes would keep every captured
 signature valid. `SecurityPosture` and the start-up log name a custom wall clock.
+
+## Measured transfer costs
+
+Recorded by `.github/workflows/perf-evidence.yml` on the org `sm-standard-4` runner (Intel Xeon
+6973P-C, 32 vCPU, 64 GiB, Linux 6.8 x86_64), runs 36391443781 and 36393972731. The runner is shared,
+so the elapsed-time columns are records, not gates; the byte, syscall and memory columns are
+asserted by the workflow on every run.
+
+| Case | Bytes through `sendfile` | Bytes through `write`-family syscalls | Resident peak growth | Throughput |
+| --- | ---: | ---: | ---: | ---: |
+| 1 GiB GET, self-held driver | 1,073,741,824 | 7,042 / 7,178 (heads only) | 3.0 MiB | 730 MiB/s |
+| 1 GiB GET, self-held driver forced to copy | 0 | 1,073,873,359 | 2.8 MiB | 133 MiB/s |
+| 1 GiB PUT, self-held driver | — | — | 3.7 MiB (19 KB allocated in total) | 245 MiB/s |
+| 1 GiB PUT, Hyper driver | — | — | 4.0 MiB (866 KB allocated in total) | 403 MiB/s |
+
+A healthy client beside 102 slow clients that keep progressing (a third trickling a head, a third a
+body, a third reading one byte a second) kept its p99 at 0.977x and 1.020x of an idle control
+listener probed in lock-step (median of five rounds of 2,000 probes each).
+
+The per-request allocation ceilings are 148 blocks for a warm signed `GetObject` and 195 for a
+`PutObject` (`crates/gateway/tests/steady_state_allocations.rs`); rustfs/gateway#1012 tracks
+reducing them.
+

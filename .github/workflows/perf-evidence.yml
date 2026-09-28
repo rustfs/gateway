@@ -11,6 +11,8 @@ name: Perf evidence
 #     only through write-family syscalls, resident peak growth), the same GET
 #     forced onto the copy path as the control, and a 1 GiB PUT over both
 #     drivers (allocator bytes and resident peak).
+#   - The micro benches (rustfs/backlog#1766 table): allocation ceilings and
+#     the CRC hardware-calculator gate block; every time is a printed record.
 #   - crates/server/tests/server_load/slow_clients.rs: a healthy client's p99
 #     beside a hundred slow clients that keep progressing, against a lock-step
 #     control listener.
@@ -104,6 +106,17 @@ jobs:
             cargo test --release -p rustfs-gateway --test integration macro_scenarios -- --nocapture --test-threads 1
             cargo test --release -p rustfs-gateway-server --test integration tls_large -- --nocapture --test-threads 1
           } 2>&1 | tee "$RUNNER_TEMP/macro.log"
+      - name: Micro benches
+        run: |
+          set -euo pipefail
+          {
+            cargo bench -p rustfs-gateway-core --bench route
+            cargo bench -p rustfs-gateway-core --bench codec
+            cargo bench -p rustfs-gateway-http --bench parse
+            cargo bench -p rustfs-gateway-http --bench chunked
+            cargo bench -p rustfs-gateway-sig --bench verify
+            cargo bench -p rustfs-gateway-types --bench checksum
+          } 2>&1 | tee "$RUNNER_TEMP/micro.log"
       - name: Summarise
         if: always()
         run: |
@@ -111,6 +124,7 @@ jobs:
             echo "## Observations"
             echo '```'
             cat "$RUNNER_TEMP"/transfers.log "$RUNNER_TEMP"/slow-clients.log "$RUNNER_TEMP"/macro.log 2>/dev/null | grep -oE '(perf-evidence: |SKIP ).*' || echo "no observation was printed"
+            grep -E '^(route|parse|xml|encode|chunked|sig|checksum)/' "$RUNNER_TEMP/micro.log" 2>/dev/null || echo "no micro bench line was printed"
             echo '```'
           } >>"$GITHUB_STEP_SUMMARY"
       - name: Upload the logs
@@ -122,4 +136,5 @@ jobs:
             ${{ runner.temp }}/transfers.log
             ${{ runner.temp }}/slow-clients.log
             ${{ runner.temp }}/macro.log
+            ${{ runner.temp }}/micro.log
           if-no-files-found: warn

@@ -45,6 +45,7 @@ Agent entry point for handwritten protocol scalars and the mounted generated DTO
 | `src/scalar/range.rs` | Range parsing and length-dependent resolution, driven by generated typed range inputs. | A byte-range form or boundary changes. |
 | `src/scalar/error_code.rs` | `ErrorCode` itself: the newtype, `custom`, `known`, and the include of the generated status table. No status is written here — the rows live in `model/overlays/error-status.toml` and reach this file through `generated/error_status.rs`. | Add an error code, or change how one is constructed. |
 | `src/tests/dto_tests.rs` | Generated DTO semantic contracts. | Codegen changes DTO shape. |
+| `benches/checksum.rs` | CRC hardware-calculator gate and checksum throughput records. | A checksum backend or `crc-fast` feature changes. |
 | `../../OPERATIONS.md` | Generated operation/field index. | Inspect operation shapes without reading generated code. |
 | `../../spec/operations/` | Generated field-binding facts. | Inspect one binding without reading generated code. |
 | `generated/**` | Mounted generated DTO implementation. | Never read; use `OPERATIONS.md` and `spec/operations/`. |

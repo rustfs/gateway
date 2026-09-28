@@ -62,6 +62,10 @@ harness = false
 # c-lim-0064 measures healthy requests in on-CPU thread time; see that test.
 nix = { workspace = true, features = ["time"] }
 
+[[bench]]
+name = "chunked"
+harness = false
+
 [dev-dependencies]
 # The allocation instrument. `form_allocations.rs` installs `dhat::Alloc` as the test binary's
 # global allocator and compares two runs of the same read at two file sizes; a claim about a

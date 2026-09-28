@@ -64,6 +64,10 @@ dhat = { workspace = true }
 name = "route"
 harness = false
 
+[[bench]]
+name = "codec"
+harness = false
+
 [[test]]
 name = "integration"
 path = "tests/integration.rs"

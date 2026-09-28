@@ -41,3 +41,4 @@ Agent entry point for SigV2/SigV4 parsing, canonicalization and verification.
 | `tests/compile_fail.rs` | Trybuild harness for compile-time proof boundaries. | A private witness or verified type becomes constructible. |
 | `tests/security_floor*.rs` | P2-04 H1-H7 runtime evidence. | Security-floor admission or scheme policy changes. |
 | `tests/*.rs` | Remaining public verification and negative matrices. | Change any signature contract. |
+| `benches/verify.rs` | Timing records for one header verification and one 64 KiB chunk-chain link. | Verification or chunk-signing cost changes. |

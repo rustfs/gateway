@@ -82,3 +82,7 @@ zeroize = { workspace = true }
 
 [dev-dependencies]
 trybuild = { workspace = true }
+
+[[bench]]
+name = "verify"
+harness = false
