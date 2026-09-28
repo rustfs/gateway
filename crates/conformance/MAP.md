@@ -74,8 +74,7 @@ ADRs; this map only selects files.
 | `src/conn/h2/tests/h2_window_tests.rs` | Literal window scripts, measured increments, and independent receive credit controls. | Checking padded DATA limits or actual credit grants. |
 | `src/conn/h2/tests/h2_authored_flow_tests.rs` | Literal outbound flow violations followed by measured peer errors. | Checking that local credit accounting does not discard actual GOAWAY or reset observations. |
 | `src/conn/h2/tests/h2_duplex_tests.rs` | Socket-ordered credit and early controls during unfinished writes. | Checking retroactive grants or hidden peer resets under backpressure. |
-| `src/conn/h2/tests/h2_client_control_tests.rs` | Client control-frame envelopes, refusals and the exact octets a peer receives. | Checking how an authored control or raw frame reaches the wire. |
-| `src/conn/h2/tests/h2_ping_tests.rs` | Authored PING, received acknowledgements, and the client-reset barrier. | Checking when a client reset counts as processed. |
+| `src/conn/h2/tests/h2_client_control_tests.rs`, `src/conn/h2/tests/h2_ping_tests.rs` | Client control-frame envelopes and refusals; authored PING, received acknowledgements, and the client-reset barrier. | Checking how an authored control frame reaches the wire, or when a client reset counts as processed. |
 | `src/conn/h2/tests/h2_streams_tests.rs` | Scripts with more than one stream: which stream is observed and how the others are read. | Checking stream selection, shared HPACK state or shared connection credit. |
 | `src/conn/h2/tests/h2_tls_tests.rs` | Authored HTTP/2 over TLS: ALPN `h2`, octets inside the session, and TLS end-of-stream facts. | Checking an https endpoint's HTTP/2 path. |
 | `src/conn/h2/tests/h2_corpus_tests.rs` | Named HTTP/2 cases executed against production Hyper. | Checking that authored corpus coverage actually runs and passes. |
