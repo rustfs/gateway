@@ -15,21 +15,20 @@
 //! The named error-document divergences (rd-err): where the two answers to one refused request
 //! differ, each pinned by one test carrying its register id.
 //!
-//! Responsible for: observing each divergence on both stacks, and, where the seam cannot carry a
-//! refusal, the answer the gateway gives once the adapter supplies the facts.
+//! Responsible for: observing each divergence on both stacks, and, for a refusal whose facts ride
+//! in the s3s error's headers, the error RustFS writes today that cannot cross without them.
 //! NOT responsible for: the rulings (`migration_inventory/request_divergences.rs`), or the rows
 //! both stacks answer alike (`super::matrix`, `super::mapping`).
 //! Upstream: `super`, `super::matrix`. Downstream: the request-divergence register guard.
 
 use super::super::{ContextRequest, PATH_HOST};
+use super::facts;
 use super::matrix::{
-    Expect, NOT_ALLOWED, NOT_AUTHENTICATED, SKEWED, UNREPRESENTABLE, identifiers, location, object_get, object_put, part_put,
-    refused_alike,
+    Expect, NOT_ALLOWED, NOT_AUTHENTICATED, SKEWED, UNREPRESENTABLE, identifiers, location, object_get, object_head, object_put,
+    part_put, refused_alike,
 };
 use super::s3s;
 use super::{Pair, SEAM_REFUSED, Scenario, both};
-use http::{HeaderMap, HeaderValue};
-use rustfs_gateway::{ETag, HandlerError, HandlerErrorContext};
 use s3s::{S3Error, S3ErrorCode};
 
 fn answered(scenario: &Scenario) -> Pair {
@@ -95,54 +94,61 @@ fn the_app_bodys_refusal_before_reading_a_streaming_body_is_the_answer_on_both_s
     }
 }
 
-/// RustFS answers `304` with no entity tag; the seam cannot hand over what the error does not
-/// carry, so the adapter answers `500`. Given the tag, the gateway writes the AWS `304`.
+/// The entity tag rides in the error's `ETag` header, where s3s already writes it from; the seam
+/// hands it over and both stacks answer the AWS `304`, on GET and on HEAD. RustFS today attaches no
+/// tag, and that error cannot cross: the gateway would have to invent the validator.
 ///
 /// Ruling: `rd-err-0005`
 #[test]
-fn a_not_modified_from_the_app_body_needs_its_entity_tag_to_cross() {
-    let request = object_get().header("if-none-match", b"\"abc\"").signed("us-east-1");
-    let pair = answered(&Scenario::new(request.clone()).app_refuses(|| S3Error::new(S3ErrorCode::NotModified)));
-    assert_eq!((pair.oracle.status, pair.oracle.header("etag")), (304, None), "{pair:#?}");
-    assert_eq!(
-        (pair.gateway.status, pair.gateway.code(), pair.gateway.message()),
-        (500, Some("InternalError"), Some(SEAM_REFUSED)),
-        "the seam, not the gateway's resolution, refused: {pair:#?}"
-    );
+fn a_not_modified_carrying_its_entity_tag_is_304_with_it_on_both_stacks() {
+    for request in [object_get(), object_head()] {
+        let request = request.header("if-none-match", b"\"abc\"").signed("us-east-1");
+        let pair = answered(&Scenario::new(request.clone()).app_refuses(facts::not_modified));
+        for reply in [&pair.gateway, &pair.oracle] {
+            assert_eq!((reply.status, reply.header("etag")), (304, Some("\"abc\"")), "{pair:#?}");
+        }
+        // The pinned s3s writes an error document on a 304 that hyper then drops from the wire; the
+        // gateway writes none to drop.
+        let gateway = &pair.gateway;
+        assert!(gateway.body.is_empty() && gateway.header("content-type").is_none(), "{pair:#?}");
 
-    let native = answered(
-        &Scenario::new(request).gateway_native(|| HandlerErrorContext::not_modified(ETag::new("abc").expect("a tag")).into()),
-    );
-    let gateway = &native.gateway;
-    assert_eq!((gateway.status, gateway.header("etag")), (304, Some("\"abc\"")), "{native:#?}");
-    assert!(gateway.body.is_empty() && gateway.header("content-type").is_none(), "{native:#?}");
+        let today = answered(&Scenario::new(request).app_refuses(|| S3Error::new(S3ErrorCode::NotModified)));
+        assert_eq!((today.oracle.status, today.oracle.header("etag")), (304, None), "{today:#?}");
+        assert_eq!(today.gateway.status, 500, "the seam, not the gateway, refused: {today:#?}");
+    }
 }
 
-/// RustFS answers `416` without `Content-Range`; the gateway renders one only with the complete
-/// length, so through the seam it is a `500`. Given the length, the gateway writes the AWS `416`.
+/// The complete length rides in the error's unsatisfied `Content-Range`; both stacks answer `416`
+/// with it, and the gateway adds the AWS document elements naming the range and the length. RustFS
+/// today writes no `Content-Range`, and that error cannot cross.
 ///
 /// Ruling: `rd-err-0006`
 #[test]
-fn an_unsatisfiable_range_from_the_app_body_needs_its_length_to_cross() {
+fn an_invalid_range_carrying_its_length_is_416_with_content_range_on_both_stacks() {
     let request = object_get().header("range", b"bytes=100-200").signed("us-east-1");
-    let refused = || S3Error::with_message(S3ErrorCode::InvalidRange, "The requested range is not satisfiable");
-    let pair = answered(&Scenario::new(request.clone()).app_refuses(refused));
+    let pair = answered(&Scenario::new(request.clone()).app_refuses(facts::unsatisfiable));
+    for reply in [&pair.gateway, &pair.oracle] {
+        assert_eq!(
+            (reply.status, reply.code(), reply.header("content-range")),
+            (416, Some("InvalidRange"), Some("bytes */10")),
+            "{pair:#?}"
+        );
+    }
+    assert_eq!(pair.gateway.element("RangeRequested"), Some("bytes=100-200"), "{pair:#?}");
+    assert_eq!(pair.oracle.element("RangeRequested"), None, "{pair:#?}");
+
+    let today = || S3Error::with_message(S3ErrorCode::InvalidRange, "The requested range is not satisfiable");
+    let today = answered(&Scenario::new(request).app_refuses(today));
+    assert_eq!((today.oracle.status, today.oracle.header("content-range")), (416, None), "{today:#?}");
     assert_eq!(
-        (pair.oracle.status, pair.oracle.code(), pair.oracle.header("content-range")),
-        (416, Some("InvalidRange"), None),
-        "{pair:#?}"
-    );
-    assert_eq!(
-        (pair.gateway.status, pair.gateway.code(), pair.gateway.message()),
-        (500, Some("InternalError"), Some(SEAM_REFUSED)),
-        "the seam, not the gateway's resolution, refused: {pair:#?}"
+        (today.gateway.status, today.gateway.message()),
+        (500, Some(SEAM_REFUSED)),
+        "the seam, not the gateway, refused: {today:#?}"
     );
 
-    let native = answered(&Scenario::new(request).gateway_native(|| HandlerError::unsatisfiable_range("bytes=100-200", 10)));
-    let gateway = &native.gateway;
-    assert_eq!((gateway.status, gateway.code()), (416, Some("InvalidRange")), "{native:#?}");
-    assert_eq!(gateway.header("content-range"), Some("bytes */10"), "{native:#?}");
-    assert_eq!(gateway.element("RangeRequested"), Some("bytes=100-200"), "{native:#?}");
+    // A 416 names the range it refused; with no `Range` on the request there is none to name.
+    let rangeless = answered(&Scenario::new(object_get().signed("us-east-1")).app_refuses(facts::unsatisfiable));
+    assert_eq!((rangeless.gateway.status, rangeless.oracle.status), (500, 416), "{rangeless:#?}");
 }
 
 /// Ruling: `rd-err-0007`
@@ -156,29 +162,63 @@ fn a_message_past_1024_bytes_is_cut_only_on_the_gateway() {
     assert_eq!(pair.gateway.message(), whole.get(..1024), "{pair:#?}");
 }
 
-fn delete_marker_miss() -> S3Error {
-    let mut headers = HeaderMap::new();
-    headers.insert("content-type", HeaderValue::from_static("application/xml"));
-    headers.insert("x-amz-delete-marker", HeaderValue::from_static("true"));
-    headers.insert("x-amz-version-id", HeaderValue::from_static("null"));
-    let mut error = S3Error::with_message(S3ErrorCode::NoSuchKey, "The specified key does not exist.");
-    error.set_headers(headers);
-    error
-}
-
+/// Both marker reads cross with the marker flag and the instant on both stacks: the `404` a read
+/// naming no version gets, and the `405` a read naming the marker's version id gets. Only s3s writes
+/// the version id, which the gateway's marker refusals do not carry yet (rustfs/gateway#899). RustFS
+/// today writes no `Last-Modified` on the current-marker `404`, and that error cannot cross.
+///
 /// Ruling: `rd-err-0008`
 #[test]
-fn an_error_carrying_delete_marker_headers_needs_typed_facts_to_cross() {
-    let pair = answered(&Scenario::new(object_get().signed("us-east-1")).app_refuses(delete_marker_miss));
+fn an_error_carrying_delete_marker_headers_crosses_as_the_marker_read() {
+    let versioned_query = format!("versionId={}", facts::MARKER_VERSION);
+    let rows = [
+        (object_get(), facts::current_marker as fn() -> S3Error, 404, "NoSuchKey"),
+        (object_head(), facts::current_marker, 404, "NoSuchKey"),
+        (
+            ContextRequest::get(PATH_HOST, "/photos/a.txt", &versioned_query),
+            facts::versioned_marker,
+            405,
+            "MethodNotAllowed",
+        ),
+    ];
+    for (request, error, status, code) in rows {
+        let head = request.method == http::Method::HEAD;
+        let pair = answered(&Scenario::new(request.signed("us-east-1")).app_refuses(error));
+        for reply in [&pair.gateway, &pair.oracle] {
+            assert_eq!(reply.status, status, "{pair:#?}");
+            assert_eq!(reply.header("x-amz-delete-marker"), Some("true"), "{pair:#?}");
+            assert_eq!(reply.header("last-modified"), Some(facts::MARKER_WRITTEN), "{pair:#?}");
+        }
+        // A HEAD answer has no document on the gateway; s3s writes one hyper drops from the wire.
+        if head {
+            assert!(pair.gateway.body.is_empty(), "{pair:#?}");
+        } else {
+            assert_eq!((pair.gateway.code(), pair.oracle.code()), (Some(code), Some(code)), "{pair:#?}");
+        }
+        assert_eq!(
+            (pair.gateway.header("x-amz-version-id"), pair.oracle.header("x-amz-version-id")),
+            (None, Some(facts::MARKER_VERSION)),
+            "{pair:#?}"
+        );
+    }
+
+    let today = || {
+        let mut error = facts::current_marker();
+        let mut headers = error.headers().cloned().unwrap_or_default();
+        headers.remove("last-modified");
+        error.set_headers(headers);
+        error
+    };
+    let today = answered(&Scenario::new(object_get().signed("us-east-1")).app_refuses(today));
     assert_eq!(
-        (pair.oracle.status, pair.oracle.header("x-amz-delete-marker")),
+        (today.oracle.status, today.oracle.header("x-amz-delete-marker")),
         (404, Some("true")),
-        "{pair:#?}"
+        "{today:#?}"
     );
     assert_eq!(
-        (pair.gateway.status, pair.gateway.code(), pair.gateway.message()),
-        (500, Some("InternalError"), Some(SEAM_REFUSED)),
-        "the seam, not the gateway's resolution, refused: {pair:#?}"
+        (today.gateway.status, today.gateway.message()),
+        (500, Some(SEAM_REFUSED)),
+        "the seam, not the gateway, refused: {today:#?}"
     );
 }
 
