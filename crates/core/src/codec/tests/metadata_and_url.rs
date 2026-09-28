@@ -111,16 +111,25 @@ fn nested_metadata_encoded_word_is_reencoded_before_it_reaches_a_client() {
     );
 }
 
+/// A stored value with a tab is written as an encoded word, not left out (rustfs/gateway#996): the
+/// encoded form carries no control byte, so the header is safe, and the client decodes the value
+/// that was stored, as it does from the s3s build RustFS runs today.
 #[test]
-fn n_does_not_encode_a_metadata_control_character_into_a_safe_looking_header() {
+fn n_writes_a_metadata_control_character_only_inside_an_encoded_word() {
     let request = accepted("GET", "/photos/key", &[]);
     let view = MetaView::of(&request, TargetKind::Object).expect("view");
     let mut metadata = std::collections::BTreeMap::new();
     metadata.insert("bad".to_owned(), "before\tafter".to_owned());
+    metadata.insert("crlf".to_owned(), "a\r\nInjected: yes".to_owned());
     let output = dto::GetObjectOutput {
         metadata,
         ..Default::default()
     };
-    let response = dto::GetObject::encode(output, &view, 200).expect("unsafe stored metadata is omitted");
-    assert!(header(&response, "x-amz-meta-bad").is_none());
+    let response = dto::GetObject::encode(output, &view, 200).expect("encodes");
+    assert_eq!(header(&response, "x-amz-meta-bad").as_deref(), Some("=?UTF-8?B?YmVmb3JlCWFmdGVy?="));
+    assert_eq!(
+        header(&response, "x-amz-meta-crlf").as_deref(),
+        Some("=?UTF-8?B?YQ0KSW5qZWN0ZWQ6IHllcw==?=")
+    );
+    assert!(header(&response, "injected").is_none(), "no header is split off the value");
 }

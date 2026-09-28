@@ -1360,19 +1360,6 @@ s3s = '=?UTF-8?B?77+977+977+977+977+977+977+977+977+977+977+977+977+977+977+9OTE
 reason = "A metadata value whose RFC 2047 encoded word would pass 75 characters is written by the gateway as two encoded words, as RFC 2047 section 2 requires (https://www.rfc-editor.org/rfc/rfc2047#section-2); s3s writes one longer word. Both decode to the same value; a strict decoder refuses the longer word. Found by the encode_diff fuzz target; pinned to the one matrix sample."
 expires = "2027-03-31"
 
-# ── Encode: a metadata value with a C1 control character, found by the encode_diff fuzz target ─
-
-[[diff]]
-id = "kd-encode-0059"
-kind = "encode"
-operation = "HeadObject"
-item = 'header x-amz-meta-a'
-gateway = '<absent>'
-s3s = '=?UTF-8?B?woN4?='
-reason = "A metadata value holding a C1 control character is dropped from the gateway answer, with no x-amz-missing-meta count; s3s writes it as an RFC 2047 encoded word. A gateway gap, not a choice: RustFS objects with such a value would lose that entry on every read behind the gateway. rustfs/gateway#996 owns the fix; remove this entry with it. Found by the encode_diff fuzz target; pinned to the one matrix sample."
-expires = "2026-12-31"
-
-# ── Encode: an ASCII metadata value that holds "=?", found by the encode_diff fuzz target ─────
 
 [[diff]]
 id = "kd-encode-0060"
@@ -1383,13 +1370,3 @@ gateway = '=?UTF-8?B?YT0/Yg==?='
 s3s = 'a=?b'
 reason = "An ASCII metadata value holding the encoded-word opener =? is written by the gateway as an RFC 2047 encoded word, so a client that decodes encoded words reads back the value that was stored; s3s writes it raw, which such a client may misread. Both carry the same value to a client that decodes as S3 SDKs do. Found by the encode_diff fuzz target; pinned to the one matrix sample."
 expires = "2027-03-31"
-
-[[diff]]
-id = "kd-encode-0061"
-kind = "encode"
-operation = "HeadObject"
-item = 'header x-amz-meta-t'
-gateway = '<absent>'
-s3s = '=?UTF-8?B?YQli?='
-reason = "As kd-encode-0059 for a tab: a metadata value holding a tab is dropped from the gateway answer, with no x-amz-missing-meta count; s3s writes it as an RFC 2047 encoded word. rustfs/gateway#996 owns the fix; remove this entry with it. Found by the encode_diff replay; pinned to the one matrix sample."
-expires = "2026-12-31"

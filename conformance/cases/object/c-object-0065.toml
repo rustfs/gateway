@@ -1,0 +1,63 @@
+# c-object-0065 — stored user metadata holding a control character is returned as an RFC 2047
+# encoded word, never left out of the answer (rustfs/gateway#996).
+#
+# Schema dimensions exercised: seeded object metadata, header presence and value.
+
+[case]
+id = "c-object-0065"
+schema_version = 1
+title = "Stored metadata with a tab or a C1 control is returned inside an encoded word"
+rationale = """
+Objects written through RustFS before the migration can hold metadata values the gateway would \
+refuse on the way in: the pinned s3s build accepted a tab or a C1 control and writes it back as an \
+RFC 2047 base64 encoded word. The gateway used to refuse to encode such a value and silently left \
+the header out, with no x-amz-missing-meta count, so a client lost that entry on every read after \
+the migration and could not tell. The encoded word carries no control byte, so the header stays \
+safe; the value a client decodes is the value that was stored. The case seeds the values directly \
+into the backend, the way pre-migration data arrives."""
+polarity = "positive"
+operation = "GetObject"
+tags = ["error-shape"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc2047#section-4.1"
+summary = "The B encoding carries arbitrary octets as base64 inside an encoded word, so any stored value has a header spelling."
+kind = "rfc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/UsingMetadata.html"
+summary = "S3 returns user-defined metadata values that are not US-ASCII in RFC 2047 encoded form."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-object"
+
+[[setup.objects]]
+bucket = "conf-object"
+key = "meta/controls.bin"
+content_type = "text/plain"
+body = { utf8 = "hello world" }
+metadata = { tabbed = "a\tb", c1 = "\u0083x" }
+
+[request]
+method = "GET"
+target = "/conf-object/meta/controls.bin"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+connection_after = "open"
+headers_absent = ["x-amz-missing-meta"]
+
+[expect.headers_present]
+"x-amz-meta-tabbed" = "=?UTF-8?B?YQli?="
+"x-amz-meta-c1" = "=?UTF-8?B?woN4?="
+
+[expect.body]
+exact_utf8 = "hello world"

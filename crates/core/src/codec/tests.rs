@@ -668,8 +668,11 @@ fn n_reports_an_output_the_gateway_itself_cannot_serialise() {
     assert_eq!(error.code().as_str(), "InternalError");
 }
 
+/// A stored value no header field can carry raw (a NUL) is written as an RFC 2047 encoded word,
+/// as the s3s build RustFS runs today writes it, rather than left out of the answer with nothing
+/// to say so (rustfs/gateway#996). The header is printable ASCII and decodes back to the value.
 #[test]
-fn n_ignores_a_metadata_value_no_header_field_can_carry() {
+fn n_writes_a_metadata_value_no_header_field_can_carry_raw_as_an_encoded_word() {
     let request = accepted("GET", "/photos/key", &[]);
     let view = MetaView::of(&request, TargetKind::Object).expect("view");
     let mut metadata = std::collections::BTreeMap::new();
@@ -678,9 +681,15 @@ fn n_ignores_a_metadata_value_no_header_field_can_carry() {
         metadata,
         ..Default::default()
     };
-    let response = dto::GetObject::encode(output, &view, 200).expect("a value with no field form is dropped, not fatal");
+    let response = dto::GetObject::encode(output, &view, 200).expect("encodes");
 
-    assert!(header(&response, "x-amz-meta-bad").is_none());
+    let written = header(&response, "x-amz-meta-bad").expect("the entry is not dropped");
+    assert_eq!(written, "=?UTF-8?B?bGluZQBicmVhaw==?=");
+    assert_eq!(
+        rustfs_gateway_http::decode_metadata_value(&written).map(|v| v.into_owned()),
+        Err(rustfs_gateway_http::MetadataReject::ControlCharacterAfterDecoding),
+        "the inbound rule still refuses the decoded value"
+    );
 }
 
 #[test]

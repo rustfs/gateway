@@ -386,7 +386,7 @@ pub(crate) fn rows() -> Vec<OutputRow> {
                     ..Default::default()
                 })
             },
-            stamped!("kd-encode-0035", "kd-encode-0059"),
+            stamped!("kd-encode-0035"),
         ),
         row(
             "head-object-encoded-word-lookalike-metadata",
@@ -412,7 +412,7 @@ pub(crate) fn rows() -> Vec<OutputRow> {
                     ..Default::default()
                 })
             },
-            stamped!("kd-encode-0035", "kd-encode-0061"),
+            stamped!("kd-encode-0035"),
         ),
         row(
             "head-object-long-utf8-metadata",
