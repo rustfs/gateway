@@ -2240,7 +2240,7 @@ from pathlib import Path
 
 path = Path("xtask/src/verify.rs")
 text = path.read_text()
-old = '    test.extend(["--skip".to_owned(), GATEWAY_RSS_TEST.to_owned()]);'
+old = '            "--skip".to_owned(),\n            GATEWAY_RSS_TEST.to_owned(),\n'
 new = ""
 if text.count(old) != 1:
     raise SystemExit("gateway RSS fast-scope exclusion is missing")
@@ -2250,6 +2250,23 @@ PYEOF
 expect_fail check_xtask_codegen_surface.sh \
     'the gateway fast scope rerunning its million-key workspace stress contract' \
     mut_xtask_gateway_fast_scope_runs_rss_stress
+
+mut_xtask_gateway_fast_scope_runs_address_table_stress() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("xtask/src/verify.rs")
+text = path.read_text()
+old = '            "--skip".to_owned(),\n            GATEWAY_ADDRESS_TABLE_TEST.to_owned(),\n'
+new = ""
+if text.count(old) != 1:
+    raise SystemExit("governor address-table fast-scope exclusion is missing")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_xtask_codegen_surface.sh \
+    'the gateway fast scope rerunning its million-address governor contract' \
+    mut_xtask_gateway_fast_scope_runs_address_table_stress
 
 mut_xtask_server_fast_scope_runs_c_lim_0006() {
     python3 - <<'PYEOF'
