@@ -49,14 +49,28 @@ async fn configured_scheduler_expires_on_its_first_cadence() {
             .expect("a non-zero debug interval"),
     );
     let (_, running) = service_with_backend(Arc::clone(&backend));
+    let started = std::time::Instant::now();
     let scheduler = backend.start_lifecycle_scheduler().expect("a runtime is active");
 
-    tokio::time::sleep(Duration::from_millis(1_200)).await;
-    assert_eq!(
-        super::lifecycle_expiration::get(&running, "lc-scheduled", "key")
+    // Wait for the expiry itself rather than a fixed 1.2s: the first sweep runs its filesystem work
+    // on the blocking pool after the 1s cadence, and a loaded runner can take longer than any
+    // fixed margin to finish it. The next cadence cannot start until a full interval after the
+    // first sweep finishes, so shutting down as soon as the expiry is visible still isolates it.
+    let deadline = started + Duration::from_secs(30);
+    loop {
+        let status = super::lifecycle_expiration::get(&running, "lc-scheduled", "key")
             .await
-            .status(),
-        404
+            .status();
+        if status == 404 {
+            break;
+        }
+        assert_eq!(status, 200, "the object is either still current or expired");
+        assert!(std::time::Instant::now() < deadline, "no sweep expired the object within 30s");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(
+        started.elapsed() >= Duration::from_secs(1),
+        "the object expired before the first 1s cadence"
     );
     let report = scheduler.shutdown().await.expect("the scheduler joins cleanly");
     assert_eq!(report.sweeps, 1);
