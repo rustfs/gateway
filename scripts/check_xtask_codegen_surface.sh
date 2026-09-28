@@ -5,7 +5,9 @@ SCRIPT_DIR="${BASH_SOURCE[0]%/*}"
 # WHAT: Keeps codegen, facade and conformance verification on a bounded xtask dependency surface.
 # WHY: Cargo builds every normal xtask dependency before dispatch, so one heavy dependency makes
 # code generation pay for the facade, core and conformance crates before generation can start.
-# HOW TO EXEMPT: There is no further exemption. Keep other exact crate requests on the full runner.
+# Crate verification only shells out to cargo, so every exact crate request stays on the light
+# runner too: on the full one an edit to any facade-graph crate rebuilt xtask inside the budget.
+# HOW TO EXEMPT: There is no further exemption.
 
 ROOT="${GATEWAY_CHECK_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 
@@ -434,19 +436,6 @@ def compact(text):
 source = (root / "xtask/src/main.rs").read_text()
 comments_removed, syntax = rust_views(source)
 launcher_comments, launcher_syntax = rust_views((root / "xtask-launcher/src/main.rs").read_text())
-launcher_request = functions_named("crate_request_name", launcher_syntax, launcher_comments)
-expected_launcher_request = compact('''
-if arguments.first().map(String::as_str) != Some("verify") {
-    return None;
-}
-let mut verify_arguments = arguments[1..].iter().map(String::as_str).filter(|argument| *argument != "--json");
-match (verify_arguments.next(), verify_arguments.next(), verify_arguments.next()) {
-    (Some("--crate"), Some(name), None) => Some(name),
-    _ => None,
-}
-''')
-if len(launcher_request) != 1 or compact(launcher_request[0][1]) != expected_launcher_request:
-    fail("the launcher must identify only an exact crate request")
 launcher_runner = functions_named("runner_for_request", launcher_syntax, launcher_comments)
 expected_launcher_runner = compact('''
 if matches!(arguments, [command, flag, _] if command == "verify" && flag == "--op")
@@ -454,18 +443,12 @@ if matches!(arguments, [command, flag, _] if command == "verify" && flag == "--o
 {
     return OPERATION_RUNNER;
 }
-match crate_request_name(arguments) {
-    Some("rustfs-gateway" | "s3gate" | "rustfs-gateway-conformance" | "s3gate-conformance" | "conformance") | None => {
-        LIGHT_RUNNER
-    }
-    Some(_) => FULL_RUNNER,
-}
+LIGHT_RUNNER
 ''')
 if len(launcher_runner) != 1 or compact(launcher_runner[0][1]) != expected_launcher_runner:
     fail("the launcher must select each bounded runner exactly")
 launcher_source = compact(launcher_comments)
 launcher_constants = {
-    'const FULL_RUNNER: &[&str] = &["--features", "full"];',
     'const LIGHT_RUNNER: &[&str] = &["--no-default-features"];',
     'const OPERATION_RUNNER: &[&str] = &["--no-default-features", "--features", "operation"];',
 }
@@ -950,5 +933,5 @@ expected_tests_attribute = compact('#[cfg(all(test, feature = "full"))]')
 if len(tests_items) != 1 or [compact(attr) for attr in tests_items[0][1]] != [expected_tests_attribute]:
     fail("verify module tests must require the full feature")
 
-print("OK: cargo xtask keeps codegen, facade and conformance verification light while other crates reuse the full runner")
+print("OK: cargo xtask keeps codegen and every exact crate verification on the light runner")
 PYEOF
