@@ -126,13 +126,6 @@ impl RuleRef {
                       are claiming one name, and running the layer would apply it to the wrong input",
     };
 
-    /// A custom wall clock was too far from the system clock without an explicit acknowledgement.
-    pub const CLOCK_SKEW: Self = Self {
-        id: "asm-clock-skew",
-        explanation: "a custom wall clock differs from the system clock by more than the allowed window; a frozen or skewed \
-                      clock can keep captured signatures valid, so assembly requires an explicit acknowledgement",
-    };
-
     /// The declared static operation set did not exactly match assembly registration.
     pub const MONOMORPHIC_SET: Self = Self {
         id: "asm-monomorphic-set",
@@ -141,7 +134,7 @@ impl RuleRef {
 
     /// Every rule this crate can cite, for a reverse lookup and for the assertion that the set is
     /// closed.
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 9] = [
         Self::REGISTRATION,
         Self::ROUTE,
         Self::EMPTY_REGISTRY,
@@ -150,7 +143,6 @@ impl RuleRef {
         Self::MISSING_CODEC,
         Self::OP_LAYER_UNATTACHED,
         Self::OP_LAYER_TYPE,
-        Self::CLOCK_SKEW,
         Self::MONOMORPHIC_SET,
     ];
 }
@@ -215,13 +207,6 @@ pub enum AssemblyError {
         /// Which assembly rule this is.
         rule: RuleRef,
     },
-    /// A custom clock exceeded the assembly-time skew bound.
-    ClockSkew {
-        /// The observed absolute difference in seconds.
-        skew_seconds: u64,
-        /// Which assembly rule this is.
-        rule: RuleRef,
-    },
     /// The static operation set or its layer posture cannot represent this assembly.
     MonomorphicSet {
         /// The exact mismatch or unsupported dynamic layer posture.
@@ -242,8 +227,7 @@ impl AssemblyError {
             | Self::MissingAuthenticator { rule }
             | Self::MissingCodec { rule, .. }
             | Self::UnattachedOpLayer { rule, .. }
-            | Self::OpLayerTypeMismatch { rule, .. }
-            | Self::ClockSkew { rule, .. } => *rule,
+            | Self::OpLayerTypeMismatch { rule, .. } => *rule,
             Self::MonomorphicSet { rule, .. } => *rule,
         }
     }
@@ -259,9 +243,6 @@ impl fmt::Display for AssemblyError {
             }
             Self::UnattachedOpLayer { operation, .. } | Self::OpLayerTypeMismatch { operation, .. } => {
                 write!(f, "[{rule}] the operation {operation}: {}", rule.explanation())
-            }
-            Self::ClockSkew { skew_seconds, .. } => {
-                write!(f, "[{rule}] custom clock skew is {skew_seconds}s: {}", rule.explanation())
             }
             Self::MonomorphicSet { reason, .. } => write!(f, "[{rule}] {reason}: {}", rule.explanation()),
             _ => write!(f, "[{rule}] {}", rule.explanation()),
@@ -319,7 +300,6 @@ mod tests {
             RuleRef::MISSING_CODEC,
             RuleRef::OP_LAYER_UNATTACHED,
             RuleRef::OP_LAYER_TYPE,
-            RuleRef::CLOCK_SKEW,
             RuleRef::MONOMORPHIC_SET,
         ];
         for rule in rules {

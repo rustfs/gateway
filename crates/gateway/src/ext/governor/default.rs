@@ -244,7 +244,7 @@ impl DefaultGovernor {
     /// The synchronous built-in decision path.
     ///
     /// Its address maps are preallocated at construction, so it allocates no future or map
-    /// storage. The authenticated variant returns before reading a clock or touching a lock. The
+    /// storage; `allocation_tests.rs` observes that with the allocator rather than inferring it. The
     /// object-safe [`Governor`] boundary still returns the pre-existing `BoxFuture`; that
     /// allocation cannot be removed without changing the protected trait.
     pub fn try_acquire_sync(&self, request: &GovernorRequest<'_>) -> Option<Lease> {
@@ -252,7 +252,6 @@ impl DefaultGovernor {
             ClassKind::CredentialLookup => (&self.credential_lookup, self.rates.credential_lookup),
             ClassKind::CorsPreflight => (&self.cors_preflight, self.rates.cors_preflight),
             ClassKind::Unauthenticated => (&self.unauthenticated, self.rates.unauthenticated),
-            ClassKind::Authenticated => return Some(Lease::admit()),
         };
         let now = self.clock.monotonic();
         if !self.aggregate.take(self.rates.aggregate, now) {
@@ -344,7 +343,7 @@ mod tests {
     }
 
     fn request(kind: ClassKind, address: Option<IpAddr>) -> GovernorRequest<'static> {
-        GovernorRequest::new("GetObject", None, None, None, address.map(super::super::ClientAddr::from_peer), kind)
+        GovernorRequest::new("GetObject", None, None, address.map(super::super::ClientAddr::from_peer), kind)
     }
 
     fn admits(governor: &DefaultGovernor, kind: ClassKind, address: Option<IpAddr>) -> bool {
@@ -551,23 +550,6 @@ mod tests {
             assert!(admits(&governor, ClassKind::Unauthenticated, Some(address)));
         }
         assert_eq!(governor.tracked_clients(), BOUND);
-    }
-
-    #[test]
-    fn authenticated_requests_bypass_every_framework_preauthentication_meter() {
-        let (governor, _) = DefaultGovernor::manually_clocked(GovernorRates {
-            aggregate: Rate::none(),
-            per_ip: Rate::none(),
-            credential_lookup: Rate::none(),
-            cors_preflight: Rate::none(),
-            unauthenticated: Rate::none(),
-            tracked_clients: 0,
-        });
-        for _ in 0..1_000 {
-            assert!(admits(&governor, ClassKind::Authenticated, None));
-        }
-        assert_eq!(governor.tracked_clients(), 0);
-        assert_eq!(governor.client_shards(), CLIENT_SHARDS);
     }
 
     struct PanicGovernor;

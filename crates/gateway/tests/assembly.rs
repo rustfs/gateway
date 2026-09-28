@@ -238,18 +238,6 @@ fn a_vendor_operation_assembles_beside_the_aws_ones() {
     assert_eq!(service.operations().collect::<Vec<_>>(), ["example:Ping"]);
 }
 
-/// Negative — a fixed wall clock far from the system clock cannot silently reach production.
-#[test]
-fn a_large_custom_clock_skew_is_refused_at_assembly() {
-    let error = wired()
-        .register::<Ping, _>(Arc::new(Backend))
-        .dialect(&crate::support::ping_dialect())
-        .clock(rustfs_gateway::FixedClock::at_unix_seconds(1))
-        .build()
-        .expect_err("the clock is decades away from the system clock");
-    assert_eq!(error.rule(), RuleRef::CLOCK_SKEW);
-}
-
 /// Negative — the escape hatch is explicit and remains visible in the assembled posture.
 #[test]
 fn an_acknowledged_custom_clock_is_named_in_the_posture() {
@@ -265,14 +253,56 @@ fn an_acknowledged_custom_clock_is_named_in_the_posture() {
     assert_eq!(service.clock_posture(), rustfs_gateway::ClockPosture::CustomAcknowledged);
 }
 
-/// Negative — even a custom source within the allowed skew remains visible in the posture.
+/// c-gov-0022 / rustfs/backlog#1759. Negative — a custom source that agrees with the system clock
+/// at assembly is exactly the one that can freeze afterwards, so it too needs the acknowledgement,
+/// and the security posture names it. (`ServiceBuilder::clock` without an acknowledgement no longer
+/// exists; `tests/compile_fail/c_gov_0021_unacknowledged_clock.rs` pins that.)
 #[test]
-fn a_checked_custom_clock_is_named_in_the_posture() {
+fn a_custom_clock_that_agrees_with_the_system_is_still_named_in_the_posture() {
     let service = wired()
         .register::<Ping, _>(Arc::new(Backend))
         .dialect(&crate::support::ping_dialect())
-        .clock(rustfs_gateway::system_clock())
+        .clock_with_skew_ack(
+            rustfs_gateway::system_clock(),
+            rustfs_gateway::ClockSkewAck::i_understand_a_skewed_clock_can_disable_signature_expiry(),
+        )
         .build()
-        .expect("the custom source agrees with system time");
-    assert_eq!(service.clock_posture(), rustfs_gateway::ClockPosture::CustomChecked);
+        .expect("the acknowledged custom source assembles");
+    assert_eq!(service.clock_posture(), rustfs_gateway::ClockPosture::CustomAcknowledged);
+    assert_eq!(service.security_posture().wall_clock(), rustfs_gateway::ClockPosture::CustomAcknowledged);
+    let report = service.security_posture().to_string();
+    assert!(report.contains("wall clock: custom (acknowledged"), "{report}");
+}
+
+/// Positive control — the default clock is reported as the system clock.
+#[test]
+fn the_default_clock_is_reported_as_the_system_clock() {
+    let service = wired()
+        .register::<Ping, _>(Arc::new(Backend))
+        .dialect(&crate::support::ping_dialect())
+        .build()
+        .expect("a complete assembly");
+    assert_eq!(service.clock_posture(), rustfs_gateway::ClockPosture::System);
+    let report = service.security_posture().to_string();
+    assert!(report.contains("wall clock: system"), "{report}");
+    assert!(!report.contains("closed pre-authentication layers"), "{report}");
+}
+
+/// c-gov-0031. Negative — a limiter layer configured to admit nothing is legal, and is named in the
+/// security posture rather than discovered as a wall of `503 SlowDown`.
+#[test]
+fn a_closed_preauthentication_layer_is_named_in_the_posture() {
+    let service = wired()
+        .register::<Ping, _>(Arc::new(Backend))
+        .dialect(&crate::support::ping_dialect())
+        .framework_governor_rates(rustfs_gateway::GovernorRates {
+            aggregate: rustfs_gateway::Rate::none(),
+            cors_preflight: rustfs_gateway::Rate::none(),
+            ..rustfs_gateway::GovernorRates::default()
+        })
+        .build()
+        .expect("a closed layer is a legal configuration");
+    let report = service.security_posture().to_string();
+    assert!(report.contains("closed pre-authentication layers: aggregate, CORS preflight"), "{report}");
+    assert!(!report.contains("credential lookup"), "{report}");
 }

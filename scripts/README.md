@@ -156,7 +156,7 @@ fixed now so that the same check does not get written twice under two names.
 | `check_chunk_limits.sh` | `c-lim-0042` binds a four-GiB chunk to header-time refusal and an instrumented peak-RSS increase below eight MiB; `c-lim-0064` repeats the attack across 100 concurrent one-byte feeders while keeping peak RSS and healthy p99 bounded | P3-05 |
 | `check_missing_content_length.sh` | `c-lim-0020` / `c-lim-0022` bind an unframed non-streaming PutObject to 411 `MissingContentLength`, zero trailing bytes sent before the answer, and an observed socket close | P3-05 |
 | `check_declared_body_limit.sh` | `c-lim-0021` binds an oversized declared body to an immediate 400 `EntityTooLarge` and an observed socket close without sending the body | P3-05 |
-| `check_governor_fast_path.sh` | `c-lim-0004` binds an admitted request to the synchronous Governor path and structurally rejects allocation operations there | P3-05 |
+| `check_governor_fast_path.sh` | `c-lim-0004` binds the Governor boundary to the synchronous decision path and structurally rejects allocation operations there | P3-05 |
 | `check_default_doc.sh` | Every public extension `Default` implementation states its security consequence; derived subjects are discovered rather than listed by hand | P7-01 |
 | `check_minimal_assembly_lines.sh` | The complete assembly in the minimal example stays within twenty effective Rust lines | P7-01 |
 | `check_example_contracts.sh` | Every Rust example is an explicit Cargo target and propagates recoverable errors instead of teaching panic-shaped handling | P7-04 |

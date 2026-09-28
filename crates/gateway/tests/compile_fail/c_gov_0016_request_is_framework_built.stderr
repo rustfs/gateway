@@ -1,0 +1,16 @@
+error[E0624]: associated function `new` is private
+  --> tests/compile_fail/c_gov_0016_request_is_framework_built.rs:25:36
+   |
+25 |       let _forged = GovernorRequest::new("GetObject", None, None, None, ClassKind::Unauthenticated);
+   |                                      ^^^ private associated function
+   |
+  ::: src/ext/governor.rs
+   |
+   | /     pub(crate) const fn new(
+   | |         operation: &'a str,
+   | |         bucket: Option<&'a BucketName>,
+   | |         declared_body_bytes: Option<u64>,
+   | |         client_addr: Option<ClientAddr>,
+   | |         kind: ClassKind,
+   | |     ) -> Self {
+   | |_____________- private associated function defined here

@@ -56,9 +56,11 @@
 //! block is what makes those cases expressible, and it needs a clock it can set. Keeping that type
 //! public is what stops every consumer from inventing its own.
 //!
-//! A custom wall clock is checked against the system clock when the service is assembled. More
-//! than 60 seconds of skew is refused unless the caller supplies [`ClockSkewAck`]; the resulting
-//! [`ClockPosture`] keeps that acknowledgement visible to deployment audits.
+//! A custom wall clock always requires [`ClockSkewAck`]. Agreeing with the system clock when the
+//! service is assembled proves nothing about the next hour: a source that is right at `build()`
+//! and then stops moving keeps every captured signature inside its window forever. So there is no
+//! unacknowledged path for a custom source at all, and the resulting [`ClockPosture`] is named in
+//! the start-up security posture (rustfs/backlog#1759).
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
@@ -85,13 +87,11 @@ pub trait Clock: Send + Sync + 'static {
 pub enum ClockPosture {
     /// The framework's system clock.
     System,
-    /// A custom clock checked against the system clock at assembly.
-    CustomChecked,
-    /// A custom clock whose skew was explicitly acknowledged.
+    /// A custom clock installed with an explicit acknowledgement that it governs signature expiry.
     CustomAcknowledged,
 }
 
-/// The explicit acknowledgement required to assemble a deliberately skewed wall clock.
+/// The explicit acknowledgement required to assemble any custom wall clock.
 ///
 /// There is no `Default`; the call site must spell out the replay risk.
 #[derive(Clone, Copy)]
@@ -111,15 +111,6 @@ impl core::fmt::Debug for ClockSkewAck {
     }
 }
 
-/// The maximum custom-clock difference accepted without [`ClockSkewAck`].
-pub const MAX_CLOCK_SKEW_SECONDS: u64 = 60;
-
-pub(crate) fn skew_from_system(clock: &dyn Clock) -> u64 {
-    let custom = i128::from(clock.now().unix_seconds());
-    let system = i128::from(system_clock().capture().unix_seconds());
-    u64::try_from((custom - system).abs()).unwrap_or(u64::MAX)
-}
-
 impl<T> Clock for T
 where
     T: RequestClock + Send + Sync + 'static,
@@ -134,9 +125,8 @@ where
 /// What a conformance case's `[clock] fixed` block installs. Skew is expressed by moving this
 /// value, not by adding an offset here: the check that reads it takes the reading as a parameter,
 /// and a clock that applied its own offset would be a second place time is adjusted.
-/// [`crate::ServiceBuilder::clock`] rejects a production assembly when this differs from system
-/// time by more than [`MAX_CLOCK_SKEW_SECONDS`], unless the caller uses the explicit
-/// acknowledgement path.
+/// It can only be installed through [`crate::ServiceBuilder::clock_with_skew_ack`], like every
+/// other custom wall clock.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct FixedClock {
     at: RequestNow,

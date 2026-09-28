@@ -24,31 +24,74 @@ use std::collections::BTreeSet;
 use rustfs_gateway_sig::{OperationFloor, SecurityFloor};
 
 // The start-up report's facade: `crate::builder` asks this module for both lines.
+use crate::clock::ClockPosture;
 pub(crate) use crate::dialect_posture::log_dialect_posture;
-use crate::ext::{CredentialGuardConfig, Rate};
+use crate::ext::{CredentialGuardConfig, GovernorRates, Rate};
 
 /// Security-sensitive assembly configuration for a start-up report, not runtime observations.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SecurityPosture {
     credential_guard: Option<CredentialGuardConfig>,
     per_ip: Rate,
+    closed_layers: ClosedLayers,
+    wall_clock: ClockPosture,
     custom_signature_verifier: bool,
     dangerously_replaced_signature_verifier: bool,
+}
+
+/// Which pre-authentication limiter layers were configured to admit nothing (c-gov-0031).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+struct ClosedLayers {
+    aggregate: bool,
+    credential_lookup: bool,
+    cors_preflight: bool,
+    unauthenticated: bool,
+}
+
+impl ClosedLayers {
+    const fn of(rates: &GovernorRates) -> Self {
+        Self {
+            aggregate: rates.aggregate.admits_nothing(),
+            credential_lookup: rates.credential_lookup.admits_nothing(),
+            cors_preflight: rates.cors_preflight.admits_nothing(),
+            unauthenticated: rates.unauthenticated.admits_nothing(),
+        }
+    }
+
+    fn names(self) -> impl Iterator<Item = &'static str> {
+        [
+            (self.aggregate, "aggregate"),
+            (self.credential_lookup, "credential lookup"),
+            (self.cors_preflight, "CORS preflight"),
+            (self.unauthenticated, "unauthenticated"),
+        ]
+        .into_iter()
+        .filter_map(|(closed, name)| closed.then_some(name))
+    }
 }
 
 impl SecurityPosture {
     pub(crate) const fn new(
         credential_guard: Option<CredentialGuardConfig>,
-        per_ip: Rate,
+        rates: &GovernorRates,
+        wall_clock: ClockPosture,
         custom_signature_verifier: bool,
         dangerously_replaced_signature_verifier: bool,
     ) -> Self {
         Self {
             credential_guard,
-            per_ip,
+            per_ip: rates.per_ip,
+            closed_layers: ClosedLayers::of(rates),
+            wall_clock,
             custom_signature_verifier,
             dangerously_replaced_signature_verifier,
         }
+    }
+
+    /// Where the wall clock that governs signature expiry comes from.
+    #[must_use]
+    pub const fn wall_clock(self) -> ClockPosture {
+        self.wall_clock
     }
 
     /// The built-in credential guard settings, or `None` for an authenticator with no lookup.
@@ -94,6 +137,22 @@ impl core::fmt::Display for SecurityPosture {
                 self.per_ip.per_second(),
                 self.per_ip.burst()
             )?;
+        }
+        let mut closed = self.closed_layers.names().peekable();
+        if closed.peek().is_some() {
+            f.write_str("; closed pre-authentication layers: ")?;
+            for (index, name) in closed.enumerate() {
+                if index > 0 {
+                    f.write_str(", ")?;
+                }
+                f.write_str(name)?;
+            }
+        }
+        match self.wall_clock {
+            ClockPosture::System => f.write_str("; wall clock: system")?,
+            ClockPosture::CustomAcknowledged => {
+                f.write_str("; wall clock: custom (acknowledged; signature expiry follows it)")?;
+            }
         }
         if self.dangerously_replaced_signature_verifier {
             f.write_str("; AWS signature verifier: dangerously replaced")?;

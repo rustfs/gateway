@@ -443,14 +443,99 @@ async fn one_request_reads_the_wall_clock_once() {
     let service = wired()
         .register::<Ping, _>(Arc::new(Backend))
         .dialect(&crate::support::ping_dialect())
-        .clock(CountingClock {
-            calls: Arc::clone(&calls),
-            reading: Clock::now(&rustfs_gateway::system_clock()),
-        })
+        .clock_with_skew_ack(
+            CountingClock {
+                calls: Arc::clone(&calls),
+                reading: Clock::now(&rustfs_gateway::system_clock()),
+            },
+            rustfs_gateway::ClockSkewAck::i_understand_a_skewed_clock_can_disable_signature_expiry(),
+        )
         .build()
         .expect("a complete assembly");
     calls.store(0, Ordering::SeqCst);
 
     let _ = send(&service, support::plain(http::Method::POST, "/")).await;
     assert_eq!(calls.load(Ordering::SeqCst), 1);
+}
+
+/// c-gov-0004. Negative — a signed request, whose admission reads the clock for the skew check,
+/// the scope date and the `Date` header, still takes exactly one reading, and that reading is the
+/// one the signature was judged against: the request is admitted only because the snapshot equals
+/// its signing time, and the response is dated from the same snapshot.
+#[tokio::test]
+async fn a_signed_request_is_judged_and_dated_from_one_reading() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let reading = Clock::now(&support::fixed_clock());
+    let service = wired()
+        .register::<Ping, _>(Arc::new(Backend))
+        .dialect(&crate::support::ping_dialect())
+        .clock_with_skew_ack(
+            CountingClock {
+                calls: Arc::clone(&calls),
+                reading,
+            },
+            ClockSkewAck::i_understand_a_skewed_clock_can_disable_signature_expiry(),
+        )
+        .build()
+        .expect("a complete assembly");
+    calls.store(0, Ordering::SeqCst);
+
+    let response = send(&service, support::signed(http::Method::POST, "/")).await;
+    assert_eq!(response.status().as_u16(), 200, "the signature was judged against the snapshot");
+    assert_eq!(calls.load(Ordering::SeqCst), 1, "a signed request read the wall clock more than once");
+    let date = response
+        .headers()
+        .iter()
+        .find(|(name, _)| *name == http::header::DATE)
+        .and_then(|(_, value)| value.to_str().ok())
+        .expect("the response is dated");
+    // `SIGNED_AT_STAMP` (20260102T030405Z) in the IMF-fixdate form, written out rather than derived
+    // so the assertion does not share a formatter with the code under test.
+    assert_eq!(date, "Fri, 02 Jan 2026 03:04:05 GMT", "the Date header came from a different reading");
+}
+
+/// Records what the framework put in front of a deployment governor.
+struct RecordingGovernor {
+    seen: std::sync::Mutex<Vec<(Option<String>, Option<ClientAddr>)>>,
+}
+
+impl rustfs_gateway::Governor for RecordingGovernor {
+    fn try_acquire<'a>(
+        &'a self,
+        request: &'a rustfs_gateway::GovernorRequest<'a>,
+    ) -> BoxFuture<'a, Result<rustfs_gateway::Lease, ()>> {
+        self.seen
+            .lock()
+            .expect("never poisoned")
+            .push((request.bucket().map(|bucket| bucket.as_str().to_owned()), request.client_addr()));
+        Box::pin(async { Ok(rustfs_gateway::Lease::admit()) })
+    }
+}
+
+/// c-gov-0003. Negative — the bucket a governor sees is the one routing resolved from the path,
+/// and the peer is the listener's, whatever the request's headers claim.
+#[tokio::test]
+async fn a_governor_sees_the_resolved_bucket_and_the_transport_peer() {
+    let recorder = Arc::new(RecordingGovernor {
+        seen: std::sync::Mutex::new(Vec::new()),
+    });
+    let service = wired()
+        .register::<Ping, _>(Arc::new(Backend))
+        .dialect(&crate::support::ping_dialect())
+        .governor(Arc::clone(&recorder) as Arc<dyn rustfs_gateway::Governor>)
+        .build()
+        .expect("a complete assembly");
+    let peer: std::net::IpAddr = "192.0.2.44".parse().expect("an IP address");
+    let mut request = preflight(BUCKET);
+    for (name, value) in [
+        ("x-forwarded-for", "198.51.100.9"),
+        ("x-amz-bucket", "forged"),
+        ("forwarded", "for=198.51.100.9"),
+    ] {
+        request.headers_mut().insert(name, http::HeaderValue::from_static(value));
+    }
+    request.extensions_mut().insert(ClientAddr::from_peer(peer));
+    let _ = send(&service, request).await;
+    let seen = recorder.seen.lock().expect("never poisoned").clone();
+    assert_eq!(seen, [(Some(BUCKET.to_owned()), Some(ClientAddr::from_peer(peer)))]);
 }
