@@ -27,7 +27,7 @@ end
 require_equal(workflow.fetch("permissions", nil), {"contents" => "read"},
               "workflow permissions must remain contents: read")
 require_equal(workflow.fetch("concurrency", nil), {
-                "group" => "${{ github.workflow }}-${{ github.ref }}",
+                "group" => "${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}",
                 "cancel-in-progress" => "${{ github.event_name == 'pull_request' }}"
               }, "workflow concurrency must cancel superseded pull-request runs and let every main push complete")
 abort("ERROR: workflow defaults may not override command failure propagation") if workflow.key?("defaults")

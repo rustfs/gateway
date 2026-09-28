@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    aws-sdk-dotnet scenario driver. The SDK reference is an exact version range and
+    RestorePackagesWithLockFile makes restore write packages.lock.json, which pins AWSSDK.S3 and its
+    transitive AWSSDK.Core by version and content hash; the build restores with locked-mode, so a
+    lock file that no longer matches this project fails the install instead of being rewritten.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <AssemblyName>driver</AssemblyName>
+    <RootNamespace>CompatDriver</RootNamespace>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="AWSSDK.S3" Version="[4.0.103.4]" />
+  </ItemGroup>
+
+</Project>

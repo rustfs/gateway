@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -125,7 +126,43 @@ def observed_version(name: str, spec: dict) -> str:
             if len(fields) >= 3 and fields[0] == "mod" and fields[1] == wanted:
                 return fields[2]
         return "<no module version recorded in the binary>"
+    if install in {"venv", "program"}:
+        return commanded_version(name, spec)
     raise SystemExit(problem(f"client {name} declares an unknown install method {install!r}"))
+
+
+def clients_dir() -> Path:
+    return Path(os.environ.get("COMPAT_CLIENTS_DIR") or Path(__file__).resolve().parents[2] / "target/compat-clients")
+
+
+def commanded_version(name: str, spec: dict) -> str:
+    """Ask the installed client what it is, and read the version out of its own answer.
+
+    For a `program` client the answer comes from the SDK the program linked, not from its lock
+    file: a lock file says what was asked for, and only the artefact says what was built.
+    """
+    environment = dict(os.environ)
+    environment["COMPAT_CLIENT_OUT"] = str(clients_dir() / name)
+    environment["PATH"] = f"{clients_dir() / 'bin'}{os.pathsep}{environment.get('PATH', '')}"
+    try:
+        result = subprocess.run(
+            ["bash", "-c", spec["version_command"]],
+            capture_output=True,
+            text=True,
+            check=False,
+            env=environment,
+            timeout=120,
+        )
+    except subprocess.TimeoutExpired:
+        return "<version command did not finish within 120s>"
+    if result.returncode != 0:
+        tail = (result.stderr.strip() or result.stdout.strip()).splitlines()
+        return f"<version command exited {result.returncode}: {tail[-1] if tail else 'no output'}>"
+    pattern = re.compile(spec.get("version_pattern") or r"^(\S+)$")
+    found = [match.group(1) for line in result.stdout.splitlines() if (match := pattern.search(line.strip()))]
+    if len(found) != 1:
+        return f"<version command printed {len(found)} line(s) matching {pattern.pattern!r}>"
+    return found[0]
 
 
 def declared_capabilities(path: Path) -> list[str]:

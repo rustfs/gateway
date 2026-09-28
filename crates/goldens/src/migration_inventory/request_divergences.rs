@@ -131,7 +131,6 @@ const API_PUT_OBJECT: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/AP
 const API_GET_BUCKET_LOCATION: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketLocation.html";
 const ERROR_RESPONSES: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html";
 const M1_ADAPTER: &str = "https://github.com/rustfs/backlog/issues/1752";
-const SEAM_FACTS: &str = "https://github.com/rustfs/gateway/issues/795";
 
 /// Every decided request divergence.
 const OPERATION_DIVERGENCES: [RequestDivergence; 20] = [

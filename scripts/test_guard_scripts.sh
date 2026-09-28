@@ -1706,13 +1706,32 @@ expect_fail check_xtask_codegen_surface.sh \
     'the cargo xtask alias bypassing the budget-aware launcher' \
     mut_xtask_codegen_alias_bypasses_launcher
 
-mut_xtask_crate_runner_returns_to_light_graph() {
-    perl -0pi -e 's/const FULL_RUNNER: &\[&str\] = &\["--features", "full"\];/const FULL_RUNNER: \&[\&str] = \&["--no-default-features"];/' \
+# Crate verification only shells out to cargo; on the full graph an edit to any facade-graph crate
+# rebuilt xtask inside the 30-second budget (rustfs/backlog#2000).
+mut_xtask_crate_runner_returns_to_full_graph() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("xtask-launcher/src/main.rs")
+text = path.read_text()
+old = '        return OPERATION_RUNNER;\n    }\n    LIGHT_RUNNER\n}'
+new = '        return OPERATION_RUNNER;\n    }\n    &["--features", "full"]\n}'
+if text.count(old) != 1:
+    raise SystemExit("the light crate selection is not unique")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_xtask_codegen_surface.sh \
+    'exact crate verification rebuilding the full xtask graph inside its budget' \
+    mut_xtask_crate_runner_returns_to_full_graph
+
+mut_xtask_light_runner_enables_full_feature() {
+    perl -0pi -e 's/const LIGHT_RUNNER: &\[&str\] = &\["--no-default-features"\];/const LIGHT_RUNNER: \&[\&str] = \&["--features", "full"];/' \
         xtask-launcher/src/main.rs
 }
 expect_fail check_xtask_codegen_surface.sh \
-    'non-facade crate verification rebuilding the light runner after the workspace gate' \
-    mut_xtask_crate_runner_returns_to_light_graph
+    'the light runner enabling the full feature graph' \
+    mut_xtask_light_runner_enables_full_feature
 
 mut_xtask_operation_runner_uses_full_graph() {
     python3 - <<'PYEOF'
@@ -1721,7 +1740,7 @@ from pathlib import Path
 path = Path("xtask-launcher/src/main.rs")
 text = path.read_text()
 old = '        return OPERATION_RUNNER;'
-new = '        return FULL_RUNNER;'
+new = '        return &["--features", "full"];'
 if text.count(old) != 1:
     raise SystemExit("the operation runner selection is not unique")
 path.write_text(text.replace(old, new, 1))
@@ -1730,40 +1749,6 @@ PYEOF
 expect_fail check_xtask_codegen_surface.sh \
     'operation verification returning to the production server graph' \
     mut_xtask_operation_runner_uses_full_graph
-
-mut_xtask_facade_runner_returns_to_full_graph() {
-    python3 - <<'PYEOF'
-from pathlib import Path
-
-path = Path("xtask-launcher/src/main.rs")
-text = path.read_text()
-old = 'Some("rustfs-gateway" | "s3gate" | "rustfs-gateway-conformance" | "s3gate-conformance" | "conformance")'
-new = 'Some("rustfs-gateway-conformance" | "s3gate-conformance" | "conformance")'
-if text.count(old) != 1:
-    raise SystemExit("the light facade and conformance selection is not unique")
-path.write_text(text.replace(old, new, 1))
-PYEOF
-}
-expect_fail check_xtask_codegen_surface.sh \
-    'facade verification re-entering the full dependency graph' \
-    mut_xtask_facade_runner_returns_to_full_graph
-
-mut_xtask_conformance_runner_returns_to_full_graph() {
-    python3 - <<'PYEOF'
-from pathlib import Path
-
-path = Path("xtask-launcher/src/main.rs")
-text = path.read_text()
-old = 'Some("rustfs-gateway" | "s3gate" | "rustfs-gateway-conformance" | "s3gate-conformance" | "conformance")'
-new = 'Some("rustfs-gateway" | "s3gate")'
-if text.count(old) != 1:
-    raise SystemExit("the light facade and conformance selection is not unique")
-path.write_text(text.replace(old, new, 1))
-PYEOF
-}
-expect_fail check_xtask_codegen_surface.sh \
-    'conformance verification re-entering the full dependency graph' \
-    mut_xtask_conformance_runner_returns_to_full_graph
 
 mut_xtask_selection_module_becomes_full_only() {
     python3 - <<'PYEOF'
@@ -1805,6 +1790,15 @@ mut_xtask_launcher_timestamp_removed() {
 }
 expect_fail check_xtask_codegen_surface.sh \
     'the launcher no longer recording command startup' mut_xtask_launcher_timestamp_removed
+
+# A nested cargo that inherits the launcher's CARGO_MANIFEST_DIR and CARGO_PKG_* reruns ring's
+# build script and rebuilds ring through xtask inside the feedback budget (rustfs/gateway#897).
+mut_xtask_launcher_leaks_package_environment() {
+    perl -0pi -e 's/\n    without_package_environment\(&mut command\);//' xtask-launcher/src/main.rs
+}
+expect_fail check_xtask_codegen_surface.sh \
+    'the launcher passing its cargo run package variables to the xtask cargo' \
+    mut_xtask_launcher_leaks_package_environment
 
 mut_xtask_verify_ignores_launcher_time() {
     perl -0pi -e 's/        started: started\.and_then\(\|started\| started\.checked_add\(build\.elapsed\)\),\n/        started: None,\n/' xtask/src/verify.rs
@@ -2246,7 +2240,7 @@ from pathlib import Path
 
 path = Path("xtask/src/verify.rs")
 text = path.read_text()
-old = '    test.extend(["--skip".to_owned(), GATEWAY_RSS_TEST.to_owned()]);'
+old = '            "--skip".to_owned(),\n            GATEWAY_RSS_TEST.to_owned(),\n'
 new = ""
 if text.count(old) != 1:
     raise SystemExit("gateway RSS fast-scope exclusion is missing")
@@ -2256,6 +2250,23 @@ PYEOF
 expect_fail check_xtask_codegen_surface.sh \
     'the gateway fast scope rerunning its million-key workspace stress contract' \
     mut_xtask_gateway_fast_scope_runs_rss_stress
+
+mut_xtask_gateway_fast_scope_runs_address_table_stress() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("xtask/src/verify.rs")
+text = path.read_text()
+old = '            "--skip".to_owned(),\n            GATEWAY_ADDRESS_TABLE_TEST.to_owned(),\n'
+new = ""
+if text.count(old) != 1:
+    raise SystemExit("governor address-table fast-scope exclusion is missing")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_xtask_codegen_surface.sh \
+    'the gateway fast scope rerunning its million-address governor contract' \
+    mut_xtask_gateway_fast_scope_runs_address_table_stress
 
 mut_xtask_server_fast_scope_runs_c_lim_0006() {
     python3 - <<'PYEOF'
@@ -2322,6 +2333,23 @@ PYEOF
 expect_fail check_xtask_codegen_surface.sh \
     'the workspace gate dropping the gateway million-key RSS contract' \
     mut_xtask_gateway_rss_contract_disappears
+
+mut_xtask_governor_address_table_contract_disappears() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/src/ext/governor/allocation_tests.rs")
+text = path.read_text()
+old = "fn c_gov_0013_a_million_addresses_do_not_grow_memory() {"
+new = "fn c_gov_0013_a_million_addresses_do_not_grow_memory_removed() {"
+if text.count(old) != 1:
+    raise SystemExit("workspace-only governor address-table contract is missing")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_xtask_codegen_surface.sh \
+    'the workspace gate dropping the governor million-address contract' \
+    mut_xtask_governor_address_table_contract_disappears
 
 mut_xtask_sig_fast_scope_loses_exact_matching() {
     python3 - <<'PYEOF'
@@ -15770,6 +15798,53 @@ mut_clock_monotonic_source_deleted() {
 expect_fail check_clock_single_source.sh \
     "the monotonic source deleted, which must fail rather than skip" mut_clock_monotonic_source_deleted
 
+mut_clock_wall_read_through_an_alias() {
+    python3 - <<'CLOCKPY'
+import pathlib
+path = pathlib.Path("crates/gateway/src/service.rs")
+# rustfs/backlog#1759: a renamed import hides the reading from every search for the real name.
+path.write_text(path.read_text() + """
+use std::time::SystemTime as Wall;
+fn a_present_under_another_name() -> Wall {
+    Wall::now()
+}
+""")
+CLOCKPY
+}
+expect_fail check_clock_single_source.sh \
+    'a wall-clock reading through a renamed import' mut_clock_wall_read_through_an_alias \
+    'a renamed clock type hides every later reading'
+
+mut_clock_type_alias() {
+    python3 - <<'CLOCKPY'
+import pathlib
+path = pathlib.Path("crates/core/src/lib.rs")
+path.write_text(path.read_text() + """
+type Stopwatch = std::time::Instant;
+""")
+CLOCKPY
+}
+expect_fail check_clock_single_source.sh \
+    'a clock type renamed by a type alias' mut_clock_type_alias \
+    'a renamed clock type hides every later reading'
+
+mut_clock_reading_taken_as_a_function() {
+    python3 - <<'CLOCKPY'
+import pathlib
+path = pathlib.Path("crates/core/src/lib.rs")
+# No call parentheses at the path: the reading happens where the pointer is called.
+path.write_text(path.read_text() + """
+fn a_deferred_reading() -> std::time::Instant {
+    let read = <std::time::Instant>::now;
+    read()
+}
+""")
+CLOCKPY
+}
+expect_fail check_clock_single_source.sh \
+    'a clock reading taken as a function pointer through a qualified path' mut_clock_reading_taken_as_a_function \
+    'the protocol path reads a clock outside'
+
 mut_governor_moved_after_body_read() {
     python3 - <<'PYEOF'
 import pathlib
@@ -17407,6 +17482,16 @@ mut_ci_time_workflow_env_overrides_cargo() {
 expect_fail check_ci_time_gate.sh \
     'the workflow environment overriding the required command path' mut_ci_time_workflow_env_overrides_cargo
 
+# A group shared by every main push lets the next merge cancel a pending main run regardless of
+# cancel-in-progress (2026-09-28: fifteen consecutive main runs cancelled).
+mut_ci_time_concurrency_main_shares_group() {
+    replace_ci_text "  group: \${{ github.workflow }}-\${{ github.event_name == 'pull_request' && github.ref || github.sha }}" \
+        '  group: ${{ github.workflow }}-${{ github.ref }}'
+}
+expect_fail check_ci_time_gate.sh \
+    'main pushes sharing one concurrency group so a newer merge cancels the pending run' \
+    mut_ci_time_concurrency_main_shares_group
+
 mut_ci_time_concurrency_cancel_disabled() {
     replace_ci_text "  cancel-in-progress: \${{ github.event_name == 'pull_request' }}" '  cancel-in-progress: false'
 }
@@ -17681,7 +17766,7 @@ expect_fail check_ci_test_split.sh \
     'the third workspace test job being renamed away' mut_ci_third_workspace_job_missing
 
 mut_ci_workspace_command_weakened() {
-    replace_ci_text 'scripts/ci_budget.sh 480 "workspace tests 1/3" cargo test --workspace --exclude rustfs-gateway-conformance --exclude rustfs-gateway --exclude rustfs-gateway-goldens --exclude rustfs-gateway-types --exclude rustfs-gateway-sig' 'scripts/ci_budget.sh 480 "workspace tests 1/3" cargo test -p xtask'
+    replace_ci_text 'scripts/ci_budget.sh 480 "workspace tests 1/3" cargo test --workspace --exclude rustfs-gateway-conformance --exclude rustfs-gateway --exclude rustfs-gateway-goldens --exclude rustfs-gateway-difftest --exclude rustfs-gateway-types --exclude rustfs-gateway-sig' 'scripts/ci_budget.sh 480 "workspace tests 1/3" cargo test -p xtask'
 }
 expect_fail check_ci_test_split.sh \
     'the workspace test job running only one package' mut_ci_workspace_command_weakened
@@ -17700,20 +17785,20 @@ expect_fail check_ci_test_split.sh \
     mut_ci_second_workspace_gateway_prebuild_dropped
 
 mut_ci_third_workspace_command_weakened() {
-    replace_ci_text 'scripts/ci_budget.sh 480 "workspace tests 3/3" bash -c '\''cargo test --package rustfs-gateway-goldens --package rustfs-gateway-types --features rustfs-gateway-types/compat-s3s && cargo test --package rustfs-gateway --package rustfs-gateway-sig'\''' 'scripts/ci_budget.sh 480 "workspace tests 3/3" cargo test -p xtask'
+    replace_ci_text 'scripts/ci_budget.sh 480 "workspace tests 3/3" bash -c '\''cargo test --package rustfs-gateway-goldens --package rustfs-gateway-difftest --package rustfs-gateway-types --features rustfs-gateway-types/compat-s3s && cargo test --package rustfs-gateway --package rustfs-gateway-sig'\''' 'scripts/ci_budget.sh 480 "workspace tests 3/3" cargo test -p xtask'
 }
 expect_fail check_ci_test_split.sh \
     'the third workspace shard running the wrong package' mut_ci_third_workspace_command_weakened
 
 mut_ci_third_workspace_compat_feature_dropped() {
-    replace_ci_text 'scripts/ci_budget.sh 480 "workspace tests 3/3" bash -c '\''cargo test --package rustfs-gateway-goldens --package rustfs-gateway-types --features rustfs-gateway-types/compat-s3s && cargo test --package rustfs-gateway --package rustfs-gateway-sig'\''' 'scripts/ci_budget.sh 480 "workspace tests 3/3" cargo test --package rustfs-gateway-goldens --package rustfs-gateway-types'
+    replace_ci_text 'scripts/ci_budget.sh 480 "workspace tests 3/3" bash -c '\''cargo test --package rustfs-gateway-goldens --package rustfs-gateway-difftest --package rustfs-gateway-types --features rustfs-gateway-types/compat-s3s && cargo test --package rustfs-gateway --package rustfs-gateway-sig'\''' 'scripts/ci_budget.sh 480 "workspace tests 3/3" cargo test --package rustfs-gateway-goldens --package rustfs-gateway-types'
 }
 
 # The move of `rustfs-gateway` out of the shard that ran out of time and into the shard that was
 # never above 4% of its clock is the whole point of the rebalance. A shard 3 that quietly drops it
 # again would leave the gateway package tested nowhere while all three jobs stayed green.
 mut_ci_third_workspace_gateway_package_dropped() {
-    replace_ci_text 'scripts/ci_budget.sh 480 "workspace tests 3/3" bash -c '\''cargo test --package rustfs-gateway-goldens --package rustfs-gateway-types --features rustfs-gateway-types/compat-s3s && cargo test --package rustfs-gateway --package rustfs-gateway-sig'\''' 'scripts/ci_budget.sh 480 "workspace tests 3/3" cargo test --package rustfs-gateway-goldens --package rustfs-gateway-types --features rustfs-gateway-types/compat-s3s'
+    replace_ci_text 'scripts/ci_budget.sh 480 "workspace tests 3/3" bash -c '\''cargo test --package rustfs-gateway-goldens --package rustfs-gateway-difftest --package rustfs-gateway-types --features rustfs-gateway-types/compat-s3s && cargo test --package rustfs-gateway --package rustfs-gateway-sig'\''' 'scripts/ci_budget.sh 480 "workspace tests 3/3" cargo test --package rustfs-gateway-goldens --package rustfs-gateway-difftest --package rustfs-gateway-types --features rustfs-gateway-types/compat-s3s'
 }
 expect_fail check_ci_test_split.sh \
     'the third workspace shard dropping the gateway package the second one handed it' \
@@ -17750,8 +17835,8 @@ expect_fail check_ci_test_split.sh \
     mut_ci_handlers_facade_fixture_moved_before_gateway_prebuild
 
 mut_ci_workspace_failure_swallowed() {
-    replace_ci_text '          scripts/ci_budget.sh 480 "workspace tests 1/3" cargo test --workspace --exclude rustfs-gateway-conformance --exclude rustfs-gateway --exclude rustfs-gateway-goldens --exclude rustfs-gateway-types --exclude rustfs-gateway-sig' \
-        '          scripts/ci_budget.sh 480 "workspace tests 1/3" cargo test --workspace --exclude rustfs-gateway-conformance --exclude rustfs-gateway --exclude rustfs-gateway-goldens --exclude rustfs-gateway-types --exclude rustfs-gateway-sig || true'
+    replace_ci_text '          scripts/ci_budget.sh 480 "workspace tests 1/3" cargo test --workspace --exclude rustfs-gateway-conformance --exclude rustfs-gateway --exclude rustfs-gateway-goldens --exclude rustfs-gateway-difftest --exclude rustfs-gateway-types --exclude rustfs-gateway-sig' \
+        '          scripts/ci_budget.sh 480 "workspace tests 1/3" cargo test --workspace --exclude rustfs-gateway-conformance --exclude rustfs-gateway --exclude rustfs-gateway-goldens --exclude rustfs-gateway-difftest --exclude rustfs-gateway-types --exclude rustfs-gateway-sig || true'
 }
 expect_fail check_ci_test_split.sh \
     'the workspace test job swallowing a failure or timeout' mut_ci_workspace_failure_swallowed
@@ -19006,7 +19091,7 @@ path = pathlib.Path(".github/workflows/ci.yml")
 text = path.read_text()
 before = "GATEWAY_PR_BODY_JSON: ${{ toJSON(github.event.pull_request.body) }}"
 after = "GATEWAY_PR_BODY_JSON: ${{ github.event.pull_request.body }}"
-if text.count(before) != 2:
+if text.count(before) != 3:
     raise SystemExit("missing the JSON-encoded pull-request body exports")
 path.write_text(text.replace(before, after))
 PYEOF
@@ -19041,7 +19126,7 @@ import pathlib
 path = pathlib.Path(".github/workflows/ci.yml")
 text = path.read_text()
 before = "          GATEWAY_PR_BODY_JSON: ${{ toJSON(github.event.pull_request.body) }}\n"
-if text.count(before) != 2:
+if text.count(before) != 3:
     raise SystemExit("missing the JSON-encoded pull-request body exports")
 path.write_text(text.replace(before, ""))
 PYEOF
@@ -19766,11 +19851,58 @@ mut_tsan_instrumentation_deleted() {
     python3 - <<'PYEOF'
 import pathlib
 path = pathlib.Path("scripts/run_gateway_tsan.sh")
-path.write_text(path.read_text().replace("RUSTFLAGS='-Zsanitizer=thread'", "RUSTFLAGS=''", 1))
+text = path.read_text()
+old = "RUSTFLAGS='-Zsanitizer=thread --cfg gateway_tsan'"
+if text.count(old) != 1:
+    raise SystemExit("the TSAN RUSTFLAGS line is not unique")
+path.write_text(text.replace(old, "RUSTFLAGS='--cfg gateway_tsan'", 1))
 PYEOF
 }
 expect_fail check_gateway_tsan_wiring.sh \
     'the TSAN runner losing sanitizer instrumentation' mut_tsan_instrumentation_deleted
+
+# dhat's global allocator lock orders every allocating thread for TSAN (rustfs/gateway#958).
+mut_tsan_keeps_dhat_allocator() {
+    python3 - <<'PYEOF'
+import pathlib
+path = pathlib.Path("scripts/run_gateway_tsan.sh")
+text = path.read_text()
+old = "RUSTFLAGS='-Zsanitizer=thread --cfg gateway_tsan'"
+if text.count(old) != 1:
+    raise SystemExit("the TSAN RUSTFLAGS line is not unique")
+path.write_text(text.replace(old, "RUSTFLAGS='-Zsanitizer=thread'", 1))
+PYEOF
+}
+expect_fail check_gateway_tsan_wiring.sh \
+    'the TSAN build keeping the dhat global allocator' mut_tsan_keeps_dhat_allocator
+
+mut_tsan_dhat_allocator_unconditional() {
+    python3 - <<'PYEOF'
+import pathlib
+path = pathlib.Path("crates/gateway/tests/service_clone_allocations.rs")
+text = path.read_text()
+old = "#[cfg(not(gateway_tsan))]\n#[global_allocator]"
+if text.count(old) != 1:
+    raise SystemExit("the cfg-gated global allocator is not unique")
+path.write_text(text.replace(old, "#[global_allocator]", 1))
+PYEOF
+}
+expect_fail check_gateway_tsan_wiring.sh \
+    'the dhat global allocator compiled into the TSAN build' mut_tsan_dhat_allocator_unconditional
+
+mut_tsan_allocator_proof_deleted() {
+    python3 - <<'PYEOF'
+import pathlib
+path = pathlib.Path("crates/gateway/tests/service_concurrency.rs")
+text = path.read_text()
+old = "    #[cfg(gateway_tsan)]\n    assert_the_system_allocator_serves_this_binary();\n"
+if text.count(old) != 1:
+    raise SystemExit("the allocator proof call is not unique")
+path.write_text(text.replace(old, "", 1))
+PYEOF
+}
+expect_fail check_gateway_tsan_wiring.sh \
+    'the TSAN case no longer proving its allocator' mut_tsan_allocator_proof_deleted
 
 mut_tsan_build_std_deleted() {
     python3 - <<'PYEOF'
@@ -23909,6 +24041,52 @@ expect_fail check_compat_matrix.sh \
     mut_compat_known_fail_grew \
     'the list may only shrink'
 
+mut_compat_new_client_starts_its_baseline() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+versions = Path("compat/versions.toml")
+versions.write_text(
+    versions.read_text()
+    + '\n[clients.fixture-client]\ninstall = "pip"\npackage = "fixture_client"\nversion = "1.0.0"\n'
+)
+driver = Path("compat/drivers/fixture-client/run.sh")
+driver.parent.mkdir(parents=True)
+driver.write_text("#!/usr/bin/env bash\n")
+driver.chmod(0o755)
+known = Path("compat/known-fail.txt")
+known.write_text(known.read_text() + "fixture-client/copy-object  rustfs/gateway#912  measured on its first run\n")
+PYEOF
+}
+# The ratchet starts per client row. A client added in the same change has no previous baseline, so
+# the failures its first measured run records are its baseline, not a silenced regression.
+expect_guard_pass check_compat_matrix.sh \
+    'a client added in the same change starting its known-failure baseline' \
+    mut_compat_new_client_starts_its_baseline
+
+mut_compat_existing_client_hides_behind_a_new_one() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+versions = Path("compat/versions.toml")
+versions.write_text(
+    versions.read_text()
+    + '\n[clients.fixture-client]\ninstall = "pip"\npackage = "fixture_client"\nversion = "1.0.0"\n'
+)
+driver = Path("compat/drivers/fixture-client/run.sh")
+driver.parent.mkdir(parents=True)
+driver.write_text("#!/usr/bin/env bash\n")
+driver.chmod(0o755)
+known = Path("compat/known-fail.txt")
+known.write_text(known.read_text() + "boto3/list-pagination  rustfs/gateway#912  newly excused\n")
+PYEOF
+}
+# Adding a client must not open a window in which an existing client's new failure slips in.
+expect_fail check_compat_matrix.sh \
+    'an existing client gaining an excused failure in a change that also adds a client' \
+    mut_compat_existing_client_hides_behind_a_new_one \
+    'the list may only shrink'
+
 mut_compat_known_fail_unowned() {
     python3 - <<'PYEOF'
 from pathlib import Path
@@ -24068,6 +24246,101 @@ expect_fail check_client_versions_pinned.sh \
     mut_compat_client_version_range \
     'version range'
 
+mut_compat_venv_requirement_floating() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("compat/versions.toml")
+text = path.read_text()
+old = 'requirements = ["s3cmd==2.4.0"]'
+if text.count(old) != 1:
+    raise SystemExit("venv requirement mutation subject is not unique")
+path.write_text(text.replace(old, 'requirements = ["s3cmd>=2.4.0"]', 1))
+PYEOF
+}
+# The pin is only as exact as what pip is actually asked to install.
+expect_fail check_client_versions_pinned.sh \
+    'a virtualenv client installed from a requirement range' \
+    mut_compat_venv_requirement_floating \
+    'which is not an exact pin'
+
+mut_compat_archive_without_digest() {
+    python3 - <<'PYEOF'
+import re
+from pathlib import Path
+
+path = Path("compat/versions.toml")
+text = path.read_text()
+mutated, count = re.subn(r"(2\.37\.4\.tar\.gz)#sha256=[0-9a-f]{64}", r"\1", text)
+if count != 1:
+    raise SystemExit("archive digest mutation subject is not unique")
+path.write_text(mutated)
+PYEOF
+}
+# A tag archive without a digest pip verifies is a pin a moved tag can change under us.
+expect_fail check_client_versions_pinned.sh \
+    'a source-archive requirement with no digest' \
+    mut_compat_archive_without_digest \
+    'which is not an exact pin'
+
+mut_compat_pin_not_installed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("compat/versions.toml")
+text = path.read_text()
+old = 'version = "2.4.0"'
+if text.count(old) != 1:
+    raise SystemExit("installed-version mutation subject is not unique")
+path.write_text(text.replace(old, 'version = "2.3.0"', 1))
+PYEOF
+}
+# A pin that differs from what the requirements install reports one version and runs another.
+expect_fail check_client_versions_pinned.sh \
+    'a client pin that none of its requirements installs' \
+    mut_compat_pin_not_installed \
+    'none of its requirements installs that version'
+
+mut_compat_lock_disagrees_with_pin() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+import re
+
+path = Path("compat/drivers/aws-sdk-js/package-lock.json")
+text = path.read_text()
+mutated, count = re.subn(
+    r'("node_modules/@aws-sdk/client-s3": \{\s*"version": )"3\.1141\.0"', r'\1"3.1140.0"', text
+)
+if count != 1:
+    raise SystemExit("lock-file mutation subject is not unique")
+path.write_text(mutated)
+PYEOF
+}
+# A driver program's lock file is the second place its SDK version is written; the two must agree.
+expect_fail check_client_versions_pinned.sh \
+    'a driver program whose lock file builds a different SDK version than the pin' \
+    mut_compat_lock_disagrees_with_pin \
+    'but package-lock.json locks'
+
+mut_compat_lock_pattern_misses() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("compat/drivers/aws-sdk-js/package-lock.json")
+text = path.read_text()
+old = '"node_modules/@aws-sdk/client-s3": {'
+if text.count(old) != 1:
+    raise SystemExit("lock-pattern mutation subject is not unique")
+path.write_text(text.replace(old, '"node_modules/@aws-sdk/client-s3-renamed": {', 1))
+PYEOF
+}
+# A lock pattern that finds nothing proves nothing about what the lock file pins.
+expect_fail check_client_versions_pinned.sh \
+    'a driver program whose lock file no longer names the pinned SDK' \
+    mut_compat_lock_pattern_misses \
+    'matches its lock_pattern 0 time(s)'
+
 mut_compat_second_version_pin() {
     python3 - <<'PYEOF'
 from pathlib import Path
@@ -24138,9 +24411,72 @@ path.write_text("\n".join(lines) + "\n")
 PYEOF
 }
 expect_fail check_corpus_no_secrets.sh \
-    'an AWS secret access key hidden inside a base64 payload' \
+    'an AWS secret access key hidden inside a base64 payload, named by file and line' \
     mut_corpus_secret_in_a_decoded_payload \
-    'an AWS secret access key'
+    'corpus/object/PutObject.jsonl:1: an AWS secret access key'
+
+# rustfs/backlog#1763 a-cp-0015 names a JWT beside the PEM key. Planted on the second line of the
+# bucket, so the expected diagnostic also proves the line number is the offending line and not
+# the first line of whatever file had a finding.
+mut_corpus_json_web_token_in_a_header() {
+    python3 - <<'PYEOF'
+import json
+from pathlib import Path
+
+path = Path("corpus/object/PutObject.jsonl")
+lines = path.read_text().splitlines()
+if len(lines) < 2:
+    raise SystemExit("the JWT mutation needs a second entry in the bucket")
+entry = json.loads(lines[1])
+entry["headers"].append(["x-amz-meta-note", "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJjb3JwdXMifQ.c2lnbmF0dXJl"])
+lines[1] = json.dumps(entry, separators=(",", ":"))
+path.write_text("\n".join(lines) + "\n")
+PYEOF
+}
+expect_fail check_corpus_no_secrets.sh \
+    'a JSON Web Token parked in a metadata header, named by file and line' \
+    mut_corpus_json_web_token_in_a_header \
+    'corpus/object/PutObject.jsonl:2: a JSON Web Token'
+
+mut_corpus_live_trailer_signature() {
+    python3 - <<'PYEOF'
+import base64
+import json
+from pathlib import Path
+
+path = Path("corpus/object/PutObject.jsonl")
+lines = path.read_text().splitlines()
+entry = json.loads(lines[0])
+planted = "0;chunk-signature=__REDACTED__\r\nx-amz-trailer-signature:" + "ab" * 32 + "\r\n\r\n"
+entry["chunks"] = [{"bytes_b64": base64.b64encode(planted.encode()).decode()}]
+lines[0] = json.dumps(entry, separators=(",", ":"))
+path.write_text("\n".join(lines) + "\n")
+PYEOF
+}
+expect_fail check_corpus_no_secrets.sh \
+    'a live aws-chunked trailer signature inside a base64 payload' \
+    mut_corpus_live_trailer_signature \
+    'a trailer signature'
+
+mut_corpus_live_post_form_signature() {
+    python3 - <<'PYEOF'
+import base64
+import json
+from pathlib import Path
+
+path = Path("corpus/object/PutObject.jsonl")
+lines = path.read_text().splitlines()
+entry = json.loads(lines[0])
+planted = "--xyz\r\nContent-Disposition: form-data; name=\"X-Amz-Signature\"\r\n\r\n" + "ab" * 32 + "\r\n--xyz--\r\n"
+entry["chunks"] = [{"bytes_b64": base64.b64encode(planted.encode()).decode()}]
+lines[0] = json.dumps(entry, separators=(",", ":"))
+path.write_text("\n".join(lines) + "\n")
+PYEOF
+}
+expect_fail check_corpus_no_secrets.sh \
+    'a live POST-policy signature carried as a multipart form field' \
+    mut_corpus_live_post_form_signature \
+    'a live form credential field'
 
 mut_corpus_private_key_in_prose() {
     python3 - <<'PYEOF'
@@ -24162,6 +24498,73 @@ expect_fail check_corpus_no_secrets.sh \
     'the corpus tree being absent, which must fail rather than skip' \
     mut_corpus_tree_removed \
     'required input is missing'
+
+# check_corpus_change_reviewed.sh reads git history, so each case builds a two-commit repository:
+# a base whose manifest declares 49 entries and a head chosen by the case.
+corpus_review_repo() {
+    local head_subject="$1" head_entries="$2" touch_corpus="$3" repo
+    repo="$(mktemp -d "${TMPDIR:-/tmp}/gateway-corpus-review.XXXXXX")"
+    (
+        cd "$repo"
+        git init -q
+        git config user.email guard@example.invalid
+        git config user.name guard
+        mkdir -p corpus scripts
+        printf 'schema_version = 1\nentries = 49\n\n[[bucket]]\npath = "object/PutObject.jsonl"\nentries = 49\n' >corpus/MANIFEST.toml
+        printf 'x\n' >scripts/other.sh
+        git add -A && git commit -q -m 'base (#1)'
+        if [[ "$touch_corpus" == 1 ]]; then
+            printf 'schema_version = 1\nentries = %s\n\n[[bucket]]\npath = "object/PutObject.jsonl"\nentries = %s\n' "$head_entries" "$head_entries" >corpus/MANIFEST.toml
+        else
+            printf 'y\n' >scripts/other.sh
+        fi
+        git add -A && git commit -q -m "$head_subject"
+    )
+    printf '%s\n' "$repo"
+}
+
+expect_corpus_review() {
+    local expected="$1" desc="$2" mode="$3" subject="$4" entries="$5" touch="$6" body="$7" diagnostic="${8:-}"
+    local repo rc=0 output
+    cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
+    repo="$(corpus_review_repo "$subject" "$entries" "$touch")"
+    if [[ "$mode" == push ]]; then
+        output="$(GATEWAY_CHECK_ROOT="$repo" GATEWAY_CORPUS_PUSH_RANGE="HEAD~1..HEAD" \
+            "${SCRIPT_DIR}/check_corpus_change_reviewed.sh" 2>&1)" || rc=$?
+    else
+        output="$(GATEWAY_CHECK_ROOT="$repo" GATEWAY_CORPUS_BASE="$(git -C "$repo" rev-parse HEAD~1)" \
+            GATEWAY_CORPUS_HEAD="$(git -C "$repo" rev-parse HEAD)" GATEWAY_PR_BODY_JSON="$(json_string "$body")" \
+            "${SCRIPT_DIR}/check_corpus_change_reviewed.sh" 2>&1)" || rc=$?
+    fi
+    rm -rf "$repo"
+    if [[ -n "$diagnostic" && "$output" != *"$diagnostic"* ]]; then
+        fail_msg "check_corpus_change_reviewed.sh missing diagnostic for: ${desc}"
+    elif [[ "$expected" == pass && "$rc" -eq 0 ]]; then
+        pass_msg "check_corpus_change_reviewed.sh allows: ${desc}"
+    elif [[ "$expected" == fail && "$rc" -ne 0 ]]; then
+        pass_msg "check_corpus_change_reviewed.sh catches: ${desc}"
+    else
+        fail_msg "check_corpus_change_reviewed.sh unexpected result for: ${desc}"
+    fi
+}
+
+expect_corpus_review pass 'a pull request that does not touch corpus/' \
+    pr 'change a script' 49 0 ''
+expect_corpus_review pass 'a corpus pull request stating the census the manifest records' \
+    pr 'refresh corpus' 57 1 $'## Summary\nMore traffic.\n\n## Corpus change\n\nEntries: 49 -> 57\n'
+expect_corpus_review fail 'a corpus pull request with no corpus section' \
+    pr 'refresh corpus' 57 1 $'## Summary\nMore traffic.\n' 'has no `## Corpus change` section'
+expect_corpus_review fail 'a corpus pull request stating a census the manifest does not record' \
+    pr 'refresh corpus' 57 1 $'## Corpus change\n\nEntries: 49 -> 60\n' 'must state `Entries: 49 -> 57`'
+expect_corpus_review fail 'a census line outside the corpus section' \
+    pr 'refresh corpus' 57 1 $'Entries: 49 -> 57\n\n## Corpus change\n\nMore traffic.\n' 'no census line'
+expect_corpus_review pass 'a corpus commit merged from a pull request' \
+    push 'feat(corpus): refresh (#123)' 57 1 ''
+expect_corpus_review fail 'a corpus commit pushed straight to main' \
+    push 'chore: refresh corpus' 57 1 '' 'changes corpus/ outside a pull request'
+expect_corpus_review pass 'a direct push that does not touch corpus/' \
+    push 'chore: tweak a script' 49 0 ''
 
 mut_corpus_production_source() {
     python3 - <<'PYEOF'
@@ -24198,6 +24601,42 @@ expect_fail check_corpus_provenance.sh \
     'a client-matrix source with no pinned revision' \
     mut_corpus_unpinned_client_source \
     'no pinned revision'
+
+mut_corpus_uncited_s3s_issue() {
+    python3 - <<'PYEOF'
+import json
+from pathlib import Path
+
+path = Path("corpus/object/PutObject.jsonl")
+lines = path.read_text().splitlines()
+entry = json.loads(lines[0])
+entry["src"] = "handwritten:s3s-issues#999999"
+lines[0] = json.dumps(entry, separators=(",", ":"))
+path.write_text("\n".join(lines) + "\n")
+PYEOF
+}
+expect_fail check_corpus_provenance.sh \
+    'an issue-derived entry naming an issue no conformance case cites' \
+    mut_corpus_uncited_s3s_issue \
+    'no conformance case cites'
+
+mut_corpus_unnumbered_s3s_issue() {
+    python3 - <<'PYEOF'
+import json
+from pathlib import Path
+
+path = Path("corpus/object/PutObject.jsonl")
+lines = path.read_text().splitlines()
+entry = json.loads(lines[0])
+entry["src"] = "handwritten:s3s-issues"
+lines[0] = json.dumps(entry, separators=(",", ":"))
+path.write_text("\n".join(lines) + "\n")
+PYEOF
+}
+expect_fail check_corpus_provenance.sh \
+    'an issue-derived entry that names no issue' \
+    mut_corpus_unnumbered_s3s_issue \
+    'not on the allowlist'
 
 mut_corpus_allowlist_emptied() {
     python3 - <<'PYEOF'
@@ -24287,6 +24726,98 @@ expect_fail check_corpus_size.sh \
     'the hard ceiling becoming unreadable, which must fail rather than default' \
     mut_corpus_size_limits_unreadable \
     'cannot read HARD_SIZE_LIMIT_BYTES'
+
+mut_recorder_feature_in_its_own_default() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/corpus-recorder/Cargo.toml")
+text = path.read_text()
+if text.count("default = []\n") != 1:
+    raise SystemExit("recorder default mutation subject is not unique")
+path.write_text(text.replace("default = []\n", 'default = ["corpus-record"]\n', 1))
+PYEOF
+}
+expect_fail check_recorder_not_default.sh \
+    'the corpus recorder feature added to its own default set' \
+    mut_recorder_feature_in_its_own_default \
+    'must be empty'
+
+mut_recorder_required_by_another_crate() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("compat/sut/Cargo.toml")
+text = path.read_text()
+old = 'rustfs-gateway-corpus-recorder = { workspace = true, optional = true, features = ["corpus-record"] }\n'
+if text.count(old) != 1:
+    raise SystemExit("compat-sut recorder dependency mutation subject is not unique")
+path.write_text(text.replace(old, 'rustfs-gateway-corpus-recorder = { workspace = true, features = ["corpus-record"] }\n', 1))
+PYEOF
+}
+expect_fail check_recorder_not_default.sh \
+    'a workspace crate depending on the recorder without optional = true' \
+    mut_recorder_required_by_another_crate \
+    'without `optional = true`'
+
+mut_recorder_reached_from_a_default_feature_chain() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("compat/sut/Cargo.toml")
+text = path.read_text()
+old = 'corpus-record = ["dep:rustfs-gateway-corpus-recorder"]\n'
+if text.count(old) != 1:
+    raise SystemExit("compat-sut feature mutation subject is not unique")
+path.write_text(text.replace(old, 'default = ["record"]\nrecord = ["corpus-record"]\n' + old, 1))
+PYEOF
+}
+expect_fail check_recorder_not_default.sh \
+    'a default feature reaching the recorder through another feature' \
+    mut_recorder_reached_from_a_default_feature_chain \
+    'compiles the recorder in'
+
+mut_recorder_dependency_not_optional() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/corpus-recorder/Cargo.toml")
+text = path.read_text()
+old = "tower = { workspace = true, optional = true }\n"
+if text.count(old) != 1:
+    raise SystemExit("recorder dependency mutation subject is not unique")
+path.write_text(text.replace(old, "tower = { workspace = true }\n", 1))
+PYEOF
+}
+expect_fail check_recorder_not_default.sh \
+    'a recorder dependency linked into a build without the feature' \
+    mut_recorder_dependency_not_optional \
+    'is not optional'
+
+mut_recorder_module_ungated() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/corpus-recorder/src/lib.rs")
+text = path.read_text()
+old = '#[cfg(feature = "corpus-record")]\nmod writer;\n'
+if text.count(old) != 1:
+    raise SystemExit("recorder module gate mutation subject is not unique")
+path.write_text(text.replace(old, "mod writer;\n", 1))
+PYEOF
+}
+expect_fail check_recorder_not_default.sh \
+    'a recorder module compiled without the feature gate' \
+    mut_recorder_module_ungated \
+    'is not behind'
+
+mut_recorder_manifest_removed() {
+    rm -f crates/corpus-recorder/Cargo.toml
+}
+expect_fail check_recorder_not_default.sh \
+    'the recorder manifest being absent, which must fail rather than skip' \
+    mut_recorder_manifest_removed \
+    'required input is missing'
 
 # -- re-homed from the error-status block --------------------------------------------------------
 #

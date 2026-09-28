@@ -260,6 +260,19 @@ async fn c_wire_0064_one_thousand_half_open_connections_are_bounded_and_reused()
         eprintln!("SKIP c-wire-0064: this host has no dual-stack loopback listener");
         return;
     }
+    match listen_queue_capability(
+        ATTEMPTS,
+        wave_config.backlog,
+        kernel_listen_queue_limit(),
+        std::env::var_os("GITHUB_ACTIONS").is_some(),
+    ) {
+        ListenQueue::Holds => {}
+        ListenQueue::Skip(reason) => {
+            eprintln!("SKIP c-wire-0064: {reason}");
+            return;
+        }
+        ListenQueue::Required(reason) => panic!("{reason}"),
+    }
     let (runtime, running) = server_on_own_runtime(wave_config, Bytes::new());
     let v4 = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), running.local_addr.port());
     let v6 = SocketAddr::new(IpAddr::V6(std::net::Ipv6Addr::LOCALHOST), running.local_addr.port());
@@ -273,7 +286,15 @@ async fn c_wire_0064_one_thousand_half_open_connections_are_bounded_and_reused()
         }
     })
     .await
-    .expect("the per-IP ceiling refuses every excess slow header");
+    .unwrap_or_else(|_| {
+        panic!(
+            "the per-IP ceiling refuses every excess slow header: accepted={} active={} per_ip_rejected={} accept_errors={}",
+            running.metrics.accepted_connections(),
+            running.metrics.active_connections(),
+            running.metrics.per_ip_rejections(),
+            running.metrics.accept_errors()
+        )
+    });
 
     let mut v6_streams = open_partial_headers(v6, PER_IP_LIMIT).await;
     tokio::time::timeout(Duration::from_secs(2), async {
@@ -328,6 +349,93 @@ async fn c_wire_0064_one_thousand_half_open_connections_are_bounded_and_reused()
 // Only the overload wave may observe an intentional peer rejection during connect or write.
 // The exact server-side rejection census still proves that all excess attempts were admitted
 // to the per-IP decision; a client reset alone is not counted as a server refusal.
+/// Whether the kernel can queue c-wire-0064's whole simultaneous wave for `accept`.
+///
+/// The census is exact only if every completed handshake reaches the application. When the
+/// accept queue the kernel grants (the lower of the configured backlog and the host limit) is
+/// smaller than the wave, the kernel may discard queued or half-open connections before the
+/// server can see them: on macOS, with `kern.ipc.somaxconn = 128`, runs of the unchanged
+/// 1,000-connection wave ended with 60-130 connections the listener never accepted while it kept
+/// accepting, and the same wave of 120 or 250 connections passed every run under the same load
+/// (rustfs/gateway#859). That is a host capability, not a server outcome, so the case is skipped
+/// with the reason there. CI must have the capability: a skip there would silently remove the only
+/// run of this census, so it fails instead.
+#[derive(Debug, PartialEq, Eq)]
+enum ListenQueue {
+    Holds,
+    Skip(String),
+    Required(String),
+}
+
+fn listen_queue_capability(wave: usize, backlog: u32, host_limit: Option<usize>, in_ci: bool) -> ListenQueue {
+    let Some(host_limit) = host_limit else {
+        // An unreadable limit is not evidence of a small one; run and let the census speak.
+        return ListenQueue::Holds;
+    };
+    let granted = host_limit.min(usize::try_from(backlog).unwrap_or(usize::MAX));
+    if granted >= wave {
+        return ListenQueue::Holds;
+    }
+    let reason = format!(
+        "the kernel queues at most {granted} connections for accept (backlog {backlog}, host limit {host_limit}), \
+         fewer than the {wave}-connection wave, so it may discard connections the server never sees"
+    );
+    if in_ci {
+        ListenQueue::Required(reason)
+    } else {
+        ListenQueue::Skip(reason)
+    }
+}
+
+/// The host's cap on a listening socket's accept queue, where it exposes one.
+fn kernel_listen_queue_limit() -> Option<usize> {
+    #[cfg(target_os = "linux")]
+    let limit = std::fs::read_to_string("/proc/sys/net/core/somaxconn").ok();
+    #[cfg(target_vendor = "apple")]
+    let limit = std::process::Command::new("/usr/sbin/sysctl")
+        .args(["-n", "kern.ipc.somaxconn"])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .and_then(|output| String::from_utf8(output.stdout).ok());
+    #[cfg(not(any(target_os = "linux", target_vendor = "apple")))]
+    let limit: Option<String> = None;
+    limit?.trim().parse().ok()
+}
+
+#[test]
+fn a_host_queue_that_holds_the_wave_runs_the_census() {
+    assert_eq!(listen_queue_capability(1_000, 1_024, Some(4_096), true), ListenQueue::Holds);
+    assert_eq!(listen_queue_capability(1_000, 1_024, Some(1_000), false), ListenQueue::Holds);
+}
+
+#[test]
+fn an_unreadable_host_limit_still_runs_the_census() {
+    assert_eq!(listen_queue_capability(1_000, 1_024, None, false), ListenQueue::Holds);
+    assert_eq!(listen_queue_capability(1_000, 1_024, None, true), ListenQueue::Holds);
+}
+
+#[test]
+fn a_small_host_queue_skips_locally_with_the_numbers() {
+    let ListenQueue::Skip(reason) = listen_queue_capability(1_000, 1_024, Some(128), false) else {
+        panic!("a 128-connection host queue must skip a 1,000-connection wave locally");
+    };
+    assert!(reason.contains("at most 128") && reason.contains("host limit 128"), "{reason}");
+}
+
+#[test]
+fn a_small_configured_backlog_is_the_limit_too() {
+    assert!(matches!(
+        listen_queue_capability(1_000, 999, Some(4_096), false),
+        ListenQueue::Skip(reason) if reason.contains("at most 999")
+    ));
+}
+
+#[test]
+fn ci_never_skips_the_census() {
+    assert!(matches!(listen_queue_capability(1_000, 1_024, Some(128), true), ListenQueue::Required(_)));
+}
+
 async fn open_overload_headers(addr: SocketAddr, count: usize) -> Vec<TcpStream> {
     let mut tasks = tokio::task::JoinSet::new();
     for _ in 0..count {

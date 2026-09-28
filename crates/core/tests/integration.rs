@@ -65,6 +65,9 @@ mod encryption_roundtrip;
 #[path = "error_resolution.rs"]
 mod error_resolution;
 
+#[path = "event_stream_frame_replay.rs"]
+mod event_stream_frame_replay;
+
 #[path = "ext_field_policy.rs"]
 mod ext_field_policy;
 
@@ -125,6 +128,9 @@ mod replication_roundtrip;
 #[path = "response_override_safety.rs"]
 mod response_override_safety;
 
+#[path = "restore_header_replay.rs"]
+mod restore_header_replay;
+
 #[path = "route_only.rs"]
 mod route_only;
 
@@ -140,8 +146,14 @@ mod rule_filter_boundaries;
 #[path = "security_request_policy.rs"]
 mod security_request_policy;
 
+#[path = "select_records_framing.rs"]
+mod select_records_framing;
+
 #[path = "select_restore_roundtrip.rs"]
 mod select_restore_roundtrip;
+
+#[path = "selector_required_params.rs"]
+mod selector_required_params;
 
 #[path = "static_dispatch.rs"]
 mod static_dispatch;

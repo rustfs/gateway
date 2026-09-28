@@ -35,6 +35,7 @@
 //!            --lc-debug-interval 10
 //! compat-sut --data <dir> --port 9100 --tls-port 9443 --tls-self-signed <ca.pem> [--tls-san <name>]
 //! compat-sut --data <dir> --port 9100 --tls-port 9443 --tls-cert <chain.pem> --tls-key <key.pem>
+//! compat-sut --data <dir> --port 9100 --corpus-record <file.jsonl> --corpus-src <src>   # corpus-record builds
 //! compat-sut --print-capabilities
 //! ```
 //!
@@ -43,6 +44,7 @@
 //! encrypted listener is what makes those measurable. Plaintext stays on `--port` either way, so
 //! nothing that already points at it changes.
 
+mod corpus;
 mod identity;
 mod ownership;
 mod policy_authorizer;
@@ -85,6 +87,16 @@ pub(crate) struct Options {
     pub(crate) lifecycle_debug_interval: Option<Duration>,
     /// The optional encrypted listener, on the same host as the plaintext one.
     pub(crate) tls: Option<TlsListener>,
+    /// Corpus recording, when `--corpus-record` asked for it (rustfs/backlog#1763).
+    pub(crate) corpus: Option<CorpusRecording>,
+}
+
+/// Where recorded requests go and which suite produced them. Both are required together: an entry
+/// without a provenance source is refused by the corpus, so a recording without one is refused
+/// here, before anything is served.
+pub(crate) struct CorpusRecording {
+    pub(crate) output: PathBuf,
+    pub(crate) src: String,
 }
 
 fn parse_options<I, S>(arguments: I) -> Result<Options, io::Error>
@@ -102,6 +114,8 @@ where
     let mut tenant = AccountArgs::default();
     let mut lifecycle_debug_interval = None;
     let mut tls = TlsArgs::default();
+    let mut corpus_output = None;
+    let mut corpus_src = None;
     let mut arguments = arguments.into_iter();
     while let Some(argument) = arguments.next() {
         let mut value = || -> Result<String, io::Error> {
@@ -160,6 +174,8 @@ where
             "--tls-key" => tls.private_key = Some(PathBuf::from(value()?)),
             "--tls-self-signed" => tls.self_signed = Some(PathBuf::from(value()?)),
             "--tls-san" => tls.extra_names.push(value()?),
+            "--corpus-record" => corpus_output = Some(PathBuf::from(value()?)),
+            "--corpus-src" => corpus_src = Some(value()?),
             unknown => {
                 return Err(io::Error::new(io::ErrorKind::InvalidInput, format!("unknown argument: {unknown}")));
             }
@@ -175,6 +191,16 @@ where
             "--tls-port must differ from --port; the plaintext listener stays up beside the encrypted one",
         ));
     }
+    let corpus = match (corpus_output, corpus_src) {
+        (None, None) => None,
+        (Some(output), Some(src)) => Some(CorpusRecording { output, src }),
+        _ => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "--corpus-record and --corpus-src must be given together",
+            ));
+        }
+    };
     Ok(Options {
         data,
         address: SocketAddr::new(host, port),
@@ -183,6 +209,7 @@ where
         probe_log,
         lifecycle_debug_interval,
         tls,
+        corpus,
     })
 }
 
@@ -234,10 +261,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Some(path) => Some(Arc::new(ProbeLog::create(path)?)),
         None => None,
     };
+    // Refused before any port is bound: a recorder that cannot start must stop the launcher, not
+    // leave it serving unrecorded while a suite believes it is being recorded.
+    let recorder = corpus::recorder(&options)?;
     // Both listeners serve this one value, so a request is authorized, served and recorded the same
     // way whichever socket it arrived on. The only difference is the transport fact, and that is
-    // read from the socket by `DeclareTransport`, never from the request.
-    let served = DeclareTransport::new(ProbeService::new(service, log.clone()));
+    // read from the socket by `DeclareTransport`, never from the request. The corpus recorder, when
+    // there is one, is outermost, so it records the request as the client sent it.
+    let served = tower::ServiceBuilder::new()
+        .option_layer(recorder.clone())
+        .service(DeclareTransport::new(ProbeService::new(service, log.clone())));
 
     // The encrypted listener is bound first. The plaintext port is what `ci/lib/sut.sh` polls for
     // readiness, so once it answers, the TLS port is bound too and a generated authority is
@@ -292,6 +325,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     if let Some(log) = log.as_ref() {
         println!("compat-sut recorded {} probe record(s)", log.records());
+    }
+    if let Some(line) = corpus::report(recorder.as_ref()) {
+        println!("{line}");
     }
     println!("compat-sut shutdown drained={} aborted={}", report.drained, report.aborted);
     running.task.await??;
@@ -429,6 +465,26 @@ mod tests {
             ])
             .is_err()
         );
+    }
+
+    /// Negative — a recording without a provenance source, or a source without a recording, is
+    /// refused at the command line.
+    #[test]
+    fn n_corpus_recording_flags_are_refused_alone() {
+        assert!(parse_options(["--corpus-record", "out.jsonl"]).is_err());
+        assert!(parse_options(["--corpus-src", "handwritten:gateway"]).is_err());
+        assert!(parse_options(["--corpus-record"]).is_err());
+    }
+
+    /// Negative — in a build without the feature, asking to record stops the launcher instead of
+    /// serving unrecorded.
+    #[cfg(not(feature = "corpus-record"))]
+    #[test]
+    fn n_recording_is_refused_by_a_build_without_the_feature() {
+        let options = parse_options(["--corpus-record", "out.jsonl", "--corpus-src", "handwritten:gateway"])
+            .expect("a complete recording request");
+        assert!(crate::corpus::recorder(&options).is_err());
+        assert!(crate::corpus::recorder(&parse_options(["--data", "."]).expect("a valid line")).is_ok_and(|none| none.is_none()));
     }
 
     /// Negative — a zero-second lifecycle day is refused; every object would be born expired.

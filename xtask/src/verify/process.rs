@@ -38,6 +38,7 @@ use signal_hook::iterator::Signals;
 use signal_hook::low_level;
 
 use super::{GateCommand, GateResult};
+use crate::nested_cargo::without_package_environment;
 
 pub(super) struct Batch {
     pub(super) results: Vec<GateResult>,
@@ -222,7 +223,7 @@ impl Supervisor<'_> {
         let stdout = self.capture_root.join(format!("{index}.stdout"));
         let stderr = self.capture_root.join(format!("{index}.stderr"));
         let mut command = Command::new(program);
-        command
+        without_package_environment(&mut command)
             .args(args)
             .current_dir(current_dir)
             .stdout(Stdio::from(File::create(&stdout)?))
@@ -468,20 +469,49 @@ impl Drop for Supervisor<'_> {
     }
 }
 
-/// Counts the `Compiling <crate>` lines cargo wrote to a step's captured stderr before the kill.
+/// Counts the crate builds cargo reported in a step's captured stderr before the kill.
 ///
 /// This is an observation of what the child printed, not an estimate: a killed step that compiled
 /// nothing reports nothing. Unreadable capture files count as zero, which understates a build and
 /// never invents one.
 fn compiled_crates(capture: &Path) -> usize {
-    fs::read_to_string(capture)
-        .map(|captured| {
-            captured
-                .lines()
-                .filter(|line| line.trim_start().starts_with("Compiling "))
-                .count()
+    fs::read(capture).map(|captured| build_line_count(&captured)).unwrap_or(0)
+}
+
+/// Counts cargo's `Compiling <crate>` and `Checking <crate>` status lines.
+///
+/// Both are a crate being built: `Checking` is what a Clippy step prints for the crates it lints.
+/// Cargo colours these lines whenever `CARGO_TERM_COLOR=always` — which every CI job in this
+/// repository sets — so the SGR escapes around the verb are removed before it is read. Counting
+/// the raw text had reported `compiled 0 crate(s)` for every build on CI (rustfs/gateway#897).
+pub(super) fn build_line_count(stderr: &[u8]) -> usize {
+    String::from_utf8_lossy(stderr)
+        .lines()
+        .map(without_sgr_escapes)
+        .filter(|line| {
+            let line = line.trim_start();
+            line.starts_with("Compiling ") || line.starts_with("Checking ")
         })
-        .unwrap_or(0)
+        .count()
+}
+
+/// Removes ANSI SGR sequences (`ESC [ ... m`), the only escapes cargo writes into status lines.
+fn without_sgr_escapes(line: &str) -> String {
+    let mut plain = String::with_capacity(line.len());
+    let mut characters = line.chars().peekable();
+    while let Some(character) = characters.next() {
+        if character == '\u{1b}' && characters.peek() == Some(&'[') {
+            characters.next();
+            for inner in characters.by_ref() {
+                if inner.is_ascii_alphabetic() {
+                    break;
+                }
+            }
+            continue;
+        }
+        plain.push(character);
+    }
+    plain
 }
 
 fn read_output(status: ExitStatus, stdout: &Path, stderr: &Path) -> io::Result<Output> {

@@ -148,6 +148,15 @@ hot = false
 values = ["requester"]
 quirks = []
 
+[[input]]
+name = "OptionalObjectAttributes"
+wire_name = "x-amz-optional-object-attributes"
+binding = "Header"
+type = "List<StringEnum>(delimited)"
+required = false
+hot = false
+quirks = []
+
 [[output]]
 name = "IsTruncated"
 wire_name = "IsTruncated"

@@ -50,16 +50,25 @@
 #   their own outcome is not measured. Fixing those two turns them FIXED or REGRESSION; the
 #   regressions then need their own generation, attributed case by case.
 #
+# REFRESH 2026-09-28 (rustfs/gateway#812): shrink only, generation unchanged
+#   Record run https://github.com/rustfs/gateway/actions/runs/36381686870 on main 1c2e46bb:
+#   passed=357 failed=313 errored=0 skipped=70 collected=740, 0 regressions. The 40 FIXED
+#   entries (bucket default encryption, SSE-S3/SSE-KMS object reporting from #900/#964, and one
+#   presigned GET) and the 4 stale entries the suite skipped are removed, and
+#   ci/s3tests/outcomes.txt is that run's record. #812's groups are
+#   re-attributed: ACL grants and ownership controls are RustFS parity; SSE-C over plaintext is
+#   refused by design; UploadPartCopy and SSE policy condition keys moved to #979; the SSE POST
+#   forms are SigV2. The former cascade group is relabelled unattributed: those cases now fail on
+#   their own and still need per-case owners.
+#
 # generation: 2
 
-# --- gateway-bug: cleanup cascade: DeleteBucket refuses pending multipart uploads (235) — https://github.com/rustfs/gateway/issues/806 ---
+# --- unattributed: measured on their own since the #806 cleanup cascade was lifted; per-case attribution pending (137) — https://github.com/rustfs/backlog/issues/1764 ---
 s3tests.functional.test_s3::test_100_continue
 s3tests.functional.test_s3::test_block_public_object_canned_acls
 s3tests.functional.test_s3::test_block_public_put_bucket_acls
 s3tests.functional.test_s3::test_block_public_restrict_public_buckets
 s3tests.functional.test_s3::test_bucket_create_delete_bucket_ownership
-s3tests.functional.test_s3::test_bucket_policy_deny_self_denied_policy
-s3tests.functional.test_s3::test_bucket_policy_deny_self_denied_policy_confirm_header
 s3tests.functional.test_s3::test_bucket_policy_different_tenant
 s3tests.functional.test_s3::test_bucket_policy_get_obj_acl_existing_tag
 s3tests.functional.test_s3::test_bucket_policy_get_obj_existing_tag
@@ -68,61 +77,11 @@ s3tests.functional.test_s3::test_bucket_policy_put_obj_acl
 s3tests.functional.test_s3::test_bucket_policy_put_obj_copy_source
 s3tests.functional.test_s3::test_bucket_policy_put_obj_copy_source_meta
 s3tests.functional.test_s3::test_bucket_policy_put_obj_grant
-s3tests.functional.test_s3::test_bucket_policy_put_obj_kms_noenc
-s3tests.functional.test_s3::test_bucket_policy_put_obj_kms_s3
 s3tests.functional.test_s3::test_bucket_policy_put_obj_request_obj_tag
-s3tests.functional.test_s3::test_bucket_policy_put_obj_s3_incorrect_algo_sse_s3
-s3tests.functional.test_s3::test_bucket_policy_put_obj_s3_kms
-s3tests.functional.test_s3::test_bucket_policy_put_obj_s3_noenc
 s3tests.functional.test_s3::test_bucket_policy_put_obj_tagging_existing_tag
 s3tests.functional.test_s3::test_bucket_policy_set_condition_operator_end_with_IfExists
 s3tests.functional.test_s3::test_bucket_policy_tenanted_bucket
 s3tests.functional.test_s3::test_bucket_policy_upload_part_copy
-s3tests.functional.test_s3::test_copy_enc[sse-c-sse-c-STANDARD-STANDARD-1024]
-s3tests.functional.test_s3::test_copy_enc[sse-c-sse-c-STANDARD-STANDARD-1048576]
-s3tests.functional.test_s3::test_copy_enc[sse-c-sse-c-STANDARD-STANDARD-1]
-s3tests.functional.test_s3::test_copy_enc[sse-c-sse-c-STANDARD-STANDARD-8388608]
-s3tests.functional.test_s3::test_copy_enc[sse-c-sse-kms-STANDARD-STANDARD-1024]
-s3tests.functional.test_s3::test_copy_enc[sse-c-sse-kms-STANDARD-STANDARD-1048576]
-s3tests.functional.test_s3::test_copy_enc[sse-c-sse-kms-STANDARD-STANDARD-1]
-s3tests.functional.test_s3::test_copy_enc[sse-c-sse-kms-STANDARD-STANDARD-8388608]
-s3tests.functional.test_s3::test_copy_enc[sse-c-sse-s3-STANDARD-STANDARD-1024]
-s3tests.functional.test_s3::test_copy_enc[sse-c-sse-s3-STANDARD-STANDARD-1048576]
-s3tests.functional.test_s3::test_copy_enc[sse-c-sse-s3-STANDARD-STANDARD-1]
-s3tests.functional.test_s3::test_copy_enc[sse-c-sse-s3-STANDARD-STANDARD-8388608]
-s3tests.functional.test_s3::test_copy_enc[sse-kms-sse-c-STANDARD-STANDARD-1024]
-s3tests.functional.test_s3::test_copy_enc[sse-kms-sse-c-STANDARD-STANDARD-1048576]
-s3tests.functional.test_s3::test_copy_enc[sse-kms-sse-c-STANDARD-STANDARD-1]
-s3tests.functional.test_s3::test_copy_enc[sse-kms-sse-c-STANDARD-STANDARD-8388608]
-s3tests.functional.test_s3::test_copy_enc[sse-kms-sse-kms-STANDARD-STANDARD-1024]
-s3tests.functional.test_s3::test_copy_enc[sse-kms-sse-kms-STANDARD-STANDARD-1048576]
-s3tests.functional.test_s3::test_copy_enc[sse-kms-sse-kms-STANDARD-STANDARD-1]
-s3tests.functional.test_s3::test_copy_enc[sse-kms-sse-kms-STANDARD-STANDARD-8388608]
-s3tests.functional.test_s3::test_copy_enc[sse-kms-sse-s3-STANDARD-STANDARD-1024]
-s3tests.functional.test_s3::test_copy_enc[sse-kms-sse-s3-STANDARD-STANDARD-1048576]
-s3tests.functional.test_s3::test_copy_enc[sse-kms-sse-s3-STANDARD-STANDARD-1]
-s3tests.functional.test_s3::test_copy_enc[sse-kms-sse-s3-STANDARD-STANDARD-8388608]
-s3tests.functional.test_s3::test_copy_enc[sse-s3-sse-c-STANDARD-STANDARD-1024]
-s3tests.functional.test_s3::test_copy_enc[sse-s3-sse-c-STANDARD-STANDARD-1048576]
-s3tests.functional.test_s3::test_copy_enc[sse-s3-sse-c-STANDARD-STANDARD-1]
-s3tests.functional.test_s3::test_copy_enc[sse-s3-sse-c-STANDARD-STANDARD-8388608]
-s3tests.functional.test_s3::test_copy_enc[sse-s3-sse-kms-STANDARD-STANDARD-1024]
-s3tests.functional.test_s3::test_copy_enc[sse-s3-sse-kms-STANDARD-STANDARD-1048576]
-s3tests.functional.test_s3::test_copy_enc[sse-s3-sse-kms-STANDARD-STANDARD-1]
-s3tests.functional.test_s3::test_copy_enc[sse-s3-sse-kms-STANDARD-STANDARD-8388608]
-s3tests.functional.test_s3::test_copy_enc[sse-s3-sse-s3-STANDARD-STANDARD-1024]
-s3tests.functional.test_s3::test_copy_enc[sse-s3-sse-s3-STANDARD-STANDARD-1048576]
-s3tests.functional.test_s3::test_copy_enc[sse-s3-sse-s3-STANDARD-STANDARD-1]
-s3tests.functional.test_s3::test_copy_enc[sse-s3-sse-s3-STANDARD-STANDARD-8388608]
-s3tests.functional.test_s3::test_copy_part_enc[sse-c-sse-c-STANDARD-STANDARD-8388608]
-s3tests.functional.test_s3::test_copy_part_enc[sse-c-sse-kms-STANDARD-STANDARD-8388608]
-s3tests.functional.test_s3::test_copy_part_enc[sse-c-sse-s3-STANDARD-STANDARD-8388608]
-s3tests.functional.test_s3::test_copy_part_enc[sse-kms-sse-c-STANDARD-STANDARD-8388608]
-s3tests.functional.test_s3::test_copy_part_enc[sse-kms-sse-kms-STANDARD-STANDARD-8388608]
-s3tests.functional.test_s3::test_copy_part_enc[sse-kms-sse-s3-STANDARD-STANDARD-8388608]
-s3tests.functional.test_s3::test_copy_part_enc[sse-s3-sse-c-STANDARD-STANDARD-8388608]
-s3tests.functional.test_s3::test_copy_part_enc[sse-s3-sse-kms-STANDARD-STANDARD-8388608]
-s3tests.functional.test_s3::test_copy_part_enc[sse-s3-sse-s3-STANDARD-STANDARD-8388608]
 s3tests.functional.test_s3::test_cors_header_option
 s3tests.functional.test_s3::test_cors_origin_response
 s3tests.functional.test_s3::test_cors_origin_wildcard
@@ -139,26 +98,9 @@ s3tests.functional.test_s3::test_cors_presigned_put_object_with_acl
 s3tests.functional.test_s3::test_create_bucket_bucket_owner_enforced
 s3tests.functional.test_s3::test_create_bucket_bucket_owner_preferred
 s3tests.functional.test_s3::test_create_bucket_object_writer
-s3tests.functional.test_s3::test_delete_bucket_encryption_kms
-s3tests.functional.test_s3::test_delete_bucket_encryption_s3
 s3tests.functional.test_s3::test_delete_marker_expiration
 s3tests.functional.test_s3::test_delete_marker_nonversioned
-s3tests.functional.test_s3::test_encrypted_transfer_13b
-s3tests.functional.test_s3::test_encrypted_transfer_1MB
-s3tests.functional.test_s3::test_encrypted_transfer_1b
-s3tests.functional.test_s3::test_encrypted_transfer_1kb
-s3tests.functional.test_s3::test_encryption_sse_c_deny_algo_with_bucket_policy
-s3tests.functional.test_s3::test_encryption_sse_c_enforced_with_bucket_policy
-s3tests.functional.test_s3::test_encryption_sse_c_method_head
-s3tests.functional.test_s3::test_encryption_sse_c_multipart_bad_download
-s3tests.functional.test_s3::test_encryption_sse_c_multipart_upload
-s3tests.functional.test_s3::test_encryption_sse_c_other_key
-s3tests.functional.test_s3::test_encryption_sse_c_post_object_authenticated_request
-s3tests.functional.test_s3::test_encryption_sse_c_present
-s3tests.functional.test_s3::test_encryption_sse_c_unaligned_multipart_upload
 s3tests.functional.test_s3::test_get_authpublic_acl_bucket_policy_status
-s3tests.functional.test_s3::test_get_bucket_encryption_kms
-s3tests.functional.test_s3::test_get_bucket_encryption_s3
 s3tests.functional.test_s3::test_get_checksum_object_attributes
 s3tests.functional.test_s3::test_get_multipart_checksum_object_attributes
 s3tests.functional.test_s3::test_get_multipart_object_attributes
@@ -168,7 +110,6 @@ s3tests.functional.test_s3::test_get_object_torrent
 s3tests.functional.test_s3::test_get_paginated_multipart_object_attributes
 s3tests.functional.test_s3::test_get_public_acl_bucket_policy_status
 s3tests.functional.test_s3::test_get_single_multipart_object_attributes
-s3tests.functional.test_s3::test_get_sse_c_encrypted_object_attributes
 s3tests.functional.test_s3::test_get_versioned_object_attributes
 s3tests.functional.test_s3::test_head_object_404_with_policy_prefix
 s3tests.functional.test_s3::test_ignore_public_acls
@@ -177,8 +118,6 @@ s3tests.functional.test_s3::test_lifecycle_expiration_header_put
 s3tests.functional.test_s3::test_lifecycle_expiration_header_tags_head
 s3tests.functional.test_s3::test_lifecycle_get_no_id
 s3tests.functional.test_s3::test_lifecycle_invalid_status
-s3tests.functional.test_s3::test_lifecycle_plain_null_version_current_transition
-s3tests.functional.test_s3::test_lifecycle_set_noncurrent_transition
 s3tests.functional.test_s3::test_list_multipart_upload_owner
 s3tests.functional.test_s3::test_multipart_checksum_sha256
 s3tests.functional.test_s3::test_multipart_copy_improper_range
@@ -195,7 +134,6 @@ s3tests.functional.test_s3::test_multipart_put_object_if_match
 s3tests.functional.test_s3::test_multipart_resend_first_finishes_last
 s3tests.functional.test_s3::test_multipart_reupload_checksum_and_etag
 s3tests.functional.test_s3::test_multipart_single_get_part
-s3tests.functional.test_s3::test_multipart_sse_c_get_part
 s3tests.functional.test_s3::test_multipart_upload
 s3tests.functional.test_s3::test_multipart_upload_small
 s3tests.functional.test_s3::test_multipart_use_cksum_helper_crc32
@@ -204,7 +142,6 @@ s3tests.functional.test_s3::test_multipart_use_cksum_helper_crc64nvme
 s3tests.functional.test_s3::test_multipart_use_cksum_helper_sha1
 s3tests.functional.test_s3::test_multipart_use_cksum_helper_sha256
 s3tests.functional.test_s3::test_non_multipart_get_part
-s3tests.functional.test_s3::test_non_multipart_sse_c_get_part
 s3tests.functional.test_s3::test_object_checksum_crc64nvme
 s3tests.functional.test_s3::test_object_checksum_sha256
 s3tests.functional.test_s3::test_object_lock_changing_mode_from_compliance
@@ -250,40 +187,16 @@ s3tests.functional.test_s3::test_object_read_unreadable
 s3tests.functional.test_s3::test_post_object_tags_anonymous_request
 s3tests.functional.test_s3::test_post_object_tags_authenticated_request
 s3tests.functional.test_s3::test_post_object_upload_checksum
-s3tests.functional.test_s3::test_put_bucket_encryption_kms
-s3tests.functional.test_s3::test_put_bucket_encryption_s3
 s3tests.functional.test_s3::test_put_bucket_ownership_bucket_owner_enforced
 s3tests.functional.test_s3::test_put_bucket_ownership_bucket_owner_preferred
 s3tests.functional.test_s3::test_put_bucket_ownership_object_writer
 s3tests.functional.test_s3::test_put_current_object_if_match
-s3tests.functional.test_s3::test_put_obj_enc_conflict_c_kms
-s3tests.functional.test_s3::test_put_obj_enc_conflict_c_s3
 s3tests.functional.test_s3::test_put_obj_with_tags
 s3tests.functional.test_s3::test_put_object_current_if_match
 s3tests.functional.test_s3::test_put_object_if_match
 s3tests.functional.test_s3::test_set_bucket_tagging
 s3tests.functional.test_s3::test_set_cors
 s3tests.functional.test_s3::test_set_multipart_tagging
-s3tests.functional.test_s3::test_sse_kms_default_post_object_authenticated_request
-s3tests.functional.test_s3::test_sse_kms_default_upload_1b
-s3tests.functional.test_s3::test_sse_kms_default_upload_1kb
-s3tests.functional.test_s3::test_sse_kms_default_upload_1mb
-s3tests.functional.test_s3::test_sse_kms_default_upload_8mb
-s3tests.functional.test_s3::test_sse_kms_method_head
-s3tests.functional.test_s3::test_sse_kms_no_key
-s3tests.functional.test_s3::test_sse_kms_post_object_authenticated_request
-s3tests.functional.test_s3::test_sse_kms_read_declare
-s3tests.functional.test_s3::test_sse_s3_default_method_head
-s3tests.functional.test_s3::test_sse_s3_default_multipart_upload
-s3tests.functional.test_s3::test_sse_s3_default_post_object_authenticated_request
-s3tests.functional.test_s3::test_sse_s3_default_upload_1b
-s3tests.functional.test_s3::test_sse_s3_default_upload_1kb
-s3tests.functional.test_s3::test_sse_s3_default_upload_1mb
-s3tests.functional.test_s3::test_sse_s3_default_upload_8mb
-s3tests.functional.test_s3::test_sse_s3_encrypted_upload_1b
-s3tests.functional.test_s3::test_sse_s3_encrypted_upload_1kb
-s3tests.functional.test_s3::test_sse_s3_encrypted_upload_1mb
-s3tests.functional.test_s3::test_sse_s3_encrypted_upload_8mb
 s3tests.functional.test_s3::test_versioned_object_acl
 s3tests.functional.test_s3::test_versioned_object_acl_no_version_specified
 s3tests.functional.test_s3::test_versioning_bucket_atomic_upload_return_version_id
@@ -295,7 +208,7 @@ s3tests.functional.test_s3::test_bucket_list_prefix_basic
 # --- gateway-bug: stored Content-Encoding keeps aws-chunked (1) — https://github.com/rustfs/gateway/issues/813 ---
 s3tests.functional.test_s3::test_object_content_encoding_aws_chunked
 
-# --- fs-gap: ACL / ownership controls not implemented (32) — https://github.com/rustfs/gateway/issues/812 ---
+# --- rustfs-parity: ACL grants are neither stored nor enforced, and ownership controls are unimplemented, as in RustFS (31) ---
 s3tests.functional.test_s3::test_access_bucket_private_object_publicread
 s3tests.functional.test_s3::test_access_bucket_private_object_publicreadwrite
 s3tests.functional.test_s3::test_access_bucket_private_objectv2_publicread
@@ -326,17 +239,74 @@ s3tests.functional.test_s3::test_object_acl_full_control_verify_attributes
 s3tests.functional.test_s3::test_object_copy_canned_acl
 s3tests.functional.test_s3::test_object_copy_not_owned_object_bucket
 s3tests.functional.test_s3::test_object_raw_get_bucket_acl
-s3tests.functional.test_s3::test_object_raw_get_x_amz_expires_not_expired
 s3tests.functional.test_s3::test_put_bucket_acl_grant_group_read
 
-# --- fs-gap: anonymous access needs a public ACL (5) — https://github.com/rustfs/gateway/issues/812 ---
+# --- rustfs-parity: anonymous access needs a public ACL grant, which RustFS does not enforce (5) ---
 s3tests.functional.test_s3::test_object_anon_put_write_access
 s3tests.functional.test_s3::test_object_delete_key_bucket_gone
 s3tests.functional.test_s3::test_object_raw_get
 s3tests.functional.test_s3::test_object_raw_get_bucket_gone
 s3tests.functional.test_s3::test_object_raw_get_object_gone
 
-# --- out-of-scope: SigV2 (header or POST form) refused by design (34) — https://github.com/rustfs/gateway/issues/765 ---
+# --- out-of-scope: SSE-C refused over a plaintext connection by the transport gate, by design (43) ---
+s3tests.functional.test_s3::test_copy_enc[sse-c-sse-c-STANDARD-STANDARD-1024]
+s3tests.functional.test_s3::test_copy_enc[sse-c-sse-c-STANDARD-STANDARD-1048576]
+s3tests.functional.test_s3::test_copy_enc[sse-c-sse-c-STANDARD-STANDARD-1]
+s3tests.functional.test_s3::test_copy_enc[sse-c-sse-c-STANDARD-STANDARD-8388608]
+s3tests.functional.test_s3::test_copy_enc[sse-c-sse-kms-STANDARD-STANDARD-1024]
+s3tests.functional.test_s3::test_copy_enc[sse-c-sse-kms-STANDARD-STANDARD-1048576]
+s3tests.functional.test_s3::test_copy_enc[sse-c-sse-kms-STANDARD-STANDARD-1]
+s3tests.functional.test_s3::test_copy_enc[sse-c-sse-kms-STANDARD-STANDARD-8388608]
+s3tests.functional.test_s3::test_copy_enc[sse-c-sse-s3-STANDARD-STANDARD-1024]
+s3tests.functional.test_s3::test_copy_enc[sse-c-sse-s3-STANDARD-STANDARD-1048576]
+s3tests.functional.test_s3::test_copy_enc[sse-c-sse-s3-STANDARD-STANDARD-1]
+s3tests.functional.test_s3::test_copy_enc[sse-c-sse-s3-STANDARD-STANDARD-8388608]
+s3tests.functional.test_s3::test_copy_enc[sse-kms-sse-c-STANDARD-STANDARD-1024]
+s3tests.functional.test_s3::test_copy_enc[sse-kms-sse-c-STANDARD-STANDARD-1048576]
+s3tests.functional.test_s3::test_copy_enc[sse-kms-sse-c-STANDARD-STANDARD-1]
+s3tests.functional.test_s3::test_copy_enc[sse-kms-sse-c-STANDARD-STANDARD-8388608]
+s3tests.functional.test_s3::test_copy_enc[sse-s3-sse-c-STANDARD-STANDARD-1024]
+s3tests.functional.test_s3::test_copy_enc[sse-s3-sse-c-STANDARD-STANDARD-1048576]
+s3tests.functional.test_s3::test_copy_enc[sse-s3-sse-c-STANDARD-STANDARD-1]
+s3tests.functional.test_s3::test_copy_enc[sse-s3-sse-c-STANDARD-STANDARD-8388608]
+s3tests.functional.test_s3::test_copy_part_enc[sse-c-sse-c-STANDARD-STANDARD-8388608]
+s3tests.functional.test_s3::test_copy_part_enc[sse-c-sse-kms-STANDARD-STANDARD-8388608]
+s3tests.functional.test_s3::test_copy_part_enc[sse-c-sse-s3-STANDARD-STANDARD-8388608]
+s3tests.functional.test_s3::test_copy_part_enc[sse-kms-sse-c-STANDARD-STANDARD-8388608]
+s3tests.functional.test_s3::test_copy_part_enc[sse-s3-sse-c-STANDARD-STANDARD-8388608]
+s3tests.functional.test_s3::test_encrypted_transfer_13b
+s3tests.functional.test_s3::test_encrypted_transfer_1MB
+s3tests.functional.test_s3::test_encrypted_transfer_1b
+s3tests.functional.test_s3::test_encrypted_transfer_1kb
+s3tests.functional.test_s3::test_encryption_sse_c_deny_algo_with_bucket_policy
+s3tests.functional.test_s3::test_encryption_sse_c_enforced_with_bucket_policy
+s3tests.functional.test_s3::test_encryption_sse_c_method_head
+s3tests.functional.test_s3::test_encryption_sse_c_multipart_bad_download
+s3tests.functional.test_s3::test_encryption_sse_c_multipart_upload
+s3tests.functional.test_s3::test_encryption_sse_c_other_key
+s3tests.functional.test_s3::test_encryption_sse_c_post_object_authenticated_request
+s3tests.functional.test_s3::test_encryption_sse_c_present
+s3tests.functional.test_s3::test_encryption_sse_c_unaligned_multipart_upload
+s3tests.functional.test_s3::test_get_sse_c_encrypted_object_attributes
+s3tests.functional.test_s3::test_multipart_sse_c_get_part
+s3tests.functional.test_s3::test_non_multipart_sse_c_get_part
+s3tests.functional.test_s3::test_put_obj_enc_conflict_c_kms
+s3tests.functional.test_s3::test_put_obj_enc_conflict_c_s3
+
+# --- fs-gap: UploadPartCopy not registered by the reference backend (4) — https://github.com/rustfs/gateway/issues/979 ---
+s3tests.functional.test_s3::test_copy_part_enc[sse-kms-sse-kms-STANDARD-STANDARD-8388608]
+s3tests.functional.test_s3::test_copy_part_enc[sse-kms-sse-s3-STANDARD-STANDARD-8388608]
+s3tests.functional.test_s3::test_copy_part_enc[sse-s3-sse-kms-STANDARD-STANDARD-8388608]
+s3tests.functional.test_s3::test_copy_part_enc[sse-s3-sse-s3-STANDARD-STANDARD-8388608]
+
+# --- fs-gap: policy condition key s3:x-amz-server-side-encryption not evaluated (5) — https://github.com/rustfs/gateway/issues/979 ---
+s3tests.functional.test_s3::test_bucket_policy_put_obj_kms_noenc
+s3tests.functional.test_s3::test_bucket_policy_put_obj_kms_s3
+s3tests.functional.test_s3::test_bucket_policy_put_obj_s3_incorrect_algo_sse_s3
+s3tests.functional.test_s3::test_bucket_policy_put_obj_s3_kms
+s3tests.functional.test_s3::test_bucket_policy_put_obj_s3_noenc
+
+# --- out-of-scope: SigV2 (header or POST form) refused by design (37) — https://github.com/rustfs/gateway/issues/765 ---
 s3tests.functional.test_headers::test_bucket_create_bad_authorization_invalid_aws2
 s3tests.functional.test_headers::test_bucket_create_bad_date_before_epoch_aws2
 s3tests.functional.test_headers::test_bucket_create_bad_date_none_aws2
@@ -371,6 +341,9 @@ s3tests.functional.test_s3::test_post_object_upload_size_below_minimum
 s3tests.functional.test_s3::test_post_object_upload_size_limit_exceeded
 s3tests.functional.test_s3::test_post_object_upload_size_rgw_chunk_size_bug
 s3tests.functional.test_s3::test_post_object_user_specified_header
+s3tests.functional.test_s3::test_sse_kms_default_post_object_authenticated_request
+s3tests.functional.test_s3::test_sse_kms_post_object_authenticated_request
+s3tests.functional.test_s3::test_sse_s3_default_post_object_authenticated_request
 
 # --- out-of-scope: IAM API (user policies) is not an S3 gateway surface (27) — https://github.com/rustfs/backlog/issues/1746 ---
 s3tests.functional.test_iam::test_allow_bucket_actions_in_user_policy

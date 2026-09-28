@@ -20,6 +20,14 @@ set -euo pipefail
 #     2. No other file under crates/*/src reads either clock.
 #     3. Neither of the two reads the OTHER clock, so the wall source cannot
 #        quietly acquire a monotonic reading or the reverse.
+#     4. No file under crates/*/src renames either clock type (`use ... as`,
+#        `type X = ...`). A renamed type reads the clock as `Wall::now()`,
+#        which no textual search for the real name can see, so a rename is
+#        refused outright rather than chased.
+#
+#   A reading is `SystemTime::now` or `Instant::now` as a path, called or not,
+#   with any whitespace around `::`: `let read = Instant::now; read()` is a
+#   reading too.
 #
 # WHY
 #   Two separate rules, and both are the silent kind.
@@ -102,6 +110,12 @@ if [[ -f "$MONOTONIC_SOURCE" ]] && grep -qF "${WALL_CALL}(" "$MONOTONIC_SOURCE";
     fail "${MONOTONIC_SOURCE} reads the wall clock; the monotonic source must not, or a limiter becomes steerable by NTP"
 fi
 
+# A path to either clock's `now`, called or not, whitespace-insensitive, bare or as the
+# qualified `<SystemTime>::now`.
+READING_PATTERN="\\b(SystemTime|Instant)[[:space:]]*>?[[:space:]]*::[[:space:]]*now\\b"
+# A renamed clock type: `SystemTime as Wall`, or `type Wall = std::time::Instant;`.
+RENAME_PATTERN="\\b(SystemTime|Instant)[[:space:]]+as[[:space:]]+[A-Za-z_]|\\btype[[:space:]]+[A-Za-z_][A-Za-z0-9_]*[[:space:]]*(<[^>]*>)?[[:space:]]*=[[:space:]]*[A-Za-z0-9_:]*\\b(SystemTime|Instant)[[:space:]]*;"
+
 # --- 3. Nothing else on the protocol path reads either clock. ----------------
 while IFS= read -r file; do
     [[ -z "$file" ]] && continue
@@ -111,11 +125,23 @@ while IFS= read -r file; do
     esac
     while IFS= read -r hit; do
         [[ -z "$hit" ]] && continue
-        fail "${hit} — the protocol path reads a clock outside ${WALL_SOURCE} and ${MONOTONIC_SOURCE}"
-    done < <(grep -nE "(${WALL_CALL}|${MONOTONIC_CALL})\(" "$file" || true)
+        fail "${file}:${hit} — the protocol path reads a clock outside ${WALL_SOURCE} and ${MONOTONIC_SOURCE}"
+    done < <(grep -nE "$READING_PATTERN" "$file" || true)
 # The index and the working tree together, for the reason recorded in
 # check_no_planning_docs.sh: a bare `git ls-files` cannot see a brand-new file, so
 # a stray clock read in one would stay invisible until the commit that lands it.
+done < <(git ls-files --cached --others --exclude-standard -- 'crates/*/src/*.rs' 'crates/*/src/**/*.rs' 2>/dev/null || true)
+
+# --- 4. Nothing renames either clock type, the sources included. -------------
+while IFS= read -r file; do
+    [[ -z "$file" ]] && continue
+    case "$file" in
+        crates/conformance/*) continue ;;
+    esac
+    while IFS= read -r hit; do
+        [[ -z "$hit" ]] && continue
+        fail "${file}:${hit} — a renamed clock type hides every later reading from this guard; name SystemTime and Instant as themselves"
+    done < <(grep -nE "$RENAME_PATTERN" "$file" || true)
 done < <(git ls-files --cached --others --exclude-standard -- 'crates/*/src/*.rs' 'crates/*/src/**/*.rs' 2>/dev/null || true)
 
 if [[ "$status" -ne 0 ]]; then

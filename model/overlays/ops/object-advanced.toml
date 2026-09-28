@@ -96,15 +96,11 @@ url_encoded_fields = []
 input_hot = ["Key", "ObjectEncryption", "VersionId"]
 output_hot = []
 
-# `x-amz-object-attributes` is a comma-delimited list in a header position, the same shape
-# `ListObjectsV2.OptionalObjectAttributes` has. The frozen IR can only describe a list through the
-# XML notions `flattened` and `wrapper_name`, so there is no truthful way to give it a list type
-# here. It is carried as the string the wire actually holds rather than dropped: it is a *required*
-# member, and dropping it would leave the decoder unable to refuse a request that omits it.
+# `x-amz-object-attributes` is a comma-delimited list in a header position; IR v3 lowers it to the
+# delimited `List` form. Required here because the decoder must refuse a request that omits it.
 [[op.GetObjectAttributes.field]]
 side = "input"
 name = "ObjectAttributes"
-type = "String"
 required = true
 missing_error = "InvalidRequest"
 hot = true

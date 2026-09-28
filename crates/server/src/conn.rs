@@ -37,6 +37,7 @@ use tokio::task::JoinSet;
 use tokio_rustls::TlsAcceptor;
 use tower::Service as TowerService;
 
+use crate::accept_error::{self, AcceptFailure};
 use crate::config::{ConfigError, ServerConfig, WriteStrategy};
 use crate::connection_service::{ConnectionError, ConnectionService, RequestStats};
 use crate::driver::{AcceptedConnection, ConnectionDriver, ConnectionInfo, HyperConnectionDriver, TransportKind};
@@ -277,7 +278,7 @@ where
                     drop(permit);
                     continue;
                 },
-                accepted = listener.accept() => accepted?,
+                accepted = listener.accept() => accepted,
             }
         } else {
             tokio::select! {
@@ -290,10 +291,35 @@ where
                     drop(permit);
                     continue;
                 },
-                accepted = listener.accept() => accepted?,
+                accepted = listener.accept() => accepted,
             }
         };
-        let (stream, peer) = accepted;
+        let (stream, peer) = match accepted {
+            Ok(accepted) => accepted,
+            Err(error) => {
+                drop(permit);
+                let failure = accept_error::classify(&error);
+                if failure == AcceptFailure::Fatal {
+                    return Err(error.into());
+                }
+                metrics.inner.accept_errors.fetch_add(1, Ordering::Relaxed);
+                if failure == AcceptFailure::Exhausted {
+                    let backoff = tokio::time::sleep(accept_error::EXHAUSTED_BACKOFF);
+                    if let Some(receiver) = &mut command_receiver {
+                        tokio::select! {
+                            command = receiver => match command {
+                                Ok(command) => break Some(command),
+                                Err(_) => command_receiver = None,
+                            },
+                            () = backoff => {}
+                        }
+                    } else {
+                        backoff.await;
+                    }
+                }
+                continue;
+            }
+        };
         let header_deadline = deadline_after(config.header_read_timeout);
         #[cfg(test)]
         let accepted_ordinal = metrics.inner.accepted.fetch_add(1, Ordering::Relaxed) + 1;

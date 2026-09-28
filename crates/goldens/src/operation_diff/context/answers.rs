@@ -59,9 +59,10 @@ fn element<'a>(body: &'a str, name: &str) -> Option<&'a str> {
 ///
 /// A harness failure; a refusal is a [`StackAnswer`].
 pub(crate) fn answers(request: &ContextRequest) -> Result<(StackAnswer, StackAnswer), String> {
-    let headers = request.wire_headers(RequestNow::capture())?;
+    let now = RequestNow::capture();
+    let headers = request.wire_headers(now)?;
     let recorded = Arc::new(Mutex::new(None));
-    let service = gateway_service(request, &recorded)?;
+    let service = gateway_service(request, &recorded, now)?;
     let http_request = request
         .http_head(&headers)
         .body(request.body.clone())

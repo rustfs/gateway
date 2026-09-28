@@ -29,6 +29,7 @@ mod ir;
 mod model;
 #[cfg(feature = "full")]
 mod mutate;
+mod nested_cargo;
 #[cfg(feature = "full")]
 mod new_op;
 #[cfg(feature = "full")]
@@ -108,6 +109,7 @@ fn dispatch(first: Option<String>, rest: Vec<String>) -> ExitCode {
 #[cfg(not(feature = "full"))]
 fn run_full(first: Option<String>, rest: &[String]) -> ExitCode {
     let mut command = std::process::Command::new(env!("CARGO"));
+    nested_cargo::without_package_environment(&mut command);
     command.args(["run", "--quiet", "--package", "xtask", "--features", "full", "--"]);
     if let Some(first) = first {
         command.arg(first);
@@ -182,6 +184,7 @@ fn conformance(args: Vec<String>) -> ExitCode {
         return mutate::command(&args[1..]);
     }
     let mut cmd = std::process::Command::new(env!("CARGO"));
+    nested_cargo::without_package_environment(&mut cmd);
     cmd.args([
         "run",
         "--quiet",

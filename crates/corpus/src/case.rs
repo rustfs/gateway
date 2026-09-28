@@ -267,7 +267,7 @@ impl CaseDraft {
             }
         }
         if let Some(status) = self.status {
-            out.push_str(&format!("\n[[expect]]\nkind = \"response\"\nstatus = {status}\n"));
+            out.push_str(&format!("\n[expect]\nkind = \"response\"\nstatus = {status}\n"));
         }
         out
     }

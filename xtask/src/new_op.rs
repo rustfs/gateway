@@ -24,6 +24,7 @@ use std::process::{Command, ExitCode};
 
 use crate::catalog;
 use crate::codegen::repo_root;
+use crate::nested_cargo::without_package_environment;
 
 const OPERATION: &str = include_str!("../templates/operation.rs.tmpl");
 const TEST: &str = include_str!("../templates/operation_test.rs.tmpl");
@@ -140,7 +141,7 @@ fn write_scaffold(rendered: &[(&PathBuf, String)], modules: &Path, old_modules: 
 }
 
 fn must_fail_at_todo(snake: &str) -> Result<(), String> {
-    let output = Command::new(env!("CARGO"))
+    let output = without_package_environment(&mut Command::new(env!("CARGO")))
         .args([
             "test",
             "-p",

@@ -45,7 +45,7 @@ use rustfs_gateway::{
 };
 use sha2::{Digest as _, Sha256};
 
-use super::{FsBackend, OBJECTS_DIR, UPLOADS_DIR, VERSIONS_DIR, lifecycle, policy, storage_error, versioning};
+use super::{FsBackend, OBJECTS_DIR, UPLOADS_DIR, VERSIONS_DIR, encryption, lifecycle, policy, storage_error, versioning};
 
 /// The cursor `ListBuckets` pages with: a value this backend minted, never a bucket name.
 const BUCKET_CURSOR: CursorSpec = CursorSpec::opaque("continuation-token");
@@ -304,7 +304,11 @@ impl Handler<DeleteBucket> for FsBackend {
             Err(error) if error.kind() == io::ErrorKind::NotFound => {}
             Err(_) => return Err(storage_error()),
         }
-        for record in [policy::POLICY_FILE, policy::PUBLIC_ACCESS_BLOCK_FILE] {
+        for record in [
+            policy::POLICY_FILE,
+            policy::PUBLIC_ACCESS_BLOCK_FILE,
+            encryption::ENCRYPTION_FILE,
+        ] {
             match tokio::fs::remove_file(self.bucket_path(bucket).join(record)).await {
                 Ok(()) => {}
                 Err(error) if error.kind() == io::ErrorKind::NotFound => {}

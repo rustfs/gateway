@@ -22,6 +22,7 @@ use std::process::{Command, ExitCode, Stdio};
 use std::time::{Duration, Instant};
 
 use crate::codegen;
+use crate::nested_cargo::without_package_environment;
 
 pub(crate) fn bootstrap(args: &[String]) -> ExitCode {
     let json = matches!(args, [flag] if flag == "--json");
@@ -47,7 +48,10 @@ pub(crate) fn bootstrap(args: &[String]) -> ExitCode {
     }
     drop(stage);
     let stage = Stage::start("dependency fetch");
-    match Command::new(env!("CARGO")).args(["fetch", "--locked"]).output() {
+    match without_package_environment(&mut Command::new(env!("CARGO")))
+        .args(["fetch", "--locked"])
+        .output()
+    {
         Ok(output) if output.status.success() => {}
         Ok(output) => {
             eprintln!("bootstrap: dependency fetch failed ({}); check network access and retry", output.status);
@@ -88,7 +92,7 @@ pub(crate) fn bootstrap(args: &[String]) -> ExitCode {
     }
     drop(stage);
     let stage = Stage::start("workspace test compilation");
-    let compile = Command::new(env!("CARGO"))
+    let compile = without_package_environment(&mut Command::new(env!("CARGO")))
         .args(["test", "--workspace", "--no-run"])
         .stdout(Stdio::null())
         .stderr(Stdio::inherit())

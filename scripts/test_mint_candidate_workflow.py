@@ -40,9 +40,17 @@ sys.exit(int(os.environ['DOCKER_EXIT']))
             env = dict(os.environ, PATH=str(root) + os.pathsep + os.environ['PATH'],
                        CANDIDATE_MODE=mode, RUNNER_TEMP=str(root), CAPTURE=str(capture),
                        IMAGE=image, DOCKER_EXIT=str(docker_exit))
-            result = subprocess.run(['bash', '-c', workflow_script('Build candidate image (manual record only)')], cwd=root,
+            result = subprocess.run(['bash', '-c', workflow_script('Build the mint image from the reviewed recipe')], cwd=root,
                                     env=env, capture_output=True, text=True)
             return result, json.loads(capture.read_text()) if capture.exists() else None
+
+    def test_every_mode_builds_exact_platform_and_local_recipe(self):
+        for mode in ('ratchet', 'record', ''):
+            with self.subTest(mode=mode):
+                result, args = self.run_build(mode)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(args[:5], ['build', '--platform', 'linux/amd64', '--progress', 'plain'])
+                self.assertEqual(args[-1], 'ci/mint')
 
     def test_record_builds_exact_platform_and_local_recipe(self):
         result, args = self.run_build('record')
@@ -51,13 +59,6 @@ sys.exit(int(os.environ['DOCKER_EXIT']))
         self.assertEqual(args[-1], 'ci/mint')
         self.assertEqual(args[-3], '--iidfile')
         self.assertTrue(args[-2].endswith('/mint-candidate.id'))
-
-    def test_other_modes_cannot_start_docker(self):
-        for mode in ('ratchet', '', 'Record', 'record; exit 0'):
-            with self.subTest(mode=mode):
-                result, args = self.run_build(mode)
-                self.assertNotEqual(result.returncode, 0)
-                self.assertIsNone(args)
 
     def test_failed_build_cannot_accept_an_image_file(self):
         result, _ = self.run_build('record', docker_exit=17)
@@ -71,7 +72,7 @@ sys.exit(int(os.environ['DOCKER_EXIT']))
                 self.assertNotEqual(result.returncode, 0)
 
 
-    def run_suite(self, derived, image=True, suite_exit=0):
+    def run_suite(self, mode, image=True, suite_exit=0):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / 'scripts').mkdir()
@@ -90,8 +91,7 @@ sys.exit(int(os.environ['SUITE_EXIT']))
             if image:
                 (root / 'mint-candidate.id').write_text(identity)
             capture = root / 'args.json'
-            env = dict(os.environ, CANDIDATE_MODE='record' if derived else 'ratchet',
-                       MINT_DERIVED_IMAGE='true' if derived else 'false',
+            env = dict(os.environ, CANDIDATE_MODE=mode,
                        RUNNER_TEMP=str(root), CAPTURE=str(capture), SUITE_EXIT=str(suite_exit),
                        GITHUB_OUTPUT=str(root / 'output'), GITHUB_STEP_SUMMARY=str(root / 'summary'))
             script = workflow_script('Run the suite').replace(
@@ -100,28 +100,27 @@ sys.exit(int(os.environ['SUITE_EXIT']))
                                     env=env, capture_output=True, text=True)
             return result, json.loads(capture.read_text()) if capture.exists() else None
 
-    def test_default_suite_uses_the_pinned_image(self):
-        result, args = self.run_suite(False)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(args[:2], ['--mode', 'ratchet'])
-        self.assertNotIn('--local-image', args)
+    def test_every_mode_measures_the_exact_recipe_image(self):
+        for mode in ('ratchet', 'record'):
+            with self.subTest(mode=mode):
+                result, args = self.run_suite(mode)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(args[:2], ['--mode', mode])
+                self.assertEqual(args[-2:], ['--local-image', 'sha256:' + 'b' * 64])
 
-    def test_candidate_suite_receives_exact_local_identity(self):
-        result, args = self.run_suite(True)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(args[:2], ['--mode', 'record'])
-        self.assertEqual(args[-2:], ['--local-image', 'sha256:' + 'b' * 64])
+    def test_suite_cannot_fall_back_to_the_bare_pin_when_the_image_is_missing(self):
+        for mode in ('ratchet', 'record'):
+            with self.subTest(mode=mode):
+                result, args = self.run_suite(mode, image=False)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIsNone(args)
 
-    def test_candidate_suite_cannot_fall_back_when_image_is_missing(self):
-        result, args = self.run_suite(True, image=False)
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIsNone(args)
-
-    def test_candidate_suite_failure_remains_failure(self):
-        for code in (1, 3, 124):
-            with self.subTest(code=code):
-                result, _ = self.run_suite(True, suite_exit=code)
-                self.assertEqual(result.returncode, code)
+    def test_suite_failure_remains_failure(self):
+        for mode in ('ratchet', 'record'):
+            for code in (1, 3, 124):
+                with self.subTest(mode=mode, code=code):
+                    result, _ = self.run_suite(mode, suite_exit=code)
+                    self.assertEqual(result.returncode, code)
 
 
 if __name__ == '__main__':

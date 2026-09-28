@@ -1,5 +1,5 @@
 {
-  "ir_version": "2",
+  "ir_version": "3",
   "operation": "GetBucketLifecycleConfiguration",
   "http": {
             "method": "GET",
@@ -58,7 +58,7 @@
                                       "kind": "List",
                                       "member": { "kind": "Structure", "shape": "LifecycleRule" },
                                       "flattened": true,
-                                      "wrapper_name": null
+                                      "member_name": null
                                     },
                             "hot": true,
                             "quirk_refs": []
@@ -195,7 +195,7 @@
                                                          "kind": "List",
                                                          "member": { "kind": "Structure", "shape": "Transition" },
                                                          "flattened": true,
-                                                         "wrapper_name": null
+                                                         "member_name": null
                                                        },
                                                "hot": false,
                                                "quirk_refs": []
@@ -212,7 +212,7 @@
                                                                      "shape": "NoncurrentVersionTransition"
                                                                    },
                                                          "flattened": true,
-                                                         "wrapper_name": null
+                                                         "member_name": null
                                                        },
                                                "hot": false,
                                                "quirk_refs": []
@@ -286,7 +286,7 @@
                                                                     "kind": "List",
                                                                     "member": { "kind": "Structure", "shape": "Tag" },
                                                                     "flattened": true,
-                                                                    "wrapper_name": null
+                                                                    "member_name": null
                                                                   },
                                                           "hot": false,
                                                           "quirk_refs": []

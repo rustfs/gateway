@@ -40,7 +40,7 @@ ROOT_DIR="${GATEWAY_CHECK_ROOT:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
 source "${SCRIPT_DIR}/lib/python.sh"
 PYTHON="$(gateway_python check_corpus_provenance)" || exit 1
 
-for required in corpus corpus/MANIFEST.toml crates/corpus/src/store.rs; do
+for required in corpus corpus/MANIFEST.toml crates/corpus/src/store.rs conformance/cases; do
     if [[ ! -e "${ROOT_DIR}/${required}" ]]; then
         printf 'check_corpus_provenance: required input is missing: %s\n' "$required" >&2
         exit 1
@@ -73,13 +73,30 @@ if not suts:
 production_suts = set(re.findall(r'Sut::RustfsServer => "([a-z-]+)",', store))
 
 
+# An issue-derived entry is admissible only if the issue it names is cited as `s3s-issue`
+# evidence by a conformance case: that citation is where the issue URL and the one-sentence
+# summary written in this repository live, and it is what makes the entry traceable.
+cited_issues: set[str] = set()
+for case_path in (root / "conformance/cases").rglob("*.toml"):
+    text = case_path.read_text(errors="replace")
+    for block in re.findall(r'(?ms)^\[\[case\.evidence\]\]\n(.*?)(?=^\[|\Z)', text):
+        if re.search(r'(?m)^kind = "s3s-issue"$', block):
+            cited_issues.update(re.findall(r'(?m)^url = "https://github\.com/s3s-project/s3s/(?:issues|pull)/(\d+)"$', block))
+
+
 def refusal(src: str) -> str | None:
     for prefix, needs_revision in allowlist:
-        matched = src.startswith(prefix) if prefix[-1] in ":@" else src == prefix
+        matched = src.startswith(prefix) if prefix[-1] in ":@#" else src == prefix
         if not matched:
             continue
         if needs_revision and "@" not in src[len(prefix):]:
             return f"source `{src}` names no pinned revision after `@`"
+        if prefix.endswith("#"):
+            number = src[len(prefix):]
+            if not number.isdigit():
+                return f"source `{src}` names no issue number after `#`"
+            if number not in cited_issues:
+                return f"source `{src}` names an issue no conformance case cites as `s3s-issue` evidence"
         return None
     return f"source `{src}` is not on the allowlist; the corpus admits synthetic test suites only"
 

@@ -44,7 +44,7 @@ Three rules do the load-bearing work:
    the wire contract and drowning every future `grep`.
 2. **No defaults on anything that renders.** `Timestamp` must state its `format`, `ETag`
    must state its `render` (`HeaderQuoted` / `XmlQuoted` / `XmlBare`), a `List` must state
-   `flattened` and `wrapper_name`. A rendering context that can be inferred is a rendering
+   `flattened` and `member_name` (`null` with `flattened: false` is a comma-delimited header list). A rendering context that can be inferred is a rendering
    context that will be inferred wrongly.
 3. **Routing and parameter validation are separate.** `http.predicates` decides *which*
    operation a request is; it is an ordered first-match table, not a disjoint partition, so

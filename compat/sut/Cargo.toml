@@ -20,7 +20,14 @@ rustdoc-args = ["--cfg", "docsrs"]
 [lints]
 workspace = true
 
+[features]
+# Test-only corpus recording (rustfs/backlog#1763): `--corpus-record <file> --corpus-src <src>`
+# writes every served S3 request as corpus JSONL. Never add this to `default`; a build without it
+# has no recorder at all. scripts/check_recorder_not_default.sh.
+corpus-record = ["dep:rustfs-gateway-corpus-recorder"]
+
 [dependencies]
+rustfs-gateway-corpus-recorder = { workspace = true, optional = true, features = ["corpus-record"] }
 rustfs-gateway = { workspace = true }
 # Path-only: the reference backend is not a workspace dependency of anything else, and this
 # launcher is repository tooling rather than a ring member, so it does not open a new shared edge.
@@ -35,7 +42,7 @@ http-body = { workspace = true }
 rcgen = { workspace = true }
 rustls = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal", "sync", "time"] }
-tower = { workspace = true }
+tower = { workspace = true, features = ["util"] }
 
 [dev-dependencies]
 # The launcher's own tests drive signed requests through the very service `main` serves, so they

@@ -50,6 +50,35 @@ jobs:
       - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v5.3.0
         with:
           python-version: "3.12"
+      # Toolchains for the SDK driver programs under compat/drivers/ (the `program` install method).
+      # The SDK versions come from each driver's own lock file, checked against compat/versions.toml.
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+      # The self-hosted image gives the runner no write access to /usr/share/dotnet, the action's
+      # default, so the SDK goes into the job's temporary directory.
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        env:
+          DOTNET_INSTALL_DIR: ${{ runner.temp }}/dotnet
+        with:
+          dotnet-version: "8.0.x"
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
+        with:
+          distribution: temurin
+          java-version: "21"
+      # Maven builds the two Java driver programs; it is a build tool, not a client under test, so it
+      # is pinned here by release and digest rather than in compat/versions.toml. The digest is the
+      # one Apache publishes beside the archive, and it matches the one Homebrew's formula pins.
+      - name: Install Maven
+        env:
+          MAVEN_VERSION: "3.9.16"
+          MAVEN_SHA512: "831a8591fe20c8243b1dbe7d71e3244f31d1665b0804b2e825e38cbbe5ce0cafb8338851f90780735568773e0a6cd07bbec107cda0b896b008b861075358b6f6"
+        run: |
+          archive="$RUNNER_TEMP/apache-maven.tar.gz"
+          curl -sSfL -o "$archive" "https://archive.apache.org/dist/maven/maven-3/${MAVEN_VERSION}/binaries/apache-maven-${MAVEN_VERSION}-bin.tar.gz"
+          echo "${MAVEN_SHA512}  ${archive}" | sha512sum -c -
+          tar -xzf "$archive" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/apache-maven-${MAVEN_VERSION}/bin" >>"$GITHUB_PATH"
 
       # The pins are read from compat/versions.toml by the installer; nothing here names a version,
       # which is what scripts/check_client_versions_pinned.sh enforces.
@@ -58,10 +87,11 @@ jobs:
           python3 -m pip install --disable-pip-version-check "pyyaml==6.0.2"
           bash ci/compat/install_clients.sh
 
-      - name: Build the system under test
-        run: cargo build --release -p rustfs-gateway-compat-sut
+      - name: Build the system under test and the corpus CLI
+        run: cargo build --release -p rustfs-gateway-compat-sut -p rustfs-gateway-corpus --bin compat-sut --bin corpus
 
       - name: Run the matrix
+        id: matrix
         env:
           GATEWAY_COMPAT_SUT_BIN: target/release/compat-sut
           GATEWAY_COMPAT_RUN_DIR: target/compat
@@ -72,6 +102,15 @@ jobs:
           bash ci/compat/run_matrix.sh \
             ${{ inputs.clients && format('--clients {0}', inputs.clients) || '' }} \
             ${{ inputs.scenarios && format('--scenarios {0}', inputs.scenarios) || '' }}
+
+      # The run's probe records become corpus material (rustfs/backlog#1765 a-cm-0008): converted,
+      # sanitized, deduplicated and verified into target/compat/corpus, never into the repository's
+      # corpus/. A full run must record at least one aws-chunked request; a filtered one may not.
+      - name: Record the run as corpus
+        if: (success() || failure()) && steps.matrix.outcome != 'skipped'
+        run: |
+          bash ci/compat/record_corpus.sh --run-dir target/compat --corpus-bin target/release/corpus \
+            ${{ (inputs.clients || inputs.scenarios) && ' ' || '--require-chunked' }}
 
       - name: Probe report
         if: always()
@@ -101,5 +140,7 @@ jobs:
             target/compat/probe.jsonl
             target/compat/results/**
             target/compat/sut.log
+            target/compat/corpus.jsonl
+            target/compat/corpus/**
           if-no-files-found: warn
           retention-days: 14
