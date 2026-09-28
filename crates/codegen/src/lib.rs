@@ -376,6 +376,7 @@ pub fn generate_mutated(input: &CodegenInput, out: &CodegenOutput, mutations: &[
     files.extend(
         emit::codec::emit(&lowered.operations, &overlay.codec_rules, &error_codes, &out.generated_dir).map_err(Error::Policy)?,
     );
+    files.extend(emit::seam::emit(&lowered.operations, &out.generated_dir).map_err(Error::Policy)?);
     for required in out.required_external_files() {
         if !files.iter().any(|(path, _)| *path == required) {
             return Err(Error::Policy(format!(

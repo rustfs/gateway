@@ -1,0 +1,9 @@
+DELETE /bkt/k?versionId=v2
+x-amz-mfa: 123 456
+x-amz-bypass-governance-retention: true
+if-match: "abc"
+x-amz-if-match-last-modified-time: Thu, 01 Jan 2026 00:00:00 GMT
+x-amz-if-match-size: 12
+x-amz-request-payer: requester
+x-amz-expected-bucket-owner: 111122223333
+

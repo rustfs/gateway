@@ -1,0 +1,6 @@
+PUT /bkt/k
+x-amz-checksum-sha256: uU0nuZNNPgilLlLX2n2r+sSE7+N6U4DukIj3rOLvzek=
+x-amz-sdk-checksum-algorithm: SHA256
+x-amz-checksum-algorithm: SHA256
+
+hello world

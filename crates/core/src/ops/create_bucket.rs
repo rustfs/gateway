@@ -50,11 +50,11 @@ use crate::ops::shared::bucket_region::RegionHeaderDuty;
 use crate::ops::shared::location_constraint::RegionMatchPolicy;
 use crate::registry::OperationSpec;
 
-/// How a presented `LocationConstraint` is matched against the deployment's regions.
+/// How a presented `LocationConstraint` is matched against the deployment's regions, by default.
 ///
-/// The strict posture is the only one this family implements; the lenient and multi-region
-/// postures arrive with service assembly (P7-01) and must drive the signature scope's region
-/// check through the same value.
+/// AWS's strict posture. A backend starts from this value and changes it only as a deployment
+/// decision: the RustFS profile accepts an explicit us-east-1
+/// ([`RegionMatchPolicy::AcceptExplicitUsEast1`], rustfs/gateway#914).
 pub static REGION_MATCH_POLICY: RegionMatchPolicy = RegionMatchPolicy::Strict;
 
 /// A creation's success says where the bucket is through `Location`; only its redirect carries

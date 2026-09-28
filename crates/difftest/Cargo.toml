@@ -20,6 +20,14 @@ path = "src/bin/decode-diff.rs"
 name = "encode-diff"
 path = "src/bin/encode-diff.rs"
 
+[[bin]]
+name = "shadow-proxy"
+path = "src/bin/shadow-proxy.rs"
+
+[[bin]]
+name = "fuzz-to-case"
+path = "src/bin/fuzz-to-case.rs"
+
 [package.metadata.gateway]
 # Ring 1 by the workspace rule (every package under `crates/` is ring 0/1 and links no RustFS
 # crate). "RING 2 — migration-only" in README.md names its lifetime, not a dependency on RustFS:
@@ -48,6 +56,7 @@ rustfs-gateway-types = { workspace = true, features = ["compat-s3s-0-17-0"] }
 bytes = { workspace = true }
 futures-core = { workspace = true }
 hex = { workspace = true }
+httparse = { workspace = true }
 http = { workspace = true }
 http-body = { workspace = true }
 http-body-util = { workspace = true }

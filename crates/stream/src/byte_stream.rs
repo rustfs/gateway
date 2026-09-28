@@ -22,6 +22,11 @@
 //! wire layer decides the length and passes it in.
 //! Upstream: this crate's `stream`, `caps` and `error`. Downstream: `rustfs-gateway-types`, whose
 //! streaming blob fields wrap this, and `rustfs-gateway-http`.
+//!
+//! A response stream may instead be a file region ([`ByteStream::from_file_region`]). That form
+//! is terminal: it becomes a `Payload::File` body for the response transport to send with
+//! `sendfile` or to copy on a blocking executor, and polling it as a push stream here — where no
+//! i/o driver exists — is a named error rather than a blocking read on an event-loop thread.
 
 use core::pin::Pin;
 use core::task::{Context, Poll};
@@ -32,7 +37,10 @@ use crate::adapt::MemoryStream;
 use crate::body::Body;
 use crate::caps::{CapsInconsistency, PayloadCaps, validate_caps};
 use crate::error::StreamError;
-use crate::payload::Payload;
+#[cfg(unix)]
+use crate::file_region::FileRegion;
+use crate::metrics::StreamMetrics;
+use crate::payload::{AdaptRefusal, Payload};
 use crate::stream::{BoxPayloadStream, PayloadRead, PayloadStream};
 use crate::trailers::TrailingHeaders;
 
@@ -82,6 +90,10 @@ impl From<Option<u64>> for RemainingLength {
 /// the inner producer directly — the inner producer is private.
 pub struct ByteStream {
     inner: BoxPayloadStream,
+    /// A file region this stream hands to the response transport whole, with the counters that
+    /// transport records its choice of path in.
+    #[cfg(unix)]
+    file: Option<(FileRegion, std::sync::Arc<StreamMetrics>)>,
     declared: Option<u64>,
     observed: u64,
     ended: bool,
@@ -94,6 +106,8 @@ impl ByteStream {
         let declared = inner.len_hint();
         Ok(Self {
             inner,
+            #[cfg(unix)]
+            file: None,
             declared,
             observed: 0,
             ended: false,
@@ -106,9 +120,43 @@ impl ByteStream {
         let declared = bytes.len() as u64;
         Self {
             inner: Box::pin(MemoryStream::new([bytes], TrailingHeaders::empty())),
+            #[cfg(unix)]
+            file: None,
             declared: Some(declared),
             observed: 0,
             ended: false,
+        }
+    }
+
+    /// A response stream that is a range of a file, sent by the response transport without this
+    /// crate reading it.
+    ///
+    /// The self-held HTTP/1.1 driver sends it with `sendfile`; every other transport copies it on
+    /// a blocking executor and records the copy, with its reason, in `metrics`. Polling the stream
+    /// directly returns [`AdaptRefusal::NeedsIoDriver`] as an upstream error.
+    #[cfg(unix)]
+    #[must_use]
+    pub fn from_file_region(region: FileRegion, metrics: std::sync::Arc<StreamMetrics>) -> Self {
+        let declared = region.len();
+        Self {
+            inner: Box::pin(MemoryStream::new([], TrailingHeaders::empty())),
+            file: Some((region, metrics)),
+            declared: Some(declared),
+            observed: 0,
+            ended: false,
+        }
+    }
+
+    /// Whether this stream is a file region handed to the transport whole.
+    #[must_use]
+    pub fn is_file_region(&self) -> bool {
+        #[cfg(unix)]
+        {
+            self.file.is_some()
+        }
+        #[cfg(not(unix))]
+        {
+            false
         }
     }
 
@@ -126,7 +174,11 @@ impl ByteStream {
 
     /// Turns the stream into a body, keeping the length checking in place.
     #[must_use]
-    pub fn into_body(self) -> Body {
+    pub fn into_body(mut self) -> Body {
+        #[cfg(unix)]
+        if let Some((region, metrics)) = self.file.take() {
+            return Body::from_payload_with_metrics(Payload::File(region), metrics);
+        }
         Body::from_payload(Payload::Stream(Box::pin(self)))
     }
 }
@@ -136,6 +188,11 @@ impl PayloadStream for ByteStream {
         let this = self.get_mut();
         if this.ended {
             return Poll::Ready(Err(StreamError::polled_after_eof().with_bytes_before_error(this.observed)));
+        }
+        #[cfg(unix)]
+        if this.file.is_some() {
+            this.ended = true;
+            return Poll::Ready(Err(StreamError::upstream(Box::new(AdaptRefusal::NeedsIoDriver))));
         }
         match this.inner.as_mut().poll_read(cx) {
             Poll::Pending => Poll::Pending,
@@ -168,6 +225,10 @@ impl PayloadStream for ByteStream {
     }
 
     fn caps(&self) -> PayloadCaps {
+        #[cfg(unix)]
+        if self.file.is_some() {
+            return PayloadCaps::KNOWN_LENGTH | PayloadCaps::FILE_REGION;
+        }
         let caps = self.inner.caps() | PayloadCaps::PUSH;
         if self.declared.is_some() {
             caps | PayloadCaps::KNOWN_LENGTH
@@ -184,6 +245,7 @@ impl PayloadStream for ByteStream {
 impl core::fmt::Debug for ByteStream {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("ByteStream")
+            .field("file_region", &self.is_file_region())
             .field("declared", &self.declared)
             .field("observed", &self.observed)
             .field("ended", &self.ended)

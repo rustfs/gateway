@@ -24,6 +24,7 @@
 //! Upstream: the shared CRUD service fixture. Downstream: the crate verification gate.
 
 use super::*;
+use rustfs_gateway::RegionMatchPolicy;
 
 /// The exact body AWS sends for a bucket with a null location constraint.
 ///
@@ -133,6 +134,51 @@ async fn n_an_explicit_us_east_1_constraint_is_refused() {
     let response = create_with(&service, "loc-explicit-home", configuration("us-east-1")).await;
     assert_eq!(response.status(), 400, "{}", String::from_utf8_lossy(response.body()));
     assert_eq!(element(response.body(), "Code").as_deref(), Some("InvalidLocationConstraint"));
+}
+
+/// The backend assembled with the RustFS-profile constraint posture (rustfs/gateway#914).
+fn relaxed_service(root: &TestRoot, region: &str) -> (Arc<FsBackend>, S3Service) {
+    let backend = FsBackend::open_with_clock(&root.0, Arc::new(FixedClock::at_unix_seconds(SIGNED_AT_SECONDS)))
+        .expect("a usable test root")
+        .with_region(region)
+        .expect("a region the model names")
+        .with_region_match_policy(RegionMatchPolicy::AcceptExplicitUsEast1);
+    service_with_backend(Arc::new(backend))
+}
+
+/// Positive — under the relaxed posture, the explicit us-east-1 minio-java sends creates a bucket
+/// that reports the us-east-1 null spelling, exactly as an omitted constraint would.
+#[tokio::test]
+async fn an_explicit_us_east_1_constraint_is_accepted_when_the_backend_opts_in() {
+    let root = TestRoot::new();
+    let (_backend, service) = relaxed_service(&root, "us-east-1");
+    let response = create_with(&service, "loc-explicit-relaxed", configuration("us-east-1")).await;
+    assert_eq!(response.status(), 200, "{}", String::from_utf8_lossy(response.body()));
+    assert_eq!(
+        String::from_utf8_lossy(location(&service, "loc-explicit-relaxed").await.body()),
+        EMPTY_CONSTRAINT
+    );
+}
+
+/// Negative — the relaxed posture changes the us-east-1 spelling only: an unserved region, and an
+/// explicit us-east-1 sent to a deployment elsewhere, are still refused and leave no bucket.
+#[tokio::test]
+async fn n_the_relaxed_posture_refuses_everything_strict_refuses_but_the_spelling() {
+    let home = TestRoot::new();
+    let (_home_backend, home_service) = relaxed_service(&home, "us-east-1");
+    let away = TestRoot::new();
+    let (_away_backend, away_service) = relaxed_service(&away, "eu-west-1");
+    for (service, constraint) in [
+        (&home_service, "eu-west-1"),
+        (&home_service, "US-EAST-1"),
+        (&away_service, "us-east-1"),
+    ] {
+        let refused = create_with(service, "loc-relaxed-refused", configuration(constraint)).await;
+        assert_eq!(refused.status(), 400, "{constraint}: {}", String::from_utf8_lossy(refused.body()));
+        assert_eq!(element(refused.body(), "Code").as_deref(), Some("InvalidLocationConstraint"));
+        let head = exchange(service, signed(http::Method::HEAD, "/loc-relaxed-refused", Bytes::new())).await;
+        assert_eq!(head.status(), 404, "{constraint}: the refused creation left a bucket behind");
+    }
 }
 
 /// Negative — a region the deployment does not serve is refused, and leaves no bucket behind.

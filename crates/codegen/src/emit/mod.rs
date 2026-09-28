@@ -29,6 +29,7 @@ pub mod quirk_toml;
 pub mod range_contracts;
 pub mod runtime_contracts;
 pub mod rust_files;
+pub mod seam;
 pub mod spec_toml;
 pub mod upload_id_contracts;
 

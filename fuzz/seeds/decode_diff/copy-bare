@@ -1,0 +1,3 @@
+PUT /bkt/dst
+x-amz-copy-source: src/k
+

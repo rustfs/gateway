@@ -34,4 +34,4 @@ bytes = { workspace = true }
 http = { workspace = true }
 http-body = { workspace = true }
 sha2 = { workspace = true }
-tokio = { workspace = true, features = ["fs", "io-util", "rt-multi-thread", "time"] }
+tokio = { workspace = true, features = ["fs", "io-util", "rt-multi-thread", "test-util", "time"] }

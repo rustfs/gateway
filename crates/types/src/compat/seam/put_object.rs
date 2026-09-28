@@ -347,7 +347,7 @@ fn instant(field: &'static str, at: Timestamp) -> Result<oracle::Timestamp, Conv
     })
 }
 
-fn streaming_blob(stream: ByteStream) -> oracle::StreamingBlob {
+pub(super) fn streaming_blob(stream: ByteStream) -> oracle::StreamingBlob {
     oracle::StreamingBlob::new(GatewayBody {
         stream: Mutex::new(stream),
         done: false,

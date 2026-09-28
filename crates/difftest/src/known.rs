@@ -20,7 +20,9 @@
 //! id refuses the whole file); judging a request's findings against it — a finding matched by an
 //! entry is known, a message wording difference is reported as information, and every other
 //! finding fails; an entry that names a `when_query` parameter applies only to a request that
-//! carries it; and naming the entries whose review date has passed.
+//! carries it, and one that names a `when_bucket` text only to a request whose first path segment
+//! holds it; and
+//! naming the entries whose review date has passed.
 //! NOT responsible for: finding differences (`decode.rs`), or comparing the entry set with the
 //! base branch's.
 //! Upstream: `known-diffs.toml`. Downstream: tests, corpus runners, the shadow proxy.
@@ -88,16 +90,28 @@ pub struct KnownDiff {
     /// same finding from a request without it is a new difference.
     #[serde(default)]
     pub when_query: Option<String>,
+    /// Text the first path segment (where a path-style request names its bucket) must contain,
+    /// ASCII case aside, for the entry to apply, such as `%2F`: like `when_query`, it confines a
+    /// difference to the request feature that causes it, and the same text in a key does not
+    /// count.
+    #[serde(default)]
+    pub when_bucket: Option<String>,
 }
 
 impl KnownDiff {
-    fn matches(&self, finding: &Finding, query: Option<&[String]>) -> bool {
-        let applies = match (&self.when_query, query) {
+    fn matches(&self, finding: &Finding, request: Option<&Scope>) -> bool {
+        let query_applies = match (&self.when_query, request) {
             (None, _) => true,
-            (Some(name), Some(names)) => names.iter().any(|carried| carried == name),
+            (Some(name), Some(scope)) => scope.query.iter().any(|carried| carried == name),
             (Some(_), None) => false,
         };
-        applies
+        let path_applies = match (&self.when_bucket, request) {
+            (None, _) => true,
+            (Some(text), Some(scope)) => scope.bucket.contains(&text.to_ascii_lowercase()),
+            (Some(_), None) => false,
+        };
+        query_applies
+            && path_applies
             && self.kind == finding.kind
             && (self.operation == finding.operation || self.operation == ANY_OPERATION)
             && matches_value(&self.item, &finding.item.to_string())
@@ -245,6 +259,16 @@ impl KnownDiffs {
             {
                 return Err(RegisterError(format!("{}: when_query {name:?} is not a query parameter name", entry.id)));
             }
+            if entry
+                .when_bucket
+                .as_deref()
+                .is_some_and(|text| text.is_empty() || text.contains(['?', '/']))
+            {
+                return Err(RegisterError(format!(
+                    "{}: when_bucket must be non-empty text of one path segment",
+                    entry.id
+                )));
+            }
             let any_operation_allowed = match entry.kind {
                 Kind::Decode => entry.item == "error.message" && entry.gateway.is_some(),
                 Kind::Encode => entry.gateway.is_some() && entry.s3s.is_some() && !entry.item.starts_with(ORDER_ITEM),
@@ -291,19 +315,39 @@ impl KnownDiffs {
     /// Judges the findings of `request` against the register.
     #[must_use]
     pub fn verdict_for(&self, request: &RawRequest, findings: Vec<Finding>) -> Verdict {
-        self.judge(findings, Some(&query_names(&request.target)))
+        let scope = Scope {
+            query: query_names(&request.target),
+            bucket: request
+                .target
+                .split_once('?')
+                .map_or(request.target.as_str(), |(path, _)| path)
+                .trim_start_matches('/')
+                .split('/')
+                .next()
+                .unwrap_or_default()
+                .to_ascii_lowercase(),
+        };
+        self.judge(findings, Some(&scope))
     }
 
-    fn judge(&self, findings: Vec<Finding>, query: Option<&[String]>) -> Verdict {
+    fn judge(&self, findings: Vec<Finding>, request: Option<&Scope>) -> Verdict {
         let mut verdict = Verdict::default();
         for finding in findings {
-            match self.entries.iter().find(|entry| entry.matches(&finding, query)) {
+            match self.entries.iter().find(|entry| entry.matches(&finding, request)) {
                 Some(entry) => verdict.known.push((finding, entry.id.clone())),
                 None => verdict.failures.push(finding),
             }
         }
         verdict
     }
+}
+
+/// What of the request an entry's scope reads.
+struct Scope {
+    /// The query parameter names, as sent.
+    query: Vec<String>,
+    /// The first path segment, ASCII-lowercased.
+    bucket: String,
 }
 
 /// The names of the query parameters in an origin-form target, as sent.

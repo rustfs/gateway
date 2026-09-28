@@ -1,0 +1,6 @@
+PUT /bkt/k
+x-amz-checksum-xxhash3: 1Eex6kDmmIs=
+x-amz-sdk-checksum-algorithm: XXHASH3
+x-amz-checksum-algorithm: XXHASH3
+
+hello world

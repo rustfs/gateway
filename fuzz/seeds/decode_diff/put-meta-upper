@@ -1,0 +1,4 @@
+PUT /bkt/k
+X-Amz-Meta-Upper: V
+
+abc

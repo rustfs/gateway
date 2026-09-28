@@ -1,0 +1,39 @@
+PUT /bkt/dst
+x-amz-copy-source: /src/dir/a%20b.txt?versionId=v9
+x-amz-copy-source-if-match: "abc"
+x-amz-copy-source-if-none-match: "def"
+x-amz-copy-source-if-modified-since: Thu, 01 Jan 2026 00:00:00 GMT
+x-amz-copy-source-if-unmodified-since: Fri, 02 Jan 2026 00:00:00 GMT
+x-amz-copy-source-server-side-encryption-customer-algorithm: AES256
+x-amz-copy-source-server-side-encryption-customer-key: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
+x-amz-copy-source-server-side-encryption-customer-key-md5: hRasmdxgYDKV3nvbahU1MA==
+x-amz-metadata-directive: REPLACE
+x-amz-tagging-directive: REPLACE
+x-amz-tagging: a=b
+x-amz-meta-a: 1
+content-type: text/plain
+cache-control: no-cache
+content-disposition: inline
+content-encoding: identity
+content-language: en
+expires: Thu, 01 Jan 2026 00:00:00 GMT
+x-amz-acl: private
+x-amz-grant-read: id=1
+x-amz-grant-full-control: id=2
+x-amz-grant-read-acp: id=3
+x-amz-grant-write-acp: id=4
+x-amz-storage-class: STANDARD
+x-amz-website-redirect-location: /other
+x-amz-object-lock-mode: GOVERNANCE
+x-amz-object-lock-retain-until-date: 2030-01-01T00:00:00Z
+x-amz-object-lock-legal-hold: OFF
+x-amz-checksum-algorithm: SHA256
+if-match: "t1"
+if-none-match: "t2"
+x-amz-request-payer: requester
+x-amz-source-expected-bucket-owner: 111122223333
+x-amz-expected-bucket-owner: 111122223333
+x-amz-server-side-encryption-customer-algorithm: AES256
+x-amz-server-side-encryption-customer-key: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
+x-amz-server-side-encryption-customer-key-md5: hRasmdxgYDKV3nvbahU1MA==
+

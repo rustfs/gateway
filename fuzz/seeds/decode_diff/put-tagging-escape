@@ -1,0 +1,4 @@
+PUT /bkt/k
+x-amz-tagging: a=%ZZ
+
+abc

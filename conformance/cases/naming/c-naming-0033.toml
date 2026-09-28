@@ -1,0 +1,57 @@
+# c-naming-0033 — an escaped slash in the first path segment is part of the bucket name, not a
+# separator. Converted from a decode_diff fuzz finding (rustfs/backlog#1762, a-df-0020): the draft
+# `fuzz-to-case` wrote from the minimised artifact `GET /er9%2Fj` (sha256
+# 65a17799517e31e88b29709942254111c05f0d3847547e1a7b6a13d8b7811488), reviewed and moved here.
+#
+# Schema dimensions exercised: a percent-encoded reserved character in the path, error shape.
+
+[case]
+id = "c-naming-0033"
+schema_version = 1
+title = "An escaped slash in the first path segment is read as part of the bucket name and refused"
+rationale = """
+The pinned s3s build RustFS runs today decodes the whole path before it splits the bucket from the \
+key, so `GET /er9%2Fj` reads object `j` from bucket `er9`; the gateway splits on the literal slash \
+first, so the bucket name is `er9%2Fj` and the request is refused. The two answers are a routing \
+fork, not a wording difference: a client that escapes the separator reaches data on one server and \
+an error on the other, and a gateway that started decoding before splitting would also let \
+`%2F` smuggle a second path segment past every rule that reads the bucket from the first one. The \
+refusal must be InvalidBucketName for the whole segment — never NoSuchBucket for `er9`, which would \
+mean the escaped slash had been treated as a separator after all. This is a deliberate break for \
+the clients that escape the separator: RustFS serves them the object today, and behind the gateway \
+they are refused (kd-decode-0064..0071 in the gateway/s3s differential)."""
+polarity = "negative"
+operation = "ListObjects"
+tags = ["naming", "routing"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc3986#section-2.2"
+summary = "A reserved character written as its percent-encoded octet is data, so a URI that escapes a slash is not the same as one that uses it as a delimiter."
+kind = "rfc"
+
+[[case.evidence]]
+url = "urn:rustfs-gateway:fuzz:decode_diff:65a17799517e31e88b29709942254111c05f0d3847547e1a7b6a13d8b7811488"
+summary = "The decode_diff fuzz target found the gateway routing this request to ListObjects while the pinned s3s routes it to GetObject."
+kind = "observed"
+
+[request]
+method = "GET"
+target = "/er9%2Fj"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[expect.error]
+code = "InvalidBucketName"
+message_present = true
+request_id_present = true
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+contains_utf8 = ["<Code>InvalidBucketName</Code>"]
+not_contains_utf8 = ["NoSuchBucket", "<Contents>"]

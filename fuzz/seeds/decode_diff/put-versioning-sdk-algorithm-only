@@ -1,0 +1,5 @@
+PUT /bkt?versioning
+x-amz-sdk-checksum-algorithm: CRC32
+x-amz-checksum-crc32: HFOOsA==
+
+<VersioningConfiguration><Status>Enabled</Status><MfaDelete>Disabled</MfaDelete></VersioningConfiguration>

@@ -48,6 +48,7 @@ use rustfs_gateway::{ChecksumAlgorithm, ChecksumSpec, ChecksumType, ErrorCode, H
 use tokio::io::AsyncWriteExt as _;
 
 use super::records::{ObjectAttributes, decode_trailing_sections, encode_trailing_sections, validate_attributes};
+use super::tagging::TAGS_FILE;
 use super::{FsBackend, PARTS_DIR, UPLOAD_RECORD, storage_error};
 
 const UPLOAD_ID_SEQUENCE: &str = ".multipart-upload-id-sequence";
@@ -490,6 +491,11 @@ impl FsBackend {
                 .await?;
             file.write_all(record.as_bytes()).await?;
             file.sync_all().await?;
+            // The initiation's tags travel beside the record, in the form a version stores them,
+            // and are published with the completed object (rustfs/gateway#1000).
+            if !attributes.tags.is_empty() {
+                tokio::fs::write(temporary.join(TAGS_FILE), super::tagging::serialize_tags(&attributes.tags)).await?;
+            }
             tokio::fs::rename(&temporary, destination).await
         }
         .await;

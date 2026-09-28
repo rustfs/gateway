@@ -1,0 +1,3 @@
+PUT /newbkt
+
+<CreateBucketConfiguration><LocationConstraint>eu-west-1</LocationConstraint><Location><Name>usw2-az1</Name><Type>AvailabilityZone</Type></Location><Bucket><DataRedundancy>SingleAvailabilityZone</DataRedundancy><Type>Directory</Type></Bucket><Tags><Tag><Key>k</Key><Value>v</Value></Tag></Tags></CreateBucketConfiguration>

@@ -43,10 +43,14 @@ mod xmltree;
 
 pub mod decode;
 pub mod encode;
+pub mod fuzz;
+pub mod fuzz_case;
 pub mod known;
 pub mod normalize;
 pub mod runner;
 pub mod samples;
+pub mod shadow;
+pub mod tee;
 
 pub use convert::Unconvertible;
 pub use decode::{BodyDigest, Cmp, DecodeDiff, Differ, FieldDiff, Finding, Item, Priority, S3ErrorView, decode_diff};

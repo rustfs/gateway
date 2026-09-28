@@ -42,6 +42,7 @@ pub struct StreamMetrics {
     zero_copy_refusals_transport: AtomicU64,
     zero_copy_refusals_obligation: AtomicU64,
     zero_copy_refusals_tls: AtomicU64,
+    zero_copy_refusals_http2: AtomicU64,
     zero_copy_refused_bytes_total: AtomicU64,
 }
 
@@ -99,6 +100,7 @@ impl StreamMetrics {
             NoZeroCopy::TransportLacksSendfile => &self.zero_copy_refusals_transport,
             NoZeroCopy::VerificationObligationPresent => &self.zero_copy_refusals_obligation,
             NoZeroCopy::TlsInPath => &self.zero_copy_refusals_tls,
+            NoZeroCopy::Http2InPath => &self.zero_copy_refusals_http2,
         };
         counter.fetch_add(1, Ordering::Relaxed);
         if let Some(bytes) = bytes {
@@ -114,6 +116,7 @@ impl StreamMetrics {
             NoZeroCopy::TransportLacksSendfile => self.zero_copy_refusals_transport.load(Ordering::Relaxed),
             NoZeroCopy::VerificationObligationPresent => self.zero_copy_refusals_obligation.load(Ordering::Relaxed),
             NoZeroCopy::TlsInPath => self.zero_copy_refusals_tls.load(Ordering::Relaxed),
+            NoZeroCopy::Http2InPath => self.zero_copy_refusals_http2.load(Ordering::Relaxed),
         }
     }
 
@@ -125,6 +128,7 @@ impl StreamMetrics {
             .saturating_add(self.zero_copy_refusals_transport.load(Ordering::Relaxed))
             .saturating_add(self.zero_copy_refusals_obligation.load(Ordering::Relaxed))
             .saturating_add(self.zero_copy_refusals_tls.load(Ordering::Relaxed))
+            .saturating_add(self.zero_copy_refusals_http2.load(Ordering::Relaxed))
     }
 
     /// How many body bytes took the slow path because the kernel-side path was refused.

@@ -1,0 +1,32 @@
+PUT /bkt/k
+content-type: text/plain
+cache-control: no-cache
+content-disposition: inline
+content-encoding: identity
+content-language: en
+content-md5: XrY7u+Ae7tCTyyK7j1rNww==
+expires: Thu, 01 Jan 2026 00:00:00 GMT
+x-amz-acl: private
+x-amz-grant-read: id=1
+x-amz-grant-full-control: id=2
+x-amz-grant-read-acp: id=3
+x-amz-grant-write-acp: id=4
+x-amz-meta-color: blue
+x-amz-meta-size: large
+x-amz-storage-class: STANDARD_IA
+x-amz-website-redirect-location: /other
+x-amz-tagging: a=b
+x-amz-object-lock-mode: GOVERNANCE
+x-amz-object-lock-retain-until-date: 2030-01-01T00:00:00.123Z
+x-amz-object-lock-legal-hold: ON
+x-amz-request-payer: requester
+x-amz-checksum-crc32: DUoRhQ==
+x-amz-sdk-checksum-algorithm: CRC32
+if-none-match: *
+x-amz-write-offset-bytes: 0
+x-amz-expected-bucket-owner: 111122223333
+x-amz-server-side-encryption-customer-algorithm: AES256
+x-amz-server-side-encryption-customer-key: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
+x-amz-server-side-encryption-customer-key-md5: hRasmdxgYDKV3nvbahU1MA==
+
+hello world

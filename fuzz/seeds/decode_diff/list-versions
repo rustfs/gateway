@@ -1,0 +1,4 @@
+GET /bkt?versions&prefix=p&key-marker=k&version-id-marker=v&max-keys=7&delimiter=%2F&encoding-type=url
+x-amz-request-payer: requester
+x-amz-expected-bucket-owner: 111122223333
+

@@ -1,0 +1,4 @@
+POST /bkt?delete
+content-md5: 6MtSlqyPpAWnEImDgd0S7w==
+
+<Delete><Object><Key>a</Key><ETag>"e1"</ETag><LastModifiedTime>Thu, 01 Jan 2026 00:00:00 GMT</LastModifiedTime><Size>12</Size></Object></Delete>

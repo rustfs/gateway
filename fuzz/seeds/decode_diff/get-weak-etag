@@ -1,0 +1,3 @@
+GET /bkt/k
+if-none-match: W/"w"
+

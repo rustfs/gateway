@@ -1,0 +1,11 @@
+PUT /newbkt
+x-amz-acl: private
+x-amz-grant-read: id=1
+x-amz-grant-full-control: id=2
+x-amz-grant-read-acp: id=3
+x-amz-grant-write: id=4
+x-amz-grant-write-acp: id=5
+x-amz-bucket-object-lock-enabled: true
+x-amz-object-ownership: BucketOwnerEnforced
+
+<CreateBucketConfiguration><LocationConstraint>eu-west-1</LocationConstraint></CreateBucketConfiguration>

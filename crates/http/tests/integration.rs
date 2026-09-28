@@ -40,6 +40,8 @@ mod header_accept_replay;
 mod header_and_query;
 #[path = "host_ambiguity.rs"]
 mod host_ambiguity;
+#[path = "ingest_chunk_rss.rs"]
+mod ingest_chunk_rss;
 #[path = "ingest_chunk_rules.rs"]
 mod ingest_chunk_rules;
 #[path = "ingest_framing.rs"]

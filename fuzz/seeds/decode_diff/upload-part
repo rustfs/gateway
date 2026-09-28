@@ -1,0 +1,10 @@
+PUT /bkt/k?partNumber=3&uploadId=up-1
+content-md5: J7Ph78rJKYDUMevg/+smbA==
+x-amz-checksum-sha256: Ipvar83SrlL+B5gOlN/4PP1f4d4gCmAkqmWH1V6gfoQ=
+x-amz-request-payer: requester
+x-amz-expected-bucket-owner: 111122223333
+x-amz-server-side-encryption-customer-algorithm: AES256
+x-amz-server-side-encryption-customer-key: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
+x-amz-server-side-encryption-customer-key-md5: hRasmdxgYDKV3nvbahU1MA==
+
+part-bytes

@@ -69,7 +69,10 @@ impl Handler<UploadPartCopy> for FsBackend {
         }
         self.store_part(input.bucket.as_str(), &upload_id, input.part_number, bytes)
             .await?;
+        let encryption = record.attributes.headers.encryption();
         Ok(Resp::new(UploadPartCopyOutput {
+            server_side_encryption: encryption.reported_algorithm(),
+            ssekms_key_id: encryption.kms_key_id,
             e_tag: etag(bytes)?,
             last_modified: Some(Timestamp::from_secs(self.clock.now().unix_seconds())),
             copy_source_version_id: source.version_id().map(ToOwned::to_owned).or(representation.version_id),

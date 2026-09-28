@@ -38,6 +38,7 @@ after it has accepted.
 | `tests/boundary_guards.rs` | Source-level guards for properties no type signature can state. | Change a boundary a type cannot express. |
 | `tests/allocation_budget.rs` | The allocation budget the acceptance layer promises, asserted rather than claimed. | Change request-head parsing. |
 | `tests/ingest_chunk_rules.rs` | Chunk grammar negative matrix and the ceilings that bound a chunk. | Change chunk syntax or limits. |
+| `tests/ingest_chunk_rss.rs` | c-lim-0042/0064 OS-observed peak RSS and on-CPU healthy p99 under one hundred concurrent four-GiB announcements. | A chunk attack's memory or healthy-latency evidence changes. |
 | `tests/ingest_framing.rs` | Whether the chunk parser runs at all, and whether the two declared lengths agree. | Change payload/framing selection. |
 | `tests/ingest_verify.rs` | The chunk signature chain and the promise that nothing unverified is handed over. | Change signature-chain verification or trailer parsing. |
 | `tests/ingest_known_answer.rs` | `ChunkSigner` verified against AWS's published chunked-upload example, not our own builder. | Change the chunk string-to-sign or its HMAC chain. |

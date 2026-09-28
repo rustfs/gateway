@@ -1,0 +1,13 @@
+POST /bkt/k?uploadId=up-1
+x-amz-mp-object-size: 100
+x-amz-checksum-type: FULL_OBJECT
+x-amz-checksum-crc32: AAAAAA==
+if-match: "m"
+if-none-match: *
+x-amz-request-payer: requester
+x-amz-expected-bucket-owner: 111122223333
+x-amz-server-side-encryption-customer-algorithm: AES256
+x-amz-server-side-encryption-customer-key: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
+x-amz-server-side-encryption-customer-key-md5: hRasmdxgYDKV3nvbahU1MA==
+
+<CompleteMultipartUpload><Part><PartNumber>1</PartNumber><ETag>"e1"</ETag><ChecksumCRC32>AAAAAA==</ChecksumCRC32></Part><Part><PartNumber>2</PartNumber><ETag>"e2"</ETag></Part></CompleteMultipartUpload>

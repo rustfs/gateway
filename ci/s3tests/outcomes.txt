@@ -1,6 +1,6 @@
 # Per-case outcomes of the Ceph s3-tests run that measured this xfail generation.
 # Written by `ci/s3tests/report.py --outcomes`; refreshed together with ci/s3tests/xfail.txt.
-# passed=357 failed=313 errored=0 skipped=70 collected=740
+# passed=371 failed=299 errored=0 skipped=70 collected=740
 #
 # generation: 2
 
@@ -150,6 +150,11 @@ passed s3tests.functional.test_s3::test_bucket_policy_acl
 passed s3tests.functional.test_s3::test_bucket_policy_allow_notprincipal
 passed s3tests.functional.test_s3::test_bucket_policy_another_bucket
 passed s3tests.functional.test_s3::test_bucket_policy_multipart
+passed s3tests.functional.test_s3::test_bucket_policy_put_obj_kms_noenc
+passed s3tests.functional.test_s3::test_bucket_policy_put_obj_kms_s3
+passed s3tests.functional.test_s3::test_bucket_policy_put_obj_s3_incorrect_algo_sse_s3
+passed s3tests.functional.test_s3::test_bucket_policy_put_obj_s3_kms
+passed s3tests.functional.test_s3::test_bucket_policy_put_obj_s3_noenc
 passed s3tests.functional.test_s3::test_bucket_recreate_not_overriding
 passed s3tests.functional.test_s3::test_buckets_create_then_list
 passed s3tests.functional.test_s3::test_buckets_list_ctime
@@ -230,6 +235,13 @@ passed s3tests.functional.test_s3::test_multi_object_delete
 passed s3tests.functional.test_s3::test_multi_object_delete_key_limit
 passed s3tests.functional.test_s3::test_multi_objectv2_delete
 passed s3tests.functional.test_s3::test_multi_objectv2_delete_key_limit
+passed s3tests.functional.test_s3::test_multipart_copy_improper_range
+passed s3tests.functional.test_s3::test_multipart_copy_multiple_sizes
+passed s3tests.functional.test_s3::test_multipart_copy_small
+passed s3tests.functional.test_s3::test_multipart_copy_special_names
+passed s3tests.functional.test_s3::test_multipart_copy_versioned
+passed s3tests.functional.test_s3::test_multipart_copy_without_range
+passed s3tests.functional.test_s3::test_multipart_put_current_object_if_none_match
 passed s3tests.functional.test_s3::test_multipart_upload_complete_without_create
 passed s3tests.functional.test_s3::test_multipart_upload_contents
 passed s3tests.functional.test_s3::test_multipart_upload_empty
@@ -342,7 +354,9 @@ passed s3tests.functional.test_s3::test_sse_s3_encrypted_upload_8mb
 passed s3tests.functional.test_s3::test_upload_part_copy_percent_encoded_key
 passed s3tests.functional.test_s3::test_versioned_concurrent_object_create_and_remove
 passed s3tests.functional.test_s3::test_versioned_concurrent_object_create_concurrent_remove
+passed s3tests.functional.test_s3::test_versioning_bucket_atomic_upload_return_version_id
 passed s3tests.functional.test_s3::test_versioning_bucket_create_suspend
+passed s3tests.functional.test_s3::test_versioning_bucket_multipart_upload_return_version_id
 passed s3tests.functional.test_s3::test_versioning_concurrent_multi_object_delete
 passed s3tests.functional.test_s3::test_versioning_copy_obj_version
 passed s3tests.functional.test_s3::test_versioning_multi_object_delete
@@ -443,12 +457,7 @@ failed s3tests.functional.test_s3::test_bucket_policy_put_obj_acl
 failed s3tests.functional.test_s3::test_bucket_policy_put_obj_copy_source
 failed s3tests.functional.test_s3::test_bucket_policy_put_obj_copy_source_meta
 failed s3tests.functional.test_s3::test_bucket_policy_put_obj_grant
-failed s3tests.functional.test_s3::test_bucket_policy_put_obj_kms_noenc
-failed s3tests.functional.test_s3::test_bucket_policy_put_obj_kms_s3
 failed s3tests.functional.test_s3::test_bucket_policy_put_obj_request_obj_tag
-failed s3tests.functional.test_s3::test_bucket_policy_put_obj_s3_incorrect_algo_sse_s3
-failed s3tests.functional.test_s3::test_bucket_policy_put_obj_s3_kms
-failed s3tests.functional.test_s3::test_bucket_policy_put_obj_s3_noenc
 failed s3tests.functional.test_s3::test_bucket_policy_put_obj_tagging_existing_tag
 failed s3tests.functional.test_s3::test_bucket_policy_set_condition_operator_end_with_IfExists
 failed s3tests.functional.test_s3::test_bucket_policy_tenanted_bucket
@@ -536,16 +545,9 @@ failed s3tests.functional.test_s3::test_lifecycle_get_no_id
 failed s3tests.functional.test_s3::test_lifecycle_invalid_status
 failed s3tests.functional.test_s3::test_list_multipart_upload_owner
 failed s3tests.functional.test_s3::test_multipart_checksum_sha256
-failed s3tests.functional.test_s3::test_multipart_copy_improper_range
 failed s3tests.functional.test_s3::test_multipart_copy_invalid_range
-failed s3tests.functional.test_s3::test_multipart_copy_multiple_sizes
-failed s3tests.functional.test_s3::test_multipart_copy_small
-failed s3tests.functional.test_s3::test_multipart_copy_special_names
-failed s3tests.functional.test_s3::test_multipart_copy_versioned
-failed s3tests.functional.test_s3::test_multipart_copy_without_range
 failed s3tests.functional.test_s3::test_multipart_get_part
 failed s3tests.functional.test_s3::test_multipart_put_current_object_if_match
-failed s3tests.functional.test_s3::test_multipart_put_current_object_if_none_match
 failed s3tests.functional.test_s3::test_multipart_put_object_if_match
 failed s3tests.functional.test_s3::test_multipart_resend_first_finishes_last
 failed s3tests.functional.test_s3::test_multipart_reupload_checksum_and_etag
@@ -671,8 +673,6 @@ failed s3tests.functional.test_s3::test_sse_kms_post_object_authenticated_reques
 failed s3tests.functional.test_s3::test_sse_s3_default_post_object_authenticated_request
 failed s3tests.functional.test_s3::test_versioned_object_acl
 failed s3tests.functional.test_s3::test_versioned_object_acl_no_version_specified
-failed s3tests.functional.test_s3::test_versioning_bucket_atomic_upload_return_version_id
-failed s3tests.functional.test_s3::test_versioning_bucket_multipart_upload_return_version_id
 failed s3tests.functional.test_s3control::test_account_public_access_block
 skipped s3tests.functional.test_iam::test_account_current_user_access_key_create
 skipped s3tests.functional.test_iam::test_account_current_user_access_key_delete

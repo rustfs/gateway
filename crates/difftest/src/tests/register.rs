@@ -368,3 +368,38 @@ fn a_when_query_that_is_not_a_parameter_name_is_refused() {
     }
     assert!(KnownDiffs::parse(&format!("{VALID}when_query = \"x-id\"\n")).is_ok());
 }
+
+/// Negative — an entry scoped by `when_bucket` accepts its finding only from a request whose first
+/// path segment holds the text, ASCII case aside; the same route pair from a misrouting gateway on
+/// a plain path fails, and so does the text in a key or in the query.
+#[test]
+fn an_entry_scoped_to_bucket_text_applies_only_where_the_bucket_segment_holds_it() {
+    let register = KnownDiffs::parse(
+        r#"
+[[diff]]
+id = "kd-decode-0001"
+kind = "decode"
+operation = "ListObjects"
+item = "route"
+gateway = "ListObjects"
+s3s = "GetObject"
+reason = "the escaped separator"
+expires = "2026-12-31"
+when_bucket = "%2F"
+"#,
+    )
+    .expect("parses");
+    let routed = || vec![finding("ListObjects", Item::Route, "ListObjects", "GetObject")];
+    assert!(register.verdict_for(&crate::RawRequest::get("/bkt%2Fk"), routed()).passed());
+    assert!(register.verdict_for(&crate::RawRequest::get("/bkt%2fk"), routed()).passed());
+    assert!(!register.verdict_for(&crate::RawRequest::get("/bkt/k"), routed()).passed());
+    assert!(
+        !register
+            .verdict_for(&crate::RawRequest::get("/bkt/k?prefix=%2F"), routed())
+            .passed()
+    );
+    assert!(!register.verdict(routed()).passed());
+    for text in ["", "a?b", "a/b"] {
+        assert!(refused(&format!("{VALID}when_bucket = {text:?}\n")).contains("when_bucket"), "{text:?}");
+    }
+}

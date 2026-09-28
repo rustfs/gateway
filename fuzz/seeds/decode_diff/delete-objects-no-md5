@@ -1,0 +1,3 @@
+POST /bkt?delete
+
+<Delete><Object><Key>a</Key></Object></Delete>

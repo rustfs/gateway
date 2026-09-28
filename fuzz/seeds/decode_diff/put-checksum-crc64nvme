@@ -1,0 +1,6 @@
+PUT /bkt/k
+x-amz-checksum-crc64nvme: jSnVw/bqjr4=
+x-amz-sdk-checksum-algorithm: CRC64NVME
+x-amz-checksum-algorithm: CRC64NVME
+
+hello world

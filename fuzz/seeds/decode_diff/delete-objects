@@ -1,0 +1,8 @@
+POST /bkt?delete
+content-md5: 518mvoIMO6cC8X/s9Ak1Cg==
+x-amz-mfa: 123 456
+x-amz-bypass-governance-retention: true
+x-amz-request-payer: requester
+x-amz-expected-bucket-owner: 111122223333
+
+<Delete><Object><Key>a</Key></Object><Object><Key>b</Key><VersionId>v1</VersionId></Object><Quiet>true</Quiet></Delete>

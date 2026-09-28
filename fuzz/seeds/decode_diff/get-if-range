@@ -1,0 +1,4 @@
+GET /bkt/k
+if-range: "abc"
+range: bytes=0-1
+
