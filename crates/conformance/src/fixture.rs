@@ -1774,8 +1774,8 @@ enum Selected<'a> {
     Object(&'a StoredObject),
     /// No version of this key exists.
     Absent,
-    /// The newest version is a delete marker, recorded at this instant in Unix seconds.
-    Deleted(i64),
+    /// The newest version is this delete marker.
+    Deleted(&'a StoredVersion),
 }
 
 impl<'a> Selected<'a> {
@@ -1794,7 +1794,7 @@ fn select_current<'a>(fixture: &'a Fixture, bucket: &str, key: &str) -> Selected
         None => Selected::Absent,
         Some(version) => match version.object.as_ref() {
             Some(object) => Selected::Object(object),
-            None => Selected::Deleted(version.last_modified),
+            None => Selected::Deleted(version),
         },
     }
 }
@@ -1822,11 +1822,11 @@ fn versioned_delete_marker(version_id: &str, last_modified: i64) -> HandlerError
 }
 
 /// The `404` a read with no `versionId` gets when the newest version is a delete marker.
-fn deleted_by_marker(key: &str, last_modified: i64) -> HandlerError {
+fn deleted_by_marker(key: &str, marker: &StoredVersion) -> HandlerError {
     let named = ObjectKey::new(key.to_owned()).ok();
-    HandlerErrorContext::current_delete_marker(ResourceVisibility::Visible, named, last_modified)
+    HandlerErrorContext::current_delete_marker(ResourceVisibility::Visible, named, &marker.version_id, marker.last_modified)
         .map(HandlerError::from)
-        .unwrap_or_else(|_| HandlerError::internal_error("a fixture delete marker has no renderable instant"))
+        .unwrap_or_else(|_| HandlerError::internal_error("a fixture delete marker is not renderable"))
 }
 
 /// `NoSuchKey`, raised only once every condition has been evaluated against the absence.
@@ -2592,7 +2592,7 @@ fn read_copy_source(fixture: &Fixture, source: &CopySource) -> Result<(StoredObj
             .flatten();
         return Ok((object, reported));
     };
-    let object = select_named(fixture, bucket, key, requested)?;
+    let object = select_named(fixture, bucket, key, requested).map_err(HandlerError::as_copy_source_refusal)?;
     Ok((object.clone(), Some(requested.to_owned())))
 }
 
@@ -2695,7 +2695,7 @@ impl Stub {
         let object = match selected {
             Selected::Object(object) => object,
             Selected::Absent => return Err(no_such_key(input.key.as_str())),
-            Selected::Deleted(at) => return Err(deleted_by_marker(input.key.as_str(), at)),
+            Selected::Deleted(marker) => return Err(deleted_by_marker(input.key.as_str(), marker)),
         };
         if condition == ConditionalOutcome::NotModified {
             let e_tag = if condition.includes_selected_etag() {
@@ -2785,7 +2785,7 @@ impl Stub {
         let object = match selected {
             Selected::Object(object) => object,
             Selected::Absent => return Err(no_such_key(input.key.as_str())),
-            Selected::Deleted(at) => return Err(deleted_by_marker(input.key.as_str(), at)),
+            Selected::Deleted(marker) => return Err(deleted_by_marker(input.key.as_str(), marker)),
         };
         let wants_etag = input.object_attributes.split(',').any(|attribute| attribute.trim() == "ETag");
         Ok(Resp::new(dto::GetObjectAttributesOutput {
@@ -2821,7 +2821,7 @@ impl Stub {
         let object = match selected {
             Selected::Object(object) => object,
             Selected::Absent => return Err(no_such_key(input.key.as_str())),
-            Selected::Deleted(at) => return Err(deleted_by_marker(input.key.as_str(), at)),
+            Selected::Deleted(marker) => return Err(deleted_by_marker(input.key.as_str(), marker)),
         };
         if condition == ConditionalOutcome::NotModified {
             let e_tag = if condition.includes_selected_etag() {

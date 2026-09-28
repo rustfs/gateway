@@ -181,7 +181,42 @@ impl HttpDate {
     }
 }
 
-/// A value refused by [`RegionLabel::new`], [`RedirectTarget::new`] or [`HttpDate::from_unix_seconds`].
+/// An object version id a refusal may state, validated at construction.
+///
+/// Carried by [`ErrorHeader::VersionId`], the `x-amz-version-id` of a delete-marker refusal. The
+/// value is backend knowledge — the version the read found — and its byte set is closed here for
+/// [`RegionLabel`]'s reason: visible ASCII only, bounded, so a header split cannot be spelled.
+/// Every version id S3 mints, and RustFS's UUIDs and `null`, fall inside it.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct VersionIdLabel(Box<str>);
+
+impl VersionIdLabel {
+    /// The longest version id this type accepts; an object key's bound.
+    pub const MAX_LEN: usize = 1024;
+
+    /// Validates a version id.
+    ///
+    /// # Errors
+    ///
+    /// [`InvalidWireLabel`] when the id is empty, longer than [`Self::MAX_LEN`], or carries any
+    /// byte that is not ASCII graphic.
+    pub fn new(text: &str) -> Result<Self, InvalidWireLabel> {
+        let ok = !text.is_empty() && text.len() <= Self::MAX_LEN && text.bytes().all(|byte| byte.is_ascii_graphic());
+        if !ok {
+            return Err(InvalidWireLabel);
+        }
+        Ok(Self(Box::from(text)))
+    }
+
+    /// The validated id.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// A value refused by [`RegionLabel::new`], [`RedirectTarget::new`], [`VersionIdLabel::new`] or
+/// [`HttpDate::from_unix_seconds`].
 ///
 /// Carries nothing on purpose: echoing the refused bytes back would hand the caller of a
 /// diagnostic path the very bytes the validation exists to keep out of a header.
@@ -252,6 +287,16 @@ pub enum ErrorHeader {
     /// backend knows a version is a marker, and the value is this module's literal `true`, never a
     /// reading of anything the caller sent.
     DeleteMarker,
+    /// `x-amz-version-id: <id>` — which version the delete-marker refusal found.
+    ///
+    /// Rides with [`Self::DeleteMarker`] on both marker refusals: a client removing the marker to
+    /// restore the object needs its id, and the `404` a read naming no version gets is where it
+    /// learns it without listing versions. Only the backend knows the id; [`VersionIdLabel`] fixes
+    /// the syntax.
+    VersionId {
+        /// The version id of the marker the read found.
+        version_id: VersionIdLabel,
+    },
     /// `Last-Modified: <IMF-fixdate>` — when the selected version was written.
     ///
     /// AWS answers it on the refusal a delete-marker read gets, and it is what lets a client
@@ -273,6 +318,7 @@ impl ErrorHeader {
             Self::BucketRegion { .. } => HeaderName::from_static("x-amz-bucket-region"),
             Self::RedirectLocation { .. } => HeaderName::from_static("location"),
             Self::DeleteMarker => HeaderName::from_static("x-amz-delete-marker"),
+            Self::VersionId { .. } => HeaderName::from_static("x-amz-version-id"),
             Self::LastModified { .. } => HeaderName::from_static("last-modified"),
         }
     }
@@ -292,6 +338,7 @@ impl ErrorHeader {
             Self::BucketRegion { region } => region.as_str().to_owned(),
             Self::RedirectLocation { target } => target.as_str().to_owned(),
             Self::DeleteMarker => "true".to_owned(),
+            Self::VersionId { version_id } => version_id.as_str().to_owned(),
             Self::LastModified { at } => at.as_str().to_owned(),
         }
     }
@@ -403,6 +450,9 @@ mod tests {
                 target: RedirectTarget::new("https://b.s3.eu-west-1.example.com").expect("a valid target"),
             },
             ErrorHeader::DeleteMarker,
+            ErrorHeader::VersionId {
+                version_id: VersionIdLabel::new("3HL4kqtJlcpXroDTDmJ.rmSpXd3dIbrHY").expect("a valid version id"),
+            },
             ErrorHeader::LastModified {
                 at: HttpDate::from_unix_seconds(1_767_236_645).expect("a renderable instant"),
             },
@@ -414,6 +464,7 @@ mod tests {
                 | ErrorHeader::BucketRegion { .. }
                 | ErrorHeader::RedirectLocation { .. }
                 | ErrorHeader::DeleteMarker
+                | ErrorHeader::VersionId { .. }
                 | ErrorHeader::LastModified { .. } => {}
             }
         }

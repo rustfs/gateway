@@ -20,8 +20,8 @@
 
 use http::StatusCode;
 use rustfs_gateway_core::{
-    BodyPolicy, ErrorContext, ErrorDetail, HandlerError, HandlerErrorContext, MissingObject, RedirectTarget, RegionLabel,
-    ResourceVisibility, ResponseKind, resolve,
+    BodyPolicy, ErrorContext, ErrorDetail, HandlerError, HandlerErrorContext, InvalidErrorContext, MissingObject, RedirectTarget,
+    RegionLabel, ResourceVisibility, ResponseKind, resolve,
 };
 use rustfs_gateway_types::{BucketName, ETag, ErrorCode, ObjectKey};
 
@@ -71,21 +71,16 @@ fn c_err_n003_delete_missing_key_does_not_hide_a_missing_bucket() {
 fn c_err_n004_only_an_explicit_versioned_delete_marker_is_method_not_allowed() {
     assert!(ErrorContext::versioned_delete_marker("", MARKER_INSTANT).is_err());
     let resolution = resolve(
-        ErrorContext::versioned_delete_marker("version-1", MARKER_INSTANT).expect("a non-empty bounded version id"),
+        ErrorContext::versioned_delete_marker(MARKER_VERSION, MARKER_INSTANT).expect("a non-empty bounded version id"),
         ResponseKind::Other,
     );
     assert_eq!(resolution.status(), StatusCode::METHOD_NOT_ALLOWED);
     assert_eq!(resolution.code(), Some(&ErrorCode::METHOD_NOT_ALLOWED));
-    // The refusal is only usable because of these two. Without the marker header a client cannot
-    // tell this from a version id that names nothing, and without the instant it cannot tell the
-    // marker it just created from an older one.
-    assert_eq!(
-        header_values(&resolution),
-        vec![
-            ("x-amz-delete-marker".to_owned(), "true".to_owned()),
-            ("last-modified".to_owned(), MARKER_HTTP_DATE.to_owned()),
-        ]
-    );
+    // The refusal is only usable because of these. Without the marker header a client cannot tell
+    // this from a version id that names nothing, without the version id it cannot name the marker
+    // it would remove, and without the instant it cannot tell the marker it just created from an
+    // older one.
+    assert_eq!(header_values(&resolution), marker_headers());
 }
 
 /// c-err-0007 — the acceptance id rustfs/backlog#1694 §7 gives this rule.
@@ -96,19 +91,13 @@ fn n_a_current_delete_marker_is_a_not_found_that_still_says_it_is_a_marker() {
     // the client the method is the problem, and it is not.
     let key = ObjectKey::new("versioned/current.txt".to_owned()).expect("a valid key");
     let resolution = resolve(
-        ErrorContext::current_delete_marker(ResourceVisibility::Visible, Some(key), MARKER_INSTANT)
+        ErrorContext::current_delete_marker(ResourceVisibility::Visible, Some(key), MARKER_VERSION, MARKER_INSTANT)
             .expect("a renderable instant"),
         ResponseKind::Other,
     );
     assert_eq!(resolution.status(), StatusCode::NOT_FOUND);
     assert_eq!(resolution.code(), Some(&ErrorCode::NO_SUCH_KEY));
-    assert_eq!(
-        header_values(&resolution),
-        vec![
-            ("x-amz-delete-marker".to_owned(), "true".to_owned()),
-            ("last-modified".to_owned(), MARKER_HTTP_DATE.to_owned()),
-        ]
-    );
+    assert_eq!(header_values(&resolution), marker_headers());
 }
 
 /// c-err-1006 — the acceptance id rustfs/backlog#1694 §7 gives this rule.
@@ -120,14 +109,15 @@ fn n_a_current_delete_marker_is_a_not_found_that_still_says_it_is_a_marker() {
 fn n_a_hidden_delete_marker_says_nothing_about_the_key_it_replaced() {
     let key = ObjectKey::new("versioned/current.txt".to_owned()).expect("a valid key");
     let resolution = resolve(
-        ErrorContext::current_delete_marker(ResourceVisibility::Hidden, Some(key), MARKER_INSTANT).expect("a renderable instant"),
+        ErrorContext::current_delete_marker(ResourceVisibility::Hidden, Some(key), MARKER_VERSION, MARKER_INSTANT)
+            .expect("a renderable instant"),
         ResponseKind::Other,
     );
     assert_eq!(resolution.status(), StatusCode::FORBIDDEN);
     assert_eq!(resolution.code(), Some(&ErrorCode::ACCESS_DENIED));
     assert!(header_values(&resolution).is_empty(), "{:?}", header_values(&resolution));
     let rendered = format!("{resolution:?}");
-    for probe in ["versioned/current.txt", MARKER_HTTP_DATE] {
+    for probe in ["versioned/current.txt", MARKER_VERSION, MARKER_HTTP_DATE] {
         assert!(!rendered.contains(probe), "the refusal leaks {probe:?}:\n{rendered}");
     }
 }
@@ -137,6 +127,17 @@ fn n_a_hidden_delete_marker_says_nothing_about_the_key_it_replaced() {
 /// between two calls to the same function.
 const MARKER_INSTANT: i64 = 1_767_236_645;
 const MARKER_HTTP_DATE: &str = "Thu, 01 Jan 2026 03:04:05 GMT";
+/// The marker's version id both refusals name.
+const MARKER_VERSION: &str = "3HL4kqtJlcpXroDTDmJ.rmSpXd3dIbrHY";
+
+/// The three headers both visible delete-marker refusals carry, in order.
+fn marker_headers() -> Vec<(String, String)> {
+    vec![
+        ("x-amz-delete-marker".to_owned(), "true".to_owned()),
+        ("x-amz-version-id".to_owned(), MARKER_VERSION.to_owned()),
+        ("last-modified".to_owned(), MARKER_HTTP_DATE.to_owned()),
+    ]
+}
 
 /// The headers a resolution selected, as `(name, value)` pairs in order.
 fn header_values(resolution: &rustfs_gateway_core::ErrorResolution) -> Vec<(String, String)> {
@@ -152,8 +153,43 @@ fn header_values(resolution: &rustfs_gateway_core::ErrorResolution) -> Vec<(Stri
 #[test]
 fn n_an_unrenderable_instant_is_refused_rather_than_approximated() {
     assert!(ErrorContext::versioned_delete_marker("version-1", i64::MAX).is_err());
-    assert!(ErrorContext::current_delete_marker(ResourceVisibility::Visible, None, i64::MIN).is_err());
+    assert!(ErrorContext::current_delete_marker(ResourceVisibility::Visible, None, "version-1", i64::MIN).is_err());
     assert!(rustfs_gateway_core::HttpDate::from_unix_seconds(i64::MAX).is_err());
+}
+
+/// A version id is a header value on both marker refusals, so either constructor refuses one that
+/// is empty, oversized, or holds a byte outside visible ASCII — the same whatever the visibility,
+/// so a hidden refusal cannot be the way a bad id gets in.
+#[test]
+fn n_a_version_id_that_is_not_a_header_token_is_refused_by_both_marker_constructors() {
+    let oversized = "v".repeat(1025);
+    for version_id in [
+        "",
+        " ",
+        "a b",
+        "tab\tid",
+        "line\nbreak",
+        "caf\u{e9}",
+        "nul\0id",
+        "del\u{7f}",
+        oversized.as_str(),
+    ] {
+        assert_eq!(
+            ErrorContext::versioned_delete_marker(version_id, MARKER_INSTANT),
+            Err(InvalidErrorContext::InvalidVersionId),
+            "{version_id:?}"
+        );
+        for visibility in [ResourceVisibility::Visible, ResourceVisibility::Hidden] {
+            assert_eq!(
+                ErrorContext::current_delete_marker(visibility, None, version_id, MARKER_INSTANT),
+                Err(InvalidErrorContext::InvalidVersionId),
+                "{version_id:?} {visibility:?}"
+            );
+        }
+    }
+    let longest = "v".repeat(1024);
+    assert!(ErrorContext::versioned_delete_marker(&longest, MARKER_INSTANT).is_ok());
+    assert!(ErrorContext::current_delete_marker(ResourceVisibility::Visible, None, "null", MARKER_INSTANT).is_ok());
 }
 
 #[test]
@@ -364,6 +400,7 @@ fn n_restricting_a_current_delete_marker_removes_every_existence_signal() {
     let error: HandlerError = HandlerErrorContext::current_delete_marker(
         ResourceVisibility::Visible,
         Some(ObjectKey::new("private/deleted.txt").expect("a valid key")),
+        "version-1",
         1_767_326_645,
     )
     .expect("a renderable instant")
@@ -373,6 +410,35 @@ fn n_restricting_a_current_delete_marker_removes_every_existence_signal() {
     assert_eq!(hidden.code(), Some(&ErrorCode::ACCESS_DENIED));
     assert!(hidden.headers().is_empty());
     assert!(hidden.details().is_empty());
+}
+
+/// Negative — a copy answers `x-amz-version-id` for the version it wrote, so a source that is a
+/// delete marker must not put the marker's id there. The flag and the instant stay, and the
+/// restriction leaves every other refusal alone.
+#[test]
+fn n_a_copy_source_marker_refusal_does_not_state_the_markers_version_as_the_copys() {
+    let versioned: HandlerError = HandlerErrorContext::versioned_delete_marker(MARKER_VERSION, MARKER_INSTANT)
+        .expect("a valid marker")
+        .into();
+    let current: HandlerError =
+        HandlerErrorContext::current_delete_marker(ResourceVisibility::Visible, None, MARKER_VERSION, MARKER_INSTANT)
+            .expect("a valid marker")
+            .into();
+    for (error, code) in [(versioned, ErrorCode::METHOD_NOT_ALLOWED), (current, ErrorCode::NO_SUCH_KEY)] {
+        let context = ErrorContext::ordinary(error.as_copy_source_refusal()).expect("the restricted context remains sealed");
+        let resolution = resolve(context, ResponseKind::Other);
+        assert_eq!(resolution.code(), Some(&code));
+        assert_eq!(
+            header_values(&resolution),
+            vec![
+                ("x-amz-delete-marker".to_owned(), "true".to_owned()),
+                ("last-modified".to_owned(), MARKER_HTTP_DATE.to_owned()),
+            ]
+        );
+        assert!(!format!("{resolution:?}").contains(MARKER_VERSION), "{resolution:?}");
+    }
+    let unrelated: HandlerError = HandlerErrorContext::missing_bucket().into();
+    assert_eq!(unrelated.clone().as_copy_source_refusal(), unrelated);
 }
 
 /// Positive control — the restriction is deliberately narrow and cannot turn an unrelated

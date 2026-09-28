@@ -107,8 +107,7 @@ pub enum Refusal {
     /// `HandlerErrorContext::current_delete_marker(ResourceVisibility::Visible, key, last_modified)`:
     /// `404 NoSuchKey` with the marker header. Visible for the reason [`Self::MissingKey`] is.
     CurrentDeleteMarker {
-        /// The marker's version id, from `x-amz-version-id`; the gateway does not render it yet
-        /// (rustfs/gateway#899).
+        /// The marker's version id, from `x-amz-version-id`.
         version_id: String,
         /// When the marker was written, in Unix seconds, from `Last-Modified`.
         last_modified: i64,

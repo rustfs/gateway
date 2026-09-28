@@ -5,7 +5,7 @@ error[E0423]: cannot initialize a tuple struct which contains private fields
    |                    ^^^^^^^^^^^^^^^^^^^
    |
 note: constructor is not visible here due to private fields
-  --> src/error_resolution.rs
+  --> src/error_resolution/handler_context.rs
    |
    | pub struct HandlerErrorContext(ErrorContext);
    |                                ^^^^^^^^^^^^ private field

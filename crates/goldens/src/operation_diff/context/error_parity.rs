@@ -302,7 +302,7 @@ pub(crate) const SEAM_REFUSED: &str = "the handler error has no gateway renderin
 
 /// The RustFS ring-2 adapter's error half: the gateway refusal for the RustFS body's s3s error, one
 /// seam verdict to one gateway constructor. The adapter supplies what only the request holds: the
-/// key, and the `Range` a `416` names. The marker's version id waits for rustfs/gateway#899.
+/// key, and the `Range` a `416` names.
 pub(crate) fn adapter_error(error: &s3s::S3Error, context: &RequestContextView) -> HandlerError {
     let missing = |kind| match context.key() {
         Some(key) => HandlerErrorContext::missing_object_for(key.clone(), kind, ResourceVisibility::Visible),
@@ -319,10 +319,16 @@ pub(crate) fn adapter_error(error: &s3s::S3Error, context: &RequestContextView) 
             Some(range) => HandlerError::unsatisfiable_range(range.to_owned(), complete_length),
             None => refused(),
         },
-        Ok(Refusal::CurrentDeleteMarker { last_modified, .. }) => {
-            HandlerErrorContext::current_delete_marker(ResourceVisibility::Visible, context.key().cloned(), last_modified)
-                .map_or_else(|_| refused(), Into::into)
-        }
+        Ok(Refusal::CurrentDeleteMarker {
+            version_id,
+            last_modified,
+        }) => HandlerErrorContext::current_delete_marker(
+            ResourceVisibility::Visible,
+            context.key().cloned(),
+            &version_id,
+            last_modified,
+        )
+        .map_or_else(|_| refused(), Into::into),
         Ok(Refusal::VersionedDeleteMarker {
             version_id,
             last_modified,
