@@ -56,6 +56,9 @@ mod multipart_sizing;
 #[path = "crud/multipart_checksums.rs"]
 mod multipart_checksums;
 
+#[path = "crud/multipart_trailer_checksums.rs"]
+mod multipart_trailer_checksums;
+
 #[path = "crud/multipart_versioning.rs"]
 mod multipart_versioning;
 

@@ -36,8 +36,8 @@ use rustfs_gateway::dto::{
 };
 use rustfs_gateway::{
     BucketName, ByteStream, Clock, ETag, ErrorCode, Handler, HandlerError, HandlerErrorContext, HandlerResult, MissingObject,
-    ObjectKey, REGION_MATCH_POLICY, RegionMatchPolicy, RegionSet, Req, ResourceVisibility, Resp, Timestamp, US_EAST_1,
-    UploadIdClaim, collect, normalize_location_constraint, resolve_upload, system_clock,
+    ObjectKey, REGION_MATCH_POLICY, RegionMatchPolicy, RegionSet, Req, ResourceVisibility, Resp, Timestamp, TrailingHeaders,
+    US_EAST_1, UploadIdClaim, collect, normalize_location_constraint, request_checksum, resolve_upload, system_clock,
 };
 use sha2::Sha256;
 use tokio::io::AsyncWriteExt as _;
@@ -466,12 +466,23 @@ fn last_modified(metadata: &std::fs::Metadata) -> Timestamp {
 }
 
 async fn drain(body: Option<ByteStream>) -> Result<Vec<u8>, HandlerError> {
-    let Some(stream) = body else { return Ok(Vec::new()) };
+    drain_with_trailers(body).await.map(|(bytes, _)| bytes)
+}
+
+/// Reads a request body to its end, keeping the trailer section it ended with.
+///
+/// The section is reachable only here, after the last byte: a checksum carried as a trailer is
+/// otherwise indistinguishable from no checksum (rustfs/gateway#929).
+async fn drain_with_trailers(body: Option<ByteStream>) -> Result<(Vec<u8>, TrailingHeaders), HandlerError> {
+    let Some(stream) = body else {
+        return Ok((Vec::new(), TrailingHeaders::empty()));
+    };
     let response = http::Response::new(stream.into_body());
     let collected = collect(response)
         .await
         .map_err(|_| HandlerError::new(ErrorCode::INCOMPLETE_BODY, "the request body did not arrive as it was framed"))?;
-    Ok(collected.body().to_vec())
+    let trailers = TrailingHeaders::from_header_map(collected.trailers().iter().cloned().collect());
+    Ok((collected.body().to_vec(), trailers))
 }
 
 impl Handler<CreateMultipartUpload> for FsBackend {
@@ -536,7 +547,7 @@ impl Handler<UploadPart> for FsBackend {
     async fn call(&self, request: Req<UploadPart>) -> HandlerResult<UploadPart> {
         let input = request.into_input();
         self.require_bucket(input.bucket.as_str()).await?;
-        let bytes = drain(input.body).await?;
+        let (bytes, trailers) = drain_with_trailers(input.body).await?;
         if i64::try_from(bytes.len()).ok() != Some(input.content_length) {
             return Err(HandlerError::new(
                 ErrorCode::INCOMPLETE_BODY,
@@ -544,9 +555,10 @@ impl Handler<UploadPart> for FsBackend {
             ));
         }
         let (upload_id, record) = self.resolve_upload(&input.upload_id, &input.bucket, &input.key)?;
+        let claimed = request_checksum(input.checksum_spec, &trailers)?;
         let checksum_spec = match record.checksum {
-            Some(checksum) => Some(checksum.validate_part(input.checksum_spec, &bytes)?),
-            None => input.checksum_spec,
+            Some(checksum) => Some(checksum.validate_part(claimed, &bytes)?),
+            None => claimed,
         };
         self.store_part(input.bucket.as_str(), &upload_id, input.part_number, &bytes)
             .await?;

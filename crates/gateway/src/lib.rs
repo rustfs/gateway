@@ -239,6 +239,10 @@ pub use rustfs_gateway_core::ops::shared::precondition::{
 // The other half of the range contract. `evaluate_range` stops at a part *selector* because the
 // part table is a fact only the handler has; this is what a backend resolves it with.
 pub use rustfs_gateway_core::ops::shared::part_table::{PartWindow, resolve_part};
+// The checksum a streaming body claimed. A trailer exists only once the body has ended, so only the
+// backend that drained it can ask; this is where it asks, with the header decoder's field rule and
+// the wire layer's refusal of a claim made in both places (rustfs/gateway#929).
+pub use rustfs_gateway_core::ops::shared::trailer_checksum::request_checksum;
 // The upload-id capability. Five multipart operations are handed an id the caller chose to send,
 // and the rule that separates a genuine id from a genuine id *belonging to somebody else* is one
 // comparison that every one of them must make identically — including the part that makes all its
