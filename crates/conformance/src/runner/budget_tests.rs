@@ -403,3 +403,71 @@ fn deadline_expiry_requires_the_exact_clock_outcome_and_measured_wait() {
     assert_eq!(receipt.deadline(), deadline + wait);
     assert_eq!(receipt.observed_at(), deadline + Duration::from_millis(8));
 }
+
+// rustfs/gateway#928: the case clock starts when the first request is dispatched, so the harness's
+// own preparation — however long a loaded host makes it — cannot expire the case before the target
+// is asked anything.
+mod first_dispatch {
+    use super::super::*;
+    use crate::observation::Observation;
+    use std::time::{Duration, Instant};
+
+    struct Recorded {
+        dispatched: Vec<Instant>,
+    }
+
+    impl Sut for Recorded {
+        fn describe(&self) -> String {
+            "records each dispatch".to_owned()
+        }
+        fn prepare(&mut self, _: &str, _: Option<&Value>) -> Result<Captures, SutError> {
+            Ok(Captures::new())
+        }
+        fn exchange(&mut self, _: &ExchangePlan<'_>) -> Result<Observation, SutError> {
+            self.dispatched.push(Instant::now());
+            std::thread::sleep(Duration::from_millis(20));
+            Ok(Observation::response(204, Vec::new(), Vec::new()))
+        }
+    }
+
+    struct NoGoldens;
+    impl GoldenSource for NoGoldens {
+        fn read_golden(&self, relative: &str) -> Result<Vec<u8>, String> {
+            Err(format!("no golden declared: {relative}"))
+        }
+    }
+
+    /// A request large enough that interpolating it — harness work before dispatch — takes longer
+    /// than the whole 1 ms case budget on any host.
+    fn case_with_slow_preparation() -> Case {
+        let mut case = super::super::tests::corpus().cases()[0].clone();
+        let target = format!("/{}", "a".repeat(4 << 20));
+        case.document = Some(
+            crate::toml::parse(&format!(
+                "[case]\ntimeout_ms = 1\n[[exchanges]]\n[exchanges.request]\nmethod = \"GET\"\ntarget = \"{target}\"\n\
+                 [exchanges.expect]\nkind = \"response\"\n[[exchanges]]\n[exchanges.request]\nmethod = \"GET\"\n\
+                 target = \"/\"\n[exchanges.expect]\nkind = \"response\"\n"
+            ))
+            .expect("the fixture parses"),
+        );
+        case
+    }
+
+    /// Negative and positive — preparation is not the target's time: the first request is always
+    /// dispatched, and the target's own 20 ms against a 1 ms budget still fails the case and stops
+    /// the second request.
+    #[test]
+    fn slow_preparation_cannot_expire_the_case_before_the_first_dispatch() {
+        let mut target = Recorded { dispatched: Vec::new() };
+        let outcome = run_case(
+            &case_with_slow_preparation(),
+            &mut target,
+            &RunOptions::default(),
+            &NoGoldens,
+            &mut Vec::new(),
+        );
+        assert_eq!(target.dispatched.len(), 1, "the first request is dispatched, the second is not");
+        assert_eq!(outcome.verdict, Verdict::Failed);
+        assert!(outcome.failures().iter().any(|failure| failure.rule == "runner/timeout"));
+    }
+}

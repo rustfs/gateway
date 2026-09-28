@@ -254,7 +254,10 @@ fn run_case(
         .meta()
         .and_then(|meta| meta.read("caseMeta.timeout_ms"))
         .and_then(Value::as_integer);
-    let started = std::time::Instant::now();
+    // Restarted at the first dispatch: preparing a request is the harness's work, and on a loaded
+    // host it must not expire the case before the target is asked anything (rustfs/gateway#928).
+    let mut started = std::time::Instant::now();
+    let mut dispatched = false;
     // The harness's own waiting, measured where it happens and kept out of the target's budget.
     let mut harness_wait_ms: u64 = 0;
     let mut measured_expiry = None;
@@ -291,6 +294,7 @@ fn run_case(
             .and_then(Value::as_bool)
             .unwrap_or(false);
         if concurrent {
+            started = std::time::Instant::now();
             if let Err(error) = run_concurrent_exchanges(
                 case,
                 sut,
@@ -330,6 +334,10 @@ fn run_case(
                     }
                 };
                 for attempt in 0..exchange.repeat {
+                    if !dispatched {
+                        started = std::time::Instant::now();
+                        dispatched = true;
+                    }
                     if measured_expiry.is_some()
                         || case_deadline(started, timeout_ms, harness_wait_ms).is_some_and(|end| std::time::Instant::now() >= end)
                     {
