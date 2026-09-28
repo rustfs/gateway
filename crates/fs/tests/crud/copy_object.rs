@@ -166,24 +166,25 @@ async fn replace_without_metadata_clears_the_source_map() {
     assert_eq!(header(&fetched, "x-amz-meta-old"), None);
 }
 
+async fn enable_versioning(service: &S3Service, bucket: &str) {
+    create_bucket(service, bucket).await;
+    let document = Bytes::from_static(
+        b"<VersioningConfiguration xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\"><Status>Enabled</Status></VersioningConfiguration>",
+    );
+    let mut checksum = http::HeaderMap::new();
+    checksum.insert("content-md5", http::HeaderValue::from_static("QQFYoy/mRYV9PGZUfFi0Bw=="));
+    let target = format!("/{bucket}?versioning");
+    let enabled = exchange(service, signed_with_headers(http::Method::PUT, &target, document, checksum)).await;
+    assert_eq!(enabled.status(), http::StatusCode::OK, "{}", body(&enabled));
+}
+
 /// Positive — an explicit source version selects historic bytes and is reported separately from
 /// the new destination version.
 #[tokio::test]
 async fn copy_reads_and_reports_the_explicit_source_version() {
     let root = TestRoot::new();
     let (_, service) = service(&root);
-    create_bucket(&service, "versions").await;
-    let document = Bytes::from_static(
-        b"<VersioningConfiguration xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\"><Status>Enabled</Status></VersioningConfiguration>",
-    );
-    let mut checksum = http::HeaderMap::new();
-    checksum.insert("content-md5", http::HeaderValue::from_static("QQFYoy/mRYV9PGZUfFi0Bw=="));
-    let enabled = exchange(
-        &service,
-        signed_with_headers(http::Method::PUT, "/versions?versioning", document, checksum),
-    )
-    .await;
-    assert_eq!(enabled.status(), http::StatusCode::OK, "{}", body(&enabled));
+    enable_versioning(&service, "versions").await;
     let historic = put(&service, "/versions/source", b"historic", &[]).await;
     let historic_id = header(&historic, "x-amz-version-id")
         .expect("an enabled PutObject version")
@@ -207,6 +208,44 @@ async fn copy_reads_and_reports_the_explicit_source_version() {
     let destination_id = header(&copied, "x-amz-version-id").expect("the destination receives its own version");
     assert_ne!(destination_id.to_str().expect("an ASCII version id"), historic_id);
     assert_eq!(get(&service, "/versions/destination").await.body().as_ref(), b"historic");
+}
+
+/// Negative — a copy answers `x-amz-version-id` for the version it wrote, so a source that is a
+/// delete marker is refused with the marker flag and without the marker's id, whether the copy
+/// named the marker or found it current. A read of the same key is the control that does name it.
+#[tokio::test]
+async fn a_delete_marker_source_is_refused_without_naming_the_marker_as_the_copys_version() {
+    let root = TestRoot::new();
+    let (_, service) = service(&root);
+    enable_versioning(&service, "versions").await;
+    assert_eq!(put(&service, "/versions/source", b"bytes", &[]).await.status(), http::StatusCode::OK);
+    let deleted = exchange(&service, signed(http::Method::DELETE, "/versions/source", Bytes::new())).await;
+    let marker = header(&deleted, "x-amz-version-id")
+        .and_then(|value| value.to_str().ok())
+        .expect("a versioned delete mints a marker")
+        .to_owned();
+
+    let read = get(&service, "/versions/source").await;
+    assert_eq!(read.status(), http::StatusCode::NOT_FOUND, "{}", body(&read));
+    assert_eq!(
+        header(&read, "x-amz-version-id").and_then(|value| value.to_str().ok()),
+        Some(marker.as_str())
+    );
+
+    for (source, status) in [
+        (format!("/versions/source?versionId={marker}"), http::StatusCode::METHOD_NOT_ALLOWED),
+        ("/versions/source".to_owned(), http::StatusCode::NOT_FOUND),
+    ] {
+        let copied = copy(&service, &source, "/versions/destination", &[]).await;
+        assert_eq!(copied.status(), status, "{source}: {}", body(&copied));
+        assert_eq!(
+            header(&copied, "x-amz-delete-marker").and_then(|value| value.to_str().ok()),
+            Some("true"),
+            "{source}"
+        );
+        assert!(header(&copied, "x-amz-version-id").is_none(), "{source}: {}", body(&copied));
+    }
+    assert_eq!(get(&service, "/versions/destination").await.status(), http::StatusCode::NOT_FOUND);
 }
 
 /// Negative — COPY onto the same current key changes nothing and must not mint a replacement.

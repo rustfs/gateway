@@ -459,7 +459,7 @@ pub use rustfs_gateway_core::ops::shared::location_constraint::{
     EU_ALIAS, MAX_CONSTRAINT_LEN, RegionMatchPolicy, US_EAST_1, invalid_location_constraint,
     normalize as normalize_location_constraint, resolve as resolve_location_constraint,
 };
-pub use rustfs_gateway_core::{InvalidWireLabel, RedirectTarget, RegionLabel};
+pub use rustfs_gateway_core::{InvalidWireLabel, RedirectTarget, RegionLabel, VersionIdLabel};
 // The policy itself, not just its type. A backend that reaches for `RegionMatchPolicy::Strict`
 // directly has written the deployment's region posture down a second time, and the second copy is
 // the one that will not move when the first does — which is the whole failure mode `ops/shared/`

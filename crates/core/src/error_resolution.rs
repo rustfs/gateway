@@ -27,7 +27,11 @@ use http::StatusCode;
 use rustfs_gateway_types::{BucketName, ETag, ErrorCode, ObjectKey, is_xml_representable};
 
 use crate::ops::shared::bucket_region::{PERMANENT_REDIRECT_MESSAGE, TEMPORARY_REDIRECT_MESSAGE};
-use crate::{CodecError, ErrorDetail, ErrorHeader, HandlerError, HttpDate, RedirectTarget, RegionLabel};
+use crate::{CodecError, ErrorDetail, ErrorHeader, HandlerError, HttpDate, RedirectTarget, RegionLabel, VersionIdLabel};
+
+mod validate;
+
+use validate::{is_contextual, valid_identifier, validate_code, validate_extras, validate_message};
 
 const MAX_CODE_BYTES: usize = 128;
 const MAX_MESSAGE_BYTES: usize = 1024;
@@ -81,7 +85,7 @@ pub enum InvalidErrorContext {
     ContextRequired,
     /// An unknown custom code is not a bounded ASCII identifier.
     InvalidCode,
-    /// A version-specific outcome did not carry a bounded non-empty version id.
+    /// A delete-marker outcome did not carry a non-empty, bounded, visible-ASCII version id.
     InvalidVersionId,
     /// The instant a delete-marker refusal would report cannot be rendered as a `Last-Modified`.
     InvalidLastModified,
@@ -98,7 +102,7 @@ impl fmt::Display for InvalidErrorContext {
         let message = match self {
             Self::ContextRequired => "the error code requires a named resolution context",
             Self::InvalidCode => "the custom error code is not a bounded identifier",
-            Self::InvalidVersionId => "the version id is empty, oversized, or not XML text",
+            Self::InvalidVersionId => "the version id is empty, oversized, or not visible ASCII",
             Self::InvalidLastModified => "the instant is outside the range Last-Modified can express",
             Self::InvalidMessage => "the error message is oversized or not XML text",
             Self::InvalidDetail => "an error detail is malformed or incompatible with its code",
@@ -121,8 +125,9 @@ enum ErrorCase {
     PermanentRedirect(Option<BucketName>, RegionLabel),
     TemporaryRedirect(RegionLabel, RedirectTarget),
     OwnedBucketRecreation,
-    VersionedDeleteMarker(HttpDate),
-    CurrentDeleteMarker(ResourceVisibility, Option<ObjectKey>, HttpDate),
+    /// The marker's version id is `None` once a copy restricted it (`copy_source_marker`).
+    VersionedDeleteMarker(Option<VersionIdLabel>, HttpDate),
+    CurrentDeleteMarker(ResourceVisibility, Option<ObjectKey>, Option<VersionIdLabel>, HttpDate),
     AuthorizationScopeMalformed,
     AuthorizationRegionMismatch(RegionLabel),
     NotModified(ETag),
@@ -234,14 +239,11 @@ impl ErrorContext {
     ///
     /// # Errors
     ///
-    /// [`InvalidErrorContext`] when the version id is empty, oversized or not XML 1.0 text, or
-    /// when the instant falls outside the range `Last-Modified` can express.
+    /// [`InvalidErrorContext`] when the version id is not a [`VersionIdLabel`], or when the instant
+    /// falls outside the range `Last-Modified` can express.
     pub fn versioned_delete_marker(version_id: &str, last_modified: i64) -> Result<Self, InvalidErrorContext> {
-        if version_id.is_empty() || version_id.len() > MAX_KEY_BYTES || !is_xml_representable(version_id) {
-            return Err(InvalidErrorContext::InvalidVersionId);
-        }
-        let at = HttpDate::from_unix_seconds(last_modified).map_err(|_| InvalidErrorContext::InvalidLastModified)?;
-        Ok(Self(ErrorCase::VersionedDeleteMarker(at)))
+        let (version_id, at) = marker_facts(version_id, last_modified)?;
+        Ok(Self(ErrorCase::VersionedDeleteMarker(Some(version_id), at)))
     }
 
     /// A read that named no version found a delete marker as the current version.
@@ -256,16 +258,21 @@ impl ErrorContext {
     /// oracle than the `404` it rides on. A hidden resource is answered `AccessDenied` with no
     /// header and no instant.
     ///
+    /// The version id is validated whatever the visibility, so a hidden refusal is not a way to pass
+    /// one that could not be rendered.
+    ///
     /// # Errors
     ///
-    /// [`InvalidErrorContext`] when the instant falls outside the range `Last-Modified` can express.
+    /// [`InvalidErrorContext`] when the version id is not a [`VersionIdLabel`], or when the instant
+    /// falls outside the range `Last-Modified` can express.
     pub fn current_delete_marker(
         visibility: ResourceVisibility,
         key: Option<ObjectKey>,
+        version_id: &str,
         last_modified: i64,
     ) -> Result<Self, InvalidErrorContext> {
-        let at = HttpDate::from_unix_seconds(last_modified).map_err(|_| InvalidErrorContext::InvalidLastModified)?;
-        Ok(Self(ErrorCase::CurrentDeleteMarker(visibility, key, at)))
+        let (version_id, at) = marker_facts(version_id, last_modified)?;
+        Ok(Self(ErrorCase::CurrentDeleteMarker(visibility, key, Some(version_id), at)))
     }
 
     /// A signing credential named a region other than the bucket's bounded region.
@@ -292,11 +299,23 @@ impl ErrorContext {
         Self(ErrorCase::CorsForbidden)
     }
 
+    /// A marker refusal a copy answers for its source, without the marker's version id: on a copy,
+    /// `x-amz-version-id` names the version the copy wrote. Every other context is unchanged.
+    fn copy_source_marker(self) -> Self {
+        match self.0 {
+            ErrorCase::VersionedDeleteMarker(_, at) => Self(ErrorCase::VersionedDeleteMarker(None, at)),
+            ErrorCase::CurrentDeleteMarker(visibility, key, _, at) => {
+                Self(ErrorCase::CurrentDeleteMarker(visibility, key, None, at))
+            }
+            other => Self(other),
+        }
+    }
+
     fn hide_missing_object(self) -> Self {
         match self.0 {
             ErrorCase::MissingObject(kind, _, _) => Self(ErrorCase::MissingObject(kind, ResourceVisibility::Hidden, None)),
-            ErrorCase::CurrentDeleteMarker(_, _, at) => {
-                Self(ErrorCase::CurrentDeleteMarker(ResourceVisibility::Hidden, None, at))
+            ErrorCase::CurrentDeleteMarker(_, _, _, at) => {
+                Self(ErrorCase::CurrentDeleteMarker(ResourceVisibility::Hidden, None, None, at))
             }
             other => Self(other),
         }
@@ -370,23 +389,25 @@ impl HandlerErrorContext {
     ///
     /// # Errors
     ///
-    /// [`InvalidErrorContext`] when the version id is empty, oversized or not XML 1.0 text, or
-    /// when the instant falls outside the range `Last-Modified` can express.
+    /// [`InvalidErrorContext`] when the version id is not a [`VersionIdLabel`], or when the instant
+    /// falls outside the range `Last-Modified` can express.
     pub fn versioned_delete_marker(version_id: &str, last_modified: i64) -> Result<Self, InvalidErrorContext> {
         ErrorContext::versioned_delete_marker(version_id, last_modified).map(Self)
     }
 
-    /// A read that named no version found a delete marker as the current version.
+    /// A read that named no version found a delete marker, `version_id`, as the current version.
     ///
     /// # Errors
     ///
-    /// [`InvalidErrorContext`] when the instant falls outside the range `Last-Modified` can express.
+    /// [`InvalidErrorContext`] when the version id is not a [`VersionIdLabel`], or when the instant
+    /// falls outside the range `Last-Modified` can express.
     pub fn current_delete_marker(
         visibility: ResourceVisibility,
         key: Option<ObjectKey>,
+        version_id: &str,
         last_modified: i64,
     ) -> Result<Self, InvalidErrorContext> {
-        ErrorContext::current_delete_marker(visibility, key, last_modified).map(Self)
+        ErrorContext::current_delete_marker(visibility, key, version_id, last_modified).map(Self)
     }
 
     /// A read precondition matched the current entity tag.
@@ -397,6 +418,10 @@ impl HandlerErrorContext {
 
     pub(crate) fn into_error_context(self) -> ErrorContext {
         self.0
+    }
+
+    pub(crate) fn copy_source_marker(self) -> Self {
+        Self(self.0.copy_source_marker())
     }
 
     pub(crate) fn hide_missing_object(self) -> Self {
@@ -552,25 +577,26 @@ pub fn resolve(context: ErrorContext, response: ResponseKind) -> ErrorResolution
         // the version is there and this method cannot produce bytes for it; a read that named no
         // version is told the object is not there. Both carry the marker header, because that is
         // the only thing on the wire that separates a deletion from a key that never existed, and
-        // both carry the instant, because a client deciding whether to remove the marker needs it.
-        ErrorCase::VersionedDeleteMarker(at) => ordinary_parts(
+        // both carry the marker's version id and the instant, because a client deciding whether to
+        // remove the marker needs both.
+        ErrorCase::VersionedDeleteMarker(version_id, at) => ordinary_parts(
             ErrorCode::METHOD_NOT_ALLOWED,
             Cow::Borrowed("The specified method is not allowed against this resource."),
-            vec![ErrorHeader::DeleteMarker, ErrorHeader::LastModified { at: at.clone() }],
+            marker_headers(version_id, at),
             Vec::new(),
             None,
         ),
         // A caller who may not list the bucket learns nothing here, not even that the key was once
         // written: the marker header on a 404 would say "a deletion is recorded at this key", which
         // is a sharper existence oracle than the status it rides on.
-        ErrorCase::CurrentDeleteMarker(ResourceVisibility::Hidden, _, _) => ordinary_parts(
+        ErrorCase::CurrentDeleteMarker(ResourceVisibility::Hidden, _, _, _) => ordinary_parts(
             ErrorCode::ACCESS_DENIED,
             Cow::Borrowed("the request is not allowed"),
             Vec::new(),
             Vec::new(),
             None,
         ),
-        ErrorCase::CurrentDeleteMarker(ResourceVisibility::Visible, key, at) => {
+        ErrorCase::CurrentDeleteMarker(ResourceVisibility::Visible, key, version_id, at) => {
             let details = match key {
                 Some(key) if is_xml_representable(key.as_str()) => {
                     vec![ErrorDetail::Key(Cow::Owned(key.as_str().to_owned()))]
@@ -580,7 +606,7 @@ pub fn resolve(context: ErrorContext, response: ResponseKind) -> ErrorResolution
             ordinary_parts(
                 ErrorCode::NO_SUCH_KEY,
                 Cow::Borrowed("The specified key does not exist."),
-                vec![ErrorHeader::DeleteMarker, ErrorHeader::LastModified { at: at.clone() }],
+                marker_headers(version_id, at),
                 details,
                 None,
             )
@@ -650,6 +676,26 @@ fn ordinary_resolution(error: HandlerError, resource: Option<Box<str>>) -> Error
     )
 }
 
+/// The two facts both delete-marker constructors validate, in one place so they cannot disagree.
+fn marker_facts(version_id: &str, last_modified: i64) -> Result<(VersionIdLabel, HttpDate), InvalidErrorContext> {
+    let version_id = VersionIdLabel::new(version_id).map_err(|_| InvalidErrorContext::InvalidVersionId)?;
+    let at = HttpDate::from_unix_seconds(last_modified).map_err(|_| InvalidErrorContext::InvalidLastModified)?;
+    Ok((version_id, at))
+}
+
+/// The head both visible delete-marker refusals carry; a copy's carries no version id.
+fn marker_headers(version_id: Option<VersionIdLabel>, at: HttpDate) -> Vec<ErrorHeader> {
+    let version_id = version_id.map(|version_id| ErrorHeader::VersionId { version_id });
+    [
+        Some(ErrorHeader::DeleteMarker),
+        version_id,
+        Some(ErrorHeader::LastModified { at }),
+    ]
+    .into_iter()
+    .flatten()
+    .collect()
+}
+
 fn ordinary_parts(
     code: ErrorCode,
     message: Cow<'static, str>,
@@ -666,130 +712,5 @@ fn ordinary_parts(
         details,
         etag: None,
         resource,
-    }
-}
-
-fn validate_code(code: &ErrorCode) -> Result<(), InvalidErrorContext> {
-    if code.is_known() || valid_identifier(code.as_str(), MAX_CODE_BYTES, None) {
-        Ok(())
-    } else {
-        Err(InvalidErrorContext::InvalidCode)
-    }
-}
-
-/// A letter, then letters, digits and `also`: an error code admits nothing more, and a codec
-/// refusal's member also admits `_`, because it may name a claimed row's path parameter
-/// (`target_type`, ADR-0024 and ADR-0027).
-fn valid_identifier(value: &str, max: usize, also: Option<u8>) -> bool {
-    if value.is_empty() || value.len() > max || !is_xml_representable(value) {
-        return false;
-    }
-    let mut bytes = value.bytes();
-    bytes.next().is_some_and(|first| first.is_ascii_alphabetic())
-        && bytes.all(|byte| byte.is_ascii_alphanumeric() || Some(byte) == also)
-}
-
-fn validate_message(message: &str) -> Result<(), InvalidErrorContext> {
-    if message.len() <= MAX_MESSAGE_BYTES && is_xml_representable(message) {
-        Ok(())
-    } else {
-        Err(InvalidErrorContext::InvalidMessage)
-    }
-}
-
-fn is_contextual(code: &ErrorCode) -> bool {
-    code == &ErrorCode::NO_SUCH_KEY
-        || code == &ErrorCode::NO_SUCH_VERSION
-        || code == &ErrorCode::NO_SUCH_BUCKET
-        || code == &ErrorCode::PERMANENT_REDIRECT
-        || code == &ErrorCode::TEMPORARY_REDIRECT
-        || code == &ErrorCode::NOT_MODIFIED
-        || code == &ErrorCode::AUTHORIZATION_HEADER_MALFORMED
-        || code == &ErrorCode::METHOD_NOT_ALLOWED
-        || code == &ErrorCode::BUCKET_ALREADY_OWNED_BY_YOU
-        || code == &ErrorCode::ACCESS_FORBIDDEN
-}
-
-fn validate_extras(error: &HandlerError) -> Result<(), InvalidErrorContext> {
-    let code = error.code();
-    let mut range_header = None;
-    let mut range_text = false;
-    let mut actual_size = None;
-
-    for header in error.headers() {
-        match header {
-            ErrorHeader::UnsatisfiedRange { complete_length } => {
-                if code != &ErrorCode::INVALID_RANGE {
-                    return Err(InvalidErrorContext::InvalidDetail);
-                }
-                range_header = Some(*complete_length);
-            }
-            ErrorHeader::RetryAfter { .. } => {
-                if code != &ErrorCode::SLOW_DOWN && code != &ErrorCode::SERVICE_UNAVAILABLE {
-                    return Err(InvalidErrorContext::InvalidDetail);
-                }
-            }
-            // Four facts only resolution may state. A backend that could attach them could
-            // announce a bucket lives elsewhere, or announce a deletion, on any refusal it liked.
-            ErrorHeader::BucketRegion { .. }
-            | ErrorHeader::RedirectLocation { .. }
-            | ErrorHeader::DeleteMarker
-            | ErrorHeader::LastModified { .. } => {
-                return Err(InvalidErrorContext::ReservedExtra);
-            }
-        }
-    }
-
-    for detail in error.details() {
-        match detail {
-            ErrorDetail::Key(text) => {
-                validate_detail_text(text, MAX_KEY_BYTES)?;
-                if code != &ErrorCode::INVALID_OBJECT_STATE {
-                    return Err(InvalidErrorContext::InvalidDetail);
-                }
-            }
-            ErrorDetail::BucketName(text) => {
-                validate_detail_text(text, MAX_BUCKET_BYTES)?;
-                return Err(InvalidErrorContext::ReservedExtra);
-            }
-            ErrorDetail::Condition(text) => {
-                validate_detail_text(text, 32)?;
-                if code != &ErrorCode::PRECONDITION_FAILED
-                    || !matches!(text.as_ref(), "If-Match" | "If-None-Match" | "If-Modified-Since" | "If-Unmodified-Since")
-                {
-                    return Err(InvalidErrorContext::InvalidDetail);
-                }
-            }
-            ErrorDetail::RangeRequested(text) => {
-                validate_detail_text(text, MAX_RANGE_BYTES)?;
-                if code != &ErrorCode::INVALID_RANGE {
-                    return Err(InvalidErrorContext::InvalidDetail);
-                }
-                range_text = true;
-            }
-            ErrorDetail::ActualObjectSize(size) => {
-                if code != &ErrorCode::INVALID_RANGE {
-                    return Err(InvalidErrorContext::InvalidDetail);
-                }
-                actual_size = Some(*size);
-            }
-            ErrorDetail::Region(_) => return Err(InvalidErrorContext::ReservedExtra),
-        }
-    }
-
-    if code == &ErrorCode::INVALID_RANGE {
-        match (range_header, range_text, actual_size) {
-            (Some(header), true, Some(size)) if header == size => {}
-            _ => return Err(InvalidErrorContext::InvalidDetail),
-        }
-    }
-    Ok(())
-}
-
-fn validate_detail_text(text: &str, max: usize) -> Result<(), InvalidErrorContext> {
-    if text.len() <= max && is_xml_representable(text) {
-        Ok(())
-    } else {
-        Err(InvalidErrorContext::InvalidDetail)
     }
 }

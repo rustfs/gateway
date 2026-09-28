@@ -123,7 +123,8 @@ impl Handler<CopyObject> for FsBackend {
         let storage_class = requested_storage_class(input.storage_class.as_ref())?;
         let source_representation = self
             .representation(source.bucket().as_str(), source.key().as_str(), source.version_id())
-            .await?;
+            .await
+            .map_err(HandlerError::as_copy_source_refusal)?;
         // Naming a storage class is itself a change, so a self copy that only moves the object to
         // another class is not refused as a no-op.
         let changes_the_object = metadata_source.changes_the_object() || storage_class.is_some();
