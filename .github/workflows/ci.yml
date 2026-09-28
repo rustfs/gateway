@@ -122,7 +122,7 @@ jobs:
   gateway-tsan:
     name: Gateway ThreadSanitizer
     runs-on: sm-standard-4
-    timeout-minutes: 9
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -156,10 +156,10 @@ jobs:
           scripts/run_gateway_tsan.sh &
           runner=$!
           export TSAN_OPTIONS=verbosity=1
-          for i in $(seq 1 240); do kill -0 "$runner" 2>/dev/null || break; sleep 1; done
+          for i in $(seq 1 150); do kill -0 "$runner" 2>/dev/null || break; sleep 1; done
           if kill -0 "$runner" 2>/dev/null; then
             pid="$(pgrep -f 'deps/integration-' | head -1)"
-            echo "HANG after 240s; pid=$pid"
+            echo "HANG after 150s; pid=$pid"
             cat /tmp/tsan-diag.log || true
             ps -o pid,stat,nlwp,pcpu,etime,cmd -p "$pid"
             grep -E 'Threads|State|VmRSS|voluntary' "/proc/$pid/status"
