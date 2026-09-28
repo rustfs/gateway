@@ -688,6 +688,7 @@ gateway_modules = (
     "ingest_assembly",
     "lifecycle_reachability",
     "lock_encryption_reachability",
+    "macro_scenarios",
     "middleware",
     "monomorphic",
     "naming_policy",
