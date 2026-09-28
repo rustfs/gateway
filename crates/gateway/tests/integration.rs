@@ -86,6 +86,8 @@ mod ingest_assembly;
 mod lifecycle_reachability;
 #[path = "lock_encryption_reachability.rs"]
 mod lock_encryption_reachability;
+#[path = "macro_scenarios.rs"]
+mod macro_scenarios;
 #[path = "middleware.rs"]
 mod middleware;
 #[path = "monomorphic.rs"]

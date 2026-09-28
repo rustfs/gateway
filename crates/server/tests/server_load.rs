@@ -45,6 +45,9 @@ mod isolation;
 #[path = "server_load/per_ip.rs"]
 mod per_ip;
 
+#[path = "server_load/tls_large.rs"]
+mod tls_large;
+
 #[path = "server_load/slow_clients.rs"]
 mod slow_clients;
 
