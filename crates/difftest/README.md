@@ -1,7 +1,7 @@
 # RING 2 — migration-only, deleted with the compat feature
 
 `rustfs-gateway-difftest` compares the gateway with the s3s revision RustFS main links
-(`f3e17541`) as two pure functions (rustfs/backlog#1762): the same raw request bytes decoded by
+(`0.17.0`) as two pure functions (rustfs/backlog#1762): the same raw request bytes decoded by
 both, and the same handler output encoded by both. It
 exists only for the migration from s3s to the gateway and is deleted together with the
 `compat-s3s` feature of `rustfs-gateway-types` (P9-09). It is never published, and nothing that
@@ -9,7 +9,7 @@ ships depends on it.
 
 "Ring 2" names its lifetime and its purpose, not a dependency on RustFS: the workspace ring rule
 admits only ring 0 and 1 under `crates/`, so the manifest declares ring 1, links no RustFS crate,
-and reaches s3s only through the types crate's `compat-s3s-f3e17541` seam.
+and reaches s3s only through the types crate's `compat-s3s-0-17-0` seam.
 
 ## What one decode diff compares
 

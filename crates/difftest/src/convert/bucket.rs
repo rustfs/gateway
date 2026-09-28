@@ -59,7 +59,7 @@ pub(crate) fn head_bucket(output: oracle::HeadBucketOutput) -> Converted<dto::He
 
 /// GetBucketLocation: the production seam RustFS will run.
 pub(crate) fn get_bucket_location(output: oracle::GetBucketLocationOutput) -> Converted<dto::GetBucketLocationOutput> {
-    Ok(rustfs_gateway_types::compat::s3s_f3e17541::get_bucket_location::output_from_s3s(output))
+    Ok(rustfs_gateway_types::compat::s3s_0_17_0::get_bucket_location::output_from_s3s(output))
 }
 
 /// GetBucketVersioning.
