@@ -8,7 +8,7 @@ This bounded implementation supports bucket and version-aware object CRUD, `List
 `DeleteObjects`, browser `POST` Object uploads, `CopyObject`, plus `ListObjects` and
 `ListObjectsV2`, `ListMultipartUploads`, `GetBucketLocation`,
 `GetBucketVersioning`, `PutBucketVersioning`, `ListObjectVersions`, `CreateMultipartUpload`,
-`UploadPart`, `ListParts`, `CompleteMultipartUpload`, `AbortMultipartUpload`, and lifecycle
+`UploadPart`, `UploadPartCopy`, `ListParts`, `CompleteMultipartUpload`, `AbortMultipartUpload`, and lifecycle
 configuration PUT/GET/DELETE plus object tagging GET/PUT/DELETE. Default-encryption
 configuration PUT/GET/DELETE is stored and reported as RustFS answers it, and nothing is
 encrypted: this backend measures the protocol surface, not key management. Object writes record

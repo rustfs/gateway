@@ -27,6 +27,8 @@ mod bucket_encryption;
 mod bucket_policy;
 #[path = "crud/object_encryption.rs"]
 mod object_encryption;
+#[path = "crud/upload_part_copy.rs"]
+mod upload_part_copy;
 #[path = "crud/versioning.rs"]
 mod versioning;
 
@@ -385,7 +387,8 @@ async fn bucket_and_object_crud_runs_through_the_production_registry() {
             "PutObjectAcl",
             "PutObjectTagging",
             "PutPublicAccessBlock",
-            "UploadPart"
+            "UploadPart",
+            "UploadPartCopy"
         ]
     );
     assert_eq!(
