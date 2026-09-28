@@ -477,10 +477,11 @@ launcher_fragments = {
     "runner split": 'let runner = runner_for_request(&arguments);',
     "startup clock": 'Ok(started) => started.as_nanos().to_string()',
     "budget handoff": '.env(STARTED_ENV, started)',
+    "package environment": 'let mut command = Command::new(&cargo); without_package_environment(&mut command);',
     "xtask child": '.args(["run", "--quiet", "--package", "xtask"]).args(runner).arg("--").args(arguments)',
 }
 if not launcher_body or any(compact(fragment) not in launcher_body for fragment in launcher_fragments.values()):
-    fail("the launcher must preserve runner selection, child arguments, and startup recording")
+    fail("the launcher must preserve runner selection, child arguments, package-environment removal, and startup recording")
 dispatches = functions_named("dispatch", syntax, comments_removed)
 expected_full_attribute = compact('#[cfg(feature = "full")]')
 expected_light_attribute = compact('#[cfg(not(feature = "full"))]')
@@ -506,6 +507,7 @@ if len(run_full_functions) != 1 or [compact(attr) for attr in run_full_functions
     fail("xtask must have exactly one light-only full-runner bridge")
 expected_run_full = compact('''
 let mut command = std::process::Command::new(env!("CARGO"));
+nested_cargo::without_package_environment(&mut command);
 command.args(["run", "--quiet", "--package", "xtask", "--features", "full", "--"]);
 if let Some(first) = first {
     command.arg(first);
