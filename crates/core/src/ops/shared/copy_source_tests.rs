@@ -194,3 +194,121 @@ fn more_than_one_span_is_refused() {
     let err = resolve_copy_range(Some("bytes=0-1,5-6"), 100).expect_err("refused");
     assert_eq!(err.code(), &ErrorCode::INVALID_ARGUMENT);
 }
+
+/// The normalized `(bucket, key, version)` one copy member resolved, or the code it refused with.
+type Named = Result<(String, String, Option<String>), ErrorCode>;
+
+/// What each copy operation's input stage made of one header value: the normalized
+/// `(bucket, key, version)` authorization saw and the handler resolves, or the refusal code.
+///
+/// Both members go through their own `prepare_input`, so a rule that reached `CopyObject` and not
+/// `UploadPartCopy` (or the reverse) shows up as the two answers disagreeing.
+fn through_both_members(raw: &str) -> [Named; 2] {
+    use rustfs_gateway_types::dto::{UploadPartCopy, UploadPartCopyInput};
+
+    fn resolve<O>(input: O::Input) -> Named
+    where
+        O: crate::Operation<DerivedResources = CopySourceResources>,
+    {
+        let decoded = prepare_input::<O>(input).map_err(|error| error.code().clone())?;
+        let authorized = authorize_input(decoded, |_| Decision::Allow).expect("authorized");
+        let source = authorized
+            .resources()
+            .source()
+            .resolve(authorized.read_proof())
+            .expect("the proof belongs to this source");
+        Ok((
+            source.bucket().as_str().to_owned(),
+            source.key().as_str().to_owned(),
+            source.version_id().map(str::to_owned),
+        ))
+    }
+
+    [
+        resolve::<CopyObject>(CopyObjectInput {
+            copy_source: raw.to_owned(),
+            ..Default::default()
+        }),
+        resolve::<UploadPartCopy>(UploadPartCopyInput {
+            copy_source: raw.to_owned(),
+            ..Default::default()
+        }),
+    ]
+}
+
+fn named(bucket: &str, key: &str, version: Option<&str>) -> Named {
+    Ok((bucket.to_owned(), key.to_owned(), version.map(str::to_owned)))
+}
+
+/// Positive — rustfs/gateway#926: aws-sdk-dotnet percent-encodes the whole `bucket/key` value,
+/// separator included. A bucket name cannot contain `/`, so the first `/` of the decoded value is
+/// the separator whichever way the client spelled it.
+#[test]
+fn an_encoded_separator_names_the_same_source_as_a_literal_one() {
+    for raw in ["bucket%2Fkey", "/bucket%2Fkey", "bucket%2fkey", "bucket/key", "/bucket/key"] {
+        assert_eq!(
+            through_both_members(raw),
+            [named("bucket", "key", None), named("bucket", "key", None)],
+            "{raw}"
+        );
+    }
+}
+
+/// Positive — a slash after the separator is key bytes however it was spelled: the key an
+/// encoded-separator value names is the key the literal-separator spelling names.
+#[test]
+fn a_slash_after_the_separator_stays_in_the_key_however_it_is_spelled() {
+    for raw in ["bucket/a%2Fc", "bucket%2Fa%2Fc", "bucket%2Fa/c", "/bucket%2F%2Fleading"] {
+        let key = if raw.ends_with("leading") { "/leading" } else { "a/c" };
+        assert_eq!(
+            through_both_members(raw),
+            [named("bucket", key, None), named("bucket", key, None)],
+            "{raw}"
+        );
+    }
+}
+
+/// Positive — the version suffix is still split off the raw value first: an encoded `?` stays key
+/// bytes behind an encoded separator exactly as it does behind a literal one.
+#[test]
+fn an_encoded_separator_does_not_move_the_raw_version_split() {
+    let versioned = named("bucket", "a?b", Some("v1"));
+    assert_eq!(through_both_members("bucket%2Fa%3Fb?versionId=v1"), [versioned.clone(), versioned]);
+    let literal = named("bucket", "a?versionId=v1", None);
+    assert_eq!(through_both_members("bucket%2Fa%3FversionId%3Dv1"), [literal.clone(), literal]);
+}
+
+/// Negative — decoding the separator does not relax any refusal: an empty bucket or key, a value
+/// encoded twice (decoded once, it still names no key), a traversal on either side of an encoded
+/// separator, bytes that are not UTF-8, a control character and a non-version query are all still
+/// `InvalidArgument` from both members.
+#[test]
+fn n_an_encoded_separator_relaxes_no_refusal() {
+    for raw in [
+        "bucket%2F",
+        "/bucket%2F",
+        "%2Fkey",
+        "/%2Fkey",
+        "%2F",
+        "bucket%252Fkey",
+        "%2e%2e%2Fsecret",
+        "bucket%2F..%2F..%2Fetc%2Fpasswd",
+        "bucket%2F%252e%252e%252fsecret",
+        "bucket%2F%FF%FE",
+        "bu%FFcket%2Fkey",
+        "bucket%2Fa%01b",
+        "bucket%2Fkey?notaversion=1",
+        "bucket%2Fkey?versionId=",
+    ] {
+        let refused = Err(ErrorCode::INVALID_ARGUMENT);
+        assert_eq!(through_both_members(raw), [refused.clone(), refused], "{raw}");
+    }
+}
+
+/// Positive — finding the separator never decodes the key: behind an encoded separator the key is
+/// still decoded exactly once, so `%2541` is the three bytes `%41` and not `A`.
+#[test]
+fn a_key_behind_an_encoded_separator_is_decoded_exactly_once() {
+    let once = named("bucket", "a%41", None);
+    assert_eq!(through_both_members("bucket%2Fa%2541"), [once.clone(), once]);
+}
