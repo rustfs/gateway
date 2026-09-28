@@ -24163,6 +24163,46 @@ expect_fail check_client_versions_pinned.sh \
     mut_compat_pin_not_installed \
     'none of its requirements installs that version'
 
+mut_compat_lock_disagrees_with_pin() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+import re
+
+path = Path("compat/drivers/aws-sdk-js/package-lock.json")
+text = path.read_text()
+mutated, count = re.subn(
+    r'("node_modules/@aws-sdk/client-s3": \{\s*"version": )"3\.1141\.0"', r'\1"3.1140.0"', text
+)
+if count != 1:
+    raise SystemExit("lock-file mutation subject is not unique")
+path.write_text(mutated)
+PYEOF
+}
+# A driver program's lock file is the second place its SDK version is written; the two must agree.
+expect_fail check_client_versions_pinned.sh \
+    'a driver program whose lock file builds a different SDK version than the pin' \
+    mut_compat_lock_disagrees_with_pin \
+    'but package-lock.json locks'
+
+mut_compat_lock_pattern_misses() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("compat/drivers/aws-sdk-js/package-lock.json")
+text = path.read_text()
+old = '"node_modules/@aws-sdk/client-s3": {'
+if text.count(old) != 1:
+    raise SystemExit("lock-pattern mutation subject is not unique")
+path.write_text(text.replace(old, '"node_modules/@aws-sdk/client-s3-renamed": {', 1))
+PYEOF
+}
+# A lock pattern that finds nothing proves nothing about what the lock file pins.
+expect_fail check_client_versions_pinned.sh \
+    'a driver program whose lock file no longer names the pinned SDK' \
+    mut_compat_lock_pattern_misses \
+    'matches its lock_pattern 0 time(s)'
+
 mut_compat_second_version_pin() {
     python3 - <<'PYEOF'
 from pathlib import Path
