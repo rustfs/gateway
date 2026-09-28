@@ -14,7 +14,9 @@ fail() {
 
 command -v ruby >/dev/null 2>&1 || fail 'required command is missing: ruby'
 
-ruby -ryaml - "$ROOT" <<'RUBY'
+# -E and the magic comment pin UTF-8 for the script and every file it reads, whatever the host locale.
+ruby -E UTF-8 -ryaml - "$ROOT" <<'RUBY'
+# encoding: utf-8
 root = ARGV.fetch(0)
 template_dir = File.join(root, ".github", "ISSUE_TEMPLATE")
 paths = {

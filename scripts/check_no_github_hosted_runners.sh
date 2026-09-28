@@ -31,7 +31,11 @@ if [[ ! -d "$WORKFLOWS" ]]; then
     exit 1
 fi
 
-mapfile -t workflow_files < <(find "$WORKFLOWS" -maxdepth 1 -type f -name '*.yml' | sort)
+# `while read` rather than `mapfile`: macOS ships bash 3.2, which has no `mapfile`.
+workflow_files=()
+while IFS= read -r workflow; do
+    workflow_files+=("$workflow")
+done < <(find "$WORKFLOWS" -maxdepth 1 -type f -name '*.yml' | sort)
 if [[ "${#workflow_files[@]}" -eq 0 ]]; then
     printf 'ERROR: .github/workflows contains no workflow files\n' >&2
     exit 1
