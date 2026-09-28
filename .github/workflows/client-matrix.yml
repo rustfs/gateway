@@ -55,6 +55,13 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "22"
+      # The self-hosted image gives the runner no write access to /usr/share/dotnet, the action's
+      # default, so the SDK goes into the job's temporary directory.
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        env:
+          DOTNET_INSTALL_DIR: ${{ runner.temp }}/dotnet
+        with:
+          dotnet-version: "8.0.x"
 
       # The pins are read from compat/versions.toml by the installer; nothing here names a version,
       # which is what scripts/check_client_versions_pinned.sh enforces.
