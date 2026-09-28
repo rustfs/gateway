@@ -1196,7 +1196,7 @@
                                 "summary": "The upstream fix that makes unknown request elements a skip rather than an error, which is the behaviour this decoder generates by construction."
                               }
                             ],
-                "cases": ["c-select-restore-0007"]
+                "cases": ["c-select-restore-0007", "c-select-restore-0056"]
               },
               {
                 "id": "q-restore-0008",

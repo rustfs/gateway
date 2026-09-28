@@ -7,7 +7,7 @@ codec_value = "skip"
 mutation_dimension = "unknown_element_policy"
 target = "RestoreObject.RestoreRequest"
 summary = "Unknown elements inside a RestoreRequest are skipped rather than refused."
-cases = ["c-select-restore-0007"]
+cases = ["c-select-restore-0007", "c-select-restore-0056"]
 
 [[evidence]]
 kind = "s3s-issue"
