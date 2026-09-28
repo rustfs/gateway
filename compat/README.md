@@ -92,6 +92,21 @@ Exit codes are `0` no regression, `1` at least one regression, `3` the environme
 broken. The third is not the same as "everything failed": a matrix that cannot reach its server
 must say so rather than record 56 failures and poison the baseline.
 
+## Corpus recording
+
+Every scheduled run also records itself as corpus material, the second corpus source P8-04
+describes: `ci/compat/record_corpus.sh` converts the run's probe records with
+`corpus/tools/from_compat_probe.py`, ingests them with the `corpus` CLI (sanitized, deduplicated,
+refused if any credential survives) into `target/compat/corpus`, verifies that strictly, and
+uploads both with the run's artifact. A full run must record at least one aws-chunked request and
+fails if it does not. Nothing is written into the repository's `corpus/`; refreshing that stays a
+reviewed pull request.
+
+```bash
+cargo build --release -p rustfs-gateway-corpus --bin corpus
+ci/compat/record_corpus.sh --run-dir target/compat --corpus-bin target/release/corpus --require-chunked
+```
+
 ## Files
 
 | File | What it is |
@@ -100,6 +115,7 @@ must say so rather than record 56 failures and poison the baseline.
 | `capabilities.toml` | The operations the system under test registers. Checked against the launcher's own registry before every run. |
 | `scenarios/*.yaml` | Client-independent scenarios, with the wire facts some of them assert. |
 | `drivers/<client>/run.sh` | One client's translation of those scenarios. |
+| `../ci/compat/record_corpus.sh` | Turns a run's probe records into a verified corpus under the run directory. |
 | `known-fail.txt` | Excused failures. Shrinks only. |
 | `matrix.json` | The generated manifest. A protected file: it is an external promise. |
 | `sut/` | The `compat-sut` binary: puts `rustfs-gateway-fs` behind a real socket and records what crossed it. It is the runnable server rustfs/gateway#624 says the workspace lacked. Started through `ci/lib/sut.sh`, the launcher shared with the P8-05 external-suite runner (rustfs/backlog#1764). The matrix also starts its TLS listener (`--tls-port`, `--tls-self-signed`) and hands drivers `COMPAT_TLS_ENDPOINT` and `COMPAT_CA_BUNDLE`; only a scenario a client can express solely over TLS uses them (rustfs/gateway#719). |
