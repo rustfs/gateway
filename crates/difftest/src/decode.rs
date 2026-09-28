@@ -25,7 +25,7 @@
 //!
 //! # Faults
 //!
-//! [`Fault`] breaks the gateway side on purpose, the way a real defect would: a host resolver that
+//! `Fault` breaks the gateway side on purpose, the way a real defect would: a host resolver that
 //! reads every object path as a bucket path (the real route table then picks another operation), a
 //! decoder that takes one body byte more than its framing said, or one member decoded wrongly.
 //! They exist so the negative controls (a-df-0009, a-df-0010, a-df-0003) run against the same
