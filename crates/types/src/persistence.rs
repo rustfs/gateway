@@ -194,10 +194,10 @@ impl fmt::Debug for RedactedKeyId<'_> {
 ///
 /// Its only caller is `crate::compat`, so it is compiled under the same features: ungated it is
 /// dead code in every build without them, which `-D warnings` refuses.
-#[cfg(any(feature = "compat-s3s", feature = "compat-s3s-f3e17541"))]
+#[cfg(any(feature = "compat-s3s", feature = "compat-s3s-0-17-0"))]
 pub(crate) struct RedactedEncryptionRuleBehavior<'a>(pub(crate) &'a EncryptionRuleBehavior);
 
-#[cfg(any(feature = "compat-s3s", feature = "compat-s3s-f3e17541"))]
+#[cfg(any(feature = "compat-s3s", feature = "compat-s3s-0-17-0"))]
 impl fmt::Debug for RedactedEncryptionRuleBehavior<'_> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         let (algorithm, key_id, bucket_key_enabled, blocked) = self.0;
@@ -611,7 +611,7 @@ fn parse_bucket_encryption_rule(
     })
 }
 
-/// Reads the wrapper the way s3s `bdcb6259`/`f3e17541` do: only flattened `EncryptionType`
+/// Reads the wrapper the way s3s `bdcb6259`/`0.17.0` do: only flattened `EncryptionType`
 /// children, each kept as its stored text, and anything else refused.
 fn parse_blocked_encryption_types(
     blocked: &rustfs_gateway_xml::XmlNode,

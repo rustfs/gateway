@@ -47,8 +47,8 @@ use rustfs_gateway_sig::{
     AmzDate, PayloadMode, RegionSet, RequestNow, SigService, SigV4Signer, SigningCredentials, SigningRequest, SigningScope,
 };
 
-use crate::operation_diff::s3s_f3e17541::context::{ACCESS_KEY, ContextRequest, PATH_HOST, REGIONS, SECRET_KEY, amz_date};
-use crate::operation_diff::s3s_f3e17541::harness::block_on;
+use crate::operation_diff::s3s_0_17_0::context::{ACCESS_KEY, ContextRequest, PATH_HOST, REGIONS, SECRET_KEY, amz_date};
+use crate::operation_diff::s3s_0_17_0::harness::block_on;
 use crate::rustfs_admin_proof::same_bytes;
 
 const REGION: &str = "us-east-1";

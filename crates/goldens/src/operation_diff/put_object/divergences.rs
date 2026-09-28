@@ -91,7 +91,7 @@ fn a_put_without_content_length_is_refused_by_the_gateway_and_backfilled_by_s3s(
 
 /// An `Expires` that is not a date: the gateway keeps it opaque under every revision. The baseline
 /// s3s `9c4690d8` holds the member parsed, so it refuses the request and the seam refuses the value
-/// by name. `f3e17541`, the revision RustFS main links, holds the wire text: both stacks hand their
+/// by name. `0.17.0`, the revision RustFS main links, holds the wire text: both stacks hand their
 /// handler the same `never`, and the seam carries it across.
 ///
 /// Ruling: `rd-put-0004`
@@ -100,11 +100,7 @@ fn an_expires_that_is_not_a_date_is_kept_by_the_gateway_and_refused_only_by_the_
     let request = full_request().replace("expires", "never");
     if SEAM_REVISION == OracleRevision::Candidate {
         let diff = run_decode(&request, &request, convert).compared();
-        assert!(
-            diff.differing.is_empty(),
-            "f3e17541 and the seam both keep the text: {:?}",
-            diff.differing
-        );
+        assert!(diff.differing.is_empty(), "0.17.0 and the seam both keep the text: {:?}", diff.differing);
         return;
     }
     let refusal = run_decode(&request, &request, convert).refused();

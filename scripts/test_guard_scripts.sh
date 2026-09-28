@@ -7327,21 +7327,35 @@ mut_floating_s3s_feature() {
 from pathlib import Path
 path = Path("crates/types/Cargo.toml")
 text = path.read_text()
-for old in ('compat-s3s-f3e17541 = [', '"compat-s3s-f3e17541", '):
+for old in ('compat-s3s-0-17-0 = [', '"compat-s3s-0-17-0", '):
     if text.count(old) != 1:
         raise SystemExit(f"{old} is not unique")
-path.write_text(text.replace('compat-s3s-f3e17541 = [', 'compat-s3s-prod = [').replace('"compat-s3s-f3e17541", ', '"compat-s3s-prod", '))
+path.write_text(text.replace('compat-s3s-0-17-0 = [', 'compat-s3s-prod = [').replace('"compat-s3s-0-17-0", ', '"compat-s3s-prod", '))
 PYEOF
 }
 expect_fail check_ring_boundaries.sh \
     'an s3s feature not named after the revision it links' mut_floating_s3s_feature
+
+mut_floating_s3s_release() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/types/Cargo.toml")
+text = path.read_text()
+old = 's3s_candidate = { package = "s3s", version = "0.17.0",'
+if text.count(old) != 1:
+    raise SystemExit(f"{old} is not unique")
+path.write_text(text.replace(old, 's3s_candidate = { package = "s3s", version = "0.17",'))
+PYEOF
+}
+expect_fail check_ring_boundaries.sh \
+    'an s3s release requirement that names no exact version' mut_floating_s3s_release
 
 mut_s3s_feature_outside_umbrella() {
     python3 - <<'PYEOF'
 from pathlib import Path
 path = Path("crates/types/Cargo.toml")
 text = path.read_text()
-old = '"compat-s3s-f3e17541", '
+old = '"compat-s3s-0-17-0", '
 if text.count(old) != 1:
     raise SystemExit(f"{old} is not unique")
 path.write_text(text.replace(old, ""))

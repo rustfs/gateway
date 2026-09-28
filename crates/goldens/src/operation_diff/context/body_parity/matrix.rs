@@ -119,7 +119,7 @@ fn the_seam_carries_an_untrailered_upload_to_the_app_body_unchanged() {
 }
 
 /// Where the trailer handoff stands (rustfs/backlog#1762, rustfs/backlog#1752): no pinned s3s —
-/// the baseline nor f3e17541, the revision RustFS links — lets anything but its own aws-chunked
+/// the baseline nor 0.17.0, the revision RustFS links — lets anything but its own aws-chunked
 /// decoder mint `s3s::TrailingHeaders` (a `pub(crate)` field, filled by the `pub(crate)`
 /// `AwsChunkedStream::trailing_headers_handle`), so `S3Request::trailing_headers` cannot carry the
 /// fields a gateway body ends with. Both halves of the seam refuse rather than drop them: the

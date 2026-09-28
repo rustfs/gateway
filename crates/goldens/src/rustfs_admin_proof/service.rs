@@ -40,7 +40,7 @@ use super::{
     ListAccessKeysLdapBulk, ListAccessKeysOpenidBulk, ListPools, OidcAuthorize, OidcCallback, OidcListProviders, OidcLogout,
     ReplicationMetricsV2, SelfAccountInfo, ServerInfo, ServiceRestart, admin_dialect, json, open, same_bytes, seal,
 };
-use crate::operation_diff::s3s_f3e17541::context::{ACCESS_KEY, REGIONS, SECRET_KEY};
+use crate::operation_diff::s3s_0_17_0::context::{ACCESS_KEY, REGIONS, SECRET_KEY};
 
 // ── the authorizer ────────────────────────────────────────────────────────────────────────────
 

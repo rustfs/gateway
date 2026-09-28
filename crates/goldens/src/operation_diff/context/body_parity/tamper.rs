@@ -19,7 +19,7 @@
 //! Responsible for: pinning, per row, both answers, the bytes each handler was handed before the
 //! refusal (the verified prefix, never a byte of the chunk that failed), that neither handler saw
 //! end of body, and the gateway's connection verdict; and, for the decoded length, the one place
-//! the two revisions differ — the baseline accepts what f3e17541 and the gateway refuse.
+//! the two revisions differ — the baseline accepts what 0.17.0 and the gateway refuse.
 //! NOT responsible for: rows where the stacks disagree (`divergences`).
 //! Upstream: the harness in `super`. Downstream: nothing.
 
@@ -89,7 +89,7 @@ fn a_bad_trailer_signature_is_refused_alike_and_publishes_no_trailer() {
 /// A declared decoded length one byte either side of the body. The gateway refuses both, holding
 /// the handler to the declaration: one short hands it the chunks that fit and refuses the chunk that
 /// would pass it, closing; one long hands it everything and refuses at end of body, with the wire
-/// body complete. f3e17541 answers the same with the same bytes; the baseline accepts both, and one
+/// body complete. 0.17.0 answers the same with the same bytes; the baseline accepts both, and one
 /// short it hands the handler more bytes than its `ContentLength`.
 #[test]
 fn a_decoded_length_that_disagrees_with_the_body_is_refused_by_the_gateway_and_by_the_candidate() {
