@@ -24,14 +24,21 @@ use super::*;
 
 #[path = "observation_tests.rs"]
 mod observation_tests;
+#[path = "path_isolation_tests.rs"]
+mod path_isolation_tests;
 
+/// A directory no other test in this process shares. The clock alone is not unique: macOS reports
+/// microseconds, so parallel cases with one label started in the same microsecond once shared a
+/// root and deleted each other's fixtures.
 fn test_root(label: &str) -> PathBuf {
+    static SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let sequence = SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let nonce = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("test clock must be after the Unix epoch")
         .as_nanos();
-    let root = std::env::temp_dir().join(format!("gateway-{label}-{}-{nonce}", std::process::id()));
-    fs::create_dir_all(&root).expect("test directory must be creatable");
+    let root = std::env::temp_dir().join(format!("gateway-{label}-{}-{nonce}-{sequence}", std::process::id()));
+    fs::create_dir(&root).expect("test directory must be creatable and not already exist");
     root
 }
 
@@ -748,45 +755,4 @@ fn signal_racing_last_completion_cannot_return_success() {
 
     assert!(!survived, "a signal racing the last completion returned success");
     assert_eq!(status.signal(), Some(SIGTERM), "the completion race did not preserve SIGTERM semantics");
-}
-
-#[test]
-fn path_isolation_helper_process() {
-    if std::env::var_os("GATEWAY_PATH_ISOLATION_HELPER").is_none() {
-        return;
-    }
-    let pid_file = PathBuf::from(std::env::var_os("GATEWAY_SIGNAL_PID_FILE").expect("pid file must be provided"));
-    let commands = vec![(
-        "/bin/sh".to_owned(),
-        vec![
-            "-c".to_owned(),
-            format!("/bin/sleep 30 & echo $! > '{}'; wait", pid_file.display()),
-        ],
-        "path-isolated process tree".to_owned(),
-    )];
-    let _ = run(&commands, Path::new("."), Some(Instant::now() + Duration::from_millis(100)));
-}
-
-#[test]
-fn group_termination_does_not_depend_on_path_lookup() {
-    let root = test_root("path-isolation");
-    let pid_file = root.join("grandchild.pid");
-    let mut helper = test_executable("verify::process::tests::path_isolation_helper_process")
-        .env("GATEWAY_PATH_ISOLATION_HELPER", "1")
-        .env("GATEWAY_SIGNAL_PID_FILE", &pid_file)
-        .env("PATH", "/nonexistent")
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .expect("PATH-isolated helper must start");
-    wait_for_file(&pid_file);
-    let _ = helper.wait();
-    let pid = fs::read_to_string(&pid_file).expect("grandchild must publish its pid");
-    let alive = descendant_can_execute(pid.trim());
-    if alive {
-        terminate_pid(pid.trim());
-    }
-    fs::remove_dir_all(root).expect("test directory must be removable");
-
-    assert!(!alive, "PATH isolation bypassed process-group termination");
 }
