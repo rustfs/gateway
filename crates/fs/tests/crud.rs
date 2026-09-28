@@ -47,6 +47,9 @@ mod bucket_location;
 #[path = "crud/multipart_listing.rs"]
 mod multipart_listing;
 
+#[path = "crud/multipart_conditions.rs"]
+mod multipart_conditions;
+
 #[path = "crud/multipart_sizing.rs"]
 mod multipart_sizing;
 
