@@ -11,6 +11,7 @@ import tempfile
 import time
 
 SOURCE = Path(__file__).resolve().parents[1] / "src/bootstrap.rs"
+NESTED_CARGO = Path(__file__).resolve().parents[1] / "src/nested_cargo.rs"
 STAGES = ["toolchain check", "dependency fetch", "pinned model verification",
           "generated artifact verification", "workspace test compilation"]
 
@@ -55,6 +56,8 @@ esac
         }
     }
 }
+#[path = ''' + json.dumps(str(NESTED_CARGO)) + ''']
+mod nested_cargo;
 #[path = ''' + json.dumps(str(SOURCE)) + ''']
 mod bootstrap;
 fn main() -> std::process::ExitCode {

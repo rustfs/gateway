@@ -1806,6 +1806,15 @@ mut_xtask_launcher_timestamp_removed() {
 expect_fail check_xtask_codegen_surface.sh \
     'the launcher no longer recording command startup' mut_xtask_launcher_timestamp_removed
 
+# A nested cargo that inherits the launcher's CARGO_MANIFEST_DIR and CARGO_PKG_* reruns ring's
+# build script and rebuilds ring through xtask inside the feedback budget (rustfs/gateway#897).
+mut_xtask_launcher_leaks_package_environment() {
+    perl -0pi -e 's/\n    without_package_environment\(&mut command\);//' xtask-launcher/src/main.rs
+}
+expect_fail check_xtask_codegen_surface.sh \
+    'the launcher passing its cargo run package variables to the xtask cargo' \
+    mut_xtask_launcher_leaks_package_environment
+
 mut_xtask_verify_ignores_launcher_time() {
     perl -0pi -e 's/        started: started\.and_then\(\|started\| started\.checked_add\(build\.elapsed\)\),\n/        started: None,\n/' xtask/src/verify.rs
 }
