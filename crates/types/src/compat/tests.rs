@@ -40,8 +40,16 @@ fn every_revision_is_the_one_the_manifest_pins() {
             .find(|line| line.starts_with(&format!("{alias} = ")))
             .unwrap_or_else(|| panic!("{alias} must be declared"));
         assert!(line.contains("package = \"s3s\""), "{line}");
-        assert!(line.contains(&format!("git = \"{}\"", oracle.repository())), "{line}");
-        assert!(line.contains(&format!("rev = \"{}\"", oracle.revision())), "{line}");
+        match oracle.repository() {
+            Some(repository) => {
+                assert!(line.contains(&format!("git = \"{repository}\"")), "{line}");
+                assert!(line.contains(&format!("rev = \"{}\"", oracle.revision())), "{line}");
+            }
+            None => {
+                assert!(!line.contains("git = "), "a crates.io release names no git source: {line}");
+                assert!(line.contains(&format!("version = \"{}\"", oracle.revision())), "{line}");
+            }
+        }
         assert!(line.contains("optional = true"), "{line}");
     }
     let revisions = OracleRevision::ALL.map(OracleRevision::revision);
@@ -54,11 +62,11 @@ fn every_revision_is_the_one_the_manifest_pins() {
     );
 }
 
-/// RustFS main's own s3s declaration (rustfs/rustfs@64e0ac08 `Cargo.toml`), the crate the
+/// RustFS main's own s3s declaration (rustfs/rustfs@528a3681 `Cargo.toml`), the crate the
 /// production seam must share with `impl s3s::S3 for FS`.
-const RUSTFS_MAIN_S3S: &str = r#"s3s = { git = "https://github.com/s3s-project/s3s.git", rev = "f3e17541f366696bf0cbaf380fcbd8b44c17eba4", version = "0.15.0", features = ["minio"] }"#;
+const RUSTFS_MAIN_S3S: &str = r#"s3s = { version = "0.17.0", features = ["minio"] }"#;
 
-/// Cargo unifies two git dependencies only when their source, reference and version agree, so the
+/// Cargo unifies two dependencies only when their source and semver-compatible version agree, so the
 /// candidate alias must spell exactly what RustFS main spells, and the production feature must pull
 /// in that alias and nothing from the oracle revisions.
 #[test]
@@ -70,18 +78,18 @@ fn the_production_seam_links_the_very_s3s_rustfs_main_declares() {
         .expect("the candidate alias is declared");
     let theirs = RUSTFS_MAIN_S3S.strip_prefix("s3s = { ").expect("a RustFS dependency line");
     assert_eq!(ours.strip_suffix(", optional = true }"), theirs.strip_suffix(" }"));
-    assert!(RUSTFS_MAIN_S3S.contains(OracleRevision::Candidate.revision()));
-    assert!(RUSTFS_MAIN_S3S.contains(OracleRevision::Candidate.repository()));
+    assert!(RUSTFS_MAIN_S3S.contains(&format!("version = \"{}\"", OracleRevision::Candidate.revision())));
+    assert_eq!(OracleRevision::Candidate.repository(), None, "RustFS main links the crates.io release");
     let feature = manifest
         .lines()
-        .find(|line| line.starts_with("compat-s3s-f3e17541 = "))
+        .find(|line| line.starts_with("compat-s3s-0-17-0 = "))
         .expect("the production feature is declared");
-    assert_eq!(feature, r#"compat-s3s-f3e17541 = ["dep:s3s_candidate", "dep:futures-core"]"#);
+    assert_eq!(feature, r#"compat-s3s-0-17-0 = ["dep:s3s_candidate", "dep:futures-core"]"#);
     let everything = manifest
         .lines()
         .find(|line| line.starts_with("compat-s3s = "))
         .expect("the oracle feature is declared");
-    assert!(everything.contains(r#""compat-s3s-f3e17541""#), "{everything}");
+    assert!(everything.contains(r#""compat-s3s-0-17-0""#), "{everything}");
 }
 
 fn blocked_sse_c() -> PersistedBucketEncryptionConfiguration {
@@ -158,7 +166,7 @@ fn selection_is_restored_after_nesting_and_after_a_panic() {
 fn display_names_role_and_short_revision() {
     assert_eq!(OracleRevision::Baseline.to_string(), "baseline s3s@9c4690d8");
     assert_eq!(OracleRevision::Rollback.to_string(), "rollback s3s@bdcb6259");
-    assert_eq!(OracleRevision::Candidate.to_string(), "candidate s3s@f3e17541");
+    assert_eq!(OracleRevision::Candidate.to_string(), "candidate s3s@0.17.0");
 }
 
 #[test]

@@ -104,9 +104,14 @@ and absence of an observed termination.
 Existing version 1, 2 and 3 cases remain valid without edits. To assert received HTTP/2 controls,
 set `case.schema_version = 4` and add `expect.h2_control_frames`, an exact ordered list such as
 `[{ type = "rst_stream", stream_id = 1, error_code = 8 }]`. An empty list asserts that the observer
-received none of the supported controls; an unavailable observation fails this assertion.
-Numeric error codes preserve unknown wire values. Missing, extra, reordered, or different frames
-fail the comparison.
+received none of the supported controls other than connection-level grants; an unavailable
+observation fails this assertion. Numeric error codes preserve unknown wire values. Missing, extra,
+reordered, or different frames fail the comparison, with one exception: a connection-level
+WINDOW_UPDATE (stream zero). HTTP/2 leaves when a receiver sends WINDOW_UPDATE, and what it grants,
+to the implementation (RFC 9113 section 5.2.1), so whether a peer's grant goes out before a
+connection error depends on when its reader sees the offending frame. Each listed connection-level
+grant must therefore have been received with exactly that increment, wherever it arrived, and an
+unlisted one is not a mismatch. Stream-level WINDOW_UPDATE frames stay in the exact ordered list.
 
 The list covers RST_STREAM, GOAWAY and WINDOW_UPDATE until the selected exchange ends. It does not claim to
 capture every HTTP/2 frame: DATA and headers keep their existing response representation. Other-stream resets are recorded without terminating
@@ -406,9 +411,11 @@ must agree case for case; a case that could name a path would be a case that hid
   lock *enforcement* is later work and no case here asserts it. `restore` marks a case about
   archive retrieval — the four-state status mapping, the `RestoreRequest` document and the
   structured `x-amz-restore` header; how long a retrieval takes is the backend's and no case here
-  asserts it. `select` marks a case about the select request codec; the framed response is not
-  wired, so no case asserts an event stream and the deferral itself is what `event-stream` marks
-  where it appears beside `select`. `acl` marks a case about the access control list family's
+  asserts it. `select` marks a case about the select request codec or its answer, and
+  `event-stream` marks a case that asserts the decoded frames of that answer: each
+  `[[expect.events]]` selects frames by type — `event` messages by `:event-type`, or request-level
+  error frames by `:error-code` when its `headers` name `message-type = "error"` — and asserts
+  counts, a payload and per-frame headers, whose names are written without the leading colon. `acl` marks a case about the access control list family's
   codec — the two input channels, the canned-ACL sets, the grant-header grammar and the `xsi:type`
   discriminator; ACL *evaluation* is the deployment's authorizer's, and no case here asserts that a
   grant permits anything. `naming` marks a case about the single normalisation an object key

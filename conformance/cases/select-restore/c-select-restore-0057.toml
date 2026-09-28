@@ -1,0 +1,43 @@
+[case]
+id = "c-select-restore-0057"
+schema_version = 1
+title = "A select on a key that does not exist is 404 NoSuchKey before any event stream"
+rationale = """
+A missing object is known before anything is streamed, so it is an ordinary error response: a 404 with an XML error document and no event-stream content type. Reporting it as an in-band error inside a 200 would tell a client its request started when it never did, and an SDK retries those two cases differently."""
+polarity = "negative"
+operation = "SelectObjectContent"
+tags = ["select", "event-stream", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-select-event-status-0150", "q-select-0008"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_SelectObjectContent.html"
+summary = "Errors detected before the response begins are returned as ordinary S3 error responses rather than as event-stream messages."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-select"
+
+[[setup.objects]]
+bucket = "conf-select"
+key = "rows.csv"
+body = { utf8 = "a,b\n1,2\n" }
+
+[request]
+method = "POST"
+target = "/conf-select/missing.csv?select&select-type=2"
+headers = { "content-type" = "application/xml" }
+body = { utf8 = '<SelectObjectContentRequest><Expression>SELECT * FROM S3Object</Expression><ExpressionType>SQL</ExpressionType><InputSerialization><CSV/></InputSerialization><OutputSerialization><CSV/></OutputSerialization></SelectObjectContentRequest>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 404
+connection_after = "open"
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.error]
+code = "NoSuchKey"
+request_id_present = true

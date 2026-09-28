@@ -810,7 +810,7 @@
         "h2_control_frames": {
           "type": "array",
           "items": { "$ref": "#/$defs/h2ControlFrame" },
-          "description": "Version 4: the exact ordered list of supported HTTP/2 control frames received before the exchange ended. RST_STREAM, GOAWAY and WINDOW_UPDATE are supported, and from version 5 PING acknowledgements; this is not a list of all received frames. An empty list asserts measured absence of supported controls; an unavailable observation fails even that assertion."
+          "description": "Version 4: the exact ordered list of supported HTTP/2 control frames received before the exchange ended, except connection-level WINDOW_UPDATE grants (stream 0). RST_STREAM, GOAWAY and WINDOW_UPDATE are supported, and from version 5 PING acknowledgements; this is not a list of all received frames. A peer may send a connection-level grant at any time (RFC 9113 section 5.2.1), so each listed grant must have been received with that increment wherever it arrived, and an unlisted one is not a mismatch. An empty list asserts measured absence of the other supported controls; an unavailable observation fails even that assertion."
         },
         "events": {
           "type": "array",

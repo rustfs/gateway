@@ -36,7 +36,7 @@ use super::{
     presigned, signed, templates, unsigned, value_of, wire, with_segment,
 };
 use crate::migration_inventory::rustfs_admin_routes::{AdminAuthMode, RequestBodyUse, ResponseBodyUse};
-use crate::operation_diff::s3s_f3e17541::context::ACCESS_KEY;
+use crate::operation_diff::s3s_0_17_0::context::ACCESS_KEY;
 use crate::rustfs_admin_route_inventory;
 
 const fn request_kind(recorded: RequestBodyUse) -> BodyKind {

@@ -201,13 +201,16 @@ async fn suspension_keeps_opaque_history_and_replaces_null_current() {
     let historic = put(&service, "suspended", "key", b"historic").await;
     let historic_id = header_text(&historic, "x-amz-version-id").expect("an opaque id").to_owned();
     assert_eq!(set_versioning(&service, "suspended", "Suspended").await.status(), 200);
+    // A write into a suspended bucket reports no version id, as RustFS answers it (it reports one
+    // only while versioning is enabled) and as s3-tests expects (rustfs/gateway#1003); the null
+    // version it wrote is still listed below.
     assert_eq!(
         header_text(&put(&service, "suspended", "key", b"null-one").await, "x-amz-version-id"),
-        Some("null")
+        None
     );
     assert_eq!(
         header_text(&put(&service, "suspended", "key", b"null-two").await, "x-amz-version-id"),
-        Some("null")
+        None
     );
     let census = body(&exchange(&service, signed(http::Method::GET, "/suspended?versions", Bytes::new())).await);
     assert_eq!(census.matches("<VersionId>null</VersionId>").count(), 1);
@@ -658,10 +661,9 @@ async fn n_a_delimiter_rolls_versions_below_it_into_common_prefixes() {
     assert_eq!(under_text.matches("<DeleteMarker>").count(), 1, "{under_text}");
 }
 
-/// Negative — a suspended bucket's null version reports `x-amz-version-id: null` on the read as
-/// well as on the write, and a bucket that was never versioned reports no version id on either.
-/// The write already answered `null` from the versioning state; the read answered from the
-/// record's id, which is `null` in both kinds of bucket, so it said nothing where AWS says `null`.
+/// Negative — a suspended bucket's null version reports `x-amz-version-id: null` on the read, and
+/// a bucket that was never versioned reports no version id on either. The write reports none in
+/// both, as RustFS answers it (rustfs/gateway#1003).
 #[tokio::test]
 async fn n_a_suspended_buckets_null_version_reads_back_as_null() {
     let root = TestRoot::new();
@@ -669,10 +671,7 @@ async fn n_a_suspended_buckets_null_version_reads_back_as_null() {
     create_bucket(&service, "null-reads").await;
     assert_eq!(set_versioning(&service, "null-reads", "Enabled").await.status(), 200);
     assert_eq!(set_versioning(&service, "null-reads", "Suspended").await.status(), 200);
-    assert_eq!(
-        header_text(&put(&service, "null-reads", "key", b"body").await, "x-amz-version-id"),
-        Some("null")
-    );
+    assert_eq!(header_text(&put(&service, "null-reads", "key", b"body").await, "x-amz-version-id"), None);
     for method in [http::Method::GET, http::Method::HEAD] {
         let read = exchange(&service, signed(method.clone(), "/null-reads/key", Bytes::new())).await;
         assert_eq!(read.status(), 200, "{method}");

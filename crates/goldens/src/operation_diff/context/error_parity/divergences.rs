@@ -162,10 +162,10 @@ fn a_message_past_1024_bytes_is_cut_only_on_the_gateway() {
     assert_eq!(pair.gateway.message(), whole.get(..1024), "{pair:#?}");
 }
 
-/// Both marker reads cross with the marker flag and the instant on both stacks: the `404` a read
-/// naming no version gets, and the `405` a read naming the marker's version id gets. Only s3s writes
-/// the version id, which the gateway's marker refusals do not carry yet (rustfs/gateway#899). RustFS
-/// today writes no `Last-Modified` on the current-marker `404`, and that error cannot cross.
+/// Both marker reads cross with the marker flag, the marker's version id and the instant on both
+/// stacks: the `404` a read naming no version gets, and the `405` a read naming the marker's version
+/// id gets. RustFS today writes no `Last-Modified` on the current-marker `404`, and that error
+/// cannot cross.
 ///
 /// Ruling: `rd-err-0008`
 #[test]
@@ -195,11 +195,9 @@ fn an_error_carrying_delete_marker_headers_crosses_as_the_marker_read() {
         } else {
             assert_eq!((pair.gateway.code(), pair.oracle.code()), (Some(code), Some(code)), "{pair:#?}");
         }
-        assert_eq!(
-            (pair.gateway.header("x-amz-version-id"), pair.oracle.header("x-amz-version-id")),
-            (None, Some(facts::MARKER_VERSION)),
-            "{pair:#?}"
-        );
+        for reply in [&pair.gateway, &pair.oracle] {
+            assert_eq!(reply.header("x-amz-version-id"), Some(facts::MARKER_VERSION), "{pair:#?}");
+        }
     }
 
     let today = || {

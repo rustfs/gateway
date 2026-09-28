@@ -24,13 +24,14 @@
 //! s3s. Nothing here is linked by a shipping crate; see `README.md` for why this is not an
 //! in-process dual stack.
 //! Upstream: `rustfs-gateway` (assembly), `rustfs-gateway-core` (route table), the
-//! `compat::s3s_f3e17541` seam of `rustfs-gateway-types` (the only path to s3s).
+//! `compat::s3s_0_17_0` seam of `rustfs-gateway-types` (the only path to s3s).
 //! Downstream: this crate's tests and, later, its corpus runners and shadow proxy.
 
 #![deny(missing_docs)]
 #![doc = include_str!("../README.md")]
 
 mod convert;
+pub mod corpus;
 mod fields;
 mod gateway;
 mod oracle;
@@ -44,6 +45,8 @@ pub mod decode;
 pub mod encode;
 pub mod known;
 pub mod normalize;
+pub mod runner;
+pub mod samples;
 
 pub use convert::Unconvertible;
 pub use decode::{BodyDigest, Cmp, DecodeDiff, Differ, FieldDiff, Finding, Item, Priority, S3ErrorView, decode_diff};
@@ -55,7 +58,7 @@ pub use project::{DIFFED_OPERATIONS, OracleOutput};
 pub use request::RawRequest;
 
 /// The s3s revision every oracle answer in this crate comes from: the one RustFS main links.
-use rustfs_gateway_types::compat::s3s_f3e17541::s3s;
+use rustfs_gateway_types::compat::s3s_0_17_0::s3s;
 
 #[cfg(test)]
 mod tests;

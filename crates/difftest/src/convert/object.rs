@@ -34,7 +34,7 @@ use crate::s3s::dto as oracle;
 
 /// PutObject: the production seam RustFS will run.
 pub(crate) fn put_object(output: oracle::PutObjectOutput) -> Converted<dto::PutObjectOutput> {
-    rustfs_gateway_types::compat::s3s_f3e17541::put_object::output_from_s3s(output).map_err(|error| Unconvertible {
+    rustfs_gateway_types::compat::s3s_0_17_0::put_object::output_from_s3s(output).map_err(|error| Unconvertible {
         member: error.field,
         reason: error.reason,
     })

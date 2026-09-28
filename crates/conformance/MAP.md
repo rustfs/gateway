@@ -20,6 +20,7 @@ ADRs; this map only selects files.
 | `src/expect.rs` | Expected observation matching. | A response, stream error or timing assertion is judged wrongly. |
 | `src/expect/h2_control_frames.rs` | Exact ordered comparison of measured HTTP/2 control frames. | A frame assertion must reject missing measurements, wrong fields, or order. |
 | `src/expect/h2_reset_tests.rs` | Exact ordered reset-fact matching and unavailable-observer controls. | A reset expectation could match the wrong stream, code, order, or missing measurement. |
+| `src/expect/h2_grant_tests.rs` | Connection-level WINDOW_UPDATE grants matched by presence and value, apart from ordered controls. | A peer grant's timing fails, or wrongly satisfies, a control-frame assertion. |
 | `src/expect/h2_ping_tests.rs` | PING-acknowledgement and `client_reset` matching. | A PING expectation could match other octets or another ending. |
 | `src/expect/h2_goaway_tests.rs` | Ordered GOAWAY/reset and receive-side probe matching. | A shutdown announcement is confused with observed termination. |
 | `src/expect/events.rs` | Event-stream count and byte-exact payload matching. | An event payload expectation is ignored or misjudged. |

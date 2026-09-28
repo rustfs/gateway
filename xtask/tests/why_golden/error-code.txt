@@ -16,7 +16,9 @@ CASES     c-copy-0025 — A copy source that is an ARN of another service is ref
           c-object-0054 — A PutObject body shorter than Content-Length is refused and remains unreadable
           c-object-0055 — A disconnected PutObject remains unreadable
           c-object-0056 — A stalled PutObject is refused and remains unreadable
+          c-object-0063 — Both delete-marker refusals carry the version id of the marker they found
           c-range-0007 — A read of one part is a 206 that reports how many parts the object has
+          c-select-restore-0057 — A select on a key that does not exist is 404 NoSuchKey before any event stream
           c-tagging-0016 — PutObject with x-amz-tagging carrying a segment without '=' is a 400 and stores nothing
           c-tagging-0024 — A ?tagging request naming a delete marker is a 405, not a NoSuchKey
 ADR       NONE

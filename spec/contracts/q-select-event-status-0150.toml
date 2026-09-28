@@ -7,7 +7,7 @@ contract_value = "success_200"
 mutation_dimension = "select_event_status"
 target = "SelectObjectContent"
 summary = "A successful select event stream uses status 200."
-cases = ["c-select-restore-0035"]
+cases = ["c-select-restore-0035", "c-select-restore-0052", "c-select-restore-0054", "c-select-restore-0057"]
 
 [[evidence]]
 kind = "aws-doc"

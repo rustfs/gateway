@@ -19,8 +19,8 @@
 //! DeleteObjects, CopyObject) — every member set somewhere, a streaming body always the
 //! deterministic placeholder — and the fixtures the other sample file shares.
 //! NOT responsible for: listing, multipart and bucket samples (`outputs_more.rs`), or judging
-//! (`encoding.rs`).
-//! Upstream: the library's sample type. Downstream: `encoding.rs`, `encode_controls.rs`.
+//! (`tests/encoding.rs`).
+//! Upstream: the library's sample type. Downstream: tests, the `encode-diff` runner, fuzzing.
 
 use std::sync::Arc;
 
@@ -30,10 +30,9 @@ use crate::s3s::dto as oracle;
 use crate::{OracleOutput, OutputSample, PLACEHOLDER_LENGTH, RawRequest, placeholder_body};
 
 /// A version id in the shape RustFS mints: a lowercase UUID.
-pub(crate) const VERSION_ID: &str = "0f1e2d3c-4b5a-4978-8796-a5b4c3d2e1f0";
+pub const VERSION_ID: &str = "0f1e2d3c-4b5a-4978-8796-a5b4c3d2e1f0";
 /// An upload id in the shape RustFS mints: unpadded base64url of `<deployment>.<UUID>`.
-pub(crate) const UPLOAD_ID: &str =
-    "ZjNhMWMyZDQtNWU2Zi00YTdiLThjOWQtMGUxZjJhM2I0YzVkLjdjMmU5ZjEwLTNiNGEtNGQ1ZS05ZjYwLTcxODI5M2E0YjVjNg";
+pub const UPLOAD_ID: &str = "ZjNhMWMyZDQtNWU2Zi00YTdiLThjOWQtMGUxZjJhM2I0YzVkLjdjMmU5ZjEwLTNiNGEtNGQ1ZS05ZjYwLTcxODI5M2E0YjVjNg";
 /// A canonical owner id.
 pub(crate) const OWNER_ID: &str = "75aa57f09aa0c8caeab4f8c24e99d10f8e7faeebf76c078efc7c6caea54ba06a";
 
@@ -47,9 +46,12 @@ macro_rules! stamped {
 pub(crate) use stamped;
 
 /// One output sample and the register ids its findings must match, no more and no fewer.
-pub(crate) struct OutputRow {
-    pub(crate) sample: OutputSample,
-    pub(crate) expect: &'static [&'static str],
+#[derive(Clone, Debug)]
+pub struct OutputRow {
+    /// The output and the request it answers.
+    pub sample: OutputSample,
+    /// The register ids its encode diff produces.
+    pub expect: &'static [&'static str],
 }
 
 pub(crate) fn row(
@@ -71,7 +73,10 @@ pub(crate) fn row(
 /// An instant with milliseconds.
 pub(crate) fn at(secs: i64, millis: i64) -> oracle::Timestamp {
     let nanos = i128::from(secs) * 1_000_000_000 + i128::from(millis) * 1_000_000;
-    oracle::Timestamp::from(time::OffsetDateTime::from_unix_timestamp_nanos(nanos).expect("a fixture instant"))
+    oracle::Timestamp::from(
+        time::OffsetDateTime::from_unix_timestamp_nanos(nanos)
+            .unwrap_or_else(|_| unreachable!("every fixture instant is in range")),
+    )
 }
 
 pub(crate) fn etag(tag: &str) -> Option<oracle::ETag> {

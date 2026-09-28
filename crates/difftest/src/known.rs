@@ -19,7 +19,8 @@
 //! `expires`, a malformed date, id or pattern, an unpinned route or outcome entry, or a duplicate
 //! id refuses the whole file); judging a request's findings against it — a finding matched by an
 //! entry is known, a message wording difference is reported as information, and every other
-//! finding fails; and naming the entries whose review date has passed.
+//! finding fails; an entry that names a `when_query` parameter applies only to a request that
+//! carries it; and naming the entries whose review date has passed.
 //! NOT responsible for: finding differences (`decode.rs`), or comparing the entry set with the
 //! base branch's.
 //! Upstream: `known-diffs.toml`. Downstream: tests, corpus runners, the shadow proxy.
@@ -30,6 +31,7 @@ use std::fmt;
 use serde::Deserialize;
 
 use crate::decode::{Finding, Priority};
+use crate::request::RawRequest;
 
 /// The operation of an entry that holds for every operation: allowed only for a decode message
 /// wording entry that pins the gateway's sentence, or an encode entry that pins both sides — one
@@ -81,11 +83,22 @@ pub struct KnownDiff {
     /// The ADR, when the difference is an architecture decision.
     #[serde(default)]
     pub adr: Option<String>,
+    /// A query parameter the request must carry for the entry to apply, such as `x-id`: a
+    /// difference caused by one request feature is accepted only where that feature is, so the
+    /// same finding from a request without it is a new difference.
+    #[serde(default)]
+    pub when_query: Option<String>,
 }
 
 impl KnownDiff {
-    fn matches(&self, finding: &Finding) -> bool {
-        self.kind == finding.kind
+    fn matches(&self, finding: &Finding, query: Option<&[String]>) -> bool {
+        let applies = match (&self.when_query, query) {
+            (None, _) => true,
+            (Some(name), Some(names)) => names.iter().any(|carried| carried == name),
+            (Some(_), None) => false,
+        };
+        applies
+            && self.kind == finding.kind
             && (self.operation == finding.operation || self.operation == ANY_OPERATION)
             && matches_value(&self.item, &finding.item.to_string())
             && self.side_matches(self.gateway.as_deref(), &finding.gateway)
@@ -224,6 +237,14 @@ impl KnownDiffs {
                     entry.id
                 )));
             }
+            if let Some(name) = &entry.when_query
+                && (name.is_empty()
+                    || !name
+                        .bytes()
+                        .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_'))
+            {
+                return Err(RegisterError(format!("{}: when_query {name:?} is not a query parameter name", entry.id)));
+            }
             let any_operation_allowed = match entry.kind {
                 Kind::Decode => entry.item == "error.message" && entry.gateway.is_some(),
                 Kind::Encode => entry.gateway.is_some() && entry.s3s.is_some() && !entry.item.starts_with(ORDER_ITEM),
@@ -260,18 +281,43 @@ impl KnownDiffs {
         self.entries.iter().filter(|entry| entry.expires.as_str() < today).collect()
     }
 
-    /// Judges `findings` against the register.
+    /// Judges `findings` against the register, knowing nothing of the request: an entry with a
+    /// `when_query` never applies.
     #[must_use]
     pub fn verdict(&self, findings: Vec<Finding>) -> Verdict {
+        self.judge(findings, None)
+    }
+
+    /// Judges the findings of `request` against the register.
+    #[must_use]
+    pub fn verdict_for(&self, request: &RawRequest, findings: Vec<Finding>) -> Verdict {
+        self.judge(findings, Some(&query_names(&request.target)))
+    }
+
+    fn judge(&self, findings: Vec<Finding>, query: Option<&[String]>) -> Verdict {
         let mut verdict = Verdict::default();
         for finding in findings {
-            match self.entries.iter().find(|entry| entry.matches(&finding)) {
+            match self.entries.iter().find(|entry| entry.matches(&finding, query)) {
                 Some(entry) => verdict.known.push((finding, entry.id.clone())),
                 None => verdict.failures.push(finding),
             }
         }
         verdict
     }
+}
+
+/// The names of the query parameters in an origin-form target, as sent.
+fn query_names(target: &str) -> Vec<String> {
+    target
+        .split_once('?')
+        .map(|(_, query)| {
+            query
+                .split('&')
+                .filter(|pair| !pair.is_empty())
+                .map(|pair| pair.split_once('=').map_or(pair, |(name, _)| name).to_owned())
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// `YYYY-MM-DD` with a month 1–12 and a day 1–31.

@@ -26,7 +26,7 @@
 //!
 //! # `persisted-doctype` (rustfs/gateway#469)
 //!
-//! Every admitted revision (s3s `9c4690d8`, `bdcb6259`, `f3e17541`) skips a document type
+//! Every admitted revision (s3s `9c4690d8`, `bdcb6259`, `0.17.0`) skips a document type
 //! declaration of any shape before the root: internal subsets with element, entity or parameter
 //! entity declarations, `SYSTEM` and `PUBLIC` external identifiers, a name that is not the root,
 //! and even the lowercase `<!doctype`. It fails only when a declared entity is referenced. The

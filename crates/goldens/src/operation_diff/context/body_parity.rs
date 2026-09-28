@@ -37,7 +37,7 @@
 //!
 //! The s3s handler stands in for a RustFS app body. s3s decodes the body itself but leaves the
 //! answer to a body error to the implementation, so this one answers the code s3s names for it —
-//! `AwsChunkedStreamError::to_s3_error_code` at f3e17541, spelled out in [`oracle_code`] because the
+//! `AwsChunkedStreamError::to_s3_error_code` at 0.17.0, spelled out in [`oracle_code`] because the
 //! baseline has no such method, and the AWS code for a payload digest mismatch, which s3s names
 //! nowhere. The trailer fields are read from the s3s handle the way the RustFS A4 adapter reads
 //! them (`rustfs/src/app/trailer_adapter.rs`, rustfs/backlog#1735): no handle, a handle not yet
@@ -438,7 +438,7 @@ fn handle_state(handle: Option<&s3s::TrailingHeaders>) -> Trailers {
 }
 
 /// The code a RustFS app body answers for an s3s body error, by the variant its `Display` spells:
-/// `AwsChunkedStreamError::to_s3_error_code` at f3e17541 (the baseline has the same variants but
+/// `AwsChunkedStreamError::to_s3_error_code` at 0.17.0 (the baseline has the same variants but
 /// `LengthMismatch`, and no mapping), and the AWS code for `UploadStreamError::Sha256Mismatch`,
 /// for which s3s names none.
 pub(crate) fn oracle_code(variant: &str) -> &'static str {

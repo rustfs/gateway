@@ -121,7 +121,7 @@ use rustfs_gateway::{
     RestoreState, RestoreStatus, SseEnforced, TagScope, TaggingRejection, Timestamp, UploadIdClaim, canonicalize_grantee,
     collect, completion_failure_retains_upload, conditional_write_guards_before_mutation, copy_source_guards_before_target_write,
     copy_source_if_match_miss_proceeds, copy_target_uses_source_validators, encryption_delete_absent_succeeds, evaluate,
-    evaluate_range, format_optional_restore_status, frame_records, object_lock_requires_enabled_bucket, parse_conditional_etag,
+    evaluate_range, format_optional_restore_status, object_lock_requires_enabled_bucket, parse_conditional_etag,
     parse_tagging_header, permanent_redirect_for, refuse_blocked_encryption_type, resolve_copy_range,
     resolve_input as resolve_acl_input, resolve_location_constraint, resolve_part, resolve_upload, select_scan_bytes,
     select_uses_event_stream, validate_accelerate, validate_cors, validate_encryption, validate_legal_hold, validate_lifecycle,
@@ -138,6 +138,7 @@ mod handlers_object;
 mod list_allocations;
 #[cfg(test)]
 mod pagination_properties;
+mod select_answer;
 
 use committed::{ArmedFault, COMPLETE_MULTIPART_UPLOAD, COPY_OBJECT, CommittedFault, head as committed_head};
 pub use committed::{COMMITTED_OPERATIONS, UnreportableFault};
@@ -1773,8 +1774,8 @@ enum Selected<'a> {
     Object(&'a StoredObject),
     /// No version of this key exists.
     Absent,
-    /// The newest version is a delete marker, recorded at this instant in Unix seconds.
-    Deleted(i64),
+    /// The newest version is this delete marker.
+    Deleted(&'a StoredVersion),
 }
 
 impl<'a> Selected<'a> {
@@ -1793,7 +1794,7 @@ fn select_current<'a>(fixture: &'a Fixture, bucket: &str, key: &str) -> Selected
         None => Selected::Absent,
         Some(version) => match version.object.as_ref() {
             Some(object) => Selected::Object(object),
-            None => Selected::Deleted(version.last_modified),
+            None => Selected::Deleted(version),
         },
     }
 }
@@ -1821,11 +1822,11 @@ fn versioned_delete_marker(version_id: &str, last_modified: i64) -> HandlerError
 }
 
 /// The `404` a read with no `versionId` gets when the newest version is a delete marker.
-fn deleted_by_marker(key: &str, last_modified: i64) -> HandlerError {
+fn deleted_by_marker(key: &str, marker: &StoredVersion) -> HandlerError {
     let named = ObjectKey::new(key.to_owned()).ok();
-    HandlerErrorContext::current_delete_marker(ResourceVisibility::Visible, named, last_modified)
+    HandlerErrorContext::current_delete_marker(ResourceVisibility::Visible, named, &marker.version_id, marker.last_modified)
         .map(HandlerError::from)
-        .unwrap_or_else(|_| HandlerError::internal_error("a fixture delete marker has no renderable instant"))
+        .unwrap_or_else(|_| HandlerError::internal_error("a fixture delete marker is not renderable"))
 }
 
 /// `NoSuchKey`, raised only once every condition has been evaluated against the absence.
@@ -2571,7 +2572,7 @@ fn read_copy_source(fixture: &Fixture, source: &CopySource) -> Result<(StoredObj
             .flatten();
         return Ok((object, reported));
     };
-    let object = select_named(fixture, bucket, key, requested)?;
+    let object = select_named(fixture, bucket, key, requested).map_err(HandlerError::as_copy_source_refusal)?;
     Ok((object.clone(), Some(requested.to_owned())))
 }
 
@@ -2674,7 +2675,7 @@ impl Stub {
         let object = match selected {
             Selected::Object(object) => object,
             Selected::Absent => return Err(no_such_key(input.key.as_str())),
-            Selected::Deleted(at) => return Err(deleted_by_marker(input.key.as_str(), at)),
+            Selected::Deleted(marker) => return Err(deleted_by_marker(input.key.as_str(), marker)),
         };
         if condition == ConditionalOutcome::NotModified {
             let e_tag = if condition.includes_selected_etag() {
@@ -2764,7 +2765,7 @@ impl Stub {
         let object = match selected {
             Selected::Object(object) => object,
             Selected::Absent => return Err(no_such_key(input.key.as_str())),
-            Selected::Deleted(at) => return Err(deleted_by_marker(input.key.as_str(), at)),
+            Selected::Deleted(marker) => return Err(deleted_by_marker(input.key.as_str(), marker)),
         };
         let wants_etag = input.object_attributes.iter().any(|attribute| attribute.as_str() == "ETag");
         Ok(Resp::new(dto::GetObjectAttributesOutput {
@@ -2800,7 +2801,7 @@ impl Stub {
         let object = match selected {
             Selected::Object(object) => object,
             Selected::Absent => return Err(no_such_key(input.key.as_str())),
-            Selected::Deleted(at) => return Err(deleted_by_marker(input.key.as_str(), at)),
+            Selected::Deleted(marker) => return Err(deleted_by_marker(input.key.as_str(), marker)),
         };
         if condition == ConditionalOutcome::NotModified {
             let e_tag = if condition.includes_selected_etag() {
@@ -4207,9 +4208,13 @@ impl Stub {
     /// A select query, decoded and validated in full, then answered as a framed event stream.
     ///
     /// This fixture does not evaluate SQL: after validating the opaque expression and the input
-    /// and output descriptions, it emits the stored bytes as one `Records` event, the accounting,
-    /// and `End`. The response path under test is real — the handler returns [`Resp::event_stream`]
-    /// and the same assembled service used by ordinary operations writes it.
+    /// and output descriptions, it emits the scanned bytes as `Records`, the accounting, and `End`
+    /// through [`frame_records`]. Two requests are framed by hand instead, because they need frames
+    /// the adapter does not write: one that enables `RequestProgress` (a keep-alive, the records, a
+    /// `Progress` and then the accounting) and a CSV or JSON scan that is not UTF-8 (the readable
+    /// prefix, then an in-band `InvalidTextEncoding` error and no `End`). The response path under
+    /// test is real — the handler returns [`Resp::event_stream`] and the same assembled service
+    /// used by ordinary operations writes it.
     fn select_object_content(&self, input: &dto::SelectObjectContentInput) -> HandlerResult<dto::SelectObjectContent> {
         let fixture = self.borrow()?;
         require_bucket(&fixture, &input.bucket)?;
@@ -4230,9 +4235,7 @@ impl Stub {
             return Ok(Resp::new(dto::SelectObjectContentOutput::default()));
         }
         let selected = select_scan_bytes(input.scan_range.as_ref(), &body);
-        // Framed lazily by the production adapter: one message per read, never the whole answer.
-        let records = ByteStream::from_bytes(bytes::Bytes::copy_from_slice(selected));
-        Ok(Resp::event_stream(frame_records(records)))
+        Ok(Resp::event_stream(select_answer::answer(input, selected)))
     }
 
     /// Opens a multipart upload, and records the attributes only this request can state.

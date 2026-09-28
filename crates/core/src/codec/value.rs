@@ -589,6 +589,9 @@ const CONTENT_MD5: &str = "content-md5";
 /// upload sends its digest in a trailer and announces it in `x-amz-trailer`, so demanding a header
 /// value would refuse traffic the AWS SDKs consider well formed.
 ///
+/// A view the deployment built [`MetaView::with_integrity_optional`] for is admitted without one:
+/// that is the reviewed client waiver, decided per operation by the assembly, not here.
+///
 /// `x-amz-sdk-checksum-algorithm` deliberately does not satisfy it. It names an algorithm and
 /// carries no digest, so treating it as an integrity check would accept exactly the request this
 /// function exists to refuse.
@@ -597,7 +600,7 @@ const CONTENT_MD5: &str = "content-md5";
 ///
 /// [`CodecError::invalid_request`] naming the header a caller can supply.
 pub fn require_integrity(request: &MetaView<'_>) -> Result<(), CodecError> {
-    if request.header(CONTENT_MD5).is_some() {
+    if request.integrity_optional() || request.header(CONTENT_MD5).is_some() {
         return Ok(());
     }
     if request.headers_with_prefix(CHECKSUM_PREFIX).next().is_some() {

@@ -522,6 +522,159 @@ gateway = "* then an error"
 reason = "The gateway verifies a Content-MD5 or x-amz-checksum-* digest while the handler reads and fails the body at its end when it does not match; s3s hands every byte to RustFS, which verifies the same digest in its own reader and refuses with BadDigest (https://github.com/rustfs/rustfs/blob/719000460b231792b52314df321f0d385d03dff4/rustfs/src/app/object/extract.rs#L1208). Neither stack commits the object."
 expires = "2026-12-31"
 
+# ── Decode: first seen in the corpus, each reproduced by a built-in row ─────────────────────
+
+[[diff]]
+id = "kd-decode-0053"
+kind = "decode"
+operation = "PutBucketVersioning"
+item = "error.code"
+gateway = "InvalidRequest"
+s3s = "MissingRequestBodyError"
+reason = "An empty versioning body with no integrity header: the gateway refuses the missing integrity check first (the operation is in httpChecksumRequired), s3s the missing body; both answer 400."
+expires = "2027-03-31"
+
+[[diff]]
+id = "kd-decode-0054"
+kind = "decode"
+operation = "*"
+item = "error.message"
+gateway = "this operation requires an integrity check on the request body: send Content-MD5 or an x-amz-checksum-* header"
+reason = "The gateway's fixed sentence for a body the model requires an integrity check on; s3s describes its own reason."
+expires = "2027-03-31"
+ruling = "rd-err-0009"
+
+[[diff]]
+id = "kd-decode-0055"
+kind = "decode"
+operation = "PutObject"
+item = "route"
+gateway = "PutObject"
+s3s = "CopyObject"
+reason = "s3s routes by the x-id query hint whenever it names an operation; the gateway routes as AWS does, on the method, path, subresources and headers, and ignores x-id. The two agree whenever the x-id names the operation the rest of the request names; a request whose x-id names another operation reaches a different handler on each stack. The entry applies only to requests carrying x-id."
+expires = "2027-03-31"
+when_query = "x-id"
+
+[[diff]]
+id = "kd-decode-0056"
+kind = "decode"
+operation = "PutObject"
+item = "outcome"
+gateway = "handled"
+s3s = "400 InvalidRequest: missing header: x-amz-copy-source"
+reason = "As kd-decode-0055: s3s dispatched the x-id's CopyObject and refuses it for the missing copy source; the gateway stores the body as the PUT it is."
+expires = "2027-03-31"
+when_query = "x-id"
+
+[[diff]]
+id = "kd-decode-0057"
+kind = "decode"
+operation = "ListObjects"
+item = "route"
+gateway = "ListObjects"
+s3s = "ListObjectsV2"
+reason = "s3s routes by the x-id query hint whenever it names an operation; the gateway routes as AWS does, on the method, path, subresources and headers, and ignores x-id. The two agree whenever the x-id names the operation the rest of the request names; a request whose x-id names another operation reaches a different handler on each stack. The entry applies only to requests carrying x-id. Without list-type=2 the gateway answers a version 1 listing where s3s answers version 2."
+expires = "2027-03-31"
+when_query = "x-id"
+
+[[diff]]
+id = "kd-decode-0058"
+kind = "decode"
+operation = "GetObject"
+item = "route"
+gateway = "GetObject"
+s3s = "GetObjectTagging"
+reason = "s3s routes by the x-id query hint whenever it names an operation; the gateway routes as AWS does, on the method, path, subresources and headers, and ignores x-id. The two agree whenever the x-id names the operation the rest of the request names; a request whose x-id names another operation reaches a different handler on each stack. The entry applies only to requests carrying x-id."
+expires = "2027-03-31"
+when_query = "x-id"
+
+[[diff]]
+id = "kd-decode-0059"
+kind = "decode"
+operation = "GetObject"
+item = "outcome"
+gateway = "handled"
+s3s = "501 NotImplemented: GetObjectTagging is not implemented yet"
+reason = "As kd-decode-0058: s3s dispatched the hinted operation, which the diff does not project, so its recording backend answers 501; the gateway hands the GetObject to its handler."
+expires = "2027-03-31"
+when_query = "x-id"
+
+[[diff]]
+id = "kd-decode-0060"
+kind = "decode"
+operation = "CreateMultipartUpload"
+item = "route"
+gateway = "<none>"
+s3s = "CreateMultipartUpload"
+reason = "s3s routes by the x-id query hint whenever it names an operation; the gateway routes as AWS does, on the method, path, subresources and headers, and ignores x-id. The two agree whenever the x-id names the operation the rest of the request names; a request whose x-id names another operation reaches a different handler on each stack. The entry applies only to requests carrying x-id. A POST to a key without ?uploads names no S3 operation for the gateway."
+expires = "2027-03-31"
+when_query = "x-id"
+
+[[diff]]
+id = "kd-decode-0061"
+kind = "decode"
+operation = "CreateMultipartUpload"
+item = "outcome"
+gateway = "501 NotImplemented: This request does not name any S3 operation.*"
+s3s = "handled"
+reason = "As kd-decode-0060: the gateway refuses a request that names no operation; s3s starts the upload the x-id named."
+expires = "2027-03-31"
+when_query = "x-id"
+
+[[diff]]
+id = "kd-decode-0062"
+kind = "decode"
+operation = "DeleteObject"
+item = "route"
+gateway = "DeleteObject"
+s3s = "<none>"
+reason = "s3s routes by the x-id query hint whenever it names an operation; the gateway routes as AWS does, on the method, path, subresources and headers, and ignores x-id. The two agree whenever the x-id names the operation the rest of the request names; a request whose x-id names another operation reaches a different handler on each stack. The entry applies only to requests carrying x-id. An x-id that names an operation the method cannot reach is refused by s3s before routing."
+expires = "2027-03-31"
+when_query = "x-id"
+
+[[diff]]
+id = "kd-decode-0063"
+kind = "decode"
+operation = "DeleteObject"
+item = "outcome"
+gateway = "handled"
+s3s = "400 InvalidRequest: operation id DeleteObjects is unknown or does not match this request"
+reason = "As kd-decode-0062: s3s refuses the mismatched hint; the gateway deletes the object the request names."
+expires = "2027-03-31"
+when_query = "x-id"
+
+# ── Decode: handwritten s3s-issue entries in the corpus, each reproduced by a built-in row ──
+
+[[diff]]
+id = "kd-decode-0072"
+kind = "decode"
+operation = "GetObject"
+item = "outcome"
+gateway = "400 InvalidArgument: the name is spelled as an absolute or UNC path"
+s3s = "handled"
+reason = "A key spelled as a UNC path (//server/share, from https://github.com/s3s-project/s3s/issues/102) is refused by the gateway's name policy, which protects backends that map keys to paths; s3s hands it to the handler. RustFS stores such a key today; behind the gateway it can no longer be read or written under that spelling."
+expires = "2027-03-31"
+
+[[diff]]
+id = "kd-decode-0073"
+kind = "decode"
+operation = "CopyObject"
+item = "CopyObjectInput.copy_source_if_match"
+gateway = '"5eb63bbbe01eeed093cb22bb8f5acdc3"'
+s3s = '"\"5eb63bbbe01eeed093cb22bb8f5acdc3\""'
+reason = "An entity tag sent without its quotes in x-amz-copy-source-if-match (https://github.com/s3s-project/s3s/issues/448) reaches the gateway handler as sent and the s3s handler as the quoted strong tag it parsed. A RustFS handler that compares the member with a stored quoted ETag as a string sees a different value on each stack; the adapter must compare entity tags, not strings."
+expires = "2027-03-31"
+
+[[diff]]
+id = "kd-decode-0074"
+kind = "decode"
+operation = "PutObject"
+item = "PutObjectInput.content_type"
+gateway = '""'
+s3s = "<unset>"
+reason = "An empty Content-Type header (https://github.com/s3s-project/s3s/issues/361) reaches the gateway handler as an empty content type and the s3s handler as none. RustFS stores no content type today and answers the default; behind the gateway the adapter must treat the empty value as absent or it stores and returns an empty Content-Type."
+expires = "2027-03-31"
+
 # ── Encode: what the gateway writes on every answer ─────────────────────────────────────────
 
 [[diff]]
