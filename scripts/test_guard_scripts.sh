@@ -17482,6 +17482,16 @@ mut_ci_time_workflow_env_overrides_cargo() {
 expect_fail check_ci_time_gate.sh \
     'the workflow environment overriding the required command path' mut_ci_time_workflow_env_overrides_cargo
 
+# A group shared by every main push lets the next merge cancel a pending main run regardless of
+# cancel-in-progress (2026-09-28: fifteen consecutive main runs cancelled).
+mut_ci_time_concurrency_main_shares_group() {
+    replace_ci_text "  group: \${{ github.workflow }}-\${{ github.event_name == 'pull_request' && github.ref || github.sha }}" \
+        '  group: ${{ github.workflow }}-${{ github.ref }}'
+}
+expect_fail check_ci_time_gate.sh \
+    'main pushes sharing one concurrency group so a newer merge cancels the pending run' \
+    mut_ci_time_concurrency_main_shares_group
+
 mut_ci_time_concurrency_cancel_disabled() {
     replace_ci_text "  cancel-in-progress: \${{ github.event_name == 'pull_request' }}" '  cancel-in-progress: false'
 }
@@ -17756,7 +17766,7 @@ expect_fail check_ci_test_split.sh \
     'the third workspace test job being renamed away' mut_ci_third_workspace_job_missing
 
 mut_ci_workspace_command_weakened() {
-    replace_ci_text 'scripts/ci_budget.sh 480 "workspace tests 1/3" cargo test --workspace --exclude rustfs-gateway-conformance --exclude rustfs-gateway --exclude rustfs-gateway-goldens --exclude rustfs-gateway-types --exclude rustfs-gateway-sig' 'scripts/ci_budget.sh 480 "workspace tests 1/3" cargo test -p xtask'
+    replace_ci_text 'scripts/ci_budget.sh 480 "workspace tests 1/3" cargo test --workspace --exclude rustfs-gateway-conformance --exclude rustfs-gateway --exclude rustfs-gateway-goldens --exclude rustfs-gateway-difftest --exclude rustfs-gateway-types --exclude rustfs-gateway-sig' 'scripts/ci_budget.sh 480 "workspace tests 1/3" cargo test -p xtask'
 }
 expect_fail check_ci_test_split.sh \
     'the workspace test job running only one package' mut_ci_workspace_command_weakened
@@ -17775,20 +17785,20 @@ expect_fail check_ci_test_split.sh \
     mut_ci_second_workspace_gateway_prebuild_dropped
 
 mut_ci_third_workspace_command_weakened() {
-    replace_ci_text 'scripts/ci_budget.sh 480 "workspace tests 3/3" bash -c '\''cargo test --package rustfs-gateway-goldens --package rustfs-gateway-types --features rustfs-gateway-types/compat-s3s && cargo test --package rustfs-gateway --package rustfs-gateway-sig'\''' 'scripts/ci_budget.sh 480 "workspace tests 3/3" cargo test -p xtask'
+    replace_ci_text 'scripts/ci_budget.sh 480 "workspace tests 3/3" bash -c '\''cargo test --package rustfs-gateway-goldens --package rustfs-gateway-difftest --package rustfs-gateway-types --features rustfs-gateway-types/compat-s3s && cargo test --package rustfs-gateway --package rustfs-gateway-sig'\''' 'scripts/ci_budget.sh 480 "workspace tests 3/3" cargo test -p xtask'
 }
 expect_fail check_ci_test_split.sh \
     'the third workspace shard running the wrong package' mut_ci_third_workspace_command_weakened
 
 mut_ci_third_workspace_compat_feature_dropped() {
-    replace_ci_text 'scripts/ci_budget.sh 480 "workspace tests 3/3" bash -c '\''cargo test --package rustfs-gateway-goldens --package rustfs-gateway-types --features rustfs-gateway-types/compat-s3s && cargo test --package rustfs-gateway --package rustfs-gateway-sig'\''' 'scripts/ci_budget.sh 480 "workspace tests 3/3" cargo test --package rustfs-gateway-goldens --package rustfs-gateway-types'
+    replace_ci_text 'scripts/ci_budget.sh 480 "workspace tests 3/3" bash -c '\''cargo test --package rustfs-gateway-goldens --package rustfs-gateway-difftest --package rustfs-gateway-types --features rustfs-gateway-types/compat-s3s && cargo test --package rustfs-gateway --package rustfs-gateway-sig'\''' 'scripts/ci_budget.sh 480 "workspace tests 3/3" cargo test --package rustfs-gateway-goldens --package rustfs-gateway-types'
 }
 
 # The move of `rustfs-gateway` out of the shard that ran out of time and into the shard that was
 # never above 4% of its clock is the whole point of the rebalance. A shard 3 that quietly drops it
 # again would leave the gateway package tested nowhere while all three jobs stayed green.
 mut_ci_third_workspace_gateway_package_dropped() {
-    replace_ci_text 'scripts/ci_budget.sh 480 "workspace tests 3/3" bash -c '\''cargo test --package rustfs-gateway-goldens --package rustfs-gateway-types --features rustfs-gateway-types/compat-s3s && cargo test --package rustfs-gateway --package rustfs-gateway-sig'\''' 'scripts/ci_budget.sh 480 "workspace tests 3/3" cargo test --package rustfs-gateway-goldens --package rustfs-gateway-types --features rustfs-gateway-types/compat-s3s'
+    replace_ci_text 'scripts/ci_budget.sh 480 "workspace tests 3/3" bash -c '\''cargo test --package rustfs-gateway-goldens --package rustfs-gateway-difftest --package rustfs-gateway-types --features rustfs-gateway-types/compat-s3s && cargo test --package rustfs-gateway --package rustfs-gateway-sig'\''' 'scripts/ci_budget.sh 480 "workspace tests 3/3" cargo test --package rustfs-gateway-goldens --package rustfs-gateway-difftest --package rustfs-gateway-types --features rustfs-gateway-types/compat-s3s'
 }
 expect_fail check_ci_test_split.sh \
     'the third workspace shard dropping the gateway package the second one handed it' \
@@ -17825,8 +17835,8 @@ expect_fail check_ci_test_split.sh \
     mut_ci_handlers_facade_fixture_moved_before_gateway_prebuild
 
 mut_ci_workspace_failure_swallowed() {
-    replace_ci_text '          scripts/ci_budget.sh 480 "workspace tests 1/3" cargo test --workspace --exclude rustfs-gateway-conformance --exclude rustfs-gateway --exclude rustfs-gateway-goldens --exclude rustfs-gateway-types --exclude rustfs-gateway-sig' \
-        '          scripts/ci_budget.sh 480 "workspace tests 1/3" cargo test --workspace --exclude rustfs-gateway-conformance --exclude rustfs-gateway --exclude rustfs-gateway-goldens --exclude rustfs-gateway-types --exclude rustfs-gateway-sig || true'
+    replace_ci_text '          scripts/ci_budget.sh 480 "workspace tests 1/3" cargo test --workspace --exclude rustfs-gateway-conformance --exclude rustfs-gateway --exclude rustfs-gateway-goldens --exclude rustfs-gateway-difftest --exclude rustfs-gateway-types --exclude rustfs-gateway-sig' \
+        '          scripts/ci_budget.sh 480 "workspace tests 1/3" cargo test --workspace --exclude rustfs-gateway-conformance --exclude rustfs-gateway --exclude rustfs-gateway-goldens --exclude rustfs-gateway-difftest --exclude rustfs-gateway-types --exclude rustfs-gateway-sig || true'
 }
 expect_fail check_ci_test_split.sh \
     'the workspace test job swallowing a failure or timeout' mut_ci_workspace_failure_swallowed
@@ -24591,6 +24601,42 @@ expect_fail check_corpus_provenance.sh \
     'a client-matrix source with no pinned revision' \
     mut_corpus_unpinned_client_source \
     'no pinned revision'
+
+mut_corpus_uncited_s3s_issue() {
+    python3 - <<'PYEOF'
+import json
+from pathlib import Path
+
+path = Path("corpus/object/PutObject.jsonl")
+lines = path.read_text().splitlines()
+entry = json.loads(lines[0])
+entry["src"] = "handwritten:s3s-issues#999999"
+lines[0] = json.dumps(entry, separators=(",", ":"))
+path.write_text("\n".join(lines) + "\n")
+PYEOF
+}
+expect_fail check_corpus_provenance.sh \
+    'an issue-derived entry naming an issue no conformance case cites' \
+    mut_corpus_uncited_s3s_issue \
+    'no conformance case cites'
+
+mut_corpus_unnumbered_s3s_issue() {
+    python3 - <<'PYEOF'
+import json
+from pathlib import Path
+
+path = Path("corpus/object/PutObject.jsonl")
+lines = path.read_text().splitlines()
+entry = json.loads(lines[0])
+entry["src"] = "handwritten:s3s-issues"
+lines[0] = json.dumps(entry, separators=(",", ":"))
+path.write_text("\n".join(lines) + "\n")
+PYEOF
+}
+expect_fail check_corpus_provenance.sh \
+    'an issue-derived entry that names no issue' \
+    mut_corpus_unnumbered_s3s_issue \
+    'not on the allowlist'
 
 mut_corpus_allowlist_emptied() {
     python3 - <<'PYEOF'

@@ -58,7 +58,7 @@
     {
       "if": {
         "allOf": [
-          { "properties": { "case": { "properties": { "schema_version": { "const": 4 } } } } },
+          { "properties": { "case": { "properties": { "schema_version": { "enum": [4, 5] } } } } },
           {
             "anyOf": [
               {
@@ -140,7 +140,28 @@
       "then": {
         "properties": {
           "case": {
-            "properties": { "schema_version": { "enum": [2, 3, 4] } }
+            "properties": { "schema_version": { "enum": [2, 3, 4, 5] } }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "case": { "properties": { "schema_version": { "enum": [1, 2, 3, 4] } } }
+        }
+      },
+      "then": {
+        "properties": {
+          "request": { "$ref": "#/$defs/requestWithoutPing" },
+          "expect": { "$ref": "#/$defs/expectWithoutPing" },
+          "exchanges": {
+            "items": {
+              "properties": {
+                "request": { "$ref": "#/$defs/requestWithoutPing" },
+                "expect": { "$ref": "#/$defs/expectWithoutPing" }
+              }
+            }
           }
         }
       }
@@ -165,6 +186,19 @@
   ],
 
   "$defs": {
+    "requestWithoutPing": {
+      "description": "Versions 1-4: no authored ping frame.",
+      "properties": {
+        "h2_frames": { "items": { "properties": { "type": { "not": { "const": "ping" } } } } }
+      }
+    },
+    "expectWithoutPing": {
+      "description": "Versions 1-4: no received ping control frame and no client_reset outcome.",
+      "properties": {
+        "kind": { "not": { "const": "client_reset" } },
+        "h2_control_frames": { "items": { "properties": { "type": { "not": { "const": "ping" } } } } }
+      }
+    },
     "caseMeta": {
       "type": "object",
       "additionalProperties": false,
@@ -176,8 +210,8 @@
           "description": "c-<domain>-<NNNN>. The domain segment must equal the directory the file lives in, and the file must be named <id>.toml."
         },
         "schema_version": {
-          "enum": [1, 2, 3, 4],
-          "description": "Version 1 is the original frozen format. Version 2 adds connection.concurrent. Version 3 adds request.content_md5. Version 4 adds expect.h2_control_frames and kind stream_reset. A runner MUST reject a case whose schema_version it does not know, with an explicit 'update the runner' error - never by ignoring unknown fields."
+          "enum": [1, 2, 3, 4, 5],
+          "description": "Version 1 is the original frozen format. Version 2 adds connection.concurrent. Version 3 adds request.content_md5. Version 4 adds expect.h2_control_frames and kind stream_reset. Version 5 adds the authored h2 frame type ping, the received control frame type ping (an acknowledgement), and kind client_reset. A runner MUST reject a case whose schema_version it does not know, with an explicit 'update the runner' error - never by ignoring unknown fields."
         },
         "title": { "type": "string", "minLength": 4, "maxLength": 120 },
         "rationale": {
@@ -651,7 +685,7 @@
       "additionalProperties": false,
       "required": ["type"],
       "properties": {
-        "type": { "enum": ["headers", "continuation", "data", "rst_stream", "window_update", "settings", "priority", "goaway", "raw"] },
+        "type": { "enum": ["headers", "continuation", "data", "rst_stream", "window_update", "settings", "priority", "goaway", "ping", "raw"] },
         "stream_id": { "type": "integer", "minimum": 0 },
         "flags": { "type": "array", "items": { "type": "string" } },
         "payload_hex": { "type": "string", "pattern": "^([0-9a-fA-F]{2})*$" },
@@ -727,8 +761,8 @@
       "required": ["kind"],
       "properties": {
         "kind": {
-          "enum": ["response", "stream_error", "event_stream", "hang", "connection_reset", "stream_reset"],
-          "description": "response: a complete response, success or error, head and body intact. stream_error: the operation failed AFTER the response head was committed - either an error document inside a success status, or an abrupt end of the body. event_stream: a framed event sequence. hang: no complete response was observed by the case deadline. Versions 1-3 reserve this expectation for documented foreign-implementation defects. Version 4 additionally permits bounded scripted HTTP/2 incompletion, with an explicit positive case.timeout_ms and a measured deadline-expiry receipt. Other expectations remain independently checked. connection_reset: the exchange ended without a complete response; this legacy outcome includes EOF and does not establish a TCP reset. stream_reset: the selected HTTP/2 stream received RST_STREAM before a response head; this does not imply a TCP reset."
+          "enum": ["response", "stream_error", "event_stream", "hang", "connection_reset", "stream_reset", "client_reset"],
+          "description": "response: a complete response, success or error, head and body intact. stream_error: the operation failed AFTER the response head was committed - either an error document inside a success status, or an abrupt end of the body. event_stream: a framed event sequence. hang: no complete response was observed by the case deadline. Versions 1-3 reserve this expectation for documented foreign-implementation defects. Version 4 additionally permits bounded scripted HTTP/2 incompletion, with an explicit positive case.timeout_ms and a measured deadline-expiry receipt. Other expectations remain independently checked. connection_reset: the exchange ended without a complete response; this legacy outcome includes EOF and does not establish a TCP reset. stream_reset: the selected HTTP/2 stream received RST_STREAM before a response head; this does not imply a TCP reset. client_reset (version 5): the client reset the selected HTTP/2 stream with an authored RST_STREAM, and the acknowledgement of a PING authored after it arrived, so the peer processed the reset before the observation ended; status and body are what arrived before that acknowledgement."
         },
         "stream_termination": {
           "enum": ["error_document", "abrupt_close", "reset", "trailer_error"],
@@ -776,7 +810,7 @@
         "h2_control_frames": {
           "type": "array",
           "items": { "$ref": "#/$defs/h2ControlFrame" },
-          "description": "Version 4: the exact ordered list of supported HTTP/2 control frames received before the exchange ended, except connection-level WINDOW_UPDATE grants (stream 0). RST_STREAM, GOAWAY and WINDOW_UPDATE are supported; this is not a list of all received frames. A peer may send a connection-level grant at any time (RFC 9113 section 5.2.1), so each listed grant must have been received with that increment wherever it arrived, and an unlisted one is not a mismatch. An empty list asserts measured absence of the other supported controls; an unavailable observation fails even that assertion."
+          "description": "Version 4: the exact ordered list of supported HTTP/2 control frames received before the exchange ended, except connection-level WINDOW_UPDATE grants (stream 0). RST_STREAM, GOAWAY and WINDOW_UPDATE are supported, and from version 5 PING acknowledgements; this is not a list of all received frames. A peer may send a connection-level grant at any time (RFC 9113 section 5.2.1), so each listed grant must have been received with that increment wherever it arrived, and an unlisted one is not a mismatch. An empty list asserts measured absence of the other supported controls; an unavailable observation fails even that assertion."
         },
         "events": {
           "type": "array",
@@ -860,6 +894,27 @@
           }
         },
         {
+          "if": { "properties": { "kind": { "const": "client_reset" } }, "required": ["kind"] },
+          "then": {
+            "required": ["h2_control_frames"],
+            "properties": {
+              "stream_termination": false,
+              "body_bytes_before_error": false,
+              "h2_control_frames": {
+                "minItems": 1,
+                "not": {
+                  "items": {
+                    "not": {
+                      "required": ["type"],
+                      "properties": { "type": { "const": "ping" } }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
           "if": { "properties": { "kind": { "const": "response" } }, "required": ["kind"] },
           "then": { "required": ["status"] }
         },
@@ -879,12 +934,17 @@
       "additionalProperties": false,
       "required": ["type"],
       "properties": {
-        "type": { "enum": ["rst_stream", "goaway", "window_update"] },
+        "type": { "enum": ["rst_stream", "goaway", "window_update", "ping"] },
         "stream_id": { "type": "integer", "minimum": 0, "maximum": 2147483647 },
         "last_stream_id": { "type": "integer", "minimum": 0, "maximum": 2147483647 },
         "error_code": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
         "increment": { "type": "integer", "minimum": 1, "maximum": 2147483647 },
-        "error_code_any_of": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "integer", "minimum": 0, "maximum": 4294967295 } }
+        "error_code_any_of": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "integer", "minimum": 0, "maximum": 4294967295 } },
+        "payload_hex": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{16}$",
+          "description": "Version 5, ping only: the eight opaque octets of a received PING acknowledgement."
+        }
       },
       "oneOf": [
         {
@@ -894,7 +954,8 @@
             "stream_id": { "minimum": 1 },
             "last_stream_id": false,
             "error_code_any_of": false,
-            "increment": false
+            "increment": false,
+            "payload_hex": false
           }
         },
         {
@@ -903,12 +964,17 @@
             { "required": ["error_code"], "properties": { "error_code_any_of": false } },
             { "required": ["error_code_any_of"], "properties": { "error_code": false } }
           ],
-          "properties": { "type": { "const": "goaway" }, "stream_id": false, "increment": false }
+          "properties": { "type": { "const": "goaway" }, "stream_id": false, "increment": false, "payload_hex": false }
         },
         {
           "required": ["stream_id", "increment"],
           "properties": { "type": { "const": "window_update" }, "last_stream_id": false,
-            "error_code_any_of": false, "error_code": false }
+            "error_code_any_of": false, "error_code": false, "payload_hex": false }
+        },
+        {
+          "required": ["payload_hex"],
+          "properties": { "type": { "const": "ping" }, "stream_id": false, "last_stream_id": false,
+            "error_code": false, "error_code_any_of": false, "increment": false }
         }
       ]
     },

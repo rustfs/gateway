@@ -55,7 +55,7 @@ h2_control_frames = [{ type = "rst_stream", stream_id = 1, error_code = 8 }]
 
 #[test]
 fn version_four_accepts_reset_facts_in_single_and_multi_exchange_forms() {
-    assert_eq!(super::SCHEMA_VERSION, 4);
+    assert_eq!(super::SCHEMA_VERSION, 5);
     assert_eq!(super::MIN_SCHEMA_VERSION, 1);
     for multiple in [false, true] {
         let found = violations(4, RESET, multiple);

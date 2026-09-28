@@ -12,19 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Client-authored HTTP/2 control frames: RST_STREAM, GOAWAY, PRIORITY and literal `raw` frames.
+//! Client-authored HTTP/2 control frames: RST_STREAM, GOAWAY, PRIORITY, PING and literal `raw` frames.
 //! Responsible for: turning one declared control frame into the exact envelope the writer sends —
 //! an error-code name into its RFC 9113 section 7 number, a GOAWAY error code into its eight-octet
 //! payload, and a `raw` frame's octets into the envelope they already spell — and refusing, by
 //! name, every declaration that would leave a field unsent or make the writer's stream and credit
-//! accounting guess.
+//! accounting guess. It also names the reset barrier: the PING whose acknowledgement shows the peer
+//! processed a client RST_STREAM of the selected stream.
 //! NOT responsible for: writing frames, reading the peer's reaction, or deciding what a peer ought
 //! to do; `super::duplex` writes, `super::Receiver` observes, and the case asserts.
-//! Upstream: `super::envelope`. Downstream: `super::Envelope`.
+//! Upstream: `super::envelope` and `super::compile`. Downstream: `super::Envelope`.
 
 use super::{
-    CONTINUATION, DATA, Envelope, FRAME_HEADER_LEN, GOAWAY, H2Frame, HEADERS, PRIORITY, RST_STREAM, SETTINGS, SutError,
-    WINDOW_UPDATE, declared_stream, refused, within_frame_length,
+    ACK, CONTINUATION, DATA, Envelope, FRAME_HEADER_LEN, GOAWAY, H2Frame, HEADERS, PING, PRIORITY, RST_STREAM, SETTINGS,
+    SutError, WINDOW_UPDATE, declared_stream, refused, within_frame_length,
 };
 
 /// The RFC 9113 section 7 error-code registry, by the names the RFC gives them.
@@ -51,7 +52,7 @@ const TYPED_ONLY: &[u8] = &[DATA, HEADERS, SETTINGS, WINDOW_UPDATE, CONTINUATION
 
 /// Whether this module owns the declared frame type.
 pub(super) fn owns(kind: &str) -> bool {
-    matches!(kind, "rst_stream" | "goaway" | "priority" | "raw")
+    matches!(kind, "rst_stream" | "goaway" | "priority" | "ping" | "raw")
 }
 
 /// The error-code number an authored `error_code` names: a registered name, or `0x` followed by
@@ -75,6 +76,9 @@ fn error_code(index: usize, spelling: &str) -> Result<u32, SutError> {
 /// Compiles one owned control frame into its envelope.
 pub(super) fn envelope(index: usize, frame: &H2Frame) -> Result<Envelope, SutError> {
     let kind = frame.kind.as_str();
+    if kind == "ping" {
+        return ping(index, frame);
+    }
     if !frame.flags.is_empty() {
         return Err(refused(format!(
             "`h2_frames[{index}].flags` is declared on a {kind} frame, which defines no flags this writer sets; \
@@ -128,6 +132,37 @@ pub(super) fn envelope(index: usize, frame: &H2Frame) -> Result<Envelope, SutErr
     })
 }
 
+/// A PING, answered or not: stream zero unless declared, the literal payload, and the `ack` flag.
+fn ping(index: usize, frame: &H2Frame) -> Result<Envelope, SutError> {
+    let mut flags = 0;
+    for name in &frame.flags {
+        if name != "ack" {
+            return Err(refused(format!("`h2_frames[{index}].flags` names `{name}`, which is not a ping flag")));
+        }
+        flags |= ACK;
+    }
+    if frame.error_code.is_some() || frame.increment.is_some() {
+        return Err(refused(format!(
+            "`h2_frames[{index}]` is a ping frame; error_code and increment belong to other frame types"
+        )));
+    }
+    if !frame.payload_declared {
+        return Err(refused(format!(
+            "`h2_frames[{index}]` is a ping frame with no payload_hex; its opaque octets are what the \
+             acknowledgement must echo"
+        )));
+    }
+    let stream_id = declared_stream(index, frame, true)?;
+    within_frame_length(index, frame)?;
+    Ok(Envelope {
+        frame_type: PING,
+        flags,
+        stream_id,
+        payload: frame.payload.clone(),
+        delay_ms: frame.delay_ms,
+    })
+}
+
 /// A `raw` frame is one complete frame, header included, written octet for octet.
 fn raw(index: usize, frame: &H2Frame) -> Result<Envelope, SutError> {
     if frame.stream_id.is_some() || frame.error_code.is_some() {
@@ -170,4 +205,42 @@ fn raw(index: usize, frame: &H2Frame) -> Result<Envelope, SutError> {
         payload: payload.to_vec(),
         delay_ms: frame.delay_ms,
     })
+}
+
+/// The PING whose acknowledgement shows the peer processed a client reset of the selected stream:
+/// the last typed, eight-octet, unacknowledged, stream-zero PING written after the last well-formed
+/// (four-octet) RST_STREAM of that stream. Typed PING is a version-5 construct, so a version-4
+/// script, which can only spell PING as `raw`, never has a barrier.
+pub(super) fn reset_barrier(frames: &[H2Frame], envelopes: &[Envelope], stream_id: u32) -> Result<Option<Vec<u8>>, SutError> {
+    let is_probe = |envelope: &Envelope| {
+        envelope.frame_type == PING && envelope.flags & ACK == 0 && envelope.stream_id == 0 && envelope.payload.len() == 8
+    };
+    let Some(reset) = envelopes.iter().rposition(|envelope| {
+        envelope.frame_type == RST_STREAM && envelope.stream_id == stream_id && envelope.payload.len() == 4
+    }) else {
+        return Ok(None);
+    };
+    let Some(barrier) = envelopes
+        .iter()
+        .zip(frames)
+        .skip(reset + 1)
+        .rev()
+        .find(|(envelope, frame)| frame.kind == "ping" && is_probe(envelope))
+        .map(|(envelope, _)| envelope)
+    else {
+        return Ok(None);
+    };
+    if envelopes
+        .iter()
+        .filter(|envelope| is_probe(envelope) && envelope.payload == barrier.payload)
+        .count()
+        > 1
+    {
+        return Err(refused(
+            "two authored PING frames carry the opaque octets of the PING after the client reset, so an \
+             acknowledgement could not say which one the peer answered"
+                .to_owned(),
+        ));
+    }
+    Ok(Some(barrier.payload.clone()))
 }

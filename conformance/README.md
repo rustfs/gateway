@@ -160,11 +160,27 @@ always spells its five-octet payload. None of the four accept `flags` or `increm
 `payload_hex` is one complete frame, header included, whose declared length must equal the octets
 that follow; it takes no `stream_id` or `error_code`, keeps the reserved stream-identifier bit as
 written, and may not spell DATA, HEADERS, SETTINGS, WINDOW_UPDATE or CONTINUATION, whose typed forms
-drive the runner's stream and credit accounting. PING, unknown extension types and deliberately
-unusual flags are written as `raw` frames. A client reset of the selected stream is not an end
-condition: nothing on the wire says the peer has processed it, so the observation still ends only on
-a peer fact or the deadline. When an authored violation follows the peer's initial grant, delay it
-so the grant's arrival order is not left to scheduling.
+drive the runner's stream and credit accounting. Unknown extension types and deliberately unusual
+flags are written as `raw` frames. When an authored violation follows the peer's initial grant,
+delay it so the grant's arrival order is not left to scheduling.
+
+Version 5 adds three things. An authored `ping` frame defaults to stream zero, accepts only the
+`ack` flag, and always spells its `payload_hex`, written literally. A received PING acknowledgement
+is recorded in `h2_control_frames` as `{ type = "ping", payload_hex = "<eight octets>" }`; a peer's
+own PING without ACK is read and neither recorded nor answered. Acknowledgements are recorded only
+for scripts that author a typed `ping`, so a version-4 script, which can spell PING only as `raw`,
+keeps its version-4 control-frame list. And `expect.kind = "client_reset"`
+names the one way a client reset of the selected stream becomes observable: a well-formed
+(four-octet) authored RST_STREAM of the selected stream followed by a typed, eight-octet, stream-zero
+PING. That PING is the reset barrier; a `raw` PING never is one. HTTP/2 processes a connection's frames in order, so its
+acknowledgement shows the peer handled the reset first, and the observation ends when it arrives,
+with the status and body received before it. Without such a PING, a client reset is not an end
+condition and the observation ends only on a peer fact or the deadline. Two authored PINGs, typed or
+raw, carrying the barrier's octets are refused, because an acknowledgement could not say which one
+it answers. The acknowledgement shows the peer read the reset first; it does not by itself show what
+the peer did with a response it had already queued.
+`client_reset` requires a PING acknowledgement in the exact control-frame list and forbids
+`stream_termination` and `body_bytes_before_error`.
 
 `expect.socket_read_after` independently asserts `no_termination_observed`, `eof`, or `reset`.
 These values describe receive-side reads and a bounded final socket probe, not both TCP directions,
@@ -178,13 +194,19 @@ After a response head, use `stream_error`, `stream_termination = "reset"`, the r
 `body_bytes_before_error`, and the exact control-frame expectation. A TCP reset alone cannot satisfy
 that frame expectation. Neither form infers socket closure or connection reusability from a frame.
 
-Versions 1 through 3 reject both new expectation fields and the new outcome. Rust callers constructing an
+Versions 1 through 3 reject both new expectation fields and the new outcome; versions 1 through 4
+reject authored `ping` frames, received `ping` control frames and `client_reset`. Existing version
+1-4 cases need no edit; to use a version-5 addition, set `case.schema_version = 5`. Runners older than
+this one refuse version 5 with the explicit "update the runner" error. Rust callers constructing an
 `Observation` must initialize `h2_control_frames` to `None` unless their transport actually measures
 supported controls; `Some([])` means measured absence. Initialize `socket_read_after` to `None`
 unless receive-side termination is independently observed; never derive it from GOAWAY or a
-Connection header. Exhaustive `ObservedH2ControlFrame` matches must handle `GoAway` and `WindowUpdate`.
-Exhaustive `Outcome` matches must handle
-`StreamReset` separately from `ConnectionReset`.
+Connection header. Exhaustive `ObservedH2ControlFrame` matches must handle `GoAway`, `WindowUpdate`
+and, from conformance 0.13.0, `PingAck`. Exhaustive `Outcome` matches must handle `StreamReset`
+separately from `ConnectionReset`, and from 0.13.0 `ClientReset`, which a transport may produce only
+after it received the acknowledgement of a PING written after its own reset of the selected stream.
+An HTTP/2 stream that ends abruptly after its head now reports the unpadded DATA octets received
+before the end as `body_bytes_before_error` instead of leaving it unavailable.
 
 ### Comparing production transports
 

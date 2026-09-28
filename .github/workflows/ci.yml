@@ -101,8 +101,15 @@ permissions:
 
 # A superseded pull-request run is cancelled; a main push always runs to completion, because
 # with frequent merges a cancelled main run means nobody can ever confirm main is green.
+#
+# `cancel-in-progress: false` alone does not deliver that. A concurrency group holds one running
+# and one pending run, and GitHub cancels the pending one whenever a newer run joins the group,
+# whatever cancel-in-progress says. With main pushes sharing one group per ref, every merge wave
+# cancelled all but the last push: fifteen consecutive main commits on 2026-09-28 ended
+# `cancelled`, none verified. Each main push therefore gets a group of its own (its commit SHA);
+# pull requests keep one group per ref so a new push still supersedes the old run.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
@@ -371,7 +378,7 @@ jobs:
         run: bash scripts/ci_install_host_tools.sh
       - name: Workspace tests 1/3 (maximum 8 minutes after setup)
         run: |
-          scripts/ci_budget.sh 480 "workspace tests 1/3" cargo test --workspace --exclude rustfs-gateway-conformance --exclude rustfs-gateway --exclude rustfs-gateway-goldens --exclude rustfs-gateway-types --exclude rustfs-gateway-sig
+          scripts/ci_budget.sh 480 "workspace tests 1/3" cargo test --workspace --exclude rustfs-gateway-conformance --exclude rustfs-gateway --exclude rustfs-gateway-goldens --exclude rustfs-gateway-difftest --exclude rustfs-gateway-types --exclude rustfs-gateway-sig
 
   workspace-tests-2:
     name: Workspace tests 2
@@ -404,7 +411,7 @@ jobs:
         run: bash scripts/ci_install_host_tools.sh
       - name: Workspace tests 3/3 (maximum 8 minutes after setup)
         run: |
-          scripts/ci_budget.sh 480 "workspace tests 3/3" bash -c 'cargo test --package rustfs-gateway-goldens --package rustfs-gateway-types --features rustfs-gateway-types/compat-s3s && cargo test --package rustfs-gateway --package rustfs-gateway-sig'
+          scripts/ci_budget.sh 480 "workspace tests 3/3" bash -c 'cargo test --package rustfs-gateway-goldens --package rustfs-gateway-difftest --package rustfs-gateway-types --features rustfs-gateway-types/compat-s3s && cargo test --package rustfs-gateway --package rustfs-gateway-sig'
 
   # Transport parity runs the whole corpus twice (once per production driver) and compares.
   # On one runner it sat at 413-471s of a 480s budget for nine consecutive main runs and hit

@@ -1,0 +1,48 @@
+# c-h2-0018 — client-authored HTTP/2 control frame.
+
+[case]
+id = "c-h2-0018"
+schema_version = 5
+title = "An unsolicited PING acknowledgement is not answered"
+rationale = "A peer must never acknowledge an acknowledgement; the request after the unsolicited ACK must be served with no PING ACK in return. The octets of the authored ACK are proved by the wire-image unit test, not by this case, and a peer PING without ACK would not be recorded here."
+polarity = "negative"
+tags = ["framing"]
+timeout_ms = 1500
+quirks = []
+applies_to = { http_versions = ["h2"], tls = "forbidden" }
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9113.html#section-6.7"
+summary = "A PING without ACK must be answered by a PING with ACK carrying the same eight octets; a PING with ACK is never answered."
+kind = "rfc"
+
+[[setup.buckets]]
+name = "conf-cors-rt"
+
+[request]
+method = "OPTIONS"
+target = "/conf-cors-rt/key.txt"
+http_version = "h2"
+
+[[request.h2_frames]]
+type = "settings"
+
+[[request.h2_frames]]
+type = "ping"
+flags = ["ack"]
+payload_hex = "0102030405060708"
+delay_ms = 100
+
+[[request.h2_frames]]
+type = "headers"
+stream_id = 1
+flags = ["end_headers", "end_stream"]
+payload_hex = "02074f5054494f4e538604152f636f6e662d636f72732d72742f6b65792e747874410e73332e6578616d706c652e636f6d"
+
+[expect]
+kind = "response"
+status = 400
+h2_control_frames = [{ type = "window_update", stream_id = 0, increment = 2031617 }]
+
+[expect.body]
+contains_utf8 = ["<Code>BadRequest</Code>"]

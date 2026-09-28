@@ -3,20 +3,20 @@
 # differential result computed from it, so it is never an automatic commit.
 schema_version = 1
 buckets = 82
-entries = 134
-bytes = 238973
-chunk_framed_entries = 11
+entries = 239
+bytes = 272032
+chunk_framed_entries = 12
 entries_from_production_server = 0
 
 [[bucket]]
 path = "bucket/CreateBucket.jsonl"
 op = "CreateBucket"
 family = "bucket"
-entries = 4
+entries = 7
 chunked = 0
 trailers = 0
-bytes = 2492
-sha256 = "418779cb1751deb69403eb74ee47cf28f4690f728b1dcf9878c9077eb00efb1d"
+bytes = 3446
+sha256 = "0c892cb12aa61ceb749d3d2b67e255b7d7d730319bd2d9cdbfdac37e426b6708"
 
 [[bucket]]
 path = "bucket/DeleteBucket.jsonl"
@@ -112,11 +112,11 @@ sha256 = "6f086142903bb82e0a7896af6a00307862a9ca4fe6e0b3bc562e1bdb26d37619"
 path = "bucket/GetBucketAcl.jsonl"
 op = "GetBucketAcl"
 family = "bucket"
-entries = 1
+entries = 3
 chunked = 0
 trailers = 0
-bytes = 933
-sha256 = "251bd16c2a8a2386d53cc4ca71830102a68d9bea62186df0ca8803c7310d7ef1"
+bytes = 2334
+sha256 = "43f26c27f43c0f929c174856fb6d5aab3ade6939303bea901631aa0c0ebf0870"
 
 [[bucket]]
 path = "bucket/GetBucketAnalyticsConfiguration.jsonl"
@@ -132,21 +132,21 @@ sha256 = "813c47b4679784450da739fb64b8835058c16be730c849b0eaecff91ac72a4c5"
 path = "bucket/GetBucketCors.jsonl"
 op = "GetBucketCors"
 family = "bucket"
-entries = 1
+entries = 3
 chunked = 0
 trailers = 0
-bytes = 959
-sha256 = "0a47fd76bdfa989575609fcbc9b727c320bbaf395352846d71cd8bda4e65060d"
+bytes = 1754
+sha256 = "7836ad041f158831d59e20621790160cc10576a365c2679749dd409dd3366796"
 
 [[bucket]]
 path = "bucket/GetBucketEncryption.jsonl"
 op = "GetBucketEncryption"
 family = "bucket"
-entries = 1
+entries = 3
 chunked = 0
 trailers = 0
-bytes = 971
-sha256 = "f2f8c18d5c598bc93a7b919970a3760aa8769f89a515b67dc4c16b80ddcdd571"
+bytes = 1674
+sha256 = "befedd95915326c81b226a06b25b0aa413b00027103d16f4dfc4ec5695b31b5c"
 
 [[bucket]]
 path = "bucket/GetBucketIntelligentTieringConfiguration.jsonl"
@@ -172,11 +172,11 @@ sha256 = "de79ce25b9c8cb863c2d36c7272f7b1376974a05261ed4c1d2d6523846cd85d9"
 path = "bucket/GetBucketLifecycleConfiguration.jsonl"
 op = "GetBucketLifecycleConfiguration"
 family = "bucket"
-entries = 1
+entries = 3
 chunked = 0
 trailers = 0
-bytes = 956
-sha256 = "98d263feda1f53cbb1cbf575baee65f206a0e43b7f35adcbda38800eba1a9815"
+bytes = 2099
+sha256 = "68755b79ace0e9dec17afe95c1c945701cc28ce334975fb2c8461b4302b93778"
 
 [[bucket]]
 path = "bucket/GetBucketLocation.jsonl"
@@ -362,21 +362,21 @@ sha256 = "99451c8c84cba817871c46905fecf3ca0a9869b5d7462ffa5f3f40df5c8a4b7e"
 path = "bucket/PutBucketAcl.jsonl"
 op = "PutBucketAcl"
 family = "bucket"
-entries = 1
+entries = 3
 chunked = 0
 trailers = 0
-bytes = 1024
-sha256 = "afdd514a7206da50e597b42c1ce81dcc39096f4a4b1c81b4881cd00e3cc5fc4b"
+bytes = 2041
+sha256 = "63470d6be34839fa6f81fa9878541585c6ad166ca0e98917d514c57369dbbd7a"
 
 [[bucket]]
 path = "bucket/PutBucketCors.jsonl"
 op = "PutBucketCors"
 family = "bucket"
-entries = 1
+entries = 4
 chunked = 0
 trailers = 0
-bytes = 1063
-sha256 = "cff736cf0ac5622358a7ea34760325808dd8d7d5fddde7134013d41b2eaefc5c"
+bytes = 2253
+sha256 = "5f97fa557ae0bfb347e9f8a3dce12eccaa1234bf13d5f1243c7e5a6b942bf74d"
 
 [[bucket]]
 path = "bucket/PutBucketEncryption.jsonl"
@@ -392,11 +392,11 @@ sha256 = "33b03bcf828a86768bc7c5237548f0375609a474e522f311aa11a4a2941afab7"
 path = "bucket/PutBucketLifecycleConfiguration.jsonl"
 op = "PutBucketLifecycleConfiguration"
 family = "bucket"
-entries = 1
+entries = 4
 chunked = 0
 trailers = 0
-bytes = 1357
-sha256 = "2a4714cca57b3264a6d6835951ce5ff8d78358f9fcd2a5b1a1f05d7cecf12951"
+bytes = 2747
+sha256 = "5aadc0a11d9574d836169a74bdf426a3198fd8c015d539fd331473b1fda98b30"
 
 [[bucket]]
 path = "bucket/PutBucketLogging.jsonl"
@@ -432,11 +432,11 @@ sha256 = "bbc461e49e788cb5485c9a5094361f2f114a027eed68feb615d226c7230332b2"
 path = "bucket/PutBucketReplication.jsonl"
 op = "PutBucketReplication"
 family = "bucket"
-entries = 1
+entries = 4
 chunked = 0
 trailers = 0
-bytes = 1077
-sha256 = "c30ded4e091523930ff8aa3154aef411f4c3701b505664d8a498eff98aec79bb"
+bytes = 2614
+sha256 = "4cdd0c6d32e9faf301930de13eb3d04b4b142a22a0144a72018729b0a8771f13"
 
 [[bucket]]
 path = "bucket/PutBucketRequestPayment.jsonl"
@@ -462,11 +462,11 @@ sha256 = "8273260b91b3034b1397b8d7de5c1da79e04474dbc1d6f23282149e22f557348"
 path = "bucket/PutBucketVersioning.jsonl"
 op = "PutBucketVersioning"
 family = "bucket"
-entries = 1
+entries = 2
 chunked = 0
 trailers = 0
-bytes = 467
-sha256 = "fb5fc4e5900ca014e64019f5f458cf7e1c26adf266fae3e558e3964edae88afc"
+bytes = 870
+sha256 = "49b4e7a224b2eb6457cf9f3e97e843b7a17fdbe65610a788ec6e57b515c8a48d"
 
 [[bucket]]
 path = "bucket/PutBucketWebsite.jsonl"
@@ -482,21 +482,21 @@ sha256 = "a7af74313209937ccf8096d08ec35fd44b6975dedc45cb93aab2f21220515329"
 path = "multipart/AbortMultipartUpload.jsonl"
 op = "AbortMultipartUpload"
 family = "multipart"
-entries = 1
+entries = 3
 chunked = 0
 trailers = 0
-bytes = 965
-sha256 = "c217b4fbd28b1495ed7beb849b5958144abd155069ad46e4506c9a499f9f71ae"
+bytes = 1428
+sha256 = "06fb8e5022749693e777138682c1cd33bd9c5d3c3aa63d707249e825f3e59999"
 
 [[bucket]]
 path = "multipart/CompleteMultipartUpload.jsonl"
 op = "CompleteMultipartUpload"
 family = "multipart"
-entries = 1
+entries = 9
 chunked = 0
 trailers = 0
-bytes = 500
-sha256 = "0ca568cd936365d619f4b0b5b1740e10fe4a025da7512523ec246d3f301b5e5d"
+bytes = 3465
+sha256 = "0c0df60bdf5c4e8d33a471ff504ac843309dab2bd0412caf58f41d7dcec6d23d"
 
 [[bucket]]
 path = "multipart/CreateMultipartUpload.jsonl"
@@ -522,51 +522,51 @@ sha256 = "f01e63e4558857a91686ac666a723d764376d75f5737d65572623e355ab4ae18"
 path = "multipart/ListParts.jsonl"
 op = "ListParts"
 family = "multipart"
-entries = 1
+entries = 2
 chunked = 0
 trailers = 0
-bytes = 963
-sha256 = "928978aa954286b67cf23053c26c92cb8bab144c4adfb7c2f260f68e58021513"
+bytes = 1164
+sha256 = "fad394bf64c55d6bc026d18fcf65e26d11f5108c285ef009dce08c303ac2733c"
 
 [[bucket]]
 path = "multipart/UploadPart.jsonl"
 op = "UploadPart"
 family = "multipart"
-entries = 4
+entries = 9
 chunked = 2
 trailers = 1
-bytes = 4090
-sha256 = "bbd6ef34aadc3e1e2299823c7f327a3608e4e22dddc3a485d1a775083dc9ebb4"
+bytes = 5663
+sha256 = "a00e801f88397aca87f2e831d6b038f9cc3cada6200111ae3410f7312fc9ef1f"
 
 [[bucket]]
 path = "multipart/UploadPartCopy.jsonl"
 op = "UploadPartCopy"
 family = "multipart"
-entries = 1
+entries = 3
 chunked = 0
 trailers = 0
-bytes = 1068
-sha256 = "00faa10f8d86261a911f38196e2c9dbf0118104d11b66db51a16bd89da63472b"
+bytes = 1616
+sha256 = "d5ea7a8eed481485e56ae2d75717838fa5b025379b930a3ffbb1a7756d21953a"
 
 [[bucket]]
 path = "object/CopyObject.jsonl"
 op = "CopyObject"
 family = "object"
-entries = 2
+entries = 13
 chunked = 0
 trailers = 0
-bytes = 1481
-sha256 = "9726f0baabe4c217d1676332218d404604c5dc5416dafe515aca087b54db1d75"
+bytes = 4187
+sha256 = "990a020bec708a05847d707483f3cc5ddfd16984b22342eb6501590ed88ea7eb"
 
 [[bucket]]
 path = "object/DeleteObject.jsonl"
 op = "DeleteObject"
 family = "object"
-entries = 4
+entries = 5
 chunked = 0
 trailers = 0
-bytes = 2396
-sha256 = "f1eb73663cdac94530d52545784a49e363a690cad6318b4107a1a557a252e6ab"
+bytes = 2577
+sha256 = "bd3144c34f16dd00bb07e062ae054e7d0c3c13c66414adc087587422219fecf2"
 
 [[bucket]]
 path = "object/DeleteObjectTagging.jsonl"
@@ -582,21 +582,21 @@ sha256 = "a85e5401e249c5811a00491c859cd274a22b8e51be751eceeafe6548ec4ec1ac"
 path = "object/DeleteObjects.jsonl"
 op = "DeleteObjects"
 family = "object"
-entries = 2
+entries = 3
 chunked = 0
 trailers = 0
-bytes = 1549
-sha256 = "5eafc1a3f5c1db92cc3d60829cd26a6e3d09d6a1307ec0f002cd5ff2e1bebd20"
+bytes = 1973
+sha256 = "ab2c0da896ebbf7a2bf3f0ba7dd02f955f0000e46a406f4780dbcfad6f2c3d92"
 
 [[bucket]]
 path = "object/GetObject.jsonl"
 op = "GetObject"
 family = "object"
-entries = 8
+entries = 14
 chunked = 0
 trailers = 0
-bytes = 4632
-sha256 = "0bb229c60ce2fb98ebe3449f64718ad35274ca2cfce95e6449f006ead2e53272"
+bytes = 6134
+sha256 = "d6a24b2008ca85a8d9e1fba4f4397e8ee449d84098727c82bd90eb81f6ed4987"
 
 [[bucket]]
 path = "object/GetObjectAcl.jsonl"
@@ -612,11 +612,11 @@ sha256 = "ca07a19cdf6ccb101e7d6dc6450cede8e3a96905f28ec77084d3c3c30e3b134a"
 path = "object/GetObjectAttributes.jsonl"
 op = "GetObjectAttributes"
 family = "object"
-entries = 1
+entries = 3
 chunked = 0
 trailers = 0
-bytes = 1023
-sha256 = "57d40cadb28bc708d40c643f9027ad11f70dff22fe6b7e23e1fcb7b57300526c"
+bytes = 1450
+sha256 = "2aa59a21bfbf36ccf79a747b20c97a568e22ae0a9627bf6d9dc5984a3f7c525c"
 
 [[bucket]]
 path = "object/GetObjectLegalHold.jsonl"
@@ -632,11 +632,11 @@ sha256 = "c9c5b9850a9f98eb67b5bb5ca8811f9b12472dd288cb80d3133d2873fe719840"
 path = "object/GetObjectLockConfiguration.jsonl"
 op = "GetObjectLockConfiguration"
 family = "object"
-entries = 1
+entries = 3
 chunked = 0
 trailers = 0
-bytes = 818
-sha256 = "e7a77cff86de75d66ae020a0c1d5ec5178643ead91bd44847d330cd79e6d2a60"
+bytes = 1517
+sha256 = "0bf34a02de5548dd3c0324b80dff9df52f6fbc0aa4ef12cbe844960347ba2f19"
 
 [[bucket]]
 path = "object/GetObjectRetention.jsonl"
@@ -672,11 +672,11 @@ sha256 = "ccb58cd99a85e5adba1353baf0ab4e9ce5f9d80b57c1a55d41c36077c9cbbec5"
 path = "object/HeadObject.jsonl"
 op = "HeadObject"
 family = "object"
-entries = 6
+entries = 10
 chunked = 0
 trailers = 0
-bytes = 3132
-sha256 = "c642a4ec5be144453585d5bea31b9c5cc399c0b079523266b8f843a8d3259f0a"
+bytes = 4113
+sha256 = "ea82f1caafd7d7533dc1e533ac779d5a404e9d09a68cf74f8baf0716e538ac57"
 
 [[bucket]]
 path = "object/ListObjectVersions.jsonl"
@@ -692,31 +692,31 @@ sha256 = "34e38538642a10c40b2e652215ff0d2304949b39fb024526e5880c05e3fbd21f"
 path = "object/ListObjects.jsonl"
 op = "ListObjects"
 family = "object"
-entries = 2
+entries = 8
 chunked = 0
 trailers = 0
-bytes = 698
-sha256 = "6f3630a2fcbf65aa7b7dc52da596e076797941efe19e631bbb2d2bc4a4f1f9b6"
+bytes = 1813
+sha256 = "4d01acd1305b1b074a8950ce570a05a770682f8cffb1d117d4f3fbdaebdf3172"
 
 [[bucket]]
 path = "object/ListObjectsV2.jsonl"
 op = "ListObjectsV2"
 family = "object"
-entries = 5
+entries = 18
 chunked = 0
 trailers = 0
-bytes = 3164
-sha256 = "0f9fca029b16d0021301541bceb0996d3aa1ee099c31bd9f89bd3b45d0c2513c"
+bytes = 6234
+sha256 = "8fc9d23f39d30f4fdced0cfb988f370e96b6bf8297099a674a7b0f2dd4d4b8d2"
 
 [[bucket]]
 path = "object/PutObject.jsonl"
 op = "PutObject"
 family = "object"
-entries = 17
-chunked = 9
-trailers = 3
-bytes = 141407
-sha256 = "4d113135130146fcfe48e1f797721288f2bcac5e3ba8dc15773ab0bc6381a6b2"
+entries = 29
+chunked = 10
+trailers = 4
+bytes = 144898
+sha256 = "39cbfc6f47aeb3fe961149d701815efb465d40d7b42a6d52123a698253cf7aaa"
 
 [[bucket]]
 path = "object/PutObjectAcl.jsonl"
@@ -752,11 +752,11 @@ sha256 = "41fd89ebabf49a41ea2c98b39538d06cb95dbbb5d2aa8e546a9d611d52b91da5"
 path = "object/PutObjectRetention.jsonl"
 op = "PutObjectRetention"
 family = "object"
-entries = 1
+entries = 3
 chunked = 0
 trailers = 0
-bytes = 1079
-sha256 = "9e056fd92d3e1107f6c8fa95050350d82174934c0aadf3b4dbcdadbc1d09a982"
+bytes = 1724
+sha256 = "715238e822d15719f5789aec34dc54343634378c3da81426c24d92cb2edb1c5d"
 
 [[bucket]]
 path = "object/PutObjectTagging.jsonl"
@@ -772,21 +772,21 @@ sha256 = "f6735aaf83212f5922c1b529cf3373e9da9ab8705ed9adb87fe84ae8fa9c0dec"
 path = "object/RestoreObject.jsonl"
 op = "RestoreObject"
 family = "object"
-entries = 1
+entries = 2
 chunked = 0
 trailers = 0
-bytes = 1072
-sha256 = "9a8e87d47f1899db44b6c8fbeed58e39d29decb5ba1b07cb03d1534d665bd1e5"
+bytes = 1535
+sha256 = "a92e144a6dbbdd6a3d3c18de5d5404ec6e19422bd01dd43cb0673859bc926f37"
 
 [[bucket]]
 path = "object/SelectObjectContent.jsonl"
 op = "SelectObjectContent"
 family = "object"
-entries = 1
+entries = 2
 chunked = 0
 trailers = 0
-bytes = 1013
-sha256 = "c3e4d3d667ad10754072224fc373fad812dfe6059c42998164f92008a74dc8da"
+bytes = 1746
+sha256 = "c1e0c0e3d0a6776400411df496bb6531c0625b0625e27d49ad49be08ed94a4a8"
 
 [[bucket]]
 path = "other/DeletePublicAccessBlock.jsonl"
@@ -822,11 +822,11 @@ sha256 = "4be44fa4e04adef4c62b9aa7058c788e4765481c34e2416dfe208a5fc1393dd0"
 path = "service/ListBuckets.jsonl"
 op = "ListBuckets"
 family = "service"
-entries = 1
+entries = 3
 chunked = 0
 trailers = 0
-bytes = 916
-sha256 = "f0d1efe43ad3d23e25c2a1a0ef816e92c269339ce3c75aade720d896895398b0"
+bytes = 1255
+sha256 = "83acfd2b96fc3a2e6d960a81ddb16b58f906bfbfa7f609424aa597b7d5945a85"
 
 [[source]]
 id = "client-matrix:boto3@1.42.96"
@@ -852,3 +852,213 @@ entries = 7
 id = "handwritten:gateway"
 sut = "none"
 entries = 6
+
+[[source]]
+id = "handwritten:s3s-issues#102"
+sut = "none"
+entries = 2
+
+[[source]]
+id = "handwritten:s3s-issues#144"
+sut = "none"
+entries = 1
+
+[[source]]
+id = "handwritten:s3s-issues#15"
+sut = "none"
+entries = 1
+
+[[source]]
+id = "handwritten:s3s-issues#176"
+sut = "none"
+entries = 2
+
+[[source]]
+id = "handwritten:s3s-issues#220"
+sut = "none"
+entries = 1
+
+[[source]]
+id = "handwritten:s3s-issues#229"
+sut = "none"
+entries = 3
+
+[[source]]
+id = "handwritten:s3s-issues#241"
+sut = "none"
+entries = 1
+
+[[source]]
+id = "handwritten:s3s-issues#259"
+sut = "none"
+entries = 1
+
+[[source]]
+id = "handwritten:s3s-issues#264"
+sut = "none"
+entries = 15
+
+[[source]]
+id = "handwritten:s3s-issues#297"
+sut = "none"
+entries = 3
+
+[[source]]
+id = "handwritten:s3s-issues#300"
+sut = "none"
+entries = 1
+
+[[source]]
+id = "handwritten:s3s-issues#325"
+sut = "none"
+entries = 1
+
+[[source]]
+id = "handwritten:s3s-issues#350"
+sut = "none"
+entries = 5
+
+[[source]]
+id = "handwritten:s3s-issues#361"
+sut = "none"
+entries = 1
+
+[[source]]
+id = "handwritten:s3s-issues#367"
+sut = "none"
+entries = 1
+
+[[source]]
+id = "handwritten:s3s-issues#371"
+sut = "none"
+entries = 2
+
+[[source]]
+id = "handwritten:s3s-issues#404"
+sut = "none"
+entries = 1
+
+[[source]]
+id = "handwritten:s3s-issues#405"
+sut = "none"
+entries = 2
+
+[[source]]
+id = "handwritten:s3s-issues#419"
+sut = "none"
+entries = 1
+
+[[source]]
+id = "handwritten:s3s-issues#428"
+sut = "none"
+entries = 2
+
+[[source]]
+id = "handwritten:s3s-issues#448"
+sut = "none"
+entries = 1
+
+[[source]]
+id = "handwritten:s3s-issues#455"
+sut = "none"
+entries = 1
+
+[[source]]
+id = "handwritten:s3s-issues#462"
+sut = "none"
+entries = 2
+
+[[source]]
+id = "handwritten:s3s-issues#469"
+sut = "none"
+entries = 1
+
+[[source]]
+id = "handwritten:s3s-issues#484"
+sut = "none"
+entries = 2
+
+[[source]]
+id = "handwritten:s3s-issues#51"
+sut = "none"
+entries = 4
+
+[[source]]
+id = "handwritten:s3s-issues#526"
+sut = "none"
+entries = 1
+
+[[source]]
+id = "handwritten:s3s-issues#54"
+sut = "none"
+entries = 1
+
+[[source]]
+id = "handwritten:s3s-issues#542"
+sut = "none"
+entries = 2
+
+[[source]]
+id = "handwritten:s3s-issues#544"
+sut = "none"
+entries = 2
+
+[[source]]
+id = "handwritten:s3s-issues#545"
+sut = "none"
+entries = 1
+
+[[source]]
+id = "handwritten:s3s-issues#547"
+sut = "none"
+entries = 2
+
+[[source]]
+id = "handwritten:s3s-issues#549"
+sut = "none"
+entries = 2
+
+[[source]]
+id = "handwritten:s3s-issues#550"
+sut = "none"
+entries = 6
+
+[[source]]
+id = "handwritten:s3s-issues#569"
+sut = "none"
+entries = 2
+
+[[source]]
+id = "handwritten:s3s-issues#583"
+sut = "none"
+entries = 2
+
+[[source]]
+id = "handwritten:s3s-issues#584"
+sut = "none"
+entries = 5
+
+[[source]]
+id = "handwritten:s3s-issues#613"
+sut = "none"
+entries = 7
+
+[[source]]
+id = "handwritten:s3s-issues#629"
+sut = "none"
+entries = 2
+
+[[source]]
+id = "handwritten:s3s-issues#632"
+sut = "none"
+entries = 9
+
+[[source]]
+id = "handwritten:s3s-issues#643"
+sut = "none"
+entries = 2
+
+[[source]]
+id = "handwritten:s3s-issues#648"
+sut = "none"
+entries = 1

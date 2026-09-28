@@ -31,10 +31,10 @@ use std::collections::BTreeMap;
 
 /// The newest schema version this runner understands.
 ///
-/// Versions 1 through 3 remain readable; version 4 adds HTTP/2 control-frame observations. A case newer than this
-/// value is refused with an explicit "update the runner" error. It is never skipped and its
-/// unknown fields are never ignored.
-pub const SCHEMA_VERSION: i64 = 4;
+/// Versions 1 through 3 remain readable; version 4 adds HTTP/2 control-frame observations; version 5
+/// adds authored PING, received PING acknowledgements and `client_reset`. A newer case is refused
+/// with an explicit "update the runner" error, never skipped, and its unknown fields never ignored.
+pub const SCHEMA_VERSION: i64 = 5;
 
 /// The oldest schema version this runner still accepts.
 pub const MIN_SCHEMA_VERSION: i64 = 1;
@@ -786,15 +786,15 @@ status = 200
 #[cfg(test)]
 #[path = "schema/computed_md5_tests.rs"]
 mod computed_md5_tests;
-
-#[cfg(test)]
-#[path = "schema/h2_reset_tests.rs"]
-mod h2_reset_tests;
-
 #[cfg(test)]
 #[path = "schema/h2_goaway_tests.rs"]
 mod h2_goaway_tests;
-
+#[cfg(test)]
+#[path = "schema/h2_ping_tests.rs"]
+mod h2_ping_tests;
+#[cfg(test)]
+#[path = "schema/h2_reset_tests.rs"]
+mod h2_reset_tests;
 #[cfg(test)]
 #[path = "schema/h2_window_tests.rs"]
 mod h2_window_tests;

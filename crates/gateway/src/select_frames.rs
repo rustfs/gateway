@@ -27,11 +27,16 @@
 //! body adapter, not framing: it owns a pinned stream, and core keeps its one pinned future per
 //! request.
 
+use core::future::Future;
 use core::mem::ManuallyDrop;
 use core::pin::Pin;
 use core::task::{Context, Poll};
+use core::time::Duration;
 
 use bytes::Bytes;
+use tokio::time::Sleep;
+
+use crate::commit::KEEPALIVE_INTERVAL_SECONDS;
 use rustfs_gateway_stream::{ByteStream, PayloadCaps, PayloadRead, PayloadStream, StreamError, TrailingHeaders};
 
 use rustfs_gateway_core::ops::shared::event_stream::{
@@ -55,7 +60,11 @@ const SOURCE_FAILED_MESSAGE: &str = "the select result could not be produced";
 /// never the answer, so the resident cost is bounded by the source's chunk size and the frame
 /// ceiling rather than by the size of the result.
 ///
-/// A producer that needs `Progress`, `Cont`, or its own scan accounting frames with
+/// While the source is waiting, a `Cont` keep-alive is sent after every
+/// [`KEEPALIVE_INTERVAL_SECONDS`] without a frame (inside a Tokio runtime), so a long scan that
+/// has found nothing yet is not taken for a stalled connection.
+///
+/// A producer that needs `Progress` or its own scan accounting frames with
 /// [`EventSequence`] directly.
 #[must_use]
 pub fn frame_records(records: ByteStream) -> ByteStream {
@@ -65,6 +74,7 @@ pub fn frame_records(records: ByteStream) -> ByteStream {
         pending: Bytes::new(),
         returned: 0,
         stage: Stage::Records,
+        keepalive: None,
     });
     match ByteStream::new(framed) {
         Ok(stream) => stream,
@@ -104,11 +114,34 @@ struct FramedRecords {
     /// Record bytes taken from the source so far.
     returned: u64,
     stage: Stage,
+    /// When the next `Cont` is due, armed on the first wait after a frame and cleared by the next
+    /// frame. `None` outside a Tokio runtime, where there is no timer to arm; the stream then only
+    /// waits, as it did before keep-alives existed.
+    keepalive: Option<Pin<Box<Sleep>>>,
 }
 
 impl FramedRecords {
+    /// The source is still working: send a `Cont` if a whole keep-alive interval has passed since
+    /// the last frame, otherwise wait with the timer registered.
+    ///
+    /// The interval is the committed-response keep-alive's, [`KEEPALIVE_INTERVAL_SECONDS`]: both
+    /// answer "how long may a client wait without a byte", and two numbers could answer it twice.
+    fn keep_alive(&mut self, cx: &mut Context<'_>) -> Poll<Result<PayloadRead, StreamError>> {
+        if self.keepalive.is_none() && tokio::runtime::Handle::try_current().is_ok() {
+            self.keepalive = Some(Box::pin(tokio::time::sleep(Duration::from_secs(KEEPALIVE_INTERVAL_SECONDS))));
+        }
+        let Some(timer) = self.keepalive.as_mut() else {
+            return Poll::Pending;
+        };
+        if timer.as_mut().poll(cx).is_pending() {
+            return Poll::Pending;
+        }
+        Poll::Ready(Ok(PayloadRead::Chunk(self.frame(|sequence, out| sequence.cont(out)))))
+    }
+
     fn frame(&mut self, write: impl FnOnce(&mut EventSequence, &mut Vec<u8>) -> Result<(), EventStreamError>) -> Bytes {
         let mut out = Vec::new();
+        self.keepalive = None;
         if write(&mut self.sequence, &mut out).is_err() {
             // Every call below is legal in the phase it is made from and within every ceiling, so
             // this is unreachable; if it ever is reached, the client is still told and not hung.
@@ -142,7 +175,7 @@ impl PayloadStream for FramedRecords {
                 return Poll::Ready(Ok(PayloadRead::Chunk(this.frame(|sequence, out| sequence.records(&chunk, out)))));
             }
             match Pin::new(&mut this.source).poll_read(cx) {
-                Poll::Pending => return Poll::Pending,
+                Poll::Pending => return this.keep_alive(cx),
                 Poll::Ready(Ok(PayloadRead::Chunk(chunk))) => {
                     this.returned = this.returned.saturating_add(chunk.len() as u64);
                     this.pending = chunk;
