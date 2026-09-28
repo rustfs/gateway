@@ -9,7 +9,9 @@ This bounded implementation supports bucket and version-aware object CRUD, `List
 `ListObjectsV2`, `ListMultipartUploads`, `GetBucketLocation`,
 `GetBucketVersioning`, `PutBucketVersioning`, `ListObjectVersions`, `CreateMultipartUpload`,
 `UploadPart`, `ListParts`, `CompleteMultipartUpload`, `AbortMultipartUpload`, and lifecycle
-configuration PUT/GET/DELETE plus object tagging GET/PUT/DELETE.
+configuration PUT/GET/DELETE plus object tagging GET/PUT/DELETE. Default-encryption
+configuration PUT/GET/DELETE is stored and reported as RustFS answers it, and nothing is
+encrypted: this backend measures the protocol surface, not key management.
 `FsBackend::supported_operations`, `FsBackend::register_crud`, and
 `FsBackend::register_multipart`, `FsBackend::register_versioning`, and
 `FsBackend::register_listing`, `FsBackend::register_lifecycle`, and `FsBackend::register_tagging`
