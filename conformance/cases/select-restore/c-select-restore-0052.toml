@@ -1,0 +1,69 @@
+[case]
+id = "c-select-restore-0052"
+schema_version = 1
+title = "A select that asks for progress carries a keep-alive and a Progress frame before the accounting"
+rationale = """
+Progress and Cont are the two frames a client sees while a long scan runs: one reports interim byte counts when the request enabled RequestProgress, the other keeps an idle connection from being taken for a stall. Both are ordinary event messages that must survive the shared service path with their own headers and both CRCs, interleaved before the single Stats and the terminating End. The exact stream pins the order; the event counts and headers pin the frames independently of it."""
+polarity = "positive"
+operation = "SelectObjectContent"
+tags = ["select", "event-stream"]
+timeout_ms = 10000
+quirks = ["q-select-event-status-0150", "q-select-termination-0155"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/RESTSelectObjectAppendix.html"
+summary = "Progress reports interim byte counts when requested, Cont keeps the connection alive, and both precede the final Stats and End."
+kind = "aws-doc"
+[[setup.buckets]]
+name = "conf-select"
+
+[[setup.objects]]
+bucket = "conf-select"
+key = "rows.csv"
+body = { utf8 = "a,b\n1,2\n" }
+
+[request]
+method = "POST"
+target = "/conf-select/rows.csv?select&select-type=2"
+headers = { "content-type" = "application/xml" }
+body = { utf8 = '<SelectObjectContentRequest><Expression>SELECT * FROM S3Object</Expression><ExpressionType>SQL</ExpressionType><InputSerialization><CSV/></InputSerialization><OutputSerialization><CSV/></OutputSerialization><RequestProgress><Enabled>true</Enabled></RequestProgress></SelectObjectContentRequest>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "event_stream"
+status = 200
+connection_after = "open"
+headers_present = { "content-type" = "application/vnd.amazon.event-stream" }
+
+[[expect.events]]
+type = "Cont"
+min_count = 1
+max_count = 1
+headers = { "message-type" = "event", "event-type" = "Cont" }
+
+[[expect.events]]
+type = "Records"
+min_count = 1
+max_count = 1
+
+[[expect.events]]
+type = "Progress"
+min_count = 1
+max_count = 1
+headers = { "content-type" = "text/xml" }
+
+[expect.events.payload]
+exact_utf8 = "<Progress><Details><BytesScanned>8</BytesScanned><BytesProcessed>8</BytesProcessed><BytesReturned>8</BytesReturned></Details></Progress>"
+
+[[expect.events]]
+type = "Stats"
+min_count = 1
+max_count = 1
+
+[[expect.events]]
+type = "End"
+min_count = 1
+max_count = 1
+
+[expect.body]
+exact_hex = "00000039000000298ba19df20d3a6d6573736167652d747970650700056576656e740b3a6576656e742d74797065070004436f6e749c864a0d0000006d000000551f81c9ee0d3a6d6573736167652d747970650700056576656e740b3a6576656e742d747970650700075265636f7264730d3a636f6e74656e742d747970650700186170706c69636174696f6e2f6f637465742d73747265616d612c620a312c320a339ad29f000000de00000046cc58faf40d3a6d6573736167652d747970650700056576656e740b3a6576656e742d7479706507000850726f67726573730d3a636f6e74656e742d74797065070008746578742f786d6c3c50726f67726573733e3c44657461696c733e3c42797465735363616e6e65643e383c2f42797465735363616e6e65643e3c427974657350726f6365737365643e383c2f427974657350726f6365737365643e3c427974657352657475726e65643e383c2f427974657352657475726e65643e3c2f44657461696c733e3c2f50726f67726573733ebe704a4f000000d500000043cbe23f6a0d3a6d6573736167652d747970650700056576656e740b3a6576656e742d7479706507000553746174730d3a636f6e74656e742d74797065070008746578742f786d6c3c53746174733e3c44657461696c733e3c42797465735363616e6e65643e383c2f42797465735363616e6e65643e3c427974657350726f6365737365643e383c2f427974657350726f6365737365643e3c427974657352657475726e65643e383c2f427974657352657475726e65643e3c2f44657461696c733e3c2f53746174733e217b407a0000003800000028c1c684d40d3a6d6573736167652d747970650700056576656e740b3a6576656e742d74797065070003456e64cf97d392"

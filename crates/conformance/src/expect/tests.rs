@@ -464,6 +464,83 @@ fn n_a_different_event_payload_is_reported() {
     assert_eq!(rules(&judgement), vec!["expect/body.exact_utf8"]);
 }
 
+/// A frame carrying extra headers beside `:message-type`.
+fn frame_with(message_type: &str, name: &str, extra: &[(&str, &str)]) -> ObservedEvent {
+    let mut frame = event_frame(message_type, name, b"");
+    frame
+        .headers
+        .extend(extra.iter().map(|(key, value)| ((*key).to_owned(), (*value).to_owned())));
+    frame
+}
+
+fn error_stream(code: &str, message: &str) -> Observation {
+    let mut observed = ok_response();
+    observed.outcome = Outcome::EventStream;
+    observed.events.push(event_frame("event", "Records", b"a"));
+    observed
+        .events
+        .push(frame_with("error", code, &[(":error-code", code), (":error-message", message)]));
+    observed
+}
+
+/// Positive — a spec that names `message-type = "error"` selects the error frame by its code, and
+/// every declared header is compared against the colon-prefixed frame header.
+#[test]
+fn an_error_frame_is_selected_when_the_spec_asks_for_one() {
+    let expect = expectation(
+        "kind = \"event_stream\"\n[[events]]\ntype = \"InvalidTextEncoding\"\nmin_count = 1\nmax_count = 1\nheaders = { \"message-type\" = \"error\", \"error-code\" = \"InvalidTextEncoding\", \"error-message\" = \"bad\" }\n",
+    );
+    let judgement = judge(&expect, &error_stream("InvalidTextEncoding", "bad"), "/expect", &no_goldens());
+    assert!(judgement.is_clean(), "{:?}", judgement.diagnostics);
+}
+
+/// Negative — without `message-type = "error"` the same spec selects only events, so an error
+/// frame never satisfies it.
+#[test]
+fn n_an_error_frame_is_not_selected_by_type_alone() {
+    let expect = expectation("kind = \"event_stream\"\n[[events]]\ntype = \"InvalidTextEncoding\"\nmin_count = 1\n");
+    let judgement = judge(&expect, &error_stream("InvalidTextEncoding", "bad"), "/expect", &no_goldens());
+    assert_eq!(rules(&judgement), vec!["expect/events.min_count"]);
+}
+
+/// Negative — a selected frame whose header value differs is reported.
+#[test]
+fn n_a_different_error_message_header_is_reported() {
+    let expect = expectation(
+        "kind = \"event_stream\"\n[[events]]\ntype = \"InvalidTextEncoding\"\nheaders = { \"message-type\" = \"error\", \"error-message\" = \"bad\" }\n",
+    );
+    let judgement = judge(&expect, &error_stream("InvalidTextEncoding", "worse"), "/expect", &no_goldens());
+    assert_eq!(rules(&judgement), vec!["expect/events.headers"]);
+}
+
+/// Negative — a header the selected event frame does not carry is reported, on every selected frame.
+#[test]
+fn n_a_missing_event_header_is_reported_per_frame() {
+    let mut observed = ok_response();
+    observed.outcome = Outcome::EventStream;
+    observed
+        .events
+        .push(frame_with("event", "Progress", &[(":content-type", "text/xml")]));
+    observed.events.push(event_frame("event", "Progress", b""));
+    let expect =
+        expectation("kind = \"event_stream\"\n[[events]]\ntype = \"Progress\"\nheaders = { \"content-type\" = \"text/xml\" }\n");
+    let judgement = judge(&expect, &observed, "/expect", &no_goldens());
+    assert_eq!(rules(&judgement), vec!["expect/events.headers"]);
+}
+
+/// Negative — a spec asking for an error frame is not satisfied by the success terminator.
+#[test]
+fn n_an_event_does_not_satisfy_an_error_spec() {
+    let mut observed = ok_response();
+    observed.outcome = Outcome::EventStream;
+    observed.events.push(event_frame("event", "End", b""));
+    let expect = expectation(
+        "kind = \"event_stream\"\n[[events]]\ntype = \"End\"\nmin_count = 1\nheaders = { \"message-type\" = \"error\" }\n",
+    );
+    let judgement = judge(&expect, &observed, "/expect", &no_goldens());
+    assert_eq!(rules(&judgement), vec!["expect/events.min_count"]);
+}
+
 // --- a capture is a value to spend, not a wire form to compare -----------------------------------
 
 #[test]

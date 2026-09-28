@@ -1,0 +1,63 @@
+[case]
+id = "c-select-restore-0053"
+schema_version = 1
+title = "A select that disables progress carries no Progress and no keep-alive frame"
+rationale = """
+The opposite direction of c-select-restore-0052 on the same object and expression: RequestProgress present but disabled. A service that emitted interim frames regardless, or a harness that could not tell them apart, would make both cases green; here neither frame may appear and the stream is exactly Records, Stats, End."""
+polarity = "negative"
+operation = "SelectObjectContent"
+tags = ["select", "event-stream"]
+timeout_ms = 10000
+quirks = ["q-select-termination-0155"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/RESTSelectObjectAppendix.html"
+summary = "Progress messages are sent only when the request enables them; otherwise the stream carries records, the accounting and the terminator."
+kind = "aws-doc"
+[[setup.buckets]]
+name = "conf-select"
+
+[[setup.objects]]
+bucket = "conf-select"
+key = "rows.csv"
+body = { utf8 = "a,b\n1,2\n" }
+
+[request]
+method = "POST"
+target = "/conf-select/rows.csv?select&select-type=2"
+headers = { "content-type" = "application/xml" }
+body = { utf8 = '<SelectObjectContentRequest><Expression>SELECT * FROM S3Object</Expression><ExpressionType>SQL</ExpressionType><InputSerialization><CSV/></InputSerialization><OutputSerialization><CSV/></OutputSerialization><RequestProgress><Enabled>false</Enabled></RequestProgress></SelectObjectContentRequest>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "event_stream"
+status = 200
+connection_after = "open"
+
+[[expect.events]]
+type = "Progress"
+min_count = 0
+max_count = 0
+
+[[expect.events]]
+type = "Cont"
+min_count = 0
+max_count = 0
+
+[[expect.events]]
+type = "Records"
+min_count = 1
+max_count = 1
+
+[[expect.events]]
+type = "Stats"
+min_count = 1
+max_count = 1
+
+[[expect.events]]
+type = "End"
+min_count = 1
+max_count = 1
+
+[expect.body]
+exact_hex = "0000006d000000551f81c9ee0d3a6d6573736167652d747970650700056576656e740b3a6576656e742d747970650700075265636f7264730d3a636f6e74656e742d747970650700186170706c69636174696f6e2f6f637465742d73747265616d612c620a312c320a339ad29f000000d500000043cbe23f6a0d3a6d6573736167652d747970650700056576656e740b3a6576656e742d7479706507000553746174730d3a636f6e74656e742d74797065070008746578742f786d6c3c53746174733e3c44657461696c733e3c42797465735363616e6e65643e383c2f42797465735363616e6e65643e3c427974657350726f6365737365643e383c2f427974657350726f6365737365643e3c427974657352657475726e65643e383c2f427974657352657475726e65643e3c2f44657461696c733e3c2f53746174733e217b407a0000003800000028c1c684d40d3a6d6573736167652d747970650700056576656e740b3a6576656e742d74797065070003456e64cf97d392"

@@ -252,13 +252,6 @@ pub const DECLARED: &[(&str, Disposition, &str)] = &[
          already what happens and `flush = false` would need a buffering client written for the \
          sole purpose of ignoring the boundary the schema exists to express",
     ),
-    (
-        "expect.events[].headers",
-        Disposition::Unhonoured,
-        "per-frame headers of an observed event stream. Both transports decode and record them, \
-         but the event matcher currently counts `event` messages by `type` and never compares \
-         these values",
-    ),
     // -- Unreachable behind a refusal -------------------------------------------------------------
     (
         "connection.tls.enabled",
