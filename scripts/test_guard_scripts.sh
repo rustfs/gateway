@@ -17482,6 +17482,16 @@ mut_ci_time_workflow_env_overrides_cargo() {
 expect_fail check_ci_time_gate.sh \
     'the workflow environment overriding the required command path' mut_ci_time_workflow_env_overrides_cargo
 
+# A group shared by every main push lets the next merge cancel a pending main run regardless of
+# cancel-in-progress (2026-09-28: fifteen consecutive main runs cancelled).
+mut_ci_time_concurrency_main_shares_group() {
+    replace_ci_text "  group: \${{ github.workflow }}-\${{ github.event_name == 'pull_request' && github.ref || github.sha }}" \
+        '  group: ${{ github.workflow }}-${{ github.ref }}'
+}
+expect_fail check_ci_time_gate.sh \
+    'main pushes sharing one concurrency group so a newer merge cancels the pending run' \
+    mut_ci_time_concurrency_main_shares_group
+
 mut_ci_time_concurrency_cancel_disabled() {
     replace_ci_text "  cancel-in-progress: \${{ github.event_name == 'pull_request' }}" '  cancel-in-progress: false'
 }

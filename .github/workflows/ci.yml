@@ -101,8 +101,15 @@ permissions:
 
 # A superseded pull-request run is cancelled; a main push always runs to completion, because
 # with frequent merges a cancelled main run means nobody can ever confirm main is green.
+#
+# `cancel-in-progress: false` alone does not deliver that. A concurrency group holds one running
+# and one pending run, and GitHub cancels the pending one whenever a newer run joins the group,
+# whatever cancel-in-progress says. With main pushes sharing one group per ref, every merge wave
+# cancelled all but the last push: fifteen consecutive main commits on 2026-09-28 ended
+# `cancelled`, none verified. Each main push therefore gets a group of its own (its commit SHA);
+# pull requests keep one group per ref so a new push still supersedes the old run.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
