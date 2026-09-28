@@ -28,7 +28,7 @@ use rustls::ClientConfig;
 use rustls::pki_types::ServerName;
 
 use super::Connection;
-use super::stream::ConnectionStream;
+use super::stream::{ConnectionStream, DuplexIo};
 use crate::sut::SutError;
 
 impl Connection {
@@ -38,11 +38,25 @@ impl Connection {
         Ok(Self::plain(socket))
     }
 
-    /// Borrows the sole cleartext socket for incremental duplex I/O; never bypasses TLS records.
-    pub(crate) fn cleartext_socket(&mut self) -> Result<&mut TcpStream, SutError> {
+    /// Borrows the connection for incremental duplex I/O; over TLS every byte goes through the
+    /// session, never around it.
+    pub(crate) fn duplex_io(&mut self) -> DuplexIo<'_> {
         match &mut self.stream {
-            ConnectionStream::Plain(socket) => Ok(socket),
-            ConnectionStream::Tls(_) => Err(SutError::Environment("incremental HTTP/2 socket I/O requires cleartext".to_owned())),
+            ConnectionStream::Plain(socket) => DuplexIo::Plain(socket),
+            ConnectionStream::Tls(stream) => DuplexIo::Tls(stream),
+        }
+    }
+
+    /// Whether this connection carries a TLS session.
+    pub(crate) const fn is_tls(&self) -> bool {
+        matches!(self.stream, ConnectionStream::Tls(_))
+    }
+
+    /// The ALPN protocol the TLS peer selected; `None` in cleartext or when none was selected.
+    pub(crate) fn alpn_protocol(&self) -> Option<Vec<u8>> {
+        match &self.stream {
+            ConnectionStream::Plain(_) => None,
+            ConnectionStream::Tls(stream) => stream.conn.alpn_protocol().map(<[u8]>::to_vec),
         }
     }
 

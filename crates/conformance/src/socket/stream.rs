@@ -126,3 +126,100 @@ impl Write for ConnectionStream {
         }
     }
 }
+
+/// One owner's nonblocking, incremental I/O over either transport, for the HTTP/2 duplex writer.
+///
+/// Over TLS, a write returns once rustls has accepted the plaintext; the records carrying it may
+/// still be queued, and [`DuplexIo::flush_pending`] pushes them as the socket allows. A read
+/// returns decrypted application bytes, and zero at either a `close_notify` or TCP end of stream.
+pub(crate) enum DuplexIo<'a> {
+    Plain(&'a mut TcpStream),
+    Tls(&'a mut StreamOwned<ClientConnection, TcpStream>),
+}
+
+impl DuplexIo<'_> {
+    /// The socket underneath, for blocking-mode changes only.
+    pub(crate) fn socket(&mut self) -> &mut TcpStream {
+        match self {
+            Self::Plain(socket) => socket,
+            Self::Tls(stream) => &mut stream.sock,
+        }
+    }
+
+    pub(crate) const fn is_tls(&self) -> bool {
+        matches!(self, Self::Tls(_))
+    }
+
+    pub(crate) fn read_available(&mut self, bytes: &mut [u8]) -> std::io::Result<usize> {
+        match self {
+            Self::Plain(socket) => socket.read(bytes),
+            Self::Tls(stream) => loop {
+                match stream.conn.reader().read(bytes) {
+                    Err(error) if error.kind() == ErrorKind::WouldBlock => {}
+                    result => return result,
+                }
+                // A record error is sticky in rustls, so it surfaces here once the plaintext that
+                // was decrypted before it has been read.
+                stream
+                    .conn
+                    .process_new_packets()
+                    .map_err(|error| Error::new(ErrorKind::InvalidData, error.to_string()))?;
+                if stream.conn.read_tls(&mut stream.sock)? == 0 {
+                    // Plaintext still buffered, `Ok(0)` after `close_notify`, or `UnexpectedEof`
+                    // when the TCP stream ended without one.
+                    return stream.conn.reader().read(bytes);
+                }
+                if let Err(error) = stream.conn.process_new_packets() {
+                    // Hand over what was decrypted before the bad record; the error follows.
+                    return match stream.conn.reader().read(bytes) {
+                        Ok(read) if read > 0 => Ok(read),
+                        _ => Err(Error::new(ErrorKind::InvalidData, error.to_string())),
+                    };
+                }
+            },
+        }
+    }
+
+    pub(crate) fn write_some(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        match self {
+            Self::Plain(socket) => socket.write(bytes),
+            Self::Tls(stream) => {
+                flush_tls(stream)?;
+                if stream.conn.wants_write() {
+                    return Err(Error::new(ErrorKind::WouldBlock, "earlier TLS records are still queued"));
+                }
+                let accepted = stream.conn.writer().write(bytes)?;
+                flush_tls(stream)?;
+                Ok(accepted)
+            }
+        }
+    }
+
+    /// Whether TLS records carrying accepted plaintext are still queued, not yet on the wire.
+    pub(crate) fn has_queued(&self) -> bool {
+        match self {
+            Self::Plain(_) => false,
+            Self::Tls(stream) => stream.conn.wants_write(),
+        }
+    }
+
+    /// Writes queued TLS records until the socket would block; nothing to do in cleartext.
+    pub(crate) fn flush_pending(&mut self) -> std::io::Result<()> {
+        match self {
+            Self::Plain(_) => Ok(()),
+            Self::Tls(stream) => flush_tls(stream),
+        }
+    }
+}
+
+fn flush_tls(stream: &mut StreamOwned<ClientConnection, TcpStream>) -> std::io::Result<()> {
+    while stream.conn.wants_write() {
+        match stream.conn.write_tls(&mut stream.sock) {
+            Ok(0) => return Err(Error::new(ErrorKind::WriteZero, "TLS record write made no progress")),
+            Ok(_) => {}
+            Err(error) if error.kind() == ErrorKind::WouldBlock => return Ok(()),
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
+}

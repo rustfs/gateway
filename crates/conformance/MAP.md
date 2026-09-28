@@ -45,7 +45,7 @@ ADRs; this map only selects files.
 | `src/socket.rs` | Real socket transport and connection observations. | A wire-level close/reuse fact is wrong. |
 | `src/socket/connect.rs` | Plain and TLS client connection setup, including absolute setup deadlines. | A TCP connect or TLS handshake escapes the case budget. |
 | `src/socket/response.rs` | Fixed-length and chunked HTTP/1.1 response decoding. | A raw response body is truncated or framed incorrectly. |
-| `src/socket/stream.rs` | The client transport under one connection: plain socket or TLS session. | Authored bytes are altered, or the socket underneath a TLS session is unobservable. |
+| `src/socket/stream.rs` | The client transport under one connection: plain socket or TLS session, and nonblocking duplex I/O over either. | Authored bytes are altered, or the socket underneath a TLS session is unobservable. |
 | `src/conn/` | Connection state and reusable transport helpers. | A multi-exchange case loses connection state. |
 | `src/conn/control_chunks.rs` | Control chunks on a socket exchange: body catch-up, stalls, teardowns, and what they charge to the harness account. | A `stall`, `half_close`, or `close` control chunk is carried out or timed wrongly. |
 | `src/conn/bind.rs` | Queues a pacing rendezvous before a fresh socket connects. | A socket case skips only under scheduler load. |
@@ -76,7 +76,7 @@ ADRs; this map only selects files.
 | `src/conn/h2/tests/h2_authored_flow_tests.rs` | Literal outbound flow violations followed by measured peer errors. | Checking that local credit accounting does not discard actual GOAWAY or reset observations. |
 | `src/conn/h2/tests/h2_duplex_tests.rs` | Socket-ordered credit and early controls during unfinished writes. | Checking retroactive grants or hidden peer resets under backpressure. |
 | `src/conn/h2/tests/h2_client_control_tests.rs`, `src/conn/h2/tests/h2_ping_tests.rs` | Client control-frame envelopes and refusals; authored PING, received acknowledgements, and the client-reset barrier. | Checking how an authored control frame reaches the wire, or when a client reset counts as processed. |
-| `src/conn/h2/tests/h2_streams_tests.rs` | Scripts with more than one stream: which stream is observed and how the others are read. | Checking stream selection, shared HPACK state or shared connection credit. |
+| `src/conn/h2/tests/h2_streams_tests.rs`, `src/conn/h2/tests/h2_tls_tests.rs` | Scripts with more than one stream; authored HTTP/2 over TLS with ALPN `h2` and TLS end-of-stream facts. | Checking stream selection, shared HPACK state or credit, or an https endpoint's HTTP/2 path. |
 | `src/conn/h2/tests/h2_corpus_tests.rs` | Named HTTP/2 cases executed against production Hyper. | Checking that authored corpus coverage actually runs and passes. |
 | `src/inprocess/h2_frames.rs` | Reads `request.h2_frames` into typed, ordered frame declarations. | A declared frame field is lost before a transport sees it. |
 | `src/conn/server.rs` | Lazily assembles test and production listeners with the case clock and profile. | The socket transports assemble a different policy from in-process execution. |

@@ -12,13 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Responsible for: one cleartext owner interleaving literal frame writes and measured peer reads.
-//! NOT responsible for: TLS, automatic credit, or changing authored frame boundaries. Only the
+//! Responsible for: one owner interleaving literal frame writes and measured peer reads, in
+//! cleartext or through a TLS session (`crate::socket::DuplexIo`).
+//! NOT responsible for: TLS setup, automatic credit, or changing authored frame boundaries. Only the
 //! observed stream's request progress is measured; other streams' DATA spends connection credit.
 //! Upstream: the HTTP/2 executor; downstream: the socket, frame decoder, and two-scope flow ledger.
 
-use std::io::{ErrorKind, Read, Write};
-use std::net::TcpStream;
+use std::io::ErrorKind;
+
+use crate::socket::DuplexIo;
 
 use super::*;
 
@@ -27,6 +29,8 @@ pub(super) struct Progress {
     pub(super) at_response: Option<u64>,
     pub(super) body_complete: bool,
     pub(super) unfinished_script: bool,
+    /// The TLS peer ended the TCP stream without `close_notify`.
+    pub(super) truncated_tls: bool,
 }
 
 pub(super) fn run(
@@ -35,13 +39,14 @@ pub(super) fn run(
     clock: &mut ExchangeClock,
     sleep: Option<&mut dyn FnMut(Duration)>,
 ) -> Result<(Response, Progress), SutError> {
-    let socket = connection.cleartext_socket()?;
-    socket
+    let mut io = connection.duplex_io();
+    io.socket()
         .set_nonblocking(true)
         .map_err(|error| refused(format!("cannot start HTTP/2 duplex I/O: {error}")))?;
-    let result = pump(socket, script, clock, sleep);
+    let result = pump(&mut io, script, clock, sleep);
     // Restore blocking probes even on a protocol refusal; this connection has no other owner.
-    let restored = socket
+    let restored = io
+        .socket()
         .set_nonblocking(false)
         .map_err(|error| refused(format!("cannot finish HTTP/2 duplex I/O: {error}")));
     let result = result?;
@@ -50,7 +55,7 @@ pub(super) fn run(
 }
 
 fn pump(
-    socket: &mut TcpStream,
+    io: &mut DuplexIo<'_>,
     script: &Script,
     clock: &mut ExchangeClock,
     mut sleep: Option<&mut dyn FnMut(Duration)>,
@@ -59,10 +64,16 @@ fn pump(
     let mut reader = FrameReader::default();
     let mut receiver = Receiver::new(script);
     let mut writer = Writer::new();
+    // Inside TLS a write hands plaintext to the session, not to the wire, so the octets of the
+    // request body on the wire at the response are not measured.
+    if io.is_tls() {
+        writer.body_written = None;
+    }
     let mut at_response = None;
     let mut ended_body = false;
     let mut write_failed = false;
     let mut deadline_expiry = None;
+    let mut truncated_tls = false;
     'exchange: loop {
         if Instant::now() >= clock.deadline {
             deadline_expiry = Some(crate::observation::DeadlineExpiry {
@@ -95,7 +106,7 @@ fn pump(
                 break 'exchange;
             }
             let mut bytes = [0; 4096];
-            match socket.read(&mut bytes) {
+            match io.read_available(&mut bytes) {
                 Ok(0) => {
                     receiver.response.cut_short = Some(if reader.buffered.is_empty() {
                         ReadFailure::ClosedBeforeHead
@@ -107,6 +118,16 @@ fn pump(
                 Ok(count) => reader.buffered.extend_from_slice(&bytes[..count]),
                 Err(error) if error.kind() == ErrorKind::WouldBlock => break,
                 Err(error) if error.kind() == ErrorKind::Interrupted => continue,
+                // The TLS peer ended the TCP stream without `close_notify`: an end of stream, noted.
+                Err(error) if error.kind() == ErrorKind::UnexpectedEof => {
+                    truncated_tls = true;
+                    receiver.response.cut_short = Some(if reader.buffered.is_empty() {
+                        ReadFailure::ClosedBeforeHead
+                    } else {
+                        ReadFailure::Truncated
+                    });
+                    break 'exchange;
+                }
                 Err(error) => {
                     receiver.response.cut_short = Some(match error.kind() {
                         ErrorKind::ConnectionReset | ErrorKind::ConnectionAborted => ReadFailure::Reset,
@@ -146,7 +167,7 @@ fn pump(
         if !waiting && !partial_peer_grant && !write_failed && writer.offset < writer.bytes.len() {
             // A bounded syscall slice allows read progress even when the socket accepts a large frame.
             let end = (writer.offset + 16_384).min(writer.bytes.len());
-            match socket.write(&writer.bytes[writer.offset..end]) {
+            match io.write_some(&writer.bytes[writer.offset..end]) {
                 Ok(0) => write_failed = true,
                 Ok(count) => {
                     if !writer.preface
@@ -186,6 +207,12 @@ fn pump(
                 Err(_) => write_failed = true,
             }
         }
+        // Queued TLS records go out as the socket allows; cleartext has none.
+        match io.flush_pending() {
+            Ok(()) => {}
+            Err(error) if error.kind() == ErrorKind::WouldBlock => {}
+            Err(_) => write_failed = true,
+        }
         let pause = clock
             .deadline
             .saturating_duration_since(Instant::now())
@@ -196,6 +223,9 @@ fn pump(
             std::thread::sleep(pause);
         }
     }
+    // Records still queued when the exchange ended never reached the peer.
+    let _ = io.flush_pending();
+    let unsent_records = io.has_queued();
     let body_complete = ended_body
         && script
             .envelopes
@@ -206,7 +236,8 @@ fn pump(
         deadline_expiry,
         at_response,
         body_complete,
-        unfinished_script: writer.preface || writer.index < script.envelopes.len(),
+        unfinished_script: writer.preface || writer.index < script.envelopes.len() || unsent_records,
+        truncated_tls,
     };
     Ok((receiver.response, progress))
 }
