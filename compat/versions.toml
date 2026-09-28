@@ -17,6 +17,25 @@
 #
 # `boto3` has no such database. Its identity is checked the other way: pip installs the exact
 # `==` version and the runner compares `boto3.__version__` with the pin.
+#
+# Four install methods, each with its own read-back:
+#
+#   go       `go install <module>@<version>`; read back with `go version -m <binary>`.
+#   pip      `pip install` into the runner's interpreter; read back as `<package>.__version__`.
+#   venv     `pip install` into a virtualenv of its own under `$COMPAT_CLIENTS_DIR/<name>`, for a
+#            command-line client whose dependencies must not share an interpreter with another
+#            client's; its `binary` is linked into `$COMPAT_CLIENTS_DIR/bin`. Read back by running
+#            `version_command` and matching `version_pattern` (group 1) against the pin.
+#   program  a driver program in `source` built from its own lock file by `build`, for an SDK that
+#            is a library rather than a command. The lock file necessarily names the SDK version a
+#            second time, so `scripts/check_client_versions_pinned.sh` requires `lock_pattern`
+#            (group 1) to match it exactly once and to equal the pin here. The built program
+#            answers `version_command` with the version of the SDK it actually linked, read from
+#            the SDK itself rather than from the lock file, and that is what the runner compares.
+#
+# `version_command` and `build` are shell strings. They run with `COMPAT_CLIENT_OUT` set to the
+# client's own directory under `$COMPAT_CLIENTS_DIR` (default `target/compat-clients`), and with
+# `$COMPAT_CLIENTS_DIR/bin` first on `PATH`.
 
 [clients.boto3]
 install = "pip"
@@ -49,3 +68,31 @@ module = "github.com/rclone/rclone"
 module_version_path = "github.com/rclone/rclone"
 version = "v1.74.0"
 binary = "rclone"
+
+[clients.aws-cli]
+install = "venv"
+# aws-cli v2 is not on PyPI (the `awscli` package there is v1, a different client), so the pin is
+# its release tag's source archive. pip verifies the archive against the `#sha256=` fragment and
+# refuses a mismatch before anything is installed, so a moved tag cannot change what runs.
+requirements = [
+  "awscli @ https://github.com/aws/aws-cli/archive/refs/tags/2.37.4.tar.gz#sha256=0f003652fd53309c68124be6edb5c5c14ae332d9f04e42f880c8ff565eb5a526",
+]
+version = "2.37.4"
+binary = "aws"
+version_command = "aws --version"
+version_pattern = '^aws-cli/(\S+) '
+
+[clients.s3cmd]
+install = "venv"
+requirements = ["s3cmd==2.4.0"]
+version = "2.4.0"
+binary = "s3cmd"
+version_command = "s3cmd --version"
+version_pattern = '^s3cmd version (\S+)$'
+
+[clients.opendal]
+install = "pip"
+# The Python binding of Apache OpenDAL: the same Rust `services-s3` backend s3s's own OpenDAL
+# client test drove, behind a thin PyO3 layer, so no Rust toolchain or second lock file is needed.
+package = "opendal"
+version = "0.47.10"

@@ -55,6 +55,10 @@ done
 export GATEWAY_COMPAT_ACCESS_KEY="${GATEWAY_COMPAT_ACCESS_KEY:-compatmatrixkey}"
 export GATEWAY_COMPAT_SECRET_KEY="${GATEWAY_COMPAT_SECRET_KEY:-compatmatrixsecret0123456789}"
 export GATEWAY_COMPAT_REGION="${GATEWAY_COMPAT_REGION:-us-east-1}"
+# Where `ci/compat/install_clients.sh` put the clients it does not install onto the global PATH:
+# virtualenvs, SDK driver programs, and the `bin/` their commands are linked into.
+export COMPAT_CLIENTS_DIR="${COMPAT_CLIENTS_DIR:-$ROOT_DIR/target/compat-clients}"
+export PATH="$COMPAT_CLIENTS_DIR/bin:$PATH"
 
 problem() {
     printf 'run_matrix: %s\n' "$*" >&2
@@ -158,7 +162,7 @@ for client in $CLIENTS; do
                 --timeout "$SCENARIO_TIMEOUT" \
                 --out "$RUN_DIR/results/$client/$scenario.json"
         )"
-        printf 'run_matrix: %-8s %-26s %s\n' "$client" "$scenario" "$status"
+        printf 'run_matrix: %-18s %-26s %s\n' "$client" "$scenario" "$status"
     done
 done
 
