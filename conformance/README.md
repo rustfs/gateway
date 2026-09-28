@@ -142,7 +142,21 @@ so already available DATA is checked before later grants and an early stream res
 unfinished request. GOAWAY alone does not end the selected stream. Request progress records actual
 unpadded DATA payload writes at the first response head or a pre-head reset; padded authored DATA
 leaves that application-byte count unavailable. An unfinished script is reported explicitly.
-This support does not extend to TLS or multiple concurrent streams.
+This support does not extend to TLS.
+
+A script may open more than one stream. The observed stream is the last one an authored HEADERS
+frame opens; request trailers on an earlier stream do not move it. Each other stream a HEADERS frame
+opened is read but not observed: nothing records whether it was answered. Its header blocks
+are decompressed in order, because every block can change the shared HPACK dynamic table (RFC 9113
+section 4.3); its DATA spends the shared connection window, whose limit still holds, while its own stream
+window is not tracked, so a peer overrunning another stream's window is not detected; and its
+WINDOW_UPDATE and RST_STREAM frames are recorded in `h2_control_frames` like the observed stream's.
+A peer frame on a stream no authored HEADERS opened is still refused. Only the observed stream's
+own credit and request progress are tracked: authored DATA on another stream spends connection
+credit and is not the observed request's body. Stream identifiers are written exactly as authored,
+so a lower identifier after a higher one, or a HEADERS frame inside another stream's unfinished
+header block, stays an executable protocol violation. Reusing an identifier whose earlier request
+has already been answered cannot be observed this way, because that answer ends the observation.
 
 Authored `rst_stream`, `goaway`, `priority` and `raw` frames are written exactly as declared, and
 the peer's reaction is observed like any other: a status, the received controls, and measured

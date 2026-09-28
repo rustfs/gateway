@@ -25,14 +25,14 @@
 //!
 //! # What is executed, and what is refused by name
 //!
-//! * SETTINGS, HEADERS, CONTINUATION, DATA, WINDOW_UPDATE, RST_STREAM, GOAWAY, PRIORITY and `raw`
-//!   frames are written; `control` compiles the last four. What the peer does after them is observed
-//!   like any other reaction: a status, received controls, and independently measured termination.
-//!   A client reset of the selected stream is not an end condition: nothing on the wire says the
-//!   peer has processed it, so the observation still ends only on a peer fact or the deadline.
-//! * One stream per script. Received RST_STREAM frames are recorded in arrival order; resetting
-//!   the selected stream ends its observation without implying a TCP reset. GOAWAY is recorded
-//!   without ending an in-flight stream or inventing receive-side termination.
+//! * SETTINGS, HEADERS, CONTINUATION, DATA, WINDOW_UPDATE, RST_STREAM, GOAWAY, PRIORITY, PING and
+//!   `raw` frames are written; `control` compiles the last five. What the peer does after them is
+//!   observed like any other reaction: a status, received controls, and measured termination. A
+//!   client reset of the selected stream ends the observation only through the reset barrier.
+//! * The selected stream is the one the last authored HEADERS frame names; other opened streams are
+//!   read (`receive`) but not observed. Received RST_STREAM frames are recorded in arrival order;
+//!   resetting the selected stream ends its observation without implying a TCP reset. GOAWAY is
+//!   recorded without ending an in-flight stream or inventing receive-side termination.
 //! * Only the production Hyper driver speaks HTTP/2 in cleartext with prior knowledge. The
 //!   self-held driver, the test harness, external endpoints, and TLS refuse the script.
 
@@ -117,8 +117,12 @@ impl Envelope {
 #[derive(Debug)]
 struct Script {
     envelopes: Vec<Envelope>,
-    /// The one stream the script opens; the response on it is the observation.
+    /// The stream the last authored HEADERS frame opens; the response on it is the observation.
     stream_id: u32,
+    /// Every stream an authored HEADERS frame names, the observed one included. The peer's frames
+    /// on the others are read — header blocks decompressed, DATA charged to connection credit —
+    /// and not observed.
+    opened: Vec<u32>,
     /// The dynamic-table ceiling this client advertised, which bounds the peer's HPACK encoder.
     header_table_size: usize,
     /// The opaque octets of the last PING authored after a client RST_STREAM on the selected
@@ -158,18 +162,15 @@ fn compile(wire: &Wire) -> Result<Script, SutError> {
     }
     let mut envelopes = Vec::with_capacity(wire.h2_frames.len());
     let mut stream_id = None;
+    let mut opened = Vec::new();
     let mut header_table_size = DEFAULT_HEADER_TABLE_SIZE;
     for (index, frame) in wire.h2_frames.iter().enumerate() {
         let envelope = envelope(index, frame)?;
-        if matches!(envelope.frame_type, HEADERS | CONTINUATION | DATA) {
-            let opened = *stream_id.get_or_insert(envelope.stream_id);
-            if envelope.stream_id != opened {
-                return Err(refused(format!(
-                    "`h2_frames[{index}]` is on stream {} after the script opened stream {opened}; \
-                     scripts with more than one stream are not executed yet",
-                    envelope.stream_id
-                )));
-            }
+        // The last stream a HEADERS frame opens is the observed one; the others are read. Trailers
+        // on an earlier stream do not open it again, so they do not move the observation.
+        if envelope.frame_type == HEADERS && !opened.contains(&envelope.stream_id) {
+            opened.push(envelope.stream_id);
+            stream_id = Some(envelope.stream_id);
         }
         if envelope.frame_type == SETTINGS
             && envelope.flags & ACK == 0
@@ -194,6 +195,7 @@ fn compile(wire: &Wire) -> Result<Script, SutError> {
         header_table_size,
         reset_barrier,
         observes_pings,
+        opened,
     })
 }
 

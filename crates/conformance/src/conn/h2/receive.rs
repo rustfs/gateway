@@ -70,7 +70,8 @@ pub(super) struct Response {
 pub(super) struct Receiver {
     pub(super) decoder: hpack::Decoder,
     pub(super) response: Response,
-    pub(super) open_block: Option<(Vec<u8>, bool)>,
+    /// An unfinished header block: its stream, the fragments so far, and whether it ends the stream.
+    pub(super) open_block: Option<(u32, Vec<u8>, bool)>,
 }
 
 impl Receiver {
@@ -89,8 +90,8 @@ impl Receiver {
             response,
             open_block,
         } = self;
-        if let Some((mut fragment, ends_stream)) = open_block.take() {
-            if frame.frame_type != CONTINUATION || frame.stream_id != script.stream_id {
+        if let Some((block_stream, mut fragment, ends_stream)) = open_block.take() {
+            if frame.frame_type != CONTINUATION || frame.stream_id != block_stream {
                 return Err(refused(format!(
                     "the peer sent {} on stream {} inside an unfinished header block, which RFC 9113 \
                      section 6.10 forbids",
@@ -100,14 +101,15 @@ impl Receiver {
             }
             fragment.extend_from_slice(&frame.payload);
             if frame.flags & END_HEADERS == 0 {
-                *open_block = Some((fragment, ends_stream));
+                *open_block = Some((block_stream, fragment, ends_stream));
+                return Ok(false);
+            }
+            if block_stream != script.stream_id {
+                discard_block(decoder, &fragment)?;
                 return Ok(false);
             }
             accept_block(response, decoder, &fragment)?;
-            if ends_stream {
-                return Ok(true);
-            }
-            return Ok(false);
+            return Ok(ends_stream);
         }
         match frame.frame_type {
             // Connection management addressed to this client: read, and answered only when the case
@@ -138,23 +140,32 @@ impl Receiver {
                 if increment == 0 {
                     return Err(refused("WINDOW_UPDATE increment must not be zero".to_owned()));
                 }
-                flow.received_update(frame.stream_id, increment)?;
+                flow.received_update(frame.stream_id, increment, script.opened.contains(&frame.stream_id))?;
                 response.control_frames.push(ObservedH2ControlFrame::WindowUpdate {
                     stream_id: frame.stream_id,
                     increment,
                 });
             }
-            HEADERS if frame.stream_id == script.stream_id => {
+            HEADERS if script.opened.contains(&frame.stream_id) => {
                 let fragment = unpadded(&frame)?.to_vec();
                 let ends_stream = frame.flags & END_STREAM != 0;
                 if frame.flags & END_HEADERS == 0 {
-                    *open_block = Some((fragment, ends_stream));
+                    *open_block = Some((frame.stream_id, fragment, ends_stream));
+                    return Ok(false);
+                }
+                if frame.stream_id != script.stream_id {
+                    discard_block(decoder, &fragment)?;
                     return Ok(false);
                 }
                 accept_block(response, decoder, &fragment)?;
                 if ends_stream {
                     return Ok(true);
                 }
+            }
+            // Another opened stream's body is not observed, but it spends the shared connection credit.
+            DATA if frame.stream_id != script.stream_id && script.opened.contains(&frame.stream_id) => {
+                unpadded(&frame)?;
+                flow.received_other_data(frame.payload.len())?;
             }
             DATA if frame.stream_id == script.stream_id => {
                 if response.status.is_none() {
@@ -232,6 +243,14 @@ pub(super) fn accept_block(response: &mut Response, decoder: &mut hpack::Decoder
     response.status = Some(status);
     response.headers = fields.collect();
     Ok(())
+}
+
+/// Decompresses another stream's header block for the shared dynamic table, and discards it.
+pub(super) fn discard_block(decoder: &mut hpack::Decoder, block: &[u8]) -> Result<(), SutError> {
+    decoder
+        .decode(block)
+        .map(drop)
+        .map_err(|error| refused(format!("the peer's header block could not be decoded: {error}")))
 }
 
 /// A DATA or HEADERS payload without its padding and priority fields (RFC 9113 sections 6.1, 6.2).

@@ -1,0 +1,46 @@
+# c-h2-0023 — more than one stream on one HTTP/2 connection.
+
+[case]
+id = "c-h2-0023"
+schema_version = 4
+title = "Opening stream 1 after stream 3 is a connection PROTOCOL_ERROR"
+rationale = "A stream identifier lower than one the client already opened can never be valid; answering it would let a client reorder or replay streams."
+polarity = "negative"
+tags = ["framing"]
+timeout_ms = 1500
+quirks = []
+applies_to = { http_versions = ["h2"], tls = "forbidden" }
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9113.html#section-5.1.1"
+summary = "A client opens streams with odd identifiers, each numerically greater than every stream it opened before; an unexpected identifier is a connection PROTOCOL_ERROR."
+kind = "rfc"
+
+[request]
+method = "GET"
+target = "/"
+http_version = "h2"
+
+[[request.h2_frames]]
+type = "settings"
+
+# Written 100 ms after SETTINGS so the peer's initial grant is on the wire first; the ordered
+# expectation fails, rather than passes, on a host too slow for that.
+
+[[request.h2_frames]]
+type = "headers"
+stream_id = 3
+flags = ["end_headers", "end_stream"]
+payload_hex = "828684410e73332e6578616d706c652e636f6d"
+delay_ms = 100
+
+[[request.h2_frames]]
+type = "headers"
+stream_id = 1
+flags = ["end_headers", "end_stream"]
+payload_hex = "828684410e73332e6578616d706c652e636f6d"
+
+[expect]
+kind = "connection_reset"
+h2_control_frames = [{ type = "window_update", stream_id = 0, increment = 2031617 }, { type = "goaway", last_stream_id = 3, error_code = 1 }]
+socket_read_after = "eof"

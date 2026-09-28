@@ -13,7 +13,8 @@
 // limitations under the License.
 
 //! Responsible for: one cleartext owner interleaving literal frame writes and measured peer reads.
-//! NOT responsible for: TLS, multiple streams, automatic credit, or changing authored frame boundaries.
+//! NOT responsible for: TLS, automatic credit, or changing authored frame boundaries. Only the
+//! observed stream's request progress is measured; other streams' DATA spends connection credit.
 //! Upstream: the HTTP/2 executor; downstream: the socket, frame decoder, and two-scope flow ledger.
 
 use std::io::{ErrorKind, Read, Write};
@@ -154,12 +155,15 @@ fn pump(
                     {
                         let before = writer.offset.saturating_sub(FRAME_HEADER_LEN);
                         let after = (writer.offset + count).saturating_sub(FRAME_HEADER_LEN);
-                        flow.sent_data(after - before);
+                        flow.sent_data(after - before, envelope.stream_id);
                         // Authored padded DATA is literal, but its application-byte progress is unavailable.
-                        writer.body_written = writer
-                            .body_written
-                            .filter(|_| envelope.flags & PADDED == 0)
-                            .and_then(|written| written.checked_add(u64::try_from(after - before).ok()?));
+                        // Another stream's DATA is not the observed request's body.
+                        if envelope.stream_id == script.stream_id {
+                            writer.body_written = writer
+                                .body_written
+                                .filter(|_| envelope.flags & PADDED == 0)
+                                .and_then(|written| written.checked_add(u64::try_from(after - before).ok()?));
+                        }
                     }
                     writer.offset += count;
                     if writer.offset == writer.bytes.len() {
@@ -168,7 +172,9 @@ fn pump(
                         } else if let Some(envelope) = script.envelopes.get(writer.index) {
                             // Commit the grant before reading a peer response to the completed frame.
                             flow.sent(envelope);
-                            ended_body |= matches!(envelope.frame_type, DATA | HEADERS) && envelope.flags & END_STREAM != 0;
+                            ended_body |= matches!(envelope.frame_type, DATA | HEADERS)
+                                && envelope.flags & END_STREAM != 0
+                                && envelope.stream_id == script.stream_id;
                             writer.index += 1;
                         }
                     }
@@ -195,7 +201,7 @@ fn pump(
             .envelopes
             .iter()
             .skip(writer.index)
-            .all(|frame| frame.frame_type != DATA);
+            .all(|frame| frame.frame_type != DATA || frame.stream_id != script.stream_id);
     let progress = Progress {
         deadline_expiry,
         at_response,
