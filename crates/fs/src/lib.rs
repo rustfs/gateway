@@ -535,9 +535,13 @@ impl Handler<UploadPart> for FsBackend {
         };
         self.store_part(input.bucket.as_str(), &upload_id, input.part_number, &bytes)
             .await?;
+        // A part reports the encryption its upload was initiated under.
+        let encryption = record.attributes.headers.encryption();
         Ok(Resp::new(UploadPartOutput {
             e_tag: etag(&bytes)?,
             checksum_spec,
+            server_side_encryption: encryption.reported_algorithm(),
+            ssekms_key_id: encryption.kms_key_id,
             ..UploadPartOutput::default()
         }))
     }
