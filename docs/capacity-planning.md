@@ -114,6 +114,14 @@ self-held HTTP/1 driver negotiates a `FileRegion` separately and reports complet
 calls and bytes; TLS, HTTP/2, verification obligations and unsupported platforms stay on a named,
 byte-counted user-space fallback.
 
+A handler answers with a file region through `ByteStream::from_file_region`. On the self-held
+driver it leaves through `sendfile`. On every other path — the Hyper driver, TLS, HTTP/2, an
+in-process `call_bytes` caller — `S3Service` copies it on the blocking pool in 64 KiB reads and
+records one `adapt_copies_total` of the region's length plus one `zero_copy_refusals` with the
+reason (`tls-in-path`, `http2-in-path`, `transport-lacks-sendfile`, or
+`verification-obligation-present`). The copy is streamed, so its resident cost is one read buffer,
+not the object.
+
 Dedicated 1 GiB RSS and syscall measurements belong to rustfs/backlog#1766, as recorded by
 ADR-0014. They are not wall-clock gates on shared runners.
 

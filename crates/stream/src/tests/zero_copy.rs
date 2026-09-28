@@ -176,3 +176,73 @@ fn every_refusal_reason_has_a_distinct_label() {
         assert!(!labels[index + 1..].contains(label), "duplicate refusal label {label}");
     }
 }
+
+/// rustfs/gateway#949. Negative — a response `ByteStream` over a file region becomes a file-backed
+/// body carrying the handler's counters, and polling it where there is no i/o driver is a named
+/// error rather than a silent empty stream.
+#[test]
+fn a_file_region_byte_stream_is_terminal_and_keeps_its_counters() {
+    use std::sync::Arc;
+
+    use crate::byte_stream::ByteStream;
+    use crate::stream::PayloadStream;
+
+    let metrics = Arc::new(StreamMetrics::new());
+    let stream = ByteStream::from_file_region(file_region(4096), Arc::clone(&metrics));
+    assert!(stream.is_file_region());
+    assert_eq!(stream.len_hint(), Some(4096));
+    let body = stream.into_body();
+    assert_eq!(body.file_region_end_offset(), Some(4096));
+    assert!(Arc::ptr_eq(body.stream_metrics(), &metrics));
+
+    let mut polled = Box::pin(ByteStream::from_file_region(file_region(8), Arc::new(StreamMetrics::new())));
+    let mut context = core::task::Context::from_waker(core::task::Waker::noop());
+    match polled.as_mut().poll_read(&mut context) {
+        core::task::Poll::Ready(Err(error)) => assert!(error.to_string().contains("i/o driver"), "{error}"),
+        other => panic!("a file-region stream polled without an i/o driver answered {other:?}"),
+    }
+}
+
+/// Negative — the copied path records the transport's reason once, except that an outstanding
+/// verification obligation outranks it; a body that is not a file records nothing.
+#[test]
+fn the_copied_path_records_one_reason_and_the_obligation_outranks_the_transport() {
+    use std::sync::Arc;
+
+    let metrics = Arc::new(StreamMetrics::new());
+    let body = crate::body::Body::from_payload_with_metrics(Payload::File(file_region(64)), Arc::clone(&metrics));
+    let copied = body
+        .into_transport()
+        .try_into_copied_file_for(NoZeroCopy::TlsInPath)
+        .expect("a file-backed body takes the copied path");
+    assert_eq!(copied.len(), 64);
+    assert_eq!(metrics.zero_copy_refusals(NoZeroCopy::TlsInPath), 1);
+    assert_eq!(metrics.zero_copy_refusals_total(), 1);
+
+    let obliged = Arc::new(StreamMetrics::new());
+    let body = crate::body::Body::from_payload_with_metrics(Payload::File(file_region(64)), Arc::clone(&obliged))
+        .requiring_verification();
+    assert!(
+        body.into_transport()
+            .try_into_copied_file_for(NoZeroCopy::Http2InPath)
+            .is_ok()
+    );
+    assert_eq!(obliged.zero_copy_refusals(NoZeroCopy::VerificationObligationPresent), 1);
+    assert_eq!(obliged.zero_copy_refusals(NoZeroCopy::Http2InPath), 0);
+
+    let memory = Arc::new(StreamMetrics::new());
+    let body = crate::body::Body::from_payload_with_metrics(Payload::Bytes(Bytes::from_static(b"x")), Arc::clone(&memory));
+    assert!(body.into_transport().try_into_copied_file_for(NoZeroCopy::TlsInPath).is_err());
+    assert_eq!(memory.zero_copy_refusals_total(), 0);
+}
+
+/// Negative — an HTTP/2 refusal is counted under its own name and in the total.
+#[test]
+fn an_http2_refusal_has_its_own_counter() {
+    let metrics = StreamMetrics::new();
+    metrics.record_zero_copy_refusal(NoZeroCopy::Http2InPath, Some(10));
+    assert_eq!(metrics.zero_copy_refusals(NoZeroCopy::Http2InPath), 1);
+    assert_eq!(metrics.zero_copy_refusals(NoZeroCopy::TlsInPath), 0);
+    assert_eq!(metrics.zero_copy_refusals_total(), 1);
+    assert_eq!(NoZeroCopy::Http2InPath.as_str(), "http2-in-path");
+}

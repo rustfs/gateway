@@ -678,6 +678,7 @@ gateway_modules = (
     "dialect_entry",
     "error_context_filters",
     "facade_probe",
+    "file_responses",
     "file_transfer",
     "governor_runtime",
     "governor_streaming",

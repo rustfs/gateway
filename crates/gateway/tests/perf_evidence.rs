@@ -18,9 +18,9 @@
 //! which syscalls moved the bytes (`strace`), how far the resident set rose (`VmHWM` after a
 //! reset), how many bytes the allocator handed out, and whether the transport counters agree
 //! with all three (rustfs/backlog#1740 a-zc-0002..0004, rustfs/backlog#1766 a-pf-0005, 0006,
-//! 0013). The copying control is the same driver forced onto its read-and-copy path by a
-//! verification obligation: the default Hyper driver cannot serve a `Payload::File` body at all
-//! (`AdaptRefusal::NeedsIoDriver`, rustfs/gateway#949), so it has no copy path to compare against yet.
+//! 0010, 0013). The copying controls are the same driver forced onto its read-and-copy path by a
+//! verification obligation, and a real `GetObject` handler's file region served by the default
+//! Hyper driver, which copies it once on the blocking pool (rustfs/gateway#949).
 //! NOT responsible for: throughput thresholds. Elapsed time is printed as a record and never
 //! asserted; the release-only `perf-evidence.yml` workflow runs this file, and the PR gate does not.
 //! Upstream: `SelfHeldHttp1Driver`, the default Hyper driver, `rustfs-gateway-stream` payloads.
@@ -238,26 +238,88 @@ mod release {
         }
     }
 
+    /// How a GET case serves the fixture.
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum GetMode {
+        /// A raw service on the self-held driver.
+        Kernel,
+        /// The same, with a verification obligation that forbids the kernel path.
+        ForcedCopy,
+        /// A real `GetObject` handler answering with a file region, through `S3Service` on Hyper.
+        HyperS3,
+    }
+
+    /// Answers every signed `GetObject` with the whole fixture as a file region.
+    struct FileObject {
+        path: PathBuf,
+        metrics: Arc<StreamMetrics>,
+    }
+
+    impl rustfs_gateway::Handler<rustfs_gateway::dto::GetObject> for FileObject {
+        async fn call(
+            &self,
+            _request: rustfs_gateway::Req<rustfs_gateway::dto::GetObject>,
+        ) -> rustfs_gateway::HandlerResult<rustfs_gateway::dto::GetObject> {
+            let file = File::open(&self.path).expect("the fixture remains openable");
+            let region = FileRegion::new(OwnedFd::from(file), 0, GIB).expect("the fixture range does not overflow");
+            Ok(rustfs_gateway::Resp::new(rustfs_gateway::dto::GetObjectOutput {
+                body: Some(rustfs_gateway::ByteStream::from_file_region(region, Arc::clone(&self.metrics))),
+                content_length: Some(GIB as i64),
+                ..rustfs_gateway::dto::GetObjectOutput::default()
+            }))
+        }
+    }
+
+    fn signed_get_head() -> Vec<u8> {
+        let signed = crate::support::signed(http::Method::GET, "/bucket/object");
+        let mut head = format!("GET {} HTTP/1.1\r\n", signed.uri());
+        for (name, value) in signed.headers() {
+            head.push_str(&format!("{name}: {}\r\n", value.to_str().expect("an ASCII header")));
+        }
+        head.push_str("connection: close\r\n\r\n");
+        head.into_bytes()
+    }
+
     /// Child role: one GET of the whole fixture, verified byte by byte on arrival.
-    async fn get_once(copy: bool, fixture: &Path) -> Vec<(&'static str, String)> {
+    async fn get_once(mode: GetMode, fixture: &Path) -> Vec<(&'static str, String)> {
         let stream_metrics = Arc::new(StreamMetrics::new());
         let transport = Arc::new(ResponseTransportMetrics::new());
-        let service = EvidenceService {
-            path: Arc::new(fixture.to_owned()),
-            stream_metrics: Arc::clone(&stream_metrics),
-            copy,
+        let (running, request) = if mode == GetMode::HyperS3 {
+            let service = crate::support::wired_at_signed_time()
+                .register::<rustfs_gateway::dto::GetObject, _>(Arc::new(FileObject {
+                    path: fixture.to_owned(),
+                    metrics: Arc::clone(&stream_metrics),
+                }))
+                .build()
+                .expect("a complete assembly");
+            let config = ServerConfig {
+                bind_addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
+                plaintext: true,
+                tcp_nodelay: true,
+                ..ServerConfig::default()
+            };
+            (
+                Server::new(config, service).serve().expect("the evidence server starts"),
+                signed_get_head(),
+            )
+        } else {
+            let service = EvidenceService {
+                path: Arc::new(fixture.to_owned()),
+                stream_metrics: Arc::clone(&stream_metrics),
+                copy: mode == GetMode::ForcedCopy,
+            };
+            (
+                start(Driver::SelfHeld, service, &transport),
+                b"GET /object HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n".to_vec(),
+            )
         };
-        let running = start(Driver::SelfHeld, service, &transport);
         let mut client = TcpStream::connect(running.local_addr).await.expect("the client connects");
         let mut buffer = Vec::with_capacity(256 * 1024);
         let mut chunk = vec![0_u8; 256 * 1024];
         let peak_reset = reset_peak();
         let before = resident();
         let started = Instant::now();
-        client
-            .write_all(b"GET /object HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
-            .await
-            .expect("the request writes");
+        client.write_all(&request).await.expect("the request writes");
         let (status, head_len) = read_head(&mut client, &mut buffer).await;
         assert_eq!(status, StatusCode::OK);
         let mut offset = 0_u64;
@@ -520,7 +582,7 @@ mod release {
     #[test]
     fn one_gib_get_on_the_self_held_driver_moves_no_byte_through_user_space() {
         const TEST: &str = "perf_evidence::release::one_gib_get_on_the_self_held_driver_moves_no_byte_through_user_space";
-        if child(TEST, |fixture| runtime().block_on(get_once(false, fixture))) {
+        if child(TEST, |fixture| runtime().block_on(get_once(GetMode::Kernel, fixture))) {
             return;
         }
         let fixture = Fixture::create();
@@ -551,7 +613,7 @@ mod release {
     #[test]
     fn one_gib_get_forced_to_copy_is_seen_copying() {
         const TEST: &str = "perf_evidence::release::one_gib_get_forced_to_copy_is_seen_copying";
-        if child(TEST, |fixture| runtime().block_on(get_once(true, fixture))) {
+        if child(TEST, |fixture| runtime().block_on(get_once(GetMode::ForcedCopy, fixture))) {
             return;
         }
         let fixture = Fixture::create();
@@ -565,6 +627,33 @@ mod release {
         assert_resident(TEST, &fields);
         if let Some(syscalls) = syscalls {
             assert_eq!(syscalls.sendfile_bytes, 0, "a copied body used the kernel path: {syscalls:?}");
+            assert!(
+                syscalls.write_bytes >= GIB,
+                "the copied body must appear in write-family syscalls: {syscalls:?}"
+            );
+        }
+    }
+
+    /// a-pf-0010 / a-zc-0012: a real `GetObject` handler answering with a 1 GiB file region,
+    /// served by the default Hyper driver. Hyper has no kernel path, so the region is copied once
+    /// on the blocking pool — counted as one adaptation of exactly a gibibyte with a named reason —
+    /// and the resident peak stays inside the same budget, because the copy is streamed in 64 KiB
+    /// reads rather than held.
+    #[test]
+    fn one_gib_get_on_the_hyper_driver_copies_once_and_counts_it() {
+        const TEST: &str = "perf_evidence::release::one_gib_get_on_the_hyper_driver_copies_once_and_counts_it";
+        if child(TEST, |fixture| runtime().block_on(get_once(GetMode::HyperS3, fixture))) {
+            return;
+        }
+        let fixture = Fixture::create();
+        let (fields, syscalls) = run_child(TEST, &fixture);
+        assert_eq!(value(&fields, "body_bytes"), GIB);
+        assert_eq!(value(&fields, "adapt_copies_total"), 1, "{fields:?}");
+        assert_eq!(value(&fields, "adapt_copied_bytes_total"), GIB, "{fields:?}");
+        assert_eq!(value(&fields, "zero_copy_refusals_total"), 1, "{fields:?}");
+        assert_resident(TEST, &fields);
+        if let Some(syscalls) = syscalls {
+            assert_eq!(syscalls.sendfile_bytes, 0, "the Hyper driver has no kernel path: {syscalls:?}");
             assert!(
                 syscalls.write_bytes >= GIB,
                 "the copied body must appear in write-family syscalls: {syscalls:?}"

@@ -14,7 +14,7 @@ for request order and `docs/assembly-order.md` for extension call counts.
 | `src/service.rs`, `src/service/update.rs` | Ordered pipeline and atomic assembly publication; ADR-0024's service-level addressing, secret opt-in and typed path values, and ADR-0025/0026's bound bucket (template or query) and subjects, are decided in `src/routed_facts.rs`; the route stage asks one question per action and per account | Moving a stage, replacing middleware, or tracing a response |
 | `src/service_tests.rs` | The pipeline's own unit suite, split out at the 800-line limit | Changing what is decidable without a request |
 | `src/adapt.rs`, `src/request_end.rs` | tower and hyper adapters; whether the request body ended before the answer (marks the response for the server's lingering close) | Wiring a server, checking `Infallible`, or a head-decided refusal ending in `RST` on the Hyper driver |
-| `src/conn/**`, `src/conn/response_tests.rs`, `src/conn/request_tests.rs`, `src/conn/request_cost_tests.rs` | Optional plaintext HTTP/1.1 framing and response transport, with bounded-vector, partial-write, and scripted request scan controls | Auditing the self-held socket path or changing response fallback writes |
+| `src/conn/**`, `src/conn/response_tests.rs`, `src/conn/request_tests.rs`, `src/conn/request_cost_tests.rs`, `src/file_fallback.rs` | Optional plaintext HTTP/1.1 framing and response transport, with bounded-vector, partial-write, and scripted request scan controls; file-region bodies copied on every other transport | Auditing the self-held socket path, changing response fallback writes, or a file body failing on Hyper |
 | `src/assembly.rs` | `AssemblyError` and `asm-*` rule refs | Adding an assembly refusal |
 | `src/dispatch.rs` | Codec-aware operation erasure and dispatch table | A route cannot decode or invoke |
 | `src/gate.rs` | Authentication proof, sealed body, the two ceilings' and two deadlines' values, and the four refusals they produce | Moving work around the body read |
@@ -84,7 +84,7 @@ for request order and `docs/assembly-order.md` for extension call counts.
 | `tests/sse_runtime.rs`, `tests/sse_runtime/context.rs` | TLS gate, key hygiene, multipart consistency and JSON context admission |
 | `tests/vhost_resolution.rs`, `tests/host_resolve_replay.rs` | Host boundary and fallback behavior; the `host_resolve` fuzz property over its committed seeds and 100,000 fixed-seed samples |
 | `tests/connection_teardown.rs`, `tests/self_held_http1.rs` | Connection intent and production self-held HTTP/1.1 wire controls |
-| `tests/payload_transport.rs`, `tests/unread_body_refusal.rs` | Payload framing and cancellation observed through real HTTP/1 sockets; a handler refusal before the body is read is the answer on every entry |
+| `tests/payload_transport.rs`, `tests/unread_body_refusal.rs`, `tests/file_responses.rs` | Payload framing and cancellation observed through real HTTP/1 sockets; a handler refusal before the body is read is the answer on every entry |
 | `tests/compat_aliases.rs` | Input-parameterized compatibility aliases remain identical to operation requests |
 | `tests/refusal_order_guards.rs` | Body-proof source guards |
 | `tests/precondition_contract.rs` | Real adapter controls for conditional-race and completed-part contract inputs |

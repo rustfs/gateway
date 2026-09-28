@@ -68,6 +68,8 @@ mod dialect_entry;
 mod error_context_filters;
 #[path = "facade_probe.rs"]
 mod facade_probe;
+#[path = "file_responses.rs"]
+mod file_responses;
 #[path = "file_transfer.rs"]
 mod file_transfer;
 #[path = "governor_runtime.rs"]
