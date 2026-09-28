@@ -85,6 +85,20 @@ layers = [
         "rustfs-gateway-corpus-recorder",
         {"rustfs-gateway", "rustfs-gateway-core", "rustfs-gateway-corpus"},
     ),
+    # Migration-only (rustfs/backlog#1762): the decode/encode diff drives the assembled facade and
+    # reads the route table, the wire view and the signature floor directly; s3s reaches it only
+    # through the types crate's compat seam.
+    (
+        "rustfs-gateway-difftest",
+        {
+            "rustfs-gateway",
+            "rustfs-gateway-core",
+            "rustfs-gateway-http",
+            "rustfs-gateway-sig",
+            "rustfs-gateway-stream",
+            "rustfs-gateway-types",
+        },
+    ),
     ("rustfs-gateway-conformance", {"rustfs-gateway"}),
     (
         "xtask",
