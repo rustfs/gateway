@@ -339,16 +339,16 @@ impl S3Service {
         let handler_deadline_report = config.handler_deadline_report();
         let trace = self.inner.traces.mint();
         let now = self.inner.clock.now();
-        // Read before the request is consumed, and the only thing kept out of it: the RFC 9110 body
-        // rules are stated over the request method, and every stage below has either forgotten it or
-        // never had it.
+        // Read before the request is consumed, and the only thing kept out of it: the RFC 9110 body rules are
+        // stated over the request method, and every stage below has either forgotten it or never had it.
         let method = request.method().clone();
-        // Read here for the same reason as the method: this is the last place the whole request
-        // exists, and `WireRequest::accept` publishes no way back to its extensions. Absent means
-        // cleartext, which is what makes the customer-key gate fail closed for a transport that
-        // has not been taught to declare anything.
+        // Read here for the same reason as the method: this is the last place the whole request exists, and
+        // `WireRequest::accept` publishes no way back to its extensions. Absent means cleartext, which is what
+        // makes the customer-key gate fail closed for a transport that has not been taught to declare anything.
+        // The file-body path is decided here too, and applied last (rustfs/gateway#949).
         let connection = connection_security(request.extensions());
         let client_addr = request.extensions().get::<ClientAddr>().copied();
+        let file_body_path = crate::file_fallback::FileBodyPath::of(request.extensions(), request.version());
         let mut outcome = Outcome::new(&trace, &method);
         let mut response = self
             .run(
@@ -451,7 +451,7 @@ impl S3Service {
             };
             crate::ext::observe_safely(runtime.observer.as_ref(), &event);
         }
-        response
+        file_body_path.adapt(response)
     }
 
     /// Answers one request whose body is already in memory.

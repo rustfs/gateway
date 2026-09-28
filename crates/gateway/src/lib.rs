@@ -92,6 +92,7 @@ mod conn;
 mod dialect_posture;
 mod dispatch;
 mod ext;
+mod file_fallback;
 mod gate;
 mod integrity;
 mod invariants;

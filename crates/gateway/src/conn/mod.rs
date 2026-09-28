@@ -178,7 +178,9 @@ where
         }
         let method = parsed.request.method().clone();
         let mut force_close = parsed.close_after_response || !config.h1_keep_alive;
-        let response = match Service::call(&mut service, parsed.request).await {
+        let mut request = parsed.request;
+        request.extensions_mut().insert(crate::file_fallback::KernelFileTransfer);
+        let response = match Service::call(&mut service, request).await {
             Ok(response) => response,
             Err(_) => {
                 close_socket(&io).await;
