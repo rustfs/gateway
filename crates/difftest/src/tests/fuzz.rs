@@ -174,10 +174,8 @@ fn the_reader_refuses_what_is_not_a_request() {
         b"GET /bkt/k\nbad name: v\n\n",
         b"GET /bkt/k\nx: \x7f\n\n",
         b"PUT /bkt/k\nx-amz-content-sha256: STREAMING-AWS4-HMAC-SHA256-PAYLOAD\n\nbody",
-        b"GET /bkt/k?response-expires=Thu%99%matchL0A00%matchL\n\n",
         b"GET /bkt/k\x7f\n\n",
         b"PUT /bkt/k?x-id=PutO#&c\x18\n\n",
-        b"GET /bkt/k\nif-modified-since: Thu\xc3\xa901 Jan 2026 00:00:00 GM\n\n",
         b"GET /bkt%2Fk\n\n",
         b"GET /bkt%2fk?list-type=2\n\n",
     ] {
@@ -204,10 +202,9 @@ fn the_reader_owns_framing_and_drops_the_operation_hint() {
         request_of(b"GET /bkt/a%2Fb\n\n").is_some(),
         "an escaped slash inside a key is data both stacks agree on"
     );
-    assert!(
-        request_of(b"GET /bkt/k?response-expires=Thu%2C%2001\n\n").is_some(),
-        "an ASCII escape in a date is read"
-    );
+    // rustfs/gateway#1013 is fixed: a date that is not ASCII is compared like any other value.
+    let reproducer = request_of(b"GET /bkt/k?response-expires=Thu%99%matchL0A00%matchL\n\n").expect("a request");
+    check_decode(&render(&reproducer)).expect("both stacks refuse or read it without a misroute");
     let sse = request_of(b"GET /bkt/k\nx-amz-server-side-encryption-customer-algorithm: AES256\n\n").expect("a request");
     assert!(sse.secure);
 }

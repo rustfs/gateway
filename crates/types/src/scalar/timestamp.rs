@@ -151,6 +151,15 @@ impl Timestamp {
     ///
     /// Returns a [`ParseError`] describing which component was rejected.
     pub fn parse(value: &str, format: TimestampFormat) -> Result<Self, ParseError> {
+        // Every wire form is ASCII, and every parser below slices by byte offset after checking a
+        // byte length. A multi-byte character would put an offset inside it and panic
+        // (rustfs/gateway#1013), so a value that is not ASCII is refused before any slicing.
+        if !value.is_ascii() {
+            return Err(match format {
+                TimestampFormat::HttpDate => http_err("the date holds a character outside ASCII"),
+                _ => err("the timestamp holds a character outside ASCII"),
+            });
+        }
         match format {
             TimestampFormat::HttpDate => parse_http_date(value),
             TimestampFormat::Iso8601 => parse_iso8601(value),

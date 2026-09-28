@@ -28,10 +28,7 @@
 //! (removed: s3s routes by it and the gateway does not, a known class, kd-decode-0055..0063), an
 //! escaped slash in the first path segment (refused: s3s decodes it into a bucket/key separator and
 //! the gateway reads it as part of the bucket name, a known class this property found,
-//! kd-decode-0064..0071), a date value that is not ASCII (refused until rustfs/gateway#1013 is
-//! fixed: the gateway's date parser panics on one, which this property found and which would
-//! otherwise stop every run at the same input), and a signed chunk framing (refused: its
-//! signatures cannot be made). A request carrying SSE-C members
+//! kd-decode-0064..0071), and a signed chunk framing (refused: its signatures cannot be made). A request carrying SSE-C members
 //! is sent as over TLS, as in the matrix.
 //! Only a misroute fails the decode property: both stacks naming an operation, and naming different
 //! ones. The two stacks refuse malformed input with different codes, messages and stages all the
@@ -57,31 +54,6 @@ use crate::project::OracleOutput;
 use crate::request::RawRequest;
 use crate::s3s::dto as oracle;
 
-/// The request headers the gateway parses as dates; see the module documentation (#1013).
-const DATE_HEADERS: [&str; 7] = [
-    "if-modified-since",
-    "if-unmodified-since",
-    "x-amz-copy-source-if-modified-since",
-    "x-amz-copy-source-if-unmodified-since",
-    "expires",
-    "x-amz-object-lock-retain-until-date",
-    "x-amz-if-match-last-modified-time",
-];
-
-/// Whether a query value, percent-decoded, is ASCII: an escape of a byte above 0x7F is not.
-fn percent_decoded_is_ascii(value: &str) -> bool {
-    let bytes = value.as_bytes();
-    value.is_ascii()
-        && !bytes.iter().enumerate().any(|(at, byte)| {
-            *byte == b'%'
-                && bytes
-                    .get(at + 1..at + 3)
-                    .and_then(|hex| std::str::from_utf8(hex).ok())
-                    .and_then(|hex| u8::from_str_radix(hex, 16).ok())
-                    .is_some_and(|decoded| !decoded.is_ascii())
-        })
-}
-
 /// The query parameter s3s routes by and the gateway ignores; see the module documentation.
 const OPERATION_HINT: &str = "x-id";
 
@@ -104,13 +76,7 @@ pub fn request_of(input: &[u8]) -> Option<RawRequest> {
     if !target.starts_with('/') || uri.scheme().is_some() || uri.authority().is_some() {
         return None;
     }
-    let (path, query) = target.split_once('?').unwrap_or((target, ""));
-    if query.split('&').any(|pair| {
-        pair.split_once('=')
-            .is_some_and(|(name, value)| name == "response-expires" && !percent_decoded_is_ascii(value))
-    }) {
-        return None;
-    }
+    let path = target.split_once('?').map_or(target, |(path, _)| path);
     let first_segment = path[1..].split('/').next().unwrap_or_default();
     if first_segment.to_ascii_lowercase().contains("%2f") {
         return None;
@@ -126,9 +92,6 @@ pub fn request_of(input: &[u8]) -> Option<RawRequest> {
             continue;
         }
         if name.eq_ignore_ascii_case("x-amz-content-sha256") && value.starts_with(b"STREAMING-AWS4-") {
-            return None;
-        }
-        if DATE_HEADERS.iter().any(|date| name.eq_ignore_ascii_case(date)) && !value.is_ascii() {
             return None;
         }
         if name.to_ascii_lowercase().contains("server-side-encryption-customer") {

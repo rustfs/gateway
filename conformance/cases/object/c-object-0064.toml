@@ -1,0 +1,66 @@
+# c-object-0064 — a response-expires value holding a non-ASCII byte is refused as a bad date, and
+# the service does not panic on it. The decode_diff fuzz target's reproducer (rustfs/gateway#1013).
+#
+# Schema dimensions exercised: a percent-encoded non-ASCII query value, error shape.
+
+[case]
+id = "c-object-0064"
+schema_version = 1
+title = "A response-expires value with a non-ASCII byte at a date offset is refused, not a panic"
+rationale = """
+The date parser checked a value's byte length and then sliced it at fixed offsets. The fuzz \
+reproducer, `Thu%99%matchL0A00%matchL`, decodes to 24 bytes, the length of an asctime date, with \
+U+FFFD across bytes 3 to 5, so the slice at offset 4 fell inside that character and the decoder \
+panicked. This case sends the same shape with an escape the signer can canonicalise (`é` across \
+bytes 3 and 4); the literal reproducer is the first vector of the unit test in \
+`crates/types/src/scalar/tests/timestamp_tests.rs`. The panic boundary turned that into a \
+500, but any unauthenticated request could spend an unwind, and a 500 tells a client the server \
+failed when the request was malformed. Every wire date form is ASCII, so the answer must be the \
+ordinary refusal for a value that is not a date: a 400, with nothing of the object in the body."""
+polarity = "negative"
+operation = "GetObject"
+tags = ["presigned", "error-shape"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9110#section-5.6.7"
+summary = "Each of the three HTTP-date forms is written in ASCII, so a value with a byte outside ASCII is not a date in any of them."
+kind = "rfc"
+
+[[case.evidence]]
+url = "urn:rustfs-gateway:fuzz:decode_diff:response-expires-non-ascii"
+summary = "The decode_diff fuzz target found the gateway's date decoder panicking on this query value (rustfs/gateway#1013)."
+kind = "observed"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-object"
+
+[[setup.objects]]
+bucket = "conf-object"
+key = "overrides/fuzzed.bin"
+content_type = "text/plain"
+body = { utf8 = "hello world" }
+
+[request]
+method = "GET"
+target = "/conf-object/overrides/fuzzed.bin?response-expires=Thu%C3%A9Nv%20%206%2008%3A49%3A37%201994"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 400
+connection_after = "open"
+headers_absent = ["expires", "etag"]
+
+[expect.error]
+code = "InvalidArgument"
+request_id_present = true
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+contains_utf8 = ["<Code>InvalidArgument</Code>"]
+not_contains_utf8 = ["hello world"]
