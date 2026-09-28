@@ -144,7 +144,7 @@ mutation_dimension = "unknown_element_policy"
 codec_value = "skip"
 target  = "RestoreObject.RestoreRequest"
 summary = "Unknown elements inside a RestoreRequest are skipped rather than refused."
-cases   = ["c-select-restore-0007"]
+cases   = ["c-select-restore-0007", "c-select-restore-0056"]
 
   [[quirk.evidence]]
   kind    = "s3s-issue"
@@ -269,7 +269,7 @@ mutation_dimension = "element_rename"
 mutation_sources = ["SelectObjectContent.xml.request_root"]
 target  = "SelectObjectContent"
 summary = "This is the only request in the supported surface whose XML members sit at operation level rather than inside a payload structure, so the body root is the input shape's own name, SelectObjectContentRequest; MinIO's SelectRequest is accepted as an exact alias of it, decoding into the same DTO under the same member rules, and a body rooted at anything else is 400 MalformedXML."
-cases   = ["c-select-restore-0032", "c-select-restore-0033", "c-select-restore-0034", "c-select-restore-0049"]
+cases   = ["c-select-restore-0032", "c-select-restore-0033", "c-select-restore-0034", "c-select-restore-0049", "c-select-restore-0055", "c-select-restore-0057"]
 
   [[quirk.evidence]]
   kind    = "aws-doc"
@@ -696,7 +696,7 @@ mutation_dimension = "select_event_status"
 contract_value = "success_200"
 target = "SelectObjectContent"
 summary = "A successful select event stream uses status 200."
-cases = ["c-select-restore-0035", "c-select-restore-0052", "c-select-restore-0054"]
+cases = ["c-select-restore-0035", "c-select-restore-0052", "c-select-restore-0054", "c-select-restore-0057"]
   [[quirk.evidence]]
   kind = "aws-doc"
   ref = "https://docs.aws.amazon.com/AmazonS3/latest/API/RESTSelectObjectAppendix.html"
