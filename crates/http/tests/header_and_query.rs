@@ -699,3 +699,27 @@ fn the_significant_header_set_covers_the_whole_x_amz_family() {
     assert!(!is_significant_header(&name("x-proxy-tag")));
     assert!(!is_significant_header(&name("user-agent")));
 }
+
+/// Negative (rustfs/gateway#996) — a stored value holding a control character (a tab, a C1
+/// control, CR/LF, NUL, DEL) is written as RFC 2047 base64 encoded words, as the s3s build RustFS
+/// runs today writes it, instead of being refused and so left out of the answer. The encoded form
+/// is printable ASCII, so no control byte reaches the header, and it decodes back to the value.
+#[test]
+fn a_stored_value_with_a_control_character_is_encoded_not_refused() {
+    for (value, expected) in [
+        ("a\tb", "=?UTF-8?B?YQli?="),
+        ("\u{83}x", "=?UTF-8?B?woN4?="),
+        ("a\r\nb", "=?UTF-8?B?YQ0KYg==?="),
+        ("a\u{0}b", "=?UTF-8?B?YQBi?="),
+        ("a\u{7f}b", "=?UTF-8?B?YX9i?="),
+    ] {
+        let encoded = encode_metadata_value(value).unwrap_or_else(|error| panic!("{value:?} is refused: {error:?}"));
+        assert_eq!(encoded, expected, "{value:?}");
+        assert!(
+            encoded.bytes().all(|byte| (0x20..0x7f).contains(&byte)),
+            "{encoded:?} is not printable ASCII"
+        );
+        assert!(http::HeaderValue::from_str(&encoded).is_ok());
+    }
+    assert_eq!(encode_metadata_value("plain").as_deref(), Ok("plain"));
+}

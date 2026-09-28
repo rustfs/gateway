@@ -253,21 +253,17 @@ fn header_value(text: &str) -> String {
         .collect()
 }
 
-/// A metadata value as [`header_value`], less the known classes this property found: a C1
-/// control or a tab, either of which makes the gateway drop the header where s3s writes an
-/// encoded word (kd-encode-0059, kd-encode-0061, rustfs/gateway#996); the encoded-word opener
-/// `=?` or closer `?=`, which only the gateway encodes (kd-encode-0060); and, for a value that
-/// is not ASCII, the bytes past 40, where the gateway splits the encoded word and s3s does not
-/// (kd-encode-0058).
+/// A metadata value, control characters included, less the known classes this property found: the
+/// encoded-word opener `=?` or closer `?=`, which only the gateway encodes (kd-encode-0060); and,
+/// for a value either stack encodes (not ASCII, or holding a control character), the bytes past
+/// 40, where the gateway splits the encoded word and s3s does not (kd-encode-0058). Control characters are compared: both stacks write them inside an
+/// encoded word (rustfs/gateway#996).
 fn metadata_value(text: &str) -> String {
-    let mut value: String = header_value(text)
-        .chars()
-        .filter(|character| *character != '\t' && !('\u{80}'..='\u{9f}').contains(character))
-        .collect();
+    let mut value = text.to_owned();
     while value.contains("=?") || value.contains("?=") {
         value = value.replace("=?", "=").replace("?=", "=");
     }
-    if !value.is_ascii() {
+    if !value.is_ascii() || value.chars().any(char::is_control) {
         while value.len() > 40 {
             value.pop();
         }

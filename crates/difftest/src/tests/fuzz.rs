@@ -328,7 +328,8 @@ fn encode_inputs_drop_control_characters() {
     let tab_joined = head(b"\x00\x00n\x00a=\t?b");
     assert_eq!(
         tab_joined.metadata.and_then(|metadata| metadata.get("n").cloned()).as_deref(),
-        Some("a=b")
+        Some("a=\t?b"),
+        "a tab is kept: both stacks encode it (rustfs/gateway#996)"
     );
     let lookalike = head(b"t\tx\x01\x00\x00n\x00a=?b==???=");
     assert_eq!(lookalike.content_type.as_deref(), Some("t\tx"), "a tab is legal in a header value");
@@ -339,7 +340,7 @@ fn encode_inputs_drop_control_characters() {
     let named = head(b"\x00\x00x/Y z\x00\xc2\x83v");
     assert_eq!(
         named.metadata.map(|metadata| metadata.into_iter().collect::<Vec<_>>()),
-        Some(vec![("xyz".to_owned(), "v".to_owned())])
+        Some(vec![("xyz".to_owned(), "\u{83}v".to_owned())])
     );
     let long = "a".repeat(60);
     let ascii = head(format!("\0\0n\0{long}").as_bytes());
@@ -349,14 +350,20 @@ fn encode_inputs_drop_control_characters() {
         "a long ASCII value is kept whole"
     );
     let tabbed = head(b"\0\0n\0a\tb\0");
-    assert_eq!(tabbed.metadata.and_then(|metadata| metadata.get("n").cloned()).as_deref(), Some("ab"));
+    assert_eq!(tabbed.metadata.and_then(|metadata| metadata.get("n").cloned()).as_deref(), Some("a\tb"));
     let tabbed_accented = head("\0\0n\0é\tb".as_bytes());
     assert_eq!(
         tabbed_accented
             .metadata
             .and_then(|metadata| metadata.get("n").cloned())
             .as_deref(),
-        Some("éb")
+        Some("é\tb")
+    );
+    let controlled = head(format!("\0\0n\0\t{}", "a".repeat(60)).as_bytes());
+    assert_eq!(
+        controlled.metadata.and_then(|metadata| metadata.get("n").map(String::len)),
+        Some(40),
+        "an encoded value is cut"
     );
     let accented = head(format!("\0\0n\0{}", "é".repeat(30)).as_bytes());
     assert_eq!(accented.metadata.and_then(|metadata| metadata.get("n").cloned()), Some("é".repeat(20)));

@@ -162,21 +162,25 @@ pub fn decode_metadata_value(value: &str) -> Result<Cow<'_, str>, MetadataReject
     Ok(Cow::Owned(output))
 }
 
-/// Encodes a non-ASCII user-metadata value into RFC 2047 UTF-8 base64 encoded-words.
+/// Encodes a stored user-metadata value for a response header.
 ///
-/// Each word is at most 75 bytes and contains an integral number of UTF-8 characters. ASCII-only
-/// values are returned unchanged unless they contain encoded-word syntax that a client could
-/// decode a second time.
+/// A value that is not ASCII, that holds a control character, or that holds encoded-word syntax a
+/// client could decode a second time is written as RFC 2047 UTF-8 base64 encoded-words; any other
+/// value is returned unchanged. Each word is at most 75 bytes and contains an integral number of
+/// UTF-8 characters.
+///
+/// A control character is encoded, not refused: the base64 form is printable ASCII, so no control
+/// byte reaches the header, and a client decodes the value that was stored. Refusing it left the
+/// header out of the answer with nothing to say so (rustfs/gateway#996), where the s3s build
+/// RustFS runs today writes the encoded word. What may be stored is decided on the way in
+/// ([`validate_metadata_value`]), not here.
 ///
 /// # Errors
 ///
-/// [`MetadataReject::ControlCharacterInValue`] when the pre-encode value contains any control
-/// character.
+/// [`MetadataReject::MalformedEncodedWord`] if a word boundary cannot be placed, which a `&str`
+/// never causes.
 pub fn encode_metadata_value(value: &str) -> Result<Cow<'_, str>, MetadataReject> {
-    if value.chars().any(char::is_control) {
-        return Err(MetadataReject::ControlCharacterInValue);
-    }
-    if value.is_ascii() && find(value.as_bytes(), b"=?").is_none() {
+    if value.is_ascii() && !value.chars().any(char::is_control) && find(value.as_bytes(), b"=?").is_none() {
         return Ok(Cow::Borrowed(value));
     }
 
