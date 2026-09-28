@@ -18,6 +18,7 @@ rustfs-gateway = { path = "crates/gateway", version = "0.49.0", default-features
 rustfs-gateway-codegen = { path = "crates/codegen", version = "0.17.0" }
 rustfs-gateway-conformance = { path = "crates/conformance", version = "0.12.0", default-features = false }
 rustfs-gateway-corpus = { path = "crates/corpus", version = "0.1.0" }
+rustfs-gateway-corpus-recorder = { path = "crates/corpus-recorder", version = "0.1.0" }
 rustfs-gateway-core = { path = "crates/core", version = "0.45.0" }
 rustfs-gateway-http = { path = "crates/http", version = "0.1.4" }
 rustfs-gateway-macros = { path = "crates/macros", version = "0.1.4" }

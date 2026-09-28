@@ -24537,6 +24537,106 @@ expect_fail check_corpus_size.sh \
     mut_corpus_size_limits_unreadable \
     'cannot read HARD_SIZE_LIMIT_BYTES'
 
+mut_recorder_feature_in_its_own_default() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/corpus-recorder/Cargo.toml")
+text = path.read_text()
+if text.count("default = []\n") != 1:
+    raise SystemExit("recorder default mutation subject is not unique")
+path.write_text(text.replace("default = []\n", 'default = ["corpus-record"]\n', 1))
+PYEOF
+}
+expect_fail check_recorder_not_default.sh \
+    'the corpus recorder feature added to its own default set' \
+    mut_recorder_feature_in_its_own_default \
+    'must be empty'
+
+mut_recorder_required_by_another_crate() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("compat/sut/Cargo.toml")
+text = path.read_text()
+if text.count("[dependencies]\n") != 1:
+    raise SystemExit("compat-sut dependency mutation subject is not unique")
+path.write_text(text.replace(
+    "[dependencies]\n",
+    '[dependencies]\nrustfs-gateway-corpus-recorder = { workspace = true, features = ["corpus-record"] }\n',
+    1,
+))
+PYEOF
+}
+expect_fail check_recorder_not_default.sh \
+    'a workspace crate depending on the recorder without optional = true' \
+    mut_recorder_required_by_another_crate \
+    'without `optional = true`'
+
+mut_recorder_reached_from_a_default_feature_chain() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("compat/sut/Cargo.toml")
+text = path.read_text()
+if text.count("[dependencies]\n") != 1:
+    raise SystemExit("compat-sut feature mutation subject is not unique")
+text = text.replace(
+    "[dependencies]\n",
+    '[features]\ndefault = ["record"]\nrecord = ["dep:rustfs-gateway-corpus-recorder"]\n\n[dependencies]\n'
+    'rustfs-gateway-corpus-recorder = { workspace = true, optional = true, features = ["corpus-record"] }\n',
+    1,
+)
+path.write_text(text)
+PYEOF
+}
+expect_fail check_recorder_not_default.sh \
+    'a default feature reaching the recorder through another feature' \
+    mut_recorder_reached_from_a_default_feature_chain \
+    'compiles the recorder in'
+
+mut_recorder_dependency_not_optional() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/corpus-recorder/Cargo.toml")
+text = path.read_text()
+old = "tower = { workspace = true, optional = true }\n"
+if text.count(old) != 1:
+    raise SystemExit("recorder dependency mutation subject is not unique")
+path.write_text(text.replace(old, "tower = { workspace = true }\n", 1))
+PYEOF
+}
+expect_fail check_recorder_not_default.sh \
+    'a recorder dependency linked into a build without the feature' \
+    mut_recorder_dependency_not_optional \
+    'is not optional'
+
+mut_recorder_module_ungated() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/corpus-recorder/src/lib.rs")
+text = path.read_text()
+old = '#[cfg(feature = "corpus-record")]\nmod writer;\n'
+if text.count(old) != 1:
+    raise SystemExit("recorder module gate mutation subject is not unique")
+path.write_text(text.replace(old, "mod writer;\n", 1))
+PYEOF
+}
+expect_fail check_recorder_not_default.sh \
+    'a recorder module compiled without the feature gate' \
+    mut_recorder_module_ungated \
+    'is not behind'
+
+mut_recorder_manifest_removed() {
+    rm -f crates/corpus-recorder/Cargo.toml
+}
+expect_fail check_recorder_not_default.sh \
+    'the recorder manifest being absent, which must fail rather than skip' \
+    mut_recorder_manifest_removed \
+    'required input is missing'
+
 # -- re-homed from the error-status block --------------------------------------------------------
 #
 # These nine cases were written at the end of the file while the last block in it was
