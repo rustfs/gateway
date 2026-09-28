@@ -35,7 +35,7 @@ impl ContextRequest {
     /// A `PUT` of `body` to `path?query` on `host`.
     #[allow(
         dead_code,
-        reason = "only the RustFS admin dialect sends one, through the s3s_f3e17541 compilation"
+        reason = "only the RustFS admin dialect sends one, through the s3s_0_17_0 compilation"
     )]
     pub(crate) fn put_with_query(host: &str, path: &str, query: &str, body: &[u8]) -> Self {
         Self::new(Method::PUT, host, path, query, body)

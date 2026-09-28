@@ -115,7 +115,7 @@ fn every_app_body_error_crosses_the_adapter_with_the_s3s_status_code_and_message
             if SEAM_REVISION == OracleRevision::Candidate {
                 assert!(
                     pair.gateway.message().is_some_and(|message| !message.is_empty()),
-                    "f3e17541 names a message for every code: {pair:#?}"
+                    "0.17.0 names a message for every code: {pair:#?}"
                 );
             }
         }

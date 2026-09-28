@@ -123,7 +123,7 @@ fn ordinary_report_shows_evidence_per_oracle_revision() {
     for (oracle, samples, widened) in [
         ("baseline s3s@9c4690d8", 206, 2),
         ("rollback s3s@bdcb6259", 208, 0),
-        ("candidate s3s@f3e17541", 208, 0),
+        ("candidate s3s@0.17.0", 208, 0),
     ] {
         let line = text
             .lines()

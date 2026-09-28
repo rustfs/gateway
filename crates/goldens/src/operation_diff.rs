@@ -16,7 +16,7 @@
 //! migration seam is built against.
 //!
 //! Responsible for: binding each seam revision (`compat::s3s_9c4690d8`, the baseline oracle every
-//! proof was first measured against, and `compat::s3s_f3e17541`, the revision RustFS main links) to
+//! proof was first measured against, and `compat::s3s_0_17_0`, the revision RustFS main links) to
 //! one compilation of the same harness and proofs, so every proof runs against the s3s service and
 //! the seam conversion of that revision.
 //! NOT responsible for: any proof itself (`operation_diff/*.rs`), or choosing which revision a
@@ -47,14 +47,14 @@ mod s3s_9c4690d8 {
     mod put_object;
 }
 
-/// s3s `f3e17541`, the revision RustFS main links and the RustFS adapter converts through.
+/// s3s `0.17.0`, the revision RustFS main links and the RustFS adapter converts through.
 #[path = "operation_diff"]
 #[allow(clippy::duplicate_mod)] // Deliberate: one harness source is compiled once per seam revision.
 // Crate-visible so the RustFS admin proof (rustfs/backlog#1744) signs its requests with the same
 // client signer, under the revision RustFS main links.
-pub(crate) mod s3s_f3e17541 {
+pub(crate) mod s3s_0_17_0 {
     use rustfs_gateway_types::compat::OracleRevision;
-    use rustfs_gateway_types::compat::s3s_f3e17541 as seam;
+    use rustfs_gateway_types::compat::s3s_0_17_0 as seam;
     use s3s::dto as oracle;
     use seam::s3s;
 

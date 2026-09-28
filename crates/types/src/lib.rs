@@ -65,14 +65,14 @@ pub mod secret;
 /// - `compat-s3s`: the persistence oracles. Those adapters expose owned gateway-neutral values
 ///   rather than s3s types, and answer from every s3s revision named by `compat::OracleRevision`.
 ///   Only `rustfs-gateway-goldens` consumes them.
-/// - `compat-s3s-f3e17541` (also enabled by `compat-s3s`): the migration seam compiled against
-///   the s3s revision RustFS `main` links, as `compat::s3s_f3e17541`. Its whole point is to produce
+/// - `compat-s3s-0-17-0` (also enabled by `compat-s3s`): the migration seam compiled against
+///   the s3s revision RustFS `main` links, as `compat::s3s_0_17_0`. Its whole point is to produce
 ///   the s3s values a RustFS app body receives, so its signatures name s3s types. The RustFS ring-2
 ///   adapter enables this feature alone; `compat-s3s` adds the same seam against the baseline
 ///   oracle, `compat::s3s_9c4690d8`, for the goldens.
 ///
 /// It owns no gateway XML behavior, golden assertion, or production decision.
-#[cfg(any(feature = "compat-s3s", feature = "compat-s3s-f3e17541"))]
+#[cfg(any(feature = "compat-s3s", feature = "compat-s3s-0-17-0"))]
 pub mod compat;
 
 #[cfg(test)]

@@ -19,8 +19,8 @@
 //! selecting which revision answers, and exposing family-scoped adapters over owned values (feature
 //! `compat-s3s`); and the migration seam — the single-operation DTO conversions (`put_object`,
 //! `get_bucket_location`) and the request-context conversion (`request_context`) — compiled once
-//! per seam revision: [`s3s_f3e17541`](crate::compat::s3s_f3e17541), the revision RustFS main
-//! links (feature `compat-s3s-f3e17541`), and `s3s_9c4690d8`, the baseline oracle the goldens also
+//! per seam revision: [`s3s_0_17_0`](crate::compat::s3s_0_17_0), the revision RustFS main
+//! links (feature `compat-s3s-0-17-0`), and `s3s_9c4690d8`, the baseline oracle the goldens also
 //! measure (feature `compat-s3s`). The seam modules are the only ones whose API names s3s types.
 //! NOT responsible for: production XML behavior, golden assertions, or the RustFS side of any
 //! conversion (its extensions, its hooks, its call order).
@@ -32,8 +32,8 @@
 //!
 //! `compat/seam/*.rs` names s3s only as `super::s3s`, so each seam module below binds its own
 //! revision and the same source compiles against it. The DTO and request shapes the seam touches
-//! are identical in `9c4690d8` and `f3e17541` but for one member: `PutObjectInput.expires` is a
-//! parsed `Timestamp` in `9c4690d8` and the wire text in `f3e17541`. That difference is the
+//! are identical in `9c4690d8` and `0.17.0` but for one member: `PutObjectInput.expires` is a
+//! parsed `Timestamp` in `9c4690d8` and the wire text in `0.17.0`. That difference is the
 //! `expires` hook each seam module defines, as `encryption_rule` is for the oracles; the file is
 //! never copied.
 //!
@@ -61,16 +61,16 @@ use crate::persistence::{
     ReplicationBehaviorProjection,
 };
 
-/// The migration seam against s3s `f3e17541`, the revision RustFS `main` links
+/// The migration seam against s3s `0.17.0`, the revision RustFS `main` links
 /// (`OracleRevision::Candidate`): what the RustFS ring-2 adapter converts through, and what the
 /// goldens decode, encode and context diffs measure a second time.
 ///
 /// Its `s3s` is the crate RustFS itself names, unified by Cargo because this crate declares it
 /// with the same source, revision and version, so the converted values are the ones
 /// `impl s3s::S3 for FS` takes.
-#[cfg(feature = "compat-s3s-f3e17541")]
+#[cfg(feature = "compat-s3s-0-17-0")]
 #[path = "compat/seam"]
-pub mod s3s_f3e17541 {
+pub mod s3s_0_17_0 {
     /// The s3s revision every signature in this module names. Kernel crates other than this one
     /// may not depend on s3s at all (`scripts/check_ring_boundaries.sh`), so this is the one route
     /// a harness takes to it.
@@ -81,13 +81,13 @@ pub mod s3s_f3e17541 {
     pub mod put_object;
     pub mod request_context;
 
-    /// `f3e17541` fills a message from the code's default sentence when a body names none, so the
+    /// `0.17.0` fills a message from the code's default sentence when a body names none, so the
     /// gateway writes the sentence the s3s document would have carried.
     fn default_message(code: &s3s::S3ErrorCode) -> Option<&'static str> {
         code.default_message()
     }
 
-    /// `f3e17541` holds `PutObjectInput.expires` as the wire text, exactly as the gateway keeps it
+    /// `0.17.0` holds `PutObjectInput.expires` as the wire text, exactly as the gateway keeps it
     /// (`q-timestamp-0005`), so every value crosses unchanged and nothing is refused.
     #[allow(clippy::unnecessary_wraps)] // The signature is the one both revisions' hooks share.
     fn expires(value: &str) -> Result<s3s::dto::Expires, super::ConversionError> {
@@ -177,22 +177,24 @@ impl OracleRevision {
         }
     }
 
-    /// Git repository the revision is fetched from, exactly as this crate's manifest names it.
+    /// Git repository the revision is fetched from, exactly as this crate's manifest names it, or
+    /// `None` for a crates.io release.
     #[must_use]
-    pub const fn repository(self) -> &'static str {
+    pub const fn repository(self) -> Option<&'static str> {
         match self {
-            Self::Baseline | Self::Rollback => "https://github.com/rustfs/s3s.git",
-            Self::Candidate => "https://github.com/s3s-project/s3s.git",
+            Self::Baseline | Self::Rollback => Some("https://github.com/rustfs/s3s.git"),
+            Self::Candidate => None,
         }
     }
 
-    /// Full s3s commit, identical to the `rev` this crate's manifest pins for the revision.
+    /// What this crate's manifest pins for the revision: the full s3s commit (`rev`) of a git
+    /// revision, or the `version` of a crates.io release.
     #[must_use]
     pub const fn revision(self) -> &'static str {
         match self {
             Self::Baseline => "9c4690d8e73fc8d184031a19b2c4539ebc77d180",
             Self::Rollback => "bdcb6259339c41369f9f1c60e3a42b5ab8da607b",
-            Self::Candidate => "f3e17541f366696bf0cbaf380fcbd8b44c17eba4",
+            Self::Candidate => "0.17.0",
         }
     }
 
@@ -202,14 +204,18 @@ impl OracleRevision {
         match self {
             Self::Baseline => "rustfs/rustfs@436a1be899e90e67d7c4aa81def70d39fe1748d5 (1.0.0-rc.5-preview.2)",
             Self::Rollback => "rustfs/rustfs@5cd58319ed6148ed7f09f2a4d0b4e46e429f043a (1.0.0-rc.6)",
-            Self::Candidate => "rustfs/rustfs@cc29b03a05e61d0c713266aa12ad6a470ecdf9f9 (main)",
+            Self::Candidate => "rustfs/rustfs@528a368144a6543adccfa7ca5e6dce570f0d9a19 (main)",
         }
     }
 }
 
 impl fmt::Display for OracleRevision {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let short = self.revision().get(..8).unwrap_or(self.revision());
+        // A git commit is shortened to eight characters; a release version is already short.
+        let short = match self.repository() {
+            Some(_) => self.revision().get(..8).unwrap_or(self.revision()),
+            None => self.revision(),
+        };
         write!(formatter, "{} s3s@{short}", self.role())
     }
 }
@@ -505,7 +511,7 @@ mod rollback {
     type EncryptionRuleParts = (Option<ServerSideEncryptionByDefault>, Option<Vec<String>>, Option<bool>);
 }
 
-/// s3s `f3e17541`, with the same `BlockedEncryptionTypes` member as the rollback revision.
+/// s3s `0.17.0`, with the same `BlockedEncryptionTypes` member as the rollback revision.
 #[cfg(feature = "compat-s3s")]
 #[path = "compat/oracle"]
 #[allow(clippy::duplicate_mod)] // Deliberate: one adapter source is compiled once per pinned revision.

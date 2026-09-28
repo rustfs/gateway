@@ -7,7 +7,7 @@ description = "S3 scalar types, operation inputs/outputs and their generated cod
 # the root `rustfs-gateway-types` dependency requirement still matches it. Keep the numeric part
 # equal to that requirement, and move the date whenever `model/s3.json` is re-pinned — the value is
 # `model/PROVENANCE.md`'s "Pinned commit date".
-version = "0.27.0+aws.2026-09-17"
+version = "0.28.0+aws.2026-09-17"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -50,9 +50,9 @@ s3s_baseline = { package = "s3s", git = "https://github.com/rustfs/s3s.git", rev
 s3s_rollback = { package = "s3s", git = "https://github.com/rustfs/s3s.git", rev = "bdcb6259339c41369f9f1c60e3a42b5ab8da607b", version = "0.15.0", features = ["minio"], optional = true }
 # Candidate: RustFS main, the production build the migration is a candidate for. Everything after
 # `package = "s3s", ` MUST stay byte-identical to RustFS main's own `s3s = { ... }` line: Cargo
-# unifies the two only when source, rev and version agree, and the production seam
-# (`compat-s3s-f3e17541`) is useless to RustFS if its s3s types are a second copy of the crate.
-s3s_candidate = { package = "s3s", git = "https://github.com/s3s-project/s3s.git", rev = "f3e17541f366696bf0cbaf380fcbd8b44c17eba4", version = "0.15.0", features = ["minio"], optional = true }
+# unifies the two only when source and semver-compatible version agree, and the production seam
+# (`compat-s3s-0-17-0`) is useless to RustFS if its s3s types are a second copy of the crate.
+s3s_candidate = { package = "s3s", version = "0.17.0", features = ["minio"], optional = true }
 # Only for the seam's `put_object`: the s3s streaming body is a `futures_core::Stream`, so moving
 # the live gateway body into it without buffering needs the trait. Never enabled without a
 # `compat-s3s*` feature.
@@ -82,11 +82,12 @@ serde_json = { workspace = true }
 # it to float would make a golden compare two moving targets.
 # DELETE BY: P9-09 removes this dependency and compatibility module after the last migration.
 # see ADR-0004: version carries +aws.<model-date> once the model is pinned
-compat-s3s = ["compat-s3s-f3e17541", "dep:s3s_baseline", "dep:s3s_rollback", "dep:s3s_candidate", "dep:futures-core"]
-# The production half of `compat-s3s` and nothing else: the migration seam (`compat::s3s_f3e17541`)
+compat-s3s = ["compat-s3s-0-17-0", "dep:s3s_baseline", "dep:s3s_rollback", "dep:s3s_candidate", "dep:futures-core"]
+# The production half of `compat-s3s` and nothing else: the migration seam (`compat::s3s_0_17_0`)
 # compiled against the one s3s revision RustFS main links, for the RustFS ring-2 adapter, which must
-# not pay for the two oracle revisions. The suffix names that revision: after a RustFS s3s bump the
+# not pay for the two oracle revisions. The suffix names that revision (the eight-character git rev,
+# or the crates.io release version with dashes): after a RustFS s3s bump the
 # adapter stops compiling (its s3s and this seam's are two crates) until a seam for the new revision
 # exists here, instead of converting to a revision RustFS no longer runs.
 # DELETE BY: P9-09 removes this feature together with `compat-s3s`.
-compat-s3s-f3e17541 = ["dep:s3s_candidate", "dep:futures-core"]
+compat-s3s-0-17-0 = ["dep:s3s_candidate", "dep:futures-core"]

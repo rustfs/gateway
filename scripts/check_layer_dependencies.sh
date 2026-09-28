@@ -390,7 +390,16 @@ for crate, (relative, source, document) in packages.items():
                 for alias, declaration in dependency_table.items():
                     package, merged = resolve(alias, declaration, workspace_dependencies)
                     if package == "s3s" or package.startswith("s3s-"):
-                        s3s_revisions[alias] = str(merged.get("rev", ""))
+                        # The suffix a production seam feature must carry: the eight-character rev
+                        # of a git revision, or the exact X.Y.Z of a crates.io release spelled X-Y-Z
+                        # (a bare TOML key cannot hold a dot). Anything else — a branch, a short
+                        # rev, a floating requirement — names no revision.
+                        rev = str(merged.get("rev", ""))
+                        version = str(merged.get("version", ""))
+                        if "git" in merged:
+                            s3s_revisions[alias] = rev[:8] if len(rev) >= 8 else ""
+                        else:
+                            s3s_revisions[alias] = version.replace(".", "-") if re.fullmatch(r"\d+\.\d+\.\d+", version) else ""
             umbrella = features.get("compat-s3s") or []
             for name, members in features.items():
                 if name == "compat-s3s" or not isinstance(members, list):
@@ -399,9 +408,9 @@ for crate, (relative, source, document) in packages.items():
                 if not enabled:
                     continue
                 line_index = next((index for index, line in enumerate(lines) if re.match(rf"^\s*{re.escape(name)}\s*=", line)), 0)
-                expected = {f"compat-s3s-{s3s_revisions[alias][:8]}" for alias in enabled}
-                if len(enabled) != 1 or name not in expected or len(s3s_revisions[enabled[0]]) < 8:
-                    violations.append((relative, line_index + 1, f"feature {name} enables {', '.join(enabled)} but is not compat-s3s-<rev8> of exactly one s3s revision"))
+                expected = {f"compat-s3s-{s3s_revisions[alias]}" for alias in enabled}
+                if len(enabled) != 1 or name not in expected or not s3s_revisions[enabled[0]]:
+                    violations.append((relative, line_index + 1, f"feature {name} enables {', '.join(enabled)} but is not compat-s3s-<rev8|X-Y-Z> of exactly one s3s revision"))
                 if name not in umbrella:
                     violations.append((relative, line_index + 1, f"feature {name} enables s3s but compat-s3s does not include it"))
                 window = lines[max(0, line_index - 6) : line_index + 1]
