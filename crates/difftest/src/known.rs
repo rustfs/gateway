@@ -31,8 +31,9 @@ use serde::Deserialize;
 
 use crate::decode::{Finding, Priority};
 
-/// The operation of an entry that holds for every operation: allowed only for a message wording
-/// entry that pins the gateway's sentence, because a sentence is one fact wherever it is written.
+/// The operation of an entry that holds for every operation: allowed only for a decode message
+/// wording entry that pins the gateway's sentence, or an encode entry that pins both sides — one
+/// fact wherever it is written, such as the headers the gateway stamps on every answer.
 pub const ANY_OPERATION: &str = "*";
 
 /// The register checked into this crate.
@@ -63,7 +64,7 @@ pub struct KnownDiff {
     /// one `*` over member paths.
     pub item: String,
     /// The gateway side exactly as the finding renders it, or a pattern with one `*`; any value
-    /// when absent.
+    /// when absent. When both sides are patterns, the two `*` must match the same text.
     #[serde(default)]
     pub gateway: Option<String>,
     /// The s3s side exactly as the finding renders it, or a pattern with one `*`; any value when
@@ -84,14 +85,64 @@ pub struct KnownDiff {
 
 impl KnownDiff {
     fn matches(&self, finding: &Finding) -> bool {
-        (self.operation == finding.operation || self.operation == ANY_OPERATION)
+        self.kind == finding.kind
+            && (self.operation == finding.operation || self.operation == ANY_OPERATION)
             && matches_value(&self.item, &finding.item.to_string())
-            && self
-                .gateway
-                .as_deref()
-                .is_none_or(|pattern| matches_value(pattern, &finding.gateway))
-            && self.s3s.as_deref().is_none_or(|pattern| matches_value(pattern, &finding.s3s))
+            && self.side_matches(self.gateway.as_deref(), &finding.gateway)
+            && self.side_matches(self.s3s.as_deref(), &finding.s3s)
+            && self.wildcards_agree(finding)
     }
+
+    /// When both sides are patterns, their `*` stand for the same text: an entry for "the gateway
+    /// writes `&quot;X&quot;` where s3s writes `"X"`" must not accept two different `X`.
+    fn wildcards_agree(&self, finding: &Finding) -> bool {
+        if self.item.starts_with(ORDER_ITEM) {
+            return true;
+        }
+        match (
+            self.gateway
+                .as_deref()
+                .and_then(|pattern| wildcard_text(pattern, &finding.gateway)),
+            self.s3s.as_deref().and_then(|pattern| wildcard_text(pattern, &finding.s3s)),
+        ) {
+            (Some(gateway), Some(s3s)) => gateway == s3s,
+            _ => true,
+        }
+    }
+
+    /// An element-order entry pins each side's complete child order; a finding matches when the
+    /// children it wrote are that order with some children left out. Every other entry matches
+    /// by value or pattern.
+    fn side_matches(&self, pinned: Option<&str>, rendered: &str) -> bool {
+        match pinned {
+            None => true,
+            Some(order) if self.item.starts_with(ORDER_ITEM) => is_suborder(rendered, order),
+            Some(pattern) => matches_value(pattern, rendered),
+        }
+    }
+}
+
+/// The text a pattern's `*` matched in `value`, when the pattern has one and matches.
+fn wildcard_text<'a>(pattern: &str, value: &'a str) -> Option<&'a str> {
+    let (prefix, suffix) = pattern.split_once('*')?;
+    matches_value(pattern, value).then(|| &value[prefix.len()..value.len() - suffix.len()])
+}
+
+/// The item prefix of an element-order finding.
+const ORDER_ITEM: &str = "body.order ";
+
+/// Whether the comma list `written`, with repeated neighbours collapsed (`Contents,Contents`),
+/// is `complete` with some names left out.
+fn is_suborder(written: &str, complete: &str) -> bool {
+    let mut names = complete.split(',');
+    let mut previous = None;
+    written.split(',').all(|name| {
+        if previous == Some(name) {
+            return true;
+        }
+        previous = Some(name);
+        names.any(|candidate| candidate == name)
+    })
 }
 
 /// An exact value, or — with one `*` — every value that starts with what precedes it and ends
@@ -166,15 +217,20 @@ impl KnownDiffs {
             if patterns.iter().flatten().any(|pattern| pattern.matches('*').count() > 1) {
                 return Err(RegisterError(format!("{}: a pattern holds at most one *", entry.id)));
             }
-            if matches!(entry.item.as_str(), "route" | "outcome") && (entry.gateway.is_none() || entry.s3s.is_none()) {
+            let pins_both = matches!(entry.item.as_str(), "route" | "outcome") || entry.item.starts_with(ORDER_ITEM);
+            if pins_both && (entry.gateway.is_none() || entry.s3s.is_none()) {
                 return Err(RegisterError(format!(
-                    "{}: a route or outcome entry pins both sides, or it would accept every such difference",
+                    "{}: a route, outcome or element-order entry pins both sides, or it would accept every such difference",
                     entry.id
                 )));
             }
-            if entry.operation == ANY_OPERATION && (entry.item != "error.message" || entry.gateway.is_none()) {
+            let any_operation_allowed = match entry.kind {
+                Kind::Decode => entry.item == "error.message" && entry.gateway.is_some(),
+                Kind::Encode => entry.gateway.is_some() && entry.s3s.is_some() && !entry.item.starts_with(ORDER_ITEM),
+            };
+            if entry.operation == ANY_OPERATION && !any_operation_allowed {
                 return Err(RegisterError(format!(
-                    "{}: only an error.message entry that pins the gateway sentence may hold for every operation",
+                    "{}: only a decode error.message entry pinning the gateway sentence, or an encode entry pinning both sides (not an element order), may hold for every operation",
                     entry.id
                 )));
             }

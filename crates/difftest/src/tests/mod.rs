@@ -24,7 +24,11 @@
 
 mod census;
 mod controls;
+mod encode_controls;
+mod encoding;
 mod matrix;
+mod outputs;
+mod outputs_more;
 mod register;
 mod rows;
 

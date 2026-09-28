@@ -39,6 +39,7 @@ use rustfs_gateway_stream::{ByteStream, PayloadRead, PayloadStream};
 use rustfs_gateway_types::ErrorCode;
 
 use crate::decode::{Answer, BodySeen, Fault};
+use crate::encode::WireAnswer;
 use crate::fields::Fields;
 use crate::probe::{ProbeBody, block_on};
 use crate::project::{Projected, Projection};
@@ -59,10 +60,13 @@ pub(crate) struct Handed {
 
 type Slot = Arc<Mutex<Option<Handed>>>;
 type Routed = Arc<Mutex<Option<Option<String>>>>;
+/// The gateway output the next handler call returns instead of refusing: the encode diff's output.
+type AnswerSlot = Arc<Mutex<Option<Box<dyn std::any::Any + Send>>>>;
 
 /// A backend whose every handler records its input and refuses, so no output is ever encoded.
 pub(crate) struct Recorder {
     slot: Slot,
+    answer: AnswerSlot,
     /// [`Fault::GatewayDecoderEatsOneByte`]: the handler sees the body with its first byte gone.
     eats_one_byte: bool,
 }
@@ -81,7 +85,11 @@ where
         if let Ok(mut slot) = self.slot.lock() {
             *slot = Some(Handed { operation, fields, body });
         }
-        Err(HandlerError::new(ErrorCode::NOT_IMPLEMENTED, "recorded by the decode diff"))
+        let answer = self.answer.lock().ok().and_then(|mut answer| answer.take());
+        match answer.map(|answer| answer.downcast::<O::Output>()) {
+            Some(Ok(output)) => Ok(rustfs_gateway::Resp::new(*output)),
+            _ => Err(HandlerError::new(ErrorCode::NOT_IMPLEMENTED, "recorded by the decode diff")),
+        }
     }
 }
 
@@ -165,6 +173,7 @@ pub(crate) struct GatewayStack {
     service: S3Service,
     slot: Slot,
     routed: Routed,
+    answer: AnswerSlot,
 }
 
 impl GatewayStack {
@@ -175,8 +184,10 @@ impl GatewayStack {
         let authenticator = SigV4Authenticator::new(Arc::new(StaticCredentials::new().with(credentials)), regions);
         let slot: Slot = Arc::new(Mutex::new(None));
         let routed: Routed = Arc::new(Mutex::new(None));
+        let answer: AnswerSlot = Arc::new(Mutex::new(None));
         let recorder = Arc::new(Recorder {
             slot: Arc::clone(&slot),
+            answer: Arc::clone(&answer),
             eats_one_byte: *fault == Fault::GatewayDecoderEatsOneByte,
         });
         let unbounded = Rate::new(u32::MAX, u32::MAX);
@@ -201,7 +212,43 @@ impl GatewayStack {
         let service = crate::project::register(builder, &recorder)
             .build()
             .map_err(|error| format!("assembly: {error:?}"))?;
-        Ok(Self { service, slot, routed })
+        Ok(Self {
+            service,
+            slot,
+            routed,
+            answer,
+        })
+    }
+
+    /// Sends `request` with `output` queued as its handler's answer, and returns the whole
+    /// response the gateway wrote.
+    pub(crate) fn answer(&self, request: &RawRequest, output: Box<dyn std::any::Any + Send>) -> Result<WireAnswer, String> {
+        *self.answer.lock().map_err(|_| "the answer slot is poisoned".to_owned())? = Some(output);
+        let mut head = request.http_head()?;
+        if request.secure {
+            head = head.extension(rustfs_gateway::TransportSecurity::Encrypted);
+        }
+        let http_request = head
+            .body(ProbeBody::new(&request.body))
+            .map_err(|error| format!("request head: {error}"))?;
+        let response = block_on(self.service.call(http_request));
+        if self
+            .answer
+            .lock()
+            .map_err(|_| "the answer slot is poisoned".to_owned())?
+            .take()
+            .is_some()
+        {
+            return Err(format!(
+                "the gateway never reached the handler the answer was queued for (status {})",
+                response.status().as_u16()
+            ));
+        }
+        let (parts, body) = response.into_parts();
+        let body = block_on(body.collect())
+            .map_err(|_| "the gateway response body failed".to_owned())?
+            .to_bytes();
+        Ok(WireAnswer::new(parts.status.as_u16(), &parts.headers, body.to_vec()))
     }
 
     /// Sends `request` and reports what the gateway made of it.

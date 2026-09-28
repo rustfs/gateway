@@ -1,7 +1,8 @@
 # RING 2 — migration-only, deleted with the compat feature
 
 `rustfs-gateway-difftest` compares the gateway with the s3s revision RustFS main links
-(`f3e17541`), on the same raw request bytes, one pure decode at a time (rustfs/backlog#1762). It
+(`f3e17541`) as two pure functions (rustfs/backlog#1762): the same raw request bytes decoded by
+both, and the same handler output encoded by both. It
 exists only for the migration from s3s to the gateway and is deleted together with the
 `compat-s3s` feature of `rustfs-gateway-types` (P9-09). It is never published, and nothing that
 ships depends on it.
@@ -34,11 +35,57 @@ Four things are compared, and a difference in any is a finding:
 Twenty-two operations are compared member by member (`DIFFED_OPERATIONS`); every other operation
 is still route-diffed, and its refusals still compared.
 
+## What one encode diff compares
+
+One s3s output — what a RustFS handler returns — goes to both stacks as their handler's answer to
+the same request: to s3s as it is, and to the gateway converted to the gateway output
+(`src/convert/`; PutObject and GetBucketLocation go through the production seam, so for them the
+diff measures what RustFS will run). A member the gateway output cannot hold is a finding naming it,
+never a dropped value. Both answers are then compared on:
+
+1. **the status**;
+2. **every header line** — name, value, the order of repeated lines, and presence (a header only
+   one stack writes is a difference);
+3. **the body**: the XML declaration apart, then the document element by element — attributes
+   (`xmlns`), whether an empty element is `<X/>` or `<X></X>`, the order of the children both
+   sides wrote, presence, text, and the whitespace between children — and, where the structure is
+   the same, byte for byte, so an escape or spacing inside a tag still shows.
+
+A streaming output (GetObject) carries a deterministic placeholder body — fixed bytes in fixed
+pieces with an exact length — so both stacks write the same stream and the joined bytes compare.
+Cadence, trailers and mid-stream errors are conformance cases, not this.
+
+Header names are compared as the `http` crate hands them over, which is lowercased on both sides;
+their spelling on the wire is the shadow proxy's to observe.
+
+### Normalisation, not exemption
+
+Four headers legitimately differ between the stacks — `x-amz-request-id`, `x-amz-id-2`, `Date`
+and `Server` are the service's, not the answer's. Each is replaced by a placeholder **and its
+format is asserted on its own** (`src/normalize.rs`): the request id is 16 uppercase hex digits,
+the host id 32, `Date` an IMF-fixdate, `Server` a bare product name. An exemption would hide a
+change of format; a placeholder with its own check does not.
+
+Values that come from the output both stacks were handed — version ids, upload ids, instants — are
+not replaced at all: they are asserted (an upload id is unpadded base64url of `<deployment>.<UUID>`
+as RustFS mints it, an XML instant always carries milliseconds, and so on) **and** compared as
+written, so a conversion that changed one within its format — an upload id re-encoded as hex, a
+truncated millisecond — is caught twice. `Connection`, `Keep-Alive` and `Transfer-Encoding` are
+removed as framing; `Content-Length` on an answer with a body is held to that side's own body and
+compared across sides only over identical bodies, and on a `HEAD` answer — the size of the object
+not sent — is compared like any other header.
+
 ## Unregistered differences fail
 
 Every finding must match an entry of [`known-diffs.toml`](known-diffs.toml), which says what
 differs, why that is accepted, and when it is reviewed again. A message-wording difference is
-reported as information once registered; unregistered, it fails like any other.
+reported as information once registered; unregistered, it fails like any other. An element-order
+entry pins both complete orders, and a finding matches when the children written are that order
+with some left out — so a gateway that starts writing another order is a new difference. When an
+entry pins both sides with a `*`, the two stand for the same text.
+
+When an s3s output member cannot be held by the gateway output, the diff reports that member and
+compares nothing else for that output: there is no gateway answer to compare it with.
 
 ## Why this is not an in-process dual stack
 

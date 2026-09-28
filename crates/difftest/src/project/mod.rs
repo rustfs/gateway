@@ -136,9 +136,45 @@ pub(crate) use {gateway_projection, oracle_projection};
 /// The one table: operation, the s3s trait method and its input/output types, and the two
 /// projections.
 macro_rules! diffed_operations {
-    ($($op:ident / $method:ident($input:ident, $output:ident) => $gateway:path, $oracle:path;)+) => {
-        /// Every operation whose input the decode diff compares member by member.
+    ($($op:ident / $method:ident($input:ident, $output:ident) => $gateway:path, $oracle:path, $convert:path;)+) => {
+        /// Every operation whose input the decode diff compares member by member, and whose output
+        /// the encode diff writes on both stacks.
         pub const DIFFED_OPERATIONS: &[&str] = &[$(stringify!($op)),+];
+
+        /// One output a RustFS handler could return, for an operation the diff knows.
+        #[allow(clippy::large_enum_variant, reason = "a sample is built once and moved once")]
+        pub enum OracleOutput {
+            $(
+                #[doc = concat!("A ", stringify!($op), " output.")]
+                $op(oracle::$output),
+            )+
+        }
+
+        impl std::fmt::Debug for OracleOutput {
+            fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                match self {
+                    $(Self::$op(output) => output.fmt(formatter),)+
+                }
+            }
+        }
+
+        impl OracleOutput {
+            /// The operation this output answers.
+            #[must_use]
+            pub const fn operation(&self) -> &'static str {
+                match self {
+                    $(Self::$op(_) => stringify!($op),)+
+                }
+            }
+
+            /// The gateway output the gateway codec writes for this one, boxed for the recorder's
+            /// answer slot.
+            pub(crate) fn into_gateway(self) -> Result<Box<dyn std::any::Any + Send>, crate::convert::Unconvertible> {
+                match self {
+                    $(Self::$op(output) => $convert(output).map(|converted| Box::new(converted) as Box<dyn std::any::Any + Send>),)+
+                }
+            }
+        }
 
         /// Registers the recording handler for every diffed operation.
         pub(crate) fn register(builder: ServiceBuilder, recorder: &Arc<Recorder>) -> ServiceBuilder {
@@ -166,7 +202,10 @@ macro_rules! diffed_operations {
                 let OracleProjection { fields, body } = $oracle(request.input);
                 Box::pin(async move {
                     self.record(fields, body).await;
-                    recorded()
+                    match self.take_answer() {
+                        Some(OracleOutput::$op(output)) => Ok(s3s::S3Response::new(output)),
+                        _ => recorded(),
+                    }
                 })
             })+
         }
@@ -174,28 +213,28 @@ macro_rules! diffed_operations {
 }
 
 diffed_operations! {
-    GetObject / get_object(GetObjectInput, GetObjectOutput) => object::gateway_get_object, object::oracle_get_object;
-    HeadObject / head_object(HeadObjectInput, HeadObjectOutput) => object::gateway_head_object, object::oracle_head_object;
-    PutObject / put_object(PutObjectInput, PutObjectOutput) => object::gateway_put_object, object::oracle_put_object;
-    DeleteObject / delete_object(DeleteObjectInput, DeleteObjectOutput) => object::gateway_delete_object, object::oracle_delete_object;
-    DeleteObjects / delete_objects(DeleteObjectsInput, DeleteObjectsOutput) => object::gateway_delete_objects, object::oracle_delete_objects;
-    CopyObject / copy_object(CopyObjectInput, CopyObjectOutput) => object::gateway_copy_object, object::oracle_copy_object;
-    ListObjects / list_objects(ListObjectsInput, ListObjectsOutput) => listing::gateway_list_objects, listing::oracle_list_objects;
-    ListObjectsV2 / list_objects_v2(ListObjectsV2Input, ListObjectsV2Output) => listing::gateway_list_objects_v2, listing::oracle_list_objects_v2;
-    ListObjectVersions / list_object_versions(ListObjectVersionsInput, ListObjectVersionsOutput) => listing::gateway_list_object_versions, listing::oracle_list_object_versions;
-    ListMultipartUploads / list_multipart_uploads(ListMultipartUploadsInput, ListMultipartUploadsOutput) => listing::gateway_list_multipart_uploads, listing::oracle_list_multipart_uploads;
-    CreateMultipartUpload / create_multipart_upload(CreateMultipartUploadInput, CreateMultipartUploadOutput) => multipart::gateway_create_multipart_upload, multipart::oracle_create_multipart_upload;
-    UploadPart / upload_part(UploadPartInput, UploadPartOutput) => multipart::gateway_upload_part, multipart::oracle_upload_part;
-    CompleteMultipartUpload / complete_multipart_upload(CompleteMultipartUploadInput, CompleteMultipartUploadOutput) => multipart::gateway_complete_multipart_upload, multipart::oracle_complete_multipart_upload;
-    AbortMultipartUpload / abort_multipart_upload(AbortMultipartUploadInput, AbortMultipartUploadOutput) => multipart::gateway_abort_multipart_upload, multipart::oracle_abort_multipart_upload;
-    ListParts / list_parts(ListPartsInput, ListPartsOutput) => multipart::gateway_list_parts, multipart::oracle_list_parts;
-    CreateBucket / create_bucket(CreateBucketInput, CreateBucketOutput) => bucket::gateway_create_bucket, bucket::oracle_create_bucket;
-    DeleteBucket / delete_bucket(DeleteBucketInput, DeleteBucketOutput) => bucket::gateway_delete_bucket, bucket::oracle_delete_bucket;
-    HeadBucket / head_bucket(HeadBucketInput, HeadBucketOutput) => bucket::gateway_head_bucket, bucket::oracle_head_bucket;
-    ListBuckets / list_buckets(ListBucketsInput, ListBucketsOutput) => bucket::gateway_list_buckets, bucket::oracle_list_buckets;
-    GetBucketLocation / get_bucket_location(GetBucketLocationInput, GetBucketLocationOutput) => bucket::gateway_get_bucket_location, bucket::oracle_get_bucket_location;
-    GetBucketVersioning / get_bucket_versioning(GetBucketVersioningInput, GetBucketVersioningOutput) => bucket::gateway_get_bucket_versioning, bucket::oracle_get_bucket_versioning;
-    PutBucketVersioning / put_bucket_versioning(PutBucketVersioningInput, PutBucketVersioningOutput) => bucket::gateway_put_bucket_versioning, bucket::oracle_put_bucket_versioning;
+    GetObject / get_object(GetObjectInput, GetObjectOutput) => object::gateway_get_object, object::oracle_get_object, crate::convert::object::get_object;
+    HeadObject / head_object(HeadObjectInput, HeadObjectOutput) => object::gateway_head_object, object::oracle_head_object, crate::convert::object::head_object;
+    PutObject / put_object(PutObjectInput, PutObjectOutput) => object::gateway_put_object, object::oracle_put_object, crate::convert::object::put_object;
+    DeleteObject / delete_object(DeleteObjectInput, DeleteObjectOutput) => object::gateway_delete_object, object::oracle_delete_object, crate::convert::object::delete_object;
+    DeleteObjects / delete_objects(DeleteObjectsInput, DeleteObjectsOutput) => object::gateway_delete_objects, object::oracle_delete_objects, crate::convert::object::delete_objects;
+    CopyObject / copy_object(CopyObjectInput, CopyObjectOutput) => object::gateway_copy_object, object::oracle_copy_object, crate::convert::object::copy_object;
+    ListObjects / list_objects(ListObjectsInput, ListObjectsOutput) => listing::gateway_list_objects, listing::oracle_list_objects, crate::convert::listing::list_objects;
+    ListObjectsV2 / list_objects_v2(ListObjectsV2Input, ListObjectsV2Output) => listing::gateway_list_objects_v2, listing::oracle_list_objects_v2, crate::convert::listing::list_objects_v2;
+    ListObjectVersions / list_object_versions(ListObjectVersionsInput, ListObjectVersionsOutput) => listing::gateway_list_object_versions, listing::oracle_list_object_versions, crate::convert::listing::list_object_versions;
+    ListMultipartUploads / list_multipart_uploads(ListMultipartUploadsInput, ListMultipartUploadsOutput) => listing::gateway_list_multipart_uploads, listing::oracle_list_multipart_uploads, crate::convert::listing::list_multipart_uploads;
+    CreateMultipartUpload / create_multipart_upload(CreateMultipartUploadInput, CreateMultipartUploadOutput) => multipart::gateway_create_multipart_upload, multipart::oracle_create_multipart_upload, crate::convert::multipart::create_multipart_upload;
+    UploadPart / upload_part(UploadPartInput, UploadPartOutput) => multipart::gateway_upload_part, multipart::oracle_upload_part, crate::convert::multipart::upload_part;
+    CompleteMultipartUpload / complete_multipart_upload(CompleteMultipartUploadInput, CompleteMultipartUploadOutput) => multipart::gateway_complete_multipart_upload, multipart::oracle_complete_multipart_upload, crate::convert::multipart::complete_multipart_upload;
+    AbortMultipartUpload / abort_multipart_upload(AbortMultipartUploadInput, AbortMultipartUploadOutput) => multipart::gateway_abort_multipart_upload, multipart::oracle_abort_multipart_upload, crate::convert::multipart::abort_multipart_upload;
+    ListParts / list_parts(ListPartsInput, ListPartsOutput) => multipart::gateway_list_parts, multipart::oracle_list_parts, crate::convert::multipart::list_parts;
+    CreateBucket / create_bucket(CreateBucketInput, CreateBucketOutput) => bucket::gateway_create_bucket, bucket::oracle_create_bucket, crate::convert::bucket::create_bucket;
+    DeleteBucket / delete_bucket(DeleteBucketInput, DeleteBucketOutput) => bucket::gateway_delete_bucket, bucket::oracle_delete_bucket, crate::convert::bucket::delete_bucket;
+    HeadBucket / head_bucket(HeadBucketInput, HeadBucketOutput) => bucket::gateway_head_bucket, bucket::oracle_head_bucket, crate::convert::bucket::head_bucket;
+    ListBuckets / list_buckets(ListBucketsInput, ListBucketsOutput) => bucket::gateway_list_buckets, bucket::oracle_list_buckets, crate::convert::listing::list_buckets;
+    GetBucketLocation / get_bucket_location(GetBucketLocationInput, GetBucketLocationOutput) => bucket::gateway_get_bucket_location, bucket::oracle_get_bucket_location, crate::convert::bucket::get_bucket_location;
+    GetBucketVersioning / get_bucket_versioning(GetBucketVersioningInput, GetBucketVersioningOutput) => bucket::gateway_get_bucket_versioning, bucket::oracle_get_bucket_versioning, crate::convert::bucket::get_bucket_versioning;
+    PutBucketVersioning / put_bucket_versioning(PutBucketVersioningInput, PutBucketVersioningOutput) => bucket::gateway_put_bucket_versioning, bucket::oracle_put_bucket_versioning, crate::convert::bucket::put_bucket_versioning;
 }
 
 /// Every gateway member each diffed operation's projection reads, for the census test.

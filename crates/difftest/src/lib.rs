@@ -30,6 +30,7 @@
 #![deny(missing_docs)]
 #![doc = include_str!("../README.md")]
 
+mod convert;
 mod fields;
 mod gateway;
 mod oracle;
@@ -37,14 +38,20 @@ mod probe;
 mod project;
 mod request;
 mod resolver;
+mod xmltree;
 
 pub mod decode;
+pub mod encode;
 pub mod known;
+pub mod normalize;
 
+pub use convert::Unconvertible;
 pub use decode::{BodyDigest, Cmp, DecodeDiff, Differ, FieldDiff, Finding, Item, Priority, S3ErrorView, decode_diff};
+pub use encode::{EncodeDiff, HeaderDiff, OutputSample, PLACEHOLDER_LENGTH, WireAnswer, placeholder_body};
 pub use fields::{FieldValue, Fields};
 pub use known::{KnownDiff, KnownDiffs, Verdict};
-pub use project::DIFFED_OPERATIONS;
+pub use normalize::{Format, FormatAssertion, Normalizer, Side};
+pub use project::{DIFFED_OPERATIONS, OracleOutput};
 pub use request::RawRequest;
 
 /// The s3s revision every oracle answer in this crate comes from: the one RustFS main links.

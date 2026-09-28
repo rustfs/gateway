@@ -38,6 +38,7 @@ use sha2::{Digest as _, Sha256};
 
 use crate::fields::FieldValue;
 use crate::gateway::GatewayStack;
+use crate::known::Kind;
 use crate::oracle::OracleStack;
 use crate::request::RawRequest;
 
@@ -55,6 +56,24 @@ pub(crate) enum Fault {
     /// The named member (a path relative to the input) is decoded as a different value.
     #[cfg_attr(not(test), allow(dead_code, reason = "constructed by the negative controls only"))]
     GatewayMemberSkewed(String),
+    /// Encode: the first two children of the XML root are written in the other order.
+    #[cfg_attr(not(test), allow(dead_code, reason = "constructed by the negative controls only"))]
+    GatewayXmlElementsReordered,
+    /// Encode: the root element loses its `xmlns`.
+    #[cfg_attr(not(test), allow(dead_code, reason = "constructed by the negative controls only"))]
+    GatewayXmlnsDropped,
+    /// Encode: the first empty element is spelled the other way (`<X/>` and `<X></X>`).
+    #[cfg_attr(not(test), allow(dead_code, reason = "constructed by the negative controls only"))]
+    GatewayEmptyElementRespelled,
+    /// Encode: an upload id is written as the hex of its bytes.
+    #[cfg_attr(not(test), allow(dead_code, reason = "constructed by the negative controls only"))]
+    GatewayUploadIdAsHex,
+    /// Encode: one header no registered difference names is added.
+    #[cfg_attr(not(test), allow(dead_code, reason = "constructed by the negative controls only"))]
+    GatewayExtraHeader,
+    /// Encode: the request id is written in lowercase.
+    #[cfg_attr(not(test), allow(dead_code, reason = "constructed by the negative controls only"))]
+    GatewayRequestIdMalformed,
 }
 
 /// One thing compared, with the gateway's value and the s3s value.
@@ -224,6 +243,22 @@ pub enum Item {
     Member(String),
     /// The body bytes left for the handler.
     RestBody,
+    /// Encode: the two answers' statuses.
+    ResponseStatus,
+    /// Encode: one header's lines, by lowercase name.
+    Header(String),
+    /// Encode: the answer bodies after any XML declaration, after normalisation.
+    Body,
+    /// Encode: the XML declaration and the whitespace after it.
+    BodyProlog,
+    /// Encode: one XML element's attributes, spelling, presence or text, by element path.
+    BodyElement(String),
+    /// Encode: one XML element's children written in another order, by element path.
+    BodyOrder(String),
+    /// Encode: a normalised value that did not have its format.
+    Format(String),
+    /// Encode: an s3s output member the gateway output cannot hold.
+    Unconvertible(String),
 }
 
 impl fmt::Display for Item {
@@ -236,6 +271,14 @@ impl fmt::Display for Item {
             Self::Message => formatter.write_str("error.message"),
             Self::Member(path) => formatter.write_str(path),
             Self::RestBody => formatter.write_str("rest_body"),
+            Self::ResponseStatus => formatter.write_str("status"),
+            Self::Header(name) => write!(formatter, "header {name}"),
+            Self::Body => formatter.write_str("body"),
+            Self::BodyProlog => formatter.write_str("body.prolog"),
+            Self::BodyElement(path) => write!(formatter, "body {path}"),
+            Self::BodyOrder(path) => write!(formatter, "body.order {path}"),
+            Self::Format(field) => write!(formatter, "format {field}"),
+            Self::Unconvertible(member) => write!(formatter, "unconvertible {member}"),
         }
     }
 }
@@ -255,6 +298,8 @@ pub enum Priority {
 /// One difference, ready to be matched against the known-diffs register.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Finding {
+    /// Which differential found it.
+    pub kind: Kind,
     /// The operation it concerns: the gateway's when it routed to one, else the s3s one.
     pub operation: String,
     /// What differs.
@@ -310,6 +355,7 @@ impl DecodeDiff {
             .or_else(|| self.operation.s3s.clone())
             .unwrap_or_else(|| "<unrouted>".to_owned());
         let finding = |item: Item, priority: Priority, gateway: String, s3s: String| Finding {
+            kind: Kind::Decode,
             operation: operation.clone(),
             item,
             priority,
@@ -401,6 +447,18 @@ impl Differ {
             oracle: OracleStack::new(),
             fault,
         })
+    }
+
+    pub(crate) const fn gateway_stack(&self) -> &GatewayStack {
+        &self.gateway
+    }
+
+    pub(crate) const fn oracle_stack(&self) -> &OracleStack {
+        &self.oracle
+    }
+
+    pub(crate) const fn fault(&self) -> &Fault {
+        &self.fault
     }
 
     /// Sends `request` to both stacks and compares the two decodes.

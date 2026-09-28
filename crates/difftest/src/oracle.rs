@@ -35,6 +35,7 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
 use crate::decode::{Answer, BodySeen};
+use crate::encode::WireAnswer;
 use crate::fields::Fields;
 use crate::probe::{ProbeBody, block_on};
 use crate::request::RawRequest;
@@ -49,12 +50,21 @@ pub(crate) struct OracleHanded {
 
 pub(crate) type OracleSlot = Arc<Mutex<Option<OracleHanded>>>;
 
+/// The answer the next handler call returns instead of refusing: the encode diff's output.
+pub(crate) type AnswerSlot = Arc<Mutex<Option<crate::project::OracleOutput>>>;
+
 /// The recording backend. Its `s3s::S3` methods are generated beside the projections.
 pub(crate) struct RecordingS3 {
     pub(crate) slot: OracleSlot,
+    pub(crate) answer: AnswerSlot,
 }
 
 impl RecordingS3 {
+    /// The queued answer, if the encode diff queued one.
+    pub(crate) fn take_answer(&self) -> Option<crate::project::OracleOutput> {
+        self.answer.lock().ok().and_then(|mut answer| answer.take())
+    }
+
     /// Records one handler call, draining the body a streaming input carries first.
     pub(crate) async fn record(&self, fields: Fields, body: Option<oracle::StreamingBlob>) {
         let body = match body {
@@ -133,13 +143,18 @@ pub(crate) struct OracleStack {
     service: s3s::service::S3Service,
     slot: OracleSlot,
     routed: Arc<Mutex<Option<String>>>,
+    answer: AnswerSlot,
 }
 
 impl OracleStack {
     pub(crate) fn new() -> Self {
         let slot: OracleSlot = Arc::new(Mutex::new(None));
         let routed = Arc::new(Mutex::new(None));
-        let mut builder = s3s::service::S3ServiceBuilder::new(RecordingS3 { slot: Arc::clone(&slot) });
+        let answer: AnswerSlot = Arc::new(Mutex::new(None));
+        let mut builder = s3s::service::S3ServiceBuilder::new(RecordingS3 {
+            slot: Arc::clone(&slot),
+            answer: Arc::clone(&answer),
+        });
         builder.set_auth(s3s::auth::SimpleAuth::from_single(ACCESS_KEY, SECRET_KEY));
         builder.set_access(RecordOperation {
             routed: Arc::clone(&routed),
@@ -148,7 +163,32 @@ impl OracleStack {
             service: builder.build(),
             slot,
             routed,
+            answer,
         }
+    }
+
+    /// Sends `request` with `output` queued as its handler's answer, and returns the whole
+    /// response s3s wrote.
+    pub(crate) fn answer(&self, request: &RawRequest, output: crate::project::OracleOutput) -> Result<WireAnswer, String> {
+        *self.answer.lock().map_err(|_| "the answer slot is poisoned".to_owned())? = Some(output);
+        let source: s3s::stream::DynByteStream = Box::pin(ProbeBody::new(&request.body));
+        let http_request = request
+            .http_head()?
+            .body(s3s::Body::from(source))
+            .map_err(|error| format!("request head: {error}"))?;
+        let response = block_on(self.service.call(http_request)).map_err(|error| format!("s3s service failed: {error:?}"));
+        let unused = self
+            .answer
+            .lock()
+            .map_err(|_| "the answer slot is poisoned".to_owned())?
+            .take();
+        let response = response?;
+        if unused.is_some() {
+            return Err("s3s never reached the handler the answer was queued for".to_owned());
+        }
+        let (parts, mut body) = response.into_parts();
+        let body = block_on(body.store_all_limited(64 << 20)).map_err(|error| format!("s3s response body: {error}"))?;
+        Ok(WireAnswer::new(parts.status.as_u16(), &parts.headers, body.to_vec()))
     }
 
     /// Sends `request` and reports what s3s made of it.
