@@ -13,6 +13,8 @@ Agent entry point for repository automation commands.
 | `src/ir/semantic.rs` | Cross-field, shape, unwrapped-output, and quirk invariants. | A semantic IR rule changes. |
 | `src/mutate.rs` | `conformance mutate`: the per-quirk kill matrix, and the guards that keep a mutation which never reached the gateway from reading as a gap in the corpus. | A mutation verdict, the inert/not-measured rules, or the restore loop changes. |
 | `src/mutate/tests.rs` | Verdict-order controls for the mutation classifier, including the two shapes of ledger row that certify nothing (`UNWITNESSED`) and the live-case control that keeps `SURVIVED` meaning a corpus gap. | A guard in front of `SURVIVED` changes. |
+| `src/mutate/reach.rs` | `--reachability`: reruns a `SURVIVED` rule's mutated tree with coverage and judges its changed lines reached, unreached (`SURVIVED_UNREACHED`, a dead source) or unknown. | A survivor's reachability verdict, or the coverage collection, changes. |
+| `src/mutate/report.rs` | Matrix row and summary wording, and the refinement of a `SURVIVED` row by a reachability answer. | A row's label or note changes. |
 | `src/nested_cargo.rs` | Strips the `CARGO_MANIFEST_*` / `CARGO_PKG_*` variables `cargo run` gave xtask before any nested Cargo inherits them. | A nested Cargo rebuilds `ring` and everything above it that a shell build had already built. |
 | `src/new_op.rs` | Intentionally-red operation scaffold. | Scaffold contents or collision checks change. |
 | `src/route.rs` | Route explanation CLI rendering. | `route explain` output changes. |
