@@ -25,9 +25,6 @@
 
 use super::{DivergenceFollowUp, DivergenceRuling, ERROR_PARITY, ERROR_RESPONSES, RequestDivergence};
 
-/// The marker's version id on the gateway's delete-marker refusals.
-const MARKER_VERSION_ID: &str = "https://github.com/rustfs/gateway/issues/899";
-
 pub(super) const ERROR_DIVERGENCES: [RequestDivergence; 10] = [
     RequestDivergence {
         id: "rd-err-0001",
@@ -143,12 +140,11 @@ pub(super) const ERROR_DIVERGENCES: [RequestDivergence; 10] = [
         aws_evidence: "https://docs.aws.amazon.com/AmazonS3/latest/userguide/DeleteMarker.html",
         s3s: "writes the code and every header of the error (RustFS with_delete_marker_read_headers)",
         gateway: "the seam reads the three headers (Refusal::CurrentDeleteMarker, VersionedDeleteMarker) and the delete-marker \
-                  contexts render the flag and Last-Modified; the version id is not rendered yet, and a marker error with no \
-                  Last-Modified (RustFS's current-marker 404 today) is refused",
-        client_impact: "a read of a deleted key is the 404 or 405 with the marker flag, without x-amz-version-id until the \
-                        follow-up lands; not on M1's two operations",
+                  contexts render all three; a marker error with no Last-Modified (RustFS's current-marker 404 today) is refused",
+        client_impact: "a read of a deleted key is the 404 or 405 with the marker flag and version id once the RustFS body \
+                        writes Last-Modified on both, and a 500 until then; not on M1's two operations",
         ruling: DivergenceRuling::AlignS3s,
-        follow_up: DivergenceFollowUp::Open(MARKER_VERSION_ID),
+        follow_up: DivergenceFollowUp::Landed("c-object-0063"),
         test_file: ERROR_PARITY,
         test: "an_error_carrying_delete_marker_headers_crosses_as_the_marker_read",
     },

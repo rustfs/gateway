@@ -64,6 +64,7 @@ Agent entry point for operations, routing, codecs, authorization state and handl
 | `src/dispatch.rs` | Route, registration and parameter refusal order. | A request fails in the wrong stage. |
 | `src/error.rs` | Closed pre-authentication errors. | A refusal before authentication has the wrong status. |
 | `src/error_resolution.rs` | Closed contextual error resolution and body policy. | A contextual refusal has the wrong code, status, extras or body policy. |
+| `src/error_resolution/validate.rs` | Admission checks for an ordinary refusal: code, message and detail bounds, contextual codes, and which headers and details a code may carry. | A handler refusal is admitted or refused bare when it should not be. |
 | `src/fault.rs` | Closed error headers/details. | An error document needs a reviewed field. |
 | `src/cors/` | CORS rule and response primitives. | CORS semantics change. |
 | `src/sse/` | Server-side encryption proof, bounded KMS context JSON validation and rejection types. | SSE headers or key handling change. |

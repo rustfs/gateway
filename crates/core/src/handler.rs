@@ -559,6 +559,20 @@ impl HandlerError {
         }
     }
 
+    /// Restricts a delete-marker refusal to what a copy may say about its source.
+    ///
+    /// A copy answers `x-amz-version-id` for the version it wrote, so a source that is a delete
+    /// marker must not put the marker's id in that header. A backend applies this to the refusal its
+    /// source read returns, for CopyObject and UploadPartCopy; the marker flag and `Last-Modified`
+    /// stay, and every other refusal is unchanged.
+    #[must_use]
+    pub fn as_copy_source_refusal(mut self) -> Self {
+        match self.context.take() {
+            Some(context) => Self::from(context.copy_source_marker()),
+            None => self,
+        }
+    }
+
     /// The error code.
     #[must_use]
     pub const fn code(&self) -> &ErrorCode {

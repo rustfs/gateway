@@ -139,7 +139,7 @@ pub use crate::error_resolution::{
 };
 pub use crate::fault::{
     ELEMENT_ORDER, ErrorDetail, ErrorHeader, HttpDate, InvalidWireLabel, PRECONDITION_FAILED_MESSAGE,
-    RANGE_NOT_SATISFIABLE_MESSAGE, RedirectTarget, RegionLabel,
+    RANGE_NOT_SATISFIABLE_MESSAGE, RedirectTarget, RegionLabel, VersionIdLabel,
 };
 pub use crate::handler::{Answer, BoxFuture, Handler, HandlerError, HandlerResult, Req, Resp};
 pub use crate::op::{

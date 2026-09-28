@@ -551,7 +551,7 @@ pub(super) fn delete_marker_error(record: &VersionRecord, key: &str, explicit: b
             .unwrap_or_else(|_| storage_error());
     }
     let key = ObjectKey::new(key.to_owned()).ok();
-    HandlerErrorContext::current_delete_marker(ResourceVisibility::Visible, key, record.modified)
+    HandlerErrorContext::current_delete_marker(ResourceVisibility::Visible, key, &record.version_id, record.modified)
         .map(Into::into)
         .unwrap_or_else(|_| storage_error())
 }
