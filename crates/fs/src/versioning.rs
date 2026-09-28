@@ -29,7 +29,7 @@ use std::path::PathBuf;
 
 use rustfs_gateway::dto::{
     DeleteObject, DeleteObjectOutput, GetBucketVersioning, GetBucketVersioningOutput, PutBucketVersioning,
-    PutBucketVersioningOutput, PutObject, PutObjectOutput, Status, StorageClass,
+    PutBucketVersioningOutput, PutObject, PutObjectOutput, ServerSideEncryption, Status, StorageClass,
 };
 use rustfs_gateway::{
     ETag, ErrorCode, Handler, HandlerError, HandlerErrorContext, HandlerResult, MissingObject, ObjectKey, Preconditions, Req,
@@ -606,8 +606,15 @@ impl Handler<PutObject> for FsBackend {
         // rather than as a body the handler abandoned. Every refusal still precedes publication:
         // a malformed tag header or an unknown class fails the request with no version written.
         let bytes = drain(input.body).await?;
+        let encryption = self
+            .write_encryption(
+                input.bucket.as_str(),
+                input.server_side_encryption.as_ref().map(ServerSideEncryption::as_str),
+                input.ssekms_key_id.as_deref(),
+            )
+            .await?;
         let attributes = ObjectAttributes {
-            headers: request_content_headers!(input),
+            headers: request_content_headers!(input).with_encryption(encryption.clone()),
             storage_class: requested_storage_class(input.storage_class.as_ref())?,
             tags: tags_from_header(input.tagging.as_deref())?,
             metadata: input.metadata,
@@ -635,6 +642,8 @@ impl Handler<PutObject> for FsBackend {
             size: Some(published.size),
             e_tag,
             version_id: published.version_id,
+            server_side_encryption: encryption.reported_algorithm(),
+            ssekms_key_id: encryption.kms_key_id,
             ..PutObjectOutput::default()
         }))
     }

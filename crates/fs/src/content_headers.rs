@@ -17,7 +17,9 @@
 //! Responsible for: the six headers a write may carry and every later read answers
 //! (`Content-Type`, `Content-Encoding`, `Content-Disposition`, `Content-Language`,
 //! `Cache-Control`, `Expires`), reading them out of a write request, the model's default media
-//! type, their storability rule, and the byte form of the `headers/1` trailing section.
+//! type, their storability rule, and the byte form of the `headers/1` trailing section — which
+//! also carries the server-managed encryption a version was written under
+//! (`x-amz-server-side-encryption` and its KMS key id), resolved by `super::encryption`.
 //! NOT responsible for: where that section sits in a record or an upload, or the sections around
 //! it, which are `super::records`'; `response-*` overrides, which the codec applies.
 //! Upstream: the write handlers, through `request_content_headers!`. Downstream: `super::records`,
@@ -70,17 +72,24 @@ pub(super) struct ContentHeaders {
     pub(super) content_language: Option<String>,
     pub(super) content_type: Option<String>,
     pub(super) expires: Option<String>,
+    /// The server-managed algorithm the version was written under, reported and never applied
+    /// (see `super::encryption`); set after the request is read, never by `from_request`.
+    pub(super) server_side_encryption: Option<String>,
+    /// The KMS key id beside an `aws:kms` algorithm.
+    pub(super) ssekms_key_id: Option<String>,
 }
 
 impl ContentHeaders {
     /// The header names this section may carry, in the order they are written.
-    const NAMES: [&'static str; 6] = [
+    const NAMES: [&'static str; 8] = [
         "cache-control",
         "content-disposition",
         "content-encoding",
         "content-language",
         "content-type",
         "expires",
+        "x-amz-server-side-encryption",
+        "x-amz-server-side-encryption-aws-kms-key-id",
     ];
 
     fn slot(&mut self, name: &str) -> Option<&mut Option<String>> {
@@ -91,11 +100,13 @@ impl ContentHeaders {
             "content-language" => Some(&mut self.content_language),
             "content-type" => Some(&mut self.content_type),
             "expires" => Some(&mut self.expires),
+            "x-amz-server-side-encryption" => Some(&mut self.server_side_encryption),
+            "x-amz-server-side-encryption-aws-kms-key-id" => Some(&mut self.ssekms_key_id),
             _ => None,
         }
     }
 
-    fn entries(&self) -> [(&'static str, Option<&str>); 6] {
+    fn entries(&self) -> [(&'static str, Option<&str>); 8] {
         [
             (Self::NAMES[0], self.cache_control.as_deref()),
             (Self::NAMES[1], self.content_disposition.as_deref()),
@@ -103,6 +114,8 @@ impl ContentHeaders {
             (Self::NAMES[3], self.content_language.as_deref()),
             (Self::NAMES[4], self.content_type.as_deref()),
             (Self::NAMES[5], self.expires.as_deref()),
+            (Self::NAMES[6], self.server_side_encryption.as_deref()),
+            (Self::NAMES[7], self.ssekms_key_id.as_deref()),
         ]
     }
 
@@ -126,6 +139,23 @@ impl ContentHeaders {
             content_language,
             content_type: content_type.filter(|value| value != DEFAULT_CONTENT_TYPE),
             expires,
+            server_side_encryption: None,
+            ssekms_key_id: None,
+        }
+    }
+
+    /// These headers with the encryption a write resolved in place of whatever they carried.
+    pub(super) fn with_encryption(mut self, encryption: super::encryption::ObjectEncryption) -> Self {
+        self.server_side_encryption = encryption.algorithm;
+        self.ssekms_key_id = encryption.kms_key_id;
+        self
+    }
+
+    /// The encryption this version was written under.
+    pub(super) fn encryption(&self) -> super::encryption::ObjectEncryption {
+        super::encryption::ObjectEncryption {
+            algorithm: self.server_side_encryption.clone(),
+            kms_key_id: self.ssekms_key_id.clone(),
         }
     }
 

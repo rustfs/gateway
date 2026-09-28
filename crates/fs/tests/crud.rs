@@ -25,6 +25,8 @@ mod acl;
 mod bucket_encryption;
 #[path = "crud/bucket_policy.rs"]
 mod bucket_policy;
+#[path = "crud/object_encryption.rs"]
+mod object_encryption;
 #[path = "crud/versioning.rs"]
 mod versioning;
 
