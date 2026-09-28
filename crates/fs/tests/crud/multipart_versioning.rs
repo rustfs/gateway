@@ -123,10 +123,9 @@ async fn enabled_multipart_versions_survive_restart() {
     assert!(!uploads.contains(&second_upload));
 }
 
-/// Positive — never-enabled and suspended buckets follow the same null-version rules as PUT, on
-/// the read as well as the write: once the bucket has been versioned, every null version —
-/// the one completed before versioning was enabled included — reads back as `null`, the id its
-/// completion reported.
+/// Positive — never-enabled and suspended buckets follow the same null-version rules as PUT: the
+/// completion reports no version id, and once the bucket has been versioned every null version —
+/// the one completed before versioning was enabled included — reads back as `null`.
 #[tokio::test]
 async fn never_enabled_and_suspended_completion_share_null_semantics() {
     let root = TestRoot::new();
@@ -141,10 +140,21 @@ async fn never_enabled_and_suspended_completion_share_null_semantics() {
     assert_eq!(set_versioning(&running, "mpu-null", "Enabled").await.status(), 200);
     let (historic_id, _, _) = complete_one(&running, "mpu-null", "key", b"historic").await;
     assert_eq!(set_versioning(&running, "mpu-null", "Suspended").await.status(), 200);
-    let (first_null, _, _) = complete_one(&running, "mpu-null", "key", b"null-one").await;
-    let (second_null, second_tag, _) = complete_one(&running, "mpu-null", "key", b"null-two").await;
-    assert_eq!(first_null, "null");
-    assert_eq!(second_null, "null");
+    // A suspended bucket's completion reports no version id, as RustFS answers it
+    // (rustfs/gateway#1003); the null version it wrote reads back as `null` below.
+    for body in [&b"null-one"[..], &b"null-two"[..]] {
+        let (upload_id, part) = start_one(&running, "mpu-null", "key", body).await;
+        let completed = complete(&running, "mpu-null", "key", &upload_id, &[(1, &part)]).await;
+        assert_eq!(completed.status(), 200, "{}", String::from_utf8_lossy(completed.body()));
+        assert!(header_text(&completed, "x-amz-version-id").is_none());
+    }
+    let second_tag = {
+        let current = exchange(&running, signed(http::Method::HEAD, "/mpu-null/key", Bytes::new())).await;
+        header_text(&current, "etag")
+            .expect("an entity tag")
+            .trim_matches('"')
+            .to_owned()
+    };
 
     let (_, reopened) = service(&root);
     // The bucket has been versioned since `plain` was completed, so its null version is now
@@ -158,7 +168,7 @@ async fn never_enabled_and_suspended_completion_share_null_semantics() {
     assert_eq!(current.status(), 200);
     assert_eq!(current.body().as_ref(), b"null-two");
     assert_eq!(header_text(&current, "etag"), Some(format!("\"{second_tag}\"").as_str()));
-    assert_eq!(header_text(&current, "x-amz-version-id"), Some("null"), "the id the completion reported");
+    assert_eq!(header_text(&current, "x-amz-version-id"), Some("null"), "the null version it wrote");
 
     let historic = exchange(
         &reopened,
