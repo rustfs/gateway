@@ -34,8 +34,10 @@ if command -v taskset >/dev/null 2>&1; then
     fi
 fi
 
-RUSTFLAGS='-Zsanitizer=thread' \
-RUSTDOCFLAGS='-Zsanitizer=thread' \
+# `--cfg gateway_tsan` compiles the dhat global allocator out of the test binary; see
+# crates/gateway/tests/service_clone_allocations.rs and rustfs/gateway#958.
+RUSTFLAGS='-Zsanitizer=thread --cfg gateway_tsan' \
+RUSTDOCFLAGS='-Zsanitizer=thread --cfg gateway_tsan' \
     cargo "+${TOOLCHAIN}" test -Zbuild-std --target "$TARGET" \
         -p rustfs-gateway --test integration \
         service_concurrency::one_hundred_clones_answer_concurrently -- --exact --test-threads=1

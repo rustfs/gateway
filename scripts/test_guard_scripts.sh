@@ -19760,11 +19760,58 @@ mut_tsan_instrumentation_deleted() {
     python3 - <<'PYEOF'
 import pathlib
 path = pathlib.Path("scripts/run_gateway_tsan.sh")
-path.write_text(path.read_text().replace("RUSTFLAGS='-Zsanitizer=thread'", "RUSTFLAGS=''", 1))
+text = path.read_text()
+old = "RUSTFLAGS='-Zsanitizer=thread --cfg gateway_tsan'"
+if text.count(old) != 1:
+    raise SystemExit("the TSAN RUSTFLAGS line is not unique")
+path.write_text(text.replace(old, "RUSTFLAGS='--cfg gateway_tsan'", 1))
 PYEOF
 }
 expect_fail check_gateway_tsan_wiring.sh \
     'the TSAN runner losing sanitizer instrumentation' mut_tsan_instrumentation_deleted
+
+# dhat's global allocator lock orders every allocating thread for TSAN (rustfs/gateway#958).
+mut_tsan_keeps_dhat_allocator() {
+    python3 - <<'PYEOF'
+import pathlib
+path = pathlib.Path("scripts/run_gateway_tsan.sh")
+text = path.read_text()
+old = "RUSTFLAGS='-Zsanitizer=thread --cfg gateway_tsan'"
+if text.count(old) != 1:
+    raise SystemExit("the TSAN RUSTFLAGS line is not unique")
+path.write_text(text.replace(old, "RUSTFLAGS='-Zsanitizer=thread'", 1))
+PYEOF
+}
+expect_fail check_gateway_tsan_wiring.sh \
+    'the TSAN build keeping the dhat global allocator' mut_tsan_keeps_dhat_allocator
+
+mut_tsan_dhat_allocator_unconditional() {
+    python3 - <<'PYEOF'
+import pathlib
+path = pathlib.Path("crates/gateway/tests/service_clone_allocations.rs")
+text = path.read_text()
+old = "#[cfg(not(gateway_tsan))]\n#[global_allocator]"
+if text.count(old) != 1:
+    raise SystemExit("the cfg-gated global allocator is not unique")
+path.write_text(text.replace(old, "#[global_allocator]", 1))
+PYEOF
+}
+expect_fail check_gateway_tsan_wiring.sh \
+    'the dhat global allocator compiled into the TSAN build' mut_tsan_dhat_allocator_unconditional
+
+mut_tsan_allocator_proof_deleted() {
+    python3 - <<'PYEOF'
+import pathlib
+path = pathlib.Path("crates/gateway/tests/service_concurrency.rs")
+text = path.read_text()
+old = "    #[cfg(gateway_tsan)]\n    assert_the_system_allocator_serves_this_binary();\n"
+if text.count(old) != 1:
+    raise SystemExit("the allocator proof call is not unique")
+path.write_text(text.replace(old, "", 1))
+PYEOF
+}
+expect_fail check_gateway_tsan_wiring.sh \
+    'the TSAN case no longer proving its allocator' mut_tsan_allocator_proof_deleted
 
 mut_tsan_build_std_deleted() {
     python3 - <<'PYEOF'
