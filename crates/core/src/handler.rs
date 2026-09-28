@@ -257,6 +257,8 @@ where
 pub struct Resp<O: Operation> {
     answer: Answer<O>,
     status: u16,
+    /// Headers the output cannot express; see `Resp::with_extra_headers`.
+    pub(crate) extra_headers: http::HeaderMap,
 }
 
 impl<O: Operation> Resp<O> {
@@ -269,15 +271,17 @@ impl<O: Operation> Resp<O> {
         Self {
             answer: Answer::Settled(output),
             status: O::spec().success_status,
+            extra_headers: http::HeaderMap::new(),
         }
     }
 
     /// The answer with a status other than the declared one — `206` for a ranged read, `200` for a
     /// delete that reports per-key results.
-    pub const fn with_status(output: O::Output, status: u16) -> Self {
+    pub fn with_status(output: O::Output, status: u16) -> Self {
         Self {
             answer: Answer::Settled(output),
             status,
+            extra_headers: http::HeaderMap::new(),
         }
     }
 
@@ -292,6 +296,7 @@ impl<O: Operation> Resp<O> {
         Self {
             answer: Answer::EventStream(stream),
             status: O::spec().success_status,
+            extra_headers: http::HeaderMap::new(),
         }
     }
 
@@ -350,9 +355,12 @@ impl<O: Operation> Resp<O> {
         }
     }
 
-    /// Takes the content and the status.
-    pub fn into_parts(self) -> (Answer<O>, u16) {
-        (self.answer, self.status)
+    /// Takes the content, the status and the extra headers.
+    ///
+    /// The extra headers are part of the tuple rather than a separate accessor so that no dispatch
+    /// path can take the answer and forget them.
+    pub fn into_parts(self) -> (Answer<O>, u16, http::HeaderMap) {
+        (self.answer, self.status, self.extra_headers)
     }
 
     /// Wraps a committed continuation, leaving every other answer and the status untouched.
@@ -368,12 +376,20 @@ impl<O: Operation> Resp<O> {
     /// contract: a wrapper meant for a continuation must not become a wrapper on everything.
     #[must_use]
     pub fn map_commit_work(self, f: impl FnOnce(CommitWork<O>) -> CommitWork<O>) -> Self {
-        let Self { answer, status } = self;
+        let Self {
+            answer,
+            status,
+            extra_headers,
+        } = self;
         let answer = match answer {
             Answer::Committed(committed) => Answer::Committed(committed.map_work(f)),
             settled_or_stream => settled_or_stream,
         };
-        Self { answer, status }
+        Self {
+            answer,
+            status,
+            extra_headers,
+        }
     }
 }
 
@@ -389,6 +405,7 @@ impl<O: DeferredOperation> Resp<O> {
         Self {
             answer: Answer::Committed(CommittedResponse::new(head, work, O::RESPONSE_HEADERS, O::RESPONSE_HEADER_PREFIXES)),
             status: O::spec().success_status,
+            extra_headers: http::HeaderMap::new(),
         }
     }
 
@@ -398,6 +415,7 @@ impl<O: DeferredOperation> Resp<O> {
         Self {
             answer: Answer::Committed(CommittedResponse::new(head, work, O::RESPONSE_HEADERS, O::RESPONSE_HEADER_PREFIXES)),
             status,
+            extra_headers: http::HeaderMap::new(),
         }
     }
 }
@@ -682,7 +700,7 @@ mod tests {
     #[test]
     fn an_event_stream_survives_into_parts() {
         let response = Resp::<SelectObjectContent>::event_stream(ByteStream::from_bytes(Bytes::from_static(b"frame")));
-        let (answer, status) = response.into_parts();
+        let (answer, status, _extra) = response.into_parts();
         assert_eq!(status, 200);
         assert!(matches!(answer, Answer::EventStream(_)));
     }

@@ -233,9 +233,13 @@ pub(crate) fn erase<O: OperationCodec>() -> ErasedCodec {
     });
     let encode: ErasedEncode = Arc::new(|response: ErasedResponse, request: &MetaView<'_>| {
         let response = response.downcast::<Resp<O>>().map_err(|_| RESPONSE_MISMATCH)?;
-        let (answer, status) = response.into_parts();
+        let (answer, status, extra_headers) = response.into_parts();
         match answer {
-            crate::handler::Answer::Settled(output) => O::encode(output, request, status),
+            crate::handler::Answer::Settled(output) => {
+                let mut encoded = O::encode(output, request, status)?;
+                encoded.append_extra_headers(extra_headers)?;
+                Ok(encoded)
+            }
             // This erasure encodes what a handler already produced; a committed answer has not
             // produced it yet, and driving the continuation would mean awaiting — which this file
             // may not do (`tests/purity_guard.rs`). The facade's own table is the path that drives

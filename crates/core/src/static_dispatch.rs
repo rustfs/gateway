@@ -308,9 +308,15 @@ where
             .map_err(StaticDispatchError::Input)?;
         let authorized = authorize::<O>(decoded, &decisions).map_err(StaticDispatchError::Denied)?;
         let response = invoke_handler(backend, authorized.into_request(sse, context), request_guard).await?;
-        let (answer, status) = response.into_parts();
+        let (answer, status, extra_headers) = response.into_parts();
+        if !extra_headers.is_empty() && !matches!(answer, Answer::Settled(_)) {
+            return Err(StaticDispatchError::Codec(CodecError::internal(
+                "extra response headers apply only to a settled answer",
+            )));
+        }
         match answer {
             Answer::Settled(output) => encode::<O>(output, meta, status)
+                .and_then(|mut encoded| encoded.append_extra_headers(extra_headers).map(|()| encoded))
                 .map(StaticDispatchOutcome::Settled)
                 .map_err(StaticDispatchError::Codec),
             Answer::Committed(committed) => Ok(StaticDispatchOutcome::Committed {

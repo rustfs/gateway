@@ -164,8 +164,8 @@ impl OperationMode for DynamicMode<'_> {
                 };
             let (answer, status) = answer.map_err(hide).map_err(StaticDispatchError::Handler)?;
             match answer {
-                ErasedAnswer::Settled(output) => entry
-                    .encode(output, meta, status)
+                ErasedAnswer::Settled(output, extra_headers) => entry
+                    .encode(output, meta, status, extra_headers)
                     .map(StaticDispatchOutcome::Settled)
                     .map_err(StaticDispatchError::Codec),
                 ErasedAnswer::Committed(response) => Ok(StaticDispatchOutcome::Committed { status, response }),

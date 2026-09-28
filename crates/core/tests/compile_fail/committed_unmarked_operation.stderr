@@ -32,8 +32,8 @@ note: if you're trying to build a new `Resp<ListBuckets>` consider using one of 
    |     pub fn new(output: O::Output) -> Self {
    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 ...
-   |     pub const fn with_status(output: O::Output, status: u16) -> Self {
-   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |     pub fn with_status(output: O::Output, status: u16) -> Self {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 ...
    |     pub fn event_stream(stream: ByteStream) -> Self {
    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

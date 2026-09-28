@@ -5147,7 +5147,7 @@ mod tests {
     /// would see `Answer::Committed(_)` and learn nothing: the fault this arms lives inside the
     /// future, which is the whole reason it is a fault after a commit and not a refusal.
     fn refusal_after_commit<O: rustfs_gateway::Operation>(resp: Resp<O>) -> Option<HandlerError> {
-        let (answer, _status) = resp.into_parts();
+        let (answer, _status, _extra_headers) = resp.into_parts();
         match answer {
             rustfs_gateway::Answer::Committed(committed) => crate::exec::block_on(committed.into_parts().1).err(),
             _ => panic!("{} did not commit its head", O::NAME),
@@ -5232,7 +5232,7 @@ mod tests {
     }
 
     fn stalls_for_ever<O: rustfs_gateway::Operation>(resp: Resp<O>) -> bool {
-        let (answer, _status) = resp.into_parts();
+        let (answer, _status, _extra_headers) = resp.into_parts();
         let rustfs_gateway::Answer::Committed(committed) = answer else {
             panic!("{} did not commit its head", O::NAME);
         };

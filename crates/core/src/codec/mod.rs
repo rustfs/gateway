@@ -47,6 +47,7 @@
 //! * emit-or-omit for an empty member is `xml.empty_value_policy`, carried per member.
 
 pub mod error;
+pub mod extra_headers;
 pub mod response;
 pub mod value;
 pub mod view;
@@ -55,6 +56,7 @@ pub mod view;
 mod tests;
 
 pub use crate::codec::error::CodecError;
+pub use crate::codec::extra_headers::{OWNED_RESPONSE_HEADERS, is_owned_response_header};
 pub use crate::codec::response::{
     BodyAllowance, EncodedResponse, ResponseBody, ResponseOverride, body_allowance, override_header_value, response_body_allowed,
     response_framing_allowed, status_code,

@@ -86,8 +86,9 @@ type ErasedOutput = Box<dyn std::any::Any + Send>;
 /// has not been written and one whose head is already on the wire, and the facade writes the two
 /// differently.
 pub(crate) enum ErasedAnswer {
-    /// The output is here; the response can be encoded whole.
-    Settled(ErasedOutput),
+    /// The output is here, with the handler's extra response headers; the response can be encoded
+    /// whole.
+    Settled(ErasedOutput, http::HeaderMap),
     /// The status is committed and the outcome is still running.
     Committed(StaticCommittedResponse),
     /// An already framed event stream, with no generated output document to encode.
@@ -129,7 +130,7 @@ type Invoke =
     Arc<dyn Fn(ErasedRequest, RequestConfig<Authorized>, RequestContextView) -> Result<Invocation, HandlerError> + Send + Sync>;
 
 /// Write the answer back to the wire.
-type Encode = Arc<dyn Fn(ErasedOutput, &MetaView<'_>, u16) -> Result<EncodedResponse, CodecError> + Send + Sync>;
+type Encode = Arc<dyn Fn(ErasedOutput, &MetaView<'_>, u16, http::HeaderMap) -> Result<EncodedResponse, CodecError> + Send + Sync>;
 
 /// Everything the service needs about one registered operation, with `O` erased.
 #[derive(Clone)]
@@ -224,9 +225,12 @@ impl OperationDispatch {
                             HandlerError::internal_error("the registered dispatch received another operation's response")
                         })?;
                         let response = response.map_commit_work(|work| commit_with_progress_deadline(work, commit_progress));
-                        let (answer, status) = response.into_parts();
+                        let (answer, status, extra_headers) = response.into_parts();
+                        if !extra_headers.is_empty() && !matches!(answer, CoreAnswer::Settled(_)) {
+                            return Err(HandlerError::internal_error("extra response headers apply only to a settled answer"));
+                        }
                         let answer = match answer {
-                            CoreAnswer::Settled(output) => ErasedAnswer::Settled(Box::new(output) as ErasedOutput),
+                            CoreAnswer::Settled(output) => ErasedAnswer::Settled(Box::new(output) as ErasedOutput, extra_headers),
                             CoreAnswer::Committed(committed) => {
                                 ErasedAnswer::Committed(StaticCommittedResponse::erase(committed))
                             }
@@ -238,7 +242,7 @@ impl OperationDispatch {
             },
         );
 
-        let encode: Encode = Arc::new(|output: ErasedOutput, meta: &MetaView<'_>, status: u16| {
+        let encode: Encode = Arc::new(|output: ErasedOutput, meta: &MetaView<'_>, status: u16, extra: http::HeaderMap| {
             // Unreachable through the service, which looks the entry up by the same name it
             // invoked. Answered rather than panicked: a table bug must not take the process down.
             let output = output
@@ -246,6 +250,7 @@ impl OperationDispatch {
                 .map_err(|_| CodecError::internal("the registered codec was handed another operation's output"))?;
             let mut encoded = O::encode(*output, meta, status)?;
             encoded.apply_response_overrides(meta, O::RESPONSE_OVERRIDES);
+            encoded.append_extra_headers(extra)?;
             encoded.enforce_http_invariants(meta.method());
             Ok(encoded)
         });
@@ -312,8 +317,15 @@ impl OperationDispatch {
     /// # Errors
     ///
     /// [`CodecError::internal`] for an output with no wire form. Nothing a caller sends reaches it.
-    pub(crate) fn encode(&self, output: ErasedOutput, meta: &MetaView<'_>, status: u16) -> Result<EncodedResponse, CodecError> {
-        (self.encode)(output, meta, status)
+    /// Also for extra response headers the gateway owns or the encoder already wrote.
+    pub(crate) fn encode(
+        &self,
+        output: ErasedOutput,
+        meta: &MetaView<'_>,
+        status: u16,
+        extra_headers: http::HeaderMap,
+    ) -> Result<EncodedResponse, CodecError> {
+        (self.encode)(output, meta, status, extra_headers)
     }
 }
 
@@ -639,7 +651,7 @@ mod tests {
             invocation_with_deadline(&dispatch, Duration::from_millis(100), Duration::from_millis(20)).expect("dispatchable");
 
         let result = invocation.await;
-        assert!(matches!(result, Ok((ErasedAnswer::Settled(_), 200))));
+        assert!(matches!(result, Ok((ErasedAnswer::Settled(_, _), 200))));
     }
 
     /// Positive — the other direction. One registered layer does enter the chain, so the counter
