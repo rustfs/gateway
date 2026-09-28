@@ -221,12 +221,20 @@ fn a_peer_goaway_preserves_the_protocol_error_and_independent_eof() {
     assert_eq!(observed.outcome, Outcome::ConnectionReset);
     assert_eq!(observed.status, None);
     assert_eq!(observed.socket_read_after, Some(crate::observation::SocketReadState::Eof));
+    // Whether the peer's connection-level grant goes out before the error depends on when its
+    // reader sees the HEADERS (RFC 9113 section 5.2.1 leaves WINDOW_UPDATE timing to the peer), so
+    // only such grants are set aside; every other received control stays exact.
+    let controls = observed.h2_control_frames.expect("controls are measured");
+    let (grants, others): (Vec<_>, Vec<_>) = controls
+        .into_iter()
+        .partition(|frame| matches!(frame, ObservedH2ControlFrame::WindowUpdate { stream_id: 0, .. }));
+    assert!(grants.len() <= 1, "at most the one initial connection grant: {grants:?}");
     assert_eq!(
-        observed.h2_control_frames,
-        Some(vec![ObservedH2ControlFrame::GoAway {
+        others,
+        vec![ObservedH2ControlFrame::GoAway {
             last_stream_id: 0,
             error_code: 1
-        }]),
+        }],
         "the real peer reports PROTOCOL_ERROR for the unchanged invalid stream",
     );
 }

@@ -791,4 +791,7 @@ mod h2_goaway_tests;
 mod h2_window_tests;
 
 #[cfg(test)]
+mod h2_grant_tests;
+
+#[cfg(test)]
 mod h2_ping_tests;

@@ -104,9 +104,14 @@ and absence of an observed termination.
 Existing version 1, 2 and 3 cases remain valid without edits. To assert received HTTP/2 controls,
 set `case.schema_version = 4` and add `expect.h2_control_frames`, an exact ordered list such as
 `[{ type = "rst_stream", stream_id = 1, error_code = 8 }]`. An empty list asserts that the observer
-received none of the supported controls; an unavailable observation fails this assertion.
-Numeric error codes preserve unknown wire values. Missing, extra, reordered, or different frames
-fail the comparison.
+received none of the supported controls other than connection-level grants; an unavailable
+observation fails this assertion. Numeric error codes preserve unknown wire values. Missing, extra,
+reordered, or different frames fail the comparison, with one exception: a connection-level
+WINDOW_UPDATE (stream zero). HTTP/2 leaves when a receiver sends WINDOW_UPDATE, and what it grants,
+to the implementation (RFC 9113 section 5.2.1), so whether a peer's grant goes out before a
+connection error depends on when its reader sees the offending frame. Each listed connection-level
+grant must therefore have been received with exactly that increment, wherever it arrived, and an
+unlisted one is not a mismatch. Stream-level WINDOW_UPDATE frames stay in the exact ordered list.
 
 The list covers RST_STREAM, GOAWAY and WINDOW_UPDATE until the selected exchange ends. It does not claim to
 capture every HTTP/2 frame: DATA and headers keep their existing response representation. Other-stream resets are recorded without terminating
