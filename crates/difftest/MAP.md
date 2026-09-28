@@ -48,6 +48,10 @@ compare and why this is not an in-process dual stack.
 | `src/fuzz_case.rs` | A decode_diff fuzz artifact as a conformance case draft under `conformance/cases/_from_fuzz/`. | Converting a fuzz finding into a case. |
 | `src/bin/fuzz-to-case.rs` | The converter's command line. | Never; it only calls `fuzz_case::draft`. |
 | `src/tests/fuzz.rs` | The stable replay of both properties (committed seeds, fixed-seed samplers), the reader, the converter, and both properties failing on injected faults. | A fuzz property or the converter changes. |
+| `src/tee.rs` | The shadow proxy's copy of a connection read back as HTTP/1.1 requests: framing, pipelining, caps, and giving up on what is not HTTP. | A copied request is cut, merged or lost wrongly. |
+| `src/shadow.rs` | The shadow proxy: byte-for-byte forwarding, the never-waited-on judging queue, and the verdict per request. | The proxy changes traffic, or a verdict is wrong. |
+| `src/bin/shadow-proxy.rs` | The proxy's command line. | Changing its options. |
+| `src/tests/shadow.rs` | The copy's framing cases, bytes unchanged both ways, a stalled diff never slowing traffic, the verdicts. | The proxy or its copy changes. |
 | `src/tests/census.rs` | Each gateway projection held to the generated DTO field count. | A DTO gains a member. |
 
 ## Verify
