@@ -39,50 +39,60 @@ entries, so the claim cannot rot.
 
 ## What is in here today
 
-49 entries in 18 buckets, 26 KB. 43 of them are **real captured traffic** from the
-four-client compatibility matrix (rustfs/backlog#1765), deduplicated down from 340 probe
-records; 6 are hand-authored inputs carrying chunk framing and abnormal termination.
+134 entries in 82 buckets, 0.3 MB. 128 of them are **real captured traffic** against the
+`rustfs-gateway-fs` reference backend; 6 are hand-authored inputs carrying chunk framing and
+abnormal termination. The captured traffic comes from two recorders:
 
-| Source | Entries |
-|---|---|
-| `client-matrix:boto3@1.42.96` | 23 |
-| `client-matrix:rclone@v1.74.0` | 11 |
-| `client-matrix:restic@v0.19.1` | 7 |
-| `client-matrix:mc@v0.0.0-20250416181326-b00526b153a3` | 2 |
-| `handwritten:gateway` | 6 |
+- 43 `head_partial` entries converted from the four-client compatibility matrix's probe log
+  (rustfs/backlog#1765), deduplicated down from 340 probe records;
+- 85 `head_full` entries written by the `CorpusRecorderLayer` (`crates/corpus-recorder`)
+  mounted in `compat-sut`, from real `mc` and boto3 sessions: the whole head, the whole body as
+  the service received it with every signature redacted, and the response head.
+
+| Source | Entries | Chunk-framed |
+|---|---|---|
+| `client-matrix:boto3@1.42.96` | 94 | 3 |
+| `client-matrix:mc@v0.0.0-20250416181326-b00526b153a3` | 16 | 2 |
+| `client-matrix:rclone@v1.74.0` | 11 | 0 |
+| `client-matrix:restic@v0.19.1` | 7 | 3 |
+| `handwritten:gateway` | 6 | 3 |
 
 ### Client diversity is not signing diversity
 
-The manifest counts `chunked` and `trailers` per bucket because the answer is not what
-the client list suggests. Across the whole captured run, **only restic** emitted
-aws-chunked framing:
+The manifest counts `chunked` and `trailers` per bucket because the answer is not what the
+client list suggests. Over cleartext, rclone and boto3 never emit aws-chunked framing at any
+object size; minio-go (restic and `mc`) emits signed `STREAMING-AWS4-HMAC-SHA256-PAYLOAD`
+chunks. botocore reaches the aws-chunked wrapper only on the unsigned-payload path, which
+requires TLS, and there it sends `STREAMING-UNSIGNED-PAYLOAD-TRAILER` with an
+`x-amz-checksum-*` trailer. Bucketing therefore records the framing rather than the client.
 
-| Source | Chunk-framed | Plain |
-|---|---|---|
-| `client-matrix:restic@v0.19.1` | 3 | 4 |
-| `client-matrix:boto3@1.42.96` | 0 | 23 |
-| `client-matrix:rclone@v1.74.0` | 0 | 11 |
-| `client-matrix:mc@…` | 0 | 2 |
-
-boto3 and the AWS CLI do not emit `STREAMING-AWS4-HMAC-SHA256` against a cleartext
-endpoint at any object size; botocore only reaches the aws-chunked wrapper on the
-unsigned-payload path, which requires TLS. restic (minio-go, explicit region) does emit
-it. Four clients therefore bought one signing mode plus one, not four — which is why
-bucketing records the framing rather than the client, and why the three hand-authored
-chunk-framed entries exist at all.
+Blind spot B is closed with **recorded** bodies, not only hand-authored ones:
+`object/PutObject.jsonl` holds `mc` uploads whose wire body is
+`<size>;chunk-signature=__REDACTED__\r\n<data>\r\n…` exactly as received, and boto3 TLS
+uploads (`PutObject`, `UploadPart`) whose body ends in the declared `x-amz-checksum-crc32` or
+`x-amz-checksum-sha256` trailer. `the_checked_in_corpus_holds_recorded_signed_chunks_and_trailers`
+in `crates/corpus/tests/integration.rs` asserts both.
 
 ### Operations with no entries
 
-Measured against the compatibility matrix's own capability list, nine of its operations
-produced nothing the corpus retained: `AbortMultipartUpload`, `DeleteBucketLifecycle`,
-`DeleteObjectTagging`, `GetBucketLifecycleConfiguration`, `GetObjectTagging`,
-`ListMultipartUploads`, `ListParts`, `PutBucketLifecycleConfiguration`,
-`PutObjectTagging`. `CopyObject` is present only as a hand-authored entry: the compat
-probe does not record `x-amz-copy-source`, so a captured copy is indistinguishable from a
-plain `PutObject` and the converter refuses to guess.
+Measured against every operation in `OPERATIONS.md`, eleven have no entry:
+`DeleteObjectAnnotation`, `GetBucketAbac`, `GetBucketMetadataConfiguration`,
+`GetBucketMetadataTableConfiguration`, `GetObjectAnnotation`, `ListDirectoryBuckets`,
+`ListObjectAnnotations`, `PostObject`, `PutObjectAnnotation`, `RenameObject`,
+`UpdateObjectEncryption`. `PostObject` waits on the form-field credential rule
+(rustfs/gateway#922): before it, the gate would have admitted a live POST-policy signature.
 
-These are the targets for the next round of client-matrix scenarios and for the
-hand-written negative corpus.
+Coverage of the others is thinner than the bucket list suggests. The reference backend answers
+`501 NotImplemented` for about forty operations (CORS, encryption, bucket tagging, website,
+replication, logging, notification, accelerate, request payment, ownership controls, object lock
+and retention, `GetObjectAttributes`, `GetObjectTorrent`, `RestoreObject`,
+`SelectObjectContent`, `UploadPartCopy`, and the analytics, intelligent-tiering, inventory and
+metrics configurations) without reading the request body, so their entries carry the head only:
+the recorder records a body it did not observe whole as no body. Those bodies need a recording
+against a server that reads them.
+
+These are the targets for the next round of client-matrix scenarios and for the hand-written
+negative corpus.
 
 ## Do not read entry counts as coverage
 
@@ -93,7 +103,7 @@ behaviour — SDK retry shapes, part-size strategies, header-order dialects — 
 from the cron client matrix. An entry count is a count of inputs, never evidence that a
 behaviour is covered.
 
-Half of what is here is `capture = "head_partial"`: the compat probe observes a named
+A third of what is here is `capture = "head_partial"`: the compat probe observes a named
 subset of the request head, so absence of a header in such an entry is not evidence that
 the header was absent on the wire. `corpus to-case` refuses to build a conformance case
 from a partial capture for exactly that reason.
@@ -104,7 +114,8 @@ Corpus changes go through an explicit pull request. They are never an automatic 
 because a corpus change silently changes every differential result computed from it.
 
 ```bash
-# 1. Convert a client-matrix run into corpus JSONL.
+# 1. Record with the CorpusRecorderLayer (see "Recording" below), or convert a
+#    client-matrix probe log into corpus JSONL.
 corpus/tools/from_compat_probe.py <run-dir>/results \
     --pins compat/versions.toml --recorded 2026-09-02 > /tmp/matrix.jsonl
 
@@ -145,9 +156,23 @@ to a CI artifact: tens of thousands of requests reach hundreds of megabytes, and
 in-repository tree targets under 20 MB with a hard ceiling of 50 MB
 (`scripts/check_corpus_size.sh`).
 
-## What lives elsewhere
+## Recording
 
-Recording itself. The `CorpusRecorderLayer` that writes the JSONL is a feature-gated
-tower layer in the RustFS main repository, compiled only into test builds, and it is not
-part of this repository. Until it lands, `tools/from_compat_probe.py` bridges the
-client-matrix probe records into this format.
+`crates/corpus-recorder` holds the `CorpusRecorderLayer`: a tower layer compiled only with its
+`corpus-record` feature, refusing to start unless `RUSTFS_CORPUS_RECORD=1` and every configured
+access key is a test credential, and running this crate's gate before anything reaches disk. Its
+README has the RustFS integration steps. In this repository it is mounted in `compat-sut`:
+
+```bash
+cargo build -p rustfs-gateway-compat-sut --features corpus-record
+RUSTFS_CORPUS_RECORD=1 target/debug/compat-sut --data <dir> --port 9100 \
+    --access-key compatmatrixkey --secret-key <secret> \
+    --corpus-record /tmp/mc.jsonl --corpus-src 'client-matrix:mc@<pinned version>'
+# ...drive one client against it, stop it with Ctrl-C (it prints the recorder's counters)...
+cargo run -p rustfs-gateway-corpus --bin corpus -- ingest /tmp/mc.jsonl --into corpus
+```
+
+One `compat-sut` process records one `--corpus-src`, so each client gets its own run.
+`--sanitize` is not needed for recorder output: the recorder already sanitized every entry and
+the gate admitted it. `tools/from_compat_probe.py` still converts the matrix's probe log, which
+observes only part of the head.

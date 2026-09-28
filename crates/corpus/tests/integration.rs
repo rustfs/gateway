@@ -665,3 +665,46 @@ fn the_checked_in_corpus_verifies_and_carries_chunk_framing() {
         }
     }
 }
+
+/// a-cp-0005 as an assertion rather than a grep: the checked-in corpus holds **recorded** — not
+/// hand-authored — aws-chunked bodies, both a signed `STREAMING-AWS4-HMAC-SHA256-PAYLOAD` one whose
+/// wire framing carries redacted `chunk-signature` extensions, and one that declares
+/// `x-amz-trailer` and carries the trailer in its body. Blind spot B is closed only if both exist
+/// with `sut` other than `none`.
+#[test]
+fn the_checked_in_corpus_holds_recorded_signed_chunks_and_trailers() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../corpus");
+    let recorded: Vec<Entry> = store::load_all(&root)
+        .unwrap()
+        .into_iter()
+        .filter(|entry| entry.sut != Sut::None && entry.capture == Capture::HeadFull)
+        .collect();
+    let body = |entry: &Entry| -> Vec<u8> {
+        entry
+            .chunks
+            .iter()
+            .flatten()
+            .filter_map(|chunk| match chunk {
+                Chunk::Data { bytes_b64, .. } => base64::decode(bytes_b64).ok(),
+                Chunk::Control { .. } => None,
+            })
+            .flatten()
+            .collect()
+    };
+    let contains = |haystack: &[u8], needle: &[u8]| haystack.windows(needle.len()).any(|window| window == needle);
+    let signed = recorded.iter().any(|entry| {
+        entry
+            .header_values("x-amz-content-sha256")
+            .any(|mode| mode == "STREAMING-AWS4-HMAC-SHA256-PAYLOAD")
+            && contains(&body(entry), format!(";chunk-signature={}", redact::PLACEHOLDER).as_bytes())
+            && entry.redacted.iter().any(|field| field == "chunk-signature")
+    });
+    assert!(signed, "no recorded signed-chunk body with redacted chunk signatures");
+    let trailer = recorded.iter().any(|entry| {
+        entry.header_values("x-amz-trailer").any(|name| {
+            let line = format!("{name}:");
+            contains(&body(entry), line.as_bytes())
+        })
+    });
+    assert!(trailer, "no recorded body carrying the trailer its head declares");
+}
