@@ -89,7 +89,9 @@ def entries_at(revision: str) -> int:
     )
     if result.returncode != 0:
         return 0
-    found = re.findall(r"(?m)^entries = (\d+)$", result.stdout.decode("utf-8", "replace"))
+    # Only the header above the first `[[bucket]]` table: every bucket row has its own `entries`.
+    header = result.stdout.decode("utf-8", "replace").split("\n[[", 1)[0]
+    found = re.findall(r"(?m)^entries = (\d+)$", header)
     if len(found) != 1:
         fail(f"{MANIFEST} at {revision[:12]} does not declare exactly one top-level `entries`")
     return int(found[0])

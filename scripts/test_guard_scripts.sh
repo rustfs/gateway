@@ -19006,7 +19006,7 @@ path = pathlib.Path(".github/workflows/ci.yml")
 text = path.read_text()
 before = "GATEWAY_PR_BODY_JSON: ${{ toJSON(github.event.pull_request.body) }}"
 after = "GATEWAY_PR_BODY_JSON: ${{ github.event.pull_request.body }}"
-if text.count(before) != 2:
+if text.count(before) != 3:
     raise SystemExit("missing the JSON-encoded pull-request body exports")
 path.write_text(text.replace(before, after))
 PYEOF
@@ -19041,7 +19041,7 @@ import pathlib
 path = pathlib.Path(".github/workflows/ci.yml")
 text = path.read_text()
 before = "          GATEWAY_PR_BODY_JSON: ${{ toJSON(github.event.pull_request.body) }}\n"
-if text.count(before) != 2:
+if text.count(before) != 3:
     raise SystemExit("missing the JSON-encoded pull-request body exports")
 path.write_text(text.replace(before, ""))
 PYEOF
@@ -24194,11 +24194,11 @@ corpus_review_repo() {
         git config user.email guard@example.invalid
         git config user.name guard
         mkdir -p corpus scripts
-        printf 'schema_version = 1\nentries = 49\n' >corpus/MANIFEST.toml
+        printf 'schema_version = 1\nentries = 49\n\n[[bucket]]\npath = "object/PutObject.jsonl"\nentries = 49\n' >corpus/MANIFEST.toml
         printf 'x\n' >scripts/other.sh
         git add -A && git commit -q -m 'base (#1)'
         if [[ "$touch_corpus" == 1 ]]; then
-            printf 'schema_version = 1\nentries = %s\n' "$head_entries" >corpus/MANIFEST.toml
+            printf 'schema_version = 1\nentries = %s\n\n[[bucket]]\npath = "object/PutObject.jsonl"\nentries = %s\n' "$head_entries" "$head_entries" >corpus/MANIFEST.toml
         else
             printf 'y\n' >scripts/other.sh
         fi
