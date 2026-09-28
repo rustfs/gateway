@@ -17,7 +17,7 @@
 //! Responsible for: a-df-0017 (an entry without `reason` or `expires` is refused) and the rest of
 //! the register's refusals, and the matching rules — pinned values, one-`*` patterns, the
 //! any-operation wording entry.
-//! NOT responsible for: which entries exist (`rows.rs` holds them to the matrix).
+//! NOT responsible for: which entries exist (`samples/requests.rs` holds them to the matrix).
 //! Upstream: `known.rs`. Downstream: none.
 
 use crate::decode::{Finding, Item, Priority};
@@ -327,4 +327,44 @@ fn the_two_wildcards_of_one_entry_stand_for_the_same_text() {
             .passed()
     );
     assert!(!register.verdict(vec![found("\"&quot;&quot;\"", "\"\\\"abc\\\"\"")]).passed());
+}
+
+/// Negative — an entry scoped to a request feature (`when_query`) accepts its finding only from a
+/// request that carries the parameter: the same route difference from a request without `x-id` is
+/// a gateway misroute, not the hint, and fails. Judged without a request, it never applies.
+#[test]
+fn an_entry_scoped_to_a_query_parameter_applies_only_where_the_request_carries_it() {
+    let register = KnownDiffs::parse(
+        r#"
+[[diff]]
+id = "kd-decode-0001"
+kind = "decode"
+operation = "ListObjects"
+item = "route"
+gateway = "ListObjects"
+s3s = "ListObjectsV2"
+reason = "the hint"
+expires = "2026-12-31"
+when_query = "x-id"
+"#,
+    )
+    .expect("parses");
+    let routed = || vec![finding("ListObjects", Item::Route, "ListObjects", "ListObjectsV2")];
+    let hinted = crate::RawRequest::get("/bkt?x-id=ListObjectsV2");
+    let bare = crate::RawRequest::get("/bkt?list-type=2");
+    let valued = crate::RawRequest::get("/bkt?prefix=x-id");
+    assert!(register.verdict_for(&hinted, routed()).passed());
+    assert!(!register.verdict_for(&bare, routed()).passed());
+    assert!(!register.verdict_for(&valued, routed()).passed());
+    assert!(!register.verdict(routed()).passed());
+}
+
+/// Negative — `when_query` must name a query parameter.
+#[test]
+fn a_when_query_that_is_not_a_parameter_name_is_refused() {
+    for name in ["", "x id", "x-id=1", "a&b"] {
+        let text = format!("{VALID}when_query = {name:?}\n");
+        assert!(refused(&text).contains("when_query"), "{name:?}");
+    }
+    assert!(KnownDiffs::parse(&format!("{VALID}when_query = \"x-id\"\n")).is_ok());
 }

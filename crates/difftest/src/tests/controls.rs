@@ -19,7 +19,7 @@
 //! byte too many is a rest-body finding), a-df-0003 (the four compared items, a member named by
 //! its path), one skewed member per agreed member path, and the finding rules for refusals — each
 //! in both directions, so a comparison stuck on one answer fails.
-//! NOT responsible for: the request matrix (`rows.rs`).
+//! NOT responsible for: the request matrix (`samples/requests.rs`).
 //! Upstream: the library's faults. Downstream: none.
 
 use crate::decode::Fault;
@@ -162,7 +162,7 @@ fn every_agreed_member_skewed_on_the_gateway_is_named_by_its_path_alone() {
     let mut skewed = 0_usize;
     let mut seen = std::collections::BTreeSet::new();
     let clean = Differ::new().expect("both stacks build");
-    for row in super::rows::rows() {
+    for row in crate::samples::requests() {
         let diff = clean.diff(&row.request).expect("the harness runs");
         let Some(operation) = diff.operation.gateway.clone() else {
             continue;

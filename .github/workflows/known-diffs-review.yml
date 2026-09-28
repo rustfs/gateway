@@ -1,0 +1,75 @@
+name: Known-diffs review
+
+# ---------------------------------------------------------------------------
+# WHAT THIS JOB DOES
+#
+#   Once a week it lists the entries of the differential's known-diffs register
+#   (crates/difftest/known-diffs.toml, rustfs/backlog#1762) that are past their
+#   `expires` review date or due within thirty days, and keeps ONE open issue
+#   naming them (a-df-0018). An issue already open under the same title is
+#   commented on instead of duplicated.
+#
+#   It never edits the register. Extending a review date is a reviewed
+#   argument (scripts/check_known_diffs_ratchet.sh), not a bot's.
+#
+#   The pull-request gate enforces the same dates on its own: the guard
+#   scripts/check_known_diffs_expiry.sh warns inside the window and fails past
+#   it. This job exists so the review starts before that gate turns red.
+# ---------------------------------------------------------------------------
+
+on:
+  schedule:
+    # Mondays, 04:00 UTC.
+    - cron: "0 4 * * 1"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Print the due entries and file no issue."
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: known-diffs-review
+  cancel-in-progress: false
+
+jobs:
+  review:
+    name: Known-diffs review dates
+    runs-on: sm-standard-2
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - name: Install host tools
+        run: bash scripts/ci_install_host_tools.sh --with-gh
+      - name: File or refresh the review issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          due="$(bash scripts/check_known_diffs_expiry.sh --due)"
+          if [ -z "$due" ]; then
+            echo "No known-diffs entry is past or within thirty days of its review date."
+            exit 0
+          fi
+          count="$(printf '%s\n' "$due" | wc -l | tr -d ' ')"
+          title="known-diffs review due: ${count} entr$([ "$count" = 1 ] && echo y || echo ies) in crates/difftest/known-diffs.toml"
+          body="$(
+            printf 'These entries of `crates/difftest/known-diffs.toml` are past or within thirty days of their `expires` review date (rustfs/backlog#1762, a-df-0018):\n\n'
+            printf '%s\n' "$due" | sed 's/^\([^ ]*\) \(.*\)$/- `\1` — review by \2/'
+            printf '\nFor each: remove the entry if the difference is gone, or extend `expires` in a pull request whose description carries `known-diff <id>: <why>` (scripts/check_known_diffs_ratchet.sh). The pull-request gate fails once a date has passed.\n'
+          )"
+          printf '%s\n\n%s\n' "$title" "$body"
+          if [ "$DRY_RUN" = "true" ]; then
+            exit 0
+          fi
+          existing="$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search 'in:title "known-diffs review due"' --json number --jq '.[0].number // empty')"
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" --body "$body"
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body "$body"
+          fi

@@ -31,6 +31,7 @@
 #![doc = include_str!("../README.md")]
 
 mod convert;
+pub mod corpus;
 mod fields;
 mod gateway;
 mod oracle;
@@ -44,6 +45,8 @@ pub mod decode;
 pub mod encode;
 pub mod known;
 pub mod normalize;
+pub mod runner;
+pub mod samples;
 
 pub use convert::Unconvertible;
 pub use decode::{BodyDigest, Cmp, DecodeDiff, Differ, FieldDiff, Finding, Item, Priority, S3ErrorView, decode_diff};
