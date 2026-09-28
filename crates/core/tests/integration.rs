@@ -65,6 +65,9 @@ mod encryption_roundtrip;
 #[path = "error_resolution.rs"]
 mod error_resolution;
 
+#[path = "event_stream_frame_replay.rs"]
+mod event_stream_frame_replay;
+
 #[path = "ext_field_policy.rs"]
 mod ext_field_policy;
 
