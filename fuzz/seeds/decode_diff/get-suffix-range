@@ -1,0 +1,3 @@
+GET /bkt/k
+range: bytes=-10
+

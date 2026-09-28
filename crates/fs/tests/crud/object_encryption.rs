@@ -283,3 +283,38 @@ async fn a_key_id_without_an_algorithm_stores_nothing() {
     assert_eq!(refused.status(), 400, "{}", text(&refused));
     assert_eq!(send(&service, http::Method::GET, "/sse/obj", b"", &[]).await.status(), 404);
 }
+
+/// Positive and control — `UploadPart` and `UploadPartCopy` report the encryption the upload was
+/// initiated under (s3-tests `test_copy_part_enc`), and nothing for an unencrypted upload.
+#[tokio::test]
+async fn part_writes_report_the_uploads_encryption() {
+    let root = TestRoot::new();
+    let (_, service) = service(&root);
+    create_bucket(&service, "sse").await;
+    assert_eq!(send(&service, http::Method::PUT, "/sse/src", b"source", &[]).await.status(), 200);
+
+    for (key, initiation, expected) in [("enc", &[(SSE, "AES256")][..], Some("AES256")), ("plain", &[][..], None)] {
+        let initiated = send(&service, http::Method::POST, &format!("/sse/{key}?uploads"), b"", initiation).await;
+        let upload_id = element(initiated.body(), "UploadId").expect("an upload id");
+        let part = send(
+            &service,
+            http::Method::PUT,
+            &format!("/sse/{key}?partNumber=1&uploadId={upload_id}"),
+            b"part",
+            &[],
+        )
+        .await;
+        assert_eq!(part.status(), 200, "{}", text(&part));
+        assert_eq!(reported(&part, SSE), expected, "{key}: UploadPart");
+        let copied = send(
+            &service,
+            http::Method::PUT,
+            &format!("/sse/{key}?partNumber=2&uploadId={upload_id}"),
+            b"",
+            &[("x-amz-copy-source", "/sse/src")],
+        )
+        .await;
+        assert_eq!(copied.status(), 200, "{}", text(&copied));
+        assert_eq!(reported(&copied, SSE), expected, "{key}: UploadPartCopy");
+    }
+}

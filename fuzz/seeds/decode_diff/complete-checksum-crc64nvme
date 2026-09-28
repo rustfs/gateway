@@ -1,0 +1,5 @@
+POST /bkt/k?uploadId=u
+x-amz-checksum-crc64nvme: jSnVw/bqjr4=
+x-amz-checksum-type: FULL_OBJECT
+
+<CompleteMultipartUpload><Part><PartNumber>1</PartNumber><ETag>"e1"</ETag><ChecksumCRC64NVME>v+lYbwd1k6E=</ChecksumCRC64NVME></Part></CompleteMultipartUpload>

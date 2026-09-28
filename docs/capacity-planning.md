@@ -18,8 +18,10 @@ connection back-pressure, and authenticated quotas are separate controls.
 | Tracked clients | bounded address table | 4096 entries | — |
 
 A pre-authentication request must pass the aggregate meter, its class meter, and its client meter.
-If a later layer refuses, earlier charges are returned. An authenticated request does not consume
-these meters; authenticated identity quotas belong after authentication.
+If a later layer refuses, earlier charges are returned. Every request is classified before
+authentication, so the limiter never sees an identity; per-identity quotas belong in the
+`Authorizer`, which runs after the identity is known. A layer configured with `Rate::none()` is
+named in `SecurityPosture` as a closed pre-authentication layer.
 
 The client key comes only from a `ClientAddr` request extension inserted by the listener or a
 trusted-proxy adapter. The gateway never reads `X-Forwarded-For`. Requests without a trusted peer
@@ -114,6 +116,14 @@ self-held HTTP/1 driver negotiates a `FileRegion` separately and reports complet
 calls and bytes; TLS, HTTP/2, verification obligations and unsupported platforms stay on a named,
 byte-counted user-space fallback.
 
+A handler answers with a file region through `ByteStream::from_file_region`. On the self-held
+driver it leaves through `sendfile`. On every other path — the Hyper driver, TLS, HTTP/2, an
+in-process `call_bytes` caller — `S3Service` copies it on the blocking pool in 64 KiB reads and
+records one `adapt_copies_total` of the region's length plus one `zero_copy_refusals` with the
+reason (`tls-in-path`, `http2-in-path`, `transport-lacks-sendfile`, or
+`verification-obligation-present`). The copy is streamed, so its resident cost is one read buffer,
+not the object.
+
 Dedicated 1 GiB RSS and syscall measurements belong to rustfs/backlog#1766, as recorded by
 ADR-0014. They are not wall-clock gates on shared runners.
 
@@ -128,6 +138,7 @@ ADR-0014. They are not wall-clock gates on shared runners.
   tenant, identity, or key-specific policy.
 
 Refill uses a monotonic clock, so wall-clock adjustment cannot refill a rate bucket. Wall time is
-captured separately for signature expiry. A custom wall clock more than 60 seconds from the system
-clock is rejected at assembly unless the deployment supplies the explicit replay-risk
-acknowledgement; the service posture reports which choice was made.
+captured separately for signature expiry. A custom wall clock can only be installed with
+`clock_with_skew_ack` and its explicit replay-risk acknowledgement, whatever its reading at
+assembly: a source that is correct at `build()` and then freezes would keep every captured
+signature valid. `SecurityPosture` and the start-up log name a custom wall clock.

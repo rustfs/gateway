@@ -8434,6 +8434,23 @@ expect_pass_difftest_dev() {
         fail_msg 'check_difftest_not_published.sh rejected: a dev-dependency on the differential'
 }
 expect_pass_difftest_dev
+mut_fuzz_draft_committed() {
+    mkdir -p conformance/cases/_from_fuzz
+    printf '[case]\nid = "c-fuzz-0001"\n' >conformance/cases/_from_fuzz/c-fuzz-0001.toml
+}
+expect_fail check_fuzz_case_drafts.sh \
+    'a fuzz-found case draft committed where drafts are written (a-df-0020)' mut_fuzz_draft_committed 'a draft is not a case'
+mut_fuzz_marker_promoted() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("conformance/cases/naming/c-naming-0033.toml")
+text = path.read_text()
+path.write_text(text.replace('title = "', 'title = "FUZZ-DRAFT: ', 1))
+PYEOF
+}
+expect_fail check_fuzz_case_drafts.sh \
+    'a draft moved into a domain with its marker still in place' mut_fuzz_marker_promoted 'still holds FUZZ-DRAFT'
 mut_difftest_ring_line() { sed -i.bak '1s/.*/# rustfs-gateway-difftest/' crates/difftest/README.md && rm crates/difftest/README.md.bak; }
 expect_fail check_difftest_not_published.sh \
     'the differential README losing its RING 2 migration-only first line' mut_difftest_ring_line 'RING 2'
@@ -15544,6 +15561,89 @@ mut_vendored_server_tree() {
 expect_fail check_no_minio_source.sh \
     'a vendored MinIO server tree' mut_vendored_server_tree
 
+mut_go_outside_client_drivers() {
+    mkdir -p crates/core/tools
+    printf 'package tools\n' >crates/core/tools/gen.go
+}
+# Go is admitted only as a client-matrix driver program; anywhere else it is still refused.
+expect_fail check_no_minio_source.sh \
+    'a Go source file outside compat/drivers/<client>/' mut_go_outside_client_drivers \
+    'a Go source file outside compat/drivers/<client>/'
+
+mut_go_nested_in_client_driver() {
+    mkdir -p compat/drivers/aws-sdk-go/internal/server
+    cp compat/drivers/aws-sdk-go/main.go compat/drivers/aws-sdk-go/internal/server/handler.go
+}
+# One flat directory per client: a nested tree under a driver is where a vendored package would hide.
+expect_fail check_no_minio_source.sh \
+    'a Go file nested below a client driver directory' mut_go_nested_in_client_driver \
+    'a Go source file outside compat/drivers/<client>/'
+
+mut_go_driver_requires_minio_module() {
+    printf 'require github.com/minio/minio-go/v7 v7.0.97\n' >>compat/drivers/aws-sdk-go/go.mod
+}
+expect_fail check_no_minio_source.sh \
+    'a Go client driver requiring a github.com/minio module' mut_go_driver_requires_minio_module \
+    'references a github.com/minio module'
+
+mut_go_driver_sum_minio_module() {
+    printf 'github.com/minio/minio v0.0.0-20250422165208-bf2a7b8a8a41 h1:AAAA=\n' >>compat/drivers/aws-sdk-go/go.sum
+}
+expect_fail check_no_minio_source.sh \
+    'a Go client driver whose go.sum carries a github.com/minio module' mut_go_driver_sum_minio_module \
+    'references a github.com/minio module'
+
+mut_go_driver_imports_minio() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("compat/drivers/aws-sdk-go/main.go")
+text = path.read_text()
+old = '\t"github.com/aws/smithy-go"\n'
+if text.count(old) != 1:
+    raise SystemExit("go import mutation subject is not unique")
+path.write_text(text.replace(old, old + '\t_ "github.com/minio/minio/cmd"\n', 1))
+PYEOF
+}
+expect_fail check_no_minio_source.sh \
+    'a Go client driver importing a github.com/minio package' mut_go_driver_imports_minio \
+    'references a github.com/minio module'
+
+mut_go_driver_minio_copyright() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("compat/drivers/aws-sdk-go/main.go")
+path.write_text("// Copyright (c) 2015-2024 Mini\x4f, Inc.\n" + path.read_text())
+PYEOF
+}
+expect_fail check_no_minio_source.sh \
+    'a Go client driver carrying a MinIO copyright line' mut_go_driver_minio_copyright \
+    'carries a MinIO copyright'
+
+mut_go_driver_without_apache_header() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("compat/drivers/aws-sdk-go/main.go")
+text = path.read_text()
+old = 'Licensed under the Apache License, Version 2.0 (the "License");'
+if text.count(old) != 1:
+    raise SystemExit("apache header mutation subject is not unique")
+path.write_text(text.replace(old, "Licensed as described elsewhere.", 1))
+PYEOF
+}
+expect_fail check_no_minio_source.sh \
+    'a Go client driver file without the Apache-2.0 header' mut_go_driver_without_apache_header \
+    'lacks the Apache-2.0 licence header'
+
+mut_go_driver_without_module() {
+    rm compat/drivers/aws-sdk-go/go.mod
+}
+expect_fail check_no_minio_source.sh \
+    'a Go client driver with no go.mod to scan' mut_go_driver_without_module \
+    'has Go source but no go.mod'
+
 mut_minio_submodule() {
     printf '[submodule "minio"]\n\tpath = third_party/minio\n\turl = https://github.com/minio/minio.git\n' \
         >.gitmodules
@@ -16275,7 +16375,7 @@ import pathlib
 
 path = pathlib.Path("crates/gateway/src/service.rs")
 text = path.read_text()
-call_anchor = ".try_acquire(&GovernorRequest::new(operation, meta.bucket(), declared_length, None, client_addr, class))"
+call_anchor = ".try_acquire(&GovernorRequest::new(operation, meta.bucket(), declared_length, client_addr, class))"
 call = text.find(call_anchor)
 if call < 0 or text.find(call_anchor, call + 1) >= 0:
     raise SystemExit("c-lim-0039 main-pipeline governor call anchor drifted")
@@ -16376,8 +16476,8 @@ mut_governor_c_lim_0004_admission_removed() {
 import pathlib
 
 path = pathlib.Path("crates/gateway/src/ext/governor/default.rs")
-old = "            ClassKind::Authenticated => return Some(Lease::admit()),"
-new = "            ClassKind::Authenticated => return None,"
+old = "        let decided = self.try_acquire_sync(request).ok_or(());"
+new = "        let decided: Result<Lease, ()> = Ok(Lease::admit());"
 text = path.read_text()
 if text.count(old) != 1:
     raise SystemExit("c-lim-0004 synchronous admission anchor drifted")
@@ -16386,7 +16486,24 @@ GOVPY
 }
 expect_fail check_governor_fast_path.sh \
     'c-lim-0004 synchronous admission being removed' mut_governor_c_lim_0004_admission_removed \
-    'c-lim-0004 authenticated traffic no longer returns a permit'
+    'c-lim-0004 the Governor boundary no longer decides through try_acquire_sync'
+
+mut_governor_logs_a_refused_peer() {
+    python3 - <<'GOVPY'
+import pathlib
+
+path = pathlib.Path("crates/gateway/src/ext/governor/default.rs")
+old = "            class_meter.refund(class_rate);\n"
+new = "            eprintln!(\"refused {address:?}\");\n            class_meter.refund(class_rate);\n"
+text = path.read_text()
+if text.count(old) != 1:
+    raise SystemExit("c-gov-0012 refusal anchor drifted")
+path.write_text(text.replace(old, new, 1))
+GOVPY
+}
+expect_fail check_governor_fast_path.sh \
+    'c-gov-0012 a governor refusal logging the peer' mut_governor_logs_a_refused_peer \
+    'c-gov-0012'
 
 mut_governor_sync_path_allocates() {
     python3 - <<'GOVPY'
@@ -16484,7 +16601,7 @@ expect_fail check_chunk_limits.sh \
 mut_chunk_limit_attack_replaced_by_control() {
     python3 - <<'PYEOF'
 from pathlib import Path
-path = Path("crates/http/tests/ingest_chunk_rules.rs")
+path = Path("crates/http/tests/ingest_chunk_rss.rs")
 text = path.read_text()
 old = '''\
             let mut pipeline =
@@ -16506,7 +16623,7 @@ expect_fail check_chunk_limits.sh \
 mut_chunk_limit_ballast_control_reversed() {
     python3 - <<'PYEOF'
 from pathlib import Path
-path = Path("crates/http/tests/ingest_chunk_rules.rs")
+path = Path("crates/http/tests/ingest_chunk_rss.rs")
 text = path.read_text()
 old = "ballast.saturating_sub(control) >= RSS_HEADROOM_BYTES"
 if text.count(old) != 1:
@@ -16521,7 +16638,7 @@ expect_fail check_chunk_limits.sh \
 mut_chunk_limit_rss_ceiling_widened() {
     python3 - <<'PYEOF'
 from pathlib import Path
-path = Path("crates/http/tests/ingest_chunk_rules.rs")
+path = Path("crates/http/tests/ingest_chunk_rss.rs")
 text = path.read_text()
 old = "attack.saturating_sub(control) < RSS_HEADROOM_BYTES"
 if text.count(old) != 1:
@@ -16536,7 +16653,7 @@ expect_fail check_chunk_limits.sh \
 mut_chunk_limit_rss_observer_constant() {
     python3 - <<'PYEOF'
 from pathlib import Path
-path = Path("crates/http/tests/ingest_chunk_rules.rs")
+path = Path("crates/http/tests/ingest_chunk_rss.rs")
 text = path.read_text()
 old = "    parse_peak_rss(&String::from_utf8_lossy(&output.stderr))"
 if text.count(old) != 2:
@@ -16551,7 +16668,7 @@ expect_fail check_chunk_limits.sh \
 mut_concurrent_chunk_attack_count_reduced() {
     python3 - <<'PYEOF'
 from pathlib import Path
-path = Path("crates/http/tests/ingest_chunk_rules.rs")
+path = Path("crates/http/tests/ingest_chunk_rss.rs")
 text = path.read_text()
 old = "const CONCURRENT_ATTACKERS: usize = 100;"
 if text.count(old) != 1:
@@ -16566,7 +16683,7 @@ expect_fail check_chunk_limits.sh \
 mut_concurrent_chunk_attack_stops_slow_feeding() {
     python3 - <<'PYEOF'
 from pathlib import Path
-path = Path("crates/http/tests/ingest_chunk_rules.rs")
+path = Path("crates/http/tests/ingest_chunk_rss.rs")
 text = path.read_text()
 old = "                    let mut pipeline = unsigned_pipeline(body, 1, 4096, no_observers(), ChunkLimits::default());"
 if text.count(old) != 1:
@@ -16581,7 +16698,7 @@ expect_fail check_chunk_limits.sh \
 mut_concurrent_chunk_status_collapsed() {
     python3 - <<'PYEOF'
 from pathlib import Path
-path = Path("crates/http/tests/ingest_chunk_rules.rs")
+path = Path("crates/http/tests/ingest_chunk_rss.rs")
 text = path.read_text()
 old = "reject.to_status() == http::StatusCode::BAD_REQUEST"
 if text.count(old) != 1:
@@ -16596,7 +16713,7 @@ expect_fail check_chunk_limits.sh \
 mut_concurrent_chunk_all_rejections_weakened() {
     python3 - <<'PYEOF'
 from pathlib import Path
-path = Path("crates/http/tests/ingest_chunk_rules.rs")
+path = Path("crates/http/tests/ingest_chunk_rss.rs")
 text = path.read_text()
 old = "assert_eq!(valid, CONCURRENT_ATTACKERS"
 if text.count(old) != 1:
@@ -16608,10 +16725,42 @@ expect_fail check_chunk_limits.sh \
     'c-lim-0064 accepting one rejection as evidence for all one hundred' mut_concurrent_chunk_all_rejections_weakened \
     "c-lim-0064 concurrent probe lost 'assert_eq!(valid, CONCURRENT_ATTACKERS'"
 
+mut_concurrent_chunk_latency_back_on_the_wall_clock() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/http/tests/ingest_chunk_rss.rs")
+text = path.read_text()
+old = "let started = thread_cpu_time();"
+if text.count(old) != 1:
+    raise SystemExit("c-lim-0064 CPU-time anchor drifted")
+path.write_text(text.replace(old, "let started = std::time::Instant::now();", 1))
+PYEOF
+}
+expect_fail check_chunk_limits.sh \
+    'c-lim-0064 timing healthy requests on the wall clock, where host scheduling dominates' \
+    mut_concurrent_chunk_latency_back_on_the_wall_clock \
+    "c-lim-0064 concurrent probe lost 'let started = thread_cpu_time();'"
+
+mut_concurrent_chunk_pipelines_released_early() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/http/tests/ingest_chunk_rss.rs")
+text = path.read_text()
+old = "                    (refused, pipeline)"
+if text.count(old) != 1:
+    raise SystemExit("c-lim-0064 held-pipeline anchor drifted")
+path.write_text(text.replace(old, "                    drop(pipeline);\n                    (refused, ())", 1))
+PYEOF
+}
+expect_fail check_chunk_limits.sh \
+    'c-lim-0064 releasing attack pipelines early, so peak RSS depends on scheduler overlap' \
+    mut_concurrent_chunk_pipelines_released_early \
+    "c-lim-0064 concurrent probe lost '(refused, pipeline)'"
+
 mut_concurrent_chunk_rss_ceiling_widened() {
     python3 - <<'PYEOF'
 from pathlib import Path
-path = Path("crates/http/tests/ingest_chunk_rules.rs")
+path = Path("crates/http/tests/ingest_chunk_rss.rs")
 text = path.read_text()
 old = "attack_rss.saturating_sub(control_rss) < RSS_HEADROOM_BYTES"
 if text.count(old) != 1:
@@ -16626,7 +16775,7 @@ expect_fail check_chunk_limits.sh \
 mut_concurrent_chunk_p99_ceiling_widened() {
     python3 - <<'PYEOF'
 from pathlib import Path
-path = Path("crates/http/tests/ingest_chunk_rules.rs")
+path = Path("crates/http/tests/ingest_chunk_rss.rs")
 text = path.read_text()
 old = "control_p99.saturating_mul(8) + std::time::Duration::from_millis(5)"
 if text.count(old) != 1:
@@ -16641,7 +16790,7 @@ expect_fail check_chunk_limits.sh \
 mut_concurrent_chunk_p99_returns_to_max_sample() {
     python3 - <<'PYEOF'
 from pathlib import Path
-path = Path("crates/http/tests/ingest_chunk_rules.rs")
+path = Path("crates/http/tests/ingest_chunk_rss.rs")
 text = path.read_text()
 old = "const HEALTHY_PROBES: usize = 500;"
 if text.count(old) != 1:

@@ -34,7 +34,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
-use crate::decode::{Answer, BodySeen};
+use crate::decode::{Answer, BodySeen, S3ErrorView};
 use crate::encode::WireAnswer;
 use crate::fields::Fields;
 use crate::probe::{ProbeBody, block_on};
@@ -203,7 +203,7 @@ impl OracleStack {
             .http_head()?
             .body(s3s::Body::from(source))
             .map_err(|error| format!("request head: {error}"))?;
-        let response = block_on(self.service.call(http_request)).map_err(|error| format!("s3s service failed: {error:?}"))?;
+        let response = block_on(self.service.call(http_request));
         let routed = self
             .routed
             .lock()
@@ -217,6 +217,23 @@ impl OracleStack {
         if let Some(handed) = handed {
             return Ok((routed, Answer::Handed(handed)));
         }
+        // s3s failing to write any answer (an error document holding a control character it
+        // echoed from the request, for one) is still an outcome of the request: it is recorded as
+        // a 500 with no error document so that it is compared, whatever the HTTP layer in front
+        // of s3s then does with the failed call (it may close the connection instead).
+        let response = match response {
+            Ok(response) => response,
+            Err(_) => {
+                return Ok((
+                    routed,
+                    Answer::Refused(S3ErrorView {
+                        status: 500,
+                        code: None,
+                        message: Some("the s3s service call failed without an answer".to_owned()),
+                    }),
+                ));
+            }
+        };
         let (parts, mut body) = response.into_parts();
         let body = block_on(body.store_all_limited(1 << 20)).map_err(|error| format!("s3s response body: {error}"))?;
         Ok((routed, Answer::refused(parts.status.as_u16(), &body)))

@@ -1,0 +1,4 @@
+PUT /bkt/k
+x-amz-write-offset-bytes: x
+
+abc

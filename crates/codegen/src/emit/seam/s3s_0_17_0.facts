@@ -1,0 +1,2252 @@
+# s3s 0.17.0 DTO facts, extracted by scripts/extract_s3s_shapes.py. Do not edit.
+enum AnalyticsS3ExportFileFormat
+enum AnnotationConfigurationState
+enum AnnotationDirective
+enum ArchiveStatus
+enum BucketAbacStatus
+enum BucketAccelerateStatus
+enum BucketCannedACL
+enum BucketLocationConstraint
+enum BucketLogsPermission
+enum BucketNamespace
+enum BucketType
+enum BucketVersioningStatus
+enum ChecksumAlgorithm
+enum ChecksumMode
+enum ChecksumType
+enum CompressionType
+enum DataRedundancy
+enum DeleteMarkerReplicationStatus
+enum DeleteReplicationStatus
+enum EncodingType
+enum EncryptionType
+enum ExistingObjectReplicationStatus
+enum ExpirationState
+enum ExpirationStatus
+enum ExpressionType
+enum FileHeaderInfo
+enum FilterRuleName
+enum IntelligentTieringAccessTier
+enum IntelligentTieringStatus
+enum InventoryConfigurationState
+enum InventoryFormat
+enum InventoryFrequency
+enum InventoryIncludedObjectVersions
+enum InventoryOptionalField
+enum JSONType
+enum LocationType
+enum MFADelete
+enum MFADeleteStatus
+enum MetadataDirective
+enum MetricsStatus
+enum ObjectAttributes
+enum ObjectCannedACL
+enum ObjectLockEnabled
+enum ObjectLockLegalHoldStatus
+enum ObjectLockMode
+enum ObjectLockRetentionMode
+enum ObjectOwnership
+enum ObjectStorageClass
+enum ObjectVersionStorageClass
+enum OptionalObjectAttributes
+enum OwnerOverride
+enum PartitionDateSource
+enum Payer
+enum Permission
+enum Protocol
+enum QuoteFields
+enum ReplicaModificationsStatus
+enum ReplicationRuleStatus
+enum ReplicationStatus
+enum ReplicationTimeStatus
+enum RequestCharged
+enum RequestPayer
+enum RestoreRequestType
+enum S3TablesBucketType
+enum ServerSideEncryption
+enum SessionMode
+enum SseKmsEncryptedObjectsStatus
+enum StorageClass
+enum StorageClassAnalysisSchemaVersion
+enum TableSseAlgorithm
+enum TaggingDirective
+enum Tier
+enum TransitionDefaultMinimumObjectSize
+enum TransitionStorageClass
+enum Type
+union AnalyticsFilter { And: struct AnalyticsAndOperator, Prefix: String, Tag: struct Tag }
+union MetricsFilter { AccessPointArn: String, And: struct MetricsAndOperator, Prefix: String, Tag: struct Tag }
+union ObjectEncryption { SSEKMS: struct SSEKMSEncryption }
+union SelectObjectContentEvent { Cont: struct ContinuationEvent, End: struct EndEvent, Progress: struct ProgressEvent, Records: struct RecordsEvent, Stats: struct StatsEvent }
+struct AbacStatus
+  status: Option<enum BucketAbacStatus>
+struct AbortIncompleteMultipartUpload
+  days_after_initiation: Option<i32>
+struct AbortMultipartUploadInput
+  bucket: String
+  expected_bucket_owner: Option<String>
+  if_match_initiated_time: Option<Timestamp>
+  key: String
+  request_payer: Option<enum RequestPayer>
+  upload_id: String
+struct AbortMultipartUploadOutput
+  request_charged: Option<enum RequestCharged>
+struct AccelerateConfiguration
+  status: Option<enum BucketAccelerateStatus>
+struct AccessControlPolicy
+  grants: Option<Vec<struct Grant>>
+  owner: Option<struct Owner>
+struct AccessControlTranslation
+  owner: enum OwnerOverride
+struct AccessDenied
+struct AnalyticsAndOperator
+  prefix: Option<String>
+  tags: Option<Vec<struct Tag>>
+struct AnalyticsConfiguration
+  filter: Option<union AnalyticsFilter>
+  id: String
+  storage_class_analysis: struct StorageClassAnalysis
+struct AnalyticsExportDestination
+  s3_bucket_destination: struct AnalyticsS3BucketDestination
+struct AnalyticsS3BucketDestination
+  bucket: String
+  bucket_account_id: Option<String>
+  format: enum AnalyticsS3ExportFileFormat
+  prefix: Option<String>
+struct AnnotationEntry
+  annotation_name: String
+  checksum_algorithm: Option<Vec<enum ChecksumAlgorithm>>
+  e_tag: Option<ETag>
+  last_modified: Timestamp
+  replication_status: Option<enum ReplicationStatus>
+  size: i64
+struct AnnotationLimitExceeded
+struct AnnotationNameTooLong
+struct AnnotationTableConfiguration
+  configuration_state: enum AnnotationConfigurationState
+  encryption_configuration: Option<struct MetadataTableEncryptionConfiguration>
+  role: Option<String>
+struct AnnotationTableConfigurationResult
+  configuration_state: enum AnnotationConfigurationState
+  error: Option<struct ErrorDetails>
+  role: Option<String>
+  table_arn: Option<String>
+  table_name: Option<String>
+  table_status: Option<String>
+struct AnnotationTableConfigurationUpdates
+  configuration_state: enum AnnotationConfigurationState
+  encryption_configuration: Option<struct MetadataTableEncryptionConfiguration>
+  role: Option<String>
+struct AssumeRoleOutput
+  assumed_role_user: Option<struct AssumedRoleUser>
+  credentials: Option<struct Credentials>
+  packed_policy_size: Option<i32>
+  source_identity: Option<String>
+struct AssumedRoleUser
+  arn: String
+  assumed_role_id: String
+struct BlockedEncryptionTypes
+  encryption_type: Option<Vec<enum EncryptionType>>
+struct Bucket
+  bucket_arn: Option<String>
+  bucket_region: Option<String>
+  creation_date: Option<Timestamp>
+  name: Option<String>
+struct BucketAlreadyExists
+struct BucketAlreadyOwnedByYou
+struct BucketInfo
+  data_redundancy: Option<enum DataRedundancy>
+  type_: Option<enum BucketType>
+struct BucketLifecycleConfiguration
+  expiry_updated_at: Option<Timestamp>
+  rules: Vec<struct LifecycleRule>
+struct BucketLoggingStatus
+  logging_enabled: Option<struct LoggingEnabled>
+struct CORSConfiguration
+  cors_rules: Vec<struct CORSRule>
+struct CORSRule
+  allowed_headers: Option<Vec<String>>
+  allowed_methods: Vec<String>
+  allowed_origins: Vec<String>
+  expose_headers: Option<Vec<String>>
+  id: Option<String>
+  max_age_seconds: Option<i32>
+struct CSVInput
+  allow_quoted_record_delimiter: Option<bool>
+  comments: Option<String>
+  field_delimiter: Option<String>
+  file_header_info: Option<enum FileHeaderInfo>
+  quote_character: Option<String>
+  quote_escape_character: Option<String>
+  record_delimiter: Option<String>
+struct CSVOutput
+  field_delimiter: Option<String>
+  quote_character: Option<String>
+  quote_escape_character: Option<String>
+  quote_fields: Option<enum QuoteFields>
+  record_delimiter: Option<String>
+struct Checksum
+  checksum_crc32: Option<String>
+  checksum_crc32c: Option<String>
+  checksum_crc64nvme: Option<String>
+  checksum_md5: Option<String>
+  checksum_sha1: Option<String>
+  checksum_sha256: Option<String>
+  checksum_sha512: Option<String>
+  checksum_type: Option<enum ChecksumType>
+  checksum_xxhash128: Option<String>
+  checksum_xxhash3: Option<String>
+  checksum_xxhash64: Option<String>
+struct CommonPrefix
+  prefix: Option<String>
+struct CompleteMultipartUploadInput
+  bucket: String
+  checksum_crc32: Option<String>
+  checksum_crc32c: Option<String>
+  checksum_crc64nvme: Option<String>
+  checksum_md5: Option<String>
+  checksum_sha1: Option<String>
+  checksum_sha256: Option<String>
+  checksum_sha512: Option<String>
+  checksum_type: Option<enum ChecksumType>
+  checksum_xxhash128: Option<String>
+  checksum_xxhash3: Option<String>
+  checksum_xxhash64: Option<String>
+  expected_bucket_owner: Option<String>
+  if_match: Option<ETagCondition>
+  if_none_match: Option<ETagCondition>
+  key: String
+  mpu_object_size: Option<i64>
+  multipart_upload: Option<struct CompletedMultipartUpload>
+  request_payer: Option<enum RequestPayer>
+  sse_customer_algorithm: Option<String>
+  sse_customer_key: Option<String>
+  sse_customer_key_md5: Option<String>
+  upload_id: String
+struct CompleteMultipartUploadOutput
+  bucket: Option<String>
+  bucket_key_enabled: Option<bool>
+  checksum_crc32: Option<String>
+  checksum_crc32c: Option<String>
+  checksum_crc64nvme: Option<String>
+  checksum_md5: Option<String>
+  checksum_sha1: Option<String>
+  checksum_sha256: Option<String>
+  checksum_sha512: Option<String>
+  checksum_type: Option<enum ChecksumType>
+  checksum_xxhash128: Option<String>
+  checksum_xxhash3: Option<String>
+  checksum_xxhash64: Option<String>
+  e_tag: Option<ETag>
+  expiration: Option<String>
+  key: Option<String>
+  location: Option<String>
+  request_charged: Option<enum RequestCharged>
+  ssekms_key_id: Option<String>
+  server_side_encryption: Option<enum ServerSideEncryption>
+  version_id: Option<String>
+  future: Option<opaque>
+struct CompletedMultipartUpload
+  parts: Option<Vec<struct CompletedPart>>
+struct CompletedPart
+  checksum_crc32: Option<String>
+  checksum_crc32c: Option<String>
+  checksum_crc64nvme: Option<String>
+  checksum_md5: Option<String>
+  checksum_sha1: Option<String>
+  checksum_sha256: Option<String>
+  checksum_sha512: Option<String>
+  checksum_xxhash128: Option<String>
+  checksum_xxhash3: Option<String>
+  checksum_xxhash64: Option<String>
+  e_tag: Option<ETag>
+  part_number: Option<i32>
+struct Condition
+  http_error_code_returned_equals: Option<String>
+  key_prefix_equals: Option<String>
+struct ContinuationEvent
+struct CopyObjectInput
+  acl: Option<enum ObjectCannedACL>
+  annotation_directive: Option<enum AnnotationDirective>
+  bucket: String
+  bucket_key_enabled: Option<bool>
+  cache_control: Option<String>
+  checksum_algorithm: Option<enum ChecksumAlgorithm>
+  content_disposition: Option<String>
+  content_encoding: Option<String>
+  content_language: Option<String>
+  content_type: Option<String>
+  copy_source: CopySource
+  copy_source_if_match: Option<ETagCondition>
+  copy_source_if_modified_since: Option<Timestamp>
+  copy_source_if_none_match: Option<ETagCondition>
+  copy_source_if_unmodified_since: Option<Timestamp>
+  copy_source_sse_customer_algorithm: Option<String>
+  copy_source_sse_customer_key: Option<String>
+  copy_source_sse_customer_key_md5: Option<String>
+  expected_bucket_owner: Option<String>
+  expected_source_bucket_owner: Option<String>
+  expires: Option<String>
+  grant_full_control: Option<String>
+  grant_read: Option<String>
+  grant_read_acp: Option<String>
+  grant_write_acp: Option<String>
+  if_match: Option<ETagCondition>
+  if_none_match: Option<ETagCondition>
+  key: String
+  metadata: Option<Map<String, String>>
+  metadata_directive: Option<enum MetadataDirective>
+  object_lock_legal_hold_status: Option<enum ObjectLockLegalHoldStatus>
+  object_lock_mode: Option<enum ObjectLockMode>
+  object_lock_retain_until_date: Option<Timestamp>
+  request_payer: Option<enum RequestPayer>
+  sse_customer_algorithm: Option<String>
+  sse_customer_key: Option<String>
+  sse_customer_key_md5: Option<String>
+  ssekms_encryption_context: Option<String>
+  ssekms_key_id: Option<String>
+  server_side_encryption: Option<enum ServerSideEncryption>
+  storage_class: Option<enum StorageClass>
+  tagging: Option<String>
+  tagging_directive: Option<enum TaggingDirective>
+  version_id: Option<String>
+  website_redirect_location: Option<String>
+struct CopyObjectOutput
+  bucket_key_enabled: Option<bool>
+  copy_object_result: Option<struct CopyObjectResult>
+  copy_source_version_id: Option<String>
+  expiration: Option<String>
+  request_charged: Option<enum RequestCharged>
+  sse_customer_algorithm: Option<String>
+  sse_customer_key_md5: Option<String>
+  ssekms_encryption_context: Option<String>
+  ssekms_key_id: Option<String>
+  server_side_encryption: Option<enum ServerSideEncryption>
+  version_id: Option<String>
+struct CopyObjectResult
+  checksum_crc32: Option<String>
+  checksum_crc32c: Option<String>
+  checksum_crc64nvme: Option<String>
+  checksum_md5: Option<String>
+  checksum_sha1: Option<String>
+  checksum_sha256: Option<String>
+  checksum_sha512: Option<String>
+  checksum_type: Option<enum ChecksumType>
+  checksum_xxhash128: Option<String>
+  checksum_xxhash3: Option<String>
+  checksum_xxhash64: Option<String>
+  e_tag: Option<ETag>
+  last_modified: Option<Timestamp>
+struct CopyPartResult
+  checksum_crc32: Option<String>
+  checksum_crc32c: Option<String>
+  checksum_crc64nvme: Option<String>
+  checksum_md5: Option<String>
+  checksum_sha1: Option<String>
+  checksum_sha256: Option<String>
+  checksum_sha512: Option<String>
+  checksum_xxhash128: Option<String>
+  checksum_xxhash3: Option<String>
+  checksum_xxhash64: Option<String>
+  e_tag: Option<ETag>
+  last_modified: Option<Timestamp>
+struct CreateBucketConfiguration
+  bucket: Option<struct BucketInfo>
+  location: Option<struct LocationInfo>
+  location_constraint: Option<enum BucketLocationConstraint>
+  tags: Option<Vec<struct Tag>>
+struct CreateBucketInput
+  acl: Option<enum BucketCannedACL>
+  bucket: String
+  bucket_namespace: Option<enum BucketNamespace>
+  create_bucket_configuration: Option<struct CreateBucketConfiguration>
+  grant_full_control: Option<String>
+  grant_read: Option<String>
+  grant_read_acp: Option<String>
+  grant_write: Option<String>
+  grant_write_acp: Option<String>
+  object_lock_enabled_for_bucket: Option<bool>
+  object_ownership: Option<enum ObjectOwnership>
+struct CreateBucketMetadataConfigurationInput
+  bucket: String
+  checksum_algorithm: Option<enum ChecksumAlgorithm>
+  content_md5: Option<String>
+  expected_bucket_owner: Option<String>
+  metadata_configuration: struct MetadataConfiguration
+struct CreateBucketMetadataConfigurationOutput
+struct CreateBucketMetadataTableConfigurationInput
+  bucket: String
+  checksum_algorithm: Option<enum ChecksumAlgorithm>
+  content_md5: Option<String>
+  expected_bucket_owner: Option<String>
+  metadata_table_configuration: struct MetadataTableConfiguration
+struct CreateBucketMetadataTableConfigurationOutput
+struct CreateBucketOutput
+  bucket_arn: Option<String>
+  location: Option<String>
+struct CreateMultipartUploadInput
+  acl: Option<enum ObjectCannedACL>
+  bucket: String
+  bucket_key_enabled: Option<bool>
+  cache_control: Option<String>
+  checksum_algorithm: Option<enum ChecksumAlgorithm>
+  checksum_type: Option<enum ChecksumType>
+  content_disposition: Option<String>
+  content_encoding: Option<String>
+  content_language: Option<String>
+  content_type: Option<String>
+  expected_bucket_owner: Option<String>
+  expires: Option<String>
+  grant_full_control: Option<String>
+  grant_read: Option<String>
+  grant_read_acp: Option<String>
+  grant_write_acp: Option<String>
+  key: String
+  metadata: Option<Map<String, String>>
+  object_lock_legal_hold_status: Option<enum ObjectLockLegalHoldStatus>
+  object_lock_mode: Option<enum ObjectLockMode>
+  object_lock_retain_until_date: Option<Timestamp>
+  request_payer: Option<enum RequestPayer>
+  sse_customer_algorithm: Option<String>
+  sse_customer_key: Option<String>
+  sse_customer_key_md5: Option<String>
+  ssekms_encryption_context: Option<String>
+  ssekms_key_id: Option<String>
+  server_side_encryption: Option<enum ServerSideEncryption>
+  storage_class: Option<enum StorageClass>
+  tagging: Option<String>
+  version_id: Option<String>
+  website_redirect_location: Option<String>
+struct CreateMultipartUploadOutput
+  abort_date: Option<Timestamp>
+  abort_rule_id: Option<String>
+  bucket: Option<String>
+  bucket_key_enabled: Option<bool>
+  checksum_algorithm: Option<enum ChecksumAlgorithm>
+  checksum_type: Option<enum ChecksumType>
+  key: Option<String>
+  request_charged: Option<enum RequestCharged>
+  sse_customer_algorithm: Option<String>
+  sse_customer_key_md5: Option<String>
+  ssekms_encryption_context: Option<String>
+  ssekms_key_id: Option<String>
+  server_side_encryption: Option<enum ServerSideEncryption>
+  upload_id: Option<String>
+struct CreateSessionInput
+  bucket: String
+  bucket_key_enabled: Option<bool>
+  ssekms_encryption_context: Option<String>
+  ssekms_key_id: Option<String>
+  server_side_encryption: Option<enum ServerSideEncryption>
+  session_mode: Option<enum SessionMode>
+struct CreateSessionOutput
+  bucket_key_enabled: Option<bool>
+  credentials: struct SessionCredentials
+  ssekms_encryption_context: Option<String>
+  ssekms_key_id: Option<String>
+  server_side_encryption: Option<enum ServerSideEncryption>
+struct Credentials
+  access_key_id: String
+  expiration: Timestamp
+  secret_access_key: String
+  session_token: String
+struct DefaultRetention
+  days: Option<i32>
+  mode: Option<enum ObjectLockRetentionMode>
+  years: Option<i32>
+struct DelMarkerExpiration
+  days: Option<i32>
+struct Delete
+  objects: Vec<struct ObjectIdentifier>
+  quiet: Option<bool>
+struct DeleteBucketAnalyticsConfigurationInput
+  bucket: String
+  expected_bucket_owner: Option<String>
+  id: String
+struct DeleteBucketAnalyticsConfigurationOutput
+struct DeleteBucketCorsInput
+  bucket: String
+  expected_bucket_owner: Option<String>
+struct DeleteBucketCorsOutput
+struct DeleteBucketEncryptionInput
+  bucket: String
+  expected_bucket_owner: Option<String>
+struct DeleteBucketEncryptionOutput
+struct DeleteBucketInput
+  bucket: String
+  expected_bucket_owner: Option<String>
+  force_delete: Option<bool>
+struct DeleteBucketIntelligentTieringConfigurationInput
+  bucket: String
+  expected_bucket_owner: Option<String>
+  id: String
+struct DeleteBucketIntelligentTieringConfigurationOutput
+struct DeleteBucketInventoryConfigurationInput
+  bucket: String
+  expected_bucket_owner: Option<String>
+  id: String
+struct DeleteBucketInventoryConfigurationOutput
+struct DeleteBucketLifecycleInput
+  bucket: String
+  expected_bucket_owner: Option<String>
+struct DeleteBucketLifecycleOutput
+struct DeleteBucketMetadataConfigurationInput
+  bucket: String
+  expected_bucket_owner: Option<String>
+struct DeleteBucketMetadataConfigurationOutput
+struct DeleteBucketMetadataTableConfigurationInput
+  bucket: String
+  expected_bucket_owner: Option<String>
+struct DeleteBucketMetadataTableConfigurationOutput
+struct DeleteBucketMetricsConfigurationInput
+  bucket: String
+  expected_bucket_owner: Option<String>
+  id: String
+struct DeleteBucketMetricsConfigurationOutput
+struct DeleteBucketOutput
+struct DeleteBucketOwnershipControlsInput
+  bucket: String
+  expected_bucket_owner: Option<String>
+struct DeleteBucketOwnershipControlsOutput
+struct DeleteBucketPolicyInput
+  bucket: String
+  expected_bucket_owner: Option<String>
+struct DeleteBucketPolicyOutput
+struct DeleteBucketReplicationInput
+  bucket: String
+  expected_bucket_owner: Option<String>
+struct DeleteBucketReplicationOutput
+struct DeleteBucketTaggingInput
+  bucket: String
+  expected_bucket_owner: Option<String>
+struct DeleteBucketTaggingOutput
+struct DeleteBucketWebsiteInput
+  bucket: String
+  expected_bucket_owner: Option<String>
+struct DeleteBucketWebsiteOutput
+struct DeleteMarkerEntry
+  is_latest: Option<bool>
+  key: Option<String>
+  last_modified: Option<Timestamp>
+  owner: Option<struct Owner>
+  version_id: Option<String>
+struct DeleteMarkerReplication
+  status: Option<enum DeleteMarkerReplicationStatus>
+struct DeleteObjectAnnotationInput
+  annotation_name: String
+  bucket: String
+  expected_bucket_owner: Option<String>
+  key: String
+  object_if_match: Option<String>
+  request_payer: Option<enum RequestPayer>
+  version_id: Option<String>
+struct DeleteObjectAnnotationOutput
+  object_version_id: Option<String>
+  request_charged: Option<enum RequestCharged>
+struct DeleteObjectInput
+  bucket: String
+  bypass_governance_retention: Option<bool>
+  expected_bucket_owner: Option<String>
+  if_match: Option<ETagCondition>
+  if_match_last_modified_time: Option<Timestamp>
+  if_match_size: Option<i64>
+  key: String
+  mfa: Option<String>
+  request_payer: Option<enum RequestPayer>
+  version_id: Option<String>
+struct DeleteObjectOutput
+  delete_marker: Option<bool>
+  request_charged: Option<enum RequestCharged>
+  version_id: Option<String>
+struct DeleteObjectTaggingInput
+  bucket: String
+  expected_bucket_owner: Option<String>
+  key: String
+  version_id: Option<String>
+struct DeleteObjectTaggingOutput
+  version_id: Option<String>
+struct DeleteObjectsInput
+  bucket: String
+  bypass_governance_retention: Option<bool>
+  checksum_algorithm: Option<enum ChecksumAlgorithm>
+  delete: struct Delete
+  expected_bucket_owner: Option<String>
+  mfa: Option<String>
+  request_payer: Option<enum RequestPayer>
+struct DeleteObjectsOutput
+  deleted: Option<Vec<struct DeletedObject>>
+  errors: Option<Vec<struct Error>>
+  request_charged: Option<enum RequestCharged>
+struct DeletePublicAccessBlockInput
+  bucket: String
+  expected_bucket_owner: Option<String>
+struct DeletePublicAccessBlockOutput
+struct DeleteReplication
+  status: enum DeleteReplicationStatus
+struct DeletedObject
+  delete_marker: Option<bool>
+  delete_marker_version_id: Option<String>
+  key: Option<String>
+  version_id: Option<String>
+struct Destination
+  access_control_translation: Option<struct AccessControlTranslation>
+  account: Option<String>
+  bucket: String
+  encryption_configuration: Option<struct EncryptionConfiguration>
+  metrics: Option<struct Metrics>
+  replication_time: Option<struct ReplicationTime>
+  storage_class: Option<enum StorageClass>
+struct DestinationResult
+  table_bucket_arn: Option<String>
+  table_bucket_type: Option<enum S3TablesBucketType>
+  table_namespace: Option<String>
+struct Encryption
+  encryption_type: enum ServerSideEncryption
+  kms_context: Option<String>
+  kms_key_id: Option<String>
+struct EncryptionConfiguration
+  replica_kms_key_id: Option<String>
+struct EncryptionTypeMismatch
+struct EndEvent
+struct Error
+  code: Option<String>
+  key: Option<String>
+  message: Option<String>
+  version_id: Option<String>
+struct ErrorDetails
+  error_code: Option<String>
+  error_message: Option<String>
+struct ErrorDocument
+  key: String
+struct EventBridgeConfiguration
+struct ExcludedPrefix
+  prefix: Option<String>
+struct ExistingObjectReplication
+  status: enum ExistingObjectReplicationStatus
+struct FilterRule
+  name: Option<enum FilterRuleName>
+  value: Option<String>
+struct GetBucketAbacInput
+  bucket: String
+  expected_bucket_owner: Option<String>
+struct GetBucketAbacOutput
+  abac_status: Option<struct AbacStatus>
+struct GetBucketAccelerateConfigurationInput
+  bucket: String
+  expected_bucket_owner: Option<String>
+  request_payer: Option<enum RequestPayer>
+struct GetBucketAccelerateConfigurationOutput
+  request_charged: Option<enum RequestCharged>
+  status: Option<enum BucketAccelerateStatus>
+struct GetBucketAclInput
+  bucket: String
+  expected_bucket_owner: Option<String>
+struct GetBucketAclOutput
+  grants: Option<Vec<struct Grant>>
+  owner: Option<struct Owner>
+struct GetBucketAnalyticsConfigurationInput
+  bucket: String
+  expected_bucket_owner: Option<String>
+  id: String
+struct GetBucketAnalyticsConfigurationOutput
+  analytics_configuration: Option<struct AnalyticsConfiguration>
+struct GetBucketCorsInput
+  bucket: String
+  expected_bucket_owner: Option<String>
+struct GetBucketCorsOutput
+  cors_rules: Option<Vec<struct CORSRule>>
+struct GetBucketEncryptionInput
+  bucket: String
+  expected_bucket_owner: Option<String>
+struct GetBucketEncryptionOutput
+  server_side_encryption_configuration: Option<struct ServerSideEncryptionConfiguration>
+struct GetBucketIntelligentTieringConfigurationInput
+  bucket: String
+  expected_bucket_owner: Option<String>
+  id: String
+struct GetBucketIntelligentTieringConfigurationOutput
+  intelligent_tiering_configuration: Option<struct IntelligentTieringConfiguration>
+struct GetBucketInventoryConfigurationInput
+  bucket: String
+  expected_bucket_owner: Option<String>
+  id: String
+struct GetBucketInventoryConfigurationOutput
+  inventory_configuration: Option<struct InventoryConfiguration>
+struct GetBucketLifecycleConfigurationInput
+  bucket: String
+  expected_bucket_owner: Option<String>
+struct GetBucketLifecycleConfigurationOutput
+  rules: Option<Vec<struct LifecycleRule>>
+  transition_default_minimum_object_size: Option<enum TransitionDefaultMinimumObjectSize>
+struct GetBucketLocationInput
+  bucket: String
+  expected_bucket_owner: Option<String>
+struct GetBucketLocationOutput
+  location_constraint: Option<enum BucketLocationConstraint>
+struct GetBucketLoggingInput
+  bucket: String
+  expected_bucket_owner: Option<String>
+struct GetBucketLoggingOutput
+  logging_enabled: Option<struct LoggingEnabled>
+struct GetBucketMetadataConfigurationInput
+  bucket: String
+  expected_bucket_owner: Option<String>
+struct GetBucketMetadataConfigurationOutput
+  get_bucket_metadata_configuration_result: Option<struct GetBucketMetadataConfigurationResult>
+struct GetBucketMetadataConfigurationResult
+  metadata_configuration_result: struct MetadataConfigurationResult
+struct GetBucketMetadataTableConfigurationInput
+  bucket: String
+  expected_bucket_owner: Option<String>
+struct GetBucketMetadataTableConfigurationOutput
+  get_bucket_metadata_table_configuration_result: Option<struct GetBucketMetadataTableConfigurationResult>
+struct GetBucketMetadataTableConfigurationResult
+  error: Option<struct ErrorDetails>
+  metadata_table_configuration_result: struct MetadataTableConfigurationResult
+  status: String
+struct GetBucketMetricsConfigurationInput
+  bucket: String
+  expected_bucket_owner: Option<String>
+  id: String
+struct GetBucketMetricsConfigurationOutput
+  metrics_configuration: Option<struct MetricsConfiguration>
+struct GetBucketNotificationConfigurationInput
+  bucket: String
+  expected_bucket_owner: Option<String>
+struct GetBucketNotificationConfigurationOutput
+  event_bridge_configuration: Option<struct EventBridgeConfiguration>
+  lambda_function_configurations: Option<Vec<struct LambdaFunctionConfiguration>>
+  queue_configurations: Option<Vec<struct QueueConfiguration>>
+  topic_configurations: Option<Vec<struct TopicConfiguration>>
+struct GetBucketOwnershipControlsInput
+  bucket: String
+  expected_bucket_owner: Option<String>
+struct GetBucketOwnershipControlsOutput
+  ownership_controls: Option<struct OwnershipControls>
+struct GetBucketPolicyInput
+  bucket: String
+  expected_bucket_owner: Option<String>
+struct GetBucketPolicyOutput
+  policy: Option<String>
+struct GetBucketPolicyStatusInput
+  bucket: String
+  expected_bucket_owner: Option<String>
+struct GetBucketPolicyStatusOutput
+  policy_status: Option<struct PolicyStatus>
+struct GetBucketReplicationInput
+  bucket: String
+  expected_bucket_owner: Option<String>
+struct GetBucketReplicationOutput
+  replication_configuration: Option<struct ReplicationConfiguration>
+struct GetBucketRequestPaymentInput
+  bucket: String
+  expected_bucket_owner: Option<String>
+struct GetBucketRequestPaymentOutput
+  payer: Option<enum Payer>
+struct GetBucketTaggingInput
+  bucket: String
+  expected_bucket_owner: Option<String>
+struct GetBucketTaggingOutput
+  tag_set: Vec<struct Tag>
+struct GetBucketVersioningInput
+  bucket: String
+  expected_bucket_owner: Option<String>
+struct GetBucketVersioningOutput
+  mfa_delete: Option<enum MFADeleteStatus>
+  status: Option<enum BucketVersioningStatus>
+struct GetBucketWebsiteInput
+  bucket: String
+  expected_bucket_owner: Option<String>
+struct GetBucketWebsiteOutput
+  error_document: Option<struct ErrorDocument>
+  index_document: Option<struct IndexDocument>
+  redirect_all_requests_to: Option<struct RedirectAllRequestsTo>
+  routing_rules: Option<Vec<struct RoutingRule>>
+struct GetObjectAclInput
+  bucket: String
+  expected_bucket_owner: Option<String>
+  key: String
+  request_payer: Option<enum RequestPayer>
+  version_id: Option<String>
+struct GetObjectAclOutput
+  grants: Option<Vec<struct Grant>>
+  owner: Option<struct Owner>
+  request_charged: Option<enum RequestCharged>
+struct GetObjectAnnotationInput
+  annotation_name: String
+  bucket: String
+  checksum_mode: Option<enum ChecksumMode>
+  expected_bucket_owner: Option<String>
+  key: String
+  request_payer: Option<enum RequestPayer>
+  version_id: Option<String>
+struct GetObjectAnnotationOutput
+  annotation_payload: Option<StreamingBlob>
+  checksum_crc32: Option<String>
+  checksum_crc32c: Option<String>
+  checksum_crc64nvme: Option<String>
+  checksum_md5: Option<String>
+  checksum_sha1: Option<String>
+  checksum_sha256: Option<String>
+  checksum_sha512: Option<String>
+  checksum_type: Option<enum ChecksumType>
+  checksum_xxhash128: Option<String>
+  checksum_xxhash3: Option<String>
+  checksum_xxhash64: Option<String>
+  content_length: Option<i64>
+  e_tag: Option<ETag>
+  last_modified: Option<Timestamp>
+  object_version_id: Option<String>
+  replication_status: Option<enum ReplicationStatus>
+  request_charged: Option<enum RequestCharged>
+  server_side_encryption: Option<enum ServerSideEncryption>
+struct GetObjectAttributesInput
+  bucket: String
+  expected_bucket_owner: Option<String>
+  key: String
+  max_parts: Option<i32>
+  object_attributes: Vec<enum ObjectAttributes>
+  part_number_marker: Option<i32>
+  request_payer: Option<enum RequestPayer>
+  sse_customer_algorithm: Option<String>
+  sse_customer_key: Option<String>
+  sse_customer_key_md5: Option<String>
+  version_id: Option<String>
+struct GetObjectAttributesOutput
+  checksum: Option<struct Checksum>
+  delete_marker: Option<bool>
+  e_tag: Option<ETag>
+  last_modified: Option<Timestamp>
+  object_parts: Option<struct GetObjectAttributesParts>
+  object_size: Option<i64>
+  request_charged: Option<enum RequestCharged>
+  storage_class: Option<enum StorageClass>
+  version_id: Option<String>
+struct GetObjectAttributesParts
+  is_truncated: Option<bool>
+  max_parts: Option<i32>
+  next_part_number_marker: Option<i32>
+  part_number_marker: Option<i32>
+  parts: Option<Vec<struct ObjectPart>>
+  total_parts_count: Option<i32>
+struct GetObjectInput
+  bucket: String
+  checksum_mode: Option<enum ChecksumMode>
+  expected_bucket_owner: Option<String>
+  if_match: Option<ETagCondition>
+  if_modified_since: Option<Timestamp>
+  if_none_match: Option<ETagCondition>
+  if_unmodified_since: Option<Timestamp>
+  key: String
+  part_number: Option<i32>
+  range: Option<Range>
+  request_payer: Option<enum RequestPayer>
+  response_cache_control: Option<String>
+  response_content_disposition: Option<String>
+  response_content_encoding: Option<String>
+  response_content_language: Option<String>
+  response_content_type: Option<String>
+  response_expires: Option<Timestamp>
+  sse_customer_algorithm: Option<String>
+  sse_customer_key: Option<String>
+  sse_customer_key_md5: Option<String>
+  version_id: Option<String>
+struct GetObjectLegalHoldInput
+  bucket: String
+  expected_bucket_owner: Option<String>
+  key: String
+  request_payer: Option<enum RequestPayer>
+  version_id: Option<String>
+struct GetObjectLegalHoldOutput
+  legal_hold: Option<struct ObjectLockLegalHold>
+struct GetObjectLockConfigurationInput
+  bucket: String
+  expected_bucket_owner: Option<String>
+struct GetObjectLockConfigurationOutput
+  object_lock_configuration: Option<struct ObjectLockConfiguration>
+struct GetObjectOutput
+  accept_ranges: Option<String>
+  body: Option<StreamingBlob>
+  bucket_key_enabled: Option<bool>
+  cache_control: Option<String>
+  checksum_crc32: Option<String>
+  checksum_crc32c: Option<String>
+  checksum_crc64nvme: Option<String>
+  checksum_md5: Option<String>
+  checksum_sha1: Option<String>
+  checksum_sha256: Option<String>
+  checksum_sha512: Option<String>
+  checksum_type: Option<enum ChecksumType>
+  checksum_xxhash128: Option<String>
+  checksum_xxhash3: Option<String>
+  checksum_xxhash64: Option<String>
+  content_disposition: Option<String>
+  content_encoding: Option<String>
+  content_language: Option<String>
+  content_length: Option<i64>
+  content_range: Option<String>
+  content_type: Option<String>
+  delete_marker: Option<bool>
+  e_tag: Option<ETag>
+  expiration: Option<String>
+  expires: Option<String>
+  last_modified: Option<Timestamp>
+  metadata: Option<Map<String, String>>
+  missing_meta: Option<i32>
+  object_lock_legal_hold_status: Option<enum ObjectLockLegalHoldStatus>
+  object_lock_mode: Option<enum ObjectLockMode>
+  object_lock_retain_until_date: Option<Timestamp>
+  parts_count: Option<i32>
+  replication_status: Option<enum ReplicationStatus>
+  request_charged: Option<enum RequestCharged>
+  restore: Option<String>
+  sse_customer_algorithm: Option<String>
+  sse_customer_key_md5: Option<String>
+  ssekms_key_id: Option<String>
+  server_side_encryption: Option<enum ServerSideEncryption>
+  storage_class: Option<enum StorageClass>
+  tag_count: Option<i32>
+  version_id: Option<String>
+  website_redirect_location: Option<String>
+struct GetObjectRetentionInput
+  bucket: String
+  expected_bucket_owner: Option<String>
+  key: String
+  request_payer: Option<enum RequestPayer>
+  version_id: Option<String>
+struct GetObjectRetentionOutput
+  retention: Option<struct ObjectLockRetention>
+struct GetObjectTaggingInput
+  bucket: String
+  expected_bucket_owner: Option<String>
+  key: String
+  request_payer: Option<enum RequestPayer>
+  version_id: Option<String>
+struct GetObjectTaggingOutput
+  tag_set: Vec<struct Tag>
+  version_id: Option<String>
+struct GetObjectTorrentInput
+  bucket: String
+  expected_bucket_owner: Option<String>
+  key: String
+  request_payer: Option<enum RequestPayer>
+struct GetObjectTorrentOutput
+  body: Option<StreamingBlob>
+  request_charged: Option<enum RequestCharged>
+struct GetPublicAccessBlockInput
+  bucket: String
+  expected_bucket_owner: Option<String>
+struct GetPublicAccessBlockOutput
+  public_access_block_configuration: Option<struct PublicAccessBlockConfiguration>
+struct GlacierJobParameters
+  tier: enum Tier
+struct Grant
+  grantee: Option<struct Grantee>
+  permission: Option<enum Permission>
+struct Grantee
+  display_name: Option<String>
+  email_address: Option<String>
+  id: Option<String>
+  type_: enum Type
+  uri: Option<String>
+struct HeadBucketInput
+  bucket: String
+  expected_bucket_owner: Option<String>
+struct HeadBucketOutput
+  access_point_alias: Option<bool>
+  bucket_arn: Option<String>
+  bucket_location_name: Option<String>
+  bucket_location_type: Option<enum LocationType>
+  bucket_region: Option<String>
+struct HeadObjectInput
+  bucket: String
+  checksum_mode: Option<enum ChecksumMode>
+  expected_bucket_owner: Option<String>
+  if_match: Option<ETagCondition>
+  if_modified_since: Option<Timestamp>
+  if_none_match: Option<ETagCondition>
+  if_unmodified_since: Option<Timestamp>
+  key: String
+  part_number: Option<i32>
+  range: Option<Range>
+  request_payer: Option<enum RequestPayer>
+  response_cache_control: Option<String>
+  response_content_disposition: Option<String>
+  response_content_encoding: Option<String>
+  response_content_language: Option<String>
+  response_content_type: Option<String>
+  response_expires: Option<Timestamp>
+  sse_customer_algorithm: Option<String>
+  sse_customer_key: Option<String>
+  sse_customer_key_md5: Option<String>
+  version_id: Option<String>
+struct HeadObjectOutput
+  accept_ranges: Option<String>
+  archive_status: Option<enum ArchiveStatus>
+  bucket_key_enabled: Option<bool>
+  cache_control: Option<String>
+  checksum_crc32: Option<String>
+  checksum_crc32c: Option<String>
+  checksum_crc64nvme: Option<String>
+  checksum_md5: Option<String>
+  checksum_sha1: Option<String>
+  checksum_sha256: Option<String>
+  checksum_sha512: Option<String>
+  checksum_type: Option<enum ChecksumType>
+  checksum_xxhash128: Option<String>
+  checksum_xxhash3: Option<String>
+  checksum_xxhash64: Option<String>
+  content_disposition: Option<String>
+  content_encoding: Option<String>
+  content_language: Option<String>
+  content_length: Option<i64>
+  content_range: Option<String>
+  content_type: Option<String>
+  delete_marker: Option<bool>
+  e_tag: Option<ETag>
+  expiration: Option<String>
+  expires: Option<String>
+  last_modified: Option<Timestamp>
+  metadata: Option<Map<String, String>>
+  missing_meta: Option<i32>
+  object_lock_legal_hold_status: Option<enum ObjectLockLegalHoldStatus>
+  object_lock_mode: Option<enum ObjectLockMode>
+  object_lock_retain_until_date: Option<Timestamp>
+  parts_count: Option<i32>
+  replication_status: Option<enum ReplicationStatus>
+  request_charged: Option<enum RequestCharged>
+  restore: Option<String>
+  sse_customer_algorithm: Option<String>
+  sse_customer_key_md5: Option<String>
+  ssekms_key_id: Option<String>
+  server_side_encryption: Option<enum ServerSideEncryption>
+  storage_class: Option<enum StorageClass>
+  tag_count: Option<i32>
+  version_id: Option<String>
+  website_redirect_location: Option<String>
+struct IdempotencyParameterMismatch
+struct IndexDocument
+  suffix: String
+struct Initiator
+  display_name: Option<String>
+  id: Option<String>
+struct InputSerialization
+  csv: Option<struct CSVInput>
+  compression_type: Option<enum CompressionType>
+  json: Option<struct JSONInput>
+  parquet: Option<struct ParquetInput>
+struct IntelligentTieringAndOperator
+  prefix: Option<String>
+  tags: Option<Vec<struct Tag>>
+struct IntelligentTieringConfiguration
+  filter: Option<struct IntelligentTieringFilter>
+  id: String
+  status: enum IntelligentTieringStatus
+  tierings: Vec<struct Tiering>
+struct IntelligentTieringFilter
+  and: Option<struct IntelligentTieringAndOperator>
+  prefix: Option<String>
+  tag: Option<struct Tag>
+struct InvalidAnnotationName
+struct InvalidObjectState
+  access_tier: Option<enum IntelligentTieringAccessTier>
+  storage_class: Option<enum StorageClass>
+struct InvalidPrefix
+struct InvalidRequest
+struct InvalidWriteOffset
+struct InventoryConfiguration
+  destination: struct InventoryDestination
+  filter: Option<struct InventoryFilter>
+  id: String
+  included_object_versions: enum InventoryIncludedObjectVersions
+  is_enabled: bool
+  optional_fields: Option<Vec<enum InventoryOptionalField>>
+  schedule: struct InventorySchedule
+struct InventoryDestination
+  s3_bucket_destination: struct InventoryS3BucketDestination
+struct InventoryEncryption
+  ssekms: Option<struct SSEKMS>
+  sses3: Option<struct SSES3>
+struct InventoryFilter
+  prefix: String
+struct InventoryS3BucketDestination
+  account_id: Option<String>
+  bucket: String
+  encryption: Option<struct InventoryEncryption>
+  format: enum InventoryFormat
+  prefix: Option<String>
+struct InventorySchedule
+  frequency: enum InventoryFrequency
+struct InventoryTableConfiguration
+  configuration_state: enum InventoryConfigurationState
+  encryption_configuration: Option<struct MetadataTableEncryptionConfiguration>
+struct InventoryTableConfigurationResult
+  configuration_state: enum InventoryConfigurationState
+  error: Option<struct ErrorDetails>
+  table_arn: Option<String>
+  table_name: Option<String>
+  table_status: Option<String>
+struct InventoryTableConfigurationUpdates
+  configuration_state: enum InventoryConfigurationState
+  encryption_configuration: Option<struct MetadataTableEncryptionConfiguration>
+struct JSONInput
+  type_: Option<enum JSONType>
+struct JSONOutput
+  record_delimiter: Option<String>
+struct JournalTableConfiguration
+  encryption_configuration: Option<struct MetadataTableEncryptionConfiguration>
+  record_expiration: struct RecordExpiration
+struct JournalTableConfigurationResult
+  error: Option<struct ErrorDetails>
+  record_expiration: struct RecordExpiration
+  table_arn: Option<String>
+  table_name: String
+  table_status: String
+struct JournalTableConfigurationUpdates
+  record_expiration: struct RecordExpiration
+struct LambdaFunctionConfiguration
+  events: Vec<Event>
+  filter: Option<struct NotificationConfigurationFilter>
+  id: Option<String>
+  lambda_function_arn: String
+struct LifecycleExpiration
+  date: Option<Timestamp>
+  days: Option<i32>
+  expired_object_all_versions: Option<bool>
+  expired_object_delete_marker: Option<bool>
+struct LifecycleRule
+  abort_incomplete_multipart_upload: Option<struct AbortIncompleteMultipartUpload>
+  del_marker_expiration: Option<struct DelMarkerExpiration>
+  expiration: Option<struct LifecycleExpiration>
+  filter: Option<struct LifecycleRuleFilter>
+  id: Option<String>
+  noncurrent_version_expiration: Option<struct NoncurrentVersionExpiration>
+  noncurrent_version_transitions: Option<Vec<struct NoncurrentVersionTransition>>
+  prefix: Option<String>
+  status: enum ExpirationStatus
+  transitions: Option<Vec<struct Transition>>
+struct LifecycleRuleAndOperator
+  object_size_greater_than: Option<i64>
+  object_size_less_than: Option<i64>
+  prefix: Option<String>
+  tags: Option<Vec<struct Tag>>
+struct LifecycleRuleFilter
+  and: Option<struct LifecycleRuleAndOperator>
+  cached_tags: opaque
+  object_size_greater_than: Option<i64>
+  object_size_less_than: Option<i64>
+  prefix: Option<String>
+  tag: Option<struct Tag>
+struct ListBucketAnalyticsConfigurationsInput
+  bucket: String
+  continuation_token: Option<String>
+  expected_bucket_owner: Option<String>
+struct ListBucketAnalyticsConfigurationsOutput
+  analytics_configuration_list: Option<Vec<struct AnalyticsConfiguration>>
+  continuation_token: Option<String>
+  is_truncated: Option<bool>
+  next_continuation_token: Option<String>
+struct ListBucketIntelligentTieringConfigurationsInput
+  bucket: String
+  continuation_token: Option<String>
+  expected_bucket_owner: Option<String>
+struct ListBucketIntelligentTieringConfigurationsOutput
+  continuation_token: Option<String>
+  intelligent_tiering_configuration_list: Option<Vec<struct IntelligentTieringConfiguration>>
+  is_truncated: Option<bool>
+  next_continuation_token: Option<String>
+struct ListBucketInventoryConfigurationsInput
+  bucket: String
+  continuation_token: Option<String>
+  expected_bucket_owner: Option<String>
+struct ListBucketInventoryConfigurationsOutput
+  continuation_token: Option<String>
+  inventory_configuration_list: Option<Vec<struct InventoryConfiguration>>
+  is_truncated: Option<bool>
+  next_continuation_token: Option<String>
+struct ListBucketMetricsConfigurationsInput
+  bucket: String
+  continuation_token: Option<String>
+  expected_bucket_owner: Option<String>
+struct ListBucketMetricsConfigurationsOutput
+  continuation_token: Option<String>
+  is_truncated: Option<bool>
+  metrics_configuration_list: Option<Vec<struct MetricsConfiguration>>
+  next_continuation_token: Option<String>
+struct ListBucketsInput
+  bucket_region: Option<String>
+  continuation_token: Option<String>
+  max_buckets: Option<i32>
+  prefix: Option<String>
+struct ListBucketsOutput
+  buckets: Option<Vec<struct Bucket>>
+  continuation_token: Option<String>
+  owner: Option<struct Owner>
+  prefix: Option<String>
+struct ListDirectoryBucketsInput
+  continuation_token: Option<String>
+  max_directory_buckets: Option<i32>
+struct ListDirectoryBucketsOutput
+  buckets: Option<Vec<struct Bucket>>
+  continuation_token: Option<String>
+struct ListMultipartUploadsInput
+  bucket: String
+  delimiter: Option<String>
+  encoding_type: Option<enum EncodingType>
+  expected_bucket_owner: Option<String>
+  key_marker: Option<String>
+  max_uploads: Option<i32>
+  prefix: Option<String>
+  request_payer: Option<enum RequestPayer>
+  upload_id_marker: Option<String>
+struct ListMultipartUploadsOutput
+  bucket: Option<String>
+  common_prefixes: Option<Vec<struct CommonPrefix>>
+  delimiter: Option<String>
+  encoding_type: Option<enum EncodingType>
+  is_truncated: Option<bool>
+  key_marker: Option<String>
+  max_uploads: Option<i32>
+  next_key_marker: Option<String>
+  next_upload_id_marker: Option<String>
+  prefix: Option<String>
+  request_charged: Option<enum RequestCharged>
+  upload_id_marker: Option<String>
+  uploads: Option<Vec<struct MultipartUpload>>
+struct ListObjectAnnotationsInput
+  annotation_prefix: Option<String>
+  bucket: String
+  continuation_token: Option<String>
+  expected_bucket_owner: Option<String>
+  key: String
+  max_annotation_results: Option<i32>
+  request_payer: Option<enum RequestPayer>
+  version_id: Option<String>
+struct ListObjectAnnotationsOutput
+  annotation_count: Option<i32>
+  annotation_prefix: Option<String>
+  annotations: Option<Vec<struct AnnotationEntry>>
+  bucket: Option<String>
+  continuation_token: Option<String>
+  key: Option<String>
+  max_annotation_results: Option<i32>
+  next_continuation_token: Option<String>
+  object_version_id: Option<String>
+  request_charged: Option<enum RequestCharged>
+struct ListObjectVersionsInput
+  bucket: String
+  delimiter: Option<String>
+  encoding_type: Option<enum EncodingType>
+  expected_bucket_owner: Option<String>
+  key_marker: Option<String>
+  max_keys: Option<i32>
+  optional_object_attributes: Option<Vec<enum OptionalObjectAttributes>>
+  prefix: Option<String>
+  request_payer: Option<enum RequestPayer>
+  version_id_marker: Option<String>
+struct ListObjectVersionsOutput
+  common_prefixes: Option<Vec<struct CommonPrefix>>
+  delete_markers: Option<Vec<struct DeleteMarkerEntry>>
+  delimiter: Option<String>
+  encoding_type: Option<enum EncodingType>
+  is_truncated: Option<bool>
+  key_marker: Option<String>
+  max_keys: Option<i32>
+  name: Option<String>
+  next_key_marker: Option<String>
+  next_version_id_marker: Option<String>
+  prefix: Option<String>
+  request_charged: Option<enum RequestCharged>
+  version_id_marker: Option<String>
+  versions: Option<Vec<struct ObjectVersion>>
+struct ListObjectsInput
+  bucket: String
+  delimiter: Option<String>
+  encoding_type: Option<enum EncodingType>
+  expected_bucket_owner: Option<String>
+  marker: Option<String>
+  max_keys: Option<i32>
+  optional_object_attributes: Option<Vec<enum OptionalObjectAttributes>>
+  prefix: Option<String>
+  request_payer: Option<enum RequestPayer>
+struct ListObjectsOutput
+  name: Option<String>
+  prefix: Option<String>
+  marker: Option<String>
+  max_keys: Option<i32>
+  is_truncated: Option<bool>
+  contents: Option<Vec<struct Object>>
+  common_prefixes: Option<Vec<struct CommonPrefix>>
+  delimiter: Option<String>
+  next_marker: Option<String>
+  encoding_type: Option<enum EncodingType>
+  request_charged: Option<enum RequestCharged>
+struct ListObjectsV2Input
+  bucket: String
+  continuation_token: Option<String>
+  delimiter: Option<String>
+  encoding_type: Option<enum EncodingType>
+  expected_bucket_owner: Option<String>
+  fetch_owner: Option<bool>
+  max_keys: Option<i32>
+  optional_object_attributes: Option<Vec<enum OptionalObjectAttributes>>
+  prefix: Option<String>
+  request_payer: Option<enum RequestPayer>
+  start_after: Option<String>
+struct ListObjectsV2Output
+  name: Option<String>
+  prefix: Option<String>
+  max_keys: Option<i32>
+  key_count: Option<i32>
+  continuation_token: Option<String>
+  is_truncated: Option<bool>
+  next_continuation_token: Option<String>
+  contents: Option<Vec<struct Object>>
+  common_prefixes: Option<Vec<struct CommonPrefix>>
+  delimiter: Option<String>
+  encoding_type: Option<enum EncodingType>
+  start_after: Option<String>
+  request_charged: Option<enum RequestCharged>
+struct ListPartsInput
+  bucket: String
+  expected_bucket_owner: Option<String>
+  key: String
+  max_parts: Option<i32>
+  part_number_marker: Option<i32>
+  request_payer: Option<enum RequestPayer>
+  sse_customer_algorithm: Option<String>
+  sse_customer_key: Option<String>
+  sse_customer_key_md5: Option<String>
+  upload_id: String
+struct ListPartsOutput
+  abort_date: Option<Timestamp>
+  abort_rule_id: Option<String>
+  bucket: Option<String>
+  checksum_algorithm: Option<enum ChecksumAlgorithm>
+  checksum_type: Option<enum ChecksumType>
+  initiator: Option<struct Initiator>
+  is_truncated: Option<bool>
+  key: Option<String>
+  max_parts: Option<i32>
+  next_part_number_marker: Option<i32>
+  owner: Option<struct Owner>
+  part_number_marker: Option<i32>
+  parts: Option<Vec<struct Part>>
+  request_charged: Option<enum RequestCharged>
+  storage_class: Option<enum StorageClass>
+  upload_id: Option<String>
+struct ListenBucketNotificationInput
+  bucket: String
+  events: Option<String>
+  prefix: Option<String>
+  suffix: Option<String>
+struct ListenBucketNotificationOutput
+  payload: Option<StreamingBlob>
+struct LocationInfo
+  name: Option<String>
+  type_: Option<enum LocationType>
+struct LoggingEnabled
+  target_bucket: String
+  target_grants: Option<Vec<struct TargetGrant>>
+  target_object_key_format: Option<struct TargetObjectKeyFormat>
+  target_prefix: String
+struct MetadataConfiguration
+  annotation_table_configuration: Option<struct AnnotationTableConfiguration>
+  inventory_table_configuration: Option<struct InventoryTableConfiguration>
+  journal_table_configuration: struct JournalTableConfiguration
+struct MetadataConfigurationResult
+  annotation_table_configuration_result: Option<struct AnnotationTableConfigurationResult>
+  destination_result: struct DestinationResult
+  inventory_table_configuration_result: Option<struct InventoryTableConfigurationResult>
+  journal_table_configuration_result: Option<struct JournalTableConfigurationResult>
+struct MetadataEntry
+  name: Option<String>
+  value: Option<String>
+struct MetadataTableConfiguration
+  s3_tables_destination: struct S3TablesDestination
+struct MetadataTableConfigurationResult
+  s3_tables_destination_result: struct S3TablesDestinationResult
+struct MetadataTableEncryptionConfiguration
+  kms_key_arn: Option<String>
+  sse_algorithm: enum TableSseAlgorithm
+struct Metrics
+  event_threshold: Option<struct ReplicationTimeValue>
+  status: enum MetricsStatus
+struct MetricsAndOperator
+  access_point_arn: Option<String>
+  prefix: Option<String>
+  tags: Option<Vec<struct Tag>>
+struct MetricsConfiguration
+  filter: Option<union MetricsFilter>
+  id: String
+struct MultipartUpload
+  checksum_algorithm: Option<enum ChecksumAlgorithm>
+  checksum_type: Option<enum ChecksumType>
+  initiated: Option<Timestamp>
+  initiator: Option<struct Initiator>
+  key: Option<String>
+  owner: Option<struct Owner>
+  storage_class: Option<enum StorageClass>
+  upload_id: Option<String>
+struct NoSuchAnnotation
+struct NoSuchBucket
+struct NoSuchKey
+struct NoSuchUpload
+struct NoncurrentVersionExpiration
+  newer_noncurrent_versions: Option<i32>
+  noncurrent_days: Option<i32>
+struct NoncurrentVersionTransition
+  newer_noncurrent_versions: Option<i32>
+  noncurrent_days: Option<i32>
+  storage_class: Option<enum TransitionStorageClass>
+struct NotFound
+struct NotificationConfiguration
+  event_bridge_configuration: Option<struct EventBridgeConfiguration>
+  lambda_function_configurations: Option<Vec<struct LambdaFunctionConfiguration>>
+  queue_configurations: Option<Vec<struct QueueConfiguration>>
+  topic_configurations: Option<Vec<struct TopicConfiguration>>
+struct NotificationConfigurationFilter
+  key: Option<struct S3KeyFilter>
+struct Object
+  checksum_algorithm: Option<Vec<enum ChecksumAlgorithm>>
+  checksum_type: Option<enum ChecksumType>
+  e_tag: Option<ETag>
+  key: Option<String>
+  last_modified: Option<Timestamp>
+  owner: Option<struct Owner>
+  restore_status: Option<struct RestoreStatus>
+  size: Option<i64>
+  storage_class: Option<enum ObjectStorageClass>
+struct ObjectAlreadyInActiveTierError
+struct ObjectIdentifier
+  e_tag: Option<ETag>
+  key: String
+  last_modified_time: Option<Timestamp>
+  size: Option<i64>
+  version_id: Option<String>
+struct ObjectLockConfiguration
+  object_lock_enabled: Option<enum ObjectLockEnabled>
+  rule: Option<struct ObjectLockRule>
+struct ObjectLockLegalHold
+  status: Option<enum ObjectLockLegalHoldStatus>
+struct ObjectLockRetention
+  mode: Option<enum ObjectLockRetentionMode>
+  retain_until_date: Option<Timestamp>
+struct ObjectLockRule
+  default_retention: Option<struct DefaultRetention>
+struct ObjectNotInActiveTierError
+struct ObjectPart
+  checksum_crc32: Option<String>
+  checksum_crc32c: Option<String>
+  checksum_crc64nvme: Option<String>
+  checksum_md5: Option<String>
+  checksum_sha1: Option<String>
+  checksum_sha256: Option<String>
+  checksum_sha512: Option<String>
+  checksum_xxhash128: Option<String>
+  checksum_xxhash3: Option<String>
+  checksum_xxhash64: Option<String>
+  part_number: Option<i32>
+  size: Option<i64>
+struct ObjectVersion
+  checksum_algorithm: Option<Vec<enum ChecksumAlgorithm>>
+  checksum_type: Option<enum ChecksumType>
+  e_tag: Option<ETag>
+  is_latest: Option<bool>
+  key: Option<String>
+  last_modified: Option<Timestamp>
+  owner: Option<struct Owner>
+  restore_status: Option<struct RestoreStatus>
+  size: Option<i64>
+  storage_class: Option<enum ObjectVersionStorageClass>
+  version_id: Option<String>
+struct OutputLocation
+  s3: Option<struct S3Location>
+struct OutputSerialization
+  csv: Option<struct CSVOutput>
+  json: Option<struct JSONOutput>
+struct Owner
+  display_name: Option<String>
+  id: Option<String>
+struct OwnershipControls
+  rules: Vec<struct OwnershipControlsRule>
+struct OwnershipControlsRule
+  object_ownership: enum ObjectOwnership
+struct ParquetInput
+struct Part
+  checksum_crc32: Option<String>
+  checksum_crc32c: Option<String>
+  checksum_crc64nvme: Option<String>
+  checksum_md5: Option<String>
+  checksum_sha1: Option<String>
+  checksum_sha256: Option<String>
+  checksum_sha512: Option<String>
+  checksum_xxhash128: Option<String>
+  checksum_xxhash3: Option<String>
+  checksum_xxhash64: Option<String>
+  e_tag: Option<ETag>
+  last_modified: Option<Timestamp>
+  part_number: Option<i32>
+  size: Option<i64>
+struct PartitionedPrefix
+  partition_date_source: Option<enum PartitionDateSource>
+struct PolicyStatus
+  is_public: Option<bool>
+struct PostObjectInput
+  acl: Option<enum ObjectCannedACL>
+  body: Option<StreamingBlob>
+  bucket: String
+  bucket_key_enabled: Option<bool>
+  cache_control: Option<String>
+  checksum_algorithm: Option<enum ChecksumAlgorithm>
+  checksum_crc32: Option<String>
+  checksum_crc32c: Option<String>
+  checksum_crc64nvme: Option<String>
+  checksum_md5: Option<String>
+  checksum_sha1: Option<String>
+  checksum_sha256: Option<String>
+  checksum_sha512: Option<String>
+  checksum_xxhash128: Option<String>
+  checksum_xxhash3: Option<String>
+  checksum_xxhash64: Option<String>
+  content_disposition: Option<String>
+  content_encoding: Option<String>
+  content_language: Option<String>
+  content_length: Option<i64>
+  content_md5: Option<String>
+  content_type: Option<String>
+  expected_bucket_owner: Option<String>
+  expires: Option<String>
+  grant_full_control: Option<String>
+  grant_read: Option<String>
+  grant_read_acp: Option<String>
+  grant_write_acp: Option<String>
+  if_match: Option<ETagCondition>
+  if_none_match: Option<ETagCondition>
+  key: String
+  metadata: Option<Map<String, String>>
+  object_lock_legal_hold_status: Option<enum ObjectLockLegalHoldStatus>
+  object_lock_mode: Option<enum ObjectLockMode>
+  object_lock_retain_until_date: Option<Timestamp>
+  request_payer: Option<enum RequestPayer>
+  sse_customer_algorithm: Option<String>
+  sse_customer_key: Option<String>
+  sse_customer_key_md5: Option<String>
+  ssekms_encryption_context: Option<String>
+  ssekms_key_id: Option<String>
+  server_side_encryption: Option<enum ServerSideEncryption>
+  storage_class: Option<enum StorageClass>
+  tagging: Option<String>
+  version_id: Option<String>
+  website_redirect_location: Option<String>
+  write_offset_bytes: Option<i64>
+  success_action_redirect: Option<String>
+  success_action_status: Option<i32>
+  policy: Option<opaque>
+struct PostObjectOutput
+  bucket_key_enabled: Option<bool>
+  checksum_crc32: Option<String>
+  checksum_crc32c: Option<String>
+  checksum_crc64nvme: Option<String>
+  checksum_md5: Option<String>
+  checksum_sha1: Option<String>
+  checksum_sha256: Option<String>
+  checksum_sha512: Option<String>
+  checksum_type: Option<enum ChecksumType>
+  checksum_xxhash128: Option<String>
+  checksum_xxhash3: Option<String>
+  checksum_xxhash64: Option<String>
+  e_tag: Option<ETag>
+  expiration: Option<String>
+  request_charged: Option<enum RequestCharged>
+  sse_customer_algorithm: Option<String>
+  sse_customer_key_md5: Option<String>
+  ssekms_encryption_context: Option<String>
+  ssekms_key_id: Option<String>
+  server_side_encryption: Option<enum ServerSideEncryption>
+  size: Option<i64>
+  version_id: Option<String>
+struct Progress
+  bytes_processed: Option<i64>
+  bytes_returned: Option<i64>
+  bytes_scanned: Option<i64>
+struct ProgressEvent
+  details: Option<struct Progress>
+struct PublicAccessBlockConfiguration
+  block_public_acls: Option<bool>
+  block_public_policy: Option<bool>
+  ignore_public_acls: Option<bool>
+  restrict_public_buckets: Option<bool>
+struct PutBucketAbacInput
+  abac_status: struct AbacStatus
+  bucket: String
+  checksum_algorithm: Option<enum ChecksumAlgorithm>
+  content_md5: Option<String>
+  expected_bucket_owner: Option<String>
+struct PutBucketAbacOutput
+struct PutBucketAccelerateConfigurationInput
+  accelerate_configuration: struct AccelerateConfiguration
+  bucket: String
+  checksum_algorithm: Option<enum ChecksumAlgorithm>
+  expected_bucket_owner: Option<String>
+struct PutBucketAccelerateConfigurationOutput
+struct PutBucketAclInput
+  acl: Option<enum BucketCannedACL>
+  access_control_policy: Option<struct AccessControlPolicy>
+  bucket: String
+  checksum_algorithm: Option<enum ChecksumAlgorithm>
+  content_md5: Option<String>
+  expected_bucket_owner: Option<String>
+  grant_full_control: Option<String>
+  grant_read: Option<String>
+  grant_read_acp: Option<String>
+  grant_write: Option<String>
+  grant_write_acp: Option<String>
+struct PutBucketAclOutput
+struct PutBucketAnalyticsConfigurationInput
+  analytics_configuration: struct AnalyticsConfiguration
+  bucket: String
+  expected_bucket_owner: Option<String>
+  id: String
+struct PutBucketAnalyticsConfigurationOutput
+struct PutBucketCorsInput
+  bucket: String
+  cors_configuration: struct CORSConfiguration
+  checksum_algorithm: Option<enum ChecksumAlgorithm>
+  content_md5: Option<String>
+  expected_bucket_owner: Option<String>
+struct PutBucketCorsOutput
+struct PutBucketEncryptionInput
+  bucket: String
+  checksum_algorithm: Option<enum ChecksumAlgorithm>
+  content_md5: Option<String>
+  expected_bucket_owner: Option<String>
+  server_side_encryption_configuration: struct ServerSideEncryptionConfiguration
+struct PutBucketEncryptionOutput
+struct PutBucketIntelligentTieringConfigurationInput
+  bucket: String
+  expected_bucket_owner: Option<String>
+  id: String
+  intelligent_tiering_configuration: struct IntelligentTieringConfiguration
+struct PutBucketIntelligentTieringConfigurationOutput
+struct PutBucketInventoryConfigurationInput
+  bucket: String
+  expected_bucket_owner: Option<String>
+  id: String
+  inventory_configuration: struct InventoryConfiguration
+struct PutBucketInventoryConfigurationOutput
+struct PutBucketLifecycleConfigurationInput
+  bucket: String
+  checksum_algorithm: Option<enum ChecksumAlgorithm>
+  expected_bucket_owner: Option<String>
+  lifecycle_configuration: Option<struct BucketLifecycleConfiguration>
+  transition_default_minimum_object_size: Option<enum TransitionDefaultMinimumObjectSize>
+struct PutBucketLifecycleConfigurationOutput
+  transition_default_minimum_object_size: Option<enum TransitionDefaultMinimumObjectSize>
+struct PutBucketLoggingInput
+  bucket: String
+  bucket_logging_status: struct BucketLoggingStatus
+  checksum_algorithm: Option<enum ChecksumAlgorithm>
+  content_md5: Option<String>
+  expected_bucket_owner: Option<String>
+struct PutBucketLoggingOutput
+struct PutBucketMetricsConfigurationInput
+  bucket: String
+  expected_bucket_owner: Option<String>
+  id: String
+  metrics_configuration: struct MetricsConfiguration
+struct PutBucketMetricsConfigurationOutput
+struct PutBucketNotificationConfigurationInput
+  bucket: String
+  expected_bucket_owner: Option<String>
+  notification_configuration: struct NotificationConfiguration
+  skip_destination_validation: Option<bool>
+struct PutBucketNotificationConfigurationOutput
+struct PutBucketOwnershipControlsInput
+  bucket: String
+  checksum_algorithm: Option<enum ChecksumAlgorithm>
+  content_md5: Option<String>
+  expected_bucket_owner: Option<String>
+  ownership_controls: struct OwnershipControls
+struct PutBucketOwnershipControlsOutput
+struct PutBucketPolicyInput
+  bucket: String
+  checksum_algorithm: Option<enum ChecksumAlgorithm>
+  confirm_remove_self_bucket_access: Option<bool>
+  content_md5: Option<String>
+  expected_bucket_owner: Option<String>
+  policy: String
+struct PutBucketPolicyOutput
+struct PutBucketReplicationInput
+  bucket: String
+  checksum_algorithm: Option<enum ChecksumAlgorithm>
+  content_md5: Option<String>
+  expected_bucket_owner: Option<String>
+  replication_configuration: struct ReplicationConfiguration
+  token: Option<String>
+struct PutBucketReplicationOutput
+struct PutBucketRequestPaymentInput
+  bucket: String
+  checksum_algorithm: Option<enum ChecksumAlgorithm>
+  content_md5: Option<String>
+  expected_bucket_owner: Option<String>
+  request_payment_configuration: struct RequestPaymentConfiguration
+struct PutBucketRequestPaymentOutput
+struct PutBucketTaggingInput
+  bucket: String
+  checksum_algorithm: Option<enum ChecksumAlgorithm>
+  content_md5: Option<String>
+  expected_bucket_owner: Option<String>
+  tagging: struct Tagging
+struct PutBucketTaggingOutput
+struct PutBucketVersioningInput
+  bucket: String
+  checksum_algorithm: Option<enum ChecksumAlgorithm>
+  content_md5: Option<String>
+  expected_bucket_owner: Option<String>
+  mfa: Option<String>
+  versioning_configuration: struct VersioningConfiguration
+struct PutBucketVersioningOutput
+struct PutBucketWebsiteInput
+  bucket: String
+  checksum_algorithm: Option<enum ChecksumAlgorithm>
+  content_md5: Option<String>
+  expected_bucket_owner: Option<String>
+  website_configuration: struct WebsiteConfiguration
+struct PutBucketWebsiteOutput
+struct PutObjectAclInput
+  acl: Option<enum ObjectCannedACL>
+  access_control_policy: Option<struct AccessControlPolicy>
+  bucket: String
+  checksum_algorithm: Option<enum ChecksumAlgorithm>
+  content_md5: Option<String>
+  expected_bucket_owner: Option<String>
+  grant_full_control: Option<String>
+  grant_read: Option<String>
+  grant_read_acp: Option<String>
+  grant_write: Option<String>
+  grant_write_acp: Option<String>
+  key: String
+  request_payer: Option<enum RequestPayer>
+  version_id: Option<String>
+struct PutObjectAclOutput
+  request_charged: Option<enum RequestCharged>
+struct PutObjectAnnotationInput
+  annotation_name: String
+  annotation_payload: Option<StreamingBlob>
+  bucket: String
+  checksum_algorithm: Option<enum ChecksumAlgorithm>
+  checksum_crc32: Option<String>
+  checksum_crc32c: Option<String>
+  checksum_crc64nvme: Option<String>
+  checksum_md5: Option<String>
+  checksum_sha1: Option<String>
+  checksum_sha256: Option<String>
+  checksum_sha512: Option<String>
+  checksum_xxhash128: Option<String>
+  checksum_xxhash3: Option<String>
+  checksum_xxhash64: Option<String>
+  content_md5: Option<String>
+  expected_bucket_owner: Option<String>
+  key: String
+  object_if_match: Option<String>
+  request_payer: Option<enum RequestPayer>
+  version_id: Option<String>
+struct PutObjectAnnotationOutput
+  annotation_name: Option<String>
+  checksum_crc32: Option<String>
+  checksum_crc32c: Option<String>
+  checksum_crc64nvme: Option<String>
+  checksum_md5: Option<String>
+  checksum_sha1: Option<String>
+  checksum_sha256: Option<String>
+  checksum_sha512: Option<String>
+  checksum_type: Option<enum ChecksumType>
+  checksum_xxhash128: Option<String>
+  checksum_xxhash3: Option<String>
+  checksum_xxhash64: Option<String>
+  e_tag: Option<ETag>
+  key: Option<String>
+  object_version_id: Option<String>
+  request_charged: Option<enum RequestCharged>
+  server_side_encryption: Option<enum ServerSideEncryption>
+struct PutObjectInput
+  acl: Option<enum ObjectCannedACL>
+  body: Option<StreamingBlob>
+  bucket: String
+  bucket_key_enabled: Option<bool>
+  cache_control: Option<String>
+  checksum_algorithm: Option<enum ChecksumAlgorithm>
+  checksum_crc32: Option<String>
+  checksum_crc32c: Option<String>
+  checksum_crc64nvme: Option<String>
+  checksum_md5: Option<String>
+  checksum_sha1: Option<String>
+  checksum_sha256: Option<String>
+  checksum_sha512: Option<String>
+  checksum_xxhash128: Option<String>
+  checksum_xxhash3: Option<String>
+  checksum_xxhash64: Option<String>
+  content_disposition: Option<String>
+  content_encoding: Option<String>
+  content_language: Option<String>
+  content_length: Option<i64>
+  content_md5: Option<String>
+  content_type: Option<String>
+  expected_bucket_owner: Option<String>
+  expires: Option<String>
+  grant_full_control: Option<String>
+  grant_read: Option<String>
+  grant_read_acp: Option<String>
+  grant_write_acp: Option<String>
+  if_match: Option<ETagCondition>
+  if_none_match: Option<ETagCondition>
+  key: String
+  metadata: Option<Map<String, String>>
+  object_lock_legal_hold_status: Option<enum ObjectLockLegalHoldStatus>
+  object_lock_mode: Option<enum ObjectLockMode>
+  object_lock_retain_until_date: Option<Timestamp>
+  request_payer: Option<enum RequestPayer>
+  sse_customer_algorithm: Option<String>
+  sse_customer_key: Option<String>
+  sse_customer_key_md5: Option<String>
+  ssekms_encryption_context: Option<String>
+  ssekms_key_id: Option<String>
+  server_side_encryption: Option<enum ServerSideEncryption>
+  storage_class: Option<enum StorageClass>
+  tagging: Option<String>
+  version_id: Option<String>
+  website_redirect_location: Option<String>
+  write_offset_bytes: Option<i64>
+struct PutObjectLegalHoldInput
+  bucket: String
+  checksum_algorithm: Option<enum ChecksumAlgorithm>
+  content_md5: Option<String>
+  expected_bucket_owner: Option<String>
+  key: String
+  legal_hold: Option<struct ObjectLockLegalHold>
+  request_payer: Option<enum RequestPayer>
+  version_id: Option<String>
+struct PutObjectLegalHoldOutput
+  request_charged: Option<enum RequestCharged>
+struct PutObjectLockConfigurationInput
+  bucket: String
+  checksum_algorithm: Option<enum ChecksumAlgorithm>
+  content_md5: Option<String>
+  expected_bucket_owner: Option<String>
+  object_lock_configuration: Option<struct ObjectLockConfiguration>
+  request_payer: Option<enum RequestPayer>
+  token: Option<String>
+struct PutObjectLockConfigurationOutput
+  request_charged: Option<enum RequestCharged>
+struct PutObjectOutput
+  bucket_key_enabled: Option<bool>
+  checksum_crc32: Option<String>
+  checksum_crc32c: Option<String>
+  checksum_crc64nvme: Option<String>
+  checksum_md5: Option<String>
+  checksum_sha1: Option<String>
+  checksum_sha256: Option<String>
+  checksum_sha512: Option<String>
+  checksum_type: Option<enum ChecksumType>
+  checksum_xxhash128: Option<String>
+  checksum_xxhash3: Option<String>
+  checksum_xxhash64: Option<String>
+  e_tag: Option<ETag>
+  expiration: Option<String>
+  request_charged: Option<enum RequestCharged>
+  sse_customer_algorithm: Option<String>
+  sse_customer_key_md5: Option<String>
+  ssekms_encryption_context: Option<String>
+  ssekms_key_id: Option<String>
+  server_side_encryption: Option<enum ServerSideEncryption>
+  size: Option<i64>
+  version_id: Option<String>
+struct PutObjectRetentionInput
+  bucket: String
+  bypass_governance_retention: Option<bool>
+  checksum_algorithm: Option<enum ChecksumAlgorithm>
+  content_md5: Option<String>
+  expected_bucket_owner: Option<String>
+  key: String
+  request_payer: Option<enum RequestPayer>
+  retention: Option<struct ObjectLockRetention>
+  version_id: Option<String>
+struct PutObjectRetentionOutput
+  request_charged: Option<enum RequestCharged>
+struct PutObjectTaggingInput
+  bucket: String
+  checksum_algorithm: Option<enum ChecksumAlgorithm>
+  content_md5: Option<String>
+  expected_bucket_owner: Option<String>
+  key: String
+  request_payer: Option<enum RequestPayer>
+  tagging: struct Tagging
+  version_id: Option<String>
+struct PutObjectTaggingOutput
+  version_id: Option<String>
+struct PutPublicAccessBlockInput
+  bucket: String
+  checksum_algorithm: Option<enum ChecksumAlgorithm>
+  content_md5: Option<String>
+  expected_bucket_owner: Option<String>
+  public_access_block_configuration: struct PublicAccessBlockConfiguration
+struct PutPublicAccessBlockOutput
+struct QueueConfiguration
+  events: Vec<Event>
+  filter: Option<struct NotificationConfigurationFilter>
+  id: Option<String>
+  queue_arn: String
+struct RecordExpiration
+  days: Option<i32>
+  expiration: enum ExpirationState
+struct RecordsEvent
+  payload: Option<Bytes>
+struct Redirect
+  host_name: Option<String>
+  http_redirect_code: Option<String>
+  protocol: Option<enum Protocol>
+  replace_key_prefix_with: Option<String>
+  replace_key_with: Option<String>
+struct RedirectAllRequestsTo
+  host_name: String
+  protocol: Option<enum Protocol>
+struct RenameObjectInput
+  bucket: String
+  client_token: Option<String>
+  destination_if_match: Option<ETagCondition>
+  destination_if_modified_since: Option<Timestamp>
+  destination_if_none_match: Option<ETagCondition>
+  destination_if_unmodified_since: Option<Timestamp>
+  key: String
+  rename_source: String
+  source_if_match: Option<String>
+  source_if_modified_since: Option<Timestamp>
+  source_if_none_match: Option<String>
+  source_if_unmodified_since: Option<Timestamp>
+struct RenameObjectOutput
+struct ReplicaModifications
+  status: enum ReplicaModificationsStatus
+struct ReplicationConfiguration
+  role: String
+  rules: Vec<struct ReplicationRule>
+struct ReplicationRule
+  delete_marker_replication: Option<struct DeleteMarkerReplication>
+  delete_replication: Option<struct DeleteReplication>
+  destination: struct Destination
+  existing_object_replication: Option<struct ExistingObjectReplication>
+  filter: Option<struct ReplicationRuleFilter>
+  id: Option<String>
+  prefix: Option<String>
+  priority: Option<i32>
+  source_selection_criteria: Option<struct SourceSelectionCriteria>
+  status: enum ReplicationRuleStatus
+struct ReplicationRuleAndOperator
+  prefix: Option<String>
+  tags: Option<Vec<struct Tag>>
+struct ReplicationRuleFilter
+  and: Option<struct ReplicationRuleAndOperator>
+  cached_tags: opaque
+  prefix: Option<String>
+  tag: Option<struct Tag>
+struct ReplicationTime
+  status: enum ReplicationTimeStatus
+  time: struct ReplicationTimeValue
+struct ReplicationTimeValue
+  minutes: Option<i32>
+struct RequestPaymentConfiguration
+  payer: enum Payer
+struct RequestProgress
+  enabled: Option<bool>
+struct RestoreObjectInput
+  bucket: String
+  checksum_algorithm: Option<enum ChecksumAlgorithm>
+  expected_bucket_owner: Option<String>
+  key: String
+  request_payer: Option<enum RequestPayer>
+  restore_request: Option<struct RestoreRequest>
+  version_id: Option<String>
+struct RestoreObjectOutput
+  request_charged: Option<enum RequestCharged>
+  restore_output_path: Option<String>
+struct RestoreRequest
+  days: Option<i32>
+  description: Option<String>
+  glacier_job_parameters: Option<struct GlacierJobParameters>
+  output_location: Option<struct OutputLocation>
+  select_parameters: Option<struct SelectParameters>
+  tier: Option<enum Tier>
+  type_: Option<enum RestoreRequestType>
+struct RestoreStatus
+  is_restore_in_progress: Option<bool>
+  restore_expiry_date: Option<Timestamp>
+struct RoutingRule
+  condition: Option<struct Condition>
+  redirect: struct Redirect
+struct S3KeyFilter
+  filter_rules: Option<Vec<struct FilterRule>>
+struct S3Location
+  access_control_list: Option<Vec<struct Grant>>
+  bucket_name: String
+  canned_acl: Option<enum ObjectCannedACL>
+  encryption: Option<struct Encryption>
+  prefix: String
+  storage_class: Option<enum StorageClass>
+  tagging: Option<struct Tagging>
+  user_metadata: Option<Vec<struct MetadataEntry>>
+struct S3TablesDestination
+  table_bucket_arn: String
+  table_name: String
+struct S3TablesDestinationResult
+  table_arn: String
+  table_bucket_arn: String
+  table_name: String
+  table_namespace: String
+struct SSEKMS
+  key_id: String
+struct SSEKMSEncryption
+  bucket_key_enabled: Option<bool>
+  kms_key_arn: String
+struct SSES3
+struct ScanRange
+  end: Option<i64>
+  start: Option<i64>
+struct SelectObjectContentInput
+  bucket: String
+  expected_bucket_owner: Option<String>
+  key: String
+  sse_customer_algorithm: Option<String>
+  sse_customer_key: Option<String>
+  sse_customer_key_md5: Option<String>
+  request: struct SelectObjectContentRequest
+struct SelectObjectContentOutput
+  payload: Option<SelectObjectContentEventStream>
+struct SelectObjectContentRequest
+  expression: String
+  expression_type: enum ExpressionType
+  input_serialization: struct InputSerialization
+  output_serialization: struct OutputSerialization
+  request_progress: Option<struct RequestProgress>
+  scan_range: Option<struct ScanRange>
+struct SelectParameters
+  expression: String
+  expression_type: enum ExpressionType
+  input_serialization: struct InputSerialization
+  output_serialization: struct OutputSerialization
+struct ServerSideEncryptionByDefault
+  kms_master_key_id: Option<String>
+  sse_algorithm: enum ServerSideEncryption
+struct ServerSideEncryptionConfiguration
+  rules: Vec<struct ServerSideEncryptionRule>
+struct ServerSideEncryptionRule
+  apply_server_side_encryption_by_default: Option<struct ServerSideEncryptionByDefault>
+  blocked_encryption_types: Option<struct BlockedEncryptionTypes>
+  bucket_key_enabled: Option<bool>
+struct SessionCredentials
+  access_key_id: String
+  expiration: Timestamp
+  secret_access_key: String
+  session_token: String
+struct SimplePrefix
+struct SourceSelectionCriteria
+  replica_modifications: Option<struct ReplicaModifications>
+  sse_kms_encrypted_objects: Option<struct SseKmsEncryptedObjects>
+struct SseKmsEncryptedObjects
+  status: enum SseKmsEncryptedObjectsStatus
+struct Stats
+  bytes_processed: Option<i64>
+  bytes_returned: Option<i64>
+  bytes_scanned: Option<i64>
+struct StatsEvent
+  details: Option<struct Stats>
+struct StorageClassAnalysis
+  data_export: Option<struct StorageClassAnalysisDataExport>
+struct StorageClassAnalysisDataExport
+  destination: struct AnalyticsExportDestination
+  output_schema_version: enum StorageClassAnalysisSchemaVersion
+struct Tag
+  key: Option<String>
+  value: Option<String>
+struct Tagging
+  tag_set: Vec<struct Tag>
+struct TargetGrant
+  grantee: Option<struct Grantee>
+  permission: Option<enum BucketLogsPermission>
+struct TargetObjectKeyFormat
+  partitioned_prefix: Option<struct PartitionedPrefix>
+  simple_prefix: Option<struct SimplePrefix>
+struct Tiering
+  access_tier: enum IntelligentTieringAccessTier
+  days: i32
+struct TooManyParts
+struct TopicConfiguration
+  events: Vec<Event>
+  filter: Option<struct NotificationConfigurationFilter>
+  id: Option<String>
+  topic_arn: String
+struct Transition
+  date: Option<Timestamp>
+  days: Option<i32>
+  storage_class: Option<enum TransitionStorageClass>
+struct UnsupportedMediaType
+struct UpdateBucketMetadataAnnotationTableConfigurationInput
+  annotation_table_configuration: struct AnnotationTableConfigurationUpdates
+  bucket: String
+  checksum_algorithm: Option<enum ChecksumAlgorithm>
+  content_md5: Option<String>
+  expected_bucket_owner: Option<String>
+struct UpdateBucketMetadataAnnotationTableConfigurationOutput
+struct UpdateBucketMetadataInventoryTableConfigurationInput
+  bucket: String
+  checksum_algorithm: Option<enum ChecksumAlgorithm>
+  content_md5: Option<String>
+  expected_bucket_owner: Option<String>
+  inventory_table_configuration: struct InventoryTableConfigurationUpdates
+struct UpdateBucketMetadataInventoryTableConfigurationOutput
+struct UpdateBucketMetadataJournalTableConfigurationInput
+  bucket: String
+  checksum_algorithm: Option<enum ChecksumAlgorithm>
+  content_md5: Option<String>
+  expected_bucket_owner: Option<String>
+  journal_table_configuration: struct JournalTableConfigurationUpdates
+struct UpdateBucketMetadataJournalTableConfigurationOutput
+struct UpdateObjectEncryptionInput
+  bucket: String
+  checksum_algorithm: Option<enum ChecksumAlgorithm>
+  content_md5: Option<String>
+  expected_bucket_owner: Option<String>
+  key: String
+  object_encryption: union ObjectEncryption
+  request_payer: Option<enum RequestPayer>
+  version_id: Option<String>
+struct UpdateObjectEncryptionOutput
+  request_charged: Option<enum RequestCharged>
+struct UploadPartCopyInput
+  bucket: String
+  copy_source: CopySource
+  copy_source_if_match: Option<ETagCondition>
+  copy_source_if_modified_since: Option<Timestamp>
+  copy_source_if_none_match: Option<ETagCondition>
+  copy_source_if_unmodified_since: Option<Timestamp>
+  copy_source_range: Option<String>
+  copy_source_sse_customer_algorithm: Option<String>
+  copy_source_sse_customer_key: Option<String>
+  copy_source_sse_customer_key_md5: Option<String>
+  expected_bucket_owner: Option<String>
+  expected_source_bucket_owner: Option<String>
+  key: String
+  part_number: i32
+  request_payer: Option<enum RequestPayer>
+  sse_customer_algorithm: Option<String>
+  sse_customer_key: Option<String>
+  sse_customer_key_md5: Option<String>
+  upload_id: String
+struct UploadPartCopyOutput
+  bucket_key_enabled: Option<bool>
+  copy_part_result: Option<struct CopyPartResult>
+  copy_source_version_id: Option<String>
+  request_charged: Option<enum RequestCharged>
+  sse_customer_algorithm: Option<String>
+  sse_customer_key_md5: Option<String>
+  ssekms_key_id: Option<String>
+  server_side_encryption: Option<enum ServerSideEncryption>
+struct UploadPartInput
+  body: Option<StreamingBlob>
+  bucket: String
+  checksum_algorithm: Option<enum ChecksumAlgorithm>
+  checksum_crc32: Option<String>
+  checksum_crc32c: Option<String>
+  checksum_crc64nvme: Option<String>
+  checksum_md5: Option<String>
+  checksum_sha1: Option<String>
+  checksum_sha256: Option<String>
+  checksum_sha512: Option<String>
+  checksum_xxhash128: Option<String>
+  checksum_xxhash3: Option<String>
+  checksum_xxhash64: Option<String>
+  content_length: Option<i64>
+  content_md5: Option<String>
+  expected_bucket_owner: Option<String>
+  key: String
+  part_number: i32
+  request_payer: Option<enum RequestPayer>
+  sse_customer_algorithm: Option<String>
+  sse_customer_key: Option<String>
+  sse_customer_key_md5: Option<String>
+  upload_id: String
+struct UploadPartOutput
+  bucket_key_enabled: Option<bool>
+  checksum_crc32: Option<String>
+  checksum_crc32c: Option<String>
+  checksum_crc64nvme: Option<String>
+  checksum_md5: Option<String>
+  checksum_sha1: Option<String>
+  checksum_sha256: Option<String>
+  checksum_sha512: Option<String>
+  checksum_xxhash128: Option<String>
+  checksum_xxhash3: Option<String>
+  checksum_xxhash64: Option<String>
+  e_tag: Option<ETag>
+  request_charged: Option<enum RequestCharged>
+  sse_customer_algorithm: Option<String>
+  sse_customer_key_md5: Option<String>
+  ssekms_key_id: Option<String>
+  server_side_encryption: Option<enum ServerSideEncryption>
+struct VersioningConfiguration
+  exclude_folders: Option<bool>
+  excluded_prefixes: Option<Vec<struct ExcludedPrefix>>
+  mfa_delete: Option<enum MFADelete>
+  status: Option<enum BucketVersioningStatus>
+struct WebsiteConfiguration
+  error_document: Option<struct ErrorDocument>
+  index_document: Option<struct IndexDocument>
+  redirect_all_requests_to: Option<struct RedirectAllRequestsTo>
+  routing_rules: Option<Vec<struct RoutingRule>>
+struct WriteGetObjectResponseInput
+  accept_ranges: Option<String>
+  body: Option<StreamingBlob>
+  bucket_key_enabled: Option<bool>
+  cache_control: Option<String>
+  checksum_crc32: Option<String>
+  checksum_crc32c: Option<String>
+  checksum_crc64nvme: Option<String>
+  checksum_md5: Option<String>
+  checksum_sha1: Option<String>
+  checksum_sha256: Option<String>
+  checksum_sha512: Option<String>
+  checksum_xxhash128: Option<String>
+  checksum_xxhash3: Option<String>
+  checksum_xxhash64: Option<String>
+  content_disposition: Option<String>
+  content_encoding: Option<String>
+  content_language: Option<String>
+  content_length: Option<i64>
+  content_range: Option<String>
+  content_type: Option<String>
+  delete_marker: Option<bool>
+  e_tag: Option<ETag>
+  error_code: Option<String>
+  error_message: Option<String>
+  expiration: Option<String>
+  expires: Option<String>
+  last_modified: Option<Timestamp>
+  metadata: Option<Map<String, String>>
+  missing_meta: Option<i32>
+  object_lock_legal_hold_status: Option<enum ObjectLockLegalHoldStatus>
+  object_lock_mode: Option<enum ObjectLockMode>
+  object_lock_retain_until_date: Option<Timestamp>
+  parts_count: Option<i32>
+  replication_status: Option<enum ReplicationStatus>
+  request_charged: Option<enum RequestCharged>
+  request_route: String
+  request_token: String
+  restore: Option<String>
+  sse_customer_algorithm: Option<String>
+  sse_customer_key_md5: Option<String>
+  ssekms_key_id: Option<String>
+  server_side_encryption: Option<enum ServerSideEncryption>
+  status_code: Option<i32>
+  storage_class: Option<enum StorageClass>
+  tag_count: Option<i32>
+  version_id: Option<String>
+struct WriteGetObjectResponseOutput

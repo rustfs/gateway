@@ -1,0 +1,5 @@
+PUT /bkt/dst
+x-amz-copy-source: src/k
+x-amz-object-lock-event-hold: ON
+x-amz-object-lock-event-hold-duration-days: 1
+

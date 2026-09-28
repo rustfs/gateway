@@ -253,6 +253,32 @@ impl BodyTransport {
         }
     }
 
+    /// Takes a file-backed body onto the user-space copied path for a transport that has no
+    /// kernel-side one, recording the refusal under `reason` — or under
+    /// [`NoZeroCopy::VerificationObligationPresent`] when the body still owes a verification, which
+    /// outranks any transport reason.
+    ///
+    /// A body that is not file-backed is returned unchanged, with nothing recorded: it was never a
+    /// candidate for a kernel transfer, and counting it would make every in-memory response look
+    /// like a refused one.
+    #[cfg(unix)]
+    pub fn try_into_copied_file_for(self, reason: NoZeroCopy) -> Result<CopiedFileBody, Body> {
+        if !matches!(self.body.payload, Payload::File(_)) {
+            return Err(self.body);
+        }
+        let reason = if self.body.verification_obligation.is_present() {
+            NoZeroCopy::VerificationObligationPresent
+        } else {
+            reason
+        };
+        self.body
+            .metrics
+            .record_zero_copy_refusal(reason, self.body.payload.len_hint());
+        RefusedBodyTransport { body: self.body, reason }
+            .try_into_copied_file()
+            .map_err(RefusedBodyTransport::into_body)
+    }
+
     /// Returns the unchanged body for a terminal user-space streaming path.
     #[must_use]
     pub fn into_body(self) -> Body {
@@ -330,6 +356,17 @@ impl CopiedFileBody {
         self.metrics.record_adapt(&crate::adapt::AdaptCost::Copy {
             est_bytes: Some(self.len),
         });
+    }
+
+    /// Hands the file, positioned at the next selected byte, and the count still selected to a
+    /// transport that reads it on its own asynchronous file reader.
+    ///
+    /// The value is still a copied-path value: the caller has already been refused the kernel
+    /// path and recorded why, so this cannot be mistaken for a kernel-ready region.
+    pub fn into_positioned_file(mut self) -> io::Result<(File, u64)> {
+        use std::io::{Seek, SeekFrom};
+        self.file.seek(SeekFrom::Start(self.next_offset))?;
+        Ok((self.file, self.remaining))
     }
 
     /// Reads the next selected bytes without exposing a file descriptor or kernel-ready region.

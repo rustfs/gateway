@@ -99,6 +99,9 @@ impl FsBackend {
     #[must_use]
     pub fn register_tagging(self: &Arc<Self>, builder: ServiceBuilder) -> ServiceBuilder {
         builder
+            .register::<rustfs_gateway::dto::DeleteBucketTagging, _>(Arc::clone(self))
+            .register::<rustfs_gateway::dto::GetBucketTagging, _>(Arc::clone(self))
+            .register::<rustfs_gateway::dto::PutBucketTagging, _>(Arc::clone(self))
             .register::<DeleteObjectTagging, _>(Arc::clone(self))
             .register::<GetObjectTagging, _>(Arc::clone(self))
             .register::<PutObjectTagging, _>(Arc::clone(self))

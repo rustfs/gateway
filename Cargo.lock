@@ -1737,7 +1737,7 @@ checksum = "08d43f7aa6b08d49f382cde6a7982047c3426db949b1424bc4b7ec9ae12c6ce2"
 
 [[package]]
 name = "rustfs-gateway"
-version = "0.50.0"
+version = "0.51.0"
 dependencies = [
  "arc-swap",
  "bytes",
@@ -1769,7 +1769,7 @@ dependencies = [
 
 [[package]]
 name = "rustfs-gateway-codegen"
-version = "0.17.0"
+version = "0.18.0"
 dependencies = [
  "rustfs-gateway-model",
  "thiserror",
@@ -1897,6 +1897,7 @@ dependencies = [
  "http",
  "http-body",
  "http-body-util",
+ "httparse",
  "rustfs-gateway",
  "rustfs-gateway-core",
  "rustfs-gateway-corpus",
@@ -1958,6 +1959,7 @@ dependencies = [
  "hmac",
  "http",
  "memchr",
+ "nix 0.31.3",
  "phf",
  "rustfs-gateway-stream",
  "rustfs-gateway-types",
@@ -2042,7 +2044,7 @@ dependencies = [
 
 [[package]]
 name = "rustfs-gateway-types"
-version = "0.28.0+aws.2026-09-17"
+version = "0.29.0+aws.2026-09-17"
 dependencies = [
  "bytes",
  "crc-fast",

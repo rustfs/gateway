@@ -1,0 +1,6 @@
+PUT /bkt/k?partNumber=1&uploadId=u
+x-amz-checksum-md5: XrY7u+Ae7tCTyyK7j1rNww==
+x-amz-sdk-checksum-algorithm: MD5
+x-amz-checksum-algorithm: MD5
+
+hello world

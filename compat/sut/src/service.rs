@@ -28,7 +28,8 @@ use std::io;
 use std::sync::Arc;
 
 use rustfs_gateway::{
-    Credentials, RegionSet, S3Service, SecurityFloor, ServiceBuilder, SigV4Authenticator, StaticCredentials, dto,
+    Credentials, RegionMatchPolicy, RegionSet, S3Service, SecurityFloor, ServiceBuilder, SigV4Authenticator, StaticCredentials,
+    dto,
 };
 use rustfs_gateway_fs::FsBackend;
 
@@ -50,6 +51,8 @@ pub(crate) fn open_backend(options: &Options) -> io::Result<FsBackend> {
     let (owner_id, display_name) = options.accounts.data_root_owner();
     let backend = FsBackend::open(&options.data)?
         .with_region(&options.region)?
+        // As RustFS does, accept the explicit us-east-1 minio-java's `makeBucket` writes (#914).
+        .with_region_match_policy(RegionMatchPolicy::AcceptExplicitUsEast1)
         .with_owner(owner_id, display_name);
     match options.lifecycle_debug_interval {
         Some(interval) => backend.with_lifecycle_debug_interval(interval),
@@ -102,8 +105,12 @@ pub(crate) fn build_service(
             // (ADR-0021): RustFS decides every request by policy, and a public bucket policy is
             // how a suite grants the public a read. The authorizer still refuses an anonymous
             // request the stored policy does not allow, and a bucket without a policy refuses
-            // every one.
-            .security_floor(SecurityFloor::new().delegate_anonymous_to_authorizer_after_listing_in_the_posture_report())
+            // every one. RustFS also accepts SigV2 presigned URLs (`s3cmd signurl`) today (#913).
+            .security_floor(
+                SecurityFloor::new()
+                    .delegate_anonymous_to_authorizer_after_listing_in_the_posture_report()
+                    .enable_sigv2_presigned_compatibility(),
+            )
             // The same registry answers `x-amz-expected-bucket-owner`, so the owner id a caller
             // asserts is the very id the authorization decision was made against.
             .bucket_owner_source(Arc::clone(owners))
@@ -780,11 +787,12 @@ mod tests {
     #[path = "policy_tests.rs"]
     mod policy_tests;
 
-    /// The MinIO-client checksum waiver the RustFS profile installs (rustfs/gateway#916).
-    #[path = "minio_checksum_tests.rs"]
+    /// What the RustFS profile accepts beyond the AWS defaults: MinIO clients' checksum-less writes
+    /// (rustfs/gateway#916), an explicit us-east-1 constraint (#914), SigV2 presigned URLs (#913).
+    mod location_constraint_tests;
     mod minio_checksum_tests;
+    mod sigv2_presigned_tests;
 
     /// Bucket-policy conditions on the request's encryption header (rustfs/gateway#979).
-    #[path = "sse_condition_tests.rs"]
     mod sse_condition_tests;
 }

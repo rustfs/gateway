@@ -1,0 +1,2 @@
+GET /?max-buckets=10&prefix=b&continuation-token=t&bucket-region=us-east-1
+

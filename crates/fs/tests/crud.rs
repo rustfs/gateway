@@ -25,6 +25,8 @@ mod acl;
 mod bucket_encryption;
 #[path = "crud/bucket_policy.rs"]
 mod bucket_policy;
+#[path = "crud/bucket_tagging.rs"]
+mod bucket_tagging;
 #[path = "crud/object_encryption.rs"]
 mod object_encryption;
 #[path = "crud/upload_part_copy.rs"]
@@ -55,6 +57,9 @@ mod multipart_sizing;
 
 #[path = "crud/multipart_checksums.rs"]
 mod multipart_checksums;
+
+#[path = "crud/multipart_trailer_checksums.rs"]
+mod multipart_trailer_checksums;
 
 #[path = "crud/multipart_versioning.rs"]
 mod multipart_versioning;
@@ -357,6 +362,7 @@ async fn bucket_and_object_crud_runs_through_the_production_registry() {
             "DeleteBucketEncryption",
             "DeleteBucketLifecycle",
             "DeleteBucketPolicy",
+            "DeleteBucketTagging",
             "DeleteObject",
             "DeleteObjectTagging",
             "DeleteObjects",
@@ -367,6 +373,7 @@ async fn bucket_and_object_crud_runs_through_the_production_registry() {
             "GetBucketLocation",
             "GetBucketPolicy",
             "GetBucketPolicyStatus",
+            "GetBucketTagging",
             "GetBucketVersioning",
             "GetObject",
             "GetObjectAcl",
@@ -385,6 +392,7 @@ async fn bucket_and_object_crud_runs_through_the_production_registry() {
             "PutBucketEncryption",
             "PutBucketLifecycleConfiguration",
             "PutBucketPolicy",
+            "PutBucketTagging",
             "PutBucketVersioning",
             "PutObject",
             "PutObjectAcl",

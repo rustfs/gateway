@@ -101,7 +101,7 @@ pub struct CorpusEntry {
 }
 
 /// The presigned query parameters a redacted recording cannot replay.
-const PRESIGN_PARAMETERS: [&str; 7] = [
+pub(crate) const PRESIGN_PARAMETERS: [&str; 7] = [
     "X-Amz-Algorithm",
     "X-Amz-Credential",
     "X-Amz-Date",

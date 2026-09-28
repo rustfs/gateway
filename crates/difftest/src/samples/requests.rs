@@ -678,6 +678,11 @@ pub(super) fn requests() -> Vec<RequestRow> {
             &["kd-decode-0073"],
         ),
         row("put-empty-content-type", RawRequest::put("/bkt/k", b"x").header("content-type", ""), &["kd-decode-0074"]),
+        row("get-escaped-bucket-separator", RawRequest::get("/bkt%2Fk"), &["kd-decode-0064", "kd-decode-0065"]),
+        row("get-escaped-bucket-separator-lowercase", RawRequest::get("/bkt%2fk"), &["kd-decode-0064", "kd-decode-0065"]),
+        row("head-escaped-bucket-separator", RawRequest::head("/bkt%2Fk"), &["kd-decode-0066", "kd-decode-0067"]),
+        row("put-escaped-bucket-separator", RawRequest::put("/bkt%2Fk", b"hello"), &["kd-decode-0068", "kd-decode-0069"]),
+        row("delete-escaped-bucket-separator", RawRequest::delete("/bkt%2Fk"), &["kd-decode-0070", "kd-decode-0071"]),
         row("put-versioning-empty-body", RawRequest::put("/bkt?versioning", b""), &["kd-decode-0053", "kd-decode-0054"]),
         // ── the algorithm header without its checksum ──
         row(

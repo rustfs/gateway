@@ -70,9 +70,8 @@ const METADATA_SECTION: &str = "meta/1";
 
 /// Everything a write stores beside an object version's bytes.
 ///
-/// A multipart upload record persists only `metadata` and `headers`: `CreateMultipartUpload`'s
-/// storage class and tags are not carried to completion yet, so a completed upload publishes with
-/// the defaults for those two.
+/// A multipart upload record persists only `metadata` and `headers`; its tags are a `tags` file
+/// beside the record (rustfs/gateway#1000), and its storage class is not carried to completion yet.
 #[derive(Clone, Debug, Default)]
 pub(super) struct ObjectAttributes {
     /// The `x-amz-meta-*` map, keyed by the lowercase suffix.

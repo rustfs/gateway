@@ -290,6 +290,25 @@ pub(crate) fn rows() -> Vec<OutputRow> {
             stamped!("kd-encode-0005", "kd-encode-0006", "kd-encode-0026", "kd-encode-0027", "kd-encode-0028"),
         ),
         row(
+            "list-objects-v2-control-character",
+            RawRequest::get("/bkt?list-type=2"),
+            || list_v2("p/a\nb"),
+            stamped!(
+                "kd-encode-0005",
+                "kd-encode-0006",
+                "kd-encode-0026",
+                "kd-encode-0027",
+                "kd-encode-0028",
+                "kd-encode-0051",
+                "kd-encode-0052",
+                "kd-encode-0053",
+                "kd-encode-0054",
+                "kd-encode-0055",
+                "kd-encode-0056",
+                "kd-encode-0057"
+            ),
+        ),
+        row(
             "list-objects-v2-url",
             RawRequest::get("/bkt?list-type=2&encoding-type=url"),
             || {

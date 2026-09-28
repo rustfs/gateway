@@ -36,8 +36,8 @@ use rustfs_gateway::dto::{
 };
 use rustfs_gateway::{
     BucketName, ByteStream, Clock, ETag, ErrorCode, Handler, HandlerError, HandlerErrorContext, HandlerResult, MissingObject,
-    ObjectKey, RegionSet, Req, ResourceVisibility, Resp, Timestamp, US_EAST_1, UploadIdClaim, collect,
-    normalize_location_constraint, resolve_upload, system_clock,
+    ObjectKey, REGION_MATCH_POLICY, RegionMatchPolicy, RegionSet, Req, ResourceVisibility, Resp, Timestamp, TrailingHeaders,
+    US_EAST_1, UploadIdClaim, collect, normalize_location_constraint, request_checksum, resolve_upload, system_clock,
 };
 use sha2::Sha256;
 use tokio::io::AsyncWriteExt as _;
@@ -61,6 +61,7 @@ macro_rules! reference_operations {
             encryption DeleteBucketEncryption => "DeleteBucketEncryption",
             lifecycle DeleteBucketLifecycle => "DeleteBucketLifecycle",
             policy DeleteBucketPolicy => "DeleteBucketPolicy",
+            tagging DeleteBucketTagging => "DeleteBucketTagging",
             crud DeleteObject => "DeleteObject",
             tagging DeleteObjectTagging => "DeleteObjectTagging",
             crud DeleteObjects => "DeleteObjects",
@@ -71,6 +72,7 @@ macro_rules! reference_operations {
             crud GetBucketLocation => "GetBucketLocation",
             policy GetBucketPolicy => "GetBucketPolicy",
             policy GetBucketPolicyStatus => "GetBucketPolicyStatus",
+            tagging GetBucketTagging => "GetBucketTagging",
             versioning GetBucketVersioning => "GetBucketVersioning",
             crud GetObject => "GetObject",
             acl GetObjectAcl => "GetObjectAcl",
@@ -89,6 +91,7 @@ macro_rules! reference_operations {
             encryption PutBucketEncryption => "PutBucketEncryption",
             lifecycle PutBucketLifecycleConfiguration => "PutBucketLifecycleConfiguration",
             policy PutBucketPolicy => "PutBucketPolicy",
+            tagging PutBucketTagging => "PutBucketTagging",
             versioning PutBucketVersioning => "PutBucketVersioning",
             crud PutObject => "PutObject",
             acl PutObjectAcl => "PutObjectAcl",
@@ -113,6 +116,7 @@ reference_operations!(capability_names);
 mod content_headers;
 // The `register_*` methods and the entry macros behind them, kept together.
 mod acl;
+mod bucket_tagging;
 mod buckets;
 mod conditions;
 pub(crate) mod copy;
@@ -148,6 +152,7 @@ pub struct FsBackend {
     root: PathBuf,
     region: String,
     regions: RegionSet,
+    region_match_policy: RegionMatchPolicy,
     owner: Option<Owner>,
     temporary_id: AtomicU64,
     upload_id_lock: tokio::sync::Mutex<()>,
@@ -192,6 +197,7 @@ impl FsBackend {
             root: std::fs::canonicalize(root.as_ref())?,
             region: US_EAST_1.to_owned(),
             regions,
+            region_match_policy: REGION_MATCH_POLICY,
             owner: None,
             temporary_id: AtomicU64::new(0),
             upload_id_lock: tokio::sync::Mutex::new(()),
@@ -247,6 +253,18 @@ impl FsBackend {
         self.regions = RegionSet::new([normalized]).map_err(|_| invalid())?;
         self.region = normalized.to_owned();
         Ok(self)
+    }
+
+    /// Matches a `CreateBucket`'s `LocationConstraint` under `policy` instead of the operation's
+    /// default [`REGION_MATCH_POLICY`].
+    ///
+    /// The served region is unchanged: a relaxed posture accepts another spelling of it, never
+    /// another region. The RustFS-profile launcher uses
+    /// [`RegionMatchPolicy::AcceptExplicitUsEast1`] (rustfs/gateway#914).
+    #[must_use]
+    pub const fn with_region_match_policy(mut self, policy: RegionMatchPolicy) -> Self {
+        self.region_match_policy = policy;
+        self
     }
 
     /// Reports one fixed owner for every object stored in this backend.
@@ -452,12 +470,23 @@ fn last_modified(metadata: &std::fs::Metadata) -> Timestamp {
 }
 
 async fn drain(body: Option<ByteStream>) -> Result<Vec<u8>, HandlerError> {
-    let Some(stream) = body else { return Ok(Vec::new()) };
+    drain_with_trailers(body).await.map(|(bytes, _)| bytes)
+}
+
+/// Reads a request body to its end, keeping the trailer section it ended with.
+///
+/// The section is reachable only here, after the last byte: a checksum carried as a trailer is
+/// otherwise indistinguishable from no checksum (rustfs/gateway#929).
+async fn drain_with_trailers(body: Option<ByteStream>) -> Result<(Vec<u8>, TrailingHeaders), HandlerError> {
+    let Some(stream) = body else {
+        return Ok((Vec::new(), TrailingHeaders::empty()));
+    };
     let response = http::Response::new(stream.into_body());
     let collected = collect(response)
         .await
         .map_err(|_| HandlerError::new(ErrorCode::INCOMPLETE_BODY, "the request body did not arrive as it was framed"))?;
-    Ok(collected.body().to_vec())
+    let trailers = TrailingHeaders::from_header_map(collected.trailers().iter().cloned().collect());
+    Ok((collected.body().to_vec(), trailers))
 }
 
 impl Handler<CreateMultipartUpload> for FsBackend {
@@ -476,6 +505,7 @@ impl Handler<CreateMultipartUpload> for FsBackend {
             )
             .await?;
         let attributes = ObjectAttributes {
+            tags: tagging::tags_from_header(input.tagging.as_deref())?,
             metadata: input.metadata.clone(),
             headers: request_content_headers!(input).with_encryption(encryption.clone()),
             ..ObjectAttributes::default()
@@ -521,7 +551,7 @@ impl Handler<UploadPart> for FsBackend {
     async fn call(&self, request: Req<UploadPart>) -> HandlerResult<UploadPart> {
         let input = request.into_input();
         self.require_bucket(input.bucket.as_str()).await?;
-        let bytes = drain(input.body).await?;
+        let (bytes, trailers) = drain_with_trailers(input.body).await?;
         if i64::try_from(bytes.len()).ok() != Some(input.content_length) {
             return Err(HandlerError::new(
                 ErrorCode::INCOMPLETE_BODY,
@@ -529,15 +559,20 @@ impl Handler<UploadPart> for FsBackend {
             ));
         }
         let (upload_id, record) = self.resolve_upload(&input.upload_id, &input.bucket, &input.key)?;
+        let claimed = request_checksum(input.checksum_spec, &trailers)?;
         let checksum_spec = match record.checksum {
-            Some(checksum) => Some(checksum.validate_part(input.checksum_spec, &bytes)?),
-            None => input.checksum_spec,
+            Some(checksum) => Some(checksum.validate_part(claimed, &bytes)?),
+            None => claimed,
         };
         self.store_part(input.bucket.as_str(), &upload_id, input.part_number, &bytes)
             .await?;
+        // A part reports the encryption its upload was initiated under.
+        let encryption = record.attributes.headers.encryption();
         Ok(Resp::new(UploadPartOutput {
             e_tag: etag(&bytes)?,
             checksum_spec,
+            server_side_encryption: encryption.reported_algorithm(),
+            ssekms_key_id: encryption.kms_key_id,
             ..UploadPartOutput::default()
         }))
     }
@@ -679,6 +714,8 @@ impl Handler<CompleteMultipartUpload> for FsBackend {
             selection.validate_completed_object(completion_claim, actual)?;
         }
 
+        let mut attributes = (*record.attributes).clone();
+        attributes.tags = tagging::read_persisted_tags(&upload).await?;
         let tombstone = self.uploads_path(input.bucket.as_str()).join(format!(
             ".complete-{}-{}",
             std::process::id(),
@@ -700,7 +737,7 @@ impl Handler<CompleteMultipartUpload> for FsBackend {
                 input.key.as_str(),
                 &completed_bytes,
                 &composite,
-                &record.attributes,
+                &attributes,
                 conditions::any(&write_conditions).then_some(&write_conditions),
             )
             .await

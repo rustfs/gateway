@@ -9,7 +9,7 @@ This bounded implementation supports bucket and version-aware object CRUD, `List
 `ListObjectsV2`, `ListMultipartUploads`, `GetBucketLocation`,
 `GetBucketVersioning`, `PutBucketVersioning`, `ListObjectVersions`, `CreateMultipartUpload`,
 `UploadPart`, `UploadPartCopy`, `ListParts`, `CompleteMultipartUpload`, `AbortMultipartUpload`, and lifecycle
-configuration PUT/GET/DELETE plus object tagging GET/PUT/DELETE. Default-encryption
+configuration PUT/GET/DELETE plus object and bucket tagging GET/PUT/DELETE. Default-encryption
 configuration PUT/GET/DELETE is stored and reported as RustFS answers it, and nothing is
 encrypted: this backend measures the protocol surface, not key management. Object writes record
 the SSE-S3 or SSE-KMS algorithm (and KMS key id) the request names, or the bucket default, and the
@@ -71,8 +71,8 @@ version becomes visible, and the storage class its `x-amz-storage-class` names. 
 records the class the request names, `STANDARD` when it names none, copies the source's tags
 under the default tagging directive and takes the request's under `REPLACE`; a self copy that only
 names a class is a change. A class a record cannot carry is refused as `InvalidStorageClass`
-before anything is written. `CreateMultipartUpload` does not yet carry its class or tags to the
-completed object.
+before anything is written. `CreateMultipartUpload` carries its `x-amz-tagging` tags to the completed object; it does not yet
+carry its class.
 
 `ListBuckets` answers every bucket under the single-tenant data root in byte order, with the
 configured owner, a prefix filter, a region filter, and `max-buckets` pages resumed by a minted

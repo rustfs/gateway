@@ -447,3 +447,62 @@ async fn n_corrupt_tags_leave_the_read_intact_without_a_count() {
     std::fs::write(only_tag_path(&root, "tag-count"), b"corrupt").expect("the exact tag authority is writable");
     assert_eq!(tagging_counts(&service, "/tag-count/key").await, [None, None]);
 }
+
+async fn initiate_tagged(service: &S3Service, key: &str, tagging: &'static str) -> rustfs_gateway::WireResponse {
+    let mut headers = http::HeaderMap::new();
+    headers.insert("x-amz-tagging", http::HeaderValue::from_static(tagging));
+    exchange(
+        service,
+        signed_with_headers(http::Method::POST, &format!("/mpu-tags/{key}?uploads"), Bytes::new(), headers),
+    )
+    .await
+}
+
+/// Positive — the tags `CreateMultipartUpload` carries are the completed object's
+/// (rustfs/gateway#1000, s3-tests `test_set_multipart_tagging`).
+#[tokio::test]
+async fn multipart_initiation_tags_reach_the_completed_object() {
+    let root = TestRoot::new();
+    let (_, first) = service(&root);
+    create_bucket(&first, "mpu-tags").await;
+    let initiated = initiate_tagged(&first, "key", "class=cold&tenant=blue").await;
+    assert_eq!(initiated.status(), 200, "{}", String::from_utf8_lossy(initiated.body()));
+    let upload_id = element(initiated.body(), "UploadId").expect("an upload id");
+    let part = upload_part(&first, "mpu-tags", "key", &upload_id, 1, b"body").await;
+    drop(first);
+    let (_, restarted) = service(&root);
+    assert_eq!(
+        complete(&restarted, "mpu-tags", "key", &upload_id, &[(1, &part)])
+            .await
+            .status(),
+        200
+    );
+    let tags = get_tags(&restarted, "mpu-tags", "key", None).await;
+    let text = String::from_utf8_lossy(tags.body()).into_owned();
+    assert!(text.contains("<Key>class</Key><Value>cold</Value>"), "{text}");
+    assert!(text.contains("<Key>tenant</Key><Value>blue</Value>"), "{text}");
+}
+
+/// Negative — an untagged upload completes into an untagged object, and a malformed tag header
+/// refuses the initiation before any upload exists.
+#[tokio::test]
+async fn n_untagged_and_malformed_multipart_initiations() {
+    let root = TestRoot::new();
+    let (_, service) = service(&root);
+    create_bucket(&service, "mpu-tags").await;
+    let upload_id = initiate(&service, "mpu-tags", "plain").await;
+    let part = upload_part(&service, "mpu-tags", "plain", &upload_id, 1, b"body").await;
+    assert_eq!(
+        complete(&service, "mpu-tags", "plain", &upload_id, &[(1, &part)])
+            .await
+            .status(),
+        200
+    );
+    let tags = get_tags(&service, "mpu-tags", "plain", None).await;
+    assert!(!String::from_utf8_lossy(tags.body()).contains("<Tag>"));
+
+    let refused = initiate_tagged(&service, "bad", "=nokey").await;
+    assert_eq!(refused.status(), 400, "{}", String::from_utf8_lossy(refused.body()));
+    let uploads = exchange(&service, signed(http::Method::GET, "/mpu-tags?uploads", Bytes::new())).await;
+    assert!(!String::from_utf8_lossy(uploads.body()).contains("<Key>bad</Key>"));
+}

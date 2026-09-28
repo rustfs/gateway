@@ -27,12 +27,21 @@ else
     if grep -Eq 'Box::|Vec::|format!|to_owned\(|\.clone\(' <<<"$fast_path"; then
         fail 'the synchronous decision path contains an allocating operation'
     fi
-    auth_line="$(grep -nF 'ClassKind::Authenticated => return Some(Lease::admit())' <<<"$fast_path" | cut -d: -f1 || true)"
-    clock_line="$(grep -nF 'self.clock.monotonic()' <<<"$fast_path" | cut -d: -f1 || true)"
-    if [[ -z "$auth_line" || -z "$clock_line" || "$auth_line" -ge "$clock_line" ]]; then
-        fail 'c-lim-0004 authenticated traffic no longer returns a permit before the clock and address locks'
-    fi
 fi
+# c-lim-0004: the object-safe boundary decides through the synchronous path and nothing else.
+boundary="$(sed -n '/^impl Governor for DefaultGovernor {$/,/^}$/p' "$SOURCE")"
+if ! grep -qF 'let decided = self.try_acquire_sync(request).ok_or(());' <<<"$boundary"; then
+    fail 'c-lim-0004 the Governor boundary no longer decides through try_acquire_sync'
+fi
+
+# c-gov-0012: a load refusal logs nothing request-derived, because the governor logs nothing.
+for governor_source in "$INTERFACE" "$SOURCE" "$(dirname "$SOURCE")/meter.rs" "$(dirname "$SOURCE")/rates.rs"; do
+    if [[ ! -f "$governor_source" ]]; then
+        fail "governor source ${governor_source#"$ROOT_DIR"/} is missing"
+    elif grep -nE '\b(e?println|e?print|dbg|tracing::[a-z_]+|log::[a-z_]+|trace|debug|info|warn|error)!' "$governor_source" >/dev/null; then
+        fail "c-gov-0012 ${governor_source#"$ROOT_DIR"/} logs; a refusal for load must not interpolate request-derived content anywhere"
+    fi
+done
 
 shards="$(sed -n 's/^const CLIENT_SHARDS: usize = \([0-9][0-9]*\);$/\1/p' "$SOURCE")"
 if [[ -z "$shards" || "$shards" -le 1 ]]; then

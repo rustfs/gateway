@@ -1,0 +1,5 @@
+POST /bkt/k?uploadId=u
+x-amz-checksum-xxhash128: 340J6T+HSQCpm4d1zBW2xw==-2
+x-amz-checksum-type: COMPOSITE
+
+<CompleteMultipartUpload><Part><PartNumber>1</PartNumber><ETag>"e1"</ETag><ChecksumXXHASH128>KYfQBN4KyGkLcxpOLv7rDQ==</ChecksumXXHASH128></Part></CompleteMultipartUpload>

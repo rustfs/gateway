@@ -15,6 +15,12 @@ name: Perf evidence
 #     beside a hundred slow clients that keep progressing, against a lock-step
 #     control listener.
 #
+#   - crates/gateway/tests/macro_scenarios.rs and server_load/tls_large.rs: the
+#     rustfs/backlog#1766 macro scenarios no other suite measures (4 KiB GET/PUT
+#     under keep-alive load, ListObjectsV2 1000 keys x 512 connections, a
+#     10,000-part completion the client never reads, 1 GiB aws-chunked signed PUT
+#     vs unsigned, 1 GiB over TLS with and without forced flattening).
+#
 #   Syscall, allocator and memory assertions block. Elapsed time and p99 are
 #   printed as records; the p99 assertion is a generous regression gate
 #   (median of five paired rounds <= 2 x control), and that median against the 20% target is a
@@ -91,13 +97,20 @@ jobs:
           set -euo pipefail
           cargo test --release -p rustfs-gateway-server --test integration slow_clients -- --nocapture --test-threads 1 2>&1 \
             | tee "$RUNNER_TEMP/slow-clients.log"
+      - name: Macro scenarios
+        run: |
+          set -euo pipefail
+          {
+            cargo test --release -p rustfs-gateway --test integration macro_scenarios -- --nocapture --test-threads 1
+            cargo test --release -p rustfs-gateway-server --test integration tls_large -- --nocapture --test-threads 1
+          } 2>&1 | tee "$RUNNER_TEMP/macro.log"
       - name: Summarise
         if: always()
         run: |
           {
             echo "## Observations"
             echo '```'
-            cat "$RUNNER_TEMP"/transfers.log "$RUNNER_TEMP"/slow-clients.log 2>/dev/null | grep -oE '(perf-evidence: |SKIP ).*' || echo "no observation was printed"
+            cat "$RUNNER_TEMP"/transfers.log "$RUNNER_TEMP"/slow-clients.log "$RUNNER_TEMP"/macro.log 2>/dev/null | grep -oE '(perf-evidence: |SKIP ).*' || echo "no observation was printed"
             echo '```'
           } >>"$GITHUB_STEP_SUMMARY"
       - name: Upload the logs
@@ -108,4 +121,5 @@ jobs:
           path: |
             ${{ runner.temp }}/transfers.log
             ${{ runner.temp }}/slow-clients.log
+            ${{ runner.temp }}/macro.log
           if-no-files-found: warn

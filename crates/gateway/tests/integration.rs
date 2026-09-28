@@ -68,6 +68,8 @@ mod dialect_entry;
 mod error_context_filters;
 #[path = "facade_probe.rs"]
 mod facade_probe;
+#[path = "file_responses.rs"]
+mod file_responses;
 #[path = "file_transfer.rs"]
 mod file_transfer;
 #[path = "governor_runtime.rs"]
@@ -84,6 +86,8 @@ mod ingest_assembly;
 mod lifecycle_reachability;
 #[path = "lock_encryption_reachability.rs"]
 mod lock_encryption_reachability;
+#[path = "macro_scenarios.rs"]
+mod macro_scenarios;
 #[path = "middleware.rs"]
 mod middleware;
 #[path = "monomorphic.rs"]

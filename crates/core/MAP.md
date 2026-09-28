@@ -33,6 +33,7 @@ Agent entry point for operations, routing, codecs, authorization state and handl
 | `src/ops/update_object_encryption.rs` | Reserves an object encryption update independently of destructive object replacement. | An encryption update routes to PutObject or declares the wrong authorization floor. |
 | `src/ops/shared/` | Explicit cross-operation protocol logic. | A list/copy/conditional/ACL/checksum rule affects several operations. |
 | `src/ops/shared/rule_filter.rs` | The one rule `<Filter>`/`<And>` grammar lifecycle and replication both call, with each family's member set. | Either family's Filter or And acceptance changes. |
+| `src/ops/shared/trailer_checksum.rs` | `request_checksum`: the checksum a streaming body claimed, from its header or from the trailer it ended with, under the header decoder's field rule. | A backend stores a part or object checksum, or a trailer-carried checksum goes missing. |
 | `src/route/mod.rs` | Routing module map and pre-auth invariant. | Start a routing task. |
 | `src/route/selector.rs` | Route predicates and entries. | Add or interpret a predicate. |
 | `src/route/lattice.rs` | Selector overlap/refinement decision. | A conflict or shadowing decision is wrong. |

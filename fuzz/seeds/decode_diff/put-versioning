@@ -1,0 +1,6 @@
+PUT /bkt?versioning
+content-md5: 0WNnnpeLLX5q+WR6BTXy2w==
+x-amz-mfa: 123 456
+x-amz-expected-bucket-owner: 111122223333
+
+<VersioningConfiguration><Status>Enabled</Status><MfaDelete>Disabled</MfaDelete></VersioningConfiguration>

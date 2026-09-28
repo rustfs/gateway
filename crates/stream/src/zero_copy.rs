@@ -155,6 +155,8 @@ pub enum NoZeroCopy {
     VerificationObligationPresent,
     /// TLS is in the path, so every byte must be readable in user space to be encrypted.
     TlsInPath,
+    /// The response travels in HTTP/2 DATA frames, which a kernel file transfer cannot produce.
+    Http2InPath,
 }
 
 impl NoZeroCopy {
@@ -166,6 +168,7 @@ impl NoZeroCopy {
             Self::TransportLacksSendfile => "transport-lacks-sendfile",
             Self::VerificationObligationPresent => "verification-obligation-present",
             Self::TlsInPath => "tls-in-path",
+            Self::Http2InPath => "http2-in-path",
         }
     }
 }
@@ -177,6 +180,7 @@ impl fmt::Display for NoZeroCopy {
             Self::TransportLacksSendfile => "transport has no kernel-side transfer path",
             Self::VerificationObligationPresent => "payload still owes a verification, so its bytes may not be moved unseen",
             Self::TlsInPath => "TLS is in the path, so the bytes must pass through user space",
+            Self::Http2InPath => "HTTP/2 framing is in the path, so the bytes must pass through user space",
         })
     }
 }

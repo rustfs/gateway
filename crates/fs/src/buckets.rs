@@ -40,12 +40,14 @@ use rustfs_gateway::dto::{
     HeadBucket, HeadBucketOutput, ListBuckets, ListBucketsOutput, LocationConstraint,
 };
 use rustfs_gateway::{
-    BucketName, CursorSpec, ErrorCode, Handler, HandlerError, HandlerErrorContext, HandlerResult, REGION_MATCH_POLICY, Req, Resp,
-    Timestamp, US_EAST_1, resolve_location_constraint,
+    BucketName, CursorSpec, ErrorCode, Handler, HandlerError, HandlerErrorContext, HandlerResult, Req, Resp, Timestamp,
+    US_EAST_1, resolve_location_constraint,
 };
 use sha2::{Digest as _, Sha256};
 
-use super::{FsBackend, OBJECTS_DIR, UPLOADS_DIR, VERSIONS_DIR, encryption, lifecycle, policy, storage_error, versioning};
+use super::{
+    FsBackend, OBJECTS_DIR, UPLOADS_DIR, VERSIONS_DIR, bucket_tagging, encryption, lifecycle, policy, storage_error, versioning,
+};
 
 /// The cursor `ListBuckets` pages with: a value this backend minted, never a bucket name.
 const BUCKET_CURSOR: CursorSpec = CursorSpec::opaque("continuation-token");
@@ -166,7 +168,7 @@ impl Handler<CreateBucket> for FsBackend {
                 .and_then(|configuration| configuration.location_constraint.as_ref())
                 .map(LocationConstraint::as_str),
             &self.regions,
-            REGION_MATCH_POLICY,
+            self.region_match_policy,
         )?;
         let bucket = input.bucket.as_str();
         let path = self.bucket_path(bucket);
@@ -308,6 +310,7 @@ impl Handler<DeleteBucket> for FsBackend {
             policy::POLICY_FILE,
             policy::PUBLIC_ACCESS_BLOCK_FILE,
             encryption::ENCRYPTION_FILE,
+            bucket_tagging::BUCKET_TAGGING_FILE,
         ] {
             match tokio::fs::remove_file(self.bucket_path(bucket).join(record)).await {
                 Ok(()) => {}
