@@ -1803,6 +1803,7 @@ dependencies = [
  "proptest",
  "rcgen",
  "rustfs-gateway",
+ "rustfs-gateway-corpus",
  "rustfs-gateway-stream",
  "rustls",
  "tokio",
