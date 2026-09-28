@@ -1210,7 +1210,7 @@
                                 "summary": "The operation documents versionId as the query parameter naming which version of the object the retrieval applies to."
                               }
                             ],
-                "cases": ["c-select-restore-0018"]
+                "cases": ["c-select-restore-0018", "c-select-restore-0050", "c-select-restore-0051"]
               },
               {
                 "id": "q-acl-0012",
