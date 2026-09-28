@@ -476,6 +476,7 @@ impl Handler<CreateMultipartUpload> for FsBackend {
             )
             .await?;
         let attributes = ObjectAttributes {
+            tags: tagging::tags_from_header(input.tagging.as_deref())?,
             metadata: input.metadata.clone(),
             headers: request_content_headers!(input).with_encryption(encryption.clone()),
             ..ObjectAttributes::default()
@@ -679,6 +680,8 @@ impl Handler<CompleteMultipartUpload> for FsBackend {
             selection.validate_completed_object(completion_claim, actual)?;
         }
 
+        let mut attributes = (*record.attributes).clone();
+        attributes.tags = tagging::read_persisted_tags(&upload).await?;
         let tombstone = self.uploads_path(input.bucket.as_str()).join(format!(
             ".complete-{}-{}",
             std::process::id(),
@@ -700,7 +703,7 @@ impl Handler<CompleteMultipartUpload> for FsBackend {
                 input.key.as_str(),
                 &completed_bytes,
                 &composite,
-                &record.attributes,
+                &attributes,
                 conditions::any(&write_conditions).then_some(&write_conditions),
             )
             .await
