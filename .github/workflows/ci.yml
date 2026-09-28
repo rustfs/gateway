@@ -139,7 +139,7 @@ jobs:
       - name: Facts
         run: |
           nproc; grep -m1 'model name' /proc/cpuinfo; cat /sys/fs/cgroup/cpu.max; cat /proc/sys/kernel/yama/ptrace_scope 2>/dev/null || echo no-yama
-          grep -E 'CapEff|Seccomp' /proc/self/status; cat /proc/sys/vm/mmap_rnd_bits
+          grep -E 'CapEff|Seccomp' /proc/self/status; cat /proc/sys/vm/mmap_rnd_bits || true
           sudo -n apt-get install -y gdb >/dev/null 2>&1 && echo gdb-ok || echo gdb-missing
       - name: Build the TSAN test binary
         run: |
