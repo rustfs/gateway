@@ -457,33 +457,6 @@ expires = "2026-12-31"
 ruling = "rd-put-0007"
 
 [[diff]]
-id = "kd-decode-0043"
-kind = "decode"
-operation = "ListObjects"
-item = "ListObjectsInput.optional_object_attributes"
-gateway = "<no member>"
-reason = "The pinned s3s reads x-amz-optional-object-attributes into the listing input; the gateway's listing inputs do not bind it. RustFS lists no optional attributes either way."
-expires = "2026-12-31"
-
-[[diff]]
-id = "kd-decode-0044"
-kind = "decode"
-operation = "ListObjectsV2"
-item = "ListObjectsV2Input.optional_object_attributes"
-gateway = "<no member>"
-reason = "As kd-decode-0043 for ListObjectsV2."
-expires = "2026-12-31"
-
-[[diff]]
-id = "kd-decode-0045"
-kind = "decode"
-operation = "ListObjectVersions"
-item = "ListObjectVersionsInput.optional_object_attributes"
-gateway = "<no member>"
-reason = "As kd-decode-0043 for ListObjectVersions."
-expires = "2026-12-31"
-
-[[diff]]
 id = "kd-decode-0046"
 kind = "decode"
 operation = "DeleteObjects"

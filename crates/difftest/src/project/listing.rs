@@ -15,8 +15,8 @@
 //! Listing projections: ListObjects, ListObjectsV2, ListObjectVersions, ListMultipartUploads.
 //!
 //! Responsible for: reading each listing's gateway input and pinned s3s input into the same member
-//! paths. s3s carries `optional_object_attributes` (a header the gateway model does not bind for
-//! these operations); it is compared like any other member, so a request that sends it shows up.
+//! paths, `optional_object_attributes` (a comma-delimited header list on both stacks) as its
+//! comma-joined values.
 //! NOT responsible for: comparing, or pagination semantics (a decode diff compares what was read,
 //! not what a listing then does with it).
 //! Upstream: the two DTOs. Downstream: `project/mod.rs`.
@@ -27,15 +27,15 @@ use super::{gateway_projection, oracle_projection};
 use crate::fields::FieldValue;
 use crate::s3s::dto as oracle;
 
-/// s3s's list-valued attribute header, as its comma-joined values.
-fn optional_attributes(fields: &mut crate::fields::Fields, attributes: Option<&Vec<oracle::OptionalObjectAttributes>>) {
+/// The list-valued attribute header either stack reads, as its comma-joined values.
+fn optional_attributes<T: crate::fields::Render>(fields: &mut crate::fields::Fields, attributes: Option<&Vec<T>>) {
     fields.set(
         "optional_object_attributes",
         attributes.map_or(FieldValue::Absent, |attributes| {
             FieldValue::Present(
                 attributes
                     .iter()
-                    .map(|attribute| attribute.as_str().to_owned())
+                    .map(crate::fields::Render::render)
                     .collect::<Vec<_>>()
                     .join(","),
             )
@@ -47,9 +47,14 @@ gateway_projection! {
     fn gateway_list_objects(request: dto::ListObjects => input) as LIST_OBJECTS_MEMBERS {
         put: [bucket],
         opt: [delimiter, encoding_type, expected_bucket_owner, marker, max_keys, prefix, request_payer],
-        custom: [],
+        custom: [optional_object_attributes],
     }
-    |fields| { None }
+    |fields| {
+        // The gateway holds the header list as a plain list, empty when the header is absent.
+        let attributes = &input.optional_object_attributes;
+        optional_attributes(&mut fields, (!attributes.is_empty()).then_some(attributes));
+        None
+    }
 }
 
 oracle_projection! {
@@ -71,9 +76,14 @@ gateway_projection! {
             continuation_token, delimiter, encoding_type, expected_bucket_owner, fetch_owner, max_keys, prefix,
             request_payer, start_after,
         ],
-        custom: [],
+        custom: [optional_object_attributes],
     }
-    |fields| { None }
+    |fields| {
+        // The gateway holds the header list as a plain list, empty when the header is absent.
+        let attributes = &input.optional_object_attributes;
+        optional_attributes(&mut fields, (!attributes.is_empty()).then_some(attributes));
+        None
+    }
 }
 
 oracle_projection! {
@@ -98,9 +108,14 @@ gateway_projection! {
             delimiter, encoding_type, expected_bucket_owner, key_marker, max_keys, prefix, request_payer,
             version_id_marker,
         ],
-        custom: [],
+        custom: [optional_object_attributes],
     }
-    |fields| { None }
+    |fields| {
+        // The gateway holds the header list as a plain list, empty when the header is absent.
+        let attributes = &input.optional_object_attributes;
+        optional_attributes(&mut fields, (!attributes.is_empty()).then_some(attributes));
+        None
+    }
 }
 
 oracle_projection! {

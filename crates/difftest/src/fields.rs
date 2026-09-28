@@ -154,6 +154,7 @@ render_as_str!(
     rustfs_gateway_types::dto::ObjectLockLegalHoldStatus,
     rustfs_gateway_types::dto::ObjectLockMode,
     rustfs_gateway_types::dto::ObjectOwnership,
+    rustfs_gateway_types::dto::OptionalObjectAttributes,
     rustfs_gateway_types::dto::RequestPayer,
     rustfs_gateway_types::dto::ServerSideEncryption,
     rustfs_gateway_types::dto::Status,

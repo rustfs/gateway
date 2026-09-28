@@ -618,16 +618,16 @@ pub(crate) fn rows() -> Vec<Row> {
         ),
         row("copy-target-version", RawRequest::new(Method::PUT, "/bkt/dst?versionId=v1").header("x-amz-copy-source", "src/k"), &["kd-decode-0041"]),
         row("create-mpu-version", RawRequest::new(Method::POST, "/bkt/k?uploads&versionId=v1"), &["kd-decode-0042"]),
-        row("list-v1-attributes", RawRequest::get("/bkt").header("x-amz-optional-object-attributes", "RestoreStatus"), &["kd-decode-0043", "kd-decode-0005"]),
+        row("list-v1-attributes", RawRequest::get("/bkt").header("x-amz-optional-object-attributes", "RestoreStatus"), &["kd-decode-0005"]),
         row(
             "list-v2-attributes",
             RawRequest::get("/bkt?list-type=2").header("x-amz-optional-object-attributes", "RestoreStatus"),
-            &["kd-decode-0044", "kd-decode-0006", "kd-decode-0007"],
+            &["kd-decode-0006", "kd-decode-0007"],
         ),
         row(
             "list-versions-attributes",
             RawRequest::get("/bkt?versions").header("x-amz-optional-object-attributes", "RestoreStatus"),
-            &["kd-decode-0045", "kd-decode-0008"],
+            &["kd-decode-0008"],
         ),
         row(
             "delete-objects-conditions",
