@@ -75,6 +75,8 @@ pub(super) struct ObjectTagTarget {
 }
 
 pub(super) struct PublishedObject {
+    /// The version directory the object was published into.
+    pub(super) directory: PathBuf,
     pub(super) size: i64,
     pub(super) version_id: Option<String>,
     pub(super) last_modified: Timestamp,
@@ -149,6 +151,7 @@ impl FsBackend {
             }
         }
         Ok(PublishedObject {
+            directory: record.path.clone(),
             size: record.size,
             // Reported only while versioning is enabled, as RustFS reports it: a suspended bucket's
             // write is the null version and answers no id (rustfs/gateway#1003).
