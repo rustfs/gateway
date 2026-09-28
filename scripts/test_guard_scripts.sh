@@ -24142,6 +24142,26 @@ expect_fail check_corpus_no_secrets.sh \
     mut_corpus_secret_in_a_decoded_payload \
     'an AWS secret access key'
 
+mut_corpus_live_trailer_signature() {
+    python3 - <<'PYEOF'
+import base64
+import json
+from pathlib import Path
+
+path = Path("corpus/object/PutObject.jsonl")
+lines = path.read_text().splitlines()
+entry = json.loads(lines[0])
+planted = "0;chunk-signature=__REDACTED__\r\nx-amz-trailer-signature:" + "ab" * 32 + "\r\n\r\n"
+entry["chunks"] = [{"bytes_b64": base64.b64encode(planted.encode()).decode()}]
+lines[0] = json.dumps(entry, separators=(",", ":"))
+path.write_text("\n".join(lines) + "\n")
+PYEOF
+}
+expect_fail check_corpus_no_secrets.sh \
+    'a live aws-chunked trailer signature inside a base64 payload' \
+    mut_corpus_live_trailer_signature \
+    'a trailer signature'
+
 mut_corpus_private_key_in_prose() {
     python3 - <<'PYEOF'
 from pathlib import Path

@@ -10,6 +10,7 @@ module docs before changing anything there.
 | `src/lib.rs` | Module wiring and the public surface. | Start here. |
 | `src/schema.rs` | The versioned entry shape, its JSONL codec, and the refusal of an unknown schema version. | A field is accepted or rejected wrongly, or the schema version changes. |
 | `src/redact.rs` | What counts as credential material, and the refusal when it is present. | Adding a detector, a sensitive field, or a sanitizable carrier. |
+| `src/framing.rs` | The two signature carriers aws-chunked framing puts in a body (`chunk-signature`, `x-amz-trailer-signature`): detection, rewrite, and proof of a redaction claim. | A framed body is refused, rewritten, or admitted wrongly. |
 | `src/dedup.rs` | The value-free fingerprint, per-operation bucketing, and the retention rule. | Deduplication collapses too much or too little, or the cap evicts the wrong entry. |
 | `src/store.rs` | On-disk layout, generated `MANIFEST.toml`, the source and writer provenance allowlists, size ceilings, whole-corpus verification. | A corpus file, the manifest, a recording source, or a persisted-metadata writer is judged wrongly. |
 | `src/case.rs` | Conformance case **drafts** and the lossless round-trip assertion. | Chunk timing or termination stops surviving the conversion. |
