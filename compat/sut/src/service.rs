@@ -783,4 +783,8 @@ mod tests {
     /// The MinIO-client checksum waiver the RustFS profile installs (rustfs/gateway#916).
     #[path = "minio_checksum_tests.rs"]
     mod minio_checksum_tests;
+
+    /// Bucket-policy conditions on the request's encryption header (rustfs/gateway#979).
+    #[path = "sse_condition_tests.rs"]
+    mod sse_condition_tests;
 }

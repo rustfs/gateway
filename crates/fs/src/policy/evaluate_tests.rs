@@ -21,7 +21,7 @@
 
 #![allow(clippy::expect_used)]
 
-use super::{BucketPolicy, PolicyRequest, PolicyShapeError, glob};
+use super::{BucketPolicy, PolicyRequest, PolicyShapeError, RequestFacts, glob};
 
 const PUBLIC_READ: &str = r#"{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":"*","Action":["s3:GetObject"],"Resource":"arn:aws:s3:::pub/*"}]}"#;
 
@@ -118,7 +118,7 @@ fn n_a_conditioned_statement_grants_and_denies_nothing() {
         {"Effect":"Allow","Principal":"*","Action":"s3:GetObject","Resource":"arn:aws:s3:::pub/*",
          "Condition":{"IpAddress":{"aws:SourceIp":"10.0.0.0/8"}}},
         {"Effect":"Deny","Principal":"*","Action":"s3:GetObject","Resource":"arn:aws:s3:::pub/*",
-         "Condition":{"StringNotEquals":{"s3:x-amz-server-side-encryption":"AES256"}}}]}"#;
+         "Condition":{"StringNotEquals":{"s3:x-amz-grant-read":"id=owner"}}}]}"#;
     let policy = BucketPolicy::parse(conditioned).expect("a valid policy");
     assert!(!policy.allows(read(None, false, "k")), "a conditioned Allow grants nothing");
     assert!(policy.allows(read(Some("owner"), true, "k")), "a conditioned Deny denies nothing");
@@ -219,5 +219,66 @@ fn n_the_wildcard_grammar_holds_its_edges() {
         ("a*b*c", "axxbyy", false),
     ] {
         assert_eq!(glob(pattern, text), expected, "{pattern} vs {text}");
+    }
+}
+
+const PUT_DENY: &str = r#"{"Version":"2012-10-17","Statement":[{"Effect":"Deny","Principal":"*","Action":"s3:PutObject","Resource":"arn:aws:s3:::pub/*","Condition":CONDITION}]}"#;
+
+fn put_verdict(condition: &str, sse: Option<&str>) -> bool {
+    let policy = BucketPolicy::parse(&PUT_DENY.replace("CONDITION", condition)).expect("a valid policy");
+    policy.allows_with_facts(
+        PolicyRequest {
+            action: "s3:PutObject",
+            ..read(Some("owner"), true, "k")
+        },
+        RequestFacts {
+            acl: None,
+            server_side_encryption: sse,
+        },
+    )
+}
+
+/// Negative — `Null` on the encryption key: `true` denies only an absent header, `false` only a
+/// present one; `"true"` and `true` are the same value (rustfs/gateway#979).
+#[test]
+fn n_null_matches_absence_or_presence() {
+    for spelled in [
+        r#"{"Null":{"s3:x-amz-server-side-encryption":"true"}}"#,
+        r#"{"Null":{"s3:x-amz-server-side-encryption":true}}"#,
+    ] {
+        assert!(!put_verdict(spelled, None), "{spelled}");
+        assert!(put_verdict(spelled, Some("AES256")), "{spelled}");
+    }
+    let present = r#"{"Null":{"s3:x-amz-server-side-encryption":"false"}}"#;
+    assert!(put_verdict(present, None));
+    assert!(!put_verdict(present, Some("aws:kms")));
+}
+
+/// Negative — `StringNotEquals` matches another value and an absent header; `StringEquals` only
+/// the named value.
+#[test]
+fn n_string_operators_on_the_encryption_key() {
+    let not_aes = r#"{"StringNotEquals":{"s3:x-amz-server-side-encryption":"AES256"}}"#;
+    assert!(!put_verdict(not_aes, Some("aws:kms")));
+    assert!(!put_verdict(not_aes, None));
+    assert!(put_verdict(not_aes, Some("AES256")));
+    let kms = r#"{"StringEquals":{"s3:x-amz-server-side-encryption":["aws:kms","aws:kms:dsse"]}}"#;
+    assert!(!put_verdict(kms, Some("aws:kms")));
+    assert!(put_verdict(kms, Some("AES256")));
+    assert!(put_verdict(kms, None));
+}
+
+/// Negative — an unreadable value keeps the whole block unsupported, so the Deny denies nothing.
+#[test]
+fn n_unreadable_condition_values_stay_unsupported() {
+    for block in [
+        r#"{"Null":{"s3:x-amz-server-side-encryption":"maybe"}}"#,
+        r#"{"StringEquals":{"s3:x-amz-server-side-encryption":[]}}"#,
+        r#"{"StringEquals":{}}"#,
+        r#"{"StringLike":{"s3:x-amz-server-side-encryption":"AES*"}}"#,
+        r#"{"StringEquals":{"s3:x-amz-server-side-encryption":"aws:kms"},"Null":{"s3:x-amz-grant-read":"false"}}"#,
+    ] {
+        assert!(put_verdict(block, Some("aws:kms")), "{block}");
+        assert!(put_verdict(block, None), "{block}");
     }
 }

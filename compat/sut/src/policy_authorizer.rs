@@ -45,7 +45,7 @@ use rustfs_gateway::{
     Authorizer, AuthzRequest, BoxFuture, Decision, InputAuthzRequest, InputDecisions, RequestContext, ResourceShape,
 };
 use rustfs_gateway_fs::FsBackend;
-use rustfs_gateway_fs::policy::evaluate::{BucketPolicy, PolicyRequest};
+use rustfs_gateway_fs::policy::evaluate::{BucketPolicy, PolicyRequest, RequestFacts};
 
 use crate::identity::Accounts;
 use crate::ownership::{BucketOwners, decide};
@@ -113,11 +113,17 @@ impl PolicyAuthorizer {
         let Some(headers) = context.headers() else {
             return Decision::Indeterminate;
         };
-        let name = http::HeaderName::from_static("x-amz-acl");
-        let acl = match acl_value(headers.count(&name), headers.get_bytes(&name)) {
-            Ok(acl) => acl,
-            Err(decision) => return decision,
-        };
+        let mut facts = RequestFacts::default();
+        for (name, slot) in [
+            ("x-amz-acl", &mut facts.acl),
+            ("x-amz-server-side-encryption", &mut facts.server_side_encryption),
+        ] {
+            let name = http::HeaderName::from_static(name);
+            *slot = match acl_value(headers.count(&name), headers.get_bytes(&name)) {
+                Ok(value) => value,
+                Err(decision) => return decision,
+            };
+        }
         let account = request
             .identity
             .and_then(|identity| self.accounts.owner_of(identity.access_key_id()));
@@ -130,7 +136,7 @@ impl PolicyAuthorizer {
             ResourceShape::Bucket => None,
             _ => request.key.map(|key| key.as_str()),
         };
-        let allowed = policy.allows_with_acl(
+        let allowed = policy.allows_with_facts(
             PolicyRequest {
                 account,
                 is_owner,
@@ -138,7 +144,7 @@ impl PolicyAuthorizer {
                 bucket: bucket.as_str(),
                 key,
             },
-            acl,
+            facts,
         );
         if allowed { Decision::Allow } else { Decision::Deny }
     }
