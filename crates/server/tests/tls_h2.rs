@@ -502,3 +502,6 @@ async fn a_half_tls_handshake_releases_its_admission_permit_at_the_header_deadli
     let _ = shutdown.trigger(Duration::from_secs(1)).await;
     assert!(task.await.expect("server task joins").is_ok());
 }
+
+#[path = "tls_h2/alpn.rs"]
+mod alpn;

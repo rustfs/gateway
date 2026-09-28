@@ -28,7 +28,5 @@ mod lingering_close;
 mod server_load;
 #[path = "server_runtime.rs"]
 mod server_runtime;
-#[path = "tls_alpn.rs"]
-mod tls_alpn;
 #[path = "tls_h2.rs"]
 mod tls_h2;

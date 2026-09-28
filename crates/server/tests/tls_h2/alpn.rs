@@ -16,12 +16,10 @@
 //! Responsible for: proving the listener advertises `h2` and `http/1.1` by default, that the
 //! advertised list is configurable, and that a negotiated protocol is the only one the connection
 //! then speaks.
-//! NOT responsible for: certificate reload or admission (`tls_h2.rs`).
+//! NOT responsible for: certificate reload or admission (the parent `tls_h2.rs`).
 //! Upstream: rustfs/gateway#972. Downstream: the public server API.
 //! Evidence: https://www.rfc-editor.org/rfc/rfc9113.html#section-3.2 — over TLS, HTTP/2 is used
 //! only after both sides agree on the `h2` token through ALPN.
-
-#![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 
 use std::convert::Infallible;
 use std::future::{Ready, ready};
