@@ -142,18 +142,34 @@ fn measure(work: impl FnOnce() -> (u64, u64)) -> Observation {
     }
 }
 
-/// The operating system's resident-set size for this process, where the platform exposes it.
+/// The anonymous part of this process's resident set, where the platform exposes it.
 ///
+/// `RssAnon` rather than the whole resident set: the first run of any code faults its text pages
+/// in, and those file-backed pages moved the total by about a mebibyte in every window on CI —
+/// including the control's, which allocates one 64-byte box. Heap and table pages are anonymous.
 /// Read into a stack buffer: this runs inside the allocation window, and a `String` here would be
 /// the one allocation the window counted.
 fn resident_bytes() -> Option<i128> {
     use std::io::Read;
-    let mut buffer = [0_u8; 256];
-    let mut file = std::fs::File::open("/proc/self/statm").ok()?;
-    let read = file.read(&mut buffer).ok()?;
-    let text = std::str::from_utf8(buffer.get(..read)?).ok()?;
-    let pages = text.split_whitespace().nth(1)?.parse::<i128>().ok()?;
-    Some(pages * 4096)
+    let mut buffer = [0_u8; 4096];
+    let mut file = std::fs::File::open("/proc/self/status").ok()?;
+    let mut filled = 0;
+    loop {
+        let read = file.read(buffer.get_mut(filled..)?).ok()?;
+        if read == 0 {
+            break;
+        }
+        filled += read;
+    }
+    let text = std::str::from_utf8(buffer.get(..filled)?).ok()?;
+    let kibibytes = text
+        .lines()
+        .find_map(|line| line.strip_prefix("RssAnon:"))?
+        .split_whitespace()
+        .next()?
+        .parse::<i128>()
+        .ok()?;
+    Some(kibibytes * 1024)
 }
 
 /// Positive control: the instrument must see a real allocation, or every zero below is decoration.
@@ -378,7 +394,7 @@ fn c_gov_0030_contended_decisions_allocate_nothing() {
 
 /// c-gov-0013: a million distinct addresses neither allocate nor grow live heap past the bound.
 ///
-/// Resident memory is asserted where `/proc/self/statm` exists. Nothing in the window allocates, so
+/// Anonymous resident memory is asserted where `/proc/self/status` reports it. Nothing in the window allocates, so
 /// the only pages it may make resident are the table's own, allocated at construction: the budget is
 /// that allocation plus 64 KiB of stack and page-rounding slack, whatever the address count.
 #[test]
@@ -416,7 +432,9 @@ fn c_gov_0013_a_million_addresses_do_not_grow_memory() {
             "a million new addresses grew the resident set by {delta} bytes, past the {budget}-byte table the governor allocated at construction plus 64 KiB: {million:?}"
         ),
         None => {
-            eprintln!("SKIP c-gov-0013 resident set: this platform has no /proc/self/statm; the heap assertion above still ran")
+            eprintln!(
+                "SKIP c-gov-0013 resident set: this platform reports no RssAnon in /proc/self/status; the heap assertion above still ran"
+            )
         }
     }
 }
