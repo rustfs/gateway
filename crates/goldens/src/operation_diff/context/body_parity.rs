@@ -43,6 +43,8 @@
 //! them (`rustfs/src/app/trailer_adapter.rs`, rustfs/backlog#1735): no handle, a handle not yet
 //! filled (`Pending`), or the fields.
 
+#[cfg(test)]
+mod clock;
 mod divergences;
 mod matrix;
 mod properties;
@@ -345,7 +347,7 @@ impl Handler<dto::PutObject> for SeamBody {
 }
 
 /// The assembled gateway over `backend`, handing the caller's secret to it as the adapter needs.
-fn gateway_service<H>(backend: H) -> Result<S3Service, String>
+fn gateway_service<H>(backend: H, now: RequestNow) -> Result<S3Service, String>
 where
     H: Handler<dto::PutObject> + Send + Sync + 'static,
 {
@@ -353,7 +355,7 @@ where
     let regions = RegionSet::new(REGIONS).map_err(|error| format!("regions: {error:?}"))?;
     let authenticator =
         SigV4Authenticator::new(Arc::new(StaticCredentials::new().with(credentials)), regions).hand_caller_secret_to_handlers();
-    ServiceBuilder::new()
+    super::verifying_at(ServiceBuilder::new(), now)
         .authenticator(authenticator)
         .authorizer(AllowEveryStage)
         .security_floor(SecurityFloor::new().delegate_anonymous_to_authorizer_after_listing_in_the_posture_report())
@@ -384,9 +386,9 @@ fn gateway_answer(
     Ok((parts.status.as_u16(), element(&body, "Code"), closes, probe.reads()))
 }
 
-fn gateway_side(headers: &HeaderMap, pieces: Vec<Bytes>) -> Result<Side, String> {
+fn gateway_side(headers: &HeaderMap, pieces: Vec<Bytes>, now: RequestNow) -> Result<Side, String> {
     let seen = Arc::new(Mutex::new(None));
-    let service = gateway_service(GatewayBody { seen: Arc::clone(&seen) })?;
+    let service = gateway_service(GatewayBody { seen: Arc::clone(&seen) }, now)?;
     let (status, code, closes, wire) = gateway_answer(&service, headers, pieces)?;
     let handler = seen.lock().map_err(|_| "the recording slot is poisoned".to_owned())?.take();
     Ok(Side {
@@ -404,9 +406,15 @@ fn gateway_side(headers: &HeaderMap, pieces: Vec<Bytes>) -> Result<Side, String>
 ///
 /// A harness failure, or a refusal before the handler.
 pub(crate) fn through_seam(upload: &Upload) -> Result<(u16, SeamView), String> {
-    let wire = upload.wire(RequestNow::capture())?;
+    let now = RequestNow::capture();
+    through_seam_at(upload, now, now)
+}
+
+/// [`through_seam`], signed at `signed` and verified by a gateway whose clock reads `verified`.
+fn through_seam_at(upload: &Upload, signed: RequestNow, verified: RequestNow) -> Result<(u16, SeamView), String> {
+    let wire = upload.wire(signed)?;
     let seen = Arc::new(Mutex::new(None));
-    let service = gateway_service(SeamBody { seen: Arc::clone(&seen) })?;
+    let service = gateway_service(SeamBody { seen: Arc::clone(&seen) }, verified)?;
     let (status, _, _, _) = gateway_answer(&service, &wire.headers, upload.split(&wire.body))?;
     let view = seen
         .lock()
@@ -535,10 +543,11 @@ pub(crate) struct Pair {
 ///
 /// A harness failure; every refusal is a [`Side`].
 pub(crate) fn both(upload: &Upload) -> Result<Pair, String> {
-    let wire = upload.wire(RequestNow::capture())?;
+    let now = RequestNow::capture();
+    let wire = upload.wire(now)?;
     let pieces = upload.split(&wire.body);
     Ok(Pair {
-        gateway: gateway_side(&wire.headers, pieces.clone())?,
+        gateway: gateway_side(&wire.headers, pieces.clone(), now)?,
         oracle: s3s_side(&wire.headers, pieces)?,
         wire_length: wire.body.len() as u64,
     })

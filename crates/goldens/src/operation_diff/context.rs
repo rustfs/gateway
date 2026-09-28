@@ -41,6 +41,8 @@ mod adapter_request;
 mod admin_request;
 mod answers;
 mod body_parity;
+#[cfg(test)]
+mod clock_tests;
 mod error_parity;
 mod get_bucket_location;
 mod put_object;
@@ -53,9 +55,9 @@ use bytes::Bytes;
 use http::{Extensions, HeaderMap, HeaderName, HeaderValue, Method, Uri};
 use rustfs_gateway::dto;
 use rustfs_gateway::{
-    Authorizer, AuthzRequest, BoxFuture, Credentials, Decision, Handler, HandlerContext, HandlerResult, HostQuery, HostResolver,
-    InputAuthzRequest, InputDecisions, PathStyleOnly, Req, RequestContext, RequestContextView, ResolvedHost, Resp, S3Service,
-    ServiceBuilder, SigV4Authenticator, StaticCredentials, VirtualHostStyle,
+    Authorizer, AuthzRequest, BoxFuture, ClockSkewAck, Credentials, Decision, FixedClock, Handler, HandlerContext, HandlerResult,
+    HostQuery, HostResolver, InputAuthzRequest, InputDecisions, PathStyleOnly, Req, RequestContext, RequestContextView,
+    ResolvedHost, Resp, S3Service, ServiceBuilder, SigV4Authenticator, StaticCredentials, VirtualHostStyle,
 };
 use rustfs_gateway_http::{Limits, RawHost, WireRequest};
 use rustfs_gateway_sig::{
@@ -416,11 +418,29 @@ impl rustfs_gateway::BucketOwnerSource for FixtureOwner {
     }
 }
 
+/// `builder` verifying with the instant the fixture signed at (#896).
+///
+/// A request and its verifier must read one captured time: with the system clock a host clock
+/// step or suspension between signing and verification refuses a valid fixture as
+/// `RequestTimeTooSkewed` before the behaviour under comparison runs. Tests that need a skewed
+/// verifier pass a different reading. The acknowledgement is the builder's own opt-out of its
+/// assembly check against host time, which a historical fixture time must fail.
+pub(crate) fn verifying_at(builder: ServiceBuilder, now: RequestNow) -> ServiceBuilder {
+    builder.clock_with_skew_ack(
+        FixedClock::at(now),
+        ClockSkewAck::i_understand_a_skewed_clock_can_disable_signature_expiry(),
+    )
+}
+
 /// The assembled gateway: the built-in SigV4 authenticator over the shared credential, the
 /// virtual-host resolver when the request is virtual-hosted, [`FixtureOwner`], and anonymous
 /// admission delegated to the authorizer (ADR-0021), because RustFS admits every anonymous request
 /// to its access hook.
-fn gateway_service(request: &ContextRequest, recorded: &Arc<Mutex<Option<Recorded>>>) -> Result<S3Service, String> {
+fn gateway_service(
+    request: &ContextRequest,
+    recorded: &Arc<Mutex<Option<Recorded>>>,
+    now: RequestNow,
+) -> Result<S3Service, String> {
     let credentials = Credentials::new(ACCESS_KEY, SECRET_KEY.as_bytes()).map_err(|error| format!("credential: {error:?}"))?;
     let regions = RegionSet::new(REGIONS).map_err(|error| format!("regions: {error:?}"))?;
     let mut authenticator = SigV4Authenticator::new(Arc::new(StaticCredentials::new().with(credentials)), regions);
@@ -433,7 +453,7 @@ fn gateway_service(request: &ContextRequest, recorded: &Arc<Mutex<Option<Recorde
     let backend = Arc::new(AdapterBackend {
         recorded: Arc::clone(recorded),
     });
-    let mut builder = ServiceBuilder::new()
+    let mut builder = verifying_at(ServiceBuilder::new(), now)
         .authenticator(authenticator)
         .authorizer(AllowEveryStage)
         .security_floor(SecurityFloor::new().delegate_anonymous_to_authorizer_after_listing_in_the_posture_report())
@@ -470,7 +490,7 @@ fn resolve(request: &ContextRequest, wire: &WireRequest<()>) -> Result<ResolvedH
 /// # Errors
 ///
 /// The stage that refused, and why. A refusal before the handler comes back with its status.
-pub(crate) fn gateway_side(request: &ContextRequest, headers: &HeaderMap) -> Result<GatewaySide, String> {
+pub(crate) fn gateway_side(request: &ContextRequest, headers: &HeaderMap, now: RequestNow) -> Result<GatewaySide, String> {
     let head = request
         .http_head(headers)
         .body(())
@@ -479,7 +499,7 @@ pub(crate) fn gateway_side(request: &ContextRequest, headers: &HeaderMap) -> Res
     let resolved = resolve(request, &wire)?;
 
     let recorded = Arc::new(Mutex::new(None));
-    let service = gateway_service(request, &recorded)?;
+    let service = gateway_service(request, &recorded, now)?;
     let http_request = request
         .http_head(headers)
         .body(request.body.clone())
@@ -619,7 +639,7 @@ pub(crate) struct Exchange {
 pub(crate) fn exchange(request: &ContextRequest) -> Result<Exchange, String> {
     let now = RequestNow::capture();
     let headers = request.wire_headers(now)?;
-    let gateway = gateway_side(request, &headers)?;
+    let gateway = gateway_side(request, &headers, now)?;
     let (oracle_status, oracle) = s3s_side(request, &headers)?;
     Ok(Exchange {
         gateway,
