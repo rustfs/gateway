@@ -1706,13 +1706,32 @@ expect_fail check_xtask_codegen_surface.sh \
     'the cargo xtask alias bypassing the budget-aware launcher' \
     mut_xtask_codegen_alias_bypasses_launcher
 
-mut_xtask_crate_runner_returns_to_light_graph() {
-    perl -0pi -e 's/const FULL_RUNNER: &\[&str\] = &\["--features", "full"\];/const FULL_RUNNER: \&[\&str] = \&["--no-default-features"];/' \
+# Crate verification only shells out to cargo; on the full graph an edit to any facade-graph crate
+# rebuilt xtask inside the 30-second budget (rustfs/backlog#2000).
+mut_xtask_crate_runner_returns_to_full_graph() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("xtask-launcher/src/main.rs")
+text = path.read_text()
+old = '        return OPERATION_RUNNER;\n    }\n    LIGHT_RUNNER\n}'
+new = '        return OPERATION_RUNNER;\n    }\n    &["--features", "full"]\n}'
+if text.count(old) != 1:
+    raise SystemExit("the light crate selection is not unique")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_xtask_codegen_surface.sh \
+    'exact crate verification rebuilding the full xtask graph inside its budget' \
+    mut_xtask_crate_runner_returns_to_full_graph
+
+mut_xtask_light_runner_enables_full_feature() {
+    perl -0pi -e 's/const LIGHT_RUNNER: &\[&str\] = &\["--no-default-features"\];/const LIGHT_RUNNER: \&[\&str] = \&["--features", "full"];/' \
         xtask-launcher/src/main.rs
 }
 expect_fail check_xtask_codegen_surface.sh \
-    'non-facade crate verification rebuilding the light runner after the workspace gate' \
-    mut_xtask_crate_runner_returns_to_light_graph
+    'the light runner enabling the full feature graph' \
+    mut_xtask_light_runner_enables_full_feature
 
 mut_xtask_operation_runner_uses_full_graph() {
     python3 - <<'PYEOF'
@@ -1721,7 +1740,7 @@ from pathlib import Path
 path = Path("xtask-launcher/src/main.rs")
 text = path.read_text()
 old = '        return OPERATION_RUNNER;'
-new = '        return FULL_RUNNER;'
+new = '        return &["--features", "full"];'
 if text.count(old) != 1:
     raise SystemExit("the operation runner selection is not unique")
 path.write_text(text.replace(old, new, 1))
@@ -1730,40 +1749,6 @@ PYEOF
 expect_fail check_xtask_codegen_surface.sh \
     'operation verification returning to the production server graph' \
     mut_xtask_operation_runner_uses_full_graph
-
-mut_xtask_facade_runner_returns_to_full_graph() {
-    python3 - <<'PYEOF'
-from pathlib import Path
-
-path = Path("xtask-launcher/src/main.rs")
-text = path.read_text()
-old = 'Some("rustfs-gateway" | "s3gate" | "rustfs-gateway-conformance" | "s3gate-conformance" | "conformance")'
-new = 'Some("rustfs-gateway-conformance" | "s3gate-conformance" | "conformance")'
-if text.count(old) != 1:
-    raise SystemExit("the light facade and conformance selection is not unique")
-path.write_text(text.replace(old, new, 1))
-PYEOF
-}
-expect_fail check_xtask_codegen_surface.sh \
-    'facade verification re-entering the full dependency graph' \
-    mut_xtask_facade_runner_returns_to_full_graph
-
-mut_xtask_conformance_runner_returns_to_full_graph() {
-    python3 - <<'PYEOF'
-from pathlib import Path
-
-path = Path("xtask-launcher/src/main.rs")
-text = path.read_text()
-old = 'Some("rustfs-gateway" | "s3gate" | "rustfs-gateway-conformance" | "s3gate-conformance" | "conformance")'
-new = 'Some("rustfs-gateway" | "s3gate")'
-if text.count(old) != 1:
-    raise SystemExit("the light facade and conformance selection is not unique")
-path.write_text(text.replace(old, new, 1))
-PYEOF
-}
-expect_fail check_xtask_codegen_surface.sh \
-    'conformance verification re-entering the full dependency graph' \
-    mut_xtask_conformance_runner_returns_to_full_graph
 
 mut_xtask_selection_module_becomes_full_only() {
     python3 - <<'PYEOF'
