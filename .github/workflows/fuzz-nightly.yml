@@ -1,0 +1,141 @@
+name: Fuzz nightly
+
+# ---------------------------------------------------------------------------
+# WHAT THIS JOB DOES
+#
+#   Runs every registered fuzz target under libFuzzer for a fixed wall-clock
+#   budget, seeded from its committed seeds and from a corpus cached between
+#   runs (rustfs/backlog#1766 a-pf-0008, the long-run lane the PR-side seed
+#   replays deliberately leave out).
+#
+#   A crash fails the job. The crashing input and its `cargo fuzz tmin`
+#   minimisation are uploaded as an artifact. Per the 2026-08-12 Decision on
+#   rustfs/backlog#1766 (a-pf-0018), a crash becomes a committed regression
+#   seed under fuzz/seeds/<target>/ in the fix PR, and a conformance case only
+#   when a human has tied the behaviour to protocol evidence; nothing here
+#   writes to the repository.
+#
+# WHY NOT THE PR GATE
+#
+#   Seventeen targets for five minutes each is well past the ten-minute PR
+#   budget, and libFuzzer's coverage search is not reproducible run to run.
+#   The PR gate replays the committed seeds instead.
+# ---------------------------------------------------------------------------
+
+on:
+  schedule:
+    # Daily, 02:00 UTC, clear of the 04:00 perf-evidence run.
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+    inputs:
+      seconds:
+        description: "Fuzzing budget per target, in seconds."
+        default: "300"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fuzz-nightly
+  cancel-in-progress: false
+
+env:
+  # The same pins ci.yml names (CARGO_FUZZ_TOOL and the TSAN nightly);
+  # check_fuzz_nightly.sh keeps them equal and the matrix equal to fuzz/Cargo.toml.
+  CARGO_FUZZ_VERSION: 0.13.2
+  FUZZ_TOOLCHAIN: nightly-2026-06-18
+
+jobs:
+  fuzz:
+    name: Fuzz ${{ matrix.target }}
+    runs-on: sm-standard-4
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        target:
+          - credential_header_parse
+          - chunked_eof
+          - chunked_decode
+          - copy_source_parse
+          - etag_parse
+          - range_parse
+          - cors_match
+          - route_disjoint
+          - route_compiled_equiv
+          - opaque_token
+          - wire_accept
+          - host_resolve
+          - xml_parse
+          - header_accept
+          - policy_json
+          - restore_header
+          - event_stream_frame
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: ${{ env.FUZZ_TOOLCHAIN }}
+      - name: Install host tools
+        run: bash scripts/ci_install_host_tools.sh
+      - name: Install cargo-fuzz
+        run: cargo +"$FUZZ_TOOLCHAIN" install cargo-fuzz --version "$CARGO_FUZZ_VERSION" --locked
+      - name: Restore the corpus
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: fuzz/corpus/${{ matrix.target }}
+          key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}
+          restore-keys: fuzz-corpus-${{ matrix.target }}-
+      - name: Fuzz
+        env:
+          TARGET: ${{ matrix.target }}
+          SECONDS_PER_TARGET: ${{ inputs.seconds || '300' }}
+        run: |
+          set -euo pipefail
+          mkdir -p "fuzz/corpus/$TARGET" "fuzz/artifacts/$TARGET"
+          cd fuzz
+          # libFuzzer reads every directory it is given and writes new inputs to the first.
+          inputs=("corpus/$TARGET")
+          if [ -d "seeds/$TARGET" ]; then
+            inputs+=("seeds/$TARGET")
+          fi
+          cargo +"$FUZZ_TOOLCHAIN" fuzz run "$TARGET" "${inputs[@]}" -- \
+            -max_total_time="$SECONDS_PER_TARGET" -rss_limit_mb=2048 -timeout=10 -print_final_stats=1 \
+            2>&1 | tee "$RUNNER_TEMP/fuzz.log"
+      - name: Minimise a crash
+        if: failure()
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -uo pipefail
+          cd fuzz
+          for crash in artifacts/"$TARGET"/*; do
+            [ -f "$crash" ] || continue
+            cargo +"$FUZZ_TOOLCHAIN" fuzz tmin "$TARGET" "$crash" -- -runs=10000 2>&1 | tail -20 || true
+          done
+          {
+            echo "## $TARGET crashed"
+            echo '```'
+            grep -E 'panicked|ERROR: libFuzzer|SUMMARY' "$RUNNER_TEMP/fuzz.log" | head -20 || true
+            echo '```'
+            echo "Commit the minimised input as fuzz/seeds/$TARGET/<name> in the fix PR."
+          } >>"$GITHUB_STEP_SUMMARY"
+      - name: Record the run
+        if: always()
+        run: |
+          {
+            echo "## ${{ matrix.target }}"
+            echo '```'
+            grep -E '^stat::|Done [0-9]+ runs' "$RUNNER_TEMP/fuzz.log" 2>/dev/null || echo "no libFuzzer statistics were printed"
+            echo '```'
+          } >>"$GITHUB_STEP_SUMMARY"
+      - name: Upload crashes
+        if: failure()
+        uses: actions/upload-artifact@6f51ac03b9356f520e9adb1b1b7802705f340c2b # v4.5.0
+        with:
+          name: fuzz-crash-${{ matrix.target }}-${{ github.run_id }}
+          path: |
+            fuzz/artifacts/${{ matrix.target }}
+            ${{ runner.temp }}/fuzz.log
+          if-no-files-found: warn

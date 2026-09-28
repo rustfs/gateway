@@ -149,6 +149,14 @@ job is red on `main` before assuming your branch caused it — rustfs/gateway#18
 several PRs a full cycle to that mistake. Fix an overrun by making the work faster or splitting it
 across runners, never by deleting, skipping or sampling checks to fit the clock.
 
+**No wall-clock measurement may block CI on the shared org runners.** Every label this repository
+runs on is a shared pod whose timing noise is tens of percent. Benches and evidence suites print
+elapsed time and throughput as records; what they assert is counts — heap blocks, syscall bytes,
+resident growth, the calculator a checksum selected — or a ratio against a control measured in
+lock-step on the same host. Release-mode evidence and benches run in `perf-evidence.yml` and
+`fuzz-nightly.yml`, never in the pull-request gate. `scripts/check_no_time_gate_on_shared_runner.sh`
+enforces both halves.
+
 ## Protected Files
 
 Changing any path below requires the **Breaking Change process**: bump the affected version, write

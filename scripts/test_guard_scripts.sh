@@ -15798,6 +15798,156 @@ mut_clock_monotonic_source_deleted() {
 expect_fail check_clock_single_source.sh \
     "the monotonic source deleted, which must fail rather than skip" mut_clock_monotonic_source_deleted
 
+mut_fuzz_nightly_drops_a_target() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path(".github/workflows/fuzz-nightly.yml")
+text = path.read_text(encoding="utf-8")
+old = "          - xml_parse\n"
+if text.count(old) != 1:
+    raise SystemExit("fuzz-nightly matrix anchor drifted")
+path.write_text(text.replace(old, "", 1), encoding="utf-8")
+PYEOF
+}
+expect_fail check_fuzz_nightly.sh \
+    'a registered fuzz target missing from the nightly matrix' mut_fuzz_nightly_drops_a_target \
+    'registered targets never fuzzed nightly: xml_parse'
+
+mut_fuzz_nightly_runs_on_pull_requests() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path(".github/workflows/fuzz-nightly.yml")
+text = path.read_text(encoding="utf-8")
+old = "on:\n  schedule:\n"
+if text.count(old) != 1:
+    raise SystemExit("fuzz-nightly trigger anchor drifted")
+path.write_text(text.replace(old, "on:\n  pull_request:\n  schedule:\n", 1), encoding="utf-8")
+PYEOF
+}
+expect_fail check_fuzz_nightly.sh \
+    'the long-run fuzz lane triggered by pull requests' mut_fuzz_nightly_runs_on_pull_requests \
+    'must not run on pull_request'
+
+mut_fuzz_nightly_pin_drifts() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path(".github/workflows/fuzz-nightly.yml")
+text = path.read_text(encoding="utf-8")
+old = "  CARGO_FUZZ_VERSION: 0.13.2\n"
+if text.count(old) != 1:
+    raise SystemExit("fuzz-nightly pin anchor drifted")
+path.write_text(text.replace(old, "  CARGO_FUZZ_VERSION: 0.12.0\n", 1), encoding="utf-8")
+PYEOF
+}
+expect_fail check_fuzz_nightly.sh \
+    'a second, drifting cargo-fuzz pin' mut_fuzz_nightly_pin_drifts \
+    'CARGO_FUZZ_VERSION is'
+
+mut_fuzz_nightly_deleted() {
+    rm -f .github/workflows/fuzz-nightly.yml
+}
+expect_fail check_fuzz_nightly.sh \
+    "the guard's own subject deleted, which must fail rather than skip" mut_fuzz_nightly_deleted \
+    'required input is missing'
+
+mut_time_gate_rule_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("AGENTS.md")
+text = path.read_text(encoding="utf-8")
+old = "No wall-clock measurement may block CI"
+if text.count(old) != 1:
+    raise SystemExit("AGENTS.md time-gate rule anchor drifted")
+path.write_text(text.replace(old, "Wall-clock measurements are advisory", 1), encoding="utf-8")
+PYEOF
+}
+expect_fail check_no_time_gate_on_shared_runner.sh \
+    'AGENTS.md losing the shared-runner time-gate rule' mut_time_gate_rule_removed \
+    'AGENTS.md no longer states'
+
+mut_time_gate_baseline_blocks_on_time() {
+    python3 - <<'PYEOF'
+import json
+from pathlib import Path
+path = Path("benches/baseline.json")
+data = json.loads(path.read_text(encoding="utf-8"))
+for measurement in data["measurements"]:
+    if measurement["kind"] == "wall_clock":
+        measurement["blocking"] = True
+        break
+else:
+    raise SystemExit("benches/baseline.json has no wall-clock measurement")
+path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+PYEOF
+}
+expect_fail check_no_time_gate_on_shared_runner.sh \
+    'a wall-clock baseline measurement made blocking' mut_time_gate_baseline_blocks_on_time \
+    'blocking'
+
+mut_time_gate_bench_asserts_elapsed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/core/benches/route.rs")
+text = path.read_text(encoding="utf-8")
+old = "    let elapsed = started.elapsed();\n"
+if text.count(old) != 1:
+    raise SystemExit("route bench timing anchor drifted")
+path.write_text(text.replace(old, old + "    assert!(elapsed.as_secs_f64() < 1.0, \"too slow\");\n", 1), encoding="utf-8")
+PYEOF
+}
+expect_fail check_no_time_gate_on_shared_runner.sh \
+    'a bench asserting on elapsed time' mut_time_gate_bench_asserts_elapsed \
+    'an assertion names the timing quantity'
+
+mut_time_gate_pr_gate_runs_benches() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path(".github/workflows/ci.yml")
+text = path.read_text(encoding="utf-8")
+old = "          scripts/ci_budget.sh 60 \"signing suite run\" target/debug/xtask sigsuite run\n"
+if text.count(old) != 1:
+    raise SystemExit("ci.yml signing-suite anchor drifted")
+path.write_text(text.replace(old, old + "          cargo bench -p rustfs-gateway-core --bench route\n", 1), encoding="utf-8")
+PYEOF
+}
+expect_fail check_no_time_gate_on_shared_runner.sh \
+    'the pull-request gate running a bench' mut_time_gate_pr_gate_runs_benches \
+    'runs cargo bench'
+
+mut_time_gate_evidence_on_pull_requests() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path(".github/workflows/perf-evidence.yml")
+text = path.read_text(encoding="utf-8")
+old = "on:\n  schedule:\n"
+if text.count(old) != 1:
+    raise SystemExit("perf-evidence trigger anchor drifted")
+path.write_text(text.replace(old, "on:\n  pull_request:\n  schedule:\n", 1), encoding="utf-8")
+PYEOF
+}
+expect_fail check_no_time_gate_on_shared_runner.sh \
+    'release evidence triggered by pull requests' mut_time_gate_evidence_on_pull_requests \
+    'runs on pull_request'
+
+mut_fuzz_target_duplicated() {
+    cp fuzz/fuzz_targets/xml_parse.rs fuzz/fuzz_targets/xml_parse_again.rs
+}
+expect_fail check_no_duplicate_fuzz_targets.sh \
+    'a fuzz target copied under a new name' mut_fuzz_target_duplicated \
+    'is the same target as'
+
+mut_fuzz_signature_parser_twice() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("fuzz/fuzz_targets/opaque_token.rs")
+text = path.read_text(encoding="utf-8")
+path.write_text(text + "\nfn _second(header: &str) { let _ = rustfs_gateway_sig::SigV4Authorization::parse(header); }\n", encoding="utf-8")
+PYEOF
+}
+expect_fail check_no_duplicate_fuzz_targets.sh \
+    'a second target re-fuzzing the signature header parser' mut_fuzz_signature_parser_twice \
+    'must be fuzzed by credential_header_parse.rs alone'
+
 mut_clock_wall_read_through_an_alias() {
     python3 - <<'CLOCKPY'
 import pathlib
