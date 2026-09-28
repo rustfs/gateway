@@ -1,5 +1,5 @@
 {
-  "ir_version": "2",
+  "ir_version": "3",
   "operation": "GetBucketEncryption",
   "http": {
             "method": "GET",
@@ -76,7 +76,7 @@
                                                                               "values": ["NONE", "SSE-C"]
                                                                             },
                                                                   "flattened": true,
-                                                                  "wrapper_name": null
+                                                                  "member_name": null
                                                                 },
                                                         "hot": false,
                                                         "quirk_refs": []
@@ -143,7 +143,7 @@
                                                                                          "shape": "ServerSideEncryptionRule"
                                                                                        },
                                                                              "flattened": true,
-                                                                             "wrapper_name": null
+                                                                             "member_name": null
                                                                            },
                                                                    "hot": true,
                                                                    "quirk_refs": []

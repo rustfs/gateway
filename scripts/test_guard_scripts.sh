@@ -1706,13 +1706,32 @@ expect_fail check_xtask_codegen_surface.sh \
     'the cargo xtask alias bypassing the budget-aware launcher' \
     mut_xtask_codegen_alias_bypasses_launcher
 
-mut_xtask_crate_runner_returns_to_light_graph() {
-    perl -0pi -e 's/const FULL_RUNNER: &\[&str\] = &\["--features", "full"\];/const FULL_RUNNER: \&[\&str] = \&["--no-default-features"];/' \
+# Crate verification only shells out to cargo; on the full graph an edit to any facade-graph crate
+# rebuilt xtask inside the 30-second budget (rustfs/backlog#2000).
+mut_xtask_crate_runner_returns_to_full_graph() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("xtask-launcher/src/main.rs")
+text = path.read_text()
+old = '        return OPERATION_RUNNER;\n    }\n    LIGHT_RUNNER\n}'
+new = '        return OPERATION_RUNNER;\n    }\n    &["--features", "full"]\n}'
+if text.count(old) != 1:
+    raise SystemExit("the light crate selection is not unique")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_xtask_codegen_surface.sh \
+    'exact crate verification rebuilding the full xtask graph inside its budget' \
+    mut_xtask_crate_runner_returns_to_full_graph
+
+mut_xtask_light_runner_enables_full_feature() {
+    perl -0pi -e 's/const LIGHT_RUNNER: &\[&str\] = &\["--no-default-features"\];/const LIGHT_RUNNER: \&[\&str] = \&["--features", "full"];/' \
         xtask-launcher/src/main.rs
 }
 expect_fail check_xtask_codegen_surface.sh \
-    'non-facade crate verification rebuilding the light runner after the workspace gate' \
-    mut_xtask_crate_runner_returns_to_light_graph
+    'the light runner enabling the full feature graph' \
+    mut_xtask_light_runner_enables_full_feature
 
 mut_xtask_operation_runner_uses_full_graph() {
     python3 - <<'PYEOF'
@@ -1721,7 +1740,7 @@ from pathlib import Path
 path = Path("xtask-launcher/src/main.rs")
 text = path.read_text()
 old = '        return OPERATION_RUNNER;'
-new = '        return FULL_RUNNER;'
+new = '        return &["--features", "full"];'
 if text.count(old) != 1:
     raise SystemExit("the operation runner selection is not unique")
 path.write_text(text.replace(old, new, 1))
@@ -1730,40 +1749,6 @@ PYEOF
 expect_fail check_xtask_codegen_surface.sh \
     'operation verification returning to the production server graph' \
     mut_xtask_operation_runner_uses_full_graph
-
-mut_xtask_facade_runner_returns_to_full_graph() {
-    python3 - <<'PYEOF'
-from pathlib import Path
-
-path = Path("xtask-launcher/src/main.rs")
-text = path.read_text()
-old = 'Some("rustfs-gateway" | "s3gate" | "rustfs-gateway-conformance" | "s3gate-conformance" | "conformance")'
-new = 'Some("rustfs-gateway-conformance" | "s3gate-conformance" | "conformance")'
-if text.count(old) != 1:
-    raise SystemExit("the light facade and conformance selection is not unique")
-path.write_text(text.replace(old, new, 1))
-PYEOF
-}
-expect_fail check_xtask_codegen_surface.sh \
-    'facade verification re-entering the full dependency graph' \
-    mut_xtask_facade_runner_returns_to_full_graph
-
-mut_xtask_conformance_runner_returns_to_full_graph() {
-    python3 - <<'PYEOF'
-from pathlib import Path
-
-path = Path("xtask-launcher/src/main.rs")
-text = path.read_text()
-old = 'Some("rustfs-gateway" | "s3gate" | "rustfs-gateway-conformance" | "s3gate-conformance" | "conformance")'
-new = 'Some("rustfs-gateway" | "s3gate")'
-if text.count(old) != 1:
-    raise SystemExit("the light facade and conformance selection is not unique")
-path.write_text(text.replace(old, new, 1))
-PYEOF
-}
-expect_fail check_xtask_codegen_surface.sh \
-    'conformance verification re-entering the full dependency graph' \
-    mut_xtask_conformance_runner_returns_to_full_graph
 
 mut_xtask_selection_module_becomes_full_only() {
     python3 - <<'PYEOF'
@@ -1805,6 +1790,15 @@ mut_xtask_launcher_timestamp_removed() {
 }
 expect_fail check_xtask_codegen_surface.sh \
     'the launcher no longer recording command startup' mut_xtask_launcher_timestamp_removed
+
+# A nested cargo that inherits the launcher's CARGO_MANIFEST_DIR and CARGO_PKG_* reruns ring's
+# build script and rebuilds ring through xtask inside the feedback budget (rustfs/gateway#897).
+mut_xtask_launcher_leaks_package_environment() {
+    perl -0pi -e 's/\n    without_package_environment\(&mut command\);//' xtask-launcher/src/main.rs
+}
+expect_fail check_xtask_codegen_surface.sh \
+    'the launcher passing its cargo run package variables to the xtask cargo' \
+    mut_xtask_launcher_leaks_package_environment
 
 mut_xtask_verify_ignores_launcher_time() {
     perl -0pi -e 's/        started: started\.and_then\(\|started\| started\.checked_add\(build\.elapsed\)\),\n/        started: None,\n/' xtask/src/verify.rs
@@ -19006,7 +19000,7 @@ path = pathlib.Path(".github/workflows/ci.yml")
 text = path.read_text()
 before = "GATEWAY_PR_BODY_JSON: ${{ toJSON(github.event.pull_request.body) }}"
 after = "GATEWAY_PR_BODY_JSON: ${{ github.event.pull_request.body }}"
-if text.count(before) != 2:
+if text.count(before) != 3:
     raise SystemExit("missing the JSON-encoded pull-request body exports")
 path.write_text(text.replace(before, after))
 PYEOF
@@ -19041,7 +19035,7 @@ import pathlib
 path = pathlib.Path(".github/workflows/ci.yml")
 text = path.read_text()
 before = "          GATEWAY_PR_BODY_JSON: ${{ toJSON(github.event.pull_request.body) }}\n"
-if text.count(before) != 2:
+if text.count(before) != 3:
     raise SystemExit("missing the JSON-encoded pull-request body exports")
 path.write_text(text.replace(before, ""))
 PYEOF
@@ -23909,6 +23903,52 @@ expect_fail check_compat_matrix.sh \
     mut_compat_known_fail_grew \
     'the list may only shrink'
 
+mut_compat_new_client_starts_its_baseline() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+versions = Path("compat/versions.toml")
+versions.write_text(
+    versions.read_text()
+    + '\n[clients.fixture-client]\ninstall = "pip"\npackage = "fixture_client"\nversion = "1.0.0"\n'
+)
+driver = Path("compat/drivers/fixture-client/run.sh")
+driver.parent.mkdir(parents=True)
+driver.write_text("#!/usr/bin/env bash\n")
+driver.chmod(0o755)
+known = Path("compat/known-fail.txt")
+known.write_text(known.read_text() + "fixture-client/copy-object  rustfs/gateway#912  measured on its first run\n")
+PYEOF
+}
+# The ratchet starts per client row. A client added in the same change has no previous baseline, so
+# the failures its first measured run records are its baseline, not a silenced regression.
+expect_guard_pass check_compat_matrix.sh \
+    'a client added in the same change starting its known-failure baseline' \
+    mut_compat_new_client_starts_its_baseline
+
+mut_compat_existing_client_hides_behind_a_new_one() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+versions = Path("compat/versions.toml")
+versions.write_text(
+    versions.read_text()
+    + '\n[clients.fixture-client]\ninstall = "pip"\npackage = "fixture_client"\nversion = "1.0.0"\n'
+)
+driver = Path("compat/drivers/fixture-client/run.sh")
+driver.parent.mkdir(parents=True)
+driver.write_text("#!/usr/bin/env bash\n")
+driver.chmod(0o755)
+known = Path("compat/known-fail.txt")
+known.write_text(known.read_text() + "boto3/list-pagination  rustfs/gateway#912  newly excused\n")
+PYEOF
+}
+# Adding a client must not open a window in which an existing client's new failure slips in.
+expect_fail check_compat_matrix.sh \
+    'an existing client gaining an excused failure in a change that also adds a client' \
+    mut_compat_existing_client_hides_behind_a_new_one \
+    'the list may only shrink'
+
 mut_compat_known_fail_unowned() {
     python3 - <<'PYEOF'
 from pathlib import Path
@@ -24068,6 +24108,61 @@ expect_fail check_client_versions_pinned.sh \
     mut_compat_client_version_range \
     'version range'
 
+mut_compat_venv_requirement_floating() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("compat/versions.toml")
+text = path.read_text()
+old = 'requirements = ["s3cmd==2.4.0"]'
+if text.count(old) != 1:
+    raise SystemExit("venv requirement mutation subject is not unique")
+path.write_text(text.replace(old, 'requirements = ["s3cmd>=2.4.0"]', 1))
+PYEOF
+}
+# The pin is only as exact as what pip is actually asked to install.
+expect_fail check_client_versions_pinned.sh \
+    'a virtualenv client installed from a requirement range' \
+    mut_compat_venv_requirement_floating \
+    'which is not an exact pin'
+
+mut_compat_archive_without_digest() {
+    python3 - <<'PYEOF'
+import re
+from pathlib import Path
+
+path = Path("compat/versions.toml")
+text = path.read_text()
+mutated, count = re.subn(r"(2\.37\.4\.tar\.gz)#sha256=[0-9a-f]{64}", r"\1", text)
+if count != 1:
+    raise SystemExit("archive digest mutation subject is not unique")
+path.write_text(mutated)
+PYEOF
+}
+# A tag archive without a digest pip verifies is a pin a moved tag can change under us.
+expect_fail check_client_versions_pinned.sh \
+    'a source-archive requirement with no digest' \
+    mut_compat_archive_without_digest \
+    'which is not an exact pin'
+
+mut_compat_pin_not_installed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("compat/versions.toml")
+text = path.read_text()
+old = 'version = "2.4.0"'
+if text.count(old) != 1:
+    raise SystemExit("installed-version mutation subject is not unique")
+path.write_text(text.replace(old, 'version = "2.3.0"', 1))
+PYEOF
+}
+# A pin that differs from what the requirements install reports one version and runs another.
+expect_fail check_client_versions_pinned.sh \
+    'a client pin that none of its requirements installs' \
+    mut_compat_pin_not_installed \
+    'none of its requirements installs that version'
+
 mut_compat_second_version_pin() {
     python3 - <<'PYEOF'
 from pathlib import Path
@@ -24142,6 +24237,46 @@ expect_fail check_corpus_no_secrets.sh \
     mut_corpus_secret_in_a_decoded_payload \
     'an AWS secret access key'
 
+mut_corpus_live_trailer_signature() {
+    python3 - <<'PYEOF'
+import base64
+import json
+from pathlib import Path
+
+path = Path("corpus/object/PutObject.jsonl")
+lines = path.read_text().splitlines()
+entry = json.loads(lines[0])
+planted = "0;chunk-signature=__REDACTED__\r\nx-amz-trailer-signature:" + "ab" * 32 + "\r\n\r\n"
+entry["chunks"] = [{"bytes_b64": base64.b64encode(planted.encode()).decode()}]
+lines[0] = json.dumps(entry, separators=(",", ":"))
+path.write_text("\n".join(lines) + "\n")
+PYEOF
+}
+expect_fail check_corpus_no_secrets.sh \
+    'a live aws-chunked trailer signature inside a base64 payload' \
+    mut_corpus_live_trailer_signature \
+    'a trailer signature'
+
+mut_corpus_live_post_form_signature() {
+    python3 - <<'PYEOF'
+import base64
+import json
+from pathlib import Path
+
+path = Path("corpus/object/PutObject.jsonl")
+lines = path.read_text().splitlines()
+entry = json.loads(lines[0])
+planted = "--xyz\r\nContent-Disposition: form-data; name=\"X-Amz-Signature\"\r\n\r\n" + "ab" * 32 + "\r\n--xyz--\r\n"
+entry["chunks"] = [{"bytes_b64": base64.b64encode(planted.encode()).decode()}]
+lines[0] = json.dumps(entry, separators=(",", ":"))
+path.write_text("\n".join(lines) + "\n")
+PYEOF
+}
+expect_fail check_corpus_no_secrets.sh \
+    'a live POST-policy signature carried as a multipart form field' \
+    mut_corpus_live_post_form_signature \
+    'a live form credential field'
+
 mut_corpus_private_key_in_prose() {
     python3 - <<'PYEOF'
 from pathlib import Path
@@ -24162,6 +24297,73 @@ expect_fail check_corpus_no_secrets.sh \
     'the corpus tree being absent, which must fail rather than skip' \
     mut_corpus_tree_removed \
     'required input is missing'
+
+# check_corpus_change_reviewed.sh reads git history, so each case builds a two-commit repository:
+# a base whose manifest declares 49 entries and a head chosen by the case.
+corpus_review_repo() {
+    local head_subject="$1" head_entries="$2" touch_corpus="$3" repo
+    repo="$(mktemp -d "${TMPDIR:-/tmp}/gateway-corpus-review.XXXXXX")"
+    (
+        cd "$repo"
+        git init -q
+        git config user.email guard@example.invalid
+        git config user.name guard
+        mkdir -p corpus scripts
+        printf 'schema_version = 1\nentries = 49\n\n[[bucket]]\npath = "object/PutObject.jsonl"\nentries = 49\n' >corpus/MANIFEST.toml
+        printf 'x\n' >scripts/other.sh
+        git add -A && git commit -q -m 'base (#1)'
+        if [[ "$touch_corpus" == 1 ]]; then
+            printf 'schema_version = 1\nentries = %s\n\n[[bucket]]\npath = "object/PutObject.jsonl"\nentries = %s\n' "$head_entries" "$head_entries" >corpus/MANIFEST.toml
+        else
+            printf 'y\n' >scripts/other.sh
+        fi
+        git add -A && git commit -q -m "$head_subject"
+    )
+    printf '%s\n' "$repo"
+}
+
+expect_corpus_review() {
+    local expected="$1" desc="$2" mode="$3" subject="$4" entries="$5" touch="$6" body="$7" diagnostic="${8:-}"
+    local repo rc=0 output
+    cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
+    repo="$(corpus_review_repo "$subject" "$entries" "$touch")"
+    if [[ "$mode" == push ]]; then
+        output="$(GATEWAY_CHECK_ROOT="$repo" GATEWAY_CORPUS_PUSH_RANGE="HEAD~1..HEAD" \
+            "${SCRIPT_DIR}/check_corpus_change_reviewed.sh" 2>&1)" || rc=$?
+    else
+        output="$(GATEWAY_CHECK_ROOT="$repo" GATEWAY_CORPUS_BASE="$(git -C "$repo" rev-parse HEAD~1)" \
+            GATEWAY_CORPUS_HEAD="$(git -C "$repo" rev-parse HEAD)" GATEWAY_PR_BODY_JSON="$(json_string "$body")" \
+            "${SCRIPT_DIR}/check_corpus_change_reviewed.sh" 2>&1)" || rc=$?
+    fi
+    rm -rf "$repo"
+    if [[ -n "$diagnostic" && "$output" != *"$diagnostic"* ]]; then
+        fail_msg "check_corpus_change_reviewed.sh missing diagnostic for: ${desc}"
+    elif [[ "$expected" == pass && "$rc" -eq 0 ]]; then
+        pass_msg "check_corpus_change_reviewed.sh allows: ${desc}"
+    elif [[ "$expected" == fail && "$rc" -ne 0 ]]; then
+        pass_msg "check_corpus_change_reviewed.sh catches: ${desc}"
+    else
+        fail_msg "check_corpus_change_reviewed.sh unexpected result for: ${desc}"
+    fi
+}
+
+expect_corpus_review pass 'a pull request that does not touch corpus/' \
+    pr 'change a script' 49 0 ''
+expect_corpus_review pass 'a corpus pull request stating the census the manifest records' \
+    pr 'refresh corpus' 57 1 $'## Summary\nMore traffic.\n\n## Corpus change\n\nEntries: 49 -> 57\n'
+expect_corpus_review fail 'a corpus pull request with no corpus section' \
+    pr 'refresh corpus' 57 1 $'## Summary\nMore traffic.\n' 'has no `## Corpus change` section'
+expect_corpus_review fail 'a corpus pull request stating a census the manifest does not record' \
+    pr 'refresh corpus' 57 1 $'## Corpus change\n\nEntries: 49 -> 60\n' 'must state `Entries: 49 -> 57`'
+expect_corpus_review fail 'a census line outside the corpus section' \
+    pr 'refresh corpus' 57 1 $'Entries: 49 -> 57\n\n## Corpus change\n\nMore traffic.\n' 'no census line'
+expect_corpus_review pass 'a corpus commit merged from a pull request' \
+    push 'feat(corpus): refresh (#123)' 57 1 ''
+expect_corpus_review fail 'a corpus commit pushed straight to main' \
+    push 'chore: refresh corpus' 57 1 '' 'changes corpus/ outside a pull request'
+expect_corpus_review pass 'a direct push that does not touch corpus/' \
+    push 'chore: tweak a script' 49 0 ''
 
 mut_corpus_production_source() {
     python3 - <<'PYEOF'

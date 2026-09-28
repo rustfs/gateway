@@ -125,6 +125,9 @@ mod replication_roundtrip;
 #[path = "response_override_safety.rs"]
 mod response_override_safety;
 
+#[path = "restore_header_replay.rs"]
+mod restore_header_replay;
+
 #[path = "route_only.rs"]
 mod route_only;
 

@@ -89,6 +89,8 @@ pub struct Input {
     pub expected_bucket_owner: Option<String>,
     /// Wire `x-amz-request-payer`, bound as Header. Optional.
     pub request_payer: Option<crate::ops::enums::RequestPayer>,
+    /// Wire `x-amz-optional-object-attributes`, bound as Header. Optional.
+    pub optional_object_attributes: Vec<crate::ops::enums::OptionalObjectAttributes>,
 }
 
 impl Input {
@@ -259,6 +261,13 @@ impl InputBuilder {
     #[must_use]
     pub fn request_payer(mut self, value: crate::ops::enums::RequestPayer) -> Self {
         self.input.request_payer = Some(value);
+        self
+    }
+
+    /// Sets `OptionalObjectAttributes`.
+    #[must_use]
+    pub fn optional_object_attributes(mut self, value: Vec<crate::ops::enums::OptionalObjectAttributes>) -> Self {
+        self.input.optional_object_attributes = value;
         self
     }
 

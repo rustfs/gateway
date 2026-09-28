@@ -1,5 +1,5 @@
 {
-  "ir_version": "2",
+  "ir_version": "3",
   "operation": "GetObjectAcl",
   "http": {
             "method": "GET",
@@ -89,7 +89,7 @@
                                       "kind": "List",
                                       "member": { "kind": "Structure", "shape": "Grant" },
                                       "flattened": false,
-                                      "wrapper_name": "Grant"
+                                      "member_name": "Grant"
                                     },
                             "hot": true,
                             "quirk_refs": []

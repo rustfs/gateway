@@ -57,10 +57,9 @@ pub enum EtagRender {
     /// An XML text node that carries *literal* double quotes around the tag.
     ///
     /// This is the normal case: `ListObjectsV2`, `HeadObject`'s body-less twin, the multipart
-    /// responses. The quotes are returned as the byte `"`, and the writer this rendering is bound
-    /// to escapes them, so the bytes on the wire read `&quot;d41d…&quot;`. That escaping is *not*
-    /// something every text node gets — an object key carrying a quote comes back with the
-    /// literal byte — so it belongs to this rendering context and travels with it.
+    /// responses. The quotes are returned as the byte `"`, and the XML writer escapes them as it
+    /// escapes a quote in every text node, so the bytes on the wire read `&quot;d41d…&quot;`
+    /// (rustfs/gateway#13).
     XmlQuoted,
     /// An XML text node with no quotes at all.
     ///

@@ -1,5 +1,5 @@
 {
-  "ir_version": "2",
+  "ir_version": "3",
   "operation": "PutBucketCors",
   "http": {
             "method": "PUT",
@@ -112,7 +112,7 @@
                                                              "kind": "List",
                                                              "member": { "kind": "Structure", "shape": "CORSRule" },
                                                              "flattened": true,
-                                                             "wrapper_name": null
+                                                             "member_name": null
                                                            },
                                                    "hot": true,
                                                    "quirk_refs": []
@@ -145,7 +145,7 @@
                                                     "kind": "List",
                                                     "member": { "kind": "String" },
                                                     "flattened": true,
-                                                    "wrapper_name": null
+                                                    "member_name": null
                                                   },
                                           "hot": false,
                                           "quirk_refs": []
@@ -159,7 +159,7 @@
                                                     "kind": "List",
                                                     "member": { "kind": "String" },
                                                     "flattened": true,
-                                                    "wrapper_name": null
+                                                    "member_name": null
                                                   },
                                           "hot": true,
                                           "quirk_refs": []
@@ -173,7 +173,7 @@
                                                     "kind": "List",
                                                     "member": { "kind": "String" },
                                                     "flattened": true,
-                                                    "wrapper_name": null
+                                                    "member_name": null
                                                   },
                                           "hot": true,
                                           "quirk_refs": []
@@ -187,7 +187,7 @@
                                                     "kind": "List",
                                                     "member": { "kind": "String" },
                                                     "flattened": true,
-                                                    "wrapper_name": null
+                                                    "member_name": null
                                                   },
                                           "hot": false,
                                           "quirk_refs": []

@@ -553,6 +553,62 @@ mod h2_duplex_tests;
 #[cfg(feature = "production-transports")]
 mod h2_corpus_tests;
 
+/// Negative and positive — starting the listener is the harness's setup, not the target's time:
+/// a slow start must neither consume the exchange deadline nor be charged to the target.
+#[test]
+fn a_slow_listener_start_is_charged_to_the_harness_not_the_deadline() {
+    let mut answer = hex("000000 04 00 00000000");
+    answer.extend(hex("000001 01 05 00000001 88"));
+    let (addr, peer) = peer(anonymous_wire_image().len(), move |stream| {
+        stream.write_all(&answer).expect("the response is written");
+        thread::sleep(Duration::from_millis(200));
+    });
+    let start_up = Duration::from_millis(300);
+    let observation = execute_started(
+        || {
+            thread::sleep(start_up);
+            Ok(addr)
+        },
+        &anonymous_script(),
+        Instant::now() + Duration::from_millis(250),
+        None,
+    )
+    .expect("the exchange runs after the slow start");
+    peer.join().expect("the peer exits");
+    assert_eq!(observation.outcome, Outcome::Response, "{observation:?}");
+    assert_eq!(observation.status, Some(200), "{observation:?}");
+    assert!(
+        observation.harness_wait_ms >= 300,
+        "the start-up belongs to the harness account: {observation:?}"
+    );
+}
+
+/// Negative — the same slow start does not stretch a deadline the peer itself exhausts.
+#[test]
+fn a_slow_listener_start_does_not_forgive_a_silent_peer() {
+    let (release, held) = mpsc::channel::<()>();
+    let (addr, peer) = peer(anonymous_wire_image().len(), move |_| {
+        let _ = held.recv();
+    });
+    let started = Instant::now();
+    let observation = execute_started(
+        || {
+            thread::sleep(Duration::from_millis(300));
+            Ok(addr)
+        },
+        &anonymous_script(),
+        Instant::now() + Duration::from_millis(250),
+        None,
+    )
+    .expect("the silence is observed");
+    let _ = release.send(());
+    peer.join().expect("the peer exits");
+    assert_eq!(observation.outcome, Outcome::Hang, "{observation:?}");
+    let receipt = observation.deadline_expiry.as_ref().expect("the expiry is measured");
+    assert!(receipt.observed_at >= started + Duration::from_millis(550), "{receipt:?}");
+    assert!(started.elapsed() < Duration::from_millis(2_000), "the deadline is still bounded");
+}
+
 mod h2_client_control_tests;
 
 mod h2_ping_tests;

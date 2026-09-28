@@ -89,6 +89,16 @@ macro_rules! register_policy_entries {
     };
 }
 
+macro_rules! register_encryption_entries {
+    ($backend:expr, $builder:expr;) => { $builder };
+    ($backend:expr, $builder:expr; encryption $operation:ty => $name:literal, $($rest:tt)*) => {
+        register_encryption_entries!($backend, $builder.register::<$operation, _>(Arc::clone($backend)); $($rest)*)
+    };
+    ($backend:expr, $builder:expr; $group:ident $operation:ty => $name:literal, $($rest:tt)*) => {
+        register_encryption_entries!($backend, $builder; $($rest)*)
+    };
+}
+
 macro_rules! register_lifecycle_entries {
     ($backend:expr, $builder:expr;) => { $builder };
     ($backend:expr, $builder:expr; lifecycle $operation:ty => $name:literal, $($rest:tt)*) => {
@@ -140,6 +150,18 @@ impl FsBackend {
         macro_rules! register {
             ($($operations:tt)*) => {
                 register_policy_entries!(self, builder; $($operations)*)
+            };
+        }
+        reference_operations!(register)
+    }
+
+    /// Registers the default-encryption family — configuration stored and reported, nothing
+    /// encrypted (see `encryption`).
+    #[must_use]
+    pub fn register_encryption(self: &Arc<Self>, builder: ServiceBuilder) -> ServiceBuilder {
+        macro_rules! register {
+            ($($operations:tt)*) => {
+                register_encryption_entries!(self, builder; $($operations)*)
             };
         }
         reference_operations!(register)

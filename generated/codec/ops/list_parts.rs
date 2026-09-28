@@ -208,7 +208,7 @@ fn write_part(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::Part) -> 
     }
     {
         let v = &value.e_tag;
-        writer.element_quoting("ETag", &value::render_etag(v, EtagRender::XmlQuoted));
+        writer.element("ETag", &value::render_etag(v, EtagRender::XmlQuoted));
     }
     {
         let v = &value.size;

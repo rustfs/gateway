@@ -225,9 +225,8 @@ pub struct StoredObject {
     ///
     /// `None` is what makes `x-amz-restore` absent, which is a fact a client reads: an object
     /// with no header was never retrieved, and one carrying `ongoing-request="false"` is back.
-    /// Held on the object beside the tag set and the lock documents, for the same reason — the
-    /// case format declares no per-version restore state, and inventing one would be state no
-    /// case wrote.
+    /// Held on the object, so on the version that owns it: a retrieval that names a version changes
+    /// that version's state and no other one's.
     pub restore: Option<RestoreStatus>,
     /// The storage class the writer named, or `STANDARD`.
     pub storage_class: String,
@@ -1721,7 +1720,8 @@ fn require_object_lock(fixture: &Fixture, bucket: &str) -> Result<(), HandlerErr
     ))
 }
 
-/// The object version a lock-state read acts on: the newest one, or the one `versionId` names.
+/// The object version a lock-state read, or a restore, acts on: the newest one, or the one
+/// `versionId` names.
 ///
 /// Per-version lock state is the representation this fixture already had, not one it invents:
 /// a [`StoredVersion`] owns its [`StoredObject`], and the retention and hold live on the object.
@@ -2071,26 +2071,6 @@ fn storage_class_header(object: &StoredObject) -> Option<dto::StorageClass> {
         return None;
     }
     Some(dto::StorageClass::custom(object.storage_class.clone()))
-}
-
-/// Refuses `?versionId` on a restore rather than retrieving the current version instead.
-///
-/// The lock family's rule, for the same reason: this fixture keeps one restore state per key,
-/// because the case format declares no per-version one. Silently ignoring the parameter would
-/// report the current copy's retrieval as the named version's, and a case asserting on that would
-/// go green against a wrong answer about which bytes are readable.
-///
-/// # Errors
-///
-/// `NotImplemented` whenever the parameter is present, with a value or without.
-fn refuse_versioned_restore(version_id: Option<&str>) -> Result<(), HandlerError> {
-    if version_id.is_none() {
-        return Ok(());
-    }
-    Err(HandlerError::new(
-        ErrorCode::NOT_IMPLEMENTED,
-        "A header you provided implies functionality that is not implemented",
-    ))
 }
 
 /// The `x-amz-restore-output-path` a select-on-restore reports, built from where it asked for the
@@ -2787,7 +2767,7 @@ impl Stub {
             Selected::Absent => return Err(no_such_key(input.key.as_str())),
             Selected::Deleted(at) => return Err(deleted_by_marker(input.key.as_str(), at)),
         };
-        let wants_etag = input.object_attributes.split(',').any(|attribute| attribute.trim() == "ETag");
+        let wants_etag = input.object_attributes.iter().any(|attribute| attribute.as_str() == "ETag");
         Ok(Resp::new(dto::GetObjectAttributesOutput {
             last_modified: Some(Timestamp::from_secs(object.last_modified)),
             e_tag: wants_etag.then(|| entity_tag(&object.etag)).transpose()?,
@@ -4182,14 +4162,14 @@ impl Stub {
             )
         })?;
         require_bucket(&fixture, &input.bucket)?;
-        refuse_versioned_restore(input.version_id.as_deref())?;
         let expedited = document.glacier_job_parameters.as_ref().map(|parameters| &parameters.tier)
             == Some(&dto::Tier::EXPEDITED)
             || document.tier.as_ref() == Some(&dto::Tier::EXPEDITED);
         let expiry = fixture.restore_expiry();
-        let object = fixture
-            .object_mut(input.bucket.as_str(), input.key.as_str())
-            .ok_or_else(|| no_such_key(input.key.as_str()))?;
+        // `versionId` selects the copy whose retrieval state changes, and only that one: an id
+        // that names nothing is `NoSuchVersion` and one that names a delete marker is `405`, the
+        // same selection every other version-scoped write in this file makes.
+        let object = lock_state_of_mut(&mut fixture, input.bucket.as_str(), input.key.as_str(), input.version_id.as_deref())?;
 
         let state = if !is_archived(object) {
             RestoreState::NotArchived

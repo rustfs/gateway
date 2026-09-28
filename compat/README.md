@@ -21,13 +21,16 @@ the easiest parts of an S3 rewrite to get wrong, and it had no real-SDK traffic 
 | --- | --- |
 | `restic` | The only client here that signs uploads as `STREAMING-AWS4-HMAC-SHA256-PAYLOAD`. Its S3 backend is minio-go with an explicit region, so it reaches `PutObject` without a region lookup first. Its object layout — hundreds of small writes plus multi-megabyte packs read back by byte range — is a workload no single-object scenario produces, and it is the client that found `GetObject`'s missing `Range` support. |
 | `mc` | The MinIO ecosystem's own client and what RustFS users reach for first. Same transport as restic, without the region setting, which is what makes it the client that notices a missing `GetBucketLocation`. |
-| `boto3` | Python's de-facto S3 client and the SDK whose historical bug reports the s3s regression suite was built from. Driven at the raw API level, so a failing cell names one operation rather than a workflow. It is also the only client here that can generate and redeem a presigned URL as a scenario step. |
-| `rclone` | Drives aws-sdk-go-v2 at high concurrency and produces the list-then-copy traffic of a real mirroring deployment. It is this matrix's only `UNSIGNED-PAYLOAD` writer, so it covers a payload mode the others never send. |
+| `boto3` | Python's de-facto S3 client and the SDK whose historical bug reports the s3s regression suite was built from. Driven at the raw API level, so a failing cell names one operation rather than a workflow. It generates presigned URLs for both GET and PUT and redeems them with a plain HTTP client, so presigning is measured across implementations rather than round-tripped through one. |
+| `rclone` | Drives aws-sdk-go-v2 at high concurrency and produces the list-then-copy traffic of a real mirroring deployment. It declares `UNSIGNED-PAYLOAD` for its uploads, a payload mode the botocore clients never send. |
+| `aws-cli` | AWS's own command-line client (v2) and the reference most users measure a server against. botocore underneath, but its `s3` commands pick part sizes, concurrency and sync decisions of their own. Over TLS its uploads are `STREAMING-UNSIGNED-PAYLOAD-TRAILER` with a CRC64NVME trailer, so it is a second, independently configured trailer writer beside boto3. |
+| `s3cmd` | A hand-written signer and XML layer with no AWS SDK underneath, and the oldest widely deployed S3 CLI. It is the client here that writes an ACL back after a copy without an integrity header, and whose `signurl` produces a SigV2 presigned URL. |
+| `opendal` | Apache OpenDAL, the Rust data ecosystem's storage layer and the client that found s3s's stalled-request hang (s3s-project/s3s#316). Driven through its Python binding over the same Rust `services-s3` backend. It has no bucket operations, so its driver creates each cell's bucket with boto3 and measures everything else through the operator. |
 
 Deliberately absent for now, with the reason, so the next session does not have to rediscover it:
-`aws-cli`, `aws-sdk-rust`, `aws-sdk-go` and `aws-sdk-js` from the design-doc list are not yet
-registered. They are additions of data rather than code — one `[clients.<name>]` block in
-`versions.toml` and one `drivers/<name>/run.sh` — and rustfs/backlog#1765 tracks them.
+`aws-sdk-rust`, `aws-sdk-go` and `aws-sdk-js` from the design-doc list are not yet registered. An
+SDK is a library, so each needs a small driver program under `drivers/<name>/` built from its own
+lock file (the `program` install method in `versions.toml`); rustfs/backlog#1765 tracks them.
 
 ## What answered these rows
 
@@ -73,7 +76,7 @@ driver grading its own traffic would be reporting its intention rather than an o
 ```bash
 cargo build --release -p rustfs-gateway-compat-sut
 bash ci/compat/install_clients.sh                     # installs exactly the pinned versions
-export PATH="$(go env GOPATH)/bin:$PATH"
+export PATH="$(go env GOPATH)/bin:$PATH"              # the runner adds target/compat-clients/bin itself
 GATEWAY_COMPAT_SUT_BIN=target/release/compat-sut ci/compat/run_matrix.sh
 
 # The fastest feedback loop: one client, one scenario.
@@ -89,7 +92,7 @@ must say so rather than record 56 failures and poison the baseline.
 
 | File | What it is |
 | --- | --- |
-| `versions.toml` | The only place a client version is written down. |
+| `versions.toml` | The only place a client version is written down, and how each client is installed and its version read back. |
 | `capabilities.toml` | The operations the system under test registers. Checked against the launcher's own registry before every run. |
 | `scenarios/*.yaml` | Client-independent scenarios, with the wire facts some of them assert. |
 | `drivers/<client>/run.sh` | One client's translation of those scenarios. |

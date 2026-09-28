@@ -136,7 +136,7 @@ impl FsBackend {
 
     /// A bucket-level record's bytes, `None` when the file is absent; a symlink or a non-file is
     /// refused rather than read, as every record path in this backend is.
-    async fn read_bucket_record(&self, path: &std::path::Path) -> Result<Option<Vec<u8>>, HandlerError> {
+    pub(super) async fn read_bucket_record(&self, path: &std::path::Path) -> Result<Option<Vec<u8>>, HandlerError> {
         match tokio::fs::symlink_metadata(path).await {
             Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => {}
             Ok(_) => return Err(unsafe_record()),
@@ -146,7 +146,7 @@ impl FsBackend {
         tokio::fs::read(path).await.map(Some).map_err(|_| storage_error())
     }
 
-    async fn write_bucket_record(&self, bucket: &str, file: &str, bytes: &[u8]) -> Result<(), HandlerError> {
+    pub(super) async fn write_bucket_record(&self, bucket: &str, file: &str, bytes: &[u8]) -> Result<(), HandlerError> {
         let destination = self.bucket_path(bucket).join(file);
         match tokio::fs::symlink_metadata(&destination).await {
             Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => {}
@@ -157,7 +157,7 @@ impl FsBackend {
         self.write_atomic(&self.bucket_path(bucket), &destination, bytes).await
     }
 
-    async fn delete_bucket_record(&self, bucket: &str, file: &str) -> Result<(), HandlerError> {
+    pub(super) async fn delete_bucket_record(&self, bucket: &str, file: &str) -> Result<(), HandlerError> {
         let path = self.bucket_path(bucket).join(file);
         match tokio::fs::symlink_metadata(&path).await {
             Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => {

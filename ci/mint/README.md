@@ -2,7 +2,10 @@
 
 The source recipe rebuilds the missing .NET functional runner and corrects the
 `mc` dependency diagnostics in the pinned Mint image. It preserves all fifteen
-SDK directories. The normal scheduled run continues to use `pins.env`.
+SDK directories. Every `e2e-mint` run, scheduled or manual, in either mode,
+builds this recipe on the `pins.env` digest and measures the result
+(rustfs/gateway#720): the pinned image alone ships no .NET runner and writes a
+non-JSON line into `mc`'s log, so neither SDK could be judged without it.
 
 From the repository root, build a Linux amd64 candidate and pass its exact local
 image identity to the record runner:
@@ -15,10 +18,8 @@ ci/mint/run.sh --mode record --local-image "$(cat /tmp/mint-candidate.id)" \
   --work /tmp/mint-work --out /tmp/mint-out
 ```
 
-Alternatively, manually dispatch `e2e-mint` with `mode=record` and
-`derived_image=true`. The workflow builds the candidate on its native amd64
-runner and uploads only the aggregate report. It does not publish the image or
-change the baseline. A candidate is refused in ratchet mode.
+The workflow builds the image on its native amd64 runner and uploads only the
+aggregate report. It never publishes the image.
 
 The recipe fixes the Mint and .NET SDK images by digest, the .NET source archive
 by commit and SHA-256, and all 26 NuGet archives by SHA-256. The archive closure

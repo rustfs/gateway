@@ -1,5 +1,5 @@
 {
-  "ir_version": "2",
+  "ir_version": "3",
   "operation": "ListObjectAnnotations",
   "http": {
             "method": "GET",
@@ -119,7 +119,7 @@
                                       "kind": "List",
                                       "member": { "kind": "Structure", "shape": "AnnotationEntry" },
                                       "flattened": false,
-                                      "wrapper_name": "AnnotationEntry"
+                                      "member_name": "AnnotationEntry"
                                     },
                             "hot": true,
                             "quirk_refs": []
@@ -261,7 +261,7 @@
                                                                                  ]
                                                                      },
                                                            "flattened": true,
-                                                           "wrapper_name": null
+                                                           "member_name": null
                                                          },
                                                  "hot": false,
                                                  "quirk_refs": []

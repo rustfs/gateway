@@ -35,7 +35,9 @@ const USAGE: &str = "usage:
 
 `ingest` refuses any entry that still carries credential material. `--sanitize` first
 rewrites the credential-bearing carriers it knows and records them in the entry's
-`redacted` list; a body finding stays a refusal under either mode.";
+`redacted` list; a body finding stays a refusal under either mode, except the
+`chunk-signature` and `x-amz-trailer-signature` carriers of a request that declares
+aws-chunked framing, which are rewritten in place.";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();

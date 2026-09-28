@@ -5,9 +5,9 @@
 [case]
 id = "c-list-0036"
 schema_version = 1
-title = "A key holding ampersand, angle brackets and a quote round-trips through the listing unchanged"
+title = "A key holding ampersand, angle brackets and quotes is escaped the way S3 escapes it"
 rationale = """
-These four characters are legal in a key and structural in the document, so passing them through does not corrupt one element — it changes where the elements are. A key containing a closing tag can therefore inject siblings into the response, which is the listing equivalent of an injection bug and not merely a formatting one. The escaped forms are asserted directly because a parser-level check would accept the injected document as well-formed."""
+These characters are legal in a key and structural in the document, so passing them through does not corrupt one element — it changes where the elements are. A key containing a closing tag can therefore inject siblings into the response, which is the listing equivalent of an injection bug and not merely a formatting one. The escaped forms are asserted directly because a parser-level check would accept the injected document as well-formed. The quotes are escaped as well: S3 writes `&quot;` and `&apos;` in every text node (rustfs/gateway#13), and this case used to pin a literal quote here while the copy and multipart cases pinned `&quot;` inside `<ETag>`."""
 polarity = "negative"
 operation = "ListObjectsV2"
 tags = ["list", "xml-shape", "xml"]
@@ -24,6 +24,11 @@ url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html"
 summary = "The documented response returns the stored key, which makes escaping the implementation's responsibility."
 kind = "aws-doc"
 
+[[case.evidence]]
+url = "https://unidata-nexrad-level2.s3.amazonaws.com/?list-type=2&max-keys=1&prefix=a%22b%27c%3Cd%3Ee%26f"
+summary = "An anonymous ListObjectsV2 against this public AWS Open Data bucket on 2026-09-28 echoed the prefix with both quote characters escaped as entities."
+kind = "observed"
+
 [clock]
 fixed = "2026-01-02T03:04:05Z"
 
@@ -32,7 +37,7 @@ name = "conf-list-odd"
 
 [[setup.objects]]
 bucket = "conf-list-odd"
-key = "a&b<c>d\"e.txt"
+key = "a&b<c>d\"e'f.txt"
 body = { utf8 = "m" }
 
 [request]
@@ -45,8 +50,8 @@ kind = "response"
 status = 200
 
 [expect.body]
-contains_utf8 = ["<Key>a&amp;b&lt;c&gt;d\"e.txt</Key>"]
-not_contains_utf8 = ["<Key>a&b<c>d"]
+contains_utf8 = ["<Key>a&amp;b&lt;c&gt;d&quot;e&apos;f.txt</Key>"]
+not_contains_utf8 = ["<Key>a&b<c>d", "d\"e", "e'f"]
 
 [expect.body.xml]
 root = "ListBucketResult"

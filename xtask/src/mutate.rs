@@ -74,17 +74,20 @@
 //! `SURVIVED`, which is the control that this outcome did not swallow the finding it was carved out
 //! of.
 //!
-//! # What `SURVIVED` still cannot separate
+//! # What `SURVIVED` cannot separate without coverage
 //!
 //! Control 2 is at **file** granularity and the claim it supports — "running code reads this rule"
 //! — is at **read** granularity. A generated constant that no code reads still sits in a file the
 //! gateway compiles, so changing it makes cargo rebuild and the row reports `SURVIVED` exactly as a
 //! real corpus gap does. `q-bkt-0001` was that shape: `RouteRow::success_status` was dropped by
 //! `generated_entries`, and the repair that `SURVIVED` invites — write two cases — could not have
-//! worked, because no response was built from the value. The two verdicts are told apart by reading
-//! the rule's source path and asking who reads it; rustfs/gateway#242 records why this control
-//! cannot answer that on its own, and that the tractable fix is to shrink the generated surface
-//! until `dead_code` can answer it, not to add a fourth control here.
+//! worked, because no response was built from the value (rustfs/gateway#242).
+//!
+//! `--reachability` answers it where line coverage can (rustfs/gateway#671): each `SURVIVED` rule
+//! is rerun against the still-mutated tree in a coverage-instrumented build, and a row whose
+//! changed lines are instrumented and all counted zero becomes `SURVIVED_UNREACHED` — a dead source,
+//! not a corpus gap. A changed constant or table has no instrumented line, so its row stays
+//! `SURVIVED` with a note saying reachability was not established; see [`reach`].
 //!
 //! # Warming
 //!
@@ -96,7 +99,6 @@
 //! one worktree; two passes sharing a target directory answer each other's freshness questions.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -106,9 +108,14 @@ use rustfs_gateway_conformance::sha256;
 use rustfs_gateway_model::{Overlay, RuleClassification};
 
 use crate::codegen::repo_root;
+use crate::nested_cargo::without_package_environment;
 
+mod reach;
+mod report;
 #[cfg(test)]
 mod tests;
+
+use report::{describe, summary};
 
 /// What one mutated rule proved.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -126,6 +133,9 @@ pub(crate) enum Outcome {
     /// Applied, built, measured — and every case stayed green, with at least one case that could
     /// have gone red. This is the finding.
     Survived,
+    /// `Survived`, and a coverage rerun of the mutated tree shows no changed line executed: the
+    /// mutated code never ran, so this is a dead source rather than a corpus gap (#671).
+    SurvivedUnreached(String),
     /// Applied, built, measured — and this rule's ledger row names no case that could have gone
     /// red, so the green suite certifies nothing about it either way.
     Unwitnessed(String),
@@ -145,6 +155,7 @@ impl Outcome {
             Outcome::Killed { .. } => "KILLED",
             Outcome::KilledByCompile(_) => "KILLED_BY_COMPILE",
             Outcome::Survived => "SURVIVED",
+            Outcome::SurvivedUnreached(_) => "SURVIVED_UNREACHED",
             Outcome::Unwitnessed(_) => "UNWITNESSED",
             Outcome::Inert(_) => "INERT",
             Outcome::Unplannable(_) => "UNPLANNABLE",
@@ -286,6 +297,7 @@ struct Options {
     family: Option<String>,
     quirk: Option<String>,
     filter: Option<String>,
+    reachability: bool,
 }
 
 fn parse(args: &[String]) -> Result<Options, String> {
@@ -293,6 +305,7 @@ fn parse(args: &[String]) -> Result<Options, String> {
         family: None,
         quirk: None,
         filter: None,
+        reachability: false,
     };
     let mut rest = args.iter();
     while let Some(arg) = rest.next() {
@@ -302,6 +315,7 @@ fn parse(args: &[String]) -> Result<Options, String> {
             "--family" => options.family = Some(value(&mut rest)?),
             "--quirk" => options.quirk = Some(value(&mut rest)?),
             "--filter" => options.filter = Some(value(&mut rest)?),
+            "--reachability" => options.reachability = true,
             other => return Err(format!("unknown option `{other}`")),
         }
     }
@@ -336,11 +350,13 @@ pub(crate) fn command(args: &[String]) -> std::process::ExitCode {
 
 /// The usage text for the subcommand.
 pub(crate) const USAGE: &str = "\
-usage: cargo xtask conformance mutate (--family <name> | --quirk <id>) [--filter <glob>]
+usage: cargo xtask conformance mutate (--family <name> | --quirk <id>) [--filter <glob>] [--reachability]
 
   --family <name>   every mutable rule the overlay file model/overlays/quirks/<name>.toml declares
   --quirk <id>      one rule, by its stable id
   --filter <glob>   narrow the corpus run; the default runs every case
+  --reachability    rerun each SURVIVED rule with coverage and split out SURVIVED_UNREACHED, whose
+                    changed code never executed (needs `rustup component add llvm-tools`)
 ";
 
 /// One rule and the flips planned for its sources.
@@ -419,18 +435,32 @@ fn run(options: &Options) -> Result<bool, String> {
 
     let mut results: Vec<(String, String, Outcome)> = Vec::new();
     for target in &targets {
-        let outcome = match &target.plan {
-            Err(outcome) => outcome.clone(),
+        let (outcome, note) = match &target.plan {
+            Err(outcome) => (outcome.clone(), None),
             Ok(mutations) => {
                 let observed = measure(&input, &out, &root, &baseline_artifacts, &settled, options, mutations);
+                // Coverage reads the mutated tree, so it runs before the restore below, and nothing
+                // in it may return early past that restore.
+                let reach = match &observed {
+                    Ok(measured)
+                        if options.reachability
+                            && classify(&baseline_verdicts, &target.declared_cases, measured) == Outcome::Survived =>
+                    {
+                        Some(reachability(&input, &out, &root, &baseline_artifacts, options, mutations, measured))
+                    }
+                    _ => None,
+                };
                 // Whatever happened, the tree goes back and is rebuilt before the next rule is
                 // touched, so the next build's freshness answers only about the next mutation.
                 restore(&baseline_artifacts)?;
                 settled = build(&root)?.require_success("the restored tree does not build")?;
-                classify(&baseline_verdicts, &target.declared_cases, &observed?)
+                report::refine(classify(&baseline_verdicts, &target.declared_cases, &observed?), reach)
             }
         };
         println!("{:<34} {:<26} {}", target.quirk, target.dimension, describe(&outcome));
+        if let Some(note) = note {
+            println!("{:<61} {note}", "");
+        }
         results.push((target.quirk.clone(), target.dimension.clone(), outcome));
     }
 
@@ -444,46 +474,6 @@ fn run(options: &Options) -> Result<bool, String> {
 
     print!("{}", summary(&results));
     Ok(results.iter().all(|(_, _, outcome)| outcome.is_pass()))
-}
-
-fn describe(outcome: &Outcome) -> String {
-    match outcome {
-        Outcome::Killed { by, declared: true } => format!("KILLED by {}", by.join(", ")),
-        Outcome::Killed { by, declared: false } => {
-            format!("KILLED by {} — none of them is a case this rule's ledger row names", by.join(", "))
-        }
-        Outcome::KilledByCompile(unit) => {
-            format!("KILLED_BY_COMPILE — `{unit}` does not build under the mutation; no case was consulted")
-        }
-        Outcome::Survived => "SURVIVED — the mutation reached a file the gateway compiles, a case that could have \
-             gone red did not, and that is a corpus gap OR a lowered value nothing reads, which the freshness \
-             control cannot tell apart (rustfs/gateway#242)"
-            .to_owned(),
-        Outcome::Unwitnessed(why) => format!(
-            "UNWITNESSED — {why}; this is a defect in the rule's ledger row, not a gap a new assertion in \
-             those cases would close"
-        ),
-        Outcome::Inert(why) | Outcome::Unplannable(why) | Outcome::Unsupported(why) | Outcome::NotMeasured(why) => {
-            format!("{} — {why}", outcome.label())
-        }
-    }
-}
-
-fn summary(results: &[(String, String, Outcome)]) -> String {
-    let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
-    for (_, _, outcome) in results {
-        *counts.entry(outcome.label()).or_default() += 1;
-    }
-    let mut out = String::from("\nmatrix: ");
-    let rendered: Vec<String> = counts.iter().map(|(label, count)| format!("{count} {label}")).collect();
-    out.push_str(&rendered.join(", "));
-    let _ = writeln!(out, " (of {} rule(s))", results.len());
-    if results.iter().all(|(_, _, outcome)| outcome.is_pass()) {
-        out.push_str("every rule was killed by a case its ledger row names\n");
-    } else {
-        out.push_str("not every rule was killed by a case it names; the rows above that are not KILLED are the work left\n");
-    }
-    out
 }
 
 fn select(
@@ -626,6 +616,28 @@ fn measure(
     })
 }
 
+/// Asks the coverage rerun about a `SURVIVED` rule while its mutation is still on disk.
+fn reachability(
+    input: &CodegenInput,
+    out: &CodegenOutput,
+    root: &Path,
+    baseline: &Artifacts,
+    options: &Options,
+    mutations: &[Mutation],
+    measured: &Measurement,
+) -> reach::Reach {
+    let Some(verdicts) = &measured.verdicts else {
+        return reach::Reach::Unknown("the measured run left no verdicts to reproduce".to_owned());
+    };
+    match rustfs_gateway_codegen::generate_mutated(input, out, mutations) {
+        Ok(mutated) => {
+            let changed = reach::changed_sources(&baseline.files, &mutated.files);
+            reach::measure(root, options.filter.as_deref(), verdicts, &changed)
+        }
+        Err(e) => reach::Reach::Unknown(format!("regenerating the mutation: {e}")),
+    }
+}
+
 fn paths(artifacts: &Artifacts) -> BTreeSet<&PathBuf> {
     artifacts.files.iter().map(|(path, _)| path).collect()
 }
@@ -670,7 +682,7 @@ impl Built {
 /// build cargo calls fresh is one whose inputs the mutation did not touch — which is the difference
 /// between a rule no case checks and a rule no code reads.
 fn build(root: &Path) -> Result<Built, String> {
-    let output = Command::new(env!("CARGO"))
+    let output = without_package_environment(&mut Command::new(env!("CARGO")))
         .current_dir(root)
         .args(["build", "--package", GATEWAY, "--lib", "--message-format", "json"])
         .stderr(Stdio::null())
@@ -732,7 +744,7 @@ fn build(root: &Path) -> Result<Built, String> {
 /// the gateway alone or the "did the mutation reach production code" control stops meaning that.
 /// This one's answer is only *did it compile*, for the whole set of crates the measurement needs.
 fn target(root: &Path) -> Result<bool, String> {
-    let status = Command::new(env!("CARGO"))
+    let status = without_package_environment(&mut Command::new(env!("CARGO")))
         .current_dir(root)
         .args(["build", "--package", CONFORMANCE, "--bin", CONFORMANCE])
         .stdout(Stdio::null())
@@ -748,7 +760,7 @@ fn corpus(root: &Path, filter: Option<&str>) -> Result<Option<BTreeMap<String, S
     // A stale report from the previous rule would be read as this rule's measurement.
     let _ = std::fs::remove_file(&report);
     let mut command = Command::new(env!("CARGO"));
-    command
+    without_package_environment(&mut command)
         .current_dir(root)
         .args([
             "run",
@@ -775,24 +787,5 @@ fn corpus(root: &Path, filter: Option<&str>) -> Result<Option<BTreeMap<String, S
     if status.code() == Some(3) {
         return Ok(None);
     }
-    let Ok(text) = std::fs::read_to_string(&report) else {
-        return Ok(None);
-    };
-    let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else {
-        return Ok(None);
-    };
-    let Some(cases) = value.get("cases").and_then(serde_json::Value::as_array) else {
-        return Ok(None);
-    };
-    let mut verdicts = BTreeMap::new();
-    for case in cases {
-        let (Some(id), Some(verdict)) = (
-            case.get("id").and_then(serde_json::Value::as_str),
-            case.get("verdict").and_then(serde_json::Value::as_str),
-        ) else {
-            continue;
-        };
-        verdicts.insert(id.to_owned(), verdict.to_owned());
-    }
-    if verdicts.is_empty() { Ok(None) } else { Ok(Some(verdicts)) }
+    Ok(reach::read_verdicts(&report))
 }

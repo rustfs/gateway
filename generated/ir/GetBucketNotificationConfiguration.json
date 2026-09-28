@@ -1,5 +1,5 @@
 {
-  "ir_version": "2",
+  "ir_version": "3",
   "operation": "GetBucketNotificationConfiguration",
   "http": {
             "method": "GET",
@@ -58,7 +58,7 @@
                                       "kind": "List",
                                       "member": { "kind": "Structure", "shape": "TopicConfiguration" },
                                       "flattened": true,
-                                      "wrapper_name": null
+                                      "member_name": null
                                     },
                             "hot": true,
                             "quirk_refs": []
@@ -72,7 +72,7 @@
                                       "kind": "List",
                                       "member": { "kind": "Structure", "shape": "QueueConfiguration" },
                                       "flattened": true,
-                                      "wrapper_name": null
+                                      "member_name": null
                                     },
                             "hot": true,
                             "quirk_refs": []
@@ -86,7 +86,7 @@
                                       "kind": "List",
                                       "member": { "kind": "Structure", "shape": "LambdaFunctionConfiguration" },
                                       "flattened": true,
-                                      "wrapper_name": null
+                                      "member_name": null
                                     },
                             "hot": true,
                             "quirk_refs": []
@@ -201,7 +201,7 @@
                                                                                              ]
                                                                                  },
                                                                        "flattened": true,
-                                                                       "wrapper_name": null
+                                                                       "member_name": null
                                                                      },
                                                              "hot": false,
                                                              "quirk_refs": []
@@ -314,7 +314,7 @@
                                                                                     ]
                                                                         },
                                                               "flattened": true,
-                                                              "wrapper_name": null
+                                                              "member_name": null
                                                             },
                                                     "hot": false,
                                                     "quirk_refs": []
@@ -355,7 +355,7 @@
                                                        "kind": "List",
                                                        "member": { "kind": "Structure", "shape": "FilterRule" },
                                                        "flattened": true,
-                                                       "wrapper_name": null
+                                                       "member_name": null
                                                      },
                                              "hot": false,
                                              "quirk_refs": []
@@ -432,7 +432,7 @@
                                                                                     ]
                                                                         },
                                                               "flattened": true,
-                                                              "wrapper_name": null
+                                                              "member_name": null
                                                             },
                                                     "hot": false,
                                                     "quirk_refs": []

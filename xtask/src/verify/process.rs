@@ -38,6 +38,7 @@ use signal_hook::iterator::Signals;
 use signal_hook::low_level;
 
 use super::{GateCommand, GateResult};
+use crate::nested_cargo::without_package_environment;
 
 pub(super) struct Batch {
     pub(super) results: Vec<GateResult>,
@@ -222,7 +223,7 @@ impl Supervisor<'_> {
         let stdout = self.capture_root.join(format!("{index}.stdout"));
         let stderr = self.capture_root.join(format!("{index}.stderr"));
         let mut command = Command::new(program);
-        command
+        without_package_environment(&mut command)
             .args(args)
             .current_dir(current_dir)
             .stdout(Stdio::from(File::create(&stdout)?))

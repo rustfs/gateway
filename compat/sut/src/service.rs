@@ -116,11 +116,11 @@ pub(crate) fn build_service(
     );
     let service =
         backend
-            .register_policy(backend.register_acl(backend.register_tagging(
+            .register_encryption(backend.register_policy(backend.register_acl(backend.register_tagging(
                 backend.register_lifecycle(
                     backend.register_listing(backend.register_versioning(backend.register_multipart(builder))),
                 ),
-            )))
+            ))))
             .build()?;
     Ok(service)
 }
@@ -397,7 +397,10 @@ mod tests {
         let body = body_of(&listed);
         assert_eq!(listed.status(), 200, "{body}");
         assert!(body.contains("<ID>s3gate-main</ID>"), "{body}");
-        assert!(body.contains("<DisplayName>Main &lt;Owner&gt; &amp; \"Friends\"</DisplayName>"), "{body}");
+        assert!(
+            body.contains("<DisplayName>Main &lt;Owner&gt; &amp; &quot;Friends&quot;</DisplayName>"),
+            "{body}"
+        );
     }
 
     /// Negative — the rustfs/gateway#811 repro: a bucket the primary identity created is
@@ -639,7 +642,10 @@ mod tests {
         let body = body_of(&listed);
         assert_eq!(listed.status(), 200, "{body}");
         assert!(body.contains("<ID>s3gate-main</ID>"), "{body}");
-        assert!(body.contains("<DisplayName>Main &lt;Owner&gt; &amp; \"Friends\"</DisplayName>"), "{body}");
+        assert!(
+            body.contains("<DisplayName>Main &lt;Owner&gt; &amp; &quot;Friends&quot;</DisplayName>"),
+            "{body}"
+        );
     }
 
     /// Negative — configuring an owner does not bypass the ListObjectsV2 fetch-owner switch.
