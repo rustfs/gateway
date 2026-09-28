@@ -29,6 +29,8 @@ const THREADS: usize = 100;
 /// a-asm-0024. One hundred connection-style clones can answer requests concurrently.
 #[test]
 fn one_hundred_clones_answer_concurrently() {
+    #[cfg(gateway_tsan)]
+    assert_the_system_allocator_serves_this_binary();
     let service = support::service();
     let start = Arc::new(Barrier::new(THREADS));
     let completed = Arc::new(AtomicUsize::new(0));
@@ -55,4 +57,21 @@ fn one_hundred_clones_answer_concurrently() {
         worker.join().expect("a request thread must not panic");
     }
     assert_eq!(completed.load(Ordering::SeqCst), 100, "not every OS request thread completed");
+}
+
+/// Under ThreadSanitizer this binary must allocate through the system allocator, never through
+/// `dhat::Alloc`, whose global lock would order every allocating thread and could hide a race
+/// (rustfs/gateway#958). A dhat testing profiler counts blocks only when `dhat::Alloc` is the
+/// global allocator, so a counted allocation means the instrumentation is back.
+#[cfg(gateway_tsan)]
+fn assert_the_system_allocator_serves_this_binary() {
+    let profiler = dhat::Profiler::builder().testing().build();
+    let probe = std::hint::black_box(vec![0_u8; 4096]);
+    let stats = dhat::HeapStats::get();
+    drop(probe);
+    drop(profiler);
+    assert_eq!(
+        stats.total_blocks, 0,
+        "the TSAN build allocates through dhat::Alloc; its global lock orders every allocating thread"
+    );
 }

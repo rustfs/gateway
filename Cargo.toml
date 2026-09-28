@@ -99,6 +99,9 @@ rcgen = { version = "0.14", default-features = false, features = ["crypto", "pem
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
+# `gateway_tsan` is set only by scripts/run_gateway_tsan.sh: it compiles the gateway test binary's
+# `dhat::Alloc` global allocator out, so ThreadSanitizer observes the system allocator (#958).
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(gateway_tsan)"] }
 missing_docs = "deny"
 unreachable_pub = "warn"
 
