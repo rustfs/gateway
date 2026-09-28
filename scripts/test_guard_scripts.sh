@@ -37,6 +37,14 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
+# Every repository this suite creates is a short-lived fixture that later cases clone, reset or
+# delete. A commit otherwise starts detached `git maintenance run --auto`, which packs and prunes
+# loose objects underneath a concurrent `git clone` of the same sandbox ("failed to copy file ...
+# No such file or directory") or recreates files while `rm -rf` removes the repository.
+export GIT_CONFIG_COUNT=2
+export GIT_CONFIG_KEY_0=maintenance.auto GIT_CONFIG_VALUE_0=false
+export GIT_CONFIG_KEY_1=gc.auto GIT_CONFIG_VALUE_1=0
+
 failures=0
 cases=0
 QUIRK_LEDGER_ONLY="${GATEWAY_GUARD_QUIRK_LEDGER_ONLY:-0}"
@@ -1436,7 +1444,9 @@ for guard in "${SCRIPT_DIR}"/check_*.sh; do
         continue
     fi
     positive_control_output=""
-    if positive_control_output="$("$guard" 2>&1)"; then
+    # The POSIX locale is what a bare CI host provides (the org runners export no LANG); a guard
+    # whose interpreter falls back to US-ASCII there must fail here, not first on main.
+    if positive_control_output="$(LC_ALL=C LANG=C "$guard" 2>&1)"; then
         pass_msg "$(basename "$guard")"
     else
         # Print what the guard said. A positive control that swallows its own diagnosis
@@ -4127,6 +4137,23 @@ probe_adr_committed_self_base_rejected() {
     fi
 }
 probe_adr_committed_self_base_rejected
+
+probe_sandbox_commit_starts_no_maintenance() {
+    local trace rc=0
+    cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
+    make_sandbox
+    trace="$(cd "$SANDBOX" && GIT_TRACE=1 git -c user.name=t -c user.email=t@t \
+        commit --allow-empty -qm 'maintenance probe' 2>&1)" || rc=$?
+    if [[ "$rc" -eq 0 && "$trace" == *'trace: built-in: git commit'* &&
+        "$trace" != *'maintenance run'* && "$trace" != *' gc --auto'* ]]; then
+        pass_msg 'a sandbox commit starts no detached maintenance that could prune objects mid-clone'
+    else
+        fail_msg 'a sandbox commit started git auto-maintenance, which races clones and cleanup'
+        printf '%s\n' "$trace" | sed 's/^/       /' >&2
+    fi
+}
+probe_sandbox_commit_starts_no_maintenance
 
 probe_adr_origin_main_self_base_rejected() {
     local holder sandbox output rc=0

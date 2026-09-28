@@ -54,7 +54,9 @@ else
 fi
 git -C "$ROOT" cat-file -e "${BASE}^{commit}" 2>/dev/null || fail "ADR base is not a commit: ${BASE}"
 
-ruby - "$ADR_DIR" "$ROOT" "$BASE" <<'RUBY'
+# -E and the magic comment pin UTF-8 for the script and every file it reads, whatever the host locale.
+ruby -E UTF-8 - "$ADR_DIR" "$ROOT" "$BASE" <<'RUBY'
+# encoding: utf-8
 require "date"
 require "open3"
 
