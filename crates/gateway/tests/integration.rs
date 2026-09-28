@@ -148,6 +148,8 @@ mod service_config;
 mod sigv2_runtime;
 #[path = "sse_runtime.rs"]
 mod sse_runtime;
+#[path = "steady_state_allocations.rs"]
+mod steady_state_allocations;
 #[path = "streaming_request.rs"]
 mod streaming_request;
 #[path = "streaming_without_length.rs"]
