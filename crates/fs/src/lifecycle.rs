@@ -234,10 +234,11 @@ impl Handler<PutBucketLifecycleConfiguration> for FsBackend {
     async fn call(&self, request: Req<PutBucketLifecycleConfiguration>) -> HandlerResult<PutBucketLifecycleConfiguration> {
         let input = request.into_input();
         self.require_bucket(input.bucket.as_str()).await?;
-        let Some(configuration) = input.lifecycle_configuration else {
+        let Some(mut configuration) = input.lifecycle_configuration else {
             return Err(HandlerError::new(ErrorCode::MALFORMED_XML, "the request carries no lifecycle document"));
         };
         validate_lifecycle(&configuration).map_err(|rejection| HandlerError::new(rejection.code(), rejection.reason()))?;
+        rustfs_write_rules(&mut configuration)?;
         let record = LifecycleRecord {
             configuration,
             minimum_object_size: input.transition_default_minimum_object_size.clone(),
@@ -247,6 +248,38 @@ impl Handler<PutBucketLifecycleConfiguration> for FsBackend {
             transition_default_minimum_object_size: input.transition_default_minimum_object_size,
         }))
     }
+}
+
+/// RustFS's own write rules on top of the shared contract (`execute_put_bucket_lifecycle_configuration`
+/// in `rustfs/src/app/bucket_usecase.rs`, rustfs/gateway#999): a rule without `ID` is given
+/// `rule-<index>`, suffixed `-<n>` past an id another rule carries, and a `Status` other than
+/// exactly `Enabled` or `Disabled` is `MalformedXML`. The shared contract stays lenient about
+/// `Status` for documents already stored (`q-lc-0014`); this is RustFS's write path only.
+fn rustfs_write_rules(configuration: &mut BucketLifecycleConfiguration) -> Result<(), HandlerError> {
+    let mut taken: std::collections::HashSet<String> = configuration.rules.iter().filter_map(|rule| rule.id.clone()).collect();
+    for (index, rule) in configuration.rules.iter_mut().enumerate() {
+        if rule.id.is_none() {
+            let mut suffix = 0usize;
+            let mut generated = format!("rule-{index}");
+            while taken.contains(&generated) {
+                suffix += 1;
+                generated = format!("rule-{index}-{suffix}");
+            }
+            taken.insert(generated.clone());
+            rule.id = Some(generated);
+        }
+    }
+    if configuration
+        .rules
+        .iter()
+        .any(|rule| rule.status.as_str() != Status::ENABLED.as_str() && rule.status.as_str() != Status::DISABLED.as_str())
+    {
+        return Err(HandlerError::new(
+            ErrorCode::MALFORMED_XML,
+            "Malformed XML: Rule status must be either Enabled or Disabled",
+        ));
+    }
+    Ok(())
 }
 
 impl Handler<DeleteBucketLifecycle> for FsBackend {

@@ -69,6 +69,8 @@ mod multipart_upload_ids;
 
 #[path = "crud/lifecycle.rs"]
 mod lifecycle;
+#[path = "crud/lifecycle_rustfs_rules.rs"]
+mod lifecycle_rustfs_rules;
 
 #[path = "crud/lifecycle_expiration.rs"]
 mod lifecycle_expiration;
