@@ -17,7 +17,9 @@
 //!
 //! Responsible for: assembling the service the way the RustFS ring-2 adapter will (SigV4
 //! authenticator, allow-every-stage authorizer, anonymous admission delegated to it, a fixed
-//! bucket owner), registering one recording handler for every diffed operation, and reporting for
+//! bucket owner), with admission never refusing for load (the governor's rates are a deployment's
+//! capacity, not decoding; a harness that sends thousands of requests a second would otherwise
+//! measure `503 SlowDown` after the first 256), registering one recording handler for every diffed operation, and reporting for
 //! one request the operation the service routed to (from its own observer, refusals included),
 //! what the handler was handed, and the refusal when the handler was never reached.
 //! NOT responsible for: comparing (`decode.rs`), spelling members (`project/*.rs`), or host
@@ -28,9 +30,9 @@ use std::sync::{Arc, Mutex};
 
 use http_body_util::BodyExt;
 use rustfs_gateway::{
-    Authorizer, AuthzRequest, BoxFuture, Credentials, Decision, Handler, HandlerError, HandlerResult, InputAuthzRequest,
-    InputDecisions, Observer, Req, RequestContext, RequestEvent, S3Service, ServiceBuilder, SigV4Authenticator,
-    StaticCredentials,
+    Authorizer, AuthzRequest, BoxFuture, Credentials, Decision, GovernorRates, Handler, HandlerError, HandlerResult,
+    InputAuthzRequest, InputDecisions, Observer, Rate, Req, RequestContext, RequestEvent, S3Service, ServiceBuilder,
+    SigV4Authenticator, StaticCredentials, Unlimited,
 };
 use rustfs_gateway_sig::{RegionSet, SecurityFloor};
 use rustfs_gateway_stream::{ByteStream, PayloadRead, PayloadStream};
@@ -177,7 +179,17 @@ impl GatewayStack {
             slot: Arc::clone(&slot),
             eats_one_byte: *fault == Fault::GatewayDecoderEatsOneByte,
         });
+        let unbounded = Rate::new(u32::MAX, u32::MAX);
         let builder = ServiceBuilder::new()
+            .framework_governor_rates(GovernorRates {
+                aggregate: unbounded,
+                per_ip: unbounded,
+                credential_lookup: unbounded,
+                cors_preflight: unbounded,
+                unauthenticated: unbounded,
+                tracked_clients: 1,
+            })
+            .governor(Unlimited)
             .authenticator(authenticator)
             .authorizer(AllowEveryStage)
             .security_floor(SecurityFloor::new().delegate_anonymous_to_authorizer_after_listing_in_the_posture_report())

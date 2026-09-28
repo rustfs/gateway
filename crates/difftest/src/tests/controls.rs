@@ -363,3 +363,16 @@ fn findings_are_ordered_route_then_failures_then_wording() {
     );
     assert_eq!(diff.findings().last().map(|finding| finding.item.clone()), Some(Item::Message));
 }
+
+/// Negative — one pair of stacks answers any number of requests without refusing for load: a
+/// harness the gateway throttles would report `503 SlowDown` as a decode difference after the
+/// governor's default burst (256).
+#[test]
+fn the_harness_is_never_refused_for_load() {
+    let differ = Differ::new().expect("both stacks build");
+    let request = RawRequest::get("/bkt/k");
+    for step in 0..600 {
+        let diff = differ.diff(&request).expect("the harness runs");
+        assert!(diff.error.gateway.is_none(), "step {step}: {:?}", diff.error.gateway);
+    }
+}
