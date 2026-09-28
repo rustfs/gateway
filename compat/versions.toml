@@ -123,3 +123,28 @@ lock_pattern = '"AWSSDK\.S3": \{\s*"type": "Direct",\s*"requested": "[^"]*",\s*"
 version = "4.0.103.4"
 # The NuGet version is the AWSSDK.S3 assembly's file version, which the program reads at runtime.
 version_command = 'dotnet "$COMPAT_CLIENT_OUT/app/driver.dll" --client-version'
+
+[clients.aws-sdk-java-v2]
+install = "program"
+# A driver program, not a command: the SDK is a library. pom.xml names every dependency and plugin
+# at an exact version, which makes Maven's resolution deterministic, so it is the lock file. The
+# build puts the driver jar and every runtime dependency in `$COMPAT_CLIENT_OUT/lib`.
+source = "compat/drivers/aws-sdk-java-v2"
+toolchain = "mvn"
+build = 'mvn -B -q -Dcompat.out="$COMPAT_CLIENT_OUT" package'
+lock_file = "pom.xml"
+lock_pattern = '^\s*<awssdk\.version>(\S+)</awssdk\.version>$'
+version = "2.55.6"
+version_command = 'java -cp "$COMPAT_CLIENT_OUT/lib/*" compat.Driver --client-version'
+
+[clients.aws-sdk-java-v1]
+install = "program"
+# The same layout as aws-sdk-java-v2. The version is read from aws-java-sdk-core, which the pinned
+# aws-java-sdk-s3 requires at its own exact release.
+source = "compat/drivers/aws-sdk-java-v1"
+toolchain = "mvn"
+build = 'mvn -B -q -Dcompat.out="$COMPAT_CLIENT_OUT" package'
+lock_file = "pom.xml"
+lock_pattern = '^\s*<awssdk\.version>(\S+)</awssdk\.version>$'
+version = "1.12.797"
+version_command = 'java -Daws.java.v1.disableDeprecationAnnouncement=true -cp "$COMPAT_CLIENT_OUT/lib/*" compat.Driver --client-version'

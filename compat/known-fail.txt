@@ -50,3 +50,7 @@ s3cmd/presigned-get          rustfs/gateway#913  presigned SigV2 is refused unde
 # aws-sdk-dotnet percent-encodes the whole x-amz-copy-source, bucket/key separator included, and
 # the gateway looks for the separator before decoding.
 aws-sdk-dotnet/copy-object   rustfs/gateway#926  an encoded bucket/key separator in x-amz-copy-source is refused
+
+# aws-sdk-java-v2's multipart client carries each part's CRC32 in a trailer; UploadPart only reads a
+# part checksum from request headers, so a composite-checksum upload refuses every part.
+aws-sdk-java-v2/large-multipart-upload  rustfs/gateway#929  a part checksum carried in a trailer is ignored
