@@ -37,6 +37,8 @@ const AND_TAG_FILTER: &str = concat!(
     "<Status>Enabled</Status></Rule></LifecycleConfiguration>"
 );
 const AND_TAG_FILTER_MD5: &str = "k3JCUwJm8ypo6wJ3zRPyKg==";
+const EMPTY: &str = "<Tagging><TagSet></TagSet></Tagging>";
+const EMPTY_MD5: &str = "k6PBbu32RmFaV5nRULDSlw==";
 const INVALID: &str = "<Tagging><TagSet><Tag><Key></Key><Value>bad</Value></Tag></TagSet></Tagging>";
 const INVALID_MD5: &str = "r3BCGeE4PMsvsFM9d0tPgA==";
 
@@ -367,4 +369,81 @@ async fn n_tag_authority_symlink_is_refused_for_read_write_and_delete() {
     ];
     assert_eq!(statuses, [400, 400, 400]);
     assert_eq!(std::fs::read_to_string(outside).expect("outside state remains readable"), HOT);
+}
+
+async fn tagging_counts(service: &S3Service, target: &str) -> [Option<String>; 2] {
+    let mut counts = [None, None];
+    for (slot, method) in counts.iter_mut().zip([http::Method::GET, http::Method::HEAD]) {
+        let response = exchange(service, signed(method, target, Bytes::new())).await;
+        assert_eq!(response.status(), 200);
+        *slot = header(&response, "x-amz-tagging-count")
+            .and_then(|value| value.to_str().ok())
+            .map(ToOwned::to_owned);
+    }
+    counts
+}
+
+/// Positive — `GetObject` and `HeadObject` report how many tags the version carries
+/// (rustfs/gateway#1000), and follow a replacement.
+#[tokio::test]
+async fn reads_report_the_tag_count() {
+    let root = TestRoot::new();
+    let (_, service) = service(&root);
+    create_bucket(&service, "tag-count").await;
+    let mut headers = http::HeaderMap::new();
+    headers.insert("x-amz-tagging", http::HeaderValue::from_static("a=1&b=2"));
+    let written = exchange(
+        &service,
+        signed_with_headers(http::Method::PUT, "/tag-count/key", Bytes::from_static(b"body"), headers),
+    )
+    .await;
+    assert_eq!(written.status(), 200);
+    assert_eq!(
+        tagging_counts(&service, "/tag-count/key").await,
+        [Some("2".to_owned()), Some("2".to_owned())]
+    );
+
+    assert_eq!(put_tags(&service, "tag-count", "key", None, COLD, COLD_MD5).await.status(), 200);
+    assert_eq!(
+        tagging_counts(&service, "/tag-count/key").await,
+        [Some("1".to_owned()), Some("1".to_owned())]
+    );
+}
+
+/// Negative — an object with no tags, or whose tags were deleted, reports no count.
+#[tokio::test]
+async fn n_untagged_reads_report_no_tag_count() {
+    let root = TestRoot::new();
+    let (_, service) = service(&root);
+    create_bucket(&service, "tag-count").await;
+    assert_eq!(
+        exchange(&service, signed(http::Method::PUT, "/tag-count/key", Bytes::from_static(b"body")))
+            .await
+            .status(),
+        200
+    );
+    assert_eq!(tagging_counts(&service, "/tag-count/key").await, [None, None]);
+    assert_eq!(put_tags(&service, "tag-count", "key", None, COLD, COLD_MD5).await.status(), 200);
+    assert_eq!(delete_tags(&service, "tag-count", "key", None).await.status(), 204);
+    assert_eq!(tagging_counts(&service, "/tag-count/key").await, [None, None]);
+    // An explicitly empty tag set is stored, and counts as no tags.
+    assert_eq!(put_tags(&service, "tag-count", "key", None, EMPTY, EMPTY_MD5).await.status(), 200);
+    assert_eq!(tagging_counts(&service, "/tag-count/key").await, [None, None]);
+}
+
+/// Negative — an unreadable tag document does not fail the read; it reports no count.
+#[tokio::test]
+async fn n_corrupt_tags_leave_the_read_intact_without_a_count() {
+    let root = TestRoot::new();
+    let (_, service) = service(&root);
+    create_bucket(&service, "tag-count").await;
+    assert_eq!(
+        exchange(&service, signed(http::Method::PUT, "/tag-count/key", Bytes::from_static(b"body")))
+            .await
+            .status(),
+        200
+    );
+    assert_eq!(put_tags(&service, "tag-count", "key", None, COLD, COLD_MD5).await.status(), 200);
+    std::fs::write(only_tag_path(&root, "tag-count"), b"corrupt").expect("the exact tag authority is writable");
+    assert_eq!(tagging_counts(&service, "/tag-count/key").await, [None, None]);
 }

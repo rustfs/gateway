@@ -70,6 +70,17 @@ pub(super) struct Representation {
     pub(super) directory: Option<std::path::PathBuf>,
 }
 
+/// How many tags the version carries, as `x-amz-tagging-count` reports it (rustfs/gateway#1000).
+///
+/// `None` for a version with no tags, a plain object file, and a tag document that cannot be
+/// read: the count is advisory, and a read must not fail on it
+/// (`n_corrupt_tag_authority_is_not_treated_as_an_empty_set`).
+async fn tag_count(representation: &Representation) -> Option<i32> {
+    let directory = representation.directory.as_deref()?;
+    let tags = super::tagging::read_persisted_tags(directory).await.ok()?;
+    i32::try_from(tags.len()).ok().filter(|count| *count > 0)
+}
+
 /// The window a read serves, and the answer's status.
 struct Window {
     start: usize,
@@ -290,6 +301,7 @@ impl Handler<GetObject> for super::FsBackend {
             &representation,
         )?;
         let encryption = representation.headers.encryption();
+        let tag_count = tag_count(&representation).await;
         let body = representation
             .bytes
             .get(window.start..window.end_exclusive)
@@ -308,6 +320,7 @@ impl Handler<GetObject> for super::FsBackend {
                 storage_class: representation.storage_class,
                 version_id: representation.version_id,
                 metadata: representation.metadata,
+                tag_count,
                 content_type: Some(representation.headers.served_content_type()),
                 cache_control: representation.headers.cache_control,
                 content_disposition: representation.headers.content_disposition,
@@ -354,6 +367,7 @@ impl Handler<HeadObject> for super::FsBackend {
         // operation's IR carries no such field, so there is nothing to read rather than something
         // being ignored.
         let window = resolve_window(input.range.as_ref().map(|range| range.as_str()), None, input.part_number, &representation)?;
+        let tag_count = tag_count(&representation).await;
         let encryption = representation.headers.encryption();
         Ok(Resp::with_status(
             HeadObjectOutput {
@@ -365,6 +379,7 @@ impl Handler<HeadObject> for super::FsBackend {
                 storage_class: representation.storage_class,
                 version_id: representation.version_id,
                 metadata: representation.metadata,
+                tag_count,
                 content_type: Some(representation.headers.served_content_type()),
                 cache_control: representation.headers.cache_control,
                 content_disposition: representation.headers.content_disposition,
