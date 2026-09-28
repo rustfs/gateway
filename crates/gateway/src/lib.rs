@@ -106,6 +106,7 @@ mod render;
 mod request_body;
 mod request_config;
 mod request_deadline;
+mod request_end;
 mod response;
 mod routed_facts;
 mod routing;

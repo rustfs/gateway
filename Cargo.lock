@@ -1750,6 +1750,7 @@ dependencies = [
  "httparse",
  "hyper",
  "md-5",
+ "pin-project-lite",
  "rustfs-gateway-core",
  "rustfs-gateway-dialect-minio",
  "rustfs-gateway-http",
