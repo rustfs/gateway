@@ -31,6 +31,8 @@ impl Conn {
     /// Returns the test listener for this case, starting it on first use.
     pub(super) fn listener(&mut self, at_unix_seconds: i64, skew_ms: i64, profile: Profile) -> Result<&Listener, SutError> {
         if self.listener.is_none() {
+            #[cfg(test)]
+            std::thread::sleep(self.setup_delay);
             let service = self.inner.assemble(at_unix_seconds, skew_ms, profile)?;
             self.listener = Some(Listener::start(service, honour_the_services_intent(), Announce::Matching)?);
         }
@@ -44,6 +46,8 @@ impl Conn {
         #[cfg(feature = "production-transports")]
         if let Some(driver) = self.driver {
             if self.production.is_none() {
+                #[cfg(test)]
+                std::thread::sleep(self.setup_delay);
                 let service = self.inner.assemble(at_unix_seconds, skew_ms, profile)?;
                 self.production = Some(ProductionServer::start(service, driver)?);
             }

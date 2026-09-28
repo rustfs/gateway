@@ -35,6 +35,8 @@
 //! adds `x-amz-request-id` in a tower layer outside s3s (`rustfs/src/server/layer.rs`), which the
 //! divergence register records.
 
+#[cfg(test)]
+mod clock;
 mod divergences;
 mod mapping;
 mod matrix;
@@ -287,9 +289,10 @@ pub(crate) struct Pair {
 ///
 /// A harness failure; every refusal is a [`Reply`].
 pub(crate) fn both(scenario: &Scenario) -> Result<Pair, String> {
-    let (target, headers) = scenario.wire(RequestNow::capture())?;
+    let now = RequestNow::capture();
+    let (target, headers) = scenario.wire(now)?;
     Ok(Pair {
-        gateway: gateway_reply(scenario, &target, &headers)?,
+        gateway: gateway_reply(scenario, &target, &headers, now)?,
         oracle: s3s_reply(scenario, &target, &headers)?,
     })
 }
@@ -383,7 +386,7 @@ impl Authorizer for DenyAnonymous {
     }
 }
 
-fn gateway_service(scenario: &Scenario, reached: &Arc<AtomicBool>) -> Result<S3Service, String> {
+fn gateway_service(scenario: &Scenario, reached: &Arc<AtomicBool>, now: RequestNow) -> Result<S3Service, String> {
     let credentials = Credentials::new(ACCESS_KEY, SECRET_KEY.as_bytes()).map_err(|error| format!("credential: {error:?}"))?;
     let regions = RegionSet::new(REGIONS).map_err(|error| format!("regions: {error:?}"))?;
     let authenticator = SigV4Authenticator::new(Arc::new(StaticCredentials::new().with(credentials)), regions);
@@ -392,7 +395,7 @@ fn gateway_service(scenario: &Scenario, reached: &Arc<AtomicBool>) -> Result<S3S
         native: scenario.native,
         reached: Arc::clone(reached),
     });
-    ServiceBuilder::new()
+    super::verifying_at(ServiceBuilder::new(), now)
         .authenticator(authenticator)
         .authorizer(DenyAnonymous)
         .security_floor(SecurityFloor::new().delegate_anonymous_to_authorizer_after_listing_in_the_posture_report())
@@ -407,9 +410,9 @@ fn gateway_service(scenario: &Scenario, reached: &Arc<AtomicBool>) -> Result<S3S
         .map_err(|error| format!("assembly: {error:?}"))
 }
 
-fn gateway_reply(scenario: &Scenario, target: &str, headers: &HeaderMap) -> Result<Reply, String> {
+fn gateway_reply(scenario: &Scenario, target: &str, headers: &HeaderMap, now: RequestNow) -> Result<Reply, String> {
     let reached = Arc::new(AtomicBool::new(false));
-    let service = gateway_service(scenario, &reached)?;
+    let service = gateway_service(scenario, &reached, now)?;
     let request = head(scenario, target, headers)
         .body(scenario.request.body.clone())
         .map_err(|error| format!("fixture head: {error}"))?;

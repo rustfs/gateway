@@ -21,6 +21,10 @@
 use crate::support;
 use std::process::Command;
 
+/// Compiled out of the ThreadSanitizer build: dhat takes one process-wide lock on every allocation,
+/// which orders any two allocating threads for TSAN and can hide the race a-asm-0024 looks for
+/// (rustfs/gateway#958). `scripts/run_gateway_tsan.sh` sets `--cfg gateway_tsan`.
+#[cfg(not(gateway_tsan))]
 #[global_allocator]
 static ALLOCATOR: dhat::Alloc = dhat::Alloc;
 

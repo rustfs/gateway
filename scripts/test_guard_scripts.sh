@@ -15764,6 +15764,53 @@ mut_clock_monotonic_source_deleted() {
 expect_fail check_clock_single_source.sh \
     "the monotonic source deleted, which must fail rather than skip" mut_clock_monotonic_source_deleted
 
+mut_clock_wall_read_through_an_alias() {
+    python3 - <<'CLOCKPY'
+import pathlib
+path = pathlib.Path("crates/gateway/src/service.rs")
+# rustfs/backlog#1759: a renamed import hides the reading from every search for the real name.
+path.write_text(path.read_text() + """
+use std::time::SystemTime as Wall;
+fn a_present_under_another_name() -> Wall {
+    Wall::now()
+}
+""")
+CLOCKPY
+}
+expect_fail check_clock_single_source.sh \
+    'a wall-clock reading through a renamed import' mut_clock_wall_read_through_an_alias \
+    'a renamed clock type hides every later reading'
+
+mut_clock_type_alias() {
+    python3 - <<'CLOCKPY'
+import pathlib
+path = pathlib.Path("crates/core/src/lib.rs")
+path.write_text(path.read_text() + """
+type Stopwatch = std::time::Instant;
+""")
+CLOCKPY
+}
+expect_fail check_clock_single_source.sh \
+    'a clock type renamed by a type alias' mut_clock_type_alias \
+    'a renamed clock type hides every later reading'
+
+mut_clock_reading_taken_as_a_function() {
+    python3 - <<'CLOCKPY'
+import pathlib
+path = pathlib.Path("crates/core/src/lib.rs")
+# No call parentheses at the path: the reading happens where the pointer is called.
+path.write_text(path.read_text() + """
+fn a_deferred_reading() -> std::time::Instant {
+    let read = <std::time::Instant>::now;
+    read()
+}
+""")
+CLOCKPY
+}
+expect_fail check_clock_single_source.sh \
+    'a clock reading taken as a function pointer through a qualified path' mut_clock_reading_taken_as_a_function \
+    'the protocol path reads a clock outside'
+
 mut_governor_moved_after_body_read() {
     python3 - <<'PYEOF'
 import pathlib
@@ -19760,11 +19807,58 @@ mut_tsan_instrumentation_deleted() {
     python3 - <<'PYEOF'
 import pathlib
 path = pathlib.Path("scripts/run_gateway_tsan.sh")
-path.write_text(path.read_text().replace("RUSTFLAGS='-Zsanitizer=thread'", "RUSTFLAGS=''", 1))
+text = path.read_text()
+old = "RUSTFLAGS='-Zsanitizer=thread --cfg gateway_tsan'"
+if text.count(old) != 1:
+    raise SystemExit("the TSAN RUSTFLAGS line is not unique")
+path.write_text(text.replace(old, "RUSTFLAGS='--cfg gateway_tsan'", 1))
 PYEOF
 }
 expect_fail check_gateway_tsan_wiring.sh \
     'the TSAN runner losing sanitizer instrumentation' mut_tsan_instrumentation_deleted
+
+# dhat's global allocator lock orders every allocating thread for TSAN (rustfs/gateway#958).
+mut_tsan_keeps_dhat_allocator() {
+    python3 - <<'PYEOF'
+import pathlib
+path = pathlib.Path("scripts/run_gateway_tsan.sh")
+text = path.read_text()
+old = "RUSTFLAGS='-Zsanitizer=thread --cfg gateway_tsan'"
+if text.count(old) != 1:
+    raise SystemExit("the TSAN RUSTFLAGS line is not unique")
+path.write_text(text.replace(old, "RUSTFLAGS='-Zsanitizer=thread'", 1))
+PYEOF
+}
+expect_fail check_gateway_tsan_wiring.sh \
+    'the TSAN build keeping the dhat global allocator' mut_tsan_keeps_dhat_allocator
+
+mut_tsan_dhat_allocator_unconditional() {
+    python3 - <<'PYEOF'
+import pathlib
+path = pathlib.Path("crates/gateway/tests/service_clone_allocations.rs")
+text = path.read_text()
+old = "#[cfg(not(gateway_tsan))]\n#[global_allocator]"
+if text.count(old) != 1:
+    raise SystemExit("the cfg-gated global allocator is not unique")
+path.write_text(text.replace(old, "#[global_allocator]", 1))
+PYEOF
+}
+expect_fail check_gateway_tsan_wiring.sh \
+    'the dhat global allocator compiled into the TSAN build' mut_tsan_dhat_allocator_unconditional
+
+mut_tsan_allocator_proof_deleted() {
+    python3 - <<'PYEOF'
+import pathlib
+path = pathlib.Path("crates/gateway/tests/service_concurrency.rs")
+text = path.read_text()
+old = "    #[cfg(gateway_tsan)]\n    assert_the_system_allocator_serves_this_binary();\n"
+if text.count(old) != 1:
+    raise SystemExit("the allocator proof call is not unique")
+path.write_text(text.replace(old, "", 1))
+PYEOF
+}
+expect_fail check_gateway_tsan_wiring.sh \
+    'the TSAN case no longer proving its allocator' mut_tsan_allocator_proof_deleted
 
 mut_tsan_build_std_deleted() {
     python3 - <<'PYEOF'
@@ -24163,6 +24257,46 @@ expect_fail check_client_versions_pinned.sh \
     mut_compat_pin_not_installed \
     'none of its requirements installs that version'
 
+mut_compat_lock_disagrees_with_pin() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+import re
+
+path = Path("compat/drivers/aws-sdk-js/package-lock.json")
+text = path.read_text()
+mutated, count = re.subn(
+    r'("node_modules/@aws-sdk/client-s3": \{\s*"version": )"3\.1141\.0"', r'\1"3.1140.0"', text
+)
+if count != 1:
+    raise SystemExit("lock-file mutation subject is not unique")
+path.write_text(mutated)
+PYEOF
+}
+# A driver program's lock file is the second place its SDK version is written; the two must agree.
+expect_fail check_client_versions_pinned.sh \
+    'a driver program whose lock file builds a different SDK version than the pin' \
+    mut_compat_lock_disagrees_with_pin \
+    'but package-lock.json locks'
+
+mut_compat_lock_pattern_misses() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("compat/drivers/aws-sdk-js/package-lock.json")
+text = path.read_text()
+old = '"node_modules/@aws-sdk/client-s3": {'
+if text.count(old) != 1:
+    raise SystemExit("lock-pattern mutation subject is not unique")
+path.write_text(text.replace(old, '"node_modules/@aws-sdk/client-s3-renamed": {', 1))
+PYEOF
+}
+# A lock pattern that finds nothing proves nothing about what the lock file pins.
+expect_fail check_client_versions_pinned.sh \
+    'a driver program whose lock file no longer names the pinned SDK' \
+    mut_compat_lock_pattern_misses \
+    'matches its lock_pattern 0 time(s)'
+
 mut_compat_second_version_pin() {
     python3 - <<'PYEOF'
 from pathlib import Path
@@ -24233,9 +24367,32 @@ path.write_text("\n".join(lines) + "\n")
 PYEOF
 }
 expect_fail check_corpus_no_secrets.sh \
-    'an AWS secret access key hidden inside a base64 payload' \
+    'an AWS secret access key hidden inside a base64 payload, named by file and line' \
     mut_corpus_secret_in_a_decoded_payload \
-    'an AWS secret access key'
+    'corpus/object/PutObject.jsonl:1: an AWS secret access key'
+
+# rustfs/backlog#1763 a-cp-0015 names a JWT beside the PEM key. Planted on the second line of the
+# bucket, so the expected diagnostic also proves the line number is the offending line and not
+# the first line of whatever file had a finding.
+mut_corpus_json_web_token_in_a_header() {
+    python3 - <<'PYEOF'
+import json
+from pathlib import Path
+
+path = Path("corpus/object/PutObject.jsonl")
+lines = path.read_text().splitlines()
+if len(lines) < 2:
+    raise SystemExit("the JWT mutation needs a second entry in the bucket")
+entry = json.loads(lines[1])
+entry["headers"].append(["x-amz-meta-note", "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJjb3JwdXMifQ.c2lnbmF0dXJl"])
+lines[1] = json.dumps(entry, separators=(",", ":"))
+path.write_text("\n".join(lines) + "\n")
+PYEOF
+}
+expect_fail check_corpus_no_secrets.sh \
+    'a JSON Web Token parked in a metadata header, named by file and line' \
+    mut_corpus_json_web_token_in_a_header \
+    'corpus/object/PutObject.jsonl:2: a JSON Web Token'
 
 mut_corpus_live_trailer_signature() {
     python3 - <<'PYEOF'
@@ -24489,6 +24646,106 @@ expect_fail check_corpus_size.sh \
     'the hard ceiling becoming unreadable, which must fail rather than default' \
     mut_corpus_size_limits_unreadable \
     'cannot read HARD_SIZE_LIMIT_BYTES'
+
+mut_recorder_feature_in_its_own_default() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/corpus-recorder/Cargo.toml")
+text = path.read_text()
+if text.count("default = []\n") != 1:
+    raise SystemExit("recorder default mutation subject is not unique")
+path.write_text(text.replace("default = []\n", 'default = ["corpus-record"]\n', 1))
+PYEOF
+}
+expect_fail check_recorder_not_default.sh \
+    'the corpus recorder feature added to its own default set' \
+    mut_recorder_feature_in_its_own_default \
+    'must be empty'
+
+mut_recorder_required_by_another_crate() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("compat/sut/Cargo.toml")
+text = path.read_text()
+if text.count("[dependencies]\n") != 1:
+    raise SystemExit("compat-sut dependency mutation subject is not unique")
+path.write_text(text.replace(
+    "[dependencies]\n",
+    '[dependencies]\nrustfs-gateway-corpus-recorder = { workspace = true, features = ["corpus-record"] }\n',
+    1,
+))
+PYEOF
+}
+expect_fail check_recorder_not_default.sh \
+    'a workspace crate depending on the recorder without optional = true' \
+    mut_recorder_required_by_another_crate \
+    'without `optional = true`'
+
+mut_recorder_reached_from_a_default_feature_chain() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("compat/sut/Cargo.toml")
+text = path.read_text()
+if text.count("[dependencies]\n") != 1:
+    raise SystemExit("compat-sut feature mutation subject is not unique")
+text = text.replace(
+    "[dependencies]\n",
+    '[features]\ndefault = ["record"]\nrecord = ["dep:rustfs-gateway-corpus-recorder"]\n\n[dependencies]\n'
+    'rustfs-gateway-corpus-recorder = { workspace = true, optional = true, features = ["corpus-record"] }\n',
+    1,
+)
+path.write_text(text)
+PYEOF
+}
+expect_fail check_recorder_not_default.sh \
+    'a default feature reaching the recorder through another feature' \
+    mut_recorder_reached_from_a_default_feature_chain \
+    'compiles the recorder in'
+
+mut_recorder_dependency_not_optional() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/corpus-recorder/Cargo.toml")
+text = path.read_text()
+old = "tower = { workspace = true, optional = true }\n"
+if text.count(old) != 1:
+    raise SystemExit("recorder dependency mutation subject is not unique")
+path.write_text(text.replace(old, "tower = { workspace = true }\n", 1))
+PYEOF
+}
+expect_fail check_recorder_not_default.sh \
+    'a recorder dependency linked into a build without the feature' \
+    mut_recorder_dependency_not_optional \
+    'is not optional'
+
+mut_recorder_module_ungated() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/corpus-recorder/src/lib.rs")
+text = path.read_text()
+old = '#[cfg(feature = "corpus-record")]\nmod writer;\n'
+if text.count(old) != 1:
+    raise SystemExit("recorder module gate mutation subject is not unique")
+path.write_text(text.replace(old, "mod writer;\n", 1))
+PYEOF
+}
+expect_fail check_recorder_not_default.sh \
+    'a recorder module compiled without the feature gate' \
+    mut_recorder_module_ungated \
+    'is not behind'
+
+mut_recorder_manifest_removed() {
+    rm -f crates/corpus-recorder/Cargo.toml
+}
+expect_fail check_recorder_not_default.sh \
+    'the recorder manifest being absent, which must fail rather than skip' \
+    mut_recorder_manifest_removed \
+    'required input is missing'
 
 # -- re-homed from the error-status block --------------------------------------------------------
 #

@@ -18,6 +18,7 @@ rustfs-gateway = { path = "crates/gateway", version = "0.49.0", default-features
 rustfs-gateway-codegen = { path = "crates/codegen", version = "0.17.0" }
 rustfs-gateway-conformance = { path = "crates/conformance", version = "0.13.0", default-features = false }
 rustfs-gateway-corpus = { path = "crates/corpus", version = "0.1.0" }
+rustfs-gateway-corpus-recorder = { path = "crates/corpus-recorder", version = "0.1.0" }
 rustfs-gateway-core = { path = "crates/core", version = "0.45.0" }
 rustfs-gateway-http = { path = "crates/http", version = "0.1.4" }
 rustfs-gateway-macros = { path = "crates/macros", version = "0.1.4" }
@@ -99,6 +100,9 @@ rcgen = { version = "0.14", default-features = false, features = ["crypto", "pem
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
+# `gateway_tsan` is set only by scripts/run_gateway_tsan.sh: it compiles the gateway test binary's
+# `dhat::Alloc` global allocator out, so ThreadSanitizer observes the system allocator (#958).
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(gateway_tsan)"] }
 missing_docs = "deny"
 unreachable_pub = "warn"
 

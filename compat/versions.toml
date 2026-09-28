@@ -96,3 +96,14 @@ install = "pip"
 # client test drove, behind a thin PyO3 layer, so no Rust toolchain or second lock file is needed.
 package = "opendal"
 version = "0.47.10"
+[clients.aws-sdk-js]
+install = "program"
+# driver.mjs on Node.js. package-lock.json pins every package it resolves, and `npm ci` refuses a
+# lock file that disagrees with package.json instead of re-resolving.
+source = "compat/drivers/aws-sdk-js"
+toolchain = "npm"
+build = "npm ci --no-audit --no-fund --loglevel=error"
+lock_file = "package-lock.json"
+lock_pattern = '"node_modules/@aws-sdk/client-s3": \{\s*"version": "([^"]+)"'
+version = "3.1141.0"
+version_command = 'node "$COMPAT_CLIENT_OUT/src/driver.mjs" --client-version'

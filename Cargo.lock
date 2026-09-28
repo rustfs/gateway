@@ -1750,6 +1750,7 @@ dependencies = [
  "httparse",
  "hyper",
  "md-5",
+ "pin-project-lite",
  "rustfs-gateway-core",
  "rustfs-gateway-dialect-minio",
  "rustfs-gateway-http",
@@ -1840,6 +1841,24 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+]
+
+[[package]]
+name = "rustfs-gateway-corpus-recorder"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "http",
+ "http-body",
+ "http-body-util",
+ "pin-project-lite",
+ "rustfs-gateway",
+ "rustfs-gateway-core",
+ "rustfs-gateway-corpus",
+ "rustfs-gateway-corpus-recorder",
+ "serde_json",
+ "tokio",
+ "tower",
 ]
 
 [[package]]

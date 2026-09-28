@@ -25,12 +25,16 @@ the easiest parts of an S3 rewrite to get wrong, and it had no real-SDK traffic 
 | `rclone` | Drives aws-sdk-go-v2 at high concurrency and produces the list-then-copy traffic of a real mirroring deployment. It declares `UNSIGNED-PAYLOAD` for its uploads, a payload mode the botocore clients never send. |
 | `aws-cli` | AWS's own command-line client (v2) and the reference most users measure a server against. botocore underneath, but its `s3` commands pick part sizes, concurrency and sync decisions of their own. Over TLS its uploads are `STREAMING-UNSIGNED-PAYLOAD-TRAILER` with a CRC64NVME trailer, so it is a second, independently configured trailer writer beside boto3. |
 | `s3cmd` | A hand-written signer and XML layer with no AWS SDK underneath, and the oldest widely deployed S3 CLI. It is the client here that writes an ACL back after a copy without an integrity header, and whose `signurl` produces a SigV2 presigned URL. |
+| `aws-sdk-js` | AWS's JavaScript SDK, v3, on Node.js: the SDK behind most server and browser JavaScript that talks to S3, and the one most sensitive to presigning. It is the client here that frames a stream as `STREAMING-UNSIGNED-PAYLOAD-TRAILER` even over plaintext. |
 | `opendal` | Apache OpenDAL, the Rust data ecosystem's storage layer and the client that found s3s's stalled-request hang (s3s-project/s3s#316). Driven through its Python binding over the same Rust `services-s3` backend. It has no bucket operations, so its driver creates each cell's bucket with boto3 and measures everything else through the operator. |
 
-Deliberately absent for now, with the reason, so the next session does not have to rediscover it:
-`aws-sdk-rust`, `aws-sdk-go` and `aws-sdk-js` from the design-doc list are not yet registered. An
-SDK is a library, so each needs a small driver program under `drivers/<name>/` built from its own
-lock file (the `program` install method in `versions.toml`); rustfs/backlog#1765 tracks them.
+Not registered: `aws-sdk-go` from the design list. Its driver would be a Go program, and
+`scripts/check_no_minio_source.sh` refuses every Go source file in this tree as a clean-room
+boundary with no exemption (rustfs/gateway#974). Its SDK is still exercised, through rclone.
+
+An SDK is a library, so each SDK row is a small driver program under `drivers/<name>/`, built from
+its own lock file by `ci/compat/install_clients.sh` (the `program` install method in
+`versions.toml`) and asked at runtime which SDK version it actually linked.
 
 ## What answered these rows
 
@@ -88,6 +92,21 @@ Exit codes are `0` no regression, `1` at least one regression, `3` the environme
 broken. The third is not the same as "everything failed": a matrix that cannot reach its server
 must say so rather than record 56 failures and poison the baseline.
 
+## Corpus recording
+
+Every scheduled run also records itself as corpus material, the second corpus source P8-04
+describes: `ci/compat/record_corpus.sh` converts the run's probe records with
+`corpus/tools/from_compat_probe.py`, ingests them with the `corpus` CLI (sanitized, deduplicated,
+refused if any credential survives) into `target/compat/corpus`, verifies that strictly, and
+uploads both with the run's artifact. A full run must record at least one aws-chunked request and
+fails if it does not. Nothing is written into the repository's `corpus/`; refreshing that stays a
+reviewed pull request.
+
+```bash
+cargo build --release -p rustfs-gateway-corpus --bin corpus
+ci/compat/record_corpus.sh --run-dir target/compat --corpus-bin target/release/corpus --require-chunked
+```
+
 ## Files
 
 | File | What it is |
@@ -96,6 +115,7 @@ must say so rather than record 56 failures and poison the baseline.
 | `capabilities.toml` | The operations the system under test registers. Checked against the launcher's own registry before every run. |
 | `scenarios/*.yaml` | Client-independent scenarios, with the wire facts some of them assert. |
 | `drivers/<client>/run.sh` | One client's translation of those scenarios. |
+| `../ci/compat/record_corpus.sh` | Turns a run's probe records into a verified corpus under the run directory. |
 | `known-fail.txt` | Excused failures. Shrinks only. |
 | `matrix.json` | The generated manifest. A protected file: it is an external promise. |
 | `sut/` | The `compat-sut` binary: puts `rustfs-gateway-fs` behind a real socket and records what crossed it. It is the runnable server rustfs/gateway#624 says the workspace lacked. Started through `ci/lib/sut.sh`, the launcher shared with the P8-05 external-suite runner (rustfs/backlog#1764). The matrix also starts its TLS listener (`--tls-port`, `--tls-self-signed`) and hands drivers `COMPAT_TLS_ENDPOINT` and `COMPAT_CA_BUNDLE`; only a scenario a client can express solely over TLS uses them (rustfs/gateway#719). |
