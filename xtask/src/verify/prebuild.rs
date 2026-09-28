@@ -86,7 +86,7 @@ pub(super) fn run_prebuild(commands: &[Vec<String>], subject: &str) -> Result<Pr
         for (_, output) in batch.results {
             match output {
                 Ok(output) if output.status.success() => {
-                    compiled_crates += compiled_crate_count(&output.stderr);
+                    compiled_crates += process::build_line_count(&output.stderr);
                 }
                 Ok(output) => {
                     print_cargo_failure(&output);
@@ -110,14 +110,6 @@ pub(super) fn run_prebuild(commands: &[Vec<String>], subject: &str) -> Result<Pr
         elapsed: started.elapsed(),
         compiled_crates,
     })
-}
-
-/// Counts the `Compiling <crate>` lines cargo wrote, an observation of what the build did.
-fn compiled_crate_count(stderr: &[u8]) -> usize {
-    String::from_utf8_lossy(stderr)
-        .lines()
-        .filter(|line| line.trim_start().starts_with("Compiling "))
-        .count()
 }
 
 #[cfg(test)]
@@ -245,10 +237,38 @@ mod tests {
 
     #[test]
     fn compiled_crates_are_counted_from_cargo_lines_alone() {
-        let stderr = b"   Compiling proc-macro2 v1.0.0\n    Checking xtask v0.1.3\n   Compiling syn v2.0.0\n     Running unittests\nnote: Compiling is not a cargo line here\n";
+        let stderr = b"   Compiling proc-macro2 v1.0.0\n     Running unittests\n   Compiling syn v2.0.0\nnote: Compiling is not a cargo line here\n";
 
-        assert_eq!(compiled_crate_count(stderr), 2);
-        assert_eq!(compiled_crate_count(b""), 0);
-        assert_eq!(compiled_crate_count(b"    Finished `test` profile\n"), 0);
+        assert_eq!(process::build_line_count(stderr), 2);
+        assert_eq!(process::build_line_count(b""), 0);
+        assert_eq!(process::build_line_count(b"    Finished `test` profile\n"), 0);
+    }
+
+    /// `CARGO_TERM_COLOR=always`, as every CI job sets it, wraps the verb in SGR escapes.
+    #[test]
+    fn coloured_cargo_lines_are_counted() {
+        let stderr = b"\x1b[1m\x1b[92m   Compiling\x1b[0m ring v0.17.14\n\x1b[1m\x1b[92m    Checking\x1b[0m xtask v0.1.4\n\x1b[1m\x1b[92m    Finished\x1b[0m `dev` profile\n";
+
+        assert_eq!(process::build_line_count(stderr), 2);
+    }
+
+    /// A Clippy step builds the crates it lints and reports them as `Checking`.
+    #[test]
+    fn checking_lines_are_builds_too() {
+        assert_eq!(process::build_line_count(b"    Checking rustfs-gateway-core v0.44.0\n"), 1);
+    }
+
+    #[test]
+    fn n_lines_that_only_mention_a_verb_are_not_builds() {
+        for stderr in [
+            &b"note: Compiling is not a cargo line here\n"[..],
+            b"warning: Checking this later\n",
+            b"   Compilingx proc-macro2\n",
+            b"   Checking\n",
+            b"\x1b[1m   Finished\x1b[0m Compiling-free\n",
+            b"test compiling_is_lowercase ... ok\n",
+        ] {
+            assert_eq!(process::build_line_count(stderr), 0, "{}", String::from_utf8_lossy(stderr));
+        }
     }
 }
