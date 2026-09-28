@@ -1784,6 +1784,7 @@ dependencies = [
  "http-body",
  "rcgen",
  "rustfs-gateway",
+ "rustfs-gateway-corpus-recorder",
  "rustfs-gateway-fs",
  "rustfs-gateway-server",
  "rustls",

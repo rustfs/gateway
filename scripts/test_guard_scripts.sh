@@ -24703,13 +24703,10 @@ from pathlib import Path
 
 path = Path("compat/sut/Cargo.toml")
 text = path.read_text()
-if text.count("[dependencies]\n") != 1:
-    raise SystemExit("compat-sut dependency mutation subject is not unique")
-path.write_text(text.replace(
-    "[dependencies]\n",
-    '[dependencies]\nrustfs-gateway-corpus-recorder = { workspace = true, features = ["corpus-record"] }\n',
-    1,
-))
+old = 'rustfs-gateway-corpus-recorder = { workspace = true, optional = true, features = ["corpus-record"] }\n'
+if text.count(old) != 1:
+    raise SystemExit("compat-sut recorder dependency mutation subject is not unique")
+path.write_text(text.replace(old, 'rustfs-gateway-corpus-recorder = { workspace = true, features = ["corpus-record"] }\n', 1))
 PYEOF
 }
 expect_fail check_recorder_not_default.sh \
@@ -24723,15 +24720,10 @@ from pathlib import Path
 
 path = Path("compat/sut/Cargo.toml")
 text = path.read_text()
-if text.count("[dependencies]\n") != 1:
+old = 'corpus-record = ["dep:rustfs-gateway-corpus-recorder"]\n'
+if text.count(old) != 1:
     raise SystemExit("compat-sut feature mutation subject is not unique")
-text = text.replace(
-    "[dependencies]\n",
-    '[features]\ndefault = ["record"]\nrecord = ["dep:rustfs-gateway-corpus-recorder"]\n\n[dependencies]\n'
-    'rustfs-gateway-corpus-recorder = { workspace = true, optional = true, features = ["corpus-record"] }\n',
-    1,
-)
-path.write_text(text)
+path.write_text(text.replace(old, 'default = ["record"]\nrecord = ["corpus-record"]\n' + old, 1))
 PYEOF
 }
 expect_fail check_recorder_not_default.sh \
