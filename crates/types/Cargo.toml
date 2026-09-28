@@ -71,10 +71,6 @@ sha1 = { workspace = true }
 twox-hash = { workspace = true }
 zeroize = { workspace = true }
 
-[[bench]]
-name = "checksum"
-harness = false
-
 [dev-dependencies]
 proptest = { workspace = true }
 serde_json = { workspace = true }
@@ -95,3 +91,7 @@ compat-s3s = ["compat-s3s-0-17-0", "dep:s3s_baseline", "dep:s3s_rollback", "dep:
 # exists here, instead of converting to a revision RustFS no longer runs.
 # DELETE BY: P9-09 removes this feature together with `compat-s3s`.
 compat-s3s-0-17-0 = ["dep:s3s_candidate", "dep:futures-core"]
+
+[[bench]]
+name = "checksum"
+harness = false
