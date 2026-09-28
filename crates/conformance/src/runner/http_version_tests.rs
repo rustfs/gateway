@@ -281,15 +281,15 @@ fn an_excluded_top_level_request_never_touches_the_sut() {
     assert_gated("\"http/1.1\"", &source);
 }
 
-/// Negative: allowing HTTP/2 does not authorize TLS for the cleartext frame writer.
+/// Negative: allowing HTTP/2 over TLS does not authorize TLS fields the transport does not apply.
 #[cfg(feature = "production-transports")]
 #[test]
-fn an_applicable_h2_script_preserves_the_tls_refusal() {
-    let source = format!("[connection.tls]\nenabled = true\n{AUTHORED_H2}");
+fn an_applicable_h2_script_preserves_the_unapplied_tls_field_refusal() {
+    let source = format!("[connection.tls]\nenabled = true\nclose_notify = false\n{AUTHORED_H2}");
     assert_transport_refusal(
         crate::conn::Conn::production(std::path::PathBuf::from("."), crate::production::ProductionDriver::Hyper),
         &source,
-        "`[connection.tls]`",
+        "`connection.tls.close_notify`",
     );
 }
 

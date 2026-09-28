@@ -55,11 +55,21 @@ fn corpus() -> Corpus {
 /// baseline row could never regress — a ratchet that cannot fail. They are executed instead on the
 /// production Hyper driver, the one transport that runs them, and replace the refused outcome.
 fn execute_h2_scripts_on_production_hyper(corpus: &Corpus, root: std::path::PathBuf, report: &mut Report) {
-    const REFUSAL: &str = "`request.h2_frames` needs a transport that writes bytes on a socket";
+    // An authored frame script is refused for its frames, or first for `[connection.tls]`, which only
+    // a frame script may declare and which the production Hyper driver also carries out.
+    const REFUSALS: [&str; 2] = [
+        "`request.h2_frames` needs a transport that writes bytes on a socket",
+        "`[connection.tls]` needs a socket to negotiate on",
+    ];
     let refused: Vec<String> = report
         .outcomes
         .iter()
-        .filter(|outcome| outcome.skip_reason.as_deref().is_some_and(|reason| reason.contains(REFUSAL)))
+        .filter(|outcome| {
+            outcome
+                .skip_reason
+                .as_deref()
+                .is_some_and(|reason| REFUSALS.iter().any(|refusal| reason.contains(refusal)))
+        })
         .map(|outcome| outcome.id.clone())
         .collect();
     assert!(

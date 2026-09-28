@@ -2660,7 +2660,7 @@ from pathlib import Path
 
 path = Path("crates/conformance/Cargo.toml")
 text = path.read_text()
-old = 'production-transports = ["rustfs-gateway/server"]'
+old = 'production-transports = ["rustfs-gateway/server", "dep:rcgen"]'
 if text.count(old) != 1:
     raise SystemExit("production transport feature is missing")
 path.write_text(text.replace(old, 'production-transports = []', 1))

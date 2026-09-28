@@ -156,7 +156,12 @@ written. Inside TLS a write hands plaintext to the session rather than to the wi
 progress, `socket_read_after` and `connection_after` are reported unavailable instead of inferred
 from TLS records; a TCP reset stays a measured `reset`. An end of stream without a `close_notify`
 alert is noted on the case, and TLS records still queued when the exchange ends count as unwritten
-authored frames. The in-harness production drivers still refuse `[connection.tls]`. While `--allow-external-fixtures` has an owned fixture active, the
+authored frames. On the production Hyper driver, `[connection.tls]` runs an authored frame script
+inside a TLS session with the case's own listener, which serves a throwaway `localhost`
+certificate and advertises ALPN `h2` and `http/1.1`: `alpn` lists the protocols offered (`h2` when
+absent, nothing when empty), `enabled = false` means cleartext, and the script is written only after
+the listener selected `h2`. `sni`, `min_version` and `close_notify` are refused by name, as is
+`[connection.tls]` on any request that is not a frame script and on the self-held driver. While `--allow-external-fixtures` has an owned fixture active, the
 read-only guard decodes every authored header block and allows only a GET, HEAD or OPTIONS
 `:method`; `request.method` is not what the peer receives, and an undecodable block is refused as
 unclassified. An interrupted block or an orphan CONTINUATION is not classified, because the peer

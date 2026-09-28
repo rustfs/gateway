@@ -61,9 +61,11 @@ default_members = workspace.get("workspace", {}).get("default-members", [])
 if "xtask-launcher" not in members or "xtask-launcher" not in default_members:
     fail("workspace tests must prebuild the xtask launcher")
 conformance_features = conformance_manifest.get("features", {})
+# `dep:rcgen` mints the production TLS listener's throwaway certificate and exists only with the
+# production transports; it adds no second way into the server graph.
 if conformance_features.get("default") != ["production-transports"] or conformance_features.get(
     "production-transports"
-) != ["rustfs-gateway/server"]:
+) != ["rustfs-gateway/server", "dep:rcgen"]:
     fail("conformance must default to the production transport graph behind one feature")
 if conformance_manifest.get("dependencies", {}).get("rustfs-gateway") != {"workspace": True}:
     fail("conformance must enable the facade server only through production-transports")

@@ -65,6 +65,8 @@ impl Conn {
             production: None,
             #[cfg(feature = "production-transports")]
             driver: None,
+            #[cfg(feature = "production-transports")]
+            production_tls: None,
             pacer: std::sync::Arc::new(crate::socket::Pacer::new()),
             #[cfg(test)]
             setup_delay: std::time::Duration::ZERO,
