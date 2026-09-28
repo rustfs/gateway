@@ -694,6 +694,7 @@ gateway_modules = (
     "operation_registry_wire",
     "patch_layer_landings",
     "payload_transport",
+    "perf_evidence",
     "pipeline",
     "policy_reachability",
     "post_object_runtime",

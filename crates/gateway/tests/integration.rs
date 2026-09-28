@@ -102,6 +102,8 @@ mod operation_registry_wire;
 mod patch_layer_landings;
 #[path = "payload_transport.rs"]
 mod payload_transport;
+#[path = "perf_evidence.rs"]
+mod perf_evidence;
 #[path = "pipeline.rs"]
 mod pipeline;
 #[path = "policy_reachability.rs"]
