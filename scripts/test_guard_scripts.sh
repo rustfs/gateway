@@ -24248,9 +24248,32 @@ path.write_text("\n".join(lines) + "\n")
 PYEOF
 }
 expect_fail check_corpus_no_secrets.sh \
-    'an AWS secret access key hidden inside a base64 payload' \
+    'an AWS secret access key hidden inside a base64 payload, named by file and line' \
     mut_corpus_secret_in_a_decoded_payload \
-    'an AWS secret access key'
+    'corpus/object/PutObject.jsonl:1: an AWS secret access key'
+
+# rustfs/backlog#1763 a-cp-0015 names a JWT beside the PEM key. Planted on the second line of the
+# bucket, so the expected diagnostic also proves the line number is the offending line and not
+# the first line of whatever file had a finding.
+mut_corpus_json_web_token_in_a_header() {
+    python3 - <<'PYEOF'
+import json
+from pathlib import Path
+
+path = Path("corpus/object/PutObject.jsonl")
+lines = path.read_text().splitlines()
+if len(lines) < 2:
+    raise SystemExit("the JWT mutation needs a second entry in the bucket")
+entry = json.loads(lines[1])
+entry["headers"].append(["x-amz-meta-note", "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJjb3JwdXMifQ.c2lnbmF0dXJl"])
+lines[1] = json.dumps(entry, separators=(",", ":"))
+path.write_text("\n".join(lines) + "\n")
+PYEOF
+}
+expect_fail check_corpus_no_secrets.sh \
+    'a JSON Web Token parked in a metadata header, named by file and line' \
+    mut_corpus_json_web_token_in_a_header \
+    'corpus/object/PutObject.jsonl:2: a JSON Web Token'
 
 mut_corpus_live_trailer_signature() {
     python3 - <<'PYEOF'
