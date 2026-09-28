@@ -67,8 +67,11 @@ use crate::posture::{SecurityPosture, log_dialect_posture, log_startup_posture};
 use crate::routing::{RoutingSnapshot, RuntimeAssembly};
 
 mod assembly_update;
+mod client_quirks;
 mod secret_scope;
 pub use self::assembly_update::AssemblyUpdate;
+pub(crate) use self::client_quirks::ChecksumWaiver;
+pub use self::client_quirks::MINIO_CLIENT_CHECKSUM_OPTIONAL_OPERATIONS;
 use crate::service::{Inner, S3Service};
 use crate::trace::{MintedTraces, TraceSource};
 use crate::{MonomorphicOperationSet, MonomorphicService};
@@ -96,14 +99,11 @@ pub const DEFAULT_MAX_BUFFERED_BODY_BYTES: u64 = 64 * 1024 * 1024;
 /// Collects operations and extension points, and turns them into an [`S3Service`].
 ///
 /// Nothing here is generic over the backend: `register` erases the `(operation, backend)` pair
-/// into a closure, exactly as `rustfs_gateway_core::RouterBuilder::handle` does, which is what
-/// lets one process hold several services over different backends without a type parameter
-/// reaching the caller.
+/// into a closure, as `rustfs_gateway_core::RouterBuilder::handle` does, so one process can hold
+/// several services over different backends without a type parameter reaching the caller.
 pub struct ServiceBuilder {
     router: RouterBuilder,
-    /// One entry per `register` call, keyed by operation name, in name order. Deferred rather than
-    /// erased on the spot because `op_layer` may arrive after `register` and the erasure has to see
-    /// both.
+    /// One entry per `register` call, keyed by name; deferred so a later `op_layer` is seen too.
     pending: BTreeMap<&'static str, PendingRegistration>,
     /// The layers registered per operation, in registration order.
     op_layers: BTreeMap<&'static str, Vec<ErasedOpLayer>>,
@@ -117,6 +117,7 @@ pub struct ServiceBuilder {
     dangerous_allow_all_authorizer: bool,
     /// ADR-0024: a handed-over caller secret reaches every operation, not only opted-in ones.
     caller_secret_every_operation: bool,
+    checksum_waiver: client_quirks::ChecksumWaiver,
     authenticator: Option<Arc<dyn Authenticator>>,
     custom_signature_verifier: Option<Arc<dyn SignatureVerifier>>,
     #[cfg(feature = "dangerous-replace-signature-verifier")]
@@ -159,11 +160,9 @@ impl Default for ServiceBuilder {
 }
 
 impl ServiceBuilder {
-    /// A builder over the generated route table with nothing registered and no extension point
-    /// installed.
+    /// A builder over the generated route table with nothing registered and no extension point.
     ///
-    /// Building it as it stands is refused twice over — no operation, no authorizer — which is the
-    /// correct answer for a service nobody has configured.
+    /// Building it as it stands is refused twice over (no operation, no authorizer).
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -180,6 +179,7 @@ impl ServiceBuilder {
             authorizer: None,
             dangerous_allow_all_authorizer: false,
             caller_secret_every_operation: false,
+            checksum_waiver: client_quirks::ChecksumWaiver::default(),
             authenticator: None,
             custom_signature_verifier: None,
             #[cfg(feature = "dangerous-replace-signature-verifier")]
@@ -264,8 +264,7 @@ impl ServiceBuilder {
         self
     }
 
-    /// Installs an [`OpLayer`] around one operation. Layers nest outer to inner in registration
-    /// order.
+    /// Installs an [`OpLayer`] around one operation; layers nest outer to inner in order.
     ///
     /// The operation must have a handler by the time [`ServiceBuilder::build`] runs, or the build
     /// is refused with [`RuleRef::OP_LAYER_UNATTACHED`]. Ignoring an unattached layer would leave a
@@ -699,6 +698,7 @@ impl ServiceBuilder {
             response_body_corrections: std::sync::atomic::AtomicU64::new(0),
             temporary_redirect_targets: Arc::from(self.temporary_redirect_targets),
             caller_secret_every_operation: self.caller_secret_every_operation,
+            checksum_waiver: self.checksum_waiver,
         }))
     }
 

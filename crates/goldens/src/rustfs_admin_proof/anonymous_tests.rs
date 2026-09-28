@@ -39,7 +39,7 @@ use super::{
     ListAccessKeysOpenidBulk, ListPools, OidcAuthorize, OidcCallback, OidcListProviders, OidcLogout, ReplicationMetricsV2,
     SelfAccountInfo, ServerInfo, ServiceRestart, assemble,
 };
-use crate::operation_diff::s3s_f3e17541::context::{ACCESS_KEY, ContextRequest, PATH_HOST};
+use crate::operation_diff::s3s_0_17_0::context::{ACCESS_KEY, ContextRequest, PATH_HOST};
 use crate::{RouteMethod, rustfs_admin_route_inventory};
 
 /// Every bootstrap request, concretely, with the operation it reaches.

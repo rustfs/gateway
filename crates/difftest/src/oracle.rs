@@ -21,7 +21,7 @@
 //! operation, what the handler was handed, and the refusal when the handler was never reached.
 //! NOT responsible for: which s3s methods the backend implements (`project/mod.rs` generates them)
 //! or comparing (`decode.rs`).
-//! Upstream: the `compat::s3s_f3e17541` seam's `s3s`. Downstream: `decode.rs`.
+//! Upstream: the `compat::s3s_0_17_0` seam's `s3s`. Downstream: `decode.rs`.
 //!
 //! # Why an auth provider
 //!

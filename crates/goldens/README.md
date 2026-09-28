@@ -31,12 +31,12 @@ closure, not for ordinary PR sample regression. Do not infer acceptance from a c
 Oracle admission repeats the whole D1-D5 run, and re-reads every rejected sample, under each s3s
 revision a real RustFS build links (`rustfs_gateway_types::compat::OracleRevision`): the baseline
 `9c4690d8` (1.0.0-rc.5-preview.2), the rollback target `bdcb6259` (1.0.0-rc.6) and the candidate
-`f3e17541` (`main`). Every refusal boundary that moves under a revision must match a finding in
+`0.17.0` (`main`). Every refusal boundary that moves under a revision must match a finding in
 `src/oracle_admission.rs` exactly, and every registered finding must still reproduce. Today no
 boundary moves and the registry is empty.
 
 One per-revision rule applies to the accepted corpus. `Rule/BlockedEncryptionTypes` is written by
-`bdcb6259` and `f3e17541` and refused by `9c4690d8`; since rustfs/gateway#740 the production
+`bdcb6259` and `0.17.0` and refused by `9c4690d8`; since rustfs/gateway#740 the production
 decoder carries it. Its two samples run D1-D5 under the rollback and candidate revisions and are
 measured as *widenings* under the baseline: the baseline refuses the bytes and cannot write the
 value, while the production codec reads the value and writes the exact bytes. A widening is never

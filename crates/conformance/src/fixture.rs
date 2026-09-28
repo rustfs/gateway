@@ -121,7 +121,7 @@ use rustfs_gateway::{
     RestoreState, RestoreStatus, SseEnforced, TagScope, TaggingRejection, Timestamp, UploadIdClaim, canonicalize_grantee,
     collect, completion_failure_retains_upload, conditional_write_guards_before_mutation, copy_source_guards_before_target_write,
     copy_source_if_match_miss_proceeds, copy_target_uses_source_validators, encryption_delete_absent_succeeds, evaluate,
-    evaluate_range, format_optional_restore_status, frame_records, object_lock_requires_enabled_bucket, parse_conditional_etag,
+    evaluate_range, format_optional_restore_status, object_lock_requires_enabled_bucket, parse_conditional_etag,
     parse_tagging_header, permanent_redirect_for, refuse_blocked_encryption_type, resolve_copy_range,
     resolve_input as resolve_acl_input, resolve_location_constraint, resolve_part, resolve_upload, select_scan_bytes,
     select_uses_event_stream, validate_accelerate, validate_cors, validate_encryption, validate_legal_hold, validate_lifecycle,
@@ -138,6 +138,7 @@ mod handlers_object;
 mod list_allocations;
 #[cfg(test)]
 mod pagination_properties;
+mod select_answer;
 
 use committed::{ArmedFault, COMPLETE_MULTIPART_UPLOAD, COPY_OBJECT, CommittedFault, head as committed_head};
 pub use committed::{COMMITTED_OPERATIONS, UnreportableFault};
@@ -4207,9 +4208,13 @@ impl Stub {
     /// A select query, decoded and validated in full, then answered as a framed event stream.
     ///
     /// This fixture does not evaluate SQL: after validating the opaque expression and the input
-    /// and output descriptions, it emits the stored bytes as one `Records` event, the accounting,
-    /// and `End`. The response path under test is real — the handler returns [`Resp::event_stream`]
-    /// and the same assembled service used by ordinary operations writes it.
+    /// and output descriptions, it emits the scanned bytes as `Records`, the accounting, and `End`
+    /// through [`frame_records`]. Two requests are framed by hand instead, because they need frames
+    /// the adapter does not write: one that enables `RequestProgress` (a keep-alive, the records, a
+    /// `Progress` and then the accounting) and a CSV or JSON scan that is not UTF-8 (the readable
+    /// prefix, then an in-band `InvalidTextEncoding` error and no `End`). The response path under
+    /// test is real — the handler returns [`Resp::event_stream`] and the same assembled service
+    /// used by ordinary operations writes it.
     fn select_object_content(&self, input: &dto::SelectObjectContentInput) -> HandlerResult<dto::SelectObjectContent> {
         let fixture = self.borrow()?;
         require_bucket(&fixture, &input.bucket)?;
@@ -4230,9 +4235,7 @@ impl Stub {
             return Ok(Resp::new(dto::SelectObjectContentOutput::default()));
         }
         let selected = select_scan_bytes(input.scan_range.as_ref(), &body);
-        // Framed lazily by the production adapter: one message per read, never the whole answer.
-        let records = ByteStream::from_bytes(bytes::Bytes::copy_from_slice(selected));
-        Ok(Resp::event_stream(frame_records(records)))
+        Ok(Resp::event_stream(select_answer::answer(input, selected)))
     }
 
     /// Opens a multipart upload, and records the attributes only this request can state.
