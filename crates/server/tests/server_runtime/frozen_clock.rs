@@ -20,7 +20,7 @@ use std::time::Duration;
 
 /// Poll real sockets without letting scheduler stalls expire the partial-header fixtures.
 /// A runnable yield branch also prevents Tokio's paused clock from auto-advancing on idle I/O.
-pub(super) async fn with_header_clock_frozen<T>(future: impl std::future::Future<Output = T>) -> T {
+pub(crate) async fn with_header_clock_frozen<T>(future: impl std::future::Future<Output = T>) -> T {
     tokio::time::pause();
     let started = std::time::Instant::now();
     tokio::pin!(future);

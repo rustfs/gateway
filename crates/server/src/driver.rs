@@ -366,10 +366,15 @@ impl PlaintextConnection {
             file = next_file;
             match transfer.observe_handoff(result)? {
                 SendFileHandoff::Progress(progress) => {
+                    // Progress first: it resets the write deadline, and that reset also discards the
+                    // writable level recorded below. Probed in the other order, a partial send that
+                    // ended in `EAGAIN` forgot a writable edge another worker had already consumed,
+                    // and the transfer then waited for an edge that never came until the
+                    // write-progress deadline closed the connection.
+                    self.inner.record_send_file_progress(progress.bytes);
                     if progress.needs_write_ready {
                         self.inner.record_send_file_would_block();
                     }
-                    self.inner.record_send_file_progress(progress.bytes);
                     if progress.bytes > 0 || !progress.needs_write_ready {
                         return Ok((file, transfer.finish(progress.bytes)));
                     }

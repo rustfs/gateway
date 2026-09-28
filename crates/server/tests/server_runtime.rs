@@ -20,13 +20,18 @@
 
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 
+#[cfg(unix)]
+#[path = "server_runtime/accept_recovery.rs"]
+mod accept_recovery;
 #[path = "server_runtime/connection_driver.rs"]
 mod connection_driver;
 #[path = "server_runtime/drain_fixture.rs"]
 mod drain_fixture;
 pub(crate) use drain_fixture::observed_shutdown_drain;
 #[path = "server_runtime/frozen_clock.rs"]
-mod frozen_clock;
+pub(crate) mod frozen_clock;
+#[path = "server_runtime/global_admission.rs"]
+mod global_admission;
 
 use std::convert::Infallible;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -307,63 +312,6 @@ async fn c_lim_0036_an_idle_keep_alive_connection_closes_after_one_gap() {
     .await
     .expect("the idle connection releases its admission permit");
     let _ = shutdown.trigger(Duration::from_secs(1)).await;
-    assert!(task.await.expect("server task joins").is_ok());
-}
-
-#[tokio::test]
-async fn a_srv_0014_global_limit_pauses_accept_before_the_next_socket() {
-    let mut config = plaintext_config();
-    config.max_connections = 1;
-    let RunningServer {
-        local_addr,
-        metrics,
-        task,
-        shutdown,
-    } = echo_server(config);
-    let first = TcpStream::connect(local_addr).await.expect("first connection succeeds");
-    tokio::time::timeout(Duration::from_secs(1), async {
-        while metrics.active_connections() != 1 {
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .expect("the first connection owns the only admission permit");
-    let mut second = TcpStream::connect(local_addr)
-        .await
-        .expect("the kernel completes the second TCP handshake");
-    second
-        .write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
-        .await
-        .expect("the queued connection accepts request bytes");
-    let accepted_early = tokio::time::timeout(Duration::from_millis(50), async {
-        while metrics.accepted_connections() == 1 {
-            tokio::task::yield_now().await;
-        }
-    })
-    .await;
-    assert!(accepted_early.is_err(), "the listener must wait for a permit before accept");
-    assert_eq!(metrics.accepted_connections(), 1, "the second socket was not accepted then reset");
-    let mut probe = [0_u8; 1];
-    let error = second
-        .try_read(&mut probe)
-        .expect_err("the queued socket has neither a response nor EOF/RST");
-    assert_eq!(error.kind(), std::io::ErrorKind::WouldBlock);
-
-    drop(first);
-    tokio::time::timeout(Duration::from_secs(1), async {
-        while metrics.accepted_connections() != 2 {
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .expect("releasing the permit lets the accept loop take the queued socket");
-    let mut response = Vec::new();
-    second
-        .read_to_end(&mut response)
-        .await
-        .expect("the same queued socket receives a response");
-    assert!(response.starts_with(b"HTTP/1.1 200"));
-    let _ = shutdown.trigger(Duration::from_millis(100)).await;
     assert!(task.await.expect("server task joins").is_ok());
 }
 

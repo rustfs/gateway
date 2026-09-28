@@ -1,5 +1,5 @@
 {
-  "ir_version": "2",
+  "ir_version": "3",
   "operation": "GetObjectAttributes",
   "http": {
             "method": "GET",
@@ -117,7 +117,21 @@
                            "wire_name": "x-amz-object-attributes",
                            "required": true,
                            "binding": { "kind": "Header" },
-                           "type": { "kind": "String" },
+                           "type": {
+                                     "kind": "List",
+                                     "member": {
+                                                 "kind": "StringEnum",
+                                                 "values": [
+                                                             "ETag",
+                                                             "Checksum",
+                                                             "ObjectParts",
+                                                             "StorageClass",
+                                                             "ObjectSize"
+                                                           ]
+                                               },
+                                     "flattened": false,
+                                     "member_name": null
+                                   },
                            "hot": true,
                            "missing_error": "InvalidRequest",
                            "quirk_refs": []
@@ -422,7 +436,7 @@
                                                                                 "shape": "ObjectPart"
                                                                               },
                                                                     "flattened": true,
-                                                                    "wrapper_name": null
+                                                                    "member_name": null
                                                                   },
                                                           "hot": true,
                                                           "quirk_refs": ["q-mpu-part-0031"]

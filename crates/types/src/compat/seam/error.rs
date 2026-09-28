@@ -16,15 +16,17 @@
 //! app body returned, for the s3s revision this file is compiled against (`super::s3s`).
 //!
 //! Responsible for: turning the error into a [`Refusal`] — the code, status and message the s3s
-//! service would have written, or the typed context the gateway renders a contextual code from —
-//! and refusing, by member name, an error the gateway cannot answer the way s3s would: a
-//! contextual code with no typed context, a status that is not a refusal, a code that is not an
-//! identifier, text that XML 1.0 cannot carry, or response headers the gateway's closed header set
-//! has no member for.
+//! service would have written, or the typed context the gateway renders a contextual code from,
+//! including the facts a GetObject/HeadObject body states in the error's own headers (the entity
+//! tag of a `304`, the complete length of a `416`, the identity of a delete marker) — and refusing,
+//! by member name, an error the gateway cannot answer the way s3s would: a contextual code with no
+//! typed context, a fact header that is missing, repeated or malformed, a status that is not a
+//! refusal, a code that is not an identifier, text that XML 1.0 cannot carry, or a response header
+//! the verdict has no member for.
 //! NOT responsible for: building the gateway `HandlerError` (ring-1 `rustfs-gateway-core`, which
 //! this ring-0 crate may not name; the ring-2 adapter matches on [`Refusal`] and calls the one
-//! constructor each variant names), rendering the document, or choosing which request fields a
-//! context carries (the adapter holds the request).
+//! constructor each variant names), rendering the document, or supplying what only the request
+//! holds — the key, and the `Range` a `416` names (the adapter holds the request).
 //! Upstream: the s3s error of the bound revision. Downstream: the goldens error-parity diff under
 //! every seam revision, and the RustFS ring-2 adapter through the revision RustFS links
 //! (rustfs/backlog#1752, rustfs/backlog#1762).
@@ -40,8 +42,8 @@
 use super::s3s;
 use http::StatusCode;
 
-use crate::ErrorCode;
 use crate::compat::ConversionError;
+use crate::{ETag, ErrorCode, Timestamp, TimestampFormat};
 
 /// The longest message the gateway's error resolution admits; a longer one would be a `500`.
 pub const MAX_MESSAGE_BYTES: usize = 1024;
@@ -64,9 +66,10 @@ pub const CONTEXTUAL_CODES: [&str; 10] = [
     "AccessForbidden",
 ];
 
-/// Codes the gateway renders only with facts the s3s error does not carry: `416 InvalidRange` must
-/// state the object's complete length in `Content-Range` and `<ActualObjectSize>`, and the gateway
-/// answers `500` for one without them. The goldens diff proves that too.
+/// Codes the gateway renders only with facts beyond the code: `416 InvalidRange` must state the
+/// object's complete length in `Content-Range` and `<ActualObjectSize>`, and the gateway answers
+/// `500` for one without them. The goldens diff proves that too. The seam reads the length from the
+/// error's `Content-Range: bytes */<length>`, as it reads a `304`'s entity tag from `ETag`.
 pub const NEEDS_FACTS_CODES: [&str; 1] = ["InvalidRange"];
 
 /// What the gateway answers for one s3s handler error.
@@ -88,42 +91,116 @@ pub enum Refusal {
     MissingKey,
     /// The same with `MissingObject::Version`: `404 NoSuchVersion`.
     MissingVersion,
+    /// `HandlerErrorContext::not_modified(etag)`: `304` carrying the entity tag the error's `ETag`
+    /// header states.
+    NotModified {
+        /// The representation's entity tag.
+        etag: ETag,
+    },
+    /// `HandlerError::unsatisfiable_range(requested, complete_length)`: `416 InvalidRange` with
+    /// `Content-Range: bytes */<complete_length>`. The adapter supplies `requested`, the request's
+    /// own `Range` value, as it supplies the key: the s3s error does not carry it.
+    UnsatisfiableRange {
+        /// The complete length the error's `Content-Range: bytes */<length>` states.
+        complete_length: u64,
+    },
+    /// `HandlerErrorContext::current_delete_marker(ResourceVisibility::Visible, key, last_modified)`:
+    /// `404 NoSuchKey` with the marker header. Visible for the reason [`Self::MissingKey`] is.
+    CurrentDeleteMarker {
+        /// The marker's version id, from `x-amz-version-id`; the gateway does not render it yet
+        /// (rustfs/gateway#899).
+        version_id: String,
+        /// When the marker was written, in Unix seconds, from `Last-Modified`.
+        last_modified: i64,
+    },
+    /// `HandlerErrorContext::versioned_delete_marker(&version_id, last_modified)`:
+    /// `405 MethodNotAllowed` with the marker header.
+    VersionedDeleteMarker {
+        /// The marker's version id, from `x-amz-version-id`.
+        version_id: String,
+        /// When the marker was written, in Unix seconds, from `Last-Modified`.
+        last_modified: i64,
+    },
 }
 
 /// The one header an s3s error may carry that the gateway writes itself: s3s replaces the
 /// response head with the error's header map, so RustFS re-adds the XML type there.
 const WRITTEN_BY_THE_GATEWAY: [&str; 1] = ["content-type"];
 
+const ETAG: &str = "etag";
+const CONTENT_RANGE: &str = "content-range";
+const DELETE_MARKER: &str = "x-amz-delete-marker";
+const VERSION_ID: &str = "x-amz-version-id";
+const LAST_MODIFIED: &str = "last-modified";
+
+/// The headers a delete-marker read states its marker with (RustFS `with_delete_marker_read_headers`).
+const MARKER_FACTS: [&str; 3] = [DELETE_MARKER, VERSION_ID, LAST_MODIFIED];
+
 /// Maps an s3s handler error to what the gateway answers for it.
+///
+/// A `NotModified` carrying `ETag`, an `InvalidRange` carrying `Content-Range: bytes */<length>`,
+/// and a `NoSuchKey` or `MethodNotAllowed` carrying `x-amz-delete-marker: true`, `x-amz-version-id`
+/// and `Last-Modified` become the typed verdicts that state those facts. Every other error may
+/// carry no header but `Content-Type`.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming `code` for a contextual code this seam has no typed context for, or
-/// a code that is not an identifier of at most [`MAX_CODE_BYTES`]; `status_code` for a status
-/// outside 4xx and 5xx; `message` for text XML 1.0 cannot carry; `headers` for a response header
-/// other than `Content-Type`.
+/// a code that is not an identifier of at most [`MAX_CODE_BYTES`]; the header's own name for a fact
+/// header that is missing, repeated or malformed; `headers` for a response header the verdict has
+/// no member for; `status_code` for a status outside 4xx and 5xx; `message` for text XML 1.0
+/// cannot carry.
 pub fn refusal_from_s3s(error: &s3s::S3Error) -> Result<Refusal, ConversionError> {
-    if let Some(headers) = error.headers()
-        && headers.keys().any(|name| !WRITTEN_BY_THE_GATEWAY.contains(&name.as_str()))
-    {
-        return Err(ConversionError {
-            field: "headers",
-            reason: "the gateway refusal carries only its closed header set",
-        });
-    }
+    let facts = Facts(error.headers());
     let name = error.code().as_str();
-    match name {
-        "NoSuchBucket" => return Ok(Refusal::MissingBucket),
-        "NoSuchKey" => return Ok(Refusal::MissingKey),
-        "NoSuchVersion" => return Ok(Refusal::MissingVersion),
-        _ if CONTEXTUAL_CODES.contains(&name) || NEEDS_FACTS_CODES.contains(&name) => {
-            return Err(ConversionError {
-                field: "code",
-                reason: "the gateway renders this code from typed facts the s3s error does not carry",
-            });
+    let marker = facts.states(DELETE_MARKER);
+    let refusal = match name {
+        "NotModified" => {
+            facts.only(&[ETAG])?;
+            Refusal::NotModified { etag: facts.etag()? }
         }
-        _ => {}
-    }
+        "InvalidRange" => {
+            facts.only(&[CONTENT_RANGE])?;
+            Refusal::UnsatisfiableRange {
+                complete_length: facts.complete_length()?,
+            }
+        }
+        "NoSuchKey" if marker => {
+            let (version_id, last_modified) = facts.marker()?;
+            Refusal::CurrentDeleteMarker {
+                version_id,
+                last_modified,
+            }
+        }
+        "MethodNotAllowed" if marker => {
+            let (version_id, last_modified) = facts.marker()?;
+            Refusal::VersionedDeleteMarker {
+                version_id,
+                last_modified,
+            }
+        }
+        _ => {
+            facts.only(&[])?;
+            match name {
+                "NoSuchBucket" => Refusal::MissingBucket,
+                "NoSuchKey" => Refusal::MissingKey,
+                "NoSuchVersion" => Refusal::MissingVersion,
+                _ if CONTEXTUAL_CODES.contains(&name) || NEEDS_FACTS_CODES.contains(&name) => {
+                    return Err(ConversionError {
+                        field: "code",
+                        reason: "the gateway renders this code from typed facts the s3s error does not carry",
+                    });
+                }
+                _ => ordinary(error)?,
+            }
+        }
+    };
+    Ok(refusal)
+}
+
+/// A code the gateway admits bare, with the status and message s3s would write.
+fn ordinary(error: &s3s::S3Error) -> Result<Refusal, ConversionError> {
+    let name = error.code().as_str();
     if !is_identifier(name) {
         return Err(ConversionError {
             field: "code",
@@ -158,6 +235,93 @@ pub fn refusal_from_s3s(error: &s3s::S3Error) -> Result<Refusal, ConversionError
         code,
         message: truncated(text).to_owned(),
     })
+}
+
+/// The response headers of one s3s error, read as the facts a verdict states.
+struct Facts<'a>(Option<&'a http::HeaderMap>);
+
+impl Facts<'_> {
+    fn states(&self, name: &str) -> bool {
+        self.0.is_some_and(|headers| headers.contains_key(name))
+    }
+
+    /// Refuses a header that is neither `Content-Type` nor one of `admitted`: dropping it would
+    /// answer differently from s3s, which writes every one.
+    fn only(&self, admitted: &[&str]) -> Result<(), ConversionError> {
+        let beyond = |name: &http::HeaderName| {
+            let name = name.as_str();
+            !WRITTEN_BY_THE_GATEWAY.contains(&name) && !admitted.contains(&name)
+        };
+        if self.0.is_some_and(|headers| headers.keys().any(beyond)) {
+            return Err(ConversionError {
+                field: "headers",
+                reason: "the gateway refusal carries only its closed header set",
+            });
+        }
+        Ok(())
+    }
+
+    /// The one visible-ASCII value of `name`; absent, repeated or other text is refused by `name`.
+    fn single(&self, name: &'static str) -> Result<&str, ConversionError> {
+        let refused = || ConversionError {
+            field: name,
+            reason: "the fact must be stated exactly once, as visible ASCII",
+        };
+        let headers = self.0.ok_or_else(refused)?;
+        let mut values = headers.get_all(name).iter();
+        match (values.next(), values.next()) {
+            (Some(value), None) => value.to_str().map_err(|_| refused()),
+            _ => Err(refused()),
+        }
+    }
+
+    fn etag(&self) -> Result<ETag, ConversionError> {
+        match ETag::parse_http_header(self.single(ETAG)?) {
+            Ok(etag) if !etag.is_any() => Ok(etag),
+            _ => Err(ConversionError {
+                field: ETAG,
+                reason: "not one entity tag",
+            }),
+        }
+    }
+
+    /// The length in the unsatisfied form `bytes */<length>`, RFC 9110 §14.4.
+    fn complete_length(&self) -> Result<u64, ConversionError> {
+        let refused = || ConversionError {
+            field: CONTENT_RANGE,
+            reason: "not the unsatisfied form bytes */<complete-length>",
+        };
+        let length = self.single(CONTENT_RANGE)?.strip_prefix("bytes */").ok_or_else(refused)?;
+        if length.is_empty() || !length.bytes().all(|byte| byte.is_ascii_digit()) {
+            return Err(refused());
+        }
+        length.parse().map_err(|_| refused())
+    }
+
+    /// The marker's version id and write instant, with the flag stating `true`.
+    fn marker(&self) -> Result<(String, i64), ConversionError> {
+        self.only(&MARKER_FACTS)?;
+        if self.single(DELETE_MARKER)? != "true" {
+            return Err(ConversionError {
+                field: DELETE_MARKER,
+                reason: "a delete-marker read states the flag as true",
+            });
+        }
+        let version_id = self.single(VERSION_ID)?;
+        if version_id.is_empty() {
+            return Err(ConversionError {
+                field: VERSION_ID,
+                reason: "a delete marker has a version id",
+            });
+        }
+        let last_modified = Timestamp::parse(self.single(LAST_MODIFIED)?, TimestampFormat::HttpDate)
+            .map_err(|_| ConversionError {
+                field: LAST_MODIFIED,
+                reason: "not an HTTP date",
+            })?
+            .secs();
+        Ok((version_id.to_owned(), last_modified))
+    }
 }
 
 /// `text` cut to at most [`MAX_MESSAGE_BYTES`] on a character boundary. Cut rather than refused:

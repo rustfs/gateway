@@ -20,7 +20,15 @@ fail() {
 [[ -f "$CASE" ]] || fail 'the 100-thread acceptance test is missing'
 [[ -f "$CI" ]] || fail 'the CI workflow is missing'
 
-grep -Fq "RUSTFLAGS='-Zsanitizer=thread'" "$RUNNER" || fail 'ThreadSanitizer instrumentation is missing'
+grep -Fq "RUSTFLAGS='-Zsanitizer=thread --cfg gateway_tsan'" "$RUNNER" \
+    || fail 'ThreadSanitizer instrumentation, or the cfg that removes the dhat allocator, is missing'
+ALLOCATOR="${ROOT}/crates/gateway/tests/service_clone_allocations.rs"
+[[ -f "$ALLOCATOR" ]] || fail 'the dhat global allocator declaration is missing'
+awk 'previous == "#[cfg(not(gateway_tsan))]" && $0 == "#[global_allocator]" { found = 1 } { previous = $0 }
+    END { exit found ? 0 : 1 }' "$ALLOCATOR" \
+    || fail 'the dhat global allocator is not compiled out of the TSAN build (rustfs/gateway#958)'
+grep -Fq 'assert_the_system_allocator_serves_this_binary();' "$CASE" \
+    || fail 'the TSAN case no longer proves it runs on the system allocator'
 grep -Fq 'cargo "+${TOOLCHAIN}" test -Zbuild-std' "$RUNNER" || fail 'the instrumented standard-library build is missing'
 grep -Fq -- '-p rustfs-gateway --test integration' "$RUNNER" \
     || fail 'the runner no longer executes the consolidated gateway integration target'

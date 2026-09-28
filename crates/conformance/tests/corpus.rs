@@ -19,7 +19,8 @@
 //! same way a foreign implementation would use this crate. The unit tests can reach internals;
 //! this one deliberately cannot, so a refactor that breaks the product surface breaks here.
 //! Also the home of the corpus-wide half of the baseline contract: every case carries a row, and
-//! the whole corpus is run against those rows on the assembled service.
+//! the whole corpus is run against those rows on the assembled service, with the authored HTTP/2
+//! frame scripts the in-process target refuses run on the production Hyper driver instead.
 //! NOT responsible for: any individual assertion; those are unit-tested next to the engine. Nor
 //! for per-domain wiring (`tests/domain_wiring.rs`) or a family's own size, polarity and
 //! known-red set (the family ledgers).
@@ -36,15 +37,54 @@
 //! already budgeted, so the gate cannot be added to CI and then quietly not required — which is
 //! how `e2e` ended up non-blocking in the repository this suite was written to replace.
 
+use rustfs_gateway_conformance::conn::Conn;
 use rustfs_gateway_conformance::corpus::Corpus;
 use rustfs_gateway_conformance::inprocess::InProcess;
-use rustfs_gateway_conformance::report::{Baseline, Verdict};
+use rustfs_gateway_conformance::production::ProductionDriver;
+use rustfs_gateway_conformance::report::{Baseline, Report, Verdict};
 use rustfs_gateway_conformance::runner::{self, RunOptions};
 use rustfs_gateway_conformance::sut::Unwired;
 
 fn corpus() -> Corpus {
     let root = Corpus::discover_root().expect("a corpus sits next to this crate");
     runner::prepare_corpus(&root).expect("the corpus loads")
+}
+
+/// The in-process facade hands a parsed request to the service, so it refuses every authored
+/// HTTP/2 frame script by name. Left there, each such case would be recorded as `skipped` and its
+/// baseline row could never regress — a ratchet that cannot fail. They are executed instead on the
+/// production Hyper driver, the one transport that runs them, and replace the refused outcome.
+fn execute_h2_scripts_on_production_hyper(corpus: &Corpus, root: std::path::PathBuf, report: &mut Report) {
+    const REFUSAL: &str = "`request.h2_frames` needs a transport that writes bytes on a socket";
+    let refused: Vec<String> = report
+        .outcomes
+        .iter()
+        .filter(|outcome| outcome.skip_reason.as_deref().is_some_and(|reason| reason.contains(REFUSAL)))
+        .map(|outcome| outcome.id.clone())
+        .collect();
+    assert!(
+        !refused.is_empty(),
+        "no case was refused for authored HTTP/2 frames; if the in-process target now runs them, \
+         remove this rerun rather than let it select nothing"
+    );
+    let mut hyper = Conn::production(root, ProductionDriver::Hyper);
+    for id in refused {
+        let options = RunOptions {
+            filter: Some(id.clone()),
+            ..RunOptions::default()
+        };
+        let rerun = runner::run(corpus, &mut hyper, &options);
+        let [executed] = <[_; 1]>::try_from(rerun.outcomes).unwrap_or_else(|outcomes| {
+            panic!("`{id}` selected {} cases on production Hyper, not exactly itself", outcomes.len())
+        });
+        assert_eq!(executed.id, id, "the rerun selected a different case");
+        let slot = report
+            .outcomes
+            .iter_mut()
+            .find(|outcome| outcome.id == id)
+            .expect("the refused outcome is in the report");
+        *slot = executed;
+    }
 }
 
 fn baseline() -> Baseline {
@@ -111,8 +151,9 @@ fn no_baseline_row_names_a_case_the_corpus_does_not_have() {
 fn the_whole_corpus_holds_the_verdicts_the_baseline_records() {
     let corpus = corpus();
     let root = Corpus::discover_root().expect("a corpus sits next to this crate");
-    let mut sut = InProcess::new(root);
-    let report = runner::run(&corpus, &mut sut, &RunOptions::default());
+    let mut sut = InProcess::new(root.clone());
+    let mut report = runner::run(&corpus, &mut sut, &RunOptions::default());
+    execute_h2_scripts_on_production_hyper(&corpus, root, &mut report);
 
     let executed = report
         .outcomes

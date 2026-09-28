@@ -1,5 +1,5 @@
 {
-  "ir_version": "2",
+  "ir_version": "3",
   "operation": "ListBucketMetricsConfigurations",
   "http": {
             "method": "GET",
@@ -94,7 +94,7 @@
                                       "kind": "List",
                                       "member": { "kind": "Structure", "shape": "MetricsConfiguration" },
                                       "flattened": true,
-                                      "wrapper_name": null
+                                      "member_name": null
                                     },
                             "hot": false,
                             "quirk_refs": []
@@ -123,7 +123,7 @@
                                                               "kind": "List",
                                                               "member": { "kind": "Structure", "shape": "Tag" },
                                                               "flattened": true,
-                                                              "wrapper_name": null
+                                                              "member_name": null
                                                             },
                                                     "hot": false,
                                                     "quirk_refs": []

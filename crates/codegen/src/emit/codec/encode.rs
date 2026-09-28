@@ -33,9 +33,7 @@
 
 use std::fmt::Write as _;
 
-use rustfs_gateway_model::ir::{
-    AttributeSource, Binding, ETagRender, EmptyValue, Field, OmitWhen, OperationIr, Shape, ShapeKind, Type,
-};
+use rustfs_gateway_model::ir::{AttributeSource, Binding, EmptyValue, Field, OmitWhen, OperationIr, Shape, ShapeKind, Type};
 
 use super::{CodecRules, attribute_name, carried_as_attribute, expr, media, url};
 use crate::emit::dto::naming;
@@ -369,10 +367,10 @@ fn body_member(ir: &OperationIr, plan: &url::Plan, field: &Field, source: &str, 
         Type::List {
             member: inner,
             flattened,
-            wrapper_name,
+            member_name,
         } if !matches!(inner.as_ref(), Type::Structure(_)) => {
             let rendered = wire_expr(inner, member, &ir.operation, encoded)?;
-            let names = super::list_elements(*flattened, wrapper_name.as_deref(), &wire);
+            let names = super::list_elements(*flattened, member_name.as_deref(), &wire)?;
             if let Some(name) = &names.wrapper {
                 let _ = writeln!(out, "{pad}writer.open(\"{name}\", None);");
             }
@@ -386,7 +384,7 @@ fn body_member(ir: &OperationIr, plan: &url::Plan, field: &Field, source: &str, 
         Type::List {
             member: inner,
             flattened,
-            wrapper_name,
+            member_name,
         } => {
             let Type::Structure(inner_name) = inner.as_ref() else {
                 return Err(expr::unsupported(
@@ -397,7 +395,7 @@ fn body_member(ir: &OperationIr, plan: &url::Plan, field: &Field, source: &str, 
             };
             let writer_fn = format!("write_{}", naming::module_name(inner_name));
             let argument = shape_writer_argument(plan, inner_name);
-            let names = super::list_elements(*flattened, wrapper_name.as_deref(), &wire);
+            let names = super::list_elements(*flattened, member_name.as_deref(), &wire)?;
             let open = open_structure(ir, inner_name, &names.entry, "item", "&mut writer")?;
             if let Some(wrapper) = &names.wrapper {
                 let _ = writeln!(out, "{pad}writer.open(\"{wrapper}\", None);");
@@ -447,7 +445,7 @@ fn body_member(ir: &OperationIr, plan: &url::Plan, field: &Field, source: &str, 
         }
         other => {
             let rendered = wire_expr(other, member, &ir.operation, encoded)?;
-            let call = element_call(other, policy);
+            let call = element_call(policy);
             if field.required {
                 let _ = writeln!(out, "{pad}{{");
                 let _ = writeln!(out, "{pad}    let v = &{source};");
@@ -549,18 +547,13 @@ fn shape_writer_argument(plan: &url::Plan, shape: &str) -> &'static str {
 
 /// The `XmlWriter` method one scalar body member is written with.
 ///
-/// Two independent IR facts choose it and neither is a name comparison: `empty_value_policy` says
-/// whether an empty value is written as a paired element or dropped, and the type says whether the
-/// value's own wire form carries quotation marks the writer has to escape. `ETag(XmlQuoted)` is
-/// the only rendering that does — `ETag(XmlBare)` and every string are written with the ordinary
-/// escaping, which is what leaves a `"` inside an object key literal.
-fn element_call(ty: &Type, policy: EmptyValue) -> &'static str {
-    let quoting = matches!(ty, Type::ETag(ETagRender::XmlQuoted));
-    match (policy, quoting) {
-        (EmptyValue::Emit, false) => "element",
-        (EmptyValue::Omit, false) => "element_if_present",
-        (EmptyValue::Emit, true) => "element_quoting",
-        (EmptyValue::Omit, true) => "element_quoting_if_present",
+/// `empty_value_policy` alone chooses it: an empty value is written as a paired element or
+/// dropped. Escaping is not a choice — S3 escapes both quotes in every text node, an entity tag and
+/// an object key alike (rustfs/gateway#13), so there is one escaping and no per-type method.
+fn element_call(policy: EmptyValue) -> &'static str {
+    match policy {
+        EmptyValue::Emit => "element",
+        EmptyValue::Omit => "element_if_present",
     }
 }
 
@@ -625,7 +618,7 @@ pub fn shape_writer(ir: &OperationIr, name: &str, shape: &Shape) -> Result<Strin
             }
             other => {
                 let rendered = wire_expr(other, &field.name, &ir.operation, encoded)?;
-                let call = element_call(other, policy);
+                let call = element_call(policy);
                 if field.required {
                     let _ = writeln!(out, "    {{");
                     let _ = writeln!(out, "        let v = &{source};");
@@ -672,9 +665,9 @@ fn shape_child(ir: &OperationIr, plan: &url::Plan, field: &Field, source: &str, 
         Type::List {
             member: inner,
             flattened,
-            wrapper_name,
+            member_name,
         } => {
-            let names = super::list_elements(*flattened, wrapper_name.as_deref(), wire);
+            let names = super::list_elements(*flattened, member_name.as_deref(), wire)?;
             if let Some(wrapper) = &names.wrapper {
                 let _ = writeln!(out, "    writer.open(\"{wrapper}\", None);");
             }
@@ -739,7 +732,7 @@ fn union_writer(ir: &OperationIr, name: &str, shape: &Shape) -> Result<String, S
             }
             scalar => {
                 let rendered = wire_expr(scalar, &field.name, &ir.operation, encoded)?;
-                let call = element_call(scalar, empty_policy(&shape.xml.empty_value_policy, &field.name, true));
+                let call = element_call(empty_policy(&shape.xml.empty_value_policy, &field.name, true));
                 let _ = writeln!(out, "        dto::{type_name}::{variant}(v) => writer.{call}(\"{wire}\", {rendered}),");
             }
         }

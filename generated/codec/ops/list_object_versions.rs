@@ -82,6 +82,14 @@ impl OperationCodec for dto::ListObjectVersions {
             let raw = raw.as_ref();
             input.request_payer = Some(dto::RequestPayer::custom(raw.to_owned()));
         }
+        // OptionalObjectAttributes — header `x-amz-optional-object-attributes`, a comma-delimited list.
+        if let Some(raw) = request.header("x-amz-optional-object-attributes") {
+            for raw in value::header_list(raw.as_ref()) {
+                input
+                    .optional_object_attributes
+                    .push(dto::OptionalObjectAttributes::custom(raw.to_owned()));
+            }
+        }
         let _ = body;
         value::exit(input.check_required())?;
         Ok(input)
@@ -240,7 +248,7 @@ fn write_object_version(
     }
     {
         let v = &value.e_tag;
-        writer.element_quoting("ETag", &value::render_etag(v, EtagRender::XmlQuoted));
+        writer.element("ETag", &value::render_etag(v, EtagRender::XmlQuoted));
     }
     for v in &value.checksum_algorithm {
         writer.element("ChecksumAlgorithm", v.as_str());

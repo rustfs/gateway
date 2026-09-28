@@ -177,17 +177,19 @@ fn write_field(field: &mut Field, property: &str, value: &SourceValue, path: &st
         }
         "list_flattened" => {
             let flattened = boolean(value, path)?;
-            let Type::List {
-                member, wrapper_name, ..
-            } = &field.ty
-            else {
+            let Type::List { member, member_name, .. } = &field.ty else {
                 return Err(format!("mutation source `{path}` is not a list"));
             };
-            // The IR stores the entry name in `wire_name` when flattened, but the wrapper name
-            // there when wrapped, so a strategy flip has to move both names with the boolean.
+            if !matches!(&field.ty, Type::List { flattened: true, .. }) && member_name.is_none() {
+                return Err(format!(
+                    "mutation source `{path}` is a comma-delimited header list, which has no XML strategy to flip"
+                ));
+            }
+            // The IR stores the entry name in `wire_name` when flattened, but in `member_name`
+            // when wrapped, so a strategy flip has to move both names with the boolean.
             let entry_name = field.wire_name.clone().unwrap_or_else(|| field.name.clone());
-            let (wire_name, wrapper_name) = if flattened {
-                (Some(wrapper_name.clone().unwrap_or_else(|| "member".to_owned())), None)
+            let (wire_name, member_name) = if flattened {
+                (Some(member_name.clone().unwrap_or_else(|| "member".to_owned())), None)
             } else {
                 (Some(field.name.clone()), Some(entry_name))
             };
@@ -195,7 +197,7 @@ fn write_field(field: &mut Field, property: &str, value: &SourceValue, path: &st
             field.ty = Type::List {
                 member: member.clone(),
                 flattened,
-                wrapper_name,
+                member_name,
             };
         }
         other => return Err(format!("mutation source `{path}` names unsupported field property `{other}`")),

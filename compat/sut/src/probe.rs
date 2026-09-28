@@ -20,7 +20,8 @@
 //! one JSON object per line.
 //! NOT responsible for: deciding whether a scenario passed, storing anything, or reproducing any
 //! signature material. The chunk signatures themselves are counted and discarded; nothing here
-//! writes a signature, an `Authorization` header, or a credential into the log.
+//! writes a signature, an `Authorization` header, or a credential into the log — including the
+//! ones a presigned request carries in its query string, whose values are redacted.
 //! Upstream: `crate::main`, which wraps the assembled `S3Service` in [`ProbeService`].
 //! Downstream: `ci/compat/report.py`, which reads the log to decide whether a client really
 //! emitted `STREAMING-AWS4-HMAC-SHA256` framing rather than merely exiting zero.
@@ -318,7 +319,7 @@ impl RequestFacts {
         Self {
             method: parts.method.as_str().to_owned(),
             path: parts.uri.path().to_owned(),
-            query: parts.uri.query().unwrap_or_default().to_owned(),
+            query: redact_query(parts.uri.query().unwrap_or_default()),
             payload_mode,
             content_encoding: header("content-encoding"),
             decoded_length: header("x-amz-decoded-content-length"),
@@ -356,6 +357,66 @@ impl RequestFacts {
     }
 }
 
+/// The constant a redacted query value is replaced with.
+const REDACTED: &str = "__REDACTED__";
+
+/// Query parameters whose value is a signature, a credential or a session token.
+///
+/// A presigned request carries its authentication in the query string, so recording the query
+/// verbatim would write a signature and an access key into the evidence file — which is uploaded
+/// as a workflow artifact and read by the corpus converter. The names stay, because they are what
+/// tells a presigned request from a plain one; only the values go (rustfs/gateway#911).
+const SENSITIVE_QUERY_PARAMETERS: &[&str] = &[
+    "x-amz-signature",
+    "x-amz-credential",
+    "x-amz-security-token",
+    "signature",
+    "awsaccesskeyid",
+];
+
+/// Replaces the value of every [`SENSITIVE_QUERY_PARAMETERS`] entry with [`REDACTED`].
+///
+/// Names are compared case-insensitively after percent-decoding, so `X%2DAmz%2DSignature` is
+/// the same parameter a server would read. Everything else is kept byte for byte.
+fn redact_query(query: &str) -> String {
+    query
+        .split('&')
+        .map(|pair| match pair.split_once('=') {
+            Some((name, _)) if is_sensitive_name(name) => format!("{name}={REDACTED}"),
+            _ => pair.to_owned(),
+        })
+        .collect::<Vec<_>>()
+        .join("&")
+}
+
+fn is_sensitive_name(raw: &str) -> bool {
+    let decoded = percent_decode_ascii(raw).to_ascii_lowercase();
+    SENSITIVE_QUERY_PARAMETERS.contains(&decoded.as_str())
+}
+
+/// Decodes `%XX` escapes. An escape that is not two hex digits is kept literally: a malformed
+/// name is not a sensitive one, and this function never fails.
+fn percent_decode_ascii(raw: &str) -> String {
+    let bytes = raw.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while let Some(&byte) = bytes.get(index) {
+        let escaped = (byte == b'%')
+            .then(|| bytes.get(index + 1..index + 3))
+            .flatten()
+            .and_then(|hex| std::str::from_utf8(hex).ok())
+            .and_then(|hex| u8::from_str_radix(hex, 16).ok());
+        if let Some(value) = escaped {
+            decoded.push(value);
+            index += 3;
+        } else {
+            decoded.push(byte);
+            index += 1;
+        }
+    }
+    String::from_utf8_lossy(&decoded).into_owned()
+}
+
 /// Renders one JSON string, escaping what JSON requires and dropping the rest.
 fn quote(value: &str) -> String {
     let mut rendered = String::with_capacity(value.len() + 2);
@@ -377,7 +438,10 @@ fn quote(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{CHUNK_SIGNATURE_EXTENSION, NeedleCounter, PAYLOAD_MODE_SENTINELS, RequestFacts, count_occurrences, quote};
+    use super::{
+        CHUNK_SIGNATURE_EXTENSION, NeedleCounter, PAYLOAD_MODE_SENTINELS, REDACTED, RequestFacts, count_occurrences, quote,
+        redact_query,
+    };
 
     fn count_over_frames(frames: &[&[u8]]) -> u64 {
         let mut counter = NeedleCounter::new(CHUNK_SIGNATURE_EXTENSION);
@@ -439,6 +503,72 @@ mod tests {
         let facts = RequestFacts::of(&parts);
         assert_eq!(facts.payload_mode, "STREAMING-AWS4-HMAC-SHA256-PAYLOAD");
         assert!(PAYLOAD_MODE_SENTINELS.contains(&facts.payload_mode.as_str()));
+    }
+
+    fn recorded_query(uri: &str) -> String {
+        let request = http::Request::builder()
+            .method(http::Method::GET)
+            .uri(uri)
+            .body(())
+            .expect("a valid fixture request");
+        let (parts, ()) = request.into_parts();
+        RequestFacts::of(&parts).query
+    }
+
+    #[test]
+    fn a_sigv4_presigned_signature_and_credential_are_not_recorded() {
+        let query = recorded_query(
+            "/b/k?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIDEXAMPLE%2F20260928%2Fus-east-1%2Fs3%2Faws4_request\
+             &X-Amz-Date=20260928T000000Z&X-Amz-Expires=300&X-Amz-SignedHeaders=host\
+             &X-Amz-Signature=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        );
+        assert!(!query.contains("AKIDEXAMPLE"), "{query}");
+        assert!(!query.contains("0123456789abcdef"), "{query}");
+        assert!(query.contains(&format!("X-Amz-Credential={REDACTED}")), "{query}");
+        assert!(query.contains(&format!("X-Amz-Signature={REDACTED}")), "{query}");
+        // The parameters that say what kind of request it was survive.
+        assert!(query.contains("X-Amz-Algorithm=AWS4-HMAC-SHA256"), "{query}");
+        assert!(query.contains("X-Amz-Expires=300"), "{query}");
+    }
+
+    #[test]
+    fn a_sigv2_presigned_signature_and_access_key_are_not_recorded() {
+        let query = recorded_query("/b/k?AWSAccessKeyId=AKIDEXAMPLE&Expires=1790558621&Signature=v11ya5bUkQVr3yyFi8vM%3D");
+        assert_eq!(query, format!("AWSAccessKeyId={REDACTED}&Expires=1790558621&Signature={REDACTED}"));
+    }
+
+    #[test]
+    fn a_session_token_in_the_query_is_not_recorded() {
+        let query = recorded_query("/b/k?X-Amz-Security-Token=FQoGZXIvYXdzEXAMPLE&x-amz-security-token=second");
+        assert_eq!(query, format!("X-Amz-Security-Token={REDACTED}&x-amz-security-token={REDACTED}"));
+    }
+
+    #[test]
+    fn a_sensitive_name_is_matched_regardless_of_case() {
+        assert_eq!(
+            redact_query("x-amz-signature=abc&SIGNATURE=def"),
+            format!("x-amz-signature={REDACTED}&SIGNATURE={REDACTED}")
+        );
+    }
+
+    #[test]
+    fn a_percent_encoded_sensitive_name_is_still_matched() {
+        assert_eq!(redact_query("X%2DAmz%2DSignature=abc"), format!("X%2DAmz%2DSignature={REDACTED}"));
+    }
+
+    #[test]
+    fn a_name_that_only_contains_a_sensitive_word_is_kept() {
+        assert_eq!(redact_query("prefix=Signature&SignatureDisplay=x"), "prefix=Signature&SignatureDisplay=x");
+    }
+
+    #[test]
+    fn an_ordinary_query_is_recorded_unchanged() {
+        assert_eq!(
+            recorded_query("/b?list-type=2&prefix=page%2F&max-keys=7"),
+            "list-type=2&prefix=page%2F&max-keys=7"
+        );
+        assert_eq!(recorded_query("/b/k?uploads"), "uploads");
+        assert_eq!(recorded_query("/b/k?acl&versionId=3"), "acl&versionId=3");
     }
 
     #[test]

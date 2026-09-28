@@ -1,5 +1,5 @@
 {
-  "ir_version": "2",
+  "ir_version": "3",
   "operation": "ListBucketInventoryConfigurations",
   "http": {
             "method": "GET",
@@ -76,7 +76,7 @@
                                       "kind": "List",
                                       "member": { "kind": "Structure", "shape": "InventoryConfiguration" },
                                       "flattened": true,
-                                      "wrapper_name": null
+                                      "member_name": null
                                     },
                             "hot": false,
                             "quirk_refs": []
@@ -181,7 +181,7 @@
                                                                                         ]
                                                                             },
                                                                   "flattened": false,
-                                                                  "wrapper_name": "Field"
+                                                                  "member_name": "Field"
                                                                 },
                                                         "hot": false,
                                                         "quirk_refs": []

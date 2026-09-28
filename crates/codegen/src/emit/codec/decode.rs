@@ -88,16 +88,16 @@ const MISSING_MEMBER: &str = "the body omits a member the schema requires";
 ///
 /// Returned as the links of a method chain rather than as one string, because rustfmt breaks a
 /// chain that is too long link by link and this emitter has to produce what rustfmt would.
-fn list_source(flattened: bool, wrapper_name: Option<&str>, wire: &str) -> Vec<String> {
-    let names = super::list_elements(flattened, wrapper_name, wire);
-    match &names.wrapper {
+fn list_source(flattened: bool, member_name: Option<&str>, wire: &str) -> Result<Vec<String>, String> {
+    let names = super::list_elements(flattened, member_name, wire)?;
+    Ok(match &names.wrapper {
         None => vec![format!("children_named(\"{}\")", names.entry)],
         Some(wrapper) => vec![
             format!("child(\"{wrapper}\")"),
             "into_iter()".to_owned(),
             format!("flat_map(|w| w.children_named(\"{}\"))", names.entry),
         ],
-    }
+    })
 }
 
 /// Buffering the request body, and the one place a `Content-MD5` over it is settled.
@@ -227,6 +227,35 @@ fn one_field(
             let accessor = if *greedy { "require_key" } else { "require_bucket" };
             let _ = writeln!(out, "        // {member} — URI label, decoded once by `MetaView::of`.");
             out.push_str(&assign(8, target, &format!("request.{accessor}()?")));
+        }
+        Binding::Header if matches!(field.ty, Type::List { .. }) => {
+            let Type::List {
+                member: entry,
+                flattened: false,
+                member_name: None,
+            } = &field.ty
+            else {
+                return Err(expr::unsupported(
+                    op,
+                    member,
+                    "a header list is comma-delimited; an XML list form has no header spelling",
+                ));
+            };
+            let conversion = expr::from_wire(
+                entry,
+                member,
+                op,
+                false,
+                bounds::of(field, rules, op)?,
+                super::boolean::of(ir, field, rules)?,
+                "request.names()",
+            )?;
+            let _ = writeln!(out, "        // {member} — header `{wire}`, a comma-delimited list.");
+            let _ = writeln!(out, "        if let Some(raw) = request.header(\"{wire}\") {{");
+            let _ = writeln!(out, "            for raw in value::header_list(raw.as_ref()) {{");
+            out.push_str(&push_stmt(16, target, &conversion));
+            out.push_str("            }\n");
+            out.push_str(&otherwise(field, target, codes)?);
         }
         Binding::Header => {
             // A tolerated binding produces the stored `Option` itself, so it is emitted instead of
@@ -559,7 +588,7 @@ fn xml_member(
         Type::List {
             member: entry,
             flattened,
-            wrapper_name,
+            member_name,
         } if !matches!(entry.as_ref(), Type::Structure(_)) => {
             let conversion = expr::from_wire(
                 entry,
@@ -570,7 +599,7 @@ fn xml_member(
                 super::boolean::of(ir, field, rules)?,
                 name_policy.unwrap_or("names"),
             )?;
-            let links = list_source(*flattened, wrapper_name.as_deref(), &wire);
+            let links = list_source(*flattened, member_name.as_deref(), &wire)?;
             out.push_str(&for_header(indent, node, &links));
             let _ = writeln!(out, "{}let raw = item.text.as_str();", " ".repeat(inner));
             out.push_str(&push_stmt(inner, target, &conversion));
@@ -579,7 +608,7 @@ fn xml_member(
         Type::List {
             member: entry,
             flattened,
-            wrapper_name,
+            member_name,
         } => {
             let Type::Structure(entry_name) = entry.as_ref() else {
                 return Err(expr::unsupported(
@@ -589,7 +618,7 @@ fn xml_member(
                 ));
             };
             let reader = format!("read_{}", naming::module_name(entry_name));
-            let links = list_source(*flattened, wrapper_name.as_deref(), &wire);
+            let links = list_source(*flattened, member_name.as_deref(), &wire)?;
             out.push_str(&for_header(indent, node, &links));
             let read = super::name_policy::shape_reader_call(ir, entry_name, &reader, "item", name_policy)?;
             out.push_str(&push_stmt(inner, target, &read));
@@ -605,7 +634,7 @@ fn xml_member(
             // member; reading the entry count there refuses a document this shape's own encoder
             // writes.
             if field.required {
-                let names = super::list_elements(*flattened, wrapper_name.as_deref(), &wire);
+                let names = super::list_elements(*flattened, member_name.as_deref(), &wire)?;
                 let (absent, reason) = match &names.wrapper {
                     None => (format!("{target}.is_empty()"), MISSING_LIST_ENTRIES),
                     Some(wrapper) => (format!("{node}.child(\"{wrapper}\").is_none()"), MISSING_MEMBER),

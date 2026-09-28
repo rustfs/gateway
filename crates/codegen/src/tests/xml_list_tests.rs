@@ -65,27 +65,73 @@ fn at(text: &str, needle: &str) -> usize {
 
 #[test]
 fn a_flattened_list_repeats_the_field_s_own_wire_name_and_has_no_wrapper() {
-    let names = list_elements(true, None, "Contents");
+    let names = list_elements(true, None, "Contents").expect("a flattened list has XML elements");
     assert_eq!(names.wrapper, None, "a flattened list has no enclosing element");
     assert_eq!(names.entry, "Contents");
 }
 
 #[test]
 fn a_wrapped_list_encloses_the_member_name_in_the_field_s_wire_name() {
-    let names = list_elements(false, Some("Bucket"), "Buckets");
+    let names = list_elements(false, Some("Bucket"), "Buckets").expect("a wrapped list has XML elements");
     assert_eq!(
         names.wrapper.as_deref(),
         Some("Buckets"),
-        "the enclosing element is the field's own wire name, never the IR's misnamed `wrapper_name`"
+        "the enclosing element is the field's own wire name, never the IR's `member_name`"
     );
     assert_eq!(names.entry, "Bucket", "the repeated element is the list member's xmlName");
 }
 
+/// Negative — a list with neither `flattened` nor a `member_name` is the IR v3 delimited form.
+///
+/// Until v3 this resolver answered that shape with Smithy's default `member`, inventing an XML
+/// element for a list the IR could not otherwise describe. Lowering now writes the default into
+/// the IR for a body list whose model names none, so the only list that reaches here without a
+/// member name is a comma-delimited header list, and it has no element to name.
 #[test]
-fn a_wrapped_list_whose_model_names_no_member_falls_back_to_the_smithy_default() {
-    let names = list_elements(false, None, "Values");
-    assert_eq!(names.wrapper.as_deref(), Some("Values"));
-    assert_eq!(names.entry, "member", "Smithy's default member spelling, not a repeat of the wrapper");
+fn n_a_delimited_list_has_no_xml_elements() {
+    let refusal = list_elements(false, None, "x-amz-object-attributes").expect_err("a header list has no XML form");
+    assert!(refusal.contains("delimited"), "{refusal}");
+}
+
+#[test]
+fn a_delimited_header_list_is_read_entry_by_entry() {
+    let text = body("codec/ops/get_object_attributes.rs");
+    assert!(
+        text.contains("for raw in value::header_list(raw.as_ref()) {"),
+        "x-amz-object-attributes is split into its entries:\n{text}"
+    );
+    assert!(
+        text.contains("input.object_attributes.push(dto::ObjectAttributes::custom(raw.to_owned()));"),
+        "each entry becomes one open enumeration value:\n{text}"
+    );
+}
+
+#[test]
+fn n_the_listing_operations_no_longer_withhold_the_optional_attribute_header() {
+    for path in [
+        "codec/ops/list_objects_v2.rs",
+        "codec/ops/list_objects.rs",
+        "codec/ops/list_object_versions.rs",
+    ] {
+        let text = body(path);
+        assert!(
+            text.contains("request.header(\"x-amz-optional-object-attributes\")"),
+            "{path}: the header the model declares is read"
+        );
+    }
+}
+
+#[test]
+fn n_a_delimited_list_in_a_response_body_is_refused() {
+    let mut ir = ir("ListBuckets");
+    let values = Type::List {
+        member: Box::new(Type::String),
+        flattened: false,
+        member_name: None,
+    };
+    retype_output(&mut ir, "Prefix", "Values", values);
+    let refusal = encode::body(&ir, &Default::default()).expect_err("a body list needs XML elements");
+    assert!(refusal.contains("delimited"), "{refusal}");
 }
 
 #[test]
@@ -105,7 +151,7 @@ fn a_second_wrapped_list_of_structures_nests_the_same_way() {
     let entries = Type::List {
         member: Box::new(Type::Structure("Object".to_owned())),
         flattened: false,
-        wrapper_name: Some("Entry".to_owned()),
+        member_name: Some("Entry".to_owned()),
     };
     retype_output(&mut ir, "Contents", "Entries", entries);
     let body = encode::body(&ir, &Default::default()).expect("the retyped operation encodes");
@@ -123,7 +169,7 @@ fn a_second_wrapped_list_of_scalars_nests_the_same_way() {
     let values = Type::List {
         member: Box::new(Type::String),
         flattened: false,
-        wrapper_name: Some("Value".to_owned()),
+        member_name: Some("Value".to_owned()),
     };
     retype_output(&mut ir, "Prefix", "Values", values);
     let body = encode::body(&ir, &Default::default()).expect("the retyped operation encodes");
@@ -153,7 +199,7 @@ fn the_reader_of_a_wrapped_list_descends_through_the_same_two_names() {
     let objects = Type::List {
         member: Box::new(Type::Structure("ObjectIdentifier".to_owned())),
         flattened: false,
-        wrapper_name: Some("Entry".to_owned()),
+        member_name: Some("Entry".to_owned()),
     };
     let shape = ir.shapes.get_mut("Delete").expect("DeleteObjects carries a Delete shape");
     let field = shape

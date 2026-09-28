@@ -523,6 +523,8 @@ for mode, statuses in (("ratchet", (0, 1, 3, 124)), ("record", (0, 3, 124))):
             budget = work / "scripts/ci_budget.sh"
             budget.write_text(f"#!/bin/bash\nexit {status}\n", encoding="utf-8")
             budget.chmod(0o755)
+            # The recipe build step leaves the image identity the suite step measures.
+            (work / "mint-candidate.id").write_text("sha256:" + "c" * 64, encoding="utf-8")
             outputs = work / "outputs"
             summary = work / "summary"
             body = suite_body.replace("${{ inputs.mode || 'ratchet' }}", mode)

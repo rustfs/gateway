@@ -26,11 +26,11 @@
 pub use crate::ops::enums::{
     AccessTier, Acl, ArchiveStatus, CannedAcl, ChecksumAlgorithm, ChecksumMode, ChecksumType, CompressionType,
     ConfigurationState, EncodingType, EncryptionType, EventHold, Events, Expiration, ExpressionType, FileHeaderInfo, Format,
-    Frequency, IncludedObjectVersions, LocationConstraint, MetadataDirective, MfaDelete, Mode, Name, ObjectLockEnabled,
-    ObjectLockEventHold, ObjectLockLegalHoldStatus, ObjectLockMode, ObjectOwnership, OptionalFields, OutputSchemaVersion,
-    PartitionDateSource, Payer, Permission, Protocol, QuoteFields, ReplicationStatus, RequestCharged, RequestPayer,
-    ServerSideEncryption, SseAlgorithm, Status, StorageClass, TableBucketType, TaggingDirective, Tier,
-    TransitionDefaultMinimumObjectSize, Type,
+    Frequency, IncludedObjectVersions, LocationConstraint, MetadataDirective, MfaDelete, Mode, Name, ObjectAttributes,
+    ObjectLockEnabled, ObjectLockEventHold, ObjectLockLegalHoldStatus, ObjectLockMode, ObjectOwnership, OptionalFields,
+    OptionalObjectAttributes, OutputSchemaVersion, PartitionDateSource, Payer, Permission, Protocol, QuoteFields,
+    ReplicationStatus, RequestCharged, RequestPayer, ServerSideEncryption, SseAlgorithm, Status, StorageClass, TableBucketType,
+    TaggingDirective, Tier, TransitionDefaultMinimumObjectSize, Type,
 };
 pub use crate::ops::shapes::{
     AbacStatus, AbortIncompleteMultipartUpload, AccelerateConfiguration, AccessControlPolicy, AccessControlTranslation,

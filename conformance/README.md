@@ -200,6 +200,39 @@ the peer did with a response it had already queued.
 `client_reset` requires a PING acknowledgement in the exact control-frame list and forbids
 `stream_termination` and `body_bytes_before_error`.
 
+Authored `rst_stream`, `goaway`, `priority` and `raw` frames are written exactly as declared, and
+the peer's reaction is observed like any other: a status, the received controls, and measured
+termination. `rst_stream` and `goaway` take either `error_code` or a literal `payload_hex`, never
+both. `error_code` is an RFC 9113 section 7 name such as `CANCEL` or `NO_ERROR`, or `0x` followed by
+one to eight hexadecimal digits for an unregistered code. A `goaway` built from `error_code` carries
+last-stream identifier zero, because a client has accepted no server-initiated stream, and defaults
+to stream zero; spell any other last-stream identifier or debug data with `payload_hex`. `priority`
+always spells its five-octet payload. None of the four accept `flags` or `increment`. A `raw` frame's
+`payload_hex` is one complete frame, header included, whose declared length must equal the octets
+that follow; it takes no `stream_id` or `error_code`, keeps the reserved stream-identifier bit as
+written, and may not spell DATA, HEADERS, SETTINGS, WINDOW_UPDATE or CONTINUATION, whose typed forms
+drive the runner's stream and credit accounting. Unknown extension types and deliberately unusual
+flags are written as `raw` frames. When an authored violation follows the peer's initial grant,
+delay it so the grant's arrival order is not left to scheduling.
+
+Version 5 adds three things. An authored `ping` frame defaults to stream zero, accepts only the
+`ack` flag, and always spells its `payload_hex`, written literally. A received PING acknowledgement
+is recorded in `h2_control_frames` as `{ type = "ping", payload_hex = "<eight octets>" }`; a peer's
+own PING without ACK is read and neither recorded nor answered. Acknowledgements are recorded only
+for scripts that author a typed `ping`, so a version-4 script, which can spell PING only as `raw`,
+keeps its version-4 control-frame list. And `expect.kind = "client_reset"`
+names the one way a client reset of the selected stream becomes observable: a well-formed
+(four-octet) authored RST_STREAM of the selected stream followed by a typed, eight-octet, stream-zero
+PING. That PING is the reset barrier; a `raw` PING never is one. HTTP/2 processes a connection's frames in order, so its
+acknowledgement shows the peer handled the reset first, and the observation ends when it arrives,
+with the status and body received before it. Without such a PING, a client reset is not an end
+condition and the observation ends only on a peer fact or the deadline. Two authored PINGs, typed or
+raw, carrying the barrier's octets are refused, because an acknowledgement could not say which one
+it answers. The acknowledgement shows the peer read the reset first; it does not by itself show what
+the peer did with a response it had already queued.
+`client_reset` requires a PING acknowledgement in the exact control-frame list and forbids
+`stream_termination` and `body_bytes_before_error`.
+
 `expect.socket_read_after` independently asserts `no_termination_observed`, `eof`, or `reset`.
 These values describe receive-side reads and a bounded final socket probe, not both TCP directions,
 future socket state, or connection reusability. Missing measurements fail even an expectation of
@@ -443,6 +476,11 @@ enforcing. Until rustfs/gateway#192 a skip could not be a regression, so a faili
 nothing at all, and the file was a list of excuses wearing the shape of a table of expectations.
 It also left the hole rustfs/gateway#203 and #214 both fell into — a domain that stops executing
 turns into skips, and skips were free.
+
+The in-process target that the gate runs cannot execute an authored HTTP/2 frame script and refuses
+it by name. Recorded as `skipped`, every such row would be a ratchet that cannot fail, so the gate
+re-runs exactly those refused cases on the production Hyper driver, the transport `conformance
+baseline` itself uses, and their rows are measured verdicts.
 
 Refreshing it:
 

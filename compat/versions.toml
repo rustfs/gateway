@@ -17,6 +17,25 @@
 #
 # `boto3` has no such database. Its identity is checked the other way: pip installs the exact
 # `==` version and the runner compares `boto3.__version__` with the pin.
+#
+# Four install methods, each with its own read-back:
+#
+#   go       `go install <module>@<version>`; read back with `go version -m <binary>`.
+#   pip      `pip install` into the runner's interpreter; read back as `<package>.__version__`.
+#   venv     `pip install` into a virtualenv of its own under `$COMPAT_CLIENTS_DIR/<name>`, for a
+#            command-line client whose dependencies must not share an interpreter with another
+#            client's; its `binary` is linked into `$COMPAT_CLIENTS_DIR/bin`. Read back by running
+#            `version_command` and matching `version_pattern` (group 1) against the pin.
+#   program  a driver program in `source` built from its own lock file by `build`, for an SDK that
+#            is a library rather than a command. The lock file necessarily names the SDK version a
+#            second time, so `scripts/check_client_versions_pinned.sh` requires `lock_pattern`
+#            (group 1) to match it exactly once and to equal the pin here. The built program
+#            answers `version_command` with the version of the SDK it actually linked, read from
+#            the SDK itself rather than from the lock file, and that is what the runner compares.
+#
+# `version_command` and `build` are shell strings. They run with `COMPAT_CLIENT_OUT` set to the
+# client's own directory under `$COMPAT_CLIENTS_DIR` (default `target/compat-clients`), and with
+# `$COMPAT_CLIENTS_DIR/bin` first on `PATH`.
 
 [clients.boto3]
 install = "pip"
@@ -49,3 +68,83 @@ module = "github.com/rclone/rclone"
 module_version_path = "github.com/rclone/rclone"
 version = "v1.74.0"
 binary = "rclone"
+
+[clients.aws-cli]
+install = "venv"
+# aws-cli v2 is not on PyPI (the `awscli` package there is v1, a different client), so the pin is
+# its release tag's source archive. pip verifies the archive against the `#sha256=` fragment and
+# refuses a mismatch before anything is installed, so a moved tag cannot change what runs.
+requirements = [
+  "awscli @ https://github.com/aws/aws-cli/archive/refs/tags/2.37.4.tar.gz#sha256=0f003652fd53309c68124be6edb5c5c14ae332d9f04e42f880c8ff565eb5a526",
+]
+version = "2.37.4"
+binary = "aws"
+version_command = "aws --version"
+version_pattern = '^aws-cli/(\S+) '
+
+[clients.s3cmd]
+install = "venv"
+requirements = ["s3cmd==2.4.0"]
+version = "2.4.0"
+binary = "s3cmd"
+version_command = "s3cmd --version"
+version_pattern = '^s3cmd version (\S+)$'
+
+[clients.opendal]
+install = "pip"
+# The Python binding of Apache OpenDAL: the same Rust `services-s3` backend s3s's own OpenDAL
+# client test drove, behind a thin PyO3 layer, so no Rust toolchain or second lock file is needed.
+package = "opendal"
+version = "0.47.10"
+[clients.aws-sdk-js]
+install = "program"
+# driver.mjs on Node.js. package-lock.json pins every package it resolves, and `npm ci` refuses a
+# lock file that disagrees with package.json instead of re-resolving.
+source = "compat/drivers/aws-sdk-js"
+toolchain = "npm"
+build = "npm ci --no-audit --no-fund --loglevel=error"
+lock_file = "package-lock.json"
+lock_pattern = '"node_modules/@aws-sdk/client-s3": \{\s*"version": "([^"]+)"'
+version = "3.1141.0"
+version_command = 'node "$COMPAT_CLIENT_OUT/src/driver.mjs" --client-version'
+
+[clients.aws-sdk-dotnet]
+install = "program"
+# A driver program, not a command: the SDK is a library. The project references AWSSDK.S3 at an
+# exact version and packages.lock.json pins it and AWSSDK.Core by version and content hash;
+# `--locked-mode` refuses to restore anything the lock file does not already name, and nuget.config
+# beside it restricts restore to nuget.org. The published program runs on the shared .NET 8 runtime.
+source = "compat/drivers/aws-sdk-dotnet"
+toolchain = "dotnet"
+build = 'export DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1 && dotnet restore --locked-mode && dotnet publish -c Release --no-restore -o "$COMPAT_CLIENT_OUT/app"'
+lock_file = "packages.lock.json"
+# The Direct entry is followed by its requested range and then its resolved version.
+lock_pattern = '"AWSSDK\.S3": \{\s*"type": "Direct",\s*"requested": "[^"]*",\s*"resolved": "([^"]+)"'
+version = "4.0.103.4"
+# The NuGet version is the AWSSDK.S3 assembly's file version, which the program reads at runtime.
+version_command = 'dotnet "$COMPAT_CLIENT_OUT/app/driver.dll" --client-version'
+
+[clients.aws-sdk-java-v2]
+install = "program"
+# A driver program, not a command: the SDK is a library. pom.xml names every dependency and plugin
+# at an exact version, which makes Maven's resolution deterministic, so it is the lock file. The
+# build puts the driver jar and every runtime dependency in `$COMPAT_CLIENT_OUT/lib`.
+source = "compat/drivers/aws-sdk-java-v2"
+toolchain = "mvn"
+build = 'mvn -B -q -Dcompat.out="$COMPAT_CLIENT_OUT" package'
+lock_file = "pom.xml"
+lock_pattern = '^\s*<awssdk\.version>(\S+)</awssdk\.version>$'
+version = "2.55.6"
+version_command = 'java -cp "$COMPAT_CLIENT_OUT/lib/*" compat.Driver --client-version'
+
+[clients.aws-sdk-java-v1]
+install = "program"
+# The same layout as aws-sdk-java-v2. The version is read from aws-java-sdk-core, which the pinned
+# aws-java-sdk-s3 requires at its own exact release.
+source = "compat/drivers/aws-sdk-java-v1"
+toolchain = "mvn"
+build = 'mvn -B -q -Dcompat.out="$COMPAT_CLIENT_OUT" package'
+lock_file = "pom.xml"
+lock_pattern = '^\s*<awssdk\.version>(\S+)</awssdk\.version>$'
+version = "1.12.797"
+version_command = 'java -Daws.java.v1.disableDeprecationAnnouncement=true -cp "$COMPAT_CLIENT_OUT/lib/*" compat.Driver --client-version'

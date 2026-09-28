@@ -115,6 +115,9 @@ pub struct Conn {
     #[cfg(feature = "production-transports")]
     driver: Option<ProductionDriver>,
     pacer: Arc<Pacer>,
+    /// A deliberate stall in starting this case's server, standing in for a loaded host.
+    #[cfg(test)]
+    setup_delay: Duration,
 }
 impl Conn {
     /// Builds a target rooted at a corpus directory.
@@ -131,6 +134,8 @@ impl Conn {
             #[cfg(feature = "production-transports")]
             driver: None,
             pacer: Arc::new(Pacer::new()),
+            #[cfg(test)]
+            setup_delay: Duration::ZERO,
         }
     }
     /// Builds a target backed by one real production connection driver.
@@ -146,6 +151,8 @@ impl Conn {
             production: None,
             driver: Some(driver),
             pacer: Arc::new(Pacer::new()),
+            #[cfg(test)]
+            setup_delay: Duration::ZERO,
         }
     }
 }
@@ -376,10 +383,11 @@ impl Sut for Conn {
         let head = self.head(&wire, &request_time)?;
         let budget = budget_of(plan.timeout_ms);
 
-        let addr = self.addr(fixed.unix_seconds, skew_ms, plan.profile)?;
-        // Replace a connection already observed closed rather than hiding that fact behind a later write error.
-        // The probe is an observation window, so what it costs is the harness's, not the target's.
+        // Starting this case's server and the reuse probe (an observation window) are the harness's
+        // time, not the target's. Replace a connection already observed closed rather than hiding
+        // that fact behind a later write error.
         let mut reuse_probe = Duration::ZERO;
+        let addr = charged_to_harness(&mut reuse_probe, || self.addr(fixed.unix_seconds, skew_ms, plan.profile))?;
         let fresh = !reuse
             || self
                 .connection
@@ -778,6 +786,8 @@ fn write_body(
 }
 
 mod control_chunks;
+#[cfg(test)]
+mod setup_tests;
 #[cfg(test)]
 mod tests;
 

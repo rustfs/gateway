@@ -300,14 +300,14 @@ pub fn attribute_name(shape: &Shape, member: &str) -> String {
 ///
 /// Resolved in one place because the two are easy to swap and a swap is invisible in a diff: the
 /// shipped `ListBuckets` inversion — `<Bucket><Buckets>…</Buckets></Bucket>` where AWS writes
-/// `<Buckets><Bucket>…</Bucket></Buckets>` — was one emitter reading `Type::List`'s misnamed
-/// `wrapper_name` as the enclosing element on both the encode and the decode path.
+/// `<Buckets><Bucket>…</Bucket></Buckets>` — was one emitter reading `Type::List`'s then-misnamed
+/// `wrapper_name` as the enclosing element on both the encode and the decode path. IR v3 renamed
+/// the key to `member_name` (rustfs/gateway#11).
 ///
 /// * `wrapper` is the enclosing element, and is always the field's own `wire_name`. `None` for a
 ///   flattened list, which has no enclosing element.
-/// * `entry` is the repeated element. For a wrapped list it is `wrapper_name`, which despite its
-///   name is the list member's `xmlName`; for a flattened one it is the field's `wire_name`,
-///   which is what flattening means.
+/// * `entry` is the repeated element. For a wrapped list it is `member_name`, the list member's
+///   `xmlName`; for a flattened one it is the field's `wire_name`, which is what flattening means.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ListElements {
     /// The enclosing element, when the list has one.
@@ -316,25 +316,30 @@ pub struct ListElements {
     pub entry: String,
 }
 
-/// The Smithy default `xmlName` of a list member, used when the model declares none.
-const DEFAULT_LIST_MEMBER: &str = "member";
-
 /// Resolves the wrapper and entry element names of one list-typed field.
 ///
 /// `wire` is the field's wire name — the wrapper of a wrapped list, and the repeated element of a
 /// flattened one.
-#[must_use]
-pub fn list_elements(flattened: bool, wrapper_name: Option<&str>, wire: &str) -> ListElements {
+///
+/// # Errors
+///
+/// A list that is neither flattened nor names a member is the IR's comma-delimited header form,
+/// which has no XML elements. Lowering writes Smithy's default `member` into every body list whose
+/// model names none, so reaching here with that shape means a header list was routed into an XML
+/// emitter; inventing an element name for it would put a fabricated wire form into safe code.
+pub fn list_elements(flattened: bool, member_name: Option<&str>, wire: &str) -> Result<ListElements, String> {
     if flattened {
-        return ListElements {
+        return Ok(ListElements {
             wrapper: None,
             entry: wire.to_owned(),
-        };
+        });
     }
-    ListElements {
+    let entry = member_name
+        .ok_or_else(|| format!("list `{wire}` is a comma-delimited header list and has no XML elements to read or write"))?;
+    Ok(ListElements {
         wrapper: Some(wire.to_owned()),
-        entry: wrapper_name.unwrap_or(DEFAULT_LIST_MEMBER).to_owned(),
-    }
+        entry: entry.to_owned(),
+    })
 }
 
 /// Which half of an operation a shape is reachable from.

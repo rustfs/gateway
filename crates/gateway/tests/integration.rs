@@ -102,6 +102,8 @@ mod operation_registry_wire;
 mod patch_layer_landings;
 #[path = "payload_transport.rs"]
 mod payload_transport;
+#[path = "perf_evidence.rs"]
+mod perf_evidence;
 #[path = "pipeline.rs"]
 mod pipeline;
 #[path = "policy_reachability.rs"]
@@ -132,6 +134,8 @@ mod request_context_runtime;
 mod response_invariants;
 #[path = "response_stream_termination.rs"]
 mod response_stream_termination;
+#[path = "select_frame_records.rs"]
+mod select_frame_records;
 #[path = "select_restore_intent.rs"]
 mod select_restore_intent;
 #[path = "select_restore_reachability.rs"]
@@ -148,6 +152,8 @@ mod service_config;
 mod sigv2_runtime;
 #[path = "sse_runtime.rs"]
 mod sse_runtime;
+#[path = "steady_state_allocations.rs"]
+mod steady_state_allocations;
 #[path = "streaming_request.rs"]
 mod streaming_request;
 #[path = "streaming_without_length.rs"]

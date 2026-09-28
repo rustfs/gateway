@@ -1,0 +1,73 @@
+[case]
+id = "c-select-restore-0051"
+schema_version = 3
+title = "A restore that names a delete marker is refused as a method on a deletion"
+rationale = """
+A named version that is a delete marker has no bytes to retrieve. Treating the id as absent would answer NoSuchVersion for a version that exists, and falling back to the newest object would start a retrieval nobody asked for; the version-scoped refusal is 405 MethodNotAllowed, the answer every other version-scoped read of a delete marker gives."""
+polarity = "negative"
+operation = "RestoreObject"
+tags = ["restore", "versions"]
+timeout_ms = 10000
+quirks = ["q-restore-0008"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/DeleteMarker.html"
+summary = "A request naming a delete marker's version id is answered 405 Method Not Allowed."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-restore-marker"
+versioning = "enabled"
+
+[connection]
+reuse = true
+
+[[exchanges]]
+name = "archive-an-object"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-restore-marker/cold.txt"
+headers = { "content-type" = "text/plain", "x-amz-storage-class" = "GLACIER" }
+body = { utf8 = 'payload' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[[exchanges]]
+name = "delete-it"
+
+[exchanges.request]
+method = "DELETE"
+target = "/conf-restore-marker/cold.txt"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 204
+connection_after = "open"
+
+[exchanges.expect.capture]
+marker = { header = "x-amz-version-id" }
+
+[[exchanges]]
+name = "restore-the-marker"
+
+[exchanges.request]
+method = "POST"
+target = "/conf-restore-marker/cold.txt?restore&versionId=${capture.marker}"
+headers = { "content-type" = "application/xml" }
+body = { utf8 = '<RestoreRequest><Days>1</Days><GlacierJobParameters><Tier>Standard</Tier></GlacierJobParameters></RestoreRequest>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 405
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "MethodNotAllowed"
+request_id_present = true

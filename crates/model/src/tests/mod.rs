@@ -20,7 +20,9 @@
 //! Upstream: the module's declared inputs. Downstream: its callers and regression tests.
 
 mod json_tests;
+mod list_form_tests;
 mod lower_tests;
 mod overlay_tests;
 mod route_tests;
+mod selector_param_tests;
 mod toml_tests;

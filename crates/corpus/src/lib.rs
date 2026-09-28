@@ -25,6 +25,8 @@
 pub mod base64;
 pub mod case;
 pub mod dedup;
+pub mod form;
+pub mod framing;
 pub mod redact;
 pub mod schema;
 pub mod store;

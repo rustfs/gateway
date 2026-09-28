@@ -9,7 +9,9 @@ set -euo pipefail
 #
 #     1. The known-failure list only ever shrinks. Every entry in `compat/known-fail.txt` was
 #        already in the committed version. Adding one is how a regression gets silenced in the same
-#        change that introduced it, so adding one fails here.
+#        change that introduced it, so adding one fails here. The ratchet starts per client row:
+#        an entry for a client that `compat/versions.toml` did not declare in the comparison commit
+#        is that client's first measured baseline, not a silenced regression, and is admitted.
 #     2. Every known-failure entry names a client that exists in `compat/versions.toml` and a
 #        scenario that exists under `compat/scenarios/`. An entry naming neither excuses nothing and
 #        would sit there forever.
@@ -50,7 +52,8 @@ command -v git >/dev/null 2>&1 || fail 'required command is missing: git'
 [[ -f "$ROOT_DIR/.github/workflows/client-matrix.yml" ]] || fail 'required input is missing: .github/workflows/client-matrix.yml'
 
 previous="$(mktemp "${TMPDIR:-/tmp}/gateway-known-fail.XXXXXX")"
-trap 'rm -f "$previous"' EXIT
+previous_versions="$(mktemp "${TMPDIR:-/tmp}/gateway-versions.XXXXXX")"
+trap 'rm -f "$previous" "$previous_versions"' EXIT
 
 # Before a commit, compare the working file with HEAD. In CI, actions/checkout checks out the
 # pull-request merge commit, so HEAD^ is the base branch and the comparison covers the whole
@@ -67,14 +70,21 @@ if ! git -C "$ROOT_DIR" show "${baseline_ref}:compat/known-fail.txt" >"$previous
     printf 'check_compat_matrix: compat/known-fail.txt is new in %s; the ratchet starts here\n' "$baseline_ref"
 fi
 
-"$PYTHON" - "$ROOT_DIR" "$previous" <<'PY'
+# The clients the comparison commit declared. A client absent there is new in this change, and its
+# first known failures start its row of the ratchet. When the file cannot be read, every current
+# client counts as old: the exemption fails closed.
+if ! git -C "$ROOT_DIR" show "${baseline_ref}:compat/versions.toml" >"$previous_versions" 2>/dev/null; then
+    cp "$ROOT_DIR/compat/versions.toml" "$previous_versions"
+fi
+
+"$PYTHON" - "$ROOT_DIR" "$previous" "$previous_versions" <<'PY'
 import json
 import re
 import sys
 import tomllib
 from pathlib import Path
 
-root, previous = Path(sys.argv[1]), Path(sys.argv[2])
+root, previous, previous_versions = Path(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[3])
 failures = []
 
 
@@ -107,8 +117,12 @@ current = parse((root / "compat/known-fail.txt").read_text(encoding="utf-8"), "c
 before = parse(previous.read_text(encoding="utf-8"))
 
 added = sorted(set(current) - set(before))
+declared_before = set(tomllib.loads(previous_versions.read_text(encoding="utf-8")).get("clients", {}))
 if added and before:
     for cell in added:
+        if cell.partition("/")[0] not in declared_before:
+            print(f"check_compat_matrix: {cell} starts the baseline of a client this change adds")
+            continue
         failures.append(f"compat/known-fail.txt gained {cell}; the list may only shrink")
 
 clients = set(tomllib.loads((root / "compat/versions.toml").read_text(encoding="utf-8")).get("clients", {}))

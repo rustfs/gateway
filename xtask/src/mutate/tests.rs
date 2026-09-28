@@ -382,3 +382,12 @@ fn n_a_baseline_with_nothing_green_can_prove_no_survivor() {
         other => panic!("{other:?}"),
     }
 }
+
+#[test]
+fn the_reachability_flag_is_opt_in() {
+    let args = |list: &[&str]| list.iter().map(|arg| (*arg).to_owned()).collect::<Vec<String>>();
+    let plain = super::parse(&args(&["--quirk", "q-x-0001"])).expect("parses");
+    assert!(!plain.reachability, "coverage costs an instrumented build, so it is never the default");
+    let asked = super::parse(&args(&["--quirk", "q-x-0001", "--reachability"])).expect("parses");
+    assert!(asked.reachability);
+}

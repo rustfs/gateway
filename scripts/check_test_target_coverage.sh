@@ -41,6 +41,7 @@ COVERED = {
     "crates/conformance": "check_test_target_consolidation.sh",
     "crates/core": "check_test_target_consolidation.sh",
     "crates/corpus": "check_test_target_coverage.sh",
+    "crates/corpus-recorder": "check_test_target_coverage.sh",
     "crates/dialect-minio": "check_test_target_coverage.sh",
     "crates/dialect-rustfs-admin": "check_test_target_coverage.sh",
     "crates/gateway": "check_test_target_consolidation.sh",

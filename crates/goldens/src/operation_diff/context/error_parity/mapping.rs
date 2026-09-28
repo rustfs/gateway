@@ -135,7 +135,8 @@ fn the_missing_resource_codes_map_to_the_gateways_typed_context() {
 
 /// The seam's two lists are the gateway's own: every code on them is refused as a bare
 /// `HandlerError` (a `500` through the adapter), and every other code the RustFS bodies return is
-/// admitted. The seam maps the three missing-resource codes and refuses the rest by name.
+/// admitted. Bare — with no header — the seam maps the three missing-resource codes and refuses the
+/// rest by name, or by the header carrying the fact it lacks.
 #[test]
 fn the_seams_fact_lists_are_exactly_the_codes_the_gateway_refuses_bare() {
     for name in CONTEXTUAL_CODES.iter().chain(NEEDS_FACTS_CODES.iter()) {
@@ -146,7 +147,15 @@ fn the_seams_fact_lists_are_exactly_the_codes_the_gateway_refuses_bare() {
             Some(Ok(Refusal::MissingBucket | Refusal::MissingKey | Refusal::MissingVersion)) => {
                 assert!(["NoSuchBucket", "NoSuchKey", "NoSuchVersion"].contains(name), "{name}");
             }
-            Some(Err(error)) => assert_eq!(error.field, "code", "{name}"),
+            // Bare, the two codes whose facts ride in a header are refused by that header.
+            Some(Err(error)) => {
+                let lacking = match *name {
+                    "NotModified" => "etag",
+                    "InvalidRange" => "content-range",
+                    _ => "code",
+                };
+                assert_eq!(error.field, lacking, "{name}");
+            }
             other => panic!("{name}: the seam answered {other:?}"),
         }
     }
