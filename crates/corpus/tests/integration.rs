@@ -708,3 +708,18 @@ fn the_checked_in_corpus_holds_recorded_signed_chunks_and_trailers() {
     });
     assert!(trailer, "no recorded body carrying the trailer its head declares");
 }
+
+/// Negative (a-cp-0006) — an issue-derived source must name the issue it came from; without the
+/// number, or with anything but a number, the entry cannot be traced and is refused.
+#[test]
+fn an_s3s_issue_source_without_an_issue_number_is_refused() {
+    for src in [
+        "handwritten:s3s-issues",
+        "handwritten:s3s-issues#",
+        "handwritten:s3s-issues#12a",
+        "handwritten:s3s-issues#/1",
+    ] {
+        assert!(store::check_source(src).is_err(), "{src} was admitted");
+    }
+    store::check_source("handwritten:s3s-issues#297").expect("a numbered issue source is admitted");
+}

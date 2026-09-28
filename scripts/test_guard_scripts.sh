@@ -24602,6 +24602,42 @@ expect_fail check_corpus_provenance.sh \
     mut_corpus_unpinned_client_source \
     'no pinned revision'
 
+mut_corpus_uncited_s3s_issue() {
+    python3 - <<'PYEOF'
+import json
+from pathlib import Path
+
+path = Path("corpus/object/PutObject.jsonl")
+lines = path.read_text().splitlines()
+entry = json.loads(lines[0])
+entry["src"] = "handwritten:s3s-issues#999999"
+lines[0] = json.dumps(entry, separators=(",", ":"))
+path.write_text("\n".join(lines) + "\n")
+PYEOF
+}
+expect_fail check_corpus_provenance.sh \
+    'an issue-derived entry naming an issue no conformance case cites' \
+    mut_corpus_uncited_s3s_issue \
+    'no conformance case cites'
+
+mut_corpus_unnumbered_s3s_issue() {
+    python3 - <<'PYEOF'
+import json
+from pathlib import Path
+
+path = Path("corpus/object/PutObject.jsonl")
+lines = path.read_text().splitlines()
+entry = json.loads(lines[0])
+entry["src"] = "handwritten:s3s-issues"
+lines[0] = json.dumps(entry, separators=(",", ":"))
+path.write_text("\n".join(lines) + "\n")
+PYEOF
+}
+expect_fail check_corpus_provenance.sh \
+    'an issue-derived entry that names no issue' \
+    mut_corpus_unnumbered_s3s_issue \
+    'not on the allowlist'
+
 mut_corpus_allowlist_emptied() {
     python3 - <<'PYEOF'
 import re
