@@ -114,9 +114,10 @@ pub(crate) fn build_service(
             // The same registry answers `x-amz-expected-bucket-owner`, so the owner id a caller
             // asserts is the very id the authorization decision was made against.
             .bucket_owner_source(Arc::clone(owners))
-            // RustFS accepts the MinIO SDKs' checksum-less policy and versioning writes, and so
-            // must the launcher that stands for it (rustfs/gateway#916).
+            // RustFS accepts the MinIO SDKs' checksum-less policy and versioning writes (#916) and
+            // s3cmd's checksum-less ACL writes (#912), and so must the launcher that stands for it.
             .accept_minio_client_checksum_omissions()
+            .accept_s3cmd_acl_checksum_omissions()
             // And the same registry decides whether a name is taken: another identity's
             // re-creation is `409 BucketAlreadyExists` before the backend is asked, and a
             // creation the backend admitted is what gets recorded.
@@ -787,10 +788,11 @@ mod tests {
     #[path = "policy_tests.rs"]
     mod policy_tests;
 
-    /// What the RustFS profile accepts beyond the AWS defaults: MinIO clients' checksum-less writes
-    /// (rustfs/gateway#916), an explicit us-east-1 constraint (#914), SigV2 presigned URLs (#913).
+    /// What the RustFS profile accepts beyond the AWS defaults: MinIO checksum-less writes (#916), an
+    /// explicit us-east-1 constraint (#914), s3cmd's ACL writes (#912), SigV2 presigned URLs (#913).
     mod location_constraint_tests;
     mod minio_checksum_tests;
+    mod s3cmd_acl_tests;
     mod sigv2_presigned_tests;
 
     /// Bucket-policy conditions on the request's encryption header (rustfs/gateway#979).

@@ -9,7 +9,7 @@ for request order and `docs/assembly-order.md` for extension call counts.
 | File | Responsibility | Read it when |
 | --- | --- | --- |
 | `src/lib.rs` | Modules and public re-exports | A downstream caller cannot name a type |
-| `src/builder.rs`, `src/builder/assembly_update.rs`, `src/builder/client_quirks.rs` | Registration, validated assemblies, and the MinIO-client checksum waiver (#916) | Adding a knob, diagnosing candidate validation, or changing a client waiver |
+| `src/builder.rs`, `src/builder/assembly_update.rs`, `src/builder/client_quirks.rs` | Registration, validated assemblies, and the MinIO-client (#916) and s3cmd ACL (#912) checksum waivers | Adding a knob, diagnosing candidate validation, or changing a client waiver |
 | `src/config.rs`, `src/routing.rs` | One atomic settings, routing, and middleware snapshot | Updating a live generation or checking one-load-per-request |
 | `src/service.rs`, `src/service/update.rs` | Ordered pipeline and atomic assembly publication; ADR-0024's service-level addressing, secret opt-in and typed path values, and ADR-0025/0026's bound bucket (template or query) and subjects, are decided in `src/routed_facts.rs`; the route stage asks one question per action and per account | Moving a stage, replacing middleware, or tracing a response |
 | `src/service_tests.rs` | The pipeline's own unit suite, split out at the 800-line limit | Changing what is decidable without a request |
