@@ -221,6 +221,26 @@ jobs:
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
             bash scripts/check_role_verdicts.sh
           fi
+      # The differential's register only grows with an argument in the description, and the
+      # differential never changes alongside gateway source silently (rustfs/backlog#1762).
+      - name: Known-diffs ratchet
+        env:
+          GATEWAY_KNOWN_DIFFS_BASE: ${{ github.event.pull_request.base.sha }}
+          GATEWAY_KNOWN_DIFFS_HEAD: ${{ github.event.pull_request.head.sha }}
+          GATEWAY_PR_BODY_JSON: ${{ toJSON(github.event.pull_request.body) }}
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            bash scripts/check_known_diffs_ratchet.sh
+          fi
+      - name: Differential stays read-only
+        env:
+          GATEWAY_DIFFTEST_BASE: ${{ github.event.pull_request.base.sha }}
+          GATEWAY_DIFFTEST_HEAD: ${{ github.event.pull_request.head.sha }}
+          GATEWAY_PR_BODY_JSON: ${{ toJSON(github.event.pull_request.body) }}
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            bash scripts/check_difftest_readonly.sh
+          fi
       # Generated artefacts are a pure function of (model, overlays). If regenerating moves a
       # byte, the checked-in output and the generator disagree, and every review that read the
       # output was reading something the generator no longer produces.
@@ -412,6 +432,8 @@ jobs:
       - name: Workspace tests 3/3 (maximum 8 minutes after setup)
         run: |
           scripts/ci_budget.sh 480 "workspace tests 3/3" bash -c 'cargo test --package rustfs-gateway-goldens --package rustfs-gateway-difftest --package rustfs-gateway-types --features rustfs-gateway-types/compat-s3s && cargo test --package rustfs-gateway --package rustfs-gateway-sig'
+          scripts/ci_budget.sh 120 "difftest runners build" cargo build --quiet --package rustfs-gateway-difftest --bins
+          scripts/ci_budget.sh 200 "difftest runners" bash -c 'target/debug/decode-diff --corpus corpus --budget-seconds 180 && target/debug/encode-diff --builtin --budget-seconds 180'
 
   # Transport parity runs the whole corpus twice (once per production driver) and compares.
   # On one runner it sat at 413-471s of a 480s budget for nine consecutive main runs and hit

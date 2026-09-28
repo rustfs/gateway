@@ -267,7 +267,7 @@ fn every_format_refuses_the_shapes_next_to_its_own() {
         ),
         (
             Format::UploadId,
-            super::outputs::UPLOAD_ID,
+            crate::samples::UPLOAD_ID,
             &[
                 "",
                 "not base64!",

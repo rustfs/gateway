@@ -8178,6 +8178,266 @@ probe_protected_missing_inputs() {
 }
 probe_protected_missing_inputs
 
+# The differential's pull-request guards (rustfs/backlog#1762): the known-diffs register grows
+# only with an argument, and the differential never changes alongside gateway source silently.
+# Each case commits its mutation so the guard compares HEAD^ with HEAD as CI compares base
+# with head.
+expect_difftest_pr() {
+    local guard="$1" expect="$2" desc="$3" mutate="$4" body="${5:-}" sandbox output rc=0
+    cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
+    [[ -x "${SCRIPT_DIR}/${guard}" ]] || { fail_msg "${guard} is missing or not executable; cannot test: ${desc}"; return; }
+    make_sandbox
+    sandbox="$SANDBOX"
+    (cd "$sandbox" && "$mutate" >/dev/null && git add -A && git -c user.name=t -c user.email=t@t commit -qm mutation)
+    output="$(GATEWAY_CHECK_ROOT="$sandbox" \
+        GATEWAY_KNOWN_DIFFS_BASE=HEAD^ GATEWAY_KNOWN_DIFFS_HEAD=HEAD \
+        GATEWAY_DIFFTEST_BASE=HEAD^ GATEWAY_DIFFTEST_HEAD=HEAD \
+        GATEWAY_PR_BODY_JSON="$(json_string "$body")" \
+        "${SCRIPT_DIR}/${guard}" 2>&1)" || rc=$?
+    if [[ "$expect" == fail && "$rc" -ne 0 ]]; then
+        pass_msg "${guard} catches: ${desc}"
+    elif [[ "$expect" == pass && "$rc" -eq 0 ]]; then
+        pass_msg "${guard} allows: ${desc}"
+    else
+        fail_msg "${guard} got exit ${rc} on: ${desc}"
+        printf '%s\n' "$output" | sed 's/^/       /' >&2
+    fi
+}
+
+known_diffs_append() {
+    printf '\n[[diff]]\nid = "kd-decode-9999"\nkind = "decode"\noperation = "GetObject"\nitem = "GetObjectInput.guard_fixture"\n%s\n' "$1" \
+        >>crates/difftest/known-diffs.toml
+}
+mut_known_diff_added() { known_diffs_append $'reason = "A guard fixture entry."\nexpires = "2026-12-31"'; }
+expect_difftest_pr check_known_diffs_ratchet.sh fail \
+    'a register entry added without an argument (a-df-0016)' mut_known_diff_added
+expect_difftest_pr check_known_diffs_ratchet.sh fail \
+    'a register entry added with an argument too short to be one' mut_known_diff_added \
+    'known-diff kd-decode-9999: needed'
+expect_difftest_pr check_known_diffs_ratchet.sh fail \
+    'a register entry added with an argument naming a different id' mut_known_diff_added \
+    'known-diff kd-decode-9998: the gateway reads this member where the model binds it.'
+expect_difftest_pr check_known_diffs_ratchet.sh pass \
+    'a register entry added with its argument in the description' mut_known_diff_added \
+    $'Summary.\n- known-diff kd-decode-9999: the gateway reads this member where the model binds it.'
+mut_known_diff_no_reason() { known_diffs_append 'expires = "2026-12-31"'; }
+expect_difftest_pr check_known_diffs_ratchet.sh fail \
+    'a register entry without a reason, even argued (a-df-0017)' mut_known_diff_no_reason \
+    'known-diff kd-decode-9999: the gateway reads this member where the model binds it.'
+mut_known_diff_no_expiry() { known_diffs_append 'reason = "A guard fixture entry."'; }
+expect_difftest_pr check_known_diffs_ratchet.sh fail \
+    'a register entry without a review date, even argued (a-df-0017)' mut_known_diff_no_expiry \
+    'known-diff kd-decode-9999: the gateway reads this member where the model binds it.'
+mut_known_diff_bad_expiry() { known_diffs_append $'reason = "A guard fixture entry."\nexpires = "2026-02-30"'; }
+expect_difftest_pr check_known_diffs_ratchet.sh fail \
+    'a register entry whose review date is not a calendar date' mut_known_diff_bad_expiry \
+    'known-diff kd-decode-9999: the gateway reads this member where the model binds it.'
+mut_known_diff_extended() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/difftest/known-diffs.toml")
+text = path.read_text()
+anchor = 'id = "kd-decode-0001"'
+start = text.index(anchor)
+at = text.index('expires = "', start)
+end = text.index('"', at + len('expires = "'))
+path.write_text(text[:at] + 'expires = "2099-12-31' + text[end:])
+PYEOF
+}
+expect_difftest_pr check_known_diffs_ratchet.sh fail \
+    'an existing entry whose review date moved without an argument' mut_known_diff_extended
+mut_known_diff_widened() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/difftest/known-diffs.toml")
+text = path.read_text()
+start = text.index('id = "kd-decode-0003"')
+at = text.index('s3s = "', start)
+end = text.index('\n', at)
+path.write_text(text[:at] + 's3s = "*"' + text[end:])
+PYEOF
+}
+expect_difftest_pr check_known_diffs_ratchet.sh fail \
+    'an existing entry widened to any value without an argument' mut_known_diff_widened
+expect_difftest_pr check_known_diffs_ratchet.sh fail \
+    'an argument hidden in an HTML comment a reviewer cannot see' mut_known_diff_widened \
+    $'<!--\nknown-diff kd-decode-0003: the gateway reads this member where the model binds it.\n-->'
+mut_known_diff_far_expiry() { known_diffs_append $'reason = "A guard fixture entry."\nexpires = "2099-12-31"'; }
+expect_difftest_pr check_known_diffs_ratchet.sh fail \
+    'an added entry whose review is decades away, even argued' mut_known_diff_far_expiry \
+    'known-diff kd-decode-9999: the gateway reads this member where the model binds it.'
+mut_known_diff_matching_code() { printf '\n// matching changed\n' >>crates/difftest/src/known.rs; }
+expect_difftest_pr check_known_diffs_ratchet.sh fail \
+    'the matching code changed without a word, the register file untouched' mut_known_diff_matching_code
+expect_difftest_pr check_known_diffs_ratchet.sh pass \
+    'the matching code changed with the reason given' mut_known_diff_matching_code \
+    'Difftest-matching change: entries may now be scoped to a query parameter the request carries.'
+mut_known_diff_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/difftest/known-diffs.toml")
+text = path.read_text()
+start = text.index('[[diff]]\nid = "kd-decode-0002"')
+end = text.index("[[diff]]", start + 1)
+path.write_text(text[:start] + text[end:])
+PYEOF
+}
+expect_difftest_pr check_known_diffs_ratchet.sh pass \
+    'an entry removed because its difference is gone' mut_known_diff_removed
+
+mut_difftest_and_gateway_source() {
+    printf '\n' >>crates/difftest/known-diffs.toml
+    printf '\n' >>crates/core/src/lib.rs
+}
+expect_difftest_pr check_difftest_readonly.sh fail \
+    'gateway source changed alongside the differential without a word (a-df-0019)' mut_difftest_and_gateway_source
+expect_difftest_pr check_difftest_readonly.sh pass \
+    'gateway source changed alongside the differential with the reason given' mut_difftest_and_gateway_source \
+    'Difftest-coupled change: the decode diff found a real gateway bug in the Range parser.'
+mut_difftest_and_overlay() {
+    printf '\n' >>crates/difftest/known-diffs.toml
+    printf '\n' >>model/overlays/error-status.toml
+}
+expect_difftest_pr check_difftest_readonly.sh fail \
+    'a protocol overlay changed alongside the differential without a word' mut_difftest_and_overlay
+mut_difftest_only() { printf '\n' >>crates/difftest/known-diffs.toml; }
+expect_difftest_pr check_difftest_readonly.sh pass \
+    'the differential changed on its own' mut_difftest_only
+
+probe_difftest_pr_guards_missing_inputs() {
+    local guard variable output rc
+    for guard in check_known_diffs_ratchet.sh:GATEWAY_KNOWN_DIFFS_BASE check_difftest_readonly.sh:GATEWAY_DIFFTEST_BASE; do
+        variable="${guard#*:}"
+        guard="${guard%%:*}"
+        rc=0
+        cases=$((cases + 1))
+        guard_case_owned "$cases" || continue
+        output="$(GATEWAY_CHECK_ROOT="$REPO_ROOT" GATEWAY_PR_BODY_JSON='""' "${SCRIPT_DIR}/${guard}" 2>&1)" || rc=$?
+        [[ "$rc" -ne 0 && "$output" == *"required input is missing: ${variable}"* ]] &&
+            pass_msg "${guard} fails closed without PR comparison inputs" ||
+            fail_msg "${guard} reported green without PR comparison inputs"
+    done
+}
+probe_difftest_pr_guards_missing_inputs
+
+mut_known_diff_expired() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/difftest/known-diffs.toml")
+text = path.read_text()
+at = text.index('expires = "', text.index('id = "kd-encode-0001"'))
+end = text.index('"', at + len('expires = "'))
+path.write_text(text[:at] + 'expires = "2020-01-01' + text[end:])
+PYEOF
+}
+expect_fail check_known_diffs_expiry.sh \
+    'a register entry past its review date (a-df-0018)' mut_known_diff_expired 'kd-encode-0001 expired on 2020-01-01'
+mut_known_diff_expiry_unreadable() { known_diffs_append 'reason = "A guard fixture entry."'; }
+expect_fail check_known_diffs_expiry.sh \
+    'a register entry with no review date at all' mut_known_diff_expiry_unreadable 'kd-decode-9999: no expires'
+probe_known_diffs_due_soon() {
+    local output rc=0
+    cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
+    output="$(GATEWAY_KNOWN_DIFFS_TODAY=2026-12-15 "${SCRIPT_DIR}/check_known_diffs_expiry.sh" 2>&1)" || rc=$?
+    [[ "$rc" -eq 0 && "$output" == *'::warning::known-diffs entry kd-decode-0001 is due for review on 2026-12-31'* ]] &&
+        pass_msg 'check_known_diffs_expiry.sh warns before an entry falls due' ||
+        fail_msg 'check_known_diffs_expiry.sh said nothing about an entry due in sixteen days'
+    rc=0
+    output="$(GATEWAY_KNOWN_DIFFS_TODAY=2027-01-01 "${SCRIPT_DIR}/check_known_diffs_expiry.sh" --due 2>&1)" || rc=$?
+    [[ "$rc" -eq 0 && "$output" == *'kd-decode-0001 2026-12-31'* ]] &&
+        pass_msg 'check_known_diffs_expiry.sh --due lists expired entries for the review issue' ||
+        fail_msg 'check_known_diffs_expiry.sh --due did not list an expired entry'
+}
+probe_known_diffs_due_soon
+
+mut_difftest_published() { sed -i.bak 's/^publish = false$/publish = true/' crates/difftest/Cargo.toml && rm crates/difftest/Cargo.toml.bak; }
+expect_fail check_difftest_not_published.sh \
+    'the differential made publishable (a-df-0022)' mut_difftest_published 'publish = false'
+mut_difftest_shipped() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/Cargo.toml")
+text = path.read_text()
+anchor = "[dependencies]\n"
+if text.count(anchor) != 1:
+    raise SystemExit("gateway dependencies table is missing or ambiguous")
+path.write_text(text.replace(anchor, anchor + 'oracle = { package = "rustfs-gateway-difftest", path = "../difftest" }\n', 1))
+PYEOF
+}
+expect_fail check_difftest_not_published.sh \
+    'a shipping crate depending on the differential under another name' mut_difftest_shipped 'rustfs-gateway reaches rustfs-gateway-difftest'
+mut_difftest_inherited() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+root = Path("Cargo.toml")
+text = root.read_text()
+anchor = "[workspace.dependencies]\n"
+if text.count(anchor) != 1:
+    raise SystemExit("workspace dependencies table is missing or ambiguous")
+root.write_text(text.replace(anchor, anchor + 'rustfs-gateway-difftest = { path = "crates/difftest" }\n', 1))
+path = Path("compat/sut/Cargo.toml")
+text = path.read_text()
+anchor = "[dependencies]\n"
+if text.count(anchor) != 1:
+    raise SystemExit("compat-sut dependencies table is missing or ambiguous")
+path.write_text(text.replace(anchor, anchor + "rustfs-gateway-difftest.workspace = true\n", 1))
+PYEOF
+}
+expect_fail check_difftest_not_published.sh \
+    'a workspace member outside crates/ inheriting the differential from the workspace table' mut_difftest_inherited 'reaches rustfs-gateway-difftest'
+mut_difftest_transitive() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/corpus/Cargo.toml")
+text = path.read_text()
+anchor = "[dependencies]\n"
+if text.count(anchor) != 1:
+    raise SystemExit("corpus dependencies table is missing or ambiguous")
+path.write_text(text.replace(anchor, anchor + 'rustfs-gateway-fuzz = { path = "../../fuzz" }\n', 1))
+fuzz = Path("fuzz/Cargo.toml")
+text = fuzz.read_text()
+if 'rustfs-gateway-difftest' not in text:
+    if text.count(anchor) != 1:
+        raise SystemExit("fuzz dependencies table is missing or ambiguous")
+    fuzz.write_text(text.replace(anchor, anchor + 'rustfs-gateway-difftest = { path = "../crates/difftest" }\n', 1))
+PYEOF
+}
+expect_fail check_difftest_not_published.sh \
+    'a crate reaching the differential through the fuzz crate' mut_difftest_transitive 'rustfs-gateway-corpus reaches'
+mut_difftest_dev_dependency() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/corpus/Cargo.toml")
+text = path.read_text()
+path.write_text(text + '\n[dev-dependencies.rustfs-gateway-difftest]\npath = "../difftest"\n')
+PYEOF
+}
+expect_pass_difftest_dev() {
+    local sandbox rc=0
+    cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
+    make_sandbox
+    sandbox="$SANDBOX"
+    (cd "$sandbox" && mut_difftest_dev_dependency >/dev/null)
+    GATEWAY_CHECK_ROOT="$sandbox" "${SCRIPT_DIR}/check_difftest_not_published.sh" >/dev/null 2>&1 || rc=$?
+    [[ "$rc" -eq 0 ]] && pass_msg 'check_difftest_not_published.sh allows: a dev-dependency on the differential' ||
+        fail_msg 'check_difftest_not_published.sh rejected: a dev-dependency on the differential'
+}
+expect_pass_difftest_dev
+mut_difftest_ring_line() { sed -i.bak '1s/.*/# rustfs-gateway-difftest/' crates/difftest/README.md && rm crates/difftest/README.md.bak; }
+expect_fail check_difftest_not_published.sh \
+    'the differential README losing its RING 2 migration-only first line' mut_difftest_ring_line 'RING 2'
+
 mut_inventory() {
     python3 - <<'PYEOF'
 from pathlib import Path
@@ -17821,6 +18081,12 @@ expect_fail check_ci_test_split.sh \
     'the types tests losing the workspace compat-s3s feature graph' \
     mut_ci_third_workspace_compat_feature_dropped
 
+mut_ci_difftest_runners_dropped() {
+    replace_ci_text 'scripts/ci_budget.sh 200 "difftest runners"' 'true scripts/ci_budget.sh 200 "difftest runners"'
+}
+expect_fail check_ci_test_split.sh \
+    'the third workspace shard no longer running the differential runners' mut_ci_difftest_runners_dropped
+
 # Shard 1 excludes the sig package because shard 3 runs it; a shard 3 that stops running it would
 # leave the sig tests running nowhere while all three jobs stayed green.
 mut_ci_third_workspace_sig_package_dropped() {
@@ -19105,7 +19371,7 @@ path = pathlib.Path(".github/workflows/ci.yml")
 text = path.read_text()
 before = "GATEWAY_PR_BODY_JSON: ${{ toJSON(github.event.pull_request.body) }}"
 after = "GATEWAY_PR_BODY_JSON: ${{ github.event.pull_request.body }}"
-if text.count(before) != 3:
+if text.count(before) != 5:
     raise SystemExit("missing the JSON-encoded pull-request body exports")
 path.write_text(text.replace(before, after))
 PYEOF
@@ -19140,7 +19406,7 @@ import pathlib
 path = pathlib.Path(".github/workflows/ci.yml")
 text = path.read_text()
 before = "          GATEWAY_PR_BODY_JSON: ${{ toJSON(github.event.pull_request.body) }}\n"
-if text.count(before) != 3:
+if text.count(before) != 5:
     raise SystemExit("missing the JSON-encoded pull-request body exports")
 path.write_text(text.replace(before, ""))
 PYEOF
