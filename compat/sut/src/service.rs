@@ -107,6 +107,9 @@ pub(crate) fn build_service(
             // The same registry answers `x-amz-expected-bucket-owner`, so the owner id a caller
             // asserts is the very id the authorization decision was made against.
             .bucket_owner_source(Arc::clone(owners))
+            // RustFS accepts the MinIO SDKs' checksum-less policy and versioning writes, and so
+            // must the launcher that stands for it (rustfs/gateway#916).
+            .accept_minio_client_checksum_omissions()
             // And the same registry decides whether a name is taken: another identity's
             // re-creation is `409 BucketAlreadyExists` before the backend is asked, and a
             // creation the backend admitted is what gets recorded.
@@ -776,4 +779,8 @@ mod tests {
     /// The bucket-policy enforcement cases, beside these in their own file.
     #[path = "policy_tests.rs"]
     mod policy_tests;
+
+    /// The MinIO-client checksum waiver the RustFS profile installs (rustfs/gateway#916).
+    #[path = "minio_checksum_tests.rs"]
+    mod minio_checksum_tests;
 }

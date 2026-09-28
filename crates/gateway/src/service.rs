@@ -166,8 +166,7 @@ mod update;
 /// algorithm the credential store fell over under is not a fact a caller needs.
 const UNAUTHENTICATED: &str = "the request could not be authenticated";
 
-/// Everything an assembled service holds. Behind one `Arc`, so cloning the service is one
-/// refcount bump and a connection may hold its own clone.
+/// Everything an assembled service holds, behind one `Arc` so a clone is one refcount bump.
 pub(crate) struct Inner {
     pub(crate) floor: SecurityFloor,
     pub(crate) limits: Limits,
@@ -192,6 +191,7 @@ pub(crate) struct Inner {
     pub(crate) temporary_redirect_targets: Arc<[RedirectTarget]>,
     /// Whether a handed-over caller secret reaches every operation, not only opted-in ones (ADR-0024).
     pub(crate) caller_secret_every_operation: bool,
+    pub(crate) checksum_waiver: crate::builder::ChecksumWaiver,
 }
 
 struct AuthorizedRoute {
@@ -625,7 +625,7 @@ impl S3Service {
             None => resolved.bucket().cloned(),
         };
         let meta = match MetaView::addressed_with(&wire, target, host_bucket, &self.inner.names) {
-            Ok(meta) => meta,
+            Ok(meta) => self.inner.checksum_waiver.apply(operation, meta),
             Err(error) => return outcome.refuse(from_codec(error, response_kind)),
         };
         let config = config.routed();
