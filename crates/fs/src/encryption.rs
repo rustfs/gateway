@@ -15,8 +15,9 @@
 //! The default-encryption family, stored and answered as RustFS stores and answers it.
 //!
 //! Responsible for: `PutBucketEncryption`, `GetBucketEncryption` and `DeleteBucketEncryption` on
-//! the reference backend, and [`FsBackend::bucket_encryption`], the stored document an object
-//! write consults.
+//! the reference backend, [`FsBackend::bucket_encryption`], and the encryption an object write
+//! records and every later read reports: the request's managed algorithm, else the bucket
+//! default, refused where RustFS refuses it; and the refusal of a read that names one.
 //! NOT responsible for: the document's shared rules (`validate_encryption`), its persisted grammar
 //! (`rustfs_gateway::persistence`), or encrypting anything.
 //! Upstream: the shared encryption contract and the persistence codec. Downstream: the production
@@ -38,10 +39,22 @@
 //!   and an algorithm other than `AES256` or `aws:kms` (`validate_bucket_encryption_configuration`).
 //! - An `aws:kms` default without a key id is filled with the KMS's default key; with no KMS
 //!   configured RustFS answers `500 InternalError`. This backend has no KMS, so it answers that.
+//!
+//! # Objects (`sse.rs` upstream)
+//!
+//! - A write stores the algorithm the request named, and the KMS key id beside `aws:kms`; a write
+//!   naming none takes the bucket default's first rule. A copy takes its own request's, never the
+//!   source's; a multipart upload takes it at initiation. The write and every `GET`/`HEAD` report
+//!   it.
+//! - An algorithm other than `AES256`/`aws:kms` is `400 InvalidArgument`
+//!   (`validate_sse_headers_for_write`), and `aws:kms` with no key id to use is the same
+//!   no-KMS `500` as above. The framework has already refused a key id with no algorithm.
+//! - A `GET` or `HEAD` naming a managed algorithm is `400 InvalidArgument`
+//!   (`validate_sse_headers_for_read`).
 
 use rustfs_gateway::dto::{
     DeleteBucketEncryption, DeleteBucketEncryptionOutput, GetBucketEncryption, GetBucketEncryptionOutput, PutBucketEncryption,
-    PutBucketEncryptionOutput, ServerSideEncryptionConfiguration,
+    PutBucketEncryptionOutput, ServerSideEncryption, ServerSideEncryptionConfiguration,
 };
 use rustfs_gateway::persistence::{parse_bucket_encryption_dto, serialize_bucket_encryption_dto};
 use rustfs_gateway::{ErrorCode, Handler, HandlerError, HandlerResult, Req, Resp, validate_encryption};
@@ -58,6 +71,10 @@ fn not_found() -> HandlerError {
         ErrorCode::SERVER_SIDE_ENCRYPTION_CONFIGURATION_NOT_FOUND,
         "The server side encryption configuration was not found",
     )
+}
+
+fn no_kms() -> HandlerError {
+    HandlerError::new(ErrorCode::INTERNAL_ERROR, "KMS default key not configured")
 }
 
 fn malformed(reason: &'static str) -> HandlerError {
@@ -78,7 +95,7 @@ fn refuse_what_rustfs_cannot_honour(configuration: &ServerSideEncryptionConfigur
             return Err(malformed("SSEAlgorithm is not supported; expected AES256 or aws:kms"));
         }
         if algorithm == "aws:kms" && by_default.kms_master_key_id.as_deref().is_none_or(str::is_empty) {
-            return Err(HandlerError::new(ErrorCode::INTERNAL_ERROR, "KMS default key not configured"));
+            return Err(no_kms());
         }
     }
     Ok(())
@@ -99,6 +116,77 @@ impl FsBackend {
         {
             Some(bytes) => Ok(Some(parse_bucket_encryption_dto(&bytes).map_err(|_| storage_error())?)),
             None => Ok(None),
+        }
+    }
+}
+
+/// The server-managed encryption one object version is written under, as stored and reported.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub(super) struct ObjectEncryption {
+    pub(super) algorithm: Option<String>,
+    pub(super) kms_key_id: Option<String>,
+}
+
+impl ObjectEncryption {
+    /// The algorithm as the response member spells it.
+    pub(super) fn reported_algorithm(&self) -> Option<ServerSideEncryption> {
+        self.algorithm.clone().map(ServerSideEncryption::custom)
+    }
+}
+
+/// Refuses a read that names a managed algorithm: RustFS answers every such read `400`.
+pub(super) fn refuse_read_encryption(sse: &rustfs_gateway::SseEnforced) -> Result<(), HandlerError> {
+    if sse.managed_algorithm().is_some() {
+        return Err(HandlerError::new(
+            ErrorCode::INVALID_ARGUMENT,
+            "Server-side encryption headers are not accepted on a read of an object encrypted with managed keys",
+        ));
+    }
+    Ok(())
+}
+
+impl FsBackend {
+    /// The encryption an object write records: the request's managed algorithm and key id, or the
+    /// bucket default's first rule when the request named none.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidArgument` for an algorithm RustFS's write path cannot apply, the no-KMS
+    /// `InternalError` for `aws:kms` with no key id, and the bucket's own read errors.
+    pub(super) async fn write_encryption(
+        &self,
+        bucket: &str,
+        requested: Option<&str>,
+        requested_key_id: Option<&str>,
+    ) -> Result<ObjectEncryption, HandlerError> {
+        let (algorithm, key_id) = match requested {
+            Some(algorithm) => (Some(algorithm.to_owned()), requested_key_id.map(ToOwned::to_owned)),
+            None => match self.bucket_encryption(bucket).await? {
+                Some(configuration) => configuration
+                    .rules
+                    .first()
+                    .and_then(|rule| rule.apply_server_side_encryption_by_default.as_ref())
+                    .map_or((None, None), |by_default| {
+                        (Some(by_default.sse_algorithm.as_str().to_owned()), by_default.kms_master_key_id.clone())
+                    }),
+                None => (None, None),
+            },
+        };
+        match algorithm.as_deref() {
+            None => Ok(ObjectEncryption::default()),
+            Some("AES256") => Ok(ObjectEncryption {
+                algorithm,
+                kms_key_id: None,
+            }),
+            Some("aws:kms") if key_id.as_deref().is_some_and(|id| !id.is_empty()) => Ok(ObjectEncryption {
+                algorithm,
+                kms_key_id: key_id,
+            }),
+            Some("aws:kms") => Err(no_kms()),
+            Some(_) => Err(HandlerError::new(
+                ErrorCode::INVALID_ARGUMENT,
+                "The SSE algorithm specified is not supported. The valid values are AES256 or aws:kms.",
+            )),
         }
     }
 }

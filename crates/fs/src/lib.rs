@@ -31,7 +31,8 @@ use std::time::{Duration, UNIX_EPOCH};
 use md5::{Digest as _, Md5};
 use rustfs_gateway::dto::{
     AbortMultipartUpload, AbortMultipartUploadOutput, CompleteMultipartUpload, CompleteMultipartUploadOutput,
-    CreateMultipartUpload, CreateMultipartUploadOutput, ListParts, ListPartsOutput, Owner, Part, UploadPart, UploadPartOutput,
+    CreateMultipartUpload, CreateMultipartUploadOutput, ListParts, ListPartsOutput, Owner, Part, ServerSideEncryption,
+    UploadPart, UploadPartOutput,
 };
 use rustfs_gateway::{
     BucketName, ByteStream, Clock, ETag, ErrorCode, Handler, HandlerError, HandlerErrorContext, HandlerResult, MissingObject,
@@ -465,9 +466,16 @@ impl Handler<CreateMultipartUpload> for FsBackend {
         // S3 carries user metadata and the representation headers on the initiating request and on
         // neither the parts nor the completion, so this is the only call in the multipart family
         // that has them to persist.
+        let encryption = self
+            .write_encryption(
+                input.bucket.as_str(),
+                input.server_side_encryption.as_ref().map(ServerSideEncryption::as_str),
+                input.ssekms_key_id.as_deref(),
+            )
+            .await?;
         let attributes = ObjectAttributes {
             metadata: input.metadata.clone(),
-            headers: request_content_headers!(input),
+            headers: request_content_headers!(input).with_encryption(encryption.clone()),
             ..ObjectAttributes::default()
         };
         let upload_id = self.create_upload(&input.bucket, &input.key, checksum, &attributes).await?;
@@ -477,6 +485,8 @@ impl Handler<CreateMultipartUpload> for FsBackend {
             upload_id,
             checksum_algorithm: input.checksum_algorithm,
             checksum_type,
+            server_side_encryption: encryption.reported_algorithm(),
+            ssekms_key_id: encryption.kms_key_id,
             ..CreateMultipartUploadOutput::default()
         }))
     }
@@ -683,6 +693,8 @@ impl Handler<CompleteMultipartUpload> for FsBackend {
             e_tag: Some(composite),
             version_id: published.version_id,
             checksum_type: record.checksum.map(uploads::UploadChecksum::dto_type),
+            server_side_encryption: record.attributes.headers.encryption().reported_algorithm(),
+            ssekms_key_id: record.attributes.headers.encryption().kms_key_id,
             ..CompleteMultipartUploadOutput::default()
         };
         if let Some(checksum) = completed_checksum {

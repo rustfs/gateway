@@ -56,9 +56,10 @@ impl Handler<PostObject> for FsBackend {
         // Drained first: a refusal returned with the file unread would be reported as an abandoned
         // body rather than as itself. Nothing is published until every refusal has had its turn.
         let bytes = drain(Some(input.body)).await?;
+        let encryption = self.write_encryption(input.bucket.as_str(), None, None).await?;
         let attributes = ObjectAttributes {
             metadata: form_metadata(input.metadata)?,
-            headers: ContentHeaders::from_request(None, None, None, None, input.content_type, None),
+            headers: ContentHeaders::from_request(None, None, None, None, input.content_type, None).with_encryption(encryption),
             ..ObjectAttributes::default()
         };
         let e_tag = etag(&bytes)?;

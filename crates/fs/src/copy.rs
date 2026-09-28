@@ -20,7 +20,9 @@
 //! seals the raw header and supplies the proof consumed here. Upstream: `rustfs-gateway` copy and
 //! conditional contracts plus `super::reads`. Downstream: the CRUD registry.
 
-use rustfs_gateway::dto::{CopyObject, CopyObjectInput, CopyObjectOutput, MetadataDirective, TaggingDirective};
+use rustfs_gateway::dto::{
+    CopyObject, CopyObjectInput, CopyObjectOutput, MetadataDirective, ServerSideEncryption, TaggingDirective,
+};
 use rustfs_gateway::{
     ConditionalOutcome, ETag, ErrorCode, Handler, HandlerError, HandlerResult, MetadataSource, ObjectValidators,
     PRECONDITION_FAILED_MESSAGE, Preconditions, Req, RequestKind, Resp, Timestamp, classify_self_copy,
@@ -144,9 +146,18 @@ impl Handler<CopyObject> for FsBackend {
             (MetadataSource::FromSource, Some(directory)) => read_persisted_tags(directory).await?,
             (MetadataSource::FromSource, None) => Vec::new(),
         };
+        // The destination's encryption is the copy request's own, or the bucket default: never the
+        // source's, whichever directive copied the other headers.
+        let encryption = self
+            .write_encryption(
+                input.bucket.as_str(),
+                input.server_side_encryption.as_ref().map(ServerSideEncryption::as_str),
+                input.ssekms_key_id.as_deref(),
+            )
+            .await?;
         let attributes = ObjectAttributes {
             metadata,
-            headers,
+            headers: headers.with_encryption(encryption.clone()),
             storage_class,
             tags,
         };
@@ -173,6 +184,8 @@ impl Handler<CopyObject> for FsBackend {
                 .map(ToOwned::to_owned)
                 .or(source_representation.version_id),
             version_id: published.version_id,
+            server_side_encryption: encryption.reported_algorithm(),
+            ssekms_key_id: encryption.kms_key_id,
             ..CopyObjectOutput::default()
         }))
     }

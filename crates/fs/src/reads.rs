@@ -41,6 +41,7 @@ use rustfs_gateway::{
 
 use super::conditions::{conditions, guard_read};
 use super::content_headers::ContentHeaders;
+use super::encryption::refuse_read_encryption;
 use super::records::RecordKind;
 use super::storage_error;
 use super::versioning::{delete_marker_error, explicit_for_key, missing_version, newest_for_key};
@@ -253,6 +254,7 @@ pub(super) enum Selected {
 
 impl Handler<GetObject> for super::FsBackend {
     async fn call(&self, request: Req<GetObject>) -> HandlerResult<GetObject> {
+        refuse_read_encryption(request.sse())?;
         let input = request.input();
         let conditions = conditions(
             input.if_match.as_deref(),
@@ -287,6 +289,7 @@ impl Handler<GetObject> for super::FsBackend {
             input.part_number,
             &representation,
         )?;
+        let encryption = representation.headers.encryption();
         let body = representation
             .bytes
             .get(window.start..window.end_exclusive)
@@ -310,6 +313,8 @@ impl Handler<GetObject> for super::FsBackend {
                 content_disposition: representation.headers.content_disposition,
                 content_encoding: representation.headers.content_encoding,
                 content_language: representation.headers.content_language,
+                server_side_encryption: encryption.reported_algorithm(),
+                ssekms_key_id: encryption.kms_key_id,
                 expires: representation.headers.expires.map(Into::into),
                 body: Some(ByteStream::from_bytes(Bytes::from(body))),
                 ..GetObjectOutput::default()
@@ -321,6 +326,7 @@ impl Handler<GetObject> for super::FsBackend {
 
 impl Handler<HeadObject> for super::FsBackend {
     async fn call(&self, request: Req<HeadObject>) -> HandlerResult<HeadObject> {
+        refuse_read_encryption(request.sse())?;
         let input = request.input();
         let conditions = conditions(
             input.if_match.as_deref(),
@@ -348,6 +354,7 @@ impl Handler<HeadObject> for super::FsBackend {
         // operation's IR carries no such field, so there is nothing to read rather than something
         // being ignored.
         let window = resolve_window(input.range.as_ref().map(|range| range.as_str()), None, input.part_number, &representation)?;
+        let encryption = representation.headers.encryption();
         Ok(Resp::with_status(
             HeadObjectOutput {
                 content_length: i64::try_from(window.len()).ok(),
@@ -363,6 +370,8 @@ impl Handler<HeadObject> for super::FsBackend {
                 content_disposition: representation.headers.content_disposition,
                 content_encoding: representation.headers.content_encoding,
                 content_language: representation.headers.content_language,
+                server_side_encryption: encryption.reported_algorithm(),
+                ssekms_key_id: encryption.kms_key_id,
                 expires: representation.headers.expires.map(Into::into),
                 ..HeadObjectOutput::default()
             },
