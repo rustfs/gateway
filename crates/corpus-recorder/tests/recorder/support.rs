@@ -75,6 +75,20 @@ pub(crate) async fn settle(layer: &CorpusRecorderLayer, finished: u64) -> Record
     panic!("the writer did not finish {finished} record(s): {:?}", layer.stats());
 }
 
+/// The stats once a record that must not be written has been counted, after giving the writer
+/// thread time to write it if the recorder did submit it: a negative "nothing was written" must
+/// not pass only because the writer was slower than the assertion.
+pub(crate) async fn settle_unwritten(layer: &CorpusRecorderLayer) -> RecorderStats {
+    for _ in 0..500 {
+        if layer.stats().body_not_recorded >= 1 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    layer.stats()
+}
+
 /// Every entry in the recorder's output file.
 pub(crate) fn entries(config: &RecorderConfig) -> Vec<Entry> {
     let text = std::fs::read_to_string(&config.output).unwrap_or_default();

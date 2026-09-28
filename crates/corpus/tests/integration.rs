@@ -723,3 +723,72 @@ fn an_s3s_issue_source_without_an_issue_number_is_refused() {
     }
     store::check_source("handwritten:s3s-issues#297").expect("a numbered issue source is admitted");
 }
+
+/// Negative — a complete, unframed recording whose declared `Content-Length` disagrees with the
+/// body it recorded is refused: replaying it sends a request no client sent
+/// (`corpus/object/DeleteObjects.jsonl:1` declared 116 bytes over an 83-byte body).
+#[test]
+fn a_declared_length_the_recorded_body_does_not_have_is_refused() {
+    let mut short = with_body("hello");
+    short.headers.push(("content-length".to_owned(), "9".to_owned()));
+    let refusal = store::check_declared_length(&short).expect_err("9 declared, 5 recorded");
+    assert!(refusal.contains("content-length 9") && refusal.contains("5"), "{refusal}");
+
+    let root = scratch_dir("declared-length");
+    let (buckets, _) = dedup::bucketize(vec![short], dedup::DEFAULT_BUCKET_CAP);
+    store::write(&root, &buckets).unwrap();
+    let violations = store::verify(&root).unwrap_err();
+    assert!(
+        violations.iter().any(|violation| violation.contains("content-length 9")),
+        "{violations:?}"
+    );
+    std::fs::remove_dir_all(&root).unwrap();
+
+    let mut empty = base_entry();
+    empty.headers.push(("content-length".to_owned(), "3".to_owned()));
+    assert!(
+        store::check_declared_length(&empty).is_err(),
+        "no body recorded against a declared 3 bytes"
+    );
+    let mut unparsable = with_body("hello");
+    unparsable.headers.push(("content-length".to_owned(), "five".to_owned()));
+    assert!(store::check_declared_length(&unparsable).is_err());
+}
+
+/// Positive — what the length check must leave alone: an exact length, no declared length, a
+/// partial head capture (the recorder may not have seen the whole body), aws-chunked framing (the
+/// length counts the framing), chunked transfer, and an abnormal end that is the point of the
+/// entry.
+#[test]
+fn the_declared_length_check_leaves_legitimate_recordings_alone() {
+    let mut exact = with_body("hello");
+    exact.headers.push(("content-length".to_owned(), "5".to_owned()));
+    assert_eq!(store::check_declared_length(&exact), Ok(()));
+    assert_eq!(store::check_declared_length(&with_body("hello")), Ok(()));
+
+    let mut partial = with_body("hello");
+    partial.headers.push(("content-length".to_owned(), "9".to_owned()));
+    partial.capture = Capture::HeadPartial;
+    assert_eq!(store::check_declared_length(&partial), Ok(()));
+
+    let mut framed = with_body("hello");
+    framed.headers.push(("content-length".to_owned(), "99".to_owned()));
+    framed.headers.push(("content-encoding".to_owned(), "aws-chunked".to_owned()));
+    assert_eq!(store::check_declared_length(&framed), Ok(()));
+
+    let mut transferred = with_body("hello");
+    transferred
+        .headers
+        .push(("transfer-encoding".to_owned(), "chunked".to_owned()));
+    transferred.headers.push(("content-length".to_owned(), "99".to_owned()));
+    assert_eq!(store::check_declared_length(&transferred), Ok(()));
+
+    let mut truncated = with_body("short");
+    truncated.headers.push(("content-length".to_owned(), "1024".to_owned()));
+    truncated.chunks.as_mut().unwrap().push(Chunk::Control {
+        action: "half_close".to_owned(),
+        delay_ms: None,
+        duration_ms: None,
+    });
+    assert_eq!(store::check_declared_length(&truncated), Ok(()));
+}

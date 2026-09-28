@@ -24,7 +24,8 @@ use tower::{Layer as _, ServiceExt as _};
 use rustfs_gateway_corpus::redact::PLACEHOLDER;
 
 use crate::support::{
-    Frames, Seen, config, entries, ignoring_service, reading_service, recorder, request, settle, stop_at_end_service,
+    Frames, Seen, config, entries, ignoring_service, reading_service, recorder, request, settle, settle_unwritten,
+    stop_at_end_service,
 };
 
 const SSE_C_KEY: &str = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=";
@@ -172,6 +173,35 @@ async fn n_an_unread_body_is_not_recorded() {
     let entry = &entries(&config)[0];
     assert!(entry.chunks.is_none());
     assert_eq!(entry.resp.as_ref().map(|response| response.status), Some(403));
+}
+
+/// Negative — a request whose head declares a body the service never read is not written at all:
+/// an entry with the head's `Content-Length` and no body claims a request no client sent, and
+/// replays as one. The checked-in corpus held fourteen such entries, every one an operation the
+/// reference server answered 501 before reading the body. Counted as a body not recorded.
+#[tokio::test]
+async fn n_an_unread_declared_body_is_not_written() {
+    for declared in [("content-length", "10"), ("transfer-encoding", "chunked")] {
+        let config = config(&format!("capture-unread-declared-{}", declared.0));
+        let layer = recorder(config.clone());
+        let response = layer
+            .layer(ignoring_service())
+            .oneshot(request("PUT", "/bucket/key", &[declared], Frames::of(&[b"never read"])))
+            .await
+            .expect("an infallible service");
+        assert_eq!(response.status(), 403, "the request is still served");
+        let stats = settle_unwritten(&layer).await;
+        assert_eq!((stats.body_not_recorded, stats.recorded), (1, 0), "{declared:?}");
+        assert_eq!(std::fs::read_to_string(&config.output).unwrap_or_default(), "", "{declared:?}");
+    }
+    let config = config("capture-unread-declared-empty");
+    let layer = recorder(config.clone());
+    let _ = layer
+        .layer(ignoring_service())
+        .oneshot(request("PUT", "/bucket/key", &[("content-length", "0")], Frames::of(&[])))
+        .await;
+    let stats = settle(&layer, 1).await;
+    assert_eq!(stats.recorded, 1, "a declared empty body was observed in full");
 }
 
 /// Negative — a request no S3 route names is served but not recorded, and counted.

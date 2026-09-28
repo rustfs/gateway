@@ -128,6 +128,11 @@ fn ingest(args: &[String]) -> ExitCode {
                 refused += 1;
                 continue;
             }
+            if let Err(reason) = store::check_declared_length(&entry) {
+                eprintln!("corpus ingest: {input}:{line}: {reason}");
+                refused += 1;
+                continue;
+            }
             if sanitize {
                 sanitized_fields += redact::sanitize(&mut entry).len();
             }
