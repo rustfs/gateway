@@ -48,8 +48,7 @@ use crate::resolver::Resolver;
 
 /// The one credential the gateway store holds. The diff sends no signed request today — recorded
 /// signatures are redacted — but the authenticator is the one a deployment runs.
-const ACCESS_KEY: &str = "AKIDDIFFTEST";
-const SECRET_KEY: &str = "difftest-secret-key";
+use crate::sign::{ACCESS_KEY, REGION, SECRET_KEY};
 
 /// What one gateway handler call recorded.
 pub(crate) struct Handed {
@@ -180,7 +179,7 @@ impl GatewayStack {
     pub(crate) fn new(fault: &Fault) -> Result<Self, String> {
         let credentials =
             Credentials::new(ACCESS_KEY, SECRET_KEY.as_bytes()).map_err(|error| format!("credential: {error:?}"))?;
-        let regions = RegionSet::new(["us-east-1"]).map_err(|error| format!("regions: {error:?}"))?;
+        let regions = RegionSet::new([REGION]).map_err(|error| format!("regions: {error:?}"))?;
         let authenticator = SigV4Authenticator::new(Arc::new(StaticCredentials::new().with(credentials)), regions);
         let slot: Slot = Arc::new(Mutex::new(None));
         let routed: Routed = Arc::new(Mutex::new(None));

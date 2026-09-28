@@ -242,12 +242,22 @@ fn a_copied_request_loses_its_signature_and_framing() {
     };
     let request = request_of(&captured).expect("sendable");
     assert_eq!(request.target, "/bkt/k?tagging");
-    assert_eq!(
-        request.headers,
-        vec![
-            ("Host".to_owned(), b"h".to_vec()),
-            ("content-length".to_owned(), b"3".to_vec())
-        ]
+    let value = |wanted: &str| {
+        request
+            .headers
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case(wanted))
+            .map(|(_, value)| String::from_utf8_lossy(value).into_owned())
+    };
+    assert_eq!(value("content-length").as_deref(), Some("3"));
+    assert_eq!(value("transfer-encoding"), None);
+    assert!(
+        value("authorization").is_some_and(|signature| signature.contains("Credential=AKIDDIFFTEST/")),
+        "signed again"
+    );
+    assert!(
+        request.headers.iter().all(|(_, value)| value != b"AWS4-HMAC-SHA256 ..."),
+        "the client's signature is gone"
     );
     let signed = Captured {
         headers: vec![("x-amz-content-sha256".to_owned(), b"STREAMING-AWS4-HMAC-SHA256-PAYLOAD".to_vec())],
