@@ -1,0 +1,3 @@
+DELETE /bkt/k
+x-amz-if-match-size: big
+

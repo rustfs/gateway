@@ -1,0 +1,4 @@
+PUT /bkt/k
+x-amz-meta-name: =?UTF-8?B?w6k=?=
+
+abc

@@ -1,0 +1,4 @@
+PUT /bkt?versioning
+content-md5: Wa47PRGv0uNTKQpT3bkHzg==
+
+<VersioningConfiguration><Status>Enabled</Status><ExcludedPrefixes><Prefix>tmp/</Prefix></ExcludedPrefixes><ExcludeFolders>true</ExcludeFolders></VersioningConfiguration>

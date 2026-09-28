@@ -1,0 +1,6 @@
+PUT /bkt/k
+x-amz-checksum-crc32c: yZRlqg==
+x-amz-sdk-checksum-algorithm: CRC32C
+x-amz-checksum-algorithm: CRC32C
+
+hello world

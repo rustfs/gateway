@@ -85,7 +85,8 @@ with some left out — so a gateway that starts writing another order is a new d
 entry pins both sides with a `*`, the two stand for the same text. An entry with `when_query`
 applies only to a request carrying that query parameter: the `x-id` routing entries accept a route
 difference only where an `x-id` hint caused it, so the same difference from any other request —
-a real misroute — fails.
+a real misroute — fails. `when_bucket` does the same for text the first path segment must hold (the escaped
+bucket separator `%2F`).
 
 When an s3s output member cannot be held by the gateway output, the diff reports that member and
 compares nothing else for that output: there is no gateway answer to compare it with.
@@ -132,6 +133,17 @@ five reasons, and the shape of this crate follows from them:
 So the stateful comparison is split into pure functions — decode here, encode next — with no
 backend, no clock and no randomness, which can run over every recorded request and under fuzzing.
 Streaming cadence, trailer timing and mid-stream errors belong to conformance cases.
+
+## Fuzzing
+
+Two cargo-fuzz targets drive the same differential with generated inputs (`fuzz/fuzz_targets/decode_diff.rs`, `encode_diff.rs`). `decode_diff` reads its bytes as a raw request (`METHOD target`, header lines, a blank line, the body) and fails when the two stacks name different operations for it with no register entry accepting that; it is seeded with the built-in matrix (`fuzz/seeds/decode_diff/`). `encode_diff` builds a listing and a head answer from its bytes and fails on any unregistered encode difference. Each property leaves out, and names, the known classes it found — the `x-id` hint, an escaped slash in the bucket segment, control characters in listing members, over-long encoded metadata words — each pinned by a matrix row and a register entry instead. Both properties also run on stable in `src/tests/fuzz.rs` over the committed seeds and a fixed-seed sample of mutated inputs, so CI exercises them without a nightly toolchain.
+
+```bash
+cargo +nightly fuzz run decode_diff fuzz/corpus/decode_diff fuzz/seeds/decode_diff
+cargo +nightly fuzz run encode_diff fuzz/corpus/encode_diff
+```
+
+A decode finding becomes a conformance case draft with `fuzz-to-case` (`conformance/cases/_from_fuzz/README.md` has the steps); `conformance/cases/naming/c-naming-0033.toml` is the first case made that way.
 
 ## What it does not cover
 

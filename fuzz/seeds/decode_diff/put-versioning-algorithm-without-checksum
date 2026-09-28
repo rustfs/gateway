@@ -1,0 +1,5 @@
+PUT /bkt?versioning
+content-md5: 0WNnnpeLLX5q+WR6BTXy2w==
+x-amz-sdk-checksum-algorithm: CRC32
+
+<VersioningConfiguration><Status>Enabled</Status><MfaDelete>Disabled</MfaDelete></VersioningConfiguration>

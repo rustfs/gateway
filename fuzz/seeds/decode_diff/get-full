@@ -1,0 +1,13 @@
+GET /bkt/dir/key.txt?versionId=v1&partNumber=2&response-cache-control=no-cache&response-content-disposition=attachment&response-content-encoding=gzip&response-content-language=en&response-content-type=text%2Fplain&response-expires=Thu%2C%2001%20Jan%202026%2000%3A00%3A00%20GMT
+range: bytes=0-9
+if-match: "abc"
+if-none-match: "def"
+if-modified-since: Thu, 01 Jan 2026 00:00:00 GMT
+if-unmodified-since: Fri, 02 Jan 2026 00:00:00 GMT
+x-amz-checksum-mode: ENABLED
+x-amz-request-payer: requester
+x-amz-expected-bucket-owner: 111122223333
+x-amz-server-side-encryption-customer-algorithm: AES256
+x-amz-server-side-encryption-customer-key: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
+x-amz-server-side-encryption-customer-key-md5: hRasmdxgYDKV3nvbahU1MA==
+

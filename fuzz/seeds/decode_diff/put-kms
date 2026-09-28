@@ -1,0 +1,8 @@
+PUT /bkt/k
+x-amz-server-side-encryption: aws:kms
+x-amz-server-side-encryption-aws-kms-key-id: key-1
+x-amz-server-side-encryption-context: e30=
+x-amz-server-side-encryption-bucket-key-enabled: true
+if-match: "abc"
+
+x

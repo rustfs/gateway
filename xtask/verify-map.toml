@@ -250,7 +250,7 @@ cases = "c-authz-0008,c-authz-1016,c-authz-1017,c-list-0012,c-list-0013,c-list-0
 
 [[operation]]
 name = "ListObjects"
-cases = "c-bkt-0033,c-host-0005,c-list-0002,c-list-0003,c-list-0010,c-list-0011,c-list-0018,c-list-0019,c-list-0022"
+cases = "c-bkt-0033,c-host-0005,c-list-0002,c-list-0003,c-list-0010,c-list-0011,c-list-0018,c-list-0019,c-list-0022,c-naming-0033"
 
 [[operation]]
 name = "ListObjectsV2"

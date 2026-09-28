@@ -1,0 +1,5 @@
+POST /bkt/k?uploadId=u
+x-amz-checksum-crc32c: yZRlqg==
+x-amz-checksum-type: FULL_OBJECT
+
+<CompleteMultipartUpload><Part><PartNumber>1</PartNumber><ETag>"e1"</ETag><ChecksumCRC32C>cP5/Xg==</ChecksumCRC32C></Part></CompleteMultipartUpload>

@@ -1,0 +1,6 @@
+PUT /bkt/k?partNumber=1&uploadId=u
+x-amz-checksum-crc32: DUoRhQ==
+x-amz-sdk-checksum-algorithm: CRC32
+x-amz-checksum-algorithm: CRC32
+
+hello world

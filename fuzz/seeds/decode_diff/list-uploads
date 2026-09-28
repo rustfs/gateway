@@ -1,0 +1,4 @@
+GET /bkt?uploads&prefix=p&key-marker=k&upload-id-marker=u&max-uploads=3&delimiter=%2F&encoding-type=url
+x-amz-request-payer: requester
+x-amz-expected-bucket-owner: 111122223333
+

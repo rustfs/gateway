@@ -1,0 +1,4 @@
+PUT /bkt/k
+x-amz-checksum-crc32: AAAAAA==
+
+hello world

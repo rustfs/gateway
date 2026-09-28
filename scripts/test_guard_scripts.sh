@@ -8434,6 +8434,23 @@ expect_pass_difftest_dev() {
         fail_msg 'check_difftest_not_published.sh rejected: a dev-dependency on the differential'
 }
 expect_pass_difftest_dev
+mut_fuzz_draft_committed() {
+    mkdir -p conformance/cases/_from_fuzz
+    printf '[case]\nid = "c-fuzz-0001"\n' >conformance/cases/_from_fuzz/c-fuzz-0001.toml
+}
+expect_fail check_fuzz_case_drafts.sh \
+    'a fuzz-found case draft committed where drafts are written (a-df-0020)' mut_fuzz_draft_committed 'a draft is not a case'
+mut_fuzz_marker_promoted() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("conformance/cases/naming/c-naming-0033.toml")
+text = path.read_text()
+path.write_text(text.replace('title = "', 'title = "FUZZ-DRAFT: ', 1))
+PYEOF
+}
+expect_fail check_fuzz_case_drafts.sh \
+    'a draft moved into a domain with its marker still in place' mut_fuzz_marker_promoted 'still holds FUZZ-DRAFT'
 mut_difftest_ring_line() { sed -i.bak '1s/.*/# rustfs-gateway-difftest/' crates/difftest/README.md && rm crates/difftest/README.md.bak; }
 expect_fail check_difftest_not_published.sh \
     'the differential README losing its RING 2 migration-only first line' mut_difftest_ring_line 'RING 2'

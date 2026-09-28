@@ -675,6 +675,96 @@ s3s = "<unset>"
 reason = "An empty Content-Type header (https://github.com/s3s-project/s3s/issues/361) reaches the gateway handler as an empty content type and the s3s handler as none. RustFS stores no content type today and answers the default; behind the gateway the adapter must treat the empty value as absent or it stores and returns an empty Content-Type."
 expires = "2027-03-31"
 
+# ── Decode: found by the decode_diff fuzz target, each reproduced by a built-in row ─────────
+
+[[diff]]
+id = "kd-decode-0064"
+kind = "decode"
+operation = "ListObjects"
+item = "route"
+gateway = "ListObjects"
+s3s = "GetObject"
+reason = "s3s percent-decodes the path before it splits the bucket from the key, so /bkt%2Fk names object k in bucket bkt; the gateway splits on the literal / first, as RFC 3986 section 2.2 reads an escaped reserved character as data, so bkt%2Fk is the bucket name, which is invalid. A client that escapes the separator between bucket and key reaches the object on RustFS today and is refused with InvalidBucketName by the gateway. Found by the decode_diff fuzz target; scoped to a first path segment holding %2F."
+expires = "2027-03-31"
+when_bucket = "%2F"
+
+[[diff]]
+id = "kd-decode-0065"
+kind = "decode"
+operation = "ListObjects"
+item = "outcome"
+gateway = "400 InvalidBucketName: The specified bucket is not valid"
+s3s = "handled"
+reason = "As kd-decode-0064: the gateway refuses the bucket name it read; s3s hands GetObject the object it decoded."
+expires = "2027-03-31"
+when_bucket = "%2F"
+
+[[diff]]
+id = "kd-decode-0066"
+kind = "decode"
+operation = "HeadBucket"
+item = "route"
+gateway = "HeadBucket"
+s3s = "HeadObject"
+reason = "As kd-decode-0064, for HeadObject."
+expires = "2027-03-31"
+when_bucket = "%2F"
+
+[[diff]]
+id = "kd-decode-0067"
+kind = "decode"
+operation = "HeadBucket"
+item = "outcome"
+gateway = "400 <no code>"
+s3s = "handled"
+reason = "As kd-decode-0066: the gateway refuses the bucket name it read; s3s hands HeadObject the object it decoded."
+expires = "2027-03-31"
+when_bucket = "%2F"
+
+[[diff]]
+id = "kd-decode-0068"
+kind = "decode"
+operation = "CreateBucket"
+item = "route"
+gateway = "CreateBucket"
+s3s = "PutObject"
+reason = "As kd-decode-0064, for PutObject."
+expires = "2027-03-31"
+when_bucket = "%2F"
+
+[[diff]]
+id = "kd-decode-0069"
+kind = "decode"
+operation = "CreateBucket"
+item = "outcome"
+gateway = "400 InvalidBucketName: The specified bucket is not valid"
+s3s = "handled"
+reason = "As kd-decode-0068: the gateway refuses the bucket name it read; s3s hands PutObject the object it decoded."
+expires = "2027-03-31"
+when_bucket = "%2F"
+
+[[diff]]
+id = "kd-decode-0070"
+kind = "decode"
+operation = "DeleteBucket"
+item = "route"
+gateway = "DeleteBucket"
+s3s = "DeleteObject"
+reason = "As kd-decode-0064, for DeleteObject."
+expires = "2027-03-31"
+when_bucket = "%2F"
+
+[[diff]]
+id = "kd-decode-0071"
+kind = "decode"
+operation = "DeleteBucket"
+item = "outcome"
+gateway = "400 InvalidBucketName: The specified bucket is not valid"
+s3s = "handled"
+reason = "As kd-decode-0070: the gateway refuses the bucket name it read; s3s hands DeleteObject the object it decoded."
+expires = "2027-03-31"
+when_bucket = "%2F"
+
 # ── Encode: what the gateway writes on every answer ─────────────────────────────────────────
 
 [[diff]]
@@ -1184,4 +1274,122 @@ operation = "HeadBucket"
 item = 'unconvertible bucket_location_type'
 gateway = '<cannot hold>'
 reason = "As kd-encode-0046: the gateway HeadBucketOutput has no directory-bucket location type; RustFS does not set it."
+expires = "2026-12-31"
+
+# ── Encode: a listing member with a control character, found by the encode_diff fuzz target ──
+
+[[diff]]
+id = "kd-encode-0051"
+kind = "encode"
+operation = "ListObjectsV2"
+item = 'body ListBucketResult/EncodingType'
+gateway = '<EncodingType>'
+s3s = '<absent>'
+reason = "A listing member holding a C0 control character or DEL makes the gateway percent-encode every key-shaped member of the answer and echo EncodingType=url although the request did not ask for it: one flag covers the whole document, and a raw control character is a hazard for XML parsers (line-ending normalisation, rejected characters). s3s writes the character raw. An SDK decodes the members when it reads the echo, so it sees the same keys; a hand-rolled client that ignores EncodingType sees percent-encoded ones. Found by the encode_diff fuzz target; pinned to the one matrix sample."
+expires = "2027-03-31"
+
+[[diff]]
+id = "kd-encode-0052"
+kind = "encode"
+operation = "ListObjectsV2"
+item = 'body ListBucketResult/Prefix'
+gateway = '"p%2F"'
+s3s = '"p/"'
+reason = "As kd-encode-0051: the member Prefix percent-encoded under the forced EncodingType=url."
+expires = "2027-03-31"
+
+[[diff]]
+id = "kd-encode-0053"
+kind = "encode"
+operation = "ListObjectsV2"
+item = 'body ListBucketResult/Delimiter'
+gateway = '"%2F"'
+s3s = '"/"'
+reason = "As kd-encode-0051: the member Delimiter percent-encoded under the forced EncodingType=url."
+expires = "2027-03-31"
+
+[[diff]]
+id = "kd-encode-0054"
+kind = "encode"
+operation = "ListObjectsV2"
+item = 'body ListBucketResult/Contents[0]/Key'
+gateway = '"p%2Fa%0Ab"'
+s3s = '"p/a\nb"'
+reason = "As kd-encode-0051: the member Key percent-encoded under the forced EncodingType=url."
+expires = "2027-03-31"
+
+[[diff]]
+id = "kd-encode-0055"
+kind = "encode"
+operation = "ListObjectsV2"
+item = 'body ListBucketResult/Contents[1]/Key'
+gateway = '"p%2Fb"'
+s3s = '"p/b"'
+reason = "As kd-encode-0051: the member Key percent-encoded under the forced EncodingType=url."
+expires = "2027-03-31"
+
+[[diff]]
+id = "kd-encode-0056"
+kind = "encode"
+operation = "ListObjectsV2"
+item = 'body ListBucketResult/CommonPrefixes/Prefix'
+gateway = '"p%2Fc%2F"'
+s3s = '"p/c/"'
+reason = "As kd-encode-0051: the member Prefix percent-encoded under the forced EncodingType=url."
+expires = "2027-03-31"
+
+[[diff]]
+id = "kd-encode-0057"
+kind = "encode"
+operation = "ListObjectsV2"
+item = 'body ListBucketResult/StartAfter'
+gateway = '"p%2F0"'
+s3s = '"p/0"'
+reason = "As kd-encode-0051: the member StartAfter percent-encoded under the forced EncodingType=url."
+expires = "2027-03-31"
+
+# ── Encode: a long non-ASCII metadata value, found by the encode_diff fuzz target ────────────
+
+[[diff]]
+id = "kd-encode-0058"
+kind = "encode"
+operation = "HeadObject"
+item = 'header x-amz-meta-note'
+gateway = '=?UTF-8?B?77+977+977+977+977+977+977+977+977+977+977+977+977+977+977+9?= =?UTF-8?B?OTE=?='
+s3s = '=?UTF-8?B?77+977+977+977+977+977+977+977+977+977+977+977+977+977+977+9OTE=?='
+reason = "A metadata value whose RFC 2047 encoded word would pass 75 characters is written by the gateway as two encoded words, as RFC 2047 section 2 requires (https://www.rfc-editor.org/rfc/rfc2047#section-2); s3s writes one longer word. Both decode to the same value; a strict decoder refuses the longer word. Found by the encode_diff fuzz target; pinned to the one matrix sample."
+expires = "2027-03-31"
+
+# ── Encode: a metadata value with a C1 control character, found by the encode_diff fuzz target ─
+
+[[diff]]
+id = "kd-encode-0059"
+kind = "encode"
+operation = "HeadObject"
+item = 'header x-amz-meta-a'
+gateway = '<absent>'
+s3s = '=?UTF-8?B?woN4?='
+reason = "A metadata value holding a C1 control character is dropped from the gateway answer, with no x-amz-missing-meta count; s3s writes it as an RFC 2047 encoded word. A gateway gap, not a choice: RustFS objects with such a value would lose that entry on every read behind the gateway. rustfs/gateway#996 owns the fix; remove this entry with it. Found by the encode_diff fuzz target; pinned to the one matrix sample."
+expires = "2026-12-31"
+
+# ── Encode: an ASCII metadata value that holds "=?", found by the encode_diff fuzz target ─────
+
+[[diff]]
+id = "kd-encode-0060"
+kind = "encode"
+operation = "HeadObject"
+item = 'header x-amz-meta-w'
+gateway = '=?UTF-8?B?YT0/Yg==?='
+s3s = 'a=?b'
+reason = "An ASCII metadata value holding the encoded-word opener =? is written by the gateway as an RFC 2047 encoded word, so a client that decodes encoded words reads back the value that was stored; s3s writes it raw, which such a client may misread. Both carry the same value to a client that decodes as S3 SDKs do. Found by the encode_diff fuzz target; pinned to the one matrix sample."
+expires = "2027-03-31"
+
+[[diff]]
+id = "kd-encode-0061"
+kind = "encode"
+operation = "HeadObject"
+item = 'header x-amz-meta-t'
+gateway = '<absent>'
+s3s = '=?UTF-8?B?YQli?='
+reason = "As kd-encode-0059 for a tab: a metadata value holding a tab is dropped from the gateway answer, with no x-amz-missing-meta count; s3s writes it as an RFC 2047 encoded word. rustfs/gateway#996 owns the fix; remove this entry with it. Found by the encode_diff replay; pinned to the one matrix sample."
 expires = "2026-12-31"
