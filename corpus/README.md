@@ -39,15 +39,24 @@ entries, so the claim cannot rot.
 
 ## What is in here today
 
-134 entries in 82 buckets, 0.3 MB. 128 of them are **real captured traffic** against the
-`rustfs-gateway-fs` reference backend; 6 are hand-authored inputs carrying chunk framing and
-abnormal termination. The captured traffic comes from two recorders:
+239 entries in 82 buckets, 0.3 MB, from three kinds of source:
 
-- 43 `head_partial` entries converted from the four-client compatibility matrix's probe log
-  (rustfs/backlog#1765), deduplicated down from 340 probe records;
-- 85 `head_full` entries written by the `CorpusRecorderLayer` (`crates/corpus-recorder`)
-  mounted in `compat-sut`, from real `mc` and boto3 sessions: the whole head, the whole body as
-  the service received it with every signature redacted, and the response head.
+- 128 entries of **real captured traffic** against the `rustfs-gateway-fs` reference backend:
+  43 `head_partial` entries converted from the four-client compatibility matrix's probe log
+  (rustfs/backlog#1765), deduplicated down from 340 probe records, and 85 `head_full` entries
+  written by the `CorpusRecorderLayer` (`crates/corpus-recorder`) mounted in `compat-sut`, from
+  real `mc` and boto3 sessions — the whole head, the whole body as the service received it with
+  every signature redacted, and the response head;
+- 105 **issue-derived** entries, `handwritten:s3s-issues#<n>`: the requests of the conformance
+  cases that cite an s3s issue as `s3s-issue` evidence, lifted by
+  `tools/from_conformance_cases.py` (158 requests from 100 cases, 48 duplicates dropped by
+  fingerprint; 65 of the 158 come from negative-polarity cases). They cover 42 distinct issues.
+  The issue URL and the one-sentence summary stay in the citing case, where they were written and
+  reviewed; `scripts/check_corpus_provenance.sh` refuses an entry whose issue no case cites.
+  These are `head_partial` with `sut = "none"`: a case names the request as authored, and the
+  runner adds signing headers at run time, so a missing header proves nothing;
+- 6 entries hand-authored here (`handwritten:gateway`) carrying chunk framing and abnormal
+  termination.
 
 | Source | Entries | Chunk-framed |
 |---|---|---|
@@ -55,6 +64,7 @@ abnormal termination. The captured traffic comes from two recorders:
 | `client-matrix:mc@v0.0.0-20250416181326-b00526b153a3` | 16 | 2 |
 | `client-matrix:rclone@v1.74.0` | 11 | 0 |
 | `client-matrix:restic@v0.19.1` | 7 | 3 |
+| `handwritten:s3s-issues#<n>` (42 issues) | 105 | 1 |
 | `handwritten:gateway` | 6 | 3 |
 
 ### Client diversity is not signing diversity
@@ -103,9 +113,10 @@ behaviour — SDK retry shapes, part-size strategies, header-order dialects — 
 from the cron client matrix. An entry count is a count of inputs, never evidence that a
 behaviour is covered.
 
-A third of what is here is `capture = "head_partial"`: the compat probe observes a named
-subset of the request head, so absence of a header in such an entry is not evidence that
-the header was absent on the wire. `corpus to-case` refuses to build a conformance case
+Most of what is here is `capture = "head_partial"`: the compat probe observes a named
+subset of the request head, and an issue-derived entry holds only the headers its case
+authored, so absence of a header in such an entry is not evidence that the header was absent
+on the wire. `corpus to-case` refuses to build a conformance case
 from a partial capture for exactly that reason.
 
 ## How to update it

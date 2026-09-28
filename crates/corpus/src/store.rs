@@ -55,11 +55,13 @@ pub const HARD_SIZE_LIMIT_BYTES: u64 = 50 * 1024 * 1024;
 pub const SOURCE_ALLOWLIST: &[(&str, bool)] = &[
     ("client-matrix:", true),
     ("fuzz:", false),
-    // Hand-authored in this repository. Separate from `handwritten:s3s-issues` because the
+    // Hand-authored in this repository. Separate from `handwritten:s3s-issues#<n>` because the
     // two have different review obligations: an issue-derived entry has to be traceable to
-    // the issue it came from, and one written here does not exist anywhere else.
+    // the issue it came from, and one written here does not exist anywhere else. The issue
+    // number is part of the source for that reason, and scripts/check_corpus_provenance.sh
+    // refuses one that no conformance case cites as `s3s-issue` evidence.
     ("handwritten:gateway", false),
-    ("handwritten:s3s-issues", false),
+    ("handwritten:s3s-issues#", false),
     ("mint@", false),
     ("minio-interop@", false),
     ("s3-tests@", false),
@@ -146,13 +148,19 @@ fn is_commit(version: &str) -> bool {
 /// Whether `src` names an allowed synthetic recording source.
 pub fn check_source(src: &str) -> Result<(), String> {
     for (prefix, needs_revision) in SOURCE_ALLOWLIST {
-        let matched = if prefix.ends_with([':', '@']) {
+        let matched = if prefix.ends_with([':', '@', '#']) {
             src.starts_with(prefix)
         } else {
             src == *prefix
         };
         if !matched {
             continue;
+        }
+        if prefix.ends_with('#') {
+            let number = &src[prefix.len()..];
+            if number.is_empty() || !number.bytes().all(|byte| byte.is_ascii_digit()) {
+                return Err(format!("source `{src}` names no issue number after `#`"));
+            }
         }
         if *needs_revision && !src[prefix.len()..].contains('@') {
             return Err(format!("source `{src}` names no pinned revision after `@`"));
