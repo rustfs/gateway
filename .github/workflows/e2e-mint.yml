@@ -20,7 +20,10 @@ name: e2e-mint
 #
 #   minio/mint is archived, and its two remaining tags can still be re-pointed.
 #   ci/mint/pins.env pins the linux/amd64 manifest digest and records how it
-#   was resolved; THIRD-PARTY-NOTICES.md carries the licence review.
+#   was resolved; THIRD-PARTY-NOTICES.md carries the licence review. The job
+#   measures the image ci/mint/Dockerfile builds on that digest: every input
+#   of the recipe is pinned by digest or SHA-256, and it only adds the .NET
+#   runner and the mc diagnostics fix the pinned image lacks (#720).
 #
 # WHAT IS UPLOADED
 #
@@ -53,10 +56,6 @@ on:
         options:
           - ratchet
           - record
-      derived_image:
-        description: Build the reviewed source recipe for a record-only trial; publish nothing.
-        type: boolean
-        default: false
 
 permissions:
   contents: read
@@ -86,40 +85,31 @@ jobs:
       - name: Build the compatibility SUT
         run: cargo build --release -p rustfs-gateway-compat-sut
 
-      - name: Build candidate image (manual record only)
-        if: github.event_name == 'workflow_dispatch' && inputs.derived_image
-        env:
-          CANDIDATE_MODE: ${{ inputs.mode || 'ratchet' }}
+      # Every run, scheduled or manual, measures the image the reviewed recipe in ci/mint builds
+      # on top of the pinned digest: the pinned image alone cannot produce attributable
+      # .minio-dotnet or mc records (rustfs/gateway#720). Nothing is published.
+      - name: Build the mint image from the reviewed recipe
         run: |
           set -euo pipefail
-          if [[ "$CANDIDATE_MODE" != record ]]; then
-            echo "A derived image requires record mode." >&2
-            exit 2
-          fi
-          scripts/ci_budget.sh 1800 "mint candidate build" \
+          scripts/ci_budget.sh 1800 "mint recipe build" \
             docker build --platform linux/amd64 --progress plain \
             --iidfile "${RUNNER_TEMP}/mint-candidate.id" ci/mint
           image="$(cat "${RUNNER_TEMP}/mint-candidate.id")"
           if [[ ! "$image" =~ ^sha256:[0-9a-f]{64}$ ]]; then
-            echo "The build did not return a complete local image identity." >&2
+            echo "The recipe build did not return a complete local image identity." >&2
             exit 2
           fi
 
       - name: Run the suite
         id: suite
-        env:
-          MINT_DERIVED_IMAGE: ${{ inputs.derived_image && 'true' || 'false' }}
         run: |
           set -uo pipefail
           mode="${{ inputs.mode || 'ratchet' }}"
           work="${RUNNER_TEMP}/mint-work"
           out="${RUNNER_TEMP}/mint-out"
           mkdir -p "$work" "$out"
-          set --
-          if [[ "${MINT_DERIVED_IMAGE:-false}" == true ]]; then
-            image="$(cat "${RUNNER_TEMP}/mint-candidate.id")"
-            set -- --local-image "$image"
-          fi
+          image="$(cat "${RUNNER_TEMP}/mint-candidate.id")" || exit 2
+          set -- --local-image "$image"
           # 90 minutes. The wrapper reports the margin on every run, so the cliff
           # announces itself before it is hit.
           # Capture failures explicitly: the runner invokes this script with -e.
