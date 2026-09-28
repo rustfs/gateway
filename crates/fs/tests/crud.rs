@@ -21,6 +21,8 @@
 
 #[path = "crud/acl.rs"]
 mod acl;
+#[path = "crud/bucket_cors.rs"]
+mod bucket_cors;
 #[path = "crud/bucket_encryption.rs"]
 mod bucket_encryption;
 #[path = "crud/bucket_policy.rs"]
@@ -201,15 +203,16 @@ fn service_with_backend_and_credentials(
                 ClockSkewAck::i_understand_a_skewed_clock_can_disable_signature_expiry(),
             ),
     );
-    let service =
-        backend
-            .register_encryption(backend.register_policy(backend.register_acl(backend.register_tagging(
+    let service = backend
+        .register_cors(backend.register_encryption(backend.register_policy(backend.register_acl(
+            backend.register_tagging(
                 backend.register_lifecycle(
                     backend.register_listing(backend.register_versioning(backend.register_multipart(builder))),
                 ),
-            ))))
-            .build()
-            .expect("the reference registry is a complete assembly");
+            ),
+        ))))
+        .build()
+        .expect("the reference registry is a complete assembly");
     (backend, service)
 }
 
@@ -364,6 +367,7 @@ async fn bucket_and_object_crud_runs_through_the_production_registry() {
             "CreateBucket",
             "CreateMultipartUpload",
             "DeleteBucket",
+            "DeleteBucketCors",
             "DeleteBucketEncryption",
             "DeleteBucketLifecycle",
             "DeleteBucketPolicy",
@@ -373,6 +377,7 @@ async fn bucket_and_object_crud_runs_through_the_production_registry() {
             "DeleteObjects",
             "DeletePublicAccessBlock",
             "GetBucketAcl",
+            "GetBucketCors",
             "GetBucketEncryption",
             "GetBucketLifecycleConfiguration",
             "GetBucketLocation",
@@ -394,6 +399,7 @@ async fn bucket_and_object_crud_runs_through_the_production_registry() {
             "ListParts",
             "PostObject",
             "PutBucketAcl",
+            "PutBucketCors",
             "PutBucketEncryption",
             "PutBucketLifecycleConfiguration",
             "PutBucketPolicy",

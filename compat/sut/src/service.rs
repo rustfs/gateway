@@ -28,8 +28,8 @@ use std::io;
 use std::sync::Arc;
 
 use rustfs_gateway::{
-    Credentials, RegionMatchPolicy, RegionSet, S3Service, SecurityFloor, ServiceBuilder, SigV4Authenticator, StaticCredentials,
-    dto,
+    CorsCacheConfig, Credentials, RegionMatchPolicy, RegionSet, S3Service, SecurityFloor, ServiceBuilder, SigV4Authenticator,
+    StaticCredentials, dto,
 };
 use rustfs_gateway_fs::FsBackend;
 
@@ -119,6 +119,14 @@ pub(crate) fn build_service(
             // s3cmd's checksum-less ACL writes (#912), and so must the launcher that stands for it.
             .accept_minio_client_checksum_omissions()
             .accept_s3cmd_acl_checksum_omissions()
+            // The backend's stored CORS documents feed the gateway's CORS answers, as RustFS's do
+            // behind the gateway; no cache lifetime, so a suite sees a `PutBucketCors` at once.
+            .cors_source(Arc::clone(backend))
+            .cors_cache(CorsCacheConfig {
+                entries: 4096,
+                ttl_seconds: 0,
+                jitter_seconds: 0,
+            })
             // And the same registry decides whether a name is taken: another identity's
             // re-creation is `409 BucketAlreadyExists` before the backend is asked, and a
             // creation the backend admitted is what gets recorded.
@@ -126,14 +134,15 @@ pub(crate) fn build_service(
             // And released once the backend deleted the bucket, so the name is free again.
             .op_layer::<dto::DeleteBucket, _>(ReleasedNames::new(Arc::clone(owners))),
     );
-    let service =
-        backend
-            .register_encryption(backend.register_policy(backend.register_acl(backend.register_tagging(
+    let service = backend
+        .register_cors(backend.register_encryption(backend.register_policy(backend.register_acl(
+            backend.register_tagging(
                 backend.register_lifecycle(
                     backend.register_listing(backend.register_versioning(backend.register_multipart(builder))),
                 ),
-            ))))
-            .build()?;
+            ),
+        ))))
+        .build()?;
     Ok(service)
 }
 

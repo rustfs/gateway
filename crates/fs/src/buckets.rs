@@ -46,7 +46,8 @@ use rustfs_gateway::{
 use sha2::{Digest as _, Sha256};
 
 use super::{
-    FsBackend, OBJECTS_DIR, UPLOADS_DIR, VERSIONS_DIR, bucket_tagging, encryption, lifecycle, policy, storage_error, versioning,
+    FsBackend, OBJECTS_DIR, UPLOADS_DIR, VERSIONS_DIR, bucket_cors, bucket_tagging, encryption, lifecycle, policy, storage_error,
+    versioning,
 };
 
 /// The cursor `ListBuckets` pages with: a value this backend minted, never a bucket name.
@@ -311,6 +312,7 @@ impl Handler<DeleteBucket> for FsBackend {
             policy::PUBLIC_ACCESS_BLOCK_FILE,
             encryption::ENCRYPTION_FILE,
             bucket_tagging::BUCKET_TAGGING_FILE,
+            bucket_cors::CORS_FILE,
         ] {
             match tokio::fs::remove_file(self.bucket_path(bucket).join(record)).await {
                 Ok(()) => {}
