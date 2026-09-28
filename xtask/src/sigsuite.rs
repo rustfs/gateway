@@ -22,8 +22,6 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
-use crate::nested_cargo::without_package_environment;
-
 const LOCK: &str = include_str!("../../spec/third-party/aws-signing-test-suite.lock");
 
 struct SuiteLock<'a> {
@@ -132,9 +130,7 @@ fn validate_checkout(checkout: &Path) -> Result<(), String> {
 }
 
 fn suite_cargo_command() -> Command {
-    let mut command = Command::new("cargo");
-    without_package_environment(&mut command);
-    command
+    Command::new("cargo")
 }
 
 fn run() -> Result<(), String> {
