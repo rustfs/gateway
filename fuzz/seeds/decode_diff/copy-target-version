@@ -1,0 +1,3 @@
+PUT /bkt/dst?versionId=v1
+x-amz-copy-source: src/k
+

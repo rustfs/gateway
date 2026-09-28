@@ -1,0 +1,5 @@
+POST /bkt?delete
+x-amz-sdk-checksum-algorithm: CRC32
+x-amz-checksum-crc32: Y0BRuw==
+
+<Delete><Object><Key>a</Key></Object><Object><Key>b</Key><VersionId>v1</VersionId></Object><Quiet>true</Quiet></Delete>

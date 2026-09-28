@@ -1,0 +1,4 @@
+PUT /bkt/dst
+x-amz-copy-source: src/k
+x-amz-metadata-directive: bogus
+

@@ -1,0 +1,5 @@
+GET /bkt/k
+x-amz-server-side-encryption-customer-algorithm: AES256
+x-amz-server-side-encryption-customer-key: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
+x-amz-server-side-encryption-customer-key-md5: hRasmdxgYDKV3nvbahU1MA==
+

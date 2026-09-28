@@ -1,0 +1,3 @@
+GET /bkt?location
+x-amz-expected-bucket-owner: 111122223333
+

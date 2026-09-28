@@ -1,0 +1,3 @@
+POST /bkt/k?uploads
+x-amz-object-lock-event-hold-duration-years: 1
+

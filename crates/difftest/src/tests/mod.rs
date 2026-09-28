@@ -27,6 +27,7 @@ mod census;
 mod controls;
 mod encode_controls;
 mod encoding;
+mod fuzz;
 mod matrix;
 mod register;
 mod runner;

@@ -1,0 +1,27 @@
+POST /bkt/k?uploads
+content-type: text/plain
+cache-control: no-cache
+content-disposition: inline
+content-encoding: identity
+content-language: en
+expires: Thu, 01 Jan 2026 00:00:00 GMT
+x-amz-acl: private
+x-amz-grant-read: id=1
+x-amz-grant-full-control: id=2
+x-amz-grant-read-acp: id=3
+x-amz-grant-write-acp: id=4
+x-amz-meta-a: 1
+x-amz-storage-class: STANDARD
+x-amz-website-redirect-location: /other
+x-amz-tagging: a=b
+x-amz-object-lock-mode: COMPLIANCE
+x-amz-object-lock-retain-until-date: 2030-01-01T00:00:00Z
+x-amz-object-lock-legal-hold: ON
+x-amz-checksum-algorithm: CRC32C
+x-amz-checksum-type: COMPOSITE
+x-amz-request-payer: requester
+x-amz-expected-bucket-owner: 111122223333
+x-amz-server-side-encryption-customer-algorithm: AES256
+x-amz-server-side-encryption-customer-key: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
+x-amz-server-side-encryption-customer-key-md5: hRasmdxgYDKV3nvbahU1MA==
+

@@ -43,6 +43,8 @@ mod xmltree;
 
 pub mod decode;
 pub mod encode;
+pub mod fuzz;
+pub mod fuzz_case;
 pub mod known;
 pub mod normalize;
 pub mod runner;

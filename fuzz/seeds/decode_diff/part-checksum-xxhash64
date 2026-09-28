@@ -1,0 +1,6 @@
+PUT /bkt/k?partNumber=1&uploadId=u
+x-amz-checksum-xxhash64: RatnNLIeaWg=
+x-amz-sdk-checksum-algorithm: XXHASH64
+x-amz-checksum-algorithm: XXHASH64
+
+hello world

@@ -1,0 +1,3 @@
+POST /bkt/k?uploadId=u
+
+<CompleteMultipartUpload><Part>

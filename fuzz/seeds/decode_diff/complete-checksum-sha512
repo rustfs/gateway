@@ -1,0 +1,5 @@
+POST /bkt/k?uploadId=u
+x-amz-checksum-sha512: MJ7MSJwS1utMxA9QyQLytNDtd+5RGnx6m808qG1M2G+YndNbxf9JlnDaNCVbRbDP2DDoH2Bdz33FVC6TrpzXbw==-2
+x-amz-checksum-type: COMPOSITE
+
+<CompleteMultipartUpload><Part><PartNumber>1</PartNumber><ETag>"e1"</ETag><ChecksumSHA512>GhqvZuOtT6dLeD6B6eSAp+8Qo3MZrkfbGkzIqfUaMM5iH5j5vFd1NNZY3q1k3Uuksy9pUYion0/prI/ElqaQdw==</ChecksumSHA512></Part></CompleteMultipartUpload>

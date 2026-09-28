@@ -1,0 +1,4 @@
+GET /bkt?list-type=2&prefix=p&delimiter=%2F&continuation-token=tok&start-after=s&max-keys=5&fetch-owner=true&encoding-type=url
+x-amz-request-payer: requester
+x-amz-expected-bucket-owner: 111122223333
+

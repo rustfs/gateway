@@ -1,0 +1,3 @@
+DELETE /bkt/k
+x-amz-bypass-governance-retention: maybe
+

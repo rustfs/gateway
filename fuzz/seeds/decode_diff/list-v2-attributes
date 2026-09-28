@@ -1,0 +1,3 @@
+GET /bkt?list-type=2
+x-amz-optional-object-attributes: RestoreStatus
+

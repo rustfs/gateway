@@ -1,0 +1,4 @@
+GET /bkt?prefix=a%2F&delimiter=%2F&marker=a%2Fb&max-keys=10&encoding-type=url
+x-amz-request-payer: requester
+x-amz-expected-bucket-owner: 111122223333
+

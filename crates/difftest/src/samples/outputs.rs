@@ -376,6 +376,62 @@ pub(crate) fn rows() -> Vec<OutputRow> {
             stamped!(),
         ),
         row(
+            "head-object-c1-metadata",
+            RawRequest::head("/bkt/k"),
+            || {
+                OracleOutput::HeadObject(oracle::HeadObjectOutput {
+                    content_length: Some(5),
+                    e_tag: etag("abc"),
+                    metadata: Some([("a".to_owned(), "\u{83}x".to_owned())].into_iter().collect()),
+                    ..Default::default()
+                })
+            },
+            stamped!("kd-encode-0035", "kd-encode-0059"),
+        ),
+        row(
+            "head-object-encoded-word-lookalike-metadata",
+            RawRequest::head("/bkt/k"),
+            || {
+                OracleOutput::HeadObject(oracle::HeadObjectOutput {
+                    content_length: Some(5),
+                    e_tag: etag("abc"),
+                    metadata: Some([("w".to_owned(), "a=?b".to_owned())].into_iter().collect()),
+                    ..Default::default()
+                })
+            },
+            stamped!("kd-encode-0035", "kd-encode-0060"),
+        ),
+        row(
+            "head-object-tab-metadata",
+            RawRequest::head("/bkt/k"),
+            || {
+                OracleOutput::HeadObject(oracle::HeadObjectOutput {
+                    content_length: Some(5),
+                    e_tag: etag("abc"),
+                    metadata: Some([("t".to_owned(), "a\tb".to_owned())].into_iter().collect()),
+                    ..Default::default()
+                })
+            },
+            stamped!("kd-encode-0035", "kd-encode-0061"),
+        ),
+        row(
+            "head-object-long-utf8-metadata",
+            RawRequest::head("/bkt/k"),
+            || {
+                OracleOutput::HeadObject(oracle::HeadObjectOutput {
+                    content_length: Some(5),
+                    e_tag: etag("abc"),
+                    metadata: Some(
+                        [("note".to_owned(), format!("{}91", "\u{fffd}".repeat(15)))]
+                            .into_iter()
+                            .collect(),
+                    ),
+                    ..Default::default()
+                })
+            },
+            stamped!("kd-encode-0035", "kd-encode-0058"),
+        ),
+        row(
             "head-object-sse-c",
             super::sse(RawRequest::head("/bkt/k")),
             || {
