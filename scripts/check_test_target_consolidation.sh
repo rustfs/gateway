@@ -716,6 +716,7 @@ gateway_modules = (
     "service_config",
     "sigv2_runtime",
     "sse_runtime",
+    "steady_state_allocations",
     "streaming_request",
     "streaming_without_length",
     "tagging_reachability",
