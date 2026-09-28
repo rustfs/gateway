@@ -34,6 +34,7 @@ Agent entry point. File → responsibility → when you need to open it.
 | `tests/crud/lifecycle_expiration.rs` | Debug-day, version-aware expiration, selection, and preflight evidence. | Changing lifecycle execution or its fail-closed boundaries. |
 | `tests/crud/lifecycle_scheduler.rs` | Automatic cadence and scheduler shutdown evidence. | Changing lifecycle worker startup, recovery, or shutdown. |
 | `tests/crud/lifecycle_transitions.rs` | Transition due-time, size-default, restart, projection, and preflight evidence. | Changing current-object transition execution. |
+| `tests/crud/multipart_conditions.rs` | `If-Match`/`If-None-Match` on `CompleteMultipartUpload`: publish when they hold, `412` leaving object and upload in place. | Changing conditional completion. |
 | `tests/crud/multipart_listing.rs` | Restarted upload pages, paired markers, rollup, retirement, and path refusals. | Changing upload listing or its persisted authority. |
 | `tests/crud/multipart_checksums.rs` | Negotiated part validation, restart, retry, and completion checksum evidence. | Changing multipart checksum persistence or verification. |
 | `tests/crud/multipart_sizing.rs` | Multipart minimum-part rejection, retryability, and boundary evidence. | Changing completion part-size validation. |

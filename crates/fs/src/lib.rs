@@ -669,13 +669,23 @@ impl Handler<CompleteMultipartUpload> for FsBackend {
             self.temporary_id.fetch_add(1, Ordering::Relaxed)
         ));
         tokio::fs::rename(&upload, &tombstone).await.map_err(|_| no_such_upload())?;
+        // The completion's write conditions are the same verdict `PutObject` gives, evaluated
+        // inside the publication's version lock (rustfs/gateway#1002, #808).
+        let write_conditions = conditions::conditions(
+            input.if_match.as_deref(),
+            None,
+            input.if_none_match.as_deref(),
+            None,
+            Timestamp::from_secs(self.clock.now().unix_seconds()),
+        )?;
         let published = match self
-            .publish_object(
+            .publish_object_if(
                 input.bucket.as_str(),
                 input.key.as_str(),
                 &completed_bytes,
                 &composite,
                 &record.attributes,
+                conditions::any(&write_conditions).then_some(&write_conditions),
             )
             .await
         {
