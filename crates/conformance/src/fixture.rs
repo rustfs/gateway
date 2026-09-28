@@ -114,21 +114,20 @@ use std::sync::{Arc, Mutex};
 use rustfs_gateway::dto;
 use rustfs_gateway::{
     AclHeaders, AclInput, AclRejection, AclTarget, BucketName, ByteStream, ChecksumAlgorithm, ChecksumSpec,
-    ChecksumType as PackedChecksumType, ConditionalOutcome, CopyRange, CopySourceRejection, ETag, ErrorCode, EventSequence,
-    FailedCondition, GranteeType, Handler, HandlerError, HandlerErrorContext, HandlerResult, IfRange, MissingObject, ObjectKey,
-    ObjectValidators, Operation, PRECONDITION_FAILED_MESSAGE, PreconditionRejection, Preconditions, REGION_MATCH_POLICY,
-    RangeDecision, RangeSelectors, RecordedUpload, RegionLabel, RegionSet, Req, RequestKind, ResolvedUploadId,
-    ResourceVisibility, Resp, RestoreState, RestoreStatus, SseEnforced, TagScope, TaggingRejection, Timestamp, UploadIdClaim,
-    canonicalize_grantee, collect, completion_failure_retains_upload, conditional_write_guards_before_mutation,
-    copy_source_guards_before_target_write, copy_source_if_match_miss_proceeds, copy_target_uses_source_validators,
-    encryption_delete_absent_succeeds, evaluate, evaluate_range, format_optional_restore_status,
-    object_lock_requires_enabled_bucket, parse_conditional_etag, parse_tagging_header, permanent_redirect_for,
-    refuse_blocked_encryption_type, resolve_copy_range, resolve_input as resolve_acl_input, resolve_location_constraint,
-    resolve_part, resolve_upload, select_scan_bytes, select_uses_event_stream, stats_document, validate_accelerate,
-    validate_cors, validate_encryption, validate_legal_hold, validate_lifecycle, validate_lock_configuration, validate_logging,
-    validate_notification, validate_object_write_lock, validate_policy, validate_public_access_block, validate_replication,
-    validate_request_payment, validate_restore, validate_retention, validate_select, validate_tag_set, validate_versioning,
-    validate_website,
+    ChecksumType as PackedChecksumType, ConditionalOutcome, CopyRange, CopySourceRejection, ETag, ErrorCode, FailedCondition,
+    GranteeType, Handler, HandlerError, HandlerErrorContext, HandlerResult, IfRange, MissingObject, ObjectKey, ObjectValidators,
+    Operation, PRECONDITION_FAILED_MESSAGE, PreconditionRejection, Preconditions, REGION_MATCH_POLICY, RangeDecision,
+    RangeSelectors, RecordedUpload, RegionLabel, RegionSet, Req, RequestKind, ResolvedUploadId, ResourceVisibility, Resp,
+    RestoreState, RestoreStatus, SseEnforced, TagScope, TaggingRejection, Timestamp, UploadIdClaim, canonicalize_grantee,
+    collect, completion_failure_retains_upload, conditional_write_guards_before_mutation, copy_source_guards_before_target_write,
+    copy_source_if_match_miss_proceeds, copy_target_uses_source_validators, encryption_delete_absent_succeeds, evaluate,
+    evaluate_range, format_optional_restore_status, frame_records, object_lock_requires_enabled_bucket, parse_conditional_etag,
+    parse_tagging_header, permanent_redirect_for, refuse_blocked_encryption_type, resolve_copy_range,
+    resolve_input as resolve_acl_input, resolve_location_constraint, resolve_part, resolve_upload, select_scan_bytes,
+    select_uses_event_stream, validate_accelerate, validate_cors, validate_encryption, validate_legal_hold, validate_lifecycle,
+    validate_lock_configuration, validate_logging, validate_notification, validate_object_write_lock, validate_policy,
+    validate_public_access_block, validate_replication, validate_request_payment, validate_restore, validate_retention,
+    validate_select, validate_tag_set, validate_versioning, validate_website,
 };
 
 mod committed;
@@ -4251,19 +4250,9 @@ impl Stub {
             return Ok(Resp::new(dto::SelectObjectContentOutput::default()));
         }
         let selected = select_scan_bytes(input.scan_range.as_ref(), &body);
-        let count = selected.len() as u64;
-        let mut frames = Vec::new();
-        let mut sequence = EventSequence::new();
-        sequence
-            .records(selected, &mut frames)
-            .map_err(|error| HandlerError::internal_error(error.message()))?;
-        sequence
-            .stats(&stats_document(count, count, count), &mut frames)
-            .map_err(|error| HandlerError::internal_error(error.message()))?;
-        sequence
-            .end(&mut frames)
-            .map_err(|error| HandlerError::internal_error(error.message()))?;
-        Ok(Resp::event_stream(ByteStream::from_bytes(bytes::Bytes::from(frames))))
+        // Framed lazily by the production adapter: one message per read, never the whole answer.
+        let records = ByteStream::from_bytes(bytes::Bytes::copy_from_slice(selected));
+        Ok(Resp::event_stream(frame_records(records)))
     }
 
     /// Opens a multipart upload, and records the attributes only this request can state.

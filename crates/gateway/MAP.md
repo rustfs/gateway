@@ -24,7 +24,7 @@ for request order and `docs/assembly-order.md` for extension call counts.
 | `src/chunked.rs`, `src/chunked_trailer_tests.rs` | `aws-chunked` ingest execution and trailer commit tests | A framed upload stores wrong bytes |
 | `src/integrity.rs` | What an `x-amz-checksum-*` header is the digest *of*, per operation, and how an integrity verdict renders | A body digest is compared against the wrong bytes, or not at all |
 | `src/payload_header.rs` | Signed payload and trailer declaration parsing | A request head selects the wrong payload mode |
-| `src/render.rs`, `src/response.rs` | S3 error rendering and encoded-success-to-HTTP conversion | Changing final response bytes or headers |
+| `src/render.rs`, `src/response.rs`, `src/select_frames.rs` | S3 error rendering, encoded-success-to-HTTP conversion, and `frame_records`, the lazy one-frame-per-read select event-stream body | Changing final response bytes or headers, or select framing memory |
 | `src/commit.rs` | 200-then-answer/error response shape | Work continues after the head commits |
 | `src/commit_task.rs` | Detached committed-work task ownership | Work stops after its response body is dropped |
 | `src/invariants.rs` | HEAD/bodyless and SSE-C response rules | A forbidden body or key reaches the wire |
@@ -80,7 +80,7 @@ for request order and `docs/assembly-order.md` for extension call counts.
 | `tests/authz_contract.rs`, `tests/authz_contract/headers.rs` | Two authorization stages, audit, failure floor, and borrowed headers without Debug disclosure |
 | `tests/governor_runtime.rs` | Limits run before expensive work and recover |
 | `tests/cors_runtime.rs`, `tests/cors_runtime/headerless.rs` | Headerless OPTIONS rejection, preflight and actual-response CORS behavior |
-| `tests/middleware.rs`, `tests/response_invariants.rs`, `tests/response_stream_termination.rs` | Filter seams, runtime correction metrics, malformed response refusal, and how a filter-installed stream ends on a real socket |
+| `tests/middleware.rs`, `tests/response_invariants.rs`, `tests/response_stream_termination.rs`, `tests/select_frame_records.rs` | Filter seams, runtime correction metrics, malformed response refusal, how a filter-installed stream ends on a real socket, and `frame_records` with its c-sel-0012 peak-RSS bound |
 | `tests/sse_runtime.rs`, `tests/sse_runtime/context.rs` | TLS gate, key hygiene, multipart consistency and JSON context admission |
 | `tests/vhost_resolution.rs`, `tests/host_resolve_replay.rs` | Host boundary and fallback behavior; the `host_resolve` fuzz property over its committed seeds and 100,000 fixed-seed samples |
 | `tests/connection_teardown.rs`, `tests/self_held_http1.rs` | Connection intent and production self-held HTTP/1.1 wire controls |

@@ -109,6 +109,7 @@ mod request_deadline;
 mod response;
 mod routed_facts;
 mod routing;
+mod select_frames;
 mod service;
 mod stamp;
 mod trace;
@@ -389,6 +390,8 @@ pub use rustfs_gateway_core::ops::shared::event_stream::{
     EVENT_STREAM_CONTENT_TYPE, EventKind, EventSequence, EventStreamError, MAX_PAYLOAD_BYTES, encode_event, encode_exception,
     progress_document, stats_document,
 };
+// The bounded way to answer a select from a record source: one frame per read, never the answer.
+pub use select_frames::frame_records;
 
 // The ACL contract, exported for the same reason as the five above, plus one this family has to
 // itself: an ACL arrives on **two** wire channels — the `<AccessControlPolicy>` body and the

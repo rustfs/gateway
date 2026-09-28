@@ -200,36 +200,46 @@ fn pair(name: &str, value: &str) -> (String, String) {
     (name.to_owned(), value.to_owned())
 }
 
-/// What the model says a call does: the refusal, or the frame and the phase after it.
-fn predict(phase: Phase, op: &Op) -> Result<(Frame, Phase), EventStreamError> {
+/// What the model says a call does: the refusal, or the frames and the phase after it.
+fn predict(phase: Phase, op: &Op) -> Result<(Vec<Frame>, Phase), EventStreamError> {
     let order = |allowed: bool| if allowed { Ok(()) } else { Err(EventStreamError::OutOfOrder) };
     match op {
         Op::Records(payload) => {
             order(phase == Phase::Scanning)?;
-            Ok((event_frame(EventKind::Records, payload)?, phase))
+            // A sequence splits a payload past the ceiling into consecutive frames; an empty
+            // payload is still one frame.
+            let frames = if payload.is_empty() {
+                vec![event_frame(EventKind::Records, payload)?]
+            } else {
+                payload
+                    .chunks(PAYLOAD_CEILING)
+                    .map(|chunk| event_frame(EventKind::Records, chunk))
+                    .collect::<Result<_, _>>()?
+            };
+            Ok((frames, phase))
         }
         Op::Progress(document) => {
             order(phase == Phase::Scanning)?;
-            Ok((event_frame(EventKind::Progress, document.as_bytes())?, phase))
+            Ok((vec![event_frame(EventKind::Progress, document.as_bytes())?], phase))
         }
         Op::Cont => {
             order(phase == Phase::Scanning)?;
-            Ok((event_frame(EventKind::Cont, &[])?, phase))
+            Ok((vec![event_frame(EventKind::Cont, &[])?], phase))
         }
         Op::Stats(document) => {
             order(phase == Phase::Scanning)?;
-            Ok((event_frame(EventKind::Stats, document.as_bytes())?, Phase::Counted))
+            Ok((vec![event_frame(EventKind::Stats, document.as_bytes())?], Phase::Counted))
         }
         Op::End => {
             order(phase == Phase::Counted)?;
-            Ok((event_frame(EventKind::End, &[])?, Phase::Terminated))
+            Ok((vec![event_frame(EventKind::End, &[])?], Phase::Terminated))
         }
         Op::Exception(code, message) => {
             order(phase != Phase::Terminated)?;
-            Ok((error_frame(code, message)?, Phase::Terminated))
+            Ok((vec![error_frame(code, message)?], Phase::Terminated))
         }
-        Op::RawEvent(kind, payload) => Ok((event_frame(*kind, payload)?, phase)),
-        Op::RawException(code, message) => Ok((error_frame(code, message)?, phase)),
+        Op::RawEvent(kind, payload) => Ok((vec![event_frame(*kind, payload)?], phase)),
+        Op::RawException(code, message) => Ok((vec![error_frame(code, message)?], phase)),
     }
 }
 
@@ -247,7 +257,8 @@ fn apply(sequence: &mut EventSequence, op: &Op, out: &mut Vec<u8>) -> Result<(),
 }
 
 /// Runs one call against production and the model, asserting that they agree byte for byte.
-fn step(sequence: &mut EventSequence, phase: &mut Phase, op: &Op, out: &mut Vec<u8>) -> Result<(), EventStreamError> {
+/// Returns how many frames the call appended.
+fn step(sequence: &mut EventSequence, phase: &mut Phase, op: &Op, out: &mut Vec<u8>) -> Result<usize, EventStreamError> {
     let before = out.clone();
     let actual = apply(sequence, op, out);
     match predict(*phase, op) {
@@ -255,16 +266,27 @@ fn step(sequence: &mut EventSequence, phase: &mut Phase, op: &Op, out: &mut Vec<
             assert_eq!(actual, Err(expected), "production and model disagree on {op:?}");
             assert_eq!(*out, before, "a refused call changed the output");
         }
-        Ok((frame, next)) => {
+        Ok((frames, next)) => {
             assert_eq!(actual, Ok(()), "production refused what the model accepts: {op:?}");
             assert_eq!(out.get(..before.len()), Some(before.as_slice()), "earlier output was rewritten");
-            let appended = out.get(before.len()..).unwrap_or_default();
-            assert_eq!(reference_frame(appended), Ok(frame), "the appended frame is not the predicted one");
+            let mut appended = out.get(before.len()..).unwrap_or_default();
+            for frame in &frames {
+                let total = be32(appended, 0).unwrap_or(usize::MAX).min(appended.len());
+                assert_eq!(
+                    reference_frame(&appended[..total]),
+                    Ok(frame.clone()),
+                    "an appended frame is not the predicted one"
+                );
+                appended = &appended[total..];
+            }
+            assert!(appended.is_empty(), "the call appended more than the predicted frames");
             *phase = next;
+            assert_eq!(sequence.is_terminated(), *phase == Phase::Terminated, "sequence state diverged");
+            return Ok(frames.len());
         }
     }
     assert_eq!(sequence.is_terminated(), *phase == Phase::Terminated, "sequence state diverged");
-    actual
+    actual.map(|()| 0)
 }
 
 /// Runs a script, then closes a still-live sequence with a checked error frame so dropping it is
@@ -278,14 +300,14 @@ pub(super) fn run(ops: &[Op]) -> Summary {
     let mut summary = Summary::default();
     for op in ops {
         match step(&mut sequence, &mut phase, op, &mut out) {
-            Ok(()) => summary.frames += 1,
+            Ok(appended) => summary.frames += appended,
             Err(refusal) => summary.refusals.push(refusal),
         }
     }
     summary.terminated = sequence.is_terminated();
     if !summary.terminated {
         let close = Op::Exception("InternalError".into(), "script ended".into());
-        assert_eq!(step(&mut sequence, &mut phase, &close, &mut out), Ok(()));
+        assert_eq!(step(&mut sequence, &mut phase, &close, &mut out), Ok(1));
     }
     drop(std::mem::ManuallyDrop::into_inner(sequence));
     summary
@@ -313,7 +335,7 @@ fn be32(bytes: &[u8], at: usize) -> Result<usize, &'static str> {
 }
 
 /// Independent reader for exactly one message: lengths, both CRC ranges, string headers, payload.
-pub(super) fn reference_frame(frame: &[u8]) -> Result<Frame, &'static str> {
+pub(crate) fn reference_frame(frame: &[u8]) -> Result<Frame, &'static str> {
     let total = be32(frame, 0)?;
     let headers_len = be32(frame, 4)?;
     if total != frame.len() {
