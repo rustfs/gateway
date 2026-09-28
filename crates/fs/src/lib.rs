@@ -61,6 +61,7 @@ macro_rules! reference_operations {
             encryption DeleteBucketEncryption => "DeleteBucketEncryption",
             lifecycle DeleteBucketLifecycle => "DeleteBucketLifecycle",
             policy DeleteBucketPolicy => "DeleteBucketPolicy",
+            tagging DeleteBucketTagging => "DeleteBucketTagging",
             crud DeleteObject => "DeleteObject",
             tagging DeleteObjectTagging => "DeleteObjectTagging",
             crud DeleteObjects => "DeleteObjects",
@@ -71,6 +72,7 @@ macro_rules! reference_operations {
             crud GetBucketLocation => "GetBucketLocation",
             policy GetBucketPolicy => "GetBucketPolicy",
             policy GetBucketPolicyStatus => "GetBucketPolicyStatus",
+            tagging GetBucketTagging => "GetBucketTagging",
             versioning GetBucketVersioning => "GetBucketVersioning",
             crud GetObject => "GetObject",
             acl GetObjectAcl => "GetObjectAcl",
@@ -89,6 +91,7 @@ macro_rules! reference_operations {
             encryption PutBucketEncryption => "PutBucketEncryption",
             lifecycle PutBucketLifecycleConfiguration => "PutBucketLifecycleConfiguration",
             policy PutBucketPolicy => "PutBucketPolicy",
+            tagging PutBucketTagging => "PutBucketTagging",
             versioning PutBucketVersioning => "PutBucketVersioning",
             crud PutObject => "PutObject",
             acl PutObjectAcl => "PutObjectAcl",
@@ -113,6 +116,7 @@ reference_operations!(capability_names);
 mod content_headers;
 // The `register_*` methods and the entry macros behind them, kept together.
 mod acl;
+mod bucket_tagging;
 mod buckets;
 mod conditions;
 pub(crate) mod copy;
