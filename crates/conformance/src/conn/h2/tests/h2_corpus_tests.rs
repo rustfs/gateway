@@ -34,7 +34,7 @@ fn the_named_h2_corpus_runs_all_cases_on_production_hyper() {
     let ids: Vec<_> = report.outcomes.iter().map(|outcome| outcome.id.clone()).collect();
     assert_eq!(
         ids,
-        (1..=7).map(|index| format!("c-h2-{index:04}")).collect::<Vec<_>>(),
+        (1..=16).map(|index| format!("c-h2-{index:04}")).collect::<Vec<_>>(),
         "missing or unexecuted named case"
     );
     for outcome in &report.outcomes {
@@ -44,6 +44,20 @@ fn the_named_h2_corpus_runs_all_cases_on_production_hyper() {
             outcome.verdict,
             outcome.failures(),
             outcome.skip_reason
+        );
+    }
+    // c-h2-0010 proves nothing unless its client GOAWAY, authored after the request head, was
+    // written before the response ended the exchange. c-h2-0008 and c-h2-0009 write their control
+    // frame before HEADERS, so the exact wire-image test in h2_client_control_tests covers them.
+    for outcome in report.outcomes.iter().filter(|outcome| outcome.id == "c-h2-0010") {
+        assert!(
+            outcome
+                .warnings()
+                .iter()
+                .all(|warning| !warning.message.contains("before all authored")),
+            "{}: {:?}",
+            outcome.id,
+            outcome.warnings()
         );
     }
     for outcome in &report.outcomes {

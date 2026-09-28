@@ -252,15 +252,6 @@ fn frames_without_an_h2_request_version_are_refused() {
 }
 
 #[test]
-fn every_frame_type_this_writer_cannot_observe_is_refused_by_name() {
-    // WINDOW_UPDATE is executed literally; its accepted and malformed forms live in h2_window_tests.
-    for kind in ["rst_stream", "goaway", "priority", "raw"] {
-        let error = compile_error(&format!("{HEAD}[[h2_frames]]\ntype = \"{kind}\"\nstream_id = 1\n"));
-        assert!(error.contains(&format!("type = \"{kind}\"` is not executed")), "{kind}: {error}");
-    }
-}
-
-#[test]
 fn a_flag_foreign_to_its_frame_type_is_refused() {
     for (kind, flag) in [
         ("headers", "ack"),
@@ -617,3 +608,5 @@ fn a_slow_listener_start_does_not_forgive_a_silent_peer() {
     assert!(receipt.observed_at >= started + Duration::from_millis(550), "{receipt:?}");
     assert!(started.elapsed() < Duration::from_millis(2_000), "the deadline is still bounded");
 }
+
+mod h2_client_control_tests;

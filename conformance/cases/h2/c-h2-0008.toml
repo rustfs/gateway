@@ -1,0 +1,53 @@
+# c-h2-0008 — client-authored HTTP/2 control frame.
+
+[case]
+id = "c-h2-0008"
+schema_version = 4
+title = "A PRIORITY frame before the request is ignored and the request is answered"
+rationale = "Deprecated priority signals must not change the response; a harness that dropped the authored PRIORITY octets would pass only together with the literal wire-image test."
+polarity = "positive"
+tags = ["framing"]
+timeout_ms = 1500
+quirks = []
+applies_to = { http_versions = ["h2"], tls = "forbidden" }
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9113.html#section-5.3.2"
+summary = "RFC 9113 deprecates the priority signaling that RFC 7540 defined, so a well-formed PRIORITY frame changes no response."
+kind = "rfc"
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9113.html#section-6.3"
+summary = "A PRIORITY frame may be sent on a stream in any state, including idle, and only stream zero or a length other than five is an error."
+kind = "rfc"
+
+[[setup.buckets]]
+name = "conf-cors-rt"
+
+[request]
+method = "OPTIONS"
+target = "/conf-cors-rt/key.txt"
+http_version = "h2"
+
+[[request.h2_frames]]
+type = "settings"
+
+[[request.h2_frames]]
+type = "priority"
+stream_id = 1
+payload_hex = "0000000010"
+
+[[request.h2_frames]]
+type = "headers"
+stream_id = 1
+flags = ["end_headers", "end_stream"]
+payload_hex = "02074f5054494f4e538604152f636f6e662d636f72732d72742f6b65792e747874410e73332e6578616d706c652e636f6d"
+
+[expect]
+kind = "response"
+status = 400
+h2_control_frames = [{ type = "window_update", stream_id = 0, increment = 2031617 }]
+socket_read_after = "no_termination_observed"
+
+[expect.body]
+contains_utf8 = ["<Code>BadRequest</Code>"]

@@ -60,6 +60,7 @@ ADRs; this map only selects files.
 | `src/conn/external_fixture/runner_tests.rs` | Full CLI-to-external-endpoint fixture lifecycle regression coverage. | The runner does not create, exercise, or clean up an opted-in remote fixture. |
 | `src/conn/external_tls.rs` | Verified TLS client setup with public and explicit CA roots. | HTTPS trust, ALPN, or certificate failure classification is wrong. |
 | `src/conn/h2.rs` | Authored `request.h2_frames` scripts: exact preface and frame envelopes to production Hyper, and the response read back off peer frames. | A frame script is refused wrongly, written differently from its declaration, or its response is misread. |
+| `src/conn/h2/control.rs` | Client-authored RST_STREAM, GOAWAY, PRIORITY and literal `raw` frame envelopes. | An authored control frame is encoded, defaulted or refused wrongly. |
 | `src/conn/h2/duplex.rs` | Single-owner cleartext read/write progress and credit ordering. | Checking early peer controls or partial request transmission. |
 | `src/conn/h2/flow.rs` | Connection and selected-stream credit from literal writes and received frames. | Checking DATA padding accounting or a window overflow. |
 | `src/conn/h2/hpack.rs` | HPACK decoding of the peer's response header blocks, dynamic table included. | A decoded response header is wrong, or a malformed block is accepted. |
@@ -70,6 +71,7 @@ ADRs; this map only selects files.
 | `src/conn/h2/tests/h2_window_tests.rs` | Literal window scripts, measured increments, and independent receive credit controls. | Checking padded DATA limits or actual credit grants. |
 | `src/conn/h2/tests/h2_authored_flow_tests.rs` | Literal outbound flow violations followed by measured peer errors. | Checking that local credit accounting does not discard actual GOAWAY or reset observations. |
 | `src/conn/h2/tests/h2_duplex_tests.rs` | Socket-ordered credit and early controls during unfinished writes. | Checking retroactive grants or hidden peer resets under backpressure. |
+| `src/conn/h2/tests/h2_client_control_tests.rs` | Client control-frame envelopes, refusals and the exact octets a peer receives. | Checking how an authored control or raw frame reaches the wire. |
 | `src/conn/h2/tests/h2_corpus_tests.rs` | Named HTTP/2 cases executed against production Hyper. | Checking that authored corpus coverage actually runs and passes. |
 | `src/inprocess/h2_frames.rs` | Reads `request.h2_frames` into typed, ordered frame declarations. | A declared frame field is lost before a transport sees it. |
 | `src/conn/server.rs` | Lazily assembles test and production listeners with the case clock and profile. | The socket transports assemble a different policy from in-process execution. |

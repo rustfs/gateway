@@ -1,0 +1,47 @@
+# c-h2-0009 — client-authored HTTP/2 control frame.
+
+[case]
+id = "c-h2-0009"
+schema_version = 4
+title = "A frame of unknown type is discarded and the request is answered"
+rationale = "Unknown extension frames must be ignored; treating one as a connection error would break every future extension a client might send."
+polarity = "positive"
+tags = ["framing"]
+timeout_ms = 1500
+quirks = []
+applies_to = { http_versions = ["h2"], tls = "forbidden" }
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9113.html#section-4.1"
+summary = "Implementations must ignore and discard frames whose type they do not know rather than treat them as errors."
+kind = "rfc"
+
+[[setup.buckets]]
+name = "conf-cors-rt"
+
+[request]
+method = "OPTIONS"
+target = "/conf-cors-rt/key.txt"
+http_version = "h2"
+
+[[request.h2_frames]]
+type = "settings"
+
+[[request.h2_frames]]
+type = "raw"
+payload_hex = "000004fa0000000000deadbeef"
+
+[[request.h2_frames]]
+type = "headers"
+stream_id = 1
+flags = ["end_headers", "end_stream"]
+payload_hex = "02074f5054494f4e538604152f636f6e662d636f72732d72742f6b65792e747874410e73332e6578616d706c652e636f6d"
+
+[expect]
+kind = "response"
+status = 400
+h2_control_frames = [{ type = "window_update", stream_id = 0, increment = 2031617 }]
+socket_read_after = "no_termination_observed"
+
+[expect.body]
+contains_utf8 = ["<Code>BadRequest</Code>"]

@@ -25,14 +25,18 @@
 //!
 //! # What is executed, and what is refused by name
 //!
-//! * SETTINGS, HEADERS, CONTINUATION, DATA and WINDOW_UPDATE are written. RST_STREAM, GOAWAY,
-//!   PRIORITY and `raw` are refused: what a peer does after them is not yet observable here.
+//! * SETTINGS, HEADERS, CONTINUATION, DATA, WINDOW_UPDATE, RST_STREAM, GOAWAY, PRIORITY and `raw`
+//!   frames are written; `control` compiles the last four. What the peer does after them is observed
+//!   like any other reaction: a status, received controls, and independently measured termination.
+//!   A client reset of the selected stream is not an end condition: nothing on the wire says the
+//!   peer has processed it, so the observation still ends only on a peer fact or the deadline.
 //! * One stream per script. Received RST_STREAM frames are recorded in arrival order; resetting
 //!   the selected stream ends its observation without implying a TCP reset. GOAWAY is recorded
 //!   without ending an in-flight stream or inventing receive-side termination.
 //! * Only the production Hyper driver speaks HTTP/2 in cleartext with prior knowledge. The
 //!   self-held driver, the test harness, external endpoints, and TLS refuse the script.
 
+mod control;
 mod duplex;
 mod flow;
 mod hpack;
@@ -180,6 +184,9 @@ fn compile(wire: &Wire) -> Result<Script, SutError> {
 }
 
 fn envelope(index: usize, frame: &H2Frame) -> Result<Envelope, SutError> {
+    if control::owns(&frame.kind) {
+        return control::envelope(index, frame);
+    }
     let (frame_type, known): (u8, &[(&str, u8)]) = match frame.kind.as_str() {
         "settings" => (SETTINGS, &[("ack", ACK)]),
         "window_update" => (WINDOW_UPDATE, &[]),
@@ -197,8 +204,8 @@ fn envelope(index: usize, frame: &H2Frame) -> Result<Envelope, SutError> {
         other => {
             return Err(refused(format!(
                 "`h2_frames[{index}].type = \"{other}\"` is not executed: this writer carries out \
-                 settings, headers, continuation, data and window_update, and what a peer does after an authored \
-                 {other} frame is not yet observable here"
+                 settings, headers, continuation, data, window_update, rst_stream, goaway, priority and raw \
+                 frames; spell any other frame type as a raw frame"
             )));
         }
     };
@@ -220,21 +227,8 @@ fn envelope(index: usize, frame: &H2Frame) -> Result<Envelope, SutError> {
             .ok_or_else(|| refused(format!("`h2_frames[{index}].flags` names `{name}`, which is not a {kind} flag")))?;
         flags |= bit;
     }
-    let declared = match (frame.stream_id, frame_type) {
-        (Some(id), _) => id,
-        (None, SETTINGS) => 0,
-        (None, _) => return Err(refused(format!("`h2_frames[{index}]` is a {kind} frame with no stream_id"))),
-    };
-    let stream_id = u32::try_from(declared)
-        .ok()
-        .filter(|id| *id <= MAX_STREAM_ID)
-        .ok_or_else(|| refused(format!("`h2_frames[{index}].stream_id = {declared}` is not a 31-bit stream identifier")))?;
-    if frame.payload.len() > MAX_PAYLOAD {
-        return Err(refused(format!(
-            "`h2_frames[{index}].payload_hex` is {} octets, beyond the 24-bit frame length",
-            frame.payload.len()
-        )));
-    }
+    let stream_id = declared_stream(index, frame, frame_type == SETTINGS)?;
+    within_frame_length(index, frame)?;
     let payload = if frame_type == WINDOW_UPDATE {
         if let Some(increment) = frame.increment {
             if frame.payload_declared {
@@ -259,6 +253,33 @@ fn envelope(index: usize, frame: &H2Frame) -> Result<Envelope, SutError> {
         payload,
         delay_ms: frame.delay_ms,
     })
+}
+
+/// The declared 31-bit stream identifier, or stream zero when the frame type is connection-scoped
+/// by default and the case declared none.
+fn declared_stream(index: usize, frame: &H2Frame, defaults_to_zero: bool) -> Result<u32, SutError> {
+    let declared = match frame.stream_id {
+        Some(id) => id,
+        None if defaults_to_zero => 0,
+        None => {
+            return Err(refused(format!("`h2_frames[{index}]` is a {} frame with no stream_id", frame.kind)));
+        }
+    };
+    u32::try_from(declared)
+        .ok()
+        .filter(|id| *id <= MAX_STREAM_ID)
+        .ok_or_else(|| refused(format!("`h2_frames[{index}].stream_id = {declared}` is not a 31-bit stream identifier")))
+}
+
+/// Refuses a payload the 24-bit frame length cannot declare, which the header would misstate.
+fn within_frame_length(index: usize, frame: &H2Frame) -> Result<(), SutError> {
+    if frame.payload.len() > MAX_PAYLOAD {
+        return Err(refused(format!(
+            "`h2_frames[{index}].payload_hex` is {} octets, beyond the 24-bit frame length",
+            frame.payload.len()
+        )));
+    }
+    Ok(())
 }
 
 /// The SETTINGS_HEADER_TABLE_SIZE a SETTINGS payload advertises (RFC 9113 section 6.5.1).
