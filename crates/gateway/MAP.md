@@ -13,7 +13,7 @@ for request order and `docs/assembly-order.md` for extension call counts.
 | `src/config.rs`, `src/routing.rs` | One atomic settings, routing, and middleware snapshot | Updating a live generation or checking one-load-per-request |
 | `src/service.rs`, `src/service/update.rs` | Ordered pipeline and atomic assembly publication; ADR-0024's service-level addressing, secret opt-in and typed path values, and ADR-0025/0026's bound bucket (template or query) and subjects, are decided in `src/routed_facts.rs`; the route stage asks one question per action and per account | Moving a stage, replacing middleware, or tracing a response |
 | `src/service_tests.rs` | The pipeline's own unit suite, split out at the 800-line limit | Changing what is decidable without a request |
-| `src/adapt.rs` | tower and hyper adapters | Wiring a server or checking `Infallible` |
+| `src/adapt.rs`, `src/request_end.rs` | tower and hyper adapters; whether the request body ended before the answer (marks the response for the server's lingering close) | Wiring a server, checking `Infallible`, or a head-decided refusal ending in `RST` on the Hyper driver |
 | `src/conn/**`, `src/conn/response_tests.rs`, `src/conn/request_tests.rs`, `src/conn/request_cost_tests.rs` | Optional plaintext HTTP/1.1 framing and response transport, with bounded-vector, partial-write, and scripted request scan controls | Auditing the self-held socket path or changing response fallback writes |
 | `src/assembly.rs` | `AssemblyError` and `asm-*` rule refs | Adding an assembly refusal |
 | `src/dispatch.rs` | Codec-aware operation erasure and dispatch table | A route cannot decode or invoke |

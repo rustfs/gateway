@@ -51,6 +51,7 @@ http-body = { workspace = true }
 http-body-util = { workspace = true }
 httparse = { workspace = true }
 hyper = { workspace = true }
+pin-project-lite = { workspace = true }
 sha2 = { workspace = true }
 tower = { workspace = true }
 tokio = { workspace = true, features = ["fs", "io-util", "net", "sync", "time"] }
