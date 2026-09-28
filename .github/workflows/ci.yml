@@ -152,3 +152,28 @@ jobs:
           if [ -f "crates/$dir/src/lib.rs" ]; then echo "// probe" >> "crates/$dir/src/lib.rs"; elif [ "$dir" = xtask ]; then echo "// probe" >> xtask/src/main.rs; fi
           s=$(date +%s%N); cargo xtask verify --crate ${{ matrix.crate }} 2>&1 | grep -E '^(verify|what|where|rule):'; rc=${PIPESTATUS[0]}; e=$(date +%s%N)
           echo "RESULT crate=${{ matrix.crate }} run=edited rc=$rc outer_ms=$(( (e - s) / 1000000 ))"
+
+  tsan-unpinned:
+    name: TSAN unpinned ${{ matrix.allocator }} ${{ matrix.copy }}
+    runs-on: sm-standard-4
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        allocator: [dhat, system]
+        copy: [1, 2]
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: ${{ matrix.allocator == 'system' && 'p0/958-tsan-system-allocator' || 'main' }}
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: nightly-2026-06-18
+          components: rust-src
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Install host tools
+        run: bash scripts/ci_install_host_tools.sh
+      - name: Unpinned TSAN run
+        run: |
+          nproc; grep -m1 'model name' /proc/cpuinfo
+          GATEWAY_TSAN_CPUS=4096 timeout 420 scripts/run_gateway_tsan.sh; echo "RESULT allocator=${{ matrix.allocator }} rc=$?"
