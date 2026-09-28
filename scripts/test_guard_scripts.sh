@@ -24183,6 +24183,73 @@ expect_fail check_corpus_no_secrets.sh \
     mut_corpus_tree_removed \
     'required input is missing'
 
+# check_corpus_change_reviewed.sh reads git history, so each case builds a two-commit repository:
+# a base whose manifest declares 49 entries and a head chosen by the case.
+corpus_review_repo() {
+    local head_subject="$1" head_entries="$2" touch_corpus="$3" repo
+    repo="$(mktemp -d "${TMPDIR:-/tmp}/gateway-corpus-review.XXXXXX")"
+    (
+        cd "$repo"
+        git init -q
+        git config user.email guard@example.invalid
+        git config user.name guard
+        mkdir -p corpus scripts
+        printf 'schema_version = 1\nentries = 49\n' >corpus/MANIFEST.toml
+        printf 'x\n' >scripts/other.sh
+        git add -A && git commit -q -m 'base (#1)'
+        if [[ "$touch_corpus" == 1 ]]; then
+            printf 'schema_version = 1\nentries = %s\n' "$head_entries" >corpus/MANIFEST.toml
+        else
+            printf 'y\n' >scripts/other.sh
+        fi
+        git add -A && git commit -q -m "$head_subject"
+    )
+    printf '%s\n' "$repo"
+}
+
+expect_corpus_review() {
+    local expected="$1" desc="$2" mode="$3" subject="$4" entries="$5" touch="$6" body="$7" diagnostic="${8:-}"
+    local repo rc=0 output
+    cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
+    repo="$(corpus_review_repo "$subject" "$entries" "$touch")"
+    if [[ "$mode" == push ]]; then
+        output="$(GATEWAY_CHECK_ROOT="$repo" GATEWAY_CORPUS_PUSH_RANGE="HEAD~1..HEAD" \
+            "${SCRIPT_DIR}/check_corpus_change_reviewed.sh" 2>&1)" || rc=$?
+    else
+        output="$(GATEWAY_CHECK_ROOT="$repo" GATEWAY_CORPUS_BASE="$(git -C "$repo" rev-parse HEAD~1)" \
+            GATEWAY_CORPUS_HEAD="$(git -C "$repo" rev-parse HEAD)" GATEWAY_PR_BODY_JSON="$(json_string "$body")" \
+            "${SCRIPT_DIR}/check_corpus_change_reviewed.sh" 2>&1)" || rc=$?
+    fi
+    rm -rf "$repo"
+    if [[ -n "$diagnostic" && "$output" != *"$diagnostic"* ]]; then
+        fail_msg "check_corpus_change_reviewed.sh missing diagnostic for: ${desc}"
+    elif [[ "$expected" == pass && "$rc" -eq 0 ]]; then
+        pass_msg "check_corpus_change_reviewed.sh allows: ${desc}"
+    elif [[ "$expected" == fail && "$rc" -ne 0 ]]; then
+        pass_msg "check_corpus_change_reviewed.sh catches: ${desc}"
+    else
+        fail_msg "check_corpus_change_reviewed.sh unexpected result for: ${desc}"
+    fi
+}
+
+expect_corpus_review pass 'a pull request that does not touch corpus/' \
+    pr 'change a script' 49 0 ''
+expect_corpus_review pass 'a corpus pull request stating the census the manifest records' \
+    pr 'refresh corpus' 57 1 $'## Summary\nMore traffic.\n\n## Corpus change\n\nEntries: 49 -> 57\n'
+expect_corpus_review fail 'a corpus pull request with no corpus section' \
+    pr 'refresh corpus' 57 1 $'## Summary\nMore traffic.\n' 'has no `## Corpus change` section'
+expect_corpus_review fail 'a corpus pull request stating a census the manifest does not record' \
+    pr 'refresh corpus' 57 1 $'## Corpus change\n\nEntries: 49 -> 60\n' 'must state `Entries: 49 -> 57`'
+expect_corpus_review fail 'a census line outside the corpus section' \
+    pr 'refresh corpus' 57 1 $'Entries: 49 -> 57\n\n## Corpus change\n\nMore traffic.\n' 'no census line'
+expect_corpus_review pass 'a corpus commit merged from a pull request' \
+    push 'feat(corpus): refresh (#123)' 57 1 ''
+expect_corpus_review fail 'a corpus commit pushed straight to main' \
+    push 'chore: refresh corpus' 57 1 '' 'changes corpus/ outside a pull request'
+expect_corpus_review pass 'a direct push that does not touch corpus/' \
+    push 'chore: tweak a script' 49 0 ''
+
 mut_corpus_production_source() {
     python3 - <<'PYEOF'
 import json
