@@ -38,7 +38,8 @@ options:
   --profile <aws|minio|strict>
                             the profile the target claims (default aws)
   --root <dir>              corpus directory holding case.schema.json
-  --endpoint <http(s)-url>  external target (raw HTTP/1.1)
+  --endpoint <http(s)-url>  external target (raw HTTP/1.1; authored HTTP/2 frames only
+                            over http://, with prior knowledge)
   --allow-external-fixtures
                             allow isolated owned bucket/object setup and automatic cleanup
   --ca-cert <pem-path>      additional CA certificates for an HTTPS endpoint

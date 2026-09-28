@@ -27,6 +27,8 @@ use crate::sut::SutError;
 use crate::value::Value;
 
 mod clock;
+#[cfg(test)]
+mod h2_guard_tests;
 mod lifecycle;
 mod object;
 #[cfg(test)]
@@ -147,7 +149,21 @@ impl ExternalFixtures {
                 "external fixtures owned by `{active_case}` are still active; refusing to run `{case_id}`"
             )));
         }
-        if matches!(wire.method.as_str(), "GET" | "HEAD" | "OPTIONS") && wire.raw_head.is_none() {
+        let read_only = |method: &str| matches!(method, "GET" | "HEAD" | "OPTIONS");
+        if !wire.h2_frames.is_empty() {
+            // The authored header blocks are what the peer executes; `request.method` is not sent.
+            let method = match super::h2::authored_methods(wire) {
+                Ok(methods) => match methods.into_iter().find(|method| !read_only(method)) {
+                    None => return Ok(()),
+                    Some(method) => method,
+                },
+                Err(error) => format!("an unclassified authored HTTP/2 script ({error})"),
+            };
+            return Err(SutError::Environment(format!(
+                "external fixtures are active for `{case_id}`; only read-only GET, HEAD, and OPTIONS case exchanges are allowed, not {method}"
+            )));
+        }
+        if read_only(&wire.method) && wire.raw_head.is_none() {
             return Ok(());
         }
         let method = if wire.raw_head.is_some() {
