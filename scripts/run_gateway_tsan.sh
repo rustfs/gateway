@@ -21,6 +21,7 @@ if command -v taskset >/dev/null 2>&1 && [[ -r /sys/fs/cgroup/cpu.max ]]; then
     read -r quota period </sys/fs/cgroup/cpu.max
     if [[ "$quota" != max && "$period" -gt 0 ]]; then
         limit=$((quota / period))
+        limit="${GATEWAY_TSAN_CPUS:-$limit}"
         allowed=()
         IFS=, read -r -a ranges <<<"$(taskset -cp $$ | sed 's/.*: //')"
         for range in "${ranges[@]}"; do
@@ -41,6 +42,6 @@ fi
 
 RUSTFLAGS='-Zsanitizer=thread' \
 RUSTDOCFLAGS='-Zsanitizer=thread' \
-    "${pin[@]}" cargo "+${TOOLCHAIN}" test -Zbuild-std --target "$TARGET" \
+    ${pin[@]+"${pin[@]}"} cargo "+${TOOLCHAIN}" test -Zbuild-std --target "$TARGET" \
         -p rustfs-gateway --test integration \
         service_concurrency::one_hundred_clones_answer_concurrently -- --exact --test-threads=1

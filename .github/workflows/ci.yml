@@ -126,7 +126,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        copy: [1, 2, 3, 4]
+        cpus: [1, 2, 4, 8]
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
@@ -145,17 +145,12 @@ jobs:
           grep -m1 'model name' /proc/cpuinfo || true
           grep -iE 'seccomp|NoNewPrivs' /proc/self/status || true
           (sudo -n apt-get install -y gdb >/dev/null 2>&1 && echo gdb-ok) || echo gdb-missing
-      - name: Same test without TSAN, pinned and unpinned
-        run: |
-          timeout 300 cargo test -p rustfs-gateway --test integration service_concurrency::one_hundred_clones_answer_concurrently -- --exact --nocapture 2>&1 | grep -E 'test result|panicked' || true; cat /tmp/tsan-diag.log | tail -3; rm -f /tmp/tsan-diag.log
-          timeout 120 taskset -c 0-14 cargo test -p rustfs-gateway --test integration service_concurrency::one_hundred_clones_answer_concurrently -- --exact --nocapture 2>&1 | grep -E 'test result|panicked' || true; cat /tmp/tsan-diag.log | tail -3; rm -f /tmp/tsan-diag.log
       - name: One hundred OS threads under TSAN
         run: |
           set +e
           cat /sys/fs/cgroup/cpu.stat
-          scripts/run_gateway_tsan.sh &
+          GATEWAY_TSAN_CPUS=${{ matrix.cpus }} scripts/run_gateway_tsan.sh &
           runner=$!
-          export TSAN_OPTIONS=verbosity=1
           for i in $(seq 1 150); do kill -0 "$runner" 2>/dev/null || break; sleep 1; done
           if kill -0 "$runner" 2>/dev/null; then
             pid="$(pgrep -f 'deps/integration-' | head -1)"
