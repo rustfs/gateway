@@ -21,13 +21,23 @@ the easiest parts of an S3 rewrite to get wrong, and it had no real-SDK traffic 
 | --- | --- |
 | `restic` | The only client here that signs uploads as `STREAMING-AWS4-HMAC-SHA256-PAYLOAD`. Its S3 backend is minio-go with an explicit region, so it reaches `PutObject` without a region lookup first. Its object layout — hundreds of small writes plus multi-megabyte packs read back by byte range — is a workload no single-object scenario produces, and it is the client that found `GetObject`'s missing `Range` support. |
 | `mc` | The MinIO ecosystem's own client and what RustFS users reach for first. Same transport as restic, without the region setting, which is what makes it the client that notices a missing `GetBucketLocation`. |
-| `boto3` | Python's de-facto S3 client and the SDK whose historical bug reports the s3s regression suite was built from. Driven at the raw API level, so a failing cell names one operation rather than a workflow. It is also the only client here that can generate and redeem a presigned URL as a scenario step. |
-| `rclone` | Drives aws-sdk-go-v2 at high concurrency and produces the list-then-copy traffic of a real mirroring deployment. It is this matrix's only `UNSIGNED-PAYLOAD` writer, so it covers a payload mode the others never send. |
+| `boto3` | Python's de-facto S3 client and the SDK whose historical bug reports the s3s regression suite was built from. Driven at the raw API level, so a failing cell names one operation rather than a workflow. It generates presigned URLs for both GET and PUT and redeems them with a plain HTTP client, so presigning is measured across implementations rather than round-tripped through one. |
+| `rclone` | Drives aws-sdk-go-v2 at high concurrency and produces the list-then-copy traffic of a real mirroring deployment. It declares `UNSIGNED-PAYLOAD` for its uploads, a payload mode the botocore clients never send. |
+| `aws-cli` | AWS's own command-line client (v2) and the reference most users measure a server against. botocore underneath, but its `s3` commands pick part sizes, concurrency and sync decisions of their own. Over TLS its uploads are `STREAMING-UNSIGNED-PAYLOAD-TRAILER` with a CRC64NVME trailer, so it is a second, independently configured trailer writer beside boto3. |
+| `s3cmd` | A hand-written signer and XML layer with no AWS SDK underneath, and the oldest widely deployed S3 CLI. It is the client here that writes an ACL back after a copy without an integrity header, and whose `signurl` produces a SigV2 presigned URL. |
+| `aws-sdk-js` | AWS's JavaScript SDK, v3, on Node.js: the SDK behind most server and browser JavaScript that talks to S3, and the one most sensitive to presigning. It is the client here that frames a stream as `STREAMING-UNSIGNED-PAYLOAD-TRAILER` even over plaintext. |
+| `aws-sdk-dotnet` | AWS's .NET SDK (AWSSDK.S3 v4), the S3 client of the .NET ecosystem, driven at the API level. With its defaults it sends every PutObject and UploadPart over plaintext as `STREAMING-AWS4-HMAC-SHA256-PAYLOAD-TRAILER` with a signed CRC32 trailer: an independent signed-chunk and signed-trailer implementation. It also percent-encodes the whole `x-amz-copy-source`, separator included. |
+| `aws-sdk-java-v2` | AWS's Java SDK 2.x, under most JVM data tooling that speaks S3. With its defaults it signs single-part uploads over plaintext as `STREAMING-AWS4-HMAC-SHA256-PAYLOAD-TRAILER` with a signed CRC32 trailer, and its built-in multipart client sends each part as `STREAMING-UNSIGNED-PAYLOAD-TRAILER` with the part checksum in the trailer. |
+| `aws-sdk-java-v1` | AWS's Java SDK 1.x: out of support, still linked by a long tail of deployed JVM applications, and a signer separate from 2.x. It frames every PutObject and UploadPart as `STREAMING-AWS4-HMAC-SHA256-PAYLOAD` signed chunks with no `Content-Encoding: aws-chunked` header and no trailer — a shape no other client here sends. |
+| `opendal` | Apache OpenDAL, the Rust data ecosystem's storage layer and the client that found s3s's stalled-request hang (s3s-project/s3s#316). Driven through its Python binding over the same Rust `services-s3` backend. It has no bucket operations, so its driver creates each cell's bucket with boto3 and measures everything else through the operator. |
 
-Deliberately absent for now, with the reason, so the next session does not have to rediscover it:
-`aws-cli`, `aws-sdk-rust`, `aws-sdk-go` and `aws-sdk-js` from the design-doc list are not yet
-registered. They are additions of data rather than code — one `[clients.<name>]` block in
-`versions.toml` and one `drivers/<name>/run.sh` — and rustfs/backlog#1765 tracks them.
+Not registered: `aws-sdk-go` from the design list. Its driver would be a Go program, and
+`scripts/check_no_minio_source.sh` refuses every Go source file in this tree as a clean-room
+boundary with no exemption (rustfs/gateway#974). Its SDK is still exercised, through rclone.
+
+An SDK is a library, so each SDK row is a small driver program under `drivers/<name>/`, built from
+its own lock file by `ci/compat/install_clients.sh` (the `program` install method in
+`versions.toml`) and asked at runtime which SDK version it actually linked.
 
 ## What answered these rows
 
@@ -73,7 +83,7 @@ driver grading its own traffic would be reporting its intention rather than an o
 ```bash
 cargo build --release -p rustfs-gateway-compat-sut
 bash ci/compat/install_clients.sh                     # installs exactly the pinned versions
-export PATH="$(go env GOPATH)/bin:$PATH"
+export PATH="$(go env GOPATH)/bin:$PATH"              # the runner adds target/compat-clients/bin itself
 GATEWAY_COMPAT_SUT_BIN=target/release/compat-sut ci/compat/run_matrix.sh
 
 # The fastest feedback loop: one client, one scenario.
@@ -85,14 +95,30 @@ Exit codes are `0` no regression, `1` at least one regression, `3` the environme
 broken. The third is not the same as "everything failed": a matrix that cannot reach its server
 must say so rather than record 56 failures and poison the baseline.
 
+## Corpus recording
+
+Every scheduled run also records itself as corpus material, the second corpus source P8-04
+describes: `ci/compat/record_corpus.sh` converts the run's probe records with
+`corpus/tools/from_compat_probe.py`, ingests them with the `corpus` CLI (sanitized, deduplicated,
+refused if any credential survives) into `target/compat/corpus`, verifies that strictly, and
+uploads both with the run's artifact. A full run must record at least one aws-chunked request and
+fails if it does not. Nothing is written into the repository's `corpus/`; refreshing that stays a
+reviewed pull request.
+
+```bash
+cargo build --release -p rustfs-gateway-corpus --bin corpus
+ci/compat/record_corpus.sh --run-dir target/compat --corpus-bin target/release/corpus --require-chunked
+```
+
 ## Files
 
 | File | What it is |
 | --- | --- |
-| `versions.toml` | The only place a client version is written down. |
+| `versions.toml` | The only place a client version is written down, and how each client is installed and its version read back. |
 | `capabilities.toml` | The operations the system under test registers. Checked against the launcher's own registry before every run. |
 | `scenarios/*.yaml` | Client-independent scenarios, with the wire facts some of them assert. |
 | `drivers/<client>/run.sh` | One client's translation of those scenarios. |
+| `../ci/compat/record_corpus.sh` | Turns a run's probe records into a verified corpus under the run directory. |
 | `known-fail.txt` | Excused failures. Shrinks only. |
 | `matrix.json` | The generated manifest. A protected file: it is an external promise. |
 | `sut/` | The `compat-sut` binary: puts `rustfs-gateway-fs` behind a real socket and records what crossed it. It is the runnable server rustfs/gateway#624 says the workspace lacked. Started through `ci/lib/sut.sh`, the launcher shared with the P8-05 external-suite runner (rustfs/backlog#1764). The matrix also starts its TLS listener (`--tls-port`, `--tls-self-signed`) and hands drivers `COMPAT_TLS_ENDPOINT` and `COMPAT_CA_BUNDLE`; only a scenario a client can express solely over TLS uses them (rustfs/gateway#719). |

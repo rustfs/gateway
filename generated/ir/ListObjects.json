@@ -1,5 +1,5 @@
 {
-  "ir_version": "2",
+  "ir_version": "3",
   "operation": "ListObjects",
   "http": {
             "method": "GET",
@@ -90,6 +90,20 @@
                            "type": { "kind": "String" },
                            "hot": false,
                            "quirk_refs": []
+                         },
+                         {
+                           "name": "OptionalObjectAttributes",
+                           "wire_name": "x-amz-optional-object-attributes",
+                           "required": false,
+                           "binding": { "kind": "Header" },
+                           "type": {
+                                     "kind": "List",
+                                     "member": { "kind": "StringEnum", "values": ["RestoreStatus"] },
+                                     "flattened": false,
+                                     "member_name": null
+                                   },
+                           "hot": false,
+                           "quirk_refs": []
                          }
                        ]
            },
@@ -131,7 +145,7 @@
                                       "kind": "List",
                                       "member": { "kind": "Structure", "shape": "Object" },
                                       "flattened": true,
-                                      "wrapper_name": null
+                                      "member_name": null
                                     },
                             "hot": true,
                             "quirk_refs": ["q-flat-0019", "q-owner-0065"]
@@ -181,7 +195,7 @@
                                       "kind": "List",
                                       "member": { "kind": "Structure", "shape": "CommonPrefix" },
                                       "flattened": true,
-                                      "wrapper_name": null
+                                      "member_name": null
                                     },
                             "hot": true,
                             "quirk_refs": ["q-flat-0019"]
@@ -279,7 +293,7 @@
                                                                         ]
                                                             },
                                                   "flattened": true,
-                                                  "wrapper_name": null
+                                                  "member_name": null
                                                 },
                                         "hot": false,
                                         "quirk_refs": ["q-flat-0019"]

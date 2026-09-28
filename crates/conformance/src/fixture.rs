@@ -114,21 +114,20 @@ use std::sync::{Arc, Mutex};
 use rustfs_gateway::dto;
 use rustfs_gateway::{
     AclHeaders, AclInput, AclRejection, AclTarget, BucketName, ByteStream, ChecksumAlgorithm, ChecksumSpec,
-    ChecksumType as PackedChecksumType, ConditionalOutcome, CopyRange, CopySourceRejection, ETag, ErrorCode, EventSequence,
-    FailedCondition, GranteeType, Handler, HandlerError, HandlerErrorContext, HandlerResult, IfRange, MissingObject, ObjectKey,
-    ObjectValidators, Operation, PRECONDITION_FAILED_MESSAGE, PreconditionRejection, Preconditions, REGION_MATCH_POLICY,
-    RangeDecision, RangeSelectors, RecordedUpload, RegionLabel, RegionSet, Req, RequestKind, ResolvedUploadId,
-    ResourceVisibility, Resp, RestoreState, RestoreStatus, SseEnforced, TagScope, TaggingRejection, Timestamp, UploadIdClaim,
-    canonicalize_grantee, collect, completion_failure_retains_upload, conditional_write_guards_before_mutation,
-    copy_source_guards_before_target_write, copy_source_if_match_miss_proceeds, copy_target_uses_source_validators,
-    encryption_delete_absent_succeeds, evaluate, evaluate_range, format_optional_restore_status,
-    object_lock_requires_enabled_bucket, parse_conditional_etag, parse_tagging_header, permanent_redirect_for,
-    refuse_blocked_encryption_type, resolve_copy_range, resolve_input as resolve_acl_input, resolve_location_constraint,
-    resolve_part, resolve_upload, select_scan_bytes, select_uses_event_stream, stats_document, validate_accelerate,
-    validate_cors, validate_encryption, validate_legal_hold, validate_lifecycle, validate_lock_configuration, validate_logging,
-    validate_notification, validate_object_write_lock, validate_policy, validate_public_access_block, validate_replication,
-    validate_request_payment, validate_restore, validate_retention, validate_select, validate_tag_set, validate_versioning,
-    validate_website,
+    ChecksumType as PackedChecksumType, ConditionalOutcome, CopyRange, CopySourceRejection, ETag, ErrorCode, FailedCondition,
+    GranteeType, Handler, HandlerError, HandlerErrorContext, HandlerResult, IfRange, MissingObject, ObjectKey, ObjectValidators,
+    Operation, PRECONDITION_FAILED_MESSAGE, PreconditionRejection, Preconditions, REGION_MATCH_POLICY, RangeDecision,
+    RangeSelectors, RecordedUpload, RegionLabel, RegionSet, Req, RequestKind, ResolvedUploadId, ResourceVisibility, Resp,
+    RestoreState, RestoreStatus, SseEnforced, TagScope, TaggingRejection, Timestamp, UploadIdClaim, canonicalize_grantee,
+    collect, completion_failure_retains_upload, conditional_write_guards_before_mutation, copy_source_guards_before_target_write,
+    copy_source_if_match_miss_proceeds, copy_target_uses_source_validators, encryption_delete_absent_succeeds, evaluate,
+    evaluate_range, format_optional_restore_status, frame_records, object_lock_requires_enabled_bucket, parse_conditional_etag,
+    parse_tagging_header, permanent_redirect_for, refuse_blocked_encryption_type, resolve_copy_range,
+    resolve_input as resolve_acl_input, resolve_location_constraint, resolve_part, resolve_upload, select_scan_bytes,
+    select_uses_event_stream, validate_accelerate, validate_cors, validate_encryption, validate_legal_hold, validate_lifecycle,
+    validate_lock_configuration, validate_logging, validate_notification, validate_object_write_lock, validate_policy,
+    validate_public_access_block, validate_replication, validate_request_payment, validate_restore, validate_retention,
+    validate_select, validate_tag_set, validate_versioning, validate_website,
 };
 
 mod committed;
@@ -225,9 +224,8 @@ pub struct StoredObject {
     ///
     /// `None` is what makes `x-amz-restore` absent, which is a fact a client reads: an object
     /// with no header was never retrieved, and one carrying `ongoing-request="false"` is back.
-    /// Held on the object beside the tag set and the lock documents, for the same reason — the
-    /// case format declares no per-version restore state, and inventing one would be state no
-    /// case wrote.
+    /// Held on the object, so on the version that owns it: a retrieval that names a version changes
+    /// that version's state and no other one's.
     pub restore: Option<RestoreStatus>,
     /// The storage class the writer named, or `STANDARD`.
     pub storage_class: String,
@@ -1721,7 +1719,8 @@ fn require_object_lock(fixture: &Fixture, bucket: &str) -> Result<(), HandlerErr
     ))
 }
 
-/// The object version a lock-state read acts on: the newest one, or the one `versionId` names.
+/// The object version a lock-state read, or a restore, acts on: the newest one, or the one
+/// `versionId` names.
 ///
 /// Per-version lock state is the representation this fixture already had, not one it invents:
 /// a [`StoredVersion`] owns its [`StoredObject`], and the retention and hold live on the object.
@@ -2071,26 +2070,6 @@ fn storage_class_header(object: &StoredObject) -> Option<dto::StorageClass> {
         return None;
     }
     Some(dto::StorageClass::custom(object.storage_class.clone()))
-}
-
-/// Refuses `?versionId` on a restore rather than retrieving the current version instead.
-///
-/// The lock family's rule, for the same reason: this fixture keeps one restore state per key,
-/// because the case format declares no per-version one. Silently ignoring the parameter would
-/// report the current copy's retrieval as the named version's, and a case asserting on that would
-/// go green against a wrong answer about which bytes are readable.
-///
-/// # Errors
-///
-/// `NotImplemented` whenever the parameter is present, with a value or without.
-fn refuse_versioned_restore(version_id: Option<&str>) -> Result<(), HandlerError> {
-    if version_id.is_none() {
-        return Ok(());
-    }
-    Err(HandlerError::new(
-        ErrorCode::NOT_IMPLEMENTED,
-        "A header you provided implies functionality that is not implemented",
-    ))
 }
 
 /// The `x-amz-restore-output-path` a select-on-restore reports, built from where it asked for the
@@ -2787,7 +2766,7 @@ impl Stub {
             Selected::Absent => return Err(no_such_key(input.key.as_str())),
             Selected::Deleted(at) => return Err(deleted_by_marker(input.key.as_str(), at)),
         };
-        let wants_etag = input.object_attributes.split(',').any(|attribute| attribute.trim() == "ETag");
+        let wants_etag = input.object_attributes.iter().any(|attribute| attribute.as_str() == "ETag");
         Ok(Resp::new(dto::GetObjectAttributesOutput {
             last_modified: Some(Timestamp::from_secs(object.last_modified)),
             e_tag: wants_etag.then(|| entity_tag(&object.etag)).transpose()?,
@@ -4182,14 +4161,14 @@ impl Stub {
             )
         })?;
         require_bucket(&fixture, &input.bucket)?;
-        refuse_versioned_restore(input.version_id.as_deref())?;
         let expedited = document.glacier_job_parameters.as_ref().map(|parameters| &parameters.tier)
             == Some(&dto::Tier::EXPEDITED)
             || document.tier.as_ref() == Some(&dto::Tier::EXPEDITED);
         let expiry = fixture.restore_expiry();
-        let object = fixture
-            .object_mut(input.bucket.as_str(), input.key.as_str())
-            .ok_or_else(|| no_such_key(input.key.as_str()))?;
+        // `versionId` selects the copy whose retrieval state changes, and only that one: an id
+        // that names nothing is `NoSuchVersion` and one that names a delete marker is `405`, the
+        // same selection every other version-scoped write in this file makes.
+        let object = lock_state_of_mut(&mut fixture, input.bucket.as_str(), input.key.as_str(), input.version_id.as_deref())?;
 
         let state = if !is_archived(object) {
             RestoreState::NotArchived
@@ -4251,19 +4230,9 @@ impl Stub {
             return Ok(Resp::new(dto::SelectObjectContentOutput::default()));
         }
         let selected = select_scan_bytes(input.scan_range.as_ref(), &body);
-        let count = selected.len() as u64;
-        let mut frames = Vec::new();
-        let mut sequence = EventSequence::new();
-        sequence
-            .records(selected, &mut frames)
-            .map_err(|error| HandlerError::internal_error(error.message()))?;
-        sequence
-            .stats(&stats_document(count, count, count), &mut frames)
-            .map_err(|error| HandlerError::internal_error(error.message()))?;
-        sequence
-            .end(&mut frames)
-            .map_err(|error| HandlerError::internal_error(error.message()))?;
-        Ok(Resp::event_stream(ByteStream::from_bytes(bytes::Bytes::from(frames))))
+        // Framed lazily by the production adapter: one message per read, never the whole answer.
+        let records = ByteStream::from_bytes(bytes::Bytes::copy_from_slice(selected));
+        Ok(Resp::event_stream(frame_records(records)))
     }
 
     /// Opens a multipart upload, and records the attributes only this request can state.

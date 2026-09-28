@@ -181,7 +181,7 @@ impl OperationCodec for dto::UploadPartCopy {
         writer.open("CopyPartResult", Some(rustfs_gateway_xml::S3_XMLNS));
         {
             let v = &output.e_tag;
-            writer.element_quoting("ETag", &value::render_etag(v, EtagRender::XmlQuoted));
+            writer.element("ETag", &value::render_etag(v, EtagRender::XmlQuoted));
         }
         if let Some(v) = output.last_modified.as_ref() {
             writer.element("LastModified", &value::render_timestamp(v, TimestampFormat::Iso8601)?);

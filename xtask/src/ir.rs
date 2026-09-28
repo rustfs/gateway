@@ -70,11 +70,14 @@ pub(super) fn command(args: &[String]) -> ExitCode {
     let root = root.as_path();
     let started = Instant::now();
     let result = match args {
-        [validate] if validate == "validate" => validate_samples(root).map(|report| {
-            println!("ir.schema.json: valid (draft 2020-12)");
-            println!("samples: {} ok ({})", report.samples, SAMPLE_NAMES.join(", "));
-            println!("quirk refs: 100% resolved ({})", report.quirk_refs);
-        }),
+        [validate] if validate == "validate" => validate_samples(root)
+            .map(|report| {
+                println!("ir.schema.json: valid (draft 2020-12)");
+                println!("samples: {} ok ({})", report.samples, SAMPLE_NAMES.join(", "));
+                println!("quirk refs: 100% resolved ({})", report.quirk_refs);
+            })
+            .and_then(|()| validate_generated(root))
+            .map(|count| println!("generated: {count} ok")),
         [validate, flag, dir] if validate == "validate" && flag == "--expect-fail" => {
             negative::validate_expected_failures(root, Path::new(dir)).map(|report| {
                 println!(
@@ -122,6 +125,48 @@ fn validate_samples(root: &Path) -> Result<Report, String> {
         samples: docs.len(),
         quirk_refs,
     })
+}
+
+/// Validates every generated IR document against the schema and the semantic checks.
+///
+/// The three samples are hand-written, so the schema could drift from what codegen actually emits
+/// without any sample noticing — and it had: ten documents carried an evidence kind and one a
+/// success status the schema did not admit. Returns the number of documents checked.
+fn validate_generated(root: &Path) -> Result<usize, String> {
+    validate_ir_dir(root, &root.join("generated/ir"))
+}
+
+fn validate_ir_dir(root: &Path, dir: &Path) -> Result<usize, String> {
+    let schema = load_schema(root)?;
+    let validator = compile_schema(&schema)?;
+    let overlay = Overlay::load(&root.join("model/overlays")).map_err(|error| error.to_string())?;
+    let mut paths: Vec<PathBuf> = fs::read_dir(dir)
+        .map_err(|error| format!("{}: {error}", dir.display()))?
+        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+        .filter(|path| path.extension().is_some_and(|extension| extension == "json"))
+        .collect();
+    paths.sort();
+    if paths.is_empty() {
+        return Err(format!("{}: no IR documents to validate", dir.display()));
+    }
+    let docs = paths
+        .into_iter()
+        .map(|path| read_json(&path).map(|doc| (path, doc)))
+        .collect::<Result<Vec<(PathBuf, Value)>, String>>()?;
+    let operations = operation_names(&docs)?;
+    let mut failures = Vec::new();
+    for (path, doc) in &docs {
+        let mut diagnostics = schema_diagnostics(&validator, doc);
+        diagnostics.extend(semantic::diagnostics(doc, &operations, &overlay));
+        if !diagnostics.is_empty() {
+            failures.push(render_diagnostics(path, &diagnostics));
+        }
+    }
+    if failures.is_empty() {
+        Ok(docs.len())
+    } else {
+        Err(failures.join("\n"))
+    }
 }
 
 fn load_schema(root: &Path) -> Result<Value, String> {
@@ -313,6 +358,33 @@ mod tests {
     }
 
     #[test]
+    fn every_generated_ir_document_conforms_to_the_frozen_schema() {
+        let count = validate_generated(&root()).expect("the generated IR must satisfy the schema it is frozen against");
+        assert!(count > 3, "the generated IR set is the whole operation surface, saw {count}");
+    }
+
+    #[test]
+    fn n_a_generated_document_outside_the_schema_is_refused() {
+        let dir = std::env::temp_dir().join(format!("gateway-ir-generated-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let mut doc: Value = read_json(&root().join("generated/ir/RestoreObject.json")).expect("a generated document parses");
+        doc["http"]["success_status"] = Value::from(299);
+        std::fs::write(dir.join("RestoreObject.json"), doc.to_string()).expect("write");
+        let error = validate_ir_dir(&root(), &dir).expect_err("a status outside the enum is refused");
+        std::fs::remove_dir_all(&dir).ok();
+        assert!(error.contains("/http/success_status"), "{error}");
+    }
+
+    #[test]
+    fn n_an_empty_generated_directory_is_a_missing_input_not_a_pass() {
+        let dir = std::env::temp_dir().join(format!("gateway-ir-empty-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let error = validate_ir_dir(&root(), &dir).expect_err("nothing to validate is not a pass");
+        std::fs::remove_dir_all(&dir).ok();
+        assert!(error.contains("no IR documents"), "{error}");
+    }
+
+    #[test]
     fn c_ir_n001_through_n014_are_rejected_for_the_named_rule() {
         let report = negative::validate_expected_failures(&root(), Path::new("spec/ir/samples/invalid"))
             .expect("all negative samples must be rejected for their named rule");
@@ -358,17 +430,71 @@ mod tests {
     }
 
     #[test]
-    fn ir_version_other_than_two_gets_the_exact_const_diagnostic() {
+    fn ir_version_other_than_three_gets_the_exact_const_diagnostic() {
         let schema = load_schema(&root()).expect("schema must load");
         let validator = compile_schema(&schema).expect("schema must compile");
         let mut doc: Value =
             read_json(&root().join("spec/ir/samples/GetBucketLocation.json")).expect("positive sample must parse");
-        doc["ir_version"] = Value::String("1".to_owned());
+        for retired in ["1", "2"] {
+            doc["ir_version"] = Value::String(retired.to_owned());
+            let diagnostics = schema_diagnostics(&validator, &doc);
+            assert!(
+                diagnostics.iter().any(|diagnostic| {
+                    diagnostic.at == "/ir_version" && diagnostic.rule == "schema:#/properties/ir_version/const"
+                }),
+                "ir_version {retired} must be refused: {diagnostics:?}"
+            );
+        }
+    }
+
+    fn list_sample() -> Value {
+        read_json(&root().join("spec/ir/samples/ListObjectsV2.json")).expect("positive sample must parse")
+    }
+
+    pub(super) fn delimited_header_list(binding: &str) -> Value {
+        serde_json::json!({
+            "name": "OptionalObjectAttributes",
+            "wire_name": "x-amz-optional-object-attributes",
+            "required": false,
+            "binding": { "kind": binding },
+            "type": {
+                "kind": "List",
+                "member": { "kind": "StringEnum", "values": ["RestoreStatus"] },
+                "flattened": false,
+                "member_name": null
+            },
+            "hot": false,
+            "quirk_refs": []
+        })
+    }
+
+    #[test]
+    fn ir_v3_accepts_a_delimited_header_list() {
+        let schema = load_schema(&root()).expect("schema must load");
+        let validator = compile_schema(&schema).expect("schema must compile");
+        let mut doc = list_sample();
+        doc["input"]["fields"]
+            .as_array_mut()
+            .expect("fields")
+            .push(delimited_header_list("Header"));
+        let diagnostics = schema_diagnostics(&validator, &doc);
+        assert!(diagnostics.is_empty(), "IR v3 delimited-list diagnostics: {diagnostics:?}");
+    }
+
+    #[test]
+    fn n_ir_v3_rejects_the_retired_wrapper_name_key() {
+        let schema = load_schema(&root()).expect("schema must load");
+        let validator = compile_schema(&schema).expect("schema must compile");
+        let mut doc = list_sample();
+        let ty = doc["output"]["fields"][6]["type"].as_object_mut().expect("type is an object");
+        let value = ty.remove("member_name").expect("the v3 key is present");
+        ty.insert("wrapper_name".to_owned(), value);
         let diagnostics = schema_diagnostics(&validator, &doc);
         assert!(
-            diagnostics.iter().any(|diagnostic| {
-                diagnostic.at == "/ir_version" && diagnostic.rule == "schema:#/properties/ir_version/const"
-            })
+            diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.at == "/output/fields/6/type" && diagnostic.rule == "schema:#/$defs/type/oneOf"),
+            "the v2 spelling must not validate under v3: {diagnostics:?}"
         );
     }
 
@@ -378,7 +504,6 @@ mod tests {
         let validator = compile_schema(&schema).expect("schema must compile");
         let mut doc: Value =
             read_json(&root().join("spec/ir/samples/GetBucketLocation.json")).expect("positive sample must parse");
-        doc["ir_version"] = Value::String("2".to_owned());
         doc["input"]["fields"][0]["type"] = serde_json::json!({
             "kind": "Capability",
             "exchange": "upload_id",

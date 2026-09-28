@@ -45,6 +45,9 @@ mod isolation;
 #[path = "server_load/per_ip.rs"]
 mod per_ip;
 
+#[path = "server_load/slow_clients.rs"]
+mod slow_clients;
+
 fn plaintext_config() -> ServerConfig {
     ServerConfig {
         bind_addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
@@ -161,6 +164,14 @@ async fn run_isolated(test_name: &str) -> bool {
         report.contains("1 passed"),
         "the isolated child for {test_name} ran no test, which is not the same as passing:\n{report}"
     );
+    // The child's recorded measurements are the point of the release-only evidence cases, and a
+    // passing child's output is otherwise discarded.
+    for line in report
+        .lines()
+        .filter_map(|line| line.find("perf-evidence: ").map(|start| &line[start..]))
+    {
+        println!("{line}");
+    }
     false
 }
 

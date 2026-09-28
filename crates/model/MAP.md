@@ -42,6 +42,7 @@ overlays/quirks/*.toml    ──┘
 | `src/ir/emit.rs` | IR → JSON value, in the schema's key order. | A generated IR document's key order looks wrong. |
 | `src/lower/mod.rs` | The derivation rules that need the model, the overlay and the route at once: uri → route and target, member traits → binding and wire name, shape kinds → IR types, and the overlay-target checks. | Any question of the form "why did codegen decide *that*?" |
 | `src/lower/support.rs` | The self-contained half: uri parsing, payload discipline, empty-value policy, XML root, checksum algorithms, error-code union, and the `validate` pass. | A derived default is wrong, or an IR rule rejected your operation. |
+| `src/lower/selector_params.rs` | c-param-1003: a query parameter that both selects an operation and is its required member must record both roles — a `query_present` selector and a required IR field. | Lowering refuses an operation for a route discriminator that lost one of its two roles. |
 | `src/tests/` | Parser tests, and lowering tests against a miniature model rather than the 3 MB pinned one. | You changed a rule and want the fastest possible red. |
 
 ## The division of authority (the rule to keep)

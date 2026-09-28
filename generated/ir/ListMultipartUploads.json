@@ -1,5 +1,5 @@
 {
-  "ir_version": "2",
+  "ir_version": "3",
   "operation": "ListMultipartUploads",
   "http": {
             "method": "GET",
@@ -203,7 +203,7 @@
                                       "kind": "List",
                                       "member": { "kind": "Structure", "shape": "MultipartUpload" },
                                       "flattened": true,
-                                      "wrapper_name": null
+                                      "member_name": null
                                     },
                             "hot": true,
                             "quirk_refs": ["q-mpu-upload-0032"]
@@ -217,7 +217,7 @@
                                       "kind": "List",
                                       "member": { "kind": "Structure", "shape": "CommonPrefix" },
                                       "flattened": true,
-                                      "wrapper_name": null
+                                      "member_name": null
                                     },
                             "hot": true,
                             "quirk_refs": ["q-flat-0019"]

@@ -100,7 +100,7 @@ impl PostObjectResponsePlan {
                 writer.element("Location", &location);
                 writer.element("Bucket", &self.bucket);
                 writer.element("Key", &self.key);
-                writer.element_quoting("ETag", e_tag);
+                writer.element("ETag", e_tag);
                 encoded.status = StatusCode::CREATED;
                 encoded.set_header("content-type", "application/xml");
                 encoded.body = ResponseBody::Complete(writer.finish().into_bytes());

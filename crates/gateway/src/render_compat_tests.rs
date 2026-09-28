@@ -231,8 +231,18 @@ fn a_rendered_refusal_carries_the_client_message() {
     let trace = trace();
     for reject in every_reject() {
         let rendered = document(&from_wire_reject(reject.clone()), &trace);
+        // The message is element text, so it arrives escaped the way S3 escapes every text node
+        // (rustfs/gateway#13). Spelled out here rather than borrowed from the writer, so a writer
+        // regression cannot also move the expectation.
+        let message = reject
+            .message()
+            .replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+            .replace('"', "&quot;")
+            .replace('\'', "&apos;");
         assert!(
-            rendered.contains(&format!("<Message>{}</Message>", reject.message())),
+            rendered.contains(&format!("<Message>{message}</Message>")),
             "the document for {reject:?} does not carry its client message:\n{rendered}"
         );
     }

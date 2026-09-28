@@ -83,7 +83,7 @@ fn load(overlay_text: &str) -> crate::Result<crate::Lowered> {
     lower(&model, &overlay)
 }
 
-fn overlay_from(text: &str) -> crate::Result<Overlay> {
+pub(super) fn overlay_from(text: &str) -> crate::Result<Overlay> {
     // One directory per call: the test binary runs these in parallel threads, and a shared path
     // would make them read each other's overlay.
     static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);

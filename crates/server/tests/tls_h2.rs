@@ -390,8 +390,24 @@ async fn a_srv_0009_invalid_tls_reload_keeps_old_tls_and_never_opens_plaintext()
     assert!(task.await.expect("server task joins").is_ok());
 }
 
+std::thread_local! {
+    /// A deliberate runtime stall injected into c-lim-0062 after both half-open connections are
+    /// admitted. Thread-local so the stall control can reuse the one c-lim-0062 body the timeout
+    /// ownership guard reads, on the same thread its `#[tokio::test]` runtime runs on.
+    static C_LIM_0062_STALL: std::cell::Cell<Duration> = const { std::cell::Cell::new(Duration::ZERO) };
+}
+
+/// #886: a host stall longer than the 50ms header deadline after both half-open connections are
+/// admitted must not expire them before the third connection meets the per-IP limit.
+#[test]
+fn c_lim_0062_per_ip_half_open_limit_survives_a_scheduling_stall_before_the_third_connection() {
+    C_LIM_0062_STALL.with(|stall| stall.set(Duration::from_millis(250)));
+    c_lim_0062_a_srv_0015_per_ip_half_open_limit_and_header_deadline_recover();
+}
+
 #[tokio::test]
 async fn c_lim_0062_a_srv_0015_per_ip_half_open_limit_and_header_deadline_recover() {
+    let stall = C_LIM_0062_STALL.with(std::cell::Cell::get);
     let mut server_config = config();
     server_config.max_connections_per_ip = Some(2);
     server_config.header_read_timeout = Duration::from_millis(50);
@@ -406,19 +422,28 @@ async fn c_lim_0062_a_srv_0015_per_ip_half_open_limit_and_header_deadline_recove
         .with_tls(tls.clone())
         .serve()
         .expect("server starts");
-    let mut first = TcpStream::connect(local_addr).await.expect("first TCP connection succeeds");
-    let mut second = TcpStream::connect(local_addr).await.expect("second TCP connection succeeds");
-    let third = TcpStream::connect(local_addr)
-        .await
-        .expect("third TCP handshake reaches the listener");
-    tokio::time::timeout(Duration::from_secs(1), async {
+    // Admission is observed on a frozen fixture clock: a stall past the 50ms header deadline must
+    // not expire the two half-open connections before the third meets the per-IP limit. The clock
+    // resumes before the deadline assertions below, which still observe real expiry and recovery.
+    let (mut first, mut second, third) = crate::server_runtime::frozen_clock::with_header_clock_frozen(async {
+        let first = TcpStream::connect(local_addr).await.expect("first TCP connection succeeds");
+        let second = TcpStream::connect(local_addr).await.expect("second TCP connection succeeds");
+        while metrics.active_connections() != 2 {
+            tokio::task::yield_now().await;
+        }
+        // Blocks the whole current-thread runtime, as a descheduled test process would.
+        std::thread::sleep(stall);
+        let third = TcpStream::connect(local_addr)
+            .await
+            .expect("third TCP handshake reaches the listener");
         while metrics.per_ip_rejections() != 1 {
             tokio::task::yield_now().await;
         }
+        assert_eq!(metrics.active_connections(), 2, "both half-open connections still hold their permits");
+        assert_eq!(tls.handshake_count(), 2, "the rejected connection did not start TLS work");
+        (first, second, third)
     })
-    .await
-    .expect("third connection is rejected");
-    assert_eq!(tls.handshake_count(), 2, "the rejected connection did not start TLS work");
+    .await;
     tokio::time::timeout(Duration::from_millis(250), async {
         while metrics.active_connections() != 0 {
             tokio::task::yield_now().await;

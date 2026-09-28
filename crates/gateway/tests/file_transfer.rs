@@ -359,6 +359,77 @@ mod unix {
         assert!(running.task.await.expect("server task joins").is_ok());
     }
 
+    /// Negative control for a lost writable wakeup: a file far larger than the socket buffers,
+    /// served on a multi-thread runtime whose other workers consume readiness events concurrently,
+    /// finishes inside a write-progress deadline it never needs to reach.
+    ///
+    /// A partial `sendfile` that ended in `EAGAIN` used to probe the socket's writable level and
+    /// then discard the answer when it recorded its own progress. If another worker had consumed
+    /// the writable edge in between, nothing woke the transfer again and the write-progress
+    /// deadline closed a connection that was draining at full speed: a 1 GiB response stopped
+    /// after 2.6 MB on Linux and after 0.3 MB on macOS. A current-thread runtime never showed it,
+    /// because its only worker cannot consume an edge while it is also running the transfer.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn production_driver_finishes_a_large_file_on_a_multi_thread_runtime() {
+        const LEN: usize = 64 * 1024 * 1024;
+        let fixture_bytes: Vec<u8> = (0..LEN).map(|index| (index % 251) as u8).collect();
+        let fixture = FixtureFile::new(&fixture_bytes);
+        let service = FileService {
+            path: Arc::clone(&fixture.path),
+            offset: 0,
+            len: LEN as u64,
+            metrics: Arc::new(StreamMetrics::new()),
+        };
+        let config = ServerConfig {
+            bind_addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
+            plaintext: true,
+            tcp_nodelay: true,
+            write_progress_timeout: Duration::from_secs(2),
+            so_sndbuf: Some(64 * 1024),
+            ..ServerConfig::default()
+        };
+        let transport_metrics = Arc::new(ResponseTransportMetrics::new());
+        let running = Server::new(config, service)
+            .serve_with(SelfHeldHttp1Driver::with_metrics(Arc::clone(&transport_metrics)))
+            .expect("self-held server starts");
+        // Small buffers on both ends make the kernel refuse a send often, so the transfer crosses
+        // the `EAGAIN` path thousands of times instead of a handful.
+        let socket = tokio::net::TcpSocket::new_v4().expect("a v4 socket");
+        socket
+            .set_recv_buffer_size(64 * 1024)
+            .expect("the receive buffer is settable");
+        let mut client = socket.connect(running.local_addr).await.expect("client connects");
+        client
+            .write_all(b"GET /file HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+            .await
+            .expect("request writes");
+        let mut response = Vec::with_capacity(LEN + 512);
+        let mut chunk = vec![0_u8; 16 * 1024];
+        tokio::time::timeout(Duration::from_secs(60), async {
+            loop {
+                let read = client.read(&mut chunk).await.expect("the response reads");
+                if read == 0 {
+                    break;
+                }
+                response.extend_from_slice(&chunk[..read]);
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("the response closes inside the outer test bound");
+        let separator = response
+            .windows(4)
+            .position(|window| window == b"\r\n\r\n")
+            .expect("response contains a head terminator");
+        let body = response.get(separator + 4..).expect("response body follows its terminator");
+        assert_eq!(body.len(), LEN, "the write-progress deadline cut a transfer that was still draining");
+        assert!(body == fixture_bytes.as_slice(), "the transferred bytes are the fixture's");
+        assert_eq!(transport_metrics.kernel_transferred_bytes(), LEN as u64);
+        assert_eq!(transport_metrics.copied_payload_bytes(), 0);
+        let _ = running.shutdown.trigger(Duration::from_secs(1)).await;
+        assert!(running.task.await.expect("server task joins").is_ok());
+    }
+
     #[cfg(not(debug_assertions))]
     #[tokio::test]
     async fn release_sample_reports_warm_file_handoff_amplification() {

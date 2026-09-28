@@ -68,6 +68,7 @@ Agent entry point for operations, routing, codecs, authorization state and handl
 | `src/cors/` | CORS rule and response primitives. | CORS semantics change. |
 | `src/sse/` | Server-side encryption proof, bounded KMS context JSON validation and rejection types. | SSE headers or key handling change. |
 | `tests/route_table.rs` | Route-table positive/negative matrix. | Any route row changes. |
+| `tests/selector_required_params.rs` | c-param-1003 on `GetBucketAnalyticsConfiguration`: `id` routes to the read (listing without it) and the read decoded without it is a static 400. | A parameter is both a route discriminator and a required member. |
 | `tests/dialect_claims.rs` | What a claim captures, templates, aliases, typed values, the secret opt-in default. | A claim captures too much or too little. |
 | `tests/dialect_claims_refusals.rs` | Every claim, template and claimed-row refusal, one variant each. | A claimed-route refusal changes. |
 | `tests/route_sizes.rs` | Independent compile-time size ceiling for the copied hot-path bucket. | The compiled router's bucket layout changes. |
@@ -84,5 +85,8 @@ Agent entry point for operations, routing, codecs, authorization state and handl
 | `tests/security_request_policy.rs` | Unknown-element refusal for every security configuration PUT (allow-registered write policy). | A security PUT starts accepting, or stops refusing, an unregistered element. |
 | `tests/purity_guard.rs` | Source-shape guards for pre-auth code. | Add public/core routing code. |
 | `tests/xml_parse_replay.rs` | Replays `fuzz/seeds/xml_parse/` and 40,000 fixed-seed samples through the `xml_parse` property over `rustfs-gateway-xml`'s bounded reader. | Change an XML ceiling or refusal, or add a minimised fuzz regression seed. |
+| `tests/select_records_framing.rs` | `EventSequence::records` splitting a payload past the one-message ceiling into consecutive frames, still refused out of phase. | Change `EventSequence::records` or `MAX_PAYLOAD_BYTES`. |
+| `tests/event_stream_frame_replay.rs` | Replays `fuzz/seeds/event_stream_frame/`, every four-call sequence script and fixed-seed scripts through the `event_stream_frame` property: production framing and `EventSequence` held to an independent CRC, frame reader and sequence model. | Change event-stream framing, a header or payload ceiling, or the sequence order. |
 | `tests/policy_json_replay.rs` | Replays `fuzz/seeds/policy_json/` and 20,000 fixed-seed samples through the `policy_json` property: the `PutBucketPolicy` codec and `validate_policy` held to a strict duplicate-aware JSON reader. | Change a bucket policy check or ceiling, or add a minimised fuzz regression seed. |
+| `tests/restore_header_replay.rs` | Replays the Restore header grammar and calendar boundaries fuzz property on stable. | Restore header parsing or formatting changes. |
 | `tests/golden/route-table.txt` | Protected ordered route table. | Never edit without the Breaking Change process. |

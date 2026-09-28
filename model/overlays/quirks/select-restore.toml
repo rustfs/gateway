@@ -314,7 +314,7 @@ mutation_dimension = "restore_version_selector"
 contract_value = "preserve"
 target  = "RestoreObject.VersionId"
 summary = "versionId selects which version of the object is retrieved, so it is decoded and carried to the handler rather than dropped: a backend that ignored it would retrieve the current version and report success for a request about another one, which is indistinguishable from having honoured it."
-cases   = ["c-select-restore-0018"]
+cases   = ["c-select-restore-0018", "c-select-restore-0050", "c-select-restore-0051"]
 
   [[quirk.evidence]]
   kind    = "aws-doc"

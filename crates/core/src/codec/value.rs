@@ -446,6 +446,19 @@ pub fn text_payload(value: &[u8], member: &'static str) -> Result<String, CodecE
     }
 }
 
+/// Splits a comma-delimited list header into its elements.
+///
+/// RFC 9110 section 5.6.1 list syntax: elements are separated by commas with optional whitespace
+/// around each, and empty elements do not count. Repeated field lines arrive here already joined
+/// with a comma by the header view, so they read as one list. An element is not otherwise
+/// interpreted: the caller turns each into the member type the IR declares.
+pub fn header_list(value: &str) -> impl Iterator<Item = &str> {
+    value
+        .split(',')
+        .map(|element| element.trim_matches([' ', '\t']))
+        .filter(|element| !element.is_empty())
+}
+
 /// Wraps a value that is round-tripped byte for byte and never parsed.
 #[must_use]
 pub fn opaque(value: &str) -> OpaqueString {

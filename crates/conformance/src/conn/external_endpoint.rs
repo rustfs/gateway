@@ -465,34 +465,56 @@ mod tests {
         assert_eq!(calls.load(Ordering::SeqCst), 2, "only the stalled and recovery jobs may start");
     }
 
+    /// The DNS time and the TLS handshake share one setup deadline. Observed directly: the deadline
+    /// the connector is handed must not lie past the caller's, which no host load can blur. The
+    /// silent peer holds its socket until the client has given up, so a handshake that ignored its
+    /// deadline would hang into the watchdog rather than end on the peer's close.
     #[test]
     fn dns_time_is_not_granted_again_to_a_stalled_tls_handshake() {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind silent TLS peer");
         let address = listener.local_addr().expect("silent TLS address");
+        let (release, released) = mpsc::channel::<()>();
         let server = thread::spawn(move || {
             let (_socket, _) = listener.accept().expect("accept TLS client");
-            thread::sleep(Duration::from_millis(250));
+            let _ = released.recv();
         });
-        let endpoint = ExternalEndpoint::parse("https://shared-budget.invalid:443").expect("valid endpoint syntax");
         let started = Instant::now();
         let deadline = started + Duration::from_millis(100);
+        let handed = Arc::new(Mutex::new(Vec::new()));
+        let seen = Arc::clone(&handed);
+        let (finished, outcome) = mpsc::channel();
+        let client = thread::spawn(move || {
+            let endpoint = ExternalEndpoint::parse("https://shared-budget.invalid:443").expect("valid endpoint syntax");
+            let opened = endpoint.open_with(
+                deadline,
+                move |_| {
+                    thread::sleep(Duration::from_millis(60));
+                    Ok(vec![address])
+                },
+                move |transport, address, attempt_deadline| {
+                    seen.lock().expect("deadline record").push(attempt_deadline);
+                    transport.open(address, attempt_deadline)
+                },
+            );
+            let _ = finished.send((opened.is_err(), started.elapsed()));
+        });
 
-        let opened = endpoint.open_with(
-            deadline,
-            move |_| {
-                thread::sleep(Duration::from_millis(60));
-                Ok(vec![address])
-            },
-            |transport, address, attempt_deadline| transport.open(address, attempt_deadline),
-        );
-        let elapsed = started.elapsed();
+        let finished = outcome.recv_timeout(Duration::from_secs(5));
+        let _ = release.send(());
         server.join().expect("silent TLS peer exits");
+        client.join().expect("client exits");
+        let (failed, elapsed) = finished.expect("the stalled TLS handshake honoured its setup deadline");
+        let handed = handed.lock().expect("deadline record").clone();
 
-        assert!(opened.is_err(), "the TLS handshake must consume the same setup budget as DNS");
-        assert!(elapsed >= Duration::from_millis(95));
+        assert!(failed, "the TLS handshake must consume the same setup budget as DNS");
+        assert_eq!(handed.len(), 1, "one address, one connection attempt: {handed:?}");
         assert!(
-            elapsed < Duration::from_millis(135),
-            "the setup budget was restarted after DNS: {elapsed:?}"
+            handed.iter().all(|attempt| *attempt <= deadline),
+            "the setup budget was restarted after DNS: attempt deadlines {handed:?} past {deadline:?}"
+        );
+        assert!(
+            elapsed >= Duration::from_millis(95),
+            "the handshake gave up before its deadline: {elapsed:?}"
         );
     }
 }

@@ -15,6 +15,8 @@
 # operation the client needs, or admits it too narrowly. None of them is a client sending something
 # S3 does not define. The two dispositions are completely different, so the distinction is recorded
 # rather than left to be re-derived.
+# Where a client does something the model does not require a server to accept, or the refusal is a
+# deliberate default posture, the entry's own comment says so and its issue asks for the decision.
 
 # The reference backend registers no GetBucketLocation, and minio-go asks a server for a bucket's
 # region before it touches an object unless one is configured. mc has no region setting, so all
@@ -37,3 +39,18 @@ boto3/presigned-put          rustfs/gateway#628  presigned PUT is not an admitte
 # rclone stamps a modification time by copying an object onto itself, and CopyObject is not
 # registered. The first mirror succeeds; every rerun fails and rclone then stops converging.
 rclone/sync-directory        rustfs/gateway#629  CopyObject is not registered
+
+# s3cmd preserves the source ACL on `cp` by writing it back with PutObjectAcl, and sends that body
+# with no Content-MD5 or x-amz-checksum-*. The model marks PutObjectAcl checksum-required and the
+# gateway enforces it; RustFS behind s3s answers the same request today.
+s3cmd/copy-object            rustfs/gateway#912  PutObjectAcl without Content-MD5 is refused
+# s3cmd signurl produces a SigV2 presigned URL, which the default SigV2Policy::HeaderOnly refuses.
+s3cmd/presigned-get          rustfs/gateway#913  presigned SigV2 is refused under the default policy
+
+# aws-sdk-dotnet percent-encodes the whole x-amz-copy-source, bucket/key separator included, and
+# the gateway looks for the separator before decoding.
+aws-sdk-dotnet/copy-object   rustfs/gateway#926  an encoded bucket/key separator in x-amz-copy-source is refused
+
+# aws-sdk-java-v2's multipart client carries each part's CRC32 in a trailer; UploadPart only reads a
+# part checksum from request headers, so a composite-checksum upload refuses every part.
+aws-sdk-java-v2/large-multipart-upload  rustfs/gateway#929  a part checksum carried in a trailer is ignored

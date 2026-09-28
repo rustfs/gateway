@@ -26,6 +26,8 @@ mod bucket_lifecycle;
 mod copy_family;
 #[path = "corpus.rs"]
 mod corpus;
+#[path = "corpus_drafts.rs"]
+mod corpus_drafts;
 #[path = "domain_wiring.rs"]
 mod domain_wiring;
 #[path = "encryption_blocked_types.rs"]

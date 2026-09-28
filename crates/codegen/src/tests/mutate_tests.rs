@@ -82,10 +82,10 @@ fn a_boolean_rule_is_flipped_and_a_list_shape_follows_it() {
         Some("Rules"),
         "the wrapped mutant needs the list wrapper name"
     );
-    let rustfs_gateway_model::ir::Type::List { wrapper_name, .. } = &rules.ty else {
+    let rustfs_gateway_model::ir::Type::List { member_name, .. } = &rules.ty else {
         panic!("the mutated Rules field is still a list");
     };
-    assert_eq!(wrapper_name.as_deref(), Some("Rule"), "the wrapped mutant keeps the entry name");
+    assert_eq!(member_name.as_deref(), Some("Rule"), "the wrapped mutant keeps the entry name");
 }
 
 #[test]
@@ -109,13 +109,13 @@ fn a_wrapped_list_mutant_repeats_the_original_entry_name() {
         "the flattened mutant repeats the entry name"
     );
     let rustfs_gateway_model::ir::Type::List {
-        flattened, wrapper_name, ..
+        flattened, member_name, ..
     } = &buckets.ty
     else {
         panic!("the mutated Buckets field is still a list");
     };
     assert!(*flattened, "the mutant is flattened");
-    assert!(wrapper_name.is_none(), "a flattened mutant has no wrapper entry metadata");
+    assert!(member_name.is_none(), "a flattened mutant has no wrapper entry metadata");
 }
 
 #[test]

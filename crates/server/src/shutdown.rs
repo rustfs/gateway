@@ -70,6 +70,7 @@ pub(crate) struct MetricsInner {
     pub(crate) accepted: AtomicUsize,
     pub(crate) active: AtomicUsize,
     pub(crate) per_ip_rejected: AtomicUsize,
+    pub(crate) accept_errors: AtomicUsize,
     /// Shared with every connection's `ProgressIo`, which is where the octets are discarded.
     pub(crate) lingering_drained: Arc<AtomicU64>,
     /// Shared with every connection's `ProgressIo`; counts every octet it reads, drain included.
@@ -93,6 +94,14 @@ impl ServerMetrics {
     #[must_use]
     pub fn per_ip_rejections(&self) -> usize {
         self.inner.per_ip_rejected.load(Ordering::Relaxed)
+    }
+
+    /// Number of failed `accept` calls the listener survived: connections that failed while
+    /// queued, accepted sockets with no usable peer address, and descriptor or memory shortages
+    /// it waited out. A failure that ends the listener is returned by the server task instead.
+    #[must_use]
+    pub fn accept_errors(&self) -> usize {
+        self.inner.accept_errors.load(Ordering::Relaxed)
     }
 
     /// Octets read and discarded by the lingering close, summed over every connection.

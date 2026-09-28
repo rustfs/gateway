@@ -1,5 +1,5 @@
 {
-  "ir_version": "2",
+  "ir_version": "3",
   "operation": "GetBucketOwnershipControls",
   "http": {
             "method": "GET",
@@ -76,7 +76,7 @@
                                                                          "shape": "OwnershipControlsRule"
                                                                        },
                                                              "flattened": true,
-                                                             "wrapper_name": null
+                                                             "member_name": null
                                                            },
                                                    "hot": false,
                                                    "quirk_refs": []

@@ -345,14 +345,32 @@ impl EventSequence {
         matches!(self.phase, Phase::Terminated)
     }
 
-    /// Appends a `Records` frame.
+    /// Appends `payload` as `Records` frames.
+    ///
+    /// A payload past [`MAX_PAYLOAD_BYTES`] is split into consecutive frames of at most that
+    /// many bytes, in order, so the concatenated `Records` payloads are exactly `payload`. Records
+    /// are an opaque byte run to the client, which reassembles them across frames; the split
+    /// therefore needs no record boundary. An empty payload is still one empty frame.
     ///
     /// # Errors
     ///
-    /// [`EventStreamError::OutOfOrder`] once the accounting has been sent, and
-    /// [`EventStreamError::PayloadTooLarge`] for a chunk past [`MAX_PAYLOAD_BYTES`].
+    /// [`EventStreamError::OutOfOrder`] once the accounting has been sent; nothing is appended.
     pub fn records(&mut self, payload: &[u8], out: &mut Vec<u8>) -> Result<(), EventStreamError> {
-        self.scanning_event(EventKind::Records, payload, out)
+        if payload.len() <= MAX_PAYLOAD_BYTES {
+            return self.scanning_event(EventKind::Records, payload, out);
+        }
+        if self.phase != Phase::Scanning {
+            return Err(EventStreamError::OutOfOrder);
+        }
+        let start = out.len();
+        for chunk in payload.chunks(MAX_PAYLOAD_BYTES) {
+            if let Err(error) = encode_event(EventKind::Records, chunk, out) {
+                // Unreachable for a chunk within the ceiling; kept atomic all the same.
+                out.truncate(start);
+                return Err(error);
+            }
+        }
+        Ok(())
     }
 
     /// Appends a `Progress` frame.

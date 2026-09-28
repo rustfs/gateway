@@ -238,10 +238,13 @@ pub fn type_name(ty: &Type) -> String {
         Type::List {
             member,
             flattened,
-            wrapper_name,
+            member_name,
         } => {
-            let wrapper = wrapper_name.as_deref().unwrap_or("-");
-            let shape = if *flattened { "flattened" } else { wrapper };
+            let shape = match (flattened, member_name.as_deref()) {
+                (true, _) => "flattened",
+                (false, Some(entry)) => entry,
+                (false, None) => "delimited",
+            };
             format!("List<{}>({shape})", type_name(member))
         }
         Type::Map { key, value } => format!("Map<{}, {}>", type_name(key), type_name(value)),

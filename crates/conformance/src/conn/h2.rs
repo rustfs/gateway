@@ -337,8 +337,7 @@ impl Conn {
         }
         // Nothing an HTTP/1.1 exchange left open can carry HTTP/2 frames.
         self.connection = None;
-        let addr = self.addr(at_unix_seconds, skew_ms, plan.profile)?;
-        execute_inner(addr, &script, deadline, None)
+        execute_started(|| self.addr(at_unix_seconds, skew_ms, plan.profile), &script, deadline, None)
     }
 
     fn require_h2_driver(&self) -> Result<(), SutError> {
@@ -460,14 +459,30 @@ fn execute_paced(
     execute_inner(addr, script, Instant::now() + budget, Some(sleep))
 }
 
+#[cfg(test)]
 fn execute_inner(
     addr: SocketAddr,
     script: &Script,
     deadline: Instant,
     sleep: Option<&mut dyn FnMut(Duration)>,
 ) -> Result<Observation, SutError> {
+    execute_started(|| Ok(addr), script, deadline, sleep)
+}
+
+/// Starts the peer with `start`, then runs the script against the address it returns.
+///
+/// Starting a lazily assembled listener is the harness's own setup, so it is paced: it extends
+/// the deadline by exactly the time it took and is reported as harness waiting, never charged to
+/// the target the case is timing.
+fn execute_started(
+    start: impl FnOnce() -> Result<SocketAddr, SutError>,
+    script: &Script,
+    deadline: Instant,
+    sleep: Option<&mut dyn FnMut(Duration)>,
+) -> Result<Observation, SutError> {
+    let mut clock = ExchangeClock::until(deadline);
+    let addr = clock.paced(start)?;
     let started = Instant::now();
-    let clock = ExchangeClock::until(deadline);
     let connection = Connection::open_before(addr, clock.deadline)?;
     execute_on(connection, script, clock, started, sleep)
 }

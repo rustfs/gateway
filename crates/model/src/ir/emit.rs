@@ -212,12 +212,12 @@ fn ty(t: &Type) -> Value {
         Type::List {
             member,
             flattened,
-            wrapper_name,
+            member_name,
         } => Value::object([
             ("kind".into(), s("List")),
             ("member".into(), ty(member)),
             ("flattened".into(), Value::Bool(*flattened)),
-            ("wrapper_name".into(), opt_string(wrapper_name)),
+            ("member_name".into(), opt_string(member_name)),
         ]),
         Type::Map { key, value } => Value::object([
             ("kind".into(), s("Map")),
