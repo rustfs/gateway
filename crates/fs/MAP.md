@@ -35,6 +35,7 @@ Agent entry point. File → responsibility → when you need to open it.
 | `tests/crud/conditional_requests.rs` | `If-Match`, `If-None-Match`, `If-Modified-Since`, `If-Unmodified-Since` on `GET`/`HEAD` (`412`, `304` with validators and no body, evaluated before a miss), conditional `PUT` writing nothing on a false condition, and sixteen racing `If-None-Match: *` writers with one winner. | Changing conditional requests. |
 | `tests/crud/range_reads.rs` | Ranged `GET`/`HEAD` boundaries: suffix, clamp, single byte, `416`, multi-range, `If-Range`, `partNumber` conflict. | Changing ranged reads or their wire headers. |
 | `tests/crud/lifecycle.rs` | Full-rule lifecycle replacement, restart, validation, deletion, and storage-boundary evidence. | Changing lifecycle configuration behavior or its durable authority. |
+| `tests/crud/lifecycle_rustfs_rules.rs` | RustFS's lifecycle write rules: `Status` exactly `Enabled`/`Disabled` else `MalformedXML`; generated `rule-<index>` ids. | Changing lifecycle write validation. |
 | `tests/crud/lifecycle_expiration.rs` | Debug-day, version-aware expiration, selection, and preflight evidence. | Changing lifecycle execution or its fail-closed boundaries. |
 | `tests/crud/lifecycle_scheduler.rs` | Automatic cadence and scheduler shutdown evidence. | Changing lifecycle worker startup, recovery, or shutdown. |
 | `tests/crud/lifecycle_transitions.rs` | Transition due-time, size-default, restart, projection, and preflight evidence. | Changing current-object transition execution. |

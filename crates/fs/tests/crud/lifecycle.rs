@@ -29,10 +29,10 @@ const DOCUMENT: &str = concat!(
     "<NoncurrentVersionExpiration><NoncurrentDays>5</NoncurrentDays><NewerNoncurrentVersions>2</NewerNoncurrentVersions>",
     "</NoncurrentVersionExpiration><AbortIncompleteMultipartUpload><DaysAfterInitiation>3</DaysAfterInitiation>",
     "</AbortIncompleteMultipartUpload></Rule><Rule><Expiration><ExpiredObjectDeleteMarker>true",
-    "</ExpiredObjectDeleteMarker></Expiration><ID>future</ID><Prefix>tmp/</Prefix><Status>FutureStatus</Status></Rule>",
+    "</ExpiredObjectDeleteMarker></Expiration><ID>future</ID><Prefix>tmp/</Prefix><Status>Disabled</Status></Rule>",
     "</LifecycleConfiguration>"
 );
-const DOCUMENT_MD5: &str = "tIEM82gaJ/Vgx2lc8ZtHvg==";
+const DOCUMENT_MD5: &str = "I2bt5DeWnoSXxCWGk37M8Q==";
 
 fn lifecycle_headers() -> http::HeaderMap {
     let mut headers = http::HeaderMap::new();
@@ -97,7 +97,7 @@ async fn lifecycle_configuration_round_trips_and_survives_restart() {
         "<NewerNoncurrentVersions>2</NewerNoncurrentVersions>",
         "<DaysAfterInitiation>3</DaysAfterInitiation>",
         "<ExpiredObjectDeleteMarker>true</ExpiredObjectDeleteMarker>",
-        "<Status>FutureStatus</Status>",
+        "<Status>Disabled</Status>",
     ] {
         assert!(body.contains(member), "missing {member} in {body}");
     }
