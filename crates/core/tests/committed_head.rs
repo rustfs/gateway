@@ -59,7 +59,7 @@ fn a_bound_operation_header_survives_into_the_committed_answer() {
     let head = HeadPart::<CompleteMultipartUpload>::new(header(name.clone(), "version-1")).expect("a bound header");
     let response =
         Resp::<CompleteMultipartUpload>::commit(head, Box::pin(async { Ok(CompleteMultipartUploadOutput::default()) }));
-    let (Answer::Committed(committed), status) = response.into_parts() else {
+    let (Answer::Committed(committed), status, _) = response.into_parts() else {
         panic!("the committed constructor returned another answer shape");
     };
     assert_eq!(status, 200);

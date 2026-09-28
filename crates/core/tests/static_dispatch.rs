@@ -230,7 +230,7 @@ async fn mapping_a_commit_replaces_the_work_and_keeps_the_committed_status() {
     });
     assert_eq!(response.status(), 206);
     assert!(response.is_committed());
-    let (answer, _status) = response.into_parts();
+    let (answer, _status, _extra_headers) = response.into_parts();
     let rustfs_gateway_core::Answer::Committed(committed) = answer else {
         panic!("a committed answer stopped being one");
     };

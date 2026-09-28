@@ -678,6 +678,7 @@ gateway_modules = (
     "dialect_claims_runtime",
     "dialect_entry",
     "error_context_filters",
+    "extra_response_headers",
     "facade_probe",
     "file_responses",
     "file_transfer",

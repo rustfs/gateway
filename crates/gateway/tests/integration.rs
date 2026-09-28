@@ -66,6 +66,8 @@ mod dialect_claims_runtime;
 mod dialect_entry;
 #[path = "error_context_filters.rs"]
 mod error_context_filters;
+#[path = "extra_response_headers.rs"]
+mod extra_response_headers;
 #[path = "facade_probe.rs"]
 mod facade_probe;
 #[path = "file_responses.rs"]
