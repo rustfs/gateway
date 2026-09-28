@@ -181,6 +181,62 @@ async fn n_the_relaxed_posture_refuses_everything_strict_refuses_but_the_spellin
     }
 }
 
+/// The backend assembled with the constraint-ignoring RustFS posture (rustfs/gateway#914).
+fn ignoring_service(root: &TestRoot, region: &str) -> (Arc<FsBackend>, S3Service) {
+    let backend = FsBackend::open_with_clock(&root.0, Arc::new(FixedClock::at_unix_seconds(SIGNED_AT_SECONDS)))
+        .expect("a usable test root")
+        .with_region(region)
+        .expect("a region the model names")
+        .with_region_match_policy(RegionMatchPolicy::IgnoreConstraint);
+    service_with_backend(Arc::new(backend))
+}
+
+/// Positive — under the ignoring posture any constraint creates the bucket, as RustFS does.
+#[tokio::test]
+async fn any_constraint_creates_the_bucket_when_the_backend_ignores_it() {
+    let root = TestRoot::new();
+    let (_backend, service) = ignoring_service(&root, "us-east-1");
+    for (bucket, constraint) in [
+        ("loc-any-home", "us-east-1"),
+        ("loc-any-away", "eu-west-1"),
+        ("loc-any-junk", "mars-north-1"),
+    ] {
+        let response = create_with(&service, bucket, configuration(constraint)).await;
+        assert_eq!(response.status(), 200, "{constraint}: {}", String::from_utf8_lossy(response.body()));
+    }
+}
+
+/// Negative — an ignored constraint does not move the bucket: it is reported in the served region,
+/// in both directions, never in the region the creation named.
+#[tokio::test]
+async fn n_an_ignored_constraint_does_not_move_the_bucket() {
+    let home = TestRoot::new();
+    let (_home_backend, home_service) = ignoring_service(&home, "us-east-1");
+    assert_eq!(
+        create_with(&home_service, "loc-stays-home", configuration("eu-west-1"))
+            .await
+            .status(),
+        200
+    );
+    assert_eq!(
+        String::from_utf8_lossy(location(&home_service, "loc-stays-home").await.body()),
+        EMPTY_CONSTRAINT
+    );
+
+    let away = TestRoot::new();
+    let (_away_backend, away_service) = ignoring_service(&away, "eu-west-1");
+    assert_eq!(
+        create_with(&away_service, "loc-stays-away", configuration("us-east-1"))
+            .await
+            .status(),
+        200
+    );
+    assert_eq!(
+        String::from_utf8_lossy(location(&away_service, "loc-stays-away").await.body()),
+        named_constraint("eu-west-1")
+    );
+}
+
 /// Negative — a region the deployment does not serve is refused, and leaves no bucket behind.
 ///
 /// The second half is the part a late check gets wrong. A constraint judged after the directories

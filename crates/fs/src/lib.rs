@@ -258,9 +258,9 @@ impl FsBackend {
     /// Matches a `CreateBucket`'s `LocationConstraint` under `policy` instead of the operation's
     /// default [`REGION_MATCH_POLICY`].
     ///
-    /// The served region is unchanged: a relaxed posture accepts another spelling of it, never
-    /// another region. The RustFS-profile launcher uses
-    /// [`RegionMatchPolicy::AcceptExplicitUsEast1`] (rustfs/gateway#914).
+    /// The served region is unchanged: a relaxed posture accepts another spelling of it or
+    /// discards the constraint, and never creates a bucket in another region. The RustFS-profile
+    /// launcher uses [`RegionMatchPolicy::IgnoreConstraint`] (rustfs/gateway#914).
     #[must_use]
     pub const fn with_region_match_policy(mut self, policy: RegionMatchPolicy) -> Self {
         self.region_match_policy = policy;
