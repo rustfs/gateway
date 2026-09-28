@@ -421,6 +421,11 @@ nothing at all, and the file was a list of excuses wearing the shape of a table 
 It also left the hole rustfs/gateway#203 and #214 both fell into — a domain that stops executing
 turns into skips, and skips were free.
 
+The in-process target that the gate runs cannot execute an authored HTTP/2 frame script and refuses
+it by name. Recorded as `skipped`, every such row would be a ratchet that cannot fail, so the gate
+re-runs exactly those refused cases on the production Hyper driver, the transport `conformance
+baseline` itself uses, and their rows are measured verdicts.
+
 Refreshing it:
 
 ```bash

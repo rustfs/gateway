@@ -46,6 +46,7 @@ use crate::nested_cargo::without_package_environment;
 use crate::{catalog, codegen};
 
 const GATEWAY_RSS_TEST: &str = "cors_runtime::a_million_unique_keys_keep_rss_within_the_entry_budget";
+const GATEWAY_ADDRESS_TABLE_TEST: &str = "ext::governor::allocation_tests::c_gov_0013_a_million_addresses_do_not_grow_memory";
 
 #[cfg(not(feature = "full"))]
 pub(crate) fn is_available_request(args: &[String]) -> bool {
@@ -133,7 +134,12 @@ fn crate_step_batches(package: &str) -> Vec<Vec<Vec<String>>> {
     let mut steps = crate_steps(package);
     if package == "rustfs-gateway" {
         let mut test = steps.remove(0);
-        test.extend(["--skip".to_owned(), GATEWAY_RSS_TEST.to_owned()]);
+        test.extend([
+            "--skip".to_owned(),
+            GATEWAY_RSS_TEST.to_owned(),
+            "--skip".to_owned(),
+            GATEWAY_ADDRESS_TABLE_TEST.to_owned(),
+        ]);
         let clippy = steps.remove(0);
         return vec![vec![test, clippy]];
     }

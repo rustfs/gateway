@@ -1,0 +1,111 @@
+name: Perf evidence
+
+# ---------------------------------------------------------------------------
+# WHAT THIS JOB DOES
+#
+#   Runs the release-only evidence cases that measure what large transfers and
+#   slow clients actually cost, and records the numbers:
+#
+#   - crates/gateway/tests/perf_evidence.rs: a 1 GiB GET over the self-held
+#     driver under `strace -f` (every body byte returned by sendfile, heads
+#     only through write-family syscalls, resident peak growth), the same GET
+#     forced onto the copy path as the control, and a 1 GiB PUT over both
+#     drivers (allocator bytes and resident peak).
+#   - crates/server/tests/server_load/slow_clients.rs: a healthy client's p99
+#     beside a hundred slow clients that keep progressing, against a lock-step
+#     control listener.
+#
+#   Syscall, allocator and memory assertions block. Elapsed time and p99 are
+#   printed as records; the p99 assertion is a generous regression gate
+#   (median of five paired rounds <= 2 x control), and that median against the 20% target is a
+#   printed field, because a shared runner cannot hold a tighter wall-clock
+#   bound still.
+#
+# WHY NOT THE PR GATE
+#
+#   The cases need a release build and move several gibibytes; together they
+#   would cost more than the whole ten-minute PR budget. They are compiled out
+#   of debug builds, so `cargo test --workspace` never runs them.
+# ---------------------------------------------------------------------------
+
+on:
+  schedule:
+    # Daily, 04:00 UTC.
+    - cron: "0 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: perf-evidence
+  cancel-in-progress: false
+
+jobs:
+  evidence:
+    name: Release perf evidence
+    runs-on: sm-standard-4
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # pinned action revision
+        with:
+          toolchain: 1.97.1
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Install host tools
+        run: bash scripts/ci_install_host_tools.sh
+      - name: Install strace
+        run: |
+          set -euo pipefail
+          if ! command -v strace >/dev/null 2>&1; then
+            if [ "$(id -u)" -eq 0 ]; then apt=(apt-get); else apt=(sudo -n apt-get); fi
+            "${apt[@]}" update -qq
+            DEBIAN_FRONTEND=noninteractive "${apt[@]}" install -y -qq strace
+          fi
+          strace -V | head -1
+      - name: Record the host
+        run: |
+          set -euo pipefail
+          {
+            echo "## Host"
+            echo '```'
+            uname -srm
+            nproc
+            lscpu | grep -E '^(Model name|Architecture|CPU\(s\)|Thread|Core|Socket)' || true
+            free -m | head -2
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Build release test binaries
+        run: |
+          cargo test --release -p rustfs-gateway --test integration --no-run
+          cargo test --release -p rustfs-gateway-server --test integration --no-run
+      - name: 1 GiB transfers
+        env:
+          RUSTFS_GATEWAY_PERF_EVIDENCE_REQUIRE_STRACE: "1"
+        run: |
+          set -euo pipefail
+          cargo test --release -p rustfs-gateway --test integration perf_evidence -- --nocapture --test-threads 1 2>&1 \
+            | tee "$RUNNER_TEMP/transfers.log"
+      - name: Slow-client p99
+        run: |
+          set -euo pipefail
+          cargo test --release -p rustfs-gateway-server --test integration slow_clients -- --nocapture --test-threads 1 2>&1 \
+            | tee "$RUNNER_TEMP/slow-clients.log"
+      - name: Summarise
+        if: always()
+        run: |
+          {
+            echo "## Observations"
+            echo '```'
+            cat "$RUNNER_TEMP"/transfers.log "$RUNNER_TEMP"/slow-clients.log 2>/dev/null | grep -oE '(perf-evidence: |SKIP ).*' || echo "no observation was printed"
+            echo '```'
+          } >>"$GITHUB_STEP_SUMMARY"
+      - name: Upload the logs
+        if: always()
+        uses: actions/upload-artifact@6f51ac03b9356f520e9adb1b1b7802705f340c2b # v4.5.0
+        with:
+          name: perf-evidence-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/transfers.log
+            ${{ runner.temp }}/slow-clients.log
+          if-no-files-found: warn

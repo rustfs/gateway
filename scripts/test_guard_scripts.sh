@@ -2240,7 +2240,7 @@ from pathlib import Path
 
 path = Path("xtask/src/verify.rs")
 text = path.read_text()
-old = '    test.extend(["--skip".to_owned(), GATEWAY_RSS_TEST.to_owned()]);'
+old = '            "--skip".to_owned(),\n            GATEWAY_RSS_TEST.to_owned(),\n'
 new = ""
 if text.count(old) != 1:
     raise SystemExit("gateway RSS fast-scope exclusion is missing")
@@ -2250,6 +2250,23 @@ PYEOF
 expect_fail check_xtask_codegen_surface.sh \
     'the gateway fast scope rerunning its million-key workspace stress contract' \
     mut_xtask_gateway_fast_scope_runs_rss_stress
+
+mut_xtask_gateway_fast_scope_runs_address_table_stress() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("xtask/src/verify.rs")
+text = path.read_text()
+old = '            "--skip".to_owned(),\n            GATEWAY_ADDRESS_TABLE_TEST.to_owned(),\n'
+new = ""
+if text.count(old) != 1:
+    raise SystemExit("governor address-table fast-scope exclusion is missing")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_xtask_codegen_surface.sh \
+    'the gateway fast scope rerunning its million-address governor contract' \
+    mut_xtask_gateway_fast_scope_runs_address_table_stress
 
 mut_xtask_server_fast_scope_runs_c_lim_0006() {
     python3 - <<'PYEOF'
@@ -2316,6 +2333,23 @@ PYEOF
 expect_fail check_xtask_codegen_surface.sh \
     'the workspace gate dropping the gateway million-key RSS contract' \
     mut_xtask_gateway_rss_contract_disappears
+
+mut_xtask_governor_address_table_contract_disappears() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/src/ext/governor/allocation_tests.rs")
+text = path.read_text()
+old = "fn c_gov_0013_a_million_addresses_do_not_grow_memory() {"
+new = "fn c_gov_0013_a_million_addresses_do_not_grow_memory_removed() {"
+if text.count(old) != 1:
+    raise SystemExit("workspace-only governor address-table contract is missing")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_xtask_codegen_surface.sh \
+    'the workspace gate dropping the governor million-address contract' \
+    mut_xtask_governor_address_table_contract_disappears
 
 mut_xtask_sig_fast_scope_loses_exact_matching() {
     python3 - <<'PYEOF'

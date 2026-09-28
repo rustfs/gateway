@@ -569,6 +569,7 @@ verify_comments, verify_syntax = rust_views(verify_source)
 for relative, test_name in (
     ("crates/conformance/src/cli.rs", "feedback_case_c_object_0001"),
     ("crates/gateway/tests/cors_runtime.rs", "a_million_unique_keys_keep_rss_within_the_entry_budget"),
+    ("crates/gateway/src/ext/governor/allocation_tests.rs", "c_gov_0013_a_million_addresses_do_not_grow_memory"),
     ("crates/server/tests/server_load.rs", "c_lim_0006_a_srv_0008_one_thousand_connections_stay_inside_the_rss_budget"),
     (
         "crates/server/tests/server_load.rs",
@@ -802,7 +803,12 @@ if run_step_batches_body.count(expected_crate_batch_order) != 1:
 crate_step_batches_items = functions_named("crate_step_batches", syntax, comments_removed)
 expected_gateway_batch = compact('''
 let mut test = steps.remove(0);
-test.extend(["--skip".to_owned(), GATEWAY_RSS_TEST.to_owned()]);
+test.extend([
+    "--skip".to_owned(),
+    GATEWAY_RSS_TEST.to_owned(),
+    "--skip".to_owned(),
+    GATEWAY_ADDRESS_TABLE_TEST.to_owned(),
+]);
 let clippy = steps.remove(0);
 return vec![vec![test, clippy]];
 ''')

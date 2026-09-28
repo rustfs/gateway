@@ -42,6 +42,10 @@
 //! see the path, but "which bucket is this" is the [`crate::HostResolver`]'s answer and not the
 //! path's, and a layer that re-derived it would be a second component deciding the same question.
 
+#[cfg(test)]
+// Probe fixtures panic when setup or a measured invariant fails.
+#[allow(clippy::expect_used, clippy::indexing_slicing, clippy::panic, clippy::unwrap_used)]
+mod allocation_tests;
 mod default;
 mod meter;
 mod rates;

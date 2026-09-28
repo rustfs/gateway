@@ -23,7 +23,10 @@
 //! Upstream: the parent module's types and evidence constants. Downstream: the parent's
 //! `REQUEST_DIVERGENCES`, which concatenates the slices at compile time.
 
-use super::{DivergenceFollowUp, DivergenceRuling, ERROR_PARITY, ERROR_RESPONSES, RequestDivergence, SEAM_FACTS};
+use super::{DivergenceFollowUp, DivergenceRuling, ERROR_PARITY, ERROR_RESPONSES, RequestDivergence};
+
+/// The marker's version id on the gateway's delete-marker refusals.
+const MARKER_VERSION_ID: &str = "https://github.com/rustfs/gateway/issues/899";
 
 pub(super) const ERROR_DIVERGENCES: [RequestDivergence; 10] = [
     RequestDivergence {
@@ -92,13 +95,14 @@ pub(super) const ERROR_DIVERGENCES: [RequestDivergence; 10] = [
         request: "a conditional read the app body answers NotModified",
         aws: "304 with no body and the ETag of the representation",
         aws_evidence: "https://www.rfc-editor.org/rfc/rfc9110#section-15.4.5",
-        s3s: "304 with no ETag: RustFS returns S3Error::new(NotModified)",
-        gateway: "the seam refuses NotModified by name, so the adapter answers 500; HandlerErrorContext::not_modified(etag) is the AWS 304",
-        client_impact: "every revalidating GET would fail with 500 until the adapter supplies the entity tag; not on M1's two operations",
+        s3s: "304 with no ETag: RustFS returns S3Error::new(NotModified); an ETag header on the error is written as is",
+        gateway: "the seam reads the tag from the error's ETag header (Refusal::NotModified) and the adapter answers \
+                  HandlerErrorContext::not_modified(etag), the AWS 304; an error with no tag is refused, so the RustFS body must attach it",
+        client_impact: "a revalidating GET gets its ETag back once the RustFS body attaches it, and a 500 until then; not on M1's two operations",
         ruling: DivergenceRuling::AlignAws,
-        follow_up: DivergenceFollowUp::Open(SEAM_FACTS),
+        follow_up: DivergenceFollowUp::Landed("c-cond-0007"),
         test_file: ERROR_PARITY,
-        test: "a_not_modified_from_the_app_body_needs_its_entity_tag_to_cross",
+        test: "a_not_modified_carrying_its_entity_tag_is_304_with_it_on_both_stacks",
     },
     RequestDivergence {
         id: "rd-err-0006",
@@ -106,14 +110,16 @@ pub(super) const ERROR_DIVERGENCES: [RequestDivergence; 10] = [
         request: "a range the app body answers InvalidRange",
         aws: "416 with Content-Range: bytes */<length>, RangeRequested and ActualObjectSize",
         aws_evidence: "https://www.rfc-editor.org/rfc/rfc9110#section-15.5.17",
-        s3s: "416 with the RustFS range message and no Content-Range",
-        gateway: "the seam refuses InvalidRange by name (a gateway 416 needs the complete length, and is a 500 without it); \
-                  HandlerError::unsatisfiable_range(range, length) is the AWS 416",
-        client_impact: "a read past the end would be 500 instead of 416 until the adapter supplies the length; not on M1's two operations",
+        s3s: "416 with the RustFS range message and no Content-Range; a Content-Range header on the error is written as is",
+        gateway: "the seam reads the length from the error's Content-Range: bytes */<length> (Refusal::UnsatisfiableRange) and \
+                  the adapter answers HandlerError::unsatisfiable_range(request Range, length), the AWS 416; an error with no \
+                  length is refused, so the RustFS body must attach it",
+        client_impact: "a read past the end gets 416 with the length once the RustFS body attaches it, and a 500 until then; \
+                        not on M1's two operations",
         ruling: DivergenceRuling::AlignAws,
-        follow_up: DivergenceFollowUp::Open(SEAM_FACTS),
+        follow_up: DivergenceFollowUp::Landed("c-range-0009"),
         test_file: ERROR_PARITY,
-        test: "an_unsatisfiable_range_from_the_app_body_needs_its_length_to_cross",
+        test: "an_invalid_range_carrying_its_length_is_416_with_content_range_on_both_stacks",
     },
     RequestDivergence {
         id: "rd-err-0007",
@@ -132,16 +138,19 @@ pub(super) const ERROR_DIVERGENCES: [RequestDivergence; 10] = [
     RequestDivergence {
         id: "rd-err-0008",
         operation: "GetObject",
-        request: "an app body error carrying headers: NoSuchKey on a delete marker, with x-amz-delete-marker and x-amz-version-id",
-        aws: "404 NoSuchKey with x-amz-delete-marker: true and the version id",
+        request: "an app body NoSuchKey or MethodNotAllowed carrying x-amz-delete-marker, x-amz-version-id and Last-Modified",
+        aws: "404 NoSuchKey, or 405 on a read naming the marker, with x-amz-delete-marker: true and the version id",
         aws_evidence: "https://docs.aws.amazon.com/AmazonS3/latest/userguide/DeleteMarker.html",
         s3s: "writes the code and every header of the error (RustFS with_delete_marker_read_headers)",
-        gateway: "the seam refuses the headers by name, so the adapter answers 500; the delete-marker contexts render them",
-        client_impact: "a read of a deleted key would be 500, not a 404 saying a delete marker is current; not on M1's two operations",
+        gateway: "the seam reads the three headers (Refusal::CurrentDeleteMarker, VersionedDeleteMarker) and the delete-marker \
+                  contexts render the flag and Last-Modified; the version id is not rendered yet, and a marker error with no \
+                  Last-Modified (RustFS's current-marker 404 today) is refused",
+        client_impact: "a read of a deleted key is the 404 or 405 with the marker flag, without x-amz-version-id until the \
+                        follow-up lands; not on M1's two operations",
         ruling: DivergenceRuling::AlignS3s,
-        follow_up: DivergenceFollowUp::Open(SEAM_FACTS),
+        follow_up: DivergenceFollowUp::Open(MARKER_VERSION_ID),
         test_file: ERROR_PARITY,
-        test: "an_error_carrying_delete_marker_headers_needs_typed_facts_to_cross",
+        test: "an_error_carrying_delete_marker_headers_crosses_as_the_marker_read",
     },
     RequestDivergence {
         id: "rd-err-0009",

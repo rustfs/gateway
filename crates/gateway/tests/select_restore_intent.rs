@@ -249,10 +249,10 @@ fn crc32(data: &[u8]) -> u32 {
     !crc
 }
 
-/// One message read off the wire, with both CRCs verified.
-struct Frame {
-    headers: Vec<(String, String)>,
-    payload: Vec<u8>,
+/// One message read off the wire, with both CRCs verified. Shared with `select_frame_records`.
+pub(crate) struct Frame {
+    pub(crate) headers: Vec<(String, String)>,
+    pub(crate) payload: Vec<u8>,
 }
 
 /// Reads the leading message out of `bytes`, returning it and whatever follows.
@@ -310,7 +310,7 @@ fn read_frame(bytes: &[u8]) -> Result<(Frame, &[u8]), String> {
 }
 
 /// Reads a whole stream, refusing anything a real client would.
-fn read_stream(bytes: &[u8]) -> Result<Vec<Frame>, String> {
+pub(crate) fn read_stream(bytes: &[u8]) -> Result<Vec<Frame>, String> {
     let mut rest = bytes;
     let mut frames = Vec::new();
     while !rest.is_empty() {
@@ -321,7 +321,7 @@ fn read_stream(bytes: &[u8]) -> Result<Vec<Frame>, String> {
     Ok(frames)
 }
 
-fn header_of<'a>(frame: &'a Frame, name: &str) -> Option<&'a str> {
+pub(crate) fn header_of<'a>(frame: &'a Frame, name: &str) -> Option<&'a str> {
     frame
         .headers
         .iter()
