@@ -1958,6 +1958,7 @@ dependencies = [
  "hmac",
  "http",
  "memchr",
+ "nix 0.31.3",
  "phf",
  "rustfs-gateway-stream",
  "rustfs-gateway-types",

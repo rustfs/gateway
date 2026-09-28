@@ -16584,7 +16584,7 @@ expect_fail check_chunk_limits.sh \
 mut_chunk_limit_attack_replaced_by_control() {
     python3 - <<'PYEOF'
 from pathlib import Path
-path = Path("crates/http/tests/ingest_chunk_rules.rs")
+path = Path("crates/http/tests/ingest_chunk_rss.rs")
 text = path.read_text()
 old = '''\
             let mut pipeline =
@@ -16606,7 +16606,7 @@ expect_fail check_chunk_limits.sh \
 mut_chunk_limit_ballast_control_reversed() {
     python3 - <<'PYEOF'
 from pathlib import Path
-path = Path("crates/http/tests/ingest_chunk_rules.rs")
+path = Path("crates/http/tests/ingest_chunk_rss.rs")
 text = path.read_text()
 old = "ballast.saturating_sub(control) >= RSS_HEADROOM_BYTES"
 if text.count(old) != 1:
@@ -16621,7 +16621,7 @@ expect_fail check_chunk_limits.sh \
 mut_chunk_limit_rss_ceiling_widened() {
     python3 - <<'PYEOF'
 from pathlib import Path
-path = Path("crates/http/tests/ingest_chunk_rules.rs")
+path = Path("crates/http/tests/ingest_chunk_rss.rs")
 text = path.read_text()
 old = "attack.saturating_sub(control) < RSS_HEADROOM_BYTES"
 if text.count(old) != 1:
@@ -16636,7 +16636,7 @@ expect_fail check_chunk_limits.sh \
 mut_chunk_limit_rss_observer_constant() {
     python3 - <<'PYEOF'
 from pathlib import Path
-path = Path("crates/http/tests/ingest_chunk_rules.rs")
+path = Path("crates/http/tests/ingest_chunk_rss.rs")
 text = path.read_text()
 old = "    parse_peak_rss(&String::from_utf8_lossy(&output.stderr))"
 if text.count(old) != 2:
@@ -16651,7 +16651,7 @@ expect_fail check_chunk_limits.sh \
 mut_concurrent_chunk_attack_count_reduced() {
     python3 - <<'PYEOF'
 from pathlib import Path
-path = Path("crates/http/tests/ingest_chunk_rules.rs")
+path = Path("crates/http/tests/ingest_chunk_rss.rs")
 text = path.read_text()
 old = "const CONCURRENT_ATTACKERS: usize = 100;"
 if text.count(old) != 1:
@@ -16666,7 +16666,7 @@ expect_fail check_chunk_limits.sh \
 mut_concurrent_chunk_attack_stops_slow_feeding() {
     python3 - <<'PYEOF'
 from pathlib import Path
-path = Path("crates/http/tests/ingest_chunk_rules.rs")
+path = Path("crates/http/tests/ingest_chunk_rss.rs")
 text = path.read_text()
 old = "                    let mut pipeline = unsigned_pipeline(body, 1, 4096, no_observers(), ChunkLimits::default());"
 if text.count(old) != 1:
@@ -16681,7 +16681,7 @@ expect_fail check_chunk_limits.sh \
 mut_concurrent_chunk_status_collapsed() {
     python3 - <<'PYEOF'
 from pathlib import Path
-path = Path("crates/http/tests/ingest_chunk_rules.rs")
+path = Path("crates/http/tests/ingest_chunk_rss.rs")
 text = path.read_text()
 old = "reject.to_status() == http::StatusCode::BAD_REQUEST"
 if text.count(old) != 1:
@@ -16696,7 +16696,7 @@ expect_fail check_chunk_limits.sh \
 mut_concurrent_chunk_all_rejections_weakened() {
     python3 - <<'PYEOF'
 from pathlib import Path
-path = Path("crates/http/tests/ingest_chunk_rules.rs")
+path = Path("crates/http/tests/ingest_chunk_rss.rs")
 text = path.read_text()
 old = "assert_eq!(valid, CONCURRENT_ATTACKERS"
 if text.count(old) != 1:
@@ -16708,10 +16708,42 @@ expect_fail check_chunk_limits.sh \
     'c-lim-0064 accepting one rejection as evidence for all one hundred' mut_concurrent_chunk_all_rejections_weakened \
     "c-lim-0064 concurrent probe lost 'assert_eq!(valid, CONCURRENT_ATTACKERS'"
 
+mut_concurrent_chunk_latency_back_on_the_wall_clock() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/http/tests/ingest_chunk_rss.rs")
+text = path.read_text()
+old = "let started = thread_cpu_time();"
+if text.count(old) != 1:
+    raise SystemExit("c-lim-0064 CPU-time anchor drifted")
+path.write_text(text.replace(old, "let started = std::time::Instant::now();", 1))
+PYEOF
+}
+expect_fail check_chunk_limits.sh \
+    'c-lim-0064 timing healthy requests on the wall clock, where host scheduling dominates' \
+    mut_concurrent_chunk_latency_back_on_the_wall_clock \
+    "c-lim-0064 concurrent probe lost 'let started = thread_cpu_time();'"
+
+mut_concurrent_chunk_pipelines_released_early() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/http/tests/ingest_chunk_rss.rs")
+text = path.read_text()
+old = "                    (refused, pipeline)"
+if text.count(old) != 1:
+    raise SystemExit("c-lim-0064 held-pipeline anchor drifted")
+path.write_text(text.replace(old, "                    drop(pipeline);\n                    (refused, ())", 1))
+PYEOF
+}
+expect_fail check_chunk_limits.sh \
+    'c-lim-0064 releasing attack pipelines early, so peak RSS depends on scheduler overlap' \
+    mut_concurrent_chunk_pipelines_released_early \
+    "c-lim-0064 concurrent probe lost '(refused, pipeline)'"
+
 mut_concurrent_chunk_rss_ceiling_widened() {
     python3 - <<'PYEOF'
 from pathlib import Path
-path = Path("crates/http/tests/ingest_chunk_rules.rs")
+path = Path("crates/http/tests/ingest_chunk_rss.rs")
 text = path.read_text()
 old = "attack_rss.saturating_sub(control_rss) < RSS_HEADROOM_BYTES"
 if text.count(old) != 1:
@@ -16726,7 +16758,7 @@ expect_fail check_chunk_limits.sh \
 mut_concurrent_chunk_p99_ceiling_widened() {
     python3 - <<'PYEOF'
 from pathlib import Path
-path = Path("crates/http/tests/ingest_chunk_rules.rs")
+path = Path("crates/http/tests/ingest_chunk_rss.rs")
 text = path.read_text()
 old = "control_p99.saturating_mul(8) + std::time::Duration::from_millis(5)"
 if text.count(old) != 1:
@@ -16741,7 +16773,7 @@ expect_fail check_chunk_limits.sh \
 mut_concurrent_chunk_p99_returns_to_max_sample() {
     python3 - <<'PYEOF'
 from pathlib import Path
-path = Path("crates/http/tests/ingest_chunk_rules.rs")
+path = Path("crates/http/tests/ingest_chunk_rss.rs")
 text = path.read_text()
 old = "const HEALTHY_PROBES: usize = 500;"
 if text.count(old) != 1:
