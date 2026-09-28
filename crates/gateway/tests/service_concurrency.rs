@@ -34,17 +34,41 @@ fn one_hundred_clones_answer_concurrently() {
     let completed = Arc::new(AtomicUsize::new(0));
     let mut workers = Vec::with_capacity(THREADS);
 
+    let built = Arc::new(AtomicUsize::new(0));
+    let passed = Arc::new(AtomicUsize::new(0));
+    let answered = Arc::new(AtomicUsize::new(0));
+    {
+        let (built, passed, answered, completed) = (Arc::clone(&built), Arc::clone(&passed), Arc::clone(&answered), Arc::clone(&completed));
+        std::thread::spawn(move || {
+            let started = std::time::Instant::now();
+            loop {
+                std::thread::sleep(std::time::Duration::from_secs(5));
+                eprintln!(
+                    "DIAG t={:?} built={} passed_barrier={} answered={} completed={}",
+                    started.elapsed(),
+                    built.load(Ordering::SeqCst),
+                    passed.load(Ordering::SeqCst),
+                    answered.load(Ordering::SeqCst),
+                    completed.load(Ordering::SeqCst)
+                );
+            }
+        });
+    }
     for _ in 0..THREADS {
         let service = service.clone();
         let start = Arc::clone(&start);
         let completed = Arc::clone(&completed);
+        let (built, passed, answered) = (Arc::clone(&built), Arc::clone(&passed), Arc::clone(&answered));
         workers.push(std::thread::spawn(move || {
             let runtime = tokio::runtime::Builder::new_current_thread()
                 .build()
                 .expect("a current-thread runtime");
+            built.fetch_add(1, Ordering::SeqCst);
             start.wait();
+            passed.fetch_add(1, Ordering::SeqCst);
             runtime.block_on(async {
                 let (status, _) = support::exchange(&service, support::plain(http::Method::POST, "/")).await;
+                answered.fetch_add(1, Ordering::SeqCst);
                 assert_eq!(status, http::StatusCode::OK);
             });
             completed.fetch_add(1, Ordering::SeqCst);

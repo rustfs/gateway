@@ -145,12 +145,17 @@ jobs:
           grep -m1 'model name' /proc/cpuinfo || true
           grep -iE 'seccomp|NoNewPrivs' /proc/self/status || true
           (sudo -n apt-get install -y gdb >/dev/null 2>&1 && echo gdb-ok) || echo gdb-missing
+      - name: Same test without TSAN, pinned and unpinned
+        run: |
+          timeout 300 cargo test -p rustfs-gateway --test integration service_concurrency::one_hundred_clones_answer_concurrently -- --exact --nocapture 2>&1 | grep -E 'DIAG|test result|panicked' || true
+          timeout 120 taskset -c 0-14 cargo test -p rustfs-gateway --test integration service_concurrency::one_hundred_clones_answer_concurrently -- --exact --nocapture 2>&1 | grep -E 'DIAG|test result|panicked' || true
       - name: One hundred OS threads under TSAN
         run: |
           set +e
           cat /sys/fs/cgroup/cpu.stat
           scripts/run_gateway_tsan.sh &
           runner=$!
+          export TSAN_OPTIONS=verbosity=1
           for i in $(seq 1 240); do kill -0 "$runner" 2>/dev/null || break; sleep 1; done
           if kill -0 "$runner" 2>/dev/null; then
             pid="$(pgrep -f 'deps/integration-' | head -1)"
