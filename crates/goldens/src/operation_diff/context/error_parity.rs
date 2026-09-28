@@ -38,6 +38,7 @@
 #[cfg(test)]
 mod clock;
 mod divergences;
+mod facts;
 mod mapping;
 mod matrix;
 
@@ -89,7 +90,6 @@ pub(crate) struct Scenario {
     clock_offset_seconds: i64,
     length: Length,
     body: AppBody,
-    native: Option<fn() -> HandlerError>,
 }
 
 impl Scenario {
@@ -101,7 +101,6 @@ impl Scenario {
             clock_offset_seconds: 0,
             length: Length::Exact,
             body: AppBody::Succeeds,
-            native: None,
         }
     }
 
@@ -126,13 +125,6 @@ impl Scenario {
     /// The RustFS body answers with this error on both stacks.
     pub(crate) fn app_refuses(mut self, error: fn() -> s3s::S3Error) -> Self {
         self.body = AppBody::Refuses(error);
-        self
-    }
-
-    /// The gateway backend answers with this native refusal instead of mapping the app body's error:
-    /// the constructor a gateway-native backend calls, against which the adapter mapping is judged.
-    pub(crate) fn gateway_native(mut self, error: fn() -> HandlerError) -> Self {
-        self.native = Some(error);
         self
     }
 
@@ -312,25 +304,39 @@ fn head(scenario: &Scenario, target: &str, headers: &HeaderMap) -> http::request
 pub(crate) const SEAM_REFUSED: &str = "the handler error has no gateway rendering";
 
 /// The RustFS ring-2 adapter's error half: the gateway refusal for the RustFS body's s3s error, one
-/// seam verdict to one gateway constructor.
+/// seam verdict to one gateway constructor. The adapter supplies what only the request holds: the
+/// key, and the `Range` a `416` names. The marker's version id waits for rustfs/gateway#899.
 pub(crate) fn adapter_error(error: &s3s::S3Error, context: &RequestContextView) -> HandlerError {
     let missing = |kind| match context.key() {
         Some(key) => HandlerErrorContext::missing_object_for(key.clone(), kind, ResourceVisibility::Visible),
         None => HandlerErrorContext::missing_object(kind, ResourceVisibility::Visible),
     };
+    let refused = || HandlerError::internal_error(SEAM_REFUSED);
     match refusal_from_s3s(error) {
         Ok(Refusal::Ordinary { code, message }) => HandlerError::new(code, message),
         Ok(Refusal::MissingBucket) => HandlerErrorContext::missing_bucket().into(),
         Ok(Refusal::MissingKey) => missing(MissingObject::Key).into(),
         Ok(Refusal::MissingVersion) => missing(MissingObject::Version).into(),
-        Err(_) => HandlerError::internal_error(SEAM_REFUSED),
+        Ok(Refusal::NotModified { etag }) => HandlerErrorContext::not_modified(etag).into(),
+        Ok(Refusal::UnsatisfiableRange { complete_length }) => match context.headers().get_str(&http::header::RANGE) {
+            Some(range) => HandlerError::unsatisfiable_range(range.to_owned(), complete_length),
+            None => refused(),
+        },
+        Ok(Refusal::CurrentDeleteMarker { last_modified, .. }) => {
+            HandlerErrorContext::current_delete_marker(ResourceVisibility::Visible, context.key().cloned(), last_modified)
+                .map_or_else(|_| refused(), Into::into)
+        }
+        Ok(Refusal::VersionedDeleteMarker {
+            version_id,
+            last_modified,
+        }) => HandlerErrorContext::versioned_delete_marker(&version_id, last_modified).map_or_else(|_| refused(), Into::into),
+        Err(_) => refused(),
     }
 }
 
 /// A gateway backend that answers every operation the scenario can reach as the adapter would.
 struct ParityBackend {
     body: AppBody,
-    native: Option<fn() -> HandlerError>,
     reached: Arc<AtomicBool>,
 }
 
@@ -340,9 +346,6 @@ impl ParityBackend {
         O::Output: Default,
     {
         self.reached.store(true, Ordering::SeqCst);
-        if let Some(native) = self.native {
-            return Err(native());
-        }
         match self.body {
             AppBody::Succeeds => Ok(Resp::new(O::Output::default())),
             AppBody::Refuses(error) => Err(adapter_error(&error(), request.context())),
@@ -392,7 +395,6 @@ fn gateway_service(scenario: &Scenario, reached: &Arc<AtomicBool>, now: RequestN
     let authenticator = SigV4Authenticator::new(Arc::new(StaticCredentials::new().with(credentials)), regions);
     let backend = Arc::new(ParityBackend {
         body: scenario.body,
-        native: scenario.native,
         reached: Arc::clone(reached),
     });
     super::verifying_at(ServiceBuilder::new(), now)
