@@ -2317,6 +2317,23 @@ expect_fail check_xtask_codegen_surface.sh \
     'the workspace gate dropping the gateway million-key RSS contract' \
     mut_xtask_gateway_rss_contract_disappears
 
+mut_xtask_governor_address_table_contract_disappears() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/src/ext/governor/allocation_tests.rs")
+text = path.read_text()
+old = "fn c_gov_0013_a_million_addresses_do_not_grow_memory() {"
+new = "fn c_gov_0013_a_million_addresses_do_not_grow_memory_removed() {"
+if text.count(old) != 1:
+    raise SystemExit("workspace-only governor address-table contract is missing")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_xtask_codegen_surface.sh \
+    'the workspace gate dropping the governor million-address contract' \
+    mut_xtask_governor_address_table_contract_disappears
+
 mut_xtask_sig_fast_scope_loses_exact_matching() {
     python3 - <<'PYEOF'
 from pathlib import Path
