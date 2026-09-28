@@ -148,6 +148,7 @@ jobs:
       - name: One hundred OS threads under TSAN
         run: |
           set +e
+          cat /sys/fs/cgroup/cpu.stat
           scripts/run_gateway_tsan.sh &
           runner=$!
           for i in $(seq 1 240); do kill -0 "$runner" 2>/dev/null || break; sleep 1; done
@@ -161,5 +162,7 @@ jobs:
             sudo -n kill -9 "$pid"
             exit 1
           fi
-          wait "$runner"
+          wait "$runner"; rc=$?
+          cat /sys/fs/cgroup/cpu.stat
+          exit $rc
 
