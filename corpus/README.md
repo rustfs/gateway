@@ -110,7 +110,8 @@ corpus/tools/from_compat_probe.py <run-dir>/results \
 
 # 2. Ingest. Without --sanitize this refuses any entry that still carries
 #    authentication material and writes nothing; with it, the carriers it knows how to
-#    rewrite are replaced with __REDACTED__ and listed in the entry's `redacted` array.
+#    rewrite are replaced with __REDACTED__ and listed in the entry's `redacted` array —
+#    including the chunk-signature and trailer-signature values inside an aws-chunked body.
 cargo run -p rustfs-gateway-corpus --bin corpus -- ingest /tmp/matrix.jsonl --into corpus --sanitize
 
 # 3. Verify, then run the guards CI will run.
