@@ -71,6 +71,10 @@ sha1 = { workspace = true }
 twox-hash = { workspace = true }
 zeroize = { workspace = true }
 
+[[bench]]
+name = "checksum"
+harness = false
+
 [dev-dependencies]
 proptest = { workspace = true }
 serde_json = { workspace = true }

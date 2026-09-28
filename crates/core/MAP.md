@@ -75,6 +75,7 @@ Agent entry point for operations, routing, codecs, authorization state and handl
 | `tests/dialect_claims_refusals.rs` | Every claim, template and claimed-row refusal, one variant each. | A claimed-route refusal changes. |
 | `tests/route_sizes.rs` | Independent compile-time size ceiling for the copied hot-path bucket. | The compiled router's bucket layout changes. |
 | `benches/route.rs` | Allocation gate and non-blocking timing record for compiled route lookup. | Routing hot-path cost changes. |
+| `benches/codec.rs` | Allocation ceilings and timing records for ListObjectsV2 encode, DeleteObjects decode and the GetObject head. | A codec change moves an allocation ceiling. |
 | `tests/params_and_dispatch.rs` | Dispatch and required-parameter matrix. | Registry or dispatch changes. |
 | `tests/pre_auth_errors.rs` | Static pre-authentication constructors and allowed statuses. | A pre-authentication constructor or status changes. |
 | `tests/configuration_error_declarations.rs` | Static unconfigured-error declarations for operation triples. | A configuration operation's missing-state error changes. |

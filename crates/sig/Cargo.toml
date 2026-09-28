@@ -80,5 +80,9 @@ smallvec = { workspace = true }
 subtle = { workspace = true }
 zeroize = { workspace = true }
 
+[[bench]]
+name = "verify"
+harness = false
+
 [dev-dependencies]
 trybuild = { workspace = true }
