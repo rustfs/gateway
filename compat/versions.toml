@@ -107,3 +107,44 @@ lock_file = "package-lock.json"
 lock_pattern = '"node_modules/@aws-sdk/client-s3": \{\s*"version": "([^"]+)"'
 version = "3.1141.0"
 version_command = 'node "$COMPAT_CLIENT_OUT/src/driver.mjs" --client-version'
+
+[clients.aws-sdk-dotnet]
+install = "program"
+# A driver program, not a command: the SDK is a library. The project references AWSSDK.S3 at an
+# exact version and packages.lock.json pins it and AWSSDK.Core by version and content hash;
+# `--locked-mode` refuses to restore anything the lock file does not already name, and nuget.config
+# beside it restricts restore to nuget.org. The published program runs on the shared .NET 8 runtime.
+source = "compat/drivers/aws-sdk-dotnet"
+toolchain = "dotnet"
+build = 'export DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1 && dotnet restore --locked-mode && dotnet publish -c Release --no-restore -o "$COMPAT_CLIENT_OUT/app"'
+lock_file = "packages.lock.json"
+# The Direct entry is followed by its requested range and then its resolved version.
+lock_pattern = '"AWSSDK\.S3": \{\s*"type": "Direct",\s*"requested": "[^"]*",\s*"resolved": "([^"]+)"'
+version = "4.0.103.4"
+# The NuGet version is the AWSSDK.S3 assembly's file version, which the program reads at runtime.
+version_command = 'dotnet "$COMPAT_CLIENT_OUT/app/driver.dll" --client-version'
+
+[clients.aws-sdk-java-v2]
+install = "program"
+# A driver program, not a command: the SDK is a library. pom.xml names every dependency and plugin
+# at an exact version, which makes Maven's resolution deterministic, so it is the lock file. The
+# build puts the driver jar and every runtime dependency in `$COMPAT_CLIENT_OUT/lib`.
+source = "compat/drivers/aws-sdk-java-v2"
+toolchain = "mvn"
+build = 'mvn -B -q -Dcompat.out="$COMPAT_CLIENT_OUT" package'
+lock_file = "pom.xml"
+lock_pattern = '^\s*<awssdk\.version>(\S+)</awssdk\.version>$'
+version = "2.55.6"
+version_command = 'java -cp "$COMPAT_CLIENT_OUT/lib/*" compat.Driver --client-version'
+
+[clients.aws-sdk-java-v1]
+install = "program"
+# The same layout as aws-sdk-java-v2. The version is read from aws-java-sdk-core, which the pinned
+# aws-java-sdk-s3 requires at its own exact release.
+source = "compat/drivers/aws-sdk-java-v1"
+toolchain = "mvn"
+build = 'mvn -B -q -Dcompat.out="$COMPAT_CLIENT_OUT" package'
+lock_file = "pom.xml"
+lock_pattern = '^\s*<awssdk\.version>(\S+)</awssdk\.version>$'
+version = "1.12.797"
+version_command = 'java -Daws.java.v1.disableDeprecationAnnouncement=true -cp "$COMPAT_CLIENT_OUT/lib/*" compat.Driver --client-version'
