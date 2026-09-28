@@ -142,12 +142,8 @@ sut_wait_ready() { return 0; }
                 self.assertEqual(calls, [])
                 self.assertIsNone(report)
 
-    def test_local_ratchet_rejected(self):
-        result, calls, report = self.probe(["--local-image", LOCAL])
-        self.assertEqual(result.returncode, 2)
-        self.assertIn("--local-image is only allowed with --mode record", result.stderr)
-        self.assertEqual(calls, [])
-        self.assertIsNone(report)
+    def test_local_ratchet(self):
+        self.assert_success(["--mode", "ratchet", "--local-image", LOCAL], True)
 
     def test_missing_local_argument(self):
         result, calls, _ = self.probe(["--mode", "record", "--local-image"])

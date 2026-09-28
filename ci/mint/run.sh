@@ -68,10 +68,11 @@
 #   implementation is committed here.
 #
 # LOCAL IMAGE TRIALS
-#   --local-image sha256:<64 lowercase hex> accepts an already built Docker image ID
-#   only with --mode record. It never pulls or publishes that image. The platform, full
-#   SDK census, and evidence checks stay identical; the report records the local image ID,
-#   not the registry manifest digest. Neither the reviewed pin nor baseline is changed.
+#   --local-image sha256:<64 lowercase hex> accepts an already built Docker image ID, in
+#   either mode: the workflow passes the image ci/mint/Dockerfile built from the pinned
+#   digest. It never pulls or publishes that image. The platform, full SDK census, and
+#   evidence checks stay identical; the report records the local image ID, not the
+#   registry manifest digest.
 #
 # USAGE
 #   ci/mint/run.sh [--mode ratchet|record] [--work <dir>] [--out <dir>] [--local-image <id>]
@@ -111,7 +112,7 @@ while [[ "$#" -gt 0 ]]; do
         shift 2
         ;;
     -h | --help)
-        sed -n '17,78p' "${BASH_SOURCE[0]}"
+        sed -n '17,79p' "${BASH_SOURCE[0]}"
         exit 0
         ;;
     *)
@@ -127,11 +128,6 @@ ratchet | record) ;;
     exit "$EXIT_USAGE"
     ;;
 esac
-
-if [[ -n "$LOCAL_IMAGE" && "$MODE" != record ]]; then
-    printf 'run: --local-image is only allowed with --mode record\n' >&2
-    exit "$EXIT_USAGE"
-fi
 
 WORK_DIR="${WORK_DIR:-$(mktemp -d "${TMPDIR:-/tmp}/gateway-mint.XXXXXX")}"
 OUT_DIR="${OUT_DIR:-${WORK_DIR}/out}"
@@ -248,7 +244,7 @@ fi
 # --- the image ---------------------------------------------------------------------------
 if [[ -n "$LOCAL_IMAGE" ]]; then
     MINT_IMAGE="$LOCAL_IMAGE"
-    printf 'run: inspecting local image %s for %s (record only)\n' "$MINT_IMAGE" "$MINT_PLATFORM"
+    printf 'run: inspecting local image %s for %s\n' "$MINT_IMAGE" "$MINT_PLATFORM"
 else
     printf 'run: pulling %s for %s\n' "$MINT_IMAGE" "$MINT_PLATFORM"
     docker pull --quiet --platform "$MINT_PLATFORM" "$MINT_IMAGE" >/dev/null ||
