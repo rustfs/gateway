@@ -24,7 +24,7 @@
 //! or HTTP delivery, which the transport tests observe.
 //! Upstream: `rustfs_gateway::frame_records`. Downstream: Cargo's harness.
 //!
-//! 1 positive / 5 negative, plus the c-sel-0012 peak-RSS measurement.
+//! 2 positive / 7 negative, plus the c-sel-0012 peak-RSS measurement.
 
 use std::pin::Pin;
 use std::task::{Context, Poll, Waker};
@@ -164,6 +164,112 @@ fn n_the_framed_answer_has_no_declared_length() {
     let stream = frame_records(memory(vec![Bytes::from_static(b"row\n")]));
     assert_eq!(stream.remaining_length().get(), None);
     assert!(!stream.caps().contains(PayloadCaps::KNOWN_LENGTH));
+}
+
+/// A source that never produces anything: a scan that is still looking.
+struct Silent;
+
+impl PayloadStream for Silent {
+    fn poll_read(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<PayloadRead, StreamError>> {
+        Poll::Pending
+    }
+
+    fn caps(&self) -> PayloadCaps {
+        PayloadCaps::PUSH
+    }
+
+    fn len_hint(&self) -> Option<u64> {
+        None
+    }
+}
+
+fn silent() -> ByteStream {
+    let inner: BoxPayloadStream = Box::pin(Silent);
+    ByteStream::new(inner).expect("consistent caps")
+}
+
+/// Polls once from inside the runtime, so a timer the adapter arms is registered with it.
+async fn poll_in_runtime(stream: &mut ByteStream) -> Poll<Result<PayloadRead, StreamError>> {
+    std::future::poll_fn(|cx| Poll::Ready(Pin::new(&mut *stream).poll_read(cx))).await
+}
+
+/// c-sel-0006. A scan that produces nothing for the keep-alive interval gets a `Cont` frame, and
+/// another one each further interval, so the client does not take the silence for a stall.
+#[tokio::test(start_paused = true)]
+async fn a_silent_source_is_kept_alive_with_cont_frames() {
+    let mut stream = frame_records(silent());
+    assert!(poll_in_runtime(&mut stream).await.is_pending());
+    for _ in 0..2 {
+        tokio::time::advance(std::time::Duration::from_secs(rustfs_gateway::commit::KEEPALIVE_INTERVAL_SECONDS)).await;
+        match poll_in_runtime(&mut stream).await {
+            Poll::Ready(Ok(PayloadRead::Chunk(chunk))) => {
+                assert_eq!(frames(&chunk).iter().map(event_type).collect::<Vec<_>>(), ["Cont"]);
+            }
+            other => panic!("expected a keep-alive frame, observed {other:?}"),
+        }
+        assert!(poll_in_runtime(&mut stream).await.is_pending(), "one keep-alive per interval");
+    }
+}
+
+/// Negative — before the interval has passed, a silent scan yields nothing at all.
+#[tokio::test(start_paused = true)]
+async fn n_no_keep_alive_is_sent_before_the_interval() {
+    let mut stream = frame_records(silent());
+    assert!(poll_in_runtime(&mut stream).await.is_pending());
+    tokio::time::advance(std::time::Duration::from_secs(rustfs_gateway::commit::KEEPALIVE_INTERVAL_SECONDS - 1)).await;
+    assert!(poll_in_runtime(&mut stream).await.is_pending());
+}
+
+/// A source that waits until its gate opens, yields one chunk, then waits forever.
+struct Gated {
+    open: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    sent: bool,
+}
+
+impl PayloadStream for Gated {
+    fn poll_read(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<PayloadRead, StreamError>> {
+        let this = self.get_mut();
+        if this.sent || !this.open.load(std::sync::atomic::Ordering::SeqCst) {
+            return Poll::Pending;
+        }
+        this.sent = true;
+        Poll::Ready(Ok(PayloadRead::Chunk(Bytes::from_static(b"row\n"))))
+    }
+
+    fn caps(&self) -> PayloadCaps {
+        PayloadCaps::PUSH
+    }
+
+    fn len_hint(&self) -> Option<u64> {
+        None
+    }
+}
+
+/// Negative — a frame restarts the interval: records that arrive in time are not followed by a
+/// keep-alive measured from before them.
+#[tokio::test(start_paused = true)]
+async fn n_records_restart_the_keep_alive_interval() {
+    let interval = std::time::Duration::from_secs(rustfs_gateway::commit::KEEPALIVE_INTERVAL_SECONDS);
+    let open = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let inner: BoxPayloadStream = Box::pin(Gated {
+        open: open.clone(),
+        sent: false,
+    });
+    let mut stream = frame_records(ByteStream::new(inner).expect("consistent caps"));
+    assert!(poll_in_runtime(&mut stream).await.is_pending());
+    tokio::time::advance(interval - std::time::Duration::from_secs(1)).await;
+    open.store(true, std::sync::atomic::Ordering::SeqCst);
+    match poll_in_runtime(&mut stream).await {
+        Poll::Ready(Ok(PayloadRead::Chunk(chunk))) => {
+            assert_eq!(frames(&chunk).iter().map(event_type).collect::<Vec<_>>(), ["Records"]);
+        }
+        other => panic!("expected the records, observed {other:?}"),
+    }
+    assert!(poll_in_runtime(&mut stream).await.is_pending());
+    tokio::time::advance(interval - std::time::Duration::from_secs(1)).await;
+    assert!(poll_in_runtime(&mut stream).await.is_pending(), "the interval restarts at the last frame");
+    tokio::time::advance(std::time::Duration::from_secs(1)).await;
+    assert!(poll_in_runtime(&mut stream).await.is_ready(), "and elapses a full interval after it");
 }
 
 const RSS_PROBE_ENV: &str = "RUSTFS_GATEWAY_SELECT_FRAMING_RSS_PROBE";
