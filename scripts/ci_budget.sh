@@ -83,7 +83,8 @@ if [[ -z "$LABEL" ]]; then
     exit 2
 fi
 
-# `timeout` is GNU coreutils. CI is ubuntu-latest and always has it; macOS, where these
+# `timeout` is GNU coreutils. CI runners are Ubuntu, and scripts/ci_install_host_tools.sh
+# installs coreutils when the image does not already have it. macOS, where these
 # guards are also run by hand, generally does not. Degrading quietly to "no enforcement"
 # would turn every budget into a check that cannot fail, so the degradation is allowed
 # only off CI and it is announced. On CI a missing enforcer is a hard error.

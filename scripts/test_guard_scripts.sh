@@ -6630,10 +6630,14 @@ old = """      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed
         with:
           toolchain: 1.97.1
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Install host tools
+        run: bash scripts/ci_install_host_tools.sh
       - run: cargo clippy --workspace --all-targets -- -D warnings
 """
 new = """      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Install host tools
+        run: bash scripts/ci_install_host_tools.sh
       - run: cargo clippy --workspace --all-targets -- -D warnings
 """
 if text.count(old) != 1:
@@ -6691,9 +6695,13 @@ old = """      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed
         with:
           toolchain: 1.97.1
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Install host tools
+        run: bash scripts/ci_install_host_tools.sh
       - name: Workspace tests 1/3 (maximum 8 minutes after setup)
 """
 new = """      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Install host tools
+        run: bash scripts/ci_install_host_tools.sh
       - name: Workspace tests 1/3 (maximum 8 minutes after setup)
 """
 if text.count(old) != 1:
@@ -6740,7 +6748,7 @@ text = path.read_text()
 start = text.index("  msrv:")
 end = text.index("\n  clippy:", start)
 block = text[start:end]
-anchor = "    runs-on: ubuntu-latest\n"
+anchor = "    runs-on: sm-standard-4\n"
 if block.count(anchor) != 1:
     raise SystemExit("MSRV job runner is missing or ambiguous")
 block = block.replace(anchor, anchor + "    if: false\n", 1)
@@ -6775,7 +6783,7 @@ text = path.read_text()
 start = text.index("  msrv:")
 end = text.index("\n  clippy:", start)
 block = text[start:end]
-anchor = "    runs-on: ubuntu-latest\n"
+anchor = "    runs-on: sm-standard-4\n"
 if block.count(anchor) != 1:
     raise SystemExit("MSRV job runner is missing or ambiguous")
 block = block.replace(anchor, anchor + '    "if": false\n', 1)
@@ -17243,7 +17251,7 @@ mut_ci_time_duplicate_required_name() {
     replace_ci_text '  clippy:
     name: Clippy' '  static-decoy:
     name: Static checks
-    runs-on: ubuntu-latest
+    runs-on: sm-standard-4
     timeout-minutes: 1
     steps:
       - run: true
@@ -17257,10 +17265,10 @@ expect_fail check_ci_time_gate.sh \
 mut_ci_time_static_timeout_removed() {
     replace_ci_text '  static:
     name: Static checks
-    runs-on: ubuntu-latest
+    runs-on: sm-standard-4
     timeout-minutes: 9' '  static:
     name: Static checks
-    runs-on: ubuntu-latest'
+    runs-on: sm-standard-4'
 }
 expect_fail check_ci_time_gate.sh \
     'the required Static checks job becoming unbounded' mut_ci_time_static_timeout_removed
@@ -17268,10 +17276,10 @@ expect_fail check_ci_time_gate.sh \
 mut_ci_time_feedback_timeout_removed() {
     replace_ci_text '  feedback-loop:
     name: Operation feedback loop
-    runs-on: ubuntu-latest
+    runs-on: sm-standard-4
     timeout-minutes: 9' '  feedback-loop:
     name: Operation feedback loop
-    runs-on: ubuntu-latest'
+    runs-on: sm-standard-4'
 }
 expect_fail check_ci_time_gate.sh \
     'a non-required pull-request job becoming unbounded' mut_ci_time_feedback_timeout_removed
@@ -17286,10 +17294,10 @@ expect_fail check_ci_time_gate.sh \
 mut_ci_time_msrv_timeout_removed() {
     replace_ci_text '  msrv:
     name: MSRV
-    runs-on: ubuntu-latest
+    runs-on: sm-standard-4
     timeout-minutes: 9' '  msrv:
     name: MSRV
-    runs-on: ubuntu-latest'
+    runs-on: sm-standard-4'
 }
 expect_fail check_ci_time_gate.sh \
     'the MSRV job becoming unbounded' mut_ci_time_msrv_timeout_removed
@@ -17420,7 +17428,7 @@ mut_ci_time_duplicate_fmt_execution() {
     replace_ci_text '  clippy:
     name: Clippy' '  fmt-decoy:
     name: Format duplicate
-    runs-on: ubuntu-latest
+    runs-on: sm-standard-4
     timeout-minutes: 1
     steps:
       - run: cargo fmt --all --check
@@ -17480,12 +17488,146 @@ import pathlib
 path = pathlib.Path(".github/workflows/ci.yml")
 text = path.read_text()
 start = text.index("  clippy:")
-position = text.index("    runs-on: ubuntu-latest", start)
-path.write_text(text[:position] + text[position:].replace("    runs-on: ubuntu-latest", "    runs-on: self-hosted", 1))
+position = text.index("    runs-on: sm-standard-4", start)
+path.write_text(text[:position] + text[position:].replace("    runs-on: sm-standard-4", "    runs-on: ubuntu-latest", 1))
 PYEOF
 }
 expect_fail check_ci_time_gate.sh \
-    'the required Clippy command moving to an unexpected runner' mut_ci_time_required_runner_replaced
+    'the required Clippy job moving back onto a GitHub-hosted runner' mut_ci_time_required_runner_replaced
+
+mut_ci_time_static_host_tools_skipped() {
+    replace_ci_text '      - name: Install host tools
+        run: bash scripts/ci_install_host_tools.sh
+      - run: cargo fmt --all --check' '      - name: Install host tools
+        run: true
+      - run: cargo fmt --all --check'
+}
+expect_fail check_ci_time_gate.sh \
+    'the Static checks job pretending host tools are installed' mut_ci_time_static_host_tools_skipped
+
+mut_ci_time_test_runner_hosted() {
+    replace_ci_text '    if: always()
+    runs-on: sm-standard-2' '    if: always()
+    runs-on: ubuntu-latest'
+}
+expect_fail check_ci_time_gate.sh \
+    'the Test aggregate moving onto a GitHub-hosted runner' mut_ci_time_test_runner_hosted
+
+mut_ci_time_docs_runner_undersized() {
+    replace_ci_text '  docs:
+    name: Documentation
+    runs-on: sm-standard-4' '  docs:
+    name: Documentation
+    runs-on: sm-standard-2'
+}
+expect_fail check_ci_time_gate.sh \
+    'the documentation job leaving the 4-vCPU pool its budget was measured on' mut_ci_time_docs_runner_undersized
+
+mut_hosted_runner_ubuntu_latest() {
+    python3 - <<'PY'
+from pathlib import Path
+path = Path(".github/workflows/client-matrix.yml")
+text = path.read_text()
+old = "    runs-on: sm-standard-4\n"
+if text.count(old) != 1:
+    raise SystemExit("client-matrix runner is missing or ambiguous")
+path.write_text(text.replace(old, "    runs-on: ubuntu-latest\n", 1))
+PY
+}
+expect_fail check_no_github_hosted_runners.sh \
+    'the client matrix moving back to a GitHub-hosted runner' mut_hosted_runner_ubuntu_latest
+
+mut_hosted_runner_macos() {
+    python3 - <<'PY'
+from pathlib import Path
+path = Path(".github/workflows/e2e-mint.yml")
+text = path.read_text()
+old = "    runs-on: dind-sm-standard-2\n"
+if text.count(old) != 1:
+    raise SystemExit("mint runner is missing or ambiguous")
+path.write_text(text.replace(old, "    runs-on: macos-latest\n", 1))
+PY
+}
+expect_fail check_no_github_hosted_runners.sh \
+    'mint moving onto a GitHub-hosted macOS runner' mut_hosted_runner_macos
+
+mut_hosted_runner_windows() {
+    python3 - <<'PY'
+from pathlib import Path
+path = Path(".github/workflows/e2e-s3tests.yml")
+text = path.read_text()
+old = "    runs-on: sm-standard-4\n"
+if text.count(old) != 1:
+    raise SystemExit("s3-tests runner is missing or ambiguous")
+path.write_text(text.replace(old, "    runs-on: windows-latest\n", 1))
+PY
+}
+expect_fail check_no_github_hosted_runners.sh \
+    's3-tests moving onto a GitHub-hosted Windows runner' mut_hosted_runner_windows
+
+mut_hosted_runner_list_smuggles_ubuntu() {
+    python3 - <<'PY'
+from pathlib import Path
+path = Path(".github/workflows/model-drift.yml")
+text = path.read_text()
+old = "    runs-on: sm-standard-2\n"
+if text.count(old) != 1:
+    raise SystemExit("model-drift runner is missing or ambiguous")
+path.write_text(text.replace(old, "    runs-on: [sm-standard-2, ubuntu-latest]\n", 1))
+PY
+}
+expect_fail check_no_github_hosted_runners.sh \
+    'a runner list smuggling a GitHub-hosted label next to a self-hosted one' mut_hosted_runner_list_smuggles_ubuntu
+
+mut_hosted_timeout_removed() {
+    python3 - <<'PY'
+from pathlib import Path
+path = Path(".github/workflows/model-drift.yml")
+text = path.read_text()
+old = "    timeout-minutes: 10\n"
+if text.count(old) != 1:
+    raise SystemExit("model-drift timeout is missing or ambiguous")
+path.write_text(text.replace(old, "", 1))
+PY
+}
+expect_fail check_no_github_hosted_runners.sh \
+    'model drift dropping its timeout' mut_hosted_timeout_removed
+
+mut_hosted_install_removed() {
+    python3 - <<'PY'
+from pathlib import Path
+path = Path(".github/workflows/client-matrix.yml")
+text = path.read_text()
+old = """      - name: Install host tools
+        run: bash scripts/ci_install_host_tools.sh
+"""
+if text.count(old) != 1:
+    raise SystemExit("client-matrix host-tools step is missing or ambiguous")
+path.write_text(text.replace(old, "", 1))
+PY
+}
+expect_fail check_no_github_hosted_runners.sh \
+    'the client matrix dropping the host-tools install' mut_hosted_install_removed
+
+mut_hosted_pull_request_without_cancel() {
+    python3 - <<'PY'
+from pathlib import Path
+path = Path(".github/workflows/model-drift.yml")
+text = path.read_text()
+old = "on:\n  schedule:\n"
+if text.count(old) != 1:
+    raise SystemExit("model-drift trigger block is missing or ambiguous")
+path.write_text(text.replace(old, "on:\n  pull_request:\n  schedule:\n", 1))
+PY
+}
+expect_fail check_no_github_hosted_runners.sh \
+    'a pull-request workflow that does not cancel superseded runs' mut_hosted_pull_request_without_cancel
+
+mut_hosted_workflows_missing() {
+    rm -rf .github/workflows
+}
+expect_fail check_no_github_hosted_runners.sh \
+    'the workflow directory being deleted, which must fail rather than skip' mut_hosted_workflows_missing
 
 mut_ci_time_workflow_deleted() {
     rm -f .github/workflows/ci.yml
@@ -17653,10 +17795,10 @@ expect_fail check_ci_test_split.sh \
 mut_ci_persistence_job_budget_widened() {
     replace_ci_text '  persistence-goldens:
     name: Persistence goldens
-    runs-on: ubuntu-latest
+    runs-on: sm-standard-4
     timeout-minutes: 4' '  persistence-goldens:
     name: Persistence goldens
-    runs-on: ubuntu-latest
+    runs-on: sm-standard-4
     timeout-minutes: 5'
 }
 expect_fail check_ci_test_split.sh \
@@ -17690,10 +17832,10 @@ expect_fail check_ci_test_split.sh \
 mut_ci_workspace_budget_widened() {
     replace_ci_text '  workspace-tests:
     name: Workspace tests 1
-    runs-on: ubuntu-latest
+    runs-on: sm-standard-4
     timeout-minutes: 9' '  workspace-tests:
     name: Workspace tests 1
-    runs-on: ubuntu-latest
+    runs-on: sm-standard-4
     timeout-minutes: 10'
 }
 expect_fail check_ci_test_split.sh \
@@ -17761,10 +17903,10 @@ expect_fail check_ci_test_split.sh \
 mut_ci_guard_budget_widened() {
     replace_ci_text '  guard-self-test:
     name: Guard self-test
-    runs-on: ubuntu-latest
+    runs-on: sm-standard-4
     timeout-minutes: 6' '  guard-self-test:
     name: Guard self-test
-    runs-on: ubuntu-latest
+    runs-on: sm-standard-4
     timeout-minutes: 10'
 }
 expect_fail check_ci_test_split.sh \
@@ -17822,10 +17964,10 @@ expect_fail check_ci_test_split.sh \
 mut_ci_target_budget_widened() {
     replace_ci_text '  target-consolidation-self-test:
     name: Target consolidation self-test
-    runs-on: ubuntu-latest
+    runs-on: sm-standard-4
     timeout-minutes: 3' '  target-consolidation-self-test:
     name: Target consolidation self-test
-    runs-on: ubuntu-latest
+    runs-on: sm-standard-4
     timeout-minutes: 4'
 }
 expect_fail check_ci_test_split.sh \
@@ -17880,10 +18022,10 @@ expect_fail check_ci_test_split.sh \
 mut_ci_quirk_ledger_budget_widened() {
     replace_ci_text '  quirk-ledger-self-test:
     name: Quirk ledger self-test 1
-    runs-on: ubuntu-latest
+    runs-on: sm-standard-4
     timeout-minutes: 3' '  quirk-ledger-self-test:
     name: Quirk ledger self-test 1
-    runs-on: ubuntu-latest
+    runs-on: sm-standard-4
     timeout-minutes: 4'
 }
 expect_fail check_ci_test_split.sh \
@@ -18180,10 +18322,10 @@ expect_fail check_ci_test_split.sh \
 mut_ci_error_status_job_widens_budget() {
     replace_ci_text '  error-status-self-test:
     name: Error status self-test
-    runs-on: ubuntu-latest
+    runs-on: sm-standard-4
     timeout-minutes: 3' '  error-status-self-test:
     name: Error status self-test
-    runs-on: ubuntu-latest
+    runs-on: sm-standard-4
     timeout-minutes: 9'
 }
 expect_fail check_ci_test_split.sh \
@@ -18208,7 +18350,7 @@ expect_fail check_ci_test_split.sh \
 ci_extra_guard_job() {
     printf '%s' '  dto-compiler-self-test-2:
     name: DTO compiler self-test 2
-    runs-on: ubuntu-latest
+    runs-on: sm-standard-4
     timeout-minutes: 3
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
@@ -18377,12 +18519,12 @@ mut_ci_aggregate_budget_widened() {
     name: Test
     needs: [workspace-tests, workspace-tests-2, workspace-tests-3, transport-parity, transport-parity-2, persistence-goldens, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, guard-self-test-5, guard-self-test-6, target-consolidation-self-test, quirk-ledger-self-test, quirk-ledger-self-test-2, quirk-ledger-self-test-3, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, build-guard-self-test-4, build-guard-self-test-5, error-status-self-test, gateway-tsan, docs, examples]
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: sm-standard-2
     timeout-minutes: 1' '  test:
     name: Test
     needs: [workspace-tests, workspace-tests-2, workspace-tests-3, transport-parity, transport-parity-2, persistence-goldens, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, guard-self-test-5, guard-self-test-6, target-consolidation-self-test, quirk-ledger-self-test, quirk-ledger-self-test-2, quirk-ledger-self-test-3, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, build-guard-self-test-4, build-guard-self-test-5, error-status-self-test, gateway-tsan, docs, examples]
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: sm-standard-2
     timeout-minutes: 2'
 }
 expect_fail check_ci_test_split.sh \
@@ -18705,7 +18847,7 @@ path = pathlib.Path(".github/workflows/ci.yml")
 path.write_text(path.read_text() + """
   serialized-regression:
     name: Serialized regression
-    runs-on: ubuntu-latest
+    runs-on: sm-standard-4
     steps:
       - run: cargo xtask verify --all
 """)

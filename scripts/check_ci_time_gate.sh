@@ -115,8 +115,11 @@ require_equal(feedback_prebuild&.fetch("run", nil), expected_feedback_prebuild,
               "operation verification must prebuild its exact bounded feature graph")
 
 static_steps = jobs.fetch("static").fetch("steps")
-require_equal(static_steps.first(3).map(&:keys), [["uses", "with"], ["uses", "with"], ["run"]],
+require_equal(static_steps.first(4).map(&:keys),
+              [["uses", "with"], ["uses", "with"], ["name", "run"], ["run"]],
               "static setup or command order changed")
+require_equal(static_steps[2].fetch("run", nil), "bash scripts/ci_install_host_tools.sh",
+              "static must install host tools before cargo fmt")
 require_equal(static_steps.first(2).map { |step| step.fetch("uses") }, [
                 "actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10",
                 "dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30"
@@ -125,8 +128,11 @@ require_equal(static_steps.first.fetch("with"), {"fetch-depth" => 0},
               "static must retain the branch graph for merge-base guards")
 
 clippy_steps = jobs.fetch("clippy").fetch("steps")
-require_equal(clippy_steps.map(&:keys), [["uses"], ["uses", "with"], ["uses"], ["run"]],
+require_equal(clippy_steps.map(&:keys),
+              [["uses"], ["uses", "with"], ["uses"], ["name", "run"], ["run"]],
               "clippy setup or command can alter failure propagation")
+require_equal(clippy_steps[3].fetch("run", nil), "bash scripts/ci_install_host_tools.sh",
+              "clippy must install host tools before the lint")
 require_equal(clippy_steps.first(3).map { |step| step.fetch("uses") }, [
                 "actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10",
                 "dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30",
@@ -137,12 +143,33 @@ require_equal(clippy_steps.first(3).map { |step| step.fetch("uses") }, [
   job = jobs.fetch(job_id)
   require_equal(job.keys, ["name", "runs-on", "timeout-minutes", "steps"],
                 "#{job_id} changed its required gate shape")
-  require_equal(job.fetch("runs-on", nil), "ubuntu-latest",
-                "#{job_id} must run on the expected hosted runner")
   abort("ERROR: #{job_id} must remain an independent parallel job") if job.key?("needs")
   abort("ERROR: #{job_id} may not conditionally skip") if job.key?("if")
   require_equal(job.fetch("timeout-minutes", nil), 9,
                 "#{job_id} must retain its explicit nine-minute upper bound")
+end
+
+jobs.each do |job_id, job|
+  expected_runner = job_id == "test" ? "sm-standard-2" : "sm-standard-4"
+  require_equal(job.fetch("runs-on", nil), expected_runner,
+                "#{job_id} must run on the org self-hosted label #{expected_runner}")
+  next if job_id == "test"
+
+  steps = job.fetch("steps")
+  install_at = steps.index { |step| step["run"] == "bash scripts/ci_install_host_tools.sh" }
+  abort("ERROR: #{job_id} must install host tools exactly once") if install_at.nil?
+  if steps.count { |step| step["run"] == "bash scripts/ci_install_host_tools.sh" } != 1
+    abort("ERROR: #{job_id} must install host tools exactly once")
+  end
+  work_at = steps.index do |step|
+    run = step["run"].to_s
+    next false if run == "bash scripts/ci_install_host_tools.sh"
+    run.include?("cargo ") || run.include?("python3 ") || run.include?("bash scripts/") ||
+      run.include?("scripts/ci_budget.sh")
+  end
+  if work_at && install_at > work_at
+    abort("ERROR: #{job_id} installs host tools after the command that needs them")
+  end
 end
 
 walk = lambda do |value, path|

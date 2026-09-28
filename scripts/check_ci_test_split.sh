@@ -72,7 +72,7 @@ workspaces.each_with_index do |job, index|
   require_equal(job.keys, worker_keys,
                 "#{workspace_ids[index]} changed its parallel nine-minute contract")
   require_equal(job.values_at("name", "runs-on", "timeout-minutes"),
-                ["Workspace tests #{index + 1}", "ubuntu-latest", 9],
+                ["Workspace tests #{index + 1}", "sm-standard-4", 9],
                 "#{workspace_ids[index]} identity or budget changed")
 end
 guard_groups.each_with_index do |job, index|
@@ -81,53 +81,53 @@ guard_groups.each_with_index do |job, index|
 end
 require_equal(signing_suite.keys, worker_keys, "signing-suite changed its parallel six-minute contract")
 require_equal(signing_suite.values_at("name", "runs-on", "timeout-minutes"),
-              ["Official signing suite", "ubuntu-latest", 6], "signing-suite identity or budget changed")
+              ["Official signing suite", "sm-standard-4", 6], "signing-suite identity or budget changed")
 require_equal(persistence_goldens.keys, worker_keys,
               "persistence-goldens changed its parallel four-minute contract")
 require_equal(persistence_goldens.values_at("name", "runs-on", "timeout-minutes"),
-              ["Persistence goldens", "ubuntu-latest", 4],
+              ["Persistence goldens", "sm-standard-4", 4],
               "persistence-goldens identity or budget changed")
 # Six runners, one per sixth of the case ordinals. Six minutes each keeps the longest
 # dependency path (a guard runner plus the one-minute Test aggregate) at seven of the ten.
 guard_groups.each_with_index do |job, index|
   expected_name = index.zero? ? "Guard self-test" : "Guard self-test #{index + 1}"
   require_equal(job.values_at("name", "runs-on", "timeout-minutes"),
-                [expected_name, "ubuntu-latest", 6],
+                [expected_name, "sm-standard-4", 6],
                 "#{guard_group_ids[index]} identity or budget changed")
 end
 require_equal(target.keys, worker_keys,
               "target-consolidation-self-test changed its parallel three-minute contract")
 require_equal(target.values_at("name", "runs-on", "timeout-minutes"),
-              ["Target consolidation self-test", "ubuntu-latest", 3],
+              ["Target consolidation self-test", "sm-standard-4", 3],
               "target-consolidation-self-test identity or budget changed")
 quirk_ledgers.each_with_index do |job, index|
   require_equal(job.keys, worker_keys,
                 "#{quirk_ledger_ids[index]} changed its parallel three-minute contract")
   require_equal(job.values_at("name", "runs-on", "timeout-minutes"),
-                ["Quirk ledger self-test #{index + 1}", "ubuntu-latest", 3],
+                ["Quirk ledger self-test #{index + 1}", "sm-standard-4", 3],
                 "#{quirk_ledger_ids[index]} identity or budget changed")
 end
 require_equal(dto_compiler.keys, worker_keys,
               "dto-compiler-self-test changed its parallel three-minute contract")
 require_equal(dto_compiler.values_at("name", "runs-on", "timeout-minutes"),
-              ["DTO compiler self-test", "ubuntu-latest", 3],
+              ["DTO compiler self-test", "sm-standard-4", 3],
               "dto-compiler-self-test identity or budget changed")
 build_guards.each_with_index do |job, index|
   require_equal(job.keys, worker_keys,
                 "#{build_guard_ids[index]} changed its parallel seven-minute contract")
   require_equal(job.values_at("name", "runs-on", "timeout-minutes"),
-                ["Build guard self-test #{index + 1}", "ubuntu-latest", 7],
+                ["Build guard self-test #{index + 1}", "sm-standard-4", 7],
                 "#{build_guard_ids[index]} identity or budget changed")
 end
 require_equal(error_status.keys, worker_keys,
               "error-status-self-test changed its parallel three-minute contract")
 require_equal(error_status.values_at("name", "runs-on", "timeout-minutes"),
-              ["Error status self-test", "ubuntu-latest", 3],
+              ["Error status self-test", "sm-standard-4", 3],
               "error-status-self-test identity or budget changed")
 
 (workspaces + guard_groups).each do |job|
   steps = job.fetch("steps")
-  require_equal(steps.length, 4, "a split worker changed its setup or command step count")
+  require_equal(steps.length, 5, "a split worker changed its setup or command step count")
   expected_setup = [
     "actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10",
     "dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30",
@@ -143,7 +143,7 @@ workspaces.each_with_index do |job, index|
                 "#{workspace_ids[index]} setup gained executable control")
 end
 signing_suite_steps = signing_suite.fetch("steps")
-require_equal(signing_suite_steps.length, 4, "signing-suite changed its setup or command step count")
+require_equal(signing_suite_steps.length, 5, "signing-suite changed its setup or command step count")
 require_equal(signing_suite_steps.first(3).map { |step| step.fetch("uses") }, [
   "actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10",
   "dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30",
@@ -154,7 +154,7 @@ require_equal(signing_suite_steps.first(3).map(&:keys), [["uses"], ["uses", "wit
 require_equal(signing_suite_steps.last.keys, ["name", "run"],
               "signing-suite command can skip or hide failure")
 persistence_goldens_steps = persistence_goldens.fetch("steps")
-require_equal(persistence_goldens_steps.length, 4,
+require_equal(persistence_goldens_steps.length, 5,
               "persistence-goldens changed its setup or command step count")
 require_equal(persistence_goldens_steps.first(3).map { |step| step.fetch("uses") }, [
   "actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10",
@@ -174,7 +174,7 @@ guard_groups.each_with_index do |job, index|
                 "#{guard_group_ids[index]} cannot resolve the branch merge base")
 end
 target_steps = target.fetch("steps")
-require_equal(target_steps.length, 2,
+require_equal(target_steps.length, 3,
               "target-consolidation-self-test changed its setup or command step count")
 require_equal(target_steps.first,
               {"uses" => "actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10"},
@@ -183,7 +183,7 @@ require_equal(target_steps.last.keys, ["name", "run"],
               "target-consolidation-self-test command can skip or hide failure")
 quirk_ledger_steps = quirk_ledgers.each_with_index.map do |job, index|
   steps = job.fetch("steps")
-  require_equal(steps.length, 2,
+  require_equal(steps.length, 3,
                 "#{quirk_ledger_ids[index]} changed its setup or command step count")
   require_equal(steps.first,
                 {"uses" => "actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10"},
@@ -193,7 +193,7 @@ quirk_ledger_steps = quirk_ledgers.each_with_index.map do |job, index|
   steps
 end
 dto_compiler_steps = dto_compiler.fetch("steps")
-require_equal(dto_compiler_steps.length, 4,
+require_equal(dto_compiler_steps.length, 5,
               "dto-compiler-self-test changed its setup or command step count")
 require_equal(dto_compiler_steps.first(3).map { |step| step.fetch("uses") }, [
   "actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10",
@@ -206,7 +206,7 @@ require_equal(dto_compiler_steps.last.keys, ["name", "run"],
               "dto-compiler-self-test command can skip or hide failure")
 build_guards.each_with_index do |job, index|
   steps = job.fetch("steps")
-  require_equal(steps.length, 4,
+  require_equal(steps.length, 5,
                 "#{build_guard_ids[index]} changed its setup or command step count")
   require_equal(steps.first(3).map { |step| step.fetch("uses") }, [
     "actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10",
@@ -219,7 +219,7 @@ build_guards.each_with_index do |job, index|
                 "#{build_guard_ids[index]} command can skip or hide failure")
 end
 error_status_steps = error_status.fetch("steps")
-require_equal(error_status_steps.length, 2,
+require_equal(error_status_steps.length, 3,
               "error-status-self-test changed its setup or command step count")
 require_equal(error_status_steps.first,
               {"uses" => "actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10"},
@@ -376,7 +376,7 @@ end
 aggregate_keys = ["name", "needs", "if", "runs-on", "timeout-minutes", "steps"]
 require_equal(aggregate.keys, aggregate_keys, "the Test job changed its dependency, failure, or budget contract")
 require_equal(aggregate.values_at("name", "needs", "if", "runs-on", "timeout-minutes"),
-              ["Test", ["workspace-tests", "workspace-tests-2", "workspace-tests-3", "transport-parity", "transport-parity-2", "persistence-goldens", "signing-suite", "guard-self-test", "guard-self-test-2", "guard-self-test-3", "guard-self-test-4", "guard-self-test-5", "guard-self-test-6", "target-consolidation-self-test", "quirk-ledger-self-test", "quirk-ledger-self-test-2", "quirk-ledger-self-test-3", "dto-compiler-self-test", "build-guard-self-test", "build-guard-self-test-2", "build-guard-self-test-3", "build-guard-self-test-4", "build-guard-self-test-5", "error-status-self-test", "gateway-tsan", "docs", "examples"], "always()", "ubuntu-latest", 1],
+              ["Test", ["workspace-tests", "workspace-tests-2", "workspace-tests-3", "transport-parity", "transport-parity-2", "persistence-goldens", "signing-suite", "guard-self-test", "guard-self-test-2", "guard-self-test-3", "guard-self-test-4", "guard-self-test-5", "guard-self-test-6", "target-consolidation-self-test", "quirk-ledger-self-test", "quirk-ledger-self-test-2", "quirk-ledger-self-test-3", "dto-compiler-self-test", "build-guard-self-test", "build-guard-self-test-2", "build-guard-self-test-3", "build-guard-self-test-4", "build-guard-self-test-5", "error-status-self-test", "gateway-tsan", "docs", "examples"], "always()", "sm-standard-2", 1],
               "the Test job no longer aggregates all twenty-seven workers within the budget")
 steps = aggregate.fetch("steps")
 require_equal(steps.length, 1, "the Test job must have exactly one result-checking step")

@@ -69,12 +69,15 @@ concurrency:
 jobs:
   s3tests:
     name: Ceph s3-tests
-    runs-on: ubuntu-latest
+    # Release build of the in-repository SUT, then the Python suite. No Docker daemon.
+    runs-on: sm-standard-4
     # Generous, because the point of the wrapper below is to report the margin,
     # not to have the runner kill the job at an arbitrary line with no diagnosis.
     timeout-minutes: 150
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - name: Install host tools
+        run: bash scripts/ci_install_host_tools.sh --with-gh
 
       - name: Read the pinned suite revision
         id: pin
