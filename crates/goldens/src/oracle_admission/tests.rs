@@ -284,7 +284,7 @@ fn render_names_every_revision_build_widening_and_finding() {
 
     let text = validate(&moved(), &[SYNTHETIC]).expect("registered").render();
     assert!(text.starts_with("oracle admission: revisions=3 open-findings=2\n"), "{text}");
-    for oracle in ["rollback s3s@bdcb6259", "candidate s3s@f3e17541"] {
+    for oracle in ["rollback s3s@bdcb6259", "candidate s3s@0.17.0"] {
         assert!(
             text.contains(&format!(
                 "finding synthetic-moved-refusal oracle={oracle} family=bucket-encryption sample={} old=reads new=refuses tracking={}\n",

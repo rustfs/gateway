@@ -53,23 +53,46 @@ fn conditional_etag(value: Option<&str>) -> Result<Option<ETag>, HandlerError> {
         .map_err(|_| HandlerError::new(ErrorCode::INVALID_ARGUMENT, "a copy-source condition has an invalid entity tag"))
 }
 
-fn source_conditions(input: &CopyObjectInput, observed_at: Timestamp) -> Result<Preconditions, HandlerError> {
-    Ok(Preconditions {
-        if_match: conditional_etag(input.copy_source_if_match.as_deref())?,
-        if_none_match: conditional_etag(input.copy_source_if_none_match.as_deref())?,
+/// The four copy-source conditions, as `CopyObject` and `UploadPartCopy` both spell them.
+pub(super) struct SourceConditions<'a> {
+    pub(super) if_match: Option<&'a str>,
+    pub(super) if_none_match: Option<&'a str>,
+    pub(super) if_modified_since: Option<Timestamp>,
+    pub(super) if_unmodified_since: Option<Timestamp>,
+}
+
+fn conditions_of(input: &CopyObjectInput) -> SourceConditions<'_> {
+    SourceConditions {
+        if_match: input.copy_source_if_match.as_deref(),
+        if_none_match: input.copy_source_if_none_match.as_deref(),
         if_modified_since: input.copy_source_if_modified_since,
         if_unmodified_since: input.copy_source_if_unmodified_since,
-        observed_at: Some(observed_at),
-    })
+    }
 }
 
 fn guard_source(input: &CopyObjectInput, source: &Representation, observed_at: Timestamp) -> Result<(), HandlerError> {
-    let conditions = source_conditions(input, observed_at)?;
+    guard_copy_source(&conditions_of(input), source, observed_at)
+}
+
+/// Evaluates the copy-source conditions against the source representation; shared with
+/// `UploadPartCopy` so a part copy and an object copy answer the same `412`.
+pub(super) fn guard_copy_source(
+    conditions: &SourceConditions<'_>,
+    source: &Representation,
+    observed_at: Timestamp,
+) -> Result<(), HandlerError> {
+    let preconditions = Preconditions {
+        if_match: conditional_etag(conditions.if_match)?,
+        if_none_match: conditional_etag(conditions.if_none_match)?,
+        if_modified_since: conditions.if_modified_since,
+        if_unmodified_since: conditions.if_unmodified_since,
+        observed_at: Some(observed_at),
+    };
     // These validators describe the representation being read, so all four read-side conditions
-    // are evaluated. CopyObject itself is still a write: either negative read verdict becomes its
-    // 412 rather than a 304 response.
+    // are evaluated. A copy is still a write: either negative read verdict becomes its 412 rather
+    // than a 304 response.
     let outcome = evaluate(
-        &conditions,
+        &preconditions,
         &ObjectValidators {
             exists: true,
             etag: Some(source.e_tag.clone()),
@@ -78,10 +101,10 @@ fn guard_source(input: &CopyObjectInput, source: &Representation, observed_at: T
         RequestKind::Read,
     )
     .map_err(|rejection| HandlerError::new(rejection.code().clone(), rejection.reason()))?;
-    let only_if_match = input.copy_source_if_match.is_some()
-        && input.copy_source_if_unmodified_since.is_none()
-        && input.copy_source_if_none_match.is_none()
-        && input.copy_source_if_modified_since.is_none();
+    let only_if_match = conditions.if_match.is_some()
+        && conditions.if_unmodified_since.is_none()
+        && conditions.if_none_match.is_none()
+        && conditions.if_modified_since.is_none();
     if only_if_match && copy_source_if_match_miss_proceeds() {
         return Ok(());
     }
@@ -123,7 +146,8 @@ impl Handler<CopyObject> for FsBackend {
         let storage_class = requested_storage_class(input.storage_class.as_ref())?;
         let source_representation = self
             .representation(source.bucket().as_str(), source.key().as_str(), source.version_id())
-            .await?;
+            .await
+            .map_err(HandlerError::as_copy_source_refusal)?;
         // Naming a storage class is itself a change, so a self copy that only moves the object to
         // another class is not refused as a no-op.
         let changes_the_object = metadata_source.changes_the_object() || storage_class.is_some();

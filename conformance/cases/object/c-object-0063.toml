@@ -1,0 +1,109 @@
+# c-object-0063 — a delete-marker refusal names the marker it found.
+#
+# Schema dimensions exercised: a versioned bucket, a captured delete-marker version id, and an
+# assertion on a refusal header interpolated from that capture.
+
+[case]
+id = "c-object-0063"
+schema_version = 1
+title = "Both delete-marker refusals carry the version id of the marker they found"
+rationale = """
+A client that meets a delete marker usually wants to act on it — remove it to restore the object, \
+or keep it and stop reading — and both need the marker's version id. The 404 a read naming no \
+version gets is the only place such a client learns which version is the marker without a \
+separate ListObjectVersions, and the 405 a read naming the marker gets must name the same id so \
+the two answers agree about which version they refused. RustFS and the pinned s3s write \
+x-amz-version-id on both refusals, and a gateway that drops it silently changes what every \
+restore script reads."""
+polarity = "negative"
+operation = "GetObject"
+tags = ["error-shape"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/DeleteMarker.html"
+summary = "A read that meets a delete marker is refused with x-amz-delete-marker set, 404 without a version id and 405 when it names the marker."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://github.com/rustfs/rustfs/blob/719000460b231792b52314df321f0d385d03dff4/rustfs/src/app/object/shared.rs"
+summary = "RustFS writes the marker's version id, null for a nil one, on both delete-marker read refusals."
+kind = "other"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-object"
+versioning = "enabled"
+
+[[setup.objects]]
+bucket = "conf-object"
+key = "versioned/named.txt"
+content_type = "text/plain"
+body = { utf8 = "hello world" }
+
+[[exchanges]]
+name = "delete-the-key-and-capture-the-marker"
+
+[exchanges.request]
+method = "DELETE"
+target = "/conf-object/versioned/named.txt"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 204
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+"x-amz-delete-marker" = "true"
+
+[exchanges.expect.capture]
+marker = { header = "x-amz-version-id" }
+
+[[exchanges]]
+name = "the-404-names-the-current-marker"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-object/versioned/named.txt"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 404
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+"x-amz-delete-marker" = "true"
+"x-amz-version-id" = "${capture.marker}"
+
+[exchanges.expect.error]
+code = "NoSuchKey"
+request_id_present = true
+
+[[exchanges]]
+name = "the-405-names-the-same-marker"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-object/versioned/named.txt?versionId=${capture.marker}"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 405
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+"x-amz-delete-marker" = "true"
+"x-amz-version-id" = "${capture.marker}"
+
+[exchanges.expect.error]
+code = "MethodNotAllowed"
+request_id_present = true

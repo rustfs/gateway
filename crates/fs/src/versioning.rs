@@ -150,7 +150,9 @@ impl FsBackend {
         }
         Ok(PublishedObject {
             size: record.size,
-            version_id: (!matches!(state, VersioningState::Never)).then_some(record.version_id),
+            // Reported only while versioning is enabled, as RustFS reports it: a suspended bucket's
+            // write is the null version and answers no id (rustfs/gateway#1003).
+            version_id: matches!(state, VersioningState::Enabled).then_some(record.version_id),
             last_modified: Timestamp::from_secs(record.modified),
         })
     }
@@ -549,7 +551,7 @@ pub(super) fn delete_marker_error(record: &VersionRecord, key: &str, explicit: b
             .unwrap_or_else(|_| storage_error());
     }
     let key = ObjectKey::new(key.to_owned()).ok();
-    HandlerErrorContext::current_delete_marker(ResourceVisibility::Visible, key, record.modified)
+    HandlerErrorContext::current_delete_marker(ResourceVisibility::Visible, key, &record.version_id, record.modified)
         .map(Into::into)
         .unwrap_or_else(|_| storage_error())
 }

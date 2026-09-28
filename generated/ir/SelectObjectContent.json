@@ -633,7 +633,9 @@
                            "c-select-restore-0032",
                            "c-select-restore-0033",
                            "c-select-restore-0034",
-                           "c-select-restore-0049"
+                           "c-select-restore-0049",
+                           "c-select-restore-0055",
+                           "c-select-restore-0057"
                          ]
               },
               {
@@ -658,7 +660,7 @@
                                 "summary": "The framing digest is CRC-32/ISO-HDLC, whose published check value over the nine ASCII digits is what pins this implementation to the same parameterisation as everybody else's."
                               }
                             ],
-                "cases": ["c-select-restore-0035"]
+                "cases": ["c-select-restore-0035", "c-select-restore-0054"]
               },
               {
                 "id": "q-sse-0010",

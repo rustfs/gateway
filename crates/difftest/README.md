@@ -1,7 +1,7 @@
 # RING 2 — migration-only, deleted with the compat feature
 
 `rustfs-gateway-difftest` compares the gateway with the s3s revision RustFS main links
-(`f3e17541`) as two pure functions (rustfs/backlog#1762): the same raw request bytes decoded by
+(`0.17.0`) as two pure functions (rustfs/backlog#1762): the same raw request bytes decoded by
 both, and the same handler output encoded by both. It
 exists only for the migration from s3s to the gateway and is deleted together with the
 `compat-s3s` feature of `rustfs-gateway-types` (P9-09). It is never published, and nothing that
@@ -9,7 +9,7 @@ ships depends on it.
 
 "Ring 2" names its lifetime and its purpose, not a dependency on RustFS: the workspace ring rule
 admits only ring 0 and 1 under `crates/`, so the manifest declares ring 1, links no RustFS crate,
-and reaches s3s only through the types crate's `compat-s3s-f3e17541` seam.
+and reaches s3s only through the types crate's `compat-s3s-0-17-0` seam.
 
 ## What one decode diff compares
 
@@ -82,10 +82,27 @@ differs, why that is accepted, and when it is reviewed again. A message-wording 
 reported as information once registered; unregistered, it fails like any other. An element-order
 entry pins both complete orders, and a finding matches when the children written are that order
 with some left out — so a gateway that starts writing another order is a new difference. When an
-entry pins both sides with a `*`, the two stand for the same text.
+entry pins both sides with a `*`, the two stand for the same text. An entry with `when_query`
+applies only to a request carrying that query parameter: the `x-id` routing entries accept a route
+difference only where an `x-id` hint caused it, so the same difference from any other request —
+a real misroute — fails.
 
 When an s3s output member cannot be held by the gateway output, the diff reports that member and
 compares nothing else for that output: there is no gateway answer to compare it with.
+
+The register itself is held in place by three guards. `scripts/check_known_diffs_ratchet.sh` fails
+a pull request that adds an entry or changes one (a wider pattern, a later review date) unless its
+description carries `known-diff <id>: <why>` for it, and every entry must have a `reason` and an
+`expires` date at most a year out; a change to the code that decides what matches or what the
+runner skips (`known.rs`, `normalize.rs`, `corpus.rs`, `runner.rs`) needs a `Difftest-matching
+change: <why>` line instead. `scripts/check_known_diffs_expiry.sh` warns thirty days before a review date and
+fails past it; the weekly `known-diffs-review` workflow keeps one issue listing what is due.
+`scripts/check_difftest_readonly.sh` asks a pull request that changes this crate and anything the
+gateway is built from (a crate, the model and overlays, generated code — everything but docs, CI
+and the evidence directories) together for a `Difftest-coupled change: <why>` line, so a decoder
+bent to make a diff green is never silent. `scripts/check_difftest_not_published.sh` keeps the
+crate `publish = false`, this file's first line, and every other package free of a normal or
+build dependency on it, direct or through another package; only the fuzz crate may link it.
 
 ## Why this is not an in-process dual stack
 
@@ -134,4 +151,27 @@ Streaming cadence, trailer timing and mid-stream errors belong to conformance ca
 
 ```bash
 cargo test -p rustfs-gateway-difftest
+cargo run -p rustfs-gateway-difftest --bin decode-diff -- --corpus corpus --budget-seconds 180
+cargo run -p rustfs-gateway-difftest --bin encode-diff -- --builtin --budget-seconds 180
 ```
+
+Both runners take `--corpus DIR` (the recorded corpus) or `--builtin` (the matrix in `src/samples`),
+`--per-bucket N` (the first N entries of every operation) and `--budget-seconds S`. They exit `0`
+when every difference is registered, `1` on an unregistered one, `2` on an environment problem —
+an empty or missing corpus is one, never "zero differences" — `3` when the harness failed on an
+input, and `4` when the run outgrew its budget: sample the pull-request gate with `--per-bucket`
+and run the full set nightly rather than letting the gate grow.
+
+A recorded request is changed before both stacks see it, and the report counts each change: a
+redacted signature is removed (header or presigned query; the diff compares route and codec, not
+signing), an `__UNRECORDED__` or `__REDACTED__` header is removed, a partial head capture's missing
+`Content-Length` is set from the recorded body, and `flush`/`stall` timing is ignored. An entry
+whose body ends abnormally, claims a signed chunk framing whose signatures were redacted, or
+declares a length its recorded body does not have, or arrived with chunked transfer framing (which
+only a transport de-frames; the in-process stacks have none), is skipped with that reason, and so is
+a request of an operation the diff does not project (named in the skip), and a partial
+head capture either stack routes elsewhere than its recorded operation (a header the recorder did
+not see can change the route). Sampling counts only inputs that are sent, per operation; an
+operation none of whose inputs was compared is named (`UNCOMPARED`). A difference outranks the
+budget: a slow run with an unregistered difference exits `1`. The corpus holds requests only, so
+`encode-diff --corpus` is an environment exit that says so.

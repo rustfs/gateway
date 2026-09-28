@@ -25,8 +25,8 @@
 
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 
+use rustfs_gateway_types::compat::s3s_0_17_0::s3s::dto::ChecksumAlgorithm as CandidateChecksumAlgorithm;
 use rustfs_gateway_types::compat::s3s_9c4690d8::s3s::dto::ChecksumAlgorithm as BaselineChecksumAlgorithm;
-use rustfs_gateway_types::compat::s3s_f3e17541::s3s::dto::ChecksumAlgorithm as CandidateChecksumAlgorithm;
 use rustfs_gateway_types::{ChecksumAlgorithm, ChecksumSpec};
 
 use super::{

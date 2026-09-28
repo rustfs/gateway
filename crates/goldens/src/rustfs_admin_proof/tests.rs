@@ -44,8 +44,8 @@ use super::{
     REPLICATION_METRICS_V2, ReplicationMetricsV2, SERVER_INFO, SERVER_INFO_ACTION, SERVER_INFO_ALIAS, SERVER_INFO_PATH,
     SERVER_INFO_ROWS, ServerInfo, admin_dialect, admin_dialect_with, assemble, open, seal,
 };
-use crate::operation_diff::s3s_f3e17541::context::{ACCESS_KEY, ContextRequest, PATH_HOST, SECRET_KEY, amz_date};
-use crate::operation_diff::s3s_f3e17541::harness::block_on;
+use crate::operation_diff::s3s_0_17_0::context::{ACCESS_KEY, ContextRequest, PATH_HOST, SECRET_KEY, amz_date};
+use crate::operation_diff::s3s_0_17_0::harness::block_on;
 use crate::{RouteMethod, rustfs_admin_route_inventory};
 
 pub(super) const REGION: &str = "us-east-1";

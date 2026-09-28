@@ -95,6 +95,7 @@ macro_rules! reference_operations {
             tagging PutObjectTagging => "PutObjectTagging",
             policy PutPublicAccessBlock => "PutPublicAccessBlock",
             multipart UploadPart => "UploadPart",
+            multipart UploadPartCopy => "UploadPartCopy",
         }
     };
 }
@@ -114,7 +115,7 @@ mod content_headers;
 mod acl;
 mod buckets;
 mod conditions;
-mod copy;
+pub(crate) mod copy;
 mod deletes;
 mod encryption;
 mod lifecycle;
@@ -127,6 +128,7 @@ mod records;
 mod registry;
 mod tagging;
 mod transitions;
+mod upload_part_copy;
 mod uploads;
 mod version_listing;
 mod versioning;
@@ -492,6 +494,29 @@ impl Handler<CreateMultipartUpload> for FsBackend {
     }
 }
 
+impl FsBackend {
+    /// Writes one part of an upload, refusing a part path that is not a safe regular file.
+    pub(crate) async fn store_part(
+        &self,
+        bucket: &str,
+        upload_id: &str,
+        part_number: i32,
+        bytes: &[u8],
+    ) -> Result<(), HandlerError> {
+        let upload = self.upload_path(bucket, upload_id);
+        let destination = Self::part_path(&upload, part_number);
+        if let Ok(metadata) = tokio::fs::symlink_metadata(&destination).await
+            && (!metadata.is_file() || metadata.file_type().is_symlink())
+        {
+            return Err(HandlerError::new(
+                ErrorCode::INVALID_REQUEST,
+                "the multipart part path is not a safe regular file",
+            ));
+        }
+        self.write_atomic(&upload.join(PARTS_DIR), &destination, bytes).await
+    }
+}
+
 impl Handler<UploadPart> for FsBackend {
     async fn call(&self, request: Req<UploadPart>) -> HandlerResult<UploadPart> {
         let input = request.into_input();
@@ -508,17 +533,8 @@ impl Handler<UploadPart> for FsBackend {
             Some(checksum) => Some(checksum.validate_part(input.checksum_spec, &bytes)?),
             None => input.checksum_spec,
         };
-        let upload = self.upload_path(input.bucket.as_str(), &upload_id);
-        let destination = Self::part_path(&upload, input.part_number);
-        if let Ok(metadata) = tokio::fs::symlink_metadata(&destination).await
-            && (!metadata.is_file() || metadata.file_type().is_symlink())
-        {
-            return Err(HandlerError::new(
-                ErrorCode::INVALID_REQUEST,
-                "the multipart part path is not a safe regular file",
-            ));
-        }
-        self.write_atomic(&upload.join(PARTS_DIR), &destination, &bytes).await?;
+        self.store_part(input.bucket.as_str(), &upload_id, input.part_number, &bytes)
+            .await?;
         Ok(Resp::new(UploadPartOutput {
             e_tag: etag(&bytes)?,
             checksum_spec,
@@ -669,13 +685,23 @@ impl Handler<CompleteMultipartUpload> for FsBackend {
             self.temporary_id.fetch_add(1, Ordering::Relaxed)
         ));
         tokio::fs::rename(&upload, &tombstone).await.map_err(|_| no_such_upload())?;
+        // The completion's write conditions are the same verdict `PutObject` gives, evaluated
+        // inside the publication's version lock (rustfs/gateway#1002, #808).
+        let write_conditions = conditions::conditions(
+            input.if_match.as_deref(),
+            None,
+            input.if_none_match.as_deref(),
+            None,
+            Timestamp::from_secs(self.clock.now().unix_seconds()),
+        )?;
         let published = match self
-            .publish_object(
+            .publish_object_if(
                 input.bucket.as_str(),
                 input.key.as_str(),
                 &completed_bytes,
                 &composite,
                 &record.attributes,
+                conditions::any(&write_conditions).then_some(&write_conditions),
             )
             .await
         {

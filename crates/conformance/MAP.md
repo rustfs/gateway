@@ -20,6 +20,7 @@ ADRs; this map only selects files.
 | `src/expect.rs` | Expected observation matching. | A response, stream error or timing assertion is judged wrongly. |
 | `src/expect/h2_control_frames.rs` | Exact ordered comparison of measured HTTP/2 control frames. | A frame assertion must reject missing measurements, wrong fields, or order. |
 | `src/expect/h2_reset_tests.rs` | Exact ordered reset-fact matching and unavailable-observer controls. | A reset expectation could match the wrong stream, code, order, or missing measurement. |
+| `src/expect/h2_grant_tests.rs` | Connection-level WINDOW_UPDATE grants matched by presence and value, apart from ordered controls. | A peer grant's timing fails, or wrongly satisfies, a control-frame assertion. |
 | `src/expect/h2_ping_tests.rs` | PING-acknowledgement and `client_reset` matching. | A PING expectation could match other octets or another ending. |
 | `src/expect/h2_goaway_tests.rs` | Ordered GOAWAY/reset and receive-side probe matching. | A shutdown announcement is confused with observed termination. |
 | `src/expect/events.rs` | Event-stream count and byte-exact payload matching. | An event payload expectation is ignored or misjudged. |
@@ -74,8 +75,7 @@ ADRs; this map only selects files.
 | `src/conn/h2/tests/h2_window_tests.rs` | Literal window scripts, measured increments, and independent receive credit controls. | Checking padded DATA limits or actual credit grants. |
 | `src/conn/h2/tests/h2_authored_flow_tests.rs` | Literal outbound flow violations followed by measured peer errors. | Checking that local credit accounting does not discard actual GOAWAY or reset observations. |
 | `src/conn/h2/tests/h2_duplex_tests.rs` | Socket-ordered credit and early controls during unfinished writes. | Checking retroactive grants or hidden peer resets under backpressure. |
-| `src/conn/h2/tests/h2_client_control_tests.rs` | Client control-frame envelopes, refusals and the exact octets a peer receives. | Checking how an authored control or raw frame reaches the wire. |
-| `src/conn/h2/tests/h2_ping_tests.rs` | Authored PING, received acknowledgements, and the client-reset barrier. | Checking when a client reset counts as processed. |
+| `src/conn/h2/tests/h2_client_control_tests.rs`, `src/conn/h2/tests/h2_ping_tests.rs` | Client control-frame envelopes and refusals; authored PING, received acknowledgements, and the client-reset barrier. | Checking how an authored control frame reaches the wire, or when a client reset counts as processed. |
 | `src/conn/h2/tests/h2_streams_tests.rs` | Scripts with more than one stream: which stream is observed and how the others are read. | Checking stream selection, shared HPACK state or shared connection credit. |
 | `src/conn/h2/tests/h2_corpus_tests.rs` | Named HTTP/2 cases executed against production Hyper. | Checking that authored corpus coverage actually runs and passes. |
 | `src/inprocess/h2_frames.rs` | Reads `request.h2_frames` into typed, ordered frame declarations. | A declared frame field is lost before a transport sees it. |

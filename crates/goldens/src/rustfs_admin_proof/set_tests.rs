@@ -41,7 +41,7 @@ use super::classes::{
 };
 use super::tests::{HAND_OFF, REGION, assert_refused_before_the_handler, only, route_calls, routed, send, send_with};
 use super::{Assembled, AuthzCall, REPLICATION_METRICS_SHADOWS, admin_dialect, admin_dialect_bound, assemble};
-use crate::operation_diff::s3s_f3e17541::context::{ACCESS_KEY, ContextRequest, PATH_HOST};
+use crate::operation_diff::s3s_0_17_0::context::{ACCESS_KEY, ContextRequest, PATH_HOST};
 use crate::{RouteMethod, rustfs_admin_route_inventory};
 
 /// The three bulk listings, which are ruled alike.

@@ -1,0 +1,62 @@
+[case]
+id = "c-select-restore-0054"
+schema_version = 1
+title = "A scan that fails after the 200 ends with an in-band error frame and no End"
+rationale = """
+Once the status line has gone out as 200 the only way to report a failure is an error message inside the stream: :message-type error with the code and message as headers, no payload, and nothing after it. A stream that simply stops hangs the client, and one that appends End after the error tells it the scan completed. The readable prefix arrives as Records first, so the case also shows the error is the terminator of a stream already in progress rather than a refusal before it."""
+polarity = "negative"
+operation = "SelectObjectContent"
+tags = ["select", "event-stream"]
+timeout_ms = 10000
+quirks = ["q-select-event-status-0150", "q-select-0009"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/RESTSelectObjectAppendix.html"
+summary = "An error after the response began is an error message with error-code and error-message headers, and it ends the stream without End."
+kind = "aws-doc"
+[[setup.buckets]]
+name = "conf-select"
+
+[[setup.objects]]
+bucket = "conf-select"
+key = "rows.csv"
+body = { hex = "612c620aff0a" }
+
+[request]
+method = "POST"
+target = "/conf-select/rows.csv?select&select-type=2"
+headers = { "content-type" = "application/xml" }
+body = { utf8 = '<SelectObjectContentRequest><Expression>SELECT * FROM S3Object</Expression><ExpressionType>SQL</ExpressionType><InputSerialization><CSV/></InputSerialization><OutputSerialization><CSV/></OutputSerialization></SelectObjectContentRequest>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "event_stream"
+status = 200
+connection_after = "open"
+
+[[expect.events]]
+type = "Records"
+min_count = 1
+max_count = 1
+
+[expect.events.payload]
+exact_utf8 = "a,b\n"
+
+[[expect.events]]
+type = "InvalidTextEncoding"
+min_count = 1
+max_count = 1
+headers = { "message-type" = "error", "error-code" = "InvalidTextEncoding", "error-message" = "The scanned object bytes are not valid UTF-8 text" }
+
+[[expect.events]]
+type = "Stats"
+min_count = 0
+max_count = 0
+
+[[expect.events]]
+type = "End"
+min_count = 0
+max_count = 0
+
+[expect.body]
+exact_hex = "0000006900000055ea016f2e0d3a6d6573736167652d747970650700056576656e740b3a6576656e742d747970650700075265636f7264730d3a636f6e74656e742d747970650700186170706c69636174696f6e2f6f637465742d73747265616d612c620ae367eb1d0000008b0000007b64c3f65e0d3a6d6573736167652d747970650700056572726f720b3a6572726f722d636f6465070013496e76616c696454657874456e636f64696e670e3a6572726f722d6d657373616765070031546865207363616e6e6564206f626a65637420627974657320617265206e6f742076616c6964205554462d38207465787491a58022"

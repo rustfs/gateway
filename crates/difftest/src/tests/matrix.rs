@@ -19,13 +19,13 @@
 //! new difference fails, a difference that went away fails), every decode register entry to at
 //! least one row, and every member — shared, or carried by one model only, list elements by
 //! shape — to a row that sets it (and, when shared, agrees on it).
-//! NOT responsible for: the rows themselves (`rows.rs`).
-//! Upstream: `rows.rs`, the checked-in register. Downstream: none.
+//! NOT responsible for: the rows themselves (`samples/requests.rs`).
+//! Upstream: `samples/requests.rs`, the checked-in register. Downstream: none.
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::rows::rows;
 use crate::known::Kind;
+use crate::samples::requests as rows;
 use crate::{DIFFED_OPERATIONS, FieldValue, KnownDiffs, decode_diff};
 
 /// Positive — every row produces exactly its registered differences. A new difference fails as
@@ -38,7 +38,7 @@ fn every_row_produces_exactly_its_registered_differences() {
     for row in rows() {
         assert!(names.insert(row.name), "row {} is listed twice", row.name);
         let diff = decode_diff(&row.request).unwrap_or_else(|error| panic!("{}: {error}", row.name));
-        let verdict = register.verdict(diff.findings());
+        let verdict = register.verdict_for(&row.request, diff.findings());
         for failure in &verdict.failures {
             problems.push(format!("{}: unregistered {failure}", row.name));
         }

@@ -27,6 +27,8 @@ mod bucket_encryption;
 mod bucket_policy;
 #[path = "crud/object_encryption.rs"]
 mod object_encryption;
+#[path = "crud/upload_part_copy.rs"]
+mod upload_part_copy;
 #[path = "crud/versioning.rs"]
 mod versioning;
 
@@ -44,6 +46,9 @@ mod bucket_location;
 
 #[path = "crud/multipart_listing.rs"]
 mod multipart_listing;
+
+#[path = "crud/multipart_conditions.rs"]
+mod multipart_conditions;
 
 #[path = "crud/multipart_sizing.rs"]
 mod multipart_sizing;
@@ -385,7 +390,8 @@ async fn bucket_and_object_crud_runs_through_the_production_registry() {
             "PutObjectAcl",
             "PutObjectTagging",
             "PutPublicAccessBlock",
-            "UploadPart"
+            "UploadPart",
+            "UploadPartCopy"
         ]
     );
     assert_eq!(

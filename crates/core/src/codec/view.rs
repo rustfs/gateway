@@ -66,6 +66,8 @@ pub struct MetaView<'a> {
     names: NamePolicy,
     /// The object length `content-length` answers with, for an `aws-chunked` body.
     framed_content_length: Option<u64>,
+    /// Whether the deployment waived this operation's modelled integrity requirement.
+    integrity_optional: bool,
 }
 
 impl<'a> MetaView<'a> {
@@ -144,6 +146,7 @@ impl<'a> MetaView<'a> {
             key,
             names: names.clone(),
             framed_content_length: None,
+            integrity_optional: false,
         })
     }
 
@@ -165,7 +168,26 @@ impl<'a> MetaView<'a> {
             key: self.key.clone(),
             names: self.names.clone(),
             framed_content_length: Some(length),
+            integrity_optional: self.integrity_optional,
         }
+    }
+
+    /// This view, with the operation's modelled integrity requirement waived.
+    ///
+    /// The assembly calls this only for an operation its deployment listed in a reviewed client
+    /// waiver (rustfs/gateway#916: MinIO SDKs write bucket policies without `Content-MD5`), so
+    /// [`crate::codec::value::require_integrity`] admits a body with no integrity claim. A claim
+    /// the request does make is still verified: the waiver drops the demand, never the check.
+    #[must_use]
+    pub fn with_integrity_optional(mut self) -> Self {
+        self.integrity_optional = true;
+        self
+    }
+
+    /// Whether this operation's modelled integrity requirement was waived for this deployment.
+    #[must_use]
+    pub const fn integrity_optional(&self) -> bool {
+        self.integrity_optional
     }
 
     /// The naming policy this view was built under.

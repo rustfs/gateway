@@ -59,7 +59,7 @@ fn every_family_and_form_matches_the_recorded_decision() {
         report.render(),
         "migration inventory: decided-refusals=1 rollback-constraints=1\n\
          refusal persisted-doctype decision=https://github.com/rustfs/gateway/issues/469 witnesses=104 refused=100 tolerated=4 \
-         old=reads under baseline s3s@9c4690d8, rollback s3s@bdcb6259, candidate s3s@f3e17541 new=Xml(DocTypeDeclaration) \
+         old=reads under baseline s3s@9c4690d8, rollback s3s@bdcb6259, candidate s3s@0.17.0 new=Xml(DocTypeDeclaration) \
          writer-samples-with-doctype=0 boundary-fixtures=10 ingress=bucket-metadata-import-archive \
          remediation=re-put-configuration-through-s3-api\n\
          rollback constraints: entries=1 authority=https://github.com/rustfs/backlog/issues/1768\n\

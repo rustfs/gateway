@@ -1,0 +1,25 @@
+# aws-sdk-rust driver program for the client compatibility matrix (rustfs/backlog#1765).
+#
+# Every dependency is pinned with `=` and Cargo.lock beside this file locks the rest; the build runs
+# with `--locked`, so a lock file that no longer satisfies this manifest stops the build instead of
+# being rewritten. The SDK version here must equal the pin in compat/versions.toml.
+
+[package]
+name = "compat-driver-aws-sdk-rust"
+version = "0.0.0"
+edition = "2021"
+publish = false
+license = "Apache-2.0"
+
+# Deliberately its own workspace: the gateway's root workspace must never resolve, build or lock
+# the SDK, and this program must never inherit the root's lints, profiles or lock file.
+[workspace]
+
+[[bin]]
+name = "driver"
+path = "src/main.rs"
+
+[dependencies]
+aws-config = { version = "=1.12.0", default-features = false, features = ["behavior-version-latest", "default-https-client", "rt-tokio"] }
+aws-sdk-s3 = { version = "=1.150.0", features = ["behavior-version-latest"] }
+tokio = { version = "=1.53.1", features = ["macros", "rt", "time"] }

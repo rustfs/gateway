@@ -21,9 +21,9 @@
 //! Upstream: `crate::persistence` and `crate::compat`. Downstream: the migration goldens, which
 //! format these values with `{:?}` in their D1-D5 diagnostics.
 
-#[cfg(any(feature = "compat-s3s", feature = "compat-s3s-f3e17541"))]
+#[cfg(any(feature = "compat-s3s", feature = "compat-s3s-0-17-0"))]
 use crate::compat::S3sBucketEncryptionObservation;
-#[cfg(any(feature = "compat-s3s", feature = "compat-s3s-f3e17541"))]
+#[cfg(any(feature = "compat-s3s", feature = "compat-s3s-0-17-0"))]
 use crate::persistence::{PersistedBucketEncryptionConfiguration, PersistedBucketEncryptionRule};
 use crate::persistence::{
     PersistedEncryptionByDefault, PersistedEncryptionConfiguration, PersistedReplicationConfiguration, parse_bucket_encryption,
@@ -156,7 +156,7 @@ fn c_persist_n008_the_replication_destination_account_never_appears_in_debug() {
 }
 
 #[test]
-#[cfg(any(feature = "compat-s3s", feature = "compat-s3s-f3e17541"))]
+#[cfg(any(feature = "compat-s3s", feature = "compat-s3s-0-17-0"))]
 fn c_persist_n007_the_old_codec_observation_redacts_its_behavior_tuple_too() {
     let structure = PersistedBucketEncryptionConfiguration {
         rules: vec![PersistedBucketEncryptionRule {
