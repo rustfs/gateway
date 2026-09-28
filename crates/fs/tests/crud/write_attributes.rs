@@ -131,7 +131,9 @@ async fn a_refused_tag_header_writes_nothing() {
     let (_, service) = service(&root);
     create_bucket(&service, "bad-tags").await;
     let too_many = (0..11).map(|index| format!("k{index}=v")).collect::<Vec<_>>().join("&");
-    for header_value in ["novalue", "a=1&a=2", too_many.as_str()] {
+    // A bare `novalue` is a legal tag under RustFS's grammar (rustfs/gateway#1000), so the
+    // malformed spelling here is a broken escape.
+    for header_value in ["a%zz", "a=1&a=2", too_many.as_str()] {
         let refused = put(&service, "/bad-tags/doc", &[("x-amz-tagging", header_value)]).await;
         assert_eq!(refused.status(), 400, "{header_value}: {}", text(&refused));
         // The tag refusal itself, not an abandoned-body report standing in for it.

@@ -298,8 +298,8 @@ pub use rustfs_gateway_core::cors::{
 // and the whole of the header channel, is here, because a backend parses that header itself and
 // an unexported parser is one every backend rewrites.
 pub use rustfs_gateway_core::ops::shared::tagging::{
-    MAX_BUCKET_TAGS, MAX_OBJECT_TAGS, MAX_TAG_KEY_UNITS, MAX_TAG_VALUE_UNITS, TagScope, TaggingRejection, parse_tagging_header,
-    validate_tag_set,
+    MAX_BUCKET_TAGS, MAX_OBJECT_TAGS, MAX_TAG_KEY_UNITS, MAX_TAG_VALUE_UNITS, TagHeaderGrammar, TagScope, TaggingRejection,
+    parse_tagging_header, parse_tagging_header_with, validate_tag_set,
 };
 
 // The lifecycle document contract, exported for the same reason as the CORS one above:

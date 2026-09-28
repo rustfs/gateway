@@ -22,7 +22,8 @@
 
 use proptest::prelude::*;
 use rustfs_gateway_core::ops::shared::tagging::{
-    MAX_BUCKET_TAGS, MAX_OBJECT_TAGS, MAX_TAG_KEY_UNITS, MAX_TAG_VALUE_UNITS, TagScope, parse_tagging_header, validate_tag_set,
+    MAX_BUCKET_TAGS, MAX_OBJECT_TAGS, MAX_TAG_KEY_UNITS, MAX_TAG_VALUE_UNITS, TagHeaderGrammar, TagScope, parse_tagging_header,
+    parse_tagging_header_with, validate_tag_set,
 };
 use rustfs_gateway_types::ErrorCode;
 
@@ -113,6 +114,26 @@ fn a_bucket_holds_exactly_fifty_tags() {
 fn n_a_segment_without_a_separator_is_refused() {
     let rejection = parse_tagging_header(Some("a")).expect_err("no separator");
     assert_eq!(*rejection.code(), ErrorCode::INVALID_ARGUMENT);
+}
+
+/// RustFS's grammar reads a segment with no `=` as a key with an empty value
+/// (rustfs/gateway#1000); the default grammar above still refuses it.
+#[test]
+fn the_rustfs_grammar_reads_a_bare_key_as_an_empty_value() {
+    assert_eq!(
+        parse_tagging_header_with(Some("foo=bar&bar"), TagHeaderGrammar::RustFs).expect("a bare key"),
+        pairs(&[("foo", "bar"), ("bar", "")])
+    );
+    assert!(parse_tagging_header_with(Some("foo=bar&bar"), TagHeaderGrammar::Aws).is_err());
+}
+
+/// Every other refusal is shared by both grammars: an empty key, a repeated key (bare or not),
+/// and a broken escape.
+#[test]
+fn n_the_rustfs_grammar_keeps_every_other_refusal() {
+    for header in ["=v", "a&a", "a=1&a", "a%zz", "%"] {
+        assert!(parse_tagging_header_with(Some(header), TagHeaderGrammar::RustFs).is_err(), "{header}");
+    }
 }
 
 /// An empty key has no legal representation.
