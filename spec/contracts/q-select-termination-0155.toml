@@ -7,7 +7,7 @@ contract_value = "records_stats_end"
 mutation_dimension = "select_event_termination"
 target = "SelectObjectContent"
 summary = "A successful event sequence terminates Records, Stats, End in that order."
-cases = ["c-select-restore-0035"]
+cases = ["c-select-restore-0035", "c-select-restore-0052", "c-select-restore-0053"]
 
 [[evidence]]
 kind = "aws-doc"

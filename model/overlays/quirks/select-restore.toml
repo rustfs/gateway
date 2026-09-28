@@ -289,7 +289,7 @@ mutation_dimension = "select_response_shape"
 contract_value = "event_stream"
 target  = "SelectObjectContent"
 summary = "SelectObjectContent returns the event-stream answer shape and bypasses the document encoder."
-cases   = ["c-select-restore-0035"]
+cases   = ["c-select-restore-0035", "c-select-restore-0054"]
 
   [[quirk.evidence]]
   kind    = "aws-doc"
@@ -696,7 +696,7 @@ mutation_dimension = "select_event_status"
 contract_value = "success_200"
 target = "SelectObjectContent"
 summary = "A successful select event stream uses status 200."
-cases = ["c-select-restore-0035"]
+cases = ["c-select-restore-0035", "c-select-restore-0052", "c-select-restore-0054"]
   [[quirk.evidence]]
   kind = "aws-doc"
   ref = "https://docs.aws.amazon.com/AmazonS3/latest/API/RESTSelectObjectAppendix.html"
@@ -766,7 +766,7 @@ mutation_dimension = "select_event_termination"
 contract_value = "records_stats_end"
 target = "SelectObjectContent"
 summary = "A successful event sequence terminates Records, Stats, End in that order."
-cases = ["c-select-restore-0035"]
+cases = ["c-select-restore-0035", "c-select-restore-0052", "c-select-restore-0053"]
   [[quirk.evidence]]
   kind = "aws-doc"
   ref = "https://docs.aws.amazon.com/AmazonS3/latest/API/RESTSelectObjectAppendix.html"

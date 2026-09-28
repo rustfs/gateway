@@ -7,7 +7,7 @@ contract_value = "event_stream"
 mutation_dimension = "select_response_shape"
 target = "SelectObjectContent"
 summary = "SelectObjectContent returns the event-stream answer shape and bypasses the document encoder."
-cases = ["c-select-restore-0035"]
+cases = ["c-select-restore-0035", "c-select-restore-0054"]
 
 [[evidence]]
 kind = "aws-doc"
