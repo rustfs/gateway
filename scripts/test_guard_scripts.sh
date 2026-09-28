@@ -16172,6 +16172,46 @@ mut_clock_monotonic_source_deleted() {
 expect_fail check_clock_single_source.sh \
     "the monotonic source deleted, which must fail rather than skip" mut_clock_monotonic_source_deleted
 
+mut_baseline_value_edited_by_hand() {
+    python3 - <<'PYEOF'
+import json
+from pathlib import Path
+path = Path("benches/baseline.json")
+data = json.loads(path.read_text(encoding="utf-8"))
+for entry in data["measurements"]:
+    if entry["kind"] == "allocations":
+        entry["value"] = entry["value"] + 1
+        break
+else:
+    raise SystemExit("benches/baseline.json has no allocation measurement")
+path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+PYEOF
+}
+expect_fail check_baseline_provenance.sh \
+    'a baseline number edited by hand' mut_baseline_value_edited_by_hand \
+    'digest does not match'
+
+mut_baseline_without_a_run() {
+    python3 - <<'PYEOF'
+import json
+from pathlib import Path
+path = Path("benches/baseline.json")
+data = json.loads(path.read_text(encoding="utf-8"))
+data["source"]["run_url"] = "my laptop"
+path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+PYEOF
+}
+expect_fail check_baseline_provenance.sh \
+    'a baseline naming no workflow run' mut_baseline_without_a_run \
+    'source.run_url must name a rustfs/gateway workflow run'
+
+mut_baseline_deleted() {
+    rm -f benches/baseline.json
+}
+expect_fail check_baseline_provenance.sh \
+    "the guard's own subject deleted, which must fail rather than skip" mut_baseline_deleted \
+    'required input is missing'
+
 mut_fuzz_nightly_drops_a_target() {
     python3 - <<'PYEOF'
 from pathlib import Path
