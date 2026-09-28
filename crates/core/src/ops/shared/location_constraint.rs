@@ -38,7 +38,8 @@
 //! creation sends no constraint (or an empty one), and writing `us-east-1` out explicitly is a
 //! `400 InvalidLocationConstraint` even on a us-east-1 endpoint. Nearly every S3 reimplementation
 //! has tripped on this; here it is one branch of [`resolve`], covered by conformance cases in
-//! both regions.
+//! both regions. That branch is the one thing [`RegionMatchPolicy::AcceptExplicitUsEast1`]
+//! relaxes, for deployments whose clients write the region out.
 
 use rustfs_gateway_sig::RegionSet;
 use rustfs_gateway_types::ErrorCode;
@@ -59,16 +60,26 @@ pub const MAX_CONSTRAINT_LEN: usize = 64;
 
 /// How a presented constraint is matched against the deployment's regions.
 ///
-/// **This is the configuration item.** `Strict` is the whole of what this family implements: the
-/// constraint, after [`normalize`], must name a region the deployment's [`RegionSet`] contains,
-/// and `us-east-1` must never be written explicitly. The lenient and multi-region postures are
-/// service-assembly semantics (P7-01) and get variants here when they get semantics there; the
-/// signature scope's region check must be driven by the same choice.
+/// **This is the configuration item.** Under both postures the constraint, after [`normalize`],
+/// must name a region the deployment's [`RegionSet`] contains; they differ only in whether
+/// `us-east-1` may be written out. Neither widens the served regions, so the signature scope's
+/// region check, which reads the same [`RegionSet`], is untouched by the choice. A multi-region
+/// posture is service-assembly semantics (P7-01) and gets a variant here when it gets semantics
+/// there.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum RegionMatchPolicy {
-    /// The constraint must name a served region exactly; us-east-1 must be omitted.
+    /// The constraint must name a served region exactly; us-east-1 must be omitted. AWS's rule,
+    /// and the default.
     #[default]
     Strict,
+    /// As `Strict`, except that an explicit `us-east-1` is accepted when the deployment serves
+    /// us-east-1.
+    ///
+    /// The RustFS-profile posture (rustfs/gateway#914): minio-java 9.0.3 `makeBucket` always
+    /// writes the region out, and RustFS (through s3s) creates the bucket today, so a RustFS
+    /// deployment on `Strict` would lose every minio-java bucket creation on the day it moved to
+    /// the gateway. The exact spelling only: `US-EAST-1` is an unknown region under both postures.
+    AcceptExplicitUsEast1,
 }
 
 /// Normalises a raw constraint: the empty spelling becomes "unspecified", and `EU` becomes
@@ -103,22 +114,21 @@ pub fn invalid_location_constraint() -> HandlerError {
 /// # Errors
 ///
 /// `400 InvalidLocationConstraint` when the constraint is longer than [`MAX_CONSTRAINT_LEN`],
-/// spells `us-east-1` explicitly (it must be omitted), or names a region the deployment does not
-/// serve — including every unknown or malformed name, which is deliberately the same refusal: a
+/// spells `us-east-1` explicitly under [`RegionMatchPolicy::Strict`] (it must be omitted), or
+/// names a region the deployment does not serve — including every unknown or malformed name, which is deliberately the same refusal: a
 /// distinct "no such region" answer would be a region-topology oracle.
 pub fn resolve<'a>(
     presented: Option<&'a str>,
     regions: &RegionSet,
     policy: RegionMatchPolicy,
 ) -> Result<Option<&'a str>, HandlerError> {
-    let RegionMatchPolicy::Strict = policy;
     if presented.is_some_and(|text| text.len() > MAX_CONSTRAINT_LEN) {
         return Err(invalid_location_constraint());
     }
     let Some(constraint) = normalize(presented) else {
         return Ok(None);
     };
-    if constraint == US_EAST_1 {
+    if constraint == US_EAST_1 && policy == RegionMatchPolicy::Strict {
         return Err(invalid_location_constraint());
     }
     if !regions.contains(constraint) {
@@ -214,6 +224,51 @@ mod tests {
         assert_eq!(resolved, Some(at_max.as_str()));
         let past_max = "a".repeat(MAX_CONSTRAINT_LEN + 1);
         assert!(resolve(Some(&past_max), &regions, RegionMatchPolicy::Strict).is_err());
+    }
+
+    /// Positive — the RustFS-profile posture accepts the explicit us-east-1 a us-east-1 deployment
+    /// is sent by minio-java's `makeBucket` (rustfs/gateway#914), and resolves it to that region.
+    #[test]
+    fn an_explicit_us_east_1_is_accepted_at_us_east_1_when_the_posture_allows_it() {
+        let regions = serving(&["us-east-1"]);
+        let resolved = resolve(Some("us-east-1"), &regions, RegionMatchPolicy::AcceptExplicitUsEast1).expect("accepted");
+        assert_eq!(resolved, Some("us-east-1"));
+        assert_eq!(resolve(None, &regions, RegionMatchPolicy::AcceptExplicitUsEast1).expect("accepted"), None);
+    }
+
+    /// Negative — the default posture is the AWS one: a deployment has to opt in.
+    #[test]
+    fn n_the_default_posture_is_strict() {
+        assert_eq!(RegionMatchPolicy::default(), RegionMatchPolicy::Strict);
+    }
+
+    /// Negative — the relaxation is about spelling, not about serving: an explicit us-east-1 sent
+    /// to a deployment that does not serve us-east-1 is still refused.
+    #[test]
+    fn n_an_explicit_us_east_1_is_refused_where_us_east_1_is_not_served_even_when_allowed() {
+        let regions = serving(&["eu-west-1"]);
+        let error = resolve(Some("us-east-1"), &regions, RegionMatchPolicy::AcceptExplicitUsEast1).expect_err("refused");
+        assert_eq!(*error.code(), ErrorCode::INVALID_LOCATION_CONSTRAINT);
+    }
+
+    /// Negative — everything but the us-east-1 spelling is judged exactly as `Strict` judges it:
+    /// unserved regions, junk, the alias of an unserved region, and an oversized constraint.
+    #[test]
+    fn n_every_other_refusal_is_unchanged_by_the_relaxed_posture() {
+        let regions = serving(&["us-east-1"]);
+        let oversized = "a".repeat(MAX_CONSTRAINT_LEN + 1);
+        for hostile in [
+            "eu-west-1",
+            "EU",
+            "US-EAST-1",
+            "us-east-1 ",
+            "mars-north-1",
+            "\u{0}",
+            oversized.as_str(),
+        ] {
+            let error = resolve(Some(hostile), &regions, RegionMatchPolicy::AcceptExplicitUsEast1).expect_err("refused");
+            assert_eq!(*error.code(), ErrorCode::INVALID_LOCATION_CONSTRAINT, "{hostile:?}");
+        }
     }
 
     /// Negative — case matters: the alias is `EU`, not `eu`, and a lowercased spelling is an
