@@ -26,9 +26,12 @@ method = "GET"
 target = "/"
 http_version = "h2"
 
+# Written 100 ms after the preface magic so the peer's initial connection grant is already on the wire
+# before the violation reaches it. The expectation is ordered, so a host too slow for that fails this case; it cannot pass it.
 [[request.h2_frames]]
 type = "settings"
 payload_hex = "000480000000"
+delay_ms = 100
 
 [[request.h2_frames]]
 type = "headers"
@@ -38,5 +41,5 @@ payload_hex = "828684410e73332e6578616d706c652e636f6d"
 
 [expect]
 kind = "connection_reset"
-h2_control_frames = [{ type = "goaway", last_stream_id = 0, error_code_any_of = [1, 2, 3] }]
+h2_control_frames = [{ type = "window_update", stream_id = 0, increment = 2031617 }, { type = "goaway", last_stream_id = 0, error_code_any_of = [1, 2, 3] }]
 socket_read_after = "eof"
