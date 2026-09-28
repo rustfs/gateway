@@ -49,6 +49,9 @@ fn dto_files() -> BTreeMap<String, String> {
             let text = path.to_string_lossy().replace('\\', "/");
             text.split_once("generated/dto/").map(|(_, tail)| (tail.to_owned(), body))
         })
+        // `seam/` shares the directory for packaging (ADR-0005) but is not dto: it is the compat
+        // seam (`emit::seam`), mounted `#[rustfmt::skip]`, and destructures s3s structs on purpose.
+        .filter(|(tail, _)| !tail.starts_with("seam/"))
         .collect()
 }
 

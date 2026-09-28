@@ -61,6 +61,15 @@ use crate::persistence::{
     ReplicationBehaviorProjection,
 };
 
+/// The generated half of the `s3s_0_17_0` seam, mounted here so its `#[path]` goes through the
+/// `crates/types/generated` symlink like every other generated file (ADR-0005). Not formatted by
+/// hand: the generator's output is what is reviewed. Reach it as `s3s_0_17_0::generated`.
+#[cfg(feature = "compat-s3s-0-17-0")]
+#[rustfmt::skip]
+#[doc(hidden)]
+#[path = "../generated/seam/mod.rs"]
+pub mod seam_generated_0_17_0;
+
 /// The migration seam against s3s `0.17.0`, the revision RustFS `main` links
 /// (`OracleRevision::Candidate`): what the RustFS ring-2 adapter converts through, and what the
 /// goldens decode, encode and context diffs measure a second time.
@@ -77,7 +86,13 @@ pub mod s3s_0_17_0 {
     pub use ::s3s_candidate as s3s;
 
     pub mod error;
+    /// Every covered operation's conversions, generated from the IR against the s3s 0.17.0 facts
+    /// (rustfs/gateway#967).
+    pub use super::seam_generated_0_17_0 as generated;
+    #[cfg(test)]
+    mod generated_tests;
     pub mod get_bucket_location;
+    pub mod leaf;
     pub mod put_object;
     pub mod request_context;
 
