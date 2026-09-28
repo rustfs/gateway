@@ -27,8 +27,9 @@ use std::path::{Path, PathBuf};
 
 use rustfs_gateway_core::ops::shared::event_stream::{EventKind, EventStreamError, MAX_PAYLOAD_BYTES};
 
+// Shared with `select_records_framing`, which reads frames back with the same independent reader.
 #[path = "../../../fuzz/support/event_stream_frame.rs"]
-mod property;
+pub(crate) mod property;
 
 use property::{Op, Summary, check, decode, reference_crc32, reference_frame, run};
 
@@ -149,7 +150,8 @@ fn n_the_payload_ceiling_is_exact() {
         summary(0, &[PayloadTooLarge], false)
     );
     assert_eq!(run(&[Op::Records(at)]), summary(1, &[], false));
-    assert_eq!(run(&[Op::Records(over)]), summary(0, &[PayloadTooLarge], false));
+    // A sequence frames an oversized payload as consecutive messages instead of refusing it.
+    assert_eq!(run(&[Op::Records(over)]), summary(2, &[], false));
 }
 
 #[test]
