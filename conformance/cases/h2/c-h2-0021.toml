@@ -1,0 +1,49 @@
+# c-h2-0021 — client-authored HTTP/2 control frame.
+
+[case]
+id = "c-h2-0021"
+schema_version = 5
+title = "An acknowledgement PING on a nonzero stream is still a connection error"
+rationale = "The ACK flag does not exempt a PING from its connection scope; dropping a stream-bound ACK silently would accept a malformed frame."
+polarity = "negative"
+tags = ["framing"]
+timeout_ms = 1500
+quirks = []
+applies_to = { http_versions = ["h2"], tls = "forbidden" }
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9113.html#section-6.7"
+summary = "A PING frame received with a stream identifier other than zero must be answered with a connection error of type PROTOCOL_ERROR."
+kind = "rfc"
+
+[[setup.buckets]]
+name = "conf-cors-rt"
+
+[request]
+method = "OPTIONS"
+target = "/conf-cors-rt/key.txt"
+http_version = "h2"
+
+[[request.h2_frames]]
+type = "settings"
+
+# Written 100 ms after SETTINGS so the peer's initial grant precedes the violation; the ordered
+# expectation fails, rather than passes, on a host too slow for that.
+
+[[request.h2_frames]]
+type = "ping"
+stream_id = 1
+flags = ["ack"]
+payload_hex = "0102030405060708"
+delay_ms = 100
+
+[[request.h2_frames]]
+type = "headers"
+stream_id = 1
+flags = ["end_headers", "end_stream"]
+payload_hex = "02074f5054494f4e538604152f636f6e662d636f72732d72742f6b65792e747874410e73332e6578616d706c652e636f6d"
+
+[expect]
+kind = "connection_reset"
+h2_control_frames = [{ type = "window_update", stream_id = 0, increment = 2031617 }, { type = "goaway", last_stream_id = 0, error_code = 1 }]
+# No socket_read_after: the frames after the violation race the peer's close.

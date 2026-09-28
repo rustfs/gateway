@@ -183,3 +183,20 @@ fn tcp_reset_after_headers_has_no_rst_stream_evidence() {
     assert_eq!(observed.connection_after, Some(ConnectionState::Reset));
     assert_eq!(observed.h2_control_frames, Some(Vec::new()));
 }
+
+/// Negative and measured — EOF after a head and three DATA octets is an abrupt close whose
+/// received-byte count is the three octets that arrived, not an unavailable fact.
+#[test]
+fn eof_after_partial_data_reports_the_bytes_received_before_it() {
+    let (addr, peer) = peer(anonymous_wire_image().len(), |stream| {
+        stream
+            .write_all(&hex("000001 01 04 00000001 88 000003 00 00 00000001 616263"))
+            .expect("response head and partial body written");
+    });
+    let observed = execute(addr, &anonymous_script(), Duration::from_secs(2)).expect("EOF measured");
+    peer.join().expect("peer closes");
+    assert_eq!(observed.outcome, Outcome::StreamError);
+    assert_eq!(observed.stream_termination, Some(StreamTermination::AbruptClose));
+    assert_eq!(observed.body, b"abc");
+    assert_eq!(observed.body_bytes_before_error, Some(3));
+}

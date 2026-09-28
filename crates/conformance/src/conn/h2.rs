@@ -117,6 +117,12 @@ struct Script {
     stream_id: u32,
     /// The dynamic-table ceiling this client advertised, which bounds the peer's HPACK encoder.
     header_table_size: usize,
+    /// The opaque octets of the last PING authored after a client RST_STREAM on the selected
+    /// stream. Its acknowledgement proves the peer processed the reset, and ends the observation.
+    reset_barrier: Option<Vec<u8>>,
+    /// Whether the script authors a typed PING, the version-5 construct under which received
+    /// acknowledgements are recorded. A version-4 list of controls never contains one.
+    observes_pings: bool,
 }
 
 fn refused(reason: String) -> SutError {
@@ -176,10 +182,14 @@ fn compile(wire: &Wire) -> Result<Script, SutError> {
         ));
     }
     let stream_id = stream_id.unwrap_or_default();
+    let reset_barrier = control::reset_barrier(&wire.h2_frames, &envelopes, stream_id)?;
+    let observes_pings = wire.h2_frames.iter().any(|frame| frame.kind == "ping");
     Ok(Script {
         envelopes,
         stream_id,
         header_table_size,
+        reset_barrier,
+        observes_pings,
     })
 }
 
@@ -445,6 +455,8 @@ struct Response {
     control_frames: Vec<ObservedH2ControlFrame>,
     /// Why reading stopped before the peer ended the stream, when it did.
     cut_short: Option<ReadFailure>,
+    /// The acknowledgement of the reset barrier PING arrived.
+    client_reset: bool,
 }
 
 struct Receiver {
@@ -498,6 +510,18 @@ impl Receiver {
                 }
                 flow.received_settings(&frame.payload, frame.flags)?;
             }
+            PING if frame.flags & ACK != 0 && script.observes_pings => {
+                let opaque_data = <[u8; 8]>::try_from(frame.payload.as_slice())
+                    .ok()
+                    .filter(|_| frame.stream_id == 0)
+                    .ok_or_else(|| refused("the peer's PING acknowledgement must be eight octets on stream zero".to_owned()))?;
+                response.control_frames.push(ObservedH2ControlFrame::PingAck { opaque_data });
+                if script.reset_barrier.as_deref() == Some(frame.payload.as_slice()) {
+                    response.client_reset = true;
+                    return Ok(true);
+                }
+            }
+            // A peer's own PING is read and left unanswered, like SETTINGS; nothing here authors a reply.
             PING | PRIORITY => {}
             WINDOW_UPDATE => {
                 let bytes = <[u8; 4]>::try_from(frame.payload.as_slice())
@@ -655,7 +679,9 @@ fn observe(
         .control_frames
         .iter()
         .any(|frame| matches!(frame, ObservedH2ControlFrame::ResetStream { stream_id: received, .. } if *received == stream_id));
-    let (outcome, stream_termination, body_bytes_before_error, events, notes) = if reset_selected_stream {
+    let (outcome, stream_termination, body_bytes_before_error, events, notes) = if response.client_reset {
+        (Outcome::ClientReset, None, None, Vec::new(), Vec::new())
+    } else if reset_selected_stream {
         if response.status.is_some() {
             (
                 Outcome::StreamError,
@@ -685,10 +711,21 @@ fn observe(
                 vec![format!("the peer's frames could not be read: {detail}")],
             ),
             (Some(_), None) => (Outcome::ConnectionReset, None, None, Vec::new(), Vec::new()),
-            (Some(ReadFailure::Reset), Some(_)) => {
-                (Outcome::StreamError, Some(StreamTermination::Reset), None, Vec::new(), Vec::new())
-            }
-            (Some(_), Some(_)) => (Outcome::StreamError, Some(StreamTermination::AbruptClose), None, Vec::new(), Vec::new()),
+            // The unpadded DATA octets that arrived before the socket ended are measured.
+            (Some(ReadFailure::Reset), Some(_)) => (
+                Outcome::StreamError,
+                Some(StreamTermination::Reset),
+                Some(u64::try_from(response.body.len()).unwrap_or(u64::MAX)),
+                Vec::new(),
+                Vec::new(),
+            ),
+            (Some(_), Some(_)) => (
+                Outcome::StreamError,
+                Some(StreamTermination::AbruptClose),
+                Some(u64::try_from(response.body.len()).unwrap_or(u64::MAX)),
+                Vec::new(),
+                Vec::new(),
+            ),
         }
     };
     Ok(Observation {

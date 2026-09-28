@@ -90,6 +90,10 @@ fn read_frame(frame: &Value) -> Option<ExpectedFrame> {
     let error_code = exact_code.and_then(Value::as_integer);
     let alternatives = frame.read("h2ControlFrame.error_code_any_of");
     let increment = frame.read("h2ControlFrame.increment");
+    let payload_hex = frame.read("h2ControlFrame.payload_hex");
+    if payload_hex.is_some() && kind != Some("ping") {
+        return None;
+    }
     match kind? {
         "rst_stream" if last_stream_id.is_none() && increment.is_none() && alternatives.is_none() => {
             let error_code = u32::try_from(error_code?).ok()?;
@@ -133,6 +137,16 @@ fn read_frame(frame: &Value) -> Option<ExpectedFrame> {
                 .ok()
                 .filter(|value| (1..=0x7fff_ffff).contains(value))?;
             Some(ExpectedFrame::Exact(ObservedH2ControlFrame::WindowUpdate { stream_id, increment }))
+        }
+        "ping"
+            if stream_id.is_none()
+                && last_stream_id.is_none()
+                && exact_code.is_none()
+                && alternatives.is_none()
+                && increment.is_none() =>
+        {
+            let opaque_data = <[u8; 8]>::try_from(super::decode_hex(payload_hex?.as_str()?)?).ok()?;
+            Some(ExpectedFrame::Exact(ObservedH2ControlFrame::PingAck { opaque_data }))
         }
         _ => None,
     }

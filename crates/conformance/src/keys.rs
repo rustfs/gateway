@@ -318,6 +318,12 @@ pub const DECLARED: &[(&str, Disposition, &str)] = &[
     ),
     #[cfg(not(feature = "production-transports"))]
     (
+        "h2ControlFrame.payload_hex",
+        Disposition::BehindRefusal("requestSpec.h2_frames"),
+        "the socketless target refuses the authored frame request before judging received controls; the production Hyper target reads this key",
+    ),
+    #[cfg(not(feature = "production-transports"))]
+    (
         "h2ControlFrame.error_code_any_of",
         Disposition::BehindRefusal("requestSpec.h2_frames"),
         "the socketless target refuses the authored frame request before judging received controls; the production Hyper target reads this key",

@@ -41,6 +41,9 @@ pub enum Outcome {
     Hang,
     /// The peer reset the connection without answering.
     ConnectionReset,
+    /// The client reset the selected HTTP/2 stream, and the acknowledgement of a PING it wrote
+    /// afterwards shows the peer processed that reset.
+    ClientReset,
 }
 
 impl Outcome {
@@ -54,6 +57,7 @@ impl Outcome {
             Outcome::EventStream => "event_stream",
             Outcome::Hang => "hang",
             Outcome::ConnectionReset => "connection_reset",
+            Outcome::ClientReset => "client_reset",
         }
     }
 }
@@ -396,6 +400,11 @@ pub enum ObservedH2ControlFrame {
         last_stream_id: u32,
         /// The numeric wire code, including codes unknown to this runner.
         error_code: u32,
+    },
+    /// A PING acknowledgement: eight opaque octets on stream zero with the ACK flag set.
+    PingAck {
+        /// The echoed opaque data.
+        opaque_data: [u8; 8],
     },
     /// A complete four-octet RST_STREAM payload on a nonzero stream.
     ResetStream {

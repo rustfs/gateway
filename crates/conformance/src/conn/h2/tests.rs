@@ -554,3 +554,5 @@ mod h2_duplex_tests;
 mod h2_corpus_tests;
 
 mod h2_client_control_tests;
+
+mod h2_ping_tests;
