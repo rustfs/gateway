@@ -53,6 +53,9 @@ dhat = { workspace = true }
 # The pagination property test's generator. Same reasoning: dev-only, and the properties it states
 # are about the reference backend rather than about the corpus.
 proptest = { workspace = true }
+# rustfs/backlog#1763: the loader half of the corpus-to-case round trip. The corpus crate is ring 0
+# and cannot depend on this one, so the draft it renders is loaded here, in tests only.
+rustfs-gateway-corpus = { workspace = true }
 rcgen = { workspace = true }
 
 [dependencies]

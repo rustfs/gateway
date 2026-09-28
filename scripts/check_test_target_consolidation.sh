@@ -307,6 +307,7 @@ conformance_modules = (
     "bucket_lifecycle",
     "copy_family",
     "corpus",
+    "corpus_drafts",
     "domain_wiring",
     "encryption_blocked_types",
     "lifecycle_family",
