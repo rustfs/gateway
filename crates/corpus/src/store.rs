@@ -178,6 +178,58 @@ fn sha256_hex(bytes: &[u8]) -> String {
     base64::to_hex(&hasher.finalize())
 }
 
+/// A complete, unframed recording's declared `Content-Length` must be the length of the body it
+/// recorded.
+///
+/// A recording that disagrees replays a request no client sent: the stacks it is replayed into
+/// wait for bytes that never come, or read a body the client never framed.
+/// `corpus/object/DeleteObjects.jsonl:1` was hand-authored with 116 declared over an 83-byte body,
+/// and nothing refused it. Left alone: a partial head capture (the recorder did not see the whole
+/// request), aws-chunked or chunked-transfer framing (the length counts framing the entry does not
+/// store), and a body that ends in `close` or `half_close` (a short body is the point of such an
+/// entry). No declared length is not checked.
+///
+/// # Errors
+///
+/// The disagreement, naming both numbers.
+pub fn check_declared_length(entry: &Entry) -> Result<(), String> {
+    if entry.capture != crate::schema::Capture::HeadFull || entry.has_chunk_framing() {
+        return Ok(());
+    }
+    if entry
+        .header_values("transfer-encoding")
+        .any(|value| value.to_ascii_lowercase().contains("chunked"))
+    {
+        return Ok(());
+    }
+    let chunks = entry.chunks.as_deref().unwrap_or_default();
+    if chunks
+        .iter()
+        .any(|chunk| matches!(chunk, crate::schema::Chunk::Control { action, .. } if action == "close" || action == "half_close"))
+    {
+        return Ok(());
+    }
+    let Some(declared) = entry.header_values("content-length").next() else {
+        return Ok(());
+    };
+    let mut recorded = 0usize;
+    for chunk in chunks {
+        if let crate::schema::Chunk::Data { bytes_b64, .. } = chunk {
+            recorded += crate::base64::decode(bytes_b64)
+                .map_err(|error| format!("a body chunk does not decode: {error}"))?
+                .len();
+        }
+    }
+    match declared.trim().parse::<usize>() {
+        Ok(length) if length == recorded => Ok(()),
+        Ok(_) => Err(format!(
+            "content-length {} is declared over {recorded} recorded body bytes",
+            declared.trim()
+        )),
+        Err(_) => Err(format!("content-length {declared:?} is not a length")),
+    }
+}
+
 /// Render the manifest for a set of buckets whose files hold `rendered` bytes.
 ///
 /// The manifest is the corpus's version record: schema version, per-bucket counts with a
@@ -352,6 +404,9 @@ pub fn verify(root: &Path) -> Result<VerifyReport, Vec<String>> {
                 for finding in refusal.findings {
                     violations.push(format!("{display}:{line}: {finding}"));
                 }
+            }
+            if let Err(reason) = check_declared_length(entry) {
+                violations.push(format!("{display}:{line}: {reason}"));
             }
             *sources.entry((entry.src.clone(), sut_name(entry.sut))).or_default() += 1;
             if entry.has_chunk_framing() {

@@ -107,6 +107,13 @@ impl Drop for Capture {
                 None
             }
         };
+        // A head that declares a body, with no body recorded, would be written as an entry that
+        // claims a request no client sent (its Content-Length over nothing) and replays as one.
+        // It is counted above and not written; a head that declares no body is still worth its
+        // route and response.
+        if body.is_none() && declares_body(&head.headers) {
+            return;
+        }
         let reserved = body.as_ref().map_or(0, Vec::len);
         let response = self.response.get_mut().ok().and_then(Option::take);
         self.sink.submit(RawRecord {
@@ -119,6 +126,14 @@ impl Drop for Capture {
         });
         self.sink.release(reserved);
     }
+}
+
+/// Whether a request head declares a body: a non-zero `Content-Length`, or any
+/// `Transfer-Encoding`.
+fn declares_body(headers: &[(String, String)]) -> bool {
+    headers.iter().any(|(name, value)| {
+        name.eq_ignore_ascii_case("transfer-encoding") || (name.eq_ignore_ascii_case("content-length") && value.trim() != "0")
+    })
 }
 
 /// The copy the tap is accumulating.

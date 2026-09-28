@@ -62,8 +62,10 @@ pub struct RecorderStats {
     pub unrouted: u64,
     /// Requests whose head was not representable as text; passed through unrecorded.
     pub unrepresentable_head: u64,
-    /// Entries written without a body because the whole body was not observed: it exceeded a
-    /// cap, or the inner service stopped reading before its end.
+    /// Requests whose whole body was not observed: it exceeded a cap, or the inner service
+    /// stopped reading before its end. Written without a body when the head declares none, and
+    /// not written at all when it declares one, since that entry would claim a body nobody
+    /// measured.
     pub body_not_recorded: u64,
     /// Admitted entries that failed to reach the file.
     pub write_errors: u64,

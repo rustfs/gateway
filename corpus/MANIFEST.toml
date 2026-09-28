@@ -2,9 +2,9 @@
 # Regenerate and review in an explicit pull request: a corpus change changes every
 # differential result computed from it, so it is never an automatic commit.
 schema_version = 1
-buckets = 82
-entries = 239
-bytes = 272032
+buckets = 73
+entries = 225
+bytes = 257101
 chunk_framed_entries = 12
 entries_from_production_server = 0
 
@@ -349,16 +349,6 @@ bytes = 980
 sha256 = "7253d5f05823132ac76e8dfbdbb1d53cea9d7dd6d00d35c0971315a7f069f292"
 
 [[bucket]]
-path = "bucket/PutBucketAccelerateConfiguration.jsonl"
-op = "PutBucketAccelerateConfiguration"
-family = "bucket"
-entries = 1
-chunked = 0
-trailers = 0
-bytes = 1088
-sha256 = "99451c8c84cba817871c46905fecf3ca0a9869b5d7462ffa5f3f40df5c8a4b7e"
-
-[[bucket]]
 path = "bucket/PutBucketAcl.jsonl"
 op = "PutBucketAcl"
 family = "bucket"
@@ -372,21 +362,11 @@ sha256 = "63470d6be34839fa6f81fa9878541585c6ad166ca0e98917d514c57369dbbd7a"
 path = "bucket/PutBucketCors.jsonl"
 op = "PutBucketCors"
 family = "bucket"
-entries = 4
+entries = 3
 chunked = 0
 trailers = 0
-bytes = 2253
-sha256 = "5f97fa557ae0bfb347e9f8a3dce12eccaa1234bf13d5f1243c7e5a6b942bf74d"
-
-[[bucket]]
-path = "bucket/PutBucketEncryption.jsonl"
-op = "PutBucketEncryption"
-family = "bucket"
-entries = 1
-chunked = 0
-trailers = 0
-bytes = 1075
-sha256 = "33b03bcf828a86768bc7c5237548f0375609a474e522f311aa11a4a2941afab7"
+bytes = 1190
+sha256 = "068abf142103080150c326a4d63ee6f16fc009be299eb2074a29723cdb4d5fe2"
 
 [[bucket]]
 path = "bucket/PutBucketLifecycleConfiguration.jsonl"
@@ -397,26 +377,6 @@ chunked = 0
 trailers = 0
 bytes = 2747
 sha256 = "5aadc0a11d9574d836169a74bdf426a3198fd8c015d539fd331473b1fda98b30"
-
-[[bucket]]
-path = "bucket/PutBucketLogging.jsonl"
-op = "PutBucketLogging"
-family = "bucket"
-entries = 1
-chunked = 0
-trailers = 0
-bytes = 1068
-sha256 = "a7b5c2b782c0d5c0e38e82220c494e315937115d8230c620c67475e0219a5d20"
-
-[[bucket]]
-path = "bucket/PutBucketNotificationConfiguration.jsonl"
-op = "PutBucketNotificationConfiguration"
-family = "bucket"
-entries = 1
-chunked = 0
-trailers = 0
-bytes = 1012
-sha256 = "51add342ba8da23007f6ab3d08f513d1a0b1ee50abd5917b10db0a03498182eb"
 
 [[bucket]]
 path = "bucket/PutBucketPolicy.jsonl"
@@ -432,31 +392,11 @@ sha256 = "bbc461e49e788cb5485c9a5094361f2f114a027eed68feb615d226c7230332b2"
 path = "bucket/PutBucketReplication.jsonl"
 op = "PutBucketReplication"
 family = "bucket"
-entries = 4
+entries = 3
 chunked = 0
 trailers = 0
-bytes = 2614
-sha256 = "4cdd0c6d32e9faf301930de13eb3d04b4b142a22a0144a72018729b0a8771f13"
-
-[[bucket]]
-path = "bucket/PutBucketRequestPayment.jsonl"
-op = "PutBucketRequestPayment"
-family = "bucket"
-entries = 1
-chunked = 0
-trailers = 0
-bytes = 1083
-sha256 = "94f6712a5bb4ebe4dbb185c702b38a3ceb81438825c689dc59a22523e916010e"
-
-[[bucket]]
-path = "bucket/PutBucketTagging.jsonl"
-op = "PutBucketTagging"
-family = "bucket"
-entries = 1
-chunked = 0
-trailers = 0
-bytes = 1069
-sha256 = "8273260b91b3034b1397b8d7de5c1da79e04474dbc1d6f23282149e22f557348"
+bytes = 1537
+sha256 = "3c21140db8ff723f56ca54c03afd2996f8c83d64d9be32551f4d3f1848d3537a"
 
 [[bucket]]
 path = "bucket/PutBucketVersioning.jsonl"
@@ -467,16 +407,6 @@ chunked = 0
 trailers = 0
 bytes = 870
 sha256 = "49b4e7a224b2eb6457cf9f3e97e843b7a17fdbe65610a788ec6e57b515c8a48d"
-
-[[bucket]]
-path = "bucket/PutBucketWebsite.jsonl"
-op = "PutBucketWebsite"
-family = "bucket"
-entries = 1
-chunked = 0
-trailers = 0
-bytes = 1069
-sha256 = "a7af74313209937ccf8096d08ec35fd44b6975dedc45cb93aab2f21220515329"
 
 [[bucket]]
 path = "multipart/AbortMultipartUpload.jsonl"
@@ -585,8 +515,8 @@ family = "object"
 entries = 3
 chunked = 0
 trailers = 0
-bytes = 1973
-sha256 = "ab2c0da896ebbf7a2bf3f0ba7dd02f955f0000e46a406f4780dbcfad6f2c3d92"
+bytes = 1972
+sha256 = "9404b9234422fecd7cc4d63b07b3a45ab1f7eb57675bf3f3d20921c69a2be279"
 
 [[bucket]]
 path = "object/GetObject.jsonl"
@@ -729,34 +659,14 @@ bytes = 1030
 sha256 = "b797dcb9797160d398698da1bf48d9c854938367ff684a19dda420bb9dbae36a"
 
 [[bucket]]
-path = "object/PutObjectLegalHold.jsonl"
-op = "PutObjectLegalHold"
-family = "object"
-entries = 1
-chunked = 0
-trailers = 0
-bytes = 1079
-sha256 = "117094220780046bee8432b3e0663af37c9b384a605f2668ef86c19c4a83a1e4"
-
-[[bucket]]
-path = "object/PutObjectLockConfiguration.jsonl"
-op = "PutObjectLockConfiguration"
-family = "object"
-entries = 1
-chunked = 0
-trailers = 0
-bytes = 1083
-sha256 = "41fd89ebabf49a41ea2c98b39538d06cb95dbbb5d2aa8e546a9d611d52b91da5"
-
-[[bucket]]
 path = "object/PutObjectRetention.jsonl"
 op = "PutObjectRetention"
 family = "object"
-entries = 3
+entries = 2
 chunked = 0
 trailers = 0
-bytes = 1724
-sha256 = "715238e822d15719f5789aec34dc54343634378c3da81426c24d92cb2edb1c5d"
+bytes = 645
+sha256 = "79d8ef02d735b87a7c01099a0743887aaa2733a8c25d82ff3e128d8f3f37a770"
 
 [[bucket]]
 path = "object/PutObjectTagging.jsonl"
@@ -772,21 +682,21 @@ sha256 = "f6735aaf83212f5922c1b529cf3373e9da9ab8705ed9adb87fe84ae8fa9c0dec"
 path = "object/RestoreObject.jsonl"
 op = "RestoreObject"
 family = "object"
-entries = 2
+entries = 1
 chunked = 0
 trailers = 0
-bytes = 1535
-sha256 = "a92e144a6dbbdd6a3d3c18de5d5404ec6e19422bd01dd43cb0673859bc926f37"
+bytes = 463
+sha256 = "4792064299f57c6075fa6c528e5f1cae5ac4adbf70818e09a60759b65ac86543"
 
 [[bucket]]
 path = "object/SelectObjectContent.jsonl"
 op = "SelectObjectContent"
 family = "object"
-entries = 2
+entries = 1
 chunked = 0
 trailers = 0
-bytes = 1746
-sha256 = "c1e0c0e3d0a6776400411df496bb6531c0625b0625e27d49ad49be08ed94a4a8"
+bytes = 733
+sha256 = "ef4fbe66ca8bab86c3e0c262bde8f3aca5c2000fa3a0aa92cd422194a3cb5c99"
 
 [[bucket]]
 path = "other/DeletePublicAccessBlock.jsonl"
@@ -831,7 +741,7 @@ sha256 = "83acfd2b96fc3a2e6d960a81ddb16b58f906bfbfa7f609424aa597b7d5945a85"
 [[source]]
 id = "client-matrix:boto3@1.42.96"
 sut = "gateway-fs-reference"
-entries = 94
+entries = 80
 
 [[source]]
 id = "client-matrix:mc@v0.0.0-20250416181326-b00526b153a3"
