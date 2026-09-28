@@ -145,6 +145,19 @@ cargo +nightly fuzz run encode_diff fuzz/corpus/encode_diff
 
 A decode finding becomes a conformance case draft with `fuzz-to-case` (`conformance/cases/_from_fuzz/README.md` has the steps); `conformance/cases/naming/c-naming-0033.toml` is the first case made that way.
 
+## Shadow proxy
+
+`shadow-proxy` sits in front of a real S3 server, forwards every byte both ways unchanged, and on the side decodes a copy of each request with both stacks, logging one verdict per request: `agree`, `known <ids>`, `DIFF <findings>`, or `skip: <why>`. The copy is judged on its own thread through a bounded queue the traffic never waits on; a full queue sheds the copy and counts it. The signature is removed before the diff (a recorded signature cannot be replayed and the diff compares codecs), chunked transfer framing is replaced by a length, and a signed chunk framing is skipped. Only requests are compared: the upstream's answers go to the client untouched.
+
+```bash
+cargo build --release -p rustfs-gateway-difftest --bin shadow-proxy
+# In front of a local RustFS (slot A: point clients at 9001 instead of 9000):
+target/release/shadow-proxy --listen 127.0.0.1:9001 --upstream 127.0.0.1:9000 --log shadow.log
+grep -v ' agree$' shadow.log   # every request that was not identical on both stacks
+```
+
+`--queue N` bounds the copies waiting to be judged (default 1024), `--body-cap BYTES` the largest body compared (default 16 MiB; larger bodies are forwarded and logged as skipped). It speaks plaintext HTTP/1.1 only: put it behind the TLS terminator, or in front of a plaintext listener.
+
 ## What it does not cover
 
 - **DTO semantics and persistence.** This crate compares what each stack decodes from the wire,
