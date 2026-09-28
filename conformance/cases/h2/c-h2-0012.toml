@@ -1,0 +1,48 @@
+# c-h2-0012 — client-authored HTTP/2 control frame.
+
+[case]
+id = "c-h2-0012"
+schema_version = 4
+title = "RST_STREAM on stream zero is a connection PROTOCOL_ERROR"
+rationale = "A reset naming the connection stream is malformed; accepting it would let a client reset nothing and keep the connection."
+polarity = "negative"
+tags = ["framing"]
+timeout_ms = 1500
+quirks = []
+applies_to = { http_versions = ["h2"], tls = "forbidden" }
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9113.html#section-6.4"
+summary = "A RST_STREAM frame carrying stream identifier zero must be treated as a connection error of type PROTOCOL_ERROR."
+kind = "rfc"
+
+[[setup.buckets]]
+name = "conf-cors-rt"
+
+[request]
+method = "OPTIONS"
+target = "/conf-cors-rt/key.txt"
+http_version = "h2"
+
+[[request.h2_frames]]
+type = "settings"
+
+[[request.h2_frames]]
+type = "rst_stream"
+stream_id = 0
+error_code = "CANCEL"
+# Written 100 ms after SETTINGS so the peer's initial connection grant is already on the wire before the
+# violation reaches it. The expectation is ordered, so a host too slow for that fails this case; it cannot pass it.
+delay_ms = 100
+
+[[request.h2_frames]]
+type = "headers"
+stream_id = 1
+flags = ["end_headers", "end_stream"]
+payload_hex = "02074f5054494f4e538604152f636f6e662d636f72732d72742f6b65792e747874410e73332e6578616d706c652e636f6d"
+
+[expect]
+kind = "connection_reset"
+h2_control_frames = [{ type = "window_update", stream_id = 0, increment = 2031617 }, { type = "goaway", last_stream_id = 0, error_code = 1 }]
+# No socket_read_after: the authored frames after the offending one race the peer's close, so EOF
+# versus TCP reset is decided by this client's own trailing write, not by the server.

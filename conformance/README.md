@@ -144,6 +144,23 @@ unpadded DATA payload writes at the first response head or a pre-head reset; pad
 leaves that application-byte count unavailable. An unfinished script is reported explicitly.
 This support does not extend to TLS or multiple concurrent streams.
 
+Authored `rst_stream`, `goaway`, `priority` and `raw` frames are written exactly as declared, and
+the peer's reaction is observed like any other: a status, the received controls, and measured
+termination. `rst_stream` and `goaway` take either `error_code` or a literal `payload_hex`, never
+both. `error_code` is an RFC 9113 section 7 name such as `CANCEL` or `NO_ERROR`, or `0x` followed by
+one to eight hexadecimal digits for an unregistered code. A `goaway` built from `error_code` carries
+last-stream identifier zero, because a client has accepted no server-initiated stream, and defaults
+to stream zero; spell any other last-stream identifier or debug data with `payload_hex`. `priority`
+always spells its five-octet payload. None of the four accept `flags` or `increment`. A `raw` frame's
+`payload_hex` is one complete frame, header included, whose declared length must equal the octets
+that follow; it takes no `stream_id` or `error_code`, keeps the reserved stream-identifier bit as
+written, and may not spell DATA, HEADERS, SETTINGS, WINDOW_UPDATE or CONTINUATION, whose typed forms
+drive the runner's stream and credit accounting. PING, unknown extension types and deliberately
+unusual flags are written as `raw` frames. A client reset of the selected stream is not an end
+condition: nothing on the wire says the peer has processed it, so the observation still ends only on
+a peer fact or the deadline. When an authored violation follows the peer's initial grant, delay it
+so the grant's arrival order is not left to scheduling.
+
 `expect.socket_read_after` independently asserts `no_termination_observed`, `eof`, or `reset`.
 These values describe receive-side reads and a bounded final socket probe, not both TCP directions,
 future socket state, or connection reusability. Missing measurements fail even an expectation of

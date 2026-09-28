@@ -1,0 +1,55 @@
+# c-h2-0010 — client-authored HTTP/2 control frame.
+
+[case]
+id = "c-h2-0010"
+schema_version = 4
+title = "A client GOAWAY after the request does not cancel the in-flight response"
+rationale = "A client GOAWAY limits only server-initiated streams; the response is held at one byte of credit until after the GOAWAY, so it can only complete if the peer keeps serving stream 1 after reading it."
+polarity = "positive"
+tags = ["framing"]
+timeout_ms = 1500
+quirks = []
+applies_to = { http_versions = ["h2"], tls = "forbidden" }
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9113.html#section-6.8"
+summary = "The last-stream identifier in GOAWAY bounds streams initiated by the receiver; the sender's own earlier streams stay in progress."
+kind = "rfc"
+
+[[setup.buckets]]
+name = "conf-cors-rt"
+
+[request]
+method = "OPTIONS"
+target = "/conf-cors-rt/key.txt"
+http_version = "h2"
+
+# One byte of stream credit stalls the response after its first DATA octet (c-h2-0003).
+[[request.h2_frames]]
+type = "settings"
+payload_hex = "000400000001"
+
+[[request.h2_frames]]
+type = "headers"
+stream_id = 1
+flags = ["end_headers", "end_stream"]
+payload_hex = "02074f5054494f4e538604152f636f6e662d636f72732d72742f6b65792e747874410e73332e6578616d706c652e636f6d"
+
+[[request.h2_frames]]
+type = "goaway"
+error_code = "NO_ERROR"
+delay_ms = 80
+
+# TCP delivers this grant after the GOAWAY, so the rest of the body is sent after the peer read it.
+[[request.h2_frames]]
+type = "window_update"
+stream_id = 1
+increment = 65535
+
+[expect]
+kind = "response"
+status = 400
+h2_control_frames = [{ type = "window_update", stream_id = 0, increment = 2031617 }]
+
+[expect.body]
+contains_utf8 = ["<Code>BadRequest</Code>"]

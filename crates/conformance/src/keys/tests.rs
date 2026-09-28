@@ -295,7 +295,16 @@ fn h2_key_declarations_match_the_selected_transport_in_an_isolated_process() {
             "c-h2-0004",
             "c-h2-0005",
             "c-h2-0006",
-            "c-h2-0007"
+            "c-h2-0007",
+            "c-h2-0008",
+            "c-h2-0009",
+            "c-h2-0010",
+            "c-h2-0011",
+            "c-h2-0012",
+            "c-h2-0013",
+            "c-h2-0014",
+            "c-h2-0015",
+            "c-h2-0016"
         ]
     );
     #[cfg(not(feature = "production-transports"))]
