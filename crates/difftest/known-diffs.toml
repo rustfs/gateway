@@ -765,6 +765,38 @@ reason = "As kd-decode-0070: the gateway refuses the bucket name it read; s3s ha
 expires = "2027-03-31"
 when_bucket = "%2F"
 
+# ── Decode: signed aws-chunked uploads, seen once replays are signed again ──────────────────
+
+[[diff]]
+id = "kd-decode-0075"
+kind = "decode"
+operation = "PutObject"
+item = "PutObjectInput.content_encoding"
+gateway = "<unset>"
+s3s = '"aws-chunked"'
+reason = "A signed aws-chunked upload declares Content-Encoding: aws-chunked. The gateway removes that coding once it has decoded the framing, as S3 does (https://docs.aws.amazon.com/AmazonS3/latest/API/sigv4-streaming.html: aws-chunked is a transfer of the payload, not a coding of the stored object); the pinned s3s hands it to the handler, so RustFS today may store an object whose Content-Encoding says aws-chunked. The adapter must not rely on seeing it."
+expires = "2027-03-31"
+
+[[diff]]
+id = "kd-decode-0076"
+kind = "decode"
+operation = "PutObject"
+item = "PutObjectInput.checksum_algorithm"
+gateway = "<unset>"
+s3s = '"CRC32"'
+reason = "A trailing checksum declared by x-amz-trailer without x-amz-sdk-checksum-algorithm: s3s fills checksum_algorithm from the trailer name, the gateway only from the header the S3 model binds (see kd-decode-0001 for the other direction). The trailer's value itself is verified by both."
+expires = "2027-03-31"
+
+[[diff]]
+id = "kd-decode-0077"
+kind = "decode"
+operation = "UploadPart"
+item = "UploadPartInput.checksum_algorithm"
+gateway = "<unset>"
+s3s = '"CRC32"'
+reason = "As kd-decode-0076 for UploadPart."
+expires = "2027-03-31"
+
 # ── Encode: what the gateway writes on every answer ─────────────────────────────────────────
 
 [[diff]]

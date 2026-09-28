@@ -15,14 +15,15 @@
 //! Recorded requests as decode-diff inputs, with every change made to them said out loud.
 //!
 //! Responsible for: reading `corpus/` (its bucket files, entry by entry, with a stable id
-//! `<file>:<n>` for its n-th entry), and turning one entry into a [`RawRequest`] — or into a skip with its reason —
-//! listing each [`Adjustment`] made on the way: the redacted signature removed (the diff compares
-//! route and codec; a recording's signature cannot be replayed, rustfs/backlog#1762 decision 2), an
-//! unrecorded payload hash removed, the `Content-Length` a partial head capture did not observe
-//! synthesised from the recorded body, timing controls ignored. An entry whose body ends
-//! abnormally, that claims a signed chunk framing whose signatures were redacted, or that arrived
-//! with chunked transfer framing (which only a transport de-frames), is skipped
-//! with that reason — never silently dropped and never counted as a pass.
+//! `<file>:<n>` for its n-th entry), and turning one entry into a [`RawRequest`] — or into a skip
+//! with its reason — listing each [`Adjustment`] made on the way: a redacted signature signed
+//! again with the credential both stacks hold (`sign.rs`), so the request takes the authenticated
+//! path it took on the recorded server; an unrecorded payload hash removed; the `Content-Length` a
+//! partial head capture did not observe synthesised from the recorded body; chunked transfer
+//! framing replaced by the recorded body's length; timing controls ignored. An entry whose body
+//! ends abnormally, that claims a signed chunk framing whose signatures were redacted, or that
+//! declares aws-chunked framing over an unframed, hand-authored payload is skipped with that
+//! reason — never silently dropped and never counted as a pass.
 //! NOT responsible for: judging (`runner.rs`), or the corpus format itself
 //! (`rustfs-gateway-corpus`).
 //! Upstream: `rustfs-gateway-corpus`. Downstream: `runner.rs`.
@@ -39,24 +40,29 @@ use crate::request::RawRequest;
 /// One change made to a recorded request before both stacks see it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Adjustment {
-    /// A redacted `Authorization` header or presigned query was removed: the request is sent
-    /// unsigned.
-    SignatureRemoved,
+    /// A redacted `Authorization` header or presigned query was replaced by a fresh header
+    /// signature with the replay credential both stacks hold (`sign.rs`), so the request takes the
+    /// authenticated path it took on the recorded server.
+    SignedAgain,
     /// A header recorded as `__UNRECORDED__` or `__REDACTED__` was removed.
     PlaceholderHeaderRemoved,
     /// A partial head capture did not observe `Content-Length`; it was set to the recorded body.
     ContentLengthSynthesised,
     /// A `flush` or `stall` timing control was ignored: the diff has no clock.
     TimingIgnored,
+    /// `Transfer-Encoding: chunked` was replaced by the `Content-Length` of the recorded body: the
+    /// recorder stores the body with its transfer framing removed, as a transport hands it on.
+    TransferFramingReplaced,
 }
 
 impl fmt::Display for Adjustment {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(match self {
-            Self::SignatureRemoved => "redacted signature removed",
+            Self::SignedAgain => "redacted signature signed again",
             Self::PlaceholderHeaderRemoved => "placeholder header removed",
             Self::ContentLengthSynthesised => "content-length synthesised",
             Self::TimingIgnored => "timing control ignored",
+            Self::TransferFramingReplaced => "chunked transfer framing replaced by content-length",
         })
     }
 }
@@ -68,10 +74,10 @@ pub enum Skip {
     AbnormalBody(String),
     /// The body claims a signed chunk framing whose chunk signatures were redacted.
     SignedFramingRedacted,
-    /// The body arrived with `Transfer-Encoding: chunked`. The in-process stacks have no transport:
-    /// the gateway refuses such a request for its missing length, and replacing the framing with a
-    /// length is not what the recorded server saw either.
-    TransferFraming,
+    /// The head declares aws-chunked framing and the body holds the logical payload without it,
+    /// as the hand-authored entries write it; replayed signed, the gateway would read those bytes
+    /// as framing. The recorder stores such a body framed, as it crossed the wire.
+    LogicalFraming,
     /// The method, target, a header or a body chunk is not valid as recorded.
     Malformed(String),
 }
@@ -81,7 +87,7 @@ impl fmt::Display for Skip {
         match self {
             Self::AbnormalBody(action) => write!(formatter, "abnormal body termination ({action})"),
             Self::SignedFramingRedacted => formatter.write_str("signed chunk framing with its signatures redacted"),
-            Self::TransferFraming => formatter.write_str("chunked transfer framing, which only a transport de-frames"),
+            Self::LogicalFraming => formatter.write_str("aws-chunked declared over an unframed, hand-authored payload"),
             Self::Malformed(why) => write!(formatter, "malformed recording: {why}"),
         }
     }
@@ -115,6 +121,15 @@ fn is_placeholder(value: &str) -> bool {
     value == "__UNRECORDED__" || value == "__REDACTED__"
 }
 
+/// Whether `body` opens with an aws-chunked size line: hex digits, optional `;` extensions, CRLF.
+fn starts_with_chunk_size(body: &[u8]) -> bool {
+    let Some(end) = body.windows(2).position(|pair| pair == b"\r\n") else {
+        return false;
+    };
+    let size = body[..end].split(|byte| *byte == b';').next().unwrap_or_default();
+    !size.is_empty() && size.iter().all(u8::is_ascii_hexdigit)
+}
+
 /// One entry as the request both stacks receive.
 ///
 /// # Errors
@@ -134,7 +149,7 @@ pub fn request_of(entry: &Entry) -> Result<(RawRequest, Vec<Adjustment>), Skip> 
         })
         .collect();
     if kept.len() != query.split('&').filter(|pair| !pair.is_empty()).count() {
-        adjustments.push(Adjustment::SignatureRemoved);
+        adjustments.push(Adjustment::SignedAgain);
     }
     let target = if kept.is_empty() {
         path.to_owned()
@@ -144,7 +159,7 @@ pub fn request_of(entry: &Entry) -> Result<(RawRequest, Vec<Adjustment>), Skip> 
     let mut request = RawRequest::new(method.clone(), &target);
     for (name, value) in &entry.headers {
         if name.eq_ignore_ascii_case("authorization") {
-            adjustments.push(Adjustment::SignatureRemoved);
+            adjustments.push(Adjustment::SignedAgain);
             continue;
         }
         if is_placeholder(value) {
@@ -155,7 +170,8 @@ pub fn request_of(entry: &Entry) -> Result<(RawRequest, Vec<Adjustment>), Skip> 
             return Err(Skip::SignedFramingRedacted);
         }
         if name.eq_ignore_ascii_case("transfer-encoding") && value.to_ascii_lowercase().contains("chunked") {
-            return Err(Skip::TransferFraming);
+            adjustments.push(Adjustment::TransferFramingReplaced);
+            continue;
         }
         request = request.header(name, value);
     }
@@ -174,6 +190,9 @@ pub fn request_of(entry: &Entry) -> Result<(RawRequest, Vec<Adjustment>), Skip> 
         }
     }
     let length: usize = pieces.iter().map(Bytes::len).sum();
+    if entry.has_chunk_framing() && length > 0 && !starts_with_chunk_size(&pieces.concat()) {
+        return Err(Skip::LogicalFraming);
+    }
     if !pieces.is_empty()
         && let Some((_, declared)) = entry
             .headers
@@ -185,6 +204,11 @@ pub fn request_of(entry: &Entry) -> Result<(RawRequest, Vec<Adjustment>), Skip> 
         return Err(Skip::Malformed(format!("content-length {declared} but {length} body bytes recorded")));
     }
     request.body = pieces;
+    if adjustments.contains(&Adjustment::TransferFramingReplaced) {
+        request = request
+            .without("content-length")
+            .header("content-length", &length.to_string());
+    }
     let declared = entry
         .headers
         .iter()
@@ -192,6 +216,9 @@ pub fn request_of(entry: &Entry) -> Result<(RawRequest, Vec<Adjustment>), Skip> 
     if entry.capture == Capture::HeadPartial && !declared && matches!(method, Method::PUT | Method::POST) {
         request = request.header("content-length", &length.to_string());
         adjustments.push(Adjustment::ContentLengthSynthesised);
+    }
+    if adjustments.contains(&Adjustment::SignedAgain) {
+        request = crate::sign::signed(&request).map_err(|why| Skip::Malformed(format!("cannot sign the replay: {why}")))?;
     }
     adjustments.sort_unstable();
     adjustments.dedup();

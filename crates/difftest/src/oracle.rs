@@ -134,9 +134,9 @@ impl s3s::access::S3Access for RecordOperation {
     }
 }
 
-/// A key the provider holds and nothing signs with.
-const ACCESS_KEY: &str = "AKIDDIFFTESTORACLE";
-const SECRET_KEY: &str = "difftest-oracle-secret";
+/// The key a replayed recording is signed with (`sign.rs`); the gateway holds the same one, so a
+/// re-signed request is admitted the same way by both.
+use crate::sign::{ACCESS_KEY, SECRET_KEY};
 
 /// The pinned s3s service and its recording slots.
 pub(crate) struct OracleStack {

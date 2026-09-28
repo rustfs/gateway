@@ -39,6 +39,7 @@ mod probe;
 mod project;
 mod request;
 mod resolver;
+mod sign;
 mod xmltree;
 
 pub mod decode;

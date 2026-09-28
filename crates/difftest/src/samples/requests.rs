@@ -669,6 +669,8 @@ pub(super) fn requests() -> Vec<RequestRow> {
             &["kd-decode-0060", "kd-decode-0061"],
         ),
         row("delete-x-id-mismatch", RawRequest::delete("/bkt/k?x-id=DeleteObjects"), &["kd-decode-0062", "kd-decode-0063"]),
+        row("put-signed-unsigned-trailer", signed_unsigned_trailer("/bkt/k"), &["kd-decode-0075", "kd-decode-0076"]),
+        row("part-signed-unsigned-trailer", signed_unsigned_trailer("/bkt/k?partNumber=1&uploadId=u"), &["kd-decode-0077"]),
         row("get-unc-shaped-key", RawRequest::get("/bkt///server/share"), &["kd-decode-0072"]),
         row(
             "copy-unquoted-if-match",
@@ -749,4 +751,18 @@ pub(super) fn requests() -> Vec<RequestRow> {
     ];
     checksum_rows(&mut rows);
     rows
+}
+
+/// A signed `STREAMING-UNSIGNED-PAYLOAD-TRAILER` upload, framed as an SDK frames it: the only
+/// admission under which either stack decodes aws-chunked framing. Unsigned, both would read the
+/// framed bytes as the payload.
+fn signed_unsigned_trailer(target: &str) -> RawRequest {
+    let body: &[u8] = b"5\r\nhello\r\n0\r\nx-amz-checksum-crc32:NhCmhg==\r\n\r\n";
+    let request = RawRequest::put(target, body)
+        .header("content-encoding", "aws-chunked")
+        .header("x-amz-content-sha256", "STREAMING-UNSIGNED-PAYLOAD-TRAILER")
+        .header("x-amz-trailer", "x-amz-checksum-crc32")
+        .header("x-amz-decoded-content-length", "5");
+    // A signing failure leaves the row unsigned, and the matrix then fails on its differences.
+    crate::sign::signed(&request).unwrap_or(request)
 }

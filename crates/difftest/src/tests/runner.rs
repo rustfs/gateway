@@ -262,21 +262,39 @@ fn the_checked_in_corpus_has_no_unregistered_difference() {
     assert!(report.compared > 30, "{text}");
 }
 
-/// Negative — a redacted signature is removed, header and presigned query alike, and said so.
+/// Negative — a redacted signature, header or presigned query, is replaced by a fresh header
+/// signature with the replay credential, and said so; the recorded value never reaches a stack.
 #[test]
-fn a_redacted_signature_is_removed_and_reported() {
+fn a_redacted_signature_is_signed_again_and_reported() {
     let header = entry(&format!(
-        r#"{{{HEAD},"op":"GetObject","capture":"head_full","method":"GET","target":"/bkt/k","headers":[["host","h"],["authorization","__REDACTED__"]],"redacted":["authorization"]}}"#
+        r#"{{{HEAD},"op":"GetObject","capture":"head_full","method":"GET","target":"/bkt/k","headers":[["host","h"],["x-amz-date","20260902T000000Z"],["x-amz-content-sha256","UNSIGNED-PAYLOAD"],["authorization","__REDACTED__"]],"redacted":["authorization"]}}"#
     ));
     let (request, adjustments) = request_of(&header).expect("sendable");
-    assert!(request.headers.iter().all(|(name, _)| name != "authorization"));
-    assert_eq!(adjustments, [Adjustment::SignatureRemoved]);
+    let authorization = request
+        .headers
+        .iter()
+        .find(|(name, _)| name == "authorization")
+        .map(|(_, value)| String::from_utf8_lossy(value).into_owned())
+        .expect("signed again");
+    assert!(authorization.starts_with("AWS4-HMAC-SHA256 Credential=AKIDDIFFTEST/"), "{authorization}");
+    assert!(request.headers.iter().all(|(_, value)| value != b"__REDACTED__"));
+    for minted in ["authorization", "x-amz-date", "x-amz-content-sha256"] {
+        assert_eq!(request.headers.iter().filter(|(name, _)| name == minted).count(), 1, "{minted} once");
+    }
+    assert!(
+        request.headers.iter().all(|(_, value)| value != b"20260902T000000Z"),
+        "the recorded date is replaced"
+    );
+    assert_eq!(adjustments, [Adjustment::SignedAgain]);
     let presigned = entry(&format!(
         r#"{{{HEAD},"op":"GetObject","capture":"head_full","method":"GET","target":"/bkt/k?versionId=v&X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Signature=__REDACTED__","headers":[["host","h"]],"redacted":["x-amz-signature"]}}"#
     ));
     let (request, adjustments) = request_of(&presigned).expect("sendable");
     assert_eq!(request.target, "/bkt/k?versionId=v");
-    assert_eq!(adjustments, [Adjustment::SignatureRemoved]);
+    assert!(request.headers.iter().any(|(name, _)| name == "authorization"));
+    assert_eq!(adjustments, [Adjustment::SignedAgain]);
+    let diff = crate::decode_diff(&request).expect("the harness runs");
+    assert_eq!((diff.error.gateway, diff.error.s3s), (None, None), "both stacks admit the signed replay");
 }
 
 /// Negative — a partial head capture's missing Content-Length is synthesised from the recorded
@@ -328,7 +346,19 @@ fn what_cannot_be_replayed_is_skipped_with_its_reason() {
     let transferred = entry(&format!(
         r#"{{{HEAD},"op":"UploadPart","capture":"head_full","method":"PUT","target":"/bkt/k?partNumber=1&uploadId=u","headers":[["transfer-encoding","chunked"]],"chunks":[{{"bytes_b64":"aGVsbG8="}}]}}"#
     ));
-    assert_eq!(request_of(&transferred).map(|_| ()), Err(Skip::TransferFraming));
+    let (request, adjustments) = request_of(&transferred).expect("sendable");
+    assert_eq!(adjustments, [Adjustment::TransferFramingReplaced]);
+    assert!(request.headers.iter().all(|(name, _)| name != "transfer-encoding"));
+    assert!(
+        request
+            .headers
+            .iter()
+            .any(|(name, value)| name == "content-length" && value == b"5")
+    );
+    let logical = entry(&format!(
+        r#"{{{HEAD},"op":"PutObject","capture":"head_full","method":"PUT","target":"/bkt/k","headers":[["content-encoding","aws-chunked"],["x-amz-decoded-content-length","5"]],"chunks":[{{"bytes_b64":"aGVsbG8="}}]}}"#
+    ));
+    assert_eq!(request_of(&logical).map(|_| ()), Err(Skip::LogicalFraming));
 }
 
 /// Negative — a recorded request of an operation the diff does not project is skipped and named,

@@ -147,7 +147,7 @@ A decode finding becomes a conformance case draft with `fuzz-to-case` (`conforma
 
 ## Shadow proxy
 
-`shadow-proxy` sits in front of a real S3 server, forwards every byte both ways unchanged, and on the side decodes a copy of each request with both stacks, logging one verdict per request: `agree`, `known <ids>`, `DIFF <findings>`, or `skip: <why>`. The copy is judged on its own thread through a bounded queue the traffic never waits on; a full queue sheds the copy and counts it. The signature is removed before the diff (a recorded signature cannot be replayed and the diff compares codecs), chunked transfer framing is replaced by a length, and a signed chunk framing is skipped. Only requests are compared: the upstream's answers go to the client untouched.
+`shadow-proxy` sits in front of a real S3 server, forwards every byte both ways unchanged, and on the side decodes a copy of each request with both stacks, logging one verdict per request: `agree`, `known <ids>`, `DIFF <findings>`, or `skip: <why>`. The copy is judged on its own thread through a bounded queue the traffic never waits on; a full queue sheds the copy and counts it. A request the client signed is signed again with the credential both stacks hold (the client's key is unknown to them), so it takes the authenticated path it took upstream; chunked transfer framing is replaced by a length, and a signed chunk framing is skipped. Only requests are compared: the upstream's answers go to the client untouched.
 
 ```bash
 cargo build --release -p rustfs-gateway-difftest --bin shadow-proxy
@@ -165,8 +165,10 @@ grep -v ' agree$' shadow.log   # every request that was not identical on both st
   handlers, and whether what they persist reads back identically in both directions, is owned by
   the four-way persistence goldens (`rustfs-gateway-goldens`, P9) and the RustFS adapter's own
   proofs.
-- Authentication: the diff sends requests unsigned (recorded signatures are redacted); the
-  request-context and signed-body proofs in `rustfs-gateway-goldens` cover signing.
+- Authentication itself: a replayed request is signed again with the diff's own credential
+  (recorded signatures are redacted), so the diff compares what each stack does once a request is
+  admitted, not how it verifies a client's signature; the request-context and signed-body proofs
+  in `rustfs-gateway-goldens` cover signing.
 - Anything RustFS installs around s3s (its tower layers, extensions and access hook), and the
   RustFS handlers themselves.
 - List elements beyond the rows that send lists: the member census holds each operation's own
@@ -188,12 +190,15 @@ input, and `4` when the run outgrew its budget: sample the pull-request gate wit
 and run the full set nightly rather than letting the gate grow.
 
 A recorded request is changed before both stacks see it, and the report counts each change: a
-redacted signature is removed (header or presigned query; the diff compares route and codec, not
-signing), an `__UNRECORDED__` or `__REDACTED__` header is removed, a partial head capture's missing
+redacted signature (header or presigned query) is signed again with the credential both stacks
+hold, so the request takes the authenticated path it took on the recorded server — unsigned, an
+aws-chunked upload would take the anonymous path, where neither stack decodes its framing; an
+`__UNRECORDED__` or `__REDACTED__` header is removed; chunked transfer framing is replaced by the
+recorded body's length; a partial head capture's missing
 `Content-Length` is set from the recorded body, and `flush`/`stall` timing is ignored. An entry
 whose body ends abnormally, claims a signed chunk framing whose signatures were redacted, or
-declares a length its recorded body does not have, or arrived with chunked transfer framing (which
-only a transport de-frames; the in-process stacks have none), is skipped with that reason, and so is
+declares a length its recorded body does not have, or declares aws-chunked framing over an unframed,
+hand-authored payload, is skipped with that reason, and so is
 a request of an operation the diff does not project (named in the skip), and a partial
 head capture either stack routes elsewhere than its recorded operation (a header the recorder did
 not see can change the route). Sampling counts only inputs that are sent, per operation; an

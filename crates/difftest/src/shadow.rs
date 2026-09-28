@@ -170,6 +170,11 @@ pub fn request_of(captured: &Captured) -> Result<RawRequest, String> {
     } else {
         format!("{path}?{}", kept.join("&"))
     };
+    let signed_by_client = kept.len() != query.split('&').filter(|pair| !pair.is_empty()).count()
+        || captured
+            .headers
+            .iter()
+            .any(|(name, _)| name.eq_ignore_ascii_case("authorization"));
     let mut request = RawRequest::new(method, &target);
     for (name, value) in &captured.headers {
         if name.eq_ignore_ascii_case("x-amz-content-sha256") && value.starts_with(b"STREAMING-AWS4-") {
@@ -189,6 +194,11 @@ pub fn request_of(captured: &Captured) -> Result<RawRequest, String> {
     }
     if !captured.body.is_empty() {
         request.body = vec![bytes::Bytes::copy_from_slice(&captured.body)];
+    }
+    // A request the client signed is signed again with the credential both stacks hold, so it
+    // takes the authenticated path it took upstream; an anonymous one stays anonymous.
+    if signed_by_client {
+        request = crate::sign::signed(&request).map_err(|why| format!("cannot sign the replay: {why}"))?;
     }
     Ok(request)
 }
