@@ -24,7 +24,7 @@ use std::time::Instant;
 
 use http::{HeaderMap, Method};
 use rustfs_gateway_core::route::{
-    CompiledRouter, HostClass, RouteRequestParts, RouteTable, SHADOWING, TargetKind, generated_entries,
+    CompiledRouter, HostClass, RouteBucket, RouteRequestParts, RouteTable, SHADOWING, TargetKind, generated_entries,
 };
 use rustfs_gateway_http::{HeaderView, Limits, QueryIndex, QueryView};
 
@@ -97,6 +97,8 @@ fn record_time(name: &str, iterations: u32, mut action: impl FnMut()) {
 }
 
 fn main() {
+    // The compile-time ceiling lives beside the type; this line only reports the measured size.
+    println!("route/RouteBucket: {} bytes (ceiling 64)", size_of::<RouteBucket>());
     let router = router();
     let object = RequestFixture::new(Method::GET, "/bucket/key", TargetKind::Object, "");
     let listing = RequestFixture::new(

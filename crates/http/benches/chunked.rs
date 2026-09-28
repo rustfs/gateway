@@ -77,6 +77,7 @@ fn main() {
     let long = decode_blocks(272);
     let per_chunk = (long.saturating_sub(short)) as f64 / 256.0;
     println!("chunked/decode_64k: {short} blocks for 16 chunks, {long} for 272; {per_chunk:.3} per additional chunk");
+    println!("chunked/decode_64k_per_chunk: {} allocs", long.saturating_sub(short) / 256);
     // The first poll allocates the pipeline's scratch buffer once; seeing it proves the allocator
     // is installed, so the equality below is not two unmeasured zeroes.
     assert!(

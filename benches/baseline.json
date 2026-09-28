@@ -1,12 +1,14 @@
 {
-  "schema_version": 1,
-  "recorded_at": "2026-08-25T06:33:40Z",
-  "source_base_commit": "ecb52edd5b7abb0f1dea5b7579b8b7996bfeee1d",
-  "source_state": "P4-03 Slice D working tree based on source_base_commit",
+  "schema_version": 2,
+  "recorded_at": "2026-09-28T15:45:40Z",
+  "source": {
+    "generator": "scripts/bench_baseline.py",
+    "run_url": "https://github.com/rustfs/gateway/actions/runs/36442034198",
+    "commit": "6a2c33b0b4cfcb3506bb3d72f985e197e00eee51"
+  },
   "environment": {
-    "cpu": "Apple M4 Pro",
-    "os": "Darwin 25.5.0 arm64",
-    "rustc": "1.97.1 (8bab26f4f 2026-07-14)"
+    "runner": "AMD EPYC 9V45 96-Core Processor, 16 vCPU, Linux 6.8.0-1067-azure x86_64",
+    "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)"
   },
   "policy": {
     "allocation_and_size_measurements_block": true,
@@ -14,34 +16,6 @@
     "note": "Wall-clock values are review records only and are never CI thresholds."
   },
   "measurements": [
-    {
-      "name": "route/get_object_no_query",
-      "kind": "allocations",
-      "value": 0,
-      "unit": "heap_blocks",
-      "blocking": true
-    },
-    {
-      "name": "route/list_objects_v2_6params",
-      "kind": "allocations",
-      "value": 0,
-      "unit": "heap_blocks",
-      "blocking": true
-    },
-    {
-      "name": "parse/query_view_8params",
-      "kind": "allocations",
-      "value": 0,
-      "unit": "heap_blocks",
-      "blocking": true
-    },
-    {
-      "name": "parse/canonical_headers_signed",
-      "kind": "allocations",
-      "value": 0,
-      "unit": "heap_blocks",
-      "blocking": true
-    },
     {
       "name": "route/RouteBucket",
       "kind": "size",
@@ -52,8 +26,22 @@
     },
     {
       "name": "route/get_object_no_query",
+      "kind": "allocations",
+      "value": 0,
+      "unit": "heap_blocks",
+      "blocking": true
+    },
+    {
+      "name": "route/list_objects_v2_6params",
+      "kind": "allocations",
+      "value": 0,
+      "unit": "heap_blocks",
+      "blocking": true
+    },
+    {
+      "name": "route/get_object_no_query",
       "kind": "wall_clock",
-      "value": 6.798,
+      "value": 2.904,
       "unit": "nanoseconds_per_iteration",
       "iterations": 1000000,
       "blocking": false
@@ -61,15 +49,77 @@
     {
       "name": "route/list_objects_v2_6params",
       "kind": "wall_clock",
-      "value": 25.562,
+      "value": 18.319,
       "unit": "nanoseconds_per_iteration",
       "iterations": 1000000,
       "blocking": false
     },
     {
+      "name": "xml/serialize_list_objects_1000",
+      "kind": "allocations",
+      "value": 6021,
+      "unit": "heap_blocks",
+      "blocking": true,
+      "ceiling": 6021
+    },
+    {
+      "name": "xml/deserialize_delete_objects_1000",
+      "kind": "allocations",
+      "value": 5045,
+      "unit": "heap_blocks",
+      "blocking": true,
+      "ceiling": 5045
+    },
+    {
+      "name": "encode/get_object_response_head",
+      "kind": "allocations",
+      "value": 11,
+      "unit": "heap_blocks",
+      "blocking": true,
+      "ceiling": 11
+    },
+    {
+      "name": "xml/serialize_list_objects_1000",
+      "kind": "wall_clock",
+      "value": 694360.0,
+      "unit": "nanoseconds_per_iteration",
+      "iterations": 200,
+      "blocking": false
+    },
+    {
+      "name": "xml/deserialize_delete_objects_1000",
+      "kind": "wall_clock",
+      "value": 446136.0,
+      "unit": "nanoseconds_per_iteration",
+      "iterations": 200,
+      "blocking": false
+    },
+    {
+      "name": "encode/get_object_response_head",
+      "kind": "wall_clock",
+      "value": 506.0,
+      "unit": "nanoseconds_per_iteration",
+      "iterations": 100000,
+      "blocking": false
+    },
+    {
+      "name": "parse/query_view_8params",
+      "kind": "allocations",
+      "value": 0,
+      "unit": "heap_blocks",
+      "blocking": true
+    },
+    {
+      "name": "parse/canonical_headers_signed",
+      "kind": "allocations",
+      "value": 0,
+      "unit": "heap_blocks",
+      "blocking": true
+    },
+    {
       "name": "parse/query_view_8params",
       "kind": "wall_clock",
-      "value": 382.402,
+      "value": 298.363,
       "unit": "nanoseconds_per_iteration",
       "iterations": 100000,
       "blocking": false
@@ -77,10 +127,97 @@
     {
       "name": "parse/canonical_headers_signed",
       "kind": "wall_clock",
-      "value": 147.132,
+      "value": 144.51,
       "unit": "nanoseconds_per_iteration",
       "iterations": 100000,
       "blocking": false
+    },
+    {
+      "name": "chunked/decode_64k_per_chunk",
+      "kind": "allocations",
+      "value": 0,
+      "unit": "heap_blocks",
+      "blocking": true
+    },
+    {
+      "name": "chunked/decode_64k",
+      "kind": "wall_clock",
+      "value": 1.27,
+      "unit": "gibibytes_per_second",
+      "blocking": false
+    },
+    {
+      "name": "sig/v4_header_verify",
+      "kind": "wall_clock",
+      "value": 2268.0,
+      "unit": "nanoseconds_per_iteration",
+      "iterations": 20000,
+      "blocking": false
+    },
+    {
+      "name": "sig/chunk_signature",
+      "kind": "wall_clock",
+      "value": 31344.0,
+      "unit": "nanoseconds_per_iteration",
+      "iterations": 2000,
+      "blocking": false
+    },
+    {
+      "name": "checksum/crc32",
+      "kind": "calculator",
+      "value": "x86_64-avx512-vpclmulqdq",
+      "unit": "crc_fast_target",
+      "blocking": true
+    },
+    {
+      "name": "checksum/crc32c",
+      "kind": "calculator",
+      "value": "x86_64-avx512-vpclmulqdq",
+      "unit": "crc_fast_target",
+      "blocking": true
+    },
+    {
+      "name": "checksum/crc64nvme",
+      "kind": "calculator",
+      "value": "x86_64-avx512-vpclmulqdq",
+      "unit": "crc_fast_target",
+      "blocking": true
+    },
+    {
+      "name": "checksum/crc32",
+      "kind": "wall_clock",
+      "value": 63.2,
+      "unit": "gibibytes_per_second",
+      "blocking": false
+    },
+    {
+      "name": "checksum/crc32c",
+      "kind": "wall_clock",
+      "value": 63.25,
+      "unit": "gibibytes_per_second",
+      "blocking": false
+    },
+    {
+      "name": "checksum/crc64nvme",
+      "kind": "wall_clock",
+      "value": 62.95,
+      "unit": "gibibytes_per_second",
+      "blocking": false
+    },
+    {
+      "name": "checksum/sha256",
+      "kind": "wall_clock",
+      "value": 1.99,
+      "unit": "gibibytes_per_second",
+      "blocking": false
+    },
+    {
+      "name": "checksum/md5",
+      "kind": "wall_clock",
+      "value": 0.73,
+      "unit": "gibibytes_per_second",
+      "blocking": false
     }
-  ]
+  ],
+  "digest": "99e8b0cd8233009dbe7a05afdb5e8b97e406b7d52a38fc8c0315b0dfedb64886"
 }

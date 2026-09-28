@@ -23,6 +23,10 @@ name: Perf evidence
 #     10,000-part completion the client never reads, 1 GiB aws-chunked signed PUT
 #     vs unsigned, 1 GiB over TLS with and without forced flattening).
 #
+#   The micro-bench log is also turned into a candidate benches/baseline.json by
+#   scripts/bench_baseline.py and uploaded; committing it is how the baseline is
+#   refreshed, and check_baseline_provenance.sh refuses one edited by hand.
+#
 #   Syscall, allocator and memory assertions block. Elapsed time and p99 are
 #   printed as records; the p99 assertion is a generous regression gate
 #   (median of five paired rounds <= 2 x control), and that median against the 20% target is a
@@ -117,6 +121,18 @@ jobs:
             cargo bench -p rustfs-gateway-sig --bench verify
             cargo bench -p rustfs-gateway-types --bench checksum
           } 2>&1 | tee "$RUNNER_TEMP/micro.log"
+      - name: Candidate baseline
+        if: always()
+        run: |
+          set -euo pipefail
+          python3 scripts/bench_baseline.py \
+            --log "$RUNNER_TEMP/micro.log" \
+            --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            --commit "$GITHUB_SHA" \
+            --runner "$(lscpu | sed -n 's/^Model name: *//p' | head -1), $(nproc) vCPU, $(uname -srm)" \
+            --rustc "$(rustc -V)" \
+            --recorded-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --out "$RUNNER_TEMP/baseline.json"
       - name: Summarise
         if: always()
         run: |
@@ -137,4 +153,5 @@ jobs:
             ${{ runner.temp }}/slow-clients.log
             ${{ runner.temp }}/macro.log
             ${{ runner.temp }}/micro.log
+            ${{ runner.temp }}/baseline.json
           if-no-files-found: warn
