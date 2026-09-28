@@ -191,6 +191,20 @@ jobs:
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
             bash scripts/check_protected_files.sh
           fi
+      # rustfs/backlog#1763 a-cp-0017: a corpus change lands as a reviewed pull request that states
+      # its census, and a corpus commit pushed straight to main turns main red.
+      - name: Corpus change review
+        env:
+          GATEWAY_CORPUS_BASE: ${{ github.event.pull_request.base.sha }}
+          GATEWAY_CORPUS_HEAD: ${{ github.event.pull_request.head.sha }}
+          GATEWAY_PR_BODY_JSON: ${{ toJSON(github.event.pull_request.body) }}
+          GATEWAY_PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            bash scripts/check_corpus_change_reviewed.sh
+          elif [[ -n "$GATEWAY_PUSH_BEFORE" && "$GATEWAY_PUSH_BEFORE" != 0000000000000000000000000000000000000000 ]]; then
+            GATEWAY_CORPUS_PUSH_RANGE="${GATEWAY_PUSH_BEFORE}..${GITHUB_SHA}" bash scripts/check_corpus_change_reviewed.sh
+          fi
       - name: Role verdicts
         env:
           GATEWAY_ROLE_BASE: ${{ github.event.pull_request.base.sha }}
