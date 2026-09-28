@@ -235,40 +235,86 @@ pub(super) fn payload_spec(fields: &[Field], ov: &PayloadOverlay, operation: &st
     })
 }
 
+/// One list's IR v3 form: flattened, wrapped (naming its member's `xmlName`), or comma-delimited.
+///
+/// A header-bound list is delimited and records no member name — it has no element to name, so it
+/// must not inherit the XML default `member`. `value::header_list` splits on every comma, so only
+/// an enumeration, whose names are known to hold none, may take that form; a date or free text
+/// would be cut in two, and is refused here rather than split wrongly.
+pub(super) fn list_form(
+    operation: &str,
+    target: &str,
+    list_member: &Value,
+    binding: &Binding,
+    flattened: bool,
+    member_type: Type,
+) -> Result<Type> {
+    let delimited = *binding == Binding::Header;
+    if delimited && (flattened || !matches!(member_type, Type::StringEnum(_))) {
+        return Err(Error::ir(
+            operation,
+            format!("header list `{target}` must be a non-flattened list of enumeration values to take the comma-delimited form"),
+        ));
+    }
+    let member_name = if flattened || delimited {
+        None
+    } else {
+        Some(
+            trait_of(list_member, "smithy.api#xmlName")
+                .and_then(Value::as_str)
+                .unwrap_or("member")
+                .to_owned(),
+        )
+    };
+    Ok(Type::List {
+        member: Box::new(member_type),
+        flattened,
+        member_name,
+    })
+}
+
 /// The request checksum algorithms an operation accepts, read off `aws.protocols#httpChecksum`.
 ///
 /// The IR names all ten algorithms of the pinned model (rustfs/gateway#751 widened it from five).
-/// A spelling it cannot name is still filtered out here rather than failing the run, so a model
-/// re-pin that adds an eleventh shows up as a missing algorithm in the spec diff, and widening the
-/// IR stays an IR-FREEZE decision rather than a codegen one.
-pub(super) fn model_request_algorithms(model: &Model, op: &Value) -> Vec<ChecksumAlgo> {
+///
+/// A modelled spelling the IR cannot name fails the run. Until IR v3 it was filtered out here, so a
+/// re-pin that added an eleventh algorithm would have lowered to an operation that silently refuses
+/// it; widening the IR is an IR-FREEZE decision, and a hard failure is what makes somebody take it.
+pub(super) fn model_request_algorithms(model: &Model, op: &Value, operation: &str) -> Result<Vec<ChecksumAlgo>> {
     let Some(trait_value) = trait_of(op, "aws.protocols#httpChecksum") else {
-        return Vec::new();
+        return Ok(Vec::new());
     };
     let Some(member_name) = trait_value.get("requestAlgorithmMember").and_then(Value::as_str) else {
-        return Vec::new();
+        return Ok(Vec::new());
     };
     let Some(input_id) = op.get("input").and_then(target_of) else {
-        return Vec::new();
+        return Ok(Vec::new());
     };
     let Some(input) = model.shape(input_id) else {
-        return Vec::new();
+        return Ok(Vec::new());
     };
     let Some((_, member)) = model.members(input).into_iter().find(|(n, _)| *n == member_name) else {
-        return Vec::new();
+        return Ok(Vec::new());
     };
     let Some(target) = target_of(member) else {
-        return Vec::new();
+        return Ok(Vec::new());
     };
     let mut algorithms: Vec<ChecksumAlgo> = model
         .enum_values(target)
         .unwrap_or_default()
         .iter()
-        .filter_map(|v| ChecksumAlgo::parse(v))
-        .collect();
+        .map(|spelling| {
+            ChecksumAlgo::parse(spelling).ok_or_else(|| {
+                Error::ir(
+                    operation,
+                    format!("request checksum algorithm `{spelling}` has no IR spelling; widening checksum_algo is an IR-FREEZE decision"),
+                )
+            })
+        })
+        .collect::<Result<_>>()?;
     algorithms.sort();
     algorithms.dedup();
-    algorithms
+    Ok(algorithms)
 }
 
 /// Overlay order first, then any modelled error the overlay forgot, so a model bump that adds an

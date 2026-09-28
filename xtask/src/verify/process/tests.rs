@@ -351,6 +351,29 @@ fn a_step_killed_after_compiling_reports_the_crates_it_compiled() {
 
 /// A batch that finishes inside its deadline has no killed step, and reporting one anyway would
 /// hang a build note on a run nothing interrupted.
+/// A verification child must see the shell's environment, not the package variables `cargo`
+/// gave this process: a nested Cargo inheriting them reruns `ring`'s build script and rebuilds
+/// everything above it (rustfs/gateway#897). `cargo test` sets them here exactly as `cargo run`
+/// sets them for xtask, and a user's Cargo configuration still has to reach the child.
+#[test]
+fn a_verification_child_sees_no_package_variable_but_keeps_cargo_configuration() {
+    assert!(
+        std::env::var_os("CARGO_MANIFEST_DIR").is_some(),
+        "cargo test must set the variable under test"
+    );
+    let script = "printf 'manifest=%s\\n' \"${CARGO_MANIFEST_DIR-unset}\"; printf 'name=%s\\n' \"${CARGO_PKG_NAME-unset}\"; printf 'cargo=%s\\n' \"${CARGO-unset}\"";
+    let commands = vec![shell(vec!["-c".to_owned(), script.to_owned()], "environment")];
+
+    let batch = run(&commands, Path::new("."), None);
+
+    assert!(all_succeeded(&batch, 1));
+    let output = batch.results[0].1.as_ref().expect("child output must be captured");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("manifest=unset\n"), "{stdout}");
+    assert!(stdout.contains("name=unset\n"), "{stdout}");
+    assert!(!stdout.contains("cargo=unset"), "the cargo binary must stay visible: {stdout}");
+}
+
 #[test]
 fn a_batch_that_finishes_reports_no_killed_step() {
     let mut supervisor = test_supervisor(capture_root().expect("capture directory must be creatable"));

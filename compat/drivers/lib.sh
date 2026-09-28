@@ -21,6 +21,10 @@
 # (`https://`, the same server, data root and probe log) and `COMPAT_CA_BUNDLE`, the PEM authority
 # that is the only thing a driver may trust for it. Never disable verification instead: a client
 # that skips it is a different client from the one the manifest names.
+#
+# `COMPAT_CLIENTS_DIR` is where `ci/compat/install_clients.sh` put what it built: a `venv` client's
+# virtualenv and an SDK driver program under `$COMPAT_CLIENTS_DIR/<client>`, with commands linked
+# into `$COMPAT_CLIENTS_DIR/bin`, which the runner puts first on `PATH`.
 
 emit() {
     local scenario="$1" status="$2" detail="${3:-}"

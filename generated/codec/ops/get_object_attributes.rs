@@ -83,10 +83,11 @@ impl OperationCodec for dto::GetObjectAttributes {
             let raw = raw.as_ref();
             input.expected_bucket_owner = Some(raw.to_owned());
         }
-        // ObjectAttributes — header `x-amz-object-attributes`, repeated field lines joined.
+        // ObjectAttributes — header `x-amz-object-attributes`, a comma-delimited list.
         if let Some(raw) = request.header("x-amz-object-attributes") {
-            let raw = raw.as_ref();
-            input.object_attributes = raw.to_owned();
+            for raw in value::header_list(raw.as_ref()) {
+                input.object_attributes.push(dto::ObjectAttributes::custom(raw.to_owned()));
+            }
         } else {
             return Err(value::missing(ErrorCode::INVALID_REQUEST, "ObjectAttributes"));
         }

@@ -2787,7 +2787,7 @@ impl Stub {
             Selected::Absent => return Err(no_such_key(input.key.as_str())),
             Selected::Deleted(at) => return Err(deleted_by_marker(input.key.as_str(), at)),
         };
-        let wants_etag = input.object_attributes.split(',').any(|attribute| attribute.trim() == "ETag");
+        let wants_etag = input.object_attributes.iter().any(|attribute| attribute.as_str() == "ETag");
         Ok(Resp::new(dto::GetObjectAttributesOutput {
             last_modified: Some(Timestamp::from_secs(object.last_modified)),
             e_tag: wants_etag.then(|| entity_tag(&object.etag)).transpose()?,

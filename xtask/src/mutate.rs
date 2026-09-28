@@ -106,6 +106,7 @@ use rustfs_gateway_conformance::sha256;
 use rustfs_gateway_model::{Overlay, RuleClassification};
 
 use crate::codegen::repo_root;
+use crate::nested_cargo::without_package_environment;
 
 #[cfg(test)]
 mod tests;
@@ -670,7 +671,7 @@ impl Built {
 /// build cargo calls fresh is one whose inputs the mutation did not touch — which is the difference
 /// between a rule no case checks and a rule no code reads.
 fn build(root: &Path) -> Result<Built, String> {
-    let output = Command::new(env!("CARGO"))
+    let output = without_package_environment(&mut Command::new(env!("CARGO")))
         .current_dir(root)
         .args(["build", "--package", GATEWAY, "--lib", "--message-format", "json"])
         .stderr(Stdio::null())
@@ -732,7 +733,7 @@ fn build(root: &Path) -> Result<Built, String> {
 /// the gateway alone or the "did the mutation reach production code" control stops meaning that.
 /// This one's answer is only *did it compile*, for the whole set of crates the measurement needs.
 fn target(root: &Path) -> Result<bool, String> {
-    let status = Command::new(env!("CARGO"))
+    let status = without_package_environment(&mut Command::new(env!("CARGO")))
         .current_dir(root)
         .args(["build", "--package", CONFORMANCE, "--bin", CONFORMANCE])
         .stdout(Stdio::null())
@@ -748,7 +749,7 @@ fn corpus(root: &Path, filter: Option<&str>) -> Result<Option<BTreeMap<String, S
     // A stale report from the previous rule would be read as this rule's measurement.
     let _ = std::fs::remove_file(&report);
     let mut command = Command::new(env!("CARGO"));
-    command
+    without_package_environment(&mut command)
         .current_dir(root)
         .args([
             "run",

@@ -25,6 +25,7 @@
 //! failures are invisible, and the failure it hides here is an irreversible repository leak.
 
 use crate::base64;
+use crate::framing;
 use crate::schema::{Chunk, Entry};
 
 /// The fixed value every rewritten field is replaced with.
@@ -313,7 +314,7 @@ fn text_findings(text: &str) -> Vec<Reason> {
     if has_credential_assignment(text) {
         reasons.push(Reason::CredentialAssignment);
     }
-    if has_sigv4_signature(text) {
+    if has_sigv4_signature(text) || framing::has_live_trailer_signature(text) {
         reasons.push(Reason::SigV4Signature);
     }
     reasons
@@ -424,6 +425,9 @@ pub fn scan(entry: &Entry) -> Vec<Finding> {
 
 /// Whether `claimed` names a field that is present and holds [`PLACEHOLDER`].
 fn redaction_claim_holds(entry: &Entry, claimed: &str) -> bool {
+    if framing::is_body_carrier(claimed) {
+        return framing::claim_holds(entry, claimed);
+    }
     let header = entry
         .headers
         .iter()
@@ -451,9 +455,12 @@ pub fn admit(entry: &Entry) -> Result<(), Refusal> {
 /// Rewrite every credential-bearing carrier this policy knows how to rewrite, and record
 /// what was rewritten in `entry.redacted`.
 ///
-/// Returns the field names it touched, in sorted order. It does not touch bodies: there
-/// is no structure-independent way to replace a secret inside a payload without changing
-/// what the payload proves, so a body finding stays a refusal under every mode.
+/// Returns the field names it touched, in sorted order. It does not touch payload bytes:
+/// there is no structure-independent way to replace a secret inside a payload without
+/// changing what the payload proves, so a body finding stays a refusal under every mode.
+/// The one exception is the signature carriers aws-chunked framing puts at fixed places in
+/// the body of a request whose head declares that framing (`framing`); rewriting those
+/// changes no data byte and no chunk-size line.
 ///
 /// Calling this does not admit the entry. Run [`admit`] afterwards — that is what makes
 /// the sanitizer auditable rather than trusted.
@@ -492,6 +499,8 @@ pub fn sanitize(entry: &mut Entry) -> Vec<String> {
         }
         entry.target = format!("{path}?{}", rebuilt.join("&"));
     }
+
+    touched.extend(framing::sanitize_body(entry));
 
     touched.sort_unstable();
     touched.dedup();

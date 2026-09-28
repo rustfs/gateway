@@ -1,5 +1,5 @@
 {
-  "ir_version": "2",
+  "ir_version": "3",
   "operation": "GetBucketTagging",
   "http": {
             "method": "GET",
@@ -53,7 +53,7 @@
                                       "kind": "List",
                                       "member": { "kind": "Structure", "shape": "Tag" },
                                       "flattened": false,
-                                      "wrapper_name": "Tag"
+                                      "member_name": "Tag"
                                     },
                             "hot": true,
                             "quirk_refs": []

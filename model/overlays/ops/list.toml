@@ -35,11 +35,6 @@ precedence = 600
 auth_action = "s3:ListBucket"
 error_codes = ["NoSuchBucket", "AccessDenied", "InvalidArgument", "PermanentRedirect"]
 quirk_refs = ["q-root-0013", "q-order-0014", "q-encoding-0015"]
-# `x-amz-optional-object-attributes` is a comma-delimited list in a header position. The frozen
-# IR can only describe a list through the XML notions `flattened` and `wrapper_name`, so there is
-# no truthful way to emit it yet; it is withheld rather than described wrongly. Restoring it
-# needs an IR change (see the P1-03 handoff), not an overlay change.
-input_drop = ["OptionalObjectAttributes"]
 # AWS always writes these five, whatever the model says about optionality.
 output_required = ["Name", "Prefix", "KeyCount", "MaxKeys", "IsTruncated"]
 input_hot = ["Prefix", "Delimiter", "MaxKeys", "ContinuationToken"]
@@ -151,9 +146,6 @@ precedence = 700
 auth_action = "s3:ListBucket"
 error_codes = ["NoSuchBucket", "AccessDenied", "InvalidArgument", "PermanentRedirect"]
 quirk_refs = ["q-root-0013", "q-order-0066", "q-encoding-0067", "q-empty-0063", "q-marker-0064", "q-owner-0065", "q-maxkeys-0068"]
-# Withheld for the same reason as ListObjectsV2: a comma-delimited list in a header position has
-# no truthful IR form yet. Restoring it needs an IR change, not an overlay change.
-input_drop = ["OptionalObjectAttributes"]
 # AWS writes all five whatever the model says about optionality, and writes the first three even
 # when they are empty. Requiring them here is what turns `<Prefix></Prefix>` from a handler's good
 # intention into an encoder invariant.
@@ -258,7 +250,6 @@ quirk_refs = [
   "q-interleave-0069",
   "q-marker-0070",
 ]
-input_drop = ["OptionalObjectAttributes"]
 output_required = ["Name", "Prefix", "KeyMarker", "VersionIdMarker", "MaxKeys", "IsTruncated"]
 input_hot = ["Prefix", "Delimiter", "MaxKeys", "KeyMarker", "VersionIdMarker"]
 output_hot = ["Name", "Prefix", "KeyMarker", "MaxKeys", "Delimiter", "IsTruncated", "Versions", "DeleteMarkers", "CommonPrefixes"]

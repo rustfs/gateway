@@ -18,7 +18,7 @@
 //! the selected Cargo process starts. NOT responsible for: verification selection or
 //! budget enforcement. Upstream: the Cargo alias. Downstream: the full or light xtask runner.
 
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::process::{Command, ExitCode};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -55,6 +55,30 @@ fn runner_for_request(arguments: &[String]) -> &'static [&'static str] {
     }
 }
 
+/// Whether `name` is one of the variables `cargo run` sets for the package it runs.
+///
+/// `cargo xtask` is `cargo run --package xtask-launcher`, so this process holds the launcher's
+/// `CARGO_MANIFEST_DIR`, `CARGO_MANIFEST_PATH` and `CARGO_PKG_*`. `ring`'s build script declares
+/// `rerun-if-env-changed` on those names, so a nested Cargo that inherits them sees values the
+/// shell never had and rebuilds `ring` and everything above it up to xtask, inside the budget this
+/// launcher starts. `xtask/src/nested_cargo.rs` applies the same rule to xtask's own children.
+fn is_package_variable(name: &OsStr) -> bool {
+    let Some(name) = name.to_str() else {
+        return false;
+    };
+    matches!(name, "CARGO_MANIFEST_DIR" | "CARGO_MANIFEST_PATH") || name.starts_with("CARGO_PKG_")
+}
+
+/// Removes every package variable this process inherited from `cargo run`, and nothing else.
+fn without_package_environment(command: &mut Command) -> &mut Command {
+    for (name, _) in std::env::vars_os() {
+        if is_package_variable(&name) {
+            command.env_remove(name);
+        }
+    }
+    command
+}
+
 fn main() -> ExitCode {
     let arguments: Vec<String> = std::env::args().skip(1).collect();
     let runner = runner_for_request(&arguments);
@@ -66,7 +90,9 @@ fn main() -> ExitCode {
         }
     };
     let cargo = std::env::var_os("CARGO").unwrap_or_else(|| OsString::from("cargo"));
-    let status = Command::new(&cargo)
+    let mut command = Command::new(&cargo);
+    without_package_environment(&mut command);
+    let status = command
         .args(["run", "--quiet", "--package", "xtask"])
         .args(runner)
         .arg("--")
@@ -84,7 +110,59 @@ fn main() -> ExitCode {
 
 #[cfg(test)]
 mod tests {
-    use super::{FULL_RUNNER, LIGHT_RUNNER, OPERATION_RUNNER, runner_for_request};
+    use std::ffi::{OsStr, OsString};
+    use std::process::Command;
+
+    use super::{
+        FULL_RUNNER, LIGHT_RUNNER, OPERATION_RUNNER, is_package_variable, runner_for_request, without_package_environment,
+    };
+
+    fn removed(command: &Command) -> Vec<OsString> {
+        command
+            .get_envs()
+            .filter(|(_, value)| value.is_none())
+            .map(|(name, _)| name.to_owned())
+            .collect()
+    }
+
+    /// `cargo test` sets the same package variables for this binary that `cargo run` sets for the
+    /// launcher, so the live environment is the input rather than a copied list.
+    #[test]
+    fn the_xtask_child_inherits_no_package_variable_of_the_launcher() {
+        let inherited: Vec<OsString> = std::env::vars_os()
+            .map(|(name, _)| name)
+            .filter(|name| name == "CARGO_MANIFEST_DIR" || name.to_string_lossy().starts_with("CARGO_PKG_"))
+            .collect();
+        assert!(inherited.iter().any(|name| name == "CARGO_MANIFEST_DIR"));
+
+        let mut command = Command::new("cargo");
+        without_package_environment(&mut command);
+        let removed = removed(&command);
+
+        for name in &inherited {
+            assert!(removed.contains(name), "{name:?} reaches the xtask cargo");
+        }
+    }
+
+    #[test]
+    fn n_cargo_configuration_and_look_alike_names_reach_the_xtask_child() {
+        for name in [
+            "CARGO",
+            "CARGO_HOME",
+            "CARGO_TARGET_DIR",
+            "CARGO_BUILD_JOBS",
+            "CARGO_INCREMENTAL",
+            "RUSTFLAGS",
+            "CARGO_PKG",
+            "XCARGO_PKG_NAME",
+            "CARGO_MANIFEST_DIRS",
+        ] {
+            assert!(!is_package_variable(OsStr::new(name)), "{name}");
+        }
+        let mut command = Command::new("cargo");
+        without_package_environment(&mut command);
+        assert!(removed(&command).iter().all(|name| is_package_variable(name)));
+    }
 
     #[test]
     fn facade_and_conformance_use_the_light_runner_without_changing_other_selection() {

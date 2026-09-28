@@ -130,3 +130,10 @@ path = "fuzz_targets/policy_json.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "restore_header"
+path = "fuzz_targets/restore_header.rs"
+test = false
+doc = false
+bench = false

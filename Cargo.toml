@@ -14,18 +14,18 @@ authors = ["RustFS Team"]
 [workspace.dependencies]
 # Internal crates. Path only: nothing here is published, so the version double-write
 # that crates.io would require is just another thing to keep in sync.
-rustfs-gateway = { path = "crates/gateway", version = "0.48.0", default-features = false }
-rustfs-gateway-codegen = { path = "crates/codegen", version = "0.16.0" }
+rustfs-gateway = { path = "crates/gateway", version = "0.49.0", default-features = false }
+rustfs-gateway-codegen = { path = "crates/codegen", version = "0.17.0" }
 rustfs-gateway-conformance = { path = "crates/conformance", version = "0.12.0", default-features = false }
 rustfs-gateway-corpus = { path = "crates/corpus", version = "0.1.0" }
-rustfs-gateway-core = { path = "crates/core", version = "0.44.0" }
+rustfs-gateway-core = { path = "crates/core", version = "0.45.0" }
 rustfs-gateway-http = { path = "crates/http", version = "0.1.4" }
 rustfs-gateway-macros = { path = "crates/macros", version = "0.1.4" }
-rustfs-gateway-model = { path = "crates/model", version = "0.13.0" }
+rustfs-gateway-model = { path = "crates/model", version = "0.14.0" }
 rustfs-gateway-sig = { path = "crates/sig", version = "0.12.0" }
 rustfs-gateway-server = { path = "crates/server", version = "0.2.0" }
 rustfs-gateway-stream = { path = "crates/stream", version = "0.2.0" }
-rustfs-gateway-types = { path = "crates/types", version = "0.25.0" }
+rustfs-gateway-types = { path = "crates/types", version = "0.26.0" }
 rustfs-gateway-xml = { path = "crates/xml", version = "0.3.0" }
 
 # Third-party. Versions verified against crates.io on 2026-08-05; MSRV 1.97.1 constrains this set.
@@ -116,6 +116,24 @@ debug = "line-tables-only"
 
 [profile.dev.package."*"]
 debug = false
+
+# The persistence goldens hash and parse their whole corpus in every report, and the corpus
+# report runs once per CLI contract. Unoptimized, `sha2`'s compression loop — still carrying its
+# `ub_checks` preconditions — plus `serde_json`'s and `memchr`'s scanners were the top of the
+# profile: `corpus-report` spent 2.9 CPU-seconds, the goldens library suite 39. Optimizing these
+# three crates alone cut that to 1.6 and 32 and costs about a second of cold build. Every test
+# still compiles and runs the same assertions (rustfs/gateway#897).
+[profile.dev.package.sha2]
+opt-level = 3
+debug-assertions = false
+
+[profile.dev.package.serde_json]
+opt-level = 3
+debug-assertions = false
+
+[profile.dev.package.memchr]
+opt-level = 3
+debug-assertions = false
 
 [profile.release]
 lto = true

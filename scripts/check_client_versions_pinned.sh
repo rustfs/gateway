@@ -15,6 +15,10 @@ set -euo pipefail
 #        that method needs.
 #     4. No driver, workflow or runner script contains a version-bearing install command. A second
 #        pin is how the two silently disagree, and then a red matrix is unattributable.
+#     5. Every pip requirement a client installs is exact: `name==<version>`, or a direct archive
+#        URL carrying a `#sha256=` digest pip verifies. The client's own pin appears in one of them.
+#     6. A `program` client's lock file — the one place a second copy of the version is
+#        unavoidable — names the SDK exactly once, at exactly the version pinned here.
 #
 # WHY
 #   A client's behaviour changes between releases: which payload mode it declares, whether it sends
@@ -58,7 +62,13 @@ if not isinstance(clients, dict) or not clients:
     clients = {}
 
 FLOATING = {"latest", "*", "main", "master", "head", "devel", "stable", "edge", "nightly", ""}
-REQUIRED = {"pip": ("package",), "go": ("module", "module_version_path", "binary")}
+REQUIRED = {
+    "pip": ("package",),
+    "go": ("module", "module_version_path", "binary"),
+    "venv": ("requirements", "binary", "version_command", "version_pattern"),
+    "program": ("source", "toolchain", "build", "version_command", "lock_file", "lock_pattern"),
+}
+EXACT_REQUIREMENT = re.compile(r"^[A-Za-z0-9._-]+(==[A-Za-z0-9.+!-]+| @ https://\S+#sha256=[0-9a-f]{64})$")
 
 for name, spec in sorted(clients.items()):
     if not isinstance(spec, dict):
@@ -73,9 +83,29 @@ for name, spec in sorted(clients.items()):
     if install not in REQUIRED:
         fail(f"client {name} declares an install method {install!r} this matrix cannot verify")
         continue
-    for field in REQUIRED[install]:
-        if not spec.get(field):
-            fail(f"client {name} installs with {install} but declares no {field}")
+    missing = [field for field in REQUIRED[install] if not spec.get(field)]
+    for field in missing:
+        fail(f"client {name} installs with {install} but declares no {field}")
+    if missing:
+        continue
+    requirements = spec.get("requirements") or []
+    for requirement in requirements:
+        if not EXACT_REQUIREMENT.match(str(requirement)):
+            fail(f"client {name} installs {requirement!r}, which is not an exact pin")
+    if requirements and not any(
+        str(requirement).endswith(f"=={version}") or f"/{version}." in str(requirement) for requirement in requirements
+    ):
+        fail(f"client {name} is pinned at {version!r} but none of its requirements installs that version")
+    if install == "program":
+        lock = root / spec["source"] / spec["lock_file"]
+        if not lock.is_file():
+            fail(f"client {name} names lock file {spec['source']}/{spec['lock_file']}, which does not exist")
+            continue
+        locked = re.findall(spec["lock_pattern"], lock.read_text(encoding="utf-8"), flags=re.MULTILINE)
+        if len(locked) != 1:
+            fail(f"client {name}: {spec['lock_file']} matches its lock_pattern {len(locked)} time(s), expected exactly once")
+        elif locked[0] != version:
+            fail(f"client {name} is pinned at {version!r} but {spec['lock_file']} locks {locked[0]!r}")
 
 # A second place that names a version is a second thing to keep in sync, and the matrix would then
 # run one version while reporting another.

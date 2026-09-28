@@ -1,5 +1,5 @@
 {
-  "ir_version": "2",
+  "ir_version": "3",
   "operation": "ListBuckets",
   "http": {
             "method": "GET",
@@ -68,7 +68,7 @@
                                       "kind": "List",
                                       "member": { "kind": "Structure", "shape": "Bucket" },
                                       "flattened": false,
-                                      "wrapper_name": "Bucket"
+                                      "member_name": "Bucket"
                                     },
                             "hot": true,
                             "quirk_refs": ["q-wrapped-0062", "q-order-0066"]

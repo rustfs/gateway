@@ -116,11 +116,11 @@ pub(crate) fn build_service(
     );
     let service =
         backend
-            .register_policy(backend.register_acl(backend.register_tagging(
+            .register_encryption(backend.register_policy(backend.register_acl(backend.register_tagging(
                 backend.register_lifecycle(
                     backend.register_listing(backend.register_versioning(backend.register_multipart(builder))),
                 ),
-            )))
+            ))))
             .build()?;
     Ok(service)
 }

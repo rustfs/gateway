@@ -33,6 +33,7 @@ pub(super) fn diagnostics(doc: &Value, operations: &BTreeSet<String>, overlay: &
     check_element_order(doc, &mut diagnostics);
     check_unwrapped_output(doc, &mut diagnostics);
     check_shape_references(doc, &mut diagnostics);
+    check_delimited_lists(doc, &mut diagnostics);
     check_quirks(doc, overlay, &mut diagnostics);
     if let Some(target) = doc.get("head_mirrors").and_then(Value::as_str)
         && !operations.contains(target)
@@ -97,6 +98,7 @@ fn check_element_order(doc: &Value, diagnostics: &mut Vec<Diagnostic>) {
         compare_element_order(
             doc.pointer("/output/fields"),
             doc.pointer("/xml/element_order"),
+            doc.pointer("/xml/attributes"),
             "/xml/element_order",
             diagnostics,
         );
@@ -108,19 +110,36 @@ fn check_element_order(doc: &Value, diagnostics: &mut Vec<Diagnostic>) {
         compare_element_order(
             shape.get("fields"),
             shape.pointer("/xml/element_order"),
+            shape.pointer("/xml/attributes"),
             &format!("/shapes/{}/xml/element_order", escape_pointer(name)),
             diagnostics,
         );
     }
 }
 
-fn compare_element_order(fields: Option<&Value>, order: Option<&Value>, at: &str, diagnostics: &mut Vec<Diagnostic>) {
+/// A `BodyXml` member written as an attribute (`Grantee`'s `xsi:type`, sourced from its `Type`
+/// field) has no element, so it has no place in the element order.
+fn compare_element_order(
+    fields: Option<&Value>,
+    order: Option<&Value>,
+    attributes: Option<&Value>,
+    at: &str,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let as_attributes: BTreeSet<&str> = attributes
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|attribute| attribute.pointer("/source/kind").and_then(Value::as_str) == Some("Field"))
+        .filter_map(|attribute| attribute.pointer("/source/field").and_then(Value::as_str))
+        .collect();
     let body: BTreeSet<&str> = fields
         .and_then(Value::as_array)
         .into_iter()
         .flatten()
         .filter(|field| field.pointer("/binding/kind").and_then(Value::as_str) == Some("BodyXml"))
         .filter_map(|field| field.get("name").and_then(Value::as_str))
+        .filter(|name| !as_attributes.contains(name))
         .collect();
     let ordered_values: Vec<&str> = order
         .and_then(Value::as_array)
@@ -198,6 +217,34 @@ fn check_shape_references(doc: &Value, diagnostics: &mut Vec<Diagnostic>) {
                 "semantic/shape-kind",
             )),
             Some(_) => {}
+        }
+    });
+}
+
+/// A list with neither `flattened` nor a `member_name` is the comma-delimited header form, which
+/// has no XML elements. JSON Schema cannot see the binding beside a type, so this is where the form
+/// is confined to the direct type of a `Header`-bound field — anywhere else it is a list no codec
+/// can read or write.
+fn check_delimited_lists(doc: &Value, diagnostics: &mut Vec<Diagnostic>) {
+    let mut allowed = BTreeSet::new();
+    for side in ["input", "output"] {
+        let fields = doc.pointer(&format!("/{side}/fields")).and_then(Value::as_array);
+        for (index, field) in fields.into_iter().flatten().enumerate() {
+            if field.pointer("/binding/kind").and_then(Value::as_str) == Some("Header") {
+                allowed.insert(format!("/{side}/fields/{index}/type"));
+            }
+        }
+    }
+    walk(doc, "", &mut |value, at| {
+        let delimited = value.get("kind").and_then(Value::as_str) == Some("List")
+            && value.get("flattened").and_then(Value::as_bool) == Some(false)
+            && value.get("member_name").is_some_and(Value::is_null);
+        if delimited && !allowed.contains(at) {
+            diagnostics.push(Diagnostic::new(
+                "a comma-delimited list is valid only as the type of a Header-bound field",
+                at,
+                "semantic/delimited-list-binding",
+            ));
         }
     });
 }
@@ -403,5 +450,102 @@ mod tests {
         let mut found = Vec::new();
         check_quirks(&doc, &overlay(), &mut found);
         assert!(has_rule(&found, "semantic/quirk-set"));
+    }
+
+    fn grantee_doc() -> Value {
+        read_json(&root().join("generated/ir/PutObjectAcl.json")).expect("generated document parses")
+    }
+
+    #[test]
+    fn a_member_carried_as_an_attribute_is_not_an_element() {
+        let mut found = Vec::new();
+        check_element_order(&grantee_doc(), &mut found);
+        assert!(found.is_empty(), "{found:?}");
+    }
+
+    #[test]
+    fn n_a_member_without_an_attribute_still_needs_an_element() {
+        let mut doc = grantee_doc();
+        let attributes = doc["shapes"]["Grantee"]["xml"]["attributes"]
+            .as_array_mut()
+            .expect("attributes");
+        attributes.retain(|attribute| attribute.pointer("/source/kind").and_then(Value::as_str) != Some("Field"));
+        let mut found = Vec::new();
+        check_element_order(&doc, &mut found);
+        assert!(has_rule(&found, "semantic/element-order"), "{found:?}");
+    }
+
+    fn delimited_header_list() -> Value {
+        crate::ir::tests::delimited_header_list("Header")
+    }
+
+    #[test]
+    fn accepts_a_delimited_list_bound_to_a_header() {
+        let mut doc = sample("ListObjectsV2");
+        doc["input"]["fields"]
+            .as_array_mut()
+            .expect("fields are an array")
+            .push(delimited_header_list());
+        let mut found = Vec::new();
+        check_delimited_lists(&doc, &mut found);
+        assert!(found.is_empty(), "{found:?}");
+    }
+
+    #[test]
+    fn rejects_a_delimited_list_in_a_body_position() {
+        let mut doc = sample("ListObjectsV2");
+        doc["output"]["fields"][6]["type"]["flattened"] = json!(false);
+        doc["output"]["fields"][6]["type"]["member_name"] = Value::Null;
+        let mut found = Vec::new();
+        check_delimited_lists(&doc, &mut found);
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert_eq!(found[0].rule, "semantic/delimited-list-binding");
+        assert_eq!(found[0].at, "/output/fields/6/type");
+    }
+
+    #[test]
+    fn rejects_a_delimited_list_in_a_query_position() {
+        let mut doc = sample("ListObjectsV2");
+        let mut field = delimited_header_list();
+        field["binding"] = json!({ "kind": "Query" });
+        doc["input"]["fields"]
+            .as_array_mut()
+            .expect("fields are an array")
+            .push(field);
+        let mut found = Vec::new();
+        check_delimited_lists(&doc, &mut found);
+        assert!(has_rule(&found, "semantic/delimited-list-binding"), "{found:?}");
+    }
+
+    #[test]
+    fn rejects_a_delimited_list_nested_inside_a_header_list() {
+        let mut doc = sample("ListObjectsV2");
+        let mut field = delimited_header_list();
+        let inner = field["type"].clone();
+        field["type"]["member"] = inner;
+        let fields = doc["input"]["fields"].as_array_mut().expect("fields are an array");
+        fields.push(field);
+        let index = fields.len() - 1;
+        let mut found = Vec::new();
+        check_delimited_lists(&doc, &mut found);
+        assert_eq!(found.len(), 1, "only the nested list is out of place: {found:?}");
+        assert_eq!(found[0].at, format!("/input/fields/{index}/type/member"));
+    }
+
+    #[test]
+    fn rejects_a_delimited_list_as_a_shape_member() {
+        let mut doc = sample("ListObjectsV2");
+        let shape = doc["shapes"]
+            .as_object_mut()
+            .expect("shapes are an object")
+            .values_mut()
+            .find(|shape| shape.get("fields").and_then(Value::as_array).is_some_and(|m| !m.is_empty()))
+            .expect("one shape has members");
+        let mut field = delimited_header_list();
+        field["binding"] = json!({ "kind": "BodyXml" });
+        shape["fields"].as_array_mut().expect("fields are an array").push(field);
+        let mut found = Vec::new();
+        check_delimited_lists(&doc, &mut found);
+        assert!(has_rule(&found, "semantic/delimited-list-binding"), "{found:?}");
     }
 }

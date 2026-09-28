@@ -41,6 +41,7 @@ use prebuild::{prebuild_commands, run_prebuild};
 use process::CancelledStep;
 use selection::crate_steps;
 
+use crate::nested_cargo::without_package_environment;
 #[cfg(feature = "operation")]
 use crate::{catalog, codegen};
 
@@ -278,7 +279,7 @@ fn run_operation_contract(name: &str, mapped_cases: &[String]) -> Result<(), Str
 #[cfg(feature = "operation")]
 fn verify_scaffold(entry: &catalog::ScaffoldEntry, json: bool) -> ExitCode {
     let snake = snake_case(&entry.name);
-    let output = Command::new(env!("CARGO"))
+    let output = without_package_environment(&mut Command::new(env!("CARGO")))
         .args([
             "test",
             "-p",
@@ -417,7 +418,7 @@ struct CargoPackage {
 }
 
 fn workspace_package_names() -> Result<Vec<String>, String> {
-    let output = Command::new(env!("CARGO"))
+    let output = without_package_environment(&mut Command::new(env!("CARGO")))
         .args(["metadata", "--no-deps", "--format-version", "1"])
         .output()
         .map_err(|error| format!("cargo metadata could not start: {error}"))?;

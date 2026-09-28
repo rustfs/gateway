@@ -1806,6 +1806,15 @@ mut_xtask_launcher_timestamp_removed() {
 expect_fail check_xtask_codegen_surface.sh \
     'the launcher no longer recording command startup' mut_xtask_launcher_timestamp_removed
 
+# A nested cargo that inherits the launcher's CARGO_MANIFEST_DIR and CARGO_PKG_* reruns ring's
+# build script and rebuilds ring through xtask inside the feedback budget (rustfs/gateway#897).
+mut_xtask_launcher_leaks_package_environment() {
+    perl -0pi -e 's/\n    without_package_environment\(&mut command\);//' xtask-launcher/src/main.rs
+}
+expect_fail check_xtask_codegen_surface.sh \
+    'the launcher passing its cargo run package variables to the xtask cargo' \
+    mut_xtask_launcher_leaks_package_environment
+
 mut_xtask_verify_ignores_launcher_time() {
     perl -0pi -e 's/        started: started\.and_then\(\|started\| started\.checked_add\(build\.elapsed\)\),\n/        started: None,\n/' xtask/src/verify.rs
 }
@@ -23909,6 +23918,52 @@ expect_fail check_compat_matrix.sh \
     mut_compat_known_fail_grew \
     'the list may only shrink'
 
+mut_compat_new_client_starts_its_baseline() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+versions = Path("compat/versions.toml")
+versions.write_text(
+    versions.read_text()
+    + '\n[clients.fixture-client]\ninstall = "pip"\npackage = "fixture_client"\nversion = "1.0.0"\n'
+)
+driver = Path("compat/drivers/fixture-client/run.sh")
+driver.parent.mkdir(parents=True)
+driver.write_text("#!/usr/bin/env bash\n")
+driver.chmod(0o755)
+known = Path("compat/known-fail.txt")
+known.write_text(known.read_text() + "fixture-client/copy-object  rustfs/gateway#912  measured on its first run\n")
+PYEOF
+}
+# The ratchet starts per client row. A client added in the same change has no previous baseline, so
+# the failures its first measured run records are its baseline, not a silenced regression.
+expect_guard_pass check_compat_matrix.sh \
+    'a client added in the same change starting its known-failure baseline' \
+    mut_compat_new_client_starts_its_baseline
+
+mut_compat_existing_client_hides_behind_a_new_one() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+versions = Path("compat/versions.toml")
+versions.write_text(
+    versions.read_text()
+    + '\n[clients.fixture-client]\ninstall = "pip"\npackage = "fixture_client"\nversion = "1.0.0"\n'
+)
+driver = Path("compat/drivers/fixture-client/run.sh")
+driver.parent.mkdir(parents=True)
+driver.write_text("#!/usr/bin/env bash\n")
+driver.chmod(0o755)
+known = Path("compat/known-fail.txt")
+known.write_text(known.read_text() + "boto3/list-pagination  rustfs/gateway#912  newly excused\n")
+PYEOF
+}
+# Adding a client must not open a window in which an existing client's new failure slips in.
+expect_fail check_compat_matrix.sh \
+    'an existing client gaining an excused failure in a change that also adds a client' \
+    mut_compat_existing_client_hides_behind_a_new_one \
+    'the list may only shrink'
+
 mut_compat_known_fail_unowned() {
     python3 - <<'PYEOF'
 from pathlib import Path
@@ -24068,6 +24123,61 @@ expect_fail check_client_versions_pinned.sh \
     mut_compat_client_version_range \
     'version range'
 
+mut_compat_venv_requirement_floating() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("compat/versions.toml")
+text = path.read_text()
+old = 'requirements = ["s3cmd==2.4.0"]'
+if text.count(old) != 1:
+    raise SystemExit("venv requirement mutation subject is not unique")
+path.write_text(text.replace(old, 'requirements = ["s3cmd>=2.4.0"]', 1))
+PYEOF
+}
+# The pin is only as exact as what pip is actually asked to install.
+expect_fail check_client_versions_pinned.sh \
+    'a virtualenv client installed from a requirement range' \
+    mut_compat_venv_requirement_floating \
+    'which is not an exact pin'
+
+mut_compat_archive_without_digest() {
+    python3 - <<'PYEOF'
+import re
+from pathlib import Path
+
+path = Path("compat/versions.toml")
+text = path.read_text()
+mutated, count = re.subn(r"(2\.37\.4\.tar\.gz)#sha256=[0-9a-f]{64}", r"\1", text)
+if count != 1:
+    raise SystemExit("archive digest mutation subject is not unique")
+path.write_text(mutated)
+PYEOF
+}
+# A tag archive without a digest pip verifies is a pin a moved tag can change under us.
+expect_fail check_client_versions_pinned.sh \
+    'a source-archive requirement with no digest' \
+    mut_compat_archive_without_digest \
+    'which is not an exact pin'
+
+mut_compat_pin_not_installed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("compat/versions.toml")
+text = path.read_text()
+old = 'version = "2.4.0"'
+if text.count(old) != 1:
+    raise SystemExit("installed-version mutation subject is not unique")
+path.write_text(text.replace(old, 'version = "2.3.0"', 1))
+PYEOF
+}
+# A pin that differs from what the requirements install reports one version and runs another.
+expect_fail check_client_versions_pinned.sh \
+    'a client pin that none of its requirements installs' \
+    mut_compat_pin_not_installed \
+    'none of its requirements installs that version'
+
 mut_compat_second_version_pin() {
     python3 - <<'PYEOF'
 from pathlib import Path
@@ -24141,6 +24251,26 @@ expect_fail check_corpus_no_secrets.sh \
     'an AWS secret access key hidden inside a base64 payload' \
     mut_corpus_secret_in_a_decoded_payload \
     'an AWS secret access key'
+
+mut_corpus_live_trailer_signature() {
+    python3 - <<'PYEOF'
+import base64
+import json
+from pathlib import Path
+
+path = Path("corpus/object/PutObject.jsonl")
+lines = path.read_text().splitlines()
+entry = json.loads(lines[0])
+planted = "0;chunk-signature=__REDACTED__\r\nx-amz-trailer-signature:" + "ab" * 32 + "\r\n\r\n"
+entry["chunks"] = [{"bytes_b64": base64.b64encode(planted.encode()).decode()}]
+lines[0] = json.dumps(entry, separators=(",", ":"))
+path.write_text("\n".join(lines) + "\n")
+PYEOF
+}
+expect_fail check_corpus_no_secrets.sh \
+    'a live aws-chunked trailer signature inside a base64 payload' \
+    mut_corpus_live_trailer_signature \
+    'a trailer signature'
 
 mut_corpus_private_key_in_prose() {
     python3 - <<'PYEOF'
