@@ -139,7 +139,10 @@ async fn every_operation_on_a_missing_bucket_is_no_such_bucket() {
         assert_eq!(response.status(), 404, "{}", text(&response));
         assert!(text(&response).contains("<Code>NoSuchBucket</Code>"), "{}", text(&response));
     }
-    assert!(!root.0.join(format!("b-{}", hex::encode("ghost"))).exists(), "a refused write creates no bucket");
+    assert!(
+        !root.0.join(format!("b-{}", hex::encode("ghost"))).exists(),
+        "a refused write creates no bucket"
+    );
 }
 
 /// Negative — what the shared contract refuses: a KMS key id beside `AES256`.
