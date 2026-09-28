@@ -1,5 +1,5 @@
 {
-  "ir_version": "2",
+  "ir_version": "3",
   "operation": "PutBucketAcl",
   "http": {
             "method": "PUT",
@@ -169,7 +169,7 @@
                                                                "kind": "List",
                                                                "member": { "kind": "Structure", "shape": "Grant" },
                                                                "flattened": false,
-                                                               "wrapper_name": "Grant"
+                                                               "member_name": "Grant"
                                                              },
                                                      "hot": false,
                                                      "quirk_refs": ["q-acl-0001"]

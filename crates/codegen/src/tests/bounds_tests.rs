@@ -83,7 +83,7 @@ fn a_list_of_bounded_integers_is_bounded_element_by_element() {
     let list = Type::List {
         member: Box::new(Type::Integer),
         flattened: true,
-        wrapper_name: None,
+        member_name: None,
     };
     let resolved = bounds::of(&field("PartNumbers", list, &["q-part-number-0072"]), &values, "Fixture").expect("resolves");
     assert_eq!(

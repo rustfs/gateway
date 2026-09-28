@@ -1,5 +1,5 @@
 {
-  "ir_version": "2",
+  "ir_version": "3",
   "operation": "GetBucketInventoryConfiguration",
   "http": {
             "method": "GET",
@@ -150,7 +150,7 @@
                                                                                         ]
                                                                             },
                                                                   "flattened": false,
-                                                                  "wrapper_name": "Field"
+                                                                  "member_name": "Field"
                                                                 },
                                                         "hot": false,
                                                         "quirk_refs": []

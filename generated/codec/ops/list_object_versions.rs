@@ -82,6 +82,14 @@ impl OperationCodec for dto::ListObjectVersions {
             let raw = raw.as_ref();
             input.request_payer = Some(dto::RequestPayer::custom(raw.to_owned()));
         }
+        // OptionalObjectAttributes — header `x-amz-optional-object-attributes`, a comma-delimited list.
+        if let Some(raw) = request.header("x-amz-optional-object-attributes") {
+            for raw in value::header_list(raw.as_ref()) {
+                input
+                    .optional_object_attributes
+                    .push(dto::OptionalObjectAttributes::custom(raw.to_owned()));
+            }
+        }
         let _ = body;
         value::exit(input.check_required())?;
         Ok(input)

@@ -1,5 +1,5 @@
 {
-  "ir_version": "2",
+  "ir_version": "3",
   "operation": "DeleteObjects",
   "http": {
             "method": "POST",
@@ -127,7 +127,7 @@
                                       "kind": "List",
                                       "member": { "kind": "Structure", "shape": "DeletedObject" },
                                       "flattened": true,
-                                      "wrapper_name": null
+                                      "member_name": null
                                     },
                             "hot": true,
                             "quirk_refs": ["q-deletes-0027"]
@@ -150,7 +150,7 @@
                                       "kind": "List",
                                       "member": { "kind": "Structure", "shape": "Error" },
                                       "flattened": true,
-                                      "wrapper_name": null
+                                      "member_name": null
                                     },
                             "hot": true,
                             "quirk_refs": ["q-deletes-0027"]
@@ -170,7 +170,7 @@
                                                   "kind": "List",
                                                   "member": { "kind": "Structure", "shape": "ObjectIdentifier" },
                                                   "flattened": true,
-                                                  "wrapper_name": null
+                                                  "member_name": null
                                                 },
                                         "hot": false,
                                         "quirk_refs": []
