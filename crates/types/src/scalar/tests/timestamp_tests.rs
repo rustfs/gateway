@@ -241,3 +241,30 @@ proptest! {
         prop_assert_eq!(Timestamp::parse(&rendered, TimestampFormat::Iso8601).expect("valid"), ts);
     }
 }
+
+/// Negative (rustfs/gateway#1013) — a value of a format's exact byte length that holds a
+/// multi-byte character is refused, never sliced inside that character. Every wire date form is
+/// ASCII, so the refusal loses no valid date. The first case is the decode_diff fuzz reproducer:
+/// `response-expires=Thu%99%matchL0A00%matchL` decodes to 24 bytes with U+FFFD at offset 3.
+#[test]
+fn a_non_ascii_value_is_refused_in_every_format_without_panicking() {
+    let cases: &[(&str, TimestampFormat)] = &[
+        ("Thu\u{fffd}matchL0A00%matchL", TimestampFormat::HttpDate),
+        ("Sun N\u{e9}v  6 08:49:37 1994", TimestampFormat::HttpDate),
+        ("Sun, 06 N\u{e9}v 1994 08:49:3 GMT", TimestampFormat::HttpDate),
+        ("Sun, 0\u{e9}Nov 1994 08:49:37 GMT", TimestampFormat::HttpDate),
+        ("Sunday, 06-N\u{e9}v-94 08:49:37 GMT", TimestampFormat::HttpDate),
+        ("Sunday, 06-Nov-94 08:49:\u{e9} GMT", TimestampFormat::HttpDate),
+        ("202\u{e9}-01-02T03:04:05Z", TimestampFormat::Iso8601),
+        ("2026-01-02T03:04:0\u{e9}Z", TimestampFormat::Iso8601),
+        ("2026-01-02T03:04:05+0\u{e9}", TimestampFormat::Iso8601),
+        ("2026010\u{e9}T030405Z", TimestampFormat::Iso8601Basic),
+        ("20260102T03040\u{e9}Z", TimestampFormat::Iso8601Basic),
+        ("17672256\u{e9}", TimestampFormat::EpochSeconds),
+        ("1767225600.\u{e9}", TimestampFormat::EpochSeconds),
+    ];
+    for (value, format) in cases {
+        let outcome = std::panic::catch_unwind(|| Timestamp::parse(value, *format));
+        assert!(matches!(outcome, Ok(Err(_))), "{value:?} as {format:?} must be refused, not {outcome:?}");
+    }
+}
