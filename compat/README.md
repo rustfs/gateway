@@ -25,12 +25,16 @@ the easiest parts of an S3 rewrite to get wrong, and it had no real-SDK traffic 
 | `rclone` | Drives aws-sdk-go-v2 at high concurrency and produces the list-then-copy traffic of a real mirroring deployment. It declares `UNSIGNED-PAYLOAD` for its uploads, a payload mode the botocore clients never send. |
 | `aws-cli` | AWS's own command-line client (v2) and the reference most users measure a server against. botocore underneath, but its `s3` commands pick part sizes, concurrency and sync decisions of their own. Over TLS its uploads are `STREAMING-UNSIGNED-PAYLOAD-TRAILER` with a CRC64NVME trailer, so it is a second, independently configured trailer writer beside boto3. |
 | `s3cmd` | A hand-written signer and XML layer with no AWS SDK underneath, and the oldest widely deployed S3 CLI. It is the client here that writes an ACL back after a copy without an integrity header, and whose `signurl` produces a SigV2 presigned URL. |
+| `aws-sdk-js` | AWS's JavaScript SDK, v3, on Node.js: the SDK behind most server and browser JavaScript that talks to S3, and the one most sensitive to presigning. It is the client here that frames a stream as `STREAMING-UNSIGNED-PAYLOAD-TRAILER` even over plaintext. |
 | `opendal` | Apache OpenDAL, the Rust data ecosystem's storage layer and the client that found s3s's stalled-request hang (s3s-project/s3s#316). Driven through its Python binding over the same Rust `services-s3` backend. It has no bucket operations, so its driver creates each cell's bucket with boto3 and measures everything else through the operator. |
 
-Deliberately absent for now, with the reason, so the next session does not have to rediscover it:
-`aws-sdk-rust`, `aws-sdk-go` and `aws-sdk-js` from the design-doc list are not yet registered. An
-SDK is a library, so each needs a small driver program under `drivers/<name>/` built from its own
-lock file (the `program` install method in `versions.toml`); rustfs/backlog#1765 tracks them.
+Not registered: `aws-sdk-go` from the design list. Its driver would be a Go program, and
+`scripts/check_no_minio_source.sh` refuses every Go source file in this tree as a clean-room
+boundary with no exemption (rustfs/gateway#974). Its SDK is still exercised, through rclone.
+
+An SDK is a library, so each SDK row is a small driver program under `drivers/<name>/`, built from
+its own lock file by `ci/compat/install_clients.sh` (the `program` install method in
+`versions.toml`) and asked at runtime which SDK version it actually linked.
 
 ## What answered these rows
 
