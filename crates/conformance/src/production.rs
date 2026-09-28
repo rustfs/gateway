@@ -32,7 +32,7 @@ use http::{Request, Response};
 use http_body::{Body as HttpBody, Frame, SizeHint};
 use rustfs_gateway::{
     Body, ConnectionIntent, MAX_LINGER_DRAIN_BYTES, RunningServer, S3Service, SelfHeldHttp1Driver, Server, ServerConfig,
-    TowerService, connection_intent_of,
+    TlsHandle, TlsMaterial, TowerService, connection_intent_of,
 };
 
 use crate::socket::Pacer;
@@ -59,6 +59,10 @@ pub struct ProductionServer {
 impl ProductionServer {
     /// Starts one production server on a kernel-selected loopback port.
     pub fn start(service: S3Service, driver: ProductionDriver) -> Result<Self, SutError> {
+        Self::start_with(service, driver, None)
+    }
+
+    fn start_with(service: S3Service, driver: ProductionDriver, tls: Option<TlsHandle>) -> Result<Self, SutError> {
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
             .enable_all()
@@ -72,15 +76,20 @@ impl ProductionServer {
         };
         let config = ServerConfig {
             bind_addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
-            plaintext: true,
+            plaintext: tls.is_none(),
             tcp_nodelay: true,
             ..ServerConfig::default()
         };
         let running = runtime
             .block_on(async move {
+                let server = Server::new(config, paced);
+                let server = match tls {
+                    Some(tls) => server.with_tls(tls),
+                    None => server,
+                };
                 match driver {
-                    ProductionDriver::Hyper => Server::new(config, paced).serve(),
-                    ProductionDriver::SelfHeld => Server::new(config, paced).serve_with(SelfHeldHttp1Driver),
+                    ProductionDriver::Hyper => server.serve(),
+                    ProductionDriver::SelfHeld => server.serve_with(SelfHeldHttp1Driver),
                 }
             })
             .map_err(|error| SutError::Environment(format!("cannot start the production server: {error}")))?;
@@ -89,6 +98,22 @@ impl ProductionServer {
             running: Some(running),
             pacers,
         })
+    }
+
+    /// Starts one production Hyper server behind TLS with a throwaway certificate for
+    /// `localhost`, advertising the server's default ALPN protocols. Returns the certificate so
+    /// the client can trust exactly it.
+    pub fn start_tls(service: S3Service) -> Result<(Self, rustls::pki_types::CertificateDer<'static>), SutError> {
+        let certified = rcgen::generate_simple_self_signed(["localhost".to_owned()])
+            .map_err(|error| SutError::Environment(format!("cannot mint the listener certificate: {error}")))?;
+        let certificate = rustls::pki_types::CertificateDer::from(certified.cert.der().to_vec());
+        let handle = TlsHandle::new(TlsMaterial::from_der(
+            vec![certified.cert.der().to_vec()],
+            certified.signing_key.serialize_der(),
+        ))
+        .map_err(|error| SutError::Environment(format!("cannot configure the TLS listener: {error}")))?;
+        let server = Self::start_with(service, ProductionDriver::Hyper, Some(handle))?;
+        Ok((server, certificate))
     }
 
     /// Kernel-selected listener address.

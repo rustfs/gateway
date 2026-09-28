@@ -47,8 +47,10 @@ except (OSError, tomllib.TOMLDecodeError) as error:
 
 # `rustls` and `webpki-roots` are the TLS record layer and its public trust anchors. They carry the
 # authored bytes opaquely and parse no HTTP, so they cannot normalise the malformed framing a
-# negative case exists to send; every other addition still has to be argued for here.
-allowed_dependencies = {"rustfs-gateway", "bytes", "http", "http-body", "tokio", "rustls", "webpki-roots"}
+# negative case exists to send; every other addition still has to be argued for here. `rcgen` only
+# mints the throwaway certificate the production listener serves when a case declares
+# `[connection.tls]`; it never sees a request byte.
+allowed_dependencies = {"rustfs-gateway", "bytes", "http", "http-body", "tokio", "rustls", "webpki-roots", "rcgen"}
 dependencies = manifest.get("dependencies", {})
 if not isinstance(dependencies, dict):
     print("check_runner_raw_bytes: [dependencies] must be a table", file=sys.stderr)

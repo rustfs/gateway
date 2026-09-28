@@ -45,6 +45,7 @@ mod huffman;
 mod receive;
 #[cfg(test)]
 mod tests;
+mod tls;
 
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
@@ -59,6 +60,7 @@ use crate::socket::{Connection, ReadFailure};
 use crate::sut::{ExchangePlan, SutError};
 use receive::PeerFrame;
 use receive::{FrameReader, Receiver, Response};
+pub(super) use tls::{TlsRequest, split_tls};
 
 /// The client connection preface magic (RFC 9113 section 3.4). The SETTINGS frame that completes
 /// the preface is authored like every other frame.
@@ -323,6 +325,7 @@ impl Conn {
         at_unix_seconds: i64,
         skew_ms: i64,
         reuse: bool,
+        tls: Option<TlsRequest>,
     ) -> Result<Observation, SutError> {
         let deadline = plan.deadline.unwrap_or_else(|| Instant::now() + budget_of(plan.timeout_ms));
         let script = compile(wire)?;
@@ -337,6 +340,20 @@ impl Conn {
         }
         // Nothing an HTTP/1.1 exchange left open can carry HTTP/2 frames.
         self.connection = None;
+        #[cfg(feature = "production-transports")]
+        if let Some(tls) = tls {
+            // Starting the listener is harness setup; the handshake is the target's time.
+            let mut clock = ExchangeClock::until(deadline);
+            let mut started = Instant::now();
+            let connection = clock.paced(|| {
+                let opened = self.open_h2_tls(&tls, at_unix_seconds, skew_ms, plan.profile, deadline);
+                started = Instant::now();
+                opened
+            })?;
+            return execute_on(connection, &script, clock, started, None);
+        }
+        #[cfg(not(feature = "production-transports"))]
+        let _ = tls;
         execute_started(|| self.addr(at_unix_seconds, skew_ms, plan.profile), &script, deadline, None)
     }
 

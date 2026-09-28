@@ -312,17 +312,25 @@ fn h2_key_declarations_match_the_selected_transport_in_an_isolated_process() {
             "c-h2-0021",
             "c-h2-0022",
             "c-h2-0023",
-            "c-h2-0024"
+            "c-h2-0024",
+            "c-h2-0025",
+            "c-h2-0026"
         ]
     );
     #[cfg(not(feature = "production-transports"))]
     for outcome in &report.outcomes {
         assert_eq!(outcome.verdict, crate::report::Verdict::Skipped);
+        // The two TLS cases are refused for `[connection.tls]`, read before the frames.
+        let expected = if ["c-h2-0025", "c-h2-0026"].contains(&outcome.id.as_str()) {
+            "`[connection.tls]`"
+        } else {
+            "h2_frames"
+        };
         assert!(
-            outcome
-                .skip_reason
-                .as_deref()
-                .is_some_and(|reason| reason.contains("h2_frames"))
+            outcome.skip_reason.as_deref().is_some_and(|reason| reason.contains(expected)),
+            "{}: {:?}",
+            outcome.id,
+            outcome.skip_reason
         );
     }
     #[cfg(feature = "production-transports")]

@@ -1,0 +1,43 @@
+# c-h2-0025 — authored HTTP/2 over TLS with ALPN h2.
+
+[case]
+id = "c-h2-0025"
+schema_version = 4
+title = "A request over TLS after negotiating h2 is answered as HTTP/2"
+rationale = "The listener must select h2 when the client offers it and then serve HTTP/2 frames inside the session; a listener that advertises no ALPN would leave the frames unwritten."
+polarity = "positive"
+tags = ["framing", "tls"]
+timeout_ms = 1500
+quirks = []
+applies_to = { http_versions = ["h2"] }
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9113.html#section-3.2"
+summary = "Over TLS a connection carries HTTP/2 only after client and server agree on the h2 token through ALPN."
+kind = "rfc"
+
+[connection.tls]
+enabled = true
+alpn = ["h2"]
+
+[request]
+method = "GET"
+target = "/"
+http_version = "h2"
+
+[[request.h2_frames]]
+type = "settings"
+
+[[request.h2_frames]]
+type = "headers"
+stream_id = 1
+flags = ["end_headers", "end_stream"]
+payload_hex = "828684410e73332e6578616d706c652e636f6d"
+
+[expect]
+kind = "response"
+status = 403
+h2_control_frames = []
+
+[expect.body]
+contains_utf8 = ["<Code>AccessDenied</Code>"]

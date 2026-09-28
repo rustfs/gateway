@@ -169,7 +169,7 @@ pub use crate::wire::{OrderedHeaders, WireResponse, collect};
 pub use rustfs_gateway_http::MAX_LINGER_DRAIN_BYTES;
 pub use rustfs_gateway_macros::handlers;
 #[cfg(feature = "server")]
-pub use rustfs_gateway_server::{RunningServer, Server, ServerConfig};
+pub use rustfs_gateway_server::{DEFAULT_ALPN_PROTOCOLS, RunningServer, Server, ServerConfig, TlsHandle, TlsMaterial};
 
 /// The generated request and response types, and the operation markers they belong to.
 ///

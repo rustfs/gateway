@@ -84,10 +84,12 @@ mod external_fixture;
 mod external_pacing;
 mod external_tls;
 mod h2;
+mod options;
 mod server;
 #[cfg(test)]
 use exchange::read_concurrent_connection;
 use external_endpoint::ExternalEndpoint;
+use options::read_connection;
 /// How long the client waits on a silent server before calling the exchange wedged.
 ///
 /// Used only when the case declares no `timeout_ms`. This is a safety net and never the path a
@@ -114,6 +116,9 @@ pub struct Conn {
     production: Option<ProductionServer>,
     #[cfg(feature = "production-transports")]
     driver: Option<ProductionDriver>,
+    /// The case's TLS production listener and the certificate a client must trust, when started.
+    #[cfg(feature = "production-transports")]
+    production_tls: Option<(ProductionServer, rustls::pki_types::CertificateDer<'static>)>,
     pacer: Arc<Pacer>,
     /// A deliberate stall in starting this case's server, standing in for a loaded host.
     #[cfg(test)]
@@ -133,6 +138,8 @@ impl Conn {
             production: None,
             #[cfg(feature = "production-transports")]
             driver: None,
+            #[cfg(feature = "production-transports")]
+            production_tls: None,
             pacer: Arc::new(Pacer::new()),
             #[cfg(test)]
             setup_delay: Duration::ZERO,
@@ -150,59 +157,13 @@ impl Conn {
             connection: None,
             production: None,
             driver: Some(driver),
+            production_tls: None,
             pacer: Arc::new(Pacer::new()),
             #[cfg(test)]
             setup_delay: Duration::ZERO,
         }
     }
 }
-/// Reads `[connection]`, refusing every instruction this transport cannot carry out.
-///
-/// `reuse` is the one that is honoured rather than refused, in both directions, and it is honoured
-/// by actually opening a socket or actually keeping one.
-fn read_connection(connection: Option<&Value>) -> Result<bool, SutError> {
-    let empty = Value::empty_table();
-    let connection = connection.unwrap_or(&empty);
-    if connection.read("connection.pipeline").and_then(Value::as_bool) == Some(true) {
-        return Err(SutError::Environment(
-            "`connection.pipeline = true` asks for the next request to be written before the \
-             previous response is read. This transport can do that — but the case that declares it \
-             asserts that two conditional creates *race*, and writing both requests onto one \
-             connection does not make them race: this server reads one request off a connection, \
-             answers it, and only then reads the next, and the fixture evaluates a condition and \
-             commits under it inside one lock. The loser therefore meets an object that is simply \
-             there, and `412` is the honest answer to a question the case did not ask. Reaching the \
-             race needs a server that dispatches pipelined requests concurrently and a store with a \
-             window between the check and the commit; neither is approximated here"
-                .to_owned(),
-        ));
-    }
-    if connection.read("connection.tls").is_some() {
-        return Err(SutError::Environment(
-            "`[connection.tls]` needs a TLS implementation; this transport writes cleartext bytes \
-             on a TCP socket and negotiates nothing"
-                .to_owned(),
-        ));
-    }
-    if connection.read("connection.read_window_bytes").is_some() {
-        return Err(SutError::Environment(
-            "`connection.read_window_bytes` induces backpressure by leaving response bytes unread; \
-             this client reads a response to its end before it judges anything, and a window it \
-             declared but did not apply would report a server that ignored flow control as one that \
-             honoured it"
-                .to_owned(),
-        ));
-    }
-    if connection.read("connection.idle_timeout_ms").is_some() {
-        return Err(SutError::Environment(
-            "`connection.idle_timeout_ms` times out an idle connection; this server holds a \
-             connection open until its own generous read timeout and has no per-case idle bound"
-                .to_owned(),
-        ));
-    }
-    Ok(connection.read("connection.reuse").and_then(Value::as_bool).unwrap_or(true))
-}
-
 /// The head bytes to write, and the payload length the framing declares.
 struct Head {
     bytes: Vec<u8>,
@@ -358,6 +319,7 @@ impl Sut for Conn {
         #[cfg(feature = "production-transports")]
         {
             self.production = None;
+            self.production_tls = None;
         }
         self.inner.prepare(case_id, setup)
     }
@@ -367,14 +329,17 @@ impl Sut for Conn {
             return self.exchange_external(plan);
         }
         let (fixed, request_time, skew_ms) = clock_of(plan.clock)?;
-        let reuse = read_connection(plan.connection)?;
         self.inner.set_fixture_now(fixed.unix_seconds);
-
         let wire = self.inner.read_wire(&plan.request)?;
-        self.inner.record_exchange();
         if !wire.h2_frames.is_empty() {
-            return self.exchange_h2(plan, &wire, fixed.unix_seconds, skew_ms, reuse);
+            // Only an authored frame script runs over `[connection.tls]` (`h2::tls`).
+            let (rest, tls) = h2::split_tls(plan.connection)?;
+            let reuse = read_connection(rest.as_ref())?;
+            self.inner.record_exchange();
+            return self.exchange_h2(plan, &wire, fixed.unix_seconds, skew_ms, reuse, tls);
         }
+        let reuse = read_connection(plan.connection)?;
+        self.inner.record_exchange();
         if wire.http_version.as_deref() == Some("h2") {
             return Err(SutError::Environment(
                 "`request.http_version = \"h2\"` needs a real HTTP/2 framing layer".to_owned(),

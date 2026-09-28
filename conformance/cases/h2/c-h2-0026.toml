@@ -1,0 +1,44 @@
+# c-h2-0026 — authored HTTP/2 over TLS with ALPN h2.
+
+[case]
+id = "c-h2-0026"
+schema_version = 4
+title = "An even client stream over TLS is a connection PROTOCOL_ERROR"
+rationale = "Negotiating h2 over TLS must not relax stream rules: an even client stream is still rejected at connection scope inside the session."
+polarity = "negative"
+tags = ["framing", "tls"]
+timeout_ms = 1500
+quirks = []
+applies_to = { http_versions = ["h2"] }
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9113.html#section-3.2"
+summary = "Over TLS a connection carries HTTP/2 only after client and server agree on the h2 token through ALPN."
+kind = "rfc"
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9113.html#section-5.1.1"
+summary = "Client-initiated streams use odd identifiers; an unexpected identifier is a connection PROTOCOL_ERROR."
+kind = "rfc"
+
+[connection.tls]
+enabled = true
+alpn = ["h2"]
+
+[request]
+method = "GET"
+target = "/"
+http_version = "h2"
+
+[[request.h2_frames]]
+type = "settings"
+
+[[request.h2_frames]]
+type = "headers"
+stream_id = 2
+flags = ["end_headers", "end_stream"]
+payload_hex = "828684410e73332e6578616d706c652e636f6d"
+
+[expect]
+kind = "connection_reset"
+h2_control_frames = [{ type = "goaway", last_stream_id = 0, error_code = 1 }]

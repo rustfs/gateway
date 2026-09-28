@@ -236,18 +236,6 @@ fn setup_free_h2_cases_pass_against_an_external_endpoint() {
     }
 }
 
-/// Negative — TLS is refused before a single frame is written; this slice is cleartext only.
-#[cfg(feature = "production-transports")]
-#[test]
-fn tls_is_refused_before_an_h2_script_is_written() {
-    let mut conn = production(ProductionDriver::Hyper, "s-h2-0006");
-    let tls = block("[tls]\nenabled = true\n");
-    let error = conn
-        .exchange(&h2_plan("s-h2-0006", h2_request(ANONYMOUS_GET_ROOT_HPACK), Some(&tls)))
-        .expect_err("TLS is not negotiated here");
-    assert!(error.to_string().contains("`[connection.tls]`"), "{error}");
-}
-
 /// Negative and positive — a later exchange that asks to reuse the connection is refused, and the
 /// same exchange with `reuse = false` runs on a fresh connection.
 #[cfg(feature = "production-transports")]
@@ -684,3 +672,6 @@ mod h2_ping_tests;
 mod h2_streams_tests;
 
 mod h2_tls_tests;
+
+#[cfg(feature = "production-transports")]
+mod h2_inprocess_tls_tests;
