@@ -43,6 +43,7 @@ fn refused(text: &str) -> String {
 
 fn finding(operation: &str, item: Item, gateway: &str, s3s: &str) -> Finding {
     Finding {
+        kind: crate::known::Kind::Decode,
         operation: operation.to_owned(),
         priority: if item == Item::Message {
             Priority::Info
@@ -295,4 +296,35 @@ fn no_checked_in_entry_is_past_its_review_date() {
     let register = KnownDiffs::checked_in().expect("parses");
     let expired: Vec<&str> = register.expired_on(&today).iter().map(|entry| entry.id.as_str()).collect();
     assert!(expired.is_empty(), "past their review date on {today}: {expired:?}");
+}
+
+/// Negative — when both sides are patterns their `*` stand for the same text: an escaping entry
+/// accepts `&quot;abc&quot;` against `"abc"` and refuses it against `"abd"`.
+#[test]
+fn the_two_wildcards_of_one_entry_stand_for_the_same_text() {
+    let text = VALID
+        .replace("kind = \"decode\"", "kind = \"encode\"")
+        .replace("kd-decode-0001", "kd-encode-0001")
+        .replace("GetObjectInput.range", "body */ETag")
+        .replace("gateway = \"\\\"bytes=0-1\\\"\"", "gateway = '\"&quot;*&quot;\"'\ns3s = '\"\\\"*\\\"\"'");
+    let register = KnownDiffs::parse(&text).expect("parses");
+    let found = |gateway: &str, s3s: &str| Finding {
+        kind: crate::known::Kind::Encode,
+        operation: "GetObject".to_owned(),
+        item: Item::BodyElement("R/ETag".to_owned()),
+        priority: Priority::Fail,
+        gateway: gateway.to_owned(),
+        s3s: s3s.to_owned(),
+    };
+    assert!(
+        register
+            .verdict(vec![found("\"&quot;abc&quot;\"", "\"\\\"abc\\\"\"")])
+            .passed()
+    );
+    assert!(
+        !register
+            .verdict(vec![found("\"&quot;abc&quot;\"", "\"\\\"abd\\\"\"")])
+            .passed()
+    );
+    assert!(!register.verdict(vec![found("\"&quot;&quot;\"", "\"\\\"abc\\\"\"")]).passed());
 }

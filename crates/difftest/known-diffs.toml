@@ -521,3 +521,514 @@ item = "rest_body"
 gateway = "* then an error"
 reason = "The gateway verifies a Content-MD5 or x-amz-checksum-* digest while the handler reads and fails the body at its end when it does not match; s3s hands every byte to RustFS, which verifies the same digest in its own reader and refuses with BadDigest (https://github.com/rustfs/rustfs/blob/719000460b231792b52314df321f0d385d03dff4/rustfs/src/app/object/extract.rs#L1208). Neither stack commits the object."
 expires = "2026-12-31"
+
+# ── Encode: what the gateway writes on every answer ─────────────────────────────────────────
+
+[[diff]]
+id = "kd-encode-0001"
+kind = "encode"
+operation = "*"
+item = 'header x-amz-request-id'
+gateway = '<REQID>'
+s3s = '<absent>'
+reason = "The gateway stamps a request id on every answer (its format is asserted: 16 uppercase hex digits); s3s writes none, and RustFS adds one in a layer in front of s3s."
+expires = "2026-12-31"
+ruling = "rd-err-0001"
+
+[[diff]]
+id = "kd-encode-0002"
+kind = "encode"
+operation = "*"
+item = 'header x-amz-id-2'
+gateway = '<HOSTID>'
+s3s = '<absent>'
+reason = "The gateway stamps a host id on every answer (asserted: 32 uppercase hex digits); s3s writes none."
+expires = "2026-12-31"
+ruling = "rd-err-0001"
+
+[[diff]]
+id = "kd-encode-0003"
+kind = "encode"
+operation = "*"
+item = 'header date'
+gateway = '<DATE>'
+s3s = '<absent>'
+reason = "The gateway stamps Date from its clock abstraction (asserted: an IMF-fixdate); s3s leaves it to the HTTP server, which a RustFS deployment's hyper adds."
+expires = "2026-12-31"
+
+[[diff]]
+id = "kd-encode-0004"
+kind = "encode"
+operation = "*"
+item = 'header server'
+gateway = '<SERVER>'
+s3s = '<absent>'
+reason = "The gateway stamps Server: RustFS (asserted: a product token); s3s writes none."
+expires = "2026-12-31"
+
+[[diff]]
+id = "kd-encode-0005"
+kind = "encode"
+operation = "*"
+item = 'body.prolog'
+gateway = '"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"'
+s3s = '"<?xml version=\"1.0\" encoding=\"UTF-8\"?>"'
+reason = "The gateway ends the XML declaration with a newline, as AWS does; s3s writes the root element straight after it. Both are the same document to an XML reader."
+expires = "2026-12-31"
+
+[[diff]]
+id = "kd-encode-0006"
+kind = "encode"
+operation = "*"
+item = 'body */ETag'
+gateway = '"&quot;*&quot;"'
+s3s = '"\"*\""'
+reason = "The gateway escapes the entity tag's quotes as &quot; in XML text, as AWS does; s3s writes the literal quote. Both read back as the same text."
+expires = "2026-12-31"
+
+
+# ── Encode: element order ───────────────────────────────────────────────────────────────────
+#
+# s3s writes a structure's members in its own declaration order (mostly alphabetical); the gateway
+# writes the S3 model's order, which is the order AWS documents and answers with. Each entry pins
+# both complete orders: a finding matches when the children written are that order with some left
+# out, so a gateway that starts writing another order is a new, unregistered difference.
+
+[[diff]]
+id = "kd-encode-0007"
+kind = "encode"
+operation = "CompleteMultipartUpload"
+item = 'body.order CompleteMultipartUploadResult'
+gateway = 'Location,Bucket,Key,ETag,ChecksumCRC32,ChecksumCRC32C,ChecksumCRC64NVME,ChecksumSHA1,ChecksumSHA256,ChecksumSHA512,ChecksumMD5,ChecksumXXHASH64,ChecksumXXHASH3,ChecksumXXHASH128,ChecksumType'
+s3s = 'Bucket,ChecksumCRC32,ChecksumCRC32C,ChecksumCRC64NVME,ChecksumMD5,ChecksumSHA1,ChecksumSHA256,ChecksumSHA512,ChecksumType,ChecksumXXHASH128,ChecksumXXHASH3,ChecksumXXHASH64,ETag,Key,Location'
+reason = "The gateway writes the S3 model's member order; s3s writes its own declaration order."
+expires = "2026-12-31"
+
+[[diff]]
+id = "kd-encode-0008"
+kind = "encode"
+operation = "DeleteObjects"
+item = 'body.order DeleteResult/Deleted'
+gateway = 'Key,VersionId,DeleteMarker,DeleteMarkerVersionId'
+s3s = 'DeleteMarker,DeleteMarkerVersionId,Key,VersionId'
+reason = "The gateway writes the S3 model's member order; s3s writes its own declaration order."
+expires = "2026-12-31"
+
+[[diff]]
+id = "kd-encode-0009"
+kind = "encode"
+operation = "DeleteObjects"
+item = 'body.order DeleteResult/Error'
+gateway = 'Key,VersionId,Code,Message'
+s3s = 'Code,Key,Message,VersionId'
+reason = "The gateway writes the S3 model's member order; s3s writes its own declaration order."
+expires = "2026-12-31"
+
+[[diff]]
+id = "kd-encode-0010"
+kind = "encode"
+operation = "GetBucketVersioning"
+item = 'body.order VersioningConfiguration'
+gateway = 'Status,MfaDelete'
+s3s = 'MfaDelete,Status'
+reason = "The gateway writes the S3 model's member order; s3s writes its own declaration order."
+expires = "2026-12-31"
+
+[[diff]]
+id = "kd-encode-0011"
+kind = "encode"
+operation = "ListBuckets"
+item = 'body.order ListAllMyBucketsResult'
+gateway = 'Owner,Buckets,ContinuationToken,Prefix'
+s3s = 'Buckets,ContinuationToken,Owner,Prefix'
+reason = "The gateway writes the S3 model's member order; s3s writes its own declaration order."
+expires = "2026-12-31"
+
+[[diff]]
+id = "kd-encode-0012"
+kind = "encode"
+operation = "ListBuckets"
+item = 'body.order ListAllMyBucketsResult/Buckets/Bucket'
+gateway = 'Name,CreationDate,BucketRegion,BucketArn'
+s3s = 'BucketArn,BucketRegion,CreationDate,Name'
+reason = "The gateway writes the S3 model's member order; s3s writes its own declaration order."
+expires = "2026-12-31"
+
+[[diff]]
+id = "kd-encode-0013"
+kind = "encode"
+operation = "ListBuckets"
+item = 'body.order ListAllMyBucketsResult/Owner'
+gateway = 'ID,DisplayName'
+s3s = 'DisplayName,ID'
+reason = "The gateway writes the S3 model's member order; s3s writes its own declaration order."
+expires = "2026-12-31"
+
+[[diff]]
+id = "kd-encode-0014"
+kind = "encode"
+operation = "ListMultipartUploads"
+item = 'body.order ListMultipartUploadsResult'
+gateway = 'Bucket,KeyMarker,UploadIdMarker,NextKeyMarker,Prefix,Delimiter,NextUploadIdMarker,MaxUploads,IsTruncated,Upload,CommonPrefixes,EncodingType'
+s3s = 'Bucket,CommonPrefixes,Delimiter,EncodingType,IsTruncated,KeyMarker,MaxUploads,NextKeyMarker,NextUploadIdMarker,Prefix,UploadIdMarker,Upload'
+reason = "The gateway writes the S3 model's member order; s3s writes its own declaration order."
+expires = "2026-12-31"
+
+[[diff]]
+id = "kd-encode-0015"
+kind = "encode"
+operation = "ListMultipartUploads"
+item = 'body.order ListMultipartUploadsResult/Upload'
+gateway = 'UploadId,Key,Initiated,StorageClass,Owner,Initiator,ChecksumAlgorithm,ChecksumType'
+s3s = 'ChecksumAlgorithm,ChecksumType,Initiated,Initiator,Key,Owner,StorageClass,UploadId'
+reason = "The gateway writes the S3 model's member order; s3s writes its own declaration order."
+expires = "2026-12-31"
+
+[[diff]]
+id = "kd-encode-0016"
+kind = "encode"
+operation = "ListMultipartUploads"
+item = 'body.order ListMultipartUploadsResult/Upload/Initiator'
+gateway = 'ID,DisplayName'
+s3s = 'DisplayName,ID'
+reason = "The gateway writes the S3 model's member order; s3s writes its own declaration order."
+expires = "2026-12-31"
+
+[[diff]]
+id = "kd-encode-0017"
+kind = "encode"
+operation = "ListMultipartUploads"
+item = 'body.order ListMultipartUploadsResult/Upload/Owner'
+gateway = 'ID,DisplayName'
+s3s = 'DisplayName,ID'
+reason = "The gateway writes the S3 model's member order; s3s writes its own declaration order."
+expires = "2026-12-31"
+
+[[diff]]
+id = "kd-encode-0018"
+kind = "encode"
+operation = "ListObjectVersions"
+item = 'body.order ListVersionsResult'
+gateway = 'Name,Prefix,KeyMarker,VersionIdMarker,NextKeyMarker,NextVersionIdMarker,MaxKeys,Delimiter,IsTruncated,Version,DeleteMarker,CommonPrefixes,EncodingType'
+s3s = 'CommonPrefixes,DeleteMarker,Delimiter,EncodingType,IsTruncated,KeyMarker,MaxKeys,Name,NextKeyMarker,NextVersionIdMarker,Prefix,VersionIdMarker,Version'
+reason = "The gateway writes the S3 model's member order; s3s writes its own declaration order."
+expires = "2026-12-31"
+
+[[diff]]
+id = "kd-encode-0019"
+kind = "encode"
+operation = "ListObjectVersions"
+item = 'body.order ListVersionsResult/DeleteMarker'
+gateway = 'Key,VersionId,IsLatest,LastModified,Owner'
+s3s = 'IsLatest,Key,LastModified,Owner,VersionId'
+reason = "The gateway writes the S3 model's member order; s3s writes its own declaration order."
+expires = "2026-12-31"
+
+[[diff]]
+id = "kd-encode-0020"
+kind = "encode"
+operation = "ListObjectVersions"
+item = 'body.order ListVersionsResult/DeleteMarker/Owner'
+gateway = 'ID,DisplayName'
+s3s = 'DisplayName,ID'
+reason = "The gateway writes the S3 model's member order; s3s writes its own declaration order."
+expires = "2026-12-31"
+
+[[diff]]
+id = "kd-encode-0021"
+kind = "encode"
+operation = "ListObjectVersions"
+item = 'body.order ListVersionsResult/Version'
+gateway = 'Key,VersionId,IsLatest,LastModified,ETag,ChecksumAlgorithm,ChecksumType,Size,StorageClass,Owner,RestoreStatus'
+s3s = 'ChecksumAlgorithm,ChecksumType,ETag,IsLatest,Key,LastModified,Owner,RestoreStatus,Size,StorageClass,VersionId'
+reason = "The gateway writes the S3 model's member order; s3s writes its own declaration order."
+expires = "2026-12-31"
+
+[[diff]]
+id = "kd-encode-0022"
+kind = "encode"
+operation = "ListObjectVersions"
+item = 'body.order ListVersionsResult/Version/Owner'
+gateway = 'ID,DisplayName'
+s3s = 'DisplayName,ID'
+reason = "The gateway writes the S3 model's member order; s3s writes its own declaration order."
+expires = "2026-12-31"
+
+[[diff]]
+id = "kd-encode-0023"
+kind = "encode"
+operation = "ListObjects"
+item = 'body.order ListBucketResult'
+gateway = 'Name,Prefix,Marker,NextMarker,MaxKeys,Delimiter,IsTruncated,Contents,CommonPrefixes,EncodingType'
+s3s = 'Name,Prefix,Marker,MaxKeys,IsTruncated,Contents,CommonPrefixes,Delimiter,NextMarker,EncodingType'
+reason = "The gateway writes the S3 model's member order; s3s writes its own declaration order."
+expires = "2026-12-31"
+
+[[diff]]
+id = "kd-encode-0024"
+kind = "encode"
+operation = "ListObjects"
+item = 'body.order ListBucketResult/Contents*'
+gateway = 'Key,LastModified,ETag,ChecksumAlgorithm,ChecksumType,Size,StorageClass,Owner,RestoreStatus'
+s3s = 'ChecksumAlgorithm,ChecksumType,ETag,Key,LastModified,Owner,RestoreStatus,Size,StorageClass'
+reason = "The gateway writes the S3 model's member order; s3s writes its own declaration order."
+expires = "2026-12-31"
+
+[[diff]]
+id = "kd-encode-0025"
+kind = "encode"
+operation = "ListObjects"
+item = 'body.order ListBucketResult/Contents*/Owner'
+gateway = 'ID,DisplayName'
+s3s = 'DisplayName,ID'
+reason = "The gateway writes the S3 model's member order; s3s writes its own declaration order."
+expires = "2026-12-31"
+
+[[diff]]
+id = "kd-encode-0026"
+kind = "encode"
+operation = "ListObjectsV2"
+item = 'body.order ListBucketResult'
+gateway = 'Name,Prefix,KeyCount,MaxKeys,Delimiter,IsTruncated,Contents,CommonPrefixes,EncodingType,ContinuationToken,NextContinuationToken,StartAfter'
+s3s = 'Name,Prefix,MaxKeys,KeyCount,ContinuationToken,IsTruncated,NextContinuationToken,Contents,CommonPrefixes,Delimiter,StartAfter,EncodingType'
+reason = "The gateway writes the S3 model's member order; s3s writes its own declaration order."
+expires = "2026-12-31"
+
+[[diff]]
+id = "kd-encode-0027"
+kind = "encode"
+operation = "ListObjectsV2"
+item = 'body.order ListBucketResult/Contents*'
+gateway = 'Key,LastModified,ETag,ChecksumAlgorithm,ChecksumType,Size,StorageClass,Owner,RestoreStatus'
+s3s = 'ChecksumAlgorithm,ChecksumType,ETag,Key,LastModified,Owner,RestoreStatus,Size,StorageClass'
+reason = "The gateway writes the S3 model's member order; s3s writes its own declaration order."
+expires = "2026-12-31"
+
+[[diff]]
+id = "kd-encode-0028"
+kind = "encode"
+operation = "ListObjectsV2"
+item = 'body.order ListBucketResult/Contents*/Owner'
+gateway = 'ID,DisplayName'
+s3s = 'DisplayName,ID'
+reason = "The gateway writes the S3 model's member order; s3s writes its own declaration order."
+expires = "2026-12-31"
+
+[[diff]]
+id = "kd-encode-0029"
+kind = "encode"
+operation = "ListParts"
+item = 'body.order ListPartsResult'
+gateway = 'Bucket,Key,UploadId,PartNumberMarker,NextPartNumberMarker,MaxParts,IsTruncated,Part,Initiator,Owner,StorageClass,ChecksumAlgorithm,ChecksumType'
+s3s = 'Bucket,ChecksumAlgorithm,ChecksumType,Initiator,IsTruncated,Key,MaxParts,NextPartNumberMarker,Owner,PartNumberMarker,Part,StorageClass,UploadId'
+reason = "The gateway writes the S3 model's member order; s3s writes its own declaration order."
+expires = "2026-12-31"
+
+[[diff]]
+id = "kd-encode-0030"
+kind = "encode"
+operation = "ListParts"
+item = 'body.order ListPartsResult/Initiator'
+gateway = 'ID,DisplayName'
+s3s = 'DisplayName,ID'
+reason = "The gateway writes the S3 model's member order; s3s writes its own declaration order."
+expires = "2026-12-31"
+
+[[diff]]
+id = "kd-encode-0031"
+kind = "encode"
+operation = "ListParts"
+item = 'body.order ListPartsResult/Owner'
+gateway = 'ID,DisplayName'
+s3s = 'DisplayName,ID'
+reason = "The gateway writes the S3 model's member order; s3s writes its own declaration order."
+expires = "2026-12-31"
+
+[[diff]]
+id = "kd-encode-0032"
+kind = "encode"
+operation = "ListParts"
+item = 'body.order ListPartsResult/Part'
+gateway = 'PartNumber,LastModified,ETag,Size,ChecksumCRC32'
+s3s = 'ChecksumCRC32,ETag,LastModified,PartNumber,Size'
+reason = "The gateway writes the S3 model's member order; s3s writes its own declaration order."
+expires = "2026-12-31"
+
+
+# ── Encode: other answers written differently ───────────────────────────────────────────────
+
+[[diff]]
+id = "kd-encode-0033"
+kind = "encode"
+operation = "CopyObject"
+item = 'body CopyObjectResult'
+gateway = '<CopyObjectResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">'
+s3s = '<CopyObjectResult>'
+reason = "The gateway writes the S3 namespace on the CopyObjectResult root, as every other S3 document and AWS's own answer carry it; s3s omits it on this one."
+expires = "2026-12-31"
+
+[[diff]]
+id = "kd-encode-0034"
+kind = "encode"
+operation = "GetObject"
+item = 'header content-type'
+gateway = 'binary/octet-stream'
+s3s = '<absent>'
+reason = "With no stored content type the gateway writes the S3 default, binary/octet-stream (q-content-0008); s3s writes no Content-Type. RustFS stores a type for every object, so its outputs rarely leave it unset."
+expires = "2026-12-31"
+ruling = "rd-put-0001"
+
+[[diff]]
+id = "kd-encode-0035"
+kind = "encode"
+operation = "HeadObject"
+item = 'header content-type'
+gateway = 'binary/octet-stream'
+s3s = '<absent>'
+reason = "As for GetObject: the gateway writes the S3 default content type when the output has none; s3s writes nothing."
+expires = "2026-12-31"
+ruling = "rd-put-0001"
+
+[[diff]]
+id = "kd-encode-0036"
+kind = "encode"
+operation = "GetObject"
+item = 'status'
+gateway = '200'
+s3s = '206'
+reason = "s3s answers 206 whenever the output carries a Content-Range; the gateway takes the status from the handler's response, so the RustFS adapter must answer a ranged read with the partial status itself (rustfs/backlog#1752)."
+expires = "2026-12-31"
+
+[[diff]]
+id = "kd-encode-0037"
+kind = "encode"
+operation = "ListObjectsV2"
+item = 'body ListBucketResult/Delimiter'
+gateway = '"%252F"'
+s3s = '"%2F"'
+reason = "Double encoding under encoding-type=url: RustFS encodes listing values itself (https://github.com/rustfs/rustfs/blob/719000460b231792b52314df321f0d385d03dff4/rustfs/src/app/bucket_usecase.rs#L870) and s3s writes them as given; the gateway codec encodes them again. The RustFS adapter must hand the gateway decoded values, or RustFS must stop encoding, before listings move to the gateway."
+expires = "2026-12-31"
+
+[[diff]]
+id = "kd-encode-0038"
+kind = "encode"
+operation = "ListObjectsV2"
+item = 'body ListBucketResult/Contents/Key'
+gateway = '"a%2520b"'
+s3s = '"a%20b"'
+reason = "Double encoding under encoding-type=url: RustFS encodes listing values itself (https://github.com/rustfs/rustfs/blob/719000460b231792b52314df321f0d385d03dff4/rustfs/src/app/bucket_usecase.rs#L870) and s3s writes them as given; the gateway codec encodes them again. The RustFS adapter must hand the gateway decoded values, or RustFS must stop encoding, before listings move to the gateway."
+expires = "2026-12-31"
+
+[[diff]]
+id = "kd-encode-0039"
+kind = "encode"
+operation = "ListObjects"
+item = 'body ListBucketResult/Delimiter'
+gateway = '"%252F"'
+s3s = '"%2F"'
+reason = "Double encoding under encoding-type=url: RustFS encodes listing values itself (https://github.com/rustfs/rustfs/blob/719000460b231792b52314df321f0d385d03dff4/rustfs/src/app/bucket_usecase.rs#L870) and s3s writes them as given; the gateway codec encodes them again. The RustFS adapter must hand the gateway decoded values, or RustFS must stop encoding, before listings move to the gateway."
+expires = "2026-12-31"
+
+[[diff]]
+id = "kd-encode-0040"
+kind = "encode"
+operation = "ListObjectVersions"
+item = 'body ListVersionsResult/Delimiter'
+gateway = '"%252F"'
+s3s = '"%2F"'
+reason = "Double encoding under encoding-type=url: RustFS encodes listing values itself (https://github.com/rustfs/rustfs/blob/719000460b231792b52314df321f0d385d03dff4/rustfs/src/app/bucket_usecase.rs#L870) and s3s writes them as given; the gateway codec encodes them again. The RustFS adapter must hand the gateway decoded values, or RustFS must stop encoding, before listings move to the gateway."
+expires = "2026-12-31"
+
+[[diff]]
+id = "kd-encode-0041"
+kind = "encode"
+operation = "ListMultipartUploads"
+item = 'body ListMultipartUploadsResult/Delimiter'
+gateway = '"%252F"'
+s3s = '"%2F"'
+reason = "Double encoding under encoding-type=url: RustFS encodes listing values itself (https://github.com/rustfs/rustfs/blob/719000460b231792b52314df321f0d385d03dff4/rustfs/src/app/bucket_usecase.rs#L870) and s3s writes them as given; the gateway codec encodes them again. The RustFS adapter must hand the gateway decoded values, or RustFS must stop encoding, before listings move to the gateway."
+expires = "2026-12-31"
+
+
+# ── Encode: s3s output members the gateway output cannot hold ───────────────────────────────
+
+[[diff]]
+id = "kd-encode-0042"
+kind = "encode"
+operation = "CopyObject"
+item = 'unconvertible copy_object_result.checksums'
+gateway = '<cannot hold>'
+reason = "The gateway CopyObjectOutput flattens the copy result to ETag and LastModified and has no checksum members, while RustFS echoes the copy's checksums (https://github.com/rustfs/rustfs/blob/719000460b231792b52314df321f0d385d03dff4/rustfs/src/app/object/copy.rs#L881). A gateway follow-up: without it a RustFS copy answer loses its checksums."
+expires = "2026-12-31"
+
+[[diff]]
+id = "kd-encode-0043"
+kind = "encode"
+operation = "UploadPart"
+item = 'unconvertible checksum_spec'
+gateway = '<cannot hold>'
+reason = "The gateway output carries one checksum; an s3s output with two is refused rather than one silently dropped. RustFS answers a part upload with at most the one checksum the client named."
+expires = "2026-12-31"
+
+[[diff]]
+id = "kd-encode-0044"
+kind = "encode"
+operation = "CompleteMultipartUpload"
+item = 'unconvertible future'
+gateway = '<cannot hold>'
+reason = "s3s lets a handler defer a completion behind a future; the gateway output is written once. RustFS does not set it."
+expires = "2026-12-31"
+
+[[diff]]
+id = "kd-encode-0045"
+kind = "encode"
+operation = "CreateBucket"
+item = 'unconvertible bucket_arn'
+gateway = '<cannot hold>'
+reason = "The gateway CreateBucketOutput has no BucketArn (directory and table buckets); RustFS does not set it."
+expires = "2026-12-31"
+
+[[diff]]
+id = "kd-encode-0046"
+kind = "encode"
+operation = "HeadBucket"
+item = 'unconvertible access_point_alias'
+gateway = '<cannot hold>'
+reason = "The gateway HeadBucketOutput carries the region only; the s3s access-point-alias member is refused while set. RustFS does not set it."
+expires = "2026-12-31"
+
+[[diff]]
+id = "kd-encode-0047"
+kind = "encode"
+operation = "CopyObject"
+item = 'unconvertible copy_object_result.checksum_type'
+gateway = '<cannot hold>'
+reason = "As kd-encode-0042 for the checksum type: the gateway CopyObjectOutput has no member for it."
+expires = "2026-12-31"
+
+[[diff]]
+id = "kd-encode-0048"
+kind = "encode"
+operation = "HeadBucket"
+item = 'unconvertible bucket_arn'
+gateway = '<cannot hold>'
+reason = "As kd-encode-0046: the gateway HeadBucketOutput has no BucketArn; RustFS does not set it."
+expires = "2026-12-31"
+
+[[diff]]
+id = "kd-encode-0049"
+kind = "encode"
+operation = "HeadBucket"
+item = 'unconvertible bucket_location_name'
+gateway = '<cannot hold>'
+reason = "As kd-encode-0046: the gateway HeadBucketOutput has no directory-bucket location name; RustFS does not set it."
+expires = "2026-12-31"
+
+[[diff]]
+id = "kd-encode-0050"
+kind = "encode"
+operation = "HeadBucket"
+item = 'unconvertible bucket_location_type'
+gateway = '<cannot hold>'
+reason = "As kd-encode-0046: the gateway HeadBucketOutput has no directory-bucket location type; RustFS does not set it."
+expires = "2026-12-31"
