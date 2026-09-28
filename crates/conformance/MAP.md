@@ -73,6 +73,7 @@ ADRs; this map only selects files.
 | `src/conn/h2/tests/h2_corpus_tests.rs` | Named HTTP/2 cases executed against production Hyper. | Checking that authored corpus coverage actually runs and passes. |
 | `src/inprocess/h2_frames.rs` | Reads `request.h2_frames` into typed, ordered frame declarations. | A declared frame field is lost before a transport sees it. |
 | `src/conn/server.rs` | Lazily assembles test and production listeners with the case clock and profile. | The socket transports assemble a different policy from in-process execution. |
+| `src/conn/setup_tests.rs` | Test-only: a stalled server start is charged to the harness, not the case's target budget, on the HTTP/1.1 and production HTTP/2 paths. | A case fails `runner/timeout` or `setup deadline expired before TCP connect` because the harness's own server start was slow. |
 | `src/sign.rs` | Request signing for corpus inputs. | A signed case sends the wrong request. |
 | `src/fixture.rs` | Deterministic fixture backend used by local runs. | Setup state or a fixture operation behaves wrongly. |
 | `src/fixture/committed.rs` | Late-failure work and frozen response heads for committed fixture operations. | Copy or multipart completion loses its pre-commit metadata. |
