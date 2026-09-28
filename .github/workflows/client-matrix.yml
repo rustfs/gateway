@@ -50,6 +50,11 @@ jobs:
       - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v5.3.0
         with:
           python-version: "3.12"
+      # Toolchains for the SDK driver programs under compat/drivers/ (the `program` install method).
+      # The SDK versions come from each driver's own lock file, checked against compat/versions.toml.
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
 
       # The pins are read from compat/versions.toml by the installer; nothing here names a version,
       # which is what scripts/check_client_versions_pinned.sh enforces.
@@ -58,10 +63,11 @@ jobs:
           python3 -m pip install --disable-pip-version-check "pyyaml==6.0.2"
           bash ci/compat/install_clients.sh
 
-      - name: Build the system under test
-        run: cargo build --release -p rustfs-gateway-compat-sut
+      - name: Build the system under test and the corpus CLI
+        run: cargo build --release -p rustfs-gateway-compat-sut -p rustfs-gateway-corpus --bin compat-sut --bin corpus
 
       - name: Run the matrix
+        id: matrix
         env:
           GATEWAY_COMPAT_SUT_BIN: target/release/compat-sut
           GATEWAY_COMPAT_RUN_DIR: target/compat
@@ -72,6 +78,15 @@ jobs:
           bash ci/compat/run_matrix.sh \
             ${{ inputs.clients && format('--clients {0}', inputs.clients) || '' }} \
             ${{ inputs.scenarios && format('--scenarios {0}', inputs.scenarios) || '' }}
+
+      # The run's probe records become corpus material (rustfs/backlog#1765 a-cm-0008): converted,
+      # sanitized, deduplicated and verified into target/compat/corpus, never into the repository's
+      # corpus/. A full run must record at least one aws-chunked request; a filtered one may not.
+      - name: Record the run as corpus
+        if: (success() || failure()) && steps.matrix.outcome != 'skipped'
+        run: |
+          bash ci/compat/record_corpus.sh --run-dir target/compat --corpus-bin target/release/corpus \
+            ${{ (inputs.clients || inputs.scenarios) && ' ' || '--require-chunked' }}
 
       - name: Probe report
         if: always()
@@ -101,5 +116,7 @@ jobs:
             target/compat/probe.jsonl
             target/compat/results/**
             target/compat/sut.log
+            target/compat/corpus.jsonl
+            target/compat/corpus/**
           if-no-files-found: warn
           retention-days: 14
