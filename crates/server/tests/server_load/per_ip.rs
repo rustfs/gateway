@@ -273,7 +273,15 @@ async fn c_wire_0064_one_thousand_half_open_connections_are_bounded_and_reused()
         }
     })
     .await
-    .expect("the per-IP ceiling refuses every excess slow header");
+    .unwrap_or_else(|_| {
+        panic!(
+            "the per-IP ceiling refuses every excess slow header: accepted={} active={} per_ip_rejected={} accept_errors={}",
+            running.metrics.accepted_connections(),
+            running.metrics.active_connections(),
+            running.metrics.per_ip_rejections(),
+            running.metrics.accept_errors()
+        )
+    });
 
     let mut v6_streams = open_partial_headers(v6, PER_IP_LIMIT).await;
     tokio::time::timeout(Duration::from_secs(2), async {

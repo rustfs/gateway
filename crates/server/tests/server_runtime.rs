@@ -20,6 +20,9 @@
 
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 
+#[cfg(unix)]
+#[path = "server_runtime/accept_recovery.rs"]
+mod accept_recovery;
 #[path = "server_runtime/connection_driver.rs"]
 mod connection_driver;
 #[path = "server_runtime/drain_fixture.rs"]

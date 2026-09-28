@@ -24,6 +24,7 @@
 #![forbid(unsafe_code)]
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
 
+mod accept_error;
 mod config;
 mod conn;
 mod connection_service;
