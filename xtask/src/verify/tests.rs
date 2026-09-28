@@ -217,6 +217,8 @@ fn facade_fast_scope_keeps_heavy_contracts_in_the_workspace_gate() {
             "compile_fail::gateway_compile_fail_contracts_are_enforced",
             "--skip",
             GATEWAY_RSS_TEST,
+            "--skip",
+            GATEWAY_ADDRESS_TABLE_TEST,
         ]
         .into_iter()
         .map(str::to_owned)
@@ -230,6 +232,11 @@ fn facade_fast_scope_keeps_heavy_contracts_in_the_workspace_gate() {
         include_str!("../../../crates/gateway/tests/cors_runtime.rs")
             .contains("fn a_million_unique_keys_keep_rss_within_the_entry_budget()"),
         "the workspace-only RSS contract must remain an active test"
+    );
+    assert!(
+        include_str!("../../../crates/gateway/src/ext/governor/allocation_tests.rs")
+            .contains("fn c_gov_0013_a_million_addresses_do_not_grow_memory()"),
+        "the workspace-only address-table contract must remain an active test"
     );
 }
 

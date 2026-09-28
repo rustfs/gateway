@@ -61,12 +61,18 @@ struct ClientShard {
 }
 
 impl ClientShard {
-    fn new(rate: Rate, now: MonotonicNow, capacity: usize) -> Self {
+    fn new(rate: Rate, now: MonotonicNow, bound: usize) -> Self {
+        // Eviction is a remove plus an insert under a different key, so a full shard keeps leaving
+        // deleted slots behind. When the map runs out of free slots it rehashes in place only if
+        // its live entries fit in half of its storage; sized to exactly `bound` it instead grows
+        // once, allocating on a decision path that has been warm for hours. Twice the bound plus
+        // the one entry being inserted is the storage that growth would have ended at anyway.
+        let capacity = bound.saturating_mul(2).saturating_add(2);
         Self {
             entries: HashMap::with_capacity(capacity),
             overflow: Meter::full(rate, now),
             generation: 0,
-            capacity,
+            capacity: bound,
         }
     }
 

@@ -58,7 +58,7 @@ for request order and `docs/assembly-order.md` for extension call counts.
 | `src/ext/host.rs` | Host resolution and path-style default | Locating the bucket source |
 | `src/ext/vhost.rs` | Virtual-host label-boundary matching | Configuring served domains |
 | `src/ext/governor.rs` | Governor contract and request dimensions | Adding deployment quotas |
-| `src/ext/governor/default.rs` | Mandatory layered token buckets | Tuning shipped limits |
+| `src/ext/governor/default.rs`, `src/ext/governor/allocation_tests.rs` | Mandatory layered token buckets and their isolated allocator/RSS probes | Tuning shipped limits or the address table's storage |
 | `src/ext/governor/meter.rs` | Atomic token-bucket meter | Changing quota accounting |
 | `src/ext/governor/rates.rs` | Validated default rates | Changing capacity defaults |
 | `src/ext/cors.rs` | Cached bucket CORS source | Serving browser requests |
