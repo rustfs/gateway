@@ -15770,6 +15770,53 @@ mut_clock_monotonic_source_deleted() {
 expect_fail check_clock_single_source.sh \
     "the monotonic source deleted, which must fail rather than skip" mut_clock_monotonic_source_deleted
 
+mut_clock_wall_read_through_an_alias() {
+    python3 - <<'CLOCKPY'
+import pathlib
+path = pathlib.Path("crates/gateway/src/service.rs")
+# rustfs/backlog#1759: a renamed import hides the reading from every search for the real name.
+path.write_text(path.read_text() + """
+use std::time::SystemTime as Wall;
+fn a_present_under_another_name() -> Wall {
+    Wall::now()
+}
+""")
+CLOCKPY
+}
+expect_fail check_clock_single_source.sh \
+    'a wall-clock reading through a renamed import' mut_clock_wall_read_through_an_alias \
+    'a renamed clock type hides every later reading'
+
+mut_clock_type_alias() {
+    python3 - <<'CLOCKPY'
+import pathlib
+path = pathlib.Path("crates/core/src/lib.rs")
+path.write_text(path.read_text() + """
+type Stopwatch = std::time::Instant;
+""")
+CLOCKPY
+}
+expect_fail check_clock_single_source.sh \
+    'a clock type renamed by a type alias' mut_clock_type_alias \
+    'a renamed clock type hides every later reading'
+
+mut_clock_reading_taken_as_a_function() {
+    python3 - <<'CLOCKPY'
+import pathlib
+path = pathlib.Path("crates/core/src/lib.rs")
+# No call parentheses at the path: the reading happens where the pointer is called.
+path.write_text(path.read_text() + """
+fn a_deferred_reading() -> std::time::Instant {
+    let read = <std::time::Instant>::now;
+    read()
+}
+""")
+CLOCKPY
+}
+expect_fail check_clock_single_source.sh \
+    'a clock reading taken as a function pointer through a qualified path' mut_clock_reading_taken_as_a_function \
+    'the protocol path reads a clock outside'
+
 mut_governor_moved_after_body_read() {
     python3 - <<'PYEOF'
 import pathlib
