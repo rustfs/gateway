@@ -181,9 +181,7 @@ mod tests {
     fn form(fields: &[(&str, &str)]) -> String {
         let mut body = String::new();
         for (name, value) in fields {
-            body.push_str(&format!(
-                "--xyz\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{value}\r\n"
-            ));
+            body.push_str(&format!("--xyz\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{value}\r\n"));
         }
         body.push_str("--xyz\r\nContent-Disposition: form-data; name=\"file\"; filename=\"a.txt\"\r\n\r\nhello\r\n--xyz--\r\n");
         body
