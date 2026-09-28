@@ -64,6 +64,8 @@ fn reordered_window_controls_cannot_match_as_a_set() {
     seen.h2_control_frames.as_mut().expect("fixture").reverse();
     assert!(!clean(EXACT, &seen));
 }
+/// An unasserted connection-level grant is not a mismatch (RFC 9113 section 5.2.1 leaves its timing
+/// to the peer; see `h2_grant_tests`), so the extra frame here is a stream-level one, which is.
 #[test]
 fn missing_or_extra_window_controls_are_not_ignored() {
     for count in [0, 2, 4] {
@@ -72,7 +74,7 @@ fn missing_or_extra_window_controls_are_not_ignored() {
         frames.resize(
             count,
             ObservedH2ControlFrame::WindowUpdate {
-                stream_id: 0,
+                stream_id: 1,
                 increment: 1,
             },
         );

@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Responsible for: exact ordered comparison of supported HTTP/2 control-frame observations.
+//! Responsible for: exact ordered comparison of supported HTTP/2 control-frame observations, with
+//! connection-level WINDOW_UPDATE grants matched by presence and value outside that order.
 //! NOT responsible for: reading sockets, classifying stream outcomes, or application event frames.
 //! Upstream: `super::judge` and transport observations. Downstream: expectation diagnostics.
 
@@ -29,13 +30,7 @@ pub(super) fn check_h2_control_frames(expect: &Value, observed: &Observation, po
             let expected: Option<Vec<_>> = expected.iter().map(read_frame).collect();
             match expected {
                 None => Some("expected HTTP/2 control frame has an unsupported type or invalid fields"),
-                Some(expected)
-                    if expected.len() != actual.len()
-                        || !expected.iter().zip(actual).all(|(expected, actual)| expected.matches(actual)) =>
-                {
-                    Some("received HTTP/2 control frames differ in count, order, or fields")
-                }
-                Some(_) => None,
+                Some(expected) => compare(&expected, actual),
             }
         }
     };
@@ -61,12 +56,52 @@ pub(super) fn check_socket_read_after(expect: &Value, observed: &Observation, po
     }
 }
 
+/// Connection-level WINDOW_UPDATE grants are matched by presence and value, apart from the others:
+/// RFC 9113 section 5.2.1 leaves when a receiver sends WINDOW_UPDATE, and what it grants, to the
+/// implementation, so a grant's position among other frames, or an unasserted grant, is not a
+/// protocol fact. Every other control frame keeps its exact count, order and fields.
+fn compare(expected: &[ExpectedFrame], actual: &[ObservedH2ControlFrame]) -> Option<&'static str> {
+    let (expected_grants, expected_ordered): (Vec<_>, Vec<_>) =
+        expected.iter().partition(|frame| frame.connection_grant().is_some());
+    let (actual_grants, actual_ordered): (Vec<_>, Vec<_>) = actual.iter().partition(|frame| grant_of(frame).is_some());
+    if expected_ordered.len() != actual_ordered.len()
+        || !expected_ordered
+            .iter()
+            .zip(&actual_ordered)
+            .all(|(expected, actual)| expected.matches(actual))
+    {
+        return Some("received HTTP/2 control frames differ in count, order, or fields");
+    }
+    let mut unclaimed: Vec<u32> = actual_grants.into_iter().filter_map(grant_of).collect();
+    for increment in expected_grants.iter().filter_map(|frame| frame.connection_grant()) {
+        let Some(position) = unclaimed.iter().position(|received| *received == increment) else {
+            return Some("an asserted connection-level WINDOW_UPDATE grant was not received");
+        };
+        unclaimed.swap_remove(position);
+    }
+    None
+}
+
+fn grant_of(frame: &ObservedH2ControlFrame) -> Option<u32> {
+    match frame {
+        ObservedH2ControlFrame::WindowUpdate { stream_id: 0, increment } => Some(*increment),
+        _ => None,
+    }
+}
+
 enum ExpectedFrame {
     Exact(ObservedH2ControlFrame),
     GoAwayCodes { last_stream_id: u32, codes: Vec<u32> },
 }
 
 impl ExpectedFrame {
+    fn connection_grant(&self) -> Option<u32> {
+        match self {
+            Self::Exact(frame) => grant_of(frame),
+            Self::GoAwayCodes { .. } => None,
+        }
+    }
+
     fn matches(&self, actual: &ObservedH2ControlFrame) -> bool {
         match (self, actual) {
             (Self::Exact(expected), actual) => expected == actual,
