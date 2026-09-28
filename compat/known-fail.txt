@@ -18,28 +18,6 @@
 # Where a client does something the model does not require a server to accept, or the refusal is a
 # deliberate default posture, the entry's own comment says so and its issue asks for the decision.
 
-# The reference backend registers no GetBucketLocation, and minio-go asks a server for a bucket's
-# region before it touches an object unless one is configured. mc has no region setting, so all
-# five of its runnable scenarios stop at that one refusal.
-mc/bucket-lifecycle          rustfs/gateway#627  GetBucketLocation is not registered
-mc/small-object-roundtrip    rustfs/gateway#627  GetBucketLocation is not registered
-mc/streaming-chunked-upload  rustfs/gateway#627  GetBucketLocation is not registered
-mc/list-pagination           rustfs/gateway#627  GetBucketLocation is not registered
-mc/sync-directory            rustfs/gateway#627  GetBucketLocation is not registered
-
-# GetObject ignores Range: it answers 200 with the whole object where 206 and the requested slice
-# are due. restic reads its packs by range, so this one gap fails a whole backup workflow.
-boto3/range-download         rustfs/gateway#626  GetObject ignores the Range header
-rclone/range-download        rustfs/gateway#626  GetObject ignores the Range header
-restic/backup-restore        rustfs/gateway#626  GetObject ignores the Range header
-
-# Only GetObject is reachable through a presigned URL, so a presigned PUT is refused 403.
-boto3/presigned-put          rustfs/gateway#628  presigned PUT is not an admitted operation
-
-# rclone stamps a modification time by copying an object onto itself, and CopyObject is not
-# registered. The first mirror succeeds; every rerun fails and rclone then stops converging.
-rclone/sync-directory        rustfs/gateway#629  CopyObject is not registered
-
 # s3cmd preserves the source ACL on `cp` by writing it back with PutObjectAcl, and sends that body
 # with no Content-MD5 or x-amz-checksum-*. The model marks PutObjectAcl checksum-required and the
 # gateway enforces it; RustFS behind s3s answers the same request today.
