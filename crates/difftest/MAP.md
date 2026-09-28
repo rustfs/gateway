@@ -31,14 +31,19 @@ compare and why this is not an in-process dual stack.
 | `src/project/listing.rs` | ListObjects, ListObjectsV2, ListObjectVersions, ListMultipartUploads projections. | A listing member is compared wrongly. |
 | `src/project/multipart.rs` | CreateMultipartUpload, UploadPart, CompleteMultipartUpload, AbortMultipartUpload, ListParts projections. | A multipart member is compared wrongly. |
 | `src/project/bucket.rs` | CreateBucket, DeleteBucket, HeadBucket, ListBuckets, GetBucketLocation, Get/PutBucketVersioning projections. | A bucket member is compared wrongly. |
-| `src/tests/rows.rs` | The request matrix: each row and the exact register ids its findings must match. | Adding a row, or a row's differences changed. |
+| `src/samples/mod.rs` | The built-in inputs both runners and the tests share, and their fixtures. | Adding a sample kind. |
+| `src/samples/requests.rs` | The request matrix: each row and the exact register ids its findings must match. | Adding a row, or a row's differences changed. |
+| `src/samples/outputs.rs` | The object output samples. | Adding an object output sample. |
+| `src/samples/outputs_more.rs` | The listing, multipart and bucket output samples. | Adding one of those samples. |
+| `src/corpus.rs` | A recorded corpus entry as a request, with each adjustment and skip named. | A recorded request is changed, skipped, or replayed wrongly. |
+| `src/runner.rs` | The runners' command line, sampling, budget, report and exit statuses. | A runner exits with the wrong status or reports wrongly. |
+| `src/bin/decode-diff.rs`, `src/bin/encode-diff.rs` | The two runner binaries. | Never; they only call `runner::main`. |
 | `src/tests/matrix.rs` | Judges the matrix: exact ids per row, no stale entry, every member (shared, one-sided, list element) exercised. | A matrix check fails, or the census rule changes. |
 | `src/tests/controls.rs` | The injected faults (misroute, one byte eaten, one member skewed) and the finding rules. | Auditing that a difference cannot go unreported. |
-| `src/tests/outputs.rs` | The object output samples and the fixtures every sample shares. | Adding an object output sample. |
-| `src/tests/outputs_more.rs` | The listing, multipart and bucket output samples. | Adding one of those samples. |
 | `src/tests/encoding.rs` | Judges the output samples: exact ids per sample, no stale encode entry, every s3s output member set. | An encode matrix check fails. |
 | `src/tests/encode_controls.rs` | The encoder faults (order, xmlns, empty spelling, upload id, extra header, request id), Content-Length, and every format both ways. | Auditing that an encode difference cannot go unreported. |
 | `src/tests/register.rs` | Every register refusal and matching rule. | Changing the register format. |
+| `src/tests/runner.rs` | Empty and missing corpus, unregistered corpus difference, sampling, budget, command line, every corpus adjustment and skip. | A runner or corpus behaviour changes. |
 | `src/tests/census.rs` | Each gateway projection held to the generated DTO field count. | A DTO gains a member. |
 
 ## Verify

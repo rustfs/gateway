@@ -19,21 +19,19 @@
 //! directions, every encode register entry to at least one sample, and every member of every
 //! diffed operation's s3s output to a sample that sets it (so a conversion that dropped a member
 //! would leave a difference some sample shows).
-//! NOT responsible for: the samples (`outputs.rs`, `outputs_more.rs`) or the injected encoder
+//! NOT responsible for: the samples (`samples/outputs.rs`, `samples/outputs_more.rs`) or the injected encoder
 //! defects (`encode_controls.rs`).
 //! Upstream: the samples, the checked-in register. Downstream: none.
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::outputs::OutputRow;
 use crate::known::Kind;
+use crate::samples::OutputRow;
 use crate::{Differ, KnownDiffs};
 
 /// Every output sample.
 pub(crate) fn all_rows() -> Vec<OutputRow> {
-    let mut rows = super::outputs::rows();
-    rows.extend(super::outputs_more::rows());
-    rows
+    crate::samples::outputs()
 }
 
 /// Positive — every sample produces exactly its registered differences: a new difference fails as

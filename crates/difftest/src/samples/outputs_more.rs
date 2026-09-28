@@ -17,8 +17,8 @@
 //! Responsible for: the samples of ListObjects, ListObjectsV2, ListObjectVersions,
 //! ListMultipartUploads, ListBuckets, the multipart family and the bucket operations — every
 //! member set somewhere, lists full and empty, `encoding-type=url` with a key that needs it.
-//! NOT responsible for: object samples (`outputs.rs`), or judging (`encoding.rs`).
-//! Upstream: the fixtures in `outputs.rs`. Downstream: `encoding.rs`.
+//! NOT responsible for: object samples (`outputs.rs`), or judging (`tests/encoding.rs`).
+//! Upstream: the fixtures in `outputs.rs`. Downstream: the sample list in `samples/mod.rs`.
 
 use http::Method;
 
@@ -433,7 +433,7 @@ pub(crate) fn rows() -> Vec<OutputRow> {
             RawRequest::put("/bkt/k?partNumber=1&uploadId=u", b"hello world"),
             || {
                 let OracleOutput::UploadPart(mut output) = upload_part(Some(("crc32", "DUoRhQ=="))) else {
-                    unreachable!("upload_part builds an UploadPart output");
+                    unreachable!("upload_part builds an UploadPart output")
                 };
                 output.checksum_sha1 = Some("Kq5sNclPz7QV2+lfQIuc6R7oRu0=".to_owned());
                 OracleOutput::UploadPart(output)

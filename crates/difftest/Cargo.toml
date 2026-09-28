@@ -12,6 +12,14 @@ authors.workspace = true
 publish = false
 autotests = false
 
+[[bin]]
+name = "decode-diff"
+path = "src/bin/decode-diff.rs"
+
+[[bin]]
+name = "encode-diff"
+path = "src/bin/encode-diff.rs"
+
 [package.metadata.gateway]
 # Ring 1 by the workspace rule (every package under `crates/` is ring 0/1 and links no RustFS
 # crate). "RING 2 — migration-only" in README.md names its lifetime, not a dependency on RustFS:
@@ -30,6 +38,8 @@ workspace = true
 # acceptance, the security floor, the codec and the handler hand-off.
 rustfs-gateway = { workspace = true }
 rustfs-gateway-core = { workspace = true }
+# The recorded request corpus the decode-diff runner reads.
+rustfs-gateway-corpus = { workspace = true }
 rustfs-gateway-http = { workspace = true }
 rustfs-gateway-sig = { workspace = true }
 rustfs-gateway-stream = { workspace = true }

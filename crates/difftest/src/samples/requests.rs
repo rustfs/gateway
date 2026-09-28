@@ -16,9 +16,10 @@
 //! differences each must produce.
 //!
 //! Responsible for: the rows — one request each, with the exact set of known-diff ids its findings
-//! must match — and the fixtures they share.
-//! NOT responsible for: judging the rows (`matrix.rs`) or the negative controls (`controls.rs`).
-//! Upstream: the library's request type. Downstream: `matrix.rs`, `controls.rs`.
+//! must match — and the fixtures they share. Library code, not test code, so the `decode-diff`
+//! runner and the fuzz targets start from the same requests the tests hold.
+//! NOT responsible for: judging the rows (`tests/matrix.rs`) or the negative controls.
+//! Upstream: the library's request type. Downstream: tests, the runners, the fuzz seeds.
 
 use http::Method;
 
@@ -26,14 +27,18 @@ use super::{OWNER, sse};
 use crate::RawRequest;
 
 /// One request and the register ids its findings must match, no more and no fewer.
-pub(crate) struct Row {
-    pub(crate) name: &'static str,
-    pub(crate) request: RawRequest,
-    pub(crate) expect: &'static [&'static str],
+#[derive(Clone, Debug)]
+pub struct RequestRow {
+    /// A stable name for reports.
+    pub name: &'static str,
+    /// The request.
+    pub request: RawRequest,
+    /// The register ids its decode diff produces.
+    pub expect: &'static [&'static str],
 }
 
-fn row(name: &'static str, request: RawRequest, expect: &'static [&'static str]) -> Row {
-    Row { name, request, expect }
+fn row(name: &'static str, request: RawRequest, expect: &'static [&'static str]) -> RequestRow {
+    RequestRow { name, request, expect }
 }
 
 const HTTP_DATE: &str = "Thu, 01 Jan 2026 00:00:00 GMT";
@@ -207,7 +212,8 @@ fn checksum(algorithm: rustfs_gateway_types::ChecksumAlgorithm, body: &[u8]) -> 
     let mut digest = algorithm.checksummer();
     digest.update(body);
     let digest = digest.finalize();
-    let spec = rustfs_gateway_types::ChecksumSpec::from_digest(algorithm, &digest).expect("a digest of the algorithm's width");
+    let spec = rustfs_gateway_types::ChecksumSpec::from_digest(algorithm, &digest)
+        .unwrap_or_else(|_| unreachable!("a digest is always its algorithm's width"));
     (algorithm.header_name(), spec.render_base64().to_owned())
 }
 
@@ -230,7 +236,7 @@ const ALGORITHMS: [(rustfs_gateway_types::ChecksumAlgorithm, &str); 10] = {
 
 /// A PUT or part upload of `body` carrying its checksum under every algorithm in turn, each
 /// named by both algorithm headers (one per stack, `kd-decode-0001`).
-fn checksum_rows(rows: &mut Vec<Row>) {
+fn checksum_rows(rows: &mut Vec<RequestRow>) {
     const PUT_NAMES: [&str; 10] = [
         "put-checksum-crc32",
         "put-checksum-crc32c",
@@ -321,9 +327,10 @@ fn checksum_rows(rows: &mut Vec<Row>) {
     }
 }
 
-/// Every row. Names are unique; the expectation is the exact set of register ids.
+/// Every request row. Names are unique; the expectation is the exact set of register ids.
+#[must_use]
 #[allow(clippy::too_many_lines, reason = "one table, read row by row")]
-pub(crate) fn rows() -> Vec<Row> {
+pub(super) fn requests() -> Vec<RequestRow> {
     let (delete_crc_header, delete_crc) = checksum(rustfs_gateway_types::ChecksumAlgorithm::Crc32, DELETE_BODY);
     let (versioning_crc_header, versioning_crc) = checksum(rustfs_gateway_types::ChecksumAlgorithm::Crc32, VERSIONING_BODY);
     let mut rows = vec![
@@ -650,6 +657,19 @@ pub(crate) fn rows() -> Vec<Row> {
         // ── a body that ends in an error on one stack ──
         row("put-checksum-mismatch", RawRequest::put("/bkt/k", b"hello world").header("x-amz-checksum-crc32", "AAAAAA=="), &["kd-decode-0052"]),
         row("put-md5-mismatch", RawRequest::put("/bkt/k", b"hello world").header("content-md5", "eV8yArF8trw9S3cdjGyerw=="), &["kd-decode-0052"]),
+        // ── the SDK operation hint ──
+        row("put-x-id-copy", RawRequest::put("/bkt/k?x-id=CopyObject", b"abc"), &["kd-decode-0055", "kd-decode-0056"]),
+        row("put-x-id-put", RawRequest::put("/bkt/k?x-id=PutObject", b"abc"), &[]),
+        row("list-x-id-v2-without-list-type", RawRequest::get("/bkt?x-id=ListObjectsV2"), &["kd-decode-0057"]),
+        row("list-v2-with-x-id", RawRequest::get("/bkt?list-type=2&x-id=ListObjectsV2"), &["kd-decode-0006", "kd-decode-0007"]),
+        row("get-x-id-tagging", RawRequest::get("/bkt/k?x-id=GetObjectTagging"), &["kd-decode-0058", "kd-decode-0059"]),
+        row(
+            "post-x-id-create-upload",
+            RawRequest::new(Method::POST, "/bkt/k?x-id=CreateMultipartUpload"),
+            &["kd-decode-0060", "kd-decode-0061"],
+        ),
+        row("delete-x-id-mismatch", RawRequest::delete("/bkt/k?x-id=DeleteObjects"), &["kd-decode-0062", "kd-decode-0063"]),
+        row("put-versioning-empty-body", RawRequest::put("/bkt?versioning", b""), &["kd-decode-0053", "kd-decode-0054"]),
         // ── the algorithm header without its checksum ──
         row(
             "delete-objects-algorithm-with-checksum",

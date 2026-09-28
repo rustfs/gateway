@@ -93,6 +93,7 @@ layers = [
         {
             "rustfs-gateway",
             "rustfs-gateway-core",
+            "rustfs-gateway-corpus",
             "rustfs-gateway-http",
             "rustfs-gateway-sig",
             "rustfs-gateway-stream",

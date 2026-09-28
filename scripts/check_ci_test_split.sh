@@ -234,6 +234,8 @@ RUN
   scripts/ci_budget.sh 60 "handlers facade fixture" scripts/test_handlers_facade_fixture.sh
 RUN
   scripts/ci_budget.sh 480 "workspace tests 3/3" bash -c 'cargo test --package rustfs-gateway-goldens --package rustfs-gateway-difftest --package rustfs-gateway-types --features rustfs-gateway-types/compat-s3s && cargo test --package rustfs-gateway --package rustfs-gateway-sig'
+  scripts/ci_budget.sh 120 "difftest runners build" cargo build --quiet --package rustfs-gateway-difftest --bins
+  scripts/ci_budget.sh 200 "difftest runners" bash -c 'target/debug/decode-diff --corpus corpus --budget-seconds 180 && target/debug/encode-diff --builtin --budget-seconds 180'
 RUN
 signing_suite_run = <<~'RUN'
   scripts/ci_budget.sh 180 "signing suite build" cargo build --package xtask --bin xtask

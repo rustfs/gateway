@@ -14,7 +14,8 @@
 
 //! The decode diff's own tests.
 //!
-//! Responsible for: the request matrix (`rows.rs`) and its judgement (`matrix.rs`), the negative
+//! Responsible for: judging the request matrix (`matrix.rs`) and the output matrix
+//! (`encoding.rs`) the library's `samples` module holds, the negative
 //! controls that break the gateway side on purpose (`controls.rs`), the register's refusals
 //! (`register.rs`), and the member census against the generated DTO (`census.rs`).
 //! NOT responsible for: anything the library does not do.
@@ -27,25 +28,5 @@ mod controls;
 mod encode_controls;
 mod encoding;
 mod matrix;
-mod outputs;
-mod outputs_more;
 mod register;
-mod rows;
-
-use crate::RawRequest;
-
-/// The account every fixture bucket belongs to.
-pub(crate) const OWNER: &str = crate::gateway::BUCKET_OWNER;
-/// A 32-byte SSE-C key and its MD5, both base64.
-const SSE_KEY: &str = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=";
-const SSE_KEY_MD5: &str = "hRasmdxgYDKV3nvbahU1MA==";
-
-/// The three SSE-C headers, on an encrypted connection (the gateway refuses them on cleartext;
-/// `kd-decode-0016` pins that).
-pub(crate) fn sse(request: RawRequest) -> RawRequest {
-    request
-        .header("x-amz-server-side-encryption-customer-algorithm", "AES256")
-        .header("x-amz-server-side-encryption-customer-key", SSE_KEY)
-        .header("x-amz-server-side-encryption-customer-key-md5", SSE_KEY_MD5)
-        .over_tls()
-}
+mod runner;
