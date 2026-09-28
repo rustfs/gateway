@@ -28,10 +28,6 @@ use super::ContextRequest;
 
 impl ContextRequest {
     /// A bodiless `HEAD` of `path?query` on `host`.
-    #[allow(
-        dead_code,
-        reason = "only the RustFS admin dialect sends one, through the s3s_f3e17541 compilation"
-    )]
     pub(crate) fn head(host: &str, path: &str, query: &str) -> Self {
         Self::new(Method::HEAD, host, path, query, b"")
     }

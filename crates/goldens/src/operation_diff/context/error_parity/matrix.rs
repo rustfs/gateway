@@ -60,6 +60,10 @@ pub(super) fn object_get() -> ContextRequest {
     ContextRequest::get(PATH_HOST, "/photos/a.txt", "")
 }
 
+pub(super) fn object_head() -> ContextRequest {
+    ContextRequest::head(PATH_HOST, "/photos/a.txt", "")
+}
+
 pub(super) fn object_put(body: &[u8]) -> ContextRequest {
     ContextRequest::put(PATH_HOST, "/photos/a.txt", body)
 }
@@ -320,7 +324,7 @@ fn the_gateway_411_names_the_member_and_closes() {
 // ── conditional and range ─────────────────────────────────────────────────────────────────────
 
 /// RustFS evaluates `If-Match` in its body and answers `PreconditionFailed`; through the adapter the
-/// gateway writes the same document. 304 and 416 do not cross (rd-err-0005, rd-err-0006).
+/// gateway writes the same document. 304 and 416 cross only with their facts (rd-err-0005, rd-err-0006).
 #[test]
 fn a_failed_precondition_from_the_app_body_is_412_on_both_stacks() {
     let scenario = Scenario::new(object_get().header("if-match", b"\"abc\"").signed("us-east-1"))
