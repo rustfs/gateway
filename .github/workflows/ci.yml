@@ -491,6 +491,10 @@ jobs:
     name: Gateway ThreadSanitizer
     runs-on: sm-standard-4
     timeout-minutes: 9
+    strategy:
+      fail-fast: false
+      matrix:
+        copy: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
@@ -500,8 +504,32 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Install host tools
         run: bash scripts/ci_install_host_tools.sh
+      - name: TSAN host facts
+        run: |
+          echo "runner=$RUNNER_NAME"; uname -a; nproc
+          cat /proc/sys/vm/mmap_rnd_bits /proc/sys/kernel/randomize_va_space 2>/dev/null || true
+          ulimit -a
+          cat /sys/fs/cgroup/pids.max /sys/fs/cgroup/cpu.max /sys/fs/cgroup/memory.max 2>/dev/null || true
+          grep -m1 'model name' /proc/cpuinfo || true
+          grep -iE 'seccomp|NoNewPrivs' /proc/self/status || true
+          (sudo -n apt-get install -y gdb >/dev/null 2>&1 && echo gdb-ok) || echo gdb-missing
       - name: One hundred OS threads under TSAN
-        run: scripts/ci_budget.sh 480 "gateway TSAN" scripts/run_gateway_tsan.sh
+        run: |
+          set +e
+          scripts/run_gateway_tsan.sh &
+          runner=$!
+          for i in $(seq 1 240); do kill -0 "$runner" 2>/dev/null || break; sleep 1; done
+          if kill -0 "$runner" 2>/dev/null; then
+            pid="$(pgrep -f 'deps/integration-' | head -1)"
+            echo "HANG after 240s; pid=$pid"
+            ps -o pid,stat,nlwp,pcpu,etime,cmd -p "$pid"
+            grep -E 'Threads|State|VmRSS|voluntary' "/proc/$pid/status"
+            for t in /proc/$pid/task/*; do printf '%s %s %s\n' "$(awk '{print $3}' "$t/stat")" "$(cat "$t/wchan" 2>/dev/null)" "$(cat "$t/comm")"; done | sort | uniq -c | sort -rn | head -20
+            sudo -n gdb -p "$pid" -batch -ex 'info threads' -ex 'thread apply all bt 14' 2>&1 | head -900
+            sudo -n kill -9 "$pid"
+            exit 1
+          fi
+          wait "$runner"
 
   # The guard self-test is split over five runners because it grows with every merge:
   # AGENTS.md requires a mutation per new assertion, so its case count only ever goes
