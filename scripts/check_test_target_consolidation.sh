@@ -201,6 +201,7 @@ core_modules = (
     "dto_cold_split",
     "encryption_roundtrip",
     "error_resolution",
+    "event_stream_frame_replay",
     "ext_field_policy",
     "golden",
     "hot_path",
