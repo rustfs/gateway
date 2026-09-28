@@ -162,3 +162,17 @@ lock_file = "Cargo.lock"
 lock_pattern = '^name = "aws-sdk-s3"\nversion = "([^"]+)"$'
 version = "1.150.0"
 version_command = '"$COMPAT_CLIENT_OUT/target/release/driver" --client-version'
+
+[clients.aws-sdk-go]
+install = "program"
+# A driver program, not a command: the SDK is a library. go.mod and go.sum beside it lock every
+# module it links; `go build` refuses a go.sum that does not cover them. Go is admitted in this tree
+# only as a client driver directly under compat/drivers/<client>/, with no github.com/minio module
+# anywhere in its graph (scripts/check_no_minio_source.sh rules 3 and 5, rustfs/gateway#974).
+source = "compat/drivers/aws-sdk-go"
+toolchain = "go"
+build = 'go build -trimpath -o "$COMPAT_CLIENT_OUT/driver" .'
+lock_file = "go.mod"
+lock_pattern = '^\s*github\.com/aws/aws-sdk-go-v2/service/s3 (v\S+)$'
+version = "v1.113.4"
+version_command = '"$COMPAT_CLIENT_OUT/driver" --client-version'

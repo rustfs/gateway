@@ -15544,6 +15544,89 @@ mut_vendored_server_tree() {
 expect_fail check_no_minio_source.sh \
     'a vendored MinIO server tree' mut_vendored_server_tree
 
+mut_go_outside_client_drivers() {
+    mkdir -p crates/core/tools
+    printf 'package tools\n' >crates/core/tools/gen.go
+}
+# Go is admitted only as a client-matrix driver program; anywhere else it is still refused.
+expect_fail check_no_minio_source.sh \
+    'a Go source file outside compat/drivers/<client>/' mut_go_outside_client_drivers \
+    'a Go source file outside compat/drivers/<client>/'
+
+mut_go_nested_in_client_driver() {
+    mkdir -p compat/drivers/aws-sdk-go/internal/server
+    cp compat/drivers/aws-sdk-go/main.go compat/drivers/aws-sdk-go/internal/server/handler.go
+}
+# One flat directory per client: a nested tree under a driver is where a vendored package would hide.
+expect_fail check_no_minio_source.sh \
+    'a Go file nested below a client driver directory' mut_go_nested_in_client_driver \
+    'a Go source file outside compat/drivers/<client>/'
+
+mut_go_driver_requires_minio_module() {
+    printf 'require github.com/minio/minio-go/v7 v7.0.97\n' >>compat/drivers/aws-sdk-go/go.mod
+}
+expect_fail check_no_minio_source.sh \
+    'a Go client driver requiring a github.com/minio module' mut_go_driver_requires_minio_module \
+    'references a github.com/minio module'
+
+mut_go_driver_sum_minio_module() {
+    printf 'github.com/minio/minio v0.0.0-20250422165208-bf2a7b8a8a41 h1:AAAA=\n' >>compat/drivers/aws-sdk-go/go.sum
+}
+expect_fail check_no_minio_source.sh \
+    'a Go client driver whose go.sum carries a github.com/minio module' mut_go_driver_sum_minio_module \
+    'references a github.com/minio module'
+
+mut_go_driver_imports_minio() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("compat/drivers/aws-sdk-go/main.go")
+text = path.read_text()
+old = '\t"github.com/aws/smithy-go"\n'
+if text.count(old) != 1:
+    raise SystemExit("go import mutation subject is not unique")
+path.write_text(text.replace(old, old + '\t_ "github.com/minio/minio/cmd"\n', 1))
+PYEOF
+}
+expect_fail check_no_minio_source.sh \
+    'a Go client driver importing a github.com/minio package' mut_go_driver_imports_minio \
+    'references a github.com/minio module'
+
+mut_go_driver_minio_copyright() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("compat/drivers/aws-sdk-go/main.go")
+path.write_text("// Copyright (c) 2015-2024 Mini\x4f, Inc.\n" + path.read_text())
+PYEOF
+}
+expect_fail check_no_minio_source.sh \
+    'a Go client driver carrying a MinIO copyright line' mut_go_driver_minio_copyright \
+    'carries a MinIO copyright'
+
+mut_go_driver_without_apache_header() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("compat/drivers/aws-sdk-go/main.go")
+text = path.read_text()
+old = 'Licensed under the Apache License, Version 2.0 (the "License");'
+if text.count(old) != 1:
+    raise SystemExit("apache header mutation subject is not unique")
+path.write_text(text.replace(old, "Licensed as described elsewhere.", 1))
+PYEOF
+}
+expect_fail check_no_minio_source.sh \
+    'a Go client driver file without the Apache-2.0 header' mut_go_driver_without_apache_header \
+    'lacks the Apache-2.0 licence header'
+
+mut_go_driver_without_module() {
+    rm compat/drivers/aws-sdk-go/go.mod
+}
+expect_fail check_no_minio_source.sh \
+    'a Go client driver with no go.mod to scan' mut_go_driver_without_module \
+    'has Go source but no go.mod'
+
 mut_minio_submodule() {
     printf '[submodule "minio"]\n\tpath = third_party/minio\n\turl = https://github.com/minio/minio.git\n' \
         >.gitmodules
