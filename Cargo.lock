@@ -1887,6 +1887,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "rustfs-gateway-difftest"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "futures-core",
+ "hex",
+ "http",
+ "http-body",
+ "http-body-util",
+ "rustfs-gateway",
+ "rustfs-gateway-core",
+ "rustfs-gateway-http",
+ "rustfs-gateway-sig",
+ "rustfs-gateway-stream",
+ "rustfs-gateway-types",
+ "serde",
+ "sha2",
+ "time",
+ "toml 1.1.4+spec-1.1.0",
+]
+
+[[package]]
 name = "rustfs-gateway-fs"
 version = "0.1.4"
 dependencies = [

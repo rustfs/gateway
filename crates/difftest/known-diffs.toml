@@ -1,0 +1,550 @@
+# The known-diffs register of the gateway/s3s differential (rustfs/backlog#1762).
+#
+# Every difference the decode or encode diff reports must match an entry here or it fails. An
+# entry says what differs (operation, item, and optionally the exact rendered values on each side),
+# why that is accepted, and the date by which it must be reviewed again. Entries are removed when
+# the difference is gone; adding one needs the justification spelled out in the pull request.
+#
+# Keys: id (kd-<decode|encode>-NNNN), kind, operation, item, gateway?, s3s?, reason, expires,
+# ruling? (rd-… in crates/goldens/src/migration_inventory/request_divergences.rs), adr?.
+
+# ── Decode: members the gateway reads differently ────────────────────────────────────────────
+
+[[diff]]
+id = "kd-decode-0001"
+kind = "decode"
+operation = "PutObject"
+item = "PutObjectInput.checksum_algorithm"
+gateway = "\"*\""
+s3s = "<unset>"
+reason = "The gateway reads the algorithm from x-amz-sdk-checksum-algorithm, the header the S3 model binds; the pinned s3s reads x-amz-checksum-algorithm, so each stack leaves the member unset for the other header."
+expires = "2026-12-31"
+ruling = "rd-put-0002"
+
+[[diff]]
+id = "kd-decode-0002"
+kind = "decode"
+operation = "PutObject"
+item = "PutObjectInput.version_id"
+gateway = "<no member>"
+reason = "MinIO's ?versionId= on a PUT has no member in the gateway's PutObject; only the replication dialect's replica write reads it, after s3:ReplicateObject authorization."
+expires = "2026-12-31"
+ruling = "rd-put-0007"
+
+[[diff]]
+id = "kd-decode-0003"
+kind = "decode"
+operation = "GetObject"
+item = "GetObjectInput.if_range"
+s3s = "<no member>"
+reason = "The pinned s3s GetObjectInput has no If-Range member, so RustFS never sees the validator and serves the range of whatever object is current; the gateway binds it (q-range-0058). A follow-up for the RustFS adapter, not a gateway change."
+expires = "2026-12-31"
+
+[[diff]]
+id = "kd-decode-0004"
+kind = "decode"
+operation = "UploadPart"
+item = "UploadPartInput.upload_id"
+gateway = "\"<an id the gateway could never have minted>\""
+reason = "The gateway hands an upload id out only through its resolver, which refuses a shape no server mints (a leading slash, a dot-dot segment, control bytes) as NoSuchUpload; s3s hands the text to RustFS, whose lookup answers NoSuchUpload for it too."
+expires = "2026-12-31"
+
+# ── Decode: model defaults the gateway writes into the input ────────────────────────────────
+#
+# The gateway decoder materialises the model's default for these members; s3s leaves them unset
+# and the RustFS handler applies the same number. The effective request is identical.
+
+[[diff]]
+id = "kd-decode-0005"
+kind = "decode"
+operation = "ListObjects"
+item = "ListObjectsInput.max_keys"
+gateway = "\"1000\""
+s3s = "<unset>"
+reason = "Gateway writes the 1000-key default into the input; RustFS applies the same default to an unset max-keys (https://github.com/rustfs/rustfs/blob/719000460b231792b52314df321f0d385d03dff4/rustfs/src/storage/s3_api/bucket.rs#L132)."
+expires = "2026-12-31"
+
+[[diff]]
+id = "kd-decode-0006"
+kind = "decode"
+operation = "ListObjectsV2"
+item = "ListObjectsV2Input.max_keys"
+gateway = "\"1000\""
+s3s = "<unset>"
+reason = "Gateway writes the 1000-key default into the input; RustFS applies the same default to an unset max-keys (https://github.com/rustfs/rustfs/blob/719000460b231792b52314df321f0d385d03dff4/rustfs/src/storage/s3_api/bucket.rs#L161)."
+expires = "2026-12-31"
+
+[[diff]]
+id = "kd-decode-0007"
+kind = "decode"
+operation = "ListObjectsV2"
+item = "ListObjectsV2Input.fetch_owner"
+gateway = "\"false\""
+s3s = "<unset>"
+reason = "Gateway writes fetch-owner=false into the input; RustFS reads an unset member as false (https://github.com/rustfs/rustfs/blob/719000460b231792b52314df321f0d385d03dff4/rustfs/src/app/bucket_usecase.rs#L2886)."
+expires = "2026-12-31"
+
+[[diff]]
+id = "kd-decode-0008"
+kind = "decode"
+operation = "ListObjectVersions"
+item = "ListObjectVersionsInput.max_keys"
+gateway = "\"1000\""
+s3s = "<unset>"
+reason = "Gateway writes the 1000-key default into the input; RustFS applies the same default to an unset max-keys (https://github.com/rustfs/rustfs/blob/719000460b231792b52314df321f0d385d03dff4/rustfs/src/storage/s3_api/bucket.rs#L132)."
+expires = "2026-12-31"
+
+[[diff]]
+id = "kd-decode-0009"
+kind = "decode"
+operation = "ListMultipartUploads"
+item = "ListMultipartUploadsInput.max_uploads"
+gateway = "\"1000\""
+s3s = "<unset>"
+reason = "Gateway writes the 1000-upload default into the input; RustFS applies its own 1000 cap to an unset max-uploads (https://github.com/rustfs/rustfs/blob/719000460b231792b52314df321f0d385d03dff4/rustfs/src/storage/s3_api/multipart.rs#L149)."
+expires = "2026-12-31"
+
+[[diff]]
+id = "kd-decode-0010"
+kind = "decode"
+operation = "ListParts"
+item = "ListPartsInput.max_parts"
+gateway = "\"1000\""
+s3s = "<unset>"
+reason = "Gateway writes the 1000-part default into the input; RustFS applies the same default to an unset max-parts (https://github.com/rustfs/rustfs/blob/719000460b231792b52314df321f0d385d03dff4/rustfs/src/storage/s3_api/multipart.rs#L112)."
+expires = "2026-12-31"
+
+[[diff]]
+id = "kd-decode-0011"
+kind = "decode"
+operation = "ListBuckets"
+item = "ListBucketsInput.max_buckets"
+gateway = "\"10000\""
+s3s = "<unset>"
+reason = "Gateway writes the 10000-bucket default into the input; the RustFS ListBuckets handler does not paginate and reads none of the input's members (https://github.com/rustfs/rustfs/blob/719000460b231792b52314df321f0d385d03dff4/rustfs/src/app/bucket_usecase.rs#L1566), so the value changes nothing today."
+expires = "2026-12-31"
+
+# ── Decode: one stack refuses a request the other hands to its handler ─────────────────────
+
+[[diff]]
+id = "kd-decode-0012"
+kind = "decode"
+operation = "PutObject"
+item = "outcome"
+gateway = "411 MissingContentLength: the request omits a member the wire contract requires"
+s3s = "handled"
+reason = "A plain PUT with no Content-Length is refused by the gateway (q-length-0007); s3s back-fills the length and accepts."
+expires = "2026-12-31"
+ruling = "rd-put-0003"
+
+[[diff]]
+id = "kd-decode-0013"
+kind = "decode"
+operation = "PutObject"
+item = "outcome"
+gateway = "400 InvalidRequest: Expecting a single x-amz-checksum- header"
+s3s = "handled"
+reason = "Two integrity claims in one request are refused before the body is read (q-checksum-0006); s3s keeps both."
+expires = "2026-12-31"
+ruling = "rd-put-0005"
+
+[[diff]]
+id = "kd-decode-0014"
+kind = "decode"
+operation = "PutObject"
+item = "outcome"
+gateway = "400 InvalidDigest: The Content-MD5 you specified is not valid"
+s3s = "handled"
+reason = "The gateway refuses a Content-MD5 that is not base64 before the handler with the AWS answer, 400 InvalidDigest; s3s hands it to RustFS, whose PutObject body fails to decode it as a generic storage error (https://github.com/rustfs/rustfs/blob/719000460b231792b52314df321f0d385d03dff4/rustfs/src/app/object/put.rs#L1724). Both refuse the upload; the gateway's code is the AWS one."
+expires = "2026-12-31"
+
+[[diff]]
+id = "kd-decode-0015"
+kind = "decode"
+operation = "GetObject"
+item = "outcome"
+gateway = "400 InvalidArgument: the name contains a dot-dot path segment"
+s3s = "handled"
+reason = "The object-key floor refuses a dot-dot segment for every operation that names a key; s3s keeps it."
+expires = "2026-12-31"
+ruling = "rd-put-0008"
+
+[[diff]]
+id = "kd-decode-0016"
+kind = "decode"
+operation = "GetObject"
+item = "outcome"
+gateway = "400 InvalidRequest: requests specifying a customer-provided encryption key must be made over a secure connection"
+s3s = "handled"
+reason = "The gateway refuses SSE-C on a cleartext connection by default, as AWS does. RustFS main only reports it unless RUSTFS_SSE_C_REQUIRE_TLS=true (https://github.com/rustfs/rustfs/blob/719000460b231792b52314df321f0d385d03dff4/rustfs/src/server/ssec_transport.rs#L56), so the RustFS adapter must install SseConfig::allowing_customer_keys_over_plaintext exactly when that switch is off."
+expires = "2026-12-31"
+
+[[diff]]
+id = "kd-decode-0017"
+kind = "decode"
+operation = "GetObject"
+item = "outcome"
+gateway = "handled"
+s3s = "400 InvalidArgument: invalid header: range: *"
+reason = "RFC 9110 says an unparseable, multi-range or non-bytes Range is ignored and the whole object served; the gateway keeps the header verbatim and does that, s3s refuses it with 400."
+expires = "2026-12-31"
+
+[[diff]]
+id = "kd-decode-0018"
+kind = "decode"
+operation = "GetObject"
+item = "outcome"
+gateway = "handled"
+s3s = "400 InvalidArgument: invalid header: if-modified-since: *"
+reason = "A date condition that is not an HTTP-date is ignored rather than refused (q-cond-0050); s3s refuses it."
+expires = "2026-12-31"
+
+[[diff]]
+id = "kd-decode-0019"
+kind = "decode"
+operation = "GetObject"
+item = "outcome"
+gateway = "handled"
+s3s = "400 InvalidArgument: invalid header: if-match: *"
+reason = "The gateway keeps an entity-tag condition as text and checks its grammar when the condition is evaluated (q-etag-form-0074); the migration seam's entity-tag conversion refuses a malformed one by member name, so the RustFS app body never receives it."
+expires = "2026-12-31"
+
+[[diff]]
+id = "kd-decode-0020"
+kind = "decode"
+operation = "DeleteObjects"
+item = "outcome"
+gateway = "400 InvalidRequest: this operation requires an integrity check on the request body: send Content-MD5 or an x-amz-checksum-* header"
+s3s = "handled"
+reason = "DeleteObjects is in the model's httpChecksumRequired set, so the gateway refuses a body with neither Content-MD5 nor an x-amz-checksum-* header, as AWS does; s3s does not check."
+expires = "2026-12-31"
+
+[[diff]]
+id = "kd-decode-0021"
+kind = "decode"
+operation = "PutBucketVersioning"
+item = "outcome"
+gateway = "400 InvalidRequest: this operation requires an integrity check on the request body: send Content-MD5 or an x-amz-checksum-* header"
+s3s = "handled"
+reason = "PutBucketVersioning is in the model's httpChecksumRequired set, so the gateway refuses a body with no integrity header, as AWS does; s3s does not check."
+expires = "2026-12-31"
+
+[[diff]]
+id = "kd-decode-0022"
+kind = "decode"
+operation = "UploadPart"
+item = "outcome"
+gateway = "400 InvalidArgument: the request carries a value this member cannot hold"
+s3s = "handled"
+reason = "A part number outside 1..=10000 is refused by the gateway codec; s3s hands it to RustFS, which refuses it with the same code (https://github.com/rustfs/rustfs/blob/719000460b231792b52314df321f0d385d03dff4/rustfs/src/storage/s3_api/multipart.rs#L122)."
+expires = "2026-12-31"
+
+# ── Decode: refusal wording ──────────────────────────────────────────────────────────────────
+#
+# Both stacks refuse with the same status and code; the gateway writes a fixed sentence and s3s
+# describes, often echoing, the input (rd-err-0009). Reported as information.
+
+[[diff]]
+id = "kd-decode-0023"
+kind = "decode"
+operation = "*"
+item = "error.message"
+gateway = "the request carries a value this member cannot hold"
+reason = "The gateway's codec answers every unreadable member value with one fixed sentence that repeats no request bytes; s3s names the header or query and its value."
+expires = "2026-12-31"
+ruling = "rd-err-0009"
+
+[[diff]]
+id = "kd-decode-0024"
+kind = "decode"
+operation = "*"
+item = "error.message"
+gateway = "The specified bucket is not valid"
+s3s = "The specified bucket is not valid."
+reason = "The same sentence, without the final full stop."
+expires = "2026-12-31"
+ruling = "rd-err-0009"
+
+[[diff]]
+id = "kd-decode-0025"
+kind = "decode"
+operation = "*"
+item = "error.message"
+gateway = "the request body is not the XML this operation accepts"
+s3s = "This happens when the user sends malformed XML (XML that doesn't conform to the published XSD) for the configuration. The error message is, \"The XML you provided was not well-formed or did not validate against our published schema.\""
+reason = "The gateway's fixed sentence for a request document it cannot read; s3s answers with the AWS MalformedXML description."
+expires = "2026-12-31"
+ruling = "rd-err-0009"
+
+[[diff]]
+id = "kd-decode-0026"
+kind = "decode"
+operation = "*"
+item = "error.message"
+gateway = "x-amz-copy-source must name a key as well as a bucket"
+reason = "The gateway names what the copy source lacks; s3s echoes the header value."
+expires = "2026-12-31"
+ruling = "rd-err-0009"
+
+[[diff]]
+id = "kd-decode-0027"
+kind = "decode"
+operation = "*"
+item = "error.message"
+gateway = "the bucket named by x-amz-copy-source is not a valid bucket name"
+reason = "The gateway names which part of the copy source it refused; s3s echoes the header value."
+expires = "2026-12-31"
+ruling = "rd-err-0009"
+
+[[diff]]
+id = "kd-decode-0028"
+kind = "decode"
+operation = "*"
+item = "error.message"
+gateway = "This request does not name any S3 operation. If clients address buckets as virtual hosts, check that the gateway has been configured with the domain it serves; otherwise the method, path or query is not one this service defines."
+s3s = "Unknown operation"
+reason = "Both answer a request that names no operation with the same status and code; the gateway's sentence carries the virtual-host hint."
+expires = "2026-12-31"
+ruling = "rd-err-0009"
+
+[[diff]]
+id = "kd-decode-0029"
+kind = "decode"
+operation = "*"
+item = "error.message"
+gateway = "This operation is defined by S3 but is not handled by this backend."
+s3s = "* is not implemented yet"
+reason = "A harness fact, not a stack difference: the diff registers handlers only for the operations it compares member by member, so both stacks answer any other operation with their own not-implemented sentence. Its route is still compared."
+expires = "2026-12-31"
+
+# ── Decode: the SDK algorithm header without the checksum it names ──────────────────────────
+
+[[diff]]
+id = "kd-decode-0030"
+kind = "decode"
+operation = "DeleteObjects"
+item = "outcome"
+gateway = "400 InvalidRequest: The algorithm named by x-amz-sdk-checksum-algorithm has no corresponding checksum header"
+s3s = "handled"
+reason = "The gateway refuses an x-amz-sdk-checksum-algorithm whose x-amz-checksum-* header is missing, because the request then claims an integrity check it does not carry; s3s hands the algorithm name to RustFS and checks nothing."
+expires = "2026-12-31"
+
+[[diff]]
+id = "kd-decode-0031"
+kind = "decode"
+operation = "PutBucketVersioning"
+item = "outcome"
+gateway = "400 InvalidRequest: The algorithm named by x-amz-sdk-checksum-algorithm has no corresponding checksum header"
+s3s = "handled"
+reason = "The gateway refuses an x-amz-sdk-checksum-algorithm whose x-amz-checksum-* header is missing, because the request then claims an integrity check it does not carry; s3s hands the algorithm name to RustFS and checks nothing."
+expires = "2026-12-31"
+
+[[diff]]
+id = "kd-decode-0032"
+kind = "decode"
+operation = "UploadPart"
+item = "UploadPartInput.checksum_algorithm"
+gateway = "\"*\""
+s3s = "<unset>"
+reason = "As kd-decode-0001 for PutObject: the gateway reads x-amz-sdk-checksum-algorithm, the header the model binds, and the pinned s3s reads x-amz-checksum-algorithm."
+expires = "2026-12-31"
+ruling = "rd-put-0002"
+
+[[diff]]
+id = "kd-decode-0033"
+kind = "decode"
+operation = "DeleteObjects"
+item = "DeleteObjectsInput.checksum_algorithm"
+gateway = "\"*\""
+s3s = "<unset>"
+reason = "As kd-decode-0001: the gateway reads x-amz-sdk-checksum-algorithm, the header the model binds, and the pinned s3s reads x-amz-checksum-algorithm."
+expires = "2026-12-31"
+ruling = "rd-put-0002"
+
+[[diff]]
+id = "kd-decode-0034"
+kind = "decode"
+operation = "PutBucketVersioning"
+item = "PutBucketVersioningInput.checksum_algorithm"
+gateway = "\"*\""
+s3s = "<unset>"
+reason = "As kd-decode-0001: the gateway reads x-amz-sdk-checksum-algorithm, the header the model binds, and the pinned s3s reads x-amz-checksum-algorithm."
+expires = "2026-12-31"
+ruling = "rd-put-0002"
+
+[[diff]]
+id = "kd-decode-0035"
+kind = "decode"
+operation = "UploadPart"
+item = "outcome"
+gateway = "400 InvalidRequest: The algorithm named by x-amz-sdk-checksum-algorithm has no corresponding checksum header"
+s3s = "handled"
+reason = "As kd-decode-0030 for a part upload: a named algorithm with no checksum header claims an integrity check the request does not carry."
+expires = "2026-12-31"
+
+[[diff]]
+id = "kd-decode-0036"
+kind = "decode"
+operation = "PutObject"
+item = "outcome"
+gateway = "400 InvalidRequest: The algorithm named by x-amz-sdk-checksum-algorithm has no corresponding checksum header"
+s3s = "handled"
+reason = "As kd-decode-0030 for a single PUT: a named algorithm with no checksum header claims an integrity check the request does not carry."
+expires = "2026-12-31"
+
+# ── Decode: members only one model carries ─────────────────────────────────────────────────
+
+[[diff]]
+id = "kd-decode-0037"
+kind = "decode"
+operation = "PutObject"
+item = "PutObjectInput.object_lock_event_hold*"
+gateway = "\"*\""
+s3s = "<no member>"
+reason = "The Object Lock event-hold members of the 2026-09-17 model exist in no pinned s3s input and RustFS stores no event hold; the migration seam refuses an input naming one rather than dropping the hold."
+expires = "2026-12-31"
+ruling = "rd-put-0009"
+
+[[diff]]
+id = "kd-decode-0038"
+kind = "decode"
+operation = "CopyObject"
+item = "CopyObjectInput.object_lock_event_hold*"
+gateway = "\"*\""
+s3s = "<no member>"
+reason = "As kd-decode-0037 for a copy: no pinned s3s input carries an event hold, and RustFS stores none."
+expires = "2026-12-31"
+ruling = "rd-put-0009"
+
+[[diff]]
+id = "kd-decode-0039"
+kind = "decode"
+operation = "CreateMultipartUpload"
+item = "CreateMultipartUploadInput.object_lock_event_hold*"
+gateway = "\"*\""
+s3s = "<no member>"
+reason = "As kd-decode-0037 for a multipart upload: no pinned s3s input carries an event hold, and RustFS stores none."
+expires = "2026-12-31"
+ruling = "rd-put-0009"
+
+[[diff]]
+id = "kd-decode-0040"
+kind = "decode"
+operation = "CopyObject"
+item = "CopyObjectInput.annotation_directive"
+gateway = "<no member>"
+reason = "The pinned s3s reads x-amz-object-annotation-directive into CopyObject; the gateway's CopyObject has no annotation member (object annotations are reserved as their own operations) and RustFS stores no annotations."
+expires = "2026-12-31"
+
+[[diff]]
+id = "kd-decode-0041"
+kind = "decode"
+operation = "CopyObject"
+item = "CopyObjectInput.version_id"
+gateway = "<no member>"
+reason = "As kd-decode-0002 for a copy: MinIO's ?versionId= on the copy target has no member in the gateway's CopyObject."
+expires = "2026-12-31"
+ruling = "rd-put-0007"
+
+[[diff]]
+id = "kd-decode-0042"
+kind = "decode"
+operation = "CreateMultipartUpload"
+item = "CreateMultipartUploadInput.version_id"
+gateway = "<no member>"
+reason = "As kd-decode-0002 for a multipart upload: MinIO's ?versionId= has no member in the gateway's CreateMultipartUpload."
+expires = "2026-12-31"
+ruling = "rd-put-0007"
+
+[[diff]]
+id = "kd-decode-0043"
+kind = "decode"
+operation = "ListObjects"
+item = "ListObjectsInput.optional_object_attributes"
+gateway = "<no member>"
+reason = "The pinned s3s reads x-amz-optional-object-attributes into the listing input; the gateway's listing inputs do not bind it. RustFS lists no optional attributes either way."
+expires = "2026-12-31"
+
+[[diff]]
+id = "kd-decode-0044"
+kind = "decode"
+operation = "ListObjectsV2"
+item = "ListObjectsV2Input.optional_object_attributes"
+gateway = "<no member>"
+reason = "As kd-decode-0043 for ListObjectsV2."
+expires = "2026-12-31"
+
+[[diff]]
+id = "kd-decode-0045"
+kind = "decode"
+operation = "ListObjectVersions"
+item = "ListObjectVersionsInput.optional_object_attributes"
+gateway = "<no member>"
+reason = "As kd-decode-0043 for ListObjectVersions."
+expires = "2026-12-31"
+
+[[diff]]
+id = "kd-decode-0046"
+kind = "decode"
+operation = "DeleteObjects"
+item = "DeleteObjectsInput.delete.objects[*"
+gateway = "<no member>"
+reason = "The gateway moves each key and version into the derived resources before authorization and seals the input; the per-object ETag, LastModifiedTime and Size conditions have no path to its handler. s3s hands them to RustFS, whose multi-delete does not read them today (https://github.com/rustfs/rustfs/blob/719000460b231792b52314df321f0d385d03dff4/rustfs/src/app/object/delete.rs). A gateway follow-up before RustFS implements conditional multi-delete."
+expires = "2026-12-31"
+
+[[diff]]
+id = "kd-decode-0047"
+kind = "decode"
+operation = "DeleteObjects"
+item = "error.code"
+gateway = "InvalidArgument"
+s3s = "MalformedXML"
+reason = "An ObjectIdentifier LastModifiedTime that is not the model's HTTP-date is refused by both stacks: the gateway's codec as a member value it cannot hold, s3s as a document that does not validate."
+expires = "2026-12-31"
+
+[[diff]]
+id = "kd-decode-0048"
+kind = "decode"
+operation = "CreateBucket"
+item = "CreateBucketInput.bucket_namespace"
+gateway = "<no member>"
+reason = "The pinned s3s reads x-amz-bucket-namespace (account-regional namespaces); the gateway's CreateBucket does not bind it, and RustFS has one namespace."
+expires = "2026-12-31"
+
+[[diff]]
+id = "kd-decode-0049"
+kind = "decode"
+operation = "CreateBucket"
+item = "CreateBucketInput.create_bucket_configuration.*"
+gateway = "<no member>"
+reason = "The gateway's CreateBucketConfiguration carries LocationConstraint only; Location and Bucket (directory buckets) and Tags are skipped as unknown elements, where s3s reads them. RustFS creates no directory buckets and applies no creation-time tags today; tags at creation are a gateway follow-up."
+expires = "2026-12-31"
+
+[[diff]]
+id = "kd-decode-0050"
+kind = "decode"
+operation = "DeleteBucket"
+item = "DeleteBucketInput.force_delete"
+gateway = "<no member>"
+reason = "MinIO's x-minio-force-delete has no member in the gateway's DeleteBucket. RustFS reads the header from the request headers rather than the input (https://github.com/rustfs/rustfs/blob/719000460b231792b52314df321f0d385d03dff4/rustfs/src/app/bucket_usecase.rs#L1458), and the adapter's request context carries every header, so a forced delete still reaches it."
+expires = "2026-12-31"
+
+[[diff]]
+id = "kd-decode-0051"
+kind = "decode"
+operation = "PutBucketVersioning"
+item = "PutBucketVersioningInput.versioning_configuration.exclude*"
+gateway = "<no member>"
+reason = "MinIO's ExcludedPrefixes and ExcludeFolders are skipped by the gateway's versioning decoder; s3s (built with minio) reads them and RustFS applies them (https://github.com/rustfs/rustfs/blob/719000460b231792b52314df321f0d385d03dff4/crates/ecstore/src/bucket/versioning/mod.rs#L42). A migration gap: the RustFS adapter needs them from a MinIO dialect before PutBucketVersioning moves to the gateway."
+expires = "2026-12-31"
+
+# ── Decode: a body that ends in an error on one stack ───────────────────────────────────────
+
+[[diff]]
+id = "kd-decode-0052"
+kind = "decode"
+operation = "PutObject"
+item = "rest_body"
+gateway = "* then an error"
+reason = "The gateway verifies a Content-MD5 or x-amz-checksum-* digest while the handler reads and fails the body at its end when it does not match; s3s hands every byte to RustFS, which verifies the same digest in its own reader and refuses with BadDigest (https://github.com/rustfs/rustfs/blob/719000460b231792b52314df321f0d385d03dff4/rustfs/src/app/object/extract.rs#L1208). Neither stack commits the object."
+expires = "2026-12-31"

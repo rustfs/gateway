@@ -1,0 +1,51 @@
+[package]
+name = "rustfs-gateway-difftest"
+description = "Migration-only decode/encode differential between the gateway and the pinned s3s revision RustFS links"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+# Never published and never a dependency of anything that ships: it links the pinned s3s through
+# the types crate's compat seam and is deleted with that seam (P9-09). See README.md.
+publish = false
+autotests = false
+
+[package.metadata.gateway]
+# Ring 1 by the workspace rule (every package under `crates/` is ring 0/1 and links no RustFS
+# crate). "RING 2 — migration-only" in README.md names its lifetime, not a dependency on RustFS:
+# s3s reaches it only through `rustfs-gateway-types`' `compat-s3s-f3e17541` seam.
+ring = 1
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[lints]
+workspace = true
+
+[dependencies]
+# The gateway side of every diff is the real assembled service: host resolution, routing,
+# acceptance, the security floor, the codec and the handler hand-off.
+rustfs-gateway = { workspace = true }
+rustfs-gateway-core = { workspace = true }
+rustfs-gateway-http = { workspace = true }
+rustfs-gateway-sig = { workspace = true }
+rustfs-gateway-stream = { workspace = true }
+# The s3s side: the seam compiled against the one revision RustFS main links, and nothing else.
+rustfs-gateway-types = { workspace = true, features = ["compat-s3s-f3e17541"] }
+bytes = { workspace = true }
+futures-core = { workspace = true }
+hex = { workspace = true }
+http = { workspace = true }
+http-body = { workspace = true }
+http-body-util = { workspace = true }
+serde = { workspace = true }
+sha2 = { workspace = true }
+# s3s holds every timestamp as a `time::OffsetDateTime`; reading its nanoseconds needs the type.
+# Already in the lock through s3s at this version.
+time = { version = "0.3.47", default-features = false }
+# The known-diffs register is TOML, like every other reviewed register in this repository. Already
+# in the lock at this version.
+toml = "1.1"
