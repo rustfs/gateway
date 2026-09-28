@@ -48,7 +48,7 @@ ADRs; this map only selects files.
 | `src/conn/` | Connection state and reusable transport helpers. | A multi-exchange case loses connection state. |
 | `src/conn/control_chunks.rs` | Control chunks on a socket exchange: body catch-up, stalls, teardowns, and what they charge to the harness account. | A `stall`, `half_close`, or `close` control chunk is carried out or timed wrongly. |
 | `src/conn/bind.rs` | Queues a pacing rendezvous before a fresh socket connects. | A socket case skips only under scheduler load. |
-| `src/conn/external.rs` | Authored HTTP/1.1 exchange against an external endpoint. | `--endpoint` connects, writes, or reports unavailable observations incorrectly. |
+| `src/conn/external.rs` | Authored HTTP/1.1 exchange against an external endpoint; authored HTTP/2 scripts go to `conn/h2.rs`. | `--endpoint` connects, writes, or reports unavailable observations incorrectly. |
 | `src/conn/external/tests.rs` | Authored-byte capture, early-response, refusal, and CLI controls for external endpoints. | External exchange or fixture behavior changes. |
 | `src/conn/external_pacing.rs` | Cleartext external-body delays and early-response observation. | A delayed chunk is sent too early or after a response already exists. |
 | `src/conn/external_endpoint.rs` | Strict HTTP(S) endpoint parsing, resolution, and protocol selection. | An endpoint scheme, authority, host, or default port is handled incorrectly. |
@@ -56,6 +56,7 @@ ADRs; this map only selects files.
 | `src/conn/external_fixture/clock.rs` | Current UTC signing time for external fixture controls. | A control request is rejected as stale or future-dated. |
 | `src/conn/external_fixture/lifecycle.rs` | Applies validated external plans and cleans owned objects before buckets. | A remote create, ownership transition, rollback, or cleanup order is wrong. |
 | `src/conn/external_fixture/object.rs` | Decodes and validates unversioned object fixture payloads, headers, and paths. | An external object fixture loses bytes or sends an unsafe control request. |
+| `src/conn/external_fixture/h2_guard_tests.rs` | The read-only guard classifying authored HTTP/2 scripts by their decoded `:method`. | An h2 script could mutate a remote fixture. |
 | `src/conn/external_fixture/object_tests.rs` | Real-socket ownership and refusal controls for external object fixtures. | Object fixture planning or cleanup behavior changes. |
 | `src/conn/external_fixture/region.rs` | Fixture region validation, signing scope, and CreateBucketConfiguration XML. | A remote bucket is created or signed for the wrong region. |
 | `src/conn/external_fixture/runner_tests.rs` | Full CLI-to-external-endpoint fixture lifecycle regression coverage. | The runner does not create, exercise, or clean up an opted-in remote fixture. |

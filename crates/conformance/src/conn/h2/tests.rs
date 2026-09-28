@@ -157,19 +157,82 @@ fn the_test_socket_harness_refuses_authored_h2_frames() {
     assert!(error.to_string().contains("test socket harness frames HTTP/1.1 only"), "{error}");
 }
 
-/// Negative — an external endpoint refuses a frame script before connecting.
+/// Negative — an https endpoint refuses a frame script before connecting: TLS with ALPN `h2` is not
+/// implemented, and nothing listens on port 9, so a connection attempt would report otherwise.
 #[test]
-fn an_external_endpoint_refuses_authored_h2_frames() {
-    let mut conn = Conn::external(std::path::PathBuf::from("."), "http://127.0.0.1:9").expect("the endpoint parses");
+fn an_https_external_endpoint_refuses_authored_h2_frames_before_connecting() {
+    let mut conn = Conn::external(std::path::PathBuf::from("."), "https://127.0.0.1:9").expect("the endpoint parses");
     let error = conn
         .exchange(&h2_plan("s-h2-0005", h2_request(ANONYMOUS_GET_ROOT_HPACK), None))
-        .expect_err("external HTTP/2 is not implemented");
-    assert!(
-        error
-            .to_string()
-            .contains("external endpoint HTTP/2 framing is not implemented"),
-        "{error}"
-    );
+        .expect_err("HTTP/2 over TLS is not implemented");
+    assert!(error.to_string().contains("ALPN `h2`"), "{error}");
+}
+
+/// Positive — a cleartext external endpoint receives the preface and exactly the authored frames
+/// with prior knowledge, and its answer is observed.
+#[test]
+fn a_cleartext_external_endpoint_executes_an_authored_h2_script() {
+    let expected = anonymous_wire_image();
+    let (addr, peer) = peer(expected.len(), |stream| {
+        stream
+            .write_all(&hex("000000 04 00 00000000 000001 01 05 00000001 88"))
+            .expect("the response is written");
+        thread::sleep(Duration::from_millis(100));
+    });
+    let mut conn = Conn::external(std::path::PathBuf::from("."), &format!("http://{addr}")).expect("the endpoint parses");
+    conn.prepare("s-h2-0005", None).expect("no setup");
+    let observation = conn
+        .exchange(&h2_plan("s-h2-0005", h2_request(ANONYMOUS_GET_ROOT_HPACK), None))
+        .expect("the authored frames are executed");
+    assert_eq!(peer.join().expect("the peer exits"), expected);
+    assert_eq!(observation.outcome, Outcome::Response, "{observation:?}");
+    assert_eq!(observation.status, Some(200));
+    assert_eq!(observation.http_version.as_deref(), Some("h2"));
+}
+
+/// Negative — an external exchange that asks to reuse an HTTP/2 connection is refused, as locally.
+#[test]
+fn a_later_external_exchange_cannot_reuse_an_h2_connection() {
+    let mut conn = Conn::external(std::path::PathBuf::from("."), "http://127.0.0.1:9").expect("the endpoint parses");
+    let mut plan = h2_plan("s-h2-0005", h2_request(ANONYMOUS_GET_ROOT_HPACK), None);
+    plan.index = 1;
+    let error = conn.exchange(&plan).expect_err("reuse across exchanges is not implemented");
+    assert!(error.to_string().contains("reuse the connection"), "{error}");
+}
+
+/// Positive — the setup-free HTTP/2 corpus cases pass against production Hyper reached as an
+/// external endpoint, so the external path observes what the in-harness path observes.
+#[cfg(feature = "production-transports")]
+#[test]
+fn setup_free_h2_cases_pass_against_an_external_endpoint() {
+    use crate::corpus::Corpus;
+    use crate::report::Verdict;
+    use crate::runner::{self, RunOptions};
+    let root = Corpus::discover_root().expect("the real corpus is available");
+    let corpus = runner::prepare_corpus(&root).expect("the real corpus loads");
+    let mut server = Conn::production(root.clone(), ProductionDriver::Hyper);
+    server.prepare("s-h2-external", None).expect("the empty fixture prepares");
+    let addr = server
+        .addr(1_767_322_845, 0, crate::sut::Profile::Aws)
+        .expect("the production listener starts");
+    let mut target = Conn::external(root, &format!("http://{addr}")).expect("the endpoint parses");
+    for id in ["c-h2-0004", "c-h2-0005", "c-h2-0006", "c-h2-0007", "c-h2-0023", "c-h2-0024"] {
+        let options = RunOptions {
+            filter: Some(id.to_owned()),
+            ..RunOptions::default()
+        };
+        let report = runner::run(&corpus, &mut target, &options);
+        let [outcome] = report.outcomes.as_slice() else {
+            panic!("{id}: expected one outcome, got {:?}", report.outcomes.len());
+        };
+        assert_eq!(
+            outcome.verdict,
+            Verdict::Passed,
+            "{id}: failures={:?}, skip={:?}",
+            outcome.failures(),
+            outcome.skip_reason
+        );
+    }
 }
 
 /// Negative — TLS is refused before a single frame is written; this slice is cleartext only.

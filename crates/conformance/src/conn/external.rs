@@ -16,7 +16,7 @@
 //!
 //! Responsible for: driving authored request steps without the loopback server's private demand
 //! observer, including cleartext delays that stop on observed response bytes. NOT responsible for:
-//! endpoint parsing, TLS setup, HTTP/2, controlled bodies, remote fixture lifecycle, request
+//! endpoint parsing, TLS setup, authored HTTP/2 frames (`super::h2`), controlled bodies, remote fixture lifecycle, request
 //! interpretation, or response judgement. Upstream: `super`; downstream: `crate::cli` through
 //! [`super::Conn`].
 
@@ -79,9 +79,14 @@ impl Conn {
         self.inner.set_fixture_now(fixed.unix_seconds);
         let wire = self.inner.read_wire(&plan.request)?;
         self.external_fixtures.ensure_read_only(plan.case_id, &wire)?;
-        if !wire.h2_frames.is_empty() || wire.http_version.as_deref() == Some("h2") {
+        if !wire.h2_frames.is_empty() {
+            return self.exchange_h2_external(plan, &wire, &endpoint, reuse);
+        }
+        if wire.http_version.as_deref() == Some("h2") {
             return Err(SutError::Environment(
-                "external endpoint HTTP/2 framing is not implemented; this target writes HTTP/1.1 bytes".to_owned(),
+                "`request.http_version = \"h2\"` needs authored `request.h2_frames` against an external endpoint; \
+                 this target builds no HPACK request of its own"
+                    .to_owned(),
             ));
         }
         let budget = budget_of(plan.timeout_ms);

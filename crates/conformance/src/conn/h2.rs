@@ -56,7 +56,6 @@ use crate::observation::{ConnectionState, Observation, ObservedH2ControlFrame, O
 use crate::production::ProductionDriver;
 use crate::socket::{Connection, ReadFailure};
 use crate::sut::{ExchangePlan, SutError};
-#[cfg(test)]
 use receive::PeerFrame;
 use receive::{FrameReader, Receiver, Response};
 
@@ -361,6 +360,85 @@ impl Conn {
     }
 }
 
+impl Conn {
+    /// Runs one exchange as an authored frame script against a cleartext external endpoint, with
+    /// prior knowledge (RFC 9113 section 3.3). Connection setup is the target's time, as on the
+    /// external HTTP/1.1 path. An https endpoint is refused before connecting: it would have to
+    /// negotiate `h2` by ALPN, which this writer does not do yet.
+    pub(super) fn exchange_h2_external(
+        &mut self,
+        plan: &ExchangePlan<'_>,
+        wire: &Wire,
+        endpoint: &super::external_endpoint::ExternalEndpoint,
+        reuse: bool,
+    ) -> Result<Observation, SutError> {
+        let script = compile(wire)?;
+        if endpoint.is_tls() {
+            return Err(refused(
+                "HTTP/2 over TLS (ALPN `h2`) is not implemented for external endpoints; authored frames run \
+                 against a cleartext `http://` endpoint with prior knowledge"
+                    .to_owned(),
+            ));
+        }
+        if reuse && plan.index > 0 {
+            return Err(refused(
+                "exchange after the first asks to reuse the connection; carrying an HTTP/2 connection \
+                 across exchanges is not implemented, and a fresh one would answer a different case"
+                    .to_owned(),
+            ));
+        }
+        self.connection = None;
+        let started = Instant::now();
+        let deadline = plan.deadline.unwrap_or_else(|| started + budget_of(plan.timeout_ms));
+        let connection = endpoint.open(deadline)?;
+        execute_on(connection, &script, ExchangeClock::until(deadline), started, None)
+    }
+}
+
+/// The `:method` of every authored request header block, decoded in order the way the peer's
+/// decoder will, so a guard can classify what a script asks the peer to do. A block interrupted by
+/// another frame, or a CONTINUATION with no open block, is skipped: the peer must end the
+/// connection there (RFC 9113 section 6.10) instead of running it.
+pub(super) fn authored_methods(wire: &Wire) -> Result<Vec<String>, SutError> {
+    let script = compile(wire)?;
+    let mut decoder = hpack::Decoder::new(DEFAULT_HEADER_TABLE_SIZE);
+    let mut methods = Vec::new();
+    let mut open: Option<Vec<u8>> = None;
+    for envelope in &script.envelopes {
+        let fragment = match envelope.frame_type {
+            HEADERS => receive::unpadded(&PeerFrame {
+                frame_type: HEADERS,
+                flags: envelope.flags,
+                stream_id: envelope.stream_id,
+                payload: envelope.payload.clone(),
+            })?
+            .to_vec(),
+            CONTINUATION if open.is_some() => envelope.payload.clone(),
+            _ => continue,
+        };
+        let mut block = if envelope.frame_type == HEADERS {
+            Vec::new()
+        } else {
+            open.take().unwrap_or_default()
+        };
+        block.extend_from_slice(&fragment);
+        if envelope.flags & END_HEADERS == 0 {
+            open = Some(block);
+            continue;
+        }
+        let fields = decoder
+            .decode(&block)
+            .map_err(|error| refused(format!("an authored header block could not be decoded: {error}")))?;
+        methods.extend(
+            fields
+                .into_iter()
+                .filter(|(name, _)| name == ":method")
+                .map(|(_, value)| value),
+        );
+    }
+    Ok(methods)
+}
+
 /// Opens one connection, writes the preface and the script, and observes the response.
 #[cfg(test)]
 fn execute(addr: SocketAddr, script: &Script, budget: Duration) -> Result<Observation, SutError> {
@@ -386,8 +464,19 @@ fn execute_inner(
     sleep: Option<&mut dyn FnMut(Duration)>,
 ) -> Result<Observation, SutError> {
     let started = Instant::now();
-    let mut clock = ExchangeClock::until(deadline);
-    let mut connection = Connection::open_before(addr, clock.deadline)?;
+    let clock = ExchangeClock::until(deadline);
+    let connection = Connection::open_before(addr, clock.deadline)?;
+    execute_on(connection, script, clock, started, sleep)
+}
+
+/// Writes the preface and the script on an open connection and observes the response.
+fn execute_on(
+    mut connection: Connection,
+    script: &Script,
+    mut clock: ExchangeClock,
+    started: Instant,
+    sleep: Option<&mut dyn FnMut(Duration)>,
+) -> Result<Observation, SutError> {
     let (response, progress) = duplex::run(&mut connection, script, &mut clock, sleep)?;
     let elapsed = elapsed_ms(started);
     // A consumed reset must not become EOF merely because a later peek sees a drained socket.
