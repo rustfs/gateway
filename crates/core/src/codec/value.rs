@@ -532,8 +532,21 @@ pub fn checksum_spec(
     prefix: &'static str,
     member: &'static str,
 ) -> Result<Option<ChecksumSpec>, CodecError> {
+    checksum_spec_of_fields(request.headers_with_prefix(prefix), prefix, member)
+}
+
+/// [`checksum_spec`]'s rule over any `(suffix, value)` fields that share `prefix`.
+///
+/// The header decoder and the trailer reader
+/// ([`crate::ops::shared::trailer_checksum::request_checksum`]) both call this, so a checksum field
+/// is judged by one rule whichever section of the message carried it.
+pub(crate) fn checksum_spec_of_fields<'a>(
+    fields: impl Iterator<Item = (&'a str, &'a str)>,
+    prefix: &'static str,
+    member: &'static str,
+) -> Result<Option<ChecksumSpec>, CodecError> {
     let mut found: Option<ChecksumSpec> = None;
-    for (suffix, value) in request.headers_with_prefix(prefix) {
+    for (suffix, value) in fields {
         // Three headers share the prefix and declare no digest. They are named rather than
         // pattern-matched away, for the same reason `parse_request_checksum` names them: the
         // prefix is otherwise a closed set of algorithms, and a member of it this build does not
@@ -569,7 +582,7 @@ pub fn checksum_spec(
 }
 
 /// The header prefix every per-algorithm request checksum is spelled with.
-const CHECKSUM_PREFIX: &str = "x-amz-checksum-";
+pub(crate) const CHECKSUM_PREFIX: &str = "x-amz-checksum-";
 
 /// The header a chunked upload uses to announce the checksum it will send as a trailer.
 const TRAILER_HEADER: &str = "x-amz-trailer";

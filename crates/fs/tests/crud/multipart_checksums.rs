@@ -23,13 +23,13 @@ use rustfs_gateway::{ChecksumAlgorithm, ChecksumSpec};
 
 use super::*;
 
-fn checksum(algorithm: ChecksumAlgorithm, bytes: &[u8]) -> ChecksumSpec {
+pub(super) fn checksum(algorithm: ChecksumAlgorithm, bytes: &[u8]) -> ChecksumSpec {
     let mut checksummer = algorithm.checksummer();
     checksummer.update(bytes);
     ChecksumSpec::from_digest(algorithm, &checksummer.finalize()).expect("a computed checksum has the algorithm width")
 }
 
-async fn initiate_checksum(
+pub(super) async fn initiate_checksum(
     service: &S3Service,
     bucket: &str,
     key: &str,
@@ -52,7 +52,7 @@ async fn initiate_checksum(
     .await
 }
 
-async fn put_checksum_part(
+pub(super) async fn put_checksum_part(
     service: &S3Service,
     bucket: &str,
     key: &str,
@@ -78,7 +78,7 @@ async fn put_checksum_part(
     .await
 }
 
-fn completion_with_checksum(part_number: i32, etag: &str, algorithm: ChecksumAlgorithm, value: &str) -> Bytes {
+pub(super) fn completion_with_checksum(part_number: i32, etag: &str, algorithm: ChecksumAlgorithm, value: &str) -> Bytes {
     let element = match algorithm {
         ChecksumAlgorithm::Crc32 => "ChecksumCRC32",
         ChecksumAlgorithm::Crc32c => "ChecksumCRC32C",
@@ -92,7 +92,7 @@ fn completion_with_checksum(part_number: i32, etag: &str, algorithm: ChecksumAlg
     ))
 }
 
-async fn complete_checksum(
+pub(super) async fn complete_checksum(
     service: &S3Service,
     bucket: &str,
     key: &str,
@@ -121,7 +121,7 @@ async fn complete_checksum_with_headers(
     .await
 }
 
-fn error_code(response: &rustfs_gateway::WireResponse) -> Option<String> {
+pub(super) fn error_code(response: &rustfs_gateway::WireResponse) -> Option<String> {
     element(response.body(), "Code")
 }
 

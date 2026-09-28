@@ -56,4 +56,5 @@ pub mod restore;
 pub(crate) mod rule_filter;
 pub mod select;
 pub mod tagging;
+pub mod trailer_checksum;
 pub mod upload_id;
