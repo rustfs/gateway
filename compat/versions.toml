@@ -148,3 +148,17 @@ lock_file = "pom.xml"
 lock_pattern = '^\s*<awssdk\.version>(\S+)</awssdk\.version>$'
 version = "1.12.797"
 version_command = 'java -Daws.java.v1.disableDeprecationAnnouncement=true -cp "$COMPAT_CLIENT_OUT/lib/*" compat.Driver --client-version'
+
+[clients.aws-sdk-rust]
+install = "program"
+# A driver program, not a command: the SDK is a library. Cargo.toml pins every direct dependency
+# with `=`, Cargo.lock beside it locks the rest, and `--locked` refuses to build if the two
+# disagree. Cargo.toml carries its own empty `[workspace]`, so the root workspace never resolves it.
+source = "compat/drivers/aws-sdk-rust"
+toolchain = "cargo"
+build = 'cargo build --release --locked --target-dir "$COMPAT_CLIENT_OUT/target"'
+lock_file = "Cargo.lock"
+# The lock file lists each package as a `name` line followed by its `version` line.
+lock_pattern = '^name = "aws-sdk-s3"\nversion = "([^"]+)"$'
+version = "1.150.0"
+version_command = '"$COMPAT_CLIENT_OUT/target/release/driver" --client-version'
