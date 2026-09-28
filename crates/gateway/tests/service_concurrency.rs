@@ -43,7 +43,10 @@ fn one_hundred_clones_answer_concurrently() {
             let started = std::time::Instant::now();
             loop {
                 std::thread::sleep(std::time::Duration::from_secs(5));
-                eprintln!(
+                use std::io::Write as _;
+                let mut file = std::fs::OpenOptions::new().create(true).append(true).open("/tmp/tsan-diag.log").expect("diag log");
+                let _ = writeln!(
+                    file,
                     "DIAG t={:?} built={} passed_barrier={} answered={} completed={}",
                     started.elapsed(),
                     built.load(Ordering::SeqCst),

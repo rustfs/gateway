@@ -147,8 +147,8 @@ jobs:
           (sudo -n apt-get install -y gdb >/dev/null 2>&1 && echo gdb-ok) || echo gdb-missing
       - name: Same test without TSAN, pinned and unpinned
         run: |
-          timeout 300 cargo test -p rustfs-gateway --test integration service_concurrency::one_hundred_clones_answer_concurrently -- --exact --nocapture 2>&1 | grep -E 'DIAG|test result|panicked' || true
-          timeout 120 taskset -c 0-14 cargo test -p rustfs-gateway --test integration service_concurrency::one_hundred_clones_answer_concurrently -- --exact --nocapture 2>&1 | grep -E 'DIAG|test result|panicked' || true
+          timeout 300 cargo test -p rustfs-gateway --test integration service_concurrency::one_hundred_clones_answer_concurrently -- --exact --nocapture 2>&1 | grep -E 'test result|panicked' || true; cat /tmp/tsan-diag.log | tail -3; rm -f /tmp/tsan-diag.log
+          timeout 120 taskset -c 0-14 cargo test -p rustfs-gateway --test integration service_concurrency::one_hundred_clones_answer_concurrently -- --exact --nocapture 2>&1 | grep -E 'test result|panicked' || true; cat /tmp/tsan-diag.log | tail -3; rm -f /tmp/tsan-diag.log
       - name: One hundred OS threads under TSAN
         run: |
           set +e
@@ -160,6 +160,7 @@ jobs:
           if kill -0 "$runner" 2>/dev/null; then
             pid="$(pgrep -f 'deps/integration-' | head -1)"
             echo "HANG after 240s; pid=$pid"
+            cat /tmp/tsan-diag.log || true
             ps -o pid,stat,nlwp,pcpu,etime,cmd -p "$pid"
             grep -E 'Threads|State|VmRSS|voluntary' "/proc/$pid/status"
             for t in /proc/$pid/task/*; do printf '%s %s %s\n' "$(awk '{print $3}' "$t/stat")" "$(cat "$t/wchan" 2>/dev/null)" "$(cat "$t/comm")"; done | sort | uniq -c | sort -rn | head -20
