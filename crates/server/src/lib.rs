@@ -39,6 +39,7 @@ mod sendfile;
 mod sendfile_task;
 mod shutdown;
 mod tls;
+mod write_receipt;
 
 pub use config::{ConfigError, ServerConfig, WriteStrategy, conn_memory_budget};
 pub use conn::{Server, ServerError};

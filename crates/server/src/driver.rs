@@ -493,6 +493,7 @@ impl<S> AcceptedConnection<S> {
             transport: TransportKind::Plaintext,
             tcp_nodelay: self.state.tcp_nodelay,
         };
+        let receipts = crate::write_receipt::WriteReceipts::new(Arc::clone(&self.state.request_stats));
         let service = ConnectionService::new(
             self.service,
             connection,
@@ -501,7 +502,8 @@ impl<S> AcceptedConnection<S> {
             Arc::clone(&self.state.request_stats),
             Arc::clone(&self.state.connection_in_flight),
             Arc::clone(&self.state.request_body_unfinished),
-        );
+        )
+        .confirm_writes_into(Arc::clone(&receipts));
         let inner = ProgressIo::new(
             self.state.stream,
             Arc::clone(&self.state.connection_in_flight),
@@ -515,7 +517,8 @@ impl<S> AcceptedConnection<S> {
         .count_octets_into(
             Arc::clone(&self.state.metrics.transport_read),
             Arc::clone(&self.state.metrics.lingering_drained),
-        );
+        )
+        .confirm_writes_into(receipts);
         Ok((
             PlaintextConnection {
                 inner,

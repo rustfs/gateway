@@ -18,19 +18,32 @@
 
 use super::*;
 
+/// The body a-srv-0006 drains. It tests graceful-drain semantics, not throughput: the response
+/// must be in flight when shutdown begins and must still reach the peer whole within the grace.
+/// 8 MiB is a small fraction of what loopback moves in the 2s grace even on a loaded host; the
+/// earlier 100 MiB made the case a bandwidth measurement that host contention could fail with no
+/// defect present (rustfs/gateway#657). Throughput has its own gates.
+const EXPECTED_BODY_LEN: usize = 8 * 1024 * 1024;
+
 pub(crate) async fn observed_shutdown_drain(mut checkpoint: impl FnMut()) {
     let _exclusive_load_lease = crate::server_load::exclusive_server_load_lease().await;
     checkpoint();
-    const EXPECTED_BODY_LEN: usize = 100 * 1024 * 1024;
     let handler_entered = Arc::new(Notify::new());
+    let release = Arc::new(Notify::new());
+    let answered = Arc::new(AtomicBool::new(false));
     let service = service_fn({
         let handler_entered = Arc::clone(&handler_entered);
+        let release = Arc::clone(&release);
+        let answered = Arc::clone(&answered);
         move |_request: Request<hyper::body::Incoming>| {
             let handler_entered = Arc::clone(&handler_entered);
+            let release = Arc::clone(&release);
+            let answered = Arc::clone(&answered);
             async move {
                 handler_entered.notify_one();
-                tokio::time::sleep(Duration::from_millis(40)).await;
-                Ok::<_, Infallible>(Response::new(Full::new(Bytes::from(vec![b'x'; 100 * 1024 * 1024]))))
+                release.notified().await;
+                answered.store(true, Ordering::SeqCst);
+                Ok::<_, Infallible>(Response::new(Full::new(Bytes::from(vec![b'x'; EXPECTED_BODY_LEN]))))
             }
         }
     });
@@ -44,7 +57,23 @@ pub(crate) async fn observed_shutdown_drain(mut checkpoint: impl FnMut()) {
     tokio::time::timeout(Duration::from_secs(1), handler_entered.notified())
         .await
         .expect("the handler starts before shutdown");
-    let report = shutdown.trigger(Duration::from_secs(2)).await;
+    let report = tokio::spawn(shutdown.trigger(Duration::from_secs(2)));
+    // The listener closes in the same server poll that begins shutdown, so a refused connection
+    // proves shutdown began while this request was still waiting for its answer.
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while TcpStream::connect(local_addr).await.is_ok() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("the listener closes once shutdown begins");
+    assert!(
+        !answered.load(Ordering::SeqCst),
+        "the response must still be in flight when shutdown begins, or nothing was drained"
+    );
+    release.notify_one();
+    let report = report.await.expect("shutdown joins");
+    // Counted drained only once its bytes reached the socket after shutdown began.
     assert_eq!(report, ShutdownReport { drained: 1, aborted: 0 });
     let response = client.await.expect("client task completes");
     let body_start = response

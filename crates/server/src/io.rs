@@ -115,6 +115,8 @@ pub(crate) struct ProgressIo<I> {
     send_file_retry_ready: bool,
     first_request_observed: bool,
     transport_read: Arc<AtomicU64>,
+    /// Confirms handed-over responses as written; see `crate::write_receipt`.
+    receipts: Option<Arc<crate::write_receipt::WriteReceipts>>,
     linger: Linger,
     #[cfg(test)]
     header_pending_observer: Option<HeaderPendingObserver>,
@@ -166,6 +168,7 @@ impl<I> ProgressIo<I> {
             send_file_retry_ready: false,
             first_request_observed: false,
             transport_read: Arc::new(AtomicU64::new(0)),
+            receipts: None,
             linger: Linger {
                 budget: lingering_close_time,
                 write_shut: false,
@@ -188,6 +191,12 @@ impl<I> ProgressIo<I> {
     pub(crate) fn count_octets_into(mut self, transport_read: Arc<AtomicU64>, drained: Arc<AtomicU64>) -> Self {
         self.transport_read = transport_read;
         self.linger.drained = drained;
+        self
+    }
+
+    /// Reports this transport's completed flushes and half-close as write receipts.
+    pub(crate) fn confirm_writes_into(mut self, receipts: Arc<crate::write_receipt::WriteReceipts>) -> Self {
+        self.receipts = Some(receipts);
         self
     }
 
@@ -444,6 +453,9 @@ impl<I: AsyncRead + AsyncWrite + Unpin> AsyncWrite for ProgressIo<I> {
             Poll::Ready(Ok(())) => {
                 this.reset_idle();
                 this.reset_write();
+                if let Some(receipts) = &this.receipts {
+                    receipts.flushed();
+                }
                 Poll::Ready(Ok(()))
             }
             Poll::Ready(Err(error)) => Poll::Ready(Err(error)),
@@ -471,6 +483,9 @@ impl<I: AsyncRead + AsyncWrite + Unpin> AsyncWrite for ProgressIo<I> {
         if !this.linger.write_shut {
             ready!(Pin::new(&mut this.inner).poll_shutdown(context))?;
             this.linger.write_shut = true;
+            if let Some(receipts) = &this.receipts {
+                receipts.closed();
+            }
             this.linger.deadline = Instant::now() + this.linger.budget;
             let quiet_deadline = if this.linger.body_unfinished.load(Ordering::Acquire) {
                 Instant::now() + LINGER_QUIET
