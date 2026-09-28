@@ -28,8 +28,7 @@ use bytes::Bytes;
 use http::{Request, Response};
 use http_body::Body;
 use hyper::body::Incoming;
-use hyper_util::rt::{TokioExecutor, TokioIo, TokioTimer};
-use hyper_util::server::conn::auto;
+use hyper_util::rt::{TokioIo, TokioTimer};
 use thiserror::Error;
 use tokio::net::TcpStream;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, oneshot, watch};
@@ -481,6 +480,8 @@ where
         #[cfg(test)]
         deadline_observer,
     } = state;
+    // The protocol ALPN selected is the one the connection speaks (`tls::protocol_builder`).
+    let mut negotiated: Option<Vec<u8>> = None;
     let (transport, transport_kind): (BoxTransport, TransportKind) = match tls {
         Some(tls) => {
             let acceptor = TlsAcceptor::from(tls.begin_handshake());
@@ -498,7 +499,10 @@ where
                 }
             };
             match accepted {
-                Ok(stream) => (Box::new(stream), TransportKind::Tls),
+                Ok(stream) => {
+                    negotiated = stream.get_ref().1.alpn_protocol().map(<[u8]>::to_vec);
+                    (Box::new(stream), TransportKind::Tls)
+                }
                 Err(error) => {
                     tracing::debug!(error = %error, "TLS handshake failed");
                     return;
@@ -541,7 +545,7 @@ where
         request_body_unfinished,
     )
     .confirm_writes_into(Arc::clone(&receipts));
-    let mut builder = auto::Builder::new(TokioExecutor::new());
+    let mut builder = crate::tls::protocol_builder(negotiated.as_deref());
     #[cfg(test)]
     match &deadline_observer {
         Some(observer) => {
@@ -594,11 +598,9 @@ where
 }
 
 fn log_connection_result(result: Result<(), BoxError>, receipts: &crate::write_receipt::WriteReceipts) {
-    if result.is_ok() {
-        receipts.closed();
-    }
-    if let Err(error) = result {
-        tracing::debug!(error = %error, "HTTP connection closed with an error");
+    match result {
+        Ok(()) => receipts.closed(),
+        Err(error) => tracing::debug!(error = %error, "HTTP connection closed with an error"),
     }
 }
 

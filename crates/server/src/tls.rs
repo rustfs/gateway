@@ -14,7 +14,8 @@
 
 //! Fail-closed TLS configuration and atomic reload.
 //!
-//! Responsible for: validating certificate material and swapping one config for new connections.
+//! Responsible for: validating certificate material, the ALPN protocols a listener advertises, and
+//! swapping one config for new connections.
 //! NOT responsible for: file watching, retry policy or changing established TLS sessions.
 //! Upstream: operator-provided DER material. Downstream: the connection acceptor.
 
@@ -22,14 +23,21 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use arc_swap::ArcSwap;
+use hyper_util::rt::TokioExecutor;
+use hyper_util::server::conn::auto;
 use rustls::ServerConfig as RustlsServerConfig;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use thiserror::Error;
 
-/// Owned DER certificate chain and private key for one TLS configuration.
+/// The ALPN protocols a listener advertises unless configured otherwise, in server preference
+/// order: HTTP/2 over TLS is identified only by `h2` (RFC 9113 section 3.2).
+pub const DEFAULT_ALPN_PROTOCOLS: [&[u8]; 2] = [b"h2", b"http/1.1"];
+
+/// Owned DER certificate chain, private key and advertised ALPN protocols for one TLS configuration.
 pub struct TlsMaterial {
     certificates: Vec<Vec<u8>>,
     private_key: Vec<u8>,
+    alpn_protocols: Vec<Vec<u8>>,
 }
 
 impl TlsMaterial {
@@ -39,7 +47,17 @@ impl TlsMaterial {
         Self {
             certificates,
             private_key,
+            alpn_protocols: DEFAULT_ALPN_PROTOCOLS.iter().map(|protocol| protocol.to_vec()).collect(),
         }
+    }
+
+    /// Replaces the ALPN protocols the listener advertises, in preference order. A client that
+    /// offers none of them fails the handshake with `no_application_protocol`; an empty list
+    /// advertises nothing, and every connection is then served by prior knowledge.
+    #[must_use]
+    pub fn with_alpn_protocols(mut self, protocols: Vec<Vec<u8>>) -> Self {
+        self.alpn_protocols = protocols;
+        self
     }
 
     fn into_config(self) -> Result<RustlsServerConfig, TlsReloadError> {
@@ -48,10 +66,12 @@ impl TlsMaterial {
         }
         let certificates = self.certificates.into_iter().map(CertificateDer::from).collect();
         let private_key = PrivateKeyDer::try_from(self.private_key).map_err(|_| TlsReloadError::InvalidPrivateKey)?;
-        RustlsServerConfig::builder()
+        let mut config = RustlsServerConfig::builder()
             .with_no_client_auth()
             .with_single_cert(certificates, private_key)
-            .map_err(TlsReloadError::InvalidMaterial)
+            .map_err(TlsReloadError::InvalidMaterial)?;
+        config.alpn_protocols = self.alpn_protocols;
+        Ok(config)
     }
 }
 
@@ -127,4 +147,15 @@ pub enum TlsReloadError {
     /// Rustls rejected the relation between the certificate chain and key.
     #[error("certificate material is invalid")]
     InvalidMaterial(#[source] rustls::Error),
+}
+
+/// The connection builder for the protocol ALPN negotiated: a negotiated protocol is the only one
+/// the connection speaks, and without ALPN both remain available by prior knowledge.
+pub(crate) fn protocol_builder(negotiated: Option<&[u8]>) -> auto::Builder<TokioExecutor> {
+    let builder = auto::Builder::new(TokioExecutor::new());
+    match negotiated {
+        Some(b"h2") => builder.http2_only(),
+        Some(b"http/1.1") => builder.http1_only(),
+        _ => builder,
+    }
 }
