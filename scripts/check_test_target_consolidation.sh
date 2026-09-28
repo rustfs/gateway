@@ -602,6 +602,7 @@ if not middleware_sources or middleware_sources != middleware_goldens:
     fail("gateway middleware trybuild sources and goldens must exist and remain paired")
 gateway_calls = ['cases.compile_fail("tests/compile_fail/azc_*.rs");']
 gateway_calls.append('cases.compile_fail("tests/compile_fail/c_ck_0020_*.rs");')
+gateway_calls.append('cases.compile_fail("tests/compile_fail/c_gov_*.rs");')
 gateway_calls.append('cases.compile_fail("tests/compile_fail/c_mw_*.rs");')
 if error_sources:
     gateway_calls.append('cases.compile_fail("tests/compile_fail/error_resolution_*.rs");')
@@ -867,6 +868,11 @@ fixture_sets = [
         "azc_0020_service_config_default",
         "azc_0021_allow_all",
         "azc_0025_request_extensions",
+    }),
+    (root / "crates/gateway/tests/compile_fail", "c_gov_*", {
+        "c_gov_0016_request_is_framework_built",
+        "c_gov_0021_unacknowledged_clock",
+        "c_gov_0025_clocks_do_not_convert",
     }),
     (root / "crates/gateway/tests/compile_fail", "host_resolver_*", {
         "host_resolver_async",

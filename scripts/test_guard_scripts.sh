@@ -16375,7 +16375,7 @@ import pathlib
 
 path = pathlib.Path("crates/gateway/src/service.rs")
 text = path.read_text()
-call_anchor = ".try_acquire(&GovernorRequest::new(operation, meta.bucket(), declared_length, None, client_addr, class))"
+call_anchor = ".try_acquire(&GovernorRequest::new(operation, meta.bucket(), declared_length, client_addr, class))"
 call = text.find(call_anchor)
 if call < 0 or text.find(call_anchor, call + 1) >= 0:
     raise SystemExit("c-lim-0039 main-pipeline governor call anchor drifted")
@@ -16476,8 +16476,8 @@ mut_governor_c_lim_0004_admission_removed() {
 import pathlib
 
 path = pathlib.Path("crates/gateway/src/ext/governor/default.rs")
-old = "            ClassKind::Authenticated => return Some(Lease::admit()),"
-new = "            ClassKind::Authenticated => return None,"
+old = "        let decided = self.try_acquire_sync(request).ok_or(());"
+new = "        let decided: Result<Lease, ()> = Ok(Lease::admit());"
 text = path.read_text()
 if text.count(old) != 1:
     raise SystemExit("c-lim-0004 synchronous admission anchor drifted")
@@ -16486,7 +16486,24 @@ GOVPY
 }
 expect_fail check_governor_fast_path.sh \
     'c-lim-0004 synchronous admission being removed' mut_governor_c_lim_0004_admission_removed \
-    'c-lim-0004 authenticated traffic no longer returns a permit'
+    'c-lim-0004 the Governor boundary no longer decides through try_acquire_sync'
+
+mut_governor_logs_a_refused_peer() {
+    python3 - <<'GOVPY'
+import pathlib
+
+path = pathlib.Path("crates/gateway/src/ext/governor/default.rs")
+old = "            class_meter.refund(class_rate);\n"
+new = "            eprintln!(\"refused {address:?}\");\n            class_meter.refund(class_rate);\n"
+text = path.read_text()
+if text.count(old) != 1:
+    raise SystemExit("c-gov-0012 refusal anchor drifted")
+path.write_text(text.replace(old, new, 1))
+GOVPY
+}
+expect_fail check_governor_fast_path.sh \
+    'c-gov-0012 a governor refusal logging the peer' mut_governor_logs_a_refused_peer \
+    'c-gov-0012'
 
 mut_governor_sync_path_allocates() {
     python3 - <<'GOVPY'

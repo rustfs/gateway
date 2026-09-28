@@ -127,8 +127,7 @@ pub use crate::builder::{
     AssemblyUpdate, DEFAULT_MAX_BUFFERED_BODY_BYTES, MINIO_CLIENT_CHECKSUM_OPTIONAL_OPERATIONS, ServiceBuilder,
 };
 pub use crate::clock::{
-    Clock, ClockPosture, ClockSkewAck, FixedClock, MAX_CLOCK_SKEW_SECONDS, ManualMonotonic, MonotonicClock, MonotonicNow,
-    SystemMonotonic, system_clock,
+    Clock, ClockPosture, ClockSkewAck, FixedClock, ManualMonotonic, MonotonicClock, MonotonicNow, SystemMonotonic, system_clock,
 };
 pub use crate::close::ConnectionIntent;
 pub use crate::config::{

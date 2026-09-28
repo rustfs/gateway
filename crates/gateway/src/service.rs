@@ -667,7 +667,7 @@ impl S3Service {
         let lease = match self
             .inner
             .governor
-            .try_acquire(&GovernorRequest::new(operation, meta.bucket(), declared_length, None, client_addr, class))
+            .try_acquire(&GovernorRequest::new(operation, meta.bucket(), declared_length, client_addr, class))
             .await
         {
             Ok(lease) => lease,
@@ -1363,7 +1363,6 @@ impl S3Service {
             .try_acquire(&GovernorRequest::new(
                 CORS_PREFLIGHT,
                 bucket.as_ref(),
-                None,
                 None,
                 client_addr,
                 ClassKind::CorsPreflight,

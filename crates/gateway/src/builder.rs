@@ -55,7 +55,7 @@ use rustfs_gateway_sig::{SecurityFloor, SignatureVerifier};
 use rustfs_gateway_types::{NamePolicy, NameValidator, SlashPolicy};
 
 use crate::assembly::{AssemblyError, RuleRef};
-use crate::clock::{Clock, ClockPosture, ClockSkewAck, MAX_CLOCK_SKEW_SECONDS, SystemMonotonic, skew_from_system, system_clock};
+use crate::clock::{Clock, ClockPosture, ClockSkewAck, SystemMonotonic, system_clock};
 use crate::config::{AssemblySnapshot, ConfigHandle, ConfigStore, ServiceConfig};
 use crate::dispatch::{DispatchTable, OperationDispatch};
 use crate::ext::{
@@ -518,17 +518,13 @@ impl ServiceBuilder {
         self
     }
 
-    /// Installs the clock. Defaults to the system one.
+    /// Installs a custom wall clock in place of the system one, with an explicit replay-risk
+    /// acknowledgement.
     ///
-    /// One reading is taken per request, at the top of the pipeline. See the crate's clock module.
-    #[must_use]
-    pub fn clock(mut self, clock: impl Clock) -> Self {
-        self.clock = Arc::new(clock);
-        self.clock_posture = ClockPosture::CustomChecked;
-        self
-    }
-
-    /// Installs a deliberately skewed clock with an explicit replay-risk acknowledgement.
+    /// One reading is taken per request, at the top of the pipeline. There is no unacknowledged
+    /// form: a source that agrees with the system clock at assembly can still stop moving
+    /// afterwards, and a frozen clock keeps every captured signature valid. The acknowledgement is
+    /// reported in [`crate::SecurityPosture`] and on the start-up log. See the crate's clock module.
     #[must_use]
     pub fn clock_with_skew_ack(mut self, clock: impl Clock, _ack: ClockSkewAck) -> Self {
         self.clock = Arc::new(clock);
@@ -614,14 +610,8 @@ impl ServiceBuilder {
             });
         };
 
-        if self.clock_posture == ClockPosture::CustomChecked {
-            let skew_seconds = skew_from_system(self.clock.as_ref());
-            if skew_seconds > MAX_CLOCK_SKEW_SECONDS {
-                return Err(AssemblyError::ClockSkew {
-                    skew_seconds,
-                    rule: RuleRef::CLOCK_SKEW,
-                });
-            }
+        if self.clock_posture == ClockPosture::CustomAcknowledged {
+            eprintln!("WARN: a custom wall clock is installed; signature expiry and clock skew follow it, not the system clock");
         }
 
         let routing = assemble_routing(self.router, self.pending, self.op_layers)?;
@@ -644,7 +634,8 @@ impl ServiceBuilder {
         let custom_signature_verifier = self.custom_signature_verifier.is_some();
         let security_posture = SecurityPosture::new(
             authenticator.credential_guard_config(),
-            self.governor_rates.per_ip,
+            &self.governor_rates,
+            self.clock_posture,
             custom_signature_verifier,
             dangerously_replaced_signature_verifier,
         );

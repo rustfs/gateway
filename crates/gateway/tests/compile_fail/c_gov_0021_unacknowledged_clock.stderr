@@ -1,0 +1,5 @@
+error[E0599]: no method named `clock` found for struct `ServiceBuilder` in the current scope
+  --> tests/compile_fail/c_gov_0021_unacknowledged_clock.rs:26:42
+   |
+26 |     let _builder = ServiceBuilder::new().clock(FixedClock::at_unix_seconds(1_767_225_600));
+   |                                          ^^^^^ private field, not a method

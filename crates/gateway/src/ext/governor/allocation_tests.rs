@@ -45,11 +45,10 @@ fn roomy(tracked_clients: usize) -> GovernorRates {
     }
 }
 
-const KINDS: [ClassKind; 4] = [
+const KINDS: [ClassKind; 3] = [
     ClassKind::CredentialLookup,
     ClassKind::CorsPreflight,
     ClassKind::Unauthenticated,
-    ClassKind::Authenticated,
 ];
 
 /// A reproducible address stream: xorshift, alternating IPv4 hosts and distinct IPv6 `/64`s.
@@ -72,7 +71,7 @@ impl Iterator for Addresses {
 }
 
 fn decide(governor: &DefaultGovernor, kind: ClassKind, address: Option<IpAddr>) -> bool {
-    let request = GovernorRequest::new("GetObject", None, None, None, address.map(ClientAddr::from_peer), kind);
+    let request = GovernorRequest::new("GetObject", None, None, address.map(ClientAddr::from_peer), kind);
     governor.try_acquire_sync(&request).is_some()
 }
 
@@ -221,7 +220,7 @@ fn single_thread() -> Observation {
 /// once first, so what the window counts is the decision path under contention and nothing else.
 fn contended() -> Observation {
     const THREADS: usize = 4;
-    let (governor, _) = DefaultGovernor::manually_clocked(roomy(1_024));
+    let (governor, clock) = DefaultGovernor::manually_clocked(roomy(1_024));
     let governor = Arc::new(governor);
     let start = Arc::new(Barrier::new(THREADS + 1));
     let done = Arc::new(Barrier::new(THREADS + 1));
@@ -252,6 +251,8 @@ fn contended() -> Observation {
     // Pass zero warms every shard lock, the barriers and the thread-locals outside the window.
     start.wait();
     done.wait();
+    // A second of refill between the passes, so the measured pass both admits and refuses.
+    clock.advance_millis(1_000);
     let mut observation = measure(|| {
         start.wait();
         done.wait();

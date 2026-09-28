@@ -58,7 +58,6 @@ use std::net::{IpAddr, Ipv6Addr};
 use std::sync::Arc;
 
 use rustfs_gateway_core::BoxFuture;
-use rustfs_gateway_sig::Identity;
 use rustfs_gateway_types::BucketName;
 
 /// The framework-owned pre-authentication class of one request.
@@ -71,12 +70,6 @@ pub enum ClassKind {
     CorsPreflight,
     /// A request that presented no credential material.
     Unauthenticated,
-    /// A request whose caller is already known.
-    ///
-    /// The current pre-body hook cannot produce this variant. It remains part of the vocabulary
-    /// for deployments that reuse a governor after authentication; [`DefaultGovernor`] admits it
-    /// without charging the framework's pre-authentication buckets.
-    Authenticated,
 }
 
 /// The peer address supplied by the transport.
@@ -113,10 +106,11 @@ impl ClientAddr {
 
 /// What a [`Governor`] is asked about.
 ///
-/// The identity is `None` here for every request, and that is not an oversight: this runs before
-/// authentication, because the point of a limit is to stop work being done, and verifying a
-/// signature is work. A deployment that wants a per-identity quota applies it in its
-/// [`crate::Authorizer`], which runs after the identity is known.
+/// There is no identity here, and that is not an oversight: this runs before authentication,
+/// because the point of a limit is to stop work being done, and verifying a signature is work. A
+/// deployment that wants a per-identity quota applies it in its [`crate::Authorizer`], which runs
+/// after the identity is known (rustfs/backlog#1759 removed the always-`None` identity accessor
+/// and the `Authenticated` class the framework never produced).
 #[derive(Debug)]
 pub struct GovernorRequest<'a> {
     /// The operation routing chose, by its `Operation::NAME`.
@@ -129,8 +123,6 @@ pub struct GovernorRequest<'a> {
     /// removes by switching to `Transfer-Encoding: chunked`, so an implementation that cares must
     /// handle the `None` case rather than admitting it.
     declared_body_bytes: Option<u64>,
-    /// Always `None`. Reserved so that adding the identity later is not a signature change.
-    identity: Option<&'a Identity>,
     /// The peer address supplied by the transport, or `None` when the transport supplied none.
     client_addr: Option<ClientAddr>,
     /// The framework-owned pre-authentication class.
@@ -142,7 +134,6 @@ impl<'a> GovernorRequest<'a> {
         operation: &'a str,
         bucket: Option<&'a BucketName>,
         declared_body_bytes: Option<u64>,
-        identity: Option<&'a Identity>,
         client_addr: Option<ClientAddr>,
         kind: ClassKind,
     ) -> Self {
@@ -150,7 +141,6 @@ impl<'a> GovernorRequest<'a> {
             operation,
             bucket,
             declared_body_bytes,
-            identity,
             client_addr,
             kind,
         }
@@ -172,12 +162,6 @@ impl<'a> GovernorRequest<'a> {
     #[must_use]
     pub const fn declared_body_bytes(&self) -> Option<u64> {
         self.declared_body_bytes
-    }
-
-    /// The authenticated identity, when this hook is reused after authentication.
-    #[must_use]
-    pub const fn identity(&self) -> Option<&'a Identity> {
-        self.identity
     }
 
     /// The transport-supplied peer address.
@@ -343,20 +327,13 @@ mod tests {
     }
 
     fn request() -> GovernorRequest<'static> {
-        GovernorRequest::new("PutObject", None, Some(1 << 30), None, None, ClassKind::Unauthenticated)
+        GovernorRequest::new("PutObject", None, Some(1 << 30), None, ClassKind::Unauthenticated)
     }
 
     /// Negative — a refusal is expressible, and it is the only failure shape there is.
     #[tokio::test]
     async fn a_governor_can_refuse() {
         assert!(RefuseEverything.try_acquire(&request()).await.is_err());
-    }
-
-    /// Negative — the request carries no identity, so a governor cannot be written against one and
-    /// then silently see `None` for every caller.
-    #[test]
-    fn the_question_carries_no_identity() {
-        assert!(request().identity().is_none());
     }
 
     /// Negative — the trait is usable behind `Arc<dyn _>`; that is what ADR-0002's hand-written
