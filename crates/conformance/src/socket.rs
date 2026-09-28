@@ -95,6 +95,7 @@ mod connect;
 mod response;
 mod stream;
 pub(crate) use response::PeerInput;
+pub(crate) use stream::DuplexIo;
 
 use std::collections::VecDeque;
 use std::io::{ErrorKind, Read, Write};

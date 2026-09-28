@@ -142,16 +142,21 @@ so already available DATA is checked before later grants and an early stream res
 unfinished request. GOAWAY alone does not end the selected stream. Request progress records actual
 unpadded DATA payload writes at the first response head or a pre-head reset; padded authored DATA
 leaves that application-byte count unavailable. An unfinished script is reported explicitly.
-An external `--endpoint http://…` runs authored frame scripts too, over cleartext with prior
-knowledge (RFC 9113 section 3.3); its connection setup is the target's time, as for HTTP/1.1. An
-`https://` endpoint refuses them before connecting, because it would have to negotiate `h2` by ALPN,
-which the runner does not do yet. While `--allow-external-fixtures` has an owned fixture active, the
+An external `--endpoint` runs authored frame scripts too: `http://` over cleartext with prior
+knowledge (RFC 9113 section 3.3), and `https://` over TLS offering only ALPN `h2` (section 3.2),
+with the same certificate trust as HTTP/1.1 (`--ca-cert`). Connection setup, TLS included, is the
+target's time, as for HTTP/1.1. A TLS peer that selects no protocol, or ends the handshake with
+`no_application_protocol`, is reported as an environment failure before any frame octet is
+written. Inside TLS a write hands plaintext to the session rather than to the wire, so request-body
+progress, `socket_read_after` and `connection_after` are reported unavailable instead of inferred
+from TLS records; a TCP reset stays a measured `reset`. An end of stream without a `close_notify`
+alert is noted on the case, and TLS records still queued when the exchange ends count as unwritten
+authored frames. The in-harness production drivers still refuse `[connection.tls]`. While `--allow-external-fixtures` has an owned fixture active, the
 read-only guard decodes every authored header block and allows only a GET, HEAD or OPTIONS
 `:method`; `request.method` is not what the peer receives, and an undecodable block is refused as
 unclassified. An interrupted block or an orphan CONTINUATION is not classified, because the peer
 must end the connection there rather than run it. A server that does not speak cleartext HTTP/2 answers the preface as it sees fit, and
-the case reports that answer rather than a capability the runner assumed. This support does not
-extend to TLS.
+the case reports that answer rather than a capability the runner assumed.
 
 A script may open more than one stream. The observed stream is the last one an authored HEADERS
 frame opens; request trailers on an earlier stream do not move it. Each other stream a HEADERS frame

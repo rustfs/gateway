@@ -132,6 +132,16 @@ impl ExternalEndpoint {
         )
     }
 
+    /// [`Self::open`] for an authored HTTP/2 script: TLS offers only ALPN `h2`.
+    pub(super) fn open_h2(&self, deadline: Instant) -> Result<Connection, SutError> {
+        self.open_with_worker(
+            deadline,
+            resolver_worker()?,
+            |authority| authority.to_socket_addrs().map(|resolved| resolved.collect()),
+            |transport, address, attempt_deadline| transport.open_h2(address, attempt_deadline),
+        )
+    }
+
     #[cfg(test)]
     fn open_with<R, C>(&self, deadline: Instant, resolver: R, connector: C) -> Result<Connection, SutError>
     where

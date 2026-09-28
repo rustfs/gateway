@@ -37,6 +37,8 @@ pub(super) enum ExternalTransport {
     Tls {
         server_name: ServerName<'static>,
         config: Arc<ClientConfig>,
+        /// The same trust, offering only ALPN `h2`, for authored HTTP/2 frame scripts.
+        h2_config: Arc<ClientConfig>,
     },
 }
 
@@ -68,19 +70,33 @@ impl ExternalTransport {
             add_pem_roots(&mut roots, path)?;
         }
         let mut config = ClientConfig::builder().with_root_certificates(roots).with_no_client_auth();
+        let mut h2_config = config.clone();
         config.alpn_protocols = vec![b"http/1.1".to_vec()];
+        h2_config.alpn_protocols = vec![b"h2".to_vec()];
         Ok(Self::Tls {
             server_name,
             config: Arc::new(config),
+            h2_config: Arc::new(h2_config),
         })
     }
 
     pub(super) fn open(&self, address: std::net::SocketAddr, deadline: Instant) -> Result<Connection, SutError> {
         match self {
             Self::Cleartext => Connection::open_before(address, deadline),
-            Self::Tls { server_name, config } => {
+            Self::Tls { server_name, config, .. } => {
                 Connection::open_tls_before(address, server_name.clone(), Arc::clone(config), deadline)
             }
+        }
+    }
+
+    /// Opens a connection for an authored HTTP/2 script: cleartext with prior knowledge, or TLS
+    /// offering only ALPN `h2`. Whether the peer selected `h2` is the caller's to check.
+    pub(super) fn open_h2(&self, address: std::net::SocketAddr, deadline: Instant) -> Result<Connection, SutError> {
+        match self {
+            Self::Cleartext => Connection::open_before(address, deadline),
+            Self::Tls {
+                server_name, h2_config, ..
+            } => Connection::open_tls_before(address, server_name.clone(), Arc::clone(h2_config), deadline),
         }
     }
 

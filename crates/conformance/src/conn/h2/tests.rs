@@ -157,15 +157,16 @@ fn the_test_socket_harness_refuses_authored_h2_frames() {
     assert!(error.to_string().contains("test socket harness frames HTTP/1.1 only"), "{error}");
 }
 
-/// Negative — an https endpoint refuses a frame script before connecting: TLS with ALPN `h2` is not
-/// implemented, and nothing listens on port 9, so a connection attempt would report otherwise.
+/// Negative — an unreachable https endpoint is an environment failure for a frame script, never
+/// a protocol observation; the TLS path itself is covered in `h2_tls_tests`.
 #[test]
-fn an_https_external_endpoint_refuses_authored_h2_frames_before_connecting() {
+fn an_unreachable_https_endpoint_is_an_environment_failure_for_an_h2_script() {
     let mut conn = Conn::external(std::path::PathBuf::from("."), "https://127.0.0.1:9").expect("the endpoint parses");
     let error = conn
         .exchange(&h2_plan("s-h2-0005", h2_request(ANONYMOUS_GET_ROOT_HPACK), None))
-        .expect_err("HTTP/2 over TLS is not implemented");
-    assert!(error.to_string().contains("ALPN `h2`"), "{error}");
+        .expect_err("nothing listens on port 9");
+    assert!(matches!(error, SutError::Environment(_)), "{error}");
+    assert!(error.to_string().contains("could not connect"), "{error}");
 }
 
 /// Positive — a cleartext external endpoint receives the preface and exactly the authored frames
@@ -617,3 +618,5 @@ mod h2_client_control_tests;
 mod h2_ping_tests;
 
 mod h2_streams_tests;
+
+mod h2_tls_tests;

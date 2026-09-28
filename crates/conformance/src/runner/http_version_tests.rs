@@ -234,12 +234,12 @@ fn an_applicable_h2_script_preserves_the_test_harness_refusal() {
     );
 }
 
-/// Negative: no remote connection is needed to refuse an HTTP/2 script against an https endpoint,
-/// which would have to negotiate `h2` by ALPN.
+/// Negative: an unreachable external endpoint skips an applicable HTTP/2 script with the reason,
+/// rather than reporting a protocol result.
 #[test]
-fn an_applicable_h2_script_preserves_the_external_tls_refusal() {
+fn an_applicable_h2_script_reports_an_unreachable_external_endpoint() {
     let sut = crate::conn::Conn::external(std::path::PathBuf::from("."), "https://127.0.0.1:9").expect("valid endpoint");
-    assert_transport_refusal(sut, AUTHORED_H2, "ALPN `h2`");
+    assert_transport_refusal(sut, AUTHORED_H2, "could not connect");
 }
 
 /// Negative: the self-held driver's HTTP/1.1 support must not be mistaken for Hyper HTTP/2.

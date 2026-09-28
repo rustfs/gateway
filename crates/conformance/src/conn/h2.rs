@@ -33,8 +33,9 @@
 //!   read (`receive`) but not observed. Received RST_STREAM frames are recorded in arrival order;
 //!   resetting the selected stream ends its observation without implying a TCP reset. GOAWAY is
 //!   recorded without ending an in-flight stream or inventing receive-side termination.
-//! * Only the production Hyper driver speaks HTTP/2 in cleartext with prior knowledge. The
-//!   self-held driver, the test harness, external endpoints, and TLS refuse the script.
+//! * The production Hyper driver runs scripts in cleartext with prior knowledge; external endpoints
+//!   run them in cleartext too, or over TLS once the peer selected ALPN `h2`. The self-held driver,
+//!   the test harness, and in-harness `[connection.tls]` refuse the script.
 
 mod control;
 mod duplex;
@@ -361,10 +362,9 @@ impl Conn {
 }
 
 impl Conn {
-    /// Runs one exchange as an authored frame script against a cleartext external endpoint, with
-    /// prior knowledge (RFC 9113 section 3.3). Connection setup is the target's time, as on the
-    /// external HTTP/1.1 path. An https endpoint is refused before connecting: it would have to
-    /// negotiate `h2` by ALPN, which this writer does not do yet.
+    /// Runs one exchange as an authored frame script against an external endpoint: over cleartext
+    /// with prior knowledge (RFC 9113 section 3.3), or over TLS once the peer selected ALPN `h2`
+    /// (section 3.2). Connection setup is the target's time, as on the external HTTP/1.1 path.
     pub(super) fn exchange_h2_external(
         &mut self,
         plan: &ExchangePlan<'_>,
@@ -373,13 +373,6 @@ impl Conn {
         reuse: bool,
     ) -> Result<Observation, SutError> {
         let script = compile(wire)?;
-        if endpoint.is_tls() {
-            return Err(refused(
-                "HTTP/2 over TLS (ALPN `h2`) is not implemented for external endpoints; authored frames run \
-                 against a cleartext `http://` endpoint with prior knowledge"
-                    .to_owned(),
-            ));
-        }
         if reuse && plan.index > 0 {
             return Err(refused(
                 "exchange after the first asks to reuse the connection; carrying an HTTP/2 connection \
@@ -390,7 +383,17 @@ impl Conn {
         self.connection = None;
         let started = Instant::now();
         let deadline = plan.deadline.unwrap_or_else(|| started + budget_of(plan.timeout_ms));
-        let connection = endpoint.open(deadline)?;
+        let connection = endpoint.open_h2(deadline)?;
+        if endpoint.is_tls() {
+            // Over TLS, HTTP/2 is in use only when the peer selected `h2`; nothing is written otherwise.
+            // The client offers only `h2`, so the peer either selects it, selects nothing, or fails
+            // the handshake with `no_application_protocol`.
+            if connection.alpn_protocol().as_deref() != Some(b"h2".as_slice()) {
+                return Err(refused(
+                    "the endpoint selected no ALPN protocol, not `h2`; the authored frames were not written".to_owned(),
+                ));
+            }
+        }
         execute_on(connection, &script, ExchangeClock::until(deadline), started, None)
     }
 }
@@ -482,6 +485,9 @@ fn execute_on(
     // A consumed reset must not become EOF merely because a later peek sees a drained socket.
     let socket_read_after = match &response.cut_short {
         Some(ReadFailure::Reset) => Some(SocketReadState::Reset),
+        // Under TLS an end of stream is read through records (`close_notify` may precede the TCP
+        // FIN), and a peek sees records that could be an alert as easily as data: not measured.
+        _ if connection.is_tls() => None,
         Some(ReadFailure::ClosedBeforeHead | ReadFailure::Truncated) => Some(SocketReadState::Eof),
         _ => clock.charged(|| connection.observe_read_side()),
     };
@@ -500,6 +506,11 @@ fn execute_on(
     observed.deadline_expiry = progress.deadline_expiry;
     observed.request_body_bytes_sent_at_response = progress.at_response;
     observed.request_body_fully_sent = Some(progress.body_complete);
+    if progress.truncated_tls {
+        observed
+            .notes
+            .push("the TLS peer ended the TCP stream without a close_notify alert".to_owned());
+    }
     if progress.unfinished_script {
         observed
             .notes
