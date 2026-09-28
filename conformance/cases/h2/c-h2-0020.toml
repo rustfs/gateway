@@ -1,0 +1,56 @@
+# c-h2-0020 — client-authored HTTP/2 control frame.
+
+[case]
+id = "c-h2-0020"
+schema_version = 5
+title = "A three-octet RST_STREAM on an open stream is a connection error"
+rationale = "A reset too short to carry its error code cannot be interpreted; the peer must end the connection rather than guess a code or ignore it."
+polarity = "negative"
+tags = ["framing"]
+timeout_ms = 1500
+quirks = []
+applies_to = { http_versions = ["h2"], tls = "forbidden" }
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9113.html#section-6.4"
+summary = "A RST_STREAM frame whose length is not four octets must be treated as a connection error of type FRAME_SIZE_ERROR."
+kind = "rfc"
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9113.html#section-5.4"
+summary = "An endpoint may report any applicable error code, and the generic PROTOCOL_ERROR or INTERNAL_ERROR may always replace a more specific one."
+kind = "rfc"
+
+[[setup.buckets]]
+name = "conf-cors-rt"
+
+[request]
+method = "OPTIONS"
+target = "/conf-cors-rt/key.txt"
+http_version = "h2"
+
+# One byte of stream credit holds the stream open while the malformed reset is written.
+
+[[request.h2_frames]]
+type = "settings"
+payload_hex = "000400000001"
+
+[[request.h2_frames]]
+type = "headers"
+stream_id = 1
+flags = ["end_headers", "end_stream"]
+payload_hex = "02074f5054494f4e538604152f636f6e662d636f72732d72742f6b65792e747874410e73332e6578616d706c652e636f6d"
+
+[[request.h2_frames]]
+type = "rst_stream"
+stream_id = 1
+payload_hex = "000008"
+delay_ms = 80
+
+[expect]
+kind = "stream_error"
+status = 400
+stream_termination = "abrupt_close"
+body_bytes_before_error = 1
+h2_control_frames = [{ type = "window_update", stream_id = 0, increment = 2031617 }, { type = "goaway", last_stream_id = 1, error_code_any_of = [1, 2, 6] }]
+socket_read_after = "eof"

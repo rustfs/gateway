@@ -610,3 +610,5 @@ fn a_slow_listener_start_does_not_forgive_a_silent_peer() {
 }
 
 mod h2_client_control_tests;
+
+mod h2_ping_tests;

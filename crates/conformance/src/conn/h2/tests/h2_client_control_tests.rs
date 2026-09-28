@@ -238,8 +238,8 @@ fn a_raw_frame_is_exactly_one_complete_untyped_frame() {
 
 #[test]
 fn a_frame_type_the_schema_does_not_name_is_still_refused_by_name() {
-    let error = control_error("type = \"ping\"\nstream_id = 0\n");
-    assert!(error.contains("type = \"ping\"` is not executed"), "{error}");
+    let error = control_error("type = \"push_promise\"\nstream_id = 1\n");
+    assert!(error.contains("type = \"push_promise\"` is not executed"), "{error}");
 }
 
 /// Positive — the loopback peer receives the preface and every authored control frame octet for

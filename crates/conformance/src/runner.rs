@@ -264,7 +264,7 @@ fn run_case(
                 .meta()
                 .and_then(|meta| meta.read("caseMeta.schema_version"))
                 .and_then(Value::as_integer)
-                == Some(4)
+                .is_some_and(|version| version >= 4)
             && case.exchanges().iter().any(|exchange| {
                 exchange
                     .request

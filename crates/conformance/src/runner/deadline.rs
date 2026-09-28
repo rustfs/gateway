@@ -39,7 +39,7 @@ pub(super) fn expiry_error(
             .meta()
             .and_then(|meta| meta.read("caseMeta.schema_version"))
             .and_then(Value::as_integer)
-            == Some(4);
+            .is_some_and(|version| version >= 4);
     if scripted_hang {
         let budget = case
             .meta()
