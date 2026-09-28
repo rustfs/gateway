@@ -36,7 +36,7 @@ pub use host::{ArnForm, HostClass};
 pub use types::{ETagRender, OmitWhen, TimestampFormat, Type};
 
 /// The `ir_version` every document carries. A bump requires a fresh IR-FREEZE review.
-pub const IR_VERSION: &str = "2";
+pub const IR_VERSION: &str = "3";
 
 /// One operation's complete wire contract.
 #[derive(Debug, Clone, PartialEq)]

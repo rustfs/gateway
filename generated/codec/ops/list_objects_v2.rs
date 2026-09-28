@@ -89,6 +89,14 @@ impl OperationCodec for dto::ListObjectsV2 {
             let raw = raw.as_ref();
             input.expected_bucket_owner = Some(raw.to_owned());
         }
+        // OptionalObjectAttributes — header `x-amz-optional-object-attributes`, a comma-delimited list.
+        if let Some(raw) = request.header("x-amz-optional-object-attributes") {
+            for raw in value::header_list(raw.as_ref()) {
+                input
+                    .optional_object_attributes
+                    .push(dto::OptionalObjectAttributes::custom(raw.to_owned()));
+            }
+        }
         let _ = body;
         value::exit(input.check_required())?;
         Ok(input)

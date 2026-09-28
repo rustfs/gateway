@@ -1,5 +1,5 @@
 {
-  "ir_version": "2",
+  "ir_version": "3",
   "operation": "RestoreObject",
   "http": {
             "method": "POST",
@@ -799,7 +799,7 @@
                                                       "kind": "List",
                                                       "member": { "kind": "Structure", "shape": "Grant" },
                                                       "flattened": false,
-                                                      "wrapper_name": "Grant"
+                                                      "member_name": "Grant"
                                                     },
                                             "hot": false,
                                             "quirk_refs": []
@@ -822,7 +822,7 @@
                                                       "kind": "List",
                                                       "member": { "kind": "Structure", "shape": "MetadataEntry" },
                                                       "flattened": false,
-                                                      "wrapper_name": "MetadataEntry"
+                                                      "member_name": "MetadataEntry"
                                                     },
                                             "hot": false,
                                             "quirk_refs": []
@@ -976,7 +976,7 @@
                                                    "kind": "List",
                                                    "member": { "kind": "Structure", "shape": "Tag" },
                                                    "flattened": false,
-                                                   "wrapper_name": "Tag"
+                                                   "member_name": "Tag"
                                                  },
                                          "hot": true,
                                          "quirk_refs": []

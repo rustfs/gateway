@@ -175,6 +175,7 @@ such a row as though the key selected the operation is the opposite of what the 
 | `x-amz-object-ownership` | [CreateBucket](#createbucket) |
 | `x-amz-object-size` | [PutObject](#putobject) |
 | `x-amz-object-version-id` | [DeleteObjectAnnotation](#deleteobjectannotation), [GetObjectAnnotation](#getobjectannotation), [ListObjectAnnotations](#listobjectannotations), [PutObjectAnnotation](#putobjectannotation) |
+| `x-amz-optional-object-attributes` | [ListObjectVersions](#listobjectversions), [ListObjects](#listobjects), [ListObjectsV2](#listobjectsv2) |
 | `x-amz-part-number-marker` | [GetObjectAttributes](#getobjectattributes) |
 | `x-amz-rename-source` | [RenameObject](#renameobject) |
 | `x-amz-rename-source-if-match` | [RenameObject](#renameobject) |
@@ -3231,7 +3232,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 
 **Headers**
 
-- request: `x-amz-expected-bucket-owner`, `x-amz-request-payer`
+- request: `x-amz-expected-bucket-owner`, `x-amz-optional-object-attributes`, `x-amz-request-payer`
 - response: `x-amz-request-charged`
 - required: —
 
@@ -3291,7 +3292,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 
 **Headers**
 
-- request: `x-amz-expected-bucket-owner`, `x-amz-request-payer`
+- request: `x-amz-expected-bucket-owner`, `x-amz-optional-object-attributes`, `x-amz-request-payer`
 - response: `x-amz-request-charged`
 - required: —
 
@@ -3350,7 +3351,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 
 **Headers**
 
-- request: `x-amz-expected-bucket-owner`, `x-amz-request-payer`
+- request: `x-amz-expected-bucket-owner`, `x-amz-optional-object-attributes`, `x-amz-request-payer`
 - response: `x-amz-request-charged`
 - required: —
 

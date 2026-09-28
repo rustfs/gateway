@@ -68,21 +68,23 @@ pub enum Type {
         member: Box<Type>,
         /// Whether the element repeats with no wrapper.
         flattened: bool,
-        /// The name of the **repeated entry element** inside the wrapper, when not flattened.
-        ///
-        /// The key is spelled `wrapper_name` because `spec/ir.schema.json` froze it under that
-        /// name, and the name is the wrong way round: this holds the list member's `xmlName`
-        /// (`Bucket`, defaulting to Smithy's `member`), *not* the enclosing element. The wrapper
-        /// is never recorded because it is never a free choice — it is the field's own
-        /// `wire_name`, so `<Buckets><Bucket>…</Bucket></Buckets>` reads
-        /// `wire_name` outside and this inside. A reader that takes the two the other way round
-        /// emits `<Bucket><Buckets>…</Buckets></Bucket>`, which is the inversion
-        /// `crate::emit::codec` shipped once; resolve the pair through
+        /// The name of the **repeated entry element** inside the wrapper of a wrapped XML list:
+        /// the list member's `xmlName` (`Bucket`), or Smithy's default `member` when the model
+        /// names none. The wrapper itself is never recorded because it is never a free choice —
+        /// it is the field's own `wire_name`, so `<Buckets><Bucket>…</Bucket></Buckets>` reads
+        /// `wire_name` outside and this inside. Resolve the pair through
         /// `rustfs_gateway_codegen::emit::codec::list_elements` rather than by hand.
         ///
-        /// `None` exactly when `flattened`, where the entry element is the field's `wire_name`
-        /// and there is no enclosing element at all.
-        wrapper_name: Option<String>,
+        /// `None` in two cases, told apart by `flattened`:
+        ///
+        /// * `flattened`: the entry element is the field's `wire_name`, and there is no
+        ///   enclosing element at all.
+        /// * not `flattened`: a comma-delimited list in a header position
+        ///   (`x-amz-object-attributes`). It has no XML form, and is valid only as the direct type
+        ///   of a [`crate::ir::Binding::Header`] field.
+        ///
+        /// Spelled `wrapper_name` up to IR v2, which named the wrong element (rustfs/gateway#11).
+        member_name: Option<String>,
     },
     /// A map.
     Map {

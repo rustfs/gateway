@@ -25,7 +25,7 @@
   ],
   "properties": {
     "ir_version": {
-      "const": "2",
+      "const": "3",
       "description": "Bumped on any breaking change to this schema. A bump requires a fresh IR-FREEZE review."
     },
     "operation": {
@@ -140,13 +140,13 @@
           "items": { "$ref": "#/$defs/predicate" }
         },
         "success_status": {
-          "enum": [200, 201, 204, 206, 303],
-          "description": "Default success status. 204 for the delete family, 206 for a satisfied Range GET, 303 for a POST Object redirect."
+          "enum": [200, 201, 202, 204, 206, 303],
+          "description": "Default success status. 202 for a RestoreObject that starts a restore, 204 for the delete family, 206 for a satisfied Range GET, 303 for a POST Object redirect."
         },
         "alt_success_statuses": {
           "type": "array",
           "description": "Other success statuses this operation may legitimately return, e.g. POST Object with success_action_status / success_action_redirect.",
-          "items": { "enum": [200, 201, 204, 206, 303] }
+          "items": { "enum": [200, 201, 202, 204, 206, 303] }
         },
         "path_shape": {
           "type": "string",
@@ -517,23 +517,19 @@
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["kind", "member", "flattened", "wrapper_name"],
+          "required": ["kind", "member", "flattened", "member_name"],
           "properties": {
             "kind": { "const": "List" },
             "member": { "$ref": "#/$defs/type" },
             "flattened": { "type": "boolean" },
-            "wrapper_name": { "type": ["string", "null"], "minLength": 1 }
-          },
-          "allOf": [
-            {
-              "if": { "properties": { "flattened": { "const": true } }, "required": ["flattened"] },
-              "then": { "properties": { "wrapper_name": { "type": "null" } } }
-            },
-            {
-              "if": { "properties": { "flattened": { "const": false } }, "required": ["flattened"] },
-              "then": { "properties": { "wrapper_name": { "type": "string" } } }
+            "member_name": {
+              "type": ["string", "null"],
+              "minLength": 1,
+              "description": "The repeated entry element of a wrapped XML list (Bucket inside Buckets; the enclosing element is always the field's own wire_name). null for a flattened list, whose entry element is the wire_name itself, and null with flattened false for a comma-delimited header list, which has no XML form; that form is valid only as the direct type of a Header-bound field (semantic/delimited-list-binding)."
             }
-          ]
+          },
+          "if": { "properties": { "flattened": { "const": true } }, "required": ["flattened"] },
+          "then": { "properties": { "member_name": { "type": "null" } } }
         },
         {
           "type": "object",
@@ -582,7 +578,7 @@
         "element_order": {
           "type": "array",
           "items": { "$ref": "#/$defs/ident" },
-          "description": "Wire contract for this shape's direct children. Must cover exactly the shape's BodyXml members."
+          "description": "Wire contract for this shape's direct children. Must cover exactly the shape's BodyXml members, except a member an attribute is sourced from."
         },
         "empty_value_policy": { "$ref": "#/$defs/empty_value_policy" },
         "attributes": { "type": "array", "items": { "$ref": "#/$defs/xml_attribute" } }
@@ -749,7 +745,7 @@
       "additionalProperties": false,
       "required": ["kind", "ref", "summary"],
       "properties": {
-        "kind": { "enum": ["aws-doc", "smithy-spec", "rfc", "s3s-issue", "s3s-pr", "capture", "observed"] },
+        "kind": { "enum": ["aws-doc", "smithy-spec", "rfc", "s3s-issue", "s3s-pr", "capture", "observed", "other"] },
         "ref": {
           "type": "string",
           "minLength": 1,

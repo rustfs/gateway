@@ -188,11 +188,11 @@ ListMultipartUploadsInput 9
 ListMultipartUploadsOutput 13
 ListObjectAnnotationsInput 8
 ListObjectAnnotationsOutput 10
-ListObjectVersionsInput 9
+ListObjectVersionsInput 10
 ListObjectVersionsOutput 14
-ListObjectsInput 8
+ListObjectsInput 9
 ListObjectsOutput 11
-ListObjectsV2Input 10
+ListObjectsV2Input 11
 ListObjectsV2Output 13
 ListPartsInput 10
 ListPartsOutput 16

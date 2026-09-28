@@ -1,1 +1,1 @@
-{"case_id":"c-ir-n004","base":"ListObjectsV2.json","mutation":{"op":"replace","path":"/output/fields/6/type/wrapper_name","value":"Contents"},"expect":{"at":"/output/fields/6/type","rule":"schema:#/$defs/type/oneOf"}}
+{"case_id":"c-ir-n004","base":"ListObjectsV2.json","mutation":{"op":"replace","path":"/output/fields/6/type/member_name","value":"Contents"},"expect":{"at":"/output/fields/6/type","rule":"schema:#/$defs/type/oneOf"}}

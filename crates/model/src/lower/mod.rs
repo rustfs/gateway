@@ -40,8 +40,8 @@ pub use route_only::RouteOnly;
 use route_only::lower_http;
 
 use support::{
-    Uri, body_members, default_of, empty_value_policy, error_codes, model_request_algorithms, omit_when_of, parse_binding,
-    payload_spec, validate, xml_root,
+    Uri, body_members, default_of, empty_value_policy, error_codes, list_form, model_request_algorithms, omit_when_of,
+    parse_binding, payload_spec, validate, xml_root,
 };
 
 /// Query keys that exist only to disambiguate AWS SDK client caches and never take part in
@@ -213,7 +213,7 @@ fn lower_one(model: &Model, overlay: &Overlay, name: &str) -> Result<OperationIr
             .unwrap_or_else(|| has_trait(op, "smithy.api#httpChecksumRequired")),
         request_algorithms: match &ov.request_algorithms {
             Some(list) => list.clone(),
-            None => model_request_algorithms(model, op),
+            None => model_request_algorithms(model, op, name)?,
         },
         response_algorithms: ov.response_algorithms.clone().unwrap_or_default(),
     };
@@ -519,21 +519,8 @@ impl Ctx<'_> {
                 let item = target_of(list_member)
                     .ok_or_else(|| Error::ir(self.operation, format!("list `{target}` member has no target")))?;
                 let flattened = has_trait(member, "smithy.api#xmlFlattened") || has_trait(shape, "smithy.api#xmlFlattened");
-                let wrapper_name = if flattened {
-                    None
-                } else {
-                    Some(
-                        trait_of(list_member, "smithy.api#xmlName")
-                            .and_then(Value::as_str)
-                            .unwrap_or("member")
-                            .to_owned(),
-                    )
-                };
-                Type::List {
-                    member: Box::new(self.type_of(item, list_member, &Binding::BodyXml)?),
-                    flattened,
-                    wrapper_name,
-                }
+                let member_type = self.type_of(item, list_member, &Binding::BodyXml)?;
+                list_form(self.operation, target, list_member, binding, flattened, member_type)?
             }
             "map" => {
                 let shape = self

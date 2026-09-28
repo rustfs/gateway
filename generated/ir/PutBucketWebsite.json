@@ -1,5 +1,5 @@
 {
-  "ir_version": "2",
+  "ir_version": "3",
   "operation": "PutBucketWebsite",
   "http": {
             "method": "PUT",
@@ -334,7 +334,7 @@
                                                                             "shape": "RoutingRule"
                                                                           },
                                                                 "flattened": false,
-                                                                "wrapper_name": "RoutingRule"
+                                                                "member_name": "RoutingRule"
                                                               },
                                                       "hot": true,
                                                       "quirk_refs": []

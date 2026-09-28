@@ -1,5 +1,5 @@
 {
-  "ir_version": "2",
+  "ir_version": "3",
   "operation": "GetBucketLogging",
   "http": {
             "method": "GET",
@@ -155,7 +155,7 @@
                                                           "kind": "List",
                                                           "member": { "kind": "Structure", "shape": "TargetGrant" },
                                                           "flattened": false,
-                                                          "wrapper_name": "Grant"
+                                                          "member_name": "Grant"
                                                         },
                                                 "hot": false,
                                                 "quirk_refs": []

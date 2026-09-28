@@ -1,5 +1,5 @@
 {
-  "ir_version": "2",
+  "ir_version": "3",
   "operation": "GetBucketReplication",
   "http": {
             "method": "GET",
@@ -325,7 +325,7 @@
                                                                                 "shape": "ReplicationRule"
                                                                               },
                                                                     "flattened": true,
-                                                                    "wrapper_name": null
+                                                                    "member_name": null
                                                                   },
                                                           "hot": true,
                                                           "quirk_refs": []
@@ -469,7 +469,7 @@
                                                                       "kind": "List",
                                                                       "member": { "kind": "Structure", "shape": "Tag" },
                                                                       "flattened": true,
-                                                                      "wrapper_name": null
+                                                                      "member_name": null
                                                                     },
                                                             "hot": false,
                                                             "quirk_refs": []

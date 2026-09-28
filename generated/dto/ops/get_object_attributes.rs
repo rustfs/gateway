@@ -83,7 +83,7 @@ pub struct Input {
     /// Wire `x-amz-expected-bucket-owner`, bound as Header. Optional.
     pub expected_bucket_owner: Option<String>,
     /// Wire `x-amz-object-attributes`, bound as Header. Required.
-    pub object_attributes: String,
+    pub object_attributes: Vec<crate::ops::enums::ObjectAttributes>,
 }
 
 impl Input {
@@ -104,7 +104,6 @@ impl Input {
     pub fn check_required(&self) -> Result<(), crate::PlaceholderDefault> {
         crate::reject_placeholder("GetObjectAttributesInput", "Bucket", &self.bucket)?;
         crate::reject_placeholder("GetObjectAttributesInput", "Key", &self.key)?;
-        crate::reject_placeholder("GetObjectAttributesInput", "ObjectAttributes", &self.object_attributes)?;
         Ok(())
     }
 }
@@ -274,7 +273,7 @@ impl InputBuilder {
 
     /// Sets `ObjectAttributes`.
     #[must_use]
-    pub fn object_attributes(mut self, value: String) -> Self {
+    pub fn object_attributes(mut self, value: Vec<crate::ops::enums::ObjectAttributes>) -> Self {
         self.input.object_attributes = value;
         self
     }

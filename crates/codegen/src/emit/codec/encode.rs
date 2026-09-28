@@ -369,10 +369,10 @@ fn body_member(ir: &OperationIr, plan: &url::Plan, field: &Field, source: &str, 
         Type::List {
             member: inner,
             flattened,
-            wrapper_name,
+            member_name,
         } if !matches!(inner.as_ref(), Type::Structure(_)) => {
             let rendered = wire_expr(inner, member, &ir.operation, encoded)?;
-            let names = super::list_elements(*flattened, wrapper_name.as_deref(), &wire);
+            let names = super::list_elements(*flattened, member_name.as_deref(), &wire)?;
             if let Some(name) = &names.wrapper {
                 let _ = writeln!(out, "{pad}writer.open(\"{name}\", None);");
             }
@@ -386,7 +386,7 @@ fn body_member(ir: &OperationIr, plan: &url::Plan, field: &Field, source: &str, 
         Type::List {
             member: inner,
             flattened,
-            wrapper_name,
+            member_name,
         } => {
             let Type::Structure(inner_name) = inner.as_ref() else {
                 return Err(expr::unsupported(
@@ -397,7 +397,7 @@ fn body_member(ir: &OperationIr, plan: &url::Plan, field: &Field, source: &str, 
             };
             let writer_fn = format!("write_{}", naming::module_name(inner_name));
             let argument = shape_writer_argument(plan, inner_name);
-            let names = super::list_elements(*flattened, wrapper_name.as_deref(), &wire);
+            let names = super::list_elements(*flattened, member_name.as_deref(), &wire)?;
             let open = open_structure(ir, inner_name, &names.entry, "item", "&mut writer")?;
             if let Some(wrapper) = &names.wrapper {
                 let _ = writeln!(out, "{pad}writer.open(\"{wrapper}\", None);");
@@ -672,9 +672,9 @@ fn shape_child(ir: &OperationIr, plan: &url::Plan, field: &Field, source: &str, 
         Type::List {
             member: inner,
             flattened,
-            wrapper_name,
+            member_name,
         } => {
-            let names = super::list_elements(*flattened, wrapper_name.as_deref(), wire);
+            let names = super::list_elements(*flattened, member_name.as_deref(), wire)?;
             if let Some(wrapper) = &names.wrapper {
                 let _ = writeln!(out, "    writer.open(\"{wrapper}\", None);");
             }
