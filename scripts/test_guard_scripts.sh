@@ -24309,10 +24309,10 @@ from pathlib import Path
 
 path = Path("compat/known-fail.txt")
 text = path.read_text()
-old = "boto3/range-download         rustfs/gateway#626  GetObject ignores the Range header\n"
+old = "s3cmd/copy-object            rustfs/gateway#912  PutObjectAcl without Content-MD5 is refused\n"
 if text.count(old) != 1:
     raise SystemExit("known-fail ratchet mutation subject is not unique")
-path.write_text(text.replace(old, old + "boto3/list-pagination        rustfs/gateway#626  newly excused\n", 1))
+path.write_text(text.replace(old, old + "boto3/list-pagination        rustfs/gateway#912  newly excused\n", 1))
 PYEOF
 }
 # The whole point of the ratchet: a regression must not be silenceable by the change that caused it.
@@ -24373,10 +24373,10 @@ from pathlib import Path
 
 path = Path("compat/known-fail.txt")
 text = path.read_text()
-old = "boto3/presigned-put          rustfs/gateway#628  presigned PUT is not an admitted operation"
+old = "s3cmd/presigned-get          rustfs/gateway#913  presigned SigV2 is refused under the default policy"
 if text.count(old) != 1:
     raise SystemExit("known-fail owner mutation subject is not unique")
-path.write_text(text.replace(old, "boto3/presigned-put          later  presigned PUT is not an admitted operation", 1))
+path.write_text(text.replace(old, "s3cmd/presigned-get          later  presigned SigV2 is refused under the default policy", 1))
 PYEOF
 }
 expect_fail check_compat_matrix.sh \

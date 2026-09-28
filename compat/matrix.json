@@ -1,43 +1,937 @@
 {
-  "generated_at": "2026-09-02T16:46:25Z",
+  "generated_at": "2026-09-28T10:47:38Z",
   "sut": {
     "name": "rustfs-gateway-fs",
-    "version": "0.1.3",
-    "commit": "a574fcbe",
-    "generation": 1,
+    "version": "0.1.4",
+    "commit": "c93585f2",
+    "generation": 2,
     "binary": "compat-sut",
     "package": "rustfs-gateway-compat-sut",
-    "assembly": "rustfs-gateway-fs behind rustfs-gateway-server, SigV4 verified, plaintext",
+    "assembly": "rustfs-gateway-fs behind rustfs-gateway-server, SigV4 verified, plaintext plus a TLS listener (throwaway self-signed authority) for TLS-only scenarios",
     "provisional": true,
     "provisional_reason": "measured against the matrix's own launcher; the general-purpose server binary is tracked in rustfs/gateway#624 and these rows are re-measured when it lands",
     "capabilities": [
       "AbortMultipartUpload",
       "CompleteMultipartUpload",
+      "CopyObject",
       "CreateBucket",
       "CreateMultipartUpload",
       "DeleteBucket",
+      "DeleteBucketEncryption",
       "DeleteBucketLifecycle",
+      "DeleteBucketPolicy",
       "DeleteObject",
       "DeleteObjectTagging",
+      "DeleteObjects",
+      "DeletePublicAccessBlock",
+      "GetBucketAcl",
+      "GetBucketEncryption",
       "GetBucketLifecycleConfiguration",
+      "GetBucketLocation",
+      "GetBucketPolicy",
+      "GetBucketPolicyStatus",
       "GetBucketVersioning",
       "GetObject",
+      "GetObjectAcl",
       "GetObjectTagging",
+      "GetPublicAccessBlock",
       "HeadBucket",
       "HeadObject",
+      "ListBuckets",
       "ListMultipartUploads",
       "ListObjectVersions",
       "ListObjects",
       "ListObjectsV2",
       "ListParts",
+      "PostObject",
+      "PutBucketAcl",
+      "PutBucketEncryption",
       "PutBucketLifecycleConfiguration",
+      "PutBucketPolicy",
       "PutBucketVersioning",
       "PutObject",
+      "PutObjectAcl",
       "PutObjectTagging",
+      "PutPublicAccessBlock",
       "UploadPart"
     ]
   },
   "clients": [
+    {
+      "name": "aws-cli",
+      "version": "2.37.4",
+      "scenarios": [
+        {
+          "id": "backup-restore",
+          "status": "unsupported",
+          "detail": "aws-cli is not a backup tool; it has no repository format to restore",
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "bucket-lifecycle",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "copy-object",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "delete-batch",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "large-multipart-upload",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "list-pagination",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "presigned-get",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "presigned-put",
+          "status": "unsupported",
+          "detail": "aws s3 presign signs GetObject URLs only",
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "range-download",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "small-object-roundtrip",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "streaming-chunked-upload",
+          "status": "unsupported",
+          "detail": "aws-cli (botocore) declares the whole-payload SHA-256 for every upload over a plaintext endpoint and offers no signed aws-chunked mode",
+          "verdict": null,
+          "issue": null,
+          "evidence": {
+            "wire": {
+              "requests": 0,
+              "payload_modes": [],
+              "max_signed_chunks": 0,
+              "trailer_signatures": 0,
+              "content_encodings": [],
+              "declared_trailers": []
+            }
+          }
+        },
+        {
+          "id": "sync-directory",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "trailer-chunked-upload",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {
+            "wire": {
+              "requests": 5,
+              "payload_modes": [
+                "STREAMING-UNSIGNED-PAYLOAD-TRAILER",
+                "sha256-hex"
+              ],
+              "max_signed_chunks": 0,
+              "trailer_signatures": 0,
+              "content_encodings": [
+                "aws-chunked"
+              ],
+              "declared_trailers": [
+                "x-amz-checksum-crc64nvme"
+              ]
+            }
+          }
+        },
+        {
+          "id": "versioned-object",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        }
+      ]
+    },
+    {
+      "name": "aws-sdk-dotnet",
+      "version": "4.0.103.4",
+      "scenarios": [
+        {
+          "id": "backup-restore",
+          "status": "unsupported",
+          "detail": "aws-sdk-dotnet is an SDK, not a backup tool; it has no repository format to restore",
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "bucket-lifecycle",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "copy-object",
+          "status": "fail",
+          "detail": "InvalidArgument: x-amz-copy-source must name a key as well as a bucket",
+          "verdict": "KNOWN",
+          "issue": "rustfs/gateway#926",
+          "evidence": {}
+        },
+        {
+          "id": "delete-batch",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "large-multipart-upload",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "list-pagination",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "presigned-get",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "presigned-put",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "range-download",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "small-object-roundtrip",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "streaming-chunked-upload",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {
+            "wire": {
+              "requests": 3,
+              "payload_modes": [
+                "STREAMING-AWS4-HMAC-SHA256-PAYLOAD-TRAILER",
+                "sha256-hex"
+              ],
+              "max_signed_chunks": 117,
+              "trailer_signatures": 1,
+              "content_encodings": [
+                "aws-chunked"
+              ],
+              "declared_trailers": [
+                "x-amz-checksum-crc32"
+              ]
+            }
+          }
+        },
+        {
+          "id": "sync-directory",
+          "status": "unsupported",
+          "detail": "aws-sdk-dotnet offers no directory mirroring primitive",
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "trailer-chunked-upload",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {
+            "wire": {
+              "requests": 3,
+              "payload_modes": [
+                "STREAMING-AWS4-HMAC-SHA256-PAYLOAD-TRAILER",
+                "sha256-hex"
+              ],
+              "max_signed_chunks": 14,
+              "trailer_signatures": 1,
+              "content_encodings": [
+                "aws-chunked"
+              ],
+              "declared_trailers": [
+                "x-amz-checksum-crc32"
+              ]
+            }
+          }
+        },
+        {
+          "id": "versioned-object",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        }
+      ]
+    },
+    {
+      "name": "aws-sdk-java-v1",
+      "version": "1.12.797",
+      "scenarios": [
+        {
+          "id": "backup-restore",
+          "status": "unsupported",
+          "detail": "aws-sdk-java-v1 is an SDK, not a backup tool; it has no repository format to restore",
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "bucket-lifecycle",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "copy-object",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "delete-batch",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "large-multipart-upload",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "list-pagination",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "presigned-get",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "presigned-put",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "range-download",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "small-object-roundtrip",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "streaming-chunked-upload",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {
+            "wire": {
+              "requests": 3,
+              "payload_modes": [
+                "STREAMING-AWS4-HMAC-SHA256-PAYLOAD",
+                "sha256-hex"
+              ],
+              "max_signed_chunks": 73,
+              "trailer_signatures": 0,
+              "content_encodings": [],
+              "declared_trailers": []
+            }
+          }
+        },
+        {
+          "id": "sync-directory",
+          "status": "unsupported",
+          "detail": "aws-sdk-java-v1 offers no directory mirroring primitive",
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "trailer-chunked-upload",
+          "status": "unsupported",
+          "detail": "aws-sdk-java-v1 predates flexible checksums and has no way to declare an x-amz-trailer",
+          "verdict": null,
+          "issue": null,
+          "evidence": {
+            "wire": {
+              "requests": 0,
+              "payload_modes": [],
+              "max_signed_chunks": 0,
+              "trailer_signatures": 0,
+              "content_encodings": [],
+              "declared_trailers": []
+            }
+          }
+        },
+        {
+          "id": "versioned-object",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        }
+      ]
+    },
+    {
+      "name": "aws-sdk-java-v2",
+      "version": "2.55.6",
+      "scenarios": [
+        {
+          "id": "backup-restore",
+          "status": "unsupported",
+          "detail": "aws-sdk-java-v2 is an SDK, not a backup tool; it has no repository format to restore",
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "bucket-lifecycle",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "copy-object",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "delete-batch",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "large-multipart-upload",
+          "status": "fail",
+          "detail": "InvalidRequest: a composite-checksum upload requires a checksum on every part",
+          "verdict": "KNOWN",
+          "issue": "rustfs/gateway#929",
+          "evidence": {}
+        },
+        {
+          "id": "list-pagination",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "presigned-get",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "presigned-put",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "range-download",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "small-object-roundtrip",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "streaming-chunked-upload",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {
+            "wire": {
+              "requests": 3,
+              "payload_modes": [
+                "STREAMING-AWS4-HMAC-SHA256-PAYLOAD-TRAILER",
+                "UNSIGNED-PAYLOAD"
+              ],
+              "max_signed_chunks": 73,
+              "trailer_signatures": 1,
+              "content_encodings": [
+                "aws-chunked"
+              ],
+              "declared_trailers": [
+                "x-amz-checksum-crc32"
+              ]
+            }
+          }
+        },
+        {
+          "id": "sync-directory",
+          "status": "unsupported",
+          "detail": "aws-sdk-java-v2 offers no directory mirroring primitive",
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "trailer-chunked-upload",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {
+            "wire": {
+              "requests": 3,
+              "payload_modes": [
+                "STREAMING-AWS4-HMAC-SHA256-PAYLOAD-TRAILER",
+                "UNSIGNED-PAYLOAD"
+              ],
+              "max_signed_chunks": 9,
+              "trailer_signatures": 1,
+              "content_encodings": [
+                "aws-chunked"
+              ],
+              "declared_trailers": [
+                "x-amz-checksum-crc32"
+              ]
+            }
+          }
+        },
+        {
+          "id": "versioned-object",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        }
+      ]
+    },
+    {
+      "name": "aws-sdk-js",
+      "version": "3.1141.0",
+      "scenarios": [
+        {
+          "id": "backup-restore",
+          "status": "unsupported",
+          "detail": "aws-sdk-js is an SDK, not a backup tool; it has no repository format to restore",
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "bucket-lifecycle",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "copy-object",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "delete-batch",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "large-multipart-upload",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "list-pagination",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "presigned-get",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "presigned-put",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "range-download",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "small-object-roundtrip",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "streaming-chunked-upload",
+          "status": "unsupported",
+          "detail": "aws-sdk-js v3 frames streams as STREAMING-UNSIGNED-PAYLOAD-TRAILER and has no signed aws-chunked mode",
+          "verdict": null,
+          "issue": null,
+          "evidence": {
+            "wire": {
+              "requests": 0,
+              "payload_modes": [],
+              "max_signed_chunks": 0,
+              "trailer_signatures": 0,
+              "content_encodings": [],
+              "declared_trailers": []
+            }
+          }
+        },
+        {
+          "id": "sync-directory",
+          "status": "unsupported",
+          "detail": "aws-sdk-js offers no directory mirroring primitive",
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "trailer-chunked-upload",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {
+            "wire": {
+              "requests": 3,
+              "payload_modes": [
+                "STREAMING-UNSIGNED-PAYLOAD-TRAILER",
+                "sha256-hex"
+              ],
+              "max_signed_chunks": 0,
+              "trailer_signatures": 0,
+              "content_encodings": [
+                "aws-chunked"
+              ],
+              "declared_trailers": [
+                "x-amz-checksum-crc32"
+              ]
+            }
+          }
+        },
+        {
+          "id": "versioned-object",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        }
+      ]
+    },
+    {
+      "name": "aws-sdk-rust",
+      "version": "1.150.0",
+      "scenarios": [
+        {
+          "id": "backup-restore",
+          "status": "unsupported",
+          "detail": "aws-sdk-rust is an SDK, not a backup tool; it has no repository format to restore",
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "bucket-lifecycle",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "copy-object",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "delete-batch",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "large-multipart-upload",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "list-pagination",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "presigned-get",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "presigned-put",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "range-download",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "small-object-roundtrip",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "streaming-chunked-upload",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {
+            "wire": {
+              "requests": 3,
+              "payload_modes": [
+                "STREAMING-AWS4-HMAC-SHA256-PAYLOAD-TRAILER",
+                "sha256-hex"
+              ],
+              "max_signed_chunks": 145,
+              "trailer_signatures": 1,
+              "content_encodings": [
+                "aws-chunked"
+              ],
+              "declared_trailers": [
+                "x-amz-checksum-crc32"
+              ]
+            }
+          }
+        },
+        {
+          "id": "sync-directory",
+          "status": "unsupported",
+          "detail": "aws-sdk-rust offers no directory mirroring primitive",
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "trailer-chunked-upload",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {
+            "wire": {
+              "requests": 3,
+              "payload_modes": [
+                "STREAMING-AWS4-HMAC-SHA256-PAYLOAD-TRAILER",
+                "sha256-hex"
+              ],
+              "max_signed_chunks": 17,
+              "trailer_signatures": 1,
+              "content_encodings": [
+                "aws-chunked"
+              ],
+              "declared_trailers": [
+                "x-amz-checksum-crc32"
+              ]
+            }
+          }
+        },
+        {
+          "id": "versioned-object",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        }
+      ]
+    },
     {
       "name": "boto3",
       "version": "1.42.96",
@@ -62,16 +956,16 @@
         },
         {
           "id": "copy-object",
-          "status": "unsupported",
-          "detail": "the system under test registers no CopyObject",
+          "status": "pass",
+          "detail": null,
           "verdict": null,
           "issue": null,
           "evidence": {}
         },
         {
           "id": "delete-batch",
-          "status": "unsupported",
-          "detail": "the system under test registers no DeleteObjects",
+          "status": "pass",
+          "detail": null,
           "verdict": null,
           "issue": null,
           "evidence": {}
@@ -83,7 +977,7 @@
           "verdict": null,
           "issue": null,
           "evidence": {
-            "etag": "\"f97b795e0d244bcbaf438021fa0e1adc-3\""
+            "etag": "\"eb1edc54c29d89efe06c4e627a876d32-3\""
           }
         },
         {
@@ -109,25 +1003,23 @@
         },
         {
           "id": "presigned-put",
-          "status": "fail",
-          "detail": "a presigned PUT was answered 403",
-          "verdict": "KNOWN",
-          "issue": "rustfs/gateway#628",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
           "evidence": {
-            "status": 403,
-            "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Error><Code>AccessDenied</Code><Message>the request is not allowed</Message><RequestId>27F994632327E853</RequestId><HostId>F5CA63AFECFBD61FA9C53EF49030F11A</Hos"
+            "status": 200
           }
         },
         {
           "id": "range-download",
-          "status": "fail",
-          "detail": "a bytes=1000-5000 request answered 200 with 1048576 bytes, expected 206 with 4001",
-          "verdict": "KNOWN",
-          "issue": "rustfs/gateway#626",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
           "evidence": {
-            "status": 200,
-            "returned_bytes": 1048576,
-            "expected_bytes": 4001
+            "status": 206,
+            "returned_bytes": 4001
           }
         },
         {
@@ -137,7 +1029,7 @@
           "verdict": null,
           "issue": null,
           "evidence": {
-            "etag": "\"4ebf071e4900e33e11be2b7c650d7930\""
+            "etag": "\"5e0c9b4099176490d949cf429ffff88b\""
           }
         },
         {
@@ -167,18 +1059,26 @@
         },
         {
           "id": "trailer-chunked-upload",
-          "status": "unsupported",
-          "detail": "botocore emits a checksum header rather than a trailer unless the payload is unsigned, which it only is over TLS",
+          "status": "pass",
+          "detail": null,
           "verdict": null,
           "issue": null,
           "evidence": {
+            "endpoint": "tls",
             "wire": {
-              "requests": 0,
-              "payload_modes": [],
+              "requests": 5,
+              "payload_modes": [
+                "STREAMING-UNSIGNED-PAYLOAD-TRAILER",
+                "sha256-hex"
+              ],
               "max_signed_chunks": 0,
               "trailer_signatures": 0,
-              "content_encodings": [],
-              "declared_trailers": []
+              "content_encodings": [
+                "aws-chunked"
+              ],
+              "declared_trailers": [
+                "x-amz-checksum-crc32"
+              ]
             }
           }
         },
@@ -209,16 +1109,16 @@
         },
         {
           "id": "bucket-lifecycle",
-          "status": "fail",
-          "detail": "mc rb failed: mc: <ERROR> Unable to validate target `sut/cm-mc-bucket-lifecycle`. This operation is defined by S3 but is not handled by this backend.",
-          "verdict": "KNOWN",
-          "issue": "rustfs/gateway#627",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
           "evidence": {}
         },
         {
           "id": "copy-object",
           "status": "unsupported",
-          "detail": "the system under test registers no CopyObject",
+          "detail": "mc exposes no command that isolates this operation",
           "verdict": null,
           "issue": null,
           "evidence": {}
@@ -226,7 +1126,7 @@
         {
           "id": "delete-batch",
           "status": "unsupported",
-          "detail": "the system under test registers no DeleteObjects",
+          "detail": "mc exposes no command that isolates this operation",
           "verdict": null,
           "issue": null,
           "evidence": {}
@@ -241,10 +1141,10 @@
         },
         {
           "id": "list-pagination",
-          "status": "fail",
-          "detail": "mc cp failed while seeding the listing: mc: <ERROR> Failed to copy `/private/tmp/claude-501/-Users-overtrue-www-gateway--claude-worktrees-dreamy-grothendieck-3f162e/0bb92716-86ba-4a02-bf4d-d1d8d200edb5/scratchpad/matrix-run/work/mc/list-pagination/entry.txt`. This operation is defined by S3 but is not handled by this backend.",
-          "verdict": "KNOWN",
-          "issue": "rustfs/gateway#627",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
           "evidence": {}
         },
         {
@@ -273,26 +1173,27 @@
         },
         {
           "id": "small-object-roundtrip",
-          "status": "fail",
-          "detail": "mc cp up failed: mc: <ERROR> Failed to copy `/private/tmp/claude-501/-Users-overtrue-www-gateway--claude-worktrees-dreamy-grothendieck-3f162e/0bb92716-86ba-4a02-bf4d-d1d8d200edb5/scratchpad/matrix-run/work/mc/small-object-roundtrip/payload.bin`. This operation is defined by S3 but is not handled by this backend.",
-          "verdict": "KNOWN",
-          "issue": "rustfs/gateway#627",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
           "evidence": {}
         },
         {
           "id": "streaming-chunked-upload",
-          "status": "fail",
-          "detail": "mc cp up failed: mc: <ERROR> Failed to copy `/private/tmp/claude-501/-Users-overtrue-www-gateway--claude-worktrees-dreamy-grothendieck-3f162e/0bb92716-86ba-4a02-bf4d-d1d8d200edb5/scratchpad/matrix-run/work/mc/streaming-chunked-upload/payload.bin`. This operation is defined by S3 but is not handled by this backend.",
-          "verdict": "KNOWN",
-          "issue": "rustfs/gateway#627",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
           "evidence": {
             "wire": {
-              "requests": 4,
+              "requests": 9,
               "payload_modes": [
+                "STREAMING-AWS4-HMAC-SHA256-PAYLOAD",
                 "UNSIGNED-PAYLOAD",
                 "sha256-hex"
               ],
-              "max_signed_chunks": 0,
+              "max_signed_chunks": 145,
               "trailer_signatures": 0,
               "content_encodings": [],
               "declared_trailers": []
@@ -301,10 +1202,10 @@
         },
         {
           "id": "sync-directory",
-          "status": "fail",
-          "detail": "mc ls after mirror failed: mc: <ERROR> Unable to list folder. This operation is defined by S3 but is not handled by this backend.",
-          "verdict": "KNOWN",
-          "issue": "rustfs/gateway#627",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
           "evidence": {}
         },
         {
@@ -335,6 +1236,142 @@
       ]
     },
     {
+      "name": "opendal",
+      "version": "0.47.10",
+      "scenarios": [
+        {
+          "id": "backup-restore",
+          "status": "unsupported",
+          "detail": "OpenDAL is a storage access library, not a backup tool",
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "bucket-lifecycle",
+          "status": "unsupported",
+          "detail": "OpenDAL addresses objects inside one configured bucket and has no bucket operations",
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "copy-object",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "delete-batch",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "large-multipart-upload",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "list-pagination",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "presigned-get",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "presigned-put",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "range-download",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "small-object-roundtrip",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "streaming-chunked-upload",
+          "status": "unsupported",
+          "detail": "OpenDAL's S3 backend declares UNSIGNED-PAYLOAD for writes and has no aws-chunked mode",
+          "verdict": null,
+          "issue": null,
+          "evidence": {
+            "wire": {
+              "requests": 0,
+              "payload_modes": [],
+              "max_signed_chunks": 0,
+              "trailer_signatures": 0,
+              "content_encodings": [],
+              "declared_trailers": []
+            }
+          }
+        },
+        {
+          "id": "sync-directory",
+          "status": "unsupported",
+          "detail": "OpenDAL offers no directory mirroring primitive",
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "trailer-chunked-upload",
+          "status": "unsupported",
+          "detail": "OpenDAL's S3 backend sends no trailing checksum; it has no aws-chunked mode",
+          "verdict": null,
+          "issue": null,
+          "evidence": {
+            "wire": {
+              "requests": 0,
+              "payload_modes": [],
+              "max_signed_chunks": 0,
+              "trailer_signatures": 0,
+              "content_encodings": [],
+              "declared_trailers": []
+            }
+          }
+        },
+        {
+          "id": "versioned-object",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        }
+      ]
+    },
+    {
       "name": "rclone",
       "version": "v1.74.0",
       "scenarios": [
@@ -357,7 +1394,7 @@
         {
           "id": "copy-object",
           "status": "unsupported",
-          "detail": "the system under test registers no CopyObject",
+          "detail": "rclone exposes no command that isolates this operation",
           "verdict": null,
           "issue": null,
           "evidence": {}
@@ -365,7 +1402,7 @@
         {
           "id": "delete-batch",
           "status": "unsupported",
-          "detail": "the system under test registers no DeleteObjects",
+          "detail": "rclone exposes no command that isolates this operation",
           "verdict": null,
           "issue": null,
           "evidence": {}
@@ -404,10 +1441,10 @@
         },
         {
           "id": "range-download",
-          "status": "fail",
-          "detail": "the returned range differs from the same slice of the source object",
-          "verdict": "KNOWN",
-          "issue": "rustfs/gateway#626",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
           "evidence": {}
         },
         {
@@ -437,10 +1474,10 @@
         },
         {
           "id": "sync-directory",
-          "status": "fail",
-          "detail": "rclone sync rerun failed: 2026/09/03 00:46:13 NOTICE: Failed to sync with 12 errors: last error was: not deleting files as there were IO errors",
-          "verdict": "KNOWN",
-          "issue": "rustfs/gateway#629",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
           "evidence": {}
         },
         {
@@ -476,10 +1513,10 @@
       "scenarios": [
         {
           "id": "backup-restore",
-          "status": "fail",
-          "detail": "restic restore failed: Fatal: There were 12 errors",
-          "verdict": "KNOWN",
-          "issue": "rustfs/gateway#626",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
           "evidence": {}
         },
         {
@@ -493,7 +1530,7 @@
         {
           "id": "copy-object",
           "status": "unsupported",
-          "detail": "the system under test registers no CopyObject",
+          "detail": "restic addresses a repository, not individual objects; it exposes no command for this scenario",
           "verdict": null,
           "issue": null,
           "evidence": {}
@@ -501,7 +1538,7 @@
         {
           "id": "delete-batch",
           "status": "unsupported",
-          "detail": "the system under test registers no DeleteObjects",
+          "detail": "restic addresses a repository, not individual objects; it exposes no command for this scenario",
           "verdict": null,
           "issue": null,
           "evidence": {}
@@ -568,7 +1605,7 @@
                 "UNSIGNED-PAYLOAD",
                 "sha256-hex"
               ],
-              "max_signed_chunks": 181,
+              "max_signed_chunks": 168,
               "trailer_signatures": 0,
               "content_encodings": [],
               "declared_trailers": []
@@ -609,18 +1646,159 @@
           "evidence": {}
         }
       ]
+    },
+    {
+      "name": "s3cmd",
+      "version": "2.4.0",
+      "scenarios": [
+        {
+          "id": "backup-restore",
+          "status": "unsupported",
+          "detail": "s3cmd is not a backup tool; it has no repository format to restore",
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "bucket-lifecycle",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "copy-object",
+          "status": "fail",
+          "detail": "s3cmd cp failed: ERROR: Copy failed for: 's3://cm-s3cmd-copy-object/source.bin' (400 (InvalidRequest): this operation requires an integrity check on the request body: send Content-MD5 or an x-amz-checksum-* header)",
+          "verdict": "KNOWN",
+          "issue": "rustfs/gateway#912",
+          "evidence": {}
+        },
+        {
+          "id": "delete-batch",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "large-multipart-upload",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "list-pagination",
+          "status": "unsupported",
+          "detail": "s3cmd ls always asks for the server's maximum page and exposes no page-size option, so it cannot walk a 7-key page",
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "presigned-get",
+          "status": "fail",
+          "detail": "a presigned GET was answered 403",
+          "verdict": "KNOWN",
+          "issue": "rustfs/gateway#913",
+          "evidence": {}
+        },
+        {
+          "id": "presigned-put",
+          "status": "unsupported",
+          "detail": "s3cmd signurl signs GET URLs only",
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "range-download",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "small-object-roundtrip",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "streaming-chunked-upload",
+          "status": "unsupported",
+          "detail": "s3cmd declares the whole-payload SHA-256 for every upload and has no aws-chunked mode",
+          "verdict": null,
+          "issue": null,
+          "evidence": {
+            "wire": {
+              "requests": 0,
+              "payload_modes": [],
+              "max_signed_chunks": 0,
+              "trailer_signatures": 0,
+              "content_encodings": [],
+              "declared_trailers": []
+            }
+          }
+        },
+        {
+          "id": "sync-directory",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "trailer-chunked-upload",
+          "status": "unsupported",
+          "detail": "s3cmd sends no trailing checksum; it has no aws-chunked mode",
+          "verdict": null,
+          "issue": null,
+          "evidence": {
+            "wire": {
+              "requests": 0,
+              "payload_modes": [],
+              "max_signed_chunks": 0,
+              "trailer_signatures": 0,
+              "content_encodings": [],
+              "declared_trailers": []
+            }
+          }
+        },
+        {
+          "id": "versioned-object",
+          "status": "unsupported",
+          "detail": "s3cmd has no bucket-versioning or version-id commands",
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        }
+      ]
     }
   ],
   "summary": {
-    "pass": 11,
-    "fail": 10,
-    "unsupported": 35,
-    "known": 10,
+    "pass": 106,
+    "fail": 4,
+    "unsupported": 58,
+    "known": 4,
     "regression": 0,
     "fixed": 0,
     "stale": 0
   },
   "streaming_signed_clients": [
+    "aws-sdk-dotnet",
+    "aws-sdk-java-v1",
+    "aws-sdk-java-v2",
+    "aws-sdk-rust",
+    "mc",
     "restic"
   ]
 }
