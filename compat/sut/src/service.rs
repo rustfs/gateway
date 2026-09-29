@@ -237,6 +237,9 @@ pub(crate) fn build_service(
             // RustFS answers a body refusal with the fixed sentence its API layer writes for the
             // code, and an upload declared past 5 GiB with its admission's (rustfs/gateway#1099).
             .answer_body_refusals_with_legacy_rustfs_sentences()
+            // RustFS words its two credential refusals itself: a signature that does not match
+            // and an access key nobody issued each carry RustFS's own sentence (rustfs/gateway#1120).
+            .answer_credential_refusals_with_legacy_rustfs_sentences()
             // RustFS folds the slashes of a key only when the key starts with one: `/b//x` stores
             // `x` and `/b/a//b` reaches storage as `a//b` (#1101).
             .slash_policy(SlashPolicy::RustfsLegacy)

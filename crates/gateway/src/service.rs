@@ -131,6 +131,7 @@ use rustfs_gateway_sig::{
 use rustfs_gateway_stream::Body;
 use rustfs_gateway_types::{ErrorCode, NamePolicy};
 
+use crate::builder::credential_sentences::CredentialSentences;
 use crate::clock::{Clock, ClockPosture, MonotonicClock};
 use crate::close::ConnectionIntent;
 use crate::config::{ConfigSnapshot, ConfigStore};
@@ -354,7 +355,7 @@ impl S3Service {
         let connection = connection_security(request.extensions());
         let client_addr = request.extensions().get::<ClientAddr>().copied();
         let file_body_path = crate::file_fallback::FileBodyPath::of(request.extensions(), request.version());
-        let mut outcome = Outcome::new(&trace, &method);
+        let mut outcome = Outcome::new(&trace, &method, self.inner.view_policy.credential_sentences());
         let mut response = self
             .run(
                 request,
@@ -1361,17 +1362,19 @@ struct Outcome<'a> {
     /// from costing a configuration read.
     cors: Option<CorsDecoration>,
     response_kind: ResponseKind,
+    credential_sentences: CredentialSentences,
 }
 
 impl<'a> Outcome<'a> {
     /// An outcome that knows nothing yet, except which request it is about.
-    fn new(trace: &'a RequestTrace, method: &Method) -> Self {
+    fn new(trace: &'a RequestTrace, method: &Method, credential_sentences: CredentialSentences) -> Self {
         Self {
             trace,
             operation: None,
             identity: None,
             error: None,
             cors: None,
+            credential_sentences,
             response_kind: if *method == Method::HEAD {
                 ResponseKind::Head
             } else {
@@ -1382,6 +1385,7 @@ impl<'a> Outcome<'a> {
 
     /// Renders a refusal and records its code, so every early return goes through one place.
     fn refuse(&mut self, error: S3Error) -> Response<Body> {
+        let error = self.credential_sentences.restyle(error);
         self.error = error.code().cloned();
         render(&error, self.trace)
     }
