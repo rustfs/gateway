@@ -127,6 +127,19 @@ require_equal(static_steps.first(2).map { |step| step.fetch("uses") }, [
 require_equal(static_steps.first.fetch("with"), {"fetch-depth" => 0},
               "static must retain the branch graph for merge-base guards")
 
+# The dependency policy in deny.toml is enforced here or nowhere: a pinned CARGO_DENY_TOOL that no
+# step installs, or a check that drops a section, reads exactly like one that passed.
+deny_command = "cargo deny --locked --workspace --all-features check advisories bans licenses sources"
+require_equal(all_runs.count(deny_command), 1, "#{deny_command} must have one authoritative CI execution")
+deny_at = static_steps.index { |step| step["run"] == deny_command }
+abort("ERROR: static must run #{deny_command}") if deny_at.nil?
+require_equal(static_steps[deny_at].keys, ["name", "run"], "static cargo-deny step may not alter execution")
+require_equal(static_steps[deny_at - 1], {
+                "name" => "Install cargo-deny",
+                "uses" => "taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29",
+                "with" => {"tool" => "${{ env.CARGO_DENY_TOOL }}", "fallback" => "none"}
+              }, "static must install the pinned CARGO_DENY_TOOL, with no fallback, right before cargo deny")
+
 clippy_steps = jobs.fetch("clippy").fetch("steps")
 require_equal(clippy_steps.map(&:keys),
               [["uses"], ["uses", "with"], ["uses"], ["name", "run"], ["run"]],

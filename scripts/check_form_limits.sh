@@ -24,9 +24,8 @@ set -euo pipefail
 #
 #   The issue's acceptance list asks instead for `check_multer_constraints.sh`,
 #   greping for `multer::Multipart::new(`. There is no `multer` in this
-#   workspace and no `deny.toml` to register one in (the advisories job is
-#   deferred in .github/workflows/ci.yml), so that grep would be a check that
-#   cannot fail — the shape this repository has caught eight times. The property
+#   workspace, so that grep would be a check that cannot fail — the shape this
+#   repository has caught eight times. The property
 #   it stood in for is checked above instead, against the code that exists.
 #
 # HOW TO EXEMPT
