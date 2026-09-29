@@ -70,6 +70,7 @@ jobs:
           - xml_parse
           - header_accept
           - policy_json
+          - post_form
           - restore_header
           - event_stream_frame
           - decode_diff

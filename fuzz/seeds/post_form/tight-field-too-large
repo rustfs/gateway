@@ -1,0 +1,10 @@
+ --fuzzboundary
+Content-Disposition: form-data; name="key"
+
+kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk
+--fuzzboundary
+Content-Disposition: form-data; name="file"; filename="a.txt"
+Content-Type: text/plain
+
+c
+--fuzzboundary--

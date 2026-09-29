@@ -1,0 +1,22 @@
+--fuzzboundary
+Content-Disposition: form-data; name="key"
+
+uploads/${filename}
+--fuzzboundary
+Content-Disposition: form-data; name="acl"
+
+private
+--fuzzboundary
+Content-Disposition: form-data; name="Content-Type"
+
+text/plain
+--fuzzboundary
+Content-Disposition: form-data; name="x-amz-meta-origin"
+
+form
+--fuzzboundary
+Content-Disposition: form-data; name="file"; filename="report.txt"
+Content-Type: text/plain
+
+the object content
+--fuzzboundary-- 	

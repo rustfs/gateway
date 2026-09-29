@@ -1,0 +1,10 @@
+--fuzz@boundary
+Content-Disposition: form-data; name="key"
+
+k
+--fuzz@boundary
+Content-Disposition: form-data; name="file"; filename="a.txt"
+Content-Type: text/plain
+
+c
+--fuzz@boundary--

@@ -1,0 +1,26 @@
+ --fuzzboundary
+Content-Disposition: form-data; name="x-amz-meta-0"
+
+v
+--fuzzboundary
+Content-Disposition: form-data; name="x-amz-meta-1"
+
+v
+--fuzzboundary
+Content-Disposition: form-data; name="x-amz-meta-2"
+
+v
+--fuzzboundary
+Content-Disposition: form-data; name="x-amz-meta-3"
+
+v
+--fuzzboundary
+Content-Disposition: form-data; name="x-amz-meta-4"
+
+v
+--fuzzboundary
+Content-Disposition: form-data; name="file"; filename="a.txt"
+Content-Type: text/plain
+
+c
+--fuzzboundary--
