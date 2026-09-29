@@ -419,13 +419,30 @@ mod legacy_only_outputs {
         );
     }
 
+    /// `CompleteMultipartUploadOutput.future`: the legacy writer streams a deferred completion
+    /// behind keep-alive whitespace (legacy `ops/multipart.rs:25-45`), which a gateway output
+    /// written once cannot carry, so a set one is refused, as the encode matrix's own conversion
+    /// refuses it (`kd-encode-0044`).
     #[test]
-    fn n_a_runtime_member_is_still_ignored_whatever_it_holds() {
+    fn a_set_runtime_value_is_refused_rather_than_dropped() {
         let facts = facts("struct T\n  bucket: Option<String>\n  future: Option<opaque>\n");
         let text =
             render::backward_struct(&ctx(&facts), "T", &[field("Bucket", Type::String, false)], "G", "output").expect("renders");
-        assert!(text.contains("        future: _,\n"), "{text}");
-        assert!(!text.contains("future.is_some()"), "{text}");
+        assert!(text.contains("        future,\n"), "{text}");
+        assert!(
+            text.contains("    if future.is_some() {\n        return Err(ConversionError { field: \"future\""),
+            "{text}"
+        );
+    }
+
+    /// `LifecycleRuleFilter.cached_tags`: a cache the legacy type derives from the tags beside it.
+    #[test]
+    fn n_a_derived_cache_is_ignored_whatever_it_holds() {
+        let facts = facts("struct T\n  bucket: Option<String>\n  cached_tags: opaque\n");
+        let text =
+            render::backward_struct(&ctx(&facts), "T", &[field("Bucket", Type::String, false)], "G", "output").expect("renders");
+        assert!(text.contains("        cached_tags: _,\n"), "{text}");
+        assert!(!text.contains("cached_tags.is_some()"), "{text}");
     }
 }
 

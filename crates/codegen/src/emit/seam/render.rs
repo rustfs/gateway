@@ -400,7 +400,19 @@ pub(super) fn backward_struct(
     for (member, ty) in s3s {
         if used.contains(&member.as_str()) {
             let _ = writeln!(pattern, "        {member},");
+        } else if matches!(ty, S3sType::Option(inner) if matches!(inner.as_ref(), S3sType::Opaque)) {
+            // A runtime value with no wire form, such as the deferred completion a legacy body may
+            // hand the legacy writer to stream behind keep-alive whitespace: the gateway writes an
+            // output once and cannot carry it, so a set one is refused by name rather than dropped
+            // (rustfs/gateway#1076); an unset one crosses as nothing.
+            let _ = writeln!(pattern, "        {member},");
+            let _ = writeln!(
+                refusals,
+                "    if {member}.is_some() {{\n        {};\n    }}",
+                missing(member, "a runtime value with no wire form, which the gateway output cannot carry")
+            );
         } else if matches!(ty.unwrap_option().0, S3sType::Opaque) {
+            // A cache the legacy type derives from the members beside it: nothing is lost with it.
             let _ = writeln!(pattern, "        {member}: _,");
         } else if matches!(member_rule(owner, member), Some(Rule::S3sOnly(_))) {
             // The gateway shape cannot hold it, so a value is refused by name rather than dropped

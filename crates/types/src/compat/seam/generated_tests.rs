@@ -576,3 +576,26 @@ fn n_every_legacy_only_output_member_set_is_refused_by_name() {
     };
     assert_eq!(ops::create_bucket::output_from_s3s(created).expect_err("bucket_arn").field, "bucket_arn");
 }
+
+/// A legacy body may hand the legacy writer a deferred completion to stream behind keep-alive
+/// whitespace; the gateway writes an output once, so a set one is refused rather than the output
+/// written without the result it defers. An unset one converts as before.
+#[test]
+fn n_a_deferred_completion_is_refused_not_dropped() {
+    fn complete() -> oracle::CompleteMultipartUploadOutput {
+        oracle::CompleteMultipartUploadOutput {
+            bucket: Some("bucket".to_owned()),
+            key: Some("k".to_owned()),
+            e_tag: Some(oracle::ETag::Strong("abc-2".to_owned())),
+            ..Default::default()
+        }
+    }
+    let deferred = oracle::CompleteMultipartUploadOutput {
+        future: Some(Box::pin(async { Ok(complete()) })),
+        ..complete()
+    };
+    let error = ops::complete_multipart_upload::output_from_s3s(deferred).expect_err("a deferred completion");
+    assert_eq!(error.field, "future");
+    let converted = ops::complete_multipart_upload::output_from_s3s(complete()).expect("an immediate completion converts");
+    assert_eq!(converted.e_tag.map(|etag| etag.opaque_tag().to_owned()).as_deref(), Some("abc-2"));
+}
