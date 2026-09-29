@@ -39,6 +39,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use bytes::Bytes;
+use futures_util::StreamExt as _;
 use futures_util::future::{Either, select};
 use http_body::Frame;
 use http_body_util::{BodyExt, StreamBody};
@@ -497,6 +498,77 @@ async fn the_explicit_settings_let_every_write_finish_whole() {
     let body = String::from_utf8_lossy(response.body()).into_owned();
     assert!(body.contains("<CopyObjectResult") && !body.contains("<Error>"), "{body}");
     assert_eq!(store.snapshot(), (BTreeSet::new(), BTreeSet::from(["copy"])));
+}
+
+/// Waits until `key` is staged, so a test acts mid-write rather than before the write began.
+async fn until_staged(store: &StagedStore, key: &'static str) {
+    for _ in 0..10_000 {
+        if store.snapshot().0.contains(key) {
+            return;
+        }
+        tokio::task::yield_now().await;
+    }
+    panic!("{key} was never staged");
+}
+
+/// A signed `PutObject` whose first half arrives and whose second half never does, with the
+/// host's request-cancellation signal attached when `signal` is given.
+fn stalled_put(
+    signal: Option<tokio::sync::watch::Receiver<bool>>,
+) -> http::Request<StreamBody<impl futures_util::Stream<Item = Result<Frame<Bytes>, Infallible>>>> {
+    let (head, _) = put(OBJECT).into_parts();
+    let (first, _) = OBJECT.split_at(OBJECT.len() / 2);
+    let halves = futures_util::stream::once(async move { Ok(Frame::data(Bytes::from_static(first))) })
+        .chain(futures_util::stream::pending());
+    let mut request = http::Request::from_parts(head, StreamBody::new(halves));
+    if let Some(signal) = signal {
+        request.extensions_mut().insert(signal);
+    }
+    request
+}
+
+/// Negative — with every framework deadline lifted, a write stops early only when its connection
+/// goes away. An embedding host's listener hands the gateway no cancellation signal, so the call
+/// is simply dropped, and the gateway adds nothing of its own: no rollback, no commit. The store
+/// holds exactly what the dropped handler left — here the staged object — which is what legacy
+/// RustFS leaves when hyper drops its handler with the connection. The control is the other
+/// direction: a transport that does signal the abort lets the handler roll back, so a gateway
+/// that signalled on its own, or finished the write, would be told apart from one that did not.
+#[tokio::test]
+async fn a_dropped_call_leaves_exactly_what_its_dropped_handler_left() {
+    let dropped = StagedStore::default();
+    let embedded = service(&dropped, explicitly_lifted());
+    let call = tokio::spawn(async move { embedded.call(stalled_put(None)).await });
+    until_staged(&dropped, "put").await;
+    call.abort();
+    assert!(
+        call.await.is_err_and(|error| error.is_cancelled()),
+        "the call finished instead of being dropped"
+    );
+    assert_eq!(
+        dropped.snapshot(),
+        (BTreeSet::from(["put"]), BTreeSet::new()),
+        "the gateway acted on a dropped write"
+    );
+
+    let signalled = StagedStore::default();
+    let served = service(&signalled, explicitly_lifted());
+    let (abort, signal) = tokio::sync::watch::channel(false);
+    let call = tokio::spawn(async move { served.call(stalled_put(Some(signal))).await });
+    until_staged(&signalled, "put").await;
+    abort.send(true).expect("the call still holds the signal");
+    let answered = tokio::time::timeout(Duration::from_secs(5), call)
+        .await
+        .expect("a signalled abort ends the call")
+        .expect("the signalled call answers");
+    let response = rustfs_gateway::collect(answered).await.expect("an in-memory body");
+    // What the departed client would have been told does not matter; what the store holds does.
+    assert_ne!(response.status().as_u16(), 200, "{:?}", response.body());
+    assert_eq!(
+        signalled.snapshot(),
+        (BTreeSet::new(), BTreeSet::new()),
+        "the signalled abort was not rolled back"
+    );
 }
 
 const TIMER_PROBE_ENV: &str = "RUSTFS_GATEWAY_LIFTED_DEADLINE_TIMER_PROBE";
