@@ -101,6 +101,31 @@ pub(crate) fn rustfs_service_config() -> Result<ServiceConfig, Box<dyn std::erro
         .with_request_body_deadlines(body))
 }
 
+/// The framework governor's rates in the RustFS profile: the widest rate on every layer.
+///
+/// Legacy RustFS applies no pre-authentication limit of its own. Its optional per-client limit
+/// (`RUSTFS_API_RATE_LIMIT_*`, off by default) is a host layer in front of both stacks, so the
+/// framework's layers must not refuse anything legacy RustFS answers (rustfs/gateway#1067). The
+/// address table keeps its shipped bound; it is memory, not a rate.
+///
+/// Legacy-compat (rustfs/backlog#2684): legacy RustFS verifies every signature it is sent, with no
+/// bound on how many failed verifications or credential lookups one caller can force, and serves
+/// anonymous requests with no pre-authentication bound either. That leaves forged-signature floods
+/// limited only by CPU. The intended behaviour is a bounded `credential_lookup` class (a verified
+/// request already returns its charge, so the bound would only count failed and in-flight work)
+/// with its refill above `per_ip`'s, taken from RustFS configuration.
+pub(crate) fn rustfs_governor_rates() -> rustfs_gateway::GovernorRates {
+    let widest = rustfs_gateway::Rate::new(u32::MAX, u32::MAX);
+    rustfs_gateway::GovernorRates {
+        aggregate: widest,
+        per_ip: widest,
+        credential_lookup: widest,
+        cors_preflight: widest,
+        unauthenticated: widest,
+        tracked_clients: rustfs_gateway::GovernorRates::default().tracked_clients,
+    }
+}
+
 /// Assembles the served service from the configured identities and the bucket-owner registry.
 ///
 /// # Errors
@@ -147,6 +172,8 @@ pub(crate) fn build_service(
                     .delegate_anonymous_to_authorizer_after_listing_in_the_posture_report()
                     .enable_sigv2_presigned_compatibility(),
             )
+            // Sized as the RustFS bridge sizes it: no framework layer refuses what RustFS answers.
+            .framework_governor_rates(rustfs_governor_rates())
             // The same registry answers `x-amz-expected-bucket-owner`, so the owner id a caller
             // asserts is the very id the authorization decision was made against.
             .bucket_owner_source(Arc::clone(owners))

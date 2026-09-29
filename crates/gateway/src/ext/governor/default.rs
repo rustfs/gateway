@@ -26,6 +26,16 @@
 //! clients never queue behind one process-wide mutex. A shard transfers the least-recently-used
 //! meter to a new key at capacity; debt therefore survives eviction instead of turning address
 //! rotation into a refill mechanism.
+//!
+//! # What the meters count
+//!
+//! Unverified work, and nothing else. Every admission is charged to the aggregate, class and
+//! client meters before any of that work runs, and `crate::service` reports a request whose
+//! signature verified through [`Governor::verified`], which returns the charge. What stays spent
+//! is a request still waiting for its verdict, a request whose authentication failed, and a
+//! request that presented no credentials. A verified client is therefore never capped by a
+//! limiter that was never meant to meter it — per-identity quotas are the `Authorizer`'s — while
+//! the bound on what a caller without a secret can force is exactly what it was.
 
 use std::collections::HashMap;
 use std::collections::hash_map::RandomState;
@@ -109,6 +119,18 @@ impl ClientShard {
         );
         admitted
     }
+
+    /// Returns one charge to `key`'s meter, if the key still has the meter it was charged to.
+    ///
+    /// A key evicted since its charge handed its debt to whichever key replaced it. Crediting that
+    /// key would give one caller another's refund, so the charge is kept instead.
+    fn refund(&mut self, key: IpAddr, rate: Rate) {
+        if let Some(entry) = self.entries.get_mut(&key) {
+            entry.meter.refund(rate);
+        } else if self.capacity == 0 {
+            self.overflow.refund(rate);
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -144,6 +166,16 @@ impl ClientMeters {
         lock(shard).take(address, rate, now)
     }
 
+    fn refund(&self, address: Option<IpAddr>, rate: Rate) {
+        let Some(address) = address else {
+            lock(&self.unknown).refund(rate);
+            return;
+        };
+        if let Some(shard) = self.shards.get(self.shard_index(address)) {
+            lock(shard).refund(address, rate);
+        }
+    }
+
     fn shard_index(&self, address: IpAddr) -> usize {
         usize::try_from(self.hasher.hash_one(address) % CLIENT_SHARDS as u64).unwrap_or(0)
     }
@@ -158,6 +190,10 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 }
 
 /// The limiter installed even when a deployment configures nothing.
+///
+/// It bounds unverified work: [`Governor::verified`] returns an admitted request's charge once
+/// its signature verified, so only requests awaiting a verdict, failed authentications and
+/// requests without credentials stay counted (see the module documentation).
 pub struct DefaultGovernor {
     rates: GovernorRates,
     clock: Arc<dyn MonotonicClock>,
@@ -248,11 +284,7 @@ impl DefaultGovernor {
     /// object-safe [`Governor`] boundary still returns the pre-existing `BoxFuture`; that
     /// allocation cannot be removed without changing the protected trait.
     pub fn try_acquire_sync(&self, request: &GovernorRequest<'_>) -> Option<Lease> {
-        let (class_meter, class_rate) = match request.kind() {
-            ClassKind::CredentialLookup => (&self.credential_lookup, self.rates.credential_lookup),
-            ClassKind::CorsPreflight => (&self.cors_preflight, self.rates.cors_preflight),
-            ClassKind::Unauthenticated => (&self.unauthenticated, self.rates.unauthenticated),
-        };
+        let (class_meter, class_rate) = self.class(request.kind());
         let now = self.clock.monotonic();
         if !self.aggregate.take(self.rates.aggregate, now) {
             return None;
@@ -271,10 +303,33 @@ impl DefaultGovernor {
     }
 }
 
+impl DefaultGovernor {
+    fn class(&self, kind: ClassKind) -> (&AtomicMeter, Rate) {
+        match kind {
+            ClassKind::CredentialLookup => (&self.credential_lookup, self.rates.credential_lookup),
+            ClassKind::CorsPreflight => (&self.cors_preflight, self.rates.cors_preflight),
+            ClassKind::Unauthenticated => (&self.unauthenticated, self.rates.unauthenticated),
+        }
+    }
+
+    /// Returns one admitted request's charge to the three meters it drew from.
+    fn refund(&self, request: &GovernorRequest<'_>) {
+        self.aggregate.refund(self.rates.aggregate);
+        let (class_meter, class_rate) = self.class(request.kind());
+        class_meter.refund(class_rate);
+        let address = request.client_addr().map(super::ClientAddr::rate_key);
+        self.clients.refund(address, self.rates.per_ip);
+    }
+}
+
 impl Governor for DefaultGovernor {
     fn try_acquire<'a>(&'a self, request: &'a GovernorRequest<'a>) -> BoxFuture<'a, Result<Lease, ()>> {
         let decided = self.try_acquire_sync(request).ok_or(());
         Box::pin(async move { decided })
+    }
+
+    fn verified(&self, request: &GovernorRequest<'_>) {
+        self.refund(request);
     }
 }
 
@@ -311,6 +366,13 @@ impl Governor for LayeredGovernor {
             Err(_) => Box::pin(async { Err(()) }),
         }
     }
+
+    /// The framework's charge goes back first; a deployment governor's panic is contained and
+    /// changes nothing the framework returned.
+    fn verified(&self, request: &GovernorRequest<'_>) {
+        self.framework.refund(request);
+        let _ = catch_unwind(AssertUnwindSafe(|| self.user.verified(request)));
+    }
 }
 
 struct PanicRefusal<'a> {
@@ -324,6 +386,11 @@ impl Future for PanicRefusal<'_> {
         catch_unwind(AssertUnwindSafe(|| self.inner.as_mut().poll(cx))).unwrap_or(Poll::Ready(Err(())))
     }
 }
+
+#[cfg(test)]
+#[allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
+#[path = "refund_tests.rs"]
+mod refund_tests;
 
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]

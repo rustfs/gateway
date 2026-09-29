@@ -714,3 +714,6 @@ mod deadline_tests;
 /// Request-checksum failures answered with legacy RustFS's `BadDigest` (rustfs/gateway#1057), and
 /// what each refusal leaves in storage.
 mod bad_digest_tests;
+
+/// The framework governor sized as RustFS embeds it (rustfs/gateway#1067).
+mod governor_tests;

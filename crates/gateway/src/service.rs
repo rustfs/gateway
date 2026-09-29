@@ -806,9 +806,8 @@ impl S3Service {
                     "the security floor admitted this request in a way this assembly does not handle",
                 ));
             }
-            // The floor rejects malformed credential surfaces before a verifier can recover a
-            // scope. Keep that fail-closed response distinct from a verifier's well-formed but
-            // unserved scope, which is `400 AuthorizationHeaderMalformed`.
+            // The floor rejects malformed credential surfaces before a verifier can recover a scope. Keep that fail-closed
+            // response distinct from a verifier's well-formed but unserved scope, which is `400 AuthorizationHeaderMalformed`.
             Err(error) => {
                 return outcome.refuse(from_auth(error, response_kind, wire.framing().has_body()));
             }
@@ -874,13 +873,14 @@ impl S3Service {
         outcome.identity = verdict.identity().cloned();
 
         let Some(requirement) = M::auth(&op) else {
-            // Registration refuses an operation with no authorisation action, so this is a defect
-            // rather than a configuration. Refused, never permitted: rustfs/rustfs#4845 is what a
-            // permissive answer here looks like in production.
+            // Registration refuses an operation with no authorisation action, so this is a defect rather than a configuration.
+            // Refused, never permitted: rustfs/rustfs#4845 is what a permissive answer here looks like in production.
             return outcome.refuse_handler(HandlerError::internal_error("this operation declares no authorisation action"));
         };
         let authz_started = self.inner.authz_clock.monotonic();
         let auth_scheme = if verdict.is_authenticated() {
+            let governed = GovernorRequest::new(operation, meta.bucket(), declared_length, client_addr, class);
+            self.inner.governor.verified(&governed);
             AuthSchemeRef::Authenticated
         } else {
             AuthSchemeRef::Anonymous
