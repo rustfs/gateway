@@ -23,7 +23,7 @@ CompletedMultipartUpload 1
 CompletedPart 12
 Condition 2
 CopyObjectInput 46
-CopyObjectOutput 12
+CopyObjectOutput 23
 CorsConfiguration 1
 CorsRule 6
 CreateBucketConfiguration 1
@@ -316,7 +316,7 @@ Transition 3
 UpdateObjectEncryptionInput 8
 UpdateObjectEncryptionOutput 1
 UploadPartCopyInput 19
-UploadPartCopyOutput 9
+UploadPartCopyOutput 19
 UploadPartInput 14
 UploadPartOutput 8
 VersioningConfiguration 2

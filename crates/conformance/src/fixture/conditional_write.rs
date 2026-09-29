@@ -234,6 +234,7 @@ pub(super) async fn put_object(
     let mut object = StoredObject::new(bytes, input.content_type.clone(), now);
     if let Some(checksum) = input.checksum_spec {
         object.checksum = Some(checksum);
+        object.checksum_supplied = true;
     }
     object.cache_control = input.cache_control.clone();
     object.content_disposition = input.content_disposition.clone();

@@ -1228,15 +1228,6 @@ expires = "2026-12-31"
 # ── Encode: s3s output members the gateway output cannot hold ───────────────────────────────
 
 [[diff]]
-id = "kd-encode-0042"
-kind = "encode"
-operation = "CopyObject"
-item = 'unconvertible copy_object_result.checksums'
-gateway = '<cannot hold>'
-reason = "The gateway CopyObjectOutput flattens the copy result to ETag and LastModified and has no checksum members, while RustFS echoes the copy's checksums (https://github.com/rustfs/rustfs/blob/719000460b231792b52314df321f0d385d03dff4/rustfs/src/app/object/copy.rs#L881). A gateway follow-up: without it a RustFS copy answer loses its checksums."
-expires = "2026-12-31"
-
-[[diff]]
 id = "kd-encode-0043"
 kind = "encode"
 operation = "UploadPart"
@@ -1270,15 +1261,6 @@ operation = "HeadBucket"
 item = 'unconvertible access_point_alias'
 gateway = '<cannot hold>'
 reason = "The gateway HeadBucketOutput carries the region only; the s3s access-point-alias member is refused while set. RustFS does not set it."
-expires = "2026-12-31"
-
-[[diff]]
-id = "kd-encode-0047"
-kind = "encode"
-operation = "CopyObject"
-item = 'unconvertible copy_object_result.checksum_type'
-gateway = '<cannot hold>'
-reason = "As kd-encode-0042 for the checksum type: the gateway CopyObjectOutput has no member for it."
 expires = "2026-12-31"
 
 [[diff]]
@@ -1402,3 +1384,33 @@ gateway = '=?UTF-8?B?YT0/Yg==?='
 s3s = 'a=?b'
 reason = "An ASCII metadata value holding the encoded-word opener =? is written by the gateway as an RFC 2047 encoded word, so a client that decodes encoded words reads back the value that was stored; s3s writes it raw, which such a client may misread. Both carry the same value to a client that decodes as S3 SDKs do. Found by the encode_diff fuzz target; pinned to the one matrix sample."
 expires = "2027-03-31"
+
+[[diff]]
+id = "kd-encode-0062"
+kind = "encode"
+operation = "CopyObject"
+item = 'body.order CopyObjectResult'
+gateway = 'ETag,LastModified,ChecksumCRC32'
+s3s = 'ChecksumCRC32,ETag,LastModified'
+reason = "A copy result with one checksum: the gateway writes the S3 model's member order; s3s writes its own declaration order. The members and their values agree (rd-copy-0001)."
+expires = "2026-12-31"
+
+[[diff]]
+id = "kd-encode-0063"
+kind = "encode"
+operation = "CopyObject"
+item = 'body.order CopyObjectResult'
+gateway = 'ETag,LastModified,ChecksumType'
+s3s = 'ChecksumType,ETag,LastModified'
+reason = "A copy result with the checksum type: the gateway writes the S3 model's member order; s3s writes its own declaration order. The members and their values agree (rd-copy-0001)."
+expires = "2026-12-31"
+
+[[diff]]
+id = "kd-encode-0064"
+kind = "encode"
+operation = "CopyObject"
+item = 'body.order CopyObjectResult'
+gateway = 'ETag,LastModified,ChecksumType,ChecksumCRC32,ChecksumCRC32C,ChecksumCRC64NVME,ChecksumSHA1,ChecksumSHA256,ChecksumSHA512,ChecksumMD5,ChecksumXXHASH64,ChecksumXXHASH3,ChecksumXXHASH128'
+s3s = 'ChecksumCRC32,ChecksumCRC32C,ChecksumCRC64NVME,ChecksumMD5,ChecksumSHA1,ChecksumSHA256,ChecksumSHA512,ChecksumType,ChecksumXXHASH128,ChecksumXXHASH3,ChecksumXXHASH64,ETag,LastModified'
+reason = "A copy result with every checksum and the type: the gateway writes the S3 model's member order; s3s writes its own declaration order. The members and their values agree (rd-copy-0001)."
+expires = "2026-12-31"

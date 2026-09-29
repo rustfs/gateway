@@ -132,6 +132,7 @@ use rustfs_gateway::{
 
 mod committed;
 mod conditional_write;
+mod copy_checksum;
 mod handlers_bucket;
 mod handlers_object;
 #[cfg(test)]
@@ -238,6 +239,8 @@ pub struct StoredObject {
     /// the fixture's existing checksum-bearing setup contract. A request that supplies another
     /// algorithm replaces it only after the ingest pipeline has verified the body.
     pub checksum: Option<ChecksumSpec>,
+    /// Whether a write named [`Self::checksum`]; only such a one is reported by a copy (`c-copy-0044`).
+    pub checksum_supplied: bool,
     /// The instant the case pinned, in Unix seconds.
     pub last_modified: i64,
     /// The length of each part the object was completed from, in part order, or empty for an
@@ -3026,6 +3029,7 @@ impl Stub {
                     None => {}
                 }
                 let etag = object.etag.clone();
+                let checksum = object.checksum.filter(|_| object.checksum_supplied);
                 let mut fixture = state
                     .lock()
                     .map_err(|_| HandlerError::internal_error("the fixture state was left poisoned by an earlier exchange"))?;
@@ -3040,7 +3044,7 @@ impl Stub {
                     // records the source as its new object.
                     copy_source_version_id: source_version,
                     version_id: (destination_version != UNVERSIONED).then_some(destination_version),
-                    ..dto::CopyObjectOutput::default()
+                    ..copy_checksum::copy_result_checksum(checksum.as_ref())
                 })
             }),
         ))
@@ -4455,6 +4459,7 @@ impl Stub {
                 let object = StoredObject {
                     body: assembled,
                     etag: composite.opaque_tag().to_owned(),
+                    checksum_supplied: checksum_spec.is_some(),
                     checksum: stored_checksum,
                     last_modified: now,
                     // The part boundaries, recorded here because this is the only moment they exist:

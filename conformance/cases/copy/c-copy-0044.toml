@@ -1,0 +1,67 @@
+# c-copy-0044 — a copy result names the checksum the copied object was written with
+#
+# Schema dimensions exercised: a checksum-bearing write in one exchange, the copy result document of the next
+
+[case]
+id = "c-copy-0044"
+schema_version = 1
+title = "A copy of an object written with a SHA-256 checksum reports it in the copy result, and no other"
+rationale = """
+A client that wrote an object with a checksum and then copied it verifies the copy against the digest it holds, and the copy result is where S3 hands that digest back. A result element that carried only ETag and LastModified leaves the client unable to confirm the copy without downloading it, and it is what the gateway wrote until its copy output had checksum members. The result names the algorithm the object was written with; one that named every algorithm, or a CRC the write never asked for, would be a digest nobody computed."""
+polarity = "positive"
+operation = "CopyObject"
+tags = ["checksum", "copy"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CopyObjectResult.html"
+summary = "The copy result carries a checksum member for the algorithm the copied object was uploaded with, beside ETag and LastModified."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://github.com/rustfs/rustfs/blob/719000460b231792b52314df321f0d385d03dff4/rustfs/src/app/object/copy.rs"
+summary = "RustFS fills the copy result's checksum members from the copied object's stored checksums."
+kind = "other"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-copy"
+
+[[exchanges]]
+name = "write-with-sha256"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-copy/src/0044"
+headers = { "x-amz-checksum-sha256" = "uU0nuZNNPgilLlLX2n2r+sSE7+N6U4DukIj3rOLvzek=" }
+body = { utf8 = "hello world" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[[exchanges]]
+name = "copy-reports-sha256"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-copy/dst/0044"
+headers = { "x-amz-copy-source" = "/conf-copy/src/0044" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+contains_utf8 = ["<ChecksumSHA256>uU0nuZNNPgilLlLX2n2r+sSE7+N6U4DukIj3rOLvzek=</ChecksumSHA256>"]
+not_contains_utf8 = ["<ChecksumCRC32>", "<ChecksumCRC64NVME>", "<ChecksumSHA512>"]

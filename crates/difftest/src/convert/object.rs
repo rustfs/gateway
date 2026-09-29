@@ -29,7 +29,7 @@ use futures_core::Stream;
 use rustfs_gateway_stream::{ByteStream, PayloadCaps, PayloadRead, PayloadStream, StreamError, TrailingHeaders};
 use rustfs_gateway_types::dto;
 
-use super::{Checksums, Converted, Unconvertible, absent, entity_tag, enumeration, instant, object_key, opaque, required};
+use super::{Converted, Unconvertible, entity_tag, enumeration, instant, object_key, opaque, required};
 use crate::s3s::dto as oracle;
 
 /// PutObject: the production seam RustFS will run.
@@ -396,20 +396,6 @@ pub(crate) fn copy_object(output: oracle::CopyObjectOutput) -> Converted<dto::Co
         e_tag,
         last_modified,
     } = required("copy_object_result", copy_object_result)?;
-    Checksums {
-        crc32: checksum_crc32,
-        crc32c: checksum_crc32c,
-        crc64nvme: checksum_crc64nvme,
-        md5: checksum_md5,
-        sha1: checksum_sha1,
-        sha256: checksum_sha256,
-        sha512: checksum_sha512,
-        xxhash128: checksum_xxhash128,
-        xxhash3: checksum_xxhash3,
-        xxhash64: checksum_xxhash64,
-    }
-    .none("copy_object_result.checksums")?;
-    absent("copy_object_result.checksum_type", checksum_type.as_ref())?;
     Ok(dto::CopyObjectOutput {
         e_tag: required("copy_object_result.e_tag", entity_tag("copy_object_result.e_tag", e_tag)?)?,
         last_modified: instant("copy_object_result.last_modified", last_modified)?,
@@ -423,5 +409,16 @@ pub(crate) fn copy_object(output: oracle::CopyObjectOutput) -> Converted<dto::Co
         ssekms_encryption_context,
         bucket_key_enabled,
         request_charged: enumeration(request_charged),
+        checksum_type: checksum_type.map(|value| value.as_str().to_owned()),
+        checksum_crc32,
+        checksum_crc32c,
+        checksum_crc64nvme,
+        checksum_sha1,
+        checksum_sha256,
+        checksum_sha512,
+        checksum_md5,
+        checksum_xxhash64,
+        checksum_xxhash3,
+        checksum_xxhash128,
     })
 }

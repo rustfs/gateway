@@ -79,5 +79,15 @@ pub fn output_from_s3s(output: s3s::dto::UploadPartCopyOutput) -> Result<crate::
         request_charged: request_charged.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::RequestCharged::custom(x.as_str().to_owned())) }).transpose()?,
         e_tag: match copy_part_result.e_tag { Some(x) => leaf::etag_from_s3s("e_tag", x)?, None => return Err(ConversionError { field: "e_tag", reason: "the gateway shape requires this member" }) },
         last_modified: copy_part_result.last_modified.map(|x| -> Result<_, ConversionError> { Ok(leaf::timestamp_from_s3s("last_modified", &x)?) }).transpose()?,
+        checksum_crc32: copy_part_result.checksum_crc32,
+        checksum_crc32c: copy_part_result.checksum_crc32c,
+        checksum_crc64nvme: copy_part_result.checksum_crc64nvme,
+        checksum_sha1: copy_part_result.checksum_sha1,
+        checksum_sha256: copy_part_result.checksum_sha256,
+        checksum_sha512: copy_part_result.checksum_sha512,
+        checksum_md5: copy_part_result.checksum_md5,
+        checksum_xxhash64: copy_part_result.checksum_xxhash64,
+        checksum_xxhash3: copy_part_result.checksum_xxhash3,
+        checksum_xxhash128: copy_part_result.checksum_xxhash128,
     })
 }

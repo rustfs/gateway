@@ -82,8 +82,8 @@ pub enum DivergenceFollowUp {
 /// One pinned divergence and its ruling.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct RequestDivergence {
-    /// Stable id, `rd-<put|ctx|loc|cfg|err|body>-NNNN` — the PutObject decode, a request context, the
-    /// GetBucketLocation context, a bucket configuration write, or an error document; the pinned
+    /// Stable id, `rd-<put|ctx|loc|cfg|copy|err|body>-NNNN` — the PutObject decode, a request context, the
+    /// GetBucketLocation context, a bucket configuration write, a copy result, or an error document; the pinned
     /// test's doc carries it as `Ruling: `id``.
     pub id: &'static str,
     /// Operation the request addresses.
@@ -116,13 +116,15 @@ const LOCATION_CONTEXT: &str = "operation_diff/context/get_bucket_location.rs";
 const CONFIG_DECODE: &str = "operation_diff/put_bucket_versioning.rs";
 const ERROR_PARITY: &str = "operation_diff/context/error_parity/divergences.rs";
 const BODY_PARITY: &str = "operation_diff/context/body_parity/divergences.rs";
+const COPY_RESULT: &str = "operation_diff/copy_result.rs";
 
 /// The files whose named-divergence sections the register is checked against.
-const PINNED_TEST_FILES: [&str; 6] = [
+const PINNED_TEST_FILES: [&str; 7] = [
     PUT_DECODE,
     PUT_CONTEXT,
     LOCATION_CONTEXT,
     CONFIG_DECODE,
+    COPY_RESULT,
     ERROR_PARITY,
     BODY_PARITY,
 ];
@@ -133,7 +135,7 @@ const ERROR_RESPONSES: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/E
 const M1_ADAPTER: &str = "https://github.com/rustfs/backlog/issues/1752";
 
 /// Every decided request divergence.
-const OPERATION_DIVERGENCES: [RequestDivergence; 20] = [
+const OPERATION_DIVERGENCES: [RequestDivergence; 21] = [
     RequestDivergence {
         id: "rd-put-0001",
         operation: "PutObject",
@@ -470,12 +472,31 @@ const OPERATION_DIVERGENCES: [RequestDivergence; 20] = [
         test_file: CONFIG_DECODE,
         test: "a_bare_enabled_versioning_body_is_refused_by_the_gateway_and_accepted_by_s3s",
     },
+    RequestDivergence {
+        id: "rd-copy-0001",
+        operation: "CopyObject, UploadPartCopy",
+        request: "a copy of an object RustFS stored with checksums",
+        aws: "the CopyObjectResult / CopyPartResult element carries a checksum member for the algorithm the object was written \
+              with (CopyObjectResult also its ChecksumType), beside ETag and LastModified",
+        aws_evidence: "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CopyObjectResult.html",
+        s3s: "writes every checksum member and the checksum type the RustFS body sets in the copy result (RustFS fills them \
+              from the stored object)",
+        gateway: "the copy outputs carry the ten checksum members and CopyObject's checksum type as result elements (overlay \
+                  object-copy.toml), the generated seam maps each from the s3s result, and the encoder writes them in the \
+                  S3 model's order: the same members and values as legacy RustFS; only the element order is the model's \
+                  (kd-encode-0062..0064)",
+        client_impact: "none: a client verifying a copy against its own digest reads the same checksum on both stacks",
+        ruling: DivergenceRuling::AlignS3s,
+        follow_up: DivergenceFollowUp::Landed("c-copy-0044"),
+        test_file: COPY_RESULT,
+        test: "every_copy_result_checksum_crosses_the_seam_with_its_value",
+    },
 ];
 
 /// Every pinned divergence, in id order as written: the operation, context and configuration
 /// slices above, then the error-response slice (`errors`) and the signed-body slice (`body`).
-pub const REQUEST_DIVERGENCES: [RequestDivergence; 40] = concat(
-    concat::<20, 10, 30>(OPERATION_DIVERGENCES, errors::ERROR_DIVERGENCES),
+pub const REQUEST_DIVERGENCES: [RequestDivergence; 41] = concat(
+    concat::<21, 10, 31>(OPERATION_DIVERGENCES, errors::ERROR_DIVERGENCES),
     body::BODY_DIVERGENCES,
 );
 
@@ -497,7 +518,7 @@ const fn concat<const A: usize, const B: usize, const C: usize>(
 /// A register entry that does not hold as written.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RequestDivergenceError {
-    /// The id is not `rd-<put|ctx|loc|cfg|err|body>-NNNN`.
+    /// The id is not `rd-<put|ctx|loc|cfg|copy|err|body>-NNNN`.
     MalformedId(&'static str),
     /// Two entries share an id.
     DuplicateId(&'static str),
@@ -521,7 +542,7 @@ pub enum RequestDivergenceError {
 impl fmt::Display for RequestDivergenceError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::MalformedId(id) => write!(formatter, "{id} is not an rd-<put|ctx|loc|cfg|err|body>-NNNN id"),
+            Self::MalformedId(id) => write!(formatter, "{id} is not an rd-<put|ctx|loc|cfg|copy|err|body>-NNNN id"),
             Self::DuplicateId(id) => write!(formatter, "{id} appears twice"),
             Self::MissingText { id, field } => write!(formatter, "{id} leaves {field} empty"),
             Self::EvidenceNotUrl(id) => write!(formatter, "{id} cites AWS evidence that is not a URL"),
@@ -640,7 +661,7 @@ fn check_register(entries: &[RequestDivergence]) -> Result<(), RequestDivergence
 }
 
 fn well_formed_id(id: &str) -> bool {
-    let Some(number) = ["rd-put-", "rd-ctx-", "rd-loc-", "rd-cfg-", "rd-err-", "rd-body-"]
+    let Some(number) = ["rd-put-", "rd-ctx-", "rd-loc-", "rd-cfg-", "rd-copy-", "rd-err-", "rd-body-"]
         .iter()
         .find_map(|prefix| id.strip_prefix(prefix))
     else {

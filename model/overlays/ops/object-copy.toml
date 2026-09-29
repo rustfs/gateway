@@ -87,7 +87,7 @@ quirk_refs = [
   "q-copy-source-version-0083",
 ]
 response_root = "CopyObjectResult"
-element_order = ["ETag", "LastModified"]
+element_order = ["ETag", "LastModified", "ChecksumType", "ChecksumCRC32", "ChecksumCRC32C", "ChecksumCRC64NVME", "ChecksumSHA1", "ChecksumSHA256", "ChecksumSHA512", "ChecksumMD5", "ChecksumXXHASH64", "ChecksumXXHASH3", "ChecksumXXHASH128"]
 input_hot = ["CopySource", "MetadataDirective"]
 output_hot = ["CopySourceVersionId", "VersionId"]
 
@@ -117,6 +117,98 @@ binding = "BodyXml"
 wire_name = "LastModified"
 type = "Timestamp:Iso8601"
 quirks = ["q-timestamp-0005"]
+
+# The result's checksum members, synthesized for the same reason as the two above. RustFS reports
+# the copy's checksums in them (s3s writes every one it is handed), so without them a copy through
+# the gateway would answer fewer elements than the legacy stack (rustfs/backlog#1752, rd-copy-0001).
+
+[[op.CopyObject.field]]
+side = "output"
+name = "ChecksumType"
+synthesize = true
+binding = "BodyXml"
+wire_name = "ChecksumType"
+type = "String"
+
+[[op.CopyObject.field]]
+side = "output"
+name = "ChecksumCRC32"
+synthesize = true
+binding = "BodyXml"
+wire_name = "ChecksumCRC32"
+type = "String"
+
+[[op.CopyObject.field]]
+side = "output"
+name = "ChecksumCRC32C"
+synthesize = true
+binding = "BodyXml"
+wire_name = "ChecksumCRC32C"
+type = "String"
+
+[[op.CopyObject.field]]
+side = "output"
+name = "ChecksumCRC64NVME"
+synthesize = true
+binding = "BodyXml"
+wire_name = "ChecksumCRC64NVME"
+type = "String"
+
+[[op.CopyObject.field]]
+side = "output"
+name = "ChecksumSHA1"
+synthesize = true
+binding = "BodyXml"
+wire_name = "ChecksumSHA1"
+type = "String"
+
+[[op.CopyObject.field]]
+side = "output"
+name = "ChecksumSHA256"
+synthesize = true
+binding = "BodyXml"
+wire_name = "ChecksumSHA256"
+type = "String"
+
+[[op.CopyObject.field]]
+side = "output"
+name = "ChecksumSHA512"
+synthesize = true
+binding = "BodyXml"
+wire_name = "ChecksumSHA512"
+type = "String"
+
+[[op.CopyObject.field]]
+side = "output"
+name = "ChecksumMD5"
+synthesize = true
+binding = "BodyXml"
+wire_name = "ChecksumMD5"
+type = "String"
+
+[[op.CopyObject.field]]
+side = "output"
+name = "ChecksumXXHASH64"
+synthesize = true
+binding = "BodyXml"
+wire_name = "ChecksumXXHASH64"
+type = "String"
+
+[[op.CopyObject.field]]
+side = "output"
+name = "ChecksumXXHASH3"
+synthesize = true
+binding = "BodyXml"
+wire_name = "ChecksumXXHASH3"
+type = "String"
+
+[[op.CopyObject.field]]
+side = "output"
+name = "ChecksumXXHASH128"
+synthesize = true
+binding = "BodyXml"
+wire_name = "ChecksumXXHASH128"
+type = "String"
 
 # The wire value is a single opaque string that three different grammars can inhabit, and the
 # `?versionId` suffix has to be split off it *before* percent-decoding. Neither fact is
@@ -277,7 +369,7 @@ quirk_refs = [
   "q-copy-source-version-0083",
 ]
 response_root = "CopyPartResult"
-element_order = ["ETag", "LastModified"]
+element_order = ["ETag", "LastModified", "ChecksumCRC32", "ChecksumCRC32C", "ChecksumCRC64NVME", "ChecksumSHA1", "ChecksumSHA256", "ChecksumSHA512", "ChecksumMD5", "ChecksumXXHASH64", "ChecksumXXHASH3", "ChecksumXXHASH128"]
 input_hot = ["CopySource", "CopySourceRange"]
 output_hot = ["CopySourceVersionId"]
 
@@ -310,6 +402,88 @@ binding = "BodyXml"
 wire_name = "LastModified"
 type = "Timestamp:Iso8601"
 quirks = ["q-timestamp-0005"]
+
+# The part result's checksum members; see CopyObject above (rd-copy-0001).
+
+[[op.UploadPartCopy.field]]
+side = "output"
+name = "ChecksumCRC32"
+synthesize = true
+binding = "BodyXml"
+wire_name = "ChecksumCRC32"
+type = "String"
+
+[[op.UploadPartCopy.field]]
+side = "output"
+name = "ChecksumCRC32C"
+synthesize = true
+binding = "BodyXml"
+wire_name = "ChecksumCRC32C"
+type = "String"
+
+[[op.UploadPartCopy.field]]
+side = "output"
+name = "ChecksumCRC64NVME"
+synthesize = true
+binding = "BodyXml"
+wire_name = "ChecksumCRC64NVME"
+type = "String"
+
+[[op.UploadPartCopy.field]]
+side = "output"
+name = "ChecksumSHA1"
+synthesize = true
+binding = "BodyXml"
+wire_name = "ChecksumSHA1"
+type = "String"
+
+[[op.UploadPartCopy.field]]
+side = "output"
+name = "ChecksumSHA256"
+synthesize = true
+binding = "BodyXml"
+wire_name = "ChecksumSHA256"
+type = "String"
+
+[[op.UploadPartCopy.field]]
+side = "output"
+name = "ChecksumSHA512"
+synthesize = true
+binding = "BodyXml"
+wire_name = "ChecksumSHA512"
+type = "String"
+
+[[op.UploadPartCopy.field]]
+side = "output"
+name = "ChecksumMD5"
+synthesize = true
+binding = "BodyXml"
+wire_name = "ChecksumMD5"
+type = "String"
+
+[[op.UploadPartCopy.field]]
+side = "output"
+name = "ChecksumXXHASH64"
+synthesize = true
+binding = "BodyXml"
+wire_name = "ChecksumXXHASH64"
+type = "String"
+
+[[op.UploadPartCopy.field]]
+side = "output"
+name = "ChecksumXXHASH3"
+synthesize = true
+binding = "BodyXml"
+wire_name = "ChecksumXXHASH3"
+type = "String"
+
+[[op.UploadPartCopy.field]]
+side = "output"
+name = "ChecksumXXHASH128"
+synthesize = true
+binding = "BodyXml"
+wire_name = "ChecksumXXHASH128"
+type = "String"
 
 [[op.UploadPartCopy.field]]
 side = "input"
