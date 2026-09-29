@@ -23,9 +23,19 @@ authentication, so the limiter never sees an identity; per-identity quotas belon
 `Authorizer`, which runs after the identity is known. A layer configured with `Rate::none()` is
 named in `SecurityPosture` as a closed pre-authentication layer.
 
+The meters count unverified work only. Once a request's signature verifies, the service reports it
+through `Governor::verified` and the framework returns its charge to all three meters, so what
+stays counted is a request still waiting for its verdict, a request whose authentication failed,
+and a request that presented no credentials. A verified client is therefore never capped by these
+rates, while the work a caller without a secret can force is bounded exactly as before. A
+deployment governor installed with `governor(custom)` hears the same report; the trait's default
+does nothing, so whatever a deployment governor counted stays counted unless it overrides the hook.
+
 The client key comes only from a `ClientAddr` request extension inserted by the listener or a
 trusted-proxy adapter. The gateway never reads `X-Forwarded-For`. Requests without a trusted peer
-address share one unknown-client meter.
+address share one unknown-client meter. The address is canonicalised before it is keyed: a
+dual-stack listener reports an IPv4 client as an IPv4-mapped IPv6 address, and that client is
+metered as its IPv4 `/32`, not as one member of the `/64` every mapped address shares.
 
 The address table is split across 32 locks. At capacity, the least-recently-used entry in the
 selected shard is replaced and its token debt is transferred to the new key. Address rotation
@@ -57,9 +67,47 @@ let service = ServiceBuilder::new()
 | Raise `tracked_clients` | More exact client meters | More memory can be occupied by peer keys |
 | Set a layer to `Rate::none()` | Close that layer | Every request in its path receives `503 SlowDown` |
 
+A class meter shared by every peer can be drained by one peer that sends failing requests faster
+than the class refills. Keep a bounded class's refill above `per_ip`'s, so that one peer key alone
+cannot empty it for everyone else.
+
 `governor(custom)` adds a deployment governor after the mandatory one. Both must admit. Even
 `governor(Unlimited)` leaves the framework limits in force, so an extension cannot silently remove
 the security floor.
+
+## Embedded in RustFS
+
+RustFS embeds the gateway service in its own listener. Legacy RustFS applies no pre-authentication
+limit: its optional per-client limit (`RUSTFS_API_RATE_LIMIT_*`, off by default) is a host layer in
+front of both stacks. The RustFS profile therefore sizes every framework layer so that it never
+refuses a request legacy RustFS answers, and takes any tighter value from RustFS configuration:
+
+```rust
+use rustfs_gateway::{GovernorRates, Rate};
+
+let widest = Rate::new(u32::MAX, u32::MAX);
+let rates = GovernorRates {
+    aggregate: widest,
+    per_ip: widest,
+    credential_lookup: widest,
+    cors_preflight: widest,
+    unauthenticated: widest,
+    tracked_clients: GovernorRates::default().tracked_clients,
+};
+// builder.framework_governor_rates(rates)
+```
+
+`Rate::new(u32::MAX, u32::MAX)` is the widest rate the type holds: a burst of about four million
+requests refilled within a millisecond, which no node reaches. It is a size, not a bypass; the
+layers stay installed and the posture report still names them. `compat/sut`, the RustFS-profile
+assembly, uses exactly these rates.
+
+The host inserts `ClientAddr` on every request from the address it already trusts for its own
+per-client limit: the trusted-proxy layer's client address when there is one, otherwise the
+accepted socket's peer. An operator who opts into a bound — for instance on failed signatures —
+sets `credential_lookup` and `per_ip` from RustFS configuration, keeping the class refill above the
+per-client refill as described under Tuning. Because a verified request returns its charge, such a
+bound limits forged and failing requests without capping valid signed traffic.
 
 ## Refusal and performance contracts
 

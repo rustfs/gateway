@@ -93,8 +93,13 @@ impl ClientAddr {
         self.0
     }
 
+    /// The key the per-client meter is kept under: the IPv4 address, or the IPv6 `/64` prefix.
+    ///
+    /// Canonicalised first. A dual-stack listener reports an IPv4 client as an IPv4-mapped IPv6
+    /// address (`::ffff:a.b.c.d`), and every one of those shares the `/64` prefix `::`; keyed as
+    /// written, every IPv4 client of such a listener would draw on one meter.
     pub(super) fn rate_key(self) -> IpAddr {
-        match self.0 {
+        match self.0.to_canonical() {
             IpAddr::V4(address) => IpAddr::V4(address),
             IpAddr::V6(address) => {
                 let prefix = u128::from(address) & (u128::MAX << 64);
@@ -285,11 +290,27 @@ pub trait Governor: Send + Sync + 'static {
     /// the difference between "you may not" and "not right now" is the one thing a client's retry
     /// logic branches on.
     fn try_acquire<'a>(&'a self, request: &'a GovernorRequest<'a>) -> BoxFuture<'a, Result<Lease, ()>>;
+
+    /// Hears that a request this governor admitted has verified its signature.
+    ///
+    /// Called at most once per admitted request, with the same question [`Self::try_acquire`]
+    /// was asked, once authentication produced a verified identity and before any body byte is
+    /// read. Never called for a request whose authentication failed or that presented no
+    /// credentials. [`DefaultGovernor`] returns the request's charge here, so its meters count
+    /// unverified work only; the default does nothing, so whatever a deployment governor counted
+    /// stays counted. It runs on the request path and must return promptly without blocking.
+    fn verified(&self, request: &GovernorRequest<'_>) {
+        let _ = request;
+    }
 }
 
 impl<T: Governor + ?Sized> Governor for std::sync::Arc<T> {
     fn try_acquire<'a>(&'a self, request: &'a GovernorRequest<'a>) -> BoxFuture<'a, Result<Lease, ()>> {
         (**self).try_acquire(request)
+    }
+
+    fn verified(&self, request: &GovernorRequest<'_>) {
+        (**self).verified(request);
     }
 }
 
@@ -370,6 +391,32 @@ mod tests {
 
         assert_eq!(first.load(Ordering::Relaxed), 0);
         assert_eq!(second.load(Ordering::Relaxed), 1);
+    }
+
+    /// Negative — an IPv4-mapped IPv6 peer, which is how a dual-stack listener reports an IPv4
+    /// client, is keyed as that IPv4 address, not by the `/64` every mapped address shares.
+    #[test]
+    fn an_ipv4_mapped_peer_is_keyed_as_its_ipv4_address() {
+        let mapped = |text: &str| ClientAddr::from_peer(IpAddr::V6(text.parse::<Ipv6Addr>().expect("IPv6")));
+        let first = mapped("::ffff:192.0.2.1");
+        let second = mapped("::ffff:192.0.2.2");
+        assert_eq!(first.rate_key(), IpAddr::V4(std::net::Ipv4Addr::new(192, 0, 2, 1)));
+        assert_ne!(first.rate_key(), second.rate_key(), "two IPv4 clients folded into one key");
+        assert_eq!(
+            first.rate_key(),
+            ClientAddr::from_peer(IpAddr::V4(std::net::Ipv4Addr::new(192, 0, 2, 1))).rate_key()
+        );
+    }
+
+    /// Negative — canonicalising the key does not rewrite what the transport said: a deployment
+    /// governor still reads the address exactly as the listener supplied it, and an ordinary IPv6
+    /// address still keys by its `/64`.
+    #[test]
+    fn the_supplied_address_and_native_ipv6_keys_are_unchanged() {
+        let mapped: IpAddr = IpAddr::V6("::ffff:192.0.2.1".parse::<Ipv6Addr>().expect("IPv6"));
+        assert_eq!(ClientAddr::from_peer(mapped).ip(), mapped);
+        let native = ClientAddr::from_peer(IpAddr::V6("2001:db8:1:2::7".parse::<Ipv6Addr>().expect("IPv6")));
+        assert_eq!(native.rate_key(), IpAddr::V6("2001:db8:1:2::".parse::<Ipv6Addr>().expect("IPv6")));
     }
 
     /// Positive — the governor named after admitting everything admits everything.

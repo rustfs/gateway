@@ -84,7 +84,7 @@ impl AtomicMeter {
         }
     }
 
-    /// Returns one charge after a later AND layer refused.
+    /// Returns one charge: after a later AND layer refused, or once the request verified.
     pub(super) fn refund(&self, rate: Rate) {
         let capacity = atomic_capacity(rate);
         let mut current = self.state.load(Ordering::Relaxed);
@@ -144,6 +144,11 @@ impl Meter {
             .millitokens
             .saturating_add(elapsed.saturating_mul(u64::from(rate.per_second())))
             .min(rate.capacity());
+    }
+
+    /// Returns one charge, never past the capacity: a refund is not a way to save up a burst.
+    pub(super) fn refund(&mut self, rate: Rate) {
+        self.millitokens = self.millitokens.saturating_add(COST).min(rate.capacity());
     }
 
     /// Whether this meter would admit one request as it stands.

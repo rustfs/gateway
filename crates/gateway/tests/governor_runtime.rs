@@ -539,3 +539,214 @@ async fn a_governor_sees_the_resolved_bucket_and_the_transport_peer() {
     let seen = recorder.seen.lock().expect("never poisoned").clone();
     assert_eq!(seen, [(Some(BUCKET.to_owned()), Some(ClientAddr::from_peer(peer)))]);
 }
+
+/// Every framework layer at a burst of one that never refills, so the second request charged to
+/// any of them is the first one refused.
+fn one_request_budget() -> GovernorRates {
+    GovernorRates {
+        aggregate: Rate::new(1, 0),
+        per_ip: Rate::new(1, 0),
+        credential_lookup: Rate::new(1, 0),
+        cors_preflight: Rate::new(1_000, 0),
+        unauthenticated: Rate::new(1, 0),
+        tracked_clients: 64,
+    }
+}
+
+fn one_request_assembly() -> rustfs_gateway::ServiceBuilder {
+    wired()
+        .register::<Ping, _>(Arc::new(Backend))
+        .dialect(&crate::support::ping_dialect())
+        .framework_governor_rates(one_request_budget())
+        .clock_with_skew_ack(
+            support::fixed_clock(),
+            ClockSkewAck::i_understand_a_skewed_clock_can_disable_signature_expiry(),
+        )
+}
+
+fn anonymous_from(peer: &str) -> http::Request<Bytes> {
+    let mut request = support::plain(http::Method::POST, "/");
+    request
+        .extensions_mut()
+        .insert(ClientAddr::from_peer(peer.parse().expect("an IP address")));
+    request
+}
+
+fn signed_from(peer: &str) -> http::Request<Bytes> {
+    let mut request = support::signed(http::Method::POST, "/");
+    request
+        .extensions_mut()
+        .insert(ClientAddr::from_peer(peer.parse().expect("an IP address")));
+    request
+}
+
+/// A correctly shaped signed request whose signature does not verify: the last hex digit of the
+/// `Signature=` value is changed, so only the verifier can tell it from [`signed_from`].
+fn forged_from(peer: &str) -> http::Request<Bytes> {
+    let mut request = signed_from(peer);
+    let authorization = request
+        .headers()
+        .get(http::header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .expect("a signed request carries an Authorization header")
+        .to_owned();
+    let (head, last) = authorization.split_at(authorization.len() - 1);
+    let flipped = if last == "0" { "1" } else { "0" };
+    request.headers_mut().insert(
+        http::header::AUTHORIZATION,
+        http::HeaderValue::from_str(&format!("{head}{flipped}")).expect("a header value"),
+    );
+    request
+}
+
+/// Positive — a request whose signature verifies gives back what it drew from every framework
+/// layer, so a signed client is never throttled by a limiter that exists to bound unverified work.
+/// Before the refund the second request was `503`: one global credential class, one aggregate and
+/// one peer meter each paid for verified traffic and never got it back.
+#[tokio::test]
+async fn verified_requests_do_not_spend_the_preauthentication_budget() {
+    let service = one_request_assembly().build().expect("a complete assembly");
+    for attempt in 0..8 {
+        let response = send(&service, signed_from("192.0.2.10")).await;
+        assert_eq!(response.status().as_u16(), 200, "verified request {attempt} was refused");
+    }
+}
+
+/// Negative — a signature that fails keeps its charge: the class still bounds the verification
+/// work a caller without the secret can force, and that caller's refusal is the next caller's
+/// `503`, exactly as before the refund.
+#[tokio::test]
+async fn a_failed_signature_keeps_its_charge() {
+    let service = one_request_assembly().build().expect("a complete assembly");
+    assert_eq!(send(&service, forged_from("192.0.2.11")).await.status().as_u16(), 403);
+    assert_eq!(
+        send(&service, forged_from("192.0.2.11")).await.status().as_u16(),
+        503,
+        "a failed verification was refunded"
+    );
+    assert_eq!(
+        send(&service, signed_from("192.0.2.12")).await.status().as_u16(),
+        503,
+        "the spent class and aggregate stopped bounding the next caller"
+    );
+}
+
+/// Negative — an anonymous request never verifies anything, so nothing is returned for it.
+#[tokio::test]
+async fn an_anonymous_request_keeps_its_charge() {
+    let service = one_request_assembly().build().expect("a complete assembly");
+    assert_ne!(send(&service, anonymous_from("192.0.2.13")).await.status().as_u16(), 503);
+    assert_eq!(send(&service, anonymous_from("192.0.2.13")).await.status().as_u16(), 503);
+}
+
+/// Negative — the credential lookup a forged request forced is not refunded by a verified request
+/// from the same peer that follows it: the verified one returns its own charge and no more.
+#[tokio::test]
+async fn a_verified_request_returns_only_its_own_charge() {
+    let service = wired()
+        .register::<Ping, _>(Arc::new(Backend))
+        .dialect(&crate::support::ping_dialect())
+        .framework_governor_rates(GovernorRates {
+            aggregate: Rate::new(1_000, 0),
+            per_ip: Rate::new(1_000, 0),
+            credential_lookup: Rate::new(2, 0),
+            ..one_request_budget()
+        })
+        .clock_with_skew_ack(
+            support::fixed_clock(),
+            ClockSkewAck::i_understand_a_skewed_clock_can_disable_signature_expiry(),
+        )
+        .build()
+        .expect("a complete assembly");
+    assert_eq!(send(&service, forged_from("192.0.2.14")).await.status().as_u16(), 403);
+    assert_eq!(send(&service, signed_from("192.0.2.14")).await.status().as_u16(), 200);
+    assert_eq!(send(&service, forged_from("192.0.2.14")).await.status().as_u16(), 403);
+    assert_eq!(
+        send(&service, forged_from("192.0.2.14")).await.status().as_u16(),
+        503,
+        "a verified request returned more than it drew"
+    );
+}
+
+/// Negative — a dual-stack listener reports an IPv4 client as an IPv4-mapped IPv6 address. That
+/// is the same peer as the plain IPv4 address, and not one member of a `/64` shared by every IPv4
+/// client on the internet.
+#[tokio::test]
+async fn an_ipv4_mapped_peer_is_metered_as_its_ipv4_address() {
+    let service = wired()
+        .register::<Ping, _>(Arc::new(Backend))
+        .dialect(&crate::support::ping_dialect())
+        .framework_governor_rates(GovernorRates {
+            aggregate: Rate::new(1_000, 0),
+            per_ip: Rate::new(1, 0),
+            credential_lookup: Rate::new(1_000, 0),
+            cors_preflight: Rate::new(1_000, 0),
+            unauthenticated: Rate::new(1_000, 0),
+            tracked_clients: 64,
+        })
+        .build()
+        .expect("a complete assembly");
+
+    assert_ne!(send(&service, anonymous_from("::ffff:192.0.2.20")).await.status().as_u16(), 503);
+    assert_ne!(
+        send(&service, anonymous_from("::ffff:192.0.2.21")).await.status().as_u16(),
+        503,
+        "two IPv4 clients behind a dual-stack listener shared one meter"
+    );
+    assert_eq!(
+        send(&service, anonymous_from("192.0.2.20")).await.status().as_u16(),
+        503,
+        "the mapped and the plain spelling of one IPv4 client had separate meters"
+    );
+}
+
+/// Counts the verdicts the framework reports to a deployment governor.
+struct VerdictCounter {
+    verified: AtomicUsize,
+}
+
+impl rustfs_gateway::Governor for VerdictCounter {
+    fn try_acquire<'a>(
+        &'a self,
+        _request: &'a rustfs_gateway::GovernorRequest<'a>,
+    ) -> BoxFuture<'a, Result<rustfs_gateway::Lease, ()>> {
+        Box::pin(async { Ok(rustfs_gateway::Lease::admit()) })
+    }
+
+    fn verified(&self, _request: &rustfs_gateway::GovernorRequest<'_>) {
+        self.verified.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
+/// Negative — the pipeline reports a verdict once per verified request, and never for a request
+/// whose signature failed or that carried no credentials: a second report would refund work that
+/// was paid once, and a report for either of the others would unbound exactly the work the
+/// framework limits.
+#[tokio::test]
+async fn the_pipeline_reports_each_verified_request_once_and_nothing_else() {
+    let counter = Arc::new(VerdictCounter {
+        verified: AtomicUsize::new(0),
+    });
+    let service = wired()
+        .register::<Ping, _>(Arc::new(Backend))
+        .dialect(&crate::support::ping_dialect())
+        .governor(Arc::clone(&counter) as Arc<dyn rustfs_gateway::Governor>)
+        .clock_with_skew_ack(
+            support::fixed_clock(),
+            ClockSkewAck::i_understand_a_skewed_clock_can_disable_signature_expiry(),
+        )
+        .build()
+        .expect("a complete assembly");
+
+    for _ in 0..3 {
+        assert_eq!(send(&service, signed_from("192.0.2.30")).await.status().as_u16(), 200);
+    }
+    assert_eq!(counter.verified.load(Ordering::SeqCst), 3);
+    assert_eq!(send(&service, forged_from("192.0.2.30")).await.status().as_u16(), 403);
+    assert_ne!(send(&service, anonymous_from("192.0.2.30")).await.status().as_u16(), 503);
+    assert_eq!(
+        counter.verified.load(Ordering::SeqCst),
+        3,
+        "an unverified request was reported as verified"
+    );
+}
