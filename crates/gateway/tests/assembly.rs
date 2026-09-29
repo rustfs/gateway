@@ -306,3 +306,51 @@ fn a_closed_preauthentication_layer_is_named_in_the_posture() {
     assert!(report.contains("closed pre-authentication layers: aggregate, CORS preflight"), "{report}");
     assert!(!report.contains("credential lookup"), "{report}");
 }
+
+/// Negative — a layer the host lifted with `Rate::unlimited()` is named in the posture, and the
+/// widest finite rate is still reported as the bound it is: the two are different
+/// configurations, and an operator reading the report can tell them apart.
+#[test]
+fn an_unlimited_preauthentication_layer_is_named_in_the_posture() {
+    let posture = |rate: rustfs_gateway::Rate| {
+        wired()
+            .register::<Ping, _>(Arc::new(Backend))
+            .dialect(&crate::support::ping_dialect())
+            .framework_governor_rates(rustfs_gateway::GovernorRates {
+                aggregate: rate,
+                per_ip: rate,
+                credential_lookup: rate,
+                cors_preflight: rate,
+                unauthenticated: rate,
+                ..rustfs_gateway::GovernorRates::default()
+            })
+            .build()
+            .expect("a complete assembly")
+            .security_posture()
+            .to_string()
+    };
+
+    let lifted = posture(rustfs_gateway::Rate::unlimited());
+    assert!(lifted.contains("per-IP bucket: unlimited"), "{lifted}");
+    assert!(
+        lifted.contains("unlimited pre-authentication layers: aggregate, credential lookup, CORS preflight, unauthenticated"),
+        "{lifted}"
+    );
+    assert!(!lifted.contains("closed pre-authentication layers"), "{lifted}");
+
+    let widest = posture(rustfs_gateway::Rate::new(u32::MAX, u32::MAX));
+    assert!(widest.contains("per-IP bucket: bounded (4294967295/s, burst 4294967295)"), "{widest}");
+    assert!(!widest.contains("unlimited"), "{widest}");
+}
+
+/// Negative — the default assembly names no unlimited layer.
+#[test]
+fn the_default_posture_names_no_unlimited_layer() {
+    let service = wired()
+        .register::<Ping, _>(Arc::new(Backend))
+        .dialect(&crate::support::ping_dialect())
+        .build()
+        .expect("a complete assembly");
+    let report = service.security_posture().to_string();
+    assert!(!report.contains("unlimited"), "{report}");
+}

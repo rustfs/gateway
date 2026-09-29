@@ -58,6 +58,10 @@ impl AtomicMeter {
     }
 
     pub(super) fn take(&self, rate: Rate, now: MonotonicNow) -> bool {
+        // An unlimited layer admits without counting: its word is never touched.
+        if rate.admits_everything() {
+            return true;
+        }
         let capacity = atomic_capacity(rate);
         let now = now.millis() as u32;
         let mut current = self.state.load(Ordering::Relaxed);
@@ -86,6 +90,9 @@ impl AtomicMeter {
 
     /// Returns one charge: after a later AND layer refused, or once the request verified.
     pub(super) fn refund(&self, rate: Rate) {
+        if rate.admits_everything() {
+            return;
+        }
         let capacity = atomic_capacity(rate);
         let mut current = self.state.load(Ordering::Relaxed);
         loop {
@@ -250,5 +257,28 @@ mod tests {
         meter.refund(rate);
         assert!(meter.take(rate, START));
         assert!(!meter.take(rate, START));
+    }
+    /// Negative — the widest finite rate still runs dry: frozen at one instant it admits
+    /// `u32::MAX` millitokens' worth of requests and refuses the next, which is why "a very large
+    /// number" is not the same configuration as no limit. An unlimited layer admits past it and
+    /// never touches its word.
+    #[test]
+    fn the_widest_finite_rate_runs_dry_where_an_unlimited_layer_does_not() {
+        let ceiling = u64::from(u32::MAX) / COST;
+        let widest = Rate::new(u32::MAX, u32::MAX);
+        let meter = AtomicMeter::full(widest, START);
+        for _ in 0..ceiling {
+            assert!(meter.take(widest, START));
+        }
+        assert!(!meter.take(widest, START), "the widest finite rate never ran dry");
+
+        let unlimited = Rate::unlimited();
+        let untouched = AtomicMeter::full(unlimited, START).state.into_inner();
+        let meter = AtomicMeter::full(unlimited, START);
+        for _ in 0..=ceiling {
+            assert!(meter.take(unlimited, START));
+        }
+        meter.refund(unlimited);
+        assert_eq!(meter.state.into_inner(), untouched, "an unlimited layer counted something");
     }
 }

@@ -156,6 +156,10 @@ impl ClientMeters {
     }
 
     fn take(&self, address: Option<IpAddr>, rate: Rate, now: MonotonicNow) -> bool {
+        // An unlimited per-client layer keeps no address entry and takes no lock.
+        if rate.admits_everything() {
+            return true;
+        }
         let Some(address) = address else {
             return lock(&self.unknown).take(rate, now);
         };
@@ -167,6 +171,9 @@ impl ClientMeters {
     }
 
     fn refund(&self, address: Option<IpAddr>, rate: Rate) {
+        if rate.admits_everything() {
+            return;
+        }
         let Some(address) = address else {
             lock(&self.unknown).refund(rate);
             return;
@@ -391,6 +398,11 @@ impl Future for PanicRefusal<'_> {
 #[allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 #[path = "refund_tests.rs"]
 mod refund_tests;
+
+#[cfg(test)]
+#[allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
+#[path = "unlimited_tests.rs"]
+mod unlimited_tests;
 
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]

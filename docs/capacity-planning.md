@@ -66,6 +66,7 @@ let service = ServiceBuilder::new()
 | Raise `unauthenticated` | More anonymous routed work | More requests can reach the body boundary |
 | Raise `tracked_clients` | More exact client meters | More memory can be occupied by peer keys |
 | Set a layer to `Rate::none()` | Close that layer | Every request in its path receives `503 SlowDown` |
+| Set a layer to `Rate::unlimited()` | Lift that layer: it admits without counting and keeps no state | Nothing bounds the work that layer bounded; the posture names it |
 
 A class meter shared by every peer can be drained by one peer that sends failing requests faster
 than the class refills. Keep a bounded class's refill above `per_ip`'s, so that one peer key alone
@@ -79,35 +80,38 @@ the security floor.
 
 RustFS embeds the gateway service in its own listener. Legacy RustFS applies no pre-authentication
 limit: its optional per-client limit (`RUSTFS_API_RATE_LIMIT_*`, off by default) is a host layer in
-front of both stacks. The RustFS profile therefore sizes every framework layer so that it never
-refuses a request legacy RustFS answers, and takes any tighter value from RustFS configuration:
+front of both stacks. The RustFS profile therefore lifts every framework layer, so that none refuses
+a request legacy RustFS answers, and takes any bound from RustFS configuration instead:
 
 ```rust
 use rustfs_gateway::{GovernorRates, Rate};
 
-let widest = Rate::new(u32::MAX, u32::MAX);
 let rates = GovernorRates {
-    aggregate: widest,
-    per_ip: widest,
-    credential_lookup: widest,
-    cors_preflight: widest,
-    unauthenticated: widest,
+    aggregate: Rate::unlimited(),
+    per_ip: Rate::unlimited(),
+    credential_lookup: Rate::unlimited(),
+    cors_preflight: Rate::unlimited(),
+    unauthenticated: Rate::unlimited(),
     tracked_clients: GovernorRates::default().tracked_clients,
 };
 // builder.framework_governor_rates(rates)
 ```
 
-`Rate::new(u32::MAX, u32::MAX)` is the widest rate the type holds: a burst of about four million
-requests refilled within a millisecond, which no node reaches. It is a size, not a bypass; the
-layers stay installed and the posture report still names them. `compat/sut`, the RustFS-profile
-assembly, uses exactly these rates.
+`Rate::unlimited()` is not a large rate. The widest finite rate, `Rate::new(u32::MAX, u32::MAX)`,
+is still a limit — frozen at one instant it admits about four million requests and refuses the next
+— and it still keeps a token count and an address entry per peer. An unlimited layer admits without
+counting, keeps no state, and is named in `SecurityPosture` (`per-IP bucket: unlimited`,
+`unlimited pre-authentication layers: ...`), so the absence of a limit is a stated configuration
+rather than a number that looks like one. Only the assembly's own `framework_governor_rates` can
+lift a layer; a deployment governor is still ANDed after the framework one. `compat/sut`, the
+RustFS-profile assembly, lifts all five.
 
 The host inserts `ClientAddr` on every request from the address it already trusts for its own
 per-client limit: the trusted-proxy layer's client address when there is one, otherwise the
 accepted socket's peer. An operator who opts into a bound — for instance on failed signatures —
-sets `credential_lookup` and `per_ip` from RustFS configuration, keeping the class refill above the
-per-client refill as described under Tuning. Because a verified request returns its charge, such a
-bound limits forged and failing requests without capping valid signed traffic.
+sets `credential_lookup` and `per_ip` from RustFS configuration to finite rates, keeping the class
+refill above the per-client refill as described under Tuning. Because a verified request returns
+its charge, such a bound limits forged and failing requests without capping valid signed traffic.
 
 ## Refusal and performance contracts
 
