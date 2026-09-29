@@ -21,90 +21,68 @@
 
 #[path = "crud/acl.rs"]
 mod acl;
+#[path = "crud/bucket_cors.rs"]
+mod bucket_cors;
 #[path = "crud/bucket_encryption.rs"]
 mod bucket_encryption;
+#[path = "crud/bucket_location.rs"]
+mod bucket_location;
 #[path = "crud/bucket_policy.rs"]
 mod bucket_policy;
 #[path = "crud/bucket_tagging.rs"]
 mod bucket_tagging;
+#[path = "crud/conditional_requests.rs"]
+mod conditional_requests;
+#[path = "crud/content_headers.rs"]
+mod content_headers;
+#[path = "crud/copy_object.rs"]
+mod copy_object;
+#[path = "crud/delete_objects.rs"]
+mod delete_objects;
+#[path = "crud/lifecycle.rs"]
+mod lifecycle;
+#[path = "crud/lifecycle_expiration.rs"]
+mod lifecycle_expiration;
+#[path = "crud/lifecycle_rustfs_rules.rs"]
+mod lifecycle_rustfs_rules;
+#[path = "crud/lifecycle_scheduler.rs"]
+mod lifecycle_scheduler;
+#[path = "crud/lifecycle_transitions.rs"]
+mod lifecycle_transitions;
+#[path = "crud/list_buckets.rs"]
+mod list_buckets;
+#[path = "crud/listing.rs"]
+mod listing;
+#[path = "crud/multipart_checksums.rs"]
+mod multipart_checksums;
+#[path = "crud/multipart_conditions.rs"]
+mod multipart_conditions;
+#[path = "crud/multipart_listing.rs"]
+mod multipart_listing;
+#[path = "crud/multipart_replay.rs"]
+mod multipart_replay;
+#[path = "crud/multipart_sizing.rs"]
+mod multipart_sizing;
+#[path = "crud/multipart_trailer_checksums.rs"]
+mod multipart_trailer_checksums;
+#[path = "crud/multipart_upload_ids.rs"]
+mod multipart_upload_ids;
+#[path = "crud/multipart_versioning.rs"]
+mod multipart_versioning;
 #[path = "crud/object_encryption.rs"]
 mod object_encryption;
+#[path = "crud/object_metadata.rs"]
+mod object_metadata;
+#[path = "crud/object_tagging.rs"]
+mod object_tagging;
+#[path = "crud/post_object.rs"]
+mod post_object;
+#[path = "crud/range_reads.rs"]
+mod range_reads;
 #[path = "crud/upload_part_copy.rs"]
 mod upload_part_copy;
 #[path = "crud/versioning.rs"]
 mod versioning;
-
-#[path = "crud/listing.rs"]
-mod listing;
-
-#[path = "crud/conditional_requests.rs"]
-mod conditional_requests;
-
-#[path = "crud/range_reads.rs"]
-mod range_reads;
-
-#[path = "crud/bucket_location.rs"]
-mod bucket_location;
-
-#[path = "crud/multipart_listing.rs"]
-mod multipart_listing;
-
-#[path = "crud/multipart_replay.rs"]
-mod multipart_replay;
-
-#[path = "crud/multipart_conditions.rs"]
-mod multipart_conditions;
-
-#[path = "crud/multipart_sizing.rs"]
-mod multipart_sizing;
-
-#[path = "crud/multipart_checksums.rs"]
-mod multipart_checksums;
-
-#[path = "crud/multipart_trailer_checksums.rs"]
-mod multipart_trailer_checksums;
-
-#[path = "crud/multipart_versioning.rs"]
-mod multipart_versioning;
-
-#[path = "crud/multipart_upload_ids.rs"]
-mod multipart_upload_ids;
-
-#[path = "crud/lifecycle.rs"]
-mod lifecycle;
-#[path = "crud/lifecycle_rustfs_rules.rs"]
-mod lifecycle_rustfs_rules;
-
-#[path = "crud/lifecycle_expiration.rs"]
-mod lifecycle_expiration;
-
-#[path = "crud/lifecycle_scheduler.rs"]
-mod lifecycle_scheduler;
-
-#[path = "crud/lifecycle_transitions.rs"]
-mod lifecycle_transitions;
-
-#[path = "crud/object_metadata.rs"]
-mod object_metadata;
-
-#[path = "crud/copy_object.rs"]
-mod copy_object;
-
-#[path = "crud/object_tagging.rs"]
-mod object_tagging;
-
-#[path = "crud/content_headers.rs"]
-mod content_headers;
-
-#[path = "crud/list_buckets.rs"]
-mod list_buckets;
-
-#[path = "crud/delete_objects.rs"]
-mod delete_objects;
-
-#[path = "crud/post_object.rs"]
-mod post_object;
-
 #[path = "crud/write_attributes.rs"]
 mod write_attributes;
 
@@ -201,15 +179,16 @@ fn service_with_backend_and_credentials(
                 ClockSkewAck::i_understand_a_skewed_clock_can_disable_signature_expiry(),
             ),
     );
-    let service =
-        backend
-            .register_encryption(backend.register_policy(backend.register_acl(backend.register_tagging(
+    let service = backend
+        .register_cors(backend.register_encryption(backend.register_policy(backend.register_acl(
+            backend.register_tagging(
                 backend.register_lifecycle(
                     backend.register_listing(backend.register_versioning(backend.register_multipart(builder))),
                 ),
-            ))))
-            .build()
-            .expect("the reference registry is a complete assembly");
+            ),
+        ))))
+        .build()
+        .expect("the reference registry is a complete assembly");
     (backend, service)
 }
 
@@ -364,6 +343,7 @@ async fn bucket_and_object_crud_runs_through_the_production_registry() {
             "CreateBucket",
             "CreateMultipartUpload",
             "DeleteBucket",
+            "DeleteBucketCors",
             "DeleteBucketEncryption",
             "DeleteBucketLifecycle",
             "DeleteBucketPolicy",
@@ -373,6 +353,7 @@ async fn bucket_and_object_crud_runs_through_the_production_registry() {
             "DeleteObjects",
             "DeletePublicAccessBlock",
             "GetBucketAcl",
+            "GetBucketCors",
             "GetBucketEncryption",
             "GetBucketLifecycleConfiguration",
             "GetBucketLocation",
@@ -394,6 +375,7 @@ async fn bucket_and_object_crud_runs_through_the_production_registry() {
             "ListParts",
             "PostObject",
             "PutBucketAcl",
+            "PutBucketCors",
             "PutBucketEncryption",
             "PutBucketLifecycleConfiguration",
             "PutBucketPolicy",

@@ -89,6 +89,16 @@ macro_rules! register_policy_entries {
     };
 }
 
+macro_rules! register_cors_entries {
+    ($backend:expr, $builder:expr;) => { $builder };
+    ($backend:expr, $builder:expr; cors $operation:ty => $name:literal, $($rest:tt)*) => {
+        register_cors_entries!($backend, $builder.register::<$operation, _>(Arc::clone($backend)); $($rest)*)
+    };
+    ($backend:expr, $builder:expr; $group:ident $operation:ty => $name:literal, $($rest:tt)*) => {
+        register_cors_entries!($backend, $builder; $($rest)*)
+    };
+}
+
 macro_rules! register_encryption_entries {
     ($backend:expr, $builder:expr;) => { $builder };
     ($backend:expr, $builder:expr; encryption $operation:ty => $name:literal, $($rest:tt)*) => {
@@ -162,6 +172,18 @@ impl FsBackend {
         macro_rules! register {
             ($($operations:tt)*) => {
                 register_encryption_entries!(self, builder; $($operations)*)
+            };
+        }
+        reference_operations!(register)
+    }
+
+    /// Registers the bucket CORS family. Pair it with `cors_source(backend)` so the gateway
+    /// answers preflights from the stored documents.
+    #[must_use]
+    pub fn register_cors(self: &Arc<Self>, builder: ServiceBuilder) -> ServiceBuilder {
+        macro_rules! register {
+            ($($operations:tt)*) => {
+                register_cors_entries!(self, builder; $($operations)*)
             };
         }
         reference_operations!(register)

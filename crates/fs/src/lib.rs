@@ -58,6 +58,7 @@ macro_rules! reference_operations {
             crud CreateBucket => "CreateBucket",
             multipart CreateMultipartUpload => "CreateMultipartUpload",
             crud DeleteBucket => "DeleteBucket",
+            cors DeleteBucketCors => "DeleteBucketCors",
             encryption DeleteBucketEncryption => "DeleteBucketEncryption",
             lifecycle DeleteBucketLifecycle => "DeleteBucketLifecycle",
             policy DeleteBucketPolicy => "DeleteBucketPolicy",
@@ -67,6 +68,7 @@ macro_rules! reference_operations {
             crud DeleteObjects => "DeleteObjects",
             policy DeletePublicAccessBlock => "DeletePublicAccessBlock",
             acl GetBucketAcl => "GetBucketAcl",
+            cors GetBucketCors => "GetBucketCors",
             encryption GetBucketEncryption => "GetBucketEncryption",
             lifecycle GetBucketLifecycleConfiguration => "GetBucketLifecycleConfiguration",
             crud GetBucketLocation => "GetBucketLocation",
@@ -88,6 +90,7 @@ macro_rules! reference_operations {
             multipart ListParts => "ListParts",
             crud PostObject => "PostObject",
             acl PutBucketAcl => "PutBucketAcl",
+            cors PutBucketCors => "PutBucketCors",
             encryption PutBucketEncryption => "PutBucketEncryption",
             lifecycle PutBucketLifecycleConfiguration => "PutBucketLifecycleConfiguration",
             policy PutBucketPolicy => "PutBucketPolicy",
@@ -116,6 +119,7 @@ reference_operations!(capability_names);
 mod content_headers;
 // The `register_*` methods and the entry macros behind them, kept together.
 mod acl;
+mod bucket_cors;
 mod bucket_tagging;
 mod buckets;
 mod completion_replay;

@@ -9,7 +9,8 @@ This bounded implementation supports bucket and version-aware object CRUD, `List
 `ListObjectsV2`, `ListMultipartUploads`, `GetBucketLocation`,
 `GetBucketVersioning`, `PutBucketVersioning`, `ListObjectVersions`, `CreateMultipartUpload`,
 `UploadPart`, `UploadPartCopy`, `ListParts`, `CompleteMultipartUpload`, `AbortMultipartUpload`, and lifecycle
-configuration PUT/GET/DELETE plus object and bucket tagging GET/PUT/DELETE. Default-encryption
+configuration PUT/GET/DELETE plus object and bucket tagging GET/PUT/DELETE, and bucket CORS PUT/GET/DELETE with a `CorsSource`
+that feeds the gateway's CORS answers. Default-encryption
 configuration PUT/GET/DELETE is stored and reported as RustFS answers it, and nothing is
 encrypted: this backend measures the protocol surface, not key management. Object writes record
 the SSE-S3 or SSE-KMS algorithm (and KMS key id) the request names, or the bucket default, and the
