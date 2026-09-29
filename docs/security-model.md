@@ -198,6 +198,10 @@ Two things are **yours**:
    caller switch the gate off. If you terminate TLS in front of the gateway, teach the transport
    to declare it. `SseConfig::allowing_customer_keys_over_plaintext` exists for the deployment
    that cannot, and its witness has to be typed out in full for a reason.
+   `SseConfig::refusing_only_target_keys_over_plaintext` takes the same witness and refuses only
+   the target object's key over cleartext: it reproduces legacy RustFS's gate, which serves a copy
+   source's key over cleartext, for a deployment migrating from it; that key is disclosed to
+   every hop exactly as a target key would be.
 2. **Your own handler and storage layer.** Once a decoded input reaches your backend it carries
    the key, and this framework can guarantee nothing about what you do with it. Do not log it, do
    not put it in a trace attribute, do not persist it — a multipart upload binds `MD5(key)`, never

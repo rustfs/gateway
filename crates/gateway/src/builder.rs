@@ -442,14 +442,14 @@ impl ServiceBuilder {
     ///
     /// Defaults to [`SseConfig::strict`], under which a customer-provided encryption key on a
     /// cleartext connection is refused with `400 InvalidRequest` before the request body is read.
-    /// The only way to relax that is
-    /// [`SseConfig::allowing_customer_keys_over_plaintext`][relaxed], which takes a witness whose
-    /// name has to be typed out — and a deployment that reaches for it should first ask whether
-    /// its transport can declare [`rustfs_gateway_core::TransportSecurity::Encrypted`] instead,
-    /// because that states the fact per connection rather than asserting it about all of them.
+    /// The only ways to relax that are [`SseConfig::allowing_customer_keys_over_plaintext`][relaxed]
+    /// and, for a copy source's key alone, `SseConfig::refusing_only_target_keys_over_plaintext`;
+    /// both take a witness whose name has to be typed out — and a deployment that reaches for one
+    /// should first ask whether its transport can declare
+    /// [`rustfs_gateway_core::TransportSecurity::Encrypted`] instead, because that states the fact
+    /// per connection rather than asserting it about all of them.
     ///
-    /// This setter cannot refuse anything: the witness is the refusal, and it is a compile-time
-    /// one.
+    /// This setter cannot refuse anything: the witness is the refusal, and it is a compile-time one.
     ///
     /// [relaxed]: rustfs_gateway_core::SseConfig::allowing_customer_keys_over_plaintext
     #[must_use]

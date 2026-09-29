@@ -29,8 +29,8 @@ use std::sync::Arc;
 
 use rustfs_gateway::{
     CorsCacheConfig, Credentials, DEFAULT_MAX_BUFFERED_BODY_BYTES, HandlerDeadlineClass, HandlerDeadlineConfig,
-    RegionMatchPolicy, RegionSet, RequestBodyDeadlineConfig, S3Service, SecurityFloor, ServiceBuilder, ServiceConfig,
-    SigV4Authenticator, SlashPolicy, StaticCredentials, dto,
+    PlaintextCustomerKeyAck, RegionMatchPolicy, RegionSet, RequestBodyDeadlineConfig, S3Service, SecurityFloor, ServiceBuilder,
+    ServiceConfig, SigV4Authenticator, SlashPolicy, SseConfig, StaticCredentials, dto,
 };
 use rustfs_gateway_fs::FsBackend;
 
@@ -222,6 +222,13 @@ pub(crate) fn build_service(
             // RustFS encodes a listing under `encoding-type=url` its own way: only exactly `url`,
             // only some members, `/` kept literal (rustfs/gateway#1059).
             .url_encode_listings_like_rustfs()
+            // RustFS's transport gate, with TLS required for customer keys
+            // (`RUSTFS_SSE_C_REQUIRE_TLS`), refuses the target's key over cleartext and serves a
+            // copy source's (rustfs/backlog#1677, R11). Its default, TLS not required, serves both
+            // with a warning; the bridge picks one of the two from that variable.
+            .sse_config(SseConfig::refusing_only_target_keys_over_plaintext(
+                PlaintextCustomerKeyAck::i_understand_customer_keys_will_be_sent_in_the_clear(),
+            ))
             // RustFS refuses an anonymous aws-chunked upload rather than decoding it (#1060), so
             // nothing reaches storage through the launcher that RustFS would not write.
             .leave_anonymous_streaming_payloads_undecoded()

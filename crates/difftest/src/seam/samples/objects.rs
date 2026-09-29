@@ -103,6 +103,26 @@ fn copies() -> Vec<SeamRow> {
                 .header("if-none-match", "*"))),
             Expect::Identical,
         ),
+        // A copy from an SSE-C source into a managed target: the source key decrypts the source,
+        // the managed headers encrypt the target (rustfs/backlog#1677, R11). RustFS must be handed
+        // every one of them, so the target's stored encryption is the one legacy RustFS writes.
+        row(
+            "copy-object-ssec-source-into-sse-s3",
+            source_sse(RawRequest::new(Method::PUT, "/bucket/dest").header("x-amz-copy-source", "/src-bucket/src"))
+                .header("x-amz-server-side-encryption", "AES256")
+                .over_tls(),
+            Expect::Identical,
+        ),
+        row(
+            "copy-object-ssec-source-into-sse-kms",
+            source_sse(RawRequest::new(Method::PUT, "/bucket/dest").header("x-amz-copy-source", "/src-bucket/src"))
+                .header("x-amz-server-side-encryption", "aws:kms")
+                .header("x-amz-server-side-encryption-aws-kms-key-id", "key-1")
+                .header("x-amz-server-side-encryption-context", "eyJhIjoiYiJ9")
+                .header("x-amz-server-side-encryption-bucket-key-enabled", "true")
+                .over_tls(),
+            Expect::Identical,
+        ),
         row(
             "copy-object-source-with-plus-unicode-and-null-version",
             RawRequest::new(Method::PUT, "/bucket/k").header("x-amz-copy-source", "/src-bucket/a+b%E2%9C%93?versionId=null"),
