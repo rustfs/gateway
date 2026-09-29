@@ -42,6 +42,8 @@ mod authz_implementations;
 mod backend_reachability;
 #[path = "body_refusal_sentences.rs"]
 mod body_refusal_sentences;
+#[path = "bodyless_payload_digest.rs"]
+mod bodyless_payload_digest;
 #[path = "bucket_config_reachability.rs"]
 mod bucket_config_reachability;
 #[path = "checksum_omissions.rs"]
