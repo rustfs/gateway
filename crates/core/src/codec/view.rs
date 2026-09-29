@@ -68,6 +68,8 @@ pub struct MetaView<'a> {
     framed_content_length: Option<u64>,
     /// Whether the deployment waived this operation's modelled integrity requirement.
     integrity_optional: bool,
+    /// Whether the deployment answers a request-checksum failure with `BadDigest`.
+    checksum_failures_as_bad_digest: bool,
     /// A page-size query parameter the deployment clamps to a ceiling instead of refusing.
     page_size_ceiling: Option<PageSizeCeiling>,
 }
@@ -189,6 +191,7 @@ impl<'a> MetaView<'a> {
             names: names.clone(),
             framed_content_length: None,
             integrity_optional: false,
+            checksum_failures_as_bad_digest: false,
             page_size_ceiling: None,
         })
     }
@@ -212,6 +215,7 @@ impl<'a> MetaView<'a> {
             names: self.names.clone(),
             framed_content_length: Some(length),
             integrity_optional: self.integrity_optional,
+            checksum_failures_as_bad_digest: self.checksum_failures_as_bad_digest,
             page_size_ceiling: self.page_size_ceiling,
         }
     }
@@ -232,6 +236,22 @@ impl<'a> MetaView<'a> {
     #[must_use]
     pub const fn integrity_optional(&self) -> bool {
         self.integrity_optional
+    }
+
+    /// This view, for a deployment that answers a request-checksum failure — an unreadable value, a
+    /// missing trailer checksum, a digest that does not match — with `BadDigest`, as legacy RustFS
+    /// does (rustfs/gateway#1057). The failure is refused where it always is; only its code
+    /// changes, and `Content-MD5` keeps its own codes.
+    #[must_use]
+    pub const fn with_checksum_failures_as_bad_digest(mut self) -> Self {
+        self.checksum_failures_as_bad_digest = true;
+        self
+    }
+
+    /// Whether this deployment answers a request-checksum failure with `BadDigest`.
+    #[must_use]
+    pub const fn checksum_failures_as_bad_digest(&self) -> bool {
+        self.checksum_failures_as_bad_digest
     }
 
     /// This view, with one page-size query parameter clamped to its ceiling.

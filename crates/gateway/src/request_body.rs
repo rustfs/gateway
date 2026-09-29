@@ -28,7 +28,7 @@ use core::task::{Context, Poll};
 use std::panic::catch_unwind;
 
 use bytes::Bytes;
-use rustfs_gateway_http::{BodyDigests, BodyIntegrity, IngestPipeline};
+use rustfs_gateway_http::{BodyDigests, IngestPipeline};
 use rustfs_gateway_stream::{
     AsyncPayloadRead, ByteStream, PayloadCaps, PayloadRead, PayloadStream, ReadProgress, StreamError, TrailingHeaders,
 };
@@ -37,7 +37,7 @@ use tokio::sync::{oneshot, watch};
 use crate::chunked::ChunkIngest;
 use crate::ext::{BodyQuota, VerifiedBodyProgress};
 use crate::gate::{BodyCeilings, BodyDigestObligation, BodyTimeouts};
-use crate::integrity::checksum_refusal;
+use crate::integrity::{Integrity, IntegrityCodes};
 use crate::render::S3Error;
 use crate::wire_read::{WireFrames, WireProgress, WireReader};
 
@@ -62,7 +62,7 @@ impl StreamingRead {
         body_plan: (BodyCeilings, BodyTimeouts, Option<std::sync::Arc<dyn BodyQuota>>),
         ingest: Option<ChunkIngest>,
         digest: BodyDigestObligation,
-        integrity: BodyIntegrity,
+        integrity: impl Into<Integrity>,
     ) -> Result<Self, S3Error>
     where
         B: http_body::Body + Send + 'static,
@@ -70,6 +70,7 @@ impl StreamingRead {
         B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
     {
         let (ceilings, timeouts, body_quota) = body_plan;
+        let Integrity { claims, codes } = integrity.into();
         let (progress_tx, progress_rx) = watch::channel(0_u64);
         let progress = WireProgress::for_body(digest, body.as_ref()).with_observer(progress_tx);
         if let Some(cap) = ceilings.declared
@@ -83,9 +84,10 @@ impl StreamingRead {
         let decoded_length = ingest.as_ref().map(ChunkIngest::decoded_length).or(declared_length);
         if ingest.is_none() && body.as_ref().is_none_or(http_body::Body::is_end_stream) {
             let verdict = if !progress.digest_matches() {
-                Err(crate::gate::content_sha256_mismatch())
+                Err(codes.streamed_payload_hash_mismatch())
             } else {
-                integrity.begin().verify().map(|_| BodyVerified).map_err(checksum_refusal)
+                let refuse = move |reject| codes.refusal(reject);
+                claims.begin().verify().map(|_| BodyVerified).map_err(refuse)
             };
             let (terminal_tx, terminal_rx) = oneshot::channel();
             let _ = terminal_tx.send(BodyTerminal::Complete(verdict));
@@ -111,7 +113,8 @@ impl StreamingRead {
         let producer = VerifiedRequestBody {
             source,
             progress: progress.clone(),
-            digests: Some(integrity.begin()),
+            digests: Some(claims.begin()),
+            codes,
             terminal: Some(terminal_tx),
             body_quota,
             decoded_length,
@@ -292,6 +295,8 @@ struct VerifiedRequestBody<B> {
     source: Source<B>,
     progress: WireProgress,
     digests: Option<BodyDigests>,
+    /// The codes a verification refusal of this body is answered with.
+    codes: IntegrityCodes,
     terminal: Option<oneshot::Sender<BodyTerminal>>,
     body_quota: Option<std::sync::Arc<dyn BodyQuota>>,
     decoded_length: Option<u64>,
@@ -345,14 +350,14 @@ impl<B> VerifiedRequestBody<B> {
             return self.fail(refusal);
         }
         if !self.progress.digest_matches() {
-            return self.fail(crate::gate::content_sha256_mismatch());
+            return self.fail(self.codes.streamed_payload_hash_mismatch());
         }
         let Some(digests) = self.digests.take() else {
             return self.fail(crate::gate::incomplete());
         };
         let verified = match digests.verify_with_trailers(&trailers) {
             Ok(verified) => verified,
-            Err(rejection) => return self.fail(checksum_refusal(rejection)),
+            Err(rejection) => return self.fail(self.codes.refusal(rejection)),
         };
         if !parser_commit_allowed && !(trailer_section_complete && trailer_signature_satisfied && verified.checksum().is_some()) {
             return self.fail(crate::chunked::trailers_not_verified());

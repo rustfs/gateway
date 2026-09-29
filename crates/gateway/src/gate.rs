@@ -62,11 +62,13 @@
 use bytes::{BufMut, Bytes, BytesMut};
 use http::StatusCode;
 use rustfs_gateway_core::{HandlerError, RequestBody, RequestBodyMode, ResponseKind};
-use rustfs_gateway_http::{BodyIntegrity, ChecksumVerified};
+#[cfg(test)]
+use rustfs_gateway_http::BodyIntegrity;
+use rustfs_gateway_http::ChecksumVerified;
 use rustfs_gateway_sig::Verdict;
 use rustfs_gateway_types::ErrorCode;
 
-use crate::integrity::checksum_refusal;
+use crate::integrity::Integrity;
 use crate::render::{S3Error, from_handler, from_transport_limit};
 use crate::wire_read::{RequestBodyUnfinished, WireFrames, WireProgress, WireReader};
 
@@ -209,8 +211,10 @@ where
         digest: BodyDigestObligation,
         // Settled from the head by `crate::integrity::resolve`, above this call, because a
         // contradiction between two claims is not decidable from any number of body bytes.
-        integrity: BodyIntegrity,
+        integrity: impl Into<Integrity>,
     ) -> Result<Bytes, S3Error> {
+        let Integrity { claims, codes } = integrity.into();
+        let refuse = move |reject| codes.refusal(reject);
         // Opened here, closed on every path that reaches a caller with bytes in hand.
         // `crate::payload_header::body_digest_obligation` mints `BodyDigestObligation::Sha256` for
         // every signed exact digest, header-signed and presigned alike (c-sig-0596, c-sig-0430).
@@ -219,8 +223,8 @@ where
         // the bytes arriving here are chunk headers, signatures and CRLFs, and the object's own
         // octets exist only after the decoder has produced them, so the framed path's digests are
         // fed from inside `ChunkIngest::run` instead.
-        let fuse_digests = !integrity.is_empty();
-        let mut digests = integrity.begin();
+        let fuse_digests = !claims.is_empty();
+        let mut digests = claims.begin();
         let Some(body) = self.body else {
             if !progress.digest_matches() {
                 return Err(content_sha256_mismatch());
@@ -228,7 +232,7 @@ where
             // An absent body is a zero-length body, and a zero-length body has a digest. A request
             // that claims the checksum of one byte and sends none must not pass because there was
             // nothing to compare.
-            let _verified: ChecksumVerified = digests.verify().map_err(checksum_refusal)?;
+            let _verified: ChecksumVerified = digests.verify().map_err(refuse)?;
             return Ok(Bytes::new());
         };
         if let Some(cap) = ceilings.declared
@@ -260,7 +264,7 @@ where
                         .take_refusal()
                         .unwrap_or_else(|| progress.mark_refusal_if_unfinished(error))
                 })?;
-                let verified = digests.verify_with_trailers(decoded.trailers()).map_err(checksum_refusal)?;
+                let verified = digests.verify_with_trailers(decoded.trailers()).map_err(refuse)?;
                 if !decoded.commit_allowed(&verified) {
                     return Err(crate::chunked::trailers_not_verified());
                 }
@@ -285,7 +289,7 @@ where
                     collected.put(frame);
                 }
                 let body = collected.freeze();
-                let verified = digests.verify().map_err(checksum_refusal)?;
+                let verified = digests.verify().map_err(refuse)?;
                 (body, verified)
             }
         };
@@ -314,7 +318,7 @@ where
         body_plan: (BodyCeilings, BodyTimeouts, Option<std::sync::Arc<dyn crate::BodyQuota>>),
         ingest: Option<crate::chunked::ChunkIngest>,
         digest: BodyDigestObligation,
-        integrity: BodyIntegrity,
+        integrity: impl Into<Integrity>,
     ) -> Result<crate::request_body::StreamingRead, S3Error> {
         let (ceilings, timeouts, body_quota) = body_plan;
         crate::request_body::StreamingRead::new(
@@ -333,8 +337,9 @@ where
         body_plan: (RequestBodyMode, BodyCeilings, BodyTimeouts, Option<std::sync::Arc<dyn crate::BodyQuota>>),
         ingest: Option<crate::chunked::ChunkIngest>,
         digest: BodyDigestObligation,
-        integrity: BodyIntegrity,
+        integrity: impl Into<Integrity>,
     ) -> Result<(RequestBody, Option<crate::request_body::BodyMonitor>), S3Error> {
+        let integrity = integrity.into();
         let (mode, ceilings, timeouts, body_quota) = body_plan;
         match mode {
             RequestBodyMode::Streaming => {

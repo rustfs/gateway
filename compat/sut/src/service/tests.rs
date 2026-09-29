@@ -692,3 +692,7 @@ mod cors_tests;
 
 /// The request settings RustFS embeds the gateway with (rustfs/gateway#1070).
 mod deadline_tests;
+
+/// Request-checksum failures answered with legacy RustFS's `BadDigest` (rustfs/gateway#1057), and
+/// what each refusal leaves in storage.
+mod bad_digest_tests;
