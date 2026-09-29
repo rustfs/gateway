@@ -764,3 +764,6 @@ mod legacy_key_tests;
 
 /// A request path addressed as legacy RustFS addresses it (rustfs/gateway#1115).
 mod legacy_addressing_tests;
+
+/// The operation a request names, selected as legacy RustFS selects it (rustfs/gateway#1127).
+mod legacy_selection_tests;

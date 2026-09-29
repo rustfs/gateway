@@ -136,7 +136,10 @@ traversal the floor exists to close. The start-up `NAMING_POSTURE` line reports 
 `key_floor=rustfs-legacy key_floor_lowered=true`, and the bucket floor does not move. Its companion
 for the same deployment, `address_paths_as_legacy_rustfs` (#1115), decodes the whole path once
 before it splits the bucket from the key, as RustFS does; the bucket floor then judges the decoded
-label, and the start-up line reports `path_split=rustfs-legacy`.
+label, and the start-up line reports `path_split=rustfs-legacy`. A third,
+`select_operations_as_legacy_rustfs` (#1127), chooses the operation as legacy RustFS does, a
+signed `x-id` first; it lowers no floor, and every decision after routing, authorization
+included, is made about the operation it chose.
 
 **What is still yours.** The framework's promise stops at handing you a validated `ObjectKey`. It
 does not map that key onto a physical location, and it cannot: only you know what the root is. You

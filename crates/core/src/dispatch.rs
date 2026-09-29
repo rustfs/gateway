@@ -47,8 +47,8 @@
 use crate::error::PreAuthError;
 use crate::registry::{OperationSpec, Registry, check_required};
 use crate::route::{
-    ClaimLookup, ClaimedEntry, ClaimedTable, CompileError, CompiledRouter, RouteBuildError, RouteEntry, RouteRequestParts,
-    RouteTable, RowError, SHADOWING, generated_entries,
+    ClaimLookup, ClaimedEntry, ClaimedTable, CompileError, CompiledRouter, LegacySelection, RouteBuildError, RouteEntry,
+    RouteRequestParts, RouteTable, RowError, SHADOWING, Selection, generated_entries, legacy_rustfs_selection,
 };
 
 /// The message a request that names no operation receives.
@@ -69,6 +69,11 @@ pub const NOT_REGISTERED_MESSAGE: &str = "This operation is defined by S3 but is
 /// misaddressed S3 request, it is inside a namespace S3 routing never considers.
 pub const NO_CLAIMED_ROUTE_MESSAGE: &str = "This request is inside a path prefix an installed dialect claims, and names none of the \
      operations that dialect serves there.";
+
+/// The message a request whose `x-id` is repeated, or names no operation of its method and target,
+/// receives under [`Selection::RustfsLegacy`] (rustfs/gateway#1127).
+pub const UNDECLARED_OPERATION_MESSAGE: &str =
+    "The operation named by x-id is unknown, named more than once, or does not match this request.";
 
 /// A request that has been routed, registered and validated.
 #[derive(Clone, Copy, Debug)]
@@ -130,6 +135,7 @@ pub struct Router {
     compiled: CompiledRouter,
     claims: ClaimedTable,
     registry: Registry,
+    selection: Selection,
 }
 
 impl Router {
@@ -157,7 +163,23 @@ impl Router {
             compiled,
             claims,
             registry,
+            selection: Selection::Table,
         })
+    }
+
+    /// The same router, choosing among the operations a request outside every claim names by
+    /// `selection` — [`Selection::RustfsLegacy`] for a deployment fronting RustFS
+    /// (rustfs/gateway#1127).
+    #[must_use]
+    pub const fn selecting(mut self, selection: Selection) -> Self {
+        self.selection = selection;
+        self
+    }
+
+    /// How this router chooses among the operations a request names.
+    #[must_use]
+    pub const fn selection(&self) -> Selection {
+        self.selection
     }
 
     /// The path-prefix claims and the rows inside them.
@@ -204,11 +226,33 @@ impl Router {
     #[must_use]
     pub fn resolve(&self, request: &RouteRequestParts<'_>) -> Option<&RouteEntry> {
         match self.claims.lookup(request) {
-            ClaimLookup::Outside => {
-                let op = self.compiled.resolve(request)?;
-                self.table.entries().get(usize::from(op))
-            }
+            ClaimLookup::Outside => self.select(request).ok().flatten(),
             ClaimLookup::Inside { entry, .. } => entry.map(ClaimedEntry::entry),
+        }
+    }
+
+    /// The S3-table row a request outside every claim names, under this router's [`Selection`].
+    ///
+    /// `Ok(None)` when it names none. An `Err` is a refusal [`Selection::RustfsLegacy`] makes
+    /// before the table is asked: a legacy RustFS operation this table does not define, or an
+    /// `x-id` it does not accept.
+    fn select(&self, request: &RouteRequestParts<'_>) -> Result<Option<&RouteEntry>, PreAuthError> {
+        let from_table = || {
+            self.compiled
+                .resolve(request)
+                .and_then(|op| self.table.entries().get(usize::from(op)))
+        };
+        if self.selection == Selection::Table {
+            return Ok(from_table());
+        }
+        match legacy_rustfs_selection(request) {
+            LegacySelection::Table => Ok(from_table()),
+            LegacySelection::Unknown => Ok(None),
+            LegacySelection::Undeclared => Err(PreAuthError::invalid_request(UNDECLARED_OPERATION_MESSAGE)),
+            LegacySelection::Selected(name) => match self.table.entries().iter().find(|entry| entry.op_name == name) {
+                Some(entry) => Ok(Some(entry)),
+                None => Err(PreAuthError::not_implemented(NOT_REGISTERED_MESSAGE).about(name)),
+            },
         }
     }
 
@@ -232,11 +276,7 @@ impl Router {
     pub fn dispatch(&self, request: &RouteRequestParts<'_>) -> Result<Dispatch<'_>, PreAuthError> {
         let (entry, claimed) = match self.claims.lookup(request) {
             ClaimLookup::Outside => {
-                let entry = self
-                    .compiled
-                    .resolve(request)
-                    .and_then(|op| self.table.entries().get(usize::from(op)));
-                let Some(entry) = entry else {
+                let Some(entry) = self.select(request)? else {
                     return Err(PreAuthError::not_implemented(NO_ROUTE_MESSAGE));
                 };
                 (entry, None)

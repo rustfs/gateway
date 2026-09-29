@@ -32,6 +32,7 @@ mod matrix;
 mod register;
 mod runner;
 mod rustfs_profile;
+mod rustfs_selection;
 mod seam;
 mod seam_answers;
 mod seam_outputs;

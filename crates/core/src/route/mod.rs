@@ -32,6 +32,7 @@
 //!   compiled.rs  the same table as an array index
 //!   explain.rs   what the table did with one request, and what it did not do
 //!   generated.rs the row types `generated/routes.rs` is written against
+//!   legacy_rustfs.rs legacy RustFS's `x-id` and key order, for a router fronting RustFS
 //! ```
 //!
 //! # The one invariant this module exists to hold
@@ -49,6 +50,7 @@ mod compiled;
 mod explain;
 mod generated;
 mod lattice;
+mod legacy_rustfs;
 mod mask;
 mod selector;
 mod shadowing;
@@ -62,6 +64,7 @@ pub use self::compiled::{CompiledRouter, OpId, RouteBucket};
 pub use self::explain::{Explained, Explanation};
 pub use self::generated::{ROUTES, RoutePredicate, RouteRow, RowError, generated_entries, row_of};
 pub use self::lattice::{Contradiction, OverlapError};
+pub use self::legacy_rustfs::{LegacySelection, Selection, legacy_rustfs_selection};
 pub use self::mask::{CompileError, MAX_SUBRESOURCE_KEYS, SubresourceBits};
 pub use self::selector::{ArnForm, HostClass, Predicate, RouteEntry, RouteRequestParts, RouteSelector, TargetKind};
 pub use self::shadowing::{SHADOWING, ShadowingDecl, ShadowingDecls, ShadowingPolicy};
