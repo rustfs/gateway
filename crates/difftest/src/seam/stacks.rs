@@ -171,6 +171,7 @@ impl GatewaySeam {
             .leave_anonymous_streaming_payloads_undecoded()
             .sign_presigned_payloads_as_unsigned()
             .answer_checksum_failures_with_bad_digest()
+            .accept_mismatched_payload_digests_without_a_body()
             .answer_body_refusals_with_legacy_rustfs_sentences()
             .slash_policy(SlashPolicy::RustfsLegacy)
             .accept_legacy_rustfs_object_keys_after_listing_in_the_posture_report()

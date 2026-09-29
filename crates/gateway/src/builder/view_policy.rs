@@ -71,6 +71,7 @@
 pub(crate) mod post_forms;
 
 use super::ServiceBuilder;
+use super::bodyless_digest::BodylessDigest;
 use super::client_quirks::ChecksumWaiver;
 use super::legacy_sentences::BodySentences;
 use crate::integrity::IntegrityCodes;
@@ -135,6 +136,8 @@ pub(crate) struct ViewPolicy {
     pub(super) body_sentences: BodySentences,
     /// Which grammar POST Object forms are read with (`post_forms`).
     pub(crate) post_forms: post_forms::PostFormGrammar,
+    /// Whether a bodyless request's signed digest is compared (`super::bodyless_digest`).
+    pub(crate) bodyless_digest: BodylessDigest,
     clamp_max_keys: bool,
     integrity_codes: IntegrityCodes,
     presigned_payload_unsigned: bool,
@@ -335,6 +338,7 @@ mod tests {
     #[test]
     fn the_policy_is_off_by_default_and_its_set_is_closed() {
         assert_eq!(ViewPolicy::default().body_sentences, BodySentences::Gateway);
+        assert_eq!(ViewPolicy::default().bodyless_digest, BodylessDigest::Compared);
         assert!(!ViewPolicy::default().clamp_max_keys);
         assert_eq!(ViewPolicy::default().integrity_codes, IntegrityCodes::Model);
         assert!(!ViewPolicy::default().presigned_payload_unsigned());
