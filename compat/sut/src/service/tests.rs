@@ -691,7 +691,9 @@ mod policy_tests;
 
 /// What the RustFS profile accepts beyond the AWS defaults: MinIO checksum-less writes (#916), an
 /// explicit us-east-1 constraint (#914), s3cmd's ACL writes (#912), SigV2 presigned URLs (#913),
-/// an oversized `max-keys`, any and empty signing regions (rustfs/backlog#1677).
+/// an oversized `max-keys`, any and empty signing regions, every checksum-less write
+/// (rustfs/backlog#1677).
+mod checksum_omission_tests;
 mod location_constraint_tests;
 mod minio_checksum_tests;
 mod page_size_tests;

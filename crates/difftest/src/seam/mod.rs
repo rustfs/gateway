@@ -33,6 +33,8 @@ mod table;
 
 #[cfg(test)]
 pub(crate) use samples::document as samples_document;
+#[cfg(test)]
+pub(crate) use samples::omitted::OMITTED_OPERATIONS;
 pub(crate) use samples::{Expect, SEAM_FINDINGS, SeamClass, SeamFinding, UNREACHED_PATHS, seam_rows};
 pub(crate) use table::{SEAM_OPERATIONS, input_paths};
 

@@ -28,6 +28,7 @@ use crate::request::RawRequest;
 mod configs;
 mod findings;
 mod objects;
+pub(crate) mod omitted;
 mod reads;
 
 /// What a finding means for what RustFS does and stores.
@@ -427,5 +428,6 @@ pub(crate) fn seam_rows() -> Vec<SeamRow> {
     rows.extend(configs::rows());
     rows.extend(reads::rows());
     rows.extend(findings::rows());
+    rows.extend(omitted::rows());
     rows
 }

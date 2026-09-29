@@ -17,9 +17,12 @@
 //! Responsible for: the `PutObjectAcl` that `s3cmd cp` sends after copying and the
 //! `PutBucketAcl`/`PutObjectAcl` of `s3cmd setacl` — an `AccessControlPolicy` body with no
 //! integrity header — reaching the backend and getting RustFS's own answer, while a present
-//! `Content-MD5` is still verified and the waiver reaches no other operation.
-//! NOT responsible for: the default AWS-model requirement, which the conformance corpus pins, or
-//! what the backend does with an ACL (`rustfs_gateway_fs::acl`).
+//! `Content-MD5` is still verified; and s3cmd's lifecycle write reaching it without one too, as
+//! legacy RustFS serves every write (rustfs/backlog#1677, ruling R5).
+//! NOT responsible for: the default AWS-model requirement, which the conformance corpus pins,
+//! the s3cmd waiver's own closed set (`rustfs_gateway::client_quirks` and
+//! `crates/gateway/tests/checksum_omissions.rs`), or what the backend does with an ACL
+//! (`rustfs_gateway_fs::acl`).
 //! Upstream: the parent module's two-identity assembly. Downstream: nothing.
 
 use super::*;
@@ -100,14 +103,22 @@ async fn n_a_present_but_wrong_checksum_is_still_refused() {
     }
 }
 
-/// Negative — the set is closed: a checksum-required write outside it keeps the AWS-model
-/// requirement.
+/// Positive — a checksum-required write outside the ACL pair is stored without a checksum too,
+/// because legacy RustFS requires one on no write.
+///
+/// This case asserted a `400 InvalidRequest` until rustfs/backlog#1677 ruling R5: that answer was
+/// the s3cmd waiver's closed set, not RustFS's. Legacy RustFS reads no `Content-MD5` in its
+/// lifecycle handler (rustfs/rustfs@e870a6d25b `rustfs/src/storage/ecfs.rs:1424`), and a legacy
+/// RustFS build answered the write with no integrity header `200` and stored it. The waiver's
+/// closed set is still held, at the assembly, by `crates/gateway/tests/checksum_omissions.rs`
+/// (`n_the_two_client_waivers_alone_leave_every_other_write_required`).
 #[tokio::test]
-async fn n_other_checksum_required_writes_still_refuse_a_missing_checksum() {
+async fn other_checksum_required_writes_are_stored_without_a_checksum_as_legacy_rustfs_stores_them() {
     let root = TestRoot::new();
     let service = s3cmd_object(&root).await;
 
-    let refused = put(&service, "/s3cmd?lifecycle", LIFECYCLE, &[]).await;
-    assert_eq!(refused.status(), 400, "{}", body_of(&refused));
-    assert!(body_of(&refused).contains("<Code>InvalidRequest</Code>"), "{}", body_of(&refused));
+    let written = put(&service, "/s3cmd?lifecycle", LIFECYCLE, &[]).await;
+    assert_eq!(written.status(), 200, "{}", body_of(&written));
+    let read = exchange(&service, as_main(http::Method::GET, "/s3cmd?lifecycle", Bytes::new())).await;
+    assert!(body_of(&read).contains("<ID>r</ID>"), "{}", body_of(&read));
 }
