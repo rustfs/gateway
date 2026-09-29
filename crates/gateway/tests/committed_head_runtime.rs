@@ -15,8 +15,10 @@
 //! The runtime boundary between a frozen committed head and its terminal encoded output.
 //!
 //! Responsible for: proving an operation header is available before work completes and that a
-//! terminal encoder cannot add or change one after commitment. NOT responsible for: header-name
-//! admission, keep-alive timing, or socket ownership.
+//! terminal encoder cannot add or change one after commitment; and that the host's
+//! `DetachedWork` handle is what keeps a committed write whole across a shutdown
+//! (rustfs/gateway#1081). NOT responsible for: header-name admission, keep-alive timing, or
+//! socket ownership.
 //! Upstream: generated `CopyObject` codec and `S3Service`. Downstream: no production code.
 
 use std::sync::Arc;
@@ -123,4 +125,95 @@ async fn a_terminal_output_cannot_change_a_frozen_header() {
     let body = String::from_utf8(collected.body().to_vec()).expect("UTF-8 XML");
     assert!(body.contains(&format!("<Code>{}</Code>", ErrorCode::INTERNAL_ERROR.as_str())), "{body}");
     assert!(!body.contains("version-two"), "{body}");
+}
+
+/// What a committed copy's storage holds: the object staged, and the object committed.
+#[derive(Clone, Default)]
+struct CopyStore(Arc<std::sync::Mutex<(Vec<&'static str>, Vec<&'static str>)>>);
+
+impl CopyStore {
+    fn snapshot(&self) -> (Vec<&'static str>, Vec<&'static str>) {
+        self.0.lock().expect("the store is never poisoned").clone()
+    }
+}
+
+/// A copy that commits its head at once, then stages its object, takes a while, and commits it.
+struct StagedCopy(CopyStore);
+
+impl Handler<CopyObject> for StagedCopy {
+    async fn call(&self, _request: Req<CopyObject>) -> HandlerResult<CopyObject> {
+        let store = self.0.clone();
+        Ok(Resp::commit(
+            HeadPart::new(HeaderMap::new()).expect("an empty generated CopyObject head"),
+            Box::pin(async move {
+                store.0.lock().expect("the store is never poisoned").0.push("copied");
+                futures_timer::Delay::new(std::time::Duration::from_millis(50)).await;
+                let mut stored = store.0.lock().expect("the store is never poisoned");
+                stored.0.clear();
+                stored.1.push("copied");
+                Ok(CopyObjectOutput::default())
+            }),
+        ))
+    }
+}
+
+/// A runtime of the test's own, so the test can stop it the way a host's shutdown does.
+fn host_runtime() -> tokio::runtime::Runtime {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("a runtime")
+}
+
+/// Sends a committed copy, drops its response as a departed client would, and waits until the
+/// continuation has staged its object.
+async fn copy_and_leave(service: &S3Service, store: &CopyStore) {
+    let response = service.call_bytes(support::copy_commit_request()).await;
+    assert_eq!(response.status(), 200);
+    drop(response);
+    for _ in 0..1_000 {
+        if !store.snapshot().0.is_empty() {
+            return;
+        }
+        tokio::task::yield_now().await;
+    }
+    panic!("the continuation never staged its object");
+}
+
+fn staged_copy_service(store: &CopyStore) -> S3Service {
+    support::wired_at_signed_time()
+        .register::<CopyObject, _>(Arc::new(StagedCopy(store.clone())))
+        .build()
+        .expect("a complete assembly")
+}
+
+/// Negative — the control: a host that stops its runtime without draining cuts the committed copy
+/// off between its first write and its last. The staged object is exactly a torn write, and the
+/// count still let the host see it coming: one task was running when the runtime stopped.
+#[test]
+fn stopping_the_runtime_without_draining_tears_a_committed_write() {
+    let runtime = host_runtime();
+    let store = CopyStore::default();
+    let service = staged_copy_service(&store);
+    runtime.block_on(copy_and_leave(&service, &store));
+    assert_eq!(service.detached_work().running(), 1);
+    runtime.shutdown_timeout(std::time::Duration::ZERO);
+    assert_eq!(store.snapshot(), (vec!["copied"], vec![]), "the control did not tear the write");
+    assert_eq!(service.detached_work().running(), 0);
+}
+
+/// Negative — a host that drains the service's detached work before stopping its runtime lets
+/// the same committed copy finish whole: nothing staged is left, and the object is committed.
+#[test]
+fn draining_before_the_runtime_stops_finishes_a_committed_write_whole() {
+    let runtime = host_runtime();
+    let store = CopyStore::default();
+    let service = staged_copy_service(&store);
+    runtime.block_on(async {
+        copy_and_leave(&service, &store).await;
+        service.detached_work().drained().await;
+    });
+    runtime.shutdown_timeout(std::time::Duration::ZERO);
+    assert_eq!(store.snapshot(), (vec![], vec!["copied"]));
+    assert_eq!(service.detached_work().running(), 0);
 }

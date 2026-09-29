@@ -694,6 +694,7 @@ impl ServiceBuilder {
             caller_secret_every_operation: self.caller_secret_every_operation,
             view_policy: self.view_policy,
             decode_anonymous_framing: self.decode_anonymous_framing,
+            detached_work: crate::DetachedWork::default(),
         }))
     }
 

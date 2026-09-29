@@ -86,6 +86,7 @@ mod clock;
 pub mod close;
 pub mod commit;
 mod commit_task;
+pub use crate::commit_task::DetachedWork;
 mod config;
 #[cfg(feature = "server")]
 mod conn;

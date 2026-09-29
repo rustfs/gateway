@@ -55,6 +55,9 @@ pin-project-lite = { workspace = true }
 sha2 = { workspace = true }
 tower = { workspace = true }
 tokio = { workspace = true, features = ["fs", "io-util", "net", "sync", "time"] }
+# `Instrument` and `Span::current` only: committed work keeps the span of the request that
+# started it. The gateway records nothing through it.
+tracing = { workspace = true }
 
 [dev-dependencies]
 dhat = { workspace = true }
@@ -64,6 +67,8 @@ rustfs-gateway-dialect-minio = { path = "../dialect-minio" }
 socket2 = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "signal", "test-util"] }
 trybuild = { workspace = true }
+# `commit_task`'s span test implements a subscriber's `current_span`.
+tracing-core = { workspace = true }
 
 [[test]]
 name = "integration"

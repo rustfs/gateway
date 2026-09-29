@@ -12,10 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Publishes validated routing and middleware replacements into the existing service store.
+//! Publishes validated routing and middleware replacements into the existing service store, and
+//! hands the host the service's [`crate::DetachedWork`].
 //!
 //! Responsible for: atomic replacements and releasing middleware after the last service drops,
-//! while preserving concurrent request-setting updates. NOT responsible for: validation or request capture.
+//! while preserving concurrent request-setting updates; the host's handle on committed work that
+//! outlives its response. NOT responsible for: validation or request capture.
 //! Upstream: `ServiceBuilder` and `AssemblyUpdate`. Downstream: the live service's configuration.
 
 use std::sync::Arc;
@@ -40,6 +42,17 @@ impl Drop for Inner {
 }
 
 impl S3Service {
+    /// The committed work this service has started and not yet finished.
+    ///
+    /// A host drains it — [`crate::DetachedWork::drained`] — after its connections have closed
+    /// and before it stops the runtime, so an operation whose response head committed early is
+    /// not cut off between its first write and its last. Every clone of this service returns a
+    /// handle on the same count.
+    #[must_use]
+    pub fn detached_work(&self) -> crate::DetachedWork {
+        self.inner.detached_work.clone()
+    }
+
     /// Atomically replaces this service's routes, codecs, handlers, and operation layers.
     ///
     /// The candidate builder is consumed, and only its dialect routes, operation registrations,
