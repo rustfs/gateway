@@ -735,6 +735,9 @@ mod empty_enumeration_tests;
 /// The framework governor sized as RustFS embeds it (rustfs/gateway#1067).
 mod governor_tests;
 
+/// RustFS's 5 GiB ceiling on an upload's object, measured as RustFS measures it (rustfs/rustfs#7635).
+mod upload_ceiling_tests;
+
 /// The slash rule legacy RustFS applies to an object key (rustfs/gateway#1101).
 mod slash_rule_tests;
 

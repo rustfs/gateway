@@ -1105,6 +1105,8 @@ impl S3Service {
                     let body_quota = state.config.body_quota();
                     // The accepted head, not the pre-filter copy: it is the map the codec binds from.
                     let integrity = crate::integrity::resolve_in(body_meta, &body_wire.headers(), body_wire.method(), operation)?;
+                    let object_ceiling = crate::gate::object_ceiling_for(request_body_mode, operation, state.config.config());
+                    let sealed = sealed.with_object_ceiling(object_ceiling);
                     sealed
                         .handoff(
                             &metadata_admission,

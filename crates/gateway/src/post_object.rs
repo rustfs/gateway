@@ -391,7 +391,7 @@ where
         };
         let opened = StreamingRead::new(
             Some(body),
-            None,
+            (None, None),
             (BodyCeilings::streaming(None), self.timeouts, None),
             None,
             BodyDigestObligation::None,

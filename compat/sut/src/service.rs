@@ -101,6 +101,26 @@ pub(crate) fn rustfs_service_config() -> Result<ServiceConfig, Box<dyn std::erro
         .with_request_body_deadlines(body))
 }
 
+/// RustFS's single-request ceiling on an upload's object: 5 GiB (`MAX_SINGLE_PUT_OBJECT_SIZE`,
+/// `crates/config/src/constants/body_limits.rs:73` on rustfs/rustfs `e870a6d25b`).
+pub(crate) const RUSTFS_MAX_SINGLE_UPLOAD_BYTES: u64 = 5 * 1024 * 1024 * 1024;
+
+/// The acceptance-layer ceilings of the RustFS profile: the defaults, with the declared-length
+/// ceiling widened to the framing an aws-chunked upload of RustFS's largest object may carry.
+///
+/// RustFS refuses a `PutObject` or `UploadPart` whose object is larger than 5 GiB with `400
+/// EntityTooLarge` before reading its body, and measures an aws-chunked upload by its decoded
+/// length, so a 5 GiB streaming upload whose framed `Content-Length` is larger is stored
+/// (`rustfs/src/server/http.rs:170`, rustfs/rustfs#7635). The wire's declared-length ceiling counts
+/// the framing, so at its 5 GiB default it refused that upload; `build_service` sets the object
+/// ceiling itself with `ServiceConfig::with_upload_object_ceiling`.
+pub(crate) fn rustfs_limits() -> rustfs_gateway::Limits {
+    rustfs_gateway::Limits {
+        max_body_bytes: rustfs_gateway::max_framed_upload_bytes(RUSTFS_MAX_SINGLE_UPLOAD_BYTES),
+        ..rustfs_gateway::Limits::default()
+    }
+}
+
 /// The framework governor's rates in the RustFS profile: no limit on any layer.
 ///
 /// Legacy RustFS applies no pre-authentication limit of its own. Its optional per-client limit
@@ -233,8 +253,10 @@ pub(crate) fn build_service(
             // And released once the backend deleted the bucket, so the name is free again.
             .op_layer::<dto::DeleteBucket, _>(ReleasedNames::new(Arc::clone(owners))),
     );
-    // No framework deadline, as RustFS runs none.
-    let (builder, _settings) = builder.config(rustfs_service_config()?);
+    // No framework deadline, as RustFS runs none; RustFS's ceiling on an upload's object, and the
+    // wire ceiling widened to the framing that object may carry.
+    let settings = rustfs_service_config()?.with_upload_object_ceiling(RUSTFS_MAX_SINGLE_UPLOAD_BYTES);
+    let (builder, _settings) = builder.limits(rustfs_limits()).config(settings);
     let service = backend
         .register_cors(backend.register_encryption(backend.register_policy(backend.register_acl(
             backend.register_tagging(
