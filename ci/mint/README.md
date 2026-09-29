@@ -21,6 +21,12 @@ ci/mint/run.sh --mode record --local-image "$(cat /tmp/mint-candidate.id)" \
 The workflow builds the image on its native amd64 runner and uploads only the
 aggregate report. It never publishes the image.
 
+The workflow adds `--build-arg MINT_REGISTRY=mirror.gcr.io`: anonymous Docker
+Hub pulls from the shared runner pool are rate-limited (run 36520382963 failed
+on `429 Too Many Requests`). The argument moves only where the pinned digest is
+fetched from; a pull by digest is verified against it, so the bytes are the
+same. Pass it locally too if Docker Hub refuses or cannot be reached.
+
 The recipe fixes the Mint and .NET SDK images by digest, the .NET source archive
 by commit and SHA-256, and all 26 NuGet archives by SHA-256. The archive closure
 includes both implicit runtime packs as well as the dependencies in the two

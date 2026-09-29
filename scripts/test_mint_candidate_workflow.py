@@ -52,6 +52,14 @@ sys.exit(int(os.environ['DOCKER_EXIT']))
                 self.assertEqual(args[:5], ['build', '--platform', 'linux/amd64', '--progress', 'plain'])
                 self.assertEqual(args[-1], 'ci/mint')
 
+    def test_every_mode_fetches_the_pinned_digest_through_the_mirror(self):
+        # Anonymous Docker Hub pulls from the runner pool are rate-limited (run 36520382963).
+        for mode in ('ratchet', 'record', ''):
+            with self.subTest(mode=mode):
+                result, args = self.run_build(mode)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(args[5:7], ['--build-arg', 'MINT_REGISTRY=mirror.gcr.io'])
+
     def test_record_builds_exact_platform_and_local_recipe(self):
         result, args = self.run_build('record')
         self.assertEqual(result.returncode, 0, result.stderr)

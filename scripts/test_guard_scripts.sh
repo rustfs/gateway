@@ -14237,6 +14237,34 @@ mut_mint_sdk_listed_twice() {
 expect_fail check_suites_pinned.sh 'a mint SDK named twice in the census' \
     mut_mint_sdk_listed_twice 'must name each SDK in MINT_SDKS exactly once'
 
+mut_mint_recipe_digest_drifts() {
+    mint_mutate ci/mint/Dockerfile \
+        '\nFROM ${MINT_REGISTRY}/minio/mint@sha256:08a05e68893c68be2a83b6f79556853ed6aa3c6c9e64c823a00853e4e55d2200\n' \
+        '\nFROM ${MINT_REGISTRY}/minio/mint@sha256:1111111111111111111111111111111111111111111111111111111111111111\n'
+}
+expect_fail check_suites_pinned.sh 'the measured mint image built on a digest pins.env does not name' \
+    mut_mint_recipe_digest_drifts 'ci/mint/Dockerfile must build its final stage, and every mint stage'
+
+mut_mint_recipe_final_stage_not_mint() {
+    mint_mutate ci/mint/Dockerfile \
+        '\nFROM ${MINT_REGISTRY}/minio/mint@sha256:08a05e68893c68be2a83b6f79556853ed6aa3c6c9e64c823a00853e4e55d2200\n' \
+        '\nFROM sources\n'
+}
+expect_fail check_suites_pinned.sh 'the measured mint image no longer built on the pinned image' \
+    mut_mint_recipe_final_stage_not_mint 'ci/mint/Dockerfile must build its final stage, and every mint stage'
+
+mut_mint_recipe_default_registry_moved() {
+    mint_mutate ci/mint/Dockerfile 'ARG MINT_REGISTRY=docker.io' 'ARG MINT_REGISTRY=registry.example'
+}
+expect_fail check_suites_pinned.sh 'the mint recipe defaulting to a source pins.env does not name' \
+    mut_mint_recipe_default_registry_moved 'must default MINT_REGISTRY to docker.io'
+
+mut_mint_recipe_deleted() {
+    rm -f ci/mint/Dockerfile
+}
+expect_fail check_suites_pinned.sh "the mint recipe deleted, which must fail rather than skip" \
+    mut_mint_recipe_deleted 'required input is missing: ci/mint/Dockerfile'
+
 mut_mint_workflow_enters_the_pull_request_gate() {
     mint_mutate .github/workflows/e2e-mint.yml 'on:\n  schedule:' 'on:\n  pull_request:\n  schedule:'
 }

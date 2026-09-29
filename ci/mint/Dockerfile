@@ -1,7 +1,15 @@
 # Rebuild the two broken producers without changing the other thirteen SDKs.
 # All network inputs have reviewed content identities. Restore and compilation
 # run offline; the runtime packs are included in the archive closure as well.
-FROM docker.io/minio/mint@sha256:08a05e68893c68be2a83b6f79556853ed6aa3c6c9e64c823a00853e4e55d2200 AS sources
+#
+# MINT_REGISTRY chooses only where the pinned digest is fetched from, never what it is: a pull
+# by digest is verified against that digest, so every registry that serves it serves the same
+# bytes. The default is the canonical ci/mint/pins.env source. e2e-mint.yml passes
+# mirror.gcr.io, Google's Docker Hub cache, because anonymous Docker Hub pulls from the shared
+# runner pool are rate-limited (429 Too Many Requests in run 36520382963).
+# scripts/check_suites_pinned.sh keeps both stages on the pins.env digest.
+ARG MINT_REGISTRY=docker.io
+FROM ${MINT_REGISTRY}/minio/mint@sha256:08a05e68893c68be2a83b6f79556853ed6aa3c6c9e64c823a00853e4e55d2200 AS sources
 ADD --checksum=sha256:af08d0a1ffa13ea9a81023973994520f44b25ebc05176a8c4f6bede2a78a0326 https://codeload.github.com/minio/minio-dotnet/tar.gz/ac5dc79dfdd35b425f98233f55f8227aa705afb9 /source.tar.gz
 COPY patch_producers.py fetch_packages.py dotnet-packages.json /recipe/
 RUN mkdir /src && tar -xzf /source.tar.gz --strip-components=1 -C /src \
@@ -32,7 +40,7 @@ COPY licenses/ /recipe/licenses/
 RUN --network=none python3 /recipe/collect_notices.py /out /feed \
     /recipe/dotnet-packages.json /recipe/licenses /notices
 
-FROM docker.io/minio/mint@sha256:08a05e68893c68be2a83b6f79556853ed6aa3c6c9e64c823a00853e4e55d2200
+FROM ${MINT_REGISTRY}/minio/mint@sha256:08a05e68893c68be2a83b6f79556853ed6aa3c6c9e64c823a00853e4e55d2200
 COPY --from=build /out/ /opt/mint-dotnet/
 COPY --from=sources /src/LICENSE /opt/mint-dotnet/LICENSE
 COPY --from=notices /notices/ /opt/mint-dotnet/notices/
