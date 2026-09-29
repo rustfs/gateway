@@ -13,7 +13,7 @@ AnnotationEntry 6
 AnnotationTableConfigurationResult 6
 BlockedEncryptionTypes 1
 Bucket 4
-BucketLifecycleConfiguration 1
+BucketLifecycleConfiguration 2
 BucketLoggingStatus 1
 Checksum 11
 CommonPrefix 1
@@ -34,6 +34,7 @@ CreateMultipartUploadOutput 14
 CsvInput 7
 CsvOutput 5
 DefaultRetention 4
+DelMarkerExpiration 1
 Delete 2
 DeleteBucketCorsInput 2
 DeleteBucketCorsOutput 0
@@ -63,6 +64,7 @@ DeleteObjectsInput 7
 DeleteObjectsOutput 3
 DeletePublicAccessBlockInput 2
 DeletePublicAccessBlockOutput 0
+DeleteReplication 1
 DeletedObject 4
 Destination 7
 DestinationResult 3
@@ -73,6 +75,7 @@ ErrorDetails 2
 ErrorDocument 1
 EventBridgeConfiguration 0
 EventHoldDuration 2
+ExcludedPrefix 1
 ExistingObjectReplication 1
 FilterRule 2
 GetBucketAbacInput 2
@@ -168,8 +171,8 @@ JournalTableConfigurationResult 5
 JsonInput 1
 JsonOutput 1
 LambdaFunctionConfiguration 4
-LifecycleExpiration 3
-LifecycleRule 9
+LifecycleExpiration 4
+LifecycleRule 10
 LifecycleRuleAndOperator 4
 LifecycleRuleFilter 5
 ListBucketAnalyticsConfigurationsInput 3
@@ -276,7 +279,7 @@ RenameObjectInput 12
 RenameObjectOutput 0
 ReplicaModifications 1
 ReplicationConfiguration 2
-ReplicationRule 9
+ReplicationRule 10
 ReplicationRuleAndOperator 2
 ReplicationRuleFilter 3
 ReplicationTime 2
@@ -319,5 +322,5 @@ UploadPartCopyInput 19
 UploadPartCopyOutput 19
 UploadPartInput 14
 UploadPartOutput 8
-VersioningConfiguration 2
+VersioningConfiguration 4
 WebsiteConfiguration 4

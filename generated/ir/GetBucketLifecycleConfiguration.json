@@ -97,6 +97,25 @@
                                                            "attributes": []
                                                          }
                                                 },
+              "DelMarkerExpiration": {
+                                       "kind": "Structure",
+                                       "fields": [
+                                                   {
+                                                     "name": "Days",
+                                                     "wire_name": "Days",
+                                                     "required": false,
+                                                     "binding": { "kind": "BodyXml" },
+                                                     "type": { "kind": "Integer" },
+                                                     "hot": false,
+                                                     "quirk_refs": []
+                                                   }
+                                                 ],
+                                       "xml": {
+                                                "element_order": ["Days"],
+                                                "empty_value_policy": { "Days": "emit" },
+                                                "attributes": []
+                                              }
+                                     },
               "LifecycleExpiration": {
                                        "kind": "Structure",
                                        "fields": [
@@ -126,14 +145,29 @@
                                                      "type": { "kind": "Boolean" },
                                                      "hot": false,
                                                      "quirk_refs": []
+                                                   },
+                                                   {
+                                                     "name": "ExpiredObjectAllVersions",
+                                                     "wire_name": "ExpiredObjectAllVersions",
+                                                     "required": false,
+                                                     "binding": { "kind": "BodyXml" },
+                                                     "type": { "kind": "Boolean" },
+                                                     "hot": false,
+                                                     "quirk_refs": []
                                                    }
                                                  ],
                                        "xml": {
-                                                "element_order": ["Date", "Days", "ExpiredObjectDeleteMarker"],
+                                                "element_order": [
+                                                                   "Date",
+                                                                   "Days",
+                                                                   "ExpiredObjectDeleteMarker",
+                                                                   "ExpiredObjectAllVersions"
+                                                                 ],
                                                 "empty_value_policy": {
                                                                         "Date": "emit",
                                                                         "Days": "emit",
-                                                                        "ExpiredObjectDeleteMarker": "emit"
+                                                                        "ExpiredObjectDeleteMarker": "emit",
+                                                                        "ExpiredObjectAllVersions": "emit"
                                                                       },
                                                 "attributes": []
                                               }
@@ -147,6 +181,15 @@
                                                "required": false,
                                                "binding": { "kind": "BodyXml" },
                                                "type": { "kind": "Structure", "shape": "LifecycleExpiration" },
+                                               "hot": false,
+                                               "quirk_refs": []
+                                             },
+                                             {
+                                               "name": "DelMarkerExpiration",
+                                               "wire_name": "DelMarkerExpiration",
+                                               "required": false,
+                                               "binding": { "kind": "BodyXml" },
+                                               "type": { "kind": "Structure", "shape": "DelMarkerExpiration" },
                                                "hot": false,
                                                "quirk_refs": []
                                              },
@@ -242,6 +285,7 @@
                                  "xml": {
                                           "element_order": [
                                                              "Expiration",
+                                                             "DelMarkerExpiration",
                                                              "ID",
                                                              "Prefix",
                                                              "Filter",
@@ -253,6 +297,7 @@
                                                            ],
                                           "empty_value_policy": {
                                                                   "Expiration": "emit",
+                                                                  "DelMarkerExpiration": "emit",
                                                                   "ID": "emit",
                                                                   "Prefix": "emit",
                                                                   "Filter": "emit",

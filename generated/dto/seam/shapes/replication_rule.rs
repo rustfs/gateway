@@ -30,7 +30,7 @@ use crate::compat::ConversionError;
 pub fn replication_rule_to_s3s(value: crate::ops::shapes::ReplicationRule) -> Result<s3s::dto::ReplicationRule, ConversionError> {
     Ok(s3s::dto::ReplicationRule {
         delete_marker_replication: value.delete_marker_replication.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::delete_marker_replication::delete_marker_replication_to_s3s(x)?) }).transpose()?,
-        delete_replication: Default::default(),
+        delete_replication: value.delete_replication.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::delete_replication::delete_replication_to_s3s(x)?) }).transpose()?,
         destination: { let x = value.destination; super::super::shapes::destination::destination_to_s3s(x)? },
         existing_object_replication: value.existing_object_replication.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::existing_object_replication::existing_object_replication_to_s3s(x)?) }).transpose()?,
         filter: value.filter.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::replication_rule_filter::replication_rule_filter_to_s3s(x)?) }).transpose()?,
@@ -51,7 +51,7 @@ pub fn replication_rule_to_s3s(value: crate::ops::shapes::ReplicationRule) -> Re
 pub fn replication_rule_from_s3s(value: s3s::dto::ReplicationRule) -> Result<crate::ops::shapes::ReplicationRule, ConversionError> {
     let s3s::dto::ReplicationRule {
         delete_marker_replication,
-        delete_replication: _,
+        delete_replication,
         destination,
         existing_object_replication,
         filter,
@@ -71,5 +71,6 @@ pub fn replication_rule_from_s3s(value: s3s::dto::ReplicationRule) -> Result<cra
         existing_object_replication: existing_object_replication.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::existing_object_replication::existing_object_replication_from_s3s(x)?) }).transpose()?,
         destination: { let x = destination; super::super::shapes::destination::destination_from_s3s(x)? },
         delete_marker_replication: delete_marker_replication.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::delete_marker_replication::delete_marker_replication_from_s3s(x)?) }).transpose()?,
+        delete_replication: delete_replication.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::delete_replication::delete_replication_from_s3s(x)?) }).transpose()?,
     })
 }

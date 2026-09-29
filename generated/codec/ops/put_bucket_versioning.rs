@@ -85,6 +85,17 @@ impl OperationCodec for dto::PutBucketVersioning {
     }
 }
 
+/// Reads one `ExcludedPrefix` element. Members are matched by local name, so a namespace-prefixed
+/// body and a bare one decode identically.
+fn read_excluded_prefix(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::ExcludedPrefix, CodecError> {
+    let mut shape = dto::ExcludedPrefix { ..Default::default() };
+    if let Some(raw) = node.child_text("Prefix") {
+        shape.prefix = Some(raw.to_owned());
+    }
+    value::exit(shape.check_required())?;
+    Ok(shape)
+}
+
 /// Reads one `VersioningConfiguration` element. Members are matched by local name, so a namespace-prefixed
 /// body and a bare one decode identically.
 fn read_versioning_configuration(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::VersioningConfiguration, CodecError> {
@@ -94,6 +105,12 @@ fn read_versioning_configuration(node: &rustfs_gateway_xml::XmlNode) -> Result<d
     }
     if let Some(raw) = node.child_text("Status") {
         shape.status = Some(dto::Status::custom(raw.to_owned()));
+    }
+    for item in node.children_named("ExcludedPrefixes") {
+        shape.excluded_prefixes.push(read_excluded_prefix(item)?);
+    }
+    if let Some(raw) = node.child_text("ExcludeFolders") {
+        shape.exclude_folders = Some(value::boolean(raw, "ExcludeFolders")?);
     }
     value::exit(shape.check_required())?;
     Ok(shape)

@@ -35,6 +35,8 @@ pub struct LifecycleExpiration {
     pub days: Option<i32>,
     /// Wire `ExpiredObjectDeleteMarker`, bound as BodyXml. Optional.
     pub expired_object_delete_marker: Option<bool>,
+    /// Wire `ExpiredObjectAllVersions`, bound as BodyXml. Optional.
+    pub expired_object_all_versions: Option<bool>,
 }
 
 impl LifecycleExpiration {

@@ -29,7 +29,7 @@ use crate::compat::ConversionError;
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
 pub fn bucket_lifecycle_configuration_to_s3s(value: crate::ops::shapes::BucketLifecycleConfiguration) -> Result<s3s::dto::BucketLifecycleConfiguration, ConversionError> {
     Ok(s3s::dto::BucketLifecycleConfiguration {
-        expiry_updated_at: Default::default(),
+        expiry_updated_at: value.expiry_updated_at.map(|x| -> Result<_, ConversionError> { Ok(leaf::timestamp_to_s3s("expiry_updated_at", x)?) }).transpose()?,
         rules: { let x = value.rules; x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::lifecycle_rule::lifecycle_rule_to_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()? },
     })
 }

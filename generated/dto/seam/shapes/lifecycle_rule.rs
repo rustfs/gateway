@@ -30,7 +30,7 @@ use crate::compat::ConversionError;
 pub fn lifecycle_rule_from_s3s(value: s3s::dto::LifecycleRule) -> Result<crate::ops::shapes::LifecycleRule, ConversionError> {
     let s3s::dto::LifecycleRule {
         abort_incomplete_multipart_upload,
-        del_marker_expiration: _,
+        del_marker_expiration,
         expiration,
         filter,
         id,
@@ -42,6 +42,7 @@ pub fn lifecycle_rule_from_s3s(value: s3s::dto::LifecycleRule) -> Result<crate::
     } = value;
     Ok(crate::ops::shapes::LifecycleRule {
         expiration: expiration.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::lifecycle_expiration::lifecycle_expiration_from_s3s(x)?) }).transpose()?,
+        del_marker_expiration: del_marker_expiration.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::del_marker_expiration::del_marker_expiration_from_s3s(x)?) }).transpose()?,
         id,
         prefix,
         filter: filter.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::lifecycle_rule_filter::lifecycle_rule_filter_from_s3s(x)?) }).transpose()?,
@@ -62,7 +63,7 @@ pub fn lifecycle_rule_from_s3s(value: s3s::dto::LifecycleRule) -> Result<crate::
 pub fn lifecycle_rule_to_s3s(value: crate::ops::shapes::LifecycleRule) -> Result<s3s::dto::LifecycleRule, ConversionError> {
     Ok(s3s::dto::LifecycleRule {
         abort_incomplete_multipart_upload: value.abort_incomplete_multipart_upload.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::abort_incomplete_multipart_upload::abort_incomplete_multipart_upload_to_s3s(x)?) }).transpose()?,
-        del_marker_expiration: Default::default(),
+        del_marker_expiration: value.del_marker_expiration.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::del_marker_expiration::del_marker_expiration_to_s3s(x)?) }).transpose()?,
         expiration: value.expiration.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::lifecycle_expiration::lifecycle_expiration_to_s3s(x)?) }).transpose()?,
         filter: value.filter.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::lifecycle_rule_filter::lifecycle_rule_filter_to_s3s(x)?) }).transpose()?,
         id: value.id,

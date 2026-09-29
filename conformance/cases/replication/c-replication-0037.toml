@@ -1,0 +1,80 @@
+# c-replication-0037 — MinIO bucket-configuration extensions RustFS reads (rustfs/backlog#1752)
+#
+# Schema dimensions exercised: a refused write, an accepted write and its read-back
+
+[case]
+id = "c-replication-0037"
+schema_version = 1
+title = "A MinIO delete replication without a status is refused, and one with a status is stored and read back"
+rationale = """
+RustFS replicates deletes according to the MinIO DeleteReplication element of a rule, which the legacy stack decodes and writes. A gateway that skipped it installed a rule that never replicates deletes while answering the write as a success. An element without its Status is refused as MalformedXML, as the legacy stack refuses it, rather than read as absent; a complete one survives the write and comes back from the read exactly as written."""
+polarity = "negative"
+operation = "PutBucketReplication"
+tags = ["compatibility", "replication", "error-shape"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://github.com/rustfs/rustfs/blob/719000460b231792b52314df321f0d385d03dff4/crates/ecstore/src/bucket/replication/replication_pool.rs"
+summary = "RustFS decides whether a delete is replicated from the rule's DeleteReplication status."
+kind = "other"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-replication"
+versioning = "enabled"
+
+[[exchanges]]
+name = "status-less-delete-replication-is-refused"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-replication?replication"
+headers = { "content-type" = "application/xml", "content-md5" = "GW1yBajWkzb5dfrJYNF4OQ==" }
+body = { utf8 = '<ReplicationConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Role>arn:aws:iam::111122223333:role/replication</Role><Rule><ID>replicate-logs</ID><Priority>1</Priority><Filter><Prefix>logs/</Prefix></Filter><DeleteMarkerReplication><Status>Enabled</Status></DeleteMarkerReplication><DeleteReplication></DeleteReplication><Status>Enabled</Status><Destination><Bucket>arn:aws:s3:::replica-bucket</Bucket></Destination></Rule></ReplicationConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "MalformedXML"
+request_id_present = true
+
+[[exchanges]]
+name = "delete-replication-is-stored"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-replication?replication"
+headers = { "content-type" = "application/xml", "content-md5" = "YZztkgWMRd7sJUzDCcv2/A==" }
+body = { utf8 = '<ReplicationConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Role>arn:aws:iam::111122223333:role/replication</Role><Rule><ID>replicate-logs</ID><Priority>1</Priority><Filter><Prefix>logs/</Prefix></Filter><DeleteMarkerReplication><Status>Enabled</Status></DeleteMarkerReplication><DeleteReplication><Status>Enabled</Status></DeleteReplication><Status>Enabled</Status><Destination><Bucket>arn:aws:s3:::replica-bucket</Bucket></Destination></Rule></ReplicationConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[[exchanges]]
+name = "read-back-carries-it"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-replication?replication"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+contains_utf8 = ["<DeleteReplication><Status>Enabled</Status></DeleteReplication>"]

@@ -1671,8 +1671,9 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 **Body shapes**
 
 - `AbortIncompleteMultipartUpload` (Structure) — `DaysAfterInitiation: Integer`
-- `LifecycleExpiration` (Structure) — `Date: Timestamp(Iso8601)`, `Days: Integer`, `ExpiredObjectDeleteMarker: Boolean`
-- `LifecycleRule` (Structure) — `Expiration: Structure(LifecycleExpiration)`, `ID: String`, `Prefix: String`, `Filter: Structure(LifecycleRuleFilter)`, `Status: StringEnum`, `Transitions: List<Structure(Transition)>(flattened)`, `NoncurrentVersionTransitions: List<Structure(NoncurrentVersionTransition)>(flattened)`, `NoncurrentVersionExpiration: Structure(NoncurrentVersionExpiration)`, `AbortIncompleteMultipartUpload: Structure(AbortIncompleteMultipartUpload)`
+- `DelMarkerExpiration` (Structure) — `Days: Integer`
+- `LifecycleExpiration` (Structure) — `Date: Timestamp(Iso8601)`, `Days: Integer`, `ExpiredObjectDeleteMarker: Boolean`, `ExpiredObjectAllVersions: Boolean`
+- `LifecycleRule` (Structure) — `Expiration: Structure(LifecycleExpiration)`, `DelMarkerExpiration: Structure(DelMarkerExpiration)`, `ID: String`, `Prefix: String`, `Filter: Structure(LifecycleRuleFilter)`, `Status: StringEnum`, `Transitions: List<Structure(Transition)>(flattened)`, `NoncurrentVersionTransitions: List<Structure(NoncurrentVersionTransition)>(flattened)`, `NoncurrentVersionExpiration: Structure(NoncurrentVersionExpiration)`, `AbortIncompleteMultipartUpload: Structure(AbortIncompleteMultipartUpload)`
 - `LifecycleRuleAndOperator` (Structure) — `Prefix: String`, `Tags: List<Structure(Tag)>(flattened)`, `ObjectSizeGreaterThan: Long`, `ObjectSizeLessThan: Long`
 - `LifecycleRuleFilter` (Structure) — `Prefix: String`, `Tag: Structure(Tag)`, `ObjectSizeGreaterThan: Long`, `ObjectSizeLessThan: Long`, `And: Structure(LifecycleRuleAndOperator)`
 - `NoncurrentVersionExpiration` (Structure) — `NoncurrentDays: Integer`, `NewerNoncurrentVersions: Integer`
@@ -2117,13 +2118,14 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 
 - `AccessControlTranslation` (Structure) — `Owner: String`
 - `DeleteMarkerReplication` (Structure) — `Status: StringEnum`
+- `DeleteReplication` (Structure) — `Status: StringEnum`
 - `Destination` (Structure) — `Bucket: String`, `Account: String`, `StorageClass: StringEnum`, `AccessControlTranslation: Structure(AccessControlTranslation)`, `EncryptionConfiguration: Structure(EncryptionConfiguration)`, `ReplicationTime: Structure(ReplicationTime)`, `Metrics: Structure(Metrics)`
 - `EncryptionConfiguration` (Structure) — `ReplicaKmsKeyID: String`
 - `ExistingObjectReplication` (Structure) — `Status: StringEnum`
 - `Metrics` (Structure) — `Status: StringEnum`, `EventThreshold: Structure(ReplicationTimeValue)`
 - `ReplicaModifications` (Structure) — `Status: StringEnum`
 - `ReplicationConfiguration` (Structure) — `Role: String`, `Rules: List<Structure(ReplicationRule)>(flattened)`
-- `ReplicationRule` (Structure) — `ID: String`, `Priority: Integer`, `Prefix: String`, `Filter: Structure(ReplicationRuleFilter)`, `Status: StringEnum`, `SourceSelectionCriteria: Structure(SourceSelectionCriteria)`, `ExistingObjectReplication: Structure(ExistingObjectReplication)`, `Destination: Structure(Destination)`, `DeleteMarkerReplication: Structure(DeleteMarkerReplication)`
+- `ReplicationRule` (Structure) — `ID: String`, `Priority: Integer`, `Prefix: String`, `Filter: Structure(ReplicationRuleFilter)`, `Status: StringEnum`, `SourceSelectionCriteria: Structure(SourceSelectionCriteria)`, `ExistingObjectReplication: Structure(ExistingObjectReplication)`, `Destination: Structure(Destination)`, `DeleteMarkerReplication: Structure(DeleteMarkerReplication)`, `DeleteReplication: Structure(DeleteReplication)`
 - `ReplicationRuleAndOperator` (Structure) — `Prefix: String`, `Tags: List<Structure(Tag)>(flattened)`
 - `ReplicationRuleFilter` (Structure) — `Prefix: String`, `Tag: Structure(Tag)`, `And: Structure(ReplicationRuleAndOperator)`
 - `ReplicationTime` (Structure) — `Status: StringEnum`, `Time: Structure(ReplicationTimeValue)`
@@ -3717,9 +3719,10 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 **Body shapes**
 
 - `AbortIncompleteMultipartUpload` (Structure) — `DaysAfterInitiation: Integer`
-- `BucketLifecycleConfiguration` (Structure) — `Rules: List<Structure(LifecycleRule)>(flattened)`
-- `LifecycleExpiration` (Structure) — `Date: Timestamp(Iso8601)`, `Days: Integer`, `ExpiredObjectDeleteMarker: Boolean`
-- `LifecycleRule` (Structure) — `Expiration: Structure(LifecycleExpiration)`, `ID: String`, `Prefix: String`, `Filter: Structure(LifecycleRuleFilter)`, `Status: StringEnum`, `Transitions: List<Structure(Transition)>(flattened)`, `NoncurrentVersionTransitions: List<Structure(NoncurrentVersionTransition)>(flattened)`, `NoncurrentVersionExpiration: Structure(NoncurrentVersionExpiration)`, `AbortIncompleteMultipartUpload: Structure(AbortIncompleteMultipartUpload)`
+- `BucketLifecycleConfiguration` (Structure) — `Rules: List<Structure(LifecycleRule)>(flattened)`, `ExpiryUpdatedAt: Timestamp(Iso8601)`
+- `DelMarkerExpiration` (Structure) — `Days: Integer`
+- `LifecycleExpiration` (Structure) — `Date: Timestamp(Iso8601)`, `Days: Integer`, `ExpiredObjectDeleteMarker: Boolean`, `ExpiredObjectAllVersions: Boolean`
+- `LifecycleRule` (Structure) — `Expiration: Structure(LifecycleExpiration)`, `DelMarkerExpiration: Structure(DelMarkerExpiration)`, `ID: String`, `Prefix: String`, `Filter: Structure(LifecycleRuleFilter)`, `Status: StringEnum`, `Transitions: List<Structure(Transition)>(flattened)`, `NoncurrentVersionTransitions: List<Structure(NoncurrentVersionTransition)>(flattened)`, `NoncurrentVersionExpiration: Structure(NoncurrentVersionExpiration)`, `AbortIncompleteMultipartUpload: Structure(AbortIncompleteMultipartUpload)`
 - `LifecycleRuleAndOperator` (Structure) — `Prefix: String`, `Tags: List<Structure(Tag)>(flattened)`, `ObjectSizeGreaterThan: Long`, `ObjectSizeLessThan: Long`
 - `LifecycleRuleFilter` (Structure) — `Prefix: String`, `Tag: Structure(Tag)`, `ObjectSizeGreaterThan: Long`, `ObjectSizeLessThan: Long`, `And: Structure(LifecycleRuleAndOperator)`
 - `NoncurrentVersionExpiration` (Structure) — `NoncurrentDays: Integer`, `NewerNoncurrentVersions: Integer`
@@ -3940,13 +3943,14 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 
 - `AccessControlTranslation` (Structure) — `Owner: String`
 - `DeleteMarkerReplication` (Structure) — `Status: StringEnum`
+- `DeleteReplication` (Structure) — `Status: StringEnum`
 - `Destination` (Structure) — `Bucket: String`, `Account: String`, `StorageClass: StringEnum`, `AccessControlTranslation: Structure(AccessControlTranslation)`, `EncryptionConfiguration: Structure(EncryptionConfiguration)`, `ReplicationTime: Structure(ReplicationTime)`, `Metrics: Structure(Metrics)`
 - `EncryptionConfiguration` (Structure) — `ReplicaKmsKeyID: String`
 - `ExistingObjectReplication` (Structure) — `Status: StringEnum`
 - `Metrics` (Structure) — `Status: StringEnum`, `EventThreshold: Structure(ReplicationTimeValue)`
 - `ReplicaModifications` (Structure) — `Status: StringEnum`
 - `ReplicationConfiguration` (Structure) — `Role: String`, `Rules: List<Structure(ReplicationRule)>(flattened)`
-- `ReplicationRule` (Structure) — `ID: String`, `Priority: Integer`, `Prefix: String`, `Filter: Structure(ReplicationRuleFilter)`, `Status: StringEnum`, `SourceSelectionCriteria: Structure(SourceSelectionCriteria)`, `ExistingObjectReplication: Structure(ExistingObjectReplication)`, `Destination: Structure(Destination)`, `DeleteMarkerReplication: Structure(DeleteMarkerReplication)`
+- `ReplicationRule` (Structure) — `ID: String`, `Priority: Integer`, `Prefix: String`, `Filter: Structure(ReplicationRuleFilter)`, `Status: StringEnum`, `SourceSelectionCriteria: Structure(SourceSelectionCriteria)`, `ExistingObjectReplication: Structure(ExistingObjectReplication)`, `Destination: Structure(Destination)`, `DeleteMarkerReplication: Structure(DeleteMarkerReplication)`, `DeleteReplication: Structure(DeleteReplication)`
 - `ReplicationRuleAndOperator` (Structure) — `Prefix: String`, `Tags: List<Structure(Tag)>(flattened)`
 - `ReplicationRuleFilter` (Structure) — `Prefix: String`, `Tag: Structure(Tag)`, `And: Structure(ReplicationRuleAndOperator)`
 - `ReplicationTime` (Structure) — `Status: StringEnum`, `Time: Structure(ReplicationTimeValue)`
@@ -4099,7 +4103,8 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 
 **Body shapes**
 
-- `VersioningConfiguration` (Structure) — `MFADelete: StringEnum`, `Status: StringEnum`
+- `ExcludedPrefix` (Structure) — `Prefix: String`
+- `VersioningConfiguration` (Structure) — `MFADelete: StringEnum`, `Status: StringEnum`, `ExcludedPrefixes: List<Structure(ExcludedPrefix)>(flattened)`, `ExcludeFolders: Boolean`
 
 ### PutBucketWebsite
 

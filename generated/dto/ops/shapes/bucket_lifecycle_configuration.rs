@@ -31,6 +31,8 @@
 pub struct BucketLifecycleConfiguration {
     /// Wire `Rule`, bound as BodyXml. Required.
     pub rules: Vec<crate::ops::shapes::LifecycleRule>,
+    /// Wire `ExpiryUpdatedAt`, bound as BodyXml. Optional.
+    pub expiry_updated_at: Option<crate::Timestamp>,
 }
 
 impl BucketLifecycleConfiguration {

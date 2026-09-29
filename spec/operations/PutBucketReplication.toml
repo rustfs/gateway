@@ -137,6 +137,23 @@ hot = false
 values = ["Enabled", "Disabled"]
 quirks = []
 
+[shape.DeleteReplication]
+kind = "Structure"
+element_order = ["Status"]
+
+[shape.DeleteReplication.empty_value]
+Status = "emit"
+
+[[shape.DeleteReplication.field]]
+name = "Status"
+wire_name = "Status"
+binding = "BodyXml"
+type = "StringEnum"
+required = true
+hot = false
+values = ["Enabled", "Disabled"]
+quirks = []
+
 [shape.Destination]
 kind = "Structure"
 element_order = ["Bucket", "Account", "StorageClass", "AccessControlTranslation", "EncryptionConfiguration", "ReplicationTime", "Metrics"]
@@ -319,7 +336,7 @@ quirks = []
 
 [shape.ReplicationRule]
 kind = "Structure"
-element_order = ["ID", "Priority", "Prefix", "Filter", "Status", "SourceSelectionCriteria", "ExistingObjectReplication", "Destination", "DeleteMarkerReplication"]
+element_order = ["ID", "Priority", "Prefix", "Filter", "Status", "SourceSelectionCriteria", "ExistingObjectReplication", "Destination", "DeleteMarkerReplication", "DeleteReplication"]
 
 [shape.ReplicationRule.empty_value]
 ID = "emit"
@@ -331,6 +348,7 @@ SourceSelectionCriteria = "emit"
 ExistingObjectReplication = "emit"
 Destination = "emit"
 DeleteMarkerReplication = "emit"
+DeleteReplication = "emit"
 
 [[shape.ReplicationRule.field]]
 name = "ID"
@@ -410,6 +428,15 @@ name = "DeleteMarkerReplication"
 wire_name = "DeleteMarkerReplication"
 binding = "BodyXml"
 type = "Structure(DeleteMarkerReplication)"
+required = false
+hot = false
+quirks = []
+
+[[shape.ReplicationRule.field]]
+name = "DeleteReplication"
+wire_name = "DeleteReplication"
+binding = "BodyXml"
+type = "Structure(DeleteReplication)"
 required = false
 hot = false
 quirks = []

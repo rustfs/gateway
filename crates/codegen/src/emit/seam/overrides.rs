@@ -206,18 +206,12 @@ pub const MEMBERS: &[MemberOverride] = &[
     ("UploadPartCopyOutput", "checksum_xxhash64", Rule::Nested("copy_part_result")),
     ("UploadPartCopyOutput", "checksum_xxhash3", Rule::Nested("copy_part_result")),
     ("UploadPartCopyOutput", "checksum_xxhash128", Rule::Nested("copy_part_result")),
-    // MinIO extensions s3s decodes from `x-minio-*` / `?versionId=` (MINIO) or from bucket
-    // configuration XML (MINIO_XML). The seam leaves them at their default: the adapter fills the
-    // header ones, and the XML ones are open divergences.
+    // MinIO extensions s3s decodes from `x-minio-*` / `?versionId=`. The seam leaves them at their
+    // default: the adapter fills them from the request headers. (The bucket-configuration XML ones
+    // are gateway members since rd-cfg-0002..0006 and convert like any other.)
     ("CopyObjectInput", "version_id", Rule::S3sOnly(MINIO)),
     ("CreateMultipartUploadInput", "version_id", Rule::S3sOnly(MINIO)),
     ("DeleteBucketInput", "force_delete", Rule::S3sOnly(MINIO)),
-    ("LifecycleExpiration", "expired_object_all_versions", Rule::S3sOnly(MINIO_XML)),
-    ("LifecycleRule", "del_marker_expiration", Rule::S3sOnly(MINIO_XML)),
-    ("ReplicationRule", "delete_replication", Rule::S3sOnly(MINIO_XML)),
-    ("VersioningConfiguration", "exclude_folders", Rule::S3sOnly(MINIO_XML)),
-    ("VersioningConfiguration", "excluded_prefixes", Rule::S3sOnly(MINIO_XML)),
-    ("BucketLifecycleConfiguration", "expiry_updated_at", Rule::S3sOnly(MINIO_XML)),
     // Members of AWS model revisions the gateway model does not carry; RustFS ignores the inputs
     // and sets none of the outputs.
     ("CopyObjectInput", "annotation_directive", Rule::S3sOnly(NOT_IN_MODEL)),
@@ -235,5 +229,4 @@ pub const MEMBERS: &[MemberOverride] = &[
 const SEALED: &str = "the gateway authorizes the copy source as a derived resource and clears the input member";
 const EVENT_HOLD: &str = "an Object Lock event hold, which no pinned s3s shape holds and RustFS does not store";
 const MINIO: &str = "a MinIO extension the adapter fills from the request headers";
-const MINIO_XML: &str = "a MinIO XML extension the gateway model does not decode or encode; a divergence to rule before the bucket-configuration operations move (rustfs/gateway#967)";
 const NOT_IN_MODEL: &str = "an AWS model member the gateway model does not carry and RustFS neither reads nor sets";

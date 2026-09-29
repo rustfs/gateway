@@ -66,6 +66,7 @@ pub(crate) mod s3s_0_17_0 {
 
     pub(crate) mod context;
     mod copy_result;
+    mod minio_config;
     mod put_bucket_versioning;
     mod put_object;
 }

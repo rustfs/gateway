@@ -249,6 +249,8 @@ pub struct ShapeOverlay {
     pub attributes: Vec<AttributeOverlay>,
     /// Field-level overrides.
     pub fields: Vec<FieldOverlay>,
+    /// The shape has no model shape behind it; every field is synthesized.
+    pub synthesize: bool,
 }
 
 /// One XML attribute declared on the element a shape occupies.
@@ -759,6 +761,7 @@ fn shape_overlay(name: &str, table: &Toml) -> Result<ShapeOverlay> {
         drop: list(table, "drop", &what)?,
         attributes: attribute_overlays(table, &what)?,
         fields: field_overlays(table, &what, false)?,
+        synthesize: opt_bool(table, "synthesize").unwrap_or(false),
     })
 }
 

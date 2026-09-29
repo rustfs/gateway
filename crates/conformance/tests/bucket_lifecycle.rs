@@ -577,6 +577,7 @@ fn n_a_deleted_buckets_seven_documents_and_its_acl_do_not_survive_a_recreation()
                 }),
                 ..dto::LifecycleRule::default()
             }],
+            ..dto::BucketLifecycleConfiguration::default()
         },
         None,
     );

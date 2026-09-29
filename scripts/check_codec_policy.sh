@@ -107,11 +107,13 @@ quirks = re.search(r'^quirks = \[(.*?)\]$', case, re.MULTILINE)
 if quirks is None or set(re.findall(r'"([^"]+)"', quirks.group(1))) != {"q-lc-0006", "q-lc-0015"}:
     fail("c-lifecycle-0018 no longer binds both leniency and dialect selection")
 not_contains = re.search(r'^not_contains_utf8 = \[(.*?)\]$', case, re.MULTILINE)
-if not_contains is None or set(re.findall(r'"([^"]+)"', not_contains.group(1))) != {
-    "DelMarkerExpiration",
-    "FutureKnob",
-}:
-    fail("c-lifecycle-0018 no longer proves the unselected codec drops both unknown children")
+if not_contains is None or set(re.findall(r'"([^"]+)"', not_contains.group(1))) != {"FutureKnob"}:
+    fail("c-lifecycle-0018 no longer proves the codec drops an unknown child")
+contains = re.search(r'^contains_utf8 = \[(.*?)\]$', case, re.MULTILINE)
+if contains is None or not any(
+    "<DelMarkerExpiration>" in value for value in re.findall(r'"([^"]+)"', contains.group(1))
+):
+    fail("c-lifecycle-0018 no longer proves the codec keeps MinIO's DelMarkerExpiration (ADR-0033)")
 
 overlay = source("model/overlays/quirks/lifecycle.toml")
 records = re.findall(r'\[\[quirk\]\]\n(.*?)(?=\n\[\[quirk\]\]|\Z)', overlay, re.DOTALL)

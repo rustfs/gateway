@@ -25,4 +25,5 @@ mod lower_tests;
 mod overlay_tests;
 mod route_tests;
 mod selector_param_tests;
+mod shape_member_tests;
 mod toml_tests;

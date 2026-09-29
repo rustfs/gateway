@@ -1,9 +1,9 @@
 [case]
 id = "c-lifecycle-0018"
 schema_version = 3
-title = "An unselected lifecycle dialect skips vendor and future elements without losing known members"
+title = "Lifecycle keeps MinIO's DelMarkerExpiration and skips an unknown future element without losing known members"
 rationale = """
-The lenient HTTP read is a durability promise: a lifecycle document is stored configuration, re-parsed by every future release, and other implementations extend the rule vocabulary. This fixture deliberately selects no vendor dialect, so both MinIO's registered DelMarkerExpiration spelling and an unregistered FutureKnob are skipped while every known member survives. The selected persisted path is exercised separately by rustfs-gateway-dialect-minio, where DelMarkerExpiration round-trips and FutureKnob blocks replacement; keeping this negative control proves that registering one dialect does not silently make its behavior global."""
+The lenient HTTP read is a durability promise: a lifecycle document is stored configuration, re-parsed by every future release, and other implementations extend the rule vocabulary. An unregistered FutureKnob is therefore skipped while every known member survives. MinIO's DelMarkerExpiration is not unknown: RustFS reads it, and ADR-0033 makes it a member of every assembly's lifecycle codec, so it is decoded, stored and written back in its model slot after Expiration. The persisted-XML registration path is exercised separately by rustfs-gateway-dialect-minio."""
 polarity = "negative"
 operation = "PutBucketLifecycleConfiguration"
 tags = ["lifecycle", "xml"]
@@ -46,7 +46,7 @@ status = 200
 connection_after = "open"
 
 [[exchanges]]
-name = "read-back-known-members-only"
+name = "read-back-known-members"
 
 [exchanges.request]
 method = "GET"
@@ -63,4 +63,5 @@ connection_after = "open"
 
 [exchanges.expect.body]
 golden = "goldens/c-lifecycle-0018.xml"
-not_contains_utf8 = ["DelMarkerExpiration", "FutureKnob"]
+contains_utf8 = ["<DelMarkerExpiration><Days>7</Days></DelMarkerExpiration>"]
+not_contains_utf8 = ["FutureKnob"]

@@ -652,7 +652,7 @@ pub(super) fn requests() -> Vec<RequestRow> {
         row(
             "put-versioning-excluded-prefixes",
             RawRequest::put("/bkt?versioning", b"<VersioningConfiguration><Status>Enabled</Status><ExcludedPrefixes><Prefix>tmp/</Prefix></ExcludedPrefixes><ExcludeFolders>true</ExcludeFolders></VersioningConfiguration>").header("content-md5", "Wa47PRGv0uNTKQpT3bkHzg=="),
-            &["kd-decode-0051"],
+            &[],
         ),
         // ── a body that ends in an error on one stack ──
         row("put-checksum-mismatch", RawRequest::put("/bkt/k", b"hello world").header("x-amz-checksum-crc32", "AAAAAA=="), &["kd-decode-0052"]),

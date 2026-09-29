@@ -68,7 +68,7 @@ const MINI_MODEL: &str = r#"{
   }
 }"#;
 
-const MINI_OVERLAY: &str = r#"
+pub(super) const MINI_OVERLAY: &str = r#"
 include = ["GetThing"]
 
 [op.GetThing]
@@ -77,7 +77,7 @@ auth_action = "s3:GetThing"
 output_required = ["Name"]
 "#;
 
-fn load(overlay_text: &str) -> crate::Result<crate::Lowered> {
+pub(super) fn load(overlay_text: &str) -> crate::Result<crate::Lowered> {
     let model = Model::from_json(MINI_MODEL)?;
     let overlay = overlay_from(overlay_text)?;
     lower(&model, &overlay)

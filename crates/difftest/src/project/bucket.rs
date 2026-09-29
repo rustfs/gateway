@@ -176,6 +176,22 @@ gateway_projection! {
     }
     |fields| {
         let configuration = &input.versioning_configuration;
+        fields.opt("versioning_configuration.exclude_folders", configuration.exclude_folders.as_ref());
+        fields.set(
+            "versioning_configuration.excluded_prefixes",
+            if configuration.excluded_prefixes.is_empty() {
+                crate::fields::FieldValue::Absent
+            } else {
+                crate::fields::FieldValue::Present(
+                    configuration
+                        .excluded_prefixes
+                        .iter()
+                        .map(|entry| entry.prefix.clone().unwrap_or_default())
+                        .collect::<Vec<_>>()
+                        .join("\n"),
+                )
+            },
+        );
         fields.opt("versioning_configuration.mfa_delete", configuration.mfa_delete.as_ref());
         fields.opt("versioning_configuration.status", configuration.status.as_ref());
         None
@@ -190,7 +206,7 @@ oracle_projection! {
     }
     |fields| {
         // The pinned s3s is built with `minio`, whose versioning document carries RustFS's two
-        // prefix-exclusion members; the gateway model has neither.
+        // prefix-exclusion members; the gateway carries both too (rd-cfg-0006).
         let oracle::VersioningConfiguration {
             exclude_folders,
             excluded_prefixes,

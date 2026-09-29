@@ -167,6 +167,29 @@ input_hot = ["VersioningConfiguration"]
 output_hot = []
 quirk_refs = ["q-ver-0002", "q-ver-0003", "q-ver-0004"]
 
+# MinIO's versioning extensions, which RustFS reads (prefixes and folders excluded from versioning)
+# and the legacy stack (built with MinIO support) decodes: each `<ExcludedPrefixes>` element holds one `<Prefix>` and
+# repeats with no wrapper. The generic decoder skipped both (rd-cfg-0006; rustfs/backlog#1752).
+[shape.VersioningConfiguration]
+
+[[shape.VersioningConfiguration.field]]
+name = "ExcludedPrefixes"
+synthesize = true
+type = "FlattenedList:ExcludedPrefix"
+
+[[shape.VersioningConfiguration.field]]
+name = "ExcludeFolders"
+synthesize = true
+type = "Boolean"
+
+[shape.ExcludedPrefix]
+synthesize = true
+
+[[shape.ExcludedPrefix.field]]
+name = "Prefix"
+synthesize = true
+type = "String"
+
 # =============================================================================================
 # Nested shapes owned by this family
 # =============================================================================================

@@ -116,6 +116,20 @@ fn read_bucket_lifecycle_configuration(
     if shape.rules.is_empty() {
         return Err(CodecError::malformed_xml("the body carries no entry for a member that requires one").about("Rules"));
     }
+    if let Some(raw) = node.child_text("ExpiryUpdatedAt") {
+        shape.expiry_updated_at = Some(value::timestamp(raw, TimestampFormat::Iso8601, "ExpiryUpdatedAt")?);
+    }
+    value::exit(shape.check_required())?;
+    Ok(shape)
+}
+
+/// Reads one `DelMarkerExpiration` element. Members are matched by local name, so a namespace-prefixed
+/// body and a bare one decode identically.
+fn read_del_marker_expiration(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::DelMarkerExpiration, CodecError> {
+    let mut shape = dto::DelMarkerExpiration { ..Default::default() };
+    if let Some(raw) = node.child_text("Days") {
+        shape.days = Some(value::integer(raw, "Days")?);
+    }
     value::exit(shape.check_required())?;
     Ok(shape)
 }
@@ -133,6 +147,9 @@ fn read_lifecycle_expiration(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::
     if let Some(raw) = node.child_text("ExpiredObjectDeleteMarker") {
         shape.expired_object_delete_marker = Some(value::boolean(raw, "ExpiredObjectDeleteMarker")?);
     }
+    if let Some(raw) = node.child_text("ExpiredObjectAllVersions") {
+        shape.expired_object_all_versions = Some(value::boolean(raw, "ExpiredObjectAllVersions")?);
+    }
     value::exit(shape.check_required())?;
     Ok(shape)
 }
@@ -143,6 +160,9 @@ fn read_lifecycle_rule(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::Lifecy
     let mut shape = dto::LifecycleRule { ..Default::default() };
     if let Some(child) = node.child("Expiration") {
         shape.expiration = Some(read_lifecycle_expiration(child)?);
+    }
+    if let Some(child) = node.child("DelMarkerExpiration") {
+        shape.del_marker_expiration = Some(read_del_marker_expiration(child)?);
     }
     if let Some(raw) = node.child_text("ID") {
         shape.id = Some(raw.to_owned());
