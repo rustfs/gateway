@@ -85,8 +85,11 @@ pub fn output_from_s3s(output: s3s::dto::CompleteMultipartUploadOutput) -> Resul
         ssekms_key_id,
         server_side_encryption,
         version_id,
-        future: _,
+        future,
     } = output;
+    if future.is_some() {
+        return Err(ConversionError { field: "future", reason: "a runtime value with no wire form, which the gateway output cannot carry" });
+    }
     Ok(crate::ops::complete_multipart_upload::Output {
         location,
         bucket: bucket.map(|x| -> Result<_, ConversionError> { Ok(leaf::bucket_name("bucket", x)?) }).transpose()?,

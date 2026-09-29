@@ -133,6 +133,30 @@ pub(super) fn rows() -> Vec<SeamRow> {
             Expect::FailsClosed(finding),
         ));
     }
+    for (name, target, body, finding) in [
+        (
+            "put-object-lock-configuration-default-event-hold",
+            "/bucket?object-lock",
+            "<ObjectLockConfiguration><ObjectLockEnabled>Enabled</ObjectLockEnabled><Rule><DefaultRetention><Mode>GOVERNANCE</Mode>\
+             <Days>1</Days><DefaultEventHold><Days>3</Days></DefaultEventHold></DefaultRetention></Rule></ObjectLockConfiguration>",
+            "sd-0040",
+        ),
+        (
+            "put-object-retention-event-hold",
+            "/bucket/k?retention",
+            "<Retention><Mode>GOVERNANCE</Mode><RetainUntilDate>2030-01-01T00:00:00.000Z</RetainUntilDate><EventHold>ON</EventHold></Retention>",
+            "sd-0041",
+        ),
+        (
+            "put-object-retention-event-hold-duration",
+            "/bucket/k?retention",
+            "<Retention><Mode>GOVERNANCE</Mode><RetainUntilDate>2030-01-01T00:00:00.000Z</RetainUntilDate>\
+             <EventHoldDuration><Days>2</Days></EventHoldDuration></Retention>",
+            "sd-0042",
+        ),
+    ] {
+        rows.push(row(name, super::document(Method::PUT, target, body), Expect::FailsClosed(finding)));
+    }
     rows.push(row(
         "upload-part-with-a-body-and-no-checksum",
         RawRequest::put(&format!("/bucket/k?partNumber=1&uploadId={UPLOAD_ID}"), b"0123456789"),

@@ -321,6 +321,29 @@ pub(crate) const SEAM_FINDINGS: &[SeamFinding] = &[
         "the legacy decoder keeps one element per header line, an empty line included; RustFS never reads the member \\
          (it only builds inputs without it: rustfs/src/app/bucket_list_through.rs:824; app/metadata_route.rs:718, :736)",
     ),
+    finding(
+        "sd-0040",
+        "PutObjectLockConfiguration",
+        "default_event_hold",
+        SeamClass::FailClosed,
+        "no legacy input holds a default event hold (the legacy decoder refuses the element as MalformedXML) and RustFS \
+         stores none (rd-put-0009)",
+    ),
+    finding(
+        "sd-0041",
+        "PutObjectRetention",
+        "event_hold",
+        SeamClass::FailClosed,
+        "the legacy decoder skips the element and hands RustFS the retention without it, so RustFS would apply no hold \
+         the caller asked for (rd-put-0009)",
+    ),
+    finding(
+        "sd-0042",
+        "PutObjectRetention",
+        "event_hold_duration",
+        SeamClass::FailClosed,
+        "as sd-0041, for the hold's duration (rd-put-0009)",
+    ),
 ];
 
 const EVENT_HOLD: &str = "no legacy input holds an Object Lock event hold and RustFS stores none (rd-put-0009)";
@@ -336,8 +359,8 @@ pub(crate) enum Expect {
     Identical,
     /// Both handlers are reached and the inputs differ at exactly the paths these findings name.
     Differs(&'static [&'static str]),
-    /// The gateway handler is reached and the seam refuses the member this finding names, where
-    /// the legacy stack hands the value over.
+    /// The gateway handler is reached and the seam refuses the member this finding names; the
+    /// legacy stack hands the request over without the value, or refuses it itself.
     FailsClosed(&'static str),
     /// The legacy decoder refuses the request, and the seam refuses the member only the legacy
     /// decoder reads, named here, with the legacy decoder's status and code: no RustFS body is

@@ -392,6 +392,60 @@ mod answer_headers {
     }
 }
 
+// ── legacy-only output members ───────────────────────────────────────────────────────────────
+
+mod legacy_only_outputs {
+    use rustfs_gateway_model::ir::Type;
+
+    use super::{ctx, facts, field};
+    use crate::emit::seam::render;
+
+    #[test]
+    fn a_set_legacy_only_output_member_is_refused_rather_than_dropped() {
+        // `HeadBucketOutput.bucket_arn` is a reviewed legacy-only member.
+        let facts = facts("struct HeadBucketOutput\n  bucket_region: Option<String>\n  bucket_arn: Option<String>\n");
+        let text = render::backward_struct(
+            &ctx(&facts),
+            "HeadBucketOutput",
+            &[field("BucketRegion", Type::String, false)],
+            "G",
+            "output",
+        )
+        .expect("renders");
+        assert!(text.contains("        bucket_arn,\n"), "{text}");
+        assert!(
+            text.contains("    if bucket_arn.is_some() {\n        return Err(ConversionError { field: \"bucket_arn\""),
+            "{text}"
+        );
+    }
+
+    /// `CompleteMultipartUploadOutput.future`: the legacy writer streams a deferred completion
+    /// behind keep-alive whitespace (legacy `ops/multipart.rs:25-45`), which a gateway output
+    /// written once cannot carry, so a set one is refused, as the encode matrix's own conversion
+    /// refuses it (`kd-encode-0044`).
+    #[test]
+    fn a_set_runtime_value_is_refused_rather_than_dropped() {
+        let facts = facts("struct T\n  bucket: Option<String>\n  future: Option<opaque>\n");
+        let text =
+            render::backward_struct(&ctx(&facts), "T", &[field("Bucket", Type::String, false)], "G", "output").expect("renders");
+        assert!(text.contains("        future,\n"), "{text}");
+        assert!(
+            text.contains("    if future.is_some() {\n        return Err(ConversionError { field: \"future\""),
+            "{text}"
+        );
+    }
+
+    /// `LifecycleRuleFilter.cached_tags`: a cache the legacy type derives from the tags beside it.
+    #[test]
+    fn n_a_derived_cache_is_ignored_whatever_it_holds() {
+        let facts = facts("struct T\n  bucket: Option<String>\n  cached_tags: opaque\n");
+        let text =
+            render::backward_struct(&ctx(&facts), "T", &[field("Bucket", Type::String, false)], "G", "output").expect("renders");
+        assert!(text.contains("        cached_tags: _,\n"), "{text}");
+        assert!(!text.contains("cached_tags.is_some()"), "{text}");
+    }
+}
+
 // ── the member census ─────────────────────────────────────────────────────────────────────────
 
 mod census {

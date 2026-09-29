@@ -517,3 +517,85 @@ fn n_a_header_naming_a_member_written_elsewhere_clears_nothing() {
     assert_eq!(converted.name.as_str(), "bucket");
     assert_eq!(extra.len(), 2);
 }
+
+// ── legacy-only output members ────────────────────────────────────────────────────────────────
+
+#[test]
+fn a_head_bucket_answer_without_the_legacy_only_members_converts() {
+    let output = oracle::HeadBucketOutput {
+        bucket_region: Some("us-east-1".to_owned()),
+        ..Default::default()
+    };
+    let converted = ops::head_bucket::output_from_s3s(output).expect("converts");
+    assert_eq!(converted.bucket_region.as_str(), "us-east-1");
+}
+
+#[test]
+fn n_every_legacy_only_output_member_set_is_refused_by_name() {
+    let base = || oracle::HeadBucketOutput {
+        bucket_region: Some("us-east-1".to_owned()),
+        ..Default::default()
+    };
+    let rows: [(&str, oracle::HeadBucketOutput); 4] = [
+        (
+            "access_point_alias",
+            oracle::HeadBucketOutput {
+                access_point_alias: Some(true),
+                ..base()
+            },
+        ),
+        (
+            "bucket_arn",
+            oracle::HeadBucketOutput {
+                bucket_arn: Some("arn:aws:s3:::b".to_owned()),
+                ..base()
+            },
+        ),
+        (
+            "bucket_location_name",
+            oracle::HeadBucketOutput {
+                bucket_location_name: Some("usw2-az1".to_owned()),
+                ..base()
+            },
+        ),
+        (
+            "bucket_location_type",
+            oracle::HeadBucketOutput {
+                bucket_location_type: Some(oracle::LocationType::from("AvailabilityZone".to_owned())),
+                ..base()
+            },
+        ),
+    ];
+    for (member, output) in rows {
+        let error = ops::head_bucket::output_from_s3s(output).expect_err(member);
+        assert_eq!(error.field, member);
+    }
+    let created = oracle::CreateBucketOutput {
+        bucket_arn: Some("arn:aws:s3:::b".to_owned()),
+        ..Default::default()
+    };
+    assert_eq!(ops::create_bucket::output_from_s3s(created).expect_err("bucket_arn").field, "bucket_arn");
+}
+
+/// A legacy body may hand the legacy writer a deferred completion to stream behind keep-alive
+/// whitespace; the gateway writes an output once, so a set one is refused rather than the output
+/// written without the result it defers. An unset one converts as before.
+#[test]
+fn n_a_deferred_completion_is_refused_not_dropped() {
+    fn complete() -> oracle::CompleteMultipartUploadOutput {
+        oracle::CompleteMultipartUploadOutput {
+            bucket: Some("bucket".to_owned()),
+            key: Some("k".to_owned()),
+            e_tag: Some(oracle::ETag::Strong("abc-2".to_owned())),
+            ..Default::default()
+        }
+    }
+    let deferred = oracle::CompleteMultipartUploadOutput {
+        future: Some(Box::pin(async { Ok(complete()) })),
+        ..complete()
+    };
+    let error = ops::complete_multipart_upload::output_from_s3s(deferred).expect_err("a deferred completion");
+    assert_eq!(error.field, "future");
+    let converted = ops::complete_multipart_upload::output_from_s3s(complete()).expect("an immediate completion converts");
+    assert_eq!(converted.e_tag.map(|etag| etag.opaque_tag().to_owned()).as_deref(), Some("abc-2"));
+}
