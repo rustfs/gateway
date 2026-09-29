@@ -75,6 +75,20 @@ removed as framing; `Content-Length` on an answer with a body is held to that si
 compared across sides only over identical bodies, and on a `HEAD` answer — the size of the object
 not sent — is compared like any other header.
 
+## What the seam diff compares
+
+The decode diff compares the gateway's own input with the legacy one, member by member in one
+spelling. The seam diff (`src/seam/`, rustfs/gateway#1076) compares what the RustFS app layer is
+finally handed: the gateway, assembled with the RustFS profile's decode options because the seam is
+only ever reached behind that profile, converts its request through the production migration seam
+exactly as the RustFS adapter does (the authorized copy source supplied, the authorized delete list
+patched in, the raw request handed to the members only the legacy decoder reads), and the result is
+compared whole with the input the legacy stack's handler received, through the generated member
+census. It covers every operation of the seam but `SelectObjectContent`, runs the decode matrix's
+rows as well as its own, and proves every member of every covered legacy input is either handed over
+identically by some row or named by a finding in its register, with the RustFS evidence for why the
+difference cannot change what RustFS does or stores.
+
 ## Unregistered differences fail
 
 Every finding must match an entry of [`known-diffs.toml`](known-diffs.toml), which says what

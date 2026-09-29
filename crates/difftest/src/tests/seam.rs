@@ -1,0 +1,430 @@
+// Copyright 2026 RustFS Team
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+//! Judges the seam decode diff (rustfs/gateway#1076): what the RustFS app layer is handed on each
+//! stack.
+//!
+//! Responsible for: every seam row showing exactly what it declares; every difference a decode
+//! matrix row hands over being a registered finding; the census — every member of every covered
+//! operation's legacy input handed over identically by some row, named by a finding, or listed as
+//! unreached with a reason; no stale finding; a well-formed register; and the negative controls
+//! proving a difference in a member or a body cannot go unreported.
+//! NOT responsible for: the rows themselves (`seam/samples.rs`).
+//! Upstream: `crate::seam`. Downstream: none.
+
+use std::collections::BTreeSet;
+use std::sync::OnceLock;
+
+use crate::decode::BodySeen;
+use crate::request::RawRequest;
+use crate::seam::{
+    Expect, SEAM_FINDINGS, SEAM_OPERATIONS, SeamClass, SeamDiff, SeamDiffer, SeamFinding, SeamVerdict, UNREACHED_PATHS,
+    input_paths, seam_rows,
+};
+
+/// Where a judged request came from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Source {
+    Seam,
+    Matrix,
+}
+
+struct Outcome {
+    source: Source,
+    name: &'static str,
+    expect: Option<Expect>,
+    diff: SeamDiff,
+}
+
+/// Every seam row and every decode matrix row, sent once.
+fn outcomes() -> &'static [Outcome] {
+    static OUTCOMES: OnceLock<Vec<Outcome>> = OnceLock::new();
+    OUTCOMES.get_or_init(|| {
+        let differ = SeamDiffer::new().expect("both stacks assemble");
+        let mut outcomes = Vec::new();
+        for row in seam_rows() {
+            let diff = differ
+                .diff(&row.request)
+                .unwrap_or_else(|error| panic!("{}: {error}", row.name));
+            outcomes.push(Outcome {
+                source: Source::Seam,
+                name: row.name,
+                expect: Some(row.expect),
+                diff,
+            });
+        }
+        for row in crate::samples::requests() {
+            let diff = differ
+                .diff(&row.request)
+                .unwrap_or_else(|error| panic!("{}: {error}", row.name));
+            outcomes.push(Outcome {
+                source: Source::Matrix,
+                name: row.name,
+                expect: None,
+                diff,
+            });
+        }
+        outcomes
+    })
+}
+
+/// A reported path with its list indices dropped, as the census spells it.
+fn unindexed(path: &str) -> String {
+    let mut out = String::new();
+    let mut inside = false;
+    for character in path.chars() {
+        match character {
+            '[' => {
+                inside = true;
+                out.push('[');
+            }
+            ']' => {
+                inside = false;
+                out.push(']');
+            }
+            _ if inside => {}
+            other => out.push(other),
+        }
+    }
+    out
+}
+
+fn finding(id: &str) -> Option<&'static SeamFinding> {
+    SEAM_FINDINGS.iter().find(|finding| finding.id == id)
+}
+
+/// The finding registered for a difference at `path` of `operation`, if any.
+fn registered(operation: &str, path: &str) -> Option<&'static SeamFinding> {
+    SEAM_FINDINGS.iter().find(|finding| {
+        finding.operation == operation
+            && finding.path == path
+            && !matches!(finding.class, SeamClass::FailClosed | SeamClass::LegacyStricter)
+    })
+}
+
+fn both_handed(diff: &SeamDiff) -> bool {
+    diff.verdict.gateway == SeamVerdict::Handed && diff.verdict.s3s == SeamVerdict::Handed
+}
+
+/// Every way `diff` fails to show `expect`.
+fn judge(name: &str, diff: &SeamDiff, expect: &Expect) -> Vec<String> {
+    let mut problems = Vec::new();
+    let mut problem = |text: String| problems.push(format!("{name}: {text}"));
+    let operation = diff.routed.gateway.clone().unwrap_or_default();
+    match expect {
+        Expect::Identical => {
+            if !diff.identical() {
+                problem(format!(
+                    "expected identical, got routed {:?}, verdict {:?}, differing {:?}, same body {}",
+                    diff.routed,
+                    diff.verdict,
+                    diff.differing,
+                    diff.body.same()
+                ));
+            }
+        }
+        Expect::Differs(ids) => {
+            if !diff.routed.same() || !both_handed(diff) || !diff.body.same() {
+                problem(format!("expected both handed, got routed {:?}, verdict {:?}", diff.routed, diff.verdict));
+            }
+            let expected: BTreeSet<String> = ids
+                .iter()
+                .filter_map(|id| {
+                    finding(id)
+                        .filter(|finding| finding.operation == operation)
+                        .map(|finding| finding.path.to_owned())
+                })
+                .collect();
+            if expected.len() != ids.len() {
+                problem(format!("{ids:?} names a finding that does not exist or is not about {operation}"));
+            }
+            let actual: BTreeSet<String> = diff.differing.iter().map(|path| unindexed(path)).collect();
+            if actual != expected {
+                problem(format!("expected differences {expected:?}, got {actual:?}"));
+            }
+        }
+        Expect::FailsClosed(id) => match (finding(id), &diff.verdict.gateway, &diff.verdict.s3s) {
+            (Some(finding), SeamVerdict::Unconverted { member, .. }, SeamVerdict::Handed)
+                if finding.class == SeamClass::FailClosed && finding.path == *member && finding.operation == operation => {}
+            other => problem(format!("expected the seam to refuse the member of {id}, got {other:?}")),
+        },
+        Expect::LegacyRefuses(id) => match (finding(id), &diff.verdict.gateway, &diff.verdict.s3s) {
+            (Some(finding), SeamVerdict::Handed, SeamVerdict::Refused(_))
+                if finding.class == SeamClass::LegacyStricter && finding.operation == operation => {}
+            other => problem(format!("expected the legacy decoder alone to refuse, as {id} says, got {other:?}")),
+        },
+    }
+    problems
+}
+
+#[test]
+fn every_seam_row_shows_exactly_what_it_declares() {
+    let problems: Vec<String> = outcomes()
+        .iter()
+        .filter_map(|outcome| {
+            outcome
+                .expect
+                .as_ref()
+                .map(|expect| judge(outcome.name, &outcome.diff, expect))
+        })
+        .flatten()
+        .collect();
+    assert!(problems.is_empty(), "{}", problems.join("\n"));
+}
+
+#[test]
+fn every_difference_a_decode_matrix_row_hands_over_is_a_registered_finding() {
+    let mut problems = Vec::new();
+    for outcome in outcomes().iter().filter(|outcome| outcome.source == Source::Matrix) {
+        let diff = &outcome.diff;
+        if !diff.routed.same() {
+            // A routing divergence: the decode diff's register owns it, and nothing was compared.
+            continue;
+        }
+        let operation = diff.routed.gateway.as_deref().unwrap_or_default();
+        if both_handed(diff) {
+            for path in &diff.differing {
+                if registered(operation, &unindexed(path)).is_none() {
+                    problems.push(format!("{}: {operation}.{path} differs and no finding names it", outcome.name));
+                }
+            }
+        }
+        if let (SeamVerdict::Unconverted { member, .. }, SeamVerdict::Handed) = (&diff.verdict.gateway, &diff.verdict.s3s)
+            && !SEAM_FINDINGS.iter().any(|finding| {
+                finding.class == SeamClass::FailClosed && finding.operation == operation && finding.path == *member
+            })
+        {
+            problems.push(format!("{}: the seam refuses {operation}.{member} and no finding names it", outcome.name));
+        }
+    }
+    assert!(problems.is_empty(), "{}", problems.join("\n"));
+}
+
+#[test]
+fn every_member_of_every_covered_input_is_accounted_for() {
+    let mut covered: BTreeSet<(String, String)> = BTreeSet::new();
+    for outcome in outcomes() {
+        let diff = &outcome.diff;
+        if !both_handed(diff) || !diff.routed.same() {
+            continue;
+        }
+        let operation = diff.routed.gateway.clone().unwrap_or_default();
+        let differing: BTreeSet<String> = diff.differing.iter().map(|path| unindexed(path)).collect();
+        for path in &diff.present {
+            if !differing.iter().any(|different| path.starts_with(different.as_str())) {
+                covered.insert((operation.clone(), path.clone()));
+            }
+        }
+    }
+    let under = |path: &str, prefix: &str| {
+        path == prefix || path.starts_with(&format!("{prefix}.")) || path.starts_with(&format!("{prefix}["))
+    };
+    let mut missing = Vec::new();
+    for operation in SEAM_OPERATIONS {
+        let paths = input_paths(operation).unwrap_or_else(|| panic!("{operation} has no census"));
+        for path in paths {
+            let accounted = covered.contains(&((*operation).to_owned(), (*path).to_owned()))
+                || SEAM_FINDINGS
+                    .iter()
+                    .any(|finding| finding.operation == *operation && under(path, finding.path))
+                || UNREACHED_PATHS
+                    .iter()
+                    .any(|(unreached_operation, prefix, _)| unreached_operation == operation && under(path, prefix));
+            if !accounted {
+                missing.push(format!("{operation}.{path}"));
+            }
+        }
+    }
+    assert!(
+        missing.is_empty(),
+        "{} legacy input members are neither handed over identically by a row, nor named by a finding, nor listed as unreached:\n{}",
+        missing.len(),
+        missing.join("\n")
+    );
+}
+
+#[test]
+fn n_no_finding_outlives_the_difference_it_names() {
+    let mut used: BTreeSet<&str> = BTreeSet::new();
+    for outcome in outcomes() {
+        let diff = &outcome.diff;
+        let operation = diff.routed.gateway.as_deref().unwrap_or_default();
+        match &outcome.expect {
+            Some(Expect::Differs(ids)) => used.extend(ids.iter().copied()),
+            Some(Expect::FailsClosed(id) | Expect::LegacyRefuses(id)) => {
+                used.insert(id);
+            }
+            _ => {}
+        }
+        if both_handed(diff) {
+            for path in &diff.differing {
+                if let Some(finding) = registered(operation, &unindexed(path)) {
+                    used.insert(finding.id);
+                }
+            }
+        }
+        if let SeamVerdict::Unconverted { member, .. } = &diff.verdict.gateway
+            && let Some(finding) = SEAM_FINDINGS.iter().find(|finding| {
+                finding.class == SeamClass::FailClosed && finding.operation == operation && finding.path == *member
+            })
+        {
+            used.insert(finding.id);
+        }
+    }
+    let stale: Vec<&str> = SEAM_FINDINGS
+        .iter()
+        .map(|finding| finding.id)
+        .filter(|id| !used.contains(id))
+        .collect();
+    assert!(stale.is_empty(), "findings no row exercises: {stale:?}");
+}
+
+#[test]
+fn n_the_register_is_well_formed() {
+    let mut ids = BTreeSet::new();
+    for finding in SEAM_FINDINGS {
+        assert!(ids.insert(finding.id), "{} is registered twice", finding.id);
+        let digits = finding.id.strip_prefix("sd-").unwrap_or_default();
+        assert!(
+            digits.len() == 4 && digits.bytes().all(|byte| byte.is_ascii_digit()),
+            "{}: not sd-<nnnn>",
+            finding.id
+        );
+        assert!(
+            SEAM_OPERATIONS.contains(&finding.operation),
+            "{}: {} is not covered",
+            finding.id,
+            finding.operation
+        );
+        assert!(!finding.evidence.is_empty(), "{}: no evidence", finding.id);
+        match finding.class {
+            SeamClass::FailClosed | SeamClass::LegacyStricter => {}
+            _ => {
+                let paths = input_paths(finding.operation).unwrap_or_default();
+                assert!(
+                    paths.iter().any(|path| *path == finding.path
+                        || path.starts_with(&format!("{}.", finding.path))
+                        || path.starts_with(&format!("{}[", finding.path))),
+                    "{}: {} is not a member of the {} legacy input",
+                    finding.id,
+                    finding.path,
+                    finding.operation
+                );
+            }
+        }
+        if matches!(finding.class, SeamClass::DroppedRead | SeamClass::LegacyStricter | SeamClass::Lossy) {
+            assert!(
+                finding.evidence.contains("owner rustfs/"),
+                "{}: a lossy spot names the issue that owns its fix",
+                finding.id
+            );
+        }
+        if let SeamClass::Ruled(ruling) = finding.class {
+            assert!(
+                crate::tests::seam::rulings().contains(&ruling),
+                "{}: {ruling} is not a ruling of the request-divergence register",
+                finding.id
+            );
+        }
+    }
+    for (operation, path, reason) in UNREACHED_PATHS {
+        assert!(SEAM_OPERATIONS.contains(operation), "unreached {operation}.{path}: not covered");
+        assert!(!reason.is_empty(), "unreached {operation}.{path}: no reason");
+    }
+}
+
+/// The ruling ids the difftest register already cites, which the seam register may cite too.
+fn rulings() -> BTreeSet<&'static str> {
+    // The register format keeps a ruling per entry; reading it here avoids a second copy of the
+    // ruling list that could drift from the one the decode diff is judged against.
+    static RULINGS: OnceLock<BTreeSet<&'static str>> = OnceLock::new();
+    RULINGS
+        .get_or_init(|| {
+            let text = include_str!("../../known-diffs.toml");
+            text.lines()
+                .filter_map(|line| line.strip_prefix("ruling = \"").and_then(|rest| rest.strip_suffix('"')))
+                .map(|ruling| &*Box::leak(ruling.to_owned().into_boxed_str()))
+                .collect()
+        })
+        .clone()
+}
+
+#[test]
+fn n_a_member_one_stack_decodes_differently_is_reported() {
+    let differ = SeamDiffer::new().expect("both stacks assemble");
+    let copy = |color: &str| {
+        RawRequest::new(http::Method::PUT, "/bucket/k")
+            .header("x-amz-copy-source", "/src/k")
+            .header("x-amz-metadata-directive", "REPLACE")
+            .header("x-amz-meta-color", color)
+    };
+    let diff = differ.diff_pair(&copy("blue"), &copy("red")).expect("both stacks answer");
+    assert_eq!(diff.differing, ["metadata"]);
+    assert!(!diff.identical());
+    let problems = judge("control", &diff, &Expect::Identical);
+    assert_eq!(problems.len(), 1, "{problems:?}");
+}
+
+#[test]
+fn n_a_nested_member_is_reported_at_its_path() {
+    let differ = SeamDiffer::new().expect("both stacks assemble");
+    let tagging = |value: &str| {
+        let body = format!(
+            "<Tagging><TagSet><Tag><Key>a</Key><Value>1</Value></Tag><Tag><Key>b</Key><Value>{value}</Value></Tag></TagSet></Tagging>"
+        );
+        crate::seam::samples_document(http::Method::PUT, "/bucket?tagging", &body)
+    };
+    let diff = differ.diff_pair(&tagging("x"), &tagging("y")).expect("both stacks answer");
+    // The two documents differ, so their Content-MD5 does too; the tag value is named at its index.
+    assert_eq!(diff.differing, ["content_md5", "tagging.tag_set[1].value"]);
+}
+
+#[test]
+fn n_a_body_one_handler_reads_differently_is_reported() {
+    let differ = SeamDiffer::new().expect("both stacks assemble");
+    let part = |body: &[u8]| RawRequest::put(&format!("/bucket/k?partNumber=1&uploadId={}", crate::samples::UPLOAD_ID), body);
+    let diff = differ
+        .diff_pair(&part(b"0123456789"), &part(b"0123456780"))
+        .expect("both stacks answer");
+    assert!(diff.differing.is_empty(), "{:?}", diff.differing);
+    assert!(!diff.body.same());
+    assert_eq!(diff.body.gateway, Some(BodySeen::Read(b"0123456789".to_vec())));
+    assert!(!diff.identical());
+}
+
+#[test]
+fn n_a_refused_conversion_is_never_identical() {
+    let differ = SeamDiffer::new().expect("both stacks assemble");
+    let request = RawRequest::put("/bucket/k", b"x").header("x-amz-object-lock-event-hold", "ON");
+    let diff = differ.diff(&request).expect("both stacks answer");
+    assert!(
+        matches!(
+            diff.verdict.gateway,
+            SeamVerdict::Unconverted {
+                member: "object_lock_event_hold",
+                ..
+            }
+        ),
+        "{:?}",
+        diff.verdict
+    );
+    assert!(!diff.identical());
+    assert_eq!(judge("control", &diff, &Expect::Identical).len(), 1);
+    assert!(judge("control", &diff, &Expect::FailsClosed("sd-0016")).is_empty());
+    assert_eq!(
+        judge("control", &diff, &Expect::FailsClosed("sd-0019")).len(),
+        1,
+        "a finding about another operation"
+    );
+}

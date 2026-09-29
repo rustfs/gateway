@@ -1,0 +1,253 @@
+// Copyright 2026 RustFS Team
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+//! The two stacks of the seam decode diff, each recording the pinned legacy input its handler
+//! ends up with.
+//!
+//! Responsible for: the assembled gateway (the assembly of `gateway.rs` — SigV4 authenticator,
+//! allow-every-stage authorizer, anonymous requests delegated to it, a fixed bucket owner,
+//! admission that never refuses for load — with the RustFS profile's decode options, since the
+//! seam is only reached behind that profile) with one recording handler per covered
+//! operation, which converts through the production seam and records the result; the pinned
+//! legacy service with an access hook naming the operation it routed to and a backend recording
+//! the input it was handed; and draining a body on either side once, as a storing handler would.
+//! NOT responsible for: which operations are covered or how each converts (`table.rs`), or
+//! comparing (`mod.rs`).
+//! Upstream: `rustfs-gateway`, the compat seam. Downstream: `mod.rs`.
+
+use std::any::Any;
+use std::sync::{Arc, Mutex};
+
+use http_body_util::BodyExt;
+use rustfs_gateway::{
+    Credentials, GovernorRates, Handler, HandlerError, HandlerResult, Rate, Req, S3Service, ServiceBuilder, SigV4Authenticator,
+    StaticCredentials, Unlimited,
+};
+use rustfs_gateway_sig::{RegionSet, SecurityFloor};
+use rustfs_gateway_types::ErrorCode;
+use rustfs_gateway_types::compat::ConversionError;
+
+use super::table::{self, SeamConverted};
+use crate::decode::{Answer, BodySeen, S3ErrorView};
+use crate::gateway::{AllowEveryStage, FixtureOwner, RouteObserver, Routed};
+use crate::oracle::{RecordOperation, drain};
+use crate::probe::{ProbeBody, block_on};
+use crate::request::RawRequest;
+use crate::resolver::Resolver;
+use crate::s3s;
+use crate::sign::{ACCESS_KEY, REGION, SECRET_KEY};
+
+/// What one handler ended up with.
+pub(crate) struct Recorded {
+    /// The operation the handler serves.
+    pub(crate) operation: &'static str,
+    /// The pinned legacy input, or the member the gateway conversion refused.
+    pub(crate) input: Result<Box<dyn Any + Send>, ConversionError>,
+    /// The body the handler drained, when the input carries one.
+    pub(crate) body: Option<BodySeen>,
+}
+
+pub(crate) type Slot = Arc<Mutex<Option<Recorded>>>;
+
+/// Records `recorded` in `slot`, draining the body first.
+pub(crate) async fn record(
+    slot: &Slot,
+    operation: &'static str,
+    input: Result<Box<dyn Any + Send>, ConversionError>,
+    body: Option<s3s::dto::StreamingBlob>,
+) {
+    let body = match body {
+        None => None,
+        Some(blob) => Some(drain(blob).await),
+    };
+    if let Ok(mut held) = slot.lock() {
+        *held = Some(Recorded { operation, input, body });
+    }
+}
+
+/// The gateway backend: every covered operation converts through the seam and records.
+pub(crate) struct SeamRecorder {
+    pub(crate) slot: Slot,
+}
+
+impl<O: SeamConverted> Handler<O> for SeamRecorder {
+    async fn call(&self, request: Req<O>) -> HandlerResult<O> {
+        let (input, body) = O::convert(request);
+        record(&self.slot, O::NAME, input, body).await;
+        Err(HandlerError::new(ErrorCode::NOT_IMPLEMENTED, "recorded by the seam diff"))
+    }
+}
+
+/// The assembled gateway with the seam recorder behind every covered operation.
+pub(crate) struct GatewaySeam {
+    service: S3Service,
+    slot: Slot,
+    routed: Routed,
+}
+
+impl GatewaySeam {
+    pub(crate) fn new() -> Result<Self, String> {
+        let credentials =
+            Credentials::new(ACCESS_KEY, SECRET_KEY.as_bytes()).map_err(|error| format!("credential: {error:?}"))?;
+        let regions = RegionSet::new([REGION]).map_err(|error| format!("regions: {error:?}"))?;
+        let authenticator = SigV4Authenticator::new(Arc::new(StaticCredentials::new().with(credentials)), regions);
+        let slot: Slot = Arc::new(Mutex::new(None));
+        let routed: Routed = Arc::new(Mutex::new(None));
+        let recorder = Arc::new(SeamRecorder { slot: Arc::clone(&slot) });
+        let unbounded = Rate::new(u32::MAX, u32::MAX);
+        let builder = ServiceBuilder::new()
+            .framework_governor_rates(GovernorRates {
+                aggregate: unbounded,
+                per_ip: unbounded,
+                credential_lookup: unbounded,
+                cors_preflight: unbounded,
+                unauthenticated: unbounded,
+                tracked_clients: 1,
+            })
+            .governor(Unlimited)
+            .authenticator(authenticator)
+            .authorizer(AllowEveryStage)
+            .security_floor(
+                SecurityFloor::new()
+                    .delegate_anonymous_to_authorizer_after_listing_in_the_posture_report()
+                    .enable_sigv2_presigned_compatibility(),
+            )
+            .bucket_owner_source(FixtureOwner)
+            // The RustFS profile: the seam is only ever reached behind it, so its decode choices
+            // are what the RustFS app layer is handed (`compat/sut` turns on the same ones).
+            .accept_minio_client_checksum_omissions()
+            .accept_s3cmd_acl_checksum_omissions()
+            .clamp_oversized_max_keys()
+            .leave_anonymous_streaming_payloads_undecoded()
+            .host_resolver(Resolver::new(false))
+            .observer(RouteObserver {
+                routed: Arc::clone(&routed),
+            });
+        let service = table::register(builder, &recorder)
+            .build()
+            .map_err(|error| format!("assembly: {error:?}"))?;
+        Ok(Self { service, slot, routed })
+    }
+
+    /// Sends `request` and reports the routed operation and what the handler ended up with.
+    pub(crate) fn send(&self, request: &RawRequest) -> Result<(Option<String>, Answer<Recorded>), String> {
+        *self.slot.lock().map_err(|_| "the recording slot is poisoned".to_owned())? = None;
+        *self
+            .routed
+            .lock()
+            .map_err(|_| "the routed-operation slot is poisoned".to_owned())? = None;
+        let mut head = request.http_head()?;
+        if request.secure {
+            head = head.extension(rustfs_gateway::TransportSecurity::Encrypted);
+        }
+        let http_request = head
+            .body(ProbeBody::new(&request.body))
+            .map_err(|error| format!("request head: {error}"))?;
+        let response = block_on(self.service.call(http_request));
+        let (parts, body) = response.into_parts();
+        let body = block_on(body.collect())
+            .map_err(|_| "the gateway response body failed".to_owned())?
+            .to_bytes();
+        let routed = self
+            .routed
+            .lock()
+            .map_err(|_| "the routed-operation slot is poisoned".to_owned())?
+            .take()
+            .ok_or_else(|| "the gateway answered without reporting the request to its observer".to_owned())?;
+        let recorded = self
+            .slot
+            .lock()
+            .map_err(|_| "the recording slot is poisoned".to_owned())?
+            .take();
+        match recorded {
+            Some(recorded) if routed.as_deref() != Some(recorded.operation) => Err(format!(
+                "the service reported {routed:?} and the {} handler was called",
+                recorded.operation
+            )),
+            Some(recorded) => Ok((routed, Answer::Handed(recorded))),
+            None => Ok((routed, Answer::refused(parts.status.as_u16(), &body))),
+        }
+    }
+}
+
+/// The pinned legacy backend: every covered operation records the input it was handed.
+pub(crate) struct LegacyRecorder {
+    pub(crate) slot: Slot,
+}
+
+/// The pinned legacy service with the recording backend.
+pub(crate) struct LegacySeam {
+    service: s3s::service::S3Service,
+    slot: Slot,
+    routed: Arc<Mutex<Option<String>>>,
+}
+
+impl LegacySeam {
+    pub(crate) fn new() -> Self {
+        let slot: Slot = Arc::new(Mutex::new(None));
+        let routed = Arc::new(Mutex::new(None));
+        let mut builder = s3s::service::S3ServiceBuilder::new(LegacyRecorder { slot: Arc::clone(&slot) });
+        builder.set_auth(s3s::auth::SimpleAuth::from_single(ACCESS_KEY, SECRET_KEY));
+        builder.set_access(RecordOperation {
+            routed: Arc::clone(&routed),
+        });
+        Self {
+            service: builder.build(),
+            slot,
+            routed,
+        }
+    }
+
+    /// Sends `request` and reports the routed operation and what the handler was handed.
+    pub(crate) fn send(&self, request: &RawRequest) -> Result<(Option<String>, Answer<Recorded>), String> {
+        *self
+            .routed
+            .lock()
+            .map_err(|_| "the routed-operation slot is poisoned".to_owned())? = None;
+        *self.slot.lock().map_err(|_| "the recording slot is poisoned".to_owned())? = None;
+        let source: s3s::stream::DynByteStream = Box::pin(ProbeBody::new(&request.body));
+        let http_request = request
+            .http_head()?
+            .body(s3s::Body::from(source))
+            .map_err(|error| format!("request head: {error}"))?;
+        let response = block_on(self.service.call(http_request));
+        let routed = self
+            .routed
+            .lock()
+            .map_err(|_| "the routed-operation slot is poisoned".to_owned())?
+            .take();
+        if let Some(recorded) = self
+            .slot
+            .lock()
+            .map_err(|_| "the recording slot is poisoned".to_owned())?
+            .take()
+        {
+            return Ok((routed, Answer::Handed(recorded)));
+        }
+        // A service call that fails without an answer is still an outcome, as in `oracle.rs`.
+        let Ok(response) = response else {
+            return Ok((
+                routed,
+                Answer::Refused(S3ErrorView {
+                    status: 500,
+                    code: None,
+                    message: Some("the legacy service call failed without an answer".to_owned()),
+                }),
+            ));
+        };
+        let (parts, mut body) = response.into_parts();
+        let body = block_on(body.store_all_limited(1 << 20)).map_err(|error| format!("legacy response body: {error}"))?;
+        Ok((routed, Answer::refused(parts.status.as_u16(), &body)))
+    }
+}

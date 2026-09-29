@@ -58,7 +58,7 @@ pub(crate) struct Handed {
 }
 
 type Slot = Arc<Mutex<Option<Handed>>>;
-type Routed = Arc<Mutex<Option<Option<String>>>>;
+pub(crate) type Routed = Arc<Mutex<Option<Option<String>>>>;
 /// The gateway output the next handler call returns instead of refusing: the encode diff's output.
 type AnswerSlot = Arc<Mutex<Option<Box<dyn std::any::Any + Send>>>>;
 
@@ -118,8 +118,8 @@ async fn drain(mut stream: ByteStream, eats_one_byte: bool) -> BodySeen {
 
 /// Records the operation the service routed to, for every request it answers — refusals before
 /// the handler included, and `None` when routing chose none.
-struct RouteObserver {
-    routed: Routed,
+pub(crate) struct RouteObserver {
+    pub(crate) routed: Routed,
 }
 
 impl Observer for RouteObserver {
@@ -131,7 +131,7 @@ impl Observer for RouteObserver {
 }
 
 /// Allows both stages: the diff is about decoding, not policy.
-struct AllowEveryStage;
+pub(crate) struct AllowEveryStage;
 
 impl Authorizer for AllowEveryStage {
     fn authorize_route<'a>(
@@ -156,7 +156,7 @@ impl Authorizer for AllowEveryStage {
 /// it names this account, as it does in a RustFS deployment whose owner lookup agrees.
 pub(crate) const BUCKET_OWNER: &str = "111122223333";
 
-struct FixtureOwner;
+pub(crate) struct FixtureOwner;
 
 impl rustfs_gateway::BucketOwnerSource for FixtureOwner {
     fn owner<'a>(

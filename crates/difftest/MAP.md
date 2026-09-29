@@ -53,6 +53,12 @@ compare and why this is not an in-process dual stack.
 | `src/bin/shadow-proxy.rs` | The proxy's command line. | Changing its options. |
 | `src/tests/shadow.rs` | The copy's framing cases, bytes unchanged both ways, a stalled diff never slowing traffic, the verdicts. | The proxy or its copy changes. |
 | `src/tests/census.rs` | Each gateway projection held to the generated DTO field count. | A DTO gains a member. |
+| `src/seam/mod.rs` | The seam decode diff (rustfs/gateway#1076): what the RustFS app layer is handed on each stack, compared whole with the generated member census. | A seam finding is reported wrongly. |
+| `src/seam/stacks.rs` | Both stacks of the seam diff: the assembled gateway converting through the production seam, the pinned legacy service recording its input. | A side is driven or recorded wrongly. |
+| `src/seam/table.rs` | Every covered operation, how the RustFS adapter converts it (supplied copy source, patched delete list, raw request for legacy-only members), and its census lookups. | An operation joins the seam or its adapter step changes. |
+| `src/seam/samples.rs` | The seam register (`sd-*` findings with RustFS evidence), unreached members, and the row helpers. | Classifying a difference, or adding a row family. |
+| `src/seam/samples/*.rs` | The seam rows: object writes, configuration writes, bucket lifecycle and reads, and one row per finding. | Adding a row. |
+| `src/tests/seam.rs` | Judges the seam diff: rows as declared, matrix differences registered, every legacy input member accounted for, empty optional headers, no stale finding, negative controls. | A seam judgement fails. |
 
 ## Verify
 

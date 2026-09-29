@@ -31,4 +31,5 @@ mod fuzz;
 mod matrix;
 mod register;
 mod runner;
+mod seam;
 mod shadow;

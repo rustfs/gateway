@@ -148,6 +148,7 @@ fn element(text: &str, name: &str) -> Option<String> {
 }
 
 /// What a handler read from the body after decoding.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum BodySeen {
     /// The input carries no body.
     NoBody,
