@@ -36,7 +36,7 @@ pub(crate) use samples::document as samples_document;
 #[cfg(test)]
 pub(crate) use samples::omitted::OMITTED_OPERATIONS;
 pub(crate) use samples::{Expect, SEAM_FINDINGS, SeamClass, SeamFinding, UNREACHED_PATHS, seam_rows};
-pub(crate) use table::{SEAM_OPERATIONS, input_paths};
+pub(crate) use table::{SEAM_OPERATIONS, STORED_OPERATIONS, input_paths};
 
 use crate::decode::{Answer, BodySeen, Cmp, S3ErrorView};
 use crate::request::RawRequest;
@@ -71,6 +71,9 @@ pub(crate) struct SeamDiff {
     pub(crate) present: Vec<String>,
     /// The body bytes each handler drained, when either carried one.
     pub(crate) body: Cmp<Option<BodySeen>>,
+    /// The configuration bytes each side would store, for a configuration write: the gateway's
+    /// persistence writer over its own input, and the legacy serializer RustFS stores with.
+    pub(crate) stored: Cmp<table::Stored>,
 }
 
 impl SeamDiff {
@@ -82,6 +85,7 @@ impl SeamDiff {
             && self.verdict.s3s == SeamVerdict::Handed
             && self.differing.is_empty()
             && self.body.same()
+            && self.stored.same()
     }
 }
 
@@ -114,8 +118,8 @@ impl SeamDiffer {
     pub(crate) fn diff_pair(&self, gateway_request: &RawRequest, legacy_request: &RawRequest) -> Result<SeamDiff, String> {
         let (gateway_routed, gateway) = self.gateway.send(gateway_request)?;
         let (legacy_routed, legacy) = self.legacy.send(legacy_request)?;
-        let (gateway_verdict, gateway_body, gateway_input) = split(gateway);
-        let (legacy_verdict, legacy_body, legacy_input) = split(legacy);
+        let (gateway_verdict, gateway_body, gateway_stored, gateway_input) = split(gateway);
+        let (legacy_verdict, legacy_body, legacy_stored, legacy_input) = split(legacy);
         let (present, differing) = match legacy_input {
             Some((operation, legacy_input)) => {
                 // Two handlers of different operations compare nothing: the routing divergence is
@@ -142,23 +146,28 @@ impl SeamDiffer {
                 gateway: gateway_body,
                 s3s: legacy_body,
             },
+            stored: Cmp {
+                gateway: gateway_stored,
+                s3s: legacy_stored,
+            },
         })
     }
 }
 
 type Handed = (&'static str, Box<dyn std::any::Any + Send>);
 
-fn split(answer: Answer<Recorded>) -> (SeamVerdict, Option<BodySeen>, Option<Handed>) {
+fn split(answer: Answer<Recorded>) -> (SeamVerdict, Option<BodySeen>, table::Stored, Option<Handed>) {
     match answer {
-        Answer::Refused(view) => (SeamVerdict::Refused(view), None, None),
+        Answer::Refused(view) => (SeamVerdict::Refused(view), None, None, None),
         Answer::Handed(recorded) => match recorded.input {
-            Ok(input) => (SeamVerdict::Handed, recorded.body, Some((recorded.operation, input))),
+            Ok(input) => (SeamVerdict::Handed, recorded.body, recorded.stored, Some((recorded.operation, input))),
             Err(error) => (
                 SeamVerdict::Unconverted {
                     member: error.field,
                     reason: error.reason,
                 },
                 recorded.body,
+                recorded.stored,
                 None,
             ),
         },

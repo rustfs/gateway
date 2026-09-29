@@ -32,13 +32,13 @@ use std::sync::{Arc, Mutex};
 use http_body_util::BodyExt;
 use rustfs_gateway::{
     Credentials, GovernorRates, Handler, HandlerError, HandlerResult, Rate, Req, S3Service, ServiceBuilder, SigV4Authenticator,
-    StaticCredentials, Unlimited,
+    SlashPolicy, StaticCredentials, Unlimited,
 };
 use rustfs_gateway_sig::{RegionSet, SecurityFloor};
 use rustfs_gateway_types::ErrorCode;
 use rustfs_gateway_types::compat::ConversionError;
 
-use super::table::{self, SeamConverted};
+use super::table::{self, SeamConverted, Stored};
 use crate::decode::{Answer, BodySeen, S3ErrorView};
 use crate::gateway::{AllowEveryStage, FixtureOwner, RouteObserver, Routed};
 use crate::oracle::{RecordOperation, drain};
@@ -56,6 +56,8 @@ pub(crate) struct Recorded {
     pub(crate) input: Result<Box<dyn Any + Send>, ConversionError>,
     /// The body the handler drained, when the input carries one.
     pub(crate) body: Option<BodySeen>,
+    /// The configuration bytes this side would store, for a configuration write.
+    pub(crate) stored: Stored,
 }
 
 pub(crate) type Slot = Arc<Mutex<Option<Recorded>>>;
@@ -66,13 +68,19 @@ pub(crate) async fn record(
     operation: &'static str,
     input: Result<Box<dyn Any + Send>, ConversionError>,
     body: Option<s3s::dto::StreamingBlob>,
+    stored: Stored,
 ) {
     let body = match body {
         None => None,
         Some(blob) => Some(drain(blob).await),
     };
     if let Ok(mut held) = slot.lock() {
-        *held = Some(Recorded { operation, input, body });
+        *held = Some(Recorded {
+            operation,
+            input,
+            body,
+            stored,
+        });
     }
 }
 
@@ -83,8 +91,9 @@ pub(crate) struct SeamRecorder {
 
 impl<O: SeamConverted> Handler<O> for SeamRecorder {
     async fn call(&self, request: Req<O>) -> HandlerResult<O> {
+        let stored = O::stored(request.input());
         let (input, body) = O::convert(request);
-        record(&self.slot, O::NAME, input, body).await;
+        record(&self.slot, O::NAME, input, body, stored).await;
         Err(HandlerError::new(ErrorCode::NOT_IMPLEMENTED, "recorded by the seam diff"))
     }
 }
@@ -101,7 +110,11 @@ impl GatewaySeam {
         let credentials =
             Credentials::new(ACCESS_KEY, SECRET_KEY.as_bytes()).map_err(|error| format!("credential: {error:?}"))?;
         let regions = RegionSet::new([REGION]).map_err(|error| format!("regions: {error:?}"))?;
-        let authenticator = SigV4Authenticator::new(Arc::new(StaticCredentials::new().with(credentials)), regions);
+        // The RustFS profile's scope handling, as `compat/sut` assembles it.
+        let authenticator = SigV4Authenticator::new(Arc::new(StaticCredentials::new().with(credentials)), regions)
+            .accept_any_signing_region()
+            .accept_empty_signing_region()
+            .refuse_unreadable_signing_regions_after_verification();
         let slot: Slot = Arc::new(Mutex::new(None));
         let routed: Routed = Arc::new(Mutex::new(None));
         let recorder = Arc::new(SeamRecorder { slot: Arc::clone(&slot) });
@@ -129,6 +142,9 @@ impl GatewaySeam {
             .accept_all_checksum_omissions()
             .clamp_oversized_max_keys()
             .leave_anonymous_streaming_payloads_undecoded()
+            .sign_presigned_payloads_as_unsigned()
+            .answer_checksum_failures_with_bad_digest()
+            .slash_policy(SlashPolicy::RustfsLegacy)
             .host_resolver(Resolver::new(false))
             .observer(RouteObserver {
                 routed: Arc::clone(&routed),
@@ -198,6 +214,11 @@ impl LegacySeam {
         let routed = Arc::new(Mutex::new(None));
         let mut builder = s3s::service::S3ServiceBuilder::new(LegacyRecorder { slot: Arc::clone(&slot) });
         builder.set_auth(s3s::auth::SimpleAuth::from_single(ACCESS_KEY, SECRET_KEY));
+        // Configured as RustFS main configures the legacy stack (forward-slash normalisation and
+        // SigV2 on, `s3tables` signing): the input RustFS is handed is the one this stack hands.
+        builder.set_config(Arc::new(s3s::config::StaticConfigProvider::new(Arc::new(
+            crate::oracle::rustfs_settings(),
+        ))));
         builder.set_access(RecordOperation {
             routed: Arc::clone(&routed),
         });

@@ -144,7 +144,7 @@ use crate::sign::{ACCESS_KEY, SECRET_KEY};
 /// `s3tables` admitted as a signing service, and a single-PUT ceiling of five gibibytes
 /// (`MAX_SINGLE_PUT_OBJECT_SIZE`, the same value as the default). Everything else is the default,
 /// as it is in RustFS.
-fn rustfs_settings() -> S3Config {
+pub(crate) fn rustfs_settings() -> S3Config {
     let mut settings = S3Config::default();
     settings.normalize_forward_slash_path = true;
     settings.enable_sig_v2 = true;

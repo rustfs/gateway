@@ -32,8 +32,8 @@ use rustfs_gateway_types::compat::ConversionError;
 use rustfs_gateway_types::compat::s3s_0_17_0::error::{Refusal, refusal_from_conversion};
 
 use crate::seam::{
-    Expect, SEAM_FINDINGS, SEAM_OPERATIONS, SeamClass, SeamDiff, SeamDiffer, SeamFinding, SeamVerdict, UNREACHED_PATHS,
-    input_paths, seam_rows,
+    Expect, SEAM_FINDINGS, SEAM_OPERATIONS, STORED_OPERATIONS, SeamClass, SeamDiff, SeamDiffer, SeamFinding, SeamVerdict,
+    UNREACHED_PATHS, input_paths, seam_rows,
 };
 
 /// Where a judged request came from.
@@ -531,4 +531,54 @@ fn every_empty_optional_header_is_handed_over_as_absent() {
         refused_by_the_gateway <= 179,
         "{refused_by_the_gateway} empty headers are refused by the gateway"
     );
+}
+
+/// Item 5 of rustfs/gateway#1076: a configuration written through the gateway path is stored as
+/// the bytes legacy RustFS stores. For every configuration write both stacks hand over, the
+/// gateway's persistence writer over its own decoded document and the legacy serializer RustFS
+/// stores with over the legacy one produce the same bytes; and every configuration family is
+/// written by at least one row.
+#[test]
+fn every_configuration_write_is_stored_as_the_bytes_legacy_rustfs_stores() {
+    let mut problems = Vec::new();
+    let mut written: BTreeSet<&str> = BTreeSet::new();
+    for outcome in outcomes() {
+        let diff = &outcome.diff;
+        let Some(operation) = diff.routed.gateway.as_deref() else { continue };
+        if !STORED_OPERATIONS.contains(&operation) || !both_handed(diff) {
+            continue;
+        }
+        match (&diff.stored.gateway, &diff.stored.s3s) {
+            (Some(Ok(gateway)), Some(Ok(legacy))) if gateway == legacy => {
+                written.insert(
+                    STORED_OPERATIONS
+                        .iter()
+                        .find(|name| **name == operation)
+                        .copied()
+                        .unwrap_or_default(),
+                );
+            }
+            (None, None) => {}
+            (gateway, legacy) => problems.push(format!(
+                "{}: {operation} stores {} through the gateway and {} on the legacy stack",
+                outcome.name,
+                describe(gateway.as_ref()),
+                describe(legacy.as_ref())
+            )),
+        }
+    }
+    let unwritten: Vec<&&str> = STORED_OPERATIONS
+        .iter()
+        .filter(|operation| !written.contains(**operation))
+        .collect();
+    assert!(problems.is_empty(), "{}", problems.join("\n"));
+    assert!(unwritten.is_empty(), "no row stores a configuration through {unwritten:?}");
+}
+
+fn describe(stored: Option<&Result<Vec<u8>, String>>) -> String {
+    match stored {
+        None => "nothing".to_owned(),
+        Some(Err(error)) => format!("a refusal ({error})"),
+        Some(Ok(bytes)) => format!("{:?}", String::from_utf8_lossy(bytes)),
+    }
 }
