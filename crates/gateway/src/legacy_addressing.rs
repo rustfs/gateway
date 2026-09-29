@@ -24,13 +24,14 @@
 
 use http::Method;
 use http::request::Parts;
-use rustfs_gateway_core::codec::legacy_rustfs_target;
+use rustfs_gateway_core::codec::{legacy_rustfs_decodable, legacy_rustfs_target};
 use rustfs_gateway_core::route::ClaimLookup;
 use rustfs_gateway_core::{CodecError, RouteRequestParts, Router};
 use rustfs_gateway_http::WireRequest;
-use rustfs_gateway_types::{NamePolicy, PathSplit};
+use rustfs_gateway_types::{ErrorCode, NamePolicy, PathSplit};
 
-use crate::ext::ResolvedHost;
+use crate::ext::target_of_path;
+use crate::ext::{HostQuery, HostRefusal, HostResolver, ResolvedHost};
 
 /// Reads a `GET` of exactly `//` as a `GET` of `/`, query kept, before acceptance, so that routing
 /// and the signature both read `/`.
@@ -62,18 +63,59 @@ pub(crate) fn rewrite_double_slash_root(names: &NamePolicy, parts: &mut Parts) {
 }
 
 /// The target routing reads under legacy RustFS's split, judged before routing, or the refusal
-/// legacy RustFS answers with there. A request inside a dialect's path-prefix claim is left as the
-/// resolver classified it: legacy RustFS's own routes also claim their paths before its path
-/// parser runs.
+/// legacy RustFS answers with there — the host resolver's among them, in legacy RustFS's order: an
+/// undecodable path, then a host it cannot read, then (outside a claim) a bucket the host names
+/// that its rules refuse, then the path's own bucket and key. A request inside a dialect's
+/// path-prefix claim is left as the resolver classified it: legacy RustFS's own routes also claim
+/// their paths before its path parser runs.
 pub(crate) fn classify<B>(
     names: &NamePolicy,
+    resolver: &dyn HostResolver,
     router: &Router,
     wire: &WireRequest<B>,
     mut resolved: ResolvedHost,
 ) -> Result<ResolvedHost, CodecError> {
-    if names.path_split() != PathSplit::RustfsLegacy {
+    let refusal = resolver.refusal(&HostQuery {
+        host: wire.host(),
+        path: wire.raw_path().as_str(),
+        method: wire.method(),
+    });
+    let legacy_split = names.path_split() == PathSplit::RustfsLegacy;
+    if !legacy_split && refusal.is_none() {
         return Ok(resolved);
     }
+    if legacy_split {
+        legacy_rustfs_decodable(wire.raw_path().as_str())?;
+    }
+    if refusal == Some(HostRefusal::UnusableHost) {
+        return Err(CodecError::new(ErrorCode::INVALID_REQUEST, "Invalid host header"));
+    }
+    // Legacy-compat (rustfs/backlog#2684): legacy RustFS matches its own routes by the path alone,
+    // whatever bucket the host names, so on a virtual host a claimed path is the dialect's and an
+    // object key spelling the same path is unreachable there; ADR-0024's rule is the opposite (a
+    // bucket's key space holds no claim). Kept under the legacy split so an admin client addressing
+    // a RustFS host that also names a bucket keeps reaching the admin API; the intended future
+    // behaviour is ADR-0024's.
+    if legacy_split && resolved.bucket().is_some() {
+        let path_style = ResolvedHost::standard(target_of_path(wire.raw_path().as_str()));
+        if claimed(router, wire, &path_style) {
+            return Ok(path_style);
+        }
+    }
+    if claimed(router, wire, &resolved) {
+        return Ok(resolved);
+    }
+    if refusal == Some(HostRefusal::RefusedBucket) {
+        return Err(CodecError::new(ErrorCode::INVALID_BUCKET_NAME, "The specified bucket is not valid").about("Bucket"));
+    }
+    if legacy_split {
+        resolved.target = legacy_rustfs_target(wire.raw_path().as_str(), resolved.bucket().is_some(), names)?;
+    }
+    Ok(resolved)
+}
+
+/// Whether a dialect's claim covers the request under this reading of its host.
+fn claimed<B>(router: &Router, wire: &WireRequest<B>, resolved: &ResolvedHost) -> bool {
     let parts = RouteRequestParts {
         method: wire.method(),
         path: wire.raw_path().as_str(),
@@ -84,11 +126,7 @@ pub(crate) fn classify<B>(
         headers: wire.headers(),
         host_named_bucket: resolved.bucket().is_some(),
     };
-    if matches!(router.claims().lookup(&parts), ClaimLookup::Inside { .. }) {
-        return Ok(resolved);
-    }
-    resolved.target = legacy_rustfs_target(wire.raw_path().as_str(), resolved.bucket().is_some(), names)?;
-    Ok(resolved)
+    matches!(router.claims().lookup(&parts), ClaimLookup::Inside { .. })
 }
 
 #[cfg(test)]
@@ -158,9 +196,45 @@ mod tests {
     ) -> Result<rustfs_gateway_core::TargetKind, rustfs_gateway_types::ErrorCode> {
         let wire = accepted(Method::GET, target);
         let resolved = ResolvedHost::standard(literal);
-        classify(names, &claiming_router(), &wire, resolved)
+        classify(names, &crate::ext::PathStyleOnly, &claiming_router(), &wire, resolved)
             .map(|resolved| resolved.target)
             .map_err(|error| error.code().clone())
+    }
+
+    /// Negative — legacy RustFS decodes the whole path before its own routes take theirs, so an
+    /// undecodable claimed path is `InvalidURI` under the legacy split, and the dialect's otherwise.
+    #[test]
+    fn n_an_undecodable_claimed_path_is_an_invalid_uri() {
+        use rustfs_gateway_core::TargetKind;
+        assert_eq!(
+            classified(&legacy(), "/_iceberg/v1/a%FF", TargetKind::Object),
+            Err(rustfs_gateway_types::ErrorCode::INVALID_URI)
+        );
+        assert_eq!(
+            classified(&NamePolicy::default(), "/_iceberg/v1/a%FF", TargetKind::Object),
+            Ok(TargetKind::Object)
+        );
+    }
+
+    /// Positive — a claimed path on a host that names a bucket is the dialect's under the legacy
+    /// split, read path-style, and the bucket's object under the default.
+    #[test]
+    fn a_claimed_path_on_a_virtual_host_is_the_dialects() {
+        use rustfs_gateway_core::TargetKind;
+        let wire = accepted(Method::GET, "/_iceberg/v1/config");
+        let hosted = || {
+            ResolvedHost::virtual_hosted(
+                TargetKind::Object,
+                rustfs_gateway_types::BucketName::new("vhb").expect("a bucket"),
+                None,
+            )
+        };
+        let legacy_reading =
+            classify(&legacy(), &crate::ext::PathStyleOnly, &claiming_router(), &wire, hosted()).expect("the dialect's");
+        assert_eq!(legacy_reading.bucket(), None, "read path-style");
+        let default_reading = classify(&NamePolicy::default(), &crate::ext::PathStyleOnly, &claiming_router(), &wire, hosted())
+            .expect("no refusal");
+        assert_eq!(default_reading.bucket().map(rustfs_gateway_types::BucketName::as_str), Some("vhb"));
     }
 
     /// Positive — outside a claim the legacy split decides the target, before routing.

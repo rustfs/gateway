@@ -162,6 +162,8 @@ mod rustfs_addressing;
 mod rustfs_key_floor;
 #[path = "rustfs_selection.rs"]
 mod rustfs_selection;
+#[path = "rustfs_vhost.rs"]
+mod rustfs_vhost;
 #[path = "select_frame_records.rs"]
 mod select_frame_records;
 #[path = "select_restore_intent.rs"]

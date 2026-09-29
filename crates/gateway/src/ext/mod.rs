@@ -74,6 +74,7 @@ mod credentials;
 mod filter;
 mod governor;
 mod host;
+mod legacy_vhost;
 mod observer;
 mod oplayer;
 mod policy;
@@ -106,7 +107,9 @@ pub use self::governor::{
     BodyQuota, BodyQuotaExceeded, ClassKind, ClientAddr, DefaultGovernor, Governor, GovernorRates, GovernorRequest,
     LayeredGovernor, Lease, Rate, Unlimited, VerifiedBodyProgress,
 };
-pub use self::host::{Addressing, HostQuery, HostResolver, PathStyleOnly, ResolvedHost, TargetOrigin, VhostHint};
+pub(crate) use self::host::target_of_path;
+pub use self::host::{Addressing, HostQuery, HostRefusal, HostResolver, PathStyleOnly, ResolvedHost, TargetOrigin, VhostHint};
+pub use self::legacy_vhost::{LegacyDomainError, LegacyRustfsVirtualHosts};
 pub(crate) use self::observer::observe_safely;
 pub use self::observer::{NoObserver, Observer, RequestEvent};
 pub use self::oplayer::{Next, OpLayer, op_layer};

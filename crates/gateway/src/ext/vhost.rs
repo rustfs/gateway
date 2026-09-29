@@ -366,7 +366,7 @@ fn is_region_label(label: &str) -> bool {
 /// first segment. This is the half of the rule that makes `(bucket, key)` have one source:
 /// `GET /b2/key` on `bucket.mys3.com` is the object `b2/key` in `bucket`, and never the bucket
 /// `b2`.
-fn target_of_vhost_path(path: &str) -> TargetKind {
+pub(crate) fn target_of_vhost_path(path: &str) -> TargetKind {
     let trimmed = path.strip_prefix('/').unwrap_or(path);
     if trimmed.is_empty() {
         TargetKind::Bucket

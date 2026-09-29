@@ -65,8 +65,17 @@ fn legacy_split(path: &str) -> LegacySplit<'_> {
 }
 
 /// The one decode of the whole path, judged before anything else: legacy RustFS answers a path
-/// that is not UTF-8 once decoded `400 InvalidURI`, whatever else is wrong with it. The sentence is
-/// the one the wire layer already answers an unparseable request target with.
+/// that is not UTF-8 once decoded `400 InvalidURI`, whatever else is wrong with it — its host
+/// included (rustfs/gateway#1136). The sentence is the one the wire layer already answers an
+/// unparseable request target with.
+///
+/// # Errors
+///
+/// `400 InvalidURI` for a path that is not UTF-8 once decoded.
+pub fn legacy_rustfs_decodable(path: &str) -> Result<(), CodecError> {
+    decodable(path)
+}
+
 fn decodable(path: &str) -> Result<(), CodecError> {
     decode_once(path)
         .map(drop)

@@ -29,8 +29,8 @@ use std::sync::Arc;
 
 use rustfs_gateway::{
     CorsCacheConfig, Credentials, DEFAULT_MAX_BUFFERED_BODY_BYTES, HandlerDeadlineClass, HandlerDeadlineConfig,
-    PlaintextCustomerKeyAck, RegionMatchPolicy, RegionSet, RequestBodyDeadlineConfig, S3Service, SecurityFloor, ServiceBuilder,
-    ServiceConfig, SigV4Authenticator, SlashPolicy, SseConfig, StaticCredentials, dto,
+    LegacyRustfsVirtualHosts, PlaintextCustomerKeyAck, RegionMatchPolicy, RegionSet, RequestBodyDeadlineConfig, S3Service,
+    SecurityFloor, ServiceBuilder, ServiceConfig, SigV4Authenticator, SlashPolicy, SseConfig, StaticCredentials, dto,
 };
 use rustfs_gateway_fs::FsBackend;
 
@@ -260,6 +260,10 @@ pub(crate) fn build_service(
             // RustFS takes an `x-id` as the operation and orders two operation keys by its own
             // table (#1127).
             .select_operations_as_legacy_rustfs()
+            // RustFS reads virtual hosts against `RUSTFS_SERVER_DOMAINS`, ports ignored, the whole
+            // prefix as the bucket and a CNAME-style fallback; none configured reads every request
+            // path-style (#1136).
+            .host_resolver(LegacyRustfsVirtualHosts::new(&options.server_domains)?)
             // The backend's stored CORS documents feed the gateway's CORS answers, as RustFS's do
             // behind the gateway; no cache lifetime, so a suite sees a `PutBucketCors` at once.
             .cors_source(Arc::clone(backend))

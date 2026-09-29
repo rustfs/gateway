@@ -139,7 +139,10 @@ before it splits the bucket from the key, as RustFS does; the bucket floor then 
 label, and the start-up line reports `path_split=rustfs-legacy`. A third,
 `select_operations_as_legacy_rustfs` (#1127), chooses the operation as legacy RustFS does, a
 signed `x-id` first; it lowers no floor, and every decision after routing, authorization
-included, is made about the operation it chose.
+included, is made about the operation it chose. A fourth, the `LegacyRustfsVirtualHosts` resolver
+(#1136), reads virtual hosts as legacy RustFS does, a bucket-shaped host outside every configured
+domain naming a bucket of its own; it too lowers no floor, and every later decision is made about
+the bucket it read.
 
 **What is still yours.** The framework's promise stops at handing you a validated `ObjectKey`. It
 does not map that key onto a physical location, and it cannot: only you know what the root is. You

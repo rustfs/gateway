@@ -120,9 +120,24 @@ fn signed_in(
     body: Bytes,
     extra: &[(&str, &str)],
 ) -> http::Request<Bytes> {
+    signed_to("s3.example.com", region, access_key, secret_key, method, target, body, extra)
+}
+
+/// [`signed_in`], sent to `host` rather than `s3.example.com`.
+#[allow(clippy::too_many_arguments, reason = "the signing inputs, each one a fixture choice")]
+fn signed_to(
+    host: &str,
+    region: Option<&str>,
+    access_key: &str,
+    secret_key: &str,
+    method: http::Method,
+    target: &str,
+    body: Bytes,
+    extra: &[(&str, &str)],
+) -> http::Request<Bytes> {
     let (path, query) = target.split_once('?').map_or((target, ""), |(path, query)| (path, query));
     let mut headers = http::HeaderMap::new();
-    headers.insert(http::header::HOST, http::HeaderValue::from_static("s3.example.com"));
+    headers.insert(http::header::HOST, http::HeaderValue::from_str(host).expect("a valid host"));
     for (name, value) in extra {
         headers.append(
             http::HeaderName::from_bytes(name.as_bytes()).expect("a valid header name"),
@@ -146,7 +161,7 @@ fn signed_in(
     };
     let probe = http::Request::builder()
         .uri("/")
-        .header(http::header::HOST, "s3.example.com")
+        .header(http::header::HOST, host)
         .body(Bytes::new())
         .expect("a valid host probe");
     let accepted = WireRequest::accept(probe, &Limits::default()).expect("an acceptable host");
@@ -766,6 +781,9 @@ mod legacy_key_tests;
 
 /// A request path addressed as legacy RustFS addresses it (rustfs/gateway#1115).
 mod legacy_addressing_tests;
+
+/// A virtual host read as legacy RustFS reads it (rustfs/gateway#1136).
+mod legacy_vhost_tests;
 
 /// The operation a request names, selected as legacy RustFS selects it (rustfs/gateway#1127).
 mod legacy_selection_tests;
