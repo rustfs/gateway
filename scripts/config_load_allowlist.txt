@@ -12,6 +12,7 @@
 # in the same item) both fail. Two genuinely identical sites in one item are listed twice.
 crates/gateway/src/builder.rs | impl ServiceBuilder / fn build | self.config.rcu(|current| {
 crates/gateway/src/builder/assembly_update.rs | impl AssemblyUpdate / fn into_snapshot | let config = Arc::clone(&builder.config.load_full().config);
+crates/gateway/src/classify.rs | impl S3Service / fn classify | let snapshot = self.inner.config.load_full();
 crates/gateway/src/clock.rs | impl MonotonicClock for ManualMonotonic / fn monotonic | MonotonicNow(self.millis.load(Ordering::SeqCst))
 crates/gateway/src/commit.rs | mod tests / fn pending_work_starts_only_after_the_head_is_finalized | assert_eq!(started.load(Ordering::SeqCst), 0, "the work started before finalization");
 crates/gateway/src/commit.rs | mod tests / fn pending_work_starts_only_after_the_head_is_finalized | assert_eq!(started.load(Ordering::SeqCst), 1);

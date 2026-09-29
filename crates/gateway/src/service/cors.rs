@@ -159,7 +159,7 @@ impl S3Service {
 /// two probes away from an enumeration oracle.
 ///
 /// [`Addressing::Path`]: crate::Addressing::Path
-pub(super) fn preflight_bucket(path: &str, resolved: &ResolvedHost) -> Option<rustfs_gateway_types::BucketName> {
+pub(crate) fn preflight_bucket(path: &str, resolved: &ResolvedHost) -> Option<rustfs_gateway_types::BucketName> {
     if preflight_uses_resolved_target() {
         if let Some(bucket) = resolved.bucket() {
             return Some(bucket.clone());

@@ -82,6 +82,7 @@ mod adapt;
 mod assembly;
 mod builder;
 mod chunked;
+mod classify;
 mod clock;
 pub mod close;
 pub mod commit;
@@ -135,6 +136,7 @@ pub use crate::builder::{
     AssemblyUpdate, CHECKSUM_REQUIRED_OPERATIONS, DEFAULT_MAX_BUFFERED_BODY_BYTES, MINIO_CLIENT_CHECKSUM_OPTIONAL_OPERATIONS,
     S3CMD_CHECKSUM_OPTIONAL_OPERATIONS, ServiceBuilder,
 };
+pub use crate::classify::Classification;
 pub use crate::clock::{
     Clock, ClockPosture, ClockSkewAck, FixedClock, ManualMonotonic, MonotonicClock, MonotonicNow, SystemMonotonic, system_clock,
 };
