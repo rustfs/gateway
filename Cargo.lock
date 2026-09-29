@@ -1782,6 +1782,7 @@ name = "rustfs-gateway-compat-sut"
 version = "0.1.4"
 dependencies = [
  "bytes",
+ "hmac",
  "http",
  "http-body",
  "rcgen",

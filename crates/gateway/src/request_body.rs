@@ -394,7 +394,7 @@ where
                         let refusal = this
                             .progress
                             .take_refusal()
-                            .unwrap_or_else(|| this.progress.mark_refusal_if_unfinished(ChunkIngest::refusal(pipeline)));
+                            .unwrap_or_else(|| this.progress.mark_refusal_if_unfinished(this.codes.chunk_refusal(pipeline)));
                         this.fail(refusal)
                     }
                     Poll::Ready(Ok(ReadProgress::Filled(0))) => this.fail(crate::gate::incomplete()),

@@ -48,6 +48,10 @@ tower = { workspace = true, features = ["util"] }
 # The launcher's own tests drive signed requests through the very service `main` serves, so they
 # need the signer any SDK would use and the digest it puts in `x-amz-content-sha256`.
 sha2 = { workspace = true }
+# An independent SigV4 signer for requests the gateway's own signer will not mint: presigned
+# `X-Amz-Expires` spellings legacy RustFS accepts (`0`, a leading `+`) and hand-framed aws-chunked
+# uploads whose trailers disagree with their head.
+hmac = { workspace = true }
 # `tests/tls.rs` dials the real binary over both listeners, as a client would.
 tokio = { workspace = true, features = ["io-util", "net"] }
 tokio-rustls = { workspace = true }
