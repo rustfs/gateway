@@ -182,10 +182,11 @@ pub(crate) fn build_service(
             // The same registry answers `x-amz-expected-bucket-owner`, so the owner id a caller
             // asserts is the very id the authorization decision was made against.
             .bucket_owner_source(Arc::clone(owners))
-            // RustFS accepts the MinIO SDKs' checksum-less policy and versioning writes (#916) and
-            // s3cmd's checksum-less ACL writes (#912), and so must the launcher that stands for it.
-            .accept_minio_client_checksum_omissions()
-            .accept_s3cmd_acl_checksum_omissions()
+            // RustFS requires an integrity claim on no request body: the MinIO SDKs' checksum-less
+            // policy and versioning writes (#916), s3cmd's ACL writes (#912) and every other
+            // write the AWS model marks checksum-required are served without one
+            // (rustfs/backlog#1677, R5). A claim that is sent is still compared.
+            .accept_all_checksum_omissions()
             // RustFS lowers an oversized `max-keys` to a thousand on every listing rather than
             // refusing it; Hadoop S3A pages at 5000 (rustfs/backlog#1677).
             .clamp_oversized_max_keys()

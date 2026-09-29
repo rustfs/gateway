@@ -72,7 +72,9 @@ mod client_quirks;
 mod secret_scope;
 pub(crate) mod view_policy;
 pub use self::assembly_update::AssemblyUpdate;
-pub use self::client_quirks::{MINIO_CLIENT_CHECKSUM_OPTIONAL_OPERATIONS, S3CMD_CHECKSUM_OPTIONAL_OPERATIONS};
+pub use self::client_quirks::{
+    CHECKSUM_REQUIRED_OPERATIONS, MINIO_CLIENT_CHECKSUM_OPTIONAL_OPERATIONS, S3CMD_CHECKSUM_OPTIONAL_OPERATIONS,
+};
 use crate::service::{Inner, S3Service};
 use crate::trace::{MintedTraces, TraceSource};
 use crate::{MonomorphicOperationSet, MonomorphicService};

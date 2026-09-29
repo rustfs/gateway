@@ -666,6 +666,7 @@ gateway_modules = (
     "authz_implementations",
     "backend_reachability",
     "bucket_config_reachability",
+    "checksum_omissions",
     "chunked_allocations",
     "committed_head_runtime",
     "committed_progress",

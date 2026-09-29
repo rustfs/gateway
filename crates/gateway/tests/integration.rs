@@ -42,6 +42,8 @@ mod authz_implementations;
 mod backend_reachability;
 #[path = "bucket_config_reachability.rs"]
 mod bucket_config_reachability;
+#[path = "checksum_omissions.rs"]
+mod checksum_omissions;
 #[path = "chunked_allocations.rs"]
 mod chunked_allocations;
 #[path = "committed_head_runtime.rs"]

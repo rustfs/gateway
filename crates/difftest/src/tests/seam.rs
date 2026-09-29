@@ -290,6 +290,32 @@ fn n_no_finding_outlives_the_difference_it_names() {
     assert!(stale.is_empty(), "findings no row exercises: {stale:?}");
 }
 
+/// The checksum-less rows route to exactly the operations the pinned model marks
+/// `httpChecksumRequired`, one row each, and every one of them reaches both handlers: under the
+/// RustFS profile no such write is refused for a checksum the legacy stack never asks for
+/// (rustfs/backlog#1677, R5).
+#[test]
+fn every_checksum_required_write_without_a_checksum_reaches_both_handlers() {
+    use crate::seam::OMITTED_OPERATIONS;
+
+    let mut listed = OMITTED_OPERATIONS.to_vec();
+    listed.sort_unstable();
+    let mut required = rustfs_gateway::CHECKSUM_REQUIRED_OPERATIONS.to_vec();
+    required.sort_unstable();
+    assert_eq!(listed, required);
+
+    let omitted: Vec<&Outcome> = outcomes()
+        .iter()
+        .filter(|outcome| outcome.source == Source::Seam && outcome.name.starts_with("omitted-"))
+        .collect();
+    let routed: Vec<Option<&str>> = omitted.iter().map(|outcome| outcome.diff.routed.gateway.as_deref()).collect();
+    let expected: Vec<Option<&str>> = OMITTED_OPERATIONS.iter().copied().map(Some).collect();
+    assert_eq!(routed, expected);
+    for outcome in omitted {
+        assert!(both_handed(&outcome.diff), "{}: {:?}", outcome.name, outcome.diff.verdict);
+    }
+}
+
 #[test]
 fn n_the_register_is_well_formed() {
     let mut ids = BTreeSet::new();

@@ -12,14 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The MinIO-client checksum waiver as the RustFS-profile launcher serves it (rustfs/gateway#916).
+//! The MinIO clients' checksum-less writes as the RustFS-profile launcher serves them
+//! (rustfs/gateway#916, and rustfs/backlog#1677 ruling R5 for every other write).
 //!
 //! Responsible for: a `PutBucketPolicy` and a `PutBucketVersioning` with no integrity header —
 //! what minio-go, minio-js and `mc anonymous set` send — being stored, while a present
-//! `Content-MD5` is still verified and every other checksum-required write still refuses a body
-//! with no integrity claim.
+//! `Content-MD5` is still verified; and the lifecycle and public-access-block writes, which every
+//! MinIO SDK checksums, being stored without one too, as legacy RustFS stores them.
 //! NOT responsible for: the default AWS-model requirement, which the conformance corpus pins
-//! (`c-bucketconfig-0039`), or the waiver's own unit rules (`rustfs_gateway::client_quirks`).
+//! (`c-bucketconfig-0039`), the MinIO waiver's own closed set (`rustfs_gateway::client_quirks`
+//! and `crates/gateway/tests/checksum_omissions.rs`), or the other checksum-required writes
+//! (`checksum_omission_tests.rs`).
 //! Upstream: the parent module's two-identity assembly. Downstream: nothing.
 
 use super::*;
@@ -99,20 +102,27 @@ async fn a_present_but_wrong_checksum_is_still_refused() {
     assert_eq!(get(&service, "/minio?policy").await.status(), 404);
 }
 
-/// Negative — the waiver is a closed set: every MinIO SDK checksums its lifecycle and
-/// public-access-block writes, so those keep the AWS-model requirement.
+/// Positive — legacy RustFS requires a checksum on no write, so the lifecycle and
+/// public-access-block writes are stored without one as well.
+///
+/// This case asserted a `400 InvalidRequest` until rustfs/backlog#1677 ruling R5: that answer was
+/// the MinIO waiver's closed set, not RustFS's. Legacy RustFS reads no `Content-MD5` in either
+/// handler (rustfs/rustfs@e870a6d25b `rustfs/src/storage/ecfs.rs:1424`, `:1483`), and a legacy
+/// RustFS build answered both writes with no integrity header `200` and stored them. The waiver's
+/// closed set is still held, at the assembly, by `crates/gateway/tests/checksum_omissions.rs`
+/// (`n_the_two_client_waivers_alone_leave_every_other_write_required`).
 #[tokio::test]
-async fn other_checksum_required_writes_still_refuse_a_missing_checksum() {
+async fn other_checksum_required_writes_are_stored_without_a_checksum_as_legacy_rustfs_stores_them() {
     let root = TestRoot::new();
     let service = minio_bucket(&root).await;
 
-    for (target, body) in [("/minio?lifecycle", LIFECYCLE), ("/minio?publicAccessBlock", BLOCK)] {
-        let refused = put(&service, target, body, &[]).await;
-        assert_eq!(refused.status(), 400, "{target}: {}", body_of(&refused));
-        assert!(
-            body_of(&refused).contains("<Code>InvalidRequest</Code>"),
-            "{target}: {}",
-            body_of(&refused)
-        );
+    for (target, body, stored) in [
+        ("/minio?lifecycle", LIFECYCLE, "<ID>r</ID>"),
+        ("/minio?publicAccessBlock", BLOCK, "<BlockPublicPolicy>true</BlockPublicPolicy>"),
+    ] {
+        let written = put(&service, target, body, &[]).await;
+        assert_eq!(written.status(), 200, "{target}: {}", body_of(&written));
+        let read = get(&service, target).await;
+        assert!(body_of(&read).contains(stored), "{target}: {}", body_of(&read));
     }
 }

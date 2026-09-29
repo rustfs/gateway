@@ -126,8 +126,7 @@ impl GatewaySeam {
             .bucket_owner_source(FixtureOwner)
             // The RustFS profile: the seam is only ever reached behind it, so its decode choices
             // are what the RustFS app layer is handed (`compat/sut` turns on the same ones).
-            .accept_minio_client_checksum_omissions()
-            .accept_s3cmd_acl_checksum_omissions()
+            .accept_all_checksum_omissions()
             .clamp_oversized_max_keys()
             .leave_anonymous_streaming_payloads_undecoded()
             .host_resolver(Resolver::new(false))
