@@ -20,6 +20,10 @@
 
 use super::*;
 
+// Browser `POST` uploads, beside the other object writes: `fixture.rs` is at its size allowance.
+#[path = "post_object.rs"]
+mod post_object;
+
 impl Stub {
     /// The bucket's stored `BlockedEncryptionTypes` applied to one object write: a write that
     /// presented an SSE-C key to a bucket that blocks SSE-C is refused with `403 AccessDenied`

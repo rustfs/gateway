@@ -1,0 +1,46 @@
+# c-post-0002 — A multipart form whose Content-Type names no boundary is refused.
+
+[case]
+id = "c-post-0002"
+schema_version = 1
+title = "A multipart form whose Content-Type names no boundary is refused"
+rationale = """
+Without a boundary the body cannot be framed at all: an implementation that guessed one, or read the body as a single part, would store bytes the client never meant as the object. The refusal must come before any file byte is read and name the form, not the policy."""
+polarity = "negative"
+operation = "PostObject"
+tags = ["framing", "validation", "security"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc7578"
+summary = "A multipart/form-data body is framed by its boundary, and every part names its field in a Content-Disposition header."
+kind = "rfc"
+
+[[setup.buckets]]
+name = "conf-post"
+
+[request]
+method = "POST"
+target = "/conf-post"
+sign = { mode = "anonymous" }
+body = { utf8 = "--confpost\r\nContent-Disposition: form-data; name=\"key\"\r\n\r\nuploads/report.txt\r\n--confpost\r\nContent-Disposition: form-data; name=\"file\"; filename=\"report.txt\"\r\n\r\nthe object content\r\n--confpost--\r\n" }
+
+[request.headers]
+"content-type" = "multipart/form-data"
+
+[expect]
+kind = "response"
+status = 400
+headers_absent = ["etag", "x-amz-version-id"]
+connection_after = "open"
+
+[expect.error]
+code = "MalformedPOSTRequest"
+request_id_present = true
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Error><Code>MalformedPOSTRequest</Code><Message>the POST form was not accepted</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>'''
