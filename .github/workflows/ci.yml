@@ -25,7 +25,6 @@ name: CI
 # DEFERRED JOBS — do NOT add these here "while you are in the file".
 # Each line records where the job belongs and why it is not here yet.
 #
-#   advisories (cargo-deny)         -> Week-1, together with deny.toml
 #   arch checks                     -> task P0-07
 #   SemVer / cargo public-api       -> before the first release; no baseline yet
 #   role-verdict / ct-eq checks     -> task P0-10
@@ -114,10 +113,11 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  # Central registry for tools introduced by later release, coverage, audit and
-  # fuzz jobs. Keeping all six pins here makes an upgrade one reviewable diff.
-  # The first four install through taiki-e/install-action; cargo-public-api uses
-  # `cargo install --locked`, and cargo-fuzz uses dtolnay/install.
+  # Central registry for the Cargo tools CI installs: cargo-deny in Static checks
+  # today, and the release, coverage and fuzz jobs that follow. Keeping all six
+  # pins here makes an upgrade one reviewable diff. The first four install
+  # through taiki-e/install-action; cargo-public-api uses `cargo install --locked`,
+  # and cargo-fuzz uses dtolnay/install.
   CARGO_SEMVER_CHECKS_TOOL: cargo-semver-checks@0.50.0
   CARGO_HACK_TOOL: cargo-hack@0.6.45
   CARGO_LLVM_COV_TOOL: cargo-llvm-cov@0.8.7
@@ -152,6 +152,19 @@ jobs:
       # Pinned models must match their recorded checksums before anything is generated from them.
       - name: Model integrity
         run: python3 model/tools/verify.py
+      # Dependency policy against deny.toml: RustSec advisories, bans, licences and sources.
+      # `--locked` judges the committed Cargo.lock, not one cargo would rewrite first, and
+      # `--all-features` takes in the compat-s3s oracles, the repository's only git source.
+      # An advisory published against a locked version turns every pull request red until the
+      # lock moves; that is the gate doing its job. `fallback: none` makes a missing prebuilt
+      # binary fail the install instead of compiling or fetching an unpinned installer.
+      - name: Install cargo-deny
+        uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21
+        with:
+          tool: ${{ env.CARGO_DENY_TOOL }}
+          fallback: none
+      - name: Dependency policy
+        run: cargo deny --locked --workspace --all-features check advisories bans licenses sources
       # Architecture guards. A guard that does not run in CI is decoration.
       #
       # A guard that declares REQUIRES-BUILD compiles the workspace, so it runs in

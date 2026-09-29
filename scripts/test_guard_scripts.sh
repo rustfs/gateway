@@ -17948,6 +17948,43 @@ mut_ci_time_static_failure_swallowed() {
 expect_fail check_ci_time_gate.sh \
     'the required Static checks job swallowing fmt failure' mut_ci_time_static_failure_swallowed
 
+mut_ci_time_deny_step_removed() {
+    replace_ci_text '      - name: Dependency policy
+        run: cargo deny --locked --workspace --all-features check advisories bans licenses sources
+' ''
+}
+expect_fail check_ci_time_gate.sh \
+    'Static checks no longer running cargo-deny' mut_ci_time_deny_step_removed \
+    'must have one authoritative CI execution'
+
+mut_ci_time_deny_drops_advisories() {
+    replace_ci_text 'check advisories bans licenses sources' 'check bans licenses sources'
+}
+expect_fail check_ci_time_gate.sh \
+    'cargo-deny dropping the advisories section' mut_ci_time_deny_drops_advisories \
+    'must have one authoritative CI execution'
+
+mut_ci_time_deny_failure_swallowed() {
+    replace_ci_text 'check advisories bans licenses sources' 'check advisories bans licenses sources || true'
+}
+expect_fail check_ci_time_gate.sh \
+    'the cargo-deny step swallowing its failure' mut_ci_time_deny_failure_swallowed \
+    'must have one authoritative CI execution'
+
+mut_ci_time_deny_install_fallback() {
+    replace_ci_text '          fallback: none' '          fallback: cargo-install'
+}
+expect_fail check_ci_time_gate.sh \
+    'cargo-deny installing through a compile-from-source fallback' mut_ci_time_deny_install_fallback \
+    'must install the pinned CARGO_DENY_TOOL'
+
+mut_ci_time_deny_install_unpinned() {
+    replace_ci_text 'tool: ${{ env.CARGO_DENY_TOOL }}' 'tool: cargo-deny'
+}
+expect_fail check_ci_time_gate.sh \
+    'cargo-deny installed without the central version pin' mut_ci_time_deny_install_unpinned \
+    'must install the pinned CARGO_DENY_TOOL'
+
 mut_ci_time_clippy_continues_on_error() {
     replace_ci_text '      - run: cargo clippy --workspace --all-targets -- -D warnings' \
         '      - run: cargo clippy --workspace --all-targets -- -D warnings

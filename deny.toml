@@ -17,12 +17,30 @@ allow = [
 ]
 confidence-threshold = 0.8
 
+# Each exception names one crate, so neither licence is admitted for anything else.
+exceptions = [
+    # Mozilla's root-certificate data. Only the conformance runner links it, to reach an
+    # external HTTPS target; no gateway runtime crate does.
+    { crate = "webpki-roots", allow = ["CDLA-Permissive-2.0"] },
+    # Reached only through the rustfs/s3s oracle revisions below (the `compat-s3s` feature).
+    { crate = "xxhash-rust", allow = ["BSL-1.0"] },
+]
+
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"
+# Every workspace crate is `publish = false` and names its siblings by path alone. A registry
+# dependency without a version is still denied.
+allow-wildcard-paths = true
 
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
-allow-git = []
+# The only git source: the s3s revisions RustFS 1.0.0-rc.5-preview.2 and 1.0.0-rc.6 shipped
+# with, which `rustfs-gateway-types` builds as the persistence-migration oracles
+# (`s3s_baseline` and `s3s_rollback` in crates/types/Cargo.toml, behind `compat-s3s`). They are
+# not on crates.io, and the oracle must be the exact bytes those releases ran, so the fork is
+# allowed here and every git dependency must pin a `rev`.
+allow-git = ["https://github.com/rustfs/s3s.git"]
+required-git-spec = "rev"
