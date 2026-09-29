@@ -31,13 +31,13 @@
 use bytes::Bytes;
 use http::{Method, Request, StatusCode};
 use rustfs_gateway_http::{Limits, WireRequest};
-use rustfs_gateway_types::dto;
-use rustfs_gateway_types::{BucketName, ETag, ObjectKey, OpaqueString, RangeOutcome, Timestamp};
+use rustfs_gateway_types::{BucketName, ETag, ObjectKey, OpaqueString, RangeOutcome, Timestamp, dto};
 
 use crate::codec::response::ResponseBody;
 use crate::codec::{MetaView, OperationCodec, RequestBody};
 use crate::route::TargetKind;
 
+mod body_literals;
 mod content_type_default;
 mod header_lists;
 mod metadata_and_url;

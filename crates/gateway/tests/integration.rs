@@ -40,6 +40,8 @@ mod authz_contract;
 mod authz_implementations;
 #[path = "backend_reachability.rs"]
 mod backend_reachability;
+#[path = "body_literals.rs"]
+mod body_literals;
 #[path = "body_refusal_sentences.rs"]
 mod body_refusal_sentences;
 #[path = "bodyless_payload_digest.rs"]

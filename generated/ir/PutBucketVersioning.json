@@ -209,7 +209,7 @@
            "empty_value_policy": {},
            "url_encoded_fields": [],
            "attributes": [],
-           "body_literal": false
+           "body_literal": true
          },
   "errors": {
               "not_configured": null,

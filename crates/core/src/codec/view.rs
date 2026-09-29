@@ -79,6 +79,8 @@ pub struct MetaView<'a> {
     rustfs_listing: Option<crate::codec::value::RustFsListing>,
     /// Whether the deployment reads an HTTP-date condition in legacy RustFS's one spelling.
     strict_date_conditions: bool,
+    /// Whether the deployment reads MinIO's bare body literal as the document it stands for.
+    body_literals: bool,
 }
 
 /// A page-size query parameter answered with its ceiling when the request asked for more.
@@ -203,6 +205,7 @@ impl<'a> MetaView<'a> {
             ended_empty: false,
             rustfs_listing: None,
             strict_date_conditions: false,
+            body_literals: false,
         })
     }
 
@@ -230,6 +233,7 @@ impl<'a> MetaView<'a> {
             ended_empty: self.ended_empty,
             rustfs_listing: self.rustfs_listing,
             strict_date_conditions: self.strict_date_conditions,
+            body_literals: self.body_literals,
         }
     }
 
@@ -283,6 +287,23 @@ impl<'a> MetaView<'a> {
     #[must_use]
     pub const fn strict_date_conditions(&self) -> bool {
         self.strict_date_conditions
+    }
+
+    /// This view, reading MinIO's bare body literal as the document it stands for.
+    ///
+    /// The assembly calls this only for an operation its deployment accepts the literal on (the
+    /// RustFS profile, rustfs/backlog#1677 R6), and only a decoder whose IR says `xml.body_literal`
+    /// consults it ([`crate::codec::value::body_literal`]). Every other body reads as before.
+    #[must_use]
+    pub const fn with_body_literals(mut self) -> Self {
+        self.body_literals = true;
+        self
+    }
+
+    /// Whether this deployment reads MinIO's bare body literal as the document it stands for.
+    #[must_use]
+    pub const fn body_literals_accepted(&self) -> bool {
+        self.body_literals
     }
 
     /// This view, with one page-size query parameter clamped to its ceiling.

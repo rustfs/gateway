@@ -180,6 +180,36 @@ fn every_buffered_body_is_settled_against_the_digest_declared_over_it() {
     );
 }
 
+/// MinIO's body literal is read by exactly the decoders whose IR says `xml.body_literal`, once
+/// each, after the digest has been checked over the bytes that arrived and before the document is
+/// parsed; no other decoder names it (rustfs/backlog#1677, R6).
+#[test]
+fn only_a_body_literal_decoder_reads_the_literal_and_only_after_the_digest() {
+    const SETTLE: &str = "value::verify_body_digest(request, raw_body.as_ref())?;";
+    const PARSE: &str = "rustfs_gateway_xml::parse(raw_body.as_ref())";
+    let artifacts = super::codegen_tests::artifacts();
+    let mut literal_decoders = Vec::new();
+    for ir in &artifacts.operations {
+        let generated = crate::emit::codec::decode::body(ir, &artifacts.codec_rules, &artifacts.error_codes)
+            .expect("every included operation has a decoder");
+        let calls: Vec<usize> = generated
+            .match_indices("value::body_literal(request, ")
+            .map(|(index, _)| index)
+            .collect();
+        if !ir.xml.body_literal {
+            assert!(calls.is_empty(), "{}: reads a literal its IR does not accept", ir.operation);
+            continue;
+        }
+        assert_eq!(calls.len(), 1, "{}: one literal read", ir.operation);
+        let settle = generated.find(SETTLE).expect("the digest is checked");
+        let parse = generated.find(PARSE).expect("the document is parsed");
+        assert!(settle < calls[0] && calls[0] < parse, "{}: digest, literal, parse", ir.operation);
+        literal_decoders.push(ir.operation.clone());
+    }
+    literal_decoders.sort_unstable();
+    assert_eq!(literal_decoders, ["PutBucketVersioning", "PutObjectLockConfiguration"]);
+}
+
 #[test]
 fn the_two_bounded_members_reach_the_generated_decoders() {
     let artifacts = super::codegen_tests::artifacts();

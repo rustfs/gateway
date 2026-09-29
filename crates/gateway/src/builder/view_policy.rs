@@ -95,6 +95,9 @@ const MAX_KEYS: PageSizeCeiling = PageSizeCeiling::new("max-keys", RUSTFS_MAX_KE
 /// The uploads whose absent `Content-Length` the RustFS profile reads as `0` when the transport
 /// already ended the body empty, and no others: the two that require the header.
 pub const EMPTY_UPLOAD_OPERATIONS: [&str; 2] = ["PutObject", "UploadPart"];
+/// The operations whose MinIO body literal the RustFS profile reads, and no others: the two whose
+/// IR says `xml.body_literal`, as legacy RustFS reads them (rustfs/backlog#1677, R6).
+pub const BODY_LITERAL_OPERATIONS: [&str; 2] = ["PutBucketVersioning", "PutObjectLockConfiguration"];
 
 /// Legacy RustFS's `encoding-type=url` rule, per listing: the members it percent-encodes (a root
 /// member by name, a nested one as `Shape.Member`) and whether it echoes `encoding-type`.
@@ -148,6 +151,7 @@ pub(crate) struct ViewPolicy {
     rustfs_listings: bool,
     /// Whether date conditions are read in legacy RustFS's one spelling (`date_conditions`).
     pub(super) strict_date_conditions: bool,
+    body_literals: bool,
 }
 
 impl ViewPolicy {
@@ -189,6 +193,11 @@ impl ViewPolicy {
         };
         let meta = if self.strict_date_conditions && date_conditions::covers(operation) {
             meta.with_strict_date_conditions()
+        } else {
+            meta
+        };
+        let meta = if self.body_literals && BODY_LITERAL_OPERATIONS.contains(&operation) {
+            meta.with_body_literals()
         } else {
             meta
         };
@@ -312,6 +321,21 @@ impl ServiceBuilder {
         self.view_policy.rustfs_listings = true;
         self
     }
+
+    /// Reads MinIO's bare body literal on exactly [`BODY_LITERAL_OPERATIONS`] as legacy RustFS
+    /// does: a PutBucketVersioning or PutObjectLockConfiguration body whose ASCII-trimmed bytes are
+    /// `Enabled` is the document with that one member set to `Enabled` (rustfs/backlog#1677, R6).
+    ///
+    /// Off by default: the core answers the S3 model, `400 MalformedXML` for a body that is not the
+    /// document (`c-bucketconfig-0060`). The RustFS profile turns it on so a client of RustFS's
+    /// MinIO dialect keeps working. Only the literal itself is read so: `enabled`, a bare
+    /// `Suspended` and every other body are still the document or `MalformedXML`, and a
+    /// `Content-MD5` or checksum is still verified over the bytes that arrived.
+    #[must_use]
+    pub fn accept_minio_body_literals(mut self) -> Self {
+        self.view_policy.body_literals = true;
+        self
+    }
 }
 
 #[cfg(test)]
@@ -371,6 +395,7 @@ mod tests {
         assert!(!ViewPolicy::default().empty_uploads_without_length);
         assert!(!ViewPolicy::default().rustfs_listings);
         assert!(!ViewPolicy::default().strict_date_conditions);
+        assert!(!ViewPolicy::default().body_literals);
         for operation in ["ListMultipartUploads", "ListParts", "ListBuckets", "GetObject", "PutObject"] {
             assert!(!CLAMPED_MAX_KEYS_OPERATIONS.contains(&operation), "{operation}");
         }

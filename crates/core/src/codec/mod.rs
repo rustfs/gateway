@@ -46,6 +46,7 @@
 //! * an unwrapped body is `xml.unwrapped_output`, carried per operation;
 //! * emit-or-omit for an empty member is `xml.empty_value_policy`, carried per member.
 
+mod body_literal;
 pub mod error;
 pub mod extra_headers;
 mod legacy_path;

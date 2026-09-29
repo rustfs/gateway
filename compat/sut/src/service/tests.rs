@@ -704,6 +704,8 @@ async fn n_without_the_debug_interval_a_one_day_rule_expires_nothing() {
 #[path = "tests/policy_tests.rs"]
 mod policy_tests;
 
+/// MinIO's bare `Enabled` versioning body, as RustFS reads it (rustfs/backlog#1677, R6).
+mod body_literal_tests;
 /// What the RustFS profile accepts beyond the AWS defaults: MinIO checksum-less writes (#916), an
 /// explicit us-east-1 constraint (#914), s3cmd's ACL writes (#912), SigV2 presigned URLs (#913),
 /// an oversized `max-keys`, any and empty signing regions, every checksum-less write

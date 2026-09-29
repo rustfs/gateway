@@ -58,6 +58,7 @@ impl OperationCodec for dto::PutBucketVersioning {
         // VersioningConfiguration — the XML request body, rooted at `VersioningConfiguration`.
         let raw_body = body.into_buffered()?;
         value::verify_body_digest(request, raw_body.as_ref())?;
+        let raw_body = value::body_literal(request, "VersioningConfiguration", raw_body);
         let root = rustfs_gateway_xml::parse(raw_body.as_ref())
             .map_err(|_| CodecError::malformed_xml("the request body is not the XML this operation accepts"))?;
         if !["VersioningConfiguration"].contains(&root.name.as_str()) {

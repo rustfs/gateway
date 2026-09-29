@@ -465,13 +465,17 @@ const OPERATION_DIVERGENCES: [RequestDivergence; 26] = [
         s3s: "built with its minio feature, as RustFS builds it, reads a body whose ASCII-trimmed bytes are exactly Enabled as \
               Status Enabled (http::take_body_literal) and hands it to the handler; every other body, a bare Suspended \
               included, is read as XML and refused",
-        gateway: "400 MalformedXML before the handler: body_literal is false for this operation, so the body must be the \
-                  document (c-bucketconfig-0060, decided in rustfs/gateway#715)",
+        gateway: "400 MalformedXML before the handler by default: the body must be the document (c-bucketconfig-0060, \
+                  decided in rustfs/gateway#715). Under ServiceBuilder::accept_minio_body_literals (the RustFS profile, \
+                  rustfs/backlog#1677 R6) the decoder the IR marks body_literal reads the ASCII-trimmed literal as the \
+                  document with Status Enabled, after the digest check, and hands the handler the input legacy RustFS \
+                  hands it; every other spelling is still MalformedXML",
         client_impact: "a client sending the bare literal gets 400 where RustFS answered 200 and turned versioning on. None has \
                         been found: minio-go and mc marshal the XML document, MinIO's own server reads the body only as XML, \
                         and s3s-project/s3s#612 names no client. If one appears, the literal is added through overlay, IR \
-                        and codec, never as a handler branch",
-        ruling: DivergenceRuling::KeepGateway,
+                        and codec, never as a handler branch. The RustFS profile now reads it so, through overlay, IR and \
+                        codec; only a non-RustFS assembly answers 400",
+        ruling: DivergenceRuling::RustfsProfile,
         follow_up: DivergenceFollowUp::Landed("c-bucketconfig-0060"),
         test_file: CONFIG_DECODE,
         test: "a_bare_enabled_versioning_body_is_refused_by_the_gateway_and_accepted_by_s3s",

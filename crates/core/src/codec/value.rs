@@ -335,6 +335,7 @@ pub(crate) const ENCODING_TYPE: &str = "encoding-type";
 /// The one value AWS defines for it.
 pub(crate) const ENCODING_TYPE_URL: &str = "url";
 
+pub use crate::codec::body_literal::{BODY_LITERALS, body_literal};
 pub use crate::codec::rustfs_listing::{RustFsListing, rustfs_listing_echo};
 
 /// Whether this response percent-encodes the members its operation declares as key-shaped.
