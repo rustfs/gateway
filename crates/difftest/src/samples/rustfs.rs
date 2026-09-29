@@ -132,6 +132,21 @@ fn addressing() -> Vec<RequestRow> {
         row("rustfs-addr-empty-bucket-escaped", RawRequest::get("/%2Fbkt/src"), &["kd-decode-0024"]),
         row("rustfs-addr-undecodable-key", RawRequest::get("/bkt/a%FFb"), &[]),
         row("rustfs-addr-undecodable-before-bucket", RawRequest::get("/Bad_Bucket/a%FFb"), &[]),
+        row(
+            "rustfs-addr-copy-source-reserved-bucket",
+            RawRequest::put("/bkt/dst", b"").header("x-amz-copy-source", "sthree-x/src"),
+            &[],
+        ),
+        row(
+            "rustfs-addr-copy-source-question-mark",
+            RawRequest::put("/bkt/dst", b"").header("x-amz-copy-source", "bkt/src?partNumber=1"),
+            &[],
+        ),
+        row(
+            "rustfs-addr-copy-source-version-after-question-mark",
+            RawRequest::put("/bkt/dst", b"").header("x-amz-copy-source", "bkt/a?b?versionId=v1"),
+            &[],
+        ),
     ]
 }
 

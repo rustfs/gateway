@@ -103,3 +103,37 @@ async fn n_a_get_of_double_slash_signed_over_itself_is_refused() {
     let refused = exchange(&service, as_main(http::Method::GET, "//", Bytes::new())).await;
     assert_eq!(refused.status(), 403, "{}", body_of(&refused));
 }
+
+/// Positive — an object in a bucket the AWS rules reserve, and an object whose key holds a `?`
+/// named raw in the header, are copy sources, as on legacy RustFS; the copies hold their bytes.
+#[tokio::test]
+async fn a_reserved_bucket_or_a_question_mark_key_is_a_copy_source() {
+    let root = TestRoot::new();
+    let service = addressing(&root).await;
+    let created = exchange(&service, as_main(http::Method::PUT, "/sthree-x", Bytes::new())).await;
+    assert_eq!(created.status(), 200, "{}", body_of(&created));
+    for (target, body) in [("/sthree-x/obj", &b"reserved"[..]), ("/addr/q%3Fpart%3D1", &b"question"[..])] {
+        let written = exchange(&service, as_main(http::Method::PUT, target, Bytes::copy_from_slice(body))).await;
+        assert_eq!(written.status(), 200, "{target}: {}", body_of(&written));
+    }
+    for (source, copy, expected) in [
+        ("sthree-x/obj", "/addr/from-reserved", &b"reserved"[..]),
+        ("addr/q?part=1", "/addr/from-question", &b"question"[..]),
+    ] {
+        let copied = exchange(
+            &service,
+            signed(
+                MAIN_KEY,
+                MAIN_SECRET,
+                http::Method::PUT,
+                copy,
+                Bytes::new(),
+                &[("x-amz-copy-source", source)],
+            ),
+        )
+        .await;
+        assert_eq!(copied.status(), 200, "{source}: {}", body_of(&copied));
+        let read = exchange(&service, as_main(http::Method::GET, copy, Bytes::new())).await;
+        assert_eq!(read.body().as_ref(), expected, "{source}");
+    }
+}

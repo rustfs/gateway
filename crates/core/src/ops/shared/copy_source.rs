@@ -49,7 +49,7 @@
 //! bytes, at the last `?`, and each half is decoded afterwards — `q-copy-source-split-0077`.
 
 use percent_encoding::percent_decode_str;
-use rustfs_gateway_types::{BucketName, ByteRange, ErrorCode, KeyFloor, NamePolicy, ObjectKey, RangeParse};
+use rustfs_gateway_types::{BucketName, ByteRange, ErrorCode, KeyFloor, NamePolicy, ObjectKey, PathSplit, RangeParse};
 
 use crate::contracts::{COPY_RANGE_LENGTH_ARITHMETIC, CopyRangeLengthArithmetic};
 
@@ -176,7 +176,11 @@ impl CopySource {
             ));
         }
 
-        let (path, version_id) = split_version(raw)?;
+        let (path, version_id) = if names.path_split() == PathSplit::RustfsLegacy {
+            split_version_as_legacy_rustfs(raw)?
+        } else {
+            split_version(raw)?
+        };
 
         let resource = if path.starts_with("arn:") {
             parse_arn(path, names)?
@@ -458,6 +462,29 @@ fn outside_the_source() -> CopySourceRejection {
     CopySourceRejection::new(ErrorCode::INVALID_ARGUMENT, "x-amz-copy-source-range lies outside the source object")
 }
 
+/// Splits the version off the raw header value as legacy RustFS does: at the first `?versionId=`,
+/// everything else — another `?` among it — belonging to the path.
+///
+/// Legacy-compat (rustfs/backlog#2684): a `?` that does not begin `versionId=` is key bytes to
+/// legacy RustFS, so `x-amz-copy-source: bkt/obj?partNumber=1` copies the object `obj?partNumber=1`
+/// (measured on a legacy build), where [`split_version`] refuses it. Kept, under the RustFS
+/// profile's path addressing only, so an object whose key holds a `?` stays a copy source under the
+/// spelling that reaches it today; the intended future behaviour is [`split_version`].
+fn split_version_as_legacy_rustfs(raw: &str) -> Result<(&str, Option<String>), CopySourceRejection> {
+    let Some((path, value)) = raw.split_once("?versionId=") else {
+        return Ok((raw, None));
+    };
+    let value = decode(value)?;
+    if value.is_empty() {
+        // Legacy RustFS's storage refuses an empty version with this code, after authorization.
+        return Err(CopySourceRejection::new(
+            ErrorCode::INVALID_ARGUMENT,
+            "the versionId of x-amz-copy-source must not be empty",
+        ));
+    }
+    Ok((path, Some(value)))
+}
+
 /// Splits the version suffix off the raw header value, before anything is decoded.
 ///
 /// The rule is fixed rather than heuristic: the split is at the **last** `?`, and what follows it
@@ -504,7 +531,7 @@ fn parse_path(path: &str, names: &NamePolicy) -> Result<SourceResource, CopySour
         form: CopySourceForm::Path,
         container: None,
         identity: crate::ResourceIdentity::Path,
-        bucket: bucket_of(&decode(bucket)?)?,
+        bucket: path_bucket_of(&decode(bucket)?, names)?,
         key: key_of(key, names)?,
         version_id: None,
     })
@@ -659,14 +686,31 @@ fn key_has_unsafe_path(value: &str) -> bool {
     rustfs_gateway_types::floor_check_key(value).is_err()
 }
 
+/// Validates the bucket half of the path form, under the deployment's bucket rules when it reads
+/// paths as legacy RustFS does.
+///
+/// Legacy-compat (rustfs/backlog#2684): legacy RustFS reads a copy source's bucket by its own
+/// bucket rules, so an object in a bucket it created under a prefix or suffix the AWS rules reserve
+/// (`sthree-x`, `abc-s3alias`) can be copied (measured on a legacy build: `x-amz-copy-source:
+/// sthree-x/obj` copies). Kept, under the RustFS profile's path addressing only, so no object
+/// RustFS stores stops being a copy source; the intended future behaviour is the AWS rules.
+fn path_bucket_of(name: &str, names: &NamePolicy) -> Result<BucketName, CopySourceRejection> {
+    if names.path_split() == PathSplit::RustfsLegacy {
+        return BucketName::materialize(name, names).map_err(|_| invalid_bucket());
+    }
+    bucket_of(name)
+}
+
+fn invalid_bucket() -> CopySourceRejection {
+    CopySourceRejection::new(
+        ErrorCode::INVALID_ARGUMENT,
+        "the bucket named by x-amz-copy-source is not a valid bucket name",
+    )
+}
+
 /// Validates the bucket half.
 fn bucket_of(name: &str) -> Result<BucketName, CopySourceRejection> {
-    BucketName::new(name).map_err(|_| {
-        CopySourceRejection::new(
-            ErrorCode::INVALID_ARGUMENT,
-            "the bucket named by x-amz-copy-source is not a valid bucket name",
-        )
-    })
+    BucketName::new(name).map_err(|_| invalid_bucket())
 }
 
 /// Refuses an empty ARN component.
@@ -690,3 +734,8 @@ mod rustfs_tests;
 // cannot assert an `Ok` is a test that says less than it should.
 #[allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 mod tests;
+
+#[cfg(test)]
+#[path = "copy_source_rustfs_grammar_tests.rs"]
+#[allow(clippy::expect_used)]
+mod rustfs_grammar_tests;
