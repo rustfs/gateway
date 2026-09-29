@@ -396,12 +396,31 @@ pub(super) fn backward_struct(
         }
     }
     let mut pattern = String::new();
+    let mut refusals = String::new();
     for (member, ty) in s3s {
         if used.contains(&member.as_str()) {
             let _ = writeln!(pattern, "        {member},");
-        } else if matches!(ty.unwrap_option().0, S3sType::Opaque) || matches!(member_rule(owner, member), Some(Rule::S3sOnly(_)))
-        {
+        } else if matches!(ty.unwrap_option().0, S3sType::Opaque) {
             let _ = writeln!(pattern, "        {member}: _,");
+        } else if matches!(member_rule(owner, member), Some(Rule::S3sOnly(_))) {
+            // The gateway shape cannot hold it, so a value is refused by name rather than dropped
+            // (rustfs/gateway#1076); an unset one crosses as nothing, as it would have.
+            let present = match ty {
+                S3sType::Option(_) => format!("{member}.is_some()"),
+                S3sType::Vec(_) => format!("!{member}.is_empty()"),
+                other => {
+                    errors.push(format!(
+                        "{owner}.{member}: a required legacy-only member {other:?} cannot be refused when set"
+                    ));
+                    continue;
+                }
+            };
+            let _ = writeln!(pattern, "        {member},");
+            let _ = writeln!(
+                refusals,
+                "    if {present} {{\n        {};\n    }}",
+                missing(member, "a legacy member the gateway shape cannot hold, refused rather than dropped")
+            );
         } else if matches!(member_rule(owner, member), Some(Rule::FromQuery(_) | Rule::FromBoolHeader(_))) {
             errors.push(format!("{owner}.{member}: a member decoded from the raw request is forward only"));
         } else {
@@ -428,7 +447,7 @@ pub(super) fn backward_struct(
         return Err(errors);
     }
     Ok(format!(
-        "    let s3s::dto::{owner} {{\n{pattern}    }} = {src};\n{unnest}    Ok({gw_type} {{\n{body}    }})\n"
+        "    let s3s::dto::{owner} {{\n{pattern}    }} = {src};\n{refusals}{unnest}    Ok({gw_type} {{\n{body}    }})\n"
     ))
 }
 

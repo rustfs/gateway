@@ -51,9 +51,12 @@ pub fn input_to_s3s(input: crate::ops::create_bucket::Input) -> Result<s3s::dto:
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
 pub fn output_from_s3s(output: s3s::dto::CreateBucketOutput) -> Result<crate::ops::create_bucket::Output, ConversionError> {
     let s3s::dto::CreateBucketOutput {
-        bucket_arn: _,
+        bucket_arn,
         location,
     } = output;
+    if bucket_arn.is_some() {
+        return Err(ConversionError { field: "bucket_arn", reason: "a legacy member the gateway shape cannot hold, refused rather than dropped" });
+    }
     Ok(crate::ops::create_bucket::Output {
         location,
     })

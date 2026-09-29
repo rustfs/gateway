@@ -517,3 +517,62 @@ fn n_a_header_naming_a_member_written_elsewhere_clears_nothing() {
     assert_eq!(converted.name.as_str(), "bucket");
     assert_eq!(extra.len(), 2);
 }
+
+// ── legacy-only output members ────────────────────────────────────────────────────────────────
+
+#[test]
+fn a_head_bucket_answer_without_the_legacy_only_members_converts() {
+    let output = oracle::HeadBucketOutput {
+        bucket_region: Some("us-east-1".to_owned()),
+        ..Default::default()
+    };
+    let converted = ops::head_bucket::output_from_s3s(output).expect("converts");
+    assert_eq!(converted.bucket_region.as_str(), "us-east-1");
+}
+
+#[test]
+fn n_every_legacy_only_output_member_set_is_refused_by_name() {
+    let base = || oracle::HeadBucketOutput {
+        bucket_region: Some("us-east-1".to_owned()),
+        ..Default::default()
+    };
+    let rows: [(&str, oracle::HeadBucketOutput); 4] = [
+        (
+            "access_point_alias",
+            oracle::HeadBucketOutput {
+                access_point_alias: Some(true),
+                ..base()
+            },
+        ),
+        (
+            "bucket_arn",
+            oracle::HeadBucketOutput {
+                bucket_arn: Some("arn:aws:s3:::b".to_owned()),
+                ..base()
+            },
+        ),
+        (
+            "bucket_location_name",
+            oracle::HeadBucketOutput {
+                bucket_location_name: Some("usw2-az1".to_owned()),
+                ..base()
+            },
+        ),
+        (
+            "bucket_location_type",
+            oracle::HeadBucketOutput {
+                bucket_location_type: Some(oracle::LocationType::from("AvailabilityZone".to_owned())),
+                ..base()
+            },
+        ),
+    ];
+    for (member, output) in rows {
+        let error = ops::head_bucket::output_from_s3s(output).expect_err(member);
+        assert_eq!(error.field, member);
+    }
+    let created = oracle::CreateBucketOutput {
+        bucket_arn: Some("arn:aws:s3:::b".to_owned()),
+        ..Default::default()
+    };
+    assert_eq!(ops::create_bucket::output_from_s3s(created).expect_err("bucket_arn").field, "bucket_arn");
+}

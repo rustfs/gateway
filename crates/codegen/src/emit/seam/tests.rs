@@ -392,6 +392,43 @@ mod answer_headers {
     }
 }
 
+// ── legacy-only output members ───────────────────────────────────────────────────────────────
+
+mod legacy_only_outputs {
+    use rustfs_gateway_model::ir::Type;
+
+    use super::{ctx, facts, field};
+    use crate::emit::seam::render;
+
+    #[test]
+    fn a_set_legacy_only_output_member_is_refused_rather_than_dropped() {
+        // `HeadBucketOutput.bucket_arn` is a reviewed legacy-only member.
+        let facts = facts("struct HeadBucketOutput\n  bucket_region: Option<String>\n  bucket_arn: Option<String>\n");
+        let text = render::backward_struct(
+            &ctx(&facts),
+            "HeadBucketOutput",
+            &[field("BucketRegion", Type::String, false)],
+            "G",
+            "output",
+        )
+        .expect("renders");
+        assert!(text.contains("        bucket_arn,\n"), "{text}");
+        assert!(
+            text.contains("    if bucket_arn.is_some() {\n        return Err(ConversionError { field: \"bucket_arn\""),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn n_a_runtime_member_is_still_ignored_whatever_it_holds() {
+        let facts = facts("struct T\n  bucket: Option<String>\n  future: Option<opaque>\n");
+        let text =
+            render::backward_struct(&ctx(&facts), "T", &[field("Bucket", Type::String, false)], "G", "output").expect("renders");
+        assert!(text.contains("        future: _,\n"), "{text}");
+        assert!(!text.contains("future.is_some()"), "{text}");
+    }
+}
+
 // ── the member census ─────────────────────────────────────────────────────────────────────────
 
 mod census {

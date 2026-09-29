@@ -182,11 +182,16 @@ pub const MEMBERS: &[MemberOverride] = &[
     // The copy source is sealed into the authorized derived resources (`seal_derived_input`).
     ("CopyObjectInput", "copy_source", Rule::Supplied(SEALED)),
     ("UploadPartCopyInput", "copy_source", Rule::Supplied(SEALED)),
-    // If-Range: s3s 0.17.0 has no input member; RustFS reads the header from the request.
+    // If-Range: s3s 0.17.0 has no input member, and RustFS does not read the header either (no
+    // `if-range` read anywhere in rustfs/rustfs 1e7065101d `rustfs/` or `crates/`): it serves the
+    // range whatever the validator names, as the legacy stack did (kd-decode-0003). The header line
+    // still reaches it in the request context.
     (
         "GetObjectInput",
         "if_range",
-        Rule::CarriedByHeaders("RustFS evaluates If-Range from the request headers"),
+        Rule::CarriedByHeaders(
+            "no legacy input holds If-Range and RustFS reads no If-Range header, so it serves the range as before",
+        ),
     ),
     // The gateway flattens the CopyObject/UploadPartCopy result element into its output.
     ("CopyObjectOutput", "e_tag", Rule::Nested("copy_object_result")),

@@ -42,12 +42,24 @@ pub fn input_to_s3s(input: crate::ops::head_bucket::Input) -> Result<s3s::dto::H
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
 pub fn output_from_s3s(output: s3s::dto::HeadBucketOutput) -> Result<crate::ops::head_bucket::Output, ConversionError> {
     let s3s::dto::HeadBucketOutput {
-        access_point_alias: _,
-        bucket_arn: _,
-        bucket_location_name: _,
-        bucket_location_type: _,
+        access_point_alias,
+        bucket_arn,
+        bucket_location_name,
+        bucket_location_type,
         bucket_region,
     } = output;
+    if access_point_alias.is_some() {
+        return Err(ConversionError { field: "access_point_alias", reason: "a legacy member the gateway shape cannot hold, refused rather than dropped" });
+    }
+    if bucket_arn.is_some() {
+        return Err(ConversionError { field: "bucket_arn", reason: "a legacy member the gateway shape cannot hold, refused rather than dropped" });
+    }
+    if bucket_location_name.is_some() {
+        return Err(ConversionError { field: "bucket_location_name", reason: "a legacy member the gateway shape cannot hold, refused rather than dropped" });
+    }
+    if bucket_location_type.is_some() {
+        return Err(ConversionError { field: "bucket_location_type", reason: "a legacy member the gateway shape cannot hold, refused rather than dropped" });
+    }
     Ok(crate::ops::head_bucket::Output {
         bucket_region: match bucket_region { Some(x) => x, None => return Err(ConversionError { field: "bucket_region", reason: "the gateway shape requires this member" }) },
     })

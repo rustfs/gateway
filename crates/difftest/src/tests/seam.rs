@@ -156,7 +156,7 @@ fn judge(name: &str, diff: &SeamDiff, expect: &Expect) -> Vec<String> {
             }
         }
         Expect::FailsClosed(id) => match (finding(id), &diff.verdict.gateway, &diff.verdict.s3s) {
-            (Some(finding), SeamVerdict::Unconverted { member, .. }, SeamVerdict::Handed)
+            (Some(finding), SeamVerdict::Unconverted { member, .. }, SeamVerdict::Handed | SeamVerdict::Refused(_))
                 if finding.class == SeamClass::FailClosed && finding.path == *member && finding.operation == operation => {}
             other => problem(format!("expected the seam to refuse the member of {id}, got {other:?}")),
         },
@@ -226,8 +226,8 @@ fn every_difference_a_decode_matrix_row_hands_over_is_a_registered_finding() {
     assert!(problems.is_empty(), "{}", problems.join("\n"));
 }
 
-#[test]
-fn every_member_of_every_covered_input_is_accounted_for() {
+/// Every (operation, member path) some row made both stacks hand over identically.
+pub(super) fn identically_handed() -> BTreeSet<(String, String)> {
     let mut covered: BTreeSet<(String, String)> = BTreeSet::new();
     for outcome in outcomes() {
         let diff = &outcome.diff;
@@ -242,6 +242,12 @@ fn every_member_of_every_covered_input_is_accounted_for() {
             }
         }
     }
+    covered
+}
+
+#[test]
+fn every_member_of_every_covered_input_is_accounted_for() {
+    let covered = identically_handed();
     let under = |path: &str, prefix: &str| {
         path == prefix || path.starts_with(&format!("{prefix}.")) || path.starts_with(&format!("{prefix}["))
     };
