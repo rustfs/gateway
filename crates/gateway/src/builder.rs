@@ -66,6 +66,7 @@ use crate::ext::{
 use crate::posture::{SecurityPosture, log_dialect_posture, log_startup_posture};
 use crate::routing::{RoutingSnapshot, RuntimeAssembly};
 
+mod anonymous_framing;
 mod assembly_update;
 mod client_quirks;
 mod secret_scope;
@@ -118,6 +119,7 @@ pub struct ServiceBuilder {
     /// ADR-0024: a handed-over caller secret reaches every operation, not only opted-in ones.
     caller_secret_every_operation: bool,
     view_policy: view_policy::ViewPolicy,
+    decode_anonymous_framing: bool,
     authenticator: Option<Arc<dyn Authenticator>>,
     custom_signature_verifier: Option<Arc<dyn SignatureVerifier>>,
     #[cfg(feature = "dangerous-replace-signature-verifier")]
@@ -180,6 +182,7 @@ impl ServiceBuilder {
             dangerous_allow_all_authorizer: false,
             caller_secret_every_operation: false,
             view_policy: view_policy::ViewPolicy::default(),
+            decode_anonymous_framing: true,
             authenticator: None,
             custom_signature_verifier: None,
             #[cfg(feature = "dangerous-replace-signature-verifier")]
@@ -690,6 +693,7 @@ impl ServiceBuilder {
             temporary_redirect_targets: Arc::from(self.temporary_redirect_targets),
             caller_secret_every_operation: self.caller_secret_every_operation,
             view_policy: self.view_policy,
+            decode_anonymous_framing: self.decode_anonymous_framing,
         }))
     }
 

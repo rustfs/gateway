@@ -17,8 +17,9 @@
 //! Responsible for: proving that an anonymous request whose head declares
 //! `STREAMING-UNSIGNED-PAYLOAD-TRAILER` reaches its handler decoded, with its trailer checksum
 //! verified, exactly as the signed form does; that a broken trailer or decoded length refuses it
-//! with no complete body handed on; and that a chunk-signed streaming mode, which no anonymous request can
-//! verify, is refused before the handler rather than handed through framed.
+//! with no complete body handed on; that a chunk-signed streaming mode, which no anonymous request can
+//! verify, is refused before the handler rather than handed through framed; and that the RustFS
+//! profile's switch leaves every anonymous body undecoded, as legacy RustFS does.
 //! NOT responsible for: the chunk grammar (`crates/http`), the signed streaming path
 //! (`streaming_without_length.rs`), or which anonymous requests the floor admits
 //! (`anonymous_delegation_runtime.rs`).
@@ -76,9 +77,22 @@ impl Handler<dto::PutObject> for Backend {
 }
 
 fn service() -> (S3Service, Arc<Recorded>) {
+    assembled(false)
+}
+
+/// The assembly under the RustFS profile's switch, which leaves an anonymous body undecoded.
+fn rustfs_profile_service() -> (S3Service, Arc<Recorded>) {
+    assembled(true)
+}
+
+fn assembled(leave_undecoded: bool) -> (S3Service, Arc<Recorded>) {
     let recorded = Arc::new(Recorded::default());
-    let service = support::wired_at_signed_time()
-        .security_floor(SecurityFloor::new().delegate_anonymous_to_authorizer_after_listing_in_the_posture_report())
+    let mut builder = support::wired_at_signed_time()
+        .security_floor(SecurityFloor::new().delegate_anonymous_to_authorizer_after_listing_in_the_posture_report());
+    if leave_undecoded {
+        builder = builder.leave_anonymous_streaming_payloads_undecoded();
+    }
+    let service = builder
         .register::<dto::PutObject, _>(Arc::new(Backend(Arc::clone(&recorded))))
         .build()
         .expect("a complete PutObject assembly");
@@ -164,4 +178,34 @@ async fn an_anonymous_chunk_signed_upload_is_refused_before_the_handler() {
         assert_eq!(support::element_text(&body, "Code"), Some("InvalidRequest"), "{mode}: {body}");
         assert_eq!(recorded.reached.load(Ordering::SeqCst), 0, "{mode} reached the handler: {body}");
     }
+}
+
+// ── the RustFS profile ─────────────────────────────────────────────────────────────────────────
+
+/// Negative — under the RustFS profile an anonymous unsigned-trailer upload is not decoded, as
+/// legacy RustFS does not decode it: the declared trailer never arrives through the undecoded
+/// body, so the upload is refused and no complete body reaches the handler.
+#[tokio::test]
+async fn n_the_rustfs_profile_leaves_an_anonymous_unsigned_trailer_upload_undecoded_and_uncommitted() {
+    let (service, recorded) = rustfs_profile_service();
+    let request = anonymous_put("STREAMING-UNSIGNED-PAYLOAD-TRAILER", OBJECT.len(), unsigned_framing(OBJECT_CRC32));
+    let (status, body) = support::exchange(&service, request).await;
+    assert_eq!(status, http::StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(support::element_text(&body, "Code"), Some("InvalidRequest"), "{body}");
+    let bodies = recorded.bodies.lock().expect("the record is never poisoned");
+    assert!(bodies.is_empty(), "the handler read a complete body: {bodies:?}");
+}
+
+/// Negative — under the RustFS profile an anonymous chunk-signed upload is neither decoded nor
+/// refused by the gateway: the handler is handed the framed bytes and the framed length, which is
+/// what legacy RustFS's handler is handed and refuses by its own size rule.
+#[tokio::test]
+async fn n_the_rustfs_profile_hands_an_anonymous_chunk_signed_body_over_as_legacy_rustfs_receives_it() {
+    let (service, recorded) = rustfs_profile_service();
+    let framed = unsigned_framing(OBJECT_CRC32);
+    let mut request = anonymous_put("STREAMING-AWS4-HMAC-SHA256-PAYLOAD", OBJECT.len(), framed.clone());
+    request.headers_mut().remove("x-amz-trailer");
+    let (_status, body) = support::exchange(&service, request).await;
+    let bodies = recorded.bodies.lock().expect("the record is never poisoned");
+    assert_eq!(*bodies, [(framed.len() as i64, framed)], "{body}");
 }

@@ -192,6 +192,8 @@ pub(crate) struct Inner {
     /// Whether a handed-over caller secret reaches every operation, not only opted-in ones (ADR-0024).
     pub(crate) caller_secret_every_operation: bool,
     pub(crate) view_policy: crate::builder::view_policy::ViewPolicy,
+    /// Off in the RustFS profile: an anonymous aws-chunked body stays undecoded, as legacy RustFS leaves it.
+    pub(crate) decode_anonymous_framing: bool,
 }
 
 struct AuthorizedRoute {
@@ -716,7 +718,7 @@ impl S3Service {
         let mut body_digest = BodyDigestObligation::None;
         let (authentication, signature_mismatch) = match self.inner.floor.admit(view, M::floor(&op), now) {
             Ok(Admission::Anonymous(evidence)) => {
-                framing_mode = match crate::payload_header::anonymous_framing(&headers) {
+                framing_mode = match crate::payload_header::anonymous_framing(&headers, self.inner.decode_anonymous_framing) {
                     Ok(mode) => mode,
                     Err(error) => return outcome.refuse(error),
                 };
