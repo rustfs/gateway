@@ -179,6 +179,7 @@ impl GatewaySeam {
             .accept_all_checksum_omissions()
             .clamp_oversized_max_keys()
             .accept_minio_body_literals()
+            .refuse_unsigned_amz_headers_before_routing()
             .leave_anonymous_streaming_payloads_undecoded()
             .sign_presigned_payloads_as_unsigned()
             .answer_head_refusals_without_content_length()

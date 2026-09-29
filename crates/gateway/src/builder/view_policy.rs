@@ -78,6 +78,7 @@ use super::client_quirks::ChecksumWaiver;
 use super::credential_sentences::CredentialSentences;
 use super::legacy_heads::AnswerHeads;
 use super::legacy_sentences::BodySentences;
+use super::sigv4_header_guard::SigV4HeaderGuard;
 use crate::integrity::IntegrityCodes;
 use crate::render::{S3Error, from_wire_reject};
 use rustfs_gateway_core::codec::value::RustFsListing;
@@ -148,6 +149,8 @@ pub(crate) struct ViewPolicy {
     pub(super) credential_sentences: CredentialSentences,
     /// Which grammar POST Object forms are read with (`post_forms`).
     pub(crate) post_forms: post_forms::PostFormGrammar,
+    /// Whether the legacy RustFS SigV4 header guard answers first (`super::sigv4_header_guard`).
+    pub(super) sigv4_header_guard: SigV4HeaderGuard,
     /// Whether a bodyless request's signed digest is compared (`super::bodyless_digest`).
     pub(crate) bodyless_digest: BodylessDigest,
     head_refusals_without_length: bool,
@@ -178,6 +181,12 @@ impl ViewPolicy {
     /// ([`ServiceBuilder::sign_presigned_payloads_as_unsigned`]).
     pub(crate) const fn presigned_payload_unsigned(&self) -> bool {
         self.presigned_payload_unsigned
+    }
+
+    /// The guard this assembly asks before routing
+    /// ([`ServiceBuilder::refuse_unsigned_amz_headers_before_routing`]).
+    pub(crate) const fn sigv4_header_guard(&self) -> SigV4HeaderGuard {
+        self.sigv4_header_guard
     }
 
     /// The routed view of `operation`, with this assembly's readings applied to it.
