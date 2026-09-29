@@ -48,7 +48,10 @@ impl RequestBodyDeadlineConfig {
 
     /// Builds non-zero first-byte and between-read deadlines with the shipped throughput floor.
     ///
-    /// Returns `None` when either duration is zero. Zero is never an alias for unlimited.
+    /// Returns `None` when either duration is zero. Zero is never an alias for unlimited. A host
+    /// that wants no framework deadline on a body passes `Duration::MAX`, here and as the
+    /// throughput window of [`Self::try_with_throughput_floor`]; each timer is then armed at an
+    /// instant no request reaches.
     #[must_use]
     pub const fn new(first_byte: Duration, read_idle: Duration) -> Option<Self> {
         if first_byte.is_zero() || read_idle.is_zero() {
@@ -144,6 +147,13 @@ pub struct HandlerDeadlineConfig {
 impl HandlerDeadlineConfig {
     /// Validates explicit non-zero durations for both handler deadline classes.
     ///
+    /// A host that bounds handler work itself, or deliberately not at all — RustFS embedding the
+    /// gateway, whose legacy stack runs every handler until it finishes or its connection goes
+    /// away — passes `Duration::MAX` for a class. The timer is then armed at an instant no request
+    /// reaches (an expiry the monotonic clock cannot represent is clamped thirty years ahead), so
+    /// the framework never cancels a handler of that class for time. `tests/host_deadlines.rs`
+    /// pins that in both directions.
+    ///
     /// # Errors
     ///
     /// Returns [`HandlerDeadlineConfigError`] when either duration is zero. Zero is never an
@@ -185,7 +195,9 @@ impl HandlerDeadlineConfig {
     ///
     /// Returns `None` when `commit_progress` is zero, for the same reason as the two class
     /// durations: zero is never an alias for unlimited. A deployment that wanted no bound would be
-    /// asking for the behaviour this value exists to remove.
+    /// asking for the behaviour this value exists to remove — unless its host must not have a
+    /// continuation dropped mid-write at all, as with RustFS, whose legacy stack bounds nothing.
+    /// Such a host passes `Duration::MAX`, which arms a timer no continuation reaches.
     #[must_use]
     pub const fn try_with_commit_progress(mut self, commit_progress: Duration) -> Option<Self> {
         if commit_progress.is_zero() {

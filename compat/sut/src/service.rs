@@ -28,8 +28,9 @@ use std::io;
 use std::sync::Arc;
 
 use rustfs_gateway::{
-    CorsCacheConfig, Credentials, RegionMatchPolicy, RegionSet, S3Service, SecurityFloor, ServiceBuilder, SigV4Authenticator,
-    StaticCredentials, dto,
+    CorsCacheConfig, Credentials, DEFAULT_MAX_BUFFERED_BODY_BYTES, HandlerDeadlineConfig, RegionMatchPolicy, RegionSet,
+    RequestBodyDeadlineConfig, S3Service, SecurityFloor, ServiceBuilder, ServiceConfig, SigV4Authenticator, StaticCredentials,
+    dto,
 };
 use rustfs_gateway_fs::FsBackend;
 
@@ -71,6 +72,33 @@ pub(crate) fn capability_names(backend: &FsBackend) -> Vec<&'static str> {
     let mut names: Vec<&'static str> = backend.supported_operations().collect();
     names.sort_unstable();
     names
+}
+
+/// The request settings of the RustFS profile: no framework deadline anywhere.
+///
+/// Legacy RustFS runs a handler until it finishes or its connection goes away: its external S3
+/// middleware stack has no timeout layer (`rustfs/src/server/http.rs:2044-2072` on rustfs/rustfs
+/// `1e7065101d`), and it reads the body of every operation the gateway serves with no deadline —
+/// its one body idle bound, `RUSTFS_HTTP_REQUEST_BODY_READ_TIMEOUT`, sits inside RustFS's own
+/// `PutObject` and `UploadPart` handlers (`rustfs/src/app/object/put.rs:127-160`), which keep
+/// applying it behind the gateway. `Duration::MAX` is the gateway's spelling of "no framework
+/// deadline" (rustfs/gateway#1070); everything else is the builder's default.
+///
+/// Legacy-compat (rustfs/backlog#2684): with no handler, committed-continuation or body deadline,
+/// a stuck backend call or a client that stalls mid-body holds its task and buffers until the
+/// connection drops. The intended behaviour is bounds taken from RustFS configuration, applied
+/// the same way to both stacks.
+pub(crate) fn rustfs_service_config() -> Result<ServiceConfig, Box<dyn std::error::Error>> {
+    let never = std::time::Duration::MAX;
+    let handler = HandlerDeadlineConfig::new(never, never)?
+        .try_with_commit_progress(never)
+        .ok_or("a committed-continuation bound must be non-zero")?;
+    let body = RequestBodyDeadlineConfig::new(never, never)
+        .and_then(|body| body.try_with_throughput_floor(1, never))
+        .ok_or("request-body deadlines must be non-zero")?;
+    Ok(ServiceConfig::new(DEFAULT_MAX_BUFFERED_BODY_BYTES)
+        .with_handler_deadlines(handler)
+        .with_request_body_deadlines(body))
 }
 
 /// Assembles the served service from the configured identities and the bucket-owner registry.
@@ -137,6 +165,8 @@ pub(crate) fn build_service(
             // And released once the backend deleted the bucket, so the name is free again.
             .op_layer::<dto::DeleteBucket, _>(ReleasedNames::new(Arc::clone(owners))),
     );
+    // No framework deadline, as RustFS runs none.
+    let (builder, _settings) = builder.config(rustfs_service_config()?);
     let service = backend
         .register_cors(backend.register_encryption(backend.register_policy(backend.register_acl(
             backend.register_tagging(

@@ -83,7 +83,7 @@ for request order and `docs/assembly-order.md` for extension call counts.
 | `tests/middleware.rs`, `tests/extra_response_headers.rs`, `tests/response_invariants.rs`, `tests/response_stream_termination.rs`, `tests/select_frame_records.rs` | Filter seams, handler extra response headers on both dispatch paths, runtime correction metrics, malformed response refusal, how a filter-installed stream ends on a real socket, and `frame_records` with its c-sel-0012 peak-RSS bound |
 | `tests/sse_runtime.rs`, `tests/sse_runtime/context.rs` | TLS gate, key hygiene, multipart consistency and JSON context admission |
 | `tests/vhost_resolution.rs`, `tests/host_resolve_replay.rs` | Host boundary and fallback behavior; the `host_resolve` fuzz property over its committed seeds and 100,000 fixed-seed samples |
-| `tests/connection_teardown.rs`, `tests/self_held_http1.rs` | Connection intent and production self-held HTTP/1.1 wire controls |
+| `tests/connection_teardown.rs`, `tests/self_held_http1.rs`, `tests/host_deadlines.rs` | Connection intent and production self-held HTTP/1.1 wire controls; `Duration::MAX` as the no-framework-deadline spelling, proved against a bounded deadline on the same staged write |
 | `tests/payload_transport.rs`, `tests/unread_body_refusal.rs`, `tests/file_responses.rs` | Payload framing and cancellation observed through real HTTP/1 sockets; a handler refusal before the body is read is the answer on every entry |
 | `tests/compat_aliases.rs` | Input-parameterized compatibility aliases remain identical to operation requests |
 | `tests/refusal_order_guards.rs` | Body-proof source guards |

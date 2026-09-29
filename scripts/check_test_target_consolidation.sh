@@ -685,6 +685,7 @@ gateway_modules = (
     "governor_runtime",
     "governor_streaming",
     "handler_panic",
+    "host_deadlines",
     "host_resolve_replay",
     "ingest_assembly",
     "lifecycle_reachability",
