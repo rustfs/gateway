@@ -33,12 +33,12 @@ pub fn input_to_s3s(input: crate::ops::list_objects_v2::Input) -> Result<s3s::dt
         continuation_token: input.continuation_token.map(|x| -> Result<_, ConversionError> { Ok(x.into_string()) }).transpose()?,
         delimiter: input.delimiter,
         encoding_type: input.encoding_type.map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::EncodingType::from(x.as_str().to_owned())) }).transpose()?,
-        expected_bucket_owner: input.expected_bucket_owner,
+        expected_bucket_owner: input.expected_bucket_owner.filter(|x| !x.as_str().is_empty()),
         fetch_owner: input.fetch_owner,
         max_keys: input.max_keys,
         optional_object_attributes: if input.optional_object_attributes.is_empty() { None } else { Some({ let x = input.optional_object_attributes; x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(s3s::dto::OptionalObjectAttributes::from(e.as_str().to_owned())) }).collect::<Result<Vec<_>, ConversionError>>()? }) },
         prefix: input.prefix,
-        request_payer: input.request_payer.map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::RequestPayer::from(x.as_str().to_owned())) }).transpose()?,
+        request_payer: input.request_payer.filter(|x| !x.as_str().is_empty()).map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::RequestPayer::from(x.as_str().to_owned())) }).transpose()?,
         start_after: input.start_after,
     })
 }

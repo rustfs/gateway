@@ -76,6 +76,7 @@ fn grants(request: RawRequest) -> RawRequest {
 
 fn copies() -> Vec<SeamRow> {
     vec![
+        row("put-object-plain", RawRequest::put("/bucket/dir/k.txt", b"hello"), Expect::Identical),
         row(
             "copy-object-every-stored-member",
             grants(stored_headers(

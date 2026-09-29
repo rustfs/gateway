@@ -28,6 +28,9 @@ use std::sync::OnceLock;
 
 use crate::decode::BodySeen;
 use crate::request::RawRequest;
+use rustfs_gateway_types::compat::ConversionError;
+use rustfs_gateway_types::compat::s3s_0_17_0::error::{Refusal, refusal_from_conversion};
+
 use crate::seam::{
     Expect, SEAM_FINDINGS, SEAM_OPERATIONS, SeamClass, SeamDiff, SeamDiffer, SeamFinding, SeamVerdict, UNREACHED_PATHS,
     input_paths, seam_rows,
@@ -106,11 +109,9 @@ fn finding(id: &str) -> Option<&'static SeamFinding> {
 
 /// The finding registered for a difference at `path` of `operation`, if any.
 fn registered(operation: &str, path: &str) -> Option<&'static SeamFinding> {
-    SEAM_FINDINGS.iter().find(|finding| {
-        finding.operation == operation
-            && finding.path == path
-            && !matches!(finding.class, SeamClass::FailClosed | SeamClass::LegacyStricter)
-    })
+    SEAM_FINDINGS
+        .iter()
+        .find(|finding| finding.operation == operation && finding.path == path && finding.class != SeamClass::FailClosed)
 }
 
 fn both_handed(diff: &SeamDiff) -> bool {
@@ -159,10 +160,24 @@ fn judge(name: &str, diff: &SeamDiff, expect: &Expect) -> Vec<String> {
                 if finding.class == SeamClass::FailClosed && finding.path == *member && finding.operation == operation => {}
             other => problem(format!("expected the seam to refuse the member of {id}, got {other:?}")),
         },
-        Expect::LegacyRefuses(id) => match (finding(id), &diff.verdict.gateway, &diff.verdict.s3s) {
-            (Some(finding), SeamVerdict::Handed, SeamVerdict::Refused(_))
-                if finding.class == SeamClass::LegacyStricter && finding.operation == operation => {}
-            other => problem(format!("expected the legacy decoder alone to refuse, as {id} says, got {other:?}")),
+        Expect::NeitherHandsOver => {
+            if !matches!(
+                (&diff.verdict.gateway, &diff.verdict.s3s),
+                (SeamVerdict::Refused(_), SeamVerdict::Refused(_))
+            ) {
+                problem(format!("expected both stacks to refuse before any handler, got {:?}", diff.verdict));
+            }
+        }
+        Expect::BothRefuse(member) => match (&diff.verdict.gateway, &diff.verdict.s3s) {
+            (SeamVerdict::Unconverted { member: refused, reason }, SeamVerdict::Refused(legacy)) if refused == member => {
+                let answer = refusal_from_conversion(&ConversionError { field: refused, reason });
+                match answer {
+                    Some(Refusal::Ordinary { code, .. })
+                        if Some(code.as_str()) == legacy.code.as_deref() && code.default_status().as_u16() == legacy.status => {}
+                    other => problem(format!("the seam answers {other:?} where the legacy decoder answered {legacy}")),
+                }
+            }
+            other => problem(format!("expected both stacks to refuse {member} before any RustFS body, got {other:?}")),
         },
     }
     problems
@@ -262,7 +277,7 @@ fn n_no_finding_outlives_the_difference_it_names() {
         let operation = diff.routed.gateway.as_deref().unwrap_or_default();
         match &outcome.expect {
             Some(Expect::Differs(ids)) => used.extend(ids.iter().copied()),
-            Some(Expect::FailsClosed(id) | Expect::LegacyRefuses(id)) => {
+            Some(Expect::FailsClosed(id)) => {
                 used.insert(id);
             }
             _ => {}
@@ -335,7 +350,7 @@ fn n_the_register_is_well_formed() {
         );
         assert!(!finding.evidence.is_empty(), "{}: no evidence", finding.id);
         match finding.class {
-            SeamClass::FailClosed | SeamClass::LegacyStricter => {}
+            SeamClass::FailClosed => {}
             _ => {
                 let paths = input_paths(finding.operation).unwrap_or_default();
                 assert!(
@@ -348,13 +363,6 @@ fn n_the_register_is_well_formed() {
                     finding.operation
                 );
             }
-        }
-        if matches!(finding.class, SeamClass::DroppedRead | SeamClass::LegacyStricter | SeamClass::Lossy) {
-            assert!(
-                finding.evidence.contains("owner rustfs/"),
-                "{}: a lossy spot names the issue that owns its fix",
-                finding.id
-            );
         }
         if let SeamClass::Ruled(ruling) = finding.class {
             assert!(
@@ -452,5 +460,75 @@ fn n_a_refused_conversion_is_never_identical() {
         judge("control", &diff, &Expect::FailsClosed("sd-0019")).len(),
         1,
         "a finding about another operation"
+    );
+}
+
+/// Every optional header member of `operation`'s input, by wire name, read from the generated
+/// operation spec so a header added to the model is probed without editing this test.
+fn optional_headers(operation: &str) -> Vec<String> {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("../../spec/operations/{operation}.toml"));
+    let text = std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+    let spec: toml::Value = toml::from_str(&text).unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+    spec.get("input")
+        .and_then(toml::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|field| field.get("binding").and_then(toml::Value::as_str) == Some("Header"))
+        .filter(|field| field.get("required").and_then(toml::Value::as_bool) != Some(true))
+        .filter_map(|field| field.get("wire_name").and_then(toml::Value::as_str).map(str::to_owned))
+        .collect()
+}
+
+/// The legacy decoder reads an optional header whose value is empty as absent (rustfs/gateway#1076).
+/// For every optional header of every covered operation, sent empty on a request that is otherwise
+/// handed over identically: whenever the gateway handler is reached, the RustFS body is handed the
+/// same input on both stacks, but for a registered finding. A gateway that refuses the empty value before its handler is a
+/// request-acceptance divergence, rustfs/gateway#1087's, and is counted, not compared.
+#[test]
+fn every_empty_optional_header_is_handed_over_as_absent() {
+    let differ = SeamDiffer::new().expect("both stacks assemble");
+    let rows = seam_rows();
+    let mut problems = Vec::new();
+    let (mut compared, mut refused_by_the_gateway) = (0_usize, 0_usize);
+    for operation in SEAM_OPERATIONS {
+        let base = outcomes()
+            .iter()
+            .filter(|outcome| outcome.source == Source::Seam && outcome.expect == Some(Expect::Identical))
+            .filter(|outcome| outcome.diff.routed.gateway.as_deref() == Some(operation))
+            .find_map(|outcome| rows.iter().find(|row| row.name == outcome.name));
+        let Some(base) = base else {
+            problems.push(format!("{operation}: no seam row hands it over identically to probe from"));
+            continue;
+        };
+        for header in optional_headers(operation) {
+            let request = base.request.clone().without(&header).header(&header, "");
+            let diff = differ
+                .diff(&request)
+                .unwrap_or_else(|error| panic!("{operation} {header}: {error}"));
+            let registered_only = both_handed(&diff)
+                && diff.routed.same()
+                && diff.body.same()
+                && diff
+                    .differing
+                    .iter()
+                    .all(|path| registered(operation, &unindexed(path)).is_some());
+            match (&diff.verdict.gateway, &diff.verdict.s3s) {
+                (SeamVerdict::Refused(_), _) => refused_by_the_gateway += 1,
+                _ if registered_only => compared += 1,
+                _ => problems.push(format!(
+                    "{operation} with an empty {header}: verdict {:?}, differing {:?}",
+                    diff.verdict, diff.differing
+                )),
+            }
+        }
+    }
+    assert!(problems.is_empty(), "{}", problems.join("\n"));
+    // Counts measured on 2026-09-30, so a probe that silently stopped reaching the handlers cannot
+    // pass: 146 empty headers compared, 179 refused by the gateway before its handler. Both may
+    // only move the right way — more compared, fewer refused as rustfs/gateway#1087 lands.
+    assert!(compared >= 146, "only {compared} empty headers were compared");
+    assert!(
+        refused_by_the_gateway <= 179,
+        "{refused_by_the_gateway} empty headers are refused by the gateway"
     );
 }

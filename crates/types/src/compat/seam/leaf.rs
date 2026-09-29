@@ -184,6 +184,90 @@ pub fn checksum_spec_from_s3s<const N: usize>(
     }
 }
 
+/// The raw request a member only the legacy decoder reads is decoded from: the query exactly as it
+/// arrived, without its `?`, and every accepted header line. An adapter builds it from its
+/// [`GatewayRequestContext`](super::request_context::GatewayRequestContext) with [`RequestWire::of`].
+#[derive(Clone, Copy, Debug)]
+pub struct RequestWire<'a> {
+    /// The query exactly as it arrived, without its `?`; empty when there is none.
+    pub raw_query: &'a str,
+    /// Every accepted header line.
+    pub headers: &'a http::HeaderMap,
+}
+
+impl<'a> RequestWire<'a> {
+    /// The raw query and header lines `context` holds.
+    #[must_use]
+    pub fn of(context: &'a super::request_context::GatewayRequestContext) -> Self {
+        Self {
+            raw_query: &context.raw_query,
+            headers: &context.headers,
+        }
+    }
+}
+
+/// A member the legacy decoder reads from the query parameter `name`: absent when the parameter
+/// is, its decoded value when it appears once. The query is split into pairs exactly as the legacy
+/// decoder splits it: as an `application/x-www-form-urlencoded` body, on `&`, each piece at its
+/// first `=`, `+` read as a space and percent escapes decoded.
+///
+/// # Errors
+///
+/// The parameter appearing more than once, which the legacy decoder refuses, named by the
+/// parameter; [`super::error::refusal_from_conversion`] answers it as that decoder did.
+pub fn legacy_query(wire: &RequestWire<'_>, name: &'static str) -> Result<Option<String>, ConversionError> {
+    let mut values = form_pairs(wire.raw_query)
+        .filter(|(key, _)| key == name)
+        .map(|(_, value)| value);
+    match (values.next(), values.next()) {
+        (None, _) => Ok(None),
+        (Some(value), None) => Ok(Some(value)),
+        (Some(_), Some(_)) => Err(refusal(name, super::error::LEGACY_DUPLICATE_QUERY)),
+    }
+}
+
+/// The name/value pairs of an `application/x-www-form-urlencoded` query, split as the legacy
+/// decoder splits one: on `&`, skipping empty pieces; each piece at its first `=` (a piece without
+/// one is a name with an empty value); `+` as a space; percent escapes decoded, an invalid one kept
+/// as written; bytes that are not UTF-8 replaced.
+fn form_pairs(query: &str) -> impl Iterator<Item = (String, String)> + '_ {
+    query.split('&').filter(|piece| !piece.is_empty()).map(|piece| {
+        let (name, value) = piece.split_once('=').unwrap_or((piece, ""));
+        (form_decode(name), form_decode(value))
+    })
+}
+
+fn form_decode(text: &str) -> String {
+    let spaced = text.replace('+', " ");
+    percent_encoding::percent_decode_str(&spaced).decode_utf8_lossy().into_owned()
+}
+
+/// A member the legacy decoder reads from the header `name` as a boolean: absent when the header
+/// is absent or empty, `true` for `true` and `True`, `false` for `false` and `False`.
+///
+/// # Errors
+///
+/// Any other value, or more than one line, which the legacy decoder refuses, named by the header;
+/// [`super::error::refusal_from_conversion`] answers it as that decoder did. Refusing here is what
+/// keeps a value the legacy decoder rejects from reaching a RustFS body that re-reads the raw header
+/// with a looser grammar.
+pub fn legacy_bool_header(wire: &RequestWire<'_>, name: &'static str) -> Result<Option<bool>, ConversionError> {
+    let mut lines = wire.headers.get_all(name).iter();
+    let (Some(line), None) = (lines.next(), lines.next()) else {
+        return if wire.headers.contains_key(name) {
+            Err(refusal(name, super::error::LEGACY_DUPLICATE_HEADER))
+        } else {
+            Ok(None)
+        };
+    };
+    match line.as_bytes() {
+        b"" => Ok(None),
+        b"true" | b"True" => Ok(Some(true)),
+        b"false" | b"False" => Ok(Some(false)),
+        _ => Err(refusal(name, super::error::LEGACY_INVALID_BOOLEAN)),
+    }
+}
+
 /// The live gateway body as the s3s streaming body, unread.
 #[must_use]
 pub fn streaming_blob(stream: ByteStream) -> oracle::StreamingBlob {

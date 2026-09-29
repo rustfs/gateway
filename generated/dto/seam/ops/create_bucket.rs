@@ -29,17 +29,17 @@ use crate::compat::ConversionError;
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
 pub fn input_to_s3s(input: crate::ops::create_bucket::Input) -> Result<s3s::dto::CreateBucketInput, ConversionError> {
     Ok(s3s::dto::CreateBucketInput {
-        acl: input.acl.map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::BucketCannedACL::from(x.as_str().to_owned())) }).transpose()?,
+        acl: input.acl.filter(|x| !x.as_str().is_empty()).map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::BucketCannedACL::from(x.as_str().to_owned())) }).transpose()?,
         bucket: { let x = input.bucket; x.as_str().to_owned() },
         bucket_namespace: Default::default(),
         create_bucket_configuration: input.create_bucket_configuration.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::create_bucket_configuration::create_bucket_configuration_to_s3s(x)?) }).transpose()?,
-        grant_full_control: input.grant_full_control,
-        grant_read: input.grant_read,
-        grant_read_acp: input.grant_read_acp,
-        grant_write: input.grant_write,
-        grant_write_acp: input.grant_write_acp,
+        grant_full_control: input.grant_full_control.filter(|x| !x.as_str().is_empty()),
+        grant_read: input.grant_read.filter(|x| !x.as_str().is_empty()),
+        grant_read_acp: input.grant_read_acp.filter(|x| !x.as_str().is_empty()),
+        grant_write: input.grant_write.filter(|x| !x.as_str().is_empty()),
+        grant_write_acp: input.grant_write_acp.filter(|x| !x.as_str().is_empty()),
         object_lock_enabled_for_bucket: input.object_lock_enabled_for_bucket,
-        object_ownership: input.object_ownership.map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::ObjectOwnership::from(x.as_str().to_owned())) }).transpose()?,
+        object_ownership: input.object_ownership.filter(|x| !x.as_str().is_empty()).map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::ObjectOwnership::from(x.as_str().to_owned())) }).transpose()?,
     })
 }
 

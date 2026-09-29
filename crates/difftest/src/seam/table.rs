@@ -17,8 +17,9 @@
 //!
 //! Responsible for: [`SEAM_OPERATIONS`]; the conversion each operation's gateway handler runs —
 //! the generated seam for most, the hand-written seam for `PutObject` and `GetBucketLocation`,
-//! the authorized copy source supplied to `CopyObject` and `UploadPartCopy`, and the authorized
-//! key list patched into `DeleteObjects` — each exactly as the RustFS adapter does it; the legacy
+//! the authorized copy source supplied to `CopyObject` and `UploadPartCopy`, the raw query and
+//! header lines handed to the three operations with a member only the legacy decoder reads, and
+//! the authorized key list patched into `DeleteObjects` — each exactly as the RustFS adapter does it; the legacy
 //! recorder's handler for each operation; and the census lookups by operation name.
 //! NOT responsible for: sending or comparing (`stacks.rs`, `mod.rs`).
 //! Upstream: the compat seam and its census. Downstream: `stacks.rs`, `mod.rs`.
@@ -40,6 +41,8 @@ use crate::oracle::{Answered, recorded};
 use crate::s3s;
 use s3s::dto as legacy;
 use seam::generated::{census, ops};
+use seam::leaf::RequestWire;
+use seam::request_context::GatewayRequestContext;
 
 /// What one gateway handler hands the RustFS app layer: the converted input, or the member the
 /// conversion refused, and the live body when the input carries one.
@@ -98,16 +101,45 @@ fn delete_list(request: &Req<dto::DeleteObjects>) -> Result<Vec<legacy::ObjectId
         .collect())
 }
 
+/// The raw query and header lines of `request`, as the RustFS adapter reads them from the
+/// handler's request context for the members only the legacy decoder reads.
+fn raw_wire<O: Operation>(request: &Req<O>) -> (String, http::HeaderMap) {
+    let context = request.context();
+    (
+        context.raw_query().to_owned(),
+        GatewayRequestContext::raw_headers(context.headers().iter_raw()),
+    )
+}
+
 macro_rules! convert {
     (plain, $method:ident, $request:ident) => {
         (boxed(ops::$method::input_to_s3s($request.into_input())), None)
     };
+    (plain_wire, $method:ident, $request:ident) => {{
+        let (raw_query, headers) = raw_wire(&$request);
+        let wire = RequestWire {
+            raw_query: &raw_query,
+            headers: &headers,
+        };
+        (boxed(ops::$method::input_to_s3s($request.into_input(), &wire)), None)
+    }};
     (copy, $method:ident, $request:ident) => {
         match copy_source(&$request) {
             Ok(source) => (boxed(ops::$method::input_to_s3s($request.into_input(), source)), None),
             Err(error) => (Err(error), None),
         }
     };
+    (copy_wire, $method:ident, $request:ident) => {{
+        let (raw_query, headers) = raw_wire(&$request);
+        let wire = RequestWire {
+            raw_query: &raw_query,
+            headers: &headers,
+        };
+        match copy_source(&$request) {
+            Ok(source) => (boxed(ops::$method::input_to_s3s($request.into_input(), source, &wire)), None),
+            Err(error) => (Err(error), None),
+        }
+    }};
     (delete_objects, $method:ident, $request:ident) => {{
         let objects = delete_list(&$request);
         let converted = ops::$method::input_to_s3s($request.into_input()).and_then(|mut input| {
@@ -231,10 +263,10 @@ macro_rules! seam_operations {
 seam_operations! {
     plain AbortMultipartUpload / abort_multipart_upload(AbortMultipartUploadInput, AbortMultipartUploadOutput) => abort_multipart_upload_input;
     plain CompleteMultipartUpload / complete_multipart_upload(CompleteMultipartUploadInput, CompleteMultipartUploadOutput) => complete_multipart_upload_input;
-    copy CopyObject / copy_object(CopyObjectInput, CopyObjectOutput) => copy_object_input;
+    copy_wire CopyObject / copy_object(CopyObjectInput, CopyObjectOutput) => copy_object_input;
     plain CreateBucket / create_bucket(CreateBucketInput, CreateBucketOutput) => create_bucket_input;
-    plain CreateMultipartUpload / create_multipart_upload(CreateMultipartUploadInput, CreateMultipartUploadOutput) => create_multipart_upload_input;
-    plain DeleteBucket / delete_bucket(DeleteBucketInput, DeleteBucketOutput) => delete_bucket_input;
+    plain_wire CreateMultipartUpload / create_multipart_upload(CreateMultipartUploadInput, CreateMultipartUploadOutput) => create_multipart_upload_input;
+    plain_wire DeleteBucket / delete_bucket(DeleteBucketInput, DeleteBucketOutput) => delete_bucket_input;
     plain DeleteBucketCors / delete_bucket_cors(DeleteBucketCorsInput, DeleteBucketCorsOutput) => delete_bucket_cors_input;
     plain DeleteBucketEncryption / delete_bucket_encryption(DeleteBucketEncryptionInput, DeleteBucketEncryptionOutput) => delete_bucket_encryption_input;
     plain DeleteBucketLifecycle / delete_bucket_lifecycle(DeleteBucketLifecycleInput, DeleteBucketLifecycleOutput) => delete_bucket_lifecycle_input;

@@ -27,8 +27,8 @@ use crate::compat::ConversionError;
 ///
 /// [`ConversionError`] naming a member the s3s input cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn input_to_s3s(input: crate::ops::create_multipart_upload::Input) -> Result<s3s::dto::CreateMultipartUploadInput, ConversionError> {
-    if input.object_lock_event_hold.is_some() {
+pub fn input_to_s3s(input: crate::ops::create_multipart_upload::Input, wire: &leaf::RequestWire<'_>) -> Result<s3s::dto::CreateMultipartUploadInput, ConversionError> {
+    if input.object_lock_event_hold.filter(|x| !x.as_str().is_empty()).is_some() {
         return Err(ConversionError { field: "object_lock_event_hold", reason: "an Object Lock event hold, which no pinned s3s shape holds and RustFS does not store" });
     }
     if input.object_lock_event_hold_duration_days.is_some() {
@@ -38,38 +38,38 @@ pub fn input_to_s3s(input: crate::ops::create_multipart_upload::Input) -> Result
         return Err(ConversionError { field: "object_lock_event_hold_duration_years", reason: "an Object Lock event hold, which no pinned s3s shape holds and RustFS does not store" });
     }
     Ok(s3s::dto::CreateMultipartUploadInput {
-        acl: input.acl.map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::ObjectCannedACL::from(x.as_str().to_owned())) }).transpose()?,
+        acl: input.acl.filter(|x| !x.as_str().is_empty()).map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::ObjectCannedACL::from(x.as_str().to_owned())) }).transpose()?,
         bucket: { let x = input.bucket; x.as_str().to_owned() },
         bucket_key_enabled: input.bucket_key_enabled,
-        cache_control: input.cache_control,
-        checksum_algorithm: input.checksum_algorithm.map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::ChecksumAlgorithm::from(x.as_str().to_owned())) }).transpose()?,
-        checksum_type: input.checksum_type.map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::ChecksumType::from(x.as_str().to_owned())) }).transpose()?,
-        content_disposition: input.content_disposition,
-        content_encoding: input.content_encoding,
-        content_language: input.content_language,
-        content_type: input.content_type,
-        expected_bucket_owner: input.expected_bucket_owner,
-        expires: input.expires.map(|x| -> Result<_, ConversionError> { Ok(x.into_string()) }).transpose()?,
-        grant_full_control: input.grant_full_control,
-        grant_read: input.grant_read,
-        grant_read_acp: input.grant_read_acp,
-        grant_write_acp: input.grant_write_acp,
+        cache_control: input.cache_control.filter(|x| !x.as_str().is_empty()),
+        checksum_algorithm: input.checksum_algorithm.filter(|x| !x.as_str().is_empty()).map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::ChecksumAlgorithm::from(x.as_str().to_owned())) }).transpose()?,
+        checksum_type: input.checksum_type.filter(|x| !x.as_str().is_empty()).map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::ChecksumType::from(x.as_str().to_owned())) }).transpose()?,
+        content_disposition: input.content_disposition.filter(|x| !x.as_str().is_empty()),
+        content_encoding: input.content_encoding.filter(|x| !x.as_str().is_empty()),
+        content_language: input.content_language.filter(|x| !x.as_str().is_empty()),
+        content_type: input.content_type.filter(|x| !x.as_str().is_empty()),
+        expected_bucket_owner: input.expected_bucket_owner.filter(|x| !x.as_str().is_empty()),
+        expires: input.expires.filter(|x| !x.as_str().is_empty()).map(|x| -> Result<_, ConversionError> { Ok(x.into_string()) }).transpose()?,
+        grant_full_control: input.grant_full_control.filter(|x| !x.as_str().is_empty()),
+        grant_read: input.grant_read.filter(|x| !x.as_str().is_empty()),
+        grant_read_acp: input.grant_read_acp.filter(|x| !x.as_str().is_empty()),
+        grant_write_acp: input.grant_write_acp.filter(|x| !x.as_str().is_empty()),
         key: { let x = input.key; x.as_str().to_owned() },
         metadata: if input.metadata.is_empty() { None } else { Some({ let x = input.metadata; x.into_iter().map(|(k, v)| -> Result<_, ConversionError> { Ok((k, v)) }).collect::<Result<std::collections::HashMap<_, _>, ConversionError>>()? }) },
-        object_lock_legal_hold_status: input.object_lock_legal_hold_status.map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::ObjectLockLegalHoldStatus::from(x.as_str().to_owned())) }).transpose()?,
-        object_lock_mode: input.object_lock_mode.map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::ObjectLockMode::from(x.as_str().to_owned())) }).transpose()?,
+        object_lock_legal_hold_status: input.object_lock_legal_hold_status.filter(|x| !x.as_str().is_empty()).map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::ObjectLockLegalHoldStatus::from(x.as_str().to_owned())) }).transpose()?,
+        object_lock_mode: input.object_lock_mode.filter(|x| !x.as_str().is_empty()).map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::ObjectLockMode::from(x.as_str().to_owned())) }).transpose()?,
         object_lock_retain_until_date: input.object_lock_retain_until_date.map(|x| -> Result<_, ConversionError> { Ok(leaf::timestamp_to_s3s("object_lock_retain_until_date", x)?) }).transpose()?,
-        request_payer: input.request_payer.map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::RequestPayer::from(x.as_str().to_owned())) }).transpose()?,
-        sse_customer_algorithm: input.sse_customer_algorithm,
+        request_payer: input.request_payer.filter(|x| !x.as_str().is_empty()).map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::RequestPayer::from(x.as_str().to_owned())) }).transpose()?,
+        sse_customer_algorithm: input.sse_customer_algorithm.filter(|x| !x.as_str().is_empty()),
         sse_customer_key: input.sse_customer_key.map(|x| -> Result<_, ConversionError> { Ok(x.expose_secret().to_owned()) }).transpose()?,
-        sse_customer_key_md5: input.sse_customer_key_md5,
-        ssekms_encryption_context: input.ssekms_encryption_context,
-        ssekms_key_id: input.ssekms_key_id,
-        server_side_encryption: input.server_side_encryption.map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::ServerSideEncryption::from(x.as_str().to_owned())) }).transpose()?,
-        storage_class: input.storage_class.map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::StorageClass::from(x.as_str().to_owned())) }).transpose()?,
-        tagging: input.tagging,
-        version_id: Default::default(),
-        website_redirect_location: input.website_redirect_location,
+        sse_customer_key_md5: input.sse_customer_key_md5.filter(|x| !x.as_str().is_empty()),
+        ssekms_encryption_context: input.ssekms_encryption_context.filter(|x| !x.as_str().is_empty()),
+        ssekms_key_id: input.ssekms_key_id.filter(|x| !x.as_str().is_empty()),
+        server_side_encryption: input.server_side_encryption.filter(|x| !x.as_str().is_empty()).map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::ServerSideEncryption::from(x.as_str().to_owned())) }).transpose()?,
+        storage_class: input.storage_class.filter(|x| !x.as_str().is_empty()).map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::StorageClass::from(x.as_str().to_owned())) }).transpose()?,
+        tagging: input.tagging.filter(|x| !x.as_str().is_empty()),
+        version_id: leaf::legacy_query(wire, "versionId")?,
+        website_redirect_location: input.website_redirect_location.filter(|x| !x.as_str().is_empty()),
     })
 }
 

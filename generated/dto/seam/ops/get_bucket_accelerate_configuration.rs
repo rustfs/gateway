@@ -30,8 +30,8 @@ use crate::compat::ConversionError;
 pub fn input_to_s3s(input: crate::ops::get_bucket_accelerate_configuration::Input) -> Result<s3s::dto::GetBucketAccelerateConfigurationInput, ConversionError> {
     Ok(s3s::dto::GetBucketAccelerateConfigurationInput {
         bucket: { let x = input.bucket; x.as_str().to_owned() },
-        expected_bucket_owner: input.expected_bucket_owner,
-        request_payer: input.request_payer.map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::RequestPayer::from(x.as_str().to_owned())) }).transpose()?,
+        expected_bucket_owner: input.expected_bucket_owner.filter(|x| !x.as_str().is_empty()),
+        request_payer: input.request_payer.filter(|x| !x.as_str().is_empty()).map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::RequestPayer::from(x.as_str().to_owned())) }).transpose()?,
     })
 }
 

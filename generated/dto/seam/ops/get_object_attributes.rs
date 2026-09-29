@@ -30,15 +30,15 @@ use crate::compat::ConversionError;
 pub fn input_to_s3s(input: crate::ops::get_object_attributes::Input) -> Result<s3s::dto::GetObjectAttributesInput, ConversionError> {
     Ok(s3s::dto::GetObjectAttributesInput {
         bucket: { let x = input.bucket; x.as_str().to_owned() },
-        expected_bucket_owner: input.expected_bucket_owner,
+        expected_bucket_owner: input.expected_bucket_owner.filter(|x| !x.as_str().is_empty()),
         key: { let x = input.key; x.as_str().to_owned() },
         max_parts: input.max_parts,
         object_attributes: { let x = input.object_attributes; x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(s3s::dto::ObjectAttributes::from(e.as_str().to_owned())) }).collect::<Result<Vec<_>, ConversionError>>()? },
-        part_number_marker: input.part_number_marker.map(|x| -> Result<_, ConversionError> { Ok(leaf::parse_i32("part_number_marker", &x)?) }).transpose()?,
-        request_payer: input.request_payer.map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::RequestPayer::from(x.as_str().to_owned())) }).transpose()?,
-        sse_customer_algorithm: input.sse_customer_algorithm,
+        part_number_marker: input.part_number_marker.filter(|x| !x.as_str().is_empty()).map(|x| -> Result<_, ConversionError> { Ok(leaf::parse_i32("part_number_marker", &x)?) }).transpose()?,
+        request_payer: input.request_payer.filter(|x| !x.as_str().is_empty()).map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::RequestPayer::from(x.as_str().to_owned())) }).transpose()?,
+        sse_customer_algorithm: input.sse_customer_algorithm.filter(|x| !x.as_str().is_empty()),
         sse_customer_key: input.sse_customer_key.map(|x| -> Result<_, ConversionError> { Ok(x.expose_secret().to_owned()) }).transpose()?,
-        sse_customer_key_md5: input.sse_customer_key_md5,
+        sse_customer_key_md5: input.sse_customer_key_md5.filter(|x| !x.as_str().is_empty()),
         version_id: input.version_id,
     })
 }

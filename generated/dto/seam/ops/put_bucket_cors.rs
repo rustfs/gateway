@@ -31,9 +31,9 @@ pub fn input_to_s3s(input: crate::ops::put_bucket_cors::Input) -> Result<s3s::dt
     Ok(s3s::dto::PutBucketCorsInput {
         bucket: { let x = input.bucket; x.as_str().to_owned() },
         cors_configuration: { let x = input.cors_configuration; super::super::shapes::cors_configuration::cors_configuration_to_s3s(x)? },
-        checksum_algorithm: input.checksum_algorithm.map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::ChecksumAlgorithm::from(x.as_str().to_owned())) }).transpose()?,
-        content_md5: input.content_md5,
-        expected_bucket_owner: input.expected_bucket_owner,
+        checksum_algorithm: input.checksum_algorithm.filter(|x| !x.as_str().is_empty()).map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::ChecksumAlgorithm::from(x.as_str().to_owned())) }).transpose()?,
+        content_md5: input.content_md5.filter(|x| !x.as_str().is_empty()),
+        expected_bucket_owner: input.expected_bucket_owner.filter(|x| !x.as_str().is_empty()),
     })
 }
 

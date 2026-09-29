@@ -27,11 +27,11 @@ use crate::compat::ConversionError;
 ///
 /// [`ConversionError`] naming a member the s3s input cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn input_to_s3s(input: crate::ops::delete_bucket::Input) -> Result<s3s::dto::DeleteBucketInput, ConversionError> {
+pub fn input_to_s3s(input: crate::ops::delete_bucket::Input, wire: &leaf::RequestWire<'_>) -> Result<s3s::dto::DeleteBucketInput, ConversionError> {
     Ok(s3s::dto::DeleteBucketInput {
         bucket: { let x = input.bucket; x.as_str().to_owned() },
-        expected_bucket_owner: input.expected_bucket_owner,
-        force_delete: Default::default(),
+        expected_bucket_owner: input.expected_bucket_owner.filter(|x| !x.as_str().is_empty()),
+        force_delete: leaf::legacy_bool_header(wire, "x-minio-force-delete")?,
     })
 }
 

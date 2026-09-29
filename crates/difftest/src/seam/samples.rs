@@ -46,18 +46,8 @@ pub(crate) enum SeamClass {
     Normalized,
     /// A member only the legacy decoder reads, which RustFS never reads.
     DroppedUnread,
-    /// A member only the legacy decoder reads; RustFS reads the raw header instead, and the request
-    /// context hands every header line over unchanged.
-    DroppedCarriedByHeaders,
-    /// A member only the legacy decoder reads, which RustFS reads: a lossy spot. The evidence names
-    /// the RustFS read and the issue that owns the fix.
-    DroppedRead,
-    /// Both stacks hand the member over, with values RustFS stores or acts on differently: a lossy
-    /// spot. The evidence names the RustFS read and the issue that owns the fix.
-    Lossy,
-    /// A value the legacy decoder refuses and the gateway hands over, where RustFS then acts on the
-    /// raw header: a lossy spot. The evidence names the RustFS read and the issue that owns the fix.
-    LegacyStricter,
+    /// A member both stacks hand over in different shapes, which RustFS never reads.
+    Unread,
     /// A member the gateway decodes and no legacy input holds; the seam refuses it by name instead
     /// of dropping it.
     FailClosed,
@@ -71,13 +61,11 @@ pub(crate) struct SeamFinding {
     /// The operation.
     pub(crate) operation: &'static str,
     /// The legacy input member path the census names (list indices dropped), or for
-    /// [`SeamClass::FailClosed`] the member the conversion refuses, or for
-    /// [`SeamClass::LegacyStricter`] the header the legacy decoder refuses.
+    /// [`SeamClass::FailClosed`] the member the conversion refuses.
     pub(crate) path: &'static str,
     /// What it means.
     pub(crate) class: SeamClass,
-    /// RustFS main `file:line` evidence (rustfs/rustfs `1e7065101d`), and the owning issue when
-    /// the class needs one.
+    /// RustFS main `file:line` evidence (rustfs/rustfs `1e7065101d`).
     pub(crate) evidence: &'static str,
 }
 
@@ -113,39 +101,6 @@ pub(crate) const SEAM_FINDINGS: &[SeamFinding] = &[
         "version_id",
         SeamClass::Ruled("rd-put-0007"),
         "the RustFS profile routes ?versionId= to the replication dialect's replica write, which carries it",
-    ),
-    finding(
-        "sd-0003",
-        "CopyObject",
-        "version_id",
-        SeamClass::DroppedRead,
-        "MinIO ?versionId= names the new version (rustfs/src/app/object/copy.rs:176, :325-333; storage/options.rs:385-410); \
-         owner rustfs/gateway#1076",
-    ),
-    finding(
-        "sd-0004",
-        "CreateMultipartUpload",
-        "version_id",
-        SeamClass::DroppedRead,
-        "MinIO ?versionId= names the version the upload completes into (rustfs/src/app/multipart_usecase.rs:961, :1106); \
-         owner rustfs/gateway#1076",
-    ),
-    finding(
-        "sd-0005",
-        "DeleteBucket",
-        "force_delete",
-        SeamClass::DroppedCarriedByHeaders,
-        "RustFS reads x-rustfs-force-delete then x-minio-force-delete from the request headers \
-         (rustfs/src/app/bucket_usecase.rs:1457; crates/utils/src/http/header_compat.rs:139-154)",
-    ),
-    finding(
-        "sd-0006",
-        "DeleteBucket",
-        "x-minio-force-delete",
-        SeamClass::LegacyStricter,
-        "the legacy decoder admits only true/True/false/False and one line; RustFS's own parse also takes 1, t, TRUE, on, \
-         enabled (crates/utils/src/string.rs:42-47) and force-deletes a non-empty bucket (rustfs/src/app/bucket_usecase.rs:1457-1480); \
-         owner rustfs/gateway#1076",
     ),
     finding(
         "sd-0007",
@@ -313,15 +268,6 @@ pub(crate) const SEAM_FINDINGS: &[SeamFinding] = &[
          rustfs/src/app/bucket_usecase.rs:1564-1597)",
     ),
     finding(
-        "sd-0032",
-        "PutObject",
-        "content_type",
-        SeamClass::Lossy,
-        "an empty Content-Type is absent to the legacy decoder (kd-decode-0074) and an empty value through the seam; RustFS \
-         stores the input value and skips the raw header (rustfs/src/app/object/put.rs:840-874; storage/options.rs:807-850), \
-         so it would store an empty content type where legacy stores the one detected from the key; owner rustfs/gateway#1076",
-    ),
-    finding(
         "sd-0033",
         "PutObject",
         "content_encoding",
@@ -351,6 +297,30 @@ pub(crate) const SEAM_FINDINGS: &[SeamFinding] = &[
         SeamClass::Ruled("rd-put-0002"),
         "no RustFS read of the member in the bucket use case (rustfs/src/app/bucket_usecase.rs)",
     ),
+    finding(
+        "sd-0037",
+        "ListObjects",
+        "optional_object_attributes",
+        SeamClass::Unread,
+        "the legacy decoder keeps one element per header line, an empty line included; RustFS never reads the member \\
+         (it only builds inputs without it: rustfs/src/app/bucket_list_through.rs:824; app/metadata_route.rs:718, :736)",
+    ),
+    finding(
+        "sd-0038",
+        "ListObjectsV2",
+        "optional_object_attributes",
+        SeamClass::Unread,
+        "the legacy decoder keeps one element per header line, an empty line included; RustFS never reads the member \\
+         (it only builds inputs without it: rustfs/src/app/bucket_list_through.rs:824; app/metadata_route.rs:718, :736)",
+    ),
+    finding(
+        "sd-0039",
+        "ListObjectVersions",
+        "optional_object_attributes",
+        SeamClass::Unread,
+        "the legacy decoder keeps one element per header line, an empty line included; RustFS never reads the member \\
+         (it only builds inputs without it: rustfs/src/app/bucket_list_through.rs:824; app/metadata_route.rs:718, :736)",
+    ),
 ];
 
 const EVENT_HOLD: &str = "no legacy input holds an Object Lock event hold and RustFS stores none (rd-put-0009)";
@@ -369,8 +339,13 @@ pub(crate) enum Expect {
     /// The gateway handler is reached and the seam refuses the member this finding names, where
     /// the legacy stack hands the value over.
     FailsClosed(&'static str),
-    /// The legacy decoder refuses what the gateway hands over, as this finding says.
-    LegacyRefuses(&'static str),
+    /// The legacy decoder refuses the request, and the seam refuses the member only the legacy
+    /// decoder reads, named here, with the legacy decoder's status and code: no RustFS body is
+    /// handed the request on either stack.
+    BothRefuse(&'static str),
+    /// Both stacks refuse the request before any handler, so no RustFS body is handed it. Which
+    /// code each answers is the decode diff's to compare, not this one's.
+    NeitherHandsOver,
 }
 
 /// One raw request and what it must show.

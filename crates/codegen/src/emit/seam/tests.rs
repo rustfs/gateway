@@ -63,7 +63,8 @@ fn same_names_convert_and_options_are_threaded() {
     ];
     let text = render::forward_struct(&ctx(&facts), "T", &fields, "input").expect("renders");
     assert!(text.contains("bucket: { let x = input.bucket; x.as_str().to_owned() },"), "{text}");
-    assert!(text.contains("prefix: input.prefix,"), "{text}");
+    // `Prefix` is header-bound here, and the legacy decoder reads an empty header as absent.
+    assert!(text.contains("prefix: input.prefix.filter(|x| !x.as_str().is_empty()),"), "{text}");
     assert!(text.contains("max_keys: Some(input.max_keys),"), "{text}");
 }
 
@@ -117,7 +118,8 @@ fn n_a_required_gateway_member_absent_from_s3s_output_is_refused_at_run_time() {
 fn a_keyword_member_meets_its_underscored_s3s_twin() {
     let facts = facts("struct T\n  type_: Option<String>\n");
     let text = render::forward_struct(&ctx(&facts), "T", &[field("Type", Type::String, false)], "input").expect("renders");
-    assert!(text.contains("type_: input.r#type,"), "{text}");
+    // Header-bound, so an empty value crosses as absent, as the legacy decoder reads it.
+    assert!(text.contains("type_: input.r#type.filter(|x| !x.as_str().is_empty()),"), "{text}");
 }
 
 #[test]
@@ -197,6 +199,103 @@ fn n_a_supplied_member_has_no_backward_conversion() {
     let errors = render::backward_struct(&ctx(&facts), "CopyObjectInput", &[field("CopySource", Type::String, false)], "G", "v")
         .expect_err("forward only");
     assert!(errors[0].contains("forward only"), "{errors:?}");
+}
+
+// ── legacy header and query semantics ────────────────────────────────────────────────────────
+
+mod legacy_semantics {
+    use rustfs_gateway_model::ir::{Binding, Type};
+
+    use super::{ctx, facts, field};
+    use crate::emit::seam::render;
+
+    fn header(name: &str, ty: Type) -> rustfs_gateway_model::ir::Field {
+        field(name, ty, false)
+    }
+
+    #[test]
+    fn an_empty_optional_textual_header_crosses_as_absent() {
+        let facts =
+            facts("struct T\n  cache_control: Option<String>\n  acl: Option<enum ObjectCannedACL>\n  range: Option<Range>\n");
+        let fields = [
+            header("CacheControl", Type::String),
+            header("ACL", Type::StringEnum(vec!["private".to_owned()])),
+            header("Range", Type::Range),
+        ];
+        let text = render::forward_struct(&ctx(&facts), "T", &fields, "input").expect("renders");
+        assert!(
+            text.contains("cache_control: input.cache_control.filter(|x| !x.as_str().is_empty()),"),
+            "{text}"
+        );
+        assert!(text.contains("acl: input.acl.filter(|x| !x.as_str().is_empty()).map("), "{text}");
+        assert!(text.contains("range: input.range.filter(|x| !x.as_str().is_empty()).map("), "{text}");
+    }
+
+    #[test]
+    fn n_a_query_payload_required_or_numeric_member_keeps_its_empty_value() {
+        let facts =
+            facts("struct T\n  prefix: Option<String>\n  marker: Option<String>\n  bucket: String\n  size: Option<i64>\n");
+        let mut query = field("Prefix", Type::String, false);
+        query.binding = Binding::Query;
+        let mut payload = field("Marker", Type::String, false);
+        payload.binding = Binding::BodyXml;
+        let fields = [
+            query,
+            payload,
+            field("Bucket", Type::BucketName, true),
+            header("Size", Type::Long),
+        ];
+        let text = render::forward_struct(&ctx(&facts), "T", &fields, "input").expect("renders");
+        assert!(!text.contains(".filter("), "{text}");
+    }
+
+    #[test]
+    fn a_member_only_the_legacy_decoder_reads_is_decoded_from_the_raw_request() {
+        let facts = facts("struct CopyObjectInput\n  bucket: String\n  version_id: Option<String>\n");
+        let ctx = ctx(&facts);
+        let text = render::forward_struct(&ctx, "CopyObjectInput", &[field("Bucket", Type::BucketName, true)], "input")
+            .expect("renders");
+        assert!(text.contains("version_id: leaf::legacy_query(wire, \"versionId\")?,"), "{text}");
+        assert_eq!(*ctx.supplied.borrow(), [("wire".to_owned(), "&leaf::RequestWire<'_>".to_owned())]);
+        let facts = super::facts("struct DeleteBucketInput\n  bucket: String\n  force_delete: Option<bool>\n");
+        let text = render::forward_struct(
+            &super::ctx(&facts),
+            "DeleteBucketInput",
+            &[field("Bucket", Type::BucketName, true)],
+            "input",
+        )
+        .expect("renders");
+        assert!(
+            text.contains("force_delete: leaf::legacy_bool_header(wire, \"x-minio-force-delete\")?,"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn n_a_legacy_query_member_of_another_type_fails_generation() {
+        let facts = facts("struct CopyObjectInput\n  bucket: String\n  version_id: Option<i32>\n");
+        let errors = render::forward_struct(&ctx(&facts), "CopyObjectInput", &[field("Bucket", Type::BucketName, true)], "input")
+            .expect_err("no decoding for an integer");
+        assert!(errors[0].contains("no legacy wire decoding"), "{errors:?}");
+    }
+
+    #[test]
+    fn n_a_legacy_query_override_a_gateway_member_now_fills_is_reported_stale() {
+        let facts = facts("struct CopyObjectInput\n  bucket: String\n  version_id: Option<String>\n");
+        let fields = [
+            field("Bucket", Type::BucketName, true),
+            field("VersionId", Type::String, false),
+        ];
+        let errors = render::forward_struct(&ctx(&facts), "CopyObjectInput", &fields, "input").expect_err("stale");
+        assert!(errors[0].contains("stale override"), "{errors:?}");
+    }
+
+    #[test]
+    fn n_a_member_decoded_from_the_raw_request_has_no_backward_conversion() {
+        let facts = facts("struct CopyObjectInput\n  version_id: Option<String>\n");
+        let errors = render::backward_struct(&ctx(&facts), "CopyObjectInput", &[], "G", "v").expect_err("forward only");
+        assert!(errors[0].contains("forward only"), "{errors:?}");
+    }
 }
 
 // ── the member census ─────────────────────────────────────────────────────────────────────────

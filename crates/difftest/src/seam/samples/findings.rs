@@ -33,26 +33,61 @@ fn force(value: &str) -> RawRequest {
 
 pub(super) fn rows() -> Vec<SeamRow> {
     let mut rows = vec![
-        row("delete-bucket-force-true", force("true"), Expect::Differs(&["sd-0005"])),
-        row("delete-bucket-force-capitalised-false", force("False"), Expect::Differs(&["sd-0005"])),
+        row("delete-bucket-force-true", force("true"), Expect::Identical),
+        row("delete-bucket-force-capitalised-false", force("False"), Expect::Identical),
         row("delete-bucket-force-empty-is-absent", force(""), Expect::Identical),
-        row("delete-bucket-force-numeric", force("1"), Expect::LegacyRefuses("sd-0006")),
-        row("delete-bucket-force-uppercase", force("TRUE"), Expect::LegacyRefuses("sd-0006")),
-        row("delete-bucket-force-on", force("on"), Expect::LegacyRefuses("sd-0006")),
+        row("delete-bucket-force-numeric", force("1"), Expect::BothRefuse("x-minio-force-delete")),
+        row("delete-bucket-force-uppercase", force("TRUE"), Expect::BothRefuse("x-minio-force-delete")),
+        row("delete-bucket-force-on", force("on"), Expect::BothRefuse("x-minio-force-delete")),
         row(
             "delete-bucket-force-twice",
             force("true").header("x-minio-force-delete", "true"),
-            Expect::LegacyRefuses("sd-0006"),
+            Expect::BothRefuse("x-minio-force-delete"),
         ),
         row(
             "copy-object-minio-target-version",
             RawRequest::new(Method::PUT, &format!("/bucket/k?versionId={VERSION}")).header("x-amz-copy-source", "/src/k"),
-            Expect::Differs(&["sd-0003"]),
+            Expect::Identical,
+        ),
+        row(
+            "copy-object-minio-target-version-encoded",
+            RawRequest::new(Method::PUT, "/bucket/k?versionId=a%2Bb+c&x-id=CopyObject").header("x-amz-copy-source", "/src/k"),
+            Expect::Identical,
+        ),
+        row(
+            "copy-object-minio-target-version-twice",
+            RawRequest::new(Method::PUT, "/bucket/k?versionId=a&versionId=b").header("x-amz-copy-source", "/src/k"),
+            Expect::NeitherHandsOver,
         ),
         row(
             "create-multipart-upload-minio-version",
             RawRequest::post(&format!("/bucket/k?uploads&versionId={VERSION}"), b""),
-            Expect::Differs(&["sd-0004"]),
+            Expect::Identical,
+        ),
+        row(
+            "create-multipart-upload-minio-empty-version",
+            RawRequest::post("/bucket/k?uploads&versionId=", b""),
+            Expect::Identical,
+        ),
+        row(
+            "list-objects-empty-optional-attributes",
+            RawRequest::get("/bucket").header("x-amz-optional-object-attributes", ""),
+            Expect::Differs(&["sd-0037", "sd-0025"]),
+        ),
+        row(
+            "list-objects-v2-empty-optional-attributes",
+            RawRequest::get("/bucket?list-type=2").header("x-amz-optional-object-attributes", ""),
+            Expect::Differs(&["sd-0038", "sd-0026", "sd-0027"]),
+        ),
+        row(
+            "list-object-versions-empty-optional-attributes",
+            RawRequest::get("/bucket?versions").header("x-amz-optional-object-attributes", ""),
+            Expect::Differs(&["sd-0039", "sd-0028"]),
+        ),
+        row(
+            "get-object-empty-range-is-absent",
+            RawRequest::get("/bucket/k").header("range", ""),
+            Expect::Identical,
         ),
         row(
             "get-object-attributes-joined-list",
@@ -65,6 +100,23 @@ pub(super) fn rows() -> Vec<SeamRow> {
             Expect::Identical,
         ),
     ];
+    // The query split the seam reproduces for `?versionId=`, against the legacy decoder's own.
+    for (index, query) in [
+        "versionId=a%2Bb+c",
+        "versionId=%zz",
+        "&&versionId=v&&",
+        "versionId",
+        "=x&versionId=v",
+        "versionId=%E2%9C%93",
+        "versionId=%FF",
+        "versionid=lower&versionId=v",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let name: &'static str = Box::leak(format!("create-multipart-upload-version-query-{index}").into_boxed_str());
+        rows.push(row(name, RawRequest::post(&format!("/bucket/k?uploads&{query}"), b""), Expect::Identical));
+    }
     for (operation, request, finding) in [
         ("put", RawRequest::put("/bucket/k", b"x"), "sd-0017"),
         (

@@ -126,6 +126,8 @@ fn buckets() -> Vec<SeamRow> {
 
 fn object_reads() -> Vec<SeamRow> {
     vec![
+        row("get-object-plain", RawRequest::get("/bucket/dir/k.txt"), Expect::Identical),
+        row("head-object-plain", RawRequest::head("/bucket/dir/k.txt"), Expect::Identical),
         row(
             "get-object-attributes-every-member-but-the-list",
             sse(RawRequest::get(&format!("/bucket/k?attributes&versionId={VERSION_ID}"))

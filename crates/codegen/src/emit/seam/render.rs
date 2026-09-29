@@ -22,7 +22,7 @@
 
 use std::fmt::Write as _;
 
-use rustfs_gateway_model::ir::{Field, OperationIr, Shape, ShapeKind, Type};
+use rustfs_gateway_model::ir::{Binding, Field, OperationIr, Shape, ShapeKind, Type};
 
 use super::expr::{Ctx, gateway_shape};
 use super::facts::S3sType;
@@ -125,15 +125,15 @@ fn target<'s>(ctx: &Ctx<'s>, owner: &str, field: &Field, s3s: &'s [(String, S3sT
             return Ok(Target::Nested(parent, nested.as_str(), ty, member));
         }
         Some(Rule::Rename(to)) => to.to_owned(),
-        Some(Rule::S3sOnly(_)) | None => name.clone(),
+        Some(Rule::S3sOnly(_) | Rule::FromQuery(_) | Rule::FromBoolHeader(_)) | None => name.clone(),
     };
     if matches!(field.ty, Type::ChecksumSpec) {
         return Ok(Target::ChecksumFanOut);
     }
     let (member, ty) = find(s3s, &wanted).ok_or_else(|| format!("{owner}.{name}: the s3s struct has no member `{wanted}`"))?;
-    if let Some(Rule::S3sOnly(_)) = member_rule(owner, member) {
+    if let Some(Rule::S3sOnly(_) | Rule::FromQuery(_) | Rule::FromBoolHeader(_)) = member_rule(owner, member) {
         return Err(format!(
-            "{owner}.{member}: stale override, a gateway member now fills it; delete the S3sOnly entry"
+            "{owner}.{member}: stale override, a gateway member now fills it; delete the legacy-only entry"
         ));
     }
     Ok(Target::Member(member, ty))
@@ -156,6 +156,19 @@ fn missing(field: &str, reason: &str) -> String {
     format!("return Err(ConversionError {{ field: \"{field}\", reason: \"{reason}\" }})")
 }
 
+/// Whether an empty value of this gateway member is absent on the legacy side: the legacy decoder
+/// reads an optional header whose value is empty as no value at all, before parsing it, so a
+/// textual header member the gateway holds as `Some("")` crosses as `None` (rustfs/gateway#1076).
+fn empty_is_absent(field: &Field) -> bool {
+    field.binding == Binding::Header
+        && !field.required
+        && matches!(field.ty, Type::String | Type::OpaqueString | Type::StringEnum(_) | Type::Range)
+        && !crate::emit::dto::registry::is_secret_string_field(field)
+}
+
+/// The parameter a conversion takes when a legacy-only member is decoded from the raw request.
+const WIRE_PARAMETER: (&str, &str) = ("wire", "&leaf::RequestWire<'_>");
+
 /// The s3s struct literal for the gateway value `src` of a struct with `fields`.
 pub(super) fn forward_struct(ctx: &Ctx<'_>, owner: &str, fields: &[Field], src: &str) -> Result<String, Vec<String>> {
     let Some(s3s) = ctx.facts.structs.get(owner) else {
@@ -167,7 +180,10 @@ pub(super) fn forward_struct(ctx: &Ctx<'_>, owner: &str, fields: &[Field], src: 
     let mut fan_out = false;
     for field in fields {
         let name = bare_name(field);
-        let access = format!("{src}.{}", naming::field_name(&field.name));
+        let mut access = format!("{src}.{}", naming::field_name(&field.name));
+        if empty_is_absent(field) {
+            access = format!("{access}.filter(|x| !x.as_str().is_empty())");
+        }
         match target(ctx, owner, field, s3s) {
             Err(error) => errors.push(error),
             Ok(Target::CarriedByHeaders) => {}
@@ -242,6 +258,27 @@ pub(super) fn forward_struct(ctx: &Ctx<'_>, owner: &str, fields: &[Field], src: 
         let runtime = matches!(ty.unwrap_option().0, S3sType::Opaque);
         if runtime || matches!(member_rule(owner, member), Some(Rule::S3sOnly(_))) {
             let _ = writeln!(body, "        {member}: Default::default(),");
+            continue;
+        }
+        let decoded = match (member_rule(owner, member), ty) {
+            (Some(Rule::FromQuery(parameter)), S3sType::Option(inner)) if matches!(inner.as_ref(), S3sType::Leaf(l) if l == "String") => {
+                Some(format!("leaf::legacy_query(wire, \"{parameter}\")?"))
+            }
+            (Some(Rule::FromBoolHeader(header)), S3sType::Option(inner)) if matches!(inner.as_ref(), S3sType::Leaf(l) if l == "bool") => {
+                Some(format!("leaf::legacy_bool_header(wire, \"{header}\")?"))
+            }
+            (Some(Rule::FromQuery(_) | Rule::FromBoolHeader(_)), other) => {
+                errors.push(format!("{owner}.{member}: no legacy wire decoding for {other:?}"));
+                continue;
+            }
+            _ => None,
+        };
+        if let Some(decoded) = decoded {
+            let mut supplied = ctx.supplied.borrow_mut();
+            if !supplied.iter().any(|(name, _)| name == WIRE_PARAMETER.0) {
+                supplied.push((WIRE_PARAMETER.0.to_owned(), WIRE_PARAMETER.1.to_owned()));
+            }
+            push_field(&mut body, member, &decoded);
             continue;
         }
         errors.push(format!("{owner}.{member}: an s3s member no gateway member fills"));
@@ -365,6 +402,8 @@ pub(super) fn backward_struct(
         } else if matches!(ty.unwrap_option().0, S3sType::Opaque) || matches!(member_rule(owner, member), Some(Rule::S3sOnly(_)))
         {
             let _ = writeln!(pattern, "        {member}: _,");
+        } else if matches!(member_rule(owner, member), Some(Rule::FromQuery(_) | Rule::FromBoolHeader(_))) {
+            errors.push(format!("{owner}.{member}: a member decoded from the raw request is forward only"));
         } else {
             errors.push(format!("{owner}.{member}: an s3s member no gateway member takes"));
         }
@@ -468,11 +507,17 @@ pub(super) fn operation(ctx: &Ctx<'_>, ir: &OperationIr) -> Result<(String, Stri
 pub(super) fn shape_fn(ctx: &Ctx<'_>, raw: &str, shape: &Shape, forward: bool) -> Result<String, Vec<String>> {
     let gw = gateway_shape(raw);
     let name = format!("{}_{}", naming::module_name(raw), if forward { "to_s3s" } else { "from_s3s" });
+    ctx.supplied.borrow_mut().clear();
     let body = match (shape.kind, forward) {
         (ShapeKind::Structure, true) => forward_struct(ctx, raw, &shape.fields, "value")?,
         (ShapeKind::Structure, false) => backward_struct(ctx, raw, &shape.fields, &gw, "value")?,
         (ShapeKind::Union, forward) => union(ctx, raw, &shape.fields, forward)?,
     };
+    if !ctx.supplied.borrow().is_empty() {
+        return Err(vec![format!(
+            "{raw}: a nested shape's conversion takes no parameter; supply or decode the member at the operation"
+        )]);
+    }
     let (from, to) = if forward {
         (gw.clone(), format!("s3s::dto::{raw}"))
     } else {

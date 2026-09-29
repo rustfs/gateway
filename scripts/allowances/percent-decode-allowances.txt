@@ -28,3 +28,9 @@ crates/core/src/ops/shared/copy_source.rs
 crates/sig/src/canonical.rs
 crates/sig/src/query.rs
 crates/sig/src/floor.rs
+
+# The migration seam's reading of a query parameter only the legacy decoder reads: the target
+# version id of CopyObject and CreateMultipartUpload (`?versionId=`). The seam hands RustFS the
+# value the legacy decoder would have, so it splits and decodes the raw query the way that decoder
+# does (form-urlencoded). A version id, not a name: it never becomes an ObjectKey or a BucketName.
+crates/types/src/compat/seam/leaf.rs

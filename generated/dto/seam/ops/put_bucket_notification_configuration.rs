@@ -30,7 +30,7 @@ use crate::compat::ConversionError;
 pub fn input_to_s3s(input: crate::ops::put_bucket_notification_configuration::Input) -> Result<s3s::dto::PutBucketNotificationConfigurationInput, ConversionError> {
     Ok(s3s::dto::PutBucketNotificationConfigurationInput {
         bucket: { let x = input.bucket; x.as_str().to_owned() },
-        expected_bucket_owner: input.expected_bucket_owner,
+        expected_bucket_owner: input.expected_bucket_owner.filter(|x| !x.as_str().is_empty()),
         notification_configuration: { let x = input.notification_configuration; super::super::shapes::notification_configuration::notification_configuration_to_s3s(x)? },
         skip_destination_validation: input.skip_destination_validation,
     })

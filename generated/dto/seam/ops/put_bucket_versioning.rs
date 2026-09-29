@@ -30,10 +30,10 @@ use crate::compat::ConversionError;
 pub fn input_to_s3s(input: crate::ops::put_bucket_versioning::Input) -> Result<s3s::dto::PutBucketVersioningInput, ConversionError> {
     Ok(s3s::dto::PutBucketVersioningInput {
         bucket: { let x = input.bucket; x.as_str().to_owned() },
-        checksum_algorithm: input.checksum_algorithm.map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::ChecksumAlgorithm::from(x.as_str().to_owned())) }).transpose()?,
-        content_md5: input.content_md5,
-        expected_bucket_owner: input.expected_bucket_owner,
-        mfa: input.mfa,
+        checksum_algorithm: input.checksum_algorithm.filter(|x| !x.as_str().is_empty()).map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::ChecksumAlgorithm::from(x.as_str().to_owned())) }).transpose()?,
+        content_md5: input.content_md5.filter(|x| !x.as_str().is_empty()),
+        expected_bucket_owner: input.expected_bucket_owner.filter(|x| !x.as_str().is_empty()),
+        mfa: input.mfa.filter(|x| !x.as_str().is_empty()),
         versioning_configuration: { let x = input.versioning_configuration; super::super::shapes::versioning_configuration::versioning_configuration_to_s3s(x)? },
     })
 }

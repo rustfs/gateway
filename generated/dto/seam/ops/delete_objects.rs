@@ -31,11 +31,11 @@ pub fn input_to_s3s(input: crate::ops::delete_objects::Input) -> Result<s3s::dto
     Ok(s3s::dto::DeleteObjectsInput {
         bucket: { let x = input.bucket; x.as_str().to_owned() },
         bypass_governance_retention: input.bypass_governance_retention,
-        checksum_algorithm: input.checksum_algorithm.map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::ChecksumAlgorithm::from(x.as_str().to_owned())) }).transpose()?,
+        checksum_algorithm: input.checksum_algorithm.filter(|x| !x.as_str().is_empty()).map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::ChecksumAlgorithm::from(x.as_str().to_owned())) }).transpose()?,
         delete: { let x = input.delete; super::super::shapes::delete::delete_to_s3s(x)? },
-        expected_bucket_owner: input.expected_bucket_owner,
-        mfa: input.mfa,
-        request_payer: input.request_payer.map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::RequestPayer::from(x.as_str().to_owned())) }).transpose()?,
+        expected_bucket_owner: input.expected_bucket_owner.filter(|x| !x.as_str().is_empty()),
+        mfa: input.mfa.filter(|x| !x.as_str().is_empty()),
+        request_payer: input.request_payer.filter(|x| !x.as_str().is_empty()).map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::RequestPayer::from(x.as_str().to_owned())) }).transpose()?,
     })
 }
 

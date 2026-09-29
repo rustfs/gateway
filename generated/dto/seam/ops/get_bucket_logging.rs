@@ -30,7 +30,7 @@ use crate::compat::ConversionError;
 pub fn input_to_s3s(input: crate::ops::get_bucket_logging::Input) -> Result<s3s::dto::GetBucketLoggingInput, ConversionError> {
     Ok(s3s::dto::GetBucketLoggingInput {
         bucket: { let x = input.bucket; x.as_str().to_owned() },
-        expected_bucket_owner: input.expected_bucket_owner,
+        expected_bucket_owner: input.expected_bucket_owner.filter(|x| !x.as_str().is_empty()),
     })
 }
 
