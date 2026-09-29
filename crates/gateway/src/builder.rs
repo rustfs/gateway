@@ -69,6 +69,7 @@ use crate::routing::{RoutingSnapshot, RuntimeAssembly};
 mod anonymous_framing;
 mod assembly_update;
 mod client_quirks;
+mod cors;
 mod legacy_sentences;
 mod names;
 mod secret_scope;
@@ -432,37 +433,6 @@ impl ServiceBuilder {
     #[must_use]
     pub fn governor(mut self, governor: impl Governor) -> Self {
         self.governor = Some(Arc::new(governor));
-        self
-    }
-
-    /// Installs the source of bucket CORS documents. Defaults to [`NoCors`], under which no
-    /// preflight is ever allowed.
-    ///
-    /// The source is wrapped in [`CachedCorsSource`] here and stored wrapped, which is the whole
-    /// of the "no un-cached call path" property: this is the only setter, it takes a bare source,
-    /// and nothing hands the inner one back. See `crate::ext::cors` for why an unauthenticated
-    /// read that reaches storage once per request is an amplifier.
-    #[must_use]
-    pub fn cors_source(mut self, source: impl CorsSource) -> Self {
-        self.cors_source = Arc::new(source);
-        self
-    }
-
-    /// Tunes the mandatory CORS cache. Defaults to [`CorsCacheConfig::default`].
-    #[must_use]
-    pub const fn cors_cache(mut self, config: CorsCacheConfig) -> Self {
-        self.cors_cache = config;
-        self
-    }
-
-    /// Installs the deployment's credential posture for CORS.
-    ///
-    /// Defaults to "any origin the bucket's rules admit, no credentials". A policy that would
-    /// pair a reflected origin with credentials cannot be constructed at all, so there is nothing
-    /// for this setter to refuse — see `rustfs_gateway_core::cors::CorsPolicy::new`.
-    #[must_use]
-    pub fn cors_policy(mut self, policy: CorsPolicy) -> Self {
-        self.cors_policy = policy;
         self
     }
 
