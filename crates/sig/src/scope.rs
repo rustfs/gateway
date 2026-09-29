@@ -126,9 +126,12 @@ impl RegionSet {
         })
     }
 
-    /// The configured-name grammar: 1..=[`ScopeRegion::MAX_LEN`] bytes of lowercase ASCII letters,
-    /// digits or `-`.
-    fn is_region_name(region: &str) -> bool {
+    /// Whether `region` satisfies the configured-name grammar: 1..=[`ScopeRegion::MAX_LEN`] bytes
+    /// of lowercase ASCII letters, digits or `-`. Legacy RustFS reads a signed region by the same
+    /// grammar, and a verifier that admits other spellings for key derivation
+    /// ([`ExpectedScope::accepting_any_region_spelling`]) asks this after the signature matched.
+    #[must_use]
+    pub fn is_region_name(region: &str) -> bool {
         !region.is_empty()
             && region.len() <= ScopeRegion::MAX_LEN
             && region
@@ -160,6 +163,7 @@ pub struct ExpectedScope<'a> {
     regions: &'a RegionSet,
     any_region: bool,
     empty_region: bool,
+    any_spelling: bool,
 }
 
 impl<'a> ExpectedScope<'a> {
@@ -171,6 +175,7 @@ impl<'a> ExpectedScope<'a> {
             regions,
             any_region: false,
             empty_region: false,
+            any_spelling: false,
         }
     }
 
@@ -202,9 +207,24 @@ impl<'a> ExpectedScope<'a> {
         self
     }
 
+    /// Admits every non-empty region the credential parser reads — ASCII graphic, at most
+    /// [`crate::CredentialScope::MAX_REGION_LEN`] bytes, no `/` — for a verifier that refuses a
+    /// region outside [`RegionSet::is_region_name`] only after the signature has been checked, as
+    /// legacy RustFS does (the RustFS profile, rustfs/gateway#1075).
+    ///
+    /// A verifier that turns this on must make that refusal itself: the scope check no longer
+    /// does. The key is still derived from the presented region, and the date and service checks
+    /// are unchanged.
+    #[must_use]
+    pub const fn accepting_any_region_spelling(mut self) -> Self {
+        self.any_spelling = true;
+        self
+    }
+
     /// Whether [`enforce_scope`] admits `region` under this expectation.
     fn admits_region(&self, region: &str) -> bool {
         self.regions.contains(region)
+            || (self.any_spelling && !region.is_empty())
             || (self.any_region && RegionSet::is_region_name(region))
             // Legacy-compat (rustfs/backlog#2684): legacy RustFS verifies a scope that names no
             // region at all, and its replication client relies on it. A scope without a region

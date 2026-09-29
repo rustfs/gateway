@@ -1,0 +1,64 @@
+# c-sig-0599 — a scope region outside the region grammar is refused at the scope check by default.
+#
+# Schema dimensions exercised: sign.tamper on the scope region with an uppercase spelling, and the
+# region detail that tells the client where to sign.
+
+[case]
+id = "c-sig-0599"
+schema_version = 1
+title = "A credential scope whose region is outside the region grammar is refused by default, naming the region to use"
+rationale = """
+`US-EAST-1` is not a region name: regions are lowercase letters, digits and hyphens, and the region \
+is one of the inputs the signing key is derived from. By default the gateway refuses it at the \
+scope check, before any key is derived, with 400 AuthorizationHeaderMalformed naming the region to \
+use, which is what S3 answers a wrong region with. RustFS verifies the signature first and then \
+answers 400 InvalidRequest; that is the opt-in RustFS profile \
+(`SigV4Authenticator::refuse_unreadable_signing_regions_after_verification`, rustfs/gateway#1075, \
+rd-loc-0006), which this case must not see. The key is valid, so the spelling of the region is the \
+only thing wrong with the request."""
+polarity = "negative"
+operation = "ListBuckets"
+tags = ["signature", "sigv4", "region", "error-shape"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html"
+summary = "S3 answers a credential scope that names the wrong region with 400 AuthorizationHeaderMalformed."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://github.com/rustfs/gateway/issues/1075"
+summary = "RustFS verifies such a signature and then answers InvalidRequest; the gateway does so only under the RustFS profile."
+kind = "other"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+request_time = "2026-01-02T03:04:05Z"
+
+[request]
+method = "GET"
+target = "/"
+
+[request.sign]
+mode = "sigv4_header"
+service = "s3"
+region = "us-east-1"
+credential = "valid"
+
+[request.sign.tamper]
+component = "scope_region"
+new_value = "US-EAST-1"
+
+[expect]
+kind = "response"
+status = 400
+
+[expect.error]
+code = "AuthorizationHeaderMalformed"
+request_id_present = true
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+contains_utf8 = ["<Code>AuthorizationHeaderMalformed</Code>", "<Region>us-east-1</Region>"]
+not_contains_utf8 = ["<Buckets>", "US-EAST-1"]

@@ -54,13 +54,17 @@ pub(super) const SCOPE_DIVERGENCES: [RequestDivergence; 2] = [
         aws_evidence: ERROR_RESPONSES,
         s3s: "verifies the signature, then refuses the region: 400 InvalidRequest (403 SignatureDoesNotMatch if the signature is \
               wrong)",
-        gateway: "400 AuthorizationHeaderMalformed with <Region>, at the scope check before any key is derived, by default and \
-                  under the RustFS profile (ADR-0023 keeps the configured-name grammar)",
-        client_impact: "none can succeed on either stack and both answer 400; only the code differs, and an SDK region redirector \
-                        may retry the gateway answer with the named region",
+        gateway: "400 AuthorizationHeaderMalformed with <Region>, at the scope check before any key is derived, by default \
+                  (ADR-0023 keeps the configured-name grammar); under the RustFS profile \
+                  SigV4Authenticator::refuse_unreadable_signing_regions_after_verification verifies the signature over the \
+                  region and then answers 400 InvalidRequest (403 SignatureDoesNotMatch if the signature is wrong), as \
+                  legacy RustFS does",
+        client_impact: "none can succeed on either stack. By default only the code and the order differ (an SDK region \
+                        redirector may retry the gateway answer with the named region); under the RustFS profile the answers \
+                        are legacy RustFS's",
         ruling: DivergenceRuling::RustfsProfile,
-        follow_up: DivergenceFollowUp::Open("https://github.com/rustfs/gateway/issues/1075"),
+        follow_up: DivergenceFollowUp::Landed("c-sig-0599"),
         test_file: LOCATION_CONTEXT,
-        test: "a_scope_region_outside_the_legacy_grammar_is_refused_by_both_stacks_with_different_codes",
+        test: "a_scope_region_outside_the_legacy_grammar_is_refused_as_legacy_refuses_it_only_under_the_rustfs_profile",
     },
 ];
