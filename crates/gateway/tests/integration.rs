@@ -98,6 +98,8 @@ mod governor_streaming;
 mod handler_panic;
 #[path = "host_deadlines.rs"]
 mod host_deadlines;
+#[path = "host_request_id.rs"]
+mod host_request_id;
 #[path = "host_resolve_replay.rs"]
 mod host_resolve_replay;
 #[path = "ingest_assembly.rs"]

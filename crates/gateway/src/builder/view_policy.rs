@@ -83,6 +83,7 @@ use super::legacy_sentences::BodySentences;
 use super::sigv4_header_guard::SigV4HeaderGuard;
 use crate::integrity::IntegrityCodes;
 use crate::render::{S3Error, from_wire_reject};
+use crate::trace::Identification;
 use rustfs_gateway_core::codec::value::RustFsListing;
 use rustfs_gateway_core::{DocumentReading, EncodedResponse, HandlerError, MetaView, PageSizeCeiling};
 use rustfs_gateway_http::{HeaderView, WireReject};
@@ -163,6 +164,8 @@ pub(crate) struct ViewPolicy {
     pub(crate) not_modified_headers: super::not_modified_headers::NotModifiedHeaders,
     /// Which heads a successful answer is written with (`super::legacy_heads`).
     pub(super) answer_heads: AnswerHeads,
+    /// Which identifiers an answer carries (`super::identifiers`).
+    pub(super) identification: Identification,
     clamp_max_keys: bool,
     integrity_codes: IntegrityCodes,
     document_reading: DocumentReading,
@@ -186,6 +189,12 @@ impl ViewPolicy {
     /// ([`ServiceBuilder::answer_credential_refusals_with_legacy_rustfs_sentences`]).
     pub(crate) const fn credential_sentences(&self) -> CredentialSentences {
         self.credential_sentences
+    }
+
+    /// Which identifiers this assembly's answers carry
+    /// ([`ServiceBuilder::identify_requests_as_legacy_rustfs`]).
+    pub(crate) const fn identification(&self) -> Identification {
+        self.identification
     }
 
     /// Whether a presigned request's payload declaration is read as legacy RustFS reads it

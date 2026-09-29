@@ -1753,6 +1753,7 @@ dependencies = [
  "pin-project-lite",
  "rustfs-gateway-core",
  "rustfs-gateway-dialect-minio",
+ "rustfs-gateway-dialect-rustfs-admin",
  "rustfs-gateway-http",
  "rustfs-gateway-macros",
  "rustfs-gateway-server",
