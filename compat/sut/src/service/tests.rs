@@ -739,6 +739,9 @@ mod deadline_tests;
 /// `Expires` as sent, and `Last-Modified` through `If-Modified-Since` (rustfs/gateway#1099).
 mod legacy_reading_tests;
 
+/// `HEAD` answers and the bodyless statuses shaped as legacy RustFS shapes them (rustfs/gateway#1120).
+mod head_bodyless_tests;
+
 /// The header-signed SigV4 spellings the RustFS profile accepts and refuses as legacy RustFS does
 /// (rustfs/gateway#1099).
 mod sigv4_acceptance_tests;

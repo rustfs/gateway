@@ -143,9 +143,16 @@ pub(crate) struct ViewPolicy {
     presigned_payload_unsigned: bool,
     empty_uploads_without_length: bool,
     rustfs_listings: bool,
+    head_refusals_without_length: bool,
 }
 
 impl ViewPolicy {
+    /// Whether a refused `HEAD` goes out without the `Content-Length` of the document it does not
+    /// carry ([`ServiceBuilder::answer_head_refusals_without_content_length`]).
+    pub(crate) const fn head_refusals_without_length(&self) -> bool {
+        self.head_refusals_without_length
+    }
+
     /// Whether a presigned request's payload declaration is read as legacy RustFS reads it
     /// ([`ServiceBuilder::sign_presigned_payloads_as_unsigned`]).
     pub(crate) const fn presigned_payload_unsigned(&self) -> bool {
@@ -235,6 +242,22 @@ impl ServiceBuilder {
     #[must_use]
     pub fn answer_checksum_failures_with_bad_digest(mut self) -> Self {
         self.view_policy.integrity_codes = IntegrityCodes::RustFs;
+        self
+    }
+
+    /// Answers a refused `HEAD` with no `Content-Length`, as legacy RustFS does
+    /// (rustfs/gateway#1120).
+    ///
+    /// Every `HEAD` answer already goes out without content (the response invariants). By default
+    /// a refusal keeps the length of the error document a `GET` would have carried — RFC 9110
+    /// §9.3.2 lets a server send the header, and the core does. Legacy RustFS writes the document,
+    /// then drops it for a `HEAD` without ever stating its length (`HeadRequestBodyFixLayer`,
+    /// `rustfs/src/server/layer.rs:1248-1316`), so its refused `HEAD` carries `Content-Type` and no
+    /// `Content-Length`; this switch does the same. A `HEAD` that succeeds keeps the length it
+    /// reports, whatever the setting.
+    #[must_use]
+    pub fn answer_head_refusals_without_content_length(mut self) -> Self {
+        self.view_policy.head_refusals_without_length = true;
         self
     }
 

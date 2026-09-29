@@ -417,6 +417,9 @@ impl S3Service {
             response = outcome.refuse_handler(error.into());
         }
         let corrections = crate::invariants::enforce(&mut response, &method);
+        if method == Method::HEAD && outcome.error.is_some() && self.inner.view_policy.head_refusals_without_length() {
+            response.headers_mut().remove(http::header::CONTENT_LENGTH);
+        }
         if corrections.removed_forbidden_body() {
             self.inner.response_body_corrections.fetch_add(1, Ordering::Relaxed);
         }
