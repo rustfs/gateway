@@ -686,6 +686,25 @@ impl fmt::Display for ChecksumError {
 
 impl std::error::Error for ChecksumError {}
 
+/// Whether one request header names a checksum algorithm this build does not implement: an
+/// `x-amz-checksum-<name>` header that is neither an algorithm nor one of the three headers that
+/// declare no digest, or an `x-amz-sdk-checksum-algorithm` whose value is no algorithm.
+///
+/// These are exactly the headers [`parse_request_checksum`] refuses with
+/// [`ChecksumError::UnknownAlgorithm`]; a caller that must ignore them instead, as legacy RustFS
+/// does (rustfs/backlog#1677), leaves them out of what it hands the arbitration.
+#[must_use]
+pub fn names_unknown_checksum_algorithm(name: &str, value: &str) -> bool {
+    if name.eq_ignore_ascii_case(SDK_ALGORITHM_HEADER) {
+        return ChecksumAlgorithm::from_wire_name(value).is_none();
+    }
+    let digestless = [CHECKSUM_TYPE_HEADER, CHECKSUM_ALGORITHM_HEADER, CHECKSUM_MODE_HEADER];
+    name.get(..CHECKSUM_PREFIX.len())
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case(CHECKSUM_PREFIX))
+        && !digestless.iter().any(|header| name.eq_ignore_ascii_case(header))
+        && ChecksumAlgorithm::from_header_name(name).is_none()
+}
+
 /// Picks the one checksum a request declares, out of all its headers.
 ///
 /// **This is the arbitration authority.** Every layer that needs to know which checksum a request

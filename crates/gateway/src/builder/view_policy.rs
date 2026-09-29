@@ -19,6 +19,7 @@
 //!
 //! Responsible for: [`ServiceBuilder::clamp_oversized_max_keys`],
 //! [`ServiceBuilder::answer_checksum_failures_with_bad_digest`],
+//! [`ServiceBuilder::ignore_unknown_checksum_algorithms`],
 //! [`ServiceBuilder::sign_presigned_payloads_as_unsigned`],
 //! [`ServiceBuilder::accept_empty_uploads_without_content_length`] and
 //! [`ServiceBuilder::url_encode_listings_like_rustfs`], the closed sets of operations the first and
@@ -158,6 +159,7 @@ pub(crate) struct ViewPolicy {
     /// Whether date conditions are read in legacy RustFS's one spelling (`date_conditions`).
     pub(super) strict_date_conditions: bool,
     body_literals: bool,
+    unknown_checksum_algorithms_ignored: bool,
 }
 
 impl ViewPolicy {
@@ -216,6 +218,15 @@ impl ViewPolicy {
         let meta = match self.integrity_codes {
             IntegrityCodes::RustFs => meta.with_checksum_failures_as_bad_digest(),
             IntegrityCodes::Model => meta,
+        };
+        // Legacy-compat (rustfs/backlog#2684): legacy RustFS ignores a checksum header naming an
+        // algorithm it does not implement, so a client sending one gets no answer about it and the
+        // body is stored unverified. Kept because nothing such a header claims can be verified, so
+        // storing the body damages nothing; the intended future behaviour is the core's refusal.
+        let meta = if self.unknown_checksum_algorithms_ignored {
+            meta.with_unknown_checksum_algorithms_ignored()
+        } else {
+            meta
         };
         let listing = RUSTFS_LISTING_ENCODINGS
             .iter()
@@ -304,6 +315,24 @@ impl ServiceBuilder {
     #[must_use]
     pub fn answer_head_refusals_without_content_length(mut self) -> Self {
         self.view_policy.head_refusals_without_length = true;
+        self
+    }
+
+    /// Ignores a checksum header that names an algorithm this build does not implement — an
+    /// `x-amz-checksum-<name>` header no algorithm answers to, or an `x-amz-sdk-checksum-algorithm`
+    /// naming none — as legacy RustFS does, on every operation (rustfs/backlog#1677).
+    ///
+    /// Off by default: the core refuses one, `400 InvalidRequest`, so a new AWS algorithm arrives
+    /// as a code change and never as a claim silently left unverified. The RustFS profile turns it
+    /// on because legacy RustFS stores the body either way and nothing such a header claims can be
+    /// verified. Every other claim is still verified: a known `x-amz-checksum-*` or a
+    /// `Content-MD5` beside the unknown header is compared, and a mismatch is still refused. An
+    /// ignored header claims nothing, so on an operation that requires an integrity check it does
+    /// not stand in for one; the RustFS profile waives that requirement separately
+    /// ([`ServiceBuilder::accept_all_checksum_omissions`]).
+    #[must_use]
+    pub fn ignore_unknown_checksum_algorithms(mut self) -> Self {
+        self.view_policy.unknown_checksum_algorithms_ignored = true;
         self
     }
 

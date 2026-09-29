@@ -70,6 +70,8 @@ pub struct MetaView<'a> {
     integrity_optional: bool,
     /// Whether the deployment answers a request-checksum failure with `BadDigest`.
     checksum_failures_as_bad_digest: bool,
+    /// Whether a checksum header naming an algorithm this build does not implement is ignored.
+    unknown_checksum_algorithms_ignored: bool,
     /// A page-size query parameter the deployment clamps to a ceiling instead of refusing.
     page_size_ceiling: Option<PageSizeCeiling>,
     /// Whether an absent `content-length` reads as `0`, because the transport already ended the
@@ -201,6 +203,7 @@ impl<'a> MetaView<'a> {
             framed_content_length: None,
             integrity_optional: false,
             checksum_failures_as_bad_digest: false,
+            unknown_checksum_algorithms_ignored: false,
             page_size_ceiling: None,
             ended_empty: false,
             rustfs_listing: None,
@@ -229,6 +232,7 @@ impl<'a> MetaView<'a> {
             framed_content_length: Some(length),
             integrity_optional: self.integrity_optional,
             checksum_failures_as_bad_digest: self.checksum_failures_as_bad_digest,
+            unknown_checksum_algorithms_ignored: self.unknown_checksum_algorithms_ignored,
             page_size_ceiling: self.page_size_ceiling,
             ended_empty: self.ended_empty,
             rustfs_listing: self.rustfs_listing,
@@ -304,6 +308,21 @@ impl<'a> MetaView<'a> {
     #[must_use]
     pub const fn body_literals_accepted(&self) -> bool {
         self.body_literals
+    }
+
+    /// This view, for a deployment that ignores an `x-amz-checksum-*` header naming an algorithm
+    /// this build does not implement, as legacy RustFS does, instead of refusing it: the decoder
+    /// binds no checksum from it, and every other checksum header is read as before.
+    #[must_use]
+    pub const fn with_unknown_checksum_algorithms_ignored(mut self) -> Self {
+        self.unknown_checksum_algorithms_ignored = true;
+        self
+    }
+
+    /// Whether this deployment ignores a checksum header naming an unknown algorithm.
+    #[must_use]
+    pub const fn unknown_checksum_algorithms_ignored(&self) -> bool {
+        self.unknown_checksum_algorithms_ignored
     }
 
     /// This view, with one page-size query parameter clamped to its ceiling.

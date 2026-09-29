@@ -196,6 +196,8 @@ mod streaming_without_length;
 mod tagging_reachability;
 #[path = "throughput_request.rs"]
 mod throughput_request;
+#[path = "unknown_checksum_algorithms.rs"]
+mod unknown_checksum_algorithms;
 #[path = "unread_body_refusal.rs"]
 mod unread_body_refusal;
 #[path = "upload_object_ceiling.rs"]
