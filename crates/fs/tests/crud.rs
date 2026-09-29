@@ -83,6 +83,8 @@ mod range_reads;
 mod upload_part_copy;
 #[path = "crud/versioning.rs"]
 mod versioning;
+#[path = "crud/versioning_exclusions.rs"]
+mod versioning_exclusions;
 #[path = "crud/write_attributes.rs"]
 mod write_attributes;
 

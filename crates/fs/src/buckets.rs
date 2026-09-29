@@ -297,6 +297,11 @@ impl Handler<DeleteBucket> for FsBackend {
             Err(error) if error.kind() == io::ErrorKind::NotFound => {}
             Err(_) => return Err(storage_error()),
         }
+        match tokio::fs::remove_file(self.bucket_path(bucket).join(versioning::CONFIGURATION_FILE)).await {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(_) => return Err(storage_error()),
+        }
         match tokio::fs::remove_file(self.bucket_path(bucket).join(versioning::SEQUENCE_FILE)).await {
             Ok(()) => {}
             Err(error) if error.kind() == io::ErrorKind::NotFound => {}

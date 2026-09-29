@@ -16,8 +16,10 @@
 //!
 //! Responsible for: publishing ordinary and multipart object bytes into opaque/null versions,
 //! preflighting legacy cleanup before null publication, storing delete markers, selecting current
-//! or explicit versions, exposing the selected metadata directory to object subresources, and
-//! enumerating a deterministic version census.
+//! or explicit versions, exposing the selected metadata directory to object subresources,
+//! enumerating a deterministic version census, and keeping every member of a bucket's versioning
+//! configuration — MinIO's excluded prefixes and folders applied to writes and deletes as legacy
+//! RustFS applies them (rustfs/gateway#1078).
 //! NOT responsible for: multipart part validation, lifecycle, copy, tag-document persistence,
 //! ordinary listing, or the version listing itself (`version_listing`).
 //! Upstream: the filesystem safety primitives and validated multipart assembly. Downstream:
@@ -50,11 +52,33 @@ pub(super) const STATUS_FILE: &str = "versioning-status";
 pub(super) const SEQUENCE_FILE: &str = "version-sequence";
 const RECORD_FILE: &str = "record";
 const BODY_FILE: &str = "body";
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum VersioningState {
     Never,
     Enabled,
     Suspended,
+}
+
+impl VersioningState {
+    /// The state a write of a key publishes under: an excluded key of an enabled bucket is written
+    /// as a suspended bucket's key is, as the null version (legacy RustFS's `put_opts`,
+    /// `prefix_suspended`).
+    const fn for_write(self, excluded: bool) -> Self {
+        match (self, excluded) {
+            (Self::Enabled, true) => Self::Suspended,
+            (state, _) => state,
+        }
+    }
+
+    /// The state a delete of a key's current version runs under: an excluded key of an enabled
+    /// bucket is deleted as an unversioned bucket's key is, with no delete marker (legacy RustFS's
+    /// `del_opts`, `delete_state`, which its lifecycle expiry uses too).
+    const fn for_delete(self, excluded: bool) -> Self {
+        match (self, excluded) {
+            (Self::Enabled, true) => Self::Never,
+            (state, _) => state,
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -123,6 +147,7 @@ impl FsBackend {
             }
         }
         let state = self.versioning_state(bucket).await?;
+        let state = state.for_write(self.excluded(bucket, key, state).await?);
         let existing = self.version_records(bucket).await?;
         let version_id = if matches!(state, VersioningState::Enabled) {
             None
@@ -234,6 +259,7 @@ impl FsBackend {
     ) -> Result<bool, HandlerError> {
         let _guard = self.version_lock.lock().await;
         let state = self.versioning_state(bucket).await?;
+        let state = state.for_delete(self.excluded(bucket, key, state).await?);
         let records = self.version_records(bucket).await?;
         if newest_for_key(&records, key)
             .is_none_or(|record| record.sequence != observed_sequence || !matches!(record.kind, RecordKind::Object))
@@ -584,6 +610,13 @@ impl Handler<PutBucketVersioning> for FsBackend {
             _ => return Err(HandlerError::new(ErrorCode::INVALID_ARGUMENT, "versioning status is required")),
         };
         let _guard = self.version_lock.lock().await;
+        // Legacy-compat (rustfs/backlog#2684): legacy RustFS stores `MfaDelete` with the rest of the
+        // configuration and neither enforces it — a delete never needs an MFA token — nor returns
+        // it from GetBucketVersioning (`rustfs/src/app/bucket_usecase.rs:2265-2270` at
+        // rustfs/rustfs@e870a6d25). Kept: stored, never enforced or returned. The intended
+        // behaviour is to refuse `MfaDelete` `Enabled` as unsupported, or to enforce and return it.
+        self.set_versioning_configuration(input.bucket.as_str(), &input.versioning_configuration)
+            .await?;
         self.set_versioning_state(input.bucket.as_str(), state).await?;
         Ok(Resp::new(PutBucketVersioningOutput::default()))
     }
@@ -684,6 +717,7 @@ impl FsBackend {
             }
             return Ok(DeleteObjectOutput::default());
         }
+        let state = state.for_delete(self.excluded(bucket, key, state).await?);
         let marker = self.delete_current_locked(bucket, key, state, records).await?;
         Ok(DeleteObjectOutput {
             delete_marker: marker.as_ref().map(|_| true),
@@ -702,6 +736,10 @@ impl Handler<DeleteObject> for FsBackend {
         Ok(Resp::new(output))
     }
 }
+
+mod configuration;
+
+pub(super) use configuration::CONFIGURATION_FILE;
 
 #[cfg(test)]
 mod tests;
