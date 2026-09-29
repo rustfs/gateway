@@ -369,6 +369,25 @@ if not re.fullmatch(r"docker\.io/minio/mint@sha256:[0-9a-f]{64}", mint_image):
         f"ci/mint/pins.env must set MINT_IMAGE to docker.io/minio/mint@sha256:<64 hex>, got {mint_image!r}. "
         "An archived image is still re-tagged; only a digest names one build."
     )
+# The recipe CI measures builds on exactly that digest. Where it is fetched from may vary
+# (MINT_REGISTRY: a pull by digest is verified against the digest); what is fetched may not.
+mint_recipe = root / "ci/mint/Dockerfile"
+if not mint_recipe.is_file():
+    failures.append("required input is missing: ci/mint/Dockerfile")
+elif re.fullmatch(r"docker\.io/minio/mint@sha256:[0-9a-f]{64}", mint_image):
+    recipe_text = mint_recipe.read_text(encoding="utf-8")
+    recipe_bases = re.findall(r"(?m)^FROM\s+(\S+)", recipe_text)
+    pinned_base = "${MINT_REGISTRY}/minio/mint@" + mint_image.partition("@")[2]
+    stray = [base for base in recipe_bases if "minio/mint" in base and base != pinned_base]
+    if stray or not recipe_bases or recipe_bases[-1] != pinned_base:
+        failures.append(
+            f"ci/mint/Dockerfile must build its final stage, and every mint stage, FROM {pinned_base} "
+            f"(the ci/mint/pins.env digest); found {recipe_bases!r}"
+        )
+    if not re.search(r"(?m)^ARG MINT_REGISTRY=docker\.io$", recipe_text):
+        failures.append(
+            "ci/mint/Dockerfile must default MINT_REGISTRY to docker.io, the source ci/mint/pins.env names"
+        )
 mint_platform = mint_pins.get("MINT_PLATFORM", "")
 if mint_platform != "linux/amd64":
     failures.append(

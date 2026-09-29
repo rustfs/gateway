@@ -88,11 +88,14 @@ jobs:
       # Every run, scheduled or manual, measures the image the reviewed recipe in ci/mint builds
       # on top of the pinned digest: the pinned image alone cannot produce attributable
       # .minio-dotnet or mc records (rustfs/gateway#720). Nothing is published.
+      # The digest is fetched through mirror.gcr.io: anonymous Docker Hub pulls from this runner
+      # pool hit 429 (run 36520382963). Same digest, same bytes; see ci/mint/Dockerfile.
       - name: Build the mint image from the reviewed recipe
         run: |
           set -euo pipefail
           scripts/ci_budget.sh 1800 "mint recipe build" \
             docker build --platform linux/amd64 --progress plain \
+            --build-arg MINT_REGISTRY=mirror.gcr.io \
             --iidfile "${RUNNER_TEMP}/mint-candidate.id" ci/mint
           image="$(cat "${RUNNER_TEMP}/mint-candidate.id")"
           if [[ ! "$image" =~ ^sha256:[0-9a-f]{64}$ ]]; then
