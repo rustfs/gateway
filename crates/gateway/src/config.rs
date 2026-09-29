@@ -28,6 +28,18 @@ pub const DEFAULT_STANDARD_HANDLER_DEADLINE: Duration = Duration::from_secs(30);
 pub const DEFAULT_EXTENDED_HANDLER_DEADLINE: Duration = Duration::from_secs(15 * 60);
 const DEFAULT_HANDLER_CLEANUP_GRACE: Duration = Duration::from_secs(1);
 
+/// The length of a deadline a host has lifted: the framework arms no timer for it, so it never
+/// fires (ADR-0034).
+///
+/// Legacy RustFS runs a handler until it finishes or its connection goes away, and reads the body
+/// of every operation the gateway serves with no deadline of its own. A host that must behave the
+/// same sets it with [`HandlerDeadlineConfig::without_deadline`],
+/// [`HandlerDeadlineConfig::without_commit_progress_deadline`],
+/// [`RequestBodyDeadlineConfig::without_idle_deadlines`] and
+/// [`RequestBodyDeadlineConfig::without_throughput_floor`]. It is `Duration::MAX` so that every
+/// accessor keeps answering a `Duration`; it is not a long timer, it is none.
+pub const NO_DEADLINE: Duration = Duration::MAX;
+
 /// Validated idle deadlines and windowed throughput floor for a request body.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RequestBodyDeadlineConfig {
@@ -49,9 +61,9 @@ impl RequestBodyDeadlineConfig {
     /// Builds non-zero first-byte and between-read deadlines with the shipped throughput floor.
     ///
     /// Returns `None` when either duration is zero. Zero is never an alias for unlimited. A host
-    /// that wants no framework deadline on a body passes `Duration::MAX`, here and as the
-    /// throughput window of [`Self::try_with_throughput_floor`]; each timer is then armed at an
-    /// instant no request reaches.
+    /// that wants no framework deadline on a body says so with [`Self::without_idle_deadlines`]
+    /// and [`Self::without_throughput_floor`]; a duration of [`NO_DEADLINE`] passed here means the
+    /// same, and arms no timer.
     #[must_use]
     pub const fn new(first_byte: Duration, read_idle: Duration) -> Option<Self> {
         if first_byte.is_zero() || read_idle.is_zero() {
@@ -76,6 +88,23 @@ impl RequestBodyDeadlineConfig {
         self.minimum_throughput_bytes = minimum_bytes;
         self.throughput_window = window;
         Some(self)
+    }
+
+    /// Lifts the first-byte and between-read deadlines: no timer is armed while a body is
+    /// awaited, so a body may pause for as long as its connection lasts, as legacy RustFS lets it.
+    #[must_use]
+    pub const fn without_idle_deadlines(mut self) -> Self {
+        self.first_byte = NO_DEADLINE;
+        self.read_idle = NO_DEADLINE;
+        self
+    }
+
+    /// Lifts the throughput floor: the window that measures it is never armed, so a body that
+    /// keeps arriving, however slowly, is never refused for its rate.
+    #[must_use]
+    pub const fn without_throughput_floor(mut self) -> Self {
+        self.throughput_window = NO_DEADLINE;
+        self
     }
 
     /// Returns the maximum silence before the first body byte.
@@ -149,10 +178,9 @@ impl HandlerDeadlineConfig {
     ///
     /// A host that bounds handler work itself, or deliberately not at all — RustFS embedding the
     /// gateway, whose legacy stack runs every handler until it finishes or its connection goes
-    /// away — passes `Duration::MAX` for a class. The timer is then armed at an instant no request
-    /// reaches (an expiry the monotonic clock cannot represent is clamped thirty years ahead), so
-    /// the framework never cancels a handler of that class for time. `tests/host_deadlines.rs`
-    /// pins that in both directions.
+    /// away — lifts a class with [`Self::without_deadline`]; a duration of [`NO_DEADLINE`] passed
+    /// here means the same. No timer is armed for a lifted class, so the framework never cancels
+    /// one of its handlers for time. `tests/host_deadlines.rs` pins that in both directions.
     ///
     /// # Errors
     ///
@@ -185,6 +213,25 @@ impl HandlerDeadlineConfig {
         Some(self)
     }
 
+    /// Runs `class` with no handler deadline: the framework arms no timer for its handlers and
+    /// never cancels one for time. A request the transport abandons is still cancelled.
+    #[must_use]
+    pub const fn without_deadline(mut self, class: HandlerDeadlineClass) -> Self {
+        match class {
+            HandlerDeadlineClass::Standard => self.standard = NO_DEADLINE,
+            HandlerDeadlineClass::Extended => self.extended = NO_DEADLINE,
+        }
+        self
+    }
+
+    /// Runs committed continuations with no progress bound: no timer is armed, and a continuation
+    /// is never dropped mid-write for time.
+    #[must_use]
+    pub const fn without_commit_progress_deadline(mut self) -> Self {
+        self.commit_progress = NO_DEADLINE;
+        self
+    }
+
     /// Returns the bounded cleanup grace after a handler deadline is signalled.
     #[must_use]
     pub const fn cleanup_grace(self) -> Duration {
@@ -197,7 +244,8 @@ impl HandlerDeadlineConfig {
     /// durations: zero is never an alias for unlimited. A deployment that wanted no bound would be
     /// asking for the behaviour this value exists to remove — unless its host must not have a
     /// continuation dropped mid-write at all, as with RustFS, whose legacy stack bounds nothing.
-    /// Such a host passes `Duration::MAX`, which arms a timer no continuation reaches.
+    /// Such a host calls [`Self::without_commit_progress_deadline`]; [`NO_DEADLINE`] passed here
+    /// means the same, and wraps the continuation in nothing.
     #[must_use]
     pub const fn try_with_commit_progress(mut self, commit_progress: Duration) -> Option<Self> {
         if commit_progress.is_zero() {

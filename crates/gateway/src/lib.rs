@@ -136,7 +136,7 @@ pub use crate::close::ConnectionIntent;
 pub use crate::config::{
     ConfigHandle, ConfigSnapshot, DEFAULT_COMMIT_PROGRESS_DEADLINE, DEFAULT_EXTENDED_HANDLER_DEADLINE,
     DEFAULT_STANDARD_HANDLER_DEADLINE, HandlerDeadlineConfig, HandlerDeadlineConfigError, KEEPALIVE_INTERVALS_WITHOUT_PROGRESS,
-    RequestBodyDeadlineConfig, ServiceConfig,
+    NO_DEADLINE, RequestBodyDeadlineConfig, ServiceConfig,
 };
 #[cfg(feature = "server")]
 pub use crate::conn::{

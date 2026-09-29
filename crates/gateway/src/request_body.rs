@@ -39,6 +39,7 @@ use crate::ext::{BodyQuota, VerifiedBodyProgress};
 use crate::gate::{BodyCeilings, BodyDigestObligation, BodyTimeouts};
 use crate::integrity::{Integrity, IntegrityCodes};
 use crate::render::S3Error;
+use crate::request_deadline::armed;
 use crate::wire_read::{WireFrames, WireProgress, WireReader};
 
 const DELIVERY_BYTES: usize = 64 * 1024;
@@ -180,9 +181,13 @@ impl BodyMonitor {
         }
 
         let mut body_started = *self.progress.borrow() != 0;
-        let mut idle_deadline = Box::pin(futures_timer::Delay::new(self.timeouts.waiting_for(body_started)));
-        let mut throughput_deadline =
-            body_started.then(|| Box::pin(futures_timer::Delay::new(self.timeouts.throughput_window())));
+        // A lifted deadline arms nothing, so its slot stays `None` and never wakes (ADR-0034).
+        let mut idle_deadline = armed(self.timeouts.waiting_for(body_started)).map(Box::pin);
+        let mut throughput_deadline = if body_started {
+            armed(self.timeouts.throughput_window()).map(Box::pin)
+        } else {
+            None
+        };
         let mut window_start_bytes = 0_u64;
         loop {
             let wake = {
@@ -200,7 +205,10 @@ impl BodyMonitor {
                     {
                         return Poll::Ready(Wake::Throughput);
                     }
-                    if idle_deadline.as_mut().poll(context).is_ready() {
+                    if idle_deadline
+                        .as_mut()
+                        .is_some_and(|deadline| deadline.as_mut().poll(context).is_ready())
+                    {
                         return Poll::Ready(Wake::Idle);
                     }
                     Poll::Pending
@@ -219,9 +227,9 @@ impl BodyMonitor {
                     if delivered != 0 {
                         if !body_started {
                             body_started = true;
-                            throughput_deadline = Some(Box::pin(futures_timer::Delay::new(self.timeouts.throughput_window())));
+                            throughput_deadline = armed(self.timeouts.throughput_window()).map(Box::pin);
                         }
-                        idle_deadline = Box::pin(futures_timer::Delay::new(self.timeouts.waiting_for(true)));
+                        idle_deadline = armed(self.timeouts.waiting_for(true)).map(Box::pin);
                     }
                 }
                 Wake::Idle => {
@@ -233,7 +241,7 @@ impl BodyMonitor {
                         return BodyEvent::Throughput(self.wire_progress.clone());
                     }
                     window_start_bytes = delivered;
-                    throughput_deadline = Some(Box::pin(futures_timer::Delay::new(self.timeouts.throughput_window())));
+                    throughput_deadline = armed(self.timeouts.throughput_window()).map(Box::pin);
                 }
             }
         }

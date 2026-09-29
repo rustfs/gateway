@@ -89,6 +89,7 @@ second copy is a second thing to keep in sync.
 | 0031 | The table catalog's two surfaces as claims and alias rows, `{warehouse}` bound, and first-divergence shadowing | Accepted |
 | 0032 | The last admin orders: the anonymous OIDC bootstrap generated, the profiling claims, and the routes that stay with RustFS | Accepted |
 | 0033 | MinIO's bucket-configuration members are part of every assembly's HTTP codec | Accepted |
+| 0034 | An embedding host may lift the framework's handler, continuation and body deadlines | Accepted |
 
 The index is hand-maintained. Generating it would cost more than it saves until
 there are at least fifteen records.

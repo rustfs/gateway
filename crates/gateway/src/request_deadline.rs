@@ -188,6 +188,20 @@ pub(crate) async fn handler_with_body_monitor<T>(
     }
 }
 
+/// The timer for one configured deadline, or none for [`crate::NO_DEADLINE`]: a deadline the host
+/// lifted arms nothing (ADR-0034).
+pub(crate) fn armed(deadline: Duration) -> Option<futures_timer::Delay> {
+    (deadline != crate::NO_DEADLINE).then(|| futures_timer::Delay::new(deadline))
+}
+
+/// [`armed`] as the future a deadline race polls: one that never completes when nothing is armed.
+fn expiry(deadline: Duration) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+    match armed(deadline) {
+        Some(delay) => Box::pin(delay),
+        None => Box::pin(core::future::pending()),
+    }
+}
+
 pub(crate) async fn handler_with_request_cancellation<T>(
     mut handler: BoxFuture<'static, T>,
     cancellation: HandlerCancellationSource,
@@ -195,7 +209,7 @@ pub(crate) async fn handler_with_request_cancellation<T>(
     cleanup_grace: Duration,
     request_cancellation: Option<tokio::sync::watch::Receiver<bool>>,
 ) -> HandlerCancellationOutcome<T> {
-    let mut deadline = Box::pin(futures_timer::Delay::new(deadline));
+    let mut deadline = expiry(deadline);
     let mut request_cancellation = request_cancellation.map(|mut cancellation| {
         Box::pin(async move {
             while !*cancellation.borrow() {
@@ -271,9 +285,13 @@ pub(crate) fn commit_with_progress_deadline<T>(
 where
     T: 'static,
 {
+    // A lifted bound wraps nothing: the continuation runs exactly as the backend built it.
+    if deadline == crate::NO_DEADLINE {
+        return work;
+    }
     let mut work = work;
     Box::pin(async move {
-        let mut expiry = Box::pin(futures_timer::Delay::new(deadline));
+        let mut expired = expiry(deadline);
         poll_fn(|context| {
             // The work first, and the order is load-bearing: a continuation whose outcome is ready
             // in the same wake as the expiry is an outcome, not a timeout. Polling the timer first
@@ -281,7 +299,7 @@ where
             if let Poll::Ready(outcome) = work.as_mut().poll(context) {
                 return Poll::Ready(outcome);
             }
-            if expiry.as_mut().poll(context).is_ready() {
+            if expired.as_mut().poll(context).is_ready() {
                 return Poll::Ready(Err(rustfs_gateway_core::HandlerError::internal_error(
                     crate::commit::COMMIT_PROGRESS_EXPIRED,
                 )));
@@ -586,5 +604,35 @@ mod tests {
             }
             Poll::Pending => panic!("neither the outcome nor the elapsed bound was reported"),
         }
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used)]
+mod lifted_deadline_tests {
+    use super::*;
+
+    /// Negative — only the lifted length arms nothing; any finite deadline, however long, still
+    /// arms its timer.
+    #[test]
+    fn only_a_lifted_deadline_arms_nothing() {
+        assert!(armed(crate::NO_DEADLINE).is_none());
+        assert!(armed(Duration::from_millis(1)).is_some());
+        assert!(armed(Duration::from_secs(u64::MAX)).is_some());
+    }
+
+    /// Negative — a lifted commit-progress bound hands the backend's continuation back untouched,
+    /// so nothing is ever raced against it; a bounded one wraps it.
+    #[test]
+    fn a_lifted_commit_progress_bound_wraps_nothing() {
+        fn address<T>(work: &BoxFuture<'static, Result<T, HandlerError>>) -> *const () {
+            core::ptr::from_ref::<dyn Future<Output = Result<T, HandlerError>> + Send>(&**work).cast::<()>()
+        }
+        let work: BoxFuture<'static, Result<u8, HandlerError>> = Box::pin(async { Ok(1) });
+        let before = address(&work);
+        assert_eq!(address(&commit_with_progress_deadline(work, crate::NO_DEADLINE)), before);
+        let work: BoxFuture<'static, Result<u8, HandlerError>> = Box::pin(async { Ok(1) });
+        let before = address(&work);
+        assert_ne!(address(&commit_with_progress_deadline(work, Duration::from_secs(60))), before);
     }
 }
