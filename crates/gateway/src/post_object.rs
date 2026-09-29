@@ -30,7 +30,7 @@ use bytes::Bytes;
 use http::{HeaderValue, StatusCode, Uri, header};
 use http_body::{Body, Frame, SizeHint};
 use rustfs_gateway_core::{EncodedResponse, ResponseBody, TransportSecurity};
-use rustfs_gateway_http::{BodyIntegrity, FileReader, FileStep, FormLimits, FormReader, FormReject, FormStep};
+use rustfs_gateway_http::{BodyIntegrity, FileReader, FileStep, FormGrammar, FormLimits, FormReader, FormReject, FormStep};
 use rustfs_gateway_sig::{
     EmptyRegion, PostPolicy, PostPolicyError, PostPolicyLimits, RegionLength, RegionRule, RequestNow, SigV2PostPolicy,
     build_success_action_redirect,
@@ -241,10 +241,23 @@ where
     B::Data: Send,
     B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
 {
+    /// Reads the prelude under the gateway's own form grammar.
+    #[cfg(test)]
     pub(crate) async fn read(
         body: Option<B>,
         content_type: &str,
         limits: FormLimits,
+        timeouts: BodyTimeouts,
+    ) -> Result<Self, S3Error> {
+        Self::read_with_grammar(body, content_type, limits, FormGrammar::Gateway, timeouts).await
+    }
+
+    /// Reads the prelude, the form read under `grammar`.
+    pub(crate) async fn read_with_grammar(
+        body: Option<B>,
+        content_type: &str,
+        limits: FormLimits,
+        grammar: FormGrammar,
         timeouts: BodyTimeouts,
     ) -> Result<Self, S3Error> {
         let Some(body) = body else {
@@ -252,7 +265,7 @@ where
         };
         let progress = WireProgress::for_body(BodyDigestObligation::None, Some(&body));
         let mut frames = WireFrames::new(body, progress, BodyCeilings::streaming(None), timeouts);
-        let mut reader = FormReader::new(content_type, limits).map_err(form_refusal)?;
+        let mut reader = FormReader::with_grammar(content_type, limits, grammar).map_err(form_refusal)?;
         loop {
             let Some(frame) = core::future::poll_fn(|context| frames.poll_next(context)).await? else {
                 return Err(form_refusal(reader.finish()));
@@ -293,7 +306,19 @@ where
             .iter()
             .map(|field| (field.name(), field.value()))
             .collect();
-        let filename = self.reader.filename().unwrap_or_default();
+        // The RustFS profile stores what legacy RustFS stores from this form, or refuses it before
+        // the file is read (`legacy`). A field this bridge cannot carry is refused only at the
+        // hand-off, after authorization: every refusal legacy RustFS answers before it stores —
+        // the signature, the policy, the success controls, authorization — keeps its own answer.
+        let legacy_store = matches!(self.reader.grammar(), FormGrammar::LegacyRustfs { .. });
+        let not_carried = if legacy_store {
+            legacy::refuse_uncarried(&fields).err()
+        } else {
+            None
+        };
+        // What `${filename}` stands for: the `filename` parameter, or under the legacy RustFS
+        // grammar the file part's own name when it carried none (`FormReader::file_name`).
+        let filename = self.reader.file_name().unwrap_or_default();
         let has_policy = fields.iter().any(|(name, _)| *name == "policy");
         let policy = if fields.iter().any(|(name, _)| *name == "x-amz-algorithm") {
             // The widest reading: this runs after the authenticator verified the same credential
@@ -314,25 +339,32 @@ where
         } else {
             AcceptedPolicy::Anonymous
         };
-        let anonymous_key = fields
+        let key_field = fields
             .iter()
             .find_map(|(name, value)| (*name == "key").then_some(*value))
             .ok_or_else(|| policy_refusal(PostPolicyError::Malformed))?;
         let anonymous_key = if matches!(policy, AcceptedPolicy::Anonymous) {
-            anonymous_key.replace("${filename}", filename)
+            key_field.replace("${filename}", filename)
         } else {
-            anonymous_key.to_owned()
+            key_field.to_owned()
         };
         let key_text = policy.final_key(&anonymous_key);
         let key =
             ObjectKey::materialize_decoded(key_text, names).map_err(|_| policy_refusal(PostPolicyError::ConditionFailed))?;
-        let metadata = fields
-            .iter()
-            .filter_map(|(name, value)| {
-                name.strip_prefix("x-amz-meta-")
-                    .map(|suffix| (suffix.to_owned(), (*value).to_owned()))
-            })
-            .collect();
+        let (metadata, content_type) = if legacy_store {
+            legacy::refuse_other_key(key.as_str(), &legacy::stored_key(key_field, filename))
+                .map_err(legacy::NotCarried::into_error)?;
+            (legacy::metadata(&fields), legacy::content_type(&fields))
+        } else {
+            let metadata = fields
+                .iter()
+                .filter_map(|(name, value)| {
+                    name.strip_prefix("x-amz-meta-")
+                        .map(|suffix| (suffix.to_owned(), (*value).to_owned()))
+                })
+                .collect();
+            (metadata, None)
+        };
         let response = PostObjectResponsePlan::parse(&fields, &bucket, &key)?;
         let ceiling = policy.read_ceiling(self.limits);
         let file = self.reader.into_file(ceiling).map_err(form_refusal)?;
@@ -343,8 +375,10 @@ where
             policy,
             bucket,
             key,
+            content_type,
             metadata,
             response,
+            not_carried,
             timeouts: self.timeouts,
         })
     }
@@ -358,8 +392,12 @@ pub(crate) struct ResolvedPostObject<B> {
     policy: AcceptedPolicy,
     bucket: BucketName,
     key: ObjectKey,
+    /// The `Content-Type` field under the RustFS profile; `None` under the gateway grammar.
+    content_type: Option<String>,
     metadata: Vec<(String, String)>,
     response: PostObjectResponsePlan,
+    /// Under the RustFS profile, why this form cannot be stored as legacy RustFS stores it.
+    not_carried: Option<legacy::NotCarried>,
     timeouts: BodyTimeouts,
 }
 
@@ -378,6 +416,11 @@ where
     }
 
     pub(crate) fn handoff(self, _proof: &MetadataAdmission<'_>) -> Result<(RequestBody, Option<BodyMonitor>), S3Error> {
+        // After authorization and before a file byte is read or the handler runs: the last point
+        // at which legacy RustFS would have refused nothing and gone on to store.
+        if let Some(refusal) = self.not_carried {
+            return Err(refusal.into_error());
+        }
         let body = PostFileBody {
             frames: self.frames,
             first: self.first_file_bytes,
@@ -403,7 +446,7 @@ where
                 bucket: self.bucket,
                 key: self.key,
                 body: stream,
-                content_type: None,
+                content_type: self.content_type,
                 metadata: self.metadata,
             })),
             Some(monitor),
@@ -446,6 +489,18 @@ fn retain_file_bytes(frame: &Bytes, bytes: &[u8]) -> Bytes {
     }
 }
 
+impl<B> PostFileBody<B> {
+    /// Ends the file once the form is known to be complete: the policy's final checks, then what
+    /// is still pending, then the end of the body.
+    fn complete(&mut self, file_bytes: u64) -> Poll<Option<Result<Frame<Bytes>, PostBodyError>>> {
+        if self.policy.enforce_final(&self.bucket, &self.key, file_bytes).is_err() {
+            self.pending.clear();
+            return Poll::Ready(Some(Err(PostBodyError("the POST file did not satisfy its policy"))));
+        }
+        Poll::Ready(self.pending.pop_front().map(|bytes| Ok(Frame::data(bytes))))
+    }
+}
+
 impl<B> Body for PostFileBody<B>
 where
     B: Body,
@@ -471,8 +526,15 @@ where
                         Poll::Pending => return Poll::Pending,
                         Poll::Ready(Err(_)) => return Poll::Ready(Some(Err(PostBodyError("the POST body transport failed")))),
                         Poll::Ready(Ok(None)) => {
+                            // The legacy RustFS grammar confirms its close only at the end of the
+                            // body; the gateway grammar never gets here with a complete form.
                             self.ended = true;
-                            return Poll::Ready(Some(Err(PostBodyError("the POST form ended before its closing boundary"))));
+                            return match self.file.finish() {
+                                Ok(file_bytes) => self.complete(file_bytes),
+                                Err(_) => {
+                                    Poll::Ready(Some(Err(PostBodyError("the POST form ended before its closing boundary"))))
+                                }
+                            };
                         }
                         Poll::Ready(Ok(Some(frame))) => frame,
                     },
@@ -494,13 +556,8 @@ where
                     }
                 }
                 Ok(FileStep::Complete { file_bytes }) => {
-                    if self.policy.enforce_final(&self.bucket, &self.key, file_bytes).is_err() {
-                        self.pending.clear();
-                        self.ended = true;
-                        return Poll::Ready(Some(Err(PostBodyError("the POST file did not satisfy its policy"))));
-                    }
                     self.ended = true;
-                    return Poll::Ready(self.pending.pop_front().map(|bytes| Ok(Frame::data(bytes))));
+                    return self.complete(file_bytes);
                 }
                 Err(FormReject::FileTooLarge) => {
                     self.pending.clear();
@@ -554,6 +611,9 @@ fn policy_refusal(reject: PostPolicyError) -> S3Error {
         ConnectionIntent::MayKeepAlive,
     )
 }
+
+#[path = "post_object/legacy.rs"]
+mod legacy;
 
 #[cfg(test)]
 #[path = "post_object/tests.rs"]

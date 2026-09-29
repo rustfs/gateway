@@ -27,6 +27,7 @@ use rustfs_gateway_types::ChecksumAlgorithm;
 use smallvec::SmallVec;
 
 use crate::ingest::ChunkReject;
+use crate::text::trim_ows;
 
 /// The largest complete trailer section, including its final CRLF.
 pub const MAX_TRAILER_SECTION_BYTES: usize = 1024;
@@ -166,16 +167,6 @@ fn find_line(rest: &[u8]) -> Result<Option<(usize, usize)>, ChunkReject> {
         },
         None => Ok(None),
     }
-}
-
-fn trim_ows(mut value: &[u8]) -> &[u8] {
-    while let Some(rest) = value.strip_prefix(b" ").or_else(|| value.strip_prefix(b"\t")) {
-        value = rest;
-    }
-    while let Some(rest) = value.strip_suffix(b" ").or_else(|| value.strip_suffix(b"\t")) {
-        value = rest;
-    }
-    value
 }
 
 fn is_checksum(name: &HeaderName) -> bool {

@@ -33,7 +33,7 @@ for request order and `docs/assembly-order.md` for extension call counts.
 | `src/panic_boundary.rs` | Panic isolation for deployment-provided futures | An extension panic escapes the request boundary |
 | `src/posture.rs`, `src/dialect_posture.rs`, `src/presigned_expiry_posture.rs` | Startup-only security posture rendering and the public assembly snapshot; `dialect_posture.rs` renders the `DIALECT_POSTURE` line (claimed prefixes, caller-secret operations); `presigned_expiry_posture.rs` renders `PRESIGNED_EXPIRY_POSTURE` when a non-default presigned-lifetime rule is on | Auditing deployment security visibility |
 | `src/request_deadline.rs` | Runtime-independent policy and failure-floor deadlines | Editing timeout mechanics used by the request pipeline |
-| `src/request_body.rs`, `src/post_object.rs` | Live verified body producer, terminal verdict, and bounded POST Object adapter | A streaming upload crosses the codec or handler boundary |
+| `src/request_body.rs`, `src/post_object.rs`, `src/post_object/legacy.rs`, `src/builder/post_forms.rs` | Live verified body producer, terminal verdict, bounded POST Object adapter, what a RustFS-profile form stores (or refuses), and `legacy_rustfs_post_forms`, the switch that selects it (held in `ViewPolicy`, rustfs/backlog#1677 R8) | A streaming upload crosses the codec or handler boundary, or a RustFS-profile form stores differently from legacy RustFS |
 | `src/stamp.rs` | Framework-owned response headers | A response lacks IDs, `Server`, or `Date` |
 | `src/trace.rs` | Request IDs and trace sources | Joining an answer to an audit record |
 | `src/clock.rs` | Wall and monotonic clock sources | A request reads time twice |
@@ -76,7 +76,7 @@ for request order and `docs/assembly-order.md` for extension call counts.
 | `tests/service_concurrency.rs` | One hundred concurrent clones and requests |
 | `tests/service_config.rs`, `tests/operation_registry_hot_update.rs`, `tests/assembly_snapshot.rs` | Settings, routing, and middleware updates retain one in-flight generation and preserve concurrent partial updates |
 | `tests/handler_panic.rs`, `tests/observer_panic.rs` | Handler panic becomes 500 and the next request still runs; an observer panic changes neither an ordinary response nor a committed terminal document |
-| `tests/pipeline.rs`, `tests/post_object_runtime.rs`, `tests/post_object_streaming.rs` | End-to-end ordering, response shapes, POST byte ownership and allocation bounds |
+| `tests/pipeline.rs`, `tests/post_object_runtime.rs`, `tests/post_object_streaming.rs`, `tests/post_object_legacy_form.rs` | End-to-end ordering, response shapes, POST byte ownership and allocation bounds, and the object a RustFS-profile form stores |
 | `tests/authz_contract.rs`, `tests/authz_contract/headers.rs` | Two authorization stages, audit, failure floor, and borrowed headers without Debug disclosure |
 | `tests/governor_runtime.rs` | Limits run before expensive work and recover |
 | `tests/cors_runtime.rs`, `tests/cors_runtime/headerless.rs` | Headerless OPTIONS rejection, preflight and actual-response CORS behavior |

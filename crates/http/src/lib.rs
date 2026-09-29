@@ -80,7 +80,8 @@ mod wire;
 
 pub use crate::checksum::{BodyDigests, BodyIntegrity, ChecksumReject, ChecksumSubject, ChecksumVerified};
 pub use crate::form::{
-    FORM_FILE_FIELD, FORM_POLICY_FIELD, FileReader, FileSink, FileStep, FormField, FormLimits, FormReader, FormReject, FormStep,
+    FORM_FILE_FIELD, FORM_POLICY_FIELD, FileReader, FileSink, FileStep, FormField, FormGrammar, FormLimits, FormReader,
+    FormReject, FormStep,
 };
 pub use crate::framing::{BodyLength, Framing, MAX_CHUNK_SIZE_LINE_BYTES, validate_chunk_size_line};
 pub use crate::header_view::{
