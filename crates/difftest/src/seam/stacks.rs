@@ -32,7 +32,7 @@ use std::sync::{Arc, Mutex};
 use http_body_util::BodyExt;
 use rustfs_gateway::{
     Credentials, GovernorRates, Handler, HandlerError, HandlerResult, Rate, Req, S3Service, ServiceBuilder, SigV4Authenticator,
-    StaticCredentials, Unlimited,
+    SlashPolicy, StaticCredentials, Unlimited,
 };
 use rustfs_gateway_sig::{RegionSet, SecurityFloor};
 use rustfs_gateway_types::ErrorCode;
@@ -110,7 +110,11 @@ impl GatewaySeam {
         let credentials =
             Credentials::new(ACCESS_KEY, SECRET_KEY.as_bytes()).map_err(|error| format!("credential: {error:?}"))?;
         let regions = RegionSet::new([REGION]).map_err(|error| format!("regions: {error:?}"))?;
-        let authenticator = SigV4Authenticator::new(Arc::new(StaticCredentials::new().with(credentials)), regions);
+        // The RustFS profile's scope handling, as `compat/sut` assembles it.
+        let authenticator = SigV4Authenticator::new(Arc::new(StaticCredentials::new().with(credentials)), regions)
+            .accept_any_signing_region()
+            .accept_empty_signing_region()
+            .refuse_unreadable_signing_regions_after_verification();
         let slot: Slot = Arc::new(Mutex::new(None));
         let routed: Routed = Arc::new(Mutex::new(None));
         let recorder = Arc::new(SeamRecorder { slot: Arc::clone(&slot) });
@@ -138,6 +142,9 @@ impl GatewaySeam {
             .accept_all_checksum_omissions()
             .clamp_oversized_max_keys()
             .leave_anonymous_streaming_payloads_undecoded()
+            .sign_presigned_payloads_as_unsigned()
+            .answer_checksum_failures_with_bad_digest()
+            .slash_policy(SlashPolicy::RustfsLegacy)
             .host_resolver(Resolver::new(false))
             .observer(RouteObserver {
                 routed: Arc::clone(&routed),
@@ -207,6 +214,11 @@ impl LegacySeam {
         let routed = Arc::new(Mutex::new(None));
         let mut builder = s3s::service::S3ServiceBuilder::new(LegacyRecorder { slot: Arc::clone(&slot) });
         builder.set_auth(s3s::auth::SimpleAuth::from_single(ACCESS_KEY, SECRET_KEY));
+        // Configured as RustFS main configures the legacy stack (forward-slash normalisation and
+        // SigV2 on, `s3tables` signing): the input RustFS is handed is the one this stack hands.
+        builder.set_config(Arc::new(s3s::config::StaticConfigProvider::new(Arc::new(
+            crate::oracle::rustfs_settings(),
+        ))));
         builder.set_access(RecordOperation {
             routed: Arc::clone(&routed),
         });
