@@ -378,7 +378,10 @@ where
                 if let Poll::Ready(frame) = self.body.as_mut().poll_frame(context) {
                     return Poll::Ready(self.settle(frame));
                 }
-                let mut delay = Delay::new(self.timeouts.waiting_for(self.progress.seen() != 0));
+                // A lifted idle deadline arms nothing: the frame's own wake-up is the only one.
+                let Some(mut delay) = crate::request_deadline::armed(self.timeouts.waiting_for(self.progress.seen() != 0)) else {
+                    return Poll::Pending;
+                };
                 if Pin::new(&mut delay).poll(context).is_ready() {
                     return Poll::Ready(Err(self.body_idle_refusal()));
                 }
@@ -488,5 +491,49 @@ where
 
     fn len_hint(&self) -> Option<u64> {
         None
+    }
+}
+
+#[cfg(test)]
+mod lifted_deadline_tests {
+    use super::*;
+
+    /// A body whose next frame never arrives.
+    struct Stalled;
+
+    impl http_body::Body for Stalled {
+        type Data = Bytes;
+        type Error = core::convert::Infallible;
+
+        fn poll_frame(
+            self: Pin<&mut Self>,
+            _context: &mut Context<'_>,
+        ) -> Poll<Option<Result<http_body::Frame<Bytes>, Self::Error>>> {
+            Poll::Pending
+        }
+    }
+
+    fn frames(timeouts: BodyTimeouts) -> WireFrames<Stalled> {
+        WireFrames::new(
+            Stalled,
+            WireProgress::new(BodyDigestObligation::None, false),
+            BodyCeilings::streaming(None),
+            timeouts,
+        )
+    }
+
+    /// Negative — while a frame is awaited, a lifted idle deadline arms no timer, on the first
+    /// poll or any later one; the shipped deadline arms one.
+    #[test]
+    fn a_lifted_idle_deadline_arms_no_timer_while_a_frame_is_awaited() {
+        let mut context = Context::from_waker(std::task::Waker::noop());
+        let mut bounded = frames(BodyTimeouts::S3);
+        assert!(bounded.poll_frame(&mut context).is_pending());
+        assert!(bounded.delay.is_some(), "the control armed nothing");
+        let mut lifted = frames(BodyTimeouts::S3.without_idle_deadlines());
+        for _ in 0..3 {
+            assert!(lifted.poll_frame(&mut context).is_pending());
+            assert!(lifted.delay.is_none(), "a lifted idle deadline armed a timer");
+        }
     }
 }

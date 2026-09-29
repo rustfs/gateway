@@ -28,9 +28,9 @@ use std::io;
 use std::sync::Arc;
 
 use rustfs_gateway::{
-    CorsCacheConfig, Credentials, DEFAULT_MAX_BUFFERED_BODY_BYTES, HandlerDeadlineConfig, RegionMatchPolicy, RegionSet,
-    RequestBodyDeadlineConfig, S3Service, SecurityFloor, ServiceBuilder, ServiceConfig, SigV4Authenticator, SlashPolicy,
-    StaticCredentials, dto,
+    CorsCacheConfig, Credentials, DEFAULT_MAX_BUFFERED_BODY_BYTES, HandlerDeadlineClass, HandlerDeadlineConfig,
+    RegionMatchPolicy, RegionSet, RequestBodyDeadlineConfig, S3Service, SecurityFloor, ServiceBuilder, ServiceConfig,
+    SigV4Authenticator, SlashPolicy, StaticCredentials, dto,
 };
 use rustfs_gateway_fs::FsBackend;
 
@@ -81,21 +81,21 @@ pub(crate) fn capability_names(backend: &FsBackend) -> Vec<&'static str> {
 /// `1e7065101d`), and it reads the body of every operation the gateway serves with no deadline —
 /// its one body idle bound, `RUSTFS_HTTP_REQUEST_BODY_READ_TIMEOUT`, sits inside RustFS's own
 /// `PutObject` and `UploadPart` handlers (`rustfs/src/app/object/put.rs:127-160`), which keep
-/// applying it behind the gateway. `Duration::MAX` is the gateway's spelling of "no framework
-/// deadline" (rustfs/gateway#1070); everything else is the builder's default.
+/// applying it behind the gateway. Every framework deadline is therefore lifted, which arms no
+/// timer at all (ADR-0034, rustfs/gateway#1070); everything else is the builder's default.
 ///
 /// Legacy-compat (rustfs/backlog#2684): with no handler, committed-continuation or body deadline,
 /// a stuck backend call or a client that stalls mid-body holds its task and buffers until the
 /// connection drops. The intended behaviour is bounds taken from RustFS configuration, applied
 /// the same way to both stacks.
 pub(crate) fn rustfs_service_config() -> Result<ServiceConfig, Box<dyn std::error::Error>> {
-    let never = std::time::Duration::MAX;
-    let handler = HandlerDeadlineConfig::new(never, never)?
-        .try_with_commit_progress(never)
-        .ok_or("a committed-continuation bound must be non-zero")?;
-    let body = RequestBodyDeadlineConfig::new(never, never)
-        .and_then(|body| body.try_with_throughput_floor(1, never))
-        .ok_or("request-body deadlines must be non-zero")?;
+    let handler = HandlerDeadlineConfig::default()
+        .without_deadline(HandlerDeadlineClass::Standard)
+        .without_deadline(HandlerDeadlineClass::Extended)
+        .without_commit_progress_deadline();
+    let body = RequestBodyDeadlineConfig::S3
+        .without_idle_deadlines()
+        .without_throughput_floor();
     Ok(ServiceConfig::new(DEFAULT_MAX_BUFFERED_BODY_BYTES)
         .with_handler_deadlines(handler)
         .with_request_body_deadlines(body))
