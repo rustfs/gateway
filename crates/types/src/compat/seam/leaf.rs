@@ -208,7 +208,8 @@ impl<'a> RequestWire<'a> {
 
 /// A member the legacy decoder reads from the query parameter `name`: absent when the parameter
 /// is, its decoded value when it appears once. The query is split into pairs exactly as the legacy
-/// decoder splits it ([`form_pairs`]).
+/// decoder splits it: as an `application/x-www-form-urlencoded` body, on `&`, each piece at its
+/// first `=`, `+` read as a space and percent escapes decoded.
 ///
 /// # Errors
 ///
