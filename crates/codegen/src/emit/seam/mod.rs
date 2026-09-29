@@ -32,6 +32,7 @@
 //! a decision, never a default. s3s structs are built and destructured exhaustively, so an s3s
 //! re-pin that adds a member is a compile error until the fact file and this table say what it is.
 
+pub mod census;
 pub mod expr;
 pub mod facts;
 pub mod overrides;
@@ -134,6 +135,7 @@ pub fn emit(operations: &[OperationIr], generated_dir: &Path) -> Result<Vec<(Pat
         files.push((dir.join("shapes").join(format!("{module}.rs")), render::shape_file(&name, &bodies)));
         shape_names.push(module);
     }
+    files.extend(census::emit(&facts, overrides::OPERATIONS, &dir.join("census"))?);
     files.push((dir.join("ops").join("mod.rs"), render::facade("ops", &modules)));
     files.push((dir.join("shapes").join("mod.rs"), render::facade("shapes", &shape_names)));
     files.push((dir.join("mod.rs"), render::root()));

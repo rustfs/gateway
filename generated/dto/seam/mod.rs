@@ -17,6 +17,9 @@
 //! The generated half of the migration seam (rustfs/gateway#967): one module per covered
 //! operation and one per nested shape it reaches, converting against
 //! `crate::compat::s3s_0_17_0` (its `s3s` and `leaf`).
+//!
+//! `census` holds the member census of every pinned structure they reach (rustfs/gateway#1076).
 
+pub mod census;
 pub mod ops;
 pub mod shapes;
