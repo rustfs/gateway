@@ -59,3 +59,15 @@ pub fn output_from_s3s(output: oracle::GetBucketLocationOutput) -> dto::GetBucke
         location_constraint: location_constraint.map(|value| dto::LocationConstraint::custom(value.as_str().to_owned())),
     }
 }
+
+/// Converts a RustFS app body's whole answer — its output and the response headers it set beside
+/// it — into the gateway output and the extra headers the gateway writes after it
+/// (`Resp::with_extra_headers`), as every other operation's `answer_from_legacy` does. The output
+/// has no member a header carries, so the headers are handed on whole and nothing is cleared.
+#[must_use]
+pub fn answer_from_legacy(
+    output: oracle::GetBucketLocationOutput,
+    headers: http::HeaderMap,
+) -> (dto::GetBucketLocationOutput, http::HeaderMap) {
+    (output_from_s3s(output), headers)
+}

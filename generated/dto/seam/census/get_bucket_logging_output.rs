@@ -29,6 +29,7 @@ pub const PATHS: &[&str] = &[
     "logging_enabled.target_grants[].grantee.uri",
     "logging_enabled.target_grants[].permission",
     "logging_enabled.target_object_key_format.partitioned_prefix.partition_date_source",
+    "logging_enabled.target_object_key_format.simple_prefix",
     "logging_enabled.target_prefix",
 ];
 

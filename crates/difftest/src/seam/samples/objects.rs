@@ -337,6 +337,18 @@ fn restores() -> Vec<SeamRow> {
         ),
         row("restore-object-select-every-member", document(Method::POST, "/bucket/k?restore", select), Expect::Identical),
         row("restore-object-select-json", document(Method::POST, "/bucket/k?restore", SELECT_JSON), Expect::Identical),
+        row(
+            "restore-object-select-parquet",
+            document(
+                Method::POST,
+                "/bucket/k?restore",
+                "<RestoreRequest><Type>SELECT</Type><SelectParameters><InputSerialization><Parquet/></InputSerialization>\
+                 <ExpressionType>SQL</ExpressionType><Expression>select * from s3object</Expression>\
+                 <OutputSerialization><JSON/></OutputSerialization></SelectParameters>\
+                 <OutputLocation><S3><BucketName>out</BucketName><Prefix>p/</Prefix></S3></OutputLocation></RestoreRequest>",
+            ),
+            Expect::Identical,
+        ),
     ]
 }
 

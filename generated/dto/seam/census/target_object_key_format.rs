@@ -22,6 +22,7 @@ use crate::compat::s3s_0_17_0::s3s;
 /// Every member path of `TargetObjectKeyFormat`, nested structures expanded, `[]` marking a list element.
 pub const PATHS: &[&str] = &[
     "partitioned_prefix.partition_date_source",
+    "simple_prefix",
 ];
 
 /// Appends, under `prefix`, every member path at which `left` and `right` differ. A list of another length differs as a whole; a list of the same length differs element by element.
@@ -43,5 +44,5 @@ pub fn differences(prefix: &str, left: &s3s::dto::TargetObjectKeyFormat, right: 
 #[allow(unused_variables, clippy::too_many_lines, clippy::ptr_arg)]
 pub fn present(prefix: &str, value: &s3s::dto::TargetObjectKeyFormat, out: &mut Vec<String>) {
     if let Some(held) = &value.partitioned_prefix { super::partitioned_prefix::present(&format!("{prefix}partitioned_prefix."), held, out); }
-    if let Some(held) = &value.simple_prefix { super::simple_prefix::present(&format!("{prefix}simple_prefix."), held, out); }
+    if let Some(held) = &value.simple_prefix { out.push(format!("{prefix}simple_prefix")); }
 }

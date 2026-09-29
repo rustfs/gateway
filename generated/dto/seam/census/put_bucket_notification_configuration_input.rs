@@ -23,6 +23,7 @@ use crate::compat::s3s_0_17_0::s3s;
 pub const PATHS: &[&str] = &[
     "bucket",
     "expected_bucket_owner",
+    "notification_configuration.event_bridge_configuration",
     "notification_configuration.lambda_function_configurations[].events[]",
     "notification_configuration.lambda_function_configurations[].filter.key.filter_rules[].name",
     "notification_configuration.lambda_function_configurations[].filter.key.filter_rules[].value",

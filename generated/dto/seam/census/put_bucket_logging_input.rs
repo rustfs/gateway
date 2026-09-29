@@ -30,6 +30,7 @@ pub const PATHS: &[&str] = &[
     "bucket_logging_status.logging_enabled.target_grants[].grantee.uri",
     "bucket_logging_status.logging_enabled.target_grants[].permission",
     "bucket_logging_status.logging_enabled.target_object_key_format.partitioned_prefix.partition_date_source",
+    "bucket_logging_status.logging_enabled.target_object_key_format.simple_prefix",
     "bucket_logging_status.logging_enabled.target_prefix",
     "checksum_algorithm",
     "content_md5",

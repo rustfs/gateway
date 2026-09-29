@@ -176,6 +176,24 @@ macro_rules! diffed_operations {
             }
         }
 
+        #[cfg(test)]
+        impl OracleOutput {
+            /// `sample` written by both stacks through the production seam, as the RustFS adapter
+            /// converts an answer, instead of through this crate's own conversion.
+            pub(crate) fn through_seam(
+                sample: &crate::OutputSample,
+                differ: &crate::seam::SeamDiffer,
+            ) -> Result<crate::seam::AnswerDiff, String> {
+                let build = std::sync::Arc::clone(&sample.output);
+                match (sample.output)() {
+                    $(Self::$op(_) => differ.answer_diff(&sample.request, move || match build() {
+                        Self::$op(output) => output,
+                        other => unreachable!("sample {} built a {} output", stringify!($op), other.operation()),
+                    }),)+
+                }
+            }
+        }
+
         /// Registers the recording handler for every diffed operation.
         pub(crate) fn register(builder: ServiceBuilder, recorder: &Arc<Recorder>) -> ServiceBuilder {
             builder $(.register::<dto::$op, _>(Arc::clone(recorder)))+

@@ -21,6 +21,7 @@ use crate::compat::s3s_0_17_0::s3s;
 
 /// Every member path of `NotificationConfiguration`, nested structures expanded, `[]` marking a list element.
 pub const PATHS: &[&str] = &[
+    "event_bridge_configuration",
     "lambda_function_configurations[].events[]",
     "lambda_function_configurations[].filter.key.filter_rules[].name",
     "lambda_function_configurations[].filter.key.filter_rules[].value",
@@ -66,7 +67,7 @@ pub fn differences(prefix: &str, left: &s3s::dto::NotificationConfiguration, rig
 /// Appends, under `prefix`, every member path `value` holds something at: a required member always, an optional one when set, a list element per element.
 #[allow(unused_variables, clippy::too_many_lines, clippy::ptr_arg)]
 pub fn present(prefix: &str, value: &s3s::dto::NotificationConfiguration, out: &mut Vec<String>) {
-    if let Some(held) = &value.event_bridge_configuration { super::event_bridge_configuration::present(&format!("{prefix}event_bridge_configuration."), held, out); }
+    if let Some(held) = &value.event_bridge_configuration { out.push(format!("{prefix}event_bridge_configuration")); }
     if let Some(held) = &value.lambda_function_configurations { for element in held { super::lambda_function_configuration::present(&format!("{prefix}lambda_function_configurations[]."), element, out); } }
     if let Some(held) = &value.queue_configurations { for element in held { super::queue_configuration::present(&format!("{prefix}queue_configurations[]."), element, out); } }
     if let Some(held) = &value.topic_configurations { for element in held { super::topic_configuration::present(&format!("{prefix}topic_configurations[]."), element, out); } }

@@ -57,6 +57,7 @@ pub const PATHS: &[&str] = &[
     "restore_request.select_parameters.input_serialization.csv.record_delimiter",
     "restore_request.select_parameters.input_serialization.compression_type",
     "restore_request.select_parameters.input_serialization.json.type_",
+    "restore_request.select_parameters.input_serialization.parquet",
     "restore_request.select_parameters.output_serialization.csv.field_delimiter",
     "restore_request.select_parameters.output_serialization.csv.quote_character",
     "restore_request.select_parameters.output_serialization.csv.quote_escape_character",

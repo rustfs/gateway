@@ -30,6 +30,7 @@ pub const PATHS: &[&str] = &[
     "csv.record_delimiter",
     "compression_type",
     "json.type_",
+    "parquet",
 ];
 
 /// Appends, under `prefix`, every member path at which `left` and `right` differ. A list of another length differs as a whole; a list of the same length differs element by element.
@@ -61,5 +62,5 @@ pub fn present(prefix: &str, value: &s3s::dto::InputSerialization, out: &mut Vec
     if let Some(held) = &value.csv { super::csv_input::present(&format!("{prefix}csv."), held, out); }
     if value.compression_type.is_some() { out.push(format!("{prefix}compression_type")); }
     if let Some(held) = &value.json { super::json_input::present(&format!("{prefix}json."), held, out); }
-    if let Some(held) = &value.parquet { super::parquet_input::present(&format!("{prefix}parquet."), held, out); }
+    if let Some(held) = &value.parquet { out.push(format!("{prefix}parquet")); }
 }

@@ -52,6 +52,7 @@ pub const PATHS: &[&str] = &[
     "select_parameters.input_serialization.csv.record_delimiter",
     "select_parameters.input_serialization.compression_type",
     "select_parameters.input_serialization.json.type_",
+    "select_parameters.input_serialization.parquet",
     "select_parameters.output_serialization.csv.field_delimiter",
     "select_parameters.output_serialization.csv.quote_character",
     "select_parameters.output_serialization.csv.quote_escape_character",

@@ -222,3 +222,83 @@ pub(crate) fn differences(path: &str, gateway: &Element, s3s: &Element, out: &mu
         }
     }
 }
+
+/// Every value a document holds below its root element, as `(path, value)`: each attribute at
+/// `path@name` (a namespace declaration aside, which carries no member), and each element without
+/// children at its path with its text, entities resolved — an empty element included, since it
+/// says something by being there. Paths name elements from the root's children down, joined by
+/// `/`, without the root's own name or list positions.
+///
+/// The seam answer diff holds one answer's values to be among the other's: every value the legacy
+/// answer holds is a member it wrote, whatever the order, the namespace or the root's name.
+#[cfg(test)]
+pub(crate) fn values(root: &Element) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    attribute_values(root, "", &mut out);
+    for child in &root.children {
+        collect_values(child, "", &mut out);
+    }
+    out
+}
+
+#[cfg(test)]
+fn attribute_values(element: &Element, path: &str, out: &mut Vec<(String, String)>) {
+    for (key, value) in &element.attributes {
+        if key != "xmlns" && !key.starts_with("xmlns:") {
+            out.push((format!("{path}@{key}"), resolved(value)));
+        }
+    }
+}
+
+#[cfg(test)]
+fn collect_values(element: &Element, prefix: &str, out: &mut Vec<(String, String)>) {
+    let path = if prefix.is_empty() {
+        element.name.clone()
+    } else {
+        format!("{prefix}/{}", element.name)
+    };
+    attribute_values(element, &path, out);
+    if element.children.is_empty() {
+        out.push((path, resolved(&element.text)));
+        return;
+    }
+    for child in &element.children {
+        collect_values(child, &path, out);
+    }
+}
+
+/// `text` with the five predefined entities and numeric character references resolved; an
+/// unknown or malformed reference is kept as written.
+#[cfg(test)]
+fn resolved(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(start) = rest.find('&') {
+        out.push_str(&rest[..start]);
+        let after = &rest[start..];
+        let Some(end) = after.find(';') else {
+            out.push_str(after);
+            return out;
+        };
+        let name = &after[1..end];
+        let character = match name {
+            "quot" => Some('"'),
+            "amp" => Some('&'),
+            "lt" => Some('<'),
+            "gt" => Some('>'),
+            "apos" => Some('\''),
+            _ => name
+                .strip_prefix("#x")
+                .and_then(|hex| u32::from_str_radix(hex, 16).ok())
+                .or_else(|| name.strip_prefix('#').and_then(|decimal| decimal.parse().ok()))
+                .and_then(char::from_u32),
+        };
+        match character {
+            Some(character) => out.push(character),
+            None => out.push_str(&after[..=end]),
+        }
+        rest = &after[end + 1..];
+    }
+    out.push_str(rest);
+    out
+}

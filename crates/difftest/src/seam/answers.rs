@@ -1,0 +1,334 @@
+// Copyright 2026 RustFS Team
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+//! The seam answer diff's rows (rustfs/gateway#1076, item 2): legacy outputs a RustFS app body
+//! returns, each with what the two stacks' answers must show.
+//!
+//! Responsible for: [`answer_rows`] — which, with the encode matrix's samples
+//! (`crate::samples::outputs`), set every member path of every covered operation's legacy output —
+//! and [`UNWRITTEN_PATHS`], every output member no row can set, with the reason.
+//! NOT responsible for: writing (`mod.rs`) or judging (`tests/seam_outputs.rs`).
+//! Upstream: the pinned legacy DTOs. Downstream: `tests/seam_outputs.rs`.
+//!
+//! # Element order
+//!
+//! The legacy stack writes a structure's members in its own declaration order (mostly
+//! alphabetical); the gateway writes the S3 model's order, which is the order AWS documents and
+//! answers with. The encode matrix pins that class per structure in the register
+//! (`kd-encode-0007` and the entries after it) for the operations it covers. A row here names the
+//! structures whose children the two answers write in another order (`orders`), so an order that
+//! changes is still a failing row; every other difference is held to the register or to
+//! [`ANSWER_FINDINGS`].
+
+use crate::request::RawRequest;
+use crate::s3s;
+
+use super::{AnswerDiff, LegacyOutput, SeamDiffer};
+
+mod checksums;
+mod configs;
+mod objects;
+
+/// What a row's two answers must show.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum Written {
+    /// The seam hands the output over; the answers differ by exactly the register ids in `known`,
+    /// the answer findings in `answer` and, in child order only, at exactly the element paths in
+    /// `orders`.
+    As {
+        /// The register ids (`known-diffs.toml`) the answers' differences match, no more and no
+        /// fewer.
+        known: &'static [&'static str],
+        /// The [`ANSWER_FINDINGS`] ids the answers' other differences match, no more and no fewer.
+        answer: &'static [&'static str],
+        /// The element paths (list positions as `[]`) whose children the two answers write in
+        /// another order.
+        orders: &'static [&'static str],
+    },
+    /// The seam refuses the output, naming this member: the gateway answers an internal error
+    /// rather than write less than the output holds.
+    Refused(&'static str),
+}
+
+/// Writes one row's output on both stacks.
+pub(crate) type Run = Box<dyn Fn(&SeamDiffer) -> Result<AnswerDiff, String>>;
+
+/// One legacy output, the request it answers and what both answers must show.
+pub(crate) struct AnswerRow {
+    /// A stable name for reports.
+    pub(crate) name: String,
+    /// Writes the output on both stacks.
+    pub(crate) run: Run,
+    /// What the answers must show.
+    pub(crate) expect: Written,
+}
+
+/// A row answering `request` with the legacy output `build` makes, on both stacks.
+pub(crate) fn answer<T: LegacyOutput>(
+    name: impl Into<String>,
+    request: RawRequest,
+    build: impl Fn() -> T + 'static,
+    expect: Written,
+) -> AnswerRow {
+    AnswerRow {
+        name: name.into(),
+        run: Box::new(move |differ| differ.answer_diff(&request, &build)),
+        expect,
+    }
+}
+
+/// The four headers the gateway stamps on every answer (`kd-encode-0001`..`0004`).
+pub(crate) const BARE: &[&str] = &["kd-encode-0001", "kd-encode-0002", "kd-encode-0003", "kd-encode-0004"];
+
+/// [`BARE`], and the line break the gateway writes after the XML declaration (`kd-encode-0005`).
+pub(crate) const XML: &[&str] = &[
+    "kd-encode-0001",
+    "kd-encode-0002",
+    "kd-encode-0003",
+    "kd-encode-0004",
+    "kd-encode-0005",
+];
+
+/// [`XML`], and the entity tag the gateway quotes as `&quot;` (`kd-encode-0006`).
+pub(crate) const XML_ETAG: &[&str] = &[
+    "kd-encode-0001",
+    "kd-encode-0002",
+    "kd-encode-0003",
+    "kd-encode-0004",
+    "kd-encode-0005",
+    "kd-encode-0006",
+];
+
+/// A written answer whose only differences are the register ids in `known`.
+pub(crate) const fn same(known: &'static [&'static str]) -> Written {
+    Written::As {
+        known,
+        answer: &[],
+        orders: &[],
+    }
+}
+
+/// A written answer whose differences are the register ids in `known` and the child order at
+/// `orders`.
+pub(crate) const fn reordered(known: &'static [&'static str], orders: &'static [&'static str]) -> Written {
+    Written::As {
+        known,
+        answer: &[],
+        orders,
+    }
+}
+
+/// A written answer whose differences are the register ids in `known`, the answer findings in
+/// `answer` and the child order at `orders`.
+pub(crate) const fn differs(
+    known: &'static [&'static str],
+    answer: &'static [&'static str],
+    orders: &'static [&'static str],
+) -> Written {
+    Written::As { known, answer, orders }
+}
+
+/// A configuration document as the legacy stack reads it: the value RustFS stores and returns.
+pub(crate) fn legacy_document<T>(xml: &str) -> T
+where
+    T: for<'xml> s3s::xml::Deserialize<'xml>,
+{
+    let mut deserializer = s3s::xml::Deserializer::new(xml.as_bytes());
+    T::deserialize(&mut deserializer).unwrap_or_else(|error| unreachable!("a fixture document the legacy stack reads: {error:?}"))
+}
+
+/// A legacy string enumeration value.
+pub(crate) fn named<T: From<String>>(value: &str) -> T {
+    T::from(value.to_owned())
+}
+
+/// A version id in the shape RustFS mints.
+pub(crate) const VERSION_ID: &str = crate::samples::VERSION_ID;
+
+/// One wire difference between the two answers that no register entry (`known-diffs.toml`) holds,
+/// because the encode matrix does not answer the operation: the gateway writer and the legacy writer
+/// spell the same output differently. Each is presentation only — the containment check
+/// (`AnswerDiff::lost`) proves no value of the output is lost with it — and each is pinned here and
+/// reported for a ruling (rustfs/gateway#1076), not accepted.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct AnswerFinding {
+    /// `sa-<nnnn>`.
+    pub(crate) id: &'static str,
+    /// The operation.
+    pub(crate) operation: &'static str,
+    /// The finding's item as the encode diff renders it (`body PolicyStatus`, `status`, …).
+    pub(crate) item: &'static str,
+    /// The gateway side, exactly as rendered.
+    pub(crate) gateway: &'static str,
+    /// The legacy side, exactly as rendered.
+    pub(crate) legacy: &'static str,
+    /// What differs, with the evidence for each side.
+    pub(crate) reason: &'static str,
+}
+
+const fn finding(
+    id: &'static str,
+    operation: &'static str,
+    item: &'static str,
+    gateway: &'static str,
+    legacy: &'static str,
+    reason: &'static str,
+) -> AnswerFinding {
+    AnswerFinding {
+        id,
+        operation,
+        item,
+        gateway,
+        legacy,
+        reason,
+    }
+}
+
+/// The reason every root-namespace finding shares.
+const BARE_ROOT: &str = "The legacy writer serialises an output whose body is one structure member through that structure's own \
+    writer, which opens the root without the S3 namespace; the gateway writes the namespace on every document root, as AWS \
+    answers. The same elements and values follow.";
+
+/// Every answer finding, by id.
+pub(crate) const ANSWER_FINDINGS: &[AnswerFinding] = &[
+    finding(
+        "sa-0001",
+        "GetBucketEncryption",
+        "body ServerSideEncryptionConfiguration",
+        "<ServerSideEncryptionConfiguration xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">",
+        "<ServerSideEncryptionConfiguration>",
+        BARE_ROOT,
+    ),
+    finding(
+        "sa-0002",
+        "GetBucketPolicyStatus",
+        "body PolicyStatus",
+        "<PolicyStatus xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">",
+        "<PolicyStatus>",
+        BARE_ROOT,
+    ),
+    finding(
+        "sa-0003",
+        "GetBucketReplication",
+        "body ReplicationConfiguration",
+        "<ReplicationConfiguration xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">",
+        "<ReplicationConfiguration>",
+        BARE_ROOT,
+    ),
+    finding(
+        "sa-0004",
+        "GetObjectLockConfiguration",
+        "body ObjectLockConfiguration",
+        "<ObjectLockConfiguration xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">",
+        "<ObjectLockConfiguration>",
+        BARE_ROOT,
+    ),
+    finding(
+        "sa-0005",
+        "GetPublicAccessBlock",
+        "body PublicAccessBlockConfiguration",
+        "<PublicAccessBlockConfiguration xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">",
+        "<PublicAccessBlockConfiguration>",
+        BARE_ROOT,
+    ),
+    finding(
+        "sa-0006",
+        "GetObjectLegalHold",
+        "body LegalHold",
+        "<LegalHold xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">",
+        "<LegalHold>",
+        BARE_ROOT,
+    ),
+    finding(
+        "sa-0007",
+        "GetObjectRetention",
+        "body Retention",
+        "<Retention xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">",
+        "<Retention>",
+        BARE_ROOT,
+    ),
+    finding(
+        "sa-0008",
+        "UploadPartCopy",
+        "body CopyPartResult",
+        "<CopyPartResult xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">",
+        "<CopyPartResult>",
+        BARE_ROOT,
+    ),
+    finding(
+        "sa-0009",
+        "GetObjectAttributes",
+        "body GetObjectAttributesOutput",
+        "<GetObjectAttributesOutput xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">",
+        "<GetObjectAttributesResponse xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">",
+        "The gateway roots the answer at the element AWS documents (quirk q-attributes-root-0087); the legacy writer roots it at \
+         the model's xmlName. The children are the same elements and values, which the containment check reads past the root.",
+    ),
+    finding(
+        "sa-0010",
+        "GetBucketLogging",
+        "body BucketLoggingStatus/LoggingEnabled/TargetGrants",
+        "<TargetGrants>",
+        "<absent>",
+        "The gateway output holds the grant list as a list, empty when the legacy output has none, and its writer opens the \
+         wrapper whatever it holds (generated/codec/ops/get_bucket_logging.rs); the legacy writer skips an unset list. The gateway \
+         adds an empty element; nothing the legacy answer holds is missing.",
+    ),
+    finding(
+        "sa-0011",
+        "GetBucketWebsite",
+        "body WebsiteConfiguration/RoutingRules",
+        "<RoutingRules>",
+        "<absent>",
+        "As sa-0010, for the routing rules (generated/codec/ops/get_bucket_website.rs).",
+    ),
+    finding(
+        "sa-0012",
+        "GetBucketPolicy",
+        "header content-type",
+        "application/json",
+        "<absent>",
+        "The gateway types the JSON policy body (quirk q-pol-0001); the legacy writer sets the body and no content type. The body \
+         is the same bytes.",
+    ),
+    finding(
+        "sa-0013",
+        "PutBucketPolicy",
+        "status",
+        "200",
+        "204",
+        "The gateway answers the model's success status (spec/operations/PutBucketPolicy.toml); the legacy writer answers 204 No \
+         Content. Both are bodiless successes.",
+    ),
+    finding(
+        "sa-0014",
+        "RestoreObject",
+        "status",
+        "202",
+        "200",
+        "The gateway answers 202 Accepted, the status AWS documents for a restore it starts (spec/operations/RestoreObject.toml); \
+         the legacy writer answers 200 for every restore. Both carry the same headers.",
+    ),
+];
+
+/// Every output member path no row can set, by operation, with the reason.
+pub(crate) const UNWRITTEN_PATHS: &[(&str, &str, &str)] = &[];
+
+/// Every row.
+pub(crate) fn answer_rows() -> Vec<AnswerRow> {
+    let mut rows = configs::rows();
+    rows.extend(objects::rows());
+    rows.extend(checksums::rows());
+    rows
+}

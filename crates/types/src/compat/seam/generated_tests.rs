@@ -479,6 +479,30 @@ fn n_an_answer_without_its_own_headers_converts_as_the_output_alone() {
     );
 }
 
+/// GetBucketLocation's hand-written seam answers like every generated one: its output has no member
+/// a header carries, so the headers the body set are handed on whole and the output converts as it
+/// does alone.
+#[test]
+fn a_location_answer_hands_every_header_on_and_converts_the_output_alone() {
+    let located = || oracle::GetBucketLocationOutput {
+        location_constraint: Some(oracle::BucketLocationConstraint::from("eu-west-1".to_owned())),
+    };
+    let headers = body_headers(&[("vary", "Origin"), ("x-rustfs-deployment-id", "d-1")]);
+    let (output, extra) = super::get_bucket_location::answer_from_legacy(located(), headers.clone());
+    assert_eq!(extra, headers);
+    let alone = super::get_bucket_location::output_from_s3s(located());
+    assert_eq!(
+        output.location_constraint.as_ref().map(|constraint| constraint.as_str()),
+        alone.location_constraint.as_ref().map(|constraint| constraint.as_str())
+    );
+    assert_eq!(
+        output.location_constraint.as_ref().map(|constraint| constraint.as_str()),
+        Some("eu-west-1")
+    );
+    let (_, none) = super::get_bucket_location::answer_from_legacy(located(), http::HeaderMap::new());
+    assert!(none.is_empty());
+}
+
 #[test]
 fn n_a_put_checksum_header_the_body_set_clears_only_its_own_algorithm() {
     let output = oracle::PutObjectOutput {
