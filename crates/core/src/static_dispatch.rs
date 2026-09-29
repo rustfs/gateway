@@ -29,7 +29,7 @@ use std::sync::Arc;
 use http::HeaderMap;
 use rustfs_gateway_stream::ByteStream;
 
-use crate::authz::{Decoded, authorize_input, prepare_input};
+use crate::authz::{Decoded, authorize_input, prepare_input_under};
 use crate::{
     Answer, CodecError, Decision, Denied, DerivedResourceSet, EncodedResponse, Handler, HandlerCancellationSource, HandlerError,
     MetaView, OperationCodec, OwnedResource, RequestBody,
@@ -355,7 +355,7 @@ fn poll_committed_work<T>(
 
 pub(crate) fn decode<O: OperationCodec>(meta: &MetaView<'_>, body: RequestBody) -> Result<Decoded<O>, CodecError> {
     let input = O::decode(meta, body)?;
-    prepare_input::<O>(input).map_err(|error| CodecError::new(error.code().clone(), error.message()))
+    prepare_input_under::<O>(input, meta.names()).map_err(|error| CodecError::new(error.code().clone(), error.message()))
 }
 
 pub(crate) fn resources<O: OperationCodec>(decoded: &Decoded<O>) -> Result<Vec<OwnedResource>, CodecError> {

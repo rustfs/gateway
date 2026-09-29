@@ -26,7 +26,8 @@ use std::collections::BTreeSet;
 
 use crate::decode::Differ;
 use crate::samples::rustfs_requests as rows;
-use crate::{Item, KnownDiffs, Profile, RawRequest, rustfs_decode_diff};
+use crate::samples::{KEY_SHAPES, key_operations};
+use crate::{DIFFED_OPERATIONS, Item, KnownDiffs, Profile, RawRequest, rustfs_decode_diff};
 
 /// Positive — every RustFS-profile row produces exactly its registered differences: a new one
 /// fails as unregistered, one that went away fails as an expectation no longer met.
@@ -103,4 +104,53 @@ fn n_a_legacy_stack_without_the_fold_is_caught_too() {
     let differ = Differ::with_profiles(Profile::Rustfs, Profile::Generic).expect("both stacks build");
     assert_eq!(key_findings(&differ, "/bkt//key").len(), 1, "the folded key must be a key difference");
     assert!(key_findings(&differ, "/bkt/dir//key").is_empty(), "an interior run is kept by both");
+}
+
+/// Positive — every key shape crossed with every operation that names its key in the path: the
+/// gateway's RustFS profile and legacy RustFS route to the same operation and produce no difference
+/// beyond the operation's own registered ones, and wherever the operation's members are compared
+/// the key each handler was handed is the key legacy RustFS hands its storage.
+#[test]
+fn every_key_shape_reaches_every_operation_as_legacy_rustfs_hands_it() {
+    let register = KnownDiffs::checked_in().expect("the checked-in register parses");
+    let mut problems = Vec::new();
+    for (label, stored) in KEY_SHAPES {
+        for (operation, build, expected) in key_operations() {
+            let request = build(&format!("/bkt/{label}"));
+            let diff = rustfs_decode_diff(&request).unwrap_or_else(|error| panic!("{operation} {label}: {error}"));
+            let verdict = register.verdict_for(&request, diff.findings());
+            let matched: BTreeSet<&str> = verdict.known.iter().map(|(_, id)| id.as_str()).collect();
+            if !verdict.failures.is_empty() || matched != expected.iter().copied().collect() {
+                problems.push(format!("{operation} {label}: unregistered {:?}, matched {matched:?}", verdict.failures));
+            }
+            // An operation the harness registers no handler for is answered before a handler on
+            // both stacks and names no operation on the gateway side; its route is compared by the
+            // register's refusal rule instead.
+            if DIFFED_OPERATIONS.contains(&operation) && diff.operation.gateway.as_deref() != Some(operation) {
+                problems.push(format!("{operation} {label}: routed to {:?}", diff.operation));
+            }
+            let key_path = format!("{operation}Input.key");
+            if let Some(handed) = diff.members.iter().find(|member| member.path == key_path)
+                && handed.gateway.to_string() != format!("{stored:?}")
+            {
+                problems.push(format!("{operation} {label}: handed {}", handed.gateway));
+            }
+        }
+    }
+    assert!(problems.is_empty(), "{}", problems.join("\n"));
+}
+
+/// Negative — the cross product is not vacuous: a gateway with the RustFS slash rule but the default
+/// key floor refuses keys legacy RustFS hands its storage, and every such refusal is a difference
+/// where the RustFS rows expect none.
+#[test]
+fn n_a_gateway_with_the_default_key_floor_is_caught() {
+    let differ = Differ::with_rustfs_slash_rule_only().expect("both stacks build");
+    for label in ["a%01b", "a%252Fb", "%5Cx", "a/../b"] {
+        let diff = differ
+            .diff(&RawRequest::get(&format!("/bkt/{label}")))
+            .expect("both stacks answer");
+        let refused = diff.findings().iter().any(|finding| finding.item == Item::Outcome);
+        assert!(refused, "{label}: the default floor went unnoticed: {:?}", diff.findings());
+    }
 }

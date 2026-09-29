@@ -214,6 +214,10 @@ pub(crate) fn build_service(
             // RustFS stores an upload the transport ended empty without `Content-Length` as an
             // empty object instead of answering `411` (rustfs/rustfs#6849).
             .accept_empty_uploads_without_content_length()
+            // RustFS's protocol front hands its storage every key up to 1024 bytes and its storage
+            // decides; this backend hashes keys onto the disk, so no key reaches it as a path
+            // (#1107).
+            .accept_legacy_rustfs_object_keys_after_listing_in_the_posture_report()
             // The backend's stored CORS documents feed the gateway's CORS answers, as RustFS's do
             // behind the gateway; no cache lifetime, so a suite sees a `PutBucketCors` at once.
             .cors_source(Arc::clone(backend))

@@ -408,8 +408,17 @@ impl<O: Operation> Decoded<O> {
 ///
 /// This is intentionally a free function rather than `Decoded::new`: `Decoded` is a pipeline
 /// state, not a general-purpose wrapper, and callers cannot bypass resource derivation.
-pub(crate) fn prepare_input<O: Operation>(mut input: O::Input) -> Result<Decoded<O>, DerivedResourceError> {
-    let resources = O::derive_resources(&input)?;
+pub(crate) fn prepare_input<O: Operation>(input: O::Input) -> Result<Decoded<O>, DerivedResourceError> {
+    prepare_input_under::<O>(input, &rustfs_gateway_types::NamePolicy::default())
+}
+
+/// [`prepare_input`] under the naming policy the request's own names were materialised under: the
+/// one the pipeline calls, so a derived object key is held to the request path's key floor.
+pub(crate) fn prepare_input_under<O: Operation>(
+    mut input: O::Input,
+    names: &rustfs_gateway_types::NamePolicy,
+) -> Result<Decoded<O>, DerivedResourceError> {
+    let resources = O::derive_resources_under(&input, names)?;
     O::seal_derived_input(&mut input);
     Ok(Decoded { input, resources })
 }

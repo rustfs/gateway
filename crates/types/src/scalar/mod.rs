@@ -37,11 +37,13 @@ mod checksum;
 mod checksummer;
 mod error_code;
 mod etag;
+mod key_floor;
 mod name;
 mod naming;
 mod opaque_string;
 mod parse_error;
 mod range;
+mod slash;
 mod timestamp;
 mod upload_id;
 
@@ -56,7 +58,7 @@ pub use self::error_code::ErrorCode;
 pub use self::etag::{ETag, EtagRender};
 pub use self::name::{BucketName, ObjectKey, is_xml_representable, validate_bucket_name, validate_object_key};
 pub use self::naming::{
-    AwsNameValidator, NamePolicy, NameRejection, NameValidator, SlashPolicy, Stricter, aws_bucket_rules, decode_once,
+    AwsNameValidator, KeyFloor, NamePolicy, NameRejection, NameValidator, SlashPolicy, Stricter, aws_bucket_rules, decode_once,
     floor_check_bucket, floor_check_key,
 };
 pub use self::opaque_string::OpaqueString;

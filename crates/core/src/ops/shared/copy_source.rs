@@ -49,7 +49,7 @@
 //! bytes, at the last `?`, and each half is decoded afterwards — `q-copy-source-split-0077`.
 
 use percent_encoding::percent_decode_str;
-use rustfs_gateway_types::{BucketName, ByteRange, ErrorCode, ObjectKey, RangeParse};
+use rustfs_gateway_types::{BucketName, ByteRange, ErrorCode, KeyFloor, NamePolicy, ObjectKey, RangeParse};
 
 use crate::contracts::{COPY_RANGE_LENGTH_ARITHMETIC, CopyRangeLengthArithmetic};
 
@@ -154,6 +154,21 @@ impl CopySource {
     /// demoted to a bucket name: `arn:aws:iam::1:user/bob` would otherwise address a bucket
     /// literally called `arn:aws:iam::1:user`.
     pub fn parse(raw: &str) -> Result<Self, CopySourceRejection> {
+        Self::parse_under(raw, &NamePolicy::default())
+    }
+
+    /// [`CopySource::parse`] with the source key held to `names`' key floor, the floor the
+    /// request's own key was held to (rustfs/gateway#1107).
+    ///
+    /// Under the unconditional floor this is [`CopySource::parse`] exactly: the key is checked at
+    /// every decode pass. Under [`KeyFloor::RustfsLegacy`] the source key is the value one decode
+    /// produced, held to that floor and the deployment's validator through the same
+    /// materialisation a body-carried key goes through, as legacy RustFS reads a copy source's key.
+    ///
+    /// # Errors
+    ///
+    /// As [`CopySource::parse`].
+    pub fn parse_under(raw: &str, names: &NamePolicy) -> Result<Self, CopySourceRejection> {
         if raw.is_empty() {
             return Err(CopySourceRejection::new(
                 ErrorCode::INVALID_ARGUMENT,
@@ -164,9 +179,9 @@ impl CopySource {
         let (path, version_id) = split_version(raw)?;
 
         let resource = if path.starts_with("arn:") {
-            parse_arn(path)?
+            parse_arn(path, names)?
         } else {
-            parse_path(path)?
+            parse_path(path, names)?
         };
 
         Ok(Self {
@@ -209,7 +224,12 @@ pub struct CopySourceResources {
 
 impl CopySourceResources {
     pub(crate) fn parse(raw: &str) -> Result<Self, crate::DerivedResourceError> {
-        CopySource::parse(raw)
+        Self::parse_under(raw, &NamePolicy::default())
+    }
+
+    /// The source, parsed under the naming policy the request was materialised under.
+    pub(crate) fn parse_under(raw: &str, names: &NamePolicy) -> Result<Self, crate::DerivedResourceError> {
+        CopySource::parse_under(raw, names)
             .map(|source| Self { source })
             .map_err(|error| crate::DerivedResourceError::new(error.code().clone(), error.reason()))
     }
@@ -472,7 +492,7 @@ fn split_version(raw: &str) -> Result<(&str, Option<String>), CopySourceRejectio
 /// later one — literal or encoded — is key bytes. The split is found on the raw value rather than
 /// by decoding it whole, so the key half still reaches [`key_of`] undecoded and is decoded exactly
 /// once: decoding the whole value first would decode the key a second time.
-fn parse_path(path: &str) -> Result<SourceResource, CopySourceRejection> {
+fn parse_path(path: &str, names: &NamePolicy) -> Result<SourceResource, CopySourceRejection> {
     let path = path.strip_prefix('/').unwrap_or(path);
     let Some((bucket, key)) = split_bucket_key(path) else {
         return Err(CopySourceRejection::new(
@@ -485,7 +505,7 @@ fn parse_path(path: &str) -> Result<SourceResource, CopySourceRejection> {
         container: None,
         identity: crate::ResourceIdentity::Path,
         bucket: bucket_of(&decode(bucket)?)?,
-        key: key_of(key)?,
+        key: key_of(key, names)?,
         version_id: None,
     })
 }
@@ -505,7 +525,7 @@ fn split_bucket_key(path: &str) -> Option<(&str, &str)> {
 }
 
 /// Parses the two S3 ARN spellings, and refuses every other ARN.
-fn parse_arn(path: &str) -> Result<SourceResource, CopySourceRejection> {
+fn parse_arn(path: &str, names: &NamePolicy) -> Result<SourceResource, CopySourceRejection> {
     // arn : partition : service : region : account : resource…, where the resource half itself
     // contains colons in neither form, so five splits is the whole grammar.
     let mut parts = path.splitn(6, ':');
@@ -532,7 +552,7 @@ fn parse_arn(path: &str) -> Result<SourceResource, CopySourceRejection> {
                 // control plane, so the name is what an authorizer writes its resource against and
                 // what stands in for the bucket until then.
                 bucket: bucket_of(name)?,
-                key: key_of(key)?,
+                key: key_of(key, names)?,
                 version_id: None,
             })
         }
@@ -550,7 +570,7 @@ fn parse_arn(path: &str) -> Result<SourceResource, CopySourceRejection> {
                     outpost_id: non_empty(outpost)?.to_owned(),
                 },
                 bucket: bucket_of(bucket)?,
-                key: key_of(key)?,
+                key: key_of(key, names)?,
                 version_id: None,
             })
         }
@@ -579,8 +599,23 @@ fn decode(value: &str) -> Result<String, CopySourceRejection> {
 /// `GHSA-f4vq-9ffr-m8m3` is what happens when this half is judged by looser rules than the
 /// destination: authorisation reads a key, storage reads a path. The refusal names the rule and
 /// never the value — a message quoting the header back is a header echoed into every log.
-fn key_of(encoded: &str) -> Result<ObjectKey, CopySourceRejection> {
+fn key_of(encoded: &str, names: &NamePolicy) -> Result<ObjectKey, CopySourceRejection> {
     let decoded = decode(encoded)?;
+    if names.key_floor() == KeyFloor::RustfsLegacy {
+        // Legacy-compat (rustfs/backlog#2684): legacy RustFS reads a copy source's key as the one
+        // decode of the header and checks only its length, so a source it stores under a control
+        // character, a backslash or a literal `%2F` can be copied, and a traversal or an empty key
+        // reaches its storage to be refused there (`400 InvalidArgument`, measured on a legacy
+        // build). The same materialisation as a body-carried key keeps the source under the key
+        // floor the destination is held to; the intended future behaviour is the unconditional
+        // check below, with the default floor.
+        return ObjectKey::materialize_decoded(&decoded, names).map_err(|_| {
+            CopySourceRejection::new(
+                ErrorCode::INVALID_ARGUMENT,
+                "the key named by x-amz-copy-source is not a valid object key",
+            )
+        });
+    }
     if decoded.is_empty() {
         return Err(CopySourceRejection::new(
             ErrorCode::INVALID_ARGUMENT,
@@ -603,7 +638,9 @@ fn key_of(encoded: &str) -> Result<ObjectKey, CopySourceRejection> {
             "the key named by x-amz-copy-source is not a valid object key",
         ));
     }
-    ObjectKey::new(decoded).map_err(|_| {
+    // The same materialisation as a body-carried key, so the deployment's validator judges the
+    // source as it judges the destination (the floor already ran at every decode pass above).
+    ObjectKey::materialize_decoded(&decoded, names).map_err(|_| {
         CopySourceRejection::new(
             ErrorCode::INVALID_ARGUMENT,
             "the key named by x-amz-copy-source is not a valid object key",
@@ -641,6 +678,11 @@ fn non_empty(value: &str) -> Result<&str, CopySourceRejection> {
 #[path = "copy_source_security_tests.rs"]
 #[allow(clippy::expect_used)]
 mod security_tests;
+
+#[cfg(test)]
+#[path = "copy_source_rustfs_tests.rs"]
+#[allow(clippy::expect_used)]
+mod rustfs_tests;
 
 #[cfg(test)]
 #[path = "copy_source_tests.rs"]

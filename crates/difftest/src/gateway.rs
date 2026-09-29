@@ -168,13 +168,16 @@ impl rustfs_gateway::BucketOwnerSource for FixtureOwner {
 }
 
 /// The RustFS-profile switches that decide which bucket and key a request addresses, turned on as
-/// `compat/sut` turns them on: the legacy slash rule (rustfs/gateway#1101).
+/// `compat/sut` turns them on: the legacy slash rule (rustfs/gateway#1101) and the legacy key floor
+/// (rustfs/gateway#1107).
 ///
 /// Only the addressing switches: the rows compared under this profile are about the bucket and key
 /// each stack hands its handler, and a switch that changes some other member would show up in them
 /// as a difference of its own rather than go unseen.
 fn rustfs_addressing(builder: ServiceBuilder) -> ServiceBuilder {
-    builder.slash_policy(SlashPolicy::RustfsLegacy)
+    builder
+        .slash_policy(SlashPolicy::RustfsLegacy)
+        .accept_legacy_rustfs_object_keys_after_listing_in_the_posture_report()
 }
 
 /// The assembled gateway and its recording slots.
@@ -193,6 +196,20 @@ impl GatewayStack {
     /// The assembled gateway with its defaults (`Profile::Generic`), or with the RustFS profile's
     /// addressing switches on (`Profile::Rustfs`, see [`rustfs_addressing`]).
     pub(crate) fn with_profile(fault: &Fault, profile: Profile) -> Result<Self, String> {
+        let switches: fn(ServiceBuilder) -> ServiceBuilder = match profile {
+            Profile::Generic => |builder| builder,
+            Profile::Rustfs => rustfs_addressing,
+        };
+        Self::with_switches(fault, switches)
+    }
+
+    /// The RustFS slash rule with the default key floor: the key floor's negative control.
+    #[cfg(test)]
+    pub(crate) fn with_rustfs_slash_rule_only() -> Result<Self, String> {
+        Self::with_switches(&Fault::None, |builder| builder.slash_policy(SlashPolicy::RustfsLegacy))
+    }
+
+    fn with_switches(fault: &Fault, switches: fn(ServiceBuilder) -> ServiceBuilder) -> Result<Self, String> {
         let credentials =
             Credentials::new(ACCESS_KEY, SECRET_KEY.as_bytes()).map_err(|error| format!("credential: {error:?}"))?;
         let regions = RegionSet::new([REGION]).map_err(|error| format!("regions: {error:?}"))?;
@@ -224,10 +241,7 @@ impl GatewayStack {
             .observer(RouteObserver {
                 routed: Arc::clone(&routed),
             });
-        let builder = match profile {
-            Profile::Generic => builder,
-            Profile::Rustfs => rustfs_addressing(builder),
-        };
+        let builder = switches(builder);
         let service = crate::project::register(builder, &recorder)
             .build()
             .map_err(|error| format!("assembly: {error:?}"))?;

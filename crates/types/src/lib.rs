@@ -106,9 +106,9 @@ pub mod dto {
 pub use crate::placeholder::{PlaceholderDefault, WirePlaceholder, reject_placeholder};
 pub use crate::scalar::{
     AwsNameValidator, BucketName, ByteRange, ChecksumAlgorithm, ChecksumDigest, ChecksumError, ChecksumSpec, ChecksumType,
-    Checksummer, ContentMd5, ETag, ErrorCode, EtagRender, Md5Digest, NamePolicy, NameRejection, NameValidator, ObjectKey,
-    OpaqueString, ParseError, RangeOutcome, RangeParse, RangeSpec, RecordedUpload, ResolvedUploadId, SlashPolicy, Stricter,
-    Timestamp, TimestampFormat, UploadIdClaim, UploadRejection, aws_bucket_rules, decode_once, floor_check_bucket,
+    Checksummer, ContentMd5, ETag, ErrorCode, EtagRender, KeyFloor, Md5Digest, NamePolicy, NameRejection, NameValidator,
+    ObjectKey, OpaqueString, ParseError, RangeOutcome, RangeParse, RangeSpec, RecordedUpload, ResolvedUploadId, SlashPolicy,
+    Stricter, Timestamp, TimestampFormat, UploadIdClaim, UploadRejection, aws_bucket_rules, decode_once, floor_check_bucket,
     floor_check_key, is_xml_representable, parse_request_checksum, resolve_upload, rules, validate_bucket_name,
     validate_object_key,
 };

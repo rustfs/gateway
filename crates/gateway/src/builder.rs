@@ -52,7 +52,7 @@ use rustfs_gateway_http::Limits;
 #[cfg(feature = "dangerous-replace-signature-verifier")]
 use rustfs_gateway_sig::{AwsSignatureVerifier, DangerAck};
 use rustfs_gateway_sig::{SecurityFloor, SignatureVerifier};
-use rustfs_gateway_types::{NamePolicy, NameValidator, SlashPolicy};
+use rustfs_gateway_types::NamePolicy;
 
 use crate::assembly::{AssemblyError, RuleRef};
 use crate::clock::{Clock, ClockPosture, ClockSkewAck, SystemMonotonic, system_clock};
@@ -63,13 +63,14 @@ use crate::ext::{
     Governor, GovernorRates, HostResolver, LayeredGovernor, NoAuthzAudit, NoBucketOwner, NoCors, NoObserver, NoPolicy, Observer,
     OpLayer, OpLayerSlot, PathStyleOnly, PolicySource, PolicyTimeout, StageFilter,
 };
-use crate::posture::{SecurityPosture, log_dialect_posture, log_startup_posture};
+use crate::posture::{SecurityPosture, log_dialect_posture, log_naming_posture, log_startup_posture};
 use crate::routing::{RoutingSnapshot, RuntimeAssembly};
 
 mod anonymous_framing;
 mod assembly_update;
 mod client_quirks;
 mod legacy_sentences;
+mod names;
 mod secret_scope;
 pub(crate) mod view_policy;
 pub use self::assembly_update::AssemblyUpdate;
@@ -389,38 +390,6 @@ impl ServiceBuilder {
         self
     }
 
-    /// Installs a naming policy: the slash rule and the validator.
-    ///
-    /// Defaults to [`NamePolicy::default`] — AWS slash semantics and the AWS bucket naming rules.
-    /// Whatever is installed here, the safety floor underneath it does not move: a validator has
-    /// no variant with which to permit what the floor refused.
-    #[must_use]
-    pub fn name_policy(mut self, names: NamePolicy) -> Self {
-        self.names = names;
-        self
-    }
-
-    /// Installs a name validator, keeping the slash policy already set.
-    ///
-    /// It may refuse more than the built-in `AwsNameValidator` does, and it cannot refuse less
-    /// than the floor: the framework runs the floor first and ANDs the two answers.
-    #[must_use]
-    pub fn name_validator(mut self, validator: impl NameValidator) -> Self {
-        self.names = self.names.with_validator(Arc::new(validator));
-        self
-    }
-
-    /// Chooses what happens to a run of slashes in an object key.
-    ///
-    /// **Persistence-affecting.** [`SlashPolicy::Collapse`] makes `a//b` and `a/b` the same object;
-    /// switching it on a deployment that has data renames every object whose key held an empty
-    /// segment. [`SlashPolicy::rewrites_keys`] is what a start-up posture report reads.
-    #[must_use]
-    pub fn slash_policy(mut self, slash: SlashPolicy) -> Self {
-        self.names = self.names.with_slash_policy(slash);
-        self
-    }
-
     /// Installs a host resolver. Defaults to [`PathStyleOnly`].
     ///
     /// A deployment that serves `bucket.example.com` installs
@@ -653,6 +622,7 @@ impl ServiceBuilder {
         );
         log_dialect_posture(&routing.router, self.caller_secret_every_operation);
         crate::presigned_expiry_posture::log_presigned_expiry_posture(&self.floor);
+        log_naming_posture(&self.names);
         let governor: Arc<dyn Governor> = match self.governor {
             Some(user) => Arc::new(LayeredGovernor::new(framework_governor, user)),
             None => Arc::new(framework_governor),

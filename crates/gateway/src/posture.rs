@@ -27,6 +27,7 @@ use rustfs_gateway_sig::{OperationFloor, SecurityFloor};
 use crate::clock::ClockPosture;
 pub(crate) use crate::dialect_posture::log_dialect_posture;
 use crate::ext::{CredentialGuardConfig, GovernorRates, Rate};
+pub(crate) use crate::naming_posture::log_naming_posture;
 
 /// Security-sensitive assembly configuration for a start-up report, not runtime observations.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -737,3 +737,6 @@ mod governor_tests;
 
 /// The slash rule legacy RustFS applies to an object key (rustfs/gateway#1101).
 mod slash_rule_tests;
+
+/// The object keys legacy RustFS accepts, round-tripped onto the backend (rustfs/gateway#1107).
+mod legacy_key_tests;

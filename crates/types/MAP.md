@@ -34,6 +34,9 @@ Agent entry point for handwritten protocol scalars and the mounted generated DTO
 | `src/persistence/logging_website.rs` | Bucket Logging and Website persisted structures, codecs, and runtime decision seams. | Auditing either family without loading unrelated persistence implementations. |
 | `src/persistence/replication.rs` | Full Replication persistence structure, permissive top-level parser, strict nested parser, and old-order writer. | Changing Replication metadata compatibility or rule semantics. |
 | `src/compat/oracle/replication.rs` | Old-codec Replication translation, exact writer, and runtime rule observation, compiled once per revision. | Auditing Replication D1-D5 against the old codec. |
+| `src/scalar/naming.rs` | The single normalisation, the key and bucket floors, `SlashPolicy`, `NamePolicy`, and the `NameValidator` extension point. | A client-chosen key or bucket is decoded, folded or refused wrongly. |
+| `src/scalar/slash.rs` | The two slash rewrites (`Collapse`, and legacy RustFS's fold of a key that starts with `/`). | A run of slashes is folded wrongly. |
+| `src/scalar/key_floor.rs` | `KeyFloor`: the unconditional floor, or legacy RustFS's key rule for a deployment fronting RustFS (#1107). | A key reaches the backend, or is refused, under the wrong floor. |
 | `src/scalar/bucket.rs` | Validated bucket names. | Bucket syntax or display changes. |
 | `src/scalar/key.rs` | Lossless object-key bytes. | Key normalization/encoding changes. |
 | `src/scalar/etag.rs` | Context-typed entity tags. | ETag quoting or comparison changes. |
