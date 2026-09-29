@@ -719,3 +719,6 @@ mod bad_digest_tests;
 
 /// The framework governor sized as RustFS embeds it (rustfs/gateway#1067).
 mod governor_tests;
+
+/// The slash rule legacy RustFS applies to an object key (rustfs/gateway#1101).
+mod slash_rule_tests;

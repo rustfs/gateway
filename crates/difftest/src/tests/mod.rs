@@ -31,5 +31,6 @@ mod fuzz;
 mod matrix;
 mod register;
 mod runner;
+mod rustfs_profile;
 mod seam;
 mod shadow;

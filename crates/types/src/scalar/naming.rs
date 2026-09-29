@@ -38,7 +38,8 @@
 //! ```text
 //!   decode once        %2e%2e becomes .., %252e%252e becomes %2e%2e and is not decoded again
 //!   refuse the residue an encoded separator that survived one decode is refused outright
-//!   apply SlashPolicy  runs of `/` are preserved (AWS) or folded (MinIO compatibility)
+//!   apply SlashPolicy  runs of `/` are preserved (AWS), folded (MinIO compatibility), or folded
+//!                      only in a key that starts with `/` (legacy RustFS)
 //!   floor              traversal, NUL, controls, absolute and UNC shapes, length, emptiness
 //!   validator          may refuse more; has no way to permit anything the floor refused
 //! ```
@@ -168,9 +169,22 @@ pub enum SlashPolicy {
     AwsPreserve,
     /// MinIO compatibility: a run of slashes folds to one, and a leading slash is dropped.
     ///
-    /// This is what RustFS runs in production today. It is not a cleaner: it folds separators and
-    /// removes nothing else, so a `..` segment survives it and is refused by the floor afterwards.
+    /// It is not a cleaner: it folds separators and removes nothing else, so a `..` segment
+    /// survives it and is refused by the floor afterwards. It is not what RustFS runs either:
+    /// RustFS leaves `a//b` as sent, which is [`SlashPolicy::RustfsLegacy`].
     Collapse,
+    /// Legacy RustFS: a key that starts with `/` has every run of slashes folded to one, its
+    /// leading slashes dropped and one trailing slash kept, and a key of slashes only becomes `/`;
+    /// every other key is left exactly as sent.
+    ///
+    /// So `PUT /bucket//x` stores `x`, `PUT /bucket/dir//x` stores `dir//x`, and
+    /// `PUT /bucket//` names the key `/`. The RustFS profile's rule (rustfs/gateway#1101): legacy
+    /// RustFS turns slash normalisation on (`rustfs/src/server/http.rs:166-172` on rustfs/rustfs
+    /// `e870a6d25b`), and its path parser applies it to a key only when the key starts with `/`.
+    ///
+    /// Like [`SlashPolicy::Collapse`] it removes separators and nothing else, and the floor runs on
+    /// the folded key: a `..` segment is still refused, and the length limit reads the folded key.
+    RustfsLegacy,
 }
 
 impl SlashPolicy {
@@ -183,7 +197,7 @@ impl SlashPolicy {
     pub fn rewrites_keys(self) -> bool {
         match self {
             Self::AwsPreserve => false,
-            Self::Collapse => true,
+            Self::Collapse | Self::RustfsLegacy => true,
         }
     }
 
@@ -193,6 +207,7 @@ impl SlashPolicy {
         match self {
             Self::AwsPreserve => "aws-preserve",
             Self::Collapse => "collapse",
+            Self::RustfsLegacy => "rustfs-legacy",
         }
     }
 }
@@ -502,6 +517,42 @@ fn collapse_slashes(value: &str) -> String {
     }
 }
 
+/// [`SlashPolicy::RustfsLegacy`]: folds a key that starts with `/` and leaves every other key as
+/// sent. Linear in the length of the input.
+///
+/// Legacy-compat (rustfs/backlog#2684): legacy RustFS folds the slashes of a key only when the
+/// key starts with one, so `PUT /bucket//a//b` stores `a/b` while `PUT /bucket/a//b` hands `a//b`
+/// to storage unchanged; whether a run of slashes is data depends on where in the key it sits,
+/// and the spelling a client sent is not the object it names. Kept so every key a RustFS client
+/// stored stays reachable under the spelling it used. The intended future behaviour is
+/// [`SlashPolicy::AwsPreserve`], which needs the objects stored under a folded spelling migrated
+/// first.
+fn fold_rooted_slashes(value: String) -> String {
+    if !value.starts_with('/') {
+        return value;
+    }
+    let mut folded = String::with_capacity(value.len());
+    // A separator is written only once the next segment starts, so leading slashes and runs
+    // between segments each leave at most one behind.
+    let mut separator_pending = false;
+    for ch in value.chars() {
+        if ch == '/' {
+            separator_pending = !folded.is_empty();
+        } else {
+            if separator_pending {
+                folded.push('/');
+                separator_pending = false;
+            }
+            folded.push(ch);
+        }
+    }
+    // A key of slashes only keeps one, and a key that ended in a run of slashes keeps one of them.
+    if folded.is_empty() || separator_pending {
+        folded.push('/');
+    }
+    folded
+}
+
 /// The unconditional safety floor for an object key, applied to an already-decoded value.
 ///
 /// Every rule here is one a [`NameValidator`] cannot switch off. The list is short on purpose: an
@@ -673,6 +724,7 @@ pub(crate) fn normalize_key(encoded: &str, policy: &NamePolicy) -> Result<String
     let slashes = match policy.slash_policy() {
         SlashPolicy::AwsPreserve => decoded,
         SlashPolicy::Collapse => collapse_slashes(&decoded),
+        SlashPolicy::RustfsLegacy => fold_rooted_slashes(decoded),
     };
     let unicode = match UNICODE_NORMALIZATION {
         UnicodeNormalizationPolicy::None => slashes,

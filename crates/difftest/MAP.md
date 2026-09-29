@@ -12,10 +12,10 @@ compare and why this is not an in-process dual stack.
 | `src/lib.rs` | Module wiring and the public surface. | Start here for code. |
 | `src/request.rs` | One raw request as both stacks receive it. | A request needs another shape (bytes, pieces, TLS). |
 | `src/probe.rs` | The body both stacks read, and the one-thread executor. | A stack reads the body differently than the harness offers it. |
-| `src/gateway.rs` | The assembled gateway, its recording handler, and the gateway route lookup. | The gateway side is driven or observed wrongly. |
+| `src/gateway.rs` | The assembled gateway, its recording handler, the gateway route lookup, and the RustFS profile's addressing switches. | The gateway side is driven or observed wrongly. |
 | `src/resolver.rs` | The gateway's host resolver: path-style, or reading object paths as bucket paths under the misroute fault. | The misroute control, or how the gateway side classifies a host. |
 | `src/oracle.rs` | The pinned s3s service, its access hook and recording backend. | The s3s side is driven or observed wrongly. |
-| `src/decode.rs` | `decode_diff`, `Differ`, the four compared items, findings and their priority, the faults. | A finding is reported wrongly or ranked wrongly. |
+| `src/decode.rs` | `decode_diff`, `Differ`, the four compared items, findings and their priority, the faults, and the `Profile` pairing (`rustfs_decode_diff`). | A finding is reported wrongly or ranked wrongly, or the RustFS pairing builds the wrong stacks. |
 | `src/encode.rs` | `Differ::encode`: one s3s output through both stacks, answers normalised and compared (status, headers, body structure then bytes); the encoder faults. | An answer is compared or reported wrongly. |
 | `src/normalize.rs` | The closed placeholder table and the exact format each replaced value is held to. | A stamped header or an id is normalised or checked wrongly. |
 | `src/xmltree.rs` | The structural XML comparison: attributes, empty-element spelling, child order, presence, text, by element path. | An XML difference is named at the wrong path, or missed. |
@@ -33,12 +33,14 @@ compare and why this is not an in-process dual stack.
 | `src/project/bucket.rs` | CreateBucket, DeleteBucket, HeadBucket, ListBuckets, GetBucketLocation, Get/PutBucketVersioning projections. | A bucket member is compared wrongly. |
 | `src/samples/mod.rs` | The built-in inputs both runners and the tests share, and their fixtures. | Adding a sample kind. |
 | `src/samples/requests.rs` | The request matrix: each row and the exact register ids its findings must match. | Adding a row, or a row's differences changed. |
+| `src/samples/rustfs.rs` | The RustFS-profile request matrix: rows whose bucket and key both stacks must hand their handlers identically under `Profile::Rustfs`. | Adding a RustFS-profile row, or one of its differences changed. |
 | `src/samples/outputs.rs` | The object output samples. | Adding an object output sample. |
 | `src/samples/outputs_more.rs` | The listing, multipart and bucket output samples. | Adding one of those samples. |
 | `src/corpus.rs` | A recorded corpus entry as a request, with each adjustment and skip named. | A recorded request is changed, skipped, or replayed wrongly. |
 | `src/runner.rs` | The runners' command line, sampling, budget, report and exit statuses. | A runner exits with the wrong status or reports wrongly. |
 | `src/bin/decode-diff.rs`, `src/bin/encode-diff.rs` | The two runner binaries. | Never; they only call `runner::main`. |
 | `src/tests/matrix.rs` | Judges the matrix: exact ids per row, no stale entry, every member (shared, one-sided, list element) exercised. | A matrix check fails, or the census rule changes. |
+| `src/tests/rustfs_profile.rs` | Judges the RustFS-profile matrix: exact ids per row, the key each handler was handed, and the mismatched-profile controls. | A RustFS-profile row or control fails. |
 | `src/tests/controls.rs` | The injected faults (misroute, one byte eaten, one member skewed) and the finding rules. | Auditing that a difference cannot go unreported. |
 | `src/tests/encoding.rs` | Judges the output samples: exact ids per sample, no stale encode entry, every s3s output member set. | An encode matrix check fails. |
 | `src/tests/encode_controls.rs` | The encoder faults (order, xmlns, empty spelling, upload id, extra header, request id), Content-Length, and every format both ways. | Auditing that an encode difference cannot go unreported. |

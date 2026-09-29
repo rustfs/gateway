@@ -136,7 +136,9 @@ further rules follow from the same argument:
 - **`SlashPolicy` is persistence-affecting.** `SlashPolicy::Collapse` makes `a//b` and `a/b` the
   same object; switching it on a deployment that already holds data renames every object whose key
   contained an empty segment. `SlashPolicy::rewrites_keys()` answers this so a start-up posture
-  report can name it. The default is `AwsPreserve`, which is the AWS semantics.
+  report can name it. The default is `AwsPreserve`, which is the AWS semantics. A deployment in
+  front of RustFS keeps the rule RustFS stored its keys under, `SlashPolicy::RustfsLegacy`: a key
+  that starts with `/` is folded and every other key is kept as sent.
 
 Two rules are deliberately **stricter than AWS**, and are registered as divergences in
 `model/overlays/quirks/naming.toml`: a client may not name a key containing a `..` segment, and

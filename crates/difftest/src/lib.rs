@@ -57,7 +57,10 @@ pub mod shadow;
 pub mod tee;
 
 pub use convert::Unconvertible;
-pub use decode::{BodyDigest, Cmp, DecodeDiff, Differ, FieldDiff, Finding, Item, Priority, S3ErrorView, decode_diff};
+pub use decode::{
+    BodyDigest, Cmp, DecodeDiff, Differ, FieldDiff, Finding, Item, Priority, Profile, S3ErrorView, decode_diff,
+    rustfs_decode_diff,
+};
 pub use encode::{EncodeDiff, HeaderDiff, OutputSample, PLACEHOLDER_LENGTH, WireAnswer, placeholder_body};
 pub use fields::{FieldValue, Fields};
 pub use known::{KnownDiff, KnownDiffs, Verdict};
