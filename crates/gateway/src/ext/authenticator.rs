@@ -64,10 +64,11 @@ use std::sync::Arc;
 use http::Method;
 use rustfs_gateway_core::BoxFuture;
 use rustfs_gateway_sig::{
-    AUTHORIZATION_HEADER, AmzDate, AuthError, AuthScheme, CanonicalRequestSpec, CredentialScope, ExpectedScope, PayloadMode,
-    PostPolicy, PostPolicyError, PostPolicyLimits, PresignedParams, RawHost, RegionSet, ScopeRejection, SealedAws, SessionToken,
-    SigFamily, SigIdentity, SigLocation, SigV4Authorization, Signature, SignatureMatch, SignedHeaderSet, UriPathCandidates,
-    Verdict, X_AMZ_SECURITY_TOKEN, X_AMZ_SECURITY_TOKEN_HEADER, calculate_signature, enforce_scope, signing_key, timing,
+    AUTHORIZATION_HEADER, AmzDate, AuthError, AuthScheme, CanonicalRequestSpec, CredentialScope, EmptyRegion, ExpectedScope,
+    PayloadMode, PostPolicy, PostPolicyError, PostPolicyLimits, PresignedParams, RawHost, RegionSet, ScopeRejection, SealedAws,
+    SessionToken, SigFamily, SigIdentity, SigLocation, SigV4Authorization, Signature, SignatureMatch, SignedHeaderSet,
+    UriPathCandidates, Verdict, X_AMZ_SECURITY_TOKEN, X_AMZ_SECURITY_TOKEN_HEADER, calculate_signature, enforce_scope,
+    signing_key, timing,
 };
 
 use super::credential_guard::{CredentialGuardConfig, GuardedCredentialProvider};
@@ -471,9 +472,9 @@ pub struct SigV4Authenticator {
     /// Whether a successful lookup's secret is handed to the handler (ADR-0022). Off by default;
     /// `pub(super)` so the SigV2 half honours the same switch.
     pub(super) hand_secret: bool,
-    /// Whether a scope region outside `regions` is verified (ADR-0023). Off by default;
-    /// `pub(super)` so the switch in `super::authenticator_switches` sets it.
-    pub(super) any_region: bool,
+    /// Which scope regions outside `regions` are verified (ADR-0023's grammar, the empty region).
+    /// Both off by default; `pub(super)` so the switches in `super::authenticator_switches` set them.
+    pub(super) region_policy: super::authenticator_switches::RegionPolicy,
 }
 
 /// An authenticated verdict, and the looked-up secret when the authenticator hands it on.
@@ -487,7 +488,8 @@ impl core::fmt::Debug for SigV4Authenticator {
             .field("regions", &self.regions)
             .field("credential_guard", self.credentials.config())
             .field("hands_caller_secret_to_handlers", &self.hand_secret)
-            .field("accepts_any_signing_region", &self.any_region)
+            .field("accepts_any_signing_region", &self.region_policy.any_region)
+            .field("accepts_empty_signing_region", &self.region_policy.empty_region)
             .finish()
     }
 }
@@ -514,7 +516,7 @@ impl SigV4Authenticator {
             credentials: Arc::new(GuardedCredentialProvider::with_config(credentials, config)),
             regions,
             hand_secret: false,
-            any_region: false,
+            region_policy: super::authenticator_switches::RegionPolicy::default(),
         }
     }
 
@@ -535,16 +537,14 @@ impl SigV4Authenticator {
         // Once a credential surface is present, parsing failure is still a credential failure.
         // Normalising it here keeps malformed material on the same 403 path and prevents a caller
         // from learning how far parsing got before an access key could be recovered.
-        let presented = Presented::read(sealed, location).map_err(|_| AuthError::InvalidAccessKeyId)?;
+        let presented =
+            Presented::read(sealed, location, self.region_policy.empty_region()).map_err(|_| AuthError::InvalidAccessKeyId)?;
 
         // H5, and the only public producer of the `VerifiedScope` the derivation takes. A scope
         // the client chose therefore cannot seed a signing key.
-        let expected = ExpectedScope::new(sealed.expected_service(), &self.regions);
-        let expected = if self.any_region {
-            expected.accepting_any_region()
-        } else {
-            expected
-        };
+        let expected = self
+            .region_policy
+            .apply(ExpectedScope::new(sealed.expected_service(), &self.regions));
         let verified = enforce_scope(presented.scope(), sealed.clock(), &expected).map_err(VerificationFailure::Scope)?;
 
         let resolved = self
@@ -727,12 +727,12 @@ enum Presented {
 }
 
 impl Presented {
-    fn read(sealed: &SealedAws<'_>, location: SigLocation) -> Result<Self, AuthError> {
+    fn read(sealed: &SealedAws<'_>, location: SigLocation, empty: EmptyRegion) -> Result<Self, AuthError> {
         match location {
-            SigLocation::Query => Ok(Self::Query(Box::new(PresignedParams::parse(&sealed.view().query())?))),
+            SigLocation::Query => Ok(Self::Query(Box::new(PresignedParams::parse_with(&sealed.view().query(), empty)?))),
             SigLocation::FormField => {
                 let fields = sealed.view().form_fields().ok_or(AuthError::AuthorizationHeaderMalformed)?;
-                let policy = PostPolicy::parse(fields, "", PostPolicyLimits::default(), sealed.clock().now())
+                let policy = PostPolicy::parse_with(fields, "", PostPolicyLimits::default(), sealed.clock().now(), empty)
                     .map_err(PostPolicyError::auth_error)?;
                 Ok(Self::Form(Box::new(policy)))
             }
@@ -744,7 +744,7 @@ impl Presented {
                     .ok_or(AuthError::AuthorizationHeaderMalformed)?
                     .to_str()
                     .map_err(|_| AuthError::AuthorizationHeaderMalformed)?;
-                Ok(Self::Header(Box::new(SigV4Authorization::parse(raw)?)))
+                Ok(Self::Header(Box::new(SigV4Authorization::parse_with(raw, empty)?)))
             }
             _ => Err(AuthError::AuthorizationHeaderMalformed),
         }

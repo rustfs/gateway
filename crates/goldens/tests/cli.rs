@@ -93,8 +93,8 @@ fn strict_closure_holds_under_every_revision() {
     assert!(text.contains("P9-01 acceptance census: passed=39 blocked=0 total=39\n"), "{text}");
     assert!(text.contains("oracle admission: revisions=3 open-findings=0\n"), "{text}");
     assert!(!text.contains("finding "), "{text}");
-    assert!(text.contains("request divergences: rulings=46 "), "{text}");
-    assert_eq!(text.lines().filter(|line| line.starts_with("divergence rd-")).count(), 46, "{text}");
+    assert!(text.contains("request divergences: rulings=48 "), "{text}");
+    assert_eq!(text.lines().filter(|line| line.starts_with("divergence rd-")).count(), 48, "{text}");
 }
 
 /// The ordinary report shows every revision's D1-D5, widening and refusal evidence.
@@ -113,7 +113,7 @@ fn ordinary_report_shows_evidence_per_oracle_revision() {
     );
     assert!(
         text.contains(
-            "request divergences: rulings=46 keep-gateway=27 align-s3s=12 align-aws=4 rustfs-profile=3 open-follow-ups=4 landed=19\n\
+            "request divergences: rulings=48 keep-gateway=27 align-s3s=12 align-aws=4 rustfs-profile=5 open-follow-ups=5 landed=20\n\
              divergence rd-put-0001 operation=PutObject ruling=rustfs-profile follow-up=c-object-0058 "
         ),
         "{text}"

@@ -28,9 +28,9 @@ use core::time::Duration;
 
 use http::header::HeaderMap;
 use rustfs_gateway_sig::{
-    Admission, AuthError, CredentialScope, ExpectedScope, MAX_PRESIGNED_EXPIRY_SECONDS, OperationFloor, RawQuery, RegionSet,
-    RequestClock, RequestNow, ScopeRegion, ScopeRejection, SecurityFloor, SigService, SkewWindow, SystemClock, WireView,
-    enforce_scope,
+    Admission, AuthError, CredentialScope, EmptyRegion, ExpectedScope, MAX_PRESIGNED_EXPIRY_SECONDS, OperationFloor, RawQuery,
+    RegionSet, RequestClock, RequestNow, ScopeRegion, ScopeRejection, SecurityFloor, SigService, SkewWindow, SystemClock,
+    WireView, enforce_scope,
 };
 
 use crate::security_floor_fixtures::*;
@@ -488,6 +488,36 @@ fn scope_rejection(credential: &str, expected_service: SigService) -> Option<Sco
 
 /// The region `enforce_scope` verified, or its rejection; `any_region` selects the ADR-0023 policy.
 fn scope_verdict(credential: &str, expected_service: SigService, any_region: bool) -> Result<String, ScopeRejection> {
+    scope_verdict_under(
+        credential,
+        expected_service,
+        Policy {
+            any_region,
+            empty_region: false,
+            parse: EmptyRegion::Refused,
+        },
+    )
+}
+
+/// The two opt-in region policies, `accepting_any_region` and `accepting_empty_region`, and how the
+/// scope is parsed before they are asked.
+#[derive(Clone, Copy, Debug)]
+struct Policy {
+    any_region: bool,
+    empty_region: bool,
+    /// `Admitted` isolates the scope check: the parser's own empty-region rule is `parse.rs`'s to
+    /// test, and a scope check that refuses what a lenient parser let through is the property.
+    parse: EmptyRegion,
+}
+
+const EMPTY_ONLY: Policy = Policy {
+    any_region: false,
+    empty_region: true,
+    parse: EmptyRegion::Admitted,
+};
+
+/// The region `enforce_scope` verified under `policy`, or its rejection.
+fn scope_verdict_under(credential: &str, expected_service: SigService, policy: Policy) -> Result<String, ScopeRejection> {
     let headers = signed_headers(SIGNED_AT);
     let view = WireView::new(&headers, RawQuery::new(""));
     let operation = OperationFloor::builtin("Any", expected_service);
@@ -495,13 +525,77 @@ fn scope_verdict(credential: &str, expected_service: SigService, any_region: boo
         Ok(Admission::Sealed(sealed)) => sealed,
         other => panic!("expected a sealed AWS admission, got {other:?}"),
     };
-    let presented = CredentialScope::parse(credential).expect("a well-formed scope");
+    let presented = CredentialScope::parse_with(credential, policy.parse).expect("a well-formed scope");
     let regions = regions();
     let mut expected = ExpectedScope::new(expected_service, &regions);
-    if any_region {
+    if policy.any_region {
         expected = expected.accepting_any_region();
     }
+    if policy.empty_region {
+        expected = expected.accepting_empty_region();
+    }
     enforce_scope(&presented, sealed.clock(), &expected).map(|scope| scope.region().to_owned())
+}
+
+const EMPTY_REGION: &str = "AKIDEXAMPLE/20150830//s3/aws4_request";
+
+/// Positive — the RustFS profile's empty-region policy verifies an empty scope region, as legacy
+/// RustFS does, and the verified scope keeps it empty rather than substituting a configured region.
+#[test]
+fn empty_region_policy_verifies_an_empty_region() {
+    assert_eq!(scope_verdict_under(EMPTY_REGION, SigService::S3, EMPTY_ONLY).as_deref(), Ok(""));
+    let both = Policy {
+        any_region: true,
+        empty_region: true,
+        parse: EmptyRegion::Admitted,
+    };
+    assert_eq!(scope_verdict_under(EMPTY_REGION, SigService::S3, both).as_deref(), Ok(""));
+    assert_eq!(
+        scope_verdict_under("AKIDEXAMPLE/20150830/rustfs-local/s3/aws4_request", SigService::S3, both).as_deref(),
+        Ok("rustfs-local")
+    );
+}
+
+/// Negative — without the empty-region policy an empty region is a region mismatch like any
+/// other, even if a parser let it through, and ADR-0023's any-region grammar does not reach it on
+/// its own; the default parser never reads it at all.
+#[test]
+fn n_an_empty_region_is_refused_without_the_empty_region_policy() {
+    for any_region in [false, true] {
+        let policy = Policy {
+            any_region,
+            empty_region: false,
+            parse: EmptyRegion::Admitted,
+        };
+        let rejection = scope_verdict_under(EMPTY_REGION, SigService::S3, policy).expect_err("not admitted");
+        assert_eq!(rejection.expected_region().map(ScopeRegion::as_str), Some("eu-west-1"), "{any_region}");
+    }
+    assert!(CredentialScope::parse(EMPTY_REGION).is_err(), "the default parser refuses it");
+}
+
+/// Negative — the empty-region policy admits the empty region and nothing else: an unserved or
+/// ungrammatical region is still refused, naming the region to use.
+#[test]
+fn n_empty_region_policy_admits_no_other_region() {
+    for region in ["ap-south-1", "AP-SOUTH-1", "rustfs_local", "-"] {
+        let credential = format!("AKIDEXAMPLE/20150830/{region}/s3/aws4_request");
+        let rejection = scope_verdict_under(&credential, SigService::S3, EMPTY_ONLY).expect_err(region);
+        assert_eq!(rejection.expected_region().map(ScopeRegion::as_str), Some("eu-west-1"), "{region}");
+    }
+}
+
+/// Negative — the empty-region policy widens the region check only: another day and another
+/// service are still refused.
+#[test]
+fn n_empty_region_policy_still_enforces_the_date_and_the_service() {
+    for (credential, service) in [
+        ("AKIDEXAMPLE/20150831//s3/aws4_request", SigService::S3),
+        ("AKIDEXAMPLE/20150830//sts/aws4_request", SigService::S3),
+        (EMPTY_REGION, SigService::Sts),
+    ] {
+        let rejection = scope_verdict_under(credential, service, EMPTY_ONLY).expect_err(credential);
+        assert_eq!(rejection.expected_region(), None, "{credential}");
+    }
 }
 
 /// Positive — ADR-0023: under the any-region policy an unserved region in the configured-name

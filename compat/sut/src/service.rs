@@ -90,7 +90,14 @@ pub(crate) fn build_service(
     let supported = capability_names(backend);
     let builder = backend.register_crud(
         ServiceBuilder::new()
-            .authenticator(SigV4Authenticator::new(Arc::new(credentials), RegionSet::new([options.region.clone()])?))
+            // RustFS verifies a signature whatever region its scope names, an empty one included
+            // (its replication client signs with one): ADR-0023's any-region grammar plus the empty
+            // region, rustfs/backlog#1677.
+            .authenticator(
+                SigV4Authenticator::new(Arc::new(credentials), RegionSet::new([options.region.clone()])?)
+                    .accept_any_signing_region()
+                    .accept_empty_signing_region(),
+            )
             // Not an allow-all, and not a bare operation-set filter either: the matrix must see a
             // refusal for anything outside the reference backend's registered set, and the
             // external suites must see one identity refused on another identity's bucket, unless

@@ -27,8 +27,8 @@ use sha2::Sha256;
 
 use crate::post_policy_json::{JsonParser, JsonValue};
 use crate::{
-    AmzDate, AuthError, CredentialScope, CtBytes, RequestNow, SecretBytes, SessionToken, Signature, SignatureMatch, SigningKey,
-    VerifyRejection,
+    AmzDate, AuthError, CredentialScope, CtBytes, EmptyRegion, RequestNow, SecretBytes, SessionToken, Signature, SignatureMatch,
+    SigningKey, VerifyRejection,
 };
 
 const ALGORITHM: &str = "AWS4-HMAC-SHA256";
@@ -164,6 +164,22 @@ impl PostPolicy {
         limits: PostPolicyLimits,
         now: RequestNow,
     ) -> Result<Self, PostPolicyError> {
+        Self::parse_with(fields, raw_filename, limits, now, EmptyRegion::Refused)
+    }
+
+    /// [`PostPolicy::parse`], with the `x-amz-credential` field's empty region governed by `empty`
+    /// ([`CredentialScope::parse_with`]).
+    ///
+    /// # Errors
+    ///
+    /// As [`PostPolicy::parse`].
+    pub fn parse_with(
+        fields: &[(&str, &str)],
+        raw_filename: &str,
+        limits: PostPolicyLimits,
+        now: RequestNow,
+        empty: EmptyRegion,
+    ) -> Result<Self, PostPolicyError> {
         let fields = FieldSet::parse(fields)?;
         for required in REQUIRED_FIELDS {
             fields.required(required)?;
@@ -174,7 +190,7 @@ impl PostPolicy {
         let (encoded, conditions) = parse_policy_document(&fields, limits, now)?;
 
         let credential = fields.required("x-amz-credential")?;
-        let scope = CredentialScope::parse(credential).map_err(|_| PostPolicyError::Malformed)?;
+        let scope = CredentialScope::parse_with(credential, empty).map_err(|_| PostPolicyError::Malformed)?;
         let signed_at = AmzDate::parse(fields.required("x-amz-date")?).map_err(|_| PostPolicyError::Malformed)?;
         if scope.date().as_str() != &signed_at.as_str()[..8] {
             return Err(PostPolicyError::Malformed);

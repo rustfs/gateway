@@ -159,6 +159,7 @@ pub struct ExpectedScope<'a> {
     service: SigService,
     regions: &'a RegionSet,
     any_region: bool,
+    empty_region: bool,
 }
 
 impl<'a> ExpectedScope<'a> {
@@ -169,6 +170,7 @@ impl<'a> ExpectedScope<'a> {
             service,
             regions,
             any_region: false,
+            empty_region: false,
         }
     }
 
@@ -183,9 +185,33 @@ impl<'a> ExpectedScope<'a> {
         self
     }
 
+    /// Admits a scope whose region field is empty, the second RustFS-profile region policy.
+    ///
+    /// Legacy RustFS verifies a signature whatever region its scope names, and then reads an empty
+    /// region as no region at all: the request carries the virtual host's region, or none. RustFS's
+    /// own replication client signs with an empty region, so a RustFS deployment that refused one
+    /// could not replicate to itself. The empty region is outside
+    /// [`Self::accepting_any_region`]'s grammar on purpose — it is not a region name — so it is
+    /// admitted only by this, separately.
+    ///
+    /// Only the empty region: the key is still derived from the presented (empty) region, so the
+    /// signature stays bound to it, and the date and service checks are unchanged.
+    #[must_use]
+    pub const fn accepting_empty_region(mut self) -> Self {
+        self.empty_region = true;
+        self
+    }
+
     /// Whether [`enforce_scope`] admits `region` under this expectation.
     fn admits_region(&self, region: &str) -> bool {
-        self.regions.contains(region) || (self.any_region && RegionSet::is_region_name(region))
+        self.regions.contains(region)
+            || (self.any_region && RegionSet::is_region_name(region))
+            // Legacy-compat (rustfs/backlog#2684): legacy RustFS verifies a scope that names no
+            // region at all, and its replication client relies on it. A scope without a region
+            // is not one AWS or any SDK produces, and it skips the endpoint-routing answer; the
+            // intended future behaviour is that RustFS's replication client signs with the
+            // target's real region and this policy is dropped.
+            || (self.empty_region && region.is_empty())
     }
 
     /// The service the routed operation belongs to.

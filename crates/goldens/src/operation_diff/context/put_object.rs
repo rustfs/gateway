@@ -261,11 +261,50 @@ fn a_host_region_outside_the_s3s_grammar_is_refused_by_name() {
     );
 }
 
+/// An empty signing region is no region, as legacy RustFS reads it: the request carries the host's
+/// region, or none. RustFS's replication client signs with one (rustfs/backlog#1677, R2).
 #[test]
-fn an_empty_verified_region_is_refused_by_name() {
+fn an_empty_verified_region_is_no_region_and_the_host_region_stands() {
+    let bare = request_to_s3s(
+        GatewayRequestContext {
+            principal: Some(principal("", "s3")),
+            ..context()
+        },
+        (),
+    )
+    .expect("an empty signing region is representable");
+    assert_eq!(region_of(&bare), None);
+    assert_eq!(bare.service.as_deref(), Some("s3"));
+
+    let hosted = request_to_s3s(
+        GatewayRequestContext {
+            principal: Some(principal("", "s3")),
+            host_region: Some(String::from("us-west-2")),
+            ..context()
+        },
+        (),
+    )
+    .expect("an empty signing region is representable");
+    assert_eq!(region_of(&hosted), Some("us-west-2"));
+}
+
+/// Negative — an empty host region is no region either, and an empty signing region does not let
+/// an unrepresentable host region through.
+#[test]
+fn n_an_empty_region_is_never_converted_into_a_region() {
+    let anonymous = request_to_s3s(
+        GatewayRequestContext {
+            host_region: Some(String::new()),
+            ..context()
+        },
+        (),
+    )
+    .expect("an empty host region is representable");
+    assert_eq!(region_of(&anonymous), None);
     assert_eq!(
         refused_member(GatewayRequestContext {
             principal: Some(principal("", "s3")),
+            host_region: Some(String::from("EU_WEST")),
             ..context()
         }),
         "region"

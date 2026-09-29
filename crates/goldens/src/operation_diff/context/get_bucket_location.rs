@@ -239,3 +239,45 @@ fn a_scope_region_the_gateway_does_not_serve_is_verified_only_under_the_rustfs_p
         (Some("ap-south-1"), Some("ap-south-1"))
     );
 }
+
+/// An empty scope region, what RustFS's replication client signs with: the legacy stack verifies
+/// it and hands its handler no region; the gateway refuses it by default, as a credential it cannot
+/// read, and verifies it under the RustFS profile, handing the handler no region either.
+///
+/// Ruling: `rd-loc-0005`
+#[test]
+fn an_empty_scope_region_is_verified_only_under_the_rustfs_profile() {
+    let request = location_request().signed("");
+    let (gateway, oracle) = answers(&request).expect("both stacks answer");
+    assert_eq!(oracle.status, 200, "{oracle:?}");
+    assert_eq!(gateway.status, 403, "{gateway:?}");
+    assert_eq!(gateway.code(), Some("InvalidAccessKeyId"), "{gateway:?}");
+
+    let profiled = request.rustfs_profile();
+    let (gateway, oracle) = answers(&profiled).expect("both stacks answer");
+    assert_eq!((gateway.status, oracle.status), (200, 200), "{gateway:?} {oracle:?}");
+    let compared = compared(&profiled);
+    assert_eq!(differing_context(&compared.converted, &compared.oracle), NONE);
+    assert_eq!((region_of(&compared.converted), region_of(&compared.oracle)), (None, None));
+    assert_eq!(compared.converted.service.as_deref(), Some("s3"));
+}
+
+/// A scope region outside the legacy stack's region grammar (`US-EAST-1`): both stacks refuse it
+/// with 400, under the RustFS profile too. The legacy stack verifies the signature first and
+/// answers `InvalidRequest`; the gateway refuses it at the scope check, before any key is derived,
+/// and answers `AuthorizationHeaderMalformed` naming the region to use.
+///
+/// Ruling: `rd-loc-0006`
+#[test]
+fn a_scope_region_outside_the_legacy_grammar_is_refused_by_both_stacks_with_different_codes() {
+    for request in [
+        location_request().signed("US-EAST-1"),
+        location_request().signed("US-EAST-1").rustfs_profile(),
+    ] {
+        let (gateway, oracle) = answers(&request).expect("both stacks answer");
+        assert_eq!((gateway.status, oracle.status), (400, 400), "{gateway:?} {oracle:?}");
+        assert_eq!(oracle.code(), Some("InvalidRequest"), "{oracle:?}");
+        assert_eq!(gateway.code(), Some("AuthorizationHeaderMalformed"), "{gateway:?}");
+        assert!(gateway.body.contains("<Region>eu-west-1</Region>"), "{gateway:?}");
+    }
+}

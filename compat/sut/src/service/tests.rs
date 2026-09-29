@@ -106,6 +106,20 @@ fn signed(
     body: Bytes,
     extra: &[(&str, &str)],
 ) -> http::Request<Bytes> {
+    signed_in(Some("us-east-1"), access_key, secret_key, method, target, body, extra)
+}
+
+/// [`signed`], scoped to `region`; `None` signs with an empty region, as RustFS's replication
+/// client does for a bucket target that names none.
+fn signed_in(
+    region: Option<&str>,
+    access_key: &str,
+    secret_key: &str,
+    method: http::Method,
+    target: &str,
+    body: Bytes,
+    extra: &[(&str, &str)],
+) -> http::Request<Bytes> {
     let (path, query) = target.split_once('?').map_or((target, ""), |(path, query)| (path, query));
     let mut headers = http::HeaderMap::new();
     headers.insert(http::header::HOST, http::HeaderValue::from_static("s3.example.com"));
@@ -147,7 +161,10 @@ fn signed(
         .render(TimestampFormat::Iso8601Basic)
         .expect("a representable signing stamp");
     let stamp = AmzDate::parse(&rendered).expect("a valid signing stamp");
-    let scope = SigningScope::new(stamp.day(), "us-east-1", SigService::S3).expect("a valid signing scope");
+    let scope = match region {
+        Some(region) => SigningScope::new(stamp.day(), region, SigService::S3).expect("a valid signing scope"),
+        None => SigningScope::with_empty_region(stamp.day(), SigService::S3),
+    };
     let credentials = SigningCredentials::new(access_key, secret_key.as_bytes()).expect("valid signing credentials");
     let signing = SigningRequest::new(&method, path, query, &headers, accepted.host().raw_for_signing(), payload, stamp)
         .with_wire_content_length(body.len() as u64);
@@ -674,11 +691,12 @@ mod policy_tests;
 
 /// What the RustFS profile accepts beyond the AWS defaults: MinIO checksum-less writes (#916), an
 /// explicit us-east-1 constraint (#914), s3cmd's ACL writes (#912), SigV2 presigned URLs (#913),
-/// an oversized `max-keys` (rustfs/backlog#1677).
+/// an oversized `max-keys`, any and empty signing regions (rustfs/backlog#1677).
 mod location_constraint_tests;
 mod minio_checksum_tests;
 mod page_size_tests;
 mod s3cmd_acl_tests;
+mod signing_region_tests;
 mod sigv2_presigned_tests;
 
 /// Bucket-policy conditions on the request's encryption header (rustfs/gateway#979).

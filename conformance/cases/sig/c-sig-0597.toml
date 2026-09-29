@@ -1,0 +1,102 @@
+# c-sig-0597 — a credential scope that names no region is refused by default.
+#
+# Schema dimensions exercised: sign.tamper on the scope region, in the Authorization header and in
+# a presigned URL, and the uniform credential refusal that follows an unreadable scope.
+
+[case]
+id = "c-sig-0597"
+schema_version = 1
+title = "A credential scope with an empty region is refused by default, in a header and in a presigned URL"
+rationale = """
+RustFS's own replication client signs with an empty region when a bucket target names none, and \
+RustFS verifies such a signature today. The gateway keeps that as an opt-in RustFS profile \
+(`SigV4Authenticator::accept_empty_signing_region`, rustfs/backlog#1677, rd-loc-0005), which this \
+case must not see: by default a scope with nothing between its date and its service is not a \
+credential the parser reads, and an unreadable credential gets its family's one uniform 403 \
+(InvalidAccessKeyId in a header, AccessDenied in a presigned URL), so a caller learns nothing about \
+how far parsing got. A build that turned the profile on by default would \
+answer 200 to both exchanges. The key is valid, so the empty region is the only thing wrong \
+with each request."""
+polarity = "negative"
+operation = "ListBuckets"
+tags = ["signature", "sigv4", "region", "error-shape"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_sigv-create-signed-request.html"
+summary = "The SigV4 credential scope is the date, the region, the service and the terminator, each a named field."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://github.com/rustfs/backlog/issues/1677"
+summary = "RustFS replication signs with an empty region; the gateway admits it only under the RustFS profile."
+kind = "other"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+request_time = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[exchanges]]
+name = "header"
+
+[exchanges.request]
+method = "GET"
+target = "/"
+
+[exchanges.request.sign]
+mode = "sigv4_header"
+service = "s3"
+region = "us-east-1"
+credential = "valid"
+
+[exchanges.request.sign.tamper]
+component = "scope_region"
+new_value = ""
+
+[exchanges.expect]
+kind = "response"
+status = 403
+
+[exchanges.expect.error]
+code = "InvalidAccessKeyId"
+request_id_present = true
+
+[exchanges.expect.body]
+redact = ["RequestId", "HostId"]
+contains_utf8 = ["<Code>InvalidAccessKeyId</Code>"]
+not_contains_utf8 = ["<Buckets>", "<Region>"]
+
+[[exchanges]]
+name = "presigned"
+
+[exchanges.request]
+method = "GET"
+target = "/"
+
+[exchanges.request.sign]
+mode = "presigned_v4"
+service = "s3"
+region = "us-east-1"
+credential = "valid"
+expires_s = 300
+
+[exchanges.request.sign.tamper]
+component = "scope_region"
+new_value = ""
+
+[exchanges.expect]
+kind = "response"
+status = 403
+
+# A presigned URL's unreadable credential is answered with the presigned family's uniform code.
+[exchanges.expect.error]
+code = "AccessDenied"
+
+[exchanges.expect.body]
+redact = ["RequestId", "HostId"]
+contains_utf8 = ["<Code>AccessDenied</Code>"]
+not_contains_utf8 = ["<Buckets>", "<Region>"]
