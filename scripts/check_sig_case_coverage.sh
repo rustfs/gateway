@@ -1348,7 +1348,7 @@ validate_rust_evidence "$gateway_posture" source_order \
     'format_names(&anonymous_reachable_ops)' \
     'check_sig_case_coverage: startup posture lost anonymous operation enumeration'
 validate_rust_evidence "$gateway_posture" source_order \
-    '.filter(|operation| !operation.privileged() && operation.allowed_schemes().allows_presigned())' \
+    '.filter(|operation| floor.admits_presigned(operation))' \
     'format_names(&presigned_allowed_ops)' \
     'check_sig_case_coverage: startup posture lost presigned operation enumeration'
 # P2-06's wiring made SigV2 a three-way policy that is actually verified, so the report names the

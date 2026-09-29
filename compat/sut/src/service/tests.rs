@@ -697,6 +697,8 @@ mod checksum_omission_tests;
 mod location_constraint_tests;
 mod minio_checksum_tests;
 mod page_size_tests;
+/// Presigned URLs on every standard operation, as RustFS serves them (rustfs/gateway#1052).
+mod presigned_operation_tests;
 mod s3cmd_acl_tests;
 mod signing_region_tests;
 mod sigv2_presigned_tests;

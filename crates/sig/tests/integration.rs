@@ -34,6 +34,8 @@ mod post_object_form;
 mod security_floor;
 #[path = "security_floor_fixtures/mod.rs"]
 mod security_floor_fixtures;
+#[path = "security_floor_presigned.rs"]
+mod security_floor_presigned;
 #[path = "security_floor_schemes.rs"]
 mod security_floor_schemes;
 #[path = "sig_v2.rs"]
