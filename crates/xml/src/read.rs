@@ -477,18 +477,23 @@ fn split_name(raw: &[u8]) -> Result<(Option<String>, String), XmlError> {
     }
 }
 
-/// A tag or attribute name as the wire spelled it, refused unless it is an XML `Name` whose
-/// colons, if any, each have a non-empty part on both sides.
+/// A tag or attribute name as the wire spelled it, refused unless every colon-separated part of it
+/// is an XML `Name` in its own right.
 ///
 /// `quick-xml` hands over whatever stood between `<` and the first whitespace, so this is the one
 /// place the `Name` production is checked for every element and attribute (rustfs/gateway#743).
-/// The production admits a colon anywhere, but `:a`, `a:` and `a::b` would leave [`local_name`]
-/// or [`split_name`] with an empty prefix or local part — a nameless element the writer would
-/// spell `<>` — so those are refused with it. `a:b:c` stays accepted as it always was, with `c` as
-/// its local name: this crate is not a namespace processor for element names.
+/// The production admits a colon anywhere, and a digit, `-` or `.` anywhere after the first
+/// character, so `a:2` is a `Name` whose local part `2` is not one. This reader keeps only the
+/// local part of an element name ([`local_name`]) and resolves an attribute's prefix
+/// ([`split_name`]), so a part that cannot stand as a `Name` is a name the writer would spell as
+/// something the reader refuses: `<a:2/>` read back from its canonical `<2/>` was the fuzz finding
+/// of rustfs/gateway#1077. Requiring each part to be a `Name` is the `NCName` rule of Namespaces in
+/// XML 1.0 §3 applied per part, and it also refuses the empty parts of `:a`, `a:` and `a::b`.
+/// `a:b:c` stays accepted as it always was, with `c` as its local name: this crate is not a
+/// namespace processor for element names.
 fn qualified_name(raw: &[u8]) -> Result<&str, XmlError> {
     let name = representable(core::str::from_utf8(raw).map_err(|_| XmlError::NotUtf8)?)?;
-    if !is_xml_name(name) || name.split(':').any(str::is_empty) {
+    if !name.split(':').all(is_xml_name) {
         return Err(XmlError::InvalidName);
     }
     Ok(name)

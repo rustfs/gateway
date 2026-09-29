@@ -603,6 +603,51 @@ fn n_refuses_an_element_or_attribute_name_that_is_not_an_xml_name() {
     }
 }
 
+/// Negative — a prefixed name whose parts are not each a `Name` is refused (rustfs/gateway#1077).
+/// `a:2` is a `Name` as a whole, but this reader keeps only an element's local part and resolves an
+/// attribute's prefix, so the part has to stand on its own: `<a:2/>` was accepted as the element
+/// `2`, whose canonical spelling `<2/>` it then refused. The two fuzz reproducers are the first two
+/// documents; the rest are the same shape on a prefix, a `-` and a `.`, a two-colon name, an
+/// attribute under a bound prefix, and a namespace declaration.
+#[test]
+fn n_refuses_a_prefixed_name_whose_parts_are_not_each_a_name() {
+    for body in [
+        "<a:2 k=\"3456yyyyyyy&lt;y&lt;y{yyyy99\"/>",
+        "<x3.66:66389 q=\"4\"/>",
+        "<2:a/>",
+        "<a:-x/>",
+        "<a:.x/>",
+        "<a:b:3/>",
+        "<Root><a:9>t</a:9></Root>",
+        "<Root xmlns:x=\"urn:x\" x:1=\"v\"/>",
+        "<Root xmlns:1=\"urn:x\"/>",
+    ] {
+        assert_eq!(parse(body.as_bytes()), Err(XmlError::InvalidName), "{body}");
+    }
+}
+
+/// Positive control for the rule above — a part may carry a digit, `-` or `.` after its first
+/// character, and every accepted name is written back into a document this reader reads into the
+/// same tree, which is the property rustfs/gateway#1077's input broke.
+#[test]
+fn a_prefixed_name_whose_parts_are_names_reads_and_round_trips() {
+    for (body, name) in [
+        ("<a:b2/>", "b2"),
+        ("<a:b.c-d/>", "b.c-d"),
+        ("<_:x/>", "x"),
+        ("<x3.66:y66/>", "y66"),
+    ] {
+        let tree = parse(body.as_bytes()).unwrap_or_else(|error| panic!("{body}: {error}"));
+        assert_eq!(tree.name, name, "{body}");
+        let mut writer = XmlWriter::fragment();
+        writer.open(&tree.name, None);
+        writer.close();
+        assert_eq!(parse(writer.finish().as_bytes()).as_ref(), Ok(&tree), "{body}");
+    }
+    let tree = parse(b"<Root xmlns:x=\"urn:x\" x:k1=\"v\"/>").expect("a prefixed attribute whose parts are names");
+    assert_eq!(tree.attribute_ns("urn:x", "k1"), Some("v"));
+}
+
 /// Positive control for the rule above — every spelling the production admits still reads: the
 /// colon-free names S3 uses, a prefixed name, a name with `.`, `-`, `_` and a digit after the
 /// first character, a Latin-1 letter, a CJK name, and the two-colon name this crate has always
