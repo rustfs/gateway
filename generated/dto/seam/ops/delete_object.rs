@@ -31,13 +31,13 @@ pub fn input_to_s3s(input: crate::ops::delete_object::Input) -> Result<s3s::dto:
     Ok(s3s::dto::DeleteObjectInput {
         bucket: { let x = input.bucket; x.as_str().to_owned() },
         bypass_governance_retention: input.bypass_governance_retention,
-        expected_bucket_owner: input.expected_bucket_owner,
-        if_match: input.if_match.map(|x| -> Result<_, ConversionError> { Ok(leaf::etag_condition_from_text("if_match", &x)?) }).transpose()?,
+        expected_bucket_owner: input.expected_bucket_owner.filter(|x| !x.as_str().is_empty()),
+        if_match: input.if_match.filter(|x| !x.as_str().is_empty()).map(|x| -> Result<_, ConversionError> { Ok(leaf::etag_condition_from_text("if_match", &x)?) }).transpose()?,
         if_match_last_modified_time: input.if_match_last_modified_time.map(|x| -> Result<_, ConversionError> { Ok(leaf::timestamp_to_s3s("if_match_last_modified_time", x)?) }).transpose()?,
         if_match_size: input.if_match_size,
         key: { let x = input.key; x.as_str().to_owned() },
-        mfa: input.mfa,
-        request_payer: input.request_payer.map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::RequestPayer::from(x.as_str().to_owned())) }).transpose()?,
+        mfa: input.mfa.filter(|x| !x.as_str().is_empty()),
+        request_payer: input.request_payer.filter(|x| !x.as_str().is_empty()).map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::RequestPayer::from(x.as_str().to_owned())) }).transpose()?,
         version_id: input.version_id,
     })
 }

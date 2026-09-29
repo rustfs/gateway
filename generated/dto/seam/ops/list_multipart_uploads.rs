@@ -32,11 +32,11 @@ pub fn input_to_s3s(input: crate::ops::list_multipart_uploads::Input) -> Result<
         bucket: { let x = input.bucket; x.as_str().to_owned() },
         delimiter: input.delimiter,
         encoding_type: input.encoding_type.map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::EncodingType::from(x.as_str().to_owned())) }).transpose()?,
-        expected_bucket_owner: input.expected_bucket_owner,
+        expected_bucket_owner: input.expected_bucket_owner.filter(|x| !x.as_str().is_empty()),
         key_marker: input.key_marker,
         max_uploads: input.max_uploads,
         prefix: input.prefix,
-        request_payer: input.request_payer.map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::RequestPayer::from(x.as_str().to_owned())) }).transpose()?,
+        request_payer: input.request_payer.filter(|x| !x.as_str().is_empty()).map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::RequestPayer::from(x.as_str().to_owned())) }).transpose()?,
         upload_id_marker: input.upload_id_marker,
     })
 }

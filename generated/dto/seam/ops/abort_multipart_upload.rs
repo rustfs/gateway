@@ -30,10 +30,10 @@ use crate::compat::ConversionError;
 pub fn input_to_s3s(input: crate::ops::abort_multipart_upload::Input) -> Result<s3s::dto::AbortMultipartUploadInput, ConversionError> {
     Ok(s3s::dto::AbortMultipartUploadInput {
         bucket: { let x = input.bucket; x.as_str().to_owned() },
-        expected_bucket_owner: input.expected_bucket_owner,
+        expected_bucket_owner: input.expected_bucket_owner.filter(|x| !x.as_str().is_empty()),
         if_match_initiated_time: input.if_match_initiated_time.map(|x| -> Result<_, ConversionError> { Ok(leaf::timestamp_to_s3s("if_match_initiated_time", x)?) }).transpose()?,
         key: { let x = input.key; x.as_str().to_owned() },
-        request_payer: input.request_payer.map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::RequestPayer::from(x.as_str().to_owned())) }).transpose()?,
+        request_payer: input.request_payer.filter(|x| !x.as_str().is_empty()).map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::RequestPayer::from(x.as_str().to_owned())) }).transpose()?,
         upload_id: { let x = input.upload_id; leaf::upload_id_to_s3s(&x) },
     })
 }

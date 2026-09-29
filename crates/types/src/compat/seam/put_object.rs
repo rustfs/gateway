@@ -120,6 +120,17 @@ pub const GATEWAY_OUTPUT_MEMBERS: &[&str] = &[
     "request_charged",
 ];
 
+/// An optional header member as the legacy decoder hands it over: it reads a header whose value
+/// is empty as absent, before parsing it (rustfs/gateway#1076).
+fn text(value: Option<String>) -> Option<String> {
+    value.filter(|value| !value.is_empty())
+}
+
+/// [`text`] for an enumeration member, spelled as the legacy input holds it.
+fn named(value: Option<&str>) -> Option<String> {
+    value.filter(|value| !value.is_empty()).map(str::to_owned)
+}
+
 /// Converts a decoded gateway input into the s3s input a RustFS app body receives.
 ///
 /// The body is moved, not read: the s3s input's body is the gateway's live stream behind an
@@ -132,9 +143,12 @@ pub const GATEWAY_OUTPUT_MEMBERS: &[&str] = &[
 /// (the gateway keeps it opaque, `q-timestamp-0005`; see the enclosing module's `expires` hook),
 /// an entity-tag condition the s3s grammar rejects — an instant outside what s3s represents, or
 /// an Object Lock event hold, which no pinned s3s input can hold (`EVENT_HOLD_MEMBERS`).
+///
+/// An optional header member the gateway holds as an empty value crosses as absent, as the legacy
+/// decoder reads it.
 pub fn input_to_s3s(input: dto::PutObjectInput) -> Result<oracle::PutObjectInput, ConversionError> {
     let event_hold_named = [
-        input.object_lock_event_hold.is_some(),
+        named(input.object_lock_event_hold.as_ref().map(|value| value.as_str())).is_some(),
         input.object_lock_event_hold_duration_days.is_some(),
         input.object_lock_event_hold_duration_years.is_some(),
     ];
@@ -150,10 +164,15 @@ pub fn input_to_s3s(input: dto::PutObjectInput) -> Result<oracle::PutObjectInput
             .filter(|spec| spec.algorithm() == algorithm)
             .map(|spec| spec.render_base64().to_owned())
     };
-    let expires = input.expires.map(|value| super::expires(value.as_str())).transpose()?;
-    let if_match = input.if_match.map(|value| etag_condition("if_match", &value)).transpose()?;
-    let if_none_match = input
-        .if_none_match
+    let expires = input
+        .expires
+        .filter(|value| !value.as_str().is_empty())
+        .map(|value| super::expires(value.as_str()))
+        .transpose()?;
+    let if_match = text(input.if_match)
+        .map(|value| etag_condition("if_match", &value))
+        .transpose()?;
+    let if_none_match = text(input.if_none_match)
         .map(|value| etag_condition("if_none_match", &value))
         .transpose()?;
     let object_lock_retain_until_date = input
@@ -163,12 +182,12 @@ pub fn input_to_s3s(input: dto::PutObjectInput) -> Result<oracle::PutObjectInput
     // s3s answers "no metadata" with `None`, never with an empty map.
     let metadata = (!input.metadata.is_empty()).then(|| input.metadata.into_iter().collect());
     Ok(oracle::PutObjectInput {
-        acl: input.acl.map(|value| value.as_str().to_owned().into()),
+        acl: named(input.acl.as_ref().map(|value| value.as_str())).map(Into::into),
         body: input.body.map(streaming_blob),
         bucket: input.bucket.as_str().to_owned(),
         bucket_key_enabled: input.bucket_key_enabled,
-        cache_control: input.cache_control,
-        checksum_algorithm: input.checksum_algorithm.map(|value| value.as_str().to_owned().into()),
+        cache_control: text(input.cache_control),
+        checksum_algorithm: named(input.checksum_algorithm.as_ref().map(|value| value.as_str())).map(Into::into),
         checksum_crc32: checksum_value(ChecksumAlgorithm::Crc32),
         checksum_crc32c: checksum_value(ChecksumAlgorithm::Crc32c),
         checksum_crc64nvme: checksum_value(ChecksumAlgorithm::Crc64Nvme),
@@ -179,41 +198,40 @@ pub fn input_to_s3s(input: dto::PutObjectInput) -> Result<oracle::PutObjectInput
         checksum_xxhash128: checksum_value(ChecksumAlgorithm::XxHash128),
         checksum_xxhash3: checksum_value(ChecksumAlgorithm::XxHash3),
         checksum_xxhash64: checksum_value(ChecksumAlgorithm::XxHash64),
-        content_disposition: input.content_disposition,
-        content_encoding: input.content_encoding,
-        content_language: input.content_language,
+        content_disposition: text(input.content_disposition),
+        content_encoding: text(input.content_encoding),
+        content_language: text(input.content_language),
         content_length: Some(input.content_length),
-        content_md5: input.content_md5,
-        content_type: input.content_type,
-        expected_bucket_owner: input.expected_bucket_owner,
+        content_md5: text(input.content_md5),
+        content_type: text(input.content_type),
+        expected_bucket_owner: text(input.expected_bucket_owner),
         expires,
-        grant_full_control: input.grant_full_control,
-        grant_read: input.grant_read,
-        grant_read_acp: input.grant_read_acp,
-        grant_write_acp: input.grant_write_acp,
+        grant_full_control: text(input.grant_full_control),
+        grant_read: text(input.grant_read),
+        grant_read_acp: text(input.grant_read_acp),
+        grant_write_acp: text(input.grant_write_acp),
         if_match,
         if_none_match,
         key: input.key.as_str().to_owned(),
         metadata,
-        object_lock_legal_hold_status: input
-            .object_lock_legal_hold_status
-            .map(|value| value.as_str().to_owned().into()),
-        object_lock_mode: input.object_lock_mode.map(|value| value.as_str().to_owned().into()),
+        object_lock_legal_hold_status: named(input.object_lock_legal_hold_status.as_ref().map(|value| value.as_str()))
+            .map(Into::into),
+        object_lock_mode: named(input.object_lock_mode.as_ref().map(|value| value.as_str())).map(Into::into),
         object_lock_retain_until_date,
-        request_payer: input.request_payer.map(|value| value.as_str().to_owned().into()),
-        sse_customer_algorithm: input.sse_customer_algorithm,
+        request_payer: named(input.request_payer.as_ref().map(|value| value.as_str())).map(Into::into),
+        sse_customer_algorithm: text(input.sse_customer_algorithm),
         // The s3s input holds the key as a plain `String`; that is its contract, not this one's.
         sse_customer_key: input.sse_customer_key.map(|key| key.expose_secret().to_owned()),
-        sse_customer_key_md5: input.sse_customer_key_md5,
-        ssekms_encryption_context: input.ssekms_encryption_context,
-        ssekms_key_id: input.ssekms_key_id,
-        server_side_encryption: input.server_side_encryption.map(|value| value.as_str().to_owned().into()),
-        storage_class: input.storage_class.map(|value| value.as_str().to_owned().into()),
-        tagging: input.tagging,
+        sse_customer_key_md5: text(input.sse_customer_key_md5),
+        ssekms_encryption_context: text(input.ssekms_encryption_context),
+        ssekms_key_id: text(input.ssekms_key_id),
+        server_side_encryption: named(input.server_side_encryption.as_ref().map(|value| value.as_str())).map(Into::into),
+        storage_class: named(input.storage_class.as_ref().map(|value| value.as_str())).map(Into::into),
+        tagging: text(input.tagging),
         // MinIO's `?versionId=` on a PUT has no member in the gateway model. Only the authorised
         // replica write carries one, and it converts through `replica_input_to_s3s`.
         version_id: None,
-        website_redirect_location: input.website_redirect_location,
+        website_redirect_location: text(input.website_redirect_location),
         write_offset_bytes: input.write_offset_bytes,
     })
 }

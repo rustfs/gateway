@@ -254,7 +254,8 @@ fn n_an_object_lock_event_hold_is_refused_not_dropped() {
         object_lock_event_hold: Some(crate::ops::enums::ObjectLockEventHold::custom("ON")),
         ..Default::default()
     };
-    let error = ops::create_multipart_upload::input_to_s3s(input).expect_err("event hold");
+    let headers = http::HeaderMap::new();
+    let error = ops::create_multipart_upload::input_to_s3s(input, &wire_of("", &headers)).expect_err("event hold");
     assert_eq!(error.field, "object_lock_event_hold");
 }
 
@@ -298,7 +299,134 @@ fn a_copy_takes_the_authorized_source_not_the_sealed_input_member() {
         key: "a/b".into(),
         version_id: None,
     };
-    let s3s = ops::copy_object::input_to_s3s(input, source.clone()).expect("converts");
+    let headers = http::HeaderMap::new();
+    let s3s = ops::copy_object::input_to_s3s(input, source.clone(), &wire_of("", &headers)).expect("converts");
     assert_eq!(s3s.copy_source, source);
     assert_eq!(s3s.bucket, "target");
+}
+
+// ── members only the legacy decoder reads ─────────────────────────────────────────────────────
+
+fn wire_of<'a>(raw_query: &'a str, headers: &'a http::HeaderMap) -> leaf::RequestWire<'a> {
+    leaf::RequestWire { raw_query, headers }
+}
+
+#[test]
+fn a_legacy_query_member_is_decoded_as_the_legacy_decoder_splits_the_query() {
+    let headers = http::HeaderMap::new();
+    for (query, expected) in [
+        ("versionId=v1", Some("v1")),
+        ("uploads&versionId=v1", Some("v1")),
+        ("versionId=a%2Bb+c", Some("a+b c")),
+        ("versionId=%zz", Some("%zz")),
+        ("versionId=", Some("")),
+        ("versionId", Some("")),
+        ("versionid=v1", None),
+        ("", None),
+    ] {
+        let value = leaf::legacy_query(&wire_of(query, &headers), "versionId").expect(query);
+        assert_eq!(value.as_deref(), expected, "{query}");
+    }
+}
+
+#[test]
+fn n_a_legacy_query_member_seen_twice_is_refused_by_its_parameter() {
+    let headers = http::HeaderMap::new();
+    let error = leaf::legacy_query(&wire_of("versionId=a&versionId=b", &headers), "versionId").expect_err("twice");
+    assert_eq!((error.field, error.reason), ("versionId", super::error::LEGACY_DUPLICATE_QUERY));
+}
+
+fn one_line(value: &'static str) -> http::HeaderMap {
+    let mut headers = http::HeaderMap::new();
+    headers.append("x-minio-force-delete", http::HeaderValue::from_static(value));
+    headers
+}
+
+#[test]
+fn a_legacy_boolean_header_takes_exactly_the_legacy_grammar() {
+    for (value, expected) in [
+        ("true", Some(true)),
+        ("True", Some(true)),
+        ("false", Some(false)),
+        ("False", Some(false)),
+        ("", None),
+    ] {
+        let headers = one_line(value);
+        let decoded = leaf::legacy_bool_header(&wire_of("", &headers), "x-minio-force-delete").expect(value);
+        assert_eq!(decoded, expected, "{value:?}");
+    }
+    let absent = http::HeaderMap::new();
+    assert_eq!(
+        leaf::legacy_bool_header(&wire_of("", &absent), "x-minio-force-delete").expect("absent"),
+        None
+    );
+}
+
+#[test]
+fn n_a_legacy_boolean_header_outside_the_legacy_grammar_is_refused() {
+    for value in ["1", "0", "TRUE", "t", "on", "yes", " true", "true "] {
+        let headers = one_line(value);
+        let error = leaf::legacy_bool_header(&wire_of("", &headers), "x-minio-force-delete").expect_err(value);
+        assert_eq!(
+            (error.field, error.reason),
+            ("x-minio-force-delete", super::error::LEGACY_INVALID_BOOLEAN),
+            "{value:?}"
+        );
+    }
+}
+
+#[test]
+fn n_a_legacy_boolean_header_seen_twice_is_refused_even_when_both_lines_agree() {
+    let mut headers = one_line("true");
+    headers.append("x-minio-force-delete", http::HeaderValue::from_static("true"));
+    let error = leaf::legacy_bool_header(&wire_of("", &headers), "x-minio-force-delete").expect_err("twice");
+    assert_eq!(
+        (error.field, error.reason),
+        ("x-minio-force-delete", super::error::LEGACY_DUPLICATE_HEADER)
+    );
+}
+
+#[test]
+fn a_legacy_decoder_refusal_is_answered_with_its_code_and_status() {
+    use super::error::{
+        LEGACY_DUPLICATE_HEADER, LEGACY_DUPLICATE_QUERY, LEGACY_INVALID_BOOLEAN, Refusal, refusal_from_conversion,
+    };
+    use crate::compat::ConversionError;
+    for (reason, field, code, message) in [
+        (LEGACY_DUPLICATE_QUERY, "versionId", "InvalidRequest", "duplicate query: versionId"),
+        (
+            LEGACY_DUPLICATE_HEADER,
+            "x-minio-force-delete",
+            "InvalidRequest",
+            "duplicate header: x-minio-force-delete",
+        ),
+        (
+            LEGACY_INVALID_BOOLEAN,
+            "x-minio-force-delete",
+            "InvalidArgument",
+            "invalid header: x-minio-force-delete",
+        ),
+    ] {
+        match refusal_from_conversion(&ConversionError { field, reason }) {
+            Some(Refusal::Ordinary {
+                code: answered,
+                message: text,
+            }) => {
+                assert_eq!(
+                    (answered.as_str(), answered.default_status().as_u16(), text.as_str()),
+                    (code, 400, message)
+                );
+            }
+            other => panic!("{reason}: {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn n_any_other_conversion_error_is_not_a_legacy_decoder_refusal() {
+    let error = crate::compat::ConversionError {
+        field: "range",
+        reason: "not a byte range the s3s input can hold",
+    };
+    assert_eq!(super::error::refusal_from_conversion(&error), None);
 }

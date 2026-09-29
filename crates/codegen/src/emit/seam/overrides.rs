@@ -45,6 +45,14 @@ pub enum Rule {
     /// cleared it in the input, so the input conversion takes the s3s value as a parameter the
     /// adapter builds from the authorized resource.
     Supplied(&'static str),
+    /// Forward only: the legacy member has no gateway counterpart, and the legacy decoder reads it
+    /// from the query parameter named here. The input conversion takes the raw request
+    /// (`leaf::RequestWire`) and decodes the parameter exactly as that decoder does, refusing what it
+    /// refuses, so the RustFS body is handed the value it was handed before.
+    FromQuery(&'static str),
+    /// Forward only: as [`Rule::FromQuery`], for a boolean the legacy decoder reads from the header
+    /// named here with its own grammar.
+    FromBoolHeader(&'static str),
 }
 
 /// One member exception: the s3s struct, the member name on the side the rule names, the rule.
@@ -206,12 +214,18 @@ pub const MEMBERS: &[MemberOverride] = &[
     ("UploadPartCopyOutput", "checksum_xxhash64", Rule::Nested("copy_part_result")),
     ("UploadPartCopyOutput", "checksum_xxhash3", Rule::Nested("copy_part_result")),
     ("UploadPartCopyOutput", "checksum_xxhash128", Rule::Nested("copy_part_result")),
-    // MinIO extensions s3s decodes from `x-minio-*` / `?versionId=`. The seam leaves them at their
-    // default: the adapter fills them from the request headers. (The bucket-configuration XML ones
+    // MinIO extensions s3s decodes from `x-minio-*` / `?versionId=`. They are decoded from the raw
+    // request as the legacy decoder reads them: `?versionId=` names the version a copy or an upload
+    // is stored under (rustfs/gateway#1076), and a malformed `x-minio-force-delete` is refused there
+    // before RustFS's looser parse could force-delete a bucket. (The bucket-configuration XML ones
     // are gateway members since rd-cfg-0002..0006 and convert like any other.)
-    ("CopyObjectInput", "version_id", Rule::S3sOnly(MINIO)),
-    ("CreateMultipartUploadInput", "version_id", Rule::S3sOnly(MINIO)),
-    ("DeleteBucketInput", "force_delete", Rule::S3sOnly(MINIO)),
+    // Legacy-compat (rustfs/backlog#2684): legacy RustFS stores a copy or an upload under the
+    // version id any caller with write permission names in `?versionId=`, which lets a client mint
+    // or reuse version ids; PutObject already requires s3:ReplicateObject for it (rd-put-0007). The
+    // seam hands it over unchanged for now; the intended behaviour is the same replica-only rule.
+    ("CopyObjectInput", "version_id", Rule::FromQuery("versionId")),
+    ("CreateMultipartUploadInput", "version_id", Rule::FromQuery("versionId")),
+    ("DeleteBucketInput", "force_delete", Rule::FromBoolHeader("x-minio-force-delete")),
     // Members of AWS model revisions the gateway model does not carry; RustFS ignores the inputs
     // and sets none of the outputs.
     ("CopyObjectInput", "annotation_directive", Rule::S3sOnly(NOT_IN_MODEL)),
@@ -228,5 +242,4 @@ pub const MEMBERS: &[MemberOverride] = &[
 
 const SEALED: &str = "the gateway authorizes the copy source as a derived resource and clears the input member";
 const EVENT_HOLD: &str = "an Object Lock event hold, which no pinned s3s shape holds and RustFS does not store";
-const MINIO: &str = "a MinIO extension the adapter fills from the request headers";
 const NOT_IN_MODEL: &str = "an AWS model member the gateway model does not carry and RustFS neither reads nor sets";

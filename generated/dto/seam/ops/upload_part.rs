@@ -32,7 +32,7 @@ pub fn input_to_s3s(input: crate::ops::upload_part::Input) -> Result<s3s::dto::U
     Ok(s3s::dto::UploadPartInput {
         body: input.body.map(|x| -> Result<_, ConversionError> { Ok(leaf::streaming_blob(x)) }).transpose()?,
         bucket: { let x = input.bucket; x.as_str().to_owned() },
-        checksum_algorithm: input.checksum_algorithm.map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::ChecksumAlgorithm::from(x.as_str().to_owned())) }).transpose()?,
+        checksum_algorithm: input.checksum_algorithm.filter(|x| !x.as_str().is_empty()).map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::ChecksumAlgorithm::from(x.as_str().to_owned())) }).transpose()?,
         checksum_crc32: leaf::checksum_value(checksum_spec.as_ref(), crate::ChecksumAlgorithm::Crc32),
         checksum_crc32c: leaf::checksum_value(checksum_spec.as_ref(), crate::ChecksumAlgorithm::Crc32c),
         checksum_crc64nvme: leaf::checksum_value(checksum_spec.as_ref(), crate::ChecksumAlgorithm::Crc64Nvme),
@@ -44,14 +44,14 @@ pub fn input_to_s3s(input: crate::ops::upload_part::Input) -> Result<s3s::dto::U
         checksum_xxhash3: leaf::checksum_value(checksum_spec.as_ref(), crate::ChecksumAlgorithm::XxHash3),
         checksum_xxhash64: leaf::checksum_value(checksum_spec.as_ref(), crate::ChecksumAlgorithm::XxHash64),
         content_length: Some(input.content_length),
-        content_md5: input.content_md5,
-        expected_bucket_owner: input.expected_bucket_owner,
+        content_md5: input.content_md5.filter(|x| !x.as_str().is_empty()),
+        expected_bucket_owner: input.expected_bucket_owner.filter(|x| !x.as_str().is_empty()),
         key: { let x = input.key; x.as_str().to_owned() },
         part_number: input.part_number,
-        request_payer: input.request_payer.map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::RequestPayer::from(x.as_str().to_owned())) }).transpose()?,
-        sse_customer_algorithm: input.sse_customer_algorithm,
+        request_payer: input.request_payer.filter(|x| !x.as_str().is_empty()).map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::RequestPayer::from(x.as_str().to_owned())) }).transpose()?,
+        sse_customer_algorithm: input.sse_customer_algorithm.filter(|x| !x.as_str().is_empty()),
         sse_customer_key: input.sse_customer_key.map(|x| -> Result<_, ConversionError> { Ok(x.expose_secret().to_owned()) }).transpose()?,
-        sse_customer_key_md5: input.sse_customer_key_md5,
+        sse_customer_key_md5: input.sse_customer_key_md5.filter(|x| !x.as_str().is_empty()),
         upload_id: { let x = input.upload_id; leaf::upload_id_to_s3s(&x) },
     })
 }

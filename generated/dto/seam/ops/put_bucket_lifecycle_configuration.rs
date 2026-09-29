@@ -30,10 +30,10 @@ use crate::compat::ConversionError;
 pub fn input_to_s3s(input: crate::ops::put_bucket_lifecycle_configuration::Input) -> Result<s3s::dto::PutBucketLifecycleConfigurationInput, ConversionError> {
     Ok(s3s::dto::PutBucketLifecycleConfigurationInput {
         bucket: { let x = input.bucket; x.as_str().to_owned() },
-        checksum_algorithm: input.checksum_algorithm.map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::ChecksumAlgorithm::from(x.as_str().to_owned())) }).transpose()?,
-        expected_bucket_owner: input.expected_bucket_owner,
+        checksum_algorithm: input.checksum_algorithm.filter(|x| !x.as_str().is_empty()).map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::ChecksumAlgorithm::from(x.as_str().to_owned())) }).transpose()?,
+        expected_bucket_owner: input.expected_bucket_owner.filter(|x| !x.as_str().is_empty()),
         lifecycle_configuration: input.lifecycle_configuration.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::bucket_lifecycle_configuration::bucket_lifecycle_configuration_to_s3s(x)?) }).transpose()?,
-        transition_default_minimum_object_size: input.transition_default_minimum_object_size.map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::TransitionDefaultMinimumObjectSize::from(x.as_str().to_owned())) }).transpose()?,
+        transition_default_minimum_object_size: input.transition_default_minimum_object_size.filter(|x| !x.as_str().is_empty()).map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::TransitionDefaultMinimumObjectSize::from(x.as_str().to_owned())) }).transpose()?,
     })
 }
 

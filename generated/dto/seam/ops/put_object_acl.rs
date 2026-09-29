@@ -29,19 +29,19 @@ use crate::compat::ConversionError;
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
 pub fn input_to_s3s(input: crate::ops::put_object_acl::Input) -> Result<s3s::dto::PutObjectAclInput, ConversionError> {
     Ok(s3s::dto::PutObjectAclInput {
-        acl: input.acl.map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::ObjectCannedACL::from(x.as_str().to_owned())) }).transpose()?,
+        acl: input.acl.filter(|x| !x.as_str().is_empty()).map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::ObjectCannedACL::from(x.as_str().to_owned())) }).transpose()?,
         access_control_policy: input.access_control_policy.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::access_control_policy::access_control_policy_to_s3s(x)?) }).transpose()?,
         bucket: { let x = input.bucket; x.as_str().to_owned() },
-        checksum_algorithm: input.checksum_algorithm.map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::ChecksumAlgorithm::from(x.as_str().to_owned())) }).transpose()?,
-        content_md5: input.content_md5,
-        expected_bucket_owner: input.expected_bucket_owner,
-        grant_full_control: input.grant_full_control,
-        grant_read: input.grant_read,
-        grant_read_acp: input.grant_read_acp,
-        grant_write: input.grant_write,
-        grant_write_acp: input.grant_write_acp,
+        checksum_algorithm: input.checksum_algorithm.filter(|x| !x.as_str().is_empty()).map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::ChecksumAlgorithm::from(x.as_str().to_owned())) }).transpose()?,
+        content_md5: input.content_md5.filter(|x| !x.as_str().is_empty()),
+        expected_bucket_owner: input.expected_bucket_owner.filter(|x| !x.as_str().is_empty()),
+        grant_full_control: input.grant_full_control.filter(|x| !x.as_str().is_empty()),
+        grant_read: input.grant_read.filter(|x| !x.as_str().is_empty()),
+        grant_read_acp: input.grant_read_acp.filter(|x| !x.as_str().is_empty()),
+        grant_write: input.grant_write.filter(|x| !x.as_str().is_empty()),
+        grant_write_acp: input.grant_write_acp.filter(|x| !x.as_str().is_empty()),
         key: { let x = input.key; x.as_str().to_owned() },
-        request_payer: input.request_payer.map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::RequestPayer::from(x.as_str().to_owned())) }).transpose()?,
+        request_payer: input.request_payer.filter(|x| !x.as_str().is_empty()).map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::RequestPayer::from(x.as_str().to_owned())) }).transpose()?,
         version_id: input.version_id,
     })
 }

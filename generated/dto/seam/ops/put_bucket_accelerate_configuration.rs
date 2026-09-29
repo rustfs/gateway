@@ -31,8 +31,8 @@ pub fn input_to_s3s(input: crate::ops::put_bucket_accelerate_configuration::Inpu
     Ok(s3s::dto::PutBucketAccelerateConfigurationInput {
         accelerate_configuration: { let x = input.accelerate_configuration; super::super::shapes::accelerate_configuration::accelerate_configuration_to_s3s(x)? },
         bucket: { let x = input.bucket; x.as_str().to_owned() },
-        checksum_algorithm: input.checksum_algorithm.map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::ChecksumAlgorithm::from(x.as_str().to_owned())) }).transpose()?,
-        expected_bucket_owner: input.expected_bucket_owner,
+        checksum_algorithm: input.checksum_algorithm.filter(|x| !x.as_str().is_empty()).map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::ChecksumAlgorithm::from(x.as_str().to_owned())) }).transpose()?,
+        expected_bucket_owner: input.expected_bucket_owner.filter(|x| !x.as_str().is_empty()),
     })
 }
 

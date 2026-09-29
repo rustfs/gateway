@@ -30,11 +30,11 @@ use crate::compat::ConversionError;
 pub fn input_to_s3s(input: crate::ops::put_object_tagging::Input) -> Result<s3s::dto::PutObjectTaggingInput, ConversionError> {
     Ok(s3s::dto::PutObjectTaggingInput {
         bucket: { let x = input.bucket; x.as_str().to_owned() },
-        checksum_algorithm: input.checksum_algorithm.map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::ChecksumAlgorithm::from(x.as_str().to_owned())) }).transpose()?,
-        content_md5: input.content_md5,
-        expected_bucket_owner: input.expected_bucket_owner,
+        checksum_algorithm: input.checksum_algorithm.filter(|x| !x.as_str().is_empty()).map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::ChecksumAlgorithm::from(x.as_str().to_owned())) }).transpose()?,
+        content_md5: input.content_md5.filter(|x| !x.as_str().is_empty()),
+        expected_bucket_owner: input.expected_bucket_owner.filter(|x| !x.as_str().is_empty()),
         key: { let x = input.key; x.as_str().to_owned() },
-        request_payer: input.request_payer.map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::RequestPayer::from(x.as_str().to_owned())) }).transpose()?,
+        request_payer: input.request_payer.filter(|x| !x.as_str().is_empty()).map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::RequestPayer::from(x.as_str().to_owned())) }).transpose()?,
         tagging: { let x = input.tagging; super::super::shapes::tagging::tagging_to_s3s(x)? },
         version_id: input.version_id,
     })

@@ -122,6 +122,33 @@ pub enum Refusal {
     },
 }
 
+/// Why the legacy decoder refused a request whose member only it reads: a query parameter it saw
+/// twice. The member's [`ConversionError::field`] names the parameter.
+pub const LEGACY_DUPLICATE_QUERY: &str = "a query parameter the legacy decoder refuses to see twice";
+
+/// As [`LEGACY_DUPLICATE_QUERY`], for a header line it saw twice.
+pub const LEGACY_DUPLICATE_HEADER: &str = "a header the legacy decoder refuses to see twice";
+
+/// As [`LEGACY_DUPLICATE_QUERY`], for a header value outside its boolean grammar.
+pub const LEGACY_INVALID_BOOLEAN: &str = "not a boolean the legacy decoder accepts";
+
+/// What the gateway answers for a conversion the legacy decoder would have refused before any
+/// RustFS body ran: the member only the legacy decoder reads (`leaf::legacy_query`,
+/// `leaf::legacy_bool_header`) held a value it rejects. The code and status are the legacy
+/// decoder's (`InvalidRequest` for a repeated parameter or header, `InvalidArgument` for a value
+/// it cannot parse); the message names the parameter or header, not its value. `None` for any
+/// other conversion error, which the adapter answers as an internal error.
+#[must_use]
+pub fn refusal_from_conversion(error: &ConversionError) -> Option<Refusal> {
+    let (code, message) = match error.reason {
+        LEGACY_DUPLICATE_QUERY => (ErrorCode::INVALID_REQUEST, format!("duplicate query: {}", error.field)),
+        LEGACY_DUPLICATE_HEADER => (ErrorCode::INVALID_REQUEST, format!("duplicate header: {}", error.field)),
+        LEGACY_INVALID_BOOLEAN => (ErrorCode::INVALID_ARGUMENT, format!("invalid header: {}", error.field)),
+        _ => return None,
+    };
+    Some(Refusal::Ordinary { code, message })
+}
+
 /// The one header an s3s error may carry that the gateway writes itself: s3s replaces the
 /// response head with the error's header map, so RustFS re-adds the XML type there.
 const WRITTEN_BY_THE_GATEWAY: [&str; 1] = ["content-type"];
