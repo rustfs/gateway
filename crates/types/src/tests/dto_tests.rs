@@ -191,6 +191,24 @@ fn c_dto_n030_a_placeholder_scalar_is_never_a_value_its_own_parser_would_accept(
 }
 
 #[test]
+fn c_dto_n036_an_empty_enumeration_value_is_a_wire_value_and_not_the_placeholder() {
+    // rustfs/gateway#1078: `<Status></Status>` is a value a client sends and legacy RustFS hands to
+    // its handlers. When the placeholder was the empty string, that value *was* the placeholder,
+    // and the decode exit check answered it with this side's 500.
+    let placeholder = StorageClass::default();
+    let empty = StorageClass::custom("");
+    assert!(placeholder.is_wire_placeholder());
+    assert!(!empty.is_wire_placeholder(), "the client's empty value is a filled member");
+    assert_ne!(placeholder, empty);
+    assert_eq!(placeholder.as_str(), "", "the placeholder still spells as nothing");
+    assert_eq!(empty.as_str(), "");
+    assert_eq!(placeholder.to_string(), empty.to_string());
+    assert!(!StorageClass::STANDARD.is_wire_placeholder());
+    assert!(!StorageClass::custom("MOONBASE").is_wire_placeholder());
+    assert!(!StorageClass::from("").is_wire_placeholder(), "a static empty spelling is a value too");
+}
+
+#[test]
 fn c_dto_n031_a_nested_shape_is_checked_as_deeply_as_it_is_required() {
     // `Object` is reached through a container, so a listing entry that was never filled in must
     // still be catchable — the guard is a method on the shape itself, not only on the Output.

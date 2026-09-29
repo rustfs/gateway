@@ -41,14 +41,21 @@ impl ObjectLockLegalHoldStatus {
     pub const VALUES: &'static [&'static str] = &["ON", "OFF"];
 
     /// Wraps a value this build has no constant for.
+    ///
+    /// Any value a wire carries, the empty one included: `<Status></Status>` is a client
+    /// sending the empty value, which a handler judges like any other value outside the
+    /// model's set — never the placeholder [`Default`] produces (rustfs/gateway#1078).
     #[must_use]
     pub fn custom(value: impl Into<Cow<'static, str>>) -> Self {
         Self(value.into())
     }
 
-    /// The wire spelling.
+    /// The wire spelling. The placeholder spells as the empty string, as it always has.
     #[must_use]
     pub fn as_str(&self) -> &str {
+        if self.0 == crate::placeholder::STRING_ENUMERATION_PLACEHOLDER {
+            return "";
+        }
         &self.0
     }
 
@@ -67,30 +74,29 @@ impl From<&'static str> for ObjectLockLegalHoldStatus {
 
 impl std::fmt::Display for ObjectLockLegalHoldStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
+        f.write_str(self.as_str())
     }
 }
 
 impl Default for ObjectLockLegalHoldStatus {
-    /// The empty value: a placeholder that is **invalid on the wire**, and exists for one
-    /// reason.
+    /// The placeholder: a value that is **invalid on the wire**, and exists for one reason.
     ///
     /// ADR-0004 P10. A required member of a generated dto is a bare type, and every generated
     /// dto derives `Default` so that `..Default::default()` keeps compiling when AWS adds a
-    /// member; an enumeration in a required position therefore needs a `Default`. No model
-    /// value is the empty string and no S3 response carries one, so this cannot be mistaken
-    /// for a value a client sent — a value this build has no constant for is
-    /// [`ObjectLockLegalHoldStatus::custom`], not this.
+    /// member; an enumeration in a required position therefore needs a `Default`. It holds
+    /// `crate::placeholder::STRING_ENUMERATION_PLACEHOLDER`, a NUL no decoder produces, and it
+    /// spells as the empty string. It is not the empty *value*: a client sends that one
+    /// (`<Status></Status>`), it decodes to [`ObjectLockLegalHoldStatus::custom`], and the two compare unequal.
     ///
     /// **The decoding path never produces it.** An absent member is `Option::None`, and
     /// `check_required` on the enclosing type rejects any placeholder that slips through.
     fn default() -> Self {
-        Self(Cow::Borrowed(""))
+        Self(Cow::Borrowed(crate::placeholder::STRING_ENUMERATION_PLACEHOLDER))
     }
 }
 
 impl crate::WirePlaceholder for ObjectLockLegalHoldStatus {
     fn is_wire_placeholder(&self) -> bool {
-        self.0.is_empty()
+        self.0 == crate::placeholder::STRING_ENUMERATION_PLACEHOLDER
     }
 }

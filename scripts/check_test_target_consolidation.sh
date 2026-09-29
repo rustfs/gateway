@@ -199,6 +199,7 @@ core_modules = (
     "dialect_claims",
     "dialect_claims_refusals",
     "dto_cold_split",
+    "empty_enumeration",
     "encryption_roundtrip",
     "error_resolution",
     "event_stream_frame_replay",

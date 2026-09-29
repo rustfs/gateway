@@ -725,3 +725,7 @@ mod governor_tests;
 
 /// The slash rule legacy RustFS applies to an object key (rustfs/gateway#1101).
 mod slash_rule_tests;
+
+/// An empty required enumeration element answered as legacy RustFS answers it, never with `500`
+/// (rustfs/gateway#1078).
+mod empty_enumeration_tests;

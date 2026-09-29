@@ -14,8 +14,8 @@
 
 //! The `lifecycle/` family as a closed ledger, executed rather than merely loaded.
 //!
-//! Responsible for: pinning the lifecycle family as a *closed* set — forty identifiers
-//! with no gap and no duplicate, twenty-five negative against fifteen positive, all three operations of the
+//! Responsible for: pinning the lifecycle family as a *closed* set — forty-one identifiers
+//! with no gap and no duplicate, twenty-six negative against fifteen positive, all three operations of the
 //! family reached — for proving the family really runs against the in-process target with every
 //! case green and none skipped, and for the binding rustfs/backlog#1719 §8 asks for and no
 //! command in this repository provides: every quirk the lifecycle overlay declares is claimed by
@@ -86,11 +86,12 @@ fn reference_run(filter: &str) -> rustfs_gateway_conformance::report::Report {
 /// characters" — plus the pair that walks a read-modify-write over an empty legacy `<Prefix>` in
 /// both directions (rustfs/gateway#221): the element the encoder used to drop, and the element it
 /// must not invent for a rule that never had one — plus `c-lifecycle-0040`, MinIO's rule and
-/// expiration extensions RustFS reads (rd-cfg-0002..0004).
-const FAMILY_SIZE: usize = 40;
+/// expiration extensions RustFS reads (rd-cfg-0002..0004) — plus `c-lifecycle-0041`, an empty rule
+/// `Status` stored as the out-of-set value it is rather than answered with `500` (rustfs/gateway#1078).
+const FAMILY_SIZE: usize = 41;
 
 /// The polarity split, in the order `AGENTS.md` states the rule: negatives outnumber positives.
-const NEGATIVE: usize = 25;
+const NEGATIVE: usize = 26;
 const POSITIVE: usize = 15;
 
 /// Every quirk `model/overlays/quirks/lifecycle.toml` declares, in id order.
@@ -150,13 +151,13 @@ fn run_lifecycle_domain() -> Report {
     runner::run(&corpus, &mut sut, &options)
 }
 
-/// Negative — the lifecycle family is a closed ledger: forty identifiers, contiguous, one
+/// Negative — the lifecycle family is a closed ledger: forty-one identifiers, contiguous, one
 /// file each.
 ///
 /// A gap means a case was deleted, which `AGENTS.md` lists as a silently dropped guarantee; a
 /// duplicate means two files claim one identifier, after which only one of them is ever reported.
 #[test]
-fn the_lifecycle_family_is_a_closed_ledger_of_forty_identifiers() {
+fn the_lifecycle_family_is_a_closed_ledger_of_forty_one_identifiers() {
     let corpus = corpus();
     let cases = family(&corpus);
 
@@ -179,7 +180,7 @@ fn the_lifecycle_family_is_a_closed_ledger_of_forty_identifiers() {
 /// Negative — the family keeps negatives in the majority, which is the corpus rule applied to one
 /// family rather than to the whole corpus, where a large well-balanced neighbour can pay for it.
 #[test]
-fn the_lifecycle_family_keeps_twenty_five_negative_against_fifteen_positive() {
+fn the_lifecycle_family_keeps_twenty_six_negative_against_fifteen_positive() {
     let corpus = corpus();
     let cases = family(&corpus);
 
@@ -211,7 +212,7 @@ fn every_operation_of_the_lifecycle_family_is_exercised() {
     }
 }
 
-/// Positive — the family executes against the assembled service, all forty green, none
+/// Positive — the family executes against the assembled service, all forty-one green, none
 /// skipped.
 ///
 /// Three separate things are asserted, because each is satisfiable without the others and the
