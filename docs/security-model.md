@@ -389,10 +389,13 @@ framework's half:
   classified as `ClassKind::CredentialLookup` before the provider runs, including malformed
   and forged credentials. The mandatory framework governor therefore applies its per-IP and
   credential-class budgets to the whole lookup path without parsing credentials itself; a
-  deployment governor may add tighter limits but cannot remove those budgets.
+  deployment governor may add tighter limits but cannot remove those budgets. Only the assembly
+  itself can lift one, by writing `Rate::unlimited()` into `framework_governor_rates` — as the
+  RustFS profile does, because legacy RustFS applies no pre-authentication budget.
 - **A weakened lookup posture is visible.** `S3Service::security_posture` names whether the
-  negative cache is enabled and whether the mandatory per-IP bucket is bounded or closed. A
-  start-up report can print that value without downcasting the authenticator or governor.
+  negative cache is enabled, whether the mandatory per-IP bucket is bounded, closed or unlimited,
+  and every pre-authentication layer that is closed or unlimited. A start-up report can print
+  that value without downcasting the authenticator or governor.
 - **Nothing that is a credential can be printed.** `SecretBytes`, `SessionToken` and `SigningKey`
   have no `Debug`, no `Display`, no `PartialEq`, no `Clone` and no serializer, and that absence
   propagates into anything holding one. `scripts/check_secret_hygiene.sh` and

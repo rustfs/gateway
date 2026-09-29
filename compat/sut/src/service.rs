@@ -101,12 +101,14 @@ pub(crate) fn rustfs_service_config() -> Result<ServiceConfig, Box<dyn std::erro
         .with_request_body_deadlines(body))
 }
 
-/// The framework governor's rates in the RustFS profile: the widest rate on every layer.
+/// The framework governor's rates in the RustFS profile: no limit on any layer.
 ///
 /// Legacy RustFS applies no pre-authentication limit of its own. Its optional per-client limit
 /// (`RUSTFS_API_RATE_LIMIT_*`, off by default) is a host layer in front of both stacks, so the
-/// framework's layers must not refuse anything legacy RustFS answers (rustfs/gateway#1067). The
-/// address table keeps its shipped bound; it is memory, not a rate.
+/// framework's layers must not refuse anything legacy RustFS answers (rustfs/gateway#1067): every
+/// layer is lifted with `Rate::unlimited()`, which admits without counting, keeps no address
+/// entry, and is named in the start-up posture. The address table keeps its shipped bound; it is
+/// memory, not a rate, and an unlimited per-client layer never fills it.
 ///
 /// Legacy-compat (rustfs/backlog#2684): legacy RustFS verifies every signature it is sent, with no
 /// bound on how many failed verifications or credential lookups one caller can force, and serves
@@ -115,13 +117,13 @@ pub(crate) fn rustfs_service_config() -> Result<ServiceConfig, Box<dyn std::erro
 /// request already returns its charge, so the bound would only count failed and in-flight work)
 /// with its refill above `per_ip`'s, taken from RustFS configuration.
 pub(crate) fn rustfs_governor_rates() -> rustfs_gateway::GovernorRates {
-    let widest = rustfs_gateway::Rate::new(u32::MAX, u32::MAX);
+    let unlimited = rustfs_gateway::Rate::unlimited();
     rustfs_gateway::GovernorRates {
-        aggregate: widest,
-        per_ip: widest,
-        credential_lookup: widest,
-        cors_preflight: widest,
-        unauthenticated: widest,
+        aggregate: unlimited,
+        per_ip: unlimited,
+        credential_lookup: unlimited,
+        cors_preflight: unlimited,
+        unauthenticated: unlimited,
         tracked_clients: rustfs_gateway::GovernorRates::default().tracked_clients,
     }
 }

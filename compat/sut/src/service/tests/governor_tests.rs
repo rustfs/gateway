@@ -72,3 +72,27 @@ async fn a_signed_burst_is_served() {
     let statuses = statuses(|| as_main(http::Method::GET, "/", Bytes::new())).await;
     assert!(statuses.iter().all(|status| *status == 200), "{statuses:?}");
 }
+
+/// Negative — every framework layer is lifted, not sized: the served assembly's posture names all
+/// five, exactly as the RustFS bridge's must, and none is a finite rate standing in for no limit.
+#[test]
+fn n_every_framework_governor_layer_is_unlimited() {
+    let rates = super::super::rustfs_governor_rates();
+    for rate in [
+        rates.aggregate,
+        rates.per_ip,
+        rates.credential_lookup,
+        rates.cors_preflight,
+        rates.unauthenticated,
+    ] {
+        assert!(rate.admits_everything(), "{rate:?}");
+    }
+    let root = TestRoot::new();
+    let (_backend, service) = assembled(&two_identity_options(&root, &[]));
+    let report = service.security_posture().to_string();
+    assert!(report.contains("per-IP bucket: unlimited"), "{report}");
+    assert!(
+        report.contains("unlimited pre-authentication layers: aggregate, credential lookup, CORS preflight, unauthenticated"),
+        "{report}"
+    );
+}

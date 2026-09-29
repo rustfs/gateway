@@ -28,28 +28,61 @@
 /// body — so the expensive requests are exactly the ones that would be charged nothing.
 pub(super) const COST: u64 = 1_000;
 
-/// One layer's admission rate: a burst, and what it refills at.
+/// One layer's admission rate: a burst, and what it refills at — or no limit at all.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Rate {
     burst: u32,
     per_second: u32,
+    unlimited: bool,
 }
 
 impl Rate {
     /// A rate that admits `burst` at once and then `per_second` every second.
+    ///
+    /// Always a limit, however large the numbers: only [`Self::unlimited`] lifts one.
     #[must_use]
     pub const fn new(burst: u32, per_second: u32) -> Self {
-        Self { burst, per_second }
+        Self {
+            burst,
+            per_second,
+            unlimited: false,
+        }
     }
 
     /// A rate that admits nothing at all.
     ///
     /// A legal configuration, and the only honest way to express "this class is closed". A
-    /// deployment cannot disable the mandatory framework governor through its extension; there
-    /// is no way to spell "unlimited" as a [`Rate`].
+    /// deployment cannot disable the mandatory framework governor through its extension: a
+    /// deployment governor is ANDed after it, and only the host's own
+    /// `ServiceBuilder::framework_governor_rates` can lift a layer, with [`Self::unlimited`].
     #[must_use]
     pub const fn none() -> Self {
-        Self { burst: 0, per_second: 0 }
+        Self {
+            burst: 0,
+            per_second: 0,
+            unlimited: false,
+        }
+    }
+
+    /// A layer with no limit: every request is admitted and none is counted.
+    ///
+    /// For a host that applies no pre-authentication limit of its own — legacy RustFS applies
+    /// none; its optional per-client limit is a host layer in front of both stacks. A layer at
+    /// this rate keeps no state at all, no token count and no address entry, and the start-up
+    /// posture names it. `burst` and `per_second` read `u32::MAX` for it.
+    #[must_use]
+    pub const fn unlimited() -> Self {
+        Self {
+            burst: u32::MAX,
+            per_second: u32::MAX,
+            unlimited: true,
+        }
+    }
+
+    /// Whether this layer has no limit (see [`Self::unlimited`]).
+    #[must_use]
+    pub const fn admits_everything(self) -> bool {
+        self.unlimited
     }
 
     /// How many requests may arrive at once.
@@ -79,8 +112,8 @@ impl Rate {
 /// The rates [`super::DefaultGovernor`] enforces, and the bound on what it remembers.
 ///
 /// The numbers are documented, with what happens when they are set wrong, in
-/// `docs/capacity-planning.md`. They are non-zero by construction: there is no
-/// `GovernorRates::unlimited`, because a deployment governor is ANDed after this mandatory one.
+/// `docs/capacity-planning.md`. The defaults are limits; a host lifts a layer only by writing
+/// [`Rate::unlimited`] into it here, and the start-up posture names every layer it lifted.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct GovernorRates {
     /// The ceiling on all pre-authentication work this process admits.
@@ -172,5 +205,33 @@ mod tests {
     fn an_enormous_burst_saturates_rather_than_wrapping() {
         assert_eq!(Rate::new(u32::MAX, 0).capacity(), u64::from(u32::MAX) * COST);
         assert!(Rate::new(u32::MAX, 0).capacity() > Rate::new(u32::MAX - 1, 0).capacity());
+    }
+    /// Negative — `unlimited` is its own configuration: not the widest finite rate, which still
+    /// runs dry, and not a closed layer.
+    #[test]
+    fn n_unlimited_is_neither_a_large_rate_nor_a_closed_one() {
+        let widest = Rate::new(u32::MAX, u32::MAX);
+        assert!(Rate::unlimited().admits_everything());
+        assert!(!Rate::unlimited().admits_nothing());
+        assert_ne!(Rate::unlimited(), widest, "the widest finite rate is still a limit");
+        assert!(!widest.admits_everything());
+        assert!(!Rate::none().admits_everything());
+        assert!(!Rate::new(0, 0).admits_everything());
+    }
+
+    /// Negative — nothing in the shipped defaults is unlimited; lifting a layer is always the
+    /// host's explicit choice.
+    #[test]
+    fn n_no_shipped_default_is_unlimited() {
+        let rates = GovernorRates::default();
+        for rate in [
+            rates.aggregate,
+            rates.per_ip,
+            rates.credential_lookup,
+            rates.cors_preflight,
+            rates.unauthenticated,
+        ] {
+            assert!(!rate.admits_everything(), "{rate:?}");
+        }
     }
 }

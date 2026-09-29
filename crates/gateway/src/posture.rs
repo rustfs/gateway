@@ -34,12 +34,14 @@ pub struct SecurityPosture {
     credential_guard: Option<CredentialGuardConfig>,
     per_ip: Rate,
     closed_layers: ClosedLayers,
+    unlimited_layers: ClosedLayers,
     wall_clock: ClockPosture,
     custom_signature_verifier: bool,
     dangerously_replaced_signature_verifier: bool,
 }
 
-/// Which pre-authentication limiter layers were configured to admit nothing (c-gov-0031).
+/// Which pre-authentication limiter layers were configured to admit nothing (c-gov-0031), or,
+/// read through [`ClosedLayers::unlimited_of`], to admit everything.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 struct ClosedLayers {
     aggregate: bool,
@@ -55,6 +57,16 @@ impl ClosedLayers {
             credential_lookup: rates.credential_lookup.admits_nothing(),
             cors_preflight: rates.cors_preflight.admits_nothing(),
             unauthenticated: rates.unauthenticated.admits_nothing(),
+        }
+    }
+
+    /// The same four layers, marked where the host lifted the limit ([`Rate::unlimited`]).
+    const fn unlimited_of(rates: &GovernorRates) -> Self {
+        Self {
+            aggregate: rates.aggregate.admits_everything(),
+            credential_lookup: rates.credential_lookup.admits_everything(),
+            cors_preflight: rates.cors_preflight.admits_everything(),
+            unauthenticated: rates.unauthenticated.admits_everything(),
         }
     }
 
@@ -82,6 +94,7 @@ impl SecurityPosture {
             credential_guard,
             per_ip: rates.per_ip,
             closed_layers: ClosedLayers::of(rates),
+            unlimited_layers: ClosedLayers::unlimited_of(rates),
             wall_clock,
             custom_signature_verifier,
             dangerously_replaced_signature_verifier,
@@ -130,6 +143,8 @@ impl core::fmt::Display for SecurityPosture {
         }
         if self.per_ip.admits_nothing() {
             f.write_str("; per-IP bucket: closed")?;
+        } else if self.per_ip.admits_everything() {
+            f.write_str("; per-IP bucket: unlimited")?;
         } else {
             write!(
                 f,
@@ -142,6 +157,16 @@ impl core::fmt::Display for SecurityPosture {
         if closed.peek().is_some() {
             f.write_str("; closed pre-authentication layers: ")?;
             for (index, name) in closed.enumerate() {
+                if index > 0 {
+                    f.write_str(", ")?;
+                }
+                f.write_str(name)?;
+            }
+        }
+        let mut unlimited = self.unlimited_layers.names().peekable();
+        if unlimited.peek().is_some() {
+            f.write_str("; unlimited pre-authentication layers: ")?;
+            for (index, name) in unlimited.enumerate() {
                 if index > 0 {
                     f.write_str(", ")?;
                 }
