@@ -41,12 +41,22 @@ response_root = "CopyPartResult"
 xmlns = "emit"
 unwrapped_output = false
 body_literal = false
-element_order = ["ETag", "LastModified"]
+element_order = ["ETag", "LastModified", "ChecksumCRC32", "ChecksumCRC32C", "ChecksumCRC64NVME", "ChecksumSHA1", "ChecksumSHA256", "ChecksumSHA512", "ChecksumMD5", "ChecksumXXHASH64", "ChecksumXXHASH3", "ChecksumXXHASH128"]
 url_encoded_fields = []
 
 [xml.empty_value]
 ETag = "emit"
 LastModified = "emit"
+ChecksumCRC32 = "emit"
+ChecksumCRC32C = "emit"
+ChecksumCRC64NVME = "emit"
+ChecksumSHA1 = "emit"
+ChecksumSHA256 = "emit"
+ChecksumSHA512 = "emit"
+ChecksumMD5 = "emit"
+ChecksumXXHASH64 = "emit"
+ChecksumXXHASH3 = "emit"
+ChecksumXXHASH128 = "emit"
 
 [errors]
 not_configured = ""
@@ -307,3 +317,93 @@ type = "Timestamp(Iso8601)"
 required = false
 hot = false
 quirks = ["q-timestamp-0005"]
+
+[[output]]
+name = "ChecksumCRC32"
+wire_name = "ChecksumCRC32"
+binding = "BodyXml"
+type = "String"
+required = false
+hot = false
+quirks = []
+
+[[output]]
+name = "ChecksumCRC32C"
+wire_name = "ChecksumCRC32C"
+binding = "BodyXml"
+type = "String"
+required = false
+hot = false
+quirks = []
+
+[[output]]
+name = "ChecksumCRC64NVME"
+wire_name = "ChecksumCRC64NVME"
+binding = "BodyXml"
+type = "String"
+required = false
+hot = false
+quirks = []
+
+[[output]]
+name = "ChecksumSHA1"
+wire_name = "ChecksumSHA1"
+binding = "BodyXml"
+type = "String"
+required = false
+hot = false
+quirks = []
+
+[[output]]
+name = "ChecksumSHA256"
+wire_name = "ChecksumSHA256"
+binding = "BodyXml"
+type = "String"
+required = false
+hot = false
+quirks = []
+
+[[output]]
+name = "ChecksumSHA512"
+wire_name = "ChecksumSHA512"
+binding = "BodyXml"
+type = "String"
+required = false
+hot = false
+quirks = []
+
+[[output]]
+name = "ChecksumMD5"
+wire_name = "ChecksumMD5"
+binding = "BodyXml"
+type = "String"
+required = false
+hot = false
+quirks = []
+
+[[output]]
+name = "ChecksumXXHASH64"
+wire_name = "ChecksumXXHASH64"
+binding = "BodyXml"
+type = "String"
+required = false
+hot = false
+quirks = []
+
+[[output]]
+name = "ChecksumXXHASH3"
+wire_name = "ChecksumXXHASH3"
+binding = "BodyXml"
+type = "String"
+required = false
+hot = false
+quirks = []
+
+[[output]]
+name = "ChecksumXXHASH128"
+wire_name = "ChecksumXXHASH128"
+binding = "BodyXml"
+type = "String"
+required = false
+hot = false
+quirks = []

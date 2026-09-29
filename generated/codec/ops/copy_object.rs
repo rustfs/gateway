@@ -330,6 +330,39 @@ impl OperationCodec for dto::CopyObject {
         if let Some(v) = output.last_modified.as_ref() {
             writer.element("LastModified", &value::render_timestamp(v, TimestampFormat::Iso8601)?);
         }
+        if let Some(v) = output.checksum_type.as_ref() {
+            writer.element("ChecksumType", v.as_str());
+        }
+        if let Some(v) = output.checksum_crc32.as_ref() {
+            writer.element("ChecksumCRC32", v.as_str());
+        }
+        if let Some(v) = output.checksum_crc32c.as_ref() {
+            writer.element("ChecksumCRC32C", v.as_str());
+        }
+        if let Some(v) = output.checksum_crc64nvme.as_ref() {
+            writer.element("ChecksumCRC64NVME", v.as_str());
+        }
+        if let Some(v) = output.checksum_sha1.as_ref() {
+            writer.element("ChecksumSHA1", v.as_str());
+        }
+        if let Some(v) = output.checksum_sha256.as_ref() {
+            writer.element("ChecksumSHA256", v.as_str());
+        }
+        if let Some(v) = output.checksum_sha512.as_ref() {
+            writer.element("ChecksumSHA512", v.as_str());
+        }
+        if let Some(v) = output.checksum_md5.as_ref() {
+            writer.element("ChecksumMD5", v.as_str());
+        }
+        if let Some(v) = output.checksum_xxhash64.as_ref() {
+            writer.element("ChecksumXXHASH64", v.as_str());
+        }
+        if let Some(v) = output.checksum_xxhash3.as_ref() {
+            writer.element("ChecksumXXHASH3", v.as_str());
+        }
+        if let Some(v) = output.checksum_xxhash128.as_ref() {
+            writer.element("ChecksumXXHASH128", v.as_str());
+        }
         writer.close();
         response.body = ResponseBody::Complete(writer.finish().into_bytes());
         response.set_header("content-type", "application/xml");

@@ -65,6 +65,7 @@ pub(crate) mod s3s_0_17_0 {
     use harness::*;
 
     pub(crate) mod context;
+    mod copy_result;
     mod put_bucket_versioning;
     mod put_object;
 }

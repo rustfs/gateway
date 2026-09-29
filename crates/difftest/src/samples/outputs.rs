@@ -510,7 +510,7 @@ pub(crate) fn rows() -> Vec<OutputRow> {
                     ..copy_result()
                 })
             },
-            &["kd-encode-0042"],
+            stamped!("kd-encode-0005", "kd-encode-0006", "kd-encode-0033", "kd-encode-0062"),
         ),
         row(
             "copy-object-with-checksum-type",
@@ -521,7 +521,30 @@ pub(crate) fn rows() -> Vec<OutputRow> {
                     ..copy_result()
                 })
             },
-            &["kd-encode-0047"],
+            stamped!("kd-encode-0005", "kd-encode-0006", "kd-encode-0033", "kd-encode-0063"),
+        ),
+        row(
+            "copy-object-with-every-checksum",
+            copy_request(),
+            || {
+                copy(oracle::CopyObjectResult {
+                    checksum_type: text("COMPOSITE"),
+                    checksum_crc32: Some("DUoRhQ==".to_owned()),
+                    checksum_crc32c: Some("yZRlqg==".to_owned()),
+                    checksum_crc64nvme: Some("jSnVw/bqjr4=".to_owned()),
+                    checksum_sha1: Some("Kq5sNclPz7QV2+lfQIuc6R7oRu0=".to_owned()),
+                    checksum_sha256: Some("uU0nuZNNPgilLlLX2n2r+sSE7+N6U4DukIj3rOLvzek=".to_owned()),
+                    checksum_sha512: Some(
+                        "MJ7MSJwS1utMxA9QyQLytNDtd+5RGnx6m808qG1M2G+YndNbxf9JlnDaNCVbRbDP2DDoH2Bdz33FVC6TrpzXbw==".to_owned(),
+                    ),
+                    checksum_md5: Some("XrY7u+Ae7tCTyyK7j1rNww==".to_owned()),
+                    checksum_xxhash64: Some("RQUY/mbA3bQ=".to_owned()),
+                    checksum_xxhash3: Some("0vGmIJHyGyA=".to_owned()),
+                    checksum_xxhash128: Some("32WdXnMWYnm/8YO6JpWpCg==".to_owned()),
+                    ..copy_result()
+                })
+            },
+            stamped!("kd-encode-0005", "kd-encode-0006", "kd-encode-0033", "kd-encode-0064"),
         ),
     ];
     for (algorithm, value) in CHECKSUMS {

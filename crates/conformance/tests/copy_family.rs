@@ -14,10 +14,10 @@
 
 //! The `copy/` family as a closed ledger, executed rather than merely loaded.
 //!
-//! Responsible for: pinning the copy family as a *closed* set — forty-three identifiers with no
-//! gap and no duplicate, twenty-five negative against eighteen positive, every one of them carrying a
+//! Responsible for: pinning the copy family as a *closed* set — forty-four identifiers with no
+//! gap and no duplicate, twenty-five negative against nineteen positive, every one of them carrying a
 //! verdict in the checked-in baseline — and for proving the family really runs against the
-//! in-process target, that all forty-three are green, and that the last one to become so did not
+//! in-process target, that all forty-four are green, and that the last one to become so did not
 //! buy its verdict by moving the boundary the family's other cases stand on.
 //! NOT responsible for: what any individual copy case asserts — that lives in the case file — or
 //! for the corpus-wide invariants, which `tests/corpus.rs` already owns, or for the `--baseline`
@@ -50,12 +50,13 @@ use rustfs_gateway_conformance::runner::{self, RunOptions};
 
 /// The size of the family: the thirty-eight cases enumerated in rustfs/backlog#1686 §7, plus the five
 /// negative `c-copy-0039`..`c-copy-0043` that rustfs/gateway#775 added for #764 (an unreadable
-/// copy-source date condition is ignored, as S3 does, rather than refused).
-const FAMILY_SIZE: usize = 43;
+/// copy-source date condition is ignored, as S3 does, rather than refused), plus the positive
+/// `c-copy-0044` for the copy result's checksum (rd-copy-0001).
+const FAMILY_SIZE: usize = 44;
 
 /// The polarity split, in the order `AGENTS.md` states the rule: negatives outnumber positives.
 const NEGATIVE: usize = 25;
-const POSITIVE: usize = 18;
+const POSITIVE: usize = 19;
 
 /// How many of the family are green. All of them.
 const GREEN: usize = FAMILY_SIZE;
@@ -133,7 +134,7 @@ fn assert_passed(report: &Report, id: &str, why: &str) {
 /// A gap means a case was deleted, which `AGENTS.md` lists as a silently dropped guarantee; a
 /// duplicate means two files claim one identifier, after which only one of them is ever reported.
 #[test]
-fn the_copy_family_is_a_closed_ledger_of_forty_three_identifiers() {
+fn the_copy_family_is_a_closed_ledger_of_forty_four_identifiers() {
     let corpus = corpus();
     let cases = family(&corpus);
 
@@ -153,7 +154,7 @@ fn the_copy_family_is_a_closed_ledger_of_forty_three_identifiers() {
 /// The corpus-wide check in `tests/corpus.rs` compares two totals over six hundred cases, so a
 /// family that flipped every one of its own cases to positive would still leave it green.
 #[test]
-fn the_copy_family_keeps_twenty_five_negative_against_eighteen_positive() {
+fn the_copy_family_keeps_twenty_five_negative_against_nineteen_positive() {
     let corpus = corpus();
     let cases = family(&corpus);
 
@@ -192,7 +193,7 @@ fn every_copy_case_carries_a_verdict_in_the_baseline() {
 /// * every one of them passed — a count of greens alone would let a newly-green case pay for a
 ///   newly-red one, so the reds are enumerated and the list has to be empty.
 #[test]
-fn the_copy_family_runs_with_all_forty_three_green_and_nothing_skipped() {
+fn the_copy_family_runs_with_all_forty_four_green_and_nothing_skipped() {
     let report = run_copy_domain();
 
     assert_eq!(report.outcomes.len(), FAMILY_SIZE, "the filter did not select the whole family");

@@ -185,27 +185,27 @@ pub const MEMBERS: &[MemberOverride] = &[
     ("CopyObjectOutput", "last_modified", Rule::Nested("copy_object_result")),
     ("UploadPartCopyOutput", "e_tag", Rule::Nested("copy_part_result")),
     ("UploadPartCopyOutput", "last_modified", Rule::Nested("copy_part_result")),
-    ("CopyObjectResult", "checksum_crc32", Rule::S3sOnly(RESULT_CHECKSUM)),
-    ("CopyObjectResult", "checksum_crc32c", Rule::S3sOnly(RESULT_CHECKSUM)),
-    ("CopyObjectResult", "checksum_crc64nvme", Rule::S3sOnly(RESULT_CHECKSUM)),
-    ("CopyObjectResult", "checksum_md5", Rule::S3sOnly(RESULT_CHECKSUM)),
-    ("CopyObjectResult", "checksum_sha1", Rule::S3sOnly(RESULT_CHECKSUM)),
-    ("CopyObjectResult", "checksum_sha256", Rule::S3sOnly(RESULT_CHECKSUM)),
-    ("CopyObjectResult", "checksum_sha512", Rule::S3sOnly(RESULT_CHECKSUM)),
-    ("CopyObjectResult", "checksum_type", Rule::S3sOnly(RESULT_CHECKSUM)),
-    ("CopyObjectResult", "checksum_xxhash128", Rule::S3sOnly(RESULT_CHECKSUM)),
-    ("CopyObjectResult", "checksum_xxhash3", Rule::S3sOnly(RESULT_CHECKSUM)),
-    ("CopyObjectResult", "checksum_xxhash64", Rule::S3sOnly(RESULT_CHECKSUM)),
-    ("CopyPartResult", "checksum_crc32", Rule::S3sOnly(RESULT_CHECKSUM)),
-    ("CopyPartResult", "checksum_crc32c", Rule::S3sOnly(RESULT_CHECKSUM)),
-    ("CopyPartResult", "checksum_crc64nvme", Rule::S3sOnly(RESULT_CHECKSUM)),
-    ("CopyPartResult", "checksum_md5", Rule::S3sOnly(RESULT_CHECKSUM)),
-    ("CopyPartResult", "checksum_sha1", Rule::S3sOnly(RESULT_CHECKSUM)),
-    ("CopyPartResult", "checksum_sha256", Rule::S3sOnly(RESULT_CHECKSUM)),
-    ("CopyPartResult", "checksum_sha512", Rule::S3sOnly(RESULT_CHECKSUM)),
-    ("CopyPartResult", "checksum_xxhash128", Rule::S3sOnly(RESULT_CHECKSUM)),
-    ("CopyPartResult", "checksum_xxhash3", Rule::S3sOnly(RESULT_CHECKSUM)),
-    ("CopyPartResult", "checksum_xxhash64", Rule::S3sOnly(RESULT_CHECKSUM)),
+    ("CopyObjectOutput", "checksum_type", Rule::Nested("copy_object_result")),
+    ("CopyObjectOutput", "checksum_crc32", Rule::Nested("copy_object_result")),
+    ("CopyObjectOutput", "checksum_crc32c", Rule::Nested("copy_object_result")),
+    ("CopyObjectOutput", "checksum_crc64nvme", Rule::Nested("copy_object_result")),
+    ("CopyObjectOutput", "checksum_sha1", Rule::Nested("copy_object_result")),
+    ("CopyObjectOutput", "checksum_sha256", Rule::Nested("copy_object_result")),
+    ("CopyObjectOutput", "checksum_sha512", Rule::Nested("copy_object_result")),
+    ("CopyObjectOutput", "checksum_md5", Rule::Nested("copy_object_result")),
+    ("CopyObjectOutput", "checksum_xxhash64", Rule::Nested("copy_object_result")),
+    ("CopyObjectOutput", "checksum_xxhash3", Rule::Nested("copy_object_result")),
+    ("CopyObjectOutput", "checksum_xxhash128", Rule::Nested("copy_object_result")),
+    ("UploadPartCopyOutput", "checksum_crc32", Rule::Nested("copy_part_result")),
+    ("UploadPartCopyOutput", "checksum_crc32c", Rule::Nested("copy_part_result")),
+    ("UploadPartCopyOutput", "checksum_crc64nvme", Rule::Nested("copy_part_result")),
+    ("UploadPartCopyOutput", "checksum_sha1", Rule::Nested("copy_part_result")),
+    ("UploadPartCopyOutput", "checksum_sha256", Rule::Nested("copy_part_result")),
+    ("UploadPartCopyOutput", "checksum_sha512", Rule::Nested("copy_part_result")),
+    ("UploadPartCopyOutput", "checksum_md5", Rule::Nested("copy_part_result")),
+    ("UploadPartCopyOutput", "checksum_xxhash64", Rule::Nested("copy_part_result")),
+    ("UploadPartCopyOutput", "checksum_xxhash3", Rule::Nested("copy_part_result")),
+    ("UploadPartCopyOutput", "checksum_xxhash128", Rule::Nested("copy_part_result")),
     // MinIO extensions s3s decodes from `x-minio-*` / `?versionId=` (MINIO) or from bucket
     // configuration XML (MINIO_XML). The seam leaves them at their default: the adapter fills the
     // header ones, and the XML ones are open divergences.
@@ -234,7 +234,6 @@ pub const MEMBERS: &[MemberOverride] = &[
 
 const SEALED: &str = "the gateway authorizes the copy source as a derived resource and clears the input member";
 const EVENT_HOLD: &str = "an Object Lock event hold, which no pinned s3s shape holds and RustFS does not store";
-const RESULT_CHECKSUM: &str = "the gateway copy result carries no checksum members (model gap, rustfs/gateway#967)";
 const MINIO: &str = "a MinIO extension the adapter fills from the request headers";
 const MINIO_XML: &str = "a MinIO XML extension the gateway model does not decode or encode; a divergence to rule before the bucket-configuration operations move (rustfs/gateway#967)";
 const NOT_IN_MODEL: &str = "an AWS model member the gateway model does not carry and RustFS neither reads nor sets";

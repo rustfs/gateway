@@ -282,6 +282,96 @@
                             "type": { "kind": "Timestamp", "format": "Iso8601" },
                             "hot": false,
                             "quirk_refs": ["q-timestamp-0005"]
+                          },
+                          {
+                            "name": "ChecksumCRC32",
+                            "wire_name": "ChecksumCRC32",
+                            "required": false,
+                            "binding": { "kind": "BodyXml" },
+                            "type": { "kind": "String" },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "ChecksumCRC32C",
+                            "wire_name": "ChecksumCRC32C",
+                            "required": false,
+                            "binding": { "kind": "BodyXml" },
+                            "type": { "kind": "String" },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "ChecksumCRC64NVME",
+                            "wire_name": "ChecksumCRC64NVME",
+                            "required": false,
+                            "binding": { "kind": "BodyXml" },
+                            "type": { "kind": "String" },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "ChecksumSHA1",
+                            "wire_name": "ChecksumSHA1",
+                            "required": false,
+                            "binding": { "kind": "BodyXml" },
+                            "type": { "kind": "String" },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "ChecksumSHA256",
+                            "wire_name": "ChecksumSHA256",
+                            "required": false,
+                            "binding": { "kind": "BodyXml" },
+                            "type": { "kind": "String" },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "ChecksumSHA512",
+                            "wire_name": "ChecksumSHA512",
+                            "required": false,
+                            "binding": { "kind": "BodyXml" },
+                            "type": { "kind": "String" },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "ChecksumMD5",
+                            "wire_name": "ChecksumMD5",
+                            "required": false,
+                            "binding": { "kind": "BodyXml" },
+                            "type": { "kind": "String" },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "ChecksumXXHASH64",
+                            "wire_name": "ChecksumXXHASH64",
+                            "required": false,
+                            "binding": { "kind": "BodyXml" },
+                            "type": { "kind": "String" },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "ChecksumXXHASH3",
+                            "wire_name": "ChecksumXXHASH3",
+                            "required": false,
+                            "binding": { "kind": "BodyXml" },
+                            "type": { "kind": "String" },
+                            "hot": false,
+                            "quirk_refs": []
+                          },
+                          {
+                            "name": "ChecksumXXHASH128",
+                            "wire_name": "ChecksumXXHASH128",
+                            "required": false,
+                            "binding": { "kind": "BodyXml" },
+                            "type": { "kind": "String" },
+                            "hot": false,
+                            "quirk_refs": []
                           }
                         ]
             },
@@ -292,8 +382,34 @@
            "response_root": "CopyPartResult",
            "xmlns": "emit",
            "unwrapped_output": false,
-           "element_order": ["ETag", "LastModified"],
-           "empty_value_policy": { "ETag": "emit", "LastModified": "emit" },
+           "element_order": [
+                              "ETag",
+                              "LastModified",
+                              "ChecksumCRC32",
+                              "ChecksumCRC32C",
+                              "ChecksumCRC64NVME",
+                              "ChecksumSHA1",
+                              "ChecksumSHA256",
+                              "ChecksumSHA512",
+                              "ChecksumMD5",
+                              "ChecksumXXHASH64",
+                              "ChecksumXXHASH3",
+                              "ChecksumXXHASH128"
+                            ],
+           "empty_value_policy": {
+                                   "ETag": "emit",
+                                   "LastModified": "emit",
+                                   "ChecksumCRC32": "emit",
+                                   "ChecksumCRC32C": "emit",
+                                   "ChecksumCRC64NVME": "emit",
+                                   "ChecksumSHA1": "emit",
+                                   "ChecksumSHA256": "emit",
+                                   "ChecksumSHA512": "emit",
+                                   "ChecksumMD5": "emit",
+                                   "ChecksumXXHASH64": "emit",
+                                   "ChecksumXXHASH3": "emit",
+                                   "ChecksumXXHASH128": "emit"
+                                 },
            "url_encoded_fields": [],
            "attributes": [],
            "body_literal": false

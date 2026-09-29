@@ -273,6 +273,28 @@ pub struct Output {
     pub e_tag: crate::ETag,
     /// Wire `LastModified`, bound as BodyXml. Optional.
     pub last_modified: Option<crate::Timestamp>,
+    /// Wire `ChecksumType`, bound as BodyXml. Optional.
+    pub checksum_type: Option<String>,
+    /// Wire `ChecksumCRC32`, bound as BodyXml. Optional.
+    pub checksum_crc32: Option<String>,
+    /// Wire `ChecksumCRC32C`, bound as BodyXml. Optional.
+    pub checksum_crc32c: Option<String>,
+    /// Wire `ChecksumCRC64NVME`, bound as BodyXml. Optional.
+    pub checksum_crc64nvme: Option<String>,
+    /// Wire `ChecksumSHA1`, bound as BodyXml. Optional.
+    pub checksum_sha1: Option<String>,
+    /// Wire `ChecksumSHA256`, bound as BodyXml. Optional.
+    pub checksum_sha256: Option<String>,
+    /// Wire `ChecksumSHA512`, bound as BodyXml. Optional.
+    pub checksum_sha512: Option<String>,
+    /// Wire `ChecksumMD5`, bound as BodyXml. Optional.
+    pub checksum_md5: Option<String>,
+    /// Wire `ChecksumXXHASH64`, bound as BodyXml. Optional.
+    pub checksum_xxhash64: Option<String>,
+    /// Wire `ChecksumXXHASH3`, bound as BodyXml. Optional.
+    pub checksum_xxhash3: Option<String>,
+    /// Wire `ChecksumXXHASH128`, bound as BodyXml. Optional.
+    pub checksum_xxhash128: Option<String>,
 }
 
 impl Output {
@@ -315,6 +337,17 @@ impl std::fmt::Debug for Output {
             .field("request_charged", &self.request_charged)
             .field("e_tag", &self.e_tag)
             .field("last_modified", &self.last_modified)
+            .field("checksum_type", &self.checksum_type)
+            .field("checksum_crc32", &self.checksum_crc32)
+            .field("checksum_crc32c", &self.checksum_crc32c)
+            .field("checksum_crc64nvme", &self.checksum_crc64nvme)
+            .field("checksum_sha1", &self.checksum_sha1)
+            .field("checksum_sha256", &self.checksum_sha256)
+            .field("checksum_sha512", &self.checksum_sha512)
+            .field("checksum_md5", &self.checksum_md5)
+            .field("checksum_xxhash64", &self.checksum_xxhash64)
+            .field("checksum_xxhash3", &self.checksum_xxhash3)
+            .field("checksum_xxhash128", &self.checksum_xxhash128)
             .finish()
     }
 }

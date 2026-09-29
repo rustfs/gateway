@@ -608,7 +608,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 - request: None (None)
 - response: XmlBody (Full)
 - response root: `<CopyObjectResult>`, xmlns emit
-- element order: `ETag`, `LastModified`
+- element order: `ETag`, `LastModified`, `ChecksumType`, `ChecksumCRC32`, `ChecksumCRC32C`, `ChecksumCRC64NVME`, `ChecksumSHA1`, `ChecksumSHA256`, `ChecksumSHA512`, `ChecksumMD5`, `ChecksumXXHASH64`, `ChecksumXXHASH3`, `ChecksumXXHASH128`
 
 **Error codes**
 
@@ -4868,7 +4868,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 - request: None (None)
 - response: XmlBody (Full)
 - response root: `<CopyPartResult>`, xmlns emit
-- element order: `ETag`, `LastModified`
+- element order: `ETag`, `LastModified`, `ChecksumCRC32`, `ChecksumCRC32C`, `ChecksumCRC64NVME`, `ChecksumSHA1`, `ChecksumSHA256`, `ChecksumSHA512`, `ChecksumMD5`, `ChecksumXXHASH64`, `ChecksumXXHASH3`, `ChecksumXXHASH128`
 
 **Error codes**
 

@@ -238,17 +238,6 @@ impl Checksums {
                 }),
         }
     }
-
-    /// Refused unless every member is unset: for an output whose gateway form carries none.
-    pub(crate) fn none(self, owner: &'static str) -> Converted<()> {
-        match self.present().next() {
-            None => Ok(()),
-            Some(_) => Err(Unconvertible {
-                member: owner,
-                reason: "a checksum the gateway output of this operation has no member for",
-            }),
-        }
-    }
 }
 
 /// A bucket name the gateway output holds.
