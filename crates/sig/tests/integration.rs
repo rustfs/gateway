@@ -26,6 +26,8 @@ mod compile_fail;
 mod effective_host;
 #[path = "frozen_dimensions.rs"]
 mod frozen_dimensions;
+#[path = "post_form_replay.rs"]
+mod post_form_replay;
 #[path = "post_object_form.rs"]
 mod post_object_form;
 #[path = "security_floor.rs"]

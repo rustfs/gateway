@@ -1,0 +1,11 @@
+--fuzzboundary
+Content-Disposition: form-data; name="key"
+X-Note: 1
+
+k
+--fuzzboundary
+Content-Disposition: form-data; name="file"
+
+
+hello
+--fuzzboundary--
