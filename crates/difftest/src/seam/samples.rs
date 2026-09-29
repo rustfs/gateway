@@ -25,7 +25,7 @@ use http::Method;
 
 use crate::request::RawRequest;
 
-mod configs;
+pub(in crate::seam) mod configs;
 mod findings;
 mod objects;
 pub(crate) mod omitted;

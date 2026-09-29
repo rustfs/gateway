@@ -27,7 +27,9 @@
 //!
 //! A live body or event stream has no value to compare and is left out of all three: the diff that
 //! drains it compares the bytes. A runtime member with no wire value (a cache, a parsed policy) is
-//! left out for the same reason.
+//! left out for the same reason. A member holding a structure with no member of its own (an empty
+//! element such as `<EventBridgeConfiguration/>`) is a path itself: it says something by being
+//! there, so a row must set it and a conversion that drops it must show.
 
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
@@ -103,15 +105,34 @@ pub fn paths(facts: &S3sFacts, name: &str, prefix: &str, depth: usize, out: &mut
         }
         let (core, _) = ty.unwrap_option();
         match core {
-            S3sType::Struct(nested) => paths(facts, nested, &format!("{prefix}{member}."), depth + 1, out)?,
+            S3sType::Struct(nested) => nested_paths(facts, nested, &format!("{prefix}{member}"), depth, out)?,
             S3sType::Vec(element) => match element.as_ref() {
-                S3sType::Struct(nested) => paths(facts, nested, &format!("{prefix}{member}[]."), depth + 1, out)?,
+                S3sType::Struct(nested) => nested_paths(facts, nested, &format!("{prefix}{member}[]"), depth, out)?,
                 _ => out.push(format!("{prefix}{member}[]")),
             },
             _ => out.push(format!("{prefix}{member}")),
         }
     }
     Ok(())
+}
+
+/// The paths of the structure `nested` a member at `path` holds. A structure with no member of
+/// its own (an empty element such as `<EventBridgeConfiguration/>`) says something only by being
+/// there, so the member is a path itself rather than no path at all.
+fn nested_paths(facts: &S3sFacts, nested: &str, path: &str, depth: usize, out: &mut Vec<String>) -> Result<(), String> {
+    let before = out.len();
+    paths(facts, nested, &format!("{path}."), depth + 1, out)?;
+    if out.len() == before {
+        out.push(path.to_owned());
+    }
+    Ok(())
+}
+
+/// Whether the structure `name` has no member path of its own.
+fn memberless(facts: &S3sFacts, name: &str) -> Result<bool, String> {
+    let mut held = Vec::new();
+    paths(facts, name, "", 0, &mut held)?;
+    Ok(held.is_empty())
 }
 
 /// The function of the census module for `name`.
@@ -178,7 +199,7 @@ fn non_empty(member: &str, optional: bool, path: &str) -> String {
 }
 
 /// The body of `present` for one structure.
-fn present_body(members: &[(String, S3sType)]) -> String {
+fn present_body(facts: &S3sFacts, members: &[(String, S3sType)]) -> Result<String, String> {
     let mut body = String::new();
     for (member, ty) in members {
         if skipped(ty) {
@@ -187,8 +208,12 @@ fn present_body(members: &[(String, S3sType)]) -> String {
         let (core, optional) = ty.unwrap_option();
         // What one held value of the member contributes, reading it as `held`.
         let contribution = match core {
+            S3sType::Struct(nested) if memberless(facts, nested)? => format!("out.push(format!(\"{{prefix}}{member}\"));"),
             S3sType::Struct(nested) => format!("{}(&format!(\"{{prefix}}{member}.\"), held, out);", census_fn(nested, "present")),
             S3sType::Vec(element) => match element.as_ref() {
+                S3sType::Struct(nested) if memberless(facts, nested)? => {
+                    format!("for _ in held {{ out.push(format!(\"{{prefix}}{member}[]\")); }}")
+                }
                 S3sType::Struct(nested) => format!(
                     "for element in held {{ {}(&format!(\"{{prefix}}{member}[].\"), element, out); }}",
                     census_fn(nested, "present")
@@ -217,7 +242,7 @@ fn present_body(members: &[(String, S3sType)]) -> String {
             let _ = writeln!(body, "    {{ let held = &value.{member}; {contribution} }}");
         }
     }
-    body
+    Ok(body)
 }
 
 /// One structure's census module.
@@ -256,7 +281,7 @@ pub fn module(facts: &S3sFacts, name: &str) -> Result<String, String> {
          #[allow(unused_variables, clippy::too_many_lines, clippy::ptr_arg)]\n\
          pub fn present(prefix: &str, value: &s3s::dto::{name}, out: &mut Vec<String>) {{\n{}}}\n",
         differences_body(members),
-        present_body(members)
+        present_body(facts, members)?
     );
     Ok(out)
 }

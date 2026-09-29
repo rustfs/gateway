@@ -508,6 +508,42 @@ mod census {
         assert!(rule.contains("if value.id.is_some() { out.push(format!(\"{prefix}id\")); }"), "{rule}");
     }
 
+    /// An empty element such as `<EventBridgeConfiguration/>` or `<SimplePrefix/>` says something
+    /// only by being there: the member holding it is a path of its own, counted when set, so a row
+    /// must set it and a conversion that drops it shows up.
+    #[test]
+    fn a_member_holding_a_memberless_structure_is_a_path_of_its_own() {
+        let facts = facts(
+            "struct Op\n  flag: Option<struct Empty>\n  marks: Vec<struct Empty>\n  held: struct Empty\n  config: Option<struct Config>\nstruct Empty\nstruct Config\n  inner: Option<struct Empty>\n  id: Option<String>\n",
+        );
+        let mut out = Vec::new();
+        census::paths(&facts, "Op", "", 0, &mut out).expect("paths");
+        assert_eq!(out, ["flag", "marks[]", "held", "config.inner", "config.id"]);
+
+        let text = census::module(&facts, "Op").expect("module");
+        assert!(
+            text.contains("if let Some(held) = &value.flag { out.push(format!(\"{prefix}flag\")); }"),
+            "{text}"
+        );
+        assert!(
+            text.contains("{ let held = &value.marks; for _ in held { out.push(format!(\"{prefix}marks[]\")); } }"),
+            "{text}"
+        );
+        assert!(
+            text.contains("{ let held = &value.held; out.push(format!(\"{prefix}held\")); }"),
+            "{text}"
+        );
+        assert!(
+            text.contains("(Some(l), Some(r)) => super::empty::differences(&format!(\"{prefix}flag.\"), l, r, out),\n        (None, None) => {}\n        _ => out.push(format!(\"{prefix}flag\")),"),
+            "{text}"
+        );
+        let config = census::module(&facts, "Config").expect("module");
+        assert!(
+            config.contains("if let Some(held) = &value.inner { out.push(format!(\"{prefix}inner\")); }"),
+            "{config}"
+        );
+    }
+
     #[test]
     fn n_a_member_naming_an_undeclared_structure_is_refused_by_name() {
         let facts = facts("struct Op\n  config: Option<struct Missing>\n");

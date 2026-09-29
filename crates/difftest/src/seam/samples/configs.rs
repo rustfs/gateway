@@ -26,12 +26,12 @@ use super::{Expect, SeamRow, checked, document, row};
 use crate::samples::OWNER;
 
 /// A configuration write of `body` to `target`, with both integrity headers and the owner check.
-fn config(target: &str, body: &str) -> crate::request::RawRequest {
+pub(in crate::seam) fn config(target: &str, body: &str) -> crate::request::RawRequest {
     checked(document(Method::PUT, target, body), ChecksumAlgorithm::Crc32, "CRC32", body.as_bytes())
         .header("x-amz-expected-bucket-owner", OWNER)
 }
 
-const LIFECYCLE: &str = "<LifecycleConfiguration>\
+pub(in crate::seam) const LIFECYCLE: &str = "<LifecycleConfiguration>\
     <Rule><ID>by-prefix</ID><Filter><Prefix>logs/</Prefix></Filter><Status>Enabled</Status>\
     <Expiration><Days>30</Days></Expiration>\
     <Transition><Days>7</Days><StorageClass>STANDARD_IA</StorageClass></Transition>\
@@ -52,7 +52,7 @@ const LIFECYCLE: &str = "<LifecycleConfiguration>\
     <Rule><ID>legacy-prefix</ID><Prefix>old/</Prefix><Status>Enabled</Status><Expiration><Days>9</Days></Expiration></Rule>\
     </LifecycleConfiguration>";
 
-const REPLICATION: &str = "<ReplicationConfiguration><Role>arn:aws:iam::123456789012:role/replication</Role>\
+pub(in crate::seam) const REPLICATION: &str = "<ReplicationConfiguration><Role>arn:aws:iam::123456789012:role/replication</Role>\
     <Rule><ID>everything</ID><Priority>1</Priority><Status>Enabled</Status>\
     <Filter><And><Prefix>docs/</Prefix><Tag><Key>k</Key><Value>v</Value></Tag></And></Filter>\
     <SourceSelectionCriteria><SseKmsEncryptedObjects><Status>Enabled</Status></SseKmsEncryptedObjects>\
@@ -71,7 +71,7 @@ const REPLICATION: &str = "<ReplicationConfiguration><Role>arn:aws:iam::12345678
     <Rule><ID>legacy-prefix</ID><Status>Enabled</Status><Prefix>q/</Prefix><Destination><Bucket>arn:aws:s3:::target4</Bucket></Destination></Rule>\
     </ReplicationConfiguration>";
 
-const NOTIFICATION: &str = "<NotificationConfiguration>\
+pub(in crate::seam) const NOTIFICATION: &str = "<NotificationConfiguration>\
     <TopicConfiguration><Id>t1</Id><Topic>arn:aws:sns:us-east-1:123456789012:topic</Topic><Event>s3:ObjectCreated:*</Event><Event>s3:ObjectRemoved:Delete</Event>\
     <Filter><S3Key><FilterRule><Name>prefix</Name><Value>img/</Value></FilterRule><FilterRule><Name>suffix</Name><Value>.jpg</Value></FilterRule></S3Key></Filter></TopicConfiguration>\
     <QueueConfiguration><Id>q1</Id><Queue>arn:minio:sqs::1:webhook</Queue><Event>s3:ObjectCreated:Put</Event>\
@@ -80,31 +80,31 @@ const NOTIFICATION: &str = "<NotificationConfiguration>\
     <Filter><S3Key><FilterRule><Name>prefix</Name><Value>x</Value></FilterRule></S3Key></Filter></CloudFunctionConfiguration>\
     </NotificationConfiguration>";
 
-const CORS: &str = "<CORSConfiguration><CORSRule><ID>r1</ID><AllowedHeader>x-a</AllowedHeader><AllowedHeader>x-b</AllowedHeader>\
+pub(in crate::seam) const CORS: &str = "<CORSConfiguration><CORSRule><ID>r1</ID><AllowedHeader>x-a</AllowedHeader><AllowedHeader>x-b</AllowedHeader>\
     <AllowedMethod>GET</AllowedMethod><AllowedMethod>PUT</AllowedMethod><AllowedOrigin>https://a.example</AllowedOrigin>\
     <AllowedOrigin>*</AllowedOrigin><ExposeHeader>ETag</ExposeHeader><ExposeHeader>x-amz-request-id</ExposeHeader>\
     <MaxAgeSeconds>3000</MaxAgeSeconds></CORSRule><CORSRule><AllowedMethod>HEAD</AllowedMethod><AllowedOrigin>https://b.example</AllowedOrigin></CORSRule>\
     </CORSConfiguration>";
 
-const ENCRYPTION: &str = "<ServerSideEncryptionConfiguration><Rule><ApplyServerSideEncryptionByDefault><SSEAlgorithm>aws:kms</SSEAlgorithm>\
+pub(in crate::seam) const ENCRYPTION: &str = "<ServerSideEncryptionConfiguration><Rule><ApplyServerSideEncryptionByDefault><SSEAlgorithm>aws:kms</SSEAlgorithm>\
     <KMSMasterKeyID>key-1</KMSMasterKeyID></ApplyServerSideEncryptionByDefault><BucketKeyEnabled>true</BucketKeyEnabled>\
     <BlockedEncryptionTypes><EncryptionType>SSE-C</EncryptionType></BlockedEncryptionTypes></Rule></ServerSideEncryptionConfiguration>";
 
-const WEBSITE: &str = "<WebsiteConfiguration><IndexDocument><Suffix>index.html</Suffix></IndexDocument><ErrorDocument><Key>error.html</Key></ErrorDocument>\
+pub(in crate::seam) const WEBSITE: &str = "<WebsiteConfiguration><IndexDocument><Suffix>index.html</Suffix></IndexDocument><ErrorDocument><Key>error.html</Key></ErrorDocument>\
     <RoutingRules><RoutingRule><Condition><KeyPrefixEquals>docs/</KeyPrefixEquals><HttpErrorCodeReturnedEquals>404</HttpErrorCodeReturnedEquals></Condition>\
     <Redirect><Protocol>https</Protocol><HostName>example.com</HostName><ReplaceKeyPrefixWith>documents/</ReplaceKeyPrefixWith><HttpRedirectCode>301</HttpRedirectCode></Redirect></RoutingRule>\
     <RoutingRule><Redirect><ReplaceKeyWith>fixed.html</ReplaceKeyWith></Redirect></RoutingRule></RoutingRules></WebsiteConfiguration>";
 
-const WEBSITE_REDIRECT: &str = "<WebsiteConfiguration><RedirectAllRequestsTo><HostName>example.com</HostName><Protocol>https</Protocol></RedirectAllRequestsTo></WebsiteConfiguration>";
+pub(in crate::seam) const WEBSITE_REDIRECT: &str = "<WebsiteConfiguration><RedirectAllRequestsTo><HostName>example.com</HostName><Protocol>https</Protocol></RedirectAllRequestsTo></WebsiteConfiguration>";
 
-const LOGGING: &str = "<BucketLoggingStatus><LoggingEnabled><TargetBucket>logs</TargetBucket><TargetPrefix>b/</TargetPrefix>\
+pub(in crate::seam) const LOGGING: &str = "<BucketLoggingStatus><LoggingEnabled><TargetBucket>logs</TargetBucket><TargetPrefix>b/</TargetPrefix>\
     <TargetGrants><Grant><Grantee xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:type=\"AmazonCustomerByEmail\"><EmailAddress>a@example.com</EmailAddress></Grantee><Permission>READ</Permission></Grant>\
     <Grant><Grantee xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:type=\"CanonicalUser\"><ID>i</ID><DisplayName>d</DisplayName></Grantee><Permission>WRITE</Permission></Grant>\
     <Grant><Grantee xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:type=\"Group\"><URI>http://acs.amazonaws.com/groups/s3/LogDelivery</URI></Grantee><Permission>FULL_CONTROL</Permission></Grant></TargetGrants>\
     <TargetObjectKeyFormat><PartitionedPrefix><PartitionDateSource>EventTime</PartitionDateSource></PartitionedPrefix></TargetObjectKeyFormat>\
     </LoggingEnabled></BucketLoggingStatus>";
 
-const BUCKET_ACL: &str = "<AccessControlPolicy><Owner><ID>owner-1</ID><DisplayName>owner</DisplayName></Owner><AccessControlList>\
+pub(in crate::seam) const BUCKET_ACL: &str = "<AccessControlPolicy><Owner><ID>owner-1</ID><DisplayName>owner</DisplayName></Owner><AccessControlList>\
     <Grant><Grantee xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:type=\"CanonicalUser\"><ID>owner-1</ID><DisplayName>owner</DisplayName></Grantee><Permission>FULL_CONTROL</Permission></Grant>\
     <Grant><Grantee xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:type=\"Group\"><URI>http://acs.amazonaws.com/groups/global/AuthenticatedUsers</URI></Grantee><Permission>WRITE</Permission></Grant>\
     <Grant><Grantee xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:type=\"AmazonCustomerByEmail\"><EmailAddress>a@example.com</EmailAddress></Grantee><Permission>WRITE_ACP</Permission></Grant>\
@@ -112,13 +112,13 @@ const BUCKET_ACL: &str = "<AccessControlPolicy><Owner><ID>owner-1</ID><DisplayNa
 
 /// The MinIO lifecycle members RustFS reads: a document-level expiry stamp, a rule's delete-marker
 /// expiry and an expiration of every version.
-const LIFECYCLE_MINIO: &str = "<LifecycleConfiguration><ExpiryUpdatedAt>2026-01-02T03:04:05.000Z</ExpiryUpdatedAt>\
+pub(in crate::seam) const LIFECYCLE_MINIO: &str = "<LifecycleConfiguration><ExpiryUpdatedAt>2026-01-02T03:04:05.000Z</ExpiryUpdatedAt>\
     <Rule><ID>marker-cleanup</ID><Filter><Prefix>logs/</Prefix></Filter><Status>Enabled</Status>\
     <Expiration><Days>30</Days><ExpiredObjectAllVersions>true</ExpiredObjectAllVersions></Expiration>\
     <DelMarkerExpiration><Days>7</Days></DelMarkerExpiration></Rule></LifecycleConfiguration>";
 
 /// The MinIO replication member RustFS reads: whether a rule replicates deletes.
-const REPLICATION_MINIO: &str = "<ReplicationConfiguration><Role>arn:aws:iam::111122223333:role/replication</Role>\
+pub(in crate::seam) const REPLICATION_MINIO: &str = "<ReplicationConfiguration><Role>arn:aws:iam::111122223333:role/replication</Role>\
     <Rule><ID>replicate-logs</ID><Priority>1</Priority><Filter><Prefix>logs/</Prefix></Filter>\
     <DeleteMarkerReplication><Status>Enabled</Status></DeleteMarkerReplication><DeleteReplication><Status>Enabled</Status></DeleteReplication>\
     <Status>Enabled</Status><Destination><Bucket>arn:aws:s3:::replica-bucket</Bucket></Destination></Rule></ReplicationConfiguration>";
@@ -151,6 +151,24 @@ pub(super) fn rows() -> Vec<SeamRow> {
         row(
             "put-bucket-notification-empty",
             config("/bucket?notification", "<NotificationConfiguration></NotificationConfiguration>"),
+            Expect::Identical,
+        ),
+        // An empty element says something only by being there: both stacks hand it over and store it.
+        row(
+            "put-bucket-notification-event-bridge",
+            config(
+                "/bucket?notification",
+                "<NotificationConfiguration><EventBridgeConfiguration/></NotificationConfiguration>",
+            ),
+            Expect::Identical,
+        ),
+        row(
+            "put-bucket-logging-simple-prefix",
+            config(
+                "/bucket?logging",
+                "<BucketLoggingStatus><LoggingEnabled><TargetBucket>logs</TargetBucket><TargetPrefix>b/</TargetPrefix>\
+                 <TargetObjectKeyFormat><SimplePrefix/></TargetObjectKeyFormat></LoggingEnabled></BucketLoggingStatus>",
+            ),
             Expect::Identical,
         ),
         row("put-bucket-cors-every-member", config("/bucket?cors", CORS), Expect::Identical),
