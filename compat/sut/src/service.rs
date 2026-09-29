@@ -193,6 +193,9 @@ pub(crate) fn build_service(
             // RustFS refuses an anonymous aws-chunked upload rather than decoding it (#1060), so
             // nothing reaches storage through the launcher that RustFS would not write.
             .leave_anonymous_streaming_payloads_undecoded()
+            // RustFS signs every presigned request over `UNSIGNED-PAYLOAD` and verifies a digest the
+            // request declares against the body instead (rustfs/rustfs#2379).
+            .sign_presigned_payloads_as_unsigned()
             // RustFS answers an unreadable or mismatched request checksum with `BadDigest`
             // (rustfs/gateway#1057).
             .answer_checksum_failures_with_bad_digest()

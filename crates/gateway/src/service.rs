@@ -145,7 +145,7 @@ use crate::gate::{BodyCeilings, BodyDigestObligation, MetadataAdmission, SealedB
 use crate::monomorphic::sealed::Set as StaticSet;
 use crate::operation_mode::{DynamicMode, MonomorphicMode, OperationMode};
 use crate::panic_boundary::catch_boxed_future;
-use crate::payload_header::{body_digest_obligation, payload_mode};
+use crate::payload_header::signed_payload;
 use crate::post_object::{PostObjectPrelude, ResolvedPostObject};
 pub use crate::posture::SecurityPosture;
 use crate::render::{
@@ -726,19 +726,13 @@ impl S3Service {
                 (AuthenticationOutcome::ordinary(Verdict::anonymous(evidence)), None)
             }
             Ok(Admission::Sealed(sealed)) => {
-                let payload = match payload_mode(&headers, sealed.marker().location()) {
-                    Ok(payload) => payload,
-                    Err(error) => return outcome.refuse(error),
+                let location = sealed.marker().location();
+                let presigned_unsigned = self.inner.view_policy.presigned_payload_unsigned();
+                let (payload, obligation) = match signed_payload(&headers, location, presigned_unsigned) {
+                    Ok(declared) => declared,
+                    Err(refusal) => return outcome.refuse(refusal.render(response_kind, wire.framing().has_body())),
                 };
-                body_digest = match body_digest_obligation(&payload, sealed.marker().location()) {
-                    Ok(obligation) => obligation,
-                    Err(_) => {
-                        return outcome.refuse_handler(HandlerError::new(
-                            ErrorCode::NOT_IMPLEMENTED,
-                            "streaming payloads are not implemented for presigned requests",
-                        ));
-                    }
-                };
+                body_digest = obligation;
                 framing_mode = Some(payload.clone());
                 #[cfg(feature = "dangerous-replace-signature-verifier")]
                 let replacement_verdict = self
