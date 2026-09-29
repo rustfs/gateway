@@ -202,6 +202,9 @@ pub(crate) fn build_service(
             // RustFS folds the slashes of a key only when the key starts with one: `/b//x` stores
             // `x` and `/b/a//b` reaches storage as `a//b` (#1101).
             .slash_policy(SlashPolicy::RustfsLegacy)
+            // RustFS stores an upload the transport ended empty without `Content-Length` as an
+            // empty object instead of answering `411` (rustfs/rustfs#6849).
+            .accept_empty_uploads_without_content_length()
             // The backend's stored CORS documents feed the gateway's CORS answers, as RustFS's do
             // behind the gateway; no cache lifetime, so a suite sees a `PutBucketCors` at once.
             .cors_source(Arc::clone(backend))

@@ -679,6 +679,7 @@ gateway_modules = (
     "custom_signature_verifier",
     "dialect_claims_runtime",
     "dialect_entry",
+    "empty_upload_without_length",
     "error_context_filters",
     "extra_response_headers",
     "facade_probe",

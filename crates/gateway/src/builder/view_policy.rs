@@ -18,10 +18,11 @@
 //! answer as its default.
 //!
 //! Responsible for: [`ServiceBuilder::clamp_oversized_max_keys`],
-//! [`ServiceBuilder::answer_checksum_failures_with_bad_digest`] and
-//! [`ServiceBuilder::sign_presigned_payloads_as_unsigned`], the closed set of listings the first
-//! covers, and the per-request decisions the assembly applies — the client checksum waivers of
-//! `super::client_quirks` included.
+//! [`ServiceBuilder::answer_checksum_failures_with_bad_digest`],
+//! [`ServiceBuilder::sign_presigned_payloads_as_unsigned`] and
+//! [`ServiceBuilder::accept_empty_uploads_without_content_length`], the closed sets of operations
+//! the first and the last cover, and the per-request decisions the assembly applies — the client
+//! checksum waivers of `super::client_quirks` included.
 //! NOT responsible for: reading the parameter ([`rustfs_gateway_core::MetaView::query`]) or the
 //! modelled range the default refuses outside of (the generated codec).
 //! Upstream: `super::ServiceBuilder`. Downstream: `crate::service`, which applies [`ViewPolicy`]
@@ -47,6 +48,21 @@
 //! `parse_list_multipart_uploads_params`) after its access check, and the core hands both to the
 //! backend as sent, so a RustFS backend already gives RustFS's answer in RustFS's order. Clamping
 //! them here would serve a page RustFS refuses.
+//!
+//! # Why an upload with no length is read as empty, and only when the transport says it is
+//!
+//! A `PutObject` or `UploadPart` with neither `Content-Length` nor `Transfer-Encoding` has a
+//! zero-length body on HTTP/1.1 (RFC 9112 §6.3), and an HTTP/2 request whose headers ended the
+//! stream has none either. Legacy RustFS stores such an upload as an empty object: a signed empty
+//! `PutObject` without `Content-Length` answers `200` with the empty-body `ETag`, and `HEAD` then
+//! reports `Content-Length: 0` (rustfs/rustfs#6849, pinned by RustFS's
+//! `crates/e2e_test/src/put_object_no_content_length_test.rs:90-129` on rustfs/rustfs
+//! `e870a6d25b`; observed against a legacy RustFS build over HTTP/1.1 and HTTP/2). The core keeps
+//! the AWS answer, `411 MissingContentLength` (`q-length-0007`, rd-put-0003). The RustFS profile
+//! reads the absent header as `0` instead — only for [`EMPTY_UPLOAD_OPERATIONS`], and only when
+//! the request carries no transfer coding and the body itself reports an exact length of zero,
+//! so a chunked transfer or an HTTP/2 stream still carrying data is refused with `411` exactly as
+//! RustFS refuses it.
 
 use super::ServiceBuilder;
 use super::client_quirks::ChecksumWaiver;
@@ -62,6 +78,10 @@ pub const CLAMPED_MAX_KEYS_OPERATIONS: [&str; 3] = ["ListObjects", "ListObjectVe
 /// The `max-keys` ceiling, as the view applies it.
 const MAX_KEYS: PageSizeCeiling = PageSizeCeiling::new("max-keys", RUSTFS_MAX_KEYS_CEILING);
 
+/// The uploads whose absent `Content-Length` the RustFS profile reads as `0` when the transport
+/// already ended the body empty, and no others: the two that require the header.
+pub const EMPTY_UPLOAD_OPERATIONS: [&str; 2] = ["PutObject", "UploadPart"];
+
 /// Which RustFS-profile readings this assembly applies to a routed view.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct ViewPolicy {
@@ -70,6 +90,7 @@ pub(crate) struct ViewPolicy {
     clamp_max_keys: bool,
     integrity_codes: IntegrityCodes,
     presigned_payload_unsigned: bool,
+    empty_uploads_without_length: bool,
 }
 
 impl ViewPolicy {
@@ -80,8 +101,25 @@ impl ViewPolicy {
     }
 
     /// The routed view of `operation`, with this assembly's readings applied to it.
-    pub(crate) fn apply<'a>(self, operation: &str, meta: MetaView<'a>) -> MetaView<'a> {
+    ///
+    /// `body` is the request body before anything reads it, consulted only for the length the
+    /// transport already knows it has.
+    pub(crate) fn apply<'a, B: http_body::Body>(self, operation: &str, meta: MetaView<'a>, body: Option<&B>) -> MetaView<'a> {
         let meta = self.checksum_waiver.apply(operation, meta);
+        // Legacy-compat (rustfs/backlog#2684): legacy RustFS stores an upload that carries no
+        // `Content-Length` and whose transport ended it empty as a zero-length object, where AWS
+        // answers `411 MissingContentLength`. Kept so the clients RustFS serves today keep
+        // working; the intended future behaviour is the core default (`q-length-0007`).
+        let meta = if self.empty_uploads_without_length
+            && EMPTY_UPLOAD_OPERATIONS.contains(&operation)
+            && meta.header("content-length").is_none()
+            && meta.header("transfer-encoding").is_none()
+            && body.is_some_and(|body| body.size_hint().exact() == Some(0))
+        {
+            meta.with_transport_ended_empty_body()
+        } else {
+            meta
+        };
         // Legacy-compat (rustfs/backlog#2684): legacy RustFS silently lowers an oversized
         // `max-keys` to 1000 on every listing instead of refusing it, so a client asking for more
         // cannot tell a short page from its own mistake. Kept so RustFS clients (Hadoop S3A pages
@@ -146,19 +184,87 @@ impl ServiceBuilder {
         self.view_policy.presigned_payload_unsigned = true;
         self
     }
+
+    /// Reads an absent `Content-Length` as `0` on exactly [`EMPTY_UPLOAD_OPERATIONS`] when the
+    /// transport already ended the body empty, as RustFS does, instead of refusing the upload with
+    /// `411 MissingContentLength`.
+    ///
+    /// Off by default: the core answers the AWS model's `411` (`q-length-0007`). The RustFS
+    /// profile turns it on so that a client uploading an empty object without `Content-Length`
+    /// keeps working (rustfs/rustfs#6849). A body whose length the transport does not know — a
+    /// chunked transfer, an HTTP/2 stream still carrying data — is still refused with `411`, and
+    /// a length the request does carry is read exactly as sent.
+    #[must_use]
+    pub fn accept_empty_uploads_without_content_length(mut self) -> Self {
+        self.view_policy.empty_uploads_without_length = true;
+        self
+    }
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used)]
 mod tests {
     use super::*;
+    use bytes::Bytes;
+    use http_body_util::Full;
+    use rustfs_gateway_core::TargetKind;
+    use rustfs_gateway_http::{Limits, WireRequest};
+
+    fn lengthless_put() -> WireRequest<Full<Bytes>> {
+        let request = http::Request::builder()
+            .method(http::Method::PUT)
+            .uri("/bucket/key")
+            .header(http::header::HOST, "s3.example.com")
+            .body(Full::new(Bytes::new()))
+            .expect("a valid request");
+        WireRequest::accept(request, &Limits::default()).expect("an acceptable request")
+    }
+
+    fn content_length_read(policy: ViewPolicy, operation: &str, body: Option<&Full<Bytes>>) -> Option<String> {
+        let wire = lengthless_put();
+        let meta = MetaView::of(&wire, TargetKind::Object).expect("a view");
+        policy
+            .apply(operation, meta, body)
+            .header("content-length")
+            .map(|value| value.into_owned())
+    }
+
+    #[test]
+    fn the_empty_upload_reading_answers_only_its_operations_and_only_when_on() {
+        let on = ViewPolicy {
+            empty_uploads_without_length: true,
+            ..ViewPolicy::default()
+        };
+        let empty = Full::new(Bytes::new());
+        for operation in EMPTY_UPLOAD_OPERATIONS {
+            assert_eq!(content_length_read(on, operation, Some(&empty)).as_deref(), Some("0"), "{operation}");
+            assert_eq!(content_length_read(ViewPolicy::default(), operation, Some(&empty)), None, "{operation}");
+            assert_eq!(content_length_read(on, operation, None), None, "{operation}: no body to consult");
+            let data = Full::new(Bytes::from_static(b"abc"));
+            assert_eq!(content_length_read(on, operation, Some(&data)), None, "{operation}: a body with data");
+        }
+        for operation in ["CopyObject", "PutBucketPolicy", "CompleteMultipartUpload", "DeleteObjects"] {
+            assert_eq!(content_length_read(on, operation, Some(&empty)), None, "{operation}");
+        }
+    }
 
     #[test]
     fn the_policy_is_off_by_default_and_its_set_is_closed() {
         assert!(!ViewPolicy::default().clamp_max_keys);
         assert_eq!(ViewPolicy::default().integrity_codes, IntegrityCodes::Model);
         assert!(!ViewPolicy::default().presigned_payload_unsigned());
+        assert!(!ViewPolicy::default().empty_uploads_without_length);
         for operation in ["ListMultipartUploads", "ListParts", "ListBuckets", "GetObject", "PutObject"] {
             assert!(!CLAMPED_MAX_KEYS_OPERATIONS.contains(&operation), "{operation}");
+        }
+        for operation in [
+            "CopyObject",
+            "UploadPartCopy",
+            "PutBucketPolicy",
+            "PostObject",
+            "CompleteMultipartUpload",
+        ] {
+            assert!(!EMPTY_UPLOAD_OPERATIONS.contains(&operation), "{operation}");
         }
         assert_eq!(MAX_KEYS.parameter(), "max-keys");
         assert_eq!(MAX_KEYS.ceiling(), 1000);
