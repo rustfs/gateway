@@ -684,3 +684,6 @@ mod sse_condition_tests;
 
 /// The gateway's CORS answers over the backend's stored documents (rustfs/gateway#1004).
 mod cors_tests;
+
+/// The request settings RustFS embeds the gateway with (rustfs/gateway#1070).
+mod deadline_tests;
