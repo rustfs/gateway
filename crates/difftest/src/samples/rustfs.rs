@@ -18,8 +18,8 @@
 //!
 //! Responsible for: the rows diffed under [`crate::Profile::Rustfs`] — the gateway's RustFS
 //! profile against the legacy stack configured as RustFS main configures it — grouped by the
-//! addressing rule each row pins: the slash rule (rustfs/gateway#1101) and the key floor
-//! (rustfs/gateway#1107).
+//! addressing rule each row pins: the slash rule (rustfs/gateway#1101), the key floor
+//! (rustfs/gateway#1107) and the path addressing (rustfs/gateway#1115).
 //! NOT responsible for: judging the rows (`tests/rustfs_profile.rs`), or the generic matrix
 //! (`requests.rs`), whose rows compare both stacks' defaults.
 //! Upstream: the library's request type. Downstream: tests.
@@ -41,7 +41,41 @@ const COMPLETE_BODY: &[u8] =
 pub(super) fn rows() -> Vec<RequestRow> {
     let mut rows = slash_rule();
     rows.extend(key_floor());
+    rows.extend(addressing());
     rows
+}
+
+/// Legacy RustFS's path addressing: the path decoded as a whole and split at its first decoded
+/// `/`, the bucket held to legacy RustFS's rules, and every refusal made before routing.
+fn addressing() -> Vec<RequestRow> {
+    vec![
+        row("rustfs-addr-escaped-separator-get", RawRequest::get("/bkt%2Fsrc"), &[]),
+        row("rustfs-addr-escaped-separator-head", RawRequest::head("/bkt%2Fsrc"), &[]),
+        row("rustfs-addr-escaped-separator-put", RawRequest::put("/bkt%2Fsrc", b"escaped"), &[]),
+        row("rustfs-addr-escaped-separator-delete", RawRequest::delete("/bkt%2Fsrc"), &[]),
+        row("rustfs-addr-escaped-separator-list", RawRequest::get("/bkt%2F"), &["kd-decode-0005"]),
+        row("rustfs-addr-escaped-separator-folded", RawRequest::get("/bkt%2F%2Fsrc"), &[]),
+        row("rustfs-addr-escaped-label", RawRequest::get("/b%6Bt/src"), &[]),
+        row("rustfs-addr-reserved-prefix", RawRequest::get("/sthree-x/k"), &[]),
+        row("rustfs-addr-reserved-alias-suffix", RawRequest::get("/abc-s3alias/k"), &[]),
+        row("rustfs-addr-reserved-express-suffix", RawRequest::get("/abc--x-s3/k"), &[]),
+        row("rustfs-addr-reserved-olap-suffix", RawRequest::get("/abc--ol-s3/k"), &[]),
+        row("rustfs-addr-leading-zero-quad", RawRequest::get("/01.2.3.4/k"), &[]),
+        row("rustfs-addr-address", RawRequest::get("/1.2.3.4/k"), &["kd-decode-0024"]),
+        row("rustfs-addr-punycode", RawRequest::get("/xn--abc/k"), &["kd-decode-0024"]),
+        row("rustfs-addr-bad-bucket", RawRequest::get("/Bad_Bucket/k"), &["kd-decode-0024"]),
+        row(
+            "rustfs-addr-bad-bucket-unrouted",
+            RawRequest::new(Method::PATCH, "/Bad_Bucket/k"),
+            &["kd-decode-0024"],
+        ),
+        row("rustfs-addr-empty-bucket", RawRequest::get("//bkt"), &["kd-decode-0024"]),
+        row("rustfs-addr-empty-bucket-object", RawRequest::get("//bkt/src"), &["kd-decode-0024"]),
+        row("rustfs-addr-empty-bucket-run", RawRequest::get("///"), &["kd-decode-0024"]),
+        row("rustfs-addr-empty-bucket-escaped", RawRequest::get("/%2Fbkt/src"), &["kd-decode-0024"]),
+        row("rustfs-addr-undecodable-key", RawRequest::get("/bkt/a%FFb"), &[]),
+        row("rustfs-addr-undecodable-before-bucket", RawRequest::get("/Bad_Bucket/a%FFb"), &[]),
+    ]
 }
 
 /// Every key shape the legacy key floor pins, as the label after `/bkt/` and the key legacy RustFS

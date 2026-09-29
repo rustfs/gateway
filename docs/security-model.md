@@ -133,7 +133,10 @@ request body alike, exactly as RustFS's own protocol front hands it to RustFS's 
 storage validates every key itself, after authorization. The switch is safe only in front of such a
 backend: behind one that maps a key onto a path without its own containment check it reopens the
 traversal the floor exists to close. The start-up `NAMING_POSTURE` line reports it as
-`key_floor=rustfs-legacy key_floor_lowered=true`, and the bucket floor does not move.
+`key_floor=rustfs-legacy key_floor_lowered=true`, and the bucket floor does not move. Its companion
+for the same deployment, `address_paths_as_legacy_rustfs` (#1115), decodes the whole path once
+before it splits the bucket from the key, as RustFS does; the bucket floor then judges the decoded
+label, and the start-up line reports `path_split=rustfs-legacy`.
 
 **What is still yours.** The framework's promise stops at handing you a validated `ObjectKey`. It
 does not map that key onto a physical location, and it cannot: only you know what the root is. You

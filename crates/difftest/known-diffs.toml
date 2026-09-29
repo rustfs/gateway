@@ -330,11 +330,11 @@ expires = "2026-12-31"
 [[diff]]
 id = "kd-decode-0082"
 kind = "decode"
-operation = "GetObject"
+operation = "*"
 item = "error.message"
 gateway = "the name is longer than the maximum length in bytes"
 s3s = "Your key is too long."
-reason = "Both refuse a path key over 1024 bytes before authentication with 400 KeyTooLongError; the gateway's fixed sentence names the rule, the legacy stack answers with its own."
+reason = "Both refuse a path key over 1024 bytes before authentication with 400 KeyTooLongError; the gateway's fixed sentence names the rule, the legacy stack answers with its own. Any operation: under the RustFS profile's legacy path addressing both refuse it before routing, so neither names one."
 expires = "2027-03-31"
 ruling = "rd-err-0009"
 

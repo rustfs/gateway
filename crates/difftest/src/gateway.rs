@@ -168,8 +168,8 @@ impl rustfs_gateway::BucketOwnerSource for FixtureOwner {
 }
 
 /// The RustFS-profile switches that decide which bucket and key a request addresses, turned on as
-/// `compat/sut` turns them on: the legacy slash rule (rustfs/gateway#1101) and the legacy key floor
-/// (rustfs/gateway#1107).
+/// `compat/sut` turns them on: the legacy slash rule (rustfs/gateway#1101), the legacy key floor
+/// (rustfs/gateway#1107) and the legacy path addressing (rustfs/gateway#1115).
 ///
 /// Only the addressing switches: the rows compared under this profile are about the bucket and key
 /// each stack hands its handler, and a switch that changes some other member would show up in them
@@ -178,6 +178,7 @@ fn rustfs_addressing(builder: ServiceBuilder) -> ServiceBuilder {
     builder
         .slash_policy(SlashPolicy::RustfsLegacy)
         .accept_legacy_rustfs_object_keys_after_listing_in_the_posture_report()
+        .address_paths_as_legacy_rustfs()
 }
 
 /// The assembled gateway and its recording slots.

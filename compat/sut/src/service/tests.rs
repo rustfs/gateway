@@ -761,3 +761,6 @@ mod slash_rule_tests;
 
 /// The object keys legacy RustFS accepts, round-tripped onto the backend (rustfs/gateway#1107).
 mod legacy_key_tests;
+
+/// A request path addressed as legacy RustFS addresses it (rustfs/gateway#1115).
+mod legacy_addressing_tests;

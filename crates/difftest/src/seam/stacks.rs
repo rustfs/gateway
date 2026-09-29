@@ -175,6 +175,7 @@ impl GatewaySeam {
             .answer_body_refusals_with_legacy_rustfs_sentences()
             .slash_policy(SlashPolicy::RustfsLegacy)
             .accept_legacy_rustfs_object_keys_after_listing_in_the_posture_report()
+            .address_paths_as_legacy_rustfs()
             .accept_empty_uploads_without_content_length()
             .host_resolver(Resolver::new(false))
             .observer(RouteObserver {

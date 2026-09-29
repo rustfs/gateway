@@ -97,6 +97,7 @@ mod file_fallback;
 mod gate;
 mod integrity;
 mod invariants;
+mod legacy_addressing;
 mod monomorphic;
 mod naming_posture;
 mod operation_mode;
@@ -494,8 +495,8 @@ pub use tower::Service as TowerService;
 // service but not the values the service returns is not a facade.
 pub use rustfs_gateway_types::{
     AwsNameValidator, BucketName, ChecksumAlgorithm, ChecksumDigest, ChecksumSpec, ChecksumType, Checksummer, ETag, ErrorCode,
-    KeyFloor, NamePolicy, NameRejection, NameValidator, ObjectKey, SlashPolicy, SseCustomerKey, Stricter, Timestamp,
-    TimestampFormat, decode_once, floor_check_bucket, floor_check_key,
+    KeyFloor, LegacyRustfsNameValidator, NamePolicy, NameRejection, NameValidator, ObjectKey, PathSplit, SlashPolicy,
+    SseCustomerKey, Stricter, Timestamp, TimestampFormat, decode_once, floor_check_bucket, floor_check_key,
 };
 
 #[cfg(test)]

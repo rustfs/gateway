@@ -27,6 +27,7 @@ mod etag_tests;
 mod name_tests;
 mod naming_tests;
 mod range_tests;
+mod rustfs_addressing_tests;
 mod rustfs_key_floor_tests;
 mod rustfs_slash_tests;
 mod timestamp_corpus_tests;

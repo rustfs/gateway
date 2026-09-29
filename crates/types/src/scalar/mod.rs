@@ -32,6 +32,7 @@
 //! "used ISO 8601 where the header wants an HTTP date" are not writable, rather than merely
 //! discouraged.
 
+mod addressing;
 mod base64;
 mod checksum;
 mod checksummer;
@@ -50,6 +51,7 @@ mod upload_id;
 #[cfg(test)]
 mod tests;
 
+pub use self::addressing::LegacyRustfsNameValidator;
 pub use self::checksum::{
     ChecksumAlgorithm, ChecksumDigest, ChecksumError, ChecksumSpec, ChecksumType, ContentMd5, Md5Digest, parse_request_checksum,
 };
@@ -58,8 +60,8 @@ pub use self::error_code::ErrorCode;
 pub use self::etag::{ETag, EtagRender};
 pub use self::name::{BucketName, ObjectKey, is_xml_representable, validate_bucket_name, validate_object_key};
 pub use self::naming::{
-    AwsNameValidator, KeyFloor, NamePolicy, NameRejection, NameValidator, SlashPolicy, Stricter, aws_bucket_rules, decode_once,
-    floor_check_bucket, floor_check_key,
+    AwsNameValidator, KeyFloor, NamePolicy, NameRejection, NameValidator, PathSplit, SlashPolicy, Stricter, aws_bucket_rules,
+    decode_once, floor_check_bucket, floor_check_key,
 };
 pub use self::opaque_string::OpaqueString;
 pub use self::parse_error::{ParseError, rules};

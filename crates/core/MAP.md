@@ -45,6 +45,7 @@ Agent entry point for operations, routing, codecs, authorization state and handl
 | `src/route/explain.rs` | Route explanation data. | `cargo xtask route explain` omits a reason. |
 | `src/codec/mod.rs` | Per-operation wire codec contract. | Add a decode/encode binding. |
 | `src/codec/view.rs` | Normalized request metadata view. | Headers, query or path labels decode wrongly. |
+| `src/codec/legacy_path.rs` | Legacy RustFS's path split (#1115): the whole path decoded once, the bucket ended at the first decoded `/`, and the refusals it makes before routing. | A RustFS-profile request reaches the wrong bucket, key or refusal. |
 | `src/codec/value.rs` | IR scalar conversions and strict wire forms. | A scalar is accepted, rejected or rendered wrongly. |
 | `src/codec/rustfs_listing.rs` | Legacy RustFS's `encoding-type=url` rule for a listing under the RustFS profile: which members, `/` literal, the echo. | A RustFS-profile listing encodes the wrong members or echoes the wrong value. |
 | `src/codec/response.rs` | Encoded response/body allowance. | A response has the wrong body/status shape. |
