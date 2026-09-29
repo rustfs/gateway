@@ -159,13 +159,40 @@ fn malformed_header() -> TaggingRejection {
 /// escape, and a repeated key; `InvalidTag` for an empty key, which has no legal representation in
 /// either channel.
 pub fn parse_tagging_header(header: Option<&str>) -> Result<Vec<(String, String)>, TaggingRejection> {
+    parse_tagging_header_with(header, TagHeaderGrammar::Aws)
+}
+
+/// Which spelling of a bare segment — `bar` in `foo=1&bar` — the header grammar accepts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TagHeaderGrammar {
+    /// The default: a segment with no `=` is refused with AWS's one sentence (`q-tag-header-form-0093`).
+    Aws,
+    /// RustFS's: a segment with no `=` is a key with an empty value, as RustFS's
+    /// `parse_object_tag_header` reads it (rustfs/gateway#1000). For a backend that answers as RustFS.
+    RustFs,
+}
+
+/// [`parse_tagging_header`] under an explicit grammar; every refusal other than the bare segment's
+/// is the same in both.
+///
+/// # Errors
+///
+/// As [`parse_tagging_header`], without the bare-segment refusal under [`TagHeaderGrammar::RustFs`].
+pub fn parse_tagging_header_with(
+    header: Option<&str>,
+    grammar: TagHeaderGrammar,
+) -> Result<Vec<(String, String)>, TaggingRejection> {
     let Some(raw) = header else { return Ok(Vec::new()) };
     let mut pairs: Vec<(String, String)> = Vec::new();
     for segment in raw.split('&') {
         if segment.is_empty() {
             continue;
         }
-        let (key, value) = segment.split_once('=').ok_or_else(malformed_header)?;
+        let (key, value) = match (segment.split_once('='), grammar) {
+            (Some(pair), _) => pair,
+            (None, TagHeaderGrammar::RustFs) => (segment, ""),
+            (None, TagHeaderGrammar::Aws) => return Err(malformed_header()),
+        };
         let key = form_decode(key)?;
         let value = form_decode(value)?;
         if key.is_empty() {

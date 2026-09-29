@@ -506,3 +506,27 @@ async fn n_untagged_and_malformed_multipart_initiations() {
     let uploads = exchange(&service, signed(http::Method::GET, "/mpu-tags?uploads", Bytes::new())).await;
     assert!(!String::from_utf8_lossy(uploads.body()).contains("<Key>bad</Key>"));
 }
+
+/// Positive — a bare segment in `x-amz-tagging` is a key with an empty value, as RustFS reads it
+/// (rustfs/gateway#1000, s3-tests `test_put_obj_with_tags`).
+#[tokio::test]
+async fn a_bare_header_segment_is_a_tag_with_an_empty_value() {
+    let root = TestRoot::new();
+    let (_, service) = service(&root);
+    create_bucket(&service, "bare-tags").await;
+    let mut headers = http::HeaderMap::new();
+    headers.insert("x-amz-tagging", http::HeaderValue::from_static("foo=bar&bar"));
+    let written = exchange(
+        &service,
+        signed_with_headers(http::Method::PUT, "/bare-tags/key", Bytes::from_static(b"body"), headers),
+    )
+    .await;
+    assert_eq!(written.status(), 200, "{}", String::from_utf8_lossy(written.body()));
+    let tags = get_tags(&service, "bare-tags", "key", None).await;
+    let text = String::from_utf8_lossy(tags.body()).into_owned();
+    assert!(text.contains("<Key>foo</Key><Value>bar</Value>"), "{text}");
+    assert!(
+        text.contains("<Key>bar</Key><Value></Value>") || text.contains("<Key>bar</Key><Value/>"),
+        "{text}"
+    );
+}

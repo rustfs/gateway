@@ -32,7 +32,8 @@ use rustfs_gateway::dto::{
 };
 use rustfs_gateway::persistence::{parse_tagging_dto, serialize_tagging_dto};
 use rustfs_gateway::{
-    ErrorCode, Handler, HandlerError, HandlerResult, Req, Resp, ServiceBuilder, TagScope, parse_tagging_header, validate_tag_set,
+    ErrorCode, Handler, HandlerError, HandlerResult, Req, Resp, ServiceBuilder, TagHeaderGrammar, TagScope,
+    parse_tagging_header_with, validate_tag_set,
 };
 
 use super::{FsBackend, storage_error};
@@ -48,8 +49,8 @@ pub(super) const TAGS_FILE: &str = "tags";
 ///
 /// The header grammar's refusals, and the object-scope tag-set refusals.
 pub(super) fn tags_from_header(header: Option<&str>) -> Result<Vec<(String, String)>, HandlerError> {
-    let pairs =
-        parse_tagging_header(header).map_err(|rejection| HandlerError::new(rejection.code().clone(), rejection.reason()))?;
+    let pairs = parse_tagging_header_with(header, TagHeaderGrammar::RustFs)
+        .map_err(|rejection| HandlerError::new(rejection.code().clone(), rejection.reason()))?;
     validate_tag_set(&pairs, TagScope::Object)
         .map_err(|rejection| HandlerError::new(rejection.code().clone(), rejection.reason()))?;
     Ok(pairs)
