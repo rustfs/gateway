@@ -712,6 +712,8 @@ mod sse_condition_tests;
 
 /// The path spelling a signature is verified over, as legacy RustFS verifies it (rustfs/rustfs#2593).
 mod raw_path_tests;
+/// A copy from an SSE-C source, and RustFS's transport gate for customer keys (rustfs/backlog#1677, R11).
+mod sse_copy_source_tests;
 
 /// A presigned upload's `x-amz-content-sha256`, read as legacy RustFS reads it (rustfs/rustfs#2379).
 mod presigned_payload_tests;

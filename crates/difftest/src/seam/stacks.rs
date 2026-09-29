@@ -31,8 +31,8 @@ use std::sync::{Arc, Mutex};
 
 use http_body_util::BodyExt;
 use rustfs_gateway::{
-    Credentials, GovernorRates, Handler, HandlerError, HandlerResult, Rate, Req, Resp, S3Service, ServiceBuilder,
-    SigV4Authenticator, SlashPolicy, StaticCredentials, Unlimited,
+    Credentials, GovernorRates, Handler, HandlerError, HandlerResult, PlaintextCustomerKeyAck, Rate, Req, Resp, S3Service,
+    ServiceBuilder, SigV4Authenticator, SlashPolicy, SseConfig, StaticCredentials, Unlimited,
 };
 use rustfs_gateway_sig::{PresignedExpiryRule, RegionSet, SecurityFloor};
 use rustfs_gateway_types::ErrorCode;
@@ -182,6 +182,11 @@ impl GatewaySeam {
             .accept_empty_uploads_without_content_length()
             .url_encode_listings_like_rustfs()
             .legacy_rustfs_post_forms()
+            // RustFS's transport gate with TLS required: a target's customer key is refused over
+            // cleartext, a copy source's served (rustfs/backlog#1677, R11).
+            .sse_config(SseConfig::refusing_only_target_keys_over_plaintext(
+                PlaintextCustomerKeyAck::i_understand_customer_keys_will_be_sent_in_the_clear(),
+            ))
             .host_resolver(Resolver::new(false))
             .observer(RouteObserver {
                 routed: Arc::clone(&routed),

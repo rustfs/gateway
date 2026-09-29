@@ -138,18 +138,31 @@ impl core::fmt::Debug for PlaintextCustomerKeyAck {
 /// where TLS is terminated in front of this service *and the hop between is trusted* — and that
 /// deployment is better served by having its transport declare
 /// [`TransportSecurity::Encrypted`], because then the fact travels with the connection instead
-/// of being asserted about all of them at start-up.
+/// of being asserted about all of them at start-up. Turning it half on, for a copy source's key
+/// only, exists for one deployment: one reproducing legacy RustFS's gate while it migrates.
 #[derive(Debug, Clone, Copy)]
 pub struct SseConfig {
-    allow_customer_keys_over_plaintext: bool,
+    over_plaintext: PlaintextKeys,
+}
+
+/// Which of a request's two customer-key positions may cross a cleartext connection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PlaintextKeys {
+    /// Neither: the default.
+    Neither,
+    /// The copy source's only: legacy RustFS's gate with TLS required for customer keys.
+    CopySourceOnly,
+    /// Both: the deployment asserted its transport for every connection.
+    Both,
 }
 
 impl SseConfig {
-    /// The default: a customer-provided key on a cleartext connection is refused.
+    /// The default: a customer-provided key on a cleartext connection is refused, on either of a
+    /// request's two key positions.
     #[must_use]
     pub const fn strict() -> Self {
         Self {
-            allow_customer_keys_over_plaintext: false,
+            over_plaintext: PlaintextKeys::Neither,
         }
     }
 
@@ -157,14 +170,31 @@ impl SseConfig {
     #[must_use]
     pub const fn allowing_customer_keys_over_plaintext(_ack: PlaintextCustomerKeyAck) -> Self {
         Self {
-            allow_customer_keys_over_plaintext: true,
+            over_plaintext: PlaintextKeys::Both,
+        }
+    }
+
+    /// Refuses the target object's customer-provided key over cleartext and serves the copy
+    /// source's, as legacy RustFS's transport gate does when a deployment requires TLS for
+    /// customer keys (`RUSTFS_SSE_C_REQUIRE_TLS`, rustfs/backlog#1677). Requires the witness: the
+    /// copy source's key crosses a cleartext wire.
+    #[must_use]
+    pub const fn refusing_only_target_keys_over_plaintext(_ack: PlaintextCustomerKeyAck) -> Self {
+        Self {
+            over_plaintext: PlaintextKeys::CopySourceOnly,
         }
     }
 
     /// Whether the gate is open. A deployment's start-up posture report should name this.
     #[must_use]
     pub const fn allows_customer_keys_over_plaintext(&self) -> bool {
-        self.allow_customer_keys_over_plaintext
+        matches!(self.over_plaintext, PlaintextKeys::Both)
+    }
+
+    /// Whether a copy source's customer-provided key is served over cleartext.
+    #[must_use]
+    pub const fn allows_copy_source_keys_over_plaintext(&self) -> bool {
+        !matches!(self.over_plaintext, PlaintextKeys::Neither)
     }
 }
 
@@ -360,7 +390,9 @@ impl SseEnforced {
 ///    whatever its key says, so a caller cannot use the refusal to learn anything about the key
 ///    material it just disclosed.
 /// 2. **The contradiction second**, so a request that is wrong in both channels is refused
-///    deterministically rather than by whichever check happens to run first.
+///    deterministically rather than by whichever check happens to run first. It concerns the
+///    target object only: a copy source's customer key beside a managed algorithm is a copy from
+///    an SSE-C source into an SSE-S3 or SSE-KMS target, which is a choice, not a contradiction.
 /// 3. **The target key, then the copy-source key, then the managed channel.**
 ///
 /// # Errors
@@ -369,14 +401,24 @@ impl SseEnforced {
 pub fn enforce(request: &MetaView<'_>, transport: TransportSecurity, config: &SseConfig) -> Result<SseEnforced, SseRejection> {
     let headers = SseHeaders::read(request);
 
-    if headers.any_customer_key_header()
-        && transport == TransportSecurity::Plaintext
-        && !config.allows_customer_keys_over_plaintext()
-    {
+    // Legacy-compat (rustfs/backlog#2684): legacy RustFS's transport gate looks at the target
+    // object's customer-key headers only, so with TLS required it still serves a copy source's
+    // customer key sent over cleartext, where the key is disclosed to every hop exactly as a target
+    // key would be. Reproduced only under `SseConfig::refusing_only_target_keys_over_plaintext`;
+    // the intended future behaviour is the strict default, which gates both key positions.
+    let gated = match config.over_plaintext {
+        PlaintextKeys::Neither => headers.any_customer_key_header(),
+        PlaintextKeys::CopySourceOnly => headers.target.any_present(),
+        PlaintextKeys::Both => false,
+    };
+    if gated && transport == TransportSecurity::Plaintext {
         return Err(SseRejection::PlaintextCustomerKey);
     }
 
-    if headers.managed.any_present() && headers.any_customer_key_header() {
+    // The contradiction is about the object being written: a managed algorithm and a customer key
+    // for the same object. The copy source's key decrypts another object, so an SSE-C source may
+    // be copied into an SSE-S3 or SSE-KMS target, as AWS documents for CopyObject.
+    if headers.managed.any_present() && headers.target.any_present() {
         return Err(SseRejection::ChannelsContradict);
     }
 

@@ -255,6 +255,59 @@ fn n_the_plaintext_allowance_is_off_until_a_deployment_spells_it_out() {
     assert!(!SseConfig::default().allows_customer_keys_over_plaintext());
 }
 
+/// Legacy RustFS's gate, with TLS required: only the target's key.
+fn target_gate() -> SseConfig {
+    SseConfig::refusing_only_target_keys_over_plaintext(
+        PlaintextCustomerKeyAck::i_understand_customer_keys_will_be_sent_in_the_clear(),
+    )
+}
+
+/// Under the target-only gate a copy source's key is served over cleartext, and read exactly as
+/// over TLS; the configuration says so.
+#[test]
+fn the_target_only_gate_serves_a_copy_source_key_over_cleartext() {
+    let enforced = served(enforce_with(&source_trio(KEY_A, MD5_A), TransportSecurity::Plaintext, &target_gate()));
+    let source = base64::decode_exact::<16>(MD5_A).expect("canonical");
+    assert_eq!(enforced.copy_source_key_fingerprint().map(KeyFingerprint::as_array), Some(&source));
+    assert!(target_gate().allows_copy_source_keys_over_plaintext());
+    assert!(!target_gate().allows_customer_keys_over_plaintext());
+}
+
+/// Under the target-only gate every fragment of the target's trio still trips the gate over
+/// cleartext, alone or beside a copy source's key.
+#[test]
+fn n_the_target_only_gate_still_refuses_every_target_key_fragment() {
+    for name in [SSEC_ALGORITHM, SSEC_KEY, SSEC_KEY_MD5] {
+        let value = if name.ends_with("algorithm") {
+            CUSTOMER_ALGORITHM
+        } else {
+            KEY_A
+        };
+        let mut headers = source_trio(KEY_B, MD5_B);
+        headers.push((name, value));
+        for request in [vec![(name, value)], headers] {
+            assert_eq!(
+                refused(enforce_with(&request, TransportSecurity::Plaintext, &target_gate())),
+                SseRejection::PlaintextCustomerKey,
+                "{name}"
+            );
+        }
+    }
+}
+
+/// The strict default and the full allowance are unchanged by the target-only reading: the default
+/// gates both positions, the allowance neither.
+#[test]
+fn n_the_two_other_configurations_treat_both_positions_alike() {
+    assert!(!SseConfig::strict().allows_copy_source_keys_over_plaintext());
+    let open = SseConfig::allowing_customer_keys_over_plaintext(
+        PlaintextCustomerKeyAck::i_understand_customer_keys_will_be_sent_in_the_clear(),
+    );
+    assert!(open.allows_copy_source_keys_over_plaintext());
+    assert!(is_ok(&enforce_with(&target_trio(KEY_A, MD5_A), TransportSecurity::Plaintext, &open)));
+    assert_eq!(refused(over_plaintext(&source_trio(KEY_A, MD5_A))), SseRejection::PlaintextCustomerKey);
+}
+
 /// The gate runs first, so a request that is also wrong in some other way still gets the gate's
 /// answer and nothing about its key material.
 #[test]
@@ -289,12 +342,45 @@ fn n_a_kms_qualifier_beside_a_customer_key_is_the_same_contradiction() {
     }
 }
 
-/// The contradiction covers the copy-source key too.
+/// A copy-source key beside a managed algorithm is a copy from an SSE-C source into an SSE-S3 or
+/// SSE-KMS target, not a contradiction: the source key decrypts the source, and the target is
+/// encrypted as the managed headers say.
+///
+/// This case asserted `ChannelsContradict` until rustfs/backlog#1677 (R11). AWS documents the copy
+/// as allowed: the copy-source customer-key headers are what S3 decrypts the source with, and a
+/// CopyObject may encrypt its target with an S3-managed key, a KMS key or a customer key whatever
+/// the source used (<https://docs.aws.amazon.com/AmazonS3/latest/API/API_CopyObject.html>);
+/// legacy RustFS checks the managed channel against the target's key headers only
+/// (rustfs/rustfs@e870a6d25b `rustfs/src/storage/sse.rs:626-634`). The contradiction on the
+/// target's own key is still pinned by the two cases above and the one below.
 #[test]
-fn n_a_managed_algorithm_beside_a_copy_source_key_is_refused() {
+fn a_managed_algorithm_beside_a_copy_source_key_is_a_copy_into_managed_encryption() {
+    for managed in [
+        vec![(SSE_ALGORITHM, "AES256")],
+        vec![(SSE_ALGORITHM, "aws:kms"), (SSE_KMS_KEY_ID, KEY_ARN)],
+    ] {
+        let mut headers = source_trio(KEY_A, MD5_A);
+        headers.extend(managed.iter().copied());
+        let enforced = served(over_tls(&headers));
+        let source = base64::decode_exact::<16>(MD5_A).expect("canonical");
+        assert_eq!(enforced.copy_source_key_fingerprint().map(KeyFingerprint::as_array), Some(&source));
+        assert!(enforced.customer_key_fingerprint().is_none());
+        assert!(enforced.managed_algorithm().is_some(), "{managed:?}");
+    }
+}
+
+/// The target's own key beside a managed algorithm is still the contradiction on a copy, whatever
+/// key the source carries.
+#[test]
+fn n_a_managed_algorithm_beside_the_target_key_contradicts_on_a_copy_too() {
     let mut headers = source_trio(KEY_A, MD5_A);
+    headers.extend(target_trio(KEY_B, MD5_B));
     headers.push((SSE_ALGORITHM, "AES256"));
     assert_eq!(refused(over_tls(&headers)), SseRejection::ChannelsContradict);
+    let mut fragment = source_trio(KEY_A, MD5_A);
+    fragment.push((SSEC_KEY_MD5, MD5_B));
+    fragment.push((SSE_KMS_KEY_ID, KEY_ARN));
+    assert_eq!(refused(over_tls(&fragment)), SseRejection::ChannelsContradict);
 }
 
 // ── negative: the customer key trio ──────────────────────────────────────────────────────────
