@@ -38,6 +38,7 @@ use core::fmt;
 
 use crate::clock::{ClockChecked, RequestNow};
 use crate::floor::WireView;
+use crate::presigned_expiry::PresignedExpiryRule;
 use crate::scheme::SigService;
 use crate::signature::Signature;
 use crate::verdict::CredentialPresence;
@@ -64,6 +65,7 @@ pub struct SealedSigV2<'a> {
     expires_at: Option<u64>,
     presence: CredentialPresence,
     expected_service: SigService,
+    expiry_rule: PresignedExpiryRule,
 }
 
 impl<'a> SealedSigV2<'a> {
@@ -84,6 +86,7 @@ impl<'a> SealedSigV2<'a> {
             expires_at: None,
             presence,
             expected_service,
+            expiry_rule: PresignedExpiryRule::Aws,
         }
     }
 
@@ -109,7 +112,22 @@ impl<'a> SealedSigV2<'a> {
             expires_at: Some(expires_at),
             presence,
             expected_service,
+            expiry_rule: PresignedExpiryRule::Aws,
         }
+    }
+
+    /// The same request, with the presigned-lifetime rule the floor read its `Expires` under, so
+    /// the string-to-sign accepts exactly the spellings the floor did.
+    #[must_use]
+    pub(crate) const fn with_expiry_rule(mut self, rule: PresignedExpiryRule) -> Self {
+        self.expiry_rule = rule;
+        self
+    }
+
+    /// The presigned-lifetime rule the floor admitted this request under.
+    #[must_use]
+    pub const fn expiry_rule(&self) -> PresignedExpiryRule {
+        self.expiry_rule
     }
 
     /// A browser POST form whose credential fields parsed and whose operation allows POST policy.
@@ -132,6 +150,7 @@ impl<'a> SealedSigV2<'a> {
             expires_at: None,
             presence,
             expected_service,
+            expiry_rule: PresignedExpiryRule::Aws,
         }
     }
 

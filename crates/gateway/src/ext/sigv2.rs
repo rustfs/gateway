@@ -190,7 +190,8 @@ impl SigV4Authenticator {
                     &query,
                     view.headers(),
                     request.virtual_host_bucket(),
-                );
+                )
+                .with_presigned_expiry_rule(sealed.expiry_rule());
                 let expected = spec.build_for_verification()?.sign(&key);
                 // The one comparison. `verify_presented` is a wrapper over
                 // `Signature::ct_verify`; `scripts/check_ct_eq.sh` rejects a second one.

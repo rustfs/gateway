@@ -31,7 +31,7 @@ for request order and `docs/assembly-order.md` for extension call counts.
 | `src/monomorphic.rs` | Concrete-backend service and type-level operation set | Building or auditing static dispatch |
 | `src/operation_mode.rs` | Dynamic/static adapters for the common pipeline | Auditing how a routed operation reaches its codec and handler |
 | `src/panic_boundary.rs` | Panic isolation for deployment-provided futures | An extension panic escapes the request boundary |
-| `src/posture.rs`, `src/dialect_posture.rs` | Startup-only security posture rendering and the public assembly snapshot; `dialect_posture.rs` renders the `DIALECT_POSTURE` line (claimed prefixes, caller-secret operations) | Auditing deployment security visibility |
+| `src/posture.rs`, `src/dialect_posture.rs`, `src/presigned_expiry_posture.rs` | Startup-only security posture rendering and the public assembly snapshot; `dialect_posture.rs` renders the `DIALECT_POSTURE` line (claimed prefixes, caller-secret operations); `presigned_expiry_posture.rs` renders `PRESIGNED_EXPIRY_POSTURE` when a non-default presigned-lifetime rule is on | Auditing deployment security visibility |
 | `src/request_deadline.rs` | Runtime-independent policy and failure-floor deadlines | Editing timeout mechanics used by the request pipeline |
 | `src/request_body.rs`, `src/post_object.rs` | Live verified body producer, terminal verdict, and bounded POST Object adapter | A streaming upload crosses the codec or handler boundary |
 | `src/stamp.rs` | Framework-owned response headers | A response lacks IDs, `Server`, or `Date` |

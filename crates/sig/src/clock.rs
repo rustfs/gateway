@@ -19,9 +19,9 @@
 //! the signed timestamp and that snapshot, capped at fifteen minutes), [`enforce_clock_skew`] and
 //! its presigned counterpart `enforce_presigned_clock_skew`, the [`ClockChecked`] receipt both
 //! produce, and [`enforce_expiry`] — the checked arithmetic behind a presigned URL's lifetime.
-//! NOT responsible for: reading `X-Amz-Expires` off the wire (that is [`crate::floor`], because it
-//! is a query-parsing rule), deciding which operations accept a presigned request (also
-//! [`crate::floor`]), or verifying any signature.
+//! NOT responsible for: reading `X-Amz-Expires` off the wire (that is [`crate::presigned_expiry`],
+//! because it is a query-parsing rule), deciding which operations accept a presigned request
+//! ([`crate::floor`]), or verifying any signature.
 //! Upstream: [`crate::AmzDate`], [`crate::AuthError`]. Downstream: [`crate::floor`], which is the
 //! only caller, and `rustfs-gateway-core`'s authentication stage through it.
 //!
@@ -319,7 +319,7 @@ impl PresignExpiry {
 
 /// H2, the arithmetic half — the range check, the overflow check and the expiry comparison.
 ///
-/// The strict parse of the `X-Amz-Expires` *text* lives in `crate::floor`, because a spelling
+/// The strict parse of the `X-Amz-Expires` *text* lives in `crate::presigned_expiry`, because a spelling
 /// rule belongs with the query reader. What lives here is what must not be got wrong once the
 /// number exists: the range, and the addition.
 ///
@@ -341,6 +341,36 @@ pub fn enforce_expiry(clock: ClockChecked, expires_in_seconds: u64) -> Result<Pr
         .and_then(|seconds| clock.signed_at_unix_seconds().checked_add(seconds))
         .ok_or(AuthError::AuthorizationQueryParametersError)?;
     if clock.now().unix_seconds() > expires_at {
+        return Err(AuthError::RequestExpired);
+    }
+    Ok(PresignExpiry {
+        expires_in: expires_in_seconds,
+        expires_at,
+    })
+}
+
+/// H2's arithmetic under the RustFS profile's legacy reading (`crate::PresignedExpiryRule::LegacyRustfs`).
+///
+/// Two differences from [`enforce_expiry`], both what legacy RustFS answers: `0` is a lifetime (one
+/// that has already ended unless the URL is dated in the future), and the URL stops working at the
+/// second its lifetime ends rather than one second later — legacy compares the elapsed time,
+/// which carries sub-second precision, strictly against the lifetime, so any instant inside the
+/// last second is already past it. The ceiling and the checked addition are the same.
+///
+/// # Errors
+///
+/// * [`AuthError::AuthorizationQueryParametersError`] above [`MAX_PRESIGNED_EXPIRY_SECONDS`], or
+///   when the expiry instant does not fit.
+/// * [`AuthError::RequestExpired`] from the second the lifetime ends.
+pub(crate) fn enforce_legacy_rustfs_expiry(clock: ClockChecked, expires_in_seconds: u64) -> Result<PresignExpiry, AuthError> {
+    if expires_in_seconds > MAX_PRESIGNED_EXPIRY_SECONDS {
+        return Err(AuthError::AuthorizationQueryParametersError);
+    }
+    let expires_at = i64::try_from(expires_in_seconds)
+        .ok()
+        .and_then(|seconds| clock.signed_at_unix_seconds().checked_add(seconds))
+        .ok_or(AuthError::AuthorizationQueryParametersError)?;
+    if clock.now().unix_seconds() >= expires_at {
         return Err(AuthError::RequestExpired);
     }
     Ok(PresignExpiry {

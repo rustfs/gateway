@@ -356,6 +356,13 @@ Narrowing the skew window does not shorten a presigned lifetime. This matches S3
 probe of MinIO, and the s3s revision RustFS runs (rustfs/gateway#723); `c-sig-0309`, `c-sig-0310`,
 `c-sig-0336`..`c-sig-0339` and `c-sig-0590`..`c-sig-0593` hold each boundary.
 
+The RustFS profile reads lifetimes the way legacy RustFS does
+(`PresignedExpiryRule::LegacyRustfs`, rustfs/gateway#1099): `X-Amz-Expires` as an unsigned 32-bit
+integer in Rust's spelling, with `0` a lifetime that has already ended and the URL expiring at the
+start of its last second, still capped at seven days; and SigV2's `Expires` as any absolute second
+up to the year 9999, **with no seven-day ceiling**. That widens the floor for SigV2 links, so an
+assembly running it writes `PRESIGNED_EXPIRY_POSTURE rule=legacy-rustfs` to its startup log.
+
 `CredentialProvider` is the only extension point on the **unauthenticated** path: anybody who can
 reach the port can make the gateway call it, and what it returns is a long-term secret. The
 framework's half:

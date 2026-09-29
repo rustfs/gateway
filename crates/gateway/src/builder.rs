@@ -652,6 +652,7 @@ impl ServiceBuilder {
             dangerously_replaced_signature_verifier,
         );
         log_dialect_posture(&routing.router, self.caller_secret_every_operation);
+        crate::presigned_expiry_posture::log_presigned_expiry_posture(&self.floor);
         let governor: Arc<dyn Governor> = match self.governor {
             Some(user) => Arc::new(LayeredGovernor::new(framework_governor, user)),
             None => Arc::new(framework_governor),

@@ -177,7 +177,11 @@ pub(crate) fn build_service(
             .security_floor(
                 SecurityFloor::new()
                     .delegate_anonymous_to_authorizer_after_listing_in_the_posture_report()
-                    .enable_sigv2_presigned_compatibility(),
+                    .enable_sigv2_presigned_compatibility()
+                    // RustFS reads a presigned lifetime its own way: `X-Amz-Expires` as a Rust
+                    // `u32` with `0` allowed, SigV2 `Expires` with no seven-day ceiling
+                    // (rustfs/rustfs#5368); the posture report names the rule.
+                    .with_presigned_expiry_rule(rustfs_gateway::PresignedExpiryRule::LegacyRustfs),
             )
             // Sized as the RustFS bridge sizes it: no framework layer refuses what RustFS answers.
             .framework_governor_rates(rustfs_governor_rates())
