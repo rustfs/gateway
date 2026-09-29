@@ -298,6 +298,13 @@ impl FormReader {
             }
             return Ok(false);
         };
+        // The buffer may already hold more than the header ceiling — after a field it carries the
+        // bytes that followed the value, up to that field's own budget — so the block found in it
+        // is measured, not only the buffer. Otherwise the ceiling would hold for a body sent a byte
+        // at a time and not for the same body sent in one frame.
+        if end.saturating_add(4) > self.limits.max_part_header_bytes() {
+            return Err(FormReject::PartHeaderTooLarge);
+        }
         let Some(block) = self.buffer.get(..end) else {
             return Err(FormReject::MalformedPart);
         };

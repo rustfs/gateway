@@ -679,3 +679,22 @@ fn boundary_text_inside_the_file_is_content() {
         assert_eq!(outcome.file, content, "chunk {chunk} truncated the file");
     }
 }
+
+/// Negative — a part header block over its ceiling is refused however the body is framed, even
+/// when it arrives in the same frame as a large field before it.
+///
+/// The reader keeps what follows a field in its buffer, and after a `policy` that can be twenty
+/// kibibytes: a header block found inside those bytes was once accepted whole at any size, while
+/// the same body sent a byte at a time was refused, so the ceiling held only for some framings.
+#[test]
+fn an_oversized_part_header_after_a_large_field_is_refused_in_every_framing() {
+    let body = Form::default()
+        .field("policy", &vec![b'p'; 12 * 1024])
+        .file(&"n".repeat(FormLimits::DEFAULT_MAX_PART_HEADER_BYTES), b"content")
+        .end();
+
+    for chunk in [1usize, 7, 4096, body.len()] {
+        let outcome = drive(&body, &[chunk], FormLimits::default(), &|_| 1024);
+        assert_eq!(outcome.err(), Some(FormReject::PartHeaderTooLarge), "{chunk}-byte frames");
+    }
+}
