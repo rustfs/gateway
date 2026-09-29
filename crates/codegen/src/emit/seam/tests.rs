@@ -298,6 +298,100 @@ mod legacy_semantics {
     }
 }
 
+// ── answer headers ───────────────────────────────────────────────────────────────────────────
+
+mod answer_headers {
+    use rustfs_gateway_model::ir::{Binding, Type};
+
+    use super::{ctx, facts, field};
+    use crate::emit::seam::render;
+
+    fn output_field(name: &str, wire: &str, binding: Binding, ty: Type, required: bool) -> rustfs_gateway_model::ir::Field {
+        let mut field = field(name, ty, required);
+        field.wire_name = Some(wire.to_owned());
+        field.binding = binding;
+        field
+    }
+
+    #[test]
+    fn a_header_the_body_sets_clears_the_member_that_writes_it() {
+        let facts = facts(
+            "struct T\n  accept_ranges: Option<String>\n  metadata: Option<Map<String, String>>\n  checksum_crc32: Option<String>\n  checksum_sha256: Option<String>\n",
+        );
+        let fields = [
+            output_field("AcceptRanges", "accept-ranges", Binding::Header, Type::String, false),
+            output_field(
+                "Metadata",
+                "x-amz-meta-",
+                Binding::PrefixHeaders,
+                Type::Map {
+                    key: Box::new(Type::String),
+                    value: Box::new(Type::String),
+                },
+                false,
+            ),
+            output_field("ChecksumSpec", "x-amz-checksum-", Binding::PrefixHeaders, Type::ChecksumSpec, false),
+        ];
+        let text = render::headers_body(&ctx(&facts), "T", &fields).expect("renders");
+        assert!(
+            text.contains("if headers.contains_key(\"accept-ranges\") { output.accept_ranges = None; }"),
+            "{text}"
+        );
+        assert!(
+            text.contains("map.retain(|key, _| !headers.contains_key(format!(\"x-amz-meta-{key}\").as_str()));"),
+            "{text}"
+        );
+        assert!(
+            text.contains("if headers.contains_key(\"x-amz-checksum-crc32\") { output.checksum_crc32 = None; }"),
+            "{text}"
+        );
+        assert!(
+            text.contains("if headers.contains_key(\"x-amz-checksum-sha256\") { output.checksum_sha256 = None; }"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn n_a_required_member_a_header_would_replace_is_refused_not_cleared() {
+        let facts = facts("struct T\n  request_charged: String\n");
+        let fields = [output_field(
+            "RequestCharged",
+            "x-amz-request-charged",
+            Binding::Header,
+            Type::String,
+            true,
+        )];
+        let text = render::headers_body(&ctx(&facts), "T", &fields).expect("renders");
+        assert!(text.contains("return Err(ConversionError { field: \"request_charged\""), "{text}");
+        assert!(!text.contains("= None"), "{text}");
+    }
+
+    #[test]
+    fn n_a_body_or_query_member_is_never_cleared_by_a_header() {
+        let facts = facts("struct T\n  name: Option<String>\n  marker: Option<String>\n");
+        let fields = [
+            output_field("Name", "Name", Binding::BodyXml, Type::String, false),
+            output_field("Marker", "marker", Binding::Query, Type::String, false),
+        ];
+        let text = render::headers_body(&ctx(&facts), "T", &fields).expect("renders");
+        assert!(text.is_empty(), "{text}");
+    }
+
+    #[test]
+    fn n_a_prefixed_header_member_that_is_not_a_map_fails_generation() {
+        let facts = facts("struct T\n  metadata: Option<String>\n");
+        let fields = [output_field(
+            "Metadata",
+            "x-amz-meta-",
+            Binding::PrefixHeaders,
+            Type::String,
+            false,
+        )];
+        let errors = render::headers_body(&ctx(&facts), "T", &fields).expect_err("not a map");
+        assert!(errors[0].contains("not an optional map"), "{errors:?}");
+    }
+}
+
 // ── the member census ─────────────────────────────────────────────────────────────────────────
 
 mod census {

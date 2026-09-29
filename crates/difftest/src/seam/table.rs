@@ -37,7 +37,7 @@ use rustfs_gateway_types::compat::ConversionError;
 use rustfs_gateway_types::compat::s3s_0_17_0 as seam;
 use rustfs_gateway_types::persistence as dto_bridge;
 
-use super::stacks::{LegacyRecorder, SeamRecorder, record};
+use super::stacks::{LegacyAnswer, LegacyRecorder, SeamRecorder, record, take};
 use crate::oracle::{Answered, recorded};
 use crate::s3s;
 use s3s::dto as legacy;
@@ -63,6 +63,34 @@ pub(crate) trait SeamConverted: OperationCodec + Sized {
     fn stored(_input: &Self::Input) -> Stored {
         None
     }
+
+    /// A queued [`LegacyAnswer`] of this operation, converted through the seam as the RustFS adapter
+    /// converts an answer: the output and the headers the body set, with the gateway writing the
+    /// headers after the output (`answer_from_legacy`).
+    fn answer(queued: Box<dyn Any + Send>) -> Result<(Self::Output, http::HeaderMap), ConversionError>;
+}
+
+/// The queued answer as the legacy answer of output `T`.
+fn queued<T: 'static>(queued: Box<dyn Any + Send>) -> Result<LegacyAnswer<T>, ConversionError> {
+    queued
+        .downcast::<LegacyAnswer<T>>()
+        .map(|answer| *answer)
+        .map_err(|_| refused("answer", "the queued answer is another operation's"))
+}
+
+macro_rules! answer {
+    (put_object, $method:ident, $output:ident, $queued:ident) => {{
+        let LegacyAnswer { output, headers } = queued::<legacy::$output>($queued)?;
+        seam::put_object::answer_from_legacy(output, headers)
+    }};
+    (location, $method:ident, $output:ident, $queued:ident) => {{
+        let _ = $queued;
+        Err(refused("answer", "GetBucketLocation's seam converts no answer headers"))
+    }};
+    ($kind:ident, $method:ident, $output:ident, $queued:ident) => {{
+        let LegacyAnswer { output, headers } = queued::<legacy::$output>($queued)?;
+        ops::$method::answer_from_legacy(output, headers)
+    }};
 }
 
 /// A writer's result as stored bytes.
@@ -327,6 +355,10 @@ macro_rules! seam_operations {
             }
 
             stored!($op);
+
+            fn answer(queued: Box<dyn Any + Send>) -> Result<(Self::Output, http::HeaderMap), ConversionError> {
+                answer!($kind, $method, $output, queued)
+            }
         })+
 
         /// Registers the seam recorder for every covered operation.
@@ -351,7 +383,15 @@ macro_rules! seam_operations {
                 let stored: Stored = legacy_stored!($op, input);
                 Box::pin(async move {
                     record(&self.slot, stringify!($op), Ok(Box::new(input)), body, stored).await;
-                    recorded()
+                    match take(&self.answer).map(|queued| queued.downcast::<LegacyAnswer<legacy::$output>>()) {
+                        Some(Ok(answer)) => {
+                            let LegacyAnswer { output, headers } = *answer;
+                            let mut response = s3s::S3Response::new(output);
+                            response.headers = headers;
+                            Ok(response)
+                        }
+                        _ => recorded(),
+                    }
                 })
             })+
         }

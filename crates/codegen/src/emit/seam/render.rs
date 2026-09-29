@@ -465,6 +465,77 @@ fn wrap_backward(field: &Field, s3s_optional: bool, member: &str, conv: &str, na
     }
 }
 
+/// The body of an operation's `answer_from_legacy`: every legacy output member a response header
+/// the RustFS body set itself would replace on the legacy wire is cleared, so the gateway writes
+/// that header as the body set it and no second value of it (rustfs/gateway#1076).
+///
+/// The legacy writer puts the output's headers on the response and then extends it with the
+/// body's own, and extending a header map replaces every value of a name it already holds. The
+/// gateway instead refuses a handler header its encoder already wrote (rustfs/gateway#1043), so a
+/// member the body's header replaces must not reach the encoder.
+pub(super) fn headers_body(ctx: &Ctx<'_>, owner: &str, fields: &[Field]) -> Result<String, Vec<String>> {
+    let Some(s3s) = ctx.facts.structs.get(owner) else {
+        return Err(vec![format!("{owner}: not an s3s struct")]);
+    };
+    let mut errors = Vec::new();
+    let mut body = String::new();
+    for field in fields {
+        let Some(wire) = field.wire_name.as_deref() else { continue };
+        let header = wire.to_ascii_lowercase();
+        match field.binding {
+            Binding::Header => {}
+            Binding::PrefixHeaders if !matches!(field.ty, Type::ChecksumSpec) => {
+                match target(ctx, owner, field, s3s) {
+                    Ok(Target::Member(member, S3sType::Option(inner))) if matches!(inner.as_ref(), S3sType::Map(..)) => {
+                        let _ = writeln!(
+                            body,
+                            "    if let Some(map) = output.{member}.as_mut() {{\n        map.retain(|key, _| !headers.contains_key(format!(\"{header}{{key}}\").as_str()));\n    }}"
+                        );
+                    }
+                    Ok(_) => errors.push(format!(
+                        "{owner}.{}: a prefixed header member that is not an optional map",
+                        bare_name(field)
+                    )),
+                    Err(error) => errors.push(error),
+                }
+                continue;
+            }
+            Binding::PrefixHeaders => {}
+            _ => continue,
+        }
+        match target(ctx, owner, field, s3s) {
+            Ok(Target::ChecksumFanOut) => {
+                for (member, _) in CHECKSUM_FAN_OUT {
+                    if s3s.iter().any(|(present, _)| present == member) {
+                        let suffix = member.trim_start_matches("checksum_");
+                        let _ = writeln!(
+                            body,
+                            "    if headers.contains_key(\"x-amz-checksum-{suffix}\") {{ output.{member} = None; }}"
+                        );
+                    }
+                }
+            }
+            Ok(Target::Member(member, ty)) => {
+                if matches!(ty, S3sType::Option(_)) {
+                    let _ = writeln!(body, "    if headers.contains_key(\"{header}\") {{ output.{member} = None; }}");
+                } else {
+                    let _ = writeln!(
+                        body,
+                        "    if headers.contains_key(\"{header}\") {{\n        {};\n    }}",
+                        missing(member, "a response header the RustFS body set would replace this required member")
+                    );
+                }
+            }
+            Ok(Target::GatewayOnly(_) | Target::CarriedByHeaders | Target::Supplied(..) | Target::Nested(..)) => {}
+            Err(error) => errors.push(error),
+        }
+    }
+    if !errors.is_empty() {
+        return Err(errors);
+    }
+    Ok(body)
+}
+
 /// One operation module: its module name and text.
 pub(super) fn operation(ctx: &Ctx<'_>, ir: &OperationIr) -> Result<(String, String), Vec<String>> {
     let op = &ir.operation;
@@ -479,14 +550,17 @@ pub(super) fn operation(ctx: &Ctx<'_>, ir: &OperationIr) -> Result<(String, Stri
         .map(|(name, ty)| format!(", {name}: {ty}"))
         .collect();
     let backward = backward_struct(ctx, &format!("{op}Output"), &ir.output, &format!("{gw}::Output"), "output");
-    let (forward, backward) = match (forward, backward) {
-        (Ok(f), Ok(b)) => (f, b),
-        (f, b) => {
+    let headers = headers_body(ctx, &format!("{op}Output"), &ir.output);
+    let (forward, backward, headers) = match (forward, backward, headers) {
+        (Ok(f), Ok(b), Ok(h)) => (f, b, h),
+        (f, b, h) => {
             let mut errors = f.err().unwrap_or_default();
             errors.extend(b.err().unwrap_or_default());
+            errors.extend(h.err().unwrap_or_default());
             return Err(errors.into_iter().map(|e| format!("{op}: {e}")).collect());
         }
     };
+    let mutable = if headers.is_empty() { "" } else { "mut " };
     let mut out = String::from(HEADER);
     let _ = write!(
         out,
@@ -498,7 +572,15 @@ pub(super) fn operation(ctx: &Ctx<'_>, ir: &OperationIr) -> Result<(String, Stri
          /// Converts the s3s output a RustFS app body returned into the gateway `{op}` output.\n\
          ///\n/// # Errors\n///\n/// [`ConversionError`] naming a member the gateway output cannot hold.\n\
          #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]\n\
-         pub fn output_from_s3s(output: s3s::dto::{op}Output) -> Result<{gw}::Output, ConversionError> {{\n{backward}}}\n"
+         pub fn output_from_s3s(output: s3s::dto::{op}Output) -> Result<{gw}::Output, ConversionError> {{\n{backward}}}\n\n\
+         /// Converts a RustFS app body's whole answer — its output and the response headers it set\n\
+         /// beside it — into the gateway `{op}` output and the extra headers the gateway writes after\n\
+         /// it (`Resp::with_extra_headers`). The legacy writer lets such a header replace the one an\n\
+         /// output member writes, so a member whose header the body set is left to that header.\n\
+         ///\n/// # Errors\n///\n/// [`ConversionError`] as [`output_from_s3s`], or naming a required member one of the\n\
+         /// headers would replace.\n\
+         #[allow(clippy::too_many_lines, clippy::needless_pass_by_value)]\n\
+         pub fn answer_from_legacy({mutable}output: s3s::dto::{op}Output, headers: http::HeaderMap) -> Result<({gw}::Output, http::HeaderMap), ConversionError> {{\n{headers}    Ok((output_from_s3s(output)?, headers))\n}}\n"
     );
     Ok((module, out))
 }

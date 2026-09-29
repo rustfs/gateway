@@ -55,3 +55,19 @@ pub fn output_from_s3s(output: s3s::dto::RestoreObjectOutput) -> Result<crate::o
         restore_output_path,
     })
 }
+
+/// Converts a RustFS app body's whole answer — its output and the response headers it set
+/// beside it — into the gateway `RestoreObject` output and the extra headers the gateway writes after
+/// it (`Resp::with_extra_headers`). The legacy writer lets such a header replace the one an
+/// output member writes, so a member whose header the body set is left to that header.
+///
+/// # Errors
+///
+/// [`ConversionError`] as [`output_from_s3s`], or naming a required member one of the
+/// headers would replace.
+#[allow(clippy::too_many_lines, clippy::needless_pass_by_value)]
+pub fn answer_from_legacy(mut output: s3s::dto::RestoreObjectOutput, headers: http::HeaderMap) -> Result<(crate::ops::restore_object::Output, http::HeaderMap), ConversionError> {
+    if headers.contains_key("x-amz-request-charged") { output.request_charged = None; }
+    if headers.contains_key("x-amz-restore-output-path") { output.restore_output_path = None; }
+    Ok((output_from_s3s(output)?, headers))
+}

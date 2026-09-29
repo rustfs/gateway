@@ -154,3 +154,62 @@ pub fn output_from_s3s(output: s3s::dto::HeadObjectOutput) -> Result<crate::ops:
         object_lock_event_hold_duration_years: Default::default(),
     })
 }
+
+/// Converts a RustFS app body's whole answer — its output and the response headers it set
+/// beside it — into the gateway `HeadObject` output and the extra headers the gateway writes after
+/// it (`Resp::with_extra_headers`). The legacy writer lets such a header replace the one an
+/// output member writes, so a member whose header the body set is left to that header.
+///
+/// # Errors
+///
+/// [`ConversionError`] as [`output_from_s3s`], or naming a required member one of the
+/// headers would replace.
+#[allow(clippy::too_many_lines, clippy::needless_pass_by_value)]
+pub fn answer_from_legacy(mut output: s3s::dto::HeadObjectOutput, headers: http::HeaderMap) -> Result<(crate::ops::head_object::Output, http::HeaderMap), ConversionError> {
+    if headers.contains_key("x-amz-delete-marker") { output.delete_marker = None; }
+    if headers.contains_key("accept-ranges") { output.accept_ranges = None; }
+    if headers.contains_key("x-amz-expiration") { output.expiration = None; }
+    if headers.contains_key("x-amz-restore") { output.restore = None; }
+    if headers.contains_key("x-amz-archive-status") { output.archive_status = None; }
+    if headers.contains_key("last-modified") { output.last_modified = None; }
+    if headers.contains_key("content-length") { output.content_length = None; }
+    if headers.contains_key("x-amz-checksum-crc32") { output.checksum_crc32 = None; }
+    if headers.contains_key("x-amz-checksum-crc32c") { output.checksum_crc32c = None; }
+    if headers.contains_key("x-amz-checksum-crc64nvme") { output.checksum_crc64nvme = None; }
+    if headers.contains_key("x-amz-checksum-sha1") { output.checksum_sha1 = None; }
+    if headers.contains_key("x-amz-checksum-sha256") { output.checksum_sha256 = None; }
+    if headers.contains_key("x-amz-checksum-sha512") { output.checksum_sha512 = None; }
+    if headers.contains_key("x-amz-checksum-md5") { output.checksum_md5 = None; }
+    if headers.contains_key("x-amz-checksum-xxhash64") { output.checksum_xxhash64 = None; }
+    if headers.contains_key("x-amz-checksum-xxhash3") { output.checksum_xxhash3 = None; }
+    if headers.contains_key("x-amz-checksum-xxhash128") { output.checksum_xxhash128 = None; }
+    if headers.contains_key("x-amz-checksum-type") { output.checksum_type = None; }
+    if headers.contains_key("etag") { output.e_tag = None; }
+    if headers.contains_key("x-amz-missing-meta") { output.missing_meta = None; }
+    if headers.contains_key("x-amz-version-id") { output.version_id = None; }
+    if headers.contains_key("cache-control") { output.cache_control = None; }
+    if headers.contains_key("content-disposition") { output.content_disposition = None; }
+    if headers.contains_key("content-encoding") { output.content_encoding = None; }
+    if headers.contains_key("content-language") { output.content_language = None; }
+    if headers.contains_key("content-type") { output.content_type = None; }
+    if headers.contains_key("content-range") { output.content_range = None; }
+    if headers.contains_key("expires") { output.expires = None; }
+    if headers.contains_key("x-amz-website-redirect-location") { output.website_redirect_location = None; }
+    if headers.contains_key("x-amz-server-side-encryption") { output.server_side_encryption = None; }
+    if let Some(map) = output.metadata.as_mut() {
+        map.retain(|key, _| !headers.contains_key(format!("x-amz-meta-{key}").as_str()));
+    }
+    if headers.contains_key("x-amz-server-side-encryption-customer-algorithm") { output.sse_customer_algorithm = None; }
+    if headers.contains_key("x-amz-server-side-encryption-customer-key-md5") { output.sse_customer_key_md5 = None; }
+    if headers.contains_key("x-amz-server-side-encryption-aws-kms-key-id") { output.ssekms_key_id = None; }
+    if headers.contains_key("x-amz-server-side-encryption-bucket-key-enabled") { output.bucket_key_enabled = None; }
+    if headers.contains_key("x-amz-storage-class") { output.storage_class = None; }
+    if headers.contains_key("x-amz-request-charged") { output.request_charged = None; }
+    if headers.contains_key("x-amz-replication-status") { output.replication_status = None; }
+    if headers.contains_key("x-amz-mp-parts-count") { output.parts_count = None; }
+    if headers.contains_key("x-amz-tagging-count") { output.tag_count = None; }
+    if headers.contains_key("x-amz-object-lock-mode") { output.object_lock_mode = None; }
+    if headers.contains_key("x-amz-object-lock-retain-until-date") { output.object_lock_retain_until_date = None; }
+    if headers.contains_key("x-amz-object-lock-legal-hold") { output.object_lock_legal_hold_status = None; }
+    Ok((output_from_s3s(output)?, headers))
+}

@@ -82,3 +82,18 @@ pub fn output_from_s3s(output: s3s::dto::ListObjectVersionsOutput) -> Result<cra
         request_charged: request_charged.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::RequestCharged::custom(x.as_str().to_owned())) }).transpose()?,
     })
 }
+
+/// Converts a RustFS app body's whole answer — its output and the response headers it set
+/// beside it — into the gateway `ListObjectVersions` output and the extra headers the gateway writes after
+/// it (`Resp::with_extra_headers`). The legacy writer lets such a header replace the one an
+/// output member writes, so a member whose header the body set is left to that header.
+///
+/// # Errors
+///
+/// [`ConversionError`] as [`output_from_s3s`], or naming a required member one of the
+/// headers would replace.
+#[allow(clippy::too_many_lines, clippy::needless_pass_by_value)]
+pub fn answer_from_legacy(mut output: s3s::dto::ListObjectVersionsOutput, headers: http::HeaderMap) -> Result<(crate::ops::list_object_versions::Output, http::HeaderMap), ConversionError> {
+    if headers.contains_key("x-amz-request-charged") { output.request_charged = None; }
+    Ok((output_from_s3s(output)?, headers))
+}

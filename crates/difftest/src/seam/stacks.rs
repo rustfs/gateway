@@ -31,8 +31,8 @@ use std::sync::{Arc, Mutex};
 
 use http_body_util::BodyExt;
 use rustfs_gateway::{
-    Credentials, GovernorRates, Handler, HandlerError, HandlerResult, Rate, Req, S3Service, ServiceBuilder, SigV4Authenticator,
-    SlashPolicy, StaticCredentials, Unlimited,
+    Credentials, GovernorRates, Handler, HandlerError, HandlerResult, Rate, Req, Resp, S3Service, ServiceBuilder,
+    SigV4Authenticator, SlashPolicy, StaticCredentials, Unlimited,
 };
 use rustfs_gateway_sig::{RegionSet, SecurityFloor};
 use rustfs_gateway_types::ErrorCode;
@@ -40,6 +40,7 @@ use rustfs_gateway_types::compat::ConversionError;
 
 use super::table::{self, SeamConverted, Stored};
 use crate::decode::{Answer, BodySeen, S3ErrorView};
+use crate::encode::WireAnswer;
 use crate::gateway::{AllowEveryStage, FixtureOwner, RouteObserver, Routed};
 use crate::oracle::{RecordOperation, drain};
 use crate::probe::{ProbeBody, block_on};
@@ -61,6 +62,20 @@ pub(crate) struct Recorded {
 }
 
 pub(crate) type Slot = Arc<Mutex<Option<Recorded>>>;
+
+/// A RustFS app body's whole answer: its output and the response headers it set beside it.
+pub(crate) struct LegacyAnswer<T> {
+    pub(crate) output: T,
+    pub(crate) headers: http::HeaderMap,
+}
+
+/// The answer the next handler call gives instead of refusing, boxed as a [`LegacyAnswer`] of the
+/// operation's legacy output.
+pub(crate) type Queued = Arc<Mutex<Option<Box<dyn Any + Send>>>>;
+
+pub(crate) fn take(queued: &Queued) -> Option<Box<dyn Any + Send>> {
+    queued.lock().ok().and_then(|mut held| held.take())
+}
 
 /// Records `recorded` in `slot`, draining the body first.
 pub(crate) async fn record(
@@ -84,9 +99,11 @@ pub(crate) async fn record(
     }
 }
 
-/// The gateway backend: every covered operation converts through the seam and records.
+/// The gateway backend: every covered operation converts through the seam and records, then
+/// answers with a queued legacy answer converted through the seam, or refuses.
 pub(crate) struct SeamRecorder {
     pub(crate) slot: Slot,
+    pub(crate) answer: Queued,
 }
 
 impl<O: SeamConverted> Handler<O> for SeamRecorder {
@@ -94,7 +111,11 @@ impl<O: SeamConverted> Handler<O> for SeamRecorder {
         let stored = O::stored(request.input());
         let (input, body) = O::convert(request);
         record(&self.slot, O::NAME, input, body, stored).await;
-        Err(HandlerError::new(ErrorCode::NOT_IMPLEMENTED, "recorded by the seam diff"))
+        match take(&self.answer).map(O::answer) {
+            Some(Ok((output, headers))) => Ok(Resp::new(output).with_extra_headers(headers)),
+            Some(Err(error)) => Err(HandlerError::internal_error(format!("the seam cannot hand the answer over: {error}"))),
+            None => Err(HandlerError::new(ErrorCode::NOT_IMPLEMENTED, "recorded by the seam diff")),
+        }
     }
 }
 
@@ -103,6 +124,7 @@ pub(crate) struct GatewaySeam {
     service: S3Service,
     slot: Slot,
     routed: Routed,
+    answer: Queued,
 }
 
 impl GatewaySeam {
@@ -117,7 +139,11 @@ impl GatewaySeam {
             .refuse_unreadable_signing_regions_after_verification();
         let slot: Slot = Arc::new(Mutex::new(None));
         let routed: Routed = Arc::new(Mutex::new(None));
-        let recorder = Arc::new(SeamRecorder { slot: Arc::clone(&slot) });
+        let answer: Queued = Arc::new(Mutex::new(None));
+        let recorder = Arc::new(SeamRecorder {
+            slot: Arc::clone(&slot),
+            answer: Arc::clone(&answer),
+        });
         let unbounded = Rate::new(u32::MAX, u32::MAX);
         let builder = ServiceBuilder::new()
             .framework_governor_rates(GovernorRates {
@@ -152,7 +178,34 @@ impl GatewaySeam {
         let service = table::register(builder, &recorder)
             .build()
             .map_err(|error| format!("assembly: {error:?}"))?;
-        Ok(Self { service, slot, routed })
+        Ok(Self {
+            service,
+            slot,
+            routed,
+            answer,
+        })
+    }
+
+    /// Sends `request` with `answer` (a boxed [`LegacyAnswer`]) queued for its handler, and returns
+    /// the whole response the gateway wrote.
+    pub(crate) fn answer(&self, request: &RawRequest, answer: Box<dyn Any + Send>) -> Result<WireAnswer, String> {
+        *self.answer.lock().map_err(|_| "the answer slot is poisoned".to_owned())? = Some(answer);
+        let mut head = request.http_head()?;
+        if request.secure {
+            head = head.extension(rustfs_gateway::TransportSecurity::Encrypted);
+        }
+        let http_request = head
+            .body(ProbeBody::new(&request.body))
+            .map_err(|error| format!("request head: {error}"))?;
+        let response = block_on(self.service.call(http_request));
+        if take(&self.answer).is_some() {
+            return Err(format!("the gateway never reached the handler (status {})", response.status().as_u16()));
+        }
+        let (parts, body) = response.into_parts();
+        let body = block_on(body.collect())
+            .map_err(|_| "the gateway response body failed".to_owned())?
+            .to_bytes();
+        Ok(WireAnswer::new(parts.status.as_u16(), &parts.headers, body.to_vec()))
     }
 
     /// Sends `request` and reports the routed operation and what the handler ended up with.
@@ -196,9 +249,11 @@ impl GatewaySeam {
     }
 }
 
-/// The pinned legacy backend: every covered operation records the input it was handed.
+/// The pinned legacy backend: every covered operation records the input it was handed, then
+/// answers with a queued answer or refuses.
 pub(crate) struct LegacyRecorder {
     pub(crate) slot: Slot,
+    pub(crate) answer: Queued,
 }
 
 /// The pinned legacy service with the recording backend.
@@ -206,13 +261,18 @@ pub(crate) struct LegacySeam {
     service: s3s::service::S3Service,
     slot: Slot,
     routed: Arc<Mutex<Option<String>>>,
+    answer: Queued,
 }
 
 impl LegacySeam {
     pub(crate) fn new() -> Self {
         let slot: Slot = Arc::new(Mutex::new(None));
         let routed = Arc::new(Mutex::new(None));
-        let mut builder = s3s::service::S3ServiceBuilder::new(LegacyRecorder { slot: Arc::clone(&slot) });
+        let answer: Queued = Arc::new(Mutex::new(None));
+        let mut builder = s3s::service::S3ServiceBuilder::new(LegacyRecorder {
+            slot: Arc::clone(&slot),
+            answer: Arc::clone(&answer),
+        });
         builder.set_auth(s3s::auth::SimpleAuth::from_single(ACCESS_KEY, SECRET_KEY));
         // Configured as RustFS main configures the legacy stack (forward-slash normalisation and
         // SigV2 on, `s3tables` signing): the input RustFS is handed is the one this stack hands.
@@ -226,7 +286,26 @@ impl LegacySeam {
             service: builder.build(),
             slot,
             routed,
+            answer,
         }
+    }
+
+    /// Sends `request` with `answer` (a boxed [`LegacyAnswer`]) queued for its handler, and returns
+    /// the whole response the legacy service wrote.
+    pub(crate) fn answer(&self, request: &RawRequest, answer: Box<dyn Any + Send>) -> Result<WireAnswer, String> {
+        *self.answer.lock().map_err(|_| "the answer slot is poisoned".to_owned())? = Some(answer);
+        let source: s3s::stream::DynByteStream = Box::pin(ProbeBody::new(&request.body));
+        let http_request = request
+            .http_head()?
+            .body(s3s::Body::from(source))
+            .map_err(|error| format!("request head: {error}"))?;
+        let response = block_on(self.service.call(http_request)).map_err(|error| format!("legacy service failed: {error:?}"))?;
+        if take(&self.answer).is_some() {
+            return Err("the legacy service never reached the handler".to_owned());
+        }
+        let (parts, mut body) = response.into_parts();
+        let body = block_on(body.store_all_limited(64 << 20)).map_err(|error| format!("legacy response body: {error}"))?;
+        Ok(WireAnswer::new(parts.status.as_u16(), &parts.headers, body.to_vec()))
     }
 
     /// Sends `request` and reports the routed operation and what the handler was handed.

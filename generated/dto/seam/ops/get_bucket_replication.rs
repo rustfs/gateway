@@ -48,3 +48,17 @@ pub fn output_from_s3s(output: s3s::dto::GetBucketReplicationOutput) -> Result<c
         replication_configuration: replication_configuration.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::replication_configuration::replication_configuration_from_s3s(x)?) }).transpose()?,
     })
 }
+
+/// Converts a RustFS app body's whole answer — its output and the response headers it set
+/// beside it — into the gateway `GetBucketReplication` output and the extra headers the gateway writes after
+/// it (`Resp::with_extra_headers`). The legacy writer lets such a header replace the one an
+/// output member writes, so a member whose header the body set is left to that header.
+///
+/// # Errors
+///
+/// [`ConversionError`] as [`output_from_s3s`], or naming a required member one of the
+/// headers would replace.
+#[allow(clippy::too_many_lines, clippy::needless_pass_by_value)]
+pub fn answer_from_legacy(output: s3s::dto::GetBucketReplicationOutput, headers: http::HeaderMap) -> Result<(crate::ops::get_bucket_replication::Output, http::HeaderMap), ConversionError> {
+    Ok((output_from_s3s(output)?, headers))
+}
