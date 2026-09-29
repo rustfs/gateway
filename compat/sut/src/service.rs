@@ -153,6 +153,9 @@ pub(crate) fn build_service(
             // RustFS refuses an anonymous aws-chunked upload rather than decoding it (#1060), so
             // nothing reaches storage through the launcher that RustFS would not write.
             .leave_anonymous_streaming_payloads_undecoded()
+            // RustFS answers an unreadable or mismatched request checksum with `BadDigest`
+            // (rustfs/gateway#1057).
+            .answer_checksum_failures_with_bad_digest()
             // The backend's stored CORS documents feed the gateway's CORS answers, as RustFS's do
             // behind the gateway; no cache lifetime, so a suite sees a `PutBucketCors` at once.
             .cors_source(Arc::clone(backend))

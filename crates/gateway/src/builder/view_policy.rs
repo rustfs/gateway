@@ -12,13 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The RustFS-profile readings an assembly applies to the view every codec reads
-//! (rustfs/backlog#1677): the switches that make a RustFS deployment answer a request the way
-//! RustFS answers it today, where the core keeps the AWS-model answer as its default.
+//! The RustFS-profile readings an assembly applies to the view every codec reads, and the codes
+//! it answers a body-integrity refusal with (rustfs/backlog#1677): the switches that make a RustFS
+//! deployment answer a request the way RustFS answers it today, where the core keeps the AWS-model
+//! answer as its default.
 //!
-//! Responsible for: [`ServiceBuilder::clamp_oversized_max_keys`], the closed set of listings it
-//! covers, and the per-request decision the assembly applies to the routed view, the client
-//! checksum waivers of `super::client_quirks` included.
+//! Responsible for: [`ServiceBuilder::clamp_oversized_max_keys`] and
+//! [`ServiceBuilder::answer_checksum_failures_with_bad_digest`], the closed set of listings the
+//! first covers, and the per-request decisions the assembly applies — the client checksum waivers
+//! of `super::client_quirks` included.
 //! NOT responsible for: reading the parameter ([`rustfs_gateway_core::MetaView::query`]) or the
 //! modelled range the default refuses outside of (the generated codec).
 //! Upstream: `super::ServiceBuilder`. Downstream: `crate::service`, which applies [`ViewPolicy`]
@@ -47,6 +49,7 @@
 
 use super::ServiceBuilder;
 use super::client_quirks::ChecksumWaiver;
+use crate::integrity::IntegrityCodes;
 use rustfs_gateway_core::{MetaView, PageSizeCeiling};
 
 /// The page size RustFS lowers an oversized `max-keys` to (`S3_MAX_KEYS`).
@@ -64,6 +67,7 @@ pub(crate) struct ViewPolicy {
     /// The client checksum waivers (`super::client_quirks`).
     pub(super) checksum_waiver: ChecksumWaiver,
     clamp_max_keys: bool,
+    integrity_codes: IntegrityCodes,
 }
 
 impl ViewPolicy {
@@ -75,10 +79,14 @@ impl ViewPolicy {
         // cannot tell a short page from its own mistake. Kept so RustFS clients (Hadoop S3A pages
         // at 5000) see no change; the intended future behaviour is the core default, a
         // `400 InvalidArgument` for a page size outside the modelled range (`q-max-keys-0073`).
-        if self.clamp_max_keys && CLAMPED_MAX_KEYS_OPERATIONS.contains(&operation) {
+        let meta = if self.clamp_max_keys && CLAMPED_MAX_KEYS_OPERATIONS.contains(&operation) {
             meta.with_page_size_ceiling(MAX_KEYS)
         } else {
             meta
+        };
+        match self.integrity_codes {
+            IntegrityCodes::RustFs => meta.with_checksum_failures_as_bad_digest(),
+            IntegrityCodes::Model => meta,
         }
     }
 }
@@ -97,6 +105,23 @@ impl ServiceBuilder {
         self.view_policy.clamp_max_keys = true;
         self
     }
+
+    /// Answers a request-body checksum that is not valid for its algorithm, a declared trailer
+    /// checksum that never arrived, a checksum that does not match the body, and a streamed body
+    /// that does not match its signed `x-amz-content-sha256` with `400 BadDigest`, as legacy
+    /// RustFS does (rustfs/gateway#1057).
+    ///
+    /// Off by default: the core answers the AWS model's codes, `400 InvalidRequest` for an
+    /// unreadable value and `400 XAmzContentChecksumMismatch` / `XAmzContentSHA256Mismatch` for a
+    /// mismatch. Only the code changes: the request is refused at the same point either way (before
+    /// any handler for a head or buffered body, as the terminal verdict a handler's commit waits on
+    /// for a streamed one), and `Content-MD5` keeps its own codes (`InvalidDigest`, `BadDigest`)
+    /// under both.
+    #[must_use]
+    pub fn answer_checksum_failures_with_bad_digest(mut self) -> Self {
+        self.view_policy.integrity_codes = IntegrityCodes::RustFs;
+        self
+    }
 }
 
 #[cfg(test)]
@@ -106,6 +131,7 @@ mod tests {
     #[test]
     fn the_policy_is_off_by_default_and_its_set_is_closed() {
         assert!(!ViewPolicy::default().clamp_max_keys);
+        assert_eq!(ViewPolicy::default().integrity_codes, IntegrityCodes::Model);
         for operation in ["ListMultipartUploads", "ListParts", "ListBuckets", "GetObject", "PutObject"] {
             assert!(!CLAMPED_MAX_KEYS_OPERATIONS.contains(&operation), "{operation}");
         }
