@@ -179,8 +179,14 @@ else
     fail "single-normalisation: ${ALLOWANCE_FILE} is missing; the allowlist is the check, so an absent one fails rather than passes"
 fi
 
+# Whole-line, fixed-string membership, read with shell builtins only: the scan stays at a
+# constant number of scanner processes however many files the allowlist admits.
 is_allowed() {
-    [[ -n "$ALLOWANCES" ]] && printf '%s' "$ALLOWANCES" | grep -xF "$1" >/dev/null
+    local allowed
+    while IFS= read -r allowed; do
+        [[ -n "$allowed" && "$allowed" == "$1" ]] && return 0
+    done <<<"$ALLOWANCES"
+    return 1
 }
 
 percent_hits="$(matching_files 'percent_decode_str[[:space:]]*\(|percent_decode[[:space:]]*\(')"
