@@ -194,6 +194,7 @@ impl ContextRequest {
 
     /// Gives the gateway authenticator the RustFS profile of rd-loc-0004 (ADR-0023): any scope
     /// region in the configured-name grammar is verified. s3s needs no switch; it never checks.
+    /// It also verifies an empty scope region, the RustFS profile of rd-loc-0005.
     pub(crate) fn rustfs_profile(mut self) -> Self {
         self.any_region = true;
         self
@@ -255,7 +256,12 @@ impl ContextRequest {
             return Ok(headers);
         };
         let stamp = AmzDate::parse(&amz_date(now.unix_seconds())).map_err(|error| format!("stamp: {error:?}"))?;
-        let scope = SigningScope::new(stamp.day(), region, SigService::S3).map_err(|error| format!("scope: {error:?}"))?;
+        // An empty region is RustFS's replication client's scope (rd-loc-0005), built by name.
+        let scope = if region.is_empty() {
+            SigningScope::with_empty_region(stamp.day(), SigService::S3)
+        } else {
+            SigningScope::new(stamp.day(), region, SigService::S3).map_err(|error| format!("scope: {error:?}"))?
+        };
         let credentials = SigningCredentials::new(self.access_key, self.secret_key.as_bytes())
             .map_err(|error| format!("credentials: {error:?}"))?;
         let mut signer = SigV4Signer::new(credentials, scope);
@@ -448,7 +454,7 @@ fn gateway_service(
         authenticator = authenticator.hand_caller_secret_to_handlers();
     }
     if request.any_region {
-        authenticator = authenticator.accept_any_signing_region();
+        authenticator = authenticator.accept_any_signing_region().accept_empty_signing_region();
     }
     let backend = Arc::new(AdapterBackend {
         recorded: Arc::clone(recorded),

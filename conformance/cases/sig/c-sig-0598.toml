@@ -1,0 +1,57 @@
+# c-sig-0598 — a scope region cannot carry the field separator.
+#
+# Schema dimensions exercised: sign.tamper that splits the scope region into two fields, which no
+# region policy may read back.
+
+[case]
+id = "c-sig-0598"
+schema_version = 1
+title = "A credential scope whose region contains a slash is refused as unreadable"
+rationale = """
+The credential scope is five slash-separated fields, and the region is one of the four inputs the \
+signing key is derived from. A region spelled `us/east-1` makes six fields, so a verifier would have \
+to guess which slash ends the region; guessing is how two different scopes come to share one key. \
+Neither the default nor the RustFS profile (which widens the region check to any region name and to \
+the empty region, rustfs/backlog#1677) may read it: the request is refused with the uniform \
+credential 403 before any key is derived or any region is named back to the caller."""
+polarity = "negative"
+operation = "ListBuckets"
+tags = ["signature", "sigv4", "region", "security"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_sigv-create-signed-request.html"
+summary = "The credential scope joins its date, region, service and terminator with slashes, so a slash cannot be part of a field."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+request_time = "2026-01-02T03:04:05Z"
+
+[request]
+method = "GET"
+target = "/"
+
+[request.sign]
+mode = "sigv4_header"
+service = "s3"
+region = "us-east-1"
+credential = "valid"
+
+[request.sign.tamper]
+component = "scope_region"
+new_value = "us/east-1"
+
+[expect]
+kind = "response"
+status = 403
+
+[expect.error]
+code = "InvalidAccessKeyId"
+request_id_present = true
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+contains_utf8 = ["<Code>InvalidAccessKeyId</Code>"]
+not_contains_utf8 = ["<Buckets>", "<Region>", "us/east-1"]

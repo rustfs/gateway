@@ -485,6 +485,25 @@ fn an_unusable_scope_is_refused_at_construction() {
     assert!(SigningCredentials::new("AKID WITH SPACE", EXAMPLE_KEY).is_err());
 }
 
+/// An empty-region scope exists only by name, and what it signs reads back only through the
+/// admitting parser: `<date>//<service>`, the credential RustFS's replication client presents.
+#[test]
+fn an_empty_region_scope_is_built_by_name_and_read_back_only_when_admitted() {
+    let day = ScopeDate::parse(EXAMPLE_DAY).expect("a valid day");
+    let scope = SigningScope::with_empty_region(day, SigService::S3);
+    assert_eq!(scope.region(), "");
+    let credentials = SigningCredentials::new(EXAMPLE_ACCESS_KEY_ID, EXAMPLE_KEY).expect("valid credentials");
+    let map = headers(&[("content-type", "text/plain")]);
+    let host = host();
+    let request = SigningRequest::new(&Method::GET, "/bucket", "", &map, &host, PayloadMode::Empty, timestamp());
+    let signed = SigV4Signer::new(credentials, scope).sign_headers(&request).expect("signable");
+    let header = signed.authorization().expect("a header signature");
+    assert!(header.contains("Credential=AKIDEXAMPLE/20150830//s3/aws4_request,"), "{header}");
+    let parsed = SigV4Authorization::parse_with(header, crate::parse::EmptyRegion::Admitted).expect("admitted");
+    assert_eq!(parsed.scope().region(), "");
+    assert!(SigV4Authorization::parse(header).is_err(), "the default parser still refuses it");
+}
+
 // ---------------------------------------------------------------------------
 // The aws-chunked chain
 // ---------------------------------------------------------------------------

@@ -171,6 +171,21 @@ impl fmt::Display for AmzDate {
     }
 }
 
+/// Whether a credential scope may name an empty region: `AKID/20150830//s3/aws4_request`.
+///
+/// Such a scope still has exactly five fields, so it cannot be read two ways. It is
+/// [`EmptyRegion::Refused`] everywhere by default; a verifier admits it only when its deployment
+/// admits an empty signing region at the scope check too
+/// ([`crate::ExpectedScope::accepting_empty_region`], the RustFS profile), and passes
+/// [`EmptyRegion::Admitted`] to the `parse_with` constructors below.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EmptyRegion {
+    /// An empty region field is malformed.
+    Refused,
+    /// An empty region field is a region to cross-check like any other.
+    Admitted,
+}
+
 /// The credential tuple a client presented: `<access-key>/<date>/<region>/<service>/aws4_request`.
 ///
 /// **Parsed, never trusted.** Every field here is chosen by whoever sent the request. The type
@@ -203,6 +218,17 @@ impl CredentialScope {
     /// HMAC steps, so accepting an unrecognised one means deriving a key from attacker-chosen
     /// input.
     pub fn parse(value: &str) -> Result<Self, AuthError> {
+        Self::parse_with(value, EmptyRegion::Refused)
+    }
+
+    /// [`CredentialScope::parse`], with an empty region field admitted when `empty` says so.
+    ///
+    /// # Errors
+    ///
+    /// As [`CredentialScope::parse`]; an empty region is refused only under
+    /// [`EmptyRegion::Refused`]. Every other rule — five fields, the ceiling, ASCII-graphic
+    /// bytes — is the same under both.
+    pub fn parse_with(value: &str, empty: EmptyRegion) -> Result<Self, AuthError> {
         let fields: SmallVec<[&str; 5]> = value.split('/').collect();
         let [access_key_id, date, region, service, terminator] = fields.as_slice() else {
             return Err(AuthError::AuthorizationHeaderMalformed);
@@ -210,7 +236,8 @@ impl CredentialScope {
         if *terminator != SCOPE_TERMINATOR {
             return Err(AuthError::AuthorizationHeaderMalformed);
         }
-        if region.is_empty() || region.len() > Self::MAX_REGION_LEN || !region.bytes().all(|b| b.is_ascii_graphic()) {
+        let empty_refused = region.is_empty() && empty == EmptyRegion::Refused;
+        if empty_refused || region.len() > Self::MAX_REGION_LEN || !region.bytes().all(|b| b.is_ascii_graphic()) {
             return Err(AuthError::AuthorizationHeaderMalformed);
         }
         Ok(Self {
@@ -279,6 +306,15 @@ impl SigV4Authorization {
     /// * [`AuthError::AuthorizationHeaderMalformed`] for an unknown algorithm token, for SigV2 (a
     ///   different header shape entirely, parsed in P2-06), and for every structural fault above.
     pub fn parse(header: &str) -> Result<Self, AuthError> {
+        Self::parse_with(header, EmptyRegion::Refused)
+    }
+
+    /// [`SigV4Authorization::parse`], with the credential's empty region governed by `empty`.
+    ///
+    /// # Errors
+    ///
+    /// As [`SigV4Authorization::parse`], with [`CredentialScope::parse_with`]'s region rule.
+    pub fn parse_with(header: &str, empty: EmptyRegion) -> Result<Self, AuthError> {
         let (algorithm, rest) = header.split_once(' ').ok_or(AuthError::AuthorizationHeaderMalformed)?;
         match SigFamily::from_algorithm(algorithm) {
             Ok(SigFamily::V4) => {}
@@ -318,7 +354,7 @@ impl SigV4Authorization {
         let signature = signature.ok_or(AuthError::AuthorizationHeaderMalformed)?;
 
         Ok(Self {
-            scope: CredentialScope::parse(credential)?,
+            scope: CredentialScope::parse_with(credential, empty)?,
             signed_headers: Box::from(signed_headers),
             signature: parse_hex_signature(signature)?,
         })
@@ -366,6 +402,15 @@ impl PresignedParams {
     /// * [`AuthError::AuthorizationHeaderMalformed`] if any required parameter is missing,
     ///   repeated, or ill-formed, or if the algorithm token is unknown.
     pub fn parse(query: &RawQuery<'_>) -> Result<Self, AuthError> {
+        Self::parse_with(query, EmptyRegion::Refused)
+    }
+
+    /// [`PresignedParams::parse`], with the credential's empty region governed by `empty`.
+    ///
+    /// # Errors
+    ///
+    /// As [`PresignedParams::parse`], with [`CredentialScope::parse_with`]'s region rule.
+    pub fn parse_with(query: &RawQuery<'_>, empty: EmptyRegion) -> Result<Self, AuthError> {
         let required = |name: &str| -> Result<String, AuthError> {
             query.decoded_value(name)?.ok_or(AuthError::AuthorizationHeaderMalformed)
         };
@@ -377,7 +422,7 @@ impl PresignedParams {
             return Err(AuthError::AuthorizationHeaderMalformed);
         }
         Ok(Self {
-            scope: CredentialScope::parse(&required(X_AMZ_CREDENTIAL)?)?,
+            scope: CredentialScope::parse_with(&required(X_AMZ_CREDENTIAL)?, empty)?,
             date: AmzDate::parse(&required(X_AMZ_DATE)?)?,
             signed_headers: Box::from(required(X_AMZ_SIGNED_HEADERS)?.as_str()),
             signature: parse_hex_signature(&required(crate::query::X_AMZ_SIGNATURE)?)?,
@@ -487,6 +532,61 @@ mod tests {
             "AKID/20150830/us-east-1/s3",
         ] {
             assert!(CredentialScope::parse(bad).is_err(), "must reject {bad}");
+        }
+    }
+
+    const EMPTY_REGION: &str = "AKID/20150830//s3/aws4_request";
+
+    /// An admitted empty region is structure the parser reads one way only: five fields, and a
+    /// scope line with nothing between the date and the service.
+    #[test]
+    fn an_admitted_empty_region_is_a_five_field_scope_and_renders_as_one() {
+        let scope = CredentialScope::parse_with(EMPTY_REGION, EmptyRegion::Admitted).expect("five fields");
+        assert_eq!(scope.region(), "");
+        assert_eq!(scope.scope_string(), "20150830//s3/aws4_request");
+        let header = format!(
+            "AWS4-HMAC-SHA256 Credential={EMPTY_REGION}, SignedHeaders=host, Signature={}",
+            hex_signature()
+        );
+        let parsed = SigV4Authorization::parse_with(&header, EmptyRegion::Admitted).expect("admitted");
+        assert_eq!(parsed.scope().region(), "");
+    }
+
+    /// Negative — an empty region is refused by every default constructor and under `Refused`.
+    #[test]
+    fn n_an_empty_region_is_refused_unless_admitted() {
+        assert!(CredentialScope::parse(EMPTY_REGION).is_err());
+        assert!(CredentialScope::parse_with(EMPTY_REGION, EmptyRegion::Refused).is_err());
+        let header = format!(
+            "AWS4-HMAC-SHA256 Credential={EMPTY_REGION}, SignedHeaders=host, Signature={}",
+            hex_signature()
+        );
+        assert_eq!(SigV4Authorization::parse(&header).err(), Some(AuthError::AuthorizationHeaderMalformed));
+        assert_eq!(
+            SigV4Authorization::parse_with(&header, EmptyRegion::Refused).err(),
+            Some(AuthError::AuthorizationHeaderMalformed)
+        );
+    }
+
+    /// Negative — admitting the empty region relaxes nothing else: a region field still cannot
+    /// carry the separator, a space, a control byte, a non-ASCII byte, or more than the ceiling.
+    #[test]
+    fn n_an_admitted_empty_region_relaxes_no_other_rule() {
+        let long = format!("AKID/20150830/{}/s3/aws4_request", "a".repeat(CredentialScope::MAX_REGION_LEN + 1));
+        for bad in [
+            "AKID/20150830/us/east-1/s3/aws4_request",
+            "AKID/20150830///s3/aws4_request",
+            "AKID/20150830//s3/aws4_request/",
+            "AKID/20150830//sts3/aws4_request",
+            "AKID/20150830//s3/aws4-request",
+            "AKID//us-east-1/s3/aws4_request",
+            "/20150830//s3/aws4_request",
+            "AKID/20150830/us east-1/s3/aws4_request",
+            "AKID/20150830/us\teast-1/s3/aws4_request",
+            "AKID/20150830/us-\u{e9}ast-1/s3/aws4_request",
+            long.as_str(),
+        ] {
+            assert!(CredentialScope::parse_with(bad, EmptyRegion::Admitted).is_err(), "must reject {bad:?}");
         }
     }
 

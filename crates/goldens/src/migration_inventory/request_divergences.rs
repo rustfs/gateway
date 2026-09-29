@@ -583,10 +583,14 @@ const OPERATION_DIVERGENCES: [RequestDivergence; 26] = [
 ];
 
 /// Every pinned divergence, in id order as written: the operation, context and configuration
-/// slices above, then the error-response slice (`errors`) and the signed-body slice (`body`).
-pub const REQUEST_DIVERGENCES: [RequestDivergence; 46] = concat(
-    concat::<26, 10, 36>(OPERATION_DIVERGENCES, errors::ERROR_DIVERGENCES),
-    body::BODY_DIVERGENCES,
+/// slices above, then the error-response slice (`errors`), the signed-body slice (`body`) and the
+/// signing-region slice (`scope`).
+pub const REQUEST_DIVERGENCES: [RequestDivergence; 48] = concat(
+    concat::<36, 10, 46>(
+        concat::<26, 10, 36>(OPERATION_DIVERGENCES, errors::ERROR_DIVERGENCES),
+        body::BODY_DIVERGENCES,
+    ),
+    scope::SCOPE_DIVERGENCES,
 );
 
 /// `first` then `second`, at compile time; the declared length must be their sum.
@@ -781,6 +785,7 @@ fn is_case_id(case: &str) -> bool {
 
 mod body;
 mod errors;
+mod scope;
 
 #[cfg(test)]
 mod tests;

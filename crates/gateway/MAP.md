@@ -46,7 +46,7 @@ for request order and `docs/assembly-order.md` for extension call counts.
 | File | Responsibility | Read it when |
 | --- | --- | --- |
 | `src/ext/mod.rs` | Extension roster and safe defaults | Choosing or adding an extension |
-| `src/ext/authenticator.rs`, `src/ext/authenticator_switches.rs` | `Authenticator`, SigV4 implementation; its opt-in switches (ADR-0022 secret hand-off, ADR-0023 any signing region) | Replacing authentication, or enabling either switch |
+| `src/ext/authenticator.rs`, `src/ext/authenticator_switches.rs` | `Authenticator`, SigV4 implementation; its opt-in switches (ADR-0022 secret hand-off, ADR-0023 any signing region, the empty signing region of rustfs/backlog#1677) | Replacing authentication, or enabling a switch |
 | `src/ext/authenticator_tests.rs` | The authenticator's own unit suite, split out at the 800-line limit | Changing an authenticator contract |
 | `src/ext/sigv2.rs` | `SigV2Authentication` and the SigV2 half of the built-in authenticator | A SigV2 client fails to authenticate |
 | `src/ext/authorizer.rs` | Two-stage authorization contract | Writing policy decisions |

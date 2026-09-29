@@ -160,7 +160,9 @@ impl GatewayRequestContext {
 /// Wraps `input` in the s3s request context `context` describes.
 ///
 /// The region follows the s3s precedence: the verified signing region when there is one,
-/// otherwise the region a virtual host named.
+/// otherwise the region a virtual host named. An empty region, signed or hosted, is no region, as
+/// legacy RustFS reads it: its replication client signs with an empty region, and the request then
+/// carries the host's region or none.
 ///
 /// # Errors
 ///
@@ -207,7 +209,12 @@ pub fn request_to_s3s<T>(context: GatewayRequestContext, input: T) -> Result<S3R
         Some(scope) => Some(scope.service.clone()),
         None => None,
     };
-    let region = scope.map(|scope| scope.region).or(host_region).map(region).transpose()?;
+    let region = scope
+        .map(|scope| scope.region)
+        .filter(|signed| !signed.is_empty())
+        .or_else(|| host_region.filter(|hosted| !hosted.is_empty()))
+        .map(region)
+        .transpose()?;
     Ok(S3Request {
         input,
         method,

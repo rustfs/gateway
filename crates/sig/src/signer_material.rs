@@ -32,7 +32,7 @@
 //! [`crate::derive`]'s whole shape exists to stop.
 
 use crate::derive::{VerifiedScope, signing_key};
-use crate::parse::{CredentialScope, SCOPE_TERMINATOR, ScopeDate};
+use crate::parse::{CredentialScope, EmptyRegion, SCOPE_TERMINATOR, ScopeDate};
 use crate::scheme::SigService;
 use crate::secret::{SecretBytes, SessionToken, SigningKey};
 use crate::verdict::Identity;
@@ -143,6 +143,29 @@ impl SigningScope {
         })
     }
 
+    /// A scope that names no region: `<date>//<service>/aws4_request`.
+    ///
+    /// What RustFS's replication client signs with when a bucket target has no region, and what a
+    /// verifier admits only under [`crate::ExpectedScope::accepting_empty_region`]. [`Self::new`]
+    /// keeps refusing an empty region, so an empty scope is always this constructor's, by name.
+    #[must_use]
+    pub fn with_empty_region(date: ScopeDate, service: SigService) -> Self {
+        Self {
+            date,
+            region: Box::from(""),
+            service,
+        }
+    }
+
+    /// How the verification side's parser must read this scope's region back.
+    fn empty_region(&self) -> EmptyRegion {
+        if self.region.is_empty() {
+            EmptyRegion::Admitted
+        } else {
+            EmptyRegion::Refused
+        }
+    }
+
     /// The day the signature is scoped to.
     #[must_use]
     pub const fn date(&self) -> ScopeDate {
@@ -176,7 +199,7 @@ impl SigningScope {
     /// The scope line of the string-to-sign, rebuilt through the verification side's parser so that
     /// the signer cannot produce a spelling the verifier would render differently.
     pub(super) fn presented(&self, access_key_id: &Identity) -> Result<CredentialScope, SignerError> {
-        Ok(CredentialScope::parse(&self.credential_value(access_key_id))?)
+        Ok(CredentialScope::parse_with(&self.credential_value(access_key_id), self.empty_region())?)
     }
 
     /// The scope that seeds the four derivation steps.
