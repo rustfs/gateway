@@ -36,6 +36,7 @@
 //! compat-sut --data <dir> --port 9100 --tls-port 9443 --tls-self-signed <ca.pem> [--tls-san <name>]
 //! compat-sut --data <dir> --port 9100 --tls-port 9443 --tls-cert <chain.pem> --tls-key <key.pem>
 //! compat-sut --data <dir> --port 9100 --corpus-record <file.jsonl> --corpus-src <src>   # corpus-record builds
+//! compat-sut --data <dir> --port 9100 --server-domains s3.example.com:9100,s3.local   # RUSTFS_SERVER_DOMAINS
 //! compat-sut --print-capabilities
 //! ```
 //!
@@ -89,6 +90,9 @@ pub(crate) struct Options {
     pub(crate) tls: Option<TlsListener>,
     /// Corpus recording, when `--corpus-record` asked for it (rustfs/backlog#1763).
     pub(crate) corpus: Option<CorpusRecording>,
+    /// The virtual-hosted domains, as RustFS reads `RUSTFS_SERVER_DOMAINS` (rustfs/gateway#1136):
+    /// comma-separated, each with an optional port. Empty reads every request path-style.
+    pub(crate) server_domains: Vec<String>,
 }
 
 /// Where recorded requests go and which suite produced them. Both are required together: an entry
@@ -116,6 +120,7 @@ where
     let mut tls = TlsArgs::default();
     let mut corpus_output = None;
     let mut corpus_src = None;
+    let mut server_domains = Vec::new();
     let mut arguments = arguments.into_iter();
     while let Some(argument) = arguments.next() {
         let mut value = || -> Result<String, io::Error> {
@@ -176,6 +181,13 @@ where
             "--tls-san" => tls.extra_names.push(value()?),
             "--corpus-record" => corpus_output = Some(PathBuf::from(value()?)),
             "--corpus-src" => corpus_src = Some(value()?),
+            "--server-domains" => server_domains.extend(
+                value()?
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|domain| !domain.is_empty())
+                    .map(str::to_owned),
+            ),
             unknown => {
                 return Err(io::Error::new(io::ErrorKind::InvalidInput, format!("unknown argument: {unknown}")));
             }
@@ -210,6 +222,7 @@ where
         lifecycle_debug_interval,
         tls,
         corpus,
+        server_domains,
     })
 }
 

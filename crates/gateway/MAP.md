@@ -55,8 +55,8 @@ for request order and `docs/assembly-order.md` for extension call counts.
 | `src/ext/policy.rs` | One policy snapshot per request | Two stages disagree on policy |
 | `src/ext/credentials.rs` | Credential provider and secret-safe values | Wiring IAM or STS credentials |
 | `src/ext/credential_guard.rs` | Provider timeout, panic isolation, negative cache | Bounding credential lookup work |
-| `src/ext/host.rs` | Host resolution and path-style default | Locating the bucket source |
-| `src/ext/vhost.rs` | Virtual-host label-boundary matching | Configuring served domains |
+| `src/ext/host.rs` | Host resolution, the path-style default, and `HostResolver::refusal` | Locating the bucket source |
+| `src/ext/vhost.rs`, `src/ext/legacy_vhost.rs` | Virtual-host label-boundary matching; the RustFS profile's legacy RustFS reading of its server domains, with the one host refusal (#1136) | Configuring served domains |
 | `src/ext/governor.rs` | Governor contract and request dimensions | Adding deployment quotas |
 | `src/ext/governor/default.rs`, `src/ext/governor/allocation_tests.rs`, `src/ext/governor/refund_tests.rs` | Mandatory layered token buckets, the charge a verified request returns, and their isolated allocator/RSS probes | Tuning shipped limits, the address table's storage, or what stays counted |
 | `src/ext/governor/meter.rs` | Atomic token-bucket meter | Changing quota accounting |

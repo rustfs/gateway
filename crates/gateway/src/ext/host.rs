@@ -264,14 +264,40 @@ pub trait HostResolver: Send + Sync + 'static {
     /// Infallible on purpose. A host this deployment does not serve is still a request that has to
     /// be answered, and answering it is routing's job: a resolver that could refuse would be a
     /// second rejection surface in front of the route table, with its own status code and its own
-    /// message, for a decision the table already makes.
+    /// message, for a decision the table already makes. The one exception is
+    /// [`HostResolver::refusal`], which only the RustFS profile's resolver answers.
     fn resolve(&self, query: &HostQuery<'_>) -> ResolvedHost;
+
+    /// A refusal of the host itself, answered before anything routes; `None` — the default, and
+    /// every resolver's answer but [`crate::LegacyRustfsVirtualHosts`]'s.
+    ///
+    /// Legacy-compat (rustfs/backlog#2684): legacy RustFS refuses a `Host` it cannot read as a
+    /// domain `400 InvalidRequest`, and a bucket a host names that its bucket rules refuse `400
+    /// InvalidBucketName`, where every other resolver reads such a host path-style. Kept, for the
+    /// RustFS profile only, so a RustFS client sees the answer it sees today; the intended future
+    /// behaviour is no refusal here, the host read path-style.
+    fn refusal(&self, _query: &HostQuery<'_>) -> Option<HostRefusal> {
+        None
+    }
 }
 
 impl<T: HostResolver + ?Sized> HostResolver for std::sync::Arc<T> {
     fn resolve(&self, query: &HostQuery<'_>) -> ResolvedHost {
         (**self).resolve(query)
     }
+
+    fn refusal(&self, query: &HostQuery<'_>) -> Option<HostRefusal> {
+        (**self).refusal(query)
+    }
+}
+
+/// Why [`HostResolver::refusal`] refused a host.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum HostRefusal {
+    /// The host is no domain the resolver reads: `400 InvalidRequest`.
+    UnusableHost,
+    /// The host names a bucket the resolver's bucket rules refuse: `400 InvalidBucketName`.
+    RefusedBucket,
 }
 
 /// The default resolver: the path decides which bucket, and the host names none.

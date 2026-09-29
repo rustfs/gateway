@@ -60,7 +60,7 @@ mod tests;
 
 pub use crate::codec::error::CodecError;
 pub use crate::codec::extra_headers::{OWNED_RESPONSE_HEADERS, is_owned_response_header};
-pub use crate::codec::legacy_path::legacy_rustfs_target;
+pub use crate::codec::legacy_path::{legacy_rustfs_decodable, legacy_rustfs_target};
 pub use crate::codec::response::{
     BodyAllowance, EncodedResponse, ResponseBody, ResponseOverride, body_allowance, override_header_value, response_body_allowed,
     response_framing_allowed, status_code,

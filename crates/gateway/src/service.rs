@@ -562,7 +562,8 @@ impl S3Service {
             }
         }
 
-        let resolved = match crate::legacy_addressing::classify(&self.inner.names, router, &wire, resolved) {
+        let resolver = &*self.inner.host_resolver;
+        let resolved = match crate::legacy_addressing::classify(&self.inner.names, resolver, router, &wire, resolved) {
             Ok(resolved) => resolved,
             Err(refusal) => return outcome.refuse(from_codec(refusal, response_kind)),
         };

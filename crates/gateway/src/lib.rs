@@ -154,14 +154,14 @@ pub use crate::ext::{
     CachedCorsSource, ChunkSink, ChunkVerification, ClassKind, ClientAddr, CorsCacheConfig, CorsSource, CorsSourceError,
     Credential, CredentialGuardConfig, CredentialLookup, CredentialProvider, CredentialRefusal, Credentials, CredentialsError,
     DEFAULT_POLICY_SNAPSHOT_TIMEOUT, Decision, DefaultGovernor, Denial, DenyAllAuthorizer, DomainError, FROZEN_WIRE_HEADERS,
-    FrozenHeader, Governor, GovernorRates, GovernorRequest, GuardedCredentialProvider, HostQuery, HostResolver,
-    InputAuthzRequest, InputDecisions, LayeredGovernor, Lease, MAX_BASE_DOMAIN_BYTES, MAX_POLICY_SNAPSHOT_TIMEOUT, Next,
-    NoAuthzAudit, NoBucketOwner, NoCors, NoObserver, NoPolicy, Observer, OpLayer, PathStyleOnly, PolicyError, PolicySnapshot,
-    PolicySource, PolicyTimeout, PolicyTimeoutError, ProviderError, ProviderMetrics, Rate, RequestContext, RequestEvent,
-    ResolvedHost, ResponseView, RoutedView, ServerExtensions, SessionBinding, SessionBindingError, SigV2Authentication,
-    SigV4Authenticator, SnapshotId, StageFilter, StaticCredentials, TargetOrigin, Unavailable, Unlimited, VerifiedBodyProgress,
-    VhostHint, VirtualHostStyle, WireHead, allow_when, decide_with, fn_credential_provider, op_layer, policy_from,
-    response_filter, routed_filter, wire_filter,
+    FrozenHeader, Governor, GovernorRates, GovernorRequest, GuardedCredentialProvider, HostQuery, HostRefusal, HostResolver,
+    InputAuthzRequest, InputDecisions, LayeredGovernor, Lease, LegacyDomainError, LegacyRustfsVirtualHosts,
+    MAX_BASE_DOMAIN_BYTES, MAX_POLICY_SNAPSHOT_TIMEOUT, Next, NoAuthzAudit, NoBucketOwner, NoCors, NoObserver, NoPolicy,
+    Observer, OpLayer, PathStyleOnly, PolicyError, PolicySnapshot, PolicySource, PolicyTimeout, PolicyTimeoutError,
+    ProviderError, ProviderMetrics, Rate, RequestContext, RequestEvent, ResolvedHost, ResponseView, RoutedView, ServerExtensions,
+    SessionBinding, SessionBindingError, SigV2Authentication, SigV4Authenticator, SnapshotId, StageFilter, StaticCredentials,
+    TargetOrigin, Unavailable, Unlimited, VerifiedBodyProgress, VhostHint, VirtualHostStyle, WireHead, allow_when, decide_with,
+    fn_credential_provider, op_layer, policy_from, response_filter, routed_filter, wire_filter,
 };
 #[cfg(feature = "dangerous-allow-all-authorizer")]
 pub use crate::ext::{AllowAllAuthorizer, DangerAck};
