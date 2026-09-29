@@ -34,7 +34,7 @@ use rustfs_gateway::{
     Credentials, GovernorRates, Handler, HandlerError, HandlerResult, Rate, Req, Resp, S3Service, ServiceBuilder,
     SigV4Authenticator, SlashPolicy, StaticCredentials, Unlimited,
 };
-use rustfs_gateway_sig::{RegionSet, SecurityFloor};
+use rustfs_gateway_sig::{PresignedExpiryRule, RegionSet, SecurityFloor};
 use rustfs_gateway_types::ErrorCode;
 use rustfs_gateway_types::compat::ConversionError;
 
@@ -137,7 +137,8 @@ impl GatewaySeam {
             .accept_any_signing_region()
             .accept_empty_signing_region()
             .refuse_unreadable_signing_regions_after_verification()
-            .accept_signing_regions_of_any_length();
+            .accept_signing_regions_of_any_length()
+            .verify_raw_paths_only_with_unencoded_bytes();
         let slot: Slot = Arc::new(Mutex::new(None));
         let routed: Routed = Arc::new(Mutex::new(None));
         let answer: Queued = Arc::new(Mutex::new(None));
@@ -161,7 +162,8 @@ impl GatewaySeam {
             .security_floor(
                 SecurityFloor::new()
                     .delegate_anonymous_to_authorizer_after_listing_in_the_posture_report()
-                    .enable_sigv2_presigned_compatibility(),
+                    .enable_sigv2_presigned_compatibility()
+                    .with_presigned_expiry_rule(PresignedExpiryRule::LegacyRustfs),
             )
             .bucket_owner_source(FixtureOwner)
             // The RustFS profile: the seam is only ever reached behind it, so its decode choices
@@ -176,6 +178,8 @@ impl GatewaySeam {
             .slash_policy(SlashPolicy::RustfsLegacy)
             .accept_legacy_rustfs_object_keys_after_listing_in_the_posture_report()
             .accept_empty_uploads_without_content_length()
+            .url_encode_listings_like_rustfs()
+            .legacy_rustfs_post_forms()
             .host_resolver(Resolver::new(false))
             .observer(RouteObserver {
                 routed: Arc::clone(&routed),

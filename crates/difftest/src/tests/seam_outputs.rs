@@ -102,6 +102,18 @@ fn judge(name: &str, diff: &AnswerDiff, expect: Written, register: &KnownDiffs) 
                 }) {
                     Some(entry) => {
                         answered.insert(entry.id);
+                        // A declared answer finding argues its own path, as a register entry does.
+                        match &failure.item {
+                            Item::Header(header) => {
+                                excused.headers.insert(header.clone());
+                            }
+                            Item::BodyElement(path) => {
+                                if let Some(below_root) = value_path(path) {
+                                    excused.paths.insert(below_root);
+                                }
+                            }
+                            _ => {}
+                        }
                     }
                     None => problems.push(format!("{name}: unregistered {failure}")),
                 }
@@ -147,6 +159,76 @@ fn value_path(path: &str) -> Option<String> {
     Some(shape)
 }
 
+/// Encode-matrix samples the RustFS profile answers otherwise than the generic profile the matrix
+/// pins (the seam diff runs the RustFS profile): each sample's register ids and answer findings
+/// under it. The RustFS listing rule (#1088) keeps `/` literal in a URL-encoded delimiter, so the
+/// delimiter the generic profile double-encodes (kd-encode-0037, 0039, 0041) is written as the
+/// legacy stack writes it, and it echoes no multipart EncodingType (sa-0015).
+const RUSTFS_PROFILE_SAMPLES: &[(&str, &[&str], &[&str])] = &[
+    (
+        "list-objects-v2-url",
+        &[
+            "kd-encode-0001",
+            "kd-encode-0002",
+            "kd-encode-0003",
+            "kd-encode-0004",
+            "kd-encode-0005",
+            "kd-encode-0006",
+            "kd-encode-0026",
+            "kd-encode-0027",
+            "kd-encode-0028",
+            "kd-encode-0038",
+        ],
+        &[],
+    ),
+    (
+        "list-objects-url",
+        &[
+            "kd-encode-0001",
+            "kd-encode-0002",
+            "kd-encode-0003",
+            "kd-encode-0004",
+            "kd-encode-0005",
+            "kd-encode-0006",
+            "kd-encode-0023",
+            "kd-encode-0024",
+            "kd-encode-0025",
+        ],
+        &[],
+    ),
+    (
+        "list-multipart-uploads-url",
+        &[
+            "kd-encode-0001",
+            "kd-encode-0002",
+            "kd-encode-0003",
+            "kd-encode-0004",
+            "kd-encode-0005",
+            "kd-encode-0014",
+            "kd-encode-0015",
+            "kd-encode-0016",
+            "kd-encode-0017",
+        ],
+        &["sa-0015"],
+    ),
+];
+
+/// Negative — every RustFS-profile sample names a sample of the matrix and answers otherwise than
+/// the matrix pins it: an entry that no longer differs is stale.
+#[test]
+fn n_every_rustfs_profile_sample_differs_from_what_the_matrix_pins() {
+    let rows = crate::samples::outputs();
+    for (name, known, answer) in RUSTFS_PROFILE_SAMPLES {
+        let row = rows
+            .iter()
+            .find(|row| row.sample.name == *name)
+            .unwrap_or_else(|| panic!("{name} is not an encode-matrix sample"));
+        let pinned: BTreeSet<&str> = row.expect.iter().copied().collect();
+        let profile: BTreeSet<&str> = known.iter().copied().collect();
+        assert!(pinned != profile || !answer.is_empty(), "{name} answers as the matrix pins it");
+    }
+}
+
 /// One judged answer.
 struct Outcome {
     name: String,
@@ -175,10 +257,17 @@ fn outcomes() -> &'static [Outcome] {
             // registered differences of the two answers.
             let expect = match (row.sample.output)().into_gateway() {
                 Err(unconvertible) => Written::Refused(unconvertible.member),
-                Ok(_) => Written::As {
-                    known: row.expect,
-                    answer: &[],
-                    orders: &[],
+                Ok(_) => match RUSTFS_PROFILE_SAMPLES.iter().find(|(name, _, _)| *name == row.sample.name) {
+                    Some((_, known, answer)) => Written::As {
+                        known,
+                        answer,
+                        orders: &[],
+                    },
+                    None => Written::As {
+                        known: row.expect,
+                        answer: &[],
+                        orders: &[],
+                    },
                 },
             };
             outcomes.push(Outcome {

@@ -320,6 +320,17 @@ pub(crate) const ANSWER_FINDINGS: &[AnswerFinding] = &[
         "The gateway answers 202 Accepted, the status AWS documents for a restore it starts (spec/operations/RestoreObject.toml); \
          the legacy writer answers 200 for every restore. Both carry the same headers.",
     ),
+    finding(
+        "sa-0015",
+        "ListMultipartUploads",
+        "body ListMultipartUploadsResult/EncodingType",
+        "<absent>",
+        "<EncodingType>",
+        "The RustFS listing rule (url_encode_listings_like_rustfs, #1088) echoes no EncodingType on a multipart listing, as \
+         legacy RustFS answers: its multipart listing never sets the member (rustfs/rustfs e870a6d25 \
+         rustfs/src/storage/s3_api/multipart.rs:165-206). Only the encode matrix's sample sets it, so no answer RustFS gives \
+         loses it; a legacy output that did set it would be written without it.",
+    ),
 ];
 
 /// Every output member path no row can set, by operation, with the reason.
