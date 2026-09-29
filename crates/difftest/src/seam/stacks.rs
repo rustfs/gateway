@@ -38,7 +38,7 @@ use rustfs_gateway_sig::{RegionSet, SecurityFloor};
 use rustfs_gateway_types::ErrorCode;
 use rustfs_gateway_types::compat::ConversionError;
 
-use super::table::{self, SeamConverted};
+use super::table::{self, SeamConverted, Stored};
 use crate::decode::{Answer, BodySeen, S3ErrorView};
 use crate::gateway::{AllowEveryStage, FixtureOwner, RouteObserver, Routed};
 use crate::oracle::{RecordOperation, drain};
@@ -56,6 +56,8 @@ pub(crate) struct Recorded {
     pub(crate) input: Result<Box<dyn Any + Send>, ConversionError>,
     /// The body the handler drained, when the input carries one.
     pub(crate) body: Option<BodySeen>,
+    /// The configuration bytes this side would store, for a configuration write.
+    pub(crate) stored: Stored,
 }
 
 pub(crate) type Slot = Arc<Mutex<Option<Recorded>>>;
@@ -66,13 +68,19 @@ pub(crate) async fn record(
     operation: &'static str,
     input: Result<Box<dyn Any + Send>, ConversionError>,
     body: Option<s3s::dto::StreamingBlob>,
+    stored: Stored,
 ) {
     let body = match body {
         None => None,
         Some(blob) => Some(drain(blob).await),
     };
     if let Ok(mut held) = slot.lock() {
-        *held = Some(Recorded { operation, input, body });
+        *held = Some(Recorded {
+            operation,
+            input,
+            body,
+            stored,
+        });
     }
 }
 
@@ -83,8 +91,9 @@ pub(crate) struct SeamRecorder {
 
 impl<O: SeamConverted> Handler<O> for SeamRecorder {
     async fn call(&self, request: Req<O>) -> HandlerResult<O> {
+        let stored = O::stored(request.input());
         let (input, body) = O::convert(request);
-        record(&self.slot, O::NAME, input, body).await;
+        record(&self.slot, O::NAME, input, body, stored).await;
         Err(HandlerError::new(ErrorCode::NOT_IMPLEMENTED, "recorded by the seam diff"))
     }
 }

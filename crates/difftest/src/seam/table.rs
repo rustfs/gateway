@@ -35,6 +35,7 @@ use rustfs_gateway::{CopySourceForm, CopySourceResources, Operation, Req, Servic
 use rustfs_gateway_core::codec::OperationCodec;
 use rustfs_gateway_types::compat::ConversionError;
 use rustfs_gateway_types::compat::s3s_0_17_0 as seam;
+use rustfs_gateway_types::persistence as dto_bridge;
 
 use super::stacks::{LegacyRecorder, SeamRecorder, record};
 use crate::oracle::{Answered, recorded};
@@ -48,11 +49,142 @@ use seam::request_context::GatewayRequestContext;
 /// conversion refused, and the live body when the input carries one.
 pub(crate) type Converted = (Result<Box<dyn Any + Send>, ConversionError>, Option<legacy::StreamingBlob>);
 
+/// The configuration bytes one side would store for a configuration write: the gateway's
+/// persistence writer on its own input, or the legacy serializer RustFS stores with on the legacy
+/// input. `None` for any other operation, or a write carrying no document.
+pub(crate) type Stored = Option<Result<Vec<u8>, String>>;
+
 /// A gateway operation the seam diff covers.
 pub(crate) trait SeamConverted: OperationCodec + Sized {
     /// Converts the gateway request as the RustFS adapter does.
     fn convert(request: Req<Self>) -> Converted;
+
+    /// The bytes the gateway persistence writer produces for this input's configuration document.
+    fn stored(_input: &Self::Input) -> Stored {
+        None
+    }
 }
+
+/// A writer's result as stored bytes.
+trait IntoStored {
+    fn into_stored(self) -> Result<Vec<u8>, String>;
+}
+
+impl IntoStored for Vec<u8> {
+    fn into_stored(self) -> Result<Vec<u8>, String> {
+        Ok(self)
+    }
+}
+
+impl<E: std::fmt::Display> IntoStored for Result<Vec<u8>, E> {
+    fn into_stored(self) -> Result<Vec<u8>, String> {
+        self.map_err(|error| error.to_string())
+    }
+}
+
+/// The bytes RustFS stores for a legacy configuration value: its own `serialize`
+/// (rustfs/rustfs `1e7065101d` `crates/ecstore/src/bucket/utils.rs:100-107`), a legacy XML
+/// serializer over an empty buffer, no declaration.
+fn legacy_stored<T: s3s::xml::Serialize>(value: &T) -> Result<Vec<u8>, String> {
+    let mut buffer = Vec::with_capacity(256);
+    {
+        let mut serializer = s3s::xml::Serializer::new(&mut buffer);
+        value.serialize(&mut serializer).map_err(|error| error.to_string())?;
+    }
+    Ok(buffer)
+}
+
+/// Each configuration write's gateway writer, by the member holding the document on each side:
+/// `gateway`/`legacy` are `required` or `optional`.
+macro_rules! stored {
+    (PutBucketLifecycleConfiguration) => { stored!(@optional lifecycle_configuration, dto_bridge::serialize_lifecycle_dto); };
+    (PutBucketReplication) => { stored!(@required replication_configuration, dto_bridge::serialize_replication_dto); };
+    (PutBucketNotificationConfiguration) => { stored!(@required notification_configuration, dto_bridge::serialize_notification_dto); };
+    (PutBucketCors) => { stored!(@required cors_configuration, dto_bridge::serialize_cors_dto); };
+    (PutBucketEncryption) => { stored!(@required server_side_encryption_configuration, dto_bridge::serialize_bucket_encryption_dto); };
+    (PutBucketTagging) => { stored!(@required tagging, dto_bridge::serialize_tagging_dto); };
+    (PutBucketVersioning) => { stored!(@required versioning_configuration, dto_bridge::serialize_versioning_dto); };
+    (PutObjectLockConfiguration) => { stored!(@required object_lock_configuration, dto_bridge::serialize_object_lock_dto); };
+    (PutPublicAccessBlock) => { stored!(@required public_access_block_configuration, dto_bridge::serialize_public_access_block_dto); };
+    (PutBucketWebsite) => { stored!(@required website_configuration, dto_bridge::serialize_website_dto); };
+    (PutBucketLogging) => { stored!(@required bucket_logging_status, dto_bridge::serialize_bucket_logging_dto); };
+    (PutBucketAccelerateConfiguration) => { stored!(@required accelerate_configuration, dto_bridge::serialize_accelerate_dto); };
+    (PutBucketRequestPayment) => { stored!(@required request_payment_configuration, dto_bridge::serialize_request_payment_dto); };
+    (@required $member:ident, $writer:path) => {
+        fn stored(input: &Self::Input) -> Stored {
+            Some($writer(&input.$member).into_stored())
+        }
+    };
+    (@optional $member:ident, $writer:path) => {
+        fn stored(input: &Self::Input) -> Stored {
+            input.$member.as_ref().map(|value| $writer(value).into_stored())
+        }
+    };
+    ($other:ident) => {};
+}
+
+/// The legacy side of [`stored!`]: the same document, serialized as RustFS stores it.
+macro_rules! legacy_stored {
+    (PutBucketLifecycleConfiguration, $input:ident) => {
+        $input.lifecycle_configuration.as_ref().map(legacy_stored)
+    };
+    (PutBucketReplication, $input:ident) => {
+        Some(legacy_stored(&$input.replication_configuration))
+    };
+    (PutBucketNotificationConfiguration, $input:ident) => {
+        Some(legacy_stored(&$input.notification_configuration))
+    };
+    (PutBucketCors, $input:ident) => {
+        Some(legacy_stored(&$input.cors_configuration))
+    };
+    (PutBucketEncryption, $input:ident) => {
+        Some(legacy_stored(&$input.server_side_encryption_configuration))
+    };
+    (PutBucketTagging, $input:ident) => {
+        Some(legacy_stored(&$input.tagging))
+    };
+    (PutBucketVersioning, $input:ident) => {
+        Some(legacy_stored(&$input.versioning_configuration))
+    };
+    (PutObjectLockConfiguration, $input:ident) => {
+        $input.object_lock_configuration.as_ref().map(legacy_stored)
+    };
+    (PutPublicAccessBlock, $input:ident) => {
+        Some(legacy_stored(&$input.public_access_block_configuration))
+    };
+    (PutBucketWebsite, $input:ident) => {
+        Some(legacy_stored(&$input.website_configuration))
+    };
+    (PutBucketLogging, $input:ident) => {
+        Some(legacy_stored(&$input.bucket_logging_status))
+    };
+    (PutBucketAccelerateConfiguration, $input:ident) => {
+        Some(legacy_stored(&$input.accelerate_configuration))
+    };
+    (PutBucketRequestPayment, $input:ident) => {
+        Some(legacy_stored(&$input.request_payment_configuration))
+    };
+    ($other:ident, $input:ident) => {
+        None
+    };
+}
+
+/// Every configuration write the stored-bytes comparison covers.
+pub(crate) const STORED_OPERATIONS: [&str; 13] = [
+    "PutBucketLifecycleConfiguration",
+    "PutBucketReplication",
+    "PutBucketNotificationConfiguration",
+    "PutBucketCors",
+    "PutBucketEncryption",
+    "PutBucketTagging",
+    "PutBucketVersioning",
+    "PutObjectLockConfiguration",
+    "PutPublicAccessBlock",
+    "PutBucketWebsite",
+    "PutBucketLogging",
+    "PutBucketAccelerateConfiguration",
+    "PutBucketRequestPayment",
+];
 
 fn boxed<T: Any + Send>(converted: Result<T, ConversionError>) -> Result<Box<dyn Any + Send>, ConversionError> {
     converted.map(|input| Box::new(input) as Box<dyn Any + Send>)
@@ -193,6 +325,8 @@ macro_rules! seam_operations {
             fn convert(request: Req<Self>) -> Converted {
                 convert!($kind, $method, request)
             }
+
+            stored!($op);
         })+
 
         /// Registers the seam recorder for every covered operation.
@@ -214,8 +348,9 @@ macro_rules! seam_operations {
                 #[allow(unused_mut, reason = "only an input with a body is changed")]
                 let mut input = request.input;
                 let body = take_body!($kind, input);
+                let stored: Stored = legacy_stored!($op, input);
                 Box::pin(async move {
-                    record(&self.slot, stringify!($op), Ok(Box::new(input)), body).await;
+                    record(&self.slot, stringify!($op), Ok(Box::new(input)), body, stored).await;
                     recorded()
                 })
             })+
