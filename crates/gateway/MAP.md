@@ -26,7 +26,7 @@ for request order and `docs/assembly-order.md` for extension call counts.
 | `src/payload_header.rs` | Signed payload and trailer declaration parsing | A request head selects the wrong payload mode |
 | `src/render.rs`, `src/response.rs`, `src/select_frames.rs` | S3 error rendering, encoded-success-to-HTTP conversion, and `frame_records`, the lazy one-frame-per-read select event-stream body | Changing final response bytes or headers, or select framing memory |
 | `src/commit.rs` | 200-then-answer/error response shape | Work continues after the head commits |
-| `src/commit_task.rs` | Detached committed-work task ownership | Work stops after its response body is dropped |
+| `src/commit_task.rs` | Detached committed-work task ownership, its span, and the host's `DetachedWork` count | Work stops after its response body is dropped, or a host's shutdown cuts it off |
 | `src/invariants.rs` | HEAD/bodyless and SSE-C response rules | A forbidden body or key reaches the wire |
 | `src/monomorphic.rs` | Concrete-backend service and type-level operation set | Building or auditing static dispatch |
 | `src/operation_mode.rs` | Dynamic/static adapters for the common pipeline | Auditing how a routed operation reaches its codec and handler |

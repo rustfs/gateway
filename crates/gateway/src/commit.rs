@@ -213,10 +213,12 @@ pub(crate) fn pending_response(
     Ok(response)
 }
 
-/// Starts deferred work after the caller has finalized every response-head mutation.
+/// Starts deferred work after the caller has finalized every response-head mutation, counted in
+/// the service's [`crate::DetachedWork`].
 #[must_use]
-pub(crate) fn start_pending(
+pub(crate) fn start_counted(
     response: &mut Response<Body>,
+    work: &crate::DetachedWork,
     complete: Box<dyn FnOnce(Option<rustfs_gateway_types::ErrorCode>) + Send>,
 ) -> bool {
     let Some(slot) = response.extensions_mut().remove::<PendingCommitSlot>() else {
@@ -225,8 +227,18 @@ pub(crate) fn start_pending(
     let Some(pending) = slot.take() else {
         return false;
     };
-    pending.start(complete);
+    pending.start(work, complete);
     true
+}
+
+/// [`start_counted`] with a count nobody reads, for the unit tests that predate the count.
+#[cfg(test)]
+#[must_use]
+pub(crate) fn start_pending(
+    response: &mut Response<Body>,
+    complete: Box<dyn FnOnce(Option<rustfs_gateway_types::ErrorCode>) + Send>,
+) -> bool {
+    start_counted(response, &crate::DetachedWork::default(), complete)
 }
 
 /// The terminal bytes of a successful committed response, without a second XML declaration.

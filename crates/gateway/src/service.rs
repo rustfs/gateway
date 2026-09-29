@@ -194,6 +194,7 @@ pub(crate) struct Inner {
     pub(crate) view_policy: crate::builder::view_policy::ViewPolicy,
     /// Off in the RustFS profile: an anonymous aws-chunked body stays undecoded, as legacy RustFS leaves it.
     pub(crate) decode_anonymous_framing: bool,
+    pub(crate) detached_work: crate::DetachedWork,
 }
 
 struct AuthorizedRoute {
@@ -428,7 +429,7 @@ impl S3Service {
         // through one panic boundary. The committed one runs before the terminal document is sent,
         // so a panic there would otherwise replace that document with the stopped-work fallback.
         let committed_observer = Arc::clone(&runtime.observer);
-        let started_committed_work = crate::commit::start_pending(
+        let started_committed_work = self.inner.detached_work.start(
             &mut response,
             Box::new(move |error| {
                 let event = RequestEvent {
@@ -814,8 +815,7 @@ impl S3Service {
         };
         // H4's run-time half: a receipt minted for another request cannot be attached to this one.
         let (verdict, scope_rejection, caller_secret) = authentication.into_parts();
-        // Zeroized on drop: an operation outside the assembly's secret scope never holds the key
-        // past this line (ADR-0024).
+        // Zeroized on drop: an operation outside the assembly's secret scope never holds the key past this line (ADR-0024).
         let caller_secret = caller_secret.filter(|_| hands_caller_secret || self.inner.caller_secret_every_operation);
         let verdict = SecurityFloor::seal_verdict(verdict, presence);
         if let Some(error) = verdict.rejection() {
