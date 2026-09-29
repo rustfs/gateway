@@ -430,3 +430,90 @@ fn n_any_other_conversion_error_is_not_a_legacy_decoder_refusal() {
     };
     assert_eq!(super::error::refusal_from_conversion(&error), None);
 }
+
+// ── a RustFS answer's own headers ─────────────────────────────────────────────────────────────
+
+fn body_headers(lines: &[(&'static str, &'static str)]) -> http::HeaderMap {
+    let mut headers = http::HeaderMap::new();
+    for (name, value) in lines {
+        headers.append(*name, http::HeaderValue::from_static(value));
+    }
+    headers
+}
+
+fn got_output() -> oracle::GetObjectOutput {
+    oracle::GetObjectOutput {
+        accept_ranges: Some("bytes".to_owned()),
+        restore: Some("ongoing-request=\"true\"".to_owned()),
+        metadata: Some(
+            [("color".to_owned(), "blue".to_owned()), ("size".to_owned(), "big".to_owned())]
+                .into_iter()
+                .collect(),
+        ),
+        ..Default::default()
+    }
+}
+
+#[test]
+fn a_header_the_body_set_leaves_the_member_it_replaces_to_that_header() {
+    let headers = body_headers(&[("accept-ranges", "bytes"), ("x-amz-meta-color", "red"), ("vary", "Origin")]);
+    let (output, extra) = ops::get_object::answer_from_legacy(got_output(), headers.clone()).expect("converts");
+    assert_eq!(output.accept_ranges, None);
+    assert_eq!(output.metadata.keys().collect::<Vec<_>>(), ["size"]);
+    assert_eq!(
+        output.restore.as_deref(),
+        Some("ongoing-request=\"true\""),
+        "a member no header replaces stays"
+    );
+    assert_eq!(extra, headers, "every header the body set is handed on unchanged");
+}
+
+#[test]
+fn n_an_answer_without_its_own_headers_converts_as_the_output_alone() {
+    let (output, extra) = ops::get_object::answer_from_legacy(got_output(), http::HeaderMap::new()).expect("converts");
+    let alone = ops::get_object::output_from_s3s(got_output()).expect("converts");
+    assert!(extra.is_empty());
+    assert_eq!(
+        (output.accept_ranges, output.restore, output.metadata),
+        (alone.accept_ranges, alone.restore, alone.metadata)
+    );
+}
+
+#[test]
+fn n_a_put_checksum_header_the_body_set_clears_only_its_own_algorithm() {
+    let output = oracle::PutObjectOutput {
+        checksum_sha512: Some("AAAA".to_owned()),
+        e_tag: Some(oracle::ETag::Strong("abc".to_owned())),
+        ..Default::default()
+    };
+    let headers = body_headers(&[("x-amz-checksum-sha512", "AAAA")]);
+    let (converted, extra) = super::put_object::answer_from_legacy(output, headers).expect("converts");
+    assert!(converted.checksum_spec.is_none(), "the body's header carries the checksum");
+    assert_eq!(converted.e_tag.opaque_tag(), "abc");
+    assert_eq!(extra.len(), 1);
+}
+
+#[test]
+fn n_a_metadata_header_for_another_key_leaves_the_metadata_whole() {
+    let headers = body_headers(&[("x-amz-meta-weight", "1kg")]);
+    let (output, _) = ops::get_object::answer_from_legacy(got_output(), headers).expect("converts");
+    assert_eq!(output.metadata.len(), 2);
+}
+
+#[test]
+fn n_a_header_naming_a_member_written_elsewhere_clears_nothing() {
+    // `ListObjectsV2Output.Name` is a document element, so a body header of the same spelling
+    // replaces nothing on the legacy wire.
+    let output = oracle::ListObjectsV2Output {
+        name: Some("bucket".to_owned()),
+        prefix: Some(String::new()),
+        max_keys: Some(1000),
+        key_count: Some(0),
+        is_truncated: Some(false),
+        ..Default::default()
+    };
+    let headers = body_headers(&[("name", "other"), ("x-rustfs-on-demand-migration-list", "local_only")]);
+    let (converted, extra) = ops::list_objects_v2::answer_from_legacy(output, headers).expect("converts");
+    assert_eq!(converted.name.as_str(), "bucket");
+    assert_eq!(extra.len(), 2);
+}

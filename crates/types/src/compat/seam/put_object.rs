@@ -255,6 +255,67 @@ pub fn replica_input_to_s3s(input: dto::PutObjectInput, version_id: String) -> R
     Ok(converted)
 }
 
+/// Converts a RustFS app body's whole answer — its output and the response headers it set beside
+/// it — into the gateway output and the extra headers the gateway writes after it
+/// (`Resp::with_extra_headers`). The legacy writer extends the output's headers with the body's
+/// own, which replaces every value of a name the output already wrote, so a member whose header the
+/// body set is left to that header here, and the gateway writes it as the body set it
+/// (rustfs/gateway#1076). The generated operations have the same function.
+///
+/// # Errors
+///
+/// [`ConversionError`] as [`output_from_s3s`].
+#[allow(clippy::needless_pass_by_value)]
+pub fn answer_from_legacy(
+    mut output: oracle::PutObjectOutput,
+    headers: http::HeaderMap,
+) -> Result<(dto::PutObjectOutput, http::HeaderMap), ConversionError> {
+    let replaced = |name: &str| headers.contains_key(name);
+    if replaced("x-amz-expiration") {
+        output.expiration = None;
+    }
+    if replaced("etag") {
+        output.e_tag = None;
+    }
+    for (name, member) in [
+        ("x-amz-checksum-crc32", &mut output.checksum_crc32),
+        ("x-amz-checksum-crc32c", &mut output.checksum_crc32c),
+        ("x-amz-checksum-crc64nvme", &mut output.checksum_crc64nvme),
+        ("x-amz-checksum-md5", &mut output.checksum_md5),
+        ("x-amz-checksum-sha1", &mut output.checksum_sha1),
+        ("x-amz-checksum-sha256", &mut output.checksum_sha256),
+        ("x-amz-checksum-sha512", &mut output.checksum_sha512),
+        ("x-amz-checksum-xxhash128", &mut output.checksum_xxhash128),
+        ("x-amz-checksum-xxhash3", &mut output.checksum_xxhash3),
+        ("x-amz-checksum-xxhash64", &mut output.checksum_xxhash64),
+        ("x-amz-server-side-encryption-customer-algorithm", &mut output.sse_customer_algorithm),
+        ("x-amz-server-side-encryption-customer-key-md5", &mut output.sse_customer_key_md5),
+        ("x-amz-server-side-encryption-aws-kms-key-id", &mut output.ssekms_key_id),
+        ("x-amz-server-side-encryption-context", &mut output.ssekms_encryption_context),
+        ("x-amz-version-id", &mut output.version_id),
+    ] {
+        if replaced(name) {
+            *member = None;
+        }
+    }
+    if replaced("x-amz-checksum-type") {
+        output.checksum_type = None;
+    }
+    if replaced("x-amz-server-side-encryption") {
+        output.server_side_encryption = None;
+    }
+    if replaced("x-amz-server-side-encryption-bucket-key-enabled") {
+        output.bucket_key_enabled = None;
+    }
+    if replaced("x-amz-object-size") {
+        output.size = None;
+    }
+    if replaced("x-amz-request-charged") {
+        output.request_charged = None;
+    }
+    Ok((output_from_s3s(output)?, headers))
+}
+
 /// Converts the s3s output a RustFS app body returned into the gateway output the codec writes.
 ///
 /// # Errors

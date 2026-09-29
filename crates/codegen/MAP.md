@@ -31,7 +31,7 @@ and the zero-diff gate needs no temporary directory.
 | `src/emit/dto/shared.rs` | Helpers common to the dto emitters. | — |
 | `src/emit/seam/mod.rs` | `generated/dto/seam/**` — the migration seam's s3s conversions for every RustFS operation (rustfs/gateway#967), mounted by `rustfs-gateway-types::compat::s3s_0_17_0::generated`. | A seam member fails generation, or an operation joins the seam. |
 | `src/emit/seam/expr.rs` | The (gateway IR type, s3s type) pairing table, each direction, and which nested shapes it reaches. | A pair is missing, or a leaf function changes. |
-| `src/emit/seam/render.rs` | Member matching (same name, keyword escaping, checksum fan-out, runtime members, overrides), `Option`/container wrapping, file layout. | A generated line is wrong. |
+| `src/emit/seam/render.rs` | Member matching (same name, keyword escaping, checksum fan-out, runtime members, overrides), `Option`/container wrapping, each operation's `answer_from_legacy` (the output members an answer's own headers replace), file layout. | A generated line is wrong. |
 | `src/emit/seam/overrides.rs` | Covered operations, hand-written ones, and every reviewed member exception with its reason, including members only the legacy decoder reads, decoded from the raw request. | Generation names an undecided member. |
 | `src/emit/seam/facts.rs` + `s3s_0_17_0.facts` | The s3s DTO fact table (`scripts/extract_s3s_shapes.py`) and its parser. | RustFS moves to another s3s release. |
 | `src/emit/seam/census.rs` | `generated/dto/seam/census/**` — per pinned structure a covered operation reaches: every member path, and the paths two values differ at or one holds, read from the fact table (rustfs/gateway#1076). | A differential needs to name a member, or a census path is wrong. |

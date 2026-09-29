@@ -49,3 +49,17 @@ pub fn output_from_s3s(output: s3s::dto::PutBucketCorsOutput) -> Result<crate::o
     Ok(crate::ops::put_bucket_cors::Output {
     })
 }
+
+/// Converts a RustFS app body's whole answer — its output and the response headers it set
+/// beside it — into the gateway `PutBucketCors` output and the extra headers the gateway writes after
+/// it (`Resp::with_extra_headers`). The legacy writer lets such a header replace the one an
+/// output member writes, so a member whose header the body set is left to that header.
+///
+/// # Errors
+///
+/// [`ConversionError`] as [`output_from_s3s`], or naming a required member one of the
+/// headers would replace.
+#[allow(clippy::too_many_lines, clippy::needless_pass_by_value)]
+pub fn answer_from_legacy(output: s3s::dto::PutBucketCorsOutput, headers: http::HeaderMap) -> Result<(crate::ops::put_bucket_cors::Output, http::HeaderMap), ConversionError> {
+    Ok((output_from_s3s(output)?, headers))
+}

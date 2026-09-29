@@ -582,3 +582,56 @@ fn describe(stored: Option<&Result<Vec<u8>, String>>) -> String {
         Some(Ok(bytes)) => format!("{:?}", String::from_utf8_lossy(bytes)),
     }
 }
+
+/// The name of every request-handling switch a builder chain in `text` turns on: a chained call
+/// whose name says what the RustFS profile accepts, refuses, clamps, leaves, signs, answers,
+/// enables or delegates, or which slash rule it applies.
+fn profile_switches(text: &str) -> BTreeSet<String> {
+    const SWITCHES: [&str; 8] = [
+        "accept_",
+        "refuse_",
+        "clamp_",
+        "leave_",
+        "sign_",
+        "answer_",
+        "enable_",
+        "delegate_",
+    ];
+    text.lines()
+        .filter_map(|line| line.trim_start().strip_prefix('.'))
+        .map(|call| {
+            call.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+                .next()
+                .unwrap_or_default()
+        })
+        .filter(|name| name == &"slash_policy" || SWITCHES.iter().any(|prefix| name.starts_with(prefix)))
+        .map(str::to_owned)
+        .collect()
+}
+
+/// The seam diff measures what RustFS will be handed, so its gateway runs every request-handling
+/// switch of the RustFS profile, which is spelled once, in `compat/sut`: a switch added there and
+/// not here fails, instead of the diff silently measuring another profile.
+#[test]
+fn the_seam_diff_runs_every_switch_of_the_rustfs_profile() {
+    let read = |path: &str| {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(path);
+        std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("{}: {error}", path.display()))
+    };
+    let profile = profile_switches(&read("../../compat/sut/src/service.rs"));
+    assert!(profile.len() >= 12, "the RustFS profile's switches were not found: {profile:?}");
+    let seam = profile_switches(&read("src/seam/stacks.rs"));
+    let missing: Vec<&String> = profile.difference(&seam).collect();
+    assert!(missing.is_empty(), "RustFS profile switches the seam diff does not turn on: {missing:?}");
+}
+
+/// Negative — the switch reading names a missing switch.
+#[test]
+fn n_a_switch_the_profile_turns_on_and_the_seam_does_not_is_named() {
+    let profile = profile_switches(
+        "    ServiceBuilder::new()\n        .accept_all_checksum_omissions()\n        .slash_policy(SlashPolicy::RustfsLegacy)\n        .authorizer(A)\n        .build()",
+    );
+    assert_eq!(profile.into_iter().collect::<Vec<_>>(), ["accept_all_checksum_omissions", "slash_policy"]);
+    let seam = profile_switches("        .accept_all_checksum_omissions()\n");
+    assert_eq!(profile_switches("        .slash_policy(x)").difference(&seam).count(), 1);
+}

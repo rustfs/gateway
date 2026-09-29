@@ -133,3 +133,27 @@ pub fn output_from_s3s(output: s3s::dto::CopyObjectOutput) -> Result<crate::ops:
         checksum_xxhash128: copy_object_result.checksum_xxhash128,
     })
 }
+
+/// Converts a RustFS app body's whole answer — its output and the response headers it set
+/// beside it — into the gateway `CopyObject` output and the extra headers the gateway writes after
+/// it (`Resp::with_extra_headers`). The legacy writer lets such a header replace the one an
+/// output member writes, so a member whose header the body set is left to that header.
+///
+/// # Errors
+///
+/// [`ConversionError`] as [`output_from_s3s`], or naming a required member one of the
+/// headers would replace.
+#[allow(clippy::too_many_lines, clippy::needless_pass_by_value)]
+pub fn answer_from_legacy(mut output: s3s::dto::CopyObjectOutput, headers: http::HeaderMap) -> Result<(crate::ops::copy_object::Output, http::HeaderMap), ConversionError> {
+    if headers.contains_key("x-amz-expiration") { output.expiration = None; }
+    if headers.contains_key("x-amz-copy-source-version-id") { output.copy_source_version_id = None; }
+    if headers.contains_key("x-amz-version-id") { output.version_id = None; }
+    if headers.contains_key("x-amz-server-side-encryption") { output.server_side_encryption = None; }
+    if headers.contains_key("x-amz-server-side-encryption-customer-algorithm") { output.sse_customer_algorithm = None; }
+    if headers.contains_key("x-amz-server-side-encryption-customer-key-md5") { output.sse_customer_key_md5 = None; }
+    if headers.contains_key("x-amz-server-side-encryption-aws-kms-key-id") { output.ssekms_key_id = None; }
+    if headers.contains_key("x-amz-server-side-encryption-context") { output.ssekms_encryption_context = None; }
+    if headers.contains_key("x-amz-server-side-encryption-bucket-key-enabled") { output.bucket_key_enabled = None; }
+    if headers.contains_key("x-amz-request-charged") { output.request_charged = None; }
+    Ok((output_from_s3s(output)?, headers))
+}

@@ -154,6 +154,27 @@ impl SeamDiffer {
     }
 }
 
+impl SeamDiffer {
+    /// Sends `request` to both stacks with one RustFS answer queued for each handler — `build`
+    /// makes the legacy output and the response headers the body sets beside it, once per stack —
+    /// and returns what each wrote: the gateway's `(gateway, legacy)`.
+    pub(crate) fn answer<T: Send + 'static>(
+        &self,
+        request: &RawRequest,
+        build: impl Fn() -> (T, http::HeaderMap),
+    ) -> Result<(crate::encode::WireAnswer, crate::encode::WireAnswer), String> {
+        let (output, headers) = build();
+        let gateway = self
+            .gateway
+            .answer(request, Box::new(stacks::LegacyAnswer { output, headers }))?;
+        let (output, headers) = build();
+        let legacy = self
+            .legacy
+            .answer(request, Box::new(stacks::LegacyAnswer { output, headers }))?;
+        Ok((gateway, legacy))
+    }
+}
+
 type Handed = (&'static str, Box<dyn std::any::Any + Send>);
 
 fn split(answer: Answer<Recorded>) -> (SeamVerdict, Option<BodySeen>, table::Stored, Option<Handed>) {
