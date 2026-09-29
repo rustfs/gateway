@@ -196,6 +196,9 @@ pub(crate) fn build_service(
             // RustFS lowers an oversized `max-keys` to a thousand on every listing rather than
             // refusing it; Hadoop S3A pages at 5000 (rustfs/backlog#1677).
             .clamp_oversized_max_keys()
+            // RustFS encodes a listing under `encoding-type=url` its own way: only exactly `url`,
+            // only some members, `/` kept literal (rustfs/gateway#1059).
+            .url_encode_listings_like_rustfs()
             // RustFS refuses an anonymous aws-chunked upload rather than decoding it (#1060), so
             // nothing reaches storage through the launcher that RustFS would not write.
             .leave_anonymous_streaming_payloads_undecoded()

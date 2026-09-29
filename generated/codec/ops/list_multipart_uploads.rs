@@ -107,6 +107,7 @@ impl OperationCodec for dto::ListMultipartUploads {
         } else {
             None
         };
+        value::rustfs_listing_echo(request, url_encoding, &mut output.encoding_type);
         let mut writer = rustfs_gateway_xml::XmlWriter::document();
         writer.open("ListMultipartUploadsResult", Some(rustfs_gateway_xml::S3_XMLNS));
         {
@@ -114,18 +115,22 @@ impl OperationCodec for dto::ListMultipartUploads {
             writer.element("Bucket", v.as_str());
         }
         if let Some(v) = output.key_marker.as_ref() {
+            let url_encoding = url_encoding.member("KeyMarker");
             writer.element("KeyMarker", &value::url_encoded(v.as_str(), url_encoding));
         }
         if let Some(v) = output.upload_id_marker.as_ref() {
             writer.element("UploadIdMarker", v.as_str());
         }
         if let Some(v) = output.next_key_marker.as_ref() {
+            let url_encoding = url_encoding.member("NextKeyMarker");
             writer.element("NextKeyMarker", &value::url_encoded(v.as_str(), url_encoding));
         }
         if let Some(v) = output.prefix.as_ref() {
+            let url_encoding = url_encoding.member("Prefix");
             writer.element("Prefix", &value::url_encoded(v.as_str(), url_encoding));
         }
         if let Some(v) = output.delimiter.as_ref() {
+            let url_encoding = url_encoding.member("Delimiter");
             writer.element("Delimiter", &value::url_encoded(v.as_str(), url_encoding));
         }
         if let Some(v) = output.next_upload_id_marker.as_ref() {
@@ -171,6 +176,7 @@ fn write_common_prefix(
 ) -> Result<(), CodecError> {
     {
         let v = &value.prefix;
+        let url_encoding = url_encoding.member("CommonPrefix.Prefix");
         writer.element("Prefix", &value::url_encoded(v.as_str(), url_encoding));
     }
     Ok(())
@@ -197,6 +203,7 @@ fn write_multipart_upload(
         writer.element("UploadId", v.as_str());
     }
     if let Some(v) = value.key.as_ref() {
+        let url_encoding = url_encoding.member("MultipartUpload.Key");
         writer.element("Key", &value::url_encoded_key(v, url_encoding));
     }
     if let Some(v) = value.initiated.as_ref() {

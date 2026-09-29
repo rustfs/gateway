@@ -295,6 +295,9 @@ fn xml_body(ir: &OperationIr) -> Result<String, String> {
                  \x20           None\n\
                  \x20       };\n",
             );
+            // The RustFS profile's echo (rustfs/gateway#1059), after the AWS-model one it may
+            // replace; a no-op under every other decision.
+            out.push_str("        value::rustfs_listing_echo(request, url_encoding, &mut output.encoding_type);\n");
         }
     }
     out.push_str("        let mut writer = rustfs_gateway_xml::XmlWriter::document();\n");
@@ -375,6 +378,7 @@ fn body_member(ir: &OperationIr, plan: &url::Plan, field: &Field, source: &str, 
                 let _ = writeln!(out, "{pad}writer.open(\"{name}\", None);");
             }
             let _ = writeln!(out, "{pad}for v in &{source} {{");
+            out.push_str(&url::member_binding(&format!("{pad}    "), member, encoded));
             let _ = writeln!(out, "{pad}    writer.element(\"{}\", {rendered});", names.entry);
             let _ = writeln!(out, "{pad}}}");
             if names.wrapper.is_some() {
@@ -446,13 +450,16 @@ fn body_member(ir: &OperationIr, plan: &url::Plan, field: &Field, source: &str, 
         other => {
             let rendered = wire_expr(other, member, &ir.operation, encoded)?;
             let call = element_call(policy);
+            let narrowed = url::member_binding(&format!("{pad}    "), member, encoded);
             if field.required {
                 let _ = writeln!(out, "{pad}{{");
                 let _ = writeln!(out, "{pad}    let v = &{source};");
+                out.push_str(&narrowed);
                 let _ = writeln!(out, "{pad}    writer.{call}(\"{wire}\", {rendered});");
                 let _ = writeln!(out, "{pad}}}");
             } else {
                 let _ = writeln!(out, "{pad}if let Some(v) = {source}.as_ref() {{");
+                out.push_str(&narrowed);
                 let _ = writeln!(out, "{pad}    writer.{call}(\"{wire}\", {rendered});");
                 let _ = writeln!(out, "{pad}}}");
             }
@@ -619,13 +626,16 @@ pub fn shape_writer(ir: &OperationIr, name: &str, shape: &Shape) -> Result<Strin
             other => {
                 let rendered = wire_expr(other, &field.name, &ir.operation, encoded)?;
                 let call = element_call(policy);
+                let narrowed = url::member_binding("        ", &format!("{name}.{}", field.name), encoded);
                 if field.required {
                     let _ = writeln!(out, "    {{");
                     let _ = writeln!(out, "        let v = &{source};");
+                    out.push_str(&narrowed);
                     let _ = writeln!(out, "        writer.{call}(\"{wire}\", {rendered});");
                     let _ = writeln!(out, "    }}");
                 } else {
                     let _ = writeln!(out, "    if let Some(v) = {source}.as_ref() {{");
+                    out.push_str(&narrowed);
                     let _ = writeln!(out, "        writer.{call}(\"{wire}\", {rendered});");
                     let _ = writeln!(out, "    }}");
                 }
@@ -733,7 +743,14 @@ fn union_writer(ir: &OperationIr, name: &str, shape: &Shape) -> Result<String, S
             scalar => {
                 let rendered = wire_expr(scalar, &field.name, &ir.operation, encoded)?;
                 let call = element_call(empty_policy(&shape.xml.empty_value_policy, &field.name, true));
-                let _ = writeln!(out, "        dto::{type_name}::{variant}(v) => writer.{call}(\"{wire}\", {rendered}),");
+                if encoded {
+                    let _ = writeln!(out, "        dto::{type_name}::{variant}(v) => {{");
+                    out.push_str(&url::member_binding("            ", &format!("{name}.{}", field.name), encoded));
+                    let _ = writeln!(out, "            writer.{call}(\"{wire}\", {rendered});");
+                    out.push_str("        }\n");
+                } else {
+                    let _ = writeln!(out, "        dto::{type_name}::{variant}(v) => writer.{call}(\"{wire}\", {rendered}),");
+                }
             }
         }
     }

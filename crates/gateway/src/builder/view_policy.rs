@@ -19,10 +19,11 @@
 //!
 //! Responsible for: [`ServiceBuilder::clamp_oversized_max_keys`],
 //! [`ServiceBuilder::answer_checksum_failures_with_bad_digest`],
-//! [`ServiceBuilder::sign_presigned_payloads_as_unsigned`] and
-//! [`ServiceBuilder::accept_empty_uploads_without_content_length`], the closed sets of operations
-//! the first and the last cover, and the per-request decisions the assembly applies — the client
-//! checksum waivers of `super::client_quirks` included.
+//! [`ServiceBuilder::sign_presigned_payloads_as_unsigned`],
+//! [`ServiceBuilder::accept_empty_uploads_without_content_length`] and
+//! [`ServiceBuilder::url_encode_listings_like_rustfs`], the closed sets of operations the first and
+//! the last two cover, and the per-request decisions the assembly applies — the client checksum
+//! waivers of `super::client_quirks` included.
 //! NOT responsible for: reading the parameter ([`rustfs_gateway_core::MetaView::query`]) or the
 //! modelled range the default refuses outside of (the generated codec).
 //! Upstream: `super::ServiceBuilder`. Downstream: `crate::service`, which applies [`ViewPolicy`]
@@ -69,6 +70,7 @@ use super::client_quirks::ChecksumWaiver;
 use super::legacy_sentences::BodySentences;
 use crate::integrity::IntegrityCodes;
 use crate::render::{S3Error, from_wire_reject};
+use rustfs_gateway_core::codec::value::RustFsListing;
 use rustfs_gateway_core::{MetaView, PageSizeCeiling};
 use rustfs_gateway_http::WireReject;
 
@@ -85,6 +87,40 @@ const MAX_KEYS: PageSizeCeiling = PageSizeCeiling::new("max-keys", RUSTFS_MAX_KE
 /// already ended the body empty, and no others: the two that require the header.
 pub const EMPTY_UPLOAD_OPERATIONS: [&str; 2] = ["PutObject", "UploadPart"];
 
+/// Legacy RustFS's `encoding-type=url` rule, per listing: the members it percent-encodes (a root
+/// member by name, a nested one as `Shape.Member`) and whether it echoes `encoding-type`.
+///
+/// rustfs/rustfs@1e7065101d: ListObjectsV2 encodes only each key and each rolled-up prefix
+/// (`rustfs/src/storage/s3_api/bucket.rs:296-333`); ListObjects inherits those and encodes
+/// `NextMarker` (`:361-411`); ListObjectVersions encodes every key-shaped member (`:212-279`); all
+/// three echo the request's value (`:267`, `:353`, `:92`). ListMultipartUploads drops the
+/// parameter and neither encodes nor echoes (`rustfs/src/app/multipart_usecase.rs:1519-1527`,
+/// `rustfs/src/storage/s3_api/multipart.rs:164-205`), and ListParts has no parameter at all.
+pub const RUSTFS_LISTING_ENCODINGS: [(&str, RustFsListing); 5] = [
+    (
+        "ListObjects",
+        RustFsListing::new(&["Object.Key", "CommonPrefix.Prefix", "NextMarker"], true),
+    ),
+    ("ListObjectsV2", RustFsListing::new(&["Object.Key", "CommonPrefix.Prefix"], true)),
+    (
+        "ListObjectVersions",
+        RustFsListing::new(
+            &[
+                "Prefix",
+                "Delimiter",
+                "KeyMarker",
+                "NextKeyMarker",
+                "ObjectVersion.Key",
+                "DeleteMarkerEntry.Key",
+                "CommonPrefix.Prefix",
+            ],
+            true,
+        ),
+    ),
+    ("ListMultipartUploads", RustFsListing::new(&[], false)),
+    ("ListParts", RustFsListing::new(&[], false)),
+];
+
 /// Which RustFS-profile readings this assembly applies to a routed view.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct ViewPolicy {
@@ -96,6 +132,7 @@ pub(crate) struct ViewPolicy {
     integrity_codes: IntegrityCodes,
     presigned_payload_unsigned: bool,
     empty_uploads_without_length: bool,
+    rustfs_listings: bool,
 }
 
 impl ViewPolicy {
@@ -135,9 +172,16 @@ impl ViewPolicy {
         } else {
             meta
         };
-        match self.integrity_codes {
+        let meta = match self.integrity_codes {
             IntegrityCodes::RustFs => meta.with_checksum_failures_as_bad_digest(),
             IntegrityCodes::Model => meta,
+        };
+        let listing = RUSTFS_LISTING_ENCODINGS
+            .iter()
+            .find(|(listed, _)| self.rustfs_listings && *listed == operation);
+        match listing {
+            Some((_, listing)) => meta.with_rustfs_listing_encoding(*listing),
+            None => meta,
         }
     }
 
@@ -214,6 +258,24 @@ impl ServiceBuilder {
         self.view_policy.empty_uploads_without_length = true;
         self
     }
+
+    /// Renders the listings of [`RUSTFS_LISTING_ENCODINGS`] under `encoding-type=url` exactly as
+    /// legacy RustFS does (rustfs/gateway#1059): only for exactly `url`, only the members its
+    /// table names, each with `/` kept literal, and the request's `encoding-type` echoed verbatim
+    /// where legacy echoes it.
+    ///
+    /// Off by default: the core encodes every member the AWS model declares, `/` included, for
+    /// `url` in any case, and echoes the canonical `url`. The RustFS profile turns it on so that
+    /// `ContinuationToken`, `Prefix`, `Delimiter` and the multipart listings come back as RustFS
+    /// clients read them today. A value no XML document can carry still forces the core's
+    /// encoding of the whole response. Behind a RustFS handler, the handler must hand back raw
+    /// values (the request's `encoding-type` withheld from it), or the members would be encoded
+    /// twice.
+    #[must_use]
+    pub fn url_encode_listings_like_rustfs(mut self) -> Self {
+        self.view_policy.rustfs_listings = true;
+        self
+    }
 }
 
 #[cfg(test)]
@@ -270,6 +332,7 @@ mod tests {
         assert_eq!(ViewPolicy::default().integrity_codes, IntegrityCodes::Model);
         assert!(!ViewPolicy::default().presigned_payload_unsigned());
         assert!(!ViewPolicy::default().empty_uploads_without_length);
+        assert!(!ViewPolicy::default().rustfs_listings);
         for operation in ["ListMultipartUploads", "ListParts", "ListBuckets", "GetObject", "PutObject"] {
             assert!(!CLAMPED_MAX_KEYS_OPERATIONS.contains(&operation), "{operation}");
         }

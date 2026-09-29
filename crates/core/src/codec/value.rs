@@ -310,10 +310,12 @@ pub fn bucket_name(value: &str, member: &'static str) -> Result<BucketName, Code
 }
 
 /// The query parameter a listing uses to ask for percent-encoded key-shaped members.
-const ENCODING_TYPE: &str = "encoding-type";
+pub(crate) const ENCODING_TYPE: &str = "encoding-type";
 
 /// The one value AWS defines for it.
-const ENCODING_TYPE_URL: &str = "url";
+pub(crate) const ENCODING_TYPE_URL: &str = "url";
+
+pub use crate::codec::rustfs_listing::{RustFsListing, rustfs_listing_echo};
 
 /// Whether this response percent-encodes the members its operation declares as key-shaped.
 ///
@@ -327,6 +329,18 @@ pub enum UrlEncoding {
     /// It did not. A member is still encoded when its value has no XML spelling at all, because
     /// the alternative is a body the client's parser rejects in full.
     Absent,
+    /// The RustFS profile's decision for a listing (legacy RustFS's rule,
+    /// `crate::codec::rustfs_listing`), before a member is named: whether `encoding-type` was
+    /// exactly `url`, and the listing's table. [`UrlEncoding::member`] turns it into a per-member
+    /// decision; written directly, it encodes nothing.
+    RustFs {
+        /// `encoding-type` was exactly `url`.
+        requested: bool,
+        /// The listing's legacy rule.
+        listing: RustFsListing,
+    },
+    /// One member legacy RustFS percent-encodes, with `/` kept literal.
+    RustFsMember,
 }
 
 /// Reads the encoding the request asked for.
@@ -345,6 +359,8 @@ pub fn url_encoding(request: &MetaView<'_>) -> UrlEncoding {
 pub(crate) fn url_encoding_for_response(request: &MetaView<'_>, forced: bool) -> UrlEncoding {
     if forced {
         UrlEncoding::Requested
+    } else if let Some(decision) = crate::codec::rustfs_listing::rustfs_decision(request) {
+        decision
     } else {
         url_encoding(request)
     }
@@ -409,6 +425,9 @@ fn percent_encoded(value: &str) -> Cow<'_, str> {
 /// chose, so a caller can put a byte in it that has no XML spelling.
 #[must_use]
 pub fn url_encoded(value: &str, encoding: UrlEncoding) -> Cow<'_, str> {
+    if encoding == UrlEncoding::RustFsMember {
+        return crate::codec::rustfs_listing::slash_preserving(value);
+    }
     if encoding == UrlEncoding::Requested || needs_url_encoding(value) {
         return percent_encoded(value);
     }
@@ -422,6 +441,9 @@ pub fn url_encoded(value: &str, encoding: UrlEncoding) -> Cow<'_, str> {
 /// happens to be running.
 #[must_use]
 pub fn url_encoded_key(value: &ObjectKey, encoding: UrlEncoding) -> Cow<'_, str> {
+    if encoding == UrlEncoding::RustFsMember {
+        return crate::codec::rustfs_listing::slash_preserving(value.as_str());
+    }
     if encoding == UrlEncoding::Requested || value.needs_url_encoding() {
         return percent_encoded(value.as_str());
     }
