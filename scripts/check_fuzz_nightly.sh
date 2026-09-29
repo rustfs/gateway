@@ -7,13 +7,17 @@ set -euo pipefail
 # WHAT THIS CHECKS
 #   The long-run fuzz lane (.github/workflows/fuzz-nightly.yml) fuzzes exactly the
 #   targets fuzz/Cargo.toml registers, with the cargo-fuzz version and nightly
-#   toolchain ci.yml pins, and never on a pull request.
+#   toolchain ci.yml pins, on a runner given a C++ compiler, and never on a pull
+#   request.
 #
 # WHY
 #   rustfs/backlog#1766 a-pf-0008. A target added to fuzz/Cargo.toml but not to
 #   the matrix is never fuzzed for longer than its seed replay, and nothing would
 #   say so; a second, drifting cargo-fuzz pin is the moving install
-#   check_tool_versions_pinned.sh exists to prevent.
+#   check_tool_versions_pinned.sh exists to prevent. libfuzzer-sys compiles
+#   libFuzzer's C++ sources and the org runner image ships no `c++`: without
+#   `--with-cxx` every target fails to build (run 36511088057), and the lane had
+#   never passed before that was noticed.
 #
 # HOW TO EXEMPT
 #   There is no exemption. Add the target to the matrix, or change both pins in
@@ -54,6 +58,13 @@ extra = matrix - registered
 fail_check("registered targets never fuzzed nightly: #{missing.join(', ')}") unless missing.empty?
 fail_check("matrix names targets fuzz/Cargo.toml does not register: #{extra.join(', ')}") unless extra.empty?
 fail_check("the matrix lists a target twice") unless matrix.uniq.length == matrix.length
+
+installs = Array(job["steps"]).map { |step| step.is_a?(Hash) ? step["run"].to_s : "" }
+                              .select { |run| run.include?("scripts/ci_install_host_tools.sh") }
+unless installs.length == 1 && installs.first.split.include?("--with-cxx")
+  fail_check("the fuzz job must run scripts/ci_install_host_tools.sh --with-cxx once: " \
+             "libfuzzer-sys builds libFuzzer from C++ and the runner image has no c++")
+end
 
 ci = File.read(paths[:ci], encoding: "UTF-8")
 pinned = ci[/^\s{2}CARGO_FUZZ_TOOL:\s*cargo-fuzz@([0-9.]+)\s*$/, 1]

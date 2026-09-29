@@ -79,8 +79,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
         with:
           toolchain: ${{ env.FUZZ_TOOLCHAIN }}
+      # libfuzzer-sys builds libFuzzer from C++ with cc-rs, and the runner image has no c++.
       - name: Install host tools
-        run: bash scripts/ci_install_host_tools.sh
+        run: bash scripts/ci_install_host_tools.sh --with-cxx
       - name: Install cargo-fuzz
         run: cargo +"$FUZZ_TOOLCHAIN" install cargo-fuzz --version "$CARGO_FUZZ_VERSION" --locked
       - name: Restore the corpus

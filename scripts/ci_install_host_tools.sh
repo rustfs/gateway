@@ -17,20 +17,30 @@ set -euo pipefail
 #   Docker is intentionally not installed here. Jobs that need a daemon run on
 #   the dind-sm-standard-2 label, which is the runner that has one.
 #
+#   A C++ compiler is opt-in. The sm-standard image has `cc` but no `c++`, so
+#   the `cc` probe below never pulls build-essential in, and cc-rs cannot
+#   build C++ (libfuzzer-sys compiles libFuzzer from source: every target of
+#   fuzz run 36511088057 failed on `failed to find tool "c++"`). Nothing in
+#   the pull-request gate compiles C++, so only the jobs that do ask for it.
+#
 # USAGE
 #   scripts/ci_install_host_tools.sh
 #   scripts/ci_install_host_tools.sh --with-gh
+#   scripts/ci_install_host_tools.sh --with-cxx
 # =============================================================================
 
 with_gh=0
-case "${1:-}" in
-    "") ;;
-    --with-gh) with_gh=1 ;;
-    *)
-        printf 'ci_install_host_tools: unknown argument %s\n' "$1" >&2
-        exit 2
-        ;;
-esac
+with_cxx=0
+for argument in "$@"; do
+    case "$argument" in
+        --with-gh) with_gh=1 ;;
+        --with-cxx) with_cxx=1 ;;
+        *)
+            printf 'ci_install_host_tools: unknown argument %s\n' "$argument" >&2
+            exit 2
+            ;;
+    esac
+done
 
 if [[ "$(id -u)" -eq 0 ]]; then
     apt=(apt-get)
@@ -42,6 +52,10 @@ fi
 
 missing=()
 command -v cc >/dev/null 2>&1 || missing+=(build-essential)
+# `g++` provides the `c++` alternative cc-rs looks for.
+if [[ "$with_cxx" -eq 1 ]] && ! command -v c++ >/dev/null 2>&1; then
+    missing+=(g++)
+fi
 command -v pkg-config >/dev/null 2>&1 || missing+=(pkg-config)
 command -v python3 >/dev/null 2>&1 || missing+=(python3)
 command -v ruby >/dev/null 2>&1 || missing+=(ruby)
@@ -88,6 +102,11 @@ if [[ "$want_gh" -eq 1 ]] && ! command -v gh >/dev/null 2>&1; then
         "${apt[@]}" update
         "${apt[@]}" install -y --no-install-recommends gh
     fi
+fi
+
+if [[ "$with_cxx" -eq 1 ]] && ! command -v c++ >/dev/null 2>&1; then
+    printf 'ci_install_host_tools: g++ is installed but there is still no c++ on PATH\n' >&2
+    exit 1
 fi
 
 printf 'ci_install_host_tools: installed %s\n' "${missing[*]}"
