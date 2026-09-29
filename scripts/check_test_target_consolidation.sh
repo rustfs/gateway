@@ -754,6 +754,7 @@ gateway_modules = (
     "throughput_request",
     "tracing_events",
     "unknown_checksum_algorithms",
+    "unread_body_drain",
     "unread_body_refusal",
     "upload_object_ceiling",
     "verified_scope_runtime",

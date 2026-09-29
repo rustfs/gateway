@@ -168,6 +168,9 @@ pub(crate) struct ViewPolicy {
     integrity_codes: IntegrityCodes,
     document_reading: DocumentReading,
     rustfs_response_layout: bool,
+    /// Whether and how an unread HTTP/1 request body is read after its answer
+    /// (`crate::unread_body`).
+    pub(super) unread_body_drain: Option<crate::unread_body::UnreadBodyDrain>,
     presigned_payload_unsigned: bool,
     base64_digests_as_hex: bool,
     empty_uploads_without_length: bool,
@@ -340,6 +343,12 @@ impl ViewPolicy {
             None
         }
     }
+
+    /// The drain this assembly runs behind an answer that left an HTTP/1 request body unread
+    /// ([`ServiceBuilder::drain_unread_request_bodies`]).
+    pub(crate) const fn unread_body_drain(&self) -> Option<crate::unread_body::UnreadBodyDrain> {
+        self.unread_body_drain
+    }
 }
 
 impl ServiceBuilder {
@@ -484,6 +493,25 @@ impl ServiceBuilder {
     #[must_use]
     pub fn accept_empty_uploads_without_content_length(mut self) -> Self {
         self.view_policy.empty_uploads_without_length = true;
+        self
+    }
+
+    /// Reads and discards what an HTTP/1 request body still owes after an answer that left it
+    /// unread, and closes the connection behind that answer, as RustFS does (rustfs/gateway#1120).
+    ///
+    /// For a host that owns the connection and hands the service Hyper's bodies. Hyper stops
+    /// reading an HTTP/1 connection once a body is dropped early and closes it after the answer,
+    /// so a peer still sending — a reverse proxy streaming an upload the service refused on its
+    /// head — meets a reset instead of the answer. With this setting the dropped body is read in a
+    /// task of its own until it ends, fails, or `drain`'s idle bound passes, and the answer carries
+    /// `Connection: close`. A body read to its end, one that was empty on arrival, one that
+    /// failed, and every HTTP/2 stream are left as they are.
+    ///
+    /// Off by default. The drain needs a Tokio runtime; without one the body is released as it is
+    /// with the setting off.
+    #[must_use]
+    pub fn drain_unread_request_bodies(mut self, drain: crate::UnreadBodyDrain) -> Self {
+        self.view_policy.unread_body_drain = Some(drain);
         self
     }
 

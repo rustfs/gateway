@@ -255,6 +255,11 @@ impl core::fmt::Debug for S3Service {
 }
 
 impl S3Service {
+    /// The drain this assembly runs behind an answer that left an HTTP/1 request body unread.
+    pub(crate) fn unread_body_drain(&self) -> Option<crate::UnreadBodyDrain> {
+        self.inner.view_policy.unread_body_drain()
+    }
+
     pub(crate) fn from_inner(inner: Inner) -> Self {
         Self { inner: Arc::new(inner) }
     }

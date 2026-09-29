@@ -785,6 +785,10 @@ mod bodyless_digest_tests;
 /// The request settings RustFS embeds the gateway with (rustfs/gateway#1070).
 mod deadline_tests;
 
+/// An HTTP/1 upload refused before its body is read, drained behind the answer as legacy RustFS
+/// drains it (rustfs/gateway#1120).
+mod unread_body_drain_tests;
+
 /// RustFS fixes of the legacy stack the RustFS profile already matches: ACL grantee namespaces,
 /// `Expires` as sent, and `Last-Modified` through `If-Modified-Since` (rustfs/gateway#1099).
 mod legacy_reading_tests;

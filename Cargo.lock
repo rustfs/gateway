@@ -1749,6 +1749,7 @@ dependencies = [
  "http-body-util",
  "httparse",
  "hyper",
+ "hyper-util",
  "md-5",
  "pin-project-lite",
  "rustfs-gateway-core",
