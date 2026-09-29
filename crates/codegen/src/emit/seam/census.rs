@@ -20,7 +20,7 @@
 //! differ) and `present` (the paths a value holds something at), all read from the fact table and
 //! never from the gateway model — so a differential can name the member two stacks disagree on,
 //! and prove every member was exercised, without printing a value (one of them is an SSE-C key).
-//! NOT responsible for: converting anything ([`super::render`]), or deciding what a difference
+//! NOT responsible for: converting anything (`super::render`), or deciding what a difference
 //! means (the difftest seam diff and the classification census do).
 //! Upstream: [`super::facts`] and the covered operations. Downstream: `generated/dto/seam/census/**`
 //! (rustfs/gateway#1076).
@@ -88,7 +88,7 @@ pub fn reachable<'a>(facts: &'a S3sFacts, roots: &[String]) -> Result<BTreeSet<&
 ///
 /// # Errors
 ///
-/// A structure nested deeper than [`MAX_DEPTH`] (a cycle), or one the fact table lacks.
+/// A structure nested deeper than `MAX_DEPTH` (a cycle), or one the fact table lacks.
 pub fn paths(facts: &S3sFacts, name: &str, prefix: &str, depth: usize, out: &mut Vec<String>) -> Result<(), String> {
     if depth > MAX_DEPTH {
         return Err(format!("census: `{name}` nests deeper than {MAX_DEPTH} levels"));
