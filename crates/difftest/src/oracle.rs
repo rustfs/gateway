@@ -77,7 +77,7 @@ impl RecordingS3 {
     }
 }
 
-async fn drain(mut blob: oracle::StreamingBlob) -> BodySeen {
+pub(crate) async fn drain(mut blob: oracle::StreamingBlob) -> BodySeen {
     use futures_core::Stream;
     let mut bytes = Vec::new();
     let outcome = std::future::poll_fn(|cx| {
@@ -109,8 +109,8 @@ pub(crate) fn recorded<T>() -> s3s::S3Result<s3s::S3Response<T>> {
 pub(crate) type Answered<'a, T> = Pin<Box<dyn Future<Output = s3s::S3Result<s3s::S3Response<T>>> + Send + 'a>>;
 
 /// Records the operation s3s routed to and allows it.
-struct RecordOperation {
-    routed: Arc<Mutex<Option<String>>>,
+pub(crate) struct RecordOperation {
+    pub(crate) routed: Arc<Mutex<Option<String>>>,
 }
 
 impl s3s::access::S3Access for RecordOperation {

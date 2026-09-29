@@ -39,6 +39,9 @@ mod probe;
 mod project;
 mod request;
 mod resolver;
+// Test-only for now: the seam diff is judged by `tests/seam.rs`; no runner drives it yet.
+#[cfg(test)]
+mod seam;
 mod sign;
 mod xmltree;
 
