@@ -61,7 +61,7 @@ compare and why this is not an in-process dual stack.
 | `src/seam/samples.rs` | The seam register (`sd-*` findings with RustFS evidence), unreached members, and the row helpers. | Classifying a difference, or adding a row family. |
 | `src/seam/samples/*.rs` | The seam rows: object writes, configuration writes, bucket lifecycle and reads, one row per finding, and every checksum-required write with no integrity claim (`omitted.rs`, rustfs/backlog#1677 R5). | Adding a row. |
 | `src/tests/seam_answers.rs` | Every kind of header a RustFS answer sets beside its output, written by both stacks as the same lines through the seam's `answer_from_legacy`, the one replacing an output member's header included. | An answer header is written differently or refused. |
-| `src/tests/seam.rs` | Judges the seam diff: rows as declared, matrix differences registered, every legacy input member accounted for, empty optional headers, no stale finding, negative controls. | A seam judgement fails. |
+| `src/tests/seam.rs` | Judges the seam diff: rows as declared, matrix differences registered, every legacy input member accounted for, empty optional headers, no stale finding, every RustFS-profile switch of `compat/sut` on, negative controls. | A seam judgement fails, or the RustFS profile gains a switch. |
 
 ## Verify
 

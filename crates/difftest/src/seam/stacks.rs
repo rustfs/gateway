@@ -136,7 +136,8 @@ impl GatewaySeam {
         let authenticator = SigV4Authenticator::new(Arc::new(StaticCredentials::new().with(credentials)), regions)
             .accept_any_signing_region()
             .accept_empty_signing_region()
-            .refuse_unreadable_signing_regions_after_verification();
+            .refuse_unreadable_signing_regions_after_verification()
+            .accept_signing_regions_of_any_length();
         let slot: Slot = Arc::new(Mutex::new(None));
         let routed: Routed = Arc::new(Mutex::new(None));
         let answer: Queued = Arc::new(Mutex::new(None));
@@ -171,6 +172,7 @@ impl GatewaySeam {
             .sign_presigned_payloads_as_unsigned()
             .answer_checksum_failures_with_bad_digest()
             .slash_policy(SlashPolicy::RustfsLegacy)
+            .accept_empty_uploads_without_content_length()
             .host_resolver(Resolver::new(false))
             .observer(RouteObserver {
                 routed: Arc::clone(&routed),
