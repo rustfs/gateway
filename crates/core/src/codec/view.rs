@@ -72,6 +72,9 @@ pub struct MetaView<'a> {
     checksum_failures_as_bad_digest: bool,
     /// A page-size query parameter the deployment clamps to a ceiling instead of refusing.
     page_size_ceiling: Option<PageSizeCeiling>,
+    /// Whether an absent `content-length` reads as `0`, because the transport already ended the
+    /// body with nothing in it.
+    ended_empty: bool,
 }
 
 /// A page-size query parameter answered with its ceiling when the request asked for more.
@@ -193,6 +196,7 @@ impl<'a> MetaView<'a> {
             integrity_optional: false,
             checksum_failures_as_bad_digest: false,
             page_size_ceiling: None,
+            ended_empty: false,
         })
     }
 
@@ -217,6 +221,7 @@ impl<'a> MetaView<'a> {
             integrity_optional: self.integrity_optional,
             checksum_failures_as_bad_digest: self.checksum_failures_as_bad_digest,
             page_size_ceiling: self.page_size_ceiling,
+            ended_empty: self.ended_empty,
         }
     }
 
@@ -263,6 +268,19 @@ impl<'a> MetaView<'a> {
     #[must_use]
     pub const fn with_page_size_ceiling(mut self, ceiling: PageSizeCeiling) -> Self {
         self.page_size_ceiling = Some(ceiling);
+        self
+    }
+
+    /// This view, with an absent `content-length` read as `0`.
+    ///
+    /// The assembly calls this only for an upload whose transport has already ended the body with
+    /// nothing in it — an HTTP/1.1 request with neither `Content-Length` nor `Transfer-Encoding`,
+    /// which RFC 9112 §6.3 gives a zero-length body, or an HTTP/2 request whose headers ended the
+    /// stream — and only under a deployment that accepts such an upload (the RustFS profile). A
+    /// `content-length` the request does carry is read exactly as sent.
+    #[must_use]
+    pub const fn with_transport_ended_empty_body(mut self) -> Self {
+        self.ended_empty = true;
         self
     }
 
@@ -316,6 +334,8 @@ impl<'a> MetaView<'a> {
     /// with the `aws-chunked` token removed — absent when that token was the whole value
     /// (rustfs/gateway#813). `aws-chunked` names the framing the ingest layer has already decoded,
     /// and a backend that stored it would tell a later reader to un-chunk a body that is not.
+    ///
+    /// Under [`MetaView::with_transport_ended_empty_body`] an absent `content-length` reads as `0`.
     #[must_use]
     pub fn header(&self, name: &str) -> Option<Cow<'a, str>> {
         let name = http::HeaderName::from_bytes(name.as_bytes()).ok()?;
@@ -326,6 +346,9 @@ impl<'a> MetaView<'a> {
         }
         if self.framed_content_length.is_some() && name == http::header::CONTENT_ENCODING {
             return without_aws_chunked(&self.header_text(&name)?);
+        }
+        if self.ended_empty && name == http::header::CONTENT_LENGTH {
+            return self.header_text(&name).or(Some(Cow::Borrowed("0")));
         }
         self.header_text(&name)
     }

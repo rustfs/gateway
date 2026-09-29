@@ -710,6 +710,9 @@ mod presigned_payload_tests;
 /// An anonymous aws-chunked upload left undecoded, as legacy RustFS leaves it (rustfs/gateway#1060).
 mod anonymous_chunked_tests;
 
+/// An empty upload without `Content-Length`, stored as legacy RustFS stores it (rustfs/rustfs#6849).
+mod empty_upload_tests;
+
 /// The gateway's CORS answers over the backend's stored documents (rustfs/gateway#1004).
 mod cors_tests;
 

@@ -628,7 +628,7 @@ impl S3Service {
             None => resolved.bucket().cloned(),
         };
         let meta = match MetaView::addressed_with(&wire, target, host_bucket, &self.inner.names) {
-            Ok(meta) => self.inner.view_policy.apply(operation, meta),
+            Ok(meta) => self.inner.view_policy.apply(operation, meta, pending.as_ref()),
             Err(error) => return outcome.refuse(from_codec(error, response_kind)),
         };
         let config = config.routed();

@@ -42,6 +42,7 @@ mod content_type_default;
 mod header_lists;
 mod metadata_and_url;
 mod page_size_ceiling;
+mod transport_ended_empty;
 
 /// An accepted request, owned so a `MetaView` can borrow it.
 fn accepted(method: &str, target: &str, headers: &[(&str, &str)]) -> WireRequest<()> {
