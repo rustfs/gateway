@@ -122,8 +122,9 @@ pub use crate::authz::{
 };
 pub use crate::cancellation::{HandlerCancellation, HandlerCancellationSource, HandlerContext};
 pub use crate::codec::{
-    BodyAllowance, CodecError, EncodedResponse, MetaView, OWNED_RESPONSE_HEADERS, OperationCodec, RequestBody, RequestBodyMode,
-    ResponseBody, ResponseOverride, body_allowance, override_header_value, response_body_allowed, response_framing_allowed,
+    BodyAllowance, CodecError, EncodedResponse, MetaView, OWNED_RESPONSE_HEADERS, OperationCodec, PageSizeCeiling, RequestBody,
+    RequestBodyMode, ResponseBody, ResponseOverride, body_allowance, override_header_value, response_body_allowed,
+    response_framing_allowed,
 };
 pub use crate::committed::{CommitOutcome, CommitWork, CommittedResponse, DeferredOperation, HeadPart, HeadPartError};
 pub use crate::contracts::{copy_source_guards_before_target_write, copy_source_if_match_miss_proceeds, error_root_namespace};

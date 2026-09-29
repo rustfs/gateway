@@ -191,7 +191,7 @@ pub(crate) struct Inner {
     pub(crate) temporary_redirect_targets: Arc<[RedirectTarget]>,
     /// Whether a handed-over caller secret reaches every operation, not only opted-in ones (ADR-0024).
     pub(crate) caller_secret_every_operation: bool,
-    pub(crate) checksum_waiver: crate::builder::ChecksumWaiver,
+    pub(crate) view_policy: crate::builder::view_policy::ViewPolicy,
 }
 
 struct AuthorizedRoute {
@@ -625,7 +625,7 @@ impl S3Service {
             None => resolved.bucket().cloned(),
         };
         let meta = match MetaView::addressed_with(&wire, target, host_bucket, &self.inner.names) {
-            Ok(meta) => self.inner.checksum_waiver.apply(operation, meta),
+            Ok(meta) => self.inner.view_policy.apply(operation, meta),
             Err(error) => return outcome.refuse(from_codec(error, response_kind)),
         };
         let config = config.routed();

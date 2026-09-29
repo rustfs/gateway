@@ -41,6 +41,7 @@ use crate::route::TargetKind;
 mod content_type_default;
 mod header_lists;
 mod metadata_and_url;
+mod page_size_ceiling;
 
 /// An accepted request, owned so a `MetaView` can borrow it.
 fn accepted(method: &str, target: &str, headers: &[(&str, &str)]) -> WireRequest<()> {

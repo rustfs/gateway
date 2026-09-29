@@ -119,6 +119,9 @@ pub(crate) fn build_service(
             // s3cmd's checksum-less ACL writes (#912), and so must the launcher that stands for it.
             .accept_minio_client_checksum_omissions()
             .accept_s3cmd_acl_checksum_omissions()
+            // RustFS lowers an oversized `max-keys` to a thousand on every listing rather than
+            // refusing it; Hadoop S3A pages at 5000 (rustfs/backlog#1677).
+            .clamp_oversized_max_keys()
             // The backend's stored CORS documents feed the gateway's CORS answers, as RustFS's do
             // behind the gateway; no cache lifetime, so a suite sees a `PutBucketCors` at once.
             .cors_source(Arc::clone(backend))

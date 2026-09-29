@@ -68,6 +68,48 @@ pub struct MetaView<'a> {
     framed_content_length: Option<u64>,
     /// Whether the deployment waived this operation's modelled integrity requirement.
     integrity_optional: bool,
+    /// A page-size query parameter the deployment clamps to a ceiling instead of refusing.
+    page_size_ceiling: Option<PageSizeCeiling>,
+}
+
+/// A page-size query parameter answered with its ceiling when the request asked for more.
+///
+/// The RustFS profile's reading of an oversized page size (rustfs/backlog#1677, R1): RustFS lowers
+/// `max-keys` to the listing maximum before it lists or echoes it, so a client asking for five
+/// thousand reads a page of at most a thousand and `<MaxKeys>1000</MaxKeys>`. Only a value that
+/// parses as an integer above the ceiling is replaced; an unparseable or negative value reaches
+/// the decoder as sent and is refused there exactly as before.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PageSizeCeiling {
+    parameter: &'static str,
+    ceiling: i32,
+}
+
+impl PageSizeCeiling {
+    /// Clamps the query parameter `parameter` to `ceiling`.
+    #[must_use]
+    pub const fn new(parameter: &'static str, ceiling: i32) -> Self {
+        Self { parameter, ceiling }
+    }
+
+    /// The query parameter this ceiling governs.
+    #[must_use]
+    pub const fn parameter(&self) -> &'static str {
+        self.parameter
+    }
+
+    /// The largest page size the parameter is answered with.
+    #[must_use]
+    pub const fn ceiling(&self) -> i32 {
+        self.ceiling
+    }
+
+    /// `value` clamped, when it is an integer above the ceiling under the codec's own integer
+    /// reading, and `None` otherwise.
+    fn clamp(&self, value: &str) -> Option<i32> {
+        crate::codec::value::parse_integer(value).filter(|&requested| requested > self.ceiling)?;
+        Some(self.ceiling)
+    }
 }
 
 impl<'a> MetaView<'a> {
@@ -147,6 +189,7 @@ impl<'a> MetaView<'a> {
             names: names.clone(),
             framed_content_length: None,
             integrity_optional: false,
+            page_size_ceiling: None,
         })
     }
 
@@ -169,6 +212,7 @@ impl<'a> MetaView<'a> {
             names: self.names.clone(),
             framed_content_length: Some(length),
             integrity_optional: self.integrity_optional,
+            page_size_ceiling: self.page_size_ceiling,
         }
     }
 
@@ -188,6 +232,18 @@ impl<'a> MetaView<'a> {
     #[must_use]
     pub const fn integrity_optional(&self) -> bool {
         self.integrity_optional
+    }
+
+    /// This view, with one page-size query parameter clamped to its ceiling.
+    ///
+    /// The assembly calls this only for a listing its deployment clamps (the RustFS profile's
+    /// `max-keys`), so every decoder reading the parameter — and so the handler and the
+    /// `<MaxKeys>` echo — sees the page size the listing will really serve. Absent, unparseable,
+    /// negative and in-range values read exactly as the wire carries them.
+    #[must_use]
+    pub const fn with_page_size_ceiling(mut self, ceiling: PageSizeCeiling) -> Self {
+        self.page_size_ceiling = Some(ceiling);
+        self
     }
 
     /// The naming policy this view was built under.
@@ -292,9 +348,19 @@ impl<'a> MetaView<'a> {
     ///
     /// `None` covers "absent"; a present parameter with an empty value is `Some("")`, because
     /// `?prefix=` and no `prefix` at all are different requests.
+    ///
+    /// A parameter the deployment clamps ([`MetaView::with_page_size_ceiling`]) reads as its
+    /// ceiling when the request asked for more.
     #[must_use]
     pub fn query(&self, key: &str) -> Option<Cow<'a, str>> {
-        self.query.get(key).map(decode_component)
+        let value = self.query.get(key).map(decode_component)?;
+        if let Some(ceiling) = self.page_size_ceiling
+            && ceiling.parameter == key
+            && let Some(clamped) = ceiling.clamp(&value)
+        {
+            return Some(Cow::Owned(clamped.to_string()));
+        }
+        Some(value)
     }
 
     /// Whether a query parameter is present, whatever its value.
