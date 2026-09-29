@@ -302,6 +302,32 @@ impl OperationFloor {
     }
 }
 
+/// Which operations admit a presigned URL (rustfs/backlog#1677, R7).
+///
+/// The default is [`PresignedPolicy::PerOperation`], and a floor nobody configured has it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum PresignedPolicy {
+    /// Only an operation that called [`OperationFloor::allow_presigned`] admits one.
+    #[default]
+    PerOperation,
+    /// Every non-privileged operation admits one, as a deployment that authorizes every request
+    /// itself (RustFS) does. A privileged operation still refuses every presigned URL, and cannot
+    /// be made to accept one.
+    EveryStandardOperation,
+}
+
+impl OperationFloor {
+    /// Whether this operation admits a presigned URL under `policy`.
+    ///
+    /// A privileged operation never does, under either policy: rewriting a presigned URL onto an
+    /// admin operation is MinIO #5411. Otherwise its own opt-in counts, and under
+    /// [`PresignedPolicy::EveryStandardOperation`] so does being a standard operation at all.
+    #[must_use]
+    pub const fn admits_presigned_under(&self, policy: PresignedPolicy) -> bool {
+        !self.privileged && (self.allowed_schemes.presigned || matches!(policy, PresignedPolicy::EveryStandardOperation))
+    }
+}
+
 /// Who decides a request that presented no credentials (ADR-0021).
 ///
 /// The default is [`AnonymousPolicy::PerOperation`], and a floor nobody configured has it.

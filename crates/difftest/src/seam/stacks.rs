@@ -163,7 +163,8 @@ impl GatewaySeam {
                 SecurityFloor::new()
                     .delegate_anonymous_to_authorizer_after_listing_in_the_posture_report()
                     .enable_sigv2_presigned_compatibility()
-                    .with_presigned_expiry_rule(PresignedExpiryRule::LegacyRustfs),
+                    .with_presigned_expiry_rule(PresignedExpiryRule::LegacyRustfs)
+                    .admit_presigned_on_every_standard_operation_after_listing_in_the_posture_report(),
             )
             .bucket_owner_source(FixtureOwner)
             // The RustFS profile: the seam is only ever reached behind it, so its decode choices

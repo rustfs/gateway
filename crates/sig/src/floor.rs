@@ -389,6 +389,7 @@ pub struct SecurityFloor {
     failure_floor: FailureFloor,
     custom_schemes: CustomSchemeRegistry,
     anonymous: crate::operation::AnonymousPolicy,
+    presigned: crate::operation::PresignedPolicy,
 }
 
 impl SecurityFloor {
@@ -512,6 +513,8 @@ impl SecurityFloor {
         let allowed = match slot {
             // The one anonymous predicate, shared with the posture report (ADR-0021).
             SchemeSlot::Anonymous => self.admits_anonymous(operation),
+            // The one presigned predicate, shared with the posture report the same way.
+            SchemeSlot::Presigned => self.admits_presigned(operation),
             _ => operation.allowed_schemes().allows(slot),
         };
         if !allowed {
@@ -758,6 +761,8 @@ impl SecurityFloor {
 
 #[path = "floor_anonymous.rs"]
 mod anonymous;
+#[path = "floor_presigned.rs"]
+mod presigned;
 
 #[cfg(test)]
 #[path = "floor_tests.rs"]

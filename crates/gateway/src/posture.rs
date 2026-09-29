@@ -214,7 +214,9 @@ pub(crate) fn render_startup_posture<'a>(
         .collect();
     let presigned_allowed_ops: BTreeSet<_> = operations
         .into_iter()
-        .filter(|operation| !operation.privileged() && operation.allowed_schemes().allows_presigned())
+        // The floor's own predicate again: under the presigned widening every non-privileged
+        // operation is listed (rustfs/backlog#1677, R7).
+        .filter(|operation| floor.admits_presigned(operation))
         .map(OperationFloor::name)
         .collect();
     let custom_verifier = if custom_signature_verifier { "installed" } else { "none" };
@@ -291,6 +293,23 @@ mod tests {
             per_operation.starts_with("SECURITY_POSTURE anonymous_reachable_ops=[example:PublicPing] "),
             "{per_operation}"
         );
+    }
+
+    /// Under the presigned widening the list names every operation the floor now admits a
+    /// presigned URL to: each non-privileged one, never a privileged one (rustfs/gateway#1052).
+    #[test]
+    fn a_widened_floor_lists_every_non_privileged_operation_as_presigned_reachable() {
+        let header_only = OperationFloor::builtin("PutObject", SigService::S3);
+        let presigned = OperationFloor::builtin_presigned("GetObject", SigService::S3);
+        let privileged = OperationFloor::custom("example:Admin", SigService::S3);
+        let operations = [&header_only, &presigned, &privileged];
+        let floor = SecurityFloor::new().admit_presigned_on_every_standard_operation_after_listing_in_the_posture_report();
+
+        let widened = render_startup_posture(operations.into_iter(), &floor, false, false);
+        let per_operation = render_startup_posture(operations.into_iter(), &SecurityFloor::new(), false, false);
+
+        assert!(widened.contains(" presigned_allowed_ops=[GetObject,PutObject] "), "{widened}");
+        assert!(per_operation.contains(" presigned_allowed_ops=[GetObject] "), "{per_operation}");
     }
 
     #[test]

@@ -12,6 +12,7 @@ Agent entry point for SigV2/SigV4 parsing, canonicalization and verification.
 | `src/floor.rs` | H1-H6 unconditional admission checks, and the SigV2 admission branch. | A verifier or authentication scheme appears able to bypass the security floor. |
 | `src/floor_tests.rs` | The floor's own unit suite, split out at the 800-line limit. | A floor rule decidable from a `WireView` alone changes. |
 | `src/floor_anonymous.rs` | Service-level anonymous delegation and the one anonymous-admission predicate (ADR-0021). | An anonymous request reaches, or fails to reach, an operation's authorizer. |
+| `src/floor_presigned.rs` | Service-level presigned widening and the one presigned-admission predicate (ADR-0035). | A presigned URL is admitted to, or refused on, an operation that did not opt in. |
 | `src/mode.rs` | Authenticated payload-mode selection. | HTTP framing receives the wrong mode. |
 | `src/operation.rs` | Per-operation authentication-scheme policy. | Presigned or anonymous access reaches the wrong operation. |
 | `src/parse.rs` | Credential and authorization parsing. | Date, region, service, or credential fields parse incorrectly. |

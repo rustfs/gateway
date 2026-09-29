@@ -204,7 +204,10 @@ pub(crate) fn build_service(
                     // RustFS reads a presigned lifetime its own way: `X-Amz-Expires` as a Rust
                     // `u32` with `0` allowed, SigV2 `Expires` with no seven-day ceiling
                     // (rustfs/rustfs#5368); the posture report names the rule.
-                    .with_presigned_expiry_rule(rustfs_gateway::PresignedExpiryRule::LegacyRustfs),
+                    .with_presigned_expiry_rule(rustfs_gateway::PresignedExpiryRule::LegacyRustfs)
+                    // RustFS verifies a presigned URL on every operation and authorizes it as it
+                    // authorizes a header signature (rustfs/gateway#1052).
+                    .admit_presigned_on_every_standard_operation_after_listing_in_the_posture_report(),
             )
             // Sized as the RustFS bridge sizes it: no framework layer refuses what RustFS answers.
             .framework_governor_rates(rustfs_governor_rates())

@@ -11105,7 +11105,7 @@ mut_sig_p2_04_startup_posture_presigned_filter_removed() {
 from pathlib import Path
 path = Path("crates/gateway/src/posture.rs")
 text = path.read_text()
-old = "        .filter(|operation| !operation.privileged() && operation.allowed_schemes().allows_presigned())"
+old = "        .filter(|operation| floor.admits_presigned(operation))"
 if text.count(old) != 1:
     raise SystemExit("missing presigned startup posture mutation subject")
 path.write_text(text.replace(old, "        .filter(|_| false)", 1))
