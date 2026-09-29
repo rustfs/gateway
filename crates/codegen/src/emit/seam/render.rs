@@ -30,7 +30,7 @@ use super::overrides::{self, Rule};
 use crate::emit::dto::naming;
 use crate::emit::dto::registry::Registry;
 
-const HEADER: &str = "\
+pub(super) const HEADER: &str = "\
 // Copyright 2026 RustFS Team
 //
 // Licensed under the Apache License, Version 2.0 (the \"License\");
@@ -550,6 +550,9 @@ pub(super) fn root() -> String {
     format!(
         "{HEADER}\n//! The generated half of the migration seam (rustfs/gateway#967): one module per covered\n\
          //! operation and one per nested shape it reaches, converting against\n\
-         //! `crate::compat::s3s_0_17_0` (its `s3s` and `leaf`).\n\npub mod ops;\npub mod shapes;\n"
+         //! `crate::compat::s3s_0_17_0` (its `s3s` and `leaf`).\n\
+         //!\n\
+         //! `census` holds the member census of every pinned structure they reach (rustfs/gateway#1076).\n\
+         \npub mod census;\npub mod ops;\npub mod shapes;\n"
     )
 }

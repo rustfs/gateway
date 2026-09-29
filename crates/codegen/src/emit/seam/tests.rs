@@ -198,3 +198,116 @@ fn n_a_supplied_member_has_no_backward_conversion() {
         .expect_err("forward only");
     assert!(errors[0].contains("forward only"), "{errors:?}");
 }
+
+// ── the member census ─────────────────────────────────────────────────────────────────────────
+
+mod census {
+    use super::super::census;
+    use super::facts;
+
+    const NESTED: &str = "struct Op\n  bucket: String\n  body: Option<StreamingBlob>\n  cache: opaque\n  config: Option<struct Config>\n  tags: Option<Vec<struct Tag>>\n  ids: Vec<String>\n  meta: Option<Map<String, String>>\nstruct Config\n  rule: struct Rule\nstruct Rule\n  id: Option<String>\nstruct Tag\n  key: String\n  value: String\n";
+
+    #[test]
+    fn paths_expand_nested_structures_and_list_elements() {
+        let facts = facts(NESTED);
+        let mut out = Vec::new();
+        census::paths(&facts, "Op", "", 0, &mut out).expect("paths");
+        assert_eq!(out, ["bucket", "config.rule.id", "tags[].key", "tags[].value", "ids[]", "meta"]);
+    }
+
+    #[test]
+    fn n_a_stream_and_a_runtime_member_are_never_compared_or_counted() {
+        let facts = facts(NESTED);
+        let text = census::module(&facts, "Op").expect("module");
+        assert!(!text.contains("body"), "{text}");
+        assert!(!text.contains("cache"), "{text}");
+    }
+
+    #[test]
+    fn differences_recurse_into_structures_and_compare_lists_element_by_element() {
+        let facts = facts(NESTED);
+        let text = census::module(&facts, "Op").expect("module");
+        assert!(text.contains("if left.bucket != right.bucket {"), "{text}");
+        assert!(
+            text.contains("(Some(l), Some(r)) => super::config::differences(&format!(\"{prefix}config.\"), l, r, out),"),
+            "{text}"
+        );
+        assert!(
+            text.contains("(Some(l), Some(r)) => super::list(prefix, \"tags\", l, r, out, super::tag::differences),"),
+            "{text}"
+        );
+        assert!(text.contains("if left.ids != right.ids {"), "{text}");
+        let config = census::module(&facts, "Config").expect("module");
+        assert!(
+            config.contains("super::rule::differences(&format!(\"{prefix}rule.\"), &left.rule, &right.rule, out);"),
+            "{config}"
+        );
+    }
+
+    #[test]
+    fn present_counts_a_required_member_always_and_an_optional_one_when_set() {
+        let facts = facts(NESTED);
+        let text = census::module(&facts, "Op").expect("module");
+        assert!(text.contains("    out.push(format!(\"{prefix}bucket\"));"), "{text}");
+        assert!(
+            text.contains("if !value.ids.is_empty() { out.push(format!(\"{prefix}ids[]\")); }"),
+            "{text}"
+        );
+        assert!(
+            text.contains("if value.meta.as_ref().is_some_and(|held| !held.is_empty()) { out.push(format!(\"{prefix}meta\")); }"),
+            "{text}"
+        );
+        let rule = census::module(&facts, "Rule").expect("module");
+        assert!(rule.contains("if value.id.is_some() { out.push(format!(\"{prefix}id\")); }"), "{rule}");
+    }
+
+    #[test]
+    fn n_a_member_naming_an_undeclared_structure_is_refused_by_name() {
+        let facts = facts("struct Op\n  config: Option<struct Missing>\n");
+        let error = census::reachable(&facts, &["Op".to_owned()]).expect_err("undeclared");
+        assert!(error.contains("`Missing`"), "{error}");
+        let mut out = Vec::new();
+        let error = census::paths(&facts, "Op", "", 0, &mut out).expect_err("undeclared");
+        assert!(error.contains("`Missing`"), "{error}");
+    }
+
+    #[test]
+    fn n_a_root_the_fact_table_lacks_is_refused() {
+        let facts = facts(NESTED);
+        let error = census::reachable(&facts, &["Nope".to_owned()]).expect_err("no root");
+        assert!(error.contains("`Nope`"), "{error}");
+    }
+
+    #[test]
+    fn n_a_cyclic_structure_is_refused_rather_than_expanded_forever() {
+        let facts = facts("struct A\n  b: Option<struct B>\nstruct B\n  a: Option<struct A>\n");
+        let mut out = Vec::new();
+        let error = census::paths(&facts, "A", "", 0, &mut out).expect_err("cycle");
+        assert!(error.contains("nests deeper"), "{error}");
+    }
+
+    #[test]
+    fn n_reachability_takes_exactly_the_nested_structures_and_no_unrelated_one() {
+        let facts = facts(&format!("{NESTED}struct Unrelated\n  id: String\n"));
+        let reached = census::reachable(&facts, &["Op".to_owned()]).expect("reachable");
+        assert_eq!(reached.into_iter().collect::<Vec<_>>(), ["Config", "Op", "Rule", "Tag"]);
+    }
+
+    #[test]
+    fn the_checked_in_facts_census_every_covered_operation() {
+        let facts = crate::emit::seam::facts::S3sFacts::parse(crate::emit::seam::FACTS).expect("facts");
+        let files =
+            census::emit(&facts, crate::emit::seam::overrides::OPERATIONS, std::path::Path::new("census")).expect("census");
+        for operation in crate::emit::seam::overrides::OPERATIONS {
+            for side in ["Input", "Output"] {
+                let module = format!("census/{}.rs", crate::emit::dto::naming::module_name(&format!("{operation}{side}")));
+                assert!(files.iter().any(|(path, _)| path.to_string_lossy() == module), "{module}");
+            }
+        }
+        let delete = files
+            .iter()
+            .find(|(path, _)| path.to_string_lossy() == "census/delete_objects_input.rs")
+            .expect("DeleteObjectsInput");
+        assert!(delete.1.contains("\"delete.objects[].key\","), "{}", delete.1);
+    }
+}

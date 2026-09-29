@@ -90,6 +90,8 @@ pub mod s3s_0_17_0 {
     /// (rustfs/gateway#967).
     pub use super::seam_generated_0_17_0 as generated;
     #[cfg(test)]
+    mod census_tests;
+    #[cfg(test)]
     mod generated_tests;
     pub mod get_bucket_location;
     pub mod leaf;
