@@ -671,6 +671,8 @@ pub(super) fn requests() -> Vec<RequestRow> {
         row("delete-x-id-mismatch", RawRequest::delete("/bkt/k?x-id=DeleteObjects"), &["kd-decode-0062", "kd-decode-0063"]),
         row("put-signed-unsigned-trailer", signed_unsigned_trailer("/bkt/k"), &["kd-decode-0075", "kd-decode-0076"]),
         row("part-signed-unsigned-trailer", signed_unsigned_trailer("/bkt/k?partNumber=1&uploadId=u"), &["kd-decode-0077"]),
+        row("put-anonymous-unsigned-trailer", unsigned_trailer("/bkt/k"), &["kd-decode-0075", "kd-decode-0076", "kd-decode-0078", "kd-decode-0079"]),
+        row("put-anonymous-chunk-signed", anonymous_chunk_signed("/bkt/k"), &["kd-decode-0080"]),
         row("get-unc-shaped-key", RawRequest::get("/bkt///server/share"), &["kd-decode-0072"]),
         row(
             "copy-unquoted-if-match",
@@ -754,8 +756,8 @@ pub(super) fn requests() -> Vec<RequestRow> {
 }
 
 /// A signed `STREAMING-UNSIGNED-PAYLOAD-TRAILER` upload, framed as an SDK frames it: the only
-/// admission under which either stack decodes aws-chunked framing. Unsigned, both would read the
-/// framed bytes as the payload.
+/// admission under which the legacy stack decodes aws-chunked framing; the gateway decodes it
+/// either way (rustfs/gateway#1060).
 fn signed_unsigned_trailer(target: &str) -> RawRequest {
     let body: &[u8] = b"5\r\nhello\r\n0\r\nx-amz-checksum-crc32:NhCmhg==\r\n\r\n";
     let request = RawRequest::put(target, body)
@@ -765,4 +767,25 @@ fn signed_unsigned_trailer(target: &str) -> RawRequest {
         .header("x-amz-decoded-content-length", "5");
     // A signing failure leaves the row unsigned, and the matrix then fails on its differences.
     crate::sign::signed(&request).unwrap_or(request)
+}
+
+/// The same upload sent anonymously, as a public-write bucket receives it (rustfs/gateway#1060).
+fn unsigned_trailer(target: &str) -> RawRequest {
+    let body: &[u8] = b"5\r\nhello\r\n0\r\nx-amz-checksum-crc32:NhCmhg==\r\n\r\n";
+    RawRequest::put(target, body)
+        .header("content-encoding", "aws-chunked")
+        .header("x-amz-content-sha256", "STREAMING-UNSIGNED-PAYLOAD-TRAILER")
+        .header("x-amz-trailer", "x-amz-checksum-crc32")
+        .header("x-amz-decoded-content-length", "5")
+}
+
+/// An anonymous upload that claims chunk signatures it cannot carry: with no request signature
+/// there is no seed to verify them against (rustfs/gateway#1060).
+fn anonymous_chunk_signed(target: &str) -> RawRequest {
+    let zero = "0".repeat(64);
+    let body = format!("5;chunk-signature={zero}\r\nhello\r\n0;chunk-signature={zero}\r\n\r\n");
+    RawRequest::put(target, body.as_bytes())
+        .header("content-encoding", "aws-chunked")
+        .header("x-amz-content-sha256", "STREAMING-AWS4-HMAC-SHA256-PAYLOAD")
+        .header("x-amz-decoded-content-length", "5")
 }

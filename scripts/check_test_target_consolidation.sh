@@ -656,6 +656,7 @@ if (
 
 gateway_modules = (
     "action_rules_runtime",
+    "anonymous_chunked_upload",
     "anonymous_delegation_runtime",
     "assembly",
     "assembly_order",

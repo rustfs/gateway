@@ -58,6 +58,41 @@ pub(crate) fn payload_mode(headers: &HeaderMap, location: SigLocation) -> Result
     })
 }
 
+/// The framing an anonymous request's own head declares (rustfs/gateway#1060).
+///
+/// `STREAMING-UNSIGNED-PAYLOAD-TRAILER` needs no signature to decode, so an anonymous request that
+/// declares it is decoded exactly as a signed one is; handing it through would store the framing
+/// as object data. A chunk-signed streaming mode cannot be verified without a signature and is
+/// refused. Any other declaration leaves the body plain, as before: an anonymous request's digest
+/// is not an obligation this assembly takes on.
+///
+/// With `decode` off (the RustFS profile) every anonymous body stays undecoded, as before
+/// rustfs/gateway#1060.
+pub(crate) fn anonymous_framing(headers: &HeaderMap, decode: bool) -> Result<Option<PayloadMode>, S3Error> {
+    // Legacy-compat (rustfs/backlog#2684): legacy RustFS never decodes an anonymous aws-chunked
+    // body; it sizes the object by x-amz-decoded-content-length and refuses the surplus framing
+    // bytes (400 UnexpectedContent, 500 for a streamed body), so a valid anonymous
+    // STREAMING-UNSIGNED-PAYLOAD-TRAILER upload that AWS accepts is refused. The RustFS profile
+    // keeps that until the maintainer lifts it; the intended behaviour is the decode below.
+    if !decode {
+        return Ok(None);
+    }
+    let declares_streaming = headers
+        .get("x-amz-content-sha256")
+        .is_some_and(|value| value.as_bytes().starts_with(b"STREAMING-"));
+    if !declares_streaming {
+        return Ok(None);
+    }
+    match payload_mode(headers, SigLocation::Header)? {
+        mode @ PayloadMode::StreamingUnsigned { .. } => Ok(Some(mode)),
+        PayloadMode::StreamingSigned { .. } => Err(ordinary_refusal(
+            ErrorCode::INVALID_REQUEST,
+            "a chunk-signed streaming payload needs a signed request",
+        )),
+        _ => Ok(None),
+    }
+}
+
 /// The body-integrity work a signed payload declaration leaves for the body reader.
 ///
 /// An exact digest is an obligation wherever the signature travels: the signature covers

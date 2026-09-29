@@ -18,9 +18,8 @@
 //! `Authorization` header, at the moment of the replay, under the payload mode its own
 //! `x-amz-content-sha256` names. A signed request takes the same admission path on both stacks as
 //! the client's request did on the recorded server; sent unsigned it takes the anonymous path,
-//! where the gateway decodes no aws-chunked framing (an anonymous request has no payload mode), so
-//! a recording of a signed `STREAMING-UNSIGNED-PAYLOAD-TRAILER` upload reached the gateway's
-//! handler still framed.
+//! where the legacy stack decodes no aws-chunked framing, so a recording of a signed
+//! `STREAMING-UNSIGNED-PAYLOAD-TRAILER` upload reached the legacy handler still framed.
 //! NOT responsible for: chunk signatures (`STREAMING-AWS4-HMAC-SHA256-*`), which would need the
 //! body re-framed; those recordings stay skipped. Nor for deciding which requests to re-sign
 //! (`corpus.rs`).

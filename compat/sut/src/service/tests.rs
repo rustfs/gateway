@@ -684,6 +684,9 @@ mod sigv2_presigned_tests;
 /// Bucket-policy conditions on the request's encryption header (rustfs/gateway#979).
 mod sse_condition_tests;
 
+/// An anonymous aws-chunked upload left undecoded, as legacy RustFS leaves it (rustfs/gateway#1060).
+mod anonymous_chunked_tests;
+
 /// The gateway's CORS answers over the backend's stored documents (rustfs/gateway#1004).
 mod cors_tests;
 

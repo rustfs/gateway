@@ -150,6 +150,9 @@ pub(crate) fn build_service(
             // RustFS lowers an oversized `max-keys` to a thousand on every listing rather than
             // refusing it; Hadoop S3A pages at 5000 (rustfs/backlog#1677).
             .clamp_oversized_max_keys()
+            // RustFS refuses an anonymous aws-chunked upload rather than decoding it (#1060), so
+            // nothing reaches storage through the launcher that RustFS would not write.
+            .leave_anonymous_streaming_payloads_undecoded()
             // The backend's stored CORS documents feed the gateway's CORS answers, as RustFS's do
             // behind the gateway; no cache lifetime, so a suite sees a `PutBucketCors` at once.
             .cors_source(Arc::clone(backend))
