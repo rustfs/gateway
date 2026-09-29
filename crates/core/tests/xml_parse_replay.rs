@@ -152,6 +152,16 @@ fn an_element_name_outside_the_name_production_is_refused() {
     assert_eq!(refusal("element-name-not-an-xml-name"), XmlError::InvalidName);
 }
 
+/// The fuzz findings of rustfs/gateway#1077: a prefixed element name whose local part starts with a
+/// digit — `<a:2 …/>` from the first nightly, and `<…66.66:66666666666666389 …>` from the post-merge
+/// dispatch. Each part of a qualified name is a `Name` on its own, so both are refused as names
+/// rather than read as an element whose canonical spelling (`<2 …>`) this reader then refuses.
+#[test]
+fn a_prefixed_element_name_whose_local_part_is_not_a_name_is_refused() {
+    assert_eq!(refusal("qualified-name-digit-local-part"), XmlError::InvalidName);
+    assert_eq!(refusal("qualified-name-long-digit-local-part"), XmlError::InvalidName);
+}
+
 // ---------------------------------------------------------------------------------------------
 // Each ceiling, at its boundary and one past it.
 // ---------------------------------------------------------------------------------------------
