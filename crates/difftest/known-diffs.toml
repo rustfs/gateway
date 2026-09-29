@@ -239,6 +239,16 @@ s3s = "handled"
 reason = "A part number outside 1..=10000 is refused by the gateway codec; s3s hands it to RustFS, which refuses it with the same code (https://github.com/rustfs/rustfs/blob/719000460b231792b52314df321f0d385d03dff4/rustfs/src/storage/s3_api/multipart.rs#L122)."
 expires = "2026-12-31"
 
+[[diff]]
+id = "kd-decode-0081"
+kind = "decode"
+operation = "GetObject"
+item = "outcome"
+gateway = "400 InvalidArgument: the name contains a NUL byte"
+s3s = "handled"
+reason = "A NUL in a path key is refused by the gateway before the handler, under the default key floor and under the RustFS profile's legacy key floor alike (rustfs/gateway#1107): an ObjectKey cannot hold one. The legacy stack hands it to its handler, and legacy RustFS's storage refuses it with the same 400 InvalidArgument after authorization (measured on a legacy build, PUT and GET /b/a%00b), so only the stage of the refusal differs."
+expires = "2027-03-31"
+
 # ── Decode: refusal wording ──────────────────────────────────────────────────────────────────
 #
 # Both stacks refuse with the same status and code; the gateway writes a fixed sentence and s3s
@@ -316,6 +326,17 @@ gateway = "This operation is defined by S3 but is not handled by this backend."
 s3s = "* is not implemented yet"
 reason = "A harness fact, not a stack difference: the diff registers handlers only for the operations it compares member by member, so both stacks answer any other operation with their own not-implemented sentence. Its route is still compared."
 expires = "2026-12-31"
+
+[[diff]]
+id = "kd-decode-0082"
+kind = "decode"
+operation = "GetObject"
+item = "error.message"
+gateway = "the name is longer than the maximum length in bytes"
+s3s = "Your key is too long."
+reason = "Both refuse a path key over 1024 bytes before authentication with 400 KeyTooLongError; the gateway's fixed sentence names the rule, the legacy stack answers with its own."
+expires = "2027-03-31"
+ruling = "rd-err-0009"
 
 # ── Decode: the SDK algorithm header without the checksum it names ──────────────────────────
 

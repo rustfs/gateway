@@ -108,8 +108,9 @@ the value the storage layer used, and the difference between the two was the vul
 through `ObjectKey::materialize`, `ObjectKey::materialize_decoded` and `BucketName::materialize`.
 For a path label, that one place decodes percent-encoding exactly once and applies the deployment's
 `SlashPolicy`. For a body element or query value that its own reader has already decoded, it keeps
-the literal key and does neither operation again. Every entry runs a safety floor no configuration
-can lower and only then consult the deployment's `NameValidator`. The value produced is the value
+the literal key and does neither operation again. Every entry runs a safety floor no validator can
+lower (one named switch, below, replaces it in front of RustFS) and only then consult the
+deployment's `NameValidator`. The value produced is the value
 the authorizer is shown, the value the codec puts into the operation input, and the value the
 backend receives. Nothing downstream is handed the request path to parse again.
 `scripts/check_single_normalization.sh` fails the build if a second normalisation, a second percent
@@ -122,6 +123,17 @@ one decode. For a bucket label: anything outside 3..=63 bytes, a separator, a NU
 byte, or a `%`. `NameValidator` returns `Stricter`, which has no `Allow` variant — the framework
 ANDs its answer with the floor's, so a deployment can narrow the rules and has no way to widen
 past the floor.
+
+**One named exception.** A deployment in front of RustFS may replace the key floor with legacy
+RustFS's rule, `ServiceBuilder::accept_legacy_rustfs_object_keys_after_listing_in_the_posture_report`
+(`KeyFloor::RustfsLegacy`, rustfs/gateway#1107): a key is then refused only when it is empty, longer
+than 1024 bytes or holds a NUL, and every other key — a traversal, a control character, a UNC or
+drive-letter shape, a literal encoded separator — reaches the backend, request path, copy source and
+request body alike, exactly as RustFS's own protocol front hands it to RustFS's storage today. That
+storage validates every key itself, after authorization. The switch is safe only in front of such a
+backend: behind one that maps a key onto a path without its own containment check it reopens the
+traversal the floor exists to close. The start-up `NAMING_POSTURE` line reports it as
+`key_floor=rustfs-legacy key_floor_lowered=true`, and the bucket floor does not move.
 
 **What is still yours.** The framework's promise stops at handing you a validated `ObjectKey`. It
 does not map that key onto a physical location, and it cannot: only you know what the root is. You

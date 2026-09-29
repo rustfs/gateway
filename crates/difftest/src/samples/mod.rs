@@ -29,6 +29,8 @@ mod rustfs;
 
 pub use outputs::{OutputRow, UPLOAD_ID, VERSION_ID};
 pub use requests::RequestRow;
+#[cfg(test)]
+pub(crate) use rustfs::{KEY_SHAPES, key_operations};
 
 use crate::RawRequest;
 

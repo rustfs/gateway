@@ -475,6 +475,17 @@ impl Differ {
         Self::with_profiles(profile, profile)
     }
 
+    /// The RustFS pairing with the gateway's key floor left at its default: the negative control
+    /// for the legacy key floor.
+    #[cfg(test)]
+    pub(crate) fn with_rustfs_slash_rule_only() -> Result<Self, String> {
+        Ok(Self {
+            gateway: GatewayStack::with_rustfs_slash_rule_only()?,
+            oracle: OracleStack::with_profile(Profile::Rustfs),
+            fault: Fault::None,
+        })
+    }
+
     /// Builds the gateway side for one profile and the legacy side for another: the negative
     /// controls use it to show that a gateway without the RustFS profile's switches is caught
     /// against the legacy stack as RustFS configures it.

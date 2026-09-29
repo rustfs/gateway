@@ -150,6 +150,8 @@ mod request_context_runtime;
 mod response_invariants;
 #[path = "response_stream_termination.rs"]
 mod response_stream_termination;
+#[path = "rustfs_key_floor.rs"]
+mod rustfs_key_floor;
 #[path = "select_frame_records.rs"]
 mod select_frame_records;
 #[path = "select_restore_intent.rs"]

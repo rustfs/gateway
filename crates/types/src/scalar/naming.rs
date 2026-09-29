@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The one place a client-supplied name is normalised, and the floor no deployment can lower.
+//! The one place a client-supplied name is normalised, and the floor no validator can lower.
 //!
 //! Responsible for: the single decode, the [`SlashPolicy`] decision, the unconditional safety
 //! floor for keys and bucket labels, and the [`NameValidator`] extension point whose answer can
@@ -47,6 +47,11 @@
 //! The floor runs **before** the validator and its verdict is AND-ed with the validator's, so a
 //! deployment that installs a permissive validator widens the bucket naming rules and nothing
 //! else. That is why [`Stricter`] has no `Allow` variant: the type says what the pipeline does.
+//!
+//! One switch, and not a validator, replaces the key floor: [`KeyFloor::RustfsLegacy`], legacy
+//! RustFS's rule, for a deployment in front of RustFS, whose storage validates every key itself
+//! (rustfs/gateway#1107). It is named for what it does, set only through
+//! [`NamePolicy::with_legacy_rustfs_key_floor`], and reported by the start-up posture.
 
 use std::sync::Arc;
 
@@ -54,6 +59,9 @@ use percent_encoding::percent_decode_str;
 use unicode_normalization::UnicodeNormalization as _;
 
 use super::error_code::ErrorCode;
+pub use super::key_floor::KeyFloor;
+use super::key_floor::legacy_rustfs_key_floor;
+use super::slash::{collapse_slashes, fold_rooted_slashes};
 
 /// Bucket name length bounds, in bytes.
 pub(crate) const MIN_BUCKET_BYTES: usize = 3;
@@ -383,21 +391,47 @@ impl NameValidator for PermissiveNameValidator {
     }
 }
 
-/// The slash policy and the validator, together: everything the single normalisation point needs.
+/// The slash policy, the key floor and the validator, together: everything the single
+/// normalisation point needs.
 ///
-/// Cloning is one enum copy and one refcount bump, which is what lets the request path hold it by
-/// value without the service becoming generic over the validator.
+/// Cloning is two enum copies and one refcount bump, which is what lets the request path hold it
+/// by value without the service becoming generic over the validator.
 #[derive(Clone)]
 pub struct NamePolicy {
     slash: SlashPolicy,
+    key_floor: KeyFloor,
     validator: Arc<dyn NameValidator>,
 }
 
 impl NamePolicy {
-    /// A policy over an explicit slash rule and validator.
+    /// A policy over an explicit slash rule and validator, under the unconditional key floor.
     #[must_use]
     pub fn new(slash: SlashPolicy, validator: Arc<dyn NameValidator>) -> Self {
-        Self { slash, validator }
+        Self {
+            slash,
+            key_floor: KeyFloor::Unconditional,
+            validator,
+        }
+    }
+
+    /// The same policy with legacy RustFS's key rule in place of the unconditional key floor
+    /// ([`KeyFloor::RustfsLegacy`]).
+    ///
+    /// **Security-relevant.** A traversal, a control character, a UNC or drive-letter shape and a
+    /// literal encoded separator all reach the backend. Only a backend that validates every key
+    /// itself, as RustFS's storage layer does, may be put behind it.
+    #[must_use]
+    pub fn with_legacy_rustfs_key_floor(self) -> Self {
+        Self {
+            key_floor: KeyFloor::RustfsLegacy,
+            ..self
+        }
+    }
+
+    /// The key floor in force.
+    #[must_use]
+    pub fn key_floor(&self) -> KeyFloor {
+        self.key_floor
     }
 
     /// The same policy with a different slash rule.
@@ -439,7 +473,11 @@ impl Default for NamePolicy {
             DefaultValidatorPolicy::Aws => Arc::new(AwsNameValidator),
             DefaultValidatorPolicy::Permissive => Arc::new(PermissiveNameValidator),
         };
-        Self { slash, validator }
+        Self {
+            slash,
+            key_floor: KeyFloor::Unconditional,
+            validator,
+        }
     }
 }
 
@@ -447,6 +485,7 @@ impl std::fmt::Debug for NamePolicy {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("NamePolicy")
             .field("slash", &self.slash)
+            .field("key_floor", &self.key_floor)
             .finish_non_exhaustive()
     }
 }
@@ -494,63 +533,6 @@ fn has_encoded_separator(decoded: &str) -> bool {
     }
     let lower = decoded.to_ascii_lowercase();
     lower.contains("%2f") || lower.contains("%5c") || lower.contains("%2e%2e")
-}
-
-/// Folds runs of slashes and drops a leading one. Linear in the length of the input.
-fn collapse_slashes(value: &str) -> String {
-    let mut out = String::with_capacity(value.len());
-    let mut previous_was_slash = false;
-    for ch in value.chars() {
-        if ch == '/' {
-            if !previous_was_slash {
-                out.push(ch);
-            }
-            previous_was_slash = true;
-        } else {
-            out.push(ch);
-            previous_was_slash = false;
-        }
-    }
-    match out.strip_prefix('/') {
-        Some(rest) => rest.to_owned(),
-        None => out,
-    }
-}
-
-/// [`SlashPolicy::RustfsLegacy`]: folds a key that starts with `/` and leaves every other key as
-/// sent. Linear in the length of the input.
-///
-/// Legacy-compat (rustfs/backlog#2684): legacy RustFS folds the slashes of a key only when the
-/// key starts with one, so `PUT /bucket//a//b` stores `a/b` while `PUT /bucket/a//b` hands `a//b`
-/// to storage unchanged; whether a run of slashes is data depends on where in the key it sits,
-/// and the spelling a client sent is not the object it names. Kept so every key a RustFS client
-/// stored stays reachable under the spelling it used. The intended future behaviour is
-/// [`SlashPolicy::AwsPreserve`], which needs the objects stored under a folded spelling migrated
-/// first.
-fn fold_rooted_slashes(value: String) -> String {
-    if !value.starts_with('/') {
-        return value;
-    }
-    let mut folded = String::with_capacity(value.len());
-    // A separator is written only once the next segment starts, so leading slashes and runs
-    // between segments each leave at most one behind.
-    let mut separator_pending = false;
-    for ch in value.chars() {
-        if ch == '/' {
-            separator_pending = !folded.is_empty();
-        } else {
-            if separator_pending {
-                folded.push('/');
-                separator_pending = false;
-            }
-            folded.push(ch);
-        }
-    }
-    // A key of slashes only keeps one, and a key that ended in a run of slashes keeps one of them.
-    if folded.is_empty() || separator_pending {
-        folded.push('/');
-    }
-    folded
 }
 
 /// The unconditional safety floor for an object key, applied to an already-decoded value.
@@ -718,7 +700,8 @@ fn is_ipv4_shaped(name: &str) -> bool {
 /// of this module.
 pub(crate) fn normalize_key(encoded: &str, policy: &NamePolicy) -> Result<String, NameRejection> {
     let decoded = decode_once(encoded)?;
-    if has_encoded_separator(&decoded) {
+    // The RustFS key floor keeps a literal escape as key text: `KeyFloor::refuses_residual_escapes`.
+    if policy.key_floor().refuses_residual_escapes() && has_encoded_separator(&decoded) {
         return Err(NameRejection::EncodedSeparator);
     }
     let slashes = match policy.slash_policy() {
@@ -774,7 +757,10 @@ pub(crate) fn check_bucket(name: &str, policy: &NamePolicy) -> Result<(), NameRe
 fn check_key_policy(key: &str, policy: &NamePolicy) -> Result<(), NameRejection> {
     match VALIDATOR_AUTHORITY {
         ValidatorAuthorityPolicy::NarrowOnlyAfterFloor => {
-            floor_check_key(key)?;
+            match policy.key_floor() {
+                KeyFloor::Unconditional => floor_check_key(key)?,
+                KeyFloor::RustfsLegacy => legacy_rustfs_key_floor(key)?,
+            }
             policy.validator().check_key(key).into_result()
         }
         ValidatorAuthorityPolicy::CustomMayBypassFloor => policy.validator().check_key(key).into_result(),

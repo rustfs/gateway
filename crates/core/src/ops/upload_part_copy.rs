@@ -80,6 +80,13 @@ impl Operation for UploadPartCopy {
         CopySourceResources::parse(&input.copy_source)
     }
 
+    fn derive_resources_under(
+        input: &Self::Input,
+        names: &rustfs_gateway_types::NamePolicy,
+    ) -> Result<Self::DerivedResources, crate::authz::DerivedResourceError> {
+        CopySourceResources::parse_under(&input.copy_source, names)
+    }
+
     fn seal_derived_input(input: &mut Self::Input) {
         input.copy_source.clear();
     }

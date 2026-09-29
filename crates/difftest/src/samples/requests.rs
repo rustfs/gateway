@@ -354,6 +354,8 @@ pub(super) fn requests() -> Vec<RequestRow> {
         row("get-bad-expires", RawRequest::get("/bkt/k?response-expires=notadate"), &["kd-decode-0023"]),
         row("get-sse-plaintext", sse(RawRequest::get("/bkt/k")).plaintext(), &["kd-decode-0016"]),
         row("get-dotdot-key", RawRequest::get("/bkt/a/../b"), &["kd-decode-0015"]),
+        row("get-nul-key", RawRequest::get("/bkt/a%00b"), &["kd-decode-0081"]),
+        row("get-overlong-key", RawRequest::get(&format!("/bkt/{}", "k".repeat(1025))), &["kd-decode-0082"]),
         row("get-bad-bucket", RawRequest::get("/Bad_Bucket/k"), &["kd-decode-0024"]),
         row("get-short-bucket", RawRequest::get("/ab/k"), &["kd-decode-0024"]),
         row("head-full", head_full(), &[]),

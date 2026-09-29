@@ -5908,9 +5908,9 @@ from pathlib import Path
 
 path = Path("scripts/allowances/as-any-allowances.txt")
 text = path.read_text()
-if "codecs.rs:217" not in text:
+if "codecs.rs:218" not in text:
     raise SystemExit("expected allowlist entry is missing")
-path.write_text(text.replace("codecs.rs:217", "codecs.rs:218", 1))
+path.write_text(text.replace("codecs.rs:218", "codecs.rs:219", 1))
 PYEOF
 }
 expect_fail check_no_as_any.sh \

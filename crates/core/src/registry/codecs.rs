@@ -50,7 +50,7 @@
 use std::fmt;
 use std::sync::Arc;
 
-use crate::authz::{Decoded, authorize_input, prepare_input};
+use crate::authz::{Decoded, authorize_input, prepare_input_under};
 use crate::codec::{CodecError, EncodedResponse, MetaView, OperationCodec, RequestBody, RequestBodyMode};
 use crate::handler::Resp;
 use crate::registry::handlers::{ErasedRequest, ErasedResponse};
@@ -209,7 +209,8 @@ impl fmt::Debug for ErasedCodec {
 pub(crate) fn erase<O: OperationCodec>() -> ErasedCodec {
     let decode: ErasedDecode = Arc::new(|request: &MetaView<'_>, body: RequestBody| {
         let input = O::decode(request, body)?;
-        let decoded = prepare_input::<O>(input).map_err(|error| CodecError::new(error.code().clone(), error.message()))?;
+        let decoded = prepare_input_under::<O>(input, request.names())
+            .map_err(|error| CodecError::new(error.code().clone(), error.message()))?;
         Ok(Box::new(decoded) as ErasedDecoded)
     });
     let resources: ErasedResources = Arc::new(|decoded: &ErasedDecoded| {

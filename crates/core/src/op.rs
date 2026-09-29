@@ -333,6 +333,22 @@ pub trait Operation: Send + Sync + 'static {
     /// Extracts every resource that requires the second authorization stage.
     fn derive_resources(input: &Self::Input) -> Result<Self::DerivedResources, DerivedResourceError>;
 
+    /// Extracts every derived resource under the naming policy the request's own names were
+    /// materialised under.
+    ///
+    /// The default ignores the policy and is [`Operation::derive_resources`]. An operation whose
+    /// derived resource names an object key — a copy source — overrides it, so that key is held
+    /// to the key floor the request path is held to (rustfs/gateway#1107): a deployment that
+    /// admits a key in the path must admit the same key as a copy source, and one that refuses it
+    /// must refuse it there too.
+    fn derive_resources_under(
+        input: &Self::Input,
+        names: &rustfs_gateway_types::NamePolicy,
+    ) -> Result<Self::DerivedResources, DerivedResourceError> {
+        let _ = names;
+        Self::derive_resources(input)
+    }
+
     /// Removes any raw representation whose normalized resource now lives in
     /// [`Self::DerivedResources`].
     ///
