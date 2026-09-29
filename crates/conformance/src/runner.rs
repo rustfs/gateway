@@ -41,9 +41,11 @@ use crate::sut::{ExchangePlan, Profile, Sut, SutError, Transport};
 use crate::value::Value;
 
 mod deadline;
+mod reference;
 #[cfg(test)]
 use deadline::valid_expiry;
 use deadline::{case_deadline, expiry_error, timeout_verdict};
+pub use reference::reference_report;
 
 /// How a run is configured.
 #[derive(Debug, Clone)]

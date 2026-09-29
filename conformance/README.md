@@ -494,10 +494,13 @@ nothing at all, and the file was a list of excuses wearing the shape of a table 
 It also left the hole rustfs/gateway#203 and #214 both fell into — a domain that stops executing
 turns into skips, and skips were free.
 
-The in-process target that the gate runs cannot execute an authored HTTP/2 frame script and refuses
-it by name. Recorded as `skipped`, every such row would be a ratchet that cannot fail, so the gate
-re-runs exactly those refused cases on the production Hyper driver, the transport `conformance
-baseline` itself uses, and their rows are measured verdicts.
+The file records one reference evaluation, and `conformance baseline` and the gate compute it the
+same way (`runner::reference_report`, rustfs/gateway#985): the corpus runs in process, then every
+case that target cannot judge runs again on the production Hyper driver, whose verdict is recorded.
+"Cannot judge" means refused while executing for want of a socket (authored HTTP/2 frames, raw
+heads, `[connection.tls]`, ...) or failed only on `expect.connection_after`, which the in-process
+target reports as `open` by construction. `a_refreshed_baseline_is_what_the_gate_holds` proves a
+refresh is exactly the committed file.
 
 Refreshing it:
 

@@ -11,7 +11,7 @@ ADRs; this map only selects files.
 | `src/schema.rs`, `src/schema/computed_md5_tests.rs`, `src/schema/h2_reset_tests.rs`, `src/schema/h2_goaway_tests.rs`, `src/schema/h2_ping_tests.rs` | Frozen schema validation and digest/control-frame version boundaries. | A TOML shape is accepted or rejected incorrectly. |
 | `src/toml.rs` | Minimal TOML value parser used by the corpus. | Syntax parsing fails before schema validation. |
 | `src/runner.rs` | Case/exchange execution order and timeout coordination. | A case runs in the wrong order or never reaches a verdict. |
-| `src/runner/deadline.rs` | Case clock and per-exchange expiry receipt validation. | A claimed timeout lacks a measured boundary. |
+| `src/runner/deadline.rs`, `src/runner/reference.rs` | Case clock and expiry receipts; the reference evaluation the baseline records. | A claimed timeout lacks a measured boundary, or a refresh and the gate disagree. |
 | `src/runner/h2_receipt_tests.rs` | Serial and concurrent scripted HTTP/2 receipt controls. | A synthetic outcome bypasses clock validation. |
 | `src/runner/budget_tests.rs` | The `case.timeout_ms` verdict: the target is charged, the harness's own waiting is not. | A timeout is judged on the wrong share of the wall time. |
 | `src/runner/http_version_tests.rs` | Declared HTTP-version applicability and retained transport refusals. | A version gate skips runnable HTTP/2 or claims unsupported coverage. |
@@ -41,7 +41,7 @@ ADRs; this map only selects files.
 | `src/cli/parity/selection_tests.rs` | Independent selection and capability metadata controls. | Checking filtering, sharding, applicability and census integrity. |
 | `src/cli/parity/integration_tests.rs` | Parent orchestration controls with explicit child-process reports. | Checking independent census and exit validation across the CLI boundary. |
 | `src/cli/usage.rs` | The usage text: every command, option, and exit code as the reader sees them. | An option is added, renamed, or its wording changes. |
-| `src/cli/shard_tests.rs` | The `--shard` command-line contract: parsing, forwarding to the parity children, the partial-run exit code. | A shard option is parsed, forwarded, or classified wrongly. |
+| `src/cli/shard_tests.rs`, `src/cli/baseline_tests.rs` | The `--shard` command-line contract; `baseline` rendering the reference evaluation. | A shard option is parsed, forwarded, or classified wrongly. |
 | `src/socket.rs` | Real socket transport and connection observations. | A wire-level close/reuse fact is wrong. |
 | `src/socket/connect.rs` | Plain and TLS client connection setup, including absolute setup deadlines. | A TCP connect or TLS handshake escapes the case budget. |
 | `src/socket/response.rs` | Fixed-length and chunked HTTP/1.1 response decoding. | A raw response body is truncated or framed incorrectly. |

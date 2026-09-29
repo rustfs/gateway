@@ -63,6 +63,20 @@ use rustfs_gateway_conformance::inprocess::InProcess;
 use rustfs_gateway_conformance::report::{Baseline, Report, Verdict};
 use rustfs_gateway_conformance::runner::{self, RunOptions};
 
+/// The reference evaluation `conformance/baseline.json` records (rustfs/gateway#985): the baseline
+/// is judged against it, while the in-process run above keeps its own skip and verdict ledgers.
+fn reference_run(filter: &str) -> rustfs_gateway_conformance::report::Report {
+    let root = Corpus::discover_root().expect("a corpus sits next to this crate");
+    let corpus = runner::prepare_corpus(&root).expect("the corpus loads");
+    runner::reference_report(
+        &corpus,
+        &RunOptions {
+            filter: Some(filter.to_owned()),
+            ..RunOptions::default()
+        },
+    )
+}
+
 /// The size of the family: the twenty-nine cases landed with the family in rustfs/gateway#24,
 /// plus the body-digest negative that only became expressible once `verify_body_digest` had a
 /// production caller, plus the pair that pins a filter tag key of `..` — the value the family's
@@ -251,8 +265,8 @@ fn the_lifecycle_family_holds_the_verdicts_the_baseline_records() {
     let source = std::fs::read_to_string(root.join("baseline.json")).expect("the baseline is checked in");
     let baseline = Baseline::from_json(&source).expect("the baseline parses");
 
-    let report = run_lifecycle_domain();
-    let regressions: Vec<&str> = report
+    let reference = reference_run("lifecycle/");
+    let regressions: Vec<&str> = reference
         .regressions(Some(&baseline))
         .iter()
         .map(|outcome| outcome.id.as_str())

@@ -196,6 +196,17 @@ pub fn execute(options: &Options, sut: &mut dyn Sut) -> ExitCode {
     execute_prepared(options, sut, &corpus, baseline.as_ref())
 }
 
+/// `baseline` renders the reference evaluation the whole-corpus gate holds, never one transport's
+/// run, so a refresh and the gate cannot disagree (rustfs/gateway#985). An external endpoint is
+/// its own reference.
+fn evaluate(options: &Options, sut: &mut dyn Sut, corpus: &Corpus, run_options: &RunOptions) -> Report {
+    if options.command == Command::Baseline && options.endpoint.is_none() {
+        runner::reference_report(corpus, run_options)
+    } else {
+        runner::run(corpus, sut, run_options)
+    }
+}
+
 fn execute_prepared(options: &Options, sut: &mut dyn Sut, corpus: &Corpus, baseline: Option<&Baseline>) -> ExitCode {
     let run_options = RunOptions {
         filter: options.filter.clone(),
@@ -205,7 +216,7 @@ fn execute_prepared(options: &Options, sut: &mut dyn Sut, corpus: &Corpus, basel
         shard: options.shard,
         validate_only: options.command == Command::Validate,
     };
-    let report = runner::run(corpus, sut, &run_options);
+    let report = evaluate(options, sut, corpus, &run_options);
 
     if options.command == Command::Baseline {
         print!("{}", Baseline::render(&report));
@@ -425,6 +436,9 @@ impl Options {
     }
 }
 
+#[cfg(all(test, feature = "production-transports"))]
+#[path = "cli/baseline_tests.rs"]
+mod baseline_tests;
 #[cfg(test)]
 #[path = "cli/shard_tests.rs"]
 mod shard_tests;

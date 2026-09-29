@@ -28,7 +28,8 @@ commands:
   validate                  load the corpus and check it against the frozen schema and the
                             conventions, without touching a target; every case it accepts is
                             reported `validated`, never `passed`, because nothing was executed
-  baseline                  print a baseline document for the current results
+  baseline                  print the baseline document the whole-corpus gate holds: in
+                            process, with socket-only cases on production Hyper
   audit-keys                run the corpus, then check that every key the frozen schema declares
                             is one this harness actually reads
 

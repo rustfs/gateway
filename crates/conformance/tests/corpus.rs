@@ -37,64 +37,14 @@
 //! already budgeted, so the gate cannot be added to CI and then quietly not required — which is
 //! how `e2e` ended up non-blocking in the repository this suite was written to replace.
 
-use rustfs_gateway_conformance::conn::Conn;
 use rustfs_gateway_conformance::corpus::Corpus;
-use rustfs_gateway_conformance::inprocess::InProcess;
-use rustfs_gateway_conformance::production::ProductionDriver;
-use rustfs_gateway_conformance::report::{Baseline, Report, Verdict};
+use rustfs_gateway_conformance::report::{Baseline, Verdict};
 use rustfs_gateway_conformance::runner::{self, RunOptions};
 use rustfs_gateway_conformance::sut::Unwired;
 
 fn corpus() -> Corpus {
     let root = Corpus::discover_root().expect("a corpus sits next to this crate");
     runner::prepare_corpus(&root).expect("the corpus loads")
-}
-
-/// The in-process facade hands a parsed request to the service, so it refuses every authored
-/// HTTP/2 frame script by name. Left there, each such case would be recorded as `skipped` and its
-/// baseline row could never regress — a ratchet that cannot fail. They are executed instead on the
-/// production Hyper driver, the one transport that runs them, and replace the refused outcome.
-fn execute_h2_scripts_on_production_hyper(corpus: &Corpus, root: std::path::PathBuf, report: &mut Report) {
-    // An authored frame script is refused for its frames, or first for `[connection.tls]`, which only
-    // a frame script may declare and which the production Hyper driver also carries out.
-    const REFUSALS: [&str; 2] = [
-        "`request.h2_frames` needs a transport that writes bytes on a socket",
-        "`[connection.tls]` needs a socket to negotiate on",
-    ];
-    let refused: Vec<String> = report
-        .outcomes
-        .iter()
-        .filter(|outcome| {
-            outcome
-                .skip_reason
-                .as_deref()
-                .is_some_and(|reason| REFUSALS.iter().any(|refusal| reason.contains(refusal)))
-        })
-        .map(|outcome| outcome.id.clone())
-        .collect();
-    assert!(
-        !refused.is_empty(),
-        "no case was refused for authored HTTP/2 frames; if the in-process target now runs them, \
-         remove this rerun rather than let it select nothing"
-    );
-    let mut hyper = Conn::production(root, ProductionDriver::Hyper);
-    for id in refused {
-        let options = RunOptions {
-            filter: Some(id.clone()),
-            ..RunOptions::default()
-        };
-        let rerun = runner::run(corpus, &mut hyper, &options);
-        let [executed] = <[_; 1]>::try_from(rerun.outcomes).unwrap_or_else(|outcomes| {
-            panic!("`{id}` selected {} cases on production Hyper, not exactly itself", outcomes.len())
-        });
-        assert_eq!(executed.id, id, "the rerun selected a different case");
-        let slot = report
-            .outcomes
-            .iter_mut()
-            .find(|outcome| outcome.id == id)
-            .expect("the refused outcome is in the report");
-        *slot = executed;
-    }
 }
 
 fn baseline() -> Baseline {
@@ -160,10 +110,8 @@ fn no_baseline_row_names_a_case_the_corpus_does_not_have() {
 #[test]
 fn the_whole_corpus_holds_the_verdicts_the_baseline_records() {
     let corpus = corpus();
-    let root = Corpus::discover_root().expect("a corpus sits next to this crate");
-    let mut sut = InProcess::new(root.clone());
-    let mut report = runner::run(&corpus, &mut sut, &RunOptions::default());
-    execute_h2_scripts_on_production_hyper(&corpus, root, &mut report);
+    // The same evaluation `conformance baseline` renders the file from (rustfs/gateway#985).
+    let report = runner::reference_report(&corpus, &RunOptions::default());
 
     let executed = report
         .outcomes
@@ -188,6 +136,22 @@ fn the_whole_corpus_holds_the_verdicts_the_baseline_records() {
         "{} case(s) regressed against conformance/baseline.json:\n{}",
         regressions.len(),
         regressions.join("\n")
+    );
+
+    // rustfs/gateway#985: a refresh renders this same evaluation, so refresh-then-gate is green —
+    // judged against its own rendering it has neither a regression nor an improvement — and the
+    // committed file is exactly what a refresh writes today. One evaluation serves both halves.
+    let refreshed = Baseline::from_json(&Baseline::render(&report)).expect("the rendering parses");
+    assert!(report.regressions(Some(&refreshed)).is_empty(), "a refresh regresses against itself");
+    assert!(report.improvements(Some(&refreshed)).is_empty(), "a refresh improves on itself");
+    let differing: std::collections::BTreeSet<&str> = refreshed
+        .ids()
+        .chain(baseline.ids())
+        .filter(|id| refreshed.expected(id) != baseline.expected(id))
+        .collect();
+    assert!(
+        differing.is_empty(),
+        "conformance/baseline.json differs from `conformance baseline` for {differing:?}"
     );
 }
 

@@ -32,6 +32,20 @@ use rustfs_gateway_conformance::inprocess::InProcess;
 use rustfs_gateway_conformance::report::{Baseline, Report, Verdict};
 use rustfs_gateway_conformance::runner::{self, RunOptions};
 
+/// The reference evaluation `conformance/baseline.json` records (rustfs/gateway#985): the baseline
+/// is judged against it, while the in-process run above keeps its own skip and verdict ledgers.
+fn reference_run(filter: &str) -> rustfs_gateway_conformance::report::Report {
+    let root = Corpus::discover_root().expect("a corpus sits next to this crate");
+    let corpus = runner::prepare_corpus(&root).expect("the corpus loads");
+    runner::reference_report(
+        &corpus,
+        &RunOptions {
+            filter: Some(filter.to_owned()),
+            ..RunOptions::default()
+        },
+    )
+}
+
 /// The size of each family. Numbers, not ranges: growing or shrinking a family is a decision
 /// somebody writes down, and this is where they write it.
 const COND_SIZE: usize = 28;
@@ -225,7 +239,8 @@ fn the_range_family_runs_green_with_the_blocked_case_recovered() {
         .collect();
     assert!(skipped.is_empty(), "range case(s) were skipped rather than run: {skipped:?}");
 
-    let regressions: Vec<&str> = report
+    let reference = reference_run("cases/range/");
+    let regressions: Vec<&str> = reference
         .regressions(Some(&baseline))
         .iter()
         .map(|outcome| outcome.id.as_str())
@@ -268,7 +283,8 @@ fn the_conditional_family_runs_green_with_one_case_a_target_cannot_execute() {
         .collect();
     assert_eq!(skipped, ["c-cond-0013"], "the set of conditional cases a target cannot execute changed");
 
-    let regressions: Vec<&str> = report
+    let reference = reference_run("cases/cond/");
+    let regressions: Vec<&str> = reference
         .regressions(Some(&baseline))
         .iter()
         .map(|outcome| outcome.id.as_str())
