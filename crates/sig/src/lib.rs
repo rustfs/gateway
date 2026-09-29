@@ -136,8 +136,8 @@ pub use mode::{
 };
 pub use operation::{AllowedSchemes, AnonymousPolicy, FloorConfigError, OperationFloor, SchemeSlot, SigV2Presigned};
 pub use parse::{
-    AmzDate, CredentialScope, EmptyRegion, PresignedParams, SCOPE_TERMINATOR, ScopeDate, SigV4Authorization, X_AMZ_ALGORITHM,
-    X_AMZ_CREDENTIAL, X_AMZ_DATE, X_AMZ_SIGNED_HEADERS,
+    AmzDate, CredentialScope, EmptyRegion, PresignedParams, RegionLength, RegionRule, SCOPE_TERMINATOR, ScopeDate,
+    SigV4Authorization, X_AMZ_ALGORITHM, X_AMZ_CREDENTIAL, X_AMZ_DATE, X_AMZ_SIGNED_HEADERS,
 };
 pub use post_policy::{
     PostPolicy, PostPolicyEnforcement, PostPolicyError, PostPolicyLimits, SigV2PostPolicy, build_success_action_redirect,

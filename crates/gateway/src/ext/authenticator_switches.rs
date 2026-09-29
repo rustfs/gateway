@@ -13,18 +13,19 @@
 // limitations under the License.
 
 //! The opt-in switches of the built-in SigV4 authenticator: handing the caller's secret to
-//! handlers (ADR-0022), verifying any signing region (ADR-0023), and verifying an empty signing
-//! region (rustfs/backlog#1677). All are off by default.
+//! handlers (ADR-0022), verifying any signing region (ADR-0023), and the RustFS profile's reading
+//! of signing regions — empty, outside the grammar, of any length (rustfs/backlog#1677). All are
+//! off by default.
 //!
-//! Responsible for: the three builder methods, their documented posture, and [`RegionPolicy`],
-//! which turns the two region switches into the scope expectation.
+//! Responsible for: the builder methods, their documented posture, and [`RegionPolicy`], which
+//! turns the region switches into the parsers' region rule and the scope expectation.
 //! NOT responsible for: verification itself, or what a switch changes in it; they are read in
 //! `super::authenticator` (and the secret hand-off also in `super::sigv2`).
 //! Upstream: `super::authenticator::SigV4Authenticator`. Downstream: deployments assembling the
 //! service, the RustFS ring-2 adapter first.
 
 use super::authenticator::SigV4Authenticator;
-use rustfs_gateway_sig::{EmptyRegion, ExpectedScope, RegionSet};
+use rustfs_gateway_sig::{EmptyRegion, ExpectedScope, RegionLength, RegionRule, RegionSet};
 
 /// The opt-in scope-region policies of [`SigV4Authenticator`].
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -36,17 +37,31 @@ pub(super) struct RegionPolicy {
     /// Any region the parser reads, verified and then refused when outside the grammar
     /// (rustfs/gateway#1075).
     pub(super) any_spelling: bool,
+    /// A region of any length, read by the parsers and held to the grammar without its ceiling.
+    pub(super) any_length: bool,
 }
 
 impl RegionPolicy {
-    /// How the credential parsers read an empty region field: admitted only when the scope check
-    /// admits it too, so a parse that succeeds is never refused by name for its region shape alone.
-    pub(super) const fn empty_region(self) -> EmptyRegion {
-        if self.empty_region {
+    /// How the credential parsers read the region field: an empty one admitted only when the scope
+    /// check admits it too, so a parse that succeeds is never refused by name for its region shape
+    /// alone; one of any length only under the any-length policy.
+    pub(super) const fn region_rule(self) -> RegionRule {
+        let empty = if self.empty_region {
             EmptyRegion::Admitted
         } else {
             EmptyRegion::Refused
-        }
+        };
+        // Legacy-compat (rustfs/backlog#2684): legacy RustFS reads a scope region up to the next
+        // `/` at any length and serves every one of the grammar, so a correctly signed region
+        // longer than any real one is verified and served. No region is that long, and the
+        // ceiling keeps request-chosen input small before any key is derived; the intended
+        // future behaviour is the default's 64-byte ceiling.
+        let length = if self.any_length {
+            RegionLength::Unbounded
+        } else {
+            RegionLength::Bounded
+        };
+        RegionRule::STRICT.with_empty(empty).with_length(length)
     }
 
     /// `expected`, widened by exactly the policies this authenticator turned on.
@@ -61,22 +76,29 @@ impl RegionPolicy {
         } else {
             expected
         };
-        if self.any_spelling {
+        let expected = if self.any_spelling {
             expected.accepting_any_region_spelling()
+        } else {
+            expected
+        };
+        if self.any_length {
+            expected.accepting_regions_of_any_length()
         } else {
             expected
         }
     }
 
     /// Whether a region the signature was just verified under must now be refused: only under the
-    /// any-spelling policy, and only a non-empty region outside the configured-name grammar.
+    /// any-spelling policy, and only a non-empty region outside the configured-name grammar. The
+    /// grammar is checked without its ceiling: the parser already applied the ceiling unless the
+    /// any-length policy lifted it, and legacy RustFS applies none.
     pub(super) fn refuses_after_verification(self, region: &str) -> bool {
         // Legacy-compat (rustfs/backlog#2684): legacy RustFS derives a key from any scope region,
         // so a client learns whether its signature was right before it learns that `US-EAST-1` is
         // not a region, and the answer is `InvalidRequest` rather than the
         // `AuthorizationHeaderMalformed` naming the region to use. The intended future behaviour is
         // ADR-0023's: refuse the spelling at the scope check, before any key is derived.
-        self.any_spelling && !region.is_empty() && !RegionSet::is_region_name(region)
+        self.any_spelling && !region.is_empty() && !RegionSet::is_region_name_of_any_length(region)
     }
 }
 
@@ -134,6 +156,23 @@ impl SigV4Authenticator {
     #[must_use]
     pub fn refuse_unreadable_signing_regions_after_verification(mut self) -> Self {
         self.region_policy.any_spelling = true;
+        self
+    }
+
+    /// Reads a SigV4 credential scope region of any length, as legacy RustFS does: a region of the
+    /// configured-name grammar longer than 64 bytes is verified and served under
+    /// [`accept_any_signing_region`](Self::accept_any_signing_region), and one outside the grammar
+    /// is refused after the signature under
+    /// [`refuse_unreadable_signing_regions_after_verification`](Self::refuse_unreadable_signing_regions_after_verification).
+    /// The RustFS profile turns it on together with both, and with
+    /// [`accept_empty_signing_region`](Self::accept_empty_signing_region).
+    ///
+    /// Off by default: the default refuses a region over 64 bytes as a credential it cannot read,
+    /// with `403 InvalidAccessKeyId`, before any key is derived. The region is still read up to
+    /// the next `/`, every byte of it still ASCII-graphic, and the key is still derived from it.
+    #[must_use]
+    pub fn accept_signing_regions_of_any_length(mut self) -> Self {
+        self.region_policy.any_length = true;
         self
     }
 

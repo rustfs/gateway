@@ -1,0 +1,58 @@
+# c-sig-0600 — a scope region past the parser's 64-byte ceiling is unreadable by default.
+#
+# Schema dimensions exercised: sign.tamper that lengthens the scope region past the ceiling while
+# keeping it inside the region grammar, so the length alone decides the answer.
+
+[case]
+id = "c-sig-0600"
+schema_version = 1
+title = "A credential scope whose region is longer than 64 bytes is refused as unreadable by default"
+rationale = """
+The region is one of the four inputs the signing key is derived from, and no region is anywhere \
+near 64 bytes long, so by default the credential parser stops reading a region at 64 bytes. A \
+region of 65 lowercase letters is inside the region grammar and longer than that ceiling: the \
+request is refused with the uniform credential 403 before any key is derived or any region is \
+named back to the caller. Legacy RustFS reads a region at any length and serves one of the grammar; \
+that is the opt-in RustFS profile (`SigV4Authenticator::accept_signing_regions_of_any_length`, \
+rd-loc-0007), which this case must not see."""
+polarity = "negative"
+operation = "ListBuckets"
+tags = ["signature", "sigv4", "region", "security"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_sigv-create-signed-request.html"
+summary = "The credential scope's region field is the region the request is sent to, one of the inputs the signing key is derived from."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+request_time = "2026-01-02T03:04:05Z"
+
+[request]
+method = "GET"
+target = "/"
+
+[request.sign]
+mode = "sigv4_header"
+service = "s3"
+region = "us-east-1"
+credential = "valid"
+
+[request.sign.tamper]
+component = "scope_region"
+new_value = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+[expect]
+kind = "response"
+status = 403
+
+[expect.error]
+code = "InvalidAccessKeyId"
+request_id_present = true
+
+[expect.body]
+redact = ["RequestId", "HostId"]
+contains_utf8 = ["<Code>InvalidAccessKeyId</Code>"]
+not_contains_utf8 = ["<Buckets>", "<Region>", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]

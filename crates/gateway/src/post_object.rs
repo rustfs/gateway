@@ -32,7 +32,8 @@ use http_body::{Body, Frame, SizeHint};
 use rustfs_gateway_core::{EncodedResponse, ResponseBody, TransportSecurity};
 use rustfs_gateway_http::{BodyIntegrity, FileReader, FileStep, FormLimits, FormReader, FormReject, FormStep};
 use rustfs_gateway_sig::{
-    EmptyRegion, PostPolicy, PostPolicyError, PostPolicyLimits, RequestNow, SigV2PostPolicy, build_success_action_redirect,
+    EmptyRegion, PostPolicy, PostPolicyError, PostPolicyLimits, RegionLength, RegionRule, RequestNow, SigV2PostPolicy,
+    build_success_action_redirect,
 };
 use rustfs_gateway_types::dto::PostObjectInput;
 use rustfs_gateway_types::{BucketName, NamePolicy, ObjectKey};
@@ -295,12 +296,14 @@ where
         let filename = self.reader.filename().unwrap_or_default();
         let has_policy = fields.iter().any(|(name, _)| *name == "policy");
         let policy = if fields.iter().any(|(name, _)| *name == "x-amz-algorithm") {
-            // `Admitted`: this runs after the authenticator verified the same credential under the
-            // deployment's own region policy, so an empty region reaching here was admitted there,
-            // and the conditions read below do not depend on the region.
+            // The widest reading: this runs after the authenticator verified the same credential
+            // under the deployment's own region policy, so an empty or a long region reaching here
+            // was read there, and the conditions read below do not depend on the region.
+            let rule = RegionRule::STRICT
+                .with_empty(EmptyRegion::Admitted)
+                .with_length(RegionLength::Unbounded);
             AcceptedPolicy::SigV4(
-                PostPolicy::parse_with(&fields, filename, PostPolicyLimits::default(), now, EmptyRegion::Admitted)
-                    .map_err(policy_refusal)?,
+                PostPolicy::parse_with(&fields, filename, PostPolicyLimits::default(), now, rule).map_err(policy_refusal)?,
             )
         } else if fields.iter().any(|(name, _)| *name == "awsaccesskeyid") {
             AcceptedPolicy::SigV2(

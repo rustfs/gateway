@@ -35,8 +35,8 @@ use super::super::oracle;
 use super::super::put_object::generated_field_count;
 use super::super::seam::get_bucket_location::{GATEWAY_INPUT_MEMBERS, GATEWAY_OUTPUT_MEMBERS, input_to_s3s, output_from_s3s};
 use super::{
-    ACCESS_KEY, BASE_DOMAIN, CapturedInput, Compared, ContextRequest, PATH_HOST, access_key, answers, compare, differing_context,
-    region_of,
+    ACCESS_KEY, BASE_DOMAIN, CapturedInput, Compared, ContextRequest, FORGED_SECRET, PATH_HOST, SECRET_KEY, access_key, amz_date,
+    answers, compare, differing_context, region_of,
 };
 
 const NONE: &[&str] = &[];
@@ -291,4 +291,105 @@ fn a_scope_region_outside_the_legacy_grammar_is_refused_as_legacy_refuses_it_onl
         (gateway.code(), oracle.code()),
         (Some("SignatureDoesNotMatch"), Some("SignatureDoesNotMatch"))
     );
+}
+
+/// HMAC-SHA256, written out: the rd-loc-0007 and rd-loc-0008 pins sign scope regions the gateway's
+/// own signer refuses to name.
+fn hmac(key: &[u8], data: &[u8]) -> [u8; 32] {
+    use sha2::{Digest as _, Sha256};
+    let mut block = [0u8; 64];
+    block[..key.len()].copy_from_slice(key);
+    let mut inner = Sha256::new();
+    inner.update(block.map(|byte| byte ^ 0x36));
+    inner.update(data);
+    let mut outer = Sha256::new();
+    outer.update(block.map(|byte| byte ^ 0x5c));
+    outer.update(inner.finalize());
+    outer.finalize().into()
+}
+
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+/// [`location_request`], header-signed by hand now with the shared access key and `secret`, scoped
+/// to `region` — any text the legacy stack's parser reads up to the next `/`.
+fn location_signed_by_hand(region: &str, secret: &str) -> ContextRequest {
+    use sha2::{Digest as _, Sha256};
+    let stamp = amz_date(rustfs_gateway_sig::RequestNow::capture().unix_seconds());
+    let day = &stamp[..8];
+    let scope = format!("{day}/{region}/s3/aws4_request");
+    let signed = "host;x-amz-content-sha256;x-amz-date";
+    let canonical = format!(
+        "GET\n/photos\nlocation=\nhost:{PATH_HOST}\nx-amz-content-sha256:UNSIGNED-PAYLOAD\nx-amz-date:{stamp}\n\n{signed}\nUNSIGNED-PAYLOAD"
+    );
+    let string_to_sign = format!("AWS4-HMAC-SHA256\n{stamp}\n{scope}\n{}", hex(&Sha256::digest(canonical.as_bytes())));
+    let mut key = hmac(format!("AWS4{secret}").as_bytes(), day.as_bytes());
+    for part in [region.as_bytes(), b"s3", b"aws4_request"] {
+        key = hmac(&key, part);
+    }
+    let signature = hex(&hmac(&key, string_to_sign.as_bytes()));
+    let authorization =
+        format!("AWS4-HMAC-SHA256 Credential={ACCESS_KEY}/{scope}, SignedHeaders={signed}, Signature={signature}");
+    location_request()
+        .header("x-amz-date", stamp.as_bytes())
+        .header("x-amz-content-sha256", b"UNSIGNED-PAYLOAD")
+        .header("authorization", authorization.as_bytes())
+}
+
+/// A scope region of the grammar longer than the gateway parser's 64-byte ceiling: the legacy
+/// stack reads it at any length, verifies the signature over it and serves it. By default the
+/// gateway refuses it as a credential it cannot read; under the RustFS profile it verifies and
+/// serves it, handing the handler the client's region, and a wrong signature over it is
+/// `SignatureDoesNotMatch` on both.
+///
+/// Ruling: `rd-loc-0007`
+#[test]
+fn a_scope_region_past_the_ceiling_is_verified_only_under_the_rustfs_profile() {
+    for region in ["a".repeat(65), "us-east-1-".repeat(100)] {
+        let (gateway, oracle) = answers(&location_signed_by_hand(&region, SECRET_KEY)).expect("both stacks answer");
+        assert_eq!(oracle.status, 200, "{oracle:?}");
+        assert_eq!(gateway.status, 403, "{gateway:?}");
+        assert_eq!(gateway.code(), Some("InvalidAccessKeyId"), "{gateway:?}");
+
+        let profiled = location_signed_by_hand(&region, SECRET_KEY).rustfs_profile();
+        let (gateway, oracle) = answers(&profiled).expect("both stacks answer");
+        assert_eq!((gateway.status, oracle.status), (200, 200), "{gateway:?} {oracle:?}");
+        let compared = compared(&profiled);
+        assert_eq!(differing_context(&compared.converted, &compared.oracle), NONE);
+        assert_eq!(
+            (region_of(&compared.converted), region_of(&compared.oracle)),
+            (Some(region.as_str()), Some(region.as_str()))
+        );
+
+        let forged = location_signed_by_hand(&region, FORGED_SECRET).rustfs_profile();
+        let (gateway, oracle) = answers(&forged).expect("both stacks answer");
+        assert_eq!((gateway.status, oracle.status), (403, 403), "{gateway:?} {oracle:?}");
+        assert_eq!(
+            (gateway.code(), oracle.code()),
+            (Some("SignatureDoesNotMatch"), Some("SignatureDoesNotMatch"))
+        );
+    }
+}
+
+/// A scope region carrying one of the `Authorization` header's own separators, a space or a comma:
+/// the legacy stack reads the region up to the next `/`, separators included, verifies the
+/// signature over it and refuses the region with `400 InvalidRequest`. The gateway cannot read
+/// such a credential unambiguously and answers, under both profiles, the one `403` it gives every
+/// credential it cannot read.
+///
+/// Ruling: `rd-loc-0008`
+#[test]
+fn a_scope_region_with_a_header_separator_is_refused_by_both_stacks_with_different_codes() {
+    for region in ["us east-1", "us,east-1"] {
+        for request in [
+            location_signed_by_hand(region, SECRET_KEY),
+            location_signed_by_hand(region, SECRET_KEY).rustfs_profile(),
+        ] {
+            let (gateway, oracle) = answers(&request).expect("both stacks answer");
+            assert_eq!((gateway.status, oracle.status), (403, 400), "{region}: {gateway:?} {oracle:?}");
+            assert_eq!(gateway.code(), Some("InvalidAccessKeyId"), "{region}: {gateway:?}");
+            assert_eq!(oracle.code(), Some("InvalidRequest"), "{region}: {oracle:?}");
+        }
+    }
 }

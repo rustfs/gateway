@@ -127,13 +127,19 @@ impl RegionSet {
     }
 
     /// Whether `region` satisfies the configured-name grammar: 1..=[`ScopeRegion::MAX_LEN`] bytes
-    /// of lowercase ASCII letters, digits or `-`. Legacy RustFS reads a signed region by the same
-    /// grammar, and a verifier that admits other spellings for key derivation
-    /// ([`ExpectedScope::accepting_any_region_spelling`]) asks this after the signature matched.
+    /// of lowercase ASCII letters, digits or `-`.
     #[must_use]
     pub fn is_region_name(region: &str) -> bool {
+        region.len() <= ScopeRegion::MAX_LEN && Self::is_region_name_of_any_length(region)
+    }
+
+    /// Whether `region` is one or more lowercase ASCII letters, digits or `-`, at any length: the
+    /// grammar of [`Self::is_region_name`] without its ceiling. Legacy RustFS reads a signed region
+    /// by this grammar, and a verifier that admits other spellings for key derivation
+    /// ([`ExpectedScope::accepting_any_region_spelling`]) asks this after the signature matched.
+    #[must_use]
+    pub fn is_region_name_of_any_length(region: &str) -> bool {
         !region.is_empty()
-            && region.len() <= ScopeRegion::MAX_LEN
             && region
                 .bytes()
                 .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
@@ -164,6 +170,7 @@ pub struct ExpectedScope<'a> {
     any_region: bool,
     empty_region: bool,
     any_spelling: bool,
+    any_length: bool,
 }
 
 impl<'a> ExpectedScope<'a> {
@@ -176,6 +183,7 @@ impl<'a> ExpectedScope<'a> {
             any_region: false,
             empty_region: false,
             any_spelling: false,
+            any_length: false,
         }
     }
 
@@ -207,9 +215,9 @@ impl<'a> ExpectedScope<'a> {
         self
     }
 
-    /// Admits every non-empty region the credential parser reads — ASCII graphic, at most
-    /// [`crate::CredentialScope::MAX_REGION_LEN`] bytes, no `/` — for a verifier that refuses a
-    /// region outside [`RegionSet::is_region_name`] only after the signature has been checked, as
+    /// Admits every non-empty region the credential parser reads — ASCII graphic, no `/`, at any
+    /// length its [`crate::RegionRule`] reads — for a verifier that refuses a region outside
+    /// [`RegionSet::is_region_name_of_any_length`] only after the signature has been checked, as
     /// legacy RustFS does (the RustFS profile, rustfs/gateway#1075).
     ///
     /// A verifier that turns this on must make that refusal itself: the scope check no longer
@@ -221,11 +229,24 @@ impl<'a> ExpectedScope<'a> {
         self
     }
 
+    /// Applies [`Self::accepting_any_region`]'s grammar at any length
+    /// ([`RegionSet::is_region_name_of_any_length`]), for a verifier whose parser reads a region
+    /// of any length ([`crate::RegionLength::Unbounded`]), as legacy RustFS does (the RustFS
+    /// profile). On its own it admits nothing: a configured region is never that long.
+    #[must_use]
+    pub const fn accepting_regions_of_any_length(mut self) -> Self {
+        self.any_length = true;
+        self
+    }
+
     /// Whether [`enforce_scope`] admits `region` under this expectation.
     fn admits_region(&self, region: &str) -> bool {
-        self.regions.contains(region)
-            || (self.any_spelling && !region.is_empty())
-            || (self.any_region && RegionSet::is_region_name(region))
+        let in_grammar = if self.any_length {
+            RegionSet::is_region_name_of_any_length(region)
+        } else {
+            RegionSet::is_region_name(region)
+        };
+        self.regions.contains(region) || (self.any_spelling && !region.is_empty()) || (self.any_region && in_grammar)
             // Legacy-compat (rustfs/backlog#2684): legacy RustFS verifies a scope that names no
             // region at all, and its replication client relies on it. A scope without a region
             // is not one AWS or any SDK produces, and it skips the endpoint-routing answer; the
@@ -359,5 +380,61 @@ mod tests {
         assert_eq!(reversed.names().collect::<Vec<_>>(), ["eu-west-1", "us-east-1"]);
         let unordered = RegionSet::new(std::collections::HashSet::from(["us-east-1", "eu-west-1"])).expect("valid regions");
         assert_eq!(unordered.names().collect::<Vec<_>>(), ["eu-west-1", "us-east-1"]);
+    }
+
+    /// A scope over a region of `length` bytes of `byte`, read without the ceiling.
+    fn long_scope(byte: char, length: usize) -> CredentialScope {
+        let rule = crate::RegionRule::STRICT.with_length(crate::RegionLength::Unbounded);
+        let value = format!("AKID/20150830/{}/s3/aws4_request", String::from(byte).repeat(length));
+        CredentialScope::parse_with(&value, rule).expect("read without the ceiling")
+    }
+
+    /// Positive — the grammar without its ceiling is the grammar: the same bytes, any length.
+    #[test]
+    fn the_grammar_of_any_length_differs_from_the_name_grammar_only_in_length() {
+        let at_ceiling = "a".repeat(ScopeRegion::MAX_LEN);
+        let over = "a".repeat(ScopeRegion::MAX_LEN + 1);
+        assert!(RegionSet::is_region_name(&at_ceiling) && RegionSet::is_region_name_of_any_length(&at_ceiling));
+        assert!(!RegionSet::is_region_name(&over) && RegionSet::is_region_name_of_any_length(&over));
+        assert!(RegionSet::is_region_name_of_any_length(&"us-east-1".repeat(512)));
+        for outside in ["", "US-EAST-1", "rustfs_local", "eu.west.1", &format!("{over}A")] {
+            assert!(!RegionSet::is_region_name_of_any_length(outside), "{outside:?}");
+            assert!(!RegionSet::is_region_name(outside), "{outside:?}");
+        }
+    }
+
+    /// Positive — with ADR-0023's grammar applied at any length, a long region of the grammar is
+    /// verified under the region the client named.
+    #[test]
+    fn any_length_policy_admits_a_long_region_of_the_grammar_verbatim() {
+        let regions = RegionSet::new(["us-east-1"]).expect("non-empty");
+        let expected = ExpectedScope::new(SigService::S3, &regions)
+            .accepting_any_region()
+            .accepting_regions_of_any_length();
+        let presented = long_scope('a', 65);
+        let verified = enforce_scope(&presented, clock(), &expected).expect("in the grammar");
+        assert_eq!(verified.region(), "a".repeat(65));
+    }
+
+    /// Negative — the any-length policy admits nothing on its own, keeps the grammar, and leaves
+    /// ADR-0023's ceiling in place when it is off.
+    #[test]
+    fn n_any_length_policy_admits_nothing_alone_and_keeps_the_grammar() {
+        let regions = RegionSet::new(["us-east-1", "eu-west-1"]).expect("non-empty");
+        let alone = ExpectedScope::new(SigService::S3, &regions).accepting_regions_of_any_length();
+        let refused = enforce_scope(&long_scope('a', 65), clock(), &alone).expect_err("not configured");
+        assert_eq!(refused.expected_region().map(ScopeRegion::as_str), Some("eu-west-1"));
+
+        let any_region = ExpectedScope::new(SigService::S3, &regions).accepting_any_region();
+        assert!(enforce_scope(&long_scope('a', 65), clock(), &any_region).is_err());
+
+        let both = any_region.accepting_regions_of_any_length();
+        assert!(enforce_scope(&long_scope('A', 65), clock(), &both).is_err());
+        let wrong_day = CredentialScope::parse_with(
+            &format!("AKID/20150831/{}/s3/aws4_request", "a".repeat(65)),
+            crate::RegionRule::STRICT.with_length(crate::RegionLength::Unbounded),
+        )
+        .expect("read without the ceiling");
+        assert!(enforce_scope(&wrong_day, clock(), &both).is_err());
     }
 }

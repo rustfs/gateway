@@ -194,8 +194,8 @@ impl ContextRequest {
 
     /// Gives the gateway authenticator the RustFS profile of rd-loc-0004 (ADR-0023): any scope
     /// region in the configured-name grammar is verified. s3s needs no switch; it never checks.
-    /// It also verifies an empty scope region, the RustFS profile of rd-loc-0005, and refuses a
-    /// region outside the grammar only after the signature, the RustFS profile of rd-loc-0006.
+    /// It also verifies an empty scope region (rd-loc-0005), refuses a region outside the grammar
+    /// only after the signature (rd-loc-0006), and reads a region of any length (rd-loc-0007).
     pub(crate) fn rustfs_profile(mut self) -> Self {
         self.any_region = true;
         self
@@ -458,7 +458,8 @@ fn gateway_service(
         authenticator = authenticator
             .accept_any_signing_region()
             .accept_empty_signing_region()
-            .refuse_unreadable_signing_regions_after_verification();
+            .refuse_unreadable_signing_regions_after_verification()
+            .accept_signing_regions_of_any_length();
     }
     let backend = Arc::new(AdapterBackend {
         recorded: Arc::clone(recorded),
@@ -600,13 +601,13 @@ pub(crate) fn s3s_side(request: &ContextRequest, headers: &HeaderMap) -> Result<
     Ok((status, recorded))
 }
 
-/// [`s3s_side`], with the response body.
+/// [`s3s_side`], with the response body; a request signed by the harness or by hand is verified.
 fn s3s_answer(request: &ContextRequest, headers: &HeaderMap) -> Result<(u16, Vec<u8>, Option<OracleRequest>), String> {
     let captured = Arc::new(Mutex::new(None));
     let mut builder = s3s::service::S3ServiceBuilder::new(ContextS3 {
         captured: Arc::clone(&captured),
     });
-    if request.signing_region.is_some() {
+    if request.signing_region.is_some() || request.headers.iter().any(|(name, _)| name == http::header::AUTHORIZATION) {
         builder.set_auth(s3s::auth::SimpleAuth::from_single(ACCESS_KEY, SECRET_KEY));
     }
     if request.virtual_hosting {

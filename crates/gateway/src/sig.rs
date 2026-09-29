@@ -39,11 +39,12 @@ pub use rustfs_gateway_sig::timing::LookupBudget;
 pub use rustfs_gateway_sig::{
     AmzDate, AnonymousAck, AuthError, AuthScheme, CHUNK_ALGORITHM, CHUNK_SIGNATURE_EXTENSION, ChunkSigner, CredentialPresence,
     CredentialScope, CtBytes, CustomAuthRequest, CustomAuthScheme, CustomSchemeRegistry, EmptyRegion, Identity,
-    MAX_PRESIGNED_EXPIRY_SECONDS, PayloadMode, PresignedParams, RawQuery, RegionSet, RequestClock, RequestNow, SecretBytes,
-    SecurityFloor, SessionBinding, SessionBindingError, SessionToken, SigFamily, SigIdentity, SigLocation, SigService, SigV2Mode,
-    SigV2Signer, SigV2StringToSignSpec, SigV4Authorization, SigV4Signer, Signature, SignatureMatch, SignatureVerifier,
-    SignedRequest, SignerError, SigningCredentials, SigningKey, SigningRequest, SigningScope, SkewWindow, SystemClock,
-    TRAILER_ALGORITHM, Tamper, TamperComponent, TrailerSet, Verdict, VerifiedScope, X_AMZ_SECURITY_TOKEN_HEADER,
+    MAX_PRESIGNED_EXPIRY_SECONDS, PayloadMode, PresignedParams, RawQuery, RegionLength, RegionRule, RegionSet, RequestClock,
+    RequestNow, SecretBytes, SecurityFloor, SessionBinding, SessionBindingError, SessionToken, SigFamily, SigIdentity,
+    SigLocation, SigService, SigV2Mode, SigV2Signer, SigV2StringToSignSpec, SigV4Authorization, SigV4Signer, Signature,
+    SignatureMatch, SignatureVerifier, SignedRequest, SignerError, SigningCredentials, SigningKey, SigningRequest, SigningScope,
+    SkewWindow, SystemClock, TRAILER_ALGORITHM, Tamper, TamperComponent, TrailerSet, Verdict, VerifiedScope,
+    X_AMZ_SECURITY_TOKEN_HEADER,
 };
 #[cfg(feature = "dangerous-replace-signature-verifier")]
 pub use rustfs_gateway_sig::{AwsSignatureVerifier, DangerAck, SealedAws};
