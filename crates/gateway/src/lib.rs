@@ -126,7 +126,9 @@ pub mod sig;
 
 pub use crate::adapt::ServiceFuture;
 pub use crate::assembly::{AssemblyError, RuleRef};
-pub use crate::builder::view_policy::{CLAMPED_MAX_KEYS_OPERATIONS, EMPTY_UPLOAD_OPERATIONS, RUSTFS_MAX_KEYS_CEILING};
+pub use crate::builder::view_policy::{
+    CLAMPED_MAX_KEYS_OPERATIONS, EMPTY_UPLOAD_OPERATIONS, RUSTFS_LISTING_ENCODINGS, RUSTFS_MAX_KEYS_CEILING,
+};
 pub use crate::builder::{
     AssemblyUpdate, CHECKSUM_REQUIRED_OPERATIONS, DEFAULT_MAX_BUFFERED_BODY_BYTES, MINIO_CLIENT_CHECKSUM_OPTIONAL_OPERATIONS,
     S3CMD_CHECKSUM_OPTIONAL_OPERATIONS, ServiceBuilder,

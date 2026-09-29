@@ -49,6 +49,7 @@
 pub mod error;
 pub mod extra_headers;
 pub mod response;
+mod rustfs_listing;
 pub mod value;
 pub mod view;
 

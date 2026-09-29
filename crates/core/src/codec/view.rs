@@ -75,6 +75,8 @@ pub struct MetaView<'a> {
     /// Whether an absent `content-length` reads as `0`, because the transport already ended the
     /// body with nothing in it.
     ended_empty: bool,
+    /// Legacy RustFS's `encoding-type=url` rule for this listing, under the RustFS profile.
+    rustfs_listing: Option<crate::codec::value::RustFsListing>,
 }
 
 /// A page-size query parameter answered with its ceiling when the request asked for more.
@@ -197,6 +199,7 @@ impl<'a> MetaView<'a> {
             checksum_failures_as_bad_digest: false,
             page_size_ceiling: None,
             ended_empty: false,
+            rustfs_listing: None,
         })
     }
 
@@ -222,6 +225,7 @@ impl<'a> MetaView<'a> {
             checksum_failures_as_bad_digest: self.checksum_failures_as_bad_digest,
             page_size_ceiling: self.page_size_ceiling,
             ended_empty: self.ended_empty,
+            rustfs_listing: self.rustfs_listing,
         }
     }
 
@@ -282,6 +286,24 @@ impl<'a> MetaView<'a> {
     pub const fn with_transport_ended_empty_body(mut self) -> Self {
         self.ended_empty = true;
         self
+    }
+
+    /// This view, with a listing rendered under legacy RustFS's `encoding-type=url` rule.
+    ///
+    /// The assembly calls this only for a listing its deployment renders the way legacy RustFS
+    /// does (the RustFS profile, rustfs/gateway#1059); every encoder then encodes exactly the
+    /// members `listing` names, with `/` kept literal, and echoes `encoding-type` as legacy RustFS
+    /// does. See `crate::codec::rustfs_listing`.
+    #[must_use]
+    pub const fn with_rustfs_listing_encoding(mut self, listing: crate::codec::value::RustFsListing) -> Self {
+        self.rustfs_listing = Some(listing);
+        self
+    }
+
+    /// Legacy RustFS's `encoding-type=url` rule for this listing, when the deployment applies it.
+    #[must_use]
+    pub const fn rustfs_listing_encoding(&self) -> Option<crate::codec::value::RustFsListing> {
+        self.rustfs_listing
     }
 
     /// The naming policy this view was built under.

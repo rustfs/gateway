@@ -145,3 +145,52 @@ fn n_a_member_whose_type_has_no_encoded_form_fails_the_run() {
     let error = encode::body(&ir, &Default::default()).expect_err("percent-encoding an integer is a path with no wire form");
     assert!(error.contains("MaxKeys"), "{error}");
 }
+
+/// Every encodable member is written through a decision narrowed to its own path, so a profile can
+/// encode some declared members and not others (rustfs/gateway#1059): a root member by name, a
+/// nested one as `Shape.Member`.
+#[test]
+fn every_encoded_member_narrows_the_decision_to_its_own_path() {
+    let body = encode::body(&ir("ListObjectsV2"), &Default::default()).expect("encodes");
+    let artifacts = artifacts();
+    let shapes = crate::emit::codec::operation_for_test(&ir("ListObjectsV2"), &artifacts.codec_rules, &artifacts.error_codes)
+        .expect("the whole codec renders");
+    for path in [
+        "Prefix",
+        "Delimiter",
+        "StartAfter",
+        "ContinuationToken",
+        "NextContinuationToken",
+    ] {
+        assert!(
+            body.contains(&format!("let url_encoding = url_encoding.member(\"{path}\");")),
+            "{path} is not narrowed:\n{body}"
+        );
+    }
+    for path in ["Object.Key", "CommonPrefix.Prefix"] {
+        assert!(
+            shapes.contains(&format!("let url_encoding = url_encoding.member(\"{path}\");")),
+            "{path} is not narrowed:\n{shapes}"
+        );
+    }
+    assert!(
+        body.contains("value::rustfs_listing_echo(request, url_encoding, &mut output.encoding_type);"),
+        "the RustFS profile's echo follows the model echo:\n{body}"
+    );
+}
+
+/// Negative — a member the IR does not declare encodable is never narrowed, and an operation with
+/// no echo member emits no echo call.
+#[test]
+fn n_an_undeclared_member_is_never_narrowed_and_no_echo_member_means_no_echo_call() {
+    let body = encode::body(&ir("ListObjectsV2"), &Default::default()).expect("encodes");
+    for path in ["Name", "MaxKeys", "KeyCount", "EncodingType"] {
+        assert!(
+            !body.contains(&format!("url_encoding.member(\"{path}\")")),
+            "{path} is narrowed although nothing declares it:\n{body}"
+        );
+    }
+    let parts = encode::body(&ir("ListParts"), &Default::default()).expect("encodes");
+    assert!(parts.contains("let url_encoding = url_encoding.member(\"Key\");"), "{parts}");
+    assert!(!parts.contains("rustfs_listing_echo"), "ListParts has no echo member:\n{parts}");
+}

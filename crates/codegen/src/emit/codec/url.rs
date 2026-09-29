@@ -16,7 +16,8 @@
 //!
 //! Responsible for: turning `xml.url_encoded_fields` — a list of dotted paths — into the two
 //! questions the response emitter asks, "does this operation's root encode this member?" and "does
-//! this shape's writer encode this member, and therefore need the decision passed in?".
+//! this shape's writer encode this member, and therefore need the decision passed in?", and the
+//! one line that narrows the decision to a named member (`member_binding`).
 //! NOT responsible for: emitting the calls ([`super::encode`]) or performing the encoding
 //! (`rustfs-gateway-core`'s `codec::value::url_encoded` and `url_encoded_key`).
 //! Upstream: [`rustfs_gateway_model::ir`]. Downstream: [`super::encode`].
@@ -173,4 +174,16 @@ fn unresolved(operation: &str, path: &str, why: &str) -> String {
          no member would leave `encoding-type=url` accepted, echoed, and not applied to it, which \
          is the state this list exists to end."
     )
+}
+
+/// The binding that narrows the response-wide url-encoding decision to the one member at `path` —
+/// `Prefix` at the root, `Object.Key` inside a shape — so a profile can encode some declared
+/// members and not others (the RustFS profile, rustfs/gateway#1059). Empty for a member the plan
+/// does not encode. Under the AWS-model decisions `UrlEncoding::member` is the identity.
+pub(super) fn member_binding(pad: &str, path: &str, encoded: bool) -> String {
+    if encoded {
+        format!("{pad}let url_encoding = url_encoding.member(\"{path}\");\n")
+    } else {
+        String::new()
+    }
 }

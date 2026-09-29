@@ -120,6 +120,7 @@ impl OperationCodec for dto::ListParts {
         }
         {
             let v = &output.key;
+            let url_encoding = url_encoding.member("Key");
             writer.element("Key", &value::url_encoded_key(v, url_encoding));
         }
         {

@@ -124,6 +124,7 @@ impl OperationCodec for dto::ListObjectsV2 {
         } else {
             None
         };
+        value::rustfs_listing_echo(request, url_encoding, &mut output.encoding_type);
         let mut writer = rustfs_gateway_xml::XmlWriter::document();
         writer.open("ListBucketResult", Some(rustfs_gateway_xml::S3_XMLNS));
         {
@@ -132,6 +133,7 @@ impl OperationCodec for dto::ListObjectsV2 {
         }
         {
             let v = &output.prefix;
+            let url_encoding = url_encoding.member("Prefix");
             writer.element("Prefix", &value::url_encoded(v.as_str(), url_encoding));
         }
         {
@@ -143,6 +145,7 @@ impl OperationCodec for dto::ListObjectsV2 {
             writer.element("MaxKeys", &v.to_string());
         }
         if let Some(v) = output.delimiter.as_ref() {
+            let url_encoding = url_encoding.member("Delimiter");
             writer.element("Delimiter", &value::url_encoded(v.as_str(), url_encoding));
         }
         {
@@ -163,12 +166,15 @@ impl OperationCodec for dto::ListObjectsV2 {
             writer.element("EncodingType", v.as_str());
         }
         if let Some(v) = output.continuation_token.as_ref() {
+            let url_encoding = url_encoding.member("ContinuationToken");
             writer.element("ContinuationToken", &value::url_encoded(v.as_str(), url_encoding));
         }
         if let Some(v) = output.next_continuation_token.as_ref() {
+            let url_encoding = url_encoding.member("NextContinuationToken");
             writer.element("NextContinuationToken", &value::url_encoded(v.as_str(), url_encoding));
         }
         if let Some(v) = output.start_after.as_ref() {
+            let url_encoding = url_encoding.member("StartAfter");
             writer.element("StartAfter", &value::url_encoded(v.as_str(), url_encoding));
         }
         writer.close();
@@ -190,6 +196,7 @@ fn write_common_prefix(
 ) -> Result<(), CodecError> {
     {
         let v = &value.prefix;
+        let url_encoding = url_encoding.member("CommonPrefix.Prefix");
         writer.element("Prefix", &value::url_encoded(v.as_str(), url_encoding));
     }
     Ok(())
@@ -203,6 +210,7 @@ fn write_object(
 ) -> Result<(), CodecError> {
     {
         let v = &value.key;
+        let url_encoding = url_encoding.member("Object.Key");
         writer.element("Key", &value::url_encoded_key(v, url_encoding));
     }
     {
