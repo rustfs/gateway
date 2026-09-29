@@ -22,8 +22,18 @@
 //! entries in the parent).
 //! Upstream: the parent module's types and evidence constants. Downstream: the parent's
 //! `REQUEST_DIVERGENCES`, which concatenates the slices at compile time.
+//!
+//! # rd-err-0005 to rd-err-0008 and the RustFS profile
+//!
+//! Their first rulings encoded the fail-closed design of the partial bridge (an error the typed
+//! verdicts cannot state answers `500`), not a fact about legacy RustFS; the maintainer's
+//! zero-regression constraint for the one-shot replacement supersedes them (rustfs/gateway#1148).
+//! The RustFS profile's adapter reads each such error with `refusal_from_legacy` and answers it with
+//! `HandlerErrorContext::legacy_rustfs`: legacy RustFS's status, headers and document exactly, the
+//! request and host ids apart (rd-err-0001), pinned by `error_parity/rustfs_profile.rs`. The typed
+//! reading keeps its AWS answers and its refusals, which the pinned tests below still show.
 
-use super::{DivergenceFollowUp, DivergenceRuling, ERROR_PARITY, ERROR_RESPONSES, RequestDivergence};
+use super::{DivergenceFollowUp, DivergenceRuling, ERROR_PARITY, ERROR_RESPONSES, M1_ADAPTER, RequestDivergence};
 
 pub(super) const ERROR_DIVERGENCES: [RequestDivergence; 13] = [
     RequestDivergence {
@@ -92,11 +102,15 @@ pub(super) const ERROR_DIVERGENCES: [RequestDivergence; 13] = [
         request: "a conditional read the app body answers NotModified",
         aws: "304 with no body and the ETag of the representation",
         aws_evidence: "https://www.rfc-editor.org/rfc/rfc9110#section-15.4.5",
-        s3s: "304 with no ETag: RustFS returns S3Error::new(NotModified); an ETag header on the error is written as is",
-        gateway: "the seam reads the tag from the error's ETag header (Refusal::NotModified) and the adapter answers \
-                  HandlerErrorContext::not_modified(etag), the AWS 304; an error with no tag is refused, so the RustFS body must attach it",
-        client_impact: "a revalidating GET gets its ETag back once the RustFS body attaches it, and a 500 until then; not on M1's two operations",
-        ruling: DivergenceRuling::AlignAws,
+        s3s: "legacy RustFS writes a conditional GET's 304 with ETag and Last-Modified (rustfs/src/storage/ecfs_extend.rs:557-604 \
+              on rustfs/rustfs e870a6d25b) and a conditional HEAD's with neither (rustfs/src/app/object/head.rs:423,431); \
+              the error's headers are written as they are",
+        gateway: "RustFS profile: legacy_rustfs answers each 304 with exactly the validators the body stated; the typed reading \
+                  hands only an error carrying ETag alone to HandlerErrorContext::not_modified(etag), the AWS 304, and refuses \
+                  the rest (the 500 the pinned test still shows)",
+        client_impact: "none in the RustFS profile (a conditional GET or HEAD answers as it does today); an adapter using the \
+                        typed reading answers 500 for both legacy shapes",
+        ruling: DivergenceRuling::RustfsProfile,
         follow_up: DivergenceFollowUp::Landed("c-cond-0007"),
         test_file: ERROR_PARITY,
         test: "a_not_modified_carrying_its_entity_tag_is_304_with_it_on_both_stacks",
@@ -107,13 +121,14 @@ pub(super) const ERROR_DIVERGENCES: [RequestDivergence; 13] = [
         request: "a range the app body answers InvalidRange",
         aws: "416 with Content-Range: bytes */<length>, RangeRequested and ActualObjectSize",
         aws_evidence: "https://www.rfc-editor.org/rfc/rfc9110#section-15.5.17",
-        s3s: "416 with the RustFS range message and no Content-Range; a Content-Range header on the error is written as is",
-        gateway: "the seam reads the length from the error's Content-Range: bytes */<length> (Refusal::UnsatisfiableRange) and \
-                  the adapter answers HandlerError::unsatisfiable_range(request Range, length), the AWS 416; an error with no \
-                  length is refused, so the RustFS body must attach it",
-        client_impact: "a read past the end gets 416 with the length once the RustFS body attaches it, and a 500 until then; \
-                        not on M1's two operations",
-        ruling: DivergenceRuling::AlignAws,
+        s3s: "416 with the RustFS range message and no Content-Range (rustfs/src/app/object/shared.rs:159-174 on rustfs/rustfs \
+              e870a6d25b); a Content-Range header on the error is written as is",
+        gateway: "RustFS profile: legacy_rustfs answers the legacy 416, Code and Message only, Content-Range only when the body \
+                  states it; the typed reading hands an error carrying bytes */<length> to HandlerError::unsatisfiable_range, \
+                  the AWS 416, and refuses one without (the 500 the pinned test still shows)",
+        client_impact: "none in the RustFS profile (a read past the end answers as it does today); an adapter using the typed \
+                        reading answers 500 for the legacy 416",
+        ruling: DivergenceRuling::RustfsProfile,
         follow_up: DivergenceFollowUp::Landed("c-range-0009"),
         test_file: ERROR_PARITY,
         test: "an_invalid_range_carrying_its_length_is_416_with_content_range_on_both_stacks",
@@ -125,10 +140,11 @@ pub(super) const ERROR_DIVERGENCES: [RequestDivergence; 13] = [
         aws: "no documented bound; AWS messages are one sentence",
         aws_evidence: ERROR_RESPONSES,
         s3s: "writes the whole message",
-        gateway: "the seam cuts it to 1024 bytes on a character boundary, the most the gateway admits (a longer one would be a 500)",
-        client_impact: "only a RustFS reason past 1 KiB loses its tail; code and status are unchanged",
-        ruling: DivergenceRuling::KeepGateway,
-        follow_up: DivergenceFollowUp::None,
+        gateway: "RustFS profile: legacy_rustfs writes the message whole, with no length bound; the typed reading cuts it to \
+                  1024 bytes on a character boundary, the most an ordinary HandlerError admits (a longer one would be a 500)",
+        client_impact: "none in the RustFS profile; an adapter using the typed reading loses the tail of a reason past 1 KiB",
+        ruling: DivergenceRuling::RustfsProfile,
+        follow_up: DivergenceFollowUp::Open(M1_ADAPTER),
         test_file: ERROR_PARITY,
         test: "a_message_past_1024_bytes_is_cut_only_on_the_gateway",
     },
@@ -138,12 +154,14 @@ pub(super) const ERROR_DIVERGENCES: [RequestDivergence; 13] = [
         request: "an app body NoSuchKey or MethodNotAllowed carrying x-amz-delete-marker, x-amz-version-id and Last-Modified",
         aws: "404 NoSuchKey, or 405 on a read naming the marker, with x-amz-delete-marker: true and the version id",
         aws_evidence: "https://docs.aws.amazon.com/AmazonS3/latest/userguide/DeleteMarker.html",
-        s3s: "writes the code and every header of the error (RustFS with_delete_marker_read_headers)",
-        gateway: "the seam reads the three headers (Refusal::CurrentDeleteMarker, VersionedDeleteMarker) and the delete-marker \
-                  contexts render all three; a marker error with no Last-Modified (RustFS's current-marker 404 today) is refused",
-        client_impact: "a read of a deleted key is the 404 or 405 with the marker flag and version id once the RustFS body \
-                        writes Last-Modified on both, and a 500 until then; not on M1's two operations",
-        ruling: DivergenceRuling::AlignS3s,
+        s3s: "writes the code and every header of the error: the flag and version id on both reads, Last-Modified on the \
+              versioned 405 only (rustfs/src/app/object/shared.rs:60-100 on rustfs/rustfs e870a6d25b)",
+        gateway: "RustFS profile: legacy_rustfs answers both reads with exactly the headers the body stated, Last-Modified \
+                  included only when stated, and no Key element; the typed reading hands the three headers to the \
+                  delete-marker contexts and refuses a marker without Last-Modified (the 500 the pinned test still shows)",
+        client_impact: "none in the RustFS profile (a read of a deleted key answers as it does today); an adapter using the \
+                        typed reading answers 500 for the current-marker 404",
+        ruling: DivergenceRuling::RustfsProfile,
         follow_up: DivergenceFollowUp::Landed("c-object-0063"),
         test_file: ERROR_PARITY,
         test: "an_error_carrying_delete_marker_headers_crosses_as_the_marker_read",

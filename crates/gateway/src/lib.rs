@@ -207,11 +207,11 @@ pub use rustfs_gateway_core::{
     Answer, ArnForm, AuthRequirement, Authorized, BodyPolicy, BoxFuture, CodecError, CommitOutcome, CommitWork,
     CommittedResponse, DeferredOperation, DerivedResourceError, ELEMENT_ORDER, EncodedResponse, ErrorContext, ErrorDetail,
     ErrorHeader, ErrorResolution, Handler, HandlerCancellation, HandlerContext, HandlerDeadlineClass, HandlerError,
-    HandlerErrorContext, HandlerResult, HasOperation, HeadPart, HeadPartError, HttpDate, InvalidErrorContext, MetaView,
-    MissingHandlers, MissingObject, NoDerived, OWNED_RESPONSE_HEADERS, Operation, OperationCodec, OperationSet, OperationSpec,
-    PRECONDITION_FAILED_MESSAGE, ParamKind, PreAuthError, Predicate, RANGE_NOT_SATISFIABLE_MESSAGE, Req, RequestBody,
-    RequestBodyMode, RequiredParam, ResourceIdentity, ResourceShape, ResourceVisibility, Resp, ResponseBody, ResponseKind,
-    ResponseOverride, RouteEntry, RouteSelector, RouterBuilder, TargetKind, resolve,
+    HandlerErrorContext, HandlerResult, HasOperation, HeadPart, HeadPartError, HttpDate, InvalidErrorContext, LegacyRustfsFacts,
+    LegacyRustfsRefusal, MetaView, MissingHandlers, MissingObject, NoDerived, OWNED_RESPONSE_HEADERS, Operation, OperationCodec,
+    OperationSet, OperationSpec, PRECONDITION_FAILED_MESSAGE, ParamKind, PreAuthError, Predicate, RANGE_NOT_SATISFIABLE_MESSAGE,
+    Req, RequestBody, RequestBodyMode, RequiredParam, ResourceIdentity, ResourceShape, ResourceVisibility, Resp, ResponseBody,
+    ResponseKind, ResponseOverride, RouteEntry, RouteSelector, RouterBuilder, TargetKind, resolve,
 };
 pub use rustfs_gateway_core::{Everyone, MAX_SUBJECTS, Subjects};
 

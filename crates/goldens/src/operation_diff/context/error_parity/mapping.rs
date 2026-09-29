@@ -35,11 +35,11 @@ use rustfs_gateway_types::compat::OracleRevision;
 use s3s::{S3Error, S3ErrorCode};
 
 /// One RustFS body error, and the status and code both stacks must answer it with.
-type AppBodyError = (fn() -> S3Error, u16, &'static str);
+pub(super) type AppBodyError = (fn() -> S3Error, u16, &'static str);
 
 /// Errors the RustFS PutObject and GetBucketLocation bodies return, spelled as RustFS spells them
 /// (`rustfs/src/error.rs` `error_code_to_message`, `app/object/shared.rs` `parse_expires_header`).
-const APP_BODY_ERRORS: [AppBodyError; 11] = [
+pub(super) const APP_BODY_ERRORS: [AppBodyError; 11] = [
     (|| S3Error::with_message(S3ErrorCode::AccessDenied, "Access Denied."), 403, "AccessDenied"),
     (
         || S3Error::with_message(S3ErrorCode::InvalidArgument, "Invalid Expires header"),

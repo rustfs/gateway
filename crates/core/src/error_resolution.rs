@@ -29,8 +29,10 @@ use rustfs_gateway_types::{BucketName, ETag, ErrorCode, ObjectKey, is_xml_repres
 use crate::ops::shared::bucket_region::{PERMANENT_REDIRECT_MESSAGE, TEMPORARY_REDIRECT_MESSAGE};
 use crate::{CodecError, ErrorDetail, ErrorHeader, HandlerError, HttpDate, RedirectTarget, RegionLabel, VersionIdLabel};
 
+mod legacy;
 mod validate;
 
+pub use legacy::{LegacyRustfsFacts, LegacyRustfsRefusal};
 use validate::{is_contextual, valid_identifier, validate_code, validate_extras, validate_message};
 
 const MAX_CODE_BYTES: usize = 128;
@@ -132,6 +134,8 @@ enum ErrorCase {
     AuthorizationRegionMismatch(RegionLabel),
     NotModified(ETag),
     CorsForbidden,
+    /// The RustFS profile's refusal, stated exactly as legacy RustFS writes it (`legacy`).
+    Legacy(LegacyRustfsRefusal),
 }
 
 /// A closed description of the facts that choose an S3 response shape.
@@ -299,6 +303,12 @@ impl ErrorContext {
         Self(ErrorCase::CorsForbidden)
     }
 
+    /// A refusal exactly as legacy RustFS writes it, for the RustFS profile (rustfs/gateway#1148).
+    #[must_use]
+    pub fn legacy_rustfs(refusal: LegacyRustfsRefusal) -> Self {
+        Self(ErrorCase::Legacy(refusal))
+    }
+
     /// A marker refusal a copy answers for its source, without the marker's version id: on a copy,
     /// `x-amz-version-id` names the version the copy wrote. Every other context is unchanged.
     fn copy_source_marker(self) -> Self {
@@ -307,6 +317,7 @@ impl ErrorContext {
             ErrorCase::CurrentDeleteMarker(visibility, key, _, at) => {
                 Self(ErrorCase::CurrentDeleteMarker(visibility, key, None, at))
             }
+            ErrorCase::Legacy(refusal) => Self(ErrorCase::Legacy(refusal.without_marker_version())),
             other => Self(other),
         }
     }
@@ -317,6 +328,12 @@ impl ErrorContext {
             ErrorCase::CurrentDeleteMarker(_, _, _, at) => {
                 Self(ErrorCase::CurrentDeleteMarker(ResourceVisibility::Hidden, None, None, at))
             }
+            // A legacy missing object, a current delete marker included, is hidden exactly as the
+            // typed ones are: the caller learns nothing the gateway would not tell it.
+            ErrorCase::Legacy(refusal) => match refusal.missing_object() {
+                Some(kind) => Self(ErrorCase::MissingObject(kind, ResourceVisibility::Hidden, None)),
+                None => Self(ErrorCase::Legacy(refusal)),
+            },
             other => Self(other),
         }
     }
@@ -414,6 +431,14 @@ impl HandlerErrorContext {
     #[must_use]
     pub fn not_modified(etag: ETag) -> Self {
         Self(ErrorContext::not_modified(etag))
+    }
+
+    /// A refusal exactly as legacy RustFS writes it: the RustFS profile's answer for an error a
+    /// RustFS app body returned (rustfs/gateway#1148). Every other deployment answers with the
+    /// typed contexts above.
+    #[must_use]
+    pub fn legacy_rustfs(refusal: LegacyRustfsRefusal) -> Self {
+        Self(ErrorContext::legacy_rustfs(refusal))
     }
 
     pub(crate) fn into_error_context(self) -> ErrorContext {
@@ -642,6 +667,7 @@ pub fn resolve(context: ErrorContext, response: ResponseKind) -> ErrorResolution
             Vec::new(),
             None,
         ),
+        ErrorCase::Legacy(refusal) => refusal.resolution(),
     };
 
     if response == ResponseKind::Head

@@ -23,4 +23,4 @@ help: you might have meant to use an associated function to build this type
 25 -     let _wrapped = HandlerErrorContext(context);
 25 +     let _wrapped = HandlerErrorContext::missing_bucket();
    |
-   = and 6 other candidates
+   = and 7 other candidates

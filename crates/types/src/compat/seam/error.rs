@@ -27,9 +27,12 @@
 //! this ring-0 crate may not name; the ring-2 adapter matches on [`Refusal`] and calls the one
 //! constructor each variant names), rendering the document, or supplying what only the request
 //! holds — the key, and the `Range` a `416` names (the adapter holds the request).
+//! And, for the RustFS profile, reading the same error as the legacy stack writes it
+//! ([`refusal_from_legacy`]): its status, code, message and fact headers exactly, with nothing the
+//! typed verdicts would add, refusing by name only what the gateway cannot write the same way.
 //! Upstream: the s3s error of the bound revision. Downstream: the goldens error-parity diff under
 //! every seam revision, and the RustFS ring-2 adapter through the revision RustFS links
-//! (rustfs/backlog#1752, rustfs/backlog#1762).
+//! (rustfs/backlog#1752, rustfs/backlog#1762, rustfs/gateway#1148).
 //!
 //! # Why a verdict and not a code
 //!
@@ -43,7 +46,7 @@ use super::s3s;
 use http::StatusCode;
 
 use crate::compat::ConversionError;
-use crate::{ETag, ErrorCode, Timestamp, TimestampFormat};
+use crate::{ETag, ErrorCode, EtagRender, Timestamp, TimestampFormat};
 
 /// The longest message the gateway's error resolution admits; a longer one would be a `500`.
 pub const MAX_MESSAGE_BYTES: usize = 1024;
@@ -263,6 +266,193 @@ fn ordinary(error: &s3s::S3Error) -> Result<Refusal, ConversionError> {
     })
 }
 
+/// One error a RustFS app body returned, read as the legacy stack writes it: what the RustFS
+/// profile answers (`HandlerErrorContext::legacy_rustfs` in `rustfs-gateway-core`, built member for
+/// member from this value by the ring-2 adapter).
+///
+/// Every member is exactly what the legacy stack puts on the wire for the error, so an answer built
+/// from it is legacy RustFS's answer: the status the code carries, the `<Message>` text or none,
+/// and each fact header only when the error carried it. The request id and host id the gateway
+/// stamps are not the error's (rd-err-0001).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LegacyRefusal {
+    /// The code, answered at its own status: the declared code when the legacy stack writes it at
+    /// the declared status, otherwise a custom code carrying the status the legacy stack writes.
+    pub code: ErrorCode,
+    /// The `<Message>` text, or `None` when the legacy document has no `<Message>`.
+    pub message: Option<String>,
+    /// The `ETag` of a `304`, when the error states one.
+    pub etag: Option<ETag>,
+    /// The `Last-Modified` of a `304` or a delete-marker read, in Unix seconds, when stated.
+    pub last_modified: Option<i64>,
+    /// The version id of the delete marker a `NoSuchKey` or `MethodNotAllowed` read found, when the
+    /// error states `x-amz-delete-marker: true`.
+    pub delete_marker: Option<String>,
+    /// The complete length of a `416`, when the error states `Content-Range: bytes */<length>`.
+    pub complete_length: Option<u64>,
+}
+
+/// Reads a RustFS body's handler error as the legacy stack writes it, for the RustFS profile.
+///
+/// The legacy stack answers with the error's status (its own, else the code's), writes `<Code>` and
+/// the error's `<Message>` when it has one, and, when the error carries a header map, sends that
+/// map in place of its own head — dropping `Content-Type` and `Content-Length` from a bodyless
+/// `304`. Legacy RustFS attaches four facts that way: `ETag` and `Last-Modified` on a `304`
+/// (`rustfs/src/storage/ecfs_extend.rs:557-604` on rustfs/rustfs `e870a6d25b`), none on the `304` of
+/// a conditional `HEAD` (`rustfs/src/app/object/head.rs:423,431`), and the delete-marker flag,
+/// version id and, on a versioned read only, `Last-Modified` with the `Content-Type` it re-adds
+/// (`rustfs/src/app/object/shared.rs:60-100`); its `416` carries none
+/// (`rustfs/src/app/object/shared.rs:159-174`). Each is read here only when present, and every
+/// value must be spelled exactly as the gateway will write it again, so the answer is the same
+/// bytes.
+///
+/// Unlike [`refusal_from_s3s`], nothing is resolved from typed context and nothing is cut: a
+/// contextual code crosses as the legacy answer, and a message crosses whole.
+///
+/// # Errors
+///
+/// [`ConversionError`] naming what the gateway cannot write as the legacy stack writes it:
+/// - `code`: not an identifier of at most [`MAX_CODE_BYTES`];
+/// - `status_code`: a status that is neither 4xx nor 5xx nor the `304` of `NotModified`, or a
+///   `NotModified` at another status;
+/// - `message`: text XML 1.0 cannot carry;
+/// - `request_id`: a request id the app body set, which the legacy document would carry and the
+///   gateway, writing its own, cannot;
+/// - `headers`: a header its code does not state (only `Content-Type` accompanies every code);
+/// - `content-type`: a header map without `Content-Type: application/xml` on an answer with a
+///   document, which the legacy stack would send untyped or typed otherwise;
+/// - the fact header's own name: a fact repeated, or spelled other than the gateway writes it (a
+///   quoted entity tag, an IMF-fixdate, the flag `true`, a non-empty version id, `bytes */<length>`
+///   in shortest decimal).
+pub fn refusal_from_legacy(error: &s3s::S3Error) -> Result<LegacyRefusal, ConversionError> {
+    let name = error.code().as_str();
+    if !is_identifier(name) {
+        return Err(ConversionError {
+            field: "code",
+            reason: "not an ASCII identifier of at most 128 bytes",
+        });
+    }
+    let status = error
+        .status_code()
+        .or_else(|| error.code().status_code())
+        .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+    let not_modified = name == "NotModified";
+    let bodyless = status == StatusCode::NOT_MODIFIED;
+    if not_modified != bodyless || !(bodyless || status.is_client_error() || status.is_server_error()) {
+        return Err(ConversionError {
+            field: "status_code",
+            reason: "the legacy answer is a 4xx or 5xx refusal, or the 304 of NotModified",
+        });
+    }
+    let message = error.message();
+    if message.is_some_and(|text| !text.chars().all(is_xml_char)) {
+        return Err(ConversionError {
+            field: "message",
+            reason: "holds a character XML 1.0 cannot carry",
+        });
+    }
+    // The legacy document carries a request id only when the app body set one, which legacy RustFS
+    // never does; the gateway writes its own (rd-err-0001), so a body that set one is refused.
+    if error.request_id().is_some() {
+        return Err(ConversionError {
+            field: "request_id",
+            reason: "the gateway writes its own request id in the document",
+        });
+    }
+    let facts = Facts(error.headers());
+    let marker = facts.states(DELETE_MARKER);
+    let marker_code = matches!(
+        (name, status),
+        ("NoSuchKey", StatusCode::NOT_FOUND) | ("MethodNotAllowed", StatusCode::METHOD_NOT_ALLOWED)
+    );
+    match (name, marker && marker_code) {
+        ("NotModified", _) => facts.only(&[ETAG, LAST_MODIFIED])?,
+        ("InvalidRange", _) => facts.only(&[CONTENT_RANGE])?,
+        (_, true) => facts.only(&MARKER_FACTS)?,
+        _ => facts.only(&[])?,
+    }
+    if !bodyless && error.headers().is_some() && facts.optional(CONTENT_TYPE)? != Some(XML_CONTENT_TYPE) {
+        return Err(ConversionError {
+            field: CONTENT_TYPE,
+            reason: "a legacy error document is sent with the error's own header map, which must type it application/xml",
+        });
+    }
+    let delete_marker = match marker && marker_code {
+        true => Some(facts.legacy_marker()?),
+        false => None,
+    };
+    let last_modified = match not_modified || delete_marker.is_some() {
+        true => facts.optional(LAST_MODIFIED)?.map(canonical_http_date).transpose()?,
+        false => None,
+    };
+    let etag = match not_modified {
+        true => facts.optional(ETAG)?.map(canonical_etag).transpose()?,
+        false => None,
+    };
+    let complete_length = match name {
+        "InvalidRange" => facts.optional(CONTENT_RANGE)?.map(canonical_complete_length).transpose()?,
+        _ => None,
+    };
+    let code = match ErrorCode::known(name) {
+        Some(known) if known.default_status() == status => known,
+        _ => ErrorCode::custom(name.to_owned(), status),
+    };
+    Ok(LegacyRefusal {
+        code,
+        message: message.map(str::to_owned),
+        etag,
+        last_modified,
+        delete_marker,
+        complete_length,
+    })
+}
+
+const CONTENT_TYPE: &str = "content-type";
+const XML_CONTENT_TYPE: &str = "application/xml";
+
+/// An entity tag the gateway writes back as the same header value.
+fn canonical_etag(value: &str) -> Result<ETag, ConversionError> {
+    match ETag::parse_http_header(value) {
+        Ok(etag) if !etag.is_any() && etag.render(EtagRender::HeaderQuoted) == value => Ok(etag),
+        _ => Err(ConversionError {
+            field: ETAG,
+            reason: "not one entity tag spelled as the gateway writes it",
+        }),
+    }
+}
+
+/// An IMF-fixdate the gateway writes back as the same header value.
+fn canonical_http_date(value: &str) -> Result<i64, ConversionError> {
+    let refused = || ConversionError {
+        field: LAST_MODIFIED,
+        reason: "not an IMF-fixdate spelled as the gateway writes it",
+    };
+    let seconds = Timestamp::parse(value, TimestampFormat::HttpDate)
+        .map_err(|_| refused())?
+        .secs();
+    match Timestamp::from_secs(seconds).render(TimestampFormat::HttpDate) {
+        Ok(rendered) if rendered == value => Ok(seconds),
+        _ => Err(refused()),
+    }
+}
+
+/// `bytes */<length>` with the length in shortest decimal, as the gateway writes it.
+fn canonical_complete_length(value: &str) -> Result<u64, ConversionError> {
+    let refused = || ConversionError {
+        field: CONTENT_RANGE,
+        reason: "not the unsatisfied form bytes */<complete-length> spelled as the gateway writes it",
+    };
+    let digits = value.strip_prefix("bytes */").ok_or_else(refused)?;
+    let length: u64 = match digits.bytes().all(|byte| byte.is_ascii_digit()) {
+        true => digits.parse().map_err(|_| refused())?,
+        false => return Err(refused()),
+    };
+    match length.to_string() == digits {
+        true => Ok(length),
+        false => Err(refused()),
+    }
+}
+
 /// The response headers of one s3s error, read as the facts a verdict states.
 struct Facts<'a>(Option<&'a http::HeaderMap>);
 
@@ -322,6 +512,33 @@ impl Facts<'_> {
             return Err(refused());
         }
         length.parse().map_err(|_| refused())
+    }
+
+    /// The one visible-ASCII value of `name`, or `None` when the error does not state it; a
+    /// repeated or unreadable value is refused by `name`.
+    fn optional(&self, name: &'static str) -> Result<Option<&str>, ConversionError> {
+        match self.0.is_some_and(|headers| headers.contains_key(name)) {
+            true => self.single(name).map(Some),
+            false => Ok(None),
+        }
+    }
+
+    /// The marker's version id, with the flag stating `true`; the instant is optional here, as
+    /// legacy RustFS states it on a versioned read only.
+    fn legacy_marker(&self) -> Result<String, ConversionError> {
+        if self.single(DELETE_MARKER)? != "true" {
+            return Err(ConversionError {
+                field: DELETE_MARKER,
+                reason: "a delete-marker read states the flag as true",
+            });
+        }
+        match self.single(VERSION_ID)? {
+            "" => Err(ConversionError {
+                field: VERSION_ID,
+                reason: "a delete marker has a version id",
+            }),
+            version_id => Ok(version_id.to_owned()),
+        }
     }
 
     /// The marker's version id and write instant, with the flag stating `true`.

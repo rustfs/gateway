@@ -135,8 +135,8 @@ pub use crate::dialect::{
 pub use crate::dispatch::{Dispatch, Router, RouterBuildError};
 pub use crate::error::{DisallowedPreAuthCode, PRE_AUTH_STATUSES, PreAuthError};
 pub use crate::error_resolution::{
-    BodyPolicy, ErrorContext, ErrorResolution, HandlerErrorContext, InvalidErrorContext, MissingObject, ResourceVisibility,
-    ResponseKind, resolve,
+    BodyPolicy, ErrorContext, ErrorResolution, HandlerErrorContext, InvalidErrorContext, LegacyRustfsFacts, LegacyRustfsRefusal,
+    MissingObject, ResourceVisibility, ResponseKind, resolve,
 };
 pub use crate::fault::{
     ELEMENT_ORDER, ErrorDetail, ErrorHeader, HttpDate, InvalidWireLabel, PRECONDITION_FAILED_MESSAGE,
