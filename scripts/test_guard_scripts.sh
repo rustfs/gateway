@@ -16257,6 +16257,21 @@ expect_fail check_fuzz_nightly.sh \
     'a second, drifting cargo-fuzz pin' mut_fuzz_nightly_pin_drifts \
     'CARGO_FUZZ_VERSION is'
 
+mut_fuzz_nightly_drops_cxx() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path(".github/workflows/fuzz-nightly.yml")
+text = path.read_text(encoding="utf-8")
+old = "run: bash scripts/ci_install_host_tools.sh --with-cxx\n"
+if text.count(old) != 1:
+    raise SystemExit("fuzz-nightly install anchor drifted")
+path.write_text(text.replace(old, "run: bash scripts/ci_install_host_tools.sh\n", 1), encoding="utf-8")
+PYEOF
+}
+expect_fail check_fuzz_nightly.sh \
+    'the fuzz job installing host tools without a C++ compiler' mut_fuzz_nightly_drops_cxx \
+    'must run scripts/ci_install_host_tools.sh --with-cxx once'
+
 mut_fuzz_nightly_deleted() {
     rm -f .github/workflows/fuzz-nightly.yml
 }
