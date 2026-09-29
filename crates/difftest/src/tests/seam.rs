@@ -589,20 +589,25 @@ fn describe(stored: Option<&Result<Vec<u8>, String>>) -> String {
     }
 }
 
-/// The name of every request-handling switch a builder chain in `text` turns on: a chained call
-/// whose name says what the RustFS profile accepts, refuses, clamps, leaves, signs, answers,
-/// enables or delegates, or which slash rule it applies.
-fn profile_switches(text: &str) -> BTreeSet<String> {
-    const SWITCHES: [&str; 8] = [
-        "accept_",
-        "refuse_",
-        "clamp_",
-        "leave_",
-        "sign_",
-        "answer_",
-        "enable_",
-        "delegate_",
-    ];
+/// Chained calls of an assembly that the seam diff replaces by design: its own recording backend
+/// and authenticator, an allow-all authorizer, a fixture owner, unlimited framework rates, no CORS,
+/// none of the reference backend's own operation layers (its bucket-name registry), and the final
+/// build. Every other call of the RustFS profile's builder chain is a switch.
+const ASSEMBLY_CALLS: [&str; 10] = [
+    "authenticator",
+    "authorizer",
+    "security_floor",
+    "framework_governor_rates",
+    "bucket_owner_source",
+    "cors_source",
+    "cors_cache",
+    "register_cors",
+    "op_layer",
+    "build",
+];
+
+/// The name of every chained call in `text`: each line that starts with `.name`.
+fn chained_calls(text: &str) -> BTreeSet<String> {
     text.lines()
         .filter_map(|line| line.trim_start().strip_prefix('.'))
         .map(|call| {
@@ -610,8 +615,28 @@ fn profile_switches(text: &str) -> BTreeSet<String> {
                 .next()
                 .unwrap_or_default()
         })
-        .filter(|name| name == &"slash_policy" || SWITCHES.iter().any(|prefix| name.starts_with(prefix)))
+        .filter(|name| !name.is_empty())
         .map(str::to_owned)
+        .collect()
+}
+
+/// Every switch a builder chain in `text` turns on: each chained call of the chain that starts at
+/// `ServiceBuilder::new()` and ends at its `.build()` (the whole text when it holds no such chain),
+/// the assembly calls the seam diff replaces by design left out. Switches nested in the chain (the
+/// authenticator's, the security floor's) are read with it.
+fn profile_switches(text: &str) -> BTreeSet<String> {
+    let chain = text.find("ServiceBuilder::new()").map_or(text, |start| {
+        let rest = &text[start..];
+        let end = rest
+            .match_indices('\n')
+            .map(|(at, _)| at + 1)
+            .find(|&at| rest[at..].trim_start().starts_with(".build()"))
+            .map_or(rest.len(), |at| at + rest[at..].find('\n').unwrap_or(rest.len() - at));
+        &rest[..end]
+    });
+    chained_calls(chain)
+        .into_iter()
+        .filter(|name| !ASSEMBLY_CALLS.contains(&name.as_str()))
         .collect()
 }
 
@@ -626,7 +651,8 @@ fn the_seam_diff_runs_every_switch_of_the_rustfs_profile() {
     };
     let profile = profile_switches(&read("../../compat/sut/src/service.rs"));
     assert!(profile.len() >= 12, "the RustFS profile's switches were not found: {profile:?}");
-    let seam = profile_switches(&read("src/seam/stacks.rs"));
+    // The whole seam stack: its authenticator is built before its builder chain.
+    let seam = chained_calls(&read("src/seam/stacks.rs"));
     let missing: Vec<&String> = profile.difference(&seam).collect();
     assert!(missing.is_empty(), "RustFS profile switches the seam diff does not turn on: {missing:?}");
 }
@@ -640,4 +666,22 @@ fn n_a_switch_the_profile_turns_on_and_the_seam_does_not_is_named() {
     assert_eq!(profile.into_iter().collect::<Vec<_>>(), ["accept_all_checksum_omissions", "slash_policy"]);
     let seam = profile_switches("        .accept_all_checksum_omissions()\n");
     assert_eq!(profile_switches("        .slash_policy(x)").difference(&seam).count(), 1);
+}
+
+/// Negative — a switch is read whatever its name says, the authenticator's and the floor's nested
+/// in the chain included; what follows the chain's build, and the assembly the seam diff replaces,
+/// are not switches.
+#[test]
+fn n_every_call_of_the_profile_chain_but_the_assembly_is_a_switch() {
+    let profile = profile_switches(
+        "fn options() -> O {\n    O::new()\n        .with_region(r)\n}\n    ServiceBuilder::new()\n        .authenticator(\n            A::new()\n                .verify_raw_paths_only_with_unencoded_bytes(),\n        )\n        .security_floor(F::new().with_presigned_expiry_rule(R))\n        .url_encode_listings_like_rustfs()\n        .legacy_rustfs_post_forms()\n        .register_cors(x)\n        .build()?;\n    later()\n        .not_a_switch()\n",
+    );
+    assert_eq!(
+        profile.into_iter().collect::<Vec<_>>(),
+        [
+            "legacy_rustfs_post_forms",
+            "url_encode_listings_like_rustfs",
+            "verify_raw_paths_only_with_unencoded_bytes"
+        ]
+    );
 }
