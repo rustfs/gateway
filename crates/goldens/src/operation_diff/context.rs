@@ -194,7 +194,8 @@ impl ContextRequest {
 
     /// Gives the gateway authenticator the RustFS profile of rd-loc-0004 (ADR-0023): any scope
     /// region in the configured-name grammar is verified. s3s needs no switch; it never checks.
-    /// It also verifies an empty scope region, the RustFS profile of rd-loc-0005.
+    /// It also verifies an empty scope region, the RustFS profile of rd-loc-0005, and refuses a
+    /// region outside the grammar only after the signature, the RustFS profile of rd-loc-0006.
     pub(crate) fn rustfs_profile(mut self) -> Self {
         self.any_region = true;
         self
@@ -454,7 +455,10 @@ fn gateway_service(
         authenticator = authenticator.hand_caller_secret_to_handlers();
     }
     if request.any_region {
-        authenticator = authenticator.accept_any_signing_region().accept_empty_signing_region();
+        authenticator = authenticator
+            .accept_any_signing_region()
+            .accept_empty_signing_region()
+            .refuse_unreadable_signing_regions_after_verification();
     }
     let backend = Arc::new(AdapterBackend {
         recorded: Arc::clone(recorded),

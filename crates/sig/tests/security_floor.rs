@@ -701,3 +701,59 @@ fn c_sig_0380_the_system_clock_produces_one_snapshot() {
     let first = SystemClock.capture();
     assert!(first.unix_seconds() > 1_700_000_000, "the system clock is past 2023");
 }
+
+/// The region `enforce_scope` verified under the any-spelling policy (rustfs/gateway#1075), or
+/// its rejection.
+fn spelling_verdict(credential: &str, expected_service: SigService) -> Result<String, ScopeRejection> {
+    let headers = signed_headers(SIGNED_AT);
+    let view = WireView::new(&headers, RawQuery::new(""));
+    let operation = OperationFloor::builtin("Any", expected_service);
+    let sealed = match SecurityFloor::default().admit(view, &operation, now()) {
+        Ok(Admission::Sealed(sealed)) => sealed,
+        other => panic!("expected a sealed AWS admission, got {other:?}"),
+    };
+    let presented = CredentialScope::parse(credential).expect("a well-formed scope");
+    let regions = regions();
+    let expected = ExpectedScope::new(expected_service, &regions).accepting_any_region_spelling();
+    enforce_scope(&presented, sealed.clock(), &expected).map(|scope| scope.region().to_owned())
+}
+
+/// Positive — the any-spelling policy lets a region outside the grammar through the scope check,
+/// verbatim, so the signature is checked over the region the client signed; refusing it
+/// afterwards is the verifier's job (`RegionSet::is_region_name` says which ones).
+#[test]
+fn any_spelling_policy_admits_a_region_outside_the_grammar_verbatim() {
+    for region in ["US-EAST-1", "rustfs_local", "eu.west.1", "ap-south-1"] {
+        let credential = format!("AKIDEXAMPLE/20150830/{region}/s3/aws4_request");
+        assert_eq!(spelling_verdict(&credential, SigService::S3).as_deref(), Ok(region), "{region}");
+    }
+    assert!(!RegionSet::is_region_name("US-EAST-1"));
+    assert!(!RegionSet::is_region_name(""));
+    assert!(RegionSet::is_region_name("ap-south-1"));
+}
+
+/// Negative — the any-spelling policy widens the region check only: an empty region still needs
+/// its own policy, and another day and another service are still refused.
+#[test]
+fn n_any_spelling_policy_still_enforces_the_empty_region_the_date_and_the_service() {
+    for (credential, service, region) in [
+        ("AKIDEXAMPLE/20150831/US-EAST-1/s3/aws4_request", SigService::S3, None),
+        ("AKIDEXAMPLE/20150830/US-EAST-1/sts/aws4_request", SigService::S3, None),
+        ("AKIDEXAMPLE/20150830/US-EAST-1/s3/aws4_request", SigService::Sts, None),
+    ] {
+        let rejection = spelling_verdict(credential, service).expect_err(credential);
+        assert_eq!(rejection.expected_region().map(ScopeRegion::as_str), region, "{credential}");
+    }
+    let presented =
+        CredentialScope::parse_with("AKIDEXAMPLE/20150830//s3/aws4_request", EmptyRegion::Admitted).expect("five fields");
+    let regions = regions();
+    let expected = ExpectedScope::new(SigService::S3, &regions).accepting_any_region_spelling();
+    let headers = signed_headers(SIGNED_AT);
+    let view = WireView::new(&headers, RawQuery::new(""));
+    let sealed = match SecurityFloor::default().admit(view, &OperationFloor::builtin("Any", SigService::S3), now()) {
+        Ok(Admission::Sealed(sealed)) => sealed,
+        other => panic!("expected a sealed AWS admission, got {other:?}"),
+    };
+    let rejection = enforce_scope(&presented, sealed.clock(), &expected).expect_err("the empty region is not a spelling");
+    assert_eq!(rejection.expected_region().map(ScopeRegion::as_str), Some("eu-west-1"));
+}

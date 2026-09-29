@@ -263,21 +263,32 @@ fn an_empty_scope_region_is_verified_only_under_the_rustfs_profile() {
 }
 
 /// A scope region outside the legacy stack's region grammar (`US-EAST-1`): both stacks refuse it
-/// with 400, under the RustFS profile too. The legacy stack verifies the signature first and
-/// answers `InvalidRequest`; the gateway refuses it at the scope check, before any key is derived,
-/// and answers `AuthorizationHeaderMalformed` naming the region to use.
+/// with 400. The legacy stack verifies the signature first and answers `InvalidRequest`, and a
+/// wrong signature over the same region `SignatureDoesNotMatch`. By default the gateway refuses it
+/// at the scope check, before any key is derived, with `AuthorizationHeaderMalformed` naming the
+/// region to use; under the RustFS profile it answers both requests exactly as the legacy stack
+/// does (rustfs/gateway#1075).
 ///
 /// Ruling: `rd-loc-0006`
 #[test]
-fn a_scope_region_outside_the_legacy_grammar_is_refused_by_both_stacks_with_different_codes() {
-    for request in [
-        location_request().signed("US-EAST-1"),
-        location_request().signed("US-EAST-1").rustfs_profile(),
-    ] {
-        let (gateway, oracle) = answers(&request).expect("both stacks answer");
-        assert_eq!((gateway.status, oracle.status), (400, 400), "{gateway:?} {oracle:?}");
-        assert_eq!(oracle.code(), Some("InvalidRequest"), "{oracle:?}");
-        assert_eq!(gateway.code(), Some("AuthorizationHeaderMalformed"), "{gateway:?}");
-        assert!(gateway.body.contains("<Region>eu-west-1</Region>"), "{gateway:?}");
-    }
+fn a_scope_region_outside_the_legacy_grammar_is_refused_as_legacy_refuses_it_only_under_the_rustfs_profile() {
+    let request = location_request().signed("US-EAST-1");
+    let (gateway, oracle) = answers(&request).expect("both stacks answer");
+    assert_eq!((gateway.status, oracle.status), (400, 400), "{gateway:?} {oracle:?}");
+    assert_eq!(oracle.code(), Some("InvalidRequest"), "{oracle:?}");
+    assert_eq!(gateway.code(), Some("AuthorizationHeaderMalformed"), "{gateway:?}");
+    assert!(gateway.body.contains("<Region>eu-west-1</Region>"), "{gateway:?}");
+
+    let (gateway, oracle) = answers(&request.rustfs_profile()).expect("both stacks answer");
+    assert_eq!((gateway.status, oracle.status), (400, 400), "{gateway:?} {oracle:?}");
+    assert_eq!((gateway.code(), oracle.code()), (Some("InvalidRequest"), Some("InvalidRequest")));
+    assert!(!gateway.body.contains("<Region>"), "{gateway:?}");
+
+    let forged = location_request().signed("US-EAST-1").forged().rustfs_profile();
+    let (gateway, oracle) = answers(&forged).expect("both stacks answer");
+    assert_eq!((gateway.status, oracle.status), (403, 403), "{gateway:?} {oracle:?}");
+    assert_eq!(
+        (gateway.code(), oracle.code()),
+        (Some("SignatureDoesNotMatch"), Some("SignatureDoesNotMatch"))
+    );
 }

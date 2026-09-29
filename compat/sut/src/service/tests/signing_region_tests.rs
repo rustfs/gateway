@@ -156,8 +156,11 @@ async fn n_an_empty_region_does_not_waive_the_signature() {
     assert_eq!(missing.status(), 404, "{}", body_of(&missing));
 }
 
-/// Negative — a region legacy RustFS refuses (outside its region grammar) is still refused, before
-/// any key is derived, naming the region to use.
+/// Negative — a region legacy RustFS refuses (outside its region grammar) is still refused, and as
+/// legacy refuses it: after the signature, with `400 InvalidRequest` (rustfs/gateway#1075). Until
+/// #1075 this asserted the scope check's `AuthorizationHeaderMalformed`; the goldens differential
+/// `a_scope_region_outside_the_legacy_grammar_is_refused_by_both_stacks_with_different_codes`
+/// measures legacy's `InvalidRequest`, which is why the expectation moved.
 #[tokio::test]
 async fn n_a_region_outside_the_grammar_is_still_refused() {
     let root = TestRoot::new();
@@ -167,9 +170,39 @@ async fn n_a_region_outside_the_grammar_is_still_refused() {
         let refused = exchange(&service, signed_for(Some(region), MAIN_SECRET, http::Method::GET, "/regions?location")).await;
         assert_eq!(refused.status(), 400, "{region}: {}", body_of(&refused));
         assert!(
-            body_of(&refused).contains("<Code>AuthorizationHeaderMalformed</Code>"),
+            body_of(&refused).contains("<Code>InvalidRequest</Code>"),
             "{region}: {}",
             body_of(&refused)
         );
+        assert!(!body_of(&refused).contains("<Region>"), "{region}: {}", body_of(&refused));
     }
+}
+
+/// Negative — the signature over such a region is checked first, as legacy checks it: a wrong
+/// secret is `403 SignatureDoesNotMatch`, not the region refusal, and a write stores nothing.
+#[tokio::test]
+async fn n_a_wrong_signature_over_an_unreadable_region_is_signature_does_not_match() {
+    let root = TestRoot::new();
+    let service = with_bucket(&root).await;
+
+    let forged = exchange(
+        &service,
+        signed_for(Some("US-EAST-1"), ALT_SECRET, http::Method::GET, "/regions?location"),
+    )
+    .await;
+    assert_eq!(forged.status(), 403, "{}", body_of(&forged));
+    assert!(body_of(&forged).contains("<Code>SignatureDoesNotMatch</Code>"), "{}", body_of(&forged));
+    let put = signed_in(
+        Some("US-EAST-1"),
+        MAIN_KEY,
+        MAIN_SECRET,
+        http::Method::PUT,
+        "/regions/unread",
+        Bytes::from_static(b"u"),
+        &[],
+    );
+    let refused = exchange(&service, put).await;
+    assert_eq!(refused.status(), 400, "{}", body_of(&refused));
+    let missing = exchange(&service, as_main(http::Method::GET, "/regions/unread", Bytes::new())).await;
+    assert_eq!(missing.status(), 404, "{}", body_of(&missing));
 }

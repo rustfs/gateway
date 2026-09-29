@@ -282,6 +282,11 @@ pub enum AuthError {
     RequestExpired,
     /// The scheme was recognised and is deliberately unimplemented; the caller must answer `501`.
     NotImplemented(Unimplemented),
+    /// A signature verified over a credential scope whose region is outside the region grammar:
+    /// refused after the comparison with `InvalidRequest`, the answer legacy RustFS gives it
+    /// (rustfs/gateway#1075). Only a verifier that admits such a region for key derivation
+    /// ([`crate::ExpectedScope::accepting_any_region_spelling`]) produces it.
+    InvalidCredentialRegion,
 }
 
 impl AuthError {
@@ -299,6 +304,7 @@ impl AuthError {
             Self::RequestTimeTooSkewed => "RequestTimeTooSkewed",
             Self::AuthorizationQueryParametersError => "AuthorizationQueryParametersError",
             Self::NotImplemented(_) => "NotImplemented",
+            Self::InvalidCredentialRegion => "InvalidRequest",
         }
     }
 
@@ -321,6 +327,7 @@ impl AuthError {
             // says anything the request did not already state. Every spelling is still a
             // constant, so nothing derived from the request reaches the wire.
             Self::NotImplemented(feature) => feature.message(),
+            Self::InvalidCredentialRegion => "the credential scope names a region this service cannot read",
         }
     }
 

@@ -24,15 +24,18 @@
 //! service, the RustFS ring-2 adapter first.
 
 use super::authenticator::SigV4Authenticator;
-use rustfs_gateway_sig::{EmptyRegion, ExpectedScope};
+use rustfs_gateway_sig::{EmptyRegion, ExpectedScope, RegionSet};
 
-/// The two opt-in scope-region policies of [`SigV4Authenticator`].
+/// The opt-in scope-region policies of [`SigV4Authenticator`].
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) struct RegionPolicy {
     /// ADR-0023: any region in the configured-name grammar.
     pub(super) any_region: bool,
     /// The empty region, which legacy RustFS reads as no region.
     pub(super) empty_region: bool,
+    /// Any region the parser reads, verified and then refused when outside the grammar
+    /// (rustfs/gateway#1075).
+    pub(super) any_spelling: bool,
 }
 
 impl RegionPolicy {
@@ -53,11 +56,27 @@ impl RegionPolicy {
         } else {
             expected
         };
-        if self.empty_region {
+        let expected = if self.empty_region {
             expected.accepting_empty_region()
         } else {
             expected
+        };
+        if self.any_spelling {
+            expected.accepting_any_region_spelling()
+        } else {
+            expected
         }
+    }
+
+    /// Whether a region the signature was just verified under must now be refused: only under the
+    /// any-spelling policy, and only a non-empty region outside the configured-name grammar.
+    pub(super) fn refuses_after_verification(self, region: &str) -> bool {
+        // Legacy-compat (rustfs/backlog#2684): legacy RustFS derives a key from any scope region,
+        // so a client learns whether its signature was right before it learns that `US-EAST-1` is
+        // not a region, and the answer is `InvalidRequest` rather than the
+        // `AuthorizationHeaderMalformed` naming the region to use. The intended future behaviour is
+        // ADR-0023's: refuse the spelling at the scope check, before any key is derived.
+        self.any_spelling && !region.is_empty() && !RegionSet::is_region_name(region)
     }
 }
 
@@ -98,6 +117,23 @@ impl SigV4Authenticator {
     #[must_use]
     pub fn accept_empty_signing_region(mut self) -> Self {
         self.region_policy.empty_region = true;
+        self
+    }
+
+    /// Verifies a SigV4 signature whose credential scope names a region outside the
+    /// configured-name grammar (`US-EAST-1`, `rustfs_local`) and then refuses it with
+    /// `400 InvalidRequest`, as legacy RustFS does (rustfs/gateway#1075); a wrong signature over
+    /// such a region is `403 SignatureDoesNotMatch` first. The RustFS profile turns it on together
+    /// with [`accept_any_signing_region`](Self::accept_any_signing_region) and
+    /// [`accept_empty_signing_region`](Self::accept_empty_signing_region).
+    ///
+    /// Off by default: the default refuses such a region at the scope check, before any key is
+    /// derived, with `400 AuthorizationHeaderMalformed` naming the region to use. It admits no
+    /// request the default refuses: every region it lets through the scope check it refuses after
+    /// the signature, so only the refusal's code and order change.
+    #[must_use]
+    pub fn refuse_unreadable_signing_regions_after_verification(mut self) -> Self {
+        self.region_policy.any_spelling = true;
         self
     }
 

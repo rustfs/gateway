@@ -490,6 +490,7 @@ impl core::fmt::Debug for SigV4Authenticator {
             .field("hands_caller_secret_to_handlers", &self.hand_secret)
             .field("accepts_any_signing_region", &self.region_policy.any_region)
             .field("accepts_empty_signing_region", &self.region_policy.empty_region)
+            .field("verifies_unreadable_signing_regions", &self.region_policy.any_spelling)
             .finish()
     }
 }
@@ -645,6 +646,9 @@ impl SigV4Authenticator {
         // to whoever is guessing. GHSA-3p3x-734c-h5vx is the FTPS version of that confirmation.
         if refusal.is_some() {
             return Err(AuthError::InvalidAccessKeyId.into());
+        }
+        if self.region_policy.refuses_after_verification(presented.scope().region()) {
+            return Err(AuthError::InvalidCredentialRegion.into());
         }
 
         let identity_axis = match credentials.session_token() {
