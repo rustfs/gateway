@@ -65,10 +65,10 @@ use http::Method;
 use rustfs_gateway_core::BoxFuture;
 use rustfs_gateway_sig::{
     AUTHORIZATION_HEADER, AmzDate, AuthError, AuthScheme, CanonicalRequestSpec, CredentialScope, ExpectedScope, PayloadMode,
-    PostPolicy, PostPolicyError, PostPolicyLimits, PresignedParams, RawHost, RegionRule, RegionSet, ScopeRejection, SealedAws,
-    SessionToken, SigFamily, SigIdentity, SigLocation, SigV4Authorization, Signature, SignatureMatch, SignedHeaderSet,
-    UriPathCandidates, Verdict, X_AMZ_SECURITY_TOKEN, X_AMZ_SECURITY_TOKEN_HEADER, calculate_signature, enforce_scope,
-    signing_key, timing,
+    PostPolicy, PostPolicyError, PostPolicyLimits, PresignedParams, RawHost, RawPathFallback, RegionRule, RegionSet,
+    ScopeRejection, SealedAws, SessionToken, SigFamily, SigIdentity, SigLocation, SigV4Authorization, Signature, SignatureMatch,
+    SignedHeaderSet, UriPathCandidates, Verdict, X_AMZ_SECURITY_TOKEN, X_AMZ_SECURITY_TOKEN_HEADER, calculate_signature,
+    enforce_scope, signing_key, timing,
 };
 
 use super::credential_guard::{CredentialGuardConfig, GuardedCredentialProvider};
@@ -475,6 +475,8 @@ pub struct SigV4Authenticator {
     /// Which scope regions outside `regions` are verified (ADR-0023's grammar, the empty region).
     /// Both off by default; `pub(super)` so the switches in `super::authenticator_switches` set them.
     pub(super) region_policy: super::authenticator_switches::RegionPolicy,
+    /// When the wire spelling of the request path is verified, after the decoded one failed.
+    pub(super) raw_path: RawPathFallback,
 }
 
 /// An authenticated verdict, and the looked-up secret when the authenticator hands it on.
@@ -492,6 +494,7 @@ impl core::fmt::Debug for SigV4Authenticator {
             .field("accepts_empty_signing_region", &self.region_policy.empty_region)
             .field("verifies_unreadable_signing_regions", &self.region_policy.any_spelling)
             .field("reads_signing_regions_of_any_length", &self.region_policy.any_length)
+            .field("raw_path_fallback", &self.raw_path)
             .finish()
     }
 }
@@ -519,6 +522,7 @@ impl SigV4Authenticator {
             regions,
             hand_secret: false,
             region_policy: super::authenticator_switches::RegionPolicy::default(),
+            raw_path: RawPathFallback::WhenRespelled,
         }
     }
 
@@ -595,7 +599,7 @@ impl SigV4Authenticator {
                         presented.canonical_parts().ok_or(AuthError::AuthorizationHeaderMalformed)?;
                     let signed =
                         SignedHeaderSet::parse_and_enforce(signed_headers, view.headers(), request.declared_content_length())?;
-                    let paths = UriPathCandidates::new(request.raw_path())?;
+                    let paths = UriPathCandidates::new(request.raw_path())?.with_raw_fallback(self.raw_path);
                     let query = view.query();
                     let mut spec = CanonicalRequestSpec::new(
                         request.method(),

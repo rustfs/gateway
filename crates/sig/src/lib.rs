@@ -117,8 +117,8 @@ mod verifier;
 mod full_chain_tests;
 
 pub use canonical::{
-    CanonicalCandidates, CanonicalRequest, CanonicalRequestSpec, PathCandidate, SignatureMismatchDetail, StringToSign,
-    UriPathCandidates,
+    CanonicalCandidates, CanonicalRequest, CanonicalRequestSpec, PathCandidate, RawPathFallback, SignatureMismatchDetail,
+    StringToSign, UriPathCandidates,
 };
 pub use clock::{
     ClockChecked, MAX_PRESIGNED_EXPIRY_SECONDS, PresignExpiry, RequestClock, RequestNow, SkewWindow, SystemClock,

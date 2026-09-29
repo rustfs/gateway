@@ -14,7 +14,8 @@
 
 //! The canonical request and the string-to-sign, built byte-exactly and twice when necessary.
 //!
-//! Responsible for: [`UriPathCandidates`] and the two-path fallback, [`CanonicalRequestSpec`] and
+//! Responsible for: [`UriPathCandidates`] and the two-path fallback ([`RawPathFallback`] says when
+//! the second path is tried), [`CanonicalRequestSpec`] and
 //! the [`CanonicalCandidates`] iterator it produces, [`CanonicalRequest`], [`StringToSign`], and
 //! [`SignatureMismatchDetail`] — the intermediate results AWS echoes in a `SignatureDoesNotMatch`
 //! body and that no other implementation makes visible.
@@ -81,6 +82,41 @@ pub enum PathCandidate {
     Raw,
 }
 
+/// When the wire spelling of a URI path is tried, after the decoded spelling failed.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum RawPathFallback {
+    /// Whenever the wire spelling differs from the decoded one, so a proxy that re-spells a
+    /// percent-escape in transit keeps working (R2).
+    #[default]
+    WhenRespelled,
+    /// Only when the wire path carries a byte an escape would have encoded — anything but
+    /// `A-Z a-z 0-9 - _ . ~ / %` — as legacy RustFS tries it (rustfs/rustfs#2593): a path whose
+    /// wire spelling differs from the decoded one only in how its escapes are spelled (`%7E` for
+    /// `~`, `%3d` for `%3D`) is verified in the decoded spelling alone.
+    WithUnencodedBytes,
+}
+
+impl RawPathFallback {
+    /// Whether `raw`, a path's wire spelling, is tried after its decoded spelling failed.
+    const fn tries(self, raw: &str) -> bool {
+        match self {
+            Self::WhenRespelled => true,
+            Self::WithUnencodedBytes => {
+                let bytes = raw.as_bytes();
+                let mut index = 0;
+                while index < bytes.len() {
+                    if !matches!(bytes[index], b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' | b'/' | b'%')
+                    {
+                        return true;
+                    }
+                    index += 1;
+                }
+                false
+            }
+        }
+    }
+}
+
 impl fmt::Display for PathCandidate {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
@@ -105,6 +141,7 @@ impl fmt::Display for PathCandidate {
 pub struct UriPathCandidates {
     decoded: String,
     raw: String,
+    fallback: RawPathFallback,
 }
 
 impl UriPathCandidates {
@@ -144,7 +181,15 @@ impl UriPathCandidates {
         Ok(Self {
             decoded,
             raw: raw.to_owned(),
+            fallback: RawPathFallback::default(),
         })
+    }
+
+    /// These candidates, with the wire spelling tried only as `fallback` says.
+    #[must_use]
+    pub fn with_raw_fallback(mut self, fallback: RawPathFallback) -> Self {
+        self.fallback = fallback;
+        self
     }
 
     /// The decoded-then-re-encoded spelling. Tried first.
@@ -166,7 +211,7 @@ impl UriPathCandidates {
     }
 
     fn order(&self) -> SmallVec<[PathCandidate; 2]> {
-        if self.is_single() || !SIGNATURE_RAW_PATH_FALLBACK {
+        if self.is_single() || !SIGNATURE_RAW_PATH_FALLBACK || !self.fallback.tries(&self.raw) {
             SmallVec::from_slice(&[PathCandidate::Decoded])
         } else {
             SmallVec::from_slice(&[PathCandidate::Decoded, PathCandidate::Raw])
@@ -603,6 +648,40 @@ mod tests {
         assert_eq!(paths.raw(), "/my key");
         assert!(!paths.is_single());
         assert_eq!(paths.order().as_slice(), [PathCandidate::Decoded, PathCandidate::Raw]);
+    }
+
+    /// Positive — the legacy fallback still tries the wire spelling of a path that carries an
+    /// unencoded byte: `=`, `+`, a space, `!*()'`, `,;:@&$`, a non-ASCII byte.
+    #[test]
+    fn the_legacy_fallback_tries_a_wire_path_with_an_unencoded_byte() {
+        for raw in [
+            "/b/sitemap.xmlage=",
+            "/b/a+b",
+            "/b/a b",
+            "/b/a!*()'",
+            "/b/a,;:@&$",
+            "/b/caf\u{e9}",
+            "/b/a%20b=",
+        ] {
+            let paths = UriPathCandidates::new(raw)
+                .expect("valid")
+                .with_raw_fallback(RawPathFallback::WithUnencodedBytes);
+            assert_eq!(paths.order().as_slice(), [PathCandidate::Decoded, PathCandidate::Raw], "{raw}");
+        }
+    }
+
+    /// Negative — the legacy fallback does not try a wire path that differs from the decoded one
+    /// only in how its escapes are spelled; the default still does.
+    #[test]
+    fn n_the_legacy_fallback_skips_a_wire_path_that_only_respells_escapes() {
+        for raw in ["/b/a%7Eb", "/b/a%3d", "/b/%41", "/b/a%2fb"] {
+            let paths = UriPathCandidates::new(raw).expect("valid");
+            assert!(!paths.is_single(), "{raw}: the two spellings differ");
+            assert_eq!(paths.order().as_slice(), [PathCandidate::Decoded, PathCandidate::Raw], "{raw}");
+            let legacy = paths.with_raw_fallback(RawPathFallback::WithUnencodedBytes);
+            assert_eq!(legacy.order().as_slice(), [PathCandidate::Decoded], "{raw}");
+        }
+        assert_eq!(RawPathFallback::default(), RawPathFallback::WhenRespelled);
     }
 
     #[test]

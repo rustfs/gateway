@@ -714,6 +714,7 @@ gateway_modules = (
     "precondition_contract",
     "precondition_reachability",
     "presigned_put",
+    "raw_path_fallback",
     "refusal_order_guards",
     "reject_rendering",
     "replica_put",
