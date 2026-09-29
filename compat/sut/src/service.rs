@@ -154,7 +154,9 @@ pub(crate) fn build_service(
                     .accept_empty_signing_region()
                     // And it refuses a region outside its grammar only after the signature, with
                     // `InvalidRequest` (rustfs/gateway#1075).
-                    .refuse_unreadable_signing_regions_after_verification(),
+                    .refuse_unreadable_signing_regions_after_verification()
+                    // At any length: its parser has no ceiling on the region.
+                    .accept_signing_regions_of_any_length(),
             )
             // Not an allow-all, and not a bare operation-set filter either: the matrix must see a
             // refusal for anything outside the reference backend's registered set, and the

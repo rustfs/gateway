@@ -186,6 +186,62 @@ pub enum EmptyRegion {
     Admitted,
 }
 
+/// How long a credential scope's region field may run.
+///
+/// [`RegionLength::Bounded`] everywhere by default. A verifier reads a region of any length only
+/// when it decides after the signature whether the region is one at all, as legacy RustFS does
+/// ([`crate::ExpectedScope::accepting_any_region_spelling`], the RustFS profile).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RegionLength {
+    /// At most [`CredentialScope::MAX_REGION_LEN`] bytes.
+    Bounded,
+    /// Any length the request carries. The field still ends at the next `/`, and every byte of it
+    /// is still ASCII-graphic.
+    Unbounded,
+}
+
+/// How the `parse_with` constructors read a credential scope's region field: [`EmptyRegion`] and
+/// [`RegionLength`] together. An [`EmptyRegion`] alone is that rule with a bounded length.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RegionRule {
+    empty: EmptyRegion,
+    length: RegionLength,
+}
+
+impl RegionRule {
+    /// The reading of every constructor without `_with`: no empty region, and at most
+    /// [`CredentialScope::MAX_REGION_LEN`] bytes.
+    pub const STRICT: Self = Self {
+        empty: EmptyRegion::Refused,
+        length: RegionLength::Bounded,
+    };
+
+    /// This rule, with the empty region governed by `empty`.
+    #[must_use]
+    pub const fn with_empty(self, empty: EmptyRegion) -> Self {
+        Self { empty, ..self }
+    }
+
+    /// This rule, with the region's length governed by `length`.
+    #[must_use]
+    pub const fn with_length(self, length: RegionLength) -> Self {
+        Self { length, ..self }
+    }
+
+    /// Whether `region` is a region field this rule reads.
+    fn reads(self, region: &str) -> bool {
+        let empty_refused = region.is_empty() && self.empty == EmptyRegion::Refused;
+        let too_long = self.length == RegionLength::Bounded && region.len() > CredentialScope::MAX_REGION_LEN;
+        !empty_refused && !too_long && region.bytes().all(|b| b.is_ascii_graphic())
+    }
+}
+
+impl From<EmptyRegion> for RegionRule {
+    fn from(empty: EmptyRegion) -> Self {
+        Self::STRICT.with_empty(empty)
+    }
+}
+
 /// The credential tuple a client presented: `<access-key>/<date>/<region>/<service>/aws4_request`.
 ///
 /// **Parsed, never trusted.** Every field here is chosen by whoever sent the request. The type
@@ -221,14 +277,16 @@ impl CredentialScope {
         Self::parse_with(value, EmptyRegion::Refused)
     }
 
-    /// [`CredentialScope::parse`], with an empty region field admitted when `empty` says so.
+    /// [`CredentialScope::parse`], with the region field read by `rule`: an [`EmptyRegion`], or a
+    /// [`RegionRule`] that also governs its length.
     ///
     /// # Errors
     ///
     /// As [`CredentialScope::parse`]; an empty region is refused only under
-    /// [`EmptyRegion::Refused`]. Every other rule — five fields, the ceiling, ASCII-graphic
-    /// bytes — is the same under both.
-    pub fn parse_with(value: &str, empty: EmptyRegion) -> Result<Self, AuthError> {
+    /// [`EmptyRegion::Refused`], and a region over the ceiling only under
+    /// [`RegionLength::Bounded`]. Every other rule — five fields, ASCII-graphic bytes — is the
+    /// same under every rule.
+    pub fn parse_with(value: &str, rule: impl Into<RegionRule>) -> Result<Self, AuthError> {
         let fields: SmallVec<[&str; 5]> = value.split('/').collect();
         let [access_key_id, date, region, service, terminator] = fields.as_slice() else {
             return Err(AuthError::AuthorizationHeaderMalformed);
@@ -236,8 +294,7 @@ impl CredentialScope {
         if *terminator != SCOPE_TERMINATOR {
             return Err(AuthError::AuthorizationHeaderMalformed);
         }
-        let empty_refused = region.is_empty() && empty == EmptyRegion::Refused;
-        if empty_refused || region.len() > Self::MAX_REGION_LEN || !region.bytes().all(|b| b.is_ascii_graphic()) {
+        if !rule.into().reads(region) {
             return Err(AuthError::AuthorizationHeaderMalformed);
         }
         Ok(Self {
@@ -309,12 +366,12 @@ impl SigV4Authorization {
         Self::parse_with(header, EmptyRegion::Refused)
     }
 
-    /// [`SigV4Authorization::parse`], with the credential's empty region governed by `empty`.
+    /// [`SigV4Authorization::parse`], with the credential's region read by `rule`.
     ///
     /// # Errors
     ///
     /// As [`SigV4Authorization::parse`], with [`CredentialScope::parse_with`]'s region rule.
-    pub fn parse_with(header: &str, empty: EmptyRegion) -> Result<Self, AuthError> {
+    pub fn parse_with(header: &str, rule: impl Into<RegionRule>) -> Result<Self, AuthError> {
         let (algorithm, rest) = header.split_once(' ').ok_or(AuthError::AuthorizationHeaderMalformed)?;
         match SigFamily::from_algorithm(algorithm) {
             Ok(SigFamily::V4) => {}
@@ -354,7 +411,7 @@ impl SigV4Authorization {
         let signature = signature.ok_or(AuthError::AuthorizationHeaderMalformed)?;
 
         Ok(Self {
-            scope: CredentialScope::parse_with(credential, empty)?,
+            scope: CredentialScope::parse_with(credential, rule)?,
             signed_headers: Box::from(signed_headers),
             signature: parse_hex_signature(signature)?,
         })
@@ -405,12 +462,12 @@ impl PresignedParams {
         Self::parse_with(query, EmptyRegion::Refused)
     }
 
-    /// [`PresignedParams::parse`], with the credential's empty region governed by `empty`.
+    /// [`PresignedParams::parse`], with the credential's region read by `rule`.
     ///
     /// # Errors
     ///
     /// As [`PresignedParams::parse`], with [`CredentialScope::parse_with`]'s region rule.
-    pub fn parse_with(query: &RawQuery<'_>, empty: EmptyRegion) -> Result<Self, AuthError> {
+    pub fn parse_with(query: &RawQuery<'_>, rule: impl Into<RegionRule>) -> Result<Self, AuthError> {
         let required = |name: &str| -> Result<String, AuthError> {
             query.decoded_value(name)?.ok_or(AuthError::AuthorizationHeaderMalformed)
         };
@@ -422,7 +479,7 @@ impl PresignedParams {
             return Err(AuthError::AuthorizationHeaderMalformed);
         }
         Ok(Self {
-            scope: CredentialScope::parse_with(&required(X_AMZ_CREDENTIAL)?, empty)?,
+            scope: CredentialScope::parse_with(&required(X_AMZ_CREDENTIAL)?, rule)?,
             date: AmzDate::parse(&required(X_AMZ_DATE)?)?,
             signed_headers: Box::from(required(X_AMZ_SIGNED_HEADERS)?.as_str()),
             signature: parse_hex_signature(&required(crate::query::X_AMZ_SIGNATURE)?)?,
@@ -588,6 +645,60 @@ mod tests {
         ] {
             assert!(CredentialScope::parse_with(bad, EmptyRegion::Admitted).is_err(), "must reject {bad:?}");
         }
+    }
+
+    /// The unbounded reading, with the empty region governed by `empty`.
+    fn unbounded(empty: EmptyRegion) -> RegionRule {
+        RegionRule::STRICT.with_empty(empty).with_length(RegionLength::Unbounded)
+    }
+
+    /// Positive — an unbounded rule reads a region past the ceiling verbatim, in every parser that
+    /// takes a rule; the default and a bare [`EmptyRegion`] keep the ceiling.
+    #[test]
+    fn a_region_past_the_ceiling_is_read_only_under_an_unbounded_rule() {
+        for length in [CredentialScope::MAX_REGION_LEN + 1, 4096] {
+            let region = "a".repeat(length);
+            let value = format!("AKID/20150830/{region}/s3/aws4_request");
+            assert!(CredentialScope::parse(&value).is_err());
+            assert!(CredentialScope::parse_with(&value, EmptyRegion::Admitted).is_err());
+            assert!(CredentialScope::parse_with(&value, RegionRule::STRICT).is_err());
+            let scope = CredentialScope::parse_with(&value, unbounded(EmptyRegion::Refused)).expect("unbounded");
+            assert_eq!(scope.region(), region);
+            assert_eq!(scope.scope_string(), format!("20150830/{region}/s3/aws4_request"));
+
+            let header = format!("AWS4-HMAC-SHA256 Credential={value}, SignedHeaders=host, Signature={}", hex_signature());
+            assert!(SigV4Authorization::parse(&header).is_err());
+            let parsed = SigV4Authorization::parse_with(&header, unbounded(EmptyRegion::Refused)).expect("unbounded");
+            assert_eq!(parsed.scope().region(), region);
+        }
+        let at_ceiling = format!("AKID/20150830/{}/s3/aws4_request", "a".repeat(CredentialScope::MAX_REGION_LEN));
+        assert!(CredentialScope::parse(&at_ceiling).is_ok());
+        assert_eq!(
+            RegionRule::from(EmptyRegion::Admitted),
+            RegionRule::STRICT.with_empty(EmptyRegion::Admitted)
+        );
+    }
+
+    /// Negative — an unbounded rule lifts the ceiling and nothing else: a sixth field, a byte that
+    /// is not ASCII-graphic, and an empty region it does not admit are refused at any length.
+    #[test]
+    fn n_an_unbounded_rule_relaxes_no_other_rule() {
+        let long = "a".repeat(CredentialScope::MAX_REGION_LEN + 1);
+        for bad in [
+            format!("AKID/20150830/{long}/east-1/s3/aws4_request"),
+            format!("AKID/20150830/{long} east-1/s3/aws4_request"),
+            format!("AKID/20150830/{long}\teast-1/s3/aws4_request"),
+            format!("AKID/20150830/{long}\u{e9}/s3/aws4_request"),
+            format!("AKID/20150830/{long}/sts3/aws4_request"),
+            format!("AKID/20150831x/{long}/s3/aws4_request"),
+            EMPTY_REGION.to_owned(),
+        ] {
+            assert!(
+                CredentialScope::parse_with(&bad, unbounded(EmptyRegion::Refused)).is_err(),
+                "must reject {bad:?}"
+            );
+        }
+        assert!(CredentialScope::parse_with(EMPTY_REGION, unbounded(EmptyRegion::Admitted)).is_ok());
     }
 
     #[test]

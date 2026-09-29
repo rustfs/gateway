@@ -64,8 +64,8 @@ use std::sync::Arc;
 use http::Method;
 use rustfs_gateway_core::BoxFuture;
 use rustfs_gateway_sig::{
-    AUTHORIZATION_HEADER, AmzDate, AuthError, AuthScheme, CanonicalRequestSpec, CredentialScope, EmptyRegion, ExpectedScope,
-    PayloadMode, PostPolicy, PostPolicyError, PostPolicyLimits, PresignedParams, RawHost, RegionSet, ScopeRejection, SealedAws,
+    AUTHORIZATION_HEADER, AmzDate, AuthError, AuthScheme, CanonicalRequestSpec, CredentialScope, ExpectedScope, PayloadMode,
+    PostPolicy, PostPolicyError, PostPolicyLimits, PresignedParams, RawHost, RegionRule, RegionSet, ScopeRejection, SealedAws,
     SessionToken, SigFamily, SigIdentity, SigLocation, SigV4Authorization, Signature, SignatureMatch, SignedHeaderSet,
     UriPathCandidates, Verdict, X_AMZ_SECURITY_TOKEN, X_AMZ_SECURITY_TOKEN_HEADER, calculate_signature, enforce_scope,
     signing_key, timing,
@@ -491,6 +491,7 @@ impl core::fmt::Debug for SigV4Authenticator {
             .field("accepts_any_signing_region", &self.region_policy.any_region)
             .field("accepts_empty_signing_region", &self.region_policy.empty_region)
             .field("verifies_unreadable_signing_regions", &self.region_policy.any_spelling)
+            .field("reads_signing_regions_of_any_length", &self.region_policy.any_length)
             .finish()
     }
 }
@@ -539,7 +540,7 @@ impl SigV4Authenticator {
         // Normalising it here keeps malformed material on the same 403 path and prevents a caller
         // from learning how far parsing got before an access key could be recovered.
         let presented =
-            Presented::read(sealed, location, self.region_policy.empty_region()).map_err(|_| AuthError::InvalidAccessKeyId)?;
+            Presented::read(sealed, location, self.region_policy.region_rule()).map_err(|_| AuthError::InvalidAccessKeyId)?;
 
         // H5, and the only public producer of the `VerifiedScope` the derivation takes. A scope
         // the client chose therefore cannot seed a signing key.
@@ -731,12 +732,12 @@ enum Presented {
 }
 
 impl Presented {
-    fn read(sealed: &SealedAws<'_>, location: SigLocation, empty: EmptyRegion) -> Result<Self, AuthError> {
+    fn read(sealed: &SealedAws<'_>, location: SigLocation, rule: RegionRule) -> Result<Self, AuthError> {
         match location {
-            SigLocation::Query => Ok(Self::Query(Box::new(PresignedParams::parse_with(&sealed.view().query(), empty)?))),
+            SigLocation::Query => Ok(Self::Query(Box::new(PresignedParams::parse_with(&sealed.view().query(), rule)?))),
             SigLocation::FormField => {
                 let fields = sealed.view().form_fields().ok_or(AuthError::AuthorizationHeaderMalformed)?;
-                let policy = PostPolicy::parse_with(fields, "", PostPolicyLimits::default(), sealed.clock().now(), empty)
+                let policy = PostPolicy::parse_with(fields, "", PostPolicyLimits::default(), sealed.clock().now(), rule)
                     .map_err(PostPolicyError::auth_error)?;
                 Ok(Self::Form(Box::new(policy)))
             }
@@ -748,7 +749,7 @@ impl Presented {
                     .ok_or(AuthError::AuthorizationHeaderMalformed)?
                     .to_str()
                     .map_err(|_| AuthError::AuthorizationHeaderMalformed)?;
-                Ok(Self::Header(Box::new(SigV4Authorization::parse_with(raw, empty)?)))
+                Ok(Self::Header(Box::new(SigV4Authorization::parse_with(raw, rule)?)))
             }
             _ => Err(AuthError::AuthorizationHeaderMalformed),
         }
