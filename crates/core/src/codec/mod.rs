@@ -51,6 +51,7 @@ pub mod extra_headers;
 mod legacy_path;
 pub mod response;
 mod rustfs_listing;
+pub mod strict_date;
 pub mod value;
 pub mod view;
 
@@ -64,6 +65,7 @@ pub use crate::codec::response::{
     BodyAllowance, EncodedResponse, ResponseBody, ResponseOverride, body_allowance, override_header_value, response_body_allowed,
     response_framing_allowed, status_code,
 };
+pub use crate::codec::strict_date::strict_http_date;
 pub use crate::codec::value::*;
 pub use crate::codec::view::{MetaView, PageSizeCeiling, RequestBody, RequestBodyMode, bucket_label};
 

@@ -180,6 +180,7 @@ impl GatewaySeam {
             .address_paths_as_legacy_rustfs()
             .select_operations_as_legacy_rustfs()
             .accept_empty_uploads_without_content_length()
+            .refuse_unreadable_date_conditions()
             .url_encode_listings_like_rustfs()
             .legacy_rustfs_post_forms()
             // RustFS's transport gate with TLS required: a target's customer key is refused over

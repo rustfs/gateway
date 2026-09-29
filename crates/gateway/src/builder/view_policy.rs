@@ -77,8 +77,11 @@ use super::legacy_sentences::BodySentences;
 use crate::integrity::IntegrityCodes;
 use crate::render::{S3Error, from_wire_reject};
 use rustfs_gateway_core::codec::value::RustFsListing;
-use rustfs_gateway_core::{MetaView, PageSizeCeiling};
-use rustfs_gateway_http::WireReject;
+use rustfs_gateway_core::{HandlerError, MetaView, PageSizeCeiling};
+use rustfs_gateway_http::{HeaderView, WireReject};
+
+mod date_conditions;
+pub use self::date_conditions::STRICT_DATE_CONDITION_HEADERS;
 
 /// The page size RustFS lowers an oversized `max-keys` to (`S3_MAX_KEYS`).
 pub const RUSTFS_MAX_KEYS_CEILING: i32 = 1000;
@@ -143,6 +146,8 @@ pub(crate) struct ViewPolicy {
     presigned_payload_unsigned: bool,
     empty_uploads_without_length: bool,
     rustfs_listings: bool,
+    /// Whether date conditions are read in legacy RustFS's one spelling (`date_conditions`).
+    pub(super) strict_date_conditions: bool,
 }
 
 impl ViewPolicy {
@@ -182,6 +187,11 @@ impl ViewPolicy {
         } else {
             meta
         };
+        let meta = if self.strict_date_conditions && date_conditions::covers(operation) {
+            meta.with_strict_date_conditions()
+        } else {
+            meta
+        };
         let meta = match self.integrity_codes {
             IntegrityCodes::RustFs => meta.with_checksum_failures_as_bad_digest(),
             IntegrityCodes::Model => meta,
@@ -203,6 +213,22 @@ impl ViewPolicy {
     /// A refusal of the request head's framing, answered with this assembly's sentences.
     pub(crate) fn wire_refusal(self, reject: WireReject) -> S3Error {
         self.body_sentences.restyle(from_wire_reject(reject))
+    }
+
+    /// The refusal this assembly owes `operation` before decode, when there is one the codec
+    /// cannot phrase: legacy RustFS's answer to a date condition it cannot read, which quotes the
+    /// value, when the RustFS profile reads them strictly. `headers` is the accepted head the codec
+    /// binds from.
+    ///
+    /// Unrendered: the service renders it where it renders every other refusal, after
+    /// authorization and before the body read and the codec — where legacy RustFS's own decode
+    /// refuses it, after its signature check and before its access check and handler.
+    pub(crate) fn refusal_before_decode(self, operation: &str, headers: &HeaderView<'_>) -> Option<HandlerError> {
+        if self.strict_date_conditions {
+            date_conditions::refusal(operation, headers)
+        } else {
+            None
+        }
     }
 }
 
@@ -344,6 +370,7 @@ mod tests {
         assert!(!ViewPolicy::default().presigned_payload_unsigned());
         assert!(!ViewPolicy::default().empty_uploads_without_length);
         assert!(!ViewPolicy::default().rustfs_listings);
+        assert!(!ViewPolicy::default().strict_date_conditions);
         for operation in ["ListMultipartUploads", "ListParts", "ListBuckets", "GetObject", "PutObject"] {
             assert!(!CLAMPED_MAX_KEYS_OPERATIONS.contains(&operation), "{operation}");
         }

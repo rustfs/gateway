@@ -17,7 +17,8 @@
 //!
 //! Responsible for: resolving one field's tolerance from the quirks it references.
 //! NOT responsible for: emitting the read ([`super::decode`] does) or performing it
-//! (`rustfs-gateway-core`'s `codec::value::date_condition` does).
+//! (`rustfs-gateway-core`'s `codec::value::date_condition_in` does, under the grammar the
+//! request's view carries).
 //! Upstream: [`rustfs_gateway_model::ir`]. Downstream: [`super::decode`].
 //!
 //! # The third twin, and why it is not a decoder feature
@@ -77,8 +78,11 @@ impl Tolerance {
                 let Type::Timestamp(format) = ty else {
                     return None;
                 };
+                // `date_condition_in` rather than `date_condition`: the view carries the reading
+                // the deployment chose (the RustFS profile reads legacy RustFS's one spelling), so
+                // the grammar is decided per request and never per generated file.
                 Some(format!(
-                    "value::date_condition(raw, TimestampFormat::{}).honoured()",
+                    "value::date_condition_in(request, raw, TimestampFormat::{}).honoured()",
                     super::expr::timestamp_format(*format)
                 ))
             }

@@ -701,6 +701,9 @@ mod s3cmd_acl_tests;
 mod signing_region_tests;
 mod sigv2_presigned_tests;
 
+/// And what it refuses where the core is lenient: a conditional date RustFS cannot read (R14).
+mod date_condition_tests;
+
 /// Listings under `encoding-type=url` rendered as legacy RustFS renders them (rustfs/gateway#1059).
 mod listing_encoding_tests;
 

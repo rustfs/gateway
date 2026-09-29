@@ -1083,9 +1083,13 @@ impl S3Service {
         let body_meta = &meta;
         let body_headers = &headers;
         let body_wire = &wire;
+        let view_policy = self.inner.view_policy;
         let read_body = move |state: AuthorizedRoute| async move {
             let sse = rustfs_gateway_core::sse::enforce(body_meta, connection, &body_service.inner.sse)
                 .map_err(|rejection| from_sse(rejection, response_kind))?;
+            if let Some(refusal) = view_policy.refusal_before_decode(operation, &body_wire.headers()) {
+                return Err(from_handler(refusal, response_kind, ConnectionIntent::MayKeepAlive));
+            }
             let ingest = match framing_mode.as_ref() {
                 Some(payload) => {
                     let seed = crate::chunked::presented_signature_hex(body_headers, body_wire.query().as_str());

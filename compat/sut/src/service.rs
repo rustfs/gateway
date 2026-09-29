@@ -250,6 +250,9 @@ pub(crate) fn build_service(
             // RustFS stores an upload the transport ended empty without `Content-Length` as an
             // empty object instead of answering `411` (rustfs/rustfs#6849).
             .accept_empty_uploads_without_content_length()
+            // RustFS reads a conditional date in one spelling and refuses the rest, minio-js's
+            // `Invalid Date` included, where the core ignores it (rustfs/backlog#1677, R14).
+            .refuse_unreadable_date_conditions()
             // RustFS's protocol front hands its storage every key up to 1024 bytes and its storage
             // decides; this backend hashes keys onto the disk, so no key reaches it as a path
             // (#1107).
