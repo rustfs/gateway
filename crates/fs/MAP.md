@@ -27,6 +27,7 @@ Agent entry point. File → responsibility → when you need to open it.
 | `src/upload_part_copy.rs` | `UploadPartCopy`: authorized source, copy-source conditions, `x-amz-copy-source-range` span stored as a part. | Changing part copies. |
 | `src/uploads.rs` | Durable upload-ID allocation, multipart record/checksum decoding, path validation, and active-upload enumeration. | Changing upload capability persistence, checksum negotiation, or upload listing authority. |
 | `src/versioning.rs` | Persistent version states, shared object publication, delete markers, and owner-bearing version census handlers. | Changing PUT/multipart publication, version selection, retention, or listing semantics. |
+| `src/versioning/configuration.rs` | Every member of a versioning configuration persisted in legacy RustFS's form, and MinIO's excluded prefixes and folders applied to writes and deletes as legacy RustFS applies them, with its wildcard match (rustfs/gateway#1078). | Changing which keys a bucket versions, or what a versioning configuration stores. |
 | `tests/crud.rs` | Signed production-service CRUD, multipart, and storage-boundary evidence. | Changing a handler, path rule, or public assembly API. |
 | `tests/crud/bucket_location.rs` | Null and named location answers as exact bytes, the `EU` alias, constraint refusals, and region agreement with `HeadBucket`. | Changing `GetBucketLocation` or the served region. |
 | `tests/crud/listing.rs` | Restarted V1/V2 pages, fixed-owner projection, prefix/delimiter, URL encoding, and cursor/path refusals. | Changing ordinary listing behavior or its persisted source. |
@@ -59,6 +60,7 @@ Agent entry point. File → responsibility → when you need to open it.
 | `tests/crud/object_tagging.rs` | Restarted current/version tag operations and lifecycle filter consumption. | Changing object tags or tag-selected lifecycle expiration. |
 | `tests/fixtures/version-record-v0/**` | One version directory captured verbatim from the build that wrote eight-line records. | Proving this build still reads what the pre-metadata-section build wrote. |
 | `tests/crud/versioning.rs` | Enabled, suspended, owner reporting, restart, corruption, symlink, version-cursor pairing, and vanished-cursor resume evidence. | Changing versioned object behavior, persistence, or version-listing cursors. |
+| `tests/crud/versioning_exclusions.rs` | Excluded keys written as null versions and deleted without markers, every member persisted and surviving restart, the status-only answer, clearing, and fail-closed corruption. | Changing versioning exclusions or the persisted configuration. |
 
 ## Verify
 
