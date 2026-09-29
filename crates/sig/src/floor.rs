@@ -16,10 +16,10 @@
 //!
 //! Responsible for: [`WireView`] (the authentication surfaces of one request), [`SecurityFloor`]
 //! and its [`SecurityFloor::admit`] — the one entry point that runs the seven unconditional rules
-//! in order — and the three of those rules whose implementation lives here: the presented-credential
-//! rule, the duplicate-parameter rule, and the strict `X-Amz-Expires` reader.
-//! The allow-list lives in [`crate::operation`] and the scope cross-check in [`crate::scope`];
-//! both are still unconditional, and `admit` is what calls them.
+//! in order — and the two of those rules whose implementation lives here: the presented-credential
+//! rule and the duplicate-parameter rule. The allow-list lives in [`crate::operation`], the scope
+//! cross-check in [`crate::scope`] and the `X-Amz-Expires` reader in [`crate::presigned_expiry`];
+//! all are still unconditional, and `admit` is what calls them.
 //! NOT responsible for: computing or comparing a signature (that is [`crate::derive`] and
 //! [`crate::signature`]), the presigned body rules and POST-policy field enforcement (P2-05),
 //! SigV2's string-to-sign (P2-06), the operation registry (P4-04 — this module defines what
@@ -64,14 +64,15 @@ use core::fmt;
 
 use http::HeaderMap;
 
-use crate::clock::{
-    ClockChecked, PresignExpiry, RequestNow, SkewWindow, enforce_clock_skew, enforce_expiry, enforce_presigned_clock_skew,
-};
+use crate::clock::{RequestNow, SkewWindow, enforce_clock_skew, enforce_presigned_clock_skew};
 use crate::mode::{
     STREAMING_ECDSA, STREAMING_ECDSA_TRAILER, STREAMING_SIGNED, STREAMING_SIGNED_TRAILER, STREAMING_UNSIGNED_TRAILER,
 };
 use crate::operation::{OperationFloor, SchemeSlot, SigV2Presigned};
 use crate::parse::{AmzDate, X_AMZ_ALGORITHM, X_AMZ_CREDENTIAL, X_AMZ_DATE, X_AMZ_SIGNED_HEADERS};
+use crate::presigned_expiry::PresignedExpiryRule;
+#[cfg(test)]
+pub(crate) use crate::presigned_expiry::enforce_presign_expiry;
 use crate::query::{RawQuery, X_AMZ_SIGNATURE, percent_decode};
 use crate::scheme::{SigFamily, SigLocation};
 use crate::sig_v2::{SIGV2_EXPIRES_PARAM, SealedSigV2, SigV2Mode, SigV2Policy};
@@ -309,43 +310,6 @@ pub fn enforce_no_duplicate_sig_params(view: &WireView<'_>) -> Result<(), AuthEr
     Ok(())
 }
 
-/// H2, the parsing half — the strict `X-Amz-Expires` reader.
-///
-/// Strict means: present exactly once, a non-empty run of ASCII digits and nothing else. No sign,
-/// no decimal point, no exponent, no whitespace, no unit suffix, no non-ASCII digit. Everything
-/// else is a rejection, because every lenient reader turns some spelling of "very large" into a
-/// presigned URL that outlives its ceiling (rustfs/rustfs#5368).
-///
-/// The range and overflow rules are [`crate::enforce_expiry`]'s, and this function calls it.
-///
-/// # Errors
-///
-/// [`AuthError::AuthorizationQueryParametersError`] for every spelling fault and for a value
-/// outside `1..=604800`; [`AuthError::RequestExpired`] when the URL's lifetime has passed.
-pub fn enforce_presign_expiry(view: &WireView<'_>, clock: ClockChecked) -> Result<PresignExpiry, AuthError> {
-    if view.count_query_param(X_AMZ_EXPIRES) != 1 {
-        return Err(AuthError::AuthorizationQueryParametersError);
-    }
-    let raw = view
-        .query()
-        .decoded_value(X_AMZ_EXPIRES)
-        .map_err(|_| AuthError::AuthorizationQueryParametersError)?
-        .ok_or(AuthError::AuthorizationQueryParametersError)?;
-
-    let digits = raw.as_bytes();
-    if digits.is_empty() || !digits.iter().all(u8::is_ascii_digit) {
-        return Err(AuthError::AuthorizationQueryParametersError);
-    }
-    let mut seconds: u64 = 0;
-    for digit in digits {
-        seconds = seconds
-            .checked_mul(10)
-            .and_then(|value| value.checked_add(u64::from(digit - b'0')))
-            .ok_or(AuthError::AuthorizationQueryParametersError)?;
-    }
-    enforce_expiry(clock, seconds)
-}
-
 /// Refuses a SigV2 request that declares a framed payload.
 ///
 /// `x-amz-content-sha256` is not part of SigV2 at all; a client that sends one has it signed as an
@@ -421,6 +385,7 @@ impl fmt::Debug for Admission<'_> {
 pub struct SecurityFloor {
     skew: SkewWindow,
     sigv2: SigV2Policy,
+    expiry: PresignedExpiryRule,
     failure_floor: FailureFloor,
     custom_schemes: CustomSchemeRegistry,
     anonymous: crate::operation::AnonymousPolicy,
@@ -476,6 +441,20 @@ impl SecurityFloor {
     #[must_use]
     pub const fn sigv2_policy(&self) -> SigV2Policy {
         self.sigv2
+    }
+
+    /// Sets how a presigned URL's lifetime is read ([`PresignedExpiryRule`]; AWS by default). The
+    /// legacy reading widens what is accepted, so the posture report names it whenever it is on.
+    #[must_use]
+    pub const fn with_presigned_expiry_rule(mut self, rule: PresignedExpiryRule) -> Self {
+        self.expiry = rule;
+        self
+    }
+
+    /// The presigned-lifetime rule in force, for the startup security-posture report.
+    #[must_use]
+    pub const fn presigned_expiry_rule(&self) -> PresignedExpiryRule {
+        self.expiry
     }
 
     /// The clock-skew window in force.
@@ -593,7 +572,7 @@ impl SecurityFloor {
         // 6. H2 — the presigned lifetime, from the receipt step 5 produced; for a presigned URL
         // this is the past bound, so it runs on every receipt `enforce_presigned_clock_skew` made.
         let expiry = if presigned {
-            Some(enforce_presign_expiry(&view, clock)?)
+            Some(self.expiry.enforce(&view, clock)?)
         } else {
             None
         };
@@ -663,19 +642,14 @@ impl SecurityFloor {
             SigV2Mode::PresignedUrl => {
                 let access_key_id = self.sigv2_query_value(&view, AWS_ACCESS_KEY_ID_PARAM)?;
                 let signature = self.sigv2_query_value(&view, SIGV2_SIGNATURE_PARAM)?;
-                let expires = self.sigv2_query_value(&view, SIGV2_EXPIRES_PARAM)?;
                 // Before the credential is parsed, so that an expired URL and a malformed one are
                 // not distinguishable by which check ran.
-                let expires_at = crate::sig_v2::parse_presigned_expires(&expires, now)?;
+                let expires_at = self.expiry.sigv2_expires_of(&view, now)?;
                 let presented = crate::sig_v2::parse_presigned_credential(&access_key_id, &signature)?;
-                Ok(Admission::SealedSigV2(SealedSigV2::presigned(
-                    view,
-                    presented,
-                    now,
-                    expires_at,
-                    presence,
-                    operation.service(),
-                )))
+                Ok(Admission::SealedSigV2(
+                    SealedSigV2::presigned(view, presented, now, expires_at, presence, operation.service())
+                        .with_expiry_rule(self.expiry),
+                ))
             }
             SigV2Mode::HeaderAuth => {
                 let raw = view

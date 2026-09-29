@@ -701,6 +701,9 @@ mod s3cmd_acl_tests;
 mod signing_region_tests;
 mod sigv2_presigned_tests;
 
+/// A presigned URL's lifetime, read as legacy RustFS reads it (rustfs/rustfs#5368).
+mod presigned_expiry_tests;
+
 /// Bucket-policy conditions on the request's encryption header (rustfs/gateway#979).
 mod sse_condition_tests;
 

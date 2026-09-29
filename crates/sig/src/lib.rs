@@ -100,6 +100,7 @@ mod parse;
 pub mod post_policy;
 mod post_policy_json;
 pub mod presigned;
+mod presigned_expiry;
 mod query;
 mod scheme;
 mod scope;
@@ -127,7 +128,7 @@ pub use derive::{VerifiedScope, calculate_signature, signing_key};
 pub use error::{SigParseError, Unimplemented};
 pub use floor::{
     Admission, SecurityFloor, WireView, X_AMZ_DATE_HEADER, X_AMZ_EXPIRES, X_AMZ_SECURITY_TOKEN, X_AMZ_SECURITY_TOKEN_HEADER,
-    detect_credentials, enforce_no_duplicate_sig_params, enforce_presign_expiry,
+    detect_credentials, enforce_no_duplicate_sig_params,
 };
 pub use mode::{
     CanonicalPayloadToken, DeclaredTrailers, EMPTY_PAYLOAD_SHA256_HEX, MAX_DECLARED_TRAILERS, PayloadMode, STREAMING_ECDSA,
@@ -143,6 +144,7 @@ pub use post_policy::{
     PostPolicy, PostPolicyEnforcement, PostPolicyError, PostPolicyLimits, SigV2PostPolicy, build_success_action_redirect,
 };
 pub use presigned::{PayloadObligation, PresignedRequest};
+pub use presigned_expiry::{PresignedExpiryRule, enforce_presign_expiry};
 pub use query::{QueryExclusion, RawQuery, X_AMZ_SIGNATURE, percent_decode, percent_encode};
 pub use secret::{SessionTokenMatch, TokenMismatch};
 // The effective host is determined in `rustfs-gateway-http` and nowhere else. These are

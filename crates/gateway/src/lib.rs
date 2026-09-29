@@ -103,6 +103,7 @@ mod panic_boundary;
 mod payload_header;
 mod post_object;
 mod posture;
+mod presigned_expiry_posture;
 mod probe;
 mod render;
 mod request_body;
@@ -473,7 +474,9 @@ pub use rustfs_gateway_core::{InvalidWireLabel, RedirectTarget, RegionLabel, Ver
 // exists to prevent. This is the value `CreateBucket` declares, and it is what a backend reads.
 pub use rustfs_gateway_core::ops::create_bucket::REGION_MATCH_POLICY;
 pub use rustfs_gateway_http::{EffectiveHost, Limits, TransportExtensions, WireReject, WireRequest};
-pub use rustfs_gateway_sig::{Identity, OperationFloor, RegionSet, RequestNow, SecurityFloor, SigService, SkewWindow, Verdict};
+pub use rustfs_gateway_sig::{
+    Identity, OperationFloor, PresignedExpiryRule, RegionSet, RequestNow, SecurityFloor, SigService, SkewWindow, Verdict,
+};
 pub use rustfs_gateway_stream::{Body, ByteStream, Payload, TrailingHeaders};
 /// Tower's service trait, exposed so facade-only consumers can wrap [`S3Service`].
 pub use tower::Service as TowerService;

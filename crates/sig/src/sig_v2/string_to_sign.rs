@@ -29,6 +29,7 @@ use http::Method;
 use http::header::{CONTENT_TYPE, DATE, HeaderMap, HeaderName};
 
 use crate::contracts::{SIGV2_EMPTY_DATE_ON_AMZ_DATE, SIGV2_INCLUDED_QUERY, SIGV2_QUERY_NOT_COVERED};
+use crate::presigned_expiry::PresignedExpiryRule;
 use crate::query::RawQuery;
 use crate::secret::SecretBytes;
 use crate::signature::{CtBytes, Signature};
@@ -205,6 +206,7 @@ pub struct SigV2StringToSignSpec<'r> {
     query: &'r RawQuery<'r>,
     headers: &'r HeaderMap,
     virtual_host_bucket: Option<&'r str>,
+    expiry_rule: PresignedExpiryRule,
 }
 
 impl<'r> SigV2StringToSignSpec<'r> {
@@ -233,7 +235,17 @@ impl<'r> SigV2StringToSignSpec<'r> {
             query,
             headers,
             virtual_host_bucket,
+            expiry_rule: PresignedExpiryRule::Aws,
         }
+    }
+
+    /// Reads a presigned `Expires` under `rule`: the rule the floor admitted the request under, so
+    /// the preimage signs exactly the spellings the floor accepted (the RustFS profile's legacy
+    /// reading takes `+` and `-0`). The AWS reading is the default.
+    #[must_use]
+    pub const fn with_presigned_expiry_rule(mut self, rule: PresignedExpiryRule) -> Self {
+        self.expiry_rule = rule;
+        self
     }
 
     /// Builds the six-line string-to-sign.
@@ -321,10 +333,10 @@ impl<'r> SigV2StringToSignSpec<'r> {
                     .decoded_value(SIGV2_EXPIRES_PARAM)
                     .map_err(|_| AuthError::AuthorizationQueryParametersError)?
                     .ok_or(AuthError::AuthorizationQueryParametersError)?;
-                // Syntax only. The seven-day ceiling and the expiry instant need a clock, and live
-                // in `super::parse_presigned_expires`; rejecting the syntax here means no malformed
-                // spelling ever reaches the HMAC.
-                super::parse_expires_digits(&raw)?;
+                // Syntax only. The ceiling and the expiry instant need a clock, and live in
+                // `crate::PresignedExpiryRule::sigv2_expires`; rejecting the syntax here means no
+                // spelling the rule does not read ever reaches the HMAC.
+                self.expiry_rule.sigv2_expires_spelling(&raw)?;
                 Ok(raw)
             }
             SigV2Mode::PostPolicy => Err(AuthError::AuthorizationHeaderMalformed),
