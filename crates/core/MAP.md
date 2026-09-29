@@ -49,6 +49,7 @@ Agent entry point for operations, routing, codecs, authorization state and handl
 | `src/codec/legacy_path.rs` | Legacy RustFS's path split (#1115): the whole path decoded once, the bucket ended at the first decoded `/`, and the refusals it makes before routing. | A RustFS-profile request reaches the wrong bucket, key or refusal. |
 | `src/codec/value.rs` | IR scalar conversions and strict wire forms. | A scalar is accepted, rejected or rendered wrongly. |
 | `src/codec/rustfs_listing.rs` | Legacy RustFS's `encoding-type=url` rule for a listing under the RustFS profile: which members, `/` literal, the echo. | A RustFS-profile listing encodes the wrong members or echoes the wrong value. |
+| `src/codec/strict_date.rs` | The one HTTP-date spelling legacy RustFS reads a conditional date in (RustFS profile, rustfs/backlog#1677 R14). | A RustFS-profile date condition reads differently from legacy RustFS. |
 | `src/codec/response.rs` | Encoded response/body allowance. | A response has the wrong body/status shape. |
 | `src/codec/extra_headers.rs` | A handler's extra response headers and the gateway-owned names they may not use (rustfs/gateway#1018). | A backend header is refused, dropped or allowed to override the encoder. |
 | `src/codec/tests/metadata_and_url.rs` | Metadata symmetry and forced listing-encoding regressions. | RFC 2047 or `encoding-type=url` behavior changes. |

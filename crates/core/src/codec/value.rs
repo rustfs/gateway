@@ -241,6 +241,26 @@ pub fn date_condition(value: &str, format: TimestampFormat) -> DateCondition {
     }
 }
 
+/// Reads a date condition under the reading `request`'s deployment chose, tolerantly.
+///
+/// The call every generated decoder makes for a `header_tolerance` date condition. The core
+/// default is [`date_condition`]'s RFC 9110 grammar. A view the deployment marked with
+/// [`MetaView::with_strict_date_conditions`] (the RustFS profile, rustfs/backlog#1677 R14) reads an
+/// HTTP-date as legacy RustFS reads it instead, [`crate::codec::strict_date::strict_http_date`],
+/// so a value both read is handed on as the same instant and a value only one of them reads is
+/// never handed on as a condition the other would not have seen.
+///
+/// Never an error, under either reading: the RustFS profile refuses an unreadable value before
+/// decode, where it can say which header and which value it could not read, so a view marked
+/// strict only reaches this with a value the strict grammar reads, an empty one, or none.
+#[must_use]
+pub fn date_condition_in(request: &MetaView<'_>, value: &str, format: TimestampFormat) -> DateCondition {
+    if request.strict_date_conditions() && format == TimestampFormat::HttpDate {
+        return crate::codec::strict_date::strict_http_date(value).map_or(DateCondition::Unreadable, DateCondition::At);
+    }
+    date_condition(value, format)
+}
+
 /// Renders a timestamp in the format the IR bound to this field.
 ///
 /// # Errors

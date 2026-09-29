@@ -27,6 +27,8 @@ use crate::request::RawRequest;
 use crate::samples::{OWNER, UPLOAD_ID, VERSION_ID, sse};
 
 const DATE: &str = "Wed, 21 Oct 2015 07:28:00 GMT";
+/// [`DATE`] with a sign on its year, which legacy RustFS reads and RFC 9110 does not.
+const SIGNED_YEAR: &str = "Wed, 21 Oct +2015 07:28:00 GMT";
 const LOCK_DATE: &str = "2030-01-01T00:00:00.000Z";
 const SSE_KEY: &str = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=";
 const SSE_KEY_MD5: &str = "hRasmdxgYDKV3nvbahU1MA==";
@@ -126,6 +128,25 @@ fn copies() -> Vec<SeamRow> {
         row(
             "copy-object-source-with-plus-unicode-and-null-version",
             RawRequest::new(Method::PUT, "/bucket/k").header("x-amz-copy-source", "/src-bucket/a+b%E2%9C%93?versionId=null"),
+            Expect::Identical,
+        ),
+        // A year with a sign: legacy RustFS reads `+1994` as 1994, and the RFC 9110 grammar the core
+        // reads by default refuses it and drops the condition. Under the RustFS profile both stacks
+        // hand RustFS the same instant (rustfs/backlog#1677, R14).
+        row(
+            "copy-object-signed-year-conditions",
+            RawRequest::new(Method::PUT, "/bucket/k")
+                .header("x-amz-copy-source", "/src-bucket/src")
+                .header("x-amz-copy-source-if-modified-since", SIGNED_YEAR)
+                .header("x-amz-copy-source-if-unmodified-since", SIGNED_YEAR),
+            Expect::Identical,
+        ),
+        row(
+            "upload-part-copy-signed-year-conditions",
+            RawRequest::new(Method::PUT, &format!("/bucket/k?partNumber=1&uploadId={UPLOAD_ID}"))
+                .header("x-amz-copy-source", "/src-bucket/src")
+                .header("x-amz-copy-source-if-modified-since", SIGNED_YEAR)
+                .header("x-amz-copy-source-if-unmodified-since", SIGNED_YEAR),
             Expect::Identical,
         ),
         row(

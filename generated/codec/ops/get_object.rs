@@ -60,7 +60,7 @@ impl OperationCodec for dto::GetObject {
         // IfModifiedSince — header `if-modified-since`, read tolerantly: a value that is not a date is ignored.
         if let Some(raw) = request.header("if-modified-since") {
             let raw = raw.as_ref();
-            input.if_modified_since = value::date_condition(raw, TimestampFormat::HttpDate).honoured();
+            input.if_modified_since = value::date_condition_in(request, raw, TimestampFormat::HttpDate).honoured();
         }
         // IfNoneMatch — header `if-none-match`, repeated field lines joined.
         if let Some(raw) = request.header("if-none-match") {
@@ -70,7 +70,7 @@ impl OperationCodec for dto::GetObject {
         // IfUnmodifiedSince — header `if-unmodified-since`, read tolerantly: a value that is not a date is ignored.
         if let Some(raw) = request.header("if-unmodified-since") {
             let raw = raw.as_ref();
-            input.if_unmodified_since = value::date_condition(raw, TimestampFormat::HttpDate).honoured();
+            input.if_unmodified_since = value::date_condition_in(request, raw, TimestampFormat::HttpDate).honoured();
         }
         // Key — URI label, decoded once by `MetaView::of`.
         input.key = request.require_key()?;

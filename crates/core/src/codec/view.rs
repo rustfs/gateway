@@ -77,6 +77,8 @@ pub struct MetaView<'a> {
     ended_empty: bool,
     /// Legacy RustFS's `encoding-type=url` rule for this listing, under the RustFS profile.
     rustfs_listing: Option<crate::codec::value::RustFsListing>,
+    /// Whether the deployment reads an HTTP-date condition in legacy RustFS's one spelling.
+    strict_date_conditions: bool,
 }
 
 /// A page-size query parameter answered with its ceiling when the request asked for more.
@@ -200,6 +202,7 @@ impl<'a> MetaView<'a> {
             page_size_ceiling: None,
             ended_empty: false,
             rustfs_listing: None,
+            strict_date_conditions: false,
         })
     }
 
@@ -226,6 +229,7 @@ impl<'a> MetaView<'a> {
             page_size_ceiling: self.page_size_ceiling,
             ended_empty: self.ended_empty,
             rustfs_listing: self.rustfs_listing,
+            strict_date_conditions: self.strict_date_conditions,
         }
     }
 
@@ -261,6 +265,24 @@ impl<'a> MetaView<'a> {
     #[must_use]
     pub const fn checksum_failures_as_bad_digest(&self) -> bool {
         self.checksum_failures_as_bad_digest
+    }
+
+    /// This view, reading an HTTP-date condition in the one spelling legacy RustFS reads.
+    ///
+    /// The assembly calls this only for an operation its deployment reads date conditions strictly
+    /// on (the RustFS profile, rustfs/backlog#1677 R14), having refused an unreadable one first, so
+    /// [`crate::codec::value::date_condition_in`] hands on the instant legacy RustFS would have read
+    /// rather than the RFC 9110 reading of the same bytes. Every other member reads as before.
+    #[must_use]
+    pub const fn with_strict_date_conditions(mut self) -> Self {
+        self.strict_date_conditions = true;
+        self
+    }
+
+    /// Whether this deployment reads an HTTP-date condition in legacy RustFS's one spelling.
+    #[must_use]
+    pub const fn strict_date_conditions(&self) -> bool {
+        self.strict_date_conditions
     }
 
     /// This view, with one page-size query parameter clamped to its ceiling.
