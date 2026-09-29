@@ -13,9 +13,9 @@
 // limitations under the License.
 
 //! The opt-in switches of the built-in SigV4 authenticator: handing the caller's secret to
-//! handlers (ADR-0022), verifying any signing region (ADR-0023), and the RustFS profile's reading
-//! of signing regions — empty, outside the grammar, of any length (rustfs/backlog#1677). All are
-//! off by default.
+//! handlers (ADR-0022), verifying any signing region (ADR-0023), the RustFS profile's reading of
+//! signing regions — empty, outside the grammar, of any length (rustfs/backlog#1677) — and its
+//! narrower raw-path fallback (rustfs/rustfs#2593). All are off by default.
 //!
 //! Responsible for: the builder methods, their documented posture, and [`RegionPolicy`], which
 //! turns the region switches into the parsers' region rule and the scope expectation.
@@ -173,6 +173,22 @@ impl SigV4Authenticator {
     #[must_use]
     pub fn accept_signing_regions_of_any_length(mut self) -> Self {
         self.region_policy.any_length = true;
+        self
+    }
+
+    /// Verifies the wire spelling of a request path, after its decoded spelling failed, only when
+    /// the wire path carries a byte a percent-escape would have encoded (anything but
+    /// `A-Z a-z 0-9 - _ . ~ / %`), as legacy RustFS does (rustfs/rustfs#2593): a client that signs
+    /// a raw `=` or `+` in a key is verified, and a path that differs from its decoded spelling
+    /// only in how its escapes are spelled (`%7E`, `%3d`) is verified in the decoded spelling
+    /// alone, so a signature over the re-spelled escapes is `403 SignatureDoesNotMatch`.
+    ///
+    /// Off by default: the default also tries the wire spelling of a path whose escapes a proxy
+    /// re-spelled in transit. The switch only removes a candidate; it adds none, changes no key
+    /// material and no comparison, and every other check is unchanged.
+    #[must_use]
+    pub fn verify_raw_paths_only_with_unencoded_bytes(mut self) -> Self {
+        self.raw_path = rustfs_gateway_sig::RawPathFallback::WithUnencodedBytes;
         self
     }
 

@@ -156,7 +156,10 @@ pub(crate) fn build_service(
                     // `InvalidRequest` (rustfs/gateway#1075).
                     .refuse_unreadable_signing_regions_after_verification()
                     // At any length: its parser has no ceiling on the region.
-                    .accept_signing_regions_of_any_length(),
+                    .accept_signing_regions_of_any_length()
+                    // It verifies a path's wire spelling only when the path carries an unencoded
+                    // byte, such as a raw `=` (rustfs/rustfs#2593).
+                    .verify_raw_paths_only_with_unencoded_bytes(),
             )
             // Not an allow-all, and not a bare operation-set filter either: the matrix must see a
             // refusal for anything outside the reference backend's registered set, and the

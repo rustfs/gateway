@@ -134,6 +134,8 @@ mod precondition_contract;
 mod precondition_reachability;
 #[path = "presigned_put.rs"]
 mod presigned_put;
+#[path = "raw_path_fallback.rs"]
+mod raw_path_fallback;
 #[path = "refusal_order_guards.rs"]
 mod refusal_order_guards;
 #[path = "reject_rendering.rs"]
