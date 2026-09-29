@@ -17,10 +17,11 @@
 //! deployment answer a request the way RustFS answers it today, where the core keeps the AWS-model
 //! answer as its default.
 //!
-//! Responsible for: [`ServiceBuilder::clamp_oversized_max_keys`] and
-//! [`ServiceBuilder::answer_checksum_failures_with_bad_digest`], the closed set of listings the
-//! first covers, and the per-request decisions the assembly applies — the client checksum waivers
-//! of `super::client_quirks` included.
+//! Responsible for: [`ServiceBuilder::clamp_oversized_max_keys`],
+//! [`ServiceBuilder::answer_checksum_failures_with_bad_digest`] and
+//! [`ServiceBuilder::sign_presigned_payloads_as_unsigned`], the closed set of listings the first
+//! covers, and the per-request decisions the assembly applies — the client checksum waivers of
+//! `super::client_quirks` included.
 //! NOT responsible for: reading the parameter ([`rustfs_gateway_core::MetaView::query`]) or the
 //! modelled range the default refuses outside of (the generated codec).
 //! Upstream: `super::ServiceBuilder`. Downstream: `crate::service`, which applies [`ViewPolicy`]
@@ -68,9 +69,16 @@ pub(crate) struct ViewPolicy {
     pub(super) checksum_waiver: ChecksumWaiver,
     clamp_max_keys: bool,
     integrity_codes: IntegrityCodes,
+    presigned_payload_unsigned: bool,
 }
 
 impl ViewPolicy {
+    /// Whether a presigned request's payload declaration is read as legacy RustFS reads it
+    /// ([`ServiceBuilder::sign_presigned_payloads_as_unsigned`]).
+    pub(crate) const fn presigned_payload_unsigned(&self) -> bool {
+        self.presigned_payload_unsigned
+    }
+
     /// The routed view of `operation`, with this assembly's readings applied to it.
     pub(crate) fn apply<'a>(self, operation: &str, meta: MetaView<'a>) -> MetaView<'a> {
         let meta = self.checksum_waiver.apply(operation, meta);
@@ -122,6 +130,22 @@ impl ServiceBuilder {
         self.view_policy.integrity_codes = IntegrityCodes::RustFs;
         self
     }
+
+    /// Reads a presigned request's `x-amz-content-sha256` as legacy RustFS does: the signature
+    /// always covers `UNSIGNED-PAYLOAD`, a declared digest (lowercase hex or base64) is verified
+    /// against the body instead, any other value is `403 SignatureDoesNotMatch`, and a streaming
+    /// mode is `501 NotImplemented` (rustfs/rustfs#2379; the reading is
+    /// `crate::payload_header::signed_payload`).
+    ///
+    /// Off by default: the core signs the declared digest itself, as AWS does (`c-sig-0430`). The
+    /// RustFS profile turns it on so that a presigned upload signed the way RustFS verifies it today
+    /// keeps working. A body that does not match its declared digest is still refused before it
+    /// can be stored; header-signed requests are unaffected.
+    #[must_use]
+    pub fn sign_presigned_payloads_as_unsigned(mut self) -> Self {
+        self.view_policy.presigned_payload_unsigned = true;
+        self
+    }
 }
 
 #[cfg(test)]
@@ -132,6 +156,7 @@ mod tests {
     fn the_policy_is_off_by_default_and_its_set_is_closed() {
         assert!(!ViewPolicy::default().clamp_max_keys);
         assert_eq!(ViewPolicy::default().integrity_codes, IntegrityCodes::Model);
+        assert!(!ViewPolicy::default().presigned_payload_unsigned());
         for operation in ["ListMultipartUploads", "ListParts", "ListBuckets", "GetObject", "PutObject"] {
             assert!(!CLAMPED_MAX_KEYS_OPERATIONS.contains(&operation), "{operation}");
         }
