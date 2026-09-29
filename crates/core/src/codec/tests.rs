@@ -46,7 +46,7 @@ mod rustfs_listing;
 mod transport_ended_empty;
 
 /// An accepted request, owned so a `MetaView` can borrow it.
-fn accepted(method: &str, target: &str, headers: &[(&str, &str)]) -> WireRequest<()> {
+pub(super) fn accepted(method: &str, target: &str, headers: &[(&str, &str)]) -> WireRequest<()> {
     let mut builder = Request::builder()
         .method(method)
         .uri(format!("http://host.invalid{target}"))

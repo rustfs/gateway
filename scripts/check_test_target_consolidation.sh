@@ -724,6 +724,7 @@ gateway_modules = (
     "request_context_runtime",
     "response_invariants",
     "response_stream_termination",
+    "rustfs_addressing",
     "rustfs_key_floor",
     "select_frame_records",
     "select_restore_intent",

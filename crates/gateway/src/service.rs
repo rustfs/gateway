@@ -500,6 +500,7 @@ impl S3Service {
         // a filter that writes an `Authorization` header does not make an anonymous request
         // authenticated, and one that deletes it does not make a signed request fail.
         let (mut parts, body) = request.into_parts();
+        crate::legacy_addressing::rewrite_double_slash_root(&self.inner.names, &mut parts);
         let headers = parts.headers.clone();
 
         // The wire seam, before acceptance so that whatever it writes is subject to every
@@ -561,6 +562,10 @@ impl S3Service {
             }
         }
 
+        let resolved = match crate::legacy_addressing::classify(&self.inner.names, router, &wire, resolved) {
+            Ok(resolved) => resolved,
+            Err(refusal) => return outcome.refuse(from_codec(refusal, response_kind)),
+        };
         let dispatched = match router.dispatch(&RouteRequestParts {
             method: wire.method(),
             path: wire.raw_path().as_str(),

@@ -13,20 +13,24 @@
 // limitations under the License.
 
 //! The naming switches: the naming policy, its validator and slash rule, and the RustFS profile's
-//! object-key floor (rustfs/gateway#1107), the one builder switch that lowers the key floor, named
-//! for what it does.
+//! two: the object-key floor (rustfs/gateway#1107), the one builder switch that lowers the key
+//! floor, named for what it does, and the path addressing (rustfs/gateway#1115), the one switch
+//! that reads a request path as legacy RustFS does.
 //!
 //! Responsible for: [`ServiceBuilder::name_policy`], [`ServiceBuilder::name_validator`],
-//! [`ServiceBuilder::slash_policy`] and
-//! [`ServiceBuilder::accept_legacy_rustfs_object_keys_after_listing_in_the_posture_report`].
-//! NOT responsible for: the rules themselves ([`NamePolicy`], [`rustfs_gateway_types::KeyFloor`]),
-//! or the start-up line that reports them (`crate::naming_posture`).
-//! Upstream: `super::ServiceBuilder`. Downstream: the naming policy every request's key is
-//! materialised under, the request path's and the request body's alike.
+//! [`ServiceBuilder::slash_policy`],
+//! [`ServiceBuilder::accept_legacy_rustfs_object_keys_after_listing_in_the_posture_report`] and
+//! [`ServiceBuilder::address_paths_as_legacy_rustfs`].
+//! NOT responsible for: the rules themselves ([`NamePolicy`], [`rustfs_gateway_types::KeyFloor`],
+//! the split [`rustfs_gateway_core::codec::legacy_rustfs_target`] and the bucket rules
+//! [`LegacyRustfsNameValidator`]), where the pipeline applies the split
+//! (`crate::legacy_addressing`), or the start-up line that reports them (`crate::naming_posture`).
+//! Upstream: `super::ServiceBuilder`. Downstream: the naming policy every request is addressed and
+//! every key is materialised under, the request path's and the request body's alike.
 
 use std::sync::Arc;
 
-use rustfs_gateway_types::{NamePolicy, NameValidator, SlashPolicy};
+use rustfs_gateway_types::{LegacyRustfsNameValidator, NamePolicy, NameValidator, SlashPolicy};
 
 use super::ServiceBuilder;
 
@@ -83,6 +87,26 @@ impl ServiceBuilder {
     #[must_use]
     pub fn accept_legacy_rustfs_object_keys_after_listing_in_the_posture_report(mut self) -> Self {
         self.names = self.names.with_legacy_rustfs_key_floor();
+        self
+    }
+
+    /// Addresses a request as legacy RustFS does, for a deployment in front of RustFS.
+    ///
+    /// The path is decoded once as a whole (`400 InvalidURI` when it is not UTF-8) and split at its
+    /// first decoded `/`, so `/bkt%2Fkey` is the key `key` in the bucket `bkt`; an empty bucket
+    /// segment (`//bkt`) is `400 InvalidBucketName`; the bucket is held to legacy RustFS's naming
+    /// rules ([`LegacyRustfsNameValidator`], which replaces any validator installed before this
+    /// call); all of it is judged before routing, as legacy RustFS judges it; and a `GET` of exactly
+    /// `//` is read as `GET /`, the signature included. A path inside a dialect's claim is left to
+    /// the dialect, as legacy RustFS's own routes take theirs first.
+    ///
+    /// Off by default: the core splits the path as it arrived and refuses an escaped bucket label.
+    #[must_use]
+    pub fn address_paths_as_legacy_rustfs(mut self) -> Self {
+        self.names = self
+            .names
+            .with_legacy_rustfs_path_split()
+            .with_validator(Arc::new(LegacyRustfsNameValidator));
         self
     }
 }

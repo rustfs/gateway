@@ -15,8 +15,8 @@
 //! The `NAMING_POSTURE` start-up line: the slash rule and the key floor an assembly names keys
 //! under (rustfs/gateway#1107).
 //!
-//! Responsible for: rendering and logging the two naming choices that decide which key an object
-//! is stored under and which keys reach the backend at all.
+//! Responsible for: rendering and logging the naming choices that decide which key an object is
+//! stored under, which keys reach the backend at all, and where a path's bucket ends.
 //! NOT responsible for: the `SECURITY_POSTURE` and `DIALECT_POSTURE` lines, whose exact shapes
 //! `crate::posture` and `crate::dialect_posture` pin, or applying either choice.
 //! Upstream: `crate::builder`. Downstream: startup logs and operators.
@@ -31,11 +31,12 @@ pub(crate) fn render_naming_posture(names: &NamePolicy) -> String {
     let slash = names.slash_policy();
     let floor = names.key_floor();
     format!(
-        "NAMING_POSTURE slash_policy={} slash_rewrites_keys={} key_floor={} key_floor_lowered={}",
+        "NAMING_POSTURE slash_policy={} slash_rewrites_keys={} key_floor={} key_floor_lowered={} path_split={}",
         slash.as_str(),
         slash.rewrites_keys(),
         floor.as_str(),
         floor.lowers_the_default(),
+        names.path_split().as_str(),
     )
 }
 
@@ -92,5 +93,16 @@ mod tests {
         assert_eq!(field(&line, "slash_policy"), "rustfs-legacy");
         assert_eq!(field(&line, "key_floor"), "unconditional");
         assert_eq!(field(&line, "key_floor_lowered"), "false");
+    }
+
+    /// Negative and positive — the path split is its own field: the default splits literally, and
+    /// only the legacy addressing switch reports legacy RustFS's split.
+    #[test]
+    fn the_path_split_is_reported_on_its_own() {
+        assert_eq!(field(&render_naming_posture(&NamePolicy::default()), "path_split"), "literal");
+        let legacy = NamePolicy::default().with_legacy_rustfs_path_split();
+        let line = render_naming_posture(&legacy);
+        assert_eq!(field(&line, "path_split"), "rustfs-legacy");
+        assert_eq!(field(&line, "key_floor"), "unconditional", "the split lowers no floor");
     }
 }

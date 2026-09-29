@@ -58,6 +58,7 @@ use std::sync::Arc;
 use percent_encoding::percent_decode_str;
 use unicode_normalization::UnicodeNormalization as _;
 
+pub use super::addressing::PathSplit;
 use super::error_code::ErrorCode;
 pub use super::key_floor::KeyFloor;
 use super::key_floor::legacy_rustfs_key_floor;
@@ -400,6 +401,7 @@ impl NameValidator for PermissiveNameValidator {
 pub struct NamePolicy {
     slash: SlashPolicy,
     key_floor: KeyFloor,
+    path_split: PathSplit,
     validator: Arc<dyn NameValidator>,
 }
 
@@ -410,6 +412,7 @@ impl NamePolicy {
         Self {
             slash,
             key_floor: KeyFloor::Unconditional,
+            path_split: PathSplit::Literal,
             validator,
         }
     }
@@ -432,6 +435,22 @@ impl NamePolicy {
     #[must_use]
     pub fn key_floor(&self) -> KeyFloor {
         self.key_floor
+    }
+
+    /// The same policy with legacy RustFS's path split ([`PathSplit::RustfsLegacy`]): the path is
+    /// decoded as a whole before the bucket is split from it.
+    #[must_use]
+    pub fn with_legacy_rustfs_path_split(self) -> Self {
+        Self {
+            path_split: PathSplit::RustfsLegacy,
+            ..self
+        }
+    }
+
+    /// Where a path-style request's bucket ends.
+    #[must_use]
+    pub fn path_split(&self) -> PathSplit {
+        self.path_split
     }
 
     /// The same policy with a different slash rule.
@@ -476,6 +495,7 @@ impl Default for NamePolicy {
         Self {
             slash,
             key_floor: KeyFloor::Unconditional,
+            path_split: PathSplit::Literal,
             validator,
         }
     }
@@ -486,6 +506,7 @@ impl std::fmt::Debug for NamePolicy {
         f.debug_struct("NamePolicy")
             .field("slash", &self.slash)
             .field("key_floor", &self.key_floor)
+            .field("path_split", &self.path_split)
             .finish_non_exhaustive()
     }
 }

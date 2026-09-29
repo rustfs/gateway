@@ -47,7 +47,7 @@ use http::Method;
 use rustfs_gateway_http::{HeaderView, QueryView, WireRequest};
 use rustfs_gateway_stream::ByteStream;
 use rustfs_gateway_types::dto::PostObjectInput;
-use rustfs_gateway_types::{BucketName, NamePolicy, NameRejection, ObjectKey};
+use rustfs_gateway_types::{BucketName, NamePolicy, NameRejection, ObjectKey, PathSplit};
 
 use crate::codec::error::CodecError;
 use crate::route::TargetKind;
@@ -494,6 +494,9 @@ fn split_labels(
     target: TargetKind,
     names: &NamePolicy,
 ) -> Result<(Option<BucketName>, Option<ObjectKey>), CodecError> {
+    if names.path_split() == PathSplit::RustfsLegacy {
+        return super::legacy_path::legacy_labels(path, target, names);
+    }
     let trimmed = path.strip_prefix('/').unwrap_or(path);
     match target {
         TargetKind::Service => Ok((None, None)),
