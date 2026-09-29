@@ -765,6 +765,9 @@ mod legacy_server_error_tests;
 /// The gateway's CORS answers over the backend's stored documents (rustfs/gateway#1004).
 mod cors_tests;
 
+/// CORS answered as legacy RustFS answers it, credentials apart (rustfs/gateway#1120).
+mod legacy_cors_tests;
+
 /// Request-body refusals answered with legacy RustFS's sentences (rustfs/gateway#1099).
 mod body_refusal_tests;
 

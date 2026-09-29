@@ -102,6 +102,8 @@ mod host_deadlines;
 mod host_resolve_replay;
 #[path = "ingest_assembly.rs"]
 mod ingest_assembly;
+#[path = "legacy_cors.rs"]
+mod legacy_cors;
 #[path = "lifecycle_reachability.rs"]
 mod lifecycle_reachability;
 #[path = "lock_encryption_reachability.rs"]

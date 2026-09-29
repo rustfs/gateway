@@ -93,6 +93,7 @@ pub use crate::commit_task::DetachedWork;
 mod config;
 #[cfg(feature = "server")]
 mod conn;
+mod cors_legacy;
 mod dialect_posture;
 mod dispatch;
 mod ext;
@@ -153,6 +154,7 @@ pub use crate::config::{
 pub use crate::conn::{
     MeasuredSelfHeldHttp1Driver, ResponseFallbackReason, ResponseTransportMetrics, SelfHeldHttp1Driver, SelfHeldRequestBody,
 };
+pub use crate::cors_legacy::{DEFAULT_RUSTFS_CONSOLE_PREFIX, LegacyRustfsCors};
 pub use crate::ext::{
     Addressing, AuthSchemeRef, Authentication, AuthenticationOutcome, Authenticator, Authorizer, AuthzAuditEvent, AuthzAuditSink,
     AuthzRequest, AuthzStage, BaseDomain, BodyQuota, BodyQuotaExceeded, BucketOwnerError, BucketOwnerSource, CORS_PREFLIGHT,

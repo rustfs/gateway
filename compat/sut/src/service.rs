@@ -320,6 +320,11 @@ pub(crate) fn build_service(
                 ttl_seconds: 0,
                 jitter_seconds: 0,
             })
+            // And RustFS answers CORS from them itself, in a layer in front of its S3 stack: every
+            // `OPTIONS` before routing, every other answer decorated, refusals included — all but
+            // the credentials legacy RustFS allows (rustfs/gateway#1120). No
+            // `RUSTFS_CORS_ALLOWED_ORIGINS` fallback, as RustFS runs by default.
+            .answer_cors_as_legacy_rustfs(rustfs_gateway::LegacyRustfsCors::with_fallback_origins(None))
             // RustFS reads a browser upload form with its legacy grammar, and stores from it what
             // legacy RustFS stores or refuses it (ruling R8 of rustfs/backlog#1677).
             .legacy_rustfs_post_forms()

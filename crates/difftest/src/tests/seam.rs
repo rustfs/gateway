@@ -631,10 +631,11 @@ fn describe(stored: Option<&Result<Vec<u8>, String>>) -> String {
 }
 
 /// Chained calls of an assembly that the seam diff replaces by design: its own recording backend
-/// and authenticator, an allow-all authorizer, a fixture owner, unlimited framework rates, no CORS,
-/// none of the reference backend's own operation layers (its bucket-name registry), and the final
-/// build. Every other call of the RustFS profile's builder chain is a switch.
-const ASSEMBLY_CALLS: [&str; 10] = [
+/// and authenticator, an allow-all authorizer, a fixture owner, unlimited framework rates, no CORS
+/// (neither the gateway's own answers nor legacy RustFS's), none of the reference backend's own
+/// operation layers (its bucket-name registry), and the final build. Every other call of the
+/// RustFS profile's builder chain is a switch.
+const ASSEMBLY_CALLS: [&str; 11] = [
     "authenticator",
     "authorizer",
     "security_floor",
@@ -642,6 +643,7 @@ const ASSEMBLY_CALLS: [&str; 10] = [
     "bucket_owner_source",
     "cors_source",
     "cors_cache",
+    "answer_cors_as_legacy_rustfs",
     "register_cors",
     "op_layer",
     "build",

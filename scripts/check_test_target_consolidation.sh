@@ -698,6 +698,7 @@ gateway_modules = (
     "host_deadlines",
     "host_resolve_replay",
     "ingest_assembly",
+    "legacy_cors",
     "lifecycle_reachability",
     "lock_encryption_reachability",
     "macro_scenarios",
