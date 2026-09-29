@@ -159,6 +159,7 @@ const GATES: &[(&str, Wiring)] = &[
             "c-object-0060",
         ]),
     ),
+    ("post", Wiring::Runs(&[])),
     ("range", Wiring::Runs(&[])),
     ("replication", Wiring::Runs(&[])),
     ("select-restore", Wiring::Runs(&[])),

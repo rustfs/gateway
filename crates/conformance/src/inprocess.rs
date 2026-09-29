@@ -453,6 +453,7 @@ impl InProcess {
             .register::<dto::PutBucketVersioning, _>(Arc::clone(&backend))
             .register::<dto::PutBucketWebsite, _>(Arc::clone(&backend))
             .register::<dto::PutPublicAccessBlock, _>(Arc::clone(&backend))
+            .register::<dto::PostObject, _>(Arc::clone(&backend))
             .register::<dto::PutObject, _>(Arc::clone(&backend))
             .register::<dto::PutObjectAcl, _>(Arc::clone(&backend))
             .register::<dto::PutObjectLegalHold, _>(Arc::clone(&backend))
