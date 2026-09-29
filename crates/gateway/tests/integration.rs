@@ -124,6 +124,8 @@ mod perf_evidence;
 mod pipeline;
 #[path = "policy_reachability.rs"]
 mod policy_reachability;
+#[path = "post_object_legacy_form.rs"]
+mod post_object_legacy_form;
 #[path = "post_object_runtime.rs"]
 mod post_object_runtime;
 #[path = "post_object_streaming.rs"]

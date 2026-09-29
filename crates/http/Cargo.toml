@@ -36,6 +36,10 @@ rustfs-gateway-stream = { workspace = true }
 http = { workspace = true }
 phf = { workspace = true }
 memchr = { workspace = true }
+# The legacy RustFS form grammar reads a POST Object part's header fields with this crate's field
+# grammar, at the version legacy RustFS reads them with: which bytes a field name and value may
+# hold, bare-LF line ends, folded lines refused. Already in the lock through hyper.
+httparse = { workspace = true }
 # `smallvec` keeps the query index and the normalised host off the heap for the sizes that
 # actually occur; the acceptance path performs no allocation for a typical request, and a `Vec`
 # here would put one malloc per request back.

@@ -16,7 +16,7 @@
 //!
 //! Responsible for: `multipart/form-data` framing for browser POST uploads — the boundary, the
 //! per-part headers, the bounded text fields that precede the file, and a file reader that cannot
-//! be constructed without a byte ceiling.
+//! be constructed without a byte ceiling — under one of two [`FormGrammar`]s.
 //! NOT responsible for: what a policy *means*. Base64, JSON, expiry, conditions, `${filename}`
 //! substitution and the signature comparison all live in `rustfs-gateway-sig`'s post-policy module,
 //! which sits above this crate and consumes the fields produced here.
@@ -47,6 +47,19 @@
 //! length and not of the upload. `crates/http/tests/form_allocations.rs` measures that rather than
 //! asserting it.
 //!
+//! # Two grammars
+//!
+//! [`FormGrammar::Gateway`], the default, is this crate's own reading and is what every
+//! deployment gets unless it asks otherwise. [`FormGrammar::LegacyRustfs`] reads a form exactly as
+//! the POST Object parser RustFS serves today does, in both directions — a preamble, transport
+//! padding, bare parameter values, a `;` inside a quoted value and `filename*` are accepted, and
+//! an epilogue or a boundary outside RFC 2046's characters is refused — for the RustFS profile
+//! (ruling R8 of rustfs/backlog#1677). `legacy.rs` holds the header grammars it adds; its
+//! questionable rules carry `Legacy-compat (rustfs/backlog#2684)` notes. The ceilings, the
+//! refusal of a repeated field and of a control byte in a value, and the policy-before-file
+//! order hold under both; the legacy grammar adds [`FormLimits::max_prelude_bytes`], because a
+//! preamble and padding belong to no other ceiling.
+//!
 //! # Why the framing is written here rather than taken from a crate
 //!
 //! The obvious candidate is `multer`. It supplies the framing and not the property above: its
@@ -57,6 +70,7 @@
 //! crate that has none.
 
 mod file;
+mod legacy;
 mod reader;
 
 pub use self::file::{FileReader, FileSink, FileStep};
@@ -76,6 +90,34 @@ const MULTIPART_FORM_DATA: &str = "multipart/form-data";
 
 /// The longest boundary RFC 2046 permits, in bytes.
 const MAX_BOUNDARY_BYTES: usize = 70;
+
+/// The longest boundary line: the CRLF before it, `--`, the boundary, and the CRLF after it.
+const BOUNDARY_LINE_BYTES: u64 = MAX_BOUNDARY_BYTES as u64 + 6;
+
+/// Which grammar a POST Object form is read with.
+///
+/// Chosen per request by whoever reads the form; a deployment asks for the legacy one through its
+/// assembly's RustFS-profile option, never by default.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum FormGrammar {
+    /// This crate's own reading: the form opens on its first boundary, a boundary line ends in
+    /// CRLF, `Content-Disposition` parameters are quoted and appear once, a boundary may hold any
+    /// visible ASCII byte or a space, and nothing after the closing delimiter is read.
+    #[default]
+    Gateway,
+    /// The legacy RustFS form parser's reading, byte for byte, in both directions.
+    ///
+    /// A preamble before the first boundary is skipped, transport padding after a boundary line is
+    /// skipped, and a part's header block and `Content-Disposition` are read as `legacy.rs`
+    /// describes. The boundary must be RFC 2046 `bchars`, and after the closing delimiter only
+    /// padding, CRLF and the end of the body may follow.
+    LegacyRustfs {
+        /// Whether the request declared its body's length. The legacy stack then derives the
+        /// file's exact length from it, which leaves no room for padding after the closing
+        /// delimiter: only exactly CRLF may follow it.
+        declared_length: bool,
+    },
+}
 
 /// Which ceiling, or which rule, the form crossed.
 ///
@@ -113,6 +155,14 @@ pub enum FormReject {
     WholeStreamTooLarge,
     /// The file part exceeded the ceiling named at [`FormReader::into_file`].
     FileTooLarge,
+    /// Under [`FormGrammar::LegacyRustfs`], more arrived before the file part than
+    /// [`FormLimits::max_prelude_bytes`] permits: a preamble or transport padding that long is
+    /// refused rather than read before authorization.
+    PreludeTooLarge,
+    /// Under [`FormGrammar::LegacyRustfs`], the closing delimiter was followed by something other
+    /// than the padding and the CRLF that may end the body: an epilogue, or padding the declared
+    /// length leaves no room for.
+    ClosingNotLast,
     /// A part arrived after the `file` part.
     ///
     /// S3 requires `file` to be last precisely so that everything needed to authorise the upload
@@ -140,6 +190,8 @@ impl FormReject {
             Self::DuplicateField => "duplicate-field",
             Self::WholeStreamTooLarge => "whole-stream-too-large",
             Self::FileTooLarge => "file-too-large",
+            Self::PreludeTooLarge => "prelude-too-large",
+            Self::ClosingNotLast => "closing-not-last",
             Self::FieldAfterFile => "field-after-file",
             Self::MissingFile => "missing-file",
             Self::IncompleteStream => "incomplete-stream",
@@ -252,6 +304,26 @@ impl FormLimits {
     #[must_use]
     pub const fn max_whole_stream_bytes(&self) -> u64 {
         self.max_whole_stream_bytes
+    }
+
+    /// The most bytes a form may carry before its file part under
+    /// [`FormGrammar::LegacyRustfs`], derived rather than chosen.
+    ///
+    /// It is every byte a form at every other ceiling can carry there — each text field at its
+    /// ceiling, the policy at its own, one header block and one boundary line per part — plus one
+    /// header block the reader may already hold past the file's header. A preamble and transport
+    /// padding belong to no ceiling, so without this bound they would let a peer stream the whole
+    /// form budget in before any authorization; the gateway grammar has neither, and is bounded by
+    /// its ceilings alone.
+    #[must_use]
+    pub const fn max_prelude_bytes(&self) -> u64 {
+        let parts = (self.max_field_count as u64).saturating_add(1);
+        let lines = parts.saturating_mul((self.max_part_header_bytes as u64).saturating_add(BOUNDARY_LINE_BYTES));
+        (self.max_field_count as u64)
+            .saturating_mul(self.max_field_bytes as u64)
+            .saturating_add(self.max_policy_bytes as u64)
+            .saturating_add(lines)
+            .saturating_add(self.max_part_header_bytes as u64)
     }
 
     /// The deployment ceiling on the file part, in bytes.

@@ -15,13 +15,15 @@
 //! The file part, read under a ceiling that was named before it started.
 //!
 //! Responsible for: emitting file content to a sink, stopping at the byte that crosses the
-//! ceiling, finding the closing delimiter, and refusing a part that arrives after the file.
+//! ceiling, finding the closing delimiter, refusing a part that arrives after the file, and —
+//! under [`FormGrammar::LegacyRustfs`] — refusing whatever follows the closing delimiter except the
+//! padding and CRLF that may end the body.
 //! NOT responsible for: choosing the ceiling — that is the caller's, at
 //! [`crate::FormReader::into_file`]; storing the bytes; or hashing them.
 //! Upstream: the form reader, which is the only thing that can construct this type. Downstream:
 //! whatever the caller's sink writes to.
 
-use super::{FormReject, find};
+use super::{FormGrammar, FormReject, find};
 
 /// What one [`FileReader::push`] achieved.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -59,6 +61,13 @@ enum Tail {
     Marker,
     /// Both have been read.
     Done,
+    /// Legacy grammar: `--` has closed the form; padding may follow, then the CRLF.
+    Closing,
+    /// Legacy grammar: the CR of the final CRLF has been read.
+    ClosingLf,
+    /// Legacy grammar: the final CRLF has been read. Only the end of the body may follow, which
+    /// [`FileReader::finish`] confirms.
+    Closed,
 }
 
 /// Reads the file part, under a ceiling that was named before it existed.
@@ -81,11 +90,19 @@ pub struct FileReader {
     file_bytes: u64,
     bytes_seen: u64,
     tail: Tail,
+    grammar: FormGrammar,
 }
 
 impl FileReader {
     /// Builds the reader. Crate-private: the ceiling has to come from `into_file`.
-    pub(super) fn new(ceiling: u64, max_whole_stream_bytes: u64, delimiter: &[u8], carry: Vec<u8>, bytes_seen: u64) -> Self {
+    pub(super) fn new(
+        ceiling: u64,
+        max_whole_stream_bytes: u64,
+        delimiter: &[u8],
+        carry: Vec<u8>,
+        bytes_seen: u64,
+        grammar: FormGrammar,
+    ) -> Self {
         let mut closing = Vec::with_capacity(delimiter.len().saturating_add(2));
         closing.extend_from_slice(b"\r\n");
         closing.extend_from_slice(delimiter);
@@ -99,6 +116,7 @@ impl FileReader {
             file_bytes: 0,
             bytes_seen,
             tail: Tail::Content,
+            grammar,
         }
     }
 
@@ -129,6 +147,10 @@ impl FileReader {
     /// * [`FormReject::FieldAfterFile`] when another part follows the file.
     /// * [`FormReject::WholeStreamTooLarge`], and [`FormReject::MalformedPart`] for a close that
     ///   is neither `--` nor `\r\n`.
+    /// * Under [`FormGrammar::LegacyRustfs`], [`FormReject::ClosingNotLast`] for anything after the
+    ///   closing `--` but padding and one CRLF. That grammar never answers
+    ///   [`FileStep::Complete`] from here: the body is complete only when it has ended, which
+    ///   [`FileReader::finish`] confirms.
     pub fn push(&mut self, input: &[u8], sink: &mut impl FileSink) -> Result<FileStep, FormReject> {
         self.bytes_seen = self.bytes_seen.saturating_add(input.len() as u64);
         if self.bytes_seen > self.max_whole_stream_bytes {
@@ -151,16 +173,29 @@ impl FileReader {
                     if self.carry.len() < 2 {
                         return Ok(FileStep::NeedMore);
                     }
-                    return match self.carry.get(..2) {
-                        Some(b"--") => {
+                    return match (self.carry.get(..2), self.grammar) {
+                        (Some(b"--"), FormGrammar::Gateway) => {
                             self.tail = Tail::Done;
                             Ok(FileStep::Complete {
                                 file_bytes: self.file_bytes,
                             })
                         }
-                        Some(b"\r\n") => Err(FormReject::FieldAfterFile),
+                        (Some(b"--"), FormGrammar::LegacyRustfs { .. }) => {
+                            // What followed `--` in the same frames is the start of the tail.
+                            let carried = self.carry.split_off(2);
+                            self.carry.clear();
+                            self.tail = Tail::Closing;
+                            self.read_closing(&carried)?;
+                            self.read_closing(input.get(offset..).unwrap_or_default())?;
+                            Ok(FileStep::NeedMore)
+                        }
+                        (Some(b"\r\n"), _) => Err(FormReject::FieldAfterFile),
                         _ => Err(FormReject::MalformedPart),
                     };
+                }
+                Tail::Closing | Tail::ClosingLf | Tail::Closed => {
+                    self.read_closing(input.get(offset..).unwrap_or_default())?;
+                    return Ok(FileStep::NeedMore);
                 }
                 Tail::Content => {
                     let rest = input.get(offset..).unwrap_or_default();
@@ -184,9 +219,29 @@ impl FileReader {
     /// `c-lim-0007` measures.
     pub const fn finish(&self) -> Result<u64, FormReject> {
         match self.tail {
-            Tail::Done => Ok(self.file_bytes),
+            Tail::Done | Tail::Closed => Ok(self.file_bytes),
             _ => Err(FormReject::IncompleteStream),
         }
+    }
+
+    /// Legacy grammar: reads the bytes after the closing `--`.
+    ///
+    /// Legacy-compat (rustfs/backlog#2684): the legacy stack refuses an epilogue after the closing
+    /// delimiter, which RFC 2046 section 5.1.1 allows and tells a reader to ignore, and it refuses
+    /// padding before the final CRLF only when the request declared its length (it derives the
+    /// file's length from that and the padding then does not add up). The intended future
+    /// behaviour is the gateway grammar's: ignore whatever follows the closing `--`.
+    fn read_closing(&mut self, bytes: &[u8]) -> Result<(), FormReject> {
+        let declared_length = matches!(self.grammar, FormGrammar::LegacyRustfs { declared_length: true });
+        for &byte in bytes {
+            self.tail = match (self.tail, byte) {
+                (Tail::Closing, b' ' | b'\t') if !declared_length => Tail::Closing,
+                (Tail::Closing, b'\r') => Tail::ClosingLf,
+                (Tail::ClosingLf, b'\n') => Tail::Closed,
+                _ => return Err(FormReject::ClosingNotLast),
+            };
+        }
+        Ok(())
     }
 
     /// Emits as much of `input` as is certainly content, returning how much of it was consumed.

@@ -15,16 +15,29 @@
 //! The half of the form that comes before the file, and the door to the half that comes after.
 //!
 //! Responsible for: the boundary delimiters, each part's header block, the bounded text fields,
-//! and stopping at the `file` part header with no file byte consumed.
+//! and stopping at the `file` part header with no file byte consumed — under either
+//! [`FormGrammar`]: the gateway's own, or the legacy RustFS one, which adds a preamble before the
+//! first boundary and transport padding after a boundary line.
 //! NOT responsible for: file content — that is `super::file`, reachable only through
-//! [`FormReader::into_file`] and only with a ceiling; and policy semantics, which are
-//! `rustfs-gateway-sig`'s.
+//! [`FormReader::into_file`] and only with a ceiling; what a legacy header block says
+//! (`super::legacy`); and policy semantics, which are `rustfs-gateway-sig`'s.
 //! Upstream: `super` for the limits, the rejections and the shared parsers. Downstream:
-//! `super::file`.
+//! `super::file`, `super::legacy`.
 
 use super::{
-    FORM_FILE_FIELD, FORM_POLICY_FIELD, FileReader, FormField, FormLimits, FormReject, find, parse_boundary, parse_disposition,
+    FORM_FILE_FIELD, FORM_POLICY_FIELD, FileReader, FormField, FormGrammar, FormLimits, FormReject, find, legacy, parse_boundary,
+    parse_disposition,
 };
+
+/// How much of a preamble is held at once while the first boundary is searched for.
+///
+/// The preamble is discarded as it is searched: between searches only the bytes that could still
+/// begin a boundary are kept, so a preamble of any length costs this much memory, and its bytes
+/// are charged to the whole-stream budget like every other byte of the form.
+const PREAMBLE_WINDOW: usize = 1024;
+
+/// How much transport padding after a boundary is held at once; it is discarded as it is read.
+const PADDING_WINDOW: usize = 64;
 
 /// What one [`FormReader::push`] achieved.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -45,7 +58,18 @@ pub enum FormStep {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum State {
     /// The opening `--boundary` delimiter, or the one that follows a field.
+    ///
+    /// The gateway grammar only; the legacy grammar reads the same bytes as [`State::Preamble`]
+    /// and [`State::AfterBoundary`].
     Delimiter,
+    /// Legacy grammar: before the first boundary. Everything up to its first occurrence is a
+    /// preamble and is discarded.
+    Preamble,
+    /// Legacy grammar: just after a boundary. `--` closes the form, a space or a tab is transport
+    /// padding, and CRLF opens a part.
+    AfterBoundary,
+    /// Legacy grammar: transport padding after a boundary, up to the CRLF that ends its line.
+    Padding,
     /// A part's header block, up to `\r\n\r\n`.
     PartHeaders,
     /// A text field's value, up to `\r\n--boundary`.
@@ -62,6 +86,7 @@ enum State {
 #[derive(Debug)]
 pub struct FormReader {
     limits: FormLimits,
+    grammar: FormGrammar,
     /// `--boundary`, materialised once.
     delimiter: Vec<u8>,
     /// `\r\n--boundary`, materialised once for all text-field pushes.
@@ -71,6 +96,8 @@ pub struct FormReader {
     state: State,
     current_field: Option<String>,
     filename: Option<String>,
+    /// Legacy grammar: the `file` part's name exactly as sent, once that part's header is read.
+    file_part_name: Option<String>,
     bytes_seen: u64,
     /// How far into `buffer` the current state has already searched without a hit.
     ///
@@ -82,7 +109,7 @@ pub struct FormReader {
 }
 
 impl FormReader {
-    /// Builds a reader from a request `Content-Type`.
+    /// Builds a reader from a request `Content-Type`, under the gateway's own grammar.
     ///
     /// # Errors
     ///
@@ -90,7 +117,22 @@ impl FormReader {
     /// no `boundary` parameter is present or two are, or when the boundary is empty, non-graphic,
     /// or longer than the 70 bytes RFC 2046 permits.
     pub fn new(content_type: &str, limits: FormLimits) -> Result<Self, FormReject> {
-        let boundary = parse_boundary(content_type)?;
+        Self::with_grammar(content_type, limits, FormGrammar::Gateway)
+    }
+
+    /// Builds a reader from a request `Content-Type`, under `grammar`.
+    ///
+    /// # Errors
+    ///
+    /// [`FormReject::MalformedContentType`] as [`FormReader::new`] describes for
+    /// [`FormGrammar::Gateway`]; for [`FormGrammar::LegacyRustfs`], when the header does not read
+    /// as `multipart/form-data` with a `boundary` under the legacy header grammar, or the boundary
+    /// is not one to seventy RFC 2046 `bchars` that do not end in a space.
+    pub fn with_grammar(content_type: &str, limits: FormLimits, grammar: FormGrammar) -> Result<Self, FormReject> {
+        let boundary = match grammar {
+            FormGrammar::Gateway => parse_boundary(content_type)?,
+            FormGrammar::LegacyRustfs { .. } => legacy::boundary(content_type)?.to_owned(),
+        };
         let mut delimiter = Vec::with_capacity(boundary.len().saturating_add(2));
         delimiter.extend_from_slice(b"--");
         delimiter.extend_from_slice(boundary.as_bytes());
@@ -99,13 +141,18 @@ impl FormReader {
         terminator.extend_from_slice(&delimiter);
         Ok(Self {
             limits,
+            grammar,
             delimiter,
             terminator,
             buffer: Vec::new(),
             fields: Vec::new(),
-            state: State::Delimiter,
+            state: match grammar {
+                FormGrammar::Gateway => State::Delimiter,
+                FormGrammar::LegacyRustfs { .. } => State::Preamble,
+            },
             current_field: None,
             filename: None,
+            file_part_name: None,
             bytes_seen: 0,
             scanned: 0,
         })
@@ -130,6 +177,30 @@ impl FormReader {
     #[must_use]
     pub fn filename(&self) -> Option<&str> {
         self.filename.as_deref()
+    }
+
+    /// The grammar this reader reads with.
+    #[must_use]
+    pub const fn grammar(&self) -> FormGrammar {
+        self.grammar
+    }
+
+    /// The name `${filename}` in a `key` stands for, once the `file` part's header has been read.
+    ///
+    /// Under [`FormGrammar::Gateway`] this is [`FormReader::filename`]. Under
+    /// [`FormGrammar::LegacyRustfs`] a file part without a `filename` is named after the part
+    /// itself, as sent, as the legacy stack names it.
+    ///
+    /// Legacy-compat (rustfs/backlog#2684): the legacy stack stores `uploads/${filename}` from a
+    /// file part without a `filename` as `uploads/file` (or `uploads/File`, as the part was
+    /// spelled): the form field's name stands in for a file name the client never sent. The
+    /// intended future behaviour is to refuse a `${filename}` key when the file has no name.
+    #[must_use]
+    pub fn file_name(&self) -> Option<&str> {
+        match self.grammar {
+            FormGrammar::Gateway => self.filename.as_deref(),
+            FormGrammar::LegacyRustfs { .. } => self.filename.as_deref().or(self.file_part_name.as_deref()),
+        }
     }
 
     /// The part being read when the last rejection happened, when it had a name.
@@ -178,17 +249,32 @@ impl FormReader {
             // `step` either decides something or reports that the buffer is short. It never
             // reports "short" while the buffer is at its budget — every state answers a full
             // buffer with a decision or a rejection — so this loop cannot spin.
-            if !self.step()? && take == 0 {
+            let decided = self.step()?;
+            // A preamble and transport padding belong to no ceiling, so under the legacy grammar
+            // everything decided before the file is held to the most a form at every ceiling can
+            // carry there: what is read before authorization stays bounded. Counted in decided
+            // bytes, not buffered ones, so the refusal falls at the same byte however the body
+            // was framed; the buffer on top of it is bounded by the state budgets.
+            if matches!(self.grammar, FormGrammar::LegacyRustfs { .. })
+                && self.bytes_seen.saturating_sub(self.buffer.len() as u64) > self.limits.max_prelude_bytes()
+            {
+                return Err(FormReject::PreludeTooLarge);
+            }
+            if !decided && take == 0 {
                 return Ok(FormStep::NeedMore);
             }
         }
     }
 
     /// Reports how a form that simply stopped should be refused.
+    ///
+    /// Under the legacy grammar a body that ended before its first boundary never was a form, so it
+    /// is malformed rather than truncated, as the legacy stack answers it.
     #[must_use]
     pub fn finish(&self) -> FormReject {
         match self.state {
             State::Ended => FormReject::MissingFile,
+            State::Preamble => FormReject::MalformedPart,
             _ => FormReject::IncompleteStream,
         }
     }
@@ -214,6 +300,7 @@ impl FormReader {
             &self.delimiter,
             self.buffer,
             self.bytes_seen,
+            self.grammar,
         ))
     }
 
@@ -222,6 +309,11 @@ impl FormReader {
         match self.state {
             // `--boundary` plus the two bytes that say whether another part follows.
             State::Delimiter => self.delimiter.len().saturating_add(2),
+            // Enough to hold one whole `--boundary` beside the bytes already searched.
+            State::Preamble => self.delimiter.len().saturating_mul(2).max(PREAMBLE_WINDOW),
+            // `--`, CRLF, or the first byte of padding.
+            State::AfterBoundary => 2,
+            State::Padding => PADDING_WINDOW,
             State::PartHeaders => self.limits.max_part_header_bytes(),
             // Room for the value at its ceiling, plus the terminator that ends it, so a value
             // exactly at the ceiling is still recognised as complete rather than as too large.
@@ -263,7 +355,13 @@ impl FormReader {
     fn step(&mut self) -> Result<bool, FormReject> {
         match self.state {
             State::Delimiter => self.step_delimiter(),
-            State::PartHeaders => self.step_headers(),
+            State::Preamble => Ok(self.step_preamble()),
+            State::AfterBoundary => self.step_after_boundary(),
+            State::Padding => self.step_padding(),
+            State::PartHeaders => match self.grammar {
+                FormGrammar::Gateway => self.step_headers(),
+                FormGrammar::LegacyRustfs { .. } => self.step_legacy_headers(),
+            },
             State::FieldValue => self.step_value(),
             State::FileReached | State::Ended => Ok(false),
         }
@@ -292,33 +390,55 @@ impl FormReader {
     }
 
     fn step_headers(&mut self) -> Result<bool, FormReject> {
-        let Some(end) = Self::find_resumable(&self.buffer, &mut self.scanned, b"\r\n\r\n") else {
-            if self.buffer.len() >= self.limits.max_part_header_bytes() {
+        let Some(end) = self.header_block_end()? else {
+            return Ok(false);
+        };
+        let Some(block) = self.buffer.get(..end.saturating_sub(4)) else {
+            return Err(FormReject::MalformedPart);
+        };
+        let (name, filename) = parse_disposition(block)?;
+        self.buffer.drain(..end);
+        self.rewind();
+        self.enter_part(name, filename, None)
+    }
+
+    /// Where the part header block in the buffer ends, its CRLF CRLF included, or `None` while it
+    /// has not ended within the ceiling yet.
+    fn header_block_end(&mut self) -> Result<Option<usize>, FormReject> {
+        let ceiling = self.limits.max_part_header_bytes();
+        let Some(at) = Self::find_resumable(&self.buffer, &mut self.scanned, b"\r\n\r\n") else {
+            if self.buffer.len() >= ceiling {
                 return Err(FormReject::PartHeaderTooLarge);
             }
-            return Ok(false);
+            return Ok(None);
         };
         // The buffer may already hold more than the header ceiling — after a field it carries the
         // bytes that followed the value, up to that field's own budget — so the block found in it
         // is measured, not only the buffer. Otherwise the ceiling would hold for a body sent a byte
         // at a time and not for the same body sent in one frame.
-        if end.saturating_add(4) > self.limits.max_part_header_bytes() {
+        let end = at.saturating_add(4);
+        if end > ceiling {
             return Err(FormReject::PartHeaderTooLarge);
         }
-        let Some(block) = self.buffer.get(..end) else {
-            return Err(FormReject::MalformedPart);
-        };
-        let (name, filename) = parse_disposition(block)?;
-        self.buffer.drain(..end.saturating_add(4));
-        self.rewind();
+        Ok(Some(end))
+    }
+
+    /// Enters the part a header block named: the file part, where this reader stops, or a text
+    /// field, which must be new and within the field count. `name` is already lowercased.
+    fn enter_part(&mut self, name: String, filename: Option<String>, file_part_name: Option<String>) -> Result<bool, FormReject> {
         let duplicate = self.fields.iter().any(|field| field.name() == name);
         let full = self.fields.len() >= self.limits.max_field_count();
         self.current_field = Some(name.clone());
         if name == FORM_FILE_FIELD {
             self.filename = filename;
+            self.file_part_name = file_part_name;
             self.state = State::FileReached;
             return Ok(true);
         }
+        // Under both grammars. Legacy RustFS keeps both values of a repeated field and reads the
+        // last; the RustFS profile still fails closed here, because the policy check and the POST
+        // bridge would have to read the same one and neither does yet (an open item on
+        // rustfs/backlog#1677, like the control-byte refusal in `step_value`).
         if duplicate {
             return Err(FormReject::DuplicateField);
         }
@@ -327,6 +447,97 @@ impl FormReader {
         }
         self.state = State::FieldValue;
         Ok(true)
+    }
+
+    /// Legacy grammar: discards the preamble up to and including the first `--boundary`.
+    ///
+    /// Legacy-compat (rustfs/backlog#2684): the first occurrence of `--boundary` ends the preamble
+    /// wherever it falls, mid-line included, and there is no second search: what follows it must be
+    /// a boundary line or the form is refused. RFC 2046 only recognises a delimiter at the start of
+    /// a line; the intended future behaviour is to search for one there.
+    fn step_preamble(&mut self) -> bool {
+        if let Some(at) = find(&self.buffer, &self.delimiter) {
+            self.buffer.drain(..at.saturating_add(self.delimiter.len()));
+            self.rewind();
+            self.state = State::AfterBoundary;
+            return true;
+        }
+        // Keep only the tail that could still be the start of a boundary.
+        let keep = self.delimiter.len().saturating_sub(1).min(self.buffer.len());
+        let discard = self.buffer.len().saturating_sub(keep);
+        self.buffer.drain(..discard);
+        discard > 0
+    }
+
+    /// Legacy grammar: reads what follows a boundary — `--` closes the form, a space or a tab
+    /// starts transport padding, CRLF starts a part's header block.
+    fn step_after_boundary(&mut self) -> Result<bool, FormReject> {
+        let Some(&first) = self.buffer.first() else {
+            return Ok(false);
+        };
+        let next = match first {
+            b' ' | b'\t' => {
+                self.state = State::Padding;
+                return Ok(true);
+            }
+            b'-' | b'\r' => match self.buffer.get(..2) {
+                None => return Ok(false),
+                Some(b"--") => State::Ended,
+                Some(b"\r\n") => State::PartHeaders,
+                Some(_) => return Err(FormReject::MalformedPart),
+            },
+            _ => return Err(FormReject::MalformedPart),
+        };
+        self.buffer.drain(..2);
+        self.rewind();
+        self.state = next;
+        Ok(true)
+    }
+
+    /// Legacy grammar: discards spaces and tabs after a boundary; the line must then end in CRLF.
+    fn step_padding(&mut self) -> Result<bool, FormReject> {
+        let padding = self.buffer.iter().take_while(|byte| matches!(byte, b' ' | b'\t')).count();
+        if padding > 0 {
+            self.buffer.drain(..padding);
+            return Ok(true);
+        }
+        match (self.buffer.first(), self.buffer.get(..2)) {
+            (None, _) | (Some(b'\r'), None) => Ok(false),
+            (_, Some(b"\r\n")) => {
+                self.buffer.drain(..2);
+                self.rewind();
+                self.state = State::PartHeaders;
+                Ok(true)
+            }
+            _ => Err(FormReject::MalformedPart),
+        }
+    }
+
+    /// Legacy grammar: locates a part's header block and reads it with `super::legacy`.
+    fn step_legacy_headers(&mut self) -> Result<bool, FormReject> {
+        match self.buffer.get(..2) {
+            None => return Ok(false),
+            // An empty header block: the part has no `Content-Disposition`, so no name.
+            Some(b"\r\n") => return Err(FormReject::MalformedPart),
+            Some(_) => {}
+        }
+        let Some(end) = self.header_block_end()? else {
+            return Ok(false);
+        };
+        let Some(block) = self.buffer.get(..end) else {
+            return Err(FormReject::MalformedPart);
+        };
+        let head = legacy::part_head(block)?;
+        // Legacy-compat (rustfs/backlog#2684): a part named by an empty `name` is a field like any
+        // other. RFC 7578 gives every part a name; the intended future behaviour is to refuse an
+        // empty one, as the gateway grammar does.
+        let name = head.name.to_ascii_lowercase();
+        if crate::text::contains_forbidden_control(name.as_bytes()) {
+            return Err(FormReject::MalformedPart);
+        }
+        self.buffer.drain(..head.content_start);
+        self.rewind();
+        self.enter_part(name, head.filename, Some(head.name))
     }
 
     fn step_value(&mut self) -> Result<bool, FormReject> {
@@ -348,6 +559,9 @@ impl FormReader {
         let Some(raw) = self.buffer.get(..end) else {
             return Err(FormReject::MalformedPart);
         };
+        // Under both grammars. Legacy RustFS stores a value holding CR, LF or another control
+        // byte as sent; the RustFS profile fails closed rather than store a header-injection
+        // primitive (an open item on rustfs/backlog#1677).
         if crate::text::contains_forbidden_control(raw) {
             return Err(FormReject::MalformedFieldValue);
         }
@@ -358,10 +572,18 @@ impl FormReader {
             return Err(FormReject::MalformedPart);
         };
         self.fields.push(FormField::new(name, value.to_owned()));
-        // Leave the `\r\n` behind and hand the delimiter itself back to `step_delimiter`.
-        self.buffer.drain(..end.saturating_add(2));
+        match self.grammar {
+            FormGrammar::Gateway => {
+                // Leave the `\r\n` behind and hand the delimiter itself back to `step_delimiter`.
+                self.buffer.drain(..end.saturating_add(2));
+                self.state = State::Delimiter;
+            }
+            FormGrammar::LegacyRustfs { .. } => {
+                self.buffer.drain(..end.saturating_add(self.terminator.len()));
+                self.state = State::AfterBoundary;
+            }
+        }
         self.rewind();
-        self.state = State::Delimiter;
         Ok(true)
     }
 

@@ -690,7 +690,7 @@ impl S3Service {
             let prelude = match sealed
                 .post_object_prelude(
                     content_type,
-                    rustfs_gateway_http::FormLimits::default(),
+                    self.inner.view_policy.post_forms.read(&headers),
                     config.config().request_body_deadlines(),
                 )
                 .await

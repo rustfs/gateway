@@ -30,6 +30,10 @@ mod checksum_arbitration;
 mod chunked_decode_replay;
 #[path = "form_allocations.rs"]
 mod form_allocations;
+#[path = "form_grammar.rs"]
+mod form_grammar;
+#[path = "form_legacy_edges.rs"]
+mod form_legacy_edges;
 #[path = "form_limits.rs"]
 mod form_limits;
 #[path = "framing_smuggling.rs"]

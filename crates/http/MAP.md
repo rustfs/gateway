@@ -25,8 +25,9 @@ after it has accepted.
 | `src/ingest/trailer.rs` | Strict bounded `aws-chunked` trailer parsing and declared-set matching. | A trailer name, size, count, or EOF boundary is accepted wrongly. |
 | `src/ingest/reject.rs` | Every way an `aws-chunked` body is refused, and what each refusal is on the wire. | A chunked-body refusal's status or wording is wrong. |
 | `src/form/mod.rs` | The POST Object form, read so that the file's ceiling is known before the file is. | The policy-before-file order is in question. |
-| `src/form/reader.rs` | The text fields before the file, and the door to the part after it. | A POST form text field or its ceiling changes. |
-| `src/form/file.rs` | The file part, read under a ceiling named before it started. | The file read path or its ceiling changes. |
+| `src/form/reader.rs` | The text fields before the file, and the door to the part after it; under the legacy RustFS grammar also the preamble and boundary-line padding. | A POST form text field, a boundary line, or a ceiling changes. |
+| `src/form/legacy.rs` | The legacy RustFS grammar's `Content-Type` boundary and part header block: the fields read, the winning disposition, the parameter grammar. | A RustFS-profile form is read differently from legacy RustFS. |
+| `src/form/file.rs` | The file part, read under a ceiling named before it started; under the legacy RustFS grammar also what may follow the closing delimiter. | The file read path, its ceiling, or the closing rule changes. |
 | `tests/integration.rs` | The one Cargo test target every `tests/*.rs` source is a module of; `check_http_test_target_consolidation.sh` pins it. | A test source is added, or `cargo test -p rustfs-gateway-http` links more than one integration binary. |
 | `tests/support/mod.rs` | Request builders shared by the acceptance suites. | A suite needs a new request shape. |
 | `tests/support/ingest.rs` | Wire-shaped ingest fixtures: raw `aws-chunked` bytes and a scripted socket. | An ingest suite needs new wire bytes. |
@@ -46,6 +47,9 @@ after it has accepted.
 | `tests/header_accept_replay.rs` | Replays `fuzz/seeds/header_accept/` and 20,000 fixed-seed samples through the `header_accept` property: exact header ceilings, repeats, readability, metadata. | Change a header acceptance rule, or add a minimised fuzz regression seed. |
 | `tests/ingest_perf_gates.rs` | Ingestion allocation and cost gates, stated as equalities rather than wall clocks. | Change the hot path. |
 | `tests/form_limits.rs` | POST Object form ceilings and the order in which they are decided. | Change `src/form/`. |
+| `tests/form_grammar.rs` | The legacy RustFS form grammar inside a part: header blocks and `Content-Disposition`, accepted and refused. | Change `src/form/legacy.rs`'s part grammar. |
+| `tests/form_legacy_edges.rs` | The legacy grammar at a form's edges — preamble, padding, closing tail, boundary, `Content-Type`, prelude bound — and the gateway grammar unchanged beside it. | Change a legacy branch of `src/form/reader.rs` or `src/form/file.rs`, or `src/form/legacy.rs`'s header grammar. |
+| `tests/support/form.rs` | Form builders and a framing-checked reader shared by the two legacy-grammar suites. | Those suites need a new form shape. |
 | `tests/form_allocations.rs` | Measures file-size-independent heap and bounded allocation under fragmented text fields. | Change the file read path. |
 | `benches/parse.rs` | Asserts zero allocations for eight-query indexing and signed-header canonicalization. | Change request-head parsing or canonical-header writing. |
 | `benches/chunked.rs` | Zero allocations per additional signed 64 KiB chunk, plus a throughput record. | Change the ingest pipeline's per-chunk path. |

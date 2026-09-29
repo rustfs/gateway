@@ -64,6 +64,11 @@
 //! so a chunked transfer or an HTTP/2 stream still carrying data is refused with `411` exactly as
 //! RustFS refuses it.
 
+// Declared here rather than in `builder.rs`, which is at its size limit: the POST form grammar is one
+// more RustFS-profile switch this policy holds.
+#[path = "post_forms.rs"]
+pub(crate) mod post_forms;
+
 use super::ServiceBuilder;
 use super::client_quirks::ChecksumWaiver;
 use super::legacy_sentences::BodySentences;
@@ -92,6 +97,8 @@ pub(crate) struct ViewPolicy {
     pub(super) checksum_waiver: ChecksumWaiver,
     /// The sentences a request-body refusal is answered with (`super::legacy_sentences`).
     pub(super) body_sentences: BodySentences,
+    /// Which grammar POST Object forms are read with (`post_forms`).
+    pub(crate) post_forms: post_forms::PostFormGrammar,
     clamp_max_keys: bool,
     integrity_codes: IntegrityCodes,
     presigned_payload_unsigned: bool,

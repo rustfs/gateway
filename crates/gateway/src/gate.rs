@@ -207,10 +207,11 @@ where
     pub(crate) async fn post_object_prelude(
         self,
         content_type: &str,
-        limits: rustfs_gateway_http::FormLimits,
+        form: crate::builder::view_policy::post_forms::PostFormRead,
         timeouts: BodyTimeouts,
     ) -> Result<crate::post_object::PostObjectPrelude<B>, S3Error> {
-        crate::post_object::PostObjectPrelude::read(self.body, content_type, limits, timeouts).await
+        crate::post_object::PostObjectPrelude::read_with_grammar(self.body, content_type, form.limits, form.grammar, timeouts)
+            .await
     }
 
     /// Reads the body, bounded twice, and only for a caller holding a [`MetadataAdmission`].

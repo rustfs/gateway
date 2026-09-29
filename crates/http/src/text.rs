@@ -85,6 +85,18 @@ pub(crate) fn is_all_ascii_graphic(bytes: &[u8]) -> bool {
     !bytes.is_empty() && bytes.iter().all(u8::is_ascii_graphic)
 }
 
+/// Trims optional whitespace (RFC 9110 `OWS`: spaces and horizontal tabs, nothing else) from both
+/// ends.
+pub(crate) fn trim_ows(mut value: &[u8]) -> &[u8] {
+    while let Some(rest) = value.strip_prefix(b" ").or_else(|| value.strip_prefix(b"\t")) {
+        value = rest;
+    }
+    while let Some(rest) = value.strip_suffix(b" ").or_else(|| value.strip_suffix(b"\t")) {
+        value = rest;
+    }
+    value
+}
+
 /// Whether the byte is a valid HTTP token character (RFC 9110 §5.6.2 `tchar`).
 pub(crate) fn is_tchar(byte: u8) -> bool {
     byte.is_ascii_alphanumeric()
