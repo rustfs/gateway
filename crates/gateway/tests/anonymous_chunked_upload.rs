@@ -160,7 +160,8 @@ async fn an_anonymous_chunk_signed_upload_is_refused_before_the_handler() {
         let (service, recorded) = service();
         let request = anonymous_put(mode, OBJECT.len(), unsigned_framing(OBJECT_CRC32));
         let (status, body) = support::exchange(&service, request).await;
-        assert!(status.is_client_error(), "{mode} answered {status}: {body}");
+        assert_eq!(status, http::StatusCode::BAD_REQUEST, "{mode}: {body}");
+        assert_eq!(support::element_text(&body, "Code"), Some("InvalidRequest"), "{mode}: {body}");
         assert_eq!(recorded.reached.load(Ordering::SeqCst), 0, "{mode} reached the handler: {body}");
     }
 }
