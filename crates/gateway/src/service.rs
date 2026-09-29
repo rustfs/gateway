@@ -710,12 +710,18 @@ impl S3Service {
         let presence = detect_credentials(&view);
 
         let chunk_sink = crate::ext::ChunkSink::new();
-        // Kept out of the `match` so the read at the bottom can consult it: for an anonymous or
-        // custom admission there is no payload mode and therefore no framed body to decode.
+        // Kept out of the `match` so the read at the bottom can consult it. A custom admission has no
+        // payload mode; an anonymous one has only the unsigned streaming mode its head declares.
         let mut framing_mode: Option<PayloadMode> = None;
         let mut body_digest = BodyDigestObligation::None;
         let (authentication, signature_mismatch) = match self.inner.floor.admit(view, M::floor(&op), now) {
-            Ok(Admission::Anonymous(evidence)) => (AuthenticationOutcome::ordinary(Verdict::anonymous(evidence)), None),
+            Ok(Admission::Anonymous(evidence)) => {
+                framing_mode = match crate::payload_header::anonymous_framing(&headers) {
+                    Ok(mode) => mode,
+                    Err(error) => return outcome.refuse(error),
+                };
+                (AuthenticationOutcome::ordinary(Verdict::anonymous(evidence)), None)
+            }
             Ok(Admission::Sealed(sealed)) => {
                 let payload = match payload_mode(&headers, sealed.marker().location()) {
                     Ok(payload) => payload,

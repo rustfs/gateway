@@ -22,6 +22,8 @@ mod support;
 
 #[path = "action_rules_runtime.rs"]
 mod action_rules_runtime;
+#[path = "anonymous_chunked_upload.rs"]
+mod anonymous_chunked_upload;
 #[path = "anonymous_delegation_runtime.rs"]
 mod anonymous_delegation_runtime;
 #[path = "assembly.rs"]

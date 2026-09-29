@@ -58,6 +58,30 @@ pub(crate) fn payload_mode(headers: &HeaderMap, location: SigLocation) -> Result
     })
 }
 
+/// The framing an anonymous request's own head declares (rustfs/gateway#1060).
+///
+/// `STREAMING-UNSIGNED-PAYLOAD-TRAILER` needs no signature to decode, so an anonymous request that
+/// declares it is decoded exactly as a signed one is; handing it through would store the framing
+/// as object data. A chunk-signed streaming mode cannot be verified without a signature and is
+/// refused. Any other declaration leaves the body plain, as before: an anonymous request's digest
+/// is not an obligation this assembly takes on.
+pub(crate) fn anonymous_framing(headers: &HeaderMap) -> Result<Option<PayloadMode>, S3Error> {
+    let declares_streaming = headers
+        .get("x-amz-content-sha256")
+        .is_some_and(|value| value.as_bytes().starts_with(b"STREAMING-"));
+    if !declares_streaming {
+        return Ok(None);
+    }
+    match payload_mode(headers, SigLocation::Header)? {
+        mode @ PayloadMode::StreamingUnsigned { .. } => Ok(Some(mode)),
+        PayloadMode::StreamingSigned { .. } => Err(ordinary_refusal(
+            ErrorCode::INVALID_REQUEST,
+            "a chunk-signed streaming payload needs a signed request",
+        )),
+        _ => Ok(None),
+    }
+}
+
 /// The body-integrity work a signed payload declaration leaves for the body reader.
 ///
 /// An exact digest is an obligation wherever the signature travels: the signature covers
