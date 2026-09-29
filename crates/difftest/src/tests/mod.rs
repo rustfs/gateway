@@ -34,5 +34,6 @@ mod runner;
 mod rustfs_profile;
 mod seam;
 mod seam_answers;
+mod seam_outputs;
 mod seam_overrides;
 mod shadow;

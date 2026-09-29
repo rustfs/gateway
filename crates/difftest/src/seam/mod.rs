@@ -12,31 +12,38 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The seam decode diff (rustfs/gateway#1076): what the RustFS app layer is handed on each stack.
+//! The seam decode diff and the seam answer diff (rustfs/gateway#1076): what the RustFS app layer
+//! is handed on each stack, and what each stack writes of what it answers.
 //!
 //! Responsible for: sending one raw request through the assembled gateway, whose handler converts
 //! its input into the pinned legacy input through the production seam exactly as the RustFS
 //! adapter does, and through the pinned legacy service, whose handler records the input it was
 //! handed; then comparing the two legacy inputs member by member with the generated census, and
 //! the body bytes each handler drained. Every covered operation is in [`SEAM_OPERATIONS`], so a
-//! member the conversion drops, flattens or synthesises shows up as a named path.
+//! member the conversion drops, flattens or synthesises shows up as a named path. And the other
+//! way: handing both handlers one legacy output, the gateway's converted through the seam as the
+//! RustFS adapter converts an answer, and comparing the two answers ([`AnswerDiff`]) — as the
+//! encode diff compares them, and value by value, so a member the conversion drops is named even
+//! where the two documents differ in their root.
 //! NOT responsible for: the gateway's own decode against the legacy one member by member in the
 //! gateway's spelling (`decode.rs` does that for the operations it projects), the request
-//! context (the goldens context diff), outputs, or deciding what a difference means (the seam
-//! register in `samples.rs` does).
+//! context (the goldens context diff), or deciding what a difference means (the seam register in
+//! `samples.rs` and the answer register in `answers.rs` do).
 //! Upstream: `stacks.rs`, `table.rs`, the census under `compat::s3s_0_17_0::generated::census`.
-//! Downstream: this crate's `tests/seam.rs`.
+//! Downstream: this crate's `tests/seam.rs`, `tests/seam_answers.rs` and `tests/seam_outputs.rs`.
 
+mod answers;
 mod samples;
 mod stacks;
 mod table;
 
+pub(crate) use answers::{ANSWER_FINDINGS, UNWRITTEN_PATHS, Written, answer_rows};
 #[cfg(test)]
 pub(crate) use samples::document as samples_document;
 #[cfg(test)]
 pub(crate) use samples::omitted::OMITTED_OPERATIONS;
 pub(crate) use samples::{Expect, SEAM_FINDINGS, SeamClass, SeamFinding, UNREACHED_PATHS, seam_rows};
-pub(crate) use table::{SEAM_OPERATIONS, STORED_OPERATIONS, input_paths};
+pub(crate) use table::{LegacyOutput, SEAM_OPERATIONS, STORED_OPERATIONS, input_paths, output_paths};
 
 use crate::decode::{Answer, BodySeen, Cmp, S3ErrorView};
 use crate::request::RawRequest;
@@ -172,6 +179,148 @@ impl SeamDiffer {
             .legacy
             .answer(request, Box::new(stacks::LegacyAnswer { output, headers }))?;
         Ok((gateway, legacy))
+    }
+}
+
+/// One legacy output — what a RustFS app body returns — written by both stacks: by the gateway
+/// after the seam converted it as the RustFS adapter does, and by the pinned legacy service as it
+/// is.
+#[derive(Debug)]
+pub(crate) struct AnswerDiff {
+    /// The operation the output answers.
+    pub(crate) operation: &'static str,
+    /// The member paths the legacy output holds something at.
+    pub(crate) present: Vec<String>,
+    /// What the seam refused to hand over, when it refused: the gateway then answers an internal
+    /// error instead of writing less than the output holds.
+    pub(crate) refused: Option<rustfs_gateway_types::compat::ConversionError>,
+    /// The status the gateway answered with.
+    pub(crate) gateway_status: u16,
+    /// The two answers, compared as the encode diff compares them, when the seam handed the output
+    /// over. A refused output is not written by the legacy stack: there is nothing to compare.
+    pub(crate) encode: Option<crate::encode::EncodeDiff>,
+    /// The gateway's and the legacy stack's answers as compared (normalised), when compared.
+    pub(crate) answers: Option<(crate::encode::WireAnswer, crate::encode::WireAnswer)>,
+}
+
+impl AnswerDiff {
+    /// Every value the legacy answer holds that the gateway answer does not: a header line, or a
+    /// body value (`xmltree::values`: an element's text or an attribute, whatever the order, the
+    /// namespace or the root's name), or a body that is not XML and not the same bytes. Empty
+    /// exactly when everything the legacy stack wrote of the output reached the gateway's wire.
+    ///
+    /// A header named in `excused_headers`, or a body value at or below a path in `excused_paths`,
+    /// is left to the register entry that already argues how the two stacks spell it.
+    pub(crate) fn lost(
+        &self,
+        excused_headers: &std::collections::BTreeSet<String>,
+        excused_paths: &std::collections::BTreeSet<String>,
+    ) -> Vec<String> {
+        let Some((gateway, legacy)) = &self.answers else {
+            return Vec::new();
+        };
+        let excused = |path: &str| {
+            excused_paths.iter().any(|excused| {
+                path == excused
+                    || path
+                        .strip_prefix(excused.as_str())
+                        .is_some_and(|rest| rest.starts_with('/') || rest.starts_with('@'))
+            })
+        };
+        let mut lost = Vec::new();
+        let mut offered: Vec<&(String, Vec<u8>)> = gateway.headers.iter().collect();
+        for line in &legacy.headers {
+            // Framing when a body follows: each side's own length (`encode.rs` holds each to it).
+            if (line.0 == "content-length" && !legacy.body.is_empty()) || excused_headers.contains(&line.0) {
+                continue;
+            }
+            match offered.iter().position(|candidate| *candidate == line) {
+                Some(index) => {
+                    offered.swap_remove(index);
+                }
+                None => lost.push(format!("header {}: {}", line.0, String::from_utf8_lossy(&line.1))),
+            }
+        }
+        match (document(&gateway.body), document(&legacy.body)) {
+            (Some(gateway_root), Some(legacy_root)) => {
+                let mut offered = crate::xmltree::values(&gateway_root);
+                for value in crate::xmltree::values(&legacy_root) {
+                    if excused(&value.0) {
+                        continue;
+                    }
+                    match offered.iter().position(|candidate| *candidate == value) {
+                        Some(index) => {
+                            offered.swap_remove(index);
+                        }
+                        None => lost.push(format!("body {}: {:?}", value.0, value.1)),
+                    }
+                }
+            }
+            _ if gateway.body == legacy.body => {}
+            _ => lost.push("body: not the same bytes, and not two XML documents".to_owned()),
+        }
+        lost
+    }
+}
+
+/// The root element of an XML answer body, its declaration and the whitespace after it skipped.
+fn document(body: &[u8]) -> Option<crate::xmltree::Element> {
+    let text = std::str::from_utf8(body).ok()?;
+    let text = match text.strip_prefix("<?xml") {
+        Some(rest) => rest.split_once("?>")?.1.trim_start(),
+        None => text,
+    };
+    crate::xmltree::parse(text)
+}
+
+impl SeamDiffer {
+    /// Sends `request` to both stacks with the legacy output `build` makes as each handler's
+    /// answer, and compares what each wrote: status, every header line and the body.
+    pub(crate) fn answer_diff<T: LegacyOutput>(&self, request: &RawRequest, build: impl Fn() -> T) -> Result<AnswerDiff, String> {
+        self.answer_diff_pair(request, &build, &build)
+    }
+
+    /// [`Self::answer_diff`] with a different output for each stack: the negative controls hand the
+    /// gateway less than the legacy stack, to prove the difference cannot go unreported.
+    pub(crate) fn answer_diff_pair<T: LegacyOutput>(
+        &self,
+        request: &RawRequest,
+        gateway_build: &dyn Fn() -> T,
+        legacy_build: &dyn Fn() -> T,
+    ) -> Result<AnswerDiff, String> {
+        let present = legacy_build().present();
+        let refused = gateway_build().convert(http::HeaderMap::new()).err();
+        let mut gateway = self.gateway.answer(
+            request,
+            Box::new(stacks::LegacyAnswer {
+                output: gateway_build(),
+                headers: http::HeaderMap::new(),
+            }),
+        )?;
+        let gateway_status = gateway.status;
+        let (encode, answers) = match refused {
+            Some(_) => (None, None),
+            None => {
+                let mut legacy = self.legacy.answer(
+                    request,
+                    Box::new(stacks::LegacyAnswer {
+                        output: legacy_build(),
+                        headers: http::HeaderMap::new(),
+                    }),
+                )?;
+                let head = request.method == http::Method::HEAD;
+                let encode = crate::encode::compare(T::OPERATION.to_owned(), head, &mut gateway, &mut legacy);
+                (Some(encode), Some((gateway, legacy)))
+            }
+        };
+        Ok(AnswerDiff {
+            operation: T::OPERATION,
+            present,
+            refused,
+            gateway_status,
+            encode,
+            answers,
+        })
     }
 }
 

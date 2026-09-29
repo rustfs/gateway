@@ -27,6 +27,8 @@ mod outputs_more;
 mod requests;
 mod rustfs;
 
+#[cfg(test)]
+pub(crate) use outputs::CHECKSUMS;
 pub use outputs::{OutputRow, UPLOAD_ID, VERSION_ID};
 pub use requests::RequestRow;
 #[cfg(test)]

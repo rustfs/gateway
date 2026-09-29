@@ -18,7 +18,7 @@ compare and why this is not an in-process dual stack.
 | `src/decode.rs` | `decode_diff`, `Differ`, the four compared items, findings and their priority, the faults, and the `Profile` pairing (`rustfs_decode_diff`). | A finding is reported wrongly or ranked wrongly, or the RustFS pairing builds the wrong stacks. |
 | `src/encode.rs` | `Differ::encode`: one s3s output through both stacks, answers normalised and compared (status, headers, body structure then bytes); the encoder faults. | An answer is compared or reported wrongly. |
 | `src/normalize.rs` | The closed placeholder table and the exact format each replaced value is held to. | A stamped header or an id is normalised or checked wrongly. |
-| `src/xmltree.rs` | The structural XML comparison: attributes, empty-element spelling, child order, presence, text, by element path. | An XML difference is named at the wrong path, or missed. |
+| `src/xmltree.rs` | The structural XML comparison: attributes, empty-element spelling, child order, presence, text, by element path; and every value a document holds below its root, entities resolved, for the answer diff's containment check. | An XML difference is named at the wrong path, or missed. |
 | `src/convert/mod.rs` | Output-conversion helpers and `Unconvertible`. | A member converts wrongly across every operation. |
 | `src/convert/object.rs` | GetObject, HeadObject, PutObject (seam), DeleteObject, DeleteObjects, CopyObject outputs. | One of those outputs converts wrongly. |
 | `src/convert/listing.rs` | ListObjects, ListObjectsV2, ListObjectVersions, ListMultipartUploads, ListBuckets outputs. | A listing output converts wrongly. |
@@ -55,14 +55,17 @@ compare and why this is not an in-process dual stack.
 | `src/bin/shadow-proxy.rs` | The proxy's command line. | Changing its options. |
 | `src/tests/shadow.rs` | The copy's framing cases, bytes unchanged both ways, a stalled diff never slowing traffic, the verdicts. | The proxy or its copy changes. |
 | `src/tests/census.rs` | Each gateway projection held to the generated DTO field count. | A DTO gains a member. |
-| `src/seam/mod.rs` | The seam decode diff (rustfs/gateway#1076): what the RustFS app layer is handed on each stack, compared whole with the generated member census. | A seam finding is reported wrongly. |
+| `src/seam/mod.rs` | The seam decode diff (rustfs/gateway#1076): what the RustFS app layer is handed on each stack, compared whole with the generated member census; and the seam answer diff, one legacy output written by both stacks and compared finding by finding and value by value. | A seam finding is reported wrongly, or an answer value is lost unnoticed. |
 | `src/seam/stacks.rs` | Both stacks of the seam diff: the assembled gateway converting through the production seam, the pinned legacy service recording its input. | A side is driven or recorded wrongly. |
 | `src/seam/table.rs` | Every covered operation, how the RustFS adapter converts it (supplied copy source, patched delete list, raw request for legacy-only members), and its census lookups. | An operation joins the seam or its adapter step changes. |
 | `src/seam/samples.rs` | The seam register (`sd-*` findings with RustFS evidence), unreached members, and the row helpers. | Classifying a difference, or adding a row family. |
 | `src/seam/samples/*.rs` | The seam rows: object writes, configuration writes, bucket lifecycle and reads, one row per finding, and every checksum-required write with no integrity claim (`omitted.rs`, rustfs/backlog#1677 R5). | Adding a row. |
+| `src/seam/answers.rs` | The seam answer rows' types and helpers, the answer register (`sa-*` findings: wire differences outside the encode matrix, pinned and reported), and the output members no row can set. | Classifying an answer difference, or adding an answer row family. |
+| `src/seam/answers/*.rs` | The seam answer rows: bucket configurations, object sub-resources, and the nested checksum members per algorithm. | Adding an answer row. |
 | `src/tests/seam_answers.rs` | Every kind of header a RustFS answer sets beside its output, written by both stacks as the same lines through the seam's `answer_from_legacy`, the one replacing an output member's header included. | An answer header is written differently or refused. |
 | `src/tests/seam_overrides.rs` | The census of the seam generator's overrides: every entry of `overrides.rs` read from source and proven lossless or fail-closed by a finding, a row, the fact table or a named test. | An override is added or its proof moves. |
 | `src/tests/seam.rs` | Judges the seam diff: rows as declared, matrix differences registered, every legacy input member accounted for, empty optional headers, no stale finding, every RustFS-profile switch of `compat/sut` on, negative controls. | A seam judgement fails, or the RustFS profile gains a switch. |
+| `src/tests/seam_outputs.rs` | Judges the seam answer diff: every answer row and every encode-matrix sample through the production seam as declared, no value the legacy answer holds missing from the gateway's, every legacy output member written or refused by name, no stale answer finding, negative controls. | A seam answer judgement fails. |
 
 ## Verify
 

@@ -12,15 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The one table of the seam decode diff: every covered operation, how the RustFS adapter
-//! converts its gateway request into the pinned legacy input, and its census module.
+//! The one table of the seam diffs: every covered operation, how the RustFS adapter converts its
+//! gateway request into the pinned legacy input and a legacy answer back, and its census modules.
 //!
 //! Responsible for: [`SEAM_OPERATIONS`]; the conversion each operation's gateway handler runs —
 //! the generated seam for most, the hand-written seam for `PutObject` and `GetBucketLocation`,
 //! the authorized copy source supplied to `CopyObject` and `UploadPartCopy`, the raw query and
 //! header lines handed to the three operations with a member only the legacy decoder reads, and
 //! the authorized key list patched into `DeleteObjects` — each exactly as the RustFS adapter does it; the legacy
-//! recorder's handler for each operation; and the census lookups by operation name.
+//! recorder's handler for each operation; the census lookups by operation name; and, per legacy
+//! output, [`LegacyOutput`]: its census and the answer conversion alone.
 //! NOT responsible for: sending or comparing (`stacks.rs`, `mod.rs`).
 //! Upstream: the compat seam and its census. Downstream: `stacks.rs`, `mod.rs`.
 //!
@@ -70,6 +71,20 @@ pub(crate) trait SeamConverted: OperationCodec + Sized {
     fn answer(queued: Box<dyn Any + Send>) -> Result<(Self::Output, http::HeaderMap), ConversionError>;
 }
 
+/// A covered operation's legacy output — what a RustFS app body returns — with its census and the
+/// answer conversion the RustFS adapter runs on it.
+pub(crate) trait LegacyOutput: Send + Sized + 'static {
+    /// The operation it answers.
+    const OPERATION: &'static str;
+
+    /// The member paths this value holds something at.
+    fn present(&self) -> Vec<String>;
+
+    /// Converts this output and the headers the body set beside it through the seam, as the RustFS
+    /// adapter converts an answer, and reports the member the conversion refused, if it refused.
+    fn convert(self, headers: http::HeaderMap) -> Result<(), ConversionError>;
+}
+
 /// The queued answer as the legacy answer of output `T`.
 fn queued<T: 'static>(queued: Box<dyn Any + Send>) -> Result<LegacyAnswer<T>, ConversionError> {
     queued
@@ -84,8 +99,8 @@ macro_rules! answer {
         seam::put_object::answer_from_legacy(output, headers)
     }};
     (location, $method:ident, $output:ident, $queued:ident) => {{
-        let _ = $queued;
-        Err(refused("answer", "GetBucketLocation's seam converts no answer headers"))
+        let LegacyAnswer { output, headers } = queued::<legacy::$output>($queued)?;
+        Ok(seam::get_bucket_location::answer_from_legacy(output, headers))
     }};
     ($kind:ident, $method:ident, $output:ident, $queued:ident) => {{
         let LegacyAnswer { output, headers } = queued::<legacy::$output>($queued)?;
@@ -344,7 +359,7 @@ macro_rules! take_body {
 }
 
 macro_rules! seam_operations {
-    ($($kind:ident $op:ident / $method:ident($input:ident, $output:ident) => $census:ident;)+) => {
+    ($($kind:ident $op:ident / $method:ident($input:ident, $output:ident) => $census:ident, $answer_census:ident;)+) => {
         /// Every operation the seam decode diff covers: every operation of the seam but
         /// `SelectObjectContent`.
         pub(crate) const SEAM_OPERATIONS: &[&str] = &[$(stringify!($op)),+];
@@ -404,6 +419,28 @@ macro_rules! seam_operations {
             }
         }
 
+        $(impl LegacyOutput for legacy::$output {
+            const OPERATION: &'static str = stringify!($op);
+
+            fn present(&self) -> Vec<String> {
+                let mut present = Vec::new();
+                census::$answer_census::present("", self, &mut present);
+                present
+            }
+
+            fn convert(self, headers: http::HeaderMap) -> Result<(), ConversionError> {
+                <dto::$op as SeamConverted>::answer(Box::new(LegacyAnswer { output: self, headers })).map(|_| ())
+            }
+        })+
+
+        /// Every member path of the covered operation's legacy output.
+        pub(crate) fn output_paths(operation: &str) -> Option<&'static [&'static str]> {
+            match operation {
+                $(stringify!($op) => Some(census::$answer_census::PATHS),)+
+                _ => None,
+            }
+        }
+
         /// The member paths the legacy input of `operation` holds, and — when the gateway handed the
         /// same operation an input too — the member paths at which the two differ. Both recordings
         /// are taken whole (an owned downcast), so no reference into a type-erased value outlives
@@ -436,76 +473,76 @@ macro_rules! seam_operations {
 }
 
 seam_operations! {
-    plain AbortMultipartUpload / abort_multipart_upload(AbortMultipartUploadInput, AbortMultipartUploadOutput) => abort_multipart_upload_input;
-    plain CompleteMultipartUpload / complete_multipart_upload(CompleteMultipartUploadInput, CompleteMultipartUploadOutput) => complete_multipart_upload_input;
-    copy_wire CopyObject / copy_object(CopyObjectInput, CopyObjectOutput) => copy_object_input;
-    plain CreateBucket / create_bucket(CreateBucketInput, CreateBucketOutput) => create_bucket_input;
-    plain_wire CreateMultipartUpload / create_multipart_upload(CreateMultipartUploadInput, CreateMultipartUploadOutput) => create_multipart_upload_input;
-    plain_wire DeleteBucket / delete_bucket(DeleteBucketInput, DeleteBucketOutput) => delete_bucket_input;
-    plain DeleteBucketCors / delete_bucket_cors(DeleteBucketCorsInput, DeleteBucketCorsOutput) => delete_bucket_cors_input;
-    plain DeleteBucketEncryption / delete_bucket_encryption(DeleteBucketEncryptionInput, DeleteBucketEncryptionOutput) => delete_bucket_encryption_input;
-    plain DeleteBucketLifecycle / delete_bucket_lifecycle(DeleteBucketLifecycleInput, DeleteBucketLifecycleOutput) => delete_bucket_lifecycle_input;
-    plain DeleteBucketPolicy / delete_bucket_policy(DeleteBucketPolicyInput, DeleteBucketPolicyOutput) => delete_bucket_policy_input;
-    plain DeleteBucketReplication / delete_bucket_replication(DeleteBucketReplicationInput, DeleteBucketReplicationOutput) => delete_bucket_replication_input;
-    plain DeleteBucketTagging / delete_bucket_tagging(DeleteBucketTaggingInput, DeleteBucketTaggingOutput) => delete_bucket_tagging_input;
-    plain DeleteBucketWebsite / delete_bucket_website(DeleteBucketWebsiteInput, DeleteBucketWebsiteOutput) => delete_bucket_website_input;
-    plain DeleteObject / delete_object(DeleteObjectInput, DeleteObjectOutput) => delete_object_input;
-    plain DeleteObjectTagging / delete_object_tagging(DeleteObjectTaggingInput, DeleteObjectTaggingOutput) => delete_object_tagging_input;
-    delete_objects DeleteObjects / delete_objects(DeleteObjectsInput, DeleteObjectsOutput) => delete_objects_input;
-    plain DeletePublicAccessBlock / delete_public_access_block(DeletePublicAccessBlockInput, DeletePublicAccessBlockOutput) => delete_public_access_block_input;
-    plain GetBucketAccelerateConfiguration / get_bucket_accelerate_configuration(GetBucketAccelerateConfigurationInput, GetBucketAccelerateConfigurationOutput) => get_bucket_accelerate_configuration_input;
-    plain GetBucketAcl / get_bucket_acl(GetBucketAclInput, GetBucketAclOutput) => get_bucket_acl_input;
-    plain GetBucketCors / get_bucket_cors(GetBucketCorsInput, GetBucketCorsOutput) => get_bucket_cors_input;
-    plain GetBucketEncryption / get_bucket_encryption(GetBucketEncryptionInput, GetBucketEncryptionOutput) => get_bucket_encryption_input;
-    plain GetBucketLifecycleConfiguration / get_bucket_lifecycle_configuration(GetBucketLifecycleConfigurationInput, GetBucketLifecycleConfigurationOutput) => get_bucket_lifecycle_configuration_input;
-    location GetBucketLocation / get_bucket_location(GetBucketLocationInput, GetBucketLocationOutput) => get_bucket_location_input;
-    plain GetBucketLogging / get_bucket_logging(GetBucketLoggingInput, GetBucketLoggingOutput) => get_bucket_logging_input;
-    plain GetBucketNotificationConfiguration / get_bucket_notification_configuration(GetBucketNotificationConfigurationInput, GetBucketNotificationConfigurationOutput) => get_bucket_notification_configuration_input;
-    plain GetBucketPolicy / get_bucket_policy(GetBucketPolicyInput, GetBucketPolicyOutput) => get_bucket_policy_input;
-    plain GetBucketPolicyStatus / get_bucket_policy_status(GetBucketPolicyStatusInput, GetBucketPolicyStatusOutput) => get_bucket_policy_status_input;
-    plain GetBucketReplication / get_bucket_replication(GetBucketReplicationInput, GetBucketReplicationOutput) => get_bucket_replication_input;
-    plain GetBucketRequestPayment / get_bucket_request_payment(GetBucketRequestPaymentInput, GetBucketRequestPaymentOutput) => get_bucket_request_payment_input;
-    plain GetBucketTagging / get_bucket_tagging(GetBucketTaggingInput, GetBucketTaggingOutput) => get_bucket_tagging_input;
-    plain GetBucketVersioning / get_bucket_versioning(GetBucketVersioningInput, GetBucketVersioningOutput) => get_bucket_versioning_input;
-    plain GetBucketWebsite / get_bucket_website(GetBucketWebsiteInput, GetBucketWebsiteOutput) => get_bucket_website_input;
-    plain GetObject / get_object(GetObjectInput, GetObjectOutput) => get_object_input;
-    plain GetObjectAcl / get_object_acl(GetObjectAclInput, GetObjectAclOutput) => get_object_acl_input;
-    plain GetObjectAttributes / get_object_attributes(GetObjectAttributesInput, GetObjectAttributesOutput) => get_object_attributes_input;
-    plain GetObjectLegalHold / get_object_legal_hold(GetObjectLegalHoldInput, GetObjectLegalHoldOutput) => get_object_legal_hold_input;
-    plain GetObjectLockConfiguration / get_object_lock_configuration(GetObjectLockConfigurationInput, GetObjectLockConfigurationOutput) => get_object_lock_configuration_input;
-    plain GetObjectRetention / get_object_retention(GetObjectRetentionInput, GetObjectRetentionOutput) => get_object_retention_input;
-    plain GetObjectTagging / get_object_tagging(GetObjectTaggingInput, GetObjectTaggingOutput) => get_object_tagging_input;
-    plain GetObjectTorrent / get_object_torrent(GetObjectTorrentInput, GetObjectTorrentOutput) => get_object_torrent_input;
-    plain GetPublicAccessBlock / get_public_access_block(GetPublicAccessBlockInput, GetPublicAccessBlockOutput) => get_public_access_block_input;
-    plain HeadBucket / head_bucket(HeadBucketInput, HeadBucketOutput) => head_bucket_input;
-    plain HeadObject / head_object(HeadObjectInput, HeadObjectOutput) => head_object_input;
-    plain ListBuckets / list_buckets(ListBucketsInput, ListBucketsOutput) => list_buckets_input;
-    plain ListMultipartUploads / list_multipart_uploads(ListMultipartUploadsInput, ListMultipartUploadsOutput) => list_multipart_uploads_input;
-    plain ListObjectVersions / list_object_versions(ListObjectVersionsInput, ListObjectVersionsOutput) => list_object_versions_input;
-    plain ListObjects / list_objects(ListObjectsInput, ListObjectsOutput) => list_objects_input;
-    plain ListObjectsV2 / list_objects_v2(ListObjectsV2Input, ListObjectsV2Output) => list_objects_v2input;
-    plain ListParts / list_parts(ListPartsInput, ListPartsOutput) => list_parts_input;
-    plain PutBucketAccelerateConfiguration / put_bucket_accelerate_configuration(PutBucketAccelerateConfigurationInput, PutBucketAccelerateConfigurationOutput) => put_bucket_accelerate_configuration_input;
-    plain PutBucketAcl / put_bucket_acl(PutBucketAclInput, PutBucketAclOutput) => put_bucket_acl_input;
-    plain PutBucketCors / put_bucket_cors(PutBucketCorsInput, PutBucketCorsOutput) => put_bucket_cors_input;
-    plain PutBucketEncryption / put_bucket_encryption(PutBucketEncryptionInput, PutBucketEncryptionOutput) => put_bucket_encryption_input;
-    plain PutBucketLifecycleConfiguration / put_bucket_lifecycle_configuration(PutBucketLifecycleConfigurationInput, PutBucketLifecycleConfigurationOutput) => put_bucket_lifecycle_configuration_input;
-    plain PutBucketLogging / put_bucket_logging(PutBucketLoggingInput, PutBucketLoggingOutput) => put_bucket_logging_input;
-    plain PutBucketNotificationConfiguration / put_bucket_notification_configuration(PutBucketNotificationConfigurationInput, PutBucketNotificationConfigurationOutput) => put_bucket_notification_configuration_input;
-    plain PutBucketPolicy / put_bucket_policy(PutBucketPolicyInput, PutBucketPolicyOutput) => put_bucket_policy_input;
-    plain PutBucketReplication / put_bucket_replication(PutBucketReplicationInput, PutBucketReplicationOutput) => put_bucket_replication_input;
-    plain PutBucketRequestPayment / put_bucket_request_payment(PutBucketRequestPaymentInput, PutBucketRequestPaymentOutput) => put_bucket_request_payment_input;
-    plain PutBucketTagging / put_bucket_tagging(PutBucketTaggingInput, PutBucketTaggingOutput) => put_bucket_tagging_input;
-    plain PutBucketVersioning / put_bucket_versioning(PutBucketVersioningInput, PutBucketVersioningOutput) => put_bucket_versioning_input;
-    plain PutBucketWebsite / put_bucket_website(PutBucketWebsiteInput, PutBucketWebsiteOutput) => put_bucket_website_input;
-    put_object PutObject / put_object(PutObjectInput, PutObjectOutput) => put_object_input;
-    plain PutObjectAcl / put_object_acl(PutObjectAclInput, PutObjectAclOutput) => put_object_acl_input;
-    plain PutObjectLegalHold / put_object_legal_hold(PutObjectLegalHoldInput, PutObjectLegalHoldOutput) => put_object_legal_hold_input;
-    plain PutObjectLockConfiguration / put_object_lock_configuration(PutObjectLockConfigurationInput, PutObjectLockConfigurationOutput) => put_object_lock_configuration_input;
-    plain PutObjectRetention / put_object_retention(PutObjectRetentionInput, PutObjectRetentionOutput) => put_object_retention_input;
-    plain PutObjectTagging / put_object_tagging(PutObjectTaggingInput, PutObjectTaggingOutput) => put_object_tagging_input;
-    plain PutPublicAccessBlock / put_public_access_block(PutPublicAccessBlockInput, PutPublicAccessBlockOutput) => put_public_access_block_input;
-    plain RestoreObject / restore_object(RestoreObjectInput, RestoreObjectOutput) => restore_object_input;
-    upload_part UploadPart / upload_part(UploadPartInput, UploadPartOutput) => upload_part_input;
-    copy UploadPartCopy / upload_part_copy(UploadPartCopyInput, UploadPartCopyOutput) => upload_part_copy_input;
+    plain AbortMultipartUpload / abort_multipart_upload(AbortMultipartUploadInput, AbortMultipartUploadOutput) => abort_multipart_upload_input, abort_multipart_upload_output;
+    plain CompleteMultipartUpload / complete_multipart_upload(CompleteMultipartUploadInput, CompleteMultipartUploadOutput) => complete_multipart_upload_input, complete_multipart_upload_output;
+    copy_wire CopyObject / copy_object(CopyObjectInput, CopyObjectOutput) => copy_object_input, copy_object_output;
+    plain CreateBucket / create_bucket(CreateBucketInput, CreateBucketOutput) => create_bucket_input, create_bucket_output;
+    plain_wire CreateMultipartUpload / create_multipart_upload(CreateMultipartUploadInput, CreateMultipartUploadOutput) => create_multipart_upload_input, create_multipart_upload_output;
+    plain_wire DeleteBucket / delete_bucket(DeleteBucketInput, DeleteBucketOutput) => delete_bucket_input, delete_bucket_output;
+    plain DeleteBucketCors / delete_bucket_cors(DeleteBucketCorsInput, DeleteBucketCorsOutput) => delete_bucket_cors_input, delete_bucket_cors_output;
+    plain DeleteBucketEncryption / delete_bucket_encryption(DeleteBucketEncryptionInput, DeleteBucketEncryptionOutput) => delete_bucket_encryption_input, delete_bucket_encryption_output;
+    plain DeleteBucketLifecycle / delete_bucket_lifecycle(DeleteBucketLifecycleInput, DeleteBucketLifecycleOutput) => delete_bucket_lifecycle_input, delete_bucket_lifecycle_output;
+    plain DeleteBucketPolicy / delete_bucket_policy(DeleteBucketPolicyInput, DeleteBucketPolicyOutput) => delete_bucket_policy_input, delete_bucket_policy_output;
+    plain DeleteBucketReplication / delete_bucket_replication(DeleteBucketReplicationInput, DeleteBucketReplicationOutput) => delete_bucket_replication_input, delete_bucket_replication_output;
+    plain DeleteBucketTagging / delete_bucket_tagging(DeleteBucketTaggingInput, DeleteBucketTaggingOutput) => delete_bucket_tagging_input, delete_bucket_tagging_output;
+    plain DeleteBucketWebsite / delete_bucket_website(DeleteBucketWebsiteInput, DeleteBucketWebsiteOutput) => delete_bucket_website_input, delete_bucket_website_output;
+    plain DeleteObject / delete_object(DeleteObjectInput, DeleteObjectOutput) => delete_object_input, delete_object_output;
+    plain DeleteObjectTagging / delete_object_tagging(DeleteObjectTaggingInput, DeleteObjectTaggingOutput) => delete_object_tagging_input, delete_object_tagging_output;
+    delete_objects DeleteObjects / delete_objects(DeleteObjectsInput, DeleteObjectsOutput) => delete_objects_input, delete_objects_output;
+    plain DeletePublicAccessBlock / delete_public_access_block(DeletePublicAccessBlockInput, DeletePublicAccessBlockOutput) => delete_public_access_block_input, delete_public_access_block_output;
+    plain GetBucketAccelerateConfiguration / get_bucket_accelerate_configuration(GetBucketAccelerateConfigurationInput, GetBucketAccelerateConfigurationOutput) => get_bucket_accelerate_configuration_input, get_bucket_accelerate_configuration_output;
+    plain GetBucketAcl / get_bucket_acl(GetBucketAclInput, GetBucketAclOutput) => get_bucket_acl_input, get_bucket_acl_output;
+    plain GetBucketCors / get_bucket_cors(GetBucketCorsInput, GetBucketCorsOutput) => get_bucket_cors_input, get_bucket_cors_output;
+    plain GetBucketEncryption / get_bucket_encryption(GetBucketEncryptionInput, GetBucketEncryptionOutput) => get_bucket_encryption_input, get_bucket_encryption_output;
+    plain GetBucketLifecycleConfiguration / get_bucket_lifecycle_configuration(GetBucketLifecycleConfigurationInput, GetBucketLifecycleConfigurationOutput) => get_bucket_lifecycle_configuration_input, get_bucket_lifecycle_configuration_output;
+    location GetBucketLocation / get_bucket_location(GetBucketLocationInput, GetBucketLocationOutput) => get_bucket_location_input, get_bucket_location_output;
+    plain GetBucketLogging / get_bucket_logging(GetBucketLoggingInput, GetBucketLoggingOutput) => get_bucket_logging_input, get_bucket_logging_output;
+    plain GetBucketNotificationConfiguration / get_bucket_notification_configuration(GetBucketNotificationConfigurationInput, GetBucketNotificationConfigurationOutput) => get_bucket_notification_configuration_input, get_bucket_notification_configuration_output;
+    plain GetBucketPolicy / get_bucket_policy(GetBucketPolicyInput, GetBucketPolicyOutput) => get_bucket_policy_input, get_bucket_policy_output;
+    plain GetBucketPolicyStatus / get_bucket_policy_status(GetBucketPolicyStatusInput, GetBucketPolicyStatusOutput) => get_bucket_policy_status_input, get_bucket_policy_status_output;
+    plain GetBucketReplication / get_bucket_replication(GetBucketReplicationInput, GetBucketReplicationOutput) => get_bucket_replication_input, get_bucket_replication_output;
+    plain GetBucketRequestPayment / get_bucket_request_payment(GetBucketRequestPaymentInput, GetBucketRequestPaymentOutput) => get_bucket_request_payment_input, get_bucket_request_payment_output;
+    plain GetBucketTagging / get_bucket_tagging(GetBucketTaggingInput, GetBucketTaggingOutput) => get_bucket_tagging_input, get_bucket_tagging_output;
+    plain GetBucketVersioning / get_bucket_versioning(GetBucketVersioningInput, GetBucketVersioningOutput) => get_bucket_versioning_input, get_bucket_versioning_output;
+    plain GetBucketWebsite / get_bucket_website(GetBucketWebsiteInput, GetBucketWebsiteOutput) => get_bucket_website_input, get_bucket_website_output;
+    plain GetObject / get_object(GetObjectInput, GetObjectOutput) => get_object_input, get_object_output;
+    plain GetObjectAcl / get_object_acl(GetObjectAclInput, GetObjectAclOutput) => get_object_acl_input, get_object_acl_output;
+    plain GetObjectAttributes / get_object_attributes(GetObjectAttributesInput, GetObjectAttributesOutput) => get_object_attributes_input, get_object_attributes_output;
+    plain GetObjectLegalHold / get_object_legal_hold(GetObjectLegalHoldInput, GetObjectLegalHoldOutput) => get_object_legal_hold_input, get_object_legal_hold_output;
+    plain GetObjectLockConfiguration / get_object_lock_configuration(GetObjectLockConfigurationInput, GetObjectLockConfigurationOutput) => get_object_lock_configuration_input, get_object_lock_configuration_output;
+    plain GetObjectRetention / get_object_retention(GetObjectRetentionInput, GetObjectRetentionOutput) => get_object_retention_input, get_object_retention_output;
+    plain GetObjectTagging / get_object_tagging(GetObjectTaggingInput, GetObjectTaggingOutput) => get_object_tagging_input, get_object_tagging_output;
+    plain GetObjectTorrent / get_object_torrent(GetObjectTorrentInput, GetObjectTorrentOutput) => get_object_torrent_input, get_object_torrent_output;
+    plain GetPublicAccessBlock / get_public_access_block(GetPublicAccessBlockInput, GetPublicAccessBlockOutput) => get_public_access_block_input, get_public_access_block_output;
+    plain HeadBucket / head_bucket(HeadBucketInput, HeadBucketOutput) => head_bucket_input, head_bucket_output;
+    plain HeadObject / head_object(HeadObjectInput, HeadObjectOutput) => head_object_input, head_object_output;
+    plain ListBuckets / list_buckets(ListBucketsInput, ListBucketsOutput) => list_buckets_input, list_buckets_output;
+    plain ListMultipartUploads / list_multipart_uploads(ListMultipartUploadsInput, ListMultipartUploadsOutput) => list_multipart_uploads_input, list_multipart_uploads_output;
+    plain ListObjectVersions / list_object_versions(ListObjectVersionsInput, ListObjectVersionsOutput) => list_object_versions_input, list_object_versions_output;
+    plain ListObjects / list_objects(ListObjectsInput, ListObjectsOutput) => list_objects_input, list_objects_output;
+    plain ListObjectsV2 / list_objects_v2(ListObjectsV2Input, ListObjectsV2Output) => list_objects_v2input, list_objects_v2output;
+    plain ListParts / list_parts(ListPartsInput, ListPartsOutput) => list_parts_input, list_parts_output;
+    plain PutBucketAccelerateConfiguration / put_bucket_accelerate_configuration(PutBucketAccelerateConfigurationInput, PutBucketAccelerateConfigurationOutput) => put_bucket_accelerate_configuration_input, put_bucket_accelerate_configuration_output;
+    plain PutBucketAcl / put_bucket_acl(PutBucketAclInput, PutBucketAclOutput) => put_bucket_acl_input, put_bucket_acl_output;
+    plain PutBucketCors / put_bucket_cors(PutBucketCorsInput, PutBucketCorsOutput) => put_bucket_cors_input, put_bucket_cors_output;
+    plain PutBucketEncryption / put_bucket_encryption(PutBucketEncryptionInput, PutBucketEncryptionOutput) => put_bucket_encryption_input, put_bucket_encryption_output;
+    plain PutBucketLifecycleConfiguration / put_bucket_lifecycle_configuration(PutBucketLifecycleConfigurationInput, PutBucketLifecycleConfigurationOutput) => put_bucket_lifecycle_configuration_input, put_bucket_lifecycle_configuration_output;
+    plain PutBucketLogging / put_bucket_logging(PutBucketLoggingInput, PutBucketLoggingOutput) => put_bucket_logging_input, put_bucket_logging_output;
+    plain PutBucketNotificationConfiguration / put_bucket_notification_configuration(PutBucketNotificationConfigurationInput, PutBucketNotificationConfigurationOutput) => put_bucket_notification_configuration_input, put_bucket_notification_configuration_output;
+    plain PutBucketPolicy / put_bucket_policy(PutBucketPolicyInput, PutBucketPolicyOutput) => put_bucket_policy_input, put_bucket_policy_output;
+    plain PutBucketReplication / put_bucket_replication(PutBucketReplicationInput, PutBucketReplicationOutput) => put_bucket_replication_input, put_bucket_replication_output;
+    plain PutBucketRequestPayment / put_bucket_request_payment(PutBucketRequestPaymentInput, PutBucketRequestPaymentOutput) => put_bucket_request_payment_input, put_bucket_request_payment_output;
+    plain PutBucketTagging / put_bucket_tagging(PutBucketTaggingInput, PutBucketTaggingOutput) => put_bucket_tagging_input, put_bucket_tagging_output;
+    plain PutBucketVersioning / put_bucket_versioning(PutBucketVersioningInput, PutBucketVersioningOutput) => put_bucket_versioning_input, put_bucket_versioning_output;
+    plain PutBucketWebsite / put_bucket_website(PutBucketWebsiteInput, PutBucketWebsiteOutput) => put_bucket_website_input, put_bucket_website_output;
+    put_object PutObject / put_object(PutObjectInput, PutObjectOutput) => put_object_input, put_object_output;
+    plain PutObjectAcl / put_object_acl(PutObjectAclInput, PutObjectAclOutput) => put_object_acl_input, put_object_acl_output;
+    plain PutObjectLegalHold / put_object_legal_hold(PutObjectLegalHoldInput, PutObjectLegalHoldOutput) => put_object_legal_hold_input, put_object_legal_hold_output;
+    plain PutObjectLockConfiguration / put_object_lock_configuration(PutObjectLockConfigurationInput, PutObjectLockConfigurationOutput) => put_object_lock_configuration_input, put_object_lock_configuration_output;
+    plain PutObjectRetention / put_object_retention(PutObjectRetentionInput, PutObjectRetentionOutput) => put_object_retention_input, put_object_retention_output;
+    plain PutObjectTagging / put_object_tagging(PutObjectTaggingInput, PutObjectTaggingOutput) => put_object_tagging_input, put_object_tagging_output;
+    plain PutPublicAccessBlock / put_public_access_block(PutPublicAccessBlockInput, PutPublicAccessBlockOutput) => put_public_access_block_input, put_public_access_block_output;
+    plain RestoreObject / restore_object(RestoreObjectInput, RestoreObjectOutput) => restore_object_input, restore_object_output;
+    upload_part UploadPart / upload_part(UploadPartInput, UploadPartOutput) => upload_part_input, upload_part_output;
+    copy UploadPartCopy / upload_part_copy(UploadPartCopyInput, UploadPartCopyOutput) => upload_part_copy_input, upload_part_copy_output;
 }
