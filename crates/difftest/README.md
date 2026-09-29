@@ -192,7 +192,7 @@ and run the full set nightly rather than letting the gate grow.
 A recorded request is changed before both stacks see it, and the report counts each change: a
 redacted signature (header or presigned query) is signed again with the credential both stacks
 hold, so the request takes the authenticated path it took on the recorded server — unsigned, an
-aws-chunked upload would take the anonymous path, where neither stack decodes its framing; an
+aws-chunked upload would take the anonymous path, where the legacy stack does not decode its framing; an
 `__UNRECORDED__` or `__REDACTED__` header is removed; chunked transfer framing is replaced by the
 recorded body's length; a partial head capture's missing
 `Content-Length` is set from the recorded body, and `flush`/`stall` timing is ignored. An entry

@@ -797,6 +797,34 @@ s3s = '"CRC32"'
 reason = "As kd-decode-0076 for UploadPart."
 expires = "2027-03-31"
 
+[[diff]]
+id = "kd-decode-0078"
+kind = "decode"
+operation = "PutObject"
+item = "PutObjectInput.content_length"
+gateway = '"5"'
+reason = "An anonymous STREAMING-UNSIGNED-PAYLOAD-TRAILER upload (a public-write bucket): the gateway de-frames it before the handler as it does a signed one (rustfs/gateway#1060); the legacy stack de-frames only header-signed requests, so its handler gets the framed length and bytes. Legacy RustFS then sizes the object by x-amz-decoded-content-length (https://github.com/rustfs/rustfs/blob/1e7065101d7de4ebacabd249db5b4debbf5baa68/rustfs/src/app/object/put.rs#L91-L108) and refuses the surplus framing bytes: 400 UnexpectedContent for a small body (https://github.com/rustfs/rustfs/blob/1e7065101d7de4ebacabd249db5b4debbf5baa68/rustfs/src/app/object/put.rs#L651-L678) and 500 InternalError for a streamed one (https://github.com/rustfs/rustfs/blob/1e7065101d7de4ebacabd249db5b4debbf5baa68/crates/rio/src/hardlimit_reader.rs#L44-L63). A local legacy run stored nothing in either case. The gateway accepts a request legacy RustFS refused."
+expires = "2027-03-31"
+
+[[diff]]
+id = "kd-decode-0079"
+kind = "decode"
+operation = "PutObject"
+item = "rest_body"
+gateway = "5 bytes sha256:2cf24dba5fb0a30e"
+reason = "As kd-decode-0078: the gateway hands the handler the decoded payload, the legacy stack the framed bytes."
+expires = "2027-03-31"
+
+[[diff]]
+id = "kd-decode-0080"
+kind = "decode"
+operation = "PutObject"
+item = "outcome"
+gateway = "400 InvalidRequest: a chunk-signed streaming payload needs a signed request"
+s3s = "handled"
+reason = "An anonymous request that declares STREAMING-AWS4-HMAC-SHA256-PAYLOAD has no seed signature to verify its chunk signatures against, so the gateway refuses it before authorization and before the handler (rustfs/gateway#1060). The legacy stack hands the framed body to the handler, and legacy RustFS refuses it either with AccessDenied from its bucket-policy check or, on a public-write bucket, with 400 UnexpectedContent once the framing overruns the decoded length, as in kd-decode-0078. Both refuse; the code differs, and nothing is stored on either."
+expires = "2027-03-31"
+
 # ── Encode: what the gateway writes on every answer ─────────────────────────────────────────
 
 [[diff]]
