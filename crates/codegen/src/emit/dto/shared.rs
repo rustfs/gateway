@@ -122,11 +122,19 @@ fn string_enum(def: &EnumDef) -> String {
         "\n    /// Every value the pinned model declares, in model order.\n    \
              pub const VALUES: &'static [&'static str] ={values};\n\n    \
              /// Wraps a value this build has no constant for.\n    \
+             ///\n    \
+             /// Any value a wire carries, the empty one included: `<Status></Status>` is a client\n    \
+             /// sending the empty value, which a handler judges like any other value outside the\n    \
+             /// model's set — never the placeholder [`Default`] produces (rustfs/gateway#1078).\n    \
              #[must_use]\n    \
              pub fn custom(value: impl Into<Cow<'static, str>>) -> Self {{\n        Self(value.into())\n    }}\n\n    \
-             /// The wire spelling.\n    \
+             /// The wire spelling. The placeholder spells as the empty string, as it always has.\n    \
              #[must_use]\n    \
-             pub fn as_str(&self) -> &str {{\n        &self.0\n    }}\n\n    \
+             pub fn as_str(&self) -> &str {{\n        \
+                 if self.0 == crate::placeholder::STRING_ENUMERATION_PLACEHOLDER {{\n            \
+                     return \"\";\n        \
+                 }}\n        \
+                 &self.0\n    }}\n\n    \
              /// Whether the value is one the pinned model declares.\n    \
              #[must_use]\n    \
              pub fn is_known(&self) -> bool {{\n        Self::VALUES.contains(&self.as_str())\n    }}\n\
@@ -136,25 +144,24 @@ fn string_enum(def: &EnumDef) -> String {
          }}\n\n\
          impl std::fmt::Display for {name} {{\n    \
              fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {{\n        \
-                 f.write_str(&self.0)\n    }}\n\
+                 f.write_str(self.as_str())\n    }}\n\
          }}\n\n\
          impl Default for {name} {{\n    \
-             /// The empty value: a placeholder that is **invalid on the wire**, and exists for one\n    \
-             /// reason.\n    \
+             /// The placeholder: a value that is **invalid on the wire**, and exists for one reason.\n    \
              ///\n    \
              /// ADR-0004 P10. A required member of a generated dto is a bare type, and every generated\n    \
              /// dto derives `Default` so that `..Default::default()` keeps compiling when AWS adds a\n    \
-             /// member; an enumeration in a required position therefore needs a `Default`. No model\n    \
-             /// value is the empty string and no S3 response carries one, so this cannot be mistaken\n    \
-             /// for a value a client sent — a value this build has no constant for is\n    \
-             /// [`{name}::custom`], not this.\n    \
+             /// member; an enumeration in a required position therefore needs a `Default`. It holds\n    \
+             /// `crate::placeholder::STRING_ENUMERATION_PLACEHOLDER`, a NUL no decoder produces, and it\n    \
+             /// spells as the empty string. It is not the empty *value*: a client sends that one\n    \
+             /// (`<Status></Status>`), it decodes to [`{name}::custom`], and the two compare unequal.\n    \
              ///\n    \
              /// **The decoding path never produces it.** An absent member is `Option::None`, and\n    \
              /// `check_required` on the enclosing type rejects any placeholder that slips through.\n    \
-             fn default() -> Self {{\n        Self(Cow::Borrowed(\"\"))\n    }}\n\
+             fn default() -> Self {{\n        Self(Cow::Borrowed(crate::placeholder::STRING_ENUMERATION_PLACEHOLDER))\n    }}\n\
          }}\n\n\
          impl crate::WirePlaceholder for {name} {{\n    \
-             fn is_wire_placeholder(&self) -> bool {{\n        self.0.is_empty()\n    }}\n\
+             fn is_wire_placeholder(&self) -> bool {{\n        self.0 == crate::placeholder::STRING_ENUMERATION_PLACEHOLDER\n    }}\n\
          }}\n"
     );
     out

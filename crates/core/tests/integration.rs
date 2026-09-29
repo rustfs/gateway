@@ -59,6 +59,9 @@ mod dialect_claims_refusals;
 #[path = "dto_cold_split.rs"]
 mod dto_cold_split;
 
+#[path = "empty_enumeration.rs"]
+mod empty_enumeration;
+
 #[path = "encryption_roundtrip.rs"]
 mod encryption_roundtrip;
 

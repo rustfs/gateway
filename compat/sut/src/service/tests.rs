@@ -723,6 +723,9 @@ mod deadline_tests;
 /// what each refusal leaves in storage.
 mod bad_digest_tests;
 
+/// An empty required enumeration element answered as legacy RustFS answers it, never with `500`
+/// (rustfs/gateway#1078).
+mod empty_enumeration_tests;
 /// The framework governor sized as RustFS embeds it (rustfs/gateway#1067).
 mod governor_tests;
 

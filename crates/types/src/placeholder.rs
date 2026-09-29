@@ -140,3 +140,15 @@ macro_rules! never_a_placeholder {
 // that means "not filled in", so the guard has nothing to check and says so explicitly rather than
 // leaving the impl missing, which would silently drop a member out of `check_required`.
 never_a_placeholder!(String, bool, i32, i64, bytes::Bytes);
+
+/// The spelling every generated string enumeration's placeholder `Default` holds.
+///
+/// ADR-0004 P10 asks for a value that is **invalid on the wire**. The empty string was used until
+/// rustfs/gateway#1078, and it is not: a client sends it as `<Status></Status>`, legacy RustFS hands
+/// it to its handlers (an empty `Payer` is stored and read back), and the decoder produced it — so the
+/// exit check mistook the client's empty value for a member nobody filled and answered this side's
+/// `500`. A NUL is what no decoder can produce for a required member: the XML readers refuse it as a
+/// character XML 1.0 cannot represent, a header value cannot carry one, and no required enumeration
+/// is bound to a query parameter or a form field. `as_str` still spells the placeholder as the empty
+/// string, so what a defaulted member renders as is unchanged.
+pub(crate) const STRING_ENUMERATION_PLACEHOLDER: &str = "\u{0}";
