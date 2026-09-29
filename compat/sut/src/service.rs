@@ -231,11 +231,14 @@ pub(crate) fn build_service(
             // RustFS answers an unreadable or mismatched request checksum with `BadDigest`
             // (rustfs/gateway#1057).
             .answer_checksum_failures_with_bad_digest()
+            // RustFS answers a refused HEAD with no Content-Length (rustfs/gateway#1120).
+            .answer_head_refusals_without_content_length()
+            // RustFS answers a `304` with its object's `ETag` and `Last-Modified` on a `GET` and with
+            // no header of the object on a `HEAD` (rustfs/gateway#1120).
+            .answer_not_modified_with_legacy_rustfs_headers()
             // RustFS never compares the signed digest of a request without a body: a read or delete
             // declaring another payload's digest is served (rustfs/gateway#1099).
             .accept_mismatched_payload_digests_without_a_body()
-            // RustFS answers a refused HEAD with no Content-Length (rustfs/gateway#1120).
-            .answer_head_refusals_without_content_length()
             // RustFS answers a body refusal with the fixed sentence its API layer writes for the
             // code, and an upload declared past 5 GiB with its admission's (rustfs/gateway#1099).
             .answer_body_refusals_with_legacy_rustfs_sentences()

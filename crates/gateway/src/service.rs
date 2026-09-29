@@ -369,6 +369,12 @@ impl S3Service {
                 runtime,
             )
             .await;
+        // The RustFS profile's `304` carries legacy RustFS's object headers (`builder/not_modified_headers.rs`).
+        let status = response.status();
+        self.inner
+            .view_policy
+            .not_modified_headers
+            .apply(outcome.operation, status, response.headers_mut());
         // The CORS decoration for an ordinary request, applied here because it belongs on
         // **every** answer the pipeline produced once authorisation was granted — the `404` and
         // the `500` included. A browser cannot read a response it was not granted access to, so

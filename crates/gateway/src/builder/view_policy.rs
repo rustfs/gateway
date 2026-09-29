@@ -138,21 +138,17 @@ pub(crate) struct ViewPolicy {
     pub(crate) post_forms: post_forms::PostFormGrammar,
     /// Whether a bodyless request's signed digest is compared (`super::bodyless_digest`).
     pub(crate) bodyless_digest: BodylessDigest,
+    head_refusals_without_length: bool,
+    /// Which object headers a `304` keeps (`super::not_modified_headers`).
+    pub(crate) not_modified_headers: super::not_modified_headers::NotModifiedHeaders,
     clamp_max_keys: bool,
     integrity_codes: IntegrityCodes,
     presigned_payload_unsigned: bool,
     empty_uploads_without_length: bool,
     rustfs_listings: bool,
-    head_refusals_without_length: bool,
 }
 
 impl ViewPolicy {
-    /// Whether a refused `HEAD` goes out without the `Content-Length` of the document it does not
-    /// carry ([`ServiceBuilder::answer_head_refusals_without_content_length`]).
-    pub(crate) const fn head_refusals_without_length(&self) -> bool {
-        self.head_refusals_without_length
-    }
-
     /// Whether a presigned request's payload declaration is read as legacy RustFS reads it
     /// ([`ServiceBuilder::sign_presigned_payloads_as_unsigned`]).
     pub(crate) const fn presigned_payload_unsigned(&self) -> bool {
@@ -205,6 +201,12 @@ impl ViewPolicy {
     /// A refusal of the request body, answered with this assembly's sentences.
     pub(crate) fn body_refusal(self, refusal: S3Error) -> S3Error {
         self.body_sentences.restyle(refusal)
+    }
+
+    /// Whether a refused `HEAD` goes out without the `Content-Length` of the document it does not
+    /// carry ([`ServiceBuilder::answer_head_refusals_without_content_length`]).
+    pub(crate) const fn head_refusals_without_length(&self) -> bool {
+        self.head_refusals_without_length
     }
 
     /// A refusal of the request head's framing, answered with this assembly's sentences.
