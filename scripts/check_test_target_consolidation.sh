@@ -736,6 +736,7 @@ gateway_modules = (
     "tagging_reachability",
     "throughput_request",
     "unread_body_refusal",
+    "upload_object_ceiling",
     "verified_scope_runtime",
     "vhost_resolution",
 )

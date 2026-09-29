@@ -59,7 +59,7 @@ pub(crate) struct StreamingRead {
 impl StreamingRead {
     pub(crate) fn new<B>(
         body: Option<B>,
-        declared_length: Option<u64>,
+        (declared_length, object_ceiling): (Option<u64>, Option<u64>),
         body_plan: (BodyCeilings, BodyTimeouts, Option<std::sync::Arc<dyn BodyQuota>>),
         ingest: Option<ChunkIngest>,
         digest: BodyDigestObligation,
@@ -83,6 +83,11 @@ impl StreamingRead {
             return Err(crate::gate::past_buffered_ceiling(progress.request_body_unfinished()));
         }
         let decoded_length = ingest.as_ref().map(ChunkIngest::decoded_length).or(declared_length);
+        if let Some(ceiling) = object_ceiling
+            && decoded_length.is_some_and(|length| length > ceiling)
+        {
+            return Err(crate::gate::past_object_ceiling(progress.request_body_unfinished()));
+        }
         if ingest.is_none() && body.as_ref().is_none_or(http_body::Body::is_end_stream) {
             let verdict = if !progress.digest_matches() {
                 Err(codes.streamed_payload_hash_mismatch())

@@ -472,6 +472,9 @@ pub use rustfs_gateway_core::{InvalidWireLabel, RedirectTarget, RegionLabel, Ver
 // directly has written the deployment's region posture down a second time, and the second copy is
 // the one that will not move when the first does — which is the whole failure mode `ops/shared/`
 // exists to prevent. This is the value `CreateBucket` declares, and it is what a backend reads.
+/// The wire ceiling an upload-object ceiling implies for an aws-chunked body; see
+/// [`ServiceConfig::with_upload_object_ceiling`].
+pub use crate::gate::max_framed_upload_bytes;
 pub use rustfs_gateway_core::ops::create_bucket::REGION_MATCH_POLICY;
 pub use rustfs_gateway_http::{EffectiveHost, Limits, TransportExtensions, WireReject, WireRequest};
 pub use rustfs_gateway_sig::{

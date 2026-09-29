@@ -180,6 +180,8 @@ mod tagging_reachability;
 mod throughput_request;
 #[path = "unread_body_refusal.rs"]
 mod unread_body_refusal;
+#[path = "upload_object_ceiling.rs"]
+mod upload_object_ceiling;
 #[path = "verified_scope_runtime.rs"]
 mod verified_scope_runtime;
 #[path = "vhost_resolution.rs"]

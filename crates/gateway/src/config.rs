@@ -309,6 +309,7 @@ pub struct ServiceConfig {
     verbose_signature_errors: bool,
     handler_deadlines: HandlerDeadlineConfig,
     request_body_deadlines: RequestBodyDeadlineConfig,
+    upload_object_ceiling: Option<u64>,
 }
 
 impl ServiceConfig {
@@ -325,6 +326,7 @@ impl ServiceConfig {
                 commit_progress: DEFAULT_COMMIT_PROGRESS_DEADLINE,
             },
             request_body_deadlines: RequestBodyDeadlineConfig::S3,
+            upload_object_ceiling: None,
         }
     }
 
@@ -425,6 +427,27 @@ impl ServiceConfig {
     #[must_use]
     pub const fn request_body_deadlines(&self) -> RequestBodyDeadlineConfig {
         self.request_body_deadlines
+    }
+
+    /// Refuses a `PutObject` or `UploadPart` whose object — the decoded length of an aws-chunked
+    /// body, the `Content-Length` of any other — is larger than `ceiling`, with `400
+    /// EntityTooLarge`, after authentication and before a body byte is read.
+    ///
+    /// Unset by default: an upload is bounded by the wire's `Limits::max_body_bytes` alone, which
+    /// counts an aws-chunked body's framing too. The RustFS profile sets RustFS's 5 GiB
+    /// single-request ceiling here, as RustFS applies it to the object and not the wire
+    /// (rustfs/rustfs#7635), and widens the wire limit with [`crate::max_framed_upload_bytes`] so an
+    /// upload whose object fits is not refused for its framing.
+    #[must_use]
+    pub const fn with_upload_object_ceiling(mut self, ceiling: u64) -> Self {
+        self.upload_object_ceiling = Some(ceiling);
+        self
+    }
+
+    /// The largest object a single upload may declare, when this snapshot sets one.
+    #[must_use]
+    pub const fn upload_object_ceiling(&self) -> Option<u64> {
+        self.upload_object_ceiling
     }
 
     /// Returns the duration mapped to an operation's closed handler deadline class.

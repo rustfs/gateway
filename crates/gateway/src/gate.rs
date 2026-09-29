@@ -43,7 +43,7 @@
 //! paid for, the memory is spent, and only then is the request refused. The refusal is free only
 //! if it happens first.
 //!
-//! # The two ceilings, and why they are not one number
+//! # The ceilings, and why they are not one number
 //!
 //! * **The assembly's buffered ceiling** is how much this deployment is willing to hold in memory
 //!   at once. Exceeding it is `EntityTooLarge` / `413`: the caller sent something this server
@@ -52,12 +52,16 @@
 //!   `DeleteObjects` documents at most one thousand entries, so a body far past that is malformed
 //!   however much memory is free. Exceeding it is `InvalidRequest` / `400`: a statement about the
 //!   request.
+//! * **The assembly's upload-object ceiling**, when one is set, is how large an object one
+//!   `PutObject` or `UploadPart` may carry, measured as its decoded length. Exceeding it is
+//!   `EntityTooLarge` / `400` before a byte is read: RustFS's single-request limit
+//!   (`gate_ceilings.rs`, carried by [`SealedBody::with_object_ceiling`]).
 //!
-//! Both are enforced while the body arrives rather than after it has been collected — the check is
-//! inside `crate::wire_read::WireFrames`, which is the one place either path pulls a frame from, so
-//! the refusal is emitted at the first frame that crosses the line and the frames behind it are
-//! never buffered. A ceiling that is only consulted once the body is in hand is not a ceiling; it
-//! is a report.
+//! The first two are enforced while the body arrives rather than after it has been collected —
+//! the check is inside `crate::wire_read::WireFrames`, which is the one place either path pulls a
+//! frame from, so the refusal is emitted at the first frame that crosses the line and the frames
+//! behind it are never buffered. A ceiling that is only consulted once the body is in hand is not
+//! a ceiling; it is a report.
 
 use bytes::{BufMut, Bytes, BytesMut};
 use http::StatusCode;
@@ -71,6 +75,12 @@ use rustfs_gateway_types::ErrorCode;
 use crate::integrity::Integrity;
 use crate::render::{S3Error, from_handler, from_transport_limit};
 use crate::wire_read::{RequestBodyUnfinished, WireFrames, WireProgress, WireReader};
+
+#[path = "gate_ceilings.rs"]
+mod ceilings;
+use ceilings::declared_body_cap;
+pub use ceilings::max_framed_upload_bytes;
+pub(crate) use ceilings::{object_ceiling_for, past_object_ceiling};
 
 /// Evidence that a request's signature reached a verdict and the verdict was not a rejection.
 ///
@@ -168,6 +178,8 @@ impl BodyCeilings {
 pub(crate) struct SealedBody<B> {
     body: Option<B>,
     declared_length: Option<u64>,
+    /// The largest object a streamed upload may declare (`gate_ceilings.rs`), when one applies.
+    object_ceiling: Option<u64>,
 }
 
 impl<B> SealedBody<B>
@@ -178,7 +190,17 @@ where
 {
     /// Seals a body that the transport handed over, with whatever length the head announced.
     pub(crate) const fn seal(body: Option<B>, declared_length: Option<u64>) -> Self {
-        Self { body, declared_length }
+        Self {
+            body,
+            declared_length,
+            object_ceiling: None,
+        }
+    }
+
+    /// This body, refused before its first byte when it streams an object past `ceiling`.
+    pub(crate) const fn with_object_ceiling(mut self, ceiling: Option<u64>) -> Self {
+        self.object_ceiling = ceiling;
+        self
     }
 
     /// Reads only POST Object's bounded text prelude, leaving the file part unopened.
@@ -323,7 +345,7 @@ where
         let (ceilings, timeouts, body_quota) = body_plan;
         crate::request_body::StreamingRead::new(
             self.body,
-            self.declared_length,
+            (self.declared_length, self.object_ceiling),
             (ceilings, timeouts, body_quota),
             ingest,
             digest,
@@ -374,28 +396,6 @@ pub(crate) fn content_sha256_mismatch() -> S3Error {
         crate::close::ConnectionIntent::MayKeepAlive,
     )
 }
-
-/// How large a well-formed body for this operation can be, when the operation bounds one.
-///
-/// **This table is in the wrong crate and is here for a boundary reason, not a design one.** The
-/// bound belongs beside the operation — `rustfs_gateway_core::Operation` is where a per-operation
-/// constant should be declared, so that a new operation with a bounded body cannot be added
-/// without stating its bound. Until that constant exists, an assembly that enforces nothing is
-/// strictly worse than an assembly that enforces the documented number from one greppable place.
-///
-/// `DeleteObjects` is the only entry: AWS documents the request as carrying at most one thousand
-/// key entries, and a thousand entries of the maximum key length plus their version ids fit inside
-/// two mebibytes with room to spare. Everything else is `None` and falls back to the assembly's
-/// buffered ceiling.
-pub(crate) const fn declared_body_cap(operation: &str) -> Option<u64> {
-    match operation.as_bytes() {
-        b"DeleteObjects" => Some(MAX_DELETE_OBJECTS_BODY_BYTES),
-        _ => None,
-    }
-}
-
-/// The `DeleteObjects` request-body cap, in bytes.
-pub(crate) const MAX_DELETE_OBJECTS_BODY_BYTES: u64 = 2 * 1024 * 1024;
 
 /// The refusal for a body larger than the operation's own bound.
 ///
