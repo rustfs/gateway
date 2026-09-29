@@ -93,8 +93,8 @@ difference cannot change what RustFS does or stores.
 
 The two stacks above run with their defaults. A second pairing, `Profile::Rustfs`
 (`Differ::for_profile`, `rustfs_decode_diff`), stands for the deployment the gateway is replacing:
-the gateway with the RustFS profile's addressing switches on (the slash rule, the key floor and the
-path addressing), as `compat/sut` turns them on, against
+the gateway with the RustFS profile's addressing switches on (the slash rule, the key floor, the
+path addressing and the operation selection), as `compat/sut` turns them on, against
 the legacy stack configured the way RustFS main configures it (`rustfs/src/server/http.rs:166-172`,
 `rustfs_s3_config`: forward-slash normalisation and SigV2 on, `s3tables` signing admitted). Its rows
 (`src/samples/rustfs.rs`) are the requests whose bucket and key RustFS's storage must be handed

@@ -250,6 +250,9 @@ pub(crate) fn build_service(
             // RustFS decodes the whole path before it splits the bucket, judges the bucket by its
             // own rules before routing, and reads `GET //` as `GET /` (#1115).
             .address_paths_as_legacy_rustfs()
+            // RustFS takes an `x-id` as the operation and orders two operation keys by its own
+            // table (#1127).
+            .select_operations_as_legacy_rustfs()
             // The backend's stored CORS documents feed the gateway's CORS answers, as RustFS's do
             // behind the gateway; no cache lifetime, so a suite sees a `PutBucketCors` at once.
             .cors_source(Arc::clone(backend))

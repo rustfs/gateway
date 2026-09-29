@@ -42,7 +42,64 @@ pub(super) fn rows() -> Vec<RequestRow> {
     let mut rows = slash_rule();
     rows.extend(key_floor());
     rows.extend(addressing());
+    rows.extend(selection());
     rows
+}
+
+/// Legacy RustFS's operation selection: an `x-id` named once is the operation, and two operation
+/// keys select the first in legacy RustFS's order. Only operations both stacks register here; an
+/// `x-id` refused with a body is pinned by the core and gateway cases, since the legacy stack names
+/// the declared operation back in its sentence (rd-err-0009).
+fn selection() -> Vec<RequestRow> {
+    vec![
+        row("rustfs-select-location-over-versioning", RawRequest::get("/bkt?versioning&location"), &[]),
+        row(
+            "rustfs-select-versions-over-v2",
+            RawRequest::get("/bkt?list-type=2&versions"),
+            &["kd-decode-0008"],
+        ),
+        row(
+            "rustfs-select-uploads-over-versions",
+            RawRequest::get("/bkt?versions&uploads"),
+            &["kd-decode-0009"],
+        ),
+        row(
+            "rustfs-select-x-id-over-a-key",
+            RawRequest::get("/bkt?location&x-id=GetBucketVersioning"),
+            &[],
+        ),
+        row(
+            "rustfs-select-x-id-v2",
+            RawRequest::get("/bkt?x-id=ListObjectsV2"),
+            &["kd-decode-0006", "kd-decode-0007"],
+        ),
+        row(
+            "rustfs-select-x-id-uploads",
+            RawRequest::get("/bkt?x-id=ListMultipartUploads"),
+            &["kd-decode-0009"],
+        ),
+        row(
+            "rustfs-select-x-id-get-over-upload-id",
+            RawRequest::get("/bkt/src?uploadId=u&x-id=GetObject"),
+            &[],
+        ),
+        row(
+            "rustfs-select-x-id-put-over-a-part",
+            RawRequest::put("/bkt/src?partNumber=1&uploadId=u&x-id=PutObject", b"part"),
+            &[],
+        ),
+        row(
+            "rustfs-select-x-id-delete-over-upload-id",
+            RawRequest::delete("/bkt/src?uploadId=u&x-id=DeleteObject"),
+            &[],
+        ),
+        row(
+            "rustfs-select-uploads-over-upload-id",
+            RawRequest::post("/bkt/src?uploadId=u&uploads", b""),
+            &[],
+        ),
+        row("rustfs-select-x-id-head", RawRequest::head("/bkt?x-id=ListBuckets"), &[]),
+    ]
 }
 
 /// Legacy RustFS's path addressing: the path decoded as a whole and split at its first decoded

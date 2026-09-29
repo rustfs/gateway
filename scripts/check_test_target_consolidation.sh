@@ -726,6 +726,7 @@ gateway_modules = (
     "response_stream_termination",
     "rustfs_addressing",
     "rustfs_key_floor",
+    "rustfs_selection",
     "select_frame_records",
     "select_restore_intent",
     "select_restore_reachability",

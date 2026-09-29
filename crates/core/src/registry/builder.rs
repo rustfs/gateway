@@ -50,8 +50,8 @@ use crate::registry::Registry;
 use crate::registry::opset::{MissingHandlers, OperationSet};
 use crate::registry::reject::RegistryError;
 use crate::route::{
-    ClaimedEntry, ClaimedTable, InstalledClaim, Predicate, RouteBuildError, RouteEntry, RouteTable, SHADOWING, ShadowingDecl,
-    ShadowingDecls, generated_entries,
+    ClaimedEntry, ClaimedTable, InstalledClaim, Predicate, RouteBuildError, RouteEntry, RouteTable, SHADOWING, Selection,
+    ShadowingDecl, ShadowingDecls, generated_entries,
 };
 
 /// Why a router refused to be built.
@@ -140,6 +140,8 @@ pub struct RouterBuilder {
     /// a claimed row is not in it.
     claimed_shadowing: Vec<&'static [ShadowingDecl]>,
     errors: Vec<RegistryError>,
+    /// How the router chooses among the operations a request names (rustfs/gateway#1127).
+    selection: Selection,
 }
 
 impl RouterBuilder {
@@ -150,6 +152,14 @@ impl RouterBuilder {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Chooses among the operations a request outside every claim names by `selection`
+    /// ([`Selection::Table`] unless told otherwise).
+    #[must_use]
+    pub fn selecting(mut self, selection: Selection) -> Self {
+        self.selection = selection;
+        self
     }
 
     /// Registers `implementation` as the handler for `O`, together with `O`'s wire codec.
@@ -308,6 +318,6 @@ impl RouterBuilder {
         }
         let claims =
             ClaimedTable::build(self.claims, self.claimed_entries, &claimed_shadowing).map_err(RouterBuildError::from)?;
-        Ok(Router::with_claims(table, claims, self.registry)?)
+        Ok(Router::with_claims(table, claims, self.registry)?.selecting(self.selection))
     }
 }

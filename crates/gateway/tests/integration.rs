@@ -160,6 +160,8 @@ mod response_stream_termination;
 mod rustfs_addressing;
 #[path = "rustfs_key_floor.rs"]
 mod rustfs_key_floor;
+#[path = "rustfs_selection.rs"]
+mod rustfs_selection;
 #[path = "select_frame_records.rs"]
 mod select_frame_records;
 #[path = "select_restore_intent.rs"]

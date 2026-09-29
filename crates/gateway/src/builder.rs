@@ -73,6 +73,7 @@ mod client_quirks;
 mod cors;
 mod legacy_sentences;
 mod names;
+mod operation_selection;
 mod secret_scope;
 pub(crate) mod view_policy;
 pub use self::assembly_update::AssemblyUpdate;
