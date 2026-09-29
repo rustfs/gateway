@@ -20,8 +20,8 @@
 //! covers, and the per-request decision the assembly applies to the routed view.
 //! NOT responsible for: the requirement itself or verifying a digest a request does send
 //! (`rustfs_gateway_core::codec::value`), which the waiver never touches.
-//! Upstream: `super::ServiceBuilder`. Downstream: `crate::service`, which applies [`ChecksumWaiver`]
-//! to the view every decoder reads.
+//! Upstream: `super::ServiceBuilder`. Downstream: `super::view_policy::ViewPolicy`, which applies
+//! [`ChecksumWaiver`] to the view every decoder reads.
 //!
 //! # Why the set is exactly these operations
 //!
@@ -95,7 +95,7 @@ impl ServiceBuilder {
     /// the request does send is still verified.
     #[must_use]
     pub fn accept_minio_client_checksum_omissions(mut self) -> Self {
-        self.checksum_waiver.minio_clients = true;
+        self.view_policy.checksum_waiver.minio_clients = true;
         self
     }
 
@@ -109,7 +109,7 @@ impl ServiceBuilder {
     /// still verified.
     #[must_use]
     pub fn accept_s3cmd_acl_checksum_omissions(mut self) -> Self {
-        self.checksum_waiver.s3cmd = true;
+        self.view_policy.checksum_waiver.s3cmd = true;
         self
     }
 }

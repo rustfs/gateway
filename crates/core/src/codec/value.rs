@@ -78,7 +78,13 @@ pub fn exit(outcome: Result<(), rustfs_gateway_types::PlaceholderDefault>) -> Re
 ///
 /// [`CodecError`] naming the member.
 pub fn integer(value: &str, member: &'static str) -> Result<i32, CodecError> {
-    value.trim().parse::<i32>().map_err(|_| unusable(member))
+    parse_integer(value).ok_or_else(|| unusable(member))
+}
+
+/// The one reading of a 32-bit integer on the wire, shared by [`integer`] and the view's page-size
+/// ceiling, so a value the ceiling clamps is a value the decoder would have parsed.
+pub(crate) fn parse_integer(value: &str) -> Option<i32> {
+    value.trim().parse::<i32>().ok()
 }
 
 /// Parses a 32-bit integer and refuses one outside the range its binding declares.

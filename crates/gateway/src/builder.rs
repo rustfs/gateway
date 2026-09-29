@@ -69,8 +69,8 @@ use crate::routing::{RoutingSnapshot, RuntimeAssembly};
 mod assembly_update;
 mod client_quirks;
 mod secret_scope;
+pub(crate) mod view_policy;
 pub use self::assembly_update::AssemblyUpdate;
-pub(crate) use self::client_quirks::ChecksumWaiver;
 pub use self::client_quirks::{MINIO_CLIENT_CHECKSUM_OPTIONAL_OPERATIONS, S3CMD_CHECKSUM_OPTIONAL_OPERATIONS};
 use crate::service::{Inner, S3Service};
 use crate::trace::{MintedTraces, TraceSource};
@@ -117,7 +117,7 @@ pub struct ServiceBuilder {
     dangerous_allow_all_authorizer: bool,
     /// ADR-0024: a handed-over caller secret reaches every operation, not only opted-in ones.
     caller_secret_every_operation: bool,
-    checksum_waiver: client_quirks::ChecksumWaiver,
+    view_policy: view_policy::ViewPolicy,
     authenticator: Option<Arc<dyn Authenticator>>,
     custom_signature_verifier: Option<Arc<dyn SignatureVerifier>>,
     #[cfg(feature = "dangerous-replace-signature-verifier")]
@@ -179,7 +179,7 @@ impl ServiceBuilder {
             authorizer: None,
             dangerous_allow_all_authorizer: false,
             caller_secret_every_operation: false,
-            checksum_waiver: client_quirks::ChecksumWaiver::default(),
+            view_policy: view_policy::ViewPolicy::default(),
             authenticator: None,
             custom_signature_verifier: None,
             #[cfg(feature = "dangerous-replace-signature-verifier")]
@@ -689,7 +689,7 @@ impl ServiceBuilder {
             response_body_corrections: std::sync::atomic::AtomicU64::new(0),
             temporary_redirect_targets: Arc::from(self.temporary_redirect_targets),
             caller_secret_every_operation: self.caller_secret_every_operation,
-            checksum_waiver: self.checksum_waiver,
+            view_policy: self.view_policy,
         }))
     }
 
