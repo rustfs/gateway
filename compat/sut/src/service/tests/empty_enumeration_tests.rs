@@ -61,11 +61,7 @@ async fn bucket(root: &TestRoot) -> S3Service {
 
 fn refused_as_malformed(response: &WireResponse, what: &str) {
     assert_eq!(response.status(), 400, "{what}: {}", body_of(response));
-    assert!(
-        body_of(response).contains("<Code>MalformedXML</Code>"),
-        "{what}: {}",
-        body_of(response)
-    );
+    assert!(body_of(response).contains("<Code>MalformedXML</Code>"), "{what}: {}", body_of(response));
 }
 
 /// Negative — an empty lifecycle status, paired or self-closing, is legacy RustFS's

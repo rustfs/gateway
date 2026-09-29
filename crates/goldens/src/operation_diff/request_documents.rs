@@ -38,8 +38,7 @@ use rustfs_gateway_types::dto;
 use super::put_object::md5_base64;
 use super::s3s::{Body as LegacyBody, S3, S3Request, S3Response, S3Result, service::S3ServiceBuilder};
 use super::seam::generated::ops::{
-    put_bucket_encryption, put_bucket_lifecycle_configuration, put_bucket_replication, put_bucket_request_payment,
-    restore_object,
+    put_bucket_encryption, put_bucket_lifecycle_configuration, put_bucket_replication, put_bucket_request_payment, restore_object,
 };
 use super::{HOST, block_on, oracle};
 
@@ -93,7 +92,9 @@ fn head(document: Document, body: &[u8]) -> http::request::Builder {
 }
 
 fn decode<O: OperationCodec>(document: Document, body: &[u8]) -> Result<O::Input, String> {
-    let request = head(document, body).body(()).map_err(|error| format!("fixture head: {error}"))?;
+    let request = head(document, body)
+        .body(())
+        .map_err(|error| format!("fixture head: {error}"))?;
     let wire = WireRequest::accept(request, &Limits::default()).map_err(|error| format!("wire refusal: {error:?}"))?;
     let view = MetaView::of(&wire, document.kind()).map_err(|error| error.code().as_str().to_owned())?;
     O::decode(&view, RequestBody::Buffered(Bytes::copy_from_slice(body))).map_err(|error| error.code().as_str().to_owned())
@@ -313,7 +314,9 @@ fn empty_required_enumerations() -> Vec<(Document, &'static str, String)> {
 fn an_empty_required_enumeration_is_handed_over_alike() {
     for (document, position, body) in empty_required_enumerations() {
         let legacy = legacy(document, body.as_bytes());
-        let handed = legacy.clone().unwrap_or_else(|code| panic!("{position}: the legacy stack refused with {code}"));
+        let handed = legacy
+            .clone()
+            .unwrap_or_else(|code| panic!("{position}: the legacy stack refused with {code}"));
         assert!(handed.contains("(\"\")"), "{position}: the legacy stack handed no empty value: {handed}");
         assert_eq!(gateway(document, body.as_bytes()), legacy, "{position}");
     }
