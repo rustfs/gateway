@@ -497,10 +497,12 @@ turns into skips, and skips were free.
 The file records one reference evaluation, and `conformance baseline` and the gate compute it the
 same way (`runner::reference_report`, rustfs/gateway#985): the corpus runs in process, then every
 case that target cannot judge runs again on the production Hyper driver, whose verdict is recorded.
-"Cannot judge" means refused while executing for want of a socket (authored HTTP/2 frames, raw
-heads, `[connection.tls]`, ...) or failed only on `expect.connection_after`, which the in-process
-target reports as `open` by construction. `a_refreshed_baseline_is_what_the_gate_holds` proves a
-refresh is exactly the committed file.
+"Cannot judge" means skipped while executing — the in-process target's refusals there are transport
+limits (authored HTTP/2 frames, raw heads, `[connection.tls]`, pipelining, a presigned clock, ...),
+and any other execute-phase skip is re-run the same way — or failed only on
+`expect.connection_after`, which the in-process target reports as `open` by construction. A failure
+on any other rule is never re-run. `the_whole_corpus_holds_the_verdicts_the_baseline_records` in
+`crates/conformance/tests/corpus.rs` proves a refresh is exactly the committed file.
 
 Refreshing it:
 
