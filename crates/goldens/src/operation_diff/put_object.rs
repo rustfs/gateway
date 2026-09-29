@@ -288,7 +288,7 @@ fn base64(bytes: &[u8]) -> String {
     out
 }
 
-fn md5_base64(bytes: &[u8]) -> String {
+pub(super) fn md5_base64(bytes: &[u8]) -> String {
     let mut digest = ContentMd5::digester();
     digest.update(bytes);
     base64(&digest.finish())

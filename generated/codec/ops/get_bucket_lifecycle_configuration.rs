@@ -86,6 +86,17 @@ fn write_abort_incomplete_multipart_upload(
     Ok(())
 }
 
+/// Writes one `DelMarkerExpiration` element's children, in the wire order the IR records.
+fn write_del_marker_expiration(
+    writer: &mut rustfs_gateway_xml::XmlWriter,
+    value: &dto::DelMarkerExpiration,
+) -> Result<(), CodecError> {
+    if let Some(v) = value.days.as_ref() {
+        writer.element("Days", &v.to_string());
+    }
+    Ok(())
+}
+
 /// Writes one `LifecycleExpiration` element's children, in the wire order the IR records.
 fn write_lifecycle_expiration(
     writer: &mut rustfs_gateway_xml::XmlWriter,
@@ -100,6 +111,9 @@ fn write_lifecycle_expiration(
     if let Some(v) = value.expired_object_delete_marker.as_ref() {
         writer.element("ExpiredObjectDeleteMarker", if *v { "true" } else { "false" });
     }
+    if let Some(v) = value.expired_object_all_versions.as_ref() {
+        writer.element("ExpiredObjectAllVersions", if *v { "true" } else { "false" });
+    }
     Ok(())
 }
 
@@ -108,6 +122,11 @@ fn write_lifecycle_rule(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto:
     if let Some(v) = value.expiration.as_ref() {
         writer.open("Expiration", None);
         write_lifecycle_expiration(writer, v)?;
+        writer.close();
+    }
+    if let Some(v) = value.del_marker_expiration.as_ref() {
+        writer.open("DelMarkerExpiration", None);
+        write_del_marker_expiration(writer, v)?;
         writer.close();
     }
     if let Some(v) = value.id.as_ref() {

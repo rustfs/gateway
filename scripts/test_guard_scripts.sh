@@ -15232,20 +15232,35 @@ expect_fail check_codec_policy.sh \
     'DelMarkerExpiration leaving its reviewed sibling slot' \
     mut_codec_policy_slot_moved
 
-mut_codec_policy_unselected_control_weakened() {
+mut_codec_policy_unknown_child_kept() {
     python3 - <<'PYEOF'
 from pathlib import Path
 path = Path("conformance/cases/lifecycle/c-lifecycle-0018.toml")
 text = path.read_text()
-old = 'not_contains_utf8 = ["DelMarkerExpiration", "FutureKnob"]\n'
+old = 'not_contains_utf8 = ["FutureKnob"]\n'
 if text.count(old) != 1:
-    raise SystemExit("codec policy no-dialect mutation anchor is not unique")
-path.write_text(text.replace(old, 'not_contains_utf8 = ["FutureKnob"]\n', 1))
+    raise SystemExit("codec policy unknown-child mutation anchor is not unique")
+path.write_text(text.replace(old, 'not_contains_utf8 = []\n', 1))
 PYEOF
 }
 expect_fail check_codec_policy.sh \
-    'the no-dialect control no longer proving the vendor field is not global' \
-    mut_codec_policy_unselected_control_weakened
+    'the lifecycle control no longer proving an unknown child is dropped' \
+    mut_codec_policy_unknown_child_kept
+
+mut_codec_policy_minio_member_dropped() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("conformance/cases/lifecycle/c-lifecycle-0018.toml")
+text = path.read_text()
+old = 'contains_utf8 = ["<DelMarkerExpiration><Days>7</Days></DelMarkerExpiration>"]\n'
+if text.count(old) != 1:
+    raise SystemExit("codec policy MinIO-member mutation anchor is not unique")
+path.write_text(text.replace(old, '', 1))
+PYEOF
+}
+expect_fail check_codec_policy.sh \
+    'the lifecycle control no longer proving MinIO DelMarkerExpiration is kept' \
+    mut_codec_policy_minio_member_dropped
 
 mut_codec_policy_contract_renamed() {
     python3 - <<'PYEOF'

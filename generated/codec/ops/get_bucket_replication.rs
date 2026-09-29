@@ -91,6 +91,18 @@ fn write_delete_marker_replication(
     Ok(())
 }
 
+/// Writes one `DeleteReplication` element's children, in the wire order the IR records.
+fn write_delete_replication(
+    writer: &mut rustfs_gateway_xml::XmlWriter,
+    value: &dto::DeleteReplication,
+) -> Result<(), CodecError> {
+    {
+        let v = &value.status;
+        writer.element("Status", v.as_str());
+    }
+    Ok(())
+}
+
 /// Writes one `Destination` element's children, in the wire order the IR records.
 fn write_destination(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::Destination) -> Result<(), CodecError> {
     {
@@ -231,6 +243,11 @@ fn write_replication_rule(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dt
     if let Some(v) = value.delete_marker_replication.as_ref() {
         writer.open("DeleteMarkerReplication", None);
         write_delete_marker_replication(writer, v)?;
+        writer.close();
+    }
+    if let Some(v) = value.delete_replication.as_ref() {
+        writer.open("DeleteReplication", None);
+        write_delete_replication(writer, v)?;
         writer.close();
     }
     Ok(())

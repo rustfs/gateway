@@ -1,2 +1,2 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<LifecycleConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Rule><Expiration><Days>7</Days></Expiration><ID>dialect</ID><Filter><Prefix>del/</Prefix></Filter><Status>Enabled</Status></Rule></LifecycleConfiguration>
+<LifecycleConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Rule><Expiration><Days>7</Days></Expiration><DelMarkerExpiration><Days>7</Days></DelMarkerExpiration><ID>dialect</ID><Filter><Prefix>del/</Prefix></Filter><Status>Enabled</Status></Rule></LifecycleConfiguration>

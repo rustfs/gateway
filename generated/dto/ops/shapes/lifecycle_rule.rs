@@ -31,6 +31,8 @@
 pub struct LifecycleRule {
     /// Wire `Expiration`, bound as BodyXml. Optional.
     pub expiration: Option<crate::ops::shapes::LifecycleExpiration>,
+    /// Wire `DelMarkerExpiration`, bound as BodyXml. Optional.
+    pub del_marker_expiration: Option<crate::ops::shapes::DelMarkerExpiration>,
     /// Wire `ID`, bound as BodyXml. Optional.
     pub id: Option<String>,
     /// Wire `Prefix`, bound as BodyXml. Optional.

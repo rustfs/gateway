@@ -23,17 +23,17 @@
 use std::io;
 
 use rustfs_gateway::dto::{
-    AbortIncompleteMultipartUpload, BucketLifecycleConfiguration, DeleteBucketLifecycle, DeleteBucketLifecycleOutput,
-    GetBucketLifecycleConfiguration, GetBucketLifecycleConfigurationOutput, LifecycleExpiration, LifecycleRule,
-    LifecycleRuleAndOperator, LifecycleRuleFilter, NoncurrentVersionExpiration, NoncurrentVersionTransition,
+    AbortIncompleteMultipartUpload, BucketLifecycleConfiguration, DelMarkerExpiration, DeleteBucketLifecycle,
+    DeleteBucketLifecycleOutput, GetBucketLifecycleConfiguration, GetBucketLifecycleConfigurationOutput, LifecycleExpiration,
+    LifecycleRule, LifecycleRuleAndOperator, LifecycleRuleFilter, NoncurrentVersionExpiration, NoncurrentVersionTransition,
     PutBucketLifecycleConfiguration, PutBucketLifecycleConfigurationOutput, Status, StorageClass, Tag, Transition,
     TransitionDefaultMinimumObjectSize,
 };
 use rustfs_gateway::persistence::{
-    PersistedAbortIncompleteMultipartUpload, PersistedLifecycleAnd, PersistedLifecycleConfiguration,
-    PersistedLifecycleExpiration, PersistedLifecycleFilter, PersistedLifecycleRule, PersistedLifecycleTag,
-    PersistedNoncurrentVersionExpiration, PersistedNoncurrentVersionTransition, PersistedTransition, parse_lifecycle,
-    serialize_lifecycle,
+    PersistedAbortIncompleteMultipartUpload, PersistedDelMarkerExpiration, PersistedLifecycleAnd,
+    PersistedLifecycleConfiguration, PersistedLifecycleExpiration, PersistedLifecycleFilter, PersistedLifecycleRule,
+    PersistedLifecycleTag, PersistedNoncurrentVersionExpiration, PersistedNoncurrentVersionTransition, PersistedTransition,
+    parse_lifecycle, serialize_lifecycle,
 };
 use rustfs_gateway::{
     ErrorCode, Handler, HandlerError, HandlerResult, Req, Resp, Timestamp, TimestampFormat, validate_lifecycle,
@@ -324,7 +324,10 @@ fn decode_record(bytes: &[u8]) -> Result<LifecycleRecord, ()> {
 
 fn to_persisted(value: &BucketLifecycleConfiguration) -> Result<PersistedLifecycleConfiguration, ()> {
     Ok(PersistedLifecycleConfiguration {
-        expiry_updated_at: None,
+        expiry_updated_at: value
+            .expiry_updated_at
+            .map(|at| at.render(TimestampFormat::Iso8601).map_err(|_| ()))
+            .transpose()?,
         rules: value.rules.iter().map(rule_to_persisted).collect::<Result<Vec<_>, _>>()?,
     })
 }
@@ -336,7 +339,10 @@ fn rule_to_persisted(value: &LifecycleRule) -> Result<PersistedLifecycleRule, ()
                 days_after_initiation: action.days_after_initiation,
             }
         }),
-        del_marker_expiration: None,
+        del_marker_expiration: value
+            .del_marker_expiration
+            .as_ref()
+            .map(|action| PersistedDelMarkerExpiration { days: action.days }),
         expiration: value
             .expiration
             .as_ref()
@@ -347,7 +353,7 @@ fn rule_to_persisted(value: &LifecycleRule) -> Result<PersistedLifecycleRule, ()
                         .map(|date| date.render(TimestampFormat::Iso8601).map_err(|_| ()))
                         .transpose()?,
                     days: expiration.days,
-                    expired_object_all_versions: None,
+                    expired_object_all_versions: expiration.expired_object_all_versions,
                     expired_object_delete_marker: expiration.expired_object_delete_marker,
                 })
             })
@@ -423,10 +429,11 @@ fn tag_to_persisted(value: &Tag) -> PersistedLifecycleTag {
 }
 
 fn from_persisted(value: PersistedLifecycleConfiguration) -> Result<BucketLifecycleConfiguration, ()> {
-    if value.expiry_updated_at.is_some() {
-        return Err(());
-    }
     Ok(BucketLifecycleConfiguration {
+        expiry_updated_at: value
+            .expiry_updated_at
+            .map(|at| Timestamp::parse(&at, TimestampFormat::Iso8601).map_err(|_| ()))
+            .transpose()?,
         rules: value
             .rules
             .into_iter()
@@ -436,10 +443,10 @@ fn from_persisted(value: PersistedLifecycleConfiguration) -> Result<BucketLifecy
 }
 
 fn rule_from_persisted(value: PersistedLifecycleRule) -> Result<LifecycleRule, ()> {
-    if value.del_marker_expiration.is_some() {
-        return Err(());
-    }
     Ok(LifecycleRule {
+        del_marker_expiration: value
+            .del_marker_expiration
+            .map(|action| DelMarkerExpiration { days: action.days }),
         abort_incomplete_multipart_upload: value
             .abort_incomplete_multipart_upload
             .map(|action| AbortIncompleteMultipartUpload {
@@ -448,10 +455,8 @@ fn rule_from_persisted(value: PersistedLifecycleRule) -> Result<LifecycleRule, (
         expiration: value
             .expiration
             .map(|expiration| {
-                if expiration.expired_object_all_versions.is_some() {
-                    return Err(());
-                }
                 Ok(LifecycleExpiration {
+                    expired_object_all_versions: expiration.expired_object_all_versions,
                     date: expiration
                         .date
                         .map(|date| Timestamp::parse(&date, TimestampFormat::Iso8601).map_err(|_| ()))

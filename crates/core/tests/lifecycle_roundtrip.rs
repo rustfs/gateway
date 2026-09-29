@@ -355,6 +355,12 @@ fn expiration() -> impl Strategy<Value = dto::LifecycleExpiration> {
             expired_object_delete_marker: Some(false),
             ..dto::LifecycleExpiration::default()
         }),
+        // MinIO's all-versions flag rides beside Days (rd-cfg-0004).
+        ((1i32..3_650), any::<bool>()).prop_map(|(days, all)| dto::LifecycleExpiration {
+            days: Some(days),
+            expired_object_all_versions: Some(all),
+            ..dto::LifecycleExpiration::default()
+        }),
     ]
 }
 
@@ -409,6 +415,9 @@ fn lifecycle_rule() -> impl Strategy<Value = dto::LifecycleRule> {
         prop::collection::vec(noncurrent_version_transition(), 0..3),
         prop::option::of((prop::option::of(1i32..3_650), prop::option::of(1i32..100))),
         prop::option::of(prop::option::of(1i32..30)),
+        // MinIO's delete-marker expiration (rd-cfg-0003): a synthesized member that must survive
+        // the round trip like every model member.
+        prop::option::of(prop::option::of(1i32..365)),
     )
         .prop_map(
             |(
@@ -420,6 +429,7 @@ fn lifecycle_rule() -> impl Strategy<Value = dto::LifecycleRule> {
                 noncurrent_version_transitions,
                 noncurrent_version_expiration,
                 abort,
+                del_marker,
             )| dto::LifecycleRule {
                 expiration,
                 id,
@@ -437,6 +447,7 @@ fn lifecycle_rule() -> impl Strategy<Value = dto::LifecycleRule> {
                 abort_incomplete_multipart_upload: abort.map(|days| dto::AbortIncompleteMultipartUpload {
                     days_after_initiation: days,
                 }),
+                del_marker_expiration: del_marker.map(|days| dto::DelMarkerExpiration { days }),
             },
         )
 }
@@ -476,7 +487,7 @@ proptest! {
         // The strategies claim to generate documents this family would store. If that claim ever
         // stops holding, the identity below would be exercising rules no client could install and
         // the property would be quietly testing less than it says.
-        let generated = dto::BucketLifecycleConfiguration { rules: rules.clone() };
+        let generated = dto::BucketLifecycleConfiguration { rules: rules.clone(), ..Default::default() };
         prop_assert_eq!(
             validate_lifecycle(&generated),
             Ok(()),
@@ -556,6 +567,7 @@ fn a_configuration_at_the_rule_ceiling_survives_the_round_trip() {
 fn n_a_configuration_one_rule_past_the_ceiling_is_refused() {
     let configuration = dto::BucketLifecycleConfiguration {
         rules: ceiling_rules(MAX_LIFECYCLE_RULES + 1),
+        ..Default::default()
     };
 
     assert_eq!(validate_lifecycle(&configuration), Err(LifecycleRejection::TooManyRules));
@@ -646,6 +658,7 @@ fn n_a_traversal_shaped_prefix_is_still_carried_as_written() {
             status: dto::Status::ENABLED,
             ..dto::LifecycleRule::default()
         }],
+        ..Default::default()
     };
     assert_eq!(
         validate_lifecycle(&unscoped),
@@ -720,6 +733,7 @@ fn an_empty_legacy_prefix_survives_a_read_modify_write() {
     assert_eq!(
         validate_lifecycle(&dto::BucketLifecycleConfiguration {
             rules: decoded.rules.clone(),
+            ..Default::default()
         }),
         Ok(()),
         "an empty legacy prefix is a scope, so the write is accepted"
@@ -740,7 +754,10 @@ fn an_empty_legacy_prefix_survives_a_read_modify_write() {
         "the second read sees the scope the operator wrote: {re_encoded}"
     );
     assert_eq!(
-        validate_lifecycle(&dto::BucketLifecycleConfiguration { rules: reread.rules }),
+        validate_lifecycle(&dto::BucketLifecycleConfiguration {
+            rules: reread.rules,
+            ..Default::default()
+        }),
         Ok(()),
         "so putting back what was read is accepted, which is what a read-modify-write does"
     );
@@ -777,36 +794,33 @@ fn n_an_absent_prefix_does_not_come_back_as_an_empty_one() {
         .expect("a document with a rule decodes to a configuration");
     assert_eq!(reread.rules[0].prefix, None, "and it is still absent on the second read");
     assert_eq!(
-        validate_lifecycle(&dto::BucketLifecycleConfiguration { rules: reread.rules }),
+        validate_lifecycle(&dto::BucketLifecycleConfiguration {
+            rules: reread.rules,
+            ..Default::default()
+        }),
         Ok(()),
         "a rule carrying both a legacy prefix and a filter is refused, so an invented one shows up here"
     );
 }
 
-/// The unselected-dialect edge, asserted rather than described.
-///
-/// `c-lifecycle-0018` pins the same fact over the generic HTTP codec. Production vtables now exist,
-/// but they are selected explicitly at the persisted metadata seam: the default codec must not
-/// start carrying one vendor's field merely because that vendor crate is linked. The paired
-/// positive and fail-closed persistence matrix lives in `rustfs-gateway-dialect-minio`.
+/// MinIO's `DelMarkerExpiration` is a lifecycle member of every assembly (ADR-0033); an unknown
+/// sibling is still skipped. `c-lifecycle-0018` pins the same fact on the wire.
 #[test]
-fn n_an_unselected_dialect_element_is_not_made_global_after_a_re_encode() {
+fn a_minio_del_marker_expiration_survives_a_re_encode_and_an_unknown_sibling_does_not() {
     let stored = "<LifecycleConfiguration><Rule><Expiration><Days>7</Days></Expiration><ID>dialect</ID>\
                   <Filter><Prefix>del/</Prefix></Filter><Status>Enabled</Status>\
-                  <DelMarkerExpiration><Days>7</Days></DelMarkerExpiration></Rule></LifecycleConfiguration>";
-
+                  <DelMarkerExpiration><Days>7</Days></DelMarkerExpiration><FutureKnob>on</FutureKnob></Rule>\
+                  </LifecycleConfiguration>";
     let decoded = decode_write(stored)
-        .expect("an unknown element is skipped, never a refusal — a stricter read turns retention off")
+        .expect("an unknown element is skipped, never a refusal")
         .expect("a document with a rule decodes to a configuration");
     assert_eq!(decoded.rules.len(), 1, "the rule around the unknown element survived");
-
     let re_encoded = encode_read(decoded.rules);
     assert!(
-        !re_encoded.contains("DelMarkerExpiration"),
-        "the unselected codec carried a vendor field globally instead of requiring the persisted \
-         MinIO policy; c-lifecycle-0018 must remain the same negative control: \
-         {re_encoded}"
+        re_encoded.contains("<DelMarkerExpiration><Days>7</Days></DelMarkerExpiration>"),
+        "the MinIO member legacy RustFS accepts was dropped: {re_encoded}"
     );
+    assert!(!re_encoded.contains("FutureKnob"), "an unregistered element was carried: {re_encoded}");
 }
 
 /// A tag key that reads as a path survives the round trip, in both filter positions.
@@ -844,7 +858,10 @@ fn a_tag_key_that_looks_like_a_path_survives_in_both_filter_positions() {
         for filter in tag_filters(key) {
             let rules = scoped_rule(filter);
             assert_eq!(
-                validate_lifecycle(&dto::BucketLifecycleConfiguration { rules: rules.clone() }),
+                validate_lifecycle(&dto::BucketLifecycleConfiguration {
+                    rules: rules.clone(),
+                    ..Default::default()
+                }),
                 Ok(()),
                 "{key}: the semantic rules refuse this before the codec ever sees it"
             );

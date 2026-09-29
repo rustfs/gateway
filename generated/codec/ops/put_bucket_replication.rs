@@ -111,6 +111,19 @@ fn read_delete_marker_replication(node: &rustfs_gateway_xml::XmlNode) -> Result<
     Ok(shape)
 }
 
+/// Reads one `DeleteReplication` element. Members are matched by local name, so a namespace-prefixed
+/// body and a bare one decode identically.
+fn read_delete_replication(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::DeleteReplication, CodecError> {
+    let mut shape = dto::DeleteReplication { ..Default::default() };
+    if let Some(raw) = node.child_text("Status") {
+        shape.status = dto::Status::custom(raw.to_owned());
+    } else {
+        return Err(CodecError::malformed_xml("the body omits a member the schema requires").about("Status"));
+    }
+    value::exit(shape.check_required())?;
+    Ok(shape)
+}
+
 /// Reads one `Destination` element. Members are matched by local name, so a namespace-prefixed
 /// body and a bare one decode identically.
 fn read_destination(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::Destination, CodecError> {
@@ -252,6 +265,9 @@ fn read_replication_rule(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::Repl
     }
     if let Some(child) = node.child("DeleteMarkerReplication") {
         shape.delete_marker_replication = Some(read_delete_marker_replication(child)?);
+    }
+    if let Some(child) = node.child("DeleteReplication") {
+        shape.delete_replication = Some(read_delete_replication(child)?);
     }
     value::exit(shape.check_required())?;
     Ok(shape)

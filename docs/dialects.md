@@ -48,15 +48,15 @@ separate task using this ADR as input." No workspace crate names `ExtField` or `
 no generated codec carries an extension slot. So the rows for 2 and 3 remain the contract their
 implementation has to satisfy rather than a description of code that exists.
 
-What that costs, concretely, is written down where it can go red rather than only here. A lifecycle
-document carrying MinIO's `DelMarkerExpiration` is *accepted* — dimension 3's leniency is the
-decoder's default — and the element is then dropped from the re-encoded document, which is how
-RustFS persists. `c-lifecycle-0018` pins that on the wire and
-`crates/core/tests/lifecycle_roundtrip.rs` pins it at the codec seam; both name themselves as the
-assertions to invert when dimension 2 reaches production. Until then, ADR-0007's persistence
-boundary applies: `lenient` is not a lossless read-modify-write policy, so production persistence
-must retain the original bytes and must never turn a parse or registration miss into an absent
-configuration.
+One vendor exception does not wait for dimension 2. ADR-0033 makes six MinIO bucket-configuration
+members (`ExpiryUpdatedAt`, `DelMarkerExpiration`, `ExpiredObjectAllVersions`, `DeleteReplication`,
+`ExcludedPrefixes`, `ExcludeFolders`) ordinary model members that every assembly decodes and
+re-encodes, because RustFS, the only product the gateway serves, reads them. `c-lifecycle-0018`
+pins that on the wire and `crates/core/tests/lifecycle_roundtrip.rs` at the codec seam, together
+with dimension 3's leniency: an unknown sibling is still accepted and dropped from the re-encoded
+document. ADR-0007's persistence boundary still applies: `lenient` is not a lossless
+read-modify-write policy, so production persistence must retain the original bytes and must never
+turn a parse or registration miss into an absent configuration.
 
 (ADR-0007's header says "Superseded by ADR-0010". ADR-0010 replaces one finding of it — Q6, the
 handler request layout — and leaves the vtable decision standing; read the two together rather

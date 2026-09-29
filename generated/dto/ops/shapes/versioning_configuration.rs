@@ -33,6 +33,10 @@ pub struct VersioningConfiguration {
     pub mfa_delete: Option<crate::ops::enums::MfaDelete>,
     /// Wire `Status`, bound as BodyXml. Optional.
     pub status: Option<crate::ops::enums::Status>,
+    /// Wire `ExcludedPrefixes`, bound as BodyXml. Optional.
+    pub excluded_prefixes: Vec<crate::ops::shapes::ExcludedPrefix>,
+    /// Wire `ExcludeFolders`, bound as BodyXml. Optional.
+    pub exclude_folders: Option<bool>,
 }
 
 impl VersioningConfiguration {

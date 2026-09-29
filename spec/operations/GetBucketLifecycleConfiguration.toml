@@ -105,14 +105,31 @@ required = false
 hot = false
 quirks = []
 
+[shape.DelMarkerExpiration]
+kind = "Structure"
+element_order = ["Days"]
+
+[shape.DelMarkerExpiration.empty_value]
+Days = "emit"
+
+[[shape.DelMarkerExpiration.field]]
+name = "Days"
+wire_name = "Days"
+binding = "BodyXml"
+type = "Integer"
+required = false
+hot = false
+quirks = []
+
 [shape.LifecycleExpiration]
 kind = "Structure"
-element_order = ["Date", "Days", "ExpiredObjectDeleteMarker"]
+element_order = ["Date", "Days", "ExpiredObjectDeleteMarker", "ExpiredObjectAllVersions"]
 
 [shape.LifecycleExpiration.empty_value]
 Date = "emit"
 Days = "emit"
 ExpiredObjectDeleteMarker = "emit"
+ExpiredObjectAllVersions = "emit"
 
 [[shape.LifecycleExpiration.field]]
 name = "Date"
@@ -141,12 +158,22 @@ required = false
 hot = false
 quirks = []
 
+[[shape.LifecycleExpiration.field]]
+name = "ExpiredObjectAllVersions"
+wire_name = "ExpiredObjectAllVersions"
+binding = "BodyXml"
+type = "Boolean"
+required = false
+hot = false
+quirks = []
+
 [shape.LifecycleRule]
 kind = "Structure"
-element_order = ["Expiration", "ID", "Prefix", "Filter", "Status", "Transitions", "NoncurrentVersionTransitions", "NoncurrentVersionExpiration", "AbortIncompleteMultipartUpload"]
+element_order = ["Expiration", "DelMarkerExpiration", "ID", "Prefix", "Filter", "Status", "Transitions", "NoncurrentVersionTransitions", "NoncurrentVersionExpiration", "AbortIncompleteMultipartUpload"]
 
 [shape.LifecycleRule.empty_value]
 Expiration = "emit"
+DelMarkerExpiration = "emit"
 ID = "emit"
 Prefix = "emit"
 Filter = "emit"
@@ -161,6 +188,15 @@ name = "Expiration"
 wire_name = "Expiration"
 binding = "BodyXml"
 type = "Structure(LifecycleExpiration)"
+required = false
+hot = false
+quirks = []
+
+[[shape.LifecycleRule.field]]
+name = "DelMarkerExpiration"
+wire_name = "DelMarkerExpiration"
+binding = "BodyXml"
+type = "Structure(DelMarkerExpiration)"
 required = false
 hot = false
 quirks = []

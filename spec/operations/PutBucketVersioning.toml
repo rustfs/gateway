@@ -104,13 +104,31 @@ required = false
 hot = false
 quirks = []
 
+[shape.ExcludedPrefix]
+kind = "Structure"
+element_order = ["Prefix"]
+
+[shape.ExcludedPrefix.empty_value]
+Prefix = "emit"
+
+[[shape.ExcludedPrefix.field]]
+name = "Prefix"
+wire_name = "Prefix"
+binding = "BodyXml"
+type = "String"
+required = false
+hot = false
+quirks = []
+
 [shape.VersioningConfiguration]
 kind = "Structure"
-element_order = ["MFADelete", "Status"]
+element_order = ["MFADelete", "Status", "ExcludedPrefixes", "ExcludeFolders"]
 
 [shape.VersioningConfiguration.empty_value]
 MFADelete = "emit"
 Status = "emit"
+ExcludedPrefixes = "emit"
+ExcludeFolders = "emit"
 
 [[shape.VersioningConfiguration.field]]
 name = "MFADelete"
@@ -130,4 +148,22 @@ type = "StringEnum"
 required = false
 hot = false
 values = ["Enabled", "Suspended"]
+quirks = []
+
+[[shape.VersioningConfiguration.field]]
+name = "ExcludedPrefixes"
+wire_name = "ExcludedPrefixes"
+binding = "BodyXml"
+type = "List<Structure(ExcludedPrefix)>(flattened)"
+required = false
+hot = false
+quirks = []
+
+[[shape.VersioningConfiguration.field]]
+name = "ExcludeFolders"
+wire_name = "ExcludeFolders"
+binding = "BodyXml"
+type = "Boolean"
+required = false
+hot = false
 quirks = []

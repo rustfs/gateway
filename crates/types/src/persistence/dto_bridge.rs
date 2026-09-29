@@ -141,23 +141,20 @@ pub fn serialize_tagging_dto(value: &crate::dto::Tagging) -> Vec<u8> {
 /// # Errors
 ///
 /// Returns [`PersistenceBridgeError::Codec`] when the historical parser rejects the bytes, and
-/// [`PersistenceBridgeError::UnsupportedPersistedMember`] when a MinIO extension is present and
-/// therefore cannot be represented without loss by the generated DTO.
+/// never [`PersistenceBridgeError::UnsupportedPersistedMember`]: the generated DTO carries MinIO's
+/// `ExcludedPrefixes` and `ExcludeFolders` (rd-cfg-0006).
 pub fn parse_versioning_dto(input: &[u8]) -> Result<crate::dto::VersioningConfiguration, PersistenceBridgeError> {
     let persisted = parse_versioning(input)?;
-    if persisted.exclude_folders.is_some() {
-        return Err(PersistenceBridgeError::UnsupportedPersistedMember(
-            "VersioningConfiguration.ExcludeFolders",
-        ));
-    }
-    if persisted.excluded_prefixes.is_some() {
-        return Err(PersistenceBridgeError::UnsupportedPersistedMember(
-            "VersioningConfiguration.ExcludedPrefixes",
-        ));
-    }
     Ok(crate::dto::VersioningConfiguration {
         mfa_delete: persisted.mfa_delete.map(crate::dto::MfaDelete::custom),
         status: persisted.status.map(crate::dto::Status::custom),
+        excluded_prefixes: persisted
+            .excluded_prefixes
+            .unwrap_or_default()
+            .into_iter()
+            .map(|prefix| crate::dto::ExcludedPrefix { prefix })
+            .collect(),
+        exclude_folders: persisted.exclude_folders,
     })
 }
 
@@ -167,8 +164,9 @@ pub fn serialize_versioning_dto(value: &crate::dto::VersioningConfiguration) -> 
     serialize_versioning(&PersistedVersioningConfiguration {
         status: value.status.as_ref().map(|status| status.as_str().to_owned()),
         mfa_delete: value.mfa_delete.as_ref().map(|state| state.as_str().to_owned()),
-        exclude_folders: None,
-        excluded_prefixes: None,
+        exclude_folders: value.exclude_folders,
+        excluded_prefixes: (!value.excluded_prefixes.is_empty())
+            .then(|| value.excluded_prefixes.iter().map(|entry| entry.prefix.clone()).collect()),
     })
 }
 
@@ -383,6 +381,7 @@ mod tests {
         let dto = VersioningConfiguration {
             mfa_delete: Some("FutureMfa".into()),
             status: Some("FutureStatus".into()),
+            ..VersioningConfiguration::default()
         };
 
         let bytes = serialize_versioning_dto(&dto);
@@ -414,23 +413,18 @@ mod tests {
         );
     }
 
+    /// MinIO's `ExcludeFolders` and flattened `ExcludedPrefixes` are DTO members since rd-cfg-0006
+    /// and cross both ways, every prefix kept in order.
     #[test]
-    fn versioning_dto_bridge_refuses_the_folder_extension() {
+    fn versioning_dto_bridge_keeps_the_minio_exclusions() {
+        let bytes: &[u8] = b"<VersioningConfiguration><Status>Enabled</Status><ExcludedPrefixes><Prefix>tmp/</Prefix></ExcludedPrefixes><ExcludedPrefixes><Prefix>cache/</Prefix></ExcludedPrefixes><ExcludeFolders>true</ExcludeFolders></VersioningConfiguration>";
+        let parsed = parse_versioning_dto(bytes).expect("both members have DTO members");
+        let prefixes: Vec<_> = parsed.excluded_prefixes.iter().map(|entry| entry.prefix.as_deref()).collect();
+        assert_eq!(prefixes, [Some("tmp/"), Some("cache/")]);
+        assert_eq!(parsed.exclude_folders, Some(true));
         assert_eq!(
-            parse_versioning_dto(b"<VersioningConfiguration><ExcludeFolders>true</ExcludeFolders></VersioningConfiguration>")
-                .expect_err("a persisted extension cannot be dropped"),
-            PersistenceBridgeError::UnsupportedPersistedMember("VersioningConfiguration.ExcludeFolders")
-        );
-    }
-
-    #[test]
-    fn versioning_dto_bridge_refuses_the_prefix_extension() {
-        assert_eq!(
-            parse_versioning_dto(
-                b"<VersioningConfiguration><ExcludedPrefixes><Prefix>tmp/</Prefix></ExcludedPrefixes></VersioningConfiguration>"
-            )
-            .expect_err("a persisted extension cannot be dropped"),
-            PersistenceBridgeError::UnsupportedPersistedMember("VersioningConfiguration.ExcludedPrefixes")
+            crate::persistence::parse_versioning(&serialize_versioning_dto(&parsed)),
+            crate::persistence::parse_versioning(bytes)
         );
     }
 

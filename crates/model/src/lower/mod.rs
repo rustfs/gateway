@@ -29,16 +29,18 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::error::{Error, Result};
 use crate::ir::*;
 use crate::json::Value;
-use crate::overlay::{AttributeOverlay, FieldOverlay, OpOverlay, Overlay, ShapeOverlay, Side};
+use crate::overlay::{FieldOverlay, OpOverlay, Overlay, ShapeOverlay, Side};
 use crate::smithy::{Model, has_trait, local_name, target_of, trait_of};
 
 mod route_only;
 mod routing_query;
 mod selector_params;
+mod shape_members;
 mod support;
 
 pub use route_only::RouteOnly;
 use route_only::lower_http;
+use shape_members::shape_attributes;
 
 use support::{
     Uri, body_members, default_of, empty_value_policy, error_codes, list_form, model_request_algorithms, omit_when_of,
@@ -631,10 +633,9 @@ impl Ctx<'_> {
                 if out.contains_key(name) {
                     return Ok(());
                 }
-                let shape = self
-                    .model
-                    .shape_local(name)
-                    .ok_or_else(|| Error::ir(self.operation, format!("unknown nested shape `{name}`")))?;
+                let Some(shape) = self.model.shape_local(name) else {
+                    return self.collect_synthesized_shape(name, out);
+                };
                 let default = ShapeOverlay::default();
                 let ov = self.overlay.shapes.get(name).unwrap_or(&default);
                 // Reserve the slot before recursing so a self-referential shape terminates.
@@ -661,7 +662,7 @@ impl Ctx<'_> {
                         }
                     }
                 }
-                for field in &ov.fields {
+                for field in ov.fields.iter().filter(|field| !field.synthesize) {
                     if !members.contains(&field.name) {
                         return Err(Error::ir(
                             self.operation,
@@ -699,6 +700,7 @@ impl Ctx<'_> {
                         quirk_refs: sort_quirk_ids(fov.map(|f| f.quirks.clone()).unwrap_or_default()),
                     });
                 }
+                self.append_synthesized_fields(ov, &mut fields)?;
                 let kind = if self.model.kind_of(&format!("{}#{name}", namespace(self.model))) == "union" {
                     ShapeKind::Union
                 } else {
@@ -743,56 +745,6 @@ impl Ctx<'_> {
         }
         Ok(())
     }
-}
-
-/// Resolves one shape's declared XML attributes against the members it actually has.
-///
-/// A field source that names no member is the failure this exists to catch: the attribute would
-/// silently disappear from the wire and the discriminator with it, which is the shape of the
-/// defect `aws-java-sdk` hit against s3s. A member carried as an attribute must also be
-/// optional — the reader this project ships strips attributes, so a required member the decoder
-/// can never populate would refuse every well-formed request body.
-fn shape_attributes(operation: &str, shape: &str, declared: &[AttributeOverlay], fields: &[Field]) -> Result<Vec<XmlAttribute>> {
-    let mut out = Vec::new();
-    for attribute in declared {
-        let element = attribute.element.clone().unwrap_or_else(|| shape.to_owned());
-        let source = match (&attribute.field, &attribute.value) {
-            (Some(member), _) => {
-                let Some(field) = fields.iter().find(|f| &f.name == member) else {
-                    return Err(Error::ir(
-                        operation,
-                        format!(
-                            "shape `{shape}`: attribute `{}` names member `{member}`, which it does not have",
-                            attribute.name
-                        ),
-                    ));
-                };
-                if field.required {
-                    return Err(Error::ir(
-                        operation,
-                        format!(
-                            "shape `{shape}`: attribute `{}` carries required member `{member}`; the XML reader drops attributes, so a required source can never be decoded",
-                            attribute.name
-                        ),
-                    ));
-                }
-                AttributeSource::Field(member.clone())
-            }
-            (None, Some(value)) => AttributeSource::Constant(value.clone()),
-            (None, None) => {
-                return Err(Error::ir(
-                    operation,
-                    format!("shape `{shape}`: attribute `{}` has no source", attribute.name),
-                ));
-            }
-        };
-        out.push(XmlAttribute {
-            element,
-            name: attribute.name.clone(),
-            source,
-        });
-    }
-    Ok(out)
 }
 
 fn namespace(model: &Model) -> &str {

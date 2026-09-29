@@ -107,6 +107,41 @@ quirk_refs = [
   "q-lc-0014",
 ]
 
+# MinIO's lifecycle extensions, which RustFS reads and the legacy stack (built with MinIO support) decodes and writes:
+# `<ExpiryUpdatedAt>` on the document, `<DelMarkerExpiration><Days>` on a rule (after
+# `<Expiration>`, where MinIO writes it) and `<ExpiredObjectAllVersions>` in an `<Expiration>`.
+# Without them the generic decoder skipped these elements, so a rule written through the gateway
+# lost them before RustFS saw it (rd-cfg-0002, rd-cfg-0003, rd-cfg-0004; rustfs/backlog#1752).
+[shape.BucketLifecycleConfiguration]
+
+[[shape.BucketLifecycleConfiguration.field]]
+name = "ExpiryUpdatedAt"
+synthesize = true
+type = "Timestamp:Iso8601"
+
+[shape.LifecycleRule]
+
+[[shape.LifecycleRule.field]]
+name = "DelMarkerExpiration"
+synthesize = true
+after = "Expiration"
+type = "Structure:DelMarkerExpiration"
+
+[shape.DelMarkerExpiration]
+synthesize = true
+
+[[shape.DelMarkerExpiration.field]]
+name = "Days"
+synthesize = true
+type = "Integer"
+
+[shape.LifecycleExpiration]
+
+[[shape.LifecycleExpiration.field]]
+name = "ExpiredObjectAllVersions"
+synthesize = true
+type = "Boolean"
+
 # =============================================================================================
 # DeleteBucketLifecycle
 #

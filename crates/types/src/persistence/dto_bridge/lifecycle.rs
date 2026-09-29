@@ -20,10 +20,10 @@
 
 use super::PersistenceBridgeError;
 use crate::persistence::{
-    PersistedAbortIncompleteMultipartUpload, PersistedLifecycleAnd, PersistedLifecycleConfiguration,
-    PersistedLifecycleExpiration, PersistedLifecycleFilter, PersistedLifecycleRule, PersistedLifecycleTag,
-    PersistedNoncurrentVersionExpiration, PersistedNoncurrentVersionTransition, PersistedTransition, PersistenceCodecError,
-    parse_lifecycle, serialize_lifecycle,
+    PersistedAbortIncompleteMultipartUpload, PersistedDelMarkerExpiration, PersistedLifecycleAnd,
+    PersistedLifecycleConfiguration, PersistedLifecycleExpiration, PersistedLifecycleFilter, PersistedLifecycleRule,
+    PersistedLifecycleTag, PersistedNoncurrentVersionExpiration, PersistedNoncurrentVersionTransition, PersistedTransition,
+    PersistenceCodecError, parse_lifecycle, serialize_lifecycle,
 };
 use crate::{Timestamp, TimestampFormat};
 
@@ -35,21 +35,17 @@ use crate::{Timestamp, TimestampFormat};
 /// [`PersistenceBridgeError::UnsupportedPersistedMember`] when an old-only member would be lost.
 pub fn parse_lifecycle_dto(input: &[u8]) -> Result<crate::dto::BucketLifecycleConfiguration, PersistenceBridgeError> {
     let persisted = parse_lifecycle(input)?;
-    if persisted.expiry_updated_at.is_some() {
-        return Err(PersistenceBridgeError::UnsupportedPersistedMember(
-            "LifecycleConfiguration.ExpiryUpdatedAt",
-        ));
-    }
     Ok(crate::dto::BucketLifecycleConfiguration {
+        expiry_updated_at: persisted.expiry_updated_at.as_deref().map(parse_timestamp).transpose()?,
         rules: persisted.rules.into_iter().map(to_dto_rule).collect::<Result<Vec<_>, _>>()?,
     })
 }
 
 fn to_dto_rule(value: PersistedLifecycleRule) -> Result<crate::dto::LifecycleRule, PersistenceBridgeError> {
-    if value.del_marker_expiration.is_some() {
-        return Err(PersistenceBridgeError::UnsupportedPersistedMember("LifecycleRule.DelMarkerExpiration"));
-    }
     Ok(crate::dto::LifecycleRule {
+        del_marker_expiration: value
+            .del_marker_expiration
+            .map(|action| crate::dto::DelMarkerExpiration { days: action.days }),
         abort_incomplete_multipart_upload: value.abort_incomplete_multipart_upload.map(|action| {
             crate::dto::AbortIncompleteMultipartUpload {
                 days_after_initiation: action.days_after_initiation,
@@ -86,14 +82,10 @@ fn to_dto_rule(value: PersistedLifecycleRule) -> Result<crate::dto::LifecycleRul
 }
 
 fn to_dto_expiration(value: PersistedLifecycleExpiration) -> Result<crate::dto::LifecycleExpiration, PersistenceBridgeError> {
-    if value.expired_object_all_versions.is_some() {
-        return Err(PersistenceBridgeError::UnsupportedPersistedMember(
-            "LifecycleRule.Expiration.ExpiredObjectAllVersions",
-        ));
-    }
     Ok(crate::dto::LifecycleExpiration {
         date: value.date.as_deref().map(parse_timestamp).transpose()?,
         days: value.days,
+        expired_object_all_versions: value.expired_object_all_versions,
         expired_object_delete_marker: value.expired_object_delete_marker,
     })
 }
@@ -156,7 +148,7 @@ fn to_dto_transition(value: PersistedTransition) -> Result<crate::dto::Transitio
 /// the value.
 pub fn serialize_lifecycle_dto(value: &crate::dto::BucketLifecycleConfiguration) -> Result<Vec<u8>, PersistenceBridgeError> {
     let persisted = PersistedLifecycleConfiguration {
-        expiry_updated_at: None,
+        expiry_updated_at: value.expiry_updated_at.as_ref().map(render_timestamp).transpose()?,
         rules: value.rules.iter().map(from_dto_rule).collect::<Result<Vec<_>, _>>()?,
     };
     serialize_lifecycle(&persisted).map_err(Into::into)
@@ -169,7 +161,10 @@ fn from_dto_rule(value: &crate::dto::LifecycleRule) -> Result<PersistedLifecycle
                 days_after_initiation: action.days_after_initiation,
             }
         }),
-        del_marker_expiration: None,
+        del_marker_expiration: value
+            .del_marker_expiration
+            .as_ref()
+            .map(|action| PersistedDelMarkerExpiration { days: action.days }),
         expiration: value.expiration.as_ref().map(from_dto_expiration).transpose()?,
         filter: value.filter.as_ref().map(from_dto_filter),
         id: value.id.clone(),
@@ -211,7 +206,7 @@ fn from_dto_expiration(value: &crate::dto::LifecycleExpiration) -> Result<Persis
     Ok(PersistedLifecycleExpiration {
         date: value.date.as_ref().map(render_timestamp).transpose()?,
         days: value.days,
-        expired_object_all_versions: None,
+        expired_object_all_versions: value.expired_object_all_versions,
         expired_object_delete_marker: value.expired_object_delete_marker,
     })
 }
@@ -291,30 +286,33 @@ mod tests {
         );
     }
 
+    /// The MinIO members are DTO members since rd-cfg-0002..0004: each crosses the bridge and back
+    /// to the same persisted bytes.
     #[test]
-    fn lifecycle_dto_bridge_rejects_the_server_timestamp() {
+    fn lifecycle_dto_bridge_keeps_the_minio_members_byte_for_byte() {
+        let bytes: &[u8] = b"<LifecycleConfiguration><ExpiryUpdatedAt>2030-01-01T00:00:00.000Z</ExpiryUpdatedAt><Rule><DelMarkerExpiration><Days>7</Days></DelMarkerExpiration><Expiration><ExpiredObjectAllVersions>true</ExpiredObjectAllVersions></Expiration><Status>Enabled</Status></Rule></LifecycleConfiguration>";
+        let parsed = parse_lifecycle_dto(bytes).expect("every MinIO member has a DTO member");
+        let rule = &parsed.rules[0];
+        assert_eq!(rule.del_marker_expiration.as_ref().and_then(|action| action.days), Some(7));
+        assert_eq!(rule.expiration.as_ref().and_then(|e| e.expired_object_all_versions), Some(true));
+        assert!(parsed.expiry_updated_at.is_some());
+        let rewritten = serialize_lifecycle_dto(&parsed).expect("the bridge writes what it read");
         assert_eq!(
-            parse_lifecycle_dto(b"<LifecycleConfiguration><ExpiryUpdatedAt>2030-01-01T00:00:00Z</ExpiryUpdatedAt><Rule><Status>Enabled</Status></Rule></LifecycleConfiguration>")
-                .expect_err("the generated DTO cannot retain a server timestamp"),
-            PersistenceBridgeError::UnsupportedPersistedMember("LifecycleConfiguration.ExpiryUpdatedAt")
+            crate::persistence::parse_lifecycle(&rewritten),
+            crate::persistence::parse_lifecycle(bytes)
         );
     }
 
+    /// MinIO writes `ExpiryUpdatedAt` with six fractional digits; the persisted codec already
+    /// normalizes it, and the bridge carries the normalized instant through unchanged.
     #[test]
-    fn lifecycle_dto_bridge_rejects_the_minio_delete_marker_extension() {
+    fn lifecycle_dto_bridge_keeps_a_six_digit_server_timestamp_as_the_codec_reads_it() {
+        let bytes: &[u8] = b"<LifecycleConfiguration><ExpiryUpdatedAt>2026-08-30T12:34:56.123456Z</ExpiryUpdatedAt><Rule><Status>Enabled</Status></Rule></LifecycleConfiguration>";
+        let parsed = parse_lifecycle_dto(bytes).expect("the codec reads the MinIO timestamp");
+        let rewritten = serialize_lifecycle_dto(&parsed).expect("the bridge writes what it read");
         assert_eq!(
-            parse_lifecycle_dto(b"<LifecycleConfiguration><Rule><DelMarkerExpiration><Days>7</Days></DelMarkerExpiration><Status>Enabled</Status></Rule></LifecycleConfiguration>")
-                .expect_err("the generated DTO cannot retain the extension"),
-            PersistenceBridgeError::UnsupportedPersistedMember("LifecycleRule.DelMarkerExpiration")
-        );
-    }
-
-    #[test]
-    fn lifecycle_dto_bridge_rejects_expired_object_all_versions() {
-        assert_eq!(
-            parse_lifecycle_dto(b"<LifecycleConfiguration><Rule><Expiration><ExpiredObjectAllVersions>true</ExpiredObjectAllVersions></Expiration><Status>Enabled</Status></Rule></LifecycleConfiguration>")
-                .expect_err("the generated DTO cannot retain the old-only expiration member"),
-            PersistenceBridgeError::UnsupportedPersistedMember("LifecycleRule.Expiration.ExpiredObjectAllVersions")
+            crate::persistence::parse_lifecycle(&rewritten),
+            crate::persistence::parse_lifecycle(bytes)
         );
     }
 
@@ -347,7 +345,10 @@ mod tests {
 
     #[test]
     fn lifecycle_dto_bridge_rejects_serializing_an_empty_rule_list() {
-        let dto = dto::BucketLifecycleConfiguration { rules: Vec::new() };
+        let dto = dto::BucketLifecycleConfiguration {
+            rules: Vec::new(),
+            ..Default::default()
+        };
         assert_eq!(
             serialize_lifecycle_dto(&dto).expect_err("historical persistence requires a rule"),
             PersistenceBridgeError::Codec(PersistenceCodecError::MissingLifecycleRule)

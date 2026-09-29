@@ -152,6 +152,7 @@ async fn direct_invalid_configuration_is_refused_without_replacing_state() {
             status: dto::Status::ENABLED,
             ..dto::LifecycleRule::default()
         }],
+        ..dto::BucketLifecycleConfiguration::default()
     };
     let error = Handler::<dto::PutBucketLifecycleConfiguration>::call(
         backend.as_ref(),

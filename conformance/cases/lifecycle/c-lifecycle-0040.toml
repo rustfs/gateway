@@ -1,0 +1,79 @@
+# c-lifecycle-0040 — MinIO bucket-configuration extensions RustFS reads (rustfs/backlog#1752)
+#
+# Schema dimensions exercised: a refused write, an accepted write and its read-back
+
+[case]
+id = "c-lifecycle-0040"
+schema_version = 1
+title = "A MinIO delete-marker expiration is refused when malformed and stored and read back when valid"
+rationale = """
+RustFS reads three MinIO lifecycle extensions — DelMarkerExpiration on a rule, ExpiredObjectAllVersions in an expiration and ExpiryUpdatedAt on the document — and the legacy stack decodes and writes them. A gateway whose decoder skipped them accepted every such document and silently installed a different one: the delete-marker expiry the client asked for was simply not there, which no answer revealed. The malformed write is the half a skipping decoder cannot pass: a value no integer reads is refused as 400 InvalidArgument, the gateway's answer for a member value its type cannot hold, rather than ignored, and nothing is stored. The read-back is the other half: the rule a lifecycle read returns carries both rule-level extensions exactly as written."""
+polarity = "negative"
+operation = "PutBucketLifecycleConfiguration"
+tags = ["compatibility", "lifecycle", "error-shape"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://github.com/rustfs/rustfs/blob/719000460b231792b52314df321f0d385d03dff4/crates/ecstore/src/bucket/lifecycle/lifecycle.rs"
+summary = "RustFS evaluates a rule's delete-marker expiration and its expired-object-all-versions flag from the stored lifecycle document."
+kind = "other"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-lifecycle"
+
+[[exchanges]]
+name = "malformed-marker-expiry-is-refused"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-lifecycle?lifecycle"
+headers = { "content-type" = "application/xml", "content-md5" = "O6GgWWk2WeptQfzTk7ErQA==" }
+body = { utf8 = '<LifecycleConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Rule><ID>marker-cleanup</ID><Filter><Prefix>logs/</Prefix></Filter><Status>Enabled</Status><Expiration><Days>30</Days></Expiration><DelMarkerExpiration><Days>soon</Days></DelMarkerExpiration></Rule></LifecycleConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "InvalidArgument"
+request_id_present = true
+
+[[exchanges]]
+name = "valid-extensions-are-stored"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-lifecycle?lifecycle"
+headers = { "content-type" = "application/xml", "content-md5" = "4A+oG4DWuqbc7xj2OB8Feg==" }
+body = { utf8 = '<LifecycleConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><ExpiryUpdatedAt>2026-01-02T03:04:05.000Z</ExpiryUpdatedAt><Rule><ID>marker-cleanup</ID><Filter><Prefix>logs/</Prefix></Filter><Status>Enabled</Status><Expiration><Days>30</Days><ExpiredObjectAllVersions>true</ExpiredObjectAllVersions></Expiration><DelMarkerExpiration><Days>7</Days></DelMarkerExpiration></Rule></LifecycleConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[[exchanges]]
+name = "read-back-carries-them"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-lifecycle?lifecycle"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+contains_utf8 = ["<DelMarkerExpiration><Days>7</Days></DelMarkerExpiration>", "<ExpiredObjectAllVersions>true</ExpiredObjectAllVersions>"]

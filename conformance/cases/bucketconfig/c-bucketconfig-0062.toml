@@ -1,0 +1,63 @@
+# c-bucketconfig-0062 — MinIO bucket-configuration extensions RustFS reads (rustfs/backlog#1752)
+#
+# Schema dimensions exercised: a refused write, an accepted write
+
+[case]
+id = "c-bucketconfig-0062"
+schema_version = 1
+title = "MinIO versioning exclusions are accepted when well formed and a non-boolean ExcludeFolders is refused"
+rationale = """
+RustFS excludes the prefixes and folders named by MinIO's ExcludedPrefixes and ExcludeFolders from versioning, and the legacy stack decodes both. A gateway that skipped them turned versioning on for objects the client had excluded, and accepted a value that is not a boolean without comment. The refusal is the observable half: ExcludeFolders that no boolean reads is 400 InvalidArgument, the gateway's answer for a member value its type cannot hold, not ignored. The well-formed write, two flattened prefix entries and the folder flag, is accepted."""
+polarity = "negative"
+operation = "PutBucketVersioning"
+tags = ["compatibility", "bucketconfig", "error-shape"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://github.com/rustfs/rustfs/blob/719000460b231792b52314df321f0d385d03dff4/crates/ecstore/src/bucket/versioning/mod.rs"
+summary = "RustFS applies the excluded prefixes and the exclude-folders flag of the stored versioning document."
+kind = "other"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-bucketconfig"
+
+[[exchanges]]
+name = "non-boolean-exclude-folders-is-refused"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-bucketconfig?versioning"
+headers = { "content-type" = "application/xml", "content-md5" = "OvGeBFiWMl2u/J7FKl/W+g==" }
+body = { utf8 = '<VersioningConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Status>Enabled</Status><ExcludeFolders>maybe</ExcludeFolders></VersioningConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 400
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "InvalidArgument"
+request_id_present = true
+
+[[exchanges]]
+name = "exclusions-are-accepted"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-bucketconfig?versioning"
+headers = { "content-type" = "application/xml", "content-md5" = "DFjHgnaz70z/YgnDigiIIA==" }
+body = { utf8 = '<VersioningConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Status>Enabled</Status><ExcludedPrefixes><Prefix>tmp/</Prefix></ExcludedPrefixes><ExcludedPrefixes><Prefix>cache/</Prefix></ExcludedPrefixes><ExcludeFolders>true</ExcludeFolders></VersioningConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"

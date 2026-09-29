@@ -42,10 +42,10 @@ pub fn parse_replication_dto(input: &[u8]) -> Result<crate::dto::ReplicationConf
 }
 
 fn to_dto_rule(value: PersistedReplicationRule) -> Result<crate::dto::ReplicationRule, PersistenceBridgeError> {
-    if value.delete_replication.is_some() {
-        return Err(PersistenceBridgeError::UnsupportedPersistedMember("ReplicationRule.DeleteReplication"));
-    }
     Ok(crate::dto::ReplicationRule {
+        delete_replication: value.delete_replication.map(|wrapper| crate::dto::DeleteReplication {
+            status: crate::dto::Status::custom(wrapper.status),
+        }),
         delete_marker_replication: value
             .delete_marker_replication
             .map(|wrapper| crate::dto::DeleteMarkerReplication {
@@ -168,7 +168,9 @@ fn from_dto_rule(value: &crate::dto::ReplicationRule) -> PersistedReplicationRul
             .map(|wrapper| PersistedOptionalReplicationStatus {
                 status: wrapper.status.as_ref().map(|status| status.as_str().to_owned()),
             }),
-        delete_replication: None,
+        delete_replication: value.delete_replication.as_ref().map(|wrapper| PersistedReplicationStatus {
+            status: wrapper.status.as_str().to_owned(),
+        }),
         destination: from_dto_destination(&value.destination),
         existing_object_replication: value
             .existing_object_replication
@@ -313,12 +315,20 @@ mod tests {
         );
     }
 
+    /// MinIO's `DeleteReplication` is a DTO member since rd-cfg-0005 and crosses both ways.
     #[test]
-    fn replication_dto_bridge_rejects_the_minio_only_delete_replication_member() {
+    fn replication_dto_bridge_keeps_the_minio_delete_replication_member() {
+        let bytes: &[u8] = b"<ReplicationConfiguration><Role>role</Role><Rule><DeleteReplication><Status>Enabled</Status></DeleteReplication><Destination><Bucket>arn:aws:s3:::backup</Bucket></Destination><Status>Enabled</Status></Rule></ReplicationConfiguration>";
+        let parsed = parse_replication_dto(bytes).expect("the member has a DTO member");
+        let replication = parsed.rules[0]
+            .delete_replication
+            .as_ref()
+            .map(|wrapper| wrapper.status.as_str());
+        assert_eq!(replication, Some("Enabled"));
+        let rewritten = serialize_replication_dto(&parsed).expect("the bridge writes what it read");
         assert_eq!(
-            parse_replication_dto(b"<ReplicationConfiguration><Role>role</Role><Rule><DeleteReplication><Status>Enabled</Status></DeleteReplication><Destination><Bucket>arn:aws:s3:::backup</Bucket></Destination><Status>Enabled</Status></Rule></ReplicationConfiguration>")
-                .expect_err("the generated DTO cannot retain the extension"),
-            PersistenceBridgeError::UnsupportedPersistedMember("ReplicationRule.DeleteReplication")
+            crate::persistence::parse_replication(&rewritten),
+            crate::persistence::parse_replication(bytes)
         );
     }
 

@@ -109,6 +109,25 @@
            },
   "output": { "fields": [] },
   "shapes": {
+              "ExcludedPrefix": {
+                                  "kind": "Structure",
+                                  "fields": [
+                                              {
+                                                "name": "Prefix",
+                                                "wire_name": "Prefix",
+                                                "required": false,
+                                                "binding": { "kind": "BodyXml" },
+                                                "type": { "kind": "String" },
+                                                "hot": false,
+                                                "quirk_refs": []
+                                              }
+                                            ],
+                                  "xml": {
+                                           "element_order": ["Prefix"],
+                                           "empty_value_policy": { "Prefix": "emit" },
+                                           "attributes": []
+                                         }
+                                },
               "VersioningConfiguration": {
                                            "kind": "Structure",
                                            "fields": [
@@ -135,11 +154,47 @@
                                                                  },
                                                          "hot": false,
                                                          "quirk_refs": []
+                                                       },
+                                                       {
+                                                         "name": "ExcludedPrefixes",
+                                                         "wire_name": "ExcludedPrefixes",
+                                                         "required": false,
+                                                         "binding": { "kind": "BodyXml" },
+                                                         "type": {
+                                                                   "kind": "List",
+                                                                   "member": {
+                                                                               "kind": "Structure",
+                                                                               "shape": "ExcludedPrefix"
+                                                                             },
+                                                                   "flattened": true,
+                                                                   "member_name": null
+                                                                 },
+                                                         "hot": false,
+                                                         "quirk_refs": []
+                                                       },
+                                                       {
+                                                         "name": "ExcludeFolders",
+                                                         "wire_name": "ExcludeFolders",
+                                                         "required": false,
+                                                         "binding": { "kind": "BodyXml" },
+                                                         "type": { "kind": "Boolean" },
+                                                         "hot": false,
+                                                         "quirk_refs": []
                                                        }
                                                      ],
                                            "xml": {
-                                                    "element_order": ["MFADelete", "Status"],
-                                                    "empty_value_policy": { "MFADelete": "emit", "Status": "emit" },
+                                                    "element_order": [
+                                                                       "MFADelete",
+                                                                       "Status",
+                                                                       "ExcludedPrefixes",
+                                                                       "ExcludeFolders"
+                                                                     ],
+                                                    "empty_value_policy": {
+                                                                            "MFADelete": "emit",
+                                                                            "Status": "emit",
+                                                                            "ExcludedPrefixes": "emit",
+                                                                            "ExcludeFolders": "emit"
+                                                                          },
                                                     "attributes": []
                                                   }
                                          }

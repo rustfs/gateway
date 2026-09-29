@@ -238,7 +238,10 @@ mod tests {
     }
 
     fn config(rules: Vec<LifecycleRule>) -> BucketLifecycleConfiguration {
-        BucketLifecycleConfiguration { rules }
+        BucketLifecycleConfiguration {
+            rules,
+            ..BucketLifecycleConfiguration::default()
+        }
     }
 
     fn tag(key: &str, value: &str) -> Tag {

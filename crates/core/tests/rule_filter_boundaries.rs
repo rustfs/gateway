@@ -53,6 +53,7 @@ fn lifecycle(filter: LifecycleRuleFilter) -> Result<(), LifecycleRejection> {
             status: Status::ENABLED,
             ..LifecycleRule::default()
         }],
+        ..BucketLifecycleConfiguration::default()
     })
 }
 

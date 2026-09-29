@@ -117,14 +117,16 @@ const CONFIG_DECODE: &str = "operation_diff/put_bucket_versioning.rs";
 const ERROR_PARITY: &str = "operation_diff/context/error_parity/divergences.rs";
 const BODY_PARITY: &str = "operation_diff/context/body_parity/divergences.rs";
 const COPY_RESULT: &str = "operation_diff/copy_result.rs";
+const MINIO_CONFIG: &str = "operation_diff/minio_config.rs";
 
 /// The files whose named-divergence sections the register is checked against.
-const PINNED_TEST_FILES: [&str; 7] = [
+const PINNED_TEST_FILES: [&str; 8] = [
     PUT_DECODE,
     PUT_CONTEXT,
     LOCATION_CONTEXT,
     CONFIG_DECODE,
     COPY_RESULT,
+    MINIO_CONFIG,
     ERROR_PARITY,
     BODY_PARITY,
 ];
@@ -132,10 +134,12 @@ const PINNED_TEST_FILES: [&str; 7] = [
 const API_PUT_OBJECT: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObject.html";
 const API_GET_BUCKET_LOCATION: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetBucketLocation.html";
 const ERROR_RESPONSES: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html";
+const API_PUT_BUCKET_LIFECYCLE: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketLifecycleConfiguration.html";
+const API_PUT_BUCKET_REPLICATION: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketReplication.html";
 const M1_ADAPTER: &str = "https://github.com/rustfs/backlog/issues/1752";
 
 /// Every decided request divergence.
-const OPERATION_DIVERGENCES: [RequestDivergence; 21] = [
+const OPERATION_DIVERGENCES: [RequestDivergence; 26] = [
     RequestDivergence {
         id: "rd-put-0001",
         operation: "PutObject",
@@ -473,6 +477,91 @@ const OPERATION_DIVERGENCES: [RequestDivergence; 21] = [
         test: "a_bare_enabled_versioning_body_is_refused_by_the_gateway_and_accepted_by_s3s",
     },
     RequestDivergence {
+        id: "rd-cfg-0002",
+        operation: "PutBucketLifecycleConfiguration",
+        request: "a lifecycle document carrying MinIO's ExpiryUpdatedAt",
+        aws: "no such element in the S3 model; MinIO's lifecycle document carries it",
+        aws_evidence: API_PUT_BUCKET_LIFECYCLE,
+        s3s: "the legacy stack, built with MinIO support as RustFS builds it, decodes ExpiryUpdatedAt and hands it to the RustFS body, which applies it",
+        gateway: "decodes ExpiryUpdatedAt into a synthesized DTO member (model overlay) and the generated seam converts it into the \
+                  same legacy member: the configuration the RustFS body is handed is identical; a malformed value is refused \
+                  before the handler on both stacks",
+        client_impact: "none against legacy RustFS; before this ruling the gateway skipped the element, so the write was \
+                        answered 200 and installed without it",
+        ruling: DivergenceRuling::AlignS3s,
+        follow_up: DivergenceFollowUp::Landed("c-lifecycle-0040"),
+        test_file: MINIO_CONFIG,
+        test: "a_lifecycle_expiry_updated_at_is_handed_over_by_both_stacks",
+    },
+    RequestDivergence {
+        id: "rd-cfg-0003",
+        operation: "PutBucketLifecycleConfiguration",
+        request: "a lifecycle rule carrying MinIO's DelMarkerExpiration",
+        aws: "no such element in the S3 model; MinIO rules carry it after Expiration",
+        aws_evidence: API_PUT_BUCKET_LIFECYCLE,
+        s3s: "the legacy stack, built with MinIO support as RustFS builds it, decodes DelMarkerExpiration and hands it to the RustFS body, which applies it",
+        gateway: "decodes DelMarkerExpiration into a synthesized DTO member (model overlay) and the generated seam converts it into the \
+                  same legacy member: the configuration the RustFS body is handed is identical; a malformed value is refused \
+                  before the handler on both stacks",
+        client_impact: "none against legacy RustFS; before this ruling the gateway skipped the element, so the write was \
+                        answered 200 and installed without it",
+        ruling: DivergenceRuling::AlignS3s,
+        follow_up: DivergenceFollowUp::Landed("c-lifecycle-0040"),
+        test_file: MINIO_CONFIG,
+        test: "a_lifecycle_del_marker_expiration_is_handed_over_by_both_stacks",
+    },
+    RequestDivergence {
+        id: "rd-cfg-0004",
+        operation: "PutBucketLifecycleConfiguration",
+        request: "a lifecycle expiration carrying MinIO's ExpiredObjectAllVersions",
+        aws: "no such element in the S3 model; MinIO expirations carry it",
+        aws_evidence: API_PUT_BUCKET_LIFECYCLE,
+        s3s: "the legacy stack, built with MinIO support as RustFS builds it, decodes ExpiredObjectAllVersions and hands it to the RustFS body, which applies it",
+        gateway: "decodes ExpiredObjectAllVersions into a synthesized DTO member (model overlay) and the generated seam converts it into the \
+                  same legacy member: the configuration the RustFS body is handed is identical; a malformed value is refused \
+                  before the handler on both stacks",
+        client_impact: "none against legacy RustFS; before this ruling the gateway skipped the element, so the write was \
+                        answered 200 and installed without it",
+        ruling: DivergenceRuling::AlignS3s,
+        follow_up: DivergenceFollowUp::Landed("c-lifecycle-0040"),
+        test_file: MINIO_CONFIG,
+        test: "a_lifecycle_expired_object_all_versions_is_handed_over_by_both_stacks",
+    },
+    RequestDivergence {
+        id: "rd-cfg-0005",
+        operation: "PutBucketReplication",
+        request: "a replication rule carrying MinIO's DeleteReplication",
+        aws: "no such element in the S3 model; MinIO rules carry it with a required Status",
+        aws_evidence: API_PUT_BUCKET_REPLICATION,
+        s3s: "the legacy stack, built with MinIO support as RustFS builds it, decodes DeleteReplication and hands it to the RustFS body, which applies it",
+        gateway: "decodes DeleteReplication into a synthesized DTO member (model overlay) and the generated seam converts it into the \
+                  same legacy member: the configuration the RustFS body is handed is identical; a malformed value is refused \
+                  before the handler on both stacks",
+        client_impact: "none against legacy RustFS; before this ruling the gateway skipped the element, so the write was \
+                        answered 200 and installed without it",
+        ruling: DivergenceRuling::AlignS3s,
+        follow_up: DivergenceFollowUp::Landed("c-replication-0037"),
+        test_file: MINIO_CONFIG,
+        test: "a_replication_delete_replication_is_handed_over_by_both_stacks",
+    },
+    RequestDivergence {
+        id: "rd-cfg-0006",
+        operation: "PutBucketVersioning",
+        request: "a versioning document carrying MinIO's ExcludedPrefixes and ExcludeFolders",
+        aws: "no such elements in the S3 model; MinIO repeats ExcludedPrefixes unwrapped, each with one Prefix",
+        aws_evidence: "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketVersioning.html",
+        s3s: "the legacy stack, built with MinIO support as RustFS builds it, decodes ExcludedPrefixes and ExcludeFolders and hands it to the RustFS body, which applies it",
+        gateway: "decodes ExcludedPrefixes and ExcludeFolders into a synthesized DTO member (model overlay) and the generated seam converts it into the \
+                  same legacy member: the configuration the RustFS body is handed is identical; a malformed value is refused \
+                  before the handler on both stacks",
+        client_impact: "none against legacy RustFS; before this ruling the gateway skipped the element, so the write was \
+                        answered 200 and installed without it",
+        ruling: DivergenceRuling::AlignS3s,
+        follow_up: DivergenceFollowUp::Landed("c-bucketconfig-0062"),
+        test_file: MINIO_CONFIG,
+        test: "versioning_excluded_prefixes_and_folders_are_handed_over_by_both_stacks",
+    },
+    RequestDivergence {
         id: "rd-copy-0001",
         operation: "CopyObject, UploadPartCopy",
         request: "a copy of an object RustFS stored with checksums",
@@ -495,8 +584,8 @@ const OPERATION_DIVERGENCES: [RequestDivergence; 21] = [
 
 /// Every pinned divergence, in id order as written: the operation, context and configuration
 /// slices above, then the error-response slice (`errors`) and the signed-body slice (`body`).
-pub const REQUEST_DIVERGENCES: [RequestDivergence; 41] = concat(
-    concat::<21, 10, 31>(OPERATION_DIVERGENCES, errors::ERROR_DIVERGENCES),
+pub const REQUEST_DIVERGENCES: [RequestDivergence; 46] = concat(
+    concat::<26, 10, 36>(OPERATION_DIVERGENCES, errors::ERROR_DIVERGENCES),
     body::BODY_DIVERGENCES,
 );
 

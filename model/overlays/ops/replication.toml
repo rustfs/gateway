@@ -144,6 +144,23 @@ element_order = ["Role", "Rules"]
 name = "Filter"
 quirks = ["q-repl-0014"]
 
+# MinIO's `<DeleteReplication><Status>` on a rule, which RustFS reads and the legacy stack (built with MinIO support)
+# decodes and writes; the generic decoder skipped it (rd-cfg-0005; rustfs/backlog#1752).
+[[shape.ReplicationRule.field]]
+name = "DeleteReplication"
+synthesize = true
+after = "DeleteMarkerReplication"
+type = "Structure:DeleteReplication"
+
+[shape.DeleteReplication]
+synthesize = true
+
+[[shape.DeleteReplication.field]]
+name = "Status"
+synthesize = true
+required = true
+type = "StringEnum:Enabled|Disabled"
+
 # The destination's `Bucket` member is typed `BucketName` in the model but carries an ARN on the
 # wire — `arn:aws:s3:::bucket` — which the bucket-name grammar (no colons) would refuse in every
 # real document ever written. The member is decoded as a plain string and no bucket-name or ARN

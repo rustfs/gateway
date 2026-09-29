@@ -102,6 +102,25 @@
                                                     "attributes": []
                                                   }
                                          },
+              "DeleteReplication": {
+                                     "kind": "Structure",
+                                     "fields": [
+                                                 {
+                                                   "name": "Status",
+                                                   "wire_name": "Status",
+                                                   "required": true,
+                                                   "binding": { "kind": "BodyXml" },
+                                                   "type": { "kind": "StringEnum", "values": ["Enabled", "Disabled"] },
+                                                   "hot": false,
+                                                   "quirk_refs": []
+                                                 }
+                                               ],
+                                     "xml": {
+                                              "element_order": ["Status"],
+                                              "empty_value_policy": { "Status": "emit" },
+                                              "attributes": []
+                                            }
+                                   },
               "Destination": {
                                "kind": "Structure",
                                "fields": [
@@ -420,6 +439,15 @@
                                                  "type": { "kind": "Structure", "shape": "DeleteMarkerReplication" },
                                                  "hot": false,
                                                  "quirk_refs": []
+                                               },
+                                               {
+                                                 "name": "DeleteReplication",
+                                                 "wire_name": "DeleteReplication",
+                                                 "required": false,
+                                                 "binding": { "kind": "BodyXml" },
+                                                 "type": { "kind": "Structure", "shape": "DeleteReplication" },
+                                                 "hot": false,
+                                                 "quirk_refs": []
                                                }
                                              ],
                                    "xml": {
@@ -432,7 +460,8 @@
                                                                "SourceSelectionCriteria",
                                                                "ExistingObjectReplication",
                                                                "Destination",
-                                                               "DeleteMarkerReplication"
+                                                               "DeleteMarkerReplication",
+                                                               "DeleteReplication"
                                                              ],
                                             "empty_value_policy": {
                                                                     "ID": "emit",
@@ -443,7 +472,8 @@
                                                                     "SourceSelectionCriteria": "emit",
                                                                     "ExistingObjectReplication": "emit",
                                                                     "Destination": "emit",
-                                                                    "DeleteMarkerReplication": "emit"
+                                                                    "DeleteMarkerReplication": "emit",
+                                                                    "DeleteReplication": "emit"
                                                                   },
                                             "attributes": []
                                           }

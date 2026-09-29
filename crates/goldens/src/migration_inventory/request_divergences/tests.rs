@@ -22,17 +22,19 @@
 //! Upstream: `super`, and the four test files it pins. Downstream: nothing.
 
 use super::{
-    BODY_PARITY, CONFIG_DECODE, COPY_RESULT, DivergenceFollowUp, DivergenceRuling, ERROR_PARITY, LOCATION_CONTEXT, PUT_CONTEXT,
-    PUT_DECODE, REQUEST_DIVERGENCES, RequestDivergence, RequestDivergenceError, build_request_divergences, check_register,
+    BODY_PARITY, CONFIG_DECODE, COPY_RESULT, DivergenceFollowUp, DivergenceRuling, ERROR_PARITY, LOCATION_CONTEXT, MINIO_CONFIG,
+    PUT_CONTEXT, PUT_DECODE, REQUEST_DIVERGENCES, RequestDivergence, RequestDivergenceError, build_request_divergences,
+    check_register,
 };
 
 /// The pinned test files, as source, keyed the way register entries name them.
-const PINNED_SOURCES: [(&str, &str); 7] = [
+const PINNED_SOURCES: [(&str, &str); 8] = [
     (PUT_DECODE, include_str!("../../operation_diff/put_object/divergences.rs")),
     (PUT_CONTEXT, include_str!("../../operation_diff/context/put_object.rs")),
     (LOCATION_CONTEXT, include_str!("../../operation_diff/context/get_bucket_location.rs")),
     (CONFIG_DECODE, include_str!("../../operation_diff/put_bucket_versioning.rs")),
     (COPY_RESULT, include_str!("../../operation_diff/copy_result.rs")),
+    (MINIO_CONFIG, include_str!("../../operation_diff/minio_config.rs")),
     (ERROR_PARITY, include_str!("../../operation_diff/context/error_parity/divergences.rs")),
     (BODY_PARITY, include_str!("../../operation_diff/context/body_parity/divergences.rs")),
 ];
@@ -150,11 +152,11 @@ fn every_pinned_divergence_test_has_a_ruling_and_every_ruling_a_test() {
 #[test]
 fn the_register_is_valid_and_renders_every_ruling() {
     let report = build_request_divergences();
-    assert_eq!(report.as_ref().map(|report| report.entries().len()), Ok(41));
+    assert_eq!(report.as_ref().map(|report| report.entries().len()), Ok(46));
     let rendered = report.map(|report| report.render()).unwrap_or_default();
     assert!(
         rendered.starts_with(
-            "request divergences: rulings=41 keep-gateway=27 align-s3s=7 align-aws=4 rustfs-profile=3 open-follow-ups=4 landed=14\n"
+            "request divergences: rulings=46 keep-gateway=27 align-s3s=12 align-aws=4 rustfs-profile=3 open-follow-ups=4 landed=19\n"
         ),
         "{rendered}"
     );

@@ -502,15 +502,6 @@ gateway = "<no member>"
 reason = "MinIO's x-minio-force-delete has no member in the gateway's DeleteBucket. RustFS reads the header from the request headers rather than the input (https://github.com/rustfs/rustfs/blob/719000460b231792b52314df321f0d385d03dff4/rustfs/src/app/bucket_usecase.rs#L1458), and the adapter's request context carries every header, so a forced delete still reaches it."
 expires = "2026-12-31"
 
-[[diff]]
-id = "kd-decode-0051"
-kind = "decode"
-operation = "PutBucketVersioning"
-item = "PutBucketVersioningInput.versioning_configuration.exclude*"
-gateway = "<no member>"
-reason = "MinIO's ExcludedPrefixes and ExcludeFolders are skipped by the gateway's versioning decoder; s3s (built with minio) reads them and RustFS applies them (https://github.com/rustfs/rustfs/blob/719000460b231792b52314df321f0d385d03dff4/crates/ecstore/src/bucket/versioning/mod.rs#L42). A migration gap: the RustFS adapter needs them from a MinIO dialect before PutBucketVersioning moves to the gateway."
-expires = "2026-12-31"
-
 # ── Decode: a body that ends in an error on one stack ───────────────────────────────────────
 
 [[diff]]
