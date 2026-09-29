@@ -48,6 +48,20 @@ use rustfs_gateway_conformance::inprocess::InProcess;
 use rustfs_gateway_conformance::report::{Baseline, Report, Verdict};
 use rustfs_gateway_conformance::runner::{self, RunOptions};
 
+/// The reference evaluation `conformance/baseline.json` records (rustfs/gateway#985): the baseline
+/// is judged against it, while the in-process run above keeps its own skip and verdict ledgers.
+fn reference_run(filter: &str) -> rustfs_gateway_conformance::report::Report {
+    let root = Corpus::discover_root().expect("a corpus sits next to this crate");
+    let corpus = runner::prepare_corpus(&root).expect("the corpus loads");
+    runner::reference_report(
+        &corpus,
+        &RunOptions {
+            filter: Some(filter.to_owned()),
+            ..RunOptions::default()
+        },
+    )
+}
+
 /// The size of the family: the thirty-eight cases enumerated in rustfs/backlog#1686 §7, plus the five
 /// negative `c-copy-0039`..`c-copy-0043` that rustfs/gateway#775 added for #764 (an unreadable
 /// copy-source date condition is ignored, as S3 does, rather than refused), plus the positive
@@ -239,9 +253,9 @@ fn the_copy_family_runs_with_all_forty_four_green_and_nothing_skipped() {
 /// green case for a red one.
 #[test]
 fn the_copy_family_holds_the_verdicts_the_baseline_records() {
-    let report = run_copy_domain();
     let baseline = baseline();
-    let regressions: Vec<&str> = report
+    let reference = reference_run("copy/");
+    let regressions: Vec<&str> = reference
         .regressions(Some(&baseline))
         .iter()
         .map(|outcome| outcome.id.as_str())
