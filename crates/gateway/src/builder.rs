@@ -69,6 +69,7 @@ use crate::routing::{RoutingSnapshot, RuntimeAssembly};
 mod anonymous_framing;
 mod assembly_update;
 mod client_quirks;
+mod legacy_sentences;
 mod secret_scope;
 pub(crate) mod view_policy;
 pub use self::assembly_update::AssemblyUpdate;

@@ -150,7 +150,7 @@ use crate::post_object::{PostObjectPrelude, ResolvedPostObject};
 pub use crate::posture::SecurityPosture;
 use crate::render::{
     S3Error, from_auth, from_auth_context, from_auth_with_detail, from_codec, from_denial, from_handler, from_pre_auth, from_sse,
-    from_wire_reject, render,
+    render,
 };
 use crate::request_config::{Entered, Guarded, HandlerDeadlineReport, RequestConfig, RouteAuthorized};
 use crate::request_deadline::{elapsed_since, hold_failure_floor, policy_snapshot_with_timeout};
@@ -514,7 +514,7 @@ impl S3Service {
 
         let wire = match WireRequest::accept(Request::from_parts(parts, body), &self.inner.limits) {
             Ok(wire) => wire,
-            Err(reject) => return outcome.refuse(from_wire_reject(reject)),
+            Err(reject) => return outcome.refuse(self.inner.view_policy.wire_refusal(reject)),
         };
         let config = config.wire();
 
@@ -1287,9 +1287,8 @@ impl S3Service {
                     "the static operation set did not match the routed operation",
                 ));
             }
-            Err(StaticDispatchError::Route(error))
-            | Err(StaticDispatchError::Body(error))
-            | Err(StaticDispatchError::Input(error)) => return outcome.refuse(error),
+            Err(StaticDispatchError::Route(error)) | Err(StaticDispatchError::Input(error)) => return outcome.refuse(error),
+            Err(StaticDispatchError::Body(error)) => return outcome.refuse(self.inner.view_policy.body_refusal(error)),
             Err(StaticDispatchError::Codec(error)) => {
                 return outcome.refuse(from_codec(error, response_kind));
             }

@@ -716,6 +716,9 @@ mod empty_upload_tests;
 /// The gateway's CORS answers over the backend's stored documents (rustfs/gateway#1004).
 mod cors_tests;
 
+/// Request-body refusals answered with legacy RustFS's sentences (rustfs/gateway#1099).
+mod body_refusal_tests;
+
 /// The request settings RustFS embeds the gateway with (rustfs/gateway#1070).
 mod deadline_tests;
 

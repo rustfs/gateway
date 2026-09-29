@@ -30,7 +30,7 @@
 
 use http::Method;
 use rustfs_gateway_core::{HandlerError, MetaView};
-use rustfs_gateway_http::{BodyIntegrity, ChecksumReject, ChecksumSubject, HeaderView};
+use rustfs_gateway_http::{BodyIntegrity, ChecksumReject, ChecksumSubject, ChunkReject, HeaderView, IngestPipeline};
 use rustfs_gateway_types::ErrorCode;
 
 use crate::close::ConnectionIntent;
@@ -84,6 +84,31 @@ impl IntegrityCodes {
                 )
             }
             _ => checksum_refusal(reject),
+        }
+    }
+
+    /// Renders the refusal a framed body's chunk decoder settled on.
+    ///
+    /// Under the RustFS codes a trailer section that does not carry exactly the checksum trailer the
+    /// head declared is `BadDigest`: legacy RustFS reads the declared checksum out of the trailer
+    /// section and reports a missing or different one as a checksum mismatch (observed against a
+    /// legacy RustFS build: none, a different checksum or an unrelated field where the head declared
+    /// `x-amz-checksum-sha256` all answer `400 BadDigest` and store nothing). The status and the
+    /// connection stay the decoder's.
+    pub(crate) fn chunk_refusal<R>(self, pipeline: &IngestPipeline<R>) -> S3Error {
+        match (self, pipeline.reject()) {
+            (Self::RustFs, Some(reject @ ChunkReject::DeclaredTrailerMismatch)) => {
+                // Legacy-compat (rustfs/backlog#2684): legacy RustFS answers a trailer section that
+                // does not match the head's declaration with the checksum-mismatch code, as though
+                // the digest had been compared and differed. The intended future behaviour is the
+                // core's `InvalidRequest`, which says the framing, not the data, was wrong.
+                from_transport_limit(
+                    HandlerError::new(ErrorCode::BAD_DIGEST, ChecksumReject::TrailerChecksumMissing.message()),
+                    reject.to_status(),
+                    crate::close::after_chunk_reject(&reject),
+                )
+            }
+            _ => crate::chunked::ChunkIngest::refusal(pipeline),
         }
     }
 

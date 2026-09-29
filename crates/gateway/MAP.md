@@ -24,7 +24,7 @@ for request order and `docs/assembly-order.md` for extension call counts.
 | `src/chunked.rs`, `src/chunked_trailer_tests.rs` | `aws-chunked` ingest execution and trailer commit tests | A framed upload stores wrong bytes |
 | `src/integrity.rs` | What an `x-amz-checksum-*` header is the digest *of*, per operation, and how an integrity verdict renders | A body digest is compared against the wrong bytes, or not at all |
 | `src/payload_header.rs` | Signed payload and trailer declaration parsing | A request head selects the wrong payload mode |
-| `src/render.rs`, `src/response.rs`, `src/select_frames.rs` | S3 error rendering, encoded-success-to-HTTP conversion, and `frame_records`, the lazy one-frame-per-read select event-stream body | Changing final response bytes or headers, or select framing memory |
+| `src/render.rs`, `src/response.rs`, `src/select_frames.rs`, `src/builder/legacy_sentences.rs` | S3 error rendering, encoded-success-to-HTTP conversion, `frame_records`, the lazy one-frame-per-read select event-stream body, and the RustFS-profile switch that answers body refusals with legacy RustFS sentences (#1099) | Changing final response bytes or headers, select framing memory, or a RustFS-profile refusal sentence |
 | `src/commit.rs` | 200-then-answer/error response shape | Work continues after the head commits |
 | `src/commit_task.rs` | Detached committed-work task ownership, its span, and the host's `DetachedWork` count | Work stops after its response body is dropped, or a host's shutdown cuts it off |
 | `src/invariants.rs` | HEAD/bodyless and SSE-C response rules | A forbidden body or key reaches the wire |

@@ -40,6 +40,8 @@ mod authz_contract;
 mod authz_implementations;
 #[path = "backend_reachability.rs"]
 mod backend_reachability;
+#[path = "body_refusal_sentences.rs"]
+mod body_refusal_sentences;
 #[path = "bucket_config_reachability.rs"]
 mod bucket_config_reachability;
 #[path = "checksum_omissions.rs"]

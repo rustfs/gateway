@@ -66,8 +66,11 @@
 
 use super::ServiceBuilder;
 use super::client_quirks::ChecksumWaiver;
+use super::legacy_sentences::BodySentences;
 use crate::integrity::IntegrityCodes;
+use crate::render::{S3Error, from_wire_reject};
 use rustfs_gateway_core::{MetaView, PageSizeCeiling};
+use rustfs_gateway_http::WireReject;
 
 /// The page size RustFS lowers an oversized `max-keys` to (`S3_MAX_KEYS`).
 pub const RUSTFS_MAX_KEYS_CEILING: i32 = 1000;
@@ -87,6 +90,8 @@ pub const EMPTY_UPLOAD_OPERATIONS: [&str; 2] = ["PutObject", "UploadPart"];
 pub(crate) struct ViewPolicy {
     /// The client checksum waivers (`super::client_quirks`).
     pub(super) checksum_waiver: ChecksumWaiver,
+    /// The sentences a request-body refusal is answered with (`super::legacy_sentences`).
+    pub(super) body_sentences: BodySentences,
     clamp_max_keys: bool,
     integrity_codes: IntegrityCodes,
     presigned_payload_unsigned: bool,
@@ -134,6 +139,16 @@ impl ViewPolicy {
             IntegrityCodes::RustFs => meta.with_checksum_failures_as_bad_digest(),
             IntegrityCodes::Model => meta,
         }
+    }
+
+    /// A refusal of the request body, answered with this assembly's sentences.
+    pub(crate) fn body_refusal(self, refusal: S3Error) -> S3Error {
+        self.body_sentences.restyle(refusal)
+    }
+
+    /// A refusal of the request head's framing, answered with this assembly's sentences.
+    pub(crate) fn wire_refusal(self, reject: WireReject) -> S3Error {
+        self.body_sentences.restyle(from_wire_reject(reject))
     }
 }
 
@@ -250,6 +265,7 @@ mod tests {
 
     #[test]
     fn the_policy_is_off_by_default_and_its_set_is_closed() {
+        assert_eq!(ViewPolicy::default().body_sentences, BodySentences::Gateway);
         assert!(!ViewPolicy::default().clamp_max_keys);
         assert_eq!(ViewPolicy::default().integrity_codes, IntegrityCodes::Model);
         assert!(!ViewPolicy::default().presigned_payload_unsigned());
