@@ -424,6 +424,22 @@ impl DecodeDiff {
     }
 }
 
+/// Which deployment the two stacks stand for.
+///
+/// `Generic` is the gateway's own defaults against the legacy stack's defaults: what the register
+/// and the built-in matrix were written for. `Rustfs` is the gateway's RustFS profile against the
+/// legacy stack configured the way RustFS main configures it (`rustfs/src/server/http.rs:166-172`,
+/// `rustfs_s3_config`): the comparison that says whether a RustFS client, and RustFS's storage,
+/// would see any difference once the gateway fronts RustFS (rustfs/backlog#1677).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Profile {
+    /// Both stacks with their defaults.
+    #[default]
+    Generic,
+    /// The gateway's RustFS profile against the legacy stack as RustFS configures it.
+    Rustfs,
+}
+
 /// Both stacks, built once and reused for every request.
 pub struct Differ {
     gateway: GatewayStack,
@@ -447,6 +463,26 @@ impl Differ {
             gateway: GatewayStack::new(&fault)?,
             oracle: OracleStack::new(),
             fault,
+        })
+    }
+
+    /// Builds both stacks for `profile`.
+    ///
+    /// # Errors
+    ///
+    /// The gateway service does not assemble.
+    pub fn for_profile(profile: Profile) -> Result<Self, String> {
+        Self::with_profiles(profile, profile)
+    }
+
+    /// Builds the gateway side for one profile and the legacy side for another: the negative
+    /// controls use it to show that a gateway without the RustFS profile's switches is caught
+    /// against the legacy stack as RustFS configures it.
+    pub(crate) fn with_profiles(gateway: Profile, oracle: Profile) -> Result<Self, String> {
+        Ok(Self {
+            gateway: GatewayStack::with_profile(&Fault::None, gateway)?,
+            oracle: OracleStack::with_profile(oracle),
+            fault: Fault::None,
         })
     }
 
@@ -554,6 +590,7 @@ fn same_member(left: &FieldValue, right: &FieldValue) -> bool {
 
 thread_local! {
     static DIFFER: RefCell<Option<Differ>> = const { RefCell::new(None) };
+    static RUSTFS_DIFFER: RefCell<Option<Differ>> = const { RefCell::new(None) };
 }
 
 /// [`Differ::diff`] on a per-thread pair of stacks with no fault.
@@ -570,6 +607,24 @@ pub fn decode_diff(request: &RawRequest) -> Result<DecodeDiff, String> {
         match slot.as_ref() {
             Some(differ) => differ.diff(request),
             None => Err("the per-thread stacks did not build".to_owned()),
+        }
+    })
+}
+
+/// [`Differ::diff`] on a per-thread pair of stacks for [`Profile::Rustfs`], with no fault.
+///
+/// # Errors
+///
+/// As [`Differ::diff`], or the stacks do not build.
+pub fn rustfs_decode_diff(request: &RawRequest) -> Result<DecodeDiff, String> {
+    RUSTFS_DIFFER.with(|cell| {
+        let mut slot = cell.borrow_mut();
+        if slot.is_none() {
+            *slot = Some(Differ::for_profile(Profile::Rustfs)?);
+        }
+        match slot.as_ref() {
+            Some(differ) => differ.diff(request),
+            None => Err("the per-thread RustFS-profile stacks did not build".to_owned()),
         }
     })
 }

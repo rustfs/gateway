@@ -12,8 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The built-in sample matrices: requests for the decode diff and outputs for the encode diff,
-//! each with the exact register ids it must produce.
+//! The built-in sample matrices: requests for the decode diff (the generic matrix and the
+//! RustFS-profile one) and outputs for the encode diff, each with the exact register ids it must
+//! produce.
 //!
 //! Responsible for: exposing both matrices to the tests, the `decode-diff` and `encode-diff`
 //! runners (`--builtin`) and the fuzz targets, so all of them start from the same inputs; and the
@@ -24,6 +25,7 @@
 mod outputs;
 mod outputs_more;
 mod requests;
+mod rustfs;
 
 pub use outputs::{OutputRow, UPLOAD_ID, VERSION_ID};
 pub use requests::RequestRow;
@@ -34,6 +36,12 @@ use crate::RawRequest;
 #[must_use]
 pub fn requests() -> Vec<RequestRow> {
     requests::requests()
+}
+
+/// Every request row of the RustFS-profile decode matrix, diffed under [`crate::Profile::Rustfs`].
+#[must_use]
+pub fn rustfs_requests() -> Vec<RequestRow> {
+    rustfs::rows()
 }
 
 /// Every output row of the encode matrix.

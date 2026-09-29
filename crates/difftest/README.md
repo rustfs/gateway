@@ -89,6 +89,20 @@ rows as well as its own, and proves every member of every covered legacy input i
 identically by some row or named by a finding in its register, with the RustFS evidence for why the
 difference cannot change what RustFS does or stores.
 
+## The RustFS profile
+
+The two stacks above run with their defaults. A second pairing, `Profile::Rustfs`
+(`Differ::for_profile`, `rustfs_decode_diff`), stands for the deployment the gateway is replacing:
+the gateway with the RustFS profile's addressing switches on, as `compat/sut` turns them on, against
+the legacy stack configured the way RustFS main configures it (`rustfs/src/server/http.rs:166-172`,
+`rustfs_s3_config`: forward-slash normalisation and SigV2 on, `s3tables` signing admitted). Its rows
+(`src/samples/rustfs.rs`) are the requests whose bucket and key RustFS's storage must be handed
+byte for byte as legacy RustFS hands them, and they are judged exactly as the generic rows are:
+every row names the register ids it produces, and most name none. Two controls pair a gateway
+without a switch with the RustFS-configured legacy stack, and the RustFS-profile gateway with a
+legacy stack left at its defaults, and each must find the key difference, so a row cannot agree
+by accident.
+
 ## Unregistered differences fail
 
 Every finding must match an entry of [`known-diffs.toml`](known-diffs.toml), which says what

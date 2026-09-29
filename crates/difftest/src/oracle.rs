@@ -34,12 +34,13 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
-use crate::decode::{Answer, BodySeen, S3ErrorView};
+use crate::decode::{Answer, BodySeen, Profile, S3ErrorView};
 use crate::encode::WireAnswer;
 use crate::fields::Fields;
 use crate::probe::{ProbeBody, block_on};
 use crate::request::RawRequest;
 use crate::s3s;
+use s3s::config::{S3Config, StaticConfigProvider};
 use s3s::dto as oracle;
 
 /// What one s3s handler call recorded.
@@ -138,6 +139,20 @@ impl s3s::access::S3Access for RecordOperation {
 /// re-signed request is admitted the same way by both.
 use crate::sign::{ACCESS_KEY, SECRET_KEY};
 
+/// The legacy stack's settings as RustFS main sets them (`rustfs/src/server/http.rs:166-172`,
+/// `rustfs_s3_config`, at rustfs/rustfs `e870a6d25b`): forward-slash normalisation and SigV2 on,
+/// `s3tables` admitted as a signing service, and a single-PUT ceiling of five gibibytes
+/// (`MAX_SINGLE_PUT_OBJECT_SIZE`, the same value as the default). Everything else is the default,
+/// as it is in RustFS.
+fn rustfs_settings() -> S3Config {
+    let mut settings = S3Config::default();
+    settings.normalize_forward_slash_path = true;
+    settings.enable_sig_v2 = true;
+    settings.put_object_max_size = Some(5 * 1024 * 1024 * 1024);
+    settings.sig_v4_allowed_services.push("s3tables".to_owned());
+    settings
+}
+
 /// The pinned s3s service and its recording slots.
 pub(crate) struct OracleStack {
     service: s3s::service::S3Service,
@@ -148,6 +163,12 @@ pub(crate) struct OracleStack {
 
 impl OracleStack {
     pub(crate) fn new() -> Self {
+        Self::with_profile(Profile::Generic)
+    }
+
+    /// The legacy stack with its defaults (`Profile::Generic`), or configured as RustFS main
+    /// configures it (`Profile::Rustfs`).
+    pub(crate) fn with_profile(profile: Profile) -> Self {
         let slot: OracleSlot = Arc::new(Mutex::new(None));
         let routed = Arc::new(Mutex::new(None));
         let answer: AnswerSlot = Arc::new(Mutex::new(None));
@@ -159,6 +180,9 @@ impl OracleStack {
         builder.set_access(RecordOperation {
             routed: Arc::clone(&routed),
         });
+        if profile == Profile::Rustfs {
+            builder.set_config(Arc::new(StaticConfigProvider::new(Arc::new(rustfs_settings()))));
+        }
         Self {
             service: builder.build(),
             slot,

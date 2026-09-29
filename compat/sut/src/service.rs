@@ -29,8 +29,8 @@ use std::sync::Arc;
 
 use rustfs_gateway::{
     CorsCacheConfig, Credentials, DEFAULT_MAX_BUFFERED_BODY_BYTES, HandlerDeadlineConfig, RegionMatchPolicy, RegionSet,
-    RequestBodyDeadlineConfig, S3Service, SecurityFloor, ServiceBuilder, ServiceConfig, SigV4Authenticator, StaticCredentials,
-    dto,
+    RequestBodyDeadlineConfig, S3Service, SecurityFloor, ServiceBuilder, ServiceConfig, SigV4Authenticator, SlashPolicy,
+    StaticCredentials, dto,
 };
 use rustfs_gateway_fs::FsBackend;
 
@@ -190,6 +190,9 @@ pub(crate) fn build_service(
             // RustFS answers an unreadable or mismatched request checksum with `BadDigest`
             // (rustfs/gateway#1057).
             .answer_checksum_failures_with_bad_digest()
+            // RustFS folds the slashes of a key only when the key starts with one: `/b//x` stores
+            // `x` and `/b/a//b` reaches storage as `a//b` (#1101).
+            .slash_policy(SlashPolicy::RustfsLegacy)
             // The backend's stored CORS documents feed the gateway's CORS answers, as RustFS's do
             // behind the gateway; no cache lifetime, so a suite sees a `PutBucketCors` at once.
             .cors_source(Arc::clone(backend))

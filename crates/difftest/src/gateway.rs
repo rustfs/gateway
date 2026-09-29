@@ -32,13 +32,13 @@ use http_body_util::BodyExt;
 use rustfs_gateway::{
     Authorizer, AuthzRequest, BoxFuture, Credentials, Decision, GovernorRates, Handler, HandlerError, HandlerResult,
     InputAuthzRequest, InputDecisions, Observer, Rate, Req, RequestContext, RequestEvent, S3Service, ServiceBuilder,
-    SigV4Authenticator, StaticCredentials, Unlimited,
+    SigV4Authenticator, SlashPolicy, StaticCredentials, Unlimited,
 };
 use rustfs_gateway_sig::{RegionSet, SecurityFloor};
 use rustfs_gateway_stream::{ByteStream, PayloadRead, PayloadStream};
 use rustfs_gateway_types::ErrorCode;
 
-use crate::decode::{Answer, BodySeen, Fault};
+use crate::decode::{Answer, BodySeen, Fault, Profile};
 use crate::encode::WireAnswer;
 use crate::fields::Fields;
 use crate::probe::{ProbeBody, block_on};
@@ -167,6 +167,16 @@ impl rustfs_gateway::BucketOwnerSource for FixtureOwner {
     }
 }
 
+/// The RustFS-profile switches that decide which bucket and key a request addresses, turned on as
+/// `compat/sut` turns them on: the legacy slash rule (rustfs/gateway#1101).
+///
+/// Only the addressing switches: the rows compared under this profile are about the bucket and key
+/// each stack hands its handler, and a switch that changes some other member would show up in them
+/// as a difference of its own rather than go unseen.
+fn rustfs_addressing(builder: ServiceBuilder) -> ServiceBuilder {
+    builder.slash_policy(SlashPolicy::RustfsLegacy)
+}
+
 /// The assembled gateway and its recording slots.
 pub(crate) struct GatewayStack {
     service: S3Service,
@@ -177,6 +187,12 @@ pub(crate) struct GatewayStack {
 
 impl GatewayStack {
     pub(crate) fn new(fault: &Fault) -> Result<Self, String> {
+        Self::with_profile(fault, Profile::Generic)
+    }
+
+    /// The assembled gateway with its defaults (`Profile::Generic`), or with the RustFS profile's
+    /// addressing switches on (`Profile::Rustfs`, see [`rustfs_addressing`]).
+    pub(crate) fn with_profile(fault: &Fault, profile: Profile) -> Result<Self, String> {
         let credentials =
             Credentials::new(ACCESS_KEY, SECRET_KEY.as_bytes()).map_err(|error| format!("credential: {error:?}"))?;
         let regions = RegionSet::new([REGION]).map_err(|error| format!("regions: {error:?}"))?;
@@ -208,6 +224,10 @@ impl GatewayStack {
             .observer(RouteObserver {
                 routed: Arc::clone(&routed),
             });
+        let builder = match profile {
+            Profile::Generic => builder,
+            Profile::Rustfs => rustfs_addressing(builder),
+        };
         let service = crate::project::register(builder, &recorder)
             .build()
             .map_err(|error| format!("assembly: {error:?}"))?;
