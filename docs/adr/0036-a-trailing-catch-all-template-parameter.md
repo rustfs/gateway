@@ -45,9 +45,10 @@ separators are all part of the value. Every segment before the catch-all keeps i
 bound `{bucket}` is still one segment that meets the S3 name rules. Matching stays allocation-free
 and synchronous.
 
-**(c) The value is decoded once, exactly as RustFS's handler decodes it.** Every well-formed escape
-is decoded once, a `%` without two hexadecimal digits is kept, and only a result that is not UTF-8
-is refused: a `400 InvalidArgument` naming the parameter, before authentication, that never echoes
+**(c) The value is decoded once, exactly as RustFS's handler decodes it,** by the gateway's one
+name decoder (`rustfs_gateway_types::decode_once`), so no second decoder exists for it. Every
+well-formed escape is decoded once, a `%` without two hexadecimal digits is kept, and only a result
+that is not UTF-8 is refused: a `400 InvalidArgument` naming the parameter, before authentication, that never echoes
 the value, as for every parameter. Nothing else is refused. Validating what the rest names is the
 handler's, as it is RustFS's today. The handler reads the value from
 `RequestContextView::path_params()` and must not decode it a second time.
@@ -93,6 +94,7 @@ naming a catch-all is refused as `DialectError::ClaimedBucketParam`.
 | Keep whole-segment parameters and declare heal with `{prefix}` | RustFS main serves `heal/photos/a/b`; the gateway would answer it with the claim's `501`. |
 | Refuse dot segments, `//` and control characters in the value before authentication, as a parameter's | RustFS matches them and refuses them in its handler after authorisation, with its own answer; the gateway would answer a request RustFS answers differently, and the handler validates the value anyway. |
 | Decode strictly, refusing a malformed escape | RustFS keeps a `%` without two hexadecimal digits, and so does the gateway for an object key; `100%zz` is a legal key. |
+| A percent-decoder of the template's own for the catch-all | A second decoder beside the name decoder is how a value gets decoded twice; `scripts/check_single_normalization.sh` refuses one, and `decode_once` is the decoding RustFS's handler applies. |
 | Hand the value raw and let the handler decode it | Two decoders for one value is how a value gets decoded twice or not at all; every other parameter is decoded once, by the facade. |
 | Allow a catch-all anywhere in a template | `matchit` refuses it, and a catch-all in the middle makes one path match in more than one way. |
 | Let a catch-all be the bound bucket | A bucket is one segment; the S3 name rules could not apply to several. |
@@ -107,5 +109,6 @@ naming a catch-all is refused as `DialectError::ClaimedBucketParam`.
   catch-all row — the heal handler — reads it from `RequestContextView::path_params()`, does not
   percent-decode it again, and keeps its own validation.
 - **Enforcement**: the tests listed under Evidence; `crates/core/tests/purity_guard.rs` (matching
-  stays synchronous and store-free); the claimed table's overlap and declaration checks; the
-  registration refusal of a catch-all bucket.
+  stays synchronous and store-free); `scripts/check_single_normalization.sh` (the value goes through
+  the one name decoder); the claimed table's overlap and declaration checks; the registration
+  refusal of a catch-all bucket.

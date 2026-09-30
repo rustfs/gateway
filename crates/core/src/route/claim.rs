@@ -58,9 +58,9 @@
 //!
 //! A catch-all is the one exception, and it is written as one: it takes the rest of the raw path
 //! after the separator before it, one byte or more, separators included, as the catch-all of
-//! RustFS's `matchit` router does (ADR-0036). Its value is decoded once as an object key is — a `%`
-//! without two hexadecimal digits stays as it is — and only a value that is not UTF-8 is refused:
-//! what the rest names is data its handler validates.
+//! RustFS's `matchit` router does (ADR-0036). Its value is decoded once by the gateway's one name
+//! decoder — a `%` without two hexadecimal digits stays as it is — and only a value that is not
+//! UTF-8 is refused: what the rest names is data its handler validates.
 
 use std::fmt;
 use std::str::FromStr;
@@ -355,15 +355,13 @@ fn decode_parameter(raw: &str) -> Result<String, &'static str> {
     Ok(value)
 }
 
-/// Decodes a catch-all value once, as an object key is decoded and as RustFS's heal handler decodes
-/// the rest it captures: every `%` followed by two hexadecimal digits is that byte, any other `%`
-/// stays as it is, and the result must be UTF-8. Nothing else is refused: separators, empty and dot
-/// segments and control characters are part of the value, which its handler validates (ADR-0036).
+/// Decodes a catch-all value once, with the gateway's one name decoder, which is also how RustFS's
+/// heal handler decodes the rest it captures: every `%` followed by two hexadecimal digits is that
+/// byte, any other `%` stays as it is, and the result must be UTF-8. Nothing else is refused:
+/// separators, empty and dot segments and control characters are part of the value, which its
+/// handler validates (ADR-0036).
 fn decode_catch_all(raw: &str) -> Result<String, &'static str> {
-    percent_encoding::percent_decode_str(raw)
-        .decode_utf8()
-        .map(std::borrow::Cow::into_owned)
-        .map_err(|_| "the decoded value is not UTF-8")
+    rustfs_gateway_types::decode_once(raw).map_err(|_| "the decoded value is not UTF-8")
 }
 
 /// A path template inside a claim: literal segments and whole-segment `{parameters}`, and at most
