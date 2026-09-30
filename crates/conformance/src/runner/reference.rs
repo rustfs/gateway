@@ -15,8 +15,11 @@
 //! The reference evaluation `conformance/baseline.json` records, shared by the refresh command and
 //! the whole-corpus gate so the two cannot disagree (rustfs/gateway#985).
 //! Responsible for: running the corpus in process, then re-running on the production Hyper driver
-//! exactly the cases the in-process target cannot judge — refused for want of a socket, or failed
-//! only on `connection_after`, which that target reports as `open` by construction.
+//! exactly the cases the in-process target cannot judge — refused with a typed transport limit
+//! (`SutError::TransportLimit`: no socket, TLS, HTTP/2 frames, connection control or concurrent
+//! dispatch), or failed only on `connection_after`, which that target reports as `open` by
+//! construction. Any other skip while executing is a failure of the in-process harness and stays a
+//! skip, so the baseline gate sees it (rustfs/gateway#985).
 //! NOT responsible for: judging a case, rendering the baseline, or external endpoints.
 //! Upstream: `crate::cli` (`conformance baseline`) and `tests/corpus.rs`. Downstream: `super::run`.
 
@@ -26,9 +29,9 @@ use crate::report::CaseOutcome;
 /// Whether the in-process outcome is a limit of that target rather than a fact about the service.
 pub(crate) fn needs_a_socket(outcome: &CaseOutcome) -> bool {
     match outcome.verdict {
-        // An environment refusal while executing is a transport limit; a gate, a filter or a
-        // convention skip is not.
-        Verdict::Skipped => outcome.phase == Phase::Execute,
+        // Only a typed transport limit while executing; an environment failure of the harness, a
+        // gate, a filter or a convention skip is not the transport's to judge.
+        Verdict::Skipped => outcome.phase == Phase::Execute && outcome.transport_limited,
         Verdict::Failed => {
             let mut failures = outcome
                 .diagnostics
@@ -88,10 +91,16 @@ mod tests {
             verdict,
             phase,
             skip_reason: None,
+            transport_limited: false,
             diagnostics,
             quirks: Vec::new(),
             evidence: Vec::new(),
         }
+    }
+
+    /// The outcome the runner records when the target refuses a case while executing it.
+    fn refused_while_executing(error: &crate::sut::SutError) -> CaseOutcome {
+        super::super::not_run(outcome(Verdict::Passed, Phase::Execute, Vec::new()), error, &mut Vec::new())
     }
 
     fn deny(rule: &str) -> Diagnostic {
@@ -100,7 +109,8 @@ mod tests {
 
     #[test]
     fn only_transport_limits_are_re_run_on_a_socket() {
-        assert!(needs_a_socket(&outcome(Verdict::Skipped, Phase::Execute, Vec::new())));
+        let limited = refused_while_executing(&crate::sut::SutError::TransportLimit("no socket".to_owned()));
+        assert!(needs_a_socket(&limited), "{limited:?}");
         assert!(needs_a_socket(&outcome(
             Verdict::Failed,
             Phase::Execute,
@@ -125,5 +135,37 @@ mod tests {
                 "{verdict:?} {diagnostics:?}"
             );
         }
+    }
+
+    /// Negative — a skip while executing that is not a transport limit is never re-judged on a
+    /// socket: a harness that fails in process (a poisoned fixture, an unreadable payload, a
+    /// service that would not assemble) keeps its skip, so the reference evaluation shows it
+    /// instead of a verdict production Hyper reached without it (rustfs/gateway#985).
+    #[test]
+    fn an_environment_failure_while_executing_is_not_re_run() {
+        for error in [
+            crate::sut::SutError::Environment("the fixture state was left poisoned by an earlier case".to_owned()),
+            crate::sut::SutError::NotWired {
+                reason: "no target".to_owned(),
+                missing: Vec::new(),
+            },
+        ] {
+            let skipped = refused_while_executing(&error);
+            assert_eq!(skipped.verdict, Verdict::Skipped, "{skipped:?}");
+            assert!(!needs_a_socket(&skipped), "{skipped:?}");
+        }
+    }
+
+    /// A transport limit is recorded as one, and reads in the report exactly as an environment
+    /// refusal always has.
+    #[test]
+    fn a_transport_limit_is_recorded_with_its_reason() {
+        let limited = refused_while_executing(&crate::sut::SutError::TransportLimit("no socket".to_owned()));
+        assert_eq!(limited.verdict, Verdict::Skipped);
+        assert!(limited.transport_limited);
+        assert_eq!(limited.skip_reason.as_deref(), Some("environment: no socket"));
+        let failed = refused_while_executing(&crate::sut::SutError::Environment("no socket".to_owned()));
+        assert!(!failed.transport_limited);
+        assert_eq!(failed.skip_reason.as_deref(), Some("environment: no socket"));
     }
 }

@@ -35,6 +35,7 @@ fn outcome(id: &str, domain: &str, verdict: Verdict) -> CaseOutcome {
         verdict,
         phase: Phase::Execute,
         skip_reason: (verdict == Verdict::Skipped).then(|| "no target".to_owned()),
+        transport_limited: false,
         diagnostics: if verdict == Verdict::Failed {
             vec![Diagnostic::deny(
                 "expect/status",

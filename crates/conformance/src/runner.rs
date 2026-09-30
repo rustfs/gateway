@@ -590,6 +590,7 @@ fn run_concurrent_exchanges(
 /// rather than of each case, so it goes into the report's notes once instead of onto every line.
 fn not_run(mut outcome: CaseOutcome, error: &SutError, notes: &mut Vec<String>) -> CaseOutcome {
     outcome.verdict = Verdict::Skipped;
+    outcome.transport_limited = matches!(error, SutError::TransportLimit(_));
     outcome.skip_reason = Some(match error {
         SutError::NotWired { reason, missing } => {
             for item in missing {
@@ -600,7 +601,7 @@ fn not_run(mut outcome: CaseOutcome, error: &SutError, notes: &mut Vec<String>) 
             }
             reason.clone()
         }
-        SutError::Environment(reason) => format!("environment: {reason}"),
+        SutError::Environment(reason) | SutError::TransportLimit(reason) => format!("environment: {reason}"),
     });
     outcome
 }
@@ -629,6 +630,7 @@ fn skeleton(case: &Case) -> CaseOutcome {
         verdict: Verdict::Skipped,
         phase: Phase::Load,
         skip_reason: None,
+        transport_limited: false,
         diagnostics: Vec::new(),
         quirks: case.quirks().into_iter().map(ToOwned::to_owned).collect(),
         evidence,
