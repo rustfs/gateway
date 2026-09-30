@@ -2,7 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-09-30
-- Trigger: axiom A4, because which admin routes the gateway serves, and with which facts, is decided per inventory route. Also a crate boundary: `rustfs-gateway-dialect-rustfs-admin` declares seven operations it did not, removes one, and changes what one matches; RustFS registers its handlers against those names.
+- Trigger: axiom A4, because which admin routes the gateway serves, and with which facts, is decided per inventory route. Also a crate boundary: `rustfs-gateway-dialect-rustfs-admin` declares eight operations it did not, removes one, and changes what one matches; RustFS registers its handlers against those names.
 - Supersedes / Superseded by: none
 
 ## Context
@@ -35,9 +35,9 @@ the eight query-discriminated extension routes are unchanged:
 |---|---|---|
 | `GET v3/integrity/readiness` (`admin:ServerInfo`), `GET v3/integrity/{bucket}/inventory` (`admin:InspectData`), `POST v3/integrity/{bucket}/jobs` (`admin:StartBatchJob`), `GET v3/integrity/{bucket}/jobs/{job_id}` (`admin:DescribeBatchJob`), `POST v3/integrity/{bucket}/jobs/{job_id}/control` (`admin:StartBatchJob`) | added, a new registration group `integrity` | rustfs/rustfs#8065; `route_policy.rs:1588-1617` |
 | `GET v3/target/{target_type}/{target_name}/subscriptions` (`admin:GetBucketTarget`) | added to `user` | rustfs/rustfs#8001; `route_policy.rs:315-320` |
-| `POST {warehouse}/catalog/warehouse-index/backfill` under `/_iceberg/v1` and `/iceberg/v1` (`admin:MigrateTableCatalog`) | added to `table_catalog` | rustfs/rustfs#7677, merged by #7935; `route_policy.rs:1034-1039`, `:1324-1329` |
+| `POST {warehouse}/catalog/warehouse-index/backfill` under `/_iceberg/v1` and `/iceberg/v1` (`admin:MigrateTableCatalog`) | added to `table_catalog` | rustfs/rustfs#7677, merged by rustfs/rustfs#7935; `route_policy.rs:1034-1039`, `:1324-1329` |
 | `GET v3/metrics` → `GET v3/realtime` (`admin:GetMetrics`) | renamed; RustFS main registers no `v3/metrics` | rustfs/rustfs#8046; `route_policy.rs:323`, `handlers/system.rs:168-172` |
-| `POST v3/heal/{bucket}/{prefix}` → `POST v3/heal/{bucket}/{*prefix}` | a catch-all (ADR-0036) | rustfs/rustfs#7653, merged by #7935; `route_policy.rs:355` |
+| `POST v3/heal/{bucket}/{prefix}` → `POST v3/heal/{bucket}/{*prefix}` | a catch-all (ADR-0036) | rustfs/rustfs#7653, merged by rustfs/rustfs#7935; `route_policy.rs:355` |
 
 ## Decision
 
