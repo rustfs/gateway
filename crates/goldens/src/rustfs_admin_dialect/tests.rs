@@ -32,8 +32,8 @@ use rustfs_gateway_core::SubjectRule;
 use rustfs_gateway_dialect_rustfs_admin::{BodyKind, PENDING, ROUTES, RouteRecord, STAYING};
 
 use super::{
-    Exchange, actions, assemble, declared, expected_bucket, expected_subject, expected_subjects, in_lanes, param, paths,
-    presigned, signed, templates, unsigned, value_of, wire, with_segment,
+    Exchange, actions, assemble, assemble_on, declared, expected_bucket, expected_subject, expected_subjects, in_lanes,
+    in_lanes_on, param, paths, presigned, rustfs_profile_floor, signed, templates, unsigned, value_of, wire, with_segment,
 };
 use crate::migration_inventory::rustfs_admin_routes::{AdminAuthMode, RequestBodyUse, ResponseBodyUse};
 use crate::operation_diff::s3s_0_17_0::context::ACCESS_KEY;
@@ -484,4 +484,47 @@ fn n_a_malformed_parameter_value_is_refused_before_authorising() {
             }
         },
     );
+}
+
+// ── named divergences ──────────────────────────────────────────────────────────────────────────
+
+/// A presigned URL on a RustFS admin route, correctly signed: legacy RustFS verifies a presigned
+/// URL on any request before it routes it and serves the admin route to the verified credential
+/// (`GET /rustfs/admin/v3/info` presigned by the root credential answered `200` with the server
+/// information, observed against rustfs/rustfs `e870a6d25b`). The gateway refuses it at the floor,
+/// as `AccessDenied` and without asking the authorizer, under the RustFS profile's floor too —
+/// which admits a presigned URL on every standard operation and on no privileged one. Kept on
+/// security grounds (MinIO #5411 was a presigned URL edited to reach an admin operation); the same
+/// rows header-signed are served behind the same floor.
+///
+/// Ruling: `rd-adm-0001`
+#[test]
+fn a_presigned_admin_request_is_refused_under_the_rustfs_profile_floor() {
+    let presignable: Vec<_> = rows().filter(|(record, _)| record.query.is_none()).collect();
+    assert_eq!(presignable.len(), 596, "every row but the service command's eight");
+    in_lanes_on(
+        &rustfs_profile_floor(),
+        |_, _| true,
+        &presignable,
+        |assembled, (record, path)| {
+            let at = format!("{} {path}", record.method);
+            let exchange = assembled.exchange(presigned(record, path));
+            refused_without_asking(&exchange, &at);
+            assert!(
+                record.method == "HEAD" || exchange.body.contains("<Code>AccessDenied</Code>"),
+                "{at}: {}",
+                exchange.body
+            );
+        },
+    );
+    let served = assemble_on(rustfs_profile_floor(), |_, _| true);
+    let info: Vec<_> = presignable
+        .iter()
+        .filter(|(record, _)| record.path == "/rustfs/admin/v3/info")
+        .collect();
+    assert!(!info.is_empty(), "the server-information row is presignable");
+    for (record, path) in info {
+        let exchange = served.exchange(wire(&signed(record, path)));
+        assert_eq!(exchange.status, 200, "{} {path}: {}", record.method, exchange.body);
+    }
 }
