@@ -79,6 +79,7 @@ use super::ServiceBuilder;
 use super::bodyless_digest::BodylessDigest;
 use super::client_quirks::ChecksumWaiver;
 use super::credential_sentences::CredentialSentences;
+use super::legacy_chunks::ChunkReading;
 use super::legacy_heads::AnswerHeads;
 use super::legacy_sentences::BodySentences;
 use super::sigv4_header_guard::SigV4HeaderGuard;
@@ -159,6 +160,8 @@ pub(crate) struct ViewPolicy {
     pub(super) sigv4_header_guard: SigV4HeaderGuard,
     /// Whether a bodyless request's signed digest is compared (`super::bodyless_digest`).
     pub(crate) bodyless_digest: BodylessDigest,
+    /// Which chunk limits an aws-chunked body is decoded under (`super::legacy_chunks`).
+    pub(crate) chunk_reading: ChunkReading,
     head_refusals_without_length: bool,
     /// Which object headers a `304` keeps (`super::not_modified_headers`).
     pub(crate) not_modified_headers: super::not_modified_headers::NotModifiedHeaders,

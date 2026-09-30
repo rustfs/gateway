@@ -782,6 +782,10 @@ mod credential_sentence_tests;
 /// (rustfs/gateway#1099).
 mod bodyless_digest_tests;
 
+/// aws-chunked uploads cut the way legacy RustFS accepts them, stored as it stores them
+/// (rustfs/gateway#1173).
+mod legacy_chunk_tests;
+
 /// The request settings RustFS embeds the gateway with (rustfs/gateway#1070).
 mod deadline_tests;
 

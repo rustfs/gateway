@@ -284,6 +284,10 @@ pub(crate) fn build_service(
             // RustFS never compares the signed digest of a request without a body: a read or delete
             // declaring another payload's digest is served (rustfs/gateway#1099).
             .accept_mismatched_payload_digests_without_a_body()
+            // RustFS decodes aws-chunked framing with no bound on chunk count or framing share and
+            // takes a chunk past 1 MiB, as a client streaming a whole buffer sends it; the profile
+            // takes chunks up to this crate's 16 MiB residency bound (rustfs/gateway#1173).
+            .read_aws_chunks_as_legacy_rustfs()
             // RustFS, built with MinIO support, reads a versioning or object-lock body that is the
             // bare word `Enabled` as the document it stands for (rustfs/backlog#1677, R6).
             .accept_minio_body_literals()
