@@ -22,7 +22,8 @@
 //! Upstream: `rustfs-gateway-types`' generated dto. Downstream: `crate::registry`.
 //!
 //! Shares: user metadata, content type, storage class and the SSE header set with the object
-//! family; the upload-id capability with the rest of the multipart family.
+//! family; the upload-id capability with the rest of the multipart family; and the object-lock,
+//! tagging and ACL header permissions with the object-write family (`shared::write_permissions`).
 //!
 //! This request is the only place the object's metadata is stated. `UploadPart` carries none of
 //! it and `CompleteMultipartUpload` carries only the part list, so metadata dropped here is
@@ -36,6 +37,7 @@ use rustfs_gateway_sig::{OperationFloor, SigService};
 use rustfs_gateway_types::dto::{CreateMultipartUpload, CreateMultipartUploadInput, CreateMultipartUploadOutput};
 
 use crate::op::{AuthRequirement, HasOperation, Operation, OperationOrigin, ResourceShape, StandardOperation};
+use crate::ops::shared::write_permissions;
 use crate::registry::OperationSpec;
 
 /// What this operation requires of a request once routing has chosen it.
@@ -45,6 +47,7 @@ use crate::registry::OperationSpec;
 static SPEC: OperationSpec = OperationSpec::standard("CreateMultipartUpload")
     .required_params(&[])
     .auth(AuthRequirement::new("s3:PutObject", ResourceShape::Object))
+    .extra_permissions(&write_permissions::OBJECT_WRITE)
     .build();
 
 /// Header signatures only, and not privileged.

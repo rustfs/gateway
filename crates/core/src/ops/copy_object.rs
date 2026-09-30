@@ -14,7 +14,7 @@
 
 //! `CopyObject`: one server-side copy, and the two directives that decide what the copy carries.
 //!
-//! Shares: copy_source, precondition. The conditional headers this operation carries are the
+//! Shares: copy_source, precondition, write_permissions. The conditional headers this operation carries are the
 //! precondition contract's to evaluate, and this file does not reach the entity-tag module
 //! directly — `shared/etag.rs`'s `Members:` line records that from the other end, and it states
 //! the use graph rather than what the use graph ought to be.
@@ -51,6 +51,7 @@ use rustfs_gateway_types::dto::{CopyObject, CopyObjectInput, CopyObjectOutput};
 
 use crate::op::{AuthRequirement, HasOperation, Operation, OperationOrigin, ResourceShape, StandardOperation};
 use crate::ops::shared::copy_source::CopySourceResources;
+use crate::ops::shared::write_permissions;
 use crate::registry::OperationSpec;
 
 /// What this operation requires of a request once routing has chosen it.
@@ -62,6 +63,7 @@ use crate::registry::OperationSpec;
 static SPEC: OperationSpec = OperationSpec::standard("CopyObject")
     .required_params(&[])
     .auth(AuthRequirement::new("s3:PutObject", ResourceShape::Object))
+    .extra_permissions(&write_permissions::OBJECT_WRITE)
     .build();
 
 /// Header signatures only, and not privileged. The request carries no body, so no payload mode

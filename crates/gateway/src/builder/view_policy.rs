@@ -170,9 +170,23 @@ pub(crate) struct ViewPolicy {
     empty_headers_absent: bool,
     /// Which action a request naming one object version is asked (`super::version_actions`).
     pub(crate) version_actions: super::version_actions::VersionActions,
+    /// Whether the RustFS-waivable header permissions (tagging, ACL) are waived
+    /// (`super::version_actions`, `ServiceBuilder::authorize_header_permissions_as_legacy_rustfs`).
+    pub(crate) waive_rustfs_header_permissions: bool,
 }
 
 impl ViewPolicy {
+    /// Whether the operation must be authorized for `extra` given this assembly's profile: every
+    /// [`rustfs_gateway_core::ExtraProfile::Generic`] permission, and a
+    /// [`rustfs_gateway_core::ExtraProfile::RustfsWaivable`] one unless the RustFS profile waives
+    /// it (`ServiceBuilder::authorize_header_permissions_as_legacy_rustfs`).
+    pub(crate) fn requires_extra_permission(&self, extra: rustfs_gateway_core::ExtraPermission) -> bool {
+        match extra.profile() {
+            rustfs_gateway_core::ExtraProfile::Generic => true,
+            rustfs_gateway_core::ExtraProfile::RustfsWaivable => !self.waive_rustfs_header_permissions,
+        }
+    }
+
     /// The sentences this assembly answers a credential refusal with
     /// ([`ServiceBuilder::answer_credential_refusals_with_legacy_rustfs_sentences`]).
     pub(crate) const fn credential_sentences(&self) -> CredentialSentences {

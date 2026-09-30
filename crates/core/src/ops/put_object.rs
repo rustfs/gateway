@@ -20,7 +20,7 @@
 //! settled in `rustfs-gateway-http` before a handler sees anything.
 //! Upstream: `rustfs-gateway-types`' generated dto. Downstream: `crate::registry`.
 //!
-//! Shares: precondition, etag
+//! Shares: precondition, etag, write_permissions
 //!
 //! Both modules exist now; the checksum cluster still does not, so checksum handling stays prose.
 //! No `range` — a write selects no byte span.
@@ -41,6 +41,7 @@ use rustfs_gateway_types::dto::{PutObject, PutObjectInput, PutObjectOutput};
 use crate::op::{AuthRequirement, HasOperation, Operation, OperationOrigin, ResourceShape, StandardOperation};
 use crate::ops::shared::etag::ConditionalHeader;
 use crate::ops::shared::precondition::RequestKind;
+use crate::ops::shared::write_permissions;
 use crate::registry::OperationSpec;
 
 /// Which side of the read/write split this operation's conditions are evaluated on.
@@ -58,6 +59,7 @@ pub static CONDITIONS: [ConditionalHeader; 2] = [ConditionalHeader::IfMatch, Con
 static SPEC: OperationSpec = OperationSpec::standard("PutObject")
     .required_params(&[])
     .auth(AuthRequirement::new("s3:PutObject", ResourceShape::Object))
+    .extra_permissions(&write_permissions::OBJECT_WRITE)
     .build();
 
 /// Header and presigned signatures, and not privileged.

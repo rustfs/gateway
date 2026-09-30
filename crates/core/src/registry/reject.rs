@@ -343,6 +343,17 @@ pub(crate) fn check_spec(spec: &'static OperationSpec) -> Result<(), RegistryErr
     if let Some(why) = auth.fault() {
         return Err(RegistryError::InvalidAuthRule { name, why });
     }
+    for extra in spec.extra_permission_set() {
+        if !AuthRequirement::new(extra.action(), auth.resource).is_well_formed() {
+            return Err(RegistryError::MalformedAuthAction {
+                name,
+                action: extra.action(),
+            });
+        }
+        if let Some(why) = extra.fault() {
+            return Err(RegistryError::InvalidAuthRule { name, why });
+        }
+    }
     // An own-account operation evaluates no IAM action in RustFS. Its action is therefore a label
     // in the operation's own vendor namespace, which no IAM policy grants or denies by accident,
     // and never `admin:` or `s3:` spelling that a reviewer would read as a policy check (ADR-0025).
@@ -529,5 +540,88 @@ mod tests {
         for name in ["rustfs:AdminSetConfig", "acme:DoThing"] {
             assert!(is_namespaced(name), "{name:?} is the shape the rule asks for");
         }
+    }
+
+    use crate::authz::{ExtraPermission, ExtraProfile, HeaderTrigger};
+
+    /// A vendor operation whose one extra permission is `PERMISSION`.
+    struct WithExtra<const PERMISSION: usize>;
+
+    static WELL_FORMED_EXTRA: [ExtraPermission; 1] = [ExtraPermission::new(
+        "acme:BypassThing",
+        &[HeaderTrigger::True("x-acme-bypass")],
+        ExtraProfile::Generic,
+    )];
+    static MALFORMED_EXTRA: [ExtraPermission; 1] = [ExtraPermission::new(
+        "acme BypassThing",
+        &[HeaderTrigger::True("x-acme-bypass")],
+        ExtraProfile::Generic,
+    )];
+    static NO_TRIGGER_EXTRA: [ExtraPermission; 1] = [ExtraPermission::new("acme:BypassThing", &[], ExtraProfile::Generic)];
+
+    static EXTRA_FLOOR: OperationFloor = OperationFloor::custom("acme:DoThing", SigService::S3);
+
+    const fn extra_spec(extras: &'static [ExtraPermission]) -> OperationSpec {
+        OperationSpec::builder("acme:DoThing", 200, None)
+            .handler_deadline_class(HandlerDeadlineClass::Standard)
+            .required_params(&[])
+            .auth(AuthRequirement::new("acme:DoThing", ResourceShape::Object))
+            .extra_permissions(extras)
+            .build()
+    }
+
+    static WELL_FORMED_SPEC: OperationSpec = extra_spec(&WELL_FORMED_EXTRA);
+    static MALFORMED_SPEC: OperationSpec = extra_spec(&MALFORMED_EXTRA);
+    static NO_TRIGGER_SPEC: OperationSpec = extra_spec(&NO_TRIGGER_EXTRA);
+
+    impl<const PERMISSION: usize> Operation for WithExtra<PERMISSION> {
+        const NAME: &'static str = "acme:DoThing";
+        type Input = ();
+        type Output = ();
+        type DerivedResources = crate::NoDerived;
+
+        fn derive_resources(_input: &Self::Input) -> Result<Self::DerivedResources, crate::DerivedResourceError> {
+            Ok(crate::NoDerived)
+        }
+
+        fn seal_derived_input(_input: &mut Self::Input) {}
+
+        fn spec() -> &'static OperationSpec {
+            match PERMISSION {
+                0 => &WELL_FORMED_SPEC,
+                1 => &MALFORMED_SPEC,
+                _ => &NO_TRIGGER_SPEC,
+            }
+        }
+
+        fn floor() -> &'static OperationFloor {
+            &EXTRA_FLOOR
+        }
+    }
+
+    /// Positive -- a well-formed extra permission registers.
+    #[test]
+    fn a_well_formed_extra_permission_registers() {
+        assert_eq!(check_operation::<WithExtra<0>>(), Ok(()));
+    }
+
+    /// Negative -- an extra permission's action is spelled `service:Action`, and it names at least
+    /// one trigger.
+    #[test]
+    fn n_a_malformed_or_triggerless_extra_permission_is_refused() {
+        assert_eq!(
+            check_operation::<WithExtra<1>>(),
+            Err(RegistryError::MalformedAuthAction {
+                name: "acme:DoThing",
+                action: "acme BypassThing"
+            })
+        );
+        assert_eq!(
+            check_operation::<WithExtra<2>>(),
+            Err(RegistryError::InvalidAuthRule {
+                name: "acme:DoThing",
+                why: "an extra permission names at least one header trigger"
+            })
+        );
     }
 }

@@ -61,6 +61,8 @@ mod dto_cold_split;
 
 #[path = "empty_enumeration.rs"]
 mod empty_enumeration;
+#[path = "extra_permissions.rs"]
+mod extra_permissions;
 
 #[path = "encryption_roundtrip.rs"]
 mod encryption_roundtrip;

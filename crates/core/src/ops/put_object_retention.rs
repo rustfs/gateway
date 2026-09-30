@@ -30,7 +30,7 @@
 //! family's entire promise.
 //! Upstream: `rustfs-gateway-types`' generated dto. Downstream: `crate::registry`.
 //!
-//! Shares: object_lock.
+//! Shares: object_lock, write_permissions.
 //!
 //! # Why the row exists before a backend does
 //!
@@ -46,6 +46,7 @@ use rustfs_gateway_sig::{OperationFloor, SigService};
 use rustfs_gateway_types::dto::{PutObjectRetention, PutObjectRetentionInput, PutObjectRetentionOutput};
 
 use crate::op::{AuthRequirement, HasOperation, Operation, OperationOrigin, ResourceShape, StandardOperation};
+use crate::ops::shared::write_permissions;
 use crate::registry::OperationSpec;
 
 /// What this operation requires of a request once routing has chosen it.
@@ -56,6 +57,7 @@ use crate::registry::OperationSpec;
 static SPEC: OperationSpec = OperationSpec::standard("PutObjectRetention")
     .required_params(&[])
     .auth(AuthRequirement::new("s3:PutObjectRetention", ResourceShape::Object))
+    .extra_permissions(&write_permissions::GOVERNANCE_BYPASS)
     .build();
 
 /// Header signatures only, and not privileged.

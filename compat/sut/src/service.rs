@@ -312,6 +312,10 @@ pub(crate) fn build_service(
             // RustFS asks a `HEAD`, tag or ACL request naming a version its unversioned action, and
             // `GetObject` and `DeleteObject` the version action (GHSA-3ppv).
             .authorize_versions_as_legacy_rustfs()
+            // RustFS's access hook asks the base `s3:PutObject` alone for a tagging or ACL header,
+            // where AWS also asks `s3:PutObjectTagging` / `s3:PutObjectAcl`; the object-lock and
+            // governance-bypass permissions it asks the same way (GHSA-3ppv-adjacent).
+            .authorize_header_permissions_as_legacy_rustfs()
             // And the same registry decides whether a name is taken: another identity's
             // re-creation is `409 BucketAlreadyExists` before the backend is asked, and a
             // creation the backend admitted is what gets recorded.

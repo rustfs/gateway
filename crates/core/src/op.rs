@@ -350,7 +350,7 @@ const fn first_action(actions: &'static [&'static str]) -> &'static str {
     }
 }
 
-fn is_well_formed_action(action: &str) -> bool {
+pub(crate) fn is_well_formed_action(action: &str) -> bool {
     match action.split_once(':') {
         Some((service, name)) => {
             !service.is_empty() && !name.is_empty() && !name.contains(':') && !action.contains(char::is_whitespace)

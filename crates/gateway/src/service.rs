@@ -926,6 +926,10 @@ impl S3Service {
         let requirement = requirement
             .for_version(named_version.is_some() && self.inner.view_policy.version_actions.asks_version_action(operation));
         let asked_version = named_version.as_deref();
+        // AWS's conditionally-required actions: an object-lock, tagging or ACL header on a write,
+        // or a governance-bypass header on a delete or retention change, requires the matching
+        // action on top of the base one. Read once here; the route stage asks each triggered one.
+        let extra_permissions = M::extra_permissions(&op);
         let authz_started = self.inner.authz_clock.monotonic();
         let auth_scheme = if verdict.is_authenticated() {
             let governed = GovernorRequest::new(operation, meta.bucket(), declared_length, client_addr, class);
@@ -1080,6 +1084,57 @@ impl S3Service {
                     (None, _) | (_, None) => Decision::Indeterminate,
                 };
             }
+            // Every triggered, profile-required extra permission is all-of on top of the base
+            // decision: the first that is not allowed refuses the request, before the body is read.
+            let mut route_extras: Vec<AuthzRequest<'_>> = Vec::new();
+            if route_decision == Decision::Allow {
+                for extra in extra_permissions {
+                    if !route_service.inner.view_policy.requires_extra_permission(*extra) {
+                        continue;
+                    }
+                    // The raw header map is read by name without minting a `HeaderName` per
+                    // trigger: the trigger headers are not the ones the view rewrites, and an
+                    // empty one is already read as absent by the trigger itself.
+                    if !extra.applies(|name| route_headers.get(name).and_then(|value| value.to_str().ok())) {
+                        continue;
+                    }
+                    route_extras.push(AuthzRequest {
+                        action: extra.action(),
+                        route_action: extra.action(),
+                        copy_source_identity: None,
+                        subject: None,
+                        ..route_request
+                    });
+                }
+                for extra_request in &route_extras {
+                    match catch_boxed_future(|| route_runtime.authorizer.authorize_route(&authz_context, extra_request)).await {
+                        Ok(decision) => {
+                            if decision != Decision::Allow {
+                                route_decision = decision;
+                                break;
+                            }
+                        }
+                        Err(()) => {
+                            crate::logging::extension_panicked(Extension::Authorizer, request_id, operation);
+                            return Err(from_handler(
+                                HandlerError::internal_error("the authorizer failed"),
+                                response_kind,
+                                ConnectionIntent::MayKeepAlive,
+                            ));
+                        }
+                    }
+                }
+            }
+            // No extra permission fired on the warm path: audit the base questions with no
+            // allocation, and combine only when an extra was actually asked.
+            let mut combined_audit;
+            let audited_route: &[AuthzRequest<'_>] = if route_extras.is_empty() {
+                asked
+            } else {
+                combined_audit = asked.to_vec();
+                combined_audit.extend(route_extras.iter().copied());
+                &combined_audit
+            };
             let settled = route_decision.settle();
             emit_safely(
                 route_runtime.authz_audit.as_ref(),
@@ -1091,7 +1146,7 @@ impl S3Service {
                     resource: requirement.resource,
                     bucket: route_meta.bucket(),
                     key: route_effective_key,
-                    resources: asked,
+                    resources: audited_route,
                     auth_scheme,
                     identity: route_verdict.identity(),
                     target_origin,

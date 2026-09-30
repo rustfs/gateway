@@ -82,6 +82,8 @@ mod empty_headers_absent;
 mod empty_upload_without_length;
 #[path = "error_context_filters.rs"]
 mod error_context_filters;
+#[path = "extra_permissions_runtime.rs"]
+mod extra_permissions_runtime;
 #[path = "extra_response_headers.rs"]
 mod extra_response_headers;
 #[path = "facade_probe.rs"]
