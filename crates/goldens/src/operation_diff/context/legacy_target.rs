@@ -25,7 +25,8 @@
 //! observed on a legacy build: `http://<authority>/<bucket>/<key>` on both).
 //! Upstream: the harness in `super`. Downstream: nothing.
 
-use super::super::seam::request_context::{GatewayRequestContext, RequestTarget, request_to_legacy};
+use super::super::seam::request_context::{GatewayRequestContext, Principal, RequestTarget, VerifiedScope, request_to_legacy};
+use super::super::seam::trailers::LegacyTrailers;
 use super::{ContextRequest, PATH_HOST, compare, differing_context};
 
 const NONE: &[&str] = &[];
@@ -128,7 +129,7 @@ fn n_a_target_that_is_not_a_scheme_and_an_authority_is_refused_by_name() {
         (Some("h ttps"), Some("s3.example.test")),
         (Some("https"), Some("s3.example.test/extra")),
     ] {
-        let error = request_to_legacy(context(), target(scheme, authority), ())
+        let error = request_to_legacy(context(), target(scheme, authority), None, ())
             .map(|_| ())
             .expect_err("the conversion refuses");
         assert_eq!(error.field, "uri", "{scheme:?} {authority:?}");
@@ -150,7 +151,7 @@ fn n_a_host_line_is_added_for_http2_and_http3_alone_and_never_replaces_one() {
             version,
             ..target(Some("https"), authority)
         };
-        let converted = request_to_legacy(context(), target, ()).expect("converts");
+        let converted = request_to_legacy(context(), target, None, ()).expect("converts");
         let host = converted
             .headers
             .get(http::header::HOST)
@@ -164,7 +165,7 @@ fn n_a_host_line_is_added_for_http2_and_http3_alone_and_never_replaces_one() {
         version: http::Version::HTTP_2,
         ..target(Some("https"), authority)
     };
-    let converted = request_to_legacy(sent, target, ()).expect("converts");
+    let converted = request_to_legacy(sent, target, None, ()).expect("converts");
     assert_eq!(converted.headers.get_all(http::header::HOST).iter().count(), 1);
     assert_eq!(
         converted.headers.get(http::header::HOST).map(http::HeaderValue::as_bytes),
@@ -176,8 +177,77 @@ fn n_a_host_line_is_added_for_http2_and_http3_alone_and_never_replaces_one() {
 /// authority; an origin-form target is the path and query alone.
 #[test]
 fn the_rebuilt_uri_keeps_the_raw_path_and_query() {
-    let converted = request_to_legacy(context(), target(Some("https"), Some("s3.example.test:9000")), ()).expect("converts");
+    let converted =
+        request_to_legacy(context(), target(Some("https"), Some("s3.example.test:9000")), None, ()).expect("converts");
     assert_eq!(converted.uri.to_string(), "https://s3.example.test:9000/photos/a.jpg?x-id=PutObject");
-    let converted = request_to_legacy(context(), target(None, None), ()).expect("converts");
+    let converted = request_to_legacy(context(), target(None, None), None, ()).expect("converts");
     assert_eq!(converted.uri.to_string(), "/photos/a.jpg?x-id=PutObject");
+}
+
+/// A SigV4-verified aws-chunked request crosses with the handle its section reaches the RustFS
+/// body through, carried in the extensions, as the legacy stack attaches one to every such request
+/// whether or not it declares a trailer; the typed reading still refuses declared trailers.
+#[test]
+fn an_aws_chunked_request_crosses_with_its_trailer_handle_in_the_extensions() {
+    for declares_trailers in [true, false] {
+        let chunked = GatewayRequestContext {
+            declares_trailers,
+            ..streaming("STREAMING-AWS4-HMAC-SHA256-PAYLOAD-TRAILER", true)
+        };
+        assert!(chunked.legacy_attaches_trailers());
+        let trailers = LegacyTrailers::default();
+        let converted = request_to_legacy(chunked, target(None, None), Some(trailers.clone()), ()).expect("converts");
+        let carried = converted.extensions.get::<LegacyTrailers>().expect("the handle is carried");
+        assert!(!carried.is_ready() && !trailers.is_ready());
+    }
+    // A plain body declaring a trailer has no section to hand over, and gets no handle, as legacy.
+    let plain = GatewayRequestContext {
+        declares_trailers: true,
+        ..streaming("UNSIGNED-PAYLOAD", true)
+    };
+    let converted = request_to_legacy(plain, target(None, None), None, ()).expect("converts");
+    assert!(converted.extensions.get::<LegacyTrailers>().is_none());
+}
+
+/// Negative — the handle crosses exactly where the legacy stack attaches one: missing on a
+/// SigV4-verified aws-chunked request (its section would be dropped), or passed for an anonymous
+/// one or a plain body, it is refused by name.
+#[test]
+fn n_a_trailer_handle_missing_or_misplaced_is_refused_by_name() {
+    let refused = |context: GatewayRequestContext, trailers: Option<LegacyTrailers>| {
+        request_to_legacy(context, target(None, None), trailers, ())
+            .map(|_| ())
+            .expect_err("refused")
+            .field
+    };
+    assert_eq!(refused(streaming("STREAMING-UNSIGNED-PAYLOAD-TRAILER", true), None), "trailing_headers");
+    assert_eq!(refused(streaming("STREAMING-AWS4-HMAC-SHA256-PAYLOAD", true), None), "trailing_headers");
+    for (payload, verified) in [("STREAMING-UNSIGNED-PAYLOAD-TRAILER", false), ("UNSIGNED-PAYLOAD", true)] {
+        assert_eq!(
+            refused(streaming(payload, verified), Some(LegacyTrailers::default())),
+            "trailing_headers",
+            "{payload} verified={verified}"
+        );
+    }
+    let converted = request_to_legacy(context(), target(None, None), None, ()).expect("converts");
+    assert!(converted.extensions.get::<LegacyTrailers>().is_none());
+}
+
+/// [`context`] with `payload` as its `x-amz-content-sha256`, signed with a verified SigV4 scope
+/// when `verified`, anonymous otherwise.
+fn streaming(payload: &'static str, verified: bool) -> GatewayRequestContext {
+    let mut headers = http::HeaderMap::new();
+    headers.insert("x-amz-content-sha256", http::HeaderValue::from_static(payload));
+    GatewayRequestContext {
+        headers,
+        principal: verified.then(|| Principal {
+            access_key: String::from("AKIDLEGACYTARGET"),
+            secret_key: "legacy-target-secret-key".into(),
+            scope: Some(VerifiedScope {
+                region: String::from("us-east-1"),
+                service: String::from("s3"),
+            }),
+        }),
+        ..context()
+    }
 }

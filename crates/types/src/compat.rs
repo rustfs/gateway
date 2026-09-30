@@ -97,6 +97,9 @@ pub mod s3s_0_17_0 {
     pub mod leaf;
     pub mod put_object;
     pub mod request_context;
+    pub mod trailers;
+    #[cfg(test)]
+    mod trailers_tests;
 
     /// `0.17.0` fills a message from the code's default sentence when a body names none, so the
     /// gateway writes the sentence the s3s document would have carried.
@@ -126,6 +129,7 @@ pub mod s3s_9c4690d8 {
     pub mod get_bucket_location;
     pub mod put_object;
     pub mod request_context;
+    pub mod trailers;
 
     /// `9c4690d8` has no default sentences: a body that names no message gets a document with no
     /// `<Message>`, and the gateway writes an empty one.

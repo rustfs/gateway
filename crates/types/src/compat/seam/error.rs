@@ -135,6 +135,10 @@ pub const LEGACY_DUPLICATE_HEADER: &str = "a header the legacy decoder refuses t
 /// As [`LEGACY_DUPLICATE_QUERY`], for a header value outside its boolean grammar.
 pub const LEGACY_INVALID_BOOLEAN: &str = "not a boolean the legacy decoder accepts";
 
+/// As [`LEGACY_DUPLICATE_QUERY`], for a header value the legacy decoder cannot read: text it cannot
+/// decode, or an `x-amz-trailer` declaration naming two checksum headers.
+pub const LEGACY_INVALID_HEADER: &str = "a header value the legacy decoder refuses";
+
 /// What the gateway answers for a conversion the legacy decoder would have refused before any
 /// RustFS body ran: the member only the legacy decoder reads (`leaf::legacy_query`,
 /// `leaf::legacy_bool_header`) held a value it rejects. The code and status are the legacy
@@ -146,7 +150,9 @@ pub fn refusal_from_conversion(error: &ConversionError) -> Option<Refusal> {
     let (code, message) = match error.reason {
         LEGACY_DUPLICATE_QUERY => (ErrorCode::INVALID_REQUEST, format!("duplicate query: {}", error.field)),
         LEGACY_DUPLICATE_HEADER => (ErrorCode::INVALID_REQUEST, format!("duplicate header: {}", error.field)),
-        LEGACY_INVALID_BOOLEAN => (ErrorCode::INVALID_ARGUMENT, format!("invalid header: {}", error.field)),
+        LEGACY_INVALID_BOOLEAN | LEGACY_INVALID_HEADER => {
+            (ErrorCode::INVALID_ARGUMENT, format!("invalid header: {}", error.field))
+        }
         _ => return None,
     };
     Some(Refusal::Ordinary { code, message })

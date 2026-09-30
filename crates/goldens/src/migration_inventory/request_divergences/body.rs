@@ -20,8 +20,19 @@
 //! `check_register` does, over the whole register) or observing them (the named tests in
 //! `operation_diff/context/body_parity/divergences.rs`).
 //! Upstream: those named tests. Downstream: the parent's `REQUEST_DIVERGENCES`.
+//!
+//! # rd-body-0006, rd-body-0007, rd-put-0002 and the RustFS profile
+//!
+//! The first two are about the trailer view a handler is handed, and the gateway's own handlers
+//! keep theirs. A RustFS body behind the RustFS profile's adapter is handed the legacy view instead
+//! (rustfs/gateway#1148): the adapter attaches a `LegacyTrailers` handle exactly where the legacy
+//! stack attaches one and the body fills it without the trailer signature; and, for rd-put-0002
+//! (in the parent), the upload's checksum algorithm as the legacy decoder reads it
+//! (`trailers::legacy_checksum_algorithm`), which picks the trailer field RustFS answers with. Both
+//! are pinned by `operation_diff/context/body_parity/rustfs_profile.rs` and the difftest seam diff;
+//! each is open until the ring-2 adapter hands them over.
 
-use super::{BODY_PARITY, DivergenceFollowUp, DivergenceRuling, ERROR_RESPONSES, RequestDivergence};
+use super::{BODY_PARITY, DivergenceFollowUp, DivergenceRuling, ERROR_RESPONSES, M1_ADAPTER, RequestDivergence};
 
 const STREAMING_UPLOADS: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/sigv4-streaming.html";
 const OBJECT_INTEGRITY: &str = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/checking-object-integrity.html";
@@ -107,8 +118,8 @@ pub(super) const BODY_DIVERGENCES: [RequestDivergence; 11] = [
         s3s: "strips x-amz-trailer-signature from the published fields",
         gateway: "hands the verified x-amz-trailer-signature to the handler beside the checksum",
         client_impact: "none: rio looks trailers up by checksum name, and no handler persists the signature",
-        ruling: DivergenceRuling::KeepGateway,
-        follow_up: DivergenceFollowUp::None,
+        ruling: DivergenceRuling::RustfsProfile,
+        follow_up: DivergenceFollowUp::Open(M1_ADAPTER),
         test_file: BODY_PARITY,
         test: "the_gateway_hands_the_verified_trailer_signature_to_the_handler_and_s3s_does_not",
     },
@@ -121,8 +132,8 @@ pub(super) const BODY_DIVERGENCES: [RequestDivergence; 11] = [
         s3s: "STREAMING-AWS4-HMAC-SHA256-PAYLOAD: a handle that stays Pending forever; a plain body: no handle",
         gateway: "an empty trailer set at end of body, so every lookup is Missing",
         client_impact: "none: rio consults a trailer source only when a trailing checksum was declared",
-        ruling: DivergenceRuling::KeepGateway,
-        follow_up: DivergenceFollowUp::None,
+        ruling: DivergenceRuling::RustfsProfile,
+        follow_up: DivergenceFollowUp::Open(M1_ADAPTER),
         test_file: BODY_PARITY,
         test: "an_upload_without_a_trailer_leaves_the_s3s_handle_pending_or_absent",
     },

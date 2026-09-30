@@ -127,17 +127,21 @@ fn judge(name: &str, diff: &SeamDiff, expect: &Expect) -> Vec<String> {
         Expect::Identical => {
             if !diff.identical() {
                 problem(format!(
-                    "expected identical, got routed {:?}, verdict {:?}, differing {:?}, same body {}",
+                    "expected identical, got routed {:?}, verdict {:?}, differing {:?}, same body {}, trailers {:?}",
                     diff.routed,
                     diff.verdict,
                     diff.differing,
-                    diff.body.same()
+                    diff.body.same(),
+                    diff.trailers
                 ));
             }
         }
         Expect::Differs(ids) => {
-            if !diff.routed.same() || !both_handed(diff) || !diff.body.same() {
-                problem(format!("expected both handed, got routed {:?}, verdict {:?}", diff.routed, diff.verdict));
+            if !diff.routed.same() || !both_handed(diff) || !diff.body.same() || !diff.trailers.same() {
+                problem(format!(
+                    "expected both handed, got routed {:?}, verdict {:?}, trailers {:?}",
+                    diff.routed, diff.verdict, diff.trailers
+                ));
             }
             let expected: BTreeSet<String> = ids
                 .iter()
@@ -441,6 +445,38 @@ fn n_a_body_one_handler_reads_differently_is_reported() {
     assert!(!diff.body.same());
     assert_eq!(diff.body.gateway, Some(BodySeen::Read(b"0123456789".to_vec())));
     assert!(!diff.identical());
+}
+
+/// Negative — a trailer section the two handlers read differently is reported, even with the same
+/// members and body: the legacy stack hands over a trailer value the gateway would refuse
+/// (rustfs/gateway#1148).
+#[test]
+fn n_a_trailer_one_handler_reads_differently_is_reported() {
+    let differ = SeamDiffer::new().expect("both stacks assemble");
+    let upload = |target: &str, checksum: &str| {
+        let body = format!("5\r\nhello\r\n0\r\nx-amz-checksum-crc32:{checksum}\r\n\r\n");
+        let request = RawRequest::put(target, body.as_bytes())
+            .header("content-encoding", "aws-chunked")
+            .header("x-amz-content-sha256", "STREAMING-UNSIGNED-PAYLOAD-TRAILER")
+            .header("x-amz-trailer", "x-amz-checksum-crc32")
+            .header("x-amz-decoded-content-length", "5");
+        crate::sign::signed(&request).expect("an unsigned-payload trailer upload signs")
+    };
+    // A part: the trailer is the only difference.
+    let part = format!("/bucket/k?partNumber=1&uploadId={}", crate::samples::UPLOAD_ID);
+    let diff = differ
+        .diff_pair(&upload(&part, "NhCmhg=="), &upload(&part, "AAAAAA=="))
+        .expect("both stacks answer");
+    assert!(diff.differing.is_empty() && diff.body.same(), "{:?} {:?}", diff.differing, diff.body);
+    assert!(!diff.trailers.same(), "{:?}", diff.trailers);
+    assert!(!diff.identical());
+    assert_eq!(judge("control", &diff, &Expect::Identical).len(), 1);
+    // An object: beside a registered difference, the trailer is still one too many.
+    let diff = differ
+        .diff_pair(&upload("/bucket/k", "NhCmhg=="), &upload("/bucket/k", "AAAAAA=="))
+        .expect("both stacks answer");
+    assert!(!diff.trailers.same(), "{:?}", diff.trailers);
+    assert_eq!(judge("control", &diff, &Expect::Differs(&["sd-0033"])).len(), 1);
 }
 
 #[test]

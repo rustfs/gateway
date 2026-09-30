@@ -39,16 +39,23 @@ use rustfs_gateway_types::compat::s3s_0_17_0 as seam;
 use rustfs_gateway_types::persistence as dto_bridge;
 
 use super::stacks::{LegacyAnswer, LegacyRecorder, SeamRecorder, record, take};
+use super::trailers::{attach, legacy_view};
 use crate::oracle::{Answered, recorded};
 use crate::s3s;
 use s3s::dto as legacy;
 use seam::generated::{census, ops};
 use seam::leaf::RequestWire;
 use seam::request_context::GatewayRequestContext;
+use seam::trailers::{LegacyTrailers, legacy_checksum_algorithm};
 
 /// What one gateway handler hands the RustFS app layer: the converted input, or the member the
-/// conversion refused, and the live body when the input carries one.
-pub(crate) type Converted = (Result<Box<dyn Any + Send>, ConversionError>, Option<legacy::StreamingBlob>);
+/// conversion refused, the live body when the input carries one, and the trailer handle the RustFS
+/// profile's adapter attaches where the legacy stack attaches one.
+pub(crate) type Converted = (
+    Result<Box<dyn Any + Send>, ConversionError>,
+    Option<legacy::StreamingBlob>,
+    Option<LegacyTrailers>,
+);
 
 /// The configuration bytes one side would store for a configuration write: the gateway's
 /// persistence writer on its own input, or the legacy serializer RustFS stores with on the legacy
@@ -288,7 +295,7 @@ fn raw_wire<O: Operation>(request: &Req<O>) -> (String, http::HeaderMap) {
 
 macro_rules! convert {
     (plain, $method:ident, $request:ident) => {
-        (boxed(ops::$method::input_to_s3s($request.into_input())), None)
+        (boxed(ops::$method::input_to_s3s($request.into_input())), None, None)
     };
     (plain_wire, $method:ident, $request:ident) => {{
         let (raw_query, headers) = raw_wire(&$request);
@@ -296,12 +303,12 @@ macro_rules! convert {
             raw_query: &raw_query,
             headers: &headers,
         };
-        (boxed(ops::$method::input_to_s3s($request.into_input(), &wire)), None)
+        (boxed(ops::$method::input_to_s3s($request.into_input(), &wire)), None, None)
     }};
     (copy, $method:ident, $request:ident) => {
         match copy_source(&$request) {
-            Ok(source) => (boxed(ops::$method::input_to_s3s($request.into_input(), source)), None),
-            Err(error) => (Err(error), None),
+            Ok(source) => (boxed(ops::$method::input_to_s3s($request.into_input(), source)), None, None),
+            Err(error) => (Err(error), None, None),
         }
     };
     (copy_wire, $method:ident, $request:ident) => {{
@@ -311,8 +318,8 @@ macro_rules! convert {
             headers: &headers,
         };
         match copy_source(&$request) {
-            Ok(source) => (boxed(ops::$method::input_to_s3s($request.into_input(), source, &wire)), None),
-            Err(error) => (Err(error), None),
+            Ok(source) => (boxed(ops::$method::input_to_s3s($request.into_input(), source, &wire)), None, None),
+            Err(error) => (Err(error), None, None),
         }
     }};
     (delete_objects, $method:ident, $request:ident) => {{
@@ -321,29 +328,42 @@ macro_rules! convert {
             input.delete.objects = objects?;
             Ok(input)
         });
-        (boxed(converted), None)
+        (boxed(converted), None, None)
     }};
     (put_object, $method:ident, $request:ident) => {
-        match seam::put_object::input_to_s3s($request.into_input()) {
-            Ok(mut input) => {
-                let body = input.body.take();
-                (boxed(Ok(input)), body)
-            }
-            Err(error) => (Err(error), None),
-        }
+        upload!(seam::put_object::input_to_s3s, $request)
     };
     (upload_part, $method:ident, $request:ident) => {
-        match ops::$method::input_to_s3s($request.into_input()) {
-            Ok(mut input) => {
-                let body = input.body.take();
-                (boxed(Ok(input)), body)
-            }
-            Err(error) => (Err(error), None),
-        }
+        upload!(ops::$method::input_to_s3s, $request)
     };
     (location, $method:ident, $request:ident) => {
-        (boxed(Ok(seam::get_bucket_location::input_to_s3s($request.into_input()))), None)
+        (boxed(Ok(seam::get_bucket_location::input_to_s3s($request.into_input()))), None, None)
     };
+}
+
+/// An upload as the RustFS profile's adapter hands it over (rustfs/gateway#1148): a trailer handle
+/// where the legacy stack attaches one, the body wrapped to fill it, and the checksum algorithm the
+/// RustFS body reads as the legacy decoder reads it.
+macro_rules! upload {
+    ($convert:path, $request:ident) => {{
+        let (_, headers) = raw_wire(&$request);
+        let trailers = attach(&$request, &headers);
+        let mut gateway_input = $request.into_input();
+        if let Some(trailers) = &trailers {
+            gateway_input.body = gateway_input.body.map(|body| trailers.publishing(body));
+        }
+        let converted = $convert(gateway_input).and_then(|mut input| {
+            input.checksum_algorithm = legacy_checksum_algorithm(&headers)?;
+            Ok(input)
+        });
+        match converted {
+            Ok(mut input) => {
+                let body = input.body.take();
+                (boxed(Ok(input)), body, trailers)
+            }
+            Err(error) => (Err(error), None, None),
+        }
+    }};
 }
 
 macro_rules! take_body {
@@ -396,8 +416,9 @@ macro_rules! seam_operations {
                 let mut input = request.input;
                 let body = take_body!($kind, input);
                 let stored: Stored = legacy_stored!($op, input);
+                let trailers = request.trailing_headers;
                 Box::pin(async move {
-                    record(&self.slot, stringify!($op), Ok(Box::new(input)), body, stored).await;
+                    record(&self.slot, stringify!($op), Ok(Box::new(input)), body, stored, || legacy_view(trailers.as_ref())).await;
                     match take(&self.answer).map(|queued| queued.downcast::<LegacyAnswer<legacy::$output>>()) {
                         Some(Ok(answer)) => {
                             let LegacyAnswer { output, headers } = *answer;

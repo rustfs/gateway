@@ -140,6 +140,8 @@ pub(crate) struct Upload {
     /// Transport piece sizes, cycled over the wire body.
     pub(crate) pieces: Vec<usize>,
     pub(crate) tamper: Tamper,
+    /// Further header lines, signed with the rest of the head.
+    pub(crate) extra: Vec<(&'static str, String)>,
 }
 
 /// The signed head and the wire body, as both stacks receive them.
@@ -157,7 +159,14 @@ impl Upload {
             chunk: 8,
             pieces: Vec::new(),
             tamper: Tamper::None,
+            extra: Vec::new(),
         }
+    }
+
+    /// Adds the header line `name: value`, signed with the rest of the head.
+    pub(crate) fn header(mut self, name: &'static str, value: impl Into<String>) -> Self {
+        self.extra.push((name, value.into()));
+        self
     }
 
     pub(crate) fn chunked(mut self, chunk: usize) -> Self {
@@ -207,6 +216,10 @@ impl Upload {
         headers.insert(http::header::CONTENT_LENGTH, HeaderValue::from(length));
         if self.mode.framed() {
             headers.insert(http::header::CONTENT_ENCODING, HeaderValue::from_static("aws-chunked"));
+        }
+        for (name, value) in &self.extra {
+            let value = HeaderValue::from_str(value).map_err(|error| format!("header {name}: {error}"))?;
+            headers.append(*name, value);
         }
         let stamp = AmzDate::parse(&amz_date(now.unix_seconds())).map_err(|error| format!("stamp: {error:?}"))?;
         let scope = SigningScope::new(stamp.day(), REGIONS[0], SigService::S3).map_err(|error| format!("scope: {error:?}"))?;

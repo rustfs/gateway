@@ -26,6 +26,7 @@ use rustfs_gateway::{CallerSecretKey, Handler, HandlerContext, HandlerResult, Re
 use super::super::seam::request_context::{
     GatewayRequestContext, Principal, RequestTarget, VerifiedScope, request_to_legacy, request_to_s3s,
 };
+use super::super::seam::trailers::LegacyTrailers;
 use super::{TransportMarker, s3s};
 
 fn refused(error: rustfs_gateway_types::compat::ConversionError) -> String {
@@ -41,15 +42,26 @@ pub(super) fn adapter_request(context: &RequestContextView) -> Result<s3s::S3Req
 
 /// The RustFS profile's adapter half (rustfs/gateway#1148): as [`adapter_request`], with the
 /// request target's scheme and authority handed over, so the legacy request URI is the one the
-/// legacy stack's transport would have built.
-pub(super) fn legacy_adapter_request(context: &RequestContextView) -> Result<s3s::S3Request<()>, String> {
+/// legacy stack's transport would have built, and with `trailers`, the handle the request's body
+/// fills with its trailer section, which the adapter passes exactly when
+/// [`legacy_attaches_trailers`] holds.
+pub(super) fn legacy_adapter_request(
+    context: &RequestContextView,
+    trailers: Option<LegacyTrailers>,
+) -> Result<s3s::S3Request<()>, String> {
     let target = RequestTarget {
         version: context.version(),
         scheme: context.target_scheme().map(str::to_owned),
         authority: context.target_authority().map(str::to_owned),
     };
-    let converted = request_to_legacy(gateway_context(context)?, target, ()).map_err(refused)?;
+    let converted = request_to_legacy(gateway_context(context)?, target, trailers, ()).map_err(refused)?;
     Ok(with_transport(context, converted))
+}
+
+/// Whether the RustFS profile's adapter hands this request's body a trailer handle: exactly when
+/// the legacy stack would attach one (`GatewayRequestContext::legacy_attaches_trailers`).
+pub(super) fn legacy_attaches_trailers(context: &RequestContextView) -> Result<bool, String> {
+    Ok(gateway_context(context)?.legacy_attaches_trailers())
 }
 
 fn gateway_context(context: &RequestContextView) -> Result<GatewayRequestContext, String> {
@@ -107,7 +119,8 @@ pub(super) struct AdapterBackend {
 impl AdapterBackend {
     fn record(&self, context: &RequestContextView) {
         let converted = if self.legacy_target {
-            legacy_adapter_request(context)
+            // The context diff carries no aws-chunked body, so no request of it gets a handle.
+            legacy_adapter_request(context, None)
         } else {
             adapter_request(context)
         };

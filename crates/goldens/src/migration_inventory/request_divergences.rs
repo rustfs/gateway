@@ -167,8 +167,8 @@ const OPERATION_DIVERGENCES: [RequestDivergence; 26] = [
         gateway: "reads x-amz-sdk-checksum-algorithm, as the model says",
         client_impact: "RustFS only uses the algorithm to pick the trailer checksum to apply, and SDKs send the matching header or trailer, \
                         so a well-formed SDK upload is stored the same way",
-        ruling: DivergenceRuling::KeepGateway,
-        follow_up: DivergenceFollowUp::None,
+        ruling: DivergenceRuling::RustfsProfile,
+        follow_up: DivergenceFollowUp::Open(M1_ADAPTER),
         test_file: PUT_DECODE,
         test: "the_sdk_checksum_algorithm_header_is_read_by_the_gateway_and_not_by_s3s",
     },

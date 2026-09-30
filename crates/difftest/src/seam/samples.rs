@@ -30,6 +30,7 @@ mod findings;
 mod objects;
 pub(crate) mod omitted;
 mod reads;
+mod trailers;
 
 /// What a finding means for what RustFS does and stores.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -87,14 +88,6 @@ const fn finding(
 
 /// Every classified difference.
 pub(crate) const SEAM_FINDINGS: &[SeamFinding] = &[
-    finding(
-        "sd-0001",
-        "PutObject",
-        "checksum_algorithm",
-        SeamClass::Ruled("rd-put-0002"),
-        "RustFS reads it only to pick a trailer checksum to echo (rustfs/src/app/object/put.rs:1374-1378), and the seam refuses \
-         declared trailers",
-    ),
     finding(
         "sd-0002",
         "PutObject",
@@ -276,14 +269,6 @@ pub(crate) const SEAM_FINDINGS: &[SeamFinding] = &[
          (rustfs/src/storage/options.rs:668-681, :830-839), so both store the same value",
     ),
     finding(
-        "sd-0034",
-        "UploadPart",
-        "checksum_algorithm",
-        SeamClass::Ruled("rd-put-0002"),
-        "RustFS reads it only to pick a trailer checksum to echo (rustfs/src/app/multipart_usecase.rs:1449-1470), and the \
-         seam refuses declared trailers",
-    ),
-    finding(
         "sd-0035",
         "DeleteObjects",
         "checksum_algorithm",
@@ -427,5 +412,6 @@ pub(crate) fn seam_rows() -> Vec<SeamRow> {
     rows.extend(reads::rows());
     rows.extend(findings::rows());
     rows.extend(omitted::rows());
+    rows.extend(trailers::rows());
     rows
 }
