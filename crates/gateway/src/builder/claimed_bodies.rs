@@ -63,11 +63,10 @@ impl ClaimedBodies {
 }
 
 impl ServiceBuilder {
-    /// Refuses a request to a claimed route whose `Content-Length` declares more than 1 MiB
-    /// ([`LEGACY_RUSTFS_CLAIMED_ROUTE_BODY_BYTES`]), as legacy RustFS refuses one to its admin
-    /// surface: `400 EntityTooLarge` with legacy RustFS's sentence, once the signature has been
-    /// verified and before authorization or any of the body is read, whatever the route reads
-    /// (rustfs/gateway#1173).
+    /// Refuses a request to a claimed route whose `Content-Length` declares more than 1 MiB, as
+    /// legacy RustFS refuses one to its admin surface: `400 EntityTooLarge` with legacy RustFS's
+    /// sentence, once the signature has been verified and before authorization or any of the body
+    /// is read, whatever the route reads (rustfs/gateway#1173).
     ///
     /// Off by default: the core bounds a claimed route's body by its body mode, as every
     /// operation's is. Unclaimed operations are unchanged, and a claimed route's body within the
