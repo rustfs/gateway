@@ -347,6 +347,12 @@ fn one_field(
                 let reader = format!("read_{}", naming::module_name(shape));
                 let _ = writeln!(out, "        // {member} — the XML request body, rooted at `{root}`.");
                 out.push_str(BUFFER_BODY);
+                if ir.xml.body_literal {
+                    // After the digest check, which is over the bytes that arrived, and before the
+                    // parse: a view the deployment marked reads MinIO's bare literal as the document
+                    // it stands for; any other body, or an unmarked view, is handed on unchanged.
+                    let _ = writeln!(out, "        let raw_body = value::body_literal(request, \"{root}\", raw_body);");
+                }
                 // An optional payload means the request may carry no body at all (CreateBucket):
                 // zero bytes decode to the absent member, and anything else must still be the
                 // declared document — an empty body is the one spelling that skips the parser.

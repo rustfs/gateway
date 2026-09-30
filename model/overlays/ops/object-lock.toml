@@ -97,6 +97,10 @@ quirk_refs = ["q-lock-0001"]
 [op.PutObjectLockConfiguration]
 precedence = 398
 auth_action = "s3:PutBucketObjectLockConfiguration"
+# MinIO's body literal: a body that is the bare text `Enabled` stands for the document with
+# `<ObjectLockEnabled>Enabled</ObjectLockEnabled>` and no rule. The decoder reads it so only on a
+# view the deployment marked (the RustFS profile); every other assembly still answers MalformedXML.
+body_literal = true
 # The pinned model carries `aws.protocols#httpChecksum` with `requestChecksumRequired` — the
 # same trait spelling every configuration write in this table states explicitly so the lowering
 # cannot lose it. A lock write with neither Content-MD5 nor an x-amz-checksum-* header is

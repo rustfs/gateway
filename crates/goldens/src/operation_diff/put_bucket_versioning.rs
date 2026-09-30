@@ -46,6 +46,8 @@ const DOCUMENT: (&[u8], &str) = (
 const BARE_ENABLED: (&[u8], &str) = (b"Enabled", "ANI6duQ7Rtrp7Hqp3L67Mg==");
 /// The bare literal s3s does not accept, with its Content-MD5.
 const BARE_SUSPENDED: (&[u8], &str) = (b"Suspended", "i/kGgzzHrqgIT1UiF+2cHQ==");
+/// The accepted literal with ASCII whitespace around it, with its Content-MD5.
+const BARE_ENABLED_PADDED: (&[u8], &str) = (b" Enabled\r\n", "BKzQxDfNlKIVG9VEBNH8MQ==");
 
 fn head(body: &[u8], md5: &str) -> http::request::Builder {
     http::Request::builder()
@@ -57,10 +59,20 @@ fn head(body: &[u8], md5: &str) -> http::request::Builder {
 }
 
 /// The status the generated decoder read, or its error code.
-fn gateway((body, md5): (&[u8], &str)) -> Result<Option<String>, String> {
+fn gateway(sample: (&[u8], &str)) -> Result<Option<String>, String> {
+    decoded(sample, false)
+}
+
+/// The same, on a view the RustFS profile marks to read MinIO's body literal.
+fn rustfs_profile(sample: (&[u8], &str)) -> Result<Option<String>, String> {
+    decoded(sample, true)
+}
+
+fn decoded((body, md5): (&[u8], &str), literals: bool) -> Result<Option<String>, String> {
     let request = head(body, md5).body(()).map_err(|error| format!("fixture head: {error}"))?;
     let wire = WireRequest::accept(request, &Limits::default()).map_err(|error| format!("wire refusal: {error:?}"))?;
     let view = MetaView::of(&wire, TargetKind::Bucket).map_err(|error| error.code().as_str().to_owned())?;
+    let view = if literals { view.with_body_literals() } else { view };
     dto::PutBucketVersioning::decode(&view, RequestBody::Buffered(Bytes::copy_from_slice(body)))
         .map(|input| input.versioning_configuration.status.map(|status| status.as_str().to_owned()))
         .map_err(|error| error.code().as_str().to_owned())
@@ -134,8 +146,9 @@ fn s3s_exchange((body, md5): (&[u8], &str)) -> OracleAnswer {
 // ── named divergence ──────────────────────────────────────────────────────────────────────────
 
 /// The bare text `Enabled` as the whole body: s3s, built with `minio`, hands its handler Status
-/// Enabled; the gateway refuses it as `MalformedXML`, because `body_literal` is false for this
-/// operation and the body is the document (`c-bucketconfig-0060`, decided in rustfs/gateway#715).
+/// Enabled; the gateway refuses it as `MalformedXML` by default, because only a view the RustFS
+/// profile marks reads the literal and the body is otherwise the document (`c-bucketconfig-0060`,
+/// decided in rustfs/gateway#715).
 /// Both stacks agree on the XML document — the control that makes the refusal about the literal —
 /// and on a bare `Suspended`, which s3s reads as XML and refuses too: the literal it accepts is
 /// `Enabled` alone.
@@ -168,4 +181,25 @@ fn a_bare_enabled_versioning_body_is_refused_by_the_gateway_and_accepted_by_s3s(
         },
         "s3s has no Suspended literal"
     );
+}
+
+// ── the RustFS profile ────────────────────────────────────────────────────────────────────────
+
+/// On a view the RustFS profile marks (`ServiceBuilder::accept_minio_body_literals`), the gateway
+/// reads the literal as the legacy stack does: `Enabled`, trimmed of ASCII whitespace, is Status
+/// Enabled on both, the document is unchanged, and a bare `Suspended` is refused by both. The
+/// whole input RustFS is handed is compared through the production seam by the seam diff
+/// (`put-bucket-versioning-bare-enabled*`).
+#[test]
+fn under_the_rustfs_profile_the_bare_literal_reads_as_the_legacy_stack_reads_it() {
+    let enabled = Some(Some("Enabled".to_owned()));
+    for sample in [BARE_ENABLED, BARE_ENABLED_PADDED, DOCUMENT] {
+        assert_eq!(rustfs_profile(sample), Ok(Some("Enabled".to_owned())), "{:?}", sample.0);
+        let legacy = s3s_exchange(sample);
+        assert_eq!((legacy.status, &legacy.handed), (200, &enabled), "{legacy:?}");
+    }
+    assert_eq!(rustfs_profile(BARE_SUSPENDED), Err("MalformedXML".to_owned()));
+    assert_eq!(s3s_exchange(BARE_SUSPENDED).status, 400);
+    // The default is untouched: an unmarked view still refuses the padded literal.
+    assert_eq!(gateway(BARE_ENABLED_PADDED), Err("MalformedXML".to_owned()));
 }

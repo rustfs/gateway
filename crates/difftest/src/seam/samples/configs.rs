@@ -130,6 +130,23 @@ const VERSIONING_MINIO: &str = "<VersioningConfiguration><Status>Enabled</Status
 
 pub(super) fn rows() -> Vec<SeamRow> {
     vec![
+        // MinIO's bare body literal, which the RustFS profile reads as the document it stands for
+        // (rustfs/backlog#1677, R6): RustFS must be handed the input the legacy stack hands it.
+        row(
+            "put-bucket-versioning-bare-enabled",
+            document(Method::PUT, "/bucket?versioning", "Enabled"),
+            Expect::Identical,
+        ),
+        row(
+            "put-bucket-versioning-bare-enabled-padded",
+            document(Method::PUT, "/bucket?versioning", " Enabled\r\n"),
+            Expect::Identical,
+        ),
+        row(
+            "put-object-lock-configuration-bare-enabled",
+            document(Method::PUT, "/bucket?object-lock", "\tEnabled "),
+            Expect::Identical,
+        ),
         row("put-bucket-lifecycle-minio-members", config("/bucket?lifecycle", LIFECYCLE_MINIO), Expect::Identical),
         row("put-bucket-replication-minio-members", config("/bucket?replication", REPLICATION_MINIO), Expect::Identical),
         row("put-bucket-versioning-minio-members", config("/bucket?versioning", VERSIONING_MINIO), Expect::Identical),

@@ -171,6 +171,7 @@ impl GatewaySeam {
             // are what the RustFS app layer is handed (`compat/sut` turns on the same ones).
             .accept_all_checksum_omissions()
             .clamp_oversized_max_keys()
+            .accept_minio_body_literals()
             .leave_anonymous_streaming_payloads_undecoded()
             .sign_presigned_payloads_as_unsigned()
             .answer_head_refusals_without_content_length()
