@@ -170,6 +170,8 @@ mod rustfs_key_floor;
 mod rustfs_selection;
 #[path = "rustfs_vhost.rs"]
 mod rustfs_vhost;
+#[path = "scope_refusals.rs"]
+mod scope_refusals;
 #[path = "select_frame_records.rs"]
 mod select_frame_records;
 #[path = "select_restore_intent.rs"]

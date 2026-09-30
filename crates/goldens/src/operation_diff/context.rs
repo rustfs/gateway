@@ -46,6 +46,9 @@ mod clock_tests;
 mod error_parity;
 mod get_bucket_location;
 mod put_object;
+mod stamp;
+
+pub(crate) use stamp::amz_date;
 
 use std::future::Future;
 use std::pin::Pin;
@@ -111,6 +114,9 @@ pub(crate) struct ContextRequest {
     secret_key: &'static str,
     /// Whether the gateway authenticator verifies any scope region (ADR-0023).
     any_region: bool,
+    /// Whether the gateway authenticator answers a refused scope as legacy RustFS does
+    /// (rustfs/gateway#1130).
+    legacy_scope_refusals: bool,
 }
 
 impl ContextRequest {
@@ -131,6 +137,7 @@ impl ContextRequest {
             access_key: ACCESS_KEY,
             secret_key: SECRET_KEY,
             any_region: false,
+            legacy_scope_refusals: false,
         }
     }
 
@@ -198,6 +205,14 @@ impl ContextRequest {
     /// only after the signature (rd-loc-0006), and reads a region of any length (rd-loc-0007).
     pub(crate) fn rustfs_profile(mut self) -> Self {
         self.any_region = true;
+        self
+    }
+
+    /// Adds the RustFS profile's legacy scope refusals (rustfs/gateway#1130): a scope date other
+    /// than the signed day and a region outside `[a-z0-9-]+` answered with legacy RustFS's code and
+    /// sentence (rd-loc-0011). Kept apart from [`Self::rustfs_profile`], whose pins predate it.
+    pub(crate) fn legacy_scope_refusals(mut self) -> Self {
+        self.legacy_scope_refusals = true;
         self
     }
 
@@ -286,29 +301,6 @@ impl ContextRequest {
         }
         builder
     }
-}
-
-/// `YYYYMMDDTHHMMSSZ` for a Unix time. Both verifiers compare the stamp against their own clock,
-/// so the fixture is signed now rather than at a fixed instant.
-pub(crate) fn amz_date(unix: i64) -> String {
-    let days = unix.div_euclid(86_400);
-    let second_of_day = unix.rem_euclid(86_400);
-    // Civil-from-days (proleptic Gregorian), days counted from 1970-01-01.
-    let shifted = days + 719_468;
-    let era = shifted.div_euclid(146_097);
-    let day_of_era = shifted - era * 146_097;
-    let year_of_era = (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
-    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
-    let month_index = (5 * day_of_year + 2) / 153;
-    let day = day_of_year - (153 * month_index + 2) / 5 + 1;
-    let month = if month_index < 10 { month_index + 3 } else { month_index - 9 };
-    let year = year_of_era + era * 400 + i64::from(month <= 2);
-    format!(
-        "{year:04}{month:02}{day:02}T{:02}{:02}{:02}Z",
-        second_of_day / 3_600,
-        second_of_day % 3_600 / 60,
-        second_of_day % 60
-    )
 }
 
 // ── the gateway side ──────────────────────────────────────────────────────────────────────────
@@ -460,6 +452,9 @@ fn gateway_service(
             .accept_empty_signing_region()
             .refuse_unreadable_signing_regions_after_verification()
             .accept_signing_regions_of_any_length();
+    }
+    if request.legacy_scope_refusals {
+        authenticator = authenticator.answer_credential_scope_refusals_as_legacy_rustfs();
     }
     let backend = Arc::new(AdapterBackend {
         recorded: Arc::clone(recorded),

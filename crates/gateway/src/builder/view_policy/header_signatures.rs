@@ -75,6 +75,7 @@ use rustfs_gateway_sig::{
 use rustfs_gateway_types::ErrorCode;
 
 use super::super::ServiceBuilder;
+use crate::ext::legacy_credential::{day_exists, number, read_authorization};
 use crate::render::{S3Error, from_handler};
 
 /// The algorithm token legacy RustFS's own guard leaves to the legacy stack.
@@ -147,8 +148,8 @@ fn sigv4_refusal(head: &SignedHead<'_>, value: &str) -> Option<(ErrorCode, Strin
     if credential.algorithm != SIGV4_ALGORITHM || !credential.canonical_signature {
         return None;
     }
-    if !SIGNING_SERVICES.contains(&credential.service) {
-        let service = credential.service;
+    if !SIGNING_SERVICES.contains(&credential.scope.service) {
+        let service = credential.scope.service;
         let expected = SIGNING_SERVICES.join(", ");
         return Some((
             ErrorCode::NOT_IMPLEMENTED,
@@ -162,7 +163,7 @@ fn sigv4_refusal(head: &SignedHead<'_>, value: &str) -> Option<(ErrorCode, Strin
     if !is_amz_date_shape(stamp) {
         return refused(ErrorCode::INVALID_REQUEST, "invalid header: x-amz-date");
     }
-    if stamp.get(..8) != Some(credential.date) {
+    if stamp.get(..8) != Some(credential.scope.date) {
         return refused(ErrorCode::SIGNATURE_DOES_NOT_MATCH, "credential scope date does not match x-amz-date");
     }
     if !names_an_instant(stamp) {
@@ -176,7 +177,7 @@ fn sigv4_refusal(head: &SignedHead<'_>, value: &str) -> Option<(ErrorCode, Strin
         Some(declared) if is_malformed_payload(declared) => {
             refused(ErrorCode::SIGNATURE_DOES_NOT_MATCH, "invalid header: x-amz-content-sha256")
         }
-        None if credential.service != "sts" => refused(ErrorCode::INVALID_REQUEST, "missing header: x-amz-content-sha256"),
+        None if credential.scope.service != "sts" => refused(ErrorCode::INVALID_REQUEST, "missing header: x-amz-content-sha256"),
         _ => None,
     }
 }
@@ -290,69 +291,6 @@ fn unique_value<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
     core::str::from_utf8(value.as_bytes()).ok()
 }
 
-/// What legacy RustFS reads out of an `Authorization` value.
-struct HeaderCredential<'a> {
-    algorithm: &'a str,
-    date: &'a str,
-    service: &'a str,
-    canonical_signature: bool,
-}
-
-/// Reads `value` with legacy RustFS's grammar: an algorithm token of one or more characters that are
-/// not ASCII whitespace; one or more spaces, tabs, CRs or LFs; `Credential=` and a scope whose key
-/// and region may be empty, whose date is a real `YYYYMMDD` day and whose service is not; `,`;
-/// optional whitespace; `SignedHeaders=` and a list up to the next `,`; `,`; optional whitespace;
-/// `Signature=` and a value up to the next whitespace; optional whitespace to the end.
-fn read_authorization(value: &str) -> Option<HeaderCredential<'_>> {
-    let algorithm_end = value.find(|c: char| c.is_ascii_whitespace())?;
-    let (algorithm, rest) = value.split_at(algorithm_end);
-    if algorithm.is_empty() {
-        return None;
-    }
-    let after_space = skip_spaces(rest);
-    if after_space.len() == rest.len() {
-        return None;
-    }
-    let rest = after_space.strip_prefix("Credential=")?;
-    let (_key, rest) = rest.split_once('/')?;
-    let (date, rest) = rest.split_once('/')?;
-    if !is_calendar_day(date) {
-        return None;
-    }
-    let (_region, rest) = rest.split_once('/')?;
-    let (service, rest) = rest.split_once('/')?;
-    if service.is_empty() {
-        return None;
-    }
-    let rest = rest.strip_prefix("aws4_request")?.strip_prefix(',')?;
-    let rest = skip_spaces(rest).strip_prefix("SignedHeaders=")?;
-    let (_list, rest) = rest.split_once(',')?;
-    let rest = skip_spaces(rest).strip_prefix("Signature=")?;
-    let signature_end = rest.find(|c: char| c.is_ascii_whitespace()).unwrap_or(rest.len());
-    let (signature, rest) = rest.split_at(signature_end);
-    if !skip_spaces(rest).is_empty() {
-        return None;
-    }
-    Some(HeaderCredential {
-        algorithm,
-        date,
-        service,
-        canonical_signature: signature.len() == 64 && signature.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')),
-    })
-}
-
-/// `value` after its leading spaces, tabs, CRs and LFs.
-fn skip_spaces(value: &str) -> &str {
-    value.trim_start_matches([' ', '\t', '\r', '\n'])
-}
-
-/// Whether `date` is `YYYYMMDD` naming a day that exists.
-fn is_calendar_day(date: &str) -> bool {
-    date.len() == 8
-        && date.bytes().all(|b| b.is_ascii_digit())
-        && day_exists(number(date, 0..4), number(date, 4..6), number(date, 6..8))
-}
-
 /// Whether `stamp` has the shape legacy RustFS reads: eight digits, `T`, six digits, `Z`.
 fn is_amz_date_shape(stamp: &str) -> bool {
     let bytes = stamp.as_bytes();
@@ -371,24 +309,6 @@ fn names_an_instant(stamp: &str) -> bool {
         && number(stamp, 9..11) <= 23
         && number(stamp, 11..13) <= 59
         && number(stamp, 13..15) <= 59
-}
-
-/// The decimal number in `text[range]`, which the callers have checked is all digits.
-fn number(text: &str, range: core::ops::Range<usize>) -> u32 {
-    text.get(range).and_then(|digits| digits.parse().ok()).unwrap_or(u32::MAX)
-}
-
-/// Whether `day` of `month` exists in `year`, in the proleptic Gregorian calendar.
-fn day_exists(year: u32, month: u32, day: u32) -> bool {
-    let leap = year.is_multiple_of(4) && (!year.is_multiple_of(100) || year.is_multiple_of(400));
-    let days = match month {
-        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
-        4 | 6 | 9 | 11 => 30,
-        2 if leap => 29,
-        2 => 28,
-        _ => return false,
-    };
-    (1..=days).contains(&day)
 }
 
 /// Whether a declared payload is one legacy RustFS cannot read: not a lowercase hex digest, a

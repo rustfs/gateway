@@ -27,9 +27,16 @@
 //! service, the RustFS ring-2 adapter first.
 
 use super::authenticator::SigV4Authenticator;
+use super::legacy_credential::{LegacyScope, invalid_region_sentence, is_legacy_region, read_authorization, read_scope};
 use super::legacy_refusal::LegacyRefusal;
-use rustfs_gateway_sig::{CredentialScope, EmptyRegion, ExpectedScope, RegionLength, RegionRule, RegionSet, ServiceReading};
+use rustfs_gateway_sig::{
+    AUTHORIZATION_HEADER, AuthError, CredentialScope, EmptyRegion, ExpectedScope, RegionLength, RegionRule, RegionSet, SealedAws,
+    ServiceReading, SigLocation, X_AMZ_DATE, X_AMZ_DATE_HEADER,
+};
 use rustfs_gateway_types::ErrorCode;
+
+/// Legacy RustFS's sentence for a scope date other than the signed timestamp's day.
+const SCOPE_DATE_SENTENCE: &str = "credential scope date does not match x-amz-date";
 
 /// The credential-scope services legacy RustFS verifies, on every route: the legacy stack's two
 /// defaults and the table catalog's signing name, in the order its refusal lists them (rustfs/rustfs
@@ -50,6 +57,8 @@ pub(super) struct ScopePolicy {
     pub(super) any_length: bool,
     /// Every service legacy RustFS verifies, on every operation (rustfs/gateway#1130).
     pub(super) legacy_services: bool,
+    /// Legacy RustFS's answers to a scope date and a region it refuses (rustfs/gateway#1130).
+    pub(super) legacy_scope_refusals: bool,
 }
 
 impl ScopePolicy {
@@ -143,6 +152,75 @@ impl ScopePolicy {
         // ADR-0023's: refuse the spelling at the scope check, before any key is derived.
         self.any_spelling && !region.is_empty() && !RegionSet::is_region_name_of_any_length(region)
     }
+
+    /// Legacy RustFS's words for a region refused after the signature, under the legacy scope
+    /// refusals.
+    pub(super) fn verified_region_refusal(self, region: &str) -> Option<LegacyRefusal> {
+        self.legacy_scope_refusals
+            .then(|| LegacyRefusal::new(ErrorCode::INVALID_REQUEST, invalid_region_sentence(region)))
+    }
+
+    /// Legacy RustFS's answer to a scope dated other than `signed_day`, under the legacy scope
+    /// refusals.
+    pub(super) fn scope_date_refusal(self, scope_date: &str, signed_day: &str) -> Option<(AuthError, LegacyRefusal)> {
+        (self.legacy_scope_refusals && scope_date != signed_day).then(|| {
+            (
+                AuthError::SignatureDoesNotMatch,
+                LegacyRefusal::new(ErrorCode::SIGNATURE_DOES_NOT_MATCH, SCOPE_DATE_SENTENCE),
+            )
+        })
+    }
+
+    /// Legacy RustFS's answer to a credential the gateway's parsers could not read, under the legacy
+    /// scope refusals: legacy RustFS reads a region with a separator, a control byte or a non-ASCII
+    /// byte, and a POST form whose scope date is not its `x-amz-date` day, and refuses both.
+    pub(super) fn unreadable_scope_refusal(
+        self,
+        sealed: &SealedAws<'_>,
+        location: SigLocation,
+    ) -> Option<(AuthError, LegacyRefusal)> {
+        if !self.legacy_scope_refusals {
+            return None;
+        }
+        let view = sealed.view();
+        let refused = |scope: LegacyScope<'_>, signed: Option<&str>| {
+            if let Some(refusal) = signed.and_then(|stamp| self.scope_date_refusal(scope.date, stamp.get(..8)?)) {
+                return Some(refusal);
+            }
+            // Legacy-compat (rustfs/backlog#2684): legacy RustFS reads a region with a separator,
+            // a control byte or a non-ASCII byte, derives a key from it and refuses it only after
+            // the signature, naming it. This refuses it before any key is derived, with legacy
+            // RustFS's code and sentence; the intended future behaviour is the gateway's own
+            // answer to a credential it cannot read.
+            (!is_legacy_region(scope.region)).then(|| {
+                (
+                    AuthError::InvalidCredentialRegion,
+                    LegacyRefusal::new(ErrorCode::INVALID_REQUEST, invalid_region_sentence(scope.region)),
+                )
+            })
+        };
+        match location {
+            SigLocation::Header => {
+                // Decoded as UTF-8, as legacy RustFS decodes a header value.
+                let utf8 = |name| {
+                    view.headers()
+                        .get(name)
+                        .and_then(|value: &http::HeaderValue| core::str::from_utf8(value.as_bytes()).ok())
+                };
+                refused(read_authorization(utf8(AUTHORIZATION_HEADER)?)?.scope, utf8(X_AMZ_DATE_HEADER))
+            }
+            SigLocation::Query => {
+                let credential = view.query().decoded_value(rustfs_gateway_sig::X_AMZ_CREDENTIAL).ok()??;
+                let signed = view.query().decoded_value(X_AMZ_DATE).ok().flatten();
+                refused(read_scope(&credential)?, signed.as_deref())
+            }
+            SigLocation::FormField => {
+                let credential = view.form_value("x-amz-credential")?;
+                refused(read_scope(credential)?, view.form_value("x-amz-date"))
+            }
+            _ => None,
+        }
+    }
 }
 
 impl SigV4Authenticator {
@@ -235,6 +313,29 @@ impl SigV4Authenticator {
     #[must_use]
     pub fn accept_legacy_rustfs_signing_services(mut self) -> Self {
         self.scope_policy.legacy_services = true;
+        self
+    }
+
+    /// Answers a credential scope legacy RustFS refuses with its code and sentence, as RustFS does
+    /// today (rustfs/gateway#1130), on every signing surface: a scope date other than the signed
+    /// timestamp's day is `403 SignatureDoesNotMatch` "credential scope date does not match
+    /// x-amz-date", before the key is looked up and before the service is judged, as legacy RustFS
+    /// refuses it; and a region outside `[a-z0-9-]+` is `400 InvalidRequest` naming it ("invalid
+    /// credential region: invalid region: "US-EAST-1"") — one the gateway's parsers read after the
+    /// signature, as
+    /// [`refuse_unreadable_signing_regions_after_verification`](Self::refuse_unreadable_signing_regions_after_verification)
+    /// refuses it and legacy RustFS does, and one they cannot read (a space, a comma in the
+    /// `Authorization` header, a control or non-ASCII byte) before any key is looked up or derived,
+    /// where legacy RustFS verifies it first (the kept order, rd-loc-0011).
+    ///
+    /// Off by default: the default answers a scope date or region the scope check refuses with
+    /// `400 AuthorizationHeaderMalformed`, a region refused after the signature with the gateway's
+    /// sentence, and a credential its parsers cannot read with `403 InvalidAccessKeyId`. The switch
+    /// only changes those answers: it admits nothing, derives no key it did not before, and changes
+    /// no comparison.
+    #[must_use]
+    pub fn answer_credential_scope_refusals_as_legacy_rustfs(mut self) -> Self {
+        self.scope_policy.legacy_scope_refusals = true;
         self
     }
 

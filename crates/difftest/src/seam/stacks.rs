@@ -139,7 +139,8 @@ impl GatewaySeam {
             .refuse_unreadable_signing_regions_after_verification()
             .accept_signing_regions_of_any_length()
             .verify_raw_paths_only_with_unencoded_bytes()
-            .accept_legacy_rustfs_signing_services();
+            .accept_legacy_rustfs_signing_services()
+            .answer_credential_scope_refusals_as_legacy_rustfs();
         let slot: Slot = Arc::new(Mutex::new(None));
         let routed: Routed = Arc::new(Mutex::new(None));
         let answer: Queued = Arc::new(Mutex::new(None));

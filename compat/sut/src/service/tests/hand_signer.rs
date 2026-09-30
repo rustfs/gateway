@@ -57,6 +57,18 @@ pub(super) fn sha256_base64(data: &[u8]) -> String {
     base64(&Sha256::digest(data))
 }
 
+/// `text` as the inside of a JSON string: a quote, a backslash and a control character escaped.
+fn json_string(text: &str) -> String {
+    text.chars()
+        .map(|character| match character {
+            '"' => "\\\"".to_owned(),
+            '\\' => "\\\\".to_owned(),
+            control if u32::from(control) < 0x20 => format!("\\u{:04x}", u32::from(control)),
+            other => other.to_string(),
+        })
+        .collect()
+}
+
 fn base64(bytes: &[u8]) -> String {
     const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::new();
@@ -116,6 +128,8 @@ pub(super) struct HandSigned {
     send_amz_date: bool,
     date_header: bool,
     scope_day: Option<String>,
+    region: &'static str,
+    access_key: &'static str,
 }
 
 impl HandSigned {
@@ -137,6 +151,8 @@ impl HandSigned {
             send_amz_date: true,
             date_header: false,
             scope_day: None,
+            region: "us-east-1",
+            access_key: MAIN_KEY,
         }
     }
 
@@ -213,15 +229,28 @@ impl HandSigned {
         self
     }
 
+    /// Names `region` in the credential scope, whatever bytes it carries, and derives the key from
+    /// it.
+    pub(super) fn in_region(mut self, region: &'static str) -> Self {
+        self.region = region;
+        self
+    }
+
+    /// Presents an access key neither identity holds, signed with the main identity's secret.
+    pub(super) fn under_an_unknown_key(mut self) -> Self {
+        self.access_key = "AKIAGATEWAYUNKNOWN00";
+        self
+    }
+
     fn scope(&self, day: &str) -> String {
         let day = self.scope_day.as_deref().unwrap_or(day);
-        format!("{day}/us-east-1/{}/aws4_request", self.service)
+        format!("{day}/{}/{}/aws4_request", self.region, self.service)
     }
 
     fn signature(&self, day: &str, string_to_sign: &str) -> String {
         let day = self.scope_day.as_deref().unwrap_or(day);
         let mut key = hmac_sha256(format!("AWS4{}", self.secret).as_bytes(), day.as_bytes());
-        for part in ["us-east-1", self.service, "aws4_request"] {
+        for part in [self.region, self.service, "aws4_request"] {
             key = hmac_sha256(&key, part.as_bytes());
         }
         hex(&hmac_sha256(&key, string_to_sign.as_bytes()))
@@ -276,7 +305,10 @@ impl HandSigned {
         request
             .header(
                 http::header::AUTHORIZATION,
-                format!("AWS4-HMAC-SHA256 Credential={MAIN_KEY}/{scope}, SignedHeaders={signed_names}, Signature={signature}"),
+                format!(
+                    "AWS4-HMAC-SHA256 Credential={}/{scope}, SignedHeaders={signed_names}, Signature={signature}",
+                    self.access_key
+                ),
             )
             .body(self.body.clone())
             .expect("a valid request")
@@ -286,7 +318,7 @@ impl HandSigned {
     /// signed as `UNSIGNED-PAYLOAD`, as the RustFS profile reads every presigned request.
     pub(super) fn presigned(&self) -> http::Request<Bytes> {
         let (stamp, _) = stamps();
-        let credential = format!("{MAIN_KEY}/{}", self.scope(&stamp[..8]));
+        let credential = format!("{}/{}", self.access_key, self.scope(&stamp[..8]));
         let parameters = [
             ("X-Amz-Algorithm", "AWS4-HMAC-SHA256"),
             ("X-Amz-Credential", credential.as_str()),
@@ -316,10 +348,11 @@ impl HandSigned {
     pub(super) fn posted(&self, key: &str, file: &str) -> http::Request<Bytes> {
         let (stamp, expires) = stamps();
         let bucket = self.path.trim_start_matches('/');
-        let credential = format!("{MAIN_KEY}/{}", self.scope(&stamp[..8]));
+        let credential = format!("{}/{}", self.access_key, self.scope(&stamp[..8]));
         let document = format!(
             "{{\"expiration\":\"{expires}\",\"conditions\":[{{\"bucket\":\"{bucket}\"}},[\"eq\",\"$key\",\"{key}\"],\
-             {{\"x-amz-algorithm\":\"AWS4-HMAC-SHA256\"}},{{\"x-amz-credential\":\"{credential}\"}},{{\"x-amz-date\":\"{stamp}\"}}]}}"
+             {{\"x-amz-algorithm\":\"AWS4-HMAC-SHA256\"}},{{\"x-amz-credential\":\"{}\"}},{{\"x-amz-date\":\"{stamp}\"}}]}}",
+            json_string(&credential)
         );
         let policy = base64(document.as_bytes());
         let signature = self.signature(&stamp[..8], &policy);
