@@ -14481,9 +14481,33 @@ expect_fail check_mint_baseline.sh 'a mint SDK listed twice in the baseline' \
     mut_mint_baseline_duplicate_sdk 'minio-go is listed more than once'
 
 # The exclusion list shrinks freely and widens only with the generation, and every entry
-# names an in-project owner and a reason. The .NET exclusion remains in the baseline;
-# its owner is shared with mc, so owner mutations name the SDK prefix as well.
+# names an in-project owner and a reason. Generation 4 excludes nothing (rustfs/gateway#720), so
+# the cases that need an exclusion to mutate first commit one in the sandbox, as a reviewed
+# generation would, and mutate that: the rules stay measured whether or not the reviewed
+# baseline currently excludes anything.
 MINT_DOTNET_EXCLUSION='.minio-dotnet excluded https://github.com/rustfs/gateway/issues/720 the pinned image ships no .NET test binary, so its runner writes no record at all'
+
+# mint_commit_dotnet_exclusion: the sandbox baseline with .minio-dotnet excluded under a raised
+# generation, committed, so the guard compares the case's mutation with it.
+mint_commit_dotnet_exclusion() {
+    python3 - "$MINT_DOTNET_EXCLUSION" <<'PYEOF'
+import pathlib
+import re
+import sys
+
+path = pathlib.Path("ci/mint/baseline.txt")
+text = path.read_text()
+exclusion = sys.argv[1]
+if exclusion not in text:
+    text, count = re.subn(r"(?m)^\.minio-dotnet [0-9]+$", exclusion, text)
+    if count != 1:
+        raise SystemExit("missing mutation subject in ci/mint/baseline.txt: a .minio-dotnet line")
+path.write_text(text)
+PYEOF
+    mint_set_generation "$((MINT_GENERATION + 1))"
+    git add ci/mint/baseline.txt
+    git -c user.name=t -c user.email=t@t commit -qm 'mint baseline: .minio-dotnet excluded'
+}
 
 mut_mint_baseline_excludes_without_generation() {
     mint_mutate ci/mint/baseline.txt '\nminio-go 0\n' \
@@ -14500,12 +14524,14 @@ expect_guard_pass check_mint_baseline.sh 'a mint SDK excluded in the change that
     mut_mint_baseline_excludes_with_generation
 
 mut_mint_baseline_restores_excluded_sdk() {
+    mint_commit_dotnet_exclusion
     mint_mutate ci/mint/baseline.txt "$MINT_DOTNET_EXCLUSION" '.minio-dotnet 4'
 }
 expect_guard_pass check_mint_baseline.sh 'an excluded mint SDK put back under a count, which only narrows' \
     mut_mint_baseline_restores_excluded_sdk
 
 mut_mint_baseline_exclusion_without_owner() {
+    mint_commit_dotnet_exclusion
     mint_mutate ci/mint/baseline.txt '.minio-dotnet excluded https://github.com/rustfs/gateway/issues/720 ' \
         '.minio-dotnet excluded '
 }
@@ -14513,6 +14539,7 @@ expect_fail check_mint_baseline.sh 'a mint exclusion that names no owning issue'
     mut_mint_baseline_exclusion_without_owner 'the exclusion of .minio-dotnet names no owner'
 
 mut_mint_baseline_exclusion_foreign_owner() {
+    mint_commit_dotnet_exclusion
     mint_mutate ci/mint/baseline.txt '.minio-dotnet excluded https://github.com/rustfs/gateway/issues/720' \
         '.minio-dotnet excluded https://github.com/minio/mint/issues/720'
 }
@@ -14520,6 +14547,7 @@ expect_fail check_mint_baseline.sh 'a mint exclusion owned by an issue outside t
     mut_mint_baseline_exclusion_foreign_owner 'the exclusion of .minio-dotnet names no owner'
 
 mut_mint_baseline_exclusion_without_reason() {
+    mint_commit_dotnet_exclusion
     mint_mutate ci/mint/baseline.txt "$MINT_DOTNET_EXCLUSION" \
         '.minio-dotnet excluded https://github.com/rustfs/gateway/issues/720 flaky'
 }
@@ -14527,6 +14555,7 @@ expect_fail check_mint_baseline.sh 'a mint exclusion whose reason is one word' \
     mut_mint_baseline_exclusion_without_reason 'the exclusion of .minio-dotnet gives no reason'
 
 mut_mint_baseline_excluded_and_counted() {
+    mint_commit_dotnet_exclusion
     mint_mutate ci/mint/baseline.txt '\nminio-go 0\n' '\nminio-go 0\n.minio-dotnet 0\n'
 }
 expect_fail check_mint_baseline.sh 'an excluded mint SDK that also carries a count' \
