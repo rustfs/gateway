@@ -64,15 +64,15 @@ use std::sync::Arc;
 use http::Method;
 use rustfs_gateway_core::BoxFuture;
 use rustfs_gateway_sig::{
-    AUTHORIZATION_HEADER, AmzDate, AuthError, AuthScheme, CanonicalRequestSpec, CredentialScope, ExpectedScope, PayloadMode,
-    PostPolicy, PostPolicyError, PostPolicyLimits, PresignedParams, RawHost, RawPathFallback, RegionRule, RegionSet,
-    ScopeRejection, SealedAws, SessionToken, SigFamily, SigIdentity, SigLocation, SigV4Authorization, Signature, SignatureMatch,
-    SignedHeaderSet, UriPathCandidates, Verdict, X_AMZ_SECURITY_TOKEN, X_AMZ_SECURITY_TOKEN_HEADER, calculate_signature,
-    enforce_scope, signing_key, timing,
+    AuthError, AuthScheme, CanonicalRequestSpec, ExpectedScope, PayloadMode, RawHost, RawPathFallback, RegionSet, ScopeRejection,
+    SealedAws, SessionToken, SigFamily, SigIdentity, SigLocation, SignatureMatch, SignedHeaderSet, Unimplemented,
+    UriPathCandidates, Verdict, X_AMZ_SECURITY_TOKEN, X_AMZ_SECURITY_TOKEN_HEADER, calculate_signature, enforce_scope,
+    signing_key, timing,
 };
 
 use super::credential_guard::{CredentialGuardConfig, GuardedCredentialProvider};
 use super::credentials::{CredentialLookup, CredentialProvider};
+use super::legacy_refusal::LegacyRefusal;
 use super::sigv2::SigV2Authentication;
 
 /// The credential store could not answer.
@@ -296,6 +296,9 @@ pub struct Authentication<'a> {
     declared_content_length: Option<u64>,
     chunks: Option<&'a ChunkSink>,
     signature_mismatch: std::sync::OnceLock<rustfs_gateway_sig::SignatureMismatchDetail>,
+    /// Legacy RustFS's words for a refusal under a RustFS-profile reading; only the built-in
+    /// authenticator publishes one, and only on a refusal.
+    legacy_refusal: std::sync::OnceLock<LegacyRefusal>,
 }
 
 impl core::fmt::Debug for Authentication<'_> {
@@ -309,6 +312,7 @@ impl core::fmt::Debug for Authentication<'_> {
             .field("declared_content_length", &self.declared_content_length)
             .field("chunks", &self.chunks)
             .field("signature_mismatch_published", &self.signature_mismatch.get().is_some())
+            .field("legacy_refusal_published", &self.legacy_refusal.get().is_some())
             .finish()
     }
 }
@@ -333,6 +337,7 @@ impl<'a> Authentication<'a> {
             declared_content_length,
             chunks: None,
             signature_mismatch: std::sync::OnceLock::new(),
+            legacy_refusal: std::sync::OnceLock::new(),
         }
     }
 
@@ -356,8 +361,10 @@ impl<'a> Authentication<'a> {
         self.chunks
     }
 
-    pub(crate) fn into_signature_mismatch(self) -> Option<rustfs_gateway_sig::SignatureMismatchDetail> {
-        self.signature_mismatch.into_inner()
+    /// What the built-in authenticator published beside its verdict: the mismatch detail of a
+    /// signature that did not match, and legacy RustFS's words for a RustFS-profile refusal.
+    pub(crate) fn into_published(self) -> (Option<rustfs_gateway_sig::SignatureMismatchDetail>, Option<LegacyRefusal>) {
+        (self.signature_mismatch.into_inner(), self.legacy_refusal.into_inner())
     }
 
     /// The admitted request. Holding one is proof the floor has run.
@@ -472,9 +479,10 @@ pub struct SigV4Authenticator {
     /// Whether a successful lookup's secret is handed to the handler (ADR-0022). Off by default;
     /// `pub(super)` so the SigV2 half honours the same switch.
     pub(super) hand_secret: bool,
-    /// Which scope regions outside `regions` are verified (ADR-0023's grammar, the empty region).
-    /// Both off by default; `pub(super)` so the switches in `super::authenticator_switches` set them.
-    pub(super) region_policy: super::authenticator_switches::RegionPolicy,
+    /// Which scope regions outside `regions` are verified (ADR-0023's grammar, the empty region),
+    /// and which scope services beside the routed operation's own (the RustFS profile). All off by
+    /// default; `pub(super)` so the switches in `super::authenticator_switches` set them.
+    pub(super) scope_policy: super::authenticator_switches::ScopePolicy,
     /// When the wire spelling of the request path is verified, after the decoded one failed.
     pub(super) raw_path: RawPathFallback,
 }
@@ -490,10 +498,11 @@ impl core::fmt::Debug for SigV4Authenticator {
             .field("regions", &self.regions)
             .field("credential_guard", self.credentials.config())
             .field("hands_caller_secret_to_handlers", &self.hand_secret)
-            .field("accepts_any_signing_region", &self.region_policy.any_region)
-            .field("accepts_empty_signing_region", &self.region_policy.empty_region)
-            .field("verifies_unreadable_signing_regions", &self.region_policy.any_spelling)
-            .field("reads_signing_regions_of_any_length", &self.region_policy.any_length)
+            .field("accepts_any_signing_region", &self.scope_policy.any_region)
+            .field("accepts_empty_signing_region", &self.scope_policy.empty_region)
+            .field("verifies_unreadable_signing_regions", &self.scope_policy.any_spelling)
+            .field("reads_signing_regions_of_any_length", &self.scope_policy.any_length)
+            .field("accepts_legacy_rustfs_signing_services", &self.scope_policy.legacy_services)
             .field("raw_path_fallback", &self.raw_path)
             .finish()
     }
@@ -521,7 +530,7 @@ impl SigV4Authenticator {
             credentials: Arc::new(GuardedCredentialProvider::with_config(credentials, config)),
             regions,
             hand_secret: false,
-            region_policy: super::authenticator_switches::RegionPolicy::default(),
+            scope_policy: super::authenticator_switches::ScopePolicy::default(),
             raw_path: RawPathFallback::WhenRespelled,
         }
     }
@@ -544,12 +553,16 @@ impl SigV4Authenticator {
         // Normalising it here keeps malformed material on the same 403 path and prevents a caller
         // from learning how far parsing got before an access key could be recovered.
         let presented =
-            Presented::read(sealed, location, self.region_policy.region_rule()).map_err(|_| AuthError::InvalidAccessKeyId)?;
+            Presented::read(sealed, location, self.scope_policy.region_rule()).map_err(|_| AuthError::InvalidAccessKeyId)?;
+        if let Some(refusal) = self.scope_policy.service_refusal(presented.scope()) {
+            let _ = request.legacy_refusal.set(refusal);
+            return Err(AuthError::NotImplemented(Unimplemented::ScopeService).into());
+        }
 
         // H5, and the only public producer of the `VerifiedScope` the derivation takes. A scope
         // the client chose therefore cannot seed a signing key.
         let expected = self
-            .region_policy
+            .scope_policy
             .apply(ExpectedScope::new(sealed.expected_service(), &self.regions));
         let verified = enforce_scope(presented.scope(), sealed.clock(), &expected).map_err(VerificationFailure::Scope)?;
 
@@ -652,7 +665,7 @@ impl SigV4Authenticator {
         if refusal.is_some() {
             return Err(AuthError::InvalidAccessKeyId.into());
         }
-        if self.region_policy.refuses_after_verification(presented.scope().region()) {
+        if self.scope_policy.refuses_after_verification(presented.scope().region()) {
             return Err(AuthError::InvalidCredentialRegion.into());
         }
 
@@ -725,73 +738,9 @@ impl From<AuthError> for VerificationFailure {
     }
 }
 
-/// The signature material the client presented, from whichever surface carried it.
-///
-/// One type for both surfaces so that the verification body has no `match` on the location running
-/// through the middle of it — the two differ in where the values are read and in nothing else.
-enum Presented {
-    Header(Box<SigV4Authorization>),
-    Query(Box<PresignedParams>),
-    Form(Box<PostPolicy>),
-}
-
-impl Presented {
-    fn read(sealed: &SealedAws<'_>, location: SigLocation, rule: RegionRule) -> Result<Self, AuthError> {
-        match location {
-            SigLocation::Query => Ok(Self::Query(Box::new(PresignedParams::parse_with(&sealed.view().query(), rule)?))),
-            SigLocation::FormField => {
-                let fields = sealed.view().form_fields().ok_or(AuthError::AuthorizationHeaderMalformed)?;
-                let policy = PostPolicy::parse_with(fields, "", PostPolicyLimits::default(), sealed.clock().now(), rule)
-                    .map_err(PostPolicyError::auth_error)?;
-                Ok(Self::Form(Box::new(policy)))
-            }
-            SigLocation::Header => {
-                let raw = sealed
-                    .view()
-                    .headers()
-                    .get(AUTHORIZATION_HEADER)
-                    .ok_or(AuthError::AuthorizationHeaderMalformed)?
-                    .to_str()
-                    .map_err(|_| AuthError::AuthorizationHeaderMalformed)?;
-                Ok(Self::Header(Box::new(SigV4Authorization::parse_with(raw, rule)?)))
-            }
-            _ => Err(AuthError::AuthorizationHeaderMalformed),
-        }
-    }
-
-    fn scope(&self) -> &CredentialScope {
-        match self {
-            Self::Header(parsed) => parsed.scope(),
-            Self::Query(parsed) => parsed.scope(),
-            Self::Form(policy) => policy.scope(),
-        }
-    }
-
-    fn canonical_parts(&self) -> Option<(&str, &Signature)> {
-        match self {
-            Self::Header(parsed) => Some((parsed.signed_headers(), parsed.signature())),
-            Self::Query(parsed) => Some((parsed.signed_headers(), parsed.signature())),
-            Self::Form(_) => None,
-        }
-    }
-
-    fn session_token(&self) -> Option<&SessionToken> {
-        let Self::Form(policy) = self else { return None };
-        policy.session_token()
-    }
-
-    /// The timestamp the string-to-sign is dated with.
-    ///
-    /// For a presigned URL it is the one in the query; for a header-signed request it is the
-    /// receipt the skew check produced, which is the same value the floor validated.
-    fn signed_at(&self, sealed: &SealedAws<'_>) -> AmzDate {
-        match self {
-            Self::Header(_) => sealed.clock().signed_at(),
-            Self::Query(parsed) => parsed.date(),
-            Self::Form(policy) => policy.signed_at(),
-        }
-    }
-}
+#[path = "authenticator_presented.rs"]
+mod presented;
+use presented::Presented;
 
 #[cfg(test)]
 #[path = "authenticator_tests.rs"]

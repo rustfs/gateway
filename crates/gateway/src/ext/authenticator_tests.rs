@@ -27,8 +27,8 @@ use super::*;
 
 use crate::ext::credentials::{Credentials, StaticCredentials};
 use rustfs_gateway_sig::{
-    Admission, OperationFloor, RawQuery, RequestNow, SecurityFloor, SigService, SigV2Policy, SigV2Signer, SkewWindow, WireView,
-    enforce_clock_skew,
+    Admission, AmzDate, CredentialScope, OperationFloor, RawQuery, RequestNow, SecurityFloor, SigService, SigV2Policy,
+    SigV2Signer, SkewWindow, WireView, enforce_clock_skew,
 };
 
 fn authenticator() -> SigV4Authenticator {
