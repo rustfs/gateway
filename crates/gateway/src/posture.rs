@@ -27,6 +27,7 @@ use rustfs_gateway_sig::{OperationFloor, SecurityFloor};
 use crate::clock::ClockPosture;
 pub(crate) use crate::dialect_posture::log_dialect_posture;
 use crate::ext::{CredentialGuardConfig, GovernorRates, Rate};
+use crate::logging;
 pub(crate) use crate::naming_posture::log_naming_posture;
 
 /// Security-sensitive assembly configuration for a start-up report, not runtime observations.
@@ -237,15 +238,21 @@ pub(crate) fn render_startup_posture<'a>(
     )
 }
 
+/// Writes [`render_startup_posture`] to the start-up log, as one `info` event whose message is the
+/// line (`crate::logging`).
 pub(crate) fn log_startup_posture<'a>(
     operations: impl Iterator<Item = &'a OperationFloor>,
     floor: &SecurityFloor,
     custom_signature_verifier: bool,
     dangerously_replaced_signature_verifier: bool,
 ) {
-    eprintln!(
+    tracing::info!(
+        target: logging::TARGET,
+        event = logging::EVENT_SECURITY_POSTURE,
+        component = logging::COMPONENT,
+        subsystem = logging::SUBSYSTEM_POSTURE,
         "{}",
-        render_startup_posture(operations, floor, custom_signature_verifier, dangerously_replaced_signature_verifier,)
+        render_startup_posture(operations, floor, custom_signature_verifier, dangerously_replaced_signature_verifier)
     );
 }
 

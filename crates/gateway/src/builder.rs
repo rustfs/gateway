@@ -63,6 +63,7 @@ use crate::ext::{
     Governor, GovernorRates, HostResolver, LayeredGovernor, NoAuthzAudit, NoBucketOwner, NoCors, NoObserver, NoPolicy, Observer,
     OpLayer, OpLayerSlot, PathStyleOnly, PolicySource, PolicyTimeout, StageFilter,
 };
+use crate::logging::{self, dangerous_assembly};
 use crate::posture::{SecurityPosture, log_dialect_posture, log_naming_posture, log_startup_posture};
 use crate::routing::{RoutingSnapshot, RuntimeAssembly};
 
@@ -561,13 +562,16 @@ impl ServiceBuilder {
         };
 
         if self.clock_posture == ClockPosture::CustomAcknowledged {
-            eprintln!("WARN: a custom wall clock is installed; signature expiry and clock skew follow it, not the system clock");
+            dangerous_assembly(
+                "custom_wall_clock",
+                "a custom wall clock is installed; signature expiry and clock skew follow it, not the system clock",
+            );
         }
 
         let routing = assemble_routing(self.router, self.pending, self.op_layers)?;
 
         if self.dangerous_allow_all_authorizer {
-            eprintln!("WARN: dangerous allow-all authorizer disables authorization for every request");
+            logging::allow_all_authorizer_assembled();
         }
 
         #[cfg(feature = "dangerous-replace-signature-verifier")]
@@ -575,8 +579,9 @@ impl ServiceBuilder {
         #[cfg(not(feature = "dangerous-replace-signature-verifier"))]
         let dangerously_replaced_signature_verifier = false;
         if dangerously_replaced_signature_verifier {
-            eprintln!(
-                "WARN: the built-in AWS signature verifier is dangerously replaced; the H1..H7 security floor remains enforced"
+            dangerous_assembly(
+                "replaced_aws_signature_verifier",
+                "the built-in AWS signature verifier is dangerously replaced; the H1..H7 security floor remains enforced",
             );
         }
 

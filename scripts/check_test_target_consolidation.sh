@@ -748,6 +748,7 @@ gateway_modules = (
     "streaming_without_length",
     "tagging_reachability",
     "throughput_request",
+    "tracing_events",
     "unknown_checksum_algorithms",
     "unread_body_refusal",
     "upload_object_ceiling",

@@ -47,6 +47,7 @@
 
 mod corpus;
 mod identity;
+mod logging;
 mod ownership;
 mod policy_authorizer;
 mod probe;
@@ -259,6 +260,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let options = parse_options(raw)?;
+    // Before the assembly, whose start-up report is a set of `tracing` events.
+    logging::install();
     std::fs::create_dir_all(&options.data)?;
     let backend = Arc::new(service::open_backend(&options)?);
     let owners = Arc::new(BucketOwners::default());

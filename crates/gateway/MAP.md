@@ -8,7 +8,7 @@ for request order and `docs/assembly-order.md` for extension call counts.
 
 | File | Responsibility | Read it when |
 | --- | --- | --- |
-| `src/lib.rs` | Modules and public re-exports | A downstream caller cannot name a type |
+| `src/lib.rs`, `src/sig.rs` | Modules and public re-exports; `sig.rs` re-exports the signing vocabulary | A downstream caller cannot name a type or needs signing vocabulary |
 | `src/builder.rs`, `src/builder/assembly_update.rs`, `src/builder/cors.rs`, `src/builder/client_quirks.rs`, `src/builder/view_policy.rs`, `src/builder/anonymous_framing.rs`, `src/builder/names.rs`, `src/builder/operation_selection.rs` | Registration, validated assemblies, `cors.rs`'s CORS settings (source, cache, credential posture), the MinIO-client (#916), s3cmd ACL (#912) and every-operation (rustfs/backlog#1677, R5; whole-service cases in `tests/checksum_omissions.rs`) checksum waivers, `view_policy.rs`'s RustFS-profile switches (the `max-keys` ceiling, the `BadDigest` integrity codes, rustfs/backlog#1677; an empty upload without `Content-Length`, rustfs/rustfs#6849), the RustFS-profile switch that leaves an anonymous aws-chunked body undecoded (#1060), and `names.rs`'s naming switches (the naming policy, its validator and slash rule, and the RustFS-profile legacy key floor, #1107, and legacy path addressing, #1115), and `operation_selection.rs`'s RustFS-profile legacy operation selection (#1127) | Adding a knob, diagnosing candidate validation, or changing a client waiver or RustFS-profile reading |
 | `src/config.rs`, `src/routing.rs` | One atomic settings, routing, and middleware snapshot | Updating a live generation or checking one-load-per-request |
 | `src/service.rs`, `src/service/update.rs`, `src/service/cors.rs`, `src/legacy_addressing.rs`, `src/classify.rs` | Ordered pipeline and atomic assembly publication, and the pipeline's CORS stage (the preflight branch and an ordinary response's decoration); ADR-0024's service-level addressing, secret opt-in and typed path values, and ADR-0025/0026's bound bucket (template or query) and subjects, are decided in `src/routed_facts.rs`; the route stage asks one question per action and per account; `legacy_addressing.rs` is the RustFS profile's `GET //` rewrite and pre-routing path judgement (#1115); `classify.rs` walks the same pre-authentication steps to classify a request head (#1141) | Moving a stage, replacing middleware, or tracing a response |
@@ -30,7 +30,8 @@ for request order and `docs/assembly-order.md` for extension call counts.
 | `src/invariants.rs` | HEAD/bodyless and SSE-C response rules | A forbidden body or key reaches the wire |
 | `src/monomorphic.rs` | Concrete-backend service and type-level operation set | Building or auditing static dispatch |
 | `src/operation_mode.rs` | Dynamic/static adapters for the common pipeline | Auditing how a routed operation reaches its codec and handler |
-| `src/panic_boundary.rs` | Panic isolation for deployment-provided futures | An extension panic escapes the request boundary |
+| `src/panic_boundary.rs` | Panic isolation for deployment-provided futures and report callbacks | An extension panic escapes the request boundary |
+| `src/logging.rs` | The `tracing` vocabulary every event shares (target, component, subsystems, event names) and the dangerous-assembly event; catalogue in `docs/observability.md`, cases in `tests/tracing_events.rs` | An event is added, renamed or leveled |
 | `src/posture.rs`, `src/dialect_posture.rs`, `src/presigned_expiry_posture.rs`, `src/naming_posture.rs` | Startup-only security posture rendering and the public assembly snapshot; `dialect_posture.rs` renders the `DIALECT_POSTURE` line (claimed prefixes, caller-secret operations); `presigned_expiry_posture.rs` renders `PRESIGNED_EXPIRY_POSTURE` when a non-default presigned-lifetime rule is on; `naming_posture.rs` renders the `NAMING_POSTURE` line (slash rule, key floor) | Auditing deployment security visibility |
 | `src/request_deadline.rs` | Runtime-independent policy and failure-floor deadlines | Editing timeout mechanics used by the request pipeline |
 | `src/request_body.rs`, `src/post_object.rs`, `src/post_object/legacy.rs`, `src/builder/post_forms.rs` | Live verified body producer, terminal verdict, bounded POST Object adapter, what a RustFS-profile form stores (or refuses), and `legacy_rustfs_post_forms`, the switch that selects it (held in `ViewPolicy`, rustfs/backlog#1677 R8) | A streaming upload crosses the codec or handler boundary, or a RustFS-profile form stores differently from legacy RustFS |
@@ -40,7 +41,6 @@ for request order and `docs/assembly-order.md` for extension call counts.
 | `src/close.rs` | Connection intent table | A refusal changes reuse behavior |
 | `src/wire.rs` | Drained response preserving header order | Asserting exact response shape |
 | `src/transport.rs` | Assembly-path vocabulary | A runner names its transport |
-| `src/sig.rs` | Signature re-exports | A caller needs signing vocabulary |
 ## Extension points
 
 | File | Responsibility | Read it when |
