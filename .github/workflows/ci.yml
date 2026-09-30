@@ -170,7 +170,7 @@ jobs:
       # judged against the same deny.toml. The driver never ships and its dependency tree is the
       # pinned SDK's, so advisories are the one section judged here (rustfs/gateway#1073).
       - name: Dependency advisories of the aws-sdk-rust driver
-        run: cargo deny --locked --manifest-path compat/drivers/aws-sdk-rust/Cargo.toml check --config deny.toml advisories
+        run: cargo deny --locked --manifest-path compat/drivers/aws-sdk-rust/Cargo.toml --config deny.toml check advisories
       # Architecture guards. A guard that does not run in CI is decoration.
       #
       # A guard that declares REQUIRES-BUILD compiles the workspace, so it runs in

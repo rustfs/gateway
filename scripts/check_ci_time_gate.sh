@@ -143,7 +143,7 @@ require_equal(static_steps[deny_at - 1], {
 # The aws-sdk-rust matrix driver locks a workspace of its own, which the command above never reads
 # (rustfs/gateway#1073). Dropping this step would leave that lock ungated with nothing red.
 driver_deny_command = "cargo deny --locked --manifest-path compat/drivers/aws-sdk-rust/Cargo.toml " \
-                      "check --config deny.toml advisories"
+                      "--config deny.toml check advisories"
 require_equal(all_runs.count(driver_deny_command), 1,
               "#{driver_deny_command} must have one authoritative CI execution")
 driver_deny_at = static_steps.index { |step| step["run"] == driver_deny_command }

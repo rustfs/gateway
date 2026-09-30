@@ -18123,7 +18123,7 @@ expect_fail check_ci_time_gate.sh \
 
 mut_ci_time_driver_deny_removed() {
     replace_ci_text '      - name: Dependency advisories of the aws-sdk-rust driver
-        run: cargo deny --locked --manifest-path compat/drivers/aws-sdk-rust/Cargo.toml check --config deny.toml advisories
+        run: cargo deny --locked --manifest-path compat/drivers/aws-sdk-rust/Cargo.toml --config deny.toml check advisories
 ' ''
 }
 expect_fail check_ci_time_gate.sh \
@@ -18131,7 +18131,7 @@ expect_fail check_ci_time_gate.sh \
     'must have one authoritative CI execution'
 
 mut_ci_time_driver_deny_failure_swallowed() {
-    replace_ci_text 'check --config deny.toml advisories' 'check --config deny.toml advisories || true'
+    replace_ci_text '--config deny.toml check advisories' '--config deny.toml check advisories || true'
 }
 expect_fail check_ci_time_gate.sh \
     'the driver cargo-deny step swallowing its failure' mut_ci_time_driver_deny_failure_swallowed \
@@ -18143,7 +18143,7 @@ import pathlib
 path = pathlib.Path(".github/workflows/ci.yml")
 text = path.read_text()
 step = """      - name: Dependency advisories of the aws-sdk-rust driver
-        run: cargo deny --locked --manifest-path compat/drivers/aws-sdk-rust/Cargo.toml check --config deny.toml advisories
+        run: cargo deny --locked --manifest-path compat/drivers/aws-sdk-rust/Cargo.toml --config deny.toml check advisories
 """
 anchor = "      - name: Model integrity\n"
 if step not in text or anchor not in text:
