@@ -93,6 +93,8 @@ pub struct MetaView<'a> {
     document_reading: DocumentReading,
     /// Whether response documents are written in legacy RustFS's layout.
     rustfs_response_layout: bool,
+    /// The most bytes an XML request document may hold, when the deployment sets its own.
+    document_body_ceiling: Option<usize>,
 }
 
 impl<'a> MetaView<'a> {
@@ -182,6 +184,7 @@ impl<'a> MetaView<'a> {
             empty_headers_absent: false,
             document_reading: DocumentReading::Tree,
             rustfs_response_layout: false,
+            document_body_ceiling: None,
         })
     }
 
@@ -214,6 +217,7 @@ impl<'a> MetaView<'a> {
             empty_headers_absent: self.empty_headers_absent,
             document_reading: self.document_reading,
             rustfs_response_layout: self.rustfs_response_layout,
+            document_body_ceiling: self.document_body_ceiling,
         }
     }
 
@@ -401,6 +405,24 @@ impl<'a> MetaView<'a> {
     #[must_use]
     pub const fn document_reading(&self) -> DocumentReading {
         self.document_reading
+    }
+
+    /// This view, reading its XML request document under a `bytes` ceiling instead of
+    /// [`rustfs_gateway_xml::XmlLimits::S3`]'s, as legacy RustFS reads one (rustfs/gateway#1173).
+    #[must_use]
+    pub const fn with_document_body_ceiling(mut self, bytes: usize) -> Self {
+        self.document_body_ceiling = Some(bytes);
+        self
+    }
+
+    /// The limits this view's XML request document is read under: the S3 limits, with the
+    /// deployment's document ceiling when it set one.
+    #[must_use]
+    pub fn document_limits(&self) -> rustfs_gateway_xml::XmlLimits {
+        let s3 = rustfs_gateway_xml::XmlLimits::S3;
+        self.document_body_ceiling
+            .and_then(|bytes| s3.with_max_body_bytes(bytes))
+            .unwrap_or(s3)
     }
 
     /// The naming policy this view was built under.

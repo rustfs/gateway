@@ -782,6 +782,10 @@ mod credential_sentence_tests;
 /// (rustfs/gateway#1099).
 mod bodyless_digest_tests;
 
+/// Buffered writes past the core's bounds, read under legacy RustFS's 20 MiB ceiling
+/// (rustfs/gateway#1173).
+mod buffered_ceiling_tests;
+
 /// The request settings RustFS embeds the gateway with (rustfs/gateway#1070).
 mod deadline_tests;
 

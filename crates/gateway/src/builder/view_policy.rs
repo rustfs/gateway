@@ -77,6 +77,7 @@ pub(crate) mod post_forms;
 
 use super::ServiceBuilder;
 use super::bodyless_digest::BodylessDigest;
+use super::buffered_ceiling::BufferedCeiling;
 use super::client_quirks::ChecksumWaiver;
 use super::credential_sentences::CredentialSentences;
 use super::legacy_heads::AnswerHeads;
@@ -159,6 +160,8 @@ pub(crate) struct ViewPolicy {
     pub(super) sigv4_header_guard: SigV4HeaderGuard,
     /// Whether a bodyless request's signed digest is compared (`super::bodyless_digest`).
     pub(crate) bodyless_digest: BodylessDigest,
+    /// Which ceiling a buffered body is read under (`super::buffered_ceiling`).
+    pub(crate) buffered_ceiling: BufferedCeiling,
     head_refusals_without_length: bool,
     /// Which object headers a `304` keeps (`super::not_modified_headers`).
     pub(crate) not_modified_headers: super::not_modified_headers::NotModifiedHeaders,
@@ -225,6 +228,7 @@ impl ViewPolicy {
             .checksum_waiver
             .apply(operation, meta)
             .with_document_reading(self.document_reading);
+        let meta = self.buffered_ceiling.apply(meta);
         // Legacy-compat (rustfs/backlog#2684): legacy RustFS stores an upload that carries no
         // `Content-Length` and whose transport ended it empty as a zero-length object, where AWS
         // answers `411 MissingContentLength`. Kept so the clients RustFS serves today keep

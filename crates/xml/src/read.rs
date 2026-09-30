@@ -126,6 +126,19 @@ impl XmlLimits {
         self.max_body_bytes
     }
 
+    /// These limits with the buffered document size raised or lowered to `bytes`, every other
+    /// bound kept; zero is refused rather than read as unlimited, as [`XmlLimits::new`] refuses it.
+    #[must_use]
+    pub const fn with_max_body_bytes(self, bytes: usize) -> Option<Self> {
+        Self::new(
+            bytes,
+            self.max_depth,
+            self.max_elements,
+            self.max_attributes_per_element,
+            self.max_attribute_bytes,
+        )
+    }
+
     /// Maximum nesting depth.
     #[must_use]
     pub const fn max_depth(self) -> usize {

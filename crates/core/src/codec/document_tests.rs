@@ -369,3 +369,70 @@ fn n_each_refusal_of_the_rustfs_reading_carries_its_code() {
     );
     assert_eq!(opened(DocumentReading::Tree, "", &ABSENT), Err(ErrorCode::MALFORMED_XML));
 }
+
+fn opened_under(reading: DocumentReading, body: &str, ceiling: Option<usize>) -> Result<(), ErrorCode> {
+    let request = Request::builder()
+        .method("PUT")
+        .uri("http://host.invalid/bucket?config")
+        .header("host", "host.invalid")
+        .body(())
+        .expect("the fixture request is well formed");
+    let request = WireRequest::accept(request, &Limits::default()).expect("the fixture request is acceptable");
+    let view = MetaView::of(&request, TargetKind::Bucket)
+        .expect("view")
+        .with_document_reading(reading);
+    let view = match ceiling {
+        Some(bytes) => view.with_document_body_ceiling(bytes),
+        None => view,
+    };
+    request_document(&view, body.as_bytes(), &MISSING)
+        .map(|_| ())
+        .map_err(|error| error.code().clone())
+}
+
+/// A document of `padding` bytes of white space between its root and its one rule.
+fn padded(padding: usize) -> String {
+    format!("<Config>{}<Rule><Note>n</Note></Rule></Config>", "\n".repeat(padding))
+}
+
+const MIB: usize = 1024 * 1024;
+
+/// Positive — a view with a raised document ceiling opens a document past the S3 limits' 1 MiB
+/// under either reading (rustfs/gateway#1173).
+#[test]
+fn a_document_past_one_mebibyte_opens_under_a_raised_ceiling() {
+    for reading in [DocumentReading::Tree, DocumentReading::RustFs] {
+        assert_eq!(opened_under(reading, &padded(MIB + MIB / 2), Some(20 * MIB)), Ok(()), "{reading:?}");
+    }
+}
+
+/// Negative — without a ceiling of its own, a view reads under the S3 limits and refuses the same
+/// document `MalformedXML`, under either reading.
+#[test]
+fn n_a_document_past_one_mebibyte_is_malformed_without_a_raised_ceiling() {
+    for reading in [DocumentReading::Tree, DocumentReading::RustFs] {
+        assert_eq!(
+            opened_under(reading, &padded(MIB + MIB / 2), None),
+            Err(ErrorCode::MALFORMED_XML),
+            "{reading:?}"
+        );
+    }
+}
+
+/// Negative — a raised ceiling still bounds: a document past it is `MalformedXML`, and a zero
+/// ceiling reads as the S3 limits, never as unlimited.
+#[test]
+fn n_a_raised_ceiling_still_bounds_and_zero_is_not_unlimited() {
+    for reading in [DocumentReading::Tree, DocumentReading::RustFs] {
+        assert_eq!(
+            opened_under(reading, &padded(3 * MIB), Some(2 * MIB)),
+            Err(ErrorCode::MALFORMED_XML),
+            "{reading:?}"
+        );
+        assert_eq!(
+            opened_under(reading, &padded(MIB + MIB / 2), Some(0)),
+            Err(ErrorCode::MALFORMED_XML),
+            "{reading:?}"
+        );
+    }
+}

@@ -48,6 +48,8 @@ mod body_refusal_sentences;
 mod bodyless_payload_digest;
 #[path = "bucket_config_reachability.rs"]
 mod bucket_config_reachability;
+#[path = "buffered_ceiling.rs"]
+mod buffered_ceiling;
 #[path = "checksum_omissions.rs"]
 mod checksum_omissions;
 #[path = "chunked_allocations.rs"]
