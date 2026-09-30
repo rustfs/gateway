@@ -194,6 +194,7 @@ impl GatewaySeam {
             .answer_checksum_failures_with_bad_digest()
             .ignore_unknown_checksum_algorithms()
             .accept_mismatched_payload_digests_without_a_body()
+            .bound_claimed_route_bodies_as_legacy_rustfs()
             .answer_body_refusals_with_legacy_rustfs_sentences()
             .answer_credential_refusals_with_legacy_rustfs_sentences()
             .slash_policy(SlashPolicy::RustfsLegacy)

@@ -52,6 +52,8 @@ mod bucket_config_reachability;
 mod checksum_omissions;
 #[path = "chunked_allocations.rs"]
 mod chunked_allocations;
+#[path = "claimed_body_ceiling.rs"]
+mod claimed_body_ceiling;
 #[path = "classification.rs"]
 mod classification;
 #[path = "committed_head_runtime.rs"]

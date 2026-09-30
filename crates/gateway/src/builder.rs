@@ -70,6 +70,7 @@ use crate::routing::{RoutingSnapshot, RuntimeAssembly};
 mod anonymous_framing;
 mod assembly_update;
 mod bodyless_digest;
+mod claimed_bodies;
 mod client_quirks;
 mod cors;
 pub(crate) mod credential_sentences;

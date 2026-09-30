@@ -77,6 +77,7 @@ pub(crate) mod post_forms;
 
 use super::ServiceBuilder;
 use super::bodyless_digest::BodylessDigest;
+use super::claimed_bodies::ClaimedBodies;
 use super::client_quirks::ChecksumWaiver;
 use super::credential_sentences::CredentialSentences;
 use super::legacy_heads::AnswerHeads;
@@ -159,6 +160,9 @@ pub(crate) struct ViewPolicy {
     pub(super) sigv4_header_guard: SigV4HeaderGuard,
     /// Whether a bodyless request's signed digest is compared (`super::bodyless_digest`).
     pub(crate) bodyless_digest: BodylessDigest,
+    /// Whether a claimed route's declared body is bounded as legacy RustFS bounds it
+    /// (`super::claimed_bodies`).
+    pub(crate) claimed_bodies: ClaimedBodies,
     head_refusals_without_length: bool,
     /// Which object headers a `304` keeps (`super::not_modified_headers`).
     pub(crate) not_modified_headers: super::not_modified_headers::NotModifiedHeaders,
