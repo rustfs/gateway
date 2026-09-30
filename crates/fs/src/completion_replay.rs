@@ -19,9 +19,9 @@
 //! parts are `InvalidPart`, and anything else keeps the original `NoSuchUpload`. RustFS's
 //! `complete_multipart_upload` does the same (`retried_complete_multipart_upload_returns_the_committed_object`
 //! in `crates/ecstore/src/set_disk/ops/multipart.rs`).
-//! NOT responsible for: the first completion (`super`), or upload-id validation
+//! NOT responsible for: the first completion (`super::completion`), or upload-id validation
 //! (`rustfs_gateway::resolve_upload`, which the replay reuses so a forged id is refused alike).
-//! Upstream: `super`'s completion handler. Downstream: nothing.
+//! Upstream: `super::completion`'s handler. Downstream: nothing.
 
 use std::path::Path;
 
