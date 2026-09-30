@@ -5,7 +5,7 @@ Agent entry point. File → responsibility → when you need to open it.
 | File | Responsibility | Read it when |
 |---|---|---|
 | `README.md` | Scope fence and supported-operation summary. | Deciding whether this reference backend fits a use case. |
-| `src/lib.rs` | Filesystem paths, capability authority, served region and owner, and five multipart handlers. | Changing shared storage behavior or the registered operation set. |
+| `src/lib.rs` | Filesystem paths, capability authority, served region and owner, and four multipart handlers (`CreateMultipartUpload`, `UploadPart`, `ListParts`, `AbortMultipartUpload`). | Changing shared storage behavior or the registered operation set. |
 | `src/deletes.rs` | `DeleteObjects`: every requested key through the single-key deletion, reported once as deleted or as an error; quiet mode; the keys a stood-in storage refuses answered alone and left alone (`refusing_batch_deletes_of`). | Changing batch deletion or its per-key report. |
 | `src/post_object.rs` | Browser `POST` Object: the accepted form's file, media type, metadata and other `PutObject` members stored through ordinary publication as RustFS stores them, or refused. | Changing what a form upload stores. |
 | `src/content_headers.rs` | The six stored representation headers, the default media type, the request reader macro, and the `headers/1` section grammar. | Changing which headers an object stores or how they persist. |
@@ -20,6 +20,7 @@ Agent entry point. File → responsibility → when you need to open it.
 | `src/reads.rs` | Representation selection for `GetObject`/`HeadObject` and the `Range` window `evaluate_range` decides. | Changing ranged or version-selected reads. |
 | `src/encryption.rs` | Default-encryption configuration, and the managed encryption an object write records (request, else bucket default) and reads report, with RustFS's refusals; nothing is encrypted (rustfs/gateway#812). | Changing `Put/Get/DeleteBucketEncryption`, object SSE-S3/SSE-KMS reporting, or the read-side SSE refusal. |
 | `src/policy/evaluate.rs` | Bucket-policy matching, `StringEquals`/`StringNotEquals`/`Null` on `s3:x-amz-acl` and `s3:x-amz-server-side-encryption`, and explicit unsupported-condition boundaries. | Changing policy condition interpretation. |
+| `src/completion.rs` | `CompleteMultipartUpload`: checksum negotiation, the part list (order, entity tags, sizes, checksums), the composite entity tag, write conditions, and the publication that retires the upload; a gone upload goes to the replay. | Changing how an upload completes. |
 | `src/completion_replay.rs` | Completion receipts and the RustFS-style replay of a repeated `CompleteMultipartUpload` (same parts replay, other parts `InvalidPart`, else `NoSuchUpload`). | Changing completion retries. |
 | `src/conditions.rs` | RFC 9110 conditional requests for `GetObject`, `HeadObject` and `PutObject`: the request's four conditions as the contract's `Preconditions`, and the contract's verdict — against the representation or its absence — as `304`, `412` or proceed. | Changing a conditional read or write (rustfs/gateway#808). |
 | `src/tagging.rs` | Durable per-version object tag replacement, reads, deletion, and storage safety. | Changing object-tagging operations or lifecycle tag inputs. |
