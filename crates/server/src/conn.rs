@@ -18,11 +18,9 @@
 //! NOT responsible for: S3 semantics, host handling, request-body intervals or handler deadlines.
 //! Upstream: `ServerConfig`, optional `TlsHandle`, and a tower service. Downstream: sockets.
 
-use std::collections::HashMap;
-use std::net::IpAddr;
 use std::net::SocketAddr;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard};
 
 use bytes::Bytes;
 use http::{Request, Response};
@@ -37,6 +35,7 @@ use tokio_rustls::TlsAcceptor;
 use tower::Service as TowerService;
 
 use crate::accept_error::{self, AcceptFailure};
+use crate::client_admission::{IpCounts, IpLease};
 use crate::config::{ConfigError, ServerConfig, WriteStrategy};
 use crate::connection_service::{ConnectionError, ConnectionService, RequestStats};
 use crate::driver::{AcceptedConnection, ConnectionDriver, ConnectionInfo, HyperConnectionDriver, TransportKind};
@@ -601,64 +600,6 @@ fn log_connection_result(result: Result<(), BoxError>, receipts: &crate::write_r
     match result {
         Ok(()) => receipts.closed(),
         Err(error) => tracing::debug!(error = %error, "HTTP connection closed with an error"),
-    }
-}
-
-struct IpCounts {
-    limit: Option<usize>,
-    counts: Arc<Mutex<HashMap<IpAddr, usize>>>,
-}
-
-impl IpCounts {
-    fn new(limit: Option<usize>) -> Self {
-        Self {
-            limit,
-            counts: Arc::new(Mutex::new(HashMap::new())),
-        }
-    }
-
-    fn try_acquire(&self, ip: IpAddr) -> Option<IpLease> {
-        let Some(limit) = self.limit else {
-            return Some(IpLease { ip, counts: None });
-        };
-        let mut counts = lock_recover(&self.counts);
-        let count = counts.entry(ip).or_default();
-        if *count >= limit {
-            return None;
-        }
-        *count = count.saturating_add(1);
-        Some(IpLease {
-            ip,
-            counts: Some(Arc::clone(&self.counts)),
-        })
-    }
-}
-
-struct IpLease {
-    ip: IpAddr,
-    counts: Option<Arc<Mutex<HashMap<IpAddr, usize>>>>,
-}
-
-impl Drop for IpLease {
-    fn drop(&mut self) {
-        let Some(counts) = &self.counts else { return };
-        let mut counts = lock_recover(counts);
-        let remove = if let Some(count) = counts.get_mut(&self.ip) {
-            *count = count.saturating_sub(1);
-            *count == 0
-        } else {
-            false
-        };
-        if remove {
-            counts.remove(&self.ip);
-        }
-    }
-}
-
-fn lock_recover<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
-    match mutex.lock() {
-        Ok(guard) => guard,
-        Err(poisoned) => poisoned.into_inner(),
     }
 }
 

@@ -80,7 +80,8 @@ pub struct ServerConfig {
     /// Increasing raises concurrent handler and response memory; decreasing pauses listener acceptance sooner.
     /// Values above the runtime semaphore maximum are invalid.
     pub max_global_inflight_requests: usize,
-    /// Optional per-IP open-connection ceiling. Increasing permits more NAT fan-in; decreasing limits single-source load.
+    /// Optional per-client open-connection ceiling. Increasing permits more NAT fan-in; decreasing limits single-source load.
+    /// A client is one IPv4 address or one IPv6 `/64` (an IPv4-mapped peer counts as its IPv4 address).
     /// The bounded default is 256; setting `None` explicitly disables this protection.
     pub max_connections_per_ip: Option<usize>,
     /// Time from accept to complete headers. Increasing admits slower headers; decreasing rejects slowloris peers sooner.
