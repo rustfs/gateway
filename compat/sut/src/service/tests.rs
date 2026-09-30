@@ -750,6 +750,9 @@ mod cors_tests;
 /// Request-body refusals answered with legacy RustFS's sentences (rustfs/gateway#1099).
 mod body_refusal_tests;
 
+/// The two credential refusals worded as legacy RustFS words them (rustfs/gateway#1120).
+mod credential_sentence_tests;
+
 /// The signed digest of a request without a body, left uncompared as legacy RustFS leaves it
 /// (rustfs/gateway#1099).
 mod bodyless_digest_tests;

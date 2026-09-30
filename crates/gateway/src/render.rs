@@ -56,7 +56,7 @@ pub struct S3Error {
     code: Option<ErrorCode>,
     status: StatusCode,
     body_policy: BodyPolicy,
-    message: Option<std::borrow::Cow<'static, str>>,
+    pub(crate) message: Option<std::borrow::Cow<'static, str>>,
     resource: Option<Box<str>>,
     etag: Option<ETag>,
     connection: ConnectionIntent,

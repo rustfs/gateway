@@ -73,6 +73,7 @@ pub(crate) mod post_forms;
 use super::ServiceBuilder;
 use super::bodyless_digest::BodylessDigest;
 use super::client_quirks::ChecksumWaiver;
+use super::credential_sentences::CredentialSentences;
 use super::legacy_sentences::BodySentences;
 use crate::integrity::IntegrityCodes;
 use crate::render::{S3Error, from_wire_reject};
@@ -137,6 +138,8 @@ pub(crate) struct ViewPolicy {
     pub(super) checksum_waiver: ChecksumWaiver,
     /// The sentences a request-body refusal is answered with (`super::legacy_sentences`).
     pub(super) body_sentences: BodySentences,
+    /// The sentences a credential refusal carries (`super::credential_sentences`).
+    pub(super) credential_sentences: CredentialSentences,
     /// Which grammar POST Object forms are read with (`post_forms`).
     pub(crate) post_forms: post_forms::PostFormGrammar,
     /// Whether a bodyless request's signed digest is compared (`super::bodyless_digest`).
@@ -151,6 +154,12 @@ pub(crate) struct ViewPolicy {
 }
 
 impl ViewPolicy {
+    /// The sentences this assembly answers a credential refusal with
+    /// ([`ServiceBuilder::answer_credential_refusals_with_legacy_rustfs_sentences`]).
+    pub(crate) const fn credential_sentences(&self) -> CredentialSentences {
+        self.credential_sentences
+    }
+
     /// Whether a presigned request's payload declaration is read as legacy RustFS reads it
     /// ([`ServiceBuilder::sign_presigned_payloads_as_unsigned`]).
     pub(crate) const fn presigned_payload_unsigned(&self) -> bool {

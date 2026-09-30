@@ -71,6 +71,7 @@ mod assembly_update;
 mod bodyless_digest;
 mod client_quirks;
 mod cors;
+pub(crate) mod credential_sentences;
 mod legacy_sentences;
 mod names;
 mod operation_selection;
