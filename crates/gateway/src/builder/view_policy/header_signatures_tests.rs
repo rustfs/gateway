@@ -274,6 +274,41 @@ fn n_what_is_not_a_readable_header_signature_is_left_alone() {
     assert_eq!(legacy(&signed(|pairs| remove(pairs, "authorization"))), None);
 }
 
+/// Negative — a header is read as UTF-8, as legacy RustFS reads one: a non-ASCII `x-amz-date` or
+/// `x-amz-content-sha256` is unreadable rather than missing, a region carrying a non-ASCII
+/// character still leaves the scope date to be held to its day, and a value that is not UTF-8 is
+/// read as absent. Observed against legacy RustFS (`e870a6d25b`) over raw sockets: `400
+/// InvalidRequest` "invalid header: x-amz-date", `403 SignatureDoesNotMatch` "invalid header:
+/// x-amz-content-sha256", `403 SignatureDoesNotMatch` "credential scope date does not match
+/// x-amz-date", and "missing header: x-amz-date" and "missing header: x-amz-content-sha256".
+#[test]
+fn n_a_header_is_read_as_utf8_as_legacy_rustfs_reads_it() {
+    let date = signed(|pairs| set(pairs, "x-amz-date", "2015083\u{e9}T123600Z"));
+    assert_eq!(legacy(&date), answer(400, "InvalidRequest", "invalid header: x-amz-date"));
+    let digest = signed(|pairs| set(pairs, "x-amz-content-sha256", "\u{e9}\u{e9}\u{e9}"));
+    assert_eq!(
+        legacy(&digest),
+        answer(403, "SignatureDoesNotMatch", "invalid header: x-amz-content-sha256")
+    );
+    let region = authorization("s3", "20150829").replace("/us-east-1/", "/us-\u{e9}ast/");
+    let dated_elsewhere = signed(|pairs| set(pairs, "authorization", &region));
+    assert_eq!(
+        legacy(&dated_elsewhere),
+        answer(403, "SignatureDoesNotMatch", "credential scope date does not match x-amz-date")
+    );
+    for (name, sentence) in [
+        ("x-amz-date", "missing header: x-amz-date"),
+        ("x-amz-content-sha256", "missing header: x-amz-content-sha256"),
+    ] {
+        let (mut headers, query, method) = signed(|_| {});
+        headers.insert(
+            http::HeaderName::from_static(name),
+            http::HeaderValue::from_bytes(b"20150830T12\xff600Z").expect("obs-text is a header value"),
+        );
+        assert_eq!(legacy(&(headers, query, method)), answer(400, "InvalidRequest", sentence), "{name}");
+    }
+}
+
 /// Negative — without the switch nothing is answered here.
 #[test]
 fn n_the_default_answers_nothing() {

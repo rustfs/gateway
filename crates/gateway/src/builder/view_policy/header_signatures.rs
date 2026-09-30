@@ -278,15 +278,16 @@ fn header_signature<'a>(head: &SignedHead<'a>) -> Option<HeaderScheme<'a>> {
     Some(HeaderScheme::SigV4(value))
 }
 
-/// The value of `name` when the request carries exactly one, readable as text; legacy RustFS reads
-/// a repeated or unreadable header as absent.
+/// The value of `name` when the request carries exactly one, decoded as UTF-8 as legacy RustFS
+/// decodes a header value: a repeated header, or one that is not UTF-8, reads as absent, and one
+/// carrying a non-ASCII character is read (and then refused by the rule it breaks).
 fn unique_value<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
     let mut values = headers.get_all(name).iter();
     let value = values.next()?;
     if values.next().is_some() {
         return None;
     }
-    value.to_str().ok()
+    core::str::from_utf8(value.as_bytes()).ok()
 }
 
 /// What legacy RustFS reads out of an `Authorization` value.
