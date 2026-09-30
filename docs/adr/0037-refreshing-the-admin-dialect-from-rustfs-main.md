@@ -74,11 +74,13 @@ ordering rule; RustFS's three heal routes have none.
 
 - Toolchain: `rustc 1.97.1 (8bab26f4f 2026-07-14)`, measured.
 - RustFS was read at `3268c42e00b375859b4535d53fe219b02d7bfe31`; the file and line references
-  are in Context. The script's `--check` against that commit exits 0.
+  are in Context. The script's `--check` against that commit exits 0, and against `736e4fb8` the
+  extended script still writes the previously recorded inventory byte for byte, so no fact of an
+  existing route moved because the script changed.
 - The script, measured by `python3 scripts/test_rustfs_admin_route_inventory.py`: RustFS's
   integrity shape yields five sites with their variants and each variant's facts; the whole
   handler read as one would not; a `_` arm is taken only by a variant no earlier arm took; a plain
-  loop is unchanged; and ten shapes are refused.
+  loop is unchanged; and thirteen shapes are refused.
 - The generator, measured by `cargo test -p xtask -- rustfs_admin_dialect`: the drift check, the
   recorded plan's groups and orders, its caller-secret opt-ins by name, the catch-all's name and
   template, and the refusal of a catch-all that is a bucket or overlaps another route.
