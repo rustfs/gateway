@@ -72,7 +72,12 @@ pub(crate) fn open_backend(options: &Options) -> io::Result<FsBackend> {
         // the kept list to be strictly increasing (`normalize_complete_multipart_parts`,
         // `rustfs/src/app/multipart_usecase.rs:177-208` on rustfs/rustfs 3268c42e00; measured on
         // `528a36814`: part 1 named twice completes with its last upload) (#1002).
-        .normalizing_completed_parts();
+        .normalizing_completed_parts()
+        // Legacy RustFS drops `aws-chunked` from a stored `Content-Encoding`, framed body or not
+        // (`normalize_content_encoding_for_storage`, `rustfs/src/storage/options.rs:664-681` on
+        // rustfs/rustfs 3268c42e00; measured on `528a36814`: `gzip, aws-chunked` over a plain body
+        // answers `gzip`) (#1203).
+        .normalizing_content_encoding();
     match options.lifecycle_debug_interval {
         Some(interval) => backend.with_lifecycle_debug_interval(interval),
         None => Ok(backend),

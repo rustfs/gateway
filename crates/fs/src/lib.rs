@@ -518,7 +518,7 @@ impl Handler<CreateMultipartUpload> for FsBackend {
         let attributes = ObjectAttributes {
             tags: tagging::tags_from_header(input.tagging.as_deref())?,
             metadata: input.metadata.clone(),
-            headers: request_content_headers!(input).with_encryption(encryption.clone()),
+            headers: request_content_headers!(self, input).with_encryption(encryption.clone()),
             ..ObjectAttributes::default()
         };
         let upload_id = self.create_upload(&input.bucket, &input.key, checksum, &attributes).await?;

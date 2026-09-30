@@ -844,3 +844,6 @@ mod tag_order_tests;
 
 /// A completion's part list normalized as legacy RustFS normalizes it (rustfs/gateway#1002).
 mod completion_parts_tests;
+
+/// A stored `Content-Encoding` normalized as legacy RustFS normalizes it (rustfs/gateway#1203).
+mod content_encoding_tests;

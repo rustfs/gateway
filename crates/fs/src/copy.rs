@@ -160,7 +160,7 @@ impl Handler<CopyObject> for FsBackend {
         // under REPLACE. The tagging directive decides the tag set the same way, independently.
         let (metadata, headers) = match metadata_source {
             MetadataSource::FromSource => (source_representation.metadata.clone(), source_representation.headers.clone()),
-            MetadataSource::FromRequest => (input.metadata.clone(), request_content_headers!(input)),
+            MetadataSource::FromRequest => (input.metadata.clone(), request_content_headers!(self, input)),
         };
         // The source's tags are read only when the directive copies them, so a copy that replaces
         // them does not fail on a source whose tag document is unreadable. A plain object file

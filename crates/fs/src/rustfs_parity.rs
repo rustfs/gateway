@@ -20,8 +20,9 @@
 //! the backend's own answers.
 //! NOT responsible for: what a switch changes, which is decided where the operation is served —
 //! `super::versioning::delete_conditions` for `If-Match` on a delete, `super::tagging` for the
-//! order of an object's tags, `super::uploads` for a completion's part list, `super::deletes` for
-//! the batch-delete refusal.
+//! order of an object's tags, `super::uploads` for a completion's part list,
+//! `super::content_headers` for a stored `Content-Encoding`, `super::deletes` for the
+//! batch-delete refusal.
 //! Upstream: the deployment assembling the backend. Downstream: the handlers that read a switch.
 
 use super::FsBackend;
@@ -37,6 +38,8 @@ pub(super) struct RustfsParity {
     pub(super) sorted_object_tags: bool,
     /// Whether a completion's part list is normalized first ([`FsBackend::normalizing_completed_parts`]).
     pub(super) normalized_completion: bool,
+    /// Whether a stored `Content-Encoding` is normalized ([`FsBackend::normalizing_content_encoding`]).
+    pub(super) normalized_content_encoding: bool,
 }
 
 impl FsBackend {
@@ -86,6 +89,23 @@ impl FsBackend {
     #[must_use]
     pub const fn normalizing_completed_parts(mut self) -> Self {
         self.rustfs_parity.normalized_completion = true;
+        self
+    }
+
+    /// Stores a write's `Content-Encoding` normalized as legacy RustFS stores it.
+    ///
+    /// Every `aws-chunked` member is dropped, whatever its case — also when the body was not
+    /// chunk-framed, where the gateway leaves the declared value for the backend — the remaining
+    /// members are trimmed and joined with `, `, and nothing is stored when nothing remains:
+    /// `gzip, aws-chunked` is stored as `gzip`, `aws-chunked` as no header, `gzip,deflate` as
+    /// `gzip, deflate`. `PutObject`, `CreateMultipartUpload` and a `REPLACE` copy store it so; a
+    /// `COPY` copy keeps its source's value, and no other stored header is touched
+    /// (rustfs/gateway#1203).
+    ///
+    /// Off by default, when the value is stored as sent.
+    #[must_use]
+    pub const fn normalizing_content_encoding(mut self) -> Self {
+        self.rustfs_parity.normalized_content_encoding = true;
         self
     }
 }
