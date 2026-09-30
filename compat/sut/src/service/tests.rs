@@ -797,6 +797,9 @@ mod sigv4_header_guard_tests;
 /// does (rustfs/gateway#1130).
 mod signing_service_tests;
 
+/// A base64 payload digest signed as its hex, as legacy RustFS signs it (rustfs/gateway#1130).
+mod payload_digest_tests;
+
 /// Request-checksum failures answered with legacy RustFS's `BadDigest` (rustfs/gateway#1057), and
 /// what each refusal leaves in storage.
 mod bad_digest_tests;

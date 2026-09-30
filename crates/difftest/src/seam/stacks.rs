@@ -185,6 +185,7 @@ impl GatewaySeam {
             .sign_presigned_payloads_as_unsigned()
             .answer_head_refusals_without_content_length()
             .answer_not_modified_with_legacy_rustfs_headers()
+            .sign_base64_payload_digests_as_hex()
             .answer_checksum_failures_with_bad_digest()
             .ignore_unknown_checksum_algorithms()
             .accept_mismatched_payload_digests_without_a_body()

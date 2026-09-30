@@ -245,6 +245,9 @@ pub(crate) fn build_service(
             // RustFS signs every presigned request over `UNSIGNED-PAYLOAD` and verifies a digest the
             // request declares against the body instead (rustfs/rustfs#2379).
             .sign_presigned_payloads_as_unsigned()
+            // RustFS signs a header-signed payload digest given in base64 as its hex, and holds the
+            // body to the digest either way (rustfs/gateway#1130).
+            .sign_base64_payload_digests_as_hex()
             // RustFS answers an unreadable or mismatched request checksum with `BadDigest`
             // (rustfs/gateway#1057).
             .answer_checksum_failures_with_bad_digest()
