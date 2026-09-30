@@ -191,6 +191,8 @@ pub(crate) struct Inner {
     pub(crate) traces: Arc<dyn TraceSource>,
     pub(crate) cors: Arc<CachedCorsSource>,
     pub(crate) cors_policy: CorsPolicy,
+    /// Legacy RustFS's CORS answers, in place of the gateway's own (`crate::cors_legacy`).
+    pub(crate) legacy_cors: Option<crate::LegacyRustfsCors>,
     pub(crate) sse: SseConfig,
     pub(crate) response_body_corrections: AtomicU64,
     pub(crate) temporary_redirect_targets: Arc<[RedirectTarget]>,
@@ -355,6 +357,8 @@ impl S3Service {
         // makes the customer-key gate fail closed for a transport that has not been taught to declare anything.
         // The file-body path is decided here too, and applied last (rustfs/gateway#949).
         let connection = connection_security(request.extensions());
+        // Legacy RustFS's CORS decoration needs the request after the pipeline has consumed it.
+        let legacy_cors = self.legacy_cors_request(&request);
         let client_addr = request.extensions().get::<ClientAddr>().copied();
         let file_body_path = crate::file_fallback::FileBodyPath::of(request.extensions(), request.version());
         let mut outcome = Outcome::new(&trace, &method, self.inner.view_policy.credential_sentences());
@@ -398,6 +402,11 @@ impl S3Service {
             if cors.vary_origin {
                 headers.insert(VARY, VARY_ORIGIN);
             }
+        }
+        // Legacy RustFS's decoration instead, on every answer, refusals before authentication
+        // included (`crate::cors_legacy`).
+        if let Some(legacy_cors) = legacy_cors {
+            self.decorate_legacy_cors(legacy_cors, &mut response, now).await;
         }
         // The response seam. After the CORS decoration, so a filter sees the response a browser
         // would; before the invariants and the stamp, so neither can be defeated by one. It runs
@@ -551,6 +560,14 @@ impl S3Service {
         // preflights retain their uniform refusal and valid ones use the stored document.
         // No signature admission, authenticator, authorizer or handler runs in these
         // branches. Refusal latency uses the same security floor as other failures.
+        if let Some(legacy) = self.inner.legacy_cors.as_ref()
+            && *wire.method() == Method::OPTIONS
+        {
+            let path = wire.raw_path().as_str();
+            return self
+                .serve_legacy_preflight(legacy, path, &headers, outcome, now, client_addr)
+                .await;
+        }
         match classify(wire.method(), &wire.headers()) {
             PreflightClass::NotPreflight => {}
             PreflightClass::HeaderlessOptions => {
