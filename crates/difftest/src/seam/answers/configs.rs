@@ -187,7 +187,7 @@ fn reads() -> Vec<AnswerRow> {
             || legacy::GetBucketPolicyOutput {
                 policy: Some(POLICY.to_owned()),
             },
-            differs(BARE, &["sa-0012"], &[]),
+            same(BARE),
         ),
         answer(
             "get-bucket-policy-status-every-member",
@@ -378,7 +378,7 @@ fn writes() -> Vec<AnswerRow> {
             "put-bucket-policy",
             config("/bucket?policy", POLICY),
             || legacy::PutBucketPolicyOutput {},
-            differs(BARE, &["sa-0013"], &[]),
+            same(BARE),
         ),
         answer(
             "put-bucket-replication",
@@ -486,9 +486,22 @@ fn deletes() -> Vec<AnswerRow> {
     ]
 }
 
+/// `HeadBucket` as legacy RustFS answers it: its handler names no region
+/// (rustfs/rustfs `e870a6d25b` `rustfs/src/app/bucket_usecase.rs:1535`), which the seam hands over
+/// as the empty region and the RustFS profile writes as no header (rustfs/gateway#1148).
+fn heads() -> Vec<AnswerRow> {
+    vec![answer(
+        "head-bucket-as-legacy-rustfs-answers-it",
+        RawRequest::head("/bucket"),
+        legacy::HeadBucketOutput::default,
+        same(BARE),
+    )]
+}
+
 pub(super) fn rows() -> Vec<AnswerRow> {
     let mut rows = reads();
     rows.extend(writes());
     rows.extend(deletes());
+    rows.extend(heads());
     rows
 }

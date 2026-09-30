@@ -53,6 +53,10 @@ fn anonymous(method: http::Method, target: &str) -> http::Request<Bytes> {
         .expect("a valid unsigned request")
 }
 
+/// Writes `document` as the bucket policy. A write the assembly accepts answers `204 No Content`:
+/// the RustFS profile writes the policy write's head as legacy RustFS does (its writer answers
+/// `PutBucketPolicy` with `204`, observed on a legacy RustFS build; rustfs/gateway#1148), where the
+/// model's head, which every other assembly keeps, is `200`.
 pub(super) async fn put_policy(service: &S3Service, document: &'static str, md5: &str) -> WireResponse {
     let request = signed(
         MAIN_KEY,
@@ -119,7 +123,7 @@ async fn a_public_read_statement_opens_the_object_to_everyone_and_nothing_else()
     assert!(body_of(&missing).contains("<Code>NoSuchBucketPolicy</Code>"));
 
     let written = put_policy(&service, PUBLIC_READ, PUBLIC_READ_MD5).await;
-    assert_eq!(written.status(), 200, "{}", body_of(&written));
+    assert_eq!(written.status(), 204, "{}", body_of(&written));
 
     let anon = exchange(&service, anonymous(http::Method::GET, "/policed/open")).await;
     assert_eq!(anon.status(), 200, "{}", body_of(&anon));
@@ -177,7 +181,7 @@ async fn n_a_named_principal_admits_that_identity_and_not_the_public() {
     let options = two_identity_options(&root, &[]);
     let (_backend, service) = assembled(&options);
     policed(&service).await;
-    assert_eq!(put_policy(&service, ALT_READ, ALT_READ_MD5).await.status(), 200);
+    assert_eq!(put_policy(&service, ALT_READ, ALT_READ_MD5).await.status(), 204);
     assert_eq!(
         exchange(&service, as_alt(http::Method::GET, "/policed/open", Bytes::new()))
             .await
@@ -207,7 +211,7 @@ async fn n_a_deny_refuses_the_owner_what_it_names() {
     let options = two_identity_options(&root, &[]);
     let (_backend, service) = assembled(&options);
     policed(&service).await;
-    assert_eq!(put_policy(&service, DENY_SECRET, DENY_SECRET_MD5).await.status(), 200);
+    assert_eq!(put_policy(&service, DENY_SECRET, DENY_SECRET_MD5).await.status(), 204);
     let refused = exchange(&service, as_main(http::Method::GET, "/policed/secret", Bytes::new())).await;
     assert_eq!(refused.status(), 403, "{}", body_of(&refused));
     assert_eq!(
@@ -279,7 +283,7 @@ async fn n_block_public_policy_refuses_a_public_policy_only() {
     let refused = put_policy(&service, PUBLIC_READ, PUBLIC_READ_MD5).await;
     assert_eq!(refused.status(), 403, "{}", body_of(&refused));
     assert!(body_of(&refused).contains("<Code>AccessDenied</Code>"));
-    assert_eq!(put_policy(&service, ALT_READ, ALT_READ_MD5).await.status(), 200);
+    assert_eq!(put_policy(&service, ALT_READ, ALT_READ_MD5).await.status(), 204);
 
     assert_eq!(
         exchange(&service, as_main(http::Method::DELETE, "/policed?publicAccessBlock", Bytes::new()))
@@ -287,7 +291,7 @@ async fn n_block_public_policy_refuses_a_public_policy_only() {
             .status(),
         204
     );
-    assert_eq!(put_policy(&service, PUBLIC_READ, PUBLIC_READ_MD5).await.status(), 200);
+    assert_eq!(put_policy(&service, PUBLIC_READ, PUBLIC_READ_MD5).await.status(), 204);
 }
 
 /// Negative — `IsPublic` is computed as RustFS computes it: `false` with no policy and with a
@@ -299,12 +303,12 @@ async fn n_the_policy_status_is_public_only_when_anonymous_listing_or_writing_is
     let (_backend, service) = assembled(&options);
     policed(&service).await;
     assert!(status(&service).await.contains("<IsPublic>false</IsPublic>"), "no policy is not public");
-    assert_eq!(put_policy(&service, PUBLIC_READ, PUBLIC_READ_MD5).await.status(), 200);
+    assert_eq!(put_policy(&service, PUBLIC_READ, PUBLIC_READ_MD5).await.status(), 204);
     assert!(
         status(&service).await.contains("<IsPublic>false</IsPublic>"),
         "object reads alone are not RustFS's public"
     );
-    assert_eq!(put_policy(&service, PUBLIC_LIST, PUBLIC_LIST_MD5).await.status(), 200);
+    assert_eq!(put_policy(&service, PUBLIC_LIST, PUBLIC_LIST_MD5).await.status(), 204);
     assert!(status(&service).await.contains("<IsPublic>true</IsPublic>"));
     assert_eq!(
         exchange(&service, anonymous(http::Method::GET, "/policed?list-type=2"))
@@ -325,7 +329,7 @@ async fn n_a_public_listing_reveals_a_missing_key_and_a_public_read_alone_does_n
     let (_backend, service) = assembled(&options);
     policed(&service).await;
 
-    assert_eq!(put_policy(&service, PUBLIC_READ, PUBLIC_READ_MD5).await.status(), 200);
+    assert_eq!(put_policy(&service, PUBLIC_READ, PUBLIC_READ_MD5).await.status(), 204);
     let hidden = exchange(&service, anonymous(http::Method::GET, "/policed/missing")).await;
     assert_eq!(hidden.status(), 403, "{}", body_of(&hidden));
 
@@ -333,7 +337,7 @@ async fn n_a_public_listing_reveals_a_missing_key_and_a_public_read_alone_does_n
         put_policy(&service, PUBLIC_READ_AND_LIST, PUBLIC_READ_AND_LIST_MD5)
             .await
             .status(),
-        200
+        204
     );
     let revealed = exchange(&service, anonymous(http::Method::GET, "/policed/missing")).await;
     assert_eq!(revealed.status(), 404, "{}", body_of(&revealed));
@@ -349,7 +353,7 @@ async fn n_an_unreadable_policy_fails_closed_for_everyone() {
     let options = two_identity_options(&root, &[]);
     let (_backend, service) = assembled(&options);
     policed(&service).await;
-    assert_eq!(put_policy(&service, PUBLIC_READ, PUBLIC_READ_MD5).await.status(), 200);
+    assert_eq!(put_policy(&service, PUBLIC_READ, PUBLIC_READ_MD5).await.status(), 204);
 
     let record = std::fs::read_dir(&root.0)
         .expect("the data root")
@@ -428,7 +432,7 @@ async fn n_acl_condition_deny_refuses_matching_owner_and_granted_guest_without_p
     let (_backend, service) = assembled(&two_identity_options(&root, &[]));
     policed(&service).await;
     let written = put_policy(&service, ACL_CONDITION_DENY, ACL_CONDITION_DENY_MD5).await;
-    assert_eq!(written.status(), 200, "{}", body_of(&written));
+    assert_eq!(written.status(), 204, "{}", body_of(&written));
     acl_condition_put(&service, "deny-owner", Some("public-read"), true, 403).await;
     acl_condition_put(&service, "deny-guest", Some("public-read"), false, 403).await;
     acl_condition_put(&service, "deny-other-value", Some("private"), true, 200).await;
@@ -443,7 +447,7 @@ async fn n_acl_condition_allow_requires_matching_header_and_preserves_rejected_k
     let (_backend, service) = assembled(&two_identity_options(&root, &[]));
     policed(&service).await;
     let written = put_policy(&service, ACL_CONDITION_ALLOW, ACL_CONDITION_ALLOW_MD5).await;
-    assert_eq!(written.status(), 200, "{}", body_of(&written));
+    assert_eq!(written.status(), 204, "{}", body_of(&written));
     acl_condition_put(&service, "allow-other-value", Some("private"), false, 403).await;
     acl_condition_put(&service, "allow-absent", None, false, 403).await;
     acl_condition_put(&service, "allow-matching", Some("public-read"), false, 200).await;
@@ -486,7 +490,7 @@ async fn n_acl_condition_exact_array_and_unsupported_block_controls() {
         ),
     ] {
         let written = put_policy(&service, document, md5).await;
-        assert_eq!(written.status(), 200, "{}", body_of(&written));
+        assert_eq!(written.status(), 204, "{}", body_of(&written));
         acl_condition_put(&service, key, Some("public-read"), false, expected).await;
     }
 }
@@ -533,7 +537,7 @@ async fn n_acl_condition_unavailable_request_facts_fail_closed_but_absent_policy
         put_policy(&service, ACL_CONDITION_DENY, ACL_CONDITION_DENY_MD5)
             .await
             .status(),
-        200
+        204
     );
     assert_eq!(
         authorizer.authorize_route(&context, &request).await,
@@ -553,7 +557,7 @@ async fn n_acl_condition_uppercase_key_is_not_a_supported_grant() {
     let (_backend, service) = assembled(&two_identity_options(&root, &[]));
     policed(&service).await;
     let written = put_policy(&service, ACL_CONDITION_UPPERCASE_KEY, ACL_CONDITION_UPPERCASE_KEY_MD5).await;
-    assert_eq!(written.status(), 200, "{}", body_of(&written));
+    assert_eq!(written.status(), 204, "{}", body_of(&written));
     acl_condition_put(&service, "uppercase-key", Some("public-read"), false, 403).await;
 }
 
@@ -566,7 +570,7 @@ async fn n_acl_condition_duplicate_signed_header_cannot_bypass_owner_deny() {
         put_policy(&service, ACL_CONDITION_DENY, ACL_CONDITION_DENY_MD5)
             .await
             .status(),
-        200
+        204
     );
     let request = signed(
         MAIN_KEY,

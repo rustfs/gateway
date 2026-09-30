@@ -419,6 +419,48 @@ mod legacy_only_outputs {
         );
     }
 
+    /// `HeadBucketOutput.bucket_region` (`Rule::AbsentAsEmpty`, rustfs/gateway#1148): the required
+    /// gateway region takes an unset legacy region as the empty one, and refuses a set empty one.
+    #[test]
+    fn an_unset_legacy_region_crosses_as_the_empty_region_and_a_set_empty_one_is_refused() {
+        let facts = facts("struct HeadBucketOutput\n  bucket_region: Option<String>\n");
+        let text = render::backward_struct(
+            &ctx(&facts),
+            "HeadBucketOutput",
+            &[field("BucketRegion", Type::String, true)],
+            "G",
+            "output",
+        )
+        .expect("renders");
+        assert!(text.contains("None => String::new()"), "{text}");
+        assert!(
+            text.contains("Some(x) if x.is_empty() => return Err(ConversionError { field: \"bucket_region\""),
+            "{text}"
+        );
+        assert!(!text.contains("the gateway shape requires this member"), "{text}");
+    }
+
+    /// Negative — the rule converts only a legacy optional string into a gateway string: on any
+    /// other pairing generation fails naming the member instead of guessing an empty value.
+    #[test]
+    fn n_absent_as_empty_on_another_pairing_fails_generation() {
+        let facts = facts("struct HeadBucketOutput\n  bucket_region: String\n");
+        let error = render::backward_struct(
+            &ctx(&facts),
+            "HeadBucketOutput",
+            &[field("BucketRegion", Type::String, true)],
+            "G",
+            "output",
+        )
+        .expect_err("a required legacy region");
+        assert!(
+            error
+                .iter()
+                .any(|error| error.contains("HeadBucketOutput.bucket_region: AbsentAsEmpty")),
+            "{error:?}"
+        );
+    }
+
     /// `CompleteMultipartUploadOutput.future`: the legacy writer streams a deferred completion
     /// behind keep-alive whitespace (legacy `ops/multipart.rs:25-45`), which a gateway output
     /// written once cannot carry, so a set one is refused, as the encode matrix's own conversion

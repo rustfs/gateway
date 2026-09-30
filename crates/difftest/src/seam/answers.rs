@@ -295,33 +295,6 @@ pub(crate) const ANSWER_FINDINGS: &[AnswerFinding] = &[
     ),
     finding(
         "sa-0012",
-        "GetBucketPolicy",
-        "header content-type",
-        "application/json",
-        "<absent>",
-        "The gateway types the JSON policy body (quirk q-pol-0001); the legacy writer sets the body and no content type. The body \
-         is the same bytes.",
-    ),
-    finding(
-        "sa-0013",
-        "PutBucketPolicy",
-        "status",
-        "200",
-        "204",
-        "The gateway answers the model's success status (spec/operations/PutBucketPolicy.toml); the legacy writer answers 204 No \
-         Content. Both are bodiless successes.",
-    ),
-    finding(
-        "sa-0014",
-        "RestoreObject",
-        "status",
-        "202",
-        "200",
-        "The gateway answers 202 Accepted, the status AWS documents for a restore it starts (spec/operations/RestoreObject.toml); \
-         the legacy writer answers 200 for every restore. Both carry the same headers.",
-    ),
-    finding(
-        "sa-0015",
         "ListMultipartUploads",
         "body ListMultipartUploadsResult/EncodingType",
         "<absent>",

@@ -53,6 +53,11 @@ pub enum Rule {
     /// Forward only: as [`Rule::FromQuery`], for a boolean the legacy decoder reads from the header
     /// named here with its own grammar.
     FromBoolHeader(&'static str),
+    /// Backward only: the gateway member is a required string the legacy member may leave unset.
+    /// An unset legacy value crosses as the empty string, which no real value is and which the
+    /// RustFS profile writes as no header at all, as the legacy writer writes an unset one; a set
+    /// empty legacy value is refused by name, since it would then be written as unset.
+    AbsentAsEmpty(&'static str),
 }
 
 /// One member exception: the s3s struct, the member name on the side the rule names, the rule.
@@ -239,6 +244,11 @@ pub const MEMBERS: &[MemberOverride] = &[
     ("CreateBucketConfiguration", "bucket", Rule::S3sOnly(NOT_IN_MODEL)),
     ("CreateBucketConfiguration", "location", Rule::S3sOnly(NOT_IN_MODEL)),
     ("CreateBucketConfiguration", "tags", Rule::S3sOnly(NOT_IN_MODEL)),
+    // Legacy RustFS answers HeadBucket with no region (rustfs/rustfs e870a6d25b
+    // `rustfs/src/app/bucket_usecase.rs:1535`), which the gateway shape, requiring one, cannot hold;
+    // `ServiceBuilder::answer_heads_as_legacy_rustfs` writes the empty region as none
+    // (rustfs/gateway#1148).
+    ("HeadBucketOutput", "bucket_region", Rule::AbsentAsEmpty(UNNAMED_REGION)),
     ("HeadBucketOutput", "access_point_alias", Rule::S3sOnly(NOT_IN_MODEL)),
     ("HeadBucketOutput", "bucket_arn", Rule::S3sOnly(NOT_IN_MODEL)),
     ("HeadBucketOutput", "bucket_location_name", Rule::S3sOnly(NOT_IN_MODEL)),
@@ -248,3 +258,4 @@ pub const MEMBERS: &[MemberOverride] = &[
 const SEALED: &str = "the gateway authorizes the copy source as a derived resource and clears the input member";
 const EVENT_HOLD: &str = "an Object Lock event hold, which no pinned s3s shape holds and RustFS does not store";
 const NOT_IN_MODEL: &str = "an AWS model member the gateway model does not carry and RustFS neither reads nor sets";
+const UNNAMED_REGION: &str = "a bucket region the RustFS handler leaves unnamed, written by the RustFS profile as no header";

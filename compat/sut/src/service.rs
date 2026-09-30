@@ -298,6 +298,9 @@ pub(crate) fn build_service(
             // RustFS reads a browser upload form with its legacy grammar, and stores from it what
             // legacy RustFS stores or refuses it (ruling R8 of rustfs/backlog#1677).
             .legacy_rustfs_post_forms()
+            // RustFS answers a policy write `204`, every restore `200`, a policy read untyped, and
+            // a HeadBucket without a region its handler left unnamed (rustfs/gateway#1148).
+            .answer_heads_as_legacy_rustfs()
             // And the same registry decides whether a name is taken: another identity's
             // re-creation is `409 BucketAlreadyExists` before the backend is asked, and a
             // creation the backend admitted is what gets recorded.

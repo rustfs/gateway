@@ -75,11 +75,12 @@ use super::ServiceBuilder;
 use super::bodyless_digest::BodylessDigest;
 use super::client_quirks::ChecksumWaiver;
 use super::credential_sentences::CredentialSentences;
+use super::legacy_heads::AnswerHeads;
 use super::legacy_sentences::BodySentences;
 use crate::integrity::IntegrityCodes;
 use crate::render::{S3Error, from_wire_reject};
 use rustfs_gateway_core::codec::value::RustFsListing;
-use rustfs_gateway_core::{HandlerError, MetaView, PageSizeCeiling};
+use rustfs_gateway_core::{EncodedResponse, HandlerError, MetaView, PageSizeCeiling};
 use rustfs_gateway_http::{HeaderView, WireReject};
 
 mod date_conditions;
@@ -151,6 +152,8 @@ pub(crate) struct ViewPolicy {
     head_refusals_without_length: bool,
     /// Which object headers a `304` keeps (`super::not_modified_headers`).
     pub(crate) not_modified_headers: super::not_modified_headers::NotModifiedHeaders,
+    /// Which heads a successful answer is written with (`super::legacy_heads`).
+    pub(super) answer_heads: AnswerHeads,
     clamp_max_keys: bool,
     integrity_codes: IntegrityCodes,
     presigned_payload_unsigned: bool,
@@ -235,6 +238,11 @@ impl ViewPolicy {
             Some((_, listing)) => meta.with_rustfs_listing_encoding(*listing),
             None => meta,
         }
+    }
+
+    /// The settled answer to `operation`, with this assembly's heads (`super::legacy_heads`).
+    pub(crate) fn settle(self, operation: &str, encoded: &mut EncodedResponse) {
+        self.answer_heads.settle(operation, encoded);
     }
 
     /// A refusal of the request body, answered with this assembly's sentences.
@@ -457,6 +465,7 @@ mod tests {
         assert!(!ViewPolicy::default().presigned_payload_unsigned());
         assert!(!ViewPolicy::default().empty_uploads_without_length);
         assert!(!ViewPolicy::default().rustfs_listings);
+        assert_eq!(ViewPolicy::default().answer_heads, AnswerHeads::Model);
         assert!(!ViewPolicy::default().strict_date_conditions);
         assert!(!ViewPolicy::default().body_literals);
         for operation in ["ListMultipartUploads", "ListParts", "ListBuckets", "GetObject", "PutObject"] {

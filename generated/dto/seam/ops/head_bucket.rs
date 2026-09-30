@@ -61,7 +61,7 @@ pub fn output_from_s3s(output: s3s::dto::HeadBucketOutput) -> Result<crate::ops:
         return Err(ConversionError { field: "bucket_location_type", reason: "a legacy member the gateway shape cannot hold, refused rather than dropped" });
     }
     Ok(crate::ops::head_bucket::Output {
-        bucket_region: match bucket_region { Some(x) => x, None => return Err(ConversionError { field: "bucket_region", reason: "the gateway shape requires this member" }) },
+        bucket_region: match bucket_region { Some(x) if x.is_empty() => return Err(ConversionError { field: "bucket_region", reason: "an empty legacy value the gateway would write as unset" }), Some(x) => x, None => String::new() },
     })
 }
 

@@ -53,7 +53,7 @@ async fn n_an_anonymous_unsigned_trailer_upload_is_refused_and_stores_nothing() 
     let (_backend, service) = assembled(&options);
     policed(&service).await;
     let written = put_policy(&service, PUBLIC_WRITE, PUBLIC_WRITE_MD5).await;
-    assert_eq!(written.status(), 200, "{}", body_of(&written));
+    assert_eq!(written.status(), 204, "{}", body_of(&written));
 
     let plain = exchange(&service, anonymous_put("/policed/plain", &[], b"hello world")).await;
     assert_eq!(plain.status(), 200, "{}", body_of(&plain));
