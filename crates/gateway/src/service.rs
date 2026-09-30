@@ -446,6 +446,7 @@ impl S3Service {
         crate::stamp::stamp(response.headers_mut(), &trace, now);
         let event_request_id = *trace.request_id();
         let event_operation = outcome.operation;
+        let event_method = method.clone();
         let event_status = response.status().as_u16();
         let event_identity = outcome.identity.clone();
         // Both reports below go to the observer this request's entry snapshot holds, and both go
@@ -458,6 +459,7 @@ impl S3Service {
                 let event = RequestEvent {
                     request_id: &event_request_id,
                     operation: event_operation,
+                    method: &event_method,
                     status: event_status,
                     handler_deadline,
                     identity: event_identity.as_ref(),
@@ -473,6 +475,7 @@ impl S3Service {
             let event = RequestEvent {
                 request_id: trace.request_id(),
                 operation: outcome.operation,
+                method: &method,
                 status: response.status().as_u16(),
                 handler_deadline,
                 identity: outcome.identity.as_ref(),

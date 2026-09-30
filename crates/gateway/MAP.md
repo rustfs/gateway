@@ -63,7 +63,7 @@ for request order and `docs/assembly-order.md` for extension call counts.
 | `src/ext/governor/rates.rs` | Validated default rates | Changing capacity defaults |
 | `src/ext/cors.rs` | Cached bucket CORS source | Serving browser requests |
 | `src/ext/cors/cache.rs` | Bounded LRU entries and recency metadata | Changing CORS cache eviction |
-| `src/ext/observer.rs` | Final response observer | Wiring logs or metrics |
+| `src/ext/observer.rs` | Final response observer; what a host's metrics and audit take from it and from the audit sink: `docs/metrics-and-audit.md` | Wiring logs, metrics or an audit trail |
 | `src/ext/filter.rs` | Wire, routed, and response seams | Rewriting untyped HTTP shape |
 | `src/ext/oplayer.rs` | Typed per-operation middleware | Rewriting one DTO |
 ## Tests and examples
@@ -75,7 +75,7 @@ for request order and `docs/assembly-order.md` for extension call counts.
 | `tests/service_clone_allocations.rs` | Zero-allocation connection clones |
 | `tests/service_concurrency.rs` | One hundred concurrent clones and requests |
 | `tests/service_config.rs`, `tests/operation_registry_hot_update.rs`, `tests/assembly_snapshot.rs` | Settings, routing, and middleware updates retain one in-flight generation and preserve concurrent partial updates |
-| `tests/handler_panic.rs`, `tests/observer_panic.rs` | Handler panic becomes 500 and the next request still runs; an observer panic changes neither an ordinary response nor a committed terminal document |
+| `tests/handler_panic.rs`, `tests/observer_panic.rs`, `tests/host_reporting.rs` | Handler panic becomes 500 and the next request still runs; an observer panic changes neither an ordinary response nor a committed terminal document; a host's RustFS-shaped counter and audit entry fed from the two hooks |
 | `tests/pipeline.rs`, `tests/post_object_runtime.rs`, `tests/post_object_streaming.rs`, `tests/post_object_legacy_form.rs`, `tests/post_object_legacy_fields.rs` | End-to-end ordering, response shapes, POST byte ownership and allocation bounds, the object a RustFS-profile form stores, and the `PutObject` members it hands its handler |
 | `tests/authz_contract.rs`, `tests/authz_contract/headers.rs` | Two authorization stages, audit, failure floor, and borrowed headers without Debug disclosure |
 | `tests/governor_runtime.rs` | Limits run before expensive work and recover |
