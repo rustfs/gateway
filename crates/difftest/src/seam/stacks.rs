@@ -138,7 +138,8 @@ impl GatewaySeam {
             .accept_empty_signing_region()
             .refuse_unreadable_signing_regions_after_verification()
             .accept_signing_regions_of_any_length()
-            .verify_raw_paths_only_with_unencoded_bytes();
+            .verify_raw_paths_only_with_unencoded_bytes()
+            .accept_legacy_rustfs_signing_services();
         let slot: Slot = Arc::new(Mutex::new(None));
         let routed: Routed = Arc::new(Mutex::new(None));
         let answer: Queued = Arc::new(Mutex::new(None));

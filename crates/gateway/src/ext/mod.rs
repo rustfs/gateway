@@ -74,6 +74,7 @@ mod credentials;
 mod filter;
 mod governor;
 mod host;
+mod legacy_refusal;
 mod legacy_vhost;
 mod observer;
 mod oplayer;

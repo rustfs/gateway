@@ -140,7 +140,7 @@ pub use operation::{
 };
 pub use parse::{
     AmzDate, CredentialScope, EmptyRegion, PresignedParams, RegionLength, RegionRule, SCOPE_TERMINATOR, ScopeDate,
-    SigV4Authorization, X_AMZ_ALGORITHM, X_AMZ_CREDENTIAL, X_AMZ_DATE, X_AMZ_SIGNED_HEADERS,
+    ServiceReading, SigV4Authorization, X_AMZ_ALGORITHM, X_AMZ_CREDENTIAL, X_AMZ_DATE, X_AMZ_SIGNED_HEADERS,
 };
 pub use post_policy::{
     PostPolicy, PostPolicyEnforcement, PostPolicyError, PostPolicyLimits, SigV2PostPolicy, build_success_action_redirect,

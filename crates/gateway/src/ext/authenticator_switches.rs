@@ -14,22 +14,31 @@
 
 //! The opt-in switches of the built-in SigV4 authenticator: handing the caller's secret to
 //! handlers (ADR-0022), verifying any signing region (ADR-0023), the RustFS profile's reading of
-//! signing regions — empty, outside the grammar, of any length (rustfs/backlog#1677) — and its
-//! narrower raw-path fallback (rustfs/rustfs#2593). All are off by default.
+//! signing regions — empty, outside the grammar, of any length (rustfs/backlog#1677) — and of
+//! signing services (rustfs/gateway#1130), and its narrower raw-path fallback
+//! (rustfs/rustfs#2593). All are off by default.
 //!
-//! Responsible for: the builder methods, their documented posture, and [`RegionPolicy`], which
-//! turns the region switches into the parsers' region rule and the scope expectation.
+//! Responsible for: the builder methods, their documented posture, and [`ScopePolicy`], which
+//! turns the region and service switches into the parsers' credential rule, the scope expectation
+//! and the service refusal legacy RustFS answers.
 //! NOT responsible for: verification itself, or what a switch changes in it; they are read in
 //! `super::authenticator` (and the secret hand-off also in `super::sigv2`).
 //! Upstream: `super::authenticator::SigV4Authenticator`. Downstream: deployments assembling the
 //! service, the RustFS ring-2 adapter first.
 
 use super::authenticator::SigV4Authenticator;
-use rustfs_gateway_sig::{EmptyRegion, ExpectedScope, RegionLength, RegionRule, RegionSet};
+use super::legacy_refusal::LegacyRefusal;
+use rustfs_gateway_sig::{CredentialScope, EmptyRegion, ExpectedScope, RegionLength, RegionRule, RegionSet, ServiceReading};
+use rustfs_gateway_types::ErrorCode;
 
-/// The opt-in scope-region policies of [`SigV4Authenticator`].
+/// The credential-scope services legacy RustFS verifies, on every route: the legacy stack's two
+/// defaults and the table catalog's signing name, in the order its refusal lists them (rustfs/rustfs
+/// `e870a6d25b` `rustfs/src/server/http.rs:166-172`, `rustfs_s3_config`).
+const LEGACY_RUSTFS_SIGNING_SERVICES: [&str; 3] = ["s3", "sts", "s3tables"];
+
+/// The opt-in credential-scope policies of [`SigV4Authenticator`].
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(super) struct RegionPolicy {
+pub(super) struct ScopePolicy {
     /// ADR-0023: any region in the configured-name grammar.
     pub(super) any_region: bool,
     /// The empty region, which legacy RustFS reads as no region.
@@ -39,12 +48,15 @@ pub(super) struct RegionPolicy {
     pub(super) any_spelling: bool,
     /// A region of any length, read by the parsers and held to the grammar without its ceiling.
     pub(super) any_length: bool,
+    /// Every service legacy RustFS verifies, on every operation (rustfs/gateway#1130).
+    pub(super) legacy_services: bool,
 }
 
-impl RegionPolicy {
+impl ScopePolicy {
     /// How the credential parsers read the region field: an empty one admitted only when the scope
     /// check admits it too, so a parse that succeeds is never refused by name for its region shape
-    /// alone; one of any length only under the any-length policy.
+    /// alone; one of any length only under the any-length policy. And the service field: any name
+    /// under the legacy services, which [`Self::service_refusal`] then answers.
     pub(super) const fn region_rule(self) -> RegionRule {
         let empty = if self.empty_region {
             EmptyRegion::Admitted
@@ -61,7 +73,15 @@ impl RegionPolicy {
         } else {
             RegionLength::Bounded
         };
-        RegionRule::STRICT.with_empty(empty).with_length(length)
+        let services = if self.legacy_services {
+            ServiceReading::AnyName
+        } else {
+            ServiceReading::Known
+        };
+        RegionRule::STRICT
+            .with_empty(empty)
+            .with_length(length)
+            .with_services(services)
     }
 
     /// `expected`, widened by exactly the policies this authenticator turned on.
@@ -81,11 +101,34 @@ impl RegionPolicy {
         } else {
             expected
         };
-        if self.any_length {
+        let expected = if self.any_length {
             expected.accepting_regions_of_any_length()
         } else {
             expected
+        };
+        if self.legacy_services {
+            expected.accepting_services(&LEGACY_RUSTFS_SIGNING_SERVICES)
+        } else {
+            expected
         }
+    }
+
+    /// Legacy RustFS's answer to a scope naming a service it verifies on no route, under the legacy
+    /// services: `501 NotImplemented`, naming the service and the ones it verifies.
+    pub(super) fn service_refusal(self, scope: &CredentialScope) -> Option<LegacyRefusal> {
+        let service = scope.service_name();
+        if !self.legacy_services || LEGACY_RUSTFS_SIGNING_SERVICES.contains(&service) {
+            return None;
+        }
+        // Legacy-compat (rustfs/backlog#2684): legacy RustFS echoes the service the request named
+        // into its refusal, where every other authentication refusal here is a constant sentence.
+        // The name is the caller's own credential text and escaped in the document; the intended
+        // future behaviour is a constant sentence.
+        let expected = LEGACY_RUSTFS_SIGNING_SERVICES.join(", ");
+        Some(LegacyRefusal::new(
+            ErrorCode::NOT_IMPLEMENTED,
+            format!("unknown service '{service}' in credential scope; expected one of: {expected}"),
+        ))
     }
 
     /// Whether a region the signature was just verified under must now be refused: only under the
@@ -114,7 +157,7 @@ impl SigV4Authenticator {
     /// the AWS answer that tells a misconfigured client which region to use.
     #[must_use]
     pub fn accept_any_signing_region(mut self) -> Self {
-        self.region_policy.any_region = true;
+        self.scope_policy.any_region = true;
         self
     }
 
@@ -138,7 +181,7 @@ impl SigV4Authenticator {
     /// client signed with, and the date and service are still enforced.
     #[must_use]
     pub fn accept_empty_signing_region(mut self) -> Self {
-        self.region_policy.empty_region = true;
+        self.scope_policy.empty_region = true;
         self
     }
 
@@ -155,7 +198,7 @@ impl SigV4Authenticator {
     /// the signature, so only the refusal's code and order change.
     #[must_use]
     pub fn refuse_unreadable_signing_regions_after_verification(mut self) -> Self {
-        self.region_policy.any_spelling = true;
+        self.scope_policy.any_spelling = true;
         self
     }
 
@@ -172,7 +215,26 @@ impl SigV4Authenticator {
     /// the next `/`, every byte of it still ASCII-graphic, and the key is still derived from it.
     #[must_use]
     pub fn accept_signing_regions_of_any_length(mut self) -> Self {
-        self.region_policy.any_length = true;
+        self.scope_policy.any_length = true;
+        self
+    }
+
+    /// Verifies a SigV4 signature whose credential scope names `s3`, `sts` or `s3tables` on every
+    /// operation, and answers a scope naming any other service with `501 NotImplemented` and the
+    /// sentence legacy RustFS writes, as legacy RustFS does (rustfs/gateway#1130): the header,
+    /// presigned and POST-form surfaces alike.
+    ///
+    /// RustFS verifies those three services wherever a request is routed — its table-catalog
+    /// clients sign `s3tables`, and AWS STS clients sign `sts` — and refuses every other one before
+    /// it looks the access key up. The key is derived from the service the client named, so a
+    /// signature stays bound to it; the date and region checks are unchanged.
+    ///
+    /// Off by default: the default verifies only the routed operation's own service, answers an
+    /// S3-family service that is not it with `400 AuthorizationHeaderMalformed`, and any other name
+    /// as a credential it cannot read, `403 InvalidAccessKeyId`.
+    #[must_use]
+    pub fn accept_legacy_rustfs_signing_services(mut self) -> Self {
+        self.scope_policy.legacy_services = true;
         self
     }
 

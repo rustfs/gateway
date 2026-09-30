@@ -101,6 +101,10 @@ pub enum Unimplemented {
     SigV2,
     /// `STREAMING-AWS4-ECDSA-P256-SHA256-PAYLOAD[-TRAILER]`, the streaming form of SigV4a.
     StreamingSigV4a,
+    /// A credential scope naming a service the deployment verifies on no route, read only by a
+    /// verifier that reads any service name ([`crate::ServiceReading::AnyName`], the RustFS
+    /// profile) and answers it as legacy RustFS does.
+    ScopeService,
     /// A SigV2 request declaring a framed (`aws-chunked`) payload.
     ///
     /// SigV2 has no streaming form: AWS never defined one, and the chunk signatures the framing
@@ -123,6 +127,7 @@ impl Unimplemented {
             Self::SigV2 => "SigV2 is recognised and not implemented",
             Self::StreamingSigV4a => "streaming SigV4a is not implemented",
             Self::StreamingSigV2 => "SigV2 has no streaming payload form",
+            Self::ScopeService => "the credential scope names a service this deployment does not verify",
         }
     }
 }

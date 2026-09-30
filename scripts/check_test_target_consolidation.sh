@@ -738,6 +738,7 @@ gateway_modules = (
     "service_clone_allocations",
     "service_concurrency",
     "service_config",
+    "signing_services",
     "sigv2_runtime",
     "sse_runtime",
     "steady_state_allocations",
