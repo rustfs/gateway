@@ -312,17 +312,31 @@ fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
+/// The three headers a hand-signed [`location_request`] sends, in canonical order.
+const SENT_HEADERS: [&str; 3] = ["host", "x-amz-content-sha256", "x-amz-date"];
+
 /// [`location_request`], header-signed by hand now with the shared access key and `secret`, scoped
 /// to `region` — any text the legacy stack's parser reads up to the next `/`.
 fn location_signed_by_hand(region: &str, secret: &str) -> ContextRequest {
+    location_signed_covering(region, secret, &SENT_HEADERS)
+}
+
+/// [`location_signed_by_hand`], naming in `SignedHeaders` — and so in the canonical request — only
+/// the `covered` ones of the three headers it sends; the rest travel unsigned.
+fn location_signed_covering(region: &str, secret: &str, covered: &[&str]) -> ContextRequest {
     use sha2::{Digest as _, Sha256};
     let stamp = amz_date(rustfs_gateway_sig::RequestNow::capture().unix_seconds());
     let day = &stamp[..8];
     let scope = format!("{day}/{region}/s3/aws4_request");
-    let signed = "host;x-amz-content-sha256;x-amz-date";
-    let canonical = format!(
-        "GET\n/photos\nlocation=\nhost:{PATH_HOST}\nx-amz-content-sha256:UNSIGNED-PAYLOAD\nx-amz-date:{stamp}\n\n{signed}\nUNSIGNED-PAYLOAD"
-    );
+    let values = [PATH_HOST, "UNSIGNED-PAYLOAD", stamp.as_str()];
+    let named: Vec<(&str, &str)> = SENT_HEADERS
+        .into_iter()
+        .zip(values)
+        .filter(|(name, _)| covered.contains(name))
+        .collect();
+    let canonical_headers: String = named.iter().map(|(name, value)| format!("{name}:{value}\n")).collect();
+    let signed = named.iter().map(|(name, _)| *name).collect::<Vec<_>>().join(";");
+    let canonical = format!("GET\n/photos\nlocation=\n{canonical_headers}\n{signed}\nUNSIGNED-PAYLOAD");
     let string_to_sign = format!("AWS4-HMAC-SHA256\n{stamp}\n{scope}\n{}", hex(&Sha256::digest(canonical.as_bytes())));
     let mut key = hmac(format!("AWS4{secret}").as_bytes(), day.as_bytes());
     for part in [region.as_bytes(), b"s3", b"aws4_request"] {
@@ -391,5 +405,49 @@ fn a_scope_region_with_a_header_separator_is_refused_by_both_stacks_with_differe
             assert_eq!(gateway.code(), Some("InvalidAccessKeyId"), "{region}: {gateway:?}");
             assert_eq!(oracle.code(), Some("InvalidRequest"), "{region}: {oracle:?}");
         }
+    }
+}
+
+/// A header-signed request whose `SignedHeaders` leaves out `host`: the legacy stack verifies the
+/// signature over the headers the list does name and serves the request. The gateway refuses it
+/// under both profiles with `403 SignatureDoesNotMatch`: a signature that does not cover the host
+/// holds for every host the request could be re-addressed to. Kept deliberately, on security
+/// grounds (rustfs/backlog#2684, intentionally not kept); the same request naming `host` is served
+/// by both.
+///
+/// Ruling: `rd-loc-0009`
+#[test]
+fn a_signature_leaving_host_unsigned_is_verified_by_the_legacy_stack_and_refused_by_the_gateway() {
+    let unsigned_host = ["x-amz-content-sha256", "x-amz-date"];
+    for request in [
+        location_signed_covering("us-east-1", SECRET_KEY, &unsigned_host),
+        location_signed_covering("us-east-1", SECRET_KEY, &unsigned_host).rustfs_profile(),
+    ] {
+        let (gateway, oracle) = answers(&request).expect("both stacks answer");
+        assert_eq!((gateway.status, oracle.status), (403, 200), "{gateway:?} {oracle:?}");
+        assert_eq!(gateway.code(), Some("SignatureDoesNotMatch"), "{gateway:?}");
+    }
+    let covered = location_signed_covering("us-east-1", SECRET_KEY, &SENT_HEADERS).rustfs_profile();
+    let (gateway, oracle) = answers(&covered).expect("both stacks answer");
+    assert_eq!((gateway.status, oracle.status), (200, 200), "{gateway:?} {oracle:?}");
+}
+
+/// A header-signed request whose `SignedHeaders` leaves out `x-amz-content-sha256`: the legacy
+/// stack exempts that header from its unsigned-header rule, reads it as the payload line and serves
+/// the request. The gateway refuses it under both profiles with `403 SignatureDoesNotMatch`: every
+/// `x-amz-*` header a request carries must be named in its `SignedHeaders`, with no exemption. Kept
+/// deliberately, on security grounds (rustfs/backlog#2684, intentionally not kept).
+///
+/// Ruling: `rd-loc-0010`
+#[test]
+fn a_signature_leaving_the_payload_hash_unsigned_is_verified_by_the_legacy_stack_and_refused_by_the_gateway() {
+    let unsigned_payload_hash = ["host", "x-amz-date"];
+    for request in [
+        location_signed_covering("us-east-1", SECRET_KEY, &unsigned_payload_hash),
+        location_signed_covering("us-east-1", SECRET_KEY, &unsigned_payload_hash).rustfs_profile(),
+    ] {
+        let (gateway, oracle) = answers(&request).expect("both stacks answer");
+        assert_eq!((gateway.status, oracle.status), (403, 200), "{gateway:?} {oracle:?}");
+        assert_eq!(gateway.code(), Some("SignatureDoesNotMatch"), "{gateway:?}");
     }
 }

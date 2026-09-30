@@ -765,6 +765,13 @@ mod legacy_reading_tests;
 /// (rustfs/gateway#1099).
 mod sigv4_acceptance_tests;
 
+/// A header-signed SigV4 request built by an independent signer, one rule bent at a time.
+mod hand_signer;
+
+/// The two headers the RustFS profile keeps requiring in `SignedHeaders`, deliberately unlike
+/// legacy RustFS (rustfs/gateway#1130).
+mod signed_coverage_tests;
+
 /// Request-checksum failures answered with legacy RustFS's `BadDigest` (rustfs/gateway#1057), and
 /// what each refusal leaves in storage.
 mod bad_digest_tests;
