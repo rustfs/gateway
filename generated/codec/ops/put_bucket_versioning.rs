@@ -59,8 +59,7 @@ impl OperationCodec for dto::PutBucketVersioning {
         let raw_body = body.into_buffered()?;
         value::verify_body_digest(request, raw_body.as_ref())?;
         let raw_body = value::body_literal(request, "VersioningConfiguration", raw_body);
-        let root = rustfs_gateway_xml::parse(raw_body.as_ref())
-            .map_err(|_| CodecError::malformed_xml("the request body is not the XML this operation accepts"))?;
+        let root = crate::codec::request_document(request, raw_body.as_ref(), &document::DOCUMENT)?;
         if !["VersioningConfiguration"].contains(&root.name.as_str()) {
             return Err(CodecError::malformed_xml("the request body has the wrong root element").about("VersioningConfiguration"));
         }
@@ -115,4 +114,24 @@ fn read_versioning_configuration(node: &rustfs_gateway_xml::XmlNode) -> Result<d
     }
     value::exit(shape.check_required())?;
     Ok(shape)
+}
+
+/// The request document's shape, as the RustFS profile reads it (`rustfs_gateway_xml::bound`,
+/// rustfs/gateway#1078): its roots, every structure it reaches, and each member legacy
+/// RustFS reads. Generated from the IR and the legacy facts in `emit::codec::document`.
+#[rustfmt::skip]
+mod document {
+    use rustfs_gateway_xml::bound::{Arity, Content, Document, EmptyBody, Member, Scalar, Shape, Unknown, Value};
+
+    pub(super) static DOCUMENT: Document = Document { roots: &["VersioningConfiguration"], empty: EmptyBody::Missing, shapes: &[
+        Shape { name: "VersioningConfiguration", attribute: None, content: Content::Members { unknown: Unknown::Skip, members: &[
+            Member { element: "MfaDelete", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "Status", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "ExcludedPrefixes", arity: Arity::Repeated, value: Value::Shape(1), required: false, kept: true },
+            Member { element: "ExcludeFolders", arity: Arity::One, value: Value::Text(Scalar::Boolean), required: false, kept: true },
+        ] } },
+        Shape { name: "ExcludedPrefix", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+            Member { element: "Prefix", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+        ] } },
+    ] };
 }

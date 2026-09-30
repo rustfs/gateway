@@ -68,8 +68,7 @@ impl OperationCodec for dto::SelectObjectContent {
         {
             return Err(CodecError::malformed_xml("the request body has the wrong root namespace"));
         }
-        let root = rustfs_gateway_xml::parse(raw_body.as_ref())
-            .map_err(|_| CodecError::malformed_xml("the request body is not the XML this operation accepts"))?;
+        let root = crate::codec::request_document(request, raw_body.as_ref(), &document::DOCUMENT)?;
         if !["SelectObjectContentRequest", "SelectRequest"].contains(&root.name.as_str()) {
             return Err(CodecError::malformed_xml("the request body has the wrong root element"));
         }
@@ -259,4 +258,64 @@ fn read_scan_range(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::ScanRange,
     }
     value::exit(shape.check_required())?;
     Ok(shape)
+}
+
+/// The request document's shape, as the RustFS profile reads it (`rustfs_gateway_xml::bound`,
+/// rustfs/gateway#1078): its roots, every structure it reaches, and each member legacy
+/// RustFS reads. Generated from the IR and the legacy facts in `emit::codec::document`.
+#[rustfmt::skip]
+mod document {
+    use rustfs_gateway_xml::bound::{Arity, Content, Document, EmptyBody, Member, Scalar, Shape, Unknown, Value};
+
+    pub(super) static DOCUMENT: Document = Document { roots: &["SelectObjectContentRequest", "SelectRequest"], empty: EmptyBody::Missing, shapes: &[
+        Shape { name: "SelectObjectContent", attribute: None, content: Content::Members { unknown: Unknown::Skip, members: &[
+            Member { element: "Expression", arity: Arity::One, value: Value::Text(Scalar::Text), required: true, kept: true },
+            Member { element: "ExpressionType", arity: Arity::One, value: Value::Text(Scalar::Text), required: true, kept: true },
+            Member { element: "RequestProgress", arity: Arity::One, value: Value::Shape(1), required: false, kept: true },
+            Member { element: "InputSerialization", arity: Arity::One, value: Value::Shape(2), required: true, kept: true },
+            Member { element: "OutputSerialization", arity: Arity::One, value: Value::Shape(3), required: true, kept: true },
+            Member { element: "ScanRange", arity: Arity::One, value: Value::Shape(4), required: false, kept: true },
+        ] } },
+        Shape { name: "RequestProgress", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+            Member { element: "Enabled", arity: Arity::One, value: Value::Text(Scalar::Boolean), required: false, kept: true },
+        ] } },
+        Shape { name: "InputSerialization", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+            Member { element: "CSV", arity: Arity::One, value: Value::Shape(5), required: false, kept: true },
+            Member { element: "CompressionType", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "JSON", arity: Arity::One, value: Value::Shape(6), required: false, kept: true },
+            Member { element: "Parquet", arity: Arity::One, value: Value::Shape(7), required: false, kept: true },
+        ] } },
+        Shape { name: "OutputSerialization", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+            Member { element: "CSV", arity: Arity::One, value: Value::Shape(8), required: false, kept: true },
+            Member { element: "JSON", arity: Arity::One, value: Value::Shape(9), required: false, kept: true },
+        ] } },
+        Shape { name: "ScanRange", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+            Member { element: "Start", arity: Arity::One, value: Value::Text(Scalar::Long), required: false, kept: true },
+            Member { element: "End", arity: Arity::One, value: Value::Text(Scalar::Long), required: false, kept: true },
+        ] } },
+        Shape { name: "CSVInput", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+            Member { element: "FileHeaderInfo", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "Comments", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "QuoteEscapeCharacter", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "RecordDelimiter", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "FieldDelimiter", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "QuoteCharacter", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "AllowQuotedRecordDelimiter", arity: Arity::One, value: Value::Text(Scalar::Boolean), required: false, kept: true },
+        ] } },
+        Shape { name: "JSONInput", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+            Member { element: "Type", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+        ] } },
+        Shape { name: "ParquetInput", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+        ] } },
+        Shape { name: "CSVOutput", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+            Member { element: "QuoteFields", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "QuoteEscapeCharacter", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "RecordDelimiter", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "FieldDelimiter", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "QuoteCharacter", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+        ] } },
+        Shape { name: "JSONOutput", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+            Member { element: "RecordDelimiter", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+        ] } },
+    ] };
 }

@@ -44,8 +44,7 @@ impl OperationCodec for dto::DeleteObjects {
         // Delete — the XML request body, rooted at `Delete`.
         let raw_body = body.into_buffered()?;
         value::verify_body_digest(request, raw_body.as_ref())?;
-        let root = rustfs_gateway_xml::parse(raw_body.as_ref())
-            .map_err(|_| CodecError::malformed_xml("the request body is not the XML this operation accepts"))?;
+        let root = crate::codec::request_document(request, raw_body.as_ref(), &document::DOCUMENT)?;
         if !["Delete"].contains(&root.name.as_str()) {
             return Err(CodecError::malformed_xml("the request body has the wrong root element").about("Delete"));
         }
@@ -187,4 +186,26 @@ fn read_object_identifier(
     }
     value::exit(shape.check_required())?;
     Ok(shape)
+}
+
+/// The request document's shape, as the RustFS profile reads it (`rustfs_gateway_xml::bound`,
+/// rustfs/gateway#1078): its roots, every structure it reaches, and each member legacy
+/// RustFS reads. Generated from the IR and the legacy facts in `emit::codec::document`.
+#[rustfmt::skip]
+mod document {
+    use rustfs_gateway_xml::bound::{Arity, Content, Document, EmptyBody, Member, Scalar, Shape, Unknown, Value};
+
+    pub(super) static DOCUMENT: Document = Document { roots: &["Delete"], empty: EmptyBody::Missing, shapes: &[
+        Shape { name: "Delete", attribute: None, content: Content::Members { unknown: Unknown::Skip, members: &[
+            Member { element: "Object", arity: Arity::Repeated, value: Value::Shape(1), required: true, kept: true },
+            Member { element: "Quiet", arity: Arity::One, value: Value::Text(Scalar::Boolean), required: false, kept: true },
+        ] } },
+        Shape { name: "ObjectIdentifier", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+            Member { element: "Key", arity: Arity::One, value: Value::Text(Scalar::Text), required: true, kept: true },
+            Member { element: "VersionId", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "ETag", arity: Arity::One, value: Value::Text(Scalar::EntityTag), required: false, kept: true },
+            Member { element: "LastModifiedTime", arity: Arity::One, value: Value::Text(Scalar::HttpDate), required: false, kept: true },
+            Member { element: "Size", arity: Arity::One, value: Value::Text(Scalar::Long), required: false, kept: true },
+        ] } },
+    ] };
 }

@@ -856,6 +856,9 @@ mod legacy_vhost_tests;
 /// The operation a request names, selected as legacy RustFS selects it (rustfs/gateway#1127).
 mod legacy_selection_tests;
 
+/// Request documents read as legacy RustFS reads them, and what each refusal leaves in storage
+/// (rustfs/gateway#1078).
+mod document_reading_tests;
 /// The object names RustFS's storage refuses, refused as RustFS refuses them (rustfs/gateway#1145).
 mod legacy_storage_names_tests;
 

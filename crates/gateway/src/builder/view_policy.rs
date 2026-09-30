@@ -20,6 +20,7 @@
 //! Responsible for: [`ServiceBuilder::clamp_oversized_max_keys`],
 //! [`ServiceBuilder::answer_checksum_failures_with_bad_digest`],
 //! [`ServiceBuilder::ignore_unknown_checksum_algorithms`],
+//! [`ServiceBuilder::read_request_documents_as_rustfs`],
 //! [`ServiceBuilder::sign_presigned_payloads_as_unsigned`],
 //! [`ServiceBuilder::sign_base64_payload_digests_as_hex`],
 //! [`ServiceBuilder::accept_empty_uploads_without_content_length`],
@@ -83,7 +84,7 @@ use super::sigv4_header_guard::SigV4HeaderGuard;
 use crate::integrity::IntegrityCodes;
 use crate::render::{S3Error, from_wire_reject};
 use rustfs_gateway_core::codec::value::RustFsListing;
-use rustfs_gateway_core::{EncodedResponse, HandlerError, MetaView, PageSizeCeiling};
+use rustfs_gateway_core::{DocumentReading, EncodedResponse, HandlerError, MetaView, PageSizeCeiling};
 use rustfs_gateway_http::{HeaderView, WireReject};
 use rustfs_gateway_sig::PayloadMode;
 
@@ -164,6 +165,7 @@ pub(crate) struct ViewPolicy {
     pub(super) answer_heads: AnswerHeads,
     clamp_max_keys: bool,
     integrity_codes: IntegrityCodes,
+    document_reading: DocumentReading,
     presigned_payload_unsigned: bool,
     base64_digests_as_hex: bool,
     empty_uploads_without_length: bool,
@@ -217,7 +219,10 @@ impl ViewPolicy {
     /// `body` is the request body before anything reads it, consulted only for the length the
     /// transport already knows it has.
     pub(crate) fn apply<'a, B: http_body::Body>(self, operation: &str, meta: MetaView<'a>, body: Option<&B>) -> MetaView<'a> {
-        let meta = self.checksum_waiver.apply(operation, meta);
+        let meta = self
+            .checksum_waiver
+            .apply(operation, meta)
+            .with_document_reading(self.document_reading);
         // Legacy-compat (rustfs/backlog#2684): legacy RustFS stores an upload that carries no
         // `Content-Length` and whose transport ended it empty as a zero-length object, where AWS
         // answers `411 MissingContentLength`. Kept so the clients RustFS serves today keep
@@ -389,6 +394,23 @@ impl ServiceBuilder {
         self
     }
 
+    /// Reads every XML request document as legacy RustFS reads one (rustfs/gateway#1078): against
+    /// the operation's shape, refusing with `400 MalformedXML` an element a nested structure does
+    /// not declare, a second occurrence of a member that may appear once, and a value legacy
+    /// RustFS's grammar does not read, and handing the handler each value exactly as legacy RustFS
+    /// reads it (`rustfs_gateway_xml::bound`, `rustfs_gateway_core::DocumentReading::RustFs`).
+    ///
+    /// Off by default: the core reads a document as a tree, skipping an element it does not know,
+    /// keeping the first of a repeated one and answering an unreadable value `400
+    /// InvalidArgument`. Turned on, a value legacy RustFS reads and this gateway cannot carry
+    /// exactly — a date with a non-zero UTC offset, an entity tag no gateway tag spells — is refused
+    /// with `400 InvalidArgument` rather than handed over differently.
+    #[must_use]
+    pub fn read_request_documents_as_rustfs(mut self) -> Self {
+        self.view_policy.document_reading = DocumentReading::RustFs;
+        self
+    }
+
     /// Reads a presigned request's `x-amz-content-sha256` as legacy RustFS does: the signature
     /// always covers `UNSIGNED-PAYLOAD`, a declared digest (lowercase hex or base64) is verified
     /// against the body instead, any other value is `403 SignatureDoesNotMatch`, and a streaming
@@ -538,6 +560,7 @@ mod tests {
         assert_eq!(ViewPolicy::default().bodyless_digest, BodylessDigest::Compared);
         assert!(!ViewPolicy::default().clamp_max_keys);
         assert_eq!(ViewPolicy::default().integrity_codes, IntegrityCodes::Model);
+        assert_eq!(ViewPolicy::default().document_reading, DocumentReading::Tree);
         assert!(!ViewPolicy::default().presigned_payload_unsigned());
         assert!(!ViewPolicy::default().empty_uploads_without_length);
         assert!(!ViewPolicy::default().rustfs_listings);

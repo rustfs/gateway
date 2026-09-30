@@ -273,6 +273,10 @@ pub(crate) fn build_service(
             // RustFS ignores a checksum header naming an algorithm it does not know, and stores the
             // body; every claim it can verify is still compared (rustfs/backlog#1677).
             .ignore_unknown_checksum_algorithms()
+            // RustFS reads a request document against its shape and refuses an unknown nested
+            // element, a repeated member and a value its grammar does not read, with `MalformedXML`
+            // (rustfs/gateway#1078), so the launcher stores no configuration RustFS would refuse.
+            .read_request_documents_as_rustfs()
             // RustFS never compares the signed digest of a request without a body: a read or delete
             // declaring another payload's digest is served (rustfs/gateway#1099).
             .accept_mismatched_payload_digests_without_a_body()
