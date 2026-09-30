@@ -51,6 +51,7 @@ mod ownership;
 mod policy_authorizer;
 mod probe;
 mod service;
+mod storage_names;
 mod tls;
 mod transport;
 

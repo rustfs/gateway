@@ -16,16 +16,36 @@
 //!
 //! Responsible for: running every requested key through the same single-key deletion
 //! `DeleteObject` uses, and reporting each one exactly once — as a deleted entry, or as an error
-//! entry carrying the code and message that key's deletion answered.
+//! entry carrying the code and message that key's deletion answered — and, when the backend was
+//! told which keys the storage it stands in for refuses ([`FsBackend::refusing_batch_deletes_of`]),
+//! answering each of those on its own instead of deleting it.
 //! NOT responsible for: the request's `Content-MD5`/checksum requirement or its XML grammar, which
 //! the framework enforces before this handler runs, or what a deletion does under each versioning
 //! state, which is `super::versioning`'s.
 //! Upstream: `FsBackend::delete_object_version`. Downstream: the CRUD registry.
 
 use rustfs_gateway::dto::{DeleteObjectOutput, DeleteObjects, DeleteObjectsOutput, DeletedObject, Error};
-use rustfs_gateway::{Handler, HandlerError, HandlerResult, ObjectKey, Req, Resp};
+use rustfs_gateway::{ErrorCode, Handler, HandlerError, HandlerResult, ObjectKey, Req, Resp};
 
 use super::FsBackend;
+
+impl FsBackend {
+    /// Answers each key of a batch delete that `refuses` names with its own
+    /// `400 InvalidArgument` "Invalid argument" error entry, and neither deletes it nor records a
+    /// delete marker for it; every other key is deleted as before.
+    ///
+    /// For a deployment standing this backend in for a storage that refuses some keys outright —
+    /// RustFS's refuses a key with a `.` or `..` segment, `//` or a NUL, and answers a batch delete
+    /// naming one this way (rustfs/gateway#1145). A batch's keys are read from its authorized
+    /// resources, which nothing in front of the handler can narrow, so this is the one place the
+    /// refusal can be made; every single-key operation can be refused before the backend is
+    /// reached. Off by default.
+    #[must_use]
+    pub fn refusing_batch_deletes_of(mut self, refuses: fn(&str) -> bool) -> Self {
+        self.batch_delete_refusal = Some(refuses);
+        self
+    }
+}
 
 /// The deleted entry for one key, shaped from what its single-key deletion reported.
 ///
@@ -70,6 +90,15 @@ impl Handler<DeleteObjects> for FsBackend {
         let mut deleted = Vec::new();
         let mut errors = Vec::new();
         for (key, version_id) in entries {
+            if self.batch_delete_refusal.is_some_and(|refuses| refuses(key.as_str())) {
+                errors.push(Error {
+                    key: Some(key),
+                    version_id,
+                    code: Some(ErrorCode::INVALID_ARGUMENT.as_str().to_owned()),
+                    message: Some("Invalid argument".to_owned()),
+                });
+                continue;
+            }
             match self.delete_object_version(bucket, key.as_str(), version_id.as_deref()).await {
                 // Quiet mode reports only the keys that failed; a success is the absence of an
                 // error entry.

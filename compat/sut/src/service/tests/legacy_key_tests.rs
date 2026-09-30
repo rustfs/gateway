@@ -18,9 +18,10 @@
 //! assembly onto a real backend and back — written, read, listed under the same bytes, copied from
 //! and batch-deleted — and the keys no `ObjectKey` can hold still storing nothing.
 //! NOT responsible for: the rule (`rustfs-gateway-types`' `rustfs_key_floor_tests`), or equality
-//! with the key legacy RustFS hands its storage (the difftest RustFS-profile rows). The keys legacy
-//! RustFS's own storage refuses (`a/../b`, CR, LF) are not written here: that refusal is RustFS's,
-//! behind the gateway, and this backend is not RustFS.
+//! with the key legacy RustFS hands its storage (the difftest RustFS-profile rows). A key legacy
+//! RustFS's storage refuses (`a/../b`) is refused in front of this backend as RustFS refuses it
+//! (`legacy_storage_names_tests`); CR and LF, which RustFS's object handlers refuse, are not
+//! written here: that refusal is RustFS's, behind the gateway, and this backend is not RustFS.
 //! Upstream: the parent module's two-identity assembly. Downstream: nothing.
 
 use super::*;
