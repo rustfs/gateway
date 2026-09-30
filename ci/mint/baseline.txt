@@ -86,17 +86,28 @@
 #   feature legacy RustFS serves outside the gateway's protocol surface that the launcher lacks
 #   (#1191, #1199, rustfs/backlog#1726, rustfs/backlog#1730).
 #
+#   Lowered on 2026-09-30 without a new generation (a count may always come down), from the
+#   `record` run https://github.com/rustfs/gateway/actions/runs/36683262730 of e7c3e2a8, the merge
+#   train through #1205 on main at f2bbfc93 (which adds #1178, #1176 and #1166 to this
+#   generation's 2b431155): minio-js 13 -> 11, because #1166 stores a form's Content-Disposition as
+#   legacy RustFS does. aws-sdk-go-v2 stays at 1, but its failure moved: #1196 made
+#   ConditionalDeleteWithIncorrectETag pass, and the suite now stops at the later ChecksumCRC32
+#   (attributed below). Every other count, and every other failing function, is unchanged.
+#
 # generation: 4
 #   MakeBucket_Test1, reported as its signature `Task MakeBucketAsync(string bucketName, string
 #   location = 'us-east-1', ...)`: the test names its bucket `minio-dotnet-example-` plus 50 random
 #   characters, 71 bytes, and the SUT refuses it 400 InvalidBucketName, as legacy RustFS does
 #   (measured) and as the 63-byte bucket-name limit requires. Not a gateway defect.
 .minio-dotnet 1
-#   ConditionalDeleteWithIncorrectETag, the sixth test; the suite stops at its first failure.
-#   DeleteObject with `If-Match: "wrong-etag"` expects 412 and the object kept; legacy RustFS answers
-#   exactly that, the reference backend ignored the header and deleted the object. A reference
-#   backend gap, #1191. Its five earlier tests pass, testPresignedPutInvalidHash included since the
-#   RustFS profile answers the invalid payload hash with SignatureDoesNotMatch.
+#   ChecksumCRC32, the ninth test; the suite stops at its first failure. PutObject with a CRC32
+#   checksum expects `ChecksumCRC32` back on the write and on a GetObject with ChecksumMode=ENABLED.
+#   Legacy RustFS stores the checksum and answers it on PUT, GET and HEAD; the reference backend
+#   stores no full-object checksum and answers none (measured against both with the same PUT/GET
+#   pair). A reference backend gap, #1001. Its eight earlier tests pass: the four conditional
+#   deletes (the wrong-tag and the missing-key cases since #1196, #1191), and
+#   testPresignedPutInvalidHash since the RustFS profile answers the invalid payload hash with
+#   SignatureDoesNotMatch.
 aws-sdk-go-v2 1
 #   The separate HTTPS pass measures 7 PASS, 0 FAIL, 0 NA. The one FAIL of `S3Client.putObject
 #   versions` in https://github.com/rustfs/gateway/actions/runs/36595845931 did not recur in this run,
@@ -132,7 +143,7 @@ minio-go 0
 #     deleteUser(), removeCannedPolicy(): the MinIO admin API, which the launcher answers 404
 #     NoSuchBucket. Legacy RustFS serves it; its listUsers() answer then fails the SDK's decryption.
 minio-java 15
-#   13 failures. As on legacy RustFS (minio-js 8.0.6 run against it locally, 6 failures there):
+#   11 failures. As on legacy RustFS (minio-js 8.0.6 run against it locally, 6 failures there):
 #   - copyObject(... conditions ...): `x-amz-copy-source-if-unmodified-since: Invalid Date` is
 #     refused, as legacy RustFS refuses an unreadable copy-source date: the RustFS profile's
 #     `refuse_unreadable_date_conditions` (ruling R14 of rustfs/backlog#1677); the generic profile
@@ -141,13 +152,10 @@ minio-java 15
 #   - extensions.listObjectsV2WithMetadata, selectObjectContent, the `after all` hook for "Remove
 #     Object post select of content:" and the `after all` hook in "functional tests".
 #   Not on legacy RustFS:
-#   - presignedPostPolicy(... setContentDisposition_inline) x2 (the step, and mocha reporting it
-#     done twice): the RustFS profile answers a form carrying a Content-Disposition field 501
-#     NotImplemented; legacy RustFS stores it (#1129).
 #   - listObjects(... recursive:true) x2 in "Force Deletion of objects with versions" and "... of
 #     prefix with versions", and the three `after all` hooks of the force-deletion blocks: MinIO's
 #     force delete, served by legacy RustFS, not by the launcher (#1199).
-minio-js 13
+minio-js 11
 #   (unnamed): upload_snowball_objects. The archive is stored as one object, so its listing check
 #   fails; legacy RustFS extracts it (measured). Served by legacy RustFS, not by the launcher (#1199).
 minio-py 1
