@@ -740,11 +740,32 @@ impl S3Service {
         };
         let presence = detect_credentials(&view);
 
+        // Legacy RustFS's answers to a header signature or a presigned URL it refuses before its
+        // credential lookup, in its order, when the assembly answers with them (rustfs/gateway#1130).
+        let signed_head = crate::builder::view_policy::header_signatures::SignedHead {
+            method: wire.method(),
+            headers: &headers,
+            query: wire.query().as_str(),
+            now,
+            window: self.inner.floor.skew_window(),
+        };
+        let policy = &self.inner.view_policy;
+        let body_owed = wire.framing().has_body();
+        let legacy_refusal = policy
+            .header_signatures
+            .refusal(&signed_head, response_kind, body_owed)
+            .or_else(|| policy.presigned_urls.refusal(&signed_head, response_kind, body_owed));
+        if let Some(refusal) = legacy_refusal {
+            return outcome.refuse(refusal);
+        }
+
         let chunk_sink = crate::ext::ChunkSink::new();
         // Kept out of the `match` so the read at the bottom can consult it. A custom admission has no
         // payload mode; an anonymous one has only the unsigned streaming mode its head declares.
         let mut framing_mode: Option<PayloadMode> = None;
         let mut body_digest = BodyDigestObligation::None;
+        // Legacy RustFS's words for a RustFS-profile refusal, when the authenticator published them.
+        let mut legacy = None;
         let (authentication, signature_mismatch) = match self.inner.floor.admit(view, M::floor(&op), now) {
             Ok(Admission::Anonymous(evidence)) => {
                 framing_mode = match crate::payload_header::anonymous_framing(&headers, self.inner.decode_anonymous_framing) {
@@ -764,6 +785,7 @@ impl S3Service {
                     }
                 };
                 body_digest = self.inner.view_policy.bodyless_digest.apply(request_body_mode, obligation);
+                let payload = self.inner.view_policy.signed_payload_mode(payload);
                 framing_mode = Some(payload.clone());
                 #[cfg(feature = "dangerous-replace-signature-verifier")]
                 let replacement_verdict = self
@@ -789,7 +811,8 @@ impl S3Service {
                     // neither survives `Verdict` — see `crate::ext::ChunkVerification`.
                     .with_chunk_sink(&chunk_sink);
                     let result = self.inner.authenticator.authenticate(&question).await;
-                    let signature_mismatch = question.into_signature_mismatch();
+                    let (signature_mismatch, published_legacy) = question.into_published();
+                    legacy = published_legacy;
                     match result {
                         Ok(authentication) => (authentication, signature_mismatch),
                         Err(_) => {
@@ -854,6 +877,10 @@ impl S3Service {
         let caller_secret = caller_secret.filter(|_| hands_caller_secret || self.inner.caller_secret_every_operation);
         let verdict = SecurityFloor::seal_verdict(verdict, presence);
         if let Some(error) = verdict.rejection() {
+            // A RustFS-profile reading's refusal, in legacy RustFS's words (rustfs/gateway#1130).
+            if let Some(legacy) = legacy {
+                return outcome.refuse(legacy.render(&error, response_kind, wire.framing().has_body()));
+            }
             if error == AuthError::AuthorizationHeaderMalformed {
                 let context = match scope_rejection.and_then(|rejection| rejection.expected_region().cloned()) {
                     Some(region) => {

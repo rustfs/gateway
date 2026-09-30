@@ -183,7 +183,16 @@ pub(crate) fn build_service(
                     .accept_signing_regions_of_any_length()
                     // It verifies a path's wire spelling only when the path carries an unencoded
                     // byte, such as a raw `=` (rustfs/rustfs#2593).
-                    .verify_raw_paths_only_with_unencoded_bytes(),
+                    .verify_raw_paths_only_with_unencoded_bytes()
+                    // It verifies an `s3`, `sts` or `s3tables` scope on every operation, and answers
+                    // any other service with its `501` (rustfs/gateway#1130).
+                    .accept_legacy_rustfs_signing_services()
+                    // And it answers a scope date other than the signed day, and a region outside
+                    // its grammar, with its own code and sentence (rustfs/gateway#1130).
+                    .answer_credential_scope_refusals_as_legacy_rustfs()
+                    // It reads `SignedHeaders` verbatim, and answers a list that does not cover
+                    // what it must in its own words (rustfs/gateway#1130).
+                    .read_signed_headers_as_legacy_rustfs(),
             )
             // Not an allow-all, and not a bare operation-set filter either: the matrix must see a
             // refusal for anything outside the reference backend's registered set, and the
@@ -211,7 +220,10 @@ pub(crate) fn build_service(
                     .with_presigned_expiry_rule(rustfs_gateway::PresignedExpiryRule::LegacyRustfs)
                     // RustFS verifies a presigned URL on every operation and authorizes it as it
                     // authorizes a header signature (rustfs/gateway#1052).
-                    .admit_presigned_on_every_standard_operation_after_listing_in_the_posture_report(),
+                    .admit_presigned_on_every_standard_operation_after_listing_in_the_posture_report()
+                    // And it reads a query string or a form as signed only when it carries the
+                    // signature; the rest is anonymous (rustfs/gateway#1130).
+                    .recognize_signatures_as_legacy_rustfs(),
             )
             // Sized as the RustFS bridge sizes it: no framework layer refuses what RustFS answers.
             .framework_governor_rates(rustfs_governor_rates())
@@ -242,6 +254,14 @@ pub(crate) fn build_service(
             // RustFS signs every presigned request over `UNSIGNED-PAYLOAD` and verifies a digest the
             // request declares against the body instead (rustfs/rustfs#2379).
             .sign_presigned_payloads_as_unsigned()
+            // RustFS signs a header-signed payload digest given in base64 as its hex, and holds the
+            // body to the digest either way (rustfs/gateway#1130).
+            .sign_base64_payload_digests_as_hex()
+            // RustFS refuses a header signature before its credential lookup in its own order and
+            // words, and takes the timestamp from `x-amz-date` alone (rustfs/gateway#1130).
+            .answer_header_signatures_as_legacy_rustfs()
+            // And a presigned URL, the same way (rustfs/gateway#1130).
+            .answer_presigned_urls_as_legacy_rustfs()
             // RustFS answers an unreadable or mismatched request checksum with `BadDigest`
             // (rustfs/gateway#1057).
             .answer_checksum_failures_with_bad_digest()

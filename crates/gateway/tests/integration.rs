@@ -174,6 +174,8 @@ mod rustfs_key_floor;
 mod rustfs_selection;
 #[path = "rustfs_vhost.rs"]
 mod rustfs_vhost;
+#[path = "scope_refusals.rs"]
+mod scope_refusals;
 #[path = "select_frame_records.rs"]
 mod select_frame_records;
 #[path = "select_restore_intent.rs"]
@@ -188,6 +190,10 @@ mod service_clone_allocations;
 mod service_concurrency;
 #[path = "service_config.rs"]
 mod service_config;
+#[path = "signed_header_reading.rs"]
+mod signed_header_reading;
+#[path = "signing_services.rs"]
+mod signing_services;
 #[path = "sigv2_runtime.rs"]
 mod sigv2_runtime;
 #[path = "sse_runtime.rs"]

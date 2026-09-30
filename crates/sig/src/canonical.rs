@@ -66,6 +66,7 @@ use crate::parse::{AmzDate, CredentialScope};
 use crate::query::{QueryExclusion, RawQuery, percent_decode, percent_encode};
 use crate::scheme::ALGORITHM_SIGV4;
 use crate::signed_headers::SignedHeaderSet;
+use crate::signed_headers_legacy;
 use crate::verdict::AuthError;
 
 /// Which spelling of the URI path a canonical request was built from.
@@ -325,17 +326,24 @@ impl<'r> CanonicalRequestSpec<'r> {
     /// a header named in the allow-list has vanished from the map between enforcement and here.
     pub fn candidates(&self) -> Result<CanonicalCandidates, AuthError> {
         let canonical_query = self.query.canonical(self.exclusion)?;
-        let signed = SignedHeaderList::parse(self.signed.as_str()).map_err(|_| AuthError::AuthorizationHeaderMalformed)?;
 
         let mut tail = String::new();
         tail.push('\n');
         tail.push_str(&canonical_query);
         tail.push('\n');
-        HeaderView::new(self.headers)
-            .write_canonical_headers_with_host(&signed, &CanonicalHost(self.host.as_str()), &mut tail)
-            .map_err(canonical_headers_error)?;
-        tail.push('\n');
-        tail.push_str(signed.as_str());
+        if self.signed.reads_verbatim() {
+            // A list AWS would call malformed, read as legacy RustFS reads it (rustfs/gateway#1130).
+            signed_headers_legacy::write_canonical_headers(self.signed.as_str(), self.headers, self.host.as_str(), &mut tail)?;
+            tail.push('\n');
+            signed_headers_legacy::write_signed_line(self.signed.as_str(), &mut tail);
+        } else {
+            let signed = SignedHeaderList::parse(self.signed.as_str()).map_err(|_| AuthError::AuthorizationHeaderMalformed)?;
+            HeaderView::new(self.headers)
+                .write_canonical_headers_with_host(&signed, &CanonicalHost(self.host.as_str()), &mut tail)
+                .map_err(canonical_headers_error)?;
+            tail.push('\n');
+            tail.push_str(signed.as_str());
+        }
         tail.push('\n');
         tail.push_str(self.payload_token.as_str());
 

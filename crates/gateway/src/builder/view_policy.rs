@@ -21,6 +21,7 @@
 //! [`ServiceBuilder::answer_checksum_failures_with_bad_digest`],
 //! [`ServiceBuilder::ignore_unknown_checksum_algorithms`],
 //! [`ServiceBuilder::sign_presigned_payloads_as_unsigned`],
+//! [`ServiceBuilder::sign_base64_payload_digests_as_hex`],
 //! [`ServiceBuilder::accept_empty_uploads_without_content_length`],
 //! [`ServiceBuilder::url_encode_listings_like_rustfs`] and
 //! [`ServiceBuilder::read_empty_headers_as_absent`], the closed sets of operations the first and
@@ -84,8 +85,11 @@ use crate::render::{S3Error, from_wire_reject};
 use rustfs_gateway_core::codec::value::RustFsListing;
 use rustfs_gateway_core::{EncodedResponse, HandlerError, MetaView, PageSizeCeiling};
 use rustfs_gateway_http::{HeaderView, WireReject};
+use rustfs_gateway_sig::PayloadMode;
 
 mod date_conditions;
+pub(crate) mod header_signatures;
+pub(crate) mod presigned_urls;
 pub use self::date_conditions::STRICT_DATE_CONDITION_HEADERS;
 
 /// The page size RustFS lowers an oversized `max-keys` to (`S3_MAX_KEYS`).
@@ -161,6 +165,7 @@ pub(crate) struct ViewPolicy {
     clamp_max_keys: bool,
     integrity_codes: IntegrityCodes,
     presigned_payload_unsigned: bool,
+    base64_digests_as_hex: bool,
     empty_uploads_without_length: bool,
     rustfs_listings: bool,
     /// Whether date conditions are read in legacy RustFS's one spelling (`date_conditions`).
@@ -168,6 +173,10 @@ pub(crate) struct ViewPolicy {
     body_literals: bool,
     unknown_checksum_algorithms_ignored: bool,
     empty_headers_absent: bool,
+    /// Who answers a header signature's pre-lookup refusals (`header_signatures`).
+    pub(crate) header_signatures: header_signatures::HeaderRefusals,
+    /// Who answers a presigned URL's pre-lookup refusals (`presigned_urls`).
+    pub(crate) presigned_urls: presigned_urls::PresignedRefusals,
 }
 
 impl ViewPolicy {
@@ -187,6 +196,20 @@ impl ViewPolicy {
     /// ([`ServiceBuilder::refuse_unsigned_amz_headers_before_routing`]).
     pub(crate) const fn sigv4_header_guard(&self) -> SigV4HeaderGuard {
         self.sigv4_header_guard
+    }
+
+    /// The payload mode a signature is checked over: `payload`, with a base64 digest signed as its
+    /// hex under [`ServiceBuilder::sign_base64_payload_digests_as_hex`]. The digest the body is held
+    /// to is the same either way.
+    pub(crate) fn signed_payload_mode(&self, payload: PayloadMode) -> PayloadMode {
+        match payload {
+            // Legacy-compat (rustfs/backlog#2684): legacy RustFS signs a base64 payload digest as
+            // its lowercase hex, so the base64 text a generic SigV4 signer signs is refused and a
+            // signature over a spelling the request never carried is served. The intended future
+            // behaviour is the core's: the value as sent.
+            PayloadMode::Base64Sha256(digest) if self.base64_digests_as_hex => PayloadMode::ExactSha256(digest),
+            payload => payload,
+        }
     }
 
     /// The routed view of `operation`, with this assembly's readings applied to it.
@@ -382,6 +405,20 @@ impl ServiceBuilder {
         self
     }
 
+    /// Signs a header-signed `x-amz-content-sha256` given as the base64 of a SHA-256 digest as the
+    /// digest's lowercase hex, as legacy RustFS does (rustfs/gateway#1130): a signature over the hex
+    /// is verified and one over the base64 text as sent is `403 SignatureDoesNotMatch`. The body is
+    /// verified against the digest either way, and a mismatch is refused before anything is
+    /// stored.
+    ///
+    /// Off by default: the core signs the value as sent, as a generic SigV4 signer does. A hex
+    /// digest, `UNSIGNED-PAYLOAD` and the streaming modes are read the same under both.
+    #[must_use]
+    pub fn sign_base64_payload_digests_as_hex(mut self) -> Self {
+        self.view_policy.base64_digests_as_hex = true;
+        self
+    }
+
     /// Reads an absent `Content-Length` as `0` on exactly [`EMPTY_UPLOAD_OPERATIONS`] when the
     /// transport already ended the body empty, as RustFS does, instead of refusing the upload with
     /// `411 MissingContentLength`.
@@ -522,5 +559,44 @@ mod tests {
         }
         assert_eq!(MAX_KEYS.parameter(), "max-keys");
         assert_eq!(MAX_KEYS.ceiling(), 1000);
+    }
+
+    /// Positive — under the switch a base64 digest is signed as its hex, over the same digest.
+    #[test]
+    fn a_base64_digest_is_signed_as_its_hex_only_under_the_switch() {
+        let on = ViewPolicy {
+            base64_digests_as_hex: true,
+            ..ViewPolicy::default()
+        };
+        let digest = [0x5a; 32];
+        assert_eq!(
+            on.signed_payload_mode(PayloadMode::Base64Sha256(digest)),
+            PayloadMode::ExactSha256(digest)
+        );
+        assert_eq!(
+            ViewPolicy::default().signed_payload_mode(PayloadMode::Base64Sha256(digest)),
+            PayloadMode::Base64Sha256(digest)
+        );
+    }
+
+    /// Negative — every other mode is signed as before, under the switch and off it.
+    #[test]
+    fn n_every_other_payload_mode_is_signed_as_before() {
+        let on = ViewPolicy {
+            base64_digests_as_hex: true,
+            ..ViewPolicy::default()
+        };
+        for payload in [
+            PayloadMode::Empty,
+            PayloadMode::Unsigned,
+            PayloadMode::ExactSha256([7; 32]),
+            PayloadMode::StreamingSigned {
+                trailer: rustfs_gateway_sig::TrailerSet::None,
+            },
+        ] {
+            assert_eq!(on.signed_payload_mode(payload.clone()), payload);
+            assert_eq!(ViewPolicy::default().signed_payload_mode(payload.clone()), payload);
+        }
+        assert!(!ViewPolicy::default().base64_digests_as_hex);
     }
 }

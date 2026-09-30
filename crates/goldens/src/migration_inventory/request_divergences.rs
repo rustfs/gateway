@@ -591,8 +591,8 @@ const OPERATION_DIVERGENCES: [RequestDivergence; 26] = [
 /// Every pinned divergence, in id order as written: the operation, context and configuration
 /// slices above, then the error-response slice (`errors`), the signed-body slice (`body`), the
 /// signing-region slice (`scope`) and the signature-coverage slice (`coverage`).
-pub const REQUEST_DIVERGENCES: [RequestDivergence; 57] = concat(
-    concat::<50, 4, 54>(
+pub const REQUEST_DIVERGENCES: [RequestDivergence; 58] = concat(
+    concat::<50, 5, 55>(
         concat::<39, 11, 50>(
             concat::<26, 13, 39>(OPERATION_DIVERGENCES, errors::ERROR_DIVERGENCES),
             body::BODY_DIVERGENCES,
