@@ -72,6 +72,13 @@ impl ServiceBuilder {
     /// closing boundary, a boundary outside RFC 2046's characters — is refused here too. The
     /// ceilings, the refusal of a repeated field and of a control byte in a field value, and the
     /// policy-before-file order are unchanged by it.
+    ///
+    /// It also hands the registered `PostObject` handler every other `PutObject` member legacy
+    /// RustFS reads from the form, in `PostObjectInput::fields` (rustfs/gateway#1129). The handler
+    /// must give each the effect its store gives that field, or refuse the upload: one it ignored
+    /// would store another object than legacy RustFS stores from the same form. The members this
+    /// profile cannot carry yet — Object Lock, SSE-C, `redirect` — are refused before any handler
+    /// runs.
     #[must_use]
     pub fn legacy_rustfs_post_forms(mut self) -> Self {
         self.view_policy.post_forms.legacy_rustfs = true;

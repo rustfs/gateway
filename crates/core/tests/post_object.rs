@@ -24,7 +24,7 @@ use http::Request;
 use rustfs_gateway_core::{MetaView, OperationCodec, RequestBody};
 use rustfs_gateway_http::{Limits, WireRequest};
 use rustfs_gateway_stream::ByteStream;
-use rustfs_gateway_types::dto::{PostObject, PostObjectInput};
+use rustfs_gateway_types::dto::{PostObject, PostObjectFields, PostObjectInput};
 use rustfs_gateway_types::{BucketName, ObjectKey};
 
 fn meta() -> MetaView<'static> {
@@ -46,6 +46,7 @@ fn prepared() -> PostObjectInput {
         body: ByteStream::from_bytes(Bytes::from_static(b"report")),
         content_type: Some("text/plain".to_owned()),
         metadata: vec![("source".to_owned(), "browser".to_owned())],
+        fields: PostObjectFields::default(),
     }
 }
 

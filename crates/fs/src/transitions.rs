@@ -170,12 +170,13 @@ pub(super) fn persisted_storage_class(value: String) -> Option<StorageClass> {
 /// [`ErrorCode::INVALID_STORAGE_CLASS`] for any other class.
 pub(super) fn requested_storage_class(requested: Option<&StorageClass>) -> Result<Option<StorageClass>, HandlerError> {
     requested
-        .map(|class| {
-            persisted_storage_class(class.as_str().to_owned()).ok_or_else(|| {
-                HandlerError::new(ErrorCode::INVALID_STORAGE_CLASS, "The storage class you specified is not valid")
-            })
-        })
+        .map(|class| persisted_storage_class(class.as_str().to_owned()).ok_or_else(invalid_storage_class))
         .transpose()
+}
+
+/// The refusal of a storage class a write may not name.
+pub(super) fn invalid_storage_class() -> HandlerError {
+    HandlerError::new(ErrorCode::INVALID_STORAGE_CLASS, "The storage class you specified is not valid")
 }
 
 fn transition_storage_class(value: &str) -> Option<StorageClass> {

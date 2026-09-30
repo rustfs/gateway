@@ -15,75 +15,56 @@
 //! What a POST Object form stores under the RustFS profile: exactly what legacy RustFS stores for
 //! the same form, or nothing.
 //!
-//! Responsible for: the key, content type and user metadata legacy RustFS stores from a form's
-//! fields, and refusing — before the file is read — a form carrying a field legacy RustFS acts on
-//! (applying it to the stored object, deciding by it whether to store one, or answering by it) that
-//! this bridge cannot honour. NOT responsible for: reading the form (`rustfs-gateway-http`), the policy
-//! (`rustfs-gateway-sig`), or the gateway grammar's projection, which `super` keeps unchanged.
-//! Upstream: `super::PostObjectPrelude::resolve` under `FormGrammar::LegacyRustfs`. Downstream:
-//! the handler's `PostObjectInput`.
+//! Responsible for: the key, content type, user metadata and other `PutObject` members legacy
+//! RustFS reads from a form's fields, read as it reads them, and refusing — before the file is read
+//! — a form carrying a field legacy RustFS acts on (applying it to the stored object, deciding by it
+//! whether to store one, or answering by it) that this bridge cannot honour. NOT responsible for:
+//! reading the form (`rustfs-gateway-http`), the policy (`rustfs-gateway-sig`), applying a member
+//! to the stored object (the handler), or the gateway grammar's projection, which `super` keeps
+//! unchanged. Upstream: `super::PostObjectPrelude::resolve` under `FormGrammar::LegacyRustfs`.
+//! Downstream: the handler's `PostObjectInput`.
 //!
-//! # Why a refusal rather than a best effort
+//! # Carried, or refused — never dropped
 //!
 //! Legacy RustFS builds a `PutObject` from the form and stores it through its `put_object` path
-//! (rustfs/rustfs at `1e7065101d`: `rustfs/src/storage/ecfs.rs` implements no `post_object`, so the
+//! (rustfs/rustfs at `e870a6d25b`: `rustfs/src/storage/ecfs.rs` implements no `post_object`, so the
 //! S3 layer's default hands the upload to `put_object`; the access hook's `post_object`,
 //! `rustfs/src/storage/access.rs:2962`, first refuses a bad `success_action_status` or redirect,
-//! `access.rs:2024-2036`). It stores the `key`, the `Content-Type` field and every `x-amz-meta-*`
-//! field, and acts on the fields [`UNCARRIED_FIELDS`] names. Dropping one of those would store a
-//! different object than legacy RustFS stores from the same request, or store one it refuses, so
-//! a form carrying one is refused until this bridge honours it.
+//! `access.rs:2024-2036`). Every field it reads for that `PutObject` crosses to the handler in
+//! `PostObjectInput` as the member it fills ([`object_fields`]), for the handler to apply exactly as
+//! it applies that member of a `PutObject`, except the fields [`UNCARRIED_FIELDS`] names: dropping
+//! one of those would store a different object than legacy RustFS stores from the same request, or
+//! store one it refuses, so a form carrying one is refused until this bridge honours it.
+
+use rustfs_gateway_types::OpaqueString;
+use rustfs_gateway_types::dto::{Acl, ChecksumAlgorithm, PostObjectFields, RequestPayer, ServerSideEncryption, StorageClass};
 
 use super::{ErrorCode, HandlerError, ResponseKind, S3Error};
 use crate::close::ConnectionIntent;
 use crate::render::from_handler;
 
-/// Form fields legacy RustFS acts on that this bridge cannot honour: the object-level fields
-/// `PostObjectInput` has no member for, and `redirect`, which legacy RustFS reads as the success
-/// redirect when `success_action_redirect` is absent and refuses the upload by when it is not an
-/// absolute URL.
-pub(super) const UNCARRIED_FIELDS: [&str; 41] = [
-    "cache-control",
-    "content-disposition",
-    "content-encoding",
-    "content-language",
-    "content-md5",
-    "expires",
-    "if-match",
-    "if-none-match",
+/// Form fields legacy RustFS acts on that this bridge cannot honour yet.
+///
+/// The Object Lock fields: legacy RustFS's access hook demands `s3:PutObjectLegalHold` for a form
+/// naming a legal hold and `s3:PutObjectRetention` for one naming a mode or a date
+/// (`rustfs/src/storage/access.rs:1504-1513`, `:3182-3188`), a second authorization this
+/// gateway's operation model does not ask. The SSE-C fields: legacy RustFS encrypts with the key the
+/// form carries (`rustfs/src/app/object/put.rs:1259-1263`), which this gateway's customer-key
+/// rules, stated over headers, have not been extended to. And `redirect`, which legacy RustFS reads
+/// as the success redirect when `success_action_redirect` is absent and refuses the upload by when
+/// it is not an absolute URL.
+///
+/// The refusal comes after authorization, so it cannot mirror one refusal legacy RustFS answers
+/// before: a retain-until date its decoder cannot read, `400 InvalidArgument` to any caller there,
+/// is `403` or `501` here.
+pub(super) const UNCARRIED_FIELDS: [&str; 7] = [
     "redirect",
-    "x-amz-acl",
-    "x-amz-checksum-crc32",
-    "x-amz-checksum-crc32c",
-    "x-amz-checksum-crc64nvme",
-    "x-amz-checksum-md5",
-    "x-amz-checksum-sha1",
-    "x-amz-checksum-sha256",
-    "x-amz-checksum-sha512",
-    "x-amz-checksum-xxhash128",
-    "x-amz-checksum-xxhash3",
-    "x-amz-checksum-xxhash64",
-    "x-amz-expected-bucket-owner",
-    "x-amz-grant-full-control",
-    "x-amz-grant-read",
-    "x-amz-grant-read-acp",
-    "x-amz-grant-write-acp",
     "x-amz-object-lock-legal-hold",
     "x-amz-object-lock-mode",
     "x-amz-object-lock-retain-until-date",
-    "x-amz-request-payer",
-    "x-amz-sdk-checksum-algorithm",
-    "x-amz-server-side-encryption",
-    "x-amz-server-side-encryption-aws-kms-key-id",
-    "x-amz-server-side-encryption-bucket-key-enabled",
-    "x-amz-server-side-encryption-context",
     "x-amz-server-side-encryption-customer-algorithm",
     "x-amz-server-side-encryption-customer-key",
     "x-amz-server-side-encryption-customer-key-md5",
-    "x-amz-storage-class",
-    "x-amz-tagging",
-    "x-amz-website-redirect-location",
-    "x-amz-write-offset-bytes",
 ];
 
 /// Why a form cannot be stored as legacy RustFS stores it.
@@ -131,9 +112,101 @@ pub(super) fn refuse_other_key(resolved: &str, legacy: &str) -> Result<(), NotCa
 
 /// The content type legacy RustFS stores: the `Content-Type` field, as sent.
 pub(super) fn content_type(fields: &[(&str, &str)]) -> Option<String> {
-    fields
-        .iter()
-        .find_map(|(name, value)| (*name == "content-type").then(|| (*value).to_owned()))
+    field(fields, "content-type").map(str::to_owned)
+}
+
+/// The other `PutObject` members legacy RustFS reads from a form, read as it reads them, or the
+/// `400 InvalidArgument` it answers for a value it cannot read.
+///
+/// Legacy RustFS reads each field named like a `PutObject` header with that member's own text
+/// parser: a text or enumeration member is the field as sent, empty included; a `bool` or `i64`
+/// member is Rust's own parse of it; an entity-tag condition is read with its grammar
+/// ([`is_entity_tag_condition`]). Only those four can fail, and the first that does — the bucket-key
+/// flag, then `If-Match`, then `If-None-Match`, then the write offset — refuses the upload before
+/// authorization, naming the field and the value as sent.
+pub(super) fn object_fields(fields: &[(&str, &str)]) -> Result<PostObjectFields, S3Error> {
+    let text = |name: &str| field(fields, name).map(str::to_owned);
+    let condition = |value: &str| is_entity_tag_condition(value).then(|| value.to_owned());
+    let bucket_key_enabled = read(fields, "x-amz-server-side-encryption-bucket-key-enabled", |value| {
+        value.parse::<bool>().ok()
+    })?;
+    let if_match = read(fields, "if-match", condition)?;
+    let if_none_match = read(fields, "if-none-match", condition)?;
+    let write_offset_bytes = read(fields, "x-amz-write-offset-bytes", |value| value.parse::<i64>().ok())?;
+    Ok(PostObjectFields {
+        acl: text("x-amz-acl").map(Acl::custom),
+        bucket_key_enabled,
+        cache_control: text("cache-control"),
+        checksum_algorithm: text("x-amz-sdk-checksum-algorithm").map(ChecksumAlgorithm::custom),
+        checksum_crc32: text("x-amz-checksum-crc32"),
+        checksum_crc32c: text("x-amz-checksum-crc32c"),
+        checksum_crc64nvme: text("x-amz-checksum-crc64nvme"),
+        checksum_md5: text("x-amz-checksum-md5"),
+        checksum_sha1: text("x-amz-checksum-sha1"),
+        checksum_sha256: text("x-amz-checksum-sha256"),
+        checksum_sha512: text("x-amz-checksum-sha512"),
+        checksum_xxhash128: text("x-amz-checksum-xxhash128"),
+        checksum_xxhash3: text("x-amz-checksum-xxhash3"),
+        checksum_xxhash64: text("x-amz-checksum-xxhash64"),
+        content_disposition: text("content-disposition"),
+        content_encoding: text("content-encoding"),
+        content_language: text("content-language"),
+        content_md5: text("content-md5"),
+        expected_bucket_owner: text("x-amz-expected-bucket-owner"),
+        expires: text("expires").map(OpaqueString::from),
+        grant_full_control: text("x-amz-grant-full-control"),
+        grant_read: text("x-amz-grant-read"),
+        grant_read_acp: text("x-amz-grant-read-acp"),
+        grant_write_acp: text("x-amz-grant-write-acp"),
+        if_match,
+        if_none_match,
+        request_payer: text("x-amz-request-payer").map(RequestPayer::custom),
+        server_side_encryption: text("x-amz-server-side-encryption").map(ServerSideEncryption::custom),
+        ssekms_encryption_context: text("x-amz-server-side-encryption-context"),
+        ssekms_key_id: text("x-amz-server-side-encryption-aws-kms-key-id"),
+        storage_class: text("x-amz-storage-class").map(StorageClass::custom),
+        tagging: text("x-amz-tagging"),
+        website_redirect_location: text("x-amz-website-redirect-location"),
+        write_offset_bytes,
+    })
+}
+
+/// The value of the field `name`, if the form carried it.
+fn field<'a>(fields: &[(&str, &'a str)], name: &str) -> Option<&'a str> {
+    fields.iter().find_map(|(field, value)| (*field == name).then_some(*value))
+}
+
+/// The field `name` as `parse` reads it, or legacy RustFS's refusal of a value it cannot read.
+fn read<T>(fields: &[(&str, &str)], name: &'static str, parse: impl Fn(&str) -> Option<T>) -> Result<Option<T>, S3Error> {
+    field(fields, name)
+        .map(|value| parse(value).ok_or_else(|| unreadable(name, value)))
+        .transpose()
+}
+
+/// Whether legacy RustFS reads `value` as an entity-tag condition: `*`; a tag in double quotes,
+/// optionally after `W/`, of ASCII characters that are not controls (tab excepted); or a bare tag
+/// of ASCII letters, digits and `-`.
+///
+/// Legacy-compat (rustfs/backlog#2684): a quoted tag runs from the first quote to the last, so a
+/// list such as `"a", "b"` is read as the one tag `a", "b` rather than refused, and a quote inside a
+/// tag is kept. The intended future behaviour is RFC 9110's `entity-tag` grammar, one tag per
+/// condition, refusing a list or an inner quote.
+fn is_entity_tag_condition(value: &str) -> bool {
+    let quoted = |tag: &[u8]| tag.iter().all(|byte| *byte == b'\t' || (0x20..0x7f).contains(byte));
+    match value.as_bytes() {
+        b"*" => true,
+        [b'"', tag @ .., b'"'] | [b'W', b'/', b'"', tag @ .., b'"'] => quoted(tag),
+        bare => !bare.is_empty() && bare.iter().all(|byte| byte.is_ascii_alphanumeric() || *byte == b'-'),
+    }
+}
+
+/// Legacy RustFS's refusal of a field value it cannot read.
+fn unreadable(name: &str, value: &str) -> S3Error {
+    from_handler(
+        HandlerError::new(ErrorCode::INVALID_ARGUMENT, format!("invalid field value: {name}: {value:?}")),
+        ResponseKind::Other,
+        ConnectionIntent::MayKeepAlive,
+    )
 }
 
 /// The user metadata legacy RustFS stores: every `x-amz-meta-*` field, by the name after the
@@ -154,6 +227,7 @@ pub(super) fn metadata(fields: &[(&str, &str)]) -> Vec<(String, String)> {
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used)]
 mod tests {
     use bytes::Bytes;
     use http::StatusCode;
@@ -174,7 +248,14 @@ mod tests {
     /// A moment before the policy's expiration.
     const NOW: i64 = 1_440_938_160;
 
+    /// [`POLICY`], plus a condition admitting any `x-amz-server-side-encryption-bucket-key-enabled`.
+    const POLICY_WITH_FLAG: &str = "eyJleHBpcmF0aW9uIjoiMjAxNS0wOC0zMFQxMzozNjowMFoiLCJjb25kaXRpb25zIjpbeyJidWNrZXQiOiJleGFtcGxlLWJ1Y2tldCJ9LFsic3RhcnRzLXdpdGgiLCIka2V5IiwidXBsb2Fkcy8iXSx7IngtYW16LWFsZ29yaXRobSI6IkFXUzQtSE1BQy1TSEEyNTYifSx7IngtYW16LWNyZWRlbnRpYWwiOiJBS0lERVhBTVBMRS8yMDE1MDgzMC91cy1lYXN0LTEvczMvYXdzNF9yZXF1ZXN0In0seyJ4LWFtei1kYXRlIjoiMjAxNTA4MzBUMTIzNjAwWiJ9LFsiY29udGVudC1sZW5ndGgtcmFuZ2UiLDAsMTAyNF0sWyJzdGFydHMtd2l0aCIsIiR4LWFtei1zZXJ2ZXItc2lkZS1lbmNyeXB0aW9uLWJ1Y2tldC1rZXktZW5hYmxlZCIsIiJdXX0=";
+
     fn signed_form(filename: &str) -> Bytes {
+        signed_form_with(filename, POLICY, &[])
+    }
+
+    fn signed_form_with(filename: &str, policy: &str, extra: &[(&str, &str)]) -> Bytes {
         let mut body = String::new();
         for (name, value) in [
             ("key", "uploads/${filename}"),
@@ -183,8 +264,11 @@ mod tests {
             ("x-amz-credential", "AKIDEXAMPLE/20150830/us-east-1/s3/aws4_request"),
             ("x-amz-date", "20150830T123600Z"),
             ("x-amz-signature", "9eb4faefbe4e1bd23ee9f29b6a1a1cd07c2496e2e439394c7ff2823593e07e7e"),
-            ("policy", POLICY),
-        ] {
+            ("policy", policy),
+        ]
+        .iter()
+        .chain(extra)
+        {
             body.push_str(&format!(
                 "--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{value}\r\n"
             ));
@@ -196,8 +280,12 @@ mod tests {
     }
 
     async fn resolve(filename: &str) -> Result<String, StatusCode> {
+        resolve_form(signed_form(filename)).await
+    }
+
+    async fn resolve_form(form: Bytes) -> Result<String, StatusCode> {
         let prelude = PostObjectPrelude::read_with_grammar(
-            Some(Full::new(signed_form(filename))),
+            Some(Full::new(form)),
             &format!("multipart/form-data; boundary={BOUNDARY}"),
             FormLimits::default(),
             FormGrammar::LegacyRustfs { declared_length: true },
@@ -219,5 +307,138 @@ mod tests {
     async fn a_signed_form_resolving_another_key_is_refused() {
         assert_eq!(resolve("report.txt").await, Ok("uploads/report.txt".to_owned()));
         assert_eq!(resolve("dir/report.txt").await, Err(StatusCode::NOT_IMPLEMENTED));
+    }
+
+    /// Negative — a field legacy RustFS cannot read answers with its `400` before this bridge's
+    /// own `501` for a key it would resolve differently: legacy RustFS decodes the form before it
+    /// stores, and would never reach the key. The control resolves.
+    #[tokio::test]
+    async fn an_unreadable_field_answers_before_a_key_this_bridge_cannot_store() {
+        let form = |filename: &str, flag: &str| {
+            signed_form_with(filename, POLICY_WITH_FLAG, &[("x-amz-server-side-encryption-bucket-key-enabled", flag)])
+        };
+        assert_eq!(resolve_form(form("report.txt", "true")).await, Ok("uploads/report.txt".to_owned()));
+        assert_eq!(resolve_form(form("dir/report.txt", "true")).await, Err(StatusCode::NOT_IMPLEMENTED));
+        assert_eq!(resolve_form(form("dir/report.txt", "yes")).await, Err(StatusCode::BAD_REQUEST));
+    }
+
+    /// Positive — every text and enumeration member is the field as sent, an empty one included,
+    /// and a member the form did not carry is absent.
+    #[test]
+    fn a_text_member_is_carried_as_sent() {
+        let fields = super::object_fields(&[
+            ("cache-control", " max-age=60 "),
+            ("content-disposition", "attachment; filename=\"r\u{e9}sum\u{e9}.pdf\""),
+            ("content-language", ""),
+            ("x-amz-storage-class", "standard"),
+            ("x-amz-server-side-encryption", "AES256"),
+            ("x-amz-tagging", "a=b&c=d"),
+            ("expires", "not a date"),
+        ])
+        .expect("every text member is read");
+        assert_eq!(fields.cache_control.as_deref(), Some(" max-age=60 "));
+        assert_eq!(
+            fields.content_disposition.as_deref(),
+            Some("attachment; filename=\"r\u{e9}sum\u{e9}.pdf\"")
+        );
+        assert_eq!(fields.content_language.as_deref(), Some(""));
+        assert_eq!(fields.storage_class.as_ref().map(|class| class.as_str()), Some("standard"));
+        assert_eq!(fields.server_side_encryption.as_ref().map(|algorithm| algorithm.as_str()), Some("AES256"));
+        assert_eq!(fields.tagging.as_deref(), Some("a=b&c=d"));
+        assert_eq!(fields.expires.as_ref().map(|value| value.as_str()), Some("not a date"));
+        assert_eq!(fields.content_encoding, None);
+        assert_eq!(fields.website_redirect_location, None);
+    }
+
+    /// Positive and negative — the two numeric members are Rust's own parses of the field.
+    #[test]
+    fn a_numeric_member_is_read_as_rust_reads_it() {
+        for (value, expected) in [("true", Some(true)), ("false", Some(false))] {
+            let fields =
+                super::object_fields(&[("x-amz-server-side-encryption-bucket-key-enabled", value)]).expect("a Rust boolean");
+            assert_eq!(fields.bucket_key_enabled, expected, "{value}");
+        }
+        for (value, expected) in [("0", 0), ("+5", 5), ("-5", -5), ("9223372036854775807", i64::MAX)] {
+            let fields = super::object_fields(&[("x-amz-write-offset-bytes", value)]).expect("a Rust i64");
+            assert_eq!(fields.write_offset_bytes, Some(expected), "{value}");
+        }
+        for value in ["True", "1", " true", ""] {
+            let error = super::object_fields(&[("x-amz-server-side-encryption-bucket-key-enabled", value)])
+                .expect_err("not a Rust boolean");
+            assert_eq!(error.status(), StatusCode::BAD_REQUEST, "{value}");
+        }
+        for value in ["", " 5", "5 ", "0x10", "9223372036854775808", "1e3"] {
+            let error = super::object_fields(&[("x-amz-write-offset-bytes", value)]).expect_err("not a Rust i64");
+            assert_eq!(error.status(), StatusCode::BAD_REQUEST, "{value}");
+        }
+    }
+
+    /// Positive and negative — an entity-tag condition is read with legacy RustFS's grammar.
+    #[test]
+    fn an_entity_tag_condition_is_read_with_the_legacy_grammar() {
+        for value in [
+            "*",
+            "\"abc\"",
+            "W/\"abc\"",
+            "\"\"",
+            "W/\"\"",
+            "\"a b\"",
+            "\"a\tb\"",
+            "\"a\"b\"",
+            "\"W/\"x\"\"",
+            "\"a\", \"b\"",
+            "abc-123",
+            "-",
+            "d41d8cd98f00b204e9800998ecf8427e-2",
+        ] {
+            assert!(super::is_entity_tag_condition(value), "{value:?}");
+            let fields = super::object_fields(&[("if-match", value), ("if-none-match", value)]).expect("a condition");
+            assert_eq!(fields.if_match.as_deref(), Some(value));
+            assert_eq!(fields.if_none_match.as_deref(), Some(value));
+        }
+        for value in [
+            "",
+            "\"",
+            "W/\"",
+            "W/abc",
+            "abc def",
+            " *",
+            "*,*",
+            "\"a\", b",
+            "\"\u{e9}\"",
+            "\u{e9}",
+            "\"a\u{1}\"",
+            "\"a\u{7f}\"",
+            "w/\"abc\"",
+            "abc_1",
+        ] {
+            assert!(!super::is_entity_tag_condition(value), "{value:?}");
+            let error = super::object_fields(&[("if-none-match", value)]).expect_err("not a condition");
+            assert_eq!(error.status(), StatusCode::BAD_REQUEST, "{value:?}");
+        }
+    }
+
+    /// Negative — the first unreadable field in legacy RustFS's reading order answers, naming the
+    /// field and the value as sent.
+    #[test]
+    fn the_first_unreadable_field_in_reading_order_answers() {
+        let every = [
+            ("x-amz-write-offset-bytes", "x"),
+            ("if-none-match", "x y"),
+            ("if-match", "x y"),
+            ("x-amz-server-side-encryption-bucket-key-enabled", "yes"),
+        ];
+        for (skipped, expected) in [
+            (0, "invalid field value: x-amz-server-side-encryption-bucket-key-enabled: \"yes\""),
+            (1, "invalid field value: if-match: \"x y\""),
+            (2, "invalid field value: if-none-match: \"x y\""),
+            (3, "invalid field value: x-amz-write-offset-bytes: \"x\""),
+        ] {
+            let present: Vec<_> = every.iter().copied().take(every.len().saturating_sub(skipped)).collect();
+            let error = super::object_fields(&present).expect_err("an unreadable field");
+            assert_eq!(error.status(), StatusCode::BAD_REQUEST);
+            assert_eq!(error.code().map(|code| code.as_str()), Some("InvalidArgument"));
+            assert_eq!(error.message(), Some(expected));
+        }
     }
 }
