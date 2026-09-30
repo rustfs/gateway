@@ -37,8 +37,10 @@
 //!
 //! This crate holds a chunk whole until it ends, and verifies a signed one before any of it is
 //! delivered, so a chunk's size is what one connection holds. The profile lifts the ceiling to the
-//! largest this crate allows, [`ChunkLimits::HARD_MAX_CHUNK_SIZE`] (16 MiB), and no further; a
-//! chunk past it is still refused, `400 InvalidChunkSizeError`, with nothing stored (rd-body-0012).
+//! largest this crate allows, [`ChunkLimits::HARD_MAX_CHUNK_SIZE`] (16 MiB), and no further: a
+//! chunk past it is still refused, `400 InvalidChunkSizeError`, with nothing stored, where legacy
+//! RustFS streams an unsigned one of any size. Reading those needs a decoder that releases an
+//! unsigned chunk before it ends, which rustfs/gateway#1173 leaves open for a decision.
 //! The chunk count and the framing ratio are lifted entirely: each chunk carries at least one body
 //! byte and a bounded size line, so the work a body can ask for stays linear in its length.
 
