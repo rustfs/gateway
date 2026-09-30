@@ -34,6 +34,8 @@ pub(crate) mod frozen_clock;
 mod global_admission;
 #[path = "server_runtime/shutdown_drain.rs"]
 mod shutdown_drain;
+#[path = "server_runtime/task_reaping.rs"]
+mod task_reaping;
 
 use std::convert::Infallible;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
