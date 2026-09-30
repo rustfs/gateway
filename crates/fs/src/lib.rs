@@ -137,6 +137,7 @@ mod post_object;
 mod reads;
 mod records;
 mod registry;
+mod rustfs_parity;
 mod tagging;
 mod transitions;
 mod upload_part_copy;
@@ -168,8 +169,8 @@ pub struct FsBackend {
     lifecycle_day_seconds: i64,
     lifecycle_scheduler_running: AtomicBool,
     lifecycle_sweep_interval: Duration,
-    /// The keys a batch delete answers on its own ([`FsBackend::refusing_batch_deletes_of`]).
-    batch_delete_refusal: Option<fn(&str) -> bool>,
+    /// The legacy-RustFS answers a deployment asked for, each off by default ([`rustfs_parity`]).
+    rustfs_parity: rustfs_parity::RustfsParity,
 }
 
 impl FsBackend {
@@ -215,7 +216,7 @@ impl FsBackend {
             lifecycle_day_seconds: 24 * 60 * 60,
             lifecycle_scheduler_running: AtomicBool::new(false),
             lifecycle_sweep_interval: Duration::from_secs(24 * 60 * 60),
-            batch_delete_refusal: None,
+            rustfs_parity: rustfs_parity::RustfsParity::default(),
         })
     }
 
