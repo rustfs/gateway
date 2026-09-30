@@ -36,6 +36,7 @@ use tower_http::catch_panic::{DefaultResponseForPanic, ResponseForPanic};
 
 use crate::driver::ConnectionInfo;
 use crate::request_capacity::{RequestCancellationFuture, RequestCancellationSource, RequestCapacity, RequestPermit};
+use crate::send_deadline::SendProgress;
 use crate::write_receipt::WriteReceipts;
 
 /// The erased error returned to a connection driver.
@@ -143,6 +144,9 @@ pub struct ResponseCompletion {
     guard: Option<RequestGuard>,
     receipts: Arc<WriteReceipts>,
     http2: bool,
+    /// The HTTP/2 stream's send progress, when this response is served on one. Only a frame the
+    /// body has not ended with is charged: once the body ends, the permit is already released.
+    progress: Option<SendProgress>,
 }
 
 impl ResponseCompletion {
@@ -179,9 +183,16 @@ where
 
     fn poll_frame(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
         let mut this = self.project();
+        // Asked for the next frame, so the transport sent what it held: from here until a frame is
+        // handed over, any wait is the body's own and is not charged to the peer.
+        if let Some(progress) = &this.completion.progress {
+            progress.producing();
+        }
         let frame = ready!(this.body.as_mut().poll_frame(context)).map(|result| result.map_err(Into::into));
         if frame.is_none() || this.body.as_ref().is_end_stream() {
             this.completion.hand_over();
+        } else if let Some(progress) = &this.completion.progress {
+            progress.wait_for_peer();
         }
         Poll::Ready(frame)
     }
@@ -272,6 +283,8 @@ where
         let receipts = Arc::clone(&self.receipts);
         let http2 = request.version() == http::Version::HTTP_2;
         Box::pin(async move {
+            // Present only when an HTTP/2 stream task is polling this future (`send_deadline`).
+            let progress = SendProgress::current();
             let permit = request_capacity
                 .acquire()
                 .await
@@ -305,6 +318,7 @@ where
                     guard: Some(guard),
                     receipts,
                     http2,
+                    progress,
                 },
             }))
         })
