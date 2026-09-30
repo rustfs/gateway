@@ -118,9 +118,10 @@ const ERROR_PARITY: &str = "operation_diff/context/error_parity/divergences.rs";
 const BODY_PARITY: &str = "operation_diff/context/body_parity/divergences.rs";
 const COPY_RESULT: &str = "operation_diff/copy_result.rs";
 const MINIO_CONFIG: &str = "operation_diff/minio_config.rs";
+const ADMIN_DIALECT: &str = "rustfs_admin_dialect/tests.rs";
 
 /// The files whose named-divergence sections the register is checked against.
-const PINNED_TEST_FILES: [&str; 8] = [
+const PINNED_TEST_FILES: [&str; 9] = [
     PUT_DECODE,
     PUT_CONTEXT,
     LOCATION_CONTEXT,
@@ -129,6 +130,7 @@ const PINNED_TEST_FILES: [&str; 8] = [
     MINIO_CONFIG,
     ERROR_PARITY,
     BODY_PARITY,
+    ADMIN_DIALECT,
 ];
 
 const API_PUT_OBJECT: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObject.html";
@@ -589,7 +591,7 @@ const OPERATION_DIVERGENCES: [RequestDivergence; 26] = [
 /// Every pinned divergence, in id order as written: the operation, context and configuration
 /// slices above, then the error-response slice (`errors`), the signed-body slice (`body`), the
 /// signing-region slice (`scope`) and the signature-coverage slice (`coverage`).
-pub const REQUEST_DIVERGENCES: [RequestDivergence; 56] = concat(
+pub const REQUEST_DIVERGENCES: [RequestDivergence; 57] = concat(
     concat::<50, 4, 54>(
         concat::<39, 11, 50>(
             concat::<26, 13, 39>(OPERATION_DIVERGENCES, errors::ERROR_DIVERGENCES),
@@ -761,13 +763,12 @@ fn check_register(entries: &[RequestDivergence]) -> Result<(), RequestDivergence
 }
 
 fn well_formed_id(id: &str) -> bool {
-    let Some(number) = ["rd-put-", "rd-ctx-", "rd-loc-", "rd-cfg-", "rd-copy-", "rd-err-", "rd-body-"]
-        .iter()
-        .find_map(|prefix| id.strip_prefix(prefix))
-    else {
+    let Some((kind, number)) = id.strip_prefix("rd-").and_then(|rest| rest.split_once('-')) else {
         return false;
     };
-    number.len() == 4 && number.bytes().all(|byte| byte.is_ascii_digit())
+    matches!(kind, "put" | "ctx" | "loc" | "cfg" | "copy" | "err" | "body" | "adm")
+        && number.len() == 4
+        && number.bytes().all(|byte| byte.is_ascii_digit())
 }
 
 fn is_issue_url(url: &str) -> bool {

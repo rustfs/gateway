@@ -19,16 +19,16 @@
 //! names that test, and every entry names a test that carries its id — plus refusing each kind of
 //! malformed entry by name.
 //! NOT responsible for: whether a divergence still diverges (the pinned tests observe that).
-//! Upstream: `super`, and the four test files it pins. Downstream: nothing.
+//! Upstream: `super`, and the test files it pins. Downstream: nothing.
 
 use super::{
-    BODY_PARITY, CONFIG_DECODE, COPY_RESULT, DivergenceFollowUp, DivergenceRuling, ERROR_PARITY, LOCATION_CONTEXT, MINIO_CONFIG,
-    PUT_CONTEXT, PUT_DECODE, REQUEST_DIVERGENCES, RequestDivergence, RequestDivergenceError, build_request_divergences,
-    check_register,
+    ADMIN_DIALECT, BODY_PARITY, CONFIG_DECODE, COPY_RESULT, DivergenceFollowUp, DivergenceRuling, ERROR_PARITY, LOCATION_CONTEXT,
+    MINIO_CONFIG, PUT_CONTEXT, PUT_DECODE, REQUEST_DIVERGENCES, RequestDivergence, RequestDivergenceError,
+    build_request_divergences, check_register,
 };
 
 /// The pinned test files, as source, keyed the way register entries name them.
-const PINNED_SOURCES: [(&str, &str); 8] = [
+const PINNED_SOURCES: [(&str, &str); 9] = [
     (PUT_DECODE, include_str!("../../operation_diff/put_object/divergences.rs")),
     (PUT_CONTEXT, include_str!("../../operation_diff/context/put_object.rs")),
     (LOCATION_CONTEXT, include_str!("../../operation_diff/context/get_bucket_location.rs")),
@@ -37,6 +37,7 @@ const PINNED_SOURCES: [(&str, &str); 8] = [
     (MINIO_CONFIG, include_str!("../../operation_diff/minio_config.rs")),
     (ERROR_PARITY, include_str!("../../operation_diff/context/error_parity/divergences.rs")),
     (BODY_PARITY, include_str!("../../operation_diff/context/body_parity/divergences.rs")),
+    (ADMIN_DIALECT, include_str!("../../rustfs_admin_dialect/tests.rs")),
 ];
 
 /// One `#[test]` function read out of a source file.
@@ -152,11 +153,11 @@ fn every_pinned_divergence_test_has_a_ruling_and_every_ruling_a_test() {
 #[test]
 fn the_register_is_valid_and_renders_every_ruling() {
     let report = build_request_divergences();
-    assert_eq!(report.as_ref().map(|report| report.entries().len()), Ok(56));
+    assert_eq!(report.as_ref().map(|report| report.entries().len()), Ok(57));
     let rendered = report.map(|report| report.render()).unwrap_or_default();
     assert!(
         rendered.starts_with(
-            "request divergences: rulings=56 keep-gateway=28 align-s3s=11 align-aws=2 rustfs-profile=15 open-follow-ups=9 landed=22\n"
+            "request divergences: rulings=57 keep-gateway=29 align-s3s=11 align-aws=2 rustfs-profile=15 open-follow-ups=9 landed=22\n"
         ),
         "{rendered}"
     );
