@@ -367,7 +367,7 @@ fn body_member(ir: &OperationIr, plan: &url::Plan, field: &Field, source: &str, 
     let policy = empty_policy(&ir.xml.empty_value_policy, member, field.required);
     let encoded = plan.encodes_root(member);
     let mut out = String::new();
-
+    let presence = crate::emit::dto::presence::carries_presence(&format!("{}Output", naming::type_name(&ir.operation)), field);
     match &field.ty {
         Type::List {
             member: inner,
@@ -379,13 +379,14 @@ fn body_member(ir: &OperationIr, plan: &url::Plan, field: &Field, source: &str, 
             if let Some(name) = &names.wrapper {
                 let _ = writeln!(out, "{pad}writer.open(\"{name}\", None);");
             }
-            let _ = writeln!(out, "{pad}for v in &{source} {{");
+            out.push_str(&layout::for_items(&pad, "v", source, presence));
             out.push_str(&url::member_binding(&format!("{pad}    "), member, encoded));
             let _ = writeln!(out, "{pad}    writer.element(\"{}\", {rendered});", names.entry);
             let _ = writeln!(out, "{pad}}}");
             if names.wrapper.is_some() {
                 let _ = writeln!(out, "{pad}writer.close();");
             }
+            layout::guard(&mut out, &pad, source, presence);
         }
         Type::List {
             member: inner,
@@ -406,7 +407,7 @@ fn body_member(ir: &OperationIr, plan: &url::Plan, field: &Field, source: &str, 
             if let Some(wrapper) = &names.wrapper {
                 let _ = writeln!(out, "{pad}writer.open(\"{wrapper}\", None);");
             }
-            let _ = writeln!(out, "{pad}for item in &{source} {{");
+            out.push_str(&layout::for_items(&pad, "item", source, presence));
             let _ = writeln!(out, "{pad}    {open}");
             let _ = writeln!(out, "{pad}    {writer_fn}(&mut writer, item{argument})?;");
             let _ = writeln!(out, "{pad}    writer.close();");
@@ -414,6 +415,7 @@ fn body_member(ir: &OperationIr, plan: &url::Plan, field: &Field, source: &str, 
             if names.wrapper.is_some() {
                 let _ = writeln!(out, "{pad}writer.close();");
             }
+            layout::guard(&mut out, &pad, source, presence);
         }
         // A required nested structure is not an `Option` in the dto, so it is written
         // unconditionally. Emitting the `as_ref()` form regardless does not compile, which is the
@@ -612,7 +614,7 @@ pub fn shape_writer(ir: &OperationIr, name: &str, shape: &Shape) -> Result<Strin
         let encoded = plan.encodes_shape_member(name, &field.name);
         match &field.ty {
             Type::Structure(_) | Type::Union(_) | Type::List { .. } => {
-                out.push_str(&shape_child(ir, &plan, field, &source, &wire)?);
+                out.push_str(&shape_child(ir, &plan, (name, field), &source, &wire)?);
             }
             other => {
                 let rendered = wire_expr(other, &field.name, &ir.operation, encoded)?;
@@ -638,8 +640,15 @@ pub fn shape_writer(ir: &OperationIr, name: &str, shape: &Shape) -> Result<Strin
 }
 
 /// A nested structure or list inside a shape.
-fn shape_child(ir: &OperationIr, plan: &url::Plan, field: &Field, source: &str, wire: &str) -> Result<String, String> {
+fn shape_child(
+    ir: &OperationIr,
+    plan: &url::Plan,
+    (owner, field): (&str, &Field),
+    source: &str,
+    wire: &str,
+) -> Result<String, String> {
     let mut out = String::new();
+    let presence = crate::emit::dto::presence::carries_presence(owner, field);
     match &field.ty {
         Type::Structure(inner) | Type::Union(inner) => {
             let writer_fn = format!("write_{}", naming::module_name(inner));
@@ -677,7 +686,7 @@ fn shape_child(ir: &OperationIr, plan: &url::Plan, field: &Field, source: &str, 
                     let writer_fn = format!("write_{}", naming::module_name(inner_name));
                     let argument = shape_writer_argument(plan, inner_name);
                     let open = open_structure(ir, inner_name, &names.entry, "item", "writer")?;
-                    let _ = writeln!(out, "    for item in &{source} {{");
+                    out.push_str(&layout::for_items("    ", "item", source, presence));
                     let _ = writeln!(out, "        {open}");
                     let _ = writeln!(out, "        {writer_fn}(writer, item{argument})?;");
                     let _ = writeln!(out, "        writer.close();");
@@ -686,7 +695,7 @@ fn shape_child(ir: &OperationIr, plan: &url::Plan, field: &Field, source: &str, 
                 // A list of scalars repeats the element with its text.
                 scalar => {
                     let rendered = expr::to_wire(scalar, &field.name, &ir.operation)?;
-                    let _ = writeln!(out, "    for v in &{source} {{");
+                    out.push_str(&layout::for_items("    ", "v", source, presence));
                     let _ = writeln!(out, "        writer.element(\"{}\", {rendered});", names.entry);
                     let _ = writeln!(out, "    }}");
                 }
@@ -694,6 +703,7 @@ fn shape_child(ir: &OperationIr, plan: &url::Plan, field: &Field, source: &str, 
             if names.wrapper.is_some() {
                 let _ = writeln!(out, "    writer.close();");
             }
+            layout::guard(&mut out, "    ", source, presence);
         }
         _ => {}
     }

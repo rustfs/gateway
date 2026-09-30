@@ -110,7 +110,7 @@ pub struct Output {
     /// Wire `Owner`, bound as BodyXml. Optional.
     pub owner: Option<crate::ops::shapes::Owner>,
     /// Wire `AccessControlList`, bound as BodyXml. Optional.
-    pub grants: Vec<crate::ops::shapes::Grant>,
+    pub grants: Option<Vec<crate::ops::shapes::Grant>>,
     /// Wire `x-amz-request-charged`, bound as Header. Optional.
     pub request_charged: Option<crate::ops::enums::RequestCharged>,
 }

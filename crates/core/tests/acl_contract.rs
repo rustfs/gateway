@@ -49,7 +49,7 @@ fn canonical_grantee() -> Grantee {
 
 fn policy(grants: Vec<Grant>) -> AccessControlPolicy {
     AccessControlPolicy {
-        grants,
+        grants: Some(grants),
         owner: Some(Owner {
             id: Some(CANONICAL_ID.to_owned()),
             display_name: Some("owner".to_owned()),
@@ -162,7 +162,13 @@ fn the_body_channel_alone_resolves_to_a_canonicalised_document() {
         panic!("the body channel resolved to headers");
     };
     // The discriminator the reader could not see, filled in by the derivation.
-    assert_eq!(document.grants[0].grantee.as_ref().and_then(|g| g.r#type.clone()), Some(Type::GROUP));
+    assert_eq!(
+        document.grants.as_deref().unwrap_or_default()[0]
+            .grantee
+            .as_ref()
+            .and_then(|g| g.r#type.clone()),
+        Some(Type::GROUP)
+    );
 }
 
 #[test]
@@ -219,7 +225,7 @@ fn an_empty_document_carries_no_grants_and_is_still_a_document() {
     let AclInput::Document(document) = resolved else {
         panic!("an empty document resolved to headers");
     };
-    assert!(document.grants.is_empty());
+    assert!(document.grants.as_deref().unwrap_or_default().is_empty());
     assert!(document.owner.is_some());
 }
 

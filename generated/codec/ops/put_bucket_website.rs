@@ -193,13 +193,15 @@ fn read_website_configuration(
     if let Some(child) = node.child("RedirectAllRequestsTo") {
         shape.redirect_all_requests_to = Some(read_redirect_all_requests_to(child)?);
     }
+    let mut routing_rules = Vec::new();
     for item in node
         .child("RoutingRules")
         .into_iter()
         .flat_map(|w| w.children_named("RoutingRule"))
     {
-        shape.routing_rules.push(read_routing_rule(item)?);
+        routing_rules.push(read_routing_rule(item)?);
     }
+    shape.routing_rules = node.child("RoutingRules").map(|_| routing_rules);
     value::exit(shape.check_required())?;
     Ok(shape)
 }

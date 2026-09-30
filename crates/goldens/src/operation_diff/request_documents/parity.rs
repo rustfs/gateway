@@ -122,15 +122,6 @@ const REGISTERED: &[Registered] = &[
         },
     },
     Registered {
-        id: "rd-doc-0005",
-        gateway: |_| "InvalidArgument",
-        covers: |case| {
-            (is(case, "emptied") && ["AccessControlList", "TargetGrants", "RoutingRules", "UserMetadata"].contains(&member(case)))
-                || ((is(case, "removed") || is(case, "prefixed"))
-                    && ["Grant", "MetadataEntry", "RoutingRule"].contains(&member(case)))
-        },
-    },
-    Registered {
         id: "rd-doc-0006",
         gateway: |op| {
             if op == Op::PutObjectLockConfiguration {
@@ -243,6 +234,30 @@ fn acl(grantee: &str) -> String {
         "<AccessControlPolicy><Owner><ID>o</ID></Owner><AccessControlList><Grant>{grantee}<Permission>READ</Permission></Grant>\
          </AccessControlList></AccessControlPolicy>"
     )
+}
+
+/// Positive — the empty wrapper of an optional wrapped list is handed over as the present empty
+/// list the legacy stack hands RustFS, which stores the empty element: the gateway's list carries
+/// its presence (rustfs/gateway#1078; `rd-doc-0005`, which refused the document while it could
+/// not, is retired).
+#[test]
+fn an_empty_optional_wrapper_is_handed_over_as_the_legacy_stack_hands_it() {
+    for (op, body, present) in [
+        (
+            Op::PutBucketWebsite,
+            "<WebsiteConfiguration><IndexDocument><Suffix>index.html</Suffix></IndexDocument><RoutingRules></RoutingRules></WebsiteConfiguration>",
+            "routing_rules: []",
+        ),
+        (
+            Op::PutBucketLogging,
+            "<BucketLoggingStatus><LoggingEnabled><TargetBucket>logs</TargetBucket><TargetPrefix>p/</TargetPrefix><TargetGrants/></LoggingEnabled></BucketLoggingStatus>",
+            "target_grants: []",
+        ),
+    ] {
+        let handed = legacy(op, body.as_bytes());
+        assert!(handed.as_ref().is_ok_and(|document| document.contains(present)), "{op:?}: {handed:?}");
+        assert_eq!(gateway(op, DocumentReading::RustFs, body.as_bytes()), handed, "{op:?}");
+    }
 }
 
 /// Negative — a grantee's type attribute is read as legacy RustFS reads it: by its literal

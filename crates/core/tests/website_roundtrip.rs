@@ -173,7 +173,7 @@ fn website_projection(configuration: &dto::WebsiteConfiguration) -> WebsiteProje
             .error_document
             .as_ref()
             .map(|error| error.key.as_str().to_owned()),
-        configuration.routing_rules.iter().map(rule_projection).collect(),
+        configuration.routing_rules.iter().flatten().map(rule_projection).collect(),
     )
 }
 
@@ -278,7 +278,7 @@ fn website_configuration() -> impl Strategy<Value = dto::WebsiteConfiguration> {
                 redirect_all_requests_to,
                 index_document,
                 error_document,
-                routing_rules,
+                routing_rules: Some(routing_rules),
             },
         )
 }
@@ -338,7 +338,7 @@ fn a_realistic_document_this_codec_wrote_is_one_the_family_accepts() {
         error_document: Some(dto::ErrorDocument {
             key: rustfs_gateway_types::ObjectKey::new("errors/404.html").expect("a literal key is valid"),
         }),
-        routing_rules: vec![dto::RoutingRule {
+        routing_rules: Some(vec![dto::RoutingRule {
             condition: Some(dto::Condition {
                 http_error_code_returned_equals: Some("404".to_owned()),
                 key_prefix_equals: None,
@@ -350,7 +350,7 @@ fn a_realistic_document_this_codec_wrote_is_one_the_family_accepts() {
                 replace_key_prefix_with: Some("report-404/".to_owned()),
                 replace_key_with: None,
             },
-        }],
+        }]),
     };
 
     let read_back = decode_write(&encode_read(configuration.clone())).expect("reads");
@@ -416,7 +416,7 @@ fn n_a_routing_rule_outside_the_wrapper_is_not_read_as_a_rule() {
     let configuration = decode_write(document).expect("a WebsiteConfiguration with an unknown element is still legal");
 
     assert!(
-        configuration.routing_rules.is_empty(),
+        configuration.routing_rules.as_deref().unwrap_or_default().is_empty(),
         "an unwrapped RoutingRule must not be read as a rule: {:?}",
         configuration.routing_rules
     );
@@ -451,7 +451,7 @@ fn n_a_redirect_replacing_the_key_twice_survives_the_decoder_and_is_refused_afte
 
     let configuration = decode_write(document).expect("the decoder does not enforce the exclusion");
 
-    assert_eq!(configuration.routing_rules.len(), 1);
+    assert_eq!(configuration.routing_rules.as_deref().unwrap_or_default().len(), 1);
     assert_eq!(validate_website(&configuration), Err(WebsiteRejection::RedirectReplacesKeyTwice));
 }
 

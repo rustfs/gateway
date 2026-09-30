@@ -363,23 +363,27 @@ fn read_s3location(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::S3Location
     if let Some(raw) = node.child_text("CannedACL") {
         shape.canned_acl = Some(dto::CannedAcl::custom(raw.to_owned()));
     }
+    let mut access_control_list = Vec::new();
     for item in node
         .child("AccessControlList")
         .into_iter()
         .flat_map(|w| w.children_named("Grant"))
     {
-        shape.access_control_list.push(read_grant(item)?);
+        access_control_list.push(read_grant(item)?);
     }
+    shape.access_control_list = node.child("AccessControlList").map(|_| access_control_list);
     if let Some(child) = node.child("Tagging") {
         shape.tagging = Some(read_tagging(child)?);
     }
+    let mut user_metadata = Vec::new();
     for item in node
         .child("UserMetadata")
         .into_iter()
         .flat_map(|w| w.children_named("MetadataEntry"))
     {
-        shape.user_metadata.push(read_metadata_entry(item)?);
+        user_metadata.push(read_metadata_entry(item)?);
     }
+    shape.user_metadata = node.child("UserMetadata").map(|_| user_metadata);
     if let Some(raw) = node.child_text("StorageClass") {
         shape.storage_class = Some(dto::StorageClass::custom(raw.to_owned()));
     }

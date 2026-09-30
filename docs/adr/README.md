@@ -91,6 +91,7 @@ second copy is a second thing to keep in sync.
 | 0033 | MinIO's bucket-configuration members are part of every assembly's HTTP codec | Accepted |
 | 0034 | An embedding host may lift the framework's handler, continuation and body deadlines | Accepted |
 | 0035 | Admit presigned URLs on every standard operation at service level | Accepted |
+| 0036 | A list whose presence is a fact of its own carries it | Accepted |
 
 The index is hand-maintained. Generating it would cost more than it saves until
 there are at least fifteen records.

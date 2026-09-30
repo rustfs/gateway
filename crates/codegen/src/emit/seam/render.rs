@@ -152,6 +152,12 @@ fn is_container(ty: &Type) -> bool {
     Registry::is_container(ty)
 }
 
+/// Whether `owner`'s member `field` is a container both sides hold bare: a list whose presence is
+/// carried (`emit::dto::presence`) crosses as the `Option` it is on both sides instead.
+fn is_bare_container(owner: &str, field: &Field) -> bool {
+    is_container(&field.ty) && !crate::emit::dto::presence::carries_presence(owner, field)
+}
+
 fn missing(field: &str, reason: &str) -> String {
     format!("return Err(ConversionError {{ field: \"{field}\", reason: \"{reason}\" }})")
 }
@@ -198,7 +204,7 @@ pub(super) fn forward_struct(ctx: &Ctx<'_>, owner: &str, fields: &[Field], src: 
                 other => errors.push(format!("{owner}.{name}: only a required leaf can be supplied, not {other:?}")),
             },
             Ok(Target::GatewayOnly(reason)) => {
-                let present = if is_container(&field.ty) {
+                let present = if is_bare_container(owner, field) {
                     format!("!{access}.is_empty()")
                 } else if field.required {
                     errors.push(format!("{owner}.{name}: a required gateway member cannot be gateway-only"));
@@ -232,7 +238,7 @@ pub(super) fn forward_struct(ctx: &Ctx<'_>, owner: &str, fields: &[Field], src: 
                         assigned.push((member.to_owned(), String::new()));
                     }
                     Ok(conv) => {
-                        let value = wrap_forward(field, optional, &access, &conv, &name);
+                        let value = wrap_forward((field, is_bare_container(owner, field)), optional, &access, &conv, &name);
                         assigned.push((member.to_owned(), value));
                     }
                 }
@@ -289,7 +295,7 @@ pub(super) fn forward_struct(ctx: &Ctx<'_>, owner: &str, fields: &[Field], src: 
     Ok(format!("{prelude}    Ok(s3s::dto::{owner} {{\n{body}    }})\n"))
 }
 
-fn wrap_forward(field: &Field, s3s_optional: bool, access: &str, conv: &str, name: &str) -> String {
+fn wrap_forward((field, container): (&Field, bool), s3s_optional: bool, access: &str, conv: &str, name: &str) -> String {
     let direct = conv == "x";
     let apply = |v: &str| {
         if direct {
@@ -300,7 +306,7 @@ fn wrap_forward(field: &Field, s3s_optional: bool, access: &str, conv: &str, nam
             format!("{{ let x = {v}; {conv} }}")
         }
     };
-    if is_container(&field.ty) {
+    if container {
         return if s3s_optional {
             format!("if {access}.is_empty() {{ None }} else {{ Some({}) }}", apply(access))
         } else {
@@ -377,7 +383,7 @@ pub(super) fn backward_struct(
                     Err(error) => errors.push(format!("{owner}.{name}: {error}")),
                     Ok(conv) => {
                         let source = format!("{parent}.{member}");
-                        let value = wrap_backward(field, optional, &source, &conv, &name);
+                        let value = wrap_backward((field, is_bare_container(owner, field)), optional, &source, &conv, &name);
                         push_field(&mut body, &gw_name, &value);
                     }
                 }
@@ -394,7 +400,7 @@ pub(super) fn backward_struct(
                         }
                     }
                     Ok(conv) => {
-                        let value = wrap_backward(field, optional, member, &conv, &name);
+                        let value = wrap_backward((field, is_bare_container(owner, field)), optional, member, &conv, &name);
                         push_field(&mut body, &gw_name, &value);
                     }
                 }
@@ -483,7 +489,7 @@ fn absent_as_empty(field: &Field, s3s_optional: bool, member: &str, conv: &str, 
     ))
 }
 
-fn wrap_backward(field: &Field, s3s_optional: bool, member: &str, conv: &str, name: &str) -> String {
+fn wrap_backward((field, container): (&Field, bool), s3s_optional: bool, member: &str, conv: &str, name: &str) -> String {
     let direct = conv == "x";
     let apply = |v: &str| {
         if direct {
@@ -494,7 +500,7 @@ fn wrap_backward(field: &Field, s3s_optional: bool, member: &str, conv: &str, na
             format!("{{ let x = {v}; {conv} }}")
         }
     };
-    if is_container(&field.ty) {
+    if container {
         return if s3s_optional && direct {
             format!("{member}.unwrap_or_default()")
         } else if s3s_optional {

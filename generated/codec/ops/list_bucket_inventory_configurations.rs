@@ -113,11 +113,13 @@ fn write_inventory_configuration(
         let v = &value.included_object_versions;
         writer.element("IncludedObjectVersions", v.as_str());
     }
-    writer.open("OptionalFields", None);
-    for v in &value.optional_fields {
-        writer.element("Field", v.as_str());
+    if value.optional_fields.is_some() || !writer.writes_legacy_layout() {
+        writer.open("OptionalFields", None);
+        for v in value.optional_fields.iter().flatten() {
+            writer.element("Field", v.as_str());
+        }
+        writer.close();
     }
-    writer.close();
     {
         let v = &value.schedule;
         writer.open("Schedule", None);

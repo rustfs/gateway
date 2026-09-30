@@ -739,29 +739,31 @@ fn n_the_default_layout_keeps_the_model_order_and_the_declaration_line_end() {
     assert!(!rule(&default), "the model writes the rule's ID before its Filter: {default}");
 }
 
-/// Negative — the one read-back the layout does not make identical: a logging configuration RustFS
-/// stored without `TargetGrants` is answered by the legacy stack without the element, and by the
-/// gateway with an empty `<TargetGrants></TargetGrants>`, because a gateway list is a container with
-/// one spelling of empty (the request side refuses the empty wrapper under the RustFS reading for
-/// the same reason). Pinned so that it is seen, and so that this test goes red the day it is fixed.
+/// Positive — a logging configuration RustFS stored without `TargetGrants` is answered without the
+/// element, and one stored with an empty list with the empty element, each byte for byte as the
+/// legacy stack answers it: the gateway's list carries its presence (rustfs/gateway#1078). Outside
+/// the layout both keep the empty wrapper every deployment has always written.
 #[test]
-fn n_an_absent_logging_grant_list_is_still_written_as_an_empty_element() {
-    let logging = oracle::GetBucketLoggingOutput {
-        logging_enabled: Some(oracle::LoggingEnabled {
-            target_bucket: "logs".to_owned(),
-            target_grants: None,
-            target_object_key_format: None,
-            target_prefix: "access/".to_owned(),
-        }),
-    };
-    let (_, legacy, [rustfs, _]) = read_back::<dto::GetBucketLogging>(
-        "photos?logging",
-        Answering {
-            logging: logging.clone(),
-            ..Default::default()
-        },
-        get_bucket_logging::output_from_s3s(logging).expect("the seam carries it"),
-    );
-    assert!(!legacy.contains("TargetGrants"), "{legacy}");
-    assert_eq!(rustfs.replacen("<TargetGrants></TargetGrants>", "", 1), legacy);
+fn a_logging_grant_list_is_written_as_the_legacy_stack_writes_it_set_or_not() {
+    for target_grants in [None, Some(Vec::new())] {
+        let logging = oracle::GetBucketLoggingOutput {
+            logging_enabled: Some(oracle::LoggingEnabled {
+                target_bucket: "logs".to_owned(),
+                target_grants: target_grants.clone(),
+                target_object_key_format: None,
+                target_prefix: "access/".to_owned(),
+            }),
+        };
+        let (_, legacy, [rustfs, default]) = read_back::<dto::GetBucketLogging>(
+            "photos?logging",
+            Answering {
+                logging: logging.clone(),
+                ..Default::default()
+            },
+            get_bucket_logging::output_from_s3s(logging).expect("the seam carries it"),
+        );
+        assert_eq!(rustfs, legacy, "{target_grants:?}");
+        assert_eq!(legacy.contains("<TargetGrants></TargetGrants>"), target_grants.is_some(), "{legacy}");
+        assert!(default.contains("<TargetGrants></TargetGrants>"), "{default}");
+    }
 }

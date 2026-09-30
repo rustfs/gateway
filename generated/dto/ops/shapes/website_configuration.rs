@@ -36,7 +36,7 @@ pub struct WebsiteConfiguration {
     /// Wire `RedirectAllRequestsTo`, bound as BodyXml. Optional.
     pub redirect_all_requests_to: Option<crate::ops::shapes::RedirectAllRequestsTo>,
     /// Wire `RoutingRules`, bound as BodyXml. Optional.
-    pub routing_rules: Vec<crate::ops::shapes::RoutingRule>,
+    pub routing_rules: Option<Vec<crate::ops::shapes::RoutingRule>>,
 }
 
 impl WebsiteConfiguration {

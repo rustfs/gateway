@@ -654,7 +654,7 @@ pub fn canonicalize_policy(policy: &mut AccessControlPolicy) -> Result<(), AclRe
     if matches!(ACL_OWNER_POLICY, AclOwnerPolicy::Drop) {
         policy.owner = None;
     }
-    for grant in &mut policy.grants {
+    for grant in policy.grants.iter_mut().flatten() {
         let Some(grantee) = grant.grantee.as_mut() else {
             return Err(AclRejection::GrantWithoutGrantee);
         };

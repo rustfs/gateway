@@ -122,7 +122,7 @@ impl WebsiteRejection {
 pub fn validate_website(configuration: &WebsiteConfiguration) -> Result<(), WebsiteRejection> {
     let documents = configuration.index_document.is_some()
         || configuration.error_document.is_some()
-        || !configuration.routing_rules.is_empty();
+        || configuration.routing_rules.as_ref().is_some_and(|rules| !rules.is_empty());
     match configuration.redirect_all_requests_to.as_ref() {
         Some(redirect) => {
             if documents {
@@ -140,7 +140,7 @@ pub fn validate_website(configuration: &WebsiteConfiguration) -> Result<(), Webs
         None if configuration.index_document.is_none() => return Err(WebsiteRejection::NoEntryPoint),
         None => {}
     }
-    for rule in &configuration.routing_rules {
+    for rule in configuration.routing_rules.iter().flatten() {
         if rule.redirect.replace_key_with.is_some() && rule.redirect.replace_key_prefix_with.is_some() {
             return Err(WebsiteRejection::RedirectReplacesKeyTwice);
         }

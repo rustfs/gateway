@@ -32,7 +32,7 @@ pub struct LoggingEnabled {
     /// Wire `TargetBucket`, bound as BodyXml. Required.
     pub target_bucket: String,
     /// Wire `TargetGrants`, bound as BodyXml. Optional.
-    pub target_grants: Vec<crate::ops::shapes::TargetGrant>,
+    pub target_grants: Option<Vec<crate::ops::shapes::TargetGrant>>,
     /// Wire `TargetPrefix`, bound as BodyXml. Required.
     pub target_prefix: String,
     /// Wire `TargetObjectKeyFormat`, bound as BodyXml. Optional.

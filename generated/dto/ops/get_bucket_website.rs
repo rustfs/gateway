@@ -107,7 +107,7 @@ pub struct Output {
     /// Wire `ErrorDocument`, bound as BodyXml. Optional.
     pub error_document: Option<crate::ops::shapes::ErrorDocument>,
     /// Wire `RoutingRules`, bound as BodyXml. Optional.
-    pub routing_rules: Vec<crate::ops::shapes::RoutingRule>,
+    pub routing_rules: Option<Vec<crate::ops::shapes::RoutingRule>>,
 }
 
 impl Output {

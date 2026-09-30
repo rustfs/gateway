@@ -29,13 +29,13 @@ use crate::compat::ConversionError;
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
 pub fn s3location_to_s3s(value: crate::ops::shapes::S3Location) -> Result<s3s::dto::S3Location, ConversionError> {
     Ok(s3s::dto::S3Location {
-        access_control_list: if value.access_control_list.is_empty() { None } else { Some({ let x = value.access_control_list; x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::grant::grant_to_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()? }) },
+        access_control_list: value.access_control_list.map(|x| -> Result<_, ConversionError> { Ok(x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::grant::grant_to_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()?) }).transpose()?,
         bucket_name: { let x = value.bucket_name; x.as_str().to_owned() },
         canned_acl: value.canned_acl.map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::ObjectCannedACL::from(x.as_str().to_owned())) }).transpose()?,
         encryption: value.encryption.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::encryption::encryption_to_s3s(x)?) }).transpose()?,
         prefix: value.prefix,
         storage_class: value.storage_class.map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::StorageClass::from(x.as_str().to_owned())) }).transpose()?,
         tagging: value.tagging.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::tagging::tagging_to_s3s(x)?) }).transpose()?,
-        user_metadata: if value.user_metadata.is_empty() { None } else { Some({ let x = value.user_metadata; x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::metadata_entry::metadata_entry_to_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()? }) },
+        user_metadata: value.user_metadata.map(|x| -> Result<_, ConversionError> { Ok(x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::metadata_entry::metadata_entry_to_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()?) }).transpose()?,
     })
 }

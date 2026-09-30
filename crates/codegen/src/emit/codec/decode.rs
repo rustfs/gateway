@@ -60,6 +60,7 @@
 //! one. This gateway wrote those bytes itself (`q-tag-object-unconfigured-0090`) and refused them.
 
 mod layout;
+mod lists;
 
 use std::fmt::Write as _;
 
@@ -71,6 +72,7 @@ use crate::emit::dto::naming;
 use crate::emit::error_status::Constants;
 
 use self::layout::{MAX_WIDTH, assign, for_header, push_stmt};
+use self::lists::{Presence, list_source};
 
 /// The default code for a required member the request did not carry.
 const DEFAULT_MISSING_CODE: &str = "InvalidArgument";
@@ -79,26 +81,6 @@ const DEFAULT_MISSING_CODE: &str = "InvalidArgument";
 const MISSING_LIST_ENTRIES: &str = "the body carries no entry for a member that requires one";
 /// A wrapped required list whose wrapper is not on the wire at all.
 const MISSING_MEMBER: &str = "the body omits a member the schema requires";
-
-/// The node iterator one list-typed member reads its entries from.
-/// A flattened list repeats its entry element directly under the parent; a wrapped one sits inside
-/// an enclosing element. Which name is which comes from [`super::list_elements`] rather than from
-/// here, so the reader and the writer cannot disagree about it — they did, and the disagreement
-/// was invisible because both spellings compile.
-///
-/// Returned as the links of a method chain rather than as one string, because rustfmt breaks a
-/// chain that is too long link by link and this emitter has to produce what rustfmt would.
-fn list_source(flattened: bool, member_name: Option<&str>, wire: &str) -> Result<Vec<String>, String> {
-    let names = super::list_elements(flattened, member_name, wire)?;
-    Ok(match &names.wrapper {
-        None => vec![format!("children_named(\"{}\")", names.entry)],
-        Some(wrapper) => vec![
-            format!("child(\"{wrapper}\")"),
-            "into_iter()".to_owned(),
-            format!("flat_map(|w| w.children_named(\"{}\"))", names.entry),
-        ],
-    })
-}
 
 /// Opening the request document, the way the request's deployment reads one: as a tree, or as
 /// legacy RustFS reads it against the operation's generated shape (`super::document`,
@@ -436,7 +418,8 @@ fn one_field(
             if open_document {
                 out.push_str(&open_request_document(ir, super::unknown_element_policy(ir, rules)?)?);
             }
-            out.push_str(&xml_member(ir, field, target, rules, "root", Some("request.names()"), 8)?);
+            let owner = format!("{}Input", naming::type_name(op));
+            out.push_str(&xml_member(ir, (&owner, field), target, rules, "root", Some("request.names()"), 8)?);
         }
         Binding::StatusCode => {
             return Err(expr::unsupported(op, member, "a status code is a response member"));
@@ -576,7 +559,7 @@ fn root_namespace_guard(operation: &str, indent: &str) -> String {
 /// required-member refusal and the flattened-list rule would come to disagree.
 fn xml_member(
     ir: &OperationIr,
-    field: &Field,
+    (owner, field): (&str, &Field),
     target: &str,
     rules: &CodecRules,
     node: &str,
@@ -589,6 +572,8 @@ fn xml_member(
     let pad = " ".repeat(indent);
     let inner = indent.saturating_add(4);
     let mut out = String::new();
+    let presence = Presence::of(owner, field, target);
+    out.push_str(&presence.prelude(&pad));
     match &field.ty {
         Type::List {
             member: entry,
@@ -607,8 +592,9 @@ fn xml_member(
             let links = list_source(*flattened, member_name.as_deref(), &wire)?;
             out.push_str(&for_header(indent, node, &links));
             let _ = writeln!(out, "{}let raw = item.text.as_str();", " ".repeat(inner));
-            out.push_str(&push_stmt(inner, target, &conversion));
+            out.push_str(&push_stmt(inner, presence.entries(), &conversion));
             let _ = writeln!(out, "{pad}}}");
+            out.push_str(&presence.assign(indent, node, super::list_elements(*flattened, member_name.as_deref(), &wire)?)?);
         }
         Type::List {
             member: entry,
@@ -626,8 +612,9 @@ fn xml_member(
             let links = list_source(*flattened, member_name.as_deref(), &wire)?;
             out.push_str(&for_header(indent, node, &links));
             let read = super::name_policy::shape_reader_call(ir, entry_name, &reader, "item", name_policy)?;
-            out.push_str(&push_stmt(inner, target, &read));
+            out.push_str(&push_stmt(inner, presence.entries(), &read));
             let _ = writeln!(out, "{pad}}}");
+            out.push_str(&presence.assign(indent, node, super::list_elements(*flattened, member_name.as_deref(), &wire)?)?);
             // Only the model's own `required` reaches here, and only `MalformedXML` can come
             // out of it. See the module documentation: an overlay that makes a list required in
             // order to reach an error code is taking the operation's answer, not stating a
@@ -805,7 +792,7 @@ pub fn shape_reader(
             )?);
             continue;
         }
-        out.push_str(&xml_member(ir, field, &target, rules, "node", needs_names.then_some("names"), 4)?);
+        out.push_str(&xml_member(ir, (name, field), &target, rules, "node", needs_names.then_some("names"), 4)?);
     }
     out.push_str("    value::exit(shape.check_required())?;\n    Ok(shape)\n}\n");
     Ok(out)

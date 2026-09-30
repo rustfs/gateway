@@ -110,16 +110,6 @@ pub(crate) const fn same(known: &'static [&'static str]) -> Written {
     }
 }
 
-/// A written answer whose differences are the register ids in `known`, the answer findings in
-/// `answer` and the child order at `orders`.
-pub(crate) const fn differs(
-    known: &'static [&'static str],
-    answer: &'static [&'static str],
-    orders: &'static [&'static str],
-) -> Written {
-    Written::As { known, answer, orders }
-}
-
 /// A configuration document as the legacy stack reads it: the value RustFS stores and returns.
 pub(crate) fn legacy_document<T>(xml: &str) -> T
 where
@@ -177,37 +167,17 @@ const fn finding(
 }
 
 /// Every answer finding, by id.
-pub(crate) const ANSWER_FINDINGS: &[AnswerFinding] = &[
-    finding(
-        "sa-0001",
-        "GetBucketLogging",
-        "body BucketLoggingStatus/LoggingEnabled/TargetGrants",
-        "<TargetGrants>",
-        "<absent>",
-        "The gateway output holds the grant list as a list, empty when the legacy output has none, and its writer opens the \
-         wrapper whatever it holds (generated/codec/ops/get_bucket_logging.rs); the legacy writer skips an unset list. The gateway \
-         adds an empty element; nothing the legacy answer holds is missing.",
-    ),
-    finding(
-        "sa-0002",
-        "GetBucketWebsite",
-        "body WebsiteConfiguration/RoutingRules",
-        "<RoutingRules>",
-        "<absent>",
-        "As sa-0001, for the routing rules (generated/codec/ops/get_bucket_website.rs).",
-    ),
-    finding(
-        "sa-0003",
-        "ListMultipartUploads",
-        "body ListMultipartUploadsResult/EncodingType",
-        "<absent>",
-        "<EncodingType>",
-        "The RustFS listing rule (url_encode_listings_like_rustfs, #1088) echoes no EncodingType on a multipart listing, as \
+pub(crate) const ANSWER_FINDINGS: &[AnswerFinding] = &[finding(
+    "sa-0001",
+    "ListMultipartUploads",
+    "body ListMultipartUploadsResult/EncodingType",
+    "<absent>",
+    "<EncodingType>",
+    "The RustFS listing rule (url_encode_listings_like_rustfs, #1088) echoes no EncodingType on a multipart listing, as \
          legacy RustFS answers: its multipart listing never sets the member (rustfs/rustfs e870a6d25 \
          rustfs/src/storage/s3_api/multipart.rs:165-206). Only the encode matrix's sample sets it, so no answer RustFS gives \
          loses it; a legacy output that did set it would be written without it.",
-    ),
-];
+)];
 
 /// Every output member path no row can set, by operation, with the reason.
 pub(crate) const UNWRITTEN_PATHS: &[(&str, &str, &str)] = &[];

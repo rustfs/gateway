@@ -26,7 +26,7 @@ use super::super::samples::configs::{
     BUCKET_ACL, CORS, ENCRYPTION, LIFECYCLE, LIFECYCLE_MINIO, LOGGING, NOTIFICATION, REPLICATION, REPLICATION_MINIO, WEBSITE,
     WEBSITE_REDIRECT, config,
 };
-use super::{AnswerRow, BARE, XML, answer, differs, legacy_document, named, same};
+use super::{AnswerRow, BARE, XML, answer, legacy_document, named, same};
 
 const POLICY: &str = "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Principal\":\"*\",\
     \"Action\":\"s3:GetObject\",\"Resource\":\"arn:aws:s3:::bucket/*\"}]}";
@@ -120,7 +120,7 @@ fn reads() -> Vec<AnswerRow> {
                     logging_enabled: status.logging_enabled,
                 }
             },
-            differs(XML, &["sa-0001"], &[]),
+            same(XML),
         ),
         answer(
             "get-bucket-notification-every-member",
@@ -228,7 +228,7 @@ fn reads() -> Vec<AnswerRow> {
                     routing_rules: website.routing_rules,
                 }
             },
-            differs(XML, &["sa-0002"], &[]),
+            same(XML),
         ),
         answer(
             "get-object-lock-configuration-days",
