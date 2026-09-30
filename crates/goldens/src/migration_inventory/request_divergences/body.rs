@@ -27,7 +27,7 @@ const STREAMING_UPLOADS: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API
 const OBJECT_INTEGRITY: &str = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/checking-object-integrity.html";
 
 /// The `rd-body-*` entries, in id order.
-pub(super) const BODY_DIVERGENCES: [RequestDivergence; 10] = [
+pub(super) const BODY_DIVERGENCES: [RequestDivergence; 11] = [
     RequestDivergence {
         id: "rd-body-0001",
         operation: "PutObject",
@@ -167,5 +167,22 @@ pub(super) const BODY_DIVERGENCES: [RequestDivergence; 10] = [
         follow_up: DivergenceFollowUp::None,
         test_file: BODY_PARITY,
         test: "a_decoded_length_the_wire_cannot_hold_is_refused_at_the_head_only_by_the_gateway",
+    },
+    RequestDivergence {
+        id: "rd-body-0011",
+        operation: "PutObject",
+        request: "a trailer upload whose x-amz-checksum-* trailer value is not base64 at all",
+        aws: "a checksum value must be base64 of its algorithm's width; nothing is stored",
+        aws_evidence: OBJECT_INTEGRITY,
+        s3s: "ends the body and publishes the value; legacy RustFS's storage reader fails to decode it: 500 InternalError, \
+              nothing stored (observed, e870a6d25b)",
+        gateway: "400 in place of end of body, before the handler may commit: InvalidRequest, or BadDigest under the RustFS \
+                  profile, the code legacy RustFS gives every other unreadable checksum",
+        client_impact: "a broken trailer is a client error the SDK does not retry, instead of a server error it does; a legacy \
+                        bug, not a decision",
+        ruling: DivergenceRuling::KeepGateway,
+        follow_up: DivergenceFollowUp::None,
+        test_file: BODY_PARITY,
+        test: "an_unreadable_checksum_trailer_is_refused_only_by_the_gateway",
     },
 ];

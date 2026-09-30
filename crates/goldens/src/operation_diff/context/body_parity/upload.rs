@@ -120,6 +120,8 @@ pub(crate) enum Tamper {
     DecodedLength(i64),
     /// The checksum trailer carries the checksum of other bytes; its signature is still valid.
     TrailerChecksum,
+    /// The checksum trailer carries a value that is not base64 at all; its signature is still valid.
+    TrailerValueUnreadable,
     /// The body ends after the terminal chunk with no trailer section, though one was declared.
     MissingTrailer,
     /// One hex digit of the trailer signature is changed.
@@ -271,7 +273,11 @@ impl Upload {
             } else {
                 self.object.clone()
             };
-            let value = crc32_base64(&checksummed);
+            let value = if self.tamper == Tamper::TrailerValueUnreadable {
+                "not base64!".to_owned()
+            } else {
+                crc32_base64(&checksummed)
+            };
             out.extend_from_slice(format!("{TRAILER}:{value}\r\n").as_bytes());
             if signed {
                 let block = format!("{TRAILER}:{value}\n");

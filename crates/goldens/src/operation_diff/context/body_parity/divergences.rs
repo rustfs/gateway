@@ -232,3 +232,20 @@ fn a_decoded_length_the_wire_cannot_hold_is_refused_at_the_head_only_by_the_gate
     assert_eq!(pair.oracle.answer(), (400, Some("IncompleteBody")));
     assert_eq!(pair.oracle.bytes().len(), 20);
 }
+
+/// A checksum trailer whose value is not base64 at all. The gateway refuses it in place of end of
+/// body; the legacy stack ends the body and publishes the value, which legacy RustFS's storage
+/// reader then fails to decode as `500 InternalError` (observed on a legacy RustFS build).
+///
+/// Ruling: `rd-body-0011`
+#[test]
+fn an_unreadable_checksum_trailer_is_refused_only_by_the_gateway() {
+    for mode in [Mode::SignedTrailer, Mode::UnsignedTrailer] {
+        let upload = Upload::new(mode, &object()).tampered(Tamper::TrailerValueUnreadable);
+        let pair = both(&upload).expect("both stacks answer");
+        assert_eq!(pair.gateway.answer(), (400, Some("InvalidRequest")), "{mode:?}: {:?}", pair.gateway);
+        assert!(!pair.gateway.accepted(), "{mode:?}");
+        assert!(pair.oracle.accepted(), "{mode:?}: {:?}", pair.oracle);
+        assert_eq!(pair.oracle.trailer(), Lookup::Present("not base64!".to_owned()), "{mode:?}");
+    }
+}

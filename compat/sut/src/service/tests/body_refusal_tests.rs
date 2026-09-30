@@ -79,7 +79,7 @@ fn hex(bytes: &[u8]) -> String {
 ///
 /// Signed by hand: the gateway's own signer refuses to mint a trailer section that disagrees with
 /// its head, which is exactly what these cases send.
-fn streaming_put(target: &str, decoded_length: usize, trailer: &str, framed: Vec<u8>) -> http::Request<Bytes> {
+pub(super) fn streaming_put(target: &str, decoded_length: usize, trailer: &str, framed: Vec<u8>) -> http::Request<Bytes> {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .expect("a clock after the epoch")
@@ -122,7 +122,7 @@ fn streaming_put(target: &str, decoded_length: usize, trailer: &str, framed: Vec
 }
 
 /// `data` in one unsigned aws-chunked chunk, then the terminal chunk and `trailer_lines`.
-fn framed(data: &[u8], trailer_lines: &str) -> Vec<u8> {
+pub(super) fn framed(data: &[u8], trailer_lines: &str) -> Vec<u8> {
     let mut body = format!("{:x}\r\n", data.len()).into_bytes();
     body.extend_from_slice(data);
     body.extend_from_slice(b"\r\n0\r\n");

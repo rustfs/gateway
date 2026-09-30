@@ -746,6 +746,13 @@ mod anonymous_chunked_tests;
 /// An empty upload without `Content-Length`, stored as legacy RustFS stores it (rustfs/rustfs#6849).
 mod empty_upload_tests;
 
+/// Buffered writes whose integrity claim contradicts their body, refused with nothing applied
+/// (rustfs/backlog#1677, rd-err-0011).
+mod buffered_integrity_tests;
+
+/// The integrity refusals legacy RustFS answers `500`, answered as the client errors they are.
+mod legacy_server_error_tests;
+
 /// The gateway's CORS answers over the backend's stored documents (rustfs/gateway#1004).
 mod cors_tests;
 
