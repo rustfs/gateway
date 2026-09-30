@@ -24867,12 +24867,10 @@ mut_compat_known_fail_grew() {
     python3 - <<'PYEOF'
 from pathlib import Path
 
+# The list can be empty (it is since #1073's refresh), so the new entry is appended rather than
+# placed after an existing one; either way it was not in the committed list.
 path = Path("compat/known-fail.txt")
-text = path.read_text()
-old = "s3cmd/copy-object            rustfs/gateway#912  PutObjectAcl without Content-MD5 is refused\n"
-if text.count(old) != 1:
-    raise SystemExit("known-fail ratchet mutation subject is not unique")
-path.write_text(text.replace(old, old + "boto3/list-pagination        rustfs/gateway#912  newly excused\n", 1))
+path.write_text(path.read_text() + "boto3/list-pagination        rustfs/gateway#912  newly excused\n")
 PYEOF
 }
 # The whole point of the ratchet: a regression must not be silenceable by the change that caused it.
@@ -24931,12 +24929,10 @@ mut_compat_known_fail_unowned() {
     python3 - <<'PYEOF'
 from pathlib import Path
 
+# The committed list can be empty, so the unowned entry is appended; the guard reports the missing
+# owner for every entry it reads, new or old, beside the ratchet's own refusal of the addition.
 path = Path("compat/known-fail.txt")
-text = path.read_text()
-old = "s3cmd/presigned-get          rustfs/gateway#913  presigned SigV2 is refused under the default policy"
-if text.count(old) != 1:
-    raise SystemExit("known-fail owner mutation subject is not unique")
-path.write_text(text.replace(old, "s3cmd/presigned-get          later  presigned SigV2 is refused under the default policy", 1))
+path.write_text(path.read_text() + "s3cmd/presigned-get          later  presigned SigV2 is refused under the default policy\n")
 PYEOF
 }
 expect_fail check_compat_matrix.sh \
@@ -24959,7 +24955,15 @@ for client in matrix["clients"]:
             row["issue"] = None
             path.write_text(json.dumps(matrix, indent=2) + "\n")
             raise SystemExit(0)
-raise SystemExit("no failing cell to promote")
+# A manifest with no failing cell (the one #1073 recorded) has nothing to promote; the same hand
+# edit in the other direction, a pass rewritten as a failure, leaves the counts just as wrong.
+for client in matrix["clients"]:
+    for row in client["scenarios"]:
+        if row["status"] == "pass":
+            row["status"] = "fail"
+            path.write_text(json.dumps(matrix, indent=2) + "\n")
+            raise SystemExit(0)
+raise SystemExit("no failing or passing cell to hand-edit")
 PYEOF
 }
 # matrix.json is a generated artefact and a published promise. A hand edit that promotes a failure
