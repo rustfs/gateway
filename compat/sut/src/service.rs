@@ -56,9 +56,10 @@ pub(crate) fn open_backend(options: &Options) -> io::Result<FsBackend> {
         // included — and creates the bucket in its own region; so does this launcher (#914).
         .with_region_match_policy(RegionMatchPolicy::IgnoreConstraint)
         .with_owner(owner_id, display_name)
-        // RustFS's storage answers a batch delete's key it cannot hold on its own and deletes the
-        // rest; every other operation is refused in front of the backend (#1145).
-        .refusing_batch_deletes_of(crate::storage_names::rustfs_storage_refuses);
+        // RustFS's storage answers a batch delete's key it cannot hold, or whose segment its disk
+        // cannot name, on its own and deletes the rest; every other operation is refused in front
+        // of the backend (#1145, #1153).
+        .refusing_batch_deletes_of(crate::storage_names::rustfs_storage_or_disk_refuses);
     match options.lifecycle_debug_interval {
         Some(interval) => backend.with_lifecycle_debug_interval(interval),
         None => Ok(backend),
