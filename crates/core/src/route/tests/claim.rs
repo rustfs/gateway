@@ -188,6 +188,7 @@ fn n_a_catch_all_never_matches_an_empty_rest_or_a_short_path() {
         assert!(!heal.matches(path), "{path}");
         assert_eq!(heal.extract(path).err(), Some(PathParamError::Mismatch), "{path}");
         assert_eq!(heal.raw_value(path, "prefix"), None, "{path}");
+        assert_eq!(heal.raw_value(path, "bucket"), None, "{path}");
     }
 }
 
