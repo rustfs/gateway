@@ -61,8 +61,6 @@ mod dto_cold_split;
 
 #[path = "empty_enumeration.rs"]
 mod empty_enumeration;
-#[path = "extra_permissions.rs"]
-mod extra_permissions;
 
 #[path = "encryption_roundtrip.rs"]
 mod encryption_roundtrip;
@@ -75,6 +73,9 @@ mod event_stream_frame_replay;
 
 #[path = "ext_field_policy.rs"]
 mod ext_field_policy;
+
+#[path = "extra_permissions.rs"]
+mod extra_permissions;
 
 #[path = "golden.rs"]
 mod golden;

@@ -926,9 +926,7 @@ impl S3Service {
         let requirement = requirement
             .for_version(named_version.is_some() && self.inner.view_policy.version_actions.asks_version_action(operation));
         let asked_version = named_version.as_deref();
-        // AWS's conditionally-required actions: an object-lock, tagging or ACL header on a write,
-        // or a governance-bypass header on a delete or retention change, requires the matching
-        // action on top of the base one. Read once here; the route stage asks each triggered one.
+        // Header-conditional actions AWS requires on top of the base one (`ExtraPermission`).
         let extra_permissions = M::extra_permissions(&op);
         let authz_started = self.inner.authz_clock.monotonic();
         let auth_scheme = if verdict.is_authenticated() {
@@ -1084,17 +1082,14 @@ impl S3Service {
                     (None, _) | (_, None) => Decision::Indeterminate,
                 };
             }
-            // Every triggered, profile-required extra permission is all-of on top of the base
-            // decision: the first that is not allowed refuses the request, before the body is read.
+            // Each triggered, profile-required extra is all-of on top of the base decision.
             let mut route_extras: Vec<AuthzRequest<'_>> = Vec::new();
             if route_decision == Decision::Allow {
                 for extra in extra_permissions {
                     if !route_service.inner.view_policy.requires_extra_permission(*extra) {
                         continue;
                     }
-                    // The raw header map is read by name without minting a `HeaderName` per
-                    // trigger: the trigger headers are not the ones the view rewrites, and an
-                    // empty one is already read as absent by the trigger itself.
+                    // Read off the raw map by name: no `HeaderName` per trigger on the warm path.
                     if !extra.applies(|name| route_headers.get(name).and_then(|value| value.to_str().ok())) {
                         continue;
                     }
@@ -1125,8 +1120,7 @@ impl S3Service {
                     }
                 }
             }
-            // No extra permission fired on the warm path: audit the base questions with no
-            // allocation, and combine only when an extra was actually asked.
+            // Combine for the audit only when an extra was asked: nothing allocates otherwise.
             let mut combined_audit;
             let audited_route: &[AuthzRequest<'_>] = if route_extras.is_empty() {
                 asked
