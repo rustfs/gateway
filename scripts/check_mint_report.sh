@@ -22,9 +22,11 @@ set -euo pipefail
 #                   listed in its own section, while the same SDK counted is
 #                   exit 3; its FAIL records never become a regression; it is
 #                   flagged RECOVERED only when its log is complete and
-#                   attributable; a counted SDK's record inside its log, or its
-#                   absence from the console, is exit 3; an exclusion without
-#                   an in-project owner or a reason is refused
+#                   attributable, and only then are its failing functions named,
+#                   redacted, in the summary, the JSON and the proposal; a
+#                   counted SDK's record inside its log, or its absence from the
+#                   console, is exit 3; an exclusion without an in-project owner
+#                   or a reason is refused
 #     record        a complete run proposes generation + 1 with the observed
 #                   counts and leaves the reviewed baseline byte-identical; an
 #                   incomplete run proposes nothing and removes a stale proposal;
@@ -386,6 +388,65 @@ recovered[".minio-dotnet"] = "\n".join([
 probe("an excluded SDK that writes valid records again is flagged RECOVERED and still not judged", 0,
       ["RECOVERED  .minio-dotnet", "1 PASS, 1 FAIL, 1 NA", "recovered=1", "incomplete=0"],
       ["REGRESSION ", "INCOMPLETE"], logs=recovered, base=EXCLUDING_DOTNET, progress=DOTNET_FAILED)
+
+
+# A recovered SDK's failures have to be attributed before its exclusion can become a count, and the
+# aggregate is all a run uploads (rustfs/gateway#720): its failing functions travel with it, through
+# the same redaction and cap as a counted SDK's.
+def names_recovered_failures(work: Path, proposal: Path) -> str | None:
+    summary = (work / "summary.md").read_text(encoding="utf-8")
+    if "\n- `.minio-dotnet` (recovered): PutObject\n" not in summary:
+        return f"the summary does not name the recovered SDK's failing function:\n{summary}"
+    excluded = json.loads((work / "report.json").read_text(encoding="utf-8"))["excluded"]
+    if excluded[".minio-dotnet"].get("failing_functions") != ["PutObject"]:
+        return f"report.json does not name the recovered SDK's failing function: {excluded}"
+    return None
+
+
+probe("a recovered excluded SDK names its failing functions in the summary and the JSON", 0,
+      ["RECOVERED  .minio-dotnet"], ["INCOMPLETE"], logs=recovered, base=EXCLUDING_DOTNET,
+      progress=DOTNET_FAILED, after=names_recovered_failures)
+
+
+def proposes_recovered_failures(work: Path, proposal: Path) -> str | None:
+    text = proposal.read_text(encoding="utf-8")
+    expected = (f"#   .minio-dotnet failed: PutObject\n"
+                f".minio-dotnet excluded {OWNER_URL} {EXCLUSION_REASON}\n")
+    if expected not in text:
+        return f"the proposal does not name the recovered SDK's failure above its unchanged exclusion:\n{text}"
+    return None
+
+
+probe("record mode names a recovered SDK's failing functions above its unchanged exclusion", 0,
+      ["proposed generation 5"], logs=recovered, base=EXCLUDING_DOTNET, progress=DOTNET_FAILED,
+      record=True, after=proposes_recovered_failures)
+
+def proposes_no_excluded_failure(work: Path, proposal: Path) -> str | None:
+    text = proposal.read_text(encoding="utf-8")
+    if ".minio-dotnet failed:" in text or "MakeBucket" in text:
+        return f"the proposal names a failure from a log that cannot be attributed:\n{text}"
+    return None
+
+
+probe("an excluded SDK whose log is not JSON never has a failing function named from it", 0,
+      ["EXCLUDED   .minio-dotnet"], ["MakeBucket", "(recovered)", "Failing functions of recovered SDKs"],
+      logs=preamble, base=EXCLUDING_DOTNET, progress=DOTNET_FAILED, record=True,
+      after=proposes_no_excluded_failure)
+
+recovered_passing = healthy_logs()
+recovered_passing[".minio-dotnet"] = rec("minio-dotnet", "MakeBucket", "PASS")
+probe("a recovered excluded SDK with no failure names none", 0,
+      ["RECOVERED  .minio-dotnet", "1 PASS, 0 FAIL, 0 NA"],
+      ["(recovered):", "MakeBucket", "Failing functions of recovered SDKs"],
+      logs=recovered_passing, base=EXCLUDING_DOTNET, progress=console(HEALTHY_PROGRESS))
+
+recovered_leaky = healthy_logs()
+recovered_leaky[".minio-dotnet"] = rec(
+    "minio-dotnet", "PresignedGetObject(url=http://x/b/o?X-Amz-Signature=feedfacefeedface0002)", "FAIL"
+)
+probe("a recovered excluded SDK's failing function is redacted like a counted SDK's", 0,
+      ["(recovered): PresignedGetObject(url=http://x/b/o?X-Amz-Signature=[REDACTED]"],
+      ["feedfacefeedface0002"], logs=recovered_leaky, base=EXCLUDING_DOTNET, progress=DOTNET_FAILED)
 
 # The other direction: valid records alone are not a recovery while the failure stays unattributed.
 passing_but_failed = healthy_logs()

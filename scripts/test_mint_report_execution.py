@@ -105,7 +105,7 @@ class MintExecutionTests(unittest.TestCase):
     def test_complete_census_uses_bounded_judge_subprocesses(self):
         result, commands = exercise()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn("OK: 47 mint report probes;", result.stdout)
+        self.assertIn("OK: 52 mint report probes;", result.stdout)
         judges = [cmd for cmd in commands if len(cmd) > 2 and cmd[2] == "judge"]
         self.assertEqual(len(judges), 4, "all four CLI exit classes need one boundary control; remaining judges must reuse the interpreter")
         self.assertEqual(sum(len(cmd) > 2 and cmd[2] == "redact" for cmd in commands), 1)
