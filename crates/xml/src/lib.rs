@@ -37,6 +37,8 @@ pub mod read;
 pub mod write;
 
 #[cfg(test)]
+mod layout_tests;
+#[cfg(test)]
 mod tests;
 
 pub use crate::chars::{UNREPRESENTABLE, is_xml_char, is_xml_name, is_xml_representable};
@@ -45,4 +47,7 @@ pub use crate::read::{
     MAX_ATTRIBUTE_BYTES, MAX_ATTRIBUTES_PER_ELEMENT, MAX_BODY_BYTES, MAX_DEPTH, MAX_ELEMENTS, XmlAttribute, XmlLimits, XmlNode,
     parse, parse_with_limits,
 };
-pub use crate::write::{DECLARATION, S3_XMLNS, XmlWriter, escape_attribute, escape_text, strip_declaration};
+pub use crate::write::{
+    COMPACT_DECLARATION, DECLARATION, S3_XMLNS, XmlWriter, escape_attribute, escape_text, strip_compact_declaration,
+    strip_declaration,
+};

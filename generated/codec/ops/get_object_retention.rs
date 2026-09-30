@@ -67,7 +67,13 @@ impl OperationCodec for dto::GetObjectRetention {
         // Retention — the XML response body, rooted at `Retention`.
         if let Some(v) = output.retention.as_ref() {
             let mut writer = rustfs_gateway_xml::XmlWriter::document();
-            writer.open("Retention", Some(rustfs_gateway_xml::S3_XMLNS));
+            writer.legacy_layout(request.rustfs_response_layout());
+            let xmlns = if request.rustfs_response_layout() {
+                None
+            } else {
+                Some(rustfs_gateway_xml::S3_XMLNS)
+            };
+            writer.open("Retention", xmlns);
             write_object_lock_retention(&mut writer, v)?;
             writer.close();
             response.body = ResponseBody::Complete(writer.finish().into_bytes());

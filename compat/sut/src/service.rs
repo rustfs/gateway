@@ -306,6 +306,10 @@ pub(crate) fn build_service(
             // RustFS reads a conditional date in one spelling and refuses the rest, minio-js's
             // `Invalid Date` included, where the core ignores it (rustfs/backlog#1677, R14).
             .refuse_unreadable_date_conditions()
+            // RustFS writes a response document's members in its own declaration order, with no
+            // line end after the XML declaration and no namespace on a payload root
+            // (rustfs/gateway#1078), so a client reads the bytes it reads from RustFS.
+            .write_responses_as_rustfs()
             // RustFS's protocol front hands its storage every key up to 1024 bytes and its storage
             // decides; this backend hashes keys onto the disk, so no key reaches it as a path
             // (#1107).

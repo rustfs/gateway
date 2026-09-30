@@ -58,6 +58,7 @@ impl OperationCodec for dto::GetBucketLifecycleConfiguration {
             response.set_header("x-amz-transition-default-minimum-object-size", rendered);
         }
         let mut writer = rustfs_gateway_xml::XmlWriter::document();
+        writer.legacy_layout(request.rustfs_response_layout());
         writer.open("LifecycleConfiguration", Some(rustfs_gateway_xml::S3_XMLNS));
         for item in &output.rules {
             writer.open("Rule", None);
@@ -102,6 +103,7 @@ fn write_lifecycle_expiration(
     writer: &mut rustfs_gateway_xml::XmlWriter,
     value: &dto::LifecycleExpiration,
 ) -> Result<(), CodecError> {
+    writer.order_children(rustfs_order::LIFECYCLE_EXPIRATION);
     if let Some(v) = value.date.as_ref() {
         writer.element("Date", &value::render_timestamp(v, TimestampFormat::Iso8601)?);
     }
@@ -119,6 +121,7 @@ fn write_lifecycle_expiration(
 
 /// Writes one `LifecycleRule` element's children, in the wire order the IR records.
 fn write_lifecycle_rule(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::LifecycleRule) -> Result<(), CodecError> {
+    writer.order_children(rustfs_order::LIFECYCLE_RULE);
     if let Some(v) = value.expiration.as_ref() {
         writer.open("Expiration", None);
         write_lifecycle_expiration(writer, v)?;
@@ -172,6 +175,7 @@ fn write_lifecycle_rule_and_operator(
     writer: &mut rustfs_gateway_xml::XmlWriter,
     value: &dto::LifecycleRuleAndOperator,
 ) -> Result<(), CodecError> {
+    writer.order_children(rustfs_order::LIFECYCLE_RULE_AND_OPERATOR);
     if let Some(v) = value.prefix.as_ref() {
         writer.element("Prefix", v.as_str());
     }
@@ -194,6 +198,7 @@ fn write_lifecycle_rule_filter(
     writer: &mut rustfs_gateway_xml::XmlWriter,
     value: &dto::LifecycleRuleFilter,
 ) -> Result<(), CodecError> {
+    writer.order_children(rustfs_order::LIFECYCLE_RULE_FILTER);
     if let Some(v) = value.prefix.as_ref() {
         writer.element("Prefix", v.as_str());
     }
@@ -221,6 +226,7 @@ fn write_noncurrent_version_expiration(
     writer: &mut rustfs_gateway_xml::XmlWriter,
     value: &dto::NoncurrentVersionExpiration,
 ) -> Result<(), CodecError> {
+    writer.order_children(rustfs_order::NONCURRENT_VERSION_EXPIRATION);
     if let Some(v) = value.noncurrent_days.as_ref() {
         writer.element("NoncurrentDays", &v.to_string());
     }
@@ -235,6 +241,7 @@ fn write_noncurrent_version_transition(
     writer: &mut rustfs_gateway_xml::XmlWriter,
     value: &dto::NoncurrentVersionTransition,
 ) -> Result<(), CodecError> {
+    writer.order_children(rustfs_order::NONCURRENT_VERSION_TRANSITION);
     if let Some(v) = value.noncurrent_days.as_ref() {
         writer.element("NoncurrentDays", &v.to_string());
     }
@@ -272,4 +279,17 @@ fn write_transition(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::Tra
         writer.element("StorageClass", v.as_str());
     }
     Ok(())
+}
+
+/// The order legacy RustFS writes each response element's children in (rustfs/gateway#1078):
+/// the order the legacy stack's structure declares its fields in.
+/// Honoured under `MetaView::rustfs_response_layout`; generated from the IR.
+#[rustfmt::skip]
+mod rustfs_order {
+    pub(super) const LIFECYCLE_EXPIRATION: &[&str] = &["Date", "Days", "ExpiredObjectAllVersions", "ExpiredObjectDeleteMarker"];
+    pub(super) const LIFECYCLE_RULE: &[&str] = &["AbortIncompleteMultipartUpload", "DelMarkerExpiration", "Expiration", "Filter", "ID", "NoncurrentVersionExpiration", "NoncurrentVersionTransition", "Prefix", "Status", "Transition"];
+    pub(super) const LIFECYCLE_RULE_AND_OPERATOR: &[&str] = &["ObjectSizeGreaterThan", "ObjectSizeLessThan", "Prefix", "Tag"];
+    pub(super) const LIFECYCLE_RULE_FILTER: &[&str] = &["And", "ObjectSizeGreaterThan", "ObjectSizeLessThan", "Prefix", "Tag"];
+    pub(super) const NONCURRENT_VERSION_EXPIRATION: &[&str] = &["NewerNoncurrentVersions", "NoncurrentDays"];
+    pub(super) const NONCURRENT_VERSION_TRANSITION: &[&str] = &["NewerNoncurrentVersions", "NoncurrentDays", "StorageClass"];
 }
