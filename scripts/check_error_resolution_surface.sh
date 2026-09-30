@@ -472,6 +472,7 @@ allowed_items = {
     "pubfnversioned_delete_marker(version_id:&str,last_modified:i64)->Result<Self,InvalidErrorContext>",
     "pubfncurrent_delete_marker(visibility:ResourceVisibility,key:Option<ObjectKey>,version_id:&str,last_modified:i64,)->Result<Self,InvalidErrorContext>",
     "pubfnnot_modified(etag:ETag)->Self",
+    "pubfnlegacy_rustfs(refusal:LegacyRustfsRefusal)->Self",
     "pub(crate)fninto_error_context(self)->ErrorContext",
     "pub(crate)fnhide_missing_object(self)->Self",
     "pub(crate)fncopy_source_marker(self)->Self",
