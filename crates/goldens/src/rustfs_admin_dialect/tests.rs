@@ -504,7 +504,7 @@ fn n_a_malformed_parameter_value_is_refused_before_authorising() {
 #[test]
 fn a_presigned_admin_request_is_refused_under_the_rustfs_profile_floor() {
     let presignable: Vec<_> = rows().filter(|(record, _)| record.query.is_none()).collect();
-    assert_eq!(presignable.len(), 596, "every row but the service command's eight");
+    assert_eq!(presignable.len(), 610, "every row but the service command's eight");
     in_lanes_on(
         &rustfs_profile_floor(),
         |_, _| true,
