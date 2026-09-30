@@ -18121,6 +18121,40 @@ expect_fail check_ci_time_gate.sh \
     'the cargo-deny step swallowing its failure' mut_ci_time_deny_failure_swallowed \
     'must have one authoritative CI execution'
 
+mut_ci_time_driver_deny_removed() {
+    replace_ci_text '      - name: Dependency advisories of the aws-sdk-rust driver
+        run: cargo deny --locked --manifest-path compat/drivers/aws-sdk-rust/Cargo.toml check --config deny.toml advisories
+' ''
+}
+expect_fail check_ci_time_gate.sh \
+    'Static checks no longer judging the aws-sdk-rust driver lock' mut_ci_time_driver_deny_removed \
+    'must have one authoritative CI execution'
+
+mut_ci_time_driver_deny_failure_swallowed() {
+    replace_ci_text 'check --config deny.toml advisories' 'check --config deny.toml advisories || true'
+}
+expect_fail check_ci_time_gate.sh \
+    'the driver cargo-deny step swallowing its failure' mut_ci_time_driver_deny_failure_swallowed \
+    'must have one authoritative CI execution'
+
+mut_ci_time_driver_deny_before_install() {
+    python3 - <<'PYEOF'
+import pathlib
+path = pathlib.Path(".github/workflows/ci.yml")
+text = path.read_text()
+step = """      - name: Dependency advisories of the aws-sdk-rust driver
+        run: cargo deny --locked --manifest-path compat/drivers/aws-sdk-rust/Cargo.toml check --config deny.toml advisories
+"""
+anchor = "      - name: Model integrity\n"
+if step not in text or anchor not in text:
+    raise SystemExit("missing mutation subject")
+path.write_text(text.replace(step, "", 1).replace(anchor, step + anchor, 1))
+PYEOF
+}
+expect_fail check_ci_time_gate.sh \
+    'the driver cargo-deny step running before cargo-deny is installed' mut_ci_time_driver_deny_before_install \
+    "must install cargo-deny before the driver's advisories"
+
 mut_ci_time_deny_install_fallback() {
     replace_ci_text '          fallback: none' '          fallback: cargo-install'
 }
