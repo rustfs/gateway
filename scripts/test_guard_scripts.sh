@@ -18121,6 +18121,40 @@ expect_fail check_ci_time_gate.sh \
     'the cargo-deny step swallowing its failure' mut_ci_time_deny_failure_swallowed \
     'must have one authoritative CI execution'
 
+mut_ci_time_driver_deny_removed() {
+    replace_ci_text '      - name: Dependency advisories of the aws-sdk-rust driver
+        run: cargo deny --locked --manifest-path compat/drivers/aws-sdk-rust/Cargo.toml --config deny.toml check advisories
+' ''
+}
+expect_fail check_ci_time_gate.sh \
+    'Static checks no longer judging the aws-sdk-rust driver lock' mut_ci_time_driver_deny_removed \
+    'must have one authoritative CI execution'
+
+mut_ci_time_driver_deny_failure_swallowed() {
+    replace_ci_text '--config deny.toml check advisories' '--config deny.toml check advisories || true'
+}
+expect_fail check_ci_time_gate.sh \
+    'the driver cargo-deny step swallowing its failure' mut_ci_time_driver_deny_failure_swallowed \
+    'must have one authoritative CI execution'
+
+mut_ci_time_driver_deny_before_install() {
+    python3 - <<'PYEOF'
+import pathlib
+path = pathlib.Path(".github/workflows/ci.yml")
+text = path.read_text()
+step = """      - name: Dependency advisories of the aws-sdk-rust driver
+        run: cargo deny --locked --manifest-path compat/drivers/aws-sdk-rust/Cargo.toml --config deny.toml check advisories
+"""
+anchor = "      - name: Model integrity\n"
+if step not in text or anchor not in text:
+    raise SystemExit("missing mutation subject")
+path.write_text(text.replace(step, "", 1).replace(anchor, step + anchor, 1))
+PYEOF
+}
+expect_fail check_ci_time_gate.sh \
+    'the driver cargo-deny step running before cargo-deny is installed' mut_ci_time_driver_deny_before_install \
+    "must install cargo-deny before the driver's advisories"
+
 mut_ci_time_deny_install_fallback() {
     replace_ci_text '          fallback: none' '          fallback: cargo-install'
 }
@@ -24833,12 +24867,10 @@ mut_compat_known_fail_grew() {
     python3 - <<'PYEOF'
 from pathlib import Path
 
+# The list can be empty (it is since #1073's refresh), so the new entry is appended rather than
+# placed after an existing one; either way it was not in the committed list.
 path = Path("compat/known-fail.txt")
-text = path.read_text()
-old = "s3cmd/copy-object            rustfs/gateway#912  PutObjectAcl without Content-MD5 is refused\n"
-if text.count(old) != 1:
-    raise SystemExit("known-fail ratchet mutation subject is not unique")
-path.write_text(text.replace(old, old + "boto3/list-pagination        rustfs/gateway#912  newly excused\n", 1))
+path.write_text(path.read_text() + "boto3/list-pagination        rustfs/gateway#912  newly excused\n")
 PYEOF
 }
 # The whole point of the ratchet: a regression must not be silenceable by the change that caused it.
@@ -24897,12 +24929,10 @@ mut_compat_known_fail_unowned() {
     python3 - <<'PYEOF'
 from pathlib import Path
 
+# The committed list can be empty, so the unowned entry is appended; the guard reports the missing
+# owner for every entry it reads, new or old, beside the ratchet's own refusal of the addition.
 path = Path("compat/known-fail.txt")
-text = path.read_text()
-old = "s3cmd/presigned-get          rustfs/gateway#913  presigned SigV2 is refused under the default policy"
-if text.count(old) != 1:
-    raise SystemExit("known-fail owner mutation subject is not unique")
-path.write_text(text.replace(old, "s3cmd/presigned-get          later  presigned SigV2 is refused under the default policy", 1))
+path.write_text(path.read_text() + "s3cmd/presigned-get          later  presigned SigV2 is refused under the default policy\n")
 PYEOF
 }
 expect_fail check_compat_matrix.sh \
@@ -24925,7 +24955,15 @@ for client in matrix["clients"]:
             row["issue"] = None
             path.write_text(json.dumps(matrix, indent=2) + "\n")
             raise SystemExit(0)
-raise SystemExit("no failing cell to promote")
+# A manifest with no failing cell (the one #1073 recorded) has nothing to promote; the same hand
+# edit in the other direction, a pass rewritten as a failure, leaves the counts just as wrong.
+for client in matrix["clients"]:
+    for row in client["scenarios"]:
+        if row["status"] == "pass":
+            row["status"] = "fail"
+            path.write_text(json.dumps(matrix, indent=2) + "\n")
+            raise SystemExit(0)
+raise SystemExit("no failing or passing cell to hand-edit")
 PYEOF
 }
 # matrix.json is a generated artefact and a published promise. A hand edit that promotes a failure
