@@ -503,6 +503,7 @@ impl core::fmt::Debug for SigV4Authenticator {
             .field("verifies_unreadable_signing_regions", &self.scope_policy.any_spelling)
             .field("reads_signing_regions_of_any_length", &self.scope_policy.any_length)
             .field("accepts_legacy_rustfs_signing_services", &self.scope_policy.legacy_services)
+            .field("answers_scope_refusals_as_legacy_rustfs", &self.scope_policy.legacy_scope_refusals)
             .field("raw_path_fallback", &self.raw_path)
             .finish()
     }
@@ -552,8 +553,26 @@ impl SigV4Authenticator {
         // Once a credential surface is present, parsing failure is still a credential failure.
         // Normalising it here keeps malformed material on the same 403 path and prevents a caller
         // from learning how far parsing got before an access key could be recovered.
-        let presented =
-            Presented::read(sealed, location, self.scope_policy.region_rule()).map_err(|_| AuthError::InvalidAccessKeyId)?;
+        let Ok(presented) = Presented::read(sealed, location, self.scope_policy.region_rule()) else {
+            if let Some((error, refusal)) = self.scope_policy.unreadable_scope_refusal(sealed, location) {
+                let _ = request.legacy_refusal.set(refusal);
+                return Err(error.into());
+            }
+            return Err(AuthError::InvalidAccessKeyId.into());
+        };
+        // Legacy RustFS refuses a presigned URL's or a form's scope date before its service; a
+        // header signature's service comes first, and the header refusals answer both earlier.
+        // Read only under the switch, so the default path does no more work than before.
+        if self.scope_policy.legacy_scope_refusals {
+            let signed_day = presented.signed_at(sealed).day();
+            if let Some((error, refusal)) = self
+                .scope_policy
+                .scope_date_refusal(presented.scope().date().as_str(), signed_day.as_str())
+            {
+                let _ = request.legacy_refusal.set(refusal);
+                return Err(error.into());
+            }
+        }
         if let Some(refusal) = self.scope_policy.service_refusal(presented.scope()) {
             let _ = request.legacy_refusal.set(refusal);
             return Err(AuthError::NotImplemented(Unimplemented::ScopeService).into());
@@ -666,6 +685,9 @@ impl SigV4Authenticator {
             return Err(AuthError::InvalidAccessKeyId.into());
         }
         if self.scope_policy.refuses_after_verification(presented.scope().region()) {
+            if let Some(refusal) = self.scope_policy.verified_region_refusal(presented.scope().region()) {
+                let _ = request.legacy_refusal.set(refusal);
+            }
             return Err(AuthError::InvalidCredentialRegion.into());
         }
 

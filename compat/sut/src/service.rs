@@ -186,7 +186,10 @@ pub(crate) fn build_service(
                     .verify_raw_paths_only_with_unencoded_bytes()
                     // It verifies an `s3`, `sts` or `s3tables` scope on every operation, and answers
                     // any other service with its `501` (rustfs/gateway#1130).
-                    .accept_legacy_rustfs_signing_services(),
+                    .accept_legacy_rustfs_signing_services()
+                    // And it answers a scope date other than the signed day, and a region outside
+                    // its grammar, with its own code and sentence (rustfs/gateway#1130).
+                    .answer_credential_scope_refusals_as_legacy_rustfs(),
             )
             // Not an allow-all, and not a bare operation-set filter either: the matrix must see a
             // refusal for anything outside the reference backend's registered set, and the

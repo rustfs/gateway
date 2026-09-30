@@ -813,6 +813,10 @@ mod payload_digest_tests;
 /// with its answers (rustfs/gateway#1130).
 mod header_signature_tests;
 
+/// A credential scope dated other than the signed day, or naming a region outside legacy RustFS's
+/// grammar, refused with legacy RustFS's answers on every signing surface (rustfs/gateway#1130).
+mod scope_refusal_tests;
+
 /// Request-checksum failures answered with legacy RustFS's `BadDigest` (rustfs/gateway#1057), and
 /// what each refusal leaves in storage.
 mod bad_digest_tests;

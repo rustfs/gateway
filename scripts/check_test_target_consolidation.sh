@@ -734,6 +734,7 @@ gateway_modules = (
     "rustfs_key_floor",
     "rustfs_selection",
     "rustfs_vhost",
+    "scope_refusals",
     "select_frame_records",
     "select_restore_intent",
     "select_restore_reachability",
