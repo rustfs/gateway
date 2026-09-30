@@ -32,7 +32,8 @@ Agent entry point for SigV2/SigV4 parsing, canonicalization and verification.
 | `src/sig_v2/string_to_sign.rs` | SigV2's six-line string-to-sign and the 35 sub-resources it covers. | A SigV2 signature differs despite the same request, or a new S3 sub-resource must be signed. |
 | `src/signature.rs` | Secret-bearing signature types and constant-time comparison. | Verification or redaction changes. |
 | `src/signer.rs` | Test/client request signing, dated by `x-amz-date` or, on request, by the HTTP `Date` header. | Conformance requests are signed wrongly. |
-| `src/signed_headers.rs` | Signed-header parsing and canonical selection, including the rule that a `Date` supplying the timestamp is signed. | Header coverage differs between signer and verifier. |
+| `src/signed_headers.rs` | Signed-header parsing and canonical selection, including the rule that a `Date` supplying the timestamp is signed, and the RustFS profile's verbatim reading of a list AWS would call malformed. | Header coverage differs between signer and verifier. |
+| `src/signed_headers_legacy.rs` | The canonical headers and signed-headers line of a list read verbatim, as legacy RustFS writes them (rustfs/gateway#1130). | A RustFS client's uppercase, unsorted or repeated `SignedHeaders` is verified differently from legacy RustFS. |
 | `src/timing.rs` | Constant-time comparison helpers. | Signature comparison timing changes. |
 | `src/verdict.rs` | Proof-carrying authentication outcomes and errors. | Authenticated or anonymous outcomes become forgeable. |
 | `src/verifier.rs` | Sealed AWS markers, custom verifier boundary, replay hook, and danger acknowledgement. | A custom or replacement verifier crosses its permitted boundary. |

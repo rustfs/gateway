@@ -57,6 +57,34 @@ pub(super) fn sha256_base64(data: &[u8]) -> String {
     base64(&Sha256::digest(data))
 }
 
+/// The canonical headers and signed-headers line of `list` as legacy RustFS writes them, over the
+/// headers `sent`: each name as written, in the order written, its values looked up
+/// case-insensitively; a name repeated in a row continues its line and is listed once.
+fn verbatim_canonical(list: &str, sent: &[(&str, String)]) -> (String, String) {
+    let mut block = String::new();
+    let mut line: Vec<&str> = Vec::new();
+    let mut previous: Option<&str> = None;
+    for name in list.split(';') {
+        let values: Vec<&str> = sent
+            .iter()
+            .filter(|(sent_name, _)| sent_name.eq_ignore_ascii_case(name))
+            .map(|(_, value)| value.as_str())
+            .collect();
+        if previous == Some(name) {
+            block.pop();
+            block.push(',');
+        } else {
+            block.push_str(name);
+            block.push(':');
+            line.push(name);
+        }
+        block.push_str(&values.join(","));
+        block.push('\n');
+        previous = Some(name);
+    }
+    (block, line.join(";"))
+}
+
 /// `text` as the inside of a JSON string: a quote, a backslash and a control character escaped.
 fn json_string(text: &str) -> String {
     text.chars()
@@ -130,6 +158,9 @@ pub(super) struct HandSigned {
     scope_day: Option<String>,
     region: &'static str,
     access_key: &'static str,
+    extra: Vec<(&'static str, &'static str, bool)>,
+    presented: Option<&'static str>,
+    verbatim: bool,
 }
 
 impl HandSigned {
@@ -153,6 +184,9 @@ impl HandSigned {
             scope_day: None,
             region: "us-east-1",
             access_key: MAIN_KEY,
+            extra: Vec::new(),
+            presented: None,
+            verbatim: false,
         }
     }
 
@@ -242,6 +276,28 @@ impl HandSigned {
         self
     }
 
+    /// Sends `name: value` too, named in `SignedHeaders` (and signed) when `signed`. A presigned
+    /// URL sends it unsigned whatever `signed` says.
+    pub(super) fn sending(mut self, name: &'static str, value: &'static str, signed: bool) -> Self {
+        self.extra.push((name, value, signed));
+        self
+    }
+
+    /// Presents `list` as the header signature's `SignedHeaders`, whatever it names; the string to
+    /// sign still covers the headers named by default, in AWS's canonical form, unless
+    /// [`Self::canonicalising_verbatim`] says otherwise.
+    pub(super) fn presenting(mut self, list: &'static str) -> Self {
+        self.presented = Some(list);
+        self
+    }
+
+    /// Writes the presented list into the string to sign as legacy RustFS reads one: each name as
+    /// written, in the order written, a name repeated in a row once with its values joined by `,`.
+    pub(super) fn canonicalising_verbatim(mut self) -> Self {
+        self.verbatim = true;
+        self
+    }
+
     fn scope(&self, day: &str) -> String {
         let day = self.scope_day.as_deref().unwrap_or(day);
         format!("{day}/{}/{}/aws4_request", self.region, self.service)
@@ -288,9 +344,27 @@ impl HandSigned {
         if self.send_amz_date {
             sent.push(("x-amz-date", stamp.clone()));
         }
-        let named: Vec<&(&str, String)> = sent.iter().filter(|(name, _)| !self.unsigned.contains(name)).collect();
-        let canonical_headers: String = named.iter().map(|(name, value)| format!("{name}:{value}\n")).collect();
-        let signed_names = named.iter().map(|(name, _)| *name).collect::<Vec<_>>().join(";");
+        let unsigned_extra: Vec<&str> = self
+            .extra
+            .iter()
+            .filter(|(_, _, signed)| !signed)
+            .map(|(name, _, _)| *name)
+            .collect();
+        if !self.extra.is_empty() {
+            // Only a case that sends more headers reorders the three a request always sends.
+            sent.extend(self.extra.iter().map(|(name, value, _)| (*name, (*value).to_owned())));
+            sent.sort_by_key(|(name, _)| *name);
+        }
+        let named: Vec<&(&str, String)> = sent
+            .iter()
+            .filter(|(name, _)| !self.unsigned.contains(name) && !unsigned_extra.contains(name))
+            .collect();
+        let mut canonical_headers: String = named.iter().map(|(name, value)| format!("{name}:{value}\n")).collect();
+        let mut signed_names = named.iter().map(|(name, _)| *name).collect::<Vec<_>>().join(";");
+        let listed = self.presented.map_or_else(|| signed_names.clone(), str::to_owned);
+        if self.verbatim {
+            (canonical_headers, signed_names) = verbatim_canonical(&listed, &sent);
+        }
         let canonical = format!("{}\n{}\n\n{canonical_headers}\n{signed_names}\n{payload}", self.method, self.path);
         let day = &clock[..8];
         let signature = self.signature(day, &self.string_to_sign(&stamp, day, &canonical));
@@ -306,7 +380,7 @@ impl HandSigned {
             .header(
                 http::header::AUTHORIZATION,
                 format!(
-                    "AWS4-HMAC-SHA256 Credential={}/{scope}, SignedHeaders={signed_names}, Signature={signature}",
+                    "AWS4-HMAC-SHA256 Credential={}/{scope}, SignedHeaders={listed}, Signature={signature}",
                     self.access_key
                 ),
             )
@@ -337,6 +411,9 @@ impl HandSigned {
             .method(self.method.clone())
             .uri(format!("{}?{query}&X-Amz-Signature={signature}", self.path))
             .header(http::header::HOST, "s3.example.com");
+        for (name, value, _) in &self.extra {
+            request = request.header(*name, *value);
+        }
         if !self.body.is_empty() || self.method == http::Method::PUT {
             request = request.header(http::header::CONTENT_LENGTH, self.body.len());
         }
