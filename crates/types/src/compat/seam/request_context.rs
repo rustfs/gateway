@@ -32,11 +32,13 @@
 //!
 //! # Extensions
 //!
-//! The produced request carries **no** extensions. Everything a RustFS app body reads from
+//! The produced request carries **no** RustFS extension. Everything a RustFS app body reads from
 //! `S3Request::extensions` is a RustFS type (`ReqInfo`, `RequestContext`, the server context slot,
 //! `Option<RemoteAddr>`, the POST Object marker) installed by RustFS's own HTTP layer or access
 //! hook, and this ring-0 crate may not name one. The ring-2 adapter owns installing them; an app
 //! body that finds one missing already fails closed (`ReqInfo not found in request extensions`).
+//! The one extension the RustFS profile's reading adds is the seam's own trailer handle
+//! (`trailers::LegacyTrailers`), for the reason [`request_to_legacy`] gives.
 
 use http::{Extensions, HeaderMap, HeaderName, HeaderValue, Method, Uri};
 
@@ -45,6 +47,7 @@ use s3s::S3Request;
 use s3s::auth::{Credentials, SecretKey};
 use s3s::region::Region;
 
+use super::trailers::LegacyTrailers;
 use crate::compat::ConversionError;
 
 /// Every context member of this revision's `s3s::S3Request`, in declaration order.
@@ -155,6 +158,15 @@ impl GatewayRequestContext {
         }
         headers
     }
+
+    /// Whether the legacy stack attaches a trailer handle to this request
+    /// ([`super::trailers::legacy_attaches_trailers`]): a principal with a verified scope, and an
+    /// aws-chunked `x-amz-content-sha256`.
+    #[must_use]
+    pub fn legacy_attaches_trailers(&self) -> bool {
+        let verified = self.principal.as_ref().is_some_and(|principal| principal.scope.is_some());
+        super::trailers::legacy_attaches_trailers(verified, &self.headers)
+    }
 }
 
 /// The request target as the transport handed it to the gateway: its HTTP version, scheme and
@@ -180,6 +192,13 @@ pub struct RequestTarget {
 /// without a `Host` line, the `Host` line the legacy stack adds from the authority before any
 /// handler runs, so a RustFS body reading `Host` reads the same host.
 ///
+/// `trailers` is the handle an aws-chunked upload's trailer section reaches the RustFS body through
+/// (`LegacyTrailers::publishing` wraps the body that fills it), which the request carries in its extensions — the legacy
+/// request's own trailer member holds a type the seam cannot build, and legacy RustFS reads it in
+/// one adapter the RustFS side points at this handle instead (rustfs/gateway#1148). Pass one
+/// exactly when [`GatewayRequestContext::legacy_attaches_trailers`] holds, as the legacy stack
+/// attaches one to exactly those requests, whether or not they declare a trailer.
+///
 /// Legacy RustFS reads the URI's authority and scheme where no `Host` line names the host: the
 /// `Location` of a completed multipart upload is built from the `Host` line, else from the URI's
 /// authority, with the URI's scheme (`rustfs/src/app/multipart_usecase.rs:359-422` on rustfs/rustfs
@@ -189,13 +208,31 @@ pub struct RequestTarget {
 ///
 /// # Errors
 ///
-/// As [`request_to_s3s`], and [`ConversionError`] naming `uri` for a target that carried only one
-/// of scheme and authority, or whose rebuilt URI does not parse.
+/// As [`request_to_s3s`] but for declared trailers, which cross; [`ConversionError`] naming
+/// `trailing_headers` for a handle missing where the legacy stack attaches one — the section would
+/// be dropped — or passed where it attaches none; and naming `uri` for a target that carried only
+/// one of scheme and authority, or whose rebuilt URI does not parse.
 pub fn request_to_legacy<T>(
     context: GatewayRequestContext,
     target: RequestTarget,
+    trailers: Option<LegacyTrailers>,
     input: T,
 ) -> Result<S3Request<T>, ConversionError> {
+    match (context.legacy_attaches_trailers(), trailers.is_some()) {
+        (true, false) => {
+            return Err(refusal(
+                "trailing_headers",
+                "an aws-chunked upload's trailer section reaches the RustFS body only through the handle its body fills",
+            ));
+        }
+        (false, true) => {
+            return Err(refusal(
+                "trailing_headers",
+                "the legacy stack attaches a trailer handle only to a SigV4-signed aws-chunked request",
+            ));
+        }
+        _ => {}
+    }
     let RequestTarget {
         version,
         scheme,
@@ -209,6 +246,9 @@ pub fn request_to_legacy<T>(
         }
     };
     let mut converted = convert(context, uri, input)?;
+    if let Some(trailers) = trailers {
+        converted.extensions.insert(trailers);
+    }
     // The legacy stack names an HTTP/2 or HTTP/3 request's host in a `Host` line of its own, from
     // `:authority`, when the request sent none; never for HTTP/1.x, whose absolute-form target
     // keeps the line it sent or none.
@@ -241,6 +281,12 @@ pub fn request_to_legacy<T>(
 ///   public constructor, so the trailers a gateway body ends with cannot be delivered where an app
 ///   body looks for them.
 pub fn request_to_s3s<T>(context: GatewayRequestContext, input: T) -> Result<S3Request<T>, ConversionError> {
+    if context.declares_trailers {
+        return Err(refusal(
+            "trailing_headers",
+            "the pinned s3s trailer handle has no public constructor, so declared trailers cannot be delivered",
+        ));
+    }
     convert(context, None, input)
 }
 
@@ -254,14 +300,8 @@ fn convert<T>(context: GatewayRequestContext, uri: Option<Uri>, input: T) -> Res
         headers,
         principal,
         host_region,
-        declares_trailers,
+        declares_trailers: _,
     } = context;
-    if declares_trailers {
-        return Err(refusal(
-            "trailing_headers",
-            "the pinned s3s trailer handle has no public constructor, so declared trailers cannot be delivered",
-        ));
-    }
     let uri = match uri {
         Some(uri) => uri,
         None => origin_form(&raw_path, &raw_query)?,

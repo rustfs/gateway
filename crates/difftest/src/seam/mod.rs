@@ -36,6 +36,7 @@ mod answers;
 mod samples;
 mod stacks;
 mod table;
+mod trailers;
 
 pub(crate) use answers::{ANSWER_FINDINGS, UNWRITTEN_PATHS, Written, answer_rows};
 #[cfg(test)]
@@ -48,6 +49,7 @@ pub(crate) use table::{LegacyOutput, SEAM_OPERATIONS, STORED_OPERATIONS, input_p
 use crate::decode::{Answer, BodySeen, Cmp, S3ErrorView};
 use crate::request::RawRequest;
 use stacks::{GatewaySeam, LegacySeam, Recorded};
+pub(crate) use trailers::TrailerView;
 
 /// What one side did with a request.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -81,6 +83,9 @@ pub(crate) struct SeamDiff {
     /// The configuration bytes each side would store, for a configuration write: the gateway's
     /// persistence writer over its own input, and the legacy serializer RustFS stores with.
     pub(crate) stored: Cmp<table::Stored>,
+    /// The trailer handle each handler was handed, as a RustFS body reads it once the body ended
+    /// (rustfs/gateway#1148); [`TrailerView::Absent`] on a side whose handler was not reached.
+    pub(crate) trailers: Cmp<TrailerView>,
 }
 
 impl SeamDiff {
@@ -93,6 +98,7 @@ impl SeamDiff {
             && self.differing.is_empty()
             && self.body.same()
             && self.stored.same()
+            && self.trailers.same()
     }
 }
 
@@ -125,8 +131,8 @@ impl SeamDiffer {
     pub(crate) fn diff_pair(&self, gateway_request: &RawRequest, legacy_request: &RawRequest) -> Result<SeamDiff, String> {
         let (gateway_routed, gateway) = self.gateway.send(gateway_request)?;
         let (legacy_routed, legacy) = self.legacy.send(legacy_request)?;
-        let (gateway_verdict, gateway_body, gateway_stored, gateway_input) = split(gateway);
-        let (legacy_verdict, legacy_body, legacy_stored, legacy_input) = split(legacy);
+        let (gateway_verdict, gateway_body, gateway_stored, gateway_trailers, gateway_input) = split(gateway);
+        let (legacy_verdict, legacy_body, legacy_stored, legacy_trailers, legacy_input) = split(legacy);
         let (present, differing) = match legacy_input {
             Some((operation, legacy_input)) => {
                 // Two handlers of different operations compare nothing: the routing divergence is
@@ -156,6 +162,10 @@ impl SeamDiffer {
             stored: Cmp {
                 gateway: gateway_stored,
                 s3s: legacy_stored,
+            },
+            trailers: Cmp {
+                gateway: gateway_trailers,
+                s3s: legacy_trailers,
             },
         })
     }
@@ -326,11 +336,19 @@ impl SeamDiffer {
 
 type Handed = (&'static str, Box<dyn std::any::Any + Send>);
 
-fn split(answer: Answer<Recorded>) -> (SeamVerdict, Option<BodySeen>, table::Stored, Option<Handed>) {
+type Split = (SeamVerdict, Option<BodySeen>, table::Stored, TrailerView, Option<Handed>);
+
+fn split(answer: Answer<Recorded>) -> Split {
     match answer {
-        Answer::Refused(view) => (SeamVerdict::Refused(view), None, None, None),
+        Answer::Refused(view) => (SeamVerdict::Refused(view), None, None, TrailerView::Absent, None),
         Answer::Handed(recorded) => match recorded.input {
-            Ok(input) => (SeamVerdict::Handed, recorded.body, recorded.stored, Some((recorded.operation, input))),
+            Ok(input) => (
+                SeamVerdict::Handed,
+                recorded.body,
+                recorded.stored,
+                recorded.trailers,
+                Some((recorded.operation, input)),
+            ),
             Err(error) => (
                 SeamVerdict::Unconverted {
                     member: error.field,
@@ -338,6 +356,7 @@ fn split(answer: Answer<Recorded>) -> (SeamVerdict, Option<BodySeen>, table::Sto
                 },
                 recorded.body,
                 recorded.stored,
+                recorded.trailers,
                 None,
             ),
         },

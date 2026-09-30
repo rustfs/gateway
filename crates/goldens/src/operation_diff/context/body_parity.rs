@@ -22,7 +22,9 @@
 //! handler drains the `StreamingBlob`; then recording, per stack, the bytes and `ContentLength`
 //! the handler saw, the trailer fields as a RustFS `TrailerSource` would look them up, how the
 //! body ended, the answer, and the connection verdict. Also (c) the RustFS adapter's path: a
-//! gateway handler that converts through the seam and drains the converted body.
+//! gateway handler that converts through the seam and drains the converted body; and (d) the
+//! RustFS profile's adapter path (rustfs/gateway#1148), which also hands the body a trailer handle
+//! as the legacy stack attaches one, and records it as the legacy side records its own.
 //! NOT responsible for: any assertion (`matrix`, `tamper`, `properties`, `divergences`), the
 //! request context (the parent), or the input members (the decode diff).
 //! Upstream: the parent (credential, owner source, authorizer, adapter context), the counting
@@ -48,6 +50,7 @@ mod clock;
 mod divergences;
 mod matrix;
 mod properties;
+mod rustfs_profile;
 mod tamper;
 mod upload;
 
@@ -69,7 +72,10 @@ use rustfs_gateway_stream::{ByteStream, PayloadRead, PayloadStream, StreamErrorK
 use rustfs_gateway_types::ErrorCode;
 
 use super::super::seam::put_object::input_to_s3s;
+use super::super::seam::request_context::GatewayRequestContext;
+use super::super::seam::trailers::{LegacyTrailers, legacy_checksum_algorithm};
 use super::super::{BodyProbe, BodyReads, ProbeSource};
+use super::adapter_request::{legacy_adapter_request, legacy_attaches_trailers};
 use super::{ACCESS_KEY, AllowEveryStage, Answer, FixtureOwner, REGIONS, SECRET_KEY, adapter_request, block_on, oracle, s3s};
 use upload::TARGET;
 pub(crate) use upload::{Mode, TRAILER, Tamper, Upload, crc32_base64};
@@ -127,6 +133,32 @@ impl Trailers {
     }
 }
 
+/// An upload input's checksum members as a RustFS body reads them: the algorithm, and the five
+/// checksums it echoes by name (CRC32, CRC32C, SHA1, SHA256, CRC64NVME, in that order).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Checksums {
+    pub(crate) algorithm: Option<String>,
+    pub(crate) named: [Option<String>; 5],
+}
+
+impl Checksums {
+    fn of(input: &oracle::PutObjectInput) -> Self {
+        Self {
+            algorithm: input
+                .checksum_algorithm
+                .as_ref()
+                .map(|algorithm| algorithm.as_str().to_owned()),
+            named: [
+                input.checksum_crc32.clone(),
+                input.checksum_crc32c.clone(),
+                input.checksum_sha1.clone(),
+                input.checksum_sha256.clone(),
+                input.checksum_crc64nvme.clone(),
+            ],
+        }
+    }
+}
+
 /// How a handler's body ended.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum BodyEnd {
@@ -145,6 +177,9 @@ pub(crate) struct HandlerView {
     /// The trailer handle once the body ended.
     pub(crate) trailers: Trailers,
     pub(crate) end: BodyEnd,
+    /// The input's checksum members, where the input is the legacy one (`None` on the gateway's own
+    /// handler, whose input has no such spelling).
+    pub(crate) checksums: Option<Checksums>,
 }
 
 /// What one stack did with the upload.
@@ -280,6 +315,7 @@ impl Handler<dto::PutObject> for GatewayBody {
                 trailers_at_mount: Trailers::Absent,
                 trailers,
                 end,
+                checksums: None,
             },
         );
         if failed {
@@ -424,6 +460,82 @@ fn through_seam_at(upload: &Upload, signed: RequestNow, verified: RequestNow) ->
     Ok((status, view))
 }
 
+/// The RustFS profile's adapter PutObject (rustfs/gateway#1148): a trailer handle exactly where
+/// the legacy stack attaches one, the context built with it, the input converted with the legacy
+/// reading of its checksum algorithm and its body filling the handle, then the converted body
+/// drained — recorded as the legacy side records its handler.
+struct LegacySeamBody {
+    seen: Arc<Mutex<Option<Result<HandlerView, String>>>>,
+}
+
+impl LegacySeamBody {
+    async fn view(request: Req<dto::PutObject>) -> Result<HandlerView, String> {
+        let trailers = legacy_attaches_trailers(request.context())?.then(LegacyTrailers::default);
+        legacy_adapter_request(request.context(), trailers.clone())?;
+        let headers = GatewayRequestContext::raw_headers(request.context().headers().iter_raw());
+        let algorithm = legacy_checksum_algorithm(&headers).map_err(|error| format!("algorithm refused: {error}"))?;
+        let mut input = request.into_input();
+        if let Some(trailers) = &trailers {
+            input.body = input.body.map(|body| trailers.publishing(body));
+        }
+        let mut input = input_to_s3s(input).map_err(|error| format!("input refused: {error}"))?;
+        input.checksum_algorithm = algorithm;
+        let handle = |trailers: &Option<LegacyTrailers>| match trailers {
+            None => Trailers::Absent,
+            Some(trailers) => trailers.read(Trailers::of).unwrap_or(Trailers::Pending),
+        };
+        let trailers_at_mount = handle(&trailers);
+        let checksums = Checksums::of(&input);
+        let content_length = input.content_length;
+        let (bytes, end) = drain_blob(input.body).await;
+        Ok(HandlerView {
+            content_length,
+            bytes,
+            trailers_at_mount,
+            trailers: handle(&trailers),
+            end,
+            checksums: Some(checksums),
+        })
+    }
+}
+
+impl Handler<dto::PutObject> for LegacySeamBody {
+    async fn call(&self, request: Req<dto::PutObject>) -> HandlerResult<dto::PutObject> {
+        let view = Self::view(request).await;
+        let failed = !matches!(&view, Ok(view) if view.end == BodyEnd::Eof);
+        record(&self.seen, view);
+        if failed {
+            return Err(body_refusal());
+        }
+        Ok(Resp::new(dto::PutObjectOutput::default()))
+    }
+}
+
+/// Sends `upload` through a gateway whose handler converts it the way the RustFS profile's adapter
+/// does (rustfs/gateway#1148), and the same signed pieces through the legacy service: the RustFS
+/// body's view on each side, the first an `Err` naming what the seam refused.
+///
+/// # Errors
+///
+/// A harness failure, or a refusal before either handler.
+pub(crate) fn through_legacy_seam(upload: &Upload) -> Result<(Result<HandlerView, String>, HandlerView), String> {
+    let now = RequestNow::capture();
+    let wire = upload.wire(now)?;
+    let seen = Arc::new(Mutex::new(None));
+    let service = gateway_service(LegacySeamBody { seen: Arc::clone(&seen) }, now)?;
+    let (status, _, _, _) = gateway_answer(&service, &wire.headers, upload.split(&wire.body))?;
+    let view = seen
+        .lock()
+        .map_err(|_| "the recording slot is poisoned".to_owned())?
+        .take()
+        .ok_or_else(|| format!("the gateway refused before its handler with status {status}"))?;
+    let oracle = s3s_side(&wire.headers, upload.split(&wire.body))?;
+    let oracle = oracle
+        .handler
+        .ok_or_else(|| format!("the legacy service refused before its handler with status {}", oracle.status))?;
+    Ok((view, oracle))
+}
+
 // ── the s3s side ──────────────────────────────────────────────────────────────────────────────
 
 struct OracleBody {
@@ -479,6 +591,7 @@ impl s3s::S3 for OracleBody {
             let handle = request.trailing_headers.clone();
             let trailers_at_mount = handle_state(handle.as_ref());
             let content_length = request.input.content_length;
+            let checksums = Checksums::of(&request.input);
             let (bytes, end) = drain_blob(request.input.body).await;
             let answer = match &end {
                 BodyEnd::Eof => Ok(s3s::S3Response::new(oracle::PutObjectOutput::default())),
@@ -496,6 +609,7 @@ impl s3s::S3 for OracleBody {
                     trailers_at_mount,
                     trailers: handle_state(handle.as_ref()),
                     end,
+                    checksums: Some(checksums),
                 },
             );
             answer

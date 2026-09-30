@@ -39,6 +39,7 @@ use rustfs_gateway_types::ErrorCode;
 use rustfs_gateway_types::compat::ConversionError;
 
 use super::table::{self, SeamConverted, Stored};
+use super::trailers::{TrailerView, gateway_view};
 use crate::decode::{Answer, BodySeen, S3ErrorView};
 use crate::encode::WireAnswer;
 use crate::gateway::{AllowEveryStage, FixtureOwner, RouteObserver, Routed};
@@ -59,6 +60,8 @@ pub(crate) struct Recorded {
     pub(crate) body: Option<BodySeen>,
     /// The configuration bytes this side would store, for a configuration write.
     pub(crate) stored: Stored,
+    /// The trailer handle the handler was handed, read once the body was drained.
+    pub(crate) trailers: TrailerView,
 }
 
 pub(crate) type Slot = Arc<Mutex<Option<Recorded>>>;
@@ -77,24 +80,28 @@ pub(crate) fn take(queued: &Queued) -> Option<Box<dyn Any + Send>> {
     queued.lock().ok().and_then(|mut held| held.take())
 }
 
-/// Records `recorded` in `slot`, draining the body first.
+/// Records `recorded` in `slot`, draining the body first and reading the trailer handle after, as
+/// a RustFS body reads it.
 pub(crate) async fn record(
     slot: &Slot,
     operation: &'static str,
     input: Result<Box<dyn Any + Send>, ConversionError>,
     body: Option<s3s::dto::StreamingBlob>,
     stored: Stored,
+    trailers: impl FnOnce() -> TrailerView,
 ) {
     let body = match body {
         None => None,
         Some(blob) => Some(drain(blob).await),
     };
+    let trailers = trailers();
     if let Ok(mut held) = slot.lock() {
         *held = Some(Recorded {
             operation,
             input,
             body,
             stored,
+            trailers,
         });
     }
 }
@@ -109,8 +116,8 @@ pub(crate) struct SeamRecorder {
 impl<O: SeamConverted> Handler<O> for SeamRecorder {
     async fn call(&self, request: Req<O>) -> HandlerResult<O> {
         let stored = O::stored(request.input());
-        let (input, body) = O::convert(request);
-        record(&self.slot, O::NAME, input, body, stored).await;
+        let (input, body, trailers) = O::convert(request);
+        record(&self.slot, O::NAME, input, body, stored, || gateway_view(trailers.as_ref())).await;
         match take(&self.answer).map(O::answer) {
             Some(Ok((output, headers))) => Ok(Resp::new(output).with_extra_headers(headers)),
             Some(Err(error)) => Err(HandlerError::internal_error(format!("the seam cannot hand the answer over: {error}"))),
