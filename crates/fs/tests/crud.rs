@@ -81,6 +81,8 @@ mod object_tagging;
 mod post_object;
 #[path = "crud/range_reads.rs"]
 mod range_reads;
+#[path = "crud/tag_order.rs"]
+mod tag_order;
 #[path = "crud/upload_part_copy.rs"]
 mod upload_part_copy;
 #[path = "crud/versioning.rs"]
