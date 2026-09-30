@@ -42,6 +42,7 @@
 
 use std::borrow::Cow;
 
+use rustfs_gateway_sig::AuthError;
 use rustfs_gateway_types::ErrorCode;
 
 use super::ServiceBuilder;
@@ -83,6 +84,12 @@ impl CredentialSentences {
             Some(code) if *code == ErrorCode::INVALID_ACCESS_KEY_ID => RUSTFS_INVALID_ACCESS_KEY_ID,
             _ => return refusal,
         };
+        // Only the gateway's one credential sentence is re-worded. A refusal that already carries
+        // legacy RustFS's words for its own case ("credential scope date does not match
+        // x-amz-date", rustfs/gateway#1130) keeps them, as legacy RustFS answers it.
+        if refusal.message() != Some(AuthError::SignatureDoesNotMatch.message()) {
+            return refusal;
+        }
         refusal.message = Some(Cow::Borrowed(sentence));
         refusal
     }
@@ -111,7 +118,6 @@ mod tests {
     use crate::close::ConnectionIntent;
     use crate::render::{from_auth, from_handler};
     use rustfs_gateway_core::{HandlerError, ResponseKind};
-    use rustfs_gateway_sig::AuthError;
 
     fn message_of(error: &S3Error) -> &str {
         error.message().unwrap_or_default()
@@ -201,5 +207,23 @@ mod tests {
         assert_eq!(restyled.status(), original.status());
         assert_eq!(restyled.connection_intent(), original.connection_intent());
         assert_eq!(message_of(&restyled), RUSTFS_SIGNATURE_DOES_NOT_MATCH);
+    }
+
+    /// Negative — a credential refusal that already carries legacy RustFS's words for its own case
+    /// keeps them: only the gateway's one sentence is re-worded (rustfs/gateway#1130).
+    #[test]
+    fn n_a_legacy_sentence_of_its_own_is_kept() {
+        for (code, sentence) in [
+            (ErrorCode::SIGNATURE_DOES_NOT_MATCH, "credential scope date does not match x-amz-date"),
+            (ErrorCode::SIGNATURE_DOES_NOT_MATCH, "invalid header: x-amz-content-sha256"),
+            (ErrorCode::INVALID_ACCESS_KEY_ID, "a sentence of the refusing stage's own"),
+        ] {
+            let original = from_handler(
+                HandlerError::new(code.clone(), sentence),
+                ResponseKind::Other,
+                ConnectionIntent::MayKeepAlive,
+            );
+            assert_eq!(CredentialSentences::LegacyRustfs.restyle(original.clone()), original, "{sentence}");
+        }
     }
 }

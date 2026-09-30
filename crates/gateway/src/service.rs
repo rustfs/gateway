@@ -731,6 +731,24 @@ impl S3Service {
         };
         let presence = detect_credentials(&view);
 
+        // Legacy RustFS's answers to a header signature it refuses before its credential lookup, in
+        // its order, when the assembly answers with them (rustfs/gateway#1130).
+        let signed_head = crate::builder::view_policy::header_signatures::SignedHead {
+            method: wire.method(),
+            headers: &headers,
+            query: wire.query().as_str(),
+            now,
+            window: self.inner.floor.skew_window(),
+        };
+        let legacy_refusal =
+            self.inner
+                .view_policy
+                .header_signatures
+                .refusal(&signed_head, response_kind, wire.framing().has_body());
+        if let Some(refusal) = legacy_refusal {
+            return outcome.refuse(refusal);
+        }
+
         let chunk_sink = crate::ext::ChunkSink::new();
         // Kept out of the `match` so the read at the bottom can consult it. A custom admission has no
         // payload mode; an anonymous one has only the unsigned streaming mode its head declares.

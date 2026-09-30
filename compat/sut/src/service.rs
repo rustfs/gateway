@@ -247,6 +247,9 @@ pub(crate) fn build_service(
             // RustFS signs a header-signed payload digest given in base64 as its hex, and holds the
             // body to the digest either way (rustfs/gateway#1130).
             .sign_base64_payload_digests_as_hex()
+            // RustFS refuses a header signature before its credential lookup in its own order and
+            // words, and takes the timestamp from `x-amz-date` alone (rustfs/gateway#1130).
+            .answer_header_signatures_as_legacy_rustfs()
             // RustFS answers an unreadable or mismatched request checksum with `BadDigest`
             // (rustfs/gateway#1057).
             .answer_checksum_failures_with_bad_digest()
