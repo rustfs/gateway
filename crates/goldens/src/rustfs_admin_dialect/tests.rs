@@ -33,7 +33,8 @@ use rustfs_gateway_dialect_rustfs_admin::{BodyKind, PENDING, ROUTES, RouteRecord
 
 use super::{
     Exchange, actions, assemble, assemble_on, declared, expected_bucket, expected_subject, expected_subjects, in_lanes,
-    in_lanes_on, param, paths, presigned, rustfs_profile_floor, signed, templates, unsigned, value_of, wire, with_segment,
+    in_lanes_on, is_catch_all, param, paths, presigned, rustfs_profile_floor, signed, templates, unsigned, value_of, wire,
+    with_segment,
 };
 use crate::migration_inventory::rustfs_admin_routes::{AdminAuthMode, RequestBodyUse, ResponseBodyUse};
 use crate::operation_diff::s3s_0_17_0::context::ACCESS_KEY;
@@ -72,13 +73,15 @@ fn rows() -> impl Iterator<Item = (&'static RouteRecord, String)> {
         .flat_map(|record| paths(record).into_iter().map(move |path| (record, path)))
 }
 
-/// Every `(record, template, segment index, parameter)` of every templated row.
+/// Every `(record, template, segment index, parameter)` of every one-segment parameter of every
+/// templated row (ADR-0024); a catch-all is `refresh_tests.rs`'s (ADR-0036).
 fn parameters() -> impl Iterator<Item = (&'static RouteRecord, &'static str, usize, &'static str)> {
     ROUTES.iter().flat_map(|record| {
         templates(record).into_iter().flat_map(move |template| {
             template
                 .split('/')
                 .enumerate()
+                .filter(|(_, segment)| !is_catch_all(segment))
                 .filter_map(move |(index, segment)| param(segment).map(|name| (record, template, index, name)))
         })
     })
@@ -174,7 +177,7 @@ fn every_migrated_route_is_declared_as_the_inventory_records_it() {
         canonical += records.len();
     }
     assert_eq!(canonical, ROUTES.len(), "a declared operation has no inventory route");
-    assert_eq!(compat, 49, "every table-catalog route has its compat row");
+    assert_eq!(compat, 50, "every table-catalog route has its compat row");
     assert_eq!((staying, STAYING.len()), (7, 7), "every staying route is an inventory route");
 }
 
@@ -272,7 +275,7 @@ fn every_row_is_authorised_by_exactly_its_declared_action() {
 }
 
 /// Positive and negative — with the authenticator handing the secret over, exactly the
-/// sixty-two rows of the thirty-one sealed operations hold it, and it is the caller's; no other
+/// sixty-six rows of the thirty-three sealed operations hold it, and it is the caller's; no other
 /// row's handler holds any secret.
 #[test]
 fn the_caller_secret_reaches_exactly_the_sealed_rows() {
@@ -287,8 +290,8 @@ fn the_caller_secret_reaches_exactly_the_sealed_rows() {
             holders.insert((record.method, path));
         }
     }
-    assert_eq!(holders.len(), 62, "{holders:?}");
-    assert_eq!(holders.iter().filter(|(_, path)| path.starts_with("/minio/admin/")).count(), 31);
+    assert_eq!(holders.len(), 66, "{holders:?}");
+    assert_eq!(holders.iter().filter(|(_, path)| path.starts_with("/minio/admin/")).count(), 33);
 }
 
 /// Positive — each any-of row is authorised by any one of its actions alone: `datausageinfo`,
@@ -362,7 +365,7 @@ fn n_every_other_action_does_not_authorise_a_row() {
 #[test]
 fn n_an_unsigned_row_is_refused_without_asking() {
     let privileged: Vec<_> = rows().filter(|(record, _)| !record.anonymous).collect();
-    assert_eq!(privileged.len(), 604 - 8, "every row but the four bootstrap operations' eight");
+    assert_eq!(privileged.len(), 618 - 8, "every row but the four bootstrap operations' eight");
     in_lanes(
         |_, _| true,
         &privileged,
@@ -437,7 +440,7 @@ fn n_a_forged_or_unknown_key_row_is_refused_without_asking() {
 #[test]
 fn n_a_presigned_row_is_refused_without_asking() {
     let presignable: Vec<_> = rows().filter(|(record, _)| record.query.is_none()).collect();
-    assert_eq!(presignable.len(), 596, "every row but the service command's eight");
+    assert_eq!(presignable.len(), 610, "every row but the service command's eight");
     in_lanes(
         |_, _| true,
         &presignable,
@@ -467,7 +470,7 @@ fn n_a_malformed_parameter_value_is_refused_before_authorising() {
                 .map(|(raw, status)| (record, with_segment(template, Some(index), raw), name, raw, status))
         })
         .collect();
-    assert_eq!(cases.len(), 5 * 2 * 181, "181 parameters across 96 templates, each with its alias");
+    assert_eq!(cases.len(), 5 * 2 * 189, "189 parameters across 102 templates, each with its alias");
     in_lanes(
         |_, _| true,
         &cases,

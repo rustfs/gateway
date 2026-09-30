@@ -111,14 +111,14 @@ impl AdminOperation for GetV4ClusterSnapshot {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 248,
+    precedence: 252,
     selector: "PathTemplate(\"/rustfs/admin/v4/cluster/snapshot\") ∧ Method(GET) ∨ PathTemplate(\"/minio/admin/v4/cluster/snapshot\") ∧ Method(GET)",
     action: "admin:ServerInfo",
     resource: ResourceShape::Service,
     success_status: 200,
     anonymous: false,
     evidence: &[
-        "https://github.com/rustfs/rustfs/blob/736e4fb8e8e5d527c25e4e56f352536b311b6daf/rustfs/src/admin/handlers/cluster_snapshot.rs",
+        "https://github.com/rustfs/rustfs/blob/3268c42e00b375859b4535d53fe219b02d7bfe31/rustfs/src/admin/handlers/cluster_snapshot.rs",
         record::ISSUE,
     ],
 };

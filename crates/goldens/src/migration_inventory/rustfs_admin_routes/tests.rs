@@ -216,6 +216,34 @@ fn n_path_parameters_that_disagree_with_the_path_are_refused() {
     assert!(matches!(reparse(&value), Err(RouteInventoryError::Row { .. })));
 }
 
+/// Negative and positive — a catch-all takes the rest of the path, so a row whose catch-all is
+/// followed by anything is refused; the recorded heal catch-all, which ends the path, is not
+/// (ADR-0036).
+#[test]
+fn n_a_catch_all_that_is_not_the_last_segment_is_refused() {
+    let value = recorded();
+    let heal = value["routes"]
+        .as_array()
+        .expect("routes is an array")
+        .iter()
+        .position(|route| route["path"] == "/rustfs/admin/v3/heal/{bucket}/{*prefix}")
+        .expect("the recorded heal catch-all");
+    assert!(reparse(&value).is_ok());
+    for (path, params) in [
+        ("/rustfs/admin/v3/heal/{bucket}/{*prefix}/{x}", vec!["bucket", "*prefix", "x"]),
+        ("/rustfs/admin/v3/heal/{bucket}/{*prefix}/x", vec!["bucket", "*prefix"]),
+        ("/rustfs/admin/v3/heal/{bucket}/{*prefix}/", vec!["bucket", "*prefix"]),
+    ] {
+        let mut value = recorded();
+        route_mut(&mut value, heal).insert("path".to_owned(), Value::from(path));
+        route_mut(&mut value, heal).insert("path_params".to_owned(), Value::from(params));
+        assert!(
+            matches!(reparse(&value), Err(RouteInventoryError::Row { reason, .. }) if reason.contains("catch-all")),
+            "{path}"
+        );
+    }
+}
+
 /// Negative — a path-table route cannot carry a query discriminator: the RustFS path router has
 /// none, and a row saying otherwise would send a migration looking for one.
 #[test]

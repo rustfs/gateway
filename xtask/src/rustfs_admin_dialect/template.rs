@@ -16,8 +16,9 @@
 //! that is its bucket, the literal-over-parameter shadowing between routes, and the operation
 //! name a route gets.
 //!
-//! Responsible for: [`template_params`] under ADR-0027's rule and ADR-0030's bucket binding,
-//! [`shadowing`] under ADR-0027 (b) and ADR-0031 (d), and [`type_name`] with its file stem [`snake`].
+//! Responsible for: [`template_params`] under ADR-0027's rule, ADR-0030's bucket binding and
+//! ADR-0036's trailing catch-all, [`shadowing`] under ADR-0027 (b) and ADR-0031 (d) — refusing any
+//! overlap through a catch-all — and [`type_name`] with its file stem [`snake`].
 //! NOT responsible for: choosing or ruling the routes, or rendering anything (`super`).
 //! Upstream: `super::Route` and `super::Declared`. Downstream: `super::plan`.
 
@@ -34,17 +35,19 @@ pub(super) struct Shadow {
     pub(super) param: String,
 }
 
-/// One segment of an inventory path: literal text, or a whole-segment `{parameter}`.
+/// One segment of an inventory path: literal text, a whole-segment `{parameter}`, or a trailing
+/// catch-all `{*parameter}` that takes the rest of the path (ADR-0036).
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(super) enum Segment<'a> {
     Literal(&'a str),
     Param(&'a str),
+    CatchAll(&'a str),
 }
 
 pub(super) fn segments(path: &str) -> impl Iterator<Item = Segment<'_>> {
     path.split('/')
         .map(|segment| match segment.strip_prefix('{').and_then(|inner| inner.strip_suffix('}')) {
-            Some(name) => Segment::Param(name),
+            Some(inner) => inner.strip_prefix('*').map_or(Segment::Param(inner), Segment::CatchAll),
             None => Segment::Literal(segment),
         })
 }
@@ -57,20 +60,31 @@ pub(super) struct Template {
     pub(super) params: Vec<String>,
     /// The `{bucket}` or `{warehouse}` parameter, which is the operation's bucket.
     pub(super) bucket: Option<String>,
+    /// The trailing catch-all's name, without its `*` (ADR-0036).
+    pub(super) catch_all: Option<String>,
 }
 
 /// A route's template under ADR-0027's rule: each parameter is a whole segment named by a
 /// lowercase identifier, the inventory lists exactly these, none repeats, and at most one is a
 /// bucket, which ADR-0030 binds. An empty segment is allowed only as a trailing `/`, which RustFS
-/// registers `POST heal/` with and core matches exactly (ADR-0030).
+/// registers `POST heal/` with and core matches exactly (ADR-0030). The last segment may be a
+/// catch-all `{*name}`, which the inventory lists as `*name` and which is never a bucket (ADR-0036).
 pub(super) fn template_params(route: &Route, at: &str) -> Result<Template, String> {
     let mut params: Vec<String> = Vec::new();
     let mut bucket = None;
+    let mut catch_all = None;
     let mut all: Vec<Segment<'_>> = segments(route.path.strip_prefix('/').unwrap_or(&route.path)).collect();
-    if matches!(all.last(), Some(Segment::Literal(""))) && all.len() > 1 {
+    let trailing_slash = matches!(all.last(), Some(Segment::Literal(""))) && all.len() > 1;
+    if trailing_slash {
         all.pop();
     }
-    for segment in all {
+    // A catch-all takes the rest of the path, so not even a trailing `/` may follow it.
+    let last = if trailing_slash {
+        all.len()
+    } else {
+        all.len().saturating_sub(1)
+    };
+    for (index, segment) in all.into_iter().enumerate() {
         match segment {
             Segment::Literal("") => return Err(format!("{at}: an empty segment that is not a trailing '/'")),
             Segment::Literal(text) if text.contains(['{', '}']) => {
@@ -92,12 +106,68 @@ pub(super) fn template_params(route: &Route, at: &str) -> Result<Template, Strin
                 }
                 params.push(name.to_owned());
             }
+            Segment::CatchAll(name) => {
+                if index != last {
+                    return Err(format!("{at}: the catch-all {{*{name}}} is not the last segment"));
+                }
+                if name.is_empty() || !name.bytes().all(|byte| byte.is_ascii_lowercase() || byte == b'_') {
+                    return Err(format!("{at}: the catch-all {{*{name}}} is not a lowercase identifier"));
+                }
+                if params.iter().any(|seen| seen == name) {
+                    return Err(format!("{at}: the parameter {{{name}}} appears twice"));
+                }
+                if BUCKET_PARAMS.contains(&name) {
+                    return Err(format!("{at}: the catch-all {{*{name}}} would be a bucket, which is one segment"));
+                }
+                catch_all = Some(name.to_owned());
+                params.push(name.to_owned());
+            }
         }
     }
-    if params != route.path_params {
-        return Err(format!("{at}: the template names {params:?}, the inventory {:?}", route.path_params));
+    // The inventory spells a catch-all as RustFS registers it, `*name`.
+    let recorded: Vec<String> = params
+        .iter()
+        .map(|param| match &catch_all {
+            Some(name) if name == param => format!("*{param}"),
+            _ => param.clone(),
+        })
+        .collect();
+    if recorded != route.path_params {
+        return Err(format!("{at}: the template names {recorded:?}, the inventory {:?}", route.path_params));
     }
-    Ok(Template { params, bucket })
+    Ok(Template {
+        params,
+        bucket,
+        catch_all,
+    })
+}
+
+/// Whether two templates, one of them ending in a catch-all, match one path, by ADR-0036 (d)'s rule:
+/// a catch-all takes a longer fixed template whose extra segments spell at least one byte, and any
+/// other catch-all whose fixed prefix meets its own.
+fn meet_through_a_catch_all(x: &[Segment<'_>], y: &[Segment<'_>]) -> bool {
+    let fixed = |template: &[Segment<'_>]| match template.last() {
+        Some(Segment::CatchAll(_)) => (template.len().saturating_sub(1), true),
+        _ => (template.len(), false),
+    };
+    let ((x_len, x_rest), (y_len, y_rest)) = (fixed(x), fixed(y));
+    let ((short, short_len, short_rest), (long, long_len, long_rest)) = if x_len <= y_len {
+        ((x, x_len, x_rest), (y, y_len, y_rest))
+    } else {
+        ((y, y_len, y_rest), (x, x_len, x_rest))
+    };
+    let extra = long.get(short_len..long_len).unwrap_or_default();
+    let fits = match (short_rest, long_rest) {
+        (false, false) => extra.is_empty(),
+        (false, true) => false,
+        (true, false) => !extra.is_empty() && !matches!(extra, [Segment::Literal("")]),
+        (true, true) => true,
+    };
+    fits && short.iter().take(short_len).zip(long).all(|pair| match pair {
+        (Segment::Literal(a), Segment::Literal(b)) => a == b,
+        (Segment::Literal(""), Segment::Param(_)) | (Segment::Param(_), Segment::Literal("")) => false,
+        _ => true,
+    })
 }
 
 /// Every pair of declared operations whose rows overlap, as `(winner, shadowed)` indices, under
@@ -116,6 +186,17 @@ pub(super) fn shadowing(declared: &[Declared]) -> Result<Vec<(usize, usize, Shad
             }
             let (x, y): (Vec<Segment<'_>>, Vec<Segment<'_>>) =
                 (segments(&first.path).collect(), segments(&second.path).collect());
+            if first.catch_all.is_some() || second.catch_all.is_some() {
+                // No generator rule orders an overlap through a catch-all yet; RustFS registers
+                // none (ADR-0036).
+                if meet_through_a_catch_all(&x, &y) {
+                    return Err(format!(
+                        "{} and {} overlap through a catch-all, and no rule orders them",
+                        first.name, second.name
+                    ));
+                }
+                continue;
+            }
             if x.len() != y.len() {
                 continue;
             }
@@ -165,7 +246,7 @@ pub(super) fn type_name(method: &str, surface: &Surface, path: &str, query: Opti
     let mut words = vec![method, surface.tag];
     for segment in segments(rest) {
         match segment {
-            Segment::Param(param) => {
+            Segment::Param(param) | Segment::CatchAll(param) => {
                 words.push("By");
                 words.extend(param.split('_'));
             }

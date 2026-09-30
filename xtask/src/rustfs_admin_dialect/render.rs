@@ -158,6 +158,9 @@ fn evidence(d: &Declared) -> String {
     if d.path.starts_with("/_iceberg/") {
         cited.push("record::ADR_0031".to_owned());
     }
+    if d.catch_all.is_some() {
+        cited.push("record::ADR_0036".to_owned());
+    }
     if d.rule.anonymous || d.path.starts_with("/profile/") {
         cited.push("record::ADR_0032".to_owned());
     }
@@ -216,6 +219,15 @@ fn bucket_doc(d: &Declared) -> String {
         doc.push_str(
             "//!\n//! RustFS registers this route with its trailing `/`, and so does the template: it matches exactly that\n\
              //! path, and the path without the `/` names no operation, as in RustFS (ADR-0030).\n",
+        );
+    }
+    if let Some(name) = &d.catch_all {
+        let _ = write!(
+            doc,
+            "//!\n//! Its `{{*{name}}}` parameter is a catch-all (ADR-0036): it takes the rest of the path, one byte or more,\n\
+             //! separators included, as RustFS's router does, and nothing when the path stops at the `/` before it.\n\
+             //! A handler reads the value decoded once, must not decode it again, and validates it as RustFS's\n\
+             //! handler does.\n"
         );
     }
     doc

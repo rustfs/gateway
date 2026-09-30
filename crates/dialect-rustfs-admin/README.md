@@ -1,6 +1,6 @@
 # rustfs-gateway-dialect-rustfs-admin
 
-RustFS's admin API and Iceberg REST table catalog as gateway dialect operations (rustfs/backlog#1744, ADR-0024 to ADR-0032).
+RustFS's admin API and Iceberg REST table catalog as gateway dialect operations (rustfs/backlog#1744, ADR-0024 to ADR-0032, ADR-0036 and ADR-0037).
 
 RustFS consumes this crate: it installs the dialect and registers its own handlers. Nothing here
 depends on RustFS, and no handler lives here.
@@ -33,8 +33,10 @@ before authentication, the authorizer is asked about that bucket, and the handle
 `RequestContextView::bucket()`. The two compat quota routes (`get-bucket-quota`,
 `set-bucket-quota`) name their bucket in the `bucket` query parameter, read exactly once
 (`BucketParam::Query`, ADR-0026 (e)). Every other template parameter (`{tiername}`, `{key_id}`,
-`{prefix}`, …) names no bucket: the operation stays service-level, and its handler reads the
-decoded value from `RequestContextView::path_params()` (ADR-0027). Where a literal segment meets
+`{job_id}`, …) names no bucket: the operation stays service-level, and its handler reads the
+decoded value from `RequestContextView::path_params()` (ADR-0027). `POST heal/{bucket}/{*prefix}`
+ends in a catch-all that takes the rest of the path, one byte or more, as RustFS's router does; its
+handler reads `prefix` decoded once, must not decode it again, and validates it (ADR-0036). Where a literal segment meets
 another route's parameter (`POST tier/clear` and `POST tier/{tiername}`; `GET buckets/{warehouse}`
 and `GET {warehouse}/namespaces`), the literal's operation declares that it stands in front, as
 RustFS's router decides (ADR-0027, ADR-0031). `POST heal/` keeps the trailing `/`

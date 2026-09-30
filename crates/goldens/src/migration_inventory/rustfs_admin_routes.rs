@@ -45,7 +45,7 @@ use std::collections::BTreeMap;
 use serde::Deserialize;
 
 /// The RustFS commit the recorded inventory was generated from.
-pub const RUSTFS_SOURCE_COMMIT: &str = "736e4fb8e8e5d527c25e4e56f352536b311b6daf";
+pub const RUSTFS_SOURCE_COMMIT: &str = "3268c42e00b375859b4535d53fe219b02d7bfe31";
 
 /// The only format this reader accepts. A generator that changes the row shape changes this too.
 pub const INVENTORY_FORMAT: &str = "rustfs-admin-route-inventory/1";
@@ -570,6 +570,16 @@ fn check_route(route: &AdminRoute) -> Result<(), RouteInventoryError> {
         .collect::<Vec<_>>();
     if params != route.path_params {
         return refuse("the path parameters are not the ones the path names");
+    }
+    // A catch-all (`{*name}`) takes the rest of the path, so it is the last parameter and nothing
+    // follows it (ADR-0036).
+    if route
+        .path_params
+        .iter()
+        .position(|param| param.starts_with('*'))
+        .is_some_and(|at| at + 1 != route.path_params.len() || !route.path.ends_with('}'))
+    {
+        return refuse("a catch-all parameter is not the path's last segment");
     }
     if route.minio_admin_alias != route.path.starts_with(ADMIN_PREFIX) {
         return refuse("the MinIO alias flag disagrees with the path prefix");

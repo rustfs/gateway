@@ -87,15 +87,15 @@ fn refused_before_authorising(exchange: &Exchange, at: &str, code: &str) {
     assert!(exchange.asked.is_empty(), "{at}: the authorizer was asked {:?}", exchange.asked);
 }
 
-/// Positive — the recorded dialect binds exactly seventeen `{bucket}` and 48 `{warehouse}` template
+/// Positive — the recorded dialect binds exactly twenty-one `{bucket}` and 49 `{warehouse}` template
 /// buckets and two query buckets, each on two rows, all of orders 5 and 6.
 #[test]
 fn the_bound_rows_are_the_order_five_and_six_ones() {
     let by_path = path_bound();
     let by_query = query_bound();
-    assert_eq!((by_path.len(), by_query.len()), (130, 4));
+    assert_eq!((by_path.len(), by_query.len()), (140, 4));
     assert!(by_path.iter().all(|(record, ..)| matches!(record.order, 5 | 6)));
-    assert_eq!(by_path.iter().filter(|(record, ..)| record.order == 6).count(), 96);
+    assert_eq!(by_path.iter().filter(|(record, ..)| record.order == 6).count(), 98);
     assert!(by_query.iter().all(|(record, _)| record.order == 5));
     let queried: Vec<&str> = by_query.iter().map(|(_, template)| *template).collect();
     assert_eq!(
@@ -122,7 +122,7 @@ fn n_an_invalid_template_bucket_is_refused_as_s3_refuses_it() {
                 .map(move |bucket| (record, with_segment(template, Some(index), &bucket), bucket))
         })
         .collect();
-    assert_eq!(cases.len(), 130 * 7);
+    assert_eq!(cases.len(), 140 * 7);
     in_lanes(
         |_, _| true,
         &cases,
@@ -207,7 +207,7 @@ fn n_a_denial_on_the_bound_bucket_names_the_bucket() {
                 .map(|(record, template)| (record, concrete(template))),
         )
         .collect();
-    assert_eq!(cases.len(), 134);
+    assert_eq!(cases.len(), 144);
     in_lanes(
         |_, _| false,
         &cases,

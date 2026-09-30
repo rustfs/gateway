@@ -38,7 +38,7 @@ use crate::table::{OVERLAY_ROWS, fold_every_operation};
 /// The RustFS router that answers the admin prefixes ahead of its S3 service, at the commit the
 /// inventory was recorded from.
 const RUSTFS_ROUTER: &str =
-    "https://github.com/rustfs/rustfs/blob/736e4fb8e8e5d527c25e4e56f352536b311b6daf/rustfs/src/admin/router.rs";
+    "https://github.com/rustfs/rustfs/blob/3268c42e00b375859b4535d53fe219b02d7bfe31/rustfs/src/admin/router.rs";
 const ROUTER_EVIDENCE: &[&str] = &[RUSTFS_ROUTER];
 
 /// The six prefixes the dialect takes away from S3 routing: the admin API under its RustFS and

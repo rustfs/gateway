@@ -120,7 +120,7 @@ pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     success_status: 200,
     anonymous: false,
     evidence: &[
-        "https://github.com/rustfs/rustfs/blob/736e4fb8e8e5d527c25e4e56f352536b311b6daf/rustfs/src/admin/handlers/system.rs",
+        "https://github.com/rustfs/rustfs/blob/3268c42e00b375859b4535d53fe219b02d7bfe31/rustfs/src/admin/handlers/system.rs",
         record::ADR_0025,
         record::ISSUE,
     ],

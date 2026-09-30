@@ -16,13 +16,16 @@
 // crates/goldens/src/migration_inventory/rustfs_admin_routes.json. Do not edit by hand: change the
 // inventory or xtask/src/rustfs_admin_dialect.rs, then regenerate.
 
-//! `rustfs:GetV3Metrics`: `GET /rustfs/admin/v3/metrics`, registration group `system`.
+//! `rustfs:GetV3TargetByTargetTypeByTargetNameSubscriptions`: `GET /rustfs/admin/v3/target/{target_type}/{target_name}/subscriptions`, registration group `user`.
 //!
 //! Responsible for: the operation's type, name, rows, action, specification, floor and codec, as the
-//! inventory records RustFS's `MetricsHandler` route.
+//! inventory records RustFS's `ListTargetSubscriptions` route.
 //! NOT responsible for: the handler, which the deployment registers, or the overlay row (`crate::table`).
 //! Upstream: the recorded inventory and `crate::admin`. Downstream: `crate::table`, which lists it,
-//! and a deployment that registers a handler for [`GetV3Metrics`].
+//! and a deployment that registers a handler for [`GetV3TargetByTargetTypeByTargetNameSubscriptions`].
+//!
+//! Its path parameters (`target_type`, `target_name`) name no bucket (ADR-0027): a handler reads each decoded value from
+//! `RequestContextView::path_params()`.
 
 use rustfs_gateway_core::codec::{CodecError, EncodedResponse, MetaView, OperationCodec, RequestBody, RequestBodyMode};
 use rustfs_gateway_core::dialect::{ClaimedRow, OverlayRow};
@@ -36,35 +39,35 @@ use crate::admin::{self, AdminOperation, AdminResponse};
 use crate::record::{self, BodyKind, RouteRecord};
 
 /// The operation name.
-pub const NAME: &str = "rustfs:GetV3Metrics";
+pub const NAME: &str = "rustfs:GetV3TargetByTargetTypeByTargetNameSubscriptions";
 
 /// What authorises it, on no bucket.
-pub const AUTH: AuthRequirement = AuthRequirement::new("admin:GetMetrics", ResourceShape::Service);
+pub const AUTH: AuthRequirement = AuthRequirement::new("admin:GetBucketTarget", ResourceShape::Service);
 
 static SELECTOR: &[Predicate] = &[Predicate::Method(http::Method::GET)];
 
 /// The canonical row, then the MinIO alias RustFS serves it under.
 pub static ROWS: &[ClaimedRow] = &[
     ClaimedRow {
-        template: "/rustfs/admin/v3/metrics",
+        template: "/rustfs/admin/v3/target/{target_type}/{target_name}/subscriptions",
         selector: SELECTOR,
     },
     ClaimedRow {
-        template: "/minio/admin/v3/metrics",
+        template: "/minio/admin/v3/target/{target_type}/{target_name}/subscriptions",
         selector: SELECTOR,
     },
 ];
 
-/// `GET /rustfs/admin/v3/metrics`.
+/// `GET /rustfs/admin/v3/target/{target_type}/{target_name}/subscriptions`.
 #[derive(Debug)]
-pub struct GetV3Metrics;
+pub struct GetV3TargetByTargetTypeByTargetNameSubscriptions;
 
 static SPEC: OperationSpec = admin::spec(NAME, AUTH, false);
 
 /// Privileged and header-signed only: never anonymous, never presigned.
 static FLOOR: OperationFloor = admin::floor(NAME);
 
-impl Operation for GetV3Metrics {
+impl Operation for GetV3TargetByTargetTypeByTargetNameSubscriptions {
     const NAME: &'static str = NAME;
 
     /// RustFS reads no request body.
@@ -87,7 +90,7 @@ impl Operation for GetV3Metrics {
     }
 }
 
-impl OperationCodec for GetV3Metrics {
+impl OperationCodec for GetV3TargetByTargetTypeByTargetNameSubscriptions {
     const REQUEST_BODY: RequestBodyMode = RequestBodyMode::None;
 
     fn decode(_request: &MetaView<'_>, _body: RequestBody) -> Result<Self::Input, CodecError> {
@@ -99,7 +102,7 @@ impl OperationCodec for GetV3Metrics {
     }
 }
 
-impl AdminOperation for GetV3Metrics {
+impl AdminOperation for GetV3TargetByTargetTypeByTargetNameSubscriptions {
     const PRECEDENCE: u16 = OVERLAY_ROW.precedence;
     const GROUP: &'static str = RECORD.group;
 
@@ -111,14 +114,15 @@ impl AdminOperation for GetV3Metrics {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 206,
-    selector: "PathTemplate(\"/rustfs/admin/v3/metrics\") ∧ Method(GET) ∨ PathTemplate(\"/minio/admin/v3/metrics\") ∧ Method(GET)",
-    action: "admin:GetMetrics",
+    precedence: 242,
+    selector: "PathTemplate(\"/rustfs/admin/v3/target/{target_type}/{target_name}/subscriptions\") ∧ Method(GET) ∨ PathTemplate(\"/minio/admin/v3/target/{target_type}/{target_name}/subscriptions\") ∧ Method(GET)",
+    action: "admin:GetBucketTarget",
     resource: ResourceShape::Service,
     success_status: 200,
     anonymous: false,
     evidence: &[
-        "https://github.com/rustfs/rustfs/blob/736e4fb8e8e5d527c25e4e56f352536b311b6daf/rustfs/src/admin/handlers/metrics.rs",
+        "https://github.com/rustfs/rustfs/blob/3268c42e00b375859b4535d53fe219b02d7bfe31/rustfs/src/admin/handlers/event.rs",
+        record::ADR_0027,
         record::ISSUE,
     ],
 };
@@ -126,19 +130,19 @@ pub const OVERLAY_ROW: OverlayRow = OverlayRow {
 /// The inventory row this operation was generated from.
 pub const RECORD: RouteRecord = RouteRecord {
     operation: NAME,
-    group: "system",
-    order: 1,
+    group: "user",
+    order: 4,
     method: "GET",
-    path: "/rustfs/admin/v3/metrics",
-    alias: Some("/minio/admin/v3/metrics"),
+    path: "/rustfs/admin/v3/target/{target_type}/{target_name}/subscriptions",
+    alias: Some("/minio/admin/v3/target/{target_type}/{target_name}/subscriptions"),
     query: None,
-    action: "admin:GetMetrics",
+    action: "admin:GetBucketTarget",
     ruled: None,
     subject: None,
     bucket: None,
     anonymous: false,
-    rustfs_handler: "MetricsHandler",
+    rustfs_handler: "ListTargetSubscriptions",
     request_body: BodyKind::NotRead,
-    response_body: BodyKind::Streamed,
+    response_body: BodyKind::Buffered,
     caller_secret: false,
 };

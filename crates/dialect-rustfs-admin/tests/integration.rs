@@ -103,16 +103,29 @@ fn templates(record: &RouteRecord) -> Vec<&'static str> {
     std::iter::once(record.path).chain(record.alias).collect()
 }
 
-/// The parameter a template segment names, if it is one.
+/// The parameter a template segment names, if it is one: `{name}`, or a catch-all `{*name}`.
 fn param(segment: &str) -> Option<&str> {
-    segment.strip_prefix('{').and_then(|inner| inner.strip_suffix('}'))
+    segment
+        .strip_prefix('{')
+        .and_then(|inner| inner.strip_suffix('}'))
+        .map(|inner| inner.strip_prefix('*').unwrap_or(inner))
 }
 
-/// `template` with every parameter given a concrete value, its name then `-1`.
+/// Whether a template segment is a catch-all, `{*name}` (ADR-0036).
+fn is_catch_all(segment: &str) -> bool {
+    segment.starts_with("{*") && segment.ends_with('}')
+}
+
+/// `template` with every parameter given a concrete value, its name then `-1`; a catch-all takes
+/// two segments, its name then `-1` and `-2`, so every row of one proves it spans segments.
 fn concrete(template: &str) -> String {
     template
         .split('/')
-        .map(|segment| param(segment).map_or_else(|| segment.to_owned(), |name| format!("{name}-1")))
+        .map(|segment| match param(segment) {
+            Some(name) if is_catch_all(segment) => format!("{name}-1/{name}-2"),
+            Some(name) => format!("{name}-1"),
+            None => segment.to_owned(),
+        })
         .collect::<Vec<_>>()
         .join("/")
 }
@@ -123,14 +136,18 @@ fn paths(record: &RouteRecord) -> Vec<String> {
 }
 
 /// ADR-0024's rule for a plain value, written here without core: the same number of segments,
-/// each literal equal, each parameter any non-empty segment.
+/// each literal equal, each parameter any non-empty segment. And ADR-0036's for a template ending
+/// in a catch-all: more segments than its fixed ones, which match as before, and a rest of one byte
+/// or more after them.
 fn template_matches(template: &str, path: &str) -> bool {
     let (template, path): (Vec<&str>, Vec<&str>) = (template.split('/').collect(), path.split('/').collect());
-    template.len() == path.len()
-        && template
-            .iter()
-            .zip(&path)
-            .all(|(segment, value)| param(segment).map_or(segment == value, |_| !value.is_empty()))
+    let segment_matches = |(segment, value): (&&str, &&str)| param(segment).map_or(segment == value, |_| !value.is_empty());
+    match template.split_last() {
+        Some((last, fixed)) if is_catch_all(last) => {
+            path.len() > fixed.len() && fixed.iter().zip(&path).all(segment_matches) && !path[fixed.len()..].join("/").is_empty()
+        }
+        _ => template.len() == path.len() && template.iter().zip(&path).all(segment_matches),
+    }
 }
 
 /// The operation a request must reach: the first record, in precedence order, of its method
@@ -213,8 +230,8 @@ fn every_declared_row_reaches_its_operation() {
         }
     }
     assert_eq!(
-        rows, 604,
-        "303 operations, each with its MinIO or compat alias but the two profiling triggers"
+        rows, 618,
+        "310 operations, each with its MinIO or compat alias but the two profiling triggers"
     );
 }
 
@@ -288,7 +305,8 @@ fn n_the_service_command_without_a_ruled_action_reaches_no_operation() {
 /// Negative — a near miss of every row never reaches that row's operation, and reaches exactly
 /// what the model says (a sibling template, at most): a trailing slash, one more segment, the
 /// last literal segment's case changed; and the same path one character outside the claim
-/// reaches no admin operation.
+/// reaches no admin operation. A row ending in a catch-all takes the trailing slash and the extra
+/// segment too, as RustFS's router does, so for it those two are no near miss (ADR-0036).
 #[test]
 fn n_a_near_miss_of_a_row_reaches_no_admin_operation() {
     let dialect = dialect();
@@ -305,9 +323,18 @@ fn n_a_near_miss_of_a_row_reaches_no_admin_operation() {
                 .rposition(|segment| param(segment).is_none() && !segment.is_empty())
                 .expect("a literal segment");
             segments[last_literal] = segments[last_literal].to_ascii_uppercase();
-            for near in [format!("{path}/"), format!("{path}/x"), segments.join("/")] {
+            let catch_all = template.rsplit('/').next().is_some_and(is_catch_all);
+            for (near, extends) in [
+                (format!("{path}/"), true),
+                (format!("{path}/x"), true),
+                (segments.join("/"), false),
+            ] {
                 let reached = resolve(record.method, &format!("{near}{query}"));
-                assert_ne!(reached, Some(record.operation), "{} {near}", record.method);
+                if catch_all && extends {
+                    assert_eq!(reached, Some(record.operation), "{} {near}", record.method);
+                } else {
+                    assert_ne!(reached, Some(record.operation), "{} {near}", record.method);
+                }
                 // A near miss of a claim's own segment (`/profile/CPU`) is outside the claim and
                 // is S3's; the model speaks only for the dialect's operations.
                 let admin = reached.filter(|name| name.starts_with("rustfs:"));
@@ -333,7 +360,8 @@ fn n_a_near_miss_of_a_row_reaches_no_admin_operation() {
 /// separator, or nothing, so no templated row is reached through one (ADR-0024). The one path an
 /// empty parameter spells that is another row — `heal/{bucket}` with nothing in the bucket is the
 /// trailing-slash `heal/` row (ADR-0030) — reaches that row, canonical and alias alike, and never
-/// the parameter's operation.
+/// the parameter's operation. A catch-all is not a parameter of that rule: what it takes is
+/// `the_heal_catch_all_takes_every_rest_and_nothing_else`'s (ADR-0036).
 #[test]
 fn n_a_parameter_never_matches_a_dot_segment_or_a_separator() {
     let dialect = dialect();
@@ -343,7 +371,11 @@ fn n_a_parameter_never_matches_a_dot_segment_or_a_separator() {
     for record in ROUTES {
         for template in templates(record) {
             let segments: Vec<&str> = template.split('/').collect();
-            for (index, _) in segments.iter().enumerate().filter(|(_, segment)| param(segment).is_some()) {
+            for (index, _) in segments
+                .iter()
+                .enumerate()
+                .filter(|(_, segment)| param(segment).is_some() && !is_catch_all(segment))
+            {
                 for bad in [
                     "%2e", "%2E", "%2e%2e", "%2E%2e", ".%2e", "a%2Fb", "a%2fb", "a%5Cb", "a%5cb", "",
                 ] {
@@ -367,7 +399,7 @@ fn n_a_parameter_never_matches_a_dot_segment_or_a_separator() {
             }
         }
     }
-    assert_eq!(refused, 10 * 2 * 181, "181 parameters across 96 templates, each with its alias");
+    assert_eq!(refused, 10 * 2 * 189, "189 parameters across 102 templates, each with its alias");
     assert_eq!(
         elsewhere,
         [
@@ -405,6 +437,42 @@ fn the_trailing_slash_heal_row_matches_exactly_its_path() {
         heal.map(|record| (record.alias, record.bucket)),
         Some((Some("/minio/admin/v3/heal/"), None))
     );
+}
+
+/// Positive and negative — the heal catch-all takes the rest of the path however many segments it
+/// spans — dot segments, encoded separators and empty segments included — as RustFS's router
+/// does, canonical and alias alike; an empty rest, a missing bucket or a bucket segment that is no
+/// segment reaches nothing, the bucket alone is `heal/{bucket}`, and another method nothing
+/// (ADR-0036).
+#[test]
+fn the_heal_catch_all_takes_every_rest_and_nothing_else() {
+    let dialect = dialect();
+    let resolve = resolver(Some(&dialect));
+    for prefix in ["/rustfs/admin", "/minio/admin"] {
+        let heal = |method: &str, rest: &str| resolve(method, &format!("{prefix}/v3/heal/{rest}"));
+        for rest in [
+            "photos/a",
+            "photos/a/b/c",
+            "photos/a/",
+            "photos//a",
+            "photos//",
+            "photos/%2e%2e",
+            "photos/a/../b",
+            "photos/.",
+            "photos/a%2Fb",
+            "photos/a%5Cb",
+            "photos/%25",
+        ] {
+            assert_eq!(heal("POST", rest), Some("rustfs:PostV3HealByBucketByPrefix"), "{prefix} {rest}");
+        }
+        assert_eq!(heal("POST", "photos"), Some("rustfs:PostV3HealByBucket"), "{prefix}");
+        for rest in ["photos/", "/a", "%2e/a", "a%2Fb/c", "../a"] {
+            assert_eq!(heal("POST", rest), None, "{prefix} {rest}");
+        }
+        for method in ["GET", "PUT", "DELETE", "HEAD"] {
+            assert_eq!(heal(method, "photos/a/b"), None, "{prefix} {method}");
+        }
+    }
 }
 
 /// Positive and negative — `POST tier/clear` stands in front of `POST tier/{tiername}` and is
@@ -613,9 +681,10 @@ fn n_a_subject_parameter_does_not_change_the_route() {
     assert_eq!(checked, 21 * 2 * 5);
 }
 
-/// Positive and negative — exactly the thirty-one operations whose body RustFS seals opt in to
-/// the caller's secret, eight of order 3, twenty-one of order 4 and two of order 5 (xtask pins each
-/// name against the inventory); every other operation is never handed it.
+/// Positive and negative — exactly the thirty-three operations whose body RustFS seals opt in to
+/// the caller's secret, eight of order 3, twenty-one of order 4 and four of order 5 — the two
+/// integrity writes among them, and none of the three integrity reads (xtask pins each name against
+/// the inventory); every other operation is never handed it.
 #[test]
 fn only_the_sealed_operations_hold_the_caller_secret() {
     let holders: Vec<(&str, u8)> = declared()
@@ -624,10 +693,10 @@ fn only_the_sealed_operations_hold_the_caller_secret() {
         .filter(|(operation, _)| operation.secret)
         .map(|(operation, record)| (operation.name, record.order))
         .collect();
-    assert_eq!(holders.len(), 31);
+    assert_eq!(holders.len(), 33);
     assert_eq!(holders.iter().filter(|(_, order)| *order == 3).count(), 8);
     assert_eq!(holders.iter().filter(|(_, order)| *order == 4).count(), 21);
-    assert_eq!(holders.iter().filter(|(_, order)| *order == 5).count(), 2);
+    assert_eq!(holders.iter().filter(|(_, order)| *order == 5).count(), 4);
     for name in [
         "rustfs:GetV3Config",
         "rustfs:PutV3SiteReplicationEdit",
@@ -636,6 +705,8 @@ fn only_the_sealed_operations_hold_the_caller_secret() {
         "rustfs:PutV3AddUser",
         "rustfs:PutV3OnDemandMigrationByBucket",
         "rustfs:PostV3OnDemandMigrationByBucketBackfill",
+        "rustfs:PostV3IntegrityByBucketJobs",
+        "rustfs:PostV3IntegrityByBucketJobsByJobIdControl",
     ] {
         assert!(holders.iter().any(|(holder, _)| *holder == name), "{name}");
     }
@@ -643,6 +714,9 @@ fn only_the_sealed_operations_hold_the_caller_secret() {
         "rustfs:GetV3AccountInfo",
         "rustfs:GetV3UserInfo",
         "rustfs:GetV3IdpLdapListAccessKeysBulk",
+        "rustfs:GetV3IntegrityReadiness",
+        "rustfs:GetV3IntegrityByBucketInventory",
+        "rustfs:GetV3IntegrityByBucketJobsByJobId",
     ] {
         assert!(!holders.iter().any(|(holder, _)| *holder == name), "{name}");
     }

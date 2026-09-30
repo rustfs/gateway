@@ -26,15 +26,16 @@ use rustfs_gateway_dialect_rustfs_admin::{PENDING, ROUTES, RouteRecord, STAYING}
 
 use super::{dialect, param};
 
-/// Positive and negative — exactly the seventeen `{bucket}` and 48 `{warehouse}` templates bind
+/// Positive and negative — exactly the twenty-one `{bucket}` and 49 `{warehouse}` templates bind
 /// their bucket (`BucketParam::Path`) and exactly the two compat quota routes bind a `bucket` query
-/// parameter (`BucketParam::Query`), all of orders 5 and 6; every other operation, `{prefix}`
-/// templates included, stays service-level; and every claimed entry carries its operation's
-/// binding, canonical row and alias alike (ADR-0025 (c), ADR-0026 (e), ADR-0027, ADR-0030, ADR-0031).
+/// parameter (`BucketParam::Query`), all of orders 5 and 6; every other operation, the `{*prefix}`
+/// catch-all included, stays service-level; and every claimed entry carries its operation's
+/// binding, canonical row and alias alike (ADR-0025 (c), ADR-0026 (e), ADR-0027, ADR-0030, ADR-0031,
+/// ADR-0036, ADR-0037).
 #[test]
 fn exactly_the_bucket_and_warehouse_routes_bind_their_bucket() {
     let templated: Vec<&RouteRecord> = ROUTES.iter().filter(|record| record.path.contains('{')).collect();
-    assert_eq!(templated.len(), 96);
+    assert_eq!(templated.len(), 102);
     let mut by_path = 0;
     let mut by_query = 0;
     for record in ROUTES {
@@ -62,7 +63,7 @@ fn exactly_the_bucket_and_warehouse_routes_bind_their_bucket() {
             assert!(!record.anonymous, "{}", record.operation);
         }
     }
-    assert_eq!((by_path, by_query), (17 + 48, 2));
+    assert_eq!((by_path, by_query), (21 + 49, 2));
     let dialect = dialect();
     let mut entries = 0;
     for operation in dialect.claimed_operations() {
@@ -75,7 +76,7 @@ fn exactly_the_bucket_and_warehouse_routes_bind_their_bucket() {
             entries += 1;
         }
     }
-    assert_eq!(entries, 604);
+    assert_eq!(entries, 618);
 }
 
 /// Positive — every order of ADR-0024's plan is declared, each inventory route once (the service
@@ -87,6 +88,7 @@ fn every_order_is_declared_and_seven_routes_stay_with_rustfs() {
     let order_five = [
         "durability_handler",
         "heal",
+        "integrity",
         "on_demand_migration",
         "quota_handler",
         "usage_prefix",
@@ -138,6 +140,7 @@ fn every_order_is_declared_and_seven_routes_stay_with_rustfs() {
             ("idp_compat", 13),
             ("ilm_transition", 11),
             ("inspect_archive", 1),
+            ("integrity", 5),
             ("kms", 35),
             ("mfa", 8),
             ("module_switch", 2),
@@ -155,17 +158,18 @@ fn every_order_is_declared_and_seven_routes_stay_with_rustfs() {
             ("site_replication", 22),
             ("sts", 1),
             ("system", 9),
-            ("table_catalog", 49),
+            ("table_catalog", 50),
             ("tier", 7),
             ("tls_debug", 1),
             ("usage_prefix", 1),
-            ("user", 37),
+            ("user", 38),
         ]
     );
-    assert_eq!(ROUTES.len(), 303);
+    assert_eq!(ROUTES.len(), 310);
     assert!(PENDING.is_empty(), "{PENDING:?}");
-    // 251 admin and profiling routes declared, the 98 table-catalog routes as 49 operations with
-    // 49 alias rows, and seven routes that stay with RustFS: the whole inventory (ADR-0032).
+    // 257 admin and profiling routes declared, the 100 table-catalog routes as 50 operations with
+    // 50 alias rows, and seven routes that stay with RustFS: the whole inventory (ADR-0032,
+    // ADR-0037).
     let staying: Vec<(&str, &str, &str)> = STAYING.iter().map(|route| (route.group, route.method, route.path)).collect();
     assert_eq!(
         staying,
@@ -186,5 +190,5 @@ fn every_order_is_declared_and_seven_routes_stay_with_rustfs() {
             .any(|record| record.method == route.method && record.path == route.path)
     }));
     let declared: usize = by_group.values().map(BTreeSet::len).sum();
-    assert_eq!(declared + 49 + STAYING.len(), 356);
+    assert_eq!(declared + 50 + STAYING.len(), 364);
 }

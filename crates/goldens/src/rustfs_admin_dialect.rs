@@ -419,9 +419,18 @@ pub(crate) fn templates(record: &RouteRecord) -> Vec<&'static str> {
     std::iter::once(record.path).chain(record.alias).collect()
 }
 
-/// The parameter a template segment names, if it is one.
+/// The parameter a template segment names, if it is one: `{name}`, or a catch-all `{*name}`, whose
+/// handler reads it as `name` (ADR-0036).
 pub(crate) fn param(segment: &str) -> Option<&str> {
-    segment.strip_prefix('{').and_then(|inner| inner.strip_suffix('}'))
+    segment
+        .strip_prefix('{')
+        .and_then(|inner| inner.strip_suffix('}'))
+        .map(|inner| inner.strip_prefix('*').unwrap_or(inner))
+}
+
+/// Whether a template segment is a catch-all, `{*name}` (ADR-0036).
+pub(crate) fn is_catch_all(segment: &str) -> bool {
+    segment.starts_with("{*") && segment.ends_with('}')
 }
 
 /// The value every parameter is given in a well-formed request: its name then `-1`.
@@ -537,5 +546,6 @@ pub(crate) fn presigned(record: &RouteRecord, path: &str) -> Request<Bytes> {
 }
 
 mod bucket_tests;
+mod refresh_tests;
 mod subject_tests;
 mod tests;

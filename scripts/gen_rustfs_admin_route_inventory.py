@@ -19,9 +19,14 @@ WHAT THIS DOES
   they agree route for route:
     1. rustfs/src/admin/route_policy.rs     ADMIN_ROUTE_POLICY_SPECS + DEFERRED_ADMIN_ROUTE_POLICIES
     2. rustfs/src/admin/route_registration_test.rs   expected_admin_route_matrix()
-    3. every `.insert(Method::X, <path>, AdminOperation(..))` site under rustfs/src/admin
+    3. every `.insert(Method::X, <path>, AdminOperation(..))` site under rustfs/src/admin, and every
+       `for (method, path, operation) in [..]` loop that inserts its rows — each row an operation, or
+       an enum-dispatched handler value (`&Handler(Route::Variant)`) the insert wraps
   Per route it then records the method, path pattern, registration group, auth mode, IAM action,
   whether a body is sealed with the caller's secret, and whether a body is streamed or buffered.
+  An enum-dispatched handler's facts are read from what its route's variant reaches: the arms of
+  `match self.0` and the branches of `if matches!(self.0, ..)` that variant cannot take are left
+  out, and any other use of `self.0` is refused.
   The query-discriminated routes the admin router claims before its path table
   (`parse_replication_extension_request`, `parse_misc_extension_request`) are recorded beside them.
   Every count in the output is computed from the rows; nothing is typed in by hand.
@@ -52,6 +57,10 @@ BUFFERED_READS = (
 )
 STREAMED_READS = ("drain_client_devnull", "drain_site_replication_devnull")
 STREAMED_RESPONSES = ("StreamingBlob", "ReaderStream", "StreamBody", "async_stream")
+# A row's operation: `AdminOperation(&Handler {})`, `AdminOperation(&module::HANDLER)`.
+OPERATION = re.compile(r"AdminOperation\(&(?:[a-z_]+::)*([A-Za-z_][A-Za-z0-9_]*)\s*(?:\{\s*\})?\)")
+# A row's enum-dispatched handler value, which the insert wraps: `&Handler(Route::Readiness)`.
+DISPATCHED = re.compile(r"&([A-Z][A-Za-z0-9_]*)\(\s*([A-Z][A-Za-z0-9_]*)::([A-Z][A-Za-z0-9_]*)\s*\)")
 
 
 class InventoryError(Exception):
@@ -378,15 +387,18 @@ def insert_sites(source):
                 continue
             insert_open = body_open + insert.end() - 1
             call = split_args(squash(text[insert_open + 1:matching_close(text, insert_open, "(", ")")]))
-            if call[0] != names[0] or call[2] != names[2]:
+            # The insert takes the row's operation as it is, or wraps the row's enum-dispatched
+            # handler value in `AdminOperation(..)`; any other shape is refused.
+            wraps = call[2:] == [f"AdminOperation({names[2]})"]
+            if len(call) != 3 or call[0] != names[0] or (call[2] != names[2] and not wraps):
                 fail(f"{relative}: loop insert {call} does not bind the loop's own names {names}")
             for item in re.finditer(r"\(", text[loop_match.end():close]):
                 start = loop_match.end() + item.start()
                 if text[loop_match.end():start].count("(") - text[loop_match.end():start].count(")") != 0:
                     continue
                 parts = split_args(squash(text[start + 1:matching_close(text, start, "(", ")")]))
-                method = re.fullmatch(r"Method::(\w+)", parts[0])
-                handler = re.fullmatch(r"AdminOperation\(&(?:[a-z_]+::)*([A-Za-z_][A-Za-z0-9_]*)\s*(?:\{\s*\})?\)", parts[2])
+                method = re.fullmatch(r"Method::(\w+)", parts[0]) if len(parts) == 3 else None
+                handler = (DISPATCHED if wraps else OPERATION).fullmatch(parts[2]) if method else None
                 if not method or not handler:
                     fail(f"{relative}: unreadable loop row {parts}")
                 bound = {names[1]: resolve_path(parts[1], source, relative)}
@@ -394,6 +406,7 @@ def insert_sites(source):
                     "method": method.group(1),
                     "path": resolve_path(call[1], source, relative, None, bound),
                     "handler": handler.group(1),
+                    "variant": f"{handler.group(2)}::{handler.group(3)}" if wraps else None,
                     "file": relative,
                     "function": enclosing_function(spans, loop_match.start()),
                 })
@@ -405,7 +418,7 @@ def insert_sites(source):
             args = split_args(squash(text[open_index + 1:close]))
             if len(args) != 3:
                 fail(f"{relative}: insert with {len(args)} arguments: {args}")
-            handler = re.fullmatch(r"AdminOperation\(&(?:[a-z_]+::)*([A-Za-z_][A-Za-z0-9_]*)\s*(?:\{\s*\})?\)", args[2])
+            handler = OPERATION.fullmatch(args[2])
             if not handler:
                 fail(f"{relative}: unreadable operation {args[2]!r}")
             prefixes = [None]
@@ -418,6 +431,7 @@ def insert_sites(source):
                     "method": match.group(1),
                     "path": resolve_path(args[1], source, relative, prefix),
                     "handler": handler.group(1),
+                    "variant": None,
                     "file": relative,
                     "function": enclosing_function(spans, match.start()),
                 })
@@ -434,15 +448,150 @@ def handler_type(source, name, relative):
     fail(f"{relative}: handler value {name} has no static or const declaration")
 
 
-def handler_body(source, type_name):
+def scan_to(text, index, stops, limit):
+    """The index of the first character of `stops` at nesting depth 0 in `text[index:limit]`, else
+    `limit`; brackets and literals are skipped whole."""
+    depth = 0
+    while index < limit:
+        end = literal_end(text, index)
+        if end is not None:
+            index = end
+            continue
+        char = text[index]
+        if depth == 0 and char in stops:
+            return index
+        if char in "([{":
+            depth += 1
+        elif char in ")]}":
+            depth -= 1
+        index += 1
+    return limit
+
+
+def match_arms(text, open_index, close_index):
+    """`(pattern, body_start, body_end)` for every arm of the `match` whose braces are at
+    `open_index` and `close_index`."""
+    arms, index = [], open_index + 1
+    while True:
+        while index < close_index and text[index] in " \t\r\n,":
+            index += 1
+        if index >= close_index:
+            return arms
+        arrow = text.find("=>", index, close_index)
+        if arrow == -1 or scan_to(text, index, "{}", arrow) != arrow:
+            fail(f"unreadable match arm {text[index:index + 80]!r}")
+        pattern, body = text[index:arrow], arrow + 2
+        while body < close_index and text[body] in " \t\r\n":
+            body += 1
+        if body < close_index and text[body] == "{":
+            end = matching_close(text, body, "{", "}") + 1
+        else:
+            end = scan_to(text, body, ",", close_index)
+        arms.append((pattern, body, end))
+        index = end
+
+
+def variant_view(block, text, variant, relative):
+    """The part of an enum-dispatched handler's `impl Operation` block that `variant` reaches.
+
+    RustFS registers one handler value per route (`&Handler(Route::Readiness)`) and dispatches on
+    the value's variant inside `call`. Every arm of `match self.0` the variant does not take — one
+    whose pattern names only other variants, or any arm after the one it takes — and the branch of
+    each `if matches!(self.0, ..) { .. } else { .. }` it does not take are blanked, keeping offsets
+    and lines. What is left can over-approximate what the variant runs but never leaves any of it
+    out. Any other use of `self.0` is refused, except as the one argument of a function of the
+    same file, whose body the facts include anyway.
+    """
+    enum, name = variant.split("::")
+    blanks, dispatches = [], []
+
+    def variants_of(pattern):
+        """The variants a pattern names, or `None` for `_`; anything else is refused."""
+        if pattern.strip() == "_":
+            return None
+        if re.search(r"\bif\b", pattern):
+            fail(f"{relative}: a guarded pattern on `self.0`: {squash(pattern)!r}")
+        found = re.findall(rf"\b{enum}::([A-Z][A-Za-z0-9_]*)\b", pattern)
+        rest = re.sub(rf"\b{enum}::[A-Z][A-Za-z0-9_]*\b", "", pattern).replace("|", "")
+        if not found or rest.strip():
+            fail(f"{relative}: a pattern on `self.0` that is not {enum} variants or `_`: {squash(pattern)!r}")
+        return set(found)
+
+    def skip_space(index):
+        while index < len(block) and block[index] in " \t\r\n":
+            index += 1
+        return index
+
+    for dispatch in re.finditer(r"\bmatch\s+self\.0\s*\{", block):
+        dispatches.append((dispatch.start(), dispatch.end()))
+        close = matching_close(block, dispatch.end() - 1, "{", "}")
+        taken = False
+        for pattern, start, end in match_arms(block, dispatch.end() - 1, close):
+            names = variants_of(pattern)
+            reaches = not taken and (names is None or name in names)
+            taken = taken or reaches
+            if not reaches:
+                blanks.append((start, end))
+        if not taken:
+            fail(f"{relative}: no arm of `match self.0` takes {variant}")
+    for condition in re.finditer(r"\bif\s+matches!\(\s*self\.0\s*,", block):
+        dispatches.append((condition.start(), condition.end()))
+        paren = block.index("(", condition.start())
+        paren_close = matching_close(block, paren, "(", ")")
+        names = variants_of(block[condition.end():paren_close].rstrip().rstrip(","))
+        then_open = skip_space(paren_close + 1)
+        if then_open >= len(block) or block[then_open] != "{" or names is None:
+            fail(f"{relative}: `matches!(self.0, ..)` that is not the whole condition of an `if` on {enum} variants")
+        then_close = matching_close(block, then_open, "{", "}") + 1
+        otherwise = None
+        after = skip_space(then_close)
+        if re.match(r"else\b", block[after:]):
+            else_open = skip_space(after + len("else"))
+            if else_open >= len(block) or block[else_open] != "{":
+                fail(f"{relative}: an `else if` after `if matches!(self.0, ..)`")
+            otherwise = (else_open, matching_close(block, else_open, "{", "}") + 1)
+        if name not in names:
+            blanks.append((then_open, then_close))
+        elif otherwise:
+            blanks.append(otherwise)
+    view = list(block)
+    for start, end in blanks:
+        for index in range(start, end):
+            if view[index] != "\n":
+                view[index] = " "
+    view = "".join(view)
+    for use in re.finditer(r"\bself\.0\b", view):
+        if any(start <= use.start() < end for start, end in dispatches):
+            continue
+        call = re.search(r"\b([a-z_][a-z0-9_]*)\(\s*$", view[:use.start()])
+        if not (call and re.match(r"\s*\)", view[use.end():])):
+            fail(f"{relative}: `self.0` is used where the generator cannot tell which variant reaches it")
+        if not re.search(rf"^(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?fn\s+{call.group(1)}\b", text, re.M):
+            fail(f"{relative}: `self.0` is handed to {call.group(1)}, which is not a function of this file")
+    return view
+
+
+def handler_body(source, type_name, variant=None):
+    """The `impl Operation` block of `type_name`, with the free functions of its file it calls.
+
+    `variant` names the route's variant of an enum-dispatched handler (`Route::Readiness`), whose
+    block is then read as that variant sees it (`variant_view`). A type implemented in more than
+    one file is refused: which one handles the route would be a guess.
+    """
+    found = []
     for relative, text in source.files.items():
         if not relative.startswith(ADMIN.as_posix() + "/"):
             continue
         match = re.search(rf"impl\s+Operation\s+for\s+{type_name}\s*\{{", text)
-        if not match:
-            continue
+        if match:
+            found.append((relative, text, match))
+    if len(found) > 1:
+        fail(f"`impl Operation for {type_name}` appears in {[relative for relative, _, _ in found]}")
+    for relative, text, match in found:
         end = matching_close(text, match.end() - 1, "{", "}")
         block = text[match.start():end]
+        if variant is not None:
+            block = variant_view(block, text, variant, relative)
         # One level of same-file free functions: the work a handler delegates in its own file.
         # Methods are excluded on purpose: every handler has a `call`, and pulling in the other
         # handlers' `call` bodies would give each handler its neighbours' facts.
@@ -692,7 +841,7 @@ def generate(root):
         if site["function"] not in owner:
             fail(f"{site['file']}: {key} is inserted by {site['function']}, which no registration group reaches")
         type_name = handler_type(source, site["handler"], site["file"])
-        handler_file, body, stream_types = handler_body(source, type_name)
+        handler_file, body, stream_types = handler_body(source, type_name, site["variant"])
         caller_secret, request_body, response_body = body_facts(body, stream_types)
         row = policy[key]
         method, path = key.split(" ", 1)
@@ -711,7 +860,7 @@ def generate(root):
             "auth_detail": row["auth_detail"],
             "risk": row["risk"],
             "router_admits_anonymous": router_admits_anonymous(method, path, row, source),
-            "handler": type_name,
+            "handler": type_name if site["variant"] is None else f"{type_name}({site['variant']})",
             "handler_file": handler_file,
             "caller_secret_body": caller_secret,
             "request_body": request_body,

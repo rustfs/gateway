@@ -19,7 +19,7 @@
 //! choosing the routes of the groups ADR-0024's plan has migrated, applying the rulings
 //! (`rulings.rs`: ADR-0025's, ADR-0026's, ADR-0028's and ADR-0030's) to the custom-auth ones,
 //! ADR-0027's to templates and overlaps, ADR-0030's bucket binding to `{bucket}` and `{warehouse}`
-//! templates and the listed query parameters (`template.rs`), and ADR-0031's surfaces (the table
+//! templates and the listed query parameters, ADR-0036's trailing catch-all (`template.rs`), and ADR-0031's surfaces (the table
 //! catalog's `/_iceberg/v1` with its `/iceberg/v1` compat rows as aliases), refusing any route it has no rule for and any rule
 //! outside those ADRs' shapes, and writing one operation module per declared operation, the
 //! module list and the dialect's table files, each through rustfmt.
@@ -143,6 +143,9 @@ const PLAN: &[(&str, u8)] = &[
     ("durability_handler", 5),
     ("heal", 5),
     ("usage_prefix", 5),
+    // A group the inventory gained after ADR-0032 closed the plan, at the order whose rule its
+    // routes need: its `{bucket}` templates take ADR-0030's binding (ADR-0037 (b)).
+    ("integrity", 5),
     ("table_catalog", 6),
     ("oidc", 7),
     ("sts", 7),
@@ -211,6 +214,8 @@ struct Declared {
     params: Vec<String>,
     /// The bucket the operation is authorised on, when it has one (ADR-0030).
     bucket: Option<Bound>,
+    /// The trailing catch-all's name, when the template ends in one (ADR-0036).
+    catch_all: Option<String>,
     /// The later operations this one stands in front of (ADR-0027).
     shadows: Vec<Shadow>,
 }
@@ -391,7 +396,11 @@ fn plan_through(
             twins_used.insert(canonical);
             continue;
         }
-        let Template { params, bucket } = template_params(route, &at)?;
+        let Template {
+            params,
+            bucket,
+            catch_all,
+        } = template_params(route, &at)?;
         if !route.query_discriminators.is_empty() {
             return Err(format!("{at}: a query-discriminated route needs a ruling on its selector first"));
         }
@@ -466,6 +475,7 @@ fn plan_through(
                 precedence,
                 params: params.clone(),
                 bucket: bucket.clone(),
+                catch_all: catch_all.clone(),
                 shadows: Vec::new(),
             });
         }
@@ -652,6 +662,9 @@ pub(crate) fn command(args: &[String]) -> ExitCode {
 #[cfg(test)]
 #[path = "rustfs_admin_dialect/bucket_tests.rs"]
 mod bucket_tests;
+#[cfg(test)]
+#[path = "rustfs_admin_dialect/refresh_tests.rs"]
+mod refresh_tests;
 #[cfg(test)]
 #[path = "rustfs_admin_dialect/tests.rs"]
 mod tests;

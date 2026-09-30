@@ -52,6 +52,10 @@ pub(crate) const ADR_0032: &str =
 /// and the first-divergence shadowing rule.
 pub(crate) const ADR_0031: &str = "https://github.com/rustfs/gateway/blob/main/docs/adr/0031-order-six-table-catalog-surfaces.md";
 
+/// ADR-0036, which every row that ends in a catch-all cites.
+pub(crate) const ADR_0036: &str =
+    "https://github.com/rustfs/gateway/blob/main/docs/adr/0036-a-trailing-catch-all-template-parameter.md";
+
 /// How RustFS reads or writes one side of a route's body, as the inventory records it.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum BodyKind {

@@ -24406,6 +24406,9 @@ shard_case 'Mint dependency notices match the shipped package identities' \
 shard_case 'nested signature cases partition the ledger and propagate every failure' \
     python3 "${SCRIPT_DIR}/test_nested_guard_ownership.py"
 
+shard_case 'the admin route inventory reads enum-dispatched handlers per variant and refuses what it cannot follow' \
+    python3 "${SCRIPT_DIR}/test_rustfs_admin_route_inventory.py"
+
 shard_case 'the default mode shards across the requested workers' \
     shard_plan_is 4 4 0 0 0
 shard_case 'the quirk-ledger mode never shards' \

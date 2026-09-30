@@ -16,7 +16,7 @@
 // crates/goldens/src/migration_inventory/rustfs_admin_routes.json. Do not edit by hand: change the
 // inventory or xtask/src/rustfs_admin_dialect.rs, then regenerate.
 
-//! `rustfs:PostV3HealByBucketByPrefix`: `POST /rustfs/admin/v3/heal/{bucket}/{prefix}`, registration group `heal`.
+//! `rustfs:PostV3HealByBucketByPrefix`: `POST /rustfs/admin/v3/heal/{bucket}/{*prefix}`, registration group `heal`.
 //!
 //! Responsible for: the operation's type, name, rows, action, specification, floor and codec, as the
 //! inventory records RustFS's `HealHandler` route.
@@ -32,6 +32,11 @@
 //!
 //! Its other path parameter (`prefix`) names no bucket (ADR-0027): a handler reads each decoded value from
 //! `RequestContextView::path_params()`.
+//!
+//! Its `{*prefix}` parameter is a catch-all (ADR-0036): it takes the rest of the path, one byte or more,
+//! separators included, as RustFS's router does, and nothing when the path stops at the `/` before it.
+//! A handler reads the value decoded once, must not decode it again, and validates it as RustFS's
+//! handler does.
 
 use bytes::Bytes;
 use rustfs_gateway_core::codec::{CodecError, EncodedResponse, MetaView, OperationCodec, RequestBody, RequestBodyMode};
@@ -59,16 +64,16 @@ static SELECTOR: &[Predicate] = &[Predicate::Method(http::Method::POST)];
 /// The canonical row, then the MinIO alias RustFS serves it under.
 pub static ROWS: &[ClaimedRow] = &[
     ClaimedRow {
-        template: "/rustfs/admin/v3/heal/{bucket}/{prefix}",
+        template: "/rustfs/admin/v3/heal/{bucket}/{*prefix}",
         selector: SELECTOR,
     },
     ClaimedRow {
-        template: "/minio/admin/v3/heal/{bucket}/{prefix}",
+        template: "/minio/admin/v3/heal/{bucket}/{*prefix}",
         selector: SELECTOR,
     },
 ];
 
-/// `POST /rustfs/admin/v3/heal/{bucket}/{prefix}`.
+/// `POST /rustfs/admin/v3/heal/{bucket}/{*prefix}`.
 #[derive(Debug)]
 pub struct PostV3HealByBucketByPrefix;
 
@@ -125,16 +130,17 @@ impl AdminOperation for PostV3HealByBucketByPrefix {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 286,
-    selector: "PathTemplate(\"/rustfs/admin/v3/heal/{bucket}/{prefix}\") ∧ Method(POST) ∨ PathTemplate(\"/minio/admin/v3/heal/{bucket}/{prefix}\") ∧ Method(POST) ⇒ BucketParam(\"bucket\")",
+    precedence: 291,
+    selector: "PathTemplate(\"/rustfs/admin/v3/heal/{bucket}/{*prefix}\") ∧ Method(POST) ∨ PathTemplate(\"/minio/admin/v3/heal/{bucket}/{*prefix}\") ∧ Method(POST) ⇒ BucketParam(\"bucket\")",
     action: "admin:Heal",
     resource: ResourceShape::Bucket,
     success_status: 200,
     anonymous: false,
     evidence: &[
-        "https://github.com/rustfs/rustfs/blob/736e4fb8e8e5d527c25e4e56f352536b311b6daf/rustfs/src/admin/handlers/heal.rs",
+        "https://github.com/rustfs/rustfs/blob/3268c42e00b375859b4535d53fe219b02d7bfe31/rustfs/src/admin/handlers/heal.rs",
         record::ADR_0027,
         record::ADR_0030,
+        record::ADR_0036,
         record::ISSUE,
     ],
 };
@@ -145,8 +151,8 @@ pub const RECORD: RouteRecord = RouteRecord {
     group: "heal",
     order: 5,
     method: "POST",
-    path: "/rustfs/admin/v3/heal/{bucket}/{prefix}",
-    alias: Some("/minio/admin/v3/heal/{bucket}/{prefix}"),
+    path: "/rustfs/admin/v3/heal/{bucket}/{*prefix}",
+    alias: Some("/minio/admin/v3/heal/{bucket}/{*prefix}"),
     query: None,
     action: "admin:Heal",
     ruled: None,
