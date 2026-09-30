@@ -762,6 +762,10 @@ mod buffered_integrity_tests;
 /// The integrity refusals legacy RustFS answers `500`, answered as the client errors they are.
 mod legacy_server_error_tests;
 
+/// Reads and deletes without `Content-Length`, served as legacy RustFS serves them
+/// (rustfs/gateway#1120).
+mod lengthless_request_tests;
+
 /// The gateway's CORS answers over the backend's stored documents (rustfs/gateway#1004).
 mod cors_tests;
 
