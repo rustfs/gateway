@@ -524,8 +524,10 @@ fn optional_headers(operation: &str) -> Vec<String> {
 /// The legacy decoder reads an optional header whose value is empty as absent (rustfs/gateway#1076).
 /// For every optional header of every covered operation, sent empty on a request that is otherwise
 /// handed over identically: whenever the gateway handler is reached, the RustFS body is handed the
-/// same input on both stacks, but for a registered finding. A gateway that refuses the empty value before its handler is a
-/// request-acceptance divergence, rustfs/gateway#1087's, and is counted, not compared.
+/// same input on both stacks, but for a registered finding. A gateway that refuses the empty value
+/// before its handler is a request-acceptance divergence, and is counted, not compared: the RustFS
+/// profile reads the empty line as absent (rustfs/gateway#1087), so what it still refuses is the
+/// request without that header.
 #[test]
 fn every_empty_optional_header_is_handed_over_as_absent() {
     let differ = SeamDiffer::new().expect("both stacks assemble");
@@ -566,11 +568,14 @@ fn every_empty_optional_header_is_handed_over_as_absent() {
     }
     assert!(problems.is_empty(), "{}", problems.join("\n"));
     // Counts measured on 2026-09-30, so a probe that silently stopped reaching the handlers cannot
-    // pass: 146 empty headers compared, 179 refused by the gateway before its handler. Both may
-    // only move the right way — more compared, fewer refused as rustfs/gateway#1087 lands.
-    assert!(compared >= 146, "only {compared} empty headers were compared");
+    // pass: 295 empty headers compared, 14 refused by the gateway before its handler. Both may
+    // only move the right way. Under the RustFS profile an empty line is absent
+    // (rustfs/gateway#1087); the 14 are one blanked header of an SSE-C trio or of a KMS request,
+    // whose remaining headers the gateway refuses before any handler as an incomplete trio or a
+    // KMS qualifier without its algorithm, where the legacy decoder leaves them to the RustFS body.
+    assert!(compared >= 295, "only {compared} empty headers were compared");
     assert!(
-        refused_by_the_gateway <= 179,
+        refused_by_the_gateway <= 14,
         "{refused_by_the_gateway} empty headers are refused by the gateway"
     );
 }

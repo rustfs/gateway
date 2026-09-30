@@ -301,6 +301,9 @@ pub(crate) fn build_service(
             // RustFS answers a policy write `204`, every restore `200`, a policy read untyped, and
             // a HeadBucket without a region its handler left unnamed (rustfs/gateway#1148).
             .answer_heads_as_legacy_rustfs()
+            // RustFS reads an optional header whose one line is empty as absent: an empty expected
+            // owner, digest, checksum or SSE header claims nothing (rustfs/gateway#1087).
+            .read_empty_headers_as_absent()
             // And the same registry decides whether a name is taken: another identity's
             // re-creation is `409 BucketAlreadyExists` before the backend is asked, and a
             // creation the backend admitted is what gets recorded.

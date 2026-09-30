@@ -197,6 +197,7 @@ impl GatewaySeam {
             .url_encode_listings_like_rustfs()
             .legacy_rustfs_post_forms()
             .answer_heads_as_legacy_rustfs()
+            .read_empty_headers_as_absent()
             // RustFS's transport gate with TLS required: a target's customer key is refused over
             // cleartext, a copy source's served (rustfs/backlog#1677, R11).
             .sse_config(SseConfig::refusing_only_target_keys_over_plaintext(

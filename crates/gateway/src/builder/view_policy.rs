@@ -21,9 +21,10 @@
 //! [`ServiceBuilder::answer_checksum_failures_with_bad_digest`],
 //! [`ServiceBuilder::ignore_unknown_checksum_algorithms`],
 //! [`ServiceBuilder::sign_presigned_payloads_as_unsigned`],
-//! [`ServiceBuilder::accept_empty_uploads_without_content_length`] and
-//! [`ServiceBuilder::url_encode_listings_like_rustfs`], the closed sets of operations the first and
-//! the last two cover, and the per-request decisions the assembly applies — the client checksum
+//! [`ServiceBuilder::accept_empty_uploads_without_content_length`],
+//! [`ServiceBuilder::url_encode_listings_like_rustfs`] and
+//! [`ServiceBuilder::read_empty_headers_as_absent`], the closed sets of operations the first and
+//! the listing and upload switches cover, and the per-request decisions the assembly applies — the client checksum
 //! waivers of `super::client_quirks` included.
 //! NOT responsible for: reading the parameter ([`rustfs_gateway_core::MetaView::query`]) or the
 //! modelled range the default refuses outside of (the generated codec).
@@ -163,6 +164,7 @@ pub(crate) struct ViewPolicy {
     pub(super) strict_date_conditions: bool,
     body_literals: bool,
     unknown_checksum_algorithms_ignored: bool,
+    empty_headers_absent: bool,
 }
 
 impl ViewPolicy {
@@ -228,6 +230,17 @@ impl ViewPolicy {
         // storing the body damages nothing; the intended future behaviour is the core's refusal.
         let meta = if self.unknown_checksum_algorithms_ignored {
             meta.with_unknown_checksum_algorithms_ignored()
+        } else {
+            meta
+        };
+        // Legacy-compat (rustfs/backlog#2684): legacy RustFS reads an optional header whose one
+        // line is empty as absent, so an empty `x-amz-expected-bucket-owner` skips the owner check
+        // and an empty `Content-MD5`, checksum or SSE header claims nothing, where the core reads
+        // the empty value and refuses what it cannot read. Questionable because an empty claim is
+        // taken for no claim; kept so the clients RustFS serves today keep being served; the
+        // intended future behaviour is the core default (rustfs/gateway#1087).
+        let meta = if self.empty_headers_absent {
+            meta.with_empty_headers_absent()
         } else {
             meta
         };
@@ -407,6 +420,23 @@ impl ServiceBuilder {
         self.view_policy.body_literals = true;
         self
     }
+
+    /// Reads a request header whose one field line is empty as absent, on every operation, as
+    /// legacy RustFS reads every optional header (rustfs/gateway#1087): for every input member,
+    /// the SSE headers, the integrity claims (`Content-MD5`, `x-amz-checksum-*`,
+    /// `x-amz-sdk-checksum-algorithm`, `x-amz-checksum-type`, `x-amz-trailer`) and the expected
+    /// bucket owner, whose check an empty line then skips.
+    ///
+    /// Off by default: the core reads an empty line as a value and refuses what it cannot read —
+    /// an empty `x-amz-expected-bucket-owner` is `403 AccessDenied`, an empty `Content-MD5`
+    /// `400 InvalidDigest`. The RustFS profile turns it on so a client sending an empty optional
+    /// header keeps being served. A value, a repeated line and `x-amz-meta-*` read as before, the
+    /// signature covers the line as it arrived, and a handler is handed the raw lines unchanged.
+    #[must_use]
+    pub fn read_empty_headers_as_absent(mut self) -> Self {
+        self.view_policy.empty_headers_absent = true;
+        self
+    }
 }
 
 #[cfg(test)]
@@ -468,6 +498,7 @@ mod tests {
         assert_eq!(ViewPolicy::default().answer_heads, AnswerHeads::Model);
         assert!(!ViewPolicy::default().strict_date_conditions);
         assert!(!ViewPolicy::default().body_literals);
+        assert!(!ViewPolicy::default().empty_headers_absent);
         for operation in ["ListMultipartUploads", "ListParts", "ListBuckets", "GetObject", "PutObject"] {
             assert!(!CLAMPED_MAX_KEYS_OPERATIONS.contains(&operation), "{operation}");
         }

@@ -329,6 +329,209 @@ pub(crate) const SEAM_FINDINGS: &[SeamFinding] = &[
         SeamClass::FailClosed,
         "as sd-0041, for the hold's duration (rd-put-0009)",
     ),
+    finding(
+        "sd-0043",
+        "PutBucketAccelerateConfiguration",
+        "checksum_algorithm",
+        SeamClass::Ruled("rd-put-0002"),
+        ALGORITHM_UNREAD,
+    ),
+    finding(
+        "sd-0044",
+        "PutBucketAcl",
+        "checksum_algorithm",
+        SeamClass::Ruled("rd-put-0002"),
+        ALGORITHM_UNREAD,
+    ),
+    finding(
+        "sd-0045",
+        "PutBucketCors",
+        "checksum_algorithm",
+        SeamClass::Ruled("rd-put-0002"),
+        ALGORITHM_UNREAD,
+    ),
+    finding(
+        "sd-0046",
+        "PutBucketEncryption",
+        "checksum_algorithm",
+        SeamClass::Ruled("rd-put-0002"),
+        ALGORITHM_UNREAD,
+    ),
+    finding(
+        "sd-0047",
+        "PutBucketLifecycleConfiguration",
+        "checksum_algorithm",
+        SeamClass::Ruled("rd-put-0002"),
+        ALGORITHM_UNREAD,
+    ),
+    finding(
+        "sd-0048",
+        "PutBucketLogging",
+        "checksum_algorithm",
+        SeamClass::Ruled("rd-put-0002"),
+        ALGORITHM_UNREAD,
+    ),
+    finding(
+        "sd-0049",
+        "PutBucketPolicy",
+        "checksum_algorithm",
+        SeamClass::Ruled("rd-put-0002"),
+        ALGORITHM_UNREAD,
+    ),
+    finding(
+        "sd-0050",
+        "PutBucketReplication",
+        "checksum_algorithm",
+        SeamClass::Ruled("rd-put-0002"),
+        ALGORITHM_UNREAD,
+    ),
+    finding(
+        "sd-0051",
+        "PutBucketRequestPayment",
+        "checksum_algorithm",
+        SeamClass::Ruled("rd-put-0002"),
+        ALGORITHM_UNREAD,
+    ),
+    finding(
+        "sd-0052",
+        "PutBucketTagging",
+        "checksum_algorithm",
+        SeamClass::Ruled("rd-put-0002"),
+        ALGORITHM_UNREAD,
+    ),
+    finding(
+        "sd-0053",
+        "PutBucketWebsite",
+        "checksum_algorithm",
+        SeamClass::Ruled("rd-put-0002"),
+        ALGORITHM_UNREAD,
+    ),
+    finding(
+        "sd-0054",
+        "PutObjectLegalHold",
+        "checksum_algorithm",
+        SeamClass::Ruled("rd-put-0002"),
+        ALGORITHM_UNREAD,
+    ),
+    finding(
+        "sd-0055",
+        "PutObjectRetention",
+        "checksum_algorithm",
+        SeamClass::Ruled("rd-put-0002"),
+        ALGORITHM_UNREAD,
+    ),
+    finding(
+        "sd-0056",
+        "PutObjectTagging",
+        "checksum_algorithm",
+        SeamClass::Ruled("rd-put-0002"),
+        ALGORITHM_UNREAD,
+    ),
+    finding(
+        "sd-0057",
+        "PutPublicAccessBlock",
+        "checksum_algorithm",
+        SeamClass::Ruled("rd-put-0002"),
+        ALGORITHM_UNREAD,
+    ),
+    finding(
+        "sd-0058",
+        "RestoreObject",
+        "checksum_algorithm",
+        SeamClass::Ruled("rd-put-0002"),
+        ALGORITHM_UNREAD,
+    ),
+];
+
+/// Why a `checksum_algorithm` the two stacks hand over differently matters to no RustFS body on
+/// the operations below: RustFS reads the member only for `PutObject`
+/// (`rustfs/src/app/object/put.rs:1375`, `extract.rs:2711`), `CopyObject` (`copy.rs:202`) and
+/// `UploadPart` (`rustfs/src/app/multipart_usecase.rs:1449`) on rustfs/rustfs `3268c42e00`.
+const ALGORITHM_UNREAD: &str = "no RustFS read: only PutObject (app/object/put.rs:1375, extract.rs:2711), CopyObject \
+    (copy.rs:202) and UploadPart (app/multipart_usecase.rs:1449) read the member, on rustfs/rustfs 3268c42e00";
+
+/// Each operation whose `checksum_algorithm` no RustFS body reads, as its finding, the row it is
+/// derived from and the derived row's name: that row without `x-amz-sdk-checksum-algorithm`, so
+/// the legacy decoder reads the algorithm from `x-amz-checksum-algorithm` and the gateway, which
+/// reads the header the model binds, reads none (rustfs/gateway#1087 reaches these requests with an
+/// empty SDK header).
+static ALGORITHM_UNREAD_ROWS: [(&str, &str, &str); 16] = [
+    (
+        "sd-0043",
+        "put-bucket-accelerate-every-member",
+        "put-bucket-accelerate-algorithm-in-the-legacy-header",
+    ),
+    ("sd-0044", "put-bucket-acl-document", "put-bucket-acl-algorithm-in-the-legacy-header"),
+    (
+        "sd-0045",
+        "put-bucket-cors-every-member",
+        "put-bucket-cors-algorithm-in-the-legacy-header",
+    ),
+    (
+        "sd-0046",
+        "put-bucket-encryption-every-member",
+        "put-bucket-encryption-algorithm-in-the-legacy-header",
+    ),
+    (
+        "sd-0047",
+        "put-bucket-lifecycle-minio-members",
+        "put-bucket-lifecycle-algorithm-in-the-legacy-header",
+    ),
+    (
+        "sd-0048",
+        "put-bucket-logging-simple-prefix",
+        "put-bucket-logging-algorithm-in-the-legacy-header",
+    ),
+    (
+        "sd-0049",
+        "put-bucket-policy-every-member",
+        "put-bucket-policy-algorithm-in-the-legacy-header",
+    ),
+    (
+        "sd-0050",
+        "put-bucket-replication-minio-members",
+        "put-bucket-replication-algorithm-in-the-legacy-header",
+    ),
+    (
+        "sd-0051",
+        "put-bucket-request-payment-every-member",
+        "put-bucket-request-payment-algorithm-in-the-legacy-header",
+    ),
+    (
+        "sd-0052",
+        "put-bucket-tagging-every-member",
+        "put-bucket-tagging-algorithm-in-the-legacy-header",
+    ),
+    (
+        "sd-0053",
+        "put-bucket-website-every-member",
+        "put-bucket-website-algorithm-in-the-legacy-header",
+    ),
+    (
+        "sd-0054",
+        "put-object-legal-hold-every-member",
+        "put-object-legal-hold-algorithm-in-the-legacy-header",
+    ),
+    (
+        "sd-0055",
+        "put-object-retention-every-member",
+        "put-object-retention-algorithm-in-the-legacy-header",
+    ),
+    (
+        "sd-0056",
+        "put-object-tagging-every-member",
+        "put-object-tagging-algorithm-in-the-legacy-header",
+    ),
+    (
+        "sd-0057",
+        "put-public-access-block-every-member",
+        "put-public-access-block-algorithm-in-the-legacy-header",
+    ),
+    (
+        "sd-0058",
+        "restore-object-glacier-every-member",
+        "restore-object-algorithm-in-the-legacy-header",
+    ),
 ];
 
 const EVENT_HOLD: &str = "no legacy input holds an Object Lock event hold and RustFS stores none (rd-put-0009)";
@@ -413,5 +616,14 @@ pub(crate) fn seam_rows() -> Vec<SeamRow> {
     rows.extend(findings::rows());
     rows.extend(omitted::rows());
     rows.extend(trailers::rows());
+    let derived: Vec<SeamRow> = ALGORITHM_UNREAD_ROWS
+        .iter()
+        .filter_map(|(finding, base, name)| {
+            let base = rows.iter().find(|row| row.name == *base)?;
+            let request = base.request.clone().without("x-amz-sdk-checksum-algorithm");
+            Some(row(name, request, Expect::Differs(core::slice::from_ref(finding))))
+        })
+        .collect();
+    rows.extend(derived);
     rows
 }

@@ -39,6 +39,7 @@ use crate::route::TargetKind;
 
 mod body_literals;
 mod content_type_default;
+mod empty_headers_absent;
 mod header_lists;
 mod metadata_and_url;
 mod page_size_ceiling;
@@ -74,9 +75,7 @@ fn header(response: &crate::codec::EncodedResponse, name: &str) -> Option<String
         .map(str::to_owned)
 }
 
-// ---------------------------------------------------------------------------------------------
-// Decode
-// ---------------------------------------------------------------------------------------------
+// ── Decode ─────────────────────────────────────────────────────────────────────────────────────
 
 #[test]
 fn decodes_the_object_path_into_its_two_labels() {
