@@ -134,8 +134,9 @@ minio-go 0
 minio-java 15
 #   13 failures. As on legacy RustFS (minio-js 8.0.6 run against it locally, 6 failures there):
 #   - copyObject(... conditions ...): `x-amz-copy-source-if-unmodified-since: Invalid Date` is
-#     refused, as legacy RustFS refuses an unreadable copy-source date (ruling R14 of
-#     rustfs/backlog#1677; rustfs/gateway#764 is superseded by it).
+#     refused, as legacy RustFS refuses an unreadable copy-source date: the RustFS profile's
+#     `refuse_unreadable_date_conditions` (ruling R14 of rustfs/backlog#1677); the generic profile
+#     ignores it since rustfs/gateway#764.
 #   - listObjects(... recursive:false): the objects the failed copy leaves in the shared bucket.
 #   - extensions.listObjectsV2WithMetadata, selectObjectContent, the `after all` hook for "Remove
 #     Object post select of content:" and the `after all` hook in "functional tests".
