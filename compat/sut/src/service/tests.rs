@@ -157,7 +157,16 @@ fn signed_to(
         );
         payload
     } else {
-        PayloadMode::Empty
+        // A bodyless request declares the empty body's digest, as every S3 SDK does: legacy RustFS
+        // refuses an `s3`-scoped header signature that declares none, and so does the RustFS
+        // profile (rustfs/gateway#1130).
+        let digest: [u8; 32] = Sha256::digest(&body).into();
+        let payload = PayloadMode::ExactSha256(digest);
+        headers.insert(
+            http::HeaderName::from_static("x-amz-content-sha256"),
+            http::HeaderValue::from_str(payload.canonical_payload_token().as_str()).expect("a digest header"),
+        );
+        payload
     };
     let probe = http::Request::builder()
         .uri("/")
@@ -799,6 +808,10 @@ mod signing_service_tests;
 
 /// A base64 payload digest signed as its hex, as legacy RustFS signs it (rustfs/gateway#1130).
 mod payload_digest_tests;
+
+/// The header-signed SigV4 requests legacy RustFS refuses before its credential lookup, refused
+/// with its answers (rustfs/gateway#1130).
+mod header_signature_tests;
 
 /// Request-checksum failures answered with legacy RustFS's `BadDigest` (rustfs/gateway#1057), and
 /// what each refusal leaves in storage.

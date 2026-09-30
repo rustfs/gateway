@@ -79,11 +79,16 @@ fn base64(bytes: &[u8]) -> String {
 /// The current second as the signing stamp, and a second an hour later: the assembly verifies
 /// against the system clock.
 fn stamps() -> (String, String) {
+    stamps_at(0)
+}
+
+/// The current second moved by `offset` seconds as the signing stamp, and a second an hour after it.
+fn stamps_at(offset: i64) -> (String, String) {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .expect("a clock after the epoch")
         .as_secs();
-    let now = i64::try_from(now).expect("a representable clock");
+    let now = i64::try_from(now).expect("a representable clock") + offset;
     let stamp = Timestamp::from_secs(now)
         .render(TimestampFormat::Iso8601Basic)
         .expect("a representable signing stamp");
@@ -105,6 +110,12 @@ pub(super) struct HandSigned {
     secret: &'static str,
     declared: Option<String>,
     payload_line: Option<String>,
+    send_payload: bool,
+    offset: i64,
+    amz_date: Option<String>,
+    send_amz_date: bool,
+    date_header: bool,
+    scope_day: Option<String>,
 }
 
 impl HandSigned {
@@ -120,7 +131,52 @@ impl HandSigned {
             secret: MAIN_SECRET,
             declared: None,
             payload_line: None,
+            send_payload: true,
+            offset: 0,
+            amz_date: None,
+            send_amz_date: true,
+            date_header: false,
+            scope_day: None,
         }
+    }
+
+    /// Sends no `x-amz-content-sha256`; the canonical payload line stays the body's hex digest
+    /// unless [`Self::signing_payload_line`] names another.
+    pub(super) fn without_payload_declaration(mut self) -> Self {
+        self.send_payload = false;
+        self
+    }
+
+    /// Signs as a clock `offset` seconds away from the server's.
+    pub(super) fn at_offset(mut self, offset: i64) -> Self {
+        self.offset = offset;
+        self
+    }
+
+    /// Sends and signs `value` as `x-amz-date`, whatever the signing clock reads.
+    pub(super) fn with_amz_date(mut self, value: impl Into<String>) -> Self {
+        self.amz_date = Some(value.into());
+        self
+    }
+
+    /// Sends no `x-amz-date`, and a signed `Date` header dated now instead — the timestamp a
+    /// gateway without the legacy reading verifies the signature over.
+    pub(super) fn dated_by_the_date_header(mut self) -> Self {
+        self.send_amz_date = false;
+        self.date_header = true;
+        self
+    }
+
+    /// Sends neither `x-amz-date` nor `Date`.
+    pub(super) fn undated(mut self) -> Self {
+        self.send_amz_date = false;
+        self
+    }
+
+    /// Names `day` as the credential scope's date and derives the key from it.
+    pub(super) fn scoped_to_day(mut self, day: impl Into<String>) -> Self {
+        self.scope_day = Some(day.into());
+        self
     }
 
     /// Sends `value` as `x-amz-content-sha256` — by default the hex digest of the body — and signs
@@ -158,10 +214,12 @@ impl HandSigned {
     }
 
     fn scope(&self, day: &str) -> String {
+        let day = self.scope_day.as_deref().unwrap_or(day);
         format!("{day}/us-east-1/{}/aws4_request", self.service)
     }
 
     fn signature(&self, day: &str, string_to_sign: &str) -> String {
+        let day = self.scope_day.as_deref().unwrap_or(day);
         let mut key = hmac_sha256(format!("AWS4{}", self.secret).as_bytes(), day.as_bytes());
         for part in ["us-east-1", self.service, "aws4_request"] {
             key = hmac_sha256(&key, part.as_bytes());
@@ -169,29 +227,44 @@ impl HandSigned {
         hex(&hmac_sha256(&key, string_to_sign.as_bytes()))
     }
 
-    fn string_to_sign(&self, stamp: &str, canonical: &str) -> String {
+    fn string_to_sign(&self, stamp: &str, day: &str, canonical: &str) -> String {
         format!(
             "AWS4-HMAC-SHA256\n{stamp}\n{}\n{}",
-            self.scope(&stamp[..8]),
+            self.scope(day),
             hex(&Sha256::digest(canonical.as_bytes()))
         )
     }
 
     /// The header-signed request, stamped now.
     pub(super) fn request(&self) -> http::Request<Bytes> {
-        let (stamp, _) = stamps();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("a clock after the epoch")
+            .as_secs();
+        let now = i64::try_from(now).expect("a representable clock") + self.offset;
+        let (clock, _) = stamps_at(self.offset);
+        let stamp = self.amz_date.clone().unwrap_or_else(|| clock.clone());
         let declared = self.declared.clone().unwrap_or_else(|| sha256_hex(&self.body));
         let payload = self.payload_line.clone().unwrap_or_else(|| declared.clone());
-        let sent = [
-            ("host", "s3.example.com".to_owned()),
-            ("x-amz-content-sha256", declared),
-            ("x-amz-date", stamp.clone()),
-        ];
+        let http_date = Timestamp::from_secs(now)
+            .render(TimestampFormat::HttpDate)
+            .expect("a representable HTTP-date");
+        let mut sent = vec![("host", "s3.example.com".to_owned())];
+        if self.date_header {
+            sent.push(("date", http_date));
+        }
+        if self.send_payload {
+            sent.push(("x-amz-content-sha256", declared));
+        }
+        if self.send_amz_date {
+            sent.push(("x-amz-date", stamp.clone()));
+        }
         let named: Vec<&(&str, String)> = sent.iter().filter(|(name, _)| !self.unsigned.contains(name)).collect();
         let canonical_headers: String = named.iter().map(|(name, value)| format!("{name}:{value}\n")).collect();
         let signed_names = named.iter().map(|(name, _)| *name).collect::<Vec<_>>().join(";");
         let canonical = format!("{}\n{}\n\n{canonical_headers}\n{signed_names}\n{payload}", self.method, self.path);
-        let signature = self.signature(&stamp[..8], &self.string_to_sign(&stamp, &canonical));
+        let day = &clock[..8];
+        let signature = self.signature(day, &self.string_to_sign(&stamp, day, &canonical));
         let mut request = http::Request::builder().method(self.method.clone()).uri(self.path);
         for (name, value) in &sent {
             request = request.header(*name, value);
@@ -199,7 +272,7 @@ impl HandSigned {
         if !self.body.is_empty() || self.method == http::Method::PUT {
             request = request.header(http::header::CONTENT_LENGTH, self.body.len());
         }
-        let scope = self.scope(&stamp[..8]);
+        let scope = self.scope(day);
         request
             .header(
                 http::header::AUTHORIZATION,
@@ -227,7 +300,7 @@ impl HandSigned {
             .collect::<Vec<_>>()
             .join("&");
         let canonical = format!("{}\n{}\n{query}\nhost:s3.example.com\n\nhost\nUNSIGNED-PAYLOAD", self.method, self.path);
-        let signature = self.signature(&stamp[..8], &self.string_to_sign(&stamp, &canonical));
+        let signature = self.signature(&stamp[..8], &self.string_to_sign(&stamp, &stamp[..8], &canonical));
         let mut request = http::Request::builder()
             .method(self.method.clone())
             .uri(format!("{}?{query}&X-Amz-Signature={signature}", self.path))

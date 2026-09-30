@@ -88,6 +88,7 @@ use rustfs_gateway_http::{HeaderView, WireReject};
 use rustfs_gateway_sig::PayloadMode;
 
 mod date_conditions;
+pub(crate) mod header_signatures;
 pub use self::date_conditions::STRICT_DATE_CONDITION_HEADERS;
 
 /// The page size RustFS lowers an oversized `max-keys` to (`S3_MAX_KEYS`).
@@ -171,6 +172,8 @@ pub(crate) struct ViewPolicy {
     body_literals: bool,
     unknown_checksum_algorithms_ignored: bool,
     empty_headers_absent: bool,
+    /// Who answers a header signature's pre-lookup refusals (`header_signatures`).
+    pub(crate) header_signatures: header_signatures::HeaderRefusals,
 }
 
 impl ViewPolicy {
