@@ -87,6 +87,7 @@ impl OperationCodec for dto::DeleteObjects {
             response.set_header("x-amz-request-charged", rendered);
         }
         let mut writer = rustfs_gateway_xml::XmlWriter::document();
+        writer.legacy_layout(request.rustfs_response_layout());
         writer.open("DeleteResult", Some(rustfs_gateway_xml::S3_XMLNS));
         for item in &output.deleted {
             writer.open("Deleted", None);
@@ -128,6 +129,7 @@ fn read_delete(node: &rustfs_gateway_xml::XmlNode, names: &rustfs_gateway_types:
 
 /// Writes one `DeletedObject` element's children, in the wire order the IR records.
 fn write_deleted_object(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::DeletedObject) -> Result<(), CodecError> {
+    writer.order_children(rustfs_order::DELETED_OBJECT);
     if let Some(v) = value.key.as_ref() {
         writer.element("Key", v.as_str());
     }
@@ -145,6 +147,7 @@ fn write_deleted_object(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto:
 
 /// Writes one `Error` element's children, in the wire order the IR records.
 fn write_error(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::Error) -> Result<(), CodecError> {
+    writer.order_children(rustfs_order::ERROR);
     if let Some(v) = value.key.as_ref() {
         writer.element("Key", v.as_str());
     }
@@ -208,4 +211,13 @@ mod document {
             Member { element: "Size", arity: Arity::One, value: Value::Text(Scalar::Long), required: false, kept: true },
         ] } },
     ] };
+}
+
+/// The order legacy RustFS writes each response element's children in (rustfs/gateway#1078):
+/// the order the legacy stack's structure declares its fields in.
+/// Honoured under `MetaView::rustfs_response_layout`; generated from the IR.
+#[rustfmt::skip]
+mod rustfs_order {
+    pub(super) const DELETED_OBJECT: &[&str] = &["DeleteMarker", "DeleteMarkerVersionId", "Key", "VersionId"];
+    pub(super) const ERROR: &[&str] = &["Code", "Key", "Message", "VersionId"];
 }

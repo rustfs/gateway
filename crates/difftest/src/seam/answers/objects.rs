@@ -25,8 +25,7 @@ use crate::s3s::dto as legacy;
 
 use super::super::samples::configs::{BUCKET_ACL, config};
 use super::super::samples_document as document;
-use super::configs::ACL_ORDERS;
-use super::{AnswerRow, BARE, VERSION_ID, XML, XML_ETAG, answer, differs, legacy_document, named, reordered, same};
+use super::{AnswerRow, BARE, VERSION_ID, XML, answer, legacy_document, named, same};
 
 /// An instant with milliseconds, as the legacy DTO holds one.
 fn at(secs: i64, millis: i64) -> legacy::Timestamp {
@@ -71,7 +70,7 @@ fn sub_resources() -> Vec<AnswerRow> {
                     request_charged: Some(named("requester")),
                 }
             },
-            reordered(XML, ACL_ORDERS),
+            same(XML),
         ),
         answer(
             "get-object-attributes-every-member",
@@ -104,7 +103,7 @@ fn sub_resources() -> Vec<AnswerRow> {
                 storage_class: Some(named("STANDARD")),
                 version_id: text(VERSION_ID),
             },
-            differs(XML, &["sa-0009"], &[]),
+            same(XML),
         ),
         answer(
             "get-object-legal-hold-every-member",
@@ -114,7 +113,7 @@ fn sub_resources() -> Vec<AnswerRow> {
                     status: Some(named("ON")),
                 }),
             },
-            differs(XML, &["sa-0006"], &[]),
+            same(XML),
         ),
         answer(
             "get-object-retention-every-member",
@@ -125,7 +124,7 @@ fn sub_resources() -> Vec<AnswerRow> {
                     retain_until_date: Some(at(1_893_456_000, 0)),
                 }),
             },
-            differs(XML, &["sa-0007"], &[]),
+            same(XML),
         ),
         answer(
             "get-object-tagging-every-member",
@@ -227,7 +226,7 @@ fn restores_and_copies() -> Vec<AnswerRow> {
                 ssekms_key_id: text("key-1"),
                 server_side_encryption: Some(named("aws:kms")),
             },
-            differs(XML_ETAG, &["sa-0008"], &["CopyPartResult"]),
+            same(XML),
         ),
     ]
 }

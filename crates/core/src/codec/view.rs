@@ -91,6 +91,8 @@ pub struct MetaView<'a> {
     empty_headers_absent: bool,
     /// How this deployment reads an XML request document.
     document_reading: DocumentReading,
+    /// Whether response documents are written in legacy RustFS's layout.
+    rustfs_response_layout: bool,
 }
 
 impl<'a> MetaView<'a> {
@@ -179,6 +181,7 @@ impl<'a> MetaView<'a> {
             body_literals: false,
             empty_headers_absent: false,
             document_reading: DocumentReading::Tree,
+            rustfs_response_layout: false,
         })
     }
 
@@ -210,6 +213,7 @@ impl<'a> MetaView<'a> {
             body_literals: self.body_literals,
             empty_headers_absent: self.empty_headers_absent,
             document_reading: self.document_reading,
+            rustfs_response_layout: self.rustfs_response_layout,
         }
     }
 
@@ -322,6 +326,22 @@ impl<'a> MetaView<'a> {
     #[must_use]
     pub const fn unknown_checksum_algorithms_ignored(&self) -> bool {
         self.unknown_checksum_algorithms_ignored
+    }
+
+    /// This view, for a deployment that writes its response documents in legacy RustFS's layout
+    /// (rustfs/gateway#1078): the XML declaration without a line end after it, and each element's
+    /// children in the order the legacy stack declares its members in
+    /// (`rustfs_gateway_xml::XmlWriter::legacy_layout`). Every other view writes the model's order.
+    #[must_use]
+    pub const fn with_rustfs_response_layout(mut self) -> Self {
+        self.rustfs_response_layout = true;
+        self
+    }
+
+    /// Whether this view's response documents are written in legacy RustFS's layout.
+    #[must_use]
+    pub const fn rustfs_response_layout(&self) -> bool {
+        self.rustfs_response_layout
     }
 
     /// This view, with one page-size query parameter clamped to its ceiling.

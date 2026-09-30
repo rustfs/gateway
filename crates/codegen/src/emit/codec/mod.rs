@@ -189,6 +189,7 @@ fn operation(
         );
     }
 
+    let mut written = Vec::new();
     for (name, shape) in &ir.shapes {
         if reachable_from(ir, name, Side::Input) {
             out.push('\n');
@@ -197,9 +198,13 @@ fn operation(
         if reachable_from(ir, name, Side::Output) {
             out.push('\n');
             out.push_str(&encode::shape_writer(ir, name, shape)?);
+            written.push((name.as_str(), shape));
         }
     }
     if let Some(module) = document::module(ir, payload_roots)? {
+        out.push_str(&module);
+    }
+    if let Some(module) = encode::order::rustfs_order_module(ir, &written)? {
         out.push_str(&module);
     }
     Ok(out)

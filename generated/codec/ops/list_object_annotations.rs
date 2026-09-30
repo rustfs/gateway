@@ -91,7 +91,9 @@ impl OperationCodec for dto::ListObjectAnnotations {
             response.set_header("x-amz-request-charged", rendered);
         }
         let mut writer = rustfs_gateway_xml::XmlWriter::document();
+        writer.legacy_layout(request.rustfs_response_layout());
         writer.open("ListObjectAnnotationsOutput", Some(rustfs_gateway_xml::S3_XMLNS));
+        writer.order_children(rustfs_order::RESPONSE);
         writer.open("Annotations", None);
         for item in &output.annotations {
             writer.open("AnnotationEntry", None);
@@ -133,6 +135,7 @@ impl OperationCodec for dto::ListObjectAnnotations {
 
 /// Writes one `AnnotationEntry` element's children, in the wire order the IR records.
 fn write_annotation_entry(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::AnnotationEntry) -> Result<(), CodecError> {
+    writer.order_children(rustfs_order::ANNOTATION_ENTRY);
     {
         let v = &value.annotation_name;
         writer.element("AnnotationName", v.as_str());
@@ -142,7 +145,7 @@ fn write_annotation_entry(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dt
         writer.element("LastModified", &value::render_timestamp(v, TimestampFormat::Iso8601)?);
     }
     if let Some(v) = value.e_tag.as_ref() {
-        writer.element("ETag", &value::render_etag(v, EtagRender::XmlQuoted));
+        writer.entity_tag_element("ETag", &value::render_etag(v, EtagRender::XmlQuoted));
     }
     for v in &value.checksum_algorithm {
         writer.element("ChecksumAlgorithm", v.as_str());
@@ -155,4 +158,13 @@ fn write_annotation_entry(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dt
         writer.element("ReplicationStatus", v.as_str());
     }
     Ok(())
+}
+
+/// The order legacy RustFS writes each response element's children in (rustfs/gateway#1078):
+/// the order the legacy stack's structure declares its fields in.
+/// Honoured under `MetaView::rustfs_response_layout`; generated from the IR.
+#[rustfmt::skip]
+mod rustfs_order {
+    pub(super) const RESPONSE: &[&str] = &["AnnotationCount", "AnnotationPrefix", "Annotations", "Bucket", "ContinuationToken", "Key", "MaxAnnotationResults", "NextContinuationToken"];
+    pub(super) const ANNOTATION_ENTRY: &[&str] = &["AnnotationName", "ChecksumAlgorithm", "ETag", "LastModified", "ReplicationStatus", "Size"];
 }

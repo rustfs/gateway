@@ -212,6 +212,7 @@ impl GatewaySeam {
                 PlaintextCustomerKeyAck::i_understand_customer_keys_will_be_sent_in_the_clear(),
             ))
             .read_request_documents_as_rustfs()
+            .write_responses_as_rustfs()
             .host_resolver(Resolver::new(false))
             .observer(RouteObserver {
                 routed: Arc::clone(&routed),

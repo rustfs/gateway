@@ -21,6 +21,7 @@
 //! [`ServiceBuilder::answer_checksum_failures_with_bad_digest`],
 //! [`ServiceBuilder::ignore_unknown_checksum_algorithms`],
 //! [`ServiceBuilder::read_request_documents_as_rustfs`],
+//! [`ServiceBuilder::write_responses_as_rustfs`],
 //! [`ServiceBuilder::sign_presigned_payloads_as_unsigned`],
 //! [`ServiceBuilder::sign_base64_payload_digests_as_hex`],
 //! [`ServiceBuilder::accept_empty_uploads_without_content_length`],
@@ -166,6 +167,7 @@ pub(crate) struct ViewPolicy {
     clamp_max_keys: bool,
     integrity_codes: IntegrityCodes,
     document_reading: DocumentReading,
+    rustfs_response_layout: bool,
     presigned_payload_unsigned: bool,
     base64_digests_as_hex: bool,
     empty_uploads_without_length: bool,
@@ -254,6 +256,18 @@ impl ViewPolicy {
         };
         let meta = if self.body_literals && BODY_LITERAL_OPERATIONS.contains(&operation) {
             meta.with_body_literals()
+        } else {
+            meta
+        };
+        // Legacy-compat (rustfs/backlog#2684): legacy RustFS writes a response document's members
+        // in its own declaration order — alphabetical by field name for most structures, so a
+        // lifecycle rule's `ID` follows its `Filter` — no line end after the XML declaration, no
+        // namespace on a payload root, the attributes answer rooted at the model's `xmlName`, and
+        // an entity tag's quotes unescaped, where AWS answers in the model's order, under the
+        // element it documents and with `&quot;`. Kept so a RustFS client reads the bytes it reads
+        // today; the intended future behaviour is the core default, the model's layout.
+        let meta = if self.rustfs_response_layout {
+            meta.with_rustfs_response_layout()
         } else {
             meta
         };
@@ -411,6 +425,23 @@ impl ServiceBuilder {
         self
     }
 
+    /// Writes every XML response document in legacy RustFS's layout (rustfs/gateway#1078): each
+    /// element's children in the order the legacy stack declares its members in, no line end after
+    /// the XML declaration, no namespace on a payload root, the attributes answer rooted at
+    /// `GetObjectAttributesResponse`, and an entity tag's quotes as they are, so an answer is the
+    /// bytes legacy RustFS answers with.
+    ///
+    /// Off by default: the core writes the model's member order, the order AWS documents and answers
+    /// with, under the root AWS documents, with `&quot;` in an entity tag, and ends the declaration
+    /// with a line end. Only the layout changes: every member is written either way, with the same
+    /// text. A committed answer (a head sent before its outcome)
+    /// keeps the default declaration its prologue already carries.
+    #[must_use]
+    pub fn write_responses_as_rustfs(mut self) -> Self {
+        self.view_policy.rustfs_response_layout = true;
+        self
+    }
+
     /// Reads a presigned request's `x-amz-content-sha256` as legacy RustFS does: the signature
     /// always covers `UNSIGNED-PAYLOAD`, a declared digest (lowercase hex or base64) is verified
     /// against the body instead, any other value is `403 SignatureDoesNotMatch`, and a streaming
@@ -561,6 +592,7 @@ mod tests {
         assert!(!ViewPolicy::default().clamp_max_keys);
         assert_eq!(ViewPolicy::default().integrity_codes, IntegrityCodes::Model);
         assert_eq!(ViewPolicy::default().document_reading, DocumentReading::Tree);
+        assert!(!ViewPolicy::default().rustfs_response_layout);
         assert!(!ViewPolicy::default().presigned_payload_unsigned());
         assert!(!ViewPolicy::default().empty_uploads_without_length);
         assert!(!ViewPolicy::default().rustfs_listings);

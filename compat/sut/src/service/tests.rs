@@ -841,6 +841,9 @@ mod governor_tests;
 /// RustFS's 5 GiB ceiling on an upload's object, measured as RustFS measures it (rustfs/rustfs#7635).
 mod upload_ceiling_tests;
 
+/// Configuration read-backs in legacy RustFS's response layout (rustfs/gateway#1078).
+mod response_layout_tests;
+
 /// The slash rule legacy RustFS applies to an object key (rustfs/gateway#1101).
 mod slash_rule_tests;
 
