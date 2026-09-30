@@ -70,89 +70,91 @@
 #   issue tracks the failures below that are not yet attributed or that the fixes above were
 #   expected to remove.
 #
-# generation: 3
-.minio-dotnet excluded https://github.com/rustfs/gateway/issues/720 the pinned image ships no .NET test binary, so its runner writes no record at all
-#   PresignedPut (testPresignedPutInvalidHash), the fourth test; the suite stops at its first
-#   failure. It adds an unsigned `X-Amz-Content-Sha256: invalid-sha256` to a presigned PUT and
-#   expects MinIO's SignatureDoesNotMatch; the SUT refuses the malformed header with 400
-#   InvalidRequest before any signature is compared (request shape reproduced locally against
-#   compat-sut). Not a gateway defect, rustfs/gateway#756.
+# GENERATION 4 (rustfs/gateway#756, rustfs/gateway#720, rustfs/gateway#1083)
+#   Measured by the native amd64 `record` run https://github.com/rustfs/gateway/actions/runs/36663386208
+#   on main at 2b431155, after the RustFS-profile changes of 2026-09-29/30: complete, incomplete=0,
+#   and the recipe image of ci/mint. The record run https://github.com/rustfs/gateway/actions/runs/36665966441
+#   of #1180 (the reporter naming a recovered SDK's failures; same SUT) measured identical counts and
+#   named the two recovered SDKs' failures. Changes: minio-java 2 -> 15 (the only raise; every one of
+#   its failures attributed below), minio-js 24 -> 13, awscli 1 -> 0, and both exclusions removed:
+#   .minio-dotnet and mc now write complete, attributable records (#720), so each is counted at 1.
+#   Every count was checked against legacy RustFS (rustfs/rustfs 528a36814 serving its own S3 stack)
+#   with the SDK builds the image carries, run locally against it and against compat-sut: minio-java
+#   8.6.0 fails 6 tests there, minio-js 8.0.6 (212f2821) 6, and compat-sut reproduces this run's 15 and
+#   13 exactly. A failure legacy RustFS shares is marked "as on legacy RustFS"; one it does not share
+#   names the issue that owns it: a RustFS-profile difference of the gateway (#1129, #1184), or a
+#   feature legacy RustFS serves outside the gateway's protocol surface that the launcher lacks
+#   (#1191, #1199, rustfs/backlog#1726, rustfs/backlog#1730).
+#
+# generation: 4
+#   MakeBucket_Test1, reported as its signature `Task MakeBucketAsync(string bucketName, string
+#   location = 'us-east-1', ...)`: the test names its bucket `minio-dotnet-example-` plus 50 random
+#   characters, 71 bytes, and the SUT refuses it 400 InvalidBucketName, as legacy RustFS does
+#   (measured) and as the 63-byte bucket-name limit requires. Not a gateway defect.
+.minio-dotnet 1
+#   ConditionalDeleteWithIncorrectETag, the sixth test; the suite stops at its first failure.
+#   DeleteObject with `If-Match: "wrong-etag"` expects 412 and the object kept; legacy RustFS answers
+#   exactly that, the reference backend ignored the header and deleted the object. A reference
+#   backend gap, #1191. Its five earlier tests pass, testPresignedPutInvalidHash included since the
+#   RustFS profile answers the invalid payload hash with SignatureDoesNotMatch.
 aws-sdk-go-v2 1
-#   The separate HTTPS pass measures 7 PASS, 0 FAIL, 0 NA. Confirmed by the complete
-#   run https://github.com/rustfs/gateway/actions/runs/34927717738 after the TLS listener
-#   and two-pass log merge landed (#767, #789). The previously empty suite is now counted.
+#   The separate HTTPS pass measures 7 PASS, 0 FAIL, 0 NA. The one FAIL of `S3Client.putObject
+#   versions` in https://github.com/rustfs/gateway/actions/runs/36595845931 did not recur in this run,
+#   in 36665966441, or in 40 local runs of the same SDK build over TLS; #1083 keeps it open.
 aws-sdk-java-v2 0
 #   abortMultipartupload: expects 204 for an unknown upload ID (MinIO); the SUT answers 404
-#   NoSuchUpload, the S3 answer. Not a gateway defect.
+#   NoSuchUpload, the S3 answer, as on legacy RustFS (measured). Not a gateway defect.
 aws-sdk-php 1
-#   presignedPut: newly reached once listBuckets passed (0 -> 11 PASS). The upload through the
-#   SigV4 presigned URL also sends `x-amz-acl: public-read`, which the URL does not sign, and the
-#   security floor refuses an unsigned x-amz-* header on a presigned request (403), as S3 does
-#   (HeadersNotSigned). Not a gateway defect, rustfs/gateway#756.
+#   presignedPut(bucket_name,file_name): the upload through the SigV4 presigned URL also sends an
+#   `x-amz-acl` the URL does not sign, and the request is refused 403, as on legacy RustFS (measured:
+#   AccessDenied, "There were headers present in the request which were not signed"; the SUT's code
+#   is SignatureDoesNotMatch, a code difference #1130 owns). Not a gateway defect.
 aws-sdk-ruby 1
-#   s3 presign: newly reached once head-object on a copy passed. awscli 1.42.67 signs
-#   `aws s3 presign` with SigV2 query parameters (AWSAccessKeyId, Signature, Expires), and the
-#   SUT runs the default SigV2Policy::HeaderOnly, which refuses presigned SigV2 (403); AWS no
-#   longer accepts SigV2 on buckets created after 2020-06-24. Reproduced locally. Not a gateway
-#   defect, rustfs/gateway#756.
-awscli 1
-#   testLivenessEndpoint: GET /minio/health/live is a MinIO-only endpoint, not an S3 contract.
+awscli 0
+#   testLivenessEndpoint: GET /minio/health/live. Legacy RustFS answers it 200 from its own router,
+#   outside its S3 stack; the launcher serves no such route (#1199). Not a gateway defect.
 healthcheck 1
-mc excluded https://github.com/rustfs/gateway/issues/720 its runner prints a line that is not JSON into log.json ahead of its records
+#   test_presigned_post_policy_error: `mc share upload`'s form is posted to the object path and
+#   expects MethodNotAllowed; legacy RustFS answers 405, the RustFS profile 501 (#1184).
+mc 1
 minio-go 0
-#   Measured 16, held at 2 rather than raised, rustfs/gateway#756. listBuckets() passes now.
-#   Attributed by a local run of minio-java 8.6.0, the release the pinned image was built with,
-#   against compat-sut; it reproduced 30 PASS, 16 FAIL, 32 NA:
-#   - getPresignedPostFormData(): the POST policy parser refused its millisecond expiration and
-#     its form without a `bucket` field. Fixed for rustfs/gateway#756 (15 FAIL locally after).
-#   - getPresignedObjectUrl() x2 ([PUT], [PUT, expiry]): the upload adds an unsigned
-#     `x-amz-acl`, refused as for aws-sdk-ruby. Not a gateway defect.
-#   - uploadSnowballObjects() x2 and putObjectFanOut(): MinIO snowball and fan-out extensions.
-#   - removeBucket(): the suite's teardown answers BucketNotEmpty, because the snowball archive
-#     stays behind as an ordinary object. A cascade of the line above.
-#   - listenBucketNotification() and 8 MinIO admin API calls (addUser, addCannedPolicy,
-#     setPolicy, getUserInfo, listUsers, listCannedPolicies, deleteUser, removeCannedPolicy):
-#     MinIO-only APIs.
-minio-java 2
-#   24 failures, by cause. Re-attributed by a local run of minio-js 8.0.7, the release the
-#   pinned image carries, against compat-sut; it reproduced all 24:
-#   10  PutBucketVersioning sent without Content-MD5 (4 setBucketVersioning, 2 "Enable Versioning
-#       on Bucket", 1 "Enable versioning", 3 `before all` hooks that enable it). The pinned model
-#       marks the operation http_checksum_required (spec/operations/PutBucketVersioning.toml), so
-#       the refusal is the contract. Not a gateway defect.
-#    1  statObject `::` Not Found: the object a failed versioning hook never created.
-#    1  copyObject `Unmodified since undefined`: the suite reads stat.modifiedDate, which
-#       minio-js 8 does not return, and sends `x-amz-copy-source-if-unmodified-since: Invalid
-#       Date`. The SUT refuses it with 400 instead of ignoring it, rustfs/gateway#764. (The
-#       setMatchETagExcept step passes.)
-#    2  presignedPostPolicy (both steps): the POST policy parser refused the millisecond
-#       expiration minio-js signs. Fixed for rustfs/gateway#756. The block then reaches
-#       `presignedUrl … GET` on the bucket, a presigned ListObjects, which the security floor
-#       refuses: an operation admits presigned URLs only when it opts in, and only GetObject
-#       and PutObject do. Net -1 expected.
-#    2  listObjects `recursive:false` (13 listed, 10 expected) and the `after all` hook in
-#       `functional tests` (BucketNotEmpty): objects the failed copyObject and presigned steps
-#       leave in the shared bucket. Cascades.
-#    2  `after all` in `Clean up temp directory part files` and `Remove Object post select of
-#       content:`: BucketNotEmpty once the statObject and selectObjectContent failures skip
-#       their cleanup steps. Cascades.
-#    2  Force Deletion of prefix: listObjects after removeObjects with MinIO's force-delete
-#       extension (1 listed, 0 expected), and its `after all` cleanup. MinIO-only.
-#    1  putObjectRetention: object lock, rustfs/backlog#1726 (P5-11).
-#    1  selectObjectContent: SelectObjectContent, rustfs/backlog#1730 (P5-15).
-#    2  listenBucketNotification and extensions.listObjectsV2WithMetadata: MinIO-only APIs.
-#   Gone since generation 2: listBuckets(cb) and 2 listObjects (rustfs/gateway#721), and both
-#   statObject failures, the Content-Type mismatch and the 30-minute timeout (rustfs/gateway#718).
-minio-js 24
-#   (unnamed): upload_snowball_objects, the MinIO snowball extension. The archive is stored as
-#   one object, so its listing check fails and the final remove_bucket answers BucketNotEmpty.
-#   Reproduced locally with minio-py 7.2.20. Not a gateway defect, rustfs/gateway#756.
+#   15 failures. As on legacy RustFS (minio-java 8.6.0 run against it locally):
+#   - getPresignedObjectUrl() x2: an unsigned `x-amz-acl` on a presigned PUT, refused as for
+#     aws-sdk-ruby above.
+#   - getObjectAcl(): the SDK requires a `Type` child in each Grantee; legacy RustFS's and AWS's
+#     ACL documents carry only the `xsi:type` attribute (rustfs/gateway#756 has the AWS capture).
+#   - putObjectFanOut(): a form with MinIO's fan-out field; legacy RustFS refuses it because the
+#     policy does not name the field (AccessDenied), the SUT with InvalidAccessKeyId.
+#   Served by legacy RustFS, not by the launcher (#1199):
+#   - uploadSnowballObjects() x2, and the removeBucket() teardown that then finds the archives:
+#     snowball auto-extract.
+#   - addUser(), addCannedPolicy(), setPolicy(), getUserInfo(), listUsers(), listCannedPolicies(),
+#     deleteUser(), removeCannedPolicy(): the MinIO admin API, which the launcher answers 404
+#     NoSuchBucket. Legacy RustFS serves it; its listUsers() answer then fails the SDK's decryption.
+minio-java 15
+#   13 failures. As on legacy RustFS (minio-js 8.0.6 run against it locally, 6 failures there):
+#   - copyObject(... conditions ...): `x-amz-copy-source-if-unmodified-since: Invalid Date` is
+#     refused, as legacy RustFS refuses an unreadable copy-source date (ruling R14 of
+#     rustfs/backlog#1677; rustfs/gateway#764 is superseded by it).
+#   - listObjects(... recursive:false): the objects the failed copy leaves in the shared bucket.
+#   - extensions.listObjectsV2WithMetadata, selectObjectContent, the `after all` hook for "Remove
+#     Object post select of content:" and the `after all` hook in "functional tests".
+#   Not on legacy RustFS:
+#   - presignedPostPolicy(... setContentDisposition_inline) x2 (the step, and mocha reporting it
+#     done twice): the RustFS profile answers a form carrying a Content-Disposition field 501
+#     NotImplemented; legacy RustFS stores it (#1129).
+#   - listObjects(... recursive:true) x2 in "Force Deletion of objects with versions" and "... of
+#     prefix with versions", and the three `after all` hooks of the force-deletion blocks: MinIO's
+#     force delete, served by legacy RustFS, not by the launcher (#1199).
+minio-js 13
+#   (unnamed): upload_snowball_objects. The archive is stored as one object, so its listing check
+#   fails; legacy RustFS extracts it (measured). Served by legacy RustFS, not by the launcher (#1199).
 minio-py 1
 s3cmd 0
-#   select_object_content: SelectObjectContent, rustfs/backlog#1730 (P5-15).
+#   select_object_content: the reference backend registers no SelectObjectContent,
+#   rustfs/backlog#1730 (P5-15).
 s3select 1
-#   testListObjectVersionsSimple (list.go:196): newly reached once tagging passed (2 -> 7 PASS).
-#   A version-id-marker without a key-marker was answered with page one, not InvalidArgument
-#   (c-list-0034). Fixed in the fs backend for rustfs/gateway#756; the suite stops at its first
-#   failure, so the next measured run may stop on a later test.
+#   /mint/build/versioning/legalhold.go:60 main.testLockingLegalhold: newly reached (13 PASS). The
+#   reference backend refuses Object Lock, rustfs/backlog#1726 (P5-11); legacy RustFS serves legal
+#   holds (minio-java's legal-hold tests pass against it). The suite stops at its first failure.
 versioning 1
