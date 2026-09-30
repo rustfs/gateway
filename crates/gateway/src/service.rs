@@ -142,6 +142,7 @@ use crate::ext::{
     SigV2Authentication, WireHead, emit_safely,
 };
 use crate::gate::{BodyCeilings, BodyDigestObligation, MetadataAdmission, SealedBody};
+use crate::logging::{Extension, Refused};
 use crate::monomorphic::sealed::Set as StaticSet;
 use crate::operation_mode::{DynamicMode, MonomorphicMode, OperationMode};
 use crate::panic_boundary::catch_boxed_future;
@@ -456,6 +457,9 @@ impl S3Service {
                 crate::ext::observe_safely(committed_observer.as_ref(), &event);
             }),
         );
+        if let Some(refused) = outcome.refused {
+            crate::logging::request_refused(refused, trace.request_id(), outcome.operation, event_status, outcome.error.as_ref());
+        }
         if !started_committed_work {
             let event = RequestEvent {
                 request_id: trace.request_id(),
@@ -528,7 +532,7 @@ impl S3Service {
 
         let wire = match WireRequest::accept(Request::from_parts(parts, body), &self.inner.limits) {
             Ok(wire) => wire,
-            Err(reject) => return outcome.refuse(self.inner.view_policy.wire_refusal(reject)),
+            Err(reject) => return outcome.refuse_at(Refused::Wire, self.inner.view_policy.wire_refusal(reject)),
         };
         let config = config.wire();
 
@@ -555,7 +559,7 @@ impl S3Service {
                 let refusal = rustfs_gateway_core::error::PreAuthError::bad_request(
                     "An Origin header is required for this OPTIONS request",
                 );
-                return outcome.refuse(from_pre_auth(refusal, response_kind));
+                return outcome.refuse_at(Refused::Wire, from_pre_auth(refusal, response_kind));
             }
             PreflightClass::Malformed => {
                 let started = self.inner.authz_clock.monotonic();
@@ -576,7 +580,7 @@ impl S3Service {
         let resolver = &*self.inner.host_resolver;
         let resolved = match crate::legacy_addressing::classify(&self.inner.names, resolver, router, &wire, resolved) {
             Ok(resolved) => resolved,
-            Err(refusal) => return outcome.refuse(from_codec(refusal, response_kind)),
+            Err(refusal) => return outcome.refuse_at(Refused::Wire, from_codec(refusal, response_kind)),
         };
         let dispatched = match router.dispatch(&RouteRequestParts {
             method: wire.method(),
@@ -604,7 +608,7 @@ impl S3Service {
                     ),
                     _ => from_pre_auth(error, response_kind),
                 };
-                return outcome.refuse(refusal);
+                return outcome.refuse_at(Refused::Wire, refusal);
             }
         };
         let operation = dispatched.spec.name;
@@ -613,7 +617,7 @@ impl S3Service {
         // A bound bucket and a named subject are decided here too, before authentication (ADR-0025).
         let facts = match RoutedFacts::of(&dispatched, wire.raw_path().as_str(), wire.query().as_str(), &self.inner.names) {
             Ok(facts) => facts,
-            Err(refusal) => return outcome.refuse(from_codec(refusal, response_kind)),
+            Err(refusal) => return outcome.refuse_at(Refused::Decode, from_codec(refusal, response_kind)),
         };
         let (service_level, target, hands_caller_secret) = (facts.service_level, facts.target, facts.hands_caller_secret);
         let (path_params, subjects, claimed, bound_bucket) =
@@ -648,7 +652,7 @@ impl S3Service {
         };
         let meta = match MetaView::addressed_with(&wire, target, host_bucket, &self.inner.names) {
             Ok(meta) => self.inner.view_policy.apply(operation, meta, pending.as_ref()),
-            Err(error) => return outcome.refuse(from_codec(error, response_kind)),
+            Err(error) => return outcome.refuse_at(Refused::Decode, from_codec(error, response_kind)),
         };
         let config = config.routed();
 
@@ -715,7 +719,7 @@ impl S3Service {
                 .await
             {
                 Ok(prelude) => prelude,
-                Err(error) => return outcome.refuse(error),
+                Err(error) => return outcome.refuse_as(Refused::reading_a_form(&error), error),
             };
             RoutedBody::PostObject(Box::new(prelude))
         } else {
@@ -740,7 +744,7 @@ impl S3Service {
             Ok(Admission::Anonymous(evidence)) => {
                 framing_mode = match crate::payload_header::anonymous_framing(&headers, self.inner.decode_anonymous_framing) {
                     Ok(mode) => mode,
-                    Err(error) => return outcome.refuse(error),
+                    Err(error) => return outcome.refuse_at(Refused::Decode, error),
                 };
                 (AuthenticationOutcome::ordinary(Verdict::anonymous(evidence)), None)
             }
@@ -749,7 +753,10 @@ impl S3Service {
                 let presigned_unsigned = self.inner.view_policy.presigned_payload_unsigned();
                 let (payload, obligation) = match signed_payload(&headers, location, presigned_unsigned) {
                     Ok(declared) => declared,
-                    Err(refusal) => return outcome.refuse(refusal.render(response_kind, wire.framing().has_body())),
+                    Err(refusal) => {
+                        return outcome
+                            .refuse_at(Refused::Authentication, refusal.render(response_kind, wire.framing().has_body()));
+                    }
                 };
                 body_digest = self.inner.view_policy.bodyless_digest.apply(request_body_mode, obligation);
                 framing_mode = Some(payload.clone());
@@ -780,7 +787,10 @@ impl S3Service {
                     let signature_mismatch = question.into_signature_mismatch();
                     match result {
                         Ok(authentication) => (authentication, signature_mismatch),
-                        Err(_) => return outcome.refuse_handler(HandlerError::internal_error(UNAUTHENTICATED)),
+                        Err(_) => {
+                            return outcome
+                                .refuse_handler_at(Refused::Authentication, HandlerError::internal_error(UNAUTHENTICATED));
+                        }
                     }
                 }
             }
@@ -791,7 +801,9 @@ impl S3Service {
                     SigV2Authentication::new(&sealed, wire.method(), wire.raw_path().as_str(), vhost_bucket.as_deref());
                 match self.inner.authenticator.authenticate_sigv2(&question).await {
                     Ok(authentication) => (authentication, None),
-                    Err(_) => return outcome.refuse_handler(HandlerError::internal_error(UNAUTHENTICATED)),
+                    Err(_) => {
+                        return outcome.refuse_handler_at(Refused::Authentication, HandlerError::internal_error(UNAUTHENTICATED));
+                    }
                 }
             }
             Ok(Admission::Custom(request)) => match &self.inner.custom_signature_verifier {
@@ -805,24 +817,30 @@ impl S3Service {
                     (AuthenticationOutcome::ordinary(verdict), None)
                 }
                 None => {
-                    return outcome.refuse_handler(HandlerError::new(
-                        ErrorCode::NOT_IMPLEMENTED,
-                        "this deployment registered a custom authentication scheme and installed no verifier for it",
-                    ));
+                    return outcome.refuse_handler_at(
+                        Refused::Authentication,
+                        HandlerError::new(
+                            ErrorCode::NOT_IMPLEMENTED,
+                            "this deployment registered a custom authentication scheme and installed no verifier for it",
+                        ),
+                    );
                 }
             },
             // `Admission` is `#[non_exhaustive]`: a variant added later must not be answered by a
             // wildcard that falls through to "authenticated". Refused, loudly.
             Ok(_) => {
-                return outcome.refuse_handler(HandlerError::new(
-                    ErrorCode::NOT_IMPLEMENTED,
-                    "the security floor admitted this request in a way this assembly does not handle",
-                ));
+                return outcome.refuse_handler_at(
+                    Refused::Authentication,
+                    HandlerError::new(
+                        ErrorCode::NOT_IMPLEMENTED,
+                        "the security floor admitted this request in a way this assembly does not handle",
+                    ),
+                );
             }
             // The floor rejects malformed credential surfaces before a verifier can recover a scope. Keep that fail-closed
             // response distinct from a verifier's well-formed but unserved scope, which is `400 AuthorizationHeaderMalformed`.
             Err(error) => {
-                return outcome.refuse(from_auth(error, response_kind, wire.framing().has_body()));
+                return outcome.refuse_at(Refused::Authentication, from_auth(error, response_kind, wire.framing().has_body()));
             }
         };
         // H4's run-time half: a receipt minted for another request cannot be attached to this one.
@@ -843,15 +861,21 @@ impl S3Service {
                     }
                     None => ErrorContext::authorization_scope_malformed(),
                 };
-                return outcome.refuse(from_auth_context(error, context, response_kind, wire.framing().has_body()));
+                return outcome.refuse_at(
+                    Refused::Authentication,
+                    from_auth_context(error, context, response_kind, wire.framing().has_body()),
+                );
             }
-            return outcome.refuse(from_auth_with_detail(
-                error,
-                signature_mismatch.as_ref(),
-                config.config().verbose_signature_errors(),
-                response_kind,
-                wire.framing().has_body(),
-            ));
+            return outcome.refuse_at(
+                Refused::Authentication,
+                from_auth_with_detail(
+                    error,
+                    signature_mismatch.as_ref(),
+                    config.config().verbose_signature_errors(),
+                    response_kind,
+                    wire.framing().has_body(),
+                ),
+            );
         }
         // The proof, minted from the verdict that has just been checked. The `else` arm is
         // unreachable — `rejection()` was `None` one line ago — and is refused rather than
@@ -869,7 +893,7 @@ impl S3Service {
                 };
                 let resolved = match (*prelude).resolve(bucket, &self.inner.names, now) {
                     Ok(resolved) => resolved,
-                    Err(error) => return outcome.refuse(error),
+                    Err(error) => return outcome.refuse_as(Refused::reading_a_form(&error), error),
                 };
                 AcceptedBody::PostObject(Box::new(resolved))
             }
@@ -1011,6 +1035,7 @@ impl S3Service {
                 match catch_boxed_future(|| route_runtime.authorizer.authorize_route(&authz_context, question)).await {
                     Ok(decision) => decisions.push(decision),
                     Err(()) => {
+                        crate::logging::extension_panicked(Extension::Authorizer, request_id, operation);
                         return Err(from_handler(
                             HandlerError::internal_error("the authorizer failed"),
                             response_kind,
@@ -1231,6 +1256,7 @@ impl S3Service {
                 match catch_boxed_future(|| input_runtime.authorizer.authorize_input(&authz_context, &input_request)).await {
                     Ok(decisions) => decisions,
                     Err(()) => {
+                        crate::logging::extension_panicked(Extension::Authorizer, request_id, operation);
                         return Err(from_handler(
                             HandlerError::internal_error("the authorizer failed"),
                             response_kind,
@@ -1295,12 +1321,14 @@ impl S3Service {
         })) {
             Ok(execution) => execution,
             Err(_) => {
+                crate::logging::extension_panicked(Extension::Handler, outcome.trace.request_id(), operation);
                 return outcome.refuse_handler(HandlerError::internal_error("the handler failed"));
             }
         };
         let dispatched = match catch_boxed_future(|| execution).await {
             Ok(result) => result,
             Err(()) => {
+                crate::logging::extension_panicked(Extension::Handler, outcome.trace.request_id(), operation);
                 return outcome.refuse_handler(HandlerError::internal_error("the handler failed"));
             }
         };
@@ -1318,9 +1346,13 @@ impl S3Service {
                 ));
             }
             Err(StaticDispatchError::Route(error)) | Err(StaticDispatchError::Input(error)) => return outcome.refuse(error),
-            Err(StaticDispatchError::Body(error)) => return outcome.refuse(self.inner.view_policy.body_refusal(error)),
+            Err(StaticDispatchError::Body(error)) => {
+                let refused = Refused::reading_the_body(&error);
+                return outcome.refuse_as(refused, self.inner.view_policy.body_refusal(error));
+            }
             Err(StaticDispatchError::Codec(error)) => {
-                return outcome.refuse(from_codec(error, response_kind));
+                let refusal = from_codec(error, response_kind);
+                return outcome.refuse_as(Refused::reading_the_input(&refusal), refusal);
             }
             Err(StaticDispatchError::Denied(denial)) => {
                 hold_failure_floor(self.inner.floor.failure_floor(), self.inner.authz_clock.as_ref(), authz_started).await;
@@ -1384,6 +1416,9 @@ struct Outcome<'a> {
     cors: Option<CorsDecoration>,
     response_kind: ResponseKind,
     credential_sentences: CredentialSentences,
+    /// The stage that refused the request, when the gateway refused it; reported once, at the end
+    /// (`crate::logging::request_refused`).
+    refused: Option<Refused>,
 }
 
 impl<'a> Outcome<'a> {
@@ -1396,6 +1431,7 @@ impl<'a> Outcome<'a> {
             error: None,
             cors: None,
             credential_sentences,
+            refused: None,
             response_kind: if *method == Method::HEAD {
                 ResponseKind::Head
             } else {
@@ -1415,6 +1451,24 @@ impl<'a> Outcome<'a> {
         self.refuse(from_handler(error, self.response_kind, ConnectionIntent::MayKeepAlive))
     }
 
+    /// [`Outcome::refuse`], remembering which stage refused, for the request's refusal event.
+    fn refuse_at(&mut self, refused: Refused, error: S3Error) -> Response<Body> {
+        self.refuse_as(Some(refused), error)
+    }
+
+    /// [`Outcome::refuse_at`] for a refusal whose stage is read off the refusal itself, and which
+    /// may be no refusal of the gateway's at all (`None`).
+    fn refuse_as(&mut self, refused: Option<Refused>, error: S3Error) -> Response<Body> {
+        self.refused = refused;
+        self.refuse(error)
+    }
+
+    /// [`Outcome::refuse_handler`], remembering which stage refused.
+    fn refuse_handler_at(&mut self, refused: Refused, error: HandlerError) -> Response<Body> {
+        self.refused = Some(refused);
+        self.refuse_handler(error)
+    }
+
     /// The one refusal a preflight can receive.
     ///
     /// `preflight_refusal_for` erases the typed cause before rendering. The closed contextual
@@ -1423,7 +1477,13 @@ impl<'a> Outcome<'a> {
     /// `Vary: Origin` rides along because the refusal is still
     /// an answer that depends on the `Origin` header: a shared cache that stored it under the URL
     /// alone would serve it to an origin that would have been allowed.
+    ///
+    /// A malformed preflight is a head the gateway could not read, and is reported as one; a
+    /// preflight the bucket's CORS configuration does not allow is that configuration's answer.
     fn refuse_preflight(&mut self, cause: PreflightRefusalCause) -> Response<Body> {
+        if cause == PreflightRefusalCause::Malformed {
+            self.refused = Some(Refused::Wire);
+        }
         let refusal = preflight_refusal_for(cause);
         let error = if refusal.code() == &ErrorCode::ACCESS_FORBIDDEN {
             S3Error::from(resolve(ErrorContext::cors_forbidden(), self.response_kind))
@@ -1445,10 +1505,10 @@ impl<'a> Outcome<'a> {
     /// Nothing here is derived from the request, and no `Retry-After` is written: the exact time
     /// the limiter recovers is the recovery rate, told to whoever asked.
     fn refuse_for_load(&mut self) -> Response<Body> {
-        self.refuse_handler(HandlerError::new(
-            ErrorCode::SLOW_DOWN,
-            "the service is not accepting this request right now",
-        ))
+        self.refuse_handler_at(
+            Refused::Governor,
+            HandlerError::new(ErrorCode::SLOW_DOWN, "the service is not accepting this request right now"),
+        )
     }
 }
 

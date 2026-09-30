@@ -31,7 +31,7 @@ for request order and `docs/assembly-order.md` for extension call counts.
 | `src/monomorphic.rs` | Concrete-backend service and type-level operation set | Building or auditing static dispatch |
 | `src/operation_mode.rs` | Dynamic/static adapters for the common pipeline | Auditing how a routed operation reaches its codec and handler |
 | `src/panic_boundary.rs` | Panic isolation for deployment-provided futures and report callbacks | An extension panic escapes the request boundary |
-| `src/logging.rs` | The `tracing` vocabulary every event shares (target, component, subsystems, event names) and the dangerous-assembly event; catalogue in `docs/observability.md`, cases in `tests/tracing_events.rs` | An event is added, renamed or leveled |
+| `src/logging.rs` | The `tracing` vocabulary every event shares (target, component, subsystems, event names), the dangerous-assembly event, the refusal and panic reporters (`request_refused`, `extension_panicked`) and the `Throttle` bounding per-request `error` events; catalogue in `docs/observability.md`, cases in `tests/tracing_events.rs` | An event is added, renamed or leveled, or a refusal is reported at the wrong stage |
 | `src/posture.rs`, `src/dialect_posture.rs`, `src/presigned_expiry_posture.rs`, `src/naming_posture.rs` | Startup-only security posture rendering and the public assembly snapshot; `dialect_posture.rs` renders the `DIALECT_POSTURE` line (claimed prefixes, caller-secret operations); `presigned_expiry_posture.rs` renders `PRESIGNED_EXPIRY_POSTURE` when a non-default presigned-lifetime rule is on; `naming_posture.rs` renders the `NAMING_POSTURE` line (slash rule, key floor) | Auditing deployment security visibility |
 | `src/request_deadline.rs` | Runtime-independent policy and failure-floor deadlines | Editing timeout mechanics used by the request pipeline |
 | `src/request_body.rs`, `src/post_object.rs`, `src/post_object/legacy.rs`, `src/builder/post_forms.rs` | Live verified body producer, terminal verdict, bounded POST Object adapter, what a RustFS-profile form stores (or refuses), and `legacy_rustfs_post_forms`, the switch that selects it (held in `ViewPolicy`, rustfs/backlog#1677 R8) | A streaming upload crosses the codec or handler boundary, or a RustFS-profile form stores differently from legacy RustFS |
@@ -50,7 +50,7 @@ for request order and `docs/assembly-order.md` for extension call counts.
 | `src/ext/authenticator_tests.rs` | The authenticator's own unit suite, split out at the 800-line limit | Changing an authenticator contract |
 | `src/ext/sigv2.rs` | `SigV2Authentication` and the SigV2 half of the built-in authenticator | A SigV2 client fails to authenticate |
 | `src/ext/authorizer.rs` | Two-stage authorization contract | Writing policy decisions |
-| `src/ext/authz_audit.rs` | Read-only decision audit sink | Recording authorization outcomes |
+| `src/ext/authz_audit.rs` | Read-only decision audit sink, and the `warn` event for a decision that refused | Recording authorization outcomes |
 | `src/ext/bucket_owner.rs` | Fail-closed bucket-owner lookup for expected-owner assertions | Wiring bucket metadata ownership into request admission |
 | `src/ext/policy.rs` | One policy snapshot per request | Two stages disagree on policy |
 | `src/ext/credentials.rs` | Credential provider and secret-safe values | Wiring IAM or STS credentials |

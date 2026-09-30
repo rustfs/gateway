@@ -141,12 +141,59 @@ pub trait AuthzAuditSink: Send + Sync + 'static {
     /// Records one decision.
     ///
     /// **Must not panic.** The framework isolates a panic so it cannot change the response, but the
-    /// event is lost. Keep the implementation to a `push` onto a queue.
+    /// event is lost, and one `error` event is written (at most one per five seconds, carrying how
+    /// many panics it stands for). Keep the implementation to a `push` onto a queue.
     fn on_decision(&self, event: &AuthzAuditEvent<'_>);
 }
 
+/// Hands one decision to the sink behind the panic boundary, and reports a decision that refused
+/// its request as a `tracing` event ([`report_refusal`]).
 pub(crate) fn emit_safely(sink: &dyn AuthzAuditSink, event: &AuthzAuditEvent<'_>) {
-    crate::panic_boundary::contain_report("authorization audit sink", || sink.on_decision(event));
+    audit_safely(sink, event);
+    report_refusal(event);
+}
+
+/// Hands one decision to the sink behind the panic boundary, and nothing else.
+fn audit_safely(sink: &dyn AuthzAuditSink, event: &AuthzAuditEvent<'_>) {
+    static PANICS: crate::logging::Throttle = crate::logging::Throttle::new();
+    crate::panic_boundary::contain_report("authorization audit sink", &PANICS, || sink.on_decision(event));
+}
+
+/// Reports a decision that refused its request — `Deny` or `Indeterminate` — as one `warn` event,
+/// as RustFS logs its own denials (`s3_authorization_denied`, rustfs/rustfs `3268c42e00`,
+/// `rustfs/src/storage/access.rs:1147`).
+///
+/// The decision is the one fact the wire hides (both are one `403`). `indeterminate` is what the
+/// pipeline decides when the policy source could not answer, what an authorizer may answer itself,
+/// and what an `x-amz-expected-bucket-owner` check that cannot be settled comes to — no bucket to
+/// check, or an owner lookup that failed — so a caller can produce it too. Neither the bucket, the
+/// key nor the access key is written — a key is caller text — and the request identifier joins this
+/// line to the event handed to the sink, which carries them.
+fn report_refusal(event: &AuthzAuditEvent<'_>) {
+    use crate::logging::{COMPONENT, EVENT_REQUEST_REFUSED, SUBSYSTEM_AUTHORIZATION, TARGET};
+
+    // What a verdict means is decided once, by `Decision::settle`; this only labels the refusal.
+    if event.decision.settle().is_ok() {
+        return;
+    }
+    let decision = event.decision.as_str();
+    let stage = match event.stage {
+        AuthzStage::Route => "route",
+        AuthzStage::Input => "input",
+    };
+    tracing::warn!(
+        target: TARGET,
+        event = EVENT_REQUEST_REFUSED,
+        component = COMPONENT,
+        subsystem = SUBSYSTEM_AUTHORIZATION,
+        result = "refused",
+        decision,
+        authorization_stage = stage,
+        request_id = %event.request_id,
+        operation = event.operation,
+        action = event.action,
+        "request refused by authorization"
+    );
 }
 
 pub(crate) fn emit_input_safely(
@@ -155,8 +202,10 @@ pub(crate) fn emit_input_safely(
     visibility: Option<(&AuthzRequest<'_>, Decision)>,
 ) {
     emit_safely(sink, event);
+    // The visibility verdict refuses nothing — it decides whether a missing object reads as missing
+    // or as denied — so it is audited and not reported as a refusal.
     if let Some((request, decision)) = visibility {
-        emit_safely(
+        audit_safely(
             sink,
             &AuthzAuditEvent {
                 request_id: event.request_id,
