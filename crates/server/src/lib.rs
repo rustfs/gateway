@@ -35,6 +35,7 @@ mod driver;
 mod io;
 pub mod layers;
 mod listener;
+mod preface;
 mod request_capacity;
 #[cfg(any(target_os = "linux", target_os = "android", target_vendor = "apple"))]
 mod sendfile;

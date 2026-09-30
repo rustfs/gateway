@@ -8,7 +8,8 @@ Ring-1 generic HTTP runtime. Start at `src/lib.rs`; read only the row needed for
 | `src/config.rs` | Serializable tuning, defaults and validation | A knob is missing or accepts an unsafe value |
 | `src/listener.rs` | socket2 bind, tuning and read-back | Bind family or socket option is wrong |
 | `src/tls.rs` | Atomic TLS config, advertised ALPN protocols and fail-closed reload | New handshakes see the wrong certificate or protocol |
-| `src/io.rs` | Write-progress and connection-idle timers, and the lingering read on close | A slow reader is killed or never released, or a peer sees `ECONNRESET` where a close was due |
+| `src/io.rs` | Write-progress and connection-idle timers (request activity only, on HTTP/2), and the lingering read on close | A slow reader is killed or never released, an idle connection never closes, or a peer sees `ECONNRESET` where a close was due |
+| `src/preface.rs` | Tells an HTTP/2 connection from an HTTP/1.1 one by its first octets | Idle HTTP/2 traffic is treated as request activity, or the reverse |
 | `src/io_sendfile_tests.rs` | Real-socket controls for sendfile writable-readiness handoff | Sendfile retries spin, stall, or lose a writable transition |
 | `src/conn.rs` | Admission and connection lifecycle | Accept limits or shutdown sequencing fails |
 | `src/accept_error.rs` | Classifies a failed accept as connection-local, a resource shortage to wait out, or a broken listener | The listener exits on a transient accept error, or keeps running on a broken socket |
@@ -31,5 +32,6 @@ Ring-1 generic HTTP runtime. Start at `src/lib.rs`; read only the row needed for
 | `tests/server_runtime/global_admission.rs` | a-srv-0014 global-limit refusal and permit reuse, with a scheduling-stall control on a frozen fixture clock | The global connection limit accepts early, or a host stall expires the permit holder |
 | `tests/server_runtime/accept_recovery.rs` | Real exhausted descriptor table: the listener survives, backs off and serves again | A failed accept ends the listener or spins |
 | `tests/tls_h2.rs` | Live TLS and h2 cases | Reload, TLS admission or h2 flow control regresses |
+| `tests/tls_h2/idle.rs` | HTTP/2 idleness while PINGs flow, cleartext and TLS, with in-flight, queued and frequent-request controls | An idle HTTP/2 connection never closes, or a busy one is cut |
 | `tests/tls_h2/alpn.rs` | ALPN negotiation and the protocol it selects | A TLS client cannot negotiate h2, or a negotiated protocol is not enforced |
 | `tests/lingering_close.rs` | How a refused connection ends, on a real socket: closed, open or reset | A client reads `ECONNRESET` instead of the refusal, or a close costs a connection slot |

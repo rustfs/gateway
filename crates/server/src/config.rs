@@ -88,6 +88,7 @@ pub struct ServerConfig {
     /// Maximum gap between successful response writes. Increasing tolerates stalls; decreasing releases stuck writers sooner.
     pub write_progress_timeout: Duration,
     /// Maximum no-I/O gap between requests. Increasing preserves reuse; decreasing releases idle connections sooner.
+    /// On HTTP/2 only request activity counts: PING, SETTINGS and flow-control traffic does not keep a connection open.
     pub keep_alive_idle: Duration,
     /// Total time a closing connection spends reading and discarding what the peer is still
     /// sending, so that the drop is a close and not a reset. Increasing tolerates peers with more
