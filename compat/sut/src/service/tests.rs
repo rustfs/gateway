@@ -793,6 +793,10 @@ mod signed_coverage_tests;
 /// RustFS's SigV4 header guard, answered before routing as legacy RustFS answers it (rustfs/gateway#1120).
 mod sigv4_header_guard_tests;
 
+/// The credential-scope services the RustFS profile verifies on every route, as legacy RustFS
+/// does (rustfs/gateway#1130).
+mod signing_service_tests;
+
 /// Request-checksum failures answered with legacy RustFS's `BadDigest` (rustfs/gateway#1057), and
 /// what each refusal leaves in storage.
 mod bad_digest_tests;

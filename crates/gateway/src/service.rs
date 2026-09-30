@@ -745,6 +745,8 @@ impl S3Service {
         // payload mode; an anonymous one has only the unsigned streaming mode its head declares.
         let mut framing_mode: Option<PayloadMode> = None;
         let mut body_digest = BodyDigestObligation::None;
+        // Legacy RustFS's words for a RustFS-profile refusal, when the authenticator published them.
+        let mut legacy = None;
         let (authentication, signature_mismatch) = match self.inner.floor.admit(view, M::floor(&op), now) {
             Ok(Admission::Anonymous(evidence)) => {
                 framing_mode = match crate::payload_header::anonymous_framing(&headers, self.inner.decode_anonymous_framing) {
@@ -789,7 +791,8 @@ impl S3Service {
                     // neither survives `Verdict` — see `crate::ext::ChunkVerification`.
                     .with_chunk_sink(&chunk_sink);
                     let result = self.inner.authenticator.authenticate(&question).await;
-                    let signature_mismatch = question.into_signature_mismatch();
+                    let (signature_mismatch, published_legacy) = question.into_published();
+                    legacy = published_legacy;
                     match result {
                         Ok(authentication) => (authentication, signature_mismatch),
                         Err(_) => {
@@ -854,6 +857,10 @@ impl S3Service {
         let caller_secret = caller_secret.filter(|_| hands_caller_secret || self.inner.caller_secret_every_operation);
         let verdict = SecurityFloor::seal_verdict(verdict, presence);
         if let Some(error) = verdict.rejection() {
+            // A RustFS-profile reading's refusal, in legacy RustFS's words (rustfs/gateway#1130).
+            if let Some(legacy) = legacy {
+                return outcome.refuse(legacy.render(&error, response_kind, wire.framing().has_body()));
+            }
             if error == AuthError::AuthorizationHeaderMalformed {
                 let context = match scope_rejection.and_then(|rejection| rejection.expected_region().cloned()) {
                     Some(region) => {
