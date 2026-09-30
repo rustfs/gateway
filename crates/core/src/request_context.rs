@@ -60,7 +60,7 @@
 
 use core::fmt;
 
-use http::{HeaderMap, Method};
+use http::{HeaderMap, Method, Version};
 use rustfs_gateway_http::{HeaderView, TransportExtensions, WireRequest};
 use rustfs_gateway_sig::{Identity, SecretBytes, SigFamily, SigIdentity, SigLocation, SigService, Verdict, VerifiedScope};
 use rustfs_gateway_types::{BucketName, ObjectKey};
@@ -265,9 +265,12 @@ impl fmt::Debug for RequestPrincipal {
 pub struct RequestContextView {
     operation: &'static str,
     method: Method,
+    version: Version,
     raw_path: Box<str>,
     raw_query: Box<str>,
     host: Box<str>,
+    target_scheme: Option<Box<str>>,
+    target_authority: Option<Box<str>>,
     addressed: Addressed,
     headers: HeaderMap,
     transport_extensions: TransportExtensions,
@@ -318,9 +321,12 @@ impl RequestContextView {
         Some(Self {
             operation,
             method: wire.method().clone(),
+            version: wire.version(),
             raw_path: Box::from(wire.raw_path().as_str()),
             raw_query: Box::from(wire.query().as_str()),
             host: Box::from(wire.host().as_str()),
+            target_scheme: wire.target_scheme().map(Box::from),
+            target_authority: wire.target_authority().map(Box::from),
             addressed,
             headers,
             transport_extensions: wire.transport_extensions().clone(),
@@ -358,9 +364,12 @@ impl RequestContextView {
         Self {
             operation,
             method: Method::GET,
+            version: Version::HTTP_11,
             raw_path: Box::from("/"),
             raw_query: Box::from(""),
             host: Box::from(""),
+            target_scheme: None,
+            target_authority: None,
             addressed: Addressed {
                 style: AddressingStyle::Path,
                 bucket: None,
@@ -402,6 +411,32 @@ impl RequestContextView {
     #[must_use]
     pub fn host(&self) -> &str {
         &self.host
+    }
+
+    /// The HTTP version the request arrived on; `HTTP/1.1` for a detached context.
+    #[must_use]
+    pub const fn version(&self) -> Version {
+        self.version
+    }
+
+    /// The request target's scheme as the transport handed it over: present for an absolute-form
+    /// HTTP/1.1 target and for an HTTP/2 request, absent for an origin-form target and for a
+    /// detached context.
+    ///
+    /// For a handler that must rebuild the target it was sent — the RustFS adapter hands it to the
+    /// legacy request URI (rustfs/gateway#1148). The host the request was routed and authorized by
+    /// is [`Self::host`].
+    #[must_use]
+    pub fn target_scheme(&self) -> Option<&str> {
+        self.target_scheme.as_deref()
+    }
+
+    /// The request target's authority as the transport handed it over, for the reason
+    /// [`Self::target_scheme`] is: present for an absolute-form HTTP/1.1 target and for an HTTP/2
+    /// request with `:authority`, which carries no `Host` line.
+    #[must_use]
+    pub fn target_authority(&self) -> Option<&str> {
+        self.target_authority.as_deref()
     }
 
     /// How the request named its bucket.
@@ -503,9 +538,12 @@ impl fmt::Debug for RequestContextView {
         f.debug_struct("RequestContextView")
             .field("operation", &self.operation)
             .field("method", &self.method)
+            .field("version", &self.version)
             .field("raw_path", &self.raw_path)
             .field("raw_query_bytes", &self.raw_query.len())
             .field("host", &self.host)
+            .field("target_scheme", &self.target_scheme)
+            .field("target_authority", &self.target_authority.is_some())
             .field("addressed", &self.addressed)
             .field("header_names", &HeaderNames(&self.headers))
             .field("principal", &self.principal)

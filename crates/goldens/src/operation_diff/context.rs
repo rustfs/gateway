@@ -45,6 +45,7 @@ mod body_parity;
 mod clock_tests;
 mod error_parity;
 mod get_bucket_location;
+mod legacy_target;
 mod put_object;
 
 use std::future::Future;
@@ -55,9 +56,9 @@ use bytes::Bytes;
 use http::{Extensions, HeaderMap, HeaderName, HeaderValue, Method, Uri};
 use rustfs_gateway::dto;
 use rustfs_gateway::{
-    Authorizer, AuthzRequest, BoxFuture, ClockSkewAck, Credentials, Decision, FixedClock, Handler, HandlerContext, HandlerResult,
-    HostQuery, HostResolver, InputAuthzRequest, InputDecisions, PathStyleOnly, Req, RequestContext, RequestContextView,
-    ResolvedHost, Resp, S3Service, ServiceBuilder, SigV4Authenticator, StaticCredentials, VirtualHostStyle,
+    Authorizer, AuthzRequest, BoxFuture, ClockSkewAck, Credentials, Decision, FixedClock, HostQuery, HostResolver,
+    InputAuthzRequest, InputDecisions, PathStyleOnly, RequestContext, ResolvedHost, S3Service, ServiceBuilder,
+    SigV4Authenticator, StaticCredentials, VirtualHostStyle,
 };
 use rustfs_gateway_http::{Limits, RawHost, WireRequest};
 use rustfs_gateway_sig::{
@@ -65,7 +66,7 @@ use rustfs_gateway_sig::{
     SigningScope,
 };
 
-use self::adapter_request::adapter_request;
+use self::adapter_request::{AdapterBackend, Recorded, adapter_request};
 use self::answers::answers;
 use super::{HOST, block_on, oracle, s3s};
 
@@ -111,6 +112,11 @@ pub(crate) struct ContextRequest {
     secret_key: &'static str,
     /// Whether the gateway authenticator verifies any scope region (ADR-0023).
     any_region: bool,
+    /// The scheme of an HTTP/2 target, which names its host in `:authority` alone.
+    http2: Option<&'static str>,
+    /// Whether the gateway adapter hands the request target over as the RustFS profile does
+    /// (`request_to_legacy`, rustfs/gateway#1148).
+    legacy_target: bool,
 }
 
 impl ContextRequest {
@@ -131,6 +137,8 @@ impl ContextRequest {
             access_key: ACCESS_KEY,
             secret_key: SECRET_KEY,
             any_region: false,
+            http2: None,
+            legacy_target: false,
         }
     }
 
@@ -227,9 +235,26 @@ impl ContextRequest {
         self
     }
 
+    /// Sends the request over HTTP/2: the target carries `scheme` and the host, as `:scheme` and
+    /// `:authority` do, and no `Host` line is sent. The request is signed over the same host.
+    pub(crate) fn http2(mut self, scheme: &'static str) -> Self {
+        self.http2 = Some(scheme);
+        self
+    }
+
+    /// Hands the request target to the adapter as the RustFS profile does (`request_to_legacy`).
+    pub(crate) fn legacy_target(mut self) -> Self {
+        self.legacy_target = true;
+        self
+    }
+
     fn target(&self) -> String {
         let mut target = String::new();
-        if self.absolute_form {
+        if let Some(scheme) = self.http2 {
+            target.push_str(scheme);
+            target.push_str("://");
+            target.push_str(&self.host);
+        } else if self.absolute_form {
             target.push_str("http://");
             target.push_str(&self.host);
         }
@@ -243,8 +268,17 @@ impl ContextRequest {
         target
     }
 
-    /// The header lines on the wire, signed at `now` when the request is signed.
+    /// The header lines on the wire, signed at `now` when the request is signed. An HTTP/2 request
+    /// sends no `Host` line: its host is the target's authority, which the signature covers.
     pub(crate) fn wire_headers(&self, now: RequestNow) -> Result<HeaderMap, String> {
+        let mut headers = self.signed_headers(now)?;
+        if self.http2.is_some() {
+            headers.remove(http::header::HOST);
+        }
+        Ok(headers)
+    }
+
+    fn signed_headers(&self, now: RequestNow) -> Result<HeaderMap, String> {
         let mut headers = HeaderMap::new();
         headers.insert(http::header::HOST, HeaderValue::from_str(&self.host).map_err(|error| error.to_string())?);
         if self.method == Method::PUT {
@@ -278,6 +312,9 @@ impl ContextRequest {
 
     pub(crate) fn http_head(&self, headers: &HeaderMap) -> http::request::Builder {
         let mut builder = http::Request::builder().method(self.method.clone()).uri(self.target());
+        if self.http2.is_some() {
+            builder = builder.version(http::Version::HTTP_2);
+        }
         for (name, value) in headers {
             builder = builder.header(name, value);
         }
@@ -327,62 +364,6 @@ pub(crate) struct GatewaySide {
     pub(crate) wire: WireRequest<()>,
     /// The host classification, for an input decode.
     pub(crate) resolved: ResolvedHost,
-}
-
-/// What one handler call recorded.
-struct Recorded {
-    operation: &'static str,
-    converted: Result<s3s::S3Request<()>, String>,
-    bucket: Option<String>,
-    key: Option<String>,
-}
-
-/// A gateway backend that records, for the one call it gets, what [`adapter_request`] made of the
-/// handler's request context.
-struct AdapterBackend {
-    recorded: Arc<Mutex<Option<Recorded>>>,
-}
-
-impl AdapterBackend {
-    fn record(&self, context: &RequestContextView) {
-        let recorded = Recorded {
-            operation: context.operation(),
-            converted: adapter_request(context),
-            bucket: context.bucket().map(|bucket| bucket.as_str().to_owned()),
-            key: context.key().map(|key| key.as_str().to_owned()),
-        };
-        if let Ok(mut slot) = self.recorded.lock() {
-            *slot = Some(recorded);
-        }
-    }
-}
-
-impl Handler<dto::PutObject> for AdapterBackend {
-    async fn call(&self, request: Req<dto::PutObject>) -> HandlerResult<dto::PutObject> {
-        self.record(request.context());
-        Ok(Resp::new(dto::PutObjectOutput::default()))
-    }
-
-    async fn call_with_context(&self, request: Req<dto::PutObject>, _context: HandlerContext) -> HandlerResult<dto::PutObject> {
-        self.record(request.context());
-        Ok(Resp::new(dto::PutObjectOutput::default()))
-    }
-}
-
-impl Handler<dto::GetBucketLocation> for AdapterBackend {
-    async fn call(&self, request: Req<dto::GetBucketLocation>) -> HandlerResult<dto::GetBucketLocation> {
-        self.record(request.context());
-        Ok(Resp::new(dto::GetBucketLocationOutput::default()))
-    }
-
-    async fn call_with_context(
-        &self,
-        request: Req<dto::GetBucketLocation>,
-        _context: HandlerContext,
-    ) -> HandlerResult<dto::GetBucketLocation> {
-        self.record(request.context());
-        Ok(Resp::new(dto::GetBucketLocationOutput::default()))
-    }
 }
 
 /// Allows both stages: this diff is about what a handler sees, not about policy. RustFS's own
@@ -463,6 +444,7 @@ fn gateway_service(
     }
     let backend = Arc::new(AdapterBackend {
         recorded: Arc::clone(recorded),
+        legacy_target: request.legacy_target,
     });
     let mut builder = verifying_at(ServiceBuilder::new(), now)
         .authenticator(authenticator)
