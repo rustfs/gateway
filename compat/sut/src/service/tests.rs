@@ -827,6 +827,9 @@ mod legacy_selection_tests;
 /// The object names RustFS's storage refuses, refused as RustFS refuses them (rustfs/gateway#1145).
 mod legacy_storage_names_tests;
 
+/// The keys RustFS's handlers and disk refuse, refused as RustFS does (rustfs/gateway#1153).
+mod legacy_key_rule_tests;
+
 /// Successful answers' heads, written as legacy RustFS writes them (rustfs/gateway#1148).
 mod legacy_heads_tests;
 
