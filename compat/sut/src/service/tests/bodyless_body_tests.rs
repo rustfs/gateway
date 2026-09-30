@@ -31,10 +31,23 @@
 
 use super::*;
 
-/// A body that counts how many of its bytes were ever polled.
-struct Counted {
+/// A body that counts how many of its bytes were ever polled, and whose length the transport does
+/// not know.
+pub(super) struct Counted {
     bytes: Option<Bytes>,
     polled: Arc<AtomicU64>,
+}
+
+impl Counted {
+    /// `bytes` as one frame, and the counter of what was polled.
+    pub(super) fn new(bytes: Bytes) -> (Self, Arc<AtomicU64>) {
+        let polled = Arc::new(AtomicU64::new(0));
+        let body = Self {
+            bytes: Some(bytes),
+            polled: Arc::clone(&polled),
+        };
+        (body, polled)
+    }
 }
 
 impl http_body::Body for Counted {
@@ -106,11 +119,7 @@ fn unsigned_as(
     for (name, value) in signed.headers() {
         request = request.header(name, value);
     }
-    let polled = Arc::new(AtomicU64::new(0));
-    let body = Counted {
-        bytes: Some(body),
-        polled: Arc::clone(&polled),
-    };
+    let (body, polled) = Counted::new(body);
     let request = request
         .header(http::header::CONTENT_LENGTH, length)
         .body(body)
@@ -128,7 +137,7 @@ fn unsigned(
     unsigned_as(MAIN_SECRET, method, target, extra, length, body)
 }
 
-async fn answer(service: &S3Service, request: http::Request<Counted>) -> WireResponse {
+pub(super) async fn answer(service: &S3Service, request: http::Request<Counted>) -> WireResponse {
     collect(service.call(request).await).await.expect("a finite response")
 }
 

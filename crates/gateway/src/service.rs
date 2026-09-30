@@ -632,6 +632,8 @@ impl S3Service {
         // every await below while the body is owned separately.
         let mut pending = None;
         let wire = wire.map_body(|body| pending = Some(body));
+        // What the transport knows of the body's length, before anything reads it.
+        let transport_length = pending.as_ref().and_then(|body| http_body::Body::size_hint(body).exact());
 
         // Two decisions, one call. The bucket has one source — the host's, when the resolver read
         // one out of the host, and the path's otherwise — and the name it produces goes through
@@ -735,6 +737,7 @@ impl S3Service {
         // Kept out of the `match` so the read at the bottom can consult it. A custom admission has no
         // payload mode; an anonymous one has only the unsigned streaming mode its head declares.
         let mut framing_mode: Option<PayloadMode> = None;
+        let mut signed_length = crate::builder::buffered_lengths::SignedLength::default();
         let mut body_digest = BodyDigestObligation::None;
         let (authentication, signature_mismatch) = match self.inner.floor.admit(view, M::floor(&op), now) {
             Ok(Admission::Anonymous(evidence)) => {
@@ -751,6 +754,7 @@ impl S3Service {
                     Ok(declared) => declared,
                     Err(refusal) => return outcome.refuse(refusal.render(response_kind, wire.framing().has_body())),
                 };
+                signed_length = crate::builder::buffered_lengths::SignedLength::of(location, &payload, obligation);
                 body_digest = self.inner.view_policy.bodyless_digest.apply(request_body_mode, obligation);
                 framing_mode = Some(payload.clone());
                 #[cfg(feature = "dangerous-replace-signature-verifier")]
@@ -1141,7 +1145,13 @@ impl S3Service {
                     let integrity = crate::integrity::resolve_in(body_meta, &body_wire.headers(), body_wire.method(), operation)?;
                     let object_ceiling = crate::gate::object_ceiling_for(request_body_mode, operation, state.config.config());
                     let sealed = sealed.with_object_ceiling(object_ceiling);
-                    sealed
+                    let (framed, lengths) = (ingest.is_some(), view_policy.buffered_lengths);
+                    if let Some(refusal) =
+                        lengths.before_read(request_body_mode, framed, signed_length, declared_length, transport_length)
+                    {
+                        return Err(refusal);
+                    }
+                    let handed = sealed
                         .handoff(
                             &metadata_admission,
                             (request_body_mode, ceilings, body_deadlines, body_quota),
@@ -1149,7 +1159,13 @@ impl S3Service {
                             body_digest,
                             integrity,
                         )
-                        .await?
+                        .await?;
+                    if let (rustfs_gateway_core::RequestBody::Buffered(bytes), _) = &handed
+                        && let Some(refusal) = lengths.after_read(request_body_mode, framed, declared_length, bytes)
+                    {
+                        return Err(refusal);
+                    }
+                    handed
                 }
                 AcceptedBody::PostObject(post) => (*post).handoff(&metadata_admission)?,
             };

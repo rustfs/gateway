@@ -75,6 +75,7 @@ pub(crate) mod post_forms;
 use super::ServiceBuilder;
 use super::bodyless_bodies::BodylessBodies;
 use super::bodyless_digest::BodylessDigest;
+use super::buffered_lengths::BufferedLengths;
 use super::client_quirks::ChecksumWaiver;
 use super::credential_sentences::CredentialSentences;
 use super::legacy_heads::AnswerHeads;
@@ -153,6 +154,8 @@ pub(crate) struct ViewPolicy {
     pub(crate) bodyless_digest: BodylessDigest,
     /// Whether the body of an operation that takes none is read (`super::bodyless_bodies`).
     pub(crate) bodyless_bodies: BodylessBodies,
+    /// Whether a buffered body legacy RustFS cannot size is refused (`super::buffered_lengths`).
+    pub(crate) buffered_lengths: BufferedLengths,
     head_refusals_without_length: bool,
     /// Which object headers a `304` keeps (`super::not_modified_headers`).
     pub(crate) not_modified_headers: super::not_modified_headers::NotModifiedHeaders,
