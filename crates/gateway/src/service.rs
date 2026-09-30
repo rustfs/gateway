@@ -370,6 +370,12 @@ impl S3Service {
                 runtime,
             )
             .await;
+        // The RustFS profile's `304` carries legacy RustFS's object headers (`builder/not_modified_headers.rs`).
+        let status = response.status();
+        self.inner
+            .view_policy
+            .not_modified_headers
+            .apply(outcome.operation, status, response.headers_mut());
         // The CORS decoration for an ordinary request, applied here because it belongs on
         // **every** answer the pipeline produced once authorisation was granted — the `404` and
         // the `500` included. A browser cannot read a response it was not granted access to, so
@@ -418,6 +424,9 @@ impl S3Service {
             response = outcome.refuse_handler(error.into());
         }
         let corrections = crate::invariants::enforce(&mut response, &method);
+        if method == Method::HEAD && outcome.error.is_some() && self.inner.view_policy.head_refusals_without_length() {
+            response.headers_mut().remove(http::header::CONTENT_LENGTH);
+        }
         if corrections.removed_forbidden_body() {
             self.inner.response_body_corrections.fetch_add(1, Ordering::Relaxed);
         }

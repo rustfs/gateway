@@ -700,6 +700,7 @@ gateway_modules = (
     "middleware",
     "monomorphic",
     "naming_policy",
+    "object_attributes_etag",
     "object_lock_intent",
     "observer_panic",
     "operation_registry_hot_update",

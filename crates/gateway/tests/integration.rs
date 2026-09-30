@@ -108,6 +108,8 @@ mod middleware;
 mod monomorphic;
 #[path = "naming_policy.rs"]
 mod naming_policy;
+#[path = "object_attributes_etag.rs"]
+mod object_attributes_etag;
 #[path = "object_lock_intent.rs"]
 mod object_lock_intent;
 #[path = "observer_panic.rs"]

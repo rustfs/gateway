@@ -173,6 +173,8 @@ impl GatewaySeam {
             .clamp_oversized_max_keys()
             .leave_anonymous_streaming_payloads_undecoded()
             .sign_presigned_payloads_as_unsigned()
+            .answer_head_refusals_without_content_length()
+            .answer_not_modified_with_legacy_rustfs_headers()
             .answer_checksum_failures_with_bad_digest()
             .accept_mismatched_payload_digests_without_a_body()
             .answer_body_refusals_with_legacy_rustfs_sentences()

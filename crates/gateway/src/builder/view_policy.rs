@@ -144,6 +144,9 @@ pub(crate) struct ViewPolicy {
     pub(crate) post_forms: post_forms::PostFormGrammar,
     /// Whether a bodyless request's signed digest is compared (`super::bodyless_digest`).
     pub(crate) bodyless_digest: BodylessDigest,
+    head_refusals_without_length: bool,
+    /// Which object headers a `304` keeps (`super::not_modified_headers`).
+    pub(crate) not_modified_headers: super::not_modified_headers::NotModifiedHeaders,
     clamp_max_keys: bool,
     integrity_codes: IntegrityCodes,
     presigned_payload_unsigned: bool,
@@ -219,6 +222,12 @@ impl ViewPolicy {
         self.body_sentences.restyle(refusal)
     }
 
+    /// Whether a refused `HEAD` goes out without the `Content-Length` of the document it does not
+    /// carry ([`ServiceBuilder::answer_head_refusals_without_content_length`]).
+    pub(crate) const fn head_refusals_without_length(&self) -> bool {
+        self.head_refusals_without_length
+    }
+
     /// A refusal of the request head's framing, answered with this assembly's sentences.
     pub(crate) fn wire_refusal(self, reject: WireReject) -> S3Error {
         self.body_sentences.restyle(from_wire_reject(reject))
@@ -270,6 +279,22 @@ impl ServiceBuilder {
     #[must_use]
     pub fn answer_checksum_failures_with_bad_digest(mut self) -> Self {
         self.view_policy.integrity_codes = IntegrityCodes::RustFs;
+        self
+    }
+
+    /// Answers a refused `HEAD` with no `Content-Length`, as legacy RustFS does
+    /// (rustfs/gateway#1120).
+    ///
+    /// Every `HEAD` answer already goes out without content (the response invariants). By default
+    /// a refusal keeps the length of the error document a `GET` would have carried — RFC 9110
+    /// §9.3.2 lets a server send the header, and the core does. Legacy RustFS writes the document,
+    /// then drops it for a `HEAD` without ever stating its length (`HeadRequestBodyFixLayer`,
+    /// `rustfs/src/server/layer.rs:1248-1316`), so its refused `HEAD` carries `Content-Type` and no
+    /// `Content-Length`; this switch does the same. A `HEAD` that succeeds keeps the length it
+    /// reports, whatever the setting.
+    #[must_use]
+    pub fn answer_head_refusals_without_content_length(mut self) -> Self {
+        self.view_policy.head_refusals_without_length = true;
         self
     }
 
