@@ -185,6 +185,10 @@ refused(lambda: gen.insert_sites(FakeSource({HANDLER: PRELUDE.replace("&Handler(
         "unreadable loop row")
 refused(lambda: gen.insert_sites(FakeSource({HANDLER: PRELUDE.replace("&Handler(Route::Create)", "&Handler(Route::Create, 1)")})),
         "unreadable loop row")
+refused(lambda: gen.insert_sites(FakeSource({HANDLER: PRELUDE.replace("&Handler(Route::Create)", "choose(&Handler(Route::Create))")})),
+        "unreadable loop row")
+refused(lambda: gen.insert_sites(FakeSource({HANDLER: PRELUDE.replace("&Handler(Route::Create)", "AdminOperation(&PlainHandler {})")})),
+        "unreadable loop row")
 refused(lambda: gen.insert_sites(FakeSource({HANDLER: PRELUDE.replace("AdminOperation(handler)", "AdminOperation(other)")})),
         "does not bind the loop's own names")
 
