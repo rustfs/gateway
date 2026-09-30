@@ -258,6 +258,10 @@ pub(crate) fn build_service(
             // RustFS, built with MinIO support, reads a versioning or object-lock body that is the
             // bare word `Enabled` as the document it stands for (rustfs/backlog#1677, R6).
             .accept_minio_body_literals()
+            // RustFS refuses a swapped SigV4 algorithm token, an unreadable SigV4 header and an
+            // unsigned `x-amz-*` header before it routes the request, with its own answers
+            // (GHSA-xm99, GHSA-g8w9; rustfs/gateway#1120).
+            .refuse_unsigned_amz_headers_before_routing()
             // RustFS answers a body refusal with the fixed sentence its API layer writes for the
             // code, and an upload declared past 5 GiB with its admission's (rustfs/gateway#1099).
             .answer_body_refusals_with_legacy_rustfs_sentences()

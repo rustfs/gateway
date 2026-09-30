@@ -576,6 +576,11 @@ impl S3Service {
                 }
             }
         }
+        // The RustFS profile's SigV4 header guard, where legacy RustFS asks it: before routing.
+        let guard = self.inner.view_policy.sigv4_header_guard();
+        if let Some(refusal) = guard.refusal(&headers, wire.query().as_str(), wire.method(), &resolved, response_kind) {
+            return outcome.refuse(refusal);
+        }
 
         let resolver = &*self.inner.host_resolver;
         let resolved = match crate::legacy_addressing::classify(&self.inner.names, resolver, router, &wire, resolved) {
