@@ -6,7 +6,7 @@ Agent entry point. File → responsibility → when you need to open it.
 |---|---|---|
 | `README.md` | Scope fence and supported-operation summary. | Deciding whether this reference backend fits a use case. |
 | `src/lib.rs` | Filesystem paths, capability authority, served region and owner, and five multipart handlers. | Changing shared storage behavior or the registered operation set. |
-| `src/deletes.rs` | `DeleteObjects`: every requested key through the single-key deletion, reported once as deleted or as an error; quiet mode. | Changing batch deletion or its per-key report. |
+| `src/deletes.rs` | `DeleteObjects`: every requested key through the single-key deletion, reported once as deleted or as an error; quiet mode; the keys a stood-in storage refuses answered alone and left alone (`refusing_batch_deletes_of`). | Changing batch deletion or its per-key report. |
 | `src/post_object.rs` | Browser `POST` Object: the accepted form's file, media type and metadata stored through ordinary publication. | Changing what a form upload stores. |
 | `src/content_headers.rs` | The six stored representation headers, the default media type, the request reader macro, and the `headers/1` section grammar. | Changing which headers an object stores or how they persist. |
 | `src/copy.rs` | Authorized source selection, source conditions, metadata directives, self-copy classification, and destination publication. | Changing server-side object-copy behavior. |
@@ -54,7 +54,7 @@ Agent entry point. File → responsibility → when you need to open it.
 | `tests/crud/object_metadata.rs` | Restarted `x-amz-meta-*` persistence, initiation-time multipart metadata, size and storability refusals, and the pre-section record fixture. | Changing user-metadata persistence or the record's compatibility story. |
 | `tests/crud/content_headers.rs` | Restarted `Content-Type` and standard stored headers, the untyped default, per-version answers, multipart initiation headers, and COPY/REPLACE. | Changing stored representation headers. |
 | `tests/crud/list_buckets.rs` | Bucket census order, owner, prefix/region filters, `max-buckets` paging, and cursor/page-size refusals. | Changing `ListBuckets`. |
-| `tests/crud/delete_objects.rs` | Batch deletion across versioning states, quiet mode, explicit versions, per-key errors, and whole-request refusals. | Changing `DeleteObjects` or single-key deletion. |
+| `tests/crud/delete_objects.rs` | Batch deletion across versioning states, quiet mode, explicit versions, per-key errors, whole-request refusals, and refused keys answered alone with no delete marker. | Changing `DeleteObjects` or single-key deletion. |
 | `tests/crud/write_attributes.rs` | `PutObject` tags and storage class, `CopyObject` class and tagging directive, and the bare copy-source `If-None-Match` refusal. | Changing what a write or copy stores besides bytes and metadata. |
 | `tests/crud/post_object.rs` | Anonymous form uploads stored and read back, versions reported, storage refusals, and a SigV4-signed form without a `bucket` field bound to its routed bucket. | Changing POST Object storage or the signed-form path. |
 | `tests/crud/object_tagging.rs` | Restarted current/version tag operations and lifecycle filter consumption. | Changing object tags or tag-selected lifecycle expiration. |

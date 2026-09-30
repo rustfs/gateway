@@ -55,7 +55,10 @@ pub(crate) fn open_backend(options: &Options) -> io::Result<FsBackend> {
         // RustFS ignores a creation's `LocationConstraint` — minio-java's explicit us-east-1
         // included — and creates the bucket in its own region; so does this launcher (#914).
         .with_region_match_policy(RegionMatchPolicy::IgnoreConstraint)
-        .with_owner(owner_id, display_name);
+        .with_owner(owner_id, display_name)
+        // RustFS's storage answers a batch delete's key it cannot hold on its own and deletes the
+        // rest; every other operation is refused in front of the backend (#1145).
+        .refusing_batch_deletes_of(crate::storage_names::rustfs_storage_refuses);
     match options.lifecycle_debug_interval {
         Some(interval) => backend.with_lifecycle_debug_interval(interval),
         None => Ok(backend),
@@ -299,6 +302,10 @@ pub(crate) fn build_service(
             // And released once the backend deleted the bucket, so the name is free again.
             .op_layer::<dto::DeleteBucket, _>(ReleasedNames::new(Arc::clone(owners))),
     );
+    // RustFS's storage refuses a key or a listing prefix with a `.` or `..` segment, `//` or a NUL,
+    // in its handlers and mostly after the bucket lookup; this backend would store them, so the
+    // launcher answers them as RustFS does before the backend is reached (#1145).
+    let builder = crate::storage_names::refuse_where_rustfs_storage_does(builder, backend);
     // No framework deadline, as RustFS runs none; RustFS's ceiling on an upload's object, and the
     // wire ceiling widened to the framing that object may carry.
     let settings = rustfs_service_config()?.with_upload_object_ceiling(RUSTFS_MAX_SINGLE_UPLOAD_BYTES);

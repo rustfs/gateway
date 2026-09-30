@@ -16,8 +16,10 @@
 //!
 //! Responsible for: every requested key being reported exactly once, the same outcome a single
 //! `DeleteObject` would have had — removal when unversioned, a delete marker when enabled, an
-//! explicit version removed by id — quiet mode reporting only failures, and a missing bucket or a
-//! body without its required integrity header refusing the whole request.
+//! explicit version removed by id — quiet mode reporting only failures, a missing bucket or a
+//! body without its required integrity header refusing the whole request, and a key the backend
+//! was told its storage refuses answered on its own and left alone
+//! (`FsBackend::refusing_batch_deletes_of`).
 //! NOT responsible for: the XML grammar or the 1000-key ceiling, which the framework enforces.
 //! Upstream: the shared CRUD service fixture. Downstream: the crate verification gate.
 
@@ -259,4 +261,69 @@ async fn one_failing_key_does_not_fail_the_batch() {
     assert!(text.contains("<Error><Key>bad</Key>"), "{text}");
     assert!(text.contains("<Code>InvalidRequest</Code>"), "{text}");
     assert_eq!(status_of(&service, "/partial/good").await, 404);
+}
+
+/// Stands in for a storage that refuses some keys outright.
+fn refused_by_storage(key: &str) -> bool {
+    key.starts_with("refused/")
+}
+
+fn refusing_service(root: &TestRoot) -> S3Service {
+    let backend = FsBackend::open_with_clock(&root.0, Arc::new(FixedClock::at_unix_seconds(SIGNED_AT_SECONDS)))
+        .expect("a usable test root")
+        .refusing_batch_deletes_of(refused_by_storage);
+    service_with_backend(Arc::new(backend)).1
+}
+
+/// Negative — a key the backend was told its storage refuses is its own `InvalidArgument` error
+/// entry and is left alone, even stored; the other keys are deleted as before, and an enabled
+/// bucket records a delete marker for none of the refused keys.
+#[tokio::test]
+async fn n_a_refused_key_is_answered_alone_and_left_alone() {
+    let root = TestRoot::new();
+    let service = refusing_service(&root);
+    create_bucket(&service, "refusing").await;
+    enable_versioning(&service, "refusing").await;
+    put(&service, "/refusing/refused/stored").await;
+    put(&service, "/refusing/gone").await;
+    let batch = delete_document(&[("refused/stored", None), ("gone", None), ("refused/never", None)], false);
+    let response = delete_objects(&service, "refusing", batch).await;
+    let text = body_text(&response);
+    assert_eq!(response.status(), 200, "{text}");
+    assert_eq!(text.matches("<Deleted>").count(), 1, "{text}");
+    assert!(text.contains("<Key>gone</Key>"), "{text}");
+    assert_eq!(text.matches("<Error>").count(), 2, "{text}");
+    assert_eq!(text.matches("<Code>InvalidArgument</Code>").count(), 2, "{text}");
+    assert_eq!(text.matches("<Message>Invalid argument</Message>").count(), 2, "{text}");
+    assert_eq!(status_of(&service, "/refusing/refused/stored").await, 200, "a refused key is not deleted");
+    assert_eq!(status_of(&service, "/refusing/gone").await, 404);
+    let versions = exchange(&service, signed(http::Method::GET, "/refusing?versions", Bytes::new())).await;
+    let listed = body_text(&versions);
+    assert_eq!(versions.status(), 200, "{listed}");
+    assert_eq!(listed.matches("<DeleteMarker>").count(), 1, "only `gone` gained a marker: {listed}");
+    assert!(!listed.contains("<Key>refused/never</Key>"), "{listed}");
+}
+
+/// Negative — quiet mode still reports a refused key, and the default backend deletes it.
+#[tokio::test]
+async fn n_quiet_mode_reports_a_refused_key_and_the_default_backend_deletes_it() {
+    let root = TestRoot::new();
+    let refusing = refusing_service(&root);
+    create_bucket(&refusing, "quiet-refusing").await;
+    put(&refusing, "/quiet-refusing/refused/a").await;
+    let response = delete_objects(&refusing, "quiet-refusing", delete_document(&[("refused/a", None)], true)).await;
+    let text = body_text(&response);
+    assert_eq!(response.status(), 200, "{text}");
+    assert!(text.contains("<Code>InvalidArgument</Code>"), "{text}");
+    assert_eq!(status_of(&refusing, "/quiet-refusing/refused/a").await, 200);
+
+    let default_root = TestRoot::new();
+    let (_, default) = service(&default_root);
+    create_bucket(&default, "default").await;
+    put(&default, "/default/refused/a").await;
+    let response = delete_objects(&default, "default", delete_document(&[("refused/a", None)], false)).await;
+    let text = body_text(&response);
+    assert_eq!(response.status(), 200, "{text}");
+    assert!(!text.contains("<Error>"), "{text}");
+    assert_eq!(status_of(&default, "/default/refused/a").await, 404);
 }

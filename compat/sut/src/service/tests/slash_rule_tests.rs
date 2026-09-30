@@ -16,7 +16,8 @@
 //!
 //! Responsible for: the key a slash-shaped request path stores under the RustFS profile — a key
 //! that starts with `/` folded (`PUT /b//x` stores `x`, as legacy RustFS stores it), every other
-//! key kept as sent (`a//b` is not `a/b`), and no object ever stored under the leading slashes.
+//! key kept as sent (`a//b` is not `a/b`, and RustFS's storage refuses it), and no object ever
+//! stored under the leading slashes.
 //! NOT responsible for: the rule itself (`rustfs-gateway-types`' `rustfs_slash_tests`) or whether
 //! the handler is handed the same key legacy RustFS hands its storage (the difftest RustFS-profile
 //! rows).
@@ -65,34 +66,40 @@ async fn a_rooted_key_is_stored_folded() {
     }
 }
 
-/// Negative — a key that does not start with a slash keeps its interior run: `a//b` is its own
-/// object, never `a/b`, which is what the MinIO-style `Collapse` would have stored.
+/// Negative — a key that does not start with a slash keeps its interior run: `a//b` reaches the
+/// storage as `a//b`, never `a/b` (which the MinIO-style `Collapse` would have stored), and RustFS's
+/// storage refuses a key holding `//` with `400 InvalidArgument` (rustfs/gateway#1145), so nothing
+/// is stored — a folded key would have been.
 #[tokio::test]
 async fn n_an_interior_run_is_not_folded() {
     let root = TestRoot::new();
     let service = slash_bucket(&root).await;
 
     let written = put(&service, "/slashes/a//b", b"interior").await;
-    assert_eq!(written.status(), 200, "{}", body_of(&written));
+    assert_eq!(written.status(), 400, "{}", body_of(&written));
+    assert!(body_of(&written).contains("<Code>InvalidArgument</Code>"), "{}", body_of(&written));
     assert_eq!(get(&service, "/slashes/a/b").await.status(), 404, "a//b must not land on a/b");
     let listing = keys(&service).await;
-    assert!(listing.contains("<Key>a//b</Key>"), "{listing}");
+    assert!(!listing.contains("<Key>"), "{listing}");
 }
 
-/// Negative — no leading slash, no fold: a trailing run and a plain key are stored as sent.
+/// Negative — no leading slash, no fold: a trailing slash and a plain key are stored as sent, and
+/// a trailing run reaches the storage as sent, which RustFS's storage refuses (rustfs/gateway#1145)
+/// rather than storing it as `dir/`.
 #[tokio::test]
 async fn n_a_key_without_a_leading_slash_is_stored_as_sent() {
     let root = TestRoot::new();
     let service = slash_bucket(&root).await;
 
-    for target in ["/slashes/dir/", "/slashes/dir//", "/slashes/plain"] {
+    for (target, status) in [("/slashes/dir/", 200), ("/slashes/dir//", 400), ("/slashes/plain", 200)] {
         let written = put(&service, target, b"as-sent").await;
-        assert_eq!(written.status(), 200, "{target}: {}", body_of(&written));
+        assert_eq!(written.status(), status, "{target}: {}", body_of(&written));
     }
     let listing = keys(&service).await;
-    for stored in ["<Key>dir/</Key>", "<Key>dir//</Key>", "<Key>plain</Key>"] {
+    for stored in ["<Key>dir/</Key>", "<Key>plain</Key>"] {
         assert!(listing.contains(stored), "{stored} missing: {listing}");
     }
+    assert_eq!(listing.matches("<Key>").count(), 2, "{listing}");
 }
 
 /// Negative — the leading slashes name no object of their own: `//x` and `///x` both overwrite
