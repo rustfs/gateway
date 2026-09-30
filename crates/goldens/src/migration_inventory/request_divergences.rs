@@ -353,12 +353,12 @@ const OPERATION_DIVERGENCES: [RequestDivergence; 26] = [
         request: "an absolute-form request target",
         aws: "a server accepts absolute-form, and its authority stands in for Host",
         aws_evidence: "https://www.rfc-editor.org/rfc/rfc9112#section-3.2.2",
-        s3s: "the handler's URI keeps the authority",
-        gateway: "the converted URI is path and query only",
-        client_impact: "RustFS takes the host from the Host header and reads the URI authority only as a fallback (multipart Location), \
-                        and the Host header is always present on HTTP/1.1, so handlers see the same object and host",
-        ruling: DivergenceRuling::KeepGateway,
-        follow_up: DivergenceFollowUp::None,
+        s3s: "the handler's URI keeps the authority, and HTTP/2 gets a Host line from :authority",
+        gateway: "typed reading: path and query only; RustFS profile (request_to_legacy): scheme, authority and that Host line",
+        client_impact: "RustFS falls back to the URI authority without a Host line (multipart Location, \
+                        rustfs/src/app/multipart_usecase.rs:359-422), so HTTP/2 through the typed reading answers a relative Location",
+        ruling: DivergenceRuling::RustfsProfile,
+        follow_up: DivergenceFollowUp::Open(M1_ADAPTER),
         test_file: PUT_CONTEXT,
         test: "divergence_an_absolute_form_target_keeps_its_authority_only_on_s3s",
     },

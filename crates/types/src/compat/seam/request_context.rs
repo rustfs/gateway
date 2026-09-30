@@ -157,6 +157,72 @@ impl GatewayRequestContext {
     }
 }
 
+/// The request target as the transport handed it to the gateway: its HTTP version, scheme and
+/// authority (`RequestContextView::version`, `target_scheme` and `target_authority` in
+/// `rustfs-gateway-core`).
+///
+/// The legacy stack's request URI carries the scheme and authority in front of the path whenever the
+/// target did: an absolute-form HTTP/1.1 target, and every HTTP/2 request, whose `:authority` is the
+/// only place it names its host. Both are absent for an origin-form target.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct RequestTarget {
+    /// The HTTP version the request arrived on.
+    pub version: http::Version,
+    /// The target's scheme (`http`, `https`), when it carried one.
+    pub scheme: Option<String>,
+    /// The target's authority, exactly as it arrived, when it carried one.
+    pub authority: Option<String>,
+}
+
+/// [`request_to_s3s`] for the RustFS profile (rustfs/gateway#1148): the request URI rebuilt as the
+/// legacy stack's transport hands it over, with `target`'s scheme and authority in front of the raw
+/// path and query whenever the request target carried them; and, on an HTTP/2 or HTTP/3 request
+/// without a `Host` line, the `Host` line the legacy stack adds from the authority before any
+/// handler runs, so a RustFS body reading `Host` reads the same host.
+///
+/// Legacy RustFS reads the URI's authority and scheme where no `Host` line names the host: the
+/// `Location` of a completed multipart upload is built from the `Host` line, else from the URI's
+/// authority, with the URI's scheme (`rustfs/src/app/multipart_usecase.rs:359-422` on rustfs/rustfs
+/// `e870a6d25b`). An HTTP/2 request has no `Host` line, so a path-only URI there answers a relative
+/// `Location` where legacy RustFS answers `http://host/bucket/key`, observed on a legacy build over
+/// HTTP/2. Every other member is converted exactly as [`request_to_s3s`] converts it.
+///
+/// # Errors
+///
+/// As [`request_to_s3s`], and [`ConversionError`] naming `uri` for a target that carried only one
+/// of scheme and authority, or whose rebuilt URI does not parse.
+pub fn request_to_legacy<T>(
+    context: GatewayRequestContext,
+    target: RequestTarget,
+    input: T,
+) -> Result<S3Request<T>, ConversionError> {
+    let RequestTarget {
+        version,
+        scheme,
+        authority,
+    } = target;
+    let uri = match (scheme, authority.as_deref()) {
+        (None, None) => None,
+        (Some(scheme), Some(authority)) => Some(absolute_form(&scheme, authority, &context.raw_path, &context.raw_query)?),
+        _ => {
+            return Err(refusal("uri", "a request target carries a scheme and an authority together, or neither"));
+        }
+    };
+    let mut converted = convert(context, uri, input)?;
+    // The legacy stack names an HTTP/2 or HTTP/3 request's host in a `Host` line of its own, from
+    // `:authority`, when the request sent none; never for HTTP/1.x, whose absolute-form target
+    // keeps the line it sent or none.
+    if matches!(version, http::Version::HTTP_2 | http::Version::HTTP_3)
+        && !converted.headers.contains_key(http::header::HOST)
+        && let Some(host) = authority
+            .as_deref()
+            .and_then(|authority| HeaderValue::from_str(authority).ok())
+    {
+        converted.headers.insert(http::header::HOST, host);
+    }
+    Ok(converted)
+}
+
 /// Wraps `input` in the s3s request context `context` describes.
 ///
 /// The region follows the s3s precedence: the verified signing region when there is one,
@@ -175,6 +241,12 @@ impl GatewayRequestContext {
 ///   public constructor, so the trailers a gateway body ends with cannot be delivered where an app
 ///   body looks for them.
 pub fn request_to_s3s<T>(context: GatewayRequestContext, input: T) -> Result<S3Request<T>, ConversionError> {
+    convert(context, None, input)
+}
+
+/// The conversion both readings share; `uri` is the rebuilt absolute URI, or `None` for the raw
+/// path and query alone.
+fn convert<T>(context: GatewayRequestContext, uri: Option<Uri>, input: T) -> Result<S3Request<T>, ConversionError> {
     let GatewayRequestContext {
         method,
         raw_path,
@@ -190,7 +262,10 @@ pub fn request_to_s3s<T>(context: GatewayRequestContext, input: T) -> Result<S3R
             "the pinned s3s trailer handle has no public constructor, so declared trailers cannot be delivered",
         ));
     }
-    let uri = origin_form(&raw_path, &raw_query)?;
+    let uri = match uri {
+        Some(uri) => uri,
+        None => origin_form(&raw_path, &raw_query)?,
+    };
     let (credentials, scope) = match principal {
         Some(principal) => {
             if principal.access_key.is_empty() {
@@ -238,6 +313,18 @@ fn origin_form(raw_path: &str, raw_query: &str) -> Result<Uri, ConversionError> 
         format!("{raw_path}?{raw_query}")
     };
     Uri::try_from(target).map_err(|_| refusal("uri", "the raw path and query do not form a URI"))
+}
+
+/// `scheme://authority` in front of the raw path and query, as an absolute-form target spells it.
+fn absolute_form(scheme: &str, authority: &str, raw_path: &str, raw_query: &str) -> Result<Uri, ConversionError> {
+    let origin = origin_form(raw_path, raw_query)?;
+    let target = format!("{scheme}://{authority}{origin}");
+    match Uri::try_from(target) {
+        Ok(uri) if uri.scheme_str() == Some(scheme) && uri.authority().map(http::uri::Authority::as_str) == Some(authority) => {
+            Ok(uri)
+        }
+        _ => Err(refusal("uri", "the target's scheme, authority, path and query do not form a URI")),
+    }
 }
 
 fn region(value: String) -> Result<Region, ConversionError> {

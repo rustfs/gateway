@@ -192,6 +192,25 @@ impl<B> WireRequest<B> {
         &self.host
     }
 
+    /// The request target's scheme, exactly as the transport handed it over: present for an
+    /// absolute-form HTTP/1.1 target and for an HTTP/2 request (its `:scheme`), absent for an
+    /// origin-form target.
+    ///
+    /// A fact for a handler that must rebuild the target it was sent (rustfs/gateway#1148); nothing
+    /// in this gateway routes, signs or authorizes by it — [`Self::host`] is the host that does.
+    #[must_use]
+    pub fn target_scheme(&self) -> Option<&str> {
+        self.uri.scheme_str()
+    }
+
+    /// The request target's authority, exactly as the transport handed it over: present for an
+    /// absolute-form HTTP/1.1 target and for an HTTP/2 request with `:authority`, absent for an
+    /// origin-form target. Read-only, for the reason [`Self::target_scheme`] is.
+    #[must_use]
+    pub fn target_authority(&self) -> Option<&str> {
+        self.uri.authority().map(http::uri::Authority::as_str)
+    }
+
     /// Where HTTP says the body ends.
     #[must_use]
     pub fn framing(&self) -> &Framing {

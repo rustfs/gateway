@@ -206,3 +206,60 @@ fn rejected_transport_requests_cannot_construct_a_handler_context() {
     let verdict = Verdict::reject(AuthError::SignatureDoesNotMatch);
     assert!(RequestContextView::from_pipeline("HeadObject", &wire, path_style(), &verdict, None).is_none());
 }
+
+/// The request target a handler must rebuild what it was sent from (rustfs/gateway#1148): an
+/// origin-form HTTP/1.1 target names no scheme and no authority, an absolute-form one names both,
+/// and an HTTP/2 request names both and its version.
+#[test]
+fn the_context_holds_the_target_as_the_transport_handed_it_over() {
+    let origin = wire("/photos/a.jpg", &[]);
+    let context = RequestContextView::from_pipeline("HeadObject", &origin, path_style(), &anonymous_verdict(&origin), None)
+        .expect("an anonymous context");
+    assert_eq!(
+        (context.version(), context.target_scheme(), context.target_authority()),
+        (Version::HTTP_11, None, None)
+    );
+
+    let absolute = wire("http://s3.example.com/photos/a.jpg", &[]);
+    let context = RequestContextView::from_pipeline("HeadObject", &absolute, path_style(), &anonymous_verdict(&absolute), None)
+        .expect("an anonymous context");
+    assert_eq!(
+        (context.target_scheme(), context.target_authority()),
+        (Some("http"), Some("s3.example.com"))
+    );
+
+    let request = http::Request::builder()
+        .method(Method::HEAD)
+        .version(Version::HTTP_2)
+        .uri("https://s3.example.com:9000/photos/a.jpg")
+        .body(Bytes::new())
+        .expect("a fixture request");
+    let h2 = WireRequest::accept(request, &Limits::default()).expect("an accepted fixture");
+    let context = RequestContextView::from_pipeline("HeadObject", &h2, path_style(), &anonymous_verdict(&h2), None)
+        .expect("an anonymous context");
+    assert_eq!(
+        (context.version(), context.target_scheme(), context.target_authority()),
+        (Version::HTTP_2, Some("https"), Some("s3.example.com:9000"))
+    );
+}
+
+/// Negative — a detached context names no target, and `Debug` states whether a target authority
+/// was carried rather than printing a second copy of the host.
+#[test]
+fn n_a_detached_context_names_no_target_and_debug_prints_only_the_authoritys_presence() {
+    let detached = RequestContextView::detached("HeadObject");
+    assert_eq!(
+        (detached.version(), detached.target_scheme(), detached.target_authority()),
+        (Version::HTTP_11, None, None)
+    );
+    let absolute = wire("http://s3.example.com/photos/a.jpg", &[]);
+    let context = RequestContextView::from_pipeline("HeadObject", &absolute, path_style(), &anonymous_verdict(&absolute), None)
+        .expect("an anonymous context");
+    let printed = format!("{context:?}");
+    assert!(printed.contains("target_authority: true"), "{printed}");
+    assert!(printed.contains("target_scheme: Some(\"http\")"), "{printed}");
+    let origin = wire("/photos/a.jpg", &[]);
+    let context = RequestContextView::from_pipeline("HeadObject", &origin, path_style(), &anonymous_verdict(&origin), None)
+        .expect("an anonymous context");
+    assert!(format!("{context:?}").contains("target_authority: false"));
+}

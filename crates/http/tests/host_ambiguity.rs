@@ -349,3 +349,34 @@ fn http_one_one_and_http_two_agree_on_every_host_verdict() {
         );
     }
 }
+
+/// The request target's scheme and authority are kept as the transport handed them over, for a
+/// handler that must rebuild the target it was sent (rustfs/gateway#1148): both on an HTTP/2
+/// request and an absolute-form HTTP/1.1 one, neither on an origin-form one or an HTTP/2 request
+/// that named its host in a `Host` line alone.
+#[test]
+fn the_target_scheme_and_authority_are_kept_as_they_arrived() {
+    let h2_authority = accept(h2(Some("b.example.com:9000"), None)).expect("authority alone is a complete host");
+    assert_eq!(
+        (h2_authority.target_scheme(), h2_authority.target_authority()),
+        (Some("https"), Some("b.example.com:9000"))
+    );
+    let absolute = accept(absolute_form("http://b.example.com/object.txt", "b.example.com")).expect("agreeing hosts");
+    assert_eq!(
+        (absolute.target_scheme(), absolute.target_authority()),
+        (Some("http"), Some("b.example.com"))
+    );
+    let origin = accept(origin_form("/object.txt")).expect("origin form is the common case");
+    assert_eq!((origin.target_scheme(), origin.target_authority()), (None, None));
+    let h2_host = accept(h2(None, Some("only.example.com"))).expect("host header alone is legal on h2");
+    assert_eq!((h2_host.target_scheme(), h2_host.target_authority()), (None, None));
+}
+
+/// Negative — the kept authority is the target's own spelling, never the effective host's: a
+/// target naming its host in another case keeps that case while the host keeps the header's.
+#[test]
+fn n_the_target_authority_is_not_rewritten_to_the_effective_host() {
+    let accepted = accept(absolute_form("http://B.Example.COM/object.txt", "b.example.com")).expect("case-insensitive agreement");
+    assert_eq!(accepted.target_authority(), Some("B.Example.COM"));
+    assert_eq!(accepted.host().as_str(), "b.example.com");
+}
