@@ -45,6 +45,8 @@ mod copy_object;
 mod delete_conditions;
 #[path = "crud/delete_objects.rs"]
 mod delete_objects;
+#[path = "crud/expiration_header.rs"]
+mod expiration_header;
 #[path = "crud/lifecycle.rs"]
 mod lifecycle;
 #[path = "crud/lifecycle_expiration.rs"]
