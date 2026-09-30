@@ -145,6 +145,27 @@ async fn n_each_pre_lookup_refusal_is_answered_as_legacy_rustfs_answers_it() {
     }
 }
 
+/// Negative — a header is decoded as UTF-8, as legacy RustFS decodes one: a non-ASCII `x-amz-date`
+/// or `x-amz-content-sha256` is refused as unreadable rather than as missing. (A value that is not
+/// UTF-8 is the wire layer's to refuse first.)
+#[tokio::test]
+async fn n_a_header_is_decoded_as_legacy_rustfs_decodes_it() {
+    let root = TestRoot::new();
+    let service = with_object(&root).await;
+    refused(
+        &exchange(&service, get().with_amz_date("2026093\u{e9}T000000Z").request()).await,
+        400,
+        "InvalidRequest",
+        "invalid header: x-amz-date",
+    );
+    refused(
+        &exchange(&service, get().declaring("\u{e9}\u{e9}\u{e9}").request()).await,
+        403,
+        "SignatureDoesNotMatch",
+        "invalid header: x-amz-content-sha256",
+    );
+}
+
 /// Negative — the three requests the gateway used to verify are refused on a write too, and store
 /// nothing: a new key stays absent and an overwrite leaves the stored bytes.
 #[tokio::test]
