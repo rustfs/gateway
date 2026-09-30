@@ -821,6 +821,10 @@ mod scope_refusal_tests;
 /// (rustfs/gateway#1130).
 mod signed_header_reading_tests;
 
+/// Presigned URLs recognised by their signature, and refused before the credential lookup, as
+/// legacy RustFS recognises and refuses them (rustfs/gateway#1130).
+mod presigned_refusal_tests;
+
 /// Request-checksum failures answered with legacy RustFS's `BadDigest` (rustfs/gateway#1057), and
 /// what each refusal leaves in storage.
 mod bad_digest_tests;

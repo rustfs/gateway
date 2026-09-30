@@ -220,7 +220,10 @@ pub(crate) fn build_service(
                     .with_presigned_expiry_rule(rustfs_gateway::PresignedExpiryRule::LegacyRustfs)
                     // RustFS verifies a presigned URL on every operation and authorizes it as it
                     // authorizes a header signature (rustfs/gateway#1052).
-                    .admit_presigned_on_every_standard_operation_after_listing_in_the_posture_report(),
+                    .admit_presigned_on_every_standard_operation_after_listing_in_the_posture_report()
+                    // And it reads a query string or a form as signed only when it carries the
+                    // signature; the rest is anonymous (rustfs/gateway#1130).
+                    .recognize_signatures_as_legacy_rustfs(),
             )
             // Sized as the RustFS bridge sizes it: no framework layer refuses what RustFS answers.
             .framework_governor_rates(rustfs_governor_rates())
@@ -257,6 +260,8 @@ pub(crate) fn build_service(
             // RustFS refuses a header signature before its credential lookup in its own order and
             // words, and takes the timestamp from `x-amz-date` alone (rustfs/gateway#1130).
             .answer_header_signatures_as_legacy_rustfs()
+            // And a presigned URL, the same way (rustfs/gateway#1130).
+            .answer_presigned_urls_as_legacy_rustfs()
             // RustFS answers an unreadable or mismatched request checksum with `BadDigest`
             // (rustfs/gateway#1057).
             .answer_checksum_failures_with_bad_digest()

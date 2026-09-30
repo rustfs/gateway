@@ -174,7 +174,8 @@ impl GatewaySeam {
                     .delegate_anonymous_to_authorizer_after_listing_in_the_posture_report()
                     .enable_sigv2_presigned_compatibility()
                     .with_presigned_expiry_rule(PresignedExpiryRule::LegacyRustfs)
-                    .admit_presigned_on_every_standard_operation_after_listing_in_the_posture_report(),
+                    .admit_presigned_on_every_standard_operation_after_listing_in_the_posture_report()
+                    .recognize_signatures_as_legacy_rustfs(),
             )
             .bucket_owner_source(FixtureOwner)
             // The RustFS profile: the seam is only ever reached behind it, so its decode choices
@@ -189,6 +190,7 @@ impl GatewaySeam {
             .answer_not_modified_with_legacy_rustfs_headers()
             .sign_base64_payload_digests_as_hex()
             .answer_header_signatures_as_legacy_rustfs()
+            .answer_presigned_urls_as_legacy_rustfs()
             .answer_checksum_failures_with_bad_digest()
             .ignore_unknown_checksum_algorithms()
             .accept_mismatched_payload_digests_without_a_body()

@@ -13,6 +13,7 @@ Agent entry point for SigV2/SigV4 parsing, canonicalization and verification.
 | `src/floor_tests.rs` | The floor's own unit suite, split out at the 800-line limit. | A floor rule decidable from a `WireView` alone changes. |
 | `src/floor_anonymous.rs` | Service-level anonymous delegation and the one anonymous-admission predicate (ADR-0021). | An anonymous request reaches, or fails to reach, an operation's authorizer. |
 | `src/floor_presigned.rs` | Service-level presigned widening and the one presigned-admission predicate (ADR-0035). | A presigned URL is admitted to, or refused on, an operation that did not opt in. |
+| `src/floor_recognition.rs` | The sealing predicate's RustFS-profile reading: a query string or form is signed only when it carries its signature (rustfs/gateway#1130). | A request carrying presigned parameters without a signature is refused, or served anonymously. |
 | `src/mode.rs` | Authenticated payload-mode selection. | HTTP framing receives the wrong mode. |
 | `src/operation.rs` | Per-operation authentication-scheme policy. | Presigned or anonymous access reaches the wrong operation. |
 | `src/parse.rs` | Credential and authorization parsing. | Date, region, service, or credential fields parse incorrectly. |

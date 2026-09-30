@@ -740,8 +740,8 @@ impl S3Service {
         };
         let presence = detect_credentials(&view);
 
-        // Legacy RustFS's answers to a header signature it refuses before its credential lookup, in
-        // its order, when the assembly answers with them (rustfs/gateway#1130).
+        // Legacy RustFS's answers to a header signature or a presigned URL it refuses before its
+        // credential lookup, in its order, when the assembly answers with them (rustfs/gateway#1130).
         let signed_head = crate::builder::view_policy::header_signatures::SignedHead {
             method: wire.method(),
             headers: &headers,
@@ -749,11 +749,12 @@ impl S3Service {
             now,
             window: self.inner.floor.skew_window(),
         };
-        let legacy_refusal =
-            self.inner
-                .view_policy
-                .header_signatures
-                .refusal(&signed_head, response_kind, wire.framing().has_body());
+        let policy = &self.inner.view_policy;
+        let body_owed = wire.framing().has_body();
+        let legacy_refusal = policy
+            .header_signatures
+            .refusal(&signed_head, response_kind, body_owed)
+            .or_else(|| policy.presigned_urls.refusal(&signed_head, response_kind, body_owed));
         if let Some(refusal) = legacy_refusal {
             return outcome.refuse(refusal);
         }

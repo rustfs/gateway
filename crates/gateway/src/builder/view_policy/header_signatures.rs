@@ -282,7 +282,7 @@ fn header_signature<'a>(head: &SignedHead<'a>) -> Option<HeaderScheme<'a>> {
 /// The value of `name` when the request carries exactly one, decoded as UTF-8 as legacy RustFS
 /// decodes a header value: a repeated header, or one that is not UTF-8, reads as absent, and one
 /// carrying a non-ASCII character is read (and then refused by the rule it breaks).
-fn unique_value<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
+pub(super) fn unique_value<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
     let mut values = headers.get_all(name).iter();
     let value = values.next()?;
     if values.next().is_some() {
@@ -292,7 +292,7 @@ fn unique_value<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
 }
 
 /// Whether `stamp` has the shape legacy RustFS reads: eight digits, `T`, six digits, `Z`.
-fn is_amz_date_shape(stamp: &str) -> bool {
+pub(super) fn is_amz_date_shape(stamp: &str) -> bool {
     let bytes = stamp.as_bytes();
     bytes.len() == 16
         && bytes.iter().enumerate().all(|(index, byte)| match index {
@@ -304,7 +304,7 @@ fn is_amz_date_shape(stamp: &str) -> bool {
 
 /// Whether a stamp of [`is_amz_date_shape`] names an instant: a real day, hour 0-23, minute and
 /// second 0-59.
-fn names_an_instant(stamp: &str) -> bool {
+pub(super) fn names_an_instant(stamp: &str) -> bool {
     day_exists(number(stamp, 0..4), number(stamp, 4..6), number(stamp, 6..8))
         && number(stamp, 9..11) <= 23
         && number(stamp, 11..13) <= 59
@@ -314,7 +314,7 @@ fn names_an_instant(stamp: &str) -> bool {
 /// Whether a declared payload is one legacy RustFS cannot read: not a lowercase hex digest, a
 /// canonical padded base64 digest, or one of the six keywords. The trailer set is not consulted:
 /// legacy RustFS reads the declaration alone.
-fn is_malformed_payload(declared: &str) -> bool {
+pub(super) fn is_malformed_payload(declared: &str) -> bool {
     matches!(PayloadMode::parse(declared, TrailerSet::None), Err(SigParseError::MalformedContentSha256))
 }
 
