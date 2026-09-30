@@ -161,7 +161,8 @@ use crate::{response::into_response, routing::RuntimeAssembly};
 mod cors;
 mod update;
 
-use self::cors::{CorsDecoration, preflight_bucket};
+use self::cors::CorsDecoration;
+pub(crate) use self::cors::preflight_bucket;
 
 /// The one sentence a request gets when the authenticator itself could not answer.
 ///
@@ -238,7 +239,7 @@ enum AcceptedBody<B> {
 /// the right thing for a server to do.
 #[derive(Clone)]
 pub struct S3Service {
-    inner: Arc<Inner>,
+    pub(crate) inner: Arc<Inner>,
 }
 
 impl core::fmt::Debug for S3Service {

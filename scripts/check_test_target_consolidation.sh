@@ -672,6 +672,7 @@ gateway_modules = (
     "bucket_config_reachability",
     "checksum_omissions",
     "chunked_allocations",
+    "classification",
     "committed_head_runtime",
     "committed_progress",
     "compat_aliases",

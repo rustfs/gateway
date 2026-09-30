@@ -52,6 +52,8 @@ mod bucket_config_reachability;
 mod checksum_omissions;
 #[path = "chunked_allocations.rs"]
 mod chunked_allocations;
+#[path = "classification.rs"]
+mod classification;
 #[path = "committed_head_runtime.rs"]
 mod committed_head_runtime;
 #[path = "committed_progress.rs"]
