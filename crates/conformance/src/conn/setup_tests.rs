@@ -66,22 +66,46 @@ fn plain_get(conn: &mut Conn) -> crate::observation::Observation {
     conn.exchange(&plan).expect("the exchange runs")
 }
 
+/// `plain_get`, with the whole call timed around it in lock-step.
+///
+/// Everything the observation reports happens inside that call: the listener start and the reuse
+/// probe before the request is written, the target's own time from the first byte to the answer,
+/// and the window observing the connection afterwards. For a request without a body those are
+/// disjoint intervals, so the harness's charge and the target's time together can never exceed
+/// the call, however slowly a loaded host runs any of them. That bound is what "charged only what
+/// it spent" means, and unlike a fixed ceiling it does not depend on how fast the host is
+/// (rustfs/gateway#1086: an unstalled start measured 648 ms against a 600 ms ceiling).
+fn timed_plain_get(conn: &mut Conn) -> (crate::observation::Observation, u128) {
+    let called = Instant::now();
+    let observation = plain_get(conn);
+    (observation, called.elapsed().as_millis())
+}
+
+/// The harness's charge plus the target's own time, the two disjoint parts of one call.
+fn charged_ms(observation: &crate::observation::Observation) -> u128 {
+    u128::from(observation.harness_wait_ms) + u128::from(observation.elapsed_ms)
+}
+
 #[test]
 fn a_slow_http1_listener_start_is_charged_to_the_harness() {
-    let observation = plain_get(&mut stalled(Conn::new(".".into()), SETUP_STALL));
+    let (observation, call_ms) = timed_plain_get(&mut stalled(Conn::new(".".into()), SETUP_STALL));
     assert_eq!(observation.status, Some(403), "{observation:?}");
     assert!(
         observation.harness_wait_ms >= 600,
         "the listener start was not charged to the harness: {observation:?}"
     );
+    assert!(
+        charged_ms(&observation) <= call_ms,
+        "the harness was charged more than the {call_ms} ms the call took: {observation:?}"
+    );
 }
 
 #[test]
 fn an_unstalled_start_charges_the_harness_only_what_it_spent() {
-    let observation = plain_get(&mut Conn::new(".".into()));
+    let (observation, call_ms) = timed_plain_get(&mut Conn::new(".".into()));
     assert_eq!(observation.status, Some(403), "{observation:?}");
     assert!(
-        observation.harness_wait_ms < 600,
-        "harness time is reported without a stall: {observation:?}"
+        charged_ms(&observation) <= call_ms,
+        "the harness was charged more than the {call_ms} ms the call took: {observation:?}"
     );
 }
