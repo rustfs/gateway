@@ -124,6 +124,13 @@ ListObjectVersions resumes after a `key-marker` and, within that key, after a `v
 a `version-id-marker` sent without a key marker is refused with `InvalidArgument` rather than
 answered with the first page.
 
+A deployment standing this backend in for RustFS — the RustFS-profile launcher, `compat/sut` — asks
+for legacy RustFS's answers by name, and each one is off by default: `FsBackend::refusing_batch_deletes_of`
+answers the keys RustFS's storage refuses on their own in a batch delete, and
+`FsBackend::evaluating_delete_if_match` judges `If-Match` on `DeleteObject` as legacy RustFS does —
+the object's own tag or `*` deletes, anything else is `412` and deletes nothing, and a versioned
+bucket's key that holds no version is marked without being judged.
+
 Ranged reads resolve through the exported `evaluate_range` contract, so a suffix range, a window
 that runs past the end, an unsatisfiable range, a multi-range header and `If-Range` all behave as
 they do everywhere else in this workspace rather than being re-derived here.
