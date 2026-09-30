@@ -67,7 +67,12 @@ pub(crate) fn open_backend(options: &Options) -> io::Result<FsBackend> {
         // Legacy RustFS answers an object's tag set sorted by key (`decode_tags`,
         // `crates/ecstore/src/bucket/tagging/mod.rs:20-43` on rustfs/rustfs 3268c42e00; measured on
         // `528a36814`: `foo=bar&bar` reads back `bar`, `foo`) (#1000).
-        .sorting_object_tags();
+        .sorting_object_tags()
+        // Legacy RustFS keeps the last entry a completion names for each part number, then requires
+        // the kept list to be strictly increasing (`normalize_complete_multipart_parts`,
+        // `rustfs/src/app/multipart_usecase.rs:177-208` on rustfs/rustfs 3268c42e00; measured on
+        // `528a36814`: part 1 named twice completes with its last upload) (#1002).
+        .normalizing_completed_parts();
     match options.lifecycle_debug_interval {
         Some(interval) => backend.with_lifecycle_debug_interval(interval),
         None => Ok(backend),

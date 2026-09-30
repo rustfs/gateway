@@ -841,3 +841,6 @@ mod conditional_delete_tests;
 
 /// An object's tag set answered in key order, as legacy RustFS answers it (rustfs/gateway#1000).
 mod tag_order_tests;
+
+/// A completion's part list normalized as legacy RustFS normalizes it (rustfs/gateway#1002).
+mod completion_parts_tests;

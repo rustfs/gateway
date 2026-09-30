@@ -31,6 +31,8 @@ mod bucket_location;
 mod bucket_policy;
 #[path = "crud/bucket_tagging.rs"]
 mod bucket_tagging;
+#[path = "crud/completion_parts.rs"]
+mod completion_parts;
 #[path = "crud/conditional_requests.rs"]
 mod conditional_requests;
 #[path = "crud/content_headers.rs"]
