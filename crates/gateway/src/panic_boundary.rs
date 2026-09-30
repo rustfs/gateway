@@ -27,6 +27,8 @@ use std::task::Poll;
 
 use rustfs_gateway_core::BoxFuture;
 
+use crate::logging::Throttle;
+
 pub(crate) async fn catch_boxed_future<'a, T, F>(build: F) -> Result<T, ()>
 where
     F: FnOnce() -> BoxFuture<'a, T>,
@@ -47,22 +49,29 @@ where
 /// Runs one report callback so that a panic in it cannot reach the answer it reports on.
 ///
 /// A panic is reported as one fixed line naming `callback`, and nothing from the payload, which
-/// is deployment text. The payload is then released under a second boundary: a payload whose
-/// destructor panics would otherwise unwind out of here after all. That second payload is leaked
-/// rather than dropped, because its destructor may panic too and nothing bounds how often.
-pub(crate) fn contain_report(callback: &'static str, report: impl FnOnce()) {
+/// is deployment text; at most one line per `throttle` interval, carrying how many it stood for,
+/// since a callback that panics on every request would otherwise write one per request. The
+/// payload is then released under a second boundary: a payload whose destructor panics would
+/// otherwise unwind out of here after all. That second payload is leaked rather than dropped,
+/// because its destructor may panic too and nothing bounds how often.
+pub(crate) fn contain_report(callback: &'static str, throttle: &'static Throttle, report: impl FnOnce()) {
     let Err(payload) = std::panic::catch_unwind(AssertUnwindSafe(report)) else {
         return;
     };
-    tracing::error!(
-        target: crate::logging::TARGET,
-        event = crate::logging::EVENT_REPORT_PANICKED,
-        component = crate::logging::COMPONENT,
-        subsystem = crate::logging::SUBSYSTEM_REPORT,
-        result = "contained",
-        callback,
-        "{callback} panicked; the response was not changed"
-    );
+    if tracing::enabled!(target: crate::logging::TARGET, tracing::Level::ERROR)
+        && let Some(suppressed) = throttle.claim()
+    {
+        tracing::error!(
+            target: crate::logging::TARGET,
+            event = crate::logging::EVENT_REPORT_PANICKED,
+            component = crate::logging::COMPONENT,
+            subsystem = crate::logging::SUBSYSTEM_REPORT,
+            result = "contained",
+            callback,
+            suppressed,
+            "{callback} panicked; the response was not changed"
+        );
+    }
     if let Err(secondary) = std::panic::catch_unwind(AssertUnwindSafe(move || drop(payload))) {
         std::mem::forget(secondary);
     }

@@ -285,6 +285,7 @@ fn a_panicking_observer_is_one_error_event_without_its_payload() {
     rustfs_shaped(panicked, "report");
     assert_eq!(panicked.field("result"), Some("contained"));
     assert_eq!(panicked.field("callback"), Some("request observer"));
+    assert_eq!(panicked.field("suppressed"), Some("0"));
     assert_eq!(panicked.field("message"), Some("request observer panicked; the response was not changed"));
     for captured in capture.events() {
         assert!(!captured.rendered().contains("wJalrXUtnFEMI"), "{captured:?}");
@@ -320,8 +321,12 @@ fn holds_a_signature(value: &str) -> bool {
     })
 }
 
-/// A body-less `POST /` signed with [`SCAN_SECRET`], as `support::signed` signs with the shared one.
-fn signed_with_scan_secret() -> http::Request<Bytes> {
+/// The bucket and key of the scanned scenario's denied read: caller text no event may repeat.
+const SCAN_BUCKET: &str = "scan-bucket-5b1e";
+const SCAN_KEY: &str = "scan-private-key-8c3d";
+
+/// A body-less request signed with [`SCAN_SECRET`], as `support::signed` signs with the shared one.
+fn signed_with_scan_secret(method: &http::Method, path: &str) -> http::Request<Bytes> {
     use rustfs_gateway::sig::{AmzDate, PayloadMode, SigService, SigV4Signer, SigningCredentials, SigningRequest, SigningScope};
 
     let mut headers = http::HeaderMap::new();
@@ -335,45 +340,52 @@ fn signed_with_scan_secret() -> http::Request<Bytes> {
     let credentials = SigningCredentials::new("AKIDEXAMPLE", SCAN_SECRET).expect("valid credentials");
     let stamp = AmzDate::parse(support::SIGNED_AT_STAMP).expect("a SigV4 stamp");
     let scope = SigningScope::new(stamp.day(), "us-east-1", SigService::S3).expect("a well-formed scope");
-    let signing = SigningRequest::new(
-        &http::Method::POST,
-        "/",
-        "",
-        &headers,
-        accepted.host().raw_for_signing(),
-        PayloadMode::Empty,
-        stamp,
-    );
+    let signing = SigningRequest::new(method, path, "", &headers, accepted.host().raw_for_signing(), PayloadMode::Empty, stamp);
     let signed = SigV4Signer::new(credentials, scope)
         .sign_headers(&signing)
         .expect("a signable request");
-    let mut request = http::Request::builder().method(http::Method::POST).uri("/");
+    let mut request = http::Request::builder().method(method.clone()).uri(path);
     for (name, value) in signed.headers() {
         request = request.header(name, value);
     }
     request.body(Bytes::new()).expect("a valid request")
 }
 
+/// What the scanned scenario was answered: a signed request, the same request with its signature
+/// forged, and a signed read the authorizer denies.
+type ScanAnswers = (http::StatusCode, http::StatusCode, http::StatusCode);
+
 /// The scanned scenario: assemble a service that verifies with [`SCAN_SECRET`], answer a request
-/// signed with it, and refuse the same request with its signature forged.
-fn scan_scenario(observer: Option<PoisoningObserver>) -> (http::StatusCode, http::StatusCode, Capture) {
-    let ((accepted, refused), capture) = captured(|runtime| {
+/// signed with it, refuse the same request with its signature forged, and refuse a signed read of
+/// [`SCAN_KEY`] in [`SCAN_BUCKET`] at authorization.
+fn scan_scenario(observer: Option<PoisoningObserver>) -> (ScanAnswers, Capture) {
+    captured(|runtime| {
         let credentials =
             Arc::new(StaticCredentials::new().with(Credentials::new("AKIDEXAMPLE", SCAN_SECRET).expect("a valid access key id")));
         let mut builder = ServiceBuilder::new()
             .authenticator(SigV4Authenticator::new(credentials, RegionSet::new(["us-east-1"]).expect("non-empty")))
-            .authorizer(rustfs_gateway::allow_when(|_| true))
+            .authorizer(rustfs_gateway::decide_with(|request| {
+                if request.key.map(|key| key.as_str()) == Some(SCAN_KEY) {
+                    rustfs_gateway::Decision::Deny
+                } else {
+                    rustfs_gateway::Decision::Allow
+                }
+            }))
             .clock_with_skew_ack(
                 support::fixed_clock(),
                 ClockSkewAck::i_understand_a_skewed_clock_can_disable_signature_expiry(),
-            );
+            )
+            .register::<rustfs_gateway::dto::GetObject, _>(Arc::new(Present));
         if let Some(observer) = observer {
             builder = builder.observer(observer);
         }
         let service = ping_service(builder);
         runtime.block_on(async {
-            let accepted = service.call_bytes(signed_with_scan_secret()).await;
-            let mut forged = signed_with_scan_secret();
+            let accepted = service.call_bytes(signed_with_scan_secret(&http::Method::POST, "/")).await;
+            let denied = service
+                .call_bytes(signed_with_scan_secret(&http::Method::GET, &format!("/{SCAN_BUCKET}/{SCAN_KEY}")))
+                .await;
+            let mut forged = signed_with_scan_secret(&http::Method::POST, "/");
             let authorization = forged
                 .headers()
                 .get(http::header::AUTHORIZATION)
@@ -386,21 +398,23 @@ fn scan_scenario(observer: Option<PoisoningObserver>) -> (http::StatusCode, http
                 http::HeaderValue::from_str(&forged_authorization).expect("a header value"),
             );
             let refused = service.call_bytes(forged).await;
-            (accepted.status(), refused.status())
+            (accepted.status(), refused.status(), denied.status())
         })
-    });
-    (accepted, refused, capture)
+    })
 }
 
-/// The field that carries credential material, if any: the access key, the secret, an
-/// `Authorization` value or any piece of one, a signature (the caller's, the forged one or the one
-/// the verifier computed), a string to sign or a canonical request.
+/// The field that carries credential material or caller text, if any: the access key, the secret,
+/// an `Authorization` value or any piece of one, a signature (the caller's, the forged one or the
+/// one the verifier computed), a string to sign, a canonical request, or the bucket and key a
+/// refused read named.
 fn credential_material(capture: &Capture) -> Option<(String, String)> {
     let secret = std::str::from_utf8(SCAN_SECRET).expect("an ASCII secret");
     every_value(capture).into_iter().find(|(_, value)| {
         [
             "AKIDEXAMPLE",
             secret,
+            SCAN_BUCKET,
+            SCAN_KEY,
             "Authorization",
             "AWS4-HMAC-SHA256",
             "Signature=",
@@ -430,18 +444,44 @@ impl Observer for PoisoningObserver {
     }
 }
 
-/// Negative — nothing the facade emits while it assembles, answers a signed request and refuses a
-/// forged one carries credential material. The poison control proves the scan sees a field emitted
-/// on the request path when one carries it.
+/// Negative — nothing the facade emits while it assembles, answers a signed request, refuses a
+/// forged one and refuses a denied read carries credential material or the caller's bucket and key,
+/// and both refusals are among what was scanned. The poison control proves the scan sees a field
+/// emitted on the request path when one carries it.
 #[test]
 fn no_event_carries_credential_material() {
-    let (accepted, refused, capture) = scan_scenario(None);
-    assert_eq!(accepted, http::StatusCode::OK);
-    assert_eq!(refused, http::StatusCode::FORBIDDEN);
-    assert!(!capture.events().is_empty(), "the capture saw nothing");
+    use http::StatusCode;
+
+    let (answers, capture) = scan_scenario(None);
+    assert_eq!(answers, (StatusCode::OK, StatusCode::FORBIDDEN, StatusCode::FORBIDDEN));
+    let subsystems: Vec<Option<String>> = capture
+        .named("gateway_request_refused")
+        .iter()
+        .map(|refusal| refusal.field("subsystem").map(str::to_owned))
+        .collect();
+    assert_eq!(subsystems.len(), 2, "{:?}", capture.events());
+    assert!(subsystems.contains(&Some("authentication".to_owned())), "{subsystems:?}");
+    assert!(subsystems.contains(&Some("authorization".to_owned())), "{subsystems:?}");
     assert_eq!(credential_material(&capture), None);
 
-    let (accepted, refused, poisoned) = scan_scenario(Some(PoisoningObserver));
-    assert_eq!((accepted, refused), (http::StatusCode::OK, http::StatusCode::FORBIDDEN));
+    let (answers, poisoned) = scan_scenario(Some(PoisoningObserver));
+    assert_eq!(answers, (StatusCode::OK, StatusCode::FORBIDDEN, StatusCode::FORBIDDEN));
     assert!(credential_material(&poisoned).is_some(), "{:?}", poisoned.events());
 }
+
+/// A `GetObject` handler that finds the object: `GetObject` is the operation that asks the
+/// `s3:ListBucket` visibility question.
+struct Present;
+
+impl rustfs_gateway::Handler<rustfs_gateway::dto::GetObject> for Present {
+    async fn call(
+        &self,
+        _request: rustfs_gateway::Req<rustfs_gateway::dto::GetObject>,
+    ) -> rustfs_gateway::HandlerResult<rustfs_gateway::dto::GetObject> {
+        Ok(rustfs_gateway::Resp::new(rustfs_gateway::dto::GetObjectOutput::default()))
+    }
+}
+
+/// The refusal and panic events (rustfs/gateway#1162), split out at the 800-line limit.
+#[path = "tracing_events/refusals.rs"]
+mod refusals;

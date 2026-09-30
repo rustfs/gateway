@@ -16,7 +16,8 @@
 //!
 //! Responsible for: [`install`], so the gateway's start-up report (`SECURITY_POSTURE` and the lines
 //! beside it) and its dangerous-assembly warnings reach the log a suite run keeps, as they did when
-//! the gateway printed them itself (rustfs/gateway#1162).
+//! the gateway printed them itself, and so do its authentication and authorization refusals
+//! (`warn`) and its contained panics (`error`) (rustfs/gateway#1162).
 //! NOT responsible for: which events exist or what they carry (`rustfs-gateway`,
 //! `docs/observability.md`), or spans, which nothing here reads.
 //! Upstream: the gateway's events. Downstream: the launcher's stderr.

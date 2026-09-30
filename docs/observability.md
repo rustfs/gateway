@@ -52,7 +52,13 @@ change, `debug` and `trace` for diagnostics.
 | `gateway_naming_posture` | `info` | `posture` | message: the `NAMING_POSTURE` line | once per assembly |
 | `gateway_presigned_expiry_posture` | `info` | `posture` | message: the `PRESIGNED_EXPIRY_POSTURE` line | once per assembly, only when a non-default presigned-lifetime rule is on |
 | `gateway_dangerous_assembly` | `warn` | `assembly` | `reason`: `custom_wall_clock`, `allow_all_authorizer`, `allow_all_authorizer_constructed` or `replaced_aws_signature_verifier`; message: the sentence the start-up log always carried | once per assembly, or per construction of the allow-all authorizer |
-| `gateway_report_panicked` | `error` | `report` | `result = "contained"`, `callback`: `request observer` or `authorization audit sink`; message | each time a deployment's report callback panics; the answer went out unchanged |
+| `gateway_report_panicked` | `error` | `report` | `result = "contained"`, `callback`: `request observer` or `authorization audit sink`, `suppressed`; message | when a deployment's report callback panics, at most once per five seconds per callback, `suppressed` counting the panics since the last; the answer went out unchanged |
+| `gateway_request_refused` | `warn` | `authentication` | `result = "refused"`, `request_id`, `operation` (`unknown` before routing), `status`, `code`; message | the signature, the credential, the signed-payload declaration, a POST policy or the security floor refused the request, the authenticator could not answer, or no verifier serves the request's custom scheme |
+| `gateway_request_refused` | `warn` | `authorization` | `result = "refused"`, `decision` (`deny` or `indeterminate`), `authorization_stage` (`route` or `input`), `request_id`, `operation`, `action`; message | an authorization decision refused the request; `indeterminate` means the policy source could not answer |
+| `gateway_request_refused` | `debug` | `governor` | as `authentication` (`code = "SlowDown"`) | a limiter refused the request before any expensive work, or its body outran its quota |
+| `gateway_request_refused` | `debug` | `wire` | as `authentication` | the request head could not be accepted or routed, including an `OPTIONS` without `Origin` and a malformed CORS preflight |
+| `gateway_request_refused` | `debug` | `decode` | as `authentication` | the query, headers, POST form or body could not be read into the operation's input, or the body failed its integrity check; a POST form its policy refuses (`403`) is `authentication`, and an `aws-chunked` chunk or trailer whose signature fails is too |
+| `gateway_extension_panicked` | `error` | `extension` | `result = "contained"`, `extension` (`handler` or `authorizer`), `request_id`, `operation`, `suppressed`; message | a deployment's handler (or what runs inside its dispatch: its operation layers, the policy source's snapshot, the CORS source) or authorizer panicked, and the request was answered `500`; at most once per five seconds per extension, `suppressed` counting the panics since the last |
 
 The posture lines keep their exact text — each module's unit tests pin its line, and
 `scripts/check_sig_case_coverage.sh` pins the `SECURITY_POSTURE` format and the event that carries
@@ -63,6 +69,58 @@ the way they reach a log changed.
 unstructured events under its module targets (`rustfs_gateway_server::…`): a TLS reload refused
 (`error`), and a TLS handshake that timed out or failed and an HTTP connection closed with an error
 (`debug`). RustFS serves the gateway from its own listener and never emits them.
+
+### Refusals
+
+One event per request the gateway itself refused, with the identifier the caller was answered with,
+so a log line joins the observer's `RequestEvent`, the authorization audit sink's events and the
+caller's `x-amz-request-id` — as long as nothing after the gateway rewrites that header: a host
+that answers with an identifier of its own hands it to the gateway (rustfs/gateway#1150), so that
+the gateway answers, and reports, with the same one. What is not reported:
+
+- a refusal the deployment answered — its handler (a missing key, a failed precondition, including
+  one over a body it never read) or one of its filters — which is the deployment's answer, not a
+  refusal of the gateway's; and an allowed request;
+- the authorization decision that only decides whether a missing object reads as missing or as
+  denied (the `s3:ListBucket` visibility check `GetObject` asks): it is audited, and refuses nothing
+  on its own;
+- a CORS preflight the bucket's CORS configuration does not allow: that is the configuration's
+  answer (a preflight without `Origin`, or malformed, is a `wire` refusal);
+- a response the gateway could not complete for a reason of its own (an answer that breaks a
+  response invariant, an internal inconsistency): answered `500`, and the host's completion log
+  records it.
+
+The levels follow RustFS's for the same classes. It logs a credential it cannot find, an unsigned
+`x-amz-*` header and an unsupported algorithm at `warn`, an authorization denial at `warn`, its own
+rate-limit refusals at `debug`, and a request its S3 stack cannot read not above `debug`. This crate
+logs every authentication refusal at `warn` — a signature mismatch and an unreadable credential
+included, one class — bounded by the limiter's admission of unauthenticated work; a limiter's own
+refusals at `debug`, since shedding load must not cost a log line per request shed; and a panic at
+`error`, at most once per five seconds per extension or callback with the count it stands for, as
+RustFS bounds its own per-request `5xx` line (`LogThrottle`, `crates/utils/src/logging.rs:21-58`,
+`rustfs/src/server/layer.rs:74`). The failure class of an authentication refusal is the code the
+caller was answered with, and nothing finer: which rule refused a credential — expired, disabled,
+bound to another token — is what the uniform `403` withholds, and a log line is not the place to
+write it down.
+
+`decision = "indeterminate"` is what the pipeline decides when the policy source could not answer,
+what an authorizer may answer itself, and what an `x-amz-expected-bucket-owner` check that cannot be
+settled comes to (no bucket to check, or an owner lookup that failed). A caller can produce the
+last, so an alert on `indeterminate` reads the audit sink's event, joined by `request_id`, before
+paging anyone.
+
+These are the gateway's own events, under its own names. RustFS keeps emitting its own events from
+its own code — the denial its authorizer decides, the credential its IAM lookup refuses, the
+completion line of every request — so a RustFS dashboard counting those keeps counting the same
+requests, and this crate's events add the stage the gateway refused at:
+
+| RustFS event (rustfs/rustfs `3268c42e00`) | Level | The gateway's event for the same request |
+| --- | --- | --- |
+| `request_rate_limited` (`rustfs/src/server/rate_limit.rs:566`), RustFS's own API rate limit | `debug` | none from RustFS's limiter; `gateway_request_refused`, `governor`, `debug`, for the gateway's |
+| `secret_key_lookup_failed` (`rustfs/src/auth.rs:238-265`), the credential store refused or could not answer | `warn` | `gateway_request_refused`, `authentication`, `code = "InvalidAccessKeyId"` (or `500 InternalError` when the store could not answer) |
+| `sigv4_unsigned_amz_header` (`rustfs/src/auth.rs:1116`), an `x-amz-*` header outside the signature | `warn` | `gateway_request_refused`, `authentication`, the code the floor answered with |
+| `s3_authorization_denied` (`rustfs/src/storage/access.rs:1147`), a policy denial | `warn` | `gateway_request_refused`, `authorization`, `decision = "deny"`; RustFS's own probe denials are `debug` (`:1134`), as the visibility check is not reported here |
+| `http_request_completed` (`rustfs/src/server/layer.rs:481-539`), every request's status and duration | `info`, `error` for a 5xx | none: the gateway reports a request's completion to the `Observer` (`RequestEvent`), which RustFS's layer does not need |
 
 ## What no event carries
 
@@ -76,10 +134,12 @@ it on stderr).
 Three guards hold this: `scripts/check_secret_hygiene.sh` refuses a formatting or logging macro under
 `crates/gateway/src/` that names key material anywhere in its invocation, fields on lines of their
 own included; `crates/gateway/tests/tracing_events.rs` captures every event the facade emits while
-it assembles, answers a signed request (`200`) and refuses the same request with a forged signature
-(`403`), and scans each field for the access key, the secret, any piece of an `Authorization` value
-and any 64-digit hexadecimal run (a signature, the caller's or the computed one), with a poison
-control emitted from inside the request path that proves the scan sees such a field when one exists;
+it assembles, answers a signed request (`200`), refuses the same request with a forged signature
+(`403`) and refuses a signed read at authorization (`403`), requires both refusal events, and scans
+each field for the access key, the secret, the bucket and key the read named, any piece of an
+`Authorization` value and any 64-digit hexadecimal run (a signature, the caller's or the computed
+one), with a poison control emitted from inside the request path that proves the scan sees such a
+field when one exists;
 and the lints above keep every diagnostic on this one path.
 
 ## A host's subscriber

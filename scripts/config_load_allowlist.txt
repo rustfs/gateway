@@ -49,6 +49,7 @@ crates/gateway/src/ext/governor/default.rs | mod tests / fn concurrent_callers_c
 crates/gateway/src/ext/governor/meter.rs | impl AtomicMeter / fn take | let mut current = self.state.load(Ordering::Relaxed);
 crates/gateway/src/ext/governor/meter.rs | impl AtomicMeter / fn refund | let mut current = self.state.load(Ordering::Relaxed);
 crates/gateway/src/ext/oplayer.rs | mod tests / fn a_layer_that_does_not_delegate_stops_the_chain | assert_eq!(inner_ran.load(std::sync::atomic::Ordering::SeqCst), 0);
+crates/gateway/src/logging.rs | impl Throttle / fn claim_at | let last = self.last.load(Ordering::Relaxed);
 crates/gateway/src/operation_mode.rs | mod tests / fn selected_entry_and_runtime_route_mismatch_is_fail_closed | assert_eq!(callbacks.load(Ordering::SeqCst), 0, "a callback ran before identity refusal");
 crates/gateway/src/probe.rs | impl BodyProgress / fn bytes_read | self.bytes_read.load(Ordering::SeqCst)
 crates/gateway/src/probe.rs | impl BodyProgress / fn is_exhausted | self.exhausted.load(Ordering::SeqCst)

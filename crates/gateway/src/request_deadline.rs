@@ -84,6 +84,9 @@ pub(crate) fn unread_body_answer<X>(
         Err(refusal) => {
             let mut refusal = crate::render::from_handler(refusal, response, ConnectionIntent::MayKeepAlive);
             refusal.body_unfinished = body_unfinished;
+            // The handler's own answer, which leaves by the body stage: not a refusal of the
+            // gateway's to report (`crate::logging::Refused::reading_the_body`).
+            refusal.answered_by_handler = true;
             refusal
         }
         Ok(_) => crate::gate::incomplete(),

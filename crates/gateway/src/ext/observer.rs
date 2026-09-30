@@ -117,16 +117,18 @@ pub trait Observer: Send + Sync + 'static {
     /// delivered even if the client has already gone.
     ///
     /// **Must not panic.** The framework isolates a panic the way it isolates one in an
-    /// [`crate::AuthzAuditSink`]: the event is lost and one fixed error line is written, but the
-    /// response — including the terminal document of a committed response, which is sent after
-    /// this call — goes out unchanged. The panic payload is released; if its destructor panics in
+    /// [`crate::AuthzAuditSink`]: the event is lost and one fixed `error` event is written (at most
+    /// one per five seconds, carrying how many panics it stands for), but the response — including
+    /// the terminal document of a committed response, which is sent after this call — goes out
+    /// unchanged. The panic payload is released; if its destructor panics in
     /// turn, that second payload is leaked rather than risk a third.
     fn on_response(&self, event: &RequestEvent<'_>);
 }
 
 /// Reports `event` to `observer` behind the same boundary the authorization audit sink uses.
 pub(crate) fn observe_safely(observer: &dyn Observer, event: &RequestEvent<'_>) {
-    crate::panic_boundary::contain_report("request observer", || observer.on_response(event));
+    static PANICS: crate::logging::Throttle = crate::logging::Throttle::new();
+    crate::panic_boundary::contain_report("request observer", &PANICS, || observer.on_response(event));
 }
 
 impl<T: Observer + ?Sized> Observer for std::sync::Arc<T> {
