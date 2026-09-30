@@ -835,3 +835,6 @@ mod legacy_heads_tests;
 
 /// What a browser form's `PutObject` members store, as legacy RustFS stores them (rustfs/gateway#1129).
 mod post_object_field_tests;
+
+/// A request naming one object version, authorised as legacy RustFS authorises it (GHSA-3ppv).
+mod version_action_tests;

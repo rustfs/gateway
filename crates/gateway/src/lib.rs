@@ -131,6 +131,7 @@ pub mod sig;
 
 pub use crate::adapt::ServiceFuture;
 pub use crate::assembly::{AssemblyError, RuleRef};
+pub use crate::builder::version_actions::LEGACY_UNVERSIONED_OPERATIONS;
 pub use crate::builder::view_policy::{
     BODY_LITERAL_OPERATIONS, CLAMPED_MAX_KEYS_OPERATIONS, EMPTY_UPLOAD_OPERATIONS, RUSTFS_LISTING_ENCODINGS,
     RUSTFS_MAX_KEYS_CEILING, STRICT_DATE_CONDITION_HEADERS,

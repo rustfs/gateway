@@ -41,6 +41,12 @@ use rustfs_gateway_types::dto::{GetObjectAttributes, GetObjectAttributesInput, G
 use crate::op::{AuthRequirement, HasOperation, Operation, OperationOrigin, ResourceShape, StandardOperation};
 use crate::registry::{OperationSpec, ParamKind, RequiredParam};
 
+/// A request naming one version is asked `s3:GetObjectVersion` alone: AWS requires the version
+/// action when `versionId` is specified
+/// (<https://docs.aws.amazon.com/AmazonS3/latest/userguide/using-with-s3-policy-actions.html>), and
+/// legacy RustFS asks it (`rustfs/src/storage/access.rs:2733-2735` on rustfs/rustfs `d60dfbb826`).
+static VERSION_AUTH: AuthRequirement = AuthRequirement::new("s3:GetObjectVersion", ResourceShape::Object);
+
 /// What this operation requires of a request once routing has chosen it.
 ///
 /// `attributes` is a routing discriminator, not a required parameter: a `GET` on an object key
@@ -55,7 +61,7 @@ static SPEC: OperationSpec = OperationSpec::standard("GetObjectAttributes")
         missing_error: ErrorCode::INVALID_REQUEST,
         message: "The x-amz-object-attributes header is required and names which attribute groups the response carries.",
     }])
-    .auth(AuthRequirement::new("s3:GetObject", ResourceShape::Object))
+    .auth(AuthRequirement::new("s3:GetObject", ResourceShape::Object).with_version_requirement(&VERSION_AUTH))
     .build();
 
 /// Header signatures only, and not privileged.

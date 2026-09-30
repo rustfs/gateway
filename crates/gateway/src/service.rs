@@ -919,6 +919,13 @@ impl S3Service {
             // Refused, never permitted: rustfs/rustfs#4845 is what a permissive answer here looks like in production.
             return outcome.refuse_handler(HandlerError::internal_error("this operation declares no authorisation action"));
         };
+        // A request naming one object version is asked the operation's version action, never the
+        // unversioned one (the GHSA-3ppv class), except where the RustFS profile keeps legacy
+        // RustFS's unversioned action; either question names the version.
+        let named_version = requirement.version_requirement().and(meta.query("versionId"));
+        let requirement = requirement
+            .for_version(named_version.is_some() && self.inner.view_policy.version_actions.asks_version_action(operation));
+        let asked_version = named_version.as_deref();
         let authz_started = self.inner.authz_clock.monotonic();
         let auth_scheme = if verdict.is_authenticated() {
             let governed = GovernorRequest::new(operation, meta.bucket(), declared_length, client_addr, class);
@@ -953,7 +960,7 @@ impl S3Service {
                 bucket: route_meta.bucket(),
                 key: route_effective_key,
                 copy_source_identity: None,
-                version_id: None,
+                version_id: asked_version,
                 route_action: first_action,
                 route_bucket: route_meta.bucket(),
                 route_key: route_effective_key,
@@ -1214,7 +1221,7 @@ impl S3Service {
                 bucket: input_meta.bucket(),
                 key: input_effective_key,
                 copy_source_identity: None,
-                version_id: None,
+                version_id: asked_version,
                 route_action: deciding.action,
                 route_bucket: input_meta.bucket(),
                 route_key: input_effective_key,

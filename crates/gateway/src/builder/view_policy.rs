@@ -168,6 +168,8 @@ pub(crate) struct ViewPolicy {
     body_literals: bool,
     unknown_checksum_algorithms_ignored: bool,
     empty_headers_absent: bool,
+    /// Which action a request naming one object version is asked (`super::version_actions`).
+    pub(crate) version_actions: super::version_actions::VersionActions,
 }
 
 impl ViewPolicy {
