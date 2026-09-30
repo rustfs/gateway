@@ -53,7 +53,8 @@ mod tests;
 
 pub use self::addressing::LegacyRustfsNameValidator;
 pub use self::checksum::{
-    ChecksumAlgorithm, ChecksumDigest, ChecksumError, ChecksumSpec, ChecksumType, ContentMd5, Md5Digest, parse_request_checksum,
+    ChecksumAlgorithm, ChecksumDigest, ChecksumError, ChecksumSpec, ChecksumType, ContentMd5, Md5Digest,
+    names_unknown_checksum_algorithm, parse_request_checksum,
 };
 pub use self::checksummer::Checksummer;
 pub use self::error_code::ErrorCode;

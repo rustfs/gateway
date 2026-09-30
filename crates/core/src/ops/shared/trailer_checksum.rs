@@ -75,6 +75,9 @@ pub fn request_checksum(header: Option<ChecksumSpec>, trailers: &TrailingHeaders
         fields().filter_map(|(suffix, value)| value.to_str().ok().map(|value| (suffix, value))),
         CHECKSUM_PREFIX,
         MEMBER,
+        // A trailer names its algorithm in `x-amz-trailer`, which the head-level arbitration
+        // refuses when unknown on every view; nothing unknown reaches this.
+        false,
     )
     .map_err(refuse)?;
     match (header, trailer) {

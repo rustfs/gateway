@@ -787,6 +787,9 @@ mod signed_coverage_tests;
 /// what each refusal leaves in storage.
 mod bad_digest_tests;
 
+/// A checksum header naming an unknown algorithm ignored, as legacy RustFS ignores it (rustfs/backlog#1677).
+mod unknown_checksum_tests;
+
 /// An empty required enumeration element answered as legacy RustFS answers it, never with `500`
 /// (rustfs/gateway#1078).
 mod empty_enumeration_tests;

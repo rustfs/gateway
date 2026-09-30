@@ -249,6 +249,9 @@ pub(crate) fn build_service(
             // RustFS answers a `304` with its object's `ETag` and `Last-Modified` on a `GET` and with
             // no header of the object on a `HEAD` (rustfs/gateway#1120).
             .answer_not_modified_with_legacy_rustfs_headers()
+            // RustFS ignores a checksum header naming an algorithm it does not know, and stores the
+            // body; every claim it can verify is still compared (rustfs/backlog#1677).
+            .ignore_unknown_checksum_algorithms()
             // RustFS never compares the signed digest of a request without a body: a read or delete
             // declaring another payload's digest is served (rustfs/gateway#1099).
             .accept_mismatched_payload_digests_without_a_body()

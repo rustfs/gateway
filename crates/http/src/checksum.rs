@@ -81,7 +81,7 @@ use http::header::HeaderName;
 use rustfs_gateway_stream::TrailingHeaders;
 use rustfs_gateway_types::{
     ChecksumAlgorithm, ChecksumError, ChecksumSpec, ChecksumType, Checksummer, ContentMd5, ErrorCode, Md5Digest,
-    parse_request_checksum,
+    names_unknown_checksum_algorithm, parse_request_checksum,
 };
 
 use crate::header_view::HeaderView;
@@ -267,6 +267,21 @@ fn declared_trailer_checksum(headers: &HeaderView<'_>) -> Result<Option<Checksum
         .ok_or(ChecksumReject::UnknownAlgorithm)
 }
 
+/// What [`BodyIntegrity::resolve_with`] does with a checksum header that names an algorithm this
+/// build does not implement: an `x-amz-checksum-<name>` header no algorithm answers to, or an
+/// `x-amz-sdk-checksum-algorithm` naming none.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum UnknownChecksumAlgorithms {
+    /// Refused with [`ChecksumReject::UnknownAlgorithm`]: the default, so a new AWS algorithm
+    /// arrives as a compile-and-test change and never as a claim silently left unverified.
+    #[default]
+    Refused,
+    /// Left out, as though the header were not there; every other claim is arbitrated and verified
+    /// as before, a `Content-MD5` and a known `x-amz-checksum-*` beside it included. Legacy RustFS's
+    /// reading, which the RustFS profile keeps (rustfs/backlog#1677).
+    Ignored,
+}
+
 /// What one request body's digests must come out to.
 ///
 /// Resolved from the head, before a body byte is read, because no number of body bytes settles a
@@ -308,9 +323,30 @@ impl BodyIntegrity {
     /// this build does not implement, a value that is not base64 of the right width, and a
     /// `Content-MD5` that is not base64 of sixteen bytes.
     pub fn resolve(headers: &HeaderView<'_>, subject: ChecksumSubject) -> Result<Self, ChecksumReject> {
+        Self::resolve_with(headers, subject, UnknownChecksumAlgorithms::Refused)
+    }
+
+    /// [`BodyIntegrity::resolve`], with a checksum header that names an unknown algorithm refused
+    /// or ignored as `unknown` says.
+    ///
+    /// # Errors
+    ///
+    /// As [`BodyIntegrity::resolve`]; under [`UnknownChecksumAlgorithms::Ignored`], never
+    /// [`ChecksumReject::UnknownAlgorithm`] for an `x-amz-checksum-*` or
+    /// `x-amz-sdk-checksum-algorithm` header.
+    pub fn resolve_with(
+        headers: &HeaderView<'_>,
+        subject: ChecksumSubject,
+        unknown: UnknownChecksumAlgorithms,
+    ) -> Result<Self, ChecksumReject> {
+        // An empty `x-amz-sdk-checksum-algorithm` names no algorithm at all rather than an unknown
+        // one, and stays refused until an empty header reads as absent everywhere (#1087).
+        let ignored = |name: &str, value: &str| {
+            unknown == UnknownChecksumAlgorithms::Ignored && !value.is_empty() && names_unknown_checksum_algorithm(name, value)
+        };
         let trailer_checksum = declared_trailer_checksum(headers)?;
         let checksum = parse_request_checksum(headers.iter_text().filter_map(|(name, value)| {
-            if trailer_checksum.is_some() && name == SDK_CHECKSUM_ALGORITHM {
+            if (trailer_checksum.is_some() && name == SDK_CHECKSUM_ALGORITHM) || ignored(name.as_str(), value) {
                 None
             } else {
                 Some((name.as_str(), value))
@@ -324,7 +360,10 @@ impl BodyIntegrity {
             if subject != ChecksumSubject::RequestBody {
                 return Err(ChecksumReject::TrailerNotAllowed);
             }
-            if let Some(declared) = headers.get_str(&SDK_CHECKSUM_ALGORITHM) {
+            if let Some(declared) = headers
+                .get_str(&SDK_CHECKSUM_ALGORITHM)
+                .filter(|declared| !ignored(SDK_CHECKSUM_ALGORITHM.as_str(), declared))
+            {
                 let declared = ChecksumAlgorithm::from_wire_name(declared).ok_or(ChecksumReject::UnknownAlgorithm)?;
                 if declared != algorithm {
                     return Err(ChecksumReject::SdkAlgorithmMismatch);

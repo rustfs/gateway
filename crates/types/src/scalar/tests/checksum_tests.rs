@@ -23,7 +23,8 @@ use md5::{Digest as _, Md5};
 use proptest::prelude::*;
 
 use crate::scalar::{
-    ChecksumAlgorithm, ChecksumError, ChecksumSpec, ChecksumType, ContentMd5, ErrorCode, parse_request_checksum,
+    ChecksumAlgorithm, ChecksumError, ChecksumSpec, ChecksumType, ContentMd5, ErrorCode, names_unknown_checksum_algorithm,
+    parse_request_checksum,
 };
 
 /// The string every CRC specification publishes its check value for.
@@ -216,6 +217,40 @@ fn a_checksum_type_that_contradicts_the_value_is_rejected() {
 fn an_unknown_checksum_header_is_rejected_rather_than_ignored() {
     let headers = [("x-amz-checksum-blake3", "mnG7TA==")];
     assert_eq!(parse_request_checksum(headers.iter().copied()), Err(ChecksumError::UnknownAlgorithm));
+}
+
+/// Negative — the predicate names exactly the headers the arbitration refuses as an unknown
+/// algorithm: an `x-amz-checksum-<name>` no algorithm answers to, in any case, and an
+/// `x-amz-sdk-checksum-algorithm` naming none; never a known algorithm, never one of the three
+/// headers that declare no digest, never another header.
+#[test]
+fn n_only_an_unknown_algorithm_is_named_unknown() {
+    for (name, value) in [
+        ("x-amz-checksum-blake3", "mnG7TA=="),
+        ("X-Amz-Checksum-Blake3", "mnG7TA=="),
+        ("x-amz-checksum-", "mnG7TA=="),
+        ("x-amz-sdk-checksum-algorithm", "BLAKE3"),
+        ("x-amz-sdk-checksum-algorithm", ""),
+    ] {
+        assert!(names_unknown_checksum_algorithm(name, value), "{name}: {value}");
+        let refused = parse_request_checksum([(name, value)]);
+        assert_eq!(refused, Err(ChecksumError::UnknownAlgorithm), "{name}: {value}");
+    }
+    for algorithm in ChecksumAlgorithm::ALL {
+        assert!(!names_unknown_checksum_algorithm(algorithm.header_name(), "mnG7TA=="), "{algorithm:?}");
+        assert!(!names_unknown_checksum_algorithm("x-amz-sdk-checksum-algorithm", algorithm.wire_name()));
+        let lower = algorithm.wire_name().to_ascii_lowercase();
+        assert!(!names_unknown_checksum_algorithm("x-amz-sdk-checksum-algorithm", &lower));
+    }
+    for (name, value) in [
+        ("x-amz-checksum-type", "BOGUS"),
+        ("x-amz-checksum-algorithm", "BLAKE3"),
+        ("x-amz-checksum-mode", "ENABLED"),
+        ("content-md5", "mnG7TA=="),
+        ("x-amz-content-sha256", "UNSIGNED-PAYLOAD"),
+    ] {
+        assert!(!names_unknown_checksum_algorithm(name, value), "{name}: {value}");
+    }
 }
 
 #[test]

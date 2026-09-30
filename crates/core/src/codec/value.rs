@@ -32,8 +32,8 @@ use std::collections::BTreeMap;
 
 use rustfs_gateway_http::decode_metadata_value;
 use rustfs_gateway_types::{
-    BucketName, ChecksumError, ChecksumSpec, ContentMd5, ETag, ErrorCode, EtagRender, NamePolicy, ObjectKey, OpaqueString,
-    RangeSpec, Timestamp, TimestampFormat, is_xml_representable,
+    BucketName, ChecksumAlgorithm, ChecksumError, ChecksumSpec, ContentMd5, ETag, ErrorCode, EtagRender, NamePolicy, ObjectKey,
+    OpaqueString, RangeSpec, Timestamp, TimestampFormat, is_xml_representable,
 };
 
 use crate::codec::error::CodecError;
@@ -581,7 +581,8 @@ pub fn checksum_spec(
     prefix: &'static str,
     member: &'static str,
 ) -> Result<Option<ChecksumSpec>, CodecError> {
-    checksum_spec_of_fields(request.headers_with_prefix(prefix), prefix, member)
+    let ignore_unknown = request.unknown_checksum_algorithms_ignored();
+    checksum_spec_of_fields(request.headers_with_prefix(prefix), prefix, member, ignore_unknown)
 }
 
 /// [`checksum_spec`]'s rule over any `(suffix, value)` fields that share `prefix`.
@@ -593,6 +594,7 @@ pub(crate) fn checksum_spec_of_fields<'a>(
     fields: impl Iterator<Item = (&'a str, &'a str)>,
     prefix: &'static str,
     member: &'static str,
+    ignore_unknown: bool,
 ) -> Result<Option<ChecksumSpec>, CodecError> {
     let mut found: Option<ChecksumSpec> = None;
     for (suffix, value) in fields {
@@ -606,6 +608,12 @@ pub(crate) fn checksum_spec_of_fields<'a>(
         let mut name = String::with_capacity(prefix.len().saturating_add(suffix.len()));
         name.push_str(prefix);
         name.push_str(suffix);
+        // Unless the deployment ignores an algorithm this build does not know
+        // (`MetaView::with_unknown_checksum_algorithms_ignored`), as the head-level arbitration
+        // does on the same view: then such a header binds nothing.
+        if ignore_unknown && ChecksumAlgorithm::from_header_name(&name).is_none() {
+            continue;
+        }
         // Refused, never skipped. Skipping a value this binder cannot read means the input reaches
         // the handler with no checksum at all, so the caller's claim is dropped on the floor and
         // the object is stored as though none had been made. The head-level arbitration in
@@ -665,7 +673,17 @@ pub fn require_integrity(request: &MetaView<'_>) -> Result<(), CodecError> {
     if request.integrity_optional() || request.header(CONTENT_MD5).is_some() {
         return Ok(());
     }
-    if request.headers_with_prefix(CHECKSUM_PREFIX).next().is_some() {
+    // A header the view ignores as naming an unknown algorithm claims nothing, here as in the
+    // arbitration: it cannot stand in for the check this operation requires.
+    let ignored = |suffix: &str| {
+        request.unknown_checksum_algorithms_ignored()
+            && !matches!(suffix, "algorithm" | "type" | "mode")
+            && ChecksumAlgorithm::from_header_name(&format!("{CHECKSUM_PREFIX}{suffix}")).is_none()
+    };
+    if request
+        .headers_with_prefix(CHECKSUM_PREFIX)
+        .any(|(suffix, _)| !ignored(suffix))
+    {
         return Ok(());
     }
     if request

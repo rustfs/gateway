@@ -26,6 +26,8 @@ mod allocation_budget;
 mod boundary_guards;
 #[path = "checksum_arbitration.rs"]
 mod checksum_arbitration;
+#[path = "checksum_unknown_algorithms.rs"]
+mod checksum_unknown_algorithms;
 #[path = "chunked_decode_replay.rs"]
 mod chunked_decode_replay;
 #[path = "form_allocations.rs"]
