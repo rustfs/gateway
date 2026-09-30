@@ -80,6 +80,9 @@ mod golden;
 #[path = "hot_path.rs"]
 mod hot_path;
 
+#[path = "legacy_rustfs_refusal.rs"]
+mod legacy_rustfs_refusal;
+
 #[path = "lifecycle_roundtrip.rs"]
 mod lifecycle_roundtrip;
 

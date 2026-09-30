@@ -69,7 +69,7 @@ Agent entry point for operations, routing, codecs, authorization state and handl
 | `src/registry/` | Handler/codec registration and erasure. | Registration, completeness or dynamic dispatch fails. |
 | `src/dispatch.rs` | Route, registration and parameter refusal order. | A request fails in the wrong stage. |
 | `src/error.rs` | Closed pre-authentication errors. | A refusal before authentication has the wrong status. |
-| `src/error_resolution.rs` | Closed contextual error resolution and body policy. | A contextual refusal has the wrong code, status, extras or body policy. |
+| `src/error_resolution.rs`, `src/error_resolution/legacy.rs` | Closed contextual error resolution and body policy; `legacy.rs` is the RustFS profile's refusal (`LegacyRustfsRefusal`, rustfs/gateway#1148), a legacy RustFS error's code, message and fact headers exactly. | A contextual refusal has the wrong code, status, extras or body policy, or a RustFS-profile error answer differs from the legacy one. |
 | `src/error_resolution/validate.rs` | Admission checks for an ordinary refusal: code, message and detail bounds, contextual codes, and which headers and details a code may carry. | A handler refusal is admitted or refused bare when it should not be. |
 | `src/fault.rs` | Closed error headers/details. | An error document needs a reviewed field. |
 | `src/cors/` | CORS rule and response primitives. | CORS semantics change. |
@@ -88,7 +88,7 @@ Agent entry point for operations, routing, codecs, authorization state and handl
 | `tests/static_dispatch.rs` | Static dispatch order and identity mismatch. | Change the monomorphic core boundary. |
 | `tests/precondition_range.rs` | Conditional/range behavior matrix. | Precondition logic changes. |
 | `tests/range_part_table.rs` | Part-number window resolution and its refusals. | A `partNumber` read serves the wrong bytes or the wrong count. |
-| `tests/error_resolution.rs` | P1-04 contextual error outcome matrix. | Change error masking, status, extras or body suppression. |
+| `tests/error_resolution.rs`, `tests/legacy_rustfs_refusal.rs` | P1-04 contextual error outcome matrix; the RustFS profile's refusal: each legacy shape, every constructor refusal, masking and the copy-source restriction. | Change error masking, status, extras or body suppression, or a legacy refusal. |
 | `tests/rule_filter_boundaries.rs` | Filter boundaries both consumers of the shared grammar still answer, side by side. | A lifecycle or replication Filter refusal changes. |
 | `tests/security_request_policy.rs` | Unknown-element refusal for every security configuration PUT (allow-registered write policy). | A security PUT starts accepting, or stops refusing, an unregistered element. |
 | `tests/purity_guard.rs` | Source-shape guards for pre-auth code. | Add public/core routing code. |

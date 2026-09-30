@@ -39,8 +39,10 @@
 mod clock;
 mod divergences;
 mod facts;
+mod legacy_reading;
 mod mapping;
 mod matrix;
+mod rustfs_profile;
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -50,8 +52,9 @@ use http::{HeaderMap, HeaderValue, Method};
 use rustfs_gateway::dto;
 use rustfs_gateway::{
     Authorizer, AuthzRequest, BoxFuture, Credentials, Decision, Handler, HandlerError, HandlerErrorContext, HandlerResult,
-    InputAuthzRequest, InputDecisions, MissingObject, Req, RequestContext, RequestContextView, ResourceVisibility, Resp,
-    S3Service, ServiceBuilder, SigV4Authenticator, StaticCredentials, connection_intent_of,
+    InputAuthzRequest, InputDecisions, LegacyRustfsFacts, LegacyRustfsRefusal, MissingObject, Req, RequestContext,
+    RequestContextView, ResourceVisibility, Resp, S3Service, ServiceBuilder, SigV4Authenticator, StaticCredentials,
+    connection_intent_of,
 };
 use rustfs_gateway_http::RawHost;
 use rustfs_gateway_sig::{
@@ -59,7 +62,7 @@ use rustfs_gateway_sig::{
     SigningScope,
 };
 
-use super::super::seam::error::{Refusal, refusal_from_s3s};
+use super::super::seam::error::{Refusal, refusal_from_legacy, refusal_from_s3s};
 use super::{ACCESS_KEY, Answer, ContextRequest, FixtureOwner, REGIONS, SECRET_KEY, amz_date, block_on, oracle, s3s};
 
 /// What the RustFS app body answers once a request reaches it, on either stack.
@@ -82,6 +85,16 @@ pub(crate) enum Length {
     Declared(u64),
 }
 
+/// How the gateway side's adapter reads the app body's error.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Reading {
+    /// `refusal_from_s3s`: the typed AWS verdicts, and a `500` for what they cannot state.
+    Typed,
+    /// `refusal_from_legacy`: the RustFS profile, the error exactly as the legacy stack writes it
+    /// (rustfs/gateway#1148).
+    Legacy,
+}
+
 /// One refusal scenario: the raw request, how it is signed, and what the app body answers.
 #[derive(Clone)]
 pub(crate) struct Scenario {
@@ -92,6 +105,7 @@ pub(crate) struct Scenario {
     body: AppBody,
     /// The bytes whose SHA-256 the request is signed over, instead of `UNSIGNED-PAYLOAD`.
     signed_payload: Option<Vec<u8>>,
+    reading: Reading,
 }
 
 impl Scenario {
@@ -104,12 +118,20 @@ impl Scenario {
             length: Length::Exact,
             body: AppBody::Succeeds,
             signed_payload: None,
+            reading: Reading::Typed,
         }
     }
 
     /// Signs the SHA-256 of `payload` in `x-amz-content-sha256`, whatever body is sent.
     pub(crate) fn signing_the_payload_of(mut self, payload: &[u8]) -> Self {
         self.signed_payload = Some(payload.to_vec());
+        self
+    }
+
+    /// The gateway adapter reads the app body's error as the RustFS profile does
+    /// ([`legacy_adapter_error`]).
+    pub(crate) fn rustfs_profile(mut self) -> Self {
+        self.reading = Reading::Legacy;
         self
     }
 
@@ -351,9 +373,31 @@ pub(crate) fn adapter_error(error: &s3s::S3Error, context: &RequestContextView) 
     }
 }
 
+/// The RustFS profile's adapter error half: the RustFS body's error read as the legacy stack
+/// writes it (`refusal_from_legacy`) and answered member for member as that
+/// (`HandlerErrorContext::legacy_rustfs`). Nothing is taken from the request: legacy RustFS names
+/// neither the key nor the range in the document. What the seam refuses to read is the adapter's
+/// `500`, as for the typed reading.
+pub(crate) fn legacy_adapter_error(error: &s3s::S3Error) -> HandlerError {
+    let Ok(legacy) = refusal_from_legacy(error) else {
+        return HandlerError::internal_error(SEAM_REFUSED);
+    };
+    let facts = LegacyRustfsFacts {
+        etag: legacy.etag,
+        last_modified: legacy.last_modified,
+        delete_marker: legacy.delete_marker,
+        complete_length: legacy.complete_length,
+    };
+    match LegacyRustfsRefusal::new(legacy.code, legacy.message, facts) {
+        Ok(refusal) => HandlerErrorContext::legacy_rustfs(refusal).into(),
+        Err(_) => HandlerError::internal_error(SEAM_REFUSED),
+    }
+}
+
 /// A gateway backend that answers every operation the scenario can reach as the adapter would.
 struct ParityBackend {
     body: AppBody,
+    reading: Reading,
     reached: Arc<AtomicBool>,
 }
 
@@ -363,9 +407,10 @@ impl ParityBackend {
         O::Output: Default,
     {
         self.reached.store(true, Ordering::SeqCst);
-        match self.body {
-            AppBody::Succeeds => Ok(Resp::new(O::Output::default())),
-            AppBody::Refuses(error) => Err(adapter_error(&error(), request.context())),
+        match (self.body, self.reading) {
+            (AppBody::Succeeds, _) => Ok(Resp::new(O::Output::default())),
+            (AppBody::Refuses(error), Reading::Typed) => Err(adapter_error(&error(), request.context())),
+            (AppBody::Refuses(error), Reading::Legacy) => Err(legacy_adapter_error(&error())),
         }
     }
 }
@@ -412,6 +457,7 @@ fn gateway_service(scenario: &Scenario, reached: &Arc<AtomicBool>, now: RequestN
     let authenticator = SigV4Authenticator::new(Arc::new(StaticCredentials::new().with(credentials)), regions);
     let backend = Arc::new(ParityBackend {
         body: scenario.body,
+        reading: scenario.reading,
         reached: Arc::clone(reached),
     });
     super::verifying_at(ServiceBuilder::new(), now)

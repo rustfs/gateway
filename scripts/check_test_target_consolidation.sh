@@ -206,6 +206,7 @@ core_modules = (
     "ext_field_policy",
     "golden",
     "hot_path",
+    "legacy_rustfs_refusal",
     "lifecycle_roundtrip",
     "limit_layering",
     "lock_roundtrip",
