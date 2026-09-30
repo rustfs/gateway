@@ -79,7 +79,8 @@ mod transport_extensions;
 mod wire;
 
 pub use crate::checksum::{
-    BodyDigests, BodyIntegrity, ChecksumReject, ChecksumSubject, ChecksumVerified, UnknownChecksumAlgorithms,
+    BodyDigests, BodyIntegrity, ChecksumReject, ChecksumSubject, ChecksumVerified, EmptyIntegrityHeaders,
+    UnknownChecksumAlgorithms,
 };
 pub use crate::form::{
     FORM_FILE_FIELD, FORM_POLICY_FIELD, FileReader, FileSink, FileStep, FormField, FormGrammar, FormLimits, FormReader,

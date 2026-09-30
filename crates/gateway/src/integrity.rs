@@ -31,7 +31,8 @@
 use http::Method;
 use rustfs_gateway_core::{HandlerError, MetaView};
 use rustfs_gateway_http::{
-    BodyIntegrity, ChecksumReject, ChecksumSubject, ChunkReject, HeaderView, IngestPipeline, UnknownChecksumAlgorithms,
+    BodyIntegrity, ChecksumReject, ChecksumSubject, ChunkReject, EmptyIntegrityHeaders, HeaderView, IngestPipeline,
+    UnknownChecksumAlgorithms,
 };
 use rustfs_gateway_types::ErrorCode;
 
@@ -209,7 +210,8 @@ pub(crate) fn resolve(headers: &HeaderView<'_>, method: &Method, operation: &str
 
 /// [`resolve`] as the pipeline calls it: every refusal — the head's now, the body's later — is
 /// answered under the codes the routed view carries (the RustFS profile's `BadDigest`, or the
-/// core's), and a header naming an unknown algorithm is refused or ignored as the view says.
+/// core's), and a header naming an unknown algorithm is refused or ignored, and an empty one read
+/// or taken as absent, as the view says.
 /// `resolve` itself is the test suites' entry, under the core's codes and refusing one.
 ///
 /// # Errors
@@ -232,7 +234,12 @@ pub(crate) fn resolve_in(
     } else {
         UnknownChecksumAlgorithms::Refused
     };
-    let claims = BodyIntegrity::resolve_with(headers, checksum_subject(method, operation), unknown).map_err(refuse)?;
+    let empty = if view.empty_headers_absent() {
+        EmptyIntegrityHeaders::Absent
+    } else {
+        EmptyIntegrityHeaders::Read
+    };
+    let claims = BodyIntegrity::resolve_reading(headers, checksum_subject(method, operation), unknown, empty).map_err(refuse)?;
     Ok(Integrity { claims, codes })
 }
 

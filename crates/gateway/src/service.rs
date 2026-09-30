@@ -1026,7 +1026,12 @@ impl S3Service {
                 deciding = combined.deciding;
                 combined.decision
             };
-            if route_decision == Decision::Allow && route_headers.contains_key("x-amz-expected-bucket-owner") {
+            // The raw map is asked first: it answers without allocating, and an absent owner — the
+            // common case — never reaches the view's reading of an empty line.
+            if route_decision == Decision::Allow
+                && route_headers.contains_key("x-amz-expected-bucket-owner")
+                && route_meta.has_header("x-amz-expected-bucket-owner")
+            {
                 route_decision = match (route_meta.header("x-amz-expected-bucket-owner"), route_meta.bucket()) {
                     (Some(expected_owner), Some(bucket)) => {
                         match catch_boxed_future(|| route_service.inner.bucket_owner_source.owner(bucket)).await {

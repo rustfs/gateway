@@ -52,6 +52,9 @@ use rustfs_gateway_types::{BucketName, NamePolicy, NameRejection, ObjectKey, Pat
 use crate::codec::error::CodecError;
 use crate::route::TargetKind;
 
+mod page_size;
+pub use self::page_size::PageSizeCeiling;
+
 /// The head of an accepted request, as a decoder sees it.
 ///
 /// Borrows the [`WireRequest`]; it owns nothing but the two decoded URI labels, which cannot be
@@ -83,46 +86,8 @@ pub struct MetaView<'a> {
     strict_date_conditions: bool,
     /// Whether the deployment reads MinIO's bare body literal as the document it stands for.
     body_literals: bool,
-}
-
-/// A page-size query parameter answered with its ceiling when the request asked for more.
-///
-/// The RustFS profile's reading of an oversized page size (rustfs/backlog#1677, R1): RustFS lowers
-/// `max-keys` to the listing maximum before it lists or echoes it, so a client asking for five
-/// thousand reads a page of at most a thousand and `<MaxKeys>1000</MaxKeys>`. Only a value that
-/// parses as an integer above the ceiling is replaced; an unparseable or negative value reaches
-/// the decoder as sent and is refused there exactly as before.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct PageSizeCeiling {
-    parameter: &'static str,
-    ceiling: i32,
-}
-
-impl PageSizeCeiling {
-    /// Clamps the query parameter `parameter` to `ceiling`.
-    #[must_use]
-    pub const fn new(parameter: &'static str, ceiling: i32) -> Self {
-        Self { parameter, ceiling }
-    }
-
-    /// The query parameter this ceiling governs.
-    #[must_use]
-    pub const fn parameter(&self) -> &'static str {
-        self.parameter
-    }
-
-    /// The largest page size the parameter is answered with.
-    #[must_use]
-    pub const fn ceiling(&self) -> i32 {
-        self.ceiling
-    }
-
-    /// `value` clamped, when it is an integer above the ceiling under the codec's own integer
-    /// reading, and `None` otherwise.
-    fn clamp(&self, value: &str) -> Option<i32> {
-        crate::codec::value::parse_integer(value).filter(|&requested| requested > self.ceiling)?;
-        Some(self.ceiling)
-    }
+    /// Whether a header whose one line is empty reads as absent, as legacy RustFS reads it.
+    empty_headers_absent: bool,
 }
 
 impl<'a> MetaView<'a> {
@@ -209,6 +174,7 @@ impl<'a> MetaView<'a> {
             rustfs_listing: None,
             strict_date_conditions: false,
             body_literals: false,
+            empty_headers_absent: false,
         })
     }
 
@@ -238,6 +204,7 @@ impl<'a> MetaView<'a> {
             rustfs_listing: self.rustfs_listing,
             strict_date_conditions: self.strict_date_conditions,
             body_literals: self.body_literals,
+            empty_headers_absent: self.empty_headers_absent,
         }
     }
 
@@ -308,6 +275,33 @@ impl<'a> MetaView<'a> {
     #[must_use]
     pub const fn body_literals_accepted(&self) -> bool {
         self.body_literals
+    }
+
+    /// This view, reading a header whose one field line is empty as absent, as legacy RustFS reads
+    /// every optional header (rustfs/gateway#1087) — for every decoder, the SSE headers and the
+    /// expected bucket owner alike. A value, a repeated line and the metadata prefix read as before.
+    #[must_use]
+    pub const fn with_empty_headers_absent(mut self) -> Self {
+        self.empty_headers_absent = true;
+        self
+    }
+
+    /// Whether this view reads a header whose one line is empty as absent.
+    #[must_use]
+    pub const fn empty_headers_absent(&self) -> bool {
+        self.empty_headers_absent
+    }
+
+    /// Whether `name` is present as [`MetaView::header`] reads presence: on the wire, and not one
+    /// empty line this view reads as absent.
+    #[must_use]
+    pub fn has_header(&self, name: &str) -> bool {
+        http::HeaderName::from_bytes(name.as_bytes())
+            .is_ok_and(|name| self.headers.count(&name) > 0 && !self.reads_as_absent(&name))
+    }
+
+    fn reads_as_absent(&self, name: &http::HeaderName) -> bool {
+        self.empty_headers_absent && !self.headers.is_multi(name) && self.headers.get_bytes(name).is_some_and(<[u8]>::is_empty)
     }
 
     /// This view, for a deployment that ignores an `x-amz-checksum-*` header naming an algorithm
@@ -419,7 +413,8 @@ impl<'a> MetaView<'a> {
     /// (rustfs/gateway#813). `aws-chunked` names the framing the ingest layer has already decoded,
     /// and a backend that stored it would tell a later reader to un-chunk a body that is not.
     ///
-    /// Under [`MetaView::with_transport_ended_empty_body`] an absent `content-length` reads as `0`.
+    /// Under [`MetaView::with_transport_ended_empty_body`] an absent `content-length` reads as `0`,
+    /// and under [`MetaView::with_empty_headers_absent`] one empty line reads as absent.
     #[must_use]
     pub fn header(&self, name: &str) -> Option<Cow<'a, str>> {
         let name = http::HeaderName::from_bytes(name.as_bytes()).ok()?;
@@ -433,6 +428,9 @@ impl<'a> MetaView<'a> {
         }
         if self.ended_empty && name == http::header::CONTENT_LENGTH {
             return self.header_text(&name).or(Some(Cow::Borrowed("0")));
+        }
+        if self.reads_as_absent(&name) {
+            return None;
         }
         self.header_text(&name)
     }
@@ -482,7 +480,7 @@ impl<'a> MetaView<'a> {
     pub fn query(&self, key: &str) -> Option<Cow<'a, str>> {
         let value = self.query.get(key).map(decode_component)?;
         if let Some(ceiling) = self.page_size_ceiling
-            && ceiling.parameter == key
+            && ceiling.parameter() == key
             && let Some(clamped) = ceiling.clamp(&value)
         {
             return Some(Cow::Owned(clamped.to_string()));

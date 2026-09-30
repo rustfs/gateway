@@ -282,6 +282,20 @@ pub enum UnknownChecksumAlgorithms {
     Ignored,
 }
 
+/// What [`BodyIntegrity::resolve_reading`] reads an integrity header whose one line is empty as.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum EmptyIntegrityHeaders {
+    /// A value, refused where it cannot be read: the default, so an empty claim is never mistaken
+    /// for no claim.
+    #[default]
+    Read,
+    /// No header at all, as legacy RustFS reads every optional header (rustfs/gateway#1087): an
+    /// empty `Content-MD5`, `x-amz-checksum-*`, `x-amz-sdk-checksum-algorithm`,
+    /// `x-amz-checksum-type` or `x-amz-trailer` claims nothing. A value, and a repeated line, are
+    /// read as before.
+    Absent,
+}
+
 /// What one request body's digests must come out to.
 ///
 /// Resolved from the head, before a body byte is read, because no number of body bytes settles a
@@ -339,14 +353,40 @@ impl BodyIntegrity {
         subject: ChecksumSubject,
         unknown: UnknownChecksumAlgorithms,
     ) -> Result<Self, ChecksumReject> {
+        Self::resolve_reading(headers, subject, unknown, EmptyIntegrityHeaders::Read)
+    }
+
+    /// [`BodyIntegrity::resolve_with`], with an integrity header whose one line is empty read as
+    /// `empty` says.
+    ///
+    /// # Errors
+    ///
+    /// As [`BodyIntegrity::resolve_with`]; under [`EmptyIntegrityHeaders::Absent`], never for an
+    /// integrity header whose one line is empty.
+    pub fn resolve_reading(
+        headers: &HeaderView<'_>,
+        subject: ChecksumSubject,
+        unknown: UnknownChecksumAlgorithms,
+        empty: EmptyIntegrityHeaders,
+    ) -> Result<Self, ChecksumReject> {
         // An empty `x-amz-sdk-checksum-algorithm` names no algorithm at all rather than an unknown
-        // one, and stays refused until an empty header reads as absent everywhere (#1087).
+        // one: under `Read` it stays refused, under `Absent` it is no header (#1087).
         let ignored = |name: &str, value: &str| {
             unknown == UnknownChecksumAlgorithms::Ignored && !value.is_empty() && names_unknown_checksum_algorithm(name, value)
         };
-        let trailer_checksum = declared_trailer_checksum(headers)?;
+        let absent = |name: &HeaderName, value: &str| {
+            empty == EmptyIntegrityHeaders::Absent && value.is_empty() && !headers.is_multi(name)
+        };
+        let read = |name: &HeaderName| headers.get_str(name).filter(|value| !absent(name, value));
+        let trailer_checksum = match headers.get_str(&X_AMZ_TRAILER) {
+            Some(value) if absent(&X_AMZ_TRAILER, value) => None,
+            _ => declared_trailer_checksum(headers)?,
+        };
         let checksum = parse_request_checksum(headers.iter_text().filter_map(|(name, value)| {
-            if (trailer_checksum.is_some() && name == SDK_CHECKSUM_ALGORITHM) || ignored(name.as_str(), value) {
+            if (trailer_checksum.is_some() && name == SDK_CHECKSUM_ALGORITHM)
+                || ignored(name.as_str(), value)
+                || absent(name, value)
+            {
                 None
             } else {
                 Some((name.as_str(), value))
@@ -360,9 +400,8 @@ impl BodyIntegrity {
             if subject != ChecksumSubject::RequestBody {
                 return Err(ChecksumReject::TrailerNotAllowed);
             }
-            if let Some(declared) = headers
-                .get_str(&SDK_CHECKSUM_ALGORITHM)
-                .filter(|declared| !ignored(SDK_CHECKSUM_ALGORITHM.as_str(), declared))
+            if let Some(declared) =
+                read(&SDK_CHECKSUM_ALGORITHM).filter(|declared| !ignored(SDK_CHECKSUM_ALGORITHM.as_str(), declared))
             {
                 let declared = ChecksumAlgorithm::from_wire_name(declared).ok_or(ChecksumReject::UnknownAlgorithm)?;
                 if declared != algorithm {
@@ -370,7 +409,7 @@ impl BodyIntegrity {
                 }
             }
         }
-        let trailer_type = match headers.get_str(&CHECKSUM_TYPE) {
+        let trailer_type = match read(&CHECKSUM_TYPE) {
             Some(value) if trailer_checksum.is_some() => {
                 Some(ChecksumType::parse(value).map_err(|_| ChecksumReject::InvalidChecksumValue)?)
             }
@@ -379,7 +418,7 @@ impl BodyIntegrity {
         // A keyed lookup, not a second walk of the map: the arbitration above already walks it
         // once, and this runs on every request including the overwhelming majority that claim
         // nothing.
-        let md5 = match headers.get_str(&CONTENT_MD5) {
+        let md5 = match read(&CONTENT_MD5) {
             Some(value) => Some(ContentMd5::parse(value).map_err(ChecksumReject::of)?),
             None => None,
         };
