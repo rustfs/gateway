@@ -211,6 +211,7 @@ impl GatewaySeam {
             .sse_config(SseConfig::refusing_only_target_keys_over_plaintext(
                 PlaintextCustomerKeyAck::i_understand_customer_keys_will_be_sent_in_the_clear(),
             ))
+            .read_request_documents_as_rustfs()
             .host_resolver(Resolver::new(false))
             .observer(RouteObserver {
                 routed: Arc::clone(&routed),

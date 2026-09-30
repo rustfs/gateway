@@ -30,6 +30,7 @@
 #![deny(missing_docs)]
 #![forbid(unsafe_code)]
 
+pub mod bound;
 pub mod chars;
 pub mod error;
 pub mod read;

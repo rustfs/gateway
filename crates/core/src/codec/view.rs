@@ -49,6 +49,7 @@ use rustfs_gateway_stream::ByteStream;
 use rustfs_gateway_types::dto::PostObjectInput;
 use rustfs_gateway_types::{BucketName, NamePolicy, NameRejection, ObjectKey, PathSplit};
 
+use crate::codec::document::DocumentReading;
 use crate::codec::error::CodecError;
 use crate::route::TargetKind;
 
@@ -88,6 +89,8 @@ pub struct MetaView<'a> {
     body_literals: bool,
     /// Whether a header whose one line is empty reads as absent, as legacy RustFS reads it.
     empty_headers_absent: bool,
+    /// How this deployment reads an XML request document.
+    document_reading: DocumentReading,
 }
 
 impl<'a> MetaView<'a> {
@@ -175,6 +178,7 @@ impl<'a> MetaView<'a> {
             strict_date_conditions: false,
             body_literals: false,
             empty_headers_absent: false,
+            document_reading: DocumentReading::Tree,
         })
     }
 
@@ -205,6 +209,7 @@ impl<'a> MetaView<'a> {
             strict_date_conditions: self.strict_date_conditions,
             body_literals: self.body_literals,
             empty_headers_absent: self.empty_headers_absent,
+            document_reading: self.document_reading,
         }
     }
 
@@ -360,6 +365,22 @@ impl<'a> MetaView<'a> {
     #[must_use]
     pub const fn rustfs_listing_encoding(&self) -> Option<crate::codec::value::RustFsListing> {
         self.rustfs_listing
+    }
+
+    /// This view, with its XML request document read the way `reading` says.
+    ///
+    /// The assembly calls this for a deployment that answers request documents as legacy RustFS
+    /// does ([`DocumentReading::RustFs`]); every other view reads a document as a tree.
+    #[must_use]
+    pub const fn with_document_reading(mut self, reading: DocumentReading) -> Self {
+        self.document_reading = reading;
+        self
+    }
+
+    /// How this view's XML request document is read.
+    #[must_use]
+    pub const fn document_reading(&self) -> DocumentReading {
+        self.document_reading
     }
 
     /// The naming policy this view was built under.
@@ -729,51 +750,9 @@ fn without_aws_chunked(value: &str) -> Option<Cow<'static, str>> {
 }
 
 #[cfg(test)]
-mod content_encoding_tests {
-    use super::without_aws_chunked;
-
-    /// Negative — the framing token is removed wherever it stands and however it is cased, the
-    /// other codings keep their spelling and order, and a token-only value is absent
-    /// (rustfs/gateway#813).
-    #[test]
-    fn n_aws_chunked_is_removed_and_nothing_else_is() {
-        assert_eq!(without_aws_chunked("gzip, aws-chunked").as_deref(), Some("gzip"));
-        assert_eq!(without_aws_chunked("aws-chunked,gzip").as_deref(), Some("gzip"));
-        assert_eq!(without_aws_chunked("br, AWS-Chunked, gzip").as_deref(), Some("br, gzip"));
-        assert_eq!(without_aws_chunked("aws-chunked").as_deref(), None);
-        assert_eq!(without_aws_chunked(" aws-chunked , ").as_deref(), None);
-        assert_eq!(without_aws_chunked("gzip").as_deref(), Some("gzip"));
-        assert_eq!(without_aws_chunked("x-aws-chunked").as_deref(), Some("x-aws-chunked"));
-    }
-}
+#[path = "tests/view_content_encoding.rs"]
+mod content_encoding_tests;
 
 #[cfg(test)]
-mod request_body_tests {
-    use super::*;
-
-    #[test]
-    fn required_stream_returns_the_live_producer() {
-        let stream = ByteStream::from_bytes(Bytes::from_static(b"annotation"));
-        assert!(RequestBody::Stream(stream).into_required_stream().is_ok());
-    }
-
-    #[test]
-    fn n_required_stream_refuses_an_absent_body() {
-        let result = RequestBody::None.into_required_stream();
-        assert!(result.is_err(), "an absent body cannot satisfy a required streaming member");
-        let Err(error) = result else {
-            return;
-        };
-        assert_eq!(*error.code(), rustfs_gateway_types::ErrorCode::INTERNAL_ERROR);
-    }
-
-    #[test]
-    fn n_required_stream_refuses_a_buffered_body() {
-        let result = RequestBody::Buffered(Bytes::from_static(b"annotation")).into_required_stream();
-        assert!(result.is_err(), "a buffered body cannot masquerade as the live producer");
-        let Err(error) = result else {
-            return;
-        };
-        assert_eq!(*error.code(), rustfs_gateway_types::ErrorCode::INTERNAL_ERROR);
-    }
-}
+#[path = "tests/view_request_body.rs"]
+mod request_body_tests;

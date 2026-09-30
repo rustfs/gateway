@@ -41,6 +41,7 @@ pub mod all_unknown;
 pub mod boolean;
 pub mod bounds;
 pub mod decode;
+pub mod document;
 pub mod encode;
 pub mod expr;
 pub mod media;
@@ -85,11 +86,12 @@ pub fn emit(
     ordered.sort_by(|a, b| a.operation.cmp(&b.operation));
 
     let ops_dir = generated_dir.join("codec").join("ops");
+    let payload_roots = document::payload_roots(&ordered);
     let mut files: Vec<(PathBuf, String)> = Vec::new();
     for ir in &ordered {
         files.push((
             ops_dir.join(format!("{}.rs", naming::module_name(&ir.operation))),
-            operation(ir, rules, codes)?,
+            operation(ir, rules, codes, &payload_roots)?,
         ));
     }
     files.push((ops_dir.join("mod.rs"), ops_mod(&ordered)));
@@ -97,7 +99,12 @@ pub fn emit(
 }
 
 /// Renders one operation's codec module.
-fn operation(ir: &OperationIr, rules: &CodecRules, codes: &Constants) -> Result<String, String> {
+fn operation(
+    ir: &OperationIr,
+    rules: &CodecRules,
+    codes: &Constants,
+    payload_roots: &BTreeSet<String>,
+) -> Result<String, String> {
     let op = &ir.operation;
     let marker = naming::type_name(op);
     let module = naming::module_name(op);
@@ -192,6 +199,9 @@ fn operation(ir: &OperationIr, rules: &CodecRules, codes: &Constants) -> Result<
             out.push_str(&encode::shape_writer(ir, name, shape)?);
         }
     }
+    if let Some(module) = document::module(ir, payload_roots)? {
+        out.push_str(&module);
+    }
     Ok(out)
 }
 
@@ -222,7 +232,7 @@ fn rust_string_slice(values: &[String]) -> String {
 
 #[cfg(test)]
 pub(crate) fn operation_for_test(ir: &OperationIr, rules: &CodecRules, codes: &Constants) -> Result<String, String> {
-    operation(ir, rules, codes)
+    operation(ir, rules, codes, &document::payload_roots(&[ir]))
 }
 
 fn unknown_element_policy(ir: &OperationIr, rules: &CodecRules) -> Result<UnknownElementPolicyValue, String> {
