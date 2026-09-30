@@ -16,8 +16,9 @@
 //! refuses (rustfs/gateway#1130).
 //!
 //! Responsible for: [`read_authorization`] (an `Authorization` value) and [`read_scope`] (a
-//! presigned URL's or a browser form's credential), restated from legacy RustFS's behaviour, and
-//! the calendar rules they share with the timestamp readings.
+//! presigned URL's or a browser form's credential), restated from legacy RustFS's behaviour, the
+//! calendar rules they share with the timestamp readings, and [`signed_headers_refusal`] — legacy
+//! RustFS's words for a `SignedHeaders` list that does not cover what it must.
 //! NOT responsible for: verifying anything, or deciding which refusal to give: the RustFS-profile
 //! switches that read with these (`crate::builder::view_policy::header_signatures`,
 //! `super::authenticator_switches`) decide that. Nothing read here reaches key derivation.
@@ -33,6 +34,9 @@
 //! `SignedHeaders=` and a list up to the next `,`; `,`; optional whitespace; `Signature=` and a
 //! value up to the next whitespace; optional whitespace to the end. Where the gateway's own
 //! parsers stop at a separator or a byte outside ASCII-graphic, legacy RustFS reads on.
+
+use http::HeaderMap;
+use rustfs_gateway_types::ErrorCode;
 
 /// The fields of a credential scope as legacy RustFS reads them.
 pub(crate) struct LegacyScope<'a> {
@@ -146,6 +150,36 @@ pub(crate) fn is_legacy_region(region: &str) -> bool {
 /// writes a string for debugging, control characters and quotes escaped.
 pub(crate) fn invalid_region_sentence(region: &str) -> String {
     format!("invalid credential region: invalid region: {region:?}")
+}
+
+/// Legacy RustFS's sentence for an `x-amz-*` header a signature leaves out.
+pub(crate) const UNSIGNED_HEADERS_SENTENCE: &str = "There were headers present in the request which were not signed";
+
+/// Legacy RustFS's answer to a `SignedHeaders` list `raw` that does not cover what it must, in its
+/// order: the first name the request did not send (`host` spelled so excepted: the authority
+/// stands in for it), or sent with a value that is not UTF-8, `403 SignatureDoesNotMatch` naming
+/// it; else an `x-amz-*` header the list does not name, case-insensitively, `403 AccessDenied`.
+/// A header signature may leave `x-amz-content-sha256` out (`payload_hash_exempt`); a presigned URL
+/// may not. `None` when the list covers everything, and the refusal is someone else's to word.
+pub(crate) fn signed_headers_refusal(raw: &str, headers: &HeaderMap, payload_hash_exempt: bool) -> Option<(ErrorCode, String)> {
+    for name in raw.split(';') {
+        let mut values = headers.get_all(name).iter().peekable();
+        if values.peek().is_none() {
+            if name == "host" {
+                continue;
+            }
+            return Some((ErrorCode::SIGNATURE_DOES_NOT_MATCH, format!("missing signed header: {name}")));
+        }
+        if values.any(|value| core::str::from_utf8(value.as_bytes()).is_err()) {
+            return Some((ErrorCode::SIGNATURE_DOES_NOT_MATCH, format!("invalid signed header: {name}")));
+        }
+    }
+    let unsigned = headers.keys().map(http::HeaderName::as_str).any(|name| {
+        name.starts_with("x-amz-")
+            && !(payload_hash_exempt && name == "x-amz-content-sha256")
+            && !raw.split(';').any(|signed| signed.eq_ignore_ascii_case(name))
+    });
+    unsigned.then(|| (ErrorCode::ACCESS_DENIED, UNSIGNED_HEADERS_SENTENCE.to_owned()))
 }
 
 #[cfg(test)]

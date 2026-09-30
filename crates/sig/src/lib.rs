@@ -108,6 +108,7 @@ mod secret;
 pub mod sig_v2;
 mod signature;
 mod signed_headers;
+mod signed_headers_legacy;
 mod signer;
 pub mod timing;
 mod verdict;

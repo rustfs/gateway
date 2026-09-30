@@ -814,6 +814,10 @@ mod header_signature_tests;
 /// grammar, refused with legacy RustFS's answers on every signing surface (rustfs/gateway#1130).
 mod scope_refusal_tests;
 
+/// `SignedHeaders` read, and its refusals answered, as legacy RustFS reads and answers them
+/// (rustfs/gateway#1130).
+mod signed_header_reading_tests;
+
 /// Request-checksum failures answered with legacy RustFS's `BadDigest` (rustfs/gateway#1057), and
 /// what each refusal leaves in storage.
 mod bad_digest_tests;

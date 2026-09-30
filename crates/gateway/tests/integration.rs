@@ -186,6 +186,8 @@ mod service_clone_allocations;
 mod service_concurrency;
 #[path = "service_config.rs"]
 mod service_config;
+#[path = "signed_header_reading.rs"]
+mod signed_header_reading;
 #[path = "signing_services.rs"]
 mod signing_services;
 #[path = "sigv2_runtime.rs"]

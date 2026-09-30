@@ -27,11 +27,13 @@
 //! service, the RustFS ring-2 adapter first.
 
 use super::authenticator::SigV4Authenticator;
-use super::legacy_credential::{LegacyScope, invalid_region_sentence, is_legacy_region, read_authorization, read_scope};
+use super::legacy_credential::{
+    LegacyScope, invalid_region_sentence, is_legacy_region, read_authorization, read_scope, signed_headers_refusal,
+};
 use super::legacy_refusal::LegacyRefusal;
 use rustfs_gateway_sig::{
     AUTHORIZATION_HEADER, AuthError, CredentialScope, EmptyRegion, ExpectedScope, RegionLength, RegionRule, RegionSet, SealedAws,
-    ServiceReading, SigLocation, X_AMZ_DATE, X_AMZ_DATE_HEADER,
+    ServiceReading, SigLocation, SignedHeaderSet, X_AMZ_DATE, X_AMZ_DATE_HEADER,
 };
 use rustfs_gateway_types::ErrorCode;
 
@@ -224,6 +226,65 @@ impl ScopePolicy {
 }
 
 impl SigV4Authenticator {
+    /// The request's `SignedHeaders` list, read and held to the completeness rules: verbatim, as
+    /// legacy RustFS reads a list AWS would call malformed, under
+    /// [`read_signed_headers_as_legacy_rustfs`](Self::read_signed_headers_as_legacy_rustfs).
+    pub(super) fn read_signed_headers(
+        &self,
+        raw: &str,
+        headers: &http::HeaderMap,
+        wire_content_length: Option<u64>,
+    ) -> Result<SignedHeaderSet, AuthError> {
+        if self.legacy_signed_headers {
+            SignedHeaderSet::parse_and_enforce_as_legacy_rustfs(raw, headers, wire_content_length)
+        } else {
+            SignedHeaderSet::parse_and_enforce(raw, headers, wire_content_length)
+        }
+    }
+
+    /// Legacy RustFS's words for a `SignedHeaders` list refused with `error`, under the legacy
+    /// reading: a name the request did not send, or sent unreadable, and an `x-amz-*` header the
+    /// list leaves out. A header signature may leave `x-amz-content-sha256` out in legacy RustFS;
+    /// the gateway still refuses that (`rd-loc-0010`), with its own words.
+    pub(super) fn signed_headers_refusal(
+        &self,
+        raw: &str,
+        headers: &http::HeaderMap,
+        location: SigLocation,
+        error: &AuthError,
+    ) -> Option<LegacyRefusal> {
+        if !self.legacy_signed_headers || *error != AuthError::SignatureDoesNotMatch {
+            return None;
+        }
+        // Legacy-compat (rustfs/backlog#2684): legacy RustFS names the header a signature
+        // declared and the request lacks, and answers an unsigned `x-amz-*` header with
+        // `AccessDenied` after it has looked the key up. Kept: the codes and sentences. The
+        // intended future behaviour is the gateway's uniform `SignatureDoesNotMatch`, which names
+        // nothing the request chose.
+        let (code, sentence) = signed_headers_refusal(raw, headers, location == SigLocation::Header)?;
+        Some(LegacyRefusal::new(code, sentence))
+    }
+
+    /// Reads `SignedHeaders` as legacy RustFS reads it, and answers its refusals in legacy RustFS's
+    /// words, as RustFS does today (rustfs/gateway#1130): a list AWS would call malformed — a name
+    /// in uppercase, out of order or repeated — is read verbatim (each name as written, in the
+    /// order written, a name repeated in a row once, its values looked up case-insensitively)
+    /// rather than refused `400 AuthorizationHeaderMalformed`, so a client that signed that same
+    /// string is verified and one that signed another is `403 SignatureDoesNotMatch`; a name the
+    /// request did not send is `403 SignatureDoesNotMatch` `missing signed header: <name>`; and an
+    /// `x-amz-*` header the list leaves out is `403 AccessDenied` "There were headers present in
+    /// the request which were not signed".
+    ///
+    /// Off by default. It covers nothing less: `host` must still be named, every `x-amz-*` header
+    /// sent must still be named — `x-amz-content-sha256` included, which legacy RustFS lets a
+    /// header signature leave out (`rd-loc-0010`, kept refused) — and every named header is still
+    /// hashed; only how a list is spelled in the string to sign, and the words of a refusal, change.
+    #[must_use]
+    pub fn read_signed_headers_as_legacy_rustfs(mut self) -> Self {
+        self.legacy_signed_headers = true;
+        self
+    }
+
     /// Verifies a SigV4 signature whose credential scope names any region in the configured-name
     /// grammar, not only one this deployment serves: the RustFS profile of rd-loc-0004
     /// (ADR-0023). RustFS verifies every scope region today, and its clients sign with

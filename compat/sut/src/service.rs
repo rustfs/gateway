@@ -188,7 +188,10 @@ pub(crate) fn build_service(
                     .accept_legacy_rustfs_signing_services()
                     // And it answers a scope date other than the signed day, and a region outside
                     // its grammar, with its own code and sentence (rustfs/gateway#1130).
-                    .answer_credential_scope_refusals_as_legacy_rustfs(),
+                    .answer_credential_scope_refusals_as_legacy_rustfs()
+                    // It reads `SignedHeaders` verbatim, and answers a list that does not cover
+                    // what it must in its own words (rustfs/gateway#1130).
+                    .read_signed_headers_as_legacy_rustfs(),
             )
             // Not an allow-all, and not a bare operation-set filter either: the matrix must see a
             // refusal for anything outside the reference backend's registered set, and the
