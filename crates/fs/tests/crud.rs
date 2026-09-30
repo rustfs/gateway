@@ -37,6 +37,8 @@ mod conditional_requests;
 mod content_headers;
 #[path = "crud/copy_object.rs"]
 mod copy_object;
+#[path = "crud/delete_conditions.rs"]
+mod delete_conditions;
 #[path = "crud/delete_objects.rs"]
 mod delete_objects;
 #[path = "crud/lifecycle.rs"]
