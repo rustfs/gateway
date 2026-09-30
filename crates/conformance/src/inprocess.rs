@@ -98,6 +98,8 @@ mod payload_literal;
 mod profile;
 mod security;
 mod sigv2;
+#[cfg(test)]
+mod transport_limit_tests;
 use crate::exec::ServiceRuntime;
 use crate::fixture::{Fixture, StoredObject, Stub};
 use crate::interpolate::Captures;
@@ -674,7 +676,7 @@ fn read_connection(connection: Option<&Value>) -> Result<(), SutError> {
     let empty = Value::empty_table();
     let connection = connection.unwrap_or(&empty);
     if connection.read("connection.pipeline").and_then(Value::as_bool) == Some(true) {
-        return Err(SutError::Environment(
+        return Err(SutError::TransportLimit(
             "`connection.pipeline = true` asks for the next request to be written before the \
              previous response is read. There is no connection here: the in-process target performs \
              one `S3Service::call` at a time and the runner reads each response before it builds \
@@ -686,28 +688,28 @@ fn read_connection(connection: Option<&Value>) -> Result<(), SutError> {
         ));
     }
     if connection.read("connection.tls").is_some() {
-        return Err(SutError::Environment(
+        return Err(SutError::TransportLimit(
             "`[connection.tls]` needs a socket to negotiate on; the in-process target hands a \
              parsed `http::Request` to the service and never speaks TLS"
                 .to_owned(),
         ));
     }
     if connection.read("connection.read_window_bytes").is_some() {
-        return Err(SutError::Environment(
+        return Err(SutError::TransportLimit(
             "`connection.read_window_bytes` induces backpressure by leaving response bytes unread; \
              the in-process target collects the whole body and has no flow-control window"
                 .to_owned(),
         ));
     }
     if connection.read("connection.idle_timeout_ms").is_some() {
-        return Err(SutError::Environment(
+        return Err(SutError::TransportLimit(
             "`connection.idle_timeout_ms` times out an idle connection, and there is no connection \
              here to leave idle"
                 .to_owned(),
         ));
     }
     if connection.read("connection.reuse").and_then(Value::as_bool) == Some(false) {
-        return Err(SutError::Environment(
+        return Err(SutError::TransportLimit(
             "`connection.reuse = false` asks for a fresh connection per exchange. There is no \
              connection, and the fixture state a case established is deliberately kept for all of \
              its exchanges, so this target cannot distinguish a fresh connection from a reused one"
@@ -781,7 +783,7 @@ impl InProcess {
             return Err(needs_a_socket("h2_frames"));
         }
         if wire.http_version.as_deref() == Some("h2") {
-            return Err(SutError::Environment(
+            return Err(SutError::TransportLimit(
                 "`request.http_version = \"h2\"` needs a real HTTP/2 framing layer".to_owned(),
             ));
         }
@@ -789,7 +791,7 @@ impl InProcess {
         // connection is asserting something about a socket and answering it from a complete body
         // would be a false green.
         if let Some(action) = wire.control_actions().next() {
-            return Err(SutError::Environment(format!(
+            return Err(SutError::TransportLimit(format!(
                 "a `{action}` control chunk needs a transport that owns the connection; the \
                  in-process target hands over a complete body"
             )));
@@ -963,7 +965,7 @@ impl InProcess {
 
 /// The refusal every request shape that needs a socket shares.
 fn needs_a_socket(field: &str) -> SutError {
-    SutError::Environment(format!(
+    SutError::TransportLimit(format!(
         "`request.{field}` needs a transport that writes bytes on a socket; the in-process target \
          hands a parsed `http::Request` to the service and cannot express a malformed head"
     ))

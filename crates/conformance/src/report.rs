@@ -121,6 +121,10 @@ pub struct CaseOutcome {
     pub phase: Phase,
     /// Why it was skipped, when it was.
     pub skip_reason: Option<String>,
+    /// Whether the skip is the target's transport limit ([`crate::sut::SutError::TransportLimit`]),
+    /// the one kind of skip a socket transport can turn into a verdict. Not rendered: the skip
+    /// reason says the same in words.
+    pub transport_limited: bool,
     /// Every finding, failing and advisory alike.
     pub diagnostics: Vec<Diagnostic>,
     /// The quirks this case declares, printed with a failure so the reader knows what it protects.

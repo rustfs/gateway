@@ -497,11 +497,12 @@ turns into skips, and skips were free.
 The file records one reference evaluation, and `conformance baseline` and the gate compute it the
 same way (`runner::reference_report`, rustfs/gateway#985): the corpus runs in process, then every
 case that target cannot judge runs again on the production Hyper driver, whose verdict is recorded.
-"Cannot judge" means skipped while executing — the in-process target's refusals there are transport
-limits (authored HTTP/2 frames, raw heads, `[connection.tls]`, pipelining, a presigned clock, ...),
-and any other execute-phase skip is re-run the same way — or failed only on
-`expect.connection_after`, which the in-process target reports as `open` by construction. A failure
-on any other rule is never re-run. `the_whole_corpus_holds_the_verdicts_the_baseline_records` in
+"Cannot judge" means refused while executing with a typed transport limit (`SutError::TransportLimit`:
+authored HTTP/2 frames, raw heads, control chunks, `[connection.tls]`, pipelining, a fresh connection
+per exchange, a concurrent batch) or failed only on `expect.connection_after`, which the in-process
+target reports as `open` by construction. Any other skip while executing is the in-process harness
+failing, not a transport limit, so it stays a skip in the record and the gate reports it; a failure
+on any other rule is never re-run either. `the_whole_corpus_holds_the_verdicts_the_baseline_records` in
 `crates/conformance/tests/corpus.rs` proves a refresh is exactly the committed file.
 
 Refreshing it:

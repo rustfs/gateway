@@ -275,6 +275,7 @@ mod tests {
             verdict,
             phase: Phase::Execute,
             skip_reason: None,
+            transport_limited: false,
             diagnostics: Vec::new(),
             quirks: Vec::new(),
             evidence: Vec::new(),
