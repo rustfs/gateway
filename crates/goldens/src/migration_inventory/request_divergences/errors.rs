@@ -14,7 +14,7 @@
 
 //! The error-response slice of the request-divergence register: `rd-err-NNNN`.
 //!
-//! Responsible for: the ten pinned divergences in how the two stacks answer a refused request —
+//! Responsible for: the thirteen pinned divergences in how the two stacks answer a refused request —
 //! status, code, `<Resource>`, `<RequestId>`, headers — each with its ruling and its pinned test
 //! in `operation_diff/context/error_parity/divergences.rs`.
 //! NOT responsible for: the register's validation and rendering, which the parent module does over
@@ -25,7 +25,7 @@
 
 use super::{DivergenceFollowUp, DivergenceRuling, ERROR_PARITY, ERROR_RESPONSES, RequestDivergence};
 
-pub(super) const ERROR_DIVERGENCES: [RequestDivergence; 10] = [
+pub(super) const ERROR_DIVERGENCES: [RequestDivergence; 13] = [
     RequestDivergence {
         id: "rd-err-0001",
         operation: "every operation",
@@ -175,5 +175,54 @@ pub(super) const ERROR_DIVERGENCES: [RequestDivergence; 10] = [
         follow_up: DivergenceFollowUp::None,
         test_file: ERROR_PARITY,
         test: "a_codec_refusal_names_its_member_as_the_resource_only_on_the_gateway",
+    },
+    RequestDivergence {
+        id: "rd-err-0011",
+        operation: "every buffered write: PutBucketVersioning, every other configuration write, DeleteObjects, PutObjectTagging",
+        request: "a Content-MD5 or x-amz-checksum-* that does not match the body or cannot be read, or two different checksums",
+        aws: "400 BadDigest, XAmzContentChecksumMismatch, InvalidDigest or InvalidRequest; nothing is stored",
+        aws_evidence: ERROR_RESPONSES,
+        s3s: "compares none of them on a buffered body and hands the write to the handler; legacy RustFS applies it (observed on \
+              twelve buffered writes, e870a6d25b)",
+        gateway: "refuses before the handler: the decoder compares Content-MD5, the body gate the checksum; under the RustFS \
+                  profile a mismatch is 400 BadDigest",
+        client_impact: "a client whose digest contradicts its body is refused instead of having the document applied; kept under \
+                        rustfs/backlog#1677's hard constraint, since storing a body that contradicts its declared checksum is \
+                        data damage",
+        ruling: DivergenceRuling::KeepGateway,
+        follow_up: DivergenceFollowUp::None,
+        test_file: ERROR_PARITY,
+        test: "a_buffered_write_that_contradicts_its_integrity_claim_is_refused_only_by_the_gateway",
+    },
+    RequestDivergence {
+        id: "rd-err-0012",
+        operation: "PutObject, UploadPart",
+        request: "a Content-MD5 that is not base64 of sixteen bytes",
+        aws: "400 InvalidDigest",
+        aws_evidence: ERROR_RESPONSES,
+        s3s: "hands it to the RustFS body, whose storage reader fails to decode it: 500 InternalError, nothing stored \
+              (observed, e870a6d25b)",
+        gateway: "400 InvalidDigest before the handler",
+        client_impact: "a malformed header is a client error the SDK does not retry, instead of a server error it does; a \
+                        legacy bug, not a decision",
+        ruling: DivergenceRuling::KeepGateway,
+        follow_up: DivergenceFollowUp::None,
+        test_file: ERROR_PARITY,
+        test: "an_unreadable_content_md5_on_an_upload_is_a_client_error_only_on_the_gateway",
+    },
+    RequestDivergence {
+        id: "rd-err-0013",
+        operation: "every buffered write: PutBucketVersioning, CreateBucket, PutObjectTagging",
+        request: "a header-signed body that does not hash to its x-amz-content-sha256",
+        aws: "400 XAmzContentSHA256Mismatch; nothing is stored",
+        aws_evidence: ERROR_RESPONSES,
+        s3s: "500 InternalError; legacy RustFS applies nothing (observed on CreateBucket and PutObjectTagging, e870a6d25b)",
+        gateway: "400 XAmzContentSHA256Mismatch before the handler",
+        client_impact: "a corrupted body is a client error the SDK does not retry, instead of a server error it does; nothing \
+                        is applied either way; a legacy bug, not a decision",
+        ruling: DivergenceRuling::KeepGateway,
+        follow_up: DivergenceFollowUp::None,
+        test_file: ERROR_PARITY,
+        test: "a_buffered_body_that_does_not_hash_to_its_signed_digest_is_a_client_error_only_on_the_gateway",
     },
 ];

@@ -90,6 +90,8 @@ pub(crate) struct Scenario {
     clock_offset_seconds: i64,
     length: Length,
     body: AppBody,
+    /// The bytes whose SHA-256 the request is signed over, instead of `UNSIGNED-PAYLOAD`.
+    signed_payload: Option<Vec<u8>>,
 }
 
 impl Scenario {
@@ -101,7 +103,14 @@ impl Scenario {
             clock_offset_seconds: 0,
             length: Length::Exact,
             body: AppBody::Succeeds,
+            signed_payload: None,
         }
+    }
+
+    /// Signs the SHA-256 of `payload` in `x-amz-content-sha256`, whatever body is sent.
+    pub(crate) fn signing_the_payload_of(mut self, payload: &[u8]) -> Self {
+        self.signed_payload = Some(payload.to_vec());
+        self
     }
 
     /// Signs by presigned query, valid for `seconds`, instead of by header.
@@ -167,7 +176,9 @@ impl Scenario {
             &request.query,
             &headers,
             &raw_host,
-            PayloadMode::Unsigned,
+            self.signed_payload.as_deref().map_or(PayloadMode::Unsigned, |payload| {
+                PayloadMode::ExactSha256(<sha2::Sha256 as sha2::Digest>::digest(payload).into())
+            }),
             stamp,
         );
         if let Some(length) = self.wire_length() {

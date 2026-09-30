@@ -152,11 +152,11 @@ fn every_pinned_divergence_test_has_a_ruling_and_every_ruling_a_test() {
 #[test]
 fn the_register_is_valid_and_renders_every_ruling() {
     let report = build_request_divergences();
-    assert_eq!(report.as_ref().map(|report| report.entries().len()), Ok(52));
+    assert_eq!(report.as_ref().map(|report| report.entries().len()), Ok(56));
     let rendered = report.map(|report| report.render()).unwrap_or_default();
     assert!(
         rendered.starts_with(
-            "request divergences: rulings=52 keep-gateway=29 align-s3s=12 align-aws=4 rustfs-profile=7 open-follow-ups=4 landed=22\n"
+            "request divergences: rulings=56 keep-gateway=33 align-s3s=12 align-aws=4 rustfs-profile=7 open-follow-ups=4 landed=22\n"
         ),
         "{rendered}"
     );

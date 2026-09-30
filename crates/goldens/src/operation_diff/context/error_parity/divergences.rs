@@ -21,6 +21,8 @@
 //! both stacks answer alike (`super::matrix`, `super::mapping`).
 //! Upstream: `super`, `super::matrix`. Downstream: the request-divergence register guard.
 
+use http::Method;
+
 use super::super::{ContextRequest, PATH_HOST};
 use super::facts;
 use super::matrix::{
@@ -274,4 +276,91 @@ fn a_codec_refusal_names_its_member_as_the_resource_only_on_the_gateway() {
         "{pair:#?}"
     );
     assert_eq!(pair.oracle.elements(), ["Code", "Message"], "{pair:#?}");
+}
+
+/// One row of integrity claims — header name and value — and the code the gateway refuses them with.
+type Claims = (&'static [(&'static str, &'static [u8])], &'static str);
+
+/// The PutBucketVersioning document the integrity rows send, and its Content-MD5.
+const VERSIONING: (&[u8], &[u8]) = (
+    b"<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>",
+    b"8qj8HSeDu3APPMQZVG06WQ==",
+);
+
+fn versioning_put(body: &[u8]) -> ContextRequest {
+    ContextRequest::new(Method::PUT, PATH_HOST, "/photos", "versioning", body)
+}
+
+/// A buffered write — PutBucketVersioning here, as every configuration write, DeleteObjects and
+/// PutObjectTagging — whose integrity claim contradicts its body or cannot be read: a Content-MD5
+/// or an `x-amz-checksum-*` of other bytes, an unreadable Content-MD5, two different checksums.
+/// The gateway refuses each before its handler; the legacy stack compares none of them on a
+/// buffered body and hands the write to the RustFS body, which applies it (legacy RustFS stores
+/// every such write).
+///
+/// Ruling: `rd-err-0011`
+#[test]
+fn a_buffered_write_that_contradicts_its_integrity_claim_is_refused_only_by_the_gateway() {
+    let (body, _) = VERSIONING;
+    let rows: [Claims; 4] = [
+        (&[("content-md5", b"XUFAKrxLKna5cZ2REBfFkg==")], "BadDigest"),
+        (&[("x-amz-checksum-crc32", b"AAAAAA==")], "XAmzContentChecksumMismatch"),
+        (&[("content-md5", b"not-base64!")], "InvalidDigest"),
+        (
+            &[
+                ("x-amz-checksum-crc32", b"AAAAAA=="),
+                ("x-amz-checksum-sha256", b"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="),
+            ],
+            "InvalidRequest",
+        ),
+    ];
+    for (claims, code) in rows {
+        let request = claims
+            .iter()
+            .fold(versioning_put(body), |request, (name, value)| request.header(name, value));
+        let pair = answered(&Scenario::new(request.signed("us-east-1")));
+        assert_eq!((pair.gateway.status, pair.gateway.code()), (400, Some(code)), "{pair:#?}");
+        assert!(!pair.gateway.reached, "{pair:#?}");
+        assert_eq!(pair.oracle.status, 200, "{pair:#?}");
+        assert!(pair.oracle.reached, "{pair:#?}");
+    }
+}
+
+/// A Content-MD5 that is not base64 on an upload. The gateway refuses the header before its handler
+/// with the AWS code; the legacy stack hands it to the RustFS body, whose storage reader fails to
+/// decode it and
+/// answers `500 InternalError` — scripted here as the RustFS body answers it, observed on a legacy
+/// RustFS build for PutObject and UploadPart.
+///
+/// Ruling: `rd-err-0012`
+#[test]
+fn an_unreadable_content_md5_on_an_upload_is_a_client_error_only_on_the_gateway() {
+    for request in [object_put(b"hello"), part_put(b"hello")] {
+        let scenario = Scenario::new(request.header("content-md5", b"not-base64!").signed("us-east-1"))
+            .app_refuses(|| S3Error::new(S3ErrorCode::InternalError));
+        let pair = answered(&scenario);
+        assert_eq!((pair.gateway.status, pair.gateway.code()), (400, Some("InvalidDigest")), "{pair:#?}");
+        assert!(!pair.gateway.reached, "{pair:#?}");
+        assert_eq!((pair.oracle.status, pair.oracle.code()), (500, Some("InternalError")), "{pair:#?}");
+        assert!(pair.oracle.reached, "{pair:#?}");
+    }
+}
+
+/// A buffered body that does not hash to the digest its signature covers. The gateway refuses it
+/// before its handler with the AWS code; the legacy stack answers `500 InternalError`, and legacy
+/// RustFS applies nothing (observed on CreateBucket and PutObjectTagging).
+///
+/// Ruling: `rd-err-0013`
+#[test]
+fn a_buffered_body_that_does_not_hash_to_its_signed_digest_is_a_client_error_only_on_the_gateway() {
+    let (body, md5) = VERSIONING;
+    let request = versioning_put(body).header("content-md5", md5).signed("us-east-1");
+    let pair = answered(&Scenario::new(request).signing_the_payload_of(b"other bytes"));
+    assert_eq!(
+        (pair.gateway.status, pair.gateway.code()),
+        (400, Some("XAmzContentSHA256Mismatch")),
+        "{pair:#?}"
+    );
+    assert!(!pair.gateway.reached, "{pair:#?}");
+    assert_eq!((pair.oracle.status, pair.oracle.code()), (500, Some("InternalError")), "{pair:#?}");
 }
