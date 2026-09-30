@@ -754,6 +754,7 @@ impl S3Service {
                     Err(refusal) => return outcome.refuse(refusal.render(response_kind, wire.framing().has_body())),
                 };
                 body_digest = self.inner.view_policy.bodyless_digest.apply(request_body_mode, obligation);
+                let payload = self.inner.view_policy.signed_payload_mode(payload);
                 framing_mode = Some(payload.clone());
                 #[cfg(feature = "dangerous-replace-signature-verifier")]
                 let replacement_verdict = self

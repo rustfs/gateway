@@ -47,6 +47,16 @@ fn encode(text: &str) -> String {
         .collect()
 }
 
+/// The SHA-256 of `data`, in lowercase hex.
+pub(super) fn sha256_hex(data: &[u8]) -> String {
+    hex(&Sha256::digest(data))
+}
+
+/// The SHA-256 of `data`, in standard base64.
+pub(super) fn sha256_base64(data: &[u8]) -> String {
+    base64(&Sha256::digest(data))
+}
+
 fn base64(bytes: &[u8]) -> String {
     const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::new();
@@ -93,6 +103,8 @@ pub(super) struct HandSigned {
     unsigned: &'static [&'static str],
     service: &'static str,
     secret: &'static str,
+    declared: Option<String>,
+    payload_line: Option<String>,
 }
 
 impl HandSigned {
@@ -106,7 +118,23 @@ impl HandSigned {
             unsigned: &[],
             service: "s3",
             secret: MAIN_SECRET,
+            declared: None,
+            payload_line: None,
         }
+    }
+
+    /// Sends `value` as `x-amz-content-sha256` — by default the hex digest of the body — and signs
+    /// it as the canonical request's payload line, unless [`Self::signing_payload_line`] names
+    /// another.
+    pub(super) fn declaring(mut self, value: impl Into<String>) -> Self {
+        self.declared = Some(value.into());
+        self
+    }
+
+    /// Signs `line` as the canonical request's payload line, whatever the request declares.
+    pub(super) fn signing_payload_line(mut self, line: impl Into<String>) -> Self {
+        self.payload_line = Some(line.into());
+        self
     }
 
     /// Sends `names` — any of `host`, `x-amz-content-sha256` and `x-amz-date` — without naming
@@ -152,10 +180,11 @@ impl HandSigned {
     /// The header-signed request, stamped now.
     pub(super) fn request(&self) -> http::Request<Bytes> {
         let (stamp, _) = stamps();
-        let payload = hex(&Sha256::digest(&self.body));
+        let declared = self.declared.clone().unwrap_or_else(|| sha256_hex(&self.body));
+        let payload = self.payload_line.clone().unwrap_or_else(|| declared.clone());
         let sent = [
             ("host", "s3.example.com".to_owned()),
-            ("x-amz-content-sha256", payload.clone()),
+            ("x-amz-content-sha256", declared),
             ("x-amz-date", stamp.clone()),
         ];
         let named: Vec<&(&str, String)> = sent.iter().filter(|(name, _)| !self.unsigned.contains(name)).collect();
