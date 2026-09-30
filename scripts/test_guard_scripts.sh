@@ -10958,10 +10958,10 @@ mut_sig_p2_04_warning_literal_changed() {
 from pathlib import Path
 path = Path("crates/gateway/src/builder.rs")
 text = path.read_text()
-old = '        "WARN: the built-in AWS signature verifier is dangerously replaced; the H1..H7 security floor remains enforced"'
+old = '                "the built-in AWS signature verifier is dangerously replaced; the H1..H7 security floor remains enforced"'
 if text.count(old) != 1:
     raise SystemExit("missing replacement warning mutation subject")
-new = '        // "WARN: the built-in AWS signature verifier is dangerously replaced; the H1..H7 security floor remains enforced"\n        "WARN: signature replacement enabled"'
+new = '                // "the built-in AWS signature verifier is dangerously replaced; the H1..H7 security floor remains enforced"\n                "signature replacement enabled"'
 path.write_text(text.replace(old, new, 1))
 PYEOF
 }
@@ -10973,8 +10973,9 @@ mut_sig_p2_04_warning_call_removed() {
 from pathlib import Path
 path = Path("crates/gateway/src/builder.rs")
 text = path.read_text()
-old = '''            eprintln!(
-                "WARN: the built-in AWS signature verifier is dangerously replaced; the H1..H7 security floor remains enforced"
+old = '''            dangerous_assembly(
+                "replaced_aws_signature_verifier",
+                "the built-in AWS signature verifier is dangerously replaced; the H1..H7 security floor remains enforced",
             );'''
 if text.count(old) != 1:
     raise SystemExit("missing replacement warning call mutation subject")
@@ -10983,6 +10984,22 @@ PYEOF
 }
 expect_fail check_sig_case_coverage.sh \
     'assembly no longer emitting the replacement warning' mut_sig_p2_04_warning_call_removed
+
+# The sentence kept only in a comment after a different message: the event would carry the decoy.
+mut_sig_p2_04_warning_trailing_decoy() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/gateway/src/builder.rs")
+text = path.read_text()
+old = '                "the built-in AWS signature verifier is dangerously replaced; the H1..H7 security floor remains enforced",\n'
+if text.count(old) != 1:
+    raise SystemExit("missing replacement warning trailing-decoy mutation subject")
+new = '                "signature replacement enabled" // , "the built-in AWS signature verifier is dangerously replaced; the H1..H7 security floor remains enforced"\n'
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'the replacement warning replaced by a decoy with the sentence in a trailing comment' mut_sig_p2_04_warning_trailing_decoy
 
 mut_sig_p2_04_floor_test_feature_changed() {
     python3 - <<'PYEOF'
@@ -11179,9 +11196,13 @@ mut_sig_p2_04_startup_posture_log_render_removed() {
 from pathlib import Path
 path = Path("crates/gateway/src/posture.rs")
 text = path.read_text()
-old = """    eprintln!(
+old = """    tracing::info!(
+        target: logging::TARGET,
+        event = logging::EVENT_SECURITY_POSTURE,
+        component = logging::COMPONENT,
+        subsystem = logging::SUBSYSTEM_POSTURE,
         "{}",
-        render_startup_posture(operations, floor, custom_signature_verifier, dangerously_replaced_signature_verifier,)
+        render_startup_posture(operations, floor, custom_signature_verifier, dangerously_replaced_signature_verifier)
     );
 """
 if text.count(old) != 1:
@@ -11198,6 +11219,27 @@ PYEOF
 }
 expect_fail check_sig_case_coverage.sh \
     'the startup posture report being rendered but never written' mut_sig_p2_04_startup_posture_log_render_removed
+
+# The report rendered and dropped, and the event carrying a decoy with the rendering in a comment.
+mut_sig_p2_04_startup_posture_log_decoy() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/gateway/src/posture.rs")
+text = path.read_text()
+old = """        "{}",
+        render_startup_posture(operations, floor, custom_signature_verifier, dangerously_replaced_signature_verifier)
+    );
+"""
+if text.count(old) != 1:
+    raise SystemExit("missing startup posture log decoy mutation subject")
+new = """        "withheld" // , "{}", render_startup_posture(operations, floor, custom_signature_verifier, dangerously_replaced_signature_verifier)
+    );
+"""
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'the startup posture event carrying a decoy with the rendering in a comment' mut_sig_p2_04_startup_posture_log_decoy
 
 mut_sig_p2_04_dry_run_arguments_unchecked() {
     python3 - <<'PYEOF'
@@ -17851,6 +17893,27 @@ CREDPY
 }
 expect_fail check_secret_hygiene.sh \
     'a formatting macro naming a secret in the gateway extension tree' mut_secret_in_a_log_line
+
+# Every event in the gateway puts its fields on lines of their own; a rule reading one line at a
+# time sees the macro on one line and the key material on another, and neither alone.
+mut_secret_in_a_multiline_event() {
+    python3 - <<'CREDPY'
+import pathlib
+path = pathlib.Path("crates/gateway/src/ext/authenticator.rs")
+path.write_text(path.read_text() + """
+fn report_mismatch(computed: &str) {
+    tracing::warn!(
+        target: "rustfs_gateway",
+        event = "signature_mismatch",
+        expected_signature = %computed,
+        "signature mismatch"
+    );
+}
+""")
+CREDPY
+}
+expect_fail check_secret_hygiene.sh \
+    'a multi-line logging macro naming key material on a field line of its own' mut_secret_in_a_multiline_event
 
 mut_refusal_in_a_log_line() {
     python3 - <<'CREDPY'

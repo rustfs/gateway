@@ -132,7 +132,7 @@ impl AssemblyUpdate {
         let authorizer = builder.validate_assembly()?;
         let routing = super::assemble_routing(builder.router, builder.pending, builder.op_layers)?;
         if builder.dangerous_allow_all_authorizer {
-            eprintln!("WARN: dangerous allow-all authorizer disables authorization for every request");
+            crate::logging::allow_all_authorizer_assembled();
         }
         let config = Arc::clone(&builder.config.load_full().config);
         Ok(AssemblySnapshot {

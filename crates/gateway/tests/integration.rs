@@ -202,6 +202,8 @@ mod streaming_without_length;
 mod tagging_reachability;
 #[path = "throughput_request.rs"]
 mod throughput_request;
+#[path = "tracing_events.rs"]
+mod tracing_events;
 #[path = "unknown_checksum_algorithms.rs"]
 mod unknown_checksum_algorithms;
 #[path = "unread_body_refusal.rs"]

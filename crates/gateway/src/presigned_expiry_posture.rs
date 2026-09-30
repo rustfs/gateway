@@ -24,6 +24,8 @@
 
 use rustfs_gateway_sig::{PresignedExpiryRule, SecurityFloor};
 
+use crate::logging;
+
 /// The line naming `floor`'s presigned-lifetime rule, or `None` for the AWS default, so every
 /// deployment that did not opt in logs exactly what it logged before.
 pub(crate) fn render_presigned_expiry_posture(floor: &SecurityFloor) -> Option<String> {
@@ -36,7 +38,13 @@ pub(crate) fn render_presigned_expiry_posture(floor: &SecurityFloor) -> Option<S
 /// Writes [`render_presigned_expiry_posture`]'s line, when there is one, to the startup log.
 pub(crate) fn log_presigned_expiry_posture(floor: &SecurityFloor) {
     if let Some(line) = render_presigned_expiry_posture(floor) {
-        eprintln!("{line}");
+        tracing::info!(
+            target: logging::TARGET,
+            event = logging::EVENT_PRESIGNED_EXPIRY_POSTURE,
+            component = logging::COMPONENT,
+            subsystem = logging::SUBSYSTEM_POSTURE,
+            "{line}"
+        );
     }
 }
 

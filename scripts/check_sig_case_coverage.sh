@@ -467,13 +467,15 @@ elif kind == "warning_branch":
         raise SystemExit(f"{path}: warning branch evidence is missing or ambiguous")
     branch_start = code.index(evidence)
     branch_end = code.find("}", branch_start)
-    position = code.find("eprintln!", branch_start, branch_end)
+    # The diagnostic is the dangerous-assembly event for the replacement, and the whole statement
+    # is its two arguments: nothing may stand between them, before them or after them, so neither
+    # a comment carrying the sentence nor a format string swallowing it passes for the sentence.
+    position = code.find("dangerous_assembly(", branch_start, branch_end)
     statement_end = code.find(";", position, branch_end) if position != -1 else -1
     statement = source[position : statement_end + 1] if statement_end != -1 else ""
     exact_warning = re.fullmatch(
-        rf"eprintln!\(\s*{re.escape(required_call)}\s*\);",
+        rf'dangerous_assembly\(\s*"replaced_aws_signature_verifier"\s*,\s*{re.escape(required_call)}\s*,?\s*\);',
         statement,
-        re.DOTALL,
     )
     if position == -1 or exact_warning is None:
         raise SystemExit(f"{path}: warning branch lost its exact active diagnostic")
@@ -512,13 +514,23 @@ elif kind == "string_match_arm":
     if len(matches) != 1:
         raise SystemExit(f"{path}: active floor-constructor mapping is missing or ambiguous")
 elif kind == "log_render":
-    if code.count("eprintln!(") != 1:
+    # The report is one `info` event whose message renders the live report: the statement is the
+    # event's exact field list and then the rendering of the four live inputs, with nothing else
+    # anywhere in it, so a comment or a second message cannot stand in for the rendered line.
+    if code.count("tracing::info!(") != 1:
         raise SystemExit(f"{path}: startup posture log call is missing or ambiguous")
-    position = code.index("eprintln!(")
-    exact_log = re.match(
-        r'eprintln!\(\s*"\{\}"\s*,\s*render_startup_posture\(',
-        source[position:],
-        re.DOTALL,
+    position = code.index("tracing::info!(")
+    statement_end = code.find(";", position)
+    statement = source[position : statement_end + 1] if statement_end != -1 else ""
+    exact_log = re.fullmatch(
+        r'tracing::info!\(\s*target:\s*logging::TARGET\s*,'
+        r'\s*event\s*=\s*logging::EVENT_SECURITY_POSTURE\s*,'
+        r'\s*component\s*=\s*logging::COMPONENT\s*,'
+        r'\s*subsystem\s*=\s*logging::SUBSYSTEM_POSTURE\s*,'
+        r'\s*"\{\}"\s*,'
+        r'\s*render_startup_posture\(\s*operations\s*,\s*floor\s*,\s*custom_signature_verifier\s*,'
+        r'\s*dangerously_replaced_signature_verifier\s*,?\s*\)\s*,?\s*\);',
+        statement,
     )
     if exact_log is None:
         raise SystemExit(f"{path}: startup posture log no longer renders the live report")
@@ -1329,7 +1341,7 @@ validate_rust_evidence "$gateway_builder" source_order \
     'check_sig_case_coverage: dangerous replacement warning is not reached at assembly'
 validate_rust_evidence "$gateway_builder" warning_branch \
     'if dangerously_replaced_signature_verifier {' \
-    '"WARN: the built-in AWS signature verifier is dangerously replaced; the H1..H7 security floor remains enforced"' \
+    '"the built-in AWS signature verifier is dangerously replaced; the H1..H7 security floor remains enforced"' \
     'check_sig_case_coverage: dangerous replacement lost its exact start-up warning'
 validate_rust_evidence "$gateway_posture" source_literal_after \
     'if self.dangerously_replaced_signature_verifier {' \

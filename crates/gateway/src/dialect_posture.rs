@@ -27,6 +27,7 @@ use std::collections::BTreeSet;
 
 use rustfs_gateway_core::{InstalledClaim, OperationSpec, Router};
 
+use crate::logging;
 use crate::posture::format_names;
 
 /// The dialect half of the start-up report (ADR-0024): every path prefix a dialect took away from
@@ -58,7 +59,11 @@ pub(crate) fn log_dialect_posture(router: &Router, every_operation: bool) {
     let caller_secret_ops = registry
         .names()
         .filter(|name| registry.get(name).is_some_and(OperationSpec::receives_caller_secret));
-    eprintln!(
+    tracing::info!(
+        target: logging::TARGET,
+        event = logging::EVENT_DIALECT_POSTURE,
+        component = logging::COMPONENT,
+        subsystem = logging::SUBSYSTEM_POSTURE,
         "{}",
         render_dialect_posture(router.claims().claims().iter(), caller_secret_ops, every_operation)
     );
