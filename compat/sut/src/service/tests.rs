@@ -826,3 +826,6 @@ mod legacy_storage_names_tests;
 
 /// Successful answers' heads, written as legacy RustFS writes them (rustfs/gateway#1148).
 mod legacy_heads_tests;
+
+/// What a browser form's `PutObject` members store, as legacy RustFS stores them (rustfs/gateway#1129).
+mod post_object_field_tests;

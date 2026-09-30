@@ -100,7 +100,7 @@ mod generated_dto;
 /// Flat aliases for every operation DTO.
 pub mod dto {
     pub use crate::generated_dto::*;
-    pub use crate::post_object::{PostObject, PostObjectInput, PostObjectOutput};
+    pub use crate::post_object::{PostObject, PostObjectFields, PostObjectInput, PostObjectOutput};
 }
 
 pub use crate::placeholder::{PlaceholderDefault, WirePlaceholder, reject_placeholder};

@@ -76,7 +76,7 @@ for request order and `docs/assembly-order.md` for extension call counts.
 | `tests/service_concurrency.rs` | One hundred concurrent clones and requests |
 | `tests/service_config.rs`, `tests/operation_registry_hot_update.rs`, `tests/assembly_snapshot.rs` | Settings, routing, and middleware updates retain one in-flight generation and preserve concurrent partial updates |
 | `tests/handler_panic.rs`, `tests/observer_panic.rs` | Handler panic becomes 500 and the next request still runs; an observer panic changes neither an ordinary response nor a committed terminal document |
-| `tests/pipeline.rs`, `tests/post_object_runtime.rs`, `tests/post_object_streaming.rs`, `tests/post_object_legacy_form.rs` | End-to-end ordering, response shapes, POST byte ownership and allocation bounds, and the object a RustFS-profile form stores |
+| `tests/pipeline.rs`, `tests/post_object_runtime.rs`, `tests/post_object_streaming.rs`, `tests/post_object_legacy_form.rs`, `tests/post_object_legacy_fields.rs` | End-to-end ordering, response shapes, POST byte ownership and allocation bounds, the object a RustFS-profile form stores, and the `PutObject` members it hands its handler |
 | `tests/authz_contract.rs`, `tests/authz_contract/headers.rs` | Two authorization stages, audit, failure floor, and borrowed headers without Debug disclosure |
 | `tests/governor_runtime.rs` | Limits run before expensive work and recover |
 | `tests/cors_runtime.rs`, `tests/cors_runtime/headerless.rs` | Headerless OPTIONS rejection, preflight and actual-response CORS behavior |

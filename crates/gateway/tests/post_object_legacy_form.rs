@@ -400,11 +400,10 @@ async fn an_unnamed_or_malformed_part_is_refused_before_the_handler() {
 #[tokio::test]
 async fn a_field_the_profile_cannot_carry_is_refused_before_the_handler() {
     for name in [
-        "Cache-Control",
-        "x-amz-storage-class",
-        "x-amz-tagging",
-        "x-amz-server-side-encryption",
-        "Expires",
+        "x-amz-object-lock-mode",
+        "X-Amz-Object-Lock-Retain-Until-Date",
+        "x-amz-object-lock-legal-hold",
+        "x-amz-server-side-encryption-customer-key",
         "redirect",
     ] {
         let body = form(&[

@@ -34,6 +34,13 @@ impl Handler<dto::PostObject> for Stub {
 /// Drains the file, then stores it; nothing is stored until the whole file has arrived.
 async fn post_object(state: &Arc<Mutex<Fixture>>, input: dto::PostObjectInput) -> HandlerResult<dto::PostObject> {
     let bytes = drain(Some(input.body)).await?;
+    // The fixture stores a form's key, media type and metadata only. The gateway grammar these
+    // cases run under hands it no other member; one it did would be refused, never dropped.
+    if !input.fields.is_empty() {
+        return Err(HandlerError::not_implemented(
+            "the fixture does not store a form's other PutObject members",
+        ));
+    }
     let mut fixture = state
         .lock()
         .map_err(|_| HandlerError::internal_error("the fixture state was left poisoned by an earlier exchange"))?;

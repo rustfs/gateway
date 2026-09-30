@@ -35,7 +35,7 @@ use rustfs_gateway_sig::{
     EmptyRegion, PostPolicy, PostPolicyError, PostPolicyLimits, RegionLength, RegionRule, RequestNow, SigV2PostPolicy,
     build_success_action_redirect,
 };
-use rustfs_gateway_types::dto::PostObjectInput;
+use rustfs_gateway_types::dto::{PostObjectFields, PostObjectInput};
 use rustfs_gateway_types::{BucketName, NamePolicy, ObjectKey};
 use rustfs_gateway_xml::{S3_XMLNS, XmlWriter};
 
@@ -351,10 +351,12 @@ where
         let key_text = policy.final_key(&anonymous_key);
         let key =
             ObjectKey::materialize_decoded(key_text, names).map_err(|_| policy_refusal(PostPolicyError::ConditionFailed))?;
-        let (metadata, content_type) = if legacy_store {
+        let (metadata, content_type, object_fields) = if legacy_store {
+            // Legacy RustFS's own refusal of an unreadable field answers before this bridge's.
+            let object_fields = legacy::object_fields(&fields)?;
             legacy::refuse_other_key(key.as_str(), &legacy::stored_key(key_field, filename))
                 .map_err(legacy::NotCarried::into_error)?;
-            (legacy::metadata(&fields), legacy::content_type(&fields))
+            (legacy::metadata(&fields), legacy::content_type(&fields), object_fields)
         } else {
             let metadata = fields
                 .iter()
@@ -363,7 +365,7 @@ where
                         .map(|suffix| (suffix.to_owned(), (*value).to_owned()))
                 })
                 .collect();
-            (metadata, None)
+            (metadata, None, PostObjectFields::default())
         };
         let response = PostObjectResponsePlan::parse(&fields, &bucket, &key)?;
         let ceiling = policy.read_ceiling(self.limits);
@@ -377,6 +379,7 @@ where
             key,
             content_type,
             metadata,
+            object_fields,
             response,
             not_carried,
             timeouts: self.timeouts,
@@ -395,6 +398,9 @@ pub(crate) struct ResolvedPostObject<B> {
     /// The `Content-Type` field under the RustFS profile; `None` under the gateway grammar.
     content_type: Option<String>,
     metadata: Vec<(String, String)>,
+    /// The other `PutObject` members the form set, under the RustFS profile; none under the
+    /// gateway grammar.
+    object_fields: PostObjectFields,
     response: PostObjectResponsePlan,
     /// Under the RustFS profile, why this form cannot be stored as legacy RustFS stores it.
     not_carried: Option<legacy::NotCarried>,
@@ -448,6 +454,7 @@ where
                 body: stream,
                 content_type: self.content_type,
                 metadata: self.metadata,
+                fields: self.object_fields,
             })),
             Some(monitor),
         ))
