@@ -63,7 +63,7 @@ async fn with_policy(document: &'static str, md5: &str) -> (TestRoot, S3Service)
     let (_backend, service) = assembled(&two_identity_options(&root, &[]));
     policed(&service).await;
     let written = put_policy(&service, document, md5).await;
-    assert_eq!(written.status(), 200, "{}", body_of(&written));
+    assert_eq!(written.status(), 204, "{}", body_of(&written));
     (root, service)
 }
 

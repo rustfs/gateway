@@ -72,6 +72,7 @@ mod bodyless_digest;
 mod client_quirks;
 mod cors;
 pub(crate) mod credential_sentences;
+mod legacy_heads;
 mod legacy_sentences;
 mod names;
 mod not_modified_headers;

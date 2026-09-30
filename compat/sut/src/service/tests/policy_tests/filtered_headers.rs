@@ -32,7 +32,7 @@ async fn fixture(document: &'static str, md5: &str, rewrite: Rewrite) -> (TestRo
     let owners = Arc::new(BucketOwners::default());
     let original = build_service(&options, &backend, &owners).expect("the production assembly");
     policed(&original).await;
-    assert_eq!(put_policy(&original, document, md5).await.status(), 200);
+    assert_eq!(put_policy(&original, document, md5).await.status(), 204);
     let mut credentials = StaticCredentials::new();
     for account in options.accounts.all() {
         credentials =

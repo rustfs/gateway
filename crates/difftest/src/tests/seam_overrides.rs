@@ -101,6 +101,12 @@ const OUTPUT_PROOFS: &[(&str, &str, &str, &str)] = &[
         "n_every_legacy_only_output_member_set_is_refused_by_name",
     ),
     (
+        "AbsentAsEmpty",
+        "HeadBucketOutput",
+        include_str!("../../../types/src/compat/seam/generated_tests.rs"),
+        "n_an_empty_legacy_region_is_refused_not_written_as_none",
+    ),
+    (
         "Nested",
         "CopyObjectOutput",
         include_str!("../../../goldens/src/operation_diff/copy_result.rs"),
@@ -176,7 +182,7 @@ fn output_proof(rule: &str, owner: &str, member: &str) -> Result<(), String> {
     };
     let body = &file[start..];
     let body = &body[..body.find("\n}\n").unwrap_or(body.len())];
-    if rule == "S3sOnly" && !body.contains(&format!("\"{member}\"")) {
+    if matches!(rule, "S3sOnly" | "AbsentAsEmpty") && !body.contains(&format!("\"{member}\"")) {
         return Err(format!("{owner}.{member} ({rule}): {test} does not name the member"));
     }
     Ok(())
@@ -209,12 +215,12 @@ fn classify(entry: &Override, covered: &BTreeSet<(String, String)>) -> Result<()
     for output in &answers {
         let proven = match rule.as_str() {
             "GatewayOnly" => !legacy_has(FACTS, output, member) || !legacy_has(FACTS, owner, member),
-            "S3sOnly" | "Nested" => output_proof(rule, output, member)
+            "S3sOnly" | "Nested" | "AbsentAsEmpty" => output_proof(rule, output, member)
                 .map_err(|error| problems.push(error))
                 .is_ok(),
             _ => false,
         };
-        if !proven && !matches!(rule.as_str(), "S3sOnly" | "Nested") {
+        if !proven && !matches!(rule.as_str(), "S3sOnly" | "Nested" | "AbsentAsEmpty") {
             problems.push(format!("{output}: {member} ({rule}) is not proven on the answer side"));
         }
     }
@@ -304,6 +310,9 @@ fn n_an_output_rule_without_a_named_test_or_naming_another_member_is_unproven() 
     assert!(output_proof("S3sOnly", "ListBucketsOutput", "owner").is_err());
     assert!(output_proof("S3sOnly", "HeadBucketOutput", "bucket_region").is_err());
     assert!(output_proof("S3sOnly", "HeadBucketOutput", "bucket_arn").is_ok());
+    assert!(output_proof("AbsentAsEmpty", "HeadBucketOutput", "bucket_region").is_ok());
+    assert!(output_proof("AbsentAsEmpty", "HeadBucketOutput", "bucket_arn").is_err());
+    assert!(output_proof("AbsentAsEmpty", "CreateBucketOutput", "bucket_region").is_err());
 }
 
 #[test]

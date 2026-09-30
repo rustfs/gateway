@@ -207,7 +207,7 @@ fn restores_and_copies() -> Vec<AnswerRow> {
                 request_charged: Some(named("requester")),
                 restore_output_path: text("out/p/"),
             },
-            differs(BARE, &["sa-0014"], &[]),
+            same(BARE),
         ),
         answer(
             "upload-part-copy-every-member",

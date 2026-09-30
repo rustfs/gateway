@@ -554,6 +554,32 @@ fn a_head_bucket_answer_without_the_legacy_only_members_converts() {
     assert_eq!(converted.bucket_region.as_str(), "us-east-1");
 }
 
+/// Legacy RustFS names no region on `HeadBucket` (rustfs/gateway#1148): the unset region crosses as
+/// the empty one, which no bucket has and the RustFS profile writes as no header.
+#[test]
+fn a_head_bucket_answer_naming_no_region_crosses_as_the_empty_region() {
+    let converted = ops::head_bucket::output_from_s3s(oracle::HeadBucketOutput::default()).expect("converts");
+    assert_eq!(converted.bucket_region.as_str(), "");
+    // A body header naming the region replaces the member on the legacy wire, so the member is
+    // left unset and the header travels beside it.
+    let headers = body_headers(&[("x-amz-bucket-region", "eu-west-1")]);
+    let (converted, extra) =
+        ops::head_bucket::answer_from_legacy(oracle::HeadBucketOutput::default(), headers).expect("converts");
+    assert_eq!((converted.bucket_region.as_str(), extra.len()), ("", 1));
+}
+
+/// Negative — a set but empty legacy region would be written as none, so it is refused by name
+/// rather than rewritten.
+#[test]
+fn n_an_empty_legacy_region_is_refused_not_written_as_none() {
+    let empty = oracle::HeadBucketOutput {
+        bucket_region: Some(String::new()),
+        ..Default::default()
+    };
+    let error = ops::head_bucket::output_from_s3s(empty).expect_err("an empty region");
+    assert_eq!(error.field, "bucket_region");
+}
+
 #[test]
 fn n_every_legacy_only_output_member_set_is_refused_by_name() {
     let base = || oracle::HeadBucketOutput {

@@ -1333,6 +1333,7 @@ impl S3Service {
                 {
                     return outcome.refuse_handler(error);
                 }
+                self.inner.view_policy.settle(operation, &mut encoded);
                 into_response(encoded)
             }
             StaticDispatchOutcome::Committed { status, response } => {

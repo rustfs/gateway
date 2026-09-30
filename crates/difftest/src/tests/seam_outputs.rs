@@ -163,7 +163,7 @@ fn value_path(path: &str) -> Option<String> {
 /// pins (the seam diff runs the RustFS profile): each sample's register ids and answer findings
 /// under it. The RustFS listing rule (#1088) keeps `/` literal in a URL-encoded delimiter, so the
 /// delimiter the generic profile double-encodes (kd-encode-0037, 0039, 0041) is written as the
-/// legacy stack writes it, and it echoes no multipart EncodingType (sa-0015).
+/// legacy stack writes it, and it echoes no multipart EncodingType (sa-0012).
 const RUSTFS_PROFILE_SAMPLES: &[(&str, &[&str], &[&str])] = &[
     (
         "list-objects-v2-url",
@@ -209,7 +209,7 @@ const RUSTFS_PROFILE_SAMPLES: &[(&str, &[&str], &[&str])] = &[
             "kd-encode-0016",
             "kd-encode-0017",
         ],
-        &["sa-0015"],
+        &["sa-0012"],
     ),
 ];
 

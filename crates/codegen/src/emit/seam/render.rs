@@ -125,7 +125,7 @@ fn target<'s>(ctx: &Ctx<'s>, owner: &str, field: &Field, s3s: &'s [(String, S3sT
             return Ok(Target::Nested(parent, nested.as_str(), ty, member));
         }
         Some(Rule::Rename(to)) => to.to_owned(),
-        Some(Rule::S3sOnly(_) | Rule::FromQuery(_) | Rule::FromBoolHeader(_)) | None => name.clone(),
+        Some(Rule::S3sOnly(_) | Rule::FromQuery(_) | Rule::FromBoolHeader(_) | Rule::AbsentAsEmpty(_)) | None => name.clone(),
     };
     if matches!(field.ty, Type::ChecksumSpec) {
         return Ok(Target::ChecksumFanOut);
@@ -387,6 +387,12 @@ pub(super) fn backward_struct(
                 let (core, optional) = ty.unwrap_option();
                 match ctx.backward(core, &field.ty, &field.name, "x", &name) {
                     Err(error) => errors.push(format!("{owner}.{name}: {error}")),
+                    Ok(conv) if field.required && matches!(member_rule(owner, member), Some(Rule::AbsentAsEmpty(_))) => {
+                        match absent_as_empty(field, optional, member, &conv, &name) {
+                            Ok(value) => push_field(&mut body, &gw_name, &value),
+                            Err(error) => errors.push(format!("{owner}.{name}: {error}")),
+                        }
+                    }
                     Ok(conv) => {
                         let value = wrap_backward(field, optional, member, &conv, &name);
                         push_field(&mut body, &gw_name, &value);
@@ -460,6 +466,20 @@ pub(super) fn backward_struct(
     }
     Ok(format!(
         "    let s3s::dto::{owner} {{\n{pattern}    }} = {src};\n{refusals}{unnest}    Ok({gw_type} {{\n{body}    }})\n"
+    ))
+}
+
+/// [`Rule::AbsentAsEmpty`] on a required gateway member: an unset legacy string is the empty gateway
+/// string, and a set empty one is refused by name, since the gateway would write it as unset. On an
+/// optional gateway member the rule changes nothing, and the member converts as any other: an unset
+/// legacy value is already the unset gateway value.
+fn absent_as_empty(field: &Field, s3s_optional: bool, member: &str, conv: &str, name: &str) -> Result<String, String> {
+    if !(s3s_optional && matches!(field.ty, Type::String) && conv == "x") {
+        return Err("AbsentAsEmpty applies only to a gateway string whose legacy member is an optional string".to_owned());
+    }
+    Ok(format!(
+        "match {member} {{ Some(x) if x.is_empty() => {}, Some(x) => x, None => String::new() }}",
+        missing(name, "an empty legacy value the gateway would write as unset")
     ))
 }
 
