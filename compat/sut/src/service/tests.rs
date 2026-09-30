@@ -883,3 +883,6 @@ mod post_object_field_tests;
 
 /// `If-Match` on a delete, judged as legacy RustFS judges it (rustfs/gateway#1191).
 mod conditional_delete_tests;
+
+/// An object's tag set answered in key order, as legacy RustFS answers it (rustfs/gateway#1000).
+mod tag_order_tests;

@@ -63,7 +63,11 @@ pub(crate) fn open_backend(options: &Options) -> io::Result<FsBackend> {
         // Legacy RustFS judges `If-Match` on a delete against the version it would remove
         // (`opts.precondition_check(&goi)`, `crates/ecstore/src/set_disk/ops/object.rs:8951` on
         // rustfs/rustfs 3268c42e00; measured on `528a36814`): another tag is `412` (#1191).
-        .evaluating_delete_if_match();
+        .evaluating_delete_if_match()
+        // Legacy RustFS answers an object's tag set sorted by key (`decode_tags`,
+        // `crates/ecstore/src/bucket/tagging/mod.rs:20-43` on rustfs/rustfs 3268c42e00; measured on
+        // `528a36814`: `foo=bar&bar` reads back `bar`, `foo`) (#1000).
+        .sorting_object_tags();
     match options.lifecycle_debug_interval {
         Some(interval) => backend.with_lifecycle_debug_interval(interval),
         None => Ok(backend),

@@ -129,7 +129,8 @@ for legacy RustFS's answers by name, and each one is off by default: `FsBackend:
 answers the keys RustFS's storage refuses on their own in a batch delete, and
 `FsBackend::evaluating_delete_if_match` judges `If-Match` on `DeleteObject` as legacy RustFS does —
 the object's own tag or `*` deletes, anything else is `412` and deletes nothing, and a versioned
-bucket's key that holds no version is marked without being judged.
+bucket's key that holds no version is marked without being judged — and `FsBackend::sorting_object_tags`
+answers an object's tag set in its keys' byte order while the stored document keeps the written one.
 
 Ranged reads resolve through the exported `evaluate_range` contract, so a suffix range, a window
 that runs past the end, an unsatisfiable range, a multi-range header and `If-Range` all behave as
