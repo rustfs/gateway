@@ -782,6 +782,10 @@ mod credential_sentence_tests;
 /// (rustfs/gateway#1099).
 mod bodyless_digest_tests;
 
+/// A body sent to an operation that takes none, left unread as legacy RustFS leaves it
+/// (rustfs/gateway#1173).
+mod bodyless_body_tests;
+
 /// The request settings RustFS embeds the gateway with (rustfs/gateway#1070).
 mod deadline_tests;
 

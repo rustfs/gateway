@@ -69,6 +69,7 @@ use crate::routing::{RoutingSnapshot, RuntimeAssembly};
 
 mod anonymous_framing;
 mod assembly_update;
+mod bodyless_bodies;
 mod bodyless_digest;
 mod client_quirks;
 mod cors;

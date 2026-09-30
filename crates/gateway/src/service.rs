@@ -1201,6 +1201,12 @@ impl S3Service {
 
             let body_deadlines = state.config.config().request_body_deadlines();
             let (body, body_monitor) = match accepted_body {
+                // Released unpolled, where it would have been read: no claim about it is judged
+                // and no byte of it is held (`builder/bodyless_bodies.rs`).
+                AcceptedBody::Ordinary(sealed) if view_policy.bodyless_bodies.leaves_unread(request_body_mode) => {
+                    drop(sealed);
+                    (rustfs_gateway_core::RequestBody::None, None)
+                }
                 AcceptedBody::Ordinary(sealed) => {
                     let ceilings =
                         BodyCeilings::for_mode(request_body_mode, operation, state.config.config().max_buffered_body_bytes());
