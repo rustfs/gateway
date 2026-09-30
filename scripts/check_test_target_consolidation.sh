@@ -737,6 +737,7 @@ gateway_modules = (
     "select_frame_records",
     "select_restore_intent",
     "select_restore_reachability",
+    "self_held_expect_continue",
     "self_held_http1",
     "service_clone_allocations",
     "service_concurrency",
