@@ -738,6 +738,7 @@ gateway_modules = (
     "select_restore_intent",
     "select_restore_reachability",
     "self_held_http1",
+    "self_held_refusal_drain",
     "service_clone_allocations",
     "service_concurrency",
     "service_config",
