@@ -255,6 +255,10 @@ pub(crate) fn build_service(
             // RustFS never compares the signed digest of a request without a body: a read or delete
             // declaring another payload's digest is served (rustfs/gateway#1099).
             .accept_mismatched_payload_digests_without_a_body()
+            // Nor does it read the body such a request carries: a read, delete, copy or multipart
+            // creation sent a body is answered as without one, whatever the body declares, and the
+            // body is never polled (rustfs/gateway#1173).
+            .leave_bodies_of_bodyless_operations_unread()
             // RustFS, built with MinIO support, reads a versioning or object-lock body that is the
             // bare word `Enabled` as the document it stands for (rustfs/backlog#1677, R6).
             .accept_minio_body_literals()

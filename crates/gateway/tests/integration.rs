@@ -44,6 +44,8 @@ mod backend_reachability;
 mod body_literals;
 #[path = "body_refusal_sentences.rs"]
 mod body_refusal_sentences;
+#[path = "bodyless_bodies.rs"]
+mod bodyless_bodies;
 #[path = "bodyless_payload_digest.rs"]
 mod bodyless_payload_digest;
 #[path = "bucket_config_reachability.rs"]
