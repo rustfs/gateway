@@ -62,7 +62,11 @@ but never out of the run or the report. An excluded SDK:
       would be dropped along with the exclusion, so a counted SDK would be judged on a subset
       without anybody noticing;
     * is flagged RECOVERED, without changing the exit code, when its log becomes a complete,
-      attributable measurement. That is the signal to remove the line.
+      attributable measurement. That is the signal to remove the line, and a recovered SDK's
+      failing functions are named in the summary, the JSON and the proposal, redacted and capped
+      like a counted SDK's, because the count that replaces the line has to be attributed and
+      the aggregate is all a run uploads (rustfs/gateway#720). A log that is not a complete
+      measurement is never a source of names.
 
 # Passes
 
@@ -402,7 +406,32 @@ def render_excluded(excluded: list[ExcludedRow]) -> list[str]:
         observed = f"**RECOVERED**: {row.observed}; remove the exclusion" if row.recovered else row.observed
         cells = (row.exclusion.owner, printable(row.exclusion.reason, 400), printable(observed, 400))
         lines.append(f"| `{row.sdk}` | " + " | ".join(cell.replace("|", "\\|") for cell in cells) + " |")
+    failing = [row for row in excluded if recovered_failures(row)]
+    if failing:
+        lines += [
+            "",
+            "### Failing functions of recovered SDKs",
+            "",
+            "Attribute each before its exclusion becomes a count.",
+            "",
+        ]
+        for row in failing:
+            shown = recovered_failures(row)
+            lines.append(f"- `{row.sdk}` (recovered): " + "; ".join(name.replace("|", "\\|") for name in shown))
+            if row.tally is not None and len(row.tally.failing) > len(shown):
+                lines.append(f"  - and {len(row.tally.failing) - len(shown)} more")
     return lines
+
+
+def recovered_failures(row: ExcludedRow) -> list[str]:
+    """The failing functions of an excluded SDK whose log was complete and attributable, capped.
+
+    Only a recovered SDK's names are reported: a log that could not be attributed as a whole is
+    not a source of names either (rustfs/gateway#720). They were redacted when they were read.
+    """
+    if not row.recovered or row.tally is None:
+        return []
+    return row.tally.failing[:FUNCTIONS_PER_SDK]
 
 
 def render_markdown(
@@ -460,6 +489,8 @@ def render_proposal(generation: int, sdks: list[str], rows: list[Row], excluded:
             entry = uncounted[sdk]
             state = "RECOVERED" if entry.recovered else "observed"
             lines.append(f"#   {sdk} {state}: {printable(entry.observed, 400)}")
+            for name in recovered_failures(entry):
+                lines.append(f"#   {sdk} failed: {name}")
             lines.append(f"{sdk} {EXCLUDED} {entry.exclusion.owner} {entry.exclusion.reason}")
     return "\n".join(lines) + "\n"
 
@@ -625,6 +656,7 @@ def judge(args: argparse.Namespace) -> int:
                     "reason": entry.exclusion.reason,
                     "observed": entry.observed,
                     "recovered": entry.recovered,
+                    "failing_functions": recovered_failures(entry),
                 }
                 for entry in excluded
             },
