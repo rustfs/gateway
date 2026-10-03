@@ -652,7 +652,7 @@ impl Handler<PutObject> for FsBackend {
             )
             .await?;
         let attributes = ObjectAttributes {
-            headers: request_content_headers!(input).with_encryption(encryption.clone()),
+            headers: request_content_headers!(self, input).with_encryption(encryption.clone()),
             storage_class: requested_storage_class(input.storage_class.as_ref())?,
             tags: tags_from_header(input.tagging.as_deref())?,
             metadata: input.metadata,

@@ -131,8 +131,9 @@ answers the keys RustFS's storage refuses on their own in a batch delete, and
 the object's own tag or `*` deletes, anything else is `412` and deletes nothing, and a versioned
 bucket's key that holds no version is marked without being judged — and `FsBackend::sorting_object_tags`
 answers an object's tag set in its keys' byte order while the stored document keeps the written one,
-and `FsBackend::normalizing_completed_parts` keeps the last entry a completion names for each part
-number, as legacy RustFS does, before the list is judged.
+`FsBackend::normalizing_completed_parts` keeps the last entry a completion names for each part
+number, as legacy RustFS does, before the list is judged, and `FsBackend::normalizing_content_encoding`
+stores a write's `Content-Encoding` without its `aws-chunked` members, as legacy RustFS stores it.
 
 Ranged reads resolve through the exported `evaluate_range` contract, so a suffix range, a window
 that runs past the end, an unsatisfiable range, a multi-range header and `If-Range` all behave as

@@ -35,6 +35,8 @@ mod bucket_tagging;
 mod completion_parts;
 #[path = "crud/conditional_requests.rs"]
 mod conditional_requests;
+#[path = "crud/content_encoding.rs"]
+mod content_encoding;
 #[path = "crud/content_headers.rs"]
 mod content_headers;
 #[path = "crud/copy_object.rs"]
