@@ -76,6 +76,7 @@
 pub(crate) mod post_forms;
 
 use super::ServiceBuilder;
+use super::bodyless_bodies::BodylessBodies;
 use super::bodyless_digest::BodylessDigest;
 use super::client_quirks::ChecksumWaiver;
 use super::credential_sentences::CredentialSentences;
@@ -160,6 +161,8 @@ pub(crate) struct ViewPolicy {
     pub(super) sigv4_header_guard: SigV4HeaderGuard,
     /// Whether a bodyless request's signed digest is compared (`super::bodyless_digest`).
     pub(crate) bodyless_digest: BodylessDigest,
+    /// Whether the body of an operation that takes none is read (`super::bodyless_bodies`).
+    pub(crate) bodyless_bodies: BodylessBodies,
     head_refusals_without_length: bool,
     /// Which object headers a `304` keeps (`super::not_modified_headers`).
     pub(crate) not_modified_headers: super::not_modified_headers::NotModifiedHeaders,

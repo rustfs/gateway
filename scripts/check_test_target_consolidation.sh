@@ -669,6 +669,7 @@ gateway_modules = (
     "backend_reachability",
     "body_literals",
     "body_refusal_sentences",
+    "bodyless_bodies",
     "bodyless_payload_digest",
     "bucket_config_reachability",
     "checksum_omissions",
