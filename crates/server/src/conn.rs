@@ -40,7 +40,7 @@ use crate::accept_error::{self, AcceptFailure};
 use crate::config::{ConfigError, ServerConfig, WriteStrategy};
 use crate::connection_service::{ConnectionError, ConnectionService, RequestStats};
 use crate::driver::{AcceptedConnection, ConnectionDriver, ConnectionInfo, HyperConnectionDriver, TransportKind};
-use crate::io::{BoxTransport, ProgressIo, deadline_after, deadline_remaining};
+use crate::io::{BoxTransport, ProgressIo, bounded, deadline_after, deadline_remaining};
 use crate::listener::Listener;
 use crate::shutdown::{MetricsInner, RunningServer, ServerMetrics, ShutdownCommand, ShutdownReport, ShutdownTrigger};
 use crate::tls::TlsHandle;
@@ -612,8 +612,8 @@ where
         .initial_connection_window_size(config.h2_initial_connection_window_size)
         .max_concurrent_streams(config.h2_max_concurrent_streams)
         .max_frame_size(config.h2_max_frame_size)
-        .keep_alive_interval(config.h2_keep_alive_interval)
-        .keep_alive_timeout(config.h2_keep_alive_timeout)
+        .keep_alive_interval(config.h2_keep_alive_interval.map(bounded))
+        .keep_alive_timeout(bounded(config.h2_keep_alive_timeout))
         .max_header_list_size(config.h2_max_header_list_size);
 
     let connection = builder.serve_connection(io, service);

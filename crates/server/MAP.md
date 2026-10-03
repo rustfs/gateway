@@ -9,6 +9,7 @@ Ring-1 generic HTTP runtime. Start at `src/lib.rs`; read only the row needed for
 | `src/listener.rs` | socket2 bind, tuning and read-back | Bind family or socket option is wrong |
 | `src/tls.rs` | Atomic TLS config, advertised ALPN protocols and fail-closed reload | New handshakes see the wrong certificate or protocol |
 | `src/io.rs` | Write-progress and connection-idle timers, and the lingering read on close | A slow reader is killed or never released, or a peer sees `ECONNRESET` where a close was due |
+| `src/io_deadline_tests.rs` | Every configured `ProgressIo` timer rearmed at `Duration::MAX` | A configured timeout panics a connection instead of meaning never |
 | `src/io_sendfile_tests.rs` | Real-socket controls for sendfile writable-readiness handoff | Sendfile retries spin, stall, or lose a writable transition |
 | `src/conn.rs` | Admission, connection lifecycle and joining finished connection tasks | Accept limits or shutdown sequencing fails, or the listener retains finished connections |
 | `src/conn/file_transfer_shutdown_tests.rs` | Shutdown against blocking file work detached from its connection | Drain or force abort waits wrongly for file work |
@@ -31,6 +32,7 @@ Ring-1 generic HTTP runtime. Start at `src/lib.rs`; read only the row needed for
 | `tests/server_runtime/frozen_clock.rs` | Frozen fixture-clock polling with an independent watchdog | Slow-header setup races deadlines under host load |
 | `tests/server_runtime/global_admission.rs` | a-srv-0014 global-limit refusal and permit reuse, with a scheduling-stall control on a frozen fixture clock | The global connection limit accepts early, or a host stall expires the permit holder |
 | `tests/server_runtime/task_reaping.rs` | Connect/close loops read through `retained_connection_tasks` | The listener keeps finished connection tasks |
+| `tests/server_runtime/unbounded_timeouts.rs` | HTTP/1.1 and HTTP/2 served with every timeout at `Duration::MAX` | A configured timeout panics the listener or Hyper |
 | `tests/server_runtime/accept_recovery.rs` | Real exhausted descriptor table: the listener survives, backs off and serves again | A failed accept ends the listener or spins |
 | `tests/tls_h2.rs` | Live TLS and h2 cases | Reload, TLS admission or h2 flow control regresses |
 | `tests/tls_h2/alpn.rs` | ALPN negotiation and the protocol it selects | A TLS client cannot negotiate h2, or a negotiated protocol is not enforced |

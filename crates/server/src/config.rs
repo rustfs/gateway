@@ -52,6 +52,9 @@ pub enum WriteStrategy {
 }
 
 /// All listener, HTTP connection, timeout and admission tuning.
+///
+/// A timeout longer than thirty years is armed as thirty years, as far as the runtime's timer goes,
+/// so `Duration::MAX` reads as "never" rather than overflowing a deadline.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct ServerConfig {
