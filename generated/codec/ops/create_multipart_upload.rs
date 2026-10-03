@@ -263,6 +263,7 @@ impl OperationCodec for dto::CreateMultipartUpload {
             response.set_header("x-amz-checksum-type", rendered);
         }
         let mut writer = rustfs_gateway_xml::XmlWriter::document();
+        writer.legacy_layout(request.rustfs_response_layout());
         writer.open("InitiateMultipartUploadResult", Some(rustfs_gateway_xml::S3_XMLNS));
         {
             let v = &output.bucket;

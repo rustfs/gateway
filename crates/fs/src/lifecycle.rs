@@ -316,12 +316,23 @@ impl Handler<GetBucketLifecycleConfiguration> for FsBackend {
     }
 }
 
+/// The sentence legacy RustFS answers a lifecycle write without a document with: the legacy
+/// stack's default for `InvalidArgument`.
+const LEGACY_NO_LIFECYCLE_DOCUMENT: &str = "Invalid argument.";
+
 impl Handler<PutBucketLifecycleConfiguration> for FsBackend {
     async fn call(&self, request: Req<PutBucketLifecycleConfiguration>) -> HandlerResult<PutBucketLifecycleConfiguration> {
         let input = request.into_input();
         self.require_bucket(input.bucket.as_str()).await?;
         let Some(mut configuration) = input.lifecycle_configuration else {
-            return Err(HandlerError::new(ErrorCode::MALFORMED_XML, "the request carries no lifecycle document"));
+            // Legacy-compat (rustfs/backlog#2684): legacy RustFS reads a lifecycle write's document
+            // as optional and its handler answers one without it `400 InvalidArgument` with the
+            // generic "Invalid argument." once the bucket is found
+            // (`rustfs/src/app/bucket_usecase.rs:2348` at rustfs/rustfs@e870a6d25), where every
+            // other configuration write answers an empty body `MissingRequestBodyError`. Kept so a
+            // RustFS client reads the answer it reads today; the intended future behaviour is
+            // `MissingRequestBodyError`, as for every other required document.
+            return Err(HandlerError::new(ErrorCode::INVALID_ARGUMENT, LEGACY_NO_LIFECYCLE_DOCUMENT));
         };
         validate_lifecycle(&configuration).map_err(|rejection| HandlerError::new(rejection.code(), rejection.reason()))?;
         rustfs_write_rules(&mut configuration)?;

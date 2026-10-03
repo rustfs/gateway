@@ -43,8 +43,7 @@ impl OperationCodec for dto::PutBucketLogging {
         // BucketLoggingStatus — the XML request body, rooted at `BucketLoggingStatus`.
         let raw_body = body.into_buffered()?;
         value::verify_body_digest(request, raw_body.as_ref())?;
-        let root = rustfs_gateway_xml::parse(raw_body.as_ref())
-            .map_err(|_| CodecError::malformed_xml("the request body is not the XML this operation accepts"))?;
+        let root = crate::codec::request_document(request, raw_body.as_ref(), &document::DOCUMENT)?;
         if !["BucketLoggingStatus"].contains(&root.name.as_str()) {
             return Err(CodecError::malformed_xml("the request body has the wrong root element").about("BucketLoggingStatus"));
         }
@@ -184,4 +183,43 @@ fn read_target_object_key_format(node: &rustfs_gateway_xml::XmlNode) -> Result<d
     }
     value::exit(shape.check_required())?;
     Ok(shape)
+}
+
+/// The request document's shape, as the RustFS profile reads it (`rustfs_gateway_xml::bound`,
+/// rustfs/gateway#1078): its roots, every structure it reaches, and each member legacy
+/// RustFS reads. Generated from the IR and the legacy facts in `emit::codec::document`.
+#[rustfmt::skip]
+mod document {
+    use rustfs_gateway_xml::bound::{Arity, Attribute, Content, Document, EmptyBody, Member, Scalar, Shape, Unknown, Value};
+
+    pub(super) static DOCUMENT: Document = Document { roots: &["BucketLoggingStatus"], empty: EmptyBody::Missing, shapes: &[
+        Shape { name: "BucketLoggingStatus", attribute: None, content: Content::Members { unknown: Unknown::Skip, members: &[
+            Member { element: "LoggingEnabled", arity: Arity::One, value: Value::Shape(1), required: false, kept: true },
+        ] } },
+        Shape { name: "LoggingEnabled", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+            Member { element: "TargetBucket", arity: Arity::One, value: Value::Text(Scalar::Text), required: true, kept: true },
+            Member { element: "TargetGrants", arity: Arity::Wrapped("Grant"), value: Value::Shape(2), required: false, kept: true },
+            Member { element: "TargetPrefix", arity: Arity::One, value: Value::Text(Scalar::Text), required: true, kept: true },
+            Member { element: "TargetObjectKeyFormat", arity: Arity::One, value: Value::Shape(3), required: false, kept: true },
+        ] } },
+        Shape { name: "TargetGrant", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+            Member { element: "Grantee", arity: Arity::One, value: Value::Shape(4), required: false, kept: true },
+            Member { element: "Permission", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+        ] } },
+        Shape { name: "TargetObjectKeyFormat", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+            Member { element: "SimplePrefix", arity: Arity::One, value: Value::Shape(5), required: false, kept: true },
+            Member { element: "PartitionedPrefix", arity: Arity::One, value: Value::Shape(6), required: false, kept: true },
+        ] } },
+        Shape { name: "Grantee", attribute: Some(Attribute { key: "xsi:type", name: "type", namespace: "http://www.w3.org/2001/XMLSchema-instance", required: true }), content: Content::Members { unknown: Unknown::Refuse, members: &[
+            Member { element: "DisplayName", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "EmailAddress", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "ID", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "URI", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+        ] } },
+        Shape { name: "SimplePrefix", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+        ] } },
+        Shape { name: "PartitionedPrefix", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+            Member { element: "PartitionDateSource", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+        ] } },
+    ] };
 }

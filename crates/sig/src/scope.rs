@@ -162,7 +162,8 @@ impl RegionSet {
 ///
 /// The service comes from the operation, never from the request. That is the whole point of H5:
 /// the client says which service it signed for, and the server says which service it routed to,
-/// and the two must agree.
+/// and the two must agree. The one widening, [`ExpectedScope::accepting_services`], takes its set
+/// from the deployment, never from the request either.
 #[derive(Clone, Copy, Debug)]
 pub struct ExpectedScope<'a> {
     service: SigService,
@@ -171,6 +172,7 @@ pub struct ExpectedScope<'a> {
     empty_region: bool,
     any_spelling: bool,
     any_length: bool,
+    services: Option<&'a [&'a str]>,
 }
 
 impl<'a> ExpectedScope<'a> {
@@ -184,6 +186,7 @@ impl<'a> ExpectedScope<'a> {
             empty_region: false,
             any_spelling: false,
             any_length: false,
+            services: None,
         }
     }
 
@@ -239,6 +242,32 @@ impl<'a> ExpectedScope<'a> {
         self
     }
 
+    /// Admits a scope naming any service in `names`, whatever service the routed operation belongs
+    /// to, for a verifier whose deployment verifies those services on every route (the RustFS
+    /// profile, rustfs/gateway#1130). Only the names listed: the key is still derived from the
+    /// service the client named, so the signature stays bound to it, and the date and region
+    /// checks are unchanged. A verifier that reads a service outside [`SigService`]
+    /// ([`crate::ServiceReading::AnyName`]) and does not call this still refuses it here.
+    #[must_use]
+    pub const fn accepting_services(mut self, names: &'a [&'a str]) -> Self {
+        self.services = Some(names);
+        self
+    }
+
+    /// Whether [`enforce_scope`] admits a scope naming `service` under this expectation.
+    fn admits_service(&self, service: &str) -> bool {
+        match self.services {
+            // Legacy-compat (rustfs/backlog#2684): legacy RustFS verifies an `s3`, `sts` or
+            // `s3tables` scope on every operation, so a signature minted for one of those services
+            // is valid for an operation of another — the cross-service replay H5 exists to stop.
+            // RustFS's table-catalog clients sign `s3tables`, and the lists RustFS configures are
+            // the ones it serves on every route today. The intended future behaviour is the
+            // default: the scope names the routed operation's own service.
+            Some(names) => names.contains(&service),
+            None => SigService::parse(service) == Ok(self.service),
+        }
+    }
+
     /// Whether [`enforce_scope`] admits `region` under this expectation.
     fn admits_region(&self, region: &str) -> bool {
         let in_grammar = if self.any_length {
@@ -274,7 +303,8 @@ impl<'a> ExpectedScope<'a> {
 ///
 /// * the scope's day equals the day of the timestamp that passed the skew check;
 /// * the region is one this deployment serves;
-/// * the service is the one the routed operation belongs to;
+/// * the service is the one the routed operation belongs to, or one of the names
+///   [`ExpectedScope::accepting_services`] admits;
 /// * the terminator is `aws4_request` — already guaranteed, because [`CredentialScope::parse`]
 ///   refuses anything else, and this is the function that depends on it.
 ///
@@ -312,13 +342,13 @@ pub fn enforce_scope(
     if !expected.admits_region(presented.region()) {
         return Err(ScopeRejection(expected.regions().regions.first().cloned()));
     }
-    if presented.service() != expected.service() {
+    if !expected.admits_service(presented.service_name()) {
         return Err(ScopeRejection(None));
     }
     Ok(VerifiedScope::from_checked_parts(
         presented.date(),
         presented.region(),
-        presented.service().as_str(),
+        presented.service_name(),
     ))
 }
 
@@ -436,5 +466,69 @@ mod tests {
         )
         .expect("read without the ceiling");
         assert!(enforce_scope(&wrong_day, clock(), &both).is_err());
+    }
+
+    /// The RustFS profile's service reading: any name, the key derived from it.
+    fn any_service(value: &str) -> Result<CredentialScope, crate::AuthError> {
+        CredentialScope::parse_with(value, crate::RegionRule::STRICT.with_services(crate::ServiceReading::AnyName))
+    }
+
+    const LEGACY_SERVICES: [&str; 3] = ["s3", "sts", "s3tables"];
+
+    /// Positive — a service read by any name is verified, on an operation of another service, when
+    /// the expectation lists it, and the verified scope keeps the name it was signed with.
+    #[test]
+    fn a_listed_service_is_verified_on_an_operation_of_another_service() {
+        let regions = RegionSet::new(["us-east-1"]).expect("non-empty");
+        let expected = ExpectedScope::new(SigService::S3, &regions).accepting_services(&LEGACY_SERVICES);
+        for service in LEGACY_SERVICES {
+            let presented = any_service(&format!("AKID/20150830/us-east-1/{service}/aws4_request")).expect("a name");
+            assert_eq!(presented.service_name(), service);
+            let verified = enforce_scope(&presented, clock(), &expected).expect("listed");
+            assert_eq!(verified.service(), service);
+        }
+        let tables = any_service("AKID/20150830/us-east-1/s3tables/aws4_request").expect("a name");
+        assert_eq!(tables.service(), None);
+        assert_eq!(tables.scope_string(), "20150830/us-east-1/s3tables/aws4_request");
+    }
+
+    /// Negative — the default reading refuses a name outside the S3 family, and an expectation that
+    /// lists no service still verifies only the routed operation's own.
+    #[test]
+    fn n_without_the_list_only_the_routed_service_is_verified() {
+        for value in [
+            "AKID/20150830/us-east-1/s3tables/aws4_request",
+            "AKID/20150830/us-east-1/foo/aws4_request",
+        ] {
+            assert!(CredentialScope::parse(value).is_err(), "{value}");
+        }
+        let regions = RegionSet::new(["us-east-1"]).expect("non-empty");
+        let routed = ExpectedScope::new(SigService::S3, &regions);
+        for value in [
+            "AKID/20150830/us-east-1/s3tables/aws4_request",
+            "AKID/20150830/us-east-1/sts/aws4_request",
+        ] {
+            let presented = any_service(value).expect("a name");
+            assert!(enforce_scope(&presented, clock(), &routed).is_err(), "{value}");
+        }
+        let s3 = any_service("AKID/20150830/us-east-1/s3/aws4_request").expect("a name");
+        assert!(enforce_scope(&s3, clock(), &routed).is_ok());
+    }
+
+    /// Negative — the list admits exactly its names: another name, another case, and an empty
+    /// service are refused, and the date and region checks still apply.
+    #[test]
+    fn n_the_list_admits_exactly_its_names() {
+        let regions = RegionSet::new(["us-east-1"]).expect("non-empty");
+        let expected = ExpectedScope::new(SigService::S3, &regions).accepting_services(&LEGACY_SERVICES);
+        for service in ["foo", "S3", "s3express", "s3tables ", "sts\u{0}"] {
+            let presented = any_service(&format!("AKID/20150830/us-east-1/{service}/aws4_request")).expect("a name");
+            assert!(enforce_scope(&presented, clock(), &expected).is_err(), "{service:?}");
+        }
+        assert!(any_service("AKID/20150830/us-east-1//aws4_request").is_err());
+        let wrong_day = any_service("AKID/20150831/us-east-1/s3tables/aws4_request").expect("a name");
+        assert!(enforce_scope(&wrong_day, clock(), &expected).is_err());
+        let wrong_region = any_service("AKID/20150830/eu-west-1/s3tables/aws4_request").expect("a name");
+        assert!(enforce_scope(&wrong_region, clock(), &expected).is_err());
     }
 }

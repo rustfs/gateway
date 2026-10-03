@@ -54,7 +54,13 @@ impl OperationCodec for dto::GetBucketMetadataTableConfiguration {
         // GetBucketMetadataTableConfigurationResult — the XML response body, rooted at `GetBucketMetadataTableConfigurationResult`.
         if let Some(v) = output.get_bucket_metadata_table_configuration_result.as_ref() {
             let mut writer = rustfs_gateway_xml::XmlWriter::document();
-            writer.open("GetBucketMetadataTableConfigurationResult", Some(rustfs_gateway_xml::S3_XMLNS));
+            writer.legacy_layout(request.rustfs_response_layout());
+            let xmlns = if request.rustfs_response_layout() {
+                None
+            } else {
+                Some(rustfs_gateway_xml::S3_XMLNS)
+            };
+            writer.open("GetBucketMetadataTableConfigurationResult", xmlns);
             write_get_bucket_metadata_table_configuration_result(&mut writer, v)?;
             writer.close();
             response.body = ResponseBody::Complete(writer.finish().into_bytes());
@@ -84,6 +90,7 @@ fn write_get_bucket_metadata_table_configuration_result(
     writer: &mut rustfs_gateway_xml::XmlWriter,
     value: &dto::GetBucketMetadataTableConfigurationResult,
 ) -> Result<(), CodecError> {
+    writer.order_children(rustfs_order::GET_BUCKET_METADATA_TABLE_CONFIGURATION_RESULT);
     {
         let v = &value.metadata_table_configuration_result;
         writer.open("MetadataTableConfigurationResult", None);
@@ -121,6 +128,7 @@ fn write_s3tables_destination_result(
     writer: &mut rustfs_gateway_xml::XmlWriter,
     value: &dto::S3TablesDestinationResult,
 ) -> Result<(), CodecError> {
+    writer.order_children(rustfs_order::S3TABLES_DESTINATION_RESULT);
     {
         let v = &value.table_bucket_arn;
         writer.element("TableBucketArn", v.as_str());
@@ -138,4 +146,13 @@ fn write_s3tables_destination_result(
         writer.element("TableNamespace", v.as_str());
     }
     Ok(())
+}
+
+/// The order legacy RustFS writes each response element's children in (rustfs/gateway#1078):
+/// the order the legacy stack's structure declares its fields in.
+/// Honoured under `MetaView::rustfs_response_layout`; generated from the IR.
+#[rustfmt::skip]
+mod rustfs_order {
+    pub(super) const GET_BUCKET_METADATA_TABLE_CONFIGURATION_RESULT: &[&str] = &["Error", "MetadataTableConfigurationResult", "Status"];
+    pub(super) const S3TABLES_DESTINATION_RESULT: &[&str] = &["TableArn", "TableBucketArn", "TableName", "TableNamespace"];
 }

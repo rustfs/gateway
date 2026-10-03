@@ -62,7 +62,13 @@ impl OperationCodec for dto::GetBucketMetricsConfiguration {
         // MetricsConfiguration — the XML response body, rooted at `MetricsConfiguration`.
         if let Some(v) = output.metrics_configuration.as_ref() {
             let mut writer = rustfs_gateway_xml::XmlWriter::document();
-            writer.open("MetricsConfiguration", Some(rustfs_gateway_xml::S3_XMLNS));
+            writer.legacy_layout(request.rustfs_response_layout());
+            let xmlns = if request.rustfs_response_layout() {
+                None
+            } else {
+                Some(rustfs_gateway_xml::S3_XMLNS)
+            };
+            writer.open("MetricsConfiguration", xmlns);
             write_metrics_configuration(&mut writer, v)?;
             writer.close();
             response.body = ResponseBody::Complete(writer.finish().into_bytes());
@@ -81,6 +87,7 @@ fn write_metrics_and_operator(
     writer: &mut rustfs_gateway_xml::XmlWriter,
     value: &dto::MetricsAndOperator,
 ) -> Result<(), CodecError> {
+    writer.order_children(rustfs_order::METRICS_AND_OPERATOR);
     if let Some(v) = value.prefix.as_ref() {
         writer.element("Prefix", v.as_str());
     }
@@ -100,6 +107,7 @@ fn write_metrics_configuration(
     writer: &mut rustfs_gateway_xml::XmlWriter,
     value: &dto::MetricsConfiguration,
 ) -> Result<(), CodecError> {
+    writer.order_children(rustfs_order::METRICS_CONFIGURATION);
     {
         let v = &value.id;
         writer.element("Id", v.as_str());
@@ -147,4 +155,13 @@ fn write_tag(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::Tag) -> Re
         writer.element("Value", v.as_str());
     }
     Ok(())
+}
+
+/// The order legacy RustFS writes each response element's children in (rustfs/gateway#1078):
+/// the order the legacy stack's structure declares its fields in.
+/// Honoured under `MetaView::rustfs_response_layout`; generated from the IR.
+#[rustfmt::skip]
+mod rustfs_order {
+    pub(super) const METRICS_AND_OPERATOR: &[&str] = &["AccessPointArn", "Prefix", "Tag"];
+    pub(super) const METRICS_CONFIGURATION: &[&str] = &["Filter", "Id"];
 }

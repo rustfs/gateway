@@ -113,7 +113,9 @@ impl OperationCodec for dto::ListParts {
         let force_url_encoding = value::requires_url_encoding(&output.key);
         let url_encoding = value::url_encoding_for_response(request, force_url_encoding);
         let mut writer = rustfs_gateway_xml::XmlWriter::document();
+        writer.legacy_layout(request.rustfs_response_layout());
         writer.open("ListPartsResult", Some(rustfs_gateway_xml::S3_XMLNS));
+        writer.order_children(rustfs_order::RESPONSE);
         {
             let v = &output.bucket;
             writer.element("Bucket", v.as_str());
@@ -178,6 +180,7 @@ impl OperationCodec for dto::ListParts {
 
 /// Writes one `Initiator` element's children, in the wire order the IR records.
 fn write_initiator(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::Initiator) -> Result<(), CodecError> {
+    writer.order_children(rustfs_order::INITIATOR);
     if let Some(v) = value.id.as_ref() {
         writer.element("ID", v.as_str());
     }
@@ -189,6 +192,7 @@ fn write_initiator(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::Init
 
 /// Writes one `Owner` element's children, in the wire order the IR records.
 fn write_owner(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::Owner) -> Result<(), CodecError> {
+    writer.order_children(rustfs_order::OWNER);
     if let Some(v) = value.id.as_ref() {
         writer.element("ID", v.as_str());
     }
@@ -200,6 +204,7 @@ fn write_owner(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::Owner) -
 
 /// Writes one `Part` element's children, in the wire order the IR records.
 fn write_part(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::Part) -> Result<(), CodecError> {
+    writer.order_children(rustfs_order::PART);
     {
         let v = &value.part_number;
         writer.element("PartNumber", &v.to_string());
@@ -209,7 +214,7 @@ fn write_part(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::Part) -> 
     }
     {
         let v = &value.e_tag;
-        writer.element("ETag", &value::render_etag(v, EtagRender::XmlQuoted));
+        writer.entity_tag_element("ETag", &value::render_etag(v, EtagRender::XmlQuoted));
     }
     {
         let v = &value.size;
@@ -246,4 +251,15 @@ fn write_part(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::Part) -> 
         writer.element("ChecksumXXHASH128", v.as_str());
     }
     Ok(())
+}
+
+/// The order legacy RustFS writes each response element's children in (rustfs/gateway#1078):
+/// the order the legacy stack's structure declares its fields in.
+/// Honoured under `MetaView::rustfs_response_layout`; generated from the IR.
+#[rustfmt::skip]
+mod rustfs_order {
+    pub(super) const RESPONSE: &[&str] = &["Bucket", "ChecksumAlgorithm", "ChecksumType", "Initiator", "IsTruncated", "Key", "MaxParts", "NextPartNumberMarker", "Owner", "PartNumberMarker", "Part", "StorageClass", "UploadId"];
+    pub(super) const INITIATOR: &[&str] = &["DisplayName", "ID"];
+    pub(super) const OWNER: &[&str] = &["DisplayName", "ID"];
+    pub(super) const PART: &[&str] = &["ChecksumCRC32", "ChecksumCRC32C", "ChecksumCRC64NVME", "ChecksumMD5", "ChecksumSHA1", "ChecksumSHA256", "ChecksumSHA512", "ChecksumXXHASH128", "ChecksumXXHASH3", "ChecksumXXHASH64", "ETag", "LastModified", "PartNumber", "Size"];
 }

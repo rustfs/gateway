@@ -58,8 +58,7 @@ impl OperationCodec for dto::RestoreObject {
         {
             return Err(CodecError::malformed_xml("the request body has the wrong root namespace"));
         }
-        let root = rustfs_gateway_xml::parse(raw_body.as_ref())
-            .map_err(|_| CodecError::malformed_xml("the request body is not the XML this operation accepts"))?;
+        let root = crate::codec::request_document(request, raw_body.as_ref(), &document::DOCUMENT)?;
         if !["RestoreRequest"].contains(&root.name.as_str()) {
             return Err(CodecError::malformed_xml("the request body has the wrong root element").about("RestoreRequest"));
         }
@@ -446,4 +445,106 @@ fn read_tagging(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::Tagging, Code
     }
     value::exit(shape.check_required())?;
     Ok(shape)
+}
+
+/// The request document's shape, as the RustFS profile reads it (`rustfs_gateway_xml::bound`,
+/// rustfs/gateway#1078): its roots, every structure it reaches, and each member legacy
+/// RustFS reads. Generated from the IR and the legacy facts in `emit::codec::document`.
+#[rustfmt::skip]
+mod document {
+    use rustfs_gateway_xml::bound::{Arity, Attribute, Content, Document, EmptyBody, Member, Scalar, Shape, Unknown, Value};
+
+    pub(super) static DOCUMENT: Document = Document { roots: &["RestoreRequest"], empty: EmptyBody::Refused, shapes: &[
+        Shape { name: "RestoreRequest", attribute: None, content: Content::Members { unknown: Unknown::Skip, members: &[
+            Member { element: "Days", arity: Arity::One, value: Value::Text(Scalar::Integer), required: false, kept: true },
+            Member { element: "GlacierJobParameters", arity: Arity::One, value: Value::Shape(1), required: false, kept: true },
+            Member { element: "Type", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "Tier", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "Description", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "SelectParameters", arity: Arity::One, value: Value::Shape(2), required: false, kept: true },
+            Member { element: "OutputLocation", arity: Arity::One, value: Value::Shape(3), required: false, kept: true },
+        ] } },
+        Shape { name: "GlacierJobParameters", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+            Member { element: "Tier", arity: Arity::One, value: Value::Text(Scalar::Text), required: true, kept: true },
+        ] } },
+        Shape { name: "SelectParameters", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+            Member { element: "InputSerialization", arity: Arity::One, value: Value::Shape(4), required: true, kept: true },
+            Member { element: "ExpressionType", arity: Arity::One, value: Value::Text(Scalar::Text), required: true, kept: true },
+            Member { element: "Expression", arity: Arity::One, value: Value::Text(Scalar::Text), required: true, kept: true },
+            Member { element: "OutputSerialization", arity: Arity::One, value: Value::Shape(5), required: true, kept: true },
+        ] } },
+        Shape { name: "OutputLocation", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+            Member { element: "S3", arity: Arity::One, value: Value::Shape(6), required: false, kept: true },
+        ] } },
+        Shape { name: "InputSerialization", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+            Member { element: "CSV", arity: Arity::One, value: Value::Shape(7), required: false, kept: true },
+            Member { element: "CompressionType", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "JSON", arity: Arity::One, value: Value::Shape(8), required: false, kept: true },
+            Member { element: "Parquet", arity: Arity::One, value: Value::Shape(9), required: false, kept: true },
+        ] } },
+        Shape { name: "OutputSerialization", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+            Member { element: "CSV", arity: Arity::One, value: Value::Shape(10), required: false, kept: true },
+            Member { element: "JSON", arity: Arity::One, value: Value::Shape(11), required: false, kept: true },
+        ] } },
+        Shape { name: "S3Location", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+            Member { element: "BucketName", arity: Arity::One, value: Value::Text(Scalar::Text), required: true, kept: true },
+            Member { element: "Prefix", arity: Arity::One, value: Value::Text(Scalar::Text), required: true, kept: true },
+            Member { element: "Encryption", arity: Arity::One, value: Value::Shape(12), required: false, kept: true },
+            Member { element: "CannedACL", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "AccessControlList", arity: Arity::Wrapped("Grant"), value: Value::Shape(13), required: false, kept: true },
+            Member { element: "Tagging", arity: Arity::One, value: Value::Shape(14), required: false, kept: true },
+            Member { element: "UserMetadata", arity: Arity::Wrapped("MetadataEntry"), value: Value::Shape(15), required: false, kept: true },
+            Member { element: "StorageClass", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+        ] } },
+        Shape { name: "CSVInput", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+            Member { element: "FileHeaderInfo", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "Comments", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "QuoteEscapeCharacter", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "RecordDelimiter", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "FieldDelimiter", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "QuoteCharacter", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "AllowQuotedRecordDelimiter", arity: Arity::One, value: Value::Text(Scalar::Boolean), required: false, kept: true },
+        ] } },
+        Shape { name: "JSONInput", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+            Member { element: "Type", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+        ] } },
+        Shape { name: "ParquetInput", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+        ] } },
+        Shape { name: "CSVOutput", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+            Member { element: "QuoteFields", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "QuoteEscapeCharacter", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "RecordDelimiter", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "FieldDelimiter", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "QuoteCharacter", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+        ] } },
+        Shape { name: "JSONOutput", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+            Member { element: "RecordDelimiter", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+        ] } },
+        Shape { name: "Encryption", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+            Member { element: "EncryptionType", arity: Arity::One, value: Value::Text(Scalar::Text), required: true, kept: true },
+            Member { element: "KMSKeyId", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "KMSContext", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+        ] } },
+        Shape { name: "Grant", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+            Member { element: "Grantee", arity: Arity::One, value: Value::Shape(16), required: false, kept: true },
+            Member { element: "Permission", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+        ] } },
+        Shape { name: "Tagging", attribute: None, content: Content::Members { unknown: Unknown::Skip, members: &[
+            Member { element: "TagSet", arity: Arity::Wrapped("Tag"), value: Value::Shape(17), required: true, kept: true },
+        ] } },
+        Shape { name: "MetadataEntry", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+            Member { element: "Name", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "Value", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+        ] } },
+        Shape { name: "Grantee", attribute: Some(Attribute { key: "xsi:type", name: "type", namespace: "http://www.w3.org/2001/XMLSchema-instance", required: true }), content: Content::Members { unknown: Unknown::Refuse, members: &[
+            Member { element: "DisplayName", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "EmailAddress", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "ID", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "URI", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+        ] } },
+        Shape { name: "Tag", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+            Member { element: "Key", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "Value", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+        ] } },
+    ] };
 }

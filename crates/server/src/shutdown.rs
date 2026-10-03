@@ -71,6 +71,8 @@ pub(crate) struct MetricsInner {
     pub(crate) active: AtomicUsize,
     pub(crate) per_ip_rejected: AtomicUsize,
     pub(crate) accept_errors: AtomicUsize,
+    /// Written by the accept loop, the only owner of the task set it measures.
+    pub(crate) connection_tasks: AtomicUsize,
     /// Shared with every connection's `ProgressIo`, which is where the octets are discarded.
     pub(crate) lingering_drained: Arc<AtomicU64>,
     /// Shared with every connection's `ProgressIo`; counts every octet it reads, drain included.
@@ -102,6 +104,18 @@ impl ServerMetrics {
     #[must_use]
     pub fn accept_errors(&self) -> usize {
         self.inner.accept_errors.load(Ordering::Relaxed)
+    }
+
+    /// Connection tasks the listener still holds a handle to, finished or not, as of the accept
+    /// loop's last look at its task set.
+    ///
+    /// A connection's task keeps its entry after the connection closes until the listener joins
+    /// it. This is the count of those entries, so it is the memory the listener retains per
+    /// connection: it settles to [`ServerMetrics::active_connections`] once finished tasks are
+    /// joined, and a value that keeps growing past it is a leak. See rustfs/gateway#1208.
+    #[must_use]
+    pub fn retained_connection_tasks(&self) -> usize {
+        self.inner.connection_tasks.load(Ordering::Relaxed)
     }
 
     /// Octets read and discarded by the lingering close, summed over every connection.

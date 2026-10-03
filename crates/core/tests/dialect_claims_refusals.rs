@@ -427,3 +427,89 @@ fn n_a_stale_declaration_between_claimed_rows_is_refused() {
     let error = route_refusal(&[&stats_and_user(25, STATS_OVER_USER)]);
     assert!(matches!(error, RouteBuildError::StaleShadowing { .. }), "{error:?}");
 }
+
+// ── overlap with a catch-all (ADR-0036) ──────────────────────────────────────────────────────
+
+/// A literal row and a catch-all row it sits inside, both under `logs/`.
+static TODAY_ROWS: &[ClaimedRow] = &[ClaimedRow {
+    template: "/acme/admin/v1/logs/today",
+    selector: GET,
+}];
+static ALL_ROWS: &[ClaimedRow] = &[ClaimedRow {
+    template: "/acme/admin/v1/{*rest}",
+    selector: GET,
+}];
+static TODAY_OVER_LOGS: &[ShadowingDecl] = &[ShadowingDecl {
+    winner: "acme:UserStats",
+    shadowed: "acme:GetUser",
+    reason: "Today's log is its own operation; every other path below `logs/` is a log.",
+    evidence: EVIDENCE,
+}];
+
+/// `acme:UserStats` on `winner_rows` at `winner_precedence` and `acme:GetUser` on `shadowed_rows`
+/// at 20.
+fn over_a_catch_all(
+    winner_rows: &'static [ClaimedRow],
+    winner_precedence: u16,
+    shadowed_rows: &'static [ClaimedRow],
+    shadows: &'static [ShadowingDecl],
+) -> Dialect {
+    let record = overlay(
+        vec![ADMIN],
+        vec![
+            overlay_row(NAMES[GET_USER], 20, shadowed_rows, ResourceShape::Service),
+            overlay_row(NAMES[USER_STATS], winner_precedence, winner_rows, ResourceShape::Service),
+        ],
+    );
+    Dialect::assemble(record)
+        .declare_claimed::<Vendor<GET_USER>>(claimed(20, shadowed_rows, &[]))
+        .declare_claimed::<Vendor<USER_STATS>>(claimed(winner_precedence, winner_rows, shadows))
+        .build()
+        .expect("the record and the declarations agree")
+}
+
+/// Negative — a literal row inside a catch-all's reach overlaps it, and so do two catch-alls one of
+/// which reaches the other's paths: at one precedence they conflict on a witness both match, and
+/// across precedences the overlap needs a declaration inside the claim (ADR-0036).
+#[test]
+fn n_an_undeclared_overlap_with_a_catch_all_is_refused() {
+    for (winner_rows, shadowed_rows, witness) in [
+        (TODAY_ROWS, crate::dialect_claims::LOGS_ROWS, "/acme/admin/v1/logs/today"),
+        (crate::dialect_claims::LOGS_ROWS, ALL_ROWS, "/acme/admin/v1/logs/p"),
+        (TODAY_ROWS, ALL_ROWS, "/acme/admin/v1/logs/today"),
+    ] {
+        let error = route_refusal(&[&over_a_catch_all(winner_rows, 20, shadowed_rows, &[])]);
+        let RouteBuildError::Conflict { witness: found, .. } = error else {
+            panic!("{error:?}");
+        };
+        assert_eq!(found.path, witness);
+        let error = route_refusal(&[&over_a_catch_all(winner_rows, 15, shadowed_rows, &[])]);
+        assert!(
+            matches!(&error, RouteBuildError::UndeclaredShadowing { winner, shadowed, .. }
+                if winner.op_name == "acme:UserStats" && shadowed.op_name == "acme:GetUser"),
+            "{witness}: {error:?}"
+        );
+    }
+}
+
+/// Positive — declared in front, the literal answers its own path and the catch-all keeps every
+/// other one below it, the longer paths under the literal included.
+#[test]
+fn a_declared_literal_stands_in_front_of_a_catch_all() {
+    let router = crate::dialect_claims::router(&[&over_a_catch_all(
+        TODAY_ROWS,
+        15,
+        crate::dialect_claims::LOGS_ROWS,
+        TODAY_OVER_LOGS,
+    )]);
+    for (line, name) in [
+        ("GET /acme/admin/v1/logs/today", "acme:UserStats"),
+        ("GET /acme/admin/v1/logs/today/", "acme:GetUser"),
+        ("GET /acme/admin/v1/logs/today/x", "acme:GetUser"),
+        ("GET /acme/admin/v1/logs/yesterday", "acme:GetUser"),
+        ("GET /acme/admin/v1/logs/Today", "acme:GetUser"),
+    ] {
+        let request = crate::support::Req::new(line);
+        assert_eq!(crate::dialect_claims::routed(&router, &request), Some(name), "{line}");
+    }
+}
