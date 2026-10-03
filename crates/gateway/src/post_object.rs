@@ -32,8 +32,8 @@ use http_body::{Body, Frame, SizeHint};
 use rustfs_gateway_core::{EncodedResponse, ResponseBody, TransportSecurity};
 use rustfs_gateway_http::{BodyIntegrity, FileReader, FileStep, FormGrammar, FormLimits, FormReader, FormReject, FormStep};
 use rustfs_gateway_sig::{
-    EmptyRegion, PostPolicy, PostPolicyError, PostPolicyLimits, RegionLength, RegionRule, RequestNow, SigV2PostPolicy,
-    build_success_action_redirect,
+    EmptyRegion, PostPolicy, PostPolicyError, PostPolicyLimits, RegionLength, RegionRule, RequestNow, ServiceReading,
+    SigV2PostPolicy, build_success_action_redirect,
 };
 use rustfs_gateway_types::dto::{PostObjectFields, PostObjectInput};
 use rustfs_gateway_types::{BucketName, NamePolicy, ObjectKey};
@@ -195,7 +195,7 @@ const fn hex_digit(nibble: u8) -> u8 {
 }
 
 enum AcceptedPolicy {
-    SigV4(PostPolicy),
+    SigV4(Box<PostPolicy>),
     SigV2(SigV2PostPolicy),
     Anonymous,
 }
@@ -322,14 +322,16 @@ where
         let has_policy = fields.iter().any(|(name, _)| *name == "policy");
         let policy = if fields.iter().any(|(name, _)| *name == "x-amz-algorithm") {
             // The widest reading: this runs after the authenticator verified the same credential
-            // under the deployment's own region policy, so an empty or a long region reaching here
-            // was read there, and the conditions read below do not depend on the region.
+            // under the deployment's own region and service policy, so an empty or a long region,
+            // or a service the RustFS profile verifies on every route, reaching here was read
+            // there, and the conditions read below depend on neither.
             let rule = RegionRule::STRICT
                 .with_empty(EmptyRegion::Admitted)
-                .with_length(RegionLength::Unbounded);
-            AcceptedPolicy::SigV4(
+                .with_length(RegionLength::Unbounded)
+                .with_services(ServiceReading::AnyName);
+            AcceptedPolicy::SigV4(Box::new(
                 PostPolicy::parse_with(&fields, filename, PostPolicyLimits::default(), now, rule).map_err(policy_refusal)?,
-            )
+            ))
         } else if fields.iter().any(|(name, _)| *name == "awsaccesskeyid") {
             AcceptedPolicy::SigV2(
                 SigV2PostPolicy::parse(&fields, filename, PostPolicyLimits::default(), now).map_err(policy_refusal)?,

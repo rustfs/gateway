@@ -38,6 +38,9 @@ use rustfs_gateway_model::ir::{AttributeSource, Binding, EmptyValue, Field, Omit
 use super::{CodecRules, attribute_name, carried_as_attribute, expr, media, url};
 use crate::emit::dto::naming;
 
+pub mod layout;
+pub mod order;
+
 /// Renders the body of one operation's `encode`.
 pub fn body(ir: &OperationIr, rules: &CodecRules) -> Result<String, String> {
     let mut out = String::new();
@@ -153,8 +156,7 @@ fn one_field(ir: &OperationIr, field: &Field, rules: &CodecRules) -> Result<Stri
                 } else {
                     let _ = writeln!(out, "        if let Some(v) = {source}.as_ref() {{");
                 }
-                out.push_str("            let mut writer = rustfs_gateway_xml::XmlWriter::document();\n");
-                let _ = writeln!(out, "            writer.open(\"{root}\", {xmlns});");
+                order::open_payload_root(&mut out, &root, xmlns);
                 let _ = writeln!(out, "            {writer_fn}(&mut writer, v)?;");
                 out.push_str("            writer.close();\n");
                 out.push_str("            response.body = ResponseBody::Complete(writer.finish().into_bytes());\n");
@@ -300,7 +302,7 @@ fn xml_body(ir: &OperationIr) -> Result<String, String> {
             out.push_str("        value::rustfs_listing_echo(request, url_encoding, &mut output.encoding_type);\n");
         }
     }
-    out.push_str("        let mut writer = rustfs_gateway_xml::XmlWriter::document();\n");
+    order::new_document(&mut out, "        ");
 
     if ir.xml.unwrapped_output {
         // The single body member *is* the root. A generic wrapper here is the shipped defect
@@ -331,7 +333,7 @@ fn xml_body(ir: &OperationIr) -> Result<String, String> {
             }
         }
     } else {
-        let _ = writeln!(out, "        writer.open(\"{root}\", {xmlns});");
+        order::open_root(&mut out, ir, &members, root, xmlns)?;
         for name in ordered_members(ir, &members) {
             let Some(field) = members.iter().find(|f| f.name == name) else {
                 continue;
@@ -449,7 +451,7 @@ fn body_member(ir: &OperationIr, plan: &url::Plan, field: &Field, source: &str, 
         }
         other => {
             let rendered = wire_expr(other, member, &ir.operation, encoded)?;
-            let call = element_call(policy);
+            let call = layout::element_call(other, policy);
             let narrowed = url::member_binding(&format!("{pad}    "), member, encoded);
             if field.required {
                 let _ = writeln!(out, "{pad}{{");
@@ -552,18 +554,6 @@ fn shape_writer_argument(plan: &url::Plan, shape: &str) -> &'static str {
     if plan.encodes_shape(shape) { ", url_encoding" } else { "" }
 }
 
-/// The `XmlWriter` method one scalar body member is written with.
-///
-/// `empty_value_policy` alone chooses it: an empty value is written as a paired element or
-/// dropped. Escaping is not a choice — S3 escapes both quotes in every text node, an entity tag and
-/// an object key alike (rustfs/gateway#13), so there is one escaping and no per-type method.
-fn element_call(policy: EmptyValue) -> &'static str {
-    match policy {
-        EmptyValue::Emit => "element",
-        EmptyValue::Omit => "element_if_present",
-    }
-}
-
 /// Emit or omit for an empty member.
 ///
 /// The declared policy wins; otherwise the default is "a required member emits, an optional one is
@@ -595,6 +585,7 @@ pub fn shape_writer(ir: &OperationIr, name: &str, shape: &Shape) -> Result<Strin
     }
     let _ = writeln!(out, "/// Writes one `{name}` element's children, in the wire order the IR records.");
     out.push_str(&shape_writer_signature(&naming::module_name(name), &type_name, plan.encodes_shape(name)));
+    order::order_shape(&mut out, name, shape)?;
     // The mirror of the empty-shape arm in `decode::shape_reader`: a structure with no members
     // writes no children, so both parameters are consumed explicitly rather than renamed.
     if shape.fields.is_empty() {
@@ -625,7 +616,7 @@ pub fn shape_writer(ir: &OperationIr, name: &str, shape: &Shape) -> Result<Strin
             }
             other => {
                 let rendered = wire_expr(other, &field.name, &ir.operation, encoded)?;
-                let call = element_call(policy);
+                let call = layout::element_call(other, policy);
                 let narrowed = url::member_binding("        ", &format!("{name}.{}", field.name), encoded);
                 if field.required {
                     let _ = writeln!(out, "    {{");
@@ -742,7 +733,7 @@ fn union_writer(ir: &OperationIr, name: &str, shape: &Shape) -> Result<String, S
             }
             scalar => {
                 let rendered = wire_expr(scalar, &field.name, &ir.operation, encoded)?;
-                let call = element_call(empty_policy(&shape.xml.empty_value_policy, &field.name, true));
+                let call = layout::element_call(scalar, empty_policy(&shape.xml.empty_value_policy, &field.name, true));
                 if encoded {
                     let _ = writeln!(out, "        dto::{type_name}::{variant}(v) => {{");
                     out.push_str(&url::member_binding("            ", &format!("{name}.{}", field.name), encoded));

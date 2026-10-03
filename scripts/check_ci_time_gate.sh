@@ -140,6 +140,18 @@ require_equal(static_steps[deny_at - 1], {
                 "with" => {"tool" => "${{ env.CARGO_DENY_TOOL }}", "fallback" => "none"}
               }, "static must install the pinned CARGO_DENY_TOOL, with no fallback, right before cargo deny")
 
+# The aws-sdk-rust matrix driver locks a workspace of its own, which the command above never reads
+# (rustfs/gateway#1073). Dropping this step would leave that lock ungated with nothing red.
+driver_deny_command = "cargo deny --locked --manifest-path compat/drivers/aws-sdk-rust/Cargo.toml " \
+                      "--config deny.toml check advisories"
+require_equal(all_runs.count(driver_deny_command), 1,
+              "#{driver_deny_command} must have one authoritative CI execution")
+driver_deny_at = static_steps.index { |step| step["run"] == driver_deny_command }
+abort("ERROR: static must run #{driver_deny_command}") if driver_deny_at.nil?
+require_equal(static_steps[driver_deny_at].keys, ["name", "run"],
+              "static driver cargo-deny step may not alter execution")
+abort("ERROR: static must install cargo-deny before the driver's advisories") unless driver_deny_at > deny_at
+
 clippy_steps = jobs.fetch("clippy").fetch("steps")
 require_equal(clippy_steps.map(&:keys),
               [["uses"], ["uses", "with"], ["uses"], ["name", "run"], ["run"]],

@@ -49,6 +49,7 @@ crates/gateway/src/ext/governor/default.rs | mod tests / fn concurrent_callers_c
 crates/gateway/src/ext/governor/meter.rs | impl AtomicMeter / fn take | let mut current = self.state.load(Ordering::Relaxed);
 crates/gateway/src/ext/governor/meter.rs | impl AtomicMeter / fn refund | let mut current = self.state.load(Ordering::Relaxed);
 crates/gateway/src/ext/oplayer.rs | mod tests / fn a_layer_that_does_not_delegate_stops_the_chain | assert_eq!(inner_ran.load(std::sync::atomic::Ordering::SeqCst), 0);
+crates/gateway/src/logging.rs | impl Throttle / fn claim_at | let last = self.last.load(Ordering::Relaxed);
 crates/gateway/src/operation_mode.rs | mod tests / fn selected_entry_and_runtime_route_mismatch_is_fail_closed | assert_eq!(callbacks.load(Ordering::SeqCst), 0, "a callback ran before identity refusal");
 crates/gateway/src/probe.rs | impl BodyProgress / fn bytes_read | self.bytes_read.load(Ordering::SeqCst)
 crates/gateway/src/probe.rs | impl BodyProgress / fn is_exhausted | self.exhausted.load(Ordering::SeqCst)
@@ -63,3 +64,16 @@ crates/gateway/src/service.rs | impl S3Service / fn call | let snapshot = self.i
 crates/gateway/src/service.rs | impl S3Service / fn call_monomorphic | let snapshot = self.inner.config.load_full();
 crates/gateway/src/service/update.rs | impl Drop for Inner / fn drop | self.config.rcu(|current| {
 crates/gateway/src/service/update.rs | impl S3Service / fn replace_registry | self.inner.config.rcu(|current| {
+crates/gateway/src/unread_body_tests.rs | fn until_dropped | while !dropped.load(Ordering::Acquire) {
+crates/gateway/src/unread_body_tests.rs | fn the_drain_reads_the_raw_body_below_the_services_transforms | assert_eq!(probe.read.load(Ordering::Relaxed), 7);
+crates/gateway/src/unread_body_tests.rs | fn the_drain_reads_the_raw_body_below_the_services_transforms | assert_eq!(polls.load(Ordering::Relaxed), 0, "the drain went through the service's transform");
+crates/gateway/src/unread_body_tests.rs | fn n_an_idle_peer_is_let_go_after_the_idle_bound | assert!(probe.dropped.load(Ordering::Acquire), "held past the bound");
+crates/gateway/src/unread_body_tests.rs | fn n_without_the_setting_the_body_is_released | assert!(probe.dropped.load(Ordering::Acquire));
+crates/gateway/src/unread_body_tests.rs | fn a_body_left_unread_on_http1_is_drained_behind_a_closing_answer | assert!(!probe.dropped.load(Ordering::Acquire), "the body was released instead of drained");
+crates/gateway/src/unread_body_tests.rs | fn a_body_left_unread_on_http1_is_drained_behind_a_closing_answer | assert_eq!(probe.read.load(Ordering::Relaxed), 7, "the drain did not read what the peer sent");
+crates/gateway/src/unread_body_tests.rs | fn n_a_body_ended_on_arrival_is_not_retained | assert!(probe.dropped.load(Ordering::Acquire));
+crates/gateway/src/unread_body_tests.rs | fn n_a_body_read_to_its_end_is_left_alone | assert!(probe.dropped.load(Ordering::Acquire));
+crates/gateway/src/unread_body_tests.rs | fn n_a_body_read_to_its_end_is_left_alone | assert_eq!(probe.read.load(Ordering::Relaxed), 7);
+crates/gateway/src/unread_body_tests.rs | fn n_an_http2_body_is_released_not_drained | assert!(probe.dropped.load(Ordering::Acquire), "an HTTP/2 body was kept");
+crates/gateway/src/unread_body_tests.rs | fn n_an_http2_body_is_released_not_drained | assert_eq!(probe.read.load(Ordering::Relaxed), 0);
+crates/gateway/src/unread_body_tests.rs | fn n_an_idle_peer_is_let_go_after_the_idle_bound | assert!(!probe.dropped.load(Ordering::Acquire), "let go before the bound");

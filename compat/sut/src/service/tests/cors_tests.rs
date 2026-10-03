@@ -47,7 +47,7 @@ fn allow_origin(response: &WireResponse) -> Option<String> {
         .flatten()
 }
 
-/// Negative then positive — without a document every preflight is refused; once stored, the
+/// Negative then positive — without a document no preflight is allowed anything; once stored, the
 /// admitted origin and method are allowed and nothing else is.
 #[tokio::test]
 async fn preflights_follow_the_stored_document() {
@@ -60,8 +60,13 @@ async fn preflights_follow_the_stored_document() {
         200
     );
 
+    // Legacy RustFS answers a preflight to a bucket without a document with its deployment-wide
+    // fallback: `200`, and no `Access-Control-*` header when `RUSTFS_CORS_ALLOWED_ORIGINS` is unset
+    // (`ConditionalCorsLayer`, rustfs/rustfs `e870a6d25b` `rustfs/src/server/layer.rs:2012-2309`,
+    // observed against a legacy RustFS build), and the RustFS profile answers CORS as legacy
+    // RustFS does since rustfs/gateway#1120; before that this was the gateway's own `403`.
     let before = exchange(&service, preflight("https://a.put", "PUT")).await;
-    assert_eq!(before.status(), 403, "{}", body_of(&before));
+    assert_eq!(before.status(), 200, "{}", body_of(&before));
     assert_eq!(allow_origin(&before), None);
 
     let written = exchange(

@@ -10958,10 +10958,10 @@ mut_sig_p2_04_warning_literal_changed() {
 from pathlib import Path
 path = Path("crates/gateway/src/builder.rs")
 text = path.read_text()
-old = '        "WARN: the built-in AWS signature verifier is dangerously replaced; the H1..H7 security floor remains enforced"'
+old = '                "the built-in AWS signature verifier is dangerously replaced; the H1..H7 security floor remains enforced"'
 if text.count(old) != 1:
     raise SystemExit("missing replacement warning mutation subject")
-new = '        // "WARN: the built-in AWS signature verifier is dangerously replaced; the H1..H7 security floor remains enforced"\n        "WARN: signature replacement enabled"'
+new = '                // "the built-in AWS signature verifier is dangerously replaced; the H1..H7 security floor remains enforced"\n                "signature replacement enabled"'
 path.write_text(text.replace(old, new, 1))
 PYEOF
 }
@@ -10973,8 +10973,9 @@ mut_sig_p2_04_warning_call_removed() {
 from pathlib import Path
 path = Path("crates/gateway/src/builder.rs")
 text = path.read_text()
-old = '''            eprintln!(
-                "WARN: the built-in AWS signature verifier is dangerously replaced; the H1..H7 security floor remains enforced"
+old = '''            dangerous_assembly(
+                "replaced_aws_signature_verifier",
+                "the built-in AWS signature verifier is dangerously replaced; the H1..H7 security floor remains enforced",
             );'''
 if text.count(old) != 1:
     raise SystemExit("missing replacement warning call mutation subject")
@@ -10983,6 +10984,22 @@ PYEOF
 }
 expect_fail check_sig_case_coverage.sh \
     'assembly no longer emitting the replacement warning' mut_sig_p2_04_warning_call_removed
+
+# The sentence kept only in a comment after a different message: the event would carry the decoy.
+mut_sig_p2_04_warning_trailing_decoy() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/gateway/src/builder.rs")
+text = path.read_text()
+old = '                "the built-in AWS signature verifier is dangerously replaced; the H1..H7 security floor remains enforced",\n'
+if text.count(old) != 1:
+    raise SystemExit("missing replacement warning trailing-decoy mutation subject")
+new = '                "signature replacement enabled" // , "the built-in AWS signature verifier is dangerously replaced; the H1..H7 security floor remains enforced"\n'
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'the replacement warning replaced by a decoy with the sentence in a trailing comment' mut_sig_p2_04_warning_trailing_decoy
 
 mut_sig_p2_04_floor_test_feature_changed() {
     python3 - <<'PYEOF'
@@ -11179,9 +11196,13 @@ mut_sig_p2_04_startup_posture_log_render_removed() {
 from pathlib import Path
 path = Path("crates/gateway/src/posture.rs")
 text = path.read_text()
-old = """    eprintln!(
+old = """    tracing::info!(
+        target: logging::TARGET,
+        event = logging::EVENT_SECURITY_POSTURE,
+        component = logging::COMPONENT,
+        subsystem = logging::SUBSYSTEM_POSTURE,
         "{}",
-        render_startup_posture(operations, floor, custom_signature_verifier, dangerously_replaced_signature_verifier,)
+        render_startup_posture(operations, floor, custom_signature_verifier, dangerously_replaced_signature_verifier)
     );
 """
 if text.count(old) != 1:
@@ -11198,6 +11219,27 @@ PYEOF
 }
 expect_fail check_sig_case_coverage.sh \
     'the startup posture report being rendered but never written' mut_sig_p2_04_startup_posture_log_render_removed
+
+# The report rendered and dropped, and the event carrying a decoy with the rendering in a comment.
+mut_sig_p2_04_startup_posture_log_decoy() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/gateway/src/posture.rs")
+text = path.read_text()
+old = """        "{}",
+        render_startup_posture(operations, floor, custom_signature_verifier, dangerously_replaced_signature_verifier)
+    );
+"""
+if text.count(old) != 1:
+    raise SystemExit("missing startup posture log decoy mutation subject")
+new = """        "withheld" // , "{}", render_startup_posture(operations, floor, custom_signature_verifier, dangerously_replaced_signature_verifier)
+    );
+"""
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_sig_case_coverage.sh \
+    'the startup posture event carrying a decoy with the rendering in a comment' mut_sig_p2_04_startup_posture_log_decoy
 
 mut_sig_p2_04_dry_run_arguments_unchecked() {
     python3 - <<'PYEOF'
@@ -14439,9 +14481,33 @@ expect_fail check_mint_baseline.sh 'a mint SDK listed twice in the baseline' \
     mut_mint_baseline_duplicate_sdk 'minio-go is listed more than once'
 
 # The exclusion list shrinks freely and widens only with the generation, and every entry
-# names an in-project owner and a reason. The .NET exclusion remains in the baseline;
-# its owner is shared with mc, so owner mutations name the SDK prefix as well.
+# names an in-project owner and a reason. Generation 4 excludes nothing (rustfs/gateway#720), so
+# the cases that need an exclusion to mutate first commit one in the sandbox, as a reviewed
+# generation would, and mutate that: the rules stay measured whether or not the reviewed
+# baseline currently excludes anything.
 MINT_DOTNET_EXCLUSION='.minio-dotnet excluded https://github.com/rustfs/gateway/issues/720 the pinned image ships no .NET test binary, so its runner writes no record at all'
+
+# mint_commit_dotnet_exclusion: the sandbox baseline with .minio-dotnet excluded under a raised
+# generation, committed, so the guard compares the case's mutation with it.
+mint_commit_dotnet_exclusion() {
+    python3 - "$MINT_DOTNET_EXCLUSION" <<'PYEOF'
+import pathlib
+import re
+import sys
+
+path = pathlib.Path("ci/mint/baseline.txt")
+text = path.read_text()
+exclusion = sys.argv[1]
+if exclusion not in text:
+    text, count = re.subn(r"(?m)^\.minio-dotnet [0-9]+$", exclusion, text)
+    if count != 1:
+        raise SystemExit("missing mutation subject in ci/mint/baseline.txt: a .minio-dotnet line")
+path.write_text(text)
+PYEOF
+    mint_set_generation "$((MINT_GENERATION + 1))"
+    git add ci/mint/baseline.txt
+    git -c user.name=t -c user.email=t@t commit -qm 'mint baseline: .minio-dotnet excluded'
+}
 
 mut_mint_baseline_excludes_without_generation() {
     mint_mutate ci/mint/baseline.txt '\nminio-go 0\n' \
@@ -14458,12 +14524,14 @@ expect_guard_pass check_mint_baseline.sh 'a mint SDK excluded in the change that
     mut_mint_baseline_excludes_with_generation
 
 mut_mint_baseline_restores_excluded_sdk() {
+    mint_commit_dotnet_exclusion
     mint_mutate ci/mint/baseline.txt "$MINT_DOTNET_EXCLUSION" '.minio-dotnet 4'
 }
 expect_guard_pass check_mint_baseline.sh 'an excluded mint SDK put back under a count, which only narrows' \
     mut_mint_baseline_restores_excluded_sdk
 
 mut_mint_baseline_exclusion_without_owner() {
+    mint_commit_dotnet_exclusion
     mint_mutate ci/mint/baseline.txt '.minio-dotnet excluded https://github.com/rustfs/gateway/issues/720 ' \
         '.minio-dotnet excluded '
 }
@@ -14471,6 +14539,7 @@ expect_fail check_mint_baseline.sh 'a mint exclusion that names no owning issue'
     mut_mint_baseline_exclusion_without_owner 'the exclusion of .minio-dotnet names no owner'
 
 mut_mint_baseline_exclusion_foreign_owner() {
+    mint_commit_dotnet_exclusion
     mint_mutate ci/mint/baseline.txt '.minio-dotnet excluded https://github.com/rustfs/gateway/issues/720' \
         '.minio-dotnet excluded https://github.com/minio/mint/issues/720'
 }
@@ -14478,6 +14547,7 @@ expect_fail check_mint_baseline.sh 'a mint exclusion owned by an issue outside t
     mut_mint_baseline_exclusion_foreign_owner 'the exclusion of .minio-dotnet names no owner'
 
 mut_mint_baseline_exclusion_without_reason() {
+    mint_commit_dotnet_exclusion
     mint_mutate ci/mint/baseline.txt "$MINT_DOTNET_EXCLUSION" \
         '.minio-dotnet excluded https://github.com/rustfs/gateway/issues/720 flaky'
 }
@@ -14485,6 +14555,7 @@ expect_fail check_mint_baseline.sh 'a mint exclusion whose reason is one word' \
     mut_mint_baseline_exclusion_without_reason 'the exclusion of .minio-dotnet gives no reason'
 
 mut_mint_baseline_excluded_and_counted() {
+    mint_commit_dotnet_exclusion
     mint_mutate ci/mint/baseline.txt '\nminio-go 0\n' '\nminio-go 0\n.minio-dotnet 0\n'
 }
 expect_fail check_mint_baseline.sh 'an excluded mint SDK that also carries a count' \
@@ -17852,6 +17923,27 @@ CREDPY
 expect_fail check_secret_hygiene.sh \
     'a formatting macro naming a secret in the gateway extension tree' mut_secret_in_a_log_line
 
+# Every event in the gateway puts its fields on lines of their own; a rule reading one line at a
+# time sees the macro on one line and the key material on another, and neither alone.
+mut_secret_in_a_multiline_event() {
+    python3 - <<'CREDPY'
+import pathlib
+path = pathlib.Path("crates/gateway/src/ext/authenticator.rs")
+path.write_text(path.read_text() + """
+fn report_mismatch(computed: &str) {
+    tracing::warn!(
+        target: "rustfs_gateway",
+        event = "signature_mismatch",
+        expected_signature = %computed,
+        "signature mismatch"
+    );
+}
+""")
+CREDPY
+}
+expect_fail check_secret_hygiene.sh \
+    'a multi-line logging macro naming key material on a field line of its own' mut_secret_in_a_multiline_event
+
 mut_refusal_in_a_log_line() {
     python3 - <<'CREDPY'
 import pathlib
@@ -18028,6 +18120,40 @@ mut_ci_time_deny_failure_swallowed() {
 expect_fail check_ci_time_gate.sh \
     'the cargo-deny step swallowing its failure' mut_ci_time_deny_failure_swallowed \
     'must have one authoritative CI execution'
+
+mut_ci_time_driver_deny_removed() {
+    replace_ci_text '      - name: Dependency advisories of the aws-sdk-rust driver
+        run: cargo deny --locked --manifest-path compat/drivers/aws-sdk-rust/Cargo.toml --config deny.toml check advisories
+' ''
+}
+expect_fail check_ci_time_gate.sh \
+    'Static checks no longer judging the aws-sdk-rust driver lock' mut_ci_time_driver_deny_removed \
+    'must have one authoritative CI execution'
+
+mut_ci_time_driver_deny_failure_swallowed() {
+    replace_ci_text '--config deny.toml check advisories' '--config deny.toml check advisories || true'
+}
+expect_fail check_ci_time_gate.sh \
+    'the driver cargo-deny step swallowing its failure' mut_ci_time_driver_deny_failure_swallowed \
+    'must have one authoritative CI execution'
+
+mut_ci_time_driver_deny_before_install() {
+    python3 - <<'PYEOF'
+import pathlib
+path = pathlib.Path(".github/workflows/ci.yml")
+text = path.read_text()
+step = """      - name: Dependency advisories of the aws-sdk-rust driver
+        run: cargo deny --locked --manifest-path compat/drivers/aws-sdk-rust/Cargo.toml --config deny.toml check advisories
+"""
+anchor = "      - name: Model integrity\n"
+if step not in text or anchor not in text:
+    raise SystemExit("missing mutation subject")
+path.write_text(text.replace(step, "", 1).replace(anchor, step + anchor, 1))
+PYEOF
+}
+expect_fail check_ci_time_gate.sh \
+    'the driver cargo-deny step running before cargo-deny is installed' mut_ci_time_driver_deny_before_install \
+    "must install cargo-deny before the driver's advisories"
 
 mut_ci_time_deny_install_fallback() {
     replace_ci_text '          fallback: none' '          fallback: cargo-install'
@@ -24741,12 +24867,10 @@ mut_compat_known_fail_grew() {
     python3 - <<'PYEOF'
 from pathlib import Path
 
+# The list can be empty (it is since #1073's refresh), so the new entry is appended rather than
+# placed after an existing one; either way it was not in the committed list.
 path = Path("compat/known-fail.txt")
-text = path.read_text()
-old = "s3cmd/copy-object            rustfs/gateway#912  PutObjectAcl without Content-MD5 is refused\n"
-if text.count(old) != 1:
-    raise SystemExit("known-fail ratchet mutation subject is not unique")
-path.write_text(text.replace(old, old + "boto3/list-pagination        rustfs/gateway#912  newly excused\n", 1))
+path.write_text(path.read_text() + "boto3/list-pagination        rustfs/gateway#912  newly excused\n")
 PYEOF
 }
 # The whole point of the ratchet: a regression must not be silenceable by the change that caused it.
@@ -24805,12 +24929,10 @@ mut_compat_known_fail_unowned() {
     python3 - <<'PYEOF'
 from pathlib import Path
 
+# The committed list can be empty, so the unowned entry is appended; the guard reports the missing
+# owner for every entry it reads, new or old, beside the ratchet's own refusal of the addition.
 path = Path("compat/known-fail.txt")
-text = path.read_text()
-old = "s3cmd/presigned-get          rustfs/gateway#913  presigned SigV2 is refused under the default policy"
-if text.count(old) != 1:
-    raise SystemExit("known-fail owner mutation subject is not unique")
-path.write_text(text.replace(old, "s3cmd/presigned-get          later  presigned SigV2 is refused under the default policy", 1))
+path.write_text(path.read_text() + "s3cmd/presigned-get          later  presigned SigV2 is refused under the default policy\n")
 PYEOF
 }
 expect_fail check_compat_matrix.sh \
@@ -24833,7 +24955,15 @@ for client in matrix["clients"]:
             row["issue"] = None
             path.write_text(json.dumps(matrix, indent=2) + "\n")
             raise SystemExit(0)
-raise SystemExit("no failing cell to promote")
+# A manifest with no failing cell (the one #1073 recorded) has nothing to promote; the same hand
+# edit in the other direction, a pass rewritten as a failure, leaves the counts just as wrong.
+for client in matrix["clients"]:
+    for row in client["scenarios"]:
+        if row["status"] == "pass":
+            row["status"] = "fail"
+            path.write_text(json.dumps(matrix, indent=2) + "\n")
+            raise SystemExit(0)
+raise SystemExit("no failing or passing cell to hand-edit")
 PYEOF
 }
 # matrix.json is a generated artefact and a published promise. A hand edit that promotes a failure

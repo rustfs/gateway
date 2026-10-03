@@ -16,8 +16,8 @@
 #   it is still run and reported, but neither KNOWN, FIXED nor REGRESSION. It is for a case whose
 #   outcome does not reproduce from run to run, and it follows the rules for an excluded SDK in
 #   ci/mint/baseline.txt: the owner is an issue in rustfs/gateway or rustfs/backlog, the reason is
-#   at least three words, and adding one needs the generation raised by exactly one. The two
-#   at the end of this file are the only cases the two measuring runs disagreed on.
+#   at least three words, and adding one needs the generation raised by exactly one. None is
+#   listed today: the two cases generation 2 excluded became deterministic (REFRESH 2026-09-30).
 #
 # HOW TO PROPOSE A NEW BASELINE
 #   Run the workflow with `mode: record`. It writes xfail.proposed.txt and outcomes.proposed.txt
@@ -67,6 +67,21 @@
 #   main 69a66109 after #1008, #1014, #1015 and #1016: passed=369 failed=299 errored=0, 0 regressions;
 #   its 14 FIXED entries are removed and ci/s3tests/outcomes.txt is its record.
 #
+# REFRESH 2026-09-30: record run https://github.com/rustfs/gateway/actions/runs/36663391914 on main
+#   2b431155, after the RustFS-profile changes of 2026-09-29/30: passed=390 known=278 regression=0
+#   fixed=21 skipped=70 collected=740. The 21 FIXED entries are removed, and
+#   ci/s3tests/outcomes.txt is that run's record. The two exclusions owned by #810 are removed:
+#   #828 refuses the 1001-key DeleteObjects at once, so it no longer leaves a half-emptied bucket
+#   behind, and both cases passed in record runs 36381686870, 36411003110 and 36663391914.
+#   Re-attributed from measurements of legacy RustFS (rustfs/rustfs 528a36814 serving its own S3
+#   stack): the two CORS cases need a public-read ACL grant, which legacy RustFS does not
+#   enforce either (an anonymous GET of the public-read bucket answers 403); an If-Match on a
+#   missing key is 404 NoSuchKey, as legacy RustFS answers it (#1002); legacy RustFS keeps the last
+#   occurrence of a part number a completion names twice
+#   (rustfs/src/app/multipart_usecase.rs:195-208 on rustfs/rustfs 3268c42e00), sorts object tags by
+#   key, and strips a declared aws-chunked coding from an unframed upload's Content-Encoding
+#   (rustfs/src/storage/options.rs:664-680), none of which the reference backend does yet.
+#
 # generation: 2
 
 # --- fs-gap: Object Lock refused by the reference backend (39) — https://github.com/rustfs/backlog/issues/1726 ---
@@ -110,7 +125,7 @@ s3tests.functional.test_s3::test_object_lock_put_obj_retention_versionid
 s3tests.functional.test_s3::test_object_lock_suspend_versioning
 s3tests.functional.test_s3::test_object_lock_uploading_obj
 
-# --- fs-gap: GetObjectAttributes, partNumber reads and stored checksums (18) — https://github.com/rustfs/gateway/issues/1001 ---
+# --- fs-gap: GetObjectAttributes, partNumber reads and stored checksums (19) — https://github.com/rustfs/gateway/issues/1001 ---
 s3tests.functional.test_s3::test_get_checksum_object_attributes
 s3tests.functional.test_s3::test_get_multipart_checksum_object_attributes
 s3tests.functional.test_s3::test_get_multipart_object_attributes
@@ -120,6 +135,7 @@ s3tests.functional.test_s3::test_get_single_multipart_object_attributes
 s3tests.functional.test_s3::test_get_versioned_object_attributes
 s3tests.functional.test_s3::test_multipart_checksum_sha256
 s3tests.functional.test_s3::test_multipart_get_part
+s3tests.functional.test_s3::test_multipart_reupload_checksum_and_etag
 s3tests.functional.test_s3::test_multipart_single_get_part
 s3tests.functional.test_s3::test_multipart_use_cksum_helper_crc32
 s3tests.functional.test_s3::test_multipart_use_cksum_helper_crc32c
@@ -129,16 +145,6 @@ s3tests.functional.test_s3::test_multipart_use_cksum_helper_sha256
 s3tests.functional.test_s3::test_non_multipart_get_part
 s3tests.functional.test_s3::test_object_checksum_crc64nvme
 s3tests.functional.test_s3::test_object_checksum_sha256
-
-# --- fs-gap: bucket CORS and bucket tagging (8) — https://github.com/rustfs/gateway/issues/1004 ---
-s3tests.functional.test_s3::test_cors_header_option
-s3tests.functional.test_s3::test_cors_origin_response
-s3tests.functional.test_s3::test_cors_origin_wildcard
-s3tests.functional.test_s3::test_cors_presigned_get_object
-s3tests.functional.test_s3::test_cors_presigned_put_object
-s3tests.functional.test_s3::test_cors_presigned_put_object_with_acl
-s3tests.functional.test_s3::test_set_bucket_tagging
-s3tests.functional.test_s3::test_set_cors
 
 # --- fs-gap: bucket-policy condition keys beyond ACL and encryption (12) — https://github.com/rustfs/gateway/issues/1037 ---
 s3tests.functional.test_s3::test_bucket_policy_get_obj_acl_existing_tag
@@ -157,29 +163,24 @@ s3tests.functional.test_s3::test_head_object_404_with_policy_prefix
 # --- not-a-defect: an unsatisfiable copy-source range is InvalidArgument under the shared resolver's quirk, not InvalidRange (1) ---
 s3tests.functional.test_s3::test_multipart_copy_invalid_range
 
-# --- fs-gap: lifecycle expiration header, rule ID and Status validation (6) — https://github.com/rustfs/gateway/issues/999 ---
+# --- fs-gap: lifecycle expiration header, rule ID and Status validation (4) — https://github.com/rustfs/gateway/issues/999 ---
 s3tests.functional.test_s3::test_delete_marker_expiration
 s3tests.functional.test_s3::test_lifecycle_expiration_header_head
 s3tests.functional.test_s3::test_lifecycle_expiration_header_put
 s3tests.functional.test_s3::test_lifecycle_expiration_header_tags_head
-s3tests.functional.test_s3::test_lifecycle_get_no_id
-s3tests.functional.test_s3::test_lifecycle_invalid_status
 
-# --- fs-gap: object tagging count, key-only header tags, multipart tags (3) — https://github.com/rustfs/gateway/issues/1000 ---
-s3tests.functional.test_s3::test_get_obj_head_tagging
+# --- fs-gap: object tags are read back in stored order; RustFS sorts them by key (1) — https://github.com/rustfs/gateway/issues/1000 ---
 s3tests.functional.test_s3::test_put_obj_with_tags
-s3tests.functional.test_s3::test_set_multipart_tagging
 
-# --- fs-gap: conditional multipart completion and completion retry (9) — https://github.com/rustfs/gateway/issues/1002 ---
+# --- rustfs-parity: If-Match on a missing key is 404 NoSuchKey, as RustFS answers it (5) — https://github.com/rustfs/gateway/issues/1002 ---
 s3tests.functional.test_s3::test_multipart_put_current_object_if_match
 s3tests.functional.test_s3::test_multipart_put_object_if_match
-s3tests.functional.test_s3::test_multipart_resend_first_finishes_last
-s3tests.functional.test_s3::test_multipart_reupload_checksum_and_etag
-s3tests.functional.test_s3::test_multipart_upload
-s3tests.functional.test_s3::test_multipart_upload_small
 s3tests.functional.test_s3::test_put_current_object_if_match
 s3tests.functional.test_s3::test_put_object_current_if_match
 s3tests.functional.test_s3::test_put_object_if_match
+
+# --- fs-gap: a completion naming one part number twice is refused; RustFS keeps the last (1) — https://github.com/rustfs/gateway/issues/1002 ---
+s3tests.functional.test_s3::test_multipart_resend_first_finishes_last
 
 # --- rustfs-parity: ownership controls and torrents are unimplemented, as in RustFS (8) ---
 s3tests.functional.test_s3::test_bucket_create_delete_bucket_ownership
@@ -227,10 +228,7 @@ s3tests.functional.test_s3::test_object_read_unreadable
 # --- unattributed: needs an AWS capture (delete marker header on an unversioned delete) (1) ---
 s3tests.functional.test_s3::test_delete_marker_nonversioned
 
-# --- gateway-bug: cleanup cascade: ListObjectVersions refuses a deleted marker (1) — https://github.com/rustfs/gateway/issues/807 ---
-s3tests.functional.test_s3::test_bucket_list_prefix_basic
-
-# --- gateway-bug: stored Content-Encoding keeps aws-chunked (1) — https://github.com/rustfs/gateway/issues/813 ---
+# --- fs-gap: an unframed upload's declared aws-chunked coding is stored; RustFS strips it (1) ---
 s3tests.functional.test_s3::test_object_content_encoding_aws_chunked
 
 # --- rustfs-parity: ACL grants are neither stored nor enforced, and ownership controls are unimplemented, as in RustFS (31) ---
@@ -266,7 +264,9 @@ s3tests.functional.test_s3::test_object_copy_not_owned_object_bucket
 s3tests.functional.test_s3::test_object_raw_get_bucket_acl
 s3tests.functional.test_s3::test_put_bucket_acl_grant_group_read
 
-# --- rustfs-parity: anonymous access needs a public ACL grant, which RustFS does not enforce (5) ---
+# --- rustfs-parity: anonymous access needs a public ACL grant, which RustFS does not enforce (7) ---
+s3tests.functional.test_s3::test_cors_origin_response
+s3tests.functional.test_s3::test_cors_origin_wildcard
 s3tests.functional.test_s3::test_object_anon_put_write_access
 s3tests.functional.test_s3::test_object_delete_key_bucket_gone
 s3tests.functional.test_s3::test_object_raw_get
@@ -317,12 +317,6 @@ s3tests.functional.test_s3::test_multipart_sse_c_get_part
 s3tests.functional.test_s3::test_non_multipart_sse_c_get_part
 s3tests.functional.test_s3::test_put_obj_enc_conflict_c_kms
 s3tests.functional.test_s3::test_put_obj_enc_conflict_c_s3
-
-# --- fs-gap: part writes do not report the upload's encryption (4) — https://github.com/rustfs/gateway/issues/979 ---
-s3tests.functional.test_s3::test_copy_part_enc[sse-kms-sse-kms-STANDARD-STANDARD-8388608]
-s3tests.functional.test_s3::test_copy_part_enc[sse-kms-sse-s3-STANDARD-STANDARD-8388608]
-s3tests.functional.test_s3::test_copy_part_enc[sse-s3-sse-kms-STANDARD-STANDARD-8388608]
-s3tests.functional.test_s3::test_copy_part_enc[sse-s3-sse-s3-STANDARD-STANDARD-8388608]
 
 # --- out-of-scope: SigV2 (header or POST form) refused by design (37) — https://github.com/rustfs/gateway/issues/765 ---
 s3tests.functional.test_headers::test_bucket_create_bad_authorization_invalid_aws2
@@ -406,16 +400,12 @@ s3tests.functional.test_s3::test_object_raw_get_x_amz_expires_not_expired_tenant
 # --- out-of-scope: S3 Control endpoint (1) ---
 s3tests.functional.test_s3control::test_account_public_access_block
 
-# --- not-a-defect: encoding-type=url also encodes Delimiter/Prefix (AWS) (4) ---
-s3tests.functional.test_s3::test_bucket_list_encoding_basic
-s3tests.functional.test_s3::test_bucket_list_prefix_delimiter_basic
+# --- not-a-defect: encoding-type=url also encodes Delimiter/Prefix (AWS) (1) ---
 s3tests.functional.test_s3::test_bucket_list_prefix_unreadable
-s3tests.functional.test_s3::test_bucket_listv2_encoding_basic
 
-# --- not-a-defect: out-of-range X-Amz-Expires is 400 AuthorizationQueryParametersError (AWS) (3) ---
+# --- not-a-defect: out-of-range X-Amz-Expires is 400 AuthorizationQueryParametersError (AWS) (2) ---
 s3tests.functional.test_s3::test_object_raw_get_x_amz_expires_out_max_range
 s3tests.functional.test_s3::test_object_raw_get_x_amz_expires_out_positive_range
-s3tests.functional.test_s3::test_object_raw_get_x_amz_expires_out_range_zero
 
 # --- not-a-defect: PUT without Content-Length refused with 411 (AWS) (1) ---
 s3tests.functional.test_s3::test_object_write_with_chunked_transfer_encoding
@@ -431,7 +421,3 @@ s3tests.functional.test_s3::test_bucket_list_delimiter_empty
 s3tests.functional.test_s3::test_bucket_listv2_continuationtoken_empty
 s3tests.functional.test_s3::test_bucket_listv2_delimiter_empty
 s3tests.functional.test_s3::test_object_raw_put_authenticated_expired
-
-# --- excluded: outcome depends on how long the preceding 1001-key DeleteObjects takes ---
-s3tests.functional.test_s3::test_object_head_zero_bytes excluded https://github.com/rustfs/gateway/issues/810 passes, or errors in setup when the preceding oversized DeleteObjects hits the handler deadline and leaves a bucket the fixture cannot empty
-s3tests.functional.test_s3::test_object_write_check_etag excluded https://github.com/rustfs/gateway/issues/810 passes, or errors in setup when the preceding oversized DeleteObjects hits the handler deadline and leaves a bucket the fixture cannot empty

@@ -1,9 +1,9 @@
 {
-  "generated_at": "2026-09-28T10:47:38Z",
+  "generated_at": "2026-09-30T03:55:49Z",
   "sut": {
     "name": "rustfs-gateway-fs",
     "version": "0.1.4",
-    "commit": "c93585f2",
+    "commit": "f41b4c7",
     "generation": 2,
     "binary": "compat-sut",
     "package": "rustfs-gateway-compat-sut",
@@ -17,19 +17,23 @@
       "CreateBucket",
       "CreateMultipartUpload",
       "DeleteBucket",
+      "DeleteBucketCors",
       "DeleteBucketEncryption",
       "DeleteBucketLifecycle",
       "DeleteBucketPolicy",
+      "DeleteBucketTagging",
       "DeleteObject",
       "DeleteObjectTagging",
       "DeleteObjects",
       "DeletePublicAccessBlock",
       "GetBucketAcl",
+      "GetBucketCors",
       "GetBucketEncryption",
       "GetBucketLifecycleConfiguration",
       "GetBucketLocation",
       "GetBucketPolicy",
       "GetBucketPolicyStatus",
+      "GetBucketTagging",
       "GetBucketVersioning",
       "GetObject",
       "GetObjectAcl",
@@ -45,15 +49,18 @@
       "ListParts",
       "PostObject",
       "PutBucketAcl",
+      "PutBucketCors",
       "PutBucketEncryption",
       "PutBucketLifecycleConfiguration",
       "PutBucketPolicy",
+      "PutBucketTagging",
       "PutBucketVersioning",
       "PutObject",
       "PutObjectAcl",
       "PutObjectTagging",
       "PutPublicAccessBlock",
-      "UploadPart"
+      "UploadPart",
+      "UploadPartCopy"
     ]
   },
   "clients": [
@@ -222,10 +229,10 @@
         },
         {
           "id": "copy-object",
-          "status": "fail",
-          "detail": "InvalidArgument: x-amz-copy-source must name a key as well as a bucket",
-          "verdict": "KNOWN",
-          "issue": "rustfs/gateway#926",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
           "evidence": {}
         },
         {
@@ -331,6 +338,149 @@
               ],
               "max_signed_chunks": 14,
               "trailer_signatures": 1,
+              "content_encodings": [
+                "aws-chunked"
+              ],
+              "declared_trailers": [
+                "x-amz-checksum-crc32"
+              ]
+            }
+          }
+        },
+        {
+          "id": "versioned-object",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        }
+      ]
+    },
+    {
+      "name": "aws-sdk-go",
+      "version": "v1.113.4",
+      "scenarios": [
+        {
+          "id": "backup-restore",
+          "status": "unsupported",
+          "detail": "aws-sdk-go-v2 is an SDK, not a backup tool; it has no repository format to restore",
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "bucket-lifecycle",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "copy-object",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "delete-batch",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "large-multipart-upload",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "list-pagination",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "presigned-get",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "presigned-put",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "range-download",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "small-object-roundtrip",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "streaming-chunked-upload",
+          "status": "unsupported",
+          "detail": "aws-sdk-go-v2 signs whole payloads over plaintext and has no signed aws-chunked mode",
+          "verdict": null,
+          "issue": null,
+          "evidence": {
+            "wire": {
+              "requests": 0,
+              "payload_modes": [],
+              "max_signed_chunks": 0,
+              "trailer_signatures": 0,
+              "content_encodings": [],
+              "declared_trailers": []
+            }
+          }
+        },
+        {
+          "id": "sync-directory",
+          "status": "unsupported",
+          "detail": "aws-sdk-go-v2 offers no directory mirroring primitive",
+          "verdict": null,
+          "issue": null,
+          "evidence": {}
+        },
+        {
+          "id": "trailer-chunked-upload",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
+          "evidence": {
+            "wire": {
+              "requests": 3,
+              "payload_modes": [
+                "STREAMING-UNSIGNED-PAYLOAD-TRAILER",
+                "sha256-hex"
+              ],
+              "max_signed_chunks": 0,
+              "trailer_signatures": 0,
               "content_encodings": [
                 "aws-chunked"
               ],
@@ -527,10 +677,10 @@
         },
         {
           "id": "large-multipart-upload",
-          "status": "fail",
-          "detail": "InvalidRequest: a composite-checksum upload requires a checksum on every part",
-          "verdict": "KNOWN",
-          "issue": "rustfs/gateway#929",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
           "evidence": {}
         },
         {
@@ -977,7 +1127,7 @@
           "verdict": null,
           "issue": null,
           "evidence": {
-            "etag": "\"eb1edc54c29d89efe06c4e627a876d32-3\""
+            "etag": "\"3011b1ea3c079ddda8e1fa0b22787a88-3\""
           }
         },
         {
@@ -1029,7 +1179,7 @@
           "verdict": null,
           "issue": null,
           "evidence": {
-            "etag": "\"5e0c9b4099176490d949cf429ffff88b\""
+            "etag": "\"4ef822c84acbcf99188af4756e0f82ba\""
           }
         },
         {
@@ -1605,7 +1755,7 @@
                 "UNSIGNED-PAYLOAD",
                 "sha256-hex"
               ],
-              "max_signed_chunks": 168,
+              "max_signed_chunks": 254,
               "trailer_signatures": 0,
               "content_encodings": [],
               "declared_trailers": []
@@ -1669,10 +1819,10 @@
         },
         {
           "id": "copy-object",
-          "status": "fail",
-          "detail": "s3cmd cp failed: ERROR: Copy failed for: 's3://cm-s3cmd-copy-object/source.bin' (400 (InvalidRequest): this operation requires an integrity check on the request body: send Content-MD5 or an x-amz-checksum-* header)",
-          "verdict": "KNOWN",
-          "issue": "rustfs/gateway#912",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
           "evidence": {}
         },
         {
@@ -1701,10 +1851,10 @@
         },
         {
           "id": "presigned-get",
-          "status": "fail",
-          "detail": "a presigned GET was answered 403",
-          "verdict": "KNOWN",
-          "issue": "rustfs/gateway#913",
+          "status": "pass",
+          "detail": null,
+          "verdict": null,
+          "issue": null,
           "evidence": {}
         },
         {
@@ -1785,10 +1935,10 @@
     }
   ],
   "summary": {
-    "pass": 106,
-    "fail": 4,
-    "unsupported": 58,
-    "known": 4,
+    "pass": 121,
+    "fail": 0,
+    "unsupported": 61,
+    "known": 0,
     "regression": 0,
     "fixed": 0,
     "stale": 0

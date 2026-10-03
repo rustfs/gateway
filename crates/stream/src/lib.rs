@@ -52,6 +52,8 @@
 #![doc = include_str!("../README.md")]
 #![deny(missing_docs)]
 #![forbid(unsafe_code)]
+// No stdout, no stderr, no `dbg!` outside tests: a diagnostic is a `tracing` event (docs/observability.md).
+#![cfg_attr(not(test), deny(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro))]
 
 mod adapt;
 mod body;

@@ -76,6 +76,8 @@
 #![doc = include_str!("../README.md")]
 #![deny(missing_docs)]
 #![forbid(unsafe_code)]
+// No stdout, no stderr, no `dbg!` outside tests: a diagnostic is a `tracing` event (docs/observability.md).
+#![cfg_attr(not(test), deny(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro))]
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
 
 mod adapt;
@@ -91,6 +93,7 @@ pub use crate::commit_task::DetachedWork;
 mod config;
 #[cfg(feature = "server")]
 mod conn;
+mod cors_legacy;
 mod dialect_posture;
 mod dispatch;
 mod ext;
@@ -99,6 +102,7 @@ mod gate;
 mod integrity;
 mod invariants;
 mod legacy_addressing;
+mod logging;
 mod monomorphic;
 mod naming_posture;
 mod operation_mode;
@@ -121,6 +125,7 @@ mod service;
 mod stamp;
 mod trace;
 mod transport;
+mod unread_body;
 mod wire;
 mod wire_read;
 
@@ -150,6 +155,7 @@ pub use crate::config::{
 pub use crate::conn::{
     MeasuredSelfHeldHttp1Driver, ResponseFallbackReason, ResponseTransportMetrics, SelfHeldHttp1Driver, SelfHeldRequestBody,
 };
+pub use crate::cors_legacy::{DEFAULT_RUSTFS_CONSOLE_PREFIX, LegacyRustfsCors};
 pub use crate::ext::{
     Addressing, AuthSchemeRef, Authentication, AuthenticationOutcome, Authenticator, Authorizer, AuthzAuditEvent, AuthzAuditSink,
     AuthzRequest, AuthzStage, BaseDomain, BodyQuota, BodyQuotaExceeded, BucketOwnerError, BucketOwnerSource, CORS_PREFLIGHT,
@@ -173,9 +179,11 @@ pub use crate::render::{S3Error, connection_intent_of, declaration, document, do
 pub use crate::request_config::HandlerDeadlineReport;
 pub use crate::service::{S3Service, SecurityPosture};
 pub use crate::trace::{
-    FixedTrace, HOST_ID_HEADER, HostId, MintedTraces, REQUEST_ID_HEADER, RequestId, RequestTrace, TraceSource,
+    FixedTrace, HOST_ID_HEADER, HostId, HostRequestId, InvalidRequestId, MintedTraces, REQUEST_ID_HEADER, RequestId,
+    RequestTrace, TraceSource, X_REQUEST_ID_HEADER,
 };
 pub use crate::transport::Transport;
+pub use crate::unread_body::UnreadBodyDrain;
 pub use crate::wire::{OrderedHeaders, WireResponse, collect};
 pub use rustfs_gateway_http::MAX_LINGER_DRAIN_BYTES;
 pub use rustfs_gateway_macros::handlers;

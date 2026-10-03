@@ -26,7 +26,7 @@ use crate::request::RawRequest;
 use crate::s3s::dto as legacy;
 use crate::samples::{CHECKSUMS, UPLOAD_ID};
 
-use super::{AnswerRow, VERSION_ID, XML, XML_ETAG, answer, differs, named};
+use super::{AnswerRow, VERSION_ID, XML, answer, named, same};
 
 /// `target` with its member named after `algorithm` (`checksum_<algorithm>`) set to `value`.
 macro_rules! with_checksum {
@@ -125,41 +125,6 @@ fn part_copy() -> RawRequest {
     RawRequest::new(Method::PUT, &format!("/bucket/k?partNumber=1&uploadId={UPLOAD_ID}")).header("x-amz-copy-source", "src/k")
 }
 
-/// [`XML_ETAG`], the listing's child order (`kd-encode-0029`) and a CRC32 part's (`kd-encode-0032`).
-const LISTED: &[&str] = &[
-    "kd-encode-0001",
-    "kd-encode-0002",
-    "kd-encode-0003",
-    "kd-encode-0004",
-    "kd-encode-0005",
-    "kd-encode-0006",
-    "kd-encode-0029",
-    "kd-encode-0032",
-];
-
-/// [`LISTED`] without the CRC32 part's order.
-const LISTED_ELSEWHERE: &[&str] = &[
-    "kd-encode-0001",
-    "kd-encode-0002",
-    "kd-encode-0003",
-    "kd-encode-0004",
-    "kd-encode-0005",
-    "kd-encode-0006",
-    "kd-encode-0029",
-];
-
-/// [`XML_ETAG`] and a version listing's child orders (`kd-encode-0018`, `kd-encode-0021`).
-const VERSIONS: &[&str] = &[
-    "kd-encode-0001",
-    "kd-encode-0002",
-    "kd-encode-0003",
-    "kd-encode-0004",
-    "kd-encode-0005",
-    "kd-encode-0006",
-    "kd-encode-0018",
-    "kd-encode-0021",
-];
-
 fn per_algorithm() -> Vec<AnswerRow> {
     let mut rows = Vec::new();
     for (algorithm, value) in CHECKSUMS {
@@ -167,26 +132,19 @@ fn per_algorithm() -> Vec<AnswerRow> {
             format!("get-object-attributes-checksum-{algorithm}"),
             RawRequest::get("/bucket/k?attributes").header("x-amz-object-attributes", "ETag,Checksum,ObjectParts,ObjectSize"),
             move || attributes(algorithm, value),
-            differs(XML, &["sa-0009"], &[]),
+            same(XML),
         ));
-        // The register pins a part's child order with a CRC32 member (`kd-encode-0032`); a part
-        // with another algorithm's member is the same reorder, named by its path here.
-        let listed = if algorithm == "crc32" {
-            differs(LISTED, &[], &[])
-        } else {
-            differs(LISTED_ELSEWHERE, &[], &["ListPartsResult/Part"])
-        };
         rows.push(answer(
             format!("list-parts-checksum-{algorithm}"),
             RawRequest::get(&format!("/bucket/k?uploadId={UPLOAD_ID}")),
             move || listed_parts(algorithm, value),
-            listed,
+            same(XML),
         ));
         rows.push(answer(
             format!("upload-part-copy-checksum-{algorithm}"),
             part_copy(),
             move || copied_part(algorithm, value),
-            differs(XML_ETAG, &["sa-0008"], &["CopyPartResult"]),
+            same(XML),
         ));
     }
     rows
@@ -207,7 +165,7 @@ fn others() -> Vec<AnswerRow> {
                 sse_customer_key_md5: Some("hRasmdxgYDKV3nvbahU1MA==".to_owned()),
                 ..Default::default()
             },
-            differs(XML_ETAG, &["sa-0008"], &[]),
+            same(XML),
         ),
         answer(
             "list-object-versions-restore-expiry",
@@ -235,7 +193,7 @@ fn others() -> Vec<AnswerRow> {
                 }]),
                 ..Default::default()
             },
-            differs(VERSIONS, &[], &[]),
+            same(XML),
         ),
     ]
 }

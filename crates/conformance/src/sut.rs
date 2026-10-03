@@ -115,13 +115,18 @@ pub enum SutError {
     },
     /// The target exists but could not be reached or driven.
     Environment(String),
+    /// The case needs something of the wire this target's transport cannot do — a socket, TLS,
+    /// HTTP/2 frames, connection control, concurrent dispatch — which a socket transport can.
+    /// Kept apart from [`SutError::Environment`] because the reference evaluation re-judges exactly
+    /// these on a socket, and nothing else (rustfs/gateway#985).
+    TransportLimit(String),
 }
 
 impl core::fmt::Display for SutError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             SutError::NotWired { reason, .. } => f.write_str(reason),
-            SutError::Environment(reason) => f.write_str(reason),
+            SutError::Environment(reason) | SutError::TransportLimit(reason) => f.write_str(reason),
         }
     }
 }
@@ -160,7 +165,7 @@ pub trait Sut {
     ///
     /// Returns [`SutError`] when independent concurrent dispatch is unavailable.
     fn exchange_concurrent(&mut self, _plans: &[ExchangePlan<'_>]) -> Result<Vec<Observation>, SutError> {
-        Err(SutError::Environment(
+        Err(SutError::TransportLimit(
             "this target cannot dispatch a concurrent exchange batch".to_owned(),
         ))
     }

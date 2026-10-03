@@ -63,6 +63,7 @@ use crate::ext::{
     Governor, GovernorRates, HostResolver, LayeredGovernor, NoAuthzAudit, NoBucketOwner, NoCors, NoObserver, NoPolicy, Observer,
     OpLayer, OpLayerSlot, PathStyleOnly, PolicySource, PolicyTimeout, StageFilter,
 };
+use crate::logging::{self, dangerous_assembly};
 use crate::posture::{SecurityPosture, log_dialect_posture, log_naming_posture, log_startup_posture};
 use crate::routing::{RoutingSnapshot, RuntimeAssembly};
 
@@ -74,12 +75,14 @@ pub(crate) mod buffered_lengths;
 mod client_quirks;
 mod cors;
 pub(crate) mod credential_sentences;
+mod identifiers;
 mod legacy_heads;
 mod legacy_sentences;
 mod names;
 mod not_modified_headers;
 mod operation_selection;
 mod secret_scope;
+pub(crate) mod sigv4_header_guard;
 pub(crate) mod view_policy;
 pub use self::assembly_update::AssemblyUpdate;
 pub use self::client_quirks::{
@@ -150,6 +153,7 @@ pub struct ServiceBuilder {
     cors_source: Arc<dyn CorsSource>,
     cors_cache: CorsCacheConfig,
     cors_policy: CorsPolicy,
+    legacy_cors: Option<crate::LegacyRustfsCors>,
     sse: SseConfig,
     temporary_redirect_targets: Vec<RedirectTarget>,
 }
@@ -213,6 +217,7 @@ impl ServiceBuilder {
             cors_source: Arc::new(NoCors),
             cors_cache: CorsCacheConfig::default(),
             cors_policy: CorsPolicy::default(),
+            legacy_cors: None,
             sse: SseConfig::strict(),
             temporary_redirect_targets: Vec::new(),
         }
@@ -563,13 +568,16 @@ impl ServiceBuilder {
         };
 
         if self.clock_posture == ClockPosture::CustomAcknowledged {
-            eprintln!("WARN: a custom wall clock is installed; signature expiry and clock skew follow it, not the system clock");
+            dangerous_assembly(
+                "custom_wall_clock",
+                "a custom wall clock is installed; signature expiry and clock skew follow it, not the system clock",
+            );
         }
 
         let routing = assemble_routing(self.router, self.pending, self.op_layers)?;
 
         if self.dangerous_allow_all_authorizer {
-            eprintln!("WARN: dangerous allow-all authorizer disables authorization for every request");
+            logging::allow_all_authorizer_assembled();
         }
 
         #[cfg(feature = "dangerous-replace-signature-verifier")]
@@ -577,8 +585,9 @@ impl ServiceBuilder {
         #[cfg(not(feature = "dangerous-replace-signature-verifier"))]
         let dangerously_replaced_signature_verifier = false;
         if dangerously_replaced_signature_verifier {
-            eprintln!(
-                "WARN: the built-in AWS signature verifier is dangerously replaced; the H1..H7 security floor remains enforced"
+            dangerous_assembly(
+                "replaced_aws_signature_verifier",
+                "the built-in AWS signature verifier is dangerously replaced; the H1..H7 security floor remains enforced",
             );
         }
 
@@ -639,6 +648,7 @@ impl ServiceBuilder {
             traces: self.traces,
             cors: Arc::new(CachedCorsSource::new(self.cors_source, self.cors_cache)),
             cors_policy: self.cors_policy,
+            legacy_cors: self.legacy_cors,
             sse: self.sse,
             response_body_corrections: std::sync::atomic::AtomicU64::new(0),
             temporary_redirect_targets: Arc::from(self.temporary_redirect_targets),

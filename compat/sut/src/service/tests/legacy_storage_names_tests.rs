@@ -353,8 +353,9 @@ async fn the_names_rustfs_s_storage_keeps_are_stored() {
 }
 
 /// A browser `POST` of one file to `bucket` under `key`, its policy signed now for the main
-/// identity.
-fn posted(bucket: &str, key: &str) -> http::Request<Bytes> {
+/// identity. The key is written into the policy as a JSON string, so a control character in it
+/// stays a valid document (`legacy_key_rule_tests` sends them).
+pub(super) fn posted(bucket: &str, key: &str) -> http::Request<Bytes> {
     const BOUNDARY: &str = "----RustFSStorageNames";
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -369,8 +370,9 @@ fn posted(bucket: &str, key: &str) -> http::Request<Bytes> {
         .expect("a representable expiration");
     let day = &stamp[..8];
     let credential = format!("{MAIN_KEY}/{day}/us-east-1/s3/aws4_request");
+    let json_key = json_escaped(key);
     let document = format!(
-        "{{\"expiration\":\"{expires}\",\"conditions\":[{{\"bucket\":\"{bucket}\"}},[\"eq\",\"$key\",\"{key}\"],\
+        "{{\"expiration\":\"{expires}\",\"conditions\":[{{\"bucket\":\"{bucket}\"}},[\"eq\",\"$key\",\"{json_key}\"],\
          {{\"x-amz-algorithm\":\"AWS4-HMAC-SHA256\"}},{{\"x-amz-credential\":\"{credential}\"}},{{\"x-amz-date\":\"{stamp}\"}}]}}"
     );
     let policy = base64(document.as_bytes());
@@ -407,6 +409,20 @@ fn posted(bucket: &str, key: &str) -> http::Request<Bytes> {
         .header(http::header::CONTENT_LENGTH, body.len())
         .body(Bytes::from(body))
         .expect("a valid form request")
+}
+
+/// `text` as the body of a JSON string: quotes, backslashes and control characters escaped.
+fn json_escaped(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for character in text.chars() {
+        match character {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            control if u32::from(control) < 0x20 => out.push_str(&format!("\\u{:04x}", u32::from(control))),
+            other => out.push(other),
+        }
+    }
+    out
 }
 
 fn hmac_sha256(key: &[u8], data: &[u8]) -> Vec<u8> {

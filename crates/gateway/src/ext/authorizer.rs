@@ -404,7 +404,10 @@ impl AllowAllAuthorizer {
     /// Constructs the dangerous authorizer after an explicit acknowledgement.
     #[must_use]
     pub fn new(acknowledgement: DangerAck) -> Self {
-        eprintln!("WARN: constructing an allow-all authorizer disables authorization for every request");
+        crate::logging::dangerous_assembly(
+            "allow_all_authorizer_constructed",
+            "constructing an allow-all authorizer disables authorization for every request",
+        );
         Self(acknowledgement)
     }
 }

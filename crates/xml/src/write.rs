@@ -38,7 +38,10 @@
 //! `<Prefix>a&quot;b&apos;c&lt;d&gt;e&amp;f</Prefix>`, and a listing of the same bucket carries
 //! `<ETag>&quot;…&quot;</ETag>` and `<Delimiter>&quot;</Delimiter>`. One escaping for every text
 //! node is also what a client can rely on: every XML parser reads both spellings as the same
-//! character, so matching S3's bytes costs no client anything.
+//! character, so matching S3's bytes costs no client anything. The one exception is the legacy
+//! RustFS layout ([`XmlWriter::legacy_layout`]): legacy RustFS writes an entity tag's quotes as
+//! they are, so [`XmlWriter::entity_tag_element`] does too there, and every other text node keeps
+//! both quotes escaped, as legacy RustFS escapes them.
 
 use core::fmt::Write as _;
 
@@ -46,6 +49,10 @@ use crate::chars::{UNREPRESENTABLE, is_xml_char};
 
 /// The XML declaration S3 puts at the head of every response body.
 pub const DECLARATION: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n";
+
+/// [`DECLARATION`] without its line end: the declaration legacy RustFS writes, the root element
+/// straight after it ([`XmlWriter::legacy_layout`]).
+pub const COMPACT_DECLARATION: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>";
 
 /// The S3 namespace written on a response root.
 pub const S3_XMLNS: &str = "http://s3.amazonaws.com/doc/2006-03-01/";
@@ -58,6 +65,21 @@ pub const S3_XMLNS: &str = "http://s3.amazonaws.com/doc/2006-03-01/";
 pub struct XmlWriter {
     out: String,
     open: Vec<String>,
+    /// Whether this document is written in legacy RustFS's layout ([`XmlWriter::legacy_layout`]).
+    legacy: bool,
+    /// The open elements whose children are written in a declared order, innermost last.
+    orders: Vec<ChildOrder>,
+}
+
+/// One open element whose children are rearranged into a declared order when it closes.
+#[derive(Debug)]
+struct ChildOrder {
+    /// How many elements were open, this one included, when the order was declared.
+    depth: usize,
+    /// The child element names, in the order they are written.
+    names: &'static [&'static str],
+    /// Where each child written so far starts, and its rank in `names`.
+    children: Vec<(usize, usize)>,
 }
 
 impl XmlWriter {
@@ -66,7 +88,123 @@ impl XmlWriter {
     pub fn document() -> Self {
         Self {
             out: String::from(DECLARATION),
-            open: Vec::new(),
+            ..Self::default()
+        }
+    }
+
+    /// Writes this document in the layout legacy RustFS writes its answers in, or not: the XML
+    /// declaration with no line end after it, and each element's children in the order
+    /// [`Self::order_children`] declares for it. Off by default, where the declaration ends with a
+    /// line end, as AWS writes it, and children keep the order they are written in.
+    ///
+    /// Decided before the root is opened; once anything follows the declaration the layout is
+    /// fixed, and a later call changes nothing.
+    pub fn legacy_layout(&mut self, on: bool) {
+        if !self.open.is_empty() || self.out.len() > DECLARATION.len() {
+            return;
+        }
+        self.legacy = on;
+        if self.out == DECLARATION || self.out == COMPACT_DECLARATION {
+            self.out.clear();
+            self.out.push_str(if on { COMPACT_DECLARATION } else { DECLARATION });
+        }
+    }
+
+    /// Declares the order the children of the element open now are written in, by name: when it
+    /// closes they are rearranged so that every child named earlier in `names` comes before every
+    /// child named later, keeping the order they were written in among children of one name, and
+    /// every child `names` does not list after all of them. Honoured only under
+    /// [`Self::legacy_layout`]; otherwise, and with no element open, it changes nothing.
+    pub fn order_children(&mut self, names: &'static [&'static str]) {
+        if !self.legacy || self.open.is_empty() {
+            return;
+        }
+        let depth = self.open.len();
+        if self.orders.last().is_some_and(|order| order.depth == depth) {
+            self.orders.pop();
+        }
+        self.orders.push(ChildOrder {
+            depth,
+            names,
+            children: Vec::new(),
+        });
+    }
+
+    /// Records that a child named `name` starts here, when the element open now orders its children.
+    fn child_starts(&mut self, name: &str) {
+        let depth = self.open.len();
+        let start = self.out.len();
+        if let Some(order) = self.orders.last_mut()
+            && order.depth == depth
+        {
+            let rank = order
+                .names
+                .iter()
+                .position(|listed| *listed == name)
+                .unwrap_or(order.names.len());
+            order.children.push((start, rank));
+        }
+    }
+
+    /// Rearranges the children of the element about to close, when it orders them.
+    fn arrange_children(&mut self) {
+        let depth = self.open.len();
+        if !self.orders.last().is_some_and(|order| order.depth == depth) {
+            return;
+        }
+        let Some(order) = self.orders.pop() else {
+            return;
+        };
+        let Some(&(first, _)) = order.children.first() else {
+            return;
+        };
+        let end = self.out.len();
+        let mut segments: Vec<(usize, usize, usize)> = order
+            .children
+            .iter()
+            .enumerate()
+            .map(|(index, &(start, rank))| {
+                let stop = order.children.get(index + 1).map_or(end, |&(next, _)| next);
+                (rank, start, stop)
+            })
+            .collect();
+        segments.sort_by_key(|&(rank, _, _)| rank);
+        let mut arranged = String::with_capacity(end - first);
+        for (_, start, stop) in segments {
+            arranged.push_str(self.out.get(start..stop).unwrap_or_default());
+        }
+        self.out.truncate(first);
+        self.out.push_str(&arranged);
+    }
+
+    /// Writes an entity-tag element. Under [`Self::legacy_layout`] the tag's double quotes are
+    /// written as they are, as legacy RustFS writes an entity tag, and everything else is escaped
+    /// as element text; otherwise it is [`Self::element`], quotes escaped as in every other text
+    /// node.
+    pub fn entity_tag_element(&mut self, name: &str, text: &str) {
+        if !self.legacy {
+            self.element(name, text);
+            return;
+        }
+        self.child_starts(name);
+        self.out.push('<');
+        self.out.push_str(name);
+        self.out.push('>');
+        for (index, part) in text.split('"').enumerate() {
+            if index > 0 {
+                self.out.push('"');
+            }
+            escape_text(part, &mut self.out);
+        }
+        self.out.push_str("</");
+        self.out.push_str(name);
+        self.out.push('>');
+    }
+
+    /// [`Self::entity_tag_element`], only when the text is non-empty.
+    pub fn entity_tag_element_if_present(&mut self, name: &str, text: &str) {
+        if !text.is_empty() {
+            self.entity_tag_element(name, text);
         }
     }
 
@@ -78,6 +216,7 @@ impl XmlWriter {
 
     /// Opens an element, optionally carrying the S3 namespace.
     pub fn open(&mut self, name: &str, xmlns: Option<&str>) {
+        self.child_starts(name);
         self.out.push('<');
         self.out.push_str(name);
         if let Some(namespace) = xmlns {
@@ -91,6 +230,7 @@ impl XmlWriter {
 
     /// Opens an element with attributes.
     pub fn open_with(&mut self, name: &str, attributes: &[(&str, &str)]) {
+        self.child_starts(name);
         self.out.push('<');
         self.out.push_str(name);
         for (attribute, value) in attributes {
@@ -106,6 +246,7 @@ impl XmlWriter {
 
     /// Closes the most recently opened element. A close with nothing open writes nothing.
     pub fn close(&mut self) {
+        self.arrange_children();
         let Some(name) = self.open.pop() else {
             return;
         };
@@ -116,6 +257,7 @@ impl XmlWriter {
 
     /// Writes a complete element with text content, escaped.
     pub fn element(&mut self, name: &str, text: &str) {
+        self.child_starts(name);
         self.out.push('<');
         self.out.push_str(name);
         self.out.push('>');
@@ -177,6 +319,9 @@ impl XmlWriter {
     /// [`crate::XmlError`] when `fragment` is not one bounded, well-formed XML element.
     pub fn append_fragment(&mut self, fragment: &str) -> Result<(), crate::XmlError> {
         crate::parse(fragment.as_bytes())?;
+        // A fragment's element is a child like any other; its name is not read back, so it ranks
+        // after every child an order names.
+        self.child_starts("");
         self.out.push_str(fragment);
         Ok(())
     }
@@ -210,6 +355,21 @@ pub fn strip_declaration(document: &[u8]) -> &[u8] {
     match document.strip_prefix(DECLARATION.as_bytes()) {
         Some(rest) => rest,
         None => document,
+    }
+}
+
+/// Removes the leading [`COMPACT_DECLARATION`] a [`XmlWriter::legacy_layout`] document opens with,
+/// if the bytes open with exactly it; [`strip_declaration`] for the other layout.
+///
+/// A separate function rather than a second form [`strip_declaration`] accepts: a caller names the
+/// layout it wrote, and the default layout's trimming stays exactly the one form it always was. The
+/// default declaration opens with the same bytes and then a line end; it is not this form, and is
+/// left alone.
+#[must_use]
+pub fn strip_compact_declaration(document: &[u8]) -> &[u8] {
+    match document.strip_prefix(COMPACT_DECLARATION.as_bytes()) {
+        Some(rest) if !rest.starts_with(b"\n") => rest,
+        _ => document,
     }
 }
 

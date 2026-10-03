@@ -23,6 +23,8 @@
 
 use rustfs_gateway_types::NamePolicy;
 
+use crate::logging;
+
 /// The naming half of the start-up report: the slash rule (persistence-affecting when it rewrites
 /// keys) and the key floor (security-relevant when it lowers the default).
 ///
@@ -42,7 +44,14 @@ pub(crate) fn render_naming_posture(names: &NamePolicy) -> String {
 
 /// Writes [`render_naming_posture`] to the start-up log.
 pub(crate) fn log_naming_posture(names: &NamePolicy) {
-    eprintln!("{}", render_naming_posture(names));
+    tracing::info!(
+        target: logging::TARGET,
+        event = logging::EVENT_NAMING_POSTURE,
+        component = logging::COMPONENT,
+        subsystem = logging::SUBSYSTEM_POSTURE,
+        "{}",
+        render_naming_posture(names)
+    );
 }
 
 #[cfg(test)]

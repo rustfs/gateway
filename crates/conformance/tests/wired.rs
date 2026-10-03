@@ -106,6 +106,7 @@ fn a_skipped_outcome_names_its_reason_in_the_assertion_message() {
         verdict: Verdict::Skipped,
         phase: rustfs_gateway_conformance::report::Phase::Execute,
         skip_reason: Some("the socket driver is not available on this host".to_owned()),
+        transport_limited: false,
         diagnostics: Vec::new(),
         quirks: Vec::new(),
         evidence: Vec::new(),

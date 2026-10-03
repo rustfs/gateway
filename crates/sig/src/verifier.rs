@@ -95,6 +95,11 @@ pub struct AwsCredentialMarker {
 }
 
 impl AwsCredentialMarker {
+    /// A marker for `family` found at `location`, for the floor's RustFS-profile predicate.
+    pub(crate) const fn new(family: SigFamily, location: SigLocation) -> Self {
+        Self { family, location }
+    }
+
     /// Which algorithm family the marker claims.
     #[must_use]
     pub const fn family(&self) -> SigFamily {

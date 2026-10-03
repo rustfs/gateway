@@ -43,6 +43,8 @@ rcgen = { workspace = true }
 rustls = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal", "sync", "time"] }
 tower = { workspace = true, features = ["util"] }
+# The launcher's own log (`src/logging.rs`): the gateway reports through `tracing`.
+tracing = { workspace = true }
 
 [dev-dependencies]
 # The launcher's own tests drive signed requests through the very service `main` serves, so they

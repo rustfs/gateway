@@ -37,7 +37,7 @@ use rustfs_gateway_core::route::{HostClass, Predicate, RouteRequestParts, Shadow
 use rustfs_gateway_core::{Everyone, SubjectRule, WhenAbsent};
 use rustfs_gateway_dialect_rustfs_admin::admin::{self, AdminResponse};
 use rustfs_gateway_dialect_rustfs_admin::{
-    AdminOperation, CLAIMS, OVERLAY, OperationFold, ROUTES, RouteRecord, fold_every_operation, rustfs_admin_dialect,
+    AdminOperation, BodyKind, CLAIMS, OVERLAY, OperationFold, ROUTES, RouteRecord, fold_every_operation, rustfs_admin_dialect,
 };
 use rustfs_gateway_http::{Limits, WireRequest};
 
@@ -708,4 +708,61 @@ fn n_an_answer_cannot_set_framing_headers() {
     let empty = admin::encode(AdminResponse::empty(), 200).expect("an empty answer encodes");
     assert!(empty.headers.is_empty());
     assert!(matches!(empty.body, ResponseBody::Empty));
+}
+
+/// Positive — the admin routes legacy RustFS reads as bodyless however the client frames them are
+/// declared to read no body, so the gateway requires no length of them and leaves a chunked
+/// transfer unread, as legacy RustFS does. Its `EmptyBodyContentLengthCompatLayer`
+/// (`rustfs/src/server/layer.rs:688-808`, rustfs/rustfs `e870a6d25b`) forces `Content-Length: 0`
+/// and drops `Transfer-Encoding` on these eight routes, their MinIO aliases, and every admin `GET`;
+/// of the `GET`s only `kms/backup` is declared to read a body, which a chunked `GET` hands it
+/// where legacy RustFS would hand it none (rustfs/gateway#1120).
+#[test]
+fn the_routes_legacy_rustfs_reads_as_bodyless_read_no_body() {
+    const BODYLESS: [(&str, &str); 8] = [
+        ("PUT", "/rustfs/admin/v3/set-user-status"),
+        ("PUT", "/rustfs/admin/v3/set-group-status"),
+        ("PUT", "/rustfs/admin/v3/restore-config-history-kv"),
+        ("POST", "/rustfs/admin/v3/rebalance/start"),
+        ("POST", "/rustfs/admin/v3/rebalance/stop"),
+        ("POST", "/rustfs/admin/v3/background-heal/status"),
+        ("POST", "/rustfs/admin/v3/pools/decommission"),
+        ("POST", "/rustfs/admin/v3/pools/cancel"),
+    ];
+    /// Each operation's name and the body mode its codec gives the pipeline.
+    struct BodyModes;
+    impl OperationFold for BodyModes {
+        type Carry = Vec<(&'static str, rustfs_gateway_core::codec::RequestBodyMode)>;
+        fn step<O: AdminOperation>(&mut self, mut carry: Self::Carry) -> Self::Carry {
+            carry.push((O::NAME, O::REQUEST_BODY));
+            carry
+        }
+    }
+    let modes = fold_every_operation(&mut BodyModes, Vec::new());
+    for (method, path) in BODYLESS {
+        let record = ROUTES
+            .iter()
+            .find(|record| record.method == method && record.path == path)
+            .unwrap_or_else(|| panic!("{method} {path} is not declared"));
+        assert_eq!(record.request_body, BodyKind::NotRead, "{method} {path}");
+        let mode = modes
+            .iter()
+            .find(|(name, _)| *name == record.operation)
+            .map(|(_, mode)| *mode);
+        assert_eq!(
+            mode,
+            Some(rustfs_gateway_core::codec::RequestBodyMode::None),
+            "{method} {path}: the codec reads no body"
+        );
+        assert!(
+            record.alias.is_some_and(|alias| alias.starts_with("/minio/admin/")),
+            "{method} {path}: legacy RustFS serves and normalizes the MinIO alias too"
+        );
+    }
+    let reading: Vec<&str> = ROUTES
+        .iter()
+        .filter(|record| record.method == "GET" && record.request_body != BodyKind::NotRead)
+        .map(|record| record.path)
+        .collect();
+    assert_eq!(reading, ["/rustfs/admin/v3/kms/backup"]);
 }

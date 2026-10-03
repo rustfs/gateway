@@ -22,12 +22,8 @@
 //! entry, so a divergence cannot be pinned without a ruling or ruled without a pin.
 //! NOT responsible for: observing the divergences (the named tests in `operation_diff` drive both
 //! stacks), persisted-byte refusals (the parent module), or implementing a follow-up.
-//! Upstream: the named tests in `operation_diff/put_object/divergences.rs`,
-//! `operation_diff/context/put_object.rs`, `operation_diff/context/get_bucket_location.rs`,
-//! `operation_diff/put_bucket_versioning.rs`, `operation_diff/context/error_parity/divergences.rs`
-//! and `operation_diff/context/body_parity/divergences.rs`.
-//! Downstream: `corpus-report`, and the RustFS adapter work
-//! of rustfs/backlog#1752.
+//! Upstream: the named tests in the files `PINNED_TEST_FILES` lists.
+//! Downstream: `corpus-report`, and the RustFS adapter work of rustfs/backlog#1752.
 //!
 //! # The default the rulings follow
 //!
@@ -82,9 +78,9 @@ pub enum DivergenceFollowUp {
 /// One pinned divergence and its ruling.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct RequestDivergence {
-    /// Stable id, `rd-<put|ctx|loc|cfg|copy|err|body>-NNNN` — the PutObject decode, a request context, the
-    /// GetBucketLocation context, a bucket configuration write, a copy result, or an error document; the pinned
-    /// test's doc carries it as `Ruling: `id``.
+    /// Stable id, `rd-<put|ctx|loc|cfg|copy|err|body|adm|doc>-NNNN` — the PutObject decode, a request context, the
+    /// GetBucketLocation context, a bucket configuration write, a copy result, an error document, a signed body, an
+    /// admin route, or a request document's reading; the pinned test's doc carries it as `Ruling: `id``.
     pub id: &'static str,
     /// Operation the request addresses.
     pub operation: &'static str,
@@ -118,9 +114,11 @@ const ERROR_PARITY: &str = "operation_diff/context/error_parity/divergences.rs";
 const BODY_PARITY: &str = "operation_diff/context/body_parity/divergences.rs";
 const COPY_RESULT: &str = "operation_diff/copy_result.rs";
 const MINIO_CONFIG: &str = "operation_diff/minio_config.rs";
+const ADMIN_DIALECT: &str = "rustfs_admin_dialect/tests.rs";
+const DOCUMENT_DECODE: &str = "operation_diff/request_documents/divergences.rs";
 
 /// The files whose named-divergence sections the register is checked against.
-const PINNED_TEST_FILES: [&str; 8] = [
+const PINNED_TEST_FILES: [&str; 10] = [
     PUT_DECODE,
     PUT_CONTEXT,
     LOCATION_CONTEXT,
@@ -129,6 +127,8 @@ const PINNED_TEST_FILES: [&str; 8] = [
     MINIO_CONFIG,
     ERROR_PARITY,
     BODY_PARITY,
+    ADMIN_DIALECT,
+    DOCUMENT_DECODE,
 ];
 
 const API_PUT_OBJECT: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObject.html";
@@ -587,17 +587,17 @@ const OPERATION_DIVERGENCES: [RequestDivergence; 26] = [
 ];
 
 /// Every pinned divergence, in id order as written: the operation, context and configuration
-/// slices above, then the error-response slice (`errors`), the signed-body slice (`body`), the
-/// signing-region slice (`scope`) and the signature-coverage slice (`coverage`).
-pub const REQUEST_DIVERGENCES: [RequestDivergence; 56] = concat(
-    concat::<50, 4, 54>(
+/// slices above, then the error-response (`errors`), signed-body (`body`), signing-region
+/// (`scope`), signature-coverage (`coverage`) and request-document (`documents`) slices.
+pub const REQUEST_DIVERGENCES: [RequestDivergence; 66] = concat(
+    concat::<50, 5, 55>(
         concat::<39, 11, 50>(
             concat::<26, 13, 39>(OPERATION_DIVERGENCES, errors::ERROR_DIVERGENCES),
             body::BODY_DIVERGENCES,
         ),
         scope::SCOPE_DIVERGENCES,
     ),
-    coverage::COVERAGE_DIVERGENCES,
+    concat::<3, 8, 11>(coverage::COVERAGE_DIVERGENCES, documents::DOCUMENT_DIVERGENCES),
 );
 
 /// `first` then `second`, at compile time; the declared length must be their sum.
@@ -618,7 +618,7 @@ const fn concat<const A: usize, const B: usize, const C: usize>(
 /// A register entry that does not hold as written.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RequestDivergenceError {
-    /// The id is not `rd-<put|ctx|loc|cfg|copy|err|body>-NNNN`.
+    /// The id is not `rd-<put|ctx|loc|cfg|copy|err|body|adm|doc>-NNNN`.
     MalformedId(&'static str),
     /// Two entries share an id.
     DuplicateId(&'static str),
@@ -642,7 +642,7 @@ pub enum RequestDivergenceError {
 impl fmt::Display for RequestDivergenceError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::MalformedId(id) => write!(formatter, "{id} is not an rd-<put|ctx|loc|cfg|copy|err|body>-NNNN id"),
+            Self::MalformedId(id) => write!(formatter, "{id} is not an rd-<put|ctx|loc|cfg|copy|err|body|adm|doc>-NNNN id"),
             Self::DuplicateId(id) => write!(formatter, "{id} appears twice"),
             Self::MissingText { id, field } => write!(formatter, "{id} leaves {field} empty"),
             Self::EvidenceNotUrl(id) => write!(formatter, "{id} cites AWS evidence that is not a URL"),
@@ -761,13 +761,12 @@ fn check_register(entries: &[RequestDivergence]) -> Result<(), RequestDivergence
 }
 
 fn well_formed_id(id: &str) -> bool {
-    let Some(number) = ["rd-put-", "rd-ctx-", "rd-loc-", "rd-cfg-", "rd-copy-", "rd-err-", "rd-body-"]
-        .iter()
-        .find_map(|prefix| id.strip_prefix(prefix))
-    else {
+    let Some((kind, number)) = id.strip_prefix("rd-").and_then(|rest| rest.split_once('-')) else {
         return false;
     };
-    number.len() == 4 && number.bytes().all(|byte| byte.is_ascii_digit())
+    matches!(kind, "put" | "ctx" | "loc" | "cfg" | "copy" | "err" | "body" | "adm" | "doc")
+        && number.len() == 4
+        && number.bytes().all(|byte| byte.is_ascii_digit())
 }
 
 fn is_issue_url(url: &str) -> bool {
@@ -792,6 +791,7 @@ fn is_case_id(case: &str) -> bool {
 
 mod body;
 mod coverage;
+mod documents;
 mod errors;
 mod scope;
 

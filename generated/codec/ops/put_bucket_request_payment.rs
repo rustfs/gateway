@@ -53,8 +53,7 @@ impl OperationCodec for dto::PutBucketRequestPayment {
         // RequestPaymentConfiguration — the XML request body, rooted at `RequestPaymentConfiguration`.
         let raw_body = body.into_buffered()?;
         value::verify_body_digest(request, raw_body.as_ref())?;
-        let root = rustfs_gateway_xml::parse(raw_body.as_ref())
-            .map_err(|_| CodecError::malformed_xml("the request body is not the XML this operation accepts"))?;
+        let root = crate::codec::request_document(request, raw_body.as_ref(), &document::DOCUMENT)?;
         if !["RequestPaymentConfiguration"].contains(&root.name.as_str()) {
             return Err(
                 CodecError::malformed_xml("the request body has the wrong root element").about("RequestPaymentConfiguration")
@@ -95,4 +94,18 @@ fn read_request_payment_configuration(
     }
     value::exit(shape.check_required())?;
     Ok(shape)
+}
+
+/// The request document's shape, as the RustFS profile reads it (`rustfs_gateway_xml::bound`,
+/// rustfs/gateway#1078): its roots, every structure it reaches, and each member legacy
+/// RustFS reads. Generated from the IR and the legacy facts in `emit::codec::document`.
+#[rustfmt::skip]
+mod document {
+    use rustfs_gateway_xml::bound::{Arity, Content, Document, EmptyBody, Member, Scalar, Shape, Unknown, Value};
+
+    pub(super) static DOCUMENT: Document = Document { roots: &["RequestPaymentConfiguration"], empty: EmptyBody::Missing, shapes: &[
+        Shape { name: "RequestPaymentConfiguration", attribute: None, content: Content::Members { unknown: Unknown::Skip, members: &[
+            Member { element: "Payer", arity: Arity::One, value: Value::Text(Scalar::Text), required: true, kept: true },
+        ] } },
+    ] };
 }

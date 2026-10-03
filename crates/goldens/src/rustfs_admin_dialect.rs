@@ -34,8 +34,8 @@ use bytes::Bytes;
 use http::{HeaderValue, Method, Request};
 use rustfs_gateway::{
     Authorizer, AuthzRequest, BoxFuture, Credentials, Decision, Governor, GovernorRates, GovernorRequest, Handler,
-    HandlerContext, HandlerResult, InputAuthzRequest, InputDecisions, Lease, Rate, Req, RequestContext, RequestContextView, Resp,
-    S3Service, ServiceBuilder, SigV4Authenticator, StaticCredentials,
+    HandlerContext, HandlerResult, InputAuthzRequest, InputDecisions, Lease, PresignedExpiryRule, Rate, Req, RequestContext,
+    RequestContextView, Resp, S3Service, SecurityFloor, ServiceBuilder, SigV4Authenticator, StaticCredentials,
 };
 use rustfs_gateway_core::dialect::BucketParam;
 use rustfs_gateway_core::{Subject, SubjectRule, Subjects};
@@ -246,6 +246,22 @@ impl Assembled {
 /// under the assembly's default opted-in scope (ADR-0024), an authorizer answering with
 /// `policy(operation, action)`, the `rustfs` dialect, and the generic handler for every operation.
 pub(crate) fn assemble(policy: impl Fn(&str, &str) -> bool + Send + Sync + 'static) -> Assembled {
+    assemble_on(SecurityFloor::new(), policy)
+}
+
+/// The security floor the RustFS profile assembles (`compat/sut`): anonymous requests delegated to
+/// the authorizer, SigV2 presigned URLs, RustFS's presigned lifetime rule, and a presigned URL on
+/// every standard operation (rustfs/gateway#1052), which leaves every privileged one refusing it.
+pub(crate) fn rustfs_profile_floor() -> SecurityFloor {
+    SecurityFloor::new()
+        .delegate_anonymous_to_authorizer_after_listing_in_the_posture_report()
+        .enable_sigv2_presigned_compatibility()
+        .with_presigned_expiry_rule(PresignedExpiryRule::LegacyRustfs)
+        .admit_presigned_on_every_standard_operation_after_listing_in_the_posture_report()
+}
+
+/// [`assemble`] behind `floor`.
+pub(crate) fn assemble_on(floor: SecurityFloor, policy: impl Fn(&str, &str) -> bool + Send + Sync + 'static) -> Assembled {
     let credentials = Credentials::new(ACCESS_KEY, SECRET_KEY.as_bytes()).expect("a fixture credential");
     let regions = RegionSet::new(REGIONS).expect("fixture regions");
     let authenticator =
@@ -263,6 +279,7 @@ pub(crate) fn assemble(policy: impl Fn(&str, &str) -> bool + Send + Sync + 'stat
         ..GovernorRates::default()
     };
     let builder = ServiceBuilder::new()
+        .security_floor(floor)
         .framework_governor_rates(rates)
         .authenticator(authenticator)
         .governor(AdmitAll)
@@ -292,14 +309,23 @@ pub(crate) fn in_lanes<P, T: Sync>(policy: P, items: &[T], check: impl Fn(&Assem
 where
     P: Fn(&str, &str) -> bool + Copy + Send + Sync + 'static,
 {
+    in_lanes_on(&SecurityFloor::new(), policy, items, check);
+}
+
+/// [`in_lanes`] with every lane's service behind `floor`.
+pub(crate) fn in_lanes_on<P, T: Sync>(floor: &SecurityFloor, policy: P, items: &[T], check: impl Fn(&Assembled, &T) + Sync)
+where
+    P: Fn(&str, &str) -> bool + Copy + Send + Sync + 'static,
+{
     let per_lane = items.len().div_ceil(LANES).max(1);
     let checked: usize = std::thread::scope(|scope| {
         let lanes: Vec<_> = items
             .chunks(per_lane)
             .map(|lane| {
                 let check = &check;
+                let floor = floor.clone();
                 scope.spawn(move || {
-                    let assembled = assemble(policy);
+                    let assembled = assemble_on(floor, policy);
                     let mut done = 0;
                     for item in lane {
                         check(&assembled, item);

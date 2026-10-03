@@ -1749,10 +1749,12 @@ dependencies = [
  "http-body-util",
  "httparse",
  "hyper",
+ "hyper-util",
  "md-5",
  "pin-project-lite",
  "rustfs-gateway-core",
  "rustfs-gateway-dialect-minio",
+ "rustfs-gateway-dialect-rustfs-admin",
  "rustfs-gateway-http",
  "rustfs-gateway-macros",
  "rustfs-gateway-server",
@@ -1795,6 +1797,7 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "tower",
+ "tracing",
 ]
 
 [[package]]
@@ -1817,7 +1820,7 @@ dependencies = [
 
 [[package]]
 name = "rustfs-gateway-core"
-version = "0.48.0"
+version = "0.49.0"
 dependencies = [
  "bytes",
  "dhat",
@@ -1948,6 +1951,7 @@ dependencies = [
  "rustfs-gateway-sig",
  "rustfs-gateway-stream",
  "rustfs-gateway-types",
+ "rustfs-gateway-xml",
  "serde",
  "serde_json",
  "sha2",

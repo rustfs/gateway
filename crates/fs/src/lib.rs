@@ -21,6 +21,8 @@
 
 #![doc = include_str!("../README.md")]
 #![deny(missing_docs)]
+// No stdout, no stderr, no `dbg!` outside tests: a diagnostic is a `tracing` event (docs/observability.md).
+#![cfg_attr(not(test), deny(clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro))]
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -30,9 +32,8 @@ use std::time::{Duration, UNIX_EPOCH};
 
 use md5::{Digest as _, Md5};
 use rustfs_gateway::dto::{
-    AbortMultipartUpload, AbortMultipartUploadOutput, CompleteMultipartUpload, CompleteMultipartUploadOutput,
-    CreateMultipartUpload, CreateMultipartUploadOutput, ListParts, ListPartsOutput, Owner, Part, ServerSideEncryption,
-    UploadPart, UploadPartOutput,
+    AbortMultipartUpload, AbortMultipartUploadOutput, CreateMultipartUpload, CreateMultipartUploadOutput, ListParts,
+    ListPartsOutput, Owner, Part, ServerSideEncryption, UploadPart, UploadPartOutput,
 };
 use rustfs_gateway::{
     BucketName, ByteStream, Clock, ETag, ErrorCode, Handler, HandlerError, HandlerErrorContext, HandlerResult, MissingObject,
@@ -122,6 +123,7 @@ mod acl;
 mod bucket_cors;
 mod bucket_tagging;
 mod buckets;
+mod completion;
 mod completion_replay;
 mod conditions;
 pub(crate) mod copy;
@@ -135,6 +137,7 @@ mod post_object;
 mod reads;
 mod records;
 mod registry;
+mod rustfs_parity;
 mod tagging;
 mod transitions;
 mod upload_part_copy;
@@ -166,8 +169,8 @@ pub struct FsBackend {
     lifecycle_day_seconds: i64,
     lifecycle_scheduler_running: AtomicBool,
     lifecycle_sweep_interval: Duration,
-    /// The keys a batch delete answers on its own ([`FsBackend::refusing_batch_deletes_of`]).
-    batch_delete_refusal: Option<fn(&str) -> bool>,
+    /// The legacy-RustFS answers a deployment asked for, each off by default ([`rustfs_parity`]).
+    rustfs_parity: rustfs_parity::RustfsParity,
 }
 
 impl FsBackend {
@@ -213,7 +216,7 @@ impl FsBackend {
             lifecycle_day_seconds: 24 * 60 * 60,
             lifecycle_scheduler_running: AtomicBool::new(false),
             lifecycle_sweep_interval: Duration::from_secs(24 * 60 * 60),
-            batch_delete_refusal: None,
+            rustfs_parity: rustfs_parity::RustfsParity::default(),
         })
     }
 
@@ -637,146 +640,6 @@ impl Handler<ListParts> for FsBackend {
             parts,
             ..ListPartsOutput::default()
         }))
-    }
-}
-
-impl Handler<CompleteMultipartUpload> for FsBackend {
-    async fn call(&self, request: Req<CompleteMultipartUpload>) -> HandlerResult<CompleteMultipartUpload> {
-        let input = request.into_input();
-        self.require_bucket(input.bucket.as_str()).await?;
-        let (upload_id, record) = match self.resolve_upload(&input.upload_id, &input.bucket, &input.key) {
-            Ok(found) => found,
-            Err(missing) => return self.replay_completion(&input, missing).await,
-        };
-        let completion_claim = input.checksum_spec;
-        if let Some(checksum) = record.checksum {
-            checksum.validate_completion_type(input.checksum_type.as_ref())?;
-        } else if input.checksum_type.is_some() || completion_claim.is_some() {
-            return Err(HandlerError::new(
-                ErrorCode::INVALID_REQUEST,
-                "the completion names a checksum type for an upload without checksum negotiation",
-            ));
-        }
-        let completed = input.multipart_upload.parts;
-        if completed.is_empty() {
-            return Err(HandlerError::new(ErrorCode::INVALID_PART, "the completion names no uploaded part"));
-        }
-        let mut requested = Vec::with_capacity(completed.len());
-        let mut previous = 0;
-        for part in completed {
-            let number = part.part_number;
-            uploads::validate_completion_part_number(record.checksum, previous, number)?;
-            previous = number;
-            let checksum = record
-                .checksum
-                .map(|selection| selection.completed_part(&part))
-                .transpose()?
-                .flatten();
-            let entity_tag = part
-                .e_tag
-                .ok_or_else(|| HandlerError::new(ErrorCode::INVALID_PART, "a completed part has no entity tag"))?;
-            requested.push((number, entity_tag, checksum));
-        }
-
-        let upload = self.upload_path(input.bucket.as_str(), &upload_id);
-        let mut completed_bytes = Vec::new();
-        let mut part_digests = Vec::with_capacity(requested.len());
-        let mut part_checksums = Vec::with_capacity(requested.len());
-        let final_part = requested.len().saturating_sub(1);
-        for (index, (number, expected, expected_checksum)) in requested.iter().enumerate() {
-            let path = Self::part_path(&upload, *number);
-            let metadata = tokio::fs::symlink_metadata(&path).await.map_err(|error| match error.kind() {
-                io::ErrorKind::NotFound => HandlerError::new(ErrorCode::INVALID_PART, "a completed part was not uploaded"),
-                _ => storage_error(),
-            })?;
-            if !metadata.is_file() || metadata.file_type().is_symlink() {
-                return Err(HandlerError::new(
-                    ErrorCode::INVALID_REQUEST,
-                    "the multipart part path is not a safe regular file",
-                ));
-            }
-            let bytes = tokio::fs::read(path).await.map_err(|_| storage_error())?;
-            if index != final_part && bytes.len() < MIN_MULTIPART_PART_BYTES {
-                return Err(HandlerError::new(
-                    ErrorCode::ENTITY_TOO_SMALL,
-                    "the proposed multipart upload contains an undersized non-final part",
-                ));
-            }
-            let actual = etag(&bytes)?;
-            if actual != *expected {
-                return Err(HandlerError::new(
-                    ErrorCode::INVALID_PART,
-                    "a completed part entity tag does not match the uploaded part",
-                ));
-            }
-            if let Some(selection) = record.checksum {
-                let actual_checksum = selection.validate_part(*expected_checksum, &bytes)?;
-                part_checksums.push(actual_checksum);
-            }
-            part_digests.push(Md5::digest(&bytes).into());
-            completed_bytes.extend_from_slice(&bytes);
-        }
-        let composite = ETag::from_part_digests(&part_digests).map_err(|_| storage_error())?;
-        let completed_checksum = record
-            .checksum
-            .map(|selection| selection.complete(&part_checksums, &completed_bytes))
-            .transpose()?;
-        if let (Some(selection), Some(actual)) = (record.checksum, completed_checksum.as_ref()) {
-            selection.validate_completed_object(completion_claim, actual)?;
-        }
-
-        let mut attributes = (*record.attributes).clone();
-        attributes.tags = tagging::read_persisted_tags(&upload).await?;
-        let tombstone = self.uploads_path(input.bucket.as_str()).join(format!(
-            ".complete-{}-{}",
-            std::process::id(),
-            self.temporary_id.fetch_add(1, Ordering::Relaxed)
-        ));
-        tokio::fs::rename(&upload, &tombstone).await.map_err(|_| no_such_upload())?;
-        // The completion's write conditions are the same verdict `PutObject` gives, evaluated
-        // inside the publication's version lock (rustfs/gateway#1002, #808).
-        let write_conditions = conditions::conditions(
-            input.if_match.as_deref(),
-            None,
-            input.if_none_match.as_deref(),
-            None,
-            Timestamp::from_secs(self.clock.now().unix_seconds()),
-        )?;
-        let published = match self
-            .publish_object_if(
-                input.bucket.as_str(),
-                input.key.as_str(),
-                &completed_bytes,
-                &composite,
-                &attributes,
-                conditions::any(&write_conditions).then_some(&write_conditions),
-            )
-            .await
-        {
-            Ok(published) => published,
-            Err(error) => {
-                let _ = tokio::fs::rename(&tombstone, &upload).await;
-                return Err(error);
-            }
-        };
-        let _ = tokio::fs::remove_dir_all(tombstone).await;
-        let parts = requested.iter().map(|(number, e_tag, _)| (*number, e_tag));
-        completion_replay::record_completion(&published.directory, &upload_id, published.version_id.as_deref(), parts).await;
-        let mut output = CompleteMultipartUploadOutput {
-            location: Some(format!("/{}/{}", input.bucket.as_str(), input.key.as_str())),
-            bucket: Some(input.bucket),
-            key: Some(input.key),
-            e_tag: Some(composite),
-            version_id: published.version_id,
-            checksum_type: record.checksum.map(uploads::UploadChecksum::dto_type),
-            server_side_encryption: record.attributes.headers.encryption().reported_algorithm(),
-            ssekms_key_id: record.attributes.headers.encryption().kms_key_id,
-            ..CompleteMultipartUploadOutput::default()
-        };
-        if let Some(checksum) = completed_checksum {
-            uploads::render_completed_checksum(&mut output, checksum)?;
-        }
-        Ok(Resp::new(output))
     }
 }
 

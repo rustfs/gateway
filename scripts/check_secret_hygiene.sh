@@ -20,7 +20,9 @@ set -euo pipefail
 #      `Display` exists to render a value for a human, and there is no
 #      redacting form of that worth having.
 #   4. No formatting or logging macro under `crates/gateway/src/` names key
-#      material (GHSA-r54g / GHSA-8cm2 / GHSA-333v — the secret in the log), and
+#      material (GHSA-r54g / GHSA-8cm2 / GHSA-333v — the secret in the log),
+#      read as the whole invocation from the macro to its closing parenthesis
+#      (an event puts each field on a line of its own), and
 #      no file under it names `CredentialRefusal` except the module that defines
 #      it and the two export blocks. Which rule refused a credential — expired,
 #      disabled, or bound to a token the request did not present — is exactly
@@ -114,6 +116,37 @@ strip_comments() {
     awk '{ s = $0; sub(/^[ \t]+/, "", s); if (s ~ /^\/\//) { print "" } else { print $0 } }' "$1"
 }
 
+# Each formatting or logging macro invocation as one line, `<first line>:<joined text>`, from the
+# macro to the parenthesis that closes it. String literals are left out of the count, not of the
+# text: a secret interpolated into a format string (`{secret}`) is exactly what rule 4 looks for.
+# An invocation that does not close within 60 lines is cut there, so a miscount cannot swallow
+# the rest of a file.
+macro_invocations() {
+    awk -v opener='(format!|write!|writeln!|print!|println!|eprintln!|panic!|unreachable!|todo!|tracing::[a-z_]+!|(debug|info|warn|error|trace)!)[ \t]*[(]' '
+        function depth_of(text,    t, opens, closes) {
+            t = text
+            gsub(/"([^"\\]|\\.)*"/, "", t)
+            opens = gsub(/[(]/, "", t)
+            closes = gsub(/[)]/, "", t)
+            return opens - closes
+        }
+        {
+            if (open) {
+                joined = joined " " $0
+                depth += depth_of($0)
+                if (depth <= 0 || NR - start >= 60) { print start ":" joined; open = 0 }
+                next
+            }
+            if (match($0, opener)) {
+                depth = depth_of(substr($0, RSTART))
+                if (depth <= 0) { print NR ":" $0; next }
+                open = 1; start = NR; joined = $0
+            }
+        }
+        END { if (open) print start ":" joined }
+    '
+}
+
 # -----------------------------------------------------------------------------
 # Rule 2 — `Credentials` has a hand-written redacting Debug and no derived one.
 # -----------------------------------------------------------------------------
@@ -173,9 +206,7 @@ for file in "${sources[@]}"; do
     while IFS= read -r hit; do
         [[ -n "$hit" ]] || continue
         report "${file}:${hit%%:*}: a formatting or logging macro names key material; GHSA-r54g / GHSA-8cm2 / GHSA-333v were all a secret in a log line"
-    done < <(printf '%s\n' "$code" |
-        grep -nE '(format!|write!|writeln!|print!|println!|eprintln!|panic!|unreachable!|todo!|tracing::[a-z_]+!|(debug|info|warn|error|trace)!)[ \t]*\(' |
-        grep -iE "$SECRET_IDENT_RE" || true)
+    done < <(printf '%s\n' "$code" | macro_invocations | grep -iE "$SECRET_IDENT_RE" || true)
 
     # Rule 4b — the refusal reason does not travel. Named rather than inferred is the whole
     # signal: `admit(..).err()` yields the reason without ever spelling the type, so a file that

@@ -102,10 +102,14 @@ mod governor_streaming;
 mod handler_panic;
 #[path = "host_deadlines.rs"]
 mod host_deadlines;
+#[path = "host_request_id.rs"]
+mod host_request_id;
 #[path = "host_resolve_replay.rs"]
 mod host_resolve_replay;
 #[path = "ingest_assembly.rs"]
 mod ingest_assembly;
+#[path = "legacy_cors.rs"]
+mod legacy_cors;
 #[path = "lifecycle_reachability.rs"]
 mod lifecycle_reachability;
 #[path = "lock_encryption_reachability.rs"]
@@ -178,6 +182,8 @@ mod rustfs_key_floor;
 mod rustfs_selection;
 #[path = "rustfs_vhost.rs"]
 mod rustfs_vhost;
+#[path = "scope_refusals.rs"]
+mod scope_refusals;
 #[path = "select_frame_records.rs"]
 mod select_frame_records;
 #[path = "select_restore_intent.rs"]
@@ -192,6 +198,10 @@ mod service_clone_allocations;
 mod service_concurrency;
 #[path = "service_config.rs"]
 mod service_config;
+#[path = "signed_header_reading.rs"]
+mod signed_header_reading;
+#[path = "signing_services.rs"]
+mod signing_services;
 #[path = "sigv2_runtime.rs"]
 mod sigv2_runtime;
 #[path = "sse_runtime.rs"]
@@ -206,8 +216,12 @@ mod streaming_without_length;
 mod tagging_reachability;
 #[path = "throughput_request.rs"]
 mod throughput_request;
+#[path = "tracing_events.rs"]
+mod tracing_events;
 #[path = "unknown_checksum_algorithms.rs"]
 mod unknown_checksum_algorithms;
+#[path = "unread_body_drain.rs"]
+mod unread_body_drain;
 #[path = "unread_body_refusal.rs"]
 mod unread_body_refusal;
 #[path = "upload_object_ceiling.rs"]

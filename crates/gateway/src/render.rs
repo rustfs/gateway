@@ -32,9 +32,7 @@ use rustfs_gateway_stream::Body;
 use rustfs_gateway_types::{ETag, ErrorCode, EtagRender};
 use rustfs_gateway_xml::{DECLARATION, XmlWriter};
 
-use crate::close::ConnectionIntent;
-use crate::ext::Denial;
-use crate::trace::RequestTrace;
+use crate::{close::ConnectionIntent, ext::Denial, trace::RequestTrace};
 
 /// Optional refusal headers, details, and redacted signature diagnostics behind one pointer.
 #[derive(Clone, Default)]
@@ -61,6 +59,7 @@ pub struct S3Error {
     etag: Option<ETag>,
     connection: ConnectionIntent,
     pub(crate) body_unfinished: Option<crate::wire_read::RequestBodyUnfinished>,
+    pub(crate) answered_by_handler: bool,
     extras: Option<Box<Extras>>,
 }
 
@@ -178,6 +177,7 @@ impl From<ErrorResolution> for S3Error {
             etag: resolution.etag().cloned(),
             connection: crate::close::after_refusal_code(resolution.code()),
             body_unfinished: None,
+            answered_by_handler: false,
             extras,
         }
     }
@@ -402,6 +402,7 @@ fn unreachable_internal_resolution() -> S3Error {
         etag: None,
         connection: ConnectionIntent::MayKeepAlive,
         body_unfinished: None,
+        answered_by_handler: false,
         extras: None,
     }
 }
@@ -439,8 +440,7 @@ pub fn document_body(error: &S3Error, trace: &RequestTrace) -> String {
         xml.element("CanonicalRequest", &signature.canonical_request);
         xml.element("StringToSign", &signature.string_to_sign);
     }
-    xml.element("RequestId", trace.request_id().as_str());
-    xml.element("HostId", trace.host_id().as_str());
+    trace.write_document_elements(&mut xml);
     xml.close();
     xml.finish()
 }

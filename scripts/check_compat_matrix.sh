@@ -11,7 +11,9 @@ set -euo pipefail
 #        already in the committed version. Adding one is how a regression gets silenced in the same
 #        change that introduced it, so adding one fails here. The ratchet starts per client row:
 #        an entry for a client that `compat/versions.toml` did not declare in the comparison commit
-#        is that client's first measured baseline, not a silenced regression, and is admitted.
+#        is that client's first measured baseline, not a silenced regression, and is admitted. The
+#        only list with no ratchet is one the comparison commit did not have at all: a list that
+#        exists but is empty, because every excused failure was fixed, admits nothing new either.
 #     2. Every known-failure entry names a client that exists in `compat/versions.toml` and a
 #        scenario that exists under `compat/scenarios/`. An entry naming neither excuses nothing and
 #        would sit there forever.
@@ -62,11 +64,13 @@ baseline_ref="HEAD^"
 if ! git -C "$ROOT_DIR" diff --quiet HEAD -- compat/known-fail.txt; then
     baseline_ref="HEAD"
 fi
+previous_state="present"
 if ! git -C "$ROOT_DIR" show "${baseline_ref}:compat/known-fail.txt" >"$previous" 2>/dev/null; then
     # The file did not exist in the comparison commit, which is true exactly once: the pull request
-    # that introduces it. An empty previous list means every entry is new, and the ratchet check
-    # below is skipped for that commit alone rather than being silently disabled afterwards.
+    # that introduces it. Every entry is new then, and the ratchet check below is skipped for that
+    # commit alone. An existing list that is empty is not that case: it keeps its ratchet.
     : >"$previous"
+    previous_state="missing"
     printf 'check_compat_matrix: compat/known-fail.txt is new in %s; the ratchet starts here\n' "$baseline_ref"
 fi
 
@@ -77,7 +81,7 @@ if ! git -C "$ROOT_DIR" show "${baseline_ref}:compat/versions.toml" >"$previous_
     cp "$ROOT_DIR/compat/versions.toml" "$previous_versions"
 fi
 
-"$PYTHON" - "$ROOT_DIR" "$previous" "$previous_versions" <<'PY'
+"$PYTHON" - "$ROOT_DIR" "$previous" "$previous_versions" "$previous_state" <<'PY'
 import json
 import re
 import sys
@@ -85,6 +89,9 @@ import tomllib
 from pathlib import Path
 
 root, previous, previous_versions = Path(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[3])
+# Whether the comparison commit had a known-failure list at all. Only its absence waives the
+# ratchet; an empty list is a list, and a fully fixed one must not reopen (rustfs/gateway#1073).
+previous_present = sys.argv[4] == "present"
 failures = []
 
 
@@ -118,7 +125,7 @@ before = parse(previous.read_text(encoding="utf-8"))
 
 added = sorted(set(current) - set(before))
 declared_before = set(tomllib.loads(previous_versions.read_text(encoding="utf-8")).get("clients", {}))
-if added and before:
+if added and previous_present:
     for cell in added:
         if cell.partition("/")[0] not in declared_before:
             print(f"check_compat_matrix: {cell} starts the baseline of a client this change adds")

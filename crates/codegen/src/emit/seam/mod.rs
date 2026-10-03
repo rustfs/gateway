@@ -51,6 +51,18 @@ use facts::S3sFacts;
 /// The s3s release RustFS links, as facts.
 const FACTS: &str = include_str!("s3s_0_17_0.facts");
 
+/// The legacy stack's DTO facts, parsed once: each structure's members in the order the legacy
+/// stack declares them, which is the order it writes them in — the codec's legacy response layout
+/// (rustfs/gateway#1078) reads it from here.
+///
+/// # Errors
+///
+/// The checked-in fact file does not parse.
+pub fn legacy_facts() -> Result<&'static S3sFacts, String> {
+    static PARSED: std::sync::OnceLock<Result<S3sFacts, String>> = std::sync::OnceLock::new();
+    PARSED.get_or_init(|| S3sFacts::parse(FACTS)).as_ref().map_err(Clone::clone)
+}
+
 /// Renders every seam artefact.
 ///
 /// # Errors

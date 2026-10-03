@@ -24,7 +24,7 @@ ADRs; this map only selects files.
 | `src/expect/h2_ping_tests.rs` | PING-acknowledgement and `client_reset` matching. | A PING expectation could match other octets or another ending. |
 | `src/expect/h2_goaway_tests.rs` | Ordered GOAWAY/reset and receive-side probe matching. | A shutdown announcement is confused with observed termination. |
 | `src/expect/events.rs` | Event-stream count and byte-exact payload matching. | An event payload expectation is ignored or misjudged. |
-| `src/inprocess.rs` | In-process facade transport. | Hyper-independent execution differs from the socket path. |
+| `src/inprocess.rs`, `src/inprocess/transport_limit_tests.rs` | In-process facade transport, and which of its refusals are typed transport limits. | Hyper-independent execution differs from the socket path, or a refusal is re-judged on a socket that should not be. |
 | `src/inprocess/computed_md5.rs`, `src/inprocess/computed_md5_tests.rs` | Derives Content-MD5 from resolved payloads and rejects conflicting wire instructions. | A computed digest is missing, stale, or overwrites an authored header. |
 | `src/inprocess/computed_md5_transport_tests.rs` | Captured-body digests, signing, and refusal controls over real sockets. | Computed MD5 or capture interpolation changes. |
 | `src/inprocess/payload.rs` | Deterministic payload generation and hexadecimal decoding. | Authored payload bytes or fill patterns differ from the case. |
