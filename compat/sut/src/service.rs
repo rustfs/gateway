@@ -388,6 +388,9 @@ pub(crate) fn build_service(
             // shape.
             .identify_requests_as_legacy_rustfs()
             .trace_source(MintedTraces::with_uuid_request_ids())
+            // RustFS asks a `HEAD`, tag or ACL request naming a version its unversioned action, and
+            // `GetObject` and `DeleteObject` the version action (GHSA-3ppv).
+            .authorize_versions_as_legacy_rustfs()
             // And the same registry decides whether a name is taken: another identity's
             // re-creation is `409 BucketAlreadyExists` before the backend is asked, and a
             // creation the backend admitted is what gets recorded.

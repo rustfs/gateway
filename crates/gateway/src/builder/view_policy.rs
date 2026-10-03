@@ -200,6 +200,8 @@ pub(crate) struct ViewPolicy {
     pub(crate) header_signatures: header_signatures::HeaderRefusals,
     /// Who answers a presigned URL's pre-lookup refusals (`presigned_urls`).
     pub(crate) presigned_urls: presigned_urls::PresignedRefusals,
+    /// Which action a request naming one object version is asked (`super::version_actions`).
+    pub(crate) version_actions: super::version_actions::VersionActions,
 }
 
 impl ViewPolicy {

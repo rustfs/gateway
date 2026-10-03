@@ -239,6 +239,7 @@ core_modules = (
     "tolerant_conditions",
     "update_object_encryption_roundtrip",
     "upload_capability",
+    "version_requirements",
     "website_roundtrip",
     "xml_character_range",
     "xml_parse_replay",
@@ -766,6 +767,7 @@ gateway_modules = (
     "unread_body_refusal",
     "upload_object_ceiling",
     "verified_scope_runtime",
+    "version_actions_runtime",
     "vhost_resolution",
 )
 gateway_tests = gateway_root / "tests"

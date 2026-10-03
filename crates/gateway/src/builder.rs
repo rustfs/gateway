@@ -85,6 +85,7 @@ mod not_modified_headers;
 mod operation_selection;
 mod secret_scope;
 pub(crate) mod sigv4_header_guard;
+pub(crate) mod version_actions;
 pub(crate) mod view_policy;
 pub use self::assembly_update::AssemblyUpdate;
 pub use self::client_quirks::{

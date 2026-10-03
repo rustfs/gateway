@@ -238,5 +238,7 @@ mod unread_body_refusal;
 mod upload_object_ceiling;
 #[path = "verified_scope_runtime.rs"]
 mod verified_scope_runtime;
+#[path = "version_actions_runtime.rs"]
+mod version_actions_runtime;
 #[path = "vhost_resolution.rs"]
 mod vhost_resolution;

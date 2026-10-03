@@ -914,3 +914,5 @@ mod content_encoding_tests;
 
 /// `x-amz-expiration` in real days, as the s3-tests suite runs the launcher (rustfs/gateway#999).
 mod expiration_header_tests;
+/// A request naming one object version, authorised as legacy RustFS authorises it (GHSA-3ppv).
+mod version_action_tests;

@@ -120,6 +120,10 @@ pub enum ResourceShape {
 /// use rustfs_gateway_core::{AuthRequirement, ResourceShape};
 /// let literal = AuthRequirement { action: "admin:A", resource: ResourceShape::Service };
 /// ```
+///
+/// A third private fact is the requirement a request naming one object version (`versionId`) is
+/// asked instead ([`AuthRequirement::with_version_requirement`]): S3 authorises a version read,
+/// delete, tag or ACL request against the operation's version action, never the unversioned one.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct AuthRequirement {
     /// The IAM action, in its wire spelling: `s3:GetObject`. For an any-of or all-of rule, the
@@ -129,6 +133,7 @@ pub struct AuthRequirement {
     pub resource: ResourceShape,
     rule: ActionRule,
     subject: Option<SubjectRule>,
+    version: Option<&'static AuthRequirement>,
 }
 
 impl AuthRequirement {
@@ -140,6 +145,7 @@ impl AuthRequirement {
             resource,
             rule: ActionRule::One,
             subject: None,
+            version: None,
         }
     }
 
@@ -152,6 +158,7 @@ impl AuthRequirement {
             resource,
             rule: ActionRule::AnyOf(actions),
             subject: None,
+            version: None,
         }
     }
 
@@ -164,6 +171,39 @@ impl AuthRequirement {
             resource,
             rule: ActionRule::AllOf(actions),
             subject: None,
+            version: None,
+        }
+    }
+
+    /// This requirement, with `versioned` asked instead for a request that names one object
+    /// version with the `versionId` query parameter.
+    ///
+    /// S3 authorises a read, delete, tag or ACL request that names a version against the
+    /// operation's version action alone (`s3:GetObjectVersion`, not `s3:GetObject`): a principal
+    /// allowed only the current object must not reach a noncurrent version, and one allowed only
+    /// versions must still reach the one it names. Registration refuses a version requirement
+    /// about another resource shape, one about an account, one with a version requirement of its
+    /// own, and one on a requirement about an account.
+    #[must_use]
+    pub const fn with_version_requirement(mut self, versioned: &'static AuthRequirement) -> Self {
+        self.version = Some(versioned);
+        self
+    }
+
+    /// The requirement a request naming one object version is asked instead, when the operation
+    /// declares one.
+    #[must_use]
+    pub const fn version_requirement(&self) -> Option<&'static AuthRequirement> {
+        self.version
+    }
+
+    /// The requirement a request is asked: the version requirement when the request names a
+    /// version and the operation declares one, and this requirement otherwise.
+    #[must_use]
+    pub const fn for_version(&self, names_a_version: bool) -> Self {
+        match (names_a_version, self.version) {
+            (true, Some(versioned)) => *versioned,
+            _ => *self,
         }
     }
 
@@ -210,6 +250,23 @@ impl AuthRequirement {
     /// [`Self::is_well_formed`]'s.
     #[must_use]
     pub fn fault(&self) -> Option<&'static str> {
+        if let Some(versioned) = self.version {
+            if versioned.version.is_some() {
+                return Some("a version requirement names no version requirement of its own");
+            }
+            if versioned.resource != self.resource {
+                return Some("a version requirement is about the resource shape of the requirement it replaces");
+            }
+            if self.subject.is_some() || versioned.subject.is_some() {
+                return Some("a requirement about an account names no version requirement");
+            }
+            if !versioned.is_well_formed() {
+                return Some("a version requirement's actions are spelled `service:Action`");
+            }
+            if let Some(why) = versioned.fault() {
+                return Some(why);
+            }
+        }
         if let ActionRule::AllOf(actions) | ActionRule::AnyOf(actions) = self.rule {
             if actions.len() < 2 {
                 return Some("an any-of or all-of rule names at least two actions; one action is `AuthRequirement::new`");
@@ -277,6 +334,9 @@ impl AuthRequirement {
                 None => rendered.push_str(&format!(" about each({param})")),
             },
             None => {}
+        }
+        if let Some(versioned) = self.version {
+            rendered.push_str(&format!("; versionId: {}", versioned.render()));
         }
         rendered
     }
