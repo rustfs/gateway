@@ -314,6 +314,10 @@ pub(crate) fn build_service(
             // access check; this launcher claims no admin route, so the switch is the profile's
             // record for the bridge (rustfs/gateway#1173).
             .bound_claimed_route_bodies_as_legacy_rustfs()
+            // RustFS buffers every body it decodes up to 20 MiB and its XML reader has no bound below
+            // that: a 10,000-part completion with checksums, a large tag set or a batch delete of long
+            // keys is read (rustfs/gateway#1173).
+            .bound_buffered_bodies_as_legacy_rustfs()
             // RustFS, built with MinIO support, reads a versioning or object-lock body that is the
             // bare word `Enabled` as the document it stands for (rustfs/backlog#1677, R6).
             .accept_minio_body_literals()

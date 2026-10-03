@@ -36,8 +36,8 @@
 //! code, and hands its handlers exactly the values legacy RustFS would.
 
 use rustfs_gateway_types::{ETag, ErrorCode, Timestamp, TimestampFormat};
+use rustfs_gateway_xml::XmlNode;
 use rustfs_gateway_xml::bound::{self, BoundRefusal, Document, Scalar, ScalarRefusal};
-use rustfs_gateway_xml::{XmlLimits, XmlNode};
 
 use crate::codec::error::CodecError;
 use crate::codec::strict_date::strict_http_date;
@@ -74,9 +74,12 @@ const NOT_THE_DOCUMENT: &str = "the request body is not the XML this operation a
 /// carry exactly — a date with a UTC offset, an entity tag no gateway tag can spell, the empty
 /// wrapper of an optional list — refused rather than written differently.
 pub fn request_document(request: &MetaView<'_>, body: &[u8], document: &'static Document) -> Result<XmlNode, CodecError> {
+    let limits = request.document_limits();
     match request.document_reading() {
-        DocumentReading::Tree => rustfs_gateway_xml::parse(body).map_err(|_| CodecError::malformed_xml(NOT_THE_DOCUMENT)),
-        DocumentReading::RustFs => bound::read(body, document, XmlLimits::S3, &rustfs_scalar).map_err(|refusal| match refusal {
+        DocumentReading::Tree => {
+            rustfs_gateway_xml::parse_with_limits(body, limits).map_err(|_| CodecError::malformed_xml(NOT_THE_DOCUMENT))
+        }
+        DocumentReading::RustFs => bound::read(body, document, limits, &rustfs_scalar).map_err(|refusal| match refusal {
             BoundRefusal::Uncarriable => {
                 CodecError::invalid_argument("the request body carries a value this gateway cannot carry exactly")
             }

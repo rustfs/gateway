@@ -1289,8 +1289,9 @@ impl S3Service {
                     (rustfs_gateway_core::RequestBody::None, None)
                 }
                 AcceptedBody::Ordinary(sealed) => {
-                    let ceilings =
+                    let model =
                         BodyCeilings::for_mode(request_body_mode, operation, state.config.config().max_buffered_body_bytes());
+                    let ceilings = view_policy.buffered_ceiling.ceilings(request_body_mode, claimed, model);
                     let body_quota = state.config.body_quota();
                     // The accepted head, not the pre-filter copy: it is the map the codec binds from.
                     let integrity = crate::integrity::resolve_in(body_meta, &body_wire.headers(), body_wire.method(), operation)?;
@@ -1310,7 +1311,8 @@ impl S3Service {
                             body_digest,
                             integrity,
                         )
-                        .await?;
+                        .await
+                        .map_err(|refusal| view_policy.buffered_ceiling.refusal(request_body_mode, claimed, refusal))?;
                     if let (rustfs_gateway_core::RequestBody::Buffered(bytes), _) = &handed
                         && let Some(refusal) = lengths.after_read(request_body_mode, framed, declared_length, bytes)
                     {

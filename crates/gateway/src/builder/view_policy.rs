@@ -80,6 +80,7 @@ use super::bodyless_bodies::BodylessBodies;
 use super::bodyless_digest::BodylessDigest;
 use super::buffered_lengths::BufferedLengths;
 use super::claimed_bodies::ClaimedBodies;
+use super::buffered_ceiling::BufferedCeiling;
 use super::client_quirks::ChecksumWaiver;
 use super::credential_sentences::CredentialSentences;
 use super::legacy_chunks::ChunkReading;
@@ -173,6 +174,8 @@ pub(crate) struct ViewPolicy {
     /// Whether a claimed route's declared body is bounded as legacy RustFS bounds it
     /// (`super::claimed_bodies`).
     pub(crate) claimed_bodies: ClaimedBodies,
+    /// Which ceiling a buffered body is read under (`super::buffered_ceiling`).
+    pub(crate) buffered_ceiling: BufferedCeiling,
     head_refusals_without_length: bool,
     /// Which object headers a `304` keeps (`super::not_modified_headers`).
     pub(crate) not_modified_headers: super::not_modified_headers::NotModifiedHeaders,
@@ -266,6 +269,7 @@ impl ViewPolicy {
             .checksum_waiver
             .apply(operation, meta)
             .with_document_reading(self.document_reading);
+        let meta = self.buffered_ceiling.apply(meta);
         // Legacy-compat (rustfs/backlog#2684): legacy RustFS stores an upload that carries no
         // `Content-Length` and whose transport ended it empty as a zero-length object, where AWS
         // answers `411 MissingContentLength`. Kept so the clients RustFS serves today keep

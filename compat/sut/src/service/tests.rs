@@ -792,6 +792,9 @@ mod buffered_length_tests;
 /// aws-chunked uploads cut the way legacy RustFS accepts them, stored as it stores them
 /// (rustfs/gateway#1173).
 mod legacy_chunk_tests;
+/// Buffered writes past the core's bounds, read under legacy RustFS's 20 MiB ceiling
+/// (rustfs/gateway#1173).
+mod buffered_ceiling_tests;
 
 /// The request settings RustFS embeds the gateway with (rustfs/gateway#1070).
 mod deadline_tests;

@@ -198,6 +198,7 @@ impl GatewaySeam {
             .refuse_unsized_buffered_bodies_as_legacy_rustfs()
             .read_aws_chunks_as_legacy_rustfs()
             .bound_claimed_route_bodies_as_legacy_rustfs()
+            .bound_buffered_bodies_as_legacy_rustfs()
             .answer_body_refusals_with_legacy_rustfs_sentences()
             .answer_credential_refusals_with_legacy_rustfs_sentences()
             .slash_policy(SlashPolicy::RustfsLegacy)

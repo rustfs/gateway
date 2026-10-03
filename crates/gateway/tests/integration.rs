@@ -52,6 +52,8 @@ mod bodyless_payload_digest;
 mod bucket_config_reachability;
 #[path = "buffered_lengths.rs"]
 mod buffered_lengths;
+#[path = "buffered_ceiling.rs"]
+mod buffered_ceiling;
 #[path = "checksum_omissions.rs"]
 mod checksum_omissions;
 #[path = "chunked_allocations.rs"]

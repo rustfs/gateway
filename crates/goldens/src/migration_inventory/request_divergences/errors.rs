@@ -35,7 +35,7 @@
 
 use super::{DivergenceFollowUp, DivergenceRuling, ERROR_PARITY, ERROR_RESPONSES, M1_ADAPTER, RequestDivergence};
 
-pub(super) const ERROR_DIVERGENCES: [RequestDivergence; 13] = [
+pub(super) const ERROR_DIVERGENCES: [RequestDivergence; 14] = [
     RequestDivergence {
         id: "rd-err-0001",
         operation: "every operation",
@@ -247,5 +247,23 @@ pub(super) const ERROR_DIVERGENCES: [RequestDivergence; 13] = [
         follow_up: DivergenceFollowUp::None,
         test_file: ERROR_PARITY,
         test: "a_buffered_body_that_does_not_hash_to_its_signed_digest_is_a_client_error_only_on_the_gateway",
+    },
+    RequestDivergence {
+        id: "rd-err-0014",
+        operation: "every buffered write: PutBucketVersioning, every other configuration write, DeleteObjects, \
+                    CompleteMultipartUpload, PutObjectTagging",
+        request: "a buffered body past legacy RustFS's 20 MiB ceiling",
+        aws: "a request body past the service's limit is refused with a client error; nothing is applied",
+        aws_evidence: ERROR_RESPONSES,
+        s3s: "reads 20 MiB, then answers 500 InternalError: the read's error is not the one its mapping names \
+              MaxMessageLengthExceeded; nothing is applied (observed on PutBucketTagging, 3268c42e00)",
+        gateway: "under the RustFS profile's 20 MiB ceiling, 400 MaxMessageLengthExceeded from the declared length before \
+                  the body is read, or at the frame that crosses it",
+        client_impact: "an oversized write is a client error the SDK does not retry, instead of a server error it retries \
+                        after uploading 20 MiB again; nothing is applied either way; a legacy bug, not a decision",
+        ruling: DivergenceRuling::KeepGateway,
+        follow_up: DivergenceFollowUp::None,
+        test_file: ERROR_PARITY,
+        test: "a_buffered_body_past_twenty_mebibytes_is_a_client_error_only_on_the_gateway",
     },
 ];

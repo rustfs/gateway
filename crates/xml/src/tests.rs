@@ -25,7 +25,7 @@
 
 use crate::error::XmlError;
 use crate::read::{
-    MAX_ATTRIBUTE_BYTES, MAX_ATTRIBUTES_PER_ELEMENT, MAX_DEPTH, MAX_ELEMENTS, XmlLimits, parse, parse_with_limits,
+    MAX_ATTRIBUTE_BYTES, MAX_ATTRIBUTES_PER_ELEMENT, MAX_BODY_BYTES, MAX_DEPTH, MAX_ELEMENTS, XmlLimits, parse, parse_with_limits,
 };
 use crate::write::{DECLARATION, S3_XMLNS, XmlWriter, strip_declaration};
 
@@ -770,4 +770,26 @@ fn a_representable_value_is_written_unchanged_by_the_character_guard() {
     writer.element("Value", "a&b<c>d\"e\tf\ng\u{7f}h\u{e9}");
     writer.close();
     assert_eq!(writer.finish(), "<Root><Value>a&amp;b&lt;c&gt;d&quot;e\tf\ng\u{7f}h\u{e9}</Value></Root>");
+}
+
+/// Positive — raising the body ceiling admits a larger document and keeps every other bound.
+#[test]
+fn a_raised_body_ceiling_admits_a_larger_document_and_keeps_the_other_bounds() {
+    let raised = XmlLimits::S3
+        .with_max_body_bytes(4 * MAX_BODY_BYTES)
+        .expect("a non-zero ceiling");
+    assert_eq!(raised.max_body_bytes(), 4 * MAX_BODY_BYTES);
+    assert_eq!(raised.max_depth(), MAX_DEPTH);
+    assert_eq!(raised.max_elements(), MAX_ELEMENTS);
+    assert_eq!(raised.max_attributes_per_element(), MAX_ATTRIBUTES_PER_ELEMENT);
+    assert_eq!(raised.max_attribute_bytes(), MAX_ATTRIBUTE_BYTES);
+    let body = format!("<Root>{}</Root>", " ".repeat(2 * MAX_BODY_BYTES));
+    assert!(parse_with_limits(body.as_bytes(), raised).is_ok());
+    assert_eq!(parse(body.as_bytes()), Err(XmlError::BodyTooLarge));
+}
+
+/// Negative — a zero ceiling is refused rather than read as unlimited.
+#[test]
+fn n_a_zero_body_ceiling_is_refused() {
+    assert!(XmlLimits::S3.with_max_body_bytes(0).is_none());
 }

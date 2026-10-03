@@ -364,3 +364,38 @@ fn a_buffered_body_that_does_not_hash_to_its_signed_digest_is_a_client_error_onl
     assert!(!pair.gateway.reached, "{pair:#?}");
     assert_eq!((pair.oracle.status, pair.oracle.code()), (500, Some("InternalError")), "{pair:#?}");
 }
+
+/// A buffered body one byte past legacy RustFS's 20 MiB ceiling. The RustFS profile refuses it
+/// `400 MaxMessageLengthExceeded` from its declared length, before reading it; the legacy stack
+/// reads 20 MiB and answers `500 InternalError`, the error of its read unrecognised by its own
+/// mapping (observed on a legacy RustFS build for a digest-signed and an `UNSIGNED-PAYLOAD`
+/// `PutBucketTagging`, rustfs/rustfs `3268c42e00`). Neither reaches its handler.
+///
+/// Ruling: `rd-err-0014`
+#[test]
+fn a_buffered_body_past_twenty_mebibytes_is_a_client_error_only_on_the_gateway() {
+    let (document, md5) = VERSIONING;
+    let padding = 20 * 1024 * 1024 + 1 - document.len();
+    let body = [b"<VersioningConfiguration>".as_slice(), &vec![b' '; padding], &document[25..]].concat();
+    assert_eq!(body.len(), 20 * 1024 * 1024 + 1);
+    let request = versioning_put(&body).header("content-md5", md5).signed("us-east-1");
+    let pair = answered(
+        &Scenario::new(request)
+            .signing_the_payload_of(&body)
+            .bounded_as_legacy_rustfs(),
+    );
+    assert_eq!(
+        (pair.gateway.status, pair.gateway.code()),
+        (400, Some("MaxMessageLengthExceeded")),
+        "{:?}",
+        pair.gateway.status
+    );
+    assert!(!pair.gateway.reached);
+    assert_eq!(
+        (pair.oracle.status, pair.oracle.code()),
+        (500, Some("InternalError")),
+        "{:?}",
+        pair.oracle.status
+    );
+    assert!(!pair.oracle.reached);
+}

@@ -115,6 +115,8 @@ pub(crate) struct Scenario {
     reading: Reading,
     /// Whether both stacks identify the request as RustFS does ([`Scenario::rustfs_identified`]).
     rustfs_identified: bool,
+    /// Whether the gateway reads a buffered body under legacy RustFS's 20 MiB ceiling.
+    legacy_buffered_ceiling: bool,
 }
 
 impl Scenario {
@@ -129,7 +131,15 @@ impl Scenario {
             signed_payload: None,
             reading: Reading::Typed,
             rustfs_identified: false,
+            legacy_buffered_ceiling: false,
         }
+    }
+
+    /// The gateway reads a buffered body under legacy RustFS's 20 MiB ceiling, as the RustFS
+    /// profile does (rustfs/gateway#1173).
+    pub(crate) fn bounded_as_legacy_rustfs(mut self) -> Self {
+        self.legacy_buffered_ceiling = true;
+        self
     }
 
     /// Signs the SHA-256 of `payload` in `x-amz-content-sha256`, whatever body is sent.
@@ -481,7 +491,12 @@ fn gateway_service(scenario: &Scenario, reached: &Arc<AtomicBool>, now: RequestN
         reading: scenario.reading,
         reached: Arc::clone(reached),
     });
-    let builder = super::verifying_at(ServiceBuilder::new(), now);
+    let builder = if scenario.legacy_buffered_ceiling {
+        ServiceBuilder::new().bound_buffered_bodies_as_legacy_rustfs()
+    } else {
+        ServiceBuilder::new()
+    };
+    let builder = super::verifying_at(builder, now);
     let builder = if scenario.rustfs_identified {
         builder.identify_requests_as_legacy_rustfs()
     } else {
