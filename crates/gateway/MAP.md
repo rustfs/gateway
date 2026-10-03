@@ -36,7 +36,7 @@ for request order and `docs/assembly-order.md` for extension call counts.
 | `src/request_deadline.rs` | Runtime-independent policy and failure-floor deadlines | Editing timeout mechanics used by the request pipeline |
 | `src/request_body.rs`, `src/post_object.rs`, `src/post_object/legacy.rs`, `src/builder/post_forms.rs` | Live verified body producer, terminal verdict, bounded POST Object adapter, what a RustFS-profile form stores (or refuses), and `legacy_rustfs_post_forms`, the switch that selects it (held in `ViewPolicy`, rustfs/backlog#1677 R8) | A streaming upload crosses the codec or handler boundary, or a RustFS-profile form stores differently from legacy RustFS |
 | `src/stamp.rs` | Framework-owned response headers | A response lacks IDs, `Server`, or `Date` |
-| `src/trace.rs` | Request IDs and trace sources | Joining an answer to an audit record |
+| `src/trace.rs`, `src/trace/host.rs`, `src/trace/answer.rs`, `src/builder/identifiers.rs` | Request IDs and trace sources; a host's own identifier (`HostRequestId`) and its closed alphabet; which identifiers an answer carries, AWS's or legacy RustFS's (`identify_requests_as_legacy_rustfs`, rustfs/backlog#1677 R10), settled once per request; whole-service cases in `tests/host_request_id.rs` | Joining an answer to an audit record, handing a host's identifier over, or changing which identifiers an answer carries |
 | `src/clock.rs` | Wall and monotonic clock sources | A request reads time twice |
 | `src/close.rs` | Connection intent table | A refusal changes reuse behavior |
 | `src/wire.rs` | Drained response preserving header order | Asserting exact response shape |

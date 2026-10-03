@@ -29,8 +29,8 @@ use std::sync::Arc;
 
 use rustfs_gateway::{
     CorsCacheConfig, Credentials, DEFAULT_MAX_BUFFERED_BODY_BYTES, HandlerDeadlineClass, HandlerDeadlineConfig,
-    LegacyRustfsVirtualHosts, PlaintextCustomerKeyAck, RegionMatchPolicy, RegionSet, RequestBodyDeadlineConfig, S3Service,
-    SecurityFloor, ServiceBuilder, ServiceConfig, SigV4Authenticator, SlashPolicy, SseConfig, StaticCredentials, dto,
+    LegacyRustfsVirtualHosts, MintedTraces, PlaintextCustomerKeyAck, RegionMatchPolicy, RegionSet, RequestBodyDeadlineConfig,
+    S3Service, SecurityFloor, ServiceBuilder, ServiceConfig, SigV4Authenticator, SlashPolicy, SseConfig, StaticCredentials, dto,
 };
 use rustfs_gateway_fs::FsBackend;
 
@@ -350,6 +350,14 @@ pub(crate) fn build_service(
             // RustFS reads an optional header whose one line is empty as absent: an empty expected
             // owner, digest, checksum or SSE header claims nothing (rustfs/gateway#1087).
             .read_empty_headers_as_absent()
+            // RustFS names an S3 answer's request with one server-owned UUID in `x-amz-request-id`
+            // and `x-request-id`, writes no `x-amz-id-2`, and names no request in an error document
+            // (rustfs/rustfs `e870a6d25b`, `rustfs/src/server/layer.rs:364-367`,
+            // `rustfs/src/storage/request_context.rs:121-123`; ruling R10). No host stands in front
+            // of this launcher to hand its identifier over, so the identifier is minted in RustFS's
+            // shape.
+            .identify_requests_as_legacy_rustfs()
+            .trace_source(MintedTraces::with_uuid_request_ids())
             // And the same registry decides whether a name is taken: another identity's
             // re-creation is `409 BucketAlreadyExists` before the backend is asked, and a
             // creation the backend admitted is what gets recorded.

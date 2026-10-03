@@ -352,7 +352,13 @@ impl S3Service {
         let request_cancellation = request.extensions().get::<tokio::sync::watch::Receiver<bool>>().cloned();
         let config = RequestConfig::enter(config).with_request_cancellation(request_cancellation);
         let handler_deadline_report = config.handler_deadline_report();
-        let trace = self.inner.traces.mint();
+        // The host's own identifier, when it handed one over, and the identifiers this assembly's answer
+        // carries on this request's path: settled once, with the minting (rustfs/backlog#1677, R10).
+        let trace = self
+            .inner
+            .view_policy
+            .identification()
+            .settle(self.inner.traces.mint(), &request, &runtime.routing.router);
         let now = self.inner.clock.now();
         // Read before the request is consumed, and the only thing kept out of it: the RFC 9110 body rules are
         // stated over the request method, and every stage below has either forgotten it or never had it.

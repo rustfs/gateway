@@ -33,12 +33,15 @@
 //! renders it. The s3s side writes no `Content-Length`: hyper frames a complete body from its exact
 //! length, and [`Reply::wire_length`] models exactly that. It writes no request id either: RustFS
 //! adds `x-amz-request-id` in a tower layer outside s3s (`rustfs/src/server/layer.rs`), which the
-//! divergence register records.
+//! divergence register records. A [`Scenario::rustfs_identified`] scenario passes the legacy answer
+//! through that layer's two header writes and runs the gateway under the RustFS profile's
+//! identifiers with RustFS's identifier handed over (`identifiers`).
 
 #[cfg(test)]
 mod clock;
 mod divergences;
 mod facts;
+mod identifiers;
 mod legacy_reading;
 mod mapping;
 mod matrix;
@@ -52,7 +55,7 @@ use http::{HeaderMap, HeaderValue, Method};
 use rustfs_gateway::dto;
 use rustfs_gateway::{
     Authorizer, AuthzRequest, BoxFuture, Credentials, Decision, Handler, HandlerError, HandlerErrorContext, HandlerResult,
-    InputAuthzRequest, InputDecisions, LegacyRustfsFacts, LegacyRustfsRefusal, MissingObject, Req, RequestContext,
+    HostRequestId, InputAuthzRequest, InputDecisions, LegacyRustfsFacts, LegacyRustfsRefusal, MissingObject, Req, RequestContext,
     RequestContextView, ResourceVisibility, Resp, S3Service, ServiceBuilder, SigV4Authenticator, StaticCredentials,
     connection_intent_of,
 };
@@ -95,6 +98,10 @@ pub(crate) enum Reading {
     Legacy,
 }
 
+/// The server-owned request identifier legacy RustFS's request-context layer gives a request, and
+/// the RustFS bridge hands over (`identifiers`).
+pub(crate) const RUSTFS_REQUEST_ID: &str = "7c9e6679-7425-40de-944b-e07fc1f90ae7";
+
 /// One refusal scenario: the raw request, how it is signed, and what the app body answers.
 #[derive(Clone)]
 pub(crate) struct Scenario {
@@ -106,6 +113,8 @@ pub(crate) struct Scenario {
     /// The bytes whose SHA-256 the request is signed over, instead of `UNSIGNED-PAYLOAD`.
     signed_payload: Option<Vec<u8>>,
     reading: Reading,
+    /// Whether both stacks identify the request as RustFS does ([`Scenario::rustfs_identified`]).
+    rustfs_identified: bool,
 }
 
 impl Scenario {
@@ -119,6 +128,7 @@ impl Scenario {
             body: AppBody::Succeeds,
             signed_payload: None,
             reading: Reading::Typed,
+            rustfs_identified: false,
         }
     }
 
@@ -132,6 +142,17 @@ impl Scenario {
     /// ([`legacy_adapter_error`]).
     pub(crate) fn rustfs_profile(mut self) -> Self {
         self.reading = Reading::Legacy;
+        self
+    }
+
+    /// Both stacks identify the request as RustFS does: the gateway under
+    /// `identify_requests_as_legacy_rustfs` with [`RUSTFS_REQUEST_ID`] handed over, and the legacy
+    /// stack's answer passed through a model of RustFS's request-context layer: its two header
+    /// writes, that identifier in `x-request-id` and `x-amz-request-id` (rustfs/rustfs `e870a6d25b`,
+    /// `rustfs/src/server/layer.rs:364-367`), applied only after the harness has measured that the
+    /// stack itself wrote no identifier header.
+    pub(crate) fn rustfs_identified(mut self) -> Self {
+        self.rustfs_identified = true;
         self
     }
 
@@ -460,7 +481,13 @@ fn gateway_service(scenario: &Scenario, reached: &Arc<AtomicBool>, now: RequestN
         reading: scenario.reading,
         reached: Arc::clone(reached),
     });
-    super::verifying_at(ServiceBuilder::new(), now)
+    let builder = super::verifying_at(ServiceBuilder::new(), now);
+    let builder = if scenario.rustfs_identified {
+        builder.identify_requests_as_legacy_rustfs()
+    } else {
+        builder
+    };
+    builder
         .authenticator(authenticator)
         .authorizer(DenyAnonymous)
         .security_floor(SecurityFloor::new().delegate_anonymous_to_authorizer_after_listing_in_the_posture_report())
@@ -478,9 +505,13 @@ fn gateway_service(scenario: &Scenario, reached: &Arc<AtomicBool>, now: RequestN
 fn gateway_reply(scenario: &Scenario, target: &str, headers: &HeaderMap, now: RequestNow) -> Result<Reply, String> {
     let reached = Arc::new(AtomicBool::new(false));
     let service = gateway_service(scenario, &reached, now)?;
-    let request = head(scenario, target, headers)
+    let mut request = head(scenario, target, headers)
         .body(scenario.request.body.clone())
         .map_err(|error| format!("fixture head: {error}"))?;
+    if scenario.rustfs_identified {
+        let id = HostRequestId::new(RUSTFS_REQUEST_ID).map_err(|error| format!("host id: {error}"))?;
+        request.extensions_mut().insert(id);
+    }
     let response = block_on(service.call_bytes(request));
     let closes = connection_intent_of(&response).map(rustfs_gateway::ConnectionIntent::must_close);
     let (parts, body) = response.into_parts();
@@ -562,7 +593,20 @@ fn s3s_reply(scenario: &Scenario, target: &str, headers: &HeaderMap) -> Result<R
         .body(body)
         .map_err(|error| format!("fixture head: {error}"))?;
     let response = block_on(service.call(request)).map_err(|error| format!("s3s service failed: {error:?}"))?;
-    let (parts, mut body) = response.into_parts();
+    let (mut parts, mut body) = response.into_parts();
+    if scenario.rustfs_identified {
+        // The model applies only over a stack that wrote no identifier of its own: that absence is
+        // measured, and the two writes below are RustFS's layer, not the stack.
+        if let Some(name) = ["x-request-id", "x-amz-request-id", "x-amz-id-2"]
+            .into_iter()
+            .find(|name| parts.headers.contains_key(*name))
+        {
+            return Err(format!("the legacy stack wrote {name} itself; the request-context model does not apply"));
+        }
+        let id = HeaderValue::from_static(RUSTFS_REQUEST_ID);
+        parts.headers.insert("x-request-id", id.clone());
+        parts.headers.insert("x-amz-request-id", id);
+    }
     let body = block_on(body.store_all_limited(1 << 20)).map_err(|error| format!("s3s response body: {error}"))?;
     Ok(Reply {
         status: parts.status.as_u16(),

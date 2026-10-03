@@ -887,3 +887,7 @@ mod post_object_field_tests;
 
 /// `If-Match` on a delete, judged as legacy RustFS judges it (rustfs/gateway#1191).
 mod conditional_delete_tests;
+
+/// The request identifiers legacy RustFS answers with, and a host's own identifier taken over
+/// (rustfs/backlog#1677, ruling R10).
+mod request_id_tests;

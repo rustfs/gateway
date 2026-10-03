@@ -134,6 +134,23 @@ fn a_governor_refusal_is_one_debug_event() {
     assert_eq!(refusal.field("code"), Some("SlowDown"), "{refusal:?}");
 }
 
+/// Positive — a refusal names the identifier the host handed over, which is the one the caller was
+/// answered with, so the host's own log lines and this event name one request (rustfs/gateway#1150).
+#[test]
+fn a_refusal_names_the_identifier_the_host_handed_over() {
+    const HOST_ID: &str = "7c9e6679-7425-40de-944b-e07fc1f90ae7";
+    let ((status, id), capture) = captured(|runtime| {
+        let service = ping_service(support::wired().governor(support::RefuseEverything));
+        let mut request = support::plain(http::Method::POST, "/");
+        request
+            .extensions_mut()
+            .insert(rustfs_gateway::HostRequestId::new(HOST_ID).expect("an identifier in the closed alphabet"));
+        answer(runtime, &service, request)
+    });
+    assert_eq!((status, id.as_str()), (503, HOST_ID));
+    one_refusal(&capture, Level::DEBUG, "governor", HOST_ID);
+}
+
 /// Negative — a request that names no operation is one `debug` event, and a malformed input one
 /// more: neither is an operator's to act on, and neither is logged above `debug`.
 #[test]

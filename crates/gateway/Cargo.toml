@@ -67,6 +67,8 @@ hyper-util = { workspace = true, features = ["tokio"] }
 md-5 = { workspace = true }
 # `tests/replica_put.rs`: the replication dialect's replica write, assembled through this facade.
 rustfs-gateway-dialect-minio = { path = "../dialect-minio" }
+# `tests/host_request_id.rs`: RustFS's admin paths, where the RustFS profile leaves the identifier to the host.
+rustfs-gateway-dialect-rustfs-admin = { path = "../dialect-rustfs-admin" }
 socket2 = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "signal", "test-util"] }
 trybuild = { workspace = true }
