@@ -112,6 +112,8 @@ mod host_request_id;
 mod host_resolve_replay;
 #[path = "ingest_assembly.rs"]
 mod ingest_assembly;
+#[path = "legacy_chunk_limits.rs"]
+mod legacy_chunk_limits;
 #[path = "legacy_cors.rs"]
 mod legacy_cors;
 #[path = "lifecycle_reachability.rs"]

@@ -703,6 +703,7 @@ gateway_modules = (
     "host_request_id",
     "host_resolve_replay",
     "ingest_assembly",
+    "legacy_chunk_limits",
     "legacy_cors",
     "lifecycle_reachability",
     "lock_encryption_reachability",

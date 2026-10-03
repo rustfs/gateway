@@ -789,6 +789,9 @@ mod bodyless_body_tests;
 /// A buffered write legacy RustFS cannot size, refused as legacy RustFS refuses it
 /// (rustfs/gateway#1173).
 mod buffered_length_tests;
+/// aws-chunked uploads cut the way legacy RustFS accepts them, stored as it stores them
+/// (rustfs/gateway#1173).
+mod legacy_chunk_tests;
 
 /// The request settings RustFS embeds the gateway with (rustfs/gateway#1070).
 mod deadline_tests;

@@ -1208,7 +1208,7 @@ impl S3Service {
                         body_wire.framing(),
                         &chunk_sink,
                         seed.as_deref(),
-                        rustfs_gateway_http::ChunkLimits::default(),
+                        view_policy.chunk_reading.limits(),
                     ) {
                         Ok(ingest) => ingest,
                         Err(error) => return Err(error),
