@@ -310,6 +310,10 @@ pub(crate) fn build_service(
             // line end after the XML declaration and no namespace on a payload root
             // (rustfs/gateway#1078), so a client reads the bytes it reads from RustFS.
             .write_responses_as_rustfs()
+            // RustFS reads an HTTP/1 body its answer left unread and closes the connection behind
+            // it, bounded by its 300-second body idle timeout (rustfs/rustfs#7019,
+            // rustfs/gateway#1120).
+            .drain_unread_request_bodies(rustfs_gateway::UnreadBodyDrain::with_idle_timeout(std::time::Duration::from_secs(300)))
             // RustFS's protocol front hands its storage every key up to 1024 bytes and its storage
             // decides; this backend hashes keys onto the disk, so no key reaches it as a path
             // (#1107).
