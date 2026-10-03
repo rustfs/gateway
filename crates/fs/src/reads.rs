@@ -16,7 +16,8 @@
 //!
 //! Responsible for: selecting the representation a `GET` or `HEAD` describes — an explicit
 //! version, the newest version, or the plain object file — turning the request's range selectors
-//! into a decision, and putting that decision's status, `Content-Range` and bytes on the wire.
+//! into a decision, and putting that decision's status, `Content-Range` and bytes on the wire,
+//! with the current version's `x-amz-expiration` (`super::lifecycle` predicts it).
 //! NOT responsible for: deciding range semantics, which belongs to
 //! [`rustfs_gateway::evaluate_range`]; version publication, delete markers, or the version census,
 //! which belong to `super::versioning`.
@@ -42,6 +43,7 @@ use rustfs_gateway::{
 use super::conditions::{conditions, guard_read};
 use super::content_headers::ContentHeaders;
 use super::encryption::refuse_read_encryption;
+use super::lifecycle::ExpiringObject;
 use super::records::RecordKind;
 use super::storage_error;
 use super::versioning::{delete_marker_error, explicit_for_key, missing_version, newest_for_key};
@@ -62,6 +64,9 @@ pub(super) struct Representation {
     pub(super) metadata: std::collections::BTreeMap<String, String>,
     /// The representation headers stored with this version.
     pub(super) headers: ContentHeaders,
+    /// Whether this is the key's current version — read without a version id, named by the id of
+    /// the newest record, or a plain object file — which alone answers `x-amz-expiration`.
+    latest: bool,
     /// The version directory this representation was read from, or `None` for a plain object file.
     ///
     /// Carried so that `CopyObject` can read the source's tags under the default tagging
@@ -79,6 +84,28 @@ async fn tag_count(representation: &Representation) -> Option<i32> {
     let directory = representation.directory.as_deref()?;
     let tags = super::tagging::read_persisted_tags(directory).await.ok()?;
     i32::try_from(tags.len()).ok().filter(|count| *count > 0)
+}
+
+impl super::FsBackend {
+    /// The `x-amz-expiration` a read of `key` answers: the current version's predicted expiration,
+    /// and nothing for a noncurrent one, as legacy RustFS answers it (rustfs/gateway#999). Advisory
+    /// like the tag count: a tag document that cannot be read answers no header.
+    async fn read_expiration(&self, bucket: &str, key: &str, representation: &Representation) -> Option<String> {
+        if !representation.latest {
+            return None;
+        }
+        let tags = match representation.directory.as_deref() {
+            Some(directory) => super::tagging::read_persisted_tags(directory).await.ok()?,
+            None => Vec::new(),
+        };
+        let object = ExpiringObject {
+            key,
+            size: i64::try_from(representation.bytes.len()).ok()?,
+            tags: &tags,
+            modified: representation.last_modified.secs(),
+        };
+        self.expiration_header(bucket, &object).await
+    }
 }
 
 /// The window a read serves, and the answer's status.
@@ -201,7 +228,9 @@ impl super::FsBackend {
             // and the window arithmetic are decided against the representation, and a length taken
             // from one source while the bytes come from another is how the two drift apart.
             let bytes = self.read_version_body(record).await?;
+            let latest = version_id.is_none() || newest_for_key(&records, key).is_some_and(|newest| newest.path == record.path);
             return Ok(Selected::Found(Box::new(Representation {
+                latest,
                 bytes,
                 e_tag: ETag::new(record.e_tag.clone()).map_err(|_| storage_error())?,
                 last_modified: Timestamp::from_secs(record.modified),
@@ -219,6 +248,7 @@ impl super::FsBackend {
             return Ok(Selected::Absent(super::no_such_key(key)));
         };
         Ok(Selected::Found(Box::new(Representation {
+            latest: true,
             e_tag: super::etag(&bytes)?,
             last_modified: super::last_modified(&file_metadata),
             bytes,
@@ -302,6 +332,10 @@ impl Handler<GetObject> for super::FsBackend {
         )?;
         let encryption = representation.headers.encryption();
         let tag_count = tag_count(&representation).await;
+        let expiration = self
+            .read_expiration(input.bucket.as_str(), input.key.as_str(), &representation)
+            .await
+            .map(Into::into);
         let body = representation
             .bytes
             .get(window.start..window.end_exclusive)
@@ -309,6 +343,7 @@ impl Handler<GetObject> for super::FsBackend {
             .to_vec();
         Ok(Resp::with_status(
             GetObjectOutput {
+                expiration,
                 content_length: i64::try_from(body.len()).ok(),
                 content_range: window.content_range,
                 accept_ranges: Some("bytes".to_owned()),
@@ -368,9 +403,14 @@ impl Handler<HeadObject> for super::FsBackend {
         // being ignored.
         let window = resolve_window(input.range.as_ref().map(|range| range.as_str()), None, input.part_number, &representation)?;
         let tag_count = tag_count(&representation).await;
+        let expiration = self
+            .read_expiration(input.bucket.as_str(), input.key.as_str(), &representation)
+            .await
+            .map(Into::into);
         let encryption = representation.headers.encryption();
         Ok(Resp::with_status(
             HeadObjectOutput {
+                expiration,
                 content_length: i64::try_from(window.len()).ok(),
                 content_range: window.content_range,
                 accept_ranges: Some("bytes".to_owned()),

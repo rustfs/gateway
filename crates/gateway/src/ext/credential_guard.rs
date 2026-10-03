@@ -20,7 +20,7 @@
 //! (`super::governor`). Upstream: a deployment's [`CredentialProvider`]. Downstream:
 //! [`super::SigV4Authenticator`].
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::future::{Future, poll_fn};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::pin::Pin;
@@ -86,10 +86,55 @@ struct GuardMetrics {
     negative_cache_hits: AtomicU64,
 }
 
+/// Missing keys and when each stops being served, with their insertion order for eviction.
+///
+/// Every operation is O(1) amortised under the lock, because every request's credential lookup
+/// takes it before its signature is checked, and forged keys keep the cache full
+/// (rustfs/gateway#1221). An expired entry stays until its key is cached again or its turn to be
+/// evicted comes; nothing scans the cache.
 #[derive(Default)]
 struct NegativeCache {
-    entries: HashMap<String, MonotonicNow>,
-    order: Vec<String>,
+    entries: HashMap<String, NegativeEntry>,
+    /// Insertion order, oldest first. A slot whose generation no longer matches its key's entry is
+    /// stale — the key was dropped or cached again since — and is skipped, never evicted by.
+    order: VecDeque<(String, u64)>,
+    next_generation: u64,
+}
+
+#[derive(Clone, Copy)]
+struct NegativeEntry {
+    expiry: MonotonicNow,
+    generation: u64,
+}
+
+impl NegativeCache {
+    fn fresh(&self, access_key_id: &str, now: MonotonicNow) -> bool {
+        self.entries.get(access_key_id).is_some_and(|entry| entry.expiry > now)
+    }
+
+    fn insert(&mut self, access_key_id: &str, expiry: MonotonicNow, capacity: usize) {
+        let generation = self.next_generation;
+        self.next_generation = self.next_generation.wrapping_add(1);
+        self.entries
+            .insert(access_key_id.to_owned(), NegativeEntry { expiry, generation });
+        self.order.push_back((access_key_id.to_owned(), generation));
+        while self.entries.len() > capacity {
+            let Some((oldest, generation)) = self.order.pop_front() else {
+                break;
+            };
+            if self.entries.get(&oldest).is_some_and(|entry| entry.generation == generation) {
+                self.entries.remove(&oldest);
+            }
+        }
+        // Stale slots accumulate when keys are cached again or dropped on lookup. Compacting only
+        // once they outnumber the live entries keeps the order bounded at twice the capacity for
+        // O(1) amortised cost.
+        if self.order.len() > capacity.saturating_mul(2) {
+            let entries = &self.entries;
+            self.order
+                .retain(|(key, generation)| entries.get(key).is_some_and(|entry| entry.generation == *generation));
+        }
+    }
 }
 
 /// Mandatory protection for an unauthenticated credential lookup: deadline, panic boundary and
@@ -148,11 +193,10 @@ impl GuardedCredentialProvider {
     }
 
     fn fresh_negative(&self, access_key_id: &str, now: MonotonicNow) -> bool {
-        let Ok(mut cache) = self.cache.lock() else {
+        let Ok(cache) = self.cache.lock() else {
             return false;
         };
-        cache.entries.retain(|_, expiry| *expiry > now);
-        cache.entries.get(access_key_id).is_some_and(|expiry| *expiry > now)
+        cache.fresh(access_key_id, now)
     }
 
     fn store_negative(&self, access_key_id: &str, now: MonotonicNow) {
@@ -164,13 +208,7 @@ impl GuardedCredentialProvider {
         };
         let lifetime_millis = u64::try_from(self.negative_lifetime(access_key_id).as_millis()).unwrap_or(u64::MAX);
         let expiry = MonotonicNow::from_millis(now.millis().saturating_add(lifetime_millis));
-        if cache.entries.insert(access_key_id.to_owned(), expiry).is_none() {
-            cache.order.push(access_key_id.to_owned());
-        }
-        while cache.order.len() > self.config.negative_entries {
-            let oldest = cache.order.remove(0);
-            cache.entries.remove(&oldest);
-        }
+        cache.insert(access_key_id, expiry, self.config.negative_entries);
     }
 
     /// Effective lifetime for one missing key, including deterministic jitter.
@@ -350,6 +388,123 @@ mod tests {
         );
         assert!(matches!(guarded.lookup("AKID").await, Err(ProviderError::Timeout)));
         assert_eq!(guarded.metrics().timeouts, 1);
+    }
+
+    /// A guard over `CountingMiss` on a clock the test drives, with a fixed 30-second negative
+    /// lifetime (no jitter) and room for `entries` keys.
+    fn manual(entries: usize) -> (GuardedCredentialProvider, Arc<CountingMiss>, Arc<crate::clock::ManualMonotonic>) {
+        let inner = Arc::new(CountingMiss(AtomicUsize::new(0)));
+        let clock = Arc::new(crate::clock::ManualMonotonic::at_millis(0));
+        let guarded = GuardedCredentialProvider {
+            inner: Arc::clone(&inner) as Arc<dyn CredentialProvider>,
+            config: CredentialGuardConfig {
+                budget: LookupBudget::new(Duration::from_secs(1), Duration::from_secs(30), Duration::ZERO),
+                negative_entries: entries,
+            },
+            clock: Arc::clone(&clock) as Arc<dyn MonotonicClock>,
+            cache: Mutex::new(NegativeCache::default()),
+            metrics: GuardMetrics::default(),
+        };
+        (guarded, inner, clock)
+    }
+
+    /// How many times the backend was asked.
+    fn calls(inner: &CountingMiss) -> usize {
+        inner.0.load(Ordering::SeqCst)
+    }
+
+    async fn miss(guarded: &GuardedCredentialProvider, key: &str) {
+        assert!(matches!(guarded.lookup(key).await, Ok(CredentialLookup::NotFound)));
+    }
+
+    /// Negative — an entry past its lifetime is not served: the backend is asked again.
+    #[tokio::test]
+    async fn an_expired_negative_entry_is_not_served() {
+        let (guarded, inner, clock) = manual(4);
+        miss(&guarded, "AKIDGONE").await;
+        clock.advance_seconds(29);
+        miss(&guarded, "AKIDGONE").await;
+        assert_eq!(calls(&inner), 1, "a live entry was not served");
+        clock.advance_seconds(1);
+        miss(&guarded, "AKIDGONE").await;
+        assert_eq!(calls(&inner), 2, "an expired entry was served");
+    }
+
+    /// Negative — at capacity the oldest key is the one evicted, and only it.
+    #[tokio::test]
+    async fn the_oldest_negative_entry_is_evicted_first() {
+        let (guarded, inner, _clock) = manual(2);
+        for key in ["AKIDA", "AKIDB", "AKIDC"] {
+            miss(&guarded, key).await;
+        }
+        assert_eq!(calls(&inner), 3);
+        miss(&guarded, "AKIDB").await;
+        miss(&guarded, "AKIDC").await;
+        assert_eq!(calls(&inner), 3, "a younger key was evicted");
+        miss(&guarded, "AKIDA").await;
+        assert_eq!(calls(&inner), 4, "the oldest key outlived the capacity");
+    }
+
+    /// Negative — a key cached again after it expired is not evicted by the slot its first entry
+    /// left behind: with room for two keys and only two cached, both are served.
+    #[tokio::test]
+    async fn a_key_cached_again_after_expiry_is_not_evicted_by_its_old_slot() {
+        let (guarded, inner, clock) = manual(2);
+        miss(&guarded, "AKIDAGAIN").await;
+        clock.advance_seconds(30);
+        miss(&guarded, "AKIDAGAIN").await;
+        miss(&guarded, "AKIDOTHER").await;
+        assert_eq!(calls(&inner), 3);
+        miss(&guarded, "AKIDAGAIN").await;
+        miss(&guarded, "AKIDOTHER").await;
+        assert_eq!(calls(&inner), 3, "a live entry was evicted under capacity");
+    }
+
+    /// Negative — eviction skips a slot its key has outlived: A was cached, expired and was cached
+    /// again after B, so B is the oldest live key and the one a third key evicts, not A.
+    #[tokio::test]
+    async fn a_stale_slot_is_skipped_so_the_oldest_live_key_is_evicted() {
+        let (guarded, inner, clock) = manual(2);
+        miss(&guarded, "AKIDA").await;
+        clock.advance_seconds(20);
+        miss(&guarded, "AKIDB").await;
+        clock.advance_seconds(10);
+        miss(&guarded, "AKIDA").await;
+        miss(&guarded, "AKIDC").await;
+        assert_eq!(calls(&inner), 4);
+        miss(&guarded, "AKIDA").await;
+        miss(&guarded, "AKIDC").await;
+        assert_eq!(calls(&inner), 4, "the key cached last but one was evicted");
+        miss(&guarded, "AKIDB").await;
+        assert_eq!(calls(&inner), 5, "the oldest live key outlived the capacity");
+    }
+
+    /// Negative — a stream of distinct forged keys leaves the cache at its capacity, however long
+    /// the stream runs.
+    #[tokio::test]
+    async fn distinct_forged_keys_leave_the_cache_at_its_capacity() {
+        let (guarded, _inner, _clock) = manual(8);
+        for round in 0..4_000_u64 {
+            miss(&guarded, &format!("AKIDFORGED{round}")).await;
+        }
+        let cache = guarded.cache.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        assert_eq!(cache.entries.len(), 8);
+        assert_eq!(cache.order.len(), 8, "eviction left order slots behind");
+    }
+
+    /// Negative — keys cached again and again after they expire leave the eviction bookkeeping
+    /// bounded by twice the capacity, although nothing is evicted: every stale slot is dropped.
+    #[tokio::test]
+    async fn keys_cached_again_leave_the_eviction_order_bounded() {
+        let (guarded, inner, clock) = manual(8);
+        for round in 0..1_000_u64 {
+            miss(&guarded, &format!("AKIDAGAIN{}", round % 3)).await;
+            clock.advance_seconds(31);
+        }
+        assert_eq!(calls(&inner), 1_000, "an expired entry was served");
+        let cache = guarded.cache.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        assert_eq!(cache.entries.len(), 3);
+        assert!(cache.order.len() <= 16, "{} order slots kept for a capacity of 8", cache.order.len());
     }
 
     /// Positive — jitter spreads keys while remaining inside the configured interval.

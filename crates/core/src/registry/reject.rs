@@ -232,9 +232,10 @@ pub(crate) fn check_operation<O: Operation>() -> Result<(), RegistryError> {
         if spec.receives_caller_secret() {
             return Err(RegistryError::StandardOperationReceivesCallerSecret { name });
         }
+        let one_action = |auth: &AuthRequirement| auth.rule() == ActionRule::One && auth.subject().is_none();
         if spec
             .auth
-            .is_some_and(|auth| auth.rule() != ActionRule::One || auth.subject().is_some())
+            .is_some_and(|auth| !one_action(&auth) || auth.version_requirement().is_some_and(|versioned| !one_action(versioned)))
         {
             return Err(RegistryError::InvalidAuthRule {
                 name,
@@ -280,7 +281,13 @@ fn check_dialect_actions(spec: &'static OperationSpec, anonymous: bool) -> Resul
     let vendor = name.split_once(':').map(|(vendor, _)| vendor);
     let service = |action: &'static str| action.split_once(':').map(|(service, _)| service);
     let is_own_label = |action| service(action) == vendor && vendor.is_some_and(|vendor| !IAM_SERVICES.contains(&vendor));
-    let mut actions = auth.actions().iter().copied().chain(auth.everyone_action());
+    let version_actions = auth.version_requirement().map_or(&[][..], AuthRequirement::actions);
+    let mut actions = auth
+        .actions()
+        .iter()
+        .copied()
+        .chain(auth.everyone_action())
+        .chain(version_actions.iter().copied());
     if anonymous {
         if auth.subject().is_some() {
             return Err(RegistryError::InvalidAuthRule {
@@ -324,15 +331,28 @@ pub(crate) fn check_spec(spec: &'static OperationSpec) -> Result<(), RegistryErr
     let Some(auth) = spec.auth else {
         return Err(RegistryError::MissingAuthRequirement { name });
     };
+    let version_actions = auth.version_requirement().map_or(&[][..], AuthRequirement::actions);
     if let Some(action) = auth
         .actions()
         .iter()
+        .chain(version_actions)
         .find(|action| !AuthRequirement::new(action, auth.resource).is_well_formed())
     {
         return Err(RegistryError::MalformedAuthAction { name, action });
     }
     if let Some(why) = auth.fault() {
         return Err(RegistryError::InvalidAuthRule { name, why });
+    }
+    for extra in spec.extra_permission_set() {
+        if !AuthRequirement::new(extra.action(), auth.resource).is_well_formed() {
+            return Err(RegistryError::MalformedAuthAction {
+                name,
+                action: extra.action(),
+            });
+        }
+        if let Some(why) = extra.fault() {
+            return Err(RegistryError::InvalidAuthRule { name, why });
+        }
     }
     // An own-account operation evaluates no IAM action in RustFS. Its action is therefore a label
     // in the operation's own vendor namespace, which no IAM policy grants or denies by accident,
@@ -379,6 +399,11 @@ fn is_namespaced(name: &str) -> bool {
 #[path = "reject_rule_tests.rs"]
 #[allow(clippy::expect_used, clippy::panic, clippy::indexing_slicing)]
 mod rule_tests;
+
+#[cfg(test)]
+#[path = "reject_version_tests.rs"]
+#[allow(clippy::expect_used, clippy::panic, clippy::indexing_slicing)]
+mod version_tests;
 
 #[cfg(test)]
 mod tests {
@@ -515,5 +540,88 @@ mod tests {
         for name in ["rustfs:AdminSetConfig", "acme:DoThing"] {
             assert!(is_namespaced(name), "{name:?} is the shape the rule asks for");
         }
+    }
+
+    use crate::authz::{ExtraPermission, ExtraProfile, HeaderTrigger};
+
+    /// A vendor operation whose one extra permission is `PERMISSION`.
+    struct WithExtra<const PERMISSION: usize>;
+
+    static WELL_FORMED_EXTRA: [ExtraPermission; 1] = [ExtraPermission::new(
+        "acme:BypassThing",
+        &[HeaderTrigger::True("x-acme-bypass")],
+        ExtraProfile::Generic,
+    )];
+    static MALFORMED_EXTRA: [ExtraPermission; 1] = [ExtraPermission::new(
+        "acme BypassThing",
+        &[HeaderTrigger::True("x-acme-bypass")],
+        ExtraProfile::Generic,
+    )];
+    static NO_TRIGGER_EXTRA: [ExtraPermission; 1] = [ExtraPermission::new("acme:BypassThing", &[], ExtraProfile::Generic)];
+
+    static EXTRA_FLOOR: OperationFloor = OperationFloor::custom("acme:DoThing", SigService::S3);
+
+    const fn extra_spec(extras: &'static [ExtraPermission]) -> OperationSpec {
+        OperationSpec::builder("acme:DoThing", 200, None)
+            .handler_deadline_class(HandlerDeadlineClass::Standard)
+            .required_params(&[])
+            .auth(AuthRequirement::new("acme:DoThing", ResourceShape::Object))
+            .extra_permissions(extras)
+            .build()
+    }
+
+    static WELL_FORMED_SPEC: OperationSpec = extra_spec(&WELL_FORMED_EXTRA);
+    static MALFORMED_SPEC: OperationSpec = extra_spec(&MALFORMED_EXTRA);
+    static NO_TRIGGER_SPEC: OperationSpec = extra_spec(&NO_TRIGGER_EXTRA);
+
+    impl<const PERMISSION: usize> Operation for WithExtra<PERMISSION> {
+        const NAME: &'static str = "acme:DoThing";
+        type Input = ();
+        type Output = ();
+        type DerivedResources = crate::NoDerived;
+
+        fn derive_resources(_input: &Self::Input) -> Result<Self::DerivedResources, crate::DerivedResourceError> {
+            Ok(crate::NoDerived)
+        }
+
+        fn seal_derived_input(_input: &mut Self::Input) {}
+
+        fn spec() -> &'static OperationSpec {
+            match PERMISSION {
+                0 => &WELL_FORMED_SPEC,
+                1 => &MALFORMED_SPEC,
+                _ => &NO_TRIGGER_SPEC,
+            }
+        }
+
+        fn floor() -> &'static OperationFloor {
+            &EXTRA_FLOOR
+        }
+    }
+
+    /// Positive -- a well-formed extra permission registers.
+    #[test]
+    fn a_well_formed_extra_permission_registers() {
+        assert_eq!(check_operation::<WithExtra<0>>(), Ok(()));
+    }
+
+    /// Negative -- an extra permission's action is spelled `service:Action`, and it names at least
+    /// one trigger.
+    #[test]
+    fn n_a_malformed_or_triggerless_extra_permission_is_refused() {
+        assert_eq!(
+            check_operation::<WithExtra<1>>(),
+            Err(RegistryError::MalformedAuthAction {
+                name: "acme:DoThing",
+                action: "acme BypassThing"
+            })
+        );
+        assert_eq!(
+            check_operation::<WithExtra<2>>(),
+            Err(RegistryError::InvalidAuthRule {
+                name: "acme:DoThing",
+                why: "an extra permission names at least one header trigger"
+            })
+        );
     }
 }

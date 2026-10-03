@@ -113,7 +113,7 @@ fn ordinary_report_shows_evidence_per_oracle_revision() {
     );
     assert!(
         text.contains(
-            "request divergences: rulings=65 keep-gateway=36 align-s3s=11 align-aws=2 rustfs-profile=16 open-follow-ups=10 landed=22\n\
+            "request divergences: rulings=65 keep-gateway=35 align-s3s=11 align-aws=2 rustfs-profile=17 open-follow-ups=10 landed=23\n\
              divergence rd-put-0001 operation=PutObject ruling=rustfs-profile follow-up=c-object-0058 "
         ),
         "{text}"

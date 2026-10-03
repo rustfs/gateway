@@ -1,0 +1,6 @@
+PUT /b/k HTTP/1.1
+Host: localhost
+Content-Length: 30
+Expect: 100-continue
+
+short

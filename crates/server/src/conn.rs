@@ -18,11 +18,9 @@
 //! NOT responsible for: S3 semantics, host handling, request-body intervals or handler deadlines.
 //! Upstream: `ServerConfig`, optional `TlsHandle`, and a tower service. Downstream: sockets.
 
-use std::collections::HashMap;
-use std::net::IpAddr;
 use std::net::SocketAddr;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard};
 
 use bytes::Bytes;
 use http::{Request, Response};
@@ -37,10 +35,11 @@ use tokio_rustls::TlsAcceptor;
 use tower::Service as TowerService;
 
 use crate::accept_error::{self, AcceptFailure};
+use crate::client_admission::{IpCounts, IpLease};
 use crate::config::{ConfigError, ServerConfig, WriteStrategy};
 use crate::connection_service::{ConnectionError, ConnectionService, RequestStats};
 use crate::driver::{AcceptedConnection, ConnectionDriver, ConnectionInfo, HyperConnectionDriver, TransportKind};
-use crate::io::{BoxTransport, ProgressIo, deadline_after, deadline_remaining};
+use crate::io::{BoxTransport, ProgressIo, bounded, deadline_after, deadline_remaining};
 use crate::listener::Listener;
 use crate::shutdown::{MetricsInner, RunningServer, ServerMetrics, ShutdownCommand, ShutdownReport, ShutdownTrigger};
 use crate::tls::TlsHandle;
@@ -277,7 +276,7 @@ where
                     drop(permit);
                     continue;
                 },
-                accepted = listener.accept() => accepted,
+                accepted = accept_reaping(&listener, &mut connections, &metrics.inner) => accepted,
             }
         } else {
             tokio::select! {
@@ -290,7 +289,7 @@ where
                     drop(permit);
                     continue;
                 },
-                accepted = listener.accept() => accepted,
+                accepted = accept_reaping(&listener, &mut connections, &metrics.inner) => accepted,
             }
         };
         let (stream, peer) = match accepted {
@@ -383,6 +382,7 @@ where
                 connection.await;
             }
         });
+        reap_finished(&mut connections, &metrics.inner);
     };
 
     drop(listener);
@@ -400,6 +400,36 @@ where
     };
     let _ = command.reply.send(report);
     Ok(())
+}
+
+/// Accepts the next socket, joining connection tasks that finish while the listener waits for it.
+///
+/// Both halves are cancel safe, so the accept loop may drop this for a shutdown command or a
+/// capacity change without losing a socket or a task. `accept` goes first: under a steady stream
+/// of connections, [`reap_finished`] after every spawn does the joining instead.
+async fn accept_reaping(
+    listener: &tokio::net::TcpListener,
+    connections: &mut JoinSet<()>,
+    metrics: &MetricsInner,
+) -> std::io::Result<(TcpStream, SocketAddr)> {
+    loop {
+        tokio::select! {
+            biased;
+            accepted = listener.accept() => return accepted,
+            Some(_) = connections.join_next() => reap_finished(connections, metrics),
+        }
+    }
+}
+
+/// Joins every connection task that has already finished and publishes how many remain.
+///
+/// A finished task keeps its entry in the set until it is joined, so without this the set, and the
+/// memory behind it, grows with every connection the listener ever accepted (rustfs/gateway#1208).
+/// The join result carries nothing to act on: a connection's outcome was logged where it ended,
+/// and a task that panicked released its admission while unwinding.
+fn reap_finished(connections: &mut JoinSet<()>, metrics: &MetricsInner) {
+    while connections.try_join_next().is_some() {}
+    metrics.connection_tasks.store(connections.len(), Ordering::Relaxed);
 }
 
 async fn drain_connections_and_file_transfers(
@@ -545,7 +575,7 @@ where
         request_body_unfinished,
     )
     .confirm_writes_into(Arc::clone(&receipts));
-    let mut builder = crate::tls::protocol_builder(negotiated.as_deref());
+    let mut builder = crate::tls::protocol_builder(negotiated.as_deref(), &config);
     #[cfg(test)]
     match &deadline_observer {
         Some(observer) => {
@@ -581,8 +611,8 @@ where
         .initial_connection_window_size(config.h2_initial_connection_window_size)
         .max_concurrent_streams(config.h2_max_concurrent_streams)
         .max_frame_size(config.h2_max_frame_size)
-        .keep_alive_interval(config.h2_keep_alive_interval)
-        .keep_alive_timeout(config.h2_keep_alive_timeout)
+        .keep_alive_interval(config.h2_keep_alive_interval.map(bounded))
+        .keep_alive_timeout(bounded(config.h2_keep_alive_timeout))
         .max_header_list_size(config.h2_max_header_list_size);
 
     let connection = builder.serve_connection(io, service);
@@ -601,64 +631,6 @@ fn log_connection_result(result: Result<(), BoxError>, receipts: &crate::write_r
     match result {
         Ok(()) => receipts.closed(),
         Err(error) => tracing::debug!(error = %error, "HTTP connection closed with an error"),
-    }
-}
-
-struct IpCounts {
-    limit: Option<usize>,
-    counts: Arc<Mutex<HashMap<IpAddr, usize>>>,
-}
-
-impl IpCounts {
-    fn new(limit: Option<usize>) -> Self {
-        Self {
-            limit,
-            counts: Arc::new(Mutex::new(HashMap::new())),
-        }
-    }
-
-    fn try_acquire(&self, ip: IpAddr) -> Option<IpLease> {
-        let Some(limit) = self.limit else {
-            return Some(IpLease { ip, counts: None });
-        };
-        let mut counts = lock_recover(&self.counts);
-        let count = counts.entry(ip).or_default();
-        if *count >= limit {
-            return None;
-        }
-        *count = count.saturating_add(1);
-        Some(IpLease {
-            ip,
-            counts: Some(Arc::clone(&self.counts)),
-        })
-    }
-}
-
-struct IpLease {
-    ip: IpAddr,
-    counts: Option<Arc<Mutex<HashMap<IpAddr, usize>>>>,
-}
-
-impl Drop for IpLease {
-    fn drop(&mut self) {
-        let Some(counts) = &self.counts else { return };
-        let mut counts = lock_recover(counts);
-        let remove = if let Some(count) = counts.get_mut(&self.ip) {
-            *count = count.saturating_sub(1);
-            *count == 0
-        } else {
-            false
-        };
-        if remove {
-            counts.remove(&self.ip);
-        }
-    }
-}
-
-fn lock_recover<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
-    match mutex.lock() {
-        Ok(guard) => guard,
-        Err(poisoned) => poisoned.into_inner(),
     }
 }
 
@@ -689,111 +661,4 @@ impl Drop for ActiveConnection {
 
 #[cfg(test)]
 #[allow(clippy::expect_used)] // Test-only synchronization failures terminate the deterministic control.
-mod file_transfer_shutdown_tests {
-    use std::sync::mpsc;
-    use std::time::Duration;
-
-    use tokio::task::JoinSet;
-
-    use super::{drain_connections_and_file_transfers, finish_shutdown};
-    use crate::connection_service::RequestStats;
-    use crate::sendfile_task::BlockingFileTransferExecutor;
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-    async fn listener_drain_waits_for_file_work_detached_from_its_connection_task() {
-        let executor = BlockingFileTransferExecutor::new(1);
-        let transfer_executor = executor.clone();
-        let (entered_tx, entered_rx) = mpsc::channel();
-        let (release_tx, release_rx) = mpsc::channel();
-        let transfer = tokio::spawn(async move {
-            transfer_executor
-                .run(move |_permit| {
-                    entered_tx.send(()).expect("test receiver remains alive");
-                    release_rx
-                        .recv_timeout(Duration::from_secs(5))
-                        .expect("test releases the blocking job");
-                    Ok::<_, std::io::Error>(())
-                })
-                .await
-        });
-        entered_rx
-            .recv_timeout(Duration::from_secs(2))
-            .expect("blocking file work starts");
-        transfer.abort();
-        assert!(
-            transfer
-                .await
-                .expect_err("connection-side waiter is cancelled")
-                .is_cancelled()
-        );
-
-        let drain_executor = executor.clone();
-        let (drain_done_tx, drain_done_rx) = mpsc::channel();
-        let drain = tokio::spawn(async move {
-            let mut connections = JoinSet::new();
-            drain_connections_and_file_transfers(&mut connections, &drain_executor).await;
-            drain_done_tx.send(()).expect("test receiver remains alive");
-        });
-        assert!(
-            matches!(
-                drain_done_rx.recv_timeout(Duration::from_millis(100)),
-                Err(mpsc::RecvTimeoutError::Timeout)
-            ),
-            "listener drain includes detached file work"
-        );
-
-        release_tx.send(()).expect("blocking job still waits for release");
-        drain_done_rx
-            .recv_timeout(Duration::from_secs(2))
-            .expect("listener drain completes after file work exits");
-        drain.await.expect("listener drain joins after file work exits");
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-    async fn force_abort_finishes_without_waiting_for_detached_file_work() {
-        let executor = BlockingFileTransferExecutor::new(1);
-        let transfer_executor = executor.clone();
-        let (entered_tx, entered_rx) = mpsc::channel();
-        let (release_tx, release_rx) = mpsc::channel();
-        let transfer = tokio::spawn(async move {
-            transfer_executor
-                .run(move |_permit| {
-                    entered_tx.send(()).expect("test receiver remains alive");
-                    release_rx
-                        .recv_timeout(Duration::from_secs(5))
-                        .expect("test releases the blocking job");
-                    Ok::<_, std::io::Error>(())
-                })
-                .await
-        });
-        entered_rx
-            .recv_timeout(Duration::from_secs(2))
-            .expect("blocking file work starts");
-        transfer.abort();
-        assert!(
-            transfer
-                .await
-                .expect_err("connection-side waiter is cancelled")
-                .is_cancelled()
-        );
-
-        let request_stats = RequestStats::default();
-        let mut connections = JoinSet::new();
-        connections.spawn(std::future::pending());
-        tokio::time::timeout(
-            Duration::from_millis(100),
-            finish_shutdown(&mut connections, &executor, &request_stats, Duration::from_millis(10)),
-        )
-        .await
-        .expect("force abort has a hard return bound");
-        assert!(
-            request_stats.force_abort.load(std::sync::atomic::Ordering::Acquire),
-            "the production grace-timeout seam marks in-flight requests for force abort"
-        );
-
-        release_tx
-            .send(())
-            .expect("detached file work remains alive until explicitly released");
-        executor.wait_idle().await;
-    }
-}
+mod file_transfer_shutdown_tests;

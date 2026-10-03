@@ -42,6 +42,8 @@ pub(crate) trait OperationMode {
 
     fn auth(entry: &Self::Entry) -> Option<AuthRequirement>;
 
+    fn extra_permissions(entry: &Self::Entry) -> &'static [rustfs_gateway_core::ExtraPermission];
+
     fn request_body_mode(entry: &Self::Entry) -> RequestBodyMode;
 
     fn dispatch<'a, S, T, E, Route, RouteFuture, Read, ReadFuture, Input, InputFuture>(
@@ -93,6 +95,10 @@ impl OperationMode for DynamicMode<'_> {
 
     fn auth(entry: &Self::Entry) -> Option<AuthRequirement> {
         entry.auth()
+    }
+
+    fn extra_permissions(entry: &Self::Entry) -> &'static [rustfs_gateway_core::ExtraPermission] {
+        entry.extra_permissions()
     }
 
     fn request_body_mode(entry: &Self::Entry) -> RequestBodyMode {
@@ -183,6 +189,7 @@ pub(crate) struct MonomorphicMode<H, Operations> {
 pub(crate) struct MonomorphicEntry {
     floor: &'static rustfs_gateway_sig::OperationFloor,
     auth: Option<AuthRequirement>,
+    extra_permissions: &'static [rustfs_gateway_core::ExtraPermission],
     request_body: RequestBodyMode,
 }
 
@@ -197,6 +204,7 @@ where
         Some(MonomorphicEntry {
             floor: Operations::floor(operation)?,
             auth: Operations::auth(operation)?,
+            extra_permissions: Operations::extra_permissions(operation)?,
             request_body: Operations::request_body_mode(operation)?,
         })
     }
@@ -207,6 +215,10 @@ where
 
     fn auth(entry: &Self::Entry) -> Option<AuthRequirement> {
         entry.auth
+    }
+
+    fn extra_permissions(entry: &Self::Entry) -> &'static [rustfs_gateway_core::ExtraPermission] {
+        entry.extra_permissions
     }
 
     fn request_body_mode(entry: &Self::Entry) -> RequestBodyMode {

@@ -253,7 +253,7 @@ impl Registry {
     ///
     /// * a **container** stays bare — an empty `Vec` and an absent list are the same fact on the
     ///   wire, so `Option<Vec<_>>` would spell "nothing" twice — except a list whose presence is a
-    ///   fact of its own ([`super::presence::carries_presence`], ADR-0036), which is an `Option`;
+    ///   fact of its own ([`super::presence::carries_presence`], ADR-0037), which is an `Option`;
     /// * a **required** member stays bare, so that requiredness is expressed by the type and no
     ///   consumer unwraps a value the wire contract says is always present;
     /// * an **optional** member is `Option<T>`, which is what absence means.

@@ -27,6 +27,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
 
 mod accept_error;
+mod client_admission;
 mod config;
 mod conn;
 mod connection_service;
@@ -35,7 +36,9 @@ mod driver;
 mod io;
 pub mod layers;
 mod listener;
+mod preface;
 mod request_capacity;
+mod send_deadline;
 #[cfg(any(target_os = "linux", target_os = "android", target_vendor = "apple"))]
 mod sendfile;
 mod sendfile_task;

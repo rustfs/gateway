@@ -66,10 +66,17 @@ pub static CONDITION_KIND: RequestKind = RequestKind::Read;
 /// representations.
 pub static CONDITIONS: [ConditionalHeader; 2] = [ConditionalHeader::IfMatch, ConditionalHeader::IfNoneMatch];
 
+/// A read naming one version is asked `s3:GetObjectVersion` alone, never `s3:GetObject`: AWS
+/// requires the version action and not the unversioned one when `versionId` is specified
+/// (<https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html>), and legacy RustFS asks
+/// the same (GHSA-3ppv, `rustfs/src/storage/access.rs:1050-1056`, `:2705-2707` on rustfs/rustfs
+/// `d60dfbb826`).
+static VERSION_AUTH: AuthRequirement = AuthRequirement::new("s3:GetObjectVersion", ResourceShape::Object);
+
 /// What this operation requires of a request once routing has chosen it.
 static SPEC: OperationSpec = OperationSpec::standard("GetObject")
     .required_params(&[])
-    .auth(AuthRequirement::new("s3:GetObject", ResourceShape::Object))
+    .auth(AuthRequirement::new("s3:GetObject", ResourceShape::Object).with_version_requirement(&VERSION_AUTH))
     .build();
 
 /// Header and presigned signatures, matching `spec/operations/GetObject.toml`.

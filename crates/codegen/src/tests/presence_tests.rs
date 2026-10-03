@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The list members whose presence is carried (rustfs/gateway#1078, ADR-0036).
+//! The list members whose presence is carried (rustfs/gateway#1078, ADR-0037).
 //!
 //! Responsible for: exactly the wrapped document lists the legacy stack holds as an `Option`
 //! carrying their presence — typed `Option<Vec<_>>`, read into the member only when the wrapper is

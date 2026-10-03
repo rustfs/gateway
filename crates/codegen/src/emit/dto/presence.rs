@@ -17,7 +17,7 @@
 //! Responsible for: [`carries_presence`] — a wrapped list the legacy stack holds as an `Option`,
 //! whose empty wrapper and whose absence are two different documents on the legacy wire, so its
 //! DTO member is `Option<Vec<_>>` rather than the bare container every other list is (the
-//! exception to ADR-0004 P1 that ADR-0036 records).
+//! exception to ADR-0004 P1 that ADR-0037 records).
 //! NOT responsible for: how a present or absent list is read, written or converted (the codec and
 //! seam emitters, which consult this).
 //! Upstream: the IR, the seam generator's checked-in legacy facts. Downstream: every emitter that

@@ -19,8 +19,10 @@
 //! nested structure does not know, a repeated member, a member name spelled with a prefix and a
 //! value its grammar does not read each refused with `400 MalformedXML` and nothing stored,
 //! replaced or deleted; an element the document's root does not know, and one inside a wrapped
-//! list, skipped as legacy RustFS skips them; and a leading-digits integer read as legacy RustFS
-//! reads it.
+//! list, skipped as legacy RustFS skips them; a leading-digits integer read as legacy RustFS
+//! reads it; and an empty body answered as legacy RustFS answers it — `MissingRequestBodyError`
+//! where the document is required, `MalformedXML` for a multipart completion, and the lifecycle
+//! handler's `InvalidArgument` — with nothing stored.
 //! NOT responsible for: proving each answer is legacy RustFS's (the `request_documents` parity
 //! battery in `crates/goldens` does, over every perturbation of every request document) or the
 //! tree reading other deployments keep (the conformance corpus).
@@ -69,6 +71,10 @@ const ACL_WITHOUT_TYPE: &str = "<AccessControlPolicy><Owner><ID>s3gate-main</ID>
 const ACL_WITHOUT_TYPE_MD5: &str = "wMpbk15GKyGviFti7LNwAg==";
 const ACL_OTHER_PREFIX: &str = "<AccessControlPolicy><Owner><ID>s3gate-main</ID></Owner><AccessControlList><Grant><Grantee xmlns:x=\"http://www.w3.org/2001/XMLSchema-instance\" x:type=\"CanonicalUser\"><ID>refused-grantee</ID></Grantee><Permission>READ</Permission></Grant></AccessControlList></AccessControlPolicy>";
 const ACL_OTHER_PREFIX_MD5: &str = "k0fZr7VDgG2zkPpk2J2XdA==";
+
+const EMPTY_MD5: &str = "1B2M2Y8AsgTpgAmY7PhCfg==";
+const VERSIONING_ENABLED: &str = "<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>";
+const VERSIONING_ENABLED_MD5: &str = "8qj8HSeDu3APPMQZVG06WQ==";
 
 async fn send(service: &S3Service, method: http::Method, target: &str, document: &'static str, md5: &str) -> WireResponse {
     exchange(
@@ -301,4 +307,142 @@ async fn n_a_grantee_without_the_literal_type_attribute_is_malformed_and_grants_
     let body = body_of(&read);
     assert_eq!(read.status(), 200, "{body}");
     assert!(!body.contains("refused-grantee"), "a refused grant reached storage: {body}");
+}
+
+// ── an empty body ─────────────────────────────────────────────────────────────────────────────
+
+/// `body` without the per-request ids an error document carries.
+fn without_request_ids(body: &str) -> String {
+    let mut out = body.to_owned();
+    for element in ["RequestId", "HostId"] {
+        let (open, close) = (format!("<{element}>"), format!("</{element}>"));
+        if let Some((head, rest)) = out.split_once(&open)
+            && let Some((_, tail)) = rest.split_once(&close)
+        {
+            out = format!("{head}{tail}");
+        }
+    }
+    out
+}
+
+/// What every read-back an empty-body write could have changed answers: the bucket's
+/// configurations, the object's tag set and the listing.
+async fn read_backs(service: &S3Service) -> Vec<(u16, String)> {
+    let mut out = Vec::new();
+    for target in [
+        "/documents?cors",
+        "/documents?encryption",
+        "/documents?publicAccessBlock",
+        "/documents?tagging",
+        "/documents?versioning",
+        "/documents?lifecycle",
+        "/documents/key?tagging",
+        "/documents",
+    ] {
+        let read = get(service, target).await;
+        out.push((read.status().as_u16(), without_request_ids(&body_of(&read))));
+    }
+    out
+}
+
+/// Negative — an empty body where legacy RustFS requires the document is `400
+/// MissingRequestBodyError`, the legacy stack's answer before any handler runs, on every such
+/// write this launcher serves (a batch delete, the CORS, encryption, public-access-block, tagging
+/// and versioning configurations, and an object's tag set), and none of them stores, replaces or
+/// deletes anything.
+#[tokio::test]
+async fn n_an_empty_required_document_is_a_missing_body_and_changes_nothing() {
+    let root = TestRoot::new();
+    let service = bucket(&root).await;
+    accepted(
+        &exchange(&service, as_main(http::Method::PUT, "/documents/key", Bytes::from_static(b"x"))).await,
+        "the object",
+    );
+    accepted(
+        &send(&service, http::Method::PUT, "/documents?tagging", TAGGING_KEPT, TAGGING_KEPT_MD5).await,
+        "the kept tag set",
+    );
+    accepted(
+        &send(&service, http::Method::PUT, "/documents/key?tagging", TAGGING_KEPT, TAGGING_KEPT_MD5).await,
+        "the kept object tag set",
+    );
+    accepted(
+        &send(
+            &service,
+            http::Method::PUT,
+            "/documents?versioning",
+            VERSIONING_ENABLED,
+            VERSIONING_ENABLED_MD5,
+        )
+        .await,
+        "versioning",
+    );
+    let before = read_backs(&service).await;
+    for (method, target) in [
+        (http::Method::POST, "/documents?delete"),
+        (http::Method::PUT, "/documents?cors"),
+        (http::Method::PUT, "/documents?encryption"),
+        (http::Method::PUT, "/documents?publicAccessBlock"),
+        (http::Method::PUT, "/documents?tagging"),
+        (http::Method::PUT, "/documents?versioning"),
+        (http::Method::PUT, "/documents/key?tagging"),
+    ] {
+        let response = send(&service, method, target, "", EMPTY_MD5).await;
+        let body = body_of(&response);
+        assert_eq!(response.status(), 400, "{target}: {body}");
+        assert!(body.contains("<Code>MissingRequestBodyError</Code>"), "{target}: {body}");
+    }
+    assert_eq!(read_backs(&service).await, before, "an empty body changed storage");
+}
+
+/// Negative — an empty multipart completion is `400 MalformedXML`, as the legacy stack reads it,
+/// and the upload stays open with no object written.
+#[tokio::test]
+async fn n_an_empty_multipart_completion_is_malformed_and_completes_nothing() {
+    let root = TestRoot::new();
+    let service = bucket(&root).await;
+    let created = exchange(&service, as_main(http::Method::POST, "/documents/parts?uploads", Bytes::new())).await;
+    let created = body_of(&created);
+    let upload_id = created
+        .split_once("<UploadId>")
+        .and_then(|(_, rest)| rest.split_once("</UploadId>"))
+        .map(|(id, _)| id.to_owned())
+        .unwrap_or_else(|| panic!("no upload id: {created}"));
+    let target = format!("/documents/parts?uploadId={upload_id}");
+    let response = exchange(
+        &service,
+        signed(
+            MAIN_KEY,
+            MAIN_SECRET,
+            http::Method::POST,
+            &target,
+            Bytes::new(),
+            &[("content-md5", EMPTY_MD5)],
+        ),
+    )
+    .await;
+    refused_as_malformed(&response, "an empty completion");
+    let uploads = body_of(&get(&service, "/documents?uploads").await);
+    assert!(uploads.contains(&upload_id), "the upload closed: {uploads}");
+    assert_eq!(get(&service, "/documents/parts").await.status(), 404, "an object was written");
+}
+
+/// Negative — Legacy-compat (rustfs/backlog#2684): an empty lifecycle write is `400
+/// InvalidArgument` with legacy RustFS's "Invalid argument." — legacy RustFS reads the document
+/// as optional and its handler refuses none — and the stored configuration stays.
+#[tokio::test]
+async fn n_an_empty_lifecycle_write_is_the_handlers_invalid_argument_and_replaces_nothing() {
+    let root = TestRoot::new();
+    let service = bucket(&root).await;
+    accepted(
+        &send(&service, http::Method::PUT, "/documents?lifecycle", LIFECYCLE_KEPT, LIFECYCLE_KEPT_MD5).await,
+        "the kept configuration",
+    );
+    let response = send(&service, http::Method::PUT, "/documents?lifecycle", "", EMPTY_MD5).await;
+    let body = body_of(&response);
+    assert_eq!(response.status(), 400, "{body}");
+    assert!(body.contains("<Code>InvalidArgument</Code>"), "{body}");
+    assert!(body.contains("<Message>Invalid argument.</Message>"), "{body}");
+    let read = get(&service, "/documents?lifecycle").await;
+    assert!(body_of(&read).contains("<ID>kept</ID>"), "{}", body_of(&read));
 }

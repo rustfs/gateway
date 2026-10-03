@@ -17,6 +17,7 @@ rustfs-gateway-core = { path = "../crates/core" }
 # The migration-only differential (rustfs/backlog#1762): the decode_diff and encode_diff properties.
 rustfs-gateway-difftest = { path = "../crates/difftest" }
 rustfs-gateway-http = { path = "../crates/http" }
+rustfs-gateway-server = { path = "../crates/server" }
 rustfs-gateway-sig = { path = "../crates/sig" }
 rustfs-gateway-stream = { path = "../crates/stream" }
 rustfs-gateway-types = { path = "../crates/types" }
@@ -24,6 +25,10 @@ rustfs-gateway-xml = { path = "../crates/xml" }
 # The `policy_json` property's reference reader: the JSON reader RustFS loads a stored policy with.
 serde = "1"
 serde_json = "1"
+# The `self_held_http1` property drives the production driver over a real loopback socket.
+http-body-util = "0.1"
+tokio = { version = "1", features = ["io-util", "net", "rt-multi-thread", "time"] }
+tower = { version = "0.5", features = ["util"] }
 
 [workspace]
 members = ["."]
@@ -164,6 +169,27 @@ bench = false
 [[bin]]
 name = "encode_diff"
 path = "fuzz_targets/encode_diff.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "sigv2_parse"
+path = "fuzz_targets/sigv2_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "presigned_query_parse"
+path = "fuzz_targets/presigned_query_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "self_held_http1"
+path = "fuzz_targets/self_held_http1.rs"
 test = false
 doc = false
 bench = false

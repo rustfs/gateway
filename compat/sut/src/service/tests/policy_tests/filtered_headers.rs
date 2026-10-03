@@ -50,6 +50,11 @@ async fn fixture(document: &'static str, md5: &str, rewrite: Rewrite) -> (TestRo
             RegionSet::new(["us-east-1"]).expect("a region"),
         ))
         .authorizer(authorizer)
+        // This bespoke assembly is the RustFS profile (fs backend, `PolicyAuthorizer`), so it
+        // waives the ACL header permission `compat/sut`'s real assembly waives; without it an
+        // `x-amz-acl` write would require `s3:PutObjectAcl` and this ACL-condition test would be
+        // measuring that instead.
+        .authorize_header_permissions_as_legacy_rustfs()
         .stage_filter(wire_filter(move |head: &mut WireHead<'_>| {
             let name = http::HeaderName::from_static("x-amz-acl");
             match &rewrite {

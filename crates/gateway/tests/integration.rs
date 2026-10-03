@@ -44,14 +44,20 @@ mod backend_reachability;
 mod body_literals;
 #[path = "body_refusal_sentences.rs"]
 mod body_refusal_sentences;
+#[path = "bodyless_bodies.rs"]
+mod bodyless_bodies;
 #[path = "bodyless_payload_digest.rs"]
 mod bodyless_payload_digest;
 #[path = "bucket_config_reachability.rs"]
 mod bucket_config_reachability;
+#[path = "buffered_lengths.rs"]
+mod buffered_lengths;
 #[path = "checksum_omissions.rs"]
 mod checksum_omissions;
 #[path = "chunked_allocations.rs"]
 mod chunked_allocations;
+#[path = "claimed_body_ceiling.rs"]
+mod claimed_body_ceiling;
 #[path = "classification.rs"]
 mod classification;
 #[path = "committed_head_runtime.rs"]
@@ -82,6 +88,8 @@ mod empty_headers_absent;
 mod empty_upload_without_length;
 #[path = "error_context_filters.rs"]
 mod error_context_filters;
+#[path = "extra_permissions_runtime.rs"]
+mod extra_permissions_runtime;
 #[path = "extra_response_headers.rs"]
 mod extra_response_headers;
 #[path = "facade_probe.rs"]
@@ -96,12 +104,20 @@ mod governor_runtime;
 mod governor_streaming;
 #[path = "handler_panic.rs"]
 mod handler_panic;
+#[path = "host_body_bounds.rs"]
+mod host_body_bounds;
 #[path = "host_deadlines.rs"]
 mod host_deadlines;
+#[path = "host_reporting.rs"]
+mod host_reporting;
+#[path = "host_request_id.rs"]
+mod host_request_id;
 #[path = "host_resolve_replay.rs"]
 mod host_resolve_replay;
 #[path = "ingest_assembly.rs"]
 mod ingest_assembly;
+#[path = "legacy_chunk_limits.rs"]
+mod legacy_chunk_limits;
 #[path = "legacy_cors.rs"]
 mod legacy_cors;
 #[path = "lifecycle_reachability.rs"]
@@ -184,8 +200,12 @@ mod select_frame_records;
 mod select_restore_intent;
 #[path = "select_restore_reachability.rs"]
 mod select_restore_reachability;
+#[path = "self_held_expect_continue.rs"]
+mod self_held_expect_continue;
 #[path = "self_held_http1.rs"]
 mod self_held_http1;
+#[path = "self_held_refusal_drain.rs"]
+mod self_held_refusal_drain;
 #[path = "service_clone_allocations.rs"]
 mod service_clone_allocations;
 #[path = "service_concurrency.rs"]
@@ -214,11 +234,15 @@ mod throughput_request;
 mod tracing_events;
 #[path = "unknown_checksum_algorithms.rs"]
 mod unknown_checksum_algorithms;
+#[path = "unread_body_drain.rs"]
+mod unread_body_drain;
 #[path = "unread_body_refusal.rs"]
 mod unread_body_refusal;
 #[path = "upload_object_ceiling.rs"]
 mod upload_object_ceiling;
 #[path = "verified_scope_runtime.rs"]
 mod verified_scope_runtime;
+#[path = "version_actions_runtime.rs"]
+mod version_actions_runtime;
 #[path = "vhost_resolution.rs"]
 mod vhost_resolution;

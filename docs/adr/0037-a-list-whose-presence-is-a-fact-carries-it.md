@@ -1,4 +1,4 @@
-# ADR-0036: A list whose presence is a fact of its own carries it
+# ADR-0037: A list whose presence is a fact of its own carries it
 
 - Status: Accepted
 - Date: 2026-09-30

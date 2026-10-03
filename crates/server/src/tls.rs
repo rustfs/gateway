@@ -23,11 +23,13 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use arc_swap::ArcSwap;
-use hyper_util::rt::TokioExecutor;
 use hyper_util::server::conn::auto;
 use rustls::ServerConfig as RustlsServerConfig;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use thiserror::Error;
+
+use crate::config::ServerConfig;
+use crate::send_deadline::StreamExecutor;
 
 /// The ALPN protocols a listener advertises unless configured otherwise, in server preference
 /// order: HTTP/2 over TLS is identified only by `h2` (RFC 9113 section 3.2).
@@ -150,12 +152,17 @@ pub enum TlsReloadError {
 }
 
 /// The connection builder for the protocol ALPN negotiated: a negotiated protocol is the only one
-/// the connection speaks, and without ALPN both remain available by prior knowledge.
-pub(crate) fn protocol_builder(negotiated: Option<&[u8]>) -> auto::Builder<TokioExecutor> {
-    let builder = auto::Builder::new(TokioExecutor::new());
+/// the connection speaks. Without ALPN, both remain available by prior knowledge when
+/// [`ServerConfig::h2_prior_knowledge`] allows it, and only HTTP/1.1 otherwise.
+///
+/// Every HTTP/2 stream runs under its send-progress deadline of
+/// [`ServerConfig::write_progress_timeout`] (`crate::send_deadline`).
+pub(crate) fn protocol_builder(negotiated: Option<&[u8]>, config: &ServerConfig) -> auto::Builder<StreamExecutor> {
+    let builder = auto::Builder::new(StreamExecutor::new(config.write_progress_timeout));
     match negotiated {
         Some(b"h2") => builder.http2_only(),
         Some(b"http/1.1") => builder.http1_only(),
-        _ => builder,
+        _ if config.h2_prior_knowledge => builder,
+        _ => builder.http1_only(),
     }
 }

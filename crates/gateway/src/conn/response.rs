@@ -479,10 +479,6 @@ pub(super) async fn write_bad_request(io: &mut ConnectionIo) -> io::Result<()> {
     .await
 }
 
-pub(super) async fn write_continue(io: &mut ConnectionIo) -> io::Result<()> {
-    write_all_progress(&mut io.stream, b"HTTP/1.1 100 Continue\r\n\r\n").await
-}
-
 pub(super) async fn write_expectation_failed(io: &mut ConnectionIo) -> io::Result<()> {
     write_all_progress(
         &mut io.stream,

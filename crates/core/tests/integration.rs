@@ -74,6 +74,9 @@ mod event_stream_frame_replay;
 #[path = "ext_field_policy.rs"]
 mod ext_field_policy;
 
+#[path = "extra_permissions.rs"]
+mod extra_permissions;
+
 #[path = "golden.rs"]
 mod golden;
 
@@ -178,6 +181,9 @@ mod update_object_encryption_roundtrip;
 
 #[path = "upload_capability.rs"]
 mod upload_capability;
+
+#[path = "version_requirements.rs"]
+mod version_requirements;
 
 #[path = "website_roundtrip.rs"]
 mod website_roundtrip;
