@@ -50,6 +50,8 @@ mod bodyless_bodies;
 mod bodyless_payload_digest;
 #[path = "bucket_config_reachability.rs"]
 mod bucket_config_reachability;
+#[path = "buffered_lengths.rs"]
+mod buffered_lengths;
 #[path = "checksum_omissions.rs"]
 mod checksum_omissions;
 #[path = "chunked_allocations.rs"]

@@ -118,7 +118,7 @@ const CEILING: u64 = 64 * 1024 * 1024;
 
 /// A header-signed request head: `extra` headers are signed with the rest, `payload` is declared
 /// and signed, and `length` is sent as `Content-Length` when given.
-fn head(
+pub(super) fn head(
     method: http::Method,
     target: &str,
     extra: &[(&str, &str)],
@@ -129,7 +129,7 @@ fn head(
 }
 
 /// [`head`], declaring `decoded` as the aws-chunked body's decoded length when given.
-fn streaming_head(
+pub(super) fn streaming_head(
     method: http::Method,
     target: &str,
     extra: &[(&str, &str)],
@@ -173,12 +173,12 @@ fn streaming_head(
 }
 
 /// `bytes` as a body that counts how many of its bytes were polled.
-fn counted(request: http::request::Builder, bytes: &'static [u8]) -> (http::Request<CountingBody>, Arc<AtomicU64>) {
+pub(super) fn counted(request: http::request::Builder, bytes: &'static [u8]) -> (http::Request<CountingBody>, Arc<AtomicU64>) {
     let (body, polled) = CountingBody::new(Bytes::from_static(bytes));
     (request.body(body).expect("a valid request"), polled)
 }
 
-async fn answer<B>(service: &S3Service, request: http::Request<B>) -> (http::StatusCode, String)
+pub(super) async fn answer<B>(service: &S3Service, request: http::Request<B>) -> (http::StatusCode, String)
 where
     B: http_body::Body + Send + 'static,
     B::Data: Send,

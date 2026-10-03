@@ -288,6 +288,10 @@ pub(crate) fn build_service(
             // creation sent a body is answered as without one, whatever the body declares, and the
             // body is never polled (rustfs/gateway#1173).
             .leave_bodies_of_bodyless_operations_unread()
+            // And it refuses a buffered write it cannot size: a signed one over a chunked transfer
+            // before reading it, and one decoded from aws-chunked framing or carried without a
+            // length once read (rustfs/gateway#1173).
+            .refuse_unsized_buffered_bodies_as_legacy_rustfs()
             // RustFS, built with MinIO support, reads a versioning or object-lock body that is the
             // bare word `Enabled` as the document it stands for (rustfs/backlog#1677, R6).
             .accept_minio_body_literals()
