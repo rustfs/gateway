@@ -54,7 +54,13 @@ impl OperationCodec for dto::GetBucketMetadataConfiguration {
         // GetBucketMetadataConfigurationResult — the XML response body, rooted at `GetBucketMetadataConfigurationResult`.
         if let Some(v) = output.get_bucket_metadata_configuration_result.as_ref() {
             let mut writer = rustfs_gateway_xml::XmlWriter::document();
-            writer.open("GetBucketMetadataConfigurationResult", Some(rustfs_gateway_xml::S3_XMLNS));
+            writer.legacy_layout(request.rustfs_response_layout());
+            let xmlns = if request.rustfs_response_layout() {
+                None
+            } else {
+                Some(rustfs_gateway_xml::S3_XMLNS)
+            };
+            writer.open("GetBucketMetadataConfigurationResult", xmlns);
             write_get_bucket_metadata_configuration_result(&mut writer, v)?;
             writer.close();
             response.body = ResponseBody::Complete(writer.finish().into_bytes());
@@ -73,6 +79,7 @@ fn write_annotation_table_configuration_result(
     writer: &mut rustfs_gateway_xml::XmlWriter,
     value: &dto::AnnotationTableConfigurationResult,
 ) -> Result<(), CodecError> {
+    writer.order_children(rustfs_order::ANNOTATION_TABLE_CONFIGURATION_RESULT);
     {
         let v = &value.configuration_state;
         writer.element("ConfigurationState", v.as_str());
@@ -102,6 +109,7 @@ fn write_destination_result(
     writer: &mut rustfs_gateway_xml::XmlWriter,
     value: &dto::DestinationResult,
 ) -> Result<(), CodecError> {
+    writer.order_children(rustfs_order::DESTINATION_RESULT);
     if let Some(v) = value.table_bucket_type.as_ref() {
         writer.element("TableBucketType", v.as_str());
     }
@@ -144,6 +152,7 @@ fn write_inventory_table_configuration_result(
     writer: &mut rustfs_gateway_xml::XmlWriter,
     value: &dto::InventoryTableConfigurationResult,
 ) -> Result<(), CodecError> {
+    writer.order_children(rustfs_order::INVENTORY_TABLE_CONFIGURATION_RESULT);
     {
         let v = &value.configuration_state;
         writer.element("ConfigurationState", v.as_str());
@@ -170,6 +179,7 @@ fn write_journal_table_configuration_result(
     writer: &mut rustfs_gateway_xml::XmlWriter,
     value: &dto::JournalTableConfigurationResult,
 ) -> Result<(), CodecError> {
+    writer.order_children(rustfs_order::JOURNAL_TABLE_CONFIGURATION_RESULT);
     {
         let v = &value.table_status;
         writer.element("TableStatus", v.as_str());
@@ -200,6 +210,7 @@ fn write_metadata_configuration_result(
     writer: &mut rustfs_gateway_xml::XmlWriter,
     value: &dto::MetadataConfigurationResult,
 ) -> Result<(), CodecError> {
+    writer.order_children(rustfs_order::METADATA_CONFIGURATION_RESULT);
     {
         let v = &value.destination_result;
         writer.open("DestinationResult", None);
@@ -226,6 +237,7 @@ fn write_metadata_configuration_result(
 
 /// Writes one `RecordExpiration` element's children, in the wire order the IR records.
 fn write_record_expiration(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::RecordExpiration) -> Result<(), CodecError> {
+    writer.order_children(rustfs_order::RECORD_EXPIRATION);
     {
         let v = &value.expiration;
         writer.element("Expiration", v.as_str());
@@ -234,4 +246,17 @@ fn write_record_expiration(writer: &mut rustfs_gateway_xml::XmlWriter, value: &d
         writer.element("Days", &v.to_string());
     }
     Ok(())
+}
+
+/// The order legacy RustFS writes each response element's children in (rustfs/gateway#1078):
+/// the order the legacy stack's structure declares its fields in.
+/// Honoured under `MetaView::rustfs_response_layout`; generated from the IR.
+#[rustfmt::skip]
+mod rustfs_order {
+    pub(super) const ANNOTATION_TABLE_CONFIGURATION_RESULT: &[&str] = &["ConfigurationState", "Error", "Role", "TableArn", "TableName", "TableStatus"];
+    pub(super) const DESTINATION_RESULT: &[&str] = &["TableBucketArn", "TableBucketType", "TableNamespace"];
+    pub(super) const INVENTORY_TABLE_CONFIGURATION_RESULT: &[&str] = &["ConfigurationState", "Error", "TableArn", "TableName", "TableStatus"];
+    pub(super) const JOURNAL_TABLE_CONFIGURATION_RESULT: &[&str] = &["Error", "RecordExpiration", "TableArn", "TableName", "TableStatus"];
+    pub(super) const METADATA_CONFIGURATION_RESULT: &[&str] = &["AnnotationTableConfigurationResult", "DestinationResult", "InventoryTableConfigurationResult", "JournalTableConfigurationResult"];
+    pub(super) const RECORD_EXPIRATION: &[&str] = &["Days", "Expiration"];
 }

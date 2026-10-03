@@ -56,10 +56,17 @@ pub static CONDITION_KIND: RequestKind = RequestKind::Read;
 /// The entity-tag conditions evaluated against the object this request names.
 pub static CONDITIONS: [ConditionalHeader; 2] = [ConditionalHeader::IfMatch, ConditionalHeader::IfNoneMatch];
 
+/// A `HEAD` naming one version is asked `s3:GetObjectVersion`: AWS requires "the relevant read
+/// object (or version) permission"
+/// (<https://docs.aws.amazon.com/AmazonS3/latest/API/API_HeadObject.html>). Legacy RustFS asks
+/// `s3:GetObject` instead (`rustfs/src/storage/access.rs:2839` on rustfs/rustfs `d60dfbb826`); the
+/// RustFS profile keeps that (`ServiceBuilder::authorize_versions_as_legacy_rustfs`).
+static VERSION_AUTH: AuthRequirement = AuthRequirement::new("s3:GetObjectVersion", ResourceShape::Object);
+
 /// What this operation requires of a request once routing has chosen it.
 static SPEC: OperationSpec = OperationSpec::standard("HeadObject")
     .required_params(&[])
-    .auth(AuthRequirement::new("s3:GetObject", ResourceShape::Object))
+    .auth(AuthRequirement::new("s3:GetObject", ResourceShape::Object).with_version_requirement(&VERSION_AUTH))
     .build();
 
 /// Header signatures only, and not privileged.

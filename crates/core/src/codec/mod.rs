@@ -47,6 +47,7 @@
 //! * emit-or-omit for an empty member is `xml.empty_value_policy`, carried per member.
 
 mod body_literal;
+pub mod document;
 pub mod error;
 pub mod extra_headers;
 mod legacy_path;
@@ -59,6 +60,7 @@ pub mod view;
 #[cfg(test)]
 mod tests;
 
+pub use crate::codec::document::{DocumentReading, request_document};
 pub use crate::codec::error::CodecError;
 pub use crate::codec::extra_headers::{OWNED_RESPONSE_HEADERS, is_owned_response_header};
 pub use crate::codec::legacy_path::{legacy_rustfs_decodable, legacy_rustfs_target};

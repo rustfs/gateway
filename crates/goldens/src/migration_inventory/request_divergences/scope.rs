@@ -16,9 +16,10 @@
 //! reads differently from the gateway, beyond ADR-0023's `rd-loc-0004` (rustfs/backlog#1677, R2).
 //!
 //! Responsible for: `rd-loc-0005` (an empty scope region), `rd-loc-0006` (a region outside
-//! `[a-z0-9-]+`), `rd-loc-0007` (a region past the parser's 64-byte ceiling) and `rd-loc-0008` (a
-//! region carrying one of the `Authorization` header's separators), each with its ruling and its
-//! pinned test in `operation_diff/context/get_bucket_location.rs`.
+//! `[a-z0-9-]+`), `rd-loc-0007` (a region past the parser's 64-byte ceiling), `rd-loc-0008` (a
+//! region carrying one of the `Authorization` header's separators) and `rd-loc-0011` (the order in
+//! which the RustFS profile's legacy answers refuse a region the gateway cannot read), each with
+//! its ruling and its pinned test in `operation_diff/context/get_bucket_location.rs`.
 //! NOT responsible for: the register's validation and rendering, which the parent module does over
 //! every slice at once, or the other slices.
 //! Upstream: the parent module's types and evidence constants. Downstream: the parent's
@@ -26,7 +27,7 @@
 
 use super::{DivergenceFollowUp, DivergenceRuling, ERROR_RESPONSES, LOCATION_CONTEXT, RequestDivergence};
 
-pub(super) const SCOPE_DIVERGENCES: [RequestDivergence; 4] = [
+pub(super) const SCOPE_DIVERGENCES: [RequestDivergence; 5] = [
     RequestDivergence {
         id: "rd-loc-0005",
         operation: "GetBucketLocation",
@@ -97,15 +98,41 @@ pub(super) const SCOPE_DIVERGENCES: [RequestDivergence; 4] = [
         aws_evidence: "https://docs.aws.amazon.com/AmazonS3/latest/API/sigv4-auth-using-authorization-header.html",
         s3s: "reads the region up to the next /, separators included, verifies the signature over it and then refuses the \
               region: 400 InvalidRequest (403 SignatureDoesNotMatch if the signature is wrong)",
-        gateway: "403 InvalidAccessKeyId under both profiles: the header is split at its separators before the credential is \
-                  read, a region byte outside ASCII-graphic is unreadable, and every unreadable credential is normalised to \
-                  one answer. The RustFS profile keeps refusing a credential scope it cannot read unambiguously \
-                  (rustfs/backlog#1677 ruling R2)",
-        client_impact: "none can succeed on either stack; only the code and the status band differ (400 on legacy RustFS, \
-                        403 on the gateway)",
+        gateway: "403 InvalidAccessKeyId by default and with the region switches alone: the header is split at its \
+                  separators before the credential is read, a region byte outside ASCII-graphic is unreadable, and every \
+                  unreadable credential is normalised to one answer. The RustFS profile keeps refusing a credential scope it \
+                  cannot read unambiguously (rustfs/backlog#1677 ruling R2); with \
+                  SigV4Authenticator::answer_credential_scope_refusals_as_legacy_rustfs, which compat-sut turns on, it answers \
+                  legacy RustFS's 400 InvalidRequest and sentence instead, still before any key is derived (rd-loc-0011)",
+        client_impact: "none can succeed on either stack; without the legacy answers only the code and the status band \
+                        differ (400 on legacy RustFS, 403 on the gateway)",
         ruling: DivergenceRuling::KeepGateway,
         follow_up: DivergenceFollowUp::None,
         test_file: LOCATION_CONTEXT,
         test: "a_scope_region_with_a_header_separator_is_refused_by_both_stacks_with_different_codes",
+    },
+    RequestDivergence {
+        id: "rd-loc-0011",
+        operation: "GetBucketLocation",
+        request: "a SigV4 credential scope region legacy RustFS reads but the gateway's parsers cannot (a space or a comma in \
+                  the Authorization header, a tab, a DEL, a non-ASCII byte), signed with a wrong secret or presenting an \
+                  unknown access key, under the RustFS profile's legacy scope answers",
+        aws: "such a credential is malformed; S3 refuses a malformed Authorization header without authenticating it",
+        aws_evidence: "https://docs.aws.amazon.com/AmazonS3/latest/API/sigv4-auth-using-authorization-header.html",
+        s3s: "reads the region up to the next /, looks the key up and verifies the signature over it first: 403 \
+              InvalidAccessKeyId for an unknown key, 403 SignatureDoesNotMatch for a wrong signature; only a valid \
+              signature reaches the region check, 400 InvalidRequest naming the region (observed against rustfs/rustfs \
+              e870a6d25b on the header, presigned URL and browser POST surfaces)",
+        gateway: "with SigV4Authenticator::answer_credential_scope_refusals_as_legacy_rustfs, 400 InvalidRequest with legacy \
+                  RustFS's sentence, before any key is looked up or derived, whatever the signature, the key and the scope \
+                  service: the gateway derives no key from a region it cannot read (rustfs/backlog#1677 ruling R2). A \
+                  correctly signed request gets legacy RustFS's answer exactly; a region the parsers do read (an uppercase \
+                  letter, a comma in a query or a form) is verified first, as legacy RustFS verifies it",
+        client_impact: "none can succeed on either stack; a client with a wrong secret or an unknown key and such a region \
+                        reads the region refusal (400) instead of the credential refusal (403)",
+        ruling: DivergenceRuling::KeepGateway,
+        follow_up: DivergenceFollowUp::None,
+        test_file: LOCATION_CONTEXT,
+        test: "a_scope_region_the_gateway_cannot_read_is_refused_before_the_signature_under_the_legacy_answers",
     },
 ];

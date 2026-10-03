@@ -28,6 +28,7 @@ mod response;
 
 use std::io;
 use std::sync::Arc;
+use std::time::Duration;
 
 use http::{Request, Response};
 use rustfs_gateway_server::{
@@ -199,7 +200,7 @@ where
             force_close = true;
         }
         if !locked.body_complete()
-            && (force_close || response_must_close || !locked.drain_request_body(MAX_LINGER_DRAIN_BYTES).await.unwrap_or(false))
+            && (force_close || response_must_close || !drain_owed_body(&mut locked, config.lingering_close_time).await)
         {
             force_close = true;
             locked.stream.mark_request_body_unfinished();
@@ -213,6 +214,22 @@ where
         }
     }
     close_socket(&io).await;
+}
+
+/// Reads and discards what a refused request still owes, so its connection can serve the next one.
+///
+/// Bounded twice: by [`MAX_LINGER_DRAIN_BYTES`] of body, and by `budget` of time — the same
+/// patience `ServerConfig::lingering_close_time` gives a closing peer that still owes a body.
+/// Without the second bound a peer that declared a body and stopped sending held its connection,
+/// and the request permit of the response waiting behind this drain, for as long as it liked
+/// (rustfs/gateway#1207). A drain that runs out of either answers `false`, and the caller closes
+/// after the response instead. Hyper's driver never waits here at all: it discards what has
+/// already arrived and closes otherwise.
+async fn drain_owed_body(io: &mut ConnectionIo, budget: Duration) -> bool {
+    matches!(
+        tokio::time::timeout(budget, io.drain_request_body(MAX_LINGER_DRAIN_BYTES)).await,
+        Ok(Ok(true))
+    )
 }
 
 async fn close_socket(io: &Arc<Mutex<ConnectionIo>>) {

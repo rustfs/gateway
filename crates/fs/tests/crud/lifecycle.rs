@@ -179,6 +179,36 @@ async fn direct_invalid_configuration_is_refused_without_replacing_state() {
     assert!(response_body(&retained).contains("<ID>archive</ID>"));
 }
 
+/// Negative — a write without a document is `400 InvalidArgument` with legacy RustFS's sentence,
+/// as its handler answers one (`rustfs/src/app/bucket_usecase.rs:2348` at rustfs/rustfs@e870a6d25),
+/// and the stored configuration stays (rustfs/gateway#1078).
+#[tokio::test]
+async fn a_write_without_a_document_is_invalid_argument_and_replaces_nothing() {
+    let root = TestRoot::new();
+    let (backend, service) = service(&root);
+    create_bucket(&service, "absent").await;
+    assert_eq!(put_lifecycle(&service, "absent").await.status(), 200);
+    let error = Handler::<dto::PutBucketLifecycleConfiguration>::call(
+        backend.as_ref(),
+        Req::new(
+            dto::PutBucketLifecycleConfigurationInput {
+                bucket: BucketName::new("absent").expect("a valid bucket"),
+                ..dto::PutBucketLifecycleConfigurationInput::default()
+            },
+            sse_proof(),
+        ),
+    )
+    .await
+    .expect_err("a write without a document must be refused");
+    assert_eq!(
+        error,
+        rustfs_gateway::HandlerError::new(rustfs_gateway::ErrorCode::INVALID_ARGUMENT, "Invalid argument.")
+    );
+    let retained = exchange(&service, signed(http::Method::GET, "/absent?lifecycle", Bytes::new())).await;
+    assert_eq!(retained.status(), 200);
+    assert!(response_body(&retained).contains("<ID>archive</ID>"));
+}
+
 /// Negative — malformed persisted bytes fail closed instead of becoming an absent policy.
 #[tokio::test]
 async fn corrupt_lifecycle_authority_is_an_internal_error() {

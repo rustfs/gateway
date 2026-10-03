@@ -34,10 +34,17 @@ use rustfs_gateway_types::dto::{DeleteObject, DeleteObjectInput, DeleteObjectOut
 use crate::op::{AuthRequirement, HasOperation, Operation, OperationOrigin, ResourceShape, StandardOperation};
 use crate::registry::OperationSpec;
 
+/// A delete naming one version removes that version for good, and is asked `s3:DeleteObjectVersion`
+/// alone: AWS requires it when `versionId` is specified
+/// (<https://docs.aws.amazon.com/AmazonS3/latest/userguide/using-with-s3-policy-actions.html>), and
+/// legacy RustFS asks it (`rustfs/src/storage/access.rs:1029-1035`, `:2423` on rustfs/rustfs
+/// `d60dfbb826`).
+static VERSION_AUTH: AuthRequirement = AuthRequirement::new("s3:DeleteObjectVersion", ResourceShape::Object);
+
 /// What this operation requires of a request once routing has chosen it.
 static SPEC: OperationSpec = OperationSpec::standard("DeleteObject")
     .required_params(&[])
-    .auth(AuthRequirement::new("s3:DeleteObject", ResourceShape::Object))
+    .auth(AuthRequirement::new("s3:DeleteObject", ResourceShape::Object).with_version_requirement(&VERSION_AUTH))
     .build();
 
 /// Header signatures only, and not privileged.

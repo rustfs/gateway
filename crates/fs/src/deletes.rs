@@ -42,7 +42,7 @@ impl FsBackend {
     /// reached. Off by default.
     #[must_use]
     pub fn refusing_batch_deletes_of(mut self, refuses: fn(&str) -> bool) -> Self {
-        self.batch_delete_refusal = Some(refuses);
+        self.rustfs_parity.batch_delete_refusal = Some(refuses);
         self
     }
 }
@@ -89,8 +89,9 @@ impl Handler<DeleteObjects> for FsBackend {
         let quiet = input.delete.quiet.unwrap_or(false);
         let mut deleted = Vec::new();
         let mut errors = Vec::new();
+        let refusal = self.rustfs_parity.batch_delete_refusal;
         for (key, version_id) in entries {
-            if self.batch_delete_refusal.is_some_and(|refuses| refuses(key.as_str())) {
+            if refusal.is_some_and(|refuses| refuses(key.as_str())) {
                 errors.push(Error {
                     key: Some(key),
                     version_id,

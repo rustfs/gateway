@@ -49,10 +49,18 @@ use crate::registry::OperationSpec;
 /// The target whose canned-ACL set governs this operation: an object's.
 pub static ACL_TARGET: AclTarget = AclTarget::Object;
 
+/// A request naming one version is asked `s3:GetObjectVersionAcl`, as AWS requires when `versionId`
+/// is specified
+/// (<https://docs.aws.amazon.com/AmazonS3/latest/userguide/using-with-s3-policy-actions.html>).
+/// Legacy RustFS asks `s3:GetObjectAcl` instead (`rustfs/src/storage/access.rs:2721` on
+/// rustfs/rustfs `d60dfbb826`); the RustFS profile keeps that
+/// (`ServiceBuilder::authorize_versions_as_legacy_rustfs`).
+static VERSION_AUTH: AuthRequirement = AuthRequirement::new("s3:GetObjectVersionAcl", ResourceShape::Object);
+
 /// What this operation requires of a request once routing has chosen it.
 static SPEC: OperationSpec = OperationSpec::standard("GetObjectAcl")
     .required_params(&[])
-    .auth(AuthRequirement::new("s3:GetObjectAcl", ResourceShape::Object))
+    .auth(AuthRequirement::new("s3:GetObjectAcl", ResourceShape::Object).with_version_requirement(&VERSION_AUTH))
     .build();
 
 /// Header signatures only, and not privileged.

@@ -52,7 +52,9 @@ impl OperationCodec for dto::GetBucketWebsite {
         let mut response = EncodedResponse::of(status);
         response.status = status_code(status)?;
         let mut writer = rustfs_gateway_xml::XmlWriter::document();
+        writer.legacy_layout(request.rustfs_response_layout());
         writer.open("WebsiteConfiguration", Some(rustfs_gateway_xml::S3_XMLNS));
+        writer.order_children(rustfs_order::RESPONSE);
         if let Some(v) = output.redirect_all_requests_to.as_ref() {
             writer.open("RedirectAllRequestsTo", None);
             write_redirect_all_requests_to(&mut writer, v)?;
@@ -164,4 +166,12 @@ fn write_routing_rule(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::R
         writer.close();
     }
     Ok(())
+}
+
+/// The order legacy RustFS writes each response element's children in (rustfs/gateway#1078):
+/// the order the legacy stack's structure declares its fields in.
+/// Honoured under `MetaView::rustfs_response_layout`; generated from the IR.
+#[rustfmt::skip]
+mod rustfs_order {
+    pub(super) const RESPONSE: &[&str] = &["ErrorDocument", "IndexDocument", "RedirectAllRequestsTo", "RoutingRules"];
 }

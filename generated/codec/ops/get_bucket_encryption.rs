@@ -54,7 +54,13 @@ impl OperationCodec for dto::GetBucketEncryption {
         // ServerSideEncryptionConfiguration — the XML response body, rooted at `ServerSideEncryptionConfiguration`.
         if let Some(v) = output.server_side_encryption_configuration.as_ref() {
             let mut writer = rustfs_gateway_xml::XmlWriter::document();
-            writer.open("ServerSideEncryptionConfiguration", Some(rustfs_gateway_xml::S3_XMLNS));
+            writer.legacy_layout(request.rustfs_response_layout());
+            let xmlns = if request.rustfs_response_layout() {
+                None
+            } else {
+                Some(rustfs_gateway_xml::S3_XMLNS)
+            };
+            writer.open("ServerSideEncryptionConfiguration", xmlns);
             write_server_side_encryption_configuration(&mut writer, v)?;
             writer.close();
             response.body = ResponseBody::Complete(writer.finish().into_bytes());
@@ -84,6 +90,7 @@ fn write_server_side_encryption_by_default(
     writer: &mut rustfs_gateway_xml::XmlWriter,
     value: &dto::ServerSideEncryptionByDefault,
 ) -> Result<(), CodecError> {
+    writer.order_children(rustfs_order::SERVER_SIDE_ENCRYPTION_BY_DEFAULT);
     {
         let v = &value.sse_algorithm;
         writer.element("SSEAlgorithm", v.as_str());
@@ -112,6 +119,7 @@ fn write_server_side_encryption_rule(
     writer: &mut rustfs_gateway_xml::XmlWriter,
     value: &dto::ServerSideEncryptionRule,
 ) -> Result<(), CodecError> {
+    writer.order_children(rustfs_order::SERVER_SIDE_ENCRYPTION_RULE);
     if let Some(v) = value.apply_server_side_encryption_by_default.as_ref() {
         writer.open("ApplyServerSideEncryptionByDefault", None);
         write_server_side_encryption_by_default(writer, v)?;
@@ -126,4 +134,13 @@ fn write_server_side_encryption_rule(
         writer.close();
     }
     Ok(())
+}
+
+/// The order legacy RustFS writes each response element's children in (rustfs/gateway#1078):
+/// the order the legacy stack's structure declares its fields in.
+/// Honoured under `MetaView::rustfs_response_layout`; generated from the IR.
+#[rustfmt::skip]
+mod rustfs_order {
+    pub(super) const SERVER_SIDE_ENCRYPTION_BY_DEFAULT: &[&str] = &["KMSMasterKeyID", "SSEAlgorithm"];
+    pub(super) const SERVER_SIDE_ENCRYPTION_RULE: &[&str] = &["ApplyServerSideEncryptionByDefault", "BlockedEncryptionTypes", "BucketKeyEnabled"];
 }
