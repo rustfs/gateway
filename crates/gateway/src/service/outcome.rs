@@ -17,7 +17,8 @@
 //! Responsible for: constructing an outcome and rendering its ordinary, contextual,
 //! preflight and governor refusals while recording their code and stage.
 //! NOT responsible for: running pipeline stages, choosing a trace, or notifying observers.
-//! Upstream and downstream: `super::S3Service`, which owns the request walk.
+//! Upstream: `super::S3Service`, which owns the request walk.
+//! Downstream: `super::S3Service`, which consumes the rendered response and recorded outcome.
 
 use http::{Method, Response};
 use rustfs_gateway_core::cors::{PreflightRefusalCause, VARY, VARY_ORIGIN, preflight_refusal_for};
