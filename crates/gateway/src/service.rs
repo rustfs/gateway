@@ -115,14 +115,13 @@ use bytes::Bytes;
 use http::{Method, Request, Response};
 use rustfs_gateway_core::cors::{
     CorsPolicy, PreflightClass, PreflightRefusalCause, VARY, VARY_ORIGIN, classify, headers_apply_to_post_auth_errors,
-    invalid_target_is_uniform_refusal, preflight_bypasses_pipeline, preflight_refusal_for,
+    invalid_target_is_uniform_refusal, preflight_bypasses_pipeline,
 };
 use rustfs_gateway_core::{
     Decision, EncodedResponse, ErrorContext, HandlerError, MetaView, OwnedResource, RedirectTarget, RegionLabel, RequestBodyMode,
     RequestContextView, ResourceShape, ResponseBody, ResponseKind, RouteRequestParts, SseConfig, StaticDispatchError,
     StaticDispatchOutcome, TransportSecurity,
     dispatch::{NO_ROUTE_MESSAGE, NOT_REGISTERED_MESSAGE},
-    resolve,
 };
 use rustfs_gateway_http::{Limits, WireRequest};
 use rustfs_gateway_sig::{
@@ -150,8 +149,7 @@ use crate::payload_header::signed_payload;
 use crate::post_object::{PostObjectPrelude, ResolvedPostObject};
 pub use crate::posture::SecurityPosture;
 use crate::render::{
-    S3Error, from_auth, from_auth_context, from_auth_with_detail, from_codec, from_denial, from_handler, from_pre_auth, from_sse,
-    render,
+    from_auth, from_auth_context, from_auth_with_detail, from_codec, from_denial, from_handler, from_pre_auth, from_sse,
 };
 use crate::request_config::{Entered, Guarded, HandlerDeadlineReport, RequestConfig, RouteAuthorized};
 use crate::request_deadline::{elapsed_since, hold_failure_floor, policy_snapshot_with_timeout};
@@ -160,6 +158,7 @@ use crate::trace::{RequestTrace, TraceSource};
 use crate::{response::into_response, routing::RuntimeAssembly};
 
 mod cors;
+mod outcome;
 mod update;
 
 use self::cors::CorsDecoration;
@@ -1567,97 +1566,6 @@ struct Outcome<'a> {
     /// The stage that refused the request, when the gateway refused it; reported once, at the end
     /// (`crate::logging::request_refused`).
     refused: Option<Refused>,
-}
-
-impl<'a> Outcome<'a> {
-    /// An outcome that knows nothing yet, except which request it is about.
-    fn new(trace: &'a RequestTrace, method: &Method, credential_sentences: CredentialSentences) -> Self {
-        Self {
-            trace,
-            operation: None,
-            identity: None,
-            error: None,
-            cors: None,
-            credential_sentences,
-            refused: None,
-            response_kind: if *method == Method::HEAD {
-                ResponseKind::Head
-            } else {
-                ResponseKind::Other
-            },
-        }
-    }
-
-    /// Renders a refusal and records its code, so every early return goes through one place.
-    fn refuse(&mut self, error: S3Error) -> Response<Body> {
-        let error = self.credential_sentences.restyle(error);
-        self.error = error.code().cloned();
-        render(&error, self.trace)
-    }
-
-    fn refuse_handler(&mut self, error: HandlerError) -> Response<Body> {
-        self.refuse(from_handler(error, self.response_kind, ConnectionIntent::MayKeepAlive))
-    }
-
-    /// [`Outcome::refuse`], remembering which stage refused, for the request's refusal event.
-    fn refuse_at(&mut self, refused: Refused, error: S3Error) -> Response<Body> {
-        self.refuse_as(Some(refused), error)
-    }
-
-    /// [`Outcome::refuse_at`] for a refusal whose stage is read off the refusal itself, and which
-    /// may be no refusal of the gateway's at all (`None`).
-    fn refuse_as(&mut self, refused: Option<Refused>, error: S3Error) -> Response<Body> {
-        self.refused = refused;
-        self.refuse(error)
-    }
-
-    /// [`Outcome::refuse_handler`], remembering which stage refused.
-    fn refuse_handler_at(&mut self, refused: Refused, error: HandlerError) -> Response<Body> {
-        self.refused = Some(refused);
-        self.refuse_handler(error)
-    }
-
-    /// The one refusal a preflight can receive.
-    ///
-    /// `preflight_refusal_for` erases the typed cause before rendering. The closed contextual
-    /// resolver remains the only authority for `AccessForbidden`; the non-contextual branch makes
-    /// the refusal-profile mutation observable without opening another public construction seam.
-    /// `Vary: Origin` rides along because the refusal is still
-    /// an answer that depends on the `Origin` header: a shared cache that stored it under the URL
-    /// alone would serve it to an origin that would have been allowed.
-    ///
-    /// A malformed preflight is a head the gateway could not read, and is reported as one; a
-    /// preflight the bucket's CORS configuration does not allow is that configuration's answer.
-    fn refuse_preflight(&mut self, cause: PreflightRefusalCause) -> Response<Body> {
-        if cause == PreflightRefusalCause::Malformed {
-            self.refused = Some(Refused::Wire);
-        }
-        let refusal = preflight_refusal_for(cause);
-        let error = if refusal.code() == &ErrorCode::ACCESS_FORBIDDEN {
-            S3Error::from(resolve(ErrorContext::cors_forbidden(), self.response_kind))
-        } else {
-            from_pre_auth(refusal, self.response_kind)
-        };
-        self.error = error.code().cloned();
-        let mut response = render(&error, self.trace);
-        response.headers_mut().insert(VARY, VARY_ORIGIN);
-        response
-    }
-
-    /// The one refusal a governor can cause.
-    ///
-    /// Takes no argument, and there is deliberately nowhere to put one. Every reason a limiter
-    /// can have — the aggregate ceiling, one client, one class, a deployment's own
-    /// quota — renders the same bytes, because a refusal that named its reason would answer "which
-    /// of my buckets is nearly full" for anybody willing to send traffic and read the difference.
-    /// Nothing here is derived from the request, and no `Retry-After` is written: the exact time
-    /// the limiter recovers is the recovery rate, told to whoever asked.
-    fn refuse_for_load(&mut self) -> Response<Body> {
-        self.refuse_handler_at(
-            Refused::Governor,
-            HandlerError::new(ErrorCode::SLOW_DOWN, "the service is not accepting this request right now"),
-        )
-    }
 }
 
 /// What the transport said about this connection, or [`TransportSecurity::Plaintext`].
