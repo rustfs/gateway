@@ -576,7 +576,7 @@ where
         request_body_unfinished,
     )
     .confirm_writes_into(Arc::clone(&receipts));
-    let mut builder = crate::tls::protocol_builder(negotiated.as_deref());
+    let mut builder = crate::tls::protocol_builder(negotiated.as_deref(), &config);
     #[cfg(test)]
     match &deadline_observer {
         Some(observer) => {

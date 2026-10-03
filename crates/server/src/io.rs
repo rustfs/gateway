@@ -91,6 +91,13 @@ pub(crate) fn deadline_after(timeout: Duration) -> Instant {
     Instant::now() + bounded(timeout)
 }
 
+/// The transport's one reading of the monotonic clock, for a transport deadline armed outside
+/// this file (`crate::send_deadline`); like every deadline here, never visible to a protocol
+/// decision.
+pub(crate) fn transport_now() -> Instant {
+    Instant::now()
+}
+
 pub(crate) fn deadline_remaining(deadline: Instant) -> Duration {
     deadline
         .saturating_duration_since(Instant::now())

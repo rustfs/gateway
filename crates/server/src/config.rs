@@ -89,6 +89,8 @@ pub struct ServerConfig {
     /// Time from accept to complete headers. Increasing admits slower headers; decreasing rejects slowloris peers sooner.
     pub header_read_timeout: Duration,
     /// Maximum gap between successful response writes. Increasing tolerates stalls; decreasing releases stuck writers sooner.
+    /// Over HTTP/2 it also bounds how long one response waits for its peer to grant send capacity
+    /// for a body frame; a response that waits longer is reset and releases its request permit.
     pub write_progress_timeout: Duration,
     /// Maximum no-I/O gap between requests. Increasing preserves reuse; decreasing releases idle connections sooner.
     pub keep_alive_idle: Duration,
@@ -109,6 +111,11 @@ pub struct ServerConfig {
     pub h1_pipeline_flush: bool,
     /// Vectored-write policy. Enabling can reduce syscalls; disabling helps transports with poor writev support.
     pub write_strategy: WriteStrategy,
+    /// Serve HTTP/2 by prior knowledge on a connection that did not negotiate a protocol with ALPN:
+    /// every cleartext connection (h2c) and a TLS connection whose client offered no ALPN.
+    /// Enabling keeps HTTP/2 reachable without ALPN; disabling makes such a connection HTTP/1.1
+    /// only, so HTTP/2 is served only where a TLS client negotiated `h2`.
+    pub h2_prior_knowledge: bool,
     /// HTTP/2 concurrent-stream ceiling. Increasing raises multiplexing and memory; decreasing limits per-connection work. Zero is invalid.
     pub h2_max_concurrent_streams: u32,
     /// HTTP/2 initial stream window bytes. Increasing raises throughput and memory; decreasing applies stream backpressure sooner.
@@ -155,6 +162,7 @@ impl Default for ServerConfig {
             h1_keep_alive: true,
             h1_pipeline_flush: false,
             write_strategy: WriteStrategy::Auto,
+            h2_prior_knowledge: true,
             h2_max_concurrent_streams: 256,
             h2_initial_stream_window_size: 1024 * 1024,
             h2_initial_connection_window_size: 2 * 1024 * 1024,
