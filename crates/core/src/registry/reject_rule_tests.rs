@@ -614,3 +614,39 @@ fn n_a_path_binding_without_its_template_parameter_is_refused() {
         "{errors:?}"
     );
 }
+
+/// Negative — a catch-all takes the rest of the path, several segments, and no bucket is several
+/// segments: binding one as the bucket is refused, while the same template binding its one-segment
+/// parameter is accepted (ADR-0036).
+#[test]
+fn n_a_catch_all_is_never_a_bound_bucket() {
+    static CATCH_ALL: &[ClaimedRow] = &[ClaimedRow {
+        template: "/acme/admin/v1/heal/{bucket}/{*prefix}",
+        selector: GET,
+    }];
+    static CATCH_ALL_BUCKET: &[ClaimedRow] = &[ClaimedRow {
+        template: "/acme/admin/v1/heal/{*bucket}",
+        selector: GET,
+    }];
+    let declare = |rows: &'static [ClaimedRow], param: &'static str| {
+        Dialect::assemble(&RECORDS_A_QUERY_BUCKET)
+            .declare_claimed::<Rule<1>>(ClaimedRoute {
+                precedence: 10,
+                rows,
+                shadows: &[],
+                bucket_param: Some(BucketParam::Path(param)),
+            })
+            .build()
+    };
+    for (rows, param) in [(CATCH_ALL, "prefix"), (CATCH_ALL_BUCKET, "bucket")] {
+        let errors = declare(rows, param).expect_err(param);
+        assert!(
+            bucket_refusal(&errors, param).is_some_and(|why| why.contains("catch-all")),
+            "{param}: {errors:?}"
+        );
+    }
+    // The control: the one-segment parameter of the same template binds (the operation is refused
+    // only for the record this overlay does not hold).
+    let errors = declare(CATCH_ALL, "bucket").expect_err("no record for this row");
+    assert_eq!(bucket_refusal(&errors, "bucket"), None, "{errors:?}");
+}

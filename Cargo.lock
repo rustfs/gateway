@@ -1749,10 +1749,12 @@ dependencies = [
  "http-body-util",
  "httparse",
  "hyper",
+ "hyper-util",
  "md-5",
  "pin-project-lite",
  "rustfs-gateway-core",
  "rustfs-gateway-dialect-minio",
+ "rustfs-gateway-dialect-rustfs-admin",
  "rustfs-gateway-http",
  "rustfs-gateway-macros",
  "rustfs-gateway-server",
@@ -1818,7 +1820,7 @@ dependencies = [
 
 [[package]]
 name = "rustfs-gateway-core"
-version = "0.48.0"
+version = "0.49.0"
 dependencies = [
  "bytes",
  "dhat",
