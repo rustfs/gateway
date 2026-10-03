@@ -509,3 +509,5 @@ mod alpn;
 mod prior_knowledge;
 #[path = "tls_h2/send_deadline.rs"]
 mod send_deadline;
+#[path = "tls_h2/idle.rs"]
+mod idle;

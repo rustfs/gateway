@@ -37,6 +37,8 @@ use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio::net::TcpStream;
 use tokio::time::{Instant, Sleep, sleep};
 
+use crate::preface::Preface;
+
 /// How long the drain waits for the *next* block once it has started reading.
 ///
 /// `ServerConfig::lingering_close_time` alone would let a peer that pauses mid-body hold a
@@ -124,6 +126,8 @@ pub(crate) fn test_deadline_now() -> Instant {
 pub(crate) struct ProgressIo<I> {
     inner: I,
     in_flight: Arc<AtomicUsize>,
+    /// Raised by the service when a request starts or ends, lowered by the idle check that sees it
+    /// (rustfs/gateway#1209); the first one also ends the accept-to-header deadline.
     request_seen: Arc<AtomicBool>,
     idle_timeout: Duration,
     write_timeout: Duration,
@@ -133,6 +137,9 @@ pub(crate) struct ProgressIo<I> {
     #[cfg(any(target_os = "linux", target_os = "android", target_vendor = "apple"))]
     send_file_retry_ready: bool,
     first_request_observed: bool,
+    /// Whether the connection opened with the HTTP/2 preface: its PING, SETTINGS and flow-control
+    /// octets are not request activity, so they do not postpone the idle deadline.
+    preface: Preface,
     transport_read: Arc<AtomicU64>,
     /// Confirms handed-over responses as written; see `crate::write_receipt`.
     receipts: Option<Arc<crate::write_receipt::WriteReceipts>>,
@@ -186,6 +193,7 @@ impl<I> ProgressIo<I> {
             #[cfg(any(target_os = "linux", target_os = "android", target_vendor = "apple"))]
             send_file_retry_ready: false,
             first_request_observed: false,
+            preface: Preface::default(),
             transport_read: Arc::new(AtomicU64::new(0)),
             receipts: None,
             linger: Linger {
@@ -239,6 +247,14 @@ impl<I> ProgressIo<I> {
         self.idle_sleep.as_mut().reset(deadline_after(self.idle_timeout));
     }
 
+    /// Transport traffic postpones the idle deadline on an HTTP/1.1 connection, where the next
+    /// octets are the next request; on an HTTP/2 connection only request activity does.
+    fn traffic_seen(&mut self) {
+        if !self.preface.is_http2() {
+            self.reset_idle();
+        }
+    }
+
     fn reset_write(&mut self) {
         self.write_sleep.as_mut().reset(deadline_after(self.write_timeout));
         self.write_waiting = false;
@@ -250,13 +266,19 @@ impl<I> ProgressIo<I> {
 
     fn record_write_progress(&mut self, written: usize) {
         if written > 0 {
-            self.reset_idle();
+            self.traffic_seen();
             self.reset_write();
         }
     }
 
     fn check_idle(&mut self, context: &mut Context<'_>) -> io::Result<()> {
-        if !self.request_seen.load(Ordering::Acquire) {
+        // A request started or ended since the last look: the connection was not idle, however
+        // quickly the request came and went between two reads.
+        if self.request_seen.swap(false, Ordering::AcqRel) {
+            self.first_request_observed = true;
+            self.reset_idle();
+        }
+        if !self.first_request_observed {
             let deadline = self.idle_sleep.as_mut().poll(context);
             #[cfg(test)]
             if deadline.is_pending()
@@ -268,10 +290,6 @@ impl<I> ProgressIo<I> {
                 return Err(io::Error::new(io::ErrorKind::TimedOut, "request header timeout"));
             }
             return Ok(());
-        }
-        if !self.first_request_observed {
-            self.first_request_observed = true;
-            self.reset_idle();
         }
         if self.in_flight.load(Ordering::Relaxed) != 0 {
             self.reset_idle();
@@ -442,8 +460,9 @@ impl<I: AsyncRead + Unpin> AsyncRead for ProgressIo<I> {
         if result.is_ok() && buffer.filled().len() > before {
             this.transport_read
                 .fetch_add((buffer.filled().len() - before) as u64, Ordering::Relaxed);
-            if this.request_seen.load(Ordering::Acquire) {
-                this.reset_idle();
+            this.preface.observe(buffer.filled().get(before..).unwrap_or_default());
+            if this.first_request_observed {
+                this.traffic_seen();
             }
         }
         Poll::Ready(result)
@@ -470,7 +489,7 @@ impl<I: AsyncRead + AsyncWrite + Unpin> AsyncWrite for ProgressIo<I> {
         let this = self.get_mut();
         match Pin::new(&mut this.inner).poll_flush(context) {
             Poll::Ready(Ok(())) => {
-                this.reset_idle();
+                this.traffic_seen();
                 this.reset_write();
                 if let Some(receipts) = &this.receipts {
                     receipts.flushed();
@@ -529,10 +548,7 @@ impl<I: AsyncRead + AsyncWrite + Unpin> AsyncWrite for ProgressIo<I> {
         let this = self.get_mut();
         match Pin::new(&mut this.inner).poll_write_vectored(context, buffers) {
             Poll::Ready(Ok(written)) => {
-                if written > 0 {
-                    this.reset_idle();
-                    this.reset_write();
-                }
+                this.record_write_progress(written);
                 Poll::Ready(Ok(written))
             }
             Poll::Ready(Err(error)) => Poll::Ready(Err(error)),

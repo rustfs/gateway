@@ -8,7 +8,8 @@ Ring-1 generic HTTP runtime. Start at `src/lib.rs`; read only the row needed for
 | `src/config.rs` | Serializable tuning, defaults and validation | A knob is missing or accepts an unsafe value |
 | `src/listener.rs` | socket2 bind, tuning and read-back | Bind family or socket option is wrong |
 | `src/tls.rs` | Atomic TLS config, advertised ALPN protocols, fail-closed reload, and the protocol a connection may speak (ALPN or prior knowledge) | New handshakes see the wrong certificate or protocol, or h2c is served when it should not be |
-| `src/io.rs` | Write-progress and connection-idle timers, and the lingering read on close | A slow reader is killed or never released, or a peer sees `ECONNRESET` where a close was due |
+| `src/io.rs` | Write-progress and connection-idle timers (request activity only, on HTTP/2), and the lingering read on close | A slow reader is killed or never released, an idle connection never closes, or a peer sees `ECONNRESET` where a close was due |
+| `src/preface.rs` | Tells an HTTP/2 connection from an HTTP/1.1 one by its first octets | Idle HTTP/2 traffic is treated as request activity, or the reverse |
 | `src/io_deadline_tests.rs` | Every configured `ProgressIo` timer rearmed at `Duration::MAX` | A configured timeout panics a connection instead of meaning never |
 | `src/io_sendfile_tests.rs` | Real-socket controls for sendfile writable-readiness handoff | Sendfile retries spin, stall, or lose a writable transition |
 | `src/conn.rs` | Admission, connection lifecycle and joining finished connection tasks | Accept limits or shutdown sequencing fails, or the listener retains finished connections |
@@ -38,6 +39,7 @@ Ring-1 generic HTTP runtime. Start at `src/lib.rs`; read only the row needed for
 | `tests/server_runtime/unbounded_timeouts.rs` | HTTP/1.1 and HTTP/2 served with every timeout at `Duration::MAX` | A configured timeout panics the listener or Hyper |
 | `tests/server_runtime/accept_recovery.rs` | Real exhausted descriptor table: the listener survives, backs off and serves again | A failed accept ends the listener or spins |
 | `tests/tls_h2.rs` | Live TLS and h2 cases | Reload, TLS admission or h2 flow control regresses |
+| `tests/tls_h2/idle.rs` | HTTP/2 idleness while PINGs flow, cleartext and TLS, with in-flight, queued and frequent-request controls | An idle HTTP/2 connection never closes, or a busy one is cut |
 | `tests/tls_h2/alpn.rs` | ALPN negotiation and the protocol it selects | A TLS client cannot negotiate h2, or a negotiated protocol is not enforced |
 | `tests/tls_h2/prior_knowledge.rs` | A listener that refuses HTTP/2 by prior knowledge | h2c or no-ALPN HTTP/2 is served, or negotiated h2 is not |
 | `tests/tls_h2/send_deadline.rs` | Zero-window and partway-starved HTTP/2 peers against the permit ceiling, with producer-time controls | A starved stream keeps its permit, or producing time is charged |

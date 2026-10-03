@@ -36,6 +36,7 @@ mod driver;
 mod io;
 pub mod layers;
 mod listener;
+mod preface;
 mod request_capacity;
 mod send_deadline;
 #[cfg(any(target_os = "linux", target_os = "android", target_vendor = "apple"))]
