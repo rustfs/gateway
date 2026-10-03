@@ -45,7 +45,7 @@ use crate::close::ConnectionIntent;
 pub use metrics::{ResponseFallbackReason, ResponseTransportMetrics};
 pub use request::SelfHeldRequestBody;
 use request::{ConnectionIo, Expectation, HeaderTimeout, read_request};
-use response::{write_bad_request, write_continue, write_expectation_failed, write_response};
+use response::{write_bad_request, write_expectation_failed, write_response};
 
 /// Driver for an explicitly configured plaintext HTTP/1.1 listener.
 ///
@@ -168,13 +168,8 @@ where
                 let _ = locked.stream.shutdown().await;
                 return;
             }
-            Expectation::Continue if parsed.body_expected => {
-                let mut locked = io.lock().await;
-                if write_continue(&mut locked).await.is_err() {
-                    let _ = locked.stream.shutdown().await;
-                    return;
-                }
-            }
+            // Invited when the service first reads the body, not here (rustfs/gateway#1222).
+            Expectation::Continue if parsed.body_expected => io.lock().await.owe_continue(),
             Expectation::None | Expectation::Continue => {}
         }
         let method = parsed.request.method().clone();
@@ -197,6 +192,12 @@ where
         let mut locked = io.lock().await;
         if response_needs_linger {
             locked.stream.mark_request_body_unfinished();
+        }
+        // A peer never invited to send its body may be waiting for the invitation or may send it
+        // anyway: neither is something to wait for, so the connection ends after the answer, as
+        // the Hyper driver ends it.
+        if locked.withdraw_continue() {
+            force_close = true;
         }
         if !locked.body_complete()
             && (force_close || response_must_close || !drain_owed_body(&mut locked, config.lingering_close_time).await)

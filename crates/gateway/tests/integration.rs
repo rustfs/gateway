@@ -198,6 +198,8 @@ mod select_frame_records;
 mod select_restore_intent;
 #[path = "select_restore_reachability.rs"]
 mod select_restore_reachability;
+#[path = "self_held_expect_continue.rs"]
+mod self_held_expect_continue;
 #[path = "self_held_http1.rs"]
 mod self_held_http1;
 #[path = "self_held_refusal_drain.rs"]

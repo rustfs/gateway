@@ -32,7 +32,7 @@ use bytes::{Buf, Bytes, BytesMut};
 use http::{HeaderMap, HeaderName, HeaderValue, Method, Request, Uri, Version, header};
 use http_body::{Frame, SizeHint};
 use rustfs_gateway_server::PlaintextConnection;
-use tokio::io::AsyncReadExt;
+use tokio::io::{AsyncReadExt, AsyncWrite};
 use tokio::sync::{Mutex, OwnedMutexGuard};
 
 #[cfg(test)]
@@ -47,6 +47,7 @@ const MAX_CHUNK_LINE_BYTES: usize = 1024;
 const MAX_TRAILER_BYTES: usize = 16 * 1024;
 const READ_CHUNK_BYTES: usize = 16 * 1024;
 const HTTP2_PREFACE: &[u8] = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
+const CONTINUE: &[u8] = b"HTTP/1.1 100 Continue\r\n\r\n";
 
 type PendingLock = Pin<Box<dyn Future<Output = OwnedMutexGuard<ConnectionIo>> + Send + 'static>>;
 
@@ -54,6 +55,11 @@ pub(super) struct ConnectionIo {
     pub(super) stream: PlaintextConnection,
     buffer: BytesMut,
     body: BodyState,
+    /// `100 Continue` is owed to a request that asked for it, and this many of its octets are
+    /// already written; it goes out when the service first reads the body, as the Hyper driver
+    /// sends it, so a request refused before that is never invited to send a body the service
+    /// will not read (rustfs/gateway#1222).
+    continue_owed: Option<usize>,
     #[cfg(test)]
     scripted_input: Option<tests::ScriptedInput>,
 }
@@ -64,9 +70,37 @@ impl ConnectionIo {
             stream,
             buffer: BytesMut::new(),
             body: BodyState::Empty,
+            continue_owed: None,
             #[cfg(test)]
             scripted_input: None,
         }
+    }
+
+    /// Owes the current request `100 Continue` until the service first reads its body.
+    pub(super) fn owe_continue(&mut self) {
+        self.continue_owed = Some(0);
+    }
+
+    /// Withdraws a `100 Continue` the service never asked for by reading, answering whether one
+    /// was still owed: the peer was then never invited to send its body.
+    pub(super) fn withdraw_continue(&mut self) -> bool {
+        self.continue_owed.take().is_some()
+    }
+
+    fn poll_continue(&mut self, context: &mut Context<'_>) -> Poll<io::Result<()>> {
+        while let Some(written) = self.continue_owed {
+            let Some(rest) = CONTINUE.get(written..).filter(|rest| !rest.is_empty()) else {
+                ready!(Pin::new(&mut self.stream).poll_flush(context))?;
+                self.continue_owed = None;
+                break;
+            };
+            let wrote = ready!(Pin::new(&mut self.stream).poll_write(context, rest))?;
+            if wrote == 0 {
+                return Poll::Ready(Err(io::ErrorKind::WriteZero.into()));
+            }
+            self.continue_owed = Some(written.saturating_add(wrote));
+        }
+        Poll::Ready(Ok(()))
     }
 
     pub(super) fn body_complete(&self) -> bool {
@@ -118,6 +152,7 @@ impl ConnectionIo {
     }
 
     fn poll_body_frame(&mut self, context: &mut Context<'_>) -> Poll<io::Result<BodyFrame>> {
+        ready!(self.poll_continue(context))?;
         let mut body = core::mem::replace(&mut self.body, BodyState::Invalid);
         let result = self.poll_body_state(context, &mut body);
         self.body = if matches!(result, Poll::Ready(Err(_))) {
