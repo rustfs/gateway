@@ -26,17 +26,10 @@ use super::super::samples::configs::{
     BUCKET_ACL, CORS, ENCRYPTION, LIFECYCLE, LIFECYCLE_MINIO, LOGGING, NOTIFICATION, REPLICATION, REPLICATION_MINIO, WEBSITE,
     WEBSITE_REDIRECT, config,
 };
-use super::{AnswerRow, BARE, XML, answer, differs, legacy_document, named, reordered, same};
+use super::{AnswerRow, BARE, XML, answer, differs, legacy_document, named, same};
 
 const POLICY: &str = "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Principal\":\"*\",\
     \"Action\":\"s3:GetObject\",\"Resource\":\"arn:aws:s3:::bucket/*\"}]}";
-
-/// The access control structures whose children the two stacks write in another order.
-pub(super) const ACL_ORDERS: &[&str] = &[
-    "AccessControlPolicy",
-    "AccessControlPolicy/Owner",
-    "AccessControlPolicy/AccessControlList/Grant[]/Grantee",
-];
 
 fn reads() -> Vec<AnswerRow> {
     vec![
@@ -59,7 +52,7 @@ fn reads() -> Vec<AnswerRow> {
                     owner: policy.owner,
                 }
             },
-            reordered(XML, ACL_ORDERS),
+            same(XML),
         ),
         answer(
             "get-bucket-cors-every-member",
@@ -70,7 +63,7 @@ fn reads() -> Vec<AnswerRow> {
                     cors_rules: Some(cors.cors_rules),
                 }
             },
-            reordered(XML, &["CORSConfiguration/CORSRule[]"]),
+            same(XML),
         ),
         answer(
             "get-bucket-encryption-every-member",
@@ -78,14 +71,7 @@ fn reads() -> Vec<AnswerRow> {
             || legacy::GetBucketEncryptionOutput {
                 server_side_encryption_configuration: Some(legacy_document(ENCRYPTION)),
             },
-            differs(
-                XML,
-                &["sa-0001"],
-                &[
-                    "ServerSideEncryptionConfiguration/Rule",
-                    "ServerSideEncryptionConfiguration/Rule/ApplyServerSideEncryptionByDefault",
-                ],
-            ),
+            same(XML),
         ),
         answer(
             "get-bucket-lifecycle-every-aws-member",
@@ -97,15 +83,7 @@ fn reads() -> Vec<AnswerRow> {
                     transition_default_minimum_object_size: Some(named("all_storage_classes_128K")),
                 }
             },
-            reordered(
-                XML,
-                &[
-                    "LifecycleConfiguration/Rule[]",
-                    "LifecycleConfiguration/Rule[]/Filter/And",
-                    "LifecycleConfiguration/Rule[]/NoncurrentVersionExpiration",
-                    "LifecycleConfiguration/Rule[]/NoncurrentVersionTransition",
-                ],
-            ),
+            same(XML),
         ),
         answer(
             "get-bucket-lifecycle-minio-members",
@@ -117,7 +95,7 @@ fn reads() -> Vec<AnswerRow> {
                     transition_default_minimum_object_size: None,
                 }
             },
-            reordered(XML, &["LifecycleConfiguration/Rule"]),
+            same(XML),
         ),
         answer(
             "get-bucket-logging-every-member",
@@ -128,13 +106,7 @@ fn reads() -> Vec<AnswerRow> {
                     logging_enabled: status.logging_enabled,
                 }
             },
-            reordered(
-                XML,
-                &[
-                    "BucketLoggingStatus/LoggingEnabled",
-                    "BucketLoggingStatus/LoggingEnabled/TargetGrants/Grant[]/Grantee",
-                ],
-            ),
+            same(XML),
         ),
         answer(
             "get-bucket-logging-simple-prefix",
@@ -148,7 +120,7 @@ fn reads() -> Vec<AnswerRow> {
                     logging_enabled: status.logging_enabled,
                 }
             },
-            differs(XML, &["sa-0010"], &["BucketLoggingStatus/LoggingEnabled"]),
+            differs(XML, &["sa-0001"], &[]),
         ),
         answer(
             "get-bucket-notification-every-member",
@@ -162,15 +134,7 @@ fn reads() -> Vec<AnswerRow> {
                     topic_configurations: notification.topic_configurations,
                 }
             },
-            reordered(
-                XML,
-                &[
-                    "NotificationConfiguration",
-                    "NotificationConfiguration/CloudFunctionConfiguration",
-                    "NotificationConfiguration/QueueConfiguration",
-                    "NotificationConfiguration/TopicConfiguration",
-                ],
-            ),
+            same(XML),
         ),
         answer(
             "get-bucket-notification-event-bridge",
@@ -195,7 +159,7 @@ fn reads() -> Vec<AnswerRow> {
             || legacy::GetBucketPolicyStatusOutput {
                 policy_status: Some(legacy::PolicyStatus { is_public: Some(true) }),
             },
-            differs(XML, &["sa-0002"], &[]),
+            same(XML),
         ),
         answer(
             "get-bucket-replication-every-aws-member",
@@ -203,16 +167,7 @@ fn reads() -> Vec<AnswerRow> {
             || legacy::GetBucketReplicationOutput {
                 replication_configuration: Some(legacy_document(REPLICATION)),
             },
-            differs(
-                XML,
-                &["sa-0003"],
-                &[
-                    "ReplicationConfiguration/Rule[]",
-                    "ReplicationConfiguration/Rule[]/Destination",
-                    "ReplicationConfiguration/Rule[]/Destination/Metrics",
-                    "ReplicationConfiguration/Rule[]/SourceSelectionCriteria",
-                ],
-            ),
+            same(XML),
         ),
         answer(
             "get-bucket-replication-minio-members",
@@ -220,7 +175,7 @@ fn reads() -> Vec<AnswerRow> {
             || legacy::GetBucketReplicationOutput {
                 replication_configuration: Some(legacy_document(REPLICATION_MINIO)),
             },
-            differs(XML, &["sa-0003"], &["ReplicationConfiguration/Rule"]),
+            same(XML),
         ),
         answer(
             "get-bucket-request-payment-every-member",
@@ -259,7 +214,7 @@ fn reads() -> Vec<AnswerRow> {
                     routing_rules: website.routing_rules,
                 }
             },
-            reordered(XML, &["WebsiteConfiguration"]),
+            same(XML),
         ),
         answer(
             "get-bucket-website-redirect",
@@ -273,7 +228,7 @@ fn reads() -> Vec<AnswerRow> {
                     routing_rules: website.routing_rules,
                 }
             },
-            differs(XML, &["sa-0011"], &[]),
+            differs(XML, &["sa-0002"], &[]),
         ),
         answer(
             "get-object-lock-configuration-days",
@@ -290,7 +245,7 @@ fn reads() -> Vec<AnswerRow> {
                     }),
                 }),
             },
-            differs(XML, &["sa-0004"], &["ObjectLockConfiguration/Rule/DefaultRetention"]),
+            same(XML),
         ),
         answer(
             "get-object-lock-configuration-years",
@@ -307,7 +262,7 @@ fn reads() -> Vec<AnswerRow> {
                     }),
                 }),
             },
-            differs(XML, &["sa-0004"], &[]),
+            same(XML),
         ),
         answer(
             "get-public-access-block-every-member",
@@ -320,7 +275,7 @@ fn reads() -> Vec<AnswerRow> {
                     restrict_public_buckets: Some(false),
                 }),
             },
-            differs(XML, &["sa-0005"], &["PublicAccessBlockConfiguration"]),
+            same(XML),
         ),
     ]
 }

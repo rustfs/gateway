@@ -178,10 +178,17 @@ impl OperationCodec for dto::UploadPartCopy {
             response.set_header("x-amz-request-charged", rendered);
         }
         let mut writer = rustfs_gateway_xml::XmlWriter::document();
-        writer.open("CopyPartResult", Some(rustfs_gateway_xml::S3_XMLNS));
+        writer.legacy_layout(request.rustfs_response_layout());
+        let xmlns = if request.rustfs_response_layout() {
+            None
+        } else {
+            Some(rustfs_gateway_xml::S3_XMLNS)
+        };
+        writer.open("CopyPartResult", xmlns);
+        writer.order_children(rustfs_order::RESPONSE);
         {
             let v = &output.e_tag;
-            writer.element("ETag", &value::render_etag(v, EtagRender::XmlQuoted));
+            writer.entity_tag_element("ETag", &value::render_etag(v, EtagRender::XmlQuoted));
         }
         if let Some(v) = output.last_modified.as_ref() {
             writer.element("LastModified", &value::render_timestamp(v, TimestampFormat::Iso8601)?);
@@ -240,4 +247,12 @@ impl crate::handler::DeferredOperation for dto::UploadPartCopy {
         "x-amz-server-side-encryption-customer-key-md5",
     ];
     const RESPONSE_HEADER_PREFIXES: &'static [&'static str] = &[];
+}
+
+/// The order legacy RustFS writes each response element's children in (rustfs/gateway#1078):
+/// the order the legacy stack's structure declares its fields in.
+/// Honoured under `MetaView::rustfs_response_layout`; generated from the IR.
+#[rustfmt::skip]
+mod rustfs_order {
+    pub(super) const RESPONSE: &[&str] = &["ChecksumCRC32", "ChecksumCRC32C", "ChecksumCRC64NVME", "ChecksumMD5", "ChecksumSHA1", "ChecksumSHA256", "ChecksumSHA512", "ChecksumXXHASH128", "ChecksumXXHASH3", "ChecksumXXHASH64", "ETag", "LastModified"];
 }

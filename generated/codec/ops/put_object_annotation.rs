@@ -212,7 +212,9 @@ impl OperationCodec for dto::PutObjectAnnotation {
             response.set_header("x-amz-request-charged", rendered);
         }
         let mut writer = rustfs_gateway_xml::XmlWriter::document();
+        writer.legacy_layout(request.rustfs_response_layout());
         writer.open("PutObjectAnnotationOutput", Some(rustfs_gateway_xml::S3_XMLNS));
+        writer.order_children(rustfs_order::RESPONSE);
         if let Some(v) = output.key.as_ref() {
             writer.element("Key", v.as_str());
         }
@@ -228,4 +230,12 @@ impl OperationCodec for dto::PutObjectAnnotation {
         response.enforce_http_invariants(request.method());
         Ok(response)
     }
+}
+
+/// The order legacy RustFS writes each response element's children in (rustfs/gateway#1078):
+/// the order the legacy stack's structure declares its fields in.
+/// Honoured under `MetaView::rustfs_response_layout`; generated from the IR.
+#[rustfmt::skip]
+mod rustfs_order {
+    pub(super) const RESPONSE: &[&str] = &["AnnotationName", "Key"];
 }

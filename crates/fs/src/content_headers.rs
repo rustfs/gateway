@@ -17,7 +17,8 @@
 //! Responsible for: the six headers a write may carry and every later read answers
 //! (`Content-Type`, `Content-Encoding`, `Content-Disposition`, `Content-Language`,
 //! `Cache-Control`, `Expires`), reading them out of a write request, the model's default media
-//! type, their storability rule, and the byte form of the `headers/1` trailing section — which
+//! type, the `Content-Encoding` normalization legacy RustFS applies when a deployment asks for it,
+//! their storability rule, and the byte form of the `headers/1` trailing section — which
 //! also carries the server-managed encryption a version was written under
 //! (`x-amz-server-side-encryption` and its KMS key id), resolved by `super::encryption`.
 //! NOT responsible for: where that section sits in a record or an upload, or the sections around
@@ -29,16 +30,18 @@ use rustfs_gateway::{ErrorCode, HandlerError};
 
 use super::records::decode_hex_text;
 
-/// Reads the six stored representation headers out of any write input that declares them.
+/// Reads the six stored representation headers out of any write input that declares them, as
+/// `backend` stores them.
 ///
 /// `PutObject`, `CopyObject` and `CreateMultipartUpload` spell the six members identically, so one
-/// reader serves all three and none of them can forget a header the others store.
+/// reader serves all three and none of them can forget a header the others store — or the
+/// `Content-Encoding` normalization a deployment asked for (`FsBackend::stored_content_encoding`).
 macro_rules! request_content_headers {
-    ($input:expr) => {
+    ($backend:expr, $input:expr) => {
         $crate::content_headers::ContentHeaders::from_request(
             $input.cache_control.clone(),
             $input.content_disposition.clone(),
-            $input.content_encoding.clone(),
+            $backend.stored_content_encoding($input.content_encoding.clone()),
             $input.content_language.clone(),
             $input.content_type.clone(),
             $input.expires.as_ref().map(|value| value.as_str().to_owned()),
@@ -167,6 +170,36 @@ impl ContentHeaders {
     fn is_empty(&self) -> bool {
         self.entries().iter().all(|(_, value)| value.is_none())
     }
+}
+
+impl super::FsBackend {
+    /// The `Content-Encoding` a write stores: as sent, or — when the deployment asked for legacy
+    /// RustFS's rule ([`super::FsBackend::normalizing_content_encoding`]) — as
+    /// [`normalized_content_encoding`] stores it.
+    pub(super) fn stored_content_encoding(&self, value: Option<String>) -> Option<String> {
+        if !self.rustfs_parity.normalized_content_encoding {
+            return value;
+        }
+        normalized_content_encoding(&value?)
+    }
+}
+
+/// `Content-Encoding` as legacy RustFS stores it: every `aws-chunked` member dropped whatever its
+/// case, the rest trimmed and joined with `, `, and nothing when nothing remains
+/// (`normalize_content_encoding_for_storage`, `rustfs/src/storage/options.rs:664-681` on
+/// rustfs/rustfs 3268c42e00). A form upload always stores its field so (`super::post_object`); a
+/// request's header only under [`super::FsBackend::normalizing_content_encoding`].
+pub(super) fn normalized_content_encoding(value: &str) -> Option<String> {
+    let kept = value
+        .split(',')
+        .map(str::trim)
+        .filter(|member| !member.is_empty() && !member.eq_ignore_ascii_case("aws-chunked"))
+        .collect::<Vec<_>>();
+    // Legacy-compat (rustfs/backlog#2684): legacy RustFS rewrites every member it keeps, not only
+    // the list it removed `aws-chunked` from — `gzip,deflate` is stored as `gzip, deflate` and an
+    // empty member vanishes. The client's other members are not the server's to reformat.
+    // Intended: drop the `aws-chunked` members and keep the rest byte for byte.
+    (!kept.is_empty()).then(|| kept.join(", "))
 }
 
 /// Refuses a representation header this backend could store but could never hand back.

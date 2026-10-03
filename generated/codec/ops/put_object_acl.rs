@@ -49,8 +49,7 @@ impl OperationCodec for dto::PutObjectAcl {
         if raw_body.as_ref().is_empty() {
             input.access_control_policy = None;
         } else {
-            let root = rustfs_gateway_xml::parse(raw_body.as_ref())
-                .map_err(|_| CodecError::malformed_xml("the request body is not the XML this operation accepts"))?;
+            let root = crate::codec::request_document(request, raw_body.as_ref(), &document::DOCUMENT)?;
             if !["AccessControlPolicy"].contains(&root.name.as_str()) {
                 return Err(CodecError::malformed_xml("the request body has the wrong root element").about("AccessControlPolicy"));
             }
@@ -198,4 +197,33 @@ fn read_owner(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::Owner, CodecErr
     }
     value::exit(shape.check_required())?;
     Ok(shape)
+}
+
+/// The request document's shape, as the RustFS profile reads it (`rustfs_gateway_xml::bound`,
+/// rustfs/gateway#1078): its roots, every structure it reaches, and each member legacy
+/// RustFS reads. Generated from the IR and the legacy facts in `emit::codec::document`.
+#[rustfmt::skip]
+mod document {
+    use rustfs_gateway_xml::bound::{Arity, Attribute, Content, Document, EmptyBody, Member, Scalar, Shape, Unknown, Value};
+
+    pub(super) static DOCUMENT: Document = Document { roots: &["AccessControlPolicy"], empty: EmptyBody::Missing, shapes: &[
+        Shape { name: "AccessControlPolicy", attribute: None, content: Content::Members { unknown: Unknown::Skip, members: &[
+            Member { element: "AccessControlList", arity: Arity::Wrapped("Grant"), value: Value::Shape(1), required: false, kept: true },
+            Member { element: "Owner", arity: Arity::One, value: Value::Shape(2), required: false, kept: true },
+        ] } },
+        Shape { name: "Grant", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+            Member { element: "Grantee", arity: Arity::One, value: Value::Shape(3), required: false, kept: true },
+            Member { element: "Permission", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+        ] } },
+        Shape { name: "Owner", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+            Member { element: "DisplayName", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "ID", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+        ] } },
+        Shape { name: "Grantee", attribute: Some(Attribute { key: "xsi:type", name: "type", namespace: "http://www.w3.org/2001/XMLSchema-instance", required: true }), content: Content::Members { unknown: Unknown::Refuse, members: &[
+            Member { element: "DisplayName", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "EmailAddress", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "ID", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "URI", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+        ] } },
+    ] };
 }

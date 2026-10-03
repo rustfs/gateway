@@ -36,6 +36,7 @@ use tower_http::catch_panic::{DefaultResponseForPanic, ResponseForPanic};
 
 use crate::driver::ConnectionInfo;
 use crate::request_capacity::{RequestCancellationFuture, RequestCancellationSource, RequestCapacity, RequestPermit};
+use crate::send_deadline::SendProgress;
 use crate::write_receipt::WriteReceipts;
 
 /// The erased error returned to a connection driver.
@@ -143,6 +144,9 @@ pub struct ResponseCompletion {
     guard: Option<RequestGuard>,
     receipts: Arc<WriteReceipts>,
     http2: bool,
+    /// The HTTP/2 stream's send progress, when this response is served on one. Only a frame the
+    /// body has not ended with is charged: once the body ends, the permit is already released.
+    progress: Option<SendProgress>,
 }
 
 impl ResponseCompletion {
@@ -179,9 +183,16 @@ where
 
     fn poll_frame(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
         let mut this = self.project();
+        // Asked for the next frame, so the transport sent what it held: from here until a frame is
+        // handed over, any wait is the body's own and is not charged to the peer.
+        if let Some(progress) = &this.completion.progress {
+            progress.producing();
+        }
         let frame = ready!(this.body.as_mut().poll_frame(context)).map(|result| result.map_err(Into::into));
         if frame.is_none() || this.body.as_ref().is_end_stream() {
             this.completion.hand_over();
+        } else if let Some(progress) = &this.completion.progress {
+            progress.wait_for_peer();
         }
         Poll::Ready(frame)
     }
@@ -267,17 +278,21 @@ where
         let request_capacity = Arc::clone(&self.request_capacity);
         let force_abort = Arc::clone(&self.request_stats.force_abort);
         let request_stats = Arc::clone(&self.request_stats);
-        let connection_in_flight = Arc::clone(&self.connection_in_flight);
+        // Counted from here rather than from the permit: a request queued for a permit is not an
+        // idle connection (rustfs/gateway#1209).
+        let in_flight = InFlight::new(Arc::clone(&self.connection_in_flight), Arc::clone(&self.request_seen));
         let request_body_unfinished = Arc::clone(&self.request_body_unfinished);
         let receipts = Arc::clone(&self.receipts);
         let http2 = request.version() == http::Version::HTTP_2;
         Box::pin(async move {
+            // Present only when an HTTP/2 stream task is polling this future (`send_deadline`).
+            let progress = SendProgress::current();
             let permit = request_capacity
                 .acquire()
                 .await
                 .map_err(|error| Box::new(error) as ConnectionError)?;
             poll_fn(|context| service.poll_ready(context)).await.map_err(Into::into)?;
-            let mut guard = RequestGuard::new(request_stats, connection_in_flight);
+            let mut guard = RequestGuard::new(request_stats, in_flight);
             let response = match catch_unwind(AssertUnwindSafe(|| service.call(request))) {
                 Ok(future) => match RequestCancellationFuture::new(
                     AssertUnwindSafe(future).catch_unwind(),
@@ -305,6 +320,7 @@ where
                     guard: Some(guard),
                     receipts,
                     http2,
+                    progress,
                 },
             }))
         })
@@ -375,18 +391,50 @@ impl RequestStats {
     }
 }
 
+/// One request's share of its connection's in-flight count, which is what keeps the connection
+/// from idling: taken when the transport hands the request over and given back once. Giving it
+/// back is request activity too, so it raises `activity` for the transport's idle check.
+struct InFlight {
+    counter: Arc<AtomicUsize>,
+    activity: Arc<AtomicBool>,
+    counted: bool,
+}
+
+impl InFlight {
+    fn new(counter: Arc<AtomicUsize>, activity: Arc<AtomicBool>) -> Self {
+        counter.fetch_add(1, Ordering::Relaxed);
+        Self {
+            counter,
+            activity,
+            counted: true,
+        }
+    }
+
+    fn end(&mut self) {
+        if std::mem::take(&mut self.counted) {
+            self.counter.fetch_sub(1, Ordering::Relaxed);
+            self.activity.store(true, Ordering::Release);
+        }
+    }
+}
+
+impl Drop for InFlight {
+    fn drop(&mut self) {
+        self.end();
+    }
+}
+
 struct RequestGuard {
     stats: Arc<RequestStats>,
-    connection_in_flight: Arc<AtomicUsize>,
+    in_flight: InFlight,
     completed: bool,
 }
 
 impl RequestGuard {
-    fn new(stats: Arc<RequestStats>, connection_in_flight: Arc<AtomicUsize>) -> Self {
-        connection_in_flight.fetch_add(1, Ordering::Relaxed);
+    fn new(stats: Arc<RequestStats>, in_flight: InFlight) -> Self {
         Self {
             stats,
-            connection_in_flight,
+            in_flight,
             completed: false,
         }
     }
@@ -401,7 +449,7 @@ impl RequestGuard {
     /// Ends the request's share of the connection without deciding whether it drained.
     fn hand_over(&mut self) {
         self.completed = true;
-        self.connection_in_flight.fetch_sub(1, Ordering::Relaxed);
+        self.in_flight.end();
     }
 }
 
@@ -410,7 +458,7 @@ impl Drop for RequestGuard {
         if self.completed {
             return;
         }
-        self.connection_in_flight.fetch_sub(1, Ordering::Relaxed);
+        self.in_flight.end();
         if self.stats.force_abort.load(Ordering::Acquire) {
             self.stats.aborted.fetch_add(1, Ordering::Relaxed);
         }

@@ -82,7 +82,20 @@
 #   key, and strips a declared aws-chunked coding from an unframed upload's Content-Encoding
 #   (rustfs/src/storage/options.rs:664-680), none of which the reference backend does yet.
 #
-# generation: 2
+# REFRESH 2026-09-30 (2), GENERATION 3: record run
+#   https://github.com/rustfs/gateway/actions/runs/36683258933 of e7c3e2a8, the merge train through
+#   #1205 on main f2bbfc93: passed=397 known=272 regression=1 fixed=6 skipped=70 collected=740.
+#   The 6 FIXED entries are removed: test_put_obj_with_tags (#1198 answers object tags in key
+#   order), test_multipart_resend_first_finishes_last (#1201 keeps the last entry of a repeated
+#   part), test_object_content_encoding_aws_chunked (#1204 drops a declared aws-chunked coding) and
+#   the three x-amz-expiration header cases (#1205). The one addition raises the generation:
+#   test_object_create_bad_md5_empty expects 400 InvalidDigest for an empty Content-MD5, and since
+#   #1176 (closing #1087) the RustFS profile reads an empty optional header as absent, as legacy
+#   RustFS does, so the PUT stores the object. Legacy RustFS (rustfs/rustfs 528a36814 serving its
+#   own S3 stack) answers the same PUT 200 (measured); #1176 records the reading as a
+#   Legacy-compat item (rustfs/backlog#2684). ci/s3tests/outcomes.txt is that run's record.
+#
+# generation: 3
 
 # --- fs-gap: Object Lock refused by the reference backend (39) — https://github.com/rustfs/backlog/issues/1726 ---
 s3tests.functional.test_s3::test_object_lock_changing_mode_from_compliance
@@ -163,14 +176,8 @@ s3tests.functional.test_s3::test_head_object_404_with_policy_prefix
 # --- not-a-defect: an unsatisfiable copy-source range is InvalidArgument under the shared resolver's quirk, not InvalidRange (1) ---
 s3tests.functional.test_s3::test_multipart_copy_invalid_range
 
-# --- fs-gap: lifecycle expiration header, rule ID and Status validation (4) — https://github.com/rustfs/gateway/issues/999 ---
+# --- fs-gap: an expired object's delete marker is not expired by the reference backend (1) — https://github.com/rustfs/gateway/issues/999 ---
 s3tests.functional.test_s3::test_delete_marker_expiration
-s3tests.functional.test_s3::test_lifecycle_expiration_header_head
-s3tests.functional.test_s3::test_lifecycle_expiration_header_put
-s3tests.functional.test_s3::test_lifecycle_expiration_header_tags_head
-
-# --- fs-gap: object tags are read back in stored order; RustFS sorts them by key (1) — https://github.com/rustfs/gateway/issues/1000 ---
-s3tests.functional.test_s3::test_put_obj_with_tags
 
 # --- rustfs-parity: If-Match on a missing key is 404 NoSuchKey, as RustFS answers it (5) — https://github.com/rustfs/gateway/issues/1002 ---
 s3tests.functional.test_s3::test_multipart_put_current_object_if_match
@@ -179,8 +186,8 @@ s3tests.functional.test_s3::test_put_current_object_if_match
 s3tests.functional.test_s3::test_put_object_current_if_match
 s3tests.functional.test_s3::test_put_object_if_match
 
-# --- fs-gap: a completion naming one part number twice is refused; RustFS keeps the last (1) — https://github.com/rustfs/gateway/issues/1002 ---
-s3tests.functional.test_s3::test_multipart_resend_first_finishes_last
+# --- rustfs-parity: an empty Content-MD5 claims nothing, as legacy RustFS reads it (1) — https://github.com/rustfs/gateway/issues/1087 ---
+s3tests.functional.test_headers::test_object_create_bad_md5_empty
 
 # --- rustfs-parity: ownership controls and torrents are unimplemented, as in RustFS (8) ---
 s3tests.functional.test_s3::test_bucket_create_delete_bucket_ownership
@@ -227,9 +234,6 @@ s3tests.functional.test_s3::test_object_read_unreadable
 
 # --- unattributed: needs an AWS capture (delete marker header on an unversioned delete) (1) ---
 s3tests.functional.test_s3::test_delete_marker_nonversioned
-
-# --- fs-gap: an unframed upload's declared aws-chunked coding is stored; RustFS strips it (1) ---
-s3tests.functional.test_s3::test_object_content_encoding_aws_chunked
 
 # --- rustfs-parity: ACL grants are neither stored nor enforced, and ownership controls are unimplemented, as in RustFS (31) ---
 s3tests.functional.test_s3::test_access_bucket_private_object_publicread

@@ -52,6 +52,7 @@ impl OperationCodec for dto::GetBucketCors {
         let mut response = EncodedResponse::of(status);
         response.status = status_code(status)?;
         let mut writer = rustfs_gateway_xml::XmlWriter::document();
+        writer.legacy_layout(request.rustfs_response_layout());
         writer.open("CORSConfiguration", Some(rustfs_gateway_xml::S3_XMLNS));
         for item in &output.cors_rules {
             writer.open("CORSRule", None);
@@ -71,6 +72,7 @@ impl OperationCodec for dto::GetBucketCors {
 
 /// Writes one `CORSRule` element's children, in the wire order the IR records.
 fn write_cors_rule(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::CorsRule) -> Result<(), CodecError> {
+    writer.order_children(rustfs_order::CORS_RULE);
     if let Some(v) = value.id.as_ref() {
         writer.element("ID", v.as_str());
     }
@@ -90,4 +92,12 @@ fn write_cors_rule(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::Cors
         writer.element("MaxAgeSeconds", &v.to_string());
     }
     Ok(())
+}
+
+/// The order legacy RustFS writes each response element's children in (rustfs/gateway#1078):
+/// the order the legacy stack's structure declares its fields in.
+/// Honoured under `MetaView::rustfs_response_layout`; generated from the IR.
+#[rustfmt::skip]
+mod rustfs_order {
+    pub(super) const CORS_RULE: &[&str] = &["AllowedHeader", "AllowedMethod", "AllowedOrigin", "ExposeHeader", "ID", "MaxAgeSeconds"];
 }

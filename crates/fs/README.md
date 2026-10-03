@@ -110,6 +110,11 @@ day/date actions to current objects, honors the persisted minimum-size mode, and
 the selected storage class without changing bytes, identity, tags, or modification time. GET, HEAD,
 and both object and version listing views project that durable class after restart.
 
+`PutObject`, `HeadObject` and `GetObject` of a current version answer `x-amz-expiration` as AWS and
+legacy RustFS do: the enabled rule selecting the object that is due first, its `Date`, or its `Days`
+after the write rounded up to the next UTC midnight in real days whatever the debug interval, with
+the rule's id. A copy or completion response, and a noncurrent version, answer none.
+
 The backend serves one region, `us-east-1` unless `FsBackend::with_region` names another. That one
 value is the `x-amz-bucket-region` a `HeadBucket` reports, the `LocationConstraint` a
 `GetBucketLocation` answers — the empty element for `us-east-1`, whose constraint AWS defines as
@@ -123,6 +128,17 @@ The XML response encoder escapes the configured id and display name when it writ
 ListObjectVersions resumes after a `key-marker` and, within that key, after a `version-id-marker`;
 a `version-id-marker` sent without a key marker is refused with `InvalidArgument` rather than
 answered with the first page.
+
+A deployment standing this backend in for RustFS — the RustFS-profile launcher, `compat/sut` — asks
+for legacy RustFS's answers by name, and each one is off by default: `FsBackend::refusing_batch_deletes_of`
+answers the keys RustFS's storage refuses on their own in a batch delete, and
+`FsBackend::evaluating_delete_if_match` judges `If-Match` on `DeleteObject` as legacy RustFS does —
+the object's own tag or `*` deletes, anything else is `412` and deletes nothing, and a versioned
+bucket's key that holds no version is marked without being judged — and `FsBackend::sorting_object_tags`
+answers an object's tag set in its keys' byte order while the stored document keeps the written one,
+`FsBackend::normalizing_completed_parts` keeps the last entry a completion names for each part
+number, as legacy RustFS does, before the list is judged, and `FsBackend::normalizing_content_encoding`
+stores a write's `Content-Encoding` without its `aws-chunked` members, as legacy RustFS stores it.
 
 Ranged reads resolve through the exported `evaluate_range` contract, so a suffix range, a window
 that runs past the end, an unsatisfiable range, a multi-range header and `If-Range` all behave as

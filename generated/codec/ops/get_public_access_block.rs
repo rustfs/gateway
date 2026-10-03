@@ -54,7 +54,13 @@ impl OperationCodec for dto::GetPublicAccessBlock {
         // PublicAccessBlockConfiguration — the XML response body, rooted at `PublicAccessBlockConfiguration`.
         if let Some(v) = output.public_access_block_configuration.as_ref() {
             let mut writer = rustfs_gateway_xml::XmlWriter::document();
-            writer.open("PublicAccessBlockConfiguration", Some(rustfs_gateway_xml::S3_XMLNS));
+            writer.legacy_layout(request.rustfs_response_layout());
+            let xmlns = if request.rustfs_response_layout() {
+                None
+            } else {
+                Some(rustfs_gateway_xml::S3_XMLNS)
+            };
+            writer.open("PublicAccessBlockConfiguration", xmlns);
             write_public_access_block_configuration(&mut writer, v)?;
             writer.close();
             response.body = ResponseBody::Complete(writer.finish().into_bytes());
@@ -73,6 +79,7 @@ fn write_public_access_block_configuration(
     writer: &mut rustfs_gateway_xml::XmlWriter,
     value: &dto::PublicAccessBlockConfiguration,
 ) -> Result<(), CodecError> {
+    writer.order_children(rustfs_order::PUBLIC_ACCESS_BLOCK_CONFIGURATION);
     if let Some(v) = value.block_public_acls.as_ref() {
         writer.element("BlockPublicAcls", if *v { "true" } else { "false" });
     }
@@ -86,4 +93,12 @@ fn write_public_access_block_configuration(
         writer.element("RestrictPublicBuckets", if *v { "true" } else { "false" });
     }
     Ok(())
+}
+
+/// The order legacy RustFS writes each response element's children in (rustfs/gateway#1078):
+/// the order the legacy stack's structure declares its fields in.
+/// Honoured under `MetaView::rustfs_response_layout`; generated from the IR.
+#[rustfmt::skip]
+mod rustfs_order {
+    pub(super) const PUBLIC_ACCESS_BLOCK_CONFIGURATION: &[&str] = &["BlockPublicAcls", "BlockPublicPolicy", "IgnorePublicAcls", "RestrictPublicBuckets"];
 }

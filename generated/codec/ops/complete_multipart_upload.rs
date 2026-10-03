@@ -45,8 +45,7 @@ impl OperationCodec for dto::CompleteMultipartUpload {
         // MultipartUpload — the XML request body, rooted at `CompleteMultipartUpload`.
         let raw_body = body.into_buffered()?;
         value::verify_body_digest(request, raw_body.as_ref())?;
-        let root = rustfs_gateway_xml::parse(raw_body.as_ref())
-            .map_err(|_| CodecError::malformed_xml("the request body is not the XML this operation accepts"))?;
+        let root = crate::codec::request_document(request, raw_body.as_ref(), &document::DOCUMENT)?;
         if !["CompleteMultipartUpload"].contains(&root.name.as_str()) {
             return Err(CodecError::malformed_xml("the request body has the wrong root element").about("MultipartUpload"));
         }
@@ -143,7 +142,9 @@ impl OperationCodec for dto::CompleteMultipartUpload {
             response.set_header("x-amz-request-charged", rendered);
         }
         let mut writer = rustfs_gateway_xml::XmlWriter::document();
+        writer.legacy_layout(request.rustfs_response_layout());
         writer.open("CompleteMultipartUploadResult", Some(rustfs_gateway_xml::S3_XMLNS));
+        writer.order_children(rustfs_order::RESPONSE);
         if let Some(v) = output.location.as_ref() {
             writer.element("Location", v.as_str());
         }
@@ -154,7 +155,7 @@ impl OperationCodec for dto::CompleteMultipartUpload {
             writer.element("Key", v.as_str());
         }
         if let Some(v) = output.e_tag.as_ref() {
-            writer.element("ETag", &value::render_etag(v, EtagRender::XmlQuoted));
+            writer.entity_tag_element("ETag", &value::render_etag(v, EtagRender::XmlQuoted));
         }
         if let Some(v) = output.checksum_crc32.as_ref() {
             writer.element("ChecksumCRC32", v.as_str());
@@ -269,4 +270,40 @@ fn read_completed_part(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::Comple
     }
     value::exit(shape.check_required())?;
     Ok(shape)
+}
+
+/// The request document's shape, as the RustFS profile reads it (`rustfs_gateway_xml::bound`,
+/// rustfs/gateway#1078): its roots, every structure it reaches, and each member legacy
+/// RustFS reads. Generated from the IR and the legacy facts in `emit::codec::document`.
+#[rustfmt::skip]
+mod document {
+    use rustfs_gateway_xml::bound::{Arity, Content, Document, EmptyBody, Member, Scalar, Shape, Unknown, Value};
+
+    pub(super) static DOCUMENT: Document = Document { roots: &["CompleteMultipartUpload"], empty: EmptyBody::Refused, shapes: &[
+        Shape { name: "CompletedMultipartUpload", attribute: None, content: Content::Members { unknown: Unknown::Skip, members: &[
+            Member { element: "Part", arity: Arity::Repeated, value: Value::Shape(1), required: false, kept: true },
+        ] } },
+        Shape { name: "CompletedPart", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+            Member { element: "ETag", arity: Arity::One, value: Value::Text(Scalar::EntityTag), required: false, kept: true },
+            Member { element: "ChecksumCRC32", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "ChecksumCRC32C", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "ChecksumCRC64NVME", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "ChecksumSHA1", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "ChecksumSHA256", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "ChecksumSHA512", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "ChecksumMD5", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "ChecksumXXHASH64", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "ChecksumXXHASH3", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "ChecksumXXHASH128", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "PartNumber", arity: Arity::One, value: Value::Text(Scalar::Integer), required: false, kept: true },
+        ] } },
+    ] };
+}
+
+/// The order legacy RustFS writes each response element's children in (rustfs/gateway#1078):
+/// the order the legacy stack's structure declares its fields in.
+/// Honoured under `MetaView::rustfs_response_layout`; generated from the IR.
+#[rustfmt::skip]
+mod rustfs_order {
+    pub(super) const RESPONSE: &[&str] = &["Bucket", "ChecksumCRC32", "ChecksumCRC32C", "ChecksumCRC64NVME", "ChecksumMD5", "ChecksumSHA1", "ChecksumSHA256", "ChecksumSHA512", "ChecksumType", "ChecksumXXHASH128", "ChecksumXXHASH3", "ChecksumXXHASH64", "ETag", "Key", "Location"];
 }

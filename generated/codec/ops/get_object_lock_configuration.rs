@@ -54,7 +54,13 @@ impl OperationCodec for dto::GetObjectLockConfiguration {
         // ObjectLockConfiguration — the XML response body, rooted at `ObjectLockConfiguration`.
         if let Some(v) = output.object_lock_configuration.as_ref() {
             let mut writer = rustfs_gateway_xml::XmlWriter::document();
-            writer.open("ObjectLockConfiguration", Some(rustfs_gateway_xml::S3_XMLNS));
+            writer.legacy_layout(request.rustfs_response_layout());
+            let xmlns = if request.rustfs_response_layout() {
+                None
+            } else {
+                Some(rustfs_gateway_xml::S3_XMLNS)
+            };
+            writer.open("ObjectLockConfiguration", xmlns);
             write_object_lock_configuration(&mut writer, v)?;
             writer.close();
             response.body = ResponseBody::Complete(writer.finish().into_bytes());
@@ -70,6 +76,7 @@ impl OperationCodec for dto::GetObjectLockConfiguration {
 
 /// Writes one `DefaultRetention` element's children, in the wire order the IR records.
 fn write_default_retention(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::DefaultRetention) -> Result<(), CodecError> {
+    writer.order_children(rustfs_order::DEFAULT_RETENTION);
     if let Some(v) = value.mode.as_ref() {
         writer.element("Mode", v.as_str());
     }
@@ -125,4 +132,12 @@ fn write_object_lock_rule(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dt
         writer.close();
     }
     Ok(())
+}
+
+/// The order legacy RustFS writes each response element's children in (rustfs/gateway#1078):
+/// the order the legacy stack's structure declares its fields in.
+/// Honoured under `MetaView::rustfs_response_layout`; generated from the IR.
+#[rustfmt::skip]
+mod rustfs_order {
+    pub(super) const DEFAULT_RETENTION: &[&str] = &["Days", "Mode", "Years", "DefaultEventHold"];
 }
