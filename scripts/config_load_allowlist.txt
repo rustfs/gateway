@@ -42,6 +42,7 @@ crates/gateway/src/ext/credential_guard.rs | impl GuardedCredentialProvider / fn
 crates/gateway/src/ext/credential_guard.rs | impl GuardedCredentialProvider / fn metrics | panics: self.metrics.panics.load(Ordering::Relaxed),
 crates/gateway/src/ext/credential_guard.rs | impl GuardedCredentialProvider / fn metrics | negative_cache_hits: self.metrics.negative_cache_hits.load(Ordering::Relaxed),
 crates/gateway/src/ext/credential_guard.rs | mod tests / fn a_repeated_missing_key_does_not_amplify_to_the_backend | assert_eq!(inner.0.load(Ordering::SeqCst), 1);
+crates/gateway/src/ext/credential_guard.rs | mod tests / fn calls | inner.0.load(Ordering::SeqCst)
 crates/gateway/src/ext/credential_guard.rs | mod tests / fn n_provider_errors_are_not_cached | assert_eq!(inner.0.load(Ordering::SeqCst), 2);
 crates/gateway/src/ext/governor.rs | mod tests / fn a_lease_holds_exactly_one_body_quota | assert_eq!(first.load(Ordering::Relaxed), 0);
 crates/gateway/src/ext/governor.rs | mod tests / fn a_lease_holds_exactly_one_body_quota | assert_eq!(second.load(Ordering::Relaxed), 1);
