@@ -87,6 +87,22 @@ impl ServiceBuilder {
         self.view_policy.version_actions = VersionActions::LegacyRustfs;
         self
     }
+
+    /// Waives the header permissions legacy RustFS does not ask — `s3:PutObjectTagging` for an
+    /// `x-amz-tagging` header and `s3:PutObjectAcl` for an ACL or grant header on a `PutObject`,
+    /// `CopyObject`, `CreateMultipartUpload` or `PostObject` — for a deployment in front of RustFS.
+    ///
+    /// Legacy RustFS's access hook asks the base `s3:PutObject` alone for those headers (the tag
+    /// header only adds `RequestObjectTag` condition keys to it), where AWS additionally requires
+    /// the tagging and ACL actions. The object-lock and governance-bypass permissions, which
+    /// legacy RustFS asks the same way AWS does, are never waived.
+    ///
+    /// Off by default: the generic profile requires every conditional permission AWS requires.
+    #[must_use]
+    pub fn authorize_header_permissions_as_legacy_rustfs(mut self) -> Self {
+        self.view_policy.waive_rustfs_header_permissions = true;
+        self
+    }
 }
 
 #[cfg(test)]

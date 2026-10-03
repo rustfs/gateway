@@ -166,6 +166,8 @@ pub(crate) mod sealed {
 
         fn auth(operation: &str) -> Option<Option<AuthRequirement>>;
 
+        fn extra_permissions(operation: &str) -> Option<&'static [rustfs_gateway_core::ExtraPermission]>;
+
         fn request_body_mode(operation: &str) -> Option<RequestBodyMode>;
 
         fn dispatch<'a, S, T, G, E, Route, RouteFuture, Read, ReadFuture, Input, InputFuture>(
@@ -211,6 +213,10 @@ pub(crate) mod sealed {
         }
 
         fn auth(_operation: &str) -> Option<Option<AuthRequirement>> {
+            None
+        }
+
+        fn extra_permissions(_operation: &str) -> Option<&'static [rustfs_gateway_core::ExtraPermission]> {
             None
         }
 
@@ -282,6 +288,14 @@ pub(crate) mod sealed {
                 Some(O::spec().auth)
             } else {
                 Tail::auth(operation)
+            }
+        }
+
+        fn extra_permissions(operation: &str) -> Option<&'static [rustfs_gateway_core::ExtraPermission]> {
+            if operation == O::NAME {
+                Some(O::spec().extra_permission_set())
+            } else {
+                Tail::extra_permissions(operation)
             }
         }
 

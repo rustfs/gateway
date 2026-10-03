@@ -74,6 +74,9 @@ mod event_stream_frame_replay;
 #[path = "ext_field_policy.rs"]
 mod ext_field_policy;
 
+#[path = "extra_permissions.rs"]
+mod extra_permissions;
+
 #[path = "golden.rs"]
 mod golden;
 

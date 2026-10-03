@@ -153,6 +153,11 @@ pub struct OperationSpec {
     /// rustfs/rustfs#4845. Every registration path goes through
     /// [`RegistryError::MissingAuthRequirement`], so there is no way to install a handler for one.
     pub auth: Option<AuthRequirement>,
+    /// The IAM actions this operation requires only when a request carries a particular header
+    /// (ADR-derived from AWS's required-permission table): object-lock retention and legal-hold
+    /// on a write, `s3:BypassGovernanceRetention` on a delete or retention change, and the
+    /// tagging and ACL actions AWS asks and legacy RustFS waives. Empty for most operations.
+    extra_permissions: &'static [crate::authz::ExtraPermission],
     handler_deadline_class: Option<HandlerDeadlineClass>,
     /// Whether this operation's handler is handed the caller's secret (ADR-0024). Private, so the
     /// only way to set it is [`Self::hand_caller_secret_to_handler`] on the operation's own spec.
@@ -183,6 +188,7 @@ impl OperationSpec {
             required_params: &[],
             not_configured_error,
             auth: None,
+            extra_permissions: &[],
             handler_deadline_class: None,
             caller_secret: false,
         }
@@ -238,6 +244,7 @@ impl OperationSpec {
             required_params: &[],
             not_configured_error,
             auth: None,
+            extra_permissions: &[],
             handler_deadline_class: None,
             caller_secret: false,
         }
@@ -255,6 +262,20 @@ impl OperationSpec {
     pub const fn auth(mut self, auth: AuthRequirement) -> Self {
         self.auth = Some(auth);
         self
+    }
+
+    /// Sets the header-conditional extra permissions this operation requires
+    /// ([`crate::authz::ExtraPermission`]).
+    #[must_use]
+    pub const fn extra_permissions(mut self, extra_permissions: &'static [crate::authz::ExtraPermission]) -> Self {
+        self.extra_permissions = extra_permissions;
+        self
+    }
+
+    /// The header-conditional extra permissions this operation requires.
+    #[must_use]
+    pub const fn extra_permission_set(&self) -> &'static [crate::authz::ExtraPermission] {
+        self.extra_permissions
     }
 
     /// Sets the explicit handler-execution deadline class for a third-party operation.

@@ -481,14 +481,17 @@ for path in sorted((root / "crates").rglob("*.rs")):
 # crates/core/src/registry/reject_version_tests.rs: the `acme:V*` family's one `const fn spec`, and
 # the rowless `WriteGetObjectResponse` fixture carrying a two-action version requirement. Both are
 # outside the standard authority and state Standard for the same reason as the fixtures above.
-if central_builders != 102 or explicit_builders != 43:
+# explicit=44: the 44th is the extra-permission registration fixture's one `const fn extra_spec` in
+# crates/core/src/registry/reject.rs (`acme:DoThing`), outside the standard authority, stating
+# Standard for the same reason.
+if central_builders != 102 or explicit_builders != 44:
     fail(
         "repository builder census drifted: "
-        f"central={central_builders} explicit={explicit_builders}, expected central=102 explicit=43"
+        f"central={central_builders} explicit={explicit_builders}, expected central=102 explicit=44"
     )
 
 print(
-    "check_handler_deadline_class: 150 repository builder sites are inventoried "
-    "(145 classified: 102 central standard, 43 explicit; 5 authority tests)"
+    "check_handler_deadline_class: 151 repository builder sites are inventoried "
+    "(146 classified: 102 central standard, 44 explicit; 5 authority tests)"
 )
 PY

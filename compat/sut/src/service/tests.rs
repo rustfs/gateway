@@ -916,3 +916,5 @@ mod content_encoding_tests;
 mod expiration_header_tests;
 /// A request naming one object version, authorised as legacy RustFS authorises it (GHSA-3ppv).
 mod version_action_tests;
+/// The header-conditional extra permissions, enforced as legacy RustFS enforces them.
+mod extra_permission_tests;

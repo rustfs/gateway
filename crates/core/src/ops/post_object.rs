@@ -13,7 +13,9 @@
 // limitations under the License.
 
 //! `PostObject`: one browser form upload written as one object.
-//! Shares: nothing.
+//! Shares: nothing. POST carries object-lock, tagging and ACL as form fields, not HTTP headers,
+//! so `write_permissions` (which triggers on headers) does not apply; those form-field permissions
+//! are the POST-form seam's (`rustfs-gateway`'s legacy POST forms and rustfs/gateway#1167).
 //!
 //! Responsible for: the standard operation identity, security floor, authorization shape, and
 //! the hand-authored codec needed because the Smithy S3 model omits this documented operation.

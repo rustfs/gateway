@@ -995,6 +995,8 @@ impl S3Service {
         let requirement = requirement
             .for_version(named_version.is_some() && self.inner.view_policy.version_actions.asks_version_action(operation));
         let asked_version = named_version.as_deref();
+        // Header-conditional actions AWS requires on top of the base one (`ExtraPermission`).
+        let extra_permissions = M::extra_permissions(&op);
         let authz_started = self.inner.authz_clock.monotonic();
         let auth_scheme = if verdict.is_authenticated() {
             let governed = GovernorRequest::new(operation, meta.bucket(), declared_length, client_addr, class);
@@ -1149,6 +1151,53 @@ impl S3Service {
                     (None, _) | (_, None) => Decision::Indeterminate,
                 };
             }
+            // Each triggered, profile-required extra is all-of on top of the base decision.
+            let mut route_extras: Vec<AuthzRequest<'_>> = Vec::new();
+            if route_decision == Decision::Allow {
+                for extra in extra_permissions {
+                    if !route_service.inner.view_policy.requires_extra_permission(*extra) {
+                        continue;
+                    }
+                    // Read off the raw map by name: no `HeaderName` per trigger on the warm path.
+                    if !extra.applies(|name| route_headers.get(name).and_then(|value| value.to_str().ok())) {
+                        continue;
+                    }
+                    route_extras.push(AuthzRequest {
+                        action: extra.action(),
+                        route_action: extra.action(),
+                        copy_source_identity: None,
+                        subject: None,
+                        ..route_request
+                    });
+                }
+                for extra_request in &route_extras {
+                    match catch_boxed_future(|| route_runtime.authorizer.authorize_route(&authz_context, extra_request)).await {
+                        Ok(decision) => {
+                            if decision != Decision::Allow {
+                                route_decision = decision;
+                                break;
+                            }
+                        }
+                        Err(()) => {
+                            crate::logging::extension_panicked(Extension::Authorizer, request_id, operation);
+                            return Err(from_handler(
+                                HandlerError::internal_error("the authorizer failed"),
+                                response_kind,
+                                ConnectionIntent::MayKeepAlive,
+                            ));
+                        }
+                    }
+                }
+            }
+            // Combine for the audit only when an extra was asked: nothing allocates otherwise.
+            let mut combined_audit;
+            let audited_route: &[AuthzRequest<'_>] = if route_extras.is_empty() {
+                asked
+            } else {
+                combined_audit = asked.to_vec();
+                combined_audit.extend(route_extras.iter().copied());
+                &combined_audit
+            };
             let settled = route_decision.settle();
             emit_safely(
                 route_runtime.authz_audit.as_ref(),
@@ -1160,7 +1209,7 @@ impl S3Service {
                     resource: requirement.resource,
                     bucket: route_meta.bucket(),
                     key: route_effective_key,
-                    resources: asked,
+                    resources: audited_route,
                     auth_scheme,
                     identity: route_verdict.identity(),
                     target_origin,
