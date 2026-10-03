@@ -66,7 +66,13 @@ impl OperationCodec for dto::GetObjectLegalHold {
         // LegalHold — the XML response body, rooted at `LegalHold`.
         if let Some(v) = output.legal_hold.as_ref() {
             let mut writer = rustfs_gateway_xml::XmlWriter::document();
-            writer.open("LegalHold", Some(rustfs_gateway_xml::S3_XMLNS));
+            writer.legacy_layout(request.rustfs_response_layout());
+            let xmlns = if request.rustfs_response_layout() {
+                None
+            } else {
+                Some(rustfs_gateway_xml::S3_XMLNS)
+            };
+            writer.open("LegalHold", xmlns);
             write_object_lock_legal_hold(&mut writer, v)?;
             writer.close();
             response.body = ResponseBody::Complete(writer.finish().into_bytes());

@@ -69,10 +69,15 @@ use crate::routing::{RoutingSnapshot, RuntimeAssembly};
 
 mod anonymous_framing;
 mod assembly_update;
+mod bodyless_bodies;
 mod bodyless_digest;
+pub(crate) mod buffered_lengths;
+mod claimed_bodies;
 mod client_quirks;
 mod cors;
 pub(crate) mod credential_sentences;
+mod identifiers;
+mod legacy_chunks;
 mod legacy_heads;
 mod legacy_sentences;
 mod names;
@@ -150,6 +155,7 @@ pub struct ServiceBuilder {
     cors_source: Arc<dyn CorsSource>,
     cors_cache: CorsCacheConfig,
     cors_policy: CorsPolicy,
+    legacy_cors: Option<crate::LegacyRustfsCors>,
     sse: SseConfig,
     temporary_redirect_targets: Vec<RedirectTarget>,
 }
@@ -213,6 +219,7 @@ impl ServiceBuilder {
             cors_source: Arc::new(NoCors),
             cors_cache: CorsCacheConfig::default(),
             cors_policy: CorsPolicy::default(),
+            legacy_cors: None,
             sse: SseConfig::strict(),
             temporary_redirect_targets: Vec::new(),
         }
@@ -643,6 +650,7 @@ impl ServiceBuilder {
             traces: self.traces,
             cors: Arc::new(CachedCorsSource::new(self.cors_source, self.cors_cache)),
             cors_policy: self.cors_policy,
+            legacy_cors: self.legacy_cors,
             sse: self.sse,
             response_body_corrections: std::sync::atomic::AtomicU64::new(0),
             temporary_redirect_targets: Arc::from(self.temporary_redirect_targets),

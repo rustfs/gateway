@@ -19,9 +19,10 @@
 //! return.
 //! NOT responsible for: any protocol decision. Both implementations forward to
 //! [`S3Service::call`] and add only what a transport entry observes: the connection verdict
-//! announcement and whether the request body had ended when the answer was produced
-//! (`crate::request_end`). If a behaviour differs between the two paths, it is a defect in one of
-//! the two libraries or in this file, and never a policy.
+//! announcement, whether the request body had ended when the answer was produced
+//! (`crate::request_end`), and, when the assembly asks for it, the drain of an HTTP/1 body the
+//! answer left unread (`crate::unread_body`). If a behaviour differs between the two paths, it is
+//! a defect in one of the two libraries or in this file, and never a policy.
 //! Upstream: `crate::service`. Downstream: P7-02's server, and any tower stack.
 //!
 //! # Why `poll_ready` is always ready
@@ -91,10 +92,12 @@ where
     fn call(&mut self, request: Request<B>) -> Self::Future {
         let service = self.clone();
         Box::pin(async move {
+            let (request, retention) = crate::unread_body::retain(request, service.unread_body_drain());
             let (request, end) = crate::request_end::observe_end(request);
             let mut response = service.call(request).await;
             end.mark_unfinished(&mut response);
             announce_connection_verdict(&mut response);
+            retention.settle(&mut response);
             Ok(response)
         })
     }
@@ -115,10 +118,12 @@ where
     fn call(&self, request: Request<B>) -> Self::Future {
         let service = self.clone();
         Box::pin(async move {
+            let (request, retention) = crate::unread_body::retain(request, service.unread_body_drain());
             let (request, end) = crate::request_end::observe_end(request);
             let mut response = service.call(request).await;
             end.mark_unfinished(&mut response);
             announce_connection_verdict(&mut response);
+            retention.settle(&mut response);
             Ok(response)
         })
     }
@@ -143,10 +148,12 @@ where
     fn call(&mut self, request: Request<B>) -> Self::Future {
         let service = self.clone();
         Box::pin(async move {
+            let (request, retention) = crate::unread_body::retain(request, service.service.unread_body_drain());
             let (request, end) = crate::request_end::observe_end(request);
             let mut response = service.call(request).await;
             end.mark_unfinished(&mut response);
             announce_connection_verdict(&mut response);
+            retention.settle(&mut response);
             Ok(response)
         })
     }
@@ -167,10 +174,12 @@ where
     fn call(&self, request: Request<B>) -> Self::Future {
         let service = self.clone();
         Box::pin(async move {
+            let (request, retention) = crate::unread_body::retain(request, service.service.unread_body_drain());
             let (request, end) = crate::request_end::observe_end(request);
             let mut response = service.call(request).await;
             end.mark_unfinished(&mut response);
             announce_connection_verdict(&mut response);
+            retention.settle(&mut response);
             Ok(response)
         })
     }

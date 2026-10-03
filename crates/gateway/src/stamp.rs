@@ -12,18 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The four headers every response carries because the framework put them there.
+//! The headers every response carries because the framework put them there.
 //!
-//! Responsible for: [`stamp`] — the one site that writes `x-amz-request-id`, `x-amz-id-2`, `Server`
-//! and `Date`, on the success path and the refusal path alike — and [`is_reserved`], the predicate
-//! that refuses anything else the same names.
+//! Responsible for: [`stamp`] — the one site that writes `Server`, `Date` and the request's
+//! identifier headers, on the success path and the refusal path alike — and [`is_reserved`], the
+//! predicate that refuses anything else the same names. Which identifier headers an answer carries
+//! is the trace's to say (`crate::trace::RequestTrace::apply`): `x-amz-request-id` and `x-amz-id-2`
+//! by default, `x-amz-request-id` and `x-request-id` under the RustFS profile, none on a path whose
+//! host writes its own.
 //! NOT responsible for: minting the identifiers (`crate::trace`), reading the clock
 //! (`crate::clock`; this module is handed one reading and cannot take another), or any header an
 //! operation declares — those are the generated encoder's.
 //! Upstream: `crate::trace`, `crate::clock`, `rustfs-gateway-types`. Downstream: `crate::service`,
 //! which calls this once per request, and `crate::render`, which consults [`is_reserved`].
 //!
-//! # Why these four are one function
+//! # Why these are one function
 //!
 //! They share a property that nothing else in a response has: **their value is a fact about the
 //! service, not about the answer.** Who answered, when, and under which identifier are questions
@@ -76,7 +79,8 @@ pub(crate) fn is_reserved(name: &HeaderName) -> bool {
         || *name == http::header::CONTENT_LENGTH
 }
 
-/// Writes the four framework-guaranteed headers into a response head.
+/// Writes the framework-guaranteed headers into a response head: `Server`, `Date`, and the
+/// identifier headers the trace's answer carries.
 ///
 /// Called once per request, at the top level, over whatever the pipeline produced — so it is the
 /// last writer, and an encoder or a backend that wrote one of these loses.

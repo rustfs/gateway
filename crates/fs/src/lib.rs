@@ -137,6 +137,7 @@ mod post_object;
 mod reads;
 mod records;
 mod registry;
+mod rustfs_parity;
 mod tagging;
 mod transitions;
 mod upload_part_copy;
@@ -168,8 +169,8 @@ pub struct FsBackend {
     lifecycle_day_seconds: i64,
     lifecycle_scheduler_running: AtomicBool,
     lifecycle_sweep_interval: Duration,
-    /// The keys a batch delete answers on its own ([`FsBackend::refusing_batch_deletes_of`]).
-    batch_delete_refusal: Option<fn(&str) -> bool>,
+    /// The legacy-RustFS answers a deployment asked for, each off by default ([`rustfs_parity`]).
+    rustfs_parity: rustfs_parity::RustfsParity,
 }
 
 impl FsBackend {
@@ -215,7 +216,7 @@ impl FsBackend {
             lifecycle_day_seconds: 24 * 60 * 60,
             lifecycle_scheduler_running: AtomicBool::new(false),
             lifecycle_sweep_interval: Duration::from_secs(24 * 60 * 60),
-            batch_delete_refusal: None,
+            rustfs_parity: rustfs_parity::RustfsParity::default(),
         })
     }
 
@@ -517,7 +518,7 @@ impl Handler<CreateMultipartUpload> for FsBackend {
         let attributes = ObjectAttributes {
             tags: tagging::tags_from_header(input.tagging.as_deref())?,
             metadata: input.metadata.clone(),
-            headers: request_content_headers!(input).with_encryption(encryption.clone()),
+            headers: request_content_headers!(self, input).with_encryption(encryption.clone()),
             ..ObjectAttributes::default()
         };
         let upload_id = self.create_upload(&input.bucket, &input.key, checksum, &attributes).await?;

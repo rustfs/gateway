@@ -846,7 +846,7 @@ operation = "*"
 item = 'header x-amz-request-id'
 gateway = '<REQID>'
 s3s = '<absent>'
-reason = "The gateway stamps a request id on every answer (its format is asserted: 16 uppercase hex digits); s3s writes none, and RustFS adds one in a layer in front of s3s."
+reason = "The gateway stamps a request id on every answer (its format is asserted: 16 uppercase hex digits); s3s writes none, and RustFS adds one in a layer in front of s3s. Both matrices run the default identifiers; the RustFS profile's (identify_requests_as_legacy_rustfs, with RustFS's own id handed over) are compared with legacy RustFS in crates/goldens error_parity::identifiers."
 expires = "2026-12-31"
 ruling = "rd-err-0001"
 
@@ -857,7 +857,7 @@ operation = "*"
 item = 'header x-amz-id-2'
 gateway = '<HOSTID>'
 s3s = '<absent>'
-reason = "The gateway stamps a host id on every answer (asserted: 32 uppercase hex digits); s3s writes none."
+reason = "The gateway stamps a host id on every answer (asserted: 32 uppercase hex digits); s3s writes none. Both matrices run the default identifiers; under the RustFS profile (identify_requests_as_legacy_rustfs) the gateway writes no host id either, as legacy RustFS writes none (crates/goldens error_parity::identifiers)."
 expires = "2026-12-31"
 ruling = "rd-err-0001"
 

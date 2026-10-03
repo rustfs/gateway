@@ -505,3 +505,7 @@ async fn a_half_tls_handshake_releases_its_admission_permit_at_the_header_deadli
 
 #[path = "tls_h2/alpn.rs"]
 mod alpn;
+#[path = "tls_h2/prior_knowledge.rs"]
+mod prior_knowledge;
+#[path = "tls_h2/send_deadline.rs"]
+mod send_deadline;

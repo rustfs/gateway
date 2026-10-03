@@ -120,9 +120,16 @@ impl OperationCodec for dto::GetObjectAttributes {
             response.set_header("x-amz-request-charged", rendered);
         }
         let mut writer = rustfs_gateway_xml::XmlWriter::document();
-        writer.open("GetObjectAttributesOutput", Some(rustfs_gateway_xml::S3_XMLNS));
+        writer.legacy_layout(request.rustfs_response_layout());
+        let root = if request.rustfs_response_layout() {
+            "GetObjectAttributesResponse"
+        } else {
+            "GetObjectAttributesOutput"
+        };
+        writer.open(root, Some(rustfs_gateway_xml::S3_XMLNS));
+        writer.order_children(rustfs_order::RESPONSE);
         if let Some(v) = output.e_tag.as_ref() {
-            writer.element("ETag", &value::render_etag(v, EtagRender::XmlBare));
+            writer.entity_tag_element("ETag", &value::render_etag(v, EtagRender::XmlBare));
         }
         if let Some(v) = output.checksum.as_ref() {
             writer.open("Checksum", None);
@@ -153,6 +160,7 @@ impl OperationCodec for dto::GetObjectAttributes {
 
 /// Writes one `Checksum` element's children, in the wire order the IR records.
 fn write_checksum(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::Checksum) -> Result<(), CodecError> {
+    writer.order_children(rustfs_order::CHECKSUM);
     if let Some(v) = value.checksum_crc32.as_ref() {
         writer.element("ChecksumCRC32", v.as_str());
     }
@@ -194,6 +202,7 @@ fn write_get_object_attributes_parts(
     writer: &mut rustfs_gateway_xml::XmlWriter,
     value: &dto::GetObjectAttributesParts,
 ) -> Result<(), CodecError> {
+    writer.order_children(rustfs_order::GET_OBJECT_ATTRIBUTES_PARTS);
     {
         let v = &value.total_parts_count;
         writer.element("PartsCount", &v.to_string());
@@ -222,6 +231,7 @@ fn write_get_object_attributes_parts(
 
 /// Writes one `ObjectPart` element's children, in the wire order the IR records.
 fn write_object_part(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::ObjectPart) -> Result<(), CodecError> {
+    writer.order_children(rustfs_order::OBJECT_PART);
     {
         let v = &value.part_number;
         writer.element("PartNumber", &v.to_string());
@@ -261,4 +271,15 @@ fn write_object_part(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::Ob
         writer.element("ChecksumXXHASH128", v.as_str());
     }
     Ok(())
+}
+
+/// The order legacy RustFS writes each response element's children in (rustfs/gateway#1078):
+/// the order the legacy stack's structure declares its fields in.
+/// Honoured under `MetaView::rustfs_response_layout`; generated from the IR.
+#[rustfmt::skip]
+mod rustfs_order {
+    pub(super) const RESPONSE: &[&str] = &["Checksum", "ETag", "ObjectParts", "ObjectSize", "StorageClass"];
+    pub(super) const CHECKSUM: &[&str] = &["ChecksumCRC32", "ChecksumCRC32C", "ChecksumCRC64NVME", "ChecksumMD5", "ChecksumSHA1", "ChecksumSHA256", "ChecksumSHA512", "ChecksumType", "ChecksumXXHASH128", "ChecksumXXHASH3", "ChecksumXXHASH64"];
+    pub(super) const GET_OBJECT_ATTRIBUTES_PARTS: &[&str] = &["IsTruncated", "MaxParts", "NextPartNumberMarker", "PartNumberMarker", "Part", "PartsCount"];
+    pub(super) const OBJECT_PART: &[&str] = &["ChecksumCRC32", "ChecksumCRC32C", "ChecksumCRC64NVME", "ChecksumMD5", "ChecksumSHA1", "ChecksumSHA256", "ChecksumSHA512", "ChecksumXXHASH128", "ChecksumXXHASH3", "ChecksumXXHASH64", "PartNumber", "Size"];
 }

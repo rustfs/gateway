@@ -62,6 +62,7 @@ impl OperationCodec for dto::GetBucketAccelerateConfiguration {
             response.set_header("x-amz-request-charged", rendered);
         }
         let mut writer = rustfs_gateway_xml::XmlWriter::document();
+        writer.legacy_layout(request.rustfs_response_layout());
         writer.open("AccelerateConfiguration", Some(rustfs_gateway_xml::S3_XMLNS));
         if let Some(v) = output.status.as_ref() {
             writer.element("Status", v.as_str());

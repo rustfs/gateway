@@ -15,8 +15,8 @@
 //! The assembly's CORS settings: where bucket documents come from, the cache in front of them, and
 //! the deployment's credential posture.
 //!
-//! Responsible for: [`ServiceBuilder::cors_source`], [`ServiceBuilder::cors_cache`] and
-//! [`ServiceBuilder::cors_policy`].
+//! Responsible for: [`ServiceBuilder::cors_source`], [`ServiceBuilder::cors_cache`],
+//! [`ServiceBuilder::cors_policy`] and [`ServiceBuilder::answer_cors_as_legacy_rustfs`].
 //! NOT responsible for: answering a preflight or decorating a response (`crate::service`'s CORS
 //! stage), or caching (`crate::ext::cors`).
 //! Upstream: `super::ServiceBuilder`. Downstream: `super::ServiceBuilder::build`, which wraps the
@@ -58,6 +58,26 @@ impl ServiceBuilder {
     #[must_use]
     pub fn cors_policy(mut self, policy: CorsPolicy) -> Self {
         self.cors_policy = policy;
+        self
+    }
+
+    /// Answers CORS as legacy RustFS does, in place of this crate's own runtime
+    /// (rustfs/gateway#1120).
+    ///
+    /// Every `OPTIONS` is answered before routing — `400` without `Origin` or
+    /// `Access-Control-Request-Method` on `/` and on an S3 path, the bucket's rules or the
+    /// deployment-wide fallback headers otherwise, `403` with no body when a bucket's rules admit
+    /// nothing — and every other request carrying `Origin` has its answer decorated, refusals
+    /// before authentication included, from the bucket named by its first path segment. See
+    /// `crate::cors_legacy` for the whole of what RustFS does. [`Self::cors_policy`] is not
+    /// consulted; the source and its cache still are.
+    ///
+    /// Off by default: the gateway's own runtime answers, with its uniform refusal. This switch
+    /// gives that up for RustFS's answers — every one of them but the credentials legacy RustFS
+    /// allows, which these answers never allow (`crate::cors_legacy` says why).
+    #[must_use]
+    pub fn answer_cors_as_legacy_rustfs(mut self, cors: crate::LegacyRustfsCors) -> Self {
+        self.legacy_cors = Some(cors);
         self
     }
 }

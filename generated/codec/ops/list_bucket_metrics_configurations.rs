@@ -57,7 +57,9 @@ impl OperationCodec for dto::ListBucketMetricsConfigurations {
         let mut response = EncodedResponse::of(status);
         response.status = status_code(status)?;
         let mut writer = rustfs_gateway_xml::XmlWriter::document();
+        writer.legacy_layout(request.rustfs_response_layout());
         writer.open("ListMetricsConfigurationsResult", Some(rustfs_gateway_xml::S3_XMLNS));
+        writer.order_children(rustfs_order::RESPONSE);
         if let Some(v) = output.is_truncated.as_ref() {
             writer.element("IsTruncated", if *v { "true" } else { "false" });
         }
@@ -88,6 +90,7 @@ fn write_metrics_and_operator(
     writer: &mut rustfs_gateway_xml::XmlWriter,
     value: &dto::MetricsAndOperator,
 ) -> Result<(), CodecError> {
+    writer.order_children(rustfs_order::METRICS_AND_OPERATOR);
     if let Some(v) = value.prefix.as_ref() {
         writer.element("Prefix", v.as_str());
     }
@@ -107,6 +110,7 @@ fn write_metrics_configuration(
     writer: &mut rustfs_gateway_xml::XmlWriter,
     value: &dto::MetricsConfiguration,
 ) -> Result<(), CodecError> {
+    writer.order_children(rustfs_order::METRICS_CONFIGURATION);
     {
         let v = &value.id;
         writer.element("Id", v.as_str());
@@ -154,4 +158,14 @@ fn write_tag(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::Tag) -> Re
         writer.element("Value", v.as_str());
     }
     Ok(())
+}
+
+/// The order legacy RustFS writes each response element's children in (rustfs/gateway#1078):
+/// the order the legacy stack's structure declares its fields in.
+/// Honoured under `MetaView::rustfs_response_layout`; generated from the IR.
+#[rustfmt::skip]
+mod rustfs_order {
+    pub(super) const RESPONSE: &[&str] = &["ContinuationToken", "IsTruncated", "MetricsConfiguration", "NextContinuationToken"];
+    pub(super) const METRICS_AND_OPERATOR: &[&str] = &["AccessPointArn", "Prefix", "Tag"];
+    pub(super) const METRICS_CONFIGURATION: &[&str] = &["Filter", "Id"];
 }

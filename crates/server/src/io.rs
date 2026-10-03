@@ -75,8 +75,27 @@ const LINGER_BLOCKS_PER_POLL: usize = 16;
 /// remainder would be the memory cost the refusal was avoiding.
 const LINGER_BLOCK: usize = 8 * 1024;
 
+/// The furthest a deadline in this crate is armed: thirty years, as far as Tokio's own timer goes.
+/// A longer configured duration means "never", and is clamped rather than added, because
+/// `Instant + Duration` panics past the platform's range (`Duration::MAX` always; rustfs/gateway#1211).
+pub(crate) const FARTHEST_DEADLINE: Duration = Duration::from_secs(30 * 365 * 24 * 60 * 60);
+
+/// `timeout`, clamped to [`FARTHEST_DEADLINE`] — for a duration some other timer adds to its own
+/// clock, as Hyper does with its keep-alive settings.
+pub(crate) fn bounded(timeout: Duration) -> Duration {
+    timeout.min(FARTHEST_DEADLINE)
+}
+
+/// The instant `timeout` from now, clamped to [`FARTHEST_DEADLINE`] so it can never overflow.
 pub(crate) fn deadline_after(timeout: Duration) -> Instant {
-    Instant::now() + timeout
+    Instant::now() + bounded(timeout)
+}
+
+/// The transport's one reading of the monotonic clock, for a transport deadline armed outside
+/// this file (`crate::send_deadline`); like every deadline here, never visible to a protocol
+/// decision.
+pub(crate) fn transport_now() -> Instant {
+    Instant::now()
 }
 
 pub(crate) fn deadline_remaining(deadline: Instant) -> Duration {
@@ -217,11 +236,11 @@ impl<I> ProgressIo<I> {
     }
 
     fn reset_idle(&mut self) {
-        self.idle_sleep.as_mut().reset(Instant::now() + self.idle_timeout);
+        self.idle_sleep.as_mut().reset(deadline_after(self.idle_timeout));
     }
 
     fn reset_write(&mut self) {
-        self.write_sleep.as_mut().reset(Instant::now() + self.write_timeout);
+        self.write_sleep.as_mut().reset(deadline_after(self.write_timeout));
         self.write_waiting = false;
         #[cfg(any(target_os = "linux", target_os = "android", target_vendor = "apple"))]
         {
@@ -272,7 +291,7 @@ impl<I> ProgressIo<I> {
 
     fn begin_write_wait(&mut self) {
         if !self.write_waiting {
-            self.write_sleep.as_mut().reset(Instant::now() + self.write_timeout);
+            self.write_sleep.as_mut().reset(deadline_after(self.write_timeout));
             self.write_waiting = true;
         }
     }
@@ -486,7 +505,7 @@ impl<I: AsyncRead + AsyncWrite + Unpin> AsyncWrite for ProgressIo<I> {
             if let Some(receipts) = &this.receipts {
                 receipts.closed();
             }
-            this.linger.deadline = Instant::now() + this.linger.budget;
+            this.linger.deadline = deadline_after(this.linger.budget);
             let quiet_deadline = if this.linger.body_unfinished.load(Ordering::Acquire) {
                 Instant::now() + LINGER_QUIET
             } else {
@@ -748,6 +767,11 @@ mod tests {
         assert!(started.elapsed() >= Duration::from_millis(900));
     }
 }
+
+#[cfg(test)]
+#[allow(clippy::expect_used)] // Test-only in-memory transport setup must terminate on fixture failure.
+#[path = "io_deadline_tests.rs"]
+mod deadline_tests;
 
 #[cfg(all(test, any(target_os = "linux", target_os = "android", target_vendor = "apple")))]
 #[allow(clippy::expect_used, clippy::panic)] // Test-only real-socket setup must terminate on fixture failure.
