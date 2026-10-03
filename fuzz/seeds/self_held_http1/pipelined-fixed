@@ -1,0 +1,8 @@
+PUT /b/k HTTP/1.1
+Host: localhost
+Content-Length: 5
+
+helloGET / HTTP/1.1
+Host: localhost
+Connection: close
+
