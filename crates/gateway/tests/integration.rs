@@ -104,6 +104,8 @@ mod host_request_id;
 mod host_resolve_replay;
 #[path = "ingest_assembly.rs"]
 mod ingest_assembly;
+#[path = "legacy_cors.rs"]
+mod legacy_cors;
 #[path = "lifecycle_reachability.rs"]
 mod lifecycle_reachability;
 #[path = "lock_encryption_reachability.rs"]
@@ -214,6 +216,8 @@ mod throughput_request;
 mod tracing_events;
 #[path = "unknown_checksum_algorithms.rs"]
 mod unknown_checksum_algorithms;
+#[path = "unread_body_drain.rs"]
+mod unread_body_drain;
 #[path = "unread_body_refusal.rs"]
 mod unread_body_refusal;
 #[path = "upload_object_ceiling.rs"]

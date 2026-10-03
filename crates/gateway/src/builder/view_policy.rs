@@ -21,6 +21,7 @@
 //! [`ServiceBuilder::answer_checksum_failures_with_bad_digest`],
 //! [`ServiceBuilder::ignore_unknown_checksum_algorithms`],
 //! [`ServiceBuilder::read_request_documents_as_rustfs`],
+//! [`ServiceBuilder::write_responses_as_rustfs`],
 //! [`ServiceBuilder::sign_presigned_payloads_as_unsigned`],
 //! [`ServiceBuilder::sign_base64_payload_digests_as_hex`],
 //! [`ServiceBuilder::accept_empty_uploads_without_content_length`],
@@ -169,6 +170,10 @@ pub(crate) struct ViewPolicy {
     clamp_max_keys: bool,
     integrity_codes: IntegrityCodes,
     document_reading: DocumentReading,
+    rustfs_response_layout: bool,
+    /// Whether and how an unread HTTP/1 request body is read after its answer
+    /// (`crate::unread_body`).
+    pub(super) unread_body_drain: Option<crate::unread_body::UnreadBodyDrain>,
     presigned_payload_unsigned: bool,
     base64_digests_as_hex: bool,
     empty_uploads_without_length: bool,
@@ -266,6 +271,18 @@ impl ViewPolicy {
         } else {
             meta
         };
+        // Legacy-compat (rustfs/backlog#2684): legacy RustFS writes a response document's members
+        // in its own declaration order — alphabetical by field name for most structures, so a
+        // lifecycle rule's `ID` follows its `Filter` — no line end after the XML declaration, no
+        // namespace on a payload root, the attributes answer rooted at the model's `xmlName`, and
+        // an entity tag's quotes unescaped, where AWS answers in the model's order, under the
+        // element it documents and with `&quot;`. Kept so a RustFS client reads the bytes it reads
+        // today; the intended future behaviour is the core default, the model's layout.
+        let meta = if self.rustfs_response_layout {
+            meta.with_rustfs_response_layout()
+        } else {
+            meta
+        };
         let meta = match self.integrity_codes {
             IntegrityCodes::RustFs => meta.with_checksum_failures_as_bad_digest(),
             IntegrityCodes::Model => meta,
@@ -334,6 +351,12 @@ impl ViewPolicy {
         } else {
             None
         }
+    }
+
+    /// The drain this assembly runs behind an answer that left an HTTP/1 request body unread
+    /// ([`ServiceBuilder::drain_unread_request_bodies`]).
+    pub(crate) const fn unread_body_drain(&self) -> Option<crate::unread_body::UnreadBodyDrain> {
+        self.unread_body_drain
     }
 }
 
@@ -420,6 +443,23 @@ impl ServiceBuilder {
         self
     }
 
+    /// Writes every XML response document in legacy RustFS's layout (rustfs/gateway#1078): each
+    /// element's children in the order the legacy stack declares its members in, no line end after
+    /// the XML declaration, no namespace on a payload root, the attributes answer rooted at
+    /// `GetObjectAttributesResponse`, and an entity tag's quotes as they are, so an answer is the
+    /// bytes legacy RustFS answers with.
+    ///
+    /// Off by default: the core writes the model's member order, the order AWS documents and answers
+    /// with, under the root AWS documents, with `&quot;` in an entity tag, and ends the declaration
+    /// with a line end. Only the layout changes: every member is written either way, with the same
+    /// text. A committed answer (a head sent before its outcome)
+    /// keeps the default declaration its prologue already carries.
+    #[must_use]
+    pub fn write_responses_as_rustfs(mut self) -> Self {
+        self.view_policy.rustfs_response_layout = true;
+        self
+    }
+
     /// Reads a presigned request's `x-amz-content-sha256` as legacy RustFS does: the signature
     /// always covers `UNSIGNED-PAYLOAD`, a declared digest (lowercase hex or base64) is verified
     /// against the body instead, any other value is `403 SignatureDoesNotMatch`, and a streaming
@@ -462,6 +502,25 @@ impl ServiceBuilder {
     #[must_use]
     pub fn accept_empty_uploads_without_content_length(mut self) -> Self {
         self.view_policy.empty_uploads_without_length = true;
+        self
+    }
+
+    /// Reads and discards what an HTTP/1 request body still owes after an answer that left it
+    /// unread, and closes the connection behind that answer, as RustFS does (rustfs/gateway#1120).
+    ///
+    /// For a host that owns the connection and hands the service Hyper's bodies. Hyper stops
+    /// reading an HTTP/1 connection once a body is dropped early and closes it after the answer,
+    /// so a peer still sending — a reverse proxy streaming an upload the service refused on its
+    /// head — meets a reset instead of the answer. With this setting the dropped body is read in a
+    /// task of its own until it ends, fails, or `drain`'s idle bound passes, and the answer carries
+    /// `Connection: close`. A body read to its end, one that was empty on arrival, one that
+    /// failed, and every HTTP/2 stream are left as they are.
+    ///
+    /// Off by default. The drain needs a Tokio runtime; without one the body is released as it is
+    /// with the setting off.
+    #[must_use]
+    pub fn drain_unread_request_bodies(mut self, drain: crate::UnreadBodyDrain) -> Self {
+        self.view_policy.unread_body_drain = Some(drain);
         self
     }
 
@@ -570,6 +629,7 @@ mod tests {
         assert!(!ViewPolicy::default().clamp_max_keys);
         assert_eq!(ViewPolicy::default().integrity_codes, IntegrityCodes::Model);
         assert_eq!(ViewPolicy::default().document_reading, DocumentReading::Tree);
+        assert!(!ViewPolicy::default().rustfs_response_layout);
         assert!(!ViewPolicy::default().presigned_payload_unsigned());
         assert!(!ViewPolicy::default().empty_uploads_without_length);
         assert!(!ViewPolicy::default().rustfs_listings);

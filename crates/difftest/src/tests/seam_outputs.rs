@@ -160,10 +160,11 @@ fn value_path(path: &str) -> Option<String> {
 }
 
 /// Encode-matrix samples the RustFS profile answers otherwise than the generic profile the matrix
-/// pins (the seam diff runs the RustFS profile): each sample's register ids and answer findings
-/// under it. The RustFS listing rule (#1088) keeps `/` literal in a URL-encoded delimiter, so the
-/// delimiter the generic profile double-encodes (kd-encode-0037, 0039, 0041) is written as the
-/// legacy stack writes it, and it echoes no multipart EncodingType (sa-0012).
+/// pins beyond the response layout ([`under_the_rustfs_layout`]; the seam diff runs the RustFS
+/// profile): each sample's register ids and answer findings under it. The RustFS listing rule
+/// (#1088) keeps `/` literal in a URL-encoded delimiter, so the delimiter the generic profile
+/// double-encodes (kd-encode-0037, 0039, 0041) is written as the legacy stack writes it, and it
+/// echoes no multipart EncodingType (sa-0003).
 const RUSTFS_PROFILE_SAMPLES: &[(&str, &[&str], &[&str])] = &[
     (
         "list-objects-v2-url",
@@ -172,44 +173,19 @@ const RUSTFS_PROFILE_SAMPLES: &[(&str, &[&str], &[&str])] = &[
             "kd-encode-0002",
             "kd-encode-0003",
             "kd-encode-0004",
-            "kd-encode-0005",
-            "kd-encode-0006",
-            "kd-encode-0026",
-            "kd-encode-0027",
-            "kd-encode-0028",
             "kd-encode-0038",
         ],
         &[],
     ),
     (
         "list-objects-url",
-        &[
-            "kd-encode-0001",
-            "kd-encode-0002",
-            "kd-encode-0003",
-            "kd-encode-0004",
-            "kd-encode-0005",
-            "kd-encode-0006",
-            "kd-encode-0023",
-            "kd-encode-0024",
-            "kd-encode-0025",
-        ],
+        &["kd-encode-0001", "kd-encode-0002", "kd-encode-0003", "kd-encode-0004"],
         &[],
     ),
     (
         "list-multipart-uploads-url",
-        &[
-            "kd-encode-0001",
-            "kd-encode-0002",
-            "kd-encode-0003",
-            "kd-encode-0004",
-            "kd-encode-0005",
-            "kd-encode-0014",
-            "kd-encode-0015",
-            "kd-encode-0016",
-            "kd-encode-0017",
-        ],
-        &["sa-0012"],
+        &["kd-encode-0001", "kd-encode-0002", "kd-encode-0003", "kd-encode-0004"],
+        &["sa-0003"],
     ),
 ];
 
@@ -223,10 +199,46 @@ fn n_every_rustfs_profile_sample_differs_from_what_the_matrix_pins() {
             .iter()
             .find(|row| row.sample.name == *name)
             .unwrap_or_else(|| panic!("{name} is not an encode-matrix sample"));
-        let pinned: BTreeSet<&str> = row.expect.iter().copied().collect();
+        let pinned: BTreeSet<&str> = under_the_rustfs_layout(row.expect).iter().copied().collect();
         let profile: BTreeSet<&str> = known.iter().copied().collect();
         assert!(pinned != profile || !answer.is_empty(), "{name} answers as the matrix pins it");
     }
+}
+
+/// The register entries the RustFS response layout (`write_responses_as_rustfs`,
+/// rustfs/gateway#1078) leaves nothing to match: the line end after the XML declaration
+/// (`body.prolog`), every model-order entry (`body.order …`), the S3 namespace on a root the legacy
+/// stack writes bare (an entry whose two sides differ in that attribute alone), and an entity tag's
+/// quotes (an entry whose two sides differ in `&quot;` against `"` alone). The seam diff runs the
+/// layout; the encode matrix, which pins these entries, runs the generic profile.
+fn layout_entries() -> &'static BTreeSet<String> {
+    static ENTRIES: OnceLock<BTreeSet<String>> = OnceLock::new();
+    ENTRIES.get_or_init(|| {
+        let namespace = " xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\"";
+        KnownDiffs::checked_in()
+            .expect("the checked-in register parses")
+            .entries()
+            .iter()
+            .filter(|entry| {
+                let (bare_root, quoted_tag) = match (&entry.gateway, &entry.s3s) {
+                    (Some(gateway), Some(legacy)) if gateway != legacy => (
+                        gateway.replacen(namespace, "", 1) == *legacy,
+                        gateway.replace("&quot;", "\\\"") == *legacy,
+                    ),
+                    _ => (false, false),
+                };
+                entry.item == "body.prolog" || entry.item.starts_with("body.order ") || bare_root || quoted_tag
+            })
+            .map(|entry| entry.id.clone())
+            .collect()
+    })
+}
+
+/// A matrix sample's register ids as the seam diff's answers show them: the pinned ids without
+/// [`layout_entries`].
+fn under_the_rustfs_layout(pinned: &[&'static str]) -> &'static [&'static str] {
+    let kept: Vec<&'static str> = pinned.iter().copied().filter(|id| !layout_entries().contains(*id)).collect();
+    Box::leak(kept.into_boxed_slice())
 }
 
 /// One judged answer.
@@ -264,7 +276,7 @@ fn outcomes() -> &'static [Outcome] {
                         orders: &[],
                     },
                     None => Written::As {
-                        known: row.expect,
+                        known: under_the_rustfs_layout(row.expect),
                         answer: &[],
                         orders: &[],
                     },
@@ -503,16 +515,13 @@ fn n_a_member_the_gateway_is_not_handed_fails_its_row() {
     );
 }
 
-const XML: &[&str] = &[
-    "kd-encode-0001",
-    "kd-encode-0002",
-    "kd-encode-0003",
-    "kd-encode-0004",
-    "kd-encode-0005",
-];
+/// An XML answer's registered differences under the RustFS response layout: the four stamped
+/// headers alone (the layout writes the legacy declaration, so `kd-encode-0005` never matches).
+const XML: &[&str] = &["kd-encode-0001", "kd-encode-0002", "kd-encode-0003", "kd-encode-0004"];
 
-/// Negative — a child order the row does not declare, a refusal declared as an answer and an answer
-/// declared as a refusal each fail the row.
+/// Negative — a child order the row declares and the answers do not show (the RustFS layout writes
+/// the ACL answer in the legacy order), a refusal declared as an answer and an answer declared as a
+/// refusal each fail the row.
 #[test]
 fn n_an_undeclared_order_or_outcome_fails_the_row() {
     let register = KnownDiffs::checked_in().expect("the checked-in register parses");
@@ -526,7 +535,7 @@ fn n_an_undeclared_order_or_outcome_fails_the_row() {
         crate::seam::Written::As {
             known: XML,
             answer: &[],
-            orders: &[],
+            orders: &["AccessControlPolicy", "AccessControlPolicy/Owner"],
         },
         &register,
     );
@@ -603,42 +612,106 @@ fn n_no_answer_finding_outlives_the_difference_it_names() {
     assert!(stale.is_empty(), "answer findings no row declares: {stale:?}");
 }
 
-fn attributes(object_size: Option<i64>) -> legacy::GetObjectAttributesOutput {
-    legacy::GetObjectAttributesOutput {
-        e_tag: Some(legacy::ETag::Strong("5d41402abc4b2a76b9719d911017c592".to_owned())),
-        object_size,
-        storage_class: Some(legacy::StorageClass::from("STANDARD".to_owned())),
-        ..Default::default()
+/// Two answers rooted at `gateway_root` and `legacy_root`, the legacy one holding an object size
+/// the gateway one may lack, compared as the seam diff compares them.
+fn rooted(gateway_root: &str, legacy_root: &str, gateway_size: Option<i64>) -> AnswerDiff {
+    let document = |root: &str, size: Option<i64>| {
+        let size = size
+            .map(|size| format!("<ObjectSize>{size}</ObjectSize>"))
+            .unwrap_or_default();
+        let body = format!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?><{root} xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\"><StorageClass>STANDARD</StorageClass>{size}</{root}>"
+        );
+        crate::encode::WireAnswer::new(200, &http::HeaderMap::new(), body.into_bytes())
+    };
+    let (mut gateway, mut legacy) = (document(gateway_root, gateway_size), document(legacy_root, Some(15)));
+    let encode = crate::encode::compare("GetObjectAttributes".to_owned(), false, &mut gateway, &mut legacy);
+    AnswerDiff {
+        operation: "GetObjectAttributes",
+        present: Vec::new(),
+        refused: None,
+        gateway_status: 200,
+        encode: Some(encode),
+        answers: Some((gateway, legacy)),
     }
 }
 
 /// Negative — a value the gateway answer lacks is named by the containment check even where the
-/// element comparison cannot reach: the two stacks root the attributes answer at different
-/// elements (`sa-0009`), so the element diff stops at the root and only the containment check
-/// reads the members below it.
+/// element comparison cannot reach: when two answers are rooted at different elements — as the
+/// generic layout roots the attributes answer at `GetObjectAttributesOutput` and the legacy stack
+/// at `GetObjectAttributesResponse` — the element diff stops at the root and only the containment
+/// check reads the members below it. (The seam diff's own answers no longer differ at the root:
+/// the RustFS response layout roots the attributes answer as the legacy stack does.)
 #[test]
 fn n_a_value_below_a_differing_root_that_the_gateway_lacks_is_named() {
-    let differ = SeamDiffer::new().expect("both stacks assemble");
-    let request = RawRequest::get("/bucket/k?attributes").header("x-amz-object-attributes", "ETag,ObjectSize,StorageClass");
-    let dropped = differ
-        .answer_diff_pair(&request, &|| attributes(None), &|| attributes(Some(15)))
-        .expect("both stacks answer");
     let none = BTreeSet::new();
+    let dropped = rooted("GetObjectAttributesOutput", "GetObjectAttributesResponse", None);
     assert_eq!(dropped.lost(&none, &none), ["body ObjectSize: \"15\""]);
     let register = KnownDiffs::checked_in().expect("the checked-in register parses");
     let written = crate::seam::Written::As {
-        known: XML,
-        answer: &["sa-0009"],
+        known: &[],
+        answer: &[],
         orders: &[],
     };
     let problems = judge("dropped", &dropped, written, &register);
-    assert_eq!(problems, ["dropped: the gateway answer lost body ObjectSize: \"15\""]);
+    assert!(
+        problems.contains(&"dropped: the gateway answer lost body ObjectSize: \"15\"".to_owned()),
+        "{problems:?}"
+    );
 
-    let kept = differ
-        .answer_diff_pair(&request, &|| attributes(Some(15)), &|| attributes(Some(15)))
-        .expect("both stacks answer");
+    let kept = rooted("GetObjectAttributesOutput", "GetObjectAttributesResponse", Some(15));
     assert!(kept.lost(&none, &none).is_empty());
-    assert!(judge("kept", &kept, written, &register).is_empty());
+    let same_root = rooted("GetObjectAttributesResponse", "GetObjectAttributesResponse", Some(15));
+    assert!(judge("same", &same_root, written, &register).is_empty());
+}
+
+/// The register ids whose entry is about the body: its prolog, a child order, or an element.
+fn body_entries() -> &'static BTreeSet<String> {
+    static ENTRIES: OnceLock<BTreeSet<String>> = OnceLock::new();
+    ENTRIES.get_or_init(|| {
+        KnownDiffs::checked_in()
+            .expect("the checked-in register parses")
+            .entries()
+            .iter()
+            .filter(|entry| entry.item.starts_with("body"))
+            .map(|entry| entry.id.clone())
+            .collect()
+    })
+}
+
+/// Positive — every answer the seam diff writes in the RustFS profile — each answer row and each
+/// encode-matrix sample, across every covered operation — is the legacy stack's document byte for
+/// byte whenever no body difference is declared (rustfs/gateway#1078); an answer that declares one
+/// (a register entry about the body, an answer finding, a child order) is one whose bytes do
+/// differ.
+#[test]
+fn every_rustfs_profile_document_is_the_legacy_bytes_bar_its_declared_differences() {
+    let mut problems = Vec::new();
+    let mut identical = 0usize;
+    for outcome in outcomes() {
+        let Written::As { known, answer, orders } = outcome.expect else {
+            continue;
+        };
+        let Some((gateway, legacy)) = &outcome.diff.answers else {
+            continue;
+        };
+        let body_declared = !answer.is_empty() || !orders.is_empty() || known.iter().any(|id| body_entries().contains(*id));
+        let same = gateway.body == legacy.body;
+        if !body_declared && !same {
+            problems.push(format!(
+                "{}: the documents differ\n  gateway {}\n  legacy  {}",
+                outcome.name,
+                String::from_utf8_lossy(&gateway.body),
+                String::from_utf8_lossy(&legacy.body)
+            ));
+        }
+        if body_declared && same {
+            problems.push(format!("{}: declares a body difference its documents do not show", outcome.name));
+        }
+        identical += usize::from(same);
+    }
+    assert!(problems.is_empty(), "{}", problems.join("\n"));
+    assert!(identical >= 100, "only {identical} answers compared byte for byte");
 }
 
 /// The containment check's reading of a document: every attribute but a namespace declaration,

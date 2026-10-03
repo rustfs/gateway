@@ -52,7 +52,9 @@ impl OperationCodec for dto::GetBucketVersioning {
         let mut response = EncodedResponse::of(status);
         response.status = status_code(status)?;
         let mut writer = rustfs_gateway_xml::XmlWriter::document();
+        writer.legacy_layout(request.rustfs_response_layout());
         writer.open("VersioningConfiguration", Some(rustfs_gateway_xml::S3_XMLNS));
+        writer.order_children(rustfs_order::RESPONSE);
         if let Some(v) = output.status.as_ref() {
             writer.element("Status", v.as_str());
         }
@@ -68,4 +70,12 @@ impl OperationCodec for dto::GetBucketVersioning {
         response.enforce_http_invariants(request.method());
         Ok(response)
     }
+}
+
+/// The order legacy RustFS writes each response element's children in (rustfs/gateway#1078):
+/// the order the legacy stack's structure declares its fields in.
+/// Honoured under `MetaView::rustfs_response_layout`; generated from the IR.
+#[rustfmt::skip]
+mod rustfs_order {
+    pub(super) const RESPONSE: &[&str] = &["MfaDelete", "Status"];
 }

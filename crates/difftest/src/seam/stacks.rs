@@ -198,6 +198,9 @@ impl GatewaySeam {
             .answer_credential_refusals_with_legacy_rustfs_sentences()
             .slash_policy(SlashPolicy::RustfsLegacy)
             .accept_legacy_rustfs_object_keys_after_listing_in_the_posture_report()
+            // Reached only through a transport entry, which the seam's in-process calls are not;
+            // turned on so the seam runs the profile `compat/sut` spells.
+            .drain_unread_request_bodies(rustfs_gateway::UnreadBodyDrain::with_idle_timeout(std::time::Duration::from_secs(300)))
             .address_paths_as_legacy_rustfs()
             .select_operations_as_legacy_rustfs()
             .accept_empty_uploads_without_content_length()
@@ -212,6 +215,7 @@ impl GatewaySeam {
                 PlaintextCustomerKeyAck::i_understand_customer_keys_will_be_sent_in_the_clear(),
             ))
             .read_request_documents_as_rustfs()
+            .write_responses_as_rustfs()
             .host_resolver(Resolver::new(false))
             .observer(RouteObserver {
                 routed: Arc::clone(&routed),

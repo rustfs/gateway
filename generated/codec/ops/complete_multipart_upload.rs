@@ -142,7 +142,9 @@ impl OperationCodec for dto::CompleteMultipartUpload {
             response.set_header("x-amz-request-charged", rendered);
         }
         let mut writer = rustfs_gateway_xml::XmlWriter::document();
+        writer.legacy_layout(request.rustfs_response_layout());
         writer.open("CompleteMultipartUploadResult", Some(rustfs_gateway_xml::S3_XMLNS));
+        writer.order_children(rustfs_order::RESPONSE);
         if let Some(v) = output.location.as_ref() {
             writer.element("Location", v.as_str());
         }
@@ -153,7 +155,7 @@ impl OperationCodec for dto::CompleteMultipartUpload {
             writer.element("Key", v.as_str());
         }
         if let Some(v) = output.e_tag.as_ref() {
-            writer.element("ETag", &value::render_etag(v, EtagRender::XmlQuoted));
+            writer.entity_tag_element("ETag", &value::render_etag(v, EtagRender::XmlQuoted));
         }
         if let Some(v) = output.checksum_crc32.as_ref() {
             writer.element("ChecksumCRC32", v.as_str());
@@ -296,4 +298,12 @@ mod document {
             Member { element: "PartNumber", arity: Arity::One, value: Value::Text(Scalar::Integer), required: false, kept: true },
         ] } },
     ] };
+}
+
+/// The order legacy RustFS writes each response element's children in (rustfs/gateway#1078):
+/// the order the legacy stack's structure declares its fields in.
+/// Honoured under `MetaView::rustfs_response_layout`; generated from the IR.
+#[rustfmt::skip]
+mod rustfs_order {
+    pub(super) const RESPONSE: &[&str] = &["Bucket", "ChecksumCRC32", "ChecksumCRC32C", "ChecksumCRC64NVME", "ChecksumMD5", "ChecksumSHA1", "ChecksumSHA256", "ChecksumSHA512", "ChecksumType", "ChecksumXXHASH128", "ChecksumXXHASH3", "ChecksumXXHASH64", "ETag", "Key", "Location"];
 }

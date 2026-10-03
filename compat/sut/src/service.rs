@@ -306,6 +306,14 @@ pub(crate) fn build_service(
             // RustFS reads a conditional date in one spelling and refuses the rest, minio-js's
             // `Invalid Date` included, where the core ignores it (rustfs/backlog#1677, R14).
             .refuse_unreadable_date_conditions()
+            // RustFS writes a response document's members in its own declaration order, with no
+            // line end after the XML declaration and no namespace on a payload root
+            // (rustfs/gateway#1078), so a client reads the bytes it reads from RustFS.
+            .write_responses_as_rustfs()
+            // RustFS reads an HTTP/1 body its answer left unread and closes the connection behind
+            // it, bounded by its 300-second body idle timeout (rustfs/rustfs#7019,
+            // rustfs/gateway#1120).
+            .drain_unread_request_bodies(rustfs_gateway::UnreadBodyDrain::with_idle_timeout(std::time::Duration::from_secs(300)))
             // RustFS's protocol front hands its storage every key up to 1024 bytes and its storage
             // decides; this backend hashes keys onto the disk, so no key reaches it as a path
             // (#1107).
@@ -328,6 +336,11 @@ pub(crate) fn build_service(
                 ttl_seconds: 0,
                 jitter_seconds: 0,
             })
+            // And RustFS answers CORS from them itself, in a layer in front of its S3 stack: every
+            // `OPTIONS` before routing, every other answer decorated, refusals included — all but
+            // the credentials legacy RustFS allows (rustfs/gateway#1120). No
+            // `RUSTFS_CORS_ALLOWED_ORIGINS` fallback, as RustFS runs by default.
+            .answer_cors_as_legacy_rustfs(rustfs_gateway::LegacyRustfsCors::with_fallback_origins(None))
             // RustFS reads a browser upload form with its legacy grammar, and stores from it what
             // legacy RustFS stores or refuses it (ruling R8 of rustfs/backlog#1677).
             .legacy_rustfs_post_forms()

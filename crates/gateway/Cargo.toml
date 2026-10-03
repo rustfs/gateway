@@ -61,6 +61,9 @@ tracing = { workspace = true }
 
 [dev-dependencies]
 dhat = { workspace = true }
+# `tests/unread_body_drain.rs` hosts the service on a plain Hyper HTTP/1 connection, as RustFS does.
+hyper = { workspace = true, features = ["http1", "server"] }
+hyper-util = { workspace = true, features = ["tokio"] }
 md-5 = { workspace = true }
 # `tests/replica_put.rs`: the replication dialect's replica write, assembled through this facade.
 rustfs-gateway-dialect-minio = { path = "../dialect-minio" }
