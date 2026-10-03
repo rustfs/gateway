@@ -79,6 +79,7 @@ use super::ServiceBuilder;
 use super::bodyless_bodies::BodylessBodies;
 use super::bodyless_digest::BodylessDigest;
 use super::buffered_lengths::BufferedLengths;
+use super::claimed_bodies::ClaimedBodies;
 use super::client_quirks::ChecksumWaiver;
 use super::credential_sentences::CredentialSentences;
 use super::legacy_chunks::ChunkReading;
@@ -169,6 +170,9 @@ pub(crate) struct ViewPolicy {
     pub(crate) buffered_lengths: BufferedLengths,
     /// Which chunk limits an aws-chunked body is decoded under (`super::legacy_chunks`).
     pub(crate) chunk_reading: ChunkReading,
+    /// Whether a claimed route's declared body is bounded as legacy RustFS bounds it
+    /// (`super::claimed_bodies`).
+    pub(crate) claimed_bodies: ClaimedBodies,
     head_refusals_without_length: bool,
     /// Which object headers a `304` keeps (`super::not_modified_headers`).
     pub(crate) not_modified_headers: super::not_modified_headers::NotModifiedHeaders,

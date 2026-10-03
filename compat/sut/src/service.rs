@@ -305,6 +305,10 @@ pub(crate) fn build_service(
             // takes a chunk past 1 MiB, as a client streaming a whole buffer sends it; the profile
             // takes chunks up to this crate's 16 MiB residency bound (rustfs/gateway#1173).
             .read_aws_chunks_as_legacy_rustfs()
+            // RustFS refuses a request to its admin surface declaring more than 1 MiB before its
+            // access check; this launcher claims no admin route, so the switch is the profile's
+            // record for the bridge (rustfs/gateway#1173).
+            .bound_claimed_route_bodies_as_legacy_rustfs()
             // RustFS, built with MinIO support, reads a versioning or object-lock body that is the
             // bare word `Enabled` as the document it stands for (rustfs/backlog#1677, R6).
             .accept_minio_body_literals()

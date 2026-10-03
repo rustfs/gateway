@@ -952,6 +952,13 @@ impl S3Service {
             return outcome
                 .refuse_handler(HandlerError::internal_error("the request could not be shown to have been authenticated"));
         };
+        // A claimed route's declared body past the profile's ceiling is refused here: after the
+        // signature and before authorization, as legacy RustFS refuses one (`builder/claimed_bodies.rs`).
+        if let RoutedBody::Ordinary(sealed) = &routed_body
+            && let Some(refusal) = sealed.past_claimed_ceiling(self.inner.view_policy.claimed_bodies.ceiling(claimed))
+        {
+            return outcome.refuse(refusal);
+        }
         let accepted_body = match routed_body {
             RoutedBody::Ordinary(sealed) => AcceptedBody::Ordinary(sealed),
             RoutedBody::PostObject(prelude) => {

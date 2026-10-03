@@ -675,6 +675,7 @@ gateway_modules = (
     "buffered_lengths",
     "checksum_omissions",
     "chunked_allocations",
+    "claimed_body_ceiling",
     "classification",
     "committed_head_runtime",
     "committed_progress",
