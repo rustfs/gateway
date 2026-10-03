@@ -76,15 +76,19 @@
 pub(crate) mod post_forms;
 
 use super::ServiceBuilder;
+use super::bodyless_bodies::BodylessBodies;
 use super::bodyless_digest::BodylessDigest;
+use super::buffered_lengths::BufferedLengths;
 use super::claimed_bodies::ClaimedBodies;
 use super::client_quirks::ChecksumWaiver;
 use super::credential_sentences::CredentialSentences;
+use super::legacy_chunks::ChunkReading;
 use super::legacy_heads::AnswerHeads;
 use super::legacy_sentences::BodySentences;
 use super::sigv4_header_guard::SigV4HeaderGuard;
 use crate::integrity::IntegrityCodes;
 use crate::render::{S3Error, from_wire_reject};
+use crate::trace::Identification;
 use rustfs_gateway_core::codec::value::RustFsListing;
 use rustfs_gateway_core::{DocumentReading, EncodedResponse, HandlerError, MetaView, PageSizeCeiling};
 use rustfs_gateway_http::{HeaderView, WireReject};
@@ -160,6 +164,12 @@ pub(crate) struct ViewPolicy {
     pub(super) sigv4_header_guard: SigV4HeaderGuard,
     /// Whether a bodyless request's signed digest is compared (`super::bodyless_digest`).
     pub(crate) bodyless_digest: BodylessDigest,
+    /// Whether the body of an operation that takes none is read (`super::bodyless_bodies`).
+    pub(crate) bodyless_bodies: BodylessBodies,
+    /// Whether a buffered body legacy RustFS cannot size is refused (`super::buffered_lengths`).
+    pub(crate) buffered_lengths: BufferedLengths,
+    /// Which chunk limits an aws-chunked body is decoded under (`super::legacy_chunks`).
+    pub(crate) chunk_reading: ChunkReading,
     /// Whether a claimed route's declared body is bounded as legacy RustFS bounds it
     /// (`super::claimed_bodies`).
     pub(crate) claimed_bodies: ClaimedBodies,
@@ -168,10 +178,15 @@ pub(crate) struct ViewPolicy {
     pub(crate) not_modified_headers: super::not_modified_headers::NotModifiedHeaders,
     /// Which heads a successful answer is written with (`super::legacy_heads`).
     pub(super) answer_heads: AnswerHeads,
+    /// Which identifiers an answer carries (`super::identifiers`).
+    pub(super) identification: Identification,
     clamp_max_keys: bool,
     integrity_codes: IntegrityCodes,
     document_reading: DocumentReading,
     rustfs_response_layout: bool,
+    /// Whether and how an unread HTTP/1 request body is read after its answer
+    /// (`crate::unread_body`).
+    pub(super) unread_body_drain: Option<crate::unread_body::UnreadBodyDrain>,
     presigned_payload_unsigned: bool,
     base64_digests_as_hex: bool,
     empty_uploads_without_length: bool,
@@ -192,6 +207,12 @@ impl ViewPolicy {
     /// ([`ServiceBuilder::answer_credential_refusals_with_legacy_rustfs_sentences`]).
     pub(crate) const fn credential_sentences(&self) -> CredentialSentences {
         self.credential_sentences
+    }
+
+    /// Which identifiers this assembly's answers carry
+    /// ([`ServiceBuilder::identify_requests_as_legacy_rustfs`]).
+    pub(crate) const fn identification(&self) -> Identification {
+        self.identification
     }
 
     /// Whether a presigned request's payload declaration is read as legacy RustFS reads it
@@ -344,6 +365,12 @@ impl ViewPolicy {
             None
         }
     }
+
+    /// The drain this assembly runs behind an answer that left an HTTP/1 request body unread
+    /// ([`ServiceBuilder::drain_unread_request_bodies`]).
+    pub(crate) const fn unread_body_drain(&self) -> Option<crate::unread_body::UnreadBodyDrain> {
+        self.unread_body_drain
+    }
 }
 
 impl ServiceBuilder {
@@ -488,6 +515,25 @@ impl ServiceBuilder {
     #[must_use]
     pub fn accept_empty_uploads_without_content_length(mut self) -> Self {
         self.view_policy.empty_uploads_without_length = true;
+        self
+    }
+
+    /// Reads and discards what an HTTP/1 request body still owes after an answer that left it
+    /// unread, and closes the connection behind that answer, as RustFS does (rustfs/gateway#1120).
+    ///
+    /// For a host that owns the connection and hands the service Hyper's bodies. Hyper stops
+    /// reading an HTTP/1 connection once a body is dropped early and closes it after the answer,
+    /// so a peer still sending — a reverse proxy streaming an upload the service refused on its
+    /// head — meets a reset instead of the answer. With this setting the dropped body is read in a
+    /// task of its own until it ends, fails, or `drain`'s idle bound passes, and the answer carries
+    /// `Connection: close`. A body read to its end, one that was empty on arrival, one that
+    /// failed, and every HTTP/2 stream are left as they are.
+    ///
+    /// Off by default. The drain needs a Tokio runtime; without one the body is released as it is
+    /// with the setting off.
+    #[must_use]
+    pub fn drain_unread_request_bodies(mut self, drain: crate::UnreadBodyDrain) -> Self {
+        self.view_policy.unread_body_drain = Some(drain);
         self
     }
 

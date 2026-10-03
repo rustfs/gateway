@@ -16,7 +16,9 @@
 //!
 //! Responsible for: durably allocating opaque upload IDs, decoding one upload record, validating
 //! its filesystem components, persisting multipart checksum negotiation and the user metadata the
-//! initiating request carried, and enumerating active uploads without following symbolic links.
+//! initiating request carried, enumerating active uploads without following symbolic links, and a
+//! completion's part list — its order, and its normalization as legacy RustFS normalizes it when a
+//! deployment asked for that (`FsBackend::normalizing_completed_parts`).
 //! NOT responsible for: pagination, delimiter rollup, object publication, or lifecycle.
 //! Upstream: upload initiation and retirement handlers. Downstream: upload capability resolution,
 //! completion-time object publication, and `ListMultipartUploads`.
@@ -269,6 +271,52 @@ impl UploadChecksum {
             ));
         }
         Ok(())
+    }
+}
+
+/// The largest part number a completion may name, as legacy RustFS bounds it.
+const MAX_COMPLETED_PART_NUMBER: i32 = 10_000;
+
+impl FsBackend {
+    /// The completion with its part list normalized as legacy RustFS normalizes it, when the
+    /// deployment asked for that ([`FsBackend::normalizing_completed_parts`]); otherwise unchanged.
+    ///
+    /// Legacy RustFS keeps the last entry naming each part number, in the order those entries were
+    /// given, and then requires the kept numbers to be within 1 to 10000 and strictly increasing,
+    /// before it looks the upload up (`normalize_complete_multipart_parts` and
+    /// `validate_complete_multipart_parts`, `rustfs/src/app/multipart_usecase.rs:177-208`, called at
+    /// line 646, on rustfs/rustfs 3268c42e00). The dropped entries are never compared with anything.
+    pub(super) fn normalized_completion(
+        &self,
+        mut input: dto::CompleteMultipartUploadInput,
+    ) -> Result<dto::CompleteMultipartUploadInput, HandlerError> {
+        if !self.rustfs_parity.normalized_completion {
+            return Ok(input);
+        }
+        let mut seen = std::collections::HashSet::new();
+        let mut kept = std::mem::take(&mut input.multipart_upload.parts)
+            .into_iter()
+            .rev()
+            .filter(|part| seen.insert(part.part_number))
+            .collect::<Vec<_>>();
+        kept.reverse();
+        if let Some(part) = kept
+            .iter()
+            .find(|part| !(1..=MAX_COMPLETED_PART_NUMBER).contains(&part.part_number))
+        {
+            return Err(HandlerError::new(
+                ErrorCode::INVALID_PART,
+                format!("Part number {} must be between 1 and {MAX_COMPLETED_PART_NUMBER}", part.part_number),
+            ));
+        }
+        if kept.windows(2).any(|pair| pair[0].part_number >= pair[1].part_number) {
+            return Err(HandlerError::new(
+                ErrorCode::INVALID_PART_ORDER,
+                "Part numbers must be strictly increasing",
+            ));
+        }
+        input.multipart_upload.parts = kept;
+        Ok(input)
     }
 }
 

@@ -440,8 +440,7 @@ pub fn document_body(error: &S3Error, trace: &RequestTrace) -> String {
         xml.element("CanonicalRequest", &signature.canonical_request);
         xml.element("StringToSign", &signature.string_to_sign);
     }
-    xml.element("RequestId", trace.request_id().as_str());
-    xml.element("HostId", trace.host_id().as_str());
+    trace.write_document_elements(&mut xml);
     xml.close();
     xml.finish()
 }

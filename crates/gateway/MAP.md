@@ -23,7 +23,7 @@ for request order and `docs/assembly-order.md` for extension call counts.
 | `src/probe.rs` | Observable request-body progress | Testing whether a refusal read bytes |
 | `src/chunked.rs`, `src/chunked_trailer_tests.rs` | `aws-chunked` ingest execution and trailer commit tests | A framed upload stores wrong bytes |
 | `src/integrity.rs` | What an `x-amz-checksum-*` header is the digest *of*, per operation, and how an integrity verdict renders | A body digest is compared against the wrong bytes, or not at all |
-| `src/payload_header.rs`, `src/builder/bodyless_digest.rs` | Signed payload and trailer declaration parsing, and the RustFS-profile switch that leaves a bodyless request's signed digest uncompared (#1099) | A request head selects the wrong payload mode, or a bodyless request is held to a digest |
+| `src/payload_header.rs`, `src/builder/bodyless_digest.rs`, `src/builder/bodyless_bodies.rs`, `src/builder/buffered_lengths.rs`, `src/builder/legacy_chunks.rs` | Signed payload and trailer declaration parsing, and RustFS-profile rules for bodyless digests (#1099), unread bodies, buffered lengths and aws-chunked limits (#1173) | A request head selects the wrong payload mode, a bodyless request is read or held to a digest, a buffered write with no usable length is stored, or an aws-chunked upload is refused for its chunking |
 | `src/render.rs`, `src/response.rs`, `src/select_frames.rs`, `src/builder/legacy_sentences.rs`, `src/builder/legacy_heads.rs` | S3 error rendering, encoded-success-to-HTTP conversion, `frame_records`, the lazy one-frame-per-read select event-stream body, the RustFS-profile switch that answers body refusals with legacy RustFS sentences (#1099), and the one that writes a successful answer's status and headers as legacy RustFS does (#1148) | Changing final response bytes or headers, select framing memory, a RustFS-profile refusal sentence, or a RustFS-profile answer head |
 | `src/commit.rs` | 200-then-answer/error response shape | Work continues after the head commits |
 | `src/commit_task.rs` | Detached committed-work task ownership, its span, and the host's `DetachedWork` count | Work stops after its response body is dropped, or a host's shutdown cuts it off |
@@ -36,7 +36,7 @@ for request order and `docs/assembly-order.md` for extension call counts.
 | `src/request_deadline.rs` | Runtime-independent policy and failure-floor deadlines | Editing timeout mechanics used by the request pipeline |
 | `src/request_body.rs`, `src/post_object.rs`, `src/post_object/legacy.rs`, `src/builder/post_forms.rs` | Live verified body producer, terminal verdict, bounded POST Object adapter, what a RustFS-profile form stores (or refuses), and `legacy_rustfs_post_forms`, the switch that selects it (held in `ViewPolicy`, rustfs/backlog#1677 R8) | A streaming upload crosses the codec or handler boundary, or a RustFS-profile form stores differently from legacy RustFS |
 | `src/stamp.rs` | Framework-owned response headers | A response lacks IDs, `Server`, or `Date` |
-| `src/trace.rs` | Request IDs and trace sources | Joining an answer to an audit record |
+| `src/trace.rs`, `src/trace/host.rs`, `src/trace/answer.rs`, `src/builder/identifiers.rs` | Request IDs and trace sources; a host's own identifier (`HostRequestId`) and its closed alphabet; which identifiers an answer carries, AWS's or legacy RustFS's (`identify_requests_as_legacy_rustfs`, rustfs/backlog#1677 R10), settled once per request; whole-service cases in `tests/host_request_id.rs` | Joining an answer to an audit record, handing a host's identifier over, or changing which identifiers an answer carries |
 | `src/clock.rs` | Wall and monotonic clock sources | A request reads time twice |
 | `src/close.rs` | Connection intent table | A refusal changes reuse behavior |
 | `src/wire.rs` | Drained response preserving header order | Asserting exact response shape |
@@ -63,7 +63,7 @@ for request order and `docs/assembly-order.md` for extension call counts.
 | `src/ext/governor/rates.rs` | Validated default rates | Changing capacity defaults |
 | `src/ext/cors.rs` | Cached bucket CORS source | Serving browser requests |
 | `src/ext/cors/cache.rs` | Bounded LRU entries and recency metadata | Changing CORS cache eviction |
-| `src/ext/observer.rs` | Final response observer | Wiring logs or metrics |
+| `src/ext/observer.rs` | Final response observer; what a host's metrics and audit take from it and from the audit sink: `docs/metrics-and-audit.md` | Wiring logs, metrics or an audit trail |
 | `src/ext/filter.rs` | Wire, routed, and response seams | Rewriting untyped HTTP shape |
 | `src/ext/oplayer.rs` | Typed per-operation middleware | Rewriting one DTO |
 ## Tests and examples
@@ -75,7 +75,7 @@ for request order and `docs/assembly-order.md` for extension call counts.
 | `tests/service_clone_allocations.rs` | Zero-allocation connection clones |
 | `tests/service_concurrency.rs` | One hundred concurrent clones and requests |
 | `tests/service_config.rs`, `tests/operation_registry_hot_update.rs`, `tests/assembly_snapshot.rs` | Settings, routing, and middleware updates retain one in-flight generation and preserve concurrent partial updates |
-| `tests/handler_panic.rs`, `tests/observer_panic.rs` | Handler panic becomes 500 and the next request still runs; an observer panic changes neither an ordinary response nor a committed terminal document |
+| `tests/handler_panic.rs`, `tests/observer_panic.rs`, `tests/host_reporting.rs` | Handler panic becomes 500 and the next request still runs; an observer panic changes neither an ordinary response nor a committed terminal document; a host's RustFS-shaped counter and audit entry fed from the two hooks |
 | `tests/pipeline.rs`, `tests/post_object_runtime.rs`, `tests/post_object_streaming.rs`, `tests/post_object_legacy_form.rs`, `tests/post_object_legacy_fields.rs` | End-to-end ordering, response shapes, POST byte ownership and allocation bounds, the object a RustFS-profile form stores, and the `PutObject` members it hands its handler |
 | `tests/authz_contract.rs`, `tests/authz_contract/headers.rs` | Two authorization stages, audit, failure floor, and borrowed headers without Debug disclosure |
 | `tests/governor_runtime.rs` | Limits run before expensive work and recover |

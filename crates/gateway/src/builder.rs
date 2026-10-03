@@ -69,11 +69,15 @@ use crate::routing::{RoutingSnapshot, RuntimeAssembly};
 
 mod anonymous_framing;
 mod assembly_update;
+mod bodyless_bodies;
 mod bodyless_digest;
+pub(crate) mod buffered_lengths;
 mod claimed_bodies;
 mod client_quirks;
 mod cors;
 pub(crate) mod credential_sentences;
+mod identifiers;
+mod legacy_chunks;
 mod legacy_heads;
 mod legacy_sentences;
 mod names;

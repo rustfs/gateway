@@ -29,8 +29,8 @@ use std::sync::Arc;
 
 use rustfs_gateway::{
     CorsCacheConfig, Credentials, DEFAULT_MAX_BUFFERED_BODY_BYTES, HandlerDeadlineClass, HandlerDeadlineConfig,
-    LegacyRustfsVirtualHosts, PlaintextCustomerKeyAck, RegionMatchPolicy, RegionSet, RequestBodyDeadlineConfig, S3Service,
-    SecurityFloor, ServiceBuilder, ServiceConfig, SigV4Authenticator, SlashPolicy, SseConfig, StaticCredentials, dto,
+    LegacyRustfsVirtualHosts, MintedTraces, PlaintextCustomerKeyAck, RegionMatchPolicy, RegionSet, RequestBodyDeadlineConfig,
+    S3Service, SecurityFloor, ServiceBuilder, ServiceConfig, SigV4Authenticator, SlashPolicy, SseConfig, StaticCredentials, dto,
 };
 use rustfs_gateway_fs::FsBackend;
 
@@ -63,7 +63,16 @@ pub(crate) fn open_backend(options: &Options) -> io::Result<FsBackend> {
         // Legacy RustFS judges `If-Match` on a delete against the version it would remove
         // (`opts.precondition_check(&goi)`, `crates/ecstore/src/set_disk/ops/object.rs:8951` on
         // rustfs/rustfs 3268c42e00; measured on `528a36814`): another tag is `412` (#1191).
-        .evaluating_delete_if_match();
+        .evaluating_delete_if_match()
+        // Legacy RustFS answers an object's tag set sorted by key (`decode_tags`,
+        // `crates/ecstore/src/bucket/tagging/mod.rs:20-43` on rustfs/rustfs 3268c42e00; measured on
+        // `528a36814`: `foo=bar&bar` reads back `bar`, `foo`) (#1000).
+        .sorting_object_tags()
+        // Legacy RustFS keeps the last entry a completion names for each part number, then requires
+        // the kept list to be strictly increasing (`normalize_complete_multipart_parts`,
+        // `rustfs/src/app/multipart_usecase.rs:177-208` on rustfs/rustfs 3268c42e00; measured on
+        // `528a36814`: part 1 named twice completes with its last upload) (#1002).
+        .normalizing_completed_parts();
     match options.lifecycle_debug_interval {
         Some(interval) => backend.with_lifecycle_debug_interval(interval),
         None => Ok(backend),
@@ -284,6 +293,18 @@ pub(crate) fn build_service(
             // RustFS never compares the signed digest of a request without a body: a read or delete
             // declaring another payload's digest is served (rustfs/gateway#1099).
             .accept_mismatched_payload_digests_without_a_body()
+            // Nor does it read the body such a request carries: a read, delete, copy or multipart
+            // creation sent a body is answered as without one, whatever the body declares, and the
+            // body is never polled (rustfs/gateway#1173).
+            .leave_bodies_of_bodyless_operations_unread()
+            // And it refuses a buffered write it cannot size: a signed one over a chunked transfer
+            // before reading it, and one decoded from aws-chunked framing or carried without a
+            // length once read (rustfs/gateway#1173).
+            .refuse_unsized_buffered_bodies_as_legacy_rustfs()
+            // RustFS decodes aws-chunked framing with no bound on chunk count or framing share and
+            // takes a chunk past 1 MiB, as a client streaming a whole buffer sends it; the profile
+            // takes chunks up to this crate's 16 MiB residency bound (rustfs/gateway#1173).
+            .read_aws_chunks_as_legacy_rustfs()
             // RustFS refuses a request to its admin surface declaring more than 1 MiB before its
             // access check; this launcher claims no admin route, so the switch is the profile's
             // record for the bridge (rustfs/gateway#1173).
@@ -314,6 +335,10 @@ pub(crate) fn build_service(
             // line end after the XML declaration and no namespace on a payload root
             // (rustfs/gateway#1078), so a client reads the bytes it reads from RustFS.
             .write_responses_as_rustfs()
+            // RustFS reads an HTTP/1 body its answer left unread and closes the connection behind
+            // it, bounded by its 300-second body idle timeout (rustfs/rustfs#7019,
+            // rustfs/gateway#1120).
+            .drain_unread_request_bodies(rustfs_gateway::UnreadBodyDrain::with_idle_timeout(std::time::Duration::from_secs(300)))
             // RustFS's protocol front hands its storage every key up to 1024 bytes and its storage
             // decides; this backend hashes keys onto the disk, so no key reaches it as a path
             // (#1107).
@@ -350,6 +375,14 @@ pub(crate) fn build_service(
             // RustFS reads an optional header whose one line is empty as absent: an empty expected
             // owner, digest, checksum or SSE header claims nothing (rustfs/gateway#1087).
             .read_empty_headers_as_absent()
+            // RustFS names an S3 answer's request with one server-owned UUID in `x-amz-request-id`
+            // and `x-request-id`, writes no `x-amz-id-2`, and names no request in an error document
+            // (rustfs/rustfs `e870a6d25b`, `rustfs/src/server/layer.rs:364-367`,
+            // `rustfs/src/storage/request_context.rs:121-123`; ruling R10). No host stands in front
+            // of this launcher to hand its identifier over, so the identifier is minted in RustFS's
+            // shape.
+            .identify_requests_as_legacy_rustfs()
+            .trace_source(MintedTraces::with_uuid_request_ids())
             // And the same registry decides whether a name is taken: another identity's
             // re-creation is `409 BucketAlreadyExists` before the backend is asked, and a
             // creation the backend admitted is what gets recorded.

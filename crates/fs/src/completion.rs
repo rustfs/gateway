@@ -39,6 +39,7 @@ impl Handler<CompleteMultipartUpload> for FsBackend {
     async fn call(&self, request: Req<CompleteMultipartUpload>) -> HandlerResult<CompleteMultipartUpload> {
         let input = request.into_input();
         self.require_bucket(input.bucket.as_str()).await?;
+        let input = self.normalized_completion(input)?;
         let (upload_id, record) = match self.resolve_upload(&input.upload_id, &input.bucket, &input.key) {
             Ok(found) => found,
             Err(missing) => return self.replay_completion(&input, missing).await,

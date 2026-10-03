@@ -19,8 +19,9 @@
 //! methods that turn each one on. Every switch is off by default, so a generic deployment keeps
 //! the backend's own answers.
 //! NOT responsible for: what a switch changes, which is decided where the operation is served —
-//! `super::versioning::delete_conditions` for `If-Match` on a delete, `super::deletes` for the
-//! batch-delete refusal.
+//! `super::versioning::delete_conditions` for `If-Match` on a delete, `super::tagging` for the
+//! order of an object's tags, `super::uploads` for a completion's part list, `super::deletes` for
+//! the batch-delete refusal.
 //! Upstream: the deployment assembling the backend. Downstream: the handlers that read a switch.
 
 use super::FsBackend;
@@ -32,6 +33,10 @@ pub(super) struct RustfsParity {
     pub(super) batch_delete_refusal: Option<fn(&str) -> bool>,
     /// Whether `DeleteObject` evaluates `If-Match` ([`FsBackend::evaluating_delete_if_match`]).
     pub(super) delete_if_match: bool,
+    /// Whether an object's tag set is answered in key order ([`FsBackend::sorting_object_tags`]).
+    pub(super) sorted_object_tags: bool,
+    /// Whether a completion's part list is normalized first ([`FsBackend::normalizing_completed_parts`]).
+    pub(super) normalized_completion: bool,
 }
 
 impl FsBackend {
@@ -50,6 +55,37 @@ impl FsBackend {
     #[must_use]
     pub const fn evaluating_delete_if_match(mut self) -> Self {
         self.rustfs_parity.delete_if_match = true;
+        self
+    }
+
+    /// Answers an object's tag set in the byte order of its keys, as legacy RustFS answers it.
+    ///
+    /// `GetObjectTagging` then lists `x-amz-tagging: foo=bar&bar` as `bar` before `foo`, whichever
+    /// write stored the set — `PutObject`, `PutObjectTagging`, a multipart initiation or a copy — on
+    /// the current and on a named version. Only the answer is reordered: the stored document keeps
+    /// the written order, as legacy RustFS's does, and bucket tags, which legacy RustFS answers as
+    /// written, are left alone (rustfs/gateway#1000).
+    ///
+    /// Off by default, when a tag set is answered in the order it was written.
+    #[must_use]
+    pub const fn sorting_object_tags(mut self) -> Self {
+        self.rustfs_parity.sorted_object_tags = true;
+        self
+    }
+
+    /// Normalizes a `CompleteMultipartUpload`'s part list as legacy RustFS does before judging it.
+    ///
+    /// The last entry naming a part number is kept and every earlier one is dropped unread — a part
+    /// uploaded again and named again completes with its last upload — and the kept list must then
+    /// be strictly increasing (`InvalidPartOrder`) and within 1 to 10000 (`InvalidPart`), judged
+    /// after the bucket and before the upload is looked up, so a retried completion is normalized
+    /// the same way before it is compared with the one that was made (rustfs/gateway#1002). A kept
+    /// entry is still matched against its part's tag and checksum.
+    ///
+    /// Off by default, when a repeated part number is refused as `InvalidPartOrder`.
+    #[must_use]
+    pub const fn normalizing_completed_parts(mut self) -> Self {
+        self.rustfs_parity.normalized_completion = true;
         self
     }
 }
