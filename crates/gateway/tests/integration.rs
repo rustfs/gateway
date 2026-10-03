@@ -102,6 +102,8 @@ mod governor_streaming;
 mod handler_panic;
 #[path = "host_deadlines.rs"]
 mod host_deadlines;
+#[path = "host_reporting.rs"]
+mod host_reporting;
 #[path = "host_request_id.rs"]
 mod host_request_id;
 #[path = "host_resolve_replay.rs"]

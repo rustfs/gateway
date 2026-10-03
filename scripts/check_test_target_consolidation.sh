@@ -698,6 +698,7 @@ gateway_modules = (
     "governor_streaming",
     "handler_panic",
     "host_deadlines",
+    "host_reporting",
     "host_request_id",
     "host_resolve_replay",
     "ingest_assembly",

@@ -31,6 +31,9 @@ that every one of the nine has a written destination with a test standing behind
 to summaries, is called after the response has been decided, and no `&mut` method will ever be
 added to it.
 
+[docs/metrics-and-audit.md](metrics-and-audit.md) lists what RustFS records about each request and
+which of it an `Observer` and an `AuthzAuditSink` carry.
+
 ## Level 2: `StageFilter`
 
 ```rust
