@@ -908,5 +908,9 @@ mod completion_parts_tests;
 /// The request identifiers legacy RustFS answers with, and a host's own identifier taken over
 /// (rustfs/backlog#1677, ruling R10).
 mod request_id_tests;
+
 /// A stored `Content-Encoding` normalized as legacy RustFS normalizes it (rustfs/gateway#1203).
 mod content_encoding_tests;
+
+/// `x-amz-expiration` in real days, as the s3-tests suite runs the launcher (rustfs/gateway#999).
+mod expiration_header_tests;

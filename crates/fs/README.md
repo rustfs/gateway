@@ -110,6 +110,11 @@ day/date actions to current objects, honors the persisted minimum-size mode, and
 the selected storage class without changing bytes, identity, tags, or modification time. GET, HEAD,
 and both object and version listing views project that durable class after restart.
 
+`PutObject`, `HeadObject` and `GetObject` of a current version answer `x-amz-expiration` as AWS and
+legacy RustFS do: the enabled rule selecting the object that is due first, its `Date`, or its `Days`
+after the write rounded up to the next UTC midnight in real days whatever the debug interval, with
+the rule's id. A copy or completion response, and a noncurrent version, answer none.
+
 The backend serves one region, `us-east-1` unless `FsBackend::with_region` names another. That one
 value is the `x-amz-bucket-region` a `HeadBucket` reports, the `LocationConstraint` a
 `GetBucketLocation` answers — the empty element for `us-east-1`, whose constraint AWS defines as

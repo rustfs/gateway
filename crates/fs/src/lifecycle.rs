@@ -15,7 +15,8 @@
 //! Persistent bucket lifecycle configuration and action selection.
 //!
 //! Responsible for: validating one complete lifecycle document, atomically replacing its durable
-//! record, serving or deleting it after restart, and selecting objects for lifecycle actions.
+//! record, serving or deleting it after restart, selecting objects for lifecycle actions, and the
+//! `x-amz-expiration` a write or read of a current version answers.
 //! NOT responsible for: mutating transition state, tag persistence, or scheduling repeated sweeps.
 //! Upstream: generated lifecycle DTOs and the historical persistence codec. Downstream: production handlers,
 //! transition execution, and the lifecycle scheduler.
@@ -188,7 +189,12 @@ fn rule_expires(rule: &LifecycleRule, object: &CurrentObjectRecord, now: i64, li
 }
 
 pub(super) fn rule_selects(rule: &LifecycleRule, object: &CurrentObjectRecord) -> bool {
-    if rule.prefix.as_deref().is_some_and(|prefix| !object.key.starts_with(prefix)) {
+    rule_selects_parts(rule, &object.key, object.size, &object.tags)
+}
+
+/// [`rule_selects`] over the three facts it reads, for a caller that holds no census record.
+fn rule_selects_parts(rule: &LifecycleRule, key: &str, size: i64, tags: &[(String, String)]) -> bool {
+    if rule.prefix.as_deref().is_some_and(|prefix| !key.starts_with(prefix)) {
         return false;
     }
     let Some(filter) = rule.filter.as_ref() else {
@@ -197,10 +203,10 @@ pub(super) fn rule_selects(rule: &LifecycleRule, object: &CurrentObjectRecord) -
     if filter
         .tag
         .as_ref()
-        .is_some_and(|required| !tag_matches(&object.tags, required.key.as_str(), &required.value))
-        || filter.prefix.as_deref().is_some_and(|prefix| !object.key.starts_with(prefix))
-        || filter.object_size_greater_than.is_some_and(|minimum| object.size <= minimum)
-        || filter.object_size_less_than.is_some_and(|maximum| object.size >= maximum)
+        .is_some_and(|required| !tag_matches(tags, required.key.as_str(), &required.value))
+        || filter.prefix.as_deref().is_some_and(|prefix| !key.starts_with(prefix))
+        || filter.object_size_greater_than.is_some_and(|minimum| size <= minimum)
+        || filter.object_size_less_than.is_some_and(|maximum| size >= maximum)
     {
         return false;
     }
@@ -209,10 +215,90 @@ pub(super) fn rule_selects(rule: &LifecycleRule, object: &CurrentObjectRecord) -
     };
     and.tags
         .iter()
-        .all(|required| tag_matches(&object.tags, required.key.as_str(), &required.value))
-        && and.prefix.as_deref().is_none_or(|prefix| object.key.starts_with(prefix))
-        && and.object_size_greater_than.is_none_or(|minimum| object.size > minimum)
-        && and.object_size_less_than.is_none_or(|maximum| object.size < maximum)
+        .all(|required| tag_matches(tags, required.key.as_str(), &required.value))
+        && and.prefix.as_deref().is_none_or(|prefix| key.starts_with(prefix))
+        && and.object_size_greater_than.is_none_or(|minimum| size > minimum)
+        && and.object_size_less_than.is_none_or(|maximum| size < maximum)
+}
+
+/// A real day: the unit `x-amz-expiration` counts `Days` in, whatever the debug interval.
+///
+/// The debug interval shortens a lifecycle day for the sweep alone. Legacy RustFS scales the
+/// answered date too when its own debug day (`RUSTFS_ILM_DEBUG_DAY_SECS`) is set, and answers real
+/// days when it is not (`expected_expiry_time`, `crates/lifecycle/src/core.rs:1069-1105` on
+/// rustfs/rustfs 3268c42e00); the s3-tests helper measures the answer in real days.
+const ANSWERED_DAY_SECONDS: i64 = 24 * 60 * 60;
+
+/// What a rule is judged against when a response predicts a current version's expiration.
+pub(super) struct ExpiringObject<'a> {
+    pub(super) key: &'a str,
+    pub(super) size: i64,
+    pub(super) tags: &'a [(String, String)],
+    /// When the version was written, in Unix seconds.
+    pub(super) modified: i64,
+}
+
+impl FsBackend {
+    /// The `x-amz-expiration` a `PutObject`, `HeadObject` or `GetObject` answers for the current
+    /// version `object` of `bucket`, as legacy RustFS predicts it (`predict_expiration`,
+    /// `crates/lifecycle/src/core.rs:654-701` on rustfs/rustfs 3268c42e00): of the enabled rules
+    /// selecting it that expire current objects, the one due first — a `Date` as written, `Days`
+    /// after the write rounded up to the next UTC midnight — named with its date and id, the
+    /// earlier rule on a tie. A rule that expires only delete markers or noncurrent versions is
+    /// not one of them.
+    ///
+    /// Advisory, as legacy RustFS's is: a configuration that cannot be read answers no header,
+    /// never a failure of a write that has already happened.
+    ///
+    /// Legacy-compat (rustfs/backlog#2684): legacy RustFS answers the header on `PutObject`,
+    /// `HeadObject` and `GetObject` only (`rustfs/src/app/object/put.rs:1365`, `head.rs:469`,
+    /// `get.rs:3724` on rustfs/rustfs 3268c42e00; measured on `528a36814`); its `CopyObject` and
+    /// `CompleteMultipartUpload` responses carry none, though the AWS model declares it on both.
+    /// Kept: those two answer nothing here either. Intended: answer the written object's expiration
+    /// on them too.
+    pub(super) async fn expiration_header(&self, bucket: &str, object: &ExpiringObject<'_>) -> Option<String> {
+        let record = self.optional_lifecycle(bucket).await.ok()??;
+        let mut earliest: Option<(i64, &LifecycleRule)> = None;
+        for rule in &record.configuration.rules {
+            if rule.status.as_str() != Status::ENABLED.as_str() || !rule_selects_parts(rule, object.key, object.size, object.tags)
+            {
+                continue;
+            }
+            let Some(expiration) = rule.expiration.as_ref() else {
+                continue;
+            };
+            let due = match (expiration.date.as_ref(), expiration.days) {
+                (Some(date), _) => date.secs(),
+                (None, Some(days)) => answered_expiry(object.modified, days),
+                // A rule that expires only delete markers names neither.
+                (None, None) => continue,
+            };
+            if earliest.is_none_or(|(held, _)| due < held) {
+                earliest = Some((due, rule));
+            }
+        }
+        let (due, rule) = earliest?;
+        // Legacy-compat (rustfs/backlog#2684): legacy RustFS reads a due time at the epoch as no
+        // expiration (`build_put_object_expiration_header`, `rustfs/src/app/object/shared.rs:665-681`
+        // on rustfs/rustfs 3268c42e00), so a rule dated 1970-01-01 answers nothing while one dated
+        // 2000-01-01 answers its date (measured on `528a36814`). The rule is valid and already due.
+        // Intended: answer its date like any other.
+        if due == 0 {
+            return None;
+        }
+        let id = rule.id.as_deref().filter(|id| !id.is_empty())?;
+        let date = Timestamp::from_secs(due).render(TimestampFormat::HttpDate).ok()?;
+        Some(format!("expiry-date=\"{date}\", rule-id=\"{id}\""))
+    }
+}
+
+/// `days` real days after `modified`, rounded up to the next UTC midnight.
+fn answered_expiry(modified: i64, days: i32) -> i64 {
+    let due = modified.saturating_add(i64::from(days).saturating_mul(ANSWERED_DAY_SECONDS));
+    match due.rem_euclid(ANSWERED_DAY_SECONDS) {
+        0 => due,
+        remainder => due.saturating_add(ANSWERED_DAY_SECONDS - remainder),
+    }
 }
 
 fn tag_matches(tags: &[(String, String)], key: &str, value: &str) -> bool {
