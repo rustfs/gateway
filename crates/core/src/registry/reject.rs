@@ -232,9 +232,10 @@ pub(crate) fn check_operation<O: Operation>() -> Result<(), RegistryError> {
         if spec.receives_caller_secret() {
             return Err(RegistryError::StandardOperationReceivesCallerSecret { name });
         }
+        let one_action = |auth: &AuthRequirement| auth.rule() == ActionRule::One && auth.subject().is_none();
         if spec
             .auth
-            .is_some_and(|auth| auth.rule() != ActionRule::One || auth.subject().is_some())
+            .is_some_and(|auth| !one_action(&auth) || auth.version_requirement().is_some_and(|versioned| !one_action(versioned)))
         {
             return Err(RegistryError::InvalidAuthRule {
                 name,
@@ -280,7 +281,13 @@ fn check_dialect_actions(spec: &'static OperationSpec, anonymous: bool) -> Resul
     let vendor = name.split_once(':').map(|(vendor, _)| vendor);
     let service = |action: &'static str| action.split_once(':').map(|(service, _)| service);
     let is_own_label = |action| service(action) == vendor && vendor.is_some_and(|vendor| !IAM_SERVICES.contains(&vendor));
-    let mut actions = auth.actions().iter().copied().chain(auth.everyone_action());
+    let version_actions = auth.version_requirement().map_or(&[][..], AuthRequirement::actions);
+    let mut actions = auth
+        .actions()
+        .iter()
+        .copied()
+        .chain(auth.everyone_action())
+        .chain(version_actions.iter().copied());
     if anonymous {
         if auth.subject().is_some() {
             return Err(RegistryError::InvalidAuthRule {
@@ -324,9 +331,11 @@ pub(crate) fn check_spec(spec: &'static OperationSpec) -> Result<(), RegistryErr
     let Some(auth) = spec.auth else {
         return Err(RegistryError::MissingAuthRequirement { name });
     };
+    let version_actions = auth.version_requirement().map_or(&[][..], AuthRequirement::actions);
     if let Some(action) = auth
         .actions()
         .iter()
+        .chain(version_actions)
         .find(|action| !AuthRequirement::new(action, auth.resource).is_well_formed())
     {
         return Err(RegistryError::MalformedAuthAction { name, action });
@@ -379,6 +388,11 @@ fn is_namespaced(name: &str) -> bool {
 #[path = "reject_rule_tests.rs"]
 #[allow(clippy::expect_used, clippy::panic, clippy::indexing_slicing)]
 mod rule_tests;
+
+#[cfg(test)]
+#[path = "reject_version_tests.rs"]
+#[allow(clippy::expect_used, clippy::panic, clippy::indexing_slicing)]
+mod version_tests;
 
 #[cfg(test)]
 mod tests {

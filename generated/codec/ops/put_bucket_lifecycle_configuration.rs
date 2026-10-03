@@ -52,8 +52,7 @@ impl OperationCodec for dto::PutBucketLifecycleConfiguration {
         if raw_body.as_ref().is_empty() {
             input.lifecycle_configuration = None;
         } else {
-            let root = rustfs_gateway_xml::parse(raw_body.as_ref())
-                .map_err(|_| CodecError::malformed_xml("the request body is not the XML this operation accepts"))?;
+            let root = crate::codec::request_document(request, raw_body.as_ref(), &document::DOCUMENT)?;
             if !["LifecycleConfiguration"].contains(&root.name.as_str()) {
                 return Err(
                     CodecError::malformed_xml("the request body has the wrong root element").about("LifecycleConfiguration")
@@ -307,4 +306,74 @@ fn read_transition(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::Transition
     }
     value::exit(shape.check_required())?;
     Ok(shape)
+}
+
+/// The request document's shape, as the RustFS profile reads it (`rustfs_gateway_xml::bound`,
+/// rustfs/gateway#1078): its roots, every structure it reaches, and each member legacy
+/// RustFS reads. Generated from the IR and the legacy facts in `emit::codec::document`.
+#[rustfmt::skip]
+mod document {
+    use rustfs_gateway_xml::bound::{Arity, Content, Document, EmptyBody, Member, Scalar, Shape, Unknown, Value};
+
+    pub(super) static DOCUMENT: Document = Document { roots: &["LifecycleConfiguration"], empty: EmptyBody::Missing, shapes: &[
+        Shape { name: "BucketLifecycleConfiguration", attribute: None, content: Content::Members { unknown: Unknown::Skip, members: &[
+            Member { element: "Rule", arity: Arity::Repeated, value: Value::Shape(1), required: true, kept: true },
+            Member { element: "ExpiryUpdatedAt", arity: Arity::One, value: Value::Text(Scalar::DateTime), required: false, kept: true },
+        ] } },
+        Shape { name: "LifecycleRule", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+            Member { element: "Expiration", arity: Arity::One, value: Value::Shape(2), required: false, kept: true },
+            Member { element: "DelMarkerExpiration", arity: Arity::One, value: Value::Shape(3), required: false, kept: true },
+            Member { element: "ID", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "Prefix", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "Filter", arity: Arity::One, value: Value::Shape(4), required: false, kept: true },
+            Member { element: "Status", arity: Arity::One, value: Value::Text(Scalar::Text), required: true, kept: true },
+            Member { element: "Transition", arity: Arity::Repeated, value: Value::Shape(5), required: false, kept: true },
+            Member { element: "NoncurrentVersionTransition", arity: Arity::Repeated, value: Value::Shape(6), required: false, kept: true },
+            Member { element: "NoncurrentVersionExpiration", arity: Arity::One, value: Value::Shape(7), required: false, kept: true },
+            Member { element: "AbortIncompleteMultipartUpload", arity: Arity::One, value: Value::Shape(8), required: false, kept: true },
+        ] } },
+        Shape { name: "LifecycleExpiration", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+            Member { element: "Date", arity: Arity::One, value: Value::Text(Scalar::DateTime), required: false, kept: true },
+            Member { element: "Days", arity: Arity::One, value: Value::Text(Scalar::Integer), required: false, kept: true },
+            Member { element: "ExpiredObjectDeleteMarker", arity: Arity::One, value: Value::Text(Scalar::Boolean), required: false, kept: true },
+            Member { element: "ExpiredObjectAllVersions", arity: Arity::One, value: Value::Text(Scalar::Boolean), required: false, kept: true },
+        ] } },
+        Shape { name: "DelMarkerExpiration", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+            Member { element: "Days", arity: Arity::One, value: Value::Text(Scalar::Integer), required: false, kept: true },
+        ] } },
+        Shape { name: "LifecycleRuleFilter", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+            Member { element: "Prefix", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "Tag", arity: Arity::One, value: Value::Shape(9), required: false, kept: true },
+            Member { element: "ObjectSizeGreaterThan", arity: Arity::One, value: Value::Text(Scalar::Long), required: false, kept: true },
+            Member { element: "ObjectSizeLessThan", arity: Arity::One, value: Value::Text(Scalar::Long), required: false, kept: true },
+            Member { element: "And", arity: Arity::One, value: Value::Shape(10), required: false, kept: true },
+        ] } },
+        Shape { name: "Transition", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+            Member { element: "Date", arity: Arity::One, value: Value::Text(Scalar::DateTime), required: false, kept: true },
+            Member { element: "Days", arity: Arity::One, value: Value::Text(Scalar::Integer), required: false, kept: true },
+            Member { element: "StorageClass", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+        ] } },
+        Shape { name: "NoncurrentVersionTransition", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+            Member { element: "NoncurrentDays", arity: Arity::One, value: Value::Text(Scalar::Integer), required: false, kept: true },
+            Member { element: "StorageClass", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "NewerNoncurrentVersions", arity: Arity::One, value: Value::Text(Scalar::Integer), required: false, kept: true },
+        ] } },
+        Shape { name: "NoncurrentVersionExpiration", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+            Member { element: "NoncurrentDays", arity: Arity::One, value: Value::Text(Scalar::Integer), required: false, kept: true },
+            Member { element: "NewerNoncurrentVersions", arity: Arity::One, value: Value::Text(Scalar::Integer), required: false, kept: true },
+        ] } },
+        Shape { name: "AbortIncompleteMultipartUpload", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+            Member { element: "DaysAfterInitiation", arity: Arity::One, value: Value::Text(Scalar::Integer), required: false, kept: true },
+        ] } },
+        Shape { name: "Tag", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+            Member { element: "Key", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "Value", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+        ] } },
+        Shape { name: "LifecycleRuleAndOperator", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+            Member { element: "Prefix", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "Tag", arity: Arity::Repeated, value: Value::Shape(9), required: false, kept: true },
+            Member { element: "ObjectSizeGreaterThan", arity: Arity::One, value: Value::Text(Scalar::Long), required: false, kept: true },
+            Member { element: "ObjectSizeLessThan", arity: Arity::One, value: Value::Text(Scalar::Long), required: false, kept: true },
+        ] } },
+    ] };
 }

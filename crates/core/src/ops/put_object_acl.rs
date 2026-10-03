@@ -47,10 +47,18 @@ use crate::registry::OperationSpec;
 /// `bucket-owner-full-control` is accepted here and `log-delivery-write` is not.
 pub static ACL_TARGET: AclTarget = AclTarget::Object;
 
+/// A request naming one version is asked `s3:PutObjectVersionAcl`, as AWS requires when `versionId`
+/// is specified
+/// (<https://docs.aws.amazon.com/AmazonS3/latest/userguide/using-with-s3-policy-actions.html>).
+/// Legacy RustFS asks `s3:PutObjectAcl` instead (`rustfs/src/storage/access.rs:3202` on
+/// rustfs/rustfs `d60dfbb826`); the RustFS profile keeps that
+/// (`ServiceBuilder::authorize_versions_as_legacy_rustfs`).
+static VERSION_AUTH: AuthRequirement = AuthRequirement::new("s3:PutObjectVersionAcl", ResourceShape::Object);
+
 /// What this operation requires of a request once routing has chosen it.
 static SPEC: OperationSpec = OperationSpec::standard("PutObjectAcl")
     .required_params(&[])
-    .auth(AuthRequirement::new("s3:PutObjectAcl", ResourceShape::Object))
+    .auth(AuthRequirement::new("s3:PutObjectAcl", ResourceShape::Object).with_version_requirement(&VERSION_AUTH))
     .build();
 
 /// Header signatures only, and not privileged.

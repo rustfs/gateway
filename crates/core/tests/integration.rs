@@ -179,6 +179,9 @@ mod update_object_encryption_roundtrip;
 #[path = "upload_capability.rs"]
 mod upload_capability;
 
+#[path = "version_requirements.rs"]
+mod version_requirements;
+
 #[path = "website_roundtrip.rs"]
 mod website_roundtrip;
 

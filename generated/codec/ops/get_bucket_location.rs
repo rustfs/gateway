@@ -52,6 +52,7 @@ impl OperationCodec for dto::GetBucketLocation {
         let mut response = EncodedResponse::of(status);
         response.status = status_code(status)?;
         let mut writer = rustfs_gateway_xml::XmlWriter::document();
+        writer.legacy_layout(request.rustfs_response_layout());
         // LocationConstraint — the unwrapped body: the member is the root.
         writer.open("LocationConstraint", Some(rustfs_gateway_xml::S3_XMLNS));
         if let Some(v) = output.location_constraint.as_ref() {

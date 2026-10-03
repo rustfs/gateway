@@ -762,8 +762,15 @@ mod buffered_integrity_tests;
 /// The integrity refusals legacy RustFS answers `500`, answered as the client errors they are.
 mod legacy_server_error_tests;
 
+/// Reads and deletes without `Content-Length`, served as legacy RustFS serves them
+/// (rustfs/gateway#1120).
+mod lengthless_request_tests;
+
 /// The gateway's CORS answers over the backend's stored documents (rustfs/gateway#1004).
 mod cors_tests;
+
+/// CORS answered as legacy RustFS answers it, credentials apart (rustfs/gateway#1120).
+mod legacy_cors_tests;
 
 /// Request-body refusals answered with legacy RustFS's sentences (rustfs/gateway#1099).
 mod body_refusal_tests;
@@ -775,8 +782,23 @@ mod credential_sentence_tests;
 /// (rustfs/gateway#1099).
 mod bodyless_digest_tests;
 
+/// A body sent to an operation that takes none, left unread as legacy RustFS leaves it
+/// (rustfs/gateway#1173).
+mod bodyless_body_tests;
+
+/// A buffered write legacy RustFS cannot size, refused as legacy RustFS refuses it
+/// (rustfs/gateway#1173).
+mod buffered_length_tests;
+/// aws-chunked uploads cut the way legacy RustFS accepts them, stored as it stores them
+/// (rustfs/gateway#1173).
+mod legacy_chunk_tests;
+
 /// The request settings RustFS embeds the gateway with (rustfs/gateway#1070).
 mod deadline_tests;
+
+/// An HTTP/1 upload refused before its body is read, drained behind the answer as legacy RustFS
+/// drains it (rustfs/gateway#1120).
+mod unread_body_drain_tests;
 
 /// RustFS fixes of the legacy stack the RustFS profile already matches: ACL grantee namespaces,
 /// `Expires` as sent, and `Last-Modified` through `If-Modified-Since` (rustfs/gateway#1099).
@@ -841,6 +863,9 @@ mod governor_tests;
 /// RustFS's 5 GiB ceiling on an upload's object, measured as RustFS measures it (rustfs/rustfs#7635).
 mod upload_ceiling_tests;
 
+/// Configuration read-backs in legacy RustFS's response layout (rustfs/gateway#1078).
+mod response_layout_tests;
+
 /// The slash rule legacy RustFS applies to an object key (rustfs/gateway#1101).
 mod slash_rule_tests;
 
@@ -856,6 +881,9 @@ mod legacy_vhost_tests;
 /// The operation a request names, selected as legacy RustFS selects it (rustfs/gateway#1127).
 mod legacy_selection_tests;
 
+/// Request documents read as legacy RustFS reads them, and what each refusal leaves in storage
+/// (rustfs/gateway#1078).
+mod document_reading_tests;
 /// The object names RustFS's storage refuses, refused as RustFS refuses them (rustfs/gateway#1145).
 mod legacy_storage_names_tests;
 
@@ -867,3 +895,24 @@ mod legacy_heads_tests;
 
 /// What a browser form's `PutObject` members store, as legacy RustFS stores them (rustfs/gateway#1129).
 mod post_object_field_tests;
+
+/// `If-Match` on a delete, judged as legacy RustFS judges it (rustfs/gateway#1191).
+mod conditional_delete_tests;
+
+/// An object's tag set answered in key order, as legacy RustFS answers it (rustfs/gateway#1000).
+mod tag_order_tests;
+
+/// A completion's part list normalized as legacy RustFS normalizes it (rustfs/gateway#1002).
+mod completion_parts_tests;
+
+/// The request identifiers legacy RustFS answers with, and a host's own identifier taken over
+/// (rustfs/backlog#1677, ruling R10).
+mod request_id_tests;
+
+/// A stored `Content-Encoding` normalized as legacy RustFS normalizes it (rustfs/gateway#1203).
+mod content_encoding_tests;
+
+/// `x-amz-expiration` in real days, as the s3-tests suite runs the launcher (rustfs/gateway#999).
+mod expiration_header_tests;
+/// A request naming one object version, authorised as legacy RustFS authorises it (GHSA-3ppv).
+mod version_action_tests;

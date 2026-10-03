@@ -50,6 +50,14 @@ use crate::registry::OperationSpec;
 /// operations use for their cursors.
 pub static TAG_SCOPE: TagScope = TagScope::Object;
 
+/// A request naming one version is asked `s3:GetObjectVersionTagging`, as AWS requires when
+/// `versionId` is specified
+/// (<https://docs.aws.amazon.com/AmazonS3/latest/userguide/using-with-s3-policy-actions.html>).
+/// Legacy RustFS asks `s3:GetObjectTagging` instead (`rustfs/src/storage/access.rs:2787` on
+/// rustfs/rustfs `d60dfbb826`); the RustFS profile keeps that
+/// (`ServiceBuilder::authorize_versions_as_legacy_rustfs`).
+static VERSION_AUTH: AuthRequirement = AuthRequirement::new("s3:GetObjectVersionTagging", ResourceShape::Object);
+
 /// What this operation requires of a request once routing has chosen it.
 ///
 /// `tagging` is a routing discriminator, not a required parameter: a `GET` on an object key without
@@ -57,7 +65,7 @@ pub static TAG_SCOPE: TagScope = TagScope::Object;
 /// selects the current one.
 static SPEC: OperationSpec = OperationSpec::standard("GetObjectTagging")
     .required_params(&[])
-    .auth(AuthRequirement::new("s3:GetObjectTagging", ResourceShape::Object))
+    .auth(AuthRequirement::new("s3:GetObjectTagging", ResourceShape::Object).with_version_requirement(&VERSION_AUTH))
     .build();
 
 /// Header signatures only, and not privileged.
