@@ -125,6 +125,7 @@ mod service;
 mod stamp;
 mod trace;
 mod transport;
+mod unread_body;
 mod wire;
 mod wire_read;
 
@@ -178,9 +179,11 @@ pub use crate::render::{S3Error, connection_intent_of, declaration, document, do
 pub use crate::request_config::HandlerDeadlineReport;
 pub use crate::service::{S3Service, SecurityPosture};
 pub use crate::trace::{
-    FixedTrace, HOST_ID_HEADER, HostId, MintedTraces, REQUEST_ID_HEADER, RequestId, RequestTrace, TraceSource,
+    FixedTrace, HOST_ID_HEADER, HostId, HostRequestId, InvalidRequestId, MintedTraces, REQUEST_ID_HEADER, RequestId,
+    RequestTrace, TraceSource, X_REQUEST_ID_HEADER,
 };
 pub use crate::transport::Transport;
+pub use crate::unread_body::UnreadBodyDrain;
 pub use crate::wire::{OrderedHeaders, WireResponse, collect};
 pub use rustfs_gateway_http::MAX_LINGER_DRAIN_BYTES;
 pub use rustfs_gateway_macros::handlers;
