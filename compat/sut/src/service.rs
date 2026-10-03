@@ -29,8 +29,8 @@ use std::sync::Arc;
 
 use rustfs_gateway::{
     CorsCacheConfig, Credentials, DEFAULT_MAX_BUFFERED_BODY_BYTES, HandlerDeadlineClass, HandlerDeadlineConfig,
-    LegacyRustfsVirtualHosts, PlaintextCustomerKeyAck, RegionMatchPolicy, RegionSet, RequestBodyDeadlineConfig, S3Service,
-    SecurityFloor, ServiceBuilder, ServiceConfig, SigV4Authenticator, SlashPolicy, SseConfig, StaticCredentials, dto,
+    LegacyRustfsVirtualHosts, MintedTraces, PlaintextCustomerKeyAck, RegionMatchPolicy, RegionSet, RequestBodyDeadlineConfig,
+    S3Service, SecurityFloor, ServiceBuilder, ServiceConfig, SigV4Authenticator, SlashPolicy, SseConfig, StaticCredentials, dto,
 };
 use rustfs_gateway_fs::FsBackend;
 
@@ -284,6 +284,14 @@ pub(crate) fn build_service(
             // RustFS never compares the signed digest of a request without a body: a read or delete
             // declaring another payload's digest is served (rustfs/gateway#1099).
             .accept_mismatched_payload_digests_without_a_body()
+            // Nor does it read the body such a request carries: a read, delete, copy or multipart
+            // creation sent a body is answered as without one, whatever the body declares, and the
+            // body is never polled (rustfs/gateway#1173).
+            .leave_bodies_of_bodyless_operations_unread()
+            // And it refuses a buffered write it cannot size: a signed one over a chunked transfer
+            // before reading it, and one decoded from aws-chunked framing or carried without a
+            // length once read (rustfs/gateway#1173).
+            .refuse_unsized_buffered_bodies_as_legacy_rustfs()
             // RustFS, built with MinIO support, reads a versioning or object-lock body that is the
             // bare word `Enabled` as the document it stands for (rustfs/backlog#1677, R6).
             .accept_minio_body_literals()
@@ -310,6 +318,10 @@ pub(crate) fn build_service(
             // line end after the XML declaration and no namespace on a payload root
             // (rustfs/gateway#1078), so a client reads the bytes it reads from RustFS.
             .write_responses_as_rustfs()
+            // RustFS reads an HTTP/1 body its answer left unread and closes the connection behind
+            // it, bounded by its 300-second body idle timeout (rustfs/rustfs#7019,
+            // rustfs/gateway#1120).
+            .drain_unread_request_bodies(rustfs_gateway::UnreadBodyDrain::with_idle_timeout(std::time::Duration::from_secs(300)))
             // RustFS's protocol front hands its storage every key up to 1024 bytes and its storage
             // decides; this backend hashes keys onto the disk, so no key reaches it as a path
             // (#1107).
@@ -346,6 +358,14 @@ pub(crate) fn build_service(
             // RustFS reads an optional header whose one line is empty as absent: an empty expected
             // owner, digest, checksum or SSE header claims nothing (rustfs/gateway#1087).
             .read_empty_headers_as_absent()
+            // RustFS names an S3 answer's request with one server-owned UUID in `x-amz-request-id`
+            // and `x-request-id`, writes no `x-amz-id-2`, and names no request in an error document
+            // (rustfs/rustfs `e870a6d25b`, `rustfs/src/server/layer.rs:364-367`,
+            // `rustfs/src/storage/request_context.rs:121-123`; ruling R10). No host stands in front
+            // of this launcher to hand its identifier over, so the identifier is minted in RustFS's
+            // shape.
+            .identify_requests_as_legacy_rustfs()
+            .trace_source(MintedTraces::with_uuid_request_ids())
             // And the same registry decides whether a name is taken: another identity's
             // re-creation is `409 BucketAlreadyExists` before the backend is asked, and a
             // creation the backend admitted is what gets recorded.

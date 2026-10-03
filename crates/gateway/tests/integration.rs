@@ -44,10 +44,14 @@ mod backend_reachability;
 mod body_literals;
 #[path = "body_refusal_sentences.rs"]
 mod body_refusal_sentences;
+#[path = "bodyless_bodies.rs"]
+mod bodyless_bodies;
 #[path = "bodyless_payload_digest.rs"]
 mod bodyless_payload_digest;
 #[path = "bucket_config_reachability.rs"]
 mod bucket_config_reachability;
+#[path = "buffered_lengths.rs"]
+mod buffered_lengths;
 #[path = "checksum_omissions.rs"]
 mod checksum_omissions;
 #[path = "chunked_allocations.rs"]
@@ -100,6 +104,8 @@ mod handler_panic;
 mod host_deadlines;
 #[path = "host_reporting.rs"]
 mod host_reporting;
+#[path = "host_request_id.rs"]
+mod host_request_id;
 #[path = "host_resolve_replay.rs"]
 mod host_resolve_replay;
 #[path = "ingest_assembly.rs"]
@@ -216,6 +222,8 @@ mod throughput_request;
 mod tracing_events;
 #[path = "unknown_checksum_algorithms.rs"]
 mod unknown_checksum_algorithms;
+#[path = "unread_body_drain.rs"]
+mod unread_body_drain;
 #[path = "unread_body_refusal.rs"]
 mod unread_body_refusal;
 #[path = "upload_object_ceiling.rs"]

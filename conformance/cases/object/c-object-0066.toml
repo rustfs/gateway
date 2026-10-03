@@ -1,0 +1,98 @@
+# c-object-0066 — a default answer names its request as AWS does, and never under x-request-id.
+#
+# Schema dimensions exercised: headers_present and headers_absent on a refusal and on a success,
+# a redacted exact error document, and a caller-sent identifier the answer must not repeat.
+
+[case]
+id = "c-object-0066"
+schema_version = 1
+title = "A default answer names its request in x-amz-request-id, x-amz-id-2 and its error document, never in x-request-id"
+rationale = """
+Legacy RustFS names a request in `x-amz-request-id` and `x-request-id` and nowhere else, and the \
+gateway reproduces that only under an explicit RustFS-profile switch \
+(`ServiceBuilder::identify_requests_as_legacy_rustfs`, rustfs/backlog#1677 ruling R10, rd-err-0001). \
+Every other deployment keeps AWS's answer: the request identifier and the host identifier in the \
+head and, last, in an error document, so a client that stored only the document can still quote \
+both. A build that switched the RustFS answer on by default would drop the host identifier from \
+both places and write a header AWS never sends; one that echoed the caller's `x-request-id` would \
+let a caller choose what a log line says about its own request. The caller sends an identifier under \
+both names on purpose: `x-request-id` must stay absent and the document must not repeat either; the \
+value under `x-amz-request-id` is held elsewhere (rd-err-0001's pinned tests), since a case can only \
+require the header, not tell a minted value from an echoed one."""
+polarity = "negative"
+operation = "GetObject"
+tags = ["error-shape", "wire-bytes"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/ErrorResponses.html"
+summary = "An S3 error document carries the request id and the host id alongside the code and message."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://github.com/rustfs/backlog/issues/1677"
+summary = "Legacy RustFS writes x-request-id beside x-amz-request-id; the gateway does so only under the RustFS profile."
+kind = "other"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-object"
+
+[[setup.objects]]
+bucket = "conf-object"
+key = "common/plain.txt"
+content_type = "text/plain"
+body = { utf8 = "hello world" }
+
+[[exchanges]]
+name = "a-refusal"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-object/common/absent.txt"
+headers = { "x-request-id" = "caller-chosen-0001", "x-amz-request-id" = "caller-chosen-0002" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 404
+connection_after = "open"
+headers_absent = ["x-request-id"]
+
+[exchanges.expect.error]
+code = "NoSuchKey"
+request_id_present = true
+
+[exchanges.expect.headers_present]
+"x-amz-request-id" = "*"
+"x-amz-id-2" = "*"
+
+[exchanges.expect.body]
+redact = ["RequestId", "HostId"]
+contains_utf8 = ["<RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>"]
+not_contains_utf8 = ["caller-chosen"]
+
+[[exchanges]]
+name = "a-success"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-object/common/plain.txt"
+headers = { "x-request-id" = "caller-chosen-0003" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+headers_absent = ["x-request-id"]
+
+[exchanges.expect.headers_present]
+"x-amz-request-id" = "*"
+"x-amz-id-2" = "*"

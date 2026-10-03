@@ -782,8 +782,20 @@ mod credential_sentence_tests;
 /// (rustfs/gateway#1099).
 mod bodyless_digest_tests;
 
+/// A body sent to an operation that takes none, left unread as legacy RustFS leaves it
+/// (rustfs/gateway#1173).
+mod bodyless_body_tests;
+
+/// A buffered write legacy RustFS cannot size, refused as legacy RustFS refuses it
+/// (rustfs/gateway#1173).
+mod buffered_length_tests;
+
 /// The request settings RustFS embeds the gateway with (rustfs/gateway#1070).
 mod deadline_tests;
+
+/// An HTTP/1 upload refused before its body is read, drained behind the answer as legacy RustFS
+/// drains it (rustfs/gateway#1120).
+mod unread_body_drain_tests;
 
 /// RustFS fixes of the legacy stack the RustFS profile already matches: ACL grantee namespaces,
 /// `Expires` as sent, and `Last-Modified` through `If-Modified-Since` (rustfs/gateway#1099).
@@ -883,3 +895,7 @@ mod post_object_field_tests;
 
 /// `If-Match` on a delete, judged as legacy RustFS judges it (rustfs/gateway#1191).
 mod conditional_delete_tests;
+
+/// The request identifiers legacy RustFS answers with, and a host's own identifier taken over
+/// (rustfs/backlog#1677, ruling R10).
+mod request_id_tests;
