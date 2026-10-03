@@ -200,6 +200,8 @@ mod select_restore_intent;
 mod select_restore_reachability;
 #[path = "self_held_http1.rs"]
 mod self_held_http1;
+#[path = "self_held_refusal_drain.rs"]
+mod self_held_refusal_drain;
 #[path = "service_clone_allocations.rs"]
 mod service_clone_allocations;
 #[path = "service_concurrency.rs"]

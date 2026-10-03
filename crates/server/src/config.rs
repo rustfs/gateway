@@ -96,7 +96,8 @@ pub struct ServerConfig {
     /// sending, so that the drop is a close and not a reset. Increasing tolerates peers with more
     /// left to send; decreasing releases the connection slot sooner. Zero is invalid — a drain
     /// that cannot read is the abortive close RFC 9112 §9.6 warns about. See `src/io.rs` for why
-    /// this is a duration rather than a byte budget.
+    /// this is a duration rather than a byte budget. A driver that drains a refused request's
+    /// remaining body to keep its connection open spends at most this long on that drain too.
     pub lingering_close_time: Duration,
     /// Optional total connection lifetime. Increasing permits longer sessions; decreasing bounds leaked connections sooner. Zero is invalid.
     pub connection_lifetime: Option<Duration>,
