@@ -191,6 +191,8 @@ pub(crate) struct Inner {
     pub(crate) traces: Arc<dyn TraceSource>,
     pub(crate) cors: Arc<CachedCorsSource>,
     pub(crate) cors_policy: CorsPolicy,
+    /// Legacy RustFS's CORS answers, in place of the gateway's own (`crate::cors_legacy`).
+    pub(crate) legacy_cors: Option<crate::LegacyRustfsCors>,
     pub(crate) sse: SseConfig,
     pub(crate) response_body_corrections: AtomicU64,
     pub(crate) temporary_redirect_targets: Arc<[RedirectTarget]>,
@@ -253,6 +255,11 @@ impl core::fmt::Debug for S3Service {
 }
 
 impl S3Service {
+    /// The drain this assembly runs behind an answer that left an HTTP/1 request body unread.
+    pub(crate) fn unread_body_drain(&self) -> Option<crate::UnreadBodyDrain> {
+        self.inner.view_policy.unread_body_drain()
+    }
+
     pub(crate) fn from_inner(inner: Inner) -> Self {
         Self { inner: Arc::new(inner) }
     }
@@ -345,7 +352,13 @@ impl S3Service {
         let request_cancellation = request.extensions().get::<tokio::sync::watch::Receiver<bool>>().cloned();
         let config = RequestConfig::enter(config).with_request_cancellation(request_cancellation);
         let handler_deadline_report = config.handler_deadline_report();
-        let trace = self.inner.traces.mint();
+        // The host's own identifier, when it handed one over, and the identifiers this assembly's answer
+        // carries on this request's path: settled once, with the minting (rustfs/backlog#1677, R10).
+        let trace = self
+            .inner
+            .view_policy
+            .identification()
+            .settle(self.inner.traces.mint(), &request, &runtime.routing.router);
         let now = self.inner.clock.now();
         // Read before the request is consumed, and the only thing kept out of it: the RFC 9110 body rules are
         // stated over the request method, and every stage below has either forgotten it or never had it.
@@ -355,6 +368,8 @@ impl S3Service {
         // makes the customer-key gate fail closed for a transport that has not been taught to declare anything.
         // The file-body path is decided here too, and applied last (rustfs/gateway#949).
         let connection = connection_security(request.extensions());
+        // Legacy RustFS's CORS decoration needs the request after the pipeline has consumed it.
+        let legacy_cors = self.legacy_cors_request(&request);
         let client_addr = request.extensions().get::<ClientAddr>().copied();
         let file_body_path = crate::file_fallback::FileBodyPath::of(request.extensions(), request.version());
         let mut outcome = Outcome::new(&trace, &method, self.inner.view_policy.credential_sentences());
@@ -399,6 +414,11 @@ impl S3Service {
                 headers.insert(VARY, VARY_ORIGIN);
             }
         }
+        // Legacy RustFS's decoration instead, on every answer, refusals before authentication
+        // included (`crate::cors_legacy`).
+        if let Some(legacy_cors) = legacy_cors {
+            self.decorate_legacy_cors(legacy_cors, &mut response, now).await;
+        }
         // The response seam. After the CORS decoration, so a filter sees the response a browser
         // would; before the invariants and the stamp, so neither can be defeated by one. It runs
         // for every response this service produces, including one refused at acceptance — which is
@@ -437,6 +457,7 @@ impl S3Service {
         crate::stamp::stamp(response.headers_mut(), &trace, now);
         let event_request_id = *trace.request_id();
         let event_operation = outcome.operation;
+        let event_method = method.clone();
         let event_status = response.status().as_u16();
         let event_identity = outcome.identity.clone();
         // Both reports below go to the observer this request's entry snapshot holds, and both go
@@ -449,6 +470,7 @@ impl S3Service {
                 let event = RequestEvent {
                     request_id: &event_request_id,
                     operation: event_operation,
+                    method: &event_method,
                     status: event_status,
                     handler_deadline,
                     identity: event_identity.as_ref(),
@@ -464,6 +486,7 @@ impl S3Service {
             let event = RequestEvent {
                 request_id: trace.request_id(),
                 operation: outcome.operation,
+                method: &method,
                 status: response.status().as_u16(),
                 handler_deadline,
                 identity: outcome.identity.as_ref(),
@@ -551,6 +574,14 @@ impl S3Service {
         // preflights retain their uniform refusal and valid ones use the stored document.
         // No signature admission, authenticator, authorizer or handler runs in these
         // branches. Refusal latency uses the same security floor as other failures.
+        if let Some(legacy) = self.inner.legacy_cors.as_ref()
+            && *wire.method() == Method::OPTIONS
+        {
+            let path = wire.raw_path().as_str();
+            return self
+                .serve_legacy_preflight(legacy, path, &headers, outcome, now, client_addr)
+                .await;
+        }
         match classify(wire.method(), &wire.headers()) {
             PreflightClass::NotPreflight => {}
             PreflightClass::HeaderlessOptions => {
@@ -641,6 +672,8 @@ impl S3Service {
         // every await below while the body is owned separately.
         let mut pending = None;
         let wire = wire.map_body(|body| pending = Some(body));
+        // What the transport knows of the body's length, before anything reads it.
+        let transport_length = pending.as_ref().and_then(|body| http_body::Body::size_hint(body).exact());
 
         // Two decisions, one call. The bucket has one source — the host's, when the resolver read
         // one out of the host, and the path's otherwise — and the name it produces goes through
@@ -740,11 +773,33 @@ impl S3Service {
         };
         let presence = detect_credentials(&view);
 
+        // Legacy RustFS's answers to a header signature or a presigned URL it refuses before its
+        // credential lookup, in its order, when the assembly answers with them (rustfs/gateway#1130).
+        let signed_head = crate::builder::view_policy::header_signatures::SignedHead {
+            method: wire.method(),
+            headers: &headers,
+            query: wire.query().as_str(),
+            now,
+            window: self.inner.floor.skew_window(),
+        };
+        let policy = &self.inner.view_policy;
+        let body_owed = wire.framing().has_body();
+        let legacy_refusal = policy
+            .header_signatures
+            .refusal(&signed_head, response_kind, body_owed)
+            .or_else(|| policy.presigned_urls.refusal(&signed_head, response_kind, body_owed));
+        if let Some(refusal) = legacy_refusal {
+            return outcome.refuse(refusal);
+        }
+
         let chunk_sink = crate::ext::ChunkSink::new();
         // Kept out of the `match` so the read at the bottom can consult it. A custom admission has no
         // payload mode; an anonymous one has only the unsigned streaming mode its head declares.
         let mut framing_mode: Option<PayloadMode> = None;
+        let mut signed_length = crate::builder::buffered_lengths::SignedLength::default();
         let mut body_digest = BodyDigestObligation::None;
+        // Legacy RustFS's words for a RustFS-profile refusal, when the authenticator published them.
+        let mut legacy = None;
         let (authentication, signature_mismatch) = match self.inner.floor.admit(view, M::floor(&op), now) {
             Ok(Admission::Anonymous(evidence)) => {
                 framing_mode = match crate::payload_header::anonymous_framing(&headers, self.inner.decode_anonymous_framing) {
@@ -763,7 +818,9 @@ impl S3Service {
                             .refuse_at(Refused::Authentication, refusal.render(response_kind, wire.framing().has_body()));
                     }
                 };
+                signed_length = crate::builder::buffered_lengths::SignedLength::of(location, &payload, obligation);
                 body_digest = self.inner.view_policy.bodyless_digest.apply(request_body_mode, obligation);
+                let payload = self.inner.view_policy.signed_payload_mode(payload);
                 framing_mode = Some(payload.clone());
                 #[cfg(feature = "dangerous-replace-signature-verifier")]
                 let replacement_verdict = self
@@ -789,7 +846,8 @@ impl S3Service {
                     // neither survives `Verdict` — see `crate::ext::ChunkVerification`.
                     .with_chunk_sink(&chunk_sink);
                     let result = self.inner.authenticator.authenticate(&question).await;
-                    let signature_mismatch = question.into_signature_mismatch();
+                    let (signature_mismatch, published_legacy) = question.into_published();
+                    legacy = published_legacy;
                     match result {
                         Ok(authentication) => (authentication, signature_mismatch),
                         Err(_) => {
@@ -854,6 +912,10 @@ impl S3Service {
         let caller_secret = caller_secret.filter(|_| hands_caller_secret || self.inner.caller_secret_every_operation);
         let verdict = SecurityFloor::seal_verdict(verdict, presence);
         if let Some(error) = verdict.rejection() {
+            // A RustFS-profile reading's refusal, in legacy RustFS's words (rustfs/gateway#1130).
+            if let Some(legacy) = legacy {
+                return outcome.refuse(legacy.render(&error, response_kind, wire.framing().has_body()));
+            }
             if error == AuthError::AuthorizationHeaderMalformed {
                 let context = match scope_rejection.and_then(|rejection| rejection.expected_region().cloned()) {
                     Some(region) => {
@@ -1146,7 +1208,7 @@ impl S3Service {
                         body_wire.framing(),
                         &chunk_sink,
                         seed.as_deref(),
-                        rustfs_gateway_http::ChunkLimits::default(),
+                        view_policy.chunk_reading.limits(),
                     ) {
                         Ok(ingest) => ingest,
                         Err(error) => return Err(error),
@@ -1157,6 +1219,12 @@ impl S3Service {
 
             let body_deadlines = state.config.config().request_body_deadlines();
             let (body, body_monitor) = match accepted_body {
+                // Released unpolled, where it would have been read: no claim about it is judged
+                // and no byte of it is held (`builder/bodyless_bodies.rs`).
+                AcceptedBody::Ordinary(sealed) if view_policy.bodyless_bodies.leaves_unread(request_body_mode) => {
+                    drop(sealed);
+                    (rustfs_gateway_core::RequestBody::None, None)
+                }
                 AcceptedBody::Ordinary(sealed) => {
                     let ceilings =
                         BodyCeilings::for_mode(request_body_mode, operation, state.config.config().max_buffered_body_bytes());
@@ -1165,7 +1233,13 @@ impl S3Service {
                     let integrity = crate::integrity::resolve_in(body_meta, &body_wire.headers(), body_wire.method(), operation)?;
                     let object_ceiling = crate::gate::object_ceiling_for(request_body_mode, operation, state.config.config());
                     let sealed = sealed.with_object_ceiling(object_ceiling);
-                    sealed
+                    let (framed, lengths) = (ingest.is_some(), view_policy.buffered_lengths);
+                    if let Some(refusal) =
+                        lengths.before_read(request_body_mode, framed, signed_length, declared_length, transport_length)
+                    {
+                        return Err(refusal);
+                    }
+                    let handed = sealed
                         .handoff(
                             &metadata_admission,
                             (request_body_mode, ceilings, body_deadlines, body_quota),
@@ -1173,7 +1247,13 @@ impl S3Service {
                             body_digest,
                             integrity,
                         )
-                        .await?
+                        .await?;
+                    if let (rustfs_gateway_core::RequestBody::Buffered(bytes), _) = &handed
+                        && let Some(refusal) = lengths.after_read(request_body_mode, framed, declared_length, bytes)
+                    {
+                        return Err(refusal);
+                    }
+                    handed
                 }
                 AcceptedBody::PostObject(post) => (*post).handoff(&metadata_admission)?,
             };

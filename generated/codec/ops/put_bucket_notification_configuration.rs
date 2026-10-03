@@ -41,8 +41,7 @@ impl OperationCodec for dto::PutBucketNotificationConfiguration {
         // NotificationConfiguration — the XML request body, rooted at `NotificationConfiguration`.
         let raw_body = body.into_buffered()?;
         value::verify_body_digest(request, raw_body.as_ref())?;
-        let root = rustfs_gateway_xml::parse(raw_body.as_ref())
-            .map_err(|_| CodecError::malformed_xml("the request body is not the XML this operation accepts"))?;
+        let root = crate::codec::request_document(request, raw_body.as_ref(), &document::DOCUMENT)?;
         if !["NotificationConfiguration"].contains(&root.name.as_str()) {
             return Err(
                 CodecError::malformed_xml("the request body has the wrong root element").about("NotificationConfiguration")
@@ -212,4 +211,51 @@ fn read_topic_configuration(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::T
     }
     value::exit(shape.check_required())?;
     Ok(shape)
+}
+
+/// The request document's shape, as the RustFS profile reads it (`rustfs_gateway_xml::bound`,
+/// rustfs/gateway#1078): its roots, every structure it reaches, and each member legacy
+/// RustFS reads. Generated from the IR and the legacy facts in `emit::codec::document`.
+#[rustfmt::skip]
+mod document {
+    use rustfs_gateway_xml::bound::{Arity, Content, Document, EmptyBody, Member, Scalar, Shape, Unknown, Value};
+
+    pub(super) static DOCUMENT: Document = Document { roots: &["NotificationConfiguration"], empty: EmptyBody::Missing, shapes: &[
+        Shape { name: "NotificationConfiguration", attribute: None, content: Content::Members { unknown: Unknown::Skip, members: &[
+            Member { element: "TopicConfiguration", arity: Arity::Repeated, value: Value::Shape(1), required: false, kept: true },
+            Member { element: "QueueConfiguration", arity: Arity::Repeated, value: Value::Shape(2), required: false, kept: true },
+            Member { element: "CloudFunctionConfiguration", arity: Arity::Repeated, value: Value::Shape(3), required: false, kept: true },
+            Member { element: "EventBridgeConfiguration", arity: Arity::One, value: Value::Shape(4), required: false, kept: true },
+        ] } },
+        Shape { name: "TopicConfiguration", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+            Member { element: "Id", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "Topic", arity: Arity::One, value: Value::Text(Scalar::Text), required: true, kept: true },
+            Member { element: "Event", arity: Arity::Repeated, value: Value::Text(Scalar::Text), required: true, kept: true },
+            Member { element: "Filter", arity: Arity::One, value: Value::Shape(5), required: false, kept: true },
+        ] } },
+        Shape { name: "QueueConfiguration", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+            Member { element: "Id", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "Queue", arity: Arity::One, value: Value::Text(Scalar::Text), required: true, kept: true },
+            Member { element: "Event", arity: Arity::Repeated, value: Value::Text(Scalar::Text), required: true, kept: true },
+            Member { element: "Filter", arity: Arity::One, value: Value::Shape(5), required: false, kept: true },
+        ] } },
+        Shape { name: "LambdaFunctionConfiguration", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+            Member { element: "Id", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "CloudFunction", arity: Arity::One, value: Value::Text(Scalar::Text), required: true, kept: true },
+            Member { element: "Event", arity: Arity::Repeated, value: Value::Text(Scalar::Text), required: true, kept: true },
+            Member { element: "Filter", arity: Arity::One, value: Value::Shape(5), required: false, kept: true },
+        ] } },
+        Shape { name: "EventBridgeConfiguration", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+        ] } },
+        Shape { name: "NotificationConfigurationFilter", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+            Member { element: "S3Key", arity: Arity::One, value: Value::Shape(6), required: false, kept: true },
+        ] } },
+        Shape { name: "S3KeyFilter", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+            Member { element: "FilterRule", arity: Arity::Repeated, value: Value::Shape(7), required: false, kept: true },
+        ] } },
+        Shape { name: "FilterRule", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+            Member { element: "Name", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "Value", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+        ] } },
+    ] };
 }

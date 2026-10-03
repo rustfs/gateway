@@ -49,8 +49,7 @@ impl OperationCodec for dto::CreateBucket {
         if raw_body.as_ref().is_empty() {
             input.create_bucket_configuration = None;
         } else {
-            let root = rustfs_gateway_xml::parse(raw_body.as_ref())
-                .map_err(|_| CodecError::malformed_xml("the request body is not the XML this operation accepts"))?;
+            let root = crate::codec::request_document(request, raw_body.as_ref(), &document::DOCUMENT)?;
             if !["CreateBucketConfiguration"].contains(&root.name.as_str()) {
                 return Err(
                     CodecError::malformed_xml("the request body has the wrong root element").about("CreateBucketConfiguration")
@@ -122,4 +121,33 @@ fn read_create_bucket_configuration(node: &rustfs_gateway_xml::XmlNode) -> Resul
     }
     value::exit(shape.check_required())?;
     Ok(shape)
+}
+
+/// The request document's shape, as the RustFS profile reads it (`rustfs_gateway_xml::bound`,
+/// rustfs/gateway#1078): its roots, every structure it reaches, and each member legacy
+/// RustFS reads. Generated from the IR and the legacy facts in `emit::codec::document`.
+#[rustfmt::skip]
+mod document {
+    use rustfs_gateway_xml::bound::{Arity, Content, Document, EmptyBody, Member, Scalar, Shape, Unknown, Value};
+
+    pub(super) static DOCUMENT: Document = Document { roots: &["CreateBucketConfiguration"], empty: EmptyBody::Missing, shapes: &[
+        Shape { name: "CreateBucketConfiguration", attribute: None, content: Content::Members { unknown: Unknown::Skip, members: &[
+            Member { element: "LocationConstraint", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "Location", arity: Arity::One, value: Value::Shape(1), required: false, kept: false },
+            Member { element: "Bucket", arity: Arity::One, value: Value::Shape(2), required: false, kept: false },
+            Member { element: "Tags", arity: Arity::Wrapped("Tag"), value: Value::Shape(3), required: false, kept: false },
+        ] } },
+        Shape { name: "LocationInfo", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+            Member { element: "Name", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "Type", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+        ] } },
+        Shape { name: "BucketInfo", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+            Member { element: "DataRedundancy", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "Type", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+        ] } },
+        Shape { name: "Tag", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+            Member { element: "Key", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "Value", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+        ] } },
+    ] };
 }

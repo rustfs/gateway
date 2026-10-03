@@ -53,8 +53,7 @@ impl OperationCodec for dto::PutBucketWebsite {
         // WebsiteConfiguration — the XML request body, rooted at `WebsiteConfiguration`.
         let raw_body = body.into_buffered()?;
         value::verify_body_digest(request, raw_body.as_ref())?;
-        let root = rustfs_gateway_xml::parse(raw_body.as_ref())
-            .map_err(|_| CodecError::malformed_xml("the request body is not the XML this operation accepts"))?;
+        let root = crate::codec::request_document(request, raw_body.as_ref(), &document::DOCUMENT)?;
         if !["WebsiteConfiguration"].contains(&root.name.as_str()) {
             return Err(CodecError::malformed_xml("the request body has the wrong root element").about("WebsiteConfiguration"));
         }
@@ -203,4 +202,46 @@ fn read_website_configuration(
     }
     value::exit(shape.check_required())?;
     Ok(shape)
+}
+
+/// The request document's shape, as the RustFS profile reads it (`rustfs_gateway_xml::bound`,
+/// rustfs/gateway#1078): its roots, every structure it reaches, and each member legacy
+/// RustFS reads. Generated from the IR and the legacy facts in `emit::codec::document`.
+#[rustfmt::skip]
+mod document {
+    use rustfs_gateway_xml::bound::{Arity, Content, Document, EmptyBody, Member, Scalar, Shape, Unknown, Value};
+
+    pub(super) static DOCUMENT: Document = Document { roots: &["WebsiteConfiguration"], empty: EmptyBody::Missing, shapes: &[
+        Shape { name: "WebsiteConfiguration", attribute: None, content: Content::Members { unknown: Unknown::Skip, members: &[
+            Member { element: "ErrorDocument", arity: Arity::One, value: Value::Shape(1), required: false, kept: true },
+            Member { element: "IndexDocument", arity: Arity::One, value: Value::Shape(2), required: false, kept: true },
+            Member { element: "RedirectAllRequestsTo", arity: Arity::One, value: Value::Shape(3), required: false, kept: true },
+            Member { element: "RoutingRules", arity: Arity::Wrapped("RoutingRule"), value: Value::Shape(4), required: false, kept: true },
+        ] } },
+        Shape { name: "ErrorDocument", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+            Member { element: "Key", arity: Arity::One, value: Value::Text(Scalar::Text), required: true, kept: true },
+        ] } },
+        Shape { name: "IndexDocument", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+            Member { element: "Suffix", arity: Arity::One, value: Value::Text(Scalar::Text), required: true, kept: true },
+        ] } },
+        Shape { name: "RedirectAllRequestsTo", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+            Member { element: "HostName", arity: Arity::One, value: Value::Text(Scalar::Text), required: true, kept: true },
+            Member { element: "Protocol", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+        ] } },
+        Shape { name: "RoutingRule", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+            Member { element: "Condition", arity: Arity::One, value: Value::Shape(5), required: false, kept: true },
+            Member { element: "Redirect", arity: Arity::One, value: Value::Shape(6), required: true, kept: true },
+        ] } },
+        Shape { name: "Condition", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+            Member { element: "HttpErrorCodeReturnedEquals", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "KeyPrefixEquals", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+        ] } },
+        Shape { name: "Redirect", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+            Member { element: "HostName", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "HttpRedirectCode", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "Protocol", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "ReplaceKeyPrefixWith", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "ReplaceKeyWith", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+        ] } },
+    ] };
 }

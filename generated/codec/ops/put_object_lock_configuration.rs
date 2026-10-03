@@ -44,8 +44,7 @@ impl OperationCodec for dto::PutObjectLockConfiguration {
         let raw_body = body.into_buffered()?;
         value::verify_body_digest(request, raw_body.as_ref())?;
         let raw_body = value::body_literal(request, "ObjectLockConfiguration", raw_body);
-        let root = rustfs_gateway_xml::parse(raw_body.as_ref())
-            .map_err(|_| CodecError::malformed_xml("the request body is not the XML this operation accepts"))?;
+        let root = crate::codec::request_document(request, raw_body.as_ref(), &document::DOCUMENT)?;
         if !["ObjectLockConfiguration"].contains(&root.name.as_str()) {
             return Err(CodecError::malformed_xml("the request body has the wrong root element").about("ObjectLockConfiguration"));
         }
@@ -168,4 +167,32 @@ fn read_object_lock_rule(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::Obje
     }
     value::exit(shape.check_required())?;
     Ok(shape)
+}
+
+/// The request document's shape, as the RustFS profile reads it (`rustfs_gateway_xml::bound`,
+/// rustfs/gateway#1078): its roots, every structure it reaches, and each member legacy
+/// RustFS reads. Generated from the IR and the legacy facts in `emit::codec::document`.
+#[rustfmt::skip]
+mod document {
+    use rustfs_gateway_xml::bound::{Arity, Content, Document, EmptyBody, Member, Scalar, Shape, Unknown, Value};
+
+    pub(super) static DOCUMENT: Document = Document { roots: &["ObjectLockConfiguration"], empty: EmptyBody::Absent, shapes: &[
+        Shape { name: "ObjectLockConfiguration", attribute: None, content: Content::Members { unknown: Unknown::Skip, members: &[
+            Member { element: "ObjectLockEnabled", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "Rule", arity: Arity::One, value: Value::Shape(1), required: false, kept: true },
+        ] } },
+        Shape { name: "ObjectLockRule", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+            Member { element: "DefaultRetention", arity: Arity::One, value: Value::Shape(2), required: false, kept: true },
+        ] } },
+        Shape { name: "DefaultRetention", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+            Member { element: "Mode", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "Days", arity: Arity::One, value: Value::Text(Scalar::Integer), required: false, kept: true },
+            Member { element: "Years", arity: Arity::One, value: Value::Text(Scalar::Integer), required: false, kept: true },
+            Member { element: "DefaultEventHold", arity: Arity::One, value: Value::Shape(3), required: false, kept: true },
+        ] } },
+        Shape { name: "EventHoldDuration", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+            Member { element: "Days", arity: Arity::One, value: Value::Text(Scalar::Integer), required: false, kept: true },
+            Member { element: "Years", arity: Arity::One, value: Value::Text(Scalar::Integer), required: false, kept: true },
+        ] } },
+    ] };
 }

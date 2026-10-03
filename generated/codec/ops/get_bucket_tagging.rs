@@ -52,6 +52,7 @@ impl OperationCodec for dto::GetBucketTagging {
         let mut response = EncodedResponse::of(status);
         response.status = status_code(status)?;
         let mut writer = rustfs_gateway_xml::XmlWriter::document();
+        writer.legacy_layout(request.rustfs_response_layout());
         writer.open("Tagging", Some(rustfs_gateway_xml::S3_XMLNS));
         writer.open("TagSet", None);
         for item in &output.tag_set {

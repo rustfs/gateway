@@ -54,7 +54,13 @@ impl OperationCodec for dto::GetBucketAbac {
         // AbacStatus — the XML response body, rooted at `AbacStatus`.
         if let Some(v) = output.abac_status.as_ref() {
             let mut writer = rustfs_gateway_xml::XmlWriter::document();
-            writer.open("AbacStatus", Some(rustfs_gateway_xml::S3_XMLNS));
+            writer.legacy_layout(request.rustfs_response_layout());
+            let xmlns = if request.rustfs_response_layout() {
+                None
+            } else {
+                Some(rustfs_gateway_xml::S3_XMLNS)
+            };
+            writer.open("AbacStatus", xmlns);
             write_abac_status(&mut writer, v)?;
             writer.close();
             response.body = ResponseBody::Complete(writer.finish().into_bytes());

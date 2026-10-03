@@ -22,7 +22,8 @@
 //! forms and surrounding whitespace), deciding that an unreadable value is refused (the facade's
 //! RustFS profile does, before decode), or rendering a date.
 //! Upstream: `rustfs-gateway-types`' `Timestamp`. Downstream: `super::value::date_condition_in`
-//! and the facade's date-condition refusal, which must agree on every spelling.
+//! and the facade's date-condition refusal, which must agree on every spelling, and
+//! `super::document`, which reads a request document's HTTP date with it (rustfs/gateway#1078).
 //!
 //! # The grammar, as legacy RustFS reads it
 //!

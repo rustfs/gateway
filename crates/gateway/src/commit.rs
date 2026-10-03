@@ -56,7 +56,7 @@ use rustfs_gateway_core::{
 use rustfs_gateway_http::WireRequest;
 use rustfs_gateway_stream::{Body, CapsInconsistency, PayloadCaps, PayloadRead, PayloadStream, TrailingHeaders};
 use rustfs_gateway_types::{BucketName, NamePolicy};
-use rustfs_gateway_xml::{DECLARATION, strip_declaration};
+use rustfs_gateway_xml::{DECLARATION, strip_compact_declaration, strip_declaration};
 use tokio::runtime::Handle;
 use tokio::sync::oneshot;
 use tokio::time::Sleep;
@@ -245,8 +245,20 @@ pub(crate) fn start_pending(
 pub(crate) fn answer_document(encoded: EncodedResponse) -> Result<Bytes, CodecError> {
     match encoded.body {
         ResponseBody::Empty => Err(CodecError::internal("a committed operation produced no terminal document")),
-        ResponseBody::Complete(bytes) => Ok(Bytes::copy_from_slice(strip_declaration(&bytes))),
+        ResponseBody::Complete(bytes) => Ok(Bytes::copy_from_slice(without_declaration(&bytes))),
         ResponseBody::Stream(_) => Err(CodecError::internal("a committed operation produced a streaming terminal document")),
+    }
+}
+
+/// An encoder's document without the one declaration it opened with, in either layout: the
+/// default one, or the compact one of `rustfs_gateway_xml::XmlWriter::legacy_layout`
+/// (rustfs/gateway#1078). Exactly one leading declaration is removed, never a second.
+fn without_declaration(bytes: &[u8]) -> &[u8] {
+    let stripped = strip_declaration(bytes);
+    if stripped.len() == bytes.len() {
+        strip_compact_declaration(bytes)
+    } else {
+        stripped
     }
 }
 
@@ -371,7 +383,7 @@ fn answered(encoded: EncodedResponse, status: StatusCode) -> Response<Body> {
         ResponseBody::Complete(bytes) => {
             let mut out = Vec::with_capacity(PROLOGUE.len().saturating_add(bytes.len()));
             out.extend_from_slice(PROLOGUE.as_bytes());
-            out.extend_from_slice(strip_declaration(&bytes));
+            out.extend_from_slice(without_declaration(&bytes));
             Body::from(out)
         }
         // A streaming payload is handed on untouched: this function cannot read the first bytes of
@@ -497,6 +509,26 @@ mod tests {
     #[test]
     fn a_committed_success_without_a_document_is_rejected() {
         assert!(answer_document(EncodedResponse::of(200)).is_err());
+    }
+
+    /// Negative — a document written in the legacy layout, whose declaration has no line end, loses
+    /// that declaration as the default one does: the committed answer carries one declaration, the
+    /// prologue's (rustfs/gateway#1078).
+    #[test]
+    fn n_a_legacy_layout_document_loses_its_compact_declaration() {
+        for declaration in [DECLARATION, rustfs_gateway_xml::COMPACT_DECLARATION] {
+            let mut encoded = EncodedResponse::of(200);
+            encoded.body = ResponseBody::Complete(
+                format!("{declaration}<CompleteMultipartUploadResult></CompleteMultipartUploadResult>").into_bytes(),
+            );
+            let document = answer_document(encoded).expect("a document");
+            assert_eq!(document.as_ref(), b"<CompleteMultipartUploadResult></CompleteMultipartUploadResult>");
+        }
+        let twice = format!("{DECLARATION}{}<A></A>", rustfs_gateway_xml::COMPACT_DECLARATION);
+        assert_eq!(
+            without_declaration(twice.as_bytes()),
+            format!("{}<A></A>", rustfs_gateway_xml::COMPACT_DECLARATION).as_bytes()
+        );
     }
 
     /// Negative — an answer's own declaration is removed rather than repeated. The encoder writes

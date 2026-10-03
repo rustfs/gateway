@@ -57,13 +57,14 @@ const STATUS: &str = "example:Status";
 const JOB: &str = "example:Job";
 const SEALED: &str = "example:Sealed";
 const HEAD_STATUS: &str = "example:HeadStatus";
+const LOGS: &str = "example:Logs";
 
 // ── the operations ───────────────────────────────────────────────────────────────────────────
 
 /// One vendor operation per index, all bodiless and answered by the recorder.
 struct Vendor<const N: usize>;
 
-const NAMES: [&str; 4] = [STATUS, JOB, SEALED, HEAD_STATUS];
+const NAMES: [&str; 5] = [STATUS, JOB, SEALED, HEAD_STATUS, LOGS];
 
 const fn spec(name: &'static str) -> OperationSpec {
     OperationSpec::builder(name, 200, None)
@@ -72,18 +73,20 @@ const fn spec(name: &'static str) -> OperationSpec {
         .auth(AuthRequirement::new("admin:Thing", ResourceShape::Service))
 }
 
-static SPECS: [OperationSpec; 4] = [
+static SPECS: [OperationSpec; 5] = [
     spec(STATUS).build(),
     spec(JOB).build(),
     spec(SEALED).hand_caller_secret_to_handler().build(),
     spec(HEAD_STATUS).build(),
+    spec(LOGS).build(),
 ];
 
-static FLOORS: [OperationFloor; 4] = [
+static FLOORS: [OperationFloor; 5] = [
     OperationFloor::custom(STATUS, SigService::S3),
     OperationFloor::custom(JOB, SigService::S3),
     OperationFloor::custom(SEALED, SigService::S3),
     OperationFloor::custom(HEAD_STATUS, SigService::S3),
+    OperationFloor::custom(LOGS, SigService::S3),
 ];
 
 impl<const N: usize> Operation for Vendor<N> {
@@ -140,6 +143,11 @@ static SEALED_ROWS: &[ClaimedRow] = &[
         selector: GET,
     },
 ];
+/// A catch-all row: everything below `logs/` (ADR-0036).
+static LOGS_ROWS: &[ClaimedRow] = &[ClaimedRow {
+    template: "/example/admin/v1/logs/{*path}",
+    selector: GET,
+}];
 static HEAD_STATUS_SELECTOR: &[Predicate] = &[
     Predicate::Method(http::Method::HEAD),
     Predicate::Target(TargetKind::Object),
@@ -177,6 +185,7 @@ static OVERLAY: DialectOverlay = DialectOverlay {
             "PathTemplate(\"/example/admin/v1/sealed\") ∧ Method(GET) ∨ PathTemplate(\"/compat/admin/v1/sealed\") ∧ Method(GET)",
         ),
         row(HEAD_STATUS, 505, "Method(HEAD) ∧ Target(Object) ∧ QueryPresent(\"example-status\")"),
+        row(LOGS, 13, "PathTemplate(\"/example/admin/v1/logs/{*path}\") ∧ Method(GET)"),
     ],
     claims: &[
         PathClaim {
@@ -203,6 +212,7 @@ fn dialect() -> Dialect {
         .declare_claimed::<Vendor<0>>(claimed(10, STATUS_ROWS))
         .declare_claimed::<Vendor<1>>(claimed(11, JOB_ROWS))
         .declare_claimed::<Vendor<2>>(claimed(12, SEALED_ROWS))
+        .declare_claimed::<Vendor<4>>(claimed(13, LOGS_ROWS))
         .declare::<Vendor<3>>(DialectRoute {
             precedence: 505,
             selector: HEAD_STATUS_SELECTOR,
@@ -379,6 +389,7 @@ fn service(recorder: &Arc<Recorder>, setup: Setup) -> S3Service {
         .register::<Vendor<1>, _>(Arc::clone(recorder))
         .register::<Vendor<2>, _>(Arc::clone(recorder))
         .register::<Vendor<3>, _>(Arc::clone(recorder))
+        .register::<Vendor<4>, _>(Arc::clone(recorder))
         .register::<GetObject, _>(Arc::clone(recorder))
         .register::<HeadObject, _>(Arc::clone(recorder));
     if matches!(setup.hand_off, Some(Scope::Every)) {
@@ -658,4 +669,66 @@ async fn n_an_anonymous_claimed_request_is_refused_before_authorisation() {
     let (status, body, recorder) = run(delegating, anonymous("/example/admin/v1/status")).await;
     assert_eq!(status, http::StatusCode::FORBIDDEN, "{body}");
     assert_nothing_asked_or_handled(&recorder);
+}
+
+// ── the catch-all (ADR-0036) ─────────────────────────────────────────────────────────────────
+
+/// Positive — a catch-all's value is the rest of the path, decoded once, separators and dot
+/// segments included, and the operation stays service-level at both authorizer stages.
+#[tokio::test]
+async fn a_catch_all_operation_reads_the_rest_of_the_path_from_the_context() {
+    for (target, value) in [
+        ("/example/admin/v1/logs/2026/09/30.log", "2026/09/30.log"),
+        ("/example/admin/v1/logs/a%2Fb/%2e%2e/c%20d", "a/b/../c d"),
+        ("/example/admin/v1/logs//x/", "/x/"),
+        ("/example/admin/v1/logs/100%25", "100%"),
+    ] {
+        let (status, body, recorder) = run(HAND_OFF, signed(http::Method::GET, target)).await;
+        assert_eq!(status, http::StatusCode::OK, "{target}: {body}");
+        let asked = recorder.asked();
+        assert_eq!(asked.iter().map(|asked| asked.stage).collect::<Vec<_>>(), ["route", "input"], "{target}");
+        for question in &asked {
+            assert_eq!(question.operation, LOGS, "{target}");
+            assert_eq!((question.bucket.as_deref(), question.key.as_deref()), (None, None), "{target}");
+        }
+        let seen = recorder.seen();
+        assert_eq!(seen.len(), 1, "{target}");
+        assert_eq!(seen[0].operation, LOGS, "{target}");
+        assert_eq!(seen[0].params, [("path".to_owned(), value.to_owned())], "{target}");
+        assert_eq!(seen[0].raw_path, target);
+    }
+}
+
+/// Negative — a catch-all value that does not decode to UTF-8 is a `400` naming the parameter,
+/// before any authorisation, and the value is not echoed.
+#[tokio::test]
+async fn n_an_undecodable_catch_all_is_a_400_before_authorisation() {
+    for (target, echoed) in [
+        ("/example/admin/v1/logs/%ff", "%ff"),
+        ("/example/admin/v1/logs/ok/%C3%28", "%C3%28"),
+    ] {
+        let (status, body, recorder) = run(HAND_OFF, signed(http::Method::GET, target)).await;
+        assert_eq!(status, http::StatusCode::BAD_REQUEST, "{target}: {body}");
+        assert!(body.contains("<Code>InvalidArgument</Code>"), "{body}");
+        assert!(!body.contains(echoed), "{body}");
+        assert_nothing_asked_or_handled(&recorder);
+    }
+}
+
+/// Negative — a catch-all with nothing to take, or a path that stops before it, is the claim's own
+/// `501`, before any authorisation.
+#[tokio::test]
+async fn n_a_catch_all_with_nothing_to_take_is_the_claims_refusal() {
+    for target in [
+        "/example/admin/v1/logs/",
+        "/example/admin/v1/logs",
+        "/example/admin/v1/logsx/a",
+    ] {
+        let (status, body, recorder) = run(HAND_OFF, signed(http::Method::GET, target)).await;
+        assert_eq!(status, http::StatusCode::NOT_IMPLEMENTED, "{target}: {body}");
+        if !body.is_empty() {
+            assert!(body.contains(NO_CLAIMED_ROUTE_MESSAGE), "{target}: {body}");
+        }
+        assert_nothing_asked_or_handled(&recorder);
+    }
 }

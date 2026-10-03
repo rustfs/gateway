@@ -57,7 +57,9 @@ impl OperationCodec for dto::ListBucketIntelligentTieringConfigurations {
         let mut response = EncodedResponse::of(status);
         response.status = status_code(status)?;
         let mut writer = rustfs_gateway_xml::XmlWriter::document();
+        writer.legacy_layout(request.rustfs_response_layout());
         writer.open("ListBucketIntelligentTieringConfigurationsOutput", Some(rustfs_gateway_xml::S3_XMLNS));
+        writer.order_children(rustfs_order::RESPONSE);
         if let Some(v) = output.is_truncated.as_ref() {
             writer.element("IsTruncated", if *v { "true" } else { "false" });
         }
@@ -104,6 +106,7 @@ fn write_intelligent_tiering_configuration(
     writer: &mut rustfs_gateway_xml::XmlWriter,
     value: &dto::IntelligentTieringConfiguration,
 ) -> Result<(), CodecError> {
+    writer.order_children(rustfs_order::INTELLIGENT_TIERING_CONFIGURATION);
     {
         let v = &value.id;
         writer.element("Id", v.as_str());
@@ -130,6 +133,7 @@ fn write_intelligent_tiering_filter(
     writer: &mut rustfs_gateway_xml::XmlWriter,
     value: &dto::IntelligentTieringFilter,
 ) -> Result<(), CodecError> {
+    writer.order_children(rustfs_order::INTELLIGENT_TIERING_FILTER);
     if let Some(v) = value.prefix.as_ref() {
         writer.element("Prefix", v.as_str());
     }
@@ -161,6 +165,7 @@ fn write_tag(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::Tag) -> Re
 
 /// Writes one `Tiering` element's children, in the wire order the IR records.
 fn write_tiering(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::Tiering) -> Result<(), CodecError> {
+    writer.order_children(rustfs_order::TIERING);
     {
         let v = &value.days;
         writer.element("Days", &v.to_string());
@@ -170,4 +175,15 @@ fn write_tiering(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::Tierin
         writer.element("AccessTier", v.as_str());
     }
     Ok(())
+}
+
+/// The order legacy RustFS writes each response element's children in (rustfs/gateway#1078):
+/// the order the legacy stack's structure declares its fields in.
+/// Honoured under `MetaView::rustfs_response_layout`; generated from the IR.
+#[rustfmt::skip]
+mod rustfs_order {
+    pub(super) const RESPONSE: &[&str] = &["ContinuationToken", "IntelligentTieringConfiguration", "IsTruncated", "NextContinuationToken"];
+    pub(super) const INTELLIGENT_TIERING_CONFIGURATION: &[&str] = &["Filter", "Id", "Status", "Tiering"];
+    pub(super) const INTELLIGENT_TIERING_FILTER: &[&str] = &["And", "Prefix", "Tag"];
+    pub(super) const TIERING: &[&str] = &["AccessTier", "Days"];
 }
