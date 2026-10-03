@@ -24,12 +24,17 @@
 //! # Element order
 //!
 //! The legacy stack writes a structure's members in its own declaration order (mostly
-//! alphabetical); the gateway writes the S3 model's order, which is the order AWS documents and
-//! answers with. The encode matrix pins that class per structure in the register
-//! (`kd-encode-0007` and the entries after it) for the operations it covers. A row here names the
-//! structures whose children the two answers write in another order (`orders`), so an order that
-//! changes is still a failing row; every other difference is held to the register or to
-//! [`ANSWER_FINDINGS`].
+//! alphabetical), no line end after the XML declaration, no namespace on the root of an output
+//! whose body is one structure, the attributes answer rooted at `GetObjectAttributesResponse`, and
+//! an entity tag's quotes as they are; the gateway writes the S3 model's order, the order AWS
+//! documents and answers with, AWS's declaration, namespace and root, and `&quot;`. The seam diff
+//! runs the RustFS response layout (`write_responses_as_rustfs`, rustfs/gateway#1078), which
+//! writes all of them as the legacy stack does, so no row's answers differ in any of them: the
+//! register's prolog, entity-tag and order entries (`kd-encode-0005`, `kd-encode-0006`,
+//! `kd-encode-0007` and the order entries after it) hold for the encode matrix's generic profile
+//! alone. A row may still name structures whose children the two answers write in
+//! another order (`orders`), so an order the layout does not reach is a failing row; every other
+//! difference is held to the register or to [`ANSWER_FINDINGS`].
 
 use crate::request::RawRequest;
 use crate::s3s;
@@ -91,24 +96,10 @@ pub(crate) fn answer<T: LegacyOutput>(
 /// The four headers the gateway stamps on every answer (`kd-encode-0001`..`0004`).
 pub(crate) const BARE: &[&str] = &["kd-encode-0001", "kd-encode-0002", "kd-encode-0003", "kd-encode-0004"];
 
-/// [`BARE`], and the line break the gateway writes after the XML declaration (`kd-encode-0005`).
-pub(crate) const XML: &[&str] = &[
-    "kd-encode-0001",
-    "kd-encode-0002",
-    "kd-encode-0003",
-    "kd-encode-0004",
-    "kd-encode-0005",
-];
-
-/// [`XML`], and the entity tag the gateway quotes as `&quot;` (`kd-encode-0006`).
-pub(crate) const XML_ETAG: &[&str] = &[
-    "kd-encode-0001",
-    "kd-encode-0002",
-    "kd-encode-0003",
-    "kd-encode-0004",
-    "kd-encode-0005",
-    "kd-encode-0006",
-];
+/// An XML answer's registered differences: [`BARE`] alone. Under the RustFS response layout the
+/// gateway writes the XML declaration as the legacy stack does, without the line break the generic
+/// layout writes after it (`kd-encode-0005`).
+pub(crate) const XML: &[&str] = BARE;
 
 /// A written answer whose only differences are the register ids in `known`.
 pub(crate) const fn same(known: &'static [&'static str]) -> Written {
@@ -116,16 +107,6 @@ pub(crate) const fn same(known: &'static [&'static str]) -> Written {
         known,
         answer: &[],
         orders: &[],
-    }
-}
-
-/// A written answer whose differences are the register ids in `known` and the child order at
-/// `orders`.
-pub(crate) const fn reordered(known: &'static [&'static str], orders: &'static [&'static str]) -> Written {
-    Written::As {
-        known,
-        answer: &[],
-        orders,
     }
 }
 
@@ -195,88 +176,10 @@ const fn finding(
     }
 }
 
-/// The reason every root-namespace finding shares.
-const BARE_ROOT: &str = "The legacy writer serialises an output whose body is one structure member through that structure's own \
-    writer, which opens the root without the S3 namespace; the gateway writes the namespace on every document root, as AWS \
-    answers. The same elements and values follow.";
-
 /// Every answer finding, by id.
 pub(crate) const ANSWER_FINDINGS: &[AnswerFinding] = &[
     finding(
         "sa-0001",
-        "GetBucketEncryption",
-        "body ServerSideEncryptionConfiguration",
-        "<ServerSideEncryptionConfiguration xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">",
-        "<ServerSideEncryptionConfiguration>",
-        BARE_ROOT,
-    ),
-    finding(
-        "sa-0002",
-        "GetBucketPolicyStatus",
-        "body PolicyStatus",
-        "<PolicyStatus xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">",
-        "<PolicyStatus>",
-        BARE_ROOT,
-    ),
-    finding(
-        "sa-0003",
-        "GetBucketReplication",
-        "body ReplicationConfiguration",
-        "<ReplicationConfiguration xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">",
-        "<ReplicationConfiguration>",
-        BARE_ROOT,
-    ),
-    finding(
-        "sa-0004",
-        "GetObjectLockConfiguration",
-        "body ObjectLockConfiguration",
-        "<ObjectLockConfiguration xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">",
-        "<ObjectLockConfiguration>",
-        BARE_ROOT,
-    ),
-    finding(
-        "sa-0005",
-        "GetPublicAccessBlock",
-        "body PublicAccessBlockConfiguration",
-        "<PublicAccessBlockConfiguration xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">",
-        "<PublicAccessBlockConfiguration>",
-        BARE_ROOT,
-    ),
-    finding(
-        "sa-0006",
-        "GetObjectLegalHold",
-        "body LegalHold",
-        "<LegalHold xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">",
-        "<LegalHold>",
-        BARE_ROOT,
-    ),
-    finding(
-        "sa-0007",
-        "GetObjectRetention",
-        "body Retention",
-        "<Retention xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">",
-        "<Retention>",
-        BARE_ROOT,
-    ),
-    finding(
-        "sa-0008",
-        "UploadPartCopy",
-        "body CopyPartResult",
-        "<CopyPartResult xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">",
-        "<CopyPartResult>",
-        BARE_ROOT,
-    ),
-    finding(
-        "sa-0009",
-        "GetObjectAttributes",
-        "body GetObjectAttributesOutput",
-        "<GetObjectAttributesOutput xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">",
-        "<GetObjectAttributesResponse xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">",
-        "The gateway roots the answer at the element AWS documents (quirk q-attributes-root-0087); the legacy writer roots it at \
-         the model's xmlName. The children are the same elements and values, which the containment check reads past the root.",
-    ),
-    finding(
-        "sa-0010",
         "GetBucketLogging",
         "body BucketLoggingStatus/LoggingEnabled/TargetGrants",
         "<TargetGrants>",
@@ -286,15 +189,15 @@ pub(crate) const ANSWER_FINDINGS: &[AnswerFinding] = &[
          adds an empty element; nothing the legacy answer holds is missing.",
     ),
     finding(
-        "sa-0011",
+        "sa-0002",
         "GetBucketWebsite",
         "body WebsiteConfiguration/RoutingRules",
         "<RoutingRules>",
         "<absent>",
-        "As sa-0010, for the routing rules (generated/codec/ops/get_bucket_website.rs).",
+        "As sa-0001, for the routing rules (generated/codec/ops/get_bucket_website.rs).",
     ),
     finding(
-        "sa-0012",
+        "sa-0003",
         "ListMultipartUploads",
         "body ListMultipartUploadsResult/EncodingType",
         "<absent>",

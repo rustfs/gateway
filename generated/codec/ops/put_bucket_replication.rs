@@ -53,8 +53,7 @@ impl OperationCodec for dto::PutBucketReplication {
         // ReplicationConfiguration — the XML request body, rooted at `ReplicationConfiguration`.
         let raw_body = body.into_buffered()?;
         value::verify_body_digest(request, raw_body.as_ref())?;
-        let root = rustfs_gateway_xml::parse(raw_body.as_ref())
-            .map_err(|_| CodecError::malformed_xml("the request body is not the XML this operation accepts"))?;
+        let root = crate::codec::request_document(request, raw_body.as_ref(), &document::DOCUMENT)?;
         if !["ReplicationConfiguration"].contains(&root.name.as_str()) {
             return Err(
                 CodecError::malformed_xml("the request body has the wrong root element").about("ReplicationConfiguration")
@@ -376,4 +375,89 @@ fn read_tag(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::Tag, CodecError> 
     }
     value::exit(shape.check_required())?;
     Ok(shape)
+}
+
+/// The request document's shape, as the RustFS profile reads it (`rustfs_gateway_xml::bound`,
+/// rustfs/gateway#1078): its roots, every structure it reaches, and each member legacy
+/// RustFS reads. Generated from the IR and the legacy facts in `emit::codec::document`.
+#[rustfmt::skip]
+mod document {
+    use rustfs_gateway_xml::bound::{Arity, Content, Document, EmptyBody, Member, Scalar, Shape, Unknown, Value};
+
+    pub(super) static DOCUMENT: Document = Document { roots: &["ReplicationConfiguration"], empty: EmptyBody::Missing, shapes: &[
+        Shape { name: "ReplicationConfiguration", attribute: None, content: Content::Members { unknown: Unknown::Skip, members: &[
+            Member { element: "Role", arity: Arity::One, value: Value::Text(Scalar::Text), required: true, kept: true },
+            Member { element: "Rule", arity: Arity::Repeated, value: Value::Shape(1), required: true, kept: true },
+        ] } },
+        Shape { name: "ReplicationRule", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+            Member { element: "ID", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "Priority", arity: Arity::One, value: Value::Text(Scalar::Integer), required: false, kept: true },
+            Member { element: "Prefix", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "Filter", arity: Arity::One, value: Value::Shape(2), required: false, kept: true },
+            Member { element: "Status", arity: Arity::One, value: Value::Text(Scalar::Text), required: true, kept: true },
+            Member { element: "SourceSelectionCriteria", arity: Arity::One, value: Value::Shape(3), required: false, kept: true },
+            Member { element: "ExistingObjectReplication", arity: Arity::One, value: Value::Shape(4), required: false, kept: true },
+            Member { element: "Destination", arity: Arity::One, value: Value::Shape(5), required: true, kept: true },
+            Member { element: "DeleteMarkerReplication", arity: Arity::One, value: Value::Shape(6), required: false, kept: true },
+            Member { element: "DeleteReplication", arity: Arity::One, value: Value::Shape(7), required: false, kept: true },
+        ] } },
+        Shape { name: "ReplicationRuleFilter", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+            Member { element: "Prefix", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "Tag", arity: Arity::One, value: Value::Shape(8), required: false, kept: true },
+            Member { element: "And", arity: Arity::One, value: Value::Shape(9), required: false, kept: true },
+        ] } },
+        Shape { name: "SourceSelectionCriteria", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+            Member { element: "SseKmsEncryptedObjects", arity: Arity::One, value: Value::Shape(10), required: false, kept: true },
+            Member { element: "ReplicaModifications", arity: Arity::One, value: Value::Shape(11), required: false, kept: true },
+        ] } },
+        Shape { name: "ExistingObjectReplication", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+            Member { element: "Status", arity: Arity::One, value: Value::Text(Scalar::Text), required: true, kept: true },
+        ] } },
+        Shape { name: "Destination", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+            Member { element: "Bucket", arity: Arity::One, value: Value::Text(Scalar::Text), required: true, kept: true },
+            Member { element: "Account", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "StorageClass", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "AccessControlTranslation", arity: Arity::One, value: Value::Shape(12), required: false, kept: true },
+            Member { element: "EncryptionConfiguration", arity: Arity::One, value: Value::Shape(13), required: false, kept: true },
+            Member { element: "ReplicationTime", arity: Arity::One, value: Value::Shape(14), required: false, kept: true },
+            Member { element: "Metrics", arity: Arity::One, value: Value::Shape(15), required: false, kept: true },
+        ] } },
+        Shape { name: "DeleteMarkerReplication", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+            Member { element: "Status", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+        ] } },
+        Shape { name: "DeleteReplication", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+            Member { element: "Status", arity: Arity::One, value: Value::Text(Scalar::Text), required: true, kept: true },
+        ] } },
+        Shape { name: "Tag", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+            Member { element: "Key", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "Value", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+        ] } },
+        Shape { name: "ReplicationRuleAndOperator", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+            Member { element: "Prefix", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+            Member { element: "Tag", arity: Arity::Repeated, value: Value::Shape(8), required: false, kept: true },
+        ] } },
+        Shape { name: "SseKmsEncryptedObjects", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+            Member { element: "Status", arity: Arity::One, value: Value::Text(Scalar::Text), required: true, kept: true },
+        ] } },
+        Shape { name: "ReplicaModifications", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+            Member { element: "Status", arity: Arity::One, value: Value::Text(Scalar::Text), required: true, kept: true },
+        ] } },
+        Shape { name: "AccessControlTranslation", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+            Member { element: "Owner", arity: Arity::One, value: Value::Text(Scalar::Text), required: true, kept: true },
+        ] } },
+        Shape { name: "EncryptionConfiguration", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+            Member { element: "ReplicaKmsKeyID", arity: Arity::One, value: Value::Text(Scalar::Text), required: false, kept: true },
+        ] } },
+        Shape { name: "ReplicationTime", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+            Member { element: "Status", arity: Arity::One, value: Value::Text(Scalar::Text), required: true, kept: true },
+            Member { element: "Time", arity: Arity::One, value: Value::Shape(16), required: true, kept: true },
+        ] } },
+        Shape { name: "Metrics", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+            Member { element: "Status", arity: Arity::One, value: Value::Text(Scalar::Text), required: true, kept: true },
+            Member { element: "EventThreshold", arity: Arity::One, value: Value::Shape(16), required: false, kept: true },
+        ] } },
+        Shape { name: "ReplicationTimeValue", attribute: None, content: Content::Members { unknown: Unknown::Refuse, members: &[
+            Member { element: "Minutes", arity: Arity::One, value: Value::Text(Scalar::Integer), required: false, kept: true },
+        ] } },
+    ] };
 }

@@ -54,7 +54,13 @@ impl OperationCodec for dto::GetBucketOwnershipControls {
         // OwnershipControls — the XML response body, rooted at `OwnershipControls`.
         if let Some(v) = output.ownership_controls.as_ref() {
             let mut writer = rustfs_gateway_xml::XmlWriter::document();
-            writer.open("OwnershipControls", Some(rustfs_gateway_xml::S3_XMLNS));
+            writer.legacy_layout(request.rustfs_response_layout());
+            let xmlns = if request.rustfs_response_layout() {
+                None
+            } else {
+                Some(rustfs_gateway_xml::S3_XMLNS)
+            };
+            writer.open("OwnershipControls", xmlns);
             write_ownership_controls(&mut writer, v)?;
             writer.close();
             response.body = ResponseBody::Complete(writer.finish().into_bytes());
