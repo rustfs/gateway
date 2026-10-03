@@ -23,6 +23,8 @@
 #[cfg(unix)]
 #[path = "server_runtime/accept_recovery.rs"]
 mod accept_recovery;
+#[path = "server_runtime/client_ceiling.rs"]
+mod client_ceiling;
 #[path = "server_runtime/connection_driver.rs"]
 mod connection_driver;
 #[path = "server_runtime/drain_fixture.rs"]

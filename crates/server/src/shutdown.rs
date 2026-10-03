@@ -92,7 +92,8 @@ impl ServerMetrics {
         self.inner.active.load(Ordering::Relaxed)
     }
 
-    /// Number of accepted sockets rejected by the per-IP limit before TLS.
+    /// Number of accepted sockets rejected by the per-IP limit before TLS; a client there is one
+    /// IPv4 address or one IPv6 `/64`.
     #[must_use]
     pub fn per_ip_rejections(&self) -> usize {
         self.inner.per_ip_rejected.load(Ordering::Relaxed)
