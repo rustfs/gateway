@@ -29,7 +29,7 @@ use std::collections::BTreeMap;
 use rustfs_gateway::dto::{PostObject, PostObjectFields, PostObjectOutput, StorageClass};
 use rustfs_gateway::{ErrorCode, Handler, HandlerError, HandlerResult, Req, Resp};
 
-use super::content_headers::ContentHeaders;
+use super::content_headers::{ContentHeaders, normalized_content_encoding};
 use super::records::ObjectAttributes;
 use super::tagging::tags_from_header;
 use super::transitions::{invalid_storage_class, requested_storage_class};
@@ -80,19 +80,6 @@ fn form_storage_class(requested: Option<&StorageClass>) -> Result<Option<Storage
         return Err(invalid_storage_class());
     }
     requested_storage_class(requested)
-}
-
-/// `Content-Encoding` as RustFS stores it: each comma-separated coding trimmed, `aws-chunked` in any
-/// case and empty codings dropped, the rest joined by `", "`; nothing left stores nothing
-/// (`rustfs/src/storage/options.rs:664-683`).
-fn stored_content_encoding(value: &str) -> Option<String> {
-    let codings: Vec<&str> = value
-        .trim()
-        .split(',')
-        .map(str::trim)
-        .filter(|coding| !coding.is_empty() && !coding.eq_ignore_ascii_case("aws-chunked"))
-        .collect();
-    (!codings.is_empty()).then(|| codings.join(", "))
 }
 
 /// Collects the form's metadata fields, refusing a field the form repeats.
@@ -149,7 +136,7 @@ impl Handler<PostObject> for FsBackend {
         let headers = ContentHeaders::from_request(
             fields.cache_control,
             fields.content_disposition,
-            fields.content_encoding.as_deref().and_then(stored_content_encoding),
+            fields.content_encoding.as_deref().and_then(normalized_content_encoding),
             fields.content_language,
             input.content_type,
             None,
@@ -211,7 +198,7 @@ mod tests {
             ("", None),
             ("x-gzip;q=1", Some("x-gzip;q=1")),
         ] {
-            assert_eq!(stored_content_encoding(sent).as_deref(), stored, "{sent:?}");
+            assert_eq!(normalized_content_encoding(sent).as_deref(), stored, "{sent:?}");
         }
     }
 

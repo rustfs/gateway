@@ -44,14 +44,20 @@ mod backend_reachability;
 mod body_literals;
 #[path = "body_refusal_sentences.rs"]
 mod body_refusal_sentences;
+#[path = "bodyless_bodies.rs"]
+mod bodyless_bodies;
 #[path = "bodyless_payload_digest.rs"]
 mod bodyless_payload_digest;
 #[path = "bucket_config_reachability.rs"]
 mod bucket_config_reachability;
+#[path = "buffered_lengths.rs"]
+mod buffered_lengths;
 #[path = "checksum_omissions.rs"]
 mod checksum_omissions;
 #[path = "chunked_allocations.rs"]
 mod chunked_allocations;
+#[path = "claimed_body_ceiling.rs"]
+mod claimed_body_ceiling;
 #[path = "classification.rs"]
 mod classification;
 #[path = "committed_head_runtime.rs"]
@@ -96,12 +102,22 @@ mod governor_runtime;
 mod governor_streaming;
 #[path = "handler_panic.rs"]
 mod handler_panic;
+#[path = "host_body_bounds.rs"]
+mod host_body_bounds;
 #[path = "host_deadlines.rs"]
 mod host_deadlines;
+#[path = "host_reporting.rs"]
+mod host_reporting;
+#[path = "host_request_id.rs"]
+mod host_request_id;
 #[path = "host_resolve_replay.rs"]
 mod host_resolve_replay;
 #[path = "ingest_assembly.rs"]
 mod ingest_assembly;
+#[path = "legacy_chunk_limits.rs"]
+mod legacy_chunk_limits;
+#[path = "legacy_cors.rs"]
+mod legacy_cors;
 #[path = "lifecycle_reachability.rs"]
 mod lifecycle_reachability;
 #[path = "lock_encryption_reachability.rs"]
@@ -174,6 +190,8 @@ mod rustfs_key_floor;
 mod rustfs_selection;
 #[path = "rustfs_vhost.rs"]
 mod rustfs_vhost;
+#[path = "scope_refusals.rs"]
+mod scope_refusals;
 #[path = "select_frame_records.rs"]
 mod select_frame_records;
 #[path = "select_restore_intent.rs"]
@@ -182,12 +200,18 @@ mod select_restore_intent;
 mod select_restore_reachability;
 #[path = "self_held_http1.rs"]
 mod self_held_http1;
+#[path = "self_held_refusal_drain.rs"]
+mod self_held_refusal_drain;
 #[path = "service_clone_allocations.rs"]
 mod service_clone_allocations;
 #[path = "service_concurrency.rs"]
 mod service_concurrency;
 #[path = "service_config.rs"]
 mod service_config;
+#[path = "signed_header_reading.rs"]
+mod signed_header_reading;
+#[path = "signing_services.rs"]
+mod signing_services;
 #[path = "sigv2_runtime.rs"]
 mod sigv2_runtime;
 #[path = "sse_runtime.rs"]
@@ -206,6 +230,8 @@ mod throughput_request;
 mod tracing_events;
 #[path = "unknown_checksum_algorithms.rs"]
 mod unknown_checksum_algorithms;
+#[path = "unread_body_drain.rs"]
+mod unread_body_drain;
 #[path = "unread_body_refusal.rs"]
 mod unread_body_refusal;
 #[path = "upload_object_ceiling.rs"]

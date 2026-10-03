@@ -52,7 +52,9 @@ impl OperationCodec for dto::GetBucketNotificationConfiguration {
         let mut response = EncodedResponse::of(status);
         response.status = status_code(status)?;
         let mut writer = rustfs_gateway_xml::XmlWriter::document();
+        writer.legacy_layout(request.rustfs_response_layout());
         writer.open("NotificationConfiguration", Some(rustfs_gateway_xml::S3_XMLNS));
+        writer.order_children(rustfs_order::RESPONSE);
         for item in &output.topic_configurations {
             writer.open("TopicConfiguration", None);
             write_topic_configuration(&mut writer, item)?;
@@ -110,6 +112,7 @@ fn write_lambda_function_configuration(
     writer: &mut rustfs_gateway_xml::XmlWriter,
     value: &dto::LambdaFunctionConfiguration,
 ) -> Result<(), CodecError> {
+    writer.order_children(rustfs_order::LAMBDA_FUNCTION_CONFIGURATION);
     if let Some(v) = value.id.as_ref() {
         writer.element("Id", v.as_str());
     }
@@ -146,6 +149,7 @@ fn write_queue_configuration(
     writer: &mut rustfs_gateway_xml::XmlWriter,
     value: &dto::QueueConfiguration,
 ) -> Result<(), CodecError> {
+    writer.order_children(rustfs_order::QUEUE_CONFIGURATION);
     if let Some(v) = value.id.as_ref() {
         writer.element("Id", v.as_str());
     }
@@ -179,6 +183,7 @@ fn write_topic_configuration(
     writer: &mut rustfs_gateway_xml::XmlWriter,
     value: &dto::TopicConfiguration,
 ) -> Result<(), CodecError> {
+    writer.order_children(rustfs_order::TOPIC_CONFIGURATION);
     if let Some(v) = value.id.as_ref() {
         writer.element("Id", v.as_str());
     }
@@ -195,4 +200,15 @@ fn write_topic_configuration(
         writer.close();
     }
     Ok(())
+}
+
+/// The order legacy RustFS writes each response element's children in (rustfs/gateway#1078):
+/// the order the legacy stack's structure declares its fields in.
+/// Honoured under `MetaView::rustfs_response_layout`; generated from the IR.
+#[rustfmt::skip]
+mod rustfs_order {
+    pub(super) const RESPONSE: &[&str] = &["EventBridgeConfiguration", "CloudFunctionConfiguration", "QueueConfiguration", "TopicConfiguration"];
+    pub(super) const LAMBDA_FUNCTION_CONFIGURATION: &[&str] = &["Event", "Filter", "Id", "CloudFunction"];
+    pub(super) const QUEUE_CONFIGURATION: &[&str] = &["Event", "Filter", "Id", "Queue"];
+    pub(super) const TOPIC_CONFIGURATION: &[&str] = &["Event", "Filter", "Id", "Topic"];
 }

@@ -23,16 +23,18 @@
 //! Upstream: `super::S3Service`'s pipeline. Downstream: `rustfs_gateway_core::cors`,
 //! `crate::ext::CachedCorsSource`.
 
-use http::{Response, StatusCode};
+use http::{HeaderMap, HeaderName, HeaderValue, Method, Request, Response, StatusCode};
 use rustfs_gateway_core::TargetKind;
 use rustfs_gateway_core::cors::{
-    CorsHeaders, PreflightOutcome, PreflightRefusalCause, PreflightRequest, answer_actual, answer_preflight,
-    preflight_uses_resolved_target,
+    ACCESS_CONTROL_ALLOW_ORIGIN, CorsHeaders, ORIGIN, PreflightOutcome, PreflightRefusalCause, PreflightRequest, answer_actual,
+    answer_preflight, preflight_uses_resolved_target,
 };
 use rustfs_gateway_sig::RequestNow;
 use rustfs_gateway_stream::Body;
+use rustfs_gateway_types::BucketName;
 
 use crate::clock::MonotonicNow;
+use crate::cors_legacy::{ActualPlan, PreflightPlan, bucket_headers};
 use crate::ext::{CORS_PREFLIGHT, ClassKind, ClientAddr, GovernorRequest, ResolvedHost};
 use crate::request_deadline::hold_failure_floor;
 
@@ -124,6 +126,10 @@ impl S3Service {
         method: &http::Method,
         now: RequestNow,
     ) -> Option<CorsDecoration> {
+        // Legacy RustFS decorates every answer itself, after the pipeline (`decorate_legacy_cors`).
+        if self.inner.legacy_cors.is_some() {
+            return None;
+        }
         let view = rustfs_gateway_http::HeaderView::new(headers);
         // Exactly one line, and one this runtime would be willing to echo. Two `Origin` lines are
         // refused here as they are on a preflight, and for the same cache-poisoning reason.
@@ -136,6 +142,135 @@ impl S3Service {
             headers: answer_actual(&self.inner.cors_policy, Some(&document), origin, method.as_str()),
             vary_origin: true,
         })
+    }
+
+    /// What an ordinary request needs kept for its legacy RustFS CORS decoration: `None` without the
+    /// setting, for an `OPTIONS` (answered by [`Self::serve_legacy_preflight`]), and for a request
+    /// carrying no `Origin`.
+    pub(super) fn legacy_cors_request<B>(&self, request: &Request<B>) -> Option<LegacyCorsRequest> {
+        // Legacy-compat (rustfs/backlog#2684): legacy RustFS decorates every answer to a request
+        // carrying `Origin`, a refusal before authentication included, so an anonymous caller makes
+        // it read the bucket's document (through the cache here) and learns the bucket's rules from
+        // any refusal. A preflight discloses the same rules, so nothing new is exposed, but the
+        // read is a cost the gateway's own runtime only pays once a request is authorized. Kept so
+        // browsers can read the refusals they read today; the intended future behaviour is the
+        // gateway's decoration after authorization.
+        self.inner.legacy_cors.as_ref()?;
+        if *request.method() == Method::OPTIONS || !request.headers().contains_key(ORIGIN) {
+            return None;
+        }
+        Some(LegacyCorsRequest {
+            path: request.uri().path().to_owned(),
+            method: request.method().clone(),
+            headers: request.headers().clone(),
+        })
+    }
+
+    /// Decorates `response` as legacy RustFS decorates an answer to a request carrying `Origin`:
+    /// when the first path segment names a bucket with a document, the bucket's rules, replacing
+    /// every `Access-Control-*` header already there; otherwise, unless the answer already allows an
+    /// origin, the fallback headers.
+    ///
+    /// Legacy RustFS leaves an answer whose handler already allowed an origin alone. Its object
+    /// handlers write the same bucket answer this computes, credentials included, so replacing it
+    /// here changes nothing on the wire but the credentials these answers never allow — including
+    /// ones a bridged handler hands over among its extra headers.
+    pub(super) async fn decorate_legacy_cors(&self, request: LegacyCorsRequest, response: &mut Response<Body>, now: RequestNow) {
+        let Some(legacy) = self.inner.legacy_cors.as_ref() else {
+            return;
+        };
+        let Some(plan) = legacy.actual_plan(&request.path, &request.headers) else {
+            return;
+        };
+        let from_bucket = match plan {
+            ActualPlan::Bucket(name) => self.legacy_bucket_headers(name, &request.method, &request.headers, now).await,
+            ActualPlan::Fallback => None,
+        };
+        let headers = response.headers_mut();
+        match from_bucket {
+            Some(pairs) => {
+                // Legacy RustFS clears every `Access-Control-*` answer header before it writes the
+                // bucket's, so a document with no matching rule leaves none.
+                let cleared: Vec<HeaderName> = headers
+                    .keys()
+                    .filter(|name| name.as_str().starts_with("access-control-"))
+                    .cloned()
+                    .collect();
+                for name in cleared {
+                    headers.remove(name);
+                }
+                insert_all(headers, pairs);
+            }
+            None if headers.contains_key(ACCESS_CONTROL_ALLOW_ORIGIN) => {}
+            None => insert_all(headers, legacy.fallback_headers(&request.headers)),
+        }
+    }
+
+    /// Answers an `OPTIONS` as legacy RustFS answers it, before routing and authentication.
+    pub(super) async fn serve_legacy_preflight(
+        &self,
+        legacy: &crate::LegacyRustfsCors,
+        path: &str,
+        headers: &HeaderMap,
+        outcome: &mut Outcome<'_>,
+        now: RequestNow,
+        client_addr: Option<ClientAddr>,
+    ) -> Response<Body> {
+        let started = self.inner.authz_clock.monotonic();
+        let plan = legacy.preflight_plan(path, headers);
+        let bucket = match plan {
+            PreflightPlan::Bucket(name) => BucketName::materialize(name, &self.inner.names).ok(),
+            PreflightPlan::BadRequest | PreflightPlan::Fallback => None,
+        };
+        if self
+            .inner
+            .governor
+            .try_acquire(&GovernorRequest::new(
+                CORS_PREFLIGHT,
+                bucket.as_ref(),
+                None,
+                client_addr,
+                ClassKind::CorsPreflight,
+            ))
+            .await
+            .is_err()
+        {
+            return outcome.refuse_for_load();
+        }
+        let answer = match plan {
+            PreflightPlan::BadRequest => None,
+            PreflightPlan::Fallback => Some(legacy.fallback_headers(headers)),
+            PreflightPlan::Bucket(name) => match self.legacy_bucket_headers(name, &Method::OPTIONS, headers, now).await {
+                Some(pairs) if pairs.iter().any(|(name, _)| *name == ACCESS_CONTROL_ALLOW_ORIGIN) => Some(pairs),
+                Some(_) => {
+                    hold_failure_floor(self.inner.floor.failure_floor(), self.inner.authz_clock.as_ref(), started).await;
+                    return empty_answer(StatusCode::FORBIDDEN, Vec::new());
+                }
+                None => Some(legacy.fallback_headers(headers)),
+            },
+        };
+        match answer {
+            Some(pairs) => empty_answer(StatusCode::OK, pairs),
+            None => {
+                hold_failure_floor(self.inner.floor.failure_floor(), self.inner.authz_clock.as_ref(), started).await;
+                empty_answer(StatusCode::BAD_REQUEST, Vec::new())
+            }
+        }
+    }
+
+    /// The headers a bucket's stored document gives the request, through the mandatory cache;
+    /// `None` for a name the deployment's policy refuses, a bucket without a document, and an
+    /// unreadable `Origin`, all of which legacy RustFS answers with its fallback headers.
+    async fn legacy_bucket_headers(
+        &self,
+        name: &str,
+        method: &Method,
+        headers: &HeaderMap,
+        now: RequestNow,
+    ) -> Option<Vec<(HeaderName, HeaderValue)>> {
+        let bucket = BucketName::materialize(name, &self.inner.names).ok()?;
+        let document = self.inner.cors.get(&bucket, now).await?;
+        bucket_headers(&document, method, headers)
     }
 }
 
@@ -189,4 +324,27 @@ fn preflight_response(headers: &CorsHeaders) -> Response<Body> {
 pub(super) struct CorsDecoration {
     pub(super) headers: Option<CorsHeaders>,
     pub(super) vary_origin: bool,
+}
+
+/// What [`S3Service::decorate_legacy_cors`] needs of a request the pipeline has consumed.
+pub(super) struct LegacyCorsRequest {
+    path: String,
+    method: Method,
+    headers: HeaderMap,
+}
+
+fn insert_all(headers: &mut HeaderMap, pairs: Vec<(HeaderName, HeaderValue)>) {
+    for (name, value) in pairs {
+        headers.insert(name, value);
+    }
+}
+
+/// A legacy RustFS preflight answer: `status`, `pairs`, and no content.
+fn empty_answer(status: StatusCode, pairs: Vec<(HeaderName, HeaderValue)>) -> Response<Body> {
+    let mut response = Response::new(Body::empty());
+    *response.status_mut() = status;
+    let headers = response.headers_mut();
+    insert_all(headers, pairs);
+    headers.insert(http::header::CONTENT_LENGTH, HeaderValue::from_static("0"));
+    response
 }

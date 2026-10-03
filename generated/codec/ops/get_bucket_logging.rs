@@ -52,6 +52,7 @@ impl OperationCodec for dto::GetBucketLogging {
         let mut response = EncodedResponse::of(status);
         response.status = status_code(status)?;
         let mut writer = rustfs_gateway_xml::XmlWriter::document();
+        writer.legacy_layout(request.rustfs_response_layout());
         writer.open("BucketLoggingStatus", Some(rustfs_gateway_xml::S3_XMLNS));
         if let Some(v) = output.logging_enabled.as_ref() {
             writer.open("LoggingEnabled", None);
@@ -81,6 +82,7 @@ fn open_grantee(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::Grantee
 
 /// Writes one `Grantee` element's children, in the wire order the IR records.
 fn write_grantee(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::Grantee) -> Result<(), CodecError> {
+    writer.order_children(rustfs_order::GRANTEE);
     if let Some(v) = value.id.as_ref() {
         writer.element("ID", v.as_str());
     }
@@ -98,6 +100,7 @@ fn write_grantee(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::Grante
 
 /// Writes one `LoggingEnabled` element's children, in the wire order the IR records.
 fn write_logging_enabled(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::LoggingEnabled) -> Result<(), CodecError> {
+    writer.order_children(rustfs_order::LOGGING_ENABLED);
     {
         let v = &value.target_bucket;
         writer.element("TargetBucket", v.as_str());
@@ -157,6 +160,7 @@ fn write_target_object_key_format(
     writer: &mut rustfs_gateway_xml::XmlWriter,
     value: &dto::TargetObjectKeyFormat,
 ) -> Result<(), CodecError> {
+    writer.order_children(rustfs_order::TARGET_OBJECT_KEY_FORMAT);
     if let Some(v) = value.simple_prefix.as_ref() {
         writer.open("SimplePrefix", None);
         write_simple_prefix(writer, v)?;
@@ -168,4 +172,14 @@ fn write_target_object_key_format(
         writer.close();
     }
     Ok(())
+}
+
+/// The order legacy RustFS writes each response element's children in (rustfs/gateway#1078):
+/// the order the legacy stack's structure declares its fields in.
+/// Honoured under `MetaView::rustfs_response_layout`; generated from the IR.
+#[rustfmt::skip]
+mod rustfs_order {
+    pub(super) const GRANTEE: &[&str] = &["DisplayName", "EmailAddress", "ID", "URI"];
+    pub(super) const LOGGING_ENABLED: &[&str] = &["TargetBucket", "TargetGrants", "TargetObjectKeyFormat", "TargetPrefix"];
+    pub(super) const TARGET_OBJECT_KEY_FORMAT: &[&str] = &["PartitionedPrefix", "SimplePrefix"];
 }

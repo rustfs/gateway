@@ -52,7 +52,9 @@ impl OperationCodec for dto::GetBucketAcl {
         let mut response = EncodedResponse::of(status);
         response.status = status_code(status)?;
         let mut writer = rustfs_gateway_xml::XmlWriter::document();
+        writer.legacy_layout(request.rustfs_response_layout());
         writer.open("AccessControlPolicy", Some(rustfs_gateway_xml::S3_XMLNS));
+        writer.order_children(rustfs_order::RESPONSE);
         if let Some(v) = output.owner.as_ref() {
             writer.open("Owner", None);
             write_owner(&mut writer, v)?;
@@ -101,6 +103,7 @@ fn open_grantee(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::Grantee
 
 /// Writes one `Grantee` element's children, in the wire order the IR records.
 fn write_grantee(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::Grantee) -> Result<(), CodecError> {
+    writer.order_children(rustfs_order::GRANTEE);
     if let Some(v) = value.id.as_ref() {
         writer.element("ID", v.as_str());
     }
@@ -118,6 +121,7 @@ fn write_grantee(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::Grante
 
 /// Writes one `Owner` element's children, in the wire order the IR records.
 fn write_owner(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::Owner) -> Result<(), CodecError> {
+    writer.order_children(rustfs_order::OWNER);
     if let Some(v) = value.id.as_ref() {
         writer.element("ID", v.as_str());
     }
@@ -125,4 +129,14 @@ fn write_owner(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::Owner) -
         writer.element("DisplayName", v.as_str());
     }
     Ok(())
+}
+
+/// The order legacy RustFS writes each response element's children in (rustfs/gateway#1078):
+/// the order the legacy stack's structure declares its fields in.
+/// Honoured under `MetaView::rustfs_response_layout`; generated from the IR.
+#[rustfmt::skip]
+mod rustfs_order {
+    pub(super) const RESPONSE: &[&str] = &["AccessControlList", "Owner"];
+    pub(super) const GRANTEE: &[&str] = &["DisplayName", "EmailAddress", "ID", "URI"];
+    pub(super) const OWNER: &[&str] = &["DisplayName", "ID"];
 }

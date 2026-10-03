@@ -74,6 +74,8 @@ mod credentials;
 mod filter;
 mod governor;
 mod host;
+pub(crate) mod legacy_credential;
+mod legacy_refusal;
 mod legacy_vhost;
 mod observer;
 mod oplayer;

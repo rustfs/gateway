@@ -200,20 +200,36 @@ pub enum RegionLength {
     Unbounded,
 }
 
-/// How the `parse_with` constructors read a credential scope's region field: [`EmptyRegion`] and
-/// [`RegionLength`] together. An [`EmptyRegion`] alone is that rule with a bounded length.
+/// Which names a credential scope's service field may hold.
+///
+/// [`ServiceReading::Known`] everywhere by default. A verifier reads any name only when it decides
+/// after the parse which services it verifies ([`crate::ExpectedScope::accepting_services`]), as
+/// legacy RustFS does (the RustFS profile, rustfs/gateway#1130).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ServiceReading {
+    /// A name [`SigService`] parses; any other is malformed.
+    Known,
+    /// Any name of one or more bytes. The field still ends at the next `/`.
+    AnyName,
+}
+
+/// How the `parse_with` constructors read a credential scope's region field ([`EmptyRegion`] and
+/// [`RegionLength`] together) and the service field beside it ([`ServiceReading`]). An
+/// [`EmptyRegion`] alone is that rule with a bounded length and the known services.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RegionRule {
     empty: EmptyRegion,
     length: RegionLength,
+    services: ServiceReading,
 }
 
 impl RegionRule {
-    /// The reading of every constructor without `_with`: no empty region, and at most
-    /// [`CredentialScope::MAX_REGION_LEN`] bytes.
+    /// The reading of every constructor without `_with`: no empty region, at most
+    /// [`CredentialScope::MAX_REGION_LEN`] bytes, and a service [`SigService`] names.
     pub const STRICT: Self = Self {
         empty: EmptyRegion::Refused,
         length: RegionLength::Bounded,
+        services: ServiceReading::Known,
     };
 
     /// This rule, with the empty region governed by `empty`.
@@ -226,6 +242,22 @@ impl RegionRule {
     #[must_use]
     pub const fn with_length(self, length: RegionLength) -> Self {
         Self { length, ..self }
+    }
+
+    /// This rule, with the service field read by `services`.
+    #[must_use]
+    pub const fn with_services(self, services: ServiceReading) -> Self {
+        Self { services, ..self }
+    }
+
+    /// The service `field` names under this rule, or `None` when the rule does not read it. A
+    /// known name is held as its [`SigService`], so the usual scope costs no allocation.
+    fn service(self, field: &str) -> Option<ScopeService> {
+        match (SigService::parse(field), self.services) {
+            (Ok(service), _) => Some(ScopeService::Known(service)),
+            (Err(_), ServiceReading::AnyName) if !field.is_empty() => Some(ScopeService::Other(Box::from(field))),
+            (Err(_), _) => None,
+        }
     }
 
     /// Whether `region` is a region field this rule reads.
@@ -252,7 +284,15 @@ pub struct CredentialScope {
     access_key_id: Identity,
     date: ScopeDate,
     region: Box<str>,
-    service: SigService,
+    service: ScopeService,
+}
+
+/// A credential scope's service field: one [`SigService`] names, or — read only under
+/// [`ServiceReading::AnyName`] — any other name.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum ScopeService {
+    Known(SigService),
+    Other(Box<str>),
 }
 
 impl CredentialScope {
@@ -283,10 +323,12 @@ impl CredentialScope {
     /// # Errors
     ///
     /// As [`CredentialScope::parse`]; an empty region is refused only under
-    /// [`EmptyRegion::Refused`], and a region over the ceiling only under
-    /// [`RegionLength::Bounded`]. Every other rule — five fields, ASCII-graphic bytes — is the
-    /// same under every rule.
+    /// [`EmptyRegion::Refused`], a region over the ceiling only under [`RegionLength::Bounded`],
+    /// and a service [`SigService`] does not name only under [`ServiceReading::Known`]. Every other
+    /// rule — five fields, ASCII-graphic region bytes, a non-empty service — is the same under
+    /// every rule.
     pub fn parse_with(value: &str, rule: impl Into<RegionRule>) -> Result<Self, AuthError> {
+        let rule = rule.into();
         let fields: SmallVec<[&str; 5]> = value.split('/').collect();
         let [access_key_id, date, region, service, terminator] = fields.as_slice() else {
             return Err(AuthError::AuthorizationHeaderMalformed);
@@ -294,14 +336,15 @@ impl CredentialScope {
         if *terminator != SCOPE_TERMINATOR {
             return Err(AuthError::AuthorizationHeaderMalformed);
         }
-        if !rule.into().reads(region) {
+        if !rule.reads(region) {
             return Err(AuthError::AuthorizationHeaderMalformed);
         }
+        let service = rule.service(service).ok_or(AuthError::AuthorizationHeaderMalformed)?;
         Ok(Self {
             access_key_id: Identity::new(access_key_id).map_err(AuthError::from)?,
             date: ScopeDate::parse(date)?,
             region: Box::from(*region),
-            service: SigService::parse(service).map_err(AuthError::from)?,
+            service,
         })
     }
 
@@ -323,10 +366,24 @@ impl CredentialScope {
         &self.region
     }
 
-    /// The service the client scoped to. P2-04 checks it against the routed operation's service.
+    /// The service the client scoped to, when it is one [`SigService`] names. P2-04 checks it
+    /// against the routed operation's service. `None` only for a name read under
+    /// [`ServiceReading::AnyName`].
     #[must_use]
-    pub const fn service(&self) -> SigService {
-        self.service
+    pub const fn service(&self) -> Option<SigService> {
+        match self.service {
+            ScopeService::Known(service) => Some(service),
+            ScopeService::Other(_) => None,
+        }
+    }
+
+    /// The service field exactly as signed.
+    #[must_use]
+    pub fn service_name(&self) -> &str {
+        match &self.service {
+            ScopeService::Known(service) => service.as_str(),
+            ScopeService::Other(name) => name,
+        }
     }
 
     /// The scope line as it appears in the string-to-sign: `<date>/<region>/<service>/aws4_request`.
@@ -335,7 +392,7 @@ impl CredentialScope {
     /// parsed can only render one way.
     #[must_use]
     pub fn scope_string(&self) -> String {
-        format!("{}/{}/{}/{SCOPE_TERMINATOR}", self.date, self.region, self.service)
+        format!("{}/{}/{}/{SCOPE_TERMINATOR}", self.date, self.region, self.service_name())
     }
 }
 

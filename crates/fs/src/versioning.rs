@@ -40,6 +40,7 @@ use rustfs_gateway::{
 use sha2::{Digest as _, Sha256};
 
 use super::conditions::{self, conditions, guard_write};
+use super::lifecycle::ExpiringObject;
 use super::reads::Selected;
 use super::records::{
     ObjectAttributes, RecordKind, VersionRecord, decode_version_record, encode_version_record, validate_attributes,
@@ -652,7 +653,7 @@ impl Handler<PutObject> for FsBackend {
             )
             .await?;
         let attributes = ObjectAttributes {
-            headers: request_content_headers!(input).with_encryption(encryption.clone()),
+            headers: request_content_headers!(self, input).with_encryption(encryption.clone()),
             storage_class: requested_storage_class(input.storage_class.as_ref())?,
             tags: tags_from_header(input.tagging.as_deref())?,
             metadata: input.metadata,
@@ -676,7 +677,14 @@ impl Handler<PutObject> for FsBackend {
                 conditions::any(&write_conditions).then_some(&write_conditions),
             )
             .await?;
+        let written = ExpiringObject {
+            key: input.key.as_str(),
+            size: published.size,
+            tags: &attributes.tags,
+            modified: published.last_modified.secs(),
+        };
         Ok(Resp::new(PutObjectOutput {
+            expiration: self.expiration_header(input.bucket.as_str(), &written).await.map(Into::into),
             size: Some(published.size),
             e_tag,
             version_id: published.version_id,
@@ -699,11 +707,27 @@ impl FsBackend {
         key: &str,
         version_id: Option<&str>,
     ) -> Result<DeleteObjectOutput, HandlerError> {
+        self.delete_object_version_if(bucket, key, version_id, None).await
+    }
+
+    /// [`Self::delete_object_version`] under a delete's `If-Match`, judged inside the version lock
+    /// and held until the delete is done, so a write racing it cannot change what was judged.
+    async fn delete_object_version_if(
+        &self,
+        bucket: &str,
+        key: &str,
+        version_id: Option<&str>,
+        condition: Option<&DeleteIfMatch>,
+    ) -> Result<DeleteObjectOutput, HandlerError> {
         let _guard = self.version_lock.lock().await;
         let state = self.versioning_state(bucket).await?;
         let records = self.version_records(bucket).await?;
         if let Some(version_id) = version_id {
-            if let Some(record) = explicit_for_key(&records, key, version_id) {
+            let record = explicit_for_key(&records, key, version_id);
+            if let Some(condition) = condition {
+                self.judge_named(condition, bucket, key, version_id, record).await?;
+            }
+            if let Some(record) = record {
                 let delete_marker = matches!(record.kind, RecordKind::DeleteMarker);
                 tokio::fs::remove_dir_all(&record.path).await.map_err(|_| storage_error())?;
                 return Ok(DeleteObjectOutput {
@@ -718,6 +742,9 @@ impl FsBackend {
             return Ok(DeleteObjectOutput::default());
         }
         let state = state.for_delete(self.excluded(bucket, key, state).await?);
+        if let Some(condition) = condition {
+            self.judge_current(condition, bucket, key, state, &records).await?;
+        }
         let marker = self.delete_current_locked(bucket, key, state, records).await?;
         Ok(DeleteObjectOutput {
             delete_marker: marker.as_ref().map(|_| true),
@@ -730,14 +757,18 @@ impl FsBackend {
 impl Handler<DeleteObject> for FsBackend {
     async fn call(&self, request: Req<DeleteObject>) -> HandlerResult<DeleteObject> {
         let input = request.input();
+        let condition = self.delete_condition(input.if_match.as_deref());
         let output = self
-            .delete_object_version(input.bucket.as_str(), input.key.as_str(), input.version_id.as_deref())
+            .delete_object_version_if(input.bucket.as_str(), input.key.as_str(), input.version_id.as_deref(), condition.as_ref())
             .await?;
         Ok(Resp::new(output))
     }
 }
 
 mod configuration;
+mod delete_conditions;
+
+use delete_conditions::DeleteIfMatch;
 
 pub(super) use configuration::CONFIGURATION_FILE;
 

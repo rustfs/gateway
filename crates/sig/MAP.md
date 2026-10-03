@@ -13,6 +13,7 @@ Agent entry point for SigV2/SigV4 parsing, canonicalization and verification.
 | `src/floor_tests.rs` | The floor's own unit suite, split out at the 800-line limit. | A floor rule decidable from a `WireView` alone changes. |
 | `src/floor_anonymous.rs` | Service-level anonymous delegation and the one anonymous-admission predicate (ADR-0021). | An anonymous request reaches, or fails to reach, an operation's authorizer. |
 | `src/floor_presigned.rs` | Service-level presigned widening and the one presigned-admission predicate (ADR-0035). | A presigned URL is admitted to, or refused on, an operation that did not opt in. |
+| `src/floor_recognition.rs` | The sealing predicate's RustFS-profile reading: a query string or form is signed only when it carries its signature (rustfs/gateway#1130). | A request carrying presigned parameters without a signature is refused, or served anonymously. |
 | `src/mode.rs` | Authenticated payload-mode selection. | HTTP framing receives the wrong mode. |
 | `src/operation.rs` | Per-operation authentication-scheme policy. | Presigned or anonymous access reaches the wrong operation. |
 | `src/parse.rs` | Credential and authorization parsing. | Date, region, service, or credential fields parse incorrectly. |
@@ -32,7 +33,8 @@ Agent entry point for SigV2/SigV4 parsing, canonicalization and verification.
 | `src/sig_v2/string_to_sign.rs` | SigV2's six-line string-to-sign and the 35 sub-resources it covers. | A SigV2 signature differs despite the same request, or a new S3 sub-resource must be signed. |
 | `src/signature.rs` | Secret-bearing signature types and constant-time comparison. | Verification or redaction changes. |
 | `src/signer.rs` | Test/client request signing, dated by `x-amz-date` or, on request, by the HTTP `Date` header. | Conformance requests are signed wrongly. |
-| `src/signed_headers.rs` | Signed-header parsing and canonical selection, including the rule that a `Date` supplying the timestamp is signed. | Header coverage differs between signer and verifier. |
+| `src/signed_headers.rs` | Signed-header parsing and canonical selection, including the rule that a `Date` supplying the timestamp is signed, and the RustFS profile's verbatim reading of a list AWS would call malformed. | Header coverage differs between signer and verifier. |
+| `src/signed_headers_legacy.rs` | The canonical headers and signed-headers line of a list read verbatim, as legacy RustFS writes them (rustfs/gateway#1130). | A RustFS client's uppercase, unsorted or repeated `SignedHeaders` is verified differently from legacy RustFS. |
 | `src/timing.rs` | Constant-time comparison helpers. | Signature comparison timing changes. |
 | `src/verdict.rs` | Proof-carrying authentication outcomes and errors. | Authenticated or anonymous outcomes become forgeable. |
 | `src/verifier.rs` | Sealed AWS markers, custom verifier boundary, replay hook, and danger acknowledgement. | A custom or replacement verifier crosses its permitted boundary. |

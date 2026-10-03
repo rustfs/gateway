@@ -15,7 +15,8 @@
 //! Persistent object-tagging handlers.
 //!
 //! Responsible for: validating and atomically replacing one version's complete tag set, answering
-//! current or explicit-version reads, and removing tags without removing object bytes.
+//! current or explicit-version reads — in key order when a deployment asked for legacy RustFS's
+//! answer (`FsBackend::sorting_object_tags`) — and removing tags without removing object bytes.
 //! Also: reading and validating the packed `x-amz-tagging` header a `PutObject` or `CopyObject`
 //! carries, and the byte form those tags are published in beside a new version.
 //! NOT responsible for: bucket tags, version publication, or lifecycle action timing.
@@ -140,9 +141,15 @@ impl Handler<GetObjectTagging> for FsBackend {
         let target = self
             .object_tag_target(input.bucket.as_str(), input.key.as_str(), input.version_id.as_deref())
             .await?;
-        let tagging = read_tagging(&target.directory).await?;
+        let mut tag_set = read_tagging(&target.directory).await?.tag_set;
+        if self.rustfs_parity.sorted_object_tags {
+            // Legacy RustFS stores a set in written order and sorts it by key as it answers
+            // (`decode_tags`, `crates/ecstore/src/bucket/tagging/mod.rs:20-43` on rustfs/rustfs
+            // 3268c42e00): a stable sort on the keys' byte order.
+            tag_set.sort_by(|left, right| left.key.cmp(&right.key));
+        }
         Ok(Resp::new(GetObjectTaggingOutput {
-            tag_set: tagging.tag_set,
+            tag_set,
             version_id: target.version_id,
         }))
     }
