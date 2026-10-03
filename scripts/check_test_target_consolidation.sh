@@ -697,6 +697,7 @@ gateway_modules = (
     "governor_runtime",
     "governor_streaming",
     "handler_panic",
+    "host_body_bounds",
     "host_deadlines",
     "host_reporting",
     "host_request_id",

@@ -100,6 +100,8 @@ mod governor_runtime;
 mod governor_streaming;
 #[path = "handler_panic.rs"]
 mod handler_panic;
+#[path = "host_body_bounds.rs"]
+mod host_body_bounds;
 #[path = "host_deadlines.rs"]
 mod host_deadlines;
 #[path = "host_reporting.rs"]
