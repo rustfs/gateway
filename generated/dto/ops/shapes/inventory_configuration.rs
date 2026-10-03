@@ -40,7 +40,7 @@ pub struct InventoryConfiguration {
     /// Wire `IncludedObjectVersions`, bound as BodyXml. Required.
     pub included_object_versions: crate::ops::enums::IncludedObjectVersions,
     /// Wire `OptionalFields`, bound as BodyXml. Optional.
-    pub optional_fields: Vec<crate::ops::enums::OptionalFields>,
+    pub optional_fields: Option<Vec<crate::ops::enums::OptionalFields>>,
     /// Wire `Schedule`, bound as BodyXml. Required.
     pub schedule: crate::ops::shapes::InventorySchedule,
 }

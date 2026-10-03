@@ -628,14 +628,14 @@ fn n_a_deleted_buckets_seven_documents_and_its_acl_do_not_survive_a_recreation()
                 id: Some("previous-owner-canonical-id".to_owned()),
                 display_name: Some("previous-owner".to_owned()),
             }),
-            grants: vec![dto::Grant {
+            grants: Some(vec![dto::Grant {
                 grantee: Some(dto::Grantee {
                     uri: Some("http://acs.amazonaws.com/groups/global/AllUsers".to_owned()),
                     r#type: Some(dto::Type::GROUP),
                     ..dto::Grantee::default()
                 }),
                 permission: Some(dto::Permission::READ),
-            }],
+            }]),
         },
     );
     fixture.set_policy(

@@ -48,6 +48,14 @@ use crate::registry::OperationSpec;
 /// The scope whose rules govern this write: an object's, ten tags at the ceiling.
 pub static TAG_SCOPE: TagScope = TagScope::Object;
 
+/// A request naming one version is asked `s3:PutObjectVersionTagging`, as AWS requires when
+/// `versionId` is specified
+/// (<https://docs.aws.amazon.com/AmazonS3/latest/userguide/using-with-s3-policy-actions.html>).
+/// Legacy RustFS asks `s3:PutObjectTagging` instead (`rustfs/src/storage/access.rs:3260` on
+/// rustfs/rustfs `d60dfbb826`); the RustFS profile keeps that
+/// (`ServiceBuilder::authorize_versions_as_legacy_rustfs`).
+static VERSION_AUTH: AuthRequirement = AuthRequirement::new("s3:PutObjectVersionTagging", ResourceShape::Object);
+
 /// What this operation requires of a request once routing has chosen it.
 ///
 /// The `Tagging` document is a required *member*, refused by the decoder with `MalformedXML` when
@@ -55,7 +63,7 @@ pub static TAG_SCOPE: TagScope = TagScope::Object;
 /// request head. Nothing on the head is required beyond the routing discriminator.
 static SPEC: OperationSpec = OperationSpec::standard("PutObjectTagging")
     .required_params(&[])
-    .auth(AuthRequirement::new("s3:PutObjectTagging", ResourceShape::Object))
+    .auth(AuthRequirement::new("s3:PutObjectTagging", ResourceShape::Object).with_version_requirement(&VERSION_AUTH))
     .build();
 
 /// Header signatures only, and not privileged.

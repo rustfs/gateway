@@ -332,6 +332,7 @@ fn restore_projection(request: &dto::RestoreRequest) -> Option<RestoreFixture> {
         user_metadata: location
             .user_metadata
             .iter()
+            .flatten()
             .map(|entry| MetadataPair {
                 name: entry.name.clone().unwrap_or_default(),
                 value: entry.value.clone().unwrap_or_default(),
@@ -547,7 +548,7 @@ fn n_metadata_outside_the_wrapper_is_not_read_as_metadata() {
         .and_then(|location| location.s3.as_ref())
         .expect("S3 decodes");
     assert!(
-        location.user_metadata.is_empty(),
+        location.user_metadata.as_deref().unwrap_or_default().is_empty(),
         "an unwrapped MetadataEntry must not be read as metadata: {:?}",
         location.user_metadata
     );

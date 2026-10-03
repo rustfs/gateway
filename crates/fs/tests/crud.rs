@@ -31,8 +31,12 @@ mod bucket_location;
 mod bucket_policy;
 #[path = "crud/bucket_tagging.rs"]
 mod bucket_tagging;
+#[path = "crud/completion_parts.rs"]
+mod completion_parts;
 #[path = "crud/conditional_requests.rs"]
 mod conditional_requests;
+#[path = "crud/content_encoding.rs"]
+mod content_encoding;
 #[path = "crud/content_headers.rs"]
 mod content_headers;
 #[path = "crud/copy_object.rs"]
@@ -41,6 +45,8 @@ mod copy_object;
 mod delete_conditions;
 #[path = "crud/delete_objects.rs"]
 mod delete_objects;
+#[path = "crud/expiration_header.rs"]
+mod expiration_header;
 #[path = "crud/lifecycle.rs"]
 mod lifecycle;
 #[path = "crud/lifecycle_expiration.rs"]
@@ -81,6 +87,8 @@ mod object_tagging;
 mod post_object;
 #[path = "crud/range_reads.rs"]
 mod range_reads;
+#[path = "crud/tag_order.rs"]
+mod tag_order;
 #[path = "crud/upload_part_copy.rs"]
 mod upload_part_copy;
 #[path = "crud/versioning.rs"]

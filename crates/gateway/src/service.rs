@@ -255,6 +255,11 @@ impl core::fmt::Debug for S3Service {
 }
 
 impl S3Service {
+    /// The drain this assembly runs behind an answer that left an HTTP/1 request body unread.
+    pub(crate) fn unread_body_drain(&self) -> Option<crate::UnreadBodyDrain> {
+        self.inner.view_policy.unread_body_drain()
+    }
+
     pub(crate) fn from_inner(inner: Inner) -> Self {
         Self { inner: Arc::new(inner) }
     }
@@ -347,7 +352,13 @@ impl S3Service {
         let request_cancellation = request.extensions().get::<tokio::sync::watch::Receiver<bool>>().cloned();
         let config = RequestConfig::enter(config).with_request_cancellation(request_cancellation);
         let handler_deadline_report = config.handler_deadline_report();
-        let trace = self.inner.traces.mint();
+        // The host's own identifier, when it handed one over, and the identifiers this assembly's answer
+        // carries on this request's path: settled once, with the minting (rustfs/backlog#1677, R10).
+        let trace = self
+            .inner
+            .view_policy
+            .identification()
+            .settle(self.inner.traces.mint(), &request, &runtime.routing.router);
         let now = self.inner.clock.now();
         // Read before the request is consumed, and the only thing kept out of it: the RFC 9110 body rules are
         // stated over the request method, and every stage below has either forgotten it or never had it.
@@ -446,6 +457,7 @@ impl S3Service {
         crate::stamp::stamp(response.headers_mut(), &trace, now);
         let event_request_id = *trace.request_id();
         let event_operation = outcome.operation;
+        let event_method = method.clone();
         let event_status = response.status().as_u16();
         let event_identity = outcome.identity.clone();
         // Both reports below go to the observer this request's entry snapshot holds, and both go
@@ -458,6 +470,7 @@ impl S3Service {
                 let event = RequestEvent {
                     request_id: &event_request_id,
                     operation: event_operation,
+                    method: &event_method,
                     status: event_status,
                     handler_deadline,
                     identity: event_identity.as_ref(),
@@ -473,6 +486,7 @@ impl S3Service {
             let event = RequestEvent {
                 request_id: trace.request_id(),
                 operation: outcome.operation,
+                method: &method,
                 status: response.status().as_u16(),
                 handler_deadline,
                 identity: outcome.identity.as_ref(),
@@ -658,6 +672,8 @@ impl S3Service {
         // every await below while the body is owned separately.
         let mut pending = None;
         let wire = wire.map_body(|body| pending = Some(body));
+        // What the transport knows of the body's length, before anything reads it.
+        let transport_length = pending.as_ref().and_then(|body| http_body::Body::size_hint(body).exact());
 
         // Two decisions, one call. The bucket has one source — the host's, when the resolver read
         // one out of the host, and the path's otherwise — and the name it produces goes through
@@ -780,6 +796,7 @@ impl S3Service {
         // Kept out of the `match` so the read at the bottom can consult it. A custom admission has no
         // payload mode; an anonymous one has only the unsigned streaming mode its head declares.
         let mut framing_mode: Option<PayloadMode> = None;
+        let mut signed_length = crate::builder::buffered_lengths::SignedLength::default();
         let mut body_digest = BodyDigestObligation::None;
         // Legacy RustFS's words for a RustFS-profile refusal, when the authenticator published them.
         let mut legacy = None;
@@ -801,6 +818,7 @@ impl S3Service {
                             .refuse_at(Refused::Authentication, refusal.render(response_kind, wire.framing().has_body()));
                     }
                 };
+                signed_length = crate::builder::buffered_lengths::SignedLength::of(location, &payload, obligation);
                 body_digest = self.inner.view_policy.bodyless_digest.apply(request_body_mode, obligation);
                 let payload = self.inner.view_policy.signed_payload_mode(payload);
                 framing_mode = Some(payload.clone());
@@ -934,6 +952,13 @@ impl S3Service {
             return outcome
                 .refuse_handler(HandlerError::internal_error("the request could not be shown to have been authenticated"));
         };
+        // A claimed route's declared body past the profile's ceiling is refused here: after the
+        // signature and before authorization, as legacy RustFS refuses one (`builder/claimed_bodies.rs`).
+        if let RoutedBody::Ordinary(sealed) = &routed_body
+            && let Some(refusal) = sealed.past_claimed_ceiling(self.inner.view_policy.claimed_bodies.ceiling(claimed))
+        {
+            return outcome.refuse(refusal);
+        }
         let accepted_body = match routed_body {
             RoutedBody::Ordinary(sealed) => AcceptedBody::Ordinary(sealed),
             RoutedBody::PostObject(prelude) => {
@@ -963,6 +988,15 @@ impl S3Service {
             // Refused, never permitted: rustfs/rustfs#4845 is what a permissive answer here looks like in production.
             return outcome.refuse_handler(HandlerError::internal_error("this operation declares no authorisation action"));
         };
+        // A request naming one object version is asked the operation's version action, never the
+        // unversioned one (the GHSA-3ppv class), except where the RustFS profile keeps legacy
+        // RustFS's unversioned action; either question names the version.
+        let named_version = requirement.version_requirement().and(meta.query("versionId"));
+        let requirement = requirement
+            .for_version(named_version.is_some() && self.inner.view_policy.version_actions.asks_version_action(operation));
+        let asked_version = named_version.as_deref();
+        // Header-conditional actions AWS requires on top of the base one (`ExtraPermission`).
+        let extra_permissions = M::extra_permissions(&op);
         let authz_started = self.inner.authz_clock.monotonic();
         let auth_scheme = if verdict.is_authenticated() {
             let governed = GovernorRequest::new(operation, meta.bucket(), declared_length, client_addr, class);
@@ -997,7 +1031,7 @@ impl S3Service {
                 bucket: route_meta.bucket(),
                 key: route_effective_key,
                 copy_source_identity: None,
-                version_id: None,
+                version_id: asked_version,
                 route_action: first_action,
                 route_bucket: route_meta.bucket(),
                 route_key: route_effective_key,
@@ -1117,6 +1151,53 @@ impl S3Service {
                     (None, _) | (_, None) => Decision::Indeterminate,
                 };
             }
+            // Each triggered, profile-required extra is all-of on top of the base decision.
+            let mut route_extras: Vec<AuthzRequest<'_>> = Vec::new();
+            if route_decision == Decision::Allow {
+                for extra in extra_permissions {
+                    if !route_service.inner.view_policy.requires_extra_permission(*extra) {
+                        continue;
+                    }
+                    // Read off the raw map by name: no `HeaderName` per trigger on the warm path.
+                    if !extra.applies(|name| route_headers.get(name).and_then(|value| value.to_str().ok())) {
+                        continue;
+                    }
+                    route_extras.push(AuthzRequest {
+                        action: extra.action(),
+                        route_action: extra.action(),
+                        copy_source_identity: None,
+                        subject: None,
+                        ..route_request
+                    });
+                }
+                for extra_request in &route_extras {
+                    match catch_boxed_future(|| route_runtime.authorizer.authorize_route(&authz_context, extra_request)).await {
+                        Ok(decision) => {
+                            if decision != Decision::Allow {
+                                route_decision = decision;
+                                break;
+                            }
+                        }
+                        Err(()) => {
+                            crate::logging::extension_panicked(Extension::Authorizer, request_id, operation);
+                            return Err(from_handler(
+                                HandlerError::internal_error("the authorizer failed"),
+                                response_kind,
+                                ConnectionIntent::MayKeepAlive,
+                            ));
+                        }
+                    }
+                }
+            }
+            // Combine for the audit only when an extra was asked: nothing allocates otherwise.
+            let mut combined_audit;
+            let audited_route: &[AuthzRequest<'_>] = if route_extras.is_empty() {
+                asked
+            } else {
+                combined_audit = asked.to_vec();
+                combined_audit.extend(route_extras.iter().copied());
+                &combined_audit
+            };
             let settled = route_decision.settle();
             emit_safely(
                 route_runtime.authz_audit.as_ref(),
@@ -1128,7 +1209,7 @@ impl S3Service {
                     resource: requirement.resource,
                     bucket: route_meta.bucket(),
                     key: route_effective_key,
-                    resources: asked,
+                    resources: audited_route,
                     auth_scheme,
                     identity: route_verdict.identity(),
                     target_origin,
@@ -1190,7 +1271,7 @@ impl S3Service {
                         body_wire.framing(),
                         &chunk_sink,
                         seed.as_deref(),
-                        rustfs_gateway_http::ChunkLimits::default(),
+                        view_policy.chunk_reading.limits(),
                     ) {
                         Ok(ingest) => ingest,
                         Err(error) => return Err(error),
@@ -1201,6 +1282,12 @@ impl S3Service {
 
             let body_deadlines = state.config.config().request_body_deadlines();
             let (body, body_monitor) = match accepted_body {
+                // Released unpolled, where it would have been read: no claim about it is judged
+                // and no byte of it is held (`builder/bodyless_bodies.rs`).
+                AcceptedBody::Ordinary(sealed) if view_policy.bodyless_bodies.leaves_unread(request_body_mode) => {
+                    drop(sealed);
+                    (rustfs_gateway_core::RequestBody::None, None)
+                }
                 AcceptedBody::Ordinary(sealed) => {
                     let model =
                         BodyCeilings::for_mode(request_body_mode, operation, state.config.config().max_buffered_body_bytes());
@@ -1210,7 +1297,13 @@ impl S3Service {
                     let integrity = crate::integrity::resolve_in(body_meta, &body_wire.headers(), body_wire.method(), operation)?;
                     let object_ceiling = crate::gate::object_ceiling_for(request_body_mode, operation, state.config.config());
                     let sealed = sealed.with_object_ceiling(object_ceiling);
-                    sealed
+                    let (framed, lengths) = (ingest.is_some(), view_policy.buffered_lengths);
+                    if let Some(refusal) =
+                        lengths.before_read(request_body_mode, framed, signed_length, declared_length, transport_length)
+                    {
+                        return Err(refusal);
+                    }
+                    let handed = sealed
                         .handoff(
                             &metadata_admission,
                             (request_body_mode, ceilings, body_deadlines, body_quota),
@@ -1219,7 +1312,13 @@ impl S3Service {
                             integrity,
                         )
                         .await
-                        .map_err(|refusal| view_policy.buffered_ceiling.refusal(request_body_mode, claimed, refusal))?
+                        .map_err(|refusal| view_policy.buffered_ceiling.refusal(request_body_mode, claimed, refusal))?;
+                    if let (rustfs_gateway_core::RequestBody::Buffered(bytes), _) = &handed
+                        && let Some(refusal) = lengths.after_read(request_body_mode, framed, declared_length, bytes)
+                    {
+                        return Err(refusal);
+                    }
+                    handed
                 }
                 AcceptedBody::PostObject(post) => (*post).handoff(&metadata_admission)?,
             };
@@ -1260,7 +1359,7 @@ impl S3Service {
                 bucket: input_meta.bucket(),
                 key: input_effective_key,
                 copy_source_identity: None,
-                version_id: None,
+                version_id: asked_version,
                 route_action: deciding.action,
                 route_bucket: input_meta.bucket(),
                 route_key: input_effective_key,

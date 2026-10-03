@@ -13,7 +13,8 @@
 // limitations under the License.
 
 //! The request documents the RustFS profile still answers differently from legacy RustFS, each a
-//! named test carrying its ruling id (`rd-doc-0001`..`0008`).
+//! named test carrying its ruling id (`rd-doc-0001`..`0004`, `rd-doc-0006`..`0008`; `rd-doc-0005`
+//! is retired, an empty list wrapper being carried now).
 //!
 //! Responsible for: one concrete document per divergence, both stacks' answers pinned. Each
 //! divergence is a refusal where legacy RustFS accepts: a value the gateway cannot carry exactly
@@ -129,26 +130,6 @@ fn a_value_the_gateway_cannot_carry_is_refused_by_the_gateway_and_read_by_the_le
     refused_where_legacy_accepts(
         Op::DeleteObjects,
         "<Delete><Object><Key>k</Key><ETag>a\"b</ETag></Object></Delete>",
-        "InvalidArgument",
-    );
-}
-
-/// The empty wrapper of an optional wrapped list: the legacy stack hands a present empty list, which
-/// RustFS stores as the empty element; the gateway's container has one spelling of empty, so the
-/// document is refused rather than stored without the element.
-///
-/// Ruling: `rd-doc-0005`
-#[test]
-fn an_empty_optional_wrapper_is_refused_by_the_gateway_and_read_as_an_empty_list_by_the_legacy_stack() {
-    refused_where_legacy_accepts(
-        Op::PutBucketWebsite,
-        "<WebsiteConfiguration><IndexDocument><Suffix>index.html</Suffix></IndexDocument><RoutingRules></RoutingRules></WebsiteConfiguration>",
-        "InvalidArgument",
-    );
-    refused_where_legacy_accepts(
-        Op::PutBucketLogging,
-        "<BucketLoggingStatus><LoggingEnabled><TargetBucket>logs</TargetBucket><TargetPrefix>p/</TargetPrefix><TargetGrants/>\
-         </LoggingEnabled></BucketLoggingStatus>",
         "InvalidArgument",
     );
 }

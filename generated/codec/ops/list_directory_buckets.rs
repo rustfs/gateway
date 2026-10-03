@@ -58,13 +58,15 @@ impl OperationCodec for dto::ListDirectoryBuckets {
         let mut writer = rustfs_gateway_xml::XmlWriter::document();
         writer.legacy_layout(request.rustfs_response_layout());
         writer.open("ListAllMyDirectoryBucketsResult", Some(rustfs_gateway_xml::S3_XMLNS));
-        writer.open("Buckets", None);
-        for item in &output.buckets {
-            writer.open("Bucket", None);
-            write_bucket(&mut writer, item)?;
+        if output.buckets.is_some() || !writer.writes_legacy_layout() {
+            writer.open("Buckets", None);
+            for item in output.buckets.iter().flatten() {
+                writer.open("Bucket", None);
+                write_bucket(&mut writer, item)?;
+                writer.close();
+            }
             writer.close();
         }
-        writer.close();
         if let Some(v) = output.continuation_token.as_ref() {
             writer.element("ContinuationToken", v.as_str());
         }

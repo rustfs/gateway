@@ -123,9 +123,11 @@ fn read_logging_enabled(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::Loggi
     } else {
         return Err(CodecError::malformed_xml("the body omits a member the schema requires").about("TargetBucket"));
     }
+    let mut target_grants = Vec::new();
     for item in node.child("TargetGrants").into_iter().flat_map(|w| w.children_named("Grant")) {
-        shape.target_grants.push(read_target_grant(item)?);
+        target_grants.push(read_target_grant(item)?);
     }
+    shape.target_grants = node.child("TargetGrants").map(|_| target_grants);
     if let Some(raw) = node.child_text("TargetPrefix") {
         shape.target_prefix = raw.to_owned();
     } else {

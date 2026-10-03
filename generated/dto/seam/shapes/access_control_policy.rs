@@ -29,7 +29,7 @@ use crate::compat::ConversionError;
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
 pub fn access_control_policy_to_s3s(value: crate::ops::shapes::AccessControlPolicy) -> Result<s3s::dto::AccessControlPolicy, ConversionError> {
     Ok(s3s::dto::AccessControlPolicy {
-        grants: if value.grants.is_empty() { None } else { Some({ let x = value.grants; x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::grant::grant_to_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()? }) },
+        grants: value.grants.map(|x| -> Result<_, ConversionError> { Ok(x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::grant::grant_to_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()?) }).transpose()?,
         owner: value.owner.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::owner::owner_to_s3s(x)?) }).transpose()?,
     })
 }

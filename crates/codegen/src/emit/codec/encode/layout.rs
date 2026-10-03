@@ -13,9 +13,13 @@
 // limitations under the License.
 
 //! The rest of the legacy RustFS response layout the encoders render (rustfs/gateway#1078): the
-//! element an answer is rooted at, and the call an entity tag is written with.
+//! element an answer is rooted at, the call an entity tag is written with, and a list whose
+//! presence is carried.
 //!
-//! Responsible for: [`LEGACY_ROOTS`], and the `XmlWriter` call a scalar member is written with.
+//! Responsible for: [`LEGACY_ROOTS`]; the `XmlWriter` call a scalar member is written with; and
+//! the iteration and guard of a list whose presence is carried (`emit::dto::presence`): its
+//! wrapper written when the list is set, and when it is not only outside the RustFS response
+//! layout, as the wrapper of every list is written today.
 //! NOT responsible for: the member order (`super::order`), or honouring any of it at run time
 //! (`rustfs_gateway_xml::XmlWriter` under its legacy layout).
 //! Upstream: the IR. Downstream: the parent's encoders and shape writers, and
@@ -54,4 +58,38 @@ pub fn element_call(ty: &Type, policy: EmptyValue) -> &'static str {
         (_, EmptyValue::Emit) => "element",
         (_, EmptyValue::Omit) => "element_if_present",
     }
+}
+
+/// The loop header over a list member's entries at `pad`, each bound to `item`: over the list
+/// itself, or over the list a member whose presence is carried holds when it is set.
+#[must_use]
+pub fn for_items(pad: &str, item: &str, source: &str, presence: bool) -> String {
+    if presence {
+        format!("{pad}for {item} in {source}.iter().flatten() {{\n")
+    } else {
+        format!("{pad}for {item} in &{source} {{\n")
+    }
+}
+
+/// Guards the lines `out` holds for one list member whose presence is carried: they are written
+/// when the list is set, and when it is not only outside the RustFS response layout — the legacy
+/// stack writes no element for an unset list, and every other deployment writes the empty wrapper
+/// it always has. Nothing changes for any other list.
+pub fn guard(out: &mut String, pad: &str, source: &str, presence: bool) {
+    if !presence {
+        return;
+    }
+    let mut guarded = format!("{pad}if {source}.is_some() || !writer.writes_legacy_layout() {{\n");
+    for line in out.lines() {
+        if line.is_empty() {
+            guarded.push('\n');
+        } else {
+            guarded.push_str("    ");
+            guarded.push_str(line);
+            guarded.push('\n');
+        }
+    }
+    guarded.push_str(pad);
+    guarded.push_str("}\n");
+    *out = guarded;
 }

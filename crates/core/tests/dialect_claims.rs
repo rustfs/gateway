@@ -485,3 +485,48 @@ fn n_no_operation_receives_the_caller_secret_unless_it_opts_in() {
     static OPTED_IN: OperationSpec = spec("acme:Sealed", ResourceShape::Service).hand_caller_secret_to_handler();
     assert!(OPTED_IN.receives_caller_secret());
 }
+
+// ── the catch-all (ADR-0036) ─────────────────────────────────────────────────────────────────
+
+/// One catch-all row: everything below `logs/`.
+pub(crate) static LOGS_ROWS: &[ClaimedRow] = &[ClaimedRow {
+    template: "/acme/admin/v1/logs/{*path}",
+    selector: GET,
+}];
+
+/// Positive and negative — a catch-all row reaches its operation for any rest of one byte or more,
+/// across segments, and extracts that rest decoded once; a path that ends at the separator before
+/// the catch-all, or before that separator, or another method, is the claim's own refusal.
+#[test]
+fn a_catch_all_row_reaches_its_operation_across_segments() {
+    let dialect = only::<GET_USER>(vec![ADMIN], LOGS_ROWS.to_vec()).expect("a catch-all row assembles");
+    let router = router(&[&dialect]);
+    for (line, value) in [
+        ("GET /acme/admin/v1/logs/a", "a"),
+        ("GET /acme/admin/v1/logs/a/b/c", "a/b/c"),
+        ("GET /acme/admin/v1/logs/a/", "a/"),
+        ("GET /acme/admin/v1/logs//a", "/a"),
+        ("GET /acme/admin/v1/logs/a%2Fb/c%20d", "a/b/c d"),
+        ("GET /acme/admin/v1/logs/100%25", "100%"),
+    ] {
+        let request = RouteReq::new(line);
+        assert_eq!(routed(&router, &request), Some(NAMES[GET_USER]), "{line}");
+        let parts = request.parts();
+        let claimed = router.claims().lookup(&parts);
+        let entry = claimed.entry().expect("a claimed row");
+        let params = entry.template().extract(parts.path).expect(line);
+        assert_eq!(params.get("path"), Some(value), "{line}");
+    }
+    for line in [
+        "GET /acme/admin/v1/logs/",
+        "GET /acme/admin/v1/logs",
+        "GET /acme/admin/v1/logsx/a",
+        "PUT /acme/admin/v1/logs/a",
+        "DELETE /acme/admin/v1/logs/a/b",
+    ] {
+        let request = RouteReq::new(line);
+        assert_eq!(routed(&router, &request), None, "{line}");
+        let refusal = router.dispatch(&request.parts()).expect_err("no row accepts it");
+        assert_eq!(refusal.message(), NO_CLAIMED_ROUTE_MESSAGE, "{line}");
+    }
+}

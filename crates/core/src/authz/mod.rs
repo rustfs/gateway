@@ -20,12 +20,14 @@
 //! invoking a handler. Those belong to the deployment, routing, and registry respectively.
 //! Upstream: [`crate::Operation`]. Downstream: `crate::registry` and the facade pipeline.
 
+mod extra;
 mod plan;
 mod query;
 mod rule;
 
 use rustfs_gateway_types::{BucketName, ErrorCode, ObjectKey};
 
+pub use self::extra::{ExtraPermission, ExtraProfile, HeaderTrigger};
 pub use self::plan::Question;
 pub use self::query::{QueryParamError, single_raw_value};
 pub use self::rule::{

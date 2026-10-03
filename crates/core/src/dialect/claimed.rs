@@ -236,6 +236,15 @@ impl DialectBuilder {
                     });
                     return None;
                 }
+                if entries.iter().any(|entry| entry.template().catch_all() == Some(param)) {
+                    self.errors.push(DialectError::ClaimedBucketParam {
+                        name,
+                        param,
+                        why: "a catch-all takes the rest of the path, several segments, and no bucket is several \
+                              segments (ADR-0036)",
+                    });
+                    return None;
+                }
             }
             (Some(BucketParam::Query(param)), Some(ResourceShape::Bucket)) => {
                 if let Some(why) = query_bucket_fault(param, auth.and_then(|auth| auth.subject())) {

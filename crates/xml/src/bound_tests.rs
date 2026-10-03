@@ -434,17 +434,21 @@ fn n_an_uncarriable_value_yields_to_a_later_refusal() {
     );
 }
 
-/// Negative — an optional wrapped list's empty wrapper is uncarriable, whether it held nothing or
-/// only skipped entries; a wrapper with an entry, and no wrapper at all, are not.
+/// Positive — an optional wrapped list's empty wrapper is read as a present empty list, as legacy
+/// RustFS reads it, whether it held nothing or only skipped entries: the caller carries a list's
+/// presence apart from its entries (rustfs/gateway#1078). No wrapper is no list.
 #[test]
-fn n_an_empty_optional_wrapper_is_uncarriable() {
+fn an_empty_optional_wrapper_is_read_as_a_present_empty_list() {
     for body in [
         "<Config><Status>s</Status><TagSet></TagSet></Config>",
         "<Config><Status>s</Status><TagSet/></Config>",
         "<Config><Status>s</Status><TagSet><Other/></TagSet></Config>",
     ] {
-        assert_eq!(bound(body), Err(BoundRefusal::Uncarriable), "{body}");
+        let tree = bound(body).unwrap_or_else(|refusal| panic!("{body}: {refusal:?}"));
+        let wrapper = tree.child("TagSet").unwrap_or_else(|| panic!("{body}: no TagSet"));
+        assert!(wrapper.children.is_empty(), "{body}");
     }
-    assert!(bound("<Config><Status>s</Status><TagSet><Tag><ID>t</ID></Tag></TagSet></Config>").is_ok());
-    assert!(bound("<Config><Status>s</Status></Config>").is_ok());
+    let listed = bound("<Config><Status>s</Status><TagSet><Tag><ID>t</ID></Tag></TagSet></Config>");
+    assert!(listed.is_ok_and(|tree| tree.child("TagSet").is_some_and(|wrapper| wrapper.children.len() == 1)));
+    assert!(bound("<Config><Status>s</Status></Config>").is_ok_and(|tree| tree.child("TagSet").is_none()));
 }

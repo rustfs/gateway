@@ -474,14 +474,24 @@ for path in sorted((root / "crates").rglob("*.rs")):
 # explicit=40: the 40th is `rustfs-gateway-dialect-rustfs-admin`'s one `const fn spec` in
 # crates/dialect-rustfs-admin/src/admin.rs (rustfs/backlog#1744), which every generated RustFS
 # admin operation is built from. It states Standard for the same reason as the fixtures above.
-if central_builders != 102 or explicit_builders != 40:
+# explicit=41: the 41st is the `example:Info`/`example:Import` pair's one `const fn spec` in
+# crates/gateway/tests/claimed_body_ceiling.rs (rustfs/gateway#1173), a claimed-route fixture that
+# states Standard for the same reason.
+# explicit=43: the 42nd and 43rd are the version-requirement registration fixtures in
+# crates/core/src/registry/reject_version_tests.rs: the `acme:V*` family's one `const fn spec`, and
+# the rowless `WriteGetObjectResponse` fixture carrying a two-action version requirement. Both are
+# outside the standard authority and state Standard for the same reason as the fixtures above.
+# explicit=44: the 44th is the extra-permission registration fixture's one `const fn extra_spec` in
+# crates/core/src/registry/reject.rs (`acme:DoThing`), outside the standard authority, stating
+# Standard for the same reason.
+if central_builders != 102 or explicit_builders != 44:
     fail(
         "repository builder census drifted: "
-        f"central={central_builders} explicit={explicit_builders}, expected central=102 explicit=40"
+        f"central={central_builders} explicit={explicit_builders}, expected central=102 explicit=44"
     )
 
 print(
-    "check_handler_deadline_class: 147 repository builder sites are inventoried "
-    "(142 classified: 102 central standard, 40 explicit; 5 authority tests)"
+    "check_handler_deadline_class: 151 repository builder sites are inventoried "
+    "(146 classified: 102 central standard, 44 explicit; 5 authority tests)"
 )
 PY

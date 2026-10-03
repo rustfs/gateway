@@ -58,3 +58,4 @@ pub mod select;
 pub mod tagging;
 pub mod trailer_checksum;
 pub mod upload_id;
+pub mod write_permissions;

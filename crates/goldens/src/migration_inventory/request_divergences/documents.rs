@@ -15,10 +15,11 @@
 //! The request-document slice of the request-divergence register: what the RustFS profile's
 //! document reading (rustfs/gateway#1078) still answers differently from legacy RustFS.
 //!
-//! Responsible for: `rd-doc-0001`..`0008`, each with its ruling and its pinned test in
-//! `operation_diff/request_documents/divergences.rs`. Every one is a refusal where legacy RustFS
-//! reads the document: two security refusals the reading keeps, and six values the gateway cannot
-//! carry exactly, refused rather than handed over or stored differently. `parity` in the same
+//! Responsible for: `rd-doc-0001`..`0004` and `rd-doc-0006`..`0008`, each with its ruling and its
+//! pinned test in `operation_diff/request_documents/divergences.rs` (`rd-doc-0005`, an empty list
+//! wrapper, is retired: the gateway carries it now). Every one is a refusal where legacy RustFS
+//! reads the document: two security refusals the reading keeps, and five values the gateway
+//! cannot carry exactly, refused rather than handed over or stored differently. `parity` in the same
 //! directory requires every difference it measures across every perturbation of every request
 //! document to fall in exactly one of them.
 //! NOT responsible for: the register's validation and rendering (the parent module) or the other
@@ -30,12 +31,11 @@ use super::{DOCUMENT_DECODE, DivergenceFollowUp, DivergenceRuling, RequestDiverg
 const XML_REFERENCE: &str = "https://www.w3.org/TR/xml/";
 const API_TAGGING: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_Tag.html";
 const API_LIFECYCLE_EXPIRATION: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_LifecycleExpiration.html";
-const API_WEBSITE: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutBucketWebsite.html";
 const API_OBJECT_LOCK: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObjectLockConfiguration.html";
 const API_DELETE_OBJECTS: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteObjects.html";
 const API_S3_LOCATION: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_S3Location.html";
 
-pub(super) const DOCUMENT_DIVERGENCES: [RequestDivergence; 8] = [
+pub(super) const DOCUMENT_DIVERGENCES: [RequestDivergence; 7] = [
     RequestDivergence {
         id: "rd-doc-0001",
         operation: "every operation with an XML request document",
@@ -103,21 +103,6 @@ pub(super) const DOCUMENT_DIVERGENCES: [RequestDivergence; 8] = [
         follow_up: DivergenceFollowUp::None,
         test_file: DOCUMENT_DECODE,
         test: "a_value_the_gateway_cannot_carry_is_refused_by_the_gateway_and_read_by_the_legacy_stack",
-    },
-    RequestDivergence {
-        id: "rd-doc-0005",
-        operation: "PutBucketWebsite, PutBucketLogging, PutBucketAcl, PutObjectAcl, RestoreObject",
-        request: "an optional wrapped list's wrapper with no entry: RoutingRules, TargetGrants, AccessControlList, UserMetadata",
-        aws: "the wrapper holds the list's entries; the model does not say an empty one is refused",
-        aws_evidence: API_WEBSITE,
-        s3s: "the legacy stack reads a present empty list, and RustFS stores the empty element with the configuration",
-        gateway: "400 InvalidArgument: a gateway list is a container with one spelling of empty, so the document is refused \
-                  rather than stored without the element",
-        client_impact: "a client sending an empty wrapper gets 400 where RustFS stored it (ACL documents: RustFS answered 501)",
-        ruling: DivergenceRuling::KeepGateway,
-        follow_up: DivergenceFollowUp::None,
-        test_file: DOCUMENT_DECODE,
-        test: "an_empty_optional_wrapper_is_refused_by_the_gateway_and_read_as_an_empty_list_by_the_legacy_stack",
     },
     RequestDivergence {
         id: "rd-doc-0006",

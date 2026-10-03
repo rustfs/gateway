@@ -133,13 +133,15 @@ impl OperationCodec for dto::PutObjectAcl {
 /// body and a bare one decode identically.
 fn read_access_control_policy(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::AccessControlPolicy, CodecError> {
     let mut shape = dto::AccessControlPolicy { ..Default::default() };
+    let mut grants = Vec::new();
     for item in node
         .child("AccessControlList")
         .into_iter()
         .flat_map(|w| w.children_named("Grant"))
     {
-        shape.grants.push(read_grant(item)?);
+        grants.push(read_grant(item)?);
     }
+    shape.grants = node.child("AccessControlList").map(|_| grants);
     if let Some(child) = node.child("Owner") {
         shape.owner = Some(read_owner(child)?);
     }

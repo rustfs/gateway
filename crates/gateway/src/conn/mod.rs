@@ -28,6 +28,7 @@ mod response;
 
 use std::io;
 use std::sync::Arc;
+use std::time::Duration;
 
 use http::{Request, Response};
 use rustfs_gateway_server::{
@@ -44,7 +45,7 @@ use crate::close::ConnectionIntent;
 pub use metrics::{ResponseFallbackReason, ResponseTransportMetrics};
 pub use request::SelfHeldRequestBody;
 use request::{ConnectionIo, Expectation, HeaderTimeout, read_request};
-use response::{write_bad_request, write_continue, write_expectation_failed, write_response};
+use response::{write_bad_request, write_expectation_failed, write_response};
 
 /// Driver for an explicitly configured plaintext HTTP/1.1 listener.
 ///
@@ -167,13 +168,8 @@ where
                 let _ = locked.stream.shutdown().await;
                 return;
             }
-            Expectation::Continue if parsed.body_expected => {
-                let mut locked = io.lock().await;
-                if write_continue(&mut locked).await.is_err() {
-                    let _ = locked.stream.shutdown().await;
-                    return;
-                }
-            }
+            // Invited when the service first reads the body, not here (rustfs/gateway#1222).
+            Expectation::Continue if parsed.body_expected => io.lock().await.owe_continue(),
             Expectation::None | Expectation::Continue => {}
         }
         let method = parsed.request.method().clone();
@@ -197,8 +193,14 @@ where
         if response_needs_linger {
             locked.stream.mark_request_body_unfinished();
         }
+        // A peer never invited to send its body may be waiting for the invitation or may send it
+        // anyway: neither is something to wait for, so the connection ends after the answer, as
+        // the Hyper driver ends it.
+        if locked.withdraw_continue() {
+            force_close = true;
+        }
         if !locked.body_complete()
-            && (force_close || response_must_close || !locked.drain_request_body(MAX_LINGER_DRAIN_BYTES).await.unwrap_or(false))
+            && (force_close || response_must_close || !drain_owed_body(&mut locked, config.lingering_close_time).await)
         {
             force_close = true;
             locked.stream.mark_request_body_unfinished();
@@ -212,6 +214,22 @@ where
         }
     }
     close_socket(&io).await;
+}
+
+/// Reads and discards what a refused request still owes, so its connection can serve the next one.
+///
+/// Bounded twice: by [`MAX_LINGER_DRAIN_BYTES`] of body, and by `budget` of time — the same
+/// patience `ServerConfig::lingering_close_time` gives a closing peer that still owes a body.
+/// Without the second bound a peer that declared a body and stopped sending held its connection,
+/// and the request permit of the response waiting behind this drain, for as long as it liked
+/// (rustfs/gateway#1207). A drain that runs out of either answers `false`, and the caller closes
+/// after the response instead. Hyper's driver never waits here at all: it discards what has
+/// already arrived and closes otherwise.
+async fn drain_owed_body(io: &mut ConnectionIo, budget: Duration) -> bool {
+    matches!(
+        tokio::time::timeout(budget, io.drain_request_body(MAX_LINGER_DRAIN_BYTES)).await,
+        Ok(Ok(true))
+    )
 }
 
 async fn close_socket(io: &Arc<Mutex<ConnectionIo>>) {

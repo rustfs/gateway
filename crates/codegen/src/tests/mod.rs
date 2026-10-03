@@ -38,6 +38,7 @@ mod mutate_tests;
 mod naming_contract_tests;
 mod operations_json_tests;
 mod operations_md_tests;
+mod presence_tests;
 mod request_body_mode_tests;
 mod response_order_tests;
 mod route_only_tests;

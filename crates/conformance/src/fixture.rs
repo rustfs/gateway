@@ -2488,7 +2488,7 @@ fn reported_tagging_version(fixture: &Fixture, bucket: &str, key: &str, requeste
 fn default_acl() -> dto::AccessControlPolicy {
     dto::AccessControlPolicy {
         owner: Some(fixture_owner()),
-        grants: vec![dto::Grant {
+        grants: Some(vec![dto::Grant {
             grantee: Some(dto::Grantee {
                 id: Some(OWNER_ID.to_owned()),
                 display_name: Some(OWNER_DISPLAY_NAME.to_owned()),
@@ -2496,7 +2496,7 @@ fn default_acl() -> dto::AccessControlPolicy {
                 ..dto::Grantee::default()
             }),
             permission: Some(dto::Permission::FULL_CONTROL),
-        }],
+        }]),
     }
 }
 
@@ -2551,7 +2551,7 @@ fn policy_of(resolved: AclInput) -> dto::AccessControlPolicy {
         AclInput::Headers { canned: _, grants } if grants.is_empty() => default_acl(),
         AclInput::Headers { canned: _, grants } => dto::AccessControlPolicy {
             owner: Some(fixture_owner()),
-            grants,
+            grants: Some(grants),
         },
     }
 }
@@ -3858,7 +3858,7 @@ impl Stub {
         let mut configuration = input.bucket_logging_status.clone();
         validate_logging(&configuration).map_err(|rejection| HandlerError::new(rejection.code(), rejection.reason()))?;
         if let Some(enabled) = configuration.logging_enabled.as_mut() {
-            for grant in &mut enabled.target_grants {
+            for grant in enabled.target_grants.iter_mut().flatten() {
                 if let Some(grantee) = grant.grantee.as_mut() {
                     canonicalize_grantee(grantee).map_err(refused_acl)?;
                 }

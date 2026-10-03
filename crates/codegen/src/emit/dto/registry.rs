@@ -252,7 +252,8 @@ impl Registry {
     /// Three cases, and the IR decides which (ADR-0004 P1):
     ///
     /// * a **container** stays bare — an empty `Vec` and an absent list are the same fact on the
-    ///   wire, so `Option<Vec<_>>` would spell "nothing" twice;
+    ///   wire, so `Option<Vec<_>>` would spell "nothing" twice — except a list whose presence is a
+    ///   fact of its own ([`super::presence::carries_presence`], ADR-0037), which is an `Option`;
     /// * a **required** member stays bare, so that requiredness is expressed by the type and no
     ///   consumer unwraps a value the wire contract says is always present;
     /// * an **optional** member is `Option<T>`, which is what absence means.
@@ -261,13 +262,21 @@ impl Registry {
     /// That default is a wire-invalid placeholder (P10) and [`Self::required_gap`] is the gate that
     /// refuses to generate a required member whose type has none.
     #[must_use]
-    pub fn field_type(field: &Field) -> String {
+    pub fn field_type(owner: &str, field: &Field) -> String {
         let inner = Self::field_inner_type(field);
-        if Self::is_container(&field.ty) || field.required {
+        if Self::is_bare(owner, field) {
             inner
         } else {
             format!("Option<{inner}>")
         }
+    }
+
+    /// Whether `owner`'s member `field` is stored bare: a required member, or a container whose
+    /// presence is not a fact of its own ([`super::presence::carries_presence`]). Every other
+    /// member is an `Option`.
+    #[must_use]
+    pub fn is_bare(owner: &str, field: &Field) -> bool {
+        field.required || (Self::is_container(&field.ty) && !super::presence::carries_presence(owner, field))
     }
 
     /// The unwrapped Rust spelling for one field, including secret scalar overrides.

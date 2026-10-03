@@ -70,13 +70,15 @@ impl OperationCodec for dto::GetBucketWebsite {
             write_error_document(&mut writer, v)?;
             writer.close();
         }
-        writer.open("RoutingRules", None);
-        for item in &output.routing_rules {
-            writer.open("RoutingRule", None);
-            write_routing_rule(&mut writer, item)?;
+        if output.routing_rules.is_some() || !writer.writes_legacy_layout() {
+            writer.open("RoutingRules", None);
+            for item in output.routing_rules.iter().flatten() {
+                writer.open("RoutingRule", None);
+                write_routing_rule(&mut writer, item)?;
+                writer.close();
+            }
             writer.close();
         }
-        writer.close();
         writer.close();
         response.body = ResponseBody::Complete(writer.finish().into_bytes());
         response.set_header("content-type", "application/xml");

@@ -69,11 +69,16 @@ use crate::routing::{RoutingSnapshot, RuntimeAssembly};
 
 mod anonymous_framing;
 mod assembly_update;
+mod bodyless_bodies;
 mod bodyless_digest;
+pub(crate) mod buffered_lengths;
+mod claimed_bodies;
 mod buffered_ceiling;
 mod client_quirks;
 mod cors;
 pub(crate) mod credential_sentences;
+mod identifiers;
+mod legacy_chunks;
 mod legacy_heads;
 mod legacy_sentences;
 mod names;
@@ -81,6 +86,7 @@ mod not_modified_headers;
 mod operation_selection;
 mod secret_scope;
 pub(crate) mod sigv4_header_guard;
+pub(crate) mod version_actions;
 pub(crate) mod view_policy;
 pub use self::assembly_update::AssemblyUpdate;
 pub use self::client_quirks::{

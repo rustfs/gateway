@@ -100,7 +100,7 @@ impl Input {
 #[derive(Debug, Clone, Default)]
 pub struct Output {
     /// Wire `Buckets`, bound as BodyXml. Optional.
-    pub buckets: Vec<crate::ops::shapes::Bucket>,
+    pub buckets: Option<Vec<crate::ops::shapes::Bucket>>,
     /// Wire `ContinuationToken`, bound as BodyXml. Optional.
     pub continuation_token: Option<String>,
 }

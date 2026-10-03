@@ -37,21 +37,21 @@ pub fn parse_bucket_logging_dto(input: &[u8]) -> Result<crate::dto::BucketLoggin
     Ok(crate::dto::BucketLoggingStatus {
         logging_enabled: persisted.logging_enabled.map(|logging| crate::dto::LoggingEnabled {
             target_bucket: logging.target_bucket,
-            target_grants: logging
-                .target_grants
-                .unwrap_or_default()
-                .into_iter()
-                .map(|grant| crate::dto::TargetGrant {
-                    grantee: grant.grantee.map(|grantee| crate::dto::Grantee {
-                        display_name: grantee.display_name,
-                        email_address: grantee.email_address,
-                        id: grantee.id,
-                        r#type: Some(crate::dto::Type::custom(grantee.grantee_type)),
-                        uri: grantee.uri,
-                    }),
-                    permission: grant.permission.map(crate::dto::Permission::custom),
-                })
-                .collect(),
+            target_grants: logging.target_grants.map(|grants| {
+                grants
+                    .into_iter()
+                    .map(|grant| crate::dto::TargetGrant {
+                        grantee: grant.grantee.map(|grantee| crate::dto::Grantee {
+                            display_name: grantee.display_name,
+                            email_address: grantee.email_address,
+                            id: grantee.id,
+                            r#type: Some(crate::dto::Type::custom(grantee.grantee_type)),
+                            uri: grantee.uri,
+                        }),
+                        permission: grant.permission.map(crate::dto::Permission::custom),
+                    })
+                    .collect()
+            }),
             target_object_key_format: logging
                 .target_object_key_format
                 .map(|format| crate::dto::TargetObjectKeyFormat {
@@ -76,10 +76,11 @@ pub fn serialize_bucket_logging_dto(value: &crate::dto::BucketLoggingStatus) -> 
         .logging_enabled
         .as_ref()
         .map(|logging| {
-            let target_grants = (!logging.target_grants.is_empty())
-                .then(|| {
-                    logging
-                        .target_grants
+            let target_grants = logging
+                .target_grants
+                .as_ref()
+                .map(|grants| {
+                    grants
                         .iter()
                         .map(persisted_logging_grant)
                         .collect::<Result<Vec<_>, PersistenceBridgeError>>()
@@ -158,24 +159,24 @@ pub fn parse_website_dto(input: &[u8]) -> Result<crate::dto::WebsiteConfiguratio
                 host_name: redirect.host_name,
                 protocol: redirect.protocol.map(crate::dto::Protocol::custom),
             }),
-        routing_rules: persisted
-            .routing_rules
-            .unwrap_or_default()
-            .into_iter()
-            .map(|rule| crate::dto::RoutingRule {
-                condition: rule.condition.map(|condition| crate::dto::Condition {
-                    http_error_code_returned_equals: condition.http_error_code_returned_equals,
-                    key_prefix_equals: condition.key_prefix_equals,
-                }),
-                redirect: crate::dto::Redirect {
-                    host_name: rule.redirect.host_name,
-                    http_redirect_code: rule.redirect.http_redirect_code,
-                    protocol: rule.redirect.protocol.map(crate::dto::Protocol::custom),
-                    replace_key_prefix_with: rule.redirect.replace_key_prefix_with,
-                    replace_key_with: rule.redirect.replace_key_with,
-                },
-            })
-            .collect(),
+        routing_rules: persisted.routing_rules.map(|rules| {
+            rules
+                .into_iter()
+                .map(|rule| crate::dto::RoutingRule {
+                    condition: rule.condition.map(|condition| crate::dto::Condition {
+                        http_error_code_returned_equals: condition.http_error_code_returned_equals,
+                        key_prefix_equals: condition.key_prefix_equals,
+                    }),
+                    redirect: crate::dto::Redirect {
+                        host_name: rule.redirect.host_name,
+                        http_redirect_code: rule.redirect.http_redirect_code,
+                        protocol: rule.redirect.protocol.map(crate::dto::Protocol::custom),
+                        replace_key_prefix_with: rule.redirect.replace_key_prefix_with,
+                        replace_key_with: rule.redirect.replace_key_with,
+                    },
+                })
+                .collect()
+        }),
     })
 }
 
@@ -196,9 +197,8 @@ pub fn serialize_website_dto(value: &crate::dto::WebsiteConfiguration) -> Vec<u8
                 host_name: redirect.host_name.clone(),
                 protocol: redirect.protocol.as_ref().map(|protocol| protocol.as_str().to_owned()),
             }),
-        routing_rules: (!value.routing_rules.is_empty()).then(|| {
-            value
-                .routing_rules
+        routing_rules: value.routing_rules.as_ref().map(|rules| {
+            rules
                 .iter()
                 .map(|rule| PersistedRoutingRule {
                     condition: rule.condition.as_ref().map(|condition| PersistedRoutingRuleCondition {
@@ -234,14 +234,14 @@ mod tests {
         let dto = BucketLoggingStatus {
             logging_enabled: Some(LoggingEnabled {
                 target_bucket: "logs".to_owned(),
-                target_grants: vec![TargetGrant {
+                target_grants: Some(vec![TargetGrant {
                     grantee: Some(Grantee {
                         id: Some("abc".to_owned()),
                         r#type: Some(Type::custom("FutureUser")),
                         ..Grantee::default()
                     }),
                     permission: Some(Permission::custom("FuturePermission")),
-                }],
+                }]),
                 target_object_key_format: Some(TargetObjectKeyFormat {
                     partitioned_prefix: Some(PartitionedPrefix {
                         partition_date_source: Some(crate::dto::PartitionDateSource::custom("FutureDate")),
@@ -261,7 +261,7 @@ mod tests {
         let enabled = parsed.logging_enabled.expect("logging remains enabled");
         assert_eq!(enabled.target_bucket, "logs");
         assert_eq!(enabled.target_prefix, "access/");
-        let grant = &enabled.target_grants[0];
+        let grant = &enabled.target_grants.as_deref().unwrap_or_default()[0];
         assert_eq!(grant.grantee.as_ref().and_then(|value| value.id.as_deref()), Some("abc"));
         assert_eq!(
             grant
@@ -309,10 +309,10 @@ mod tests {
         let dto = BucketLoggingStatus {
             logging_enabled: Some(LoggingEnabled {
                 target_bucket: "logs".to_owned(),
-                target_grants: vec![TargetGrant {
+                target_grants: Some(vec![TargetGrant {
                     grantee: Some(Grantee::default()),
                     permission: None,
-                }],
+                }]),
                 target_object_key_format: None,
                 target_prefix: String::new(),
             }),
@@ -333,7 +333,7 @@ mod tests {
                 suffix: "index.html".to_owned(),
             }),
             redirect_all_requests_to: None,
-            routing_rules: vec![RoutingRule {
+            routing_rules: Some(vec![RoutingRule {
                 condition: Some(Condition {
                     http_error_code_returned_equals: None,
                     key_prefix_equals: Some("docs/".to_owned()),
@@ -345,7 +345,7 @@ mod tests {
                     replace_key_prefix_with: Some("published/".to_owned()),
                     replace_key_with: None,
                 },
-            }],
+            }]),
         };
 
         let bytes = serialize_website_dto(&dto);
@@ -356,7 +356,7 @@ mod tests {
         let parsed = parse_website_dto(&bytes).expect("the bridge reads its own persistence bytes");
         assert_eq!(parsed.error_document.as_ref().map(|value| value.key.as_str()), Some("error.html"));
         assert_eq!(parsed.index_document.as_ref().map(|value| value.suffix.as_str()), Some("index.html"));
-        let rule = &parsed.routing_rules[0];
+        let rule = &parsed.routing_rules.as_deref().unwrap_or_default()[0];
         assert_eq!(
             rule.condition.as_ref().and_then(|value| value.key_prefix_equals.as_deref()),
             Some("docs/")
@@ -401,5 +401,56 @@ mod tests {
             .expect_err("a repeated structure must fail"),
             PersistenceBridgeError::Codec(PersistenceCodecError::DuplicateField)
         );
+    }
+
+    // A present empty list and an unset one are two stored documents: legacy RustFS stores an
+    // empty `TargetGrants` or `RoutingRules` it read with the element, and a configuration without
+    // the list without it, and the bridge keeps them apart both ways (rustfs/gateway#1078).
+    #[test]
+    fn logging_dto_bridge_stores_an_empty_grant_list_apart_from_an_unset_one() {
+        let status = |target_grants| BucketLoggingStatus {
+            logging_enabled: Some(LoggingEnabled {
+                target_bucket: "logs".to_owned(),
+                target_grants,
+                target_object_key_format: None,
+                target_prefix: String::new(),
+            }),
+        };
+        let empty = serialize_bucket_logging_dto(&status(Some(Vec::new()))).expect("an empty list is stored");
+        let unset = serialize_bucket_logging_dto(&status(None)).expect("an unset list is stored");
+        assert!(String::from_utf8_lossy(&empty).contains("<TargetGrants></TargetGrants>"), "{empty:?}");
+        assert!(!String::from_utf8_lossy(&unset).contains("TargetGrants"), "{unset:?}");
+        let grants = |bytes: &[u8]| {
+            parse_bucket_logging_dto(bytes)
+                .expect("the bridge reads its own persistence bytes")
+                .logging_enabled
+                .and_then(|logging| logging.target_grants)
+        };
+        assert_eq!(grants(&empty).map(|list| list.len()), Some(0));
+        assert_eq!(grants(&unset).map(|list| list.len()), None);
+    }
+
+    #[test]
+    fn website_dto_bridge_stores_an_empty_rule_list_apart_from_an_unset_one() {
+        let website = |routing_rules| WebsiteConfiguration {
+            error_document: None,
+            index_document: Some(IndexDocument {
+                suffix: "index.html".to_owned(),
+            }),
+            redirect_all_requests_to: None,
+            routing_rules,
+        };
+        let empty = serialize_website_dto(&website(Some(Vec::new())));
+        let unset = serialize_website_dto(&website(None));
+        assert!(String::from_utf8_lossy(&empty).contains("<RoutingRules></RoutingRules>"), "{empty:?}");
+        assert!(!String::from_utf8_lossy(&unset).contains("RoutingRules"), "{unset:?}");
+        let rules = |bytes: &[u8]| {
+            parse_website_dto(bytes)
+                .expect("the bridge reads its own persistence bytes")
+                .routing_rules
+                .map(|list| list.len())
+        };
+        assert_eq!(rules(&empty), Some(0));
+        assert_eq!(rules(&unset), None);
     }
 }

@@ -140,6 +140,7 @@ pub(crate) struct OperationDispatch {
     encode: Encode,
     floor: &'static OperationFloor,
     auth: Option<AuthRequirement>,
+    extra_permissions: &'static [rustfs_gateway_core::ExtraPermission],
 }
 
 impl OperationDispatch {
@@ -261,6 +262,7 @@ impl OperationDispatch {
             encode,
             floor: O::floor(),
             auth: O::spec().auth,
+            extra_permissions: O::spec().extra_permission_set(),
         }
     }
 
@@ -276,6 +278,11 @@ impl OperationDispatch {
     /// rather than as permission.
     pub(crate) const fn auth(&self) -> Option<AuthRequirement> {
         self.auth
+    }
+
+    /// The header-conditional extra permissions this operation requires.
+    pub(crate) const fn extra_permissions(&self) -> &'static [rustfs_gateway_core::ExtraPermission] {
+        self.extra_permissions
     }
 
     /// How the generated decoder receives this operation's request body.

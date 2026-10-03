@@ -40,6 +40,7 @@ use rustfs_gateway::{
 use sha2::{Digest as _, Sha256};
 
 use super::conditions::{self, conditions, guard_write};
+use super::lifecycle::ExpiringObject;
 use super::reads::Selected;
 use super::records::{
     ObjectAttributes, RecordKind, VersionRecord, decode_version_record, encode_version_record, validate_attributes,
@@ -652,7 +653,7 @@ impl Handler<PutObject> for FsBackend {
             )
             .await?;
         let attributes = ObjectAttributes {
-            headers: request_content_headers!(input).with_encryption(encryption.clone()),
+            headers: request_content_headers!(self, input).with_encryption(encryption.clone()),
             storage_class: requested_storage_class(input.storage_class.as_ref())?,
             tags: tags_from_header(input.tagging.as_deref())?,
             metadata: input.metadata,
@@ -676,7 +677,14 @@ impl Handler<PutObject> for FsBackend {
                 conditions::any(&write_conditions).then_some(&write_conditions),
             )
             .await?;
+        let written = ExpiringObject {
+            key: input.key.as_str(),
+            size: published.size,
+            tags: &attributes.tags,
+            modified: published.last_modified.secs(),
+        };
         Ok(Resp::new(PutObjectOutput {
+            expiration: self.expiration_header(input.bucket.as_str(), &written).await.map(Into::into),
             size: Some(published.size),
             e_tag,
             version_id: published.version_id,

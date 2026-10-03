@@ -271,6 +271,26 @@ pub(super) fn rows() -> Vec<SeamRow> {
             config("/bucket?logging", "<BucketLoggingStatus></BucketLoggingStatus>"),
             Expect::Identical,
         ),
+        // A present empty list is a list of its own on both stacks, handed over and stored as legacy
+        // RustFS stores it, the empty element included (rustfs/gateway#1078).
+        row(
+            "put-bucket-logging-empty-grants",
+            config(
+                "/bucket?logging",
+                "<BucketLoggingStatus><LoggingEnabled><TargetBucket>logs</TargetBucket><TargetGrants/><TargetPrefix>b/</TargetPrefix>\
+                 </LoggingEnabled></BucketLoggingStatus>",
+            ),
+            Expect::Identical,
+        ),
+        row(
+            "put-bucket-website-empty-routing-rules",
+            config(
+                "/bucket?website",
+                "<WebsiteConfiguration><IndexDocument><Suffix>index.html</Suffix></IndexDocument><RoutingRules></RoutingRules>\
+                 </WebsiteConfiguration>",
+            ),
+            Expect::Identical,
+        ),
         row(
             "put-bucket-accelerate-every-member",
             config(
