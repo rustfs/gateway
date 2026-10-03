@@ -52,6 +52,7 @@ impl OperationCodec for dto::GetBucketRequestPayment {
         let mut response = EncodedResponse::of(status);
         response.status = status_code(status)?;
         let mut writer = rustfs_gateway_xml::XmlWriter::document();
+        writer.legacy_layout(request.rustfs_response_layout());
         writer.open("RequestPaymentConfiguration", Some(rustfs_gateway_xml::S3_XMLNS));
         if let Some(v) = output.payer.as_ref() {
             writer.element("Payer", v.as_str());

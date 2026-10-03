@@ -109,7 +109,9 @@ impl OperationCodec for dto::ListMultipartUploads {
         };
         value::rustfs_listing_echo(request, url_encoding, &mut output.encoding_type);
         let mut writer = rustfs_gateway_xml::XmlWriter::document();
+        writer.legacy_layout(request.rustfs_response_layout());
         writer.open("ListMultipartUploadsResult", Some(rustfs_gateway_xml::S3_XMLNS));
+        writer.order_children(rustfs_order::RESPONSE);
         {
             let v = &output.bucket;
             writer.element("Bucket", v.as_str());
@@ -184,6 +186,7 @@ fn write_common_prefix(
 
 /// Writes one `Initiator` element's children, in the wire order the IR records.
 fn write_initiator(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::Initiator) -> Result<(), CodecError> {
+    writer.order_children(rustfs_order::INITIATOR);
     if let Some(v) = value.id.as_ref() {
         writer.element("ID", v.as_str());
     }
@@ -199,6 +202,7 @@ fn write_multipart_upload(
     value: &dto::MultipartUpload,
     url_encoding: value::UrlEncoding,
 ) -> Result<(), CodecError> {
+    writer.order_children(rustfs_order::MULTIPART_UPLOAD);
     if let Some(v) = value.upload_id.as_ref() {
         writer.element("UploadId", v.as_str());
     }
@@ -233,6 +237,7 @@ fn write_multipart_upload(
 
 /// Writes one `Owner` element's children, in the wire order the IR records.
 fn write_owner(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::Owner) -> Result<(), CodecError> {
+    writer.order_children(rustfs_order::OWNER);
     if let Some(v) = value.id.as_ref() {
         writer.element("ID", v.as_str());
     }
@@ -240,4 +245,15 @@ fn write_owner(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::Owner) -
         writer.element("DisplayName", v.as_str());
     }
     Ok(())
+}
+
+/// The order legacy RustFS writes each response element's children in (rustfs/gateway#1078):
+/// the order the legacy stack's structure declares its fields in.
+/// Honoured under `MetaView::rustfs_response_layout`; generated from the IR.
+#[rustfmt::skip]
+mod rustfs_order {
+    pub(super) const RESPONSE: &[&str] = &["Bucket", "CommonPrefixes", "Delimiter", "EncodingType", "IsTruncated", "KeyMarker", "MaxUploads", "NextKeyMarker", "NextUploadIdMarker", "Prefix", "UploadIdMarker", "Upload"];
+    pub(super) const INITIATOR: &[&str] = &["DisplayName", "ID"];
+    pub(super) const MULTIPART_UPLOAD: &[&str] = &["ChecksumAlgorithm", "ChecksumType", "Initiated", "Initiator", "Key", "Owner", "StorageClass", "UploadId"];
+    pub(super) const OWNER: &[&str] = &["DisplayName", "ID"];
 }

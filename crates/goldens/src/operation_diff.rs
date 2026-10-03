@@ -71,4 +71,5 @@ pub(crate) mod s3s_0_17_0 {
     mod put_bucket_versioning;
     mod put_object;
     mod request_documents;
+    mod response_order;
 }

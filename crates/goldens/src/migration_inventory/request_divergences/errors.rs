@@ -44,11 +44,16 @@ pub(super) const ERROR_DIVERGENCES: [RequestDivergence; 13] = [
         aws_evidence: ERROR_RESPONSES,
         s3s: "writes neither; RustFS adds x-amz-request-id and x-request-id in a layer outside s3s (rustfs/src/server/layer.rs), \
               never a document element or x-amz-id-2",
-        gateway: "RequestId and HostId are the last two document elements, and the head carries the same two values",
-        client_impact: "the header RustFS already sends keeps its name; a client reading the document or x-amz-id-2 now finds \
-                        the id, and log joins must accept the gateway's 16-hex-digit form",
-        ruling: DivergenceRuling::KeepGateway,
-        follow_up: DivergenceFollowUp::None,
+        gateway: "RequestId and HostId are the last two document elements, and the head carries the same two values \
+                  (c-object-0029, c-object-0066). Under ServiceBuilder::identify_requests_as_legacy_rustfs (the RustFS \
+                  profile, rustfs/backlog#1677 R10) the head carries the request id in x-amz-request-id and x-request-id, \
+                  RustFS's own when the host hands it over in a HostRequestId, no x-amz-id-2, and the document ends with \
+                  <RequestId> only; a path a dialect claims carries no identifier of the gateway's, and RustFS writes its own",
+        client_impact: "under the RustFS profile a client reads the headers legacy RustFS writes, with RustFS's own value, \
+                        and finds the same id in an error document's <RequestId>, which legacy RustFS never writes (ruling \
+                        R10: header and body agree); every other deployment answers as AWS does",
+        ruling: DivergenceRuling::RustfsProfile,
+        follow_up: DivergenceFollowUp::Landed("c-object-0066"),
         test_file: ERROR_PARITY,
         test: "only_the_gateway_identifies_the_request_in_its_head_and_document",
     },

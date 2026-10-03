@@ -39,10 +39,15 @@
 //!
 //! # Why the event carries no request bytes
 //!
-//! [`RequestEvent`] holds the operation name, the status, the access key id, the error code and
-//! the server-minted request identifier. It holds no header value, no query string and no body. An observer is the component most likely to
+//! [`RequestEvent`] holds the method, the operation name, the status, the access key id, the error
+//! code and the server-minted request identifier. It holds no header value, no query string and no body. An observer is the component most likely to
 //! be wired to a log sink, and a log line that echoes a request header is how a session token ends
 //! up in a log aggregator.
+//!
+//! # Feeding a host's metrics and audit
+//!
+//! `docs/metrics-and-audit.md` lists what RustFS records per request, where each fact comes from
+//! once the gateway answers, and what this event and the authorization audit event carry of it.
 
 use rustfs_gateway_sig::Identity;
 use rustfs_gateway_types::ErrorCode;
@@ -58,16 +63,35 @@ pub struct RequestEvent<'a> {
     /// The operation routing chose, when routing chose one. `None` when the request named none,
     /// which is the case an operator most often needs to see.
     pub operation: Option<&'a str>,
+    /// The method the request was answered for, read through [`RequestEvent::method`].
+    pub(crate) method: &'a http::Method,
     /// The status the response went out with.
     pub status: u16,
     /// How handler cleanup ended after a deadline. `None` when no handler deadline won, including
     /// requests that never reached a handler.
     pub handler_deadline: Option<HandlerDeadlineReport>,
-    /// Who the request ran as. `None` for anonymous and for every rejected request: a rejected
-    /// request must not be attributed to the access key it claimed.
+    /// Who the request ran as. `None` unless authentication succeeded — for an anonymous request,
+    /// for one whose authentication failed, and for one refused before authentication ran — so a
+    /// request is never attributed to an access key it only claimed. A request refused after
+    /// authentication (an authorization denial, say) carries the verified key.
     pub identity: Option<&'a Identity>,
     /// The S3 error code, when the response was an error document.
     pub error: Option<&'a ErrorCode>,
+}
+
+impl RequestEvent<'_> {
+    /// The method the request was answered for.
+    ///
+    /// A host's own layer, `RequestContextView::method` and a filter's `ResponseView` see it too;
+    /// this is for a counter kept in the observer — the one place that also names the operation of
+    /// a request refused before any handler ran — labelled as RustFS labels its
+    /// `rustfs_s3_http_requests_total{method, op, outcome}`. A caller chooses the method, and a
+    /// refused request is reported too, so a label folds unknown methods into one value rather
+    /// than growing with what callers send (RustFS keeps nine and `OTHER`).
+    #[must_use]
+    pub fn method(&self) -> &http::Method {
+        self.method
+    }
 }
 
 /// Records what happened to a request, and changes nothing.
@@ -179,6 +203,7 @@ mod tests {
         recorder.on_response(&RequestEvent {
             request_id: &RequestId::from_bits(1),
             operation: None,
+            method: &http::Method::PATCH,
             status: 501,
             handler_deadline: None,
             identity: None,
@@ -197,6 +222,7 @@ mod tests {
             RequestEvent {
                 request_id: &RequestId::from_bits(0xDEAD),
                 operation: Some("GetObject"),
+                method: &http::Method::GET,
                 status: 200,
                 handler_deadline: None,
                 identity: Some(&identity),
@@ -215,6 +241,7 @@ mod tests {
         observer.on_response(&RequestEvent {
             request_id: &RequestId::from_bits(2),
             operation: Some("ListBuckets"),
+            method: &http::Method::GET,
             status: 200,
             handler_deadline: None,
             identity: None,

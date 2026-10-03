@@ -56,6 +56,7 @@ impl OperationCodec for dto::ListDirectoryBuckets {
         let mut response = EncodedResponse::of(status);
         response.status = status_code(status)?;
         let mut writer = rustfs_gateway_xml::XmlWriter::document();
+        writer.legacy_layout(request.rustfs_response_layout());
         writer.open("ListAllMyDirectoryBucketsResult", Some(rustfs_gateway_xml::S3_XMLNS));
         writer.open("Buckets", None);
         for item in &output.buckets {
@@ -80,6 +81,7 @@ impl OperationCodec for dto::ListDirectoryBuckets {
 
 /// Writes one `Bucket` element's children, in the wire order the IR records.
 fn write_bucket(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::Bucket) -> Result<(), CodecError> {
+    writer.order_children(rustfs_order::BUCKET);
     {
         let v = &value.name;
         writer.element("Name", v.as_str());
@@ -95,4 +97,12 @@ fn write_bucket(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::Bucket)
         writer.element("BucketArn", v.as_str());
     }
     Ok(())
+}
+
+/// The order legacy RustFS writes each response element's children in (rustfs/gateway#1078):
+/// the order the legacy stack's structure declares its fields in.
+/// Honoured under `MetaView::rustfs_response_layout`; generated from the IR.
+#[rustfmt::skip]
+mod rustfs_order {
+    pub(super) const BUCKET: &[&str] = &["BucketArn", "BucketRegion", "CreationDate", "Name"];
 }

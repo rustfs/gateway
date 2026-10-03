@@ -54,7 +54,13 @@ impl OperationCodec for dto::GetBucketReplication {
         // ReplicationConfiguration — the XML response body, rooted at `ReplicationConfiguration`.
         if let Some(v) = output.replication_configuration.as_ref() {
             let mut writer = rustfs_gateway_xml::XmlWriter::document();
-            writer.open("ReplicationConfiguration", Some(rustfs_gateway_xml::S3_XMLNS));
+            writer.legacy_layout(request.rustfs_response_layout());
+            let xmlns = if request.rustfs_response_layout() {
+                None
+            } else {
+                Some(rustfs_gateway_xml::S3_XMLNS)
+            };
+            writer.open("ReplicationConfiguration", xmlns);
             write_replication_configuration(&mut writer, v)?;
             writer.close();
             response.body = ResponseBody::Complete(writer.finish().into_bytes());
@@ -105,6 +111,7 @@ fn write_delete_replication(
 
 /// Writes one `Destination` element's children, in the wire order the IR records.
 fn write_destination(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::Destination) -> Result<(), CodecError> {
+    writer.order_children(rustfs_order::DESTINATION);
     {
         let v = &value.bucket;
         writer.element("Bucket", v.as_str());
@@ -163,6 +170,7 @@ fn write_existing_object_replication(
 
 /// Writes one `Metrics` element's children, in the wire order the IR records.
 fn write_metrics(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::Metrics) -> Result<(), CodecError> {
+    writer.order_children(rustfs_order::METRICS);
     {
         let v = &value.status;
         writer.element("Status", v.as_str());
@@ -206,6 +214,7 @@ fn write_replication_configuration(
 
 /// Writes one `ReplicationRule` element's children, in the wire order the IR records.
 fn write_replication_rule(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::ReplicationRule) -> Result<(), CodecError> {
+    writer.order_children(rustfs_order::REPLICATION_RULE);
     if let Some(v) = value.id.as_ref() {
         writer.element("ID", v.as_str());
     }
@@ -274,6 +283,7 @@ fn write_replication_rule_filter(
     writer: &mut rustfs_gateway_xml::XmlWriter,
     value: &dto::ReplicationRuleFilter,
 ) -> Result<(), CodecError> {
+    writer.order_children(rustfs_order::REPLICATION_RULE_FILTER);
     if let Some(v) = value.prefix.as_ref() {
         writer.element("Prefix", v.as_str());
     }
@@ -321,6 +331,7 @@ fn write_source_selection_criteria(
     writer: &mut rustfs_gateway_xml::XmlWriter,
     value: &dto::SourceSelectionCriteria,
 ) -> Result<(), CodecError> {
+    writer.order_children(rustfs_order::SOURCE_SELECTION_CRITERIA);
     if let Some(v) = value.sse_kms_encrypted_objects.as_ref() {
         writer.open("SseKmsEncryptedObjects", None);
         write_sse_kms_encrypted_objects(writer, v)?;
@@ -357,4 +368,16 @@ fn write_tag(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::Tag) -> Re
         writer.element("Value", v.as_str());
     }
     Ok(())
+}
+
+/// The order legacy RustFS writes each response element's children in (rustfs/gateway#1078):
+/// the order the legacy stack's structure declares its fields in.
+/// Honoured under `MetaView::rustfs_response_layout`; generated from the IR.
+#[rustfmt::skip]
+mod rustfs_order {
+    pub(super) const DESTINATION: &[&str] = &["AccessControlTranslation", "Account", "Bucket", "EncryptionConfiguration", "Metrics", "ReplicationTime", "StorageClass"];
+    pub(super) const METRICS: &[&str] = &["EventThreshold", "Status"];
+    pub(super) const REPLICATION_RULE: &[&str] = &["DeleteMarkerReplication", "DeleteReplication", "Destination", "ExistingObjectReplication", "Filter", "ID", "Prefix", "Priority", "SourceSelectionCriteria", "Status"];
+    pub(super) const REPLICATION_RULE_FILTER: &[&str] = &["And", "Prefix", "Tag"];
+    pub(super) const SOURCE_SELECTION_CRITERIA: &[&str] = &["ReplicaModifications", "SseKmsEncryptedObjects"];
 }

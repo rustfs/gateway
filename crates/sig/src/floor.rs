@@ -80,7 +80,7 @@ use crate::timing::FailureFloor;
 use crate::verdict::{AnonymousAck, AuthError, CredentialPresence, Verdict};
 use crate::verifier::{
     AUTHORIZATION_HEADER, AWS_ACCESS_KEY_ID_PARAM, AwsCredentialMarker, CustomAuthRequest, CustomSchemeRegistry,
-    SIGV2_SIGNATURE_PARAM, SealedAws, detect_aws_credential_marker,
+    SIGV2_SIGNATURE_PARAM, SealedAws,
 };
 
 /// The presigned expiry parameter.
@@ -390,6 +390,7 @@ pub struct SecurityFloor {
     custom_schemes: CustomSchemeRegistry,
     anonymous: crate::operation::AnonymousPolicy,
     presigned: crate::operation::PresignedPolicy,
+    recognition: recognition::Recognition,
 }
 
 impl SecurityFloor {
@@ -544,7 +545,7 @@ impl SecurityFloor {
         }
 
         // 3. The sealing predicate.
-        let Some(marker) = detect_aws_credential_marker(&view) else {
+        let Some(marker) = self.credential_marker(&view) else {
             return self.admit_without_aws_marker(view, operation, presence, now);
         };
 
@@ -763,6 +764,8 @@ impl SecurityFloor {
 mod anonymous;
 #[path = "floor_presigned.rs"]
 mod presigned;
+#[path = "floor_recognition.rs"]
+mod recognition;
 
 #[cfg(test)]
 #[path = "floor_tests.rs"]
