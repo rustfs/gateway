@@ -186,7 +186,7 @@ fn every_buffered_body_is_settled_against_the_digest_declared_over_it() {
 #[test]
 fn only_a_body_literal_decoder_reads_the_literal_and_only_after_the_digest() {
     const SETTLE: &str = "value::verify_body_digest(request, raw_body.as_ref())?;";
-    const PARSE: &str = "rustfs_gateway_xml::parse(raw_body.as_ref())";
+    const PARSE: &str = "crate::codec::request_document(request, raw_body.as_ref(), ";
     let artifacts = super::codegen_tests::artifacts();
     let mut literal_decoders = Vec::new();
     for ir in &artifacts.operations {

@@ -62,7 +62,13 @@ impl OperationCodec for dto::GetBucketInventoryConfiguration {
         // InventoryConfiguration — the XML response body, rooted at `InventoryConfiguration`.
         if let Some(v) = output.inventory_configuration.as_ref() {
             let mut writer = rustfs_gateway_xml::XmlWriter::document();
-            writer.open("InventoryConfiguration", Some(rustfs_gateway_xml::S3_XMLNS));
+            writer.legacy_layout(request.rustfs_response_layout());
+            let xmlns = if request.rustfs_response_layout() {
+                None
+            } else {
+                Some(rustfs_gateway_xml::S3_XMLNS)
+            };
+            writer.open("InventoryConfiguration", xmlns);
             write_inventory_configuration(&mut writer, v)?;
             writer.close();
             response.body = ResponseBody::Complete(writer.finish().into_bytes());
@@ -81,6 +87,7 @@ fn write_inventory_configuration(
     writer: &mut rustfs_gateway_xml::XmlWriter,
     value: &dto::InventoryConfiguration,
 ) -> Result<(), CodecError> {
+    writer.order_children(rustfs_order::INVENTORY_CONFIGURATION);
     {
         let v = &value.destination;
         writer.open("Destination", None);
@@ -137,6 +144,7 @@ fn write_inventory_encryption(
     writer: &mut rustfs_gateway_xml::XmlWriter,
     value: &dto::InventoryEncryption,
 ) -> Result<(), CodecError> {
+    writer.order_children(rustfs_order::INVENTORY_ENCRYPTION);
     if let Some(v) = value.sses3.as_ref() {
         writer.open("SSE-S3", None);
         write_sses3(writer, v)?;
@@ -164,6 +172,7 @@ fn write_inventory_s3bucket_destination(
     writer: &mut rustfs_gateway_xml::XmlWriter,
     value: &dto::InventoryS3BucketDestination,
 ) -> Result<(), CodecError> {
+    writer.order_children(rustfs_order::INVENTORY_S3BUCKET_DESTINATION);
     if let Some(v) = value.account_id.as_ref() {
         writer.element("AccountId", v.as_str());
     }
@@ -212,4 +221,14 @@ fn write_sses3(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::Sses3) -
     let _ = writer;
     let _ = value;
     Ok(())
+}
+
+/// The order legacy RustFS writes each response element's children in (rustfs/gateway#1078):
+/// the order the legacy stack's structure declares its fields in.
+/// Honoured under `MetaView::rustfs_response_layout`; generated from the IR.
+#[rustfmt::skip]
+mod rustfs_order {
+    pub(super) const INVENTORY_CONFIGURATION: &[&str] = &["Destination", "Filter", "Id", "IncludedObjectVersions", "IsEnabled", "OptionalFields", "Schedule"];
+    pub(super) const INVENTORY_ENCRYPTION: &[&str] = &["SSE-KMS", "SSE-S3"];
+    pub(super) const INVENTORY_S3BUCKET_DESTINATION: &[&str] = &["AccountId", "Bucket", "Encryption", "Format", "Prefix"];
 }

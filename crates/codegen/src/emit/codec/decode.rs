@@ -100,6 +100,12 @@ fn list_source(flattened: bool, member_name: Option<&str>, wire: &str) -> Result
     })
 }
 
+/// Opening the request document, the way the request's deployment reads one: as a tree, or as
+/// legacy RustFS reads it against the operation's generated shape (`super::document`,
+/// rustfs/gateway#1078). Either way a refused document is `MalformedXML` before any member is
+/// read.
+const OPEN_DOCUMENT: &str = "let root = crate::codec::request_document(request, raw_body.as_ref(), &document::DOCUMENT)?;";
+
 /// Buffering the request body, and the one place a `Content-MD5` over it is settled.
 ///
 /// The two lines are emitted together and never apart. A decoder that buffered a body without
@@ -374,11 +380,7 @@ fn one_field(
                     ("            ", "        }\n")
                 };
                 out.push_str(&root_namespace_guard(&ir.operation, indent));
-                let _ = writeln!(out, "{indent}let root = rustfs_gateway_xml::parse(raw_body.as_ref())");
-                let _ = writeln!(
-                    out,
-                    "{indent}    .map_err(|_| CodecError::malformed_xml(\"the request body is not the XML this operation accepts\"))?;"
-                );
+                let _ = writeln!(out, "{indent}{OPEN_DOCUMENT}");
                 let mut accepted = vec![root];
                 accepted.extend(aliases);
                 let names = accepted.iter().map(|n| format!("\"{n}\"")).collect::<Vec<_>>().join(", ");
@@ -527,10 +529,7 @@ fn open_request_document(ir: &OperationIr, unknown_elements: UnknownElementPolic
     let _ = writeln!(out, "        // The XML request body, rooted at `{root}`.");
     out.push_str(BUFFER_BODY);
     out.push_str(&root_namespace_guard(&ir.operation, "        "));
-    out.push_str("        let root = rustfs_gateway_xml::parse(raw_body.as_ref())\n");
-    out.push_str(
-        "            .map_err(|_| CodecError::malformed_xml(\"the request body is not the XML this operation accepts\"))?;\n",
-    );
+    let _ = writeln!(out, "        {OPEN_DOCUMENT}");
     let _ = writeln!(out, "        if ![{names}].contains(&root.name.as_str()) {{");
     out.push_str("            return Err(CodecError::malformed_xml(\"the request body has the wrong root element\"));\n");
     out.push_str("        }\n");

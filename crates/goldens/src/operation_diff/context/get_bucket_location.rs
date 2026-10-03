@@ -408,6 +408,52 @@ fn a_scope_region_with_a_header_separator_is_refused_by_both_stacks_with_differe
     }
 }
 
+/// Under the RustFS profile's legacy scope refusals, a scope region the gateway cannot read — a
+/// space or a comma, the `Authorization` header's own separators, a tab, a non-ASCII letter — is
+/// answered as the legacy stack answers it when the signature is right: `400 InvalidRequest`
+/// naming the region, in the same sentence. The order differs, and is kept: the gateway refuses
+/// such a region before any key is looked up or derived, so a wrong secret gets the same `400`,
+/// where the legacy stack verifies first and answers `403 SignatureDoesNotMatch`. (An unknown key
+/// is the same order; this harness's legacy stack names an unknown key otherwise than RustFS's
+/// credential store does, so `compat-sut`'s `scope_refusal_tests.rs` pins that one.)
+///
+/// Ruling: `rd-loc-0011`
+#[test]
+fn a_scope_region_the_gateway_cannot_read_is_refused_before_the_signature_under_the_legacy_answers() {
+    for region in ["us east-1", "us,east-1", "us\teast-1", "us-\u{e9}ast-1"] {
+        let signed = location_signed_by_hand(region, SECRET_KEY)
+            .rustfs_profile()
+            .legacy_scope_refusals();
+        let (gateway, oracle) = answers(&signed).expect("both stacks answer");
+        assert_eq!((gateway.status, oracle.status), (400, 400), "{region:?}: {gateway:?} {oracle:?}");
+        assert_eq!(
+            (gateway.code(), oracle.code()),
+            (Some("InvalidRequest"), Some("InvalidRequest")),
+            "{region:?}"
+        );
+        assert_eq!(gateway.message(), oracle.message(), "{region:?}");
+
+        let forged = location_signed_by_hand(region, FORGED_SECRET)
+            .rustfs_profile()
+            .legacy_scope_refusals();
+        let (gateway, oracle) = answers(&forged).expect("both stacks answer");
+        assert_eq!((gateway.status, oracle.status), (400, 403), "{region:?}: {gateway:?} {oracle:?}");
+        assert_eq!(
+            (gateway.code(), oracle.code()),
+            (Some("InvalidRequest"), Some("SignatureDoesNotMatch")),
+            "{region:?}"
+        );
+        assert_eq!(gateway.message(), oracle_region_message(region).as_deref(), "{region:?}");
+    }
+}
+
+/// The sentence the legacy stack answers a correctly signed request naming `region` with.
+fn oracle_region_message(region: &str) -> Option<String> {
+    let request = location_signed_by_hand(region, SECRET_KEY).rustfs_profile();
+    let (_, oracle) = answers(&request).expect("the legacy stack answers");
+    oracle.message().map(str::to_owned)
+}
+
 /// A header-signed request whose `SignedHeaders` leaves out `host`: the legacy stack verifies the
 /// signature over the headers the list does name and serves the request. The gateway refuses it
 /// under both profiles with `403 SignatureDoesNotMatch`: a signature that does not cover the host

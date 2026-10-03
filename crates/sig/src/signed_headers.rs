@@ -16,8 +16,10 @@
 //!
 //! Responsible for: [`SignedHeaderSet`] — parsing the semicolon-separated list, and enforcing the
 //! six rules that turn it from "a hint about what to hash" into "a promise about what the client
-//! actually covered"; plus [`UNSIGNED_HEADER_EXEMPTIONS`], the closed list of headers AWS lets a
-//! client leave unsigned.
+//! actually covered"; the RustFS profile's verbatim reading of a list AWS would call malformed
+//! ([`SignedHeaderSet::parse_and_enforce_as_legacy_rustfs`], canonicalised by
+//! `crate::signed_headers_legacy`); plus [`UNSIGNED_HEADER_EXEMPTIONS`], the closed list of
+//! headers AWS lets a client leave unsigned.
 //! NOT responsible for: computing anything. This module never hashes, never compares a signature
 //! and never sees a secret; it decides which header names the canonical request is allowed to
 //! contain, and in which order.
@@ -87,6 +89,17 @@ pub const UNSIGNED_HEADER_EXEMPTIONS: [&str; 6] = [
 pub struct SignedHeaderSet {
     raw: String,
     names: SmallVec<[HeaderName; 8]>,
+    reading: ListReading,
+}
+
+/// How the canonical request reads the list.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ListReading {
+    /// Lowercase and strictly ascending, as AWS emits it: the list is canonical as it stands.
+    Aws,
+    /// Verbatim, as legacy RustFS reads a list AWS would call malformed (rustfs/gateway#1130):
+    /// every name in the order and the case the client wrote it (`crate::signed_headers_legacy`).
+    LegacyRustfs,
 }
 
 impl SignedHeaderSet {
@@ -141,8 +154,67 @@ impl SignedHeaderSet {
         let set = Self {
             raw: raw.to_owned(),
             names,
+            reading: ListReading::Aws,
         };
+        set.enforce(headers, wire_content_length)?;
+        Ok(set)
+    }
 
+    /// [`Self::parse_and_enforce`], except that a list AWS would call malformed — a name in
+    /// uppercase, out of order, repeated or empty — is read as legacy RustFS reads it, for the
+    /// RustFS profile (rustfs/gateway#1130): each name as written, in the order written, looked up
+    /// case-insensitively, and written into the canonical request that way
+    /// (`crate::signed_headers_legacy`). A list AWS emits is read exactly as
+    /// [`Self::parse_and_enforce`] reads it.
+    ///
+    /// The completeness rules hold for both readings, case-insensitively: `host` must be named,
+    /// every name must have been sent, every `x-amz-*` header sent must be named, a `Date` that
+    /// supplies the timestamp must be named, and a named `content-length` must be the wire's.
+    /// What changes is only how the covered headers are spelled in the string the client signed.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::parse_and_enforce`]; a name that is not a header name is a header the request
+    /// did not send, [`AuthError::SignatureDoesNotMatch`], as legacy RustFS answers it.
+    pub fn parse_and_enforce_as_legacy_rustfs(
+        raw: &str,
+        headers: &HeaderMap,
+        wire_content_length: Option<u64>,
+    ) -> Result<Self, AuthError> {
+        match Self::parse_and_enforce(raw, headers, wire_content_length) {
+            Err(AuthError::AuthorizationHeaderMalformed) => {}
+            read => return read,
+        }
+        // Legacy-compat (rustfs/backlog#2684): legacy RustFS reads a list AWS would call
+        // malformed (a name in uppercase, out of order, repeated) and canonicalises it as
+        // written, normalising values by Unicode whitespace; two signers of one request can
+        // disagree on that string, and a repeated name is hashed twice. Kept: the reading, only
+        // for such a list. The intended future behaviour is AWS's: lowercase, ascending, once
+        // each, refused otherwise.
+        let mut names: SmallVec<[HeaderName; 8]> = SmallVec::new();
+        for token in raw.split(';') {
+            let name = HeaderName::from_bytes(token.as_bytes()).map_err(|_| AuthError::SignatureDoesNotMatch)?;
+            // Rule 5 here rather than after the loop: a name the request did not send ends the
+            // reading at once, so the distinct names kept are never more than the headers sent.
+            if name != HOST && !headers.contains_key(&name) {
+                return Err(AuthError::SignatureDoesNotMatch);
+            }
+            if !names.contains(&name) {
+                names.push(name);
+            }
+        }
+        let set = Self {
+            raw: raw.to_owned(),
+            names,
+            reading: ListReading::LegacyRustfs,
+        };
+        set.enforce(headers, wire_content_length)?;
+        Ok(set)
+    }
+
+    /// Rules 4 to 6, and the `Date` and `content-length` rules, over the parsed names.
+    fn enforce(&self, headers: &HeaderMap, wire_content_length: Option<u64>) -> Result<(), AuthError> {
+        let set = self;
         if !set.contains(&HOST) {
             return Err(AuthError::SignatureDoesNotMatch);
         }
@@ -176,7 +248,12 @@ impl SignedHeaderSet {
             set.check_content_length(headers, wire_content_length)?;
         }
 
-        Ok(set)
+        Ok(())
+    }
+
+    /// Whether the canonical request writes the list verbatim, as legacy RustFS does.
+    pub(crate) fn reads_verbatim(&self) -> bool {
+        self.reading == ListReading::LegacyRustfs
     }
 
     fn check_content_length(&self, headers: &HeaderMap, wire_content_length: Option<u64>) -> Result<(), AuthError> {
@@ -203,7 +280,8 @@ impl SignedHeaderSet {
         self.names.iter().any(|candidate| candidate == name)
     }
 
-    /// The covered names, ascending. This is the order the canonical request uses.
+    /// The covered names, lowercase: ascending, the order the canonical request uses, for a list
+    /// AWS emits; in the order first written, each once, for one read verbatim.
     #[must_use]
     pub fn names(&self) -> &[HeaderName] {
         &self.names
@@ -353,6 +431,58 @@ mod tests {
             Some(AuthError::SignatureDoesNotMatch)
         );
         assert!(SignedHeaderSet::parse_and_enforce("date;host", &map, None).is_ok());
+    }
+
+    /// Positive — the legacy RustFS reading reads a list AWS emits exactly as the AWS reading does,
+    /// and reads verbatim a list AWS would call malformed: uppercase, out of order, repeated.
+    #[test]
+    fn the_legacy_reading_reads_what_legacy_rustfs_reads() {
+        let map = headers(&[("x-amz-date", "d"), ("x-amz-content-sha256", "UNSIGNED-PAYLOAD")]);
+        let aws = "host;x-amz-content-sha256;x-amz-date";
+        assert_eq!(
+            SignedHeaderSet::parse_and_enforce_as_legacy_rustfs(aws, &map, None),
+            SignedHeaderSet::parse_and_enforce(aws, &map, None)
+        );
+        assert!(
+            !SignedHeaderSet::parse_and_enforce_as_legacy_rustfs(aws, &map, None)
+                .expect("valid")
+                .reads_verbatim()
+        );
+        for verbatim in [
+            "HOST;X-AMZ-CONTENT-SHA256;X-AMZ-DATE",
+            "x-amz-date;host;x-amz-content-sha256",
+            "host;host;x-amz-content-sha256;x-amz-date",
+            "Host;host;x-amz-content-sha256;x-amz-date",
+        ] {
+            let set = SignedHeaderSet::parse_and_enforce_as_legacy_rustfs(verbatim, &map, None).expect(verbatim);
+            assert!(set.reads_verbatim(), "{verbatim}");
+            assert_eq!(set.as_str(), verbatim);
+            assert_eq!(set.len(), 3, "{verbatim}: each header once");
+        }
+    }
+
+    /// Negative — the legacy RustFS reading keeps every completeness rule, case-insensitively:
+    /// `host` named, every name sent (a name that is not a header name included), every `x-amz-*`
+    /// sent named, and a named `content-length` the wire's.
+    #[test]
+    fn n_the_legacy_reading_keeps_every_completeness_rule() {
+        let map = headers(&[("x-amz-date", "d"), ("content-length", "3")]);
+        for list in [
+            "X-AMZ-DATE",
+            "HOST;X-AMZ-DATE;X-AMZ-META-GONE",
+            "x-amz-date;host;x-amz-meta-gone",
+            "HOST",
+            "host;;x-amz-date",
+            "x-amz-date;host; x-amz-date",
+            "CONTENT-LENGTH;HOST;X-AMZ-DATE",
+        ] {
+            assert_eq!(
+                SignedHeaderSet::parse_and_enforce_as_legacy_rustfs(list, &map, Some(4)),
+                Err(AuthError::SignatureDoesNotMatch),
+                "{list}"
+            );
+        }
+        assert!(SignedHeaderSet::parse_and_enforce_as_legacy_rustfs("CONTENT-LENGTH;HOST;X-AMZ-DATE", &map, Some(3)).is_ok());
     }
 
     /// Positive — with `x-amz-date` present, `Date` is an ordinary header: it may be signed or

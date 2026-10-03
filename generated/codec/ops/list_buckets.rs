@@ -68,7 +68,9 @@ impl OperationCodec for dto::ListBuckets {
         let mut response = EncodedResponse::of(status);
         response.status = status_code(status)?;
         let mut writer = rustfs_gateway_xml::XmlWriter::document();
+        writer.legacy_layout(request.rustfs_response_layout());
         writer.open("ListAllMyBucketsResult", Some(rustfs_gateway_xml::S3_XMLNS));
+        writer.order_children(rustfs_order::RESPONSE);
         {
             let v = &output.owner;
             writer.open("Owner", None);
@@ -101,6 +103,7 @@ impl OperationCodec for dto::ListBuckets {
 
 /// Writes one `Bucket` element's children, in the wire order the IR records.
 fn write_bucket(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::Bucket) -> Result<(), CodecError> {
+    writer.order_children(rustfs_order::BUCKET);
     {
         let v = &value.name;
         writer.element("Name", v.as_str());
@@ -120,6 +123,7 @@ fn write_bucket(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::Bucket)
 
 /// Writes one `Owner` element's children, in the wire order the IR records.
 fn write_owner(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::Owner) -> Result<(), CodecError> {
+    writer.order_children(rustfs_order::OWNER);
     if let Some(v) = value.id.as_ref() {
         writer.element("ID", v.as_str());
     }
@@ -127,4 +131,14 @@ fn write_owner(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::Owner) -
         writer.element("DisplayName", v.as_str());
     }
     Ok(())
+}
+
+/// The order legacy RustFS writes each response element's children in (rustfs/gateway#1078):
+/// the order the legacy stack's structure declares its fields in.
+/// Honoured under `MetaView::rustfs_response_layout`; generated from the IR.
+#[rustfmt::skip]
+mod rustfs_order {
+    pub(super) const RESPONSE: &[&str] = &["Buckets", "ContinuationToken", "Owner", "Prefix"];
+    pub(super) const BUCKET: &[&str] = &["BucketArn", "BucketRegion", "CreationDate", "Name"];
+    pub(super) const OWNER: &[&str] = &["DisplayName", "ID"];
 }

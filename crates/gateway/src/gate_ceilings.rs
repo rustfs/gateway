@@ -96,6 +96,29 @@ pub(crate) fn past_object_ceiling(proof: Option<RequestBodyUnfinished>) -> S3Err
     refusal
 }
 
+/// Legacy RustFS's sentence for a claimed route's body declared past its ceiling.
+const CLAIMED_ROUTE_TOO_LARGE: &str = "Custom route request body exceeds the configured maximum size.";
+
+impl<B: http_body::Body> super::SealedBody<B> {
+    /// The refusal owed a body whose declared length is past `ceiling`, before any of it is read:
+    /// `400 EntityTooLarge` with legacy RustFS's sentence for its admin surface, closing on the
+    /// unread body as the other body ceilings do (`crate::builder`'s claimed-route switch).
+    pub(crate) fn past_claimed_ceiling(&self, ceiling: Option<u64>) -> Option<S3Error> {
+        let (ceiling, declared) = (ceiling?, self.declared_length?);
+        (declared > ceiling).then(|| {
+            let mut refusal = from_transport_limit(
+                HandlerError::new(ErrorCode::ENTITY_TOO_LARGE, CLAIMED_ROUTE_TOO_LARGE),
+                StatusCode::BAD_REQUEST,
+                crate::close::after_body_ceiling(),
+            );
+            refusal.body_unfinished =
+                crate::wire_read::WireProgress::for_body(super::BodyDigestObligation::None, self.body.as_ref())
+                    .request_body_unfinished();
+            refusal
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -49,11 +49,18 @@
 //!
 //! # Matching
 //!
-//! A template is a sequence of segments, each a literal or a `{parameter}`. Matching splits the
-//! raw path on `/` and compares segment for segment, without allocating. A parameter matches one
-//! non-empty raw segment that is not a dot segment in any spelling and carries no encoded `/` or
-//! `\`, so a parameter can never span two segments or climb out of one. Decoding happens once,
-//! after routing, in [`PathTemplate::extract`], which also refuses control bytes and invalid UTF-8.
+//! A template is a sequence of segments, each a literal or a `{parameter}`, and may end in one
+//! catch-all `{*name}`. Matching splits the raw path on `/` and compares segment for segment,
+//! without allocating. A parameter matches one non-empty raw segment that is not a dot segment in
+//! any spelling and carries no encoded `/` or `\`, so a parameter can never span two segments or
+//! climb out of one. Decoding happens once, after routing, in [`PathTemplate::extract`], which also
+//! refuses control bytes and invalid UTF-8.
+//!
+//! A catch-all is the one exception, and it is written as one: it takes the rest of the raw path
+//! after the separator before it, one byte or more, separators included, as the catch-all of
+//! RustFS's `matchit` router does (ADR-0036). Its value is decoded once by the gateway's one name
+//! decoder — a `%` without two hexadecimal digits stays as it is — and only a value that is not
+//! UTF-8 is refused: what the rest names is data its handler validates.
 
 use std::fmt;
 use std::str::FromStr;
@@ -195,6 +202,20 @@ enum Segment {
     Literal(&'static str),
     /// Matches one raw segment and binds it to this name.
     Parameter(&'static str),
+    /// `{*name}`, only as the last segment: matches the rest of the raw path after the separator
+    /// before it, one byte or more, and binds it to this name (ADR-0036). RustFS registers
+    /// `POST /rustfs/admin/v3/heal/{bucket}/{*prefix}` that way.
+    CatchAll(&'static str),
+}
+
+impl Segment {
+    /// The name a parameter or a catch-all binds.
+    const fn name(self) -> Option<&'static str> {
+        match self {
+            Self::Parameter(name) | Self::CatchAll(name) => Some(name),
+            Self::Literal(_) => None,
+        }
+    }
 }
 
 /// Why a [`PathTemplate`] was refused.
@@ -209,13 +230,16 @@ pub enum TemplateRejection {
     DotSegment,
     /// A literal byte outside RFC 3986's unreserved set.
     ForbiddenCharacter,
-    /// A parameter that is not `{name}` with a lowercase `[a-z_][a-z0-9_]*` name.
+    /// A parameter that is not `{name}` or `{*name}` with a lowercase `[a-z_][a-z0-9_]*` name.
     MalformedParameter,
     /// A parameter sharing its segment with literal text, such as `{id}.zip`. Not supported yet: the
     /// one RustFS route that needs it is recorded in ADR-0024's migration plan.
     ParameterWithAffix,
     /// The same parameter name twice.
     DuplicateParameter,
+    /// A catch-all `{*name}` that is not the last segment: it takes the rest of the path, so
+    /// nothing can follow it (ADR-0036).
+    CatchAllNotLast,
 }
 
 impl TemplateRejection {
@@ -227,9 +251,10 @@ impl TemplateRejection {
             Self::EmptySegment => "a template has no empty segment except a trailing '/'",
             Self::DotSegment => "a template has no '.' or '..' literal segment",
             Self::ForbiddenCharacter => "a template literal spells only unreserved characters",
-            Self::MalformedParameter => "a parameter is a whole segment `{name}` with a lowercase name",
+            Self::MalformedParameter => "a parameter is a whole segment `{name}` or `{*name}` with a lowercase name",
             Self::ParameterWithAffix => "a parameter is a whole segment; literal text beside it is not supported",
             Self::DuplicateParameter => "a parameter name appears once per template",
+            Self::CatchAllNotLast => "a catch-all parameter `{*name}` is the template's last segment",
         }
     }
 }
@@ -330,7 +355,17 @@ fn decode_parameter(raw: &str) -> Result<String, &'static str> {
     Ok(value)
 }
 
-/// A path template inside a claim: literal segments and whole-segment `{parameters}`.
+/// Decodes a catch-all value once, with the gateway's one name decoder, which is also how RustFS's
+/// heal handler decodes the rest it captures: every `%` followed by two hexadecimal digits is that
+/// byte, any other `%` stays as it is, and the result must be UTF-8. Nothing else is refused:
+/// separators, empty and dot segments and control characters are part of the value, which its
+/// handler validates (ADR-0036).
+fn decode_catch_all(raw: &str) -> Result<String, &'static str> {
+    rustfs_gateway_types::decode_once(raw).map_err(|_| "the decoded value is not UTF-8")
+}
+
+/// A path template inside a claim: literal segments and whole-segment `{parameters}`, and at most
+/// one trailing catch-all `{*name}`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PathTemplate {
     text: &'static str,
@@ -342,7 +377,8 @@ impl PathTemplate {
     ///
     /// A template written with a trailing `/` (`/rustfs/admin/v3/heal/`) ends in an empty literal
     /// segment: it matches a request path with that trailing `/`, and neither the path without it
-    /// nor any longer path (ADR-0030). Every other empty segment is refused.
+    /// nor any longer path (ADR-0030). Every other empty segment is refused. A template may end in
+    /// one catch-all `{*name}`, which nothing may follow (ADR-0036).
     ///
     /// # Errors
     ///
@@ -366,13 +402,20 @@ impl PathTemplate {
                 continue;
             }
             if let Some(inner) = segment.strip_prefix('{').and_then(|inner| inner.strip_suffix('}')) {
-                if !is_parameter_name(inner) {
+                let (name, catch_all) = inner.strip_prefix('*').map_or((inner, false), |name| (name, true));
+                if !is_parameter_name(name) {
                     return Err(TemplateRejection::MalformedParameter);
                 }
-                if segments.contains(&Segment::Parameter(inner)) {
+                if segments.iter().any(|seen| seen.name() == Some(name)) {
                     return Err(TemplateRejection::DuplicateParameter);
                 }
-                segments.push(Segment::Parameter(inner));
+                if !catch_all {
+                    segments.push(Segment::Parameter(name));
+                } else if raw.peek().is_some() {
+                    return Err(TemplateRejection::CatchAllNotLast);
+                } else {
+                    segments.push(Segment::CatchAll(name));
+                }
                 continue;
             }
             if segment.contains(['{', '}']) {
@@ -402,12 +445,18 @@ impl PathTemplate {
         self.text
     }
 
-    /// The parameter names, in path order.
+    /// The parameter names, in path order, a catch-all last.
     pub fn parameters(&self) -> impl Iterator<Item = &'static str> + '_ {
-        self.segments.iter().filter_map(|segment| match segment {
-            Segment::Parameter(name) => Some(*name),
-            Segment::Literal(_) => None,
-        })
+        self.segments.iter().filter_map(|segment| segment.name())
+    }
+
+    /// The catch-all's name, when the template ends in one (ADR-0036).
+    #[must_use]
+    pub fn catch_all(&self) -> Option<&'static str> {
+        match self.segments.last() {
+            Some(Segment::CatchAll(name)) => Some(*name),
+            _ => None,
+        }
     }
 
     /// Whether the template starts with the claim's segments as literals, so every path it matches
@@ -420,26 +469,49 @@ impl PathTemplate {
             .all(|wanted| matches!(mine.next(), Some(Segment::Literal(literal)) if *literal == wanted))
     }
 
+    /// Walks a raw path against the template without allocating, handing `bind` each binding's
+    /// name, raw value and whether it is the catch-all: one segment for a parameter, the rest of
+    /// the path for a catch-all. `false` when the path does not match.
+    fn walk<'p>(&self, raw_path: &'p str, mut bind: impl FnMut(&'static str, &'p str, bool)) -> bool {
+        let Some(mut rest) = raw_path.strip_prefix('/') else {
+            return false;
+        };
+        let mut ended = false;
+        for segment in self.segments.iter() {
+            if let Segment::CatchAll(name) = segment {
+                // Whatever is left, which is never nothing: a catch-all matches one byte or more.
+                if ended || rest.is_empty() {
+                    return false;
+                }
+                bind(name, rest, true);
+                return true;
+            }
+            if ended {
+                return false;
+            }
+            let value = match rest.split_once('/') {
+                Some((value, after)) => {
+                    rest = after;
+                    value
+                }
+                None => {
+                    ended = true;
+                    rest
+                }
+            };
+            match segment {
+                Segment::Literal(literal) if value == *literal => {}
+                Segment::Parameter(name) if is_one_segment_value(value) => bind(name, value, false),
+                Segment::Literal(_) | Segment::Parameter(_) | Segment::CatchAll(_) => return false,
+            }
+        }
+        ended
+    }
+
     /// Whether a raw request path matches, segment for segment. Allocates nothing.
     #[must_use]
     pub fn matches(&self, raw_path: &str) -> bool {
-        let Some(rest) = raw_path.strip_prefix('/') else {
-            return false;
-        };
-        let mut raw = rest.split('/');
-        for segment in self.segments.iter() {
-            let Some(value) = raw.next() else {
-                return false;
-            };
-            let accepted = match segment {
-                Segment::Literal(literal) => value == *literal,
-                Segment::Parameter(_) => is_one_segment_value(value),
-            };
-            if !accepted {
-                return false;
-            }
-        }
-        raw.next().is_none()
+        self.walk(raw_path, |_, _, _| {})
     }
 
     /// The parameter values of a raw path this template matches, each decoded once.
@@ -449,73 +521,135 @@ impl PathTemplate {
     /// [`PathParamError::Mismatch`] when the path does not match, and
     /// [`PathParamError::Invalid`] naming the parameter whose value decodes to something no
     /// handler may be handed: a malformed escape, invalid UTF-8, a separator, a dot segment, or a
-    /// control character. The value itself is never part of the error.
+    /// control character; for a catch-all, only a value that is not UTF-8 (ADR-0036). The value
+    /// itself is never part of the error.
     pub fn extract(&self, raw_path: &str) -> Result<PathParams, PathParamError> {
-        if !self.matches(raw_path) {
+        let mut raw = Vec::new();
+        if !self.walk(raw_path, |name, value, catch_all| raw.push((name, value, catch_all))) {
             return Err(PathParamError::Mismatch);
         }
-        let rest = raw_path.strip_prefix('/').unwrap_or(raw_path);
-        let mut values = Vec::new();
-        for (segment, raw) in self.segments.iter().zip(rest.split('/')) {
-            if let Segment::Parameter(name) = segment {
-                let value = decode_parameter(raw).map_err(|why| PathParamError::Invalid { name, why })?;
-                values.push((*name, value.into_boxed_str()));
-            }
+        let mut values = Vec::with_capacity(raw.len());
+        for (name, value, catch_all) in raw {
+            let decoded = if catch_all {
+                decode_catch_all(value)
+            } else {
+                decode_parameter(value)
+            };
+            let value = decoded.map_err(|why| PathParamError::Invalid { name, why })?;
+            values.push((name, value.into_boxed_str()));
         }
         Ok(PathParams { values })
     }
 
-    /// The raw, still-encoded segment `name` matched in `raw_path`, or `None` when the path does
-    /// not match or the template has no such parameter. For a bound bucket (ADR-0025), whose
-    /// label must meet the S3 rules undecoded.
+    /// The raw, still-encoded value `name` matched in `raw_path` — one segment, or the rest of the
+    /// path for a catch-all — or `None` when the path does not match or the template has no such
+    /// parameter. For a bound bucket (ADR-0025), whose label must meet the S3 rules undecoded.
     #[must_use]
     pub fn raw_value<'p>(&self, raw_path: &'p str, name: &str) -> Option<&'p str> {
-        if !self.matches(raw_path) {
-            return None;
+        let mut found = None;
+        let matched = self.walk(raw_path, |parameter, value, _| {
+            if parameter == name {
+                found = Some(value);
+            }
+        });
+        found.filter(|_| matched)
+    }
+
+    /// The fixed segments, and whether a catch-all follows them.
+    fn fixed(&self) -> (&[Segment], bool) {
+        match self.segments.split_last() {
+            Some((Segment::CatchAll(_), fixed)) => (fixed, true),
+            _ => (&self.segments, false),
         }
-        let rest = raw_path.strip_prefix('/').unwrap_or(raw_path);
-        self.segments
-            .iter()
-            .zip(rest.split('/'))
-            .find_map(|(segment, raw)| matches!(segment, Segment::Parameter(parameter) if *parameter == name).then_some(raw))
     }
 
     /// A path both templates match, or `None` when no path does.
+    ///
+    /// Two fixed-length templates meet segment for segment at one length. A catch-all meets a
+    /// longer fixed prefix whose extra segments spell at least one byte, and any other catch-all
+    /// whose fixed prefix meets its own (ADR-0036).
     pub(super) fn overlap_path(&self, other: &Self) -> Option<String> {
-        if self.segments.len() != other.segments.len() {
+        let (mine, theirs) = (self.fixed(), other.fixed());
+        let ((short, short_rest), (long, long_rest)) = if mine.0.len() <= theirs.0.len() {
+            (mine, theirs)
+        } else {
+            (theirs, mine)
+        };
+        let extra = long.get(short.len()..).unwrap_or_default();
+        let fits = match (short_rest, long_rest) {
+            (false, false) => extra.is_empty(),
+            // The catch-all's prefix is at least as long as the fixed-length template, so none of
+            // that template's paths reaches the byte past it that a catch-all needs.
+            (false, true) => false,
+            // The extra segments are the catch-all's value, which a lone trailing `/` leaves empty.
+            (true, false) => !extra.is_empty() && !matches!(extra, [Segment::Literal("")]),
+            (true, true) => true,
+        };
+        if !fits {
             return None;
         }
         let mut path = String::new();
-        for (mine, theirs) in self.segments.iter().zip(other.segments.iter()) {
-            let segment = match (mine, theirs) {
-                (Segment::Literal(a), Segment::Literal(b)) if a == b => *a,
-                (Segment::Literal(_), Segment::Literal(_)) => return None,
-                // A parameter never matches an empty segment, so a trailing `/` and a parameter
-                // in the same position share no path (ADR-0030).
-                (Segment::Literal(""), Segment::Parameter(_)) | (Segment::Parameter(_), Segment::Literal("")) => {
-                    return None;
-                }
-                (Segment::Literal(literal), Segment::Parameter(_)) | (Segment::Parameter(_), Segment::Literal(literal)) => {
-                    literal
-                }
-                (Segment::Parameter(_), Segment::Parameter(_)) => "p",
-            };
+        for (mine, theirs) in short.iter().zip(long) {
             path.push('/');
-            path.push_str(segment);
+            path.push_str(meet(*mine, *theirs)?);
+        }
+        for segment in extra {
+            path.push('/');
+            path.push_str(instance(*segment));
+        }
+        if long_rest {
+            path.push_str("/p");
         }
         Some(path)
     }
 
     /// Whether every path this template matches is matched by `other` too.
     pub(super) fn refines(&self, other: &Self) -> bool {
-        self.segments.len() == other.segments.len()
-            && self.segments.iter().zip(other.segments.iter()).all(|pair| match pair {
-                // An empty literal is matched by no parameter (ADR-0030).
-                (Segment::Literal(""), Segment::Parameter(_)) => false,
-                (_, Segment::Parameter(_)) => true,
-                (Segment::Literal(a), Segment::Literal(b)) => a == b,
-                (Segment::Parameter(_), Segment::Literal(_)) => false,
-            })
+        let ((mine, my_rest), (theirs, their_rest)) = (self.fixed(), other.fixed());
+        let prefix_within = || mine.iter().zip(theirs).all(|(mine, theirs)| within(*mine, *theirs));
+        match (my_rest, their_rest) {
+            (false, false) => mine.len() == theirs.len() && prefix_within(),
+            // A catch-all takes paths of every length; no fixed-length template takes them all.
+            (true, false) => false,
+            // Every path of mine continues past the other's prefix by at least one byte, unless all
+            // that continues it is a trailing `/`.
+            (false, true) => {
+                mine.len() > theirs.len() && prefix_within() && !matches!(mine.get(theirs.len()..), Some([Segment::Literal("")]))
+            }
+            (true, true) => mine.len() >= theirs.len() && prefix_within(),
+        }
+    }
+}
+
+/// One raw segment both segments match, or `None` when none does. Fixed segments only.
+fn meet(mine: Segment, theirs: Segment) -> Option<&'static str> {
+    match (mine, theirs) {
+        (Segment::Literal(a), Segment::Literal(b)) if a == b => Some(a),
+        // A parameter never matches an empty segment, so a trailing `/` and a parameter in the
+        // same position share no path (ADR-0030).
+        (Segment::Literal(""), Segment::Parameter(_)) | (Segment::Parameter(_), Segment::Literal("")) => None,
+        (Segment::Literal(literal), Segment::Parameter(_)) | (Segment::Parameter(_), Segment::Literal(literal)) => Some(literal),
+        (Segment::Parameter(_), Segment::Parameter(_)) => Some("p"),
+        (Segment::Literal(_), Segment::Literal(_)) | (Segment::CatchAll(_), _) | (_, Segment::CatchAll(_)) => None,
+    }
+}
+
+/// Whether every raw segment `mine` matches, `theirs` matches too. Fixed segments only.
+fn within(mine: Segment, theirs: Segment) -> bool {
+    match (mine, theirs) {
+        // An empty literal is matched by no parameter (ADR-0030).
+        (Segment::Literal(""), Segment::Parameter(_)) => false,
+        (Segment::Literal(_) | Segment::Parameter(_), Segment::Parameter(_)) => true,
+        (Segment::Literal(a), Segment::Literal(b)) => a == b,
+        (Segment::Parameter(_), Segment::Literal(_)) | (Segment::CatchAll(_), _) | (_, Segment::CatchAll(_)) => false,
+    }
+}
+
+/// One raw segment a fixed segment matches.
+fn instance(segment: Segment) -> &'static str {
+    match segment {
+        Segment::Literal(literal) => literal,
+        Segment::Parameter(_) | Segment::CatchAll(_) => "p",
     }
 }
 
@@ -638,112 +772,5 @@ impl PathParams {
 }
 
 #[cfg(test)]
-#[allow(clippy::expect_used, clippy::panic)]
-mod tests {
-    use super::*;
-
-    const EVIDENCE: &[&str] = &["https://github.com/rustfs/backlog/issues/1744"];
-
-    fn claim(prefix: &'static str) -> PathClaim {
-        PathClaim {
-            prefix,
-            reason: "fixture",
-            evidence: EVIDENCE,
-        }
-    }
-
-    #[test]
-    fn a_claim_covers_its_prefix_and_what_continues_it_with_a_separator() {
-        let admin = claim("/rustfs/admin");
-        for inside in ["/rustfs/admin", "/rustfs/admin/", "/rustfs/admin/v3/info"] {
-            assert!(admin.covers(inside), "{inside}");
-        }
-        for outside in [
-            "/rustfs",
-            "/rustfs/",
-            "/rustfs/adminx",
-            "/rustfs/admi",
-            "/x/rustfs/admin",
-            "rustfs/admin",
-        ] {
-            assert!(!admin.covers(outside), "{outside}");
-        }
-    }
-
-    #[test]
-    fn nested_and_equal_claims_overlap_and_siblings_do_not() {
-        let admin = claim("/rustfs/admin");
-        assert!(admin.overlaps(&claim("/rustfs/admin/v3")));
-        assert!(claim("/rustfs/admin/v3").overlaps(&admin));
-        assert!(admin.overlaps(&admin));
-        assert!(!admin.overlaps(&claim("/rustfs/adminx")));
-        assert!(!admin.overlaps(&claim("/minio/admin")));
-    }
-
-    #[test]
-    fn dot_segments_are_recognised_in_every_spelling() {
-        for dot in [".", "..", "%2e", "%2E", ".%2e", "%2E%2e"] {
-            assert!(is_dot_segment(dot), "{dot}");
-        }
-        for other in ["...", "a.", ".a", "%2e%2e%2e", "%2f", ""] {
-            assert!(!is_dot_segment(other), "{other}");
-        }
-    }
-
-    #[test]
-    fn a_literal_refines_a_parameter_and_not_the_other_way_round() {
-        let literal = PathTemplate::parse("/a/b/stats").expect("a template");
-        let parameter = PathTemplate::parse("/a/b/{name}").expect("a template");
-        assert!(literal.refines(&parameter));
-        assert!(!parameter.refines(&literal));
-        assert_eq!(literal.overlap_path(&parameter).as_deref(), Some("/a/b/stats"));
-        let other = PathTemplate::parse("/a/c/{name}").expect("a template");
-        assert_eq!(literal.overlap_path(&other), None);
-    }
-
-    /// Positive — a template written with a trailing `/` ends in an empty literal and matches a
-    /// request path with that trailing `/` and nothing else (ADR-0030).
-    #[test]
-    fn a_trailing_slash_is_an_empty_last_literal_matched_exactly() {
-        let heal = PathTemplate::parse("/rustfs/admin/v3/heal/").expect("a template");
-        assert_eq!(heal.as_str(), "/rustfs/admin/v3/heal/");
-        assert_eq!(heal.parameters().count(), 0);
-        assert!(heal.matches("/rustfs/admin/v3/heal/"));
-        for other in [
-            "/rustfs/admin/v3/heal",
-            "/rustfs/admin/v3/heal//",
-            "/rustfs/admin/v3/heal/photos",
-            "/rustfs/admin/v3/heal/%2f",
-            "/rustfs/admin/v3/heal/ ",
-        ] {
-            assert!(!heal.matches(other), "{other}");
-            assert_eq!(heal.extract(other).err(), Some(PathParamError::Mismatch), "{other}");
-        }
-        assert!(heal.extract("/rustfs/admin/v3/heal/").expect("a match").is_empty());
-    }
-
-    /// Negative — every other empty segment is still refused: two adjacent separators anywhere,
-    /// a trailing `//`, and a template that is only separators.
-    #[test]
-    fn n_an_empty_segment_that_is_not_a_trailing_slash_is_refused() {
-        for template in ["/", "//", "/a//", "/a//b", "/a/b//", "//a"] {
-            assert_eq!(PathTemplate::parse(template).err(), Some(TemplateRejection::EmptySegment), "{template}");
-        }
-    }
-
-    /// Negative — a parameter never matches an empty segment, so a trailing `/` and a parameter
-    /// in the same position overlap nothing and neither refines the other (ADR-0030).
-    #[test]
-    fn n_a_trailing_slash_and_a_parameter_share_no_path() {
-        let heal = PathTemplate::parse("/a/heal/").expect("a template");
-        let by_bucket = PathTemplate::parse("/a/heal/{bucket}").expect("a template");
-        assert_eq!(heal.overlap_path(&by_bucket), None);
-        assert_eq!(by_bucket.overlap_path(&heal), None);
-        assert!(!heal.refines(&by_bucket));
-        assert!(!by_bucket.refines(&heal));
-        assert!(!by_bucket.matches("/a/heal/"));
-        let same = PathTemplate::parse("/a/heal/").expect("a template");
-        assert_eq!(heal.overlap_path(&same).as_deref(), Some("/a/heal/"));
-        assert!(heal.refines(&same));
-    }
-}
+#[path = "tests/claim.rs"]
+mod tests;
