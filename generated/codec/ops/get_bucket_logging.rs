@@ -109,13 +109,15 @@ fn write_logging_enabled(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto
         let v = &value.target_prefix;
         writer.element("TargetPrefix", v.as_str());
     }
-    writer.open("TargetGrants", None);
-    for item in &value.target_grants {
-        writer.open("Grant", None);
-        write_target_grant(writer, item)?;
+    if value.target_grants.is_some() || !writer.writes_legacy_layout() {
+        writer.open("TargetGrants", None);
+        for item in value.target_grants.iter().flatten() {
+            writer.open("Grant", None);
+            write_target_grant(writer, item)?;
+            writer.close();
+        }
         writer.close();
     }
-    writer.close();
     if let Some(v) = value.target_object_key_format.as_ref() {
         writer.open("TargetObjectKeyFormat", None);
         write_target_object_key_format(writer, v)?;

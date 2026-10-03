@@ -122,7 +122,7 @@ impl Input {
 #[derive(Debug, Clone, Default)]
 pub struct Output {
     /// Wire `Annotations`, bound as BodyXml. Optional.
-    pub annotations: Vec<crate::ops::shapes::AnnotationEntry>,
+    pub annotations: Option<Vec<crate::ops::shapes::AnnotationEntry>>,
     /// Wire `Bucket`, bound as BodyXml. Optional.
     pub bucket: Option<crate::BucketName>,
     /// Wire `Key`, bound as BodyXml. Optional.

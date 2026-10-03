@@ -38,11 +38,11 @@ pub struct S3Location {
     /// Wire `CannedACL`, bound as BodyXml. Optional.
     pub canned_acl: Option<crate::ops::enums::CannedAcl>,
     /// Wire `AccessControlList`, bound as BodyXml. Optional.
-    pub access_control_list: Vec<crate::ops::shapes::Grant>,
+    pub access_control_list: Option<Vec<crate::ops::shapes::Grant>>,
     /// Wire `Tagging`, bound as BodyXml. Optional.
     pub tagging: Option<crate::ops::shapes::Tagging>,
     /// Wire `UserMetadata`, bound as BodyXml. Optional.
-    pub user_metadata: Vec<crate::ops::shapes::MetadataEntry>,
+    pub user_metadata: Option<Vec<crate::ops::shapes::MetadataEntry>>,
     /// Wire `StorageClass`, bound as BodyXml. Optional.
     pub storage_class: Option<crate::ops::enums::StorageClass>,
 }

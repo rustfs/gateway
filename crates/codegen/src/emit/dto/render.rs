@@ -135,7 +135,7 @@ pub fn operation(ir: &OperationIr, registry: &Registry, report: &mut DtoReport) 
         &format!("{marker}Output"),
         InputConstruction::Default,
     ));
-    out.push_str(&builder(&ir.input, registry, input_construction));
+    out.push_str(&builder(&format!("{marker}Input"), &ir.input, registry, input_construction));
     report.builders += 1;
     out
 }
@@ -211,7 +211,7 @@ fn data_struct(
     } else {
         let _ = writeln!(out, "pub struct {name} {{");
         for field in fields {
-            out.push_str(&field_decl(field));
+            out.push_str(&field_decl(baseline_name, field));
         }
         out.push_str("}\n\n");
     }
@@ -232,7 +232,7 @@ fn data_struct(
 const MAX_WIDTH: usize = 130;
 
 /// Renders the input builder. ADR-0004 P7: recommended, never the only path.
-fn builder(fields: &[Field], registry: &Registry, construction: InputConstruction<'_>) -> String {
+fn builder(owner: &str, fields: &[Field], registry: &Registry, construction: InputConstruction<'_>) -> String {
     let mut out = String::new();
     if let InputConstruction::RequiredBody(body) = construction {
         let name = naming::field_name(&body.name);
@@ -322,7 +322,7 @@ fn builder(fields: &[Field], registry: &Registry, construction: InputConstructio
         let inner = Registry::field_inner_type(field);
         // A container and a required member are both stored bare, so only an optional one is
         // wrapped. The setter's argument is the unwrapped type in every case.
-        let bare = Registry::is_container(&field.ty) || field.required;
+        let bare = Registry::is_bare(owner, field);
         let (argument, assignment) = if bare {
             (inner.clone(), format!("self.input.{name} = value;"))
         } else {

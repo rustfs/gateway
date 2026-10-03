@@ -177,6 +177,14 @@ impl XmlWriter {
         self.out.push_str(&arranged);
     }
 
+    /// Whether this document is written in legacy RustFS's layout ([`Self::legacy_layout`]): an
+    /// encoder then writes no element for a list whose presence it carries and that is not set, as
+    /// legacy RustFS writes none.
+    #[must_use]
+    pub const fn writes_legacy_layout(&self) -> bool {
+        self.legacy
+    }
+
     /// Writes an entity-tag element. Under [`Self::legacy_layout`] the tag's double quotes are
     /// written as they are, as legacy RustFS writes an entity tag, and everything else is escaped
     /// as element text; otherwise it is [`Self::element`], quotes escaped as in every other text

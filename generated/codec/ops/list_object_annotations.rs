@@ -94,13 +94,15 @@ impl OperationCodec for dto::ListObjectAnnotations {
         writer.legacy_layout(request.rustfs_response_layout());
         writer.open("ListObjectAnnotationsOutput", Some(rustfs_gateway_xml::S3_XMLNS));
         writer.order_children(rustfs_order::RESPONSE);
-        writer.open("Annotations", None);
-        for item in &output.annotations {
-            writer.open("AnnotationEntry", None);
-            write_annotation_entry(&mut writer, item)?;
+        if output.annotations.is_some() || !writer.writes_legacy_layout() {
+            writer.open("Annotations", None);
+            for item in output.annotations.iter().flatten() {
+                writer.open("AnnotationEntry", None);
+                write_annotation_entry(&mut writer, item)?;
+                writer.close();
+            }
             writer.close();
         }
-        writer.close();
         if let Some(v) = output.bucket.as_ref() {
             writer.element("Bucket", v.as_str());
         }

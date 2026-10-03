@@ -32,6 +32,6 @@ pub fn website_configuration_to_s3s(value: crate::ops::shapes::WebsiteConfigurat
         error_document: value.error_document.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::error_document::error_document_to_s3s(x)?) }).transpose()?,
         index_document: value.index_document.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::index_document::index_document_to_s3s(x)?) }).transpose()?,
         redirect_all_requests_to: value.redirect_all_requests_to.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::redirect_all_requests_to::redirect_all_requests_to_to_s3s(x)?) }).transpose()?,
-        routing_rules: if value.routing_rules.is_empty() { None } else { Some({ let x = value.routing_rules; x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::routing_rule::routing_rule_to_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()? }) },
+        routing_rules: value.routing_rules.map(|x| -> Result<_, ConversionError> { Ok(x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::routing_rule::routing_rule_to_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()?) }).transpose()?,
     })
 }

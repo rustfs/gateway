@@ -30,7 +30,7 @@
 #[derive(Debug, Clone, Default)]
 pub struct AccessControlPolicy {
     /// Wire `AccessControlList`, bound as BodyXml. Optional.
-    pub grants: Vec<crate::ops::shapes::Grant>,
+    pub grants: Option<Vec<crate::ops::shapes::Grant>>,
     /// Wire `Owner`, bound as BodyXml. Optional.
     pub owner: Option<crate::ops::shapes::Owner>,
 }

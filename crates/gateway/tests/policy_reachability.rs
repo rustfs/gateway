@@ -187,7 +187,12 @@ fn a_document_channel_acl_write_reaches_the_contract() {
         .expect("the document channel is well formed")
     {
         AclInput::Document(policy) => {
-            let grantee = policy.grants[0].grantee.as_ref().expect("one grantee");
+            let grantee = policy
+                .grants
+                .as_deref()
+                .and_then(<[_]>::first)
+                .and_then(|grant| grant.grantee.as_ref())
+                .expect("one grantee");
             assert!(grantee.r#type.is_some(), "canonicalised: the grantee carries its xsi:type");
         }
         AclInput::Headers { .. } => panic!("a document was sent"),

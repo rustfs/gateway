@@ -211,7 +211,7 @@ fn logging_projection(status: &dto::BucketLoggingStatus) -> Option<LoggingProjec
         (
             enabled.target_bucket.clone(),
             enabled.target_prefix.clone(),
-            enabled.target_grants.iter().map(target_grant_projection).collect(),
+            enabled.target_grants.iter().flatten().map(target_grant_projection).collect(),
             enabled.target_object_key_format.as_ref().map(key_format_projection),
         )
     })
@@ -309,7 +309,7 @@ fn logging_enabled() -> impl Strategy<Value = dto::LoggingEnabled> {
             |(target_bucket, target_prefix, target_grants, target_object_key_format)| dto::LoggingEnabled {
                 target_bucket,
                 target_prefix,
-                target_grants,
+                target_grants: Some(target_grants),
                 target_object_key_format,
             },
         )
@@ -367,7 +367,7 @@ proptest! {
     fn a_logging_configuration_survives_encode_then_decode(enabled in prop::option::of(logging_enabled())) {
         let document = encode_read_logging(enabled.clone());
         prop_assert_eq!(root_element(&document), LOGGING_ROOT, "document: {}", document);
-        if enabled.as_ref().is_some_and(|e| !e.target_grants.is_empty()) {
+        if enabled.as_ref().is_some_and(|e| !e.target_grants.as_deref().unwrap_or_default().is_empty()) {
             prop_assert!(
                 document.contains(TARGET_GRANTS_OPEN) && document.contains(TARGET_GRANTS_CLOSE),
                 "a non-empty grant list must be wrapped: {document}"
@@ -382,7 +382,7 @@ proptest! {
             (
                 e.target_bucket.clone(),
                 e.target_prefix.clone(),
-                e.target_grants.iter().map(target_grant_projection).collect::<Vec<_>>(),
+                e.target_grants.iter().flatten().map(target_grant_projection).collect::<Vec<_>>(),
                 e.target_object_key_format.as_ref().map(key_format_projection),
             )
         });
@@ -409,14 +409,14 @@ fn a_realistic_logging_document_this_codec_wrote_is_one_the_family_accepts() {
     let enabled = dto::LoggingEnabled {
         target_bucket: "log-bucket".to_owned(),
         target_prefix: "logs/".to_owned(),
-        target_grants: vec![dto::TargetGrant {
+        target_grants: Some(vec![dto::TargetGrant {
             grantee: Some(dto::Grantee {
                 id: Some("abc123".to_owned()),
                 r#type: Some(dto::Type::CANONICALUSER),
                 ..dto::Grantee::default()
             }),
             permission: Some(dto::Permission::READ),
-        }],
+        }]),
         target_object_key_format: Some(dto::TargetObjectKeyFormat {
             simple_prefix: Some(dto::SimplePrefix {}),
             partitioned_prefix: None,
@@ -430,7 +430,7 @@ fn a_realistic_logging_document_this_codec_wrote_is_one_the_family_accepts() {
         Some((
             enabled.target_bucket,
             enabled.target_prefix,
-            enabled.target_grants.iter().map(target_grant_projection).collect(),
+            enabled.target_grants.iter().flatten().map(target_grant_projection).collect(),
             enabled.target_object_key_format.as_ref().map(key_format_projection),
         ))
     );
@@ -444,7 +444,7 @@ fn an_empty_target_prefix_survives_the_round_trip() {
     let enabled = dto::LoggingEnabled {
         target_bucket: "log-bucket".to_owned(),
         target_prefix: String::new(),
-        target_grants: vec![],
+        target_grants: Some(vec![]),
         target_object_key_format: None,
     };
     let document = encode_read_logging(Some(enabled));
@@ -471,7 +471,7 @@ fn n_a_grant_outside_the_wrapper_is_not_read_as_a_grant() {
     let status = decode_write_logging(document).expect("an unknown element is skipped, not refused");
     let enabled = status.logging_enabled.expect("logging_enabled is present");
     assert!(
-        enabled.target_grants.is_empty(),
+        enabled.target_grants.as_deref().unwrap_or_default().is_empty(),
         "an unwrapped Grant must not be read as a grant: {:?}",
         enabled.target_grants
     );
@@ -490,7 +490,7 @@ fn n_a_grant_spelled_targetgrant_is_not_read_as_a_grant() {
     let status = decode_write_logging(document).expect("an unknown child element is skipped, not refused");
     let enabled = status.logging_enabled.expect("logging_enabled is present");
     assert!(
-        enabled.target_grants.is_empty(),
+        enabled.target_grants.as_deref().unwrap_or_default().is_empty(),
         "a TargetGrant element must not be read as a Grant: {:?}",
         enabled.target_grants
     );

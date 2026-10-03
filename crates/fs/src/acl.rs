@@ -57,7 +57,7 @@ impl FsBackend {
     fn owner_policy(&self) -> AccessControlPolicy {
         let owner = self.reported_owner().cloned().unwrap_or_default();
         AccessControlPolicy {
-            grants: vec![Grant {
+            grants: Some(vec![Grant {
                 grantee: Some(Grantee {
                     id: owner.id.clone(),
                     display_name: owner.display_name.clone(),
@@ -65,7 +65,7 @@ impl FsBackend {
                     ..Grantee::default()
                 }),
                 permission: Some(Permission::FULL_CONTROL),
-            }],
+            }]),
             owner: Some(owner),
         }
     }

@@ -45,6 +45,7 @@
 //! bump (P4), and only structural unions carry `#[non_exhaustive]` (P5).
 
 pub mod naming;
+pub mod presence;
 pub mod registry;
 pub mod render;
 pub mod shared;
@@ -242,12 +243,12 @@ pub fn field_doc(field: &Field) -> String {
 
 /// Renders one `pub` field, doc comment included.
 #[must_use]
-pub fn field_decl(field: &Field) -> String {
+pub fn field_decl(owner: &str, field: &Field) -> String {
     format!(
         "    /// {}\n    pub {}: {},\n",
         field_doc(field),
         naming::field_name(&field.name),
-        Registry::field_type(field)
+        Registry::field_type(owner, field)
     )
 }
 

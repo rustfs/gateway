@@ -60,13 +60,15 @@ impl OperationCodec for dto::GetBucketAcl {
             write_owner(&mut writer, v)?;
             writer.close();
         }
-        writer.open("AccessControlList", None);
-        for item in &output.grants {
-            writer.open("Grant", None);
-            write_grant(&mut writer, item)?;
+        if output.grants.is_some() || !writer.writes_legacy_layout() {
+            writer.open("AccessControlList", None);
+            for item in output.grants.iter().flatten() {
+                writer.open("Grant", None);
+                write_grant(&mut writer, item)?;
+                writer.close();
+            }
             writer.close();
         }
-        writer.close();
         writer.close();
         response.body = ResponseBody::Complete(writer.finish().into_bytes());
         response.set_header("content-type", "application/xml");

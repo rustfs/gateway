@@ -243,7 +243,7 @@ fn structure(def: &ShapeDef, registry: &Registry, report: &mut DtoReport) -> Str
     } else {
         let _ = writeln!(out, "pub struct {name} {{");
         for field in &def.fields {
-            out.push_str(&field_decl(field));
+            out.push_str(&field_decl(name, field));
         }
         out.push_str("}\n\n");
     }

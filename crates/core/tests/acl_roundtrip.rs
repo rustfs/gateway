@@ -167,6 +167,7 @@ fn projection(policy: &dto::AccessControlPolicy) -> PolicyProjection {
         policy
             .grants
             .iter()
+            .flatten()
             .map(|grant| {
                 (
                     grant.grantee.as_ref().map(grantee_projection),
@@ -258,7 +259,7 @@ fn access_control_policy() -> impl Strategy<Value = dto::AccessControlPolicy> {
                 display_name,
                 id: Some(id),
             }),
-            grants,
+            grants: Some(grants),
         })
 }
 
@@ -363,10 +364,10 @@ fn each_grantee_kind_carries_its_discriminator_out_and_back() {
     for (grantee, expected) in cases {
         let mut policy = dto::AccessControlPolicy {
             owner: None,
-            grants: vec![dto::Grant {
+            grants: Some(vec![dto::Grant {
                 grantee: Some(grantee),
                 permission: Some(dto::Permission::READ),
-            }],
+            }]),
         };
         canonicalize_policy(&mut policy).expect("one identity, one discriminator");
 
@@ -379,7 +380,7 @@ fn each_grantee_kind_carries_its_discriminator_out_and_back() {
 
         let read_back = store(&document);
         assert_eq!(
-            read_back.grants[0]
+            read_back.grants.as_deref().unwrap_or_default()[0]
                 .grantee
                 .as_ref()
                 .and_then(|grantee| grantee.r#type.as_ref())
@@ -402,7 +403,7 @@ fn a_display_name_of_awkward_text_comes_back_unchanged() {
             display_name: Some(awkward.to_owned()),
             id: Some(CANONICAL_ID.to_owned()),
         }),
-        grants: vec![dto::Grant {
+        grants: Some(vec![dto::Grant {
             grantee: Some(dto::Grantee {
                 id: Some(CANONICAL_ID.to_owned()),
                 display_name: Some(awkward.to_owned()),
@@ -410,7 +411,7 @@ fn a_display_name_of_awkward_text_comes_back_unchanged() {
                 ..dto::Grantee::default()
             }),
             permission: Some(dto::Permission::FULL_CONTROL),
-        }],
+        }]),
     };
 
     let document = encode_read(policy.clone());
@@ -451,7 +452,7 @@ fn a_policy_with_no_grants_keeps_its_empty_wrapper() {
             display_name: None,
             id: Some(CANONICAL_ID.to_owned()),
         }),
-        grants: Vec::new(),
+        grants: Some(Vec::new()),
     };
 
     let document = encode_read(policy.clone());
@@ -462,7 +463,7 @@ fn a_policy_with_no_grants_keeps_its_empty_wrapper() {
 
     let read_back = store(&document);
 
-    assert!(read_back.grants.is_empty());
+    assert!(read_back.grants.as_deref().unwrap_or_default().is_empty());
     assert_eq!(projection(&read_back), projection(&policy));
 }
 
@@ -489,7 +490,10 @@ fn an_empty_member_comes_back_as_itself() {
                     <Permission>READ</Permission></Grant></AccessControlList></AccessControlPolicy>";
 
     let once = store(document);
-    let grantee = once.grants[0].grantee.as_ref().expect("the grantee is read");
+    let grantee = once.grants.as_deref().unwrap_or_default()[0]
+        .grantee
+        .as_ref()
+        .expect("the grantee is read");
     assert_eq!(grantee.id.as_deref(), Some(""), "ingress keeps the empty element");
     assert_eq!(
         once.owner.as_ref().and_then(|owner| owner.display_name.as_deref()),
@@ -529,14 +533,14 @@ fn the_bucket_and_object_codecs_agree_on_one_policy() {
             display_name: Some("owner".to_owned()),
             id: Some(CANONICAL_ID.to_owned()),
         }),
-        grants: vec![dto::Grant {
+        grants: Some(vec![dto::Grant {
             grantee: Some(dto::Grantee {
                 id: Some(CANONICAL_ID.to_owned()),
                 r#type: Some(dto::Type::CANONICALUSER),
                 ..dto::Grantee::default()
             }),
             permission: Some(dto::Permission::READ),
-        }],
+        }]),
     };
 
     let bucket_document = encode_read(policy.clone());
@@ -589,7 +593,10 @@ fn n_an_unwrapped_grant_list_hides_every_grant_from_the_decoder() {
         .expect("an unknown element is skipped, not refused")
         .expect("the body still carries a policy");
 
-    assert!(policy.grants.is_empty(), "the missing wrapper took every grant with it");
+    assert!(
+        policy.grants.as_deref().unwrap_or_default().is_empty(),
+        "the missing wrapper took every grant with it"
+    );
 }
 
 /// The model's own name for the list, which the wire never uses. A decoder keyed on it would read
@@ -605,7 +612,7 @@ fn n_the_model_name_for_the_grant_list_is_not_a_wire_element() {
         .expect("an unknown element is skipped, not refused")
         .expect("the body still carries a policy");
 
-    assert!(policy.grants.is_empty());
+    assert!(policy.grants.as_deref().unwrap_or_default().is_empty());
 }
 
 /// A grantee naming no identity. The decoder accepts it — a missing optional element is not a
@@ -670,7 +677,7 @@ fn n_a_discriminator_spelled_in_another_case_is_not_the_attribute() {
         .expect("the body carries a policy");
 
     assert_eq!(
-        policy.grants[0]
+        policy.grants.as_deref().unwrap_or_default()[0]
             .grantee
             .as_ref()
             .and_then(|grantee| grantee.r#type.as_ref())
@@ -703,7 +710,7 @@ fn n_a_discriminator_on_an_enclosing_element_is_not_the_grantees() {
             .expect("the body carries a policy");
 
         assert_eq!(
-            policy.grants[0]
+            policy.grants.as_deref().unwrap_or_default()[0]
                 .grantee
                 .as_ref()
                 .and_then(|grantee| grantee.r#type.as_ref())
@@ -731,7 +738,11 @@ fn n_a_second_grant_list_is_dropped_rather_than_appended() {
         .expect("a repeated element is not a parse failure")
         .expect("the body carries a policy");
 
-    assert_eq!(policy.grants.len(), 1, "the second list was appended rather than dropped");
+    assert_eq!(
+        policy.grants.as_deref().unwrap_or_default().len(),
+        1,
+        "the second list was appended rather than dropped"
+    );
 }
 
 /// The discriminator is resolved by **namespace**, not by the spelling of the prefix — and that
@@ -756,7 +767,9 @@ fn a_discriminator_is_read_by_namespace_and_not_by_the_prefix_spelling() {
         decode_write(document)
             .expect("an attribute is never a parse failure here")
             .expect("the body carries a policy")
-            .grants[0]
+            .grants
+            .as_deref()
+            .unwrap_or_default()[0]
             .grantee
             .as_ref()
             .and_then(|grantee| grantee.r#type.as_ref())
@@ -828,7 +841,10 @@ fn n_a_permission_outside_the_closed_set_survives_the_decoder_and_is_refused_aft
         .expect("the body carries a policy");
 
     assert_eq!(
-        policy.grants[0].permission.as_ref().map(dto::Permission::as_str),
+        policy.grants.as_deref().unwrap_or_default()[0]
+            .permission
+            .as_ref()
+            .map(dto::Permission::as_str),
         Some("OWNER"),
         "the decoder is not the layer that closes the set"
     );

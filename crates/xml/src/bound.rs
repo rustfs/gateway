@@ -210,10 +210,10 @@ pub enum BoundRefusal {
     /// the caller answers what legacy RustFS's handler answers a request without one.
     Absent,
     /// The document reads, but it holds a value the caller cannot carry exactly: a scalar the
-    /// scalar reading called uncarriable, or the empty wrapper of an optional wrapped list, which
-    /// legacy RustFS reads as a present empty list and a container cannot tell from an absent one.
-    /// Reported only for a document the reading otherwise accepts, so a document legacy RustFS
-    /// refuses is refused as that first.
+    /// scalar reading called uncarriable. Reported only for a document the reading otherwise
+    /// accepts, so a document legacy RustFS refuses is refused as that first. (An optional wrapped
+    /// list's empty wrapper is carried: the caller holds such a list's presence apart from its
+    /// entries, rustfs/gateway#1078.)
     Uncarriable,
 }
 
@@ -512,13 +512,7 @@ impl<'a> Walker<'a, '_> {
                     seen[index] = true;
                     let child = match member.arity {
                         Arity::One | Arity::Repeated => self.value(member.element, member.value, &start)?,
-                        Arity::Wrapped(entry) => {
-                            let wrapper = self.wrapped(member.element, entry, member.value)?;
-                            if wrapper.children.is_empty() && !member.required && member.kept {
-                                self.uncarriable = true;
-                            }
-                            wrapper
-                        }
+                        Arity::Wrapped(entry) => self.wrapped(member.element, entry, member.value)?,
                     };
                     if member.kept {
                         node.children.push(child);
