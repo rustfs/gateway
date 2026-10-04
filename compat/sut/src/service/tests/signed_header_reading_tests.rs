@@ -21,9 +21,8 @@
 //! exactly what legacy RustFS stores or nothing; that a name the request did not send is answered
 //! `missing signed header: <name>`; that an `x-amz-*` header the signature leaves out is `403
 //! AccessDenied` "There were headers present in the request which were not signed", header-signed
-//! and presigned, storing nothing; and that the one such header legacy RustFS lets a header
-//! signature leave out, `x-amz-content-sha256`, stays refused in the gateway's own words
-//! (`rd-loc-0010`).
+//! and presigned, storing nothing; and that header authentication may cover
+//! `x-amz-content-sha256` through HashedPayload, as AWS and legacy RustFS do (`rd-loc-0010`).
 //! NOT responsible for: the pre-lookup refusals of a header signature (`header_signature_tests.rs`)
 //! or the credential scope (`scope_refusal_tests.rs`, `signing_service_tests.rs`).
 //! Upstream: the parent module's two-identity assembly and [`super::hand_signer`]. Downstream:
@@ -148,14 +147,13 @@ async fn n_an_unsigned_amz_header_is_access_denied() {
     assert_eq!(read(&service, "/listing/k").await, (200, "stored".to_owned()));
 }
 
-/// Negative — the kept refusal (`rd-loc-0010`): a header signature leaving `x-amz-content-sha256`
-/// out, which legacy RustFS verifies, stays `SignatureDoesNotMatch` in the gateway's own words.
+/// Positive — AWS covers the payload declaration through HashedPayload, so the RustFS profile
+/// accepts a valid header signature that leaves it out of SignedHeaders (`rd-loc-0010`).
 #[tokio::test]
-async fn n_an_unsigned_payload_hash_stays_refused_in_the_gateway_words() {
+async fn a_payload_hash_outside_signed_headers_reads_the_stored_object() {
     let root = TestRoot::new();
     let service = with_object(&root).await;
     let answer = exchange(&service, get().leaving_unsigned(&["x-amz-content-sha256"]).request()).await;
-    refused(&answer, 403, "SignatureDoesNotMatch", None);
-    assert!(!body_of(&answer).contains(UNSIGNED), "{}", body_of(&answer));
-    assert!(!body_of(&answer).contains("missing signed header"), "{}", body_of(&answer));
+    assert_eq!(answer.status(), 200, "{}", body_of(&answer));
+    assert_eq!(body_of(&answer), "stored");
 }

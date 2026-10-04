@@ -111,14 +111,14 @@ impl AdminOperation for PostV3Update {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 351,
+    precedence: 359,
     selector: "PathTemplate(\"/rustfs/admin/v3/update\") ∧ Method(POST) ∨ PathTemplate(\"/minio/admin/v3/update\") ∧ Method(POST)",
     action: "admin:ServerUpdate",
     resource: ResourceShape::Service,
     success_status: 200,
     anonymous: false,
     evidence: &[
-        "https://github.com/rustfs/rustfs/blob/736e4fb8e8e5d527c25e4e56f352536b311b6daf/rustfs/src/admin/handlers/system.rs",
+        "https://github.com/rustfs/rustfs/blob/5e1bd498ce1ca33bcb0ca50aeee861e69e6c8744/rustfs/src/admin/handlers/system.rs",
         record::ISSUE,
     ],
 };

@@ -142,6 +142,7 @@ const PLAN: &[(&str, u8)] = &[
     ("on_demand_migration", 5),
     ("durability_handler", 5),
     ("heal", 5),
+    ("integrity", 5),
     ("usage_prefix", 5),
     ("table_catalog", 6),
     ("oidc", 7),

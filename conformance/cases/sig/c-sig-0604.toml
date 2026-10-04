@@ -1,0 +1,39 @@
+# c-sig-0604 — gateway issue #1239.
+
+[case]
+id = "c-sig-0604"
+schema_version = 1
+title = "Payload-line coverage does not cover an unsigned metadata header"
+rationale = "A metadata instruction has no representation in HashedPayload. Adding it without signing the header must still fail."
+polarity = "negative"
+operation = "ListBuckets"
+tags = ["signature", "sigv4", "security"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/developerguide/sig-v4-header-based-auth.html"
+summary = "Header authentication covers the payload declaration through HashedPayload; other semantic headers remain covered."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+request_time = "2026-01-02T03:04:05Z"
+
+[request]
+method = "GET"
+target = "/"
+headers = { "x-amz-meta-note" = "unsigned" }
+[request.sign]
+mode = "sigv4_header"
+credential = "valid"
+service = "s3"
+region = "us-east-1"
+signed_headers = ["host", "x-amz-date"]
+payload_hash = "empty"
+[expect]
+kind = "response"
+status = 403
+[expect.error]
+code = "SignatureDoesNotMatch"
+request_id_present = true

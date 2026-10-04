@@ -28,7 +28,10 @@
 //!
 //! # The rule this whole module exists for
 //!
-//! **Every `x-amz-*` header that arrived must appear in the list.** Without it, a header the
+//! **Every semantic `x-amz-*` header that arrived must appear in the list.** Header authentication
+//! may omit `x-amz-content-sha256`: its value is already signed as HashedPayload. The header-auth
+//! constructors make that exception explicit; the strict constructors retain query coverage.
+//! Without the remaining coverage rule, a header the
 //! client never signed still reaches the operation, and the operation trusts it. The reachable set
 //! is not obscure: `x-amz-copy-source` redirects a copy at its source,
 //! `x-amz-server-side-encryption-customer-key` substitutes the encryption key,
@@ -53,7 +56,7 @@ use crate::verdict::AuthError;
 /// The SigV4 timestamp header; when it is absent, `Date` supplies the timestamp and must be signed.
 const X_AMZ_DATE: HeaderName = HeaderName::from_static("x-amz-date");
 
-/// The header-name prefix whose members must always be signed.
+/// The header-name prefix whose semantic members must be signed.
 pub const AMZ_HEADER_PREFIX: &str = "x-amz-";
 
 /// The headers a client may leave out of `SignedHeaders`.
@@ -77,8 +80,8 @@ pub const UNSIGNED_HEADER_EXEMPTIONS: [&str; 6] = [
 
 /// The client's `SignedHeaders` allow-list, with every completeness rule already enforced.
 ///
-/// The field is private and there is no constructor other than
-/// [`SignedHeaderSet::parse_and_enforce`], so a set in hand has been through all six rules. A
+/// The fields are private; every constructor checks the six completeness rules, with only the
+/// explicit header-auth constructors allowing HashedPayload coverage of the payload declaration. A
 /// public `Vec<HeaderName>` would let a caller assemble precisely the states the rules exist to
 /// reject.
 ///
@@ -132,6 +135,29 @@ impl SignedHeaderSet {
     ///   does not cover what it must, which is indistinguishable, to the client, from having signed
     ///   the wrong thing.
     pub fn parse_and_enforce(raw: &str, headers: &HeaderMap, wire_content_length: Option<u64>) -> Result<Self, AuthError> {
+        Self::parse(raw, headers, wire_content_length, false)
+    }
+
+    /// Parses a header-auth list, allowing `x-amz-content-sha256` outside `SignedHeaders`.
+    ///
+    /// AWS signs that declaration in the canonical request's HashedPayload line, so signing it
+    /// again as a header is optional. The caller must use the authenticated payload declaration
+    /// as that line. Every other completeness rule remains enforced. Do not use this constructor
+    /// for query authentication; [`Self::parse_and_enforce`] retains its full header coverage.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::parse_and_enforce`], except for the header-auth payload-declaration exception.
+    pub fn parse_and_enforce_header(raw: &str, headers: &HeaderMap, wire_content_length: Option<u64>) -> Result<Self, AuthError> {
+        Self::parse(raw, headers, wire_content_length, true)
+    }
+
+    fn parse(
+        raw: &str,
+        headers: &HeaderMap,
+        wire_content_length: Option<u64>,
+        payload_line_covered: bool,
+    ) -> Result<Self, AuthError> {
         if raw.is_empty() {
             return Err(AuthError::SignatureDoesNotMatch);
         }
@@ -156,7 +182,7 @@ impl SignedHeaderSet {
             names,
             reading: ListReading::Aws,
         };
-        set.enforce(headers, wire_content_length)?;
+        set.enforce(headers, wire_content_length, payload_line_covered)?;
         Ok(set)
     }
 
@@ -181,7 +207,33 @@ impl SignedHeaderSet {
         headers: &HeaderMap,
         wire_content_length: Option<u64>,
     ) -> Result<Self, AuthError> {
-        match Self::parse_and_enforce(raw, headers, wire_content_length) {
+        Self::parse_legacy(raw, headers, wire_content_length, false)
+    }
+
+    /// [`Self::parse_and_enforce_header`] with the legacy RustFS list spelling.
+    ///
+    /// Only header authentication may use HashedPayload coverage instead of naming
+    /// `x-amz-content-sha256`. Host, all other `x-amz-*` headers and every named header remain
+    /// covered, even for uppercase, repeated or unsorted legacy lists.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::parse_and_enforce_as_legacy_rustfs`], except for that payload declaration.
+    pub fn parse_and_enforce_header_as_legacy_rustfs(
+        raw: &str,
+        headers: &HeaderMap,
+        wire_content_length: Option<u64>,
+    ) -> Result<Self, AuthError> {
+        Self::parse_legacy(raw, headers, wire_content_length, true)
+    }
+
+    fn parse_legacy(
+        raw: &str,
+        headers: &HeaderMap,
+        wire_content_length: Option<u64>,
+        payload_line_covered: bool,
+    ) -> Result<Self, AuthError> {
+        match Self::parse(raw, headers, wire_content_length, payload_line_covered) {
             Err(AuthError::AuthorizationHeaderMalformed) => {}
             read => return read,
         }
@@ -208,12 +260,17 @@ impl SignedHeaderSet {
             names,
             reading: ListReading::LegacyRustfs,
         };
-        set.enforce(headers, wire_content_length)?;
+        set.enforce(headers, wire_content_length, payload_line_covered)?;
         Ok(set)
     }
 
     /// Rules 4 to 6, and the `Date` and `content-length` rules, over the parsed names.
-    fn enforce(&self, headers: &HeaderMap, wire_content_length: Option<u64>) -> Result<(), AuthError> {
+    fn enforce(
+        &self,
+        headers: &HeaderMap,
+        wire_content_length: Option<u64>,
+        payload_line_covered: bool,
+    ) -> Result<(), AuthError> {
         let set = self;
         if !set.contains(&HOST) {
             return Err(AuthError::SignatureDoesNotMatch);
@@ -231,7 +288,8 @@ impl SignedHeaderSet {
         }
 
         for name in headers.keys() {
-            if name.as_str().starts_with(AMZ_HEADER_PREFIX) && !set.contains(name) {
+            let covered_as_payload = payload_line_covered && name.as_str() == "x-amz-content-sha256";
+            if name.as_str().starts_with(AMZ_HEADER_PREFIX) && !covered_as_payload && !set.contains(name) {
                 return Err(AuthError::SignatureDoesNotMatch);
             }
         }

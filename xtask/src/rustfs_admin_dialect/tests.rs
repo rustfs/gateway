@@ -113,7 +113,7 @@ fn the_committed_dialect_is_what_the_inventory_generates() {
     let root = repo_root();
     let files = generate(&root).expect("the recorded inventory generates");
     assert_eq!(drift(&root, &files), Vec::<String>::new());
-    assert_eq!(files.len(), 308, "303 operations, the module list and the table's four files");
+    assert_eq!(files.len(), 317, "312 operations, the module list and the table's four files");
 }
 
 /// Negative — a file committed under a wholly generated directory without being generated, in

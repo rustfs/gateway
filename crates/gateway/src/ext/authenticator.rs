@@ -298,6 +298,8 @@ pub struct Authentication<'a> {
     /// Legacy RustFS's words for a refusal under a RustFS-profile reading; only the built-in
     /// authenticator publishes one, and only on a refusal.
     legacy_refusal: std::sync::OnceLock<LegacyRefusal>,
+    sts_body: Option<sts_body::StsBodyReading<'a>>,
+    body_refusal: std::sync::OnceLock<crate::render::S3Error>,
 }
 
 impl core::fmt::Debug for Authentication<'_> {
@@ -337,6 +339,8 @@ impl<'a> Authentication<'a> {
             chunks: None,
             signature_mismatch: std::sync::OnceLock::new(),
             legacy_refusal: std::sync::OnceLock::new(),
+            sts_body: None,
+            body_refusal: std::sync::OnceLock::new(),
         }
     }
 
@@ -361,9 +365,19 @@ impl<'a> Authentication<'a> {
     }
 
     /// What the built-in authenticator published beside its verdict: the mismatch detail of a
-    /// signature that did not match, and legacy RustFS's words for a RustFS-profile refusal.
-    pub(crate) fn into_published(self) -> (Option<rustfs_gateway_sig::SignatureMismatchDetail>, Option<LegacyRefusal>) {
-        (self.signature_mismatch.into_inner(), self.legacy_refusal.into_inner())
+    /// signature that did not match, legacy RustFS's words, or a private STS body-read refusal.
+    pub(crate) fn into_published(
+        self,
+    ) -> (
+        Option<rustfs_gateway_sig::SignatureMismatchDetail>,
+        Option<LegacyRefusal>,
+        Option<crate::render::S3Error>,
+    ) {
+        (
+            self.signature_mismatch.into_inner(),
+            self.legacy_refusal.into_inner(),
+            self.body_refusal.into_inner(),
+        )
     }
 
     /// The admitted request. Holding one is proof the floor has run.
@@ -540,15 +554,6 @@ impl SigV4Authenticator {
         }
     }
 
-    async fn verify(&self, request: &Authentication<'_>) -> Result<AuthenticationOutcome, Unavailable> {
-        match self.try_verify(request).await {
-            Ok(Some((verdict, secret))) => Ok(AuthenticationOutcome::authenticated(verdict, secret)),
-            Ok(None) => Err(Unavailable),
-            Err(VerificationFailure::Ordinary(error)) => Ok(AuthenticationOutcome::ordinary(Verdict::reject(error))),
-            Err(VerificationFailure::Scope(scope_rejection)) => Ok(AuthenticationOutcome::scope_rejected(scope_rejection)),
-        }
-    }
-
     /// `Ok(None)` is the store outage; every other outcome is a verdict or a rejection.
     async fn try_verify(&self, request: &Authentication<'_>) -> Result<Option<VerifiedWithSecret>, VerificationFailure> {
         let sealed = request.sealed();
@@ -625,6 +630,8 @@ impl SigV4Authenticator {
             Ok(CredentialLookup::NotFound) | Err(_) => None,
         };
 
+        let sts_payload = self.sts_payload(request, &presented, &resolved).await?;
+        let payload = sts_payload.as_ref().unwrap_or_else(|| request.payload());
         let key = signing_key(&secret, &verified);
         let date = presented.signed_at(sealed);
         let (mut proof, mismatch_detail): (Option<SignatureMatch>, Option<rustfs_gateway_sig::SignatureMismatchDetail>) =
@@ -640,7 +647,7 @@ impl SigV4Authenticator {
                         error
                     };
                     let signed = self
-                        .read_signed_headers(signed_headers, view.headers(), request.declared_content_length())
+                        .read_signed_headers(signed_headers, view.headers(), request.declared_content_length(), location)
                         .map_err(legacy_answer)?;
                     let paths = UriPathCandidates::new(request.raw_path())?.with_raw_fallback(self.raw_path);
                     let query = view.query();
@@ -651,7 +658,7 @@ impl SigV4Authenticator {
                         view.headers(),
                         &signed,
                         request.host(),
-                        request.payload().canonical_payload_token(),
+                        payload.canonical_payload_token(),
                     );
                     if location.is_presigned() {
                         spec = spec.presigned();
@@ -763,6 +770,7 @@ impl Authenticator for SigV4Authenticator {
 enum VerificationFailure {
     Ordinary(AuthError),
     Scope(ScopeRejection),
+    Body(crate::render::S3Error),
 }
 
 impl From<AuthError> for VerificationFailure {
@@ -774,6 +782,8 @@ impl From<AuthError> for VerificationFailure {
 #[path = "authenticator_presented.rs"]
 mod presented;
 use presented::Presented;
+#[path = "authenticator_sts_body.rs"]
+mod sts_body;
 
 #[cfg(test)]
 #[path = "authenticator_tests.rs"]
