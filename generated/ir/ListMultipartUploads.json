@@ -513,12 +513,12 @@
                 "id": "q-encoding-0015",
                 "kind": "encoding_type",
                 "target": "ListObjectsV2",
-                "summary": "When url encoding is requested, a fixed per operation set of members is percent encoded and the encoding type is echoed back; keys containing control characters are otherwise unparseable.",
+                "summary": "URL encoding applies to key, prefix, delimiter and starting-key members; opaque continuation tokens keep their value with normal XML escaping. Keys containing control characters require URL encoding.",
                 "evidence": [
                               {
                                 "kind": "aws-doc",
                                 "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html",
-                                "summary": "Describes the request parameter and states that the response echoes the encoding type when it was requested."
+                                "summary": "Lists the key and label members encoded under encoding-type=url; continuation tokens are not among those members."
                               },
                               {
                                 "kind": "capture",

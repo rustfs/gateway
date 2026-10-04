@@ -81,17 +81,86 @@ fn only_the_members_legacy_encodes_are_encoded_and_slashes_stay_literal() {
 }
 
 #[test]
-fn n_without_the_rustfs_rule_every_declared_member_is_encoded_slashes_included() {
+fn n_without_the_rustfs_rule_keys_are_encoded_but_cursors_stay_opaque() {
     let body = encode_v2("&encoding-type=url", None);
     for expected in [
         "<Key>dir%2Fwith%20space.txt</Key>",
         "<Prefix>dir%2Fa%20b%2F</Prefix>",
         "<Delimiter>%2F</Delimiter>",
-        "<ContinuationToken>ab%2Bc%2Fd%3D</ContinuationToken>",
+        "<ContinuationToken>ab+c/d=</ContinuationToken>",
+        "<NextContinuationToken>xy+z/w=</NextContinuationToken>",
         "<EncodingType>url</EncodingType>",
     ] {
         assert!(body.contains(expected), "missing {expected}: {body}");
     }
+}
+
+/// Negative — encoding a listing must not encode or interpret an opaque cursor's percent signs.
+#[test]
+fn n_opaque_cursors_never_acquire_url_escapes() {
+    let request = accepted("GET", "/conf-list?list-type=2&encoding-type=url", &[]);
+    let view = MetaView::of(&request, TargetKind::Bucket).expect("view");
+    for token in ["ab+c/d=", "x%2Fy%20z", "%252F"] {
+        let mut output = v2_listing();
+        output.continuation_token = Some(OpaqueString::new(token.to_owned()));
+        output.next_continuation_token = Some(OpaqueString::new(token.to_owned()));
+        let body = body_text(&dto::ListObjectsV2::encode(output, &view, 200).expect("encodes").body);
+        for tag in ["ContinuationToken", "NextContinuationToken"] {
+            assert!(body.contains(&format!("<{tag}>{token}</{tag}>")), "{body}");
+        }
+        assert!(body.contains("<Key>dir%2Fwith%20space.txt</Key>"), "{body}");
+    }
+}
+
+/// Negative — normal XML escaping applies to cursors; URL escapes cannot substitute for it.
+#[test]
+fn n_opaque_cursors_are_xml_escaped_without_url_encoding() {
+    let request = accepted("GET", "/conf-list?list-type=2&encoding-type=url", &[]);
+    let view = MetaView::of(&request, TargetKind::Bucket).expect("view");
+    let mut output = v2_listing();
+    output.continuation_token = Some(OpaqueString::new("a&b<c>d".to_owned()));
+    output.next_continuation_token = Some(OpaqueString::new("a&b<c>d".to_owned()));
+    let body = body_text(&dto::ListObjectsV2::encode(output, &view, 200).expect("encodes").body);
+    for tag in ["ContinuationToken", "NextContinuationToken"] {
+        assert!(body.contains(&format!("<{tag}>a&amp;b&lt;c&gt;d</{tag}>")), "{body}");
+    }
+}
+
+/// The cursor read from the response, URI-quoted once by a client, becomes the next input intact.
+#[test]
+fn a_cursor_from_an_encoded_listing_round_trips_into_the_next_query() {
+    let request = accepted("GET", "/conf-list?list-type=2&encoding-type=url", &[]);
+    let view = MetaView::of(&request, TargetKind::Bucket).expect("view");
+    for token in ["ab+c/d=", "x%2Fy%20z"] {
+        let mut output = v2_listing();
+        output.next_continuation_token = Some(OpaqueString::new(token.to_owned()));
+        let body = body_text(&dto::ListObjectsV2::encode(output, &view, 200).expect("encodes").body);
+        let returned = body
+            .split_once("<NextContinuationToken>")
+            .expect("token element")
+            .1
+            .split_once("</NextContinuationToken>")
+            .expect("token closes")
+            .0;
+        let quoted = rustfs_gateway_sig::percent_encode(returned.as_bytes());
+        let next = accepted(
+            "GET",
+            &format!("/conf-list?list-type=2&encoding-type=url&continuation-token={quoted}"),
+            &[],
+        );
+        let view = MetaView::of(&next, TargetKind::Bucket).expect("view");
+        let input = dto::ListObjectsV2::decode(&view, RequestBody::None).expect("next page decodes");
+        assert_eq!(input.continuation_token.as_ref().map(OpaqueString::as_str), Some(token));
+    }
+}
+
+/// Negative — query decoding must not interpret percent sequences inside an opaque token twice.
+#[test]
+fn n_a_cursor_query_is_not_percent_decoded_twice() {
+    let request = accepted("GET", "/conf-list?list-type=2&continuation-token=%252e%252e%252Fabc", &[]);
+    let view = MetaView::of(&request, TargetKind::Bucket).expect("view");
+    let input = dto::ListObjectsV2::decode(&view, RequestBody::None).expect("decodes once");
+    assert_eq!(input.continuation_token.as_ref().map(OpaqueString::as_str), Some("%2e%2e%2Fabc"));
 }
 
 #[test]
