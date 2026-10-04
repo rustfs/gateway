@@ -13,6 +13,7 @@ Source shapes reviewed for rustfs/gateway#720:
 - minio/mint@12559d50625b722d11fd798ae8ac2fb204e66dd1
 - minio/mc@7394ce0dd2a80935aded936b09fa12cbb3cb8096
 The launcher and mc source hashes were verified against the pinned Mint image on 2026-09-23.
+The MC stdin-test diagnostic correction is tracked by rustfs/gateway#1270.
 """
 import argparse
 import hashlib
@@ -57,7 +58,18 @@ def transform(kind: str, source: str) -> str:
             source = replace_line(source, statement, statement + " >&2")
             # The first edit changes the function's length.
             end = source.find("\n}", begin)
-        return source
+        marker = "function test_cat_stdin() {\n"
+        if source.count(marker) != 1:
+            raise ValueError("expected one test_cat_stdin function")
+        begin = source.index(marker) + len(marker)
+        end = source.find("\n}", begin)
+        if end < 0:
+            raise ValueError("missing test_cat_stdin closing brace")
+        body = source[begin:end]
+        for statement in ('mc_cmd mb "${SERVER_ALIAS}/${bucket_name}"',
+                          'echo "testcontent" | mc_cmd pipe "${SERVER_ALIAS}/${bucket_name}/${object_name}"'):
+            body = replace_line(body, statement, statement + " >&2")
+        return source[:begin] + body + source[end:]
     raise ValueError(f"unknown producer kind: {kind}")
 
 
@@ -72,7 +84,8 @@ def main() -> None:
         if hashlib.sha256(original).hexdigest() != args.sha256:
             raise ValueError("source SHA-256 mismatch; refusing to patch")
         patched = transform(args.kind, original.decode("utf-8"))
-        notice = "Modified by RustFS Team on 2026-09-23: correct Mint record production.\n"
+        date = "2026-10-04" if args.kind == "mc" else "2026-09-23"
+        notice = f"Modified by RustFS Team on {date}: correct Mint record production.\n"
         if args.kind == "logger":
             patched = "// " + notice + patched
         else:

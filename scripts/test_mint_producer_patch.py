@@ -40,6 +40,16 @@ output_log_file="$1"
 error_log_file="$2"
 /mint/run/core/minio-dotnet/out/Minio.Functional.Tests 1>>"$output_log_file" 2>"$error_log_file"
 '''
+BARE_CALLS = ('mc_cmd mb "${SERVER_ALIAS}/${bucket_name}"',
+              'echo "testcontent" | mc_cmd pipe "${SERVER_ALIAS}/${bucket_name}/${object_name}"')
+CAT = '''function test_cat_stdin() {
+    bucket_name="authored-bucket"
+    object_name="authored-object"
+    mc_cmd mb "${SERVER_ALIAS}/${bucket_name}"
+    echo "testcontent" | mc_cmd pipe "${SERVER_ALIAS}/${bucket_name}/${object_name}"
+    :
+}
+'''
 MC = '''#!/bin/bash
 # license sentinel
 function validate_dependencies() {
@@ -50,7 +60,7 @@ function validate_dependencies() {
         exit 1
     fi
 }
-helper_failure() { echo "independent failure detail"; return 9; }
+''' + CAT + '''helper_failure() { echo "independent failure detail"; return 9; }
 helper_success() { echo "independent success detail"; }
 validate_dependencies "$1"
 if [[ "$2" == fail ]]; then
@@ -61,6 +71,29 @@ if [[ "$2" == fail ]]; then
 fi
 detail=$(helper_success)
 printf '{"name":"mc","function":"fixture","status":"PASS","detail":"%s"}\\n' "$detail"
+'''
+PROBE = MC.partition('validate_dependencies "$1"\n')[0] + '''
+mc_cmd() {
+    if [[ "$1" == pipe ]]; then cat >/dev/null; fi
+    if [[ "$1" == "$FAIL_VERB" ]]; then
+        printf 'authored %s diagnostic "quoted"\\n' "$1"
+        return 9
+    fi
+    return 0
+}
+SERVER_ALIAS=authored-alias
+validate_dependencies ready
+FAIL_VERB="$1"
+if [[ "$1" == inspect ]]; then
+    detail=$(mc_cmd inspect)
+    code=$?
+    python3 -c 'import json,sys; print(json.dumps(dict(name="mc",function="authored-capture",status="FAIL",error=sys.argv[1])))' "$detail"
+    exit "$code"
+fi
+test_cat_stdin
+code=$?
+printf '{"name":"mc","function":"authored-bare","status":"PASS"}\\n'
+exit "$code"
 '''
 
 
@@ -101,10 +134,89 @@ class ProducerPatch(unittest.TestCase):
         self.assertEqual(result.stdout, "")
         self.assertIn("jq is missing", result.stderr)
 
-    def test_mc_only_changes_the_two_uncaptured_lines(self):
+    def test_mc_only_changes_uncaptured_diagnostics(self):
         expected = MC.replace('echo "Dependency validation complete"', 'echo "Dependency validation complete" >&2')
         expected = expected.replace('echo "jq is missing, please install: \'sudo apt install jq\'"', 'echo "jq is missing, please install: \'sudo apt install jq\'" >&2')
+        for statement in BARE_CALLS:
+            expected = expected.replace(statement, statement + " >&2")
         self.assertEqual(module.transform("mc", MC), expected)
+
+    def run_probe(self, outcome):
+        return subprocess.run(["bash", "-c", module.transform("mc", PROBE), "fixture", outcome],
+                              capture_output=True, text=True)
+
+    def test_bare_failures_keep_json_fields_count_and_return(self):
+        for verb in ("mb", "pipe"):
+            with self.subTest(verb=verb):
+                result = self.run_probe(verb)
+                self.assertEqual(result.returncode, 0)
+                self.assertEqual(len(result.stdout.splitlines()), 1)
+                self.assertEqual(json.loads(result.stdout), dict(name="mc", function="authored-bare", status="PASS"))
+                self.assertEqual(result.stderr, f'Dependency validation complete\nauthored {verb} diagnostic "quoted"\n')
+
+    def test_bare_success_keeps_streams_and_return(self):
+        result = self.run_probe("none")
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(json.loads(result.stdout), dict(name="mc", function="authored-bare", status="PASS"))
+        self.assertEqual(result.stderr, "Dependency validation complete\n")
+
+    def test_asserted_failure_keeps_captured_error_and_return(self):
+        result = self.run_probe("inspect")
+        self.assertEqual(result.returncode, 9)
+        self.assertEqual(json.loads(result.stdout), dict(name="mc", function="authored-capture", status="FAIL",
+                                                       error='authored inspect diagnostic "quoted"'))
+        self.assertEqual(result.stderr, "Dependency validation complete\n")
+
+    def test_other_function_calls_are_preserved(self):
+        other = "function independent_calls() {\n" + "".join("    " + line + "\n" for line in BARE_CALLS) + "}\n"
+        source = MC + other
+        expected = module.transform("mc", MC) + other
+        self.assertEqual(module.transform("mc", source), expected)
+
+    def test_missing_cat_function_is_refused(self):
+        with self.assertRaises(ValueError):
+            module.transform("mc", MC.replace("function test_cat_stdin()", "function independent()"))
+
+    def test_duplicate_cat_function_is_refused(self):
+        with self.assertRaises(ValueError):
+            module.transform("mc", MC + CAT)
+
+    def test_unclosed_cat_function_is_refused(self):
+        with self.assertRaises(ValueError):
+            module.transform("mc", MC.replace(CAT, CAT.removesuffix("}\n")))
+
+    def test_missing_bare_statements_are_refused(self):
+        for statement in BARE_CALLS:
+            with self.subTest(statement=statement), self.assertRaises(ValueError):
+                module.transform("mc", MC.replace(statement, ":"))
+
+    def test_duplicate_bare_statements_are_refused(self):
+        for statement in BARE_CALLS:
+            with self.subTest(statement=statement), self.assertRaises(ValueError):
+                module.transform("mc", MC.replace(statement, statement + "\n    " + statement))
+
+    def test_moved_bare_statements_are_refused(self):
+        for statement in BARE_CALLS:
+            source = MC.replace(statement, ":") + statement + "\n"
+            with self.subTest(statement=statement), self.assertRaises(ValueError):
+                module.transform("mc", source)
+
+    def test_reapplied_bare_statements_are_refused(self):
+        for statement in BARE_CALLS:
+            with self.subTest(statement=statement), self.assertRaises(ValueError):
+                module.transform("mc", MC.replace(statement, statement + " >&2"))
+
+    def test_cli_mc_hash_drift_does_not_write(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "mc"
+            drifted = MC + "# authored drift\n"
+            path.write_text(drifted)
+            digest = hashlib.sha256(MC.encode()).hexdigest()
+            result = subprocess.run([sys.executable, str(PATCH), "mc", str(path), "--sha256", digest],
+                                    capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("source SHA-256 mismatch", result.stderr)
+            self.assertEqual(path.read_text(), drifted)
 
     def test_missing_duplicate_and_reapplied_anchors_fail(self):
         cases = [("logger", LOGGER, "WriteIndented = false,"),
@@ -151,9 +263,10 @@ class ProducerPatch(unittest.TestCase):
             self.assertEqual(path.stat().st_mode & 0o777, 0o751)
 
     def test_cli_adds_modification_notice_without_damaging_license_or_shebang(self):
-        notice = "Modified by RustFS Team on 2026-09-23: correct Mint record production."
         for kind, source in (("logger", LOGGER), ("dotnet-runner", RUNNER), ("mc", MC)):
             with self.subTest(kind=kind), tempfile.TemporaryDirectory() as directory:
+                date = "2026-10-04" if kind == "mc" else "2026-09-23"
+                notice = f"Modified by RustFS Team on {date}: correct Mint record production."
                 path = Path(directory) / "producer"
                 path.write_text(source)
                 digest = hashlib.sha256(path.read_bytes()).hexdigest()
