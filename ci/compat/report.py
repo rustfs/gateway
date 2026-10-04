@@ -381,6 +381,10 @@ def aggregate(arguments: argparse.Namespace) -> int:
 
 
 def resolve_cell(raw: dict, scenario: dict, driver_errors: list[str], cell: str) -> tuple[str, str, dict]:
+    client, scenario_id = cell.split("/", 1)
+    if raw.get("client") != client or raw.get("scenario") != scenario_id:
+        driver_errors.append(f"{cell}: the raw result does not identify the requested cell")
+        return "fail", "driver output format error", {}
     if raw.get("skipped_reason"):
         return "unsupported", raw["skipped_reason"], {}
     if raw.get("timed_out"):
@@ -397,6 +401,12 @@ def resolve_cell(raw: dict, scenario: dict, driver_errors: list[str], cell: str)
     status = driver.get("status")
     if status not in {"pass", "fail", "unsupported"}:
         driver_errors.append(f"{cell}: the driver reported an unknown status {status!r}")
+        return "fail", "driver output format error", {}
+    if driver.get("scenario") != scenario_id:
+        driver_errors.append(f"{cell}: the driver result does not identify the requested scenario")
+        return "fail", "driver output format error", {}
+    if status in {"pass", "unsupported"} and raw.get("exit_code") != 0:
+        driver_errors.append(f"{cell}: a driver reporting {status} requires a zero process exit")
         return "fail", "driver output format error", {}
     detail = driver.get("detail") or ""
     evidence = dict(driver.get("evidence") or {})
