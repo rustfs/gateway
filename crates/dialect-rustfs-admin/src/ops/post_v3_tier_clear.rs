@@ -64,7 +64,7 @@ pub static SHADOWS: &[ShadowingDecl] = &[ShadowingDecl {
     shadowed: "rustfs:PostV3TierByTiername",
     reason: "RustFS's router tries a literal segment before a parameter, so `clear` here is this operation, never a `{tiername}` value.",
     evidence: &[
-        "https://github.com/rustfs/rustfs/blob/736e4fb8e8e5d527c25e4e56f352536b311b6daf/rustfs/src/admin/router.rs",
+        "https://github.com/rustfs/rustfs/blob/5e1bd498ce1ca33bcb0ca50aeee861e69e6c8744/rustfs/src/admin/router.rs",
         record::ADR_0027,
     ],
 }];
@@ -129,14 +129,14 @@ impl AdminOperation for PostV3TierClear {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 349,
+    precedence: 357,
     selector: "PathTemplate(\"/rustfs/admin/v3/tier/clear\") ∧ Method(POST) ∨ PathTemplate(\"/minio/admin/v3/tier/clear\") ∧ Method(POST)",
     action: "admin:SetTier",
     resource: ResourceShape::Service,
     success_status: 200,
     anonymous: false,
     evidence: &[
-        "https://github.com/rustfs/rustfs/blob/736e4fb8e8e5d527c25e4e56f352536b311b6daf/rustfs/src/admin/handlers/tier.rs",
+        "https://github.com/rustfs/rustfs/blob/5e1bd498ce1ca33bcb0ca50aeee861e69e6c8744/rustfs/src/admin/handlers/tier.rs",
         record::ADR_0027,
         record::ISSUE,
     ],

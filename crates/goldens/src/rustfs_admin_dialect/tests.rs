@@ -174,7 +174,7 @@ fn every_migrated_route_is_declared_as_the_inventory_records_it() {
         canonical += records.len();
     }
     assert_eq!(canonical, ROUTES.len(), "a declared operation has no inventory route");
-    assert_eq!(compat, 49, "every table-catalog route has its compat row");
+    assert_eq!(compat, 50, "every table-catalog route has its compat row");
     assert_eq!((staying, STAYING.len()), (7, 7), "every staying route is an inventory route");
 }
 
@@ -243,7 +243,10 @@ fn every_row_is_authorised_by_exactly_its_declared_action() {
         let params: Vec<(String, String)> = template
             .split('/')
             .filter_map(param)
-            .map(|name| (name.to_owned(), value_of(name)))
+            .map(|name| {
+                let name = name.trim_start_matches('*');
+                (name.to_owned(), value_of(name))
+            })
             .collect();
         let handed = &exchange.handed[0];
         assert_eq!(handed.params, params, "{at}");
@@ -287,8 +290,8 @@ fn the_caller_secret_reaches_exactly_the_sealed_rows() {
             holders.insert((record.method, path));
         }
     }
-    assert_eq!(holders.len(), 62, "{holders:?}");
-    assert_eq!(holders.iter().filter(|(_, path)| path.starts_with("/minio/admin/")).count(), 31);
+    assert_eq!(holders.len(), 66, "{holders:?}");
+    assert_eq!(holders.iter().filter(|(_, path)| path.starts_with("/minio/admin/")).count(), 33);
 }
 
 /// Positive — each any-of row is authorised by any one of its actions alone: `datausageinfo`,
@@ -362,7 +365,7 @@ fn n_every_other_action_does_not_authorise_a_row() {
 #[test]
 fn n_an_unsigned_row_is_refused_without_asking() {
     let privileged: Vec<_> = rows().filter(|(record, _)| !record.anonymous).collect();
-    assert_eq!(privileged.len(), 604 - 8, "every row but the four bootstrap operations' eight");
+    assert_eq!(privileged.len(), 622 - 8, "every row but the four bootstrap operations' eight");
     in_lanes(
         |_, _| true,
         &privileged,
@@ -437,7 +440,7 @@ fn n_a_forged_or_unknown_key_row_is_refused_without_asking() {
 #[test]
 fn n_a_presigned_row_is_refused_without_asking() {
     let presignable: Vec<_> = rows().filter(|(record, _)| record.query.is_none()).collect();
-    assert_eq!(presignable.len(), 596, "every row but the service command's eight");
+    assert_eq!(presignable.len(), 614, "every row but the service command's eight");
     in_lanes(
         |_, _| true,
         &presignable,
@@ -457,17 +460,29 @@ fn n_a_presigned_row_is_refused_without_asking() {
 
 /// Negative — a signed request whose parameter value does not decode to a plain segment (an
 /// invalid UTF-8 escape, a control character) is a `400 InvalidArgument` naming the parameter,
-/// and one whose value is a dot segment or an encoded separator reaches no row (the claim's
-/// `501`); both before the authorizer is asked or any handler runs.
+/// and one whose value is a dot segment or an encoded separator reaches no ordinary parameter
+/// row (the claim's `501`). ADR-0036 catch-alls retain all valid UTF-8 for handler validation.
 #[test]
 fn n_a_malformed_parameter_value_is_refused_before_authorising() {
     let cases: Vec<_> = parameters()
         .flat_map(|(record, template, index, name)| {
-            [("%ff", 400), ("a%01b", 400), ("%c3%28", 400), ("%2e%2e", 501), ("a%2Fb", 501)]
-                .map(|(raw, status)| (record, with_segment(template, Some(index), raw), name, raw, status))
+            [("%ff", 400), ("a%01b", 400), ("%c3%28", 400), ("%2e%2e", 501), ("a%2Fb", 501)].map(|(raw, status)| {
+                let status = if name.starts_with('*') && raw != "%ff" && raw != "%c3%28" {
+                    200
+                } else {
+                    status
+                };
+                (
+                    record,
+                    with_segment(template, Some(index), raw),
+                    name.trim_start_matches('*'),
+                    raw,
+                    status,
+                )
+            })
         })
         .collect();
-    assert_eq!(cases.len(), 5 * 2 * 181, "181 parameters across 96 templates, each with its alias");
+    assert_eq!(cases.len(), 5 * 2 * 190, "190 parameters across 102 templates, each with its alias");
     in_lanes(
         |_, _| true,
         &cases,
@@ -475,8 +490,20 @@ fn n_a_malformed_parameter_value_is_refused_before_authorising() {
             let at = format!("{} {path}", record.method);
             let exchange = assembled.exchange(wire(&signed(record, path)));
             assert_eq!(exchange.status, *status, "{at}: {}", exchange.body);
-            assert!(exchange.reached.is_empty(), "{at}: a handler ran");
-            assert!(exchange.asked.is_empty(), "{at}: the authorizer was asked {:?}", exchange.asked);
+            if *status == 200 {
+                let decoded = match *raw {
+                    "a%01b" => "a\u{1}b",
+                    "%2e%2e" => "..",
+                    "a%2Fb" => "a/b",
+                    _ => unreachable!(),
+                };
+                assert_eq!(exchange.handed[0].operation, record.operation, "{at}");
+                assert!(exchange.handed[0].params.contains(&(name.to_string(), decoded.to_owned())), "{at}");
+                assert!(!exchange.asked.is_empty(), "{at}: the authorizer was not asked");
+            } else {
+                assert!(exchange.reached.is_empty(), "{at}: a handler ran");
+                assert!(exchange.asked.is_empty(), "{at}: the authorizer was asked {:?}", exchange.asked);
+            }
             if *status == 400 && record.method != "HEAD" {
                 assert!(exchange.body.contains("<Code>InvalidArgument</Code>"), "{at}: {}", exchange.body);
                 assert!(exchange.body.contains(name), "{at}: {}", exchange.body);
@@ -484,6 +511,34 @@ fn n_a_malformed_parameter_value_is_refused_before_authorising() {
             }
         },
     );
+}
+
+/// The real assembled heal route keeps the raw rest of the path, decodes it once, and binds
+/// only the bucket. An empty catch-all is refused before any policy or handler is consulted.
+#[test]
+fn heal_prefixes_reach_the_handler_after_exactly_one_decode() {
+    let record = ROUTES
+        .iter()
+        .find(|record| record.path == "/rustfs/admin/v3/heal/{bucket}/{*prefix}")
+        .expect("heal row");
+    for template in templates(record) {
+        let base = template.strip_suffix("{bucket}/{*prefix}").expect("heal suffix");
+        for (raw, decoded) in [("logs/2026/10", "logs/2026/10"), ("a%252Fb/c", "a%2Fb/c")] {
+            let path = format!("{base}photos/{raw}");
+            let exchange = assemble(|_, _| true).exchange(wire(&signed(record, &path)));
+            assert_eq!(exchange.status, 200, "{path}: {}", exchange.body);
+            assert_eq!(exchange.reached, [record.operation], "{path}");
+            assert_eq!(exchange.handed[0].bucket.as_deref(), Some("photos"), "{path}");
+            assert!(exchange.handed[0].params.contains(&("prefix".to_owned(), decoded.to_owned())), "{path}");
+            assert!(exchange.asked.iter().all(|asked| asked.bucket.as_deref() == Some("photos")), "{path}");
+            assert!(!exchange.asked.is_empty(), "{path}");
+        }
+        let path = format!("{base}photos/");
+        let exchange = assemble(|_, _| true).exchange(wire(&signed(record, &path)));
+        assert_eq!(exchange.status, 501, "{path}: {}", exchange.body);
+        assert!(exchange.reached.is_empty() && exchange.handed.is_empty(), "{path}");
+        assert!(exchange.asked.is_empty(), "{path}");
+    }
 }
 
 // ── named divergences ──────────────────────────────────────────────────────────────────────────
@@ -501,7 +556,7 @@ fn n_a_malformed_parameter_value_is_refused_before_authorising() {
 #[test]
 fn a_presigned_admin_request_is_refused_under_the_rustfs_profile_floor() {
     let presignable: Vec<_> = rows().filter(|(record, _)| record.query.is_none()).collect();
-    assert_eq!(presignable.len(), 596, "every row but the service command's eight");
+    assert_eq!(presignable.len(), 614, "every row but the service command's eight");
     in_lanes_on(
         &rustfs_profile_floor(),
         |_, _| true,

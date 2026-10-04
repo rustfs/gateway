@@ -121,14 +121,14 @@ impl AdminOperation for GetV3OnDemandMigrationByBucketStatus {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 218,
+    precedence: 220,
     selector: "PathTemplate(\"/rustfs/admin/v3/on-demand-migration/{bucket}/status\") ∧ Method(GET) ∨ PathTemplate(\"/minio/admin/v3/on-demand-migration/{bucket}/status\") ∧ Method(GET) ⇒ BucketParam(\"bucket\")",
     action: "admin:GetBucketOnDemandMigration",
     resource: ResourceShape::Bucket,
     success_status: 200,
     anonymous: false,
     evidence: &[
-        "https://github.com/rustfs/rustfs/blob/736e4fb8e8e5d527c25e4e56f352536b311b6daf/rustfs/src/admin/handlers/on_demand_migration.rs",
+        "https://github.com/rustfs/rustfs/blob/5e1bd498ce1ca33bcb0ca50aeee861e69e6c8744/rustfs/src/admin/handlers/on_demand_migration.rs",
         record::ADR_0027,
         record::ADR_0030,
         record::ISSUE,

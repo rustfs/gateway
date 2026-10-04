@@ -437,7 +437,7 @@ pub(crate) fn with_segment(template: &str, index: Option<usize>, raw: &str) -> S
         .enumerate()
         .map(|(at, segment)| match (Some(at) == index, param(segment)) {
             (true, _) => raw.to_owned(),
-            (false, Some(name)) => value_of(name),
+            (false, Some(name)) => value_of(name.trim_start_matches('*')),
             (false, None) => segment.to_owned(),
         })
         .collect::<Vec<_>>()

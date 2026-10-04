@@ -152,6 +152,8 @@ jobs:
       # Pinned models must match their recorded checksums before anything is generated from them.
       - name: Model integrity
         run: python3 model/tools/verify.py
+      - name: Admin inventory reader tests
+        run: python3 scripts/test_admin_route_variants.py
       # Dependency policy against deny.toml: RustSec advisories, bans, licences and sources.
       # `--locked` judges the committed Cargo.lock, not one cargo would rewrite first, and
       # `--all-features` takes in the compat-s3s oracles, the repository's only git source.

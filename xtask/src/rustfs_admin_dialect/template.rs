@@ -68,9 +68,20 @@ pub(super) fn template_params(route: &Route, at: &str) -> Result<Template, Strin
     let mut bucket = None;
     let mut all: Vec<Segment<'_>> = segments(route.path.strip_prefix('/').unwrap_or(&route.path)).collect();
     if matches!(all.last(), Some(Segment::Literal(""))) && all.len() > 1 {
+        if matches!(all.get(all.len() - 2), Some(Segment::Param(name)) if name.starts_with('*')) {
+            return Err(format!("{at}: a catch-all must be last"));
+        }
         all.pop();
     }
-    for segment in all {
+    let raw_params: Vec<String> = all
+        .iter()
+        .filter_map(|segment| match segment {
+            Segment::Param(name) => Some((*name).to_owned()),
+            Segment::Literal(_) => None,
+        })
+        .collect();
+    let count = all.len();
+    for (index, segment) in all.into_iter().enumerate() {
         match segment {
             Segment::Literal("") => return Err(format!("{at}: an empty segment that is not a trailing '/'")),
             Segment::Literal(text) if text.contains(['{', '}']) => {
@@ -78,6 +89,11 @@ pub(super) fn template_params(route: &Route, at: &str) -> Result<Template, Strin
             }
             Segment::Literal(_) => {}
             Segment::Param(name) => {
+                let catch_all = name.starts_with('*');
+                let name = name.strip_prefix('*').unwrap_or(name);
+                if catch_all && index + 1 != count {
+                    return Err(format!("{at}: a catch-all must be last"));
+                }
                 if name.is_empty() || !name.bytes().all(|byte| byte.is_ascii_lowercase() || byte == b'_') {
                     return Err(format!("{at}: the parameter {{{name}}} is not a lowercase identifier"));
                 }
@@ -85,6 +101,9 @@ pub(super) fn template_params(route: &Route, at: &str) -> Result<Template, Strin
                     return Err(format!("{at}: the parameter {{{name}}} appears twice"));
                 }
                 if BUCKET_PARAMS.contains(&name) {
+                    if catch_all {
+                        return Err(format!("{at}: a catch-all cannot bind a bucket"));
+                    }
                     if bucket.is_some() {
                         return Err(format!("{at}: two parameters name a bucket"));
                     }
@@ -94,8 +113,8 @@ pub(super) fn template_params(route: &Route, at: &str) -> Result<Template, Strin
             }
         }
     }
-    if params != route.path_params {
-        return Err(format!("{at}: the template names {params:?}, the inventory {:?}", route.path_params));
+    if raw_params != route.path_params {
+        return Err(format!("{at}: the template names {raw_params:?}, the inventory {:?}", route.path_params));
     }
     Ok(Template { params, bucket })
 }
@@ -116,6 +135,18 @@ pub(super) fn shadowing(declared: &[Declared]) -> Result<Vec<(usize, usize, Shad
             }
             let (x, y): (Vec<Segment<'_>>, Vec<Segment<'_>>) =
                 (segments(&first.path).collect(), segments(&second.path).collect());
+            if x.iter()
+                .chain(&y)
+                .any(|segment| matches!(segment, Segment::Param(name) if name.starts_with('*')))
+            {
+                if catch_all_overlap(&x, &y) {
+                    return Err(format!(
+                        "{} and {} have a catch-all overlap that needs an explicit generator rule",
+                        first.name, second.name
+                    ));
+                }
+                continue;
+            }
             if x.len() != y.len() {
                 continue;
             }
@@ -157,6 +188,24 @@ pub(super) fn shadowing(declared: &[Declared]) -> Result<Vec<(usize, usize, Shad
     Ok(pairs)
 }
 
+/// A catch-all consumes a nonempty remainder; incompatible fixed prefixes share no path.
+fn catch_all_overlap(first: &[Segment<'_>], second: &[Segment<'_>]) -> bool {
+    for (index, (a, b)) in first.iter().zip(second).enumerate() {
+        match (a, b) {
+            (Segment::Param(name), _) if name.starts_with('*') => {
+                return second.get(index..) != Some(&[Segment::Literal("")][..]);
+            }
+            (_, Segment::Param(name)) if name.starts_with('*') => {
+                return first.get(index..) != Some(&[Segment::Literal("")][..]);
+            }
+            (Segment::Literal(a), Segment::Literal(b)) if a != b => return false,
+            (Segment::Literal(""), Segment::Param(_)) | (Segment::Param(_), Segment::Literal("")) => return false,
+            _ => {}
+        }
+    }
+    false
+}
+
 /// `Get` for `GET`, the surface's name tag (`Iceberg` for the table catalog, nothing for the
 /// admin API), and each path word after the surface's prefix capitalised (a `{parameter}` as `By`
 /// and its words), then the query value.
@@ -167,7 +216,7 @@ pub(super) fn type_name(method: &str, surface: &Surface, path: &str, query: Opti
         match segment {
             Segment::Param(param) => {
                 words.push("By");
-                words.extend(param.split('_'));
+                words.extend(param.strip_prefix('*').unwrap_or(param).split('_'));
             }
             Segment::Literal(text) => words.extend(text.split(['-', '_', '.'])),
         }
