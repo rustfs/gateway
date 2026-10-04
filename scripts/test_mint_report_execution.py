@@ -5,6 +5,7 @@
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -14,8 +15,9 @@ ROOT = Path(__file__).resolve().parents[1]
 GUARD = ROOT / "scripts/check_mint_report.sh"
 
 
-def exercise(guard=GUARD, report=None, child_change=""):
+def exercise(guard=GUARD, report=None, child_change="", extra_probes=""):
     source = guard.read_text().split("<<'PYEOF'\n", 1)[1].rsplit("\nPYEOF", 1)[0]
+    source = source.replace("if failures:\n    for failure in failures:", extra_probes + "\nif failures:\n    for failure in failures:")
     with tempfile.TemporaryDirectory() as directory:
         receipt = Path(directory) / "commands.json"
         wrapper = '''import json, subprocess, sys
@@ -85,6 +87,66 @@ class MintExecutionTests(unittest.TestCase):
                 script.write_text(f"raise SystemExit({code})\n")
                 self.assertEqual(run([sys.executable, str(script)]).returncode, code)
 
+    def test_missing_json_helper_refused(self):
+        with tempfile.TemporaryDirectory() as directory:
+            script = Path(directory) / "report.py"
+            shutil.copyfile(ROOT / "ci/mint/report.py", script)
+            evidence = Path(directory) / "log.json"
+            evidence.write_text('{}')
+            with self.assertRaises(FileNotFoundError):
+                self.runner()([sys.executable, str(script), "redact", str(evidence)])
+
+    def test_each_invocation_reads_current_json_helper_bytes(self):
+        run = self.runner()
+        with tempfile.TemporaryDirectory() as directory:
+            script = Path(directory) / "report.py"
+            shutil.copyfile(ROOT / "ci/mint/report.py", script)
+            helper, evidence = Path(directory) / "_redaction.py", Path(directory) / "log.json"
+            for label in ("first", "second"):
+                helper.write_text(f'def redact_json(text, secrets, redact_text):\n    return {label!r}\n')
+                evidence.write_text('{}')
+                result = run([sys.executable, str(script), "redact", str(evidence)])
+                self.assertEqual(result.returncode, 0)
+                self.assertEqual(evidence.read_text(), label)
+
+    def test_late_delimiter_cannot_consume_complete_suffix_records(self):
+        result, _ = exercise(extra_probes='''
+def late_delimiter_preserved(work, proposal):
+    if proposal.exists():
+        return "an incomplete run left a proposal behind"
+    text = (work / "log/minio-go/log.json").read_text(encoding="utf-8")
+    if "synthetic-late-delimiter-material-1266" in text:
+        return "a signing value retained material"
+    ending = "\\n" + delimiter + "\\n"
+    preserved = text.endswith(ending)
+    text = text[:-len(ending)] if preserved else text
+    try:
+        boundary = text.rfind("\\n", 0, text.index('"valid-suffix"')) + 1
+        records = [json.loads(text.splitlines()[0]), *json_documents(text[boundary:])]
+    except (json.JSONDecodeError, ValueError):
+        return "redaction corrupted or lost complete suffix records"
+    expected = [json.loads(rec("minio-go", name, status)) for name, status in (
+        ("valid-prefix", "PASS"), ("valid-suffix", "NA"), ("valid-after-suffix", "PASS"))]
+    if records != expected or '"tail"' not in text:
+        return "redaction changed suffix record fields, order or census"
+    if not preserved:
+        return "redaction discarded the original late delimiter"
+
+for key, value, delimiter in (
+    ("credential", '{"nested":"synthetic-late-delimiter-material-1266"', "}"),
+    ("StringToSignBytes", '["synthetic-late-delimiter-material-1266"', "]"),
+):
+    logs = healthy_logs()
+    fragment = '{"name":"minio-go","function":"tail","status":"FAIL","' + key + '":' + value
+    logs["minio-go"] = (rec("minio-go", "valid-prefix", "PASS") + "\\n" + fragment + "\\n"
+        + rec("minio-go", "valid-suffix", "NA") + "\\n" + rec("minio-go", "valid-after-suffix", "PASS") + "\\n" + delimiter)
+    probe("late delimiter " + key + " preserves complete suffix records", 3,
+        ["record 2 in minio-go/log.json is not valid JSON", '"complete": false'], logs=logs, redact=True,
+        record=True, stale_proposal=True, after=late_delimiter_preserved)
+''')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("OK: 112 mint report probes;", result.stdout)
+
     def test_noninteger_system_exit_matches_python(self):
         run = self.runner()
         with tempfile.TemporaryDirectory() as directory:
@@ -105,7 +167,7 @@ class MintExecutionTests(unittest.TestCase):
     def test_complete_census_uses_bounded_judge_subprocesses(self):
         result, commands = exercise()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn("OK: 52 mint report probes;", result.stdout)
+        self.assertIn("OK: 110 mint report probes;", result.stdout)
         judges = [cmd for cmd in commands if len(cmd) > 2 and cmd[2] == "judge"]
         self.assertEqual(len(judges), 4, "all four CLI exit classes need one boundary control; remaining judges must reuse the interpreter")
         self.assertEqual(sum(len(cmd) > 2 and cmd[2] == "redact" for cmd in commands), 1)

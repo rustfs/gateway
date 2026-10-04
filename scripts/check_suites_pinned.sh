@@ -339,6 +339,7 @@ MINT_INPUTS = (
     "ci/mint/run.sh",
     "ci/mint/pins.env",
     "ci/mint/report.py",
+    "ci/mint/_redaction.py",
     "ci/mint/baseline.txt",
 )
 missing_mint = [name for name in MINT_INPUTS if not (root / name).is_file()]

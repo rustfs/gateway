@@ -62,7 +62,7 @@ class MintLocalImage(unittest.TestCase):
     def probe(self, args, scenario=""):
         with tempfile.TemporaryDirectory(prefix="mint-local-test-") as directory:
             root = Path(directory)
-            for name in ("ci/mint/run.sh", "ci/mint/pins.env", "ci/mint/report.py"):
+            for name in ("ci/mint/run.sh", "ci/mint/pins.env", "ci/mint/report.py", "ci/mint/_redaction.py"):
                 target = root / name
                 target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(ROOT / name, target)

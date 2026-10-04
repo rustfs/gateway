@@ -175,7 +175,7 @@ def probe(
     expected_code: int,
     expect: list[str] = [],
     forbid: list[str] = [],
-    logs: dict[str, str | None] | None = None,
+    logs: dict[str, str | bytes | None] | None = None,
     progress: str | None = None,
     base: str | None = None,
     extra_dirs: dict[str, str] | None = None,
@@ -185,6 +185,7 @@ def probe(
     after=None,
     passes: list[tuple[list[str], str]] | None = None,
     also_progress: bool = False,
+    redact: bool = False,
 ) -> None:
     global probes
     probes += 1
@@ -196,7 +197,11 @@ def probe(
             if text is None:
                 continue
             (log_dir / sdk).mkdir()
-            (log_dir / sdk / "log.json").write_text(text + ("\n" if text else ""), encoding="utf-8")
+            path = log_dir / sdk / "log.json"
+            if isinstance(text, bytes):
+                path.write_bytes(text)
+            else:
+                path.write_text(text + ("\n" if text else ""), encoding="utf-8")
         for name, text in (extra_dirs or {}).items():
             (log_dir / name).mkdir()
             (log_dir / name / "log.json").write_text(text + "\n", encoding="utf-8")
@@ -223,6 +228,12 @@ def probe(
             command += ["--pass", " ".join(pass_sdks), str(pass_path)]
         if record or record_at_baseline:
             command += ["--record", str(proposal)]
+        if redact:
+            redaction = run_report([sys.executable, report, "redact", "--secret-env", "MINT_JSON_REDACTION_PROBE",
+                                   str(log_dir), str(progress_path)])
+            if redaction.returncode:
+                failures.append(f"{label}: redaction exited {redaction.returncode}")
+                return
         result = run_report(command)
         # Keep real interpreter boundary controls for every supported exit class.
         # The first fixture in each class is non-recording and deterministic.
@@ -531,6 +542,179 @@ leaky["minio-go"] = leaky["minio-go"].replace(
 )
 probe("a failing function name is redacted before it reaches the aggregate report", 0,
       ["X-Amz-Signature=[REDACTED]"], ["feedfacefeedface0001"], logs=leaky)
+
+# Decode the evidence after the real redact command, then run the unchanged judge.
+# A parseable stream alone could conceal lost records or changed status/function values.
+def json_documents(text):
+    decoder, records, position = json.JSONDecoder(), [], 0
+    while position < len(text):
+        if text[position].isspace():
+            position += 1
+            continue
+        document, position = decoder.raw_decode(text, position)
+        records.append(document)
+    return records
+
+def same_redacted_records(expected):
+    def check(work: Path, proposal: Path) -> str | None:
+        text = (work / "log/minio-go/log.json").read_text(encoding="utf-8")
+        try:
+            records = json_documents(text)
+        except json.JSONDecodeError:
+            return "redaction corrupted valid JSON evidence"
+        if records != expected:
+            return "redaction changed record content, order or census beyond signing material"
+        if (work / "console.txt").read_text(encoding="utf-8") != console(HEALTHY_PROGRESS):
+            return "redaction changed ordinary text console diagnostics"
+        return None
+    return check
+
+TEXT_REDACTIONS = (
+    ('Authorization: "quoted-auth"', 'Authorization: "[REDACTED]"'),
+    ("Authorization: 'single-auth'", "Authorization: '[REDACTED]'"),
+    ('authorization="equals-auth"', 'authorization="[REDACTED]"'),
+    ('expected signature: "quoted-signature"', 'expected signature: "[REDACTED]"'),
+    ('x-amz-security-token: "quoted-token"', 'x-amz-security-token: "[REDACTED]"'),
+    ('?X-Amz-Signature=presigned-signature&X-Amz-Credential=presigned-key&X-Amz-Security-Token=presigned-token',
+     '?X-Amz-Signature=[REDACTED]&X-Amz-Credential=[REDACTED]&X-Amz-Security-Token=[REDACTED]'),
+    ('<StringToSign>string-to-sign</StringToSign><SignatureProvided>provided-signature</SignatureProvided>',
+     '<StringToSign>[REDACTED]</StringToSign><SignatureProvided>[REDACTED]</SignatureProvided>'),
+)
+FIELD_REDACTIONS = ("Authorization", "x-amz-signature", "x-amz-credential", "x-amz-security-token",
+                    "signature", "credential", "expected_signature", "expectedsignature", "token", "secret_access_key",
+                    "StringToSign", "StringToSignBytes", "CanonicalRequest", "CanonicalRequestBytes", "SignatureProvided")
+for index, (raw, safe) in enumerate(TEXT_REDACTIONS):
+    logs = healthy_logs()
+    fixture_record = {"name": "minio-go", "function": "quoted-diagnostic", "duration": 5, "status": "FAIL", "error": raw}
+    expected = {**fixture_record, "error": safe}
+    trailing = [json.loads(rec("minio-go", "untouched-pass", "PASS")), json.loads(rec("minio-go", "untouched-na", "NA"))]
+    logs["minio-go"] = ("" if index % 2 else "\n").join(json.dumps(document) for document in [fixture_record, *trailing])
+    probe(f"JSON signing diagnostic {index + 1} stays redacted and attributable", 0,
+          ["KNOWN      minio-go fail=1 baseline=1 pass=1 na=1", "incomplete=0"],
+          logs=logs, redact=True, after=same_redacted_records([expected, *trailing]))
+for key in FIELD_REDACTIONS:
+    logs = healthy_logs()
+    fixture_record = json.loads(rec("minio-go", "structured-diagnostic", "FAIL"))
+    fixture_record["error"] = {"nested": [{key: 'field-value with "quotes" and \\ slash', "ordinary": "keep diagnostic"}]}
+    expected = {**fixture_record, "error": {"nested": [{key: "[REDACTED]", "ordinary": "keep diagnostic"}]}}
+    logs["minio-go"] = json.dumps(fixture_record, indent=2)
+    probe(f"JSON signing field {key} is fully redacted without changing its record", 0,
+          ["KNOWN      minio-go fail=1 baseline=1 pass=0 na=0"], logs=logs, redact=True,
+          after=same_redacted_records([expected]))
+ordinary = healthy_logs()
+ordinary_record = json.loads(rec("minio-go", "ordinary-function", "FAIL"))
+ordinary_record["error"] = 'ordinary "quoted" diagnostic with \\ slash and\nnext line \u2603'
+ordinary["minio-go"] = json.dumps(ordinary_record, ensure_ascii=True)
+probe("ordinary JSON diagnostic survives redaction unchanged", 0,
+      ["KNOWN      minio-go fail=1 baseline=1"], logs=ordinary, redact=True,
+      after=same_redacted_records([ordinary_record]))
+known_secret = 'configured-"secret"-with-\\-and-\u2603'
+previous_secret = os.environ.get("MINT_JSON_REDACTION_PROBE")
+os.environ["MINT_JSON_REDACTION_PROBE"] = known_secret
+try:
+    logs = healthy_logs()
+    fixture_record = json.loads(rec("minio-go", "configured-secret", "FAIL", error="before " + known_secret + " after"))
+    logs["minio-go"] = json.dumps(fixture_record, ensure_ascii=True)
+    probe("JSON escaped configured secret is removed after decoding", 0,
+          logs=logs, redact=True, after=same_redacted_records([{**fixture_record, "error": "before [REDACTED] after"}]))
+    os.environ["MINT_JSON_REDACTION_PROBE"] = "configured-key-secret"
+    fixture_record = json.loads(rec("minio-go", "secret-key-diagnostic", "FAIL"))
+    fixture_record["error"] = {"before-configured-key-secret-after": "ordinary value", "ordinary-key": "keep"}
+    logs["minio-go"] = json.dumps(fixture_record)
+    expected = {**fixture_record, "error": {"before-[REDACTED]-after": "ordinary value", "ordinary-key": "keep"}}
+    probe("known secret in a JSON dictionary key is removed without changing ordinary keys", 0,
+          logs=logs, redact=True, after=same_redacted_records([expected]))
+finally:
+    if previous_secret is None:
+        os.environ.pop("MINT_JSON_REDACTION_PROBE", None)
+    else:
+        os.environ["MINT_JSON_REDACTION_PROBE"] = previous_secret
+
+def malformed_tail_preserved(work: Path, proposal: Path) -> str | None:
+    if proposal.exists():
+        return "an incomplete run left a proposal behind"
+    text = (work / "log/minio-go/log.json").read_text(encoding="utf-8")
+    if not all(name in text for name in ("valid-prefix", "malformed-tail", "valid-suffix")):
+        return "redaction discarded a record around the malformed tail"
+    return None
+
+for index, (broken_record, ordinal) in enumerate((
+    (rec("minio-go", "malformed-tail", "FAIL", error='Authorization: "malformed-auth"')[:-1], 2),
+    (rec("minio-go", "malformed-tail", "FAIL", error="x-amz-security-token: token") + " not-json", 3),
+    (rec("minio-go", "malformed-tail", "FAIL", Authorization="invalid-escape")[:-2] + '\\q"}', 2),
+)):
+    logs = healthy_logs()
+    logs["minio-go"] = rec("minio-go", "valid-prefix", "PASS") + "\n" + broken_record + "\n" + rec("minio-go", "valid-suffix", "NA")
+    probe(f"redaction cannot repair or discard malformed JSON tail {index + 1}", 3,
+          [f"record {ordinal} in minio-go/log.json is not valid JSON", '"complete": false'], logs=logs, redact=True,
+          record=True, stale_proposal=True, after=malformed_tail_preserved)
+
+for label, document, problem in (
+    ("non-object", [{"Authorization": "array-secret"}], "is not a JSON object"),
+    ("unknown status", {"name": "minio-go", "function": "unknown-status", "status": "SKIPPED", "Authorization": "status-secret"},
+     "which is not one of"),
+):
+    logs = healthy_logs()
+    logs["minio-go"] = json.dumps(document)
+    article = "an" if label == "unknown status" else "a"
+    probe(f"redaction keeps {article} {label} record incomplete", 3,
+          [problem, '"complete": false'], logs=logs, redact=True, record=True, stale_proposal=True, after=no_proposal)
+
+invalid_utf8 = healthy_logs()
+invalid_utf8["minio-go"] = rec("minio-go", "unreadable-record", "FAIL", error="ordinary-byte").encode().replace(b"ordinary-byte", b"ordinary-\xff-byte")
+probe("redaction cannot turn invalid UTF-8 into a valid JSON record", 3,
+      ["unreadable (UnicodeDecodeError)", '"complete": false'], logs=invalid_utf8, redact=True,
+      record=True, stale_proposal=True, after=no_proposal)
+
+def malformed_signing_fields_redacted(work: Path, proposal: Path) -> str | None:
+    problem = malformed_tail_preserved(work, proposal)
+    if problem:
+        return problem
+    if "bad-tail-signing-material" in (work / "log/minio-go/log.json").read_text(encoding="utf-8"):
+        return "malformed JSON tail retained signing field material"
+    return None
+
+for key, value in [(key, "bad-tail-signing-material") for key in FIELD_REDACTIONS] + [
+    ("StringToSignBytes", ["bad-tail-signing-material"]), ("credential", {"nested": "bad-tail-signing-material"}),
+]:
+    logs = healthy_logs()
+    broken_record = rec("minio-go", "malformed-tail", "FAIL", **{key: value})[:-1]
+    logs["minio-go"] = rec("minio-go", "valid-prefix", "PASS") + "\n" + broken_record + "\n" + rec("minio-go", "valid-suffix", "NA")
+    probe(f"malformed JSON tail signing field {key} stays redacted ({type(value).__name__})", 3,
+          ["record 2 in minio-go/log.json is not valid JSON", '"complete": false'], logs=logs, redact=True,
+          record=True, stale_proposal=True, after=malformed_signing_fields_redacted)
+
+def unterminated_signing_fragment_redacted(work: Path, proposal: Path) -> str | None:
+    if proposal.exists():
+        return "an incomplete run left a proposal behind"
+    text = (work / "log/minio-go/log.json").read_text(encoding="utf-8")
+    if any(material in text for material in ("synthetic-unclosed-material-1266", "root-synthetic-unclosed-string-value-1266")):
+        return "an unterminated signing value retained signing material"
+    try:
+        boundary = text.rfind("\n", 0, text.index('"valid-suffix"')) + 1
+        records = [json.loads(text.splitlines()[0]), *json_documents(text[boundary:])]
+    except (json.JSONDecodeError, ValueError):
+        return "redaction corrupted ordinary record framing around an unterminated signing value"
+    if records != [json.loads(rec("minio-go", name, status)) for name, status in (("valid-prefix", "PASS"), ("valid-suffix", "NA"), ("valid-after-suffix", "PASS"))] or '"tail"' not in text:
+        return "redaction changed ordinary record fields around an unterminated signing value"
+    return None
+for index, fragment in enumerate((
+    '{"name":"minio-go","function":"tail","status":"FAIL","signature":"synthetic-unclosed-material-1266',
+    '{"name":"minio-go","function":"tail","status":"FAIL","token":"synthetic-unclosed-material-1266',
+    '{"name":"minio-go","function":"tail","status":"FAIL","credential":{"nested":"synthetic-unclosed-material-1266",}}',
+    '{"name":"minio-go","function":"tail","status":"FAIL","StringToSignBytes":["synthetic-unclosed-material-1266",]}',
+    '{"name":"minio-go","function":"tail","status":"FAIL","credential":{"nested":"synthetic-unclosed-material-1266"',
+    '{"name":"minio-go","function":"tail","status":"FAIL","StringToSignBytes":["synthetic-unclosed-material-1266"',
+    '{"name":"minio-go","function":"tail","status":"FAIL","credential":{\n"nested":"synthetic-unclosed-material-1266"',
+    '{"name":"minio-go","function":"tail","status":"FAIL","StringToSignBytes":[\n"synthetic-unclosed-material-1266"',
+    '{"name":"minio-go","function":"tail","status":"FAIL","credential":{\n{"nested":"synthetic-unclosed-material-1266"}',
+    '{"name":"minio-go","function":"tail","status":"FAIL","token":"first-line\nroot-synthetic-unclosed-string-value-1266',
+)):
+    logs = healthy_logs()
+    logs["minio-go"] = rec("minio-go", "valid-prefix", "PASS") + "\n" + fragment + "\n" + rec("minio-go", "valid-suffix", "NA") + "\n" + rec("minio-go", "valid-after-suffix", "PASS")
+    probe(f"unterminated signing fragment {index + 1} stays redacted and incomplete", 3,
+          ["record 2 in minio-go/log.json is not valid JSON", '"complete": false'], logs=logs, redact=True,
+          record=True, stale_proposal=True, after=unterminated_signing_fragment_redacted)
 
 probes += 1
 with tempfile.TemporaryDirectory() as directory:

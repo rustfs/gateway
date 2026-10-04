@@ -88,6 +88,7 @@ import argparse
 import json
 import os
 import re
+import runpy
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -130,7 +131,6 @@ REDACTIONS = (
     ),
     re.compile(r"(?i)(expected[ _-]?signature[\"']?\s*[:=]?\s*[\"']?)[^\s\"'<>,]+"),
 )
-
 # Mint prints `(<j>/<n>) Running <sdk> tests ... ` before an SDK and `done in` or `FAILED in`
 # after it. Only these markers are read from the console; nothing else in it is interpreted.
 RUNNING = re.compile(r"^\((\d+)/(\d+)\) Running (\S+) tests \.\.\. ", re.MULTILINE)
@@ -152,6 +152,14 @@ def redact_text(text: str, secrets: list[str]) -> str:
     return text
 
 
+# Read the helper afresh for each standalone or embedded reporter invocation.
+_redact_json = runpy.run_path(str(Path(__file__).with_name("_redaction.py")))["redact_json"]
+
+
+def redact_json(text: str, secrets: list[str]) -> str:
+    return _redact_json(text, secrets, redact_text)
+
+
 def redact_paths(paths: list[Path], secrets: list[str]) -> int:
     """Rewrites every regular file under `paths` in place. Returns how many changed."""
     files: list[Path] = []
@@ -168,7 +176,7 @@ def redact_paths(paths: list[Path], secrets: list[str]) -> int:
     for file in files:
         try:
             original = file.read_bytes().decode("utf-8", errors="surrogateescape")
-            redacted = redact_text(original, secrets)
+            redacted = redact_json(original, secrets) if file.suffix == ".json" else redact_text(original, secrets)
             if redacted != original:
                 file.write_bytes(redacted.encode("utf-8", errors="surrogateescape"))
                 changed += 1

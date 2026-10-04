@@ -14290,6 +14290,12 @@ mut_mint_input_deleted() {
 expect_fail check_suites_pinned.sh 'the mint reporter deleted from the runner inputs' \
     mut_mint_input_deleted 'the mint runner is incomplete; required inputs are missing: ci/mint/report.py'
 
+mut_mint_json_helper_deleted() {
+    rm -f ci/mint/_redaction.py
+}
+expect_fail check_suites_pinned.sh 'the mint JSON redaction helper deleted from the runner inputs' \
+    mut_mint_json_helper_deleted 'the mint runner is incomplete; required inputs are missing: ci/mint/_redaction.py'
+
 mut_mint_image_short_digest() {
     mint_mutate ci/mint/pins.env \
         'MINT_IMAGE=docker.io/minio/mint@sha256:08a05e68893c68be2a83b6f79556853ed6aa3c6c9e64c823a00853e4e55d2200' \
