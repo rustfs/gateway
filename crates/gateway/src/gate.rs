@@ -35,8 +35,8 @@
 //! gone red if it had. Axiom A3 says ordering contracts are fixed by types, and this is that fix —
 //! [`SealedBody::read`] takes a [`&MetadataAdmission`], [`MetadataAdmission::of`] is the only
 //! constructor of one and it is fallible on the verdict, so a pipeline that exposes ordinary body
-//! bytes first does not compile. POST Object may parse its bounded text prelude before admission,
-//! but its file stream has the same proof-gated handoff.
+//! bytes first does not compile. The bounded POST Object prelude and RustFS's STS-scoped body
+//! hash are private pre-verification reads; both retain the proof-gated handoff to an operation.
 //!
 //! The cost of getting it wrong is not hypothetical. A request with a bad signature and a very
 //! large body makes an implementation that reads first do the attacker's work: the transfer is
@@ -79,8 +79,11 @@ use crate::wire_read::{RequestBodyUnfinished, WireFrames, WireProgress, WireRead
 #[path = "gate_ceilings.rs"]
 mod ceilings;
 use ceilings::declared_body_cap;
+#[path = "gate_pre_verification.rs"]
+mod pre_verification;
 pub use ceilings::max_framed_upload_bytes;
 pub(crate) use ceilings::{object_ceiling_for, past_object_ceiling};
+pub(crate) use pre_verification::StsBodyReader;
 
 /// Evidence that a request's signature reached a verdict and the verdict was not a rejection.
 ///
@@ -171,12 +174,14 @@ impl BodyCeilings {
     }
 }
 
-/// A request body that has arrived and has not been read.
+/// A request body sealed from ordinary access until metadata admission.
 ///
-/// The `Option` is the "there was no body" case rather than a taken value: `read` consumes `self`,
-/// so a body cannot be read twice and there is no state in which one has been half-taken.
+/// The private STS digest read can retain a replay; the ordinary handoff still consumes `self`
+/// and requires metadata admission, so neither the original body nor a replay reaches an operation twice.
 pub(crate) struct SealedBody<B> {
-    body: Option<B>,
+    body: tokio::sync::Mutex<Option<B>>,
+    replay: std::sync::OnceLock<Box<Result<Bytes, S3Error>>>, // Allocated only by the STS reader.
+    sts_progress: std::sync::OnceLock<WireProgress>,
     declared_length: Option<u64>,
     /// The largest object a streamed upload may declare (`gate_ceilings.rs`), when one applies.
     object_ceiling: Option<u64>,
@@ -189,9 +194,11 @@ where
     B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
 {
     /// Seals a body that the transport handed over, with whatever length the head announced.
-    pub(crate) const fn seal(body: Option<B>, declared_length: Option<u64>) -> Self {
+    pub(crate) fn seal(body: Option<B>, declared_length: Option<u64>) -> Self {
         Self {
-            body,
+            body: tokio::sync::Mutex::new(body),
+            replay: std::sync::OnceLock::new(),
+            sts_progress: std::sync::OnceLock::new(),
             declared_length,
             object_ceiling: None,
         }
@@ -201,17 +208,6 @@ where
     pub(crate) const fn with_object_ceiling(mut self, ceiling: Option<u64>) -> Self {
         self.object_ceiling = ceiling;
         self
-    }
-
-    /// Reads only POST Object's bounded text prelude, leaving the file part unopened.
-    pub(crate) async fn post_object_prelude(
-        self,
-        content_type: &str,
-        form: crate::builder::view_policy::post_forms::PostFormRead,
-        timeouts: BodyTimeouts,
-    ) -> Result<crate::post_object::PostObjectPrelude<B>, S3Error> {
-        crate::post_object::PostObjectPrelude::read_with_grammar(self.body, content_type, form.limits, form.grammar, timeouts)
-            .await
     }
 
     /// Reads the body, bounded twice, and only for a caller holding a [`MetadataAdmission`].
@@ -236,19 +232,21 @@ where
         // contradiction between two claims is not decidable from any number of body bytes.
         integrity: impl Into<Integrity>,
     ) -> Result<Bytes, S3Error> {
+        let declared_length = self.declared_length;
+        let body = self.into_body()?;
         let Integrity { claims, codes } = integrity.into();
         let refuse = move |reject| codes.refusal(reject);
         // Opened here, closed on every path that reaches a caller with bytes in hand.
         // `crate::payload_header::body_digest_obligation` mints `BodyDigestObligation::Sha256` for
         // every signed exact digest, header-signed and presigned alike (c-sig-0596, c-sig-0430).
-        let progress = WireProgress::for_body(digest, self.body.as_ref());
+        let progress = WireProgress::for_body(digest, body.as_ref());
         // Read only by the unframed arm below, and that is the whole of the rule: under framing
         // the bytes arriving here are chunk headers, signatures and CRLFs, and the object's own
         // octets exist only after the decoder has produced them, so the framed path's digests are
         // fed from inside `ChunkIngest::run` instead.
         let fuse_digests = !claims.is_empty();
         let mut digests = claims.begin();
-        let Some(body) = self.body else {
+        let Some(body) = body else {
             if !progress.digest_matches() {
                 return Err(content_sha256_mismatch());
             }
@@ -259,11 +257,11 @@ where
             return Ok(Bytes::new());
         };
         if let Some(cap) = ceilings.declared
-            && self.declared_length.is_some_and(|length| length > cap)
+            && declared_length.is_some_and(|length| length > cap)
         {
             return Err(past_declared_cap(progress.request_body_unfinished()));
         }
-        if ceilings.whole_body && self.declared_length.is_some_and(|length| length > ceilings.buffered) {
+        if ceilings.whole_body && declared_length.is_some_and(|length| length > ceilings.buffered) {
             return Err(past_buffered_ceiling(progress.request_body_unfinished()));
         }
 
@@ -344,9 +342,10 @@ where
         integrity: impl Into<Integrity>,
     ) -> Result<crate::request_body::StreamingRead, S3Error> {
         let (ceilings, timeouts, body_quota) = body_plan;
+        let lengths = (self.declared_length, self.object_ceiling);
         crate::request_body::StreamingRead::new(
-            self.body,
-            (self.declared_length, self.object_ceiling),
+            self.into_body()?,
+            lengths,
             (ceilings, timeouts, body_quota),
             ingest,
             digest,

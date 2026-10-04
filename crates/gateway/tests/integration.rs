@@ -228,6 +228,8 @@ mod steady_state_allocations;
 mod streaming_request;
 #[path = "streaming_without_length.rs"]
 mod streaming_without_length;
+#[path = "sts_body_signature.rs"]
+mod sts_body_signature;
 #[path = "tagging_reachability.rs"]
 mod tagging_reachability;
 #[path = "throughput_request.rs"]

@@ -157,6 +157,7 @@ use crate::routed_facts::RoutedFacts;
 use crate::trace::{RequestTrace, TraceSource};
 use crate::{response::into_response, routing::RuntimeAssembly};
 
+mod body_preparation;
 mod cors;
 mod outcome;
 mod update;
@@ -738,9 +739,8 @@ impl S3Service {
         };
         let config = config.governed(lease);
 
-        // POST Object is the one protocol surface whose credentials live before the file inside
-        // the body. Its bounded text prelude is the only pre-auth body read; the returned type has
-        // no file reader, so this exception cannot consume an object byte.
+        // POST Object's credentials live in its bounded prelude. Ordinary bodies remain sealed,
+        // including a body the RustFS authenticator may bound and hash for an STS-scoped signature.
         let sealed = SealedBody::seal(pending, declared_length);
         let routed_body = if is_post_object {
             let content_type = headers
@@ -843,10 +843,14 @@ impl S3Service {
                     // Offered before the verdict and read long after it. An `aws-chunked` body's chunk
                     // chain is verified with the same key and seed the request signature was, and
                     // neither survives `Verdict` — see `crate::ext::ChunkVerification`.
-                    .with_chunk_sink(&chunk_sink);
+                    .with_chunk_sink(&chunk_sink)
+                    .with_sts_body_reader(routed_body.sts_body_reader(), config.config().request_body_deadlines());
                     let result = self.inner.authenticator.authenticate(&question).await;
-                    let (signature_mismatch, published_legacy) = question.into_published();
+                    let (signature_mismatch, published_legacy, body_refusal) = question.into_published();
                     legacy = published_legacy;
+                    if let Some(refusal) = body_refusal {
+                        return outcome.refuse_at(Refused::Authentication, refusal);
+                    }
                     match result {
                         Ok(authentication) => (authentication, signature_mismatch),
                         Err(_) => {
@@ -954,22 +958,15 @@ impl S3Service {
         // A claimed route's declared body past the profile's ceiling is refused here: after the
         // signature and before authorization, as legacy RustFS refuses one (`builder/claimed_bodies.rs`).
         if let RoutedBody::Ordinary(sealed) = &routed_body
-            && let Some(refusal) = sealed.past_claimed_ceiling(self.inner.view_policy.claimed_bodies.ceiling(claimed))
+            && let Some(refusal) = sealed
+                .past_claimed_ceiling(self.inner.view_policy.claimed_bodies.ceiling(claimed))
+                .await
         {
             return outcome.refuse(refusal);
         }
-        let accepted_body = match routed_body {
-            RoutedBody::Ordinary(sealed) => AcceptedBody::Ordinary(sealed),
-            RoutedBody::PostObject(prelude) => {
-                let Some(bucket) = meta.bucket().cloned() else {
-                    return outcome.refuse_handler(HandlerError::internal_error("PostObject routed without a bucket"));
-                };
-                let resolved = match (*prelude).resolve(bucket, &self.inner.names, now) {
-                    Ok(resolved) => resolved,
-                    Err(error) => return outcome.refuse_as(Refused::reading_a_form(&error), error),
-                };
-                AcceptedBody::PostObject(Box::new(resolved))
-            }
+        let accepted_body = match self.resolve_routed_body(routed_body, &meta, now) {
+            Ok(body) => body,
+            Err(error) => return outcome.refuse_as(Refused::reading_a_form(&error), error),
         };
         let effective_key = match &accepted_body {
             AcceptedBody::Ordinary(_) => meta.key().cloned(),
