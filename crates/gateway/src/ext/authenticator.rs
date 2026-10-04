@@ -640,7 +640,7 @@ impl SigV4Authenticator {
                         error
                     };
                     let signed = self
-                        .read_signed_headers(signed_headers, view.headers(), request.declared_content_length())
+                        .read_signed_headers(signed_headers, view.headers(), request.declared_content_length(), location)
                         .map_err(legacy_answer)?;
                     let paths = UriPathCandidates::new(request.raw_path())?.with_raw_fallback(self.raw_path);
                     let query = view.query();

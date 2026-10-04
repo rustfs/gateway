@@ -12,18 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The signature-coverage slice of the request-divergence register: the signatures legacy RustFS
-//! verifies and the gateway refuses on purpose, under every profile (rustfs/gateway#1130) — the
-//! headers a SigV4 signature must name in `SignedHeaders`, and the operations a presigned URL may
-//! reach.
+//! The signature-coverage slice of the request-divergence register: the headers a SigV4 signature
+//! must name in `SignedHeaders`, the payload declaration covered by `HashedPayload`, and the
+//! operations a presigned URL may reach (rustfs/gateway#1130 and #1239).
 //!
 //! Responsible for: `rd-loc-0009` (`host` left unsigned) and `rd-loc-0010` (`x-amz-content-sha256`
-//! left unsigned), each with its ruling and its pinned test in
+//! covered only by the payload line), each with its ruling and its pinned test in
 //! `operation_diff/context/get_bucket_location.rs`, and `rd-adm-0001` (a presigned URL on a RustFS
-//! admin route), pinned in `rustfs_admin_dialect/tests.rs`. All three are deliberate: the
-//! coordinator ruled on security grounds that the RustFS profile keeps refusing them (recorded in
-//! rustfs/backlog#2684 among the legacy behaviours intentionally not kept: the class of
-//! GHSA-xm99-m3gq-83g8, and of MinIO #5411, a presigned URL edited to reach an admin operation).
+//! admin route), pinned in `rustfs_admin_dialect/tests.rs`. The Host and presigned-admin refusals
+//! remain security floors under both profiles (rustfs/backlog#2684, GHSA-xm99-m3gq-83g8 and
+//! MinIO #5411). The payload declaration follows AWS header-authentication rules: its canonical
+//! payload line provides coverage without a second entry in `SignedHeaders`.
 //! NOT responsible for: the register's validation and rendering, which the parent module does over
 //! every slice at once, or the other slices.
 //! Upstream: the parent module's types. Downstream: the parent's `REQUEST_DIVERGENCES`, which
@@ -61,20 +60,18 @@ pub(super) const COVERAGE_DIVERGENCES: [RequestDivergence; 3] = [
         id: "rd-loc-0010",
         operation: "GetBucketLocation",
         request: "a header-signed SigV4 request whose SignedHeaders leaves out x-amz-content-sha256",
-        aws: "every x-amz-* header a request carries, x-amz-content-sha256 included, must be named among the signed headers",
-        aws_evidence: SIGNED_REQUEST,
+        aws: "header authentication may omit x-amz-content-sha256 from SignedHeaders because HashedPayload already covers it",
+        aws_evidence: "https://docs.aws.amazon.com/AmazonS3/latest/developerguide/sig-v4-header-based-auth.html",
         s3s: "exempts x-amz-content-sha256 from its rule that every x-amz-* header must be signed, uses its value as the \
               canonical payload line and serves the request; legacy RustFS's own unsigned-header guard exempts it too",
-        gateway: "403 SignatureDoesNotMatch under both profiles: SignedHeaderSet requires every x-amz-* header the request \
-                  carries to be named, with no exemption, so the payload declaration is covered as a header and not only \
-                  through the payload line",
-        client_impact: "every SDK signs x-amz-content-sha256; a hand-built client that does not is served by legacy RustFS and \
-                        refused by the gateway. Kept on security grounds by the coordinator's ruling (rustfs/backlog#2684, \
-                        intentionally not kept; the class of GHSA-xm99-m3gq-83g8, an x-amz-* header outside the signature)",
-        ruling: DivergenceRuling::KeepGateway,
-        follow_up: DivergenceFollowUp::None,
+        gateway: "200 under both profiles: header authentication uses HashedPayload coverage for this declaration; Host and \
+                  semantic x-amz-* headers remain required, and presigned requests retain full header coverage",
+        client_impact: "a valid client signing the payload digest once is accepted, as AWS documents; changed declarations \
+                        fail signature verification and changed body bytes fail payload verification",
+        ruling: DivergenceRuling::AlignAws,
+        follow_up: DivergenceFollowUp::Landed("c-sig-0601"),
         test_file: LOCATION_CONTEXT,
-        test: "a_signature_leaving_the_payload_hash_unsigned_is_verified_by_the_legacy_stack_and_refused_by_the_gateway",
+        test: "a_signature_covering_the_payload_hash_only_in_the_payload_line_is_verified_by_both_stacks",
     },
     RequestDivergence {
         id: "rd-adm-0001",
