@@ -3154,7 +3154,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 
 **Quirks**
 
-- `q-encoding-0015` (encoding_type on `ListObjectsV2`) — When url encoding is requested, a fixed per operation set of members is percent encoded and the encoding type is echoed back; keys containing control characters are otherwise unparseable.
+- `q-encoding-0015` (encoding_type on `ListObjectsV2`) — URL encoding applies to key, prefix, delimiter and starting-key members; opaque continuation tokens keep their value with normal XML escaping. Keys containing control characters require URL encoding.
 - `q-flat-0019` (flattened on `ListObjectsV2`) — Entry and common prefix lists repeat their element with no enclosing wrapper, unlike the wrapped lists used by tag sets and grant lists.
 - `q-mpu-upload-0032` (flattened_list on `ListMultipartUploads.Uploads`) — Each upload element repeats directly under the result root with no wrapper, and the element name is not the member name, so both halves have to come from the model rather than from the member spelling.
 - `q-mpu-upload-id-0037` (capability_token on `UploadPart.UploadId`) — An upload id is a server-minted capability, not a name the caller chose: it is resolved against the bucket and key of the request before anything is written, an unknown id answers the not-found code, and one belonging to another resource is refused rather than honoured.
@@ -3252,7 +3252,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 
 **Quirks**
 
-- `q-encoding-0015` (encoding_type on `ListObjectsV2`) — When url encoding is requested, a fixed per operation set of members is percent encoded and the encoding type is echoed back; keys containing control characters are otherwise unparseable.
+- `q-encoding-0015` (encoding_type on `ListObjectsV2`) — URL encoding applies to key, prefix, delimiter and starting-key members; opaque continuation tokens keep their value with normal XML escaping. Keys containing control characters require URL encoding.
 - `q-flat-0019` (flattened on `ListObjectsV2`) — Entry and common prefix lists repeat their element with no enclosing wrapper, unlike the wrapped lists used by tag sets and grant lists.
 - `q-etag-0020` (etag_render on `Object.ETag`) — Inside the listing body the entity tag keeps its surrounding quotes, in contrast with the bare form used by the object attributes operation.
 - `q-token-0021` (opaque_token on `ListObjectsV2`) — Pagination tokens are attacker controlled opaque bytes; they are never parsed as keys or paths and must survive url encoding unchanged.
@@ -3313,7 +3313,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 **Quirks**
 
 - `q-root-0013` (root_name on `ListObjectsV2`) — The response root element is shared verbatim with the first version of the listing operation, so the root name cannot be derived from the operation or output shape name.
-- `q-encoding-0015` (encoding_type on `ListObjectsV2`) — When url encoding is requested, a fixed per operation set of members is percent encoded and the encoding type is echoed back; keys containing control characters are otherwise unparseable.
+- `q-encoding-0015` (encoding_type on `ListObjectsV2`) — URL encoding applies to key, prefix, delimiter and starting-key members; opaque continuation tokens keep their value with normal XML escaping. Keys containing control characters require URL encoding.
 - `q-owner-0017` (omit_when on `Object.Owner`) — Owner information is written only when the request asked for it, so emission depends on a request field rather than on the value itself.
 - `q-flat-0019` (flattened on `ListObjectsV2`) — Entry and common prefix lists repeat their element with no enclosing wrapper, unlike the wrapped lists used by tag sets and grant lists.
 - `q-etag-0020` (etag_render on `Object.ETag`) — Inside the listing body the entity tag keeps its surrounding quotes, in contrast with the bare form used by the object attributes operation.
@@ -3363,7 +3363,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 - response: XmlBody (Full)
 - response root: `<ListBucketResult>`, xmlns emit
 - element order: `Name`, `Prefix`, `KeyCount`, `MaxKeys`, `Delimiter`, `IsTruncated`, `Contents`, `CommonPrefixes`, `EncodingType`, `ContinuationToken`, `NextContinuationToken`, `StartAfter`
-- percent-encoded under `encoding-type=url`: `Prefix`, `Delimiter`, `StartAfter`, `ContinuationToken`, `NextContinuationToken`, `Contents.Key`, `CommonPrefixes.Prefix`
+- percent-encoded under `encoding-type=url`: `Prefix`, `Delimiter`, `StartAfter`, `Contents.Key`, `CommonPrefixes.Prefix`
 
 **Error codes**
 
@@ -3373,7 +3373,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 
 - `q-root-0013` (root_name on `ListObjectsV2`) — The response root element is shared verbatim with the first version of the listing operation, so the root name cannot be derived from the operation or output shape name.
 - `q-order-0014` (element_order on `ListObjectsV2`) — Sibling order in the listing result is part of the wire contract; strict clients fail to parse when the bucket name follows the entry list.
-- `q-encoding-0015` (encoding_type on `ListObjectsV2`) — When url encoding is requested, a fixed per operation set of members is percent encoded and the encoding type is echoed back; keys containing control characters are otherwise unparseable.
+- `q-encoding-0015` (encoding_type on `ListObjectsV2`) — URL encoding applies to key, prefix, delimiter and starting-key members; opaque continuation tokens keep their value with normal XML escaping. Keys containing control characters require URL encoding.
 - `q-empty-0016` (empty_value on `ListObjectsV2`) — The prefix element is always written even when empty, while the delimiter element only appears when the request supplied one.
 - `q-owner-0017` (omit_when on `Object.Owner`) — Owner information is written only when the request asked for it, so emission depends on a request field rather than on the value itself.
 - `q-keycount-0018` (computed_member on `ListObjectsV2.KeyCount`) — The key count is the number of entries plus common prefixes actually returned, not the requested maximum, and is always written.

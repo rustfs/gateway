@@ -170,13 +170,7 @@ fn every_encoded_member_narrows_the_decision_to_its_own_path() {
     let artifacts = artifacts();
     let shapes = crate::emit::codec::operation_for_test(&ir("ListObjectsV2"), &artifacts.codec_rules, &artifacts.error_codes)
         .expect("the whole codec renders");
-    for path in [
-        "Prefix",
-        "Delimiter",
-        "StartAfter",
-        "ContinuationToken",
-        "NextContinuationToken",
-    ] {
+    for path in ["Prefix", "Delimiter", "StartAfter"] {
         assert!(
             body.contains(&format!("let url_encoding = url_encoding.member(\"{path}\");")),
             "{path} is not narrowed:\n{body}"
@@ -192,6 +186,17 @@ fn every_encoded_member_narrows_the_decision_to_its_own_path() {
         body.contains("value::rustfs_listing_echo(request, url_encoding, &mut output.encoding_type);"),
         "the RustFS profile's echo follows the model echo:\n{body}"
     );
+}
+
+/// Negative — an opaque paging token has no URL-encoding decision, even on an encoded listing.
+#[test]
+fn n_continuation_tokens_are_not_url_encoded_fields() {
+    let operation = ir("ListObjectsV2");
+    let body = encode::body(&operation, &Default::default()).expect("encodes");
+    for field in ["ContinuationToken", "NextContinuationToken"] {
+        assert!(!operation.xml.url_encoded_fields.iter().any(|path| path == field), "{field}");
+        assert!(!body.contains(&format!("url_encoding.member(\"{field}\")")), "{field}: {body}");
+    }
 }
 
 /// Negative — a member the IR does not declare encodable is never narrowed, and an operation with

@@ -59,8 +59,6 @@ url_encoded_fields = [
   "Prefix",
   "Delimiter",
   "StartAfter",
-  "ContinuationToken",
-  "NextContinuationToken",
   "Contents.Key",
   "CommonPrefixes.Prefix",
 ]

@@ -114,8 +114,6 @@ impl OperationCodec for dto::ListObjectsV2 {
         let force_url_encoding = value::requires_url_encoding(request, &output.prefix)
             || value::requires_url_encoding(request, &output.delimiter)
             || value::requires_url_encoding(request, &output.start_after)
-            || value::requires_url_encoding(request, &output.continuation_token)
-            || value::requires_url_encoding(request, &output.next_continuation_token)
             || value::any_requires_url_encoding(request, &output.contents, |item| &item.key)
             || value::any_requires_url_encoding(request, &output.common_prefixes, |item| &item.prefix);
         let url_encoding = value::url_encoding_for_response(request, force_url_encoding);
@@ -168,12 +166,10 @@ impl OperationCodec for dto::ListObjectsV2 {
             writer.element("EncodingType", v.as_str());
         }
         if let Some(v) = output.continuation_token.as_ref() {
-            let url_encoding = url_encoding.member("ContinuationToken");
-            writer.element("ContinuationToken", &value::url_encoded(v.as_str(), url_encoding));
+            writer.element("ContinuationToken", v.as_str());
         }
         if let Some(v) = output.next_continuation_token.as_ref() {
-            let url_encoding = url_encoding.member("NextContinuationToken");
-            writer.element("NextContinuationToken", &value::url_encoded(v.as_str(), url_encoding));
+            writer.element("NextContinuationToken", v.as_str());
         }
         if let Some(v) = output.start_after.as_ref() {
             let url_encoding = url_encoding.member("StartAfter");

@@ -42,7 +42,7 @@ xmlns = "emit"
 unwrapped_output = false
 body_literal = false
 element_order = ["Name", "Prefix", "KeyCount", "MaxKeys", "Delimiter", "IsTruncated", "Contents", "CommonPrefixes", "EncodingType", "ContinuationToken", "NextContinuationToken", "StartAfter"]
-url_encoded_fields = ["Prefix", "Delimiter", "StartAfter", "ContinuationToken", "NextContinuationToken", "Contents.Key", "CommonPrefixes.Prefix"]
+url_encoded_fields = ["Prefix", "Delimiter", "StartAfter", "Contents.Key", "CommonPrefixes.Prefix"]
 
 [xml.empty_value]
 IsTruncated = "emit"
