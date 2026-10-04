@@ -87,7 +87,9 @@ fn threads() -> Option<usize> {
     #[cfg(target_os = "linux")]
     let count = std::fs::read_dir("/proc/self/task")
         .expect("Linux exposes the current process's tasks")
-        .map(|entry| entry.expect("a task entry is readable"))
+        .inspect(|entry| {
+            entry.as_ref().expect("a task entry is readable");
+        })
         .count();
     #[cfg(target_os = "macos")]
     let count = {
