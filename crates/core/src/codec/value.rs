@@ -337,6 +337,7 @@ pub(crate) const ENCODING_TYPE_URL: &str = "url";
 
 pub use crate::codec::body_literal::{BODY_LITERALS, body_literal};
 pub use crate::codec::rustfs_listing::{RustFsListing, rustfs_listing_echo};
+pub(crate) use crate::codec::rustfs_listing::{any_requires_url_encoding, requires_url_encoding};
 
 /// Whether this response percent-encodes the members its operation declares as key-shaped.
 ///
@@ -394,39 +395,31 @@ pub fn needs_url_encoding(value: &str) -> bool {
 }
 
 pub(crate) trait UrlEncodingValue {
-    fn requires_url_encoding(&self) -> bool;
+    fn encoding_value(&self) -> Option<&str>;
 }
 
 impl UrlEncodingValue for String {
-    fn requires_url_encoding(&self) -> bool {
-        needs_url_encoding(self)
+    fn encoding_value(&self) -> Option<&str> {
+        Some(self)
     }
 }
 
 impl UrlEncodingValue for OpaqueString {
-    fn requires_url_encoding(&self) -> bool {
-        needs_url_encoding(self.as_str())
+    fn encoding_value(&self) -> Option<&str> {
+        Some(self.as_str())
     }
 }
 
 impl UrlEncodingValue for ObjectKey {
-    fn requires_url_encoding(&self) -> bool {
-        self.needs_url_encoding()
+    fn encoding_value(&self) -> Option<&str> {
+        Some(self.as_str())
     }
 }
 
 impl<T: UrlEncodingValue> UrlEncodingValue for Option<T> {
-    fn requires_url_encoding(&self) -> bool {
-        self.as_ref().is_some_and(UrlEncodingValue::requires_url_encoding)
+    fn encoding_value(&self) -> Option<&str> {
+        self.as_ref().and_then(UrlEncodingValue::encoding_value)
     }
-}
-
-pub(crate) fn requires_url_encoding<T: UrlEncodingValue>(value: &T) -> bool {
-    value.requires_url_encoding()
-}
-
-pub(crate) fn any_requires_url_encoding<T, V: UrlEncodingValue>(values: &[T], field: impl Fn(&T) -> &V) -> bool {
-    values.iter().any(|value| field(value).requires_url_encoding())
 }
 
 /// The single encoding pass, shared by both renderers below.
@@ -449,6 +442,9 @@ pub fn url_encoded(value: &str, encoding: UrlEncoding) -> Cow<'_, str> {
     if encoding == UrlEncoding::RustFsMember {
         return crate::codec::rustfs_listing::slash_preserving(value);
     }
+    if matches!(encoding, UrlEncoding::RustFs { .. }) && is_xml_representable(value) {
+        return Cow::Borrowed(value);
+    }
     if encoding == UrlEncoding::Requested || needs_url_encoding(value) {
         return percent_encoded(value);
     }
@@ -464,6 +460,9 @@ pub fn url_encoded(value: &str, encoding: UrlEncoding) -> Cow<'_, str> {
 pub fn url_encoded_key(value: &ObjectKey, encoding: UrlEncoding) -> Cow<'_, str> {
     if encoding == UrlEncoding::RustFsMember {
         return crate::codec::rustfs_listing::slash_preserving(value.as_str());
+    }
+    if matches!(encoding, UrlEncoding::RustFs { .. }) && is_xml_representable(value.as_str()) {
+        return Cow::Borrowed(value.as_str());
     }
     if encoding == UrlEncoding::Requested || value.needs_url_encoding() {
         return percent_encoded(value.as_str());

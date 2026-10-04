@@ -110,7 +110,7 @@ impl OperationCodec for dto::ListParts {
             let rendered = v.as_str();
             response.set_header("x-amz-request-charged", rendered);
         }
-        let force_url_encoding = value::requires_url_encoding(&output.key);
+        let force_url_encoding = value::requires_url_encoding(request, &output.key);
         let url_encoding = value::url_encoding_for_response(request, force_url_encoding);
         let mut writer = rustfs_gateway_xml::XmlWriter::document();
         writer.legacy_layout(request.rustfs_response_layout());

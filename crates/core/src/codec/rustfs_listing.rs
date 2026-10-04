@@ -41,16 +41,16 @@
 //! ([`super::value::url_encoding_for_response`]) and then asks it once per encodable member,
 //! naming the member by path — `Prefix` at the root, `Object.Key` inside a shape. Under the RustFS
 //! profile the response-wide decision is [`UrlEncoding::RustFs`], and [`UrlEncoding::member`] turns
-//! it into [`UrlEncoding::RustFsMember`] for exactly the members the table lists and into
-//! [`UrlEncoding::Absent`] for every other one. A value no XML document can carry still forces the
+//! it into [`UrlEncoding::RustFsMember`] for exactly the members the table lists and preserves
+//! the raw RustFS decision for every other one. A value no XML document can carry still forces the
 //! AWS-model encoding of the whole response, as it does by default: legacy RustFS writes such a value
 //! raw and produces a body no XML parser reads.
 
 use std::borrow::Cow;
 
-use rustfs_gateway_types::dto;
+use rustfs_gateway_types::{dto, is_xml_representable};
 
-use crate::codec::value::{ENCODING_TYPE, ENCODING_TYPE_URL, UrlEncoding};
+use crate::codec::value::{ENCODING_TYPE, ENCODING_TYPE_URL, UrlEncoding, UrlEncodingValue, needs_url_encoding};
 use crate::codec::view::MetaView;
 
 /// Legacy RustFS's `encoding-type=url` rule for one listing operation.
@@ -89,7 +89,7 @@ impl UrlEncoding {
     ///
     /// The AWS-model decisions apply to every member alike and come back unchanged. Under the
     /// RustFS profile a member legacy RustFS encodes becomes [`Self::RustFsMember`] when the
-    /// request asked for exactly `url`, and every other member is [`Self::Absent`].
+    /// request asked for exactly `url`, and every other member keeps the raw RustFS decision.
     #[must_use]
     pub fn member(self, path: &str) -> Self {
         match self {
@@ -97,7 +97,7 @@ impl UrlEncoding {
                 if requested && listing.members.contains(&path) {
                     Self::RustFsMember
                 } else {
-                    Self::Absent
+                    self
                 }
             }
             other => other,
@@ -111,6 +111,24 @@ pub(crate) fn rustfs_decision(request: &MetaView<'_>) -> Option<UrlEncoding> {
     let listing = request.rustfs_listing_encoding()?;
     let requested = request.query(ENCODING_TYPE).as_deref() == Some(ENCODING_TYPE_URL);
     Some(UrlEncoding::RustFs { requested, listing })
+}
+
+pub(crate) fn requires_url_encoding<T: UrlEncodingValue>(request: &MetaView<'_>, value: &T) -> bool {
+    value.encoding_value().is_some_and(|value| {
+        if request.rustfs_listing_encoding().is_some() {
+            !is_xml_representable(value)
+        } else {
+            needs_url_encoding(value)
+        }
+    })
+}
+
+pub(crate) fn any_requires_url_encoding<T, V: UrlEncodingValue>(
+    request: &MetaView<'_>,
+    values: &[T],
+    field: impl Fn(&T) -> &V,
+) -> bool {
+    values.iter().any(|value| requires_url_encoding(request, field(value)))
 }
 
 /// `value` percent-encoded the way legacy RustFS encodes a listing value: segment by segment, so

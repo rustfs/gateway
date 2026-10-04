@@ -111,13 +111,13 @@ impl OperationCodec for dto::ListObjectsV2 {
             response.set_header("x-amz-request-charged", rendered);
         }
         let mut output = output;
-        let force_url_encoding = value::requires_url_encoding(&output.prefix)
-            || value::requires_url_encoding(&output.delimiter)
-            || value::requires_url_encoding(&output.start_after)
-            || value::requires_url_encoding(&output.continuation_token)
-            || value::requires_url_encoding(&output.next_continuation_token)
-            || value::any_requires_url_encoding(&output.contents, |item| &item.key)
-            || value::any_requires_url_encoding(&output.common_prefixes, |item| &item.prefix);
+        let force_url_encoding = value::requires_url_encoding(request, &output.prefix)
+            || value::requires_url_encoding(request, &output.delimiter)
+            || value::requires_url_encoding(request, &output.start_after)
+            || value::requires_url_encoding(request, &output.continuation_token)
+            || value::requires_url_encoding(request, &output.next_continuation_token)
+            || value::any_requires_url_encoding(request, &output.contents, |item| &item.key)
+            || value::any_requires_url_encoding(request, &output.common_prefixes, |item| &item.prefix);
         let url_encoding = value::url_encoding_for_response(request, force_url_encoding);
         output.encoding_type = if url_encoding == value::UrlEncoding::Requested {
             Some(dto::EncodingType::URL)

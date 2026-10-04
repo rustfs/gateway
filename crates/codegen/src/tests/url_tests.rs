@@ -96,6 +96,21 @@ fn the_generated_encoder_reads_the_decision_once_and_passes_it_down() {
 }
 
 #[test]
+fn n_forced_encoding_cannot_ignore_the_requests_listing_profile() {
+    for operation in ["ListObjects", "ListObjectsV2", "ListObjectVersions", "ListMultipartUploads"] {
+        let body = encode::body(&ir(operation), &Default::default()).expect("encodes");
+        assert!(
+            body.contains("value::requires_url_encoding(request, &output.prefix)"),
+            "{operation}: {body}"
+        );
+        assert!(
+            body.contains("value::any_requires_url_encoding(request, &output.common_prefixes,"),
+            "{operation}: {body}"
+        );
+    }
+}
+
+#[test]
 fn n_an_operation_that_declares_nothing_reads_no_decision_at_all() {
     let body = encode::body(&ir("ListBuckets"), &Default::default()).expect("encodes");
     assert!(
