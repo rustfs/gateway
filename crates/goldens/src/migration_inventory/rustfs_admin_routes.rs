@@ -45,7 +45,7 @@ use std::collections::BTreeMap;
 use serde::Deserialize;
 
 /// The RustFS commit the recorded inventory was generated from.
-pub const RUSTFS_SOURCE_COMMIT: &str = "736e4fb8e8e5d527c25e4e56f352536b311b6daf";
+pub const RUSTFS_SOURCE_COMMIT: &str = "5e1bd498ce1ca33bcb0ca50aeee861e69e6c8744";
 
 /// The only format this reader accepts. A generator that changes the row shape changes this too.
 pub const INVENTORY_FORMAT: &str = "rustfs-admin-route-inventory/1";

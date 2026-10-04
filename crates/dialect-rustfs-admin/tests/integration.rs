@@ -112,7 +112,7 @@ fn param(segment: &str) -> Option<&str> {
 fn concrete(template: &str) -> String {
     template
         .split('/')
-        .map(|segment| param(segment).map_or_else(|| segment.to_owned(), |name| format!("{name}-1")))
+        .map(|segment| param(segment).map_or_else(|| segment.to_owned(), |name| format!("{}-1", name.trim_start_matches('*'))))
         .collect::<Vec<_>>()
         .join("/")
 }
@@ -126,11 +126,17 @@ fn paths(record: &RouteRecord) -> Vec<String> {
 /// each literal equal, each parameter any non-empty segment.
 fn template_matches(template: &str, path: &str) -> bool {
     let (template, path): (Vec<&str>, Vec<&str>) = (template.split('/').collect(), path.split('/').collect());
-    template.len() == path.len()
+    let catch_all = template.last().is_some_and(|segment| segment.starts_with("{*"));
+    (template.len() == path.len() || (catch_all && path.len() > template.len()))
         && template
             .iter()
             .zip(&path)
-            .all(|(segment, value)| param(segment).map_or(segment == value, |_| !value.is_empty()))
+            .enumerate()
+            .all(|(index, (segment, value))| match param(segment) {
+                Some(name) if name.starts_with('*') => !path[index..].join("/").is_empty(),
+                Some(_) => !value.is_empty(),
+                None => segment == value,
+            })
 }
 
 /// The operation a request must reach: the first record, in precedence order, of its method
@@ -213,8 +219,8 @@ fn every_declared_row_reaches_its_operation() {
         }
     }
     assert_eq!(
-        rows, 604,
-        "303 operations, each with its MinIO or compat alias but the two profiling triggers"
+        rows, 622,
+        "312 operations, each with its MinIO or compat alias but the two profiling triggers"
     );
 }
 
@@ -307,7 +313,11 @@ fn n_a_near_miss_of_a_row_reaches_no_admin_operation() {
             segments[last_literal] = segments[last_literal].to_ascii_uppercase();
             for near in [format!("{path}/"), format!("{path}/x"), segments.join("/")] {
                 let reached = resolve(record.method, &format!("{near}{query}"));
-                assert_ne!(reached, Some(record.operation), "{} {near}", record.method);
+                if expected(record.method, &near, &query) != Some(record.operation) {
+                    assert_ne!(reached, Some(record.operation), "{} {near}", record.method);
+                } else {
+                    assert_eq!(reached, Some(record.operation), "{} {near}", record.method);
+                }
                 // A near miss of a claim's own segment (`/profile/CPU`) is outside the claim and
                 // is S3's; the model speaks only for the dialect's operations.
                 let admin = reached.filter(|name| name.starts_with("rustfs:"));
@@ -359,6 +369,8 @@ fn n_a_parameter_never_matches_a_dot_segment_or_a_separator() {
                         if let Some(other) = reached {
                             elsewhere.push((record.operation, path, other));
                         }
+                    } else if segments[index].starts_with("{*") {
+                        assert_eq!(reached, Some(record.operation), "{} {target}", record.method);
                     } else {
                         assert_eq!(reached, None, "{} {target}", record.method);
                     }
@@ -367,7 +379,11 @@ fn n_a_parameter_never_matches_a_dot_segment_or_a_separator() {
             }
         }
     }
-    assert_eq!(refused, 10 * 2 * 181, "181 parameters across 96 templates, each with its alias");
+    assert_eq!(
+        refused,
+        10 * 2 * 190,
+        "190 parameters across 102 templates, each with its alias; catch-all values included"
+    );
     assert_eq!(
         elsewhere,
         [
@@ -624,10 +640,10 @@ fn only_the_sealed_operations_hold_the_caller_secret() {
         .filter(|(operation, _)| operation.secret)
         .map(|(operation, record)| (operation.name, record.order))
         .collect();
-    assert_eq!(holders.len(), 31);
+    assert_eq!(holders.len(), 33);
     assert_eq!(holders.iter().filter(|(_, order)| *order == 3).count(), 8);
     assert_eq!(holders.iter().filter(|(_, order)| *order == 4).count(), 21);
-    assert_eq!(holders.iter().filter(|(_, order)| *order == 5).count(), 2);
+    assert_eq!(holders.iter().filter(|(_, order)| *order == 5).count(), 4);
     for name in [
         "rustfs:GetV3Config",
         "rustfs:PutV3SiteReplicationEdit",

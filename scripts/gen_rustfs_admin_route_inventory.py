@@ -39,6 +39,8 @@ import re
 import subprocess
 import sys
 
+import rustfs_admin_route_variants as variants
+
 FORMAT = "rustfs-admin-route-inventory/1"
 ADMIN = pathlib.Path("rustfs/src/admin")
 SECRET_REQUEST = ("read_compatible_admin_body",)
@@ -378,22 +380,32 @@ def insert_sites(source):
                 continue
             insert_open = body_open + insert.end() - 1
             call = split_args(squash(text[insert_open + 1:matching_close(text, insert_open, "(", ")")]))
-            if call[0] != names[0] or call[2] != names[2]:
+            if len(re.findall(r"\.insert\(", body)) != 1:
+                fail(f"{relative}: variant loop must have exactly one insert")
+            wrapper = re.fullmatch(r"AdminOperation\((\w+)\)", call[2])
+            if call[0] != names[0] or (wrapper.group(1) if wrapper else call[2]) != names[2]:
                 fail(f"{relative}: loop insert {call} does not bind the loop's own names {names}")
             for item in re.finditer(r"\(", text[loop_match.end():close]):
                 start = loop_match.end() + item.start()
                 if text[loop_match.end():start].count("(") - text[loop_match.end():start].count(")") != 0:
                     continue
                 parts = split_args(squash(text[start + 1:matching_close(text, start, "(", ")")]))
-                method = re.fullmatch(r"Method::(\w+)", parts[0])
-                handler = re.fullmatch(r"AdminOperation\(&(?:[a-z_]+::)*([A-Za-z_][A-Za-z0-9_]*)\s*(?:\{\s*\})?\)", parts[2])
-                if not method or not handler:
+                method = re.fullmatch(r"Method::(\w+)", parts[0]) if len(parts) == 3 else None
+                if not method:
                     fail(f"{relative}: unreadable loop row {parts}")
+                if wrapper:
+                    handler, variant = variants.constructor(parts[2], fail)
+                else:
+                    operation = re.fullmatch(r"AdminOperation\((.*)\)", parts[2])
+                    if not operation:
+                        fail(f"{relative}: unreadable loop row {parts}")
+                    handler, variant = variants.constructor(operation.group(1), fail)
                 bound = {names[1]: resolve_path(parts[1], source, relative)}
                 sites.append({
                     "method": method.group(1),
                     "path": resolve_path(call[1], source, relative, None, bound),
-                    "handler": handler.group(1),
+                    "handler": handler,
+                    "variant": variant,
                     "file": relative,
                     "function": enclosing_function(spans, loop_match.start()),
                 })
@@ -425,39 +437,11 @@ def insert_sites(source):
 
 
 def handler_type(source, name, relative):
-    if not re.fullmatch(r"[A-Z][A-Z0-9_]*", name):
-        return name
-    for candidate in [relative] + sorted(source.files):
-        found = re.search(rf"\b(?:static|const)\s+{name}\s*:\s*([A-Za-z_][A-Za-z0-9_]*)", source.files[candidate])
-        if found:
-            return found.group(1)
-    fail(f"{relative}: handler value {name} has no static or const declaration")
+    return variants.handler_type(source, name, relative, fail)
 
 
-def handler_body(source, type_name):
-    for relative, text in source.files.items():
-        if not relative.startswith(ADMIN.as_posix() + "/"):
-            continue
-        match = re.search(rf"impl\s+Operation\s+for\s+{type_name}\s*\{{", text)
-        if not match:
-            continue
-        end = matching_close(text, match.end() - 1, "{", "}")
-        block = text[match.start():end]
-        # One level of same-file free functions: the work a handler delegates in its own file.
-        # Methods are excluded on purpose: every handler has a `call`, and pulling in the other
-        # handlers' `call` bodies would give each handler its neighbours' facts.
-        called = set(re.findall(r"\b([a-z_][a-z0-9_]*)\(", block))
-        helpers = []
-        for free in re.finditer(r"^(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?fn\s+([a-z_][a-z0-9_]*)\b", text, re.M):
-            if free.group(1) not in called:
-                continue
-            brace = text.find("{", free.end())
-            if brace == -1:
-                continue
-            helpers.append(text[free.start():matching_close(text, brace, "{", "}")])
-        stream_types = set(re.findall(r"impl\s+(?:futures::)?(?:Stream|ByteStream)\s+for\s+(\w+)", text))
-        return relative, block + "\n".join(helpers), stream_types
-    fail(f"no `impl Operation for {type_name}` under {ADMIN}")
+def handler_body(source, type_name, variant=None):
+    return variants.handler_body(source, type_name, variant, ADMIN, matching_close, split_args, fail)
 
 
 def body_facts(text, stream_types):
@@ -692,7 +676,7 @@ def generate(root):
         if site["function"] not in owner:
             fail(f"{site['file']}: {key} is inserted by {site['function']}, which no registration group reaches")
         type_name = handler_type(source, site["handler"], site["file"])
-        handler_file, body, stream_types = handler_body(source, type_name)
+        handler_file, body, stream_types = handler_body(source, type_name, site.get("variant"))
         caller_secret, request_body, response_body = body_facts(body, stream_types)
         row = policy[key]
         method, path = key.split(" ", 1)

@@ -124,6 +124,9 @@ pub fn fold_every_operation<F: OperationFold>(fold: &mut F, carry: F::Carry) -> 
     let carry = fold.step::<ops::get_v3_info_canned_policy::GetV3InfoCannedPolicy>(carry);
     let carry = fold.step::<ops::get_v3_info_service_account::GetV3InfoServiceAccount>(carry);
     let carry = fold.step::<ops::get_v3_inspect_data::GetV3InspectData>(carry);
+    let carry = fold.step::<ops::get_v3_integrity_readiness::GetV3IntegrityReadiness>(carry);
+    let carry = fold.step::<ops::get_v3_integrity_by_bucket_inventory::GetV3IntegrityByBucketInventory>(carry);
+    let carry = fold.step::<ops::get_v3_integrity_by_bucket_jobs_by_job_id::GetV3IntegrityByBucketJobsByJobId>(carry);
     let carry = fold.step::<ops::get_v3_is_admin::GetV3IsAdmin>(carry);
     let carry = fold.step::<ops::get_v3_kms_backup::GetV3KmsBackup>(carry);
     let carry = fold.step::<ops::get_v3_kms_config::GetV3KmsConfig>(carry);
@@ -143,7 +146,6 @@ pub fn fold_every_operation<F: OperationFold>(fold: &mut F, carry: F::Carry) -> 
     let carry = fold.step::<ops::get_v3_list_service_accounts::GetV3ListServiceAccounts>(carry);
     let carry = fold.step::<ops::get_v3_list_users::GetV3ListUsers>(carry);
     let carry = fold.step::<ops::get_v3_log::GetV3Log>(carry);
-    let carry = fold.step::<ops::get_v3_metrics::GetV3Metrics>(carry);
     let carry = fold.step::<ops::get_v3_mfa_challenge::GetV3MfaChallenge>(carry);
     let carry = fold.step::<ops::get_v3_module_switches::GetV3ModuleSwitches>(carry);
     let carry = fold.step::<ops::get_v3_obdinfo::GetV3Obdinfo>(carry);
@@ -161,6 +163,7 @@ pub fn fold_every_operation<F: OperationFold>(fold: &mut F, carry: F::Carry) -> 
     let carry = fold.step::<ops::get_v3_profiling_download::GetV3ProfilingDownload>(carry);
     let carry = fold.step::<ops::get_v3_quota_stats_by_bucket::GetV3QuotaStatsByBucket>(carry);
     let carry = fold.step::<ops::get_v3_quota_by_bucket::GetV3QuotaByBucket>(carry);
+    let carry = fold.step::<ops::get_v3_realtime::GetV3Realtime>(carry);
     let carry = fold.step::<ops::get_v3_rebalance_status::GetV3RebalanceStatus>(carry);
     let carry = fold.step::<ops::get_v3_replication_mrf::GetV3ReplicationMrf>(carry);
     let carry = fold.step::<ops::get_v3_replicationmetrics::GetV3Replicationmetrics>(carry);
@@ -179,6 +182,10 @@ pub fn fold_every_operation<F: OperationFold>(fold: &mut F, carry: F::Carry) -> 
     let carry = fold.step::<ops::get_v3_storageinfo::GetV3Storageinfo>(carry);
     let carry = fold.step::<ops::get_v3_target_arns::GetV3TargetArns>(carry);
     let carry = fold.step::<ops::get_v3_target_list::GetV3TargetList>(carry);
+    let carry = fold
+        .step::<ops::get_v3_target_by_target_type_by_target_name_subscriptions::GetV3TargetByTargetTypeByTargetNameSubscriptions>(
+        carry,
+    );
     let carry = fold.step::<ops::get_v3_temporary_account_info::GetV3TemporaryAccountInfo>(carry);
     let carry = fold.step::<ops::get_v3_tier::GetV3Tier>(carry);
     let carry = fold.step::<ops::get_v3_tier_stats::GetV3TierStats>(carry);
@@ -191,6 +198,7 @@ pub fn fold_every_operation<F: OperationFold>(fold: &mut F, carry: F::Carry) -> 
     let carry = fold.step::<ops::get_v4_cluster_snapshot::GetV4ClusterSnapshot>(carry);
     let carry = fold.step::<ops::get_v4_extensions_catalog::GetV4ExtensionsCatalog>(carry);
     let carry = fold.step::<ops::get_v4_extensions_instances::GetV4ExtensionsInstances>(carry);
+    let carry = fold.step::<ops::get_v4_heal_mrf_responsibilities::GetV4HealMrfResponsibilities>(carry);
     let carry = fold.step::<ops::get_v4_heal_replacement_recovery::GetV4HealReplacementRecovery>(carry);
     let carry = fold.step::<ops::get_v4_plugins_catalog::GetV4PluginsCatalog>(carry);
     let carry = fold.step::<ops::get_v4_plugins_instances::GetV4PluginsInstances>(carry);
@@ -201,6 +209,7 @@ pub fn fold_every_operation<F: OperationFold>(fold: &mut F, carry: F::Carry) -> 
     let carry = fold.step::<ops::head_iceberg_by_warehouse_namespaces_by_namespace_tables_by_table::HeadIcebergByWarehouseNamespacesByNamespaceTablesByTable>(carry);
     let carry = fold.step::<ops::head_iceberg_by_warehouse_namespaces_by_namespace_views_by_view::HeadIcebergByWarehouseNamespacesByNamespaceViewsByView>(carry);
     let carry = fold.step::<ops::post_iceberg_by_warehouse_catalog_migration::PostIcebergByWarehouseCatalogMigration>(carry);
+    let carry = fold.step::<ops::post_iceberg_by_warehouse_catalog_warehouse_index_backfill::PostIcebergByWarehouseCatalogWarehouseIndexBackfill>(carry);
     let carry = fold.step::<ops::post_iceberg_by_warehouse_namespaces::PostIcebergByWarehouseNamespaces>(carry);
     let carry = fold.step::<ops::post_iceberg_by_warehouse_namespaces_by_namespace_properties::PostIcebergByWarehouseNamespacesByNamespaceProperties>(carry);
     let carry = fold.step::<ops::post_iceberg_by_warehouse_namespaces_by_namespace_register::PostIcebergByWarehouseNamespacesByNamespaceRegister>(carry);
@@ -244,6 +253,9 @@ pub fn fold_every_operation<F: OperationFold>(fold: &mut F, carry: F::Carry) -> 
     let carry = fold.step::<ops::post_v3_ilm_transition_run::PostV3IlmTransitionRun>(carry);
     let carry = fold.step::<ops::post_v3_ilm_transition_state_reconcile::PostV3IlmTransitionStateReconcile>(carry);
     let carry = fold.step::<ops::post_v3_inspect_data::PostV3InspectData>(carry);
+    let carry = fold.step::<ops::post_v3_integrity_by_bucket_jobs::PostV3IntegrityByBucketJobs>(carry);
+    let carry =
+        fold.step::<ops::post_v3_integrity_by_bucket_jobs_by_job_id_control::PostV3IntegrityByBucketJobsByJobIdControl>(carry);
     let carry = fold.step::<ops::post_v3_kms_backup::PostV3KmsBackup>(carry);
     let carry = fold.step::<ops::post_v3_kms_clear_cache::PostV3KmsClearCache>(carry);
     let carry = fold.step::<ops::post_v3_kms_configure::PostV3KmsConfigure>(carry);
@@ -301,6 +313,7 @@ pub fn fold_every_operation<F: OperationFold>(fold: &mut F, carry: F::Carry) -> 
     let carry = fold.step::<ops::post_v3_tier_by_tiername::PostV3TierByTiername>(carry);
     let carry = fold.step::<ops::post_v3_update::PostV3Update>(carry);
     let carry = fold.step::<ops::post_v3_update_service_account::PostV3UpdateServiceAccount>(carry);
+    let carry = fold.step::<ops::post_v4_heal_mrf_responsibilities_actions::PostV4HealMrfResponsibilitiesActions>(carry);
     let carry = fold.step::<ops::post_v4_inspect_archive::PostV4InspectArchive>(carry);
     let carry = fold.step::<ops::put_iceberg_buckets_by_warehouse::PutIcebergBucketsByWarehouse>(carry);
     let carry = fold.step::<ops::put_iceberg_by_warehouse_namespaces_by_namespace_tables_by_table_catalog_external::PutIcebergByWarehouseNamespacesByNamespaceTablesByTableCatalogExternal>(carry);

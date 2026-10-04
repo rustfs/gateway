@@ -16,16 +16,25 @@
 // crates/goldens/src/migration_inventory/rustfs_admin_routes.json. Do not edit by hand: change the
 // inventory or xtask/src/rustfs_admin_dialect.rs, then regenerate.
 
-//! `rustfs:GetV3Metrics`: `GET /rustfs/admin/v3/metrics`, registration group `system`.
+//! `rustfs:GetV3IntegrityByBucketJobsByJobId`: `GET /rustfs/admin/v3/integrity/{bucket}/jobs/{job_id}`, registration group `integrity`.
 //!
 //! Responsible for: the operation's type, name, rows, action, specification, floor and codec, as the
-//! inventory records RustFS's `MetricsHandler` route.
+//! inventory records RustFS's `Handler` route.
 //! NOT responsible for: the handler, which the deployment registers, or the overlay row (`crate::table`).
 //! Upstream: the recorded inventory and `crate::admin`. Downstream: `crate::table`, which lists it,
-//! and a deployment that registers a handler for [`GetV3Metrics`].
+//! and a deployment that registers a handler for [`GetV3IntegrityByBucketJobsByJobId`].
+//!
+//! Its `{bucket}` parameter is the bucket the operation is authorised on (`BucketParam::Path`,
+//! ADR-0025 (c), ADR-0030): the raw segment meets the S3 bucket-name rules before authentication, and
+//! the governor, both authorizer stages, the audit event and the handler's `RequestContextView::bucket()`
+//! see that bucket and no key. Where RustFS authorises this action on no bucket and reads the segment
+//! afterwards, handing the authorizer the bucket is a deliberate tightening.
+//!
+//! Its other path parameter (`job_id`) names no bucket (ADR-0027): a handler reads each decoded value from
+//! `RequestContextView::path_params()`.
 
 use rustfs_gateway_core::codec::{CodecError, EncodedResponse, MetaView, OperationCodec, RequestBody, RequestBodyMode};
-use rustfs_gateway_core::dialect::{ClaimedRow, OverlayRow};
+use rustfs_gateway_core::dialect::{BucketParam, ClaimedRow, OverlayRow};
 use rustfs_gateway_core::op::{AuthRequirement, Operation, ResourceShape};
 use rustfs_gateway_core::registry::OperationSpec;
 use rustfs_gateway_core::route::Predicate;
@@ -36,35 +45,38 @@ use crate::admin::{self, AdminOperation, AdminResponse};
 use crate::record::{self, BodyKind, RouteRecord};
 
 /// The operation name.
-pub const NAME: &str = "rustfs:GetV3Metrics";
+pub const NAME: &str = "rustfs:GetV3IntegrityByBucketJobsByJobId";
 
-/// What authorises it, on no bucket.
-pub const AUTH: AuthRequirement = AuthRequirement::new("admin:GetMetrics", ResourceShape::Service);
+/// What authorises it, on the bucket its `{bucket}` parameter names.
+pub const AUTH: AuthRequirement = AuthRequirement::new("admin:DescribeBatchJob", ResourceShape::Bucket);
+
+/// The bucket it is authorised on, which the facade reads before authentication.
+pub const BUCKET: BucketParam = BucketParam::Path("bucket");
 
 static SELECTOR: &[Predicate] = &[Predicate::Method(http::Method::GET)];
 
 /// The canonical row, then the MinIO alias RustFS serves it under.
 pub static ROWS: &[ClaimedRow] = &[
     ClaimedRow {
-        template: "/rustfs/admin/v3/metrics",
+        template: "/rustfs/admin/v3/integrity/{bucket}/jobs/{job_id}",
         selector: SELECTOR,
     },
     ClaimedRow {
-        template: "/minio/admin/v3/metrics",
+        template: "/minio/admin/v3/integrity/{bucket}/jobs/{job_id}",
         selector: SELECTOR,
     },
 ];
 
-/// `GET /rustfs/admin/v3/metrics`.
+/// `GET /rustfs/admin/v3/integrity/{bucket}/jobs/{job_id}`.
 #[derive(Debug)]
-pub struct GetV3Metrics;
+pub struct GetV3IntegrityByBucketJobsByJobId;
 
 static SPEC: OperationSpec = admin::spec(NAME, AUTH, false);
 
 /// Privileged and header-signed only: never anonymous, never presigned.
 static FLOOR: OperationFloor = admin::floor(NAME);
 
-impl Operation for GetV3Metrics {
+impl Operation for GetV3IntegrityByBucketJobsByJobId {
     const NAME: &'static str = NAME;
 
     /// RustFS reads no request body.
@@ -87,7 +99,7 @@ impl Operation for GetV3Metrics {
     }
 }
 
-impl OperationCodec for GetV3Metrics {
+impl OperationCodec for GetV3IntegrityByBucketJobsByJobId {
     const REQUEST_BODY: RequestBodyMode = RequestBodyMode::None;
 
     fn decode(_request: &MetaView<'_>, _body: RequestBody) -> Result<Self::Input, CodecError> {
@@ -99,9 +111,10 @@ impl OperationCodec for GetV3Metrics {
     }
 }
 
-impl AdminOperation for GetV3Metrics {
+impl AdminOperation for GetV3IntegrityByBucketJobsByJobId {
     const PRECEDENCE: u16 = OVERLAY_ROW.precedence;
     const GROUP: &'static str = RECORD.group;
+    const BUCKET: Option<BucketParam> = Some(BUCKET);
 
     fn rows() -> &'static [ClaimedRow] {
         ROWS
@@ -111,14 +124,16 @@ impl AdminOperation for GetV3Metrics {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 206,
-    selector: "PathTemplate(\"/rustfs/admin/v3/metrics\") ∧ Method(GET) ∨ PathTemplate(\"/minio/admin/v3/metrics\") ∧ Method(GET)",
-    action: "admin:GetMetrics",
-    resource: ResourceShape::Service,
+    precedence: 189,
+    selector: "PathTemplate(\"/rustfs/admin/v3/integrity/{bucket}/jobs/{job_id}\") ∧ Method(GET) ∨ PathTemplate(\"/minio/admin/v3/integrity/{bucket}/jobs/{job_id}\") ∧ Method(GET) ⇒ BucketParam(\"bucket\")",
+    action: "admin:DescribeBatchJob",
+    resource: ResourceShape::Bucket,
     success_status: 200,
     anonymous: false,
     evidence: &[
-        "https://github.com/rustfs/rustfs/blob/736e4fb8e8e5d527c25e4e56f352536b311b6daf/rustfs/src/admin/handlers/metrics.rs",
+        "https://github.com/rustfs/rustfs/blob/5e1bd498ce1ca33bcb0ca50aeee861e69e6c8744/rustfs/src/admin/handlers/integrity.rs",
+        record::ADR_0027,
+        record::ADR_0030,
         record::ISSUE,
     ],
 };
@@ -126,19 +141,19 @@ pub const OVERLAY_ROW: OverlayRow = OverlayRow {
 /// The inventory row this operation was generated from.
 pub const RECORD: RouteRecord = RouteRecord {
     operation: NAME,
-    group: "system",
-    order: 1,
+    group: "integrity",
+    order: 5,
     method: "GET",
-    path: "/rustfs/admin/v3/metrics",
-    alias: Some("/minio/admin/v3/metrics"),
+    path: "/rustfs/admin/v3/integrity/{bucket}/jobs/{job_id}",
+    alias: Some("/minio/admin/v3/integrity/{bucket}/jobs/{job_id}"),
     query: None,
-    action: "admin:GetMetrics",
+    action: "admin:DescribeBatchJob",
     ruled: None,
     subject: None,
-    bucket: None,
+    bucket: Some(BUCKET),
     anonymous: false,
-    rustfs_handler: "MetricsHandler",
+    rustfs_handler: "Handler",
     request_body: BodyKind::NotRead,
-    response_body: BodyKind::Streamed,
+    response_body: BodyKind::Buffered,
     caller_secret: false,
 };
