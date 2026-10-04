@@ -141,7 +141,7 @@ pub fn plan(ir: &OperationIr) -> Result<Plan, String> {
         let child_check = scalar_force_check(&child_source, &child_field.ty, op, path)?;
         let force_check = match &field.ty {
             Type::List { .. } => format!(
-                "value::any_requires_url_encoding(&{root_source}, |item| &item.{})",
+                "value::any_requires_url_encoding(request, &{root_source}, |item| &item.{})",
                 naming::field_name(&child_field.name)
             ),
             Type::Structure(_) if field.required => scalar_force_check(
@@ -164,7 +164,7 @@ fn scalar_force_check(source: &str, ty: &Type, operation: &str, path: &str) -> R
     if !matches!(ty, Type::String | Type::OpaqueString | Type::ObjectKey) {
         return Err(unresolved(operation, path, "its final member is not string-shaped"));
     }
-    Ok(format!("value::requires_url_encoding(&{source})"))
+    Ok(format!("value::requires_url_encoding(request, &{source})"))
 }
 
 /// The one failure shape, so every version of it reads the same way.

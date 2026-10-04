@@ -26,6 +26,7 @@ use crate::codec::value::RustFsListing;
 /// The tables legacy RustFS applies; the assembly carries its own copy of these facts, and the
 /// launcher's end-to-end suite holds the two together.
 const V2: RustFsListing = RustFsListing::new(&["Object.Key", "CommonPrefix.Prefix"], true);
+const V1: RustFsListing = RustFsListing::new(&["Object.Key", "CommonPrefix.Prefix", "NextMarker"], true);
 const MULTIPART: RustFsListing = RustFsListing::new(&[], false);
 
 fn v2_listing() -> dto::ListObjectsV2Output {
@@ -108,6 +109,74 @@ fn n_without_encoding_type_nothing_is_encoded_or_echoed() {
     let body = encode_v2("", Some(V2));
     assert!(body.contains("<Key>dir/with space.txt</Key>"), "{body}");
     assert!(!body.contains("<EncodingType>"), "{body}");
+}
+
+#[test]
+fn n_xml_whitespace_does_not_force_the_rustfs_listing_into_model_encoding() {
+    for whitespace in ["\n", "\t", "\r"] {
+        let request = accepted("GET", "/conf-list?list-type=2", &[]);
+        let view = MetaView::of(&request, TargetKind::Bucket)
+            .expect("view")
+            .with_rustfs_listing_encoding(V2);
+        let mut output = one_entry_listing("ordinary/key", "b28354b543375bfa94dabaeda722927f");
+        output.prefix = whitespace.to_owned();
+        let body = body_text(&dto::ListObjectsV2::encode(output, &view, 200).expect("encodes").body);
+        let spelling = if whitespace == "\r" { "&#13;" } else { whitespace };
+        assert!(body.contains(&format!("<Prefix>{spelling}</Prefix>")), "{whitespace:?}: {body}");
+        assert!(body.contains("<Key>ordinary/key</Key>"), "{whitespace:?}: {body}");
+        assert!(!body.contains("<EncodingType>"), "{whitespace:?}: {body}");
+    }
+}
+
+#[test]
+fn n_xml_whitespace_keeps_the_rustfs_member_selection_when_url_was_requested() {
+    for whitespace in ["\n", "\t", "\r"] {
+        let request = accepted("GET", "/conf-list?list-type=2&encoding-type=url", &[]);
+        let view = MetaView::of(&request, TargetKind::Bucket)
+            .expect("view")
+            .with_rustfs_listing_encoding(V2);
+        let key = format!("dir/{whitespace}key");
+        let mut output = one_entry_listing(&key, "b28354b543375bfa94dabaeda722927f");
+        output.prefix = whitespace.to_owned();
+        let body = body_text(&dto::ListObjectsV2::encode(output, &view, 200).expect("encodes").body);
+        let spelling = if whitespace == "\r" { "&#13;" } else { whitespace };
+        assert!(body.contains(&format!("<Prefix>{spelling}</Prefix>")), "{whitespace:?}: {body}");
+        let encoded = rustfs_gateway_sig::percent_encode(whitespace.as_bytes());
+        assert!(body.contains(&format!("<Key>dir/{encoded}key</Key>")), "{whitespace:?}: {body}");
+        assert!(body.contains("<EncodingType>url</EncodingType>"), "{whitespace:?}: {body}");
+    }
+}
+
+#[test]
+fn n_xml_whitespace_still_forces_model_encoding_without_the_rustfs_profile() {
+    for whitespace in ["\n", "\t", "\r"] {
+        let request = accepted("GET", "/conf-list?list-type=2", &[]);
+        let view = MetaView::of(&request, TargetKind::Bucket).expect("view");
+        let mut output = one_entry_listing("ordinary/key", "b28354b543375bfa94dabaeda722927f");
+        output.prefix = whitespace.to_owned();
+        let body = body_text(&dto::ListObjectsV2::encode(output, &view, 200).expect("encodes").body);
+        let encoded = rustfs_gateway_sig::percent_encode(whitespace.as_bytes());
+        assert!(body.contains(&format!("<Prefix>{encoded}</Prefix>")), "{whitespace:?}: {body}");
+        assert!(body.contains("<Key>ordinary%2Fkey</Key>"), "{whitespace:?}: {body}");
+        assert!(body.contains("<EncodingType>url</EncodingType>"), "{whitespace:?}: {body}");
+    }
+}
+
+#[test]
+fn n_list_objects_preserves_the_xml_valid_lf_prefix_the_sdk_uses() {
+    for query in ["", "&encoding-type=url"] {
+        let request = accepted("GET", &format!("/conf-list?prefix=%0A{query}"), &[]);
+        let view = MetaView::of(&request, TargetKind::Bucket)
+            .expect("view")
+            .with_rustfs_listing_encoding(V1);
+        let output = dto::ListObjectsOutput {
+            name: BucketName::new("conf-list").expect("bucket"),
+            prefix: "\n".to_owned(),
+            ..Default::default()
+        };
+        let body = body_text(&dto::ListObjects::encode(output, &view, 200).expect("encodes").body);
+        assert!(body.contains("<Prefix>\n</Prefix>"), "{query}: {body}");
+    }
 }
 
 #[test]

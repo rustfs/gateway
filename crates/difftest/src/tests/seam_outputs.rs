@@ -164,8 +164,14 @@ fn value_path(path: &str) -> Option<String> {
 /// profile): each sample's register ids and answer findings under it. The RustFS listing rule
 /// (#1088) keeps `/` literal in a URL-encoded delimiter, so the delimiter the generic profile
 /// double-encodes (kd-encode-0037, 0039, 0041) is written as the legacy stack writes it, and it
-/// echoes no multipart EncodingType (sa-0001).
+/// echoes no multipart EncodingType (sa-0001). XML-valid control characters do not force the
+/// RustFS profile into the generic profile's whole-page URL encoding (kd-encode-0051..0057).
 const RUSTFS_PROFILE_SAMPLES: &[(&str, &[&str], &[&str])] = &[
+    (
+        "list-objects-v2-control-character",
+        &["kd-encode-0001", "kd-encode-0002", "kd-encode-0003", "kd-encode-0004"],
+        &[],
+    ),
     (
         "list-objects-v2-url",
         &[
