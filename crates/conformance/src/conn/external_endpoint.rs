@@ -544,7 +544,7 @@ mod tests {
 
         let finished = outcome.recv_timeout(Duration::from_secs(5));
         let _ = release.send(());
-        server.join().expect("silent TLS peer exits");
+        let accepted = server.join().expect("silent TLS peer exits");
         client.join().expect("client exits");
         let (failed, elapsed) = finished.expect("the stalled TLS handshake honoured its setup deadline");
         let handed = handed.lock().expect("deadline record").clone();
@@ -559,5 +559,6 @@ mod tests {
             elapsed >= Duration::from_millis(95),
             "the handshake gave up before its deadline: {elapsed:?}"
         );
+        assert_eq!(accepted, 1, "the silent peer must accept the TLS connection");
     }
 }
