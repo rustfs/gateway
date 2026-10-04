@@ -234,18 +234,22 @@ impl SigV4Authenticator {
         raw: &str,
         headers: &http::HeaderMap,
         wire_content_length: Option<u64>,
+        location: SigLocation,
     ) -> Result<SignedHeaderSet, AuthError> {
-        if self.legacy_signed_headers {
-            SignedHeaderSet::parse_and_enforce_as_legacy_rustfs(raw, headers, wire_content_length)
-        } else {
-            SignedHeaderSet::parse_and_enforce(raw, headers, wire_content_length)
+        match (self.legacy_signed_headers, location) {
+            (true, SigLocation::Header) => {
+                SignedHeaderSet::parse_and_enforce_header_as_legacy_rustfs(raw, headers, wire_content_length)
+            }
+            (false, SigLocation::Header) => SignedHeaderSet::parse_and_enforce_header(raw, headers, wire_content_length),
+            (true, _) => SignedHeaderSet::parse_and_enforce_as_legacy_rustfs(raw, headers, wire_content_length),
+            (false, _) => SignedHeaderSet::parse_and_enforce(raw, headers, wire_content_length),
         }
     }
 
     /// Legacy RustFS's words for a `SignedHeaders` list refused with `error`, under the legacy
     /// reading: a name the request did not send, or sent unreadable, and an `x-amz-*` header the
-    /// list leaves out. A header signature may leave `x-amz-content-sha256` out in legacy RustFS;
-    /// the gateway still refuses that (`rd-loc-0010`), with its own words.
+    /// list leaves out. Header authentication covers `x-amz-content-sha256` in HashedPayload and
+    /// may leave it out of the header list; a presigned request must still name a present header.
     pub(super) fn signed_headers_refusal(
         &self,
         raw: &str,
@@ -275,10 +279,10 @@ impl SigV4Authenticator {
     /// `x-amz-*` header the list leaves out is `403 AccessDenied` "There were headers present in
     /// the request which were not signed".
     ///
-    /// Off by default. It covers nothing less: `host` must still be named, every `x-amz-*` header
-    /// sent must still be named — `x-amz-content-sha256` included, which legacy RustFS lets a
-    /// header signature leave out (`rd-loc-0010`, kept refused) — and every named header is still
-    /// hashed; only how a list is spelled in the string to sign, and the words of a refusal, change.
+    /// Off by default. Host and every semantic `x-amz-*` header remain signed. Both readings
+    /// permit header authentication to cover `x-amz-content-sha256` through HashedPayload;
+    /// presigned requests retain full header coverage. Every named header is still hashed; this
+    /// switch changes only the list spelling in the string to sign and the words of a refusal.
     #[must_use]
     pub fn read_signed_headers_as_legacy_rustfs(mut self) -> Self {
         self.legacy_signed_headers = true;
@@ -367,6 +371,10 @@ impl SigV4Authenticator {
     /// clients sign `s3tables`, and AWS STS clients sign `sts` — and refuses every other one before
     /// it looks the access key up. The key is derived from the service the client named, so a
     /// signature stays bound to it; the date and region checks are unchanged.
+    /// An ordinary request reaching header verification with `sts` scope and no
+    /// `x-amz-content-sha256` uses the body's SHA-256 after lookup, bounded at 8192 bytes; a
+    /// longer body is `400 InvalidRequest` before comparison (rustfs/gateway#1230). The service
+    /// retains those bytes for the operation's body handoff; browser forms keep their own path.
     ///
     /// Off by default: the default verifies only the routed operation's own service, answers an
     /// S3-family service that is not it with `400 AuthorizationHeaderMalformed`, and any other name

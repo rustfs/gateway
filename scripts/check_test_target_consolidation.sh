@@ -789,6 +789,7 @@ gateway_modules = (
     "steady_state_allocations",
     "streaming_request",
     "streaming_without_length",
+    "sts_body_signature",
     "tagging_reachability",
     "throughput_request",
     "tracing_events",

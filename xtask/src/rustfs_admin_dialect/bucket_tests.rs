@@ -32,6 +32,70 @@ use super::tests::{
 };
 use super::{Bound, Route};
 
+/// ADR-0036 keeps the rest in one decoded parameter and binds only the bucket segment.
+#[test]
+fn a_trailing_catch_all_keeps_its_name_and_bucket_binding() {
+    let plan = planned(
+        vec![templated(
+            "POST",
+            "/rustfs/admin/v3/heal/{bucket}/{*prefix}",
+            &["bucket", "*prefix"],
+        )],
+        &[],
+    );
+    let declared = &plan.declared[0];
+    assert_eq!(declared.params, ["bucket", "prefix"]);
+    assert_eq!(declared.name, "rustfs:PostV3HealByBucketByPrefix");
+    assert_eq!(declared.bucket, Some(Bound::Path("bucket".to_owned())));
+    assert_eq!(declared.path, "/rustfs/admin/v3/heal/{bucket}/{*prefix}");
+    assert!(
+        render_operation(declared)
+            .contains("ClaimedRow { template: \"/rustfs/admin/v3/heal/{bucket}/{*prefix}\", selector: SELECTOR }")
+    );
+}
+
+/// Negative — a catch-all has one valid name, is last and cannot bind a bucket.
+#[test]
+fn n_a_catch_all_outside_adr_0036_is_refused() {
+    for (path, params, why) in [
+        ("/rustfs/admin/v3/{*bucket}", &["*bucket"][..], "catch-all cannot bind a bucket"),
+        ("/rustfs/admin/v3/{*prefix}/next", &["*prefix"][..], "catch-all must be last"),
+        ("/rustfs/admin/v3/{*prefix}/", &["*prefix"][..], "catch-all must be last"),
+        ("/rustfs/admin/v3/{*}", &["*"][..], "not a lowercase identifier"),
+        ("/rustfs/admin/v3/{**prefix}", &["**prefix"][..], "not a lowercase identifier"),
+        (
+            "/rustfs/admin/v3/{*prefix}/{*other}",
+            &["*prefix", "*other"][..],
+            "catch-all must be last",
+        ),
+    ] {
+        let error = refusal(vec![templated("POST", path, params)], &[]);
+        assert!(error.contains(why), "{path}: {error}");
+    }
+}
+
+/// Negative — the inventory generator cannot infer a catch-all shadow declaration.
+#[test]
+fn n_an_overlapping_catch_all_needs_an_explicit_generator_rule() {
+    for (path, params) in [
+        ("/rustfs/admin/v3/heal/{bucket}/ready", &["bucket"][..]),
+        ("/rustfs/admin/v3/heal/{bucket}/ready/next", &["bucket"][..]),
+        ("/rustfs/admin/v3/heal/{bucket}/{*other}", &["bucket", "*other"][..]),
+    ] {
+        for reversed in [false, true] {
+            let mut rows = vec![
+                templated("POST", path, params),
+                templated("POST", "/rustfs/admin/v3/heal/{bucket}/{*prefix}", &["bucket", "*prefix"]),
+            ];
+            if reversed {
+                rows.reverse();
+            }
+            let error = refusal(rows, &[]);
+            assert!(error.contains("catch-all overlap"), "{path}: {error}");
+        }
+    }
+}
+
 /// parameters in path order.
 #[test]
 fn a_templated_route_is_declared_with_its_parameters() {
@@ -208,7 +272,7 @@ fn the_recorded_bucket_bindings_are_exactly_the_order_five_ones() {
         .filter(|declared| matches!(declared.bucket, Some(Bound::Path(_))))
         .map(|declared| declared.name.as_str())
         .collect();
-    assert_eq!(by_path.len(), 17 + 48, "{by_path:?}");
+    assert_eq!(by_path.len(), 21 + 49, "{by_path:?}");
     let by_query: Vec<&str> = plan
         .declared
         .iter()
@@ -243,7 +307,7 @@ fn the_recorded_bucket_bindings_are_exactly_the_order_five_ones() {
             ("rustfs:PostV3QuotaCheckByBucket", "s3:GetBucketQuota"),
         ]
     );
-    assert_eq!(plan.declared.len(), 303);
+    assert_eq!(plan.declared.len(), 312);
     assert!(plan.pending.is_empty(), "{:?}", plan.pending);
 }
 
@@ -255,7 +319,7 @@ fn the_recorded_bucket_bindings_are_exactly_the_order_five_ones() {
 fn the_recorded_table_catalog_is_one_operation_per_surface_pair() {
     let plan = recorded_plan();
     let catalog: Vec<&super::Declared> = plan.declared.iter().filter(|declared| declared.order == 6).collect();
-    assert_eq!(catalog.len(), 49);
+    assert_eq!(catalog.len(), 50);
     for declared in &catalog {
         assert!(declared.path.starts_with("/_iceberg/v1/"), "{}", declared.name);
         assert_eq!(

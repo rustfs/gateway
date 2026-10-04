@@ -480,20 +480,18 @@ fn a_signature_leaving_host_unsigned_is_verified_by_the_legacy_stack_and_refused
 
 /// A header-signed request whose `SignedHeaders` leaves out `x-amz-content-sha256`: the legacy
 /// stack exempts that header from its unsigned-header rule, reads it as the payload line and serves
-/// the request. The gateway refuses it under both profiles with `403 SignatureDoesNotMatch`: every
-/// `x-amz-*` header a request carries must be named in its `SignedHeaders`, with no exemption. Kept
-/// deliberately, on security grounds (rustfs/backlog#2684, intentionally not kept).
+/// the request. AWS permits this too because HashedPayload already signs the declaration. Both
+/// gateway profiles now verify it; Host and all semantic `x-amz-*` headers remain required.
 ///
 /// Ruling: `rd-loc-0010`
 #[test]
-fn a_signature_leaving_the_payload_hash_unsigned_is_verified_by_the_legacy_stack_and_refused_by_the_gateway() {
+fn a_signature_covering_the_payload_hash_only_in_the_payload_line_is_verified_by_both_stacks() {
     let unsigned_payload_hash = ["host", "x-amz-date"];
     for request in [
         location_signed_covering("us-east-1", SECRET_KEY, &unsigned_payload_hash),
         location_signed_covering("us-east-1", SECRET_KEY, &unsigned_payload_hash).rustfs_profile(),
     ] {
         let (gateway, oracle) = answers(&request).expect("both stacks answer");
-        assert_eq!((gateway.status, oracle.status), (403, 200), "{gateway:?} {oracle:?}");
-        assert_eq!(gateway.code(), Some("SignatureDoesNotMatch"), "{gateway:?}");
+        assert_eq!((gateway.status, oracle.status), (200, 200), "{gateway:?} {oracle:?}");
     }
 }

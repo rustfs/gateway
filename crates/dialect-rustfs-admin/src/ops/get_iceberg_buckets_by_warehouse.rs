@@ -73,7 +73,7 @@ pub static SHADOWS: &[ShadowingDecl] = &[ShadowingDecl {
     shadowed: "rustfs:GetIcebergByWarehouseNamespaces",
     reason: "RustFS's router tries a literal segment before a parameter, so `buckets` here is this operation, never a `{warehouse}` value.",
     evidence: &[
-        "https://github.com/rustfs/rustfs/blob/736e4fb8e8e5d527c25e4e56f352536b311b6daf/rustfs/src/admin/router.rs",
+        "https://github.com/rustfs/rustfs/blob/5e1bd498ce1ca33bcb0ca50aeee861e69e6c8744/rustfs/src/admin/router.rs",
         record::ADR_0027,
         record::ADR_0031,
     ],
@@ -147,7 +147,7 @@ pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     success_status: 200,
     anonymous: false,
     evidence: &[
-        "https://github.com/rustfs/rustfs/blob/736e4fb8e8e5d527c25e4e56f352536b311b6daf/rustfs/src/admin/handlers/table_catalog/config.rs",
+        "https://github.com/rustfs/rustfs/blob/5e1bd498ce1ca33bcb0ca50aeee861e69e6c8744/rustfs/src/admin/handlers/table_catalog/config.rs",
         record::ADR_0027,
         record::ADR_0030,
         record::ADR_0031,
