@@ -155,6 +155,51 @@ for key, value, delimiter in (
             result = run([sys.executable, str(script)])
             self.assertEqual((result.returncode, result.stderr), (1, "refused\n"))
 
+    def test_malformed_diagnostic_keeps_signing_context_and_suffix_records(self):
+        result, _ = exercise(extra_probes='''
+def malformed_diagnostic_preserved(work, proposal):
+    if proposal.exists():
+        return "an incomplete run left a proposal behind"
+    text = (work / "log/minio-go/log.json").read_text(encoding="utf-8")
+    if context_secret and context_secret in text:
+        return "malformed diagnostic retained its configured secret prefix"
+    if "synthetic-tail-signing-material-1266" in text:
+        return "malformed diagnostic retained signing material across JSON tokens"
+    if "!INVALID_JSON!" not in text or '"malformed-tail"' not in text:
+        return "redaction lost the original malformed record marker or identity"
+    try:
+        boundary = text.rfind("\\n", 0, text.index('"valid-suffix"')) + 1
+        records = [json.loads(text.splitlines()[0]), *json_documents(text[boundary:])]
+    except (json.JSONDecodeError, ValueError):
+        return "redaction corrupted or lost complete suffix records"
+    if records != [prefix, suffix, {**after_suffix, "error": 'Authorization: "[REDACTED]"'}]:
+        return "redaction changed complete record fields, order or census"
+
+prefix = json.loads(rec("minio-go", "valid-prefix", "PASS"))
+suffix = json.loads(rec("minio-go", "valid-suffix", "NA", error='ordinary "quoted" diagnostic with \\\\ slash and\\nnext line \\u2603'))
+after_suffix = json.loads(rec("minio-go", "valid-after-suffix", "PASS", error='Authorization: "synthetic-suffix-signing-material-1266"'))
+previous_context_secret = os.environ.get("MINT_JSON_REDACTION_PROBE")
+try:
+    for label, diagnostic, context_secret in (
+        ("Authorization", 'Authorization: "synthetic-tail-signing-material-1266"', ""),
+        ("expected signature", 'expected signature: "synthetic-tail-signing-material-1266"', ""),
+        ("configured prefix", 'synthetic-known-label-1266 Authorization: "synthetic-tail-signing-material-1266"', "synthetic-known-label-1266"),
+    ):
+        os.environ["MINT_JSON_REDACTION_PROBE"] = context_secret
+        logs = healthy_logs()
+        fragment = '{"name":"minio-go","function":"malformed-tail","status":"FAIL","error":"' + diagnostic + '"}'
+        logs["minio-go"] = "\\n".join((json.dumps(prefix), fragment, json.dumps(suffix), json.dumps(after_suffix)))
+        probe("malformed diagnostic retains signing context " + label, 3,
+            ["record 2 in minio-go/log.json is not valid JSON", '"complete": false'], logs=logs, redact=True,
+            record=True, stale_proposal=True, after=malformed_diagnostic_preserved)
+finally:
+    if previous_context_secret is None:
+        os.environ.pop("MINT_JSON_REDACTION_PROBE", None)
+    else:
+        os.environ["MINT_JSON_REDACTION_PROBE"] = previous_context_secret
+''')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_real_cli_disagreement_is_rejected(self):
         for change in ("result.returncode = 99", "result.stdout += 'unexpected stdout'",
                        "result.stderr += 'unexpected stderr'",
