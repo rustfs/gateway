@@ -49,6 +49,7 @@ for name, arguments in refusals.items():
         raise SystemExit(f"{name}: expected argument rejection was not observed: {result}")
     print(f"OK: {name}")
 PYTEST
+: >"$LOG"
 "${TARGET_DIR}/debug/examples/minimal" 127.0.0.1:0 >"$LOG" 2>&1 &
 PROCESS_ID="$!"
 

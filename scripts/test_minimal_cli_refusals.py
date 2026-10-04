@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
-"""Exercise the smoke script's actual CLI observer with isolated executable controls.
+"""Exercise the smoke script's CLI and startup observers with isolated executable controls.
 
 This does not build or run the listener; real-binary wire and shutdown checks remain in the smoke.
 """
 import json
+import os
 import pathlib
 import re
+import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -87,6 +90,117 @@ sys.exit(0 if mode == "success" else 42 if mode == "wrong-exit" else 1)
             with self.subTest(mode=mode):
                 result, _ = self.run_observer(mode)
                 self.assertNotEqual(result.returncode, 0, result.stdout)
+
+
+class ListenerStartupObserver(unittest.TestCase):
+    def run_startup(self, mode):
+        source = SCRIPT.read_text()
+        cleanup = source[source.index("cleanup() {"):source.index('\ncd "$ROOT"')]
+        startup = source.split("\nPYTEST\n", 1)[1].split('\npython3 - "$ADDRESS"', 1)[0]
+        with tempfile.TemporaryDirectory(prefix="gateway-startup-control-") as directory:
+            root = pathlib.Path(directory)
+            (root / "smoke").mkdir()
+            (root / "debug/examples").mkdir(parents=True)
+            (root / "bin").mkdir()
+            ready, release, polls = (root / name for name in ("ready", "release", "polls.jsonl"))
+            executable = root / "debug/examples/minimal"
+            executable.write_text("#!" + sys.executable + "\n" + f'''
+import signal, sys
+mode = {mode!r}
+if mode == "silent-exit":
+    sys.exit(0)
+if mode == "startup-error":
+    print("unrelated startup failure", file=sys.stderr, flush=True)
+    sys.exit(31)
+signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+print("listening on http://127.0.0.1:9000", flush=True)
+while True:
+    signal.pause()
+''')
+            executable.chmod(0o700)
+            sed = root / "bin/sed"
+            sed.write_text("#!" + sys.executable + "\n" + f'''
+import json, pathlib, subprocess, sys, time
+ready, release, polls = map(pathlib.Path, {list(map(str, (ready, release, polls)))!r})
+while not ready.exists():
+    time.sleep(0.001)
+exists = pathlib.Path(sys.argv[-1]).is_file()
+result = subprocess.run([{shutil.which("sed")!r}, *sys.argv[1:]], capture_output=True)
+with polls.open("a") as output:
+    output.write(json.dumps({{"log_exists": exists, "status": result.returncode}}) + "\\n")
+release.write_text("release")
+sys.stdout.buffer.write(result.stdout)
+sys.stderr.buffer.write(result.stderr)
+sys.exit(result.returncode)
+''')
+            sed.chmod(0o700)
+            # Delay the actual command before its redirection; release it only after the real sed.
+            # extdebug skips the original launch once; errexit resumes before the original poll.
+            schedule = '''
+shopt -s extdebug
+schedule_launch() {
+    local command="$1"
+    if [[ "$command" == *debug/examples/minimal* && "$command" == *127.0.0.1:0* ]]; then
+        set +e
+        (
+            trap - DEBUG EXIT
+            printf ready >"$READY"
+            while [[ ! -f "$RELEASE" ]]; do sleep 0.001; done
+            eval "exec $command"
+        ) &
+        return 1
+    fi
+    if [[ "$command" == PROCESS_ID=* ]]; then
+        set -e
+        trap - DEBUG
+    fi
+    return 0
+}
+trap 'schedule_launch "$BASH_COMMAND"' DEBUG
+'''
+            harness = '\n'.join([
+                'set -euo pipefail', 'TARGET_DIR="$1"', 'SMOKE_DIR="$1/smoke"',
+                'LOG="$SMOKE_DIR/minimal.log"', 'PROCESS_ID=""',
+                'READY="$1/ready"', 'RELEASE="$1/release"', cleanup, schedule, startup,
+                'printf "observed address: %s\\n" "$ADDRESS"',
+            ])
+            process = subprocess.Popen(
+                ["bash", "-c", harness, "startup-control", str(root)],
+                env={**os.environ, "PATH": str(root / "bin") + os.pathsep + os.environ["PATH"]},
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True,
+            )
+            try:
+                stdout, stderr = process.communicate(timeout=10)
+                result = subprocess.CompletedProcess(process.args, process.returncode, stdout, stderr)
+                observed = [json.loads(line) for line in polls.read_text().splitlines()]
+                return result, observed
+            finally:
+                release.write_text("rescue")
+                try:
+                    os.killpg(process.pid, signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
+                if process.poll() is None:
+                    process.communicate(timeout=2)
+
+    def test_delayed_child_redirection_cannot_abort_the_first_poll(self):
+        result, observed = self.run_startup("announces")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(observed[0], {"log_exists": True, "status": 0})
+        self.assertIn("observed address: 127.0.0.1:9000", result.stdout)
+
+    def test_silent_child_exit_reaches_the_original_startup_refusal(self):
+        result, observed = self.run_startup("silent-exit")
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(observed[0], {"log_exists": True, "status": 0})
+        self.assertIn("example exited before announcing its listener", result.stderr)
+
+    def test_unrelated_startup_failure_remains_visible_and_refused(self):
+        result, observed = self.run_startup("startup-error")
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(observed[0], {"log_exists": True, "status": 0})
+        self.assertIn("example exited before announcing its listener", result.stderr)
+        self.assertIn("unrelated startup failure", result.stderr)
 
 
 if __name__ == "__main__":
