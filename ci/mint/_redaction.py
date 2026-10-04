@@ -106,7 +106,22 @@ def redact_json_tail(text: str, secrets: list[str], redact_text: Callable[[str, 
         chunks.append(json.dumps(redact_text(key, secrets), ensure_ascii=not any("\udc80" <= c <= "\udcff" for c in match.group())))
         position = match.end()
         colon = re.match(r"\s*:\s*", text[position:])
-        if not colon or not SENSITIVE_FIELD.fullmatch(key):
+        if not colon:
+            following = JSON_STRING.search(text, position)
+            end = following.start() if following else len(text)
+            gap = text[position:end]
+            if gap.lstrip() and gap.lstrip()[0] not in ",}]:":
+                # Keep a diagnostic label beside malformed, unquoted value text.
+                prefix = key + '"'
+                for secret in secrets:
+                    if secret:
+                        prefix = prefix.replace(secret, REDACTED)
+                joined = redact_text(prefix + gap, secrets)
+                if joined.startswith(prefix):
+                    chunks.append(joined[len(prefix):])
+                    position = end
+            continue
+        if not SENSITIVE_FIELD.fullmatch(key):
             continue
         start = position + colon.end()
         try:
