@@ -16,38 +16,57 @@
 //! `SignedHeaders` read, and its refusals answered, as legacy RustFS reads and answers them
 //! (rustfs/gateway#1130).
 //!
-//! Responsible for: both directions of the switch on a header-signed `GetObject` — with it, a list
-//! in uppercase verified when the string to sign spells it so, a name the request did not send
-//! named, and an unsigned `x-amz-*` header `AccessDenied`; without it, the gateway's own answers.
-//! NOT responsible for: presigned URLs and the storage outcome, which `compat/sut`'s
-//! `signed_header_reading_tests.rs` drives through the RustFS-profile assembly.
-//! Upstream: `support`. Downstream: nothing.
+//! Responsible for: both signed-header readings, header-auth payload coverage, stored bytes and
+//! independent signature controls for the Host, semantic-header and presigned-query boundaries.
+//! NOT responsible for: the complete RustFS assembly or live AWS capture.
+//! Upstream: `support` and the authenticator. Downstream: the integration verification gate.
 
 use std::sync::{Arc, Mutex};
 
 use bytes::Bytes;
+use http_body_util::BodyExt as _;
+use rustfs_gateway::sig::{AmzDate, PayloadMode, SigService, SigV4Signer, SigningCredentials, SigningRequest, SigningScope};
 use rustfs_gateway::{
-    ClockSkewAck, Credentials, Handler, HandlerResult, RegionSet, Req, Resp, S3Service, ServiceBuilder, SigV4Authenticator,
-    StaticCredentials, allow_when, dto,
+    ClockSkewAck, Credentials, Handler, HandlerError, HandlerResult, RegionSet, Req, Resp, S3Service, ServiceBuilder,
+    SigV4Authenticator, StaticCredentials, allow_when, dto,
 };
 use sha2::{Digest as _, Sha256};
 
 use crate::support;
 
-struct Backend(Arc<Mutex<u32>>);
+#[derive(Default)]
+struct Backend {
+    calls: Mutex<u32>,
+    stored: Mutex<Vec<Bytes>>,
+}
 
 impl Handler<dto::GetObject> for Backend {
-    fn call(&self, _request: Req<dto::GetObject>) -> impl core::future::Future<Output = HandlerResult<dto::GetObject>> + Send {
-        let calls = Arc::clone(&self.0);
-        async move {
-            *calls.lock().expect("the record is never poisoned") += 1;
-            Ok(Resp::new(dto::GetObjectOutput::default()))
-        }
+    async fn call(&self, _request: Req<dto::GetObject>) -> HandlerResult<dto::GetObject> {
+        *self.calls.lock().expect("the record is never poisoned") += 1;
+        Ok(Resp::new(dto::GetObjectOutput::default()))
     }
 }
 
-fn service(legacy: bool) -> (S3Service, Arc<Mutex<u32>>) {
-    let calls = Arc::new(Mutex::new(0));
+impl Handler<dto::PutObject> for Backend {
+    async fn call(&self, request: Req<dto::PutObject>) -> HandlerResult<dto::PutObject> {
+        *self.calls.lock().expect("the record is never poisoned") += 1;
+        let body = request
+            .into_input()
+            .body
+            .ok_or_else(|| HandlerError::internal_error("missing body"))?;
+        let bytes = body
+            .into_body()
+            .collect()
+            .await
+            .map_err(|_| HandlerError::internal_error("body failed"))?
+            .to_bytes();
+        self.stored.lock().expect("the record is never poisoned").push(bytes);
+        Ok(Resp::new(dto::PutObjectOutput::default()))
+    }
+}
+
+fn service(legacy: bool) -> (S3Service, Arc<Backend>) {
+    let backend = Arc::new(Backend::default());
     let credentials =
         Arc::new(StaticCredentials::new().with(Credentials::new("AKIDEXAMPLE", b"secret").expect("a valid access key id")));
     let mut authenticator = SigV4Authenticator::new(credentials, RegionSet::new(["us-east-1"]).expect("non-empty"));
@@ -61,10 +80,11 @@ fn service(legacy: bool) -> (S3Service, Arc<Mutex<u32>>) {
             support::fixed_clock(),
             ClockSkewAck::i_understand_a_skewed_clock_can_disable_signature_expiry(),
         )
-        .register::<dto::GetObject, _>(Arc::new(Backend(Arc::clone(&calls))))
+        .register::<dto::GetObject, _>(Arc::clone(&backend))
+        .register::<dto::PutObject, _>(Arc::clone(&backend))
         .build()
-        .expect("a complete GetObject assembly");
-    (service, calls)
+        .expect("a complete assembly");
+    (service, backend)
 }
 
 fn hmac_sha256(key: &[u8], data: &[u8]) -> [u8; 32] {
@@ -89,10 +109,22 @@ const PAYLOAD: &str = "UNSIGNED-PAYLOAD";
 /// and `signed_line` in its string to sign, with `extra` headers sent beside the three it always
 /// sends.
 fn get(list: &str, canonical_headers: &str, signed_line: &str, extra: &[(&str, &str)]) -> http::Request<Bytes> {
+    request("GET", list, canonical_headers, signed_line, PAYLOAD, Bytes::new(), extra)
+}
+
+fn request(
+    method: &str,
+    list: &str,
+    canonical_headers: &str,
+    signed_line: &str,
+    payload: &str,
+    body: Bytes,
+    extra: &[(&str, &str)],
+) -> http::Request<Bytes> {
     let stamp = support::SIGNED_AT_STAMP;
     let day = &stamp[..8];
     let scope = format!("{day}/us-east-1/s3/aws4_request");
-    let canonical = format!("GET\n/bucket/key\n\n{canonical_headers}\n{signed_line}\n{PAYLOAD}");
+    let canonical = format!("{method}\n/bucket/key\n\n{canonical_headers}\n{signed_line}\n{payload}");
     let string_to_sign = format!("AWS4-HMAC-SHA256\n{stamp}\n{scope}\n{}", hex(&Sha256::digest(canonical.as_bytes())));
     let mut key = hmac_sha256(b"AWS4secret", day.as_bytes());
     for part in ["us-east-1", "s3", "aws4_request"] {
@@ -100,10 +132,11 @@ fn get(list: &str, canonical_headers: &str, signed_line: &str, extra: &[(&str, &
     }
     let signature = hex(&hmac_sha256(&key, string_to_sign.as_bytes()));
     let mut request = http::Request::builder()
-        .method(http::Method::GET)
+        .method(method)
         .uri("/bucket/key")
         .header(http::header::HOST, "s3.example.com")
-        .header("x-amz-content-sha256", PAYLOAD)
+        .header("x-amz-content-sha256", payload)
+        .header(http::header::CONTENT_LENGTH, body.len().to_string())
         .header("x-amz-date", stamp);
     for (name, value) in extra {
         request = request.header(*name, *value);
@@ -113,7 +146,7 @@ fn get(list: &str, canonical_headers: &str, signed_line: &str, extra: &[(&str, &
             http::header::AUTHORIZATION,
             format!("AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/{scope}, SignedHeaders={list}, Signature={signature}"),
         )
-        .body(Bytes::new())
+        .body(body)
         .expect("a valid request")
 }
 
@@ -129,8 +162,141 @@ const UPPER: [&str; 3] = ["HOST", "X-AMZ-CONTENT-SHA256", "X-AMZ-DATE"];
 async fn answer(legacy: bool, request: http::Request<Bytes>) -> (http::StatusCode, String, u32) {
     let (service, calls) = service(legacy);
     let (status, body) = support::exchange(&service, request).await;
-    let reached = *calls.lock().expect("the record is never poisoned");
+    let reached = *calls.calls.lock().expect("the record is never poisoned");
     (status, body, reached)
+}
+
+/// AWS permits the payload declaration outside SignedHeaders: HashedPayload covers it already.
+#[tokio::test]
+async fn a_payload_declaration_is_covered_by_the_payload_line_under_both_readings() {
+    let empty = hex(&Sha256::digest([]));
+    for legacy in [false, true] {
+        for payload in [PAYLOAD, empty.as_str()] {
+            let list = "host;x-amz-date";
+            let headers = format!("host:s3.example.com\nx-amz-date:{}\n", support::SIGNED_AT_STAMP);
+            let request = request("GET", list, &headers, list, payload, Bytes::new(), &[]);
+            let (status, body, reached) = answer(legacy, request).await;
+            assert_eq!((status, reached), (http::StatusCode::OK, 1), "{legacy}: {body}");
+        }
+    }
+    let list = "HOST;X-AMZ-DATE";
+    let headers = format!("HOST:s3.example.com\nX-AMZ-DATE:{}\n", support::SIGNED_AT_STAMP);
+    let (status, body, reached) = answer(true, get(list, &headers, list, &[])).await;
+    assert_eq!((status, reached), (http::StatusCode::OK, 1), "{body}");
+}
+
+/// Negative — changing the unlisted digest or mode changes HashedPayload and must invalidate HMAC.
+#[tokio::test]
+async fn n_changing_an_unlisted_payload_declaration_breaks_the_signature() {
+    let empty = hex(&Sha256::digest([]));
+    let headers = format!("host:s3.example.com\nx-amz-date:{}\n", support::SIGNED_AT_STAMP);
+    for legacy in [false, true] {
+        for (signed, sent) in [(PAYLOAD, empty.as_str()), (empty.as_str(), PAYLOAD)] {
+            let list = "host;x-amz-date";
+            let mut request = request("GET", list, &headers, list, signed, Bytes::new(), &[]);
+            request
+                .headers_mut()
+                .insert("x-amz-content-sha256", sent.parse().expect("a declaration"));
+            let (status, body, reached) = answer(legacy, request).await;
+            assert_eq!((status, reached), (http::StatusCode::FORBIDDEN, 0), "{body}");
+            assert!(body.contains("<Code>SignatureDoesNotMatch</Code>"), "{body}");
+        }
+    }
+}
+
+/// Negative — the payload line covers no metadata, copy instruction or object-lock header.
+#[tokio::test]
+async fn n_payload_line_coverage_does_not_cover_other_amz_headers() {
+    let list = "host;x-amz-date";
+    let headers = format!("host:s3.example.com\nx-amz-date:{}\n", support::SIGNED_AT_STAMP);
+    for legacy in [false, true] {
+        for (name, value) in [
+            ("x-amz-meta-note", "unsigned"),
+            ("x-amz-copy-source", "/other/key"),
+            ("x-amz-object-lock-mode", "GOVERNANCE"),
+        ] {
+            let (status, body, reached) = answer(legacy, get(list, &headers, list, &[(name, value)])).await;
+            assert_eq!((status, reached), (http::StatusCode::FORBIDDEN, 0), "{name}: {body}");
+        }
+    }
+}
+
+/// Negative — the HashedPayload exception cannot exempt the request's destination.
+#[tokio::test]
+async fn n_payload_line_coverage_still_requires_host() {
+    let list = "x-amz-date";
+    let headers = format!("x-amz-date:{}\n", support::SIGNED_AT_STAMP);
+    for legacy in [false, true] {
+        let (status, body, reached) = answer(legacy, get(list, &headers, list, &[])).await;
+        assert_eq!((status, reached), (http::StatusCode::FORBIDDEN, 0), "{body}");
+    }
+}
+
+/// A valid header signature over the body digest stores the exact bytes without signing it twice.
+#[tokio::test]
+async fn a_put_with_its_digest_outside_signed_headers_stores_the_body() {
+    let list = "host;x-amz-date";
+    let headers = format!("host:s3.example.com\nx-amz-date:{}\n", support::SIGNED_AT_STAMP);
+    let bytes = Bytes::from_static(b"body covered once");
+    let digest = hex(&Sha256::digest(&bytes));
+    for legacy in [false, true] {
+        let (service, backend) = service(legacy);
+        let request = request("PUT", list, &headers, list, &digest, bytes.clone(), &[]);
+        let (status, body) = support::exchange(&service, request).await;
+        assert_eq!(status, http::StatusCode::OK, "{body}");
+        assert_eq!(*backend.calls.lock().expect("record"), 1);
+        assert_eq!(*backend.stored.lock().expect("record"), vec![bytes.clone()]);
+    }
+}
+
+/// Negative — the body verifier must refuse different bytes before the backend commits them.
+#[tokio::test]
+async fn n_a_put_with_different_bytes_does_not_commit() {
+    let list = "host;x-amz-date";
+    let headers = format!("host:s3.example.com\nx-amz-date:{}\n", support::SIGNED_AT_STAMP);
+    let digest = hex(&Sha256::digest(b"signed body"));
+    for legacy in [false, true] {
+        let (service, backend) = service(legacy);
+        let request = request("PUT", list, &headers, list, &digest, Bytes::from_static(b"wrong body"), &[]);
+        let (status, body) = support::exchange(&service, request).await;
+        assert_eq!(status, http::StatusCode::BAD_REQUEST, "{body}");
+        assert_eq!(*backend.calls.lock().expect("record"), 1, "payload verification was not exercised");
+        assert!(backend.stored.lock().expect("record").is_empty());
+    }
+}
+
+/// Negative — query authentication has no header-auth payload exception. A real valid query is
+/// the control, so this cannot pass merely because the test built an invalid presigned URL.
+#[tokio::test]
+async fn n_a_presigned_request_still_cannot_add_an_unlisted_payload_header() {
+    let mut headers = http::HeaderMap::new();
+    headers.insert(http::header::HOST, "s3.example.com".parse().expect("host"));
+    let host = rustfs_gateway_http::RawHost::from_host_header(b"s3.example.com").expect("host");
+    let stamp = AmzDate::parse(support::SIGNED_AT_STAMP).expect("timestamp");
+    let scope = SigningScope::new(stamp.day(), "us-east-1", SigService::S3).expect("scope");
+    let signing = SigningRequest::new(&http::Method::GET, "/bucket/key", "", &headers, &host, PayloadMode::Unsigned, stamp);
+    let mut signer = SigV4Signer::new(SigningCredentials::new("AKIDEXAMPLE", b"secret").expect("credentials"), scope);
+    let signed = signer.presign(&signing, 900).expect("signable request");
+    for legacy in [false, true] {
+        for add_payload in [false, true] {
+            let mut request = http::Request::builder()
+                .method("GET")
+                .uri(format!("/bucket/key?{}", signed.query()));
+            for (name, value) in signed.headers() {
+                request = request.header(name, value);
+            }
+            if add_payload {
+                request = request.header("x-amz-content-sha256", PAYLOAD);
+            }
+            let (status, body, reached) = answer(legacy, request.body(Bytes::new()).expect("request")).await;
+            let expected = if add_payload {
+                (http::StatusCode::FORBIDDEN, 0)
+            } else {
+                (http::StatusCode::OK, 1)
+            };
+            assert_eq!((status, reached), expected, "{legacy}, {add_payload}: {body}");
+        }
+    }
 }
 
 /// Positive — under the switch a list in uppercase is verified when the string to sign spells it

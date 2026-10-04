@@ -1,0 +1,48 @@
+# c-sig-0605 — gateway issue #1239.
+
+[case]
+id = "c-sig-0605"
+schema_version = 1
+title = "A presigned URL still refuses an unlisted payload declaration header"
+rationale = "The header-auth exception is not a query-auth exception. A correctly presigned query with an unlisted payload declaration must retain its header coverage refusal."
+polarity = "negative"
+operation = "GetObject"
+tags = ["signature", "sigv4", "security"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/developerguide/sig-v4-header-based-auth.html"
+summary = "Header authentication covers the payload declaration through HashedPayload; other semantic headers remain covered."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+request_time = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-sig"
+
+[[setup.objects]]
+bucket = "conf-sig"
+key = "presigned-payload-header"
+body = { utf8 = "stored" }
+
+[request]
+method = "GET"
+target = "/conf-sig/presigned-payload-header"
+headers = { "x-amz-content-sha256" = "UNSIGNED-PAYLOAD" }
+[request.sign]
+mode = "presigned_v4"
+credential = "valid"
+service = "s3"
+region = "us-east-1"
+signed_headers = ["host"]
+payload_hash = "unsigned"
+expires_s = 900
+[expect]
+kind = "response"
+status = 403
+[expect.error]
+code = "SignatureDoesNotMatch"
+request_id_present = true

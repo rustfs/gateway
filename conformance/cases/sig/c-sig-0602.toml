@@ -1,0 +1,43 @@
+# c-sig-0602 — gateway issue #1239.
+
+[case]
+id = "c-sig-0602"
+schema_version = 1
+title = "Different body bytes are refused after valid payload-line authentication"
+rationale = "The HMAC is valid over the declared digest, but the received body is different. The payload verifier must answer its mismatch, rather than fail for a missing signed header."
+polarity = "negative"
+operation = "PutObject"
+tags = ["signature", "sigv4", "security"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/developerguide/sig-v4-header-based-auth.html"
+summary = "Header authentication covers the payload declaration through HashedPayload; other semantic headers remain covered."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+request_time = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-sig"
+
+[request]
+method = "PUT"
+target = "/conf-sig/header-payload-mismatch"
+body = { utf8 = "tampered-payload" }
+[request.sign]
+mode = "sigv4_header"
+credential = "valid"
+service = "s3"
+region = "us-east-1"
+signed_headers = ["host", "x-amz-date"]
+payload_hash = "literal"
+payload_hash_literal = "c32cace75647e3e184b9dce888af087f63740976550541874c37a1037b196b56"
+[expect]
+kind = "response"
+status = 400
+[expect.error]
+code = "XAmzContentSHA256Mismatch"
+request_id_present = true
