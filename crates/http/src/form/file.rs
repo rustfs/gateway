@@ -74,7 +74,7 @@ enum Tail {
 ///
 /// The only way to obtain one is [`crate::FormReader::into_file`]. There is no `new`, no
 /// `Default`, and no way to raise the ceiling once reading has begun.
-#[derive(Debug)]
+/// `Debug` reports limits and progress without formatting boundary or file bytes.
 pub struct FileReader {
     ceiling: u64,
     max_whole_stream_bytes: u64,
@@ -91,6 +91,22 @@ pub struct FileReader {
     bytes_seen: u64,
     tail: Tail,
     grammar: FormGrammar,
+}
+
+impl core::fmt::Debug for FileReader {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("FileReader")
+            .field("ceiling", &self.ceiling)
+            .field("max_whole_stream_bytes", &self.max_whole_stream_bytes)
+            .field("boundary_bytes", &self.closing.len().saturating_sub(4))
+            .field("carry_bytes", &self.carry.len())
+            .field("scratch_bytes", &self.scratch.len())
+            .field("file_bytes", &self.file_bytes)
+            .field("bytes_seen", &self.bytes_seen)
+            .field("tail", &self.tail)
+            .field("grammar", &self.grammar)
+            .finish()
+    }
 }
 
 impl FileReader {

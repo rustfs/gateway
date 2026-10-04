@@ -338,3 +338,55 @@ fn the_host_allowlist_compares_the_host_alone() {
     assert_eq!(permitted("https://[::2]/cb").err(), Some(PostPolicyError::Malformed));
     assert_eq!(permitted("https://example.com:x@evil.com/cb").err(), Some(PostPolicyError::Malformed));
 }
+
+const POLICY_CONTENT_TYPE: &str = "eyJleHBpcmF0aW9uIjoiMjAxNS0wOC0zMFQxMzozNjowMFoiLCJjb25kaXRpb25zIjpbeyJidWNrZXQiOiJleGFtcGxlLWJ1Y2tldCJ9LFsic3RhcnRzLXdpdGgiLCIka2V5IiwidXBsb2Fkcy8iXSx7IngtYW16LWFsZ29yaXRobSI6IkFXUzQtSE1BQy1TSEEyNTYifSx7IngtYW16LWNyZWRlbnRpYWwiOiJBS0lERVhBTVBMRS8yMDE1MDgzMC91cy1lYXN0LTEvczMvYXdzNF9yZXF1ZXN0In0seyJ4LWFtei1kYXRlIjoiMjAxNTA4MzBUMTIzNjAwWiJ9LFsic3RhcnRzLXdpdGgiLCIkQ29udGVudC1UeXBlIiwiaW1hZ2UvIl1dfQ==";
+const POLICY_COMMA_METADATA: &str = "eyJleHBpcmF0aW9uIjoiMjAxNS0wOC0zMFQxMzozNjowMFoiLCJjb25kaXRpb25zIjpbeyJidWNrZXQiOiJleGFtcGxlLWJ1Y2tldCJ9LFsic3RhcnRzLXdpdGgiLCIka2V5IiwidXBsb2Fkcy8iXSx7IngtYW16LWFsZ29yaXRobSI6IkFXUzQtSE1BQy1TSEEyNTYifSx7IngtYW16LWNyZWRlbnRpYWwiOiJBS0lERVhBTVBMRS8yMDE1MDgzMC91cy1lYXN0LTEvczMvYXdzNF9yZXF1ZXN0In0seyJ4LWFtei1kYXRlIjoiMjAxNTA4MzBUMTIzNjAwWiJ9LFsic3RhcnRzLXdpdGgiLCIkeC1hbXotbWV0YS1jYXB0aW9uIiwiaW1hZ2UvIl1dfQ==";
+
+fn prefix_policy_accepts(name: &str, value: &str, encoded: &str) -> Result<(), PostPolicyError> {
+    let key = SigningKey::from_array([7u8; 32]);
+    let signature = hex_encode(&hmac_sha256(key.expose(), encoded.as_bytes()));
+    let mut fields = fields_with_policy(&signature, encoded);
+    fields.push((name, value));
+    parse(&fields, "report.txt")?.verify(&key)?;
+    Ok(())
+}
+
+#[test]
+fn n_content_type_prefix_refuses_a_disallowed_later_item() {
+    for value in ["image/png,text/html", "image/png,image/jpeg,text/html"] {
+        assert_eq!(
+            prefix_policy_accepts("Content-Type", value, POLICY_CONTENT_TYPE),
+            Err(PostPolicyError::ConditionFailed)
+        );
+    }
+}
+
+#[test]
+fn n_content_type_prefix_refuses_a_disallowed_first_item() {
+    assert_eq!(
+        prefix_policy_accepts("Content-Type", "text/html,image/png", POLICY_CONTENT_TYPE),
+        Err(PostPolicyError::ConditionFailed)
+    );
+}
+
+#[test]
+fn n_content_type_prefix_refuses_an_empty_item() {
+    for value in ["image/png,", "image/png,,image/jpeg", ",image/png"] {
+        assert_eq!(
+            prefix_policy_accepts("Content-Type", value, POLICY_CONTENT_TYPE),
+            Err(PostPolicyError::ConditionFailed)
+        );
+    }
+}
+
+#[test]
+fn content_type_prefix_accepts_every_matching_item() {
+    for value in ["image/png", "image/png,image/jpeg"] {
+        assert!(prefix_policy_accepts("cOnTeNt-TyPe", value, POLICY_CONTENT_TYPE).is_ok());
+    }
+}
+
+#[test]
+fn a_metadata_prefix_keeps_commas_as_literal_content() {
+    assert!(prefix_policy_accepts("x-amz-meta-caption", "image/png,text/html", POLICY_COMMA_METADATA).is_ok());
+}

@@ -44,6 +44,7 @@ use crate::error::{Error, Result};
 use crate::ir::{ChecksumAlgo, EmptyValue, Quirk};
 use crate::toml_lite::{self, Toml};
 use error_status::ERROR_STATUS_FILE;
+use optional::{alt_success_statuses, opt_bool, opt_int, opt_str, opt_u16, opt_u32, opt_u64};
 
 mod codec;
 mod codec_inputs;
@@ -53,6 +54,7 @@ mod cors_contract_values;
 mod error_status;
 mod mutation_dimension;
 mod naming_contract_inputs;
+mod optional;
 mod precondition_contract_inputs;
 mod precondition_contract_values;
 mod quirks;
@@ -619,18 +621,6 @@ pub(super) fn required_str(table: &Toml, key: &str, what: &str) -> Result<String
         .ok_or_else(|| Error::Overlay(format!("{what}: missing `{key}`")))
 }
 
-fn opt_str(table: &Toml, key: &str) -> Option<String> {
-    table.get(key).and_then(Toml::as_str).map(str::to_owned)
-}
-
-fn opt_bool(table: &Toml, key: &str) -> Option<bool> {
-    table.get(key).and_then(Toml::as_bool)
-}
-
-fn opt_u32(table: &Toml, key: &str) -> Option<u32> {
-    table.get(key).and_then(Toml::as_int).and_then(|i| u32::try_from(i).ok())
-}
-
 fn list(table: &Toml, key: &str, what: &str) -> Result<Vec<String>> {
     match table.get(key) {
         Some(v) => v.string_array(&format!("{what}.{key}")),
@@ -681,66 +671,53 @@ fn algorithms(table: &Toml, key: &str, what: &str) -> Result<Option<Vec<Checksum
         .map(Some)
 }
 
-fn payload_overlay(table: &Toml, prefix: &str) -> PayloadOverlay {
-    PayloadOverlay {
-        kind: opt_str(table, &format!("{prefix}_kind")),
-        buffering: opt_str(table, &format!("{prefix}_buffering")),
-        max_bytes: table
-            .get(&format!("{prefix}_max_bytes"))
-            .and_then(Toml::as_int)
-            .and_then(|i| u64::try_from(i).ok()),
-    }
+fn payload_overlay(table: &Toml, prefix: &str, what: &str) -> Result<PayloadOverlay> {
+    Ok(PayloadOverlay {
+        kind: opt_str(table, &format!("{prefix}_kind"), what)?,
+        buffering: opt_str(table, &format!("{prefix}_buffering"), what)?,
+        max_bytes: opt_u64(table, &format!("{prefix}_max_bytes"), what)?,
+    })
 }
 
 fn op_overlay(name: &str, table: &Toml) -> Result<OpOverlay> {
     let what = format!("op.{name}");
     Ok(OpOverlay {
-        method: opt_str(table, "method"),
-        precedence: opt_u32(table, "precedence"),
-        target: opt_str(table, "target"),
-        path_shape: opt_str(table, "path_shape"),
-        success_status: opt_u32(table, "success_status").and_then(|v| u16::try_from(v).ok()),
-        alt_success_statuses: table
-            .get("alt_success_statuses")
-            .and_then(Toml::as_array)
-            .map(|items| {
-                items
-                    .iter()
-                    .filter_map(Toml::as_int)
-                    .filter_map(|i| u16::try_from(i).ok())
-                    .collect()
-            })
-            .unwrap_or_default(),
+        method: opt_str(table, "method", &what)?,
+        precedence: opt_u32(table, "precedence", &what)?,
+        target: opt_str(table, "target", &what)?,
+        path_shape: opt_str(table, "path_shape", &what)?,
+        success_status: opt_u16(table, "success_status", &what)?,
+        alt_success_statuses: alt_success_statuses(table, &what)?,
         query_present: list(table, "query_present", &what)?,
         query_absent: list(table, "query_absent", &what)?,
         header_present: list(table, "header_present", &what)?,
         header_absent: list(table, "header_absent", &what)?,
         header_prefix: header_prefixes(table, &what)?,
-        host_class: opt_str(table, "host_class"),
-        arn_form: opt_str(table, "arn_form"),
-        auth_requirement: opt_str(table, "auth_requirement"),
-        auth_action: opt_str(table, "auth_action"),
-        auth_presigned: opt_bool(table, "auth_presigned"),
-        auth_service: opt_str(table, "auth_service"),
-        request: payload_overlay(table, "request"),
-        response: payload_overlay(table, "response"),
-        http_checksum_required: opt_bool(table, "http_checksum_required"),
+        host_class: opt_str(table, "host_class", &what)?,
+        arn_form: opt_str(table, "arn_form", &what)?,
+        auth_requirement: opt_str(table, "auth_requirement", &what)?,
+        auth_action: opt_str(table, "auth_action", &what)?,
+        auth_presigned: opt_bool(table, "auth_presigned", &what)?,
+        auth_service: opt_str(table, "auth_service", &what)?,
+        request: payload_overlay(table, "request", &what)?,
+        response: payload_overlay(table, "response", &what)?,
+        http_checksum_required: opt_bool(table, "http_checksum_required", &what)?,
         request_algorithms: algorithms(table, "request_algorithms", &what)?,
         response_algorithms: algorithms(table, "response_algorithms", &what)?,
-        request_root: opt_str(table, "request_root"),
+        request_root: opt_str(table, "request_root", &what)?,
         request_root_aliases: list(table, "request_root_aliases", &what)?,
-        response_root: opt_str(table, "response_root"),
-        xmlns: opt_str(table, "xmlns"),
-        unwrapped_output: opt_bool(table, "unwrapped_output"),
+        response_root: opt_str(table, "response_root", &what)?,
+        xmlns: opt_str(table, "xmlns", &what)?,
+        unwrapped_output: opt_bool(table, "unwrapped_output", &what)?,
         element_order: list(table, "element_order", &what)?,
         url_encoded_fields: list(table, "url_encoded_fields", &what)?,
-        body_literal: opt_bool(table, "body_literal"),
+        body_literal: opt_bool(table, "body_literal", &what)?,
         empty_value: empty_value_table(table, &what)?,
-        not_configured: opt_str(table, "not_configured"),
-        allows_error_after_200: opt_bool(table, "allows_error_after_200"),
+        not_configured: opt_str(table, "not_configured", &what)?,
+        allows_error_after_200: opt_bool(table, "allows_error_after_200", &what)?,
         error_codes: list(table, "error_codes", &what)?,
         quirk_refs: list(table, "quirk_refs", &what)?,
-        head_mirrors: opt_str(table, "head_mirrors"),
+        head_mirrors: opt_str(table, "head_mirrors", &what)?,
         input_drop: list(table, "input_drop", &what)?,
         input_required: list(table, "input_required", &what)?,
         input_hot: list(table, "input_hot", &what)?,
@@ -761,7 +738,7 @@ fn shape_overlay(name: &str, table: &Toml) -> Result<ShapeOverlay> {
         drop: list(table, "drop", &what)?,
         attributes: attribute_overlays(table, &what)?,
         fields: field_overlays(table, &what, false)?,
-        synthesize: opt_bool(table, "synthesize").unwrap_or(false),
+        synthesize: opt_bool(table, "synthesize", &what)?.unwrap_or(false),
     })
 }
 
@@ -774,8 +751,9 @@ fn attribute_overlays(table: &Toml, what: &str) -> Result<Vec<AttributeOverlay>>
     let mut out = Vec::new();
     for entry in array_of_tables(table, "attribute") {
         let name = required_str(entry, "name", what)?;
-        let field = opt_str(entry, "field");
-        let value = opt_str(entry, "value");
+        let context = format!("{what}.attribute `{name}`");
+        let field = opt_str(entry, "field", &context)?;
+        let value = opt_str(entry, "value", &context)?;
         match (field.is_some(), value.is_some()) {
             (true, true) => {
                 return Err(Error::Overlay(format!(
@@ -790,7 +768,7 @@ fn attribute_overlays(table: &Toml, what: &str) -> Result<Vec<AttributeOverlay>>
             _ => {}
         }
         out.push(AttributeOverlay {
-            element: opt_str(entry, "element"),
+            element: opt_str(entry, "element", &context)?,
             name,
             field,
             value,
@@ -803,7 +781,8 @@ fn field_overlays(table: &Toml, what: &str, sided: bool) -> Result<Vec<FieldOver
     let mut out = Vec::new();
     for entry in array_of_tables(table, "field") {
         let name = required_str(entry, "name", what)?;
-        let side = match opt_str(entry, "side").as_deref() {
+        let context = format!("{what}.field `{name}`");
+        let side = match opt_str(entry, "side", &context)?.as_deref() {
             None if !sided => Side::Input,
             Some("input") => Side::Input,
             Some("output") => Side::Output,
@@ -813,21 +792,21 @@ fn field_overlays(table: &Toml, what: &str, sided: bool) -> Result<Vec<FieldOver
         out.push(FieldOverlay {
             side,
             name,
-            synthesize: opt_bool(entry, "synthesize").unwrap_or(false),
-            after: opt_str(entry, "after"),
-            wire_name: opt_str(entry, "wire_name"),
-            binding: opt_str(entry, "binding"),
-            ty: opt_str(entry, "type"),
-            hot: opt_bool(entry, "hot"),
-            required: opt_bool(entry, "required"),
-            missing_error: opt_str(entry, "missing_error"),
-            default_string: opt_str(entry, "default_string"),
-            default_int: entry.get("default_int").and_then(Toml::as_int),
-            default_bool: opt_bool(entry, "default_bool"),
-            omit_when: opt_str(entry, "omit_when"),
-            omit_when_value: opt_str(entry, "omit_when_value"),
-            omit_when_field: opt_str(entry, "omit_when_field"),
-            omit_when_equals: opt_str(entry, "omit_when_equals"),
+            synthesize: opt_bool(entry, "synthesize", &context)?.unwrap_or(false),
+            after: opt_str(entry, "after", &context)?,
+            wire_name: opt_str(entry, "wire_name", &context)?,
+            binding: opt_str(entry, "binding", &context)?,
+            ty: opt_str(entry, "type", &context)?,
+            hot: opt_bool(entry, "hot", &context)?,
+            required: opt_bool(entry, "required", &context)?,
+            missing_error: opt_str(entry, "missing_error", &context)?,
+            default_string: opt_str(entry, "default_string", &context)?,
+            default_int: opt_int(entry, "default_int", &context)?,
+            default_bool: opt_bool(entry, "default_bool", &context)?,
+            omit_when: opt_str(entry, "omit_when", &context)?,
+            omit_when_value: opt_str(entry, "omit_when_value", &context)?,
+            omit_when_field: opt_str(entry, "omit_when_field", &context)?,
+            omit_when_equals: opt_str(entry, "omit_when_equals", &context)?,
             quirks: list(entry, "quirks", what)?,
         });
     }

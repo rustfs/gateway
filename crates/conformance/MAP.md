@@ -14,7 +14,7 @@ ADRs; this map only selects files.
 | `src/runner/deadline.rs`, `src/runner/reference.rs` | Case clock and expiry receipts; the reference evaluation the baseline records. | A claimed timeout lacks a measured boundary, or a refresh and the gate disagree. |
 | `src/runner/h2_receipt_tests.rs` | Serial and concurrent scripted HTTP/2 receipt controls. | A synthetic outcome bypasses clock validation. |
 | `src/runner/budget_tests.rs` | The `case.timeout_ms` verdict: the target is charged, the harness's own waiting is not. | A timeout is judged on the wrong share of the wall time. |
-| `src/runner/http_version_tests.rs` | Declared HTTP-version applicability and retained transport refusals. | A version gate skips runnable HTTP/2 or claims unsupported coverage. |
+| `src/runner/http_version_tests.rs`, `src/runner/tls_tests.rs` | Declared HTTP-version and configured TLS applicability with retained transport refusals. | An applicability gate skips runnable requests or claims unsupported coverage. |
 | `src/runner/lifecycle_tests.rs` | Post-prepare cleanup and failure-classification regression coverage. | A runner early return may bypass fixture cleanup. |
 | `src/runner/shard_tests.rs` | The `--shard` partition: every selected case exactly once, in corpus order, and the partial-run note. | Shards overlap, skip a case, or run silently as a whole. |
 | `src/expect.rs` | Expected observation matching. | A response, stream error or timing assertion is judged wrongly. |
@@ -87,7 +87,7 @@ ADRs; this map only selects files.
 | `src/fixture/handlers_bucket.rs` | Bucket Handler entries for the deterministic fixture. | A bucket operation stops reaching existing fixture behavior. |
 | `src/token.rs` | The continuation-token codec: an HMAC-authenticated page position bound to its listing. | A cursor is honoured that this service did not issue, or a real one is refused. |
 | `src/fixture/pagination_properties.rs` | Generated set semantics for the fixture's paging. | A resumed page skips or repeats an entry. |
-| `src/fixture/list_allocations.rs` | What one page of a listing costs, under a heap profiler. | A listing allocates in proportion to the bucket rather than the page. |
+| `tests/list_allocations.rs` | Isolated heap profiler for the cost of one listing page. | A listing allocates in proportion to the bucket rather than the page. |
 | `src/fixture/handlers_object.rs`, `src/fixture/post_object.rs` | Object, multipart, listing, event and browser `POST` upload Handler entries for the deterministic fixture. | An object-family operation stops reaching existing fixture behavior. |
 | `src/keys/` | Schema-key consumption audit. | A declared case key is parsed but ignored. |
 | `src/external_junit_tests.rs` | Independently parses external CLI JUnit reports and tests write failures. | The external CLI reporting composition changes. |

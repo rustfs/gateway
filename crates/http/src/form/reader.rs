@@ -83,7 +83,7 @@ enum State {
 /// Reads a POST Object form's text fields and stops at the file.
 ///
 /// See the `form` module documentation for why stopping is the point.
-#[derive(Debug)]
+/// `Debug` reports progress and counts without formatting raw fields, metadata or buffers.
 pub struct FormReader {
     limits: FormLimits,
     grammar: FormGrammar,
@@ -106,6 +106,24 @@ pub struct FormReader {
     /// thousand bytes, for one field whose ceiling is deliberately small. The cursor makes the
     /// search linear in the field, which is what the ceiling was supposed to bound.
     scanned: usize,
+}
+
+impl core::fmt::Debug for FormReader {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("FormReader")
+            .field("limits", &self.limits)
+            .field("grammar", &self.grammar)
+            .field("boundary_bytes", &self.delimiter.len().saturating_sub(2))
+            .field("buffer_bytes", &self.buffer.len())
+            .field("fields", &self.fields.len())
+            .field("state", &self.state)
+            .field("current_field", &self.current_field.is_some())
+            .field("filename", &self.filename.is_some())
+            .field("file_part_name", &self.file_part_name.is_some())
+            .field("bytes_seen", &self.bytes_seen)
+            .field("scanned", &self.scanned)
+            .finish()
+    }
 }
 
 impl FormReader {

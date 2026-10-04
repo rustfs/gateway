@@ -490,7 +490,12 @@ impl<R: AsyncPayloadRead + Unpin> IngestPipeline<R> {
         match event {
             DecodeEvent::Data { start, len } => {
                 self.observe(start, len);
-                self.pending.push((start, len));
+                match self.pending.last_mut() {
+                    Some((previous_start, previous_len)) if previous_start.checked_add(*previous_len) == Some(start) => {
+                        *previous_len = previous_len.saturating_add(len);
+                    }
+                    _ => self.pending.push((start, len)),
+                }
                 Poll::Ready(Ok(()))
             }
             DecodeEvent::ChunkEnd { signature, .. } => match self.end_chunk(signature) {
@@ -701,3 +706,6 @@ impl<R: AsyncPayloadRead + Unpin> AsyncPayloadRead for IngestPipeline<R> {
         Some(self.declared.saturating_sub(self.delivered_bytes))
     }
 }
+
+#[cfg(test)]
+mod tests;

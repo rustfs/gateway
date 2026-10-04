@@ -22,6 +22,7 @@
 mod json_tests;
 mod list_form_tests;
 mod lower_tests;
+mod optional_overlay_tests;
 mod overlay_tests;
 mod route_tests;
 mod selector_param_tests;

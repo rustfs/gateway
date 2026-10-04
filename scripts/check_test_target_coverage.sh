@@ -3,7 +3,7 @@ set -euo pipefail
 
 # WHAT THIS CHECKS
 #   Every workspace member that ships integration tests is accounted for: either a named
-#   consolidation guard holds it in one Cargo test target, or it carries a written exception row
+#   consolidation guard freezes its Cargo target inventory, or it carries a written exception row
 #   naming the crate, the number of targets it costs today, a tracking issue, and a reason.
 # WHY
 #   rustfs/gateway#277. scripts/check_test_target_consolidation.sh opens with "There are no
@@ -35,8 +35,9 @@ import tomllib
 
 root = Path(sys.argv[1]).resolve()
 
-# Members held in one test target by a guard, and the guard that holds each one. The guard name is
-# checked to exist and to name the member, so a row cannot outlive the guard it points at.
+# Members with guarded target inventories. Conformance's ordinary suite remains consolidated;
+# its exactly named heap profiler runs in an isolated binary (#1257). The guard name is checked
+# to exist and name the member, so a row cannot outlive the guard it points at.
 COVERED = {
     "crates/conformance": "check_test_target_consolidation.sh",
     "crates/core": "check_test_target_consolidation.sh",
@@ -156,6 +157,21 @@ def is_consolidated(member: str, manifest: dict) -> bool:
     if not isinstance(package, dict) or package.get("autotests") is not False:
         return False
     explicit = explicit_test_targets(manifest)
+    if member == "crates/conformance":
+        return (
+            len(explicit) == 2
+            and all(isinstance(target.get("name"), str) and isinstance(target.get("path"), str) for target in explicit)
+            and {(target["name"], target["path"]) for target in explicit} == {
+                ("integration", "tests/integration.rs"),
+                ("list_allocations", "tests/list_allocations.rs"),
+            }
+            and all(
+                target.get("test", True) is True
+                and target.get("harness", True) is True
+                and target.get("required-features", []) == []
+                for target in explicit
+            )
+        )
     if len(explicit) != 1:
         return False
     path = explicit[0].get("path")
@@ -200,8 +216,8 @@ for member, guard in sorted(COVERED.items()):
     manifest = manifest_of(member)
     if not is_consolidated(member, manifest):
         fail(
-            f"{member} is listed as covered but is not in the consolidated shape: it must set "
-            "package.autotests = false and declare exactly one [[test]] target under tests/"
+            f"{member} is listed as covered but does not match its guarded target inventory: "
+            "it must set package.autotests = false and keep every required test target active"
         )
     covered_targets += target_count(member, manifest)
 

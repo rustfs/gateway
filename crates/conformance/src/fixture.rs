@@ -136,8 +136,6 @@ mod copy_checksum;
 mod handlers_bucket;
 mod handlers_object;
 #[cfg(test)]
-mod list_allocations;
-#[cfg(test)]
 mod pagination_properties;
 mod select_answer;
 
@@ -1114,7 +1112,7 @@ impl Fixture {
     /// own ordering instead of building a list: it starts the walk at the first key that could
     /// belong on the page and stops at the first one past the prefix, so a caller that takes a
     /// hundred keys touches a hundred keys and allocates nothing per key it did not take.
-    /// [`list_allocations`] is what holds that property; before it the listing enumerated
+    /// `tests/list_allocations.rs` is what holds that property; before it the listing enumerated
     /// and sorted the whole bucket, and one page out of a 64,000-key bucket cost 64,661 heap
     /// blocks against a 1,000-key bucket's 1,649.
     ///

@@ -18,6 +18,9 @@ CASES     c-copy-0025 — A copy source that is an ARN of another service is ref
           c-object-0056 — A stalled PutObject is refused and remains unreadable
           c-object-0063 — Both delete-marker refusals carry the version id of the marker they found
           c-object-0066 — A default answer names its request in x-amz-request-id, x-amz-id-2 and its error document, never in x-request-id
+          c-post-0008 — A later Content-Type list item must satisfy the POST prefix
+          c-post-0009 — An empty Content-Type list item fails a nonempty POST prefix
+          c-post-0010 — A disallowed first Content-Type item is refused
           c-range-0007 — A read of one part is a 206 that reports how many parts the object has
           c-select-restore-0057 — A select on a key that does not exist is 404 NoSuchKey before any event stream
           c-tagging-0016 — PutObject with x-amz-tagging carrying a segment without '=' is a 400 and stores nothing

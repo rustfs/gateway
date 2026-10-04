@@ -296,11 +296,13 @@ impl AsyncPayloadRead for StreamToReader {
     }
 
     fn caps(&self) -> PayloadCaps {
-        (self.inner.caps() & !(PayloadCaps::PUSH | PayloadCaps::VECTORED)) | PayloadCaps::PULL
+        let mut caps = (self.inner.caps() & !(PayloadCaps::PUSH | PayloadCaps::VECTORED)) | PayloadCaps::PULL;
+        caps.set(PayloadCaps::KNOWN_LENGTH, self.len_hint().is_some());
+        caps
     }
 
     fn len_hint(&self) -> Option<u64> {
-        self.inner.len_hint()
+        self.inner.len_hint()?.checked_add(self.leftover.len() as u64)
     }
 }
 

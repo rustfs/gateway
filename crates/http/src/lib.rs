@@ -64,6 +64,9 @@
     clippy::panic
 )]
 
+#[cfg(test)]
+extern crate self as rustfs_gateway_http;
+
 mod checksum;
 mod form;
 mod framing;

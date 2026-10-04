@@ -55,8 +55,6 @@ crates/gateway/src/operation_mode.rs | mod tests / fn selected_entry_and_runtime
 crates/gateway/src/probe.rs | impl BodyProgress / fn bytes_read | self.bytes_read.load(Ordering::SeqCst)
 crates/gateway/src/probe.rs | impl BodyProgress / fn is_exhausted | self.exhausted.load(Ordering::SeqCst)
 crates/gateway/src/request_config.rs | impl HandlerDeadlineReportSlot / fn outcome | match self.0.load(Ordering::Acquire) {
-crates/gateway/src/request_deadline.rs | fn wait_without_runtime | if signal.fired.load(Ordering::Acquire) {
-crates/gateway/src/request_deadline.rs | fn wait_without_runtime | if signal.fired.load(Ordering::Acquire) {
 crates/gateway/src/request_end.rs | impl RequestEnd / fn mark_unfinished | && !ended.load(Ordering::Acquire)
 crates/gateway/src/service.rs | impl core::fmt::Debug for S3Service / fn fmt | let snapshot = self.inner.config.load();
 crates/gateway/src/service.rs | impl S3Service / fn operations | let snapshot = self.inner.config.load();

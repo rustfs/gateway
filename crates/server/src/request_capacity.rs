@@ -30,7 +30,8 @@ use tokio::sync::{AcquireError, OwnedSemaphorePermit, Semaphore, watch};
 /// A request-local signal that becomes `true` when the transport stops waiting for the response.
 ///
 /// The server inserts one into every request extension. A service that starts durable work should
-/// wait for the value to change beside that work and finish rollback before returning. Ignoring it
+/// wait for the value to change beside that work and finish rollback before returning. After peer
+/// loss, request capacity stays reserved until that detached work finishes. Ignoring the signal
 /// leaves cleanup to the service's own deadline policy.
 pub type RequestCancellation = watch::Receiver<bool>;
 

@@ -227,6 +227,7 @@ fn selected_capabilities(
     use crate::diagnostic::Severity;
     use crate::parity::ExpectedCapability::{HyperScriptedH2, Shared};
 
+    let target = crate::conn::Conn::production(PathBuf::new(), crate::production::ProductionDriver::Hyper);
     let mut selected = std::collections::BTreeMap::new();
     for (ordinal, case) in cases.iter().filter(|case| crate::runner::selected(case, options)).enumerate() {
         if options.shard.is_some_and(|shard| !shard.owns(ordinal)) {
@@ -238,7 +239,7 @@ fn selected_capabilities(
                 .iter()
                 .any(|diagnostic| diagnostic.severity == Severity::Deny)
             && !options.validate_only
-            && crate::runner::inapplicable(case, options).is_none()
+            && crate::runner::inapplicable(case, options, &target).is_none()
             && case.exchanges().iter().any(|exchange| {
                 exchange
                     .request

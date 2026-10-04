@@ -22,13 +22,13 @@
 
 use bytes::Bytes;
 
-use crate::adapt::{ReaderToStream, StreamToReader};
-use crate::caps::PayloadCaps;
+use crate::adapt::{MemoryStream, ReaderToStream, StreamToReader};
+use crate::caps::{PayloadCaps, validate_caps};
 use crate::error::StreamErrorKind;
 use crate::metrics::StreamMetrics;
 use crate::payload::Payload;
 use crate::read::ReadProgress;
-use crate::stream::PayloadRead;
+use crate::stream::{PayloadRead, PayloadStream};
 use crate::tests::support::{
     ScriptedReader, ScriptedStream, Step, drain_reader, drain_stream, joined, poll_reader_once, poll_stream_once, trailer_value,
     trailers,
@@ -431,4 +431,156 @@ fn remaining_length_shrinks_as_the_body_arrives() {
     assert_eq!(stream.len_hint(), Some(2));
     let _ = poll_stream_once(&mut stream);
     assert_eq!(stream.len_hint(), Some(0));
+}
+
+/// Buffered bytes belong to the reader's remaining body even after leaving its source.
+#[test]
+fn n_push_to_pull_remaining_hint_does_not_drop_buffered_bytes() {
+    let source = MemoryStream::new([Bytes::from_static(b"abc"), Bytes::from_static(b"def")], TrailingHeaders::empty());
+    let mut reader: crate::read::BoxPayloadReader = Box::pin(StreamToReader::new(Box::pin(source)));
+    let mut buffer = [0u8; 1];
+
+    assert_eq!(reader.len_hint(), Some(6));
+    for (expected_byte, remaining) in b"abcdef".iter().zip((0..6).rev()) {
+        assert!(matches!(
+            poll_reader_once(&mut reader, &mut buffer),
+            core::task::Poll::Ready(Ok(ReadProgress::Filled(1)))
+        ));
+        assert_eq!(buffer[0], *expected_byte);
+        assert_eq!(reader.len_hint(), Some(remaining));
+        assert!(validate_caps(reader.caps(), reader.len_hint()).is_ok());
+    }
+    assert!(matches!(
+        poll_reader_once(&mut reader, &mut buffer),
+        core::task::Poll::Ready(Ok(ReadProgress::Eof { .. }))
+    ));
+}
+
+/// Rewrapping a partly consumed adapter must not announce an empty HTTP body.
+#[test]
+fn n_a_partly_read_adapter_keeps_its_remaining_http_body_size() {
+    use http_body::Body as _;
+
+    let source = MemoryStream::new([Bytes::from_static(b"abcdef")], TrailingHeaders::empty());
+    let mut reader: crate::read::BoxPayloadReader = Box::pin(StreamToReader::new(Box::pin(source)));
+    let mut buffer = [0u8; 1];
+    assert!(matches!(
+        poll_reader_once(&mut reader, &mut buffer),
+        core::task::Poll::Ready(Ok(ReadProgress::Filled(1)))
+    ));
+    assert_eq!(&buffer, b"a");
+
+    let mut body = crate::body::Body::from_reader(reader).expect("the remaining hint agrees with the capabilities");
+    assert!(!body.is_empty());
+    assert_eq!(body.size_hint().exact(), Some(5));
+    let mut context = core::task::Context::from_waker(std::task::Waker::noop());
+    let first = core::pin::Pin::new(&mut body).poll_frame(&mut context);
+    let core::task::Poll::Ready(Some(Ok(frame))) = first else {
+        panic!("the five buffered bytes must be delivered");
+    };
+    assert_eq!(frame.into_data().expect("the first frame carries bytes"), b"bcdef"[..]);
+    assert_eq!(body.size_hint().exact(), Some(0));
+    assert!(matches!(
+        core::pin::Pin::new(&mut body).poll_frame(&mut context),
+        core::task::Poll::Ready(None)
+    ));
+}
+
+/// A buffered prefix cannot reveal how many bytes an unknown-length source still has.
+#[test]
+fn n_buffered_bytes_do_not_turn_an_unknown_hint_into_a_known_length() {
+    let source = ScriptedStream::new([Step::Chunk("abcdef"), Step::Eof(TrailingHeaders::empty())]).boxed();
+    let mut reader: crate::read::BoxPayloadReader = Box::pin(StreamToReader::new(source));
+    let mut buffer = [0u8; 1];
+    assert!(matches!(
+        poll_reader_once(&mut reader, &mut buffer),
+        core::task::Poll::Ready(Ok(ReadProgress::Filled(1)))
+    ));
+    assert_eq!(reader.len_hint(), None);
+    assert!(!reader.caps().contains(PayloadCaps::KNOWN_LENGTH));
+    assert!(validate_caps(reader.caps(), reader.len_hint()).is_ok());
+}
+
+/// A contradictory source hint must not overflow into an exact empty or shorter body.
+#[test]
+fn n_an_overflowing_remaining_hint_is_not_reported_as_a_known_length() {
+    let source = ScriptedStream::new([Step::Chunk("ab"), Step::Eof(TrailingHeaders::empty())])
+        .with_caps(PayloadCaps::PUSH | PayloadCaps::KNOWN_LENGTH)
+        .with_len_hint(Some(u64::MAX))
+        .boxed();
+    let mut reader: crate::read::BoxPayloadReader = Box::pin(StreamToReader::new(source));
+    let mut buffer = [0u8; 1];
+    assert_eq!(reader.len_hint(), Some(u64::MAX));
+    assert!(matches!(
+        poll_reader_once(&mut reader, &mut buffer),
+        core::task::Poll::Ready(Ok(ReadProgress::Filled(1)))
+    ));
+    assert_eq!(reader.len_hint(), None);
+    assert!(!reader.caps().contains(PayloadCaps::KNOWN_LENGTH));
+    assert!(validate_caps(reader.caps(), reader.len_hint()).is_ok());
+    assert!(matches!(
+        poll_reader_once(&mut reader, &mut buffer),
+        core::task::Poll::Ready(Ok(ReadProgress::Filled(1)))
+    ));
+    assert_eq!(&buffer, b"b");
+    assert_eq!(reader.len_hint(), Some(u64::MAX));
+    assert!(validate_caps(reader.caps(), reader.len_hint()).is_ok());
+}
+
+/// Inspected bytes from a rejected chunk are not bytes handed to the consumer.
+#[test]
+fn n_overlong_chunks_are_not_counted_as_delivered() {
+    for prefix in [None, Some("abc")] {
+        let mut steps = Vec::new();
+        if let Some(prefix) = prefix {
+            steps.push(Step::Chunk(prefix));
+        }
+        steps.push(Step::Chunk("defgh"));
+        let source = ScriptedStream::new(steps)
+            .with_caps(PayloadCaps::PUSH | PayloadCaps::KNOWN_LENGTH)
+            .with_len_hint(Some(4))
+            .boxed();
+        let mut stream = crate::byte_stream::ByteStream::new(source).expect("the declared capabilities are consistent");
+        let mut context = core::task::Context::from_waker(std::task::Waker::noop());
+        let delivered = prefix.map_or(0, |prefix| prefix.len() as u64);
+        if let Some(prefix) = prefix {
+            let event = core::pin::Pin::new(&mut stream).poll_read(&mut context);
+            assert!(
+                matches!(event, core::task::Poll::Ready(Ok(PayloadRead::Chunk(ref chunk))) if chunk.as_ref() == prefix.as_bytes())
+            );
+        }
+        let overrun = core::pin::Pin::new(&mut stream).poll_read(&mut context);
+        let core::task::Poll::Ready(Err(error)) = overrun else {
+            panic!("the overlong chunk must be rejected");
+        };
+        assert!(matches!(
+            error.kind(),
+            StreamErrorKind::LengthMismatch { declared: 4, observed } if *observed == delivered + 5
+        ));
+        assert_eq!(error.bytes_before_error(), delivered);
+        assert_eq!(stream.observed_length(), delivered);
+        let after_error = core::pin::Pin::new(&mut stream).poll_read(&mut context);
+        let core::task::Poll::Ready(Err(error)) = after_error else {
+            panic!("a rejected body must stay terminal");
+        };
+        assert!(matches!(error.kind(), StreamErrorKind::PolledAfterEof));
+        assert_eq!(error.bytes_before_error(), delivered);
+    }
+}
+
+/// An exactly sized body still records every delivered byte and ends normally.
+#[test]
+fn an_exactly_sized_body_keeps_its_delivered_progress() {
+    let mut stream = crate::byte_stream::ByteStream::from_bytes(Bytes::from_static(b"abcd"));
+    let mut context = core::task::Context::from_waker(std::task::Waker::noop());
+    assert!(matches!(
+        core::pin::Pin::new(&mut stream).poll_read(&mut context),
+        core::task::Poll::Ready(Ok(PayloadRead::Chunk(ref chunk))) if chunk.as_ref() == b"abcd"
+    ));
+    assert_eq!(stream.observed_length(), 4);
+    assert_eq!(stream.len_hint(), Some(0));
+    assert!(matches!(
+        core::pin::Pin::new(&mut stream).poll_read(&mut context),
+        core::task::Poll::Ready(Ok(PayloadRead::Eof { .. }))
+    ));
 }

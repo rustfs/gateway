@@ -100,6 +100,9 @@ use proc_macro::TokenStream;
 /// * `#[handlers(skip)]` — leave the method alone. Required for a helper: an unrecognised method
 ///   name is an error rather than a silent skip, because the failure it prevents is a handler that
 ///   is never called and never mentioned.
+/// * `#[cfg(...)]` and `#[cfg_attr(...)]` — conditional methods contribute a handler and registry
+///   entry under the same conditions. Nested `cfg_attr` is supported; method-only attributes stay
+///   on the original method.
 ///
 /// # Errors
 ///

@@ -34,6 +34,10 @@ production-transports = ["rustfs-gateway/server", "dep:rcgen"]
 name = "integration"
 path = "tests/integration.rs"
 
+[[test]]
+name = "list_allocations"
+path = "tests/list_allocations.rs"
+
 # Ahead of `[dependencies]`, and not at the end of the file where it would naturally go.
 # `scripts/test_guard_scripts.sh` proves `check_layer_dependencies.sh` can fail by appending
 # `rustfs-gateway-core = { workspace = true }` to this file — a line that means "conformance
@@ -45,10 +49,9 @@ path = "tests/integration.rs"
 # The Select transport regression supplies a fallible producer to the facade's ByteStream.
 # The producer trait is not re-exported by the facade and stays test-only here.
 rustfs-gateway-stream = { workspace = true }
-# The allocation instrument. `src/fixture/list_allocations.rs` installs `dhat::Alloc` as the
-# global allocator of the library's own test executable, under `#[cfg(test)]`, so nothing in the
-# shipped library reaches it and a dev-dependency is not inherited by an implementation that runs
-# this suite against itself.
+# The allocation instrument lives only in the dedicated `tests/list_allocations.rs` binary.
+# Neither the shipped library nor unrelated test harnesses install its global allocator.
+# A dev-dependency is not inherited by implementations that run this suite against themselves.
 dhat = { workspace = true }
 # The pagination property test's generator. Same reasoning: dev-only, and the properties it states
 # are about the reference backend rather than about the corpus.

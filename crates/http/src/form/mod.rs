@@ -394,10 +394,20 @@ impl Default for FormLimits {
 }
 
 /// One text field read from the form, in the order it arrived.
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// `Debug` reports byte counts without formatting the field name or value.
+#[derive(Clone, PartialEq, Eq)]
 pub struct FormField {
     name: String,
     value: String,
+}
+
+impl core::fmt::Debug for FormField {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("FormField")
+            .field("name_bytes", &self.name.len())
+            .field("value_bytes", &self.value.len())
+            .finish()
+    }
 }
 
 impl FormField {

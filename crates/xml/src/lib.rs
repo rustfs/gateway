@@ -37,6 +37,8 @@ pub mod read;
 pub mod write;
 
 #[cfg(test)]
+mod fragment_tests;
+#[cfg(test)]
 mod layout_tests;
 #[cfg(test)]
 mod tests;

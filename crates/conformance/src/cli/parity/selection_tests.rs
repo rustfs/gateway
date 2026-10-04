@@ -115,3 +115,18 @@ fn validation_only_cases_cannot_authorize_a_transport_capability_difference() {
     let census = selected_capabilities(&[case("scripted", FRAMES)], &options).expect("validation-only case retained");
     assert_eq!(census.get("scripted"), Some(&Shared));
 }
+
+/// Negative: an authored TLS script excluded by its gate cannot authorize a driver difference.
+#[test]
+fn n_forbidden_tls_script_remains_a_shared_skip() {
+    let source = format!("[case.applies_to]\ntls = \"forbidden\"\n[connection.tls]\nenabled = true\n{FRAMES}");
+    let census = selected_capabilities(&[case("gated-tls", &source)], &RunOptions::default()).expect("gated case retained");
+    assert_eq!(census.get("gated-tls"), Some(&Shared));
+}
+/// Positive: a required TLS script reaches production Hyper's existing capability checks.
+#[test]
+fn required_tls_script_keeps_its_hyper_capability() {
+    let source = format!("[case.applies_to]\ntls = \"required\"\n[connection.tls]\nenabled = true\n{FRAMES}");
+    let census = selected_capabilities(&[case("required-tls", &source)], &RunOptions::default()).expect("TLS script retained");
+    assert_eq!(census.get("required-tls"), Some(&HyperScriptedH2));
+}

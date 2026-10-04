@@ -143,6 +143,10 @@ impl CodegenOutput {
             self.generated_dir.join("dto").join("ops").join("enums"),
             self.generated_dir.join("dto").join("ops").join("shapes"),
             self.generated_dir.join("dto").join("ops"),
+            self.generated_dir.join("dto").join("seam").join("ops"),
+            self.generated_dir.join("dto").join("seam").join("shapes"),
+            self.generated_dir.join("dto").join("seam").join("census"),
+            self.generated_dir.join("dto").join("seam"),
             self.generated_dir.join("dto"),
             self.generated_dir.clone(),
         ]

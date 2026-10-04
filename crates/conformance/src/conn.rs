@@ -307,6 +307,15 @@ impl Sut for Conn {
         #[cfg(not(feature = "production-transports"))]
         return "rustfs-gateway test socket harness over loopback TCP".to_owned();
     }
+    fn configured_tls(&self, _request: &Value, connection: Option<&Value>) -> bool {
+        if let Some(endpoint) = &self.external {
+            return endpoint.is_tls();
+        }
+        // Requested TLS remains configured even when execution will refuse an unsupported script.
+        connection
+            .and_then(|connection| connection.read("connection.tls"))
+            .is_some_and(|tls| tls.read("connection.tls.enabled").and_then(Value::as_bool).unwrap_or(true))
+    }
     fn prepare(&mut self, case_id: &str, setup: Option<&Value>) -> Result<Captures, SutError> {
         if self.external.is_some() {
             return self.prepare_external(case_id, setup);

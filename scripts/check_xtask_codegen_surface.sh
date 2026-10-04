@@ -668,7 +668,7 @@ let subject = if package == "rustfs-gateway" {
 } else if package == "rustfs-gateway-core" {
     format!("crate {package} runtime scope; compile-time contracts remain in cargo test --workspace")
 } else if package == "rustfs-gateway-conformance" {
-    format!("crate {package} library scope; integration contracts remain in cargo test --workspace")
+    format!("crate {package} library and allocation scope; ordinary integration contracts remain in cargo test --workspace")
 } else if package == "rustfs-gateway-server" {
     format!("crate {package} runtime scope; thousand-connection load contracts remain in cargo test --workspace")
 } else {
@@ -713,19 +713,16 @@ if package == "xtask" {
             .collect(),
     ];
 }
-let clippy_step = vec![
-    "clippy".to_owned(),
-    "-p".to_owned(),
-    package.to_owned(),
-    match package {
-        "rustfs-gateway-conformance" => "--lib",
-        _ => "--all-targets",
-    }
-    .to_owned(),
-    "--".to_owned(),
-    "-D".to_owned(),
-    "warnings".to_owned(),
-];
+let target_scope: &[&str] = match package {
+    "rustfs-gateway-conformance" => &["--lib", "--test", "list_allocations"],
+    _ => &["--all-targets"],
+};
+let clippy_step = ["clippy", "-p", package]
+    .into_iter()
+    .chain(target_scope.iter().copied())
+    .chain(["--", "-D", "warnings"])
+    .map(str::to_owned)
+    .collect();
 if package == "rustfs-gateway-core" {
     return vec![
         vec![
@@ -767,12 +764,12 @@ if package == "rustfs-gateway" {
         .map(str::to_owned),
     );
 } else if package == "rustfs-gateway-conformance" {
-    test_step.push("--lib".to_owned());
+    test_step.extend(target_scope.iter().copied().map(str::to_owned));
 }
 vec![test_step, clippy_step]
 ''')
 if compact(crate_steps_items[0][1]) != expected_crate_steps_body:
-    fail("crate verification steps must preserve xtask workspace target reuse, both core runtime targets, gateway library and integration targets, exact signature timing skips, compile-fail skips, and conformance library-only test and clippy scopes")
+    fail("crate verification steps must preserve xtask workspace target reuse, both core runtime targets, gateway library and integration targets, exact signature timing skips, compile-fail skips, and conformance library plus isolated allocation test and clippy scopes")
 conformance_test_items = functions_named("conformance_test_step", syntax, comments_removed)
 expected_conformance_test_body = compact('''
 vec![

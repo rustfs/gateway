@@ -40,6 +40,8 @@
 //! is the question whose wrong answer creates a second, unauthenticated request; being told that
 //! a header is duplicated first would bury it.
 
+use core::fmt;
+
 use http::{HeaderMap, Method, Request, Uri, Version};
 
 use crate::framing::Framing;
@@ -86,7 +88,8 @@ impl<'a> RawPath<'a> {
 /// Generic over the body so this crate stays independent of any one server implementation. The
 /// head is owned and carries no lifetime — a stage that borrowed its request head would become
 /// self-referential the moment it held a body across an await point.
-#[derive(Debug)]
+///
+/// `Debug` reports request shape without formatting raw URI, header, body, or extension values.
 pub struct WireRequest<B> {
     method: Method,
     version: Version,
@@ -97,6 +100,20 @@ pub struct WireRequest<B> {
     framing: Framing,
     query_index: QueryIndex,
     body: B,
+}
+
+impl<B> fmt::Debug for WireRequest<B> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("WireRequest")
+            .field("method", &self.method)
+            .field("version", &self.version)
+            .field("path_bytes", &self.uri.path().len())
+            .field("query_bytes", &self.uri.query().map_or(0, str::len))
+            .field("headers", &self.headers.len())
+            .field("query_params", &self.query_index.len())
+            .field("transport_extensions", &self.transport_extensions)
+            .finish_non_exhaustive()
+    }
 }
 
 impl<B> WireRequest<B> {

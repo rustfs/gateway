@@ -79,7 +79,7 @@ pub(super) fn codec_rule(table: &Toml, id: &str) -> Result<Option<CodecRule>> {
     if table.get("mutation_sources").is_some() {
         return Ok(None);
     }
-    let dimension = opt_str(table, "mutation_dimension");
+    let dimension = opt_str(table, "mutation_dimension", &what)?;
     if !has_codec_value && dimension.is_none() {
         return Ok(None);
     }
