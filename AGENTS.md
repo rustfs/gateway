@@ -77,9 +77,13 @@ the gate. This does not extend to schemas, generated output, CI config, or scrip
 ### Feedback-loop latency
 
 Feedback latency is the first-order metric of an AI-friendly codebase, ahead of naming and directory
-shape. The rule: after changing a crate you must **know exactly one command to run**, and that
-command must go red or green in **≤30 seconds**. `cargo xtask verify --crate <name>` is that
-command. If it exceeds 30 seconds for any crate, that is a bug — open an issue, do not absorb it.
+shape. After changing a crate you must **know exactly one command to run**:
+`cargo xtask verify --crate <name>`. Its **prepared verification loop must finish in ≤30 seconds**.
+The command first prebuilds the selected artifacts and reports that duration outside the budget,
+as accepted in #642 and #690. Only that prebuild duration is excluded; launcher time remains charged
+to the loop. The complete invocation can therefore take longer than 30 seconds without a budget
+failure. Record prebuild, loop and complete-invocation times separately when investigating latency.
+If the loop exceeds its budget, open an issue; do not absorb it or count a killed run as a pass.
 
 Use this map rather than guessing a broader command:
 
@@ -91,9 +95,10 @@ Use this map rather than guessing a broader command:
 | One conformance case | `cargo xtask conformance run --filter '<case-id>'` |
 | Cross-crate wiring, scripts, or CI | `cargo xtask verify --all` |
 
-`verify --op` and `verify --crate` have a 30-second budget. `verify --all` is the CI surface and has
+`verify --op` has a 30-second budget; `verify --crate` has the prepared-loop budget described above.
+Do not apply the crate prebuild exclusion to other modes. `verify --all` is the CI surface and has
 a 10-minute budget. A budget failure is a tooling defect; do not replace the command with a wider,
-slower one.
+slower one. See [xtask's timing guide](xtask/README.md#verification-timing) for the output fields.
 
 `conformance validate` checks the corpus — the frozen schema and the conventions — and stops. It is
 the right command after editing `case.schema.json` or a lint rule, and the wrong one after editing a
@@ -479,7 +484,7 @@ the answer only exists after expansion. Four rules:
 | Gate got slower → accept it | Make it faster in the same PR; the gate budget is 10 minutes total |
 | Harness cannot observe something → report the server's own intention instead | Report what was observed, or skip with the reason. A note admitting the substitution does not change what the green line means |
 | A new assertion passes → assume it works | Break the implementation and confirm it goes red. Seven checks in this repository could not have failed |
-| `cargo xtask verify --crate X` takes minutes → wait it out | Open an issue; the ≤30s loop is a contract, not a hope |
+| Treat a long crate prebuild as a loop overrun, or ignore an actual loop timeout | Record prebuild and loop time separately; open an issue if the prepared loop exceeds 30s |
 
 <!-- P0-10 appends: Expert Roles & Trigger Table -->
 
