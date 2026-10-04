@@ -304,10 +304,10 @@ where
             let length = data.remaining();
             // Inside the loop, before the bytes are kept. `data` is dropped with the error, so the
             // frame that crossed the line is not buffered either.
-            let bytes = data.copy_to_bytes(length);
             if length as u64 > self.ceilings.buffered {
                 return Poll::Ready(Err(crate::gate::past_buffered_ceiling(self.progress.request_body_unfinished())));
             }
+            let bytes = data.copy_to_bytes(length);
             let seen = self.progress.record(&bytes);
             if let Some(cap) = self.ceilings.declared
                 && seen > cap

@@ -367,6 +367,10 @@ impl SigV4Authenticator {
     /// clients sign `s3tables`, and AWS STS clients sign `sts` — and refuses every other one before
     /// it looks the access key up. The key is derived from the service the client named, so a
     /// signature stays bound to it; the date and region checks are unchanged.
+    /// An ordinary request reaching header verification with `sts` scope and no
+    /// `x-amz-content-sha256` uses the body's SHA-256 after lookup, bounded at 8192 bytes; a
+    /// longer body is `400 InvalidRequest` before comparison (rustfs/gateway#1230). The service
+    /// retains those bytes for the operation's body handoff; browser forms keep their own path.
     ///
     /// Off by default: the default verifies only the routed operation's own service, answers an
     /// S3-family service that is not it with `400 AuthorizationHeaderMalformed`, and any other name
