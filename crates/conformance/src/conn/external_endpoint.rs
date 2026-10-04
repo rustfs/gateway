@@ -293,7 +293,7 @@ fn socket_authority(authority: &str, default_port: u16) -> Result<String, SutErr
 
 #[cfg(test)]
 mod tests {
-    use std::net::TcpListener;
+    use std::net::{TcpListener, TcpStream};
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Condvar, Mutex};
     use std::thread;
@@ -465,6 +465,52 @@ mod tests {
         assert_eq!(calls.load(Ordering::SeqCst), 2, "only the stalled and recovery jobs may start");
     }
 
+    fn silent_tls_peer(listener: TcpListener, released: mpsc::Receiver<()>) -> usize {
+        listener.set_nonblocking(true).expect("bound silent peer accept");
+        loop {
+            match released.try_recv() {
+                Ok(()) | Err(mpsc::TryRecvError::Disconnected) => return 0,
+                Err(mpsc::TryRecvError::Empty) => {}
+            }
+            match listener.accept() {
+                Ok((_socket, _)) => {
+                    let _ = released.recv();
+                    return 1;
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => thread::yield_now(),
+                Err(error) => panic!("accept TLS client: {error}"),
+            }
+        }
+    }
+
+    /// Cleanup must finish even when no client ever reaches the listening socket.
+    #[test]
+    fn n_silent_tls_peer_is_released_without_a_client() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind silent TLS peer");
+        let address = listener.local_addr().expect("silent TLS address");
+        let (release, released) = mpsc::channel::<()>();
+        let (finished, outcome) = mpsc::channel();
+        let server = thread::spawn(move || {
+            let accepted = silent_tls_peer(listener, released);
+            let _ = finished.send(accepted);
+            accepted
+        });
+
+        release.send(()).expect("release the silent peer");
+        let observed = outcome.recv_timeout(Duration::from_secs(5));
+        if observed.is_err() {
+            // Save the observation before rescue: a cleanup connection cannot turn a failure green.
+            let _rescue = TcpStream::connect_timeout(&address, Duration::from_millis(100)).expect("rescue the blocked peer");
+        }
+        let accepted = server.join().expect("silent TLS peer exits");
+
+        assert_eq!(
+            observed.ok(),
+            Some(0),
+            "release must finish before accept; the joined peer accepted {accepted} connection(s)"
+        );
+    }
+
     /// The DNS time and the TLS handshake share one setup deadline. Observed directly: the deadline
     /// the connector is handed must not lie past the caller's, which no host load can blur. The
     /// silent peer holds its socket until the client has given up, so a handshake that ignored its
@@ -474,10 +520,7 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind silent TLS peer");
         let address = listener.local_addr().expect("silent TLS address");
         let (release, released) = mpsc::channel::<()>();
-        let server = thread::spawn(move || {
-            let (_socket, _) = listener.accept().expect("accept TLS client");
-            let _ = released.recv();
-        });
+        let server = thread::spawn(move || silent_tls_peer(listener, released));
         let started = Instant::now();
         let deadline = started + Duration::from_millis(100);
         let handed = Arc::new(Mutex::new(Vec::new()));
@@ -501,7 +544,7 @@ mod tests {
 
         let finished = outcome.recv_timeout(Duration::from_secs(5));
         let _ = release.send(());
-        server.join().expect("silent TLS peer exits");
+        let accepted = server.join().expect("silent TLS peer exits");
         client.join().expect("client exits");
         let (failed, elapsed) = finished.expect("the stalled TLS handshake honoured its setup deadline");
         let handed = handed.lock().expect("deadline record").clone();
@@ -516,5 +559,6 @@ mod tests {
             elapsed >= Duration::from_millis(95),
             "the handshake gave up before its deadline: {elapsed:?}"
         );
+        assert_eq!(accepted, 1, "the silent peer must accept the TLS connection");
     }
 }
