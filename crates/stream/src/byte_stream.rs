@@ -201,15 +201,16 @@ impl PayloadStream for ByteStream {
                 Poll::Ready(Err(err.or_bytes_before_error(this.observed)))
             }
             Poll::Ready(Ok(PayloadRead::Chunk(chunk))) => {
-                this.observed = this.observed.saturating_add(chunk.len() as u64);
+                let observed = this.observed.saturating_add(chunk.len() as u64);
                 if let Some(declared) = this.declared
-                    && this.observed > declared
+                    && observed > declared
                 {
                     this.ended = true;
                     return Poll::Ready(Err(
-                        StreamError::length_mismatch(declared, this.observed).with_bytes_before_error(this.observed)
+                        StreamError::length_mismatch(declared, observed).with_bytes_before_error(this.observed)
                     ));
                 }
+                this.observed = observed;
                 Poll::Ready(Ok(PayloadRead::Chunk(chunk)))
             }
             Poll::Ready(Ok(PayloadRead::Eof { trailers })) => {

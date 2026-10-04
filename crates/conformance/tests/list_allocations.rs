@@ -62,9 +62,8 @@ use rustfs_gateway::{
     BucketName, Handler, Limits, MetaView, Req, SseConfig, SseEnforced, TargetKind, TransportSecurity, WireRequest,
 };
 
-use crate::exec::block_on;
-
-use super::{Fixture, StoredObject, Stub};
+use rustfs_gateway_conformance::exec::block_on;
+use rustfs_gateway_conformance::fixture::{Fixture, StoredObject, Stub};
 
 fn sse_proof() -> SseEnforced {
     let request = http::Request::builder()
@@ -81,29 +80,13 @@ fn sse_proof() -> SseEnforced {
 
 /// The profiler must be the global allocator for `dhat::HeapStats` to mean anything.
 ///
-/// # Why this module is a `#[cfg(test)]` module of the library and not a file under `tests/`
+/// This target isolates the process-wide instrument from the library and ordinary integration
+/// harnesses. Even with no active profiling window, `dhat::Alloc` serializes unrelated allocations
+/// through its global lock. The original integration placement cost 27s → 69s; the later library
+/// placement exceeded the 30-second crate loop as that suite grew (rustfs/gateway#1257).
 ///
-/// `dhat::Alloc` is not free when no profiler is built — every allocation in the binary goes
-/// through it — and a `#[global_allocator]` is per *binary*, so wherever this module lives, every
-/// test beside it pays. Three placements exist and all three were measured on this branch:
-///
-/// * its own Cargo target under `tests/` — no tax at all, and forbidden.
-///   `scripts/check_test_target_consolidation.sh` allows the conformance crate exactly one
-///   integration target, for the reason rustfs/gateway#60 measured: a second one rebuilds the
-///   same test products.
-/// * a module of the consolidated `integration` target — that suite goes from **27s to 69s**.
-///   Forty seconds of the ten-minute gate, paid by six hundred and ninety conformance cases that
-///   are not being measured.
-/// * a `#[cfg(test)]` module of the library, which is this — the library's own test executable
-///   goes from **3.0s to 18.9s**, and `cargo xtask verify --crate rustfs-gateway-conformance` from
-///   about 6s to 18.5s against its 30s contract.
-///
-/// That last number is the real price of this measurement. It is written here rather than left to
-/// be discovered, and it is the thing to revisit first if this crate's unit tests grow.
-///
-/// Under `#[cfg(test)]` the allocator reaches neither the shipped library nor any integration
-/// binary. The profiling *window* is narrower still: it is opened only inside the isolated probe
-/// process below, where nothing else is running.
+/// Both this target and the complete library suite remain in the same crate verification budget.
+/// The profiling window is opened only in the exact child probe below, with no other tests running.
 #[global_allocator]
 static ALLOC: dhat::Alloc = dhat::Alloc;
 
@@ -124,7 +107,7 @@ const PAGE: i32 = 100;
 /// tests beside it were allocating at the time. rustfs/gateway#225 settled this arrangement.
 const PROBE_ENV: &str = "RUSTFS_GATEWAY_LIST_ALLOCATION_PROBE";
 const PROBE_SENTINEL: &str = "rustfs-gateway list allocation probe: ";
-const PROBE_TEST: &str = "fixture::list_allocations::one_page_costs_one_page_whatever_the_bucket_costs";
+const PROBE_TEST: &str = "one_page_costs_one_page_whatever_the_bucket_costs";
 
 /// A bucket of `count` keys, in the shape `c-list-0040` uses.
 ///

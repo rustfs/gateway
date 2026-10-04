@@ -426,3 +426,58 @@ fn the_generated_handler_only_delegates() {
         "the body must appear once, in the method the user wrote:\n{rendered}"
     );
 }
+
+#[test]
+fn n_conditional_presence_does_not_forward_method_only_attributes() {
+    for (attrs, projected) in [
+        ("#[cfg(any())]", "#[cfg(any())]"),
+        ("#[cfg_attr(true, cfg(false))]", "#[cfg_attr(true, cfg(false))]"),
+        ("#[cfg_attr(all(), cfg(any()), inline)]", "#[cfg_attr(all(), cfg(any()))]"),
+        (
+            "#[cfg_attr(all(), cfg_attr(all(), cfg(any()), inline), cold)]",
+            "#[cfg_attr(all(), cfg_attr(all(), cfg(any())))]",
+        ),
+        (
+            "#[cfg(all())] #[cfg_attr(any(), cfg(any()))]",
+            "#[cfg(all())] #[cfg_attr(any(), cfg(any()))]",
+        ),
+        ("#[inline] #[cfg_attr(all(), cold)]", ""),
+    ] {
+        let source = format!(
+            "#[handlers] impl Fs {{ {attrs} async fn get_bucket_location(&self, r: Req<GetBucketLocation>) -> HandlerResult<GetBucketLocation> {{ self.answer(r).await }} }}"
+        );
+        let file: File = syn::parse_str(&render(&source)).expect("the expansion parses");
+        let handler = file
+            .items
+            .iter()
+            .find_map(|item| match item {
+                Item::Impl(block) if block.trait_.is_some() => Some(block),
+                _ => None,
+            })
+            .expect("a handler impl is emitted");
+        let expected: TokenStream = projected.parse().expect("the expected attributes parse");
+        let handler_attrs: TokenStream = handler.attrs.iter().map(ToTokens::to_token_stream).collect();
+        assert_eq!(handler_attrs.to_string(), expected.to_string(), "handler presence for {attrs}");
+        let registration_attrs: TokenStream = file
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                Item::Impl(block) if block.trait_.is_none() => Some(block),
+                _ => None,
+            })
+            .flat_map(|block| &block.items)
+            .filter_map(|item| match item {
+                ImplItem::Fn(method) if method.sig.ident == "register" => Some(method),
+                _ => None,
+            })
+            .flat_map(|method| &method.block.stmts)
+            .filter_map(|statement| match statement {
+                syn::Stmt::Local(local) => Some(&local.attrs),
+                _ => None,
+            })
+            .flatten()
+            .map(ToTokens::to_token_stream)
+            .collect();
+        assert_eq!(registration_attrs.to_string(), expected.to_string(), "registry presence for {attrs}");
+    }
+}

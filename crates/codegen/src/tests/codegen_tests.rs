@@ -621,6 +621,51 @@ fn n_a_stale_generated_file_fails_verification() {
     let _ = std::fs::remove_dir_all(&scratch);
 }
 
+fn stale_seam_tree(name: &str) -> (PathBuf, CodegenInput, CodegenOutput, Vec<PathBuf>) {
+    let scratch = std::env::temp_dir().join(format!("s3gate-seam-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&scratch);
+    let input = CodegenInput::at(&root());
+    let output = CodegenOutput::at(&scratch);
+    crate::write(&input, &output).expect("writes into the scratch tree");
+    let seam = output.generated_dir.join("dto/seam");
+    let stale: Vec<_> = ["", "ops", "shapes", "census"]
+        .into_iter()
+        .map(|dir| seam.join(dir).join("NotProducedByCodegen.rs"))
+        .collect();
+    for path in &stale {
+        std::fs::write(path, "// stale output\n").expect("writes a stale seam file");
+    }
+    (scratch, input, output, stale)
+}
+
+#[test]
+fn n_stale_seam_files_fail_verification_in_every_owned_directory() {
+    let (scratch, input, output, stale) = stale_seam_tree("verify");
+    let err = crate::verify(&input, &output).expect_err("stale seam output must fail verification");
+    let message = err.to_string();
+    for path in stale {
+        let drift = format!("{}: not produced by codegen", path.display());
+        assert!(message.contains(&drift), "missing stale seam file: {drift}\n{message}");
+    }
+    let _ = std::fs::remove_dir_all(&scratch);
+}
+
+#[test]
+fn n_stale_seam_files_are_removed_without_deleting_unowned_files() {
+    let (scratch, input, output, stale) = stale_seam_tree("write");
+    let unowned_dir = output.generated_dir.join("dto/seam/unowned");
+    std::fs::create_dir_all(&unowned_dir).expect("creates an unowned directory");
+    let unowned_file = unowned_dir.join("notes.txt");
+    std::fs::write(&unowned_file, "keep this file\n").expect("writes an unowned file");
+
+    crate::write(&input, &output).expect("regenerates the scratch tree");
+    for path in stale {
+        assert!(!path.exists(), "stale seam file survived regeneration: {}", path.display());
+    }
+    assert_eq!(std::fs::read_to_string(&unowned_file).expect("unowned file survives"), "keep this file\n");
+    let _ = std::fs::remove_dir_all(&scratch);
+}
+
 #[test]
 fn c_cg_0005_why_reports_a_quirk_with_its_evidence_and_cases() {
     let text = why::why(&artifacts().operations, "q-checksum-0006").expect("known quirk");

@@ -255,7 +255,7 @@ pub enum IfMatchAbsentPolicyValue {
 }
 
 pub(super) fn contract_rule(table: &Toml, id: &str) -> Result<Option<ContractRule>> {
-    let Some(value) = opt_str(table, "contract_value") else {
+    let Some(value) = opt_str(table, "contract_value", &format!("quirk `{id}` contract rule"))? else {
         return Ok(None);
     };
     let dimension = required_str(table, "mutation_dimension", &format!("quirk `{id}` contract rule"))?;

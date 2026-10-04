@@ -2,14 +2,16 @@
 set -euo pipefail
 
 # WHAT THIS CHECKS
-#   Core, gateway, and conformance integration suites each use one explicit Cargo target with every
-#   test source registered exactly once, and gateway's compile-fail cases share one trybuild batch.
+#   Ordinary core, gateway, and conformance integrations each use one explicit Cargo target.
+#   Conformance isolates its listing allocator in one additional, exactly named target (#1257).
+#   Every source is registered once; gateway's compile-fail cases share one trybuild batch.
 # WHY
 #   rustfs/gateway#60 measured separate integration targets and trybuild batches rebuilding the
 #   same test products until the 30-second verification budget expired.
 # HOW TO EXEMPT
-#   There are no exemptions for the three crates below. Add or remove a test by updating the source
-#   inventory and its single harness registration together.
+#   No arbitrary extra targets are admitted for the three crates below. Update the source
+#   inventory and harness together.
+#   The exact conformance allocation target keeps dhat's global lock out of unrelated tests.
 #
 #   That sentence used to be written without the qualifier, and for the workspace it was not true:
 #   this guard names three crates, and every other member was exempt by omission with nothing
@@ -329,11 +331,12 @@ conformance_modules = (
 )
 conformance_root = root / "crates/conformance"
 conformance_tests = conformance_root / "tests"
+conformance_allocation_path = conformance_tests / "list_allocations.rs"
 actual_conformance_sources = tuple(
     sorted(
         path.relative_to(conformance_tests).with_suffix("").as_posix()
         for path in conformance_tests.rglob("*.rs")
-        if path != conformance_tests / "integration.rs"
+        if path not in {conformance_tests / "integration.rs", conformance_allocation_path}
     )
 )
 if actual_conformance_sources != conformance_modules:
@@ -359,6 +362,24 @@ for module in conformance_modules:
     if re.search(r"#!\s*\[\s*(?:cfg|cfg_attr)\b", code_only):
         fail(f"{source_path.relative_to(root)} may not disable its registered module with a file-level cfg")
 
+if conformance_allocation_path.is_symlink():
+    fail("conformance allocation source may not be a symlink")
+try:
+    resolved_allocation = conformance_allocation_path.resolve(strict=True)
+    allocation_source = conformance_allocation_path.read_text()
+except OSError as error:
+    fail(f"cannot read conformance allocation source: {error}")
+if not inside(resolved_allocation, conformance_tests.resolve()) or resolved_allocation in resolved_conformance_sources:
+    fail("conformance allocation source must be independent of the ordinary suite")
+_, allocation_code = rust_views(allocation_source, conformance_allocation_path)
+if re.search(r"#!\s*\[\s*(?:cfg|cfg_attr)\b", allocation_code):
+    fail("conformance allocation source may not disable its registered harness")
+if len(re.findall(r"#\s*\[\s*global_allocator\s*\]", allocation_code)) != 1 or not re.search(
+    r"#\s*\[\s*global_allocator\s*\]\s*static\s+\w+\s*:\s*dhat\s*::\s*Alloc\s*=\s*dhat\s*::\s*Alloc\s*;",
+    allocation_code,
+):
+    fail("conformance allocation harness must install its own dhat global allocator")
+
 conformance_manifest_path = conformance_root / "Cargo.toml"
 try:
     conformance_manifest = tomllib.loads(conformance_manifest_path.read_text())
@@ -370,21 +391,24 @@ if not isinstance(conformance_package, dict) or conformance_package.get("autotes
 conformance_targets = conformance_manifest.get("test")
 if (
     not isinstance(conformance_targets, list)
-    or len(conformance_targets) != 1
-    or not isinstance(conformance_targets[0], dict)
+    or len(conformance_targets) != 2
+    or any(not isinstance(target, dict) for target in conformance_targets)
 ):
-    fail("crates/conformance must declare exactly one explicit [[test]] target")
-conformance_target = conformance_targets[0]
-if conformance_target.get("name") != "integration" or conformance_target.get("path") != "tests/integration.rs":
-    fail("crates/conformance explicit test target must be integration at tests/integration.rs")
-conformance_required_features = conformance_target.get("required-features", [])
-if (
-    conformance_target.get("test", True) is not True
-    or conformance_target.get("harness", True) is not True
-    or not isinstance(conformance_required_features, list)
-    or conformance_required_features
-):
-    fail("crates/conformance integration target must use the active harness without required features")
+    fail("crates/conformance must declare exactly the ordinary and allocation [[test]] targets")
+if {(target.get("name"), target.get("path")) for target in conformance_targets} != {
+    ("integration", "tests/integration.rs"),
+    ("list_allocations", "tests/list_allocations.rs"),
+}:
+    fail("crates/conformance targets must use the exact ordinary and allocation names and paths")
+for conformance_target in conformance_targets:
+    conformance_required_features = conformance_target.get("required-features", [])
+    if (
+        conformance_target.get("test", True) is not True
+        or conformance_target.get("harness", True) is not True
+        or not isinstance(conformance_required_features, list)
+        or conformance_required_features
+    ):
+        fail("crates/conformance targets must use active harnesses without required features")
 
 conformance_harness_path = conformance_tests / "integration.rs"
 conformance_harness = license_header + """
@@ -462,13 +486,13 @@ for kind, default_test in (("lib", True), ("bin", True), ("example", False), ("b
         resolved_target = conformance_target_path(kind, target)
         if resolved_target in resolved_conformance_sources:
             fail(f"crates/conformance/Cargo.toml reuses a registered test source as a {kind} target")
-        if resolved_target == conformance_harness_path.resolve():
-            fail(f"crates/conformance/Cargo.toml reuses the integration harness as a {kind} target")
+        if resolved_target in {conformance_harness_path.resolve(), resolved_allocation}:
+            fail(f"crates/conformance/Cargo.toml reuses a test harness as a {kind} target")
 
-protected_conformance_entries = set(resolved_conformance_sources) | {conformance_harness_path.resolve()}
+protected_conformance_entries = set(resolved_conformance_sources) | {conformance_harness_path.resolve(), resolved_allocation}
 registered_conformance_entries = {
     conformance_tests / f"{module}.rs" for module in conformance_modules
-} | {conformance_harness_path}
+} | {conformance_harness_path, conformance_allocation_path}
 
 for source_path in conformance_root.rglob("*.rs"):
     try:
@@ -484,6 +508,8 @@ for source_path in conformance_root.rglob("*.rs"):
     except OSError as error:
         fail(f"cannot read {source_path.relative_to(root)}: {error}")
     comments_removed, code_only = rust_views(source, source_path)
+    if source_path != conformance_allocation_path and re.search(r"#\s*\[\s*global_allocator\s*\]", code_only):
+        fail(f"{source_path.relative_to(root)} installs an allocator outside the isolated harness")
     for attribute in re.finditer(r"#\s*!?\s*\[", code_only):
         opening = code_only.find("[", attribute.start(), attribute.end())
         end = balanced_end(code_only, opening, source_path)

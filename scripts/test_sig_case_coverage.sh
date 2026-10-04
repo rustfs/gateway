@@ -98,7 +98,33 @@ make_sandbox() {
         return
     fi
 
-    local dir list archive
+    local dir list archive baseline baseline_head clone_head baseline_status
+    if [[ "${GATEWAY_SIG_GUARD_BASELINE+x}" ]]; then
+        baseline="$GATEWAY_SIG_GUARD_BASELINE"
+        if [[ -z "$baseline" || ! -d "$baseline" ]] ||
+            ! baseline_head="$(git -C "$baseline" rev-parse --verify HEAD 2>/dev/null)" ||
+            ! baseline_status="$(git -C "$baseline" status --porcelain 2>/dev/null)" ||
+            [[ -n "$baseline_status" ]]; then
+            printf 'invalid signature guard baseline\n' >&2
+            return 1
+        fi
+        if ! dir="$(mktemp -d "${TMPDIR:-/tmp}/gateway-sig-guard-test.XXXXXX")"; then
+            printf 'cannot prepare signature guard baseline\n' >&2
+            return 1
+        fi
+        # The parent retains this clean repository until the nested suite exits. Only baseline
+        # objects are borrowed; the checkout, index, refs and newly written objects remain private.
+        if ! git clone --shared -q -- "$baseline" "$dir" >/dev/null 2>&1 ||
+            ! clone_head="$(git -C "$dir" rev-parse --verify HEAD 2>/dev/null)" ||
+            [[ "$clone_head" != "$baseline_head" ]] ||
+            ! (git -C "$dir" config maintenance.auto false && git -C "$dir" config gc.auto 0); then
+            rm -rf "$dir" || true
+            printf 'cannot prepare signature guard baseline\n' >&2
+            return 1
+        fi
+        SANDBOX="$dir"
+        return 0
+    fi
     dir="$(mktemp -d "${TMPDIR:-/tmp}/gateway-sig-guard-test.XXXXXX")"
     list="${dir}.files"
     archive="${dir}.tar"

@@ -38,11 +38,12 @@
 //! block the user wrote would mean the emitted block is no longer the block they can read in their
 //! own file.
 
-use proc_macro2::TokenStream;
+use proc_macro2::{TokenStream, TokenTree};
 use quote::{format_ident, quote};
-use syn::parse::{Parse, ParseStream};
+use syn::parse::{Parse, ParseStream, Parser};
+use syn::punctuated::Punctuated;
 use syn::spanned::Spanned;
-use syn::{Attribute, Error, Ident, ImplItem, ItemImpl, Token};
+use syn::{Attribute, Error, Ident, ImplItem, ItemImpl, Meta, Token};
 
 use crate::mapping::{call_site, check_signature, operation_of};
 
@@ -77,6 +78,7 @@ impl Parse for Args {
 struct Registration {
     method: Ident,
     operation: Ident,
+    presence: Vec<Meta>,
 }
 
 /// The macro, as a function over token streams so that it can be tested without a compiler.
@@ -117,6 +119,11 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> Result<TokenStream
         registrations.push(Registration {
             method: method.sig.ident.clone(),
             operation,
+            presence: method
+                .attrs
+                .iter()
+                .filter_map(|attr| presence_meta(&attr.meta).transpose())
+                .collect::<Result<_, _>>()?,
         });
     }
 
@@ -129,6 +136,34 @@ pub(crate) fn expand(attr: TokenStream, item: TokenStream) -> Result<TokenStream
     }
 
     Ok(emit(&block, &args, &registrations))
+}
+
+/// Keeps only attributes that determine whether the method exists, including nested `cfg_attr`.
+fn presence_meta(meta: &Meta) -> Result<Option<Meta>, Error> {
+    if meta.path().is_ident("cfg") {
+        return Ok(Some(meta.clone()));
+    }
+    if !meta.path().is_ident("cfg_attr") {
+        return Ok(None);
+    }
+    let Meta::List(list) = meta else {
+        return Err(Error::new_spanned(meta, "cfg_attr requires a predicate and attributes"));
+    };
+    // The compiler owns the predicate grammar; groups keep its nested commas intact.
+    let mut arguments = list.tokens.clone().into_iter();
+    let predicate: TokenStream = arguments
+        .by_ref()
+        .take_while(|token| !matches!(token, TokenTree::Punct(punctuation) if punctuation.as_char() == ','))
+        .collect();
+    let presence: Vec<Meta> = Punctuated::<Meta, Token![,]>::parse_terminated
+        .parse2(arguments.collect())?
+        .into_iter()
+        .filter_map(|attr| presence_meta(&attr).transpose())
+        .collect::<Result<_, _>>()?;
+    if presence.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(syn::parse_quote_spanned!(list.span()=> cfg_attr(#predicate, #(#presence),*))))
 }
 
 /// Removes `#[handlers(skip)]` from a method and says whether it was there.
@@ -172,6 +207,13 @@ fn emit(block: &ItemImpl, args: &Args, registrations: &[Registration]) -> TokenS
     };
     let operations: Vec<&Ident> = registrations.iter().map(|entry| &entry.operation).collect();
     let methods: Vec<&Ident> = registrations.iter().map(|entry| &entry.method).collect();
+    let presence: Vec<TokenStream> = registrations
+        .iter()
+        .map(|entry| {
+            let attrs = &entry.presence;
+            quote! { #(#[#attrs])* }
+        })
+        .collect();
 
     let register_doc = format!(
         "Registers the operations implemented in this block: {}.",
@@ -190,13 +232,17 @@ fn emit(block: &ItemImpl, args: &Args, registrations: &[Registration]) -> TokenS
                 this: &::std::sync::Arc<Self>,
                 builder: ::rustfs_gateway::RouterBuilder,
             ) -> ::rustfs_gateway::RouterBuilder {
-                builder #(
-                    .handle::<#operations, Self>(::std::sync::Arc::clone(this))
+                let _ = this;
+                #(
+                    #presence
+                    let builder = builder.handle::<#operations, Self>(::std::sync::Arc::clone(this));
                 )*
+                builder
             }
         }
 
         #(
+            #presence
             impl #impl_generics ::rustfs_gateway::Handler<#operations> for #self_ty #where_clause {
                 fn call(
                     &self,

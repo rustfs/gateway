@@ -236,6 +236,32 @@ mod tests {
     }
 
     #[test]
+    fn conformance_prebuild_keeps_the_library_and_allocation_harness_in_both_steps() {
+        assert_eq!(
+            prebuild_commands(&crate_step_batches("rustfs-gateway-conformance"), None),
+            vec![
+                owned(&[
+                    "test",
+                    "-p",
+                    "rustfs-gateway-conformance",
+                    "--lib",
+                    "--test",
+                    "list_allocations",
+                    "--no-run"
+                ]),
+                owned(&[
+                    "check",
+                    "-p",
+                    "rustfs-gateway-conformance",
+                    "--lib",
+                    "--test",
+                    "list_allocations"
+                ]),
+            ]
+        );
+    }
+
+    #[test]
     fn compiled_crates_are_counted_from_cargo_lines_alone() {
         let stderr = b"   Compiling proc-macro2 v1.0.0\n     Running unittests\n   Compiling syn v2.0.0\nnote: Compiling is not a cargo line here\n";
 

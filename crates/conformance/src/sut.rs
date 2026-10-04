@@ -138,6 +138,16 @@ pub trait Sut {
     /// A one-line description for the report header.
     fn describe(&self) -> String;
 
+    /// Whether this authored exchange is configured to use TLS, for applicability gates.
+    ///
+    /// This reports configuration, not transport support or an observed handshake. A matching
+    /// gate must still reach the transport's normal capability checks. The default is cleartext.
+    /// Called before fixture preparation with the authored request and case connection block;
+    /// implementations must not derive this from a session left by an earlier case.
+    fn configured_tls(&self, _request: &Value, _connection: Option<&Value>) -> bool {
+        false
+    }
+
     /// Establishes the fixtures a case declares, returning any captures the setup minted.
     ///
     /// Setup traffic is not under test: a target may use normalised, correctly signed requests

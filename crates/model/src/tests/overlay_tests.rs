@@ -375,6 +375,26 @@ fn minimal_ops() -> &'static str {
 }
 
 #[test]
+fn n_optional_quirk_strings_reject_other_types() {
+    let sandbox = Sandbox::new("optional-quirk-strings");
+    sandbox.write("ops/alpha.toml", minimal_ops());
+    for key in ["contract_value", "mutation_dimension"] {
+        for value in ["false", "7", "[]"] {
+            let declaration = quirk("q-optional-0001", "c-optional-0001").replace(
+                "classification = \"contract\"\n",
+                &format!("classification = \"contract\"\n{key} = {value}\n"),
+            );
+            sandbox.write("quirks/base.toml", &declaration);
+            let message = load_error(&sandbox);
+            assert!(
+                message.contains("q-optional-0001") && message.contains(key) && message.contains("string"),
+                "{message}"
+            );
+        }
+    }
+}
+
+#[test]
 fn refuses_one_error_code_declared_twice() {
     let sandbox = Sandbox::new("code-twice");
     sandbox.write("ops/alpha.toml", minimal_ops()).write(

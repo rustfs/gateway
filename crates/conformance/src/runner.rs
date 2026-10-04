@@ -238,7 +238,7 @@ fn run_case(
         outcome.phase = Phase::Convention;
         return outcome;
     }
-    if let Some(reason) = inapplicable(case, options) {
+    if let Some(reason) = inapplicable(case, options, sut) {
         outcome.verdict = Verdict::Skipped;
         outcome.phase = Phase::Convention;
         outcome.skip_reason = Some(reason);
@@ -637,10 +637,7 @@ fn skeleton(case: &Case) -> CaseOutcome {
     }
 }
 
-/// Whether this run reaches the target over TLS. There is no socket, so it does not.
-const RUN_OVER_TLS: bool = false;
-
-/// Whether a `case.applies_to.tls` gate excludes a run with this TLS state.
+/// Whether a `case.applies_to.tls` gate excludes an exchange configured with this mode.
 fn tls_gate_excludes(gate: &str, over_tls: bool) -> bool {
     match gate {
         "required" => !over_tls,
@@ -650,7 +647,7 @@ fn tls_gate_excludes(gate: &str, over_tls: bool) -> bool {
 }
 
 /// Applicability gates the case declares. A gated-out case is skipped with the gate named.
-pub(crate) fn inapplicable(case: &Case, options: &RunOptions) -> Option<String> {
+pub(crate) fn inapplicable(case: &Case, options: &RunOptions, sut: &dyn Sut) -> Option<String> {
     let applies = case.meta()?.read("caseMeta.applies_to")?;
     if let Some(profiles) = applies.read_strings("caseMeta.applies_to.profiles")
         && !profiles.is_empty()
@@ -682,13 +679,19 @@ pub(crate) fn inapplicable(case: &Case, options: &RunOptions) -> Option<String> 
             }
         }
     }
-    if let Some(gate) = applies.read("caseMeta.applies_to.tls").and_then(Value::as_str)
-        && tls_gate_excludes(gate, RUN_OVER_TLS)
-    {
-        return Some(format!(
-            "case.applies_to.tls is `{gate}` and this run is {}",
-            if RUN_OVER_TLS { "over TLS" } else { "in cleartext" }
-        ));
+    if let Some(gate) = applies.read("caseMeta.applies_to.tls").and_then(Value::as_str) {
+        let connection = case.document.as_ref().and_then(|document| document.read("connection"));
+        for exchange in case.exchanges() {
+            let Some(request) = exchange.request else { continue };
+            let over_tls = sut.configured_tls(request, connection);
+            if tls_gate_excludes(gate, over_tls) {
+                return Some(format!(
+                    "case.applies_to.tls is `{gate}` but exchange {} is configured {}",
+                    exchange.label(),
+                    if over_tls { "over TLS" } else { "in cleartext" }
+                ));
+            }
+        }
     }
     None
 }
@@ -757,3 +760,5 @@ mod lifecycle_tests;
 mod shard_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tls_tests;

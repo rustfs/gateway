@@ -23,6 +23,7 @@
 
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used, clippy::indexing_slicing)]
 
+mod calendar;
 mod census;
 mod controls;
 mod encode_controls;

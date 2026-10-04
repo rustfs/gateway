@@ -45,6 +45,9 @@
 
 use core::fmt::Write as _;
 
+use quick_xml::Reader;
+use quick_xml::events::Event;
+
 use crate::chars::{UNREPRESENTABLE, is_xml_char};
 
 /// The XML declaration S3 puts at the head of every response body.
@@ -324,9 +327,23 @@ impl XmlWriter {
     ///
     /// # Errors
     ///
-    /// [`crate::XmlError`] when `fragment` is not one bounded, well-formed XML element.
+    /// [`crate::XmlError`] when `fragment` is not one bounded, well-formed XML element,
+    /// or carries a document declaration that cannot appear inside its parent.
     pub fn append_fragment(&mut self, fragment: &str) -> Result<(), crate::XmlError> {
         crate::parse(fragment.as_bytes())?;
+        // Document parsing permits a prolog; an appended child cannot carry one. Read events
+        // rather than searching bytes, because declaration-looking CDATA is ordinary content.
+        let mut reader = Reader::from_str(fragment);
+        loop {
+            match reader.read_event() {
+                Ok(Event::Decl(_)) | Err(_) => return Err(crate::XmlError::Malformed),
+                Ok(Event::PI(instruction)) if instruction.target().eq_ignore_ascii_case(b"xml") => {
+                    return Err(crate::XmlError::Malformed);
+                }
+                Ok(Event::Eof) => break,
+                Ok(_) => {}
+            }
+        }
         // A fragment's element is a child like any other; its name is not read back, so it ranks
         // after every child an order names.
         self.child_starts("");

@@ -22,9 +22,6 @@
 use std::future::Future;
 use std::future::poll_fn;
 use std::pin::Pin;
-use std::sync::Arc;
-use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::task::Poll;
 use std::time::Duration;
 
@@ -344,47 +341,7 @@ pub(crate) async fn policy_snapshot_with_timeout<'a>(
 }
 
 async fn wait_without_runtime(duration: Duration) {
-    struct Signal {
-        fired: AtomicBool,
-        waker: Mutex<Option<std::task::Waker>>,
-    }
-
-    let signal = Arc::new(Signal {
-        fired: AtomicBool::new(false),
-        waker: Mutex::new(None),
-    });
-    let sleeper = Arc::clone(&signal);
-    if std::thread::Builder::new()
-        .name(String::from("gateway-deadline"))
-        .spawn(move || {
-            std::thread::sleep(duration);
-            sleeper.fired.store(true, Ordering::Release);
-            if let Ok(mut slot) = sleeper.waker.lock()
-                && let Some(waker) = slot.take()
-            {
-                waker.wake();
-            }
-        })
-        .is_err()
-    {
-        return;
-    }
-
-    poll_fn(move |context| {
-        if signal.fired.load(Ordering::Acquire) {
-            return Poll::Ready(());
-        }
-        let Ok(mut slot) = signal.waker.lock() else {
-            return Poll::Ready(());
-        };
-        *slot = Some(context.waker().clone());
-        if signal.fired.load(Ordering::Acquire) {
-            Poll::Ready(())
-        } else {
-            Poll::Pending
-        }
-    })
-    .await;
+    futures_timer::Delay::new(duration).await;
 }
 
 pub(crate) fn elapsed_since(clock: &dyn MonotonicClock, started: MonotonicNow) -> Duration {
@@ -398,11 +355,16 @@ pub(crate) async fn hold_failure_floor(floor: FailureFloor, clock: &dyn Monotoni
 }
 
 #[cfg(test)]
+#[path = "request_deadline_resource_tests.rs"]
+mod resource_tests;
+
+#[cfg(test)]
 #[allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 mod tests {
     use super::*;
     use rustfs_gateway_core::HandlerError;
     use rustfs_gateway_types::ErrorCode;
+    use std::sync::{Arc, Mutex};
 
     fn bound<T: 'static>(
         work: BoxFuture<'static, Result<T, HandlerError>>,

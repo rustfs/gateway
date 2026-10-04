@@ -29,19 +29,16 @@ pub(super) fn crate_steps(package: &str) -> Vec<Vec<String>> {
                 .collect(),
         ];
     }
-    let clippy_step = vec![
-        "clippy".to_owned(),
-        "-p".to_owned(),
-        package.to_owned(),
-        match package {
-            "rustfs-gateway-conformance" => "--lib",
-            _ => "--all-targets",
-        }
-        .to_owned(),
-        "--".to_owned(),
-        "-D".to_owned(),
-        "warnings".to_owned(),
-    ];
+    let target_scope: &[&str] = match package {
+        "rustfs-gateway-conformance" => &["--lib", "--test", "list_allocations"],
+        _ => &["--all-targets"],
+    };
+    let clippy_step = ["clippy", "-p", package]
+        .into_iter()
+        .chain(target_scope.iter().copied())
+        .chain(["--", "-D", "warnings"])
+        .map(str::to_owned)
+        .collect();
     if package == "rustfs-gateway-core" {
         return vec![
             vec![
@@ -83,7 +80,7 @@ pub(super) fn crate_steps(package: &str) -> Vec<Vec<String>> {
             .map(str::to_owned),
         );
     } else if package == "rustfs-gateway-conformance" {
-        test_step.push("--lib".to_owned());
+        test_step.extend(target_scope.iter().copied().map(str::to_owned));
     }
     vec![test_step, clippy_step]
 }

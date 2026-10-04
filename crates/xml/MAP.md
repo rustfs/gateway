@@ -18,6 +18,7 @@ name and every ordering is supplied by the caller, from IR data.
 | `src/error.rs` | `XmlError`, one variant per refusal. No variant carries a fragment of the input. | You are mapping a refusal onto an S3 error code. |
 | `src/tests.rs` | Writer byte-shape controls and a negative-majority reader matrix, including the P3-05 XML limit cases. | Before changing either half. |
 | `src/layout_tests.rs` | The legacy layout: the compact declaration, declared child orders and entity-tag quotes on and off, and the compact declaration's stripping (rustfs/gateway#1078). | Before changing `legacy_layout`, `order_children` or `entity_tag_element`. |
+| `src/fragment_tests.rs` | Appended elements reject document declarations before changing their parent, while preserving nested elements and character content. | Before changing `append_fragment`. |
 
 ## Shape decisions worth not re-litigating
 

@@ -223,9 +223,16 @@ impl<'a> SignedHeaderList<'a> {
 /// Every accessor is a lookup or an iteration; none of them allocates, and none of them copies a
 /// value. The view is what layers above receive instead of the [`http::HeaderMap`], so that
 /// "reads a header" and "reads the raw request" stay different capabilities.
-#[derive(Clone, Copy, Debug)]
+/// `Debug` reports the field count without formatting names or values.
+#[derive(Clone, Copy)]
 pub struct HeaderView<'a> {
     map: &'a HeaderMap,
+}
+
+impl fmt::Debug for HeaderView<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("HeaderView").field("headers", &self.map.len()).finish()
+    }
 }
 
 impl<'a> HeaderView<'a> {

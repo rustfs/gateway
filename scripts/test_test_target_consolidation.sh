@@ -80,19 +80,19 @@ verify_restore_control() {
 # One runner for both directions: `expected` is `fail` (the guard must reject the mutation) or
 # `pass` (it must accept it). Everything else about a case is identical either way.
 run_case() {
-    local expected="$1" description="$2" mutation="$3"
-    local rc=0 outcome=pass
+    local expected="$1" description="$2" mutation="$3" error="${4:-}"
+    local rc=0 outcome=pass output
     cases=$((cases + 1))
     reset_sandbox
     (cd "$SANDBOX" && "$mutation")
-    GATEWAY_CHECK_ROOT="$SANDBOX" bash "$SANDBOX/scripts/check_test_target_consolidation.sh" \
-        >/dev/null 2>&1 || rc=$?
+    output=$(GATEWAY_CHECK_ROOT="$SANDBOX" bash "$SANDBOX/scripts/check_test_target_consolidation.sh" 2>&1) || rc=$?
     reset_sandbox
     [[ "$rc" -eq 0 ]] || outcome=fail
-    if [[ "$outcome" == "$expected" ]]; then
+    if [[ "$outcome" == "$expected" && ( -z "$error" || "$output" == *"$error"* ) ]]; then
         printf '  ok   %s\n' "$description"
     else
         printf '  FAIL %s\n' "$description" >&2
+        [[ -z "$error" ]] || printf '       expected %s; observed %s\n' "$error" "$output" >&2
         failures=$((failures + 1))
     fi
 }
@@ -105,6 +105,8 @@ if ! bash "$REPO_ROOT/scripts/check_test_target_consolidation.sh" >/dev/null; th
 fi
 
 verify_restore_control
+
+source "$SCRIPT_DIR/lib/test_conformance_allocation_target.sh"
 
 mut_core_registration_omitted() {
     python3 - <<'PYEOF'

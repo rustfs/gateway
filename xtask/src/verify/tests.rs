@@ -102,20 +102,37 @@ fn xtask_fast_scope_reuses_the_workspace_feature_graph_for_every_target() {
 }
 
 #[test]
-fn conformance_fast_scope_keeps_integration_contracts_in_the_workspace_gate() {
+fn conformance_fast_scope_keeps_allocation_contracts_and_leaves_corpus_in_the_workspace_gate() {
     let steps = crate_steps("rustfs-gateway-conformance");
 
     assert_eq!(
         steps,
         vec![
-            ["test", "-p", "rustfs-gateway-conformance", "--lib"]
-                .into_iter()
-                .map(str::to_owned)
-                .collect::<Vec<_>>(),
-            ["clippy", "-p", "rustfs-gateway-conformance", "--lib", "--", "-D", "warnings"]
-                .into_iter()
-                .map(str::to_owned)
-                .collect::<Vec<_>>(),
+            [
+                "test",
+                "-p",
+                "rustfs-gateway-conformance",
+                "--lib",
+                "--test",
+                "list_allocations"
+            ]
+            .into_iter()
+            .map(str::to_owned)
+            .collect::<Vec<_>>(),
+            [
+                "clippy",
+                "-p",
+                "rustfs-gateway-conformance",
+                "--lib",
+                "--test",
+                "list_allocations",
+                "--",
+                "-D",
+                "warnings"
+            ]
+            .into_iter()
+            .map(str::to_owned)
+            .collect::<Vec<_>>(),
         ]
     );
 }

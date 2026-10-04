@@ -101,6 +101,17 @@ fn digits(value: &str) -> bool {
     !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit())
 }
 
+fn calendar_date(year: &str, month: u8, day: &str) -> Option<time::Date> {
+    time::Date::from_calendar_date(year.parse().ok()?, time::Month::try_from(month).ok()?, day.parse().ok()?).ok()
+}
+
+fn clock_fields_hold(hour: &str, minute: &str, second: &str) -> bool {
+    hour.parse::<u8>().is_ok_and(|hour| hour <= 23)
+        && minute.parse::<u8>().is_ok_and(|minute| minute <= 59)
+        // Both wire formats allow a leap second; this format check does not consult an IERS schedule.
+        && second.parse::<u8>().is_ok_and(|second| second <= 60)
+}
+
 fn is_http_date(value: &str) -> bool {
     const DAYS: [&str; 7] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
     const MONTHS: [&str; 12] = [
@@ -111,7 +122,7 @@ fn is_http_date(value: &str) -> bool {
         return false;
     };
     let clock: Vec<&str> = time.split(':').collect();
-    day.strip_suffix(',').is_some_and(|day| DAYS.contains(&day))
+    let shape_holds = day.strip_suffix(',').is_some_and(|day| DAYS.contains(&day))
         && date.len() == 2
         && digits(date)
         && MONTHS.contains(month)
@@ -119,12 +130,30 @@ fn is_http_date(value: &str) -> bool {
         && digits(year)
         && clock.len() == 3
         && clock.iter().all(|part| part.len() == 2 && digits(part))
-        && *zone == "GMT"
+        && *zone == "GMT";
+    if !shape_holds {
+        return false;
+    }
+    let Some(month) = MONTHS
+        .iter()
+        .position(|candidate| candidate == month)
+        .and_then(|index| u8::try_from(index + 1).ok())
+    else {
+        return false;
+    };
+    let Some(date) = calendar_date(year, month, date) else {
+        return false;
+    };
+    date.year() >= 1900
+        && DAYS
+            .get(usize::from(date.weekday().number_days_from_monday()))
+            .is_some_and(|expected| day.strip_suffix(',') == Some(*expected))
+        && clock_fields_hold(clock[0], clock[1], clock[2])
 }
 
 fn is_xml_instant(value: &str) -> bool {
     let bytes = value.as_bytes();
-    bytes.len() == 24
+    let shape_holds = bytes.len() == 24
         && [4, 7].iter().all(|&index| bytes[index] == b'-')
         && bytes[10] == b'T'
         && [13, 16].iter().all(|&index| bytes[index] == b':')
@@ -132,7 +161,17 @@ fn is_xml_instant(value: &str) -> bool {
         && bytes[23] == b'Z'
         && [0..4, 5..7, 8..10, 11..13, 14..16, 17..19, 20..23]
             .into_iter()
-            .all(|range| value.get(range).is_some_and(digits))
+            .all(|range| value.get(range).is_some_and(digits));
+    if !shape_holds {
+        return false;
+    }
+    // The shape check proves every byte is ASCII and all slices below are in range.
+    value[5..7]
+        .parse::<u8>()
+        .ok()
+        .and_then(|month| calendar_date(&value[0..4], month, &value[8..10]))
+        .is_some()
+        && clock_fields_hold(&value[11..13], &value[14..16], &value[17..19])
 }
 
 fn decode_base64url(value: &str) -> Option<Vec<u8>> {

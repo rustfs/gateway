@@ -1,0 +1,71 @@
+# c-post-0009 — POST prefix semantics.
+
+[case]
+id = "c-post-0009"
+schema_version = 1
+title = "An empty Content-Type list item fails a nonempty POST prefix"
+rationale = "A Content-Type starts-with condition must match every comma-separated item. The policy has a valid fixture signature so rejection cannot pass because of a bad signature. A following authenticated GET checks whether the upload stored bytes."
+polarity = "negative"
+operation = "PostObject"
+tags = ["signature", "sigv4", "validation"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/developerguide/sigv4-HTTPPOSTConstructPolicy.html"
+summary = "Content-Type prefix conditions apply to every comma item; commas in other field values remain literal."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+request_time = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-post"
+
+[[setup.objects]]
+bucket = "conf-post"
+key = "c-post-0009.txt"
+absent = true
+
+[[exchanges]]
+name = "upload"
+
+[exchanges.request]
+method = "POST"
+target = "/conf-post"
+sign = { mode = "anonymous" }
+body = { utf8 = "--confpost\r\nContent-Disposition: form-data; name=\"key\"\r\n\r\nc-post-0009.txt\r\n--confpost\r\nContent-Disposition: form-data; name=\"x-amz-algorithm\"\r\n\r\nAWS4-HMAC-SHA256\r\n--confpost\r\nContent-Disposition: form-data; name=\"x-amz-credential\"\r\n\r\nAKIAIOSFODNN7EXAMPLE/20260102/us-east-1/s3/aws4_request\r\n--confpost\r\nContent-Disposition: form-data; name=\"x-amz-date\"\r\n\r\n20260102T030405Z\r\n--confpost\r\nContent-Disposition: form-data; name=\"Content-Type\"\r\n\r\nimage/png,\r\n--confpost\r\nContent-Disposition: form-data; name=\"policy\"\r\n\r\neyJleHBpcmF0aW9uIjoiMjAyNi0wMS0wMlQwNDowNDowNVoiLCJjb25kaXRpb25zIjpbeyJidWNrZXQiOiJjb25mLXBvc3QifSx7ImtleSI6ImMtcG9zdC0wMDA5LnR4dCJ9LHsieC1hbXotYWxnb3JpdGhtIjoiQVdTNC1ITUFDLVNIQTI1NiJ9LHsieC1hbXotY3JlZGVudGlhbCI6IkFLSUFJT1NGT0ROTjdFWEFNUExFLzIwMjYwMTAyL3VzLWVhc3QtMS9zMy9hd3M0X3JlcXVlc3QifSx7IngtYW16LWRhdGUiOiIyMDI2MDEwMlQwMzA0MDVaIn0sWyJzdGFydHMtd2l0aCIsIiRDb250ZW50LVR5cGUiLCJpbWFnZS8iXV19\r\n--confpost\r\nContent-Disposition: form-data; name=\"x-amz-signature\"\r\n\r\n7b51c05a8c9128bab6ae1e3e796925b5dd426c8bb412722f5cc6ddadf74b6bf1\r\n--confpost\r\nContent-Disposition: form-data; name=\"file\"; filename=\"upload.txt\"\r\nContent-Type: image/png\r\n\r\npolicy-controlled-object\r\n--confpost--\r\n" }
+
+[exchanges.request.headers]
+"content-type" = "multipart/form-data; boundary=confpost"
+
+[exchanges.expect]
+kind = "response"
+status = 403
+headers_absent = ["etag", "x-amz-version-id"]
+
+[exchanges.expect.error]
+# The default authenticator normalizes policy parsing refusals before lookup.
+# This case measures rejection and storage, retaining that existing error surface.
+code = "InvalidAccessKeyId"
+request_id_present = true
+
+[exchanges.expect.body]
+redact = ["RequestId", "HostId"]
+contains_utf8 = ["<Message>the request was not authenticated</Message>"]
+
+[[exchanges]]
+name = "stored-bytes"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-post/c-post-0009.txt"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 404
+
+[exchanges.expect.error]
+code = "NoSuchKey"

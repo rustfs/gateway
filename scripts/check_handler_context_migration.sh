@@ -52,7 +52,7 @@ expected = {
     "crates/gateway/tests/support/handlers.rs": 9,
     "crates/gateway/tests/support/select.rs": 1,
     "crates/macros/src/expand.rs": 1,
-    "crates/macros/tests/equivalence.rs": 3,
+    "crates/macros/tests/equivalence.rs": 4,
 }
 facade_dual = {
     "crates/conformance/src/fixture/handlers_bucket.rs",
@@ -315,7 +315,7 @@ for relative, wanted in expected.items():
             fail(f"{relative} Handler impl {ordinal} drops or bypasses the migration context source")
     total += len(implementations)
 
-if total != 128:
-    fail(f"reviewed migration census is {total}, expected 128")
-print("check_handler_context_migration: 128 reviewed Handler impls preserve their context migration mode")
+if total != 129:
+    fail(f"reviewed migration census is {total}, expected 129")
+print(f"check_handler_context_migration: {total} reviewed Handler impls preserve their context migration mode")
 PY

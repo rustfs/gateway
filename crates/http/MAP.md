@@ -20,6 +20,7 @@ after it has accepted.
 | `src/text.rs` | Byte-level predicates and the small ASCII buffer this crate stores strings in. | A character class or a bounded string is judged wrongly. |
 | `src/ingest/mod.rs` | Reading an upload body once: decode, verify, digest and deliver in a single pass. | Bytes move through decoding, verification, or digesting incorrectly. |
 | `src/ingest/pipeline.rs` | The single pass over an upload: read, decode, sign, digest, verify, deliver. | The order of the pass, or what is handed over before verification, is in question. |
+| `src/ingest/pipeline/tests.rs` | Private run-metadata bounds under fragmentation, compaction and verification failures. | Pending ranges or their storage change. |
 | `src/ingest/decoder.rs` | The `aws-chunked` state machine, working in place on the socket buffer. | A chunk boundary or size line is decoded wrongly. |
 | `src/ingest/signer.rs` | The chunk signature chain: one derivation per scope, one HMAC per chunk, no allocation. | A signed streaming body verifies wrongly. |
 | `src/ingest/trailer.rs` | Strict bounded `aws-chunked` trailer parsing and declared-set matching. | A trailer name, size, count, or EOF boundary is accepted wrongly. |
@@ -53,4 +54,4 @@ after it has accepted.
 | `tests/form_allocations.rs` | Measures file-size-independent heap and bounded allocation under fragmented text fields. | Change the file read path. |
 | `benches/parse.rs` | Asserts zero allocations for eight-query indexing and signed-header canonicalization. | Change request-head parsing or canonical-header writing. |
 | `benches/chunked.rs` | Zero allocations per additional signed 64 KiB chunk, plus a throughput record. | Change the ingest pipeline's per-chunk path. |
-| `tests/accepted_transport_extensions.rs` | Read-only transport values across acceptance and body mapping. | A transport value is lost, cloned, exposed, or substituted. |
+| `tests/accepted_transport_extensions.rs` | Read-only transport values and structural request/form Debug. | A transport value is lost or raw request/form data appears in Debug. |

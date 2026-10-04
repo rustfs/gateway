@@ -387,3 +387,151 @@ fn an_operation_neither_form_implements_is_not_implemented() {
         assert_eq!(dispatch::NOT_REGISTERED_MESSAGE.lines().count(), 1);
     }
 }
+
+macro_rules! disabled_conditional_backend {
+    ($backend:ident, $(#[$condition:meta])*) => {
+        struct $backend;
+
+        #[handlers]
+        impl $backend {
+            $(#[$condition])*
+            async fn get_bucket_location(&self, _: Req<GetBucketLocation>) -> HandlerResult<GetBucketLocation> {
+                Ok(Resp::new(GetBucketLocationOutput::default()))
+            }
+        }
+
+        // A conflicting impl would fail compilation if the macro emitted a disabled handler.
+        impl Handler<GetBucketLocation> for $backend {
+            fn call(&self, _: Req<GetBucketLocation>) -> impl Future<Output = HandlerResult<GetBucketLocation>> + Send {
+                async { Ok(Resp::new(GetBucketLocationOutput::default())) }
+            }
+
+            fn call_with_context(
+                &self,
+                _: Req<GetBucketLocation>,
+                _: HandlerContext,
+            ) -> impl Future<Output = HandlerResult<GetBucketLocation>> + Send {
+                async { Ok(Resp::new(GetBucketLocationOutput::default())) }
+            }
+        }
+    };
+}
+
+disabled_conditional_backend!(DisabledCfg, #[cfg(any())]);
+disabled_conditional_backend!(DisabledStackedCfg, #[cfg(all())] #[cfg(any())]);
+disabled_conditional_backend!(DisabledBoolCfgAttr, #[cfg_attr(true, cfg(false))]);
+disabled_conditional_backend!(DisabledCfgAttr, #[cfg_attr(all(), cfg(any()))]);
+disabled_conditional_backend!(DisabledNestedCfgAttr, #[cfg_attr(all(), cfg_attr(all(), cfg(any()), inline))]);
+disabled_conditional_backend!(DisabledMixedCfgAttr, #[cfg_attr(all(), cold, cfg(any()), inline)]);
+
+#[test]
+fn n_conditional_cfg_does_not_register_a_disabled_method() {
+    assert_eq!(
+        DisabledCfg::register(&Arc::new(DisabledCfg), RouterBuilder::new())
+            .registered()
+            .count(),
+        0
+    );
+}
+
+#[test]
+fn n_conditional_disabled_registration_preserves_the_incoming_builder() {
+    let builder = RouterBuilder::new().handle::<PutObject, ManualFs>(Arc::new(ManualFs));
+    let names: Vec<_> = DisabledCfg::register(&Arc::new(DisabledCfg), builder).registered().collect();
+    assert_eq!(names, vec!["PutObject"]);
+}
+
+#[test]
+fn n_conditional_stacked_cfg_requires_every_predicate_to_enable_the_method() {
+    assert_eq!(
+        DisabledStackedCfg::register(&Arc::new(DisabledStackedCfg), RouterBuilder::new())
+            .registered()
+            .count(),
+        0,
+    );
+}
+
+#[test]
+fn n_conditional_boolean_predicate_does_not_register_a_disabled_method() {
+    assert_eq!(
+        DisabledBoolCfgAttr::register(&Arc::new(DisabledBoolCfgAttr), RouterBuilder::new())
+            .registered()
+            .count(),
+        0,
+    );
+}
+
+#[test]
+fn n_conditional_cfg_attr_does_not_register_a_disabled_method() {
+    assert_eq!(
+        DisabledCfgAttr::register(&Arc::new(DisabledCfgAttr), RouterBuilder::new())
+            .registered()
+            .count(),
+        0
+    );
+}
+
+#[test]
+fn n_conditional_nested_cfg_attr_does_not_register_a_disabled_method() {
+    assert_eq!(
+        DisabledNestedCfgAttr::register(&Arc::new(DisabledNestedCfgAttr), RouterBuilder::new())
+            .registered()
+            .count(),
+        0,
+    );
+}
+
+#[test]
+fn n_conditional_mixed_cfg_attr_does_not_register_a_disabled_method() {
+    assert_eq!(
+        DisabledMixedCfgAttr::register(&Arc::new(DisabledMixedCfgAttr), RouterBuilder::new())
+            .registered()
+            .count(),
+        0,
+    );
+}
+
+struct EnabledConditional;
+
+#[handlers]
+impl EnabledConditional {
+    #[cfg(test)]
+    #[cfg_attr(false, cfg(false))]
+    #[inline]
+    async fn get_bucket_location(&self, _: Req<GetBucketLocation>) -> HandlerResult<GetBucketLocation> {
+        Ok(Resp::new(GetBucketLocationOutput {
+            location_constraint: Some(LocationConstraint::custom("conditional-region")),
+        }))
+    }
+
+    #[cfg_attr(any(), cfg(any()), inline)]
+    async fn put_object(&self, _: Req<PutObject>) -> HandlerResult<PutObject> {
+        Ok(Resp::new(PutObjectOutput::default()))
+    }
+
+    #[cfg_attr(all(), cfg_attr(all(), cfg(all()), inline), cold)]
+    async fn list_objects_v2(&self, _: Req<ListObjectsV2>) -> HandlerResult<ListObjectsV2> {
+        Ok(Resp::new(ListObjectsV2Output::default()))
+    }
+}
+
+#[test]
+fn conditional_enabled_and_inactive_gates_keep_the_original_handlers() {
+    let fs = Arc::new(EnabledConditional);
+    let names: Vec<_> = EnabledConditional::register(&fs, RouterBuilder::new()).registered().collect();
+    assert_eq!(names, vec!["GetBucketLocation", "ListObjectsV2", "PutObject"]);
+    let response = block_on(Handler::<GetBucketLocation>::call(
+        fs.as_ref(),
+        Req::new(GetBucketLocationInput::default(), sse_proof()),
+    ))
+    .expect("enabled handler answers");
+    assert_eq!(
+        response
+            .output()
+            .expect("settled")
+            .location_constraint
+            .as_ref()
+            .map(LocationConstraint::as_str),
+        Some("conditional-region"),
+    );
+}

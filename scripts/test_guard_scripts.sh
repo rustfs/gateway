@@ -2414,9 +2414,10 @@ if not path.exists():
     path = Path("xtask/src/verify.rs")
 text = path.read_text()
 old = '''    } else if package == "rustfs-gateway-conformance" {
-        test_step.push("--lib".to_owned());
+        test_step.extend(target_scope.iter().copied().map(str::to_owned));
 '''
 new = '''    } else if package == "rustfs-gateway-conformance" {
+        test_step.extend(["--test", "list_allocations"].map(str::to_owned));
 '''
 if text.count(old) != 1:
     raise SystemExit("conformance library fast-scope limit is missing")
@@ -2424,7 +2425,7 @@ path.write_text(text.replace(old, new, 1))
 PYEOF
 }
 expect_fail check_xtask_codegen_surface.sh \
-    'the conformance fast scope losing its library-only test limit' \
+    'the conformance fast scope losing its library test target' \
     mut_xtask_conformance_fast_scope_loses_library_limit
 
 mut_xtask_conformance_scope_restores_all_target_clippy() {
@@ -2435,16 +2436,39 @@ path = Path("xtask/src/verify/selection.rs")
 if not path.exists():
     path = Path("xtask/src/verify.rs")
 text = path.read_text()
-old = '            "rustfs-gateway-conformance" => "--lib",'
-new = '            "rustfs-gateway-conformance-disabled" => "--lib",'
+old = '''    let clippy_step = ["clippy", "-p", package]
+        .into_iter()
+        .chain(target_scope.iter().copied())
+'''
+new = '''    let clippy_step = ["clippy", "-p", package]
+        .into_iter()
+        .chain(["--all-targets"])
+'''
 if text.count(old) != 1:
-    raise SystemExit("conformance library-only clippy scope is missing")
+    raise SystemExit("conformance bounded clippy scope is missing")
 path.write_text(text.replace(old, new, 1))
 PYEOF
 }
 expect_fail check_xtask_codegen_surface.sh \
     'the conformance fast scope restoring all-target clippy' \
     mut_xtask_conformance_scope_restores_all_target_clippy
+
+mut_xtask_conformance_scope_loses_allocation_target() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("xtask/src/verify/selection.rs")
+text = path.read_text()
+old = '        "rustfs-gateway-conformance" => &["--lib", "--test", "list_allocations"],'
+new = '        "rustfs-gateway-conformance" => &["--lib"],'
+if text.count(old) != 1:
+    raise SystemExit("conformance allocation target selection is missing")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_xtask_codegen_surface.sh \
+    'the conformance fast scope omitting its allocation instrument' \
+    mut_xtask_conformance_scope_loses_allocation_target
 
 mut_xtask_workspace_target_reuse_removed() {
     python3 - <<'PYEOF'
@@ -4212,32 +4236,35 @@ probe_adr_origin_main_self_base_rejected() {
 probe_adr_origin_main_self_base_rejected
 
 probe_adr_pull_request_merge_uses_first_parent() {
-    local sandbox
+    local sandbox base tree mutation merge output rc=0
     cases=$((cases + 1))
     guard_case_owned "$cases" || return 0
     make_sandbox
     sandbox="$SANDBOX"
-    local rc=0
-    (
-        cd "$sandbox"
-        base="$(git rev-parse HEAD)"
+    if ! (
+        cd "$sandbox" || exit 1
+        base="$(git rev-parse HEAD)" || exit 1
         replace_adr_text docs/adr/0008-closed-error-resolution.md \
             'The `204` case is the proof that this cannot remain only an error-code mapping' \
-            'The `204` case merely suggests that this should not remain only an error-code mapping'
-        git add docs/adr/0008-closed-error-resolution.md
-        tree="$(git write-tree)"
-        mutation="$(printf 'mutate ADR body\n' | git commit-tree "$tree" -p "$base")"
-        merge="$(printf 'merge mutation\n' | git commit-tree "$tree" -p "$base" -p "$mutation")"
-        git reset -q --hard "$merge"
-    ) || rc=$?
-    if [[ "$rc" -eq 0 ]]; then
-        GATEWAY_CHECK_ROOT="$sandbox" GITHUB_ACTIONS=true GITHUB_EVENT_NAME=pull_request \
-            "${SCRIPT_DIR}/check_adr_contract.sh" >/dev/null 2>&1 || rc=$?
+            'The `204` case merely suggests that this should not remain only an error-code mapping' || exit 1
+        git add docs/adr/0008-closed-error-resolution.md || exit 1
+        tree="$(git write-tree)" || exit 1
+        mutation="$(printf 'mutate ADR body\n' | git -c user.name=t -c user.email=t@t commit-tree "$tree" -p "$base")" || exit 1
+        merge="$(printf 'merge mutation\n' | git -c user.name=t -c user.email=t@t commit-tree "$tree" -p "$base" -p "$mutation")" || exit 1
+        git reset -q --hard "$merge" || exit 1
+        # A fallback to origin/main must differ from the first parent, or either path catches drift.
+        git update-ref refs/remotes/origin/main "$mutation" || exit 1
+    ); then
+        fail_msg 'check_adr_contract.sh could not build its pull-request merge fixture'
+        return
     fi
-    if [[ "$rc" -ne 0 ]]; then
+    output="$(GATEWAY_CHECK_ROOT="$sandbox" GITHUB_ACTIONS=true GITHUB_EVENT_NAME=pull_request \
+        "${SCRIPT_DIR}/check_adr_contract.sh" 2>&1)" || rc=$?
+    if [[ "$rc" -ne 0 && "$output" == *'merged body changed outside lifecycle metadata'* ]]; then
         pass_msg 'check_adr_contract.sh compares a pull-request merge checkout with its first parent'
     else
-        fail_msg 'check_adr_contract.sh accepted pull-request ADR drift from a merge result'
+        fail_msg 'check_adr_contract.sh did not reject pull-request ADR drift against its first parent'
+        printf '%s\n' "$output" | sed 's/^/       /' >&2
     fi
 }
 probe_adr_pull_request_merge_uses_first_parent
@@ -11619,7 +11646,10 @@ run_signature_guard_suite() {
         fi
     done <<<"$census"
     if [[ -n "$selected" ]]; then
-        "$child" --select "$selected" "$results" || rc=$?
+        # Restore this worker's baseline before sharing its immutable Git objects. The child
+        # retains its own checkout and index; the parent stays alive until the child returns.
+        make_sandbox
+        GATEWAY_SIG_GUARD_BASELINE="$SANDBOX" "$child" --select "$selected" "$results" || rc=$?
         if [[ "$rc" -ne 0 || ! -f "$results" ]] || ! cmp -s "$expected" "$results"; then
             fail_msg 'the signature coverage mutation suite failed or omitted assigned cases'
         else
@@ -11629,6 +11659,15 @@ run_signature_guard_suite() {
     rm -f "$expected" "$results"
 }
 run_signature_guard_suite
+
+cases=$((cases + 1))
+if guard_case_owned "$cases"; then
+    if "${SCRIPT_DIR}/test_signature_guard_baseline.sh"; then
+        pass_msg 'the signature mutation baseline preserves isolation and reuses immutable objects'
+    else
+        fail_msg 'the signature mutation baseline failed its isolation or object-reuse controls'
+    fi
+fi
 
 # -----------------------------------------------------------------------------
 # ADR-0005. Each of the three mutations below is a way the generated dto silently
@@ -20569,18 +20608,36 @@ expect_fail check_config_load_once.sh \
     'one allowlist entry matching a second identical load in the same function' mut_config_load_entry_ambiguous \
     'is listed 1 time(s) but matches 2 site(s)'
 
-# Two genuinely identical loads in one item are listed twice; one entry must not cover both.
-mut_config_load_repeated_entry_collapsed() {
+# Create the repeated sites here rather than requiring duplicates in the current allowlist.
+mut_config_load_two_identical_sites_listed() {
+    mut_config_load_entry_ambiguous
     python3 - <<'PYEOF'
-from collections import Counter
 from pathlib import Path
 
 path = Path("scripts/config_load_allowlist.txt")
 lines = path.read_text().splitlines(keepends=True)
-repeated = [line for line, count in Counter(lines).items() if count == 2 and not line.startswith("#")]
-if not repeated:
-    raise SystemExit("missing mutation subject: an allowlist entry listed for two identical sites")
-lines.remove(repeated[0])
+entry = "crates/gateway/src/service.rs | impl S3Service / fn operations | let snapshot = self.inner.config.load();\n"
+if lines.count(entry) != 1:
+    raise SystemExit("missing mutation subject: the operations() allowlist entry")
+lines.append(entry)
+path.write_text("".join(lines))
+PYEOF
+}
+expect_guard_pass check_config_load_once.sh \
+    'two identical operations() loads each having a matching entry' mut_config_load_two_identical_sites_listed
+
+# Two genuinely identical loads in one item are listed twice; one entry must not cover both.
+mut_config_load_repeated_entry_collapsed() {
+    mut_config_load_two_identical_sites_listed
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("scripts/config_load_allowlist.txt")
+lines = path.read_text().splitlines(keepends=True)
+entry = "crates/gateway/src/service.rs | impl S3Service / fn operations | let snapshot = self.inner.config.load();\n"
+if lines.count(entry) != 2:
+    raise SystemExit("missing mutation subject: two operations() allowlist entries")
+lines.remove(entry)
 path.write_text("".join(lines))
 PYEOF
 }
@@ -22962,6 +23019,50 @@ expect_fail_with_diagnostic check_handler_context_migration.sh \
     'a hand-written macro-equivalence Handler losing its context-aware entry' \
     'crates/macros/tests/equivalence.rs Handler impl 1 is not on the reviewed facade migration bridge' \
     mut_manual_equivalence_handler_context_entry_removed
+
+mut_conditional_equivalence_handler_context_entry_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/macros/tests/equivalence.rs")
+text = path.read_text()
+subject = "            fn call_with_context(\n"
+if text.count(subject) != 1:
+    raise SystemExit("missing unique conditional equivalence context-entry mutation subject")
+path.write_text(text.replace(subject, "            fn call_without_context(\n", 1))
+PYEOF
+}
+expect_fail_with_diagnostic check_handler_context_migration.sh \
+    'the conditional macro-equivalence Handler losing its context-aware entry' \
+    'crates/macros/tests/equivalence.rs Handler impl 4 is not on the reviewed facade migration bridge' \
+    mut_conditional_equivalence_handler_context_entry_removed
+
+mut_conditional_equivalence_handler_context_body_diverges() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/macros/tests/equivalence.rs")
+text = path.read_text()
+subject = '''            fn call_with_context(
+                &self,
+                _: Req<GetBucketLocation>,
+                _: HandlerContext,
+            ) -> impl Future<Output = HandlerResult<GetBucketLocation>> + Send {
+                async { Ok(Resp::new(GetBucketLocationOutput::default())) }
+'''
+replacement = subject.replace(
+    "async { Ok(Resp::new(GetBucketLocationOutput::default())) }",
+    'async { panic!("conditional bridge mutation") }',
+)
+if text.count(subject) != 1:
+    raise SystemExit("missing unique conditional equivalence context-body mutation subject")
+path.write_text(text.replace(subject, replacement, 1))
+PYEOF
+}
+expect_fail_with_diagnostic check_handler_context_migration.sh \
+    'the conditional macro-equivalence Handler diverging between its two entries' \
+    'crates/macros/tests/equivalence.rs Handler impl 4 has diverged legacy and context bodies' \
+    mut_conditional_equivalence_handler_context_body_diverges
 
 mut_handler_deadline_class_mapping_removed() {
     python3 - <<'PYEOF'

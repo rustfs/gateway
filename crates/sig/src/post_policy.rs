@@ -447,7 +447,13 @@ fn enforce_policy_fields(
             }
             Condition::StartsWith(name, prefix) => {
                 mentioned.insert(name.clone());
-                if !condition_value(fields, name, &final_key)?.starts_with(prefix) {
+                let value = condition_value(fields, name, &final_key)?;
+                let matches = if name == "content-type" {
+                    value.split(',').all(|item| item.starts_with(prefix))
+                } else {
+                    value.starts_with(prefix)
+                };
+                if !matches {
                     return Err(PostPolicyError::ConditionFailed);
                 }
             }

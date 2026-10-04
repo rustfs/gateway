@@ -36,6 +36,8 @@
 //! `response-content-disposition`, or a `versionId` — is the most common real signature bypass,
 //! because it lets an attacker append meaning to a request somebody else signed.
 
+use core::fmt;
+
 use zeroize::Zeroizing;
 
 use crate::secret::SessionToken;
@@ -148,9 +150,16 @@ impl QueryExclusion {
 ///
 /// Borrowed rather than owned: the wire layer already holds the request, and copying the query
 /// into the signature path is one more buffer that can drift from the one the router reads.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+/// `Debug` reports the byte count without formatting parameter names or values.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct RawQuery<'q> {
     raw: &'q str,
+}
+
+impl fmt::Debug for RawQuery<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RawQuery").field("query_bytes", &self.raw.len()).finish()
+    }
 }
 
 impl<'q> RawQuery<'q> {
@@ -357,6 +366,39 @@ fn percent_decode_secret(input: &str) -> Result<Zeroizing<Box<[u8]>>, AuthError>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn raw_query_debug_omits_every_parameter_name_and_value() {
+        let raw = concat!(
+            "X-Amz-Credential=QUERY_CREDENTIAL_SENTINEL&",
+            "X-Amz-Signature=QUERY_SIGNATURE_SENTINEL&",
+            "X-Amz-Security-Token=QUERY_TOKEN_SENTINEL&",
+            "CUSTOM_QUERY_NAME_SENTINEL=CUSTOM_QUERY_VALUE_SENTINEL"
+        );
+        let query = RawQuery::new(raw);
+        for rendered in [format!("{query:?}"), format!("{query:#?}")] {
+            let compact: String = rendered.chars().filter(|character| !character.is_whitespace()).collect();
+            for marker in [
+                "QUERY_CREDENTIAL_SENTINEL",
+                "QUERY_SIGNATURE_SENTINEL",
+                "QUERY_TOKEN_SENTINEL",
+                "CUSTOM_QUERY_NAME_SENTINEL",
+                "CUSTOM_QUERY_VALUE_SENTINEL",
+            ] {
+                assert!(!rendered.contains(marker), "Debug must omit every raw query name and value");
+                let numeric = format!("{:?}", marker.as_bytes()).replace(' ', "");
+                let numeric = numeric.trim_start_matches('[').trim_end_matches(']');
+                assert!(!compact.contains(numeric), "Debug must omit byte representations of query values");
+            }
+            assert!(rendered.contains("RawQuery"));
+            assert!(rendered.contains(&format!("query_bytes: {}", raw.len())));
+        }
+    }
+
+    #[test]
+    fn raw_query_debug_preserves_the_empty_query_shape() {
+        assert!(format!("{:?}", RawQuery::new("")).contains("query_bytes: 0"));
+    }
 
     #[test]
     fn a_plus_is_a_literal_plus_and_never_a_space() {

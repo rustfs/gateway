@@ -259,6 +259,72 @@ PYEOF
 expect_fail 'a covered row whose guard no longer names the crate is rejected' \
     mut_covered_guard_stops_naming_its_crate
 
+# The listing profiler is the only covered two-target layout (#1257).
+mut_conformance_coverage_target_field() {
+    "$PYTHON" - "$1" <<'PYEOF'
+from pathlib import Path
+import sys
+path = Path("crates/conformance/Cargo.toml")
+entry = 'name = "list_allocations"\npath = "tests/list_allocations.rs"\n'
+text = path.read_text()
+assert entry in text
+path.write_text(text.replace(entry, entry + sys.argv[1] + '\n', 1))
+PYEOF
+}
+mut_conformance_coverage_active() {
+    mut_conformance_coverage_target_field 'test = true'
+    mut_conformance_coverage_target_field 'harness = true'
+}
+expect_pass 'the exact isolated profiler layout admits explicit active harness flags' mut_conformance_coverage_active
+
+mut_conformance_coverage_disabled() { mut_conformance_coverage_target_field 'test = false'; }
+mut_conformance_coverage_no_harness() { mut_conformance_coverage_target_field 'harness = false'; }
+mut_conformance_coverage_feature_gated() { mut_conformance_coverage_target_field 'required-features = ["production-transports"]'; }
+expect_fail 'the covered allocation target cannot disable its tests' mut_conformance_coverage_disabled
+expect_fail 'the covered allocation target cannot disable its harness' mut_conformance_coverage_no_harness
+expect_fail 'the covered allocation target cannot require a feature' mut_conformance_coverage_feature_gated
+
+mut_conformance_coverage_missing_target() {
+    "$PYTHON" - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/conformance/Cargo.toml")
+entry = '[[test]]\nname = "list_allocations"\npath = "tests/list_allocations.rs"\n'
+text = path.read_text()
+assert entry in text
+path.write_text(text.replace(entry, '', 1))
+PYEOF
+}
+expect_fail 'conformance coverage requires the allocation target' mut_conformance_coverage_missing_target
+
+mut_conformance_coverage_extra_target() {
+    cat >>crates/conformance/Cargo.toml <<'TOMLEOF'
+
+[[test]]
+name = "extra"
+path = "tests/list_allocations.rs"
+TOMLEOF
+}
+expect_fail 'conformance coverage rejects a third target' mut_conformance_coverage_extra_target
+
+mut_conformance_coverage_alias() {
+    "$PYTHON" - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/conformance/Cargo.toml")
+path.write_text(path.read_text().replace('path = "tests/list_allocations.rs"', 'path = "tests/integration.rs"', 1))
+PYEOF
+}
+expect_fail 'conformance coverage rejects an allocation target alias' mut_conformance_coverage_alias
+
+mut_other_covered_member_extra_target() {
+    cat >>crates/sig/Cargo.toml <<'TOMLEOF'
+
+[[test]]
+name = "extra"
+path = "tests/timing.rs"
+TOMLEOF
+}
+expect_fail 'another covered member still cannot add a second target' mut_other_covered_member_extra_target
+
 # --------------------------------------------------------------------------------------------
 # Table rows that describe nothing, and inputs that are missing rather than clean.
 # --------------------------------------------------------------------------------------------

@@ -19,7 +19,7 @@
 //! ties them together: *the answer does not depend on how it was cut into pages*.
 //! NOT responsible for: what a continuation token is made of, which is [`crate::token`] and
 //! `fuzz/fuzz_targets/opaque_token.rs`; or what one page costs, which is
-//! [`super::list_allocations`].
+//! the isolated `tests/list_allocations.rs` harness.
 //! Upstream: `proptest` and the parent module's private paging. Downstream: nothing — it asserts.
 //!
 //! # Why the page-size invariance is the property worth generating

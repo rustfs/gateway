@@ -326,6 +326,31 @@ fn n_fails_when_element_order_does_not_cover_the_body() {
 }
 
 #[test]
+fn n_rejects_repeated_operation_xml_order_members() {
+    let text = format!("{MINI_OVERLAY}\nelement_order = [\"Name\", \"Items\", \"Name\"]\n");
+    let err = load(&text).expect_err("a repeated output member would be encoded twice");
+    let message = err.to_string();
+    assert!(
+        message.contains("element_order") && message.contains("Name") && message.contains("duplicate"),
+        "{message}"
+    );
+}
+
+#[test]
+fn n_rejects_repeated_nested_xml_order_members() {
+    let text = format!("{MINI_OVERLAY}\n[shape.Item]\nelement_order = [\"Key\", \"Key\"]\n");
+    let err = load(&text).expect_err("a repeated nested member would be encoded twice");
+    let message = err.to_string();
+    assert!(
+        message.contains("shape `Item`")
+            && message.contains("element_order")
+            && message.contains("Key")
+            && message.contains("duplicate"),
+        "{message}"
+    );
+}
+
+#[test]
 fn n_fails_when_an_included_operation_is_not_in_the_model() {
     let err = load("include = [\"GetThing\", \"Nope\"]\n").expect_err("unknown operation");
     assert!(format!("{err}").contains("not in the model"), "{err}");

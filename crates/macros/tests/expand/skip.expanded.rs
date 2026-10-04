@@ -34,7 +34,9 @@ impl Fs {
         this: &::std::sync::Arc<Self>,
         builder: ::rustfs_gateway::RouterBuilder,
     ) -> ::rustfs_gateway::RouterBuilder {
-        builder.handle::<PutObject, Self>(::std::sync::Arc::clone(this))
+        let _ = this;
+        let builder = builder.handle::<PutObject, Self>(::std::sync::Arc::clone(this));
+        builder
     }
 }
 impl ::rustfs_gateway::Handler<PutObject> for Fs {

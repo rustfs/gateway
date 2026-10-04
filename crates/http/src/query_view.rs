@@ -32,6 +32,8 @@
 //! nothing but offsets into the string the request already owns, inline for the parameter counts
 //! that actually occur.
 
+use core::fmt;
+
 use smallvec::SmallVec;
 
 use crate::limits::{LimitKind, Limits};
@@ -228,10 +230,21 @@ fn slice(raw: &str, start: u16, end: u16) -> &str {
 /// Values are returned exactly as they appeared, still percent-encoded. Decoding is a separate,
 /// once-only step performed by whoever needs the decoded value; decoding here would mean every
 /// consumer either decodes again or works from a value that no longer matches what was signed.
-#[derive(Clone, Copy, Debug)]
+/// `Debug` reports query shape without formatting parameter names or values.
+#[derive(Clone, Copy)]
 pub struct QueryView<'a> {
     raw: &'a str,
     index: &'a QueryIndex,
+}
+
+impl fmt::Debug for QueryView<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("QueryView")
+            .field("query_bytes", &self.raw.len())
+            .field("params", &self.index.len())
+            .field("inline", &self.index.is_inline())
+            .finish()
+    }
 }
 
 impl<'a> QueryView<'a> {

@@ -366,6 +366,7 @@ pub(super) fn validate(ir: &OperationIr) -> Result<()> {
         return Err(Error::ir(op, "the resolved quirk set does not equal the referenced quirk ids"));
     }
     if !ir.xml.unwrapped_output {
+        validate_element_order(op, "output", &ir.xml.element_order)?;
         let body: BTreeSet<String> = body_members(&ir.output).into_iter().collect();
         let ordered: BTreeSet<String> = ir.xml.element_order.iter().cloned().collect();
         if body != ordered {
@@ -379,6 +380,7 @@ pub(super) fn validate(ir: &OperationIr) -> Result<()> {
     }
     for shape_name in ir.shapes.keys() {
         let shape = &ir.shapes[shape_name];
+        validate_element_order(op, &format!("shape `{shape_name}`"), &shape.xml.element_order)?;
         // A member the shape carries as an XML attribute is not one of its child elements, so it
         // is not in the element order and must not be demanded of it.
         let carried: BTreeSet<&str> = shape
@@ -399,6 +401,19 @@ pub(super) fn validate(ir: &OperationIr) -> Result<()> {
             return Err(Error::ir(
                 op,
                 format!("shape `{shape_name}`: element_order must cover exactly its body members"),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_element_order(operation: &str, owner: &str, order: &[String]) -> Result<()> {
+    let mut seen = BTreeSet::new();
+    for member in order {
+        if !seen.insert(member) {
+            return Err(Error::ir(
+                operation,
+                format!("{owner}: element_order contains duplicate member `{member}`"),
             ));
         }
     }
