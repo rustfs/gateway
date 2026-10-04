@@ -59,7 +59,7 @@ impl SigV4Authenticator {
     pub(super) async fn sts_payload(
         &self,
         request: &Authentication<'_>,
-        presented: &Presented,
+        presented: &Presented<'_>,
         resolved: &Result<CredentialLookup, super::super::credentials::ProviderError>,
     ) -> Result<Option<PayloadMode>, VerificationFailure> {
         if !self.scope_policy.legacy_services

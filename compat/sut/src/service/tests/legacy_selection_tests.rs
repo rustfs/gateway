@@ -121,3 +121,31 @@ async fn n_an_undeclared_x_id_writes_nothing() {
     assert_eq!(object_bytes(&service).await, ORIGINAL);
     assert!(!tags(&service).await.contains("<Key>k</Key>"));
 }
+
+/// An object-path form is a method refusal and neither replaces nor creates an object (#1184).
+#[tokio::test]
+async fn n_an_object_form_writes_nothing() {
+    let root = TestRoot::new();
+    let service = selecting(&root).await;
+    for (path, key) in [("/sel/obj", "obj"), ("/sel/missing?unknown=1", "missing")] {
+        let form = format!(
+            "--form\r\nContent-Disposition: form-data; name=\"key\"\r\n\r\n{key}\r\n\
+             --form\r\nContent-Disposition: form-data; name=\"file\"; filename=\"file\"\r\n\r\n\
+             form-object-bytes\r\n--form--\r\n"
+        );
+        let request = signed(
+            MAIN_KEY,
+            MAIN_SECRET,
+            http::Method::POST,
+            path,
+            Bytes::from(form),
+            &[("content-type", "multipart/form-data; boundary=form")],
+        );
+        let answer = exchange(&service, request).await;
+        assert_eq!(object_bytes(&service).await, ORIGINAL, "{path}: the original object was replaced");
+        let missing = exchange(&service, as_main(http::Method::GET, "/sel/missing", Bytes::new())).await;
+        assert_eq!(missing.status(), 404, "{path}: the form stored an object");
+        assert_eq!(answer.status(), 405, "{path}: {}", body_of(&answer));
+        assert!(body_of(&answer).contains("<Code>MethodNotAllowed</Code>"));
+    }
+}

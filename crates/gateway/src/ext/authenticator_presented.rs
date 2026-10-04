@@ -15,9 +15,9 @@
 //! The signature material a SigV4 request presented, read off whichever surface carried it.
 //!
 //! Responsible for: [`Presented`], one type for the header, presigned and POST-form surfaces, and
-//! the reading each surface gets under the authenticator's credential rule.
-//! NOT responsible for: checking anything it reads — the scope cross-check, the lookup and the
-//! comparison are the parent's `SigV4Authenticator`, split out here at the 800-line limit.
+//! the reading and session admission each surface gets under the authenticator's credential rule.
+//! NOT responsible for: scope cross-checks, credential lookup or signature comparison — those
+//! remain the parent's `SigV4Authenticator`, split out here at the 800-line limit.
 //! Upstream: `rustfs-gateway-sig`'s parsers. Downstream: `super::SigV4Authenticator`.
 
 use rustfs_gateway_sig::{
@@ -27,19 +27,29 @@ use rustfs_gateway_sig::{
 
 /// The signature material the client presented, from whichever surface carried it.
 ///
-/// One type for both surfaces so that the verification body has no `match` on the location running
-/// through the middle of it — the two differ in where the values are read and in nothing else.
-pub(super) enum Presented {
+/// One carrier for the signature surfaces keeps their reading and session checks outside the
+/// shared verification body.
+pub(super) enum Presented<'a> {
     Header(Box<SigV4Authorization>),
     Query(Box<PresignedParams>),
     Form(Box<PostPolicy>),
+    UnroutedForm(&'a rustfs_gateway_sig::UnroutedPostPolicy),
 }
 
-impl Presented {
-    pub(super) fn read(sealed: &SealedAws<'_>, location: SigLocation, rule: RegionRule) -> Result<Self, AuthError> {
+impl<'a> Presented<'a> {
+    pub(super) fn read(
+        sealed: &SealedAws<'_>,
+        location: SigLocation,
+        rule: RegionRule,
+        unrouted: Option<&'a rustfs_gateway_sig::UnroutedPostPolicy>,
+    ) -> Result<Self, AuthError> {
         match location {
             SigLocation::Query => Ok(Self::Query(Box::new(PresignedParams::parse_with(&sealed.view().query(), rule)?))),
             SigLocation::FormField => {
+                if let Some(policy) = unrouted {
+                    return Ok(Self::UnroutedForm(policy));
+                }
+
                 let fields = sealed.view().form_fields().ok_or(AuthError::AuthorizationHeaderMalformed)?;
                 let policy = PostPolicy::parse_with(fields, "", PostPolicyLimits::default(), sealed.clock().now(), rule)
                     .map_err(PostPolicyError::auth_error)?;
@@ -64,6 +74,7 @@ impl Presented {
             Self::Header(parsed) => parsed.scope(),
             Self::Query(parsed) => parsed.scope(),
             Self::Form(policy) => policy.scope(),
+            Self::UnroutedForm(policy) => policy.scope(),
         }
     }
 
@@ -71,13 +82,45 @@ impl Presented {
         match self {
             Self::Header(parsed) => Some((parsed.signed_headers(), parsed.signature())),
             Self::Query(parsed) => Some((parsed.signed_headers(), parsed.signature())),
-            Self::Form(_) => None,
+            Self::Form(_) | Self::UnroutedForm(_) => None,
         }
     }
 
     pub(super) fn session_token(&self) -> Option<&SessionToken> {
         let Self::Form(policy) = self else { return None };
         policy.session_token()
+    }
+
+    /// Records session admission before comparison; the caller answers only after HMAC.
+    pub(super) fn session_refused(
+        &self,
+        credentials: &crate::ext::credentials::Credentials,
+        sealed: &SealedAws<'_>,
+        location: SigLocation,
+    ) -> bool {
+        // Legacy-compat (rustfs/backlog#2684): an unrouted form uses only the key and HMAC
+        // before its method refusal. Session admission belongs to the upload path.
+        if matches!(self, Self::UnroutedForm(_)) {
+            return false;
+        }
+        let view = sealed.view();
+        let now = sealed.clock().now();
+        match location {
+            SigLocation::FormField => credentials
+                .admit(self.session_token().map(SessionToken::expose), now)
+                .is_err(),
+            SigLocation::Query if view.query_contains(rustfs_gateway_sig::X_AMZ_SECURITY_TOKEN) => {
+                credentials.admit_query(view.query(), now).is_err()
+            }
+            _ => credentials
+                .admit(
+                    view.headers()
+                        .get(rustfs_gateway_sig::X_AMZ_SECURITY_TOKEN_HEADER)
+                        .map(http::HeaderValue::as_bytes),
+                    now,
+                )
+                .is_err(),
+        }
     }
 
     /// The timestamp the string-to-sign is dated with.
@@ -89,6 +132,7 @@ impl Presented {
             Self::Header(_) => sealed.clock().signed_at(),
             Self::Query(parsed) => parsed.date(),
             Self::Form(policy) => policy.signed_at(),
+            Self::UnroutedForm(policy) => policy.signed_at(),
         }
     }
 }

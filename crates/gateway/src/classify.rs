@@ -56,6 +56,10 @@ pub enum Classification {
     Operation(&'static str),
     /// A CORS preflight, which the service answers itself before routing.
     Preflight,
+    /// An object-path form without an operation under the RustFS selector. Its bounded
+    /// multipart metadata and signature must be read before the service can choose its refusal.
+    /// No handler is dispatched, whatever that refusal is.
+    UnroutedPostForm,
     /// Refused before any operation is chosen, with the status and code the service answers.
     Refused {
         /// The status.
@@ -141,6 +145,9 @@ impl S3Service {
             host_named_bucket: resolved.bucket().is_some(),
         }) {
             Ok(dispatched) => dispatched,
+            Err(error) if crate::service::refused_post::applies_to(router, &wire, resolved.target, &error) => {
+                return Classification::UnroutedPostForm;
+            }
             Err(error) => return Classification::refused(&from_pre_auth(error, kind)),
         };
         match RoutedFacts::of(&dispatched, wire.raw_path().as_str(), wire.query().as_str(), &self.inner.names) {

@@ -260,17 +260,28 @@ where
         grammar: FormGrammar,
         timeouts: BodyTimeouts,
     ) -> Result<Self, S3Error> {
+        Self::read_form(body, content_type, limits, grammar, timeouts, form_refusal).await
+    }
+
+    pub(crate) async fn read_form(
+        body: Option<B>,
+        content_type: &str,
+        limits: FormLimits,
+        grammar: FormGrammar,
+        timeouts: BodyTimeouts,
+        refusal: fn(FormReject) -> S3Error,
+    ) -> Result<Self, S3Error> {
         let Some(body) = body else {
-            return Err(form_refusal(FormReject::MissingFile));
+            return Err(refusal(FormReject::MissingFile));
         };
         let progress = WireProgress::for_body(BodyDigestObligation::None, Some(&body));
         let mut frames = WireFrames::new(body, progress, BodyCeilings::streaming(None), timeouts);
-        let mut reader = FormReader::with_grammar(content_type, limits, grammar).map_err(form_refusal)?;
+        let mut reader = FormReader::with_grammar(content_type, limits, grammar).map_err(refusal)?;
         loop {
             let Some(frame) = core::future::poll_fn(|context| frames.poll_next(context)).await? else {
-                return Err(form_refusal(reader.finish()));
+                return Err(refusal(reader.finish()));
             };
-            match reader.push(&frame).map_err(form_refusal)? {
+            match reader.push(&frame).map_err(refusal)? {
                 FormStep::NeedMore => {}
                 FormStep::FileReached { consumed } => {
                     let first_file_bytes = (consumed < frame.len()).then(|| frame.slice(consumed..));

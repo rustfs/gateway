@@ -65,8 +65,8 @@ use http::Method;
 use rustfs_gateway_core::BoxFuture;
 use rustfs_gateway_sig::{
     AuthError, AuthScheme, CanonicalRequestSpec, ExpectedScope, PayloadMode, RawHost, RawPathFallback, RegionSet, ScopeRejection,
-    SealedAws, SessionToken, SigFamily, SigIdentity, SigLocation, SignatureMatch, Unimplemented, UriPathCandidates, Verdict,
-    X_AMZ_SECURITY_TOKEN, X_AMZ_SECURITY_TOKEN_HEADER, calculate_signature, enforce_scope, signing_key, timing,
+    SealedAws, SigFamily, SigIdentity, SigLocation, SignatureMatch, Unimplemented, UriPathCandidates, Verdict,
+    calculate_signature, enforce_scope, signing_key, timing,
 };
 
 use super::credential_guard::{CredentialGuardConfig, GuardedCredentialProvider};
@@ -294,6 +294,7 @@ pub struct Authentication<'a> {
     payload: &'a PayloadMode,
     declared_content_length: Option<u64>,
     chunks: Option<&'a ChunkSink>,
+    unrouted_post_policy: Option<&'a rustfs_gateway_sig::UnroutedPostPolicy>,
     signature_mismatch: std::sync::OnceLock<rustfs_gateway_sig::SignatureMismatchDetail>,
     /// Legacy RustFS's words for a refusal under a RustFS-profile reading; only the built-in
     /// authenticator publishes one, and only on a refusal.
@@ -337,6 +338,7 @@ impl<'a> Authentication<'a> {
             payload,
             declared_content_length,
             chunks: None,
+            unrouted_post_policy: None,
             signature_mismatch: std::sync::OnceLock::new(),
             legacy_refusal: std::sync::OnceLock::new(),
             sts_body: None,
@@ -351,6 +353,11 @@ impl<'a> Authentication<'a> {
     #[must_use]
     pub const fn with_chunk_sink(mut self, chunks: &'a ChunkSink) -> Self {
         self.chunks = Some(chunks);
+        self
+    }
+
+    pub(crate) const fn with_unrouted_post_policy(mut self, policy: &'a rustfs_gateway_sig::UnroutedPostPolicy) -> Self {
+        self.unrouted_post_policy = Some(policy);
         self
     }
 
@@ -562,7 +569,8 @@ impl SigV4Authenticator {
         // Once a credential surface is present, parsing failure is still a credential failure.
         // Normalising it here keeps malformed material on the same 403 path and prevents a caller
         // from learning how far parsing got before an access key could be recovered.
-        let Ok(presented) = Presented::read(sealed, location, self.scope_policy.region_rule()) else {
+        let Ok(presented) = Presented::read(sealed, location, self.scope_policy.region_rule(), request.unrouted_post_policy)
+        else {
             if let Some((error, refusal)) = self.scope_policy.unreadable_scope_refusal(sealed, location) {
                 let _ = request.legacy_refusal.set(refusal);
                 return Err(error.into());
@@ -610,24 +618,9 @@ impl SigV4Authenticator {
         // return, and an early return is exactly what makes an expired token distinguishable from
         // a wrong secret by the clock. Holding the verdict until after the derivation is also what
         // keeps cheap session checks from introducing a shorter rejection path.
-        let refusal = match &resolved {
-            Ok(CredentialLookup::Found(credentials)) => match location {
-                SigLocation::FormField => credentials
-                    .admit(presented.session_token().map(SessionToken::expose), sealed.clock().now())
-                    .err(),
-                SigLocation::Query if view.query_contains(X_AMZ_SECURITY_TOKEN) => {
-                    credentials.admit_query(view.query(), sealed.clock().now()).err()
-                }
-                _ => credentials
-                    .admit(
-                        view.headers()
-                            .get(X_AMZ_SECURITY_TOKEN_HEADER)
-                            .map(http::HeaderValue::as_bytes),
-                        sealed.clock().now(),
-                    )
-                    .err(),
-            },
-            Ok(CredentialLookup::NotFound) | Err(_) => None,
+        let session_refused = match &resolved {
+            Ok(CredentialLookup::Found(credentials)) => presented.session_refused(credentials, sealed, location),
+            Ok(CredentialLookup::NotFound) | Err(_) => false,
         };
 
         let sts_payload = self.sts_payload(request, &presented, &resolved).await?;
@@ -637,6 +630,7 @@ impl SigV4Authenticator {
         let (mut proof, mismatch_detail): (Option<SignatureMatch>, Option<rustfs_gateway_sig::SignatureMismatchDetail>) =
             match &presented {
                 Presented::Form(policy) => (policy.verify(&key).ok(), None),
+                Presented::UnroutedForm(policy) => (policy.verify(&key).ok(), None),
                 Presented::Header(_) | Presented::Query(_) => {
                     let (signed_headers, signature) =
                         presented.canonical_parts().ok_or(AuthError::AuthorizationHeaderMalformed)?;
@@ -685,7 +679,7 @@ impl SigV4Authenticator {
             return Err(AuthError::InvalidAccessKeyId.into());
         };
         let Some(proof) = proof.take() else {
-            if refusal.is_some() {
+            if session_refused {
                 return Err(AuthError::InvalidAccessKeyId.into());
             }
             let Some(detail) = mismatch_detail else {
@@ -699,7 +693,7 @@ impl SigV4Authenticator {
         // `InvalidAccessKeyId` — the same code, the same message and the same bytes an unknown key
         // gets — because "this key exists but you may not use it this way" confirms the key exists
         // to whoever is guessing. GHSA-3p3x-734c-h5vx is the FTPS version of that confirmation.
-        if refusal.is_some() {
+        if session_refused {
             return Err(AuthError::InvalidAccessKeyId.into());
         }
         if self.scope_policy.refuses_after_verification(presented.scope().region()) {

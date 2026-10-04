@@ -144,7 +144,8 @@ pub use parse::{
     ServiceReading, SigV4Authorization, X_AMZ_ALGORITHM, X_AMZ_CREDENTIAL, X_AMZ_DATE, X_AMZ_SIGNED_HEADERS,
 };
 pub use post_policy::{
-    PostPolicy, PostPolicyEnforcement, PostPolicyError, PostPolicyLimits, SigV2PostPolicy, build_success_action_redirect,
+    PostPolicy, PostPolicyEnforcement, PostPolicyError, PostPolicyLimits, SigV2PostPolicy, UnroutedPostPolicy,
+    UnroutedPostPolicyError, build_success_action_redirect,
 };
 pub use presigned::{PayloadObligation, PresignedRequest};
 pub use presigned_expiry::{PresignedExpiryRule, enforce_presign_expiry};
