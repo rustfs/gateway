@@ -291,7 +291,7 @@ where
     pub(crate) fn handoff(self, _proof: &MetadataAdmission<'_>) -> Result<(RequestBody, Option<BodyMonitor>), S3Error> {
         // After authorization and before a file byte is read or the handler runs: the last point
         // at which legacy RustFS would have refused nothing and gone on to store.
-        self.response.before_storage()?;
+        self.response.before_storage().map_err(policy_refusal)?;
         if let Some(refusal) = self.not_carried {
             return Err(refusal.into_error());
         }

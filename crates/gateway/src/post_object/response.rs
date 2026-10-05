@@ -84,9 +84,9 @@ impl PostObjectResponsePlan {
         })
     }
 
-    pub(super) fn before_storage(&self) -> Result<(), S3Error> {
+    pub(super) fn before_storage(&self) -> Result<(), PostPolicyError> {
         if matches!(self.action, SuccessAction::Malformed) {
-            return Err(policy_refusal(PostPolicyError::Malformed));
+            return Err(PostPolicyError::Malformed);
         }
         Ok(())
     }
