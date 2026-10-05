@@ -501,3 +501,29 @@ fn sigv2_encoded_proof_checks_both_resource_boundaries() {
         );
     }
 }
+
+#[test]
+fn sigv4_default_parser_still_refuses_mixed_case_operators() {
+    let decoded = String::from_utf8(decode_base64(POLICY, 4096).expect("fixture base64")).expect("fixture UTF-8");
+    for operator in ["Starts-With", "STARTS-WITH", "StArTs-WiTh"] {
+        let encoded: String = decoded
+            .replace("starts-with", operator)
+            .as_bytes()
+            .chunks(3)
+            .map(|chunk| match chunk {
+                [a, b, c] => crate::codec::encode_base64_exact(&[*a, *b, *c]),
+                [a, b] => crate::codec::encode_base64_exact(&[*a, *b]),
+                [a] => crate::codec::encode_base64_exact(&[*a]),
+                _ => unreachable!("chunks of three bytes are nonempty"),
+            })
+            .collect();
+        let signature = "0".repeat(64);
+        let mut fields = valid_fields(&signature);
+        for (name, value) in &mut fields {
+            if *name == "policy" {
+                *value = &encoded;
+            }
+        }
+        assert_eq!(parse(&fields, "report.txt").err(), Some(PostPolicyError::Malformed));
+    }
+}
