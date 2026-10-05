@@ -160,6 +160,7 @@ use crate::{response::into_response, routing::RuntimeAssembly};
 mod body_preparation;
 mod cors;
 mod outcome;
+pub(crate) mod refused_post;
 mod update;
 
 use self::cors::CorsDecoration;
@@ -636,6 +637,9 @@ impl S3Service {
             // never told the domain. The sentence is `VhostHint::message()`, a constant: this runs
             // before authentication, so nothing derived from the request may appear in it.
             Err(error) => {
+                if refused_post::applies_to(router, &wire, resolved.target, &error) {
+                    return refused_post::refuse(self, wire, &resolved, config.config(), outcome, now, client_addr).await;
+                }
                 let refusal = match resolved.diagnostic {
                     Some(hint) if error.message() == NO_ROUTE_MESSAGE => from_handler(
                         HandlerError::new(error.code().clone(), hint.message()),

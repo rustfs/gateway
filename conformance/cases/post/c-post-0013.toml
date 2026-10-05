@@ -1,0 +1,49 @@
+# c-post-0013 — The default profile keeps an object-path form outside its operation table.
+
+[case]
+id = "c-post-0013"
+schema_version = 1
+title = "The default profile refuses an object-path form without dispatching an upload"
+rationale = """
+A form upload addresses a bucket and carries its object key in the form. An object-path form \
+without an operation query names no route in the default profile, which answers 501. The RustFS \
+profile has an explicit legacy method-refusal exception; enabling that exception globally would \
+change this answer. The facade and launcher tests hold the RustFS exception separately."""
+polarity = "negative"
+operation = "PostObject"
+tags = ["routing", "error-shape"]
+timeout_ms = 10000
+quirks = []
+applies_to = { profiles = ["aws", "strict"] }
+
+[[case.evidence]]
+url = "https://github.com/rustfs/gateway/issues/1184"
+summary = "The RustFS object-path form refusal is profile-specific; the generic profile retains its operation-table answer."
+kind = "other"
+
+[[setup.buckets]]
+name = "conf-post"
+
+[request]
+method = "POST"
+target = "/conf-post/object.txt"
+sign = { mode = "anonymous" }
+body = { utf8 = "--form\r\nContent-Disposition: form-data; name=\"key\"\r\n\r\nobject.txt\r\n--form\r\nContent-Disposition: form-data; name=\"file\"; filename=\"object.txt\"\r\n\r\nform-object-bytes\r\n--form--\r\n" }
+
+[request.headers]
+"content-type" = "multipart/form-data; boundary=form"
+
+[expect]
+kind = "response"
+status = 501
+headers_absent = ["allow", "etag", "x-amz-version-id"]
+
+[expect.error]
+code = "NotImplemented"
+request_id_present = true
+
+[expect.headers_present]
+"content-type" = "application/xml"
+
+[expect.body]
+contains_utf8 = ["<Code>NotImplemented</Code>"]

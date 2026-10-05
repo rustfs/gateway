@@ -118,7 +118,7 @@ impl ClientAddr {
 /// and the `Authenticated` class the framework never produced).
 #[derive(Debug)]
 pub struct GovernorRequest<'a> {
-    /// The operation routing chose, by its `Operation::NAME`.
+    /// The routed operation or framework-owned classification, such as `UnroutedPostForm`.
     operation: &'a str,
     /// The bucket the path addressed, when it addressed one.
     bucket: Option<&'a BucketName>,
@@ -151,7 +151,7 @@ impl<'a> GovernorRequest<'a> {
         }
     }
 
-    /// The routed operation name.
+    /// The routed operation name, or classification when no operation is dispatched.
     #[must_use]
     pub const fn operation(&self) -> &'a str {
         self.operation
@@ -283,7 +283,7 @@ impl Lease {
 /// remote store on this path is buying an availability risk on every request and should say so in
 /// its own documentation.
 pub trait Governor: Send + Sync + 'static {
-    /// Decides one routed request.
+    /// Decides one routed request or body-dependent framework refusal.
     ///
     /// `Err(())` refuses it, and the framework answers `503 SlowDown`. There is no way to return a
     /// different code: a limiter that could choose the status would be able to answer `403`, and

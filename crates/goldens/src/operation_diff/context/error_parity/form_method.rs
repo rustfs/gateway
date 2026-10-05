@@ -1,0 +1,445 @@
+// Copyright 2026 RustFS Team
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+//! Object-path multipart refusal parity (rustfs/gateway#1184).
+//!
+//! Responsible for: metadata and signature ordering before the RustFS profile's 405, with no
+//! handler call. Not responsible for: upload storage or file consumption. Upstream: the two
+//! pinned oracles and the assembled gateway. Downstream: no runtime code.
+
+use http::Method;
+use rustfs_gateway_sig::RequestNow;
+use serde_json::json;
+use sha2::{Digest as _, Sha256};
+
+use super::super::{ACCESS_KEY, ContextRequest, PATH_HOST, SECRET_KEY, amz_date};
+use super::{Scenario, both};
+
+const CONTENT_TYPE: &str = "multipart/form-data; boundary=form";
+const ALGORITHM: &str = "AWS4-HMAC-SHA256";
+const METHOD_MESSAGE: &str = "The specified method is not allowed against this resource.";
+
+struct Form {
+    fields: Vec<(&'static str, String)>,
+}
+
+impl Form {
+    fn unsigned() -> Self {
+        Self {
+            fields: vec![("key", "a.txt".into())],
+        }
+    }
+
+    fn signed(expiration: &str, key_condition: &str) -> Self {
+        let date = amz_date(RequestNow::capture().unix_seconds());
+        Self::signed_at(ACCESS_KEY, &date, expiration, key_condition)
+    }
+
+    fn signed_at(access_key: &str, date: &str, expiration: &str, key_condition: &str) -> Self {
+        let credential = format!("{access_key}/{}/us-east-1/s3/aws4_request", &date[..8]);
+        let policy = base64(
+            json!({
+                "expiration": expiration,
+                "conditions": [
+                    {"x-amz-date": date}, {"x-amz-credential": credential},
+                    {"x-amz-algorithm": ALGORITHM}, {"key": key_condition}, {"bucket": "photos"}
+                ]
+            })
+            .to_string()
+            .as_bytes(),
+        );
+        let mut key = hmac(format!("AWS4{SECRET_KEY}").as_bytes(), &date.as_bytes()[..8]);
+        for part in [b"us-east-1".as_slice(), b"s3", b"aws4_request"] {
+            key = hmac(&key, part);
+        }
+        let signature = hex::encode(hmac(&key, policy.as_bytes()));
+        Self {
+            fields: vec![
+                ("key", "a.txt".into()),
+                ("x-amz-algorithm", ALGORITHM.into()),
+                ("x-amz-credential", credential),
+                ("x-amz-date", date.into()),
+                ("policy", policy),
+                ("x-amz-signature", signature),
+            ],
+        }
+    }
+
+    fn with(mut self, name: &'static str, value: &str) -> Self {
+        self.fields.retain(|(field, _)| *field != name);
+        self.fields.push((name, value.into()));
+        self
+    }
+
+    fn without(mut self, name: &str) -> Self {
+        self.fields.retain(|(field, _)| *field != name);
+        self
+    }
+
+    fn bytes(&self) -> Vec<u8> {
+        let mut body = String::new();
+        for (name, value) in &self.fields {
+            body.push_str(&format!("--form\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{value}\r\n"));
+        }
+        body.push_str(
+            "--form\r\nContent-Disposition: form-data; name=\"file\"; filename=\"a.txt\"\r\n\r\nfile bytes\r\n--form--\r\n",
+        );
+        body.into_bytes()
+    }
+}
+
+fn hmac(key: &[u8], bytes: &[u8]) -> [u8; 32] {
+    let mut block = [0u8; 64];
+    block[..key.len()].copy_from_slice(key);
+    let mut inner = Sha256::new();
+    inner.update(block.map(|byte| byte ^ 0x36));
+    inner.update(bytes);
+    let mut outer = Sha256::new();
+    outer.update(block.map(|byte| byte ^ 0x5c));
+    outer.update(inner.finalize());
+    outer.finalize().into()
+}
+
+fn base64(bytes: &[u8]) -> String {
+    const DIGITS: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut encoded = String::new();
+    for chunk in bytes.chunks(3) {
+        let word =
+            (u32::from(chunk[0]) << 16) | (u32::from(*chunk.get(1).unwrap_or(&0)) << 8) | u32::from(*chunk.get(2).unwrap_or(&0));
+        encoded.push(char::from(DIGITS[((word >> 18) & 63) as usize]));
+        encoded.push(char::from(DIGITS[((word >> 12) & 63) as usize]));
+        encoded.push(if chunk.len() > 1 {
+            char::from(DIGITS[((word >> 6) & 63) as usize])
+        } else {
+            '='
+        });
+        encoded.push(if chunk.len() > 2 {
+            char::from(DIGITS[(word & 63) as usize])
+        } else {
+            '='
+        });
+    }
+    encoded
+}
+
+fn request(body: &[u8], query: &str, content_type: &str) -> ContextRequest {
+    ContextRequest::new(Method::POST, PATH_HOST, "/photos/a.txt", query, body).header("content-type", content_type.as_bytes())
+}
+
+#[test]
+fn n_an_object_form_refuses_before_dispatch_with_legacy_headers() {
+    for form in [
+        Form::unsigned(),
+        Form::signed("2099-01-01T00:00:00Z", "a.txt"),
+        Form::signed("2000-01-01T00:00:00Z", "a.txt"),
+        Form::signed("2099-01-01T00:00:00Z", "another.txt"),
+    ] {
+        for query in ["", "unknown=1", "versionId=v", "acl"] {
+            let scenario = Scenario::new(request(&form.bytes(), query, CONTENT_TYPE))
+                .selecting_as_legacy_rustfs()
+                .rustfs_identified();
+            let pair = both(&scenario).expect("both stacks answer");
+            assert_eq!((pair.gateway.status, pair.oracle.status), (405, 405), "{pair:#?}");
+            assert_eq!(
+                (pair.gateway.code(), pair.oracle.code()),
+                (Some("MethodNotAllowed"), Some("MethodNotAllowed")),
+                "{pair:#?}"
+            );
+            assert_eq!((pair.gateway.reached, pair.oracle.reached), (false, false), "{pair:#?}");
+            assert_eq!(pair.gateway.message(), Some(METHOD_MESSAGE), "{pair:#?}");
+            for name in ["content-type", "x-request-id", "x-amz-request-id"] {
+                assert_eq!(pair.gateway.header(name), pair.oracle.header(name), "{name}: {pair:#?}");
+            }
+            for name in ["allow", "etag", "x-amz-version-id", "x-amz-id-2"] {
+                assert_eq!((pair.gateway.header(name), pair.oracle.header(name)), (None, None), "{name}: {pair:#?}");
+            }
+        }
+    }
+}
+
+#[test]
+fn a_outer_query_signatures_reach_a_registered_operation() {
+    let mut observed = Vec::new();
+    let mut expected = Vec::new();
+    for forged in [false, true] {
+        let mut request = ContextRequest::new(Method::GET, PATH_HOST, "/photos/a.txt", "", b"").signed("us-east-1");
+        if forged {
+            request = request.forged();
+        }
+        let scenario = Scenario::new(request).selecting_as_legacy_rustfs().presigned(300);
+        let pair = both(&scenario).expect("both stacks answer");
+        observed.push((
+            pair.gateway.status,
+            pair.oracle.status,
+            pair.gateway.code().map(str::to_owned),
+            pair.oracle.code().map(str::to_owned),
+            pair.gateway.reached,
+            pair.oracle.reached,
+        ));
+        let code = forged.then(|| "SignatureDoesNotMatch".to_owned());
+        let status = if forged { 403 } else { 200 };
+        expected.push((status, status, code.clone(), code, !forged, !forged));
+    }
+    assert_eq!(observed, expected, "the same query signer authenticates a registered operation");
+}
+
+#[test]
+fn n_outer_signatures_do_not_replace_the_form_verdict() {
+    let mut observed = Vec::new();
+    let mut expected = Vec::new();
+    for presigned in [false, true] {
+        for forged_outer in [false, true] {
+            for (form, kind, status, code) in [
+                (Form::unsigned(), "unsigned", 405, "MethodNotAllowed"),
+                (Form::signed("2099-01-01T00:00:00Z", "a.txt"), "valid", 405, "MethodNotAllowed"),
+                (
+                    Form::signed("2099-01-01T00:00:00Z", "a.txt").with("x-amz-signature", &"0".repeat(64)),
+                    "forged",
+                    403,
+                    "SignatureDoesNotMatch",
+                ),
+                (
+                    Form::signed("2099-01-01T00:00:00Z", "a.txt").without("policy"),
+                    "missing-policy",
+                    400,
+                    "InvalidRequest",
+                ),
+            ] {
+                let mut outer = request(&form.bytes(), "", CONTENT_TYPE).signed("us-east-1");
+                if forged_outer {
+                    outer = outer.forged();
+                }
+                let mut scenario = Scenario::new(outer).selecting_as_legacy_rustfs();
+                if presigned {
+                    scenario = scenario.presigned(300);
+                }
+                let pair = both(&scenario).expect("both stacks answer");
+                observed.push((
+                    presigned,
+                    forged_outer,
+                    kind,
+                    pair.gateway.status,
+                    pair.gateway.code().map(str::to_owned),
+                    pair.oracle.status,
+                    pair.oracle.code().map(str::to_owned),
+                ));
+                expected.push((
+                    presigned,
+                    forged_outer,
+                    kind,
+                    status,
+                    Some(code.to_owned()),
+                    status,
+                    Some(code.to_owned()),
+                ));
+            }
+        }
+    }
+    assert_eq!(observed, expected, "outer credentials do not replace form credentials");
+}
+
+#[test]
+fn n_invalid_form_metadata_and_signatures_precede_the_method_refusal() {
+    let valid = || Form::signed("2099-01-01T00:00:00Z", "a.txt");
+    for (form, status, code) in [
+        (valid().with("x-amz-signature", &"0".repeat(64)), 403, "SignatureDoesNotMatch"),
+        (valid().with("x-amz-signature", "not-hex"), 403, "SignatureDoesNotMatch"),
+        (valid().with("x-amz-signature", ""), 403, "SignatureDoesNotMatch"),
+        (
+            Form::signed("2000-01-01T00:00:00Z", "a.txt").with("x-amz-signature", &"0".repeat(64)),
+            403,
+            "SignatureDoesNotMatch",
+        ),
+        (
+            Form::signed("2099-01-01T00:00:00Z", "another.txt").with("x-amz-signature", &"0".repeat(64)),
+            403,
+            "SignatureDoesNotMatch",
+        ),
+        (valid().without("x-amz-algorithm"), 400, "InvalidRequest"),
+        (valid().without("x-amz-credential"), 400, "InvalidRequest"),
+        (valid().without("x-amz-date"), 400, "InvalidRequest"),
+        (valid().without("policy"), 400, "InvalidRequest"),
+        (valid().with("x-amz-date", "not-a-date"), 400, "InvalidRequest"),
+        (valid().with("x-amz-credential", "not-a-scope"), 400, "InvalidRequest"),
+        (valid().with("x-amz-date", "20260102T030405Z"), 400, "InvalidPolicyDocument"),
+        (
+            valid().with("x-amz-credential", "AKIDUNKNOWN/20260102/us-east-1/s3/aws4_request"),
+            400,
+            "InvalidPolicyDocument",
+        ),
+        (valid().with("policy", "not-base64"), 400, "InvalidRequest"),
+        (valid().with("policy", "e30="), 400, "InvalidPolicyDocument"),
+        (Form::signed("not-an-expiration", "a.txt"), 400, "InvalidPolicyDocument"),
+        (valid().with("x-amz-algorithm", "unsupported"), 501, "NotImplemented"),
+        (
+            Form::signed_at(ACCESS_KEY, "20000101T000000Z", "2099-01-01T00:00:00Z", "a.txt"),
+            403,
+            "RequestTimeTooSkewed",
+        ),
+        (
+            Form::signed_at(ACCESS_KEY, "20990101T000000Z", "2099-01-01T00:00:00Z", "a.txt"),
+            403,
+            "RequestTimeTooSkewed",
+        ),
+    ] {
+        let pair = both(&Scenario::new(request(&form.bytes(), "", CONTENT_TYPE)).selecting_as_legacy_rustfs())
+            .expect("both stacks answer");
+        assert_eq!((pair.gateway.status, pair.oracle.status), (status, status), "{code}: {pair:#?}");
+        assert_eq!((pair.gateway.code(), pair.oracle.code()), (Some(code), Some(code)), "{pair:#?}");
+        assert_eq!((pair.gateway.reached, pair.oracle.reached), (false, false), "{pair:#?}");
+    }
+    for (body, content_type, code) in [
+        (b"--form--\r\n".as_slice(), CONTENT_TYPE, "MalformedPOSTRequest"),
+        (
+            b"--form\r\nContent-Disposition: form-data; name=\"key\"\r\n\r\na.txt".as_slice(),
+            CONTENT_TYPE,
+            "MalformedPOSTRequest",
+        ),
+        (Form::unsigned().bytes().as_slice(), "multipart/form-data", "InvalidRequest"),
+    ] {
+        let pair =
+            both(&Scenario::new(request(body, "", content_type)).selecting_as_legacy_rustfs()).expect("both stacks answer");
+        assert_eq!((pair.gateway.status, pair.oracle.status), (400, 400), "{pair:#?}");
+        assert_eq!((pair.gateway.code(), pair.oracle.code()), (Some(code), Some(code)), "{pair:#?}");
+    }
+}
+
+#[test]
+fn n_an_unknown_form_key_keeps_the_credential_callback_refusal() {
+    let date = amz_date(RequestNow::capture().unix_seconds());
+    let form = Form::signed_at("AKIDUNKNOWN", &date, "2099-01-01T00:00:00Z", "a.txt");
+    let pair =
+        both(&Scenario::new(request(&form.bytes(), "", CONTENT_TYPE)).selecting_as_legacy_rustfs()).expect("both stacks answer");
+    assert_eq!((pair.gateway.status, pair.oracle.status), (403, 403), "{pair:#?}");
+    // The fixture's oracle callback answers NotSignedUp; RustFS IAM and the facade's existing
+    // provider contract answer InvalidAccessKeyId. Neither reaches the method check or a handler.
+    assert_eq!(pair.gateway.code(), Some("InvalidAccessKeyId"), "{pair:#?}");
+    assert_eq!(pair.oracle.code(), Some("NotSignedUp"), "{pair:#?}");
+    assert_eq!((pair.gateway.reached, pair.oracle.reached), (false, false), "{pair:#?}");
+}
+
+#[test]
+fn n_signature_presence_chooses_form_metadata_preparation() {
+    let fields = [
+        "policy",
+        "x-amz-algorithm",
+        "x-amz-credential",
+        "x-amz-date",
+        "x-amz-signature",
+    ];
+    let mut answers = Vec::new();
+    let mut expected = Vec::new();
+    for mask in 0..32 {
+        let mut form = Form::signed("2099-01-01T00:00:00Z", "a.txt");
+        for (bit, field) in fields.iter().enumerate() {
+            if mask & (1 << bit) == 0 {
+                form = form.without(field);
+            }
+        }
+        let pair = both(&Scenario::new(request(&form.bytes(), "", CONTENT_TYPE)).selecting_as_legacy_rustfs())
+            .expect("both stacks answer");
+        answers.push((
+            pair.gateway.status,
+            pair.oracle.status,
+            pair.gateway.code().map(str::to_owned),
+            pair.oracle.code().map(str::to_owned),
+            pair.gateway.reached,
+            pair.oracle.reached,
+        ));
+        let (status, code) = if mask & 16 == 0 || mask == 31 {
+            (405, "MethodNotAllowed")
+        } else {
+            (400, "InvalidRequest")
+        };
+        expected.push((status, status, Some(code.to_owned()), Some(code.to_owned()), false, false));
+    }
+    assert_eq!(answers, expected);
+    let form = Form::signed("2099-01-01T00:00:00Z", "a.txt")
+        .without("x-amz-signature")
+        .with("policy", "not-base64");
+    let pair =
+        both(&Scenario::new(request(&form.bytes(), "", CONTENT_TYPE)).selecting_as_legacy_rustfs()).expect("both stacks answer");
+    assert_eq!((pair.gateway.status, pair.oracle.status), (405, 405), "{pair:#?}");
+    assert_eq!((pair.gateway.reached, pair.oracle.reached), (false, false), "{pair:#?}");
+}
+
+#[test]
+fn n_an_unsupported_form_signature_keeps_the_existing_floor_refusal() {
+    let form = Form::unsigned().with("Signature", "");
+    let pair =
+        both(&Scenario::new(request(&form.bytes(), "", CONTENT_TYPE)).selecting_as_legacy_rustfs()).expect("both stacks answer");
+    assert_eq!((pair.gateway.status, pair.oracle.status), (403, 403), "{pair:#?}");
+    assert_eq!(
+        (pair.gateway.code(), pair.oracle.code()),
+        (Some("AccessDenied"), Some("AccessDenied")),
+        "{pair:#?}"
+    );
+    assert_eq!((pair.gateway.reached, pair.oracle.reached), (false, false), "{pair:#?}");
+}
+
+#[test]
+fn n_form_tokens_do_not_move_checks_ahead_of_the_method_refusal() {
+    let mut answers = Vec::new();
+    let mut expected = Vec::new();
+    for token in ["", "extra-token"] {
+        for (signature, status, code) in [
+            (None, 405, "MethodNotAllowed"),
+            (Some("0".repeat(64)), 403, "SignatureDoesNotMatch"),
+        ] {
+            let form = Form::signed("2099-01-01T00:00:00Z", "a.txt").with("x-amz-security-token", token);
+            let form = match signature {
+                Some(signature) => form.with("x-amz-signature", &signature),
+                None => form,
+            };
+            let pair = both(&Scenario::new(request(&form.bytes(), "", CONTENT_TYPE)).selecting_as_legacy_rustfs())
+                .expect("both stacks answer");
+            answers.push((
+                pair.gateway.status,
+                pair.oracle.status,
+                pair.gateway.code().map(str::to_owned),
+                pair.oracle.code().map(str::to_owned),
+                pair.gateway.reached,
+                pair.oracle.reached,
+            ));
+            expected.push((status, status, Some(code.to_owned()), Some(code.to_owned()), false, false));
+        }
+    }
+    assert_eq!(answers, expected);
+}
+
+#[test]
+fn n_upload_policy_checks_are_kept_on_the_bucket_path() {
+    for form in [
+        Form::signed("2000-01-01T00:00:00Z", "a.txt"),
+        Form::signed("2099-01-01T00:00:00Z", "another.txt"),
+        Form::signed("2099-01-01T00:00:00Z", "a.txt").with("x-amz-security-token", ""),
+        Form::signed("2099-01-01T00:00:00Z", "a.txt").with("x-amz-security-token", "extra-token"),
+    ] {
+        let body = form.bytes();
+        let request =
+            ContextRequest::new(Method::POST, PATH_HOST, "/photos", "", &body).header("content-type", CONTENT_TYPE.as_bytes());
+        let pair = both(&Scenario::new(request).selecting_as_legacy_rustfs()).expect("both stacks answer");
+        assert!(!pair.gateway.reached, "{pair:#?}");
+        assert_eq!(pair.gateway.status, 403, "{pair:#?}");
+    }
+}
+
+#[test]
+fn a_valid_bucket_form_can_reach_the_handler() {
+    let body = Form::signed("2099-01-01T00:00:00Z", "a.txt").bytes();
+    let request =
+        ContextRequest::new(Method::POST, PATH_HOST, "/photos", "", &body).header("content-type", CONTENT_TYPE.as_bytes());
+    let pair = both(&Scenario::new(request).selecting_as_legacy_rustfs()).expect("both stacks answer");
+    assert!(pair.gateway.reached, "{pair:#?}");
+}

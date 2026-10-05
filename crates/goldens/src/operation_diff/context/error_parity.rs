@@ -41,6 +41,7 @@
 mod clock;
 mod divergences;
 mod facts;
+mod form_method;
 mod identifiers;
 mod legacy_reading;
 mod mapping;
@@ -117,6 +118,8 @@ pub(crate) struct Scenario {
     rustfs_identified: bool,
     /// Whether the gateway reads a buffered body under legacy RustFS's 20 MiB ceiling.
     legacy_buffered_ceiling: bool,
+    /// Whether the gateway selects operations as the RustFS profile does.
+    legacy_operation_selection: bool,
 }
 
 impl Scenario {
@@ -132,6 +135,7 @@ impl Scenario {
             reading: Reading::Typed,
             rustfs_identified: false,
             legacy_buffered_ceiling: false,
+            legacy_operation_selection: false,
         }
     }
 
@@ -152,6 +156,12 @@ impl Scenario {
     /// ([`legacy_adapter_error`]).
     pub(crate) fn rustfs_profile(mut self) -> Self {
         self.reading = Reading::Legacy;
+        self
+    }
+
+    /// Selects operations as legacy RustFS does, including object-path form refusals.
+    pub(crate) fn selecting_as_legacy_rustfs(mut self) -> Self {
+        self.legacy_operation_selection = true;
         self
     }
 
@@ -456,7 +466,15 @@ macro_rules! parity_handlers {
     )+};
 }
 
-parity_handlers!(PutObject, GetBucketLocation, GetObject, HeadObject, PutBucketVersioning, UploadPart);
+parity_handlers!(
+    PutObject,
+    GetBucketLocation,
+    GetObject,
+    HeadObject,
+    PutBucketVersioning,
+    UploadPart,
+    PostObject
+);
 
 /// Refuses an anonymous caller at the route stage, as RustFS's access hook refuses one on a private
 /// bucket, and allows every signed one.
@@ -497,15 +515,30 @@ fn gateway_service(scenario: &Scenario, reached: &Arc<AtomicBool>, now: RequestN
         ServiceBuilder::new()
     };
     let builder = super::verifying_at(builder, now);
+    let builder = if scenario.legacy_operation_selection {
+        builder
+            .select_operations_as_legacy_rustfs()
+            .legacy_rustfs_post_forms()
+            .register::<dto::PostObject, _>(Arc::clone(&backend))
+    } else {
+        builder
+    };
     let builder = if scenario.rustfs_identified {
         builder.identify_requests_as_legacy_rustfs()
     } else {
         builder
     };
+    let floor = SecurityFloor::new().delegate_anonymous_to_authorizer_after_listing_in_the_posture_report();
+    let floor = if scenario.legacy_operation_selection {
+        // The RustFS profile admits presigned requests before it selects a standard operation.
+        floor.admit_presigned_on_every_standard_operation_after_listing_in_the_posture_report()
+    } else {
+        floor
+    };
     builder
         .authenticator(authenticator)
         .authorizer(DenyAnonymous)
-        .security_floor(SecurityFloor::new().delegate_anonymous_to_authorizer_after_listing_in_the_posture_report())
+        .security_floor(floor)
         .bucket_owner_source(FixtureOwner)
         .register::<dto::PutObject, _>(Arc::clone(&backend))
         .register::<dto::GetBucketLocation, _>(Arc::clone(&backend))

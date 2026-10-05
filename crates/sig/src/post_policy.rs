@@ -18,6 +18,10 @@
 //! and the SigV4 policy comparison. Not responsible for: multipart framing, object-key typing, or
 //! HTTP responses. Upstream: the bounded form parser. Downstream: the built-in authenticator.
 
+#[path = "post_policy_unrouted.rs"]
+mod unrouted;
+pub use unrouted::{UnroutedPostPolicy, UnroutedPostPolicyError};
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
