@@ -474,7 +474,7 @@ fn enforce_policy_fields(
         return Err(PostPolicyError::ConditionFailed);
     }
     for name in fields.names() {
-        if !EXEMPT_FIELDS.contains(&name.as_str()) && !mentioned.contains(name) {
+        if !EXEMPT_FIELDS.contains(&name.as_str()) && !name.starts_with("x-ignore-") && !mentioned.contains(name) {
             return Err(PostPolicyError::ConditionFailed);
         }
     }

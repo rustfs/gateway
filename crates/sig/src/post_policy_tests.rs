@@ -390,3 +390,53 @@ fn content_type_prefix_accepts_every_matching_item() {
 fn a_metadata_prefix_keeps_commas_as_literal_content() {
     assert!(prefix_policy_accepts("x-amz-meta-caption", "image/png,text/html", POLICY_COMMA_METADATA).is_ok());
 }
+
+// https://docs.aws.amazon.com/AmazonS3/latest/developerguide/HTTPPOSTForms.html
+// Fields with the x-ignore- prefix do not need a matching policy condition.
+#[test]
+fn ignored_form_fields_do_not_need_policy_conditions() {
+    let signature = "0".repeat(64);
+    for name in ["x-ignore-", "x-ignore-extra", "X-Ignore-Extra"] {
+        let mut fields = valid_fields(&signature);
+        fields.push((name, "client-only data"));
+        assert!(parse(&fields, "report.txt").is_ok());
+    }
+}
+
+#[test]
+fn ignored_field_lookalikes_still_need_conditions() {
+    let signature = "0".repeat(64);
+    for name in ["ignore-extra", "x-ignore", "x-ignoreextra", "x-ignored-extra"] {
+        let mut fields = valid_fields(&signature);
+        fields.push((name, "client-only data"));
+        assert_eq!(parse(&fields, "report.txt").err(), Some(PostPolicyError::ConditionFailed));
+    }
+}
+
+#[test]
+fn ignored_field_duplicates_still_fail_admission() {
+    let signature = "0".repeat(64);
+    let mut fields = valid_fields(&signature);
+    fields.extend([("x-ignore-extra", "one"), ("X-Ignore-Extra", "two")]);
+    assert_eq!(parse(&fields, "report.txt").err(), Some(PostPolicyError::Malformed));
+}
+
+#[test]
+fn ignored_fields_still_obey_explicit_conditions() {
+    let fields =
+        FieldSet::parse(&[("key", "upload"), ("bucket", "example-bucket"), ("x-ignore-extra", "sent")]).expect("unique fields");
+    for condition in [
+        Condition::Exact("x-ignore-extra".to_owned(), "other".to_owned()),
+        Condition::StartsWith("x-ignore-extra".to_owned(), "other".to_owned()),
+    ] {
+        let conditions = [
+            Condition::Exact("key".to_owned(), "upload".to_owned()),
+            Condition::Exact("bucket".to_owned(), "example-bucket".to_owned()),
+            condition,
+        ];
+        assert_eq!(
+            enforce_policy_fields(&fields, "", PostPolicyLimits::default(), String::new(), &conditions).err(),
+            Some(PostPolicyError::ConditionFailed)
+        );
+    }
+}
