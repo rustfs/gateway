@@ -376,27 +376,32 @@ fn chunk_stream_failed() -> S3Error {
     )
 }
 
-/// The presented request signature, as the lowercase hex the chunk seed is spelled in.
+/// The presented request signature, borrowed from the wire run used as the chunk seed.
 ///
 /// Read off `Authorization` for header-signed requests and `X-Amz-Signature` for presigned ones.
 /// Returning `None` is never an admission of anything: [`build_signer`] refuses without it.
-pub(crate) fn presented_signature_hex(headers: &HeaderMap, query: &str) -> Option<String> {
+pub(crate) fn presented_signature_hex<'a>(headers: &'a HeaderMap, query: &'a str) -> Option<&'a str> {
     if let Some(value) = headers.get(http::header::AUTHORIZATION).and_then(|value| value.to_str().ok())
         && let Some(hex) = value.split("Signature=").nth(1)
     {
-        let hex: String = hex.chars().take_while(char::is_ascii_hexdigit).collect();
-        if !hex.is_empty() {
-            return Some(hex);
+        let length = hex.bytes().take_while(u8::is_ascii_hexdigit).count();
+        if length != 0 {
+            return Some(&hex[..length]);
         }
     }
     for pair in query.split('&') {
         let (name, value) = pair.split_once('=')?;
         if name.eq_ignore_ascii_case("X-Amz-Signature") {
-            return Some(value.to_owned());
+            return Some(value);
         }
     }
     None
 }
+
+#[cfg(test)]
+#[path = "chunked_seed_tests.rs"]
+#[allow(clippy::expect_used, clippy::panic)] // Test fixtures need explicit failure messages.
+mod seed_tests;
 
 #[cfg(test)]
 #[path = "chunked_length_tests.rs"]
@@ -434,54 +439,6 @@ mod tests {
             http::HeaderValue::from_str(&length.to_string()).expect("a digit run"),
         );
         Framing::classify(http::Version::HTTP_11, &headers, &rustfs_gateway_http::Limits::default()).expect("a framed request")
-    }
-
-    /// Positive — the header form is read, and only the hex run is taken. The signature is the
-    /// last element of the header, but a parser that took the rest of the string would break the
-    /// moment a client appended anything.
-    #[test]
-    fn the_header_signature_is_read_as_hex_and_stops_at_the_hex() {
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            http::header::AUTHORIZATION,
-            http::HeaderValue::from_static(
-                "AWS4-HMAC-SHA256 Credential=AKID/20130524/us-east-1/s3/aws4_request, \
-                 SignedHeaders=host, Signature=abcdef0123456789, Extra=1",
-            ),
-        );
-        assert_eq!(presented_signature_hex(&headers, "").as_deref(), Some("abcdef0123456789"));
-    }
-
-    /// Negative — a header with no signature element yields nothing rather than a guess. The
-    /// caller refuses on `None`; a parser that returned an empty string here would build a signer
-    /// seeded with nothing.
-    #[test]
-    fn a_header_without_a_signature_element_yields_nothing() {
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            http::header::AUTHORIZATION,
-            http::HeaderValue::from_static("AWS4-HMAC-SHA256 Credential=AKID/x, SignedHeaders=host"),
-        );
-        assert_eq!(presented_signature_hex(&headers, ""), None);
-        assert_eq!(presented_signature_hex(&HeaderMap::new(), ""), None);
-    }
-
-    /// Negative — `Signature=` with nothing usable after it is nothing, not the empty seed.
-    #[test]
-    fn an_empty_signature_element_is_not_a_seed() {
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            http::header::AUTHORIZATION,
-            http::HeaderValue::from_static("AWS4-HMAC-SHA256 Signature=, SignedHeaders=host"),
-        );
-        assert_eq!(presented_signature_hex(&headers, ""), None);
-    }
-
-    /// Positive — the presigned form is read from the query when the header carries nothing.
-    #[test]
-    fn the_presigned_signature_is_read_from_the_query() {
-        let query = "X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Signature=deadbeef&X-Amz-Expires=60";
-        assert_eq!(presented_signature_hex(&HeaderMap::new(), query).as_deref(), Some("deadbeef"));
     }
 
     /// Negative — a mode that does not frame the body produces no ingest at all, whatever

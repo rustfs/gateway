@@ -54,17 +54,17 @@ const WARM_UP: usize = 16;
 const BODY: &[u8] = b"a small object body, sixty-four bytes long, for both directions.";
 
 /// a-pf-0002 / a-pf-0003: heap blocks one warm signed `GetObject` and `PutObject` may allocate,
-/// end to end, where CI runs. Measured on Linux at exactly 148.000 and 195.002 per request over
-/// four runs. The plan's targets were 3 and 4; the gap is the pipeline's to close, and this
-/// ceiling only moves down.
+/// end to end, where CI runs. The original Linux ceilings were 148 / 195 (#955); borrowing the
+/// header chunk seed removes four per-request blocks (#1297). The plan's targets remain 3 / 4,
+/// and this ceiling only moves down.
 #[cfg(target_os = "linux")]
-const BLOCKS_PER_REQUEST: Option<(u64, u64)> = Some((148, 195));
+const BLOCKS_PER_REQUEST: Option<(u64, u64)> = Some((144, 191));
 /// macOS's standard library and runtime allocate a few more blocks per request, and not the same
-/// number every window: 153.9–154.4 and 211.8–212.4 over thirteen runs, drifting up with a
-/// window's wall time. The ceiling there keeps a block of room for that drift, so it refuses two
-/// new allocations per request but not reliably one; the Linux ceiling is the exact one.
+/// number every window. After borrowing the header chunk seed, the probe measured 150.02 / 208.02
+/// (#1297). These ceilings retain the previous block of room for runtime drift, so they refuse
+/// two new allocations per request but not reliably one; the Linux ceiling is the exact one.
 #[cfg(target_os = "macos")]
-const BLOCKS_PER_REQUEST: Option<(u64, u64)> = Some((155, 213));
+const BLOCKS_PER_REQUEST: Option<(u64, u64)> = Some((151, 209));
 /// No platform other than the two above has been measured, so there is no ceiling to hold it to.
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
 const BLOCKS_PER_REQUEST: Option<(u64, u64)> = None;

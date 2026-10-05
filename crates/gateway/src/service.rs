@@ -1270,7 +1270,7 @@ impl S3Service {
                         body_headers,
                         body_wire.framing(),
                         &chunk_sink,
-                        seed.as_deref(),
+                        seed,
                         view_policy.chunk_reading.limits(),
                     ) {
                         Ok(ingest) => ingest,
