@@ -76,7 +76,7 @@ Agent entry point for operations, routing, codecs, authorization state and handl
 | `src/sse/` | Server-side encryption proof, bounded KMS context JSON validation and rejection types. | SSE headers or key handling change. |
 | `tests/route_table.rs` | Route-table positive/negative matrix. | Any route row changes. |
 | `tests/selector_required_params.rs` | c-param-1003 on `GetBucketAnalyticsConfiguration`: `id` routes to the read (listing without it) and the read decoded without it is a static 400. | A parameter is both a route discriminator and a required member. |
-| `tests/dialect_claims.rs`, `tests/dialect_claims_all_methods.rs` | Claim capture, templates, aliases, typed values, the secret default, all-method filtering and overlaps. | A claim captures too much or too little, or a methodless row changes. |
+| `tests/dialect_claims.rs` | Claim capture, templates, aliases, typed values, the secret default, all-method filtering and overlaps. | A claim captures too much or too little, or a methodless row changes. |
 | `tests/dialect_claims_refusals.rs` | Every claim, template and claimed-row refusal, one variant each. | A claimed-route refusal changes. |
 | `tests/route_sizes.rs` | Independent compile-time size ceiling for the copied hot-path bucket. | The compiled router's bucket layout changes. |
 | `benches/route.rs` | Allocation gate and non-blocking timing record for compiled route lookup. | Routing hot-path cost changes. |
