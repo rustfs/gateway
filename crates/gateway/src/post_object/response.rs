@@ -133,8 +133,12 @@ impl PostObjectResponsePlan {
             }
             SuccessAction::Redirect(raw) => {
                 let e_tag = encoded_etag(encoded, self.legacy)?;
-                let location = build_success_action_redirect(&raw, &self.bucket, &self.key, e_tag, None)
-                    .map_err(|_| HandlerError::internal_error("the accepted POST redirect could not be rendered"))?;
+                let location = if self.legacy {
+                    legacy_redirect(&raw, &self.bucket, &self.key, e_tag)
+                } else {
+                    build_success_action_redirect(&raw, &self.bucket, &self.key, e_tag, None)
+                        .map_err(|_| HandlerError::internal_error("the accepted POST redirect could not be rendered"))?
+                };
                 let location = HeaderValue::from_str(&location)
                     .map_err(|_| HandlerError::internal_error("the accepted POST redirect could not become a header"))?;
                 encoded.status = StatusCode::SEE_OTHER;
@@ -144,6 +148,32 @@ impl PostObjectResponsePlan {
         }
         Ok(())
     }
+}
+
+// The redirect was validated before storage. Append only the form-encoded parameters; leave the
+// original path/query spelling and fragment alone, including an existing trailing ampersand.
+fn legacy_redirect(raw: &str, bucket: &str, key: &str, etag: &str) -> String {
+    let (base, fragment) = raw
+        .split_once('#')
+        .map_or((raw, None), |(base, fragment)| (base, Some(fragment)));
+    let mut location = base.to_owned();
+    let query_start = if let Some(separator) = location.find('?') {
+        separator + 1
+    } else {
+        location.push('?');
+        location.len()
+    };
+    let mut query = form_urlencoded::Serializer::for_suffix(location, query_start);
+    query
+        .append_pair("bucket", bucket)
+        .append_pair("key", key)
+        .append_pair("etag", etag);
+    let mut location = query.finish();
+    if let Some(fragment) = fragment {
+        location.push('#');
+        location.push_str(fragment);
+    }
+    location
 }
 
 fn unique_success_field<'a>(fields: &'a [(&str, &str)], wanted: &str) -> Result<Option<&'a str>, S3Error> {
