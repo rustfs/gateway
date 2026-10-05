@@ -476,7 +476,16 @@ async fn legacy_redirect_cannot_override_an_unsupported_numeric_status() {
 
 #[tokio::test]
 async fn legacy_invalid_redirect_does_not_preempt_authorization() {
-    for raw in ["/complete", "https://", "//client.example/complete"] {
+    for raw in [
+        "/complete",
+        "https://",
+        "//client.example/complete",
+        "https://client.example:99999/complete",
+        "https://[bad]/complete",
+        "https://client.example:99999/a\tb",
+        "https://[bad]/a\tb",
+        "/a\tb",
+    ] {
         for allow in [true, false] {
             let (status, _, body, observed) = success_controls(true, allow, &[("success_action_redirect", raw)]).await;
             let (expected, code) = if allow {
@@ -659,4 +668,98 @@ async fn legacy_empty_redirect_cannot_hide_a_storage_failure() {
     assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{body}");
     assert!(body.contains("<Code>SlowDown</Code>"), "{body}");
     assert_eq!(backend.observed.lock().expect("observation lock").clone(), None);
+}
+
+#[tokio::test]
+async fn legacy_redirects_use_absolute_url_parsing_and_normalization() {
+    for (raw, prefix) in [
+        ("https://CLIENT.example:443", "https://client.example/"),
+        ("https://client.example/a/../done", "https://client.example/done"),
+        ("https://client.example/résumé", "https://client.example/r%C3%A9sum%C3%A9"),
+        ("https://client.example/a b", "https://client.example/a%20b"),
+        ("  https://client.example/done  ", "https://client.example/done"),
+        ("ftp://client.example/done", "ftp://client.example/done"),
+        ("mailto:upload@client.example", "mailto:upload@client.example"),
+    ] {
+        let (status, location, body, observed) = success_controls(true, true, &[("success_action_redirect", raw)]).await;
+        assert_eq!(status, StatusCode::SEE_OTHER, "{raw}: {body}");
+        assert_eq!(
+            location,
+            Some(format!("{prefix}?bucket=example-bucket&key=uploads%2Freport.txt&etag=storage-etag"))
+        );
+        assert_eq!(observed, Some(("uploads/report.txt".to_owned(), b"hello from a browser".to_vec())));
+    }
+}
+
+#[tokio::test]
+async fn legacy_blank_and_tab_redirects_are_refused_after_storage() {
+    for raw in [
+        " ",
+        "\t",
+        "\u{a0}",
+        "\u{2003}",
+        "https://client.example/a\tb",
+        "\thttps://client.example/done\t",
+        "https://cli\tent.example/done",
+        "mailto:up\tload@client.example",
+    ] {
+        let (status, _, body, observed) = success_controls(true, true, &[("success_action_redirect", raw)]).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{raw:?}: {body}");
+        assert!(body.contains("<Code>InvalidArgument</Code>"), "{raw:?}: {body}");
+        assert_eq!(observed, Some(("uploads/report.txt".to_owned(), b"hello from a browser".to_vec())));
+    }
+}
+
+#[tokio::test]
+async fn legacy_normalized_and_control_redirects_cannot_bypass_authorization() {
+    for raw in [
+        "https://client.example/a b",
+        "ftp://client.example/done",
+        "mailto:upload@client.example",
+        " ",
+        "https://client.example/a\tb",
+    ] {
+        let (status, _, body, observed) = success_controls(true, false, &[("success_action_redirect", raw)]).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{raw:?}: {body}");
+        assert!(body.contains("<Code>AccessDenied</Code>"), "{raw:?}: {body}");
+        assert_eq!(observed, None);
+    }
+}
+
+#[tokio::test]
+async fn generic_redirects_do_not_inherit_legacy_url_grammar() {
+    for raw in [
+        "https://client.example/a b",
+        "ftp://client.example/done",
+        "mailto:upload@client.example",
+        " ",
+        "https://client.example/a\tb",
+    ] {
+        for allow in [true, false] {
+            let (status, _, body, observed) = success_controls(false, allow, &[("success_action_redirect", raw)]).await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{raw:?}: {body}");
+            assert!(body.contains("<Code>MalformedPOSTRequest</Code>"), "{raw:?}: {body}");
+            assert_eq!(observed, None);
+        }
+    }
+}
+
+// The shared multipart guard deliberately rejects these values under both form grammars.
+#[tokio::test]
+async fn legacy_prohibited_control_redirects_keep_the_wire_refusal() {
+    for raw in [
+        "\0",
+        "\n",
+        "https://client.example/a\nb",
+        "https://client.example/a\rb",
+        "https://client.example/a\u{1}b",
+        "https://client.example/a\u{7f}b",
+    ] {
+        for allow in [true, false] {
+            let (status, _, body, observed) = success_controls(true, allow, &[("success_action_redirect", raw)]).await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{raw:?}: {body}");
+            assert!(body.contains("<Code>MalformedPOSTRequest</Code>"), "{raw:?}: {body}");
+            assert_eq!(observed, None);
+        }
+    }
 }

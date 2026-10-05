@@ -59,6 +59,7 @@ tokio = { workspace = true, features = ["fs", "io-util", "net", "sync", "time"] 
 # `Instrument` and `Span::current` only: committed work keeps the span of the request that
 # started it. The gateway records nothing through it.
 tracing = { workspace = true }
+url = { workspace = true }
 
 [dev-dependencies]
 dhat = { workspace = true }
