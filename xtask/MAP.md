@@ -28,6 +28,7 @@ Agent entry point for repository automation commands.
 | `src/verify/full_gate.rs` | Full-gate stages run in order under one shared deadline; the report names the stage that ran out and each finished stage's measured time. | `verify` or `verify --all` outlives its budget, blames the wrong stage, or reports the budget instead of a measurement. |
 | `src/verify/full_gate/tests.rs` | Scripted-clock controls for the shared deadline, stage order, descendant cleanup, and stage attribution. | A full-gate stage stops sharing the deadline or stops being attributed. |
 | `src/verify/process.rs` | Deadline-aware child supervision against an injectable clock, and output capture. | Verification children block, leak, or report out of order. |
+| `src/verify/process/grandchild_tests.rs` | Descendant cleanup measured after complete live PID publication, with delayed and missing-readiness controls. | A termination fixture expires before it can observe a descendant. |
 | `src/verify/process/observation_tests.rs` | Live, stopped, and unreaped-child controls for the process-state observer. | A timeout test confuses a visible PID with an executing descendant. |
 | `src/verify/process/path_isolation_tests.rs` | Unusable-PATH group termination, released only after the tree publishes a complete, live descendant pid. | A PATH-isolation case expires before its tree is observable, or group cleanup starts depending on PATH. |
 | `src/verify/selection.rs` | Crate-local Cargo test and Clippy target selection. | A crate's bounded verification scope is wrong or too slow. |
