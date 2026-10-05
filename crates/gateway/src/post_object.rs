@@ -227,7 +227,7 @@ impl AcceptedPolicy {
 }
 
 /// A governed form whose text fields are in hand and whose first file byte remains unread.
-pub(crate) struct PostObjectPrelude<B> {
+pub(crate) struct PostObjectPrelude<B: Body> {
     reader: FormReader,
     frames: WireFrames<B>,
     first_file_bytes: Option<Bytes>,
@@ -395,13 +395,14 @@ where
             object_fields,
             response,
             not_carried,
+            legacy_policy_errors: legacy_store,
             timeouts: self.timeouts,
         })
     }
 }
 
 /// A resolved POST Object request held between authentication and route authorization.
-pub(crate) struct ResolvedPostObject<B> {
+pub(crate) struct ResolvedPostObject<B: Body> {
     frames: WireFrames<B>,
     first_file_bytes: Option<Bytes>,
     file: FileReader,
@@ -417,6 +418,7 @@ pub(crate) struct ResolvedPostObject<B> {
     response: PostObjectResponsePlan,
     /// Under the RustFS profile, why this form cannot be stored as legacy RustFS stores it.
     not_carried: Option<legacy::NotCarried>,
+    legacy_policy_errors: bool,
     timeouts: BodyTimeouts,
 }
 
@@ -444,6 +446,7 @@ where
             frames: self.frames,
             first: self.first_file_bytes,
             initial: true,
+            legacy_policy_errors: self.legacy_policy_errors,
             file: self.file,
             policy: self.policy,
             bucket: self.bucket.as_str().to_owned(),
@@ -451,13 +454,14 @@ where
             ended: false,
             pending: VecDeque::new(),
         };
-        let opened = StreamingRead::new(
+        let opened = StreamingRead::new_with_refusal(
             Some(body),
             (None, None),
             (BodyCeilings::streaming(None), self.timeouts, None),
             None,
             BodyDigestObligation::None,
             BodyIntegrity::NONE,
+            PostBodyError::into_refusal,
         )?;
         let (stream, monitor) = opened.into_parts();
         Ok((
@@ -475,7 +479,13 @@ where
 }
 
 #[derive(Debug)]
-struct PostBodyError(&'static str);
+struct PostBodyError(&'static str, Option<Box<S3Error>>);
+
+impl PostBodyError {
+    fn into_refusal(self) -> S3Error {
+        self.1.map_or_else(crate::gate::incomplete, |refusal| *refusal)
+    }
+}
 
 impl fmt::Display for PostBodyError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -485,10 +495,11 @@ impl fmt::Display for PostBodyError {
 
 impl std::error::Error for PostBodyError {}
 
-struct PostFileBody<B> {
+struct PostFileBody<B: Body> {
     frames: WireFrames<B>,
     first: Option<Bytes>,
     initial: bool,
+    legacy_policy_errors: bool,
     file: FileReader,
     policy: AcceptedPolicy,
     bucket: String,
@@ -509,13 +520,31 @@ fn retain_file_bytes(frame: &Bytes, bytes: &[u8]) -> Bytes {
     }
 }
 
-impl<B> PostFileBody<B> {
+impl<B: Body> PostFileBody<B> {
+    fn policy_error(&self, message: &'static str, error: PostPolicyError) -> PostBodyError {
+        let refusal = self.legacy_policy_errors.then(|| {
+            let code = match error {
+                PostPolicyError::ConditionFailed => ErrorCode::INVALID_POLICY_DOCUMENT,
+                PostPolicyError::EntityTooSmall => ErrorCode::ENTITY_TOO_SMALL,
+                PostPolicyError::EntityTooLarge => ErrorCode::ENTITY_TOO_LARGE,
+                _ => ErrorCode::ACCESS_DENIED,
+            };
+            let refusal = from_handler(
+                HandlerError::new(code, "the POST file did not satisfy its policy"),
+                ResponseKind::Other,
+                ConnectionIntent::MayKeepAlive,
+            );
+            Box::new(self.frames.mark_refusal_if_unfinished(refusal))
+        });
+        PostBodyError(message, refusal)
+    }
+
     /// Ends the file once the form is known to be complete: the policy's final checks, then what
     /// is still pending, then the end of the body.
     fn complete(&mut self, file_bytes: u64) -> Poll<Option<Result<Frame<Bytes>, PostBodyError>>> {
-        if self.policy.enforce_final(&self.bucket, &self.key, file_bytes).is_err() {
+        if let Err(error) = self.policy.enforce_final(&self.bucket, &self.key, file_bytes) {
             self.pending.clear();
-            return Poll::Ready(Some(Err(PostBodyError("the POST file did not satisfy its policy"))));
+            return Poll::Ready(Some(Err(self.policy_error("the POST file did not satisfy its policy", error))));
         }
         Poll::Ready(self.pending.pop_front().map(|bytes| Ok(Frame::data(bytes))))
     }
@@ -544,7 +573,9 @@ where
                     Some(frame) => frame,
                     None => match self.frames.poll_next(context) {
                         Poll::Pending => return Poll::Pending,
-                        Poll::Ready(Err(_)) => return Poll::Ready(Some(Err(PostBodyError("the POST body transport failed")))),
+                        Poll::Ready(Err(_)) => {
+                            return Poll::Ready(Some(Err(PostBodyError("the POST body transport failed", None))));
+                        }
                         Poll::Ready(Ok(None)) => {
                             // The legacy RustFS grammar confirms its close only at the end of the
                             // body; the gateway grammar never gets here with a complete form.
@@ -552,7 +583,7 @@ where
                             return match self.file.finish() {
                                 Ok(file_bytes) => self.complete(file_bytes),
                                 Err(_) => {
-                                    Poll::Ready(Some(Err(PostBodyError("the POST form ended before its closing boundary"))))
+                                    Poll::Ready(Some(Err(PostBodyError("the POST form ended before its closing boundary", None))))
                                 }
                             };
                         }
@@ -582,12 +613,14 @@ where
                 Err(FormReject::FileTooLarge) => {
                     self.pending.clear();
                     self.ended = true;
-                    return Poll::Ready(Some(Err(PostBodyError("the POST file exceeded its policy ceiling"))));
+                    return Poll::Ready(Some(Err(
+                        self.policy_error("the POST file exceeded its policy ceiling", PostPolicyError::EntityTooLarge)
+                    )));
                 }
                 Err(_) => {
                     self.pending.clear();
                     self.ended = true;
-                    return Poll::Ready(Some(Err(PostBodyError("the POST form was malformed"))));
+                    return Poll::Ready(Some(Err(PostBodyError("the POST form was malformed", None))));
                 }
             }
         }
@@ -682,6 +715,7 @@ mod tests {
             frames: resolved.frames,
             first: resolved.first_file_bytes,
             initial: true,
+            legacy_policy_errors: resolved.legacy_policy_errors,
             file: resolved.file,
             policy: resolved.policy,
             bucket: resolved.bucket.as_str().to_owned(),

@@ -755,6 +755,7 @@ gateway_modules = (
     "post_object_legacy_fields",
     "post_object_legacy_form",
     "post_object_runtime",
+    "post_object_sigv2",
     "post_object_streaming",
     "precondition_contract",
     "precondition_reachability",
