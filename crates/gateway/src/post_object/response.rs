@@ -35,6 +35,7 @@ enum SuccessAction {
     Created,
     NoContent,
     Malformed,
+    EmptyRedirect,
     Redirect(String),
 }
 
@@ -61,6 +62,7 @@ impl PostObjectResponsePlan {
             };
             match (status_action, redirect) {
                 (SuccessAction::Malformed, _) => SuccessAction::Malformed,
+                (_, Some("")) => SuccessAction::EmptyRedirect,
                 (_, Some(raw)) => validated_redirect(raw, bucket.as_str(), key.as_str())
                     .map(SuccessAction::Redirect)
                     .unwrap_or(SuccessAction::Malformed),
@@ -130,6 +132,10 @@ impl PostObjectResponsePlan {
                     ErrorCode::MALFORMED_POST_REQUEST,
                     "the POST success controls were not accepted",
                 ));
+            }
+            SuccessAction::EmptyRedirect => {
+                // Legacy RustFS reports an empty redirect only after a successful storage call.
+                return Err(HandlerError::new(ErrorCode::INVALID_ARGUMENT, "Invalid redirect URL"));
             }
             SuccessAction::Redirect(raw) => {
                 let e_tag = encoded_etag(encoded, self.legacy)?;
