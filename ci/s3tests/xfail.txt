@@ -95,7 +95,14 @@
 #   own S3 stack) answers the same PUT 200 (measured); #1176 records the reading as a
 #   Legacy-compat item (rustfs/backlog#2684). ci/s3tests/outcomes.txt is that run's record.
 #
-# generation: 3
+# REFRESH 2026-10-05, GENERATION 4 (rustfs/gateway#1279): run
+#   https://github.com/rustfs/gateway/actions/runs/37290385857 on main bafcfe1b9381849fdfaa95d14e16e6a08ad4d299
+#   passed=388 failed=282 errored=0 skipped=70 collected=740. The same ten header-date
+#   failures were measured in run 37263497476. The generation-3 run used e7c3e2a8 before
+#   #1188 enabled the independently measured RustFS header-signature profile. This refresh
+#   records that intentional profile difference and removes the now-passing list-prefix case.
+#
+# generation: 4
 
 # --- fs-gap: Object Lock refused by the reference backend (39) — https://github.com/rustfs/backlog/issues/1726 ---
 s3tests.functional.test_s3::test_object_lock_changing_mode_from_compliance
@@ -404,9 +411,6 @@ s3tests.functional.test_s3::test_object_raw_get_x_amz_expires_not_expired_tenant
 # --- out-of-scope: S3 Control endpoint (1) ---
 s3tests.functional.test_s3control::test_account_public_access_block
 
-# --- not-a-defect: encoding-type=url also encodes Delimiter/Prefix (AWS) (1) ---
-s3tests.functional.test_s3::test_bucket_list_prefix_unreadable
-
 # --- not-a-defect: out-of-range X-Amz-Expires is 400 AuthorizationQueryParametersError (AWS) (2) ---
 s3tests.functional.test_s3::test_object_raw_get_x_amz_expires_out_max_range
 s3tests.functional.test_s3::test_object_raw_get_x_amz_expires_out_positive_range
@@ -425,3 +429,20 @@ s3tests.functional.test_s3::test_bucket_list_delimiter_empty
 s3tests.functional.test_s3::test_bucket_listv2_continuationtoken_empty
 s3tests.functional.test_s3::test_bucket_listv2_delimiter_empty
 s3tests.functional.test_s3::test_object_raw_put_authenticated_expired
+
+# --- RustFS parity: header-signature dates (10) — https://github.com/rustfs/gateway/issues/1279 ---
+# The two common cases use SigV4: botocore removes X-Amz-Date when Date exists, and the
+# RustFS profile deliberately refuses Date-only signatures. The eight aws2 cases name an
+# invalid, empty or RFC 1123 X-Amz-Date; the profile answers 400 InvalidRequest rather than
+# the suite's 403. #1130 records the independent native comparison; existing strict refusal
+# controls remain. These are measured failures, not skipped cases or successful operations.
+s3tests.functional.test_headers::test_bucket_create_bad_date_after_today_aws2
+s3tests.functional.test_headers::test_bucket_create_bad_date_before_today_aws2
+s3tests.functional.test_headers::test_bucket_create_bad_date_empty_aws2
+s3tests.functional.test_headers::test_bucket_create_bad_date_invalid_aws2
+s3tests.functional.test_headers::test_object_create_amz_date_and_no_date
+s3tests.functional.test_headers::test_object_create_bad_date_after_end_aws2
+s3tests.functional.test_headers::test_object_create_bad_date_before_today_aws2
+s3tests.functional.test_headers::test_object_create_bad_date_empty_aws2
+s3tests.functional.test_headers::test_object_create_bad_date_invalid_aws2
+s3tests.functional.test_headers::test_object_create_date_and_amz_date

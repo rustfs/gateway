@@ -1,31 +1,22 @@
 # Per-case outcomes of the Ceph s3-tests run that measured this xfail generation.
 # Written by `ci/s3tests/report.py --outcomes`; refreshed together with ci/s3tests/xfail.txt.
-# passed=397 failed=273 errored=0 skipped=70 collected=740
+# passed=388 failed=282 errored=0 skipped=70 collected=740
 #
-# generation: 3
+# generation: 4
 
 passed s3tests.functional.test_headers::test_bucket_create_bad_contentlength_empty
 passed s3tests.functional.test_headers::test_bucket_create_bad_contentlength_negative
 passed s3tests.functional.test_headers::test_bucket_create_bad_contentlength_none
-passed s3tests.functional.test_headers::test_bucket_create_bad_date_after_today_aws2
-passed s3tests.functional.test_headers::test_bucket_create_bad_date_before_today_aws2
-passed s3tests.functional.test_headers::test_bucket_create_bad_date_empty_aws2
-passed s3tests.functional.test_headers::test_bucket_create_bad_date_invalid_aws2
 passed s3tests.functional.test_headers::test_bucket_create_bad_expect_empty
 passed s3tests.functional.test_headers::test_bucket_create_bad_expect_mismatch
 passed s3tests.functional.test_headers::test_bucket_create_contentlength_none
 passed s3tests.functional.test_headers::test_bucket_put_bad_canned_acl
 passed s3tests.functional.test_headers::test_object_acl_create_contentlength_none
-passed s3tests.functional.test_headers::test_object_create_amz_date_and_no_date
 passed s3tests.functional.test_headers::test_object_create_bad_contentlength_empty
 passed s3tests.functional.test_headers::test_object_create_bad_contentlength_negative
 passed s3tests.functional.test_headers::test_object_create_bad_contenttype_empty
 passed s3tests.functional.test_headers::test_object_create_bad_contenttype_invalid
 passed s3tests.functional.test_headers::test_object_create_bad_contenttype_none
-passed s3tests.functional.test_headers::test_object_create_bad_date_after_end_aws2
-passed s3tests.functional.test_headers::test_object_create_bad_date_before_today_aws2
-passed s3tests.functional.test_headers::test_object_create_bad_date_empty_aws2
-passed s3tests.functional.test_headers::test_object_create_bad_date_invalid_aws2
 passed s3tests.functional.test_headers::test_object_create_bad_expect_empty
 passed s3tests.functional.test_headers::test_object_create_bad_expect_mismatch
 passed s3tests.functional.test_headers::test_object_create_bad_expect_none
@@ -35,7 +26,6 @@ passed s3tests.functional.test_headers::test_object_create_bad_md5_invalid_short
 passed s3tests.functional.test_headers::test_object_create_bad_md5_none
 passed s3tests.functional.test_headers::test_object_create_bad_ua_empty_aws2
 passed s3tests.functional.test_headers::test_object_create_bad_ua_none_aws2
-passed s3tests.functional.test_headers::test_object_create_date_and_amz_date
 passed s3tests.functional.test_s3::test_100_continue_error_retry
 passed s3tests.functional.test_s3::test_abort_multipart_upload
 passed s3tests.functional.test_s3::test_abort_multipart_upload_not_found
@@ -108,6 +98,7 @@ passed s3tests.functional.test_s3::test_bucket_list_prefix_delimiter_prefix_not_
 passed s3tests.functional.test_s3::test_bucket_list_prefix_empty
 passed s3tests.functional.test_s3::test_bucket_list_prefix_none
 passed s3tests.functional.test_s3::test_bucket_list_prefix_not_exist
+passed s3tests.functional.test_s3::test_bucket_list_prefix_unreadable
 passed s3tests.functional.test_s3::test_bucket_list_return_data
 passed s3tests.functional.test_s3::test_bucket_list_return_data_versioning
 passed s3tests.functional.test_s3::test_bucket_list_special_prefix
@@ -404,19 +395,29 @@ passed s3tests.functional.test_utils::test_generate
 failed s3tests.functional.test_headers::test_bucket_create_bad_authorization_empty
 failed s3tests.functional.test_headers::test_bucket_create_bad_authorization_invalid_aws2
 failed s3tests.functional.test_headers::test_bucket_create_bad_authorization_none
+failed s3tests.functional.test_headers::test_bucket_create_bad_date_after_today_aws2
 failed s3tests.functional.test_headers::test_bucket_create_bad_date_before_epoch_aws2
+failed s3tests.functional.test_headers::test_bucket_create_bad_date_before_today_aws2
+failed s3tests.functional.test_headers::test_bucket_create_bad_date_empty_aws2
+failed s3tests.functional.test_headers::test_bucket_create_bad_date_invalid_aws2
 failed s3tests.functional.test_headers::test_bucket_create_bad_date_none_aws2
 failed s3tests.functional.test_headers::test_bucket_create_bad_ua_empty_aws2
 failed s3tests.functional.test_headers::test_bucket_create_bad_ua_none_aws2
+failed s3tests.functional.test_headers::test_object_create_amz_date_and_no_date
 failed s3tests.functional.test_headers::test_object_create_bad_authorization_empty
 failed s3tests.functional.test_headers::test_object_create_bad_authorization_incorrect_aws2
 failed s3tests.functional.test_headers::test_object_create_bad_authorization_invalid_aws2
 failed s3tests.functional.test_headers::test_object_create_bad_authorization_none
 failed s3tests.functional.test_headers::test_object_create_bad_contentlength_mismatch_below_aws2
 failed s3tests.functional.test_headers::test_object_create_bad_contentlength_none
+failed s3tests.functional.test_headers::test_object_create_bad_date_after_end_aws2
 failed s3tests.functional.test_headers::test_object_create_bad_date_before_epoch_aws2
+failed s3tests.functional.test_headers::test_object_create_bad_date_before_today_aws2
+failed s3tests.functional.test_headers::test_object_create_bad_date_empty_aws2
+failed s3tests.functional.test_headers::test_object_create_bad_date_invalid_aws2
 failed s3tests.functional.test_headers::test_object_create_bad_date_none_aws2
 failed s3tests.functional.test_headers::test_object_create_bad_md5_empty
+failed s3tests.functional.test_headers::test_object_create_date_and_amz_date
 failed s3tests.functional.test_iam::test_allow_bucket_actions_in_user_policy
 failed s3tests.functional.test_iam::test_allow_multipart_actions_in_user_policy
 failed s3tests.functional.test_iam::test_allow_object_actions_in_user_policy
@@ -468,7 +469,6 @@ failed s3tests.functional.test_s3::test_bucket_create_delete_bucket_ownership
 failed s3tests.functional.test_s3::test_bucket_get_location
 failed s3tests.functional.test_s3::test_bucket_list_delimiter_empty
 failed s3tests.functional.test_s3::test_bucket_list_objects_anonymous
-failed s3tests.functional.test_s3::test_bucket_list_prefix_unreadable
 failed s3tests.functional.test_s3::test_bucket_listv2_continuationtoken_empty
 failed s3tests.functional.test_s3::test_bucket_listv2_delimiter_empty
 failed s3tests.functional.test_s3::test_bucket_listv2_objects_anonymous
