@@ -145,7 +145,13 @@ jobs:
             cat "$out/summary.md" >>"$GITHUB_STEP_SUMMARY"
           fi
           case "$status" in
-            0) echo "no regression against ci/s3tests/xfail.txt" ;;
+            0)
+              if [ "$mode" = "record" ]; then
+                echo "record mode wrote a baseline proposal; review the artifacts before accepting it"
+              else
+                echo "no regression against ci/s3tests/xfail.txt"
+              fi
+              ;;
             1) echo "::error title=s3-tests regression::A failing case is not listed in ci/s3tests/xfail.txt. See the job summary." ;;
             3)
               {
