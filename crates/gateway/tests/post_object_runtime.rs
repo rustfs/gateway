@@ -316,14 +316,27 @@ async fn a_non_multipart_body_is_refused_before_the_handler() {
 }
 
 async fn success_status(legacy: bool, allow: bool, raw: &str) -> (StatusCode, String, Option<(String, Vec<u8>)>) {
+    let (status, _, body, observed) = success_controls(legacy, allow, &[("success_action_status", raw)]).await;
+    (status, body, observed)
+}
+
+async fn success_controls(
+    legacy: bool,
+    allow: bool,
+    fields: &[(&str, &str)],
+) -> (StatusCode, Option<String>, String, Option<(String, Vec<u8>)>) {
     let backend = Arc::new(Backend::default());
     let response = service_with_form_profile(Arc::clone(&backend), legacy, allow)
-        .call_bytes(request(form_with_fields(&[("success_action_status", raw)])))
+        .call_bytes(request(form_with_fields(fields)))
         .await;
     let status = response.status();
+    let location = response
+        .headers()
+        .get("location")
+        .map(|value| value.to_str().expect("location").to_owned());
     let body = response.into_body().collect().await.expect("response body").to_bytes();
     let observed = backend.observed.lock().expect("observation lock").clone();
-    (status, String::from_utf8(body.to_vec()).expect("XML response"), observed)
+    (status, location, String::from_utf8(body.to_vec()).expect("XML response"), observed)
 }
 
 // Native RustFS HTTP comparisons, including authorization and stored bytes: gateway#1185.
@@ -381,5 +394,124 @@ async fn generic_success_status_keeps_exact_spellings_and_early_refusal() {
             assert!(body.contains("<Code>MalformedPOSTRequest</Code>"), "{raw}: {body}");
             assert_eq!(observed, None);
         }
+    }
+}
+
+#[tokio::test]
+async fn legacy_created_response_keeps_its_relative_location_and_bare_etag() {
+    let backend = Arc::new(Backend::default());
+    let response = service_with_form_profile(Arc::clone(&backend), true, true)
+        .call_bytes(request(form_with_filename_and_fields(
+            "a b&résumé?.txt",
+            &[("success_action_status", "201")],
+        )))
+        .await;
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let body = response.into_body().collect().await.expect("response body").to_bytes();
+    assert_eq!(
+        std::str::from_utf8(&body).expect("XML"),
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?><PostResponse><Location>/example-bucket/uploads/a b&amp;résumé?.txt</Location><Bucket>example-bucket</Bucket><Key>uploads/a b&amp;résumé?.txt</Key><ETag>storage-etag</ETag></PostResponse>"
+    );
+    assert_eq!(
+        backend.observed.lock().expect("observation lock").clone(),
+        Some(("uploads/a b&résumé?.txt".to_owned(), b"hello from a browser".to_vec()))
+    );
+}
+
+#[tokio::test]
+async fn legacy_redirect_wins_over_a_supported_status() {
+    let (status, location, body, observed) = success_controls(
+        true,
+        true,
+        &[
+            ("success_action_status", "201"),
+            ("success_action_redirect", "https://client.example/finished?upload=1#receipt"),
+        ],
+    )
+    .await;
+    assert_eq!(status, StatusCode::SEE_OTHER, "{body}");
+    assert_eq!(
+        location.as_deref(),
+        Some("https://client.example/finished?upload=1&bucket=example-bucket&key=uploads%2Freport.txt&etag=storage-etag#receipt")
+    );
+    assert_eq!(body, "");
+    assert_eq!(observed, Some(("uploads/report.txt".to_owned(), b"hello from a browser".to_vec())));
+}
+
+#[tokio::test]
+async fn legacy_redirect_cannot_override_an_unsupported_numeric_status() {
+    for allow in [true, false] {
+        let (status, _, body, observed) = success_controls(
+            true,
+            allow,
+            &[
+                ("success_action_status", "202"),
+                ("success_action_redirect", "https://client.example/finished"),
+            ],
+        )
+        .await;
+        let (expected, code) = if allow {
+            (StatusCode::BAD_REQUEST, "MalformedPOSTRequest")
+        } else {
+            (StatusCode::FORBIDDEN, "AccessDenied")
+        };
+        assert_eq!(status, expected, "{body}");
+        assert!(body.contains(&format!("<Code>{code}</Code>")), "{body}");
+        assert_eq!(observed, None);
+    }
+}
+
+#[tokio::test]
+async fn legacy_invalid_redirect_does_not_preempt_authorization() {
+    for raw in ["/complete", "https://", "//client.example/complete"] {
+        for allow in [true, false] {
+            let (status, _, body, observed) = success_controls(true, allow, &[("success_action_redirect", raw)]).await;
+            let (expected, code) = if allow {
+                (StatusCode::BAD_REQUEST, "MalformedPOSTRequest")
+            } else {
+                (StatusCode::FORBIDDEN, "AccessDenied")
+            };
+            assert_eq!(status, expected, "{raw}: {body}");
+            assert!(body.contains(&format!("<Code>{code}</Code>")), "{raw}: {body}");
+            assert_eq!(observed, None);
+        }
+    }
+}
+
+#[tokio::test]
+async fn legacy_redirect_cannot_hide_an_unreadable_status() {
+    for raw in ["", "wrong", "2147483648"] {
+        for allow in [true, false] {
+            let (status, _, body, observed) = success_controls(
+                true,
+                allow,
+                &[
+                    ("success_action_status", raw),
+                    ("success_action_redirect", "https://client.example/finished"),
+                ],
+            )
+            .await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{raw}: {body}");
+            assert!(body.contains("<Code>InvalidArgument</Code>"), "{raw}: {body}");
+            assert_eq!(observed, None);
+        }
+    }
+}
+
+#[tokio::test]
+async fn generic_redirect_conflicts_still_preempt_authorization() {
+    for allow in [true, false] {
+        let (status, _, body, observed) = success_controls(
+            false,
+            allow,
+            &[
+                ("success_action_status", "201"),
+                ("success_action_redirect", "https://client.example/finished"),
+            ],
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+        assert!(body.contains("<Code>MalformedPOSTRequest</Code>"), "{body}");
+        assert_eq!(observed, None);
     }
 }
