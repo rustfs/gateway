@@ -24464,6 +24464,9 @@ shard_case 'StageFilter discovery batches the complete census and fails closed' 
 shard_case 'Mint judges retain complete probes and isolated CLI exit boundaries' \
     python3 "${SCRIPT_DIR}/test_mint_report_execution.py"
 
+shard_case 'compatibility verdicts bind cell identities and successful driver exits' \
+    python3 "${SCRIPT_DIR}/test_compat_report_cells.py"
+
 shard_case 'DTO path scans preserve mount checks with bounded process growth' \
     python3 "${SCRIPT_DIR}/test_dto_packaged_scan_cost.py"
 
