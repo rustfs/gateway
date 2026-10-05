@@ -287,6 +287,8 @@ pub enum AuthError {
     /// (rustfs/gateway#1075). Only a verifier that admits such a region for key derivation
     /// ([`crate::ExpectedScope::accepting_any_region_spelling`]) produces it.
     InvalidCredentialRegion,
+    /// A browser POST policy is not bounded, valid base64; refused before signature comparison.
+    InvalidPostPolicyEncoding,
 }
 
 impl AuthError {
@@ -304,7 +306,7 @@ impl AuthError {
             Self::RequestTimeTooSkewed => "RequestTimeTooSkewed",
             Self::AuthorizationQueryParametersError => "AuthorizationQueryParametersError",
             Self::NotImplemented(_) => "NotImplemented",
-            Self::InvalidCredentialRegion => "InvalidRequest",
+            Self::InvalidCredentialRegion | Self::InvalidPostPolicyEncoding => "InvalidRequest",
         }
     }
 
@@ -328,6 +330,7 @@ impl AuthError {
             // constant, so nothing derived from the request reaches the wire.
             Self::NotImplemented(feature) => feature.message(),
             Self::InvalidCredentialRegion => "the credential scope names a region this service cannot read",
+            Self::InvalidPostPolicyEncoding => "the POST policy encoding is not valid",
         }
     }
 

@@ -15,7 +15,7 @@
 //! Browser POST-policy parsing and proof.
 //!
 //! Responsible for: strict policy decoding, field conditions, filename substitution, size limits,
-//! and the SigV4 policy comparison. Not responsible for: multipart framing, object-key typing, or
+//! and policy signature comparisons. Not responsible for: multipart framing, object-key typing, or
 //! HTTP responses. Upstream: the bounded form parser. Downstream: the built-in authenticator.
 
 #[path = "post_policy_unrouted.rs"]
@@ -297,6 +297,28 @@ impl fmt::Debug for SigV2PostPolicy {
 }
 
 impl SigV2PostPolicy {
+    /// Verifies the encoded policy before interpreting its JSON, expiry, or field conditions.
+    /// Only the encoded and decoded byte ceilings in `limits` apply at this stage.
+    /// A successful proof does not authorize an upload: callers must still use [`Self::parse`]
+    /// and [`Self::enforce_final`] before committing the object.
+    /// # Errors
+    /// Returns [`PostPolicyError::Malformed`] for invalid base64 or exceeded byte ceilings,
+    /// or [`PostPolicyError::SignatureMismatch`] when the signature comparison fails.
+    pub fn verify_encoded(
+        encoded: &str,
+        limits: PostPolicyLimits,
+        secret: &SecretBytes,
+        presented: &Signature,
+    ) -> Result<SignatureMatch, PostPolicyError> {
+        if encoded.len() > limits.max_encoded_bytes {
+            return Err(PostPolicyError::Malformed);
+        }
+        decode_base64(encoded, limits.max_decoded_bytes)?;
+        let preimage = crate::sig_v2::SigV2StringToSign::from_post_policy(encoded);
+        let expected = preimage.sign(secret);
+        crate::sig_v2::verify_presented(presented, &expected).map_err(|_| PostPolicyError::SignatureMismatch)
+    }
+
     /// Parses and enforces the shared pre-file POST-policy conditions for a SigV2 form.
     /// # Errors
     /// Returns [`PostPolicyError`] for malformed or expired policies and failed conditions.

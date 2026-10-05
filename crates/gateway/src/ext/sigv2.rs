@@ -176,10 +176,14 @@ impl SigV4Authenticator {
 
         let proof: Option<SignatureMatch> = match sealed.mode() {
             SigV2Mode::PostPolicy => {
-                let fields = view.form_fields().ok_or(AuthError::AuthorizationHeaderMalformed)?;
-                let policy = SigV2PostPolicy::parse(fields, "", PostPolicyLimits::default(), sealed.now())
-                    .map_err(PostPolicyError::auth_error)?;
-                policy.verify(&key, sealed.presented()).ok()
+                let encoded = view.form_value("policy").ok_or(AuthError::AuthorizationHeaderMalformed)?;
+                // Refuse invalid encoding first; JSON and conditions belong to the authenticated
+                // form resolution, with its actual filename, rather than this signature check.
+                match SigV2PostPolicy::verify_encoded(encoded, PostPolicyLimits::default(), &key, sealed.presented()) {
+                    Ok(proof) => Some(proof),
+                    Err(PostPolicyError::SignatureMismatch) => None,
+                    Err(_) => return Err(AuthError::InvalidPostPolicyEncoding),
+                }
             }
             SigV2Mode::HeaderAuth | SigV2Mode::PresignedUrl => {
                 let query = view.query();

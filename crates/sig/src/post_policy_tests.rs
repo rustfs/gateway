@@ -472,3 +472,32 @@ fn calendar_policy_expiration_accepts_real_month_ends() {
         assert!(parse_expiration(raw).is_ok(), "{raw}");
     }
 }
+
+#[test]
+fn sigv2_encoded_proof_checks_both_resource_boundaries() {
+    let secret = SecretBytes::new(b"secret");
+    let encoded = "e30=";
+    let preimage = crate::sig_v2::SigV2StringToSign::from_post_policy(encoded);
+    let presented = preimage.sign(&secret);
+    let limits = PostPolicyLimits {
+        max_encoded_bytes: 4,
+        max_decoded_bytes: 2,
+        ..PostPolicyLimits::default()
+    };
+    assert!(SigV2PostPolicy::verify_encoded(encoded, limits, &secret, &presented).is_ok());
+    for limits in [
+        PostPolicyLimits {
+            max_encoded_bytes: 3,
+            ..limits
+        },
+        PostPolicyLimits {
+            max_decoded_bytes: 1,
+            ..limits
+        },
+    ] {
+        assert_eq!(
+            SigV2PostPolicy::verify_encoded(encoded, limits, &secret, &presented).err(),
+            Some(PostPolicyError::Malformed)
+        );
+    }
+}
