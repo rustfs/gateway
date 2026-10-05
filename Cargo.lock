@@ -1770,6 +1770,7 @@ dependencies = [
  "tracing",
  "tracing-core",
  "trybuild",
+ "url",
 ]
 
 [[package]]

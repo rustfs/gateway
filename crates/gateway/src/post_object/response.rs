@@ -35,7 +35,7 @@ enum SuccessAction {
     Created,
     NoContent,
     Malformed,
-    EmptyRedirect,
+    InvalidRedirect,
     Redirect(String),
 }
 
@@ -62,10 +62,7 @@ impl PostObjectResponsePlan {
             };
             match (status_action, redirect) {
                 (SuccessAction::Malformed, _) => SuccessAction::Malformed,
-                (_, Some("")) => SuccessAction::EmptyRedirect,
-                (_, Some(raw)) => validated_redirect(raw, bucket.as_str(), key.as_str())
-                    .map(SuccessAction::Redirect)
-                    .unwrap_or(SuccessAction::Malformed),
+                (_, Some(raw)) => legacy_redirect_action(raw),
                 (action, None) => action,
             }
         } else {
@@ -133,8 +130,8 @@ impl PostObjectResponsePlan {
                     "the POST success controls were not accepted",
                 ));
             }
-            SuccessAction::EmptyRedirect => {
-                // Legacy RustFS reports an empty redirect only after a successful storage call.
+            SuccessAction::InvalidRedirect => {
+                // Legacy RustFS reports blank/control redirects only after a successful storage call.
                 return Err(HandlerError::new(ErrorCode::INVALID_ARGUMENT, "Invalid redirect URL"));
             }
             SuccessAction::Redirect(raw) => {
@@ -156,8 +153,23 @@ impl PostObjectResponsePlan {
     }
 }
 
+fn legacy_redirect_action(raw: &str) -> SuccessAction {
+    if raw.trim().is_empty() {
+        return SuccessAction::InvalidRedirect;
+    }
+    let Ok(parsed) = url::Url::parse(raw) else {
+        return SuccessAction::Malformed;
+    };
+    // Malformed URLs win before storage; control bytes in a parseable URL are refused after it.
+    if raw.bytes().any(|byte| byte.is_ascii_control()) {
+        SuccessAction::InvalidRedirect
+    } else {
+        SuccessAction::Redirect(parsed.into())
+    }
+}
+
 // The redirect was validated before storage. Append only the form-encoded parameters; leave the
-// original path/query spelling and fragment alone, including an existing trailing ampersand.
+// parsed path/query spelling and fragment alone, including an existing trailing ampersand.
 fn legacy_redirect(raw: &str, bucket: &str, key: &str, etag: &str) -> String {
     let (base, fragment) = raw
         .split_once('#')
