@@ -37,6 +37,7 @@ const BOUNDARY: &str = "----RustFSPostRuntime";
 #[derive(Default)]
 struct Backend {
     observed: Mutex<Option<(String, Vec<u8>)>>,
+    refuse: bool,
 }
 
 impl Handler<PostObject> for Backend {
@@ -60,6 +61,9 @@ impl Handler<PostObject> for Backend {
             if let Ok(data) = frame.into_data() {
                 bytes.extend_from_slice(&data);
             }
+        }
+        if self.refuse {
+            return Err(HandlerError::new(rustfs_gateway::ErrorCode::SLOW_DOWN, "storage refused the upload"));
         }
         *self
             .observed
@@ -573,4 +577,86 @@ async fn generic_redirect_parameters_do_not_inherit_legacy_form_encoding() {
         observed,
         Some(("uploads/a b~*+%&résumé.txt".to_owned(), b"hello from a browser".to_vec()))
     );
+}
+
+#[tokio::test]
+async fn legacy_empty_redirect_is_refused_after_the_file_is_stored() {
+    for status in [None, Some("200"), Some("201"), Some("204")] {
+        let mut fields = vec![("success_action_redirect", "")];
+        if let Some(status) = status {
+            fields.push(("success_action_status", status));
+        }
+        let (status, _, body, observed) = success_controls(true, true, &fields).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+        assert!(body.contains("<Code>InvalidArgument</Code>"), "{body}");
+        assert_eq!(observed, Some(("uploads/report.txt".to_owned(), b"hello from a browser".to_vec())));
+    }
+}
+
+#[tokio::test]
+async fn legacy_empty_redirect_cannot_bypass_authorization() {
+    for status in [None, Some("200"), Some("201"), Some("204")] {
+        let mut fields = vec![("success_action_redirect", "")];
+        if let Some(status) = status {
+            fields.push(("success_action_status", status));
+        }
+        let (status, _, body, observed) = success_controls(true, false, &fields).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+        assert!(body.contains("<Code>AccessDenied</Code>"), "{body}");
+        assert_eq!(observed, None);
+    }
+}
+
+#[tokio::test]
+async fn legacy_empty_redirect_cannot_override_an_unsupported_status() {
+    for allow in [true, false] {
+        let (status, _, body, observed) =
+            success_controls(true, allow, &[("success_action_redirect", ""), ("success_action_status", "202")]).await;
+        let (expected, code) = if allow {
+            (StatusCode::BAD_REQUEST, "MalformedPOSTRequest")
+        } else {
+            (StatusCode::FORBIDDEN, "AccessDenied")
+        };
+        assert_eq!(status, expected, "{body}");
+        assert!(body.contains(&format!("<Code>{code}</Code>")), "{body}");
+        assert_eq!(observed, None);
+    }
+}
+
+#[tokio::test]
+async fn legacy_empty_redirect_cannot_hide_an_unreadable_status() {
+    for allow in [true, false] {
+        let (status, _, body, observed) =
+            success_controls(true, allow, &[("success_action_redirect", ""), ("success_action_status", "")]).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+        assert!(body.contains("<Code>InvalidArgument</Code>"), "{body}");
+        assert_eq!(observed, None);
+    }
+}
+
+#[tokio::test]
+async fn generic_empty_redirect_keeps_its_early_refusal() {
+    for allow in [true, false] {
+        let (status, _, body, observed) = success_controls(false, allow, &[("success_action_redirect", "")]).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+        assert!(body.contains("<Code>MalformedPOSTRequest</Code>"), "{body}");
+        assert_eq!(observed, None);
+    }
+}
+
+#[tokio::test]
+async fn legacy_empty_redirect_cannot_hide_a_storage_failure() {
+    let backend = Arc::new(Backend {
+        refuse: true,
+        ..Backend::default()
+    });
+    let response = service_with_form_profile(Arc::clone(&backend), true, true)
+        .call_bytes(request(form_with_fields(&[("success_action_redirect", "")])))
+        .await;
+    let status = response.status();
+    let body = response.into_body().collect().await.expect("response body").to_bytes();
+    let body = std::str::from_utf8(&body).expect("XML response");
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{body}");
+    assert!(body.contains("<Code>SlowDown</Code>"), "{body}");
+    assert_eq!(backend.observed.lock().expect("observation lock").clone(), None);
 }
