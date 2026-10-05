@@ -225,12 +225,12 @@ struct RequestEntryContext {
     client_addr: Option<ClientAddr>,
 }
 
-enum RoutedBody<B> {
+enum RoutedBody<B: http_body::Body> {
     Ordinary(SealedBody<B>),
     PostObject(Box<PostObjectPrelude<B>>),
 }
 
-enum AcceptedBody<B> {
+enum AcceptedBody<B: http_body::Body> {
     Ordinary(SealedBody<B>),
     PostObject(Box<ResolvedPostObject<B>>),
 }

@@ -64,6 +64,7 @@ async fn post(opt_in: bool, fields: &[(&str, &str)], file: &str) -> (StatusCode,
         fields,
         file,
         Credentials::new("AKIDEXAMPLE", b"secret").expect("valid credentials"),
+        true,
     )
     .await
 }
@@ -73,6 +74,7 @@ async fn post_with_credentials(
     fields: &[(&str, &str)],
     file: &str,
     credentials: Credentials,
+    legacy_forms: bool,
 ) -> (StatusCode, String, Option<(String, Vec<u8>)>) {
     let backend = Arc::new(Backend::default());
     let floor = if opt_in {
@@ -82,17 +84,20 @@ async fn post_with_credentials(
     } else {
         SecurityFloor::new()
     };
-    let service = support::wired_at_signed_time()
+    let builder = support::wired_at_signed_time()
         .authenticator(SigV4Authenticator::new(
             Arc::new(StaticCredentials::new().with(credentials)),
             RegionSet::new(["us-east-1"]).expect("non-empty"),
         ))
         .register::<PostObject, _>(Arc::clone(&backend))
         .security_floor(floor)
-        .legacy_rustfs_post_forms()
-        .authorizer(allow_when(|request| request.identity.is_some()))
-        .build()
-        .expect("complete service");
+        .authorizer(allow_when(|request| request.identity.is_some()));
+    let builder = if legacy_forms {
+        builder.legacy_rustfs_post_forms()
+    } else {
+        builder
+    };
+    let service = builder.build().expect("complete service");
     let mut body = String::new();
     for (name, value) in fields {
         body.push_str(&format!(
@@ -180,10 +185,9 @@ async fn a_policy_for_another_bucket_cannot_store_an_object() {
     );
     let signature = signed_policy(&policy);
     let (status, response, stored) = post(true, &fields(&policy, &signature), "hello").await;
-    // The existing streamed target check reports IncompleteBody; legacy RustFS reports
-    // InvalidPolicyDocument. Exact refusal parity remains tracked in gateway#1185.
+    // Measured against legacy RustFS; gateway#1185 records the HTTP comparison.
     assert_eq!(status, StatusCode::BAD_REQUEST);
-    assert!(response.contains("<Code>IncompleteBody</Code>"));
+    assert!(response.contains("<Code>InvalidPolicyDocument</Code>"), "{response}");
     assert_eq!(stored, None);
 }
 
@@ -203,9 +207,10 @@ async fn changing_the_key_cannot_store_an_object() {
 async fn a_file_outside_the_policy_range_cannot_be_committed() {
     let policy = encode_base64_exact(POLICY);
     let signature = signed_policy(&policy);
-    for file in ["", "12345678901234567"] {
-        let (status, _, stored) = post(true, &fields(&policy, &signature), file).await;
-        assert!(!status.is_success());
+    for (file, code) in [("", "EntityTooSmall"), ("12345678901234567", "EntityTooLarge")] {
+        let (status, response, stored) = post(true, &fields(&policy, &signature), file).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{response}");
+        assert!(response.contains(&format!("<Code>{code}</Code>")), "{response}");
         assert_eq!(stored, None);
     }
 }
@@ -240,7 +245,7 @@ async fn a_session_token_is_required_for_temporary_credentials() {
         if let Some(token) = token {
             fields.push(("x-amz-security-token", token));
         }
-        let (status, response, stored) = post_with_credentials(true, &fields, "hello", temporary_credentials()).await;
+        let (status, response, stored) = post_with_credentials(true, &fields, "hello", temporary_credentials(), true).await;
         assert_eq!(status, StatusCode::FORBIDDEN);
         assert!(response.contains("<Code>InvalidAccessKeyId</Code>"));
         assert_eq!(stored, None);
@@ -253,7 +258,7 @@ async fn a_valid_session_token_allows_the_signed_upload() {
     let signature = signed_policy(&policy);
     let mut fields = fields(&policy, &signature);
     fields.push(("x-amz-security-token", "session-token"));
-    let (status, response, stored) = post_with_credentials(true, &fields, "hello", temporary_credentials()).await;
+    let (status, response, stored) = post_with_credentials(true, &fields, "hello", temporary_credentials(), true).await;
     assert_eq!(status, StatusCode::NO_CONTENT, "{response}");
     assert_eq!(stored, Some(("upload".to_owned(), b"hello".to_vec())));
 }
@@ -267,4 +272,23 @@ async fn a_case_variant_cannot_hide_a_second_access_key() {
     let (status, _, stored) = post(true, &fields, "hello").await;
     assert!(!status.is_success());
     assert_eq!(stored, None);
+}
+
+#[tokio::test]
+async fn the_generic_form_grammar_keeps_its_stream_failure_code() {
+    let policy = encode_base64_exact(POLICY);
+    let signature = signed_policy(&policy);
+    for file in ["", "12345678901234567"] {
+        let (status, response, stored) = post_with_credentials(
+            true,
+            &fields(&policy, &signature),
+            file,
+            Credentials::new("AKIDEXAMPLE", b"secret").expect("valid credentials"),
+            false,
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{response}");
+        assert!(response.contains("<Code>IncompleteBody</Code>"), "{response}");
+        assert_eq!(stored, None);
+    }
 }
