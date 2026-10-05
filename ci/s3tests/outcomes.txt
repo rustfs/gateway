@@ -1,6 +1,6 @@
 # Per-case outcomes of the Ceph s3-tests run that measured this xfail generation.
 # Written by `ci/s3tests/report.py --outcomes`; refreshed together with ci/s3tests/xfail.txt.
-# passed=388 failed=282 errored=0 skipped=70 collected=740
+# passed=406 failed=264 errored=0 skipped=70 collected=740
 #
 # generation: 4
 
@@ -306,14 +306,32 @@ passed s3tests.functional.test_s3::test_object_write_expires
 passed s3tests.functional.test_s3::test_object_write_file
 passed s3tests.functional.test_s3::test_object_write_read_update_read_delete
 passed s3tests.functional.test_s3::test_object_write_to_nonexist_bucket
+passed s3tests.functional.test_s3::test_post_object_authenticated_no_content_type
+passed s3tests.functional.test_s3::test_post_object_authenticated_request
 passed s3tests.functional.test_s3::test_post_object_authenticated_request_bad_access_key
+passed s3tests.functional.test_s3::test_post_object_condition_is_case_sensitive
+passed s3tests.functional.test_s3::test_post_object_empty_conditions
+passed s3tests.functional.test_s3::test_post_object_escaped_field_values
 passed s3tests.functional.test_s3::test_post_object_expired_policy
+passed s3tests.functional.test_s3::test_post_object_expires_is_case_sensitive
 passed s3tests.functional.test_s3::test_post_object_invalid_access_key
+passed s3tests.functional.test_s3::test_post_object_invalid_content_length_argument
+passed s3tests.functional.test_s3::test_post_object_invalid_date_format
 passed s3tests.functional.test_s3::test_post_object_invalid_request_field_value
 passed s3tests.functional.test_s3::test_post_object_invalid_signature
+passed s3tests.functional.test_s3::test_post_object_missing_conditions_list
+passed s3tests.functional.test_s3::test_post_object_missing_content_length_argument
+passed s3tests.functional.test_s3::test_post_object_missing_expires_condition
 passed s3tests.functional.test_s3::test_post_object_missing_policy_condition
 passed s3tests.functional.test_s3::test_post_object_missing_signature
+passed s3tests.functional.test_s3::test_post_object_no_key_specified
 passed s3tests.functional.test_s3::test_post_object_request_missing_policy_specified_field
+passed s3tests.functional.test_s3::test_post_object_tags_authenticated_request
+passed s3tests.functional.test_s3::test_post_object_upload_larger_than_chunk
+passed s3tests.functional.test_s3::test_post_object_upload_size_below_minimum
+passed s3tests.functional.test_s3::test_post_object_upload_size_limit_exceeded
+passed s3tests.functional.test_s3::test_post_object_upload_size_rgw_chunk_size_bug
+passed s3tests.functional.test_s3::test_post_object_user_specified_header
 passed s3tests.functional.test_s3::test_post_object_wrong_bucket
 passed s3tests.functional.test_s3::test_put_bucket_encryption_kms
 passed s3tests.functional.test_s3::test_put_bucket_encryption_s3
@@ -633,32 +651,14 @@ failed s3tests.functional.test_s3::test_object_read_unreadable
 failed s3tests.functional.test_s3::test_object_set_get_unicode_metadata
 failed s3tests.functional.test_s3::test_object_write_with_chunked_transfer_encoding
 failed s3tests.functional.test_s3::test_post_object_anonymous_request
-failed s3tests.functional.test_s3::test_post_object_authenticated_no_content_type
-failed s3tests.functional.test_s3::test_post_object_authenticated_request
 failed s3tests.functional.test_s3::test_post_object_case_insensitive_condition_fields
-failed s3tests.functional.test_s3::test_post_object_condition_is_case_sensitive
-failed s3tests.functional.test_s3::test_post_object_empty_conditions
-failed s3tests.functional.test_s3::test_post_object_escaped_field_values
-failed s3tests.functional.test_s3::test_post_object_expires_is_case_sensitive
 failed s3tests.functional.test_s3::test_post_object_ignored_header
-failed s3tests.functional.test_s3::test_post_object_invalid_content_length_argument
-failed s3tests.functional.test_s3::test_post_object_invalid_date_format
-failed s3tests.functional.test_s3::test_post_object_missing_conditions_list
-failed s3tests.functional.test_s3::test_post_object_missing_content_length_argument
-failed s3tests.functional.test_s3::test_post_object_missing_expires_condition
-failed s3tests.functional.test_s3::test_post_object_no_key_specified
 failed s3tests.functional.test_s3::test_post_object_set_invalid_success_code
 failed s3tests.functional.test_s3::test_post_object_set_key_from_filename
 failed s3tests.functional.test_s3::test_post_object_set_success_code
 failed s3tests.functional.test_s3::test_post_object_success_redirect_action
 failed s3tests.functional.test_s3::test_post_object_tags_anonymous_request
-failed s3tests.functional.test_s3::test_post_object_tags_authenticated_request
 failed s3tests.functional.test_s3::test_post_object_upload_checksum
-failed s3tests.functional.test_s3::test_post_object_upload_larger_than_chunk
-failed s3tests.functional.test_s3::test_post_object_upload_size_below_minimum
-failed s3tests.functional.test_s3::test_post_object_upload_size_limit_exceeded
-failed s3tests.functional.test_s3::test_post_object_upload_size_rgw_chunk_size_bug
-failed s3tests.functional.test_s3::test_post_object_user_specified_header
 failed s3tests.functional.test_s3::test_put_bucket_acl_grant_group_read
 failed s3tests.functional.test_s3::test_put_bucket_ownership_bucket_owner_enforced
 failed s3tests.functional.test_s3::test_put_bucket_ownership_bucket_owner_preferred

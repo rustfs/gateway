@@ -213,26 +213,26 @@ impl<'a> WireView<'a> {
         self.count_query_param(name) > 0
     }
 
-    /// How often a POST form field of this exact name appears.
+    /// How often a POST form field appears, ignoring ASCII case.
     #[must_use]
     pub fn count_form_field(&self, name: &str) -> usize {
         self.form_fields
-            .map_or(0, |fields| fields.iter().filter(|(field, _)| *field == name).count())
+            .map_or(0, |fields| fields.iter().filter(|(field, _)| field.eq_ignore_ascii_case(name)).count())
     }
 
-    /// Whether a POST form field of this exact name is present.
+    /// Whether a POST form field is present, ignoring ASCII case.
     #[must_use]
     pub fn form_contains(&self, name: &str) -> bool {
         self.count_form_field(name) > 0
     }
 
-    /// The value of a POST form field, when it appears exactly once.
+    /// The value of a POST form field, when it appears exactly once ignoring ASCII case.
     #[must_use]
     pub fn form_value(&self, name: &str) -> Option<&'a str> {
         let fields = self.form_fields?;
         let mut found = None;
         for (field, value) in fields {
-            if *field == name {
+            if field.eq_ignore_ascii_case(name) {
                 if found.is_some() {
                     return None;
                 }

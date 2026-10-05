@@ -96,11 +96,11 @@
 #   Legacy-compat item (rustfs/backlog#2684). ci/s3tests/outcomes.txt is that run's record.
 #
 # REFRESH 2026-10-05, GENERATION 4 (rustfs/gateway#1279): run
-#   https://github.com/rustfs/gateway/actions/runs/37290385857 on main bafcfe1b9381849fdfaa95d14e16e6a08ad4d299
-#   passed=388 failed=282 errored=0 skipped=70 collected=740. The same ten header-date
-#   failures were measured in run 37263497476. The generation-3 run used e7c3e2a8 before
-#   #1188 enabled the independently measured RustFS header-signature profile. This refresh
-#   records that intentional profile difference and removes the now-passing list-prefix case.
+#   https://github.com/rustfs/gateway/actions/runs/37341938638 on main 7f5ebaed31e27a29ab088366f8f812f1da2d5f30
+#   passed=406 failed=264 errored=0 skipped=70 collected=740. The same ten header-date
+#   failures were measured in runs 37263497476 and 37290385857. Generation 3 used e7c3e2a8
+#   before #1188 enabled the independently measured RustFS header-signature profile.
+#   Remove the newly passing list-prefix case and eighteen POST cases fixed by #1281.
 #
 # generation: 4
 
@@ -225,13 +225,11 @@ s3tests.functional.test_s3::test_cors_presigned_get_object_tenant
 s3tests.functional.test_s3::test_cors_presigned_put_object_tenant
 s3tests.functional.test_s3::test_cors_presigned_put_object_tenant_with_acl
 
-# --- out-of-scope: SigV2 (header, presigned or POST form) refused by design (6) ---
+# --- SigV2 presigned CORS differences (4) — https://github.com/rustfs/gateway/issues/765 ---
 s3tests.functional.test_s3::test_cors_presigned_get_object_tenant_v2
 s3tests.functional.test_s3::test_cors_presigned_get_object_v2
 s3tests.functional.test_s3::test_cors_presigned_put_object_tenant_v2
 s3tests.functional.test_s3::test_cors_presigned_put_object_v2
-s3tests.functional.test_s3::test_post_object_tags_authenticated_request
-s3tests.functional.test_s3::test_post_object_upload_checksum
 
 # --- not-a-defect: PutBucketPolicy answers 200 as the AWS model and RustFS do (1) ---
 s3tests.functional.test_s3::test_block_public_restrict_public_buckets
@@ -329,7 +327,7 @@ s3tests.functional.test_s3::test_non_multipart_sse_c_get_part
 s3tests.functional.test_s3::test_put_obj_enc_conflict_c_kms
 s3tests.functional.test_s3::test_put_obj_enc_conflict_c_s3
 
-# --- out-of-scope: SigV2 (header or POST form) refused by design (37) — https://github.com/rustfs/gateway/issues/765 ---
+# --- SigV2 header differences (10) — https://github.com/rustfs/gateway/issues/765 ---
 s3tests.functional.test_headers::test_bucket_create_bad_authorization_invalid_aws2
 s3tests.functional.test_headers::test_bucket_create_bad_date_before_epoch_aws2
 s3tests.functional.test_headers::test_bucket_create_bad_date_none_aws2
@@ -340,33 +338,6 @@ s3tests.functional.test_headers::test_object_create_bad_authorization_invalid_aw
 s3tests.functional.test_headers::test_object_create_bad_contentlength_mismatch_below_aws2
 s3tests.functional.test_headers::test_object_create_bad_date_before_epoch_aws2
 s3tests.functional.test_headers::test_object_create_bad_date_none_aws2
-s3tests.functional.test_s3::test_post_object_anonymous_request
-s3tests.functional.test_s3::test_post_object_authenticated_no_content_type
-s3tests.functional.test_s3::test_post_object_authenticated_request
-s3tests.functional.test_s3::test_post_object_case_insensitive_condition_fields
-s3tests.functional.test_s3::test_post_object_condition_is_case_sensitive
-s3tests.functional.test_s3::test_post_object_empty_conditions
-s3tests.functional.test_s3::test_post_object_escaped_field_values
-s3tests.functional.test_s3::test_post_object_expires_is_case_sensitive
-s3tests.functional.test_s3::test_post_object_ignored_header
-s3tests.functional.test_s3::test_post_object_invalid_content_length_argument
-s3tests.functional.test_s3::test_post_object_invalid_date_format
-s3tests.functional.test_s3::test_post_object_missing_conditions_list
-s3tests.functional.test_s3::test_post_object_missing_content_length_argument
-s3tests.functional.test_s3::test_post_object_missing_expires_condition
-s3tests.functional.test_s3::test_post_object_no_key_specified
-s3tests.functional.test_s3::test_post_object_set_invalid_success_code
-s3tests.functional.test_s3::test_post_object_set_key_from_filename
-s3tests.functional.test_s3::test_post_object_set_success_code
-s3tests.functional.test_s3::test_post_object_success_redirect_action
-s3tests.functional.test_s3::test_post_object_upload_larger_than_chunk
-s3tests.functional.test_s3::test_post_object_upload_size_below_minimum
-s3tests.functional.test_s3::test_post_object_upload_size_limit_exceeded
-s3tests.functional.test_s3::test_post_object_upload_size_rgw_chunk_size_bug
-s3tests.functional.test_s3::test_post_object_user_specified_header
-s3tests.functional.test_s3::test_sse_kms_default_post_object_authenticated_request
-s3tests.functional.test_s3::test_sse_kms_post_object_authenticated_request
-s3tests.functional.test_s3::test_sse_s3_default_post_object_authenticated_request
 
 # --- out-of-scope: IAM API (user policies) is not an S3 gateway surface (27) — https://github.com/rustfs/backlog/issues/1746 ---
 s3tests.functional.test_iam::test_allow_bucket_actions_in_user_policy
@@ -446,3 +417,18 @@ s3tests.functional.test_headers::test_object_create_bad_date_before_today_aws2
 s3tests.functional.test_headers::test_object_create_bad_date_empty_aws2
 s3tests.functional.test_headers::test_object_create_bad_date_invalid_aws2
 s3tests.functional.test_headers::test_object_create_date_and_amz_date
+# --- Remaining measured POST failures (11) — https://github.com/rustfs/gateway/issues/1185 ---
+# #1281 made eighteen POST cases pass, so these are not a blanket SigV2 refusal.
+# This 7f5ebaed record still measures status, policy/field and SSE differences.
+# Keep the failures visible under the POST owner; this is not acceptance of them.
+s3tests.functional.test_s3::test_post_object_anonymous_request
+s3tests.functional.test_s3::test_post_object_case_insensitive_condition_fields
+s3tests.functional.test_s3::test_post_object_ignored_header
+s3tests.functional.test_s3::test_post_object_set_invalid_success_code
+s3tests.functional.test_s3::test_post_object_set_key_from_filename
+s3tests.functional.test_s3::test_post_object_set_success_code
+s3tests.functional.test_s3::test_post_object_success_redirect_action
+s3tests.functional.test_s3::test_post_object_upload_checksum
+s3tests.functional.test_s3::test_sse_kms_default_post_object_authenticated_request
+s3tests.functional.test_s3::test_sse_kms_post_object_authenticated_request
+s3tests.functional.test_s3::test_sse_s3_default_post_object_authenticated_request
