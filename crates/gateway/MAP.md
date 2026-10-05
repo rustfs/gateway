@@ -72,7 +72,7 @@ for request order and `docs/assembly-order.md` for extension call counts.
 | --- | --- |
 | `tests/assembly.rs` | Assembly refusals, one-Arc service, required extensions |
 | `tests/assembly_order.rs` | Aggregate extension call order and counts |
-| `tests/service_clone_allocations.rs`, `tests/header_lookup_allocations.rs` | Zero-allocation connection clones and metadata lookups held to an independently parsed-name control |
+| `tests/service_clone_allocations.rs`, `tests/header_lookup_allocations.rs`, `tests/signature_text_allocations.rs` | Connection clones, metadata lookups and signature text held to independent allocation controls |
 | `tests/service_concurrency.rs` | One hundred concurrent clones and requests |
 | `tests/service_config.rs`, `tests/operation_registry_hot_update.rs`, `tests/assembly_snapshot.rs` | Settings, routing, and middleware updates retain one in-flight generation and preserve concurrent partial updates |
 | `tests/handler_panic.rs`, `tests/observer_panic.rs`, `tests/host_reporting.rs` | Handler panic becomes 500 and the next request still runs; an observer panic changes neither an ordinary response nor a committed terminal document; a host's RustFS-shaped counter and audit entry fed from the two hooks |

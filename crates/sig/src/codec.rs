@@ -74,11 +74,16 @@ fn hex_nibble(byte: u8) -> Result<u8, SigParseError> {
 #[must_use]
 pub fn encode_hex_lower<const N: usize>(bytes: &[u8; N]) -> String {
     let mut out = String::with_capacity(N * 2);
+    append_hex_lower(&mut out, bytes);
+    out
+}
+
+/// Appends lowercase hex without allocating a second output string.
+pub(crate) fn append_hex_lower<const N: usize>(out: &mut String, bytes: &[u8; N]) {
     for byte in bytes {
         out.push(char::from(nibble_to_hex(byte >> 4)));
         out.push(char::from(nibble_to_hex(byte & 0x0f)));
     }
-    out
 }
 
 fn nibble_to_hex(nibble: u8) -> u8 {
