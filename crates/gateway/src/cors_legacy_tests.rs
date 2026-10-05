@@ -127,7 +127,10 @@ fn the_s3_paths_are_everything_but_the_non_s3_surfaces() {
 fn n_no_fallback_origins_means_no_fallback_headers() {
     let origin = request(&[("origin", "https://example.com")]);
     for fallback in [None, Some(""), Some("   ")] {
-        assert!(legacy(fallback).fallback_headers(&origin).is_empty(), "{fallback:?}");
+        assert!(
+            legacy(fallback).fallback_headers(&CorsPolicy::default(), &origin).is_empty(),
+            "{fallback:?}"
+        );
     }
 }
 
@@ -137,10 +140,10 @@ fn n_no_fallback_origins_means_no_fallback_headers() {
 fn a_listed_fallback_origin_is_echoed_without_credentials() {
     let cors = legacy(Some(" https://other.com , https://allowed.com "));
     assert!(
-        cors.fallback_headers(&request(&[("origin", "https://denied.com")]))
+        cors.fallback_headers(&CorsPolicy::default(), &request(&[("origin", "https://denied.com")]))
             .is_empty()
     );
-    let pairs = cors.fallback_headers(&request(&[("origin", "https://allowed.com")]));
+    let pairs = cors.fallback_headers(&CorsPolicy::default(), &request(&[("origin", "https://allowed.com")]));
     assert_eq!(
         names(&pairs),
         [
@@ -160,20 +163,24 @@ fn a_listed_fallback_origin_is_echoed_without_credentials() {
 
 #[test]
 fn n_a_wildcard_fallback_allows_no_credentials() {
-    let pairs = legacy(Some("*")).fallback_headers(&request(&[("origin", "https://example.com")]));
+    let pairs = legacy(Some("*")).fallback_headers(&CorsPolicy::default(), &request(&[("origin", "https://example.com")]));
     assert_eq!(get(&pairs, &ACCESS_CONTROL_ALLOW_ORIGIN), Some("*"));
     assert_eq!(names(&pairs).len(), 4, "{pairs:?}");
     // A list that merely contains `*` is a list: only the literal origin `*` matches it.
     assert!(
         legacy(Some("https://a.com,*"))
-            .fallback_headers(&request(&[("origin", "https://b.com")]))
+            .fallback_headers(&CorsPolicy::default(), &request(&[("origin", "https://b.com")]))
             .is_empty()
     );
 }
 
 #[test]
 fn n_a_request_without_origin_gets_no_fallback_headers() {
-    assert!(legacy(Some("*")).fallback_headers(&HeaderMap::new()).is_empty());
+    assert!(
+        legacy(Some("*"))
+            .fallback_headers(&CorsPolicy::default(), &HeaderMap::new())
+            .is_empty()
+    );
 }
 
 // ── what a preflight and an ordinary request read from ─────────────────────────────────────────
@@ -212,7 +219,7 @@ fn the_actual_plan_needs_an_origin_and_reads_the_first_segment() {
 // ── the bucket's rules ─────────────────────────────────────────────────────────────────────────
 
 fn preflight_headers(pairs: &[(&'static str, &'static str)]) -> Option<Vec<(HeaderName, HeaderValue)>> {
-    bucket_headers(&lab(), &Method::OPTIONS, &request(pairs))
+    bucket_headers(&CorsPolicy::default(), &lab(), &Method::OPTIONS, &request(pairs))
 }
 
 #[test]
@@ -261,6 +268,7 @@ fn a_wildcard_rule_answers_a_star_to_an_uncredentialed_preflight() {
 fn a_credentialed_request_matching_a_wildcard_rule_gets_its_origin_without_credentials() {
     let configuration = document(vec![rule(&["*"], &["GET"], &["*"], &[], None)]);
     let pairs = bucket_headers(
+        &CorsPolicy::default(),
         &configuration,
         &Method::OPTIONS,
         &request(&[
@@ -288,7 +296,7 @@ fn a_credentialed_request_matching_a_wildcard_rule_gets_its_origin_without_crede
     for credential in ["cookie", "x-amz-security-token", "x-amz-content-sha256"] {
         let mut headers = request(&[("origin", "https://console.localhost")]);
         headers.insert(HeaderName::from_static(credential), HeaderValue::from_static("x"));
-        let pairs = bucket_headers(&configuration, &Method::GET, &headers).expect("a readable origin");
+        let pairs = bucket_headers(&CorsPolicy::default(), &configuration, &Method::GET, &headers).expect("a readable origin");
         assert_eq!(
             get(&pairs, &ACCESS_CONTROL_ALLOW_ORIGIN),
             Some("https://console.localhost"),
@@ -355,21 +363,30 @@ fn n_a_preflight_no_rule_admits_gets_nothing() {
 #[test]
 fn n_an_empty_document_and_an_unruled_method_answer_nothing() {
     let origin = request(&[("origin", "https://app.example.com")]);
-    assert_eq!(bucket_headers(&document(Vec::new()), &Method::GET, &origin), Some(Vec::new()));
-    assert_eq!(bucket_headers(&lab(), &Method::PATCH, &origin), Some(Vec::new()));
+    assert_eq!(
+        bucket_headers(&CorsPolicy::default(), &document(Vec::new()), &Method::GET, &origin),
+        Some(Vec::new())
+    );
+    assert_eq!(bucket_headers(&CorsPolicy::default(), &lab(), &Method::PATCH, &origin), Some(Vec::new()));
 }
 
 #[test]
 fn n_an_unreadable_origin_reads_as_no_document() {
     let mut headers = HeaderMap::new();
     headers.insert(ORIGIN, HeaderValue::from_bytes(b"https://caf\xc3\xa9.example").expect("an opaque value"));
-    assert_eq!(bucket_headers(&lab(), &Method::GET, &headers), None);
-    assert_eq!(bucket_headers(&lab(), &Method::GET, &HeaderMap::new()), None);
+    assert_eq!(bucket_headers(&CorsPolicy::default(), &lab(), &Method::GET, &headers), None);
+    assert_eq!(bucket_headers(&CorsPolicy::default(), &lab(), &Method::GET, &HeaderMap::new()), None);
 }
 
 #[test]
 fn an_ordinary_request_is_answered_with_exposed_headers_and_no_preflight_headers() {
-    let pairs = bucket_headers(&lab(), &Method::GET, &request(&[("origin", "https://app.example.com")])).expect("readable");
+    let pairs = bucket_headers(
+        &CorsPolicy::default(),
+        &lab(),
+        &Method::GET,
+        &request(&[("origin", "https://app.example.com")]),
+    )
+    .expect("readable");
     assert_eq!(get(&pairs, &ACCESS_CONTROL_ALLOW_ORIGIN), Some("https://app.example.com"));
     assert_eq!(get(&pairs, &VARY), Some("Origin"));
     assert_eq!(get(&pairs, &ACCESS_CONTROL_ALLOW_METHODS), Some("GET, PUT"));
@@ -381,24 +398,37 @@ fn an_ordinary_request_is_answered_with_exposed_headers_and_no_preflight_headers
 #[test]
 fn an_ordinary_request_carrying_a_request_method_is_matched_on_it() {
     let pairs = bucket_headers(
+        &CorsPolicy::default(),
         &lab(),
         &Method::GET,
         &request(&[("origin", "https://any.example"), ("access-control-request-method", "HEAD")]),
     )
     .expect("readable");
     assert_eq!(get(&pairs, &ACCESS_CONTROL_ALLOW_METHODS), Some("HEAD"));
-    let unmatched = bucket_headers(&lab(), &Method::GET, &request(&[("origin", "https://any.example")])).expect("readable");
+    let unmatched = bucket_headers(
+        &CorsPolicy::default(),
+        &lab(),
+        &Method::GET,
+        &request(&[("origin", "https://any.example")]),
+    )
+    .expect("readable");
     assert!(unmatched.is_empty(), "GET matched the HEAD-only wildcard rule: {unmatched:?}");
 }
 
 #[test]
 fn a_header_value_that_cannot_be_written_is_left_out() {
     let configuration = document(vec![rule(&["https://app.example.com"], &["GET"], &[], &["etag\u{7f}"], Some(-5))]);
-    let pairs =
-        bucket_headers(&configuration, &Method::GET, &request(&[("origin", "https://app.example.com")])).expect("readable");
+    let pairs = bucket_headers(
+        &CorsPolicy::default(),
+        &configuration,
+        &Method::GET,
+        &request(&[("origin", "https://app.example.com")]),
+    )
+    .expect("readable");
     assert_eq!(get(&pairs, &ACCESS_CONTROL_ALLOW_ORIGIN), Some("https://app.example.com"));
     assert_eq!(get(&pairs, &ACCESS_CONTROL_EXPOSE_HEADERS), None);
     let preflight = bucket_headers(
+        &CorsPolicy::default(),
         &configuration,
         &Method::OPTIONS,
         &request(&[

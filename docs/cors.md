@@ -139,7 +139,7 @@ The exclusion is enforced three times over, on purpose:
    exact allow-list with a `*` in it. A policy that permits a reflected origin to carry
    credentials does not exist, so no code path can consult one.
 2. **Control flow.** `ACCESS_CONTROL_ALLOW_CREDENTIALS` is named in one function,
-   `credentials_header`, reachable only from the `AllowOrigin::Exact` arm of `credentials_for`.
+   `credentials_header`, reachable only from the `AllowOrigin::Exact` arm of `credentials_for_origin`.
    The two wildcard arms return `None` without calling it.
 3. **Text.** `scripts/check_cors_credentials_exclusive.sh` refuses a source tree in which any
    function names both the credentials header and a wildcard `AllowOrigin` variant, in which a
@@ -149,6 +149,17 @@ The exclusion is enforced three times over, on purpose:
 
 The S3 CORS document has no element for credentials. An operator who wants them says so in the
 deployment's `CorsPolicy`, by naming the origins.
+
+The RustFS compatibility setting, `answer_cors_as_legacy_rustfs`, consults that same policy.
+Credentials are disabled by default. Enabling them requires an operator-enumerated exact origin
+and an exact origin in the matched bucket rule or deployment fallback list. A wildcard bucket
+rule does not gain credentials merely because the request is signed.
+
+For a credentialed fallback preflight, the response enumerates the validated requested header
+names, including `Authorization`, instead of answering `Allow-Headers: *`; browsers do not treat
+that value as a wildcard in credentials mode. It also varies on Origin and the preflight method
+and headers. Actual fallback decoration preserves any existing `Vary` dimensions. CORS does not
+authenticate the request: an unsigned or forged S3 request is still refused.
 
 ## `Vary: Origin`
 

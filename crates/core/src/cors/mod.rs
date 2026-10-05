@@ -56,7 +56,7 @@ use crate::contracts;
 pub use self::answer::{
     ACCESS_CONTROL_ALLOW_CREDENTIALS, ACCESS_CONTROL_ALLOW_HEADERS, ACCESS_CONTROL_ALLOW_METHODS, ACCESS_CONTROL_ALLOW_ORIGIN,
     ACCESS_CONTROL_EXPOSE_HEADERS, ACCESS_CONTROL_MAX_AGE, CorsHeaders, CorsOrigins, CorsPolicy, CorsPolicyError,
-    UnrenderableRule, VARY, VARY_ORIGIN, actual_headers, preflight_headers,
+    UnrenderableRule, VARY, VARY_ORIGIN, actual_headers, credentials_for_origin, preflight_headers,
 };
 pub use self::request::{
     ACCESS_CONTROL_REQUEST_HEADERS, ACCESS_CONTROL_REQUEST_METHOD, HeadersRejected, MAX_ORIGIN_BYTES, MAX_REQUESTED_HEADER_BYTES,
