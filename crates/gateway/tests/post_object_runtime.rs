@@ -325,9 +325,18 @@ async fn success_controls(
     allow: bool,
     fields: &[(&str, &str)],
 ) -> (StatusCode, Option<String>, String, Option<(String, Vec<u8>)>) {
+    success_controls_with_filename(legacy, allow, "report.txt", fields).await
+}
+
+async fn success_controls_with_filename(
+    legacy: bool,
+    allow: bool,
+    filename: &str,
+    fields: &[(&str, &str)],
+) -> (StatusCode, Option<String>, String, Option<(String, Vec<u8>)>) {
     let backend = Arc::new(Backend::default());
     let response = service_with_form_profile(Arc::clone(&backend), legacy, allow)
-        .call_bytes(request(form_with_fields(fields)))
+        .call_bytes(request(form_with_filename_and_fields(filename, fields)))
         .await;
     let status = response.status();
     let location = response
@@ -514,4 +523,54 @@ async fn generic_redirect_conflicts_still_preempt_authorization() {
         assert!(body.contains("<Code>MalformedPOSTRequest</Code>"), "{body}");
         assert_eq!(observed, None);
     }
+}
+
+#[tokio::test]
+async fn legacy_redirect_parameters_use_form_encoding_without_rewriting_the_url() {
+    for (raw, prefix, fragment) in [
+        (
+            "https://client.example/a%20b?tag=a%20b#receipt",
+            "https://client.example/a%20b?tag=a%20b&",
+            "#receipt",
+        ),
+        ("https://client.example/finished?", "https://client.example/finished?", ""),
+        ("https://client.example/finished?x=1&", "https://client.example/finished?x=1&&", ""),
+        ("https://client.example/finished#receipt", "https://client.example/finished?", "#receipt"),
+    ] {
+        let (status, location, body, observed) =
+            success_controls_with_filename(true, true, "a b~*+%&résumé.txt", &[("success_action_redirect", raw)]).await;
+        assert_eq!(status, StatusCode::SEE_OTHER, "{body}");
+        assert_eq!(
+            location,
+            Some(format!(
+                "{prefix}bucket=example-bucket&key=uploads%2Fa+b%7E*%2B%25%26r%C3%A9sum%C3%A9.txt&etag=storage-etag{fragment}"
+            ))
+        );
+        assert_eq!(
+            observed,
+            Some(("uploads/a b~*+%&résumé.txt".to_owned(), b"hello from a browser".to_vec()))
+        );
+    }
+}
+
+#[tokio::test]
+async fn generic_redirect_parameters_do_not_inherit_legacy_form_encoding() {
+    let (status, location, body, observed) = success_controls_with_filename(
+        false,
+        true,
+        "a b~*+%&résumé.txt",
+        &[("success_action_redirect", "https://client.example/finished#receipt")],
+    )
+    .await;
+    assert_eq!(status, StatusCode::SEE_OTHER, "{body}");
+    assert_eq!(
+        location.as_deref(),
+        Some(
+            "https://client.example/finished?bucket=example-bucket&key=uploads%2Fa%20b~%2A%2B%25%26r%C3%A9sum%C3%A9.txt&etag=%22storage-etag%22#receipt"
+        )
+    );
+    assert_eq!(
+        observed,
+        Some(("uploads/a b~*+%&résumé.txt".to_owned(), b"hello from a browser".to_vec()))
+    );
 }
