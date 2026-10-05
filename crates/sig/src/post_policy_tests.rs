@@ -440,3 +440,35 @@ fn ignored_fields_still_obey_explicit_conditions() {
         );
     }
 }
+
+#[test]
+fn n_calendar_policy_expiration_rejects_impossible_days() {
+    for raw in [
+        "2030-02-30T12:00:00Z",
+        "2028-02-30T12:00:00.123Z",
+        "2026-02-29T12:00:00Z",
+        "1900-02-29T12:00:00Z",
+        "2100-02-29T12:00:00Z",
+        "2030-04-31T12:00:00Z",
+        "2030-06-31T12:00:00Z",
+        "2030-09-31T12:00:00Z",
+        "2030-11-31T12:00:00Z",
+    ] {
+        assert_eq!(parse_expiration(raw).err(), Some(PostPolicyError::Malformed), "{raw}");
+    }
+}
+
+#[test]
+fn calendar_policy_expiration_accepts_real_month_ends() {
+    for raw in [
+        "2000-02-29T12:00:00Z",
+        "2028-02-29T12:00:00.123Z",
+        "2400-02-29T12:00:00Z",
+        "2030-02-28T12:00:00Z",
+        "2030-04-30T12:00:00Z",
+        "2030-01-31T12:00:00Z",
+        "2030-12-31T12:00:00Z",
+    ] {
+        assert!(parse_expiration(raw).is_ok(), "{raw}");
+    }
+}

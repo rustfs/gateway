@@ -681,7 +681,10 @@ fn parse_expiration(value: &str) -> Result<AmzDate, PostPolicyError> {
         &value[14..16],
         &value[17..19]
     );
-    AmzDate::parse(&compact).map_err(|_| PostPolicyError::Malformed)
+    let parsed = AmzDate::parse(&compact).map_err(|_| PostPolicyError::Malformed)?;
+    // Validate the calendar even when an unrouted form does not enforce expiration.
+    crate::clock::unix_seconds(&parsed).ok_or(PostPolicyError::Malformed)?;
+    Ok(parsed)
 }
 
 fn parse_signature(value: &str) -> Result<Signature, PostPolicyError> {

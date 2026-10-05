@@ -249,7 +249,8 @@ impl ClockChecked {
 /// # Errors
 ///
 /// [`AuthError::RequestTimeTooSkewed`] when the timestamp is further in the past than
-/// [`SkewWindow::past`], further in the future than [`SkewWindow::future`], or so far from the
+/// [`SkewWindow::past`], further in the future than [`SkewWindow::future`], names an impossible
+/// calendar date, or is so far from the
 /// epoch that the distance is not representable — an unrepresentable distance is definitionally
 /// outside any window, and answering anything else would mean deciding a comparison that
 /// overflowed.
@@ -267,7 +268,7 @@ pub fn enforce_clock_skew(signed_at: &AmzDate, now: RequestNow, window: SkewWind
 /// # Errors
 ///
 /// [`AuthError::RequestTimeTooSkewed`] when the timestamp is further in the future than
-/// [`SkewWindow::future`], or when the distance is not representable.
+/// [`SkewWindow::future`], names an impossible calendar date, or has an unrepresentable distance.
 pub(crate) fn enforce_presigned_clock_skew(
     signed_at: &AmzDate,
     now: RequestNow,
@@ -410,7 +411,13 @@ pub(crate) fn unix_seconds(date: &AmzDate) -> Option<i64> {
 
 /// Days from `1970-01-01` to a proleptic Gregorian date, positive or negative.
 fn days_from_civil(year: i64, month: i64, day: i64) -> Option<i64> {
-    if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+    let last_day = match month {
+        2 if year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) => 29,
+        2 => 28,
+        4 | 6 | 9 | 11 => 30,
+        _ => 31,
+    };
+    if !(1..=12).contains(&month) || !(1..=last_day).contains(&day) {
         return None;
     }
     let year = if month <= 2 { year.checked_sub(1)? } else { year };
@@ -524,5 +531,54 @@ mod tests {
             enforce_clock_skew(&signed, RequestNow::from_unix_seconds(1_440_938_160 + 3_600), window).err(),
             Some(AuthError::RequestTimeTooSkewed)
         );
+    }
+
+    #[test]
+    fn n_calendar_impossible_days_are_not_normalized() {
+        for raw in [
+            "20300230T120000Z",
+            "20280230T120000Z",
+            "20260229T120000Z",
+            "19000229T120000Z",
+            "21000229T120000Z",
+            "20300431T120000Z",
+            "20300631T120000Z",
+            "20300931T120000Z",
+            "20301131T120000Z",
+        ] {
+            assert_eq!(unix_seconds(&date(raw)), None, "{raw}");
+        }
+    }
+
+    #[test]
+    fn n_calendar_impossible_days_cannot_get_clock_receipts() {
+        for (invalid, normalized) in [
+            ("20300230T120000Z", "20300302T120000Z"),
+            ("21000229T120000Z", "21000301T120000Z"),
+        ] {
+            let now = RequestNow::from_unix_seconds(unix_seconds(&date(normalized)).expect("valid control date"));
+            assert_eq!(
+                enforce_clock_skew(&date(invalid), now, SkewWindow::DEFAULT).err(),
+                Some(AuthError::RequestTimeTooSkewed)
+            );
+            assert_eq!(
+                enforce_presigned_clock_skew(&date(invalid), now, SkewWindow::DEFAULT).err(),
+                Some(AuthError::RequestTimeTooSkewed)
+            );
+        }
+    }
+
+    #[test]
+    fn calendar_real_month_ends_keep_their_seconds() {
+        // Independently calculated UTC instants, including a leap century.
+        for (raw, expected) in [
+            ("20280229T000000Z", 1835395200),
+            ("24000229T000000Z", 13574563200),
+            ("20300430T000000Z", 1903737600),
+            ("20300131T000000Z", 1896048000),
+            ("20301231T000000Z", 1924905600),
+        ] {
+            assert_eq!(unix_seconds(&date(raw)), Some(expected), "{raw}");
+        }
     }
 }
