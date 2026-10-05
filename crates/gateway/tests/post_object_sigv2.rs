@@ -14,8 +14,8 @@
 
 //! SigV2 browser forms through the real multipart reader and authentication pipeline.
 //!
-//! Responsible for opt-in verification and for proving refusals never commit object bytes.
-//! Not responsible for storage implementation or multipart grammar edge cases.
+//! Responsible for: opt-in verification and for proving refusals never commit object bytes.
+//! NOT responsible for: storage implementation or multipart grammar edge cases.
 //! Upstream: the RustFS compatibility settings. Downstream: the integration test target.
 
 use std::sync::{Arc, Mutex};
