@@ -207,12 +207,7 @@ mod observer_tests {
         let failure = observe(response, 3)
             .await
             .expect_err("the observer must refuse this response");
-        let panic = failure.into_panic();
-        let message = panic
-            .downcast_ref::<String>()
-            .map(String::as_str)
-            .or_else(|| panic.downcast_ref::<&str>().copied())
-            .expect("the observer gives a readable failure");
+        let message = failure.to_string();
         assert!(message.contains(reason), "the observer failed for the wrong reason: {message}");
     }
 
