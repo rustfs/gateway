@@ -22,7 +22,7 @@
 //! NOT responsible for: what the bytes mean (`crate::gate` collects them, `crate::chunked`
 //! decodes them), the byte ceilings' values (`crate::gate::BodyCeilings::of`), or any framing rule
 //! (`rustfs_gateway_http::ingest`).
-//! Upstream: `crate::gate`, the only module that builds either type. Downstream:
+//! Upstream: `crate::gate` and local request-body adapters. Downstream:
 //! `rustfs_gateway_http::IngestPipeline`, which pulls through [`WireReader`].
 //!
 //! # Why the framed path pulls instead of collecting
@@ -239,7 +239,8 @@ impl WireProgress {
 /// Every frame passes the ceilings *before* its bytes are handed on, so the frame that crosses a
 /// line is refused rather than buffered — which is the whole difference between a ceiling and a
 /// report about a buffer that already exists.
-pub(crate) struct WireFrames<B> {
+pub(crate) struct WireFrames<B: http_body::Body> {
+    refusal: fn(B::Error) -> S3Error,
     body: Pin<Box<B>>,
     progress: WireProgress,
     ceilings: BodyCeilings,
@@ -264,6 +265,7 @@ where
     /// Opens the read. Nothing is polled until [`Self::poll_next`] is.
     pub(crate) fn new(body: B, progress: WireProgress, ceilings: BodyCeilings, timeouts: BodyTimeouts) -> Self {
         Self {
+            refusal: |_| crate::gate::incomplete(),
             body: Box::pin(body),
             progress,
             ceilings,
@@ -272,6 +274,17 @@ where
             payload_free_run: 0,
             ended: false,
         }
+    }
+
+    /// Keeps a local protocol adapter's typed refusal; transport readers use the default.
+    pub(crate) fn with_refusal(mut self, refusal: fn(B::Error) -> S3Error) -> Self {
+        self.refusal = refusal;
+        self
+    }
+
+    /// Annotates a local refusal with this reader's observed transport completion.
+    pub(crate) fn mark_refusal_if_unfinished(&self, refusal: S3Error) -> S3Error {
+        self.progress.mark_refusal_if_unfinished(refusal)
     }
 
     /// The next data frame, or `None` once the body is over.
@@ -405,6 +418,7 @@ where
 
     /// A transport error is a body that did not arrive as it was framed, and nothing more
     /// specific: the transport's own reason is not a sentence to put on the wire.
+    /// A local protocol adapter may instead supply an explicit typed refusal converter.
     fn settle(
         &mut self,
         frame: Option<Result<http_body::Frame<B::Data>, B::Error>>,
@@ -415,7 +429,7 @@ where
         match frame {
             None => Ok(None),
             Some(Ok(frame)) => Ok(Some(frame)),
-            Some(Err(_)) => Err(crate::gate::incomplete()),
+            Some(Err(error)) => Err((self.refusal)(error)),
         }
     }
 }
@@ -424,7 +438,7 @@ where
 ///
 /// `rustfs_gateway_http::IngestPipeline` reads through this, so the wire bytes it decodes are
 /// resident in its window and nowhere else.
-pub(crate) struct WireReader<B> {
+pub(crate) struct WireReader<B: http_body::Body> {
     frames: WireFrames<B>,
     /// What is left of the frame the last fill did not finish copying out.
     leftover: Bytes,

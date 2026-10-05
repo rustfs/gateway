@@ -160,6 +160,8 @@ mod post_object_legacy_fields;
 mod post_object_legacy_form;
 #[path = "post_object_runtime.rs"]
 mod post_object_runtime;
+#[path = "post_object_sigv2.rs"]
+mod post_object_sigv2;
 #[path = "post_object_streaming.rs"]
 mod post_object_streaming;
 #[path = "precondition_contract.rs"]

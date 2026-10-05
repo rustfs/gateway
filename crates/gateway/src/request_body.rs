@@ -44,7 +44,7 @@ use crate::wire_read::{WireFrames, WireProgress, WireReader};
 
 const DELIVERY_BYTES: usize = 64 * 1024;
 
-enum Source<B> {
+enum Source<B: http_body::Body> {
     Empty,
     Plain(WireFrames<B>),
     Framed(Box<IngestPipeline<WireReader<B>>>),
@@ -64,6 +64,26 @@ impl StreamingRead {
         ingest: Option<ChunkIngest>,
         digest: BodyDigestObligation,
         integrity: impl Into<Integrity>,
+    ) -> Result<Self, S3Error>
+    where
+        B: http_body::Body + Send + 'static,
+        B::Data: Send,
+        B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+    {
+        Self::new_with_refusal(body, (declared_length, object_ceiling), body_plan, ingest, digest, integrity, |_| {
+            crate::gate::incomplete()
+        })
+    }
+
+    /// Preserves a local body adapter's typed refusal outside the protocol-neutral stream.
+    pub(crate) fn new_with_refusal<B>(
+        body: Option<B>,
+        (declared_length, object_ceiling): (Option<u64>, Option<u64>),
+        body_plan: (BodyCeilings, BodyTimeouts, Option<std::sync::Arc<dyn BodyQuota>>),
+        ingest: Option<ChunkIngest>,
+        digest: BodyDigestObligation,
+        integrity: impl Into<Integrity>,
+        refusal: fn(B::Error) -> S3Error,
     ) -> Result<Self, S3Error>
     where
         B: http_body::Body + Send + 'static,
@@ -109,9 +129,11 @@ impl StreamingRead {
         }
         let source = match (body, ingest) {
             (None, _) => Source::Empty,
-            (Some(body), None) => Source::Plain(WireFrames::new(body, progress.clone(), ceilings, timeouts)),
+            (Some(body), None) => {
+                Source::Plain(WireFrames::new(body, progress.clone(), ceilings, timeouts).with_refusal(refusal))
+            }
             (Some(body), Some(ingest)) => {
-                let frames = WireFrames::new(body, progress.clone(), ceilings, timeouts);
+                let frames = WireFrames::new(body, progress.clone(), ceilings, timeouts).with_refusal(refusal);
                 Source::Framed(Box::new(ingest.into_pipeline(WireReader::new(frames))?))
             }
         };
@@ -304,7 +326,7 @@ impl BodyMonitor {
     }
 }
 
-struct VerifiedRequestBody<B> {
+struct VerifiedRequestBody<B: http_body::Body> {
     source: Source<B>,
     progress: WireProgress,
     digests: Option<BodyDigests>,
@@ -317,7 +339,7 @@ struct VerifiedRequestBody<B> {
     ended: bool,
 }
 
-impl<B> VerifiedRequestBody<B> {
+impl<B: http_body::Body> VerifiedRequestBody<B> {
     fn settle(&mut self, verdict: Result<BodyVerified, S3Error>) {
         if let Some(terminal) = self.terminal.take() {
             let _ = terminal.send(BodyTerminal::Complete(verdict));
@@ -440,7 +462,7 @@ where
     }
 }
 
-impl<B> Drop for VerifiedRequestBody<B> {
+impl<B: http_body::Body> Drop for VerifiedRequestBody<B> {
     fn drop(&mut self) {
         if let Some(terminal) = self.terminal.take() {
             // Two different drops. Nothing read is a body the handler declined, and its refusal may

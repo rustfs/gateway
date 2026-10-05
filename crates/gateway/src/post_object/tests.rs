@@ -43,6 +43,7 @@ fn body(ceiling: u64, policy: AcceptedPolicy) -> Result<PostFileBody<Full<Bytes>
         frames: WireFrames::new(wire, progress, BodyCeilings::streaming(None), BodyTimeouts::S3),
         first: Some(Bytes::from(format!("{REST}\r\n--{BOUNDARY}--\r\n"))),
         initial: false,
+        legacy_policy_errors: false,
         file,
         policy,
         bucket: "example-bucket".to_owned(),
@@ -106,4 +107,22 @@ async fn a_final_policy_refusal_discards_every_frame_from_that_push() -> Result<
 #[tokio::test]
 async fn a_ceiling_refusal_discards_the_accepted_prefix_of_that_push() -> Result<(), String> {
     assert_rejected_without_output(body(10, AcceptedPolicy::Anonymous)?, "the POST file exceeded its policy ceiling").await
+}
+
+#[tokio::test]
+async fn a_policy_refusal_keeps_the_transport_completion_observation() -> Result<(), String> {
+    for (remaining, unfinished) in [(Bytes::new(), false), (Bytes::from_static(b"unread transport bytes"), true)] {
+        let wire = Full::new(remaining);
+        let progress = WireProgress::for_body(BodyDigestObligation::None, Some(&wire));
+        let mut body = body(10, AcceptedPolicy::Anonymous)?;
+        body.frames = WireFrames::new(wire, progress, BodyCeilings::streaming(None), BodyTimeouts::S3);
+        body.legacy_policy_errors = true;
+        let Some(Err(error)) = body.frame().await else {
+            return Err("the file ceiling must refuse the pending push".to_owned());
+        };
+        let refusal = error.into_refusal();
+        assert_eq!(refusal.code(), Some(&ErrorCode::ENTITY_TOO_LARGE));
+        assert_eq!(refusal.body_unfinished.is_some(), unfinished);
+    }
+    Ok(())
 }

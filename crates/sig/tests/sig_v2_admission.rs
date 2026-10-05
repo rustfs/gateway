@@ -315,3 +315,53 @@ fn c_sig_0569_the_skew_window_reaches_sigv2_in_both_directions() {
         .expect("a Date inside the window is admitted");
     assert!(matches!(admitted, Admission::SealedSigV2(_)));
 }
+
+/// Multipart readers lowercase names; direct callers may preserve their wire spelling.
+#[test]
+fn post_form_access_key_names_are_case_insensitive() {
+    for name in ["AWSAccessKeyId", "awsaccesskeyid", "AwsAccessKeyID"] {
+        let fields = [(name, "AKIDEXAMPLE"), ("signature", WELL_FORMED_SIGNATURE)];
+        let headers = HeaderMap::new();
+        let view = WireView::new(&headers, RawQuery::new("")).with_form_fields(&fields);
+        assert!(matches!(
+            SecurityFloor::new()
+                .enable_sigv2_presigned_compatibility()
+                .admit(view, &operation(), now()),
+            Ok(Admission::SealedSigV2(_))
+        ));
+    }
+}
+
+/// A differently cased duplicate must not select either credential's value.
+#[test]
+fn differently_cased_post_credentials_are_duplicates() {
+    for name in [
+        "AWSAccessKeyId",
+        "signature",
+        "policy",
+        "x-amz-security-token",
+        "x-amz-algorithm",
+        "x-amz-credential",
+        "x-amz-date",
+        "x-amz-signature",
+    ] {
+        let upper = name.to_ascii_uppercase();
+        let fields = [(name, "first"), (upper.as_str(), "second")];
+        let headers = HeaderMap::new();
+        let view = WireView::new(&headers, RawQuery::new("")).with_form_fields(&fields);
+        assert!(view.form_value(name).is_none());
+        assert_eq!(
+            rustfs_gateway_sig::enforce_no_duplicate_sig_params(&view),
+            Err(AuthError::AuthorizationHeaderMalformed)
+        );
+    }
+}
+
+/// Incomplete normalized credentials are still a signing attempt under the default policy.
+#[test]
+fn a_lowercase_access_key_alone_cannot_be_anonymous() {
+    let fields = [("awsaccesskeyid", "AKIDEXAMPLE")];
+    let headers = HeaderMap::new();
+    let view = WireView::new(&headers, RawQuery::new("")).with_form_fields(&fields);
+    assert!(SecurityFloor::new().admit(view, &operation(), now()).is_err());
+}
