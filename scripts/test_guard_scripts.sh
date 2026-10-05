@@ -267,11 +267,12 @@ guard_case_owned() {
         guard_budget_stop "$ordinal"
     fi
     if [[ -n "$GUARD_SHARD_COUNT" ]]; then
-        if (($(guard_group_of "$ordinal" "$GUARD_SHARD_GROUPS") != GUARD_SHARD_GROUP)); then
+        # Every worker considers every ordinal. Keep this arithmetic in its parent shell;
+        # the pure helpers and the ledger controls independently check the same partition.
+        if (((ordinal - 1) % GUARD_SHARD_GROUPS != GUARD_SHARD_GROUP)); then
             return 1
         fi
-        if (($(guard_worker_of "$ordinal" "$GUARD_SHARD_GROUPS" "$GUARD_SHARD_COUNT") !=
-            GUARD_SHARD_INDEX)); then
+        if ((((ordinal - 1) / GUARD_SHARD_GROUPS) % GUARD_SHARD_COUNT != GUARD_SHARD_INDEX)); then
             return 1
         fi
     fi
@@ -305,11 +306,10 @@ guard_detect_jobs() {
         cores="$(sysctl -n hw.ncpu 2>/dev/null || true)"
     fi
     [[ "$cores" =~ ^[1-9][0-9]*$ ]] || cores=1
-    # One worker per core, not more. Each worker builds its own sandbox — a copy of
-    # the whole tree plus a fresh Git index — which on a two-core hosted runner is
-    # tens of seconds, so an extra worker beyond the core count adds more setup than
-    # the cases it takes away. GATEWAY_GUARD_JOBS overrides it, and every run prints
-    # its elapsed time, so the choice stays reviewable against real numbers.
+    # One worker per core, not more. Workers borrow baseline objects but still check out
+    # the whole tree and keep private indexes, so an extra worker beyond the core count
+    # adds more setup than the cases it takes away. GATEWAY_GUARD_JOBS overrides it;
+    # every run prints its elapsed time, keeping the choice reviewable against real numbers.
     local jobs="$cores"
     ((jobs <= 8)) || jobs=8
     printf '%s\n' "$jobs"
@@ -400,6 +400,11 @@ run_guard_shards() {
     local total_failures=0 total_executed=0
     local pids=() codes=()
     local shard_considered shard_executed shard_failures
+    # Snapshot the current tree once, retaining its immutable objects until every worker exits.
+    if ! make_sandbox; then
+        printf 'cannot prepare the current-tree guard group baseline\n' >&2
+        return 1
+    fi
     workdir="$(mktemp -d "${TMPDIR:-/tmp}/gateway-guard-shards.XXXXXX")"
     printf 'Guard self-test: group %s/%s, %s worker(s), %ss budget\n' \
         "$((GUARD_SHARD_GROUP + 1))" "$GUARD_SHARD_GROUPS" "$jobs" "$GUARD_BUDGET_SECONDS"
@@ -407,6 +412,7 @@ run_guard_shards() {
         mkdir -p "${workdir}/tmp-${index}"
         : >"${workdir}/ledger-${index}"
         env \
+            GATEWAY_GUARD_BASELINE="$SANDBOX" \
             GATEWAY_GUARD_SHARD_INDEX="$index" \
             GATEWAY_GUARD_SHARD_COUNT="$jobs" \
             GATEWAY_GUARD_SHARD_GROUPS="$GUARD_SHARD_GROUPS" \
@@ -482,25 +488,6 @@ guard_finish() {
     fi
     [[ "$failures" -eq 0 ]]
 }
-
-if [[ -z "$GUARD_SHARD_COUNT" ]]; then
-    GUARD_JOBS="${GATEWAY_GUARD_JOBS:-$(guard_detect_jobs)}"
-    if [[ ! "$GUARD_JOBS" =~ ^[1-9][0-9]*$ ]]; then
-        printf 'test_guard_scripts: GATEWAY_GUARD_JOBS must be a positive integer\n' >&2
-        exit 1
-    fi
-    GUARD_JOBS="$(guard_shard_plan \
-        "$GUARD_JOBS" "$QUIRK_LEDGER_ONLY" "$DTO_COMPILER_ONLY" "$BUILD_GUARDS_ONLY" \
-        "$ERROR_STATUS_ONLY")"
-    # One worker is still a shard when the suite is split over runners: the group
-    # filter and the coverage proof both live in run_guard_shards, so a single-worker
-    # group must go through it rather than quietly running every other group's cases.
-    if ((GUARD_JOBS > 1 || GUARD_SHARD_GROUPS > 1)); then
-        GUARD_SHARDS_RC=0
-        run_guard_shards "$GUARD_JOBS" || GUARD_SHARDS_RC=$?
-        exit "$GUARD_SHARDS_RC"
-    fi
-fi
 
 pass_msg() { printf '  ok   %s\n' "$*"; }
 fail_msg() {
@@ -637,6 +624,33 @@ make_sandbox() {
     fi
 
     local dir list archive
+    local baseline baseline_head clone_head baseline_status
+    # Only workers consume a provided baseline. A group parent must snapshot the current tree,
+    # including unstaged and untracked inputs, even if its environment contains an older seed.
+    if [[ -n "${GUARD_SHARD_COUNT:-}" && "${GATEWAY_GUARD_BASELINE+x}" ]]; then
+        baseline="$GATEWAY_GUARD_BASELINE"
+        if [[ -z "$baseline" || ! -d "$baseline" ]] ||
+            ! baseline_head="$(git -C "$baseline" rev-parse --verify HEAD 2>/dev/null)" ||
+            ! baseline_status="$(git -C "$baseline" status --porcelain 2>/dev/null)" ||
+            [[ -n "$baseline_status" ]]; then
+            printf 'invalid guard group baseline\n' >&2
+            return 1
+        fi
+        if ! dir="$(mktemp -d "${TMPDIR:-/tmp}/gateway-guard-test.XXXXXX")"; then
+            printf 'cannot prepare guard group baseline\n' >&2
+            return 1
+        fi
+        # The parent outlives all workers. Checkout, index, refs and newly written objects are
+        # private; only this clean baseline's existing objects are borrowed.
+        if ! git clone --shared -q -- "$baseline" "$dir" >/dev/null 2>&1 ||
+            ! clone_head="$(git -C "$dir" rev-parse --verify HEAD 2>/dev/null)" ||
+            [[ "$clone_head" != "$baseline_head" ]] ||
+            ! (git -C "$dir" config maintenance.auto false && git -C "$dir" config gc.auto 0); then
+            rm -rf "$dir" || true
+            printf 'cannot prepare guard group baseline\n' >&2
+            return 1
+        fi
+    else
     dir="$(mktemp -d "${TMPDIR:-/tmp}/gateway-guard-test.XXXXXX")"
     # `tar --null -T -` is GNU-only; BSD tar (macOS) rejects it, and letting the failing
     # call write to the pipe before the fallback produces a spurious "tar: Write error"
@@ -645,8 +659,8 @@ make_sandbox() {
     # The pinned model JSON used to be excluded here as 3.2 MB no guard read.
     # check_route_coverage.sh reads it, and the exclusion made that guard skip
     # its own self-test while reporting success — so the sandbox now carries the
-    # whole tree. One sandbox is built per run and reset between cases, so the
-    # 3.2 MB is paid once.
+    # whole tree. One baseline is built per group and workers reset their own clones
+    # between cases, so the 3.2 MB is archived once.
     list="${dir}.files"
     archive="${dir}.tar"
     # Include new, unignored files: a guard introduced in the same change must be able to test its
@@ -690,6 +704,7 @@ make_sandbox() {
         rm -f "$list" "$archive" || true
         rm -rf "$dir" || true
         return 1
+    fi
     fi
     SANDBOX="$dir"
     SANDBOX_RESET_TRACKED="${dir}.reset-tracked"
@@ -832,6 +847,25 @@ expect_semver_fail() {
     fi
 }
 trap cleanup_sandbox EXIT
+
+if [[ -z "$GUARD_SHARD_COUNT" ]]; then
+    GUARD_JOBS="${GATEWAY_GUARD_JOBS:-$(guard_detect_jobs)}"
+    if [[ ! "$GUARD_JOBS" =~ ^[1-9][0-9]*$ ]]; then
+        printf 'test_guard_scripts: GATEWAY_GUARD_JOBS must be a positive integer\n' >&2
+        exit 1
+    fi
+    GUARD_JOBS="$(guard_shard_plan \
+        "$GUARD_JOBS" "$QUIRK_LEDGER_ONLY" "$DTO_COMPILER_ONLY" "$BUILD_GUARDS_ONLY" \
+        "$ERROR_STATUS_ONLY")"
+    # One worker is still a shard when the suite is split over runners: the group
+    # filter and the coverage proof both live in run_guard_shards, so a single-worker
+    # group must go through it rather than quietly running every other group's cases.
+    if ((GUARD_JOBS > 1 || GUARD_SHARD_GROUPS > 1)); then
+        GUARD_SHARDS_RC=0
+        run_guard_shards "$GUARD_JOBS" || GUARD_SHARDS_RC=$?
+        exit "$GUARD_SHARDS_RC"
+    fi
+fi
 
 make_ct_eq_sandbox() {
     if [[ -n "$CT_EQ_SANDBOX" ]]; then
@@ -20923,6 +20957,8 @@ expect_sandbox_setup_failure() {
         REPO_ROOT="$probe_root/repo"
         TMPDIR="$probe_root/tmp"
         SANDBOX=""
+        # These probes inject archive construction failures, even inside a clone-backed worker.
+        unset GATEWAY_GUARD_BASELINE
 
         git() {
             local argument
@@ -24523,6 +24559,9 @@ shard_case 'Mint dependency notices match the shipped package identities' \
 
 shard_case 'nested signature cases partition the ledger and propagate every failure' \
     python3 "${SCRIPT_DIR}/test_nested_guard_ownership.py"
+
+shard_case 'one immutable group baseline preserves current inputs and private worker mutations' \
+    python3 "${SCRIPT_DIR}/test_guard_group_baseline.py"
 
 shard_case 'the default mode shards across the requested workers' \
     shard_plan_is 4 4 0 0 0
