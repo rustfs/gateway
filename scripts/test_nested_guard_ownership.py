@@ -80,6 +80,57 @@ exit "${CHILD_STATUS:-0}"
     assert run(5, 2).stdout.split()[-1] == "1", "missing child did not fail"
 print("OK: all 29 child cases run once across 48 workers and malformed results fail closed")
 
+# Observe helper execution contexts, rather than inferring a fork from source spelling. The
+# direct and command-substitution controls keep a constant observer from passing this probe.
+dispatch_definitions = "\n".join(functions[:3]).replace(
+    "guard_group_of()", "original_guard_group_of()", 1
+).replace("guard_worker_of()", "original_guard_worker_of()", 1)
+dispatch_program = dispatch_definitions + r'''
+guard_group_of() {
+    printf '%s %s\n' "$PHASE" "$BASH_SUBSHELL" >>"$TRACE"
+    original_guard_group_of "$@"
+}
+guard_worker_of() {
+    printf '%s %s\n' "$PHASE" "$BASH_SUBSHELL" >>"$TRACE"
+    original_guard_worker_of "$@"
+}
+GUARD_BUDGET_STOP=999999
+GUARD_EXECUTED=0
+PHASE=direct
+guard_group_of 1 1 >/dev/null
+PHASE=child
+control="$(guard_worker_of 1 1 8)"
+PHASE=dispatch
+for ((ordinal = 1; ordinal <= 32; ordinal++)); do
+    if guard_case_owned "$ordinal"; then printf 'selected %s\n' "$ordinal"; fi
+done
+printf 'executed %s\n' "$GUARD_EXECUTED"
+'''
+with tempfile.TemporaryDirectory(prefix="gateway-guard-dispatch-") as directory:
+    root = Path(directory)
+    trace, ledger = root / "trace", root / "ledger"
+    ledger.touch()
+    result = subprocess.run(
+        ["bash", "-c", dispatch_program], capture_output=True, text=True,
+        env=dict(os.environ, TRACE=str(trace), GUARD_SHARD_LEDGER=str(ledger),
+                 GUARD_SHARD_GROUPS="1", GUARD_SHARD_GROUP="0",
+                 GUARD_SHARD_COUNT="8", GUARD_SHARD_INDEX="0"),
+    )
+    assert result.returncode == 0, ("dispatch probe failed", result)
+    events = [line.split() for line in trace.read_text().splitlines()]
+    direct = [int(depth) for phase, depth in events if phase == "direct"]
+    child = [int(depth) for phase, depth in events if phase == "child"]
+    assert direct == [0], ("direct helper control was not observed in its caller", events)
+    assert len(child) == 1 and child[0] > 0, ("child helper control was not observed", events)
+    selected = [int(line.split()[1]) for line in result.stdout.splitlines() if line.startswith("selected ")]
+    expected = [ordinal for ordinal in range(1, 33) if (ordinal - 1) % 8 == 0]
+    assert selected == expected, ("dispatch selected the wrong ordinals", result)
+    assert result.stdout.splitlines()[-1] == f"executed {len(expected)}", ("dispatch count drifted", result)
+    assert [int(token) for token in ledger.read_text().split()] == expected, "dispatch ledger drifted"
+    dispatched_children = sum(int(depth) > 0 for phase, depth in events if phase == "dispatch")
+    assert dispatched_children == 0, f"ownership dispatch evaluated {dispatched_children} helpers in child shells"
+print("OK: ownership dispatch preserves its ledger without child helper evaluations")
+
 # Exercise the actual child's selector without constructing repository fixtures.
 child_source = Path(__file__).with_name("test_sig_case_coverage.sh").read_text()
 selector = child_source[child_source.index('failures=0\n'):child_source.index('pass_msg()')]

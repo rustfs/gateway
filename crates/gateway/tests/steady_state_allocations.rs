@@ -55,16 +55,17 @@ const BODY: &[u8] = b"a small object body, sixty-four bytes long, for both direc
 
 /// a-pf-0002 / a-pf-0003: heap blocks one warm signed `GetObject` and `PutObject` may allocate,
 /// end to end, where CI runs. Measured on Linux at exactly 148.000 and 195.002 per request over
-/// four runs. The plan's targets were 3 and 4; the gap is the pipeline's to close, and this
-/// ceiling only moves down.
+/// four runs. Borrowed metadata lookup names (#1301) lower these ceilings by 16 / 36 blocks;
+/// the plan's targets remain 3 and 4.
 #[cfg(target_os = "linux")]
-const BLOCKS_PER_REQUEST: Option<(u64, u64)> = Some((148, 195));
+const BLOCKS_PER_REQUEST: Option<(u64, u64)> = Some((132, 159));
 /// macOS's standard library and runtime allocate a few more blocks per request, and not the same
 /// number every window: 153.9–154.4 and 211.8–212.4 over thirteen runs, drifting up with a
 /// window's wall time. The ceiling there keeps a block of room for that drift, so it refuses two
 /// new allocations per request but not reliably one; the Linux ceiling is the exact one.
+/// The same name-borrowing repair measures about 138 / 176 on macOS; retain the original slack.
 #[cfg(target_os = "macos")]
-const BLOCKS_PER_REQUEST: Option<(u64, u64)> = Some((155, 213));
+const BLOCKS_PER_REQUEST: Option<(u64, u64)> = Some((139, 177));
 /// No platform other than the two above has been measured, so there is no ceiling to hold it to.
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
 const BLOCKS_PER_REQUEST: Option<(u64, u64)> = None;
