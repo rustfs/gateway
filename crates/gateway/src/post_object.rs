@@ -52,6 +52,7 @@ enum SuccessAction {
     Ok,
     Created,
     NoContent,
+    UnsupportedStatus,
     Redirect(String),
 }
 
@@ -63,14 +64,17 @@ pub(crate) struct PostObjectResponsePlan {
 }
 
 impl PostObjectResponsePlan {
-    fn parse(fields: &[(&str, &str)], bucket: &BucketName, key: &ObjectKey) -> Result<Self, S3Error> {
+    fn parse(fields: &[(&str, &str)], bucket: &BucketName, key: &ObjectKey, legacy: bool) -> Result<Self, S3Error> {
         let status = unique_success_field(fields, "success_action_status")?;
+        let normalized = status.filter(|_| legacy).map(legacy::success_status).transpose()?;
+        let status = normalized.as_deref().or(status);
         let redirect = unique_success_field(fields, "success_action_redirect")?;
         let action = match (status, redirect) {
             (Some(_), Some(_)) => return Err(policy_refusal(PostPolicyError::Malformed)),
             (Some("200"), None) => SuccessAction::Ok,
             (Some("201"), None) => SuccessAction::Created,
             (Some("204"), None) | (None, None) => SuccessAction::NoContent,
+            (Some(_), None) if legacy => SuccessAction::UnsupportedStatus,
             (Some(_), None) => return Err(policy_refusal(PostPolicyError::Malformed)),
             (None, Some(raw)) => SuccessAction::Redirect(validated_redirect(raw, bucket.as_str(), key.as_str())?),
         };
@@ -109,6 +113,12 @@ impl PostObjectResponsePlan {
             SuccessAction::NoContent => {
                 encoded.status = StatusCode::NO_CONTENT;
                 encoded.body = ResponseBody::Empty;
+            }
+            SuccessAction::UnsupportedStatus => {
+                return Err(HandlerError::new(
+                    ErrorCode::MALFORMED_POST_REQUEST,
+                    "the POST success status was not accepted",
+                ));
             }
             SuccessAction::Redirect(raw) => {
                 let e_tag = encoded_etag(encoded)?;
@@ -380,7 +390,7 @@ where
                 .collect();
             (metadata, None, PostObjectFields::default())
         };
-        let response = PostObjectResponsePlan::parse(&fields, &bucket, &key)?;
+        let response = PostObjectResponsePlan::parse(&fields, &bucket, &key, legacy_store)?;
         let ceiling = policy.read_ceiling(self.limits);
         let file = self.reader.into_file(ceiling).map_err(form_refusal)?;
         Ok(ResolvedPostObject {
@@ -439,6 +449,9 @@ where
     pub(crate) fn handoff(self, _proof: &MetadataAdmission<'_>) -> Result<(RequestBody, Option<BodyMonitor>), S3Error> {
         // After authorization and before a file byte is read or the handler runs: the last point
         // at which legacy RustFS would have refused nothing and gone on to store.
+        if matches!(self.response.action, SuccessAction::UnsupportedStatus) {
+            return Err(policy_refusal(PostPolicyError::Malformed));
+        }
         if let Some(refusal) = self.not_carried {
             return Err(refusal.into_error());
         }

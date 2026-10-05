@@ -103,17 +103,21 @@ fn file_only_form() -> Bytes {
 }
 
 fn service(backend: Arc<Backend>) -> S3Service {
+    service_with_form_profile(backend, false, true)
+}
+
+fn service_with_form_profile(backend: Arc<Backend>, legacy: bool, allow: bool) -> S3Service {
     let credentials =
         Arc::new(StaticCredentials::new().with(Credentials::new("AKIDEXAMPLE", b"secret").expect("valid credentials")));
-    ServiceBuilder::new()
+    let builder = ServiceBuilder::new()
         .register::<PostObject, _>(backend)
         .authenticator(rustfs_gateway::SigV4Authenticator::new(
             credentials,
             rustfs_gateway::RegionSet::new(["us-east-1"]).expect("non-empty region set"),
         ))
-        .authorizer(rustfs_gateway::allow_when(|_| true))
-        .build()
-        .expect("complete POST Object service")
+        .authorizer(rustfs_gateway::allow_when(move |_| allow));
+    let builder = if legacy { builder.legacy_rustfs_post_forms() } else { builder };
+    builder.build().expect("complete POST Object service")
 }
 
 fn request(body: Bytes) -> Request<Bytes> {
@@ -309,4 +313,73 @@ async fn a_non_multipart_body_is_refused_before_the_handler() {
 
     assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
     assert!(backend.observed.lock().expect("observation lock").is_none());
+}
+
+async fn success_status(legacy: bool, allow: bool, raw: &str) -> (StatusCode, String, Option<(String, Vec<u8>)>) {
+    let backend = Arc::new(Backend::default());
+    let response = service_with_form_profile(Arc::clone(&backend), legacy, allow)
+        .call_bytes(request(form_with_fields(&[("success_action_status", raw)])))
+        .await;
+    let status = response.status();
+    let body = response.into_body().collect().await.expect("response body").to_bytes();
+    let observed = backend.observed.lock().expect("observation lock").clone();
+    (status, String::from_utf8(body.to_vec()).expect("XML response"), observed)
+}
+
+// Native RustFS HTTP comparisons, including authorization and stored bytes: gateway#1185.
+#[tokio::test]
+async fn legacy_success_status_accepts_numeric_spellings() {
+    for (raw, expected) in [
+        ("0200", StatusCode::OK),
+        ("+201", StatusCode::CREATED),
+        ("000204", StatusCode::NO_CONTENT),
+    ] {
+        let (status, body, observed) = success_status(true, true, raw).await;
+        assert_eq!(status, expected, "{raw}: {body}");
+        assert_eq!(observed, Some(("uploads/report.txt".to_owned(), b"hello from a browser".to_vec())));
+    }
+}
+
+#[tokio::test]
+async fn legacy_unreadable_success_status_precedes_authorization() {
+    for raw in ["", "wrong", " 200", "200 ", "2147483648", "-2147483649"] {
+        for allow in [true, false] {
+            let (status, body, observed) = success_status(true, allow, raw).await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{raw}: {body}");
+            assert!(body.contains("<Code>InvalidArgument</Code>"), "{raw}: {body}");
+            assert_eq!(observed, None);
+        }
+    }
+}
+
+#[tokio::test]
+async fn legacy_unsupported_success_status_never_reaches_storage() {
+    for raw in ["202", "0", "-1", "65536", "2147483647", "-2147483648"] {
+        let (status, body, observed) = success_status(true, true, raw).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{raw}: {body}");
+        assert!(body.contains("<Code>MalformedPOSTRequest</Code>"), "{raw}: {body}");
+        assert_eq!(observed, None);
+    }
+}
+
+#[tokio::test]
+async fn legacy_denied_authorization_precedes_numeric_success_status() {
+    for raw in ["202", "0", "-1", "65536", "2147483647", "-2147483648", "+200", "000204"] {
+        let (status, body, observed) = success_status(true, false, raw).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{raw}: {body}");
+        assert!(body.contains("<Code>AccessDenied</Code>"), "{raw}: {body}");
+        assert_eq!(observed, None);
+    }
+}
+
+#[tokio::test]
+async fn generic_success_status_keeps_exact_spellings_and_early_refusal() {
+    for raw in ["0200", "+201", "000204", "202", "", "2147483648"] {
+        for allow in [true, false] {
+            let (status, body, observed) = success_status(false, allow, raw).await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{raw}: {body}");
+            assert!(body.contains("<Code>MalformedPOSTRequest</Code>"), "{raw}: {body}");
+            assert_eq!(observed, None);
+        }
+    }
 }

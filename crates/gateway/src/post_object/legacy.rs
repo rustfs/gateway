@@ -209,6 +209,13 @@ fn unreadable(name: &str, value: &str) -> S3Error {
     )
 }
 
+/// Read the legacy signed 32-bit status before authorization; its supported set is checked later.
+pub(super) fn success_status(raw: &str) -> Result<String, S3Error> {
+    raw.parse::<i32>()
+        .map(|status| status.to_string())
+        .map_err(|_| unreadable("success_action_status", raw))
+}
+
 /// The user metadata legacy RustFS stores: every `x-amz-meta-*` field, by the name after the
 /// prefix.
 ///
