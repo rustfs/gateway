@@ -21,6 +21,7 @@ CASES     c-copy-0025 — A copy source that is an ARN of another service is ref
           c-post-0008 — A later Content-Type list item must satisfy the POST prefix
           c-post-0009 — An empty Content-Type list item fails a nonempty POST prefix
           c-post-0010 — A disallowed first Content-Type item is refused
+          c-post-0014 — SigV4 policies retain strict expiration spellings
           c-range-0007 — A read of one part is a 206 that reports how many parts the object has
           c-select-restore-0057 — A select on a key that does not exist is 404 NoSuchKey before any event stream
           c-tagging-0016 — PutObject with x-amz-tagging carrying a segment without '=' is a 400 and stores nothing

@@ -527,3 +527,24 @@ fn sigv4_default_parser_still_refuses_mixed_case_operators() {
         assert_eq!(parse(&fields, "report.txt").err(), Some(PostPolicyError::Malformed));
     }
 }
+
+#[test]
+fn n_expiration_compatibility_is_not_enabled_by_operator_folding() {
+    let encoded = crate::codec::encode_base64_exact(
+        br#"{"expiration":"2030-01-02 12:34:56Z","conditions":[{"bucket":"example-bucket"},{"key":"upload"}]}"#,
+    );
+    let fields = [
+        ("awsaccesskeyid", "fixture"),
+        ("signature", "fixture"),
+        ("key", "upload"),
+        ("policy", encoded.as_str()),
+    ];
+    let limits = PostPolicyLimits::default();
+    let now = RequestNow::from_unix_seconds(0);
+    assert!(SigV2PostPolicy::parse_as_legacy_rustfs(&fields, "", limits, now).is_ok());
+    assert_eq!(SigV2PostPolicy::parse(&fields, "", limits, now).err(), Some(PostPolicyError::Malformed));
+    assert_eq!(
+        SigV2PostPolicy::parse_with_case_insensitive_operators(&fields, "", limits, now).err(),
+        Some(PostPolicyError::Malformed)
+    );
+}

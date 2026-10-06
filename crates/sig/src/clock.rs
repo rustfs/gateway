@@ -409,15 +409,23 @@ pub(crate) fn unix_seconds(date: &AmzDate) -> Option<i64> {
         .checked_add(second)
 }
 
-/// Days from `1970-01-01` to a proleptic Gregorian date, positive or negative.
-fn days_from_civil(year: i64, month: i64, day: i64) -> Option<i64> {
-    let last_day = match month {
+/// The shared Gregorian month boundary used by date validation and legacy POST leap seconds.
+pub(crate) fn last_day_of_month(year: i64, month: i64) -> Option<i64> {
+    if !(1..=12).contains(&month) {
+        return None;
+    }
+    Some(match month {
         2 if year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) => 29,
         2 => 28,
         4 | 6 | 9 | 11 => 30,
         _ => 31,
-    };
-    if !(1..=12).contains(&month) || !(1..=last_day).contains(&day) {
+    })
+}
+
+/// Days from `1970-01-01` to a proleptic Gregorian date, positive or negative.
+fn days_from_civil(year: i64, month: i64, day: i64) -> Option<i64> {
+    let last_day = last_day_of_month(year, month)?;
+    if !(1..=last_day).contains(&day) {
         return None;
     }
     let year = if month <= 2 { year.checked_sub(1)? } else { year };
