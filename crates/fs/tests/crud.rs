@@ -57,6 +57,8 @@ mod lifecycle_rustfs_rules;
 mod lifecycle_scheduler;
 #[path = "crud/lifecycle_transitions.rs"]
 mod lifecycle_transitions;
+#[path = "crud/lifecycle_version_expiration.rs"]
+mod lifecycle_version_expiration;
 #[path = "crud/list_buckets.rs"]
 mod list_buckets;
 #[path = "crud/listing.rs"]

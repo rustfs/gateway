@@ -183,7 +183,7 @@ s3tests.functional.test_s3::test_head_object_404_with_policy_prefix
 # --- not-a-defect: an unsatisfiable copy-source range is InvalidArgument under the shared resolver's quirk, not InvalidRange (1) ---
 s3tests.functional.test_s3::test_multipart_copy_invalid_range
 
-# --- fs-gap: an expired object's delete marker is not expired by the reference backend (1) — https://github.com/rustfs/gateway/issues/999 ---
+# --- unattributed: cleanup succeeds, but the case requires a false delete-marker header that native RustFS omits (1) — https://github.com/rustfs/gateway/issues/999 ---
 s3tests.functional.test_s3::test_delete_marker_expiration
 
 # --- rustfs-parity: If-Match on a missing key is 404 NoSuchKey, as RustFS answers it (5) — https://github.com/rustfs/gateway/issues/1002 ---

@@ -767,6 +767,7 @@ impl Handler<DeleteObject> for FsBackend {
 
 mod configuration;
 mod delete_conditions;
+mod lifecycle;
 
 use delete_conditions::DeleteIfMatch;
 
