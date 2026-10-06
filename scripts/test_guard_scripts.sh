@@ -24467,6 +24467,9 @@ shard_case 'Mint judges retain complete probes and isolated CLI exit boundaries'
 shard_case 'compatibility verdicts bind cell identities and successful driver exits' \
     python3 "${SCRIPT_DIR}/test_compat_report_cells.py"
 
+shard_case 'S3Tests workflow preserves failed suite receipts under inherited errexit' \
+    python3 "${SCRIPT_DIR}/test_s3tests_workflow_receipts.py"
+
 shard_case 'DTO path scans preserve mount checks with bounded process growth' \
     python3 "${SCRIPT_DIR}/test_dto_packaged_scan_cost.py"
 

@@ -135,9 +135,10 @@ jobs:
           mkdir -p "$work" "$out"
           # 90 minutes, the top of the suite's measured range. The wrapper reports
           # the margin on every run, so the cliff announces itself before it is hit.
+          # Keep failure receipts available under the runner's inherited errexit.
+          status=0
           scripts/ci_budget.sh 5400 "ceph s3-tests" \
-            ci/s3tests/run.sh --mode "$mode" --work "$work" --out "$out"
-          status=$?
+            ci/s3tests/run.sh --mode "$mode" --work "$work" --out "$out" || status=$?
           echo "status=$status" >>"$GITHUB_OUTPUT"
           echo "out=$out" >>"$GITHUB_OUTPUT"
           if [ -f "$out/summary.md" ]; then
