@@ -500,14 +500,13 @@ impl<'a> MetaView<'a> {
 
     /// One header as the wire carries it, multi-line values joined with `, `.
     fn header_text(&self, name: &http::HeaderName) -> Option<Cow<'a, str>> {
-        let name = name.clone();
-        if !self.headers.is_multi(&name) {
-            return self.headers.get_str(&name).map(Cow::Borrowed);
+        if !self.headers.is_multi(name) {
+            return self.headers.get_str(name).map(Cow::Borrowed);
         }
         let mut joined = String::new();
         let mut lines = 0usize;
         for (each, value) in self.headers.iter_text() {
-            if *each != name {
+            if each != name {
                 continue;
             }
             if lines > 0 {
