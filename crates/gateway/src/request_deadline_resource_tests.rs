@@ -25,6 +25,7 @@ use std::task::{Context, Poll, Waker};
 use std::time::Duration;
 
 use super::policy_snapshot_with_timeout;
+use crate::clock::{MonotonicClock, SystemMonotonic};
 use crate::ext::{PolicyError, PolicySnapshot, PolicySource};
 use rustfs_gateway_core::BoxFuture;
 use rustfs_gateway_sig::Identity;
@@ -125,6 +126,103 @@ fn baseline(context: &mut Context<'_>) -> Option<usize> {
     threads()
 }
 
+fn wait_for_thread_count(
+    expected: usize,
+    mut observe: impl FnMut() -> Option<usize>,
+    mut retry: impl FnMut() -> bool,
+) -> Option<usize> {
+    loop {
+        let observed = observe();
+        if observed == Some(expected) || observed.is_none() || !retry() {
+            return observed;
+        }
+    }
+}
+
+/// Positive — an already matching observation needs no settling delay.
+#[test]
+fn thread_wait_returns_an_immediate_match_without_retrying() {
+    assert_eq!(
+        wait_for_thread_count(3, || Some(3), || panic!("a matching observation must not wait")),
+        Some(3)
+    );
+}
+
+/// Positive — joined workers can remain visible until the kernel finishes removing their tasks.
+#[test]
+fn thread_wait_observes_late_task_removal() {
+    let mut samples = [Some(7), Some(4), Some(3)].into_iter();
+    let mut retries = 0;
+    let observed = wait_for_thread_count(
+        3,
+        || samples.next().expect("stop at the matching observation"),
+        || {
+            retries += 1;
+            assert!(retries <= 2, "the observer wait did not stop at its match");
+            true
+        },
+    );
+    assert_eq!((observed, retries), (Some(3), 2));
+}
+
+/// Negative — a worker that stays visible must not become an invented baseline on expiry.
+#[test]
+fn thread_wait_preserves_a_stuck_high_count_at_expiry() {
+    let mut retries = 0;
+    let observed = wait_for_thread_count(
+        3,
+        || Some(4),
+        || {
+            retries += 1;
+            assert!(retries <= 3, "the observer wait ignored expiry");
+            retries < 3
+        },
+    );
+    assert_eq!((observed, retries), (Some(4), 3));
+}
+
+/// Negative — fewer threads than the baseline is not an exact match either.
+#[test]
+fn thread_wait_preserves_a_stuck_low_count_at_expiry() {
+    let mut retries = 0;
+    let observed = wait_for_thread_count(
+        3,
+        || Some(2),
+        || {
+            retries += 1;
+            assert!(retries <= 1, "the observer wait ignored expiry");
+            false
+        },
+    );
+    assert_eq!((observed, retries), (Some(2), 1));
+}
+
+/// Negative — loss of the measurement is neither a match nor a reason to keep polling.
+#[test]
+fn thread_wait_preserves_an_unavailable_observer() {
+    assert_eq!(
+        wait_for_thread_count(3, || None, || panic!("an unavailable observation must stay unavailable")),
+        None
+    );
+}
+
+/// Negative — a later unavailable measurement cannot fall back to an earlier count.
+#[test]
+fn thread_wait_does_not_reuse_a_count_after_observation_is_lost() {
+    let mut samples = [Some(4), None].into_iter();
+    let mut retries = 0;
+    let observed = wait_for_thread_count(
+        3,
+        || samples.next().expect("stop when the observer is lost"),
+        || {
+            retries += 1;
+            assert!(retries <= 1, "the observer wait retried an unavailable measurement");
+            true
+        },
+    );
+    assert_eq!((observed, retries), (None, 1));
+}
+
 /// Negative — a positive but stuck observer must fail to see both held workers and their exit.
 #[test]
 fn thread_observer_tracks_held_workers_and_their_release() {
@@ -150,7 +248,17 @@ fn thread_observer_tracks_held_workers_and_their_release() {
         for worker in workers {
             worker.join().expect("the held worker exits after release");
         }
-        let joined = threads();
+        // Linux clears the TID that wakes joiners before removing the task from the thread list:
+        // <https://github.com/torvalds/linux/blob/v6.12/kernel/exit.c#L926-L959>.
+        // Wait for the OS observation itself; a retained worker still fails the exact count below.
+        let wait_clock = SystemMonotonic::new();
+        let joined = wait_for_thread_count(before, threads, || {
+            if wait_clock.monotonic().millis() >= 1_000 {
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(1));
+            true
+        });
         eprintln!("thread observer: baseline={before}, held={held:?}, joined={joined:?}");
         assert_eq!(held, Some(before + COHORT), "the observer did not see the synchronized held workers");
         assert_eq!(joined, Some(before), "the observer did not see the joined workers exit");
