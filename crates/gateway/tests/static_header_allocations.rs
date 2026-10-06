@@ -26,11 +26,15 @@ use rustfs_gateway::{Limits, MetaView, TargetKind, WireRequest};
 const ENV: &str = "RUSTFS_GATEWAY_STATIC_HEADER_ALLOCATION_PROBE";
 const SENTINEL: &str = "rustfs-gateway static header allocations: ";
 const TEST: &str = "static_header_allocations::fixed_names_cost_only_borrowed_lookup";
-// Independently selected from the GetObject/PutObject binding census before the repair.
+// The first 27 names came from the GetObject/PutObject binding census; the copy-source SSE
+// trio came from an independent allocation trace before its repair.
 const NAMES: &[&str] = &[
     "content-md5",
     "x-amz-acl",
     "x-amz-checksum-mode",
+    "x-amz-copy-source-server-side-encryption-customer-algorithm",
+    "x-amz-copy-source-server-side-encryption-customer-key",
+    "x-amz-copy-source-server-side-encryption-customer-key-md5",
     "x-amz-expected-bucket-owner",
     "x-amz-grant-full-control",
     "x-amz-grant-read",
