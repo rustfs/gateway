@@ -62,7 +62,7 @@ async fn names_bucket(root: &TestRoot) -> S3Service {
 }
 
 fn as_main_with(method: http::Method, target: &str, body: Bytes, headers: &[(&str, &str)]) -> http::Request<Bytes> {
-    signed(MAIN_KEY, MAIN_SECRET, method, target, body, headers)
+    signed_legacy_path(MAIN_KEY, MAIN_SECRET, method, target, body, headers)
 }
 
 /// Fails unless `response` is RustFS's refusal of a name its storage cannot hold.

@@ -15,7 +15,8 @@
 //! Signed requests driven through the served assembly, and the shared harness its topic files use.
 //!
 //! Responsible for: the two-identity command line, the signer and exchange helpers, and the
-//! ownership, listing, lifecycle-cadence and capability cases of `super::build_service`; the
+//! ownership, listing, lifecycle-cadence and capability cases of `super::build_service`. Shared
+//! setup and signing live in `tests/profile_fixture.rs`; the
 //! topic files beside this one (`tests/*.rs`) reuse the same harness through `use super::*`.
 //! NOT responsible for: assembling anything of its own — every case goes through
 //! `super::build_service` and `super::open_backend`, because an assembly written for a test proves
@@ -64,158 +65,9 @@ impl Drop for TestRoot {
     }
 }
 
-/// The exact command line an external suite would use, parsed by the launcher's own parser.
-fn two_identity_options(root: &TestRoot, extra: &[&str]) -> Options {
-    let mut arguments = vec![
-        "--data".to_owned(),
-        root.0.to_string_lossy().into_owned(),
-        "--access-key".to_owned(),
-        MAIN_KEY.to_owned(),
-        "--secret-key".to_owned(),
-        MAIN_SECRET.to_owned(),
-        "--owner-id".to_owned(),
-        MAIN_OWNER.to_owned(),
-        "--display-name".to_owned(),
-        MAIN_DISPLAY_NAME.to_owned(),
-        "--alt-access-key".to_owned(),
-        ALT_KEY.to_owned(),
-        "--alt-secret-key".to_owned(),
-        ALT_SECRET.to_owned(),
-        "--alt-owner-id".to_owned(),
-        ALT_OWNER.to_owned(),
-        "--alt-display-name".to_owned(),
-        ALT_OWNER.to_owned(),
-    ];
-    arguments.extend(extra.iter().map(|argument| (*argument).to_owned()));
-    parse_options(arguments).expect("a valid two-identity command line")
-}
-
-fn assembled(options: &Options) -> (Arc<FsBackend>, S3Service) {
-    let backend = Arc::new(open_backend(options).expect("a usable data root"));
-    let owners = Arc::new(BucketOwners::default());
-    let service = build_service(options, &backend, &owners).expect("a complete assembly");
-    (backend, service)
-}
-
-/// Signs one request as the named identity, using the same signer any SDK would.
-fn signed(
-    access_key: &str,
-    secret_key: &str,
-    method: http::Method,
-    target: &str,
-    body: Bytes,
-    extra: &[(&str, &str)],
-) -> http::Request<Bytes> {
-    signed_in(Some("us-east-1"), access_key, secret_key, method, target, body, extra)
-}
-
-/// [`signed`], scoped to `region`; `None` signs with an empty region, as RustFS's replication
-/// client does for a bucket target that names none.
-fn signed_in(
-    region: Option<&str>,
-    access_key: &str,
-    secret_key: &str,
-    method: http::Method,
-    target: &str,
-    body: Bytes,
-    extra: &[(&str, &str)],
-) -> http::Request<Bytes> {
-    signed_to("s3.example.com", region, access_key, secret_key, method, target, body, extra)
-}
-
-/// [`signed_in`], sent to `host` rather than `s3.example.com`.
-#[allow(clippy::too_many_arguments, reason = "the signing inputs, each one a fixture choice")]
-fn signed_to(
-    host: &str,
-    region: Option<&str>,
-    access_key: &str,
-    secret_key: &str,
-    method: http::Method,
-    target: &str,
-    body: Bytes,
-    extra: &[(&str, &str)],
-) -> http::Request<Bytes> {
-    let (path, query) = target.split_once('?').map_or((target, ""), |(path, query)| (path, query));
-    let mut headers = http::HeaderMap::new();
-    headers.insert(http::header::HOST, http::HeaderValue::from_str(host).expect("a valid host"));
-    for (name, value) in extra {
-        headers.append(
-            http::HeaderName::from_bytes(name.as_bytes()).expect("a valid header name"),
-            http::HeaderValue::from_str(value).expect("a valid header value"),
-        );
-    }
-    let payload = if (method == http::Method::PUT && target.matches('/').count() >= 2) || !body.is_empty() {
-        let digest: [u8; 32] = Sha256::digest(&body).into();
-        let payload = PayloadMode::ExactSha256(digest);
-        headers.insert(
-            http::HeaderName::from_static("x-amz-content-sha256"),
-            http::HeaderValue::from_str(payload.canonical_payload_token().as_str()).expect("a digest header"),
-        );
-        headers.insert(
-            http::header::CONTENT_LENGTH,
-            http::HeaderValue::from_str(&body.len().to_string()).expect("a content length"),
-        );
-        payload
-    } else {
-        // A bodyless request declares the empty body's digest, as every S3 SDK does: legacy RustFS
-        // refuses an `s3`-scoped header signature that declares none, and so does the RustFS
-        // profile (rustfs/gateway#1130).
-        let digest: [u8; 32] = Sha256::digest(&body).into();
-        let payload = PayloadMode::ExactSha256(digest);
-        headers.insert(
-            http::HeaderName::from_static("x-amz-content-sha256"),
-            http::HeaderValue::from_str(payload.canonical_payload_token().as_str()).expect("a digest header"),
-        );
-        payload
-    };
-    let probe = http::Request::builder()
-        .uri("/")
-        .header(http::header::HOST, host)
-        .body(Bytes::new())
-        .expect("a valid host probe");
-    let accepted = WireRequest::accept(probe, &Limits::default()).expect("an acceptable host");
-    // The assembled service uses the production system clock — `build_service` installs no
-    // fixed one — so the request must be stamped now, or every case here would fail on skew
-    // rather than on what it is written to measure.
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .expect("a clock after the epoch")
-        .as_secs();
-    let rendered = Timestamp::from_secs(i64::try_from(now).expect("a representable clock"))
-        .render(TimestampFormat::Iso8601Basic)
-        .expect("a representable signing stamp");
-    let stamp = AmzDate::parse(&rendered).expect("a valid signing stamp");
-    let scope = match region {
-        Some(region) => SigningScope::new(stamp.day(), region, SigService::S3).expect("a valid signing scope"),
-        None => SigningScope::with_empty_region(stamp.day(), SigService::S3),
-    };
-    let credentials = SigningCredentials::new(access_key, secret_key.as_bytes()).expect("valid signing credentials");
-    let signing = SigningRequest::new(&method, path, query, &headers, accepted.host().raw_for_signing(), payload, stamp)
-        .with_wire_content_length(body.len() as u64);
-    let mut signer = SigV4Signer::new(credentials, scope);
-    let signed = signer.sign_headers(&signing).expect("a signable request");
-    let mut request = http::Request::builder().method(method).uri(target);
-    for (name, value) in signed.headers() {
-        request = request.header(name, value);
-    }
-    request.body(body).expect("a valid signed request")
-}
-
-fn as_main(method: http::Method, target: &str, body: Bytes) -> http::Request<Bytes> {
-    signed(MAIN_KEY, MAIN_SECRET, method, target, body, &[])
-}
-
-fn as_alt(method: http::Method, target: &str, body: Bytes) -> http::Request<Bytes> {
-    signed(ALT_KEY, ALT_SECRET, method, target, body, &[])
-}
-
-async fn exchange(service: &S3Service, request: http::Request<Bytes>) -> WireResponse {
-    collect(service.call_bytes(request).await).await.expect("a finite response")
-}
-
-fn body_of(response: &WireResponse) -> String {
-    String::from_utf8_lossy(response.body()).into_owned()
-}
+#[path = "tests/profile_fixture.rs"]
+mod profile_fixture;
+use profile_fixture::*;
 
 /// The whole point of the second identity, end to end through the served assembly.
 ///
@@ -921,3 +773,6 @@ mod expiration_header_tests;
 mod extra_permission_tests;
 /// A request naming one object version, authorised as legacy RustFS authorises it (GHSA-3ppv).
 mod version_action_tests;
+
+#[path = "tests/legacy_paths.rs"]
+mod legacy_paths;

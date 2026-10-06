@@ -145,7 +145,7 @@ impl GatewaySeam {
             .accept_empty_signing_region()
             .refuse_unreadable_signing_regions_after_verification()
             .accept_signing_regions_of_any_length()
-            .verify_raw_paths_only_with_unencoded_bytes()
+            .verify_paths_as_legacy_rustfs()
             .accept_legacy_rustfs_signing_services()
             .answer_credential_scope_refusals_as_legacy_rustfs()
             .read_signed_headers_as_legacy_rustfs();

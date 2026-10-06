@@ -186,6 +186,42 @@ impl UriPathCandidates {
         })
     }
 
+    /// Builds the path candidates observed in legacy RustFS (rustfs/gateway#1314, #1315).
+    ///
+    /// Malformed percent escapes remain literal data. Valid escapes decode once, including
+    /// encoded slashes; neither dot segments nor repeated slashes are normalized. The raw
+    /// fallback uses [`RawPathFallback::WithUnencodedBytes`]. This never changes the wire path,
+    /// default constructor, query decoder or public signer.
+    ///
+    /// # Errors
+    ///
+    /// [`AuthError::AuthorizationHeaderMalformed`] for a literal control character.
+    pub fn for_legacy_rustfs(raw_path: &str) -> Result<Self, AuthError> {
+        // Allocate only if a literal percent needs escaping for the strict decoder. Keep
+        // the original wire spelling separately; this must never rewrite a routed target.
+        let mut escaped: Option<String> = None;
+        for (index, character) in raw_path.char_indices() {
+            if character == '%'
+                && !raw_path
+                    .as_bytes()
+                    .get(index + 1..index + 3)
+                    .is_some_and(|digits| digits.iter().all(u8::is_ascii_hexdigit))
+            {
+                escaped.get_or_insert_with(|| raw_path[..index].to_owned()).push_str("%25");
+            } else if let Some(path) = &mut escaped {
+                path.push(character);
+            }
+        }
+        let mut candidates = Self::new(escaped.as_deref().unwrap_or(raw_path))?;
+        if escaped.is_some() {
+            candidates.raw = raw_path.to_owned();
+        }
+        if candidates.decoded.contains("%2F") {
+            candidates.decoded = candidates.decoded.replace("%2F", "/");
+        }
+        Ok(candidates.with_raw_fallback(RawPathFallback::WithUnencodedBytes))
+    }
+
     /// These candidates, with the wire spelling tried only as `fallback` says.
     #[must_use]
     pub fn with_raw_fallback(mut self, fallback: RawPathFallback) -> Self {
