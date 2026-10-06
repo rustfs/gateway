@@ -39,7 +39,7 @@ Agent entry point for operations, routing, codecs, authorization state and handl
 | `src/route/lattice.rs` | Selector overlap/refinement decision. | A conflict or shadowing decision is wrong. |
 | `src/route/table.rs` | Ordered table construction and resolution. | A request selects the wrong operation. |
 | `src/route/legacy_rustfs.rs` | Legacy RustFS's `x-id` and operation-key order, for a router built with `Selection::RustfsLegacy` (#1127). | A RustFS-profile request selects another operation than legacy RustFS. |
-| `src/route/claim.rs` | A dialect's path-prefix claims, path templates (a trailing catch-all included, ADR-0036) and their typed values (ADR-0024). | A claim or template refuses, matches or extracts the wrong thing. |
+| `src/route/claim.rs`, `src/route/claim_values.rs` | A dialect's path-prefix claims, path templates (trailing catch-alls and opaque segments, ADR-0036/0040) and their typed values (ADR-0024). | A claim or template refuses, matches or extracts the wrong thing. |
 | `src/route/claimed.rs` | Claimed rows, and the table the router asks before the S3 table. | A claimed request reaches the wrong row, or reaches S3. |
 | `src/route/shadowing.rs` | Declaration types; mounts the generated record from `model/overlays/route.toml`. | A route intentionally stands before another. |
 | `src/route/compiled.rs` | Fast lookup equivalent to the readable table. | Routing performance or equivalence fails. |
