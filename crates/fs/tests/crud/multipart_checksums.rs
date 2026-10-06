@@ -125,7 +125,7 @@ pub(super) fn error_code(response: &rustfs_gateway::WireResponse) -> Option<Stri
     element(response.body(), "Code")
 }
 
-fn upload_record(root: &TestRoot, bucket: &str, upload_id: &str) -> PathBuf {
+pub(super) fn upload_record(root: &TestRoot, bucket: &str, upload_id: &str) -> PathBuf {
     let digest = Sha256::digest(upload_id.as_bytes());
     root.0
         .join(format!("b-{}", hex::encode(bucket.as_bytes())))

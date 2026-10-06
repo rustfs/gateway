@@ -64,6 +64,7 @@ pub(super) struct Representation {
     pub(super) metadata: std::collections::BTreeMap<String, String>,
     /// The representation headers stored with this version.
     pub(super) headers: ContentHeaders,
+    pub(super) checksum: Option<rustfs_gateway::ChecksumSpec>,
     /// Whether this is the key's current version — read without a version id, named by the id of
     /// the newest record, or a plain object file — which alone answers `x-amz-expiration`.
     latest: bool,
@@ -238,6 +239,7 @@ impl super::FsBackend {
                 version_id: (record.version_id != "null" || reports_null).then(|| record.version_id.clone()),
                 metadata: record.metadata.clone(),
                 headers: record.headers.clone(),
+                checksum: record.checksum,
                 directory: Some(record.path.clone()),
             })));
         }
@@ -258,6 +260,7 @@ impl super::FsBackend {
             // section, so the honest answer is the empty map rather than a guess.
             metadata: std::collections::BTreeMap::new(),
             headers: ContentHeaders::default(),
+            checksum: None,
             directory: None,
         })))
     }
@@ -341,34 +344,37 @@ impl Handler<GetObject> for super::FsBackend {
             .get(window.start..window.end_exclusive)
             .unwrap_or_default()
             .to_vec();
-        Ok(Resp::with_status(
-            GetObjectOutput {
-                expiration,
-                content_length: i64::try_from(body.len()).ok(),
-                content_range: window.content_range,
-                accept_ranges: Some("bytes".to_owned()),
-                // The validators describe the representation, never the window, so a 206 reports
-                // the entity tag and modification time of the whole object — which is what lets a
-                // resumed download notice the object changed underneath it.
-                e_tag: Some(representation.e_tag),
-                last_modified: Some(representation.last_modified),
-                storage_class: representation.storage_class,
-                version_id: representation.version_id,
-                metadata: representation.metadata,
-                tag_count,
-                content_type: Some(representation.headers.served_content_type()),
-                cache_control: representation.headers.cache_control,
-                content_disposition: representation.headers.content_disposition,
-                content_encoding: representation.headers.content_encoding,
-                content_language: representation.headers.content_language,
-                server_side_encryption: encryption.reported_algorithm(),
-                ssekms_key_id: encryption.kms_key_id,
-                expires: representation.headers.expires.map(Into::into),
-                body: Some(ByteStream::from_bytes(Bytes::from(body))),
-                ..GetObjectOutput::default()
-            },
-            window.status,
-        ))
+        let mut output = GetObjectOutput {
+            expiration,
+            content_length: i64::try_from(body.len()).ok(),
+            content_range: window.content_range,
+            accept_ranges: Some("bytes".to_owned()),
+            // The validators describe the representation, never the window, so a 206 reports
+            // the entity tag and modification time of the whole object — which is what lets a
+            // resumed download notice the object changed underneath it.
+            e_tag: Some(representation.e_tag),
+            last_modified: Some(representation.last_modified),
+            storage_class: representation.storage_class,
+            version_id: representation.version_id,
+            metadata: representation.metadata,
+            tag_count,
+            content_type: Some(representation.headers.served_content_type()),
+            cache_control: representation.headers.cache_control,
+            content_disposition: representation.headers.content_disposition,
+            content_encoding: representation.headers.content_encoding,
+            content_language: representation.headers.content_language,
+            server_side_encryption: encryption.reported_algorithm(),
+            ssekms_key_id: encryption.kms_key_id,
+            expires: representation.headers.expires.map(Into::into),
+            body: Some(ByteStream::from_bytes(Bytes::from(body))),
+            ..GetObjectOutput::default()
+        };
+        let checksum = (input.checksum_mode.as_ref() == Some(&rustfs_gateway::dto::ChecksumMode::ENABLED)
+            && input.range.is_none())
+        .then_some(representation.checksum)
+        .flatten();
+        set_object_checksum!(output, checksum);
+        Ok(Resp::with_status(output, window.status))
     }
 }
 
@@ -408,29 +414,32 @@ impl Handler<HeadObject> for super::FsBackend {
             .await
             .map(Into::into);
         let encryption = representation.headers.encryption();
-        Ok(Resp::with_status(
-            HeadObjectOutput {
-                expiration,
-                content_length: i64::try_from(window.len()).ok(),
-                content_range: window.content_range,
-                accept_ranges: Some("bytes".to_owned()),
-                e_tag: Some(representation.e_tag),
-                last_modified: Some(representation.last_modified),
-                storage_class: representation.storage_class,
-                version_id: representation.version_id,
-                metadata: representation.metadata,
-                tag_count,
-                content_type: Some(representation.headers.served_content_type()),
-                cache_control: representation.headers.cache_control,
-                content_disposition: representation.headers.content_disposition,
-                content_encoding: representation.headers.content_encoding,
-                content_language: representation.headers.content_language,
-                server_side_encryption: encryption.reported_algorithm(),
-                ssekms_key_id: encryption.kms_key_id,
-                expires: representation.headers.expires.map(Into::into),
-                ..HeadObjectOutput::default()
-            },
-            window.status,
-        ))
+        let mut output = HeadObjectOutput {
+            expiration,
+            content_length: i64::try_from(window.len()).ok(),
+            content_range: window.content_range,
+            accept_ranges: Some("bytes".to_owned()),
+            e_tag: Some(representation.e_tag),
+            last_modified: Some(representation.last_modified),
+            storage_class: representation.storage_class,
+            version_id: representation.version_id,
+            metadata: representation.metadata,
+            tag_count,
+            content_type: Some(representation.headers.served_content_type()),
+            cache_control: representation.headers.cache_control,
+            content_disposition: representation.headers.content_disposition,
+            content_encoding: representation.headers.content_encoding,
+            content_language: representation.headers.content_language,
+            server_side_encryption: encryption.reported_algorithm(),
+            ssekms_key_id: encryption.kms_key_id,
+            expires: representation.headers.expires.map(Into::into),
+            ..HeadObjectOutput::default()
+        };
+        let checksum = (input.checksum_mode.as_ref() == Some(&rustfs_gateway::dto::ChecksumMode::ENABLED)
+            && input.range.is_none())
+        .then_some(representation.checksum)
+        .flatten();
+        set_object_checksum!(output, checksum);
+        Ok(Resp::with_status(output, window.status))
     }
 }

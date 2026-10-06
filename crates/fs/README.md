@@ -43,7 +43,7 @@ links.
 User metadata is persisted in the version record itself. A record is the same eight newline-terminated
 lines earlier builds wrote, and an object carrying `x-amz-meta-*` adds a named, versioned trailing
 section — `meta/1 <count>` followed by one hex-encoded key/value line per entry. An object with no
-metadata is therefore written in the exact pre-section form and stays readable by a build that
+optional sections is written in the exact pre-section form and stays readable by a build that
 predates the section, while a record that does carry metadata is refused by that older reader rather
 than silently read as an object with none. In the other direction this build reads a pre-section
 record and answers it with no metadata; a section it does not recognise, one that declares more
@@ -62,9 +62,18 @@ The standard representation headers a write carries — `Content-Type`, `Content
 version in a second optional trailing section, `headers/1 <count>`, and answered by `GET` and `HEAD`
 on the current and on an explicit version. An object stored with no `Content-Type` answers
 `binary/octet-stream`, the model's default, which is therefore not stored; an object carrying none
-of these headers keeps the eight-line record form. Multipart takes them from
+of the optional sections keeps the eight-line record form. Multipart takes them from
 `CreateMultipartUpload`, `CopyObject` copies them under `COPY` and rebuilds them from the request
 under `REPLACE`, and a browser `POST` stores the media type the form pipeline hands over.
+
+A verified `PutObject` checksum, supplied in a header or trailer, is stored in a final optional
+`checksum/1 1` section followed by `<algorithm> <base64 value>`. `GET` and `HEAD` return it when
+`ChecksumMode=ENABLED` and no range was requested. A plain overwrite stores no checksum.
+`CopyObject` keeps the source checksum unless its `ChecksumAlgorithm` requests a recalculation.
+Earlier records remain readable without a checksum, but older builds refuse the new section;
+keep a pre-upgrade data copy for rollback instead of deleting checksums from new records.
+This does not persist completed multipart checksums or part boundaries, or implement
+`GetObjectAttributes` (rustfs/gateway#1001).
 
 A `PutObject` also stores the tag set its `x-amz-tagging` header carries, validated as the
 `?tagging` subresource's document is and written into the new version's directory before the

@@ -79,6 +79,8 @@ mod multipart_trailer_checksums;
 mod multipart_upload_ids;
 #[path = "crud/multipart_versioning.rs"]
 mod multipart_versioning;
+#[path = "crud/object_checksums.rs"]
+mod object_checksums;
 #[path = "crud/object_encryption.rs"]
 mod object_encryption;
 #[path = "crud/object_metadata.rs"]

@@ -24,8 +24,8 @@ use rustfs_gateway::dto::{
     CopyObject, CopyObjectInput, CopyObjectOutput, MetadataDirective, ServerSideEncryption, TaggingDirective,
 };
 use rustfs_gateway::{
-    ConditionalOutcome, ETag, ErrorCode, Handler, HandlerError, HandlerResult, MetadataSource, ObjectValidators,
-    PRECONDITION_FAILED_MESSAGE, Preconditions, Req, RequestKind, Resp, Timestamp, classify_self_copy,
+    ChecksumAlgorithm, ConditionalOutcome, ETag, ErrorCode, Handler, HandlerError, HandlerResult, MetadataSource,
+    ObjectValidators, PRECONDITION_FAILED_MESSAGE, Preconditions, Req, RequestKind, Resp, Timestamp, classify_self_copy,
     copy_source_guards_before_target_write, copy_source_if_match_miss_proceeds, evaluate, parse_conditional_etag,
 };
 
@@ -140,6 +140,14 @@ impl Handler<CopyObject> for FsBackend {
         let input = request.into_input();
         let metadata_source = directive(&input)?;
         let tag_source = tagging_directive(&input)?;
+        let checksum_algorithm = input
+            .checksum_algorithm
+            .as_ref()
+            .map(|algorithm| {
+                ChecksumAlgorithm::from_wire_name(algorithm.as_str())
+                    .ok_or_else(|| HandlerError::new(ErrorCode::INVALID_ARGUMENT, "the copy checksum algorithm is not supported"))
+            })
+            .transpose()?;
         // The destination's class is the request's, never the source's: a copy that names none is
         // recorded `STANDARD`. It is refused before any read or write when this backend cannot
         // record it.
@@ -179,7 +187,12 @@ impl Handler<CopyObject> for FsBackend {
                 input.ssekms_key_id.as_deref(),
             )
             .await?;
+        let checksum = match checksum_algorithm {
+            Some(algorithm) => Some(super::uploads::checksum_of(algorithm, &source_representation.bytes)?),
+            None => source_representation.checksum,
+        };
         let attributes = ObjectAttributes {
+            checksum,
             metadata,
             headers: headers.with_encryption(encryption.clone()),
             storage_class,
@@ -200,7 +213,7 @@ impl Handler<CopyObject> for FsBackend {
             return Err(HandlerError::internal_error("the copy destination was not published"));
         };
 
-        Ok(Resp::new(CopyObjectOutput {
+        let mut output = CopyObjectOutput {
             e_tag,
             last_modified: Some(published.last_modified),
             copy_source_version_id: source
@@ -211,6 +224,8 @@ impl Handler<CopyObject> for FsBackend {
             server_side_encryption: encryption.reported_algorithm(),
             ssekms_key_id: encryption.kms_key_id,
             ..CopyObjectOutput::default()
-        }))
+        };
+        set_object_checksum!(output, checksum);
+        Ok(Resp::new(output))
     }
 }

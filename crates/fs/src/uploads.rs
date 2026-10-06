@@ -485,18 +485,17 @@ impl FsBackend {
             (Some(algorithm), Some(kind)) => Some(UploadChecksum::decode(algorithm, kind)?),
             _ => return Err(storage_error()),
         };
-        let (metadata, headers) = decode_trailing_sections(&mut lines)?;
+        let attributes = decode_trailing_sections(&mut lines)?;
+        if attributes.checksum.is_some() {
+            return Err(storage_error());
+        }
         Ok(UploadRecord {
             bucket,
             key,
             upload_id,
             initiated,
             checksum,
-            attributes: Box::new(ObjectAttributes {
-                metadata,
-                headers,
-                ..ObjectAttributes::default()
-            }),
+            attributes: Box::new(attributes),
         })
     }
 
@@ -598,7 +597,7 @@ impl FsBackend {
     }
 }
 
-fn checksum_of(algorithm: ChecksumAlgorithm, bytes: &[u8]) -> Result<ChecksumSpec, HandlerError> {
+pub(super) fn checksum_of(algorithm: ChecksumAlgorithm, bytes: &[u8]) -> Result<ChecksumSpec, HandlerError> {
     let mut checksummer = algorithm.checksummer();
     checksummer.update(bytes);
     ChecksumSpec::from_digest(algorithm, &checksummer.finalize()).map_err(|_| storage_error())

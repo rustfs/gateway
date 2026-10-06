@@ -126,6 +126,8 @@ mod buckets;
 mod completion;
 mod completion_replay;
 mod conditions;
+#[macro_use]
+mod checksums;
 pub(crate) mod copy;
 mod deletes;
 mod encryption;
@@ -516,6 +518,7 @@ impl Handler<CreateMultipartUpload> for FsBackend {
             )
             .await?;
         let attributes = ObjectAttributes {
+            checksum: None,
             tags: tagging::tags_from_header(input.tagging.as_deref())?,
             metadata: input.metadata.clone(),
             headers: request_content_headers!(self, input).with_encryption(encryption.clone()),
