@@ -562,6 +562,12 @@ fn parse_arn(path: &str, names: &NamePolicy) -> Result<SourceResource, CopySourc
         return Err(unknown_arn());
     };
 
+    // AWS account IDs are twelve ASCII decimal digits, including any leading zeroes.
+    // Evidence: https://docs.aws.amazon.com/accounts/latest/reference/manage-acct-identifiers.html
+    if account.len() != 12 || !account.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Err(unknown_arn());
+    }
+
     match service {
         "s3" => {
             let rest = resource.strip_prefix("accesspoint/").ok_or_else(unknown_arn)?;
