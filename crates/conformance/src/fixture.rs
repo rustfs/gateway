@@ -133,6 +133,8 @@ use rustfs_gateway::{
 mod committed;
 mod conditional_write;
 mod copy_checksum;
+#[cfg(test)]
+mod crc32c_tests;
 mod handlers_bucket;
 mod handlers_object;
 #[cfg(test)]
@@ -2118,9 +2120,7 @@ fn tag_count_header(object: &StoredObject) -> Option<i32> {
 
 /// The checksum contract an initiating request declared, if it declared one.
 ///
-/// An algorithm this suite cannot compute is refused rather than dropped: answering the upload
-/// without the digests it asked for would look like success and produce parts no client could
-/// verify.
+/// Unsupported algorithms are refused rather than answered with an uncomputed digest.
 fn upload_checksum(
     algorithm: Option<&dto::ChecksumAlgorithm>,
     kind: Option<&dto::ChecksumType>,
@@ -2132,10 +2132,8 @@ fn upload_checksum(
             "Checksum algorithm provided is unsupported. Please try again with any of the valid types: [CRC32, CRC32C, SHA1, SHA256, CRC64NVME]",
         )
     })?;
-    if resolved != ChecksumAlgorithm::Crc32 {
-        return Err(HandlerError::not_implemented(
-            "this conformance fixture digests parts with CRC32 only; every other algorithm would have to be answered with a digest it did not compute",
-        ));
+    if !matches!(resolved, ChecksumAlgorithm::Crc32 | ChecksumAlgorithm::Crc32c) {
+        return Err(HandlerError::not_implemented("this conformance fixture computes only CRC32 and CRC32C"));
     }
     Ok(Some(UploadChecksum {
         algorithm: resolved,
@@ -2145,7 +2143,11 @@ fn upload_checksum(
 
 /// The `x-amz-checksum-*` value for one run of bytes, under the algorithm the upload declared.
 fn checksum_of(checksum: &UploadChecksum, bytes: &[u8]) -> Result<ChecksumSpec, HandlerError> {
-    let digest = crate::crc32::digest(bytes);
+    let digest = match checksum.algorithm {
+        ChecksumAlgorithm::Crc32 => crate::crc32::digest(bytes),
+        ChecksumAlgorithm::Crc32c => crate::crc32::digest_crc32c(bytes),
+        _ => return Err(HandlerError::not_implemented("this conformance fixture computes only CRC32 and CRC32C")),
+    };
     ChecksumSpec::from_digest(checksum.algorithm, &digest)
         .map_err(|_| HandlerError::internal_error("a computed digest is not a valid checksum"))
 }
@@ -4441,6 +4443,7 @@ impl Stub {
                     }
                 };
                 let checksum_type = upload.checksum.as_ref().map(|checksum| checksum.kind.clone());
+                let checksum = read_checksum(Some(&dto::ChecksumMode::ENABLED), false, checksum_spec);
                 // The entity tag of a multipart object is not the digest of its bytes. It is the digest
                 // of the concatenated part digests with the part count after a hyphen, and a client that
                 // reads the plain MD5 back would compare it against the composite and conclude the
@@ -4477,11 +4480,8 @@ impl Stub {
                     location: Some(location),
                     e_tag: Some(composite),
                     version_id: (destination_version != UNVERSIONED).then_some(destination_version),
-                    // The body binds one element per algorithm rather than the packed spec a header
-                    // binds, so the rendering is explicit here. CRC32 is the only algorithm this fixture
-                    // computes, and `upload_checksum` refuses the rest outright rather than letting one
-                    // fall through to an empty element.
-                    checksum_crc32: checksum_spec.as_ref().map(|spec| spec.render_base64().to_owned()),
+                    checksum_crc32: checksum.crc32,
+                    checksum_crc32c: checksum.crc32c,
                     checksum_type,
                     // Decided at initiation, reported here. That gap is the whole of what these cases
                     // measure: the completion's head is flushed before the body is assembled, so a value

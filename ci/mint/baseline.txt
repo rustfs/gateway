@@ -125,8 +125,11 @@ awscli 0
 #   testLivenessEndpoint: GET /minio/health/live. Legacy RustFS answers it 200 from its own router,
 #   outside its S3 stack; the launcher serves no such route (#1199). Not a gateway defect.
 healthcheck 1
-#   test_presigned_post_policy_error: `mc share upload`'s form is posted to the object path and
-#   expects MethodNotAllowed; legacy RustFS answers 405, the RustFS profile 501 (#1184).
+#   test_admin_users: the complete run 37512070914 (75b87e05) reaches 28 PASS / 1 FAIL after
+#   the stdin checksum repair (#1275). This is the MinIO admin workflow owned by #1199.
+#   A pinned-source client's first add-user call passes native RustFS and fails the launcher;
+#   the aggregate does not identify which admin assertion failed. Keep the count until the
+#   real RustFS assembly measures that workflow, rather than adding a success-only admin stub.
 mc 1
 minio-go 0
 #   15 failures. As on legacy RustFS (minio-java 8.6.0 run against it locally):

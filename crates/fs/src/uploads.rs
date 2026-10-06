@@ -264,11 +264,19 @@ impl UploadChecksum {
         claimed: Option<ChecksumSpec>,
         actual: &ChecksumSpec,
     ) -> Result<(), HandlerError> {
-        if claimed.is_some_and(|claimed| claimed.algorithm() != self.algorithm || claimed != *actual) {
-            return Err(HandlerError::new(
-                ErrorCode::BAD_DIGEST,
-                "the completed object checksum did not match the assembled bytes",
-            ));
+        if let Some(claimed) = claimed {
+            // A completion request can carry the composite digest without the response's -N suffix.
+            // A supplied suffix still has to match exactly, as does a full-object claim.
+            let matches = claimed == *actual
+                || (self.kind == ChecksumType::Composite
+                    && claimed.part_count().is_none()
+                    && claimed.digest().map_err(|_| storage_error())? == actual.digest().map_err(|_| storage_error())?);
+            if claimed.algorithm() != self.algorithm || !matches {
+                return Err(HandlerError::new(
+                    ErrorCode::BAD_DIGEST,
+                    "the completed object checksum did not match the assembled bytes",
+                ));
+            }
         }
         Ok(())
     }

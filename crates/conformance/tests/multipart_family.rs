@@ -14,8 +14,8 @@
 
 //! The ledger of the multipart family, and the three entity-tag cases it was blocked on.
 //!
-//! Responsible for: pinning the multipart family as a *closed* set — fifty-three identifiers with
-//! no gap and no duplicate, thirty-six negative against seventeen positive, every one of them
+//! Responsible for: pinning the multipart family as a *closed* set — fifty-four identifiers with
+//! no gap and no duplicate, thirty-six negative against eighteen positive, every one of them
 //! carrying a verdict in the checked-in baseline — and for proving the family executes against the
 //! in-process target with no regression, with every id in `RECOVERED` green,
 //! and with no case skipping that was not already skipping. A family whose size, polarity and
@@ -47,12 +47,12 @@ fn reference_run(filter: &str) -> rustfs_gateway_conformance::report::Report {
 
 /// The size of the family. A number, not a range: the point of the guard is that growing or
 /// shrinking the family is a decision somebody writes down, and this is where they write it.
-const FAMILY_SIZE: usize = 53;
+const FAMILY_SIZE: usize = 54;
 
 /// The polarity split, in the order `AGENTS.md` states the rule: negatives must outnumber
-/// positives, and here they do by nineteen.
+/// positives, and here they do by eighteen.
 const NEGATIVE: usize = 36;
-const POSITIVE: usize = 17;
+const POSITIVE: usize = 18;
 
 /// The cases this family was blocked on. Three are about the entity tag a multipart upload
 /// publishes; `c-mpu-0038` is the one whose own expectation was the defect — it demanded that the
@@ -125,13 +125,13 @@ fn baseline() -> Baseline {
     Baseline::from_json(&source).expect("the baseline parses")
 }
 
-/// The multipart family is a closed ledger: fifty-three identifiers, contiguous, each in its own
+/// The multipart family is a closed ledger: fifty-four identifiers, contiguous, each in its own
 /// file.
 ///
 /// A gap means a case was deleted — which `AGENTS.md` lists as a silently dropped guarantee — and a
 /// duplicate means two files claim one identifier, after which only one of them is ever reported.
 #[test]
-fn the_multipart_family_is_a_closed_ledger_of_fifty_three_identifiers() {
+fn the_multipart_family_is_a_closed_ledger_of_fifty_four_identifiers() {
     let corpus = corpus();
     let cases = family(&corpus);
 
@@ -161,7 +161,7 @@ fn the_multipart_family_is_a_closed_ledger_of_fifty_three_identifiers() {
 /// The corpus-wide check in `tests/corpus.rs` compares two totals over six hundred cases, so a
 /// family that flipped every one of its own cases to positive would still leave it green.
 #[test]
-fn the_multipart_family_keeps_thirty_six_negative_against_seventeen_positive() {
+fn the_multipart_family_keeps_thirty_six_negative_against_eighteen_positive() {
     let corpus = corpus();
     let cases = family(&corpus);
 

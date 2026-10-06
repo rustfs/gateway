@@ -6,7 +6,7 @@ cases = "c-mpu-0014,c-mpu-0032,c-mpu-0049"
 
 [[operation]]
 name = "CompleteMultipartUpload"
-cases = "c-cond-0024,c-cond-0025,c-mpu-0001,c-mpu-0002,c-mpu-0003,c-mpu-0005,c-mpu-0008,c-mpu-0009,c-mpu-0015,c-mpu-0016,c-mpu-0017,c-mpu-0019,c-mpu-0020,c-mpu-0021,c-mpu-0022,c-mpu-0023,c-mpu-0026,c-mpu-0033,c-mpu-0034,c-mpu-0035,c-mpu-0036,c-mpu-0037,c-mpu-0038,c-mpu-0039,c-mpu-0040,c-mpu-0041,c-mpu-0042,c-mpu-0051"
+cases = "c-cond-0024,c-cond-0025,c-mpu-0001,c-mpu-0002,c-mpu-0003,c-mpu-0005,c-mpu-0008,c-mpu-0009,c-mpu-0015,c-mpu-0016,c-mpu-0017,c-mpu-0019,c-mpu-0020,c-mpu-0021,c-mpu-0022,c-mpu-0023,c-mpu-0026,c-mpu-0033,c-mpu-0034,c-mpu-0035,c-mpu-0036,c-mpu-0037,c-mpu-0038,c-mpu-0039,c-mpu-0040,c-mpu-0041,c-mpu-0042,c-mpu-0051,c-mpu-0054"
 
 [[operation]]
 name = "CopyObject"
