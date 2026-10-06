@@ -45,7 +45,7 @@ Agent entry point for operations, routing, codecs, authorization state and handl
 | `src/route/compiled.rs` | Fast lookup equivalent to the readable table. | Routing performance or equivalence fails. |
 | `src/route/explain.rs` | Route explanation data. | `cargo xtask route explain` omits a reason. |
 | `src/codec/mod.rs` | Per-operation wire codec contract. | Add a decode/encode binding. |
-| `src/codec/view.rs` | Normalized request metadata view. | Headers, query or path labels decode wrongly. |
+| `src/codec/view.rs`, `src/codec/view/header_name.rs` | Normalized request metadata view and static lookup names. | Headers, query or path labels decode wrongly. |
 | `src/codec/legacy_path.rs` | Legacy RustFS's path split (#1115): the whole path decoded once, the bucket ended at the first decoded `/`, and the refusals it makes before routing. | A RustFS-profile request reaches the wrong bucket, key or refusal. |
 | `src/codec/document.rs`, `src/codec/document_tests.rs` | `DocumentReading` and `request_document`: under the RustFS profile a request document is read through `rustfs_gateway_xml::bound` with legacy RustFS's scalar grammars (`rustfs_scalar`), a refusal answered `MalformedXML` and a value the gateway cannot carry `InvalidArgument` (rustfs/gateway#1078); the tests hold each grammar and refusal code at its edges. | A request document is read differently under the RustFS profile, or a scalar grammar changes. |
 | `src/codec/value.rs`, `src/codec/body_literal.rs` | IR scalar conversions and strict wire forms; the MinIO body literals a marked view reads as their documents (RustFS profile, rustfs/backlog#1677 R6). | A scalar is accepted, rejected or rendered wrongly, or a body literal reads differently from legacy RustFS. |

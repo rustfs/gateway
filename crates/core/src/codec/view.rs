@@ -53,6 +53,7 @@ use crate::codec::document::DocumentReading;
 use crate::codec::error::CodecError;
 use crate::route::TargetKind;
 
+mod header_name;
 mod page_size;
 pub use self::page_size::PageSizeCeiling;
 
@@ -309,8 +310,7 @@ impl<'a> MetaView<'a> {
     /// empty line this view reads as absent.
     #[must_use]
     pub fn has_header(&self, name: &str) -> bool {
-        http::HeaderName::from_bytes(name.as_bytes())
-            .is_ok_and(|name| self.headers.count(&name) > 0 && !self.reads_as_absent(&name))
+        header_name::parse(name).is_ok_and(|name| self.headers.count(&name) > 0 && !self.reads_as_absent(&name))
     }
 
     fn reads_as_absent(&self, name: &http::HeaderName) -> bool {
@@ -480,7 +480,7 @@ impl<'a> MetaView<'a> {
     /// and under [`MetaView::with_empty_headers_absent`] one empty line reads as absent.
     #[must_use]
     pub fn header(&self, name: &str) -> Option<Cow<'a, str>> {
-        let name = http::HeaderName::from_bytes(name.as_bytes()).ok()?;
+        let name = header_name::parse(name).ok()?;
         if let Some(length) = self.framed_content_length
             && name == http::header::CONTENT_LENGTH
         {
