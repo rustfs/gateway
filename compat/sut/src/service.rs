@@ -199,9 +199,9 @@ pub(crate) fn build_service(
                     .refuse_unreadable_signing_regions_after_verification()
                     // At any length: its parser has no ceiling on the region.
                     .accept_signing_regions_of_any_length()
-                    // It verifies a path's wire spelling only when the path carries an unencoded
-                    // byte, such as a raw `=` (rustfs/rustfs#2593).
-                    .verify_raw_paths_only_with_unencoded_bytes()
+                    // Path escapes decode once for signing, malformed percent stays literal,
+                    // and the raw candidate follows the native rule (#1314, #1315).
+                    .verify_paths_as_legacy_rustfs()
                     // It verifies an `s3`, `sts` or `s3tables` scope on every operation, and answers
                     // any other service with its `501` (rustfs/gateway#1130).
                     .accept_legacy_rustfs_signing_services()

@@ -505,6 +505,8 @@ pub struct SigV4Authenticator {
     pub(super) scope_policy: super::authenticator_switches::ScopePolicy,
     /// When the wire spelling of the request path is verified, after the decoded one failed.
     pub(super) raw_path: RawPathFallback,
+    /// Whether canonical paths and raw fallback follow legacy RustFS (#1314, #1315).
+    pub(super) legacy_paths: bool,
     /// Whether `SignedHeaders` is read, and its refusals answered, as legacy RustFS does
     /// (rustfs/gateway#1130).
     pub(super) legacy_signed_headers: bool,
@@ -528,6 +530,7 @@ impl core::fmt::Debug for SigV4Authenticator {
             .field("accepts_legacy_rustfs_signing_services", &self.scope_policy.legacy_services)
             .field("answers_scope_refusals_as_legacy_rustfs", &self.scope_policy.legacy_scope_refusals)
             .field("raw_path_fallback", &self.raw_path)
+            .field("verifies_paths_as_legacy_rustfs", &self.legacy_paths)
             .field("reads_signed_headers_as_legacy_rustfs", &self.legacy_signed_headers)
             .finish()
     }
@@ -557,6 +560,7 @@ impl SigV4Authenticator {
             hand_secret: false,
             scope_policy: super::authenticator_switches::ScopePolicy::default(),
             raw_path: RawPathFallback::WhenRespelled,
+            legacy_paths: false,
             legacy_signed_headers: false,
         }
     }
@@ -643,7 +647,11 @@ impl SigV4Authenticator {
                     let signed = self
                         .read_signed_headers(signed_headers, view.headers(), request.declared_content_length(), location)
                         .map_err(legacy_answer)?;
-                    let paths = UriPathCandidates::new(request.raw_path())?.with_raw_fallback(self.raw_path);
+                    let paths = if self.legacy_paths {
+                        UriPathCandidates::for_legacy_rustfs(request.raw_path())
+                    } else {
+                        UriPathCandidates::new(request.raw_path()).map(|paths| paths.with_raw_fallback(self.raw_path))
+                    }?;
                     let query = view.query();
                     let mut spec = CanonicalRequestSpec::new(
                         request.method(),

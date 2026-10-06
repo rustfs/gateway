@@ -424,6 +424,21 @@ impl SigV4Authenticator {
         self
     }
 
+    /// Verifies header and query signatures over legacy RustFS path spellings (#1314, #1315).
+    ///
+    /// Malformed percent escapes remain literal data (`%zz` is signed as `%25zz`); valid
+    /// escapes decode once, including slashes. Dot segments and repeated slashes stay intact.
+    /// The raw fallback follows [`Self::verify_raw_paths_only_with_unencoded_bytes`].
+    ///
+    /// Off by default. Routing keeps the original target; strict query decoding, POST policies
+    /// and the public signer are unchanged. Literal controls remain forbidden. This includes
+    /// the narrower raw-fallback switch, so callers need only this switch for path behavior.
+    #[must_use]
+    pub fn verify_paths_as_legacy_rustfs(mut self) -> Self {
+        self.legacy_paths = true;
+        self
+    }
+
     /// Hands the secret this authenticator's own credential lookup returned for an authenticated
     /// principal to the handler, as `RequestPrincipal::secret_key_from_authenticator_lookup`
     /// (ADR-0022).

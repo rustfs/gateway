@@ -184,3 +184,6 @@ async fn n_the_default_verifies_every_spelling_the_switch_narrows() {
         assert_eq!(*keys.lock().expect("the record is never poisoned"), [key.to_owned()], "{wire}");
     }
 }
+
+#[path = "raw_path_fallback/legacy_paths.rs"]
+mod legacy_paths;

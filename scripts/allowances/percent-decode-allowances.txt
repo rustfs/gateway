@@ -29,6 +29,10 @@ crates/sig/src/canonical.rs
 crates/sig/src/query.rs
 crates/sig/src/floor.rs
 
+# Signature tests exercise the strict query-component decoder directly. The inputs are
+# malformed query spellings; this call does not materialize a bucket or object name.
+crates/sig/tests/legacy_paths.rs
+
 # The migration seam's reading of a query parameter only the legacy decoder reads: the target
 # version id of CopyObject and CreateMultipartUpload (`?versionId=`). The seam hands RustFS the
 # value the legacy decoder would have, so it splits and decodes the raw query the way that decoder
