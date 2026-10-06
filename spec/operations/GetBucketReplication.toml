@@ -124,7 +124,7 @@ type = "StringEnum"
 required = true
 hot = false
 values = ["Enabled", "Disabled"]
-quirks = []
+quirks = ["q-xml-status-0001"]
 
 [shape.Destination]
 kind = "Structure"
@@ -234,7 +234,7 @@ type = "StringEnum"
 required = true
 hot = false
 values = ["Enabled", "Disabled"]
-quirks = []
+quirks = ["q-xml-status-0001"]
 
 [shape.Metrics]
 kind = "Structure"
@@ -252,7 +252,7 @@ type = "StringEnum"
 required = true
 hot = false
 values = ["Enabled", "Disabled"]
-quirks = []
+quirks = ["q-xml-status-0001"]
 
 [[shape.Metrics.field]]
 name = "EventThreshold"
@@ -278,7 +278,7 @@ type = "StringEnum"
 required = true
 hot = false
 values = ["Enabled", "Disabled"]
-quirks = []
+quirks = ["q-xml-status-0001"]
 
 [shape.ReplicationConfiguration]
 kind = "Structure"
@@ -366,7 +366,7 @@ type = "StringEnum"
 required = true
 hot = false
 values = ["Enabled", "Disabled"]
-quirks = []
+quirks = ["q-xml-status-0001"]
 
 [[shape.ReplicationRule.field]]
 name = "SourceSelectionCriteria"
@@ -491,7 +491,7 @@ type = "StringEnum"
 required = true
 hot = false
 values = ["Enabled", "Disabled"]
-quirks = []
+quirks = ["q-xml-status-0001"]
 
 [[shape.ReplicationTime.field]]
 name = "Time"
@@ -559,7 +559,7 @@ type = "StringEnum"
 required = true
 hot = false
 values = ["Enabled", "Disabled"]
-quirks = []
+quirks = ["q-xml-status-0001"]
 
 [shape.Tag]
 kind = "Structure"

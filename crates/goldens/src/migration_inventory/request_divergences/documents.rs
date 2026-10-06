@@ -15,11 +15,11 @@
 //! The request-document slice of the request-divergence register: what the RustFS profile's
 //! document reading (rustfs/gateway#1078) still answers differently from legacy RustFS.
 //!
-//! Responsible for: `rd-doc-0001`..`0004` and `rd-doc-0006`..`0008`, each with its ruling and its
+//! Responsible for: `rd-doc-0001`..`0004` and `rd-doc-0006`..`0009`, each with its ruling and its
 //! pinned test in `operation_diff/request_documents/divergences.rs` (`rd-doc-0005`, an empty list
 //! wrapper, is retired: the gateway carries it now). Every one is a refusal where legacy RustFS
-//! reads the document: two security refusals the reading keeps, and five values the gateway
-//! cannot carry exactly, refused rather than handed over or stored differently. `parity` in the same
+//! reads the document: two security refusals, five values the gateway cannot carry exactly, and
+//! empty required Status rejected before the backend. `parity` in the same
 //! directory requires every difference it measures across every perturbation of every request
 //! document to fall in exactly one of them.
 //! NOT responsible for: the register's validation and rendering (the parent module) or the other
@@ -35,7 +35,7 @@ const API_OBJECT_LOCK: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/A
 const API_DELETE_OBJECTS: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteObjects.html";
 const API_S3_LOCATION: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_S3Location.html";
 
-pub(super) const DOCUMENT_DIVERGENCES: [RequestDivergence; 7] = [
+pub(super) const DOCUMENT_DIVERGENCES: [RequestDivergence; 8] = [
     RequestDivergence {
         id: "rd-doc-0001",
         operation: "every operation with an XML request document",
@@ -152,5 +152,19 @@ pub(super) const DOCUMENT_DIVERGENCES: [RequestDivergence; 7] = [
         follow_up: DivergenceFollowUp::None,
         test_file: DOCUMENT_DECODE,
         test: "an_invalid_output_bucket_name_is_refused_by_the_gateway_and_read_by_the_legacy_stack",
+    },
+    RequestDivergence {
+        id: "rd-doc-0009",
+        operation: "PutBucketLifecycleConfiguration, PutBucketReplication",
+        request: "a required Status decoded as empty, including CDATA discarded by the legacy XML reading",
+        aws: "Status is required and documents Enabled and Disabled as its values",
+        aws_evidence: "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ReplicationRule.html",
+        s3s: "the legacy decoder hands the empty value to the backend; its scalar reader discards CDATA",
+        gateway: "400 MalformedXML before the backend, under both document readings",
+        client_impact: "empty required request Status is refused; nonempty unknown values and persisted decoding are unchanged",
+        ruling: DivergenceRuling::KeepGateway,
+        follow_up: DivergenceFollowUp::None,
+        test_file: DOCUMENT_DECODE,
+        test: "empty_required_status_is_refused_before_the_backend",
     },
 ];

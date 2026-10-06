@@ -46,6 +46,9 @@
 //! There is no partial update: the document replaces the configuration entirely. Clearing it is
 //! spelled `DeleteBucketLifecycle`, not an empty document — an empty document is refused.
 
+//! HTTP requests additionally reject empty required Status before the backend (`q-xml-status-0001`).
+//! This does not change persisted configuration readers or nonempty unknown enum values.
+
 use rustfs_gateway_sig::{OperationFloor, SigService};
 use rustfs_gateway_types::dto::{
     PutBucketLifecycleConfiguration, PutBucketLifecycleConfigurationInput, PutBucketLifecycleConfigurationOutput,

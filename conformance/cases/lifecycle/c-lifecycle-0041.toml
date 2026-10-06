@@ -1,14 +1,14 @@
 [case]
 id = "c-lifecycle-0041"
 schema_version = 3
-title = "An empty rule Status is an out-of-set value, stored and echoed, never a 500"
+title = "Empty required Status is refused before storing lifecycle configuration"
 rationale = """
-An empty required enumeration element is a value the client sent, not a member nobody filled. The decoder used to read it into the placeholder its type's default holds, and the decode exit check that exists to catch a decoder defect then answered 500 InternalError for the client's own document: every SDK retries a 500 as a server fault, so the client retried a request that could never succeed and finally reported the server as broken (rustfs/gateway#1078). The empty value now takes the same path as any other out-of-set Status (c-lifecycle-0028): this assembly stores it and echoes it as written, in both the paired and the self-closing spelling; a backend that refuses it, as legacy RustFS does with MalformedXML, answers 400 with its own code."""
+The later ruling on #1078 requires HTTP decoding to reject an empty required Status with MalformedXML. Both XML spellings must fail without creating a configuration; persisted XML readers keep their separate lenient contract."""
 polarity = "negative"
 operation = "PutBucketLifecycleConfiguration"
 tags = ["lifecycle", "xml", "error-shape"]
 timeout_ms = 10000
-quirks = ["q-lc-0014"]
+quirks = ["q-xml-status-0001"]
 
 [[case.evidence]]
 url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_LifecycleRule.html"
@@ -18,6 +18,11 @@ kind = "aws-doc"
 [[case.evidence]]
 url = "https://github.com/rustfs/rustfs/blob/5851d9eb54dd920d93e70d41383bd7a377e17ba1/rustfs/src/app/bucket_usecase.rs#L1220-L1227"
 summary = "Legacy RustFS receives the empty rule status from its decoder and refuses it in its handler with 400 MalformedXML."
+kind = "other"
+
+[[case.evidence]]
+url = "https://github.com/rustfs/gateway/issues/1078#issuecomment-5974481156"
+summary = "The request-path ruling requires rejecting empty required Status while preserving stored-data decoding."
 kind = "other"
 
 [[setup.buckets]]
@@ -39,11 +44,11 @@ sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential
 
 [exchanges.expect]
 kind = "response"
-status = 200
+status = 400
 connection_after = "open"
 
 [exchanges.expect.body]
-size = 0
+contains_utf8 = ["<Code>MalformedXML</Code>"]
 
 [[exchanges]]
 name = "self-closing-empty-status"
@@ -58,11 +63,11 @@ sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential
 
 [exchanges.expect]
 kind = "response"
-status = 200
+status = 400
 connection_after = "open"
 
 [exchanges.expect.body]
-size = 0
+contains_utf8 = ["<Code>MalformedXML</Code>"]
 
 [[exchanges]]
 name = "read-back"
@@ -74,8 +79,8 @@ sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential
 
 [exchanges.expect]
 kind = "response"
-status = 200
+status = 404
 connection_after = "open"
 
 [exchanges.expect.body]
-contains_utf8 = ["<ID>empty</ID>", "<Status></Status>"]
+contains_utf8 = ["<Code>NoSuchLifecycleConfiguration</Code>"]

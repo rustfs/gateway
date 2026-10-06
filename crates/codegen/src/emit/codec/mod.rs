@@ -46,6 +46,7 @@ pub mod encode;
 pub mod expr;
 pub mod media;
 pub mod name_policy;
+mod nonempty;
 pub mod tolerance;
 pub mod url;
 

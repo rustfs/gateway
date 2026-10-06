@@ -112,7 +112,7 @@
                                                    "binding": { "kind": "BodyXml" },
                                                    "type": { "kind": "StringEnum", "values": ["Enabled", "Disabled"] },
                                                    "hot": false,
-                                                   "quirk_refs": []
+                                                   "quirk_refs": ["q-xml-status-0001"]
                                                  }
                                                ],
                                      "xml": {
@@ -261,7 +261,7 @@
                                                                      "values": ["Enabled", "Disabled"]
                                                                    },
                                                            "hot": false,
-                                                           "quirk_refs": []
+                                                           "quirk_refs": ["q-xml-status-0001"]
                                                          }
                                                        ],
                                              "xml": {
@@ -280,7 +280,7 @@
                                          "binding": { "kind": "BodyXml" },
                                          "type": { "kind": "StringEnum", "values": ["Enabled", "Disabled"] },
                                          "hot": false,
-                                         "quirk_refs": []
+                                         "quirk_refs": ["q-xml-status-0001"]
                                        },
                                        {
                                          "name": "EventThreshold",
@@ -311,7 +311,7 @@
                                                                 "values": ["Enabled", "Disabled"]
                                                               },
                                                       "hot": false,
-                                                      "quirk_refs": []
+                                                      "quirk_refs": ["q-xml-status-0001"]
                                                     }
                                                   ],
                                         "xml": {
@@ -402,7 +402,7 @@
                                                  "binding": { "kind": "BodyXml" },
                                                  "type": { "kind": "StringEnum", "values": ["Enabled", "Disabled"] },
                                                  "hot": false,
-                                                 "quirk_refs": []
+                                                 "quirk_refs": ["q-xml-status-0001"]
                                                },
                                                {
                                                  "name": "SourceSelectionCriteria",
@@ -565,7 +565,7 @@
                                                  "binding": { "kind": "BodyXml" },
                                                  "type": { "kind": "StringEnum", "values": ["Enabled", "Disabled"] },
                                                  "hot": false,
-                                                 "quirk_refs": []
+                                                 "quirk_refs": ["q-xml-status-0001"]
                                                },
                                                {
                                                  "name": "Time",
@@ -652,7 +652,7 @@
                                                                   "values": ["Enabled", "Disabled"]
                                                                 },
                                                         "hot": false,
-                                                        "quirk_refs": []
+                                                        "quirk_refs": ["q-xml-status-0001"]
                                                       }
                                                     ],
                                           "xml": {
@@ -729,6 +729,25 @@
                               }
                             ],
                 "cases": ["c-replication-0013", "c-replication-0012"]
+              },
+              {
+                "id": "q-xml-status-0001",
+                "kind": "nonempty_required_text",
+                "target": "request.required_status",
+                "summary": "HTTP lifecycle and replication documents refuse empty required Status members with MalformedXML; nonempty unknown values and persisted configuration readers remain lenient.",
+                "evidence": [
+                              {
+                                "kind": "other",
+                                "ref": "https://github.com/rustfs/gateway/issues/1078#issuecomment-5974481156",
+                                "summary": "The ruling separates empty required request Status refusals from permissive stored-data decoding."
+                              },
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ReplicationRule.html",
+                                "summary": "ReplicationRule requires Status and documents Enabled and Disabled as its values."
+                              }
+                            ],
+                "cases": ["c-lifecycle-0041", "c-replication-0038"]
               },
               {
                 "id": "q-repl-0002",

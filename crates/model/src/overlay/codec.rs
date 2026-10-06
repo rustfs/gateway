@@ -80,6 +80,8 @@ pub enum CodecValue {
         /// Largest accepted value.
         max: i32,
     },
+    /// Whether a required XML string member must contain text on the HTTP request path.
+    NonEmptyText(bool),
     /// Media type of a non-XML text payload.
     MediaType(String),
     /// Tolerant reading applied to a request header.

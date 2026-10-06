@@ -160,6 +160,7 @@ name = "Status"
 synthesize = true
 required = true
 type = "StringEnum:Enabled|Disabled"
+quirks = ["q-xml-status-0001"]
 
 # The destination's `Bucket` member is typed `BucketName` in the model but carries an ARN on the
 # wire — `arn:aws:s3:::bucket` — which the bucket-name grammar (no colons) would refuse in every
@@ -183,3 +184,27 @@ required = ["Bucket"]
 name = "Bucket"
 type = "String"
 quirks = ["q-repl-0011"]
+
+[[shape.ReplicationRule.field]]
+name = "Status"
+quirks = ["q-xml-status-0001"]
+
+[[shape.ExistingObjectReplication.field]]
+name = "Status"
+quirks = ["q-xml-status-0001"]
+
+[[shape.ReplicaModifications.field]]
+name = "Status"
+quirks = ["q-xml-status-0001"]
+
+[[shape.SseKmsEncryptedObjects.field]]
+name = "Status"
+quirks = ["q-xml-status-0001"]
+
+[[shape.Metrics.field]]
+name = "Status"
+quirks = ["q-xml-status-0001"]
+
+[[shape.ReplicationTime.field]]
+name = "Status"
+quirks = ["q-xml-status-0001"]
