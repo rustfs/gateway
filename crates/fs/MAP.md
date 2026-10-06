@@ -54,6 +54,7 @@ Agent entry point. File → responsibility → when you need to open it.
 | `tests/crud/multipart_conditions.rs` | `If-Match`/`If-None-Match` on `CompleteMultipartUpload`: publish when they hold, `412` leaving object and upload in place. | Changing conditional completion. |
 | `tests/crud/multipart_replay.rs` | Repeated completion replays the committed object across restart; other parts, overwrite, other key and a later upload stay refused. | Changing completion retries. |
 | `tests/crud/multipart_listing.rs` | Restarted upload pages, paired markers, rollup, retirement, and path refusals. | Changing upload listing or its persisted authority. |
+| `tests/crud/paging_limits.rs` | Populated upload/part ceilings, invalid numeric limits, and cursor progress. | Changing reference-backend pagination bounds. |
 | `tests/crud/multipart_checksums.rs` | Negotiated part validation, restart, retry, and completion checksum evidence. | Changing multipart checksum persistence or verification. |
 | `tests/crud/multipart_trailer_checksums.rs` | Part checksums carried by an unsigned `aws-chunked` trailer (aws-sdk-java-v2): accepted and combined at completion; wrong value, other algorithm, absent trailer, header-plus-trailer and malformed value refused with no part stored. | Changing how a part checksum reaches the multipart authority. |
 | `tests/crud/multipart_sizing.rs` | Multipart minimum-part rejection, retryability, and boundary evidence. | Changing completion part-size validation. |

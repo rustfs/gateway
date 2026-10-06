@@ -127,7 +127,8 @@ impl Handler<ListObjectVersions> for FsBackend {
             }
         };
         let max_keys = input.max_keys.unwrap_or(1000);
-        let limit = usize::try_from(max_keys.max(0)).map_err(|_| storage_error())?;
+        let limit = usize::try_from(max_keys)
+            .map_err(|_| HandlerError::new(ErrorCode::INVALID_ARGUMENT, "max-keys must be a non-negative integer"))?;
         let selected = entries.iter().skip(start).take(limit).collect::<Vec<_>>();
         // A page of zero is a page of nothing, not a page that ran out: `ListObjects` answers
         // `max-keys=0` with `IsTruncated=false` and no cursor (`c-list-0027`), and a `true` with no

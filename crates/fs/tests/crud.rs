@@ -85,6 +85,8 @@ mod object_encryption;
 mod object_metadata;
 #[path = "crud/object_tagging.rs"]
 mod object_tagging;
+#[path = "crud/paging_limits.rs"]
+mod paging_limits;
 #[path = "crud/post_object.rs"]
 mod post_object;
 #[path = "crud/range_reads.rs"]

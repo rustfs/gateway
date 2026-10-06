@@ -352,6 +352,10 @@ impl Handler<ListMultipartUploads> for FsBackend {
         let key_marker = input.key_marker.unwrap_or_default();
         let upload_id_marker = input.upload_id_marker.unwrap_or_default();
         let max_uploads_value = input.max_uploads.unwrap_or(1000);
+        // AWS documents a 1..=1000 request range (https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListMultipartUploads.html).
+        if !(1..=1000).contains(&max_uploads_value) {
+            return Err(HandlerError::new(ErrorCode::INVALID_ARGUMENT, "max-uploads must be between 1 and 1000"));
+        }
         let max_uploads = page_size(max_uploads_value, "max-uploads")?;
         let records = self.active_upload_records(bucket.as_str()).await?;
         let candidates = build_upload_candidates(records, &prefix, delimiter.as_deref());

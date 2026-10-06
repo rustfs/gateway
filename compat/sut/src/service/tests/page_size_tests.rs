@@ -16,8 +16,9 @@
 //!
 //! Responsible for: an oversized `max-keys` on the three listings reaching the backend as RustFS's
 //! ceiling — a page and a `<MaxKeys>` echo of a thousand, where the core default refuses
-//! ListObjectsV2 with `400` — while a negative or unparseable value is still refused and the other
-//! page-size parameters reach the backend untouched.
+//! ListObjectsV2 with `400` — while a negative or unparseable value is still refused and
+//! an oversized `max-uploads` is refused instead of silently clamped. The core's
+//! `codec::tests::page_size_ceiling` pins the exact value passed to the backend.
 //! NOT responsible for: the default refusal, which the conformance corpus pins (`c-list-0028`), or
 //! how the backend pages (`rustfs_gateway_fs::listing`).
 //! Upstream: the parent module's two-identity assembly. Downstream: nothing.
@@ -96,15 +97,20 @@ async fn n_a_negative_or_unparseable_max_keys_is_still_refused() {
     }
 }
 
-/// Negative — the ceiling is `max-keys`'s alone: `max-uploads` reaches the backend as sent, because
-/// RustFS refuses an oversized one rather than clamping it, and that answer is the backend's.
+/// Negative — the ceiling is `max-keys`'s alone: the backend refuses an oversized `max-uploads`
+/// instead of serving a clamped page, while its valid upper boundary still succeeds.
 #[tokio::test]
-async fn n_other_page_size_parameters_reach_the_backend_as_sent() {
+async fn n_oversized_max_uploads_is_refused_instead_of_clamped() {
     let root = TestRoot::new();
     let service = listing_bucket(&root).await;
 
     let listed = exchange(&service, as_main(http::Method::GET, "/pages?uploads&max-uploads=5000", Bytes::new())).await;
     let body = body_of(&listed);
+    assert_eq!(listed.status(), 400, "{body}");
+    assert!(body.contains("<Code>InvalidArgument</Code>"), "{body}");
+
+    let listed = exchange(&service, as_main(http::Method::GET, "/pages?uploads&max-uploads=1000", Bytes::new())).await;
+    let body = body_of(&listed);
     assert_eq!(listed.status(), 200, "{body}");
-    assert!(body.contains("<MaxUploads>5000</MaxUploads>"), "{body}");
+    assert!(body.contains("<MaxUploads>1000</MaxUploads>"), "{body}");
 }
