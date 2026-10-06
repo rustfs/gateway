@@ -602,7 +602,8 @@ impl Handler<ListParts> for FsBackend {
             .transpose()
             .map_err(|_| HandlerError::new(ErrorCode::INVALID_ARGUMENT, "part-number-marker must be an integer"))?
             .unwrap_or_default();
-        let max_parts_value = input.max_parts.unwrap_or(1000);
+        // AWS caps a ListParts response at 1000 parts (https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListParts.html).
+        let max_parts_value = input.max_parts.unwrap_or(1000).min(1000);
         let max_parts = usize::try_from(max_parts_value)
             .map_err(|_| HandlerError::new(ErrorCode::INVALID_ARGUMENT, "max-parts must be a non-negative integer"))?;
         let numbers = self.list_part_numbers(&upload).await?;
@@ -612,7 +613,7 @@ impl Handler<ListParts> for FsBackend {
             .filter(|number| *number > marker)
             .take(max_parts)
             .collect();
-        let is_truncated = numbers.iter().copied().filter(|number| *number > marker).count() > selected.len();
+        let is_truncated = max_parts > 0 && numbers.iter().copied().filter(|number| *number > marker).count() > selected.len();
         let mut parts = Vec::with_capacity(selected.len());
         for number in selected {
             let path = Self::part_path(&upload, number);
