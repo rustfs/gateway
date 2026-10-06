@@ -45,7 +45,8 @@ pub fn render_claimed_row(template: &str, selector: &RouteSelector) -> String {
 
 /// Why a claimed row's selector is refused, or `None` when it is usable.
 ///
-/// A claimed row names exactly one method and may add query and header predicates. Everything else
+/// A claimed row names at most one method and may add query and header predicates. No method
+/// predicate means every method, including extension tokens (ADR-0038). Everything else
 /// the claim already decides: the target (the path is not a bucket or a key), the path (the
 /// template), the endpoint face (standard only) and the ARN form (none).
 #[must_use]
@@ -67,7 +68,7 @@ pub(crate) fn claimed_selector_fault(predicates: &[Predicate]) -> Option<&'stati
             _ => {}
         }
     }
-    (methods != 1).then_some("a claimed row names exactly one method")
+    (methods > 1).then_some("a claimed row names at most one method")
 }
 
 /// Where a claimed route's authorisation bucket comes from (ADR-0025, ADR-0026).

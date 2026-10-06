@@ -51,7 +51,8 @@ pub struct ClaimedRow {
     /// The path template: literal segments and whole-segment `{parameters}`, starting with the
     /// claim's own segments.
     pub template: &'static str,
-    /// Exactly one method, and optionally query or header predicates. Never a target, a path
+    /// At most one method, and optionally query or header predicates. Omitting the method matches
+    /// every method, including extension tokens (ADR-0038). Never a target, a path
     /// literal, a host class or an ARN form: the claim decides those.
     pub selector: &'static [Predicate],
 }

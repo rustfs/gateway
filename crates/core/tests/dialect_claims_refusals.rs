@@ -253,16 +253,15 @@ fn n_a_template_outside_the_dialects_claims_is_refused() {
     }
 }
 
-/// Negative — a claimed row names exactly one method and nothing the claim already decides.
+/// Negative — a claimed row names at most one method and nothing the claim already decides.
 #[test]
 fn n_a_claimed_row_selector_that_restates_the_claim_is_refused() {
     static TARGET: &[Predicate] = &[Predicate::Method(Method::GET), Predicate::Target(TargetKind::Object)];
     static LITERAL: &[Predicate] = &[Predicate::Method(Method::GET), Predicate::PathLiteral("/acme/admin/v1/info")];
     static FACE: &[Predicate] = &[Predicate::Method(Method::GET), Predicate::HostClass(HostClass::Standard)];
     static ARN: &[Predicate] = &[Predicate::Method(Method::GET), Predicate::ArnForm(ArnForm::AccessPoint)];
-    static NO_METHOD: &[Predicate] = &[Predicate::QueryPresent("x")];
     static TWO_METHODS: &[Predicate] = &[Predicate::Method(Method::GET), Predicate::Method(Method::PUT)];
-    for selector in [TARGET, LITERAL, FACE, ARN, NO_METHOD, TWO_METHODS, &[]] {
+    for selector in [TARGET, LITERAL, FACE, ARN, TWO_METHODS] {
         let errors = refusals(only::<INFO>(
             vec![ADMIN],
             vec![ClaimedRow {
