@@ -18,7 +18,7 @@
 
 use super::*;
 
-fn state(pid: u32) -> String {
+pub(super) fn state(pid: u32) -> String {
     let output = Command::new("/bin/ps")
         .args(["-o", "stat=", "-p", &pid.to_string()])
         .output()
@@ -29,7 +29,7 @@ fn state(pid: u32) -> String {
         .to_owned()
 }
 
-fn wait_for_state(pid: u32, expected: char) {
+pub(super) fn wait_for_state(pid: u32, expected: char) {
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
         if state(pid).starts_with(expected) {

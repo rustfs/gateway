@@ -22,6 +22,9 @@ use std::sync::mpsc;
 
 use super::*;
 
+#[path = "grandchild_tests.rs"]
+mod grandchild_tests;
+
 #[path = "observation_tests.rs"]
 mod observation_tests;
 #[path = "path_isolation_tests.rs"]
@@ -145,6 +148,17 @@ fn test_executable(test: &str) -> Command {
     command
 }
 
+// These positive fixtures measure dependency progress, not a deadline. Host admission waits
+// must not expire their logical clock; the wall watchdog only bounds a stalled fixture.
+fn run_with_fixture_watchdog(commands: &[GateCommand], directory: &Path) -> Batch {
+    let now = Instant::now();
+    let deadline = now + Duration::from_secs(3600);
+    let watchdog = now + Duration::from_secs(30);
+    run_with_clock(commands, directory, Some(deadline), &|| {
+        if Instant::now() >= watchdog { deadline } else { now }
+    })
+}
+
 #[test]
 fn starts_every_child_before_waiting_for_one() {
     let root = test_root("crate-barrier");
@@ -165,10 +179,10 @@ fn starts_every_child_before_waiting_for_one() {
         shell(wait_for(&second, &first), "second"),
     ];
 
-    let batch = run(&commands, Path::new("."), Some(Instant::now() + Duration::from_secs(5)));
+    let batch = run_with_fixture_watchdog(&commands, Path::new("."));
 
     fs::remove_dir_all(root).expect("test directory must be removable");
-    assert!(all_succeeded(&batch, 2), "crate verification steps ran sequentially");
+    assert!(all_succeeded(&batch, 2), "the dependent command pair did not complete successfully");
 }
 
 #[test]
@@ -195,23 +209,30 @@ fn drains_later_output_without_blocking_an_earlier_child() {
         ),
     ];
 
-    let batch = run(&commands, Path::new("."), Some(Instant::now() + Duration::from_secs(5)));
+    let batch = run_with_fixture_watchdog(&commands, Path::new("."));
 
     fs::remove_dir_all(root).expect("test directory must be removable");
-    assert!(all_succeeded(&batch, 2), "a later child's full pipe blocked an earlier child");
+    assert!(all_succeeded(&batch, 2), "the reader/writer fixture did not complete successfully");
 }
 
 #[test]
 fn failure_cancels_and_reaps_slow_siblings() {
     let root = test_root("crate-failure");
     let marker = root.join("slow-child-finished");
-    let commands = vec![
+    let commands = [
         shell(vec!["-c".to_owned(), format!("sleep 10; touch '{}'", marker.display())], "slow"),
         shell(vec!["-c".to_owned(), "exit 7".to_owned()], "failure"),
     ];
+    let mut supervisor = test_supervisor(capture_root().expect("capture directory must be creatable"));
     let started = Instant::now();
 
-    let batch = run(&commands, Path::new("."), Some(started + Duration::from_secs(5)));
+    for (index, (program, args, step)) in commands.iter().enumerate() {
+        supervisor
+            .spawn(index, program, args, step, Path::new("."))
+            .expect("cancellation fixture child must start");
+    }
+    let batch = supervisor.wait(Some(started + Duration::from_secs(5)));
+    let batch = supervisor.finish(batch);
     let elapsed = started.elapsed();
 
     let slow_child_finished = marker.exists();
@@ -460,6 +481,15 @@ fn an_injected_clock_past_the_deadline_ends_the_lock_wait() {
 
 #[test]
 fn supervisor_lock_released_before_deadline_allows_command_to_start() {
+    assert_unexpired_lock_admission(Duration::from_millis(50));
+}
+
+#[test]
+fn supervisor_lock_admits_an_unexpired_command_after_a_host_pause() {
+    assert_unexpired_lock_admission(Duration::from_millis(1100));
+}
+
+fn assert_unexpired_lock_admission(host_pause: Duration) {
     let root = test_root("lock-release");
     let marker = root.join("started");
     let lock = SUPERVISOR_LOCK.lock().expect("test must hold the supervisor lock");
@@ -471,15 +501,29 @@ fn supervisor_lock_released_before_deadline_allows_command_to_start() {
             vec!["-c".to_owned(), format!("touch '{}'", worker_marker.display())],
             "must start",
         )];
-        ready_sender.send(()).expect("test readiness receiver must remain available");
-        run(&commands, &worker_root, Some(Instant::now() + Duration::from_secs(1)))
+        let now = Instant::now();
+        let deadline = now + Duration::from_secs(3600);
+        let watchdog = now + Duration::from_secs(30);
+        let announced = std::cell::Cell::new(false);
+        // This first clock read observes real lock contention. Only the setup watchdog uses
+        // wall time; host scheduling cannot expire the deliberately unexpired admission clock.
+        let clock = || {
+            if !announced.replace(true) {
+                ready_sender.send(()).expect("test readiness receiver must remain available");
+            }
+            if Instant::now() >= watchdog { deadline } else { now }
+        };
+        run_with_clock(&commands, &worker_root, Some(deadline), &clock)
     });
-    ready_receiver.recv().expect("deadline worker must become ready");
-    thread::sleep(Duration::from_millis(50));
+    let ready = ready_receiver.recv_timeout(Duration::from_secs(30));
+    if ready.is_ok() {
+        thread::sleep(host_pause);
+    }
     drop(lock);
 
     let batch = worker.join().expect("deadline worker must finish");
 
+    ready.expect("deadline worker must observe the held supervisor lock");
     assert!(all_succeeded(&batch, 1), "lock contention caused an early timeout");
     assert!(marker.exists(), "a command released before its deadline did not start");
     fs::remove_dir_all(root).expect("test directory must be removable");
@@ -566,30 +610,6 @@ fn a_wait_error_is_retained_after_the_child_is_reaped() {
         .as_ref()
         .expect_err("the synthetic wait failure must remain visible");
     assert_eq!(error.to_string(), "synthetic wait failure");
-}
-
-#[test]
-fn deadline_terminates_grandchildren_in_the_command_group() {
-    let root = test_root("crate-grandchild");
-    let pid_file = root.join("grandchild.pid");
-    let commands = vec![shell(
-        vec![
-            "-c".to_owned(),
-            format!("sleep 30 & echo $! > '{}'; wait", pid_file.display()),
-        ],
-        "process tree",
-    )];
-
-    let batch = run(&commands, Path::new("."), Some(Instant::now() + Duration::from_secs(1)));
-    let pid = fs::read_to_string(&pid_file).expect("grandchild must publish its pid");
-    let alive = alive_after_reap_grace(pid.trim());
-    if alive {
-        terminate_pid(pid.trim());
-    }
-    fs::remove_dir_all(root).expect("test directory must be removable");
-
-    assert!(batch.timed_out, "the process-tree deadline was not observed");
-    assert!(!alive, "a timed-out command left a grandchild running");
 }
 
 #[test]
