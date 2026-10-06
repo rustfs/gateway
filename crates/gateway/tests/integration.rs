@@ -228,6 +228,8 @@ mod signing_services;
 mod sigv2_runtime;
 #[path = "sse_runtime.rs"]
 mod sse_runtime;
+#[path = "static_header_allocations.rs"]
+mod static_header_allocations;
 #[path = "steady_state_allocations.rs"]
 mod steady_state_allocations;
 #[path = "streaming_request.rs"]

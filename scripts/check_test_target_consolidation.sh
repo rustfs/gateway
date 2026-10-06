@@ -789,6 +789,7 @@ gateway_modules = (
     "signing_services",
     "sigv2_runtime",
     "sse_runtime",
+    "static_header_allocations",
     "steady_state_allocations",
     "streaming_request",
     "streaming_without_length",
