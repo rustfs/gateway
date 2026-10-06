@@ -24,7 +24,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use rustfs_gateway_core::dialect::BucketParam;
 use rustfs_gateway_dialect_rustfs_admin::{PENDING, ROUTES, RouteRecord, STAYING};
 
-use super::{dialect, param};
+use super::{HandlerDeadlineClass, OVERLAY, Predicate, ResourceShape, declared, dialect, param, templates};
 
 /// Positive and negative — exactly the twenty-one `{bucket}` and 49 `{warehouse}` templates bind
 /// their bucket (`BucketParam::Path`) and exactly the two compat quota routes bind a `bucket` query
@@ -65,7 +65,20 @@ fn exactly_the_bucket_and_warehouse_routes_bind_their_bucket() {
     assert_eq!((by_path, by_query), (21 + 49, 2));
     let dialect = dialect();
     let mut entries = 0;
+    let mut synthetic = Vec::new();
     for operation in dialect.claimed_operations() {
+        if ["rustfs:AdminV4Fallback", "rustfs:AdminFallback"].contains(&operation.name()) {
+            let count = operation
+                .entries()
+                .iter()
+                .map(|entry| {
+                    assert_eq!(entry.bucket_param(), None, "{}", operation.name());
+                    1
+                })
+                .sum::<usize>();
+            synthetic.push((operation.name(), count));
+            continue;
+        }
         let record = ROUTES
             .iter()
             .find(|record| record.operation == operation.name())
@@ -76,6 +89,7 @@ fn exactly_the_bucket_and_warehouse_routes_bind_their_bucket() {
         }
     }
     assert_eq!(entries, 622);
+    assert_eq!(synthetic, [("rustfs:AdminV4Fallback", 6), ("rustfs:AdminFallback", 6)]);
 }
 
 /// Positive — every order of ADR-0024's plan is declared, each inventory route once (the service
@@ -189,4 +203,73 @@ fn every_order_is_declared_and_seven_routes_stay_with_rustfs() {
     }));
     let declared: usize = by_group.values().map(BTreeSet::len).sum();
     assert_eq!(declared + 50 + STAYING.len(), 366);
+}
+
+/// Positive and negative — names are unique, precedences strictly increase, and the overlay
+/// records every operation exactly once, in the same order.
+#[test]
+fn names_and_precedences_are_unique_and_the_overlay_is_complete() {
+    let declared = declared();
+    let names: BTreeSet<&str> = declared.iter().map(|operation| operation.name).collect();
+    assert_eq!(names.len(), declared.len());
+    assert!(declared.windows(2).all(|pair| pair[0].precedence < pair[1].precedence));
+    let recorded: Vec<(&str, u16)> = OVERLAY.operations.iter().map(|row| (row.name, row.precedence)).collect();
+    let mut declared: Vec<(&str, u16)> = declared
+        .iter()
+        .map(|operation| (operation.name, operation.precedence))
+        .collect();
+    declared.extend([("rustfs:AdminV4Fallback", u16::MAX - 1), ("rustfs:AdminFallback", u16::MAX)]);
+    assert_eq!(recorded, declared);
+    assert!(OVERLAY.operations.iter().all(|row| !row.evidence.is_empty()));
+}
+
+/// Positive — every operation declares what its record says: name, group, action, rows,
+/// selector, secret, and a service-level resource under the `Standard` deadline.
+#[test]
+fn every_operation_declares_what_its_record_says() {
+    let declared = declared();
+    assert_eq!(declared.len(), ROUTES.len());
+    for (operation, record) in declared.iter().zip(ROUTES) {
+        let name = record.operation;
+        assert_eq!(operation.name, name);
+        assert_eq!(operation.group, record.group, "{name}");
+        assert_eq!(operation.action.as_deref(), Some(record.action), "{name}");
+        assert_eq!(operation.subject, record.subject, "{name}");
+        assert_eq!(operation.bucket, record.bucket, "{name}");
+        let resource = if record.bucket.is_some() {
+            ResourceShape::Bucket
+        } else {
+            ResourceShape::Service
+        };
+        assert_eq!(operation.resource, Some(resource), "{name}");
+        assert_eq!(operation.secret, record.caller_secret, "{name}");
+        assert_eq!(operation.deadline, Some(HandlerDeadlineClass::Standard), "{name}");
+        let native: Vec<String> = operation
+            .rows
+            .iter()
+            .map(|row| {
+                if record.path.starts_with("/rustfs/admin/") {
+                    assert!(
+                        !row.template
+                            .split('/')
+                            .any(|part| part.starts_with('{') && !part.starts_with("{+") && !part.starts_with("{*")),
+                        "{name}: strict admin capture"
+                    );
+                    row.template.replace("{+", "{")
+                } else {
+                    row.template.to_owned()
+                }
+            })
+            .collect();
+        assert_eq!(native, templates(record), "{name}");
+        for row in operation.rows {
+            match (row.selector, record.query) {
+                ([Predicate::Method(method)], None) => assert_eq!(method.as_str(), record.method, "{name}"),
+                ([Predicate::Method(method), Predicate::QueryEquals(key, value)], Some((k, v))) => {
+                    assert_eq!((method.as_str(), *key, *value), (record.method, k, v), "{name}");
+                }
+                (selector, query) => panic!("{name}: selector {selector:?} for query {query:?}"),
+            }
+        }
+    }
 }

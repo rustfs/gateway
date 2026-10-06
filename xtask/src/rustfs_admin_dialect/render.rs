@@ -25,7 +25,7 @@ use std::fmt::Write as _;
 use super::rulings::{About, Absent};
 use super::{Bound, Declared, Plan};
 
-const LICENSE: &str = "// Copyright 2026 RustFS Team
+pub(super) const LICENSE: &str = "// Copyright 2026 RustFS Team
 //
 // Licensed under the Apache License, Version 2.0 (the \"License\");
 // you may not use this file except in compliance with the License.
@@ -53,9 +53,25 @@ fn selector(declared: &Declared) -> String {
     predicates
 }
 
+/// Native admin routing matches raw segments before interpreting their data (ADR-0040).
+/// Keep inventory paths untouched, and keep the table-catalog and profiling contracts strict.
+fn claimed_template(path: &str) -> String {
+    if !path.starts_with("/rustfs/admin/") && !path.starts_with("/minio/admin/") {
+        return path.to_owned();
+    }
+    path.split('/')
+        .map(|segment| match segment.strip_prefix('{').and_then(|name| name.strip_suffix('}')) {
+            Some(name) if !name.starts_with('*') => format!("{{+{name}}}"),
+            _ => segment.to_owned(),
+        })
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
 /// The overlay's rendering of the rows.
 fn rendered_selector(declared: &Declared) -> String {
     let row = |template: &str| {
+        let template = claimed_template(template);
         let mut rendered = format!("PathTemplate({template:?}) ∧ Method({})", declared.method);
         if let Some((key, value)) = declared.query {
             let _ = write!(rendered, " ∧ QueryEquals({key:?}, {value:?})");
@@ -224,6 +240,7 @@ fn bucket_doc(d: &Declared) -> String {
 pub(super) fn render_operation(declared: &Declared) -> String {
     let mut out = String::from(LICENSE);
     let d = declared;
+    let has_shadows = !d.shadows.is_empty() || super::fallback::shadowed_by(d).next().is_some();
     let request = request(d);
     let _ = writeln!(out, "//! `{}`: `{request}`, registration group `{}`.", d.name, d.group);
     out.push_str("//!\n");
@@ -287,7 +304,7 @@ pub(super) fn render_operation(declared: &Declared) -> String {
     }
     out.push_str("use rustfs_gateway_core::op::{AuthRequirement, Operation, ResourceShape};\n");
     out.push_str("use rustfs_gateway_core::registry::OperationSpec;\n");
-    if d.shadows.is_empty() {
+    if !has_shadows {
         out.push_str("use rustfs_gateway_core::route::Predicate;\n");
     } else {
         out.push_str("use rustfs_gateway_core::route::{Predicate, ShadowingDecl};\n");
@@ -327,8 +344,9 @@ pub(super) fn render_operation(declared: &Declared) -> String {
         );
     }
     let _ = writeln!(out, "static SELECTOR: &[Predicate] = &[{}];\n", selector(d));
-    let mut rows = format!("ClaimedRow {{ template: {:?}, selector: SELECTOR }}", d.path);
+    let mut rows = format!("ClaimedRow {{ template: {:?}, selector: SELECTOR }}", claimed_template(&d.path));
     if let Some(alias) = &d.alias {
+        let alias = claimed_template(alias);
         let _ = write!(rows, ", ClaimedRow {{ template: {alias:?}, selector: SELECTOR }}");
     }
     let rows_doc = match &d.alias {
@@ -337,12 +355,8 @@ pub(super) fn render_operation(declared: &Declared) -> String {
         None => "The canonical row; RustFS serves no MinIO alias for it.",
     };
     let _ = writeln!(out, "/// {rows_doc}\npub static ROWS: &[ClaimedRow] = &[{rows}];\n");
-    if !d.shadows.is_empty() {
-        out.push_str(
-            "/// The later operations whose parameter meets a literal segment of this one's path: RustFS's router\n\
-             /// tries the literal first, so these requests are this operation (ADR-0027).\n\
-             pub static SHADOWS: &[ShadowingDecl] = &[\n",
-        );
+    if has_shadows {
+        out.push_str("/// Reviewed precedence over overlapping templates and authenticated fallbacks.\npub static SHADOWS: &[ShadowingDecl] = &[\n");
         for shadow in &d.shadows {
             let _ = writeln!(
                 out,
@@ -358,6 +372,14 @@ pub(super) fn render_operation(declared: &Declared) -> String {
                 } else {
                     ""
                 },
+            );
+        }
+        for fallback in super::fallback::shadowed_by(d) {
+            let _ = writeln!(
+                out,
+                "ShadowingDecl {{ winner: NAME, shadowed: {:?}, reason: \"Registered admin routes precede their authenticated fallback.\", evidence: &[{:?}] }},",
+                fallback.name,
+                super::fallback::EVIDENCE
             );
         }
         out.push_str("];\n\n");
@@ -466,7 +488,7 @@ pub const RECORD: RouteRecord = RouteRecord {{
             ""
         },
         bucket = if d.bucket.is_some() { "Some(BUCKET)" } else { "None" },
-        shadows_fn = if d.shadows.is_empty() {
+        shadows_fn = if !has_shadows {
             ""
         } else {
             "\n    fn shadows() -> &'static [ShadowingDecl] {\n        SHADOWS\n    }\n"
@@ -503,6 +525,9 @@ pub(super) fn render_mod(plan: &Plan) -> String {
     out.push_str("//! and a deployment that registers handlers.\n\n");
     for declared in &plan.declared {
         let _ = writeln!(out, "pub mod {};", declared.stem);
+    }
+    for fallback in super::fallback::FALLBACKS {
+        let _ = writeln!(out, "pub mod {};", fallback.stem);
     }
     out
 }
@@ -553,6 +578,11 @@ fn render_list(plan: &Plan, doc: &str, header: &str, item: &str) -> String {
     out.push_str(header);
     for d in &plan.declared {
         let _ = writeln!(out, "    ops::{}::{item},", d.stem);
+    }
+    if item == "OVERLAY_ROW" {
+        for fallback in super::fallback::FALLBACKS {
+            let _ = writeln!(out, "    ops::{}::OVERLAY_ROW,", fallback.stem);
+        }
     }
     out.push_str("];\n");
     out

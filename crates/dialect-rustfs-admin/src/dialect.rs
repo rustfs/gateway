@@ -33,6 +33,7 @@ use rustfs_gateway_core::dialect::{ClaimedRoute, Dialect, DialectBuilder, Dialec
 use rustfs_gateway_core::route::PathClaim;
 
 use crate::admin::{AdminOperation, OperationFold};
+use crate::ops::{admin_fallback, admin_v4_fallback};
 use crate::table::{OVERLAY_ROWS, fold_every_operation};
 
 /// The RustFS router that answers the admin prefixes ahead of its S3 service, at the commit the
@@ -118,5 +119,8 @@ impl OperationFold for Declare {
 /// Every refusal [`DialectBuilder::build`] finds. None is expected: the record and the
 /// declarations are generated from the same inventory rows, and the tests pin that they agree.
 pub fn rustfs_admin_dialect() -> Result<Dialect, Vec<DialectError>> {
-    fold_every_operation(&mut Declare, Dialect::assemble(&OVERLAY)).build()
+    fold_every_operation(&mut Declare, Dialect::assemble(&OVERLAY))
+        .declare_claimed::<admin_v4_fallback::AdminV4Fallback>(admin_v4_fallback::ROUTE)
+        .declare_claimed::<admin_fallback::AdminFallback>(admin_fallback::ROUTE)
+        .build()
 }

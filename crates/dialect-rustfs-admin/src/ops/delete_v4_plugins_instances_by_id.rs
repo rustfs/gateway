@@ -31,7 +31,7 @@ use rustfs_gateway_core::codec::{CodecError, EncodedResponse, MetaView, Operatio
 use rustfs_gateway_core::dialect::{ClaimedRow, OverlayRow};
 use rustfs_gateway_core::op::{AuthRequirement, Operation, ResourceShape};
 use rustfs_gateway_core::registry::OperationSpec;
-use rustfs_gateway_core::route::Predicate;
+use rustfs_gateway_core::route::{Predicate, ShadowingDecl};
 use rustfs_gateway_core::{DerivedResourceError, NoDerived};
 use rustfs_gateway_sig::OperationFloor;
 
@@ -49,12 +49,28 @@ static SELECTOR: &[Predicate] = &[Predicate::Method(http::Method::DELETE)];
 /// The canonical row, then the MinIO alias RustFS serves it under.
 pub static ROWS: &[ClaimedRow] = &[
     ClaimedRow {
-        template: "/rustfs/admin/v4/plugins/instances/{id}",
+        template: "/rustfs/admin/v4/plugins/instances/{+id}",
         selector: SELECTOR,
     },
     ClaimedRow {
-        template: "/minio/admin/v4/plugins/instances/{id}",
+        template: "/minio/admin/v4/plugins/instances/{+id}",
         selector: SELECTOR,
+    },
+];
+
+/// Reviewed precedence over overlapping templates and authenticated fallbacks.
+pub static SHADOWS: &[ShadowingDecl] = &[
+    ShadowingDecl {
+        winner: NAME,
+        shadowed: "rustfs:AdminV4Fallback",
+        reason: "Registered admin routes precede their authenticated fallback.",
+        evidence: &["https://github.com/rustfs/gateway/blob/main/docs/adr/0039-authenticated-admin-fallbacks.md"],
+    },
+    ShadowingDecl {
+        winner: NAME,
+        shadowed: "rustfs:AdminFallback",
+        reason: "Registered admin routes precede their authenticated fallback.",
+        evidence: &["https://github.com/rustfs/gateway/blob/main/docs/adr/0039-authenticated-admin-fallbacks.md"],
     },
 ];
 
@@ -109,13 +125,17 @@ impl AdminOperation for DeleteV4PluginsInstancesById {
     fn rows() -> &'static [ClaimedRow] {
         ROWS
     }
+
+    fn shadows() -> &'static [ShadowingDecl] {
+        SHADOWS
+    }
 }
 
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
     precedence: 125,
-    selector: "PathTemplate(\"/rustfs/admin/v4/plugins/instances/{id}\") ∧ Method(DELETE) ∨ PathTemplate(\"/minio/admin/v4/plugins/instances/{id}\") ∧ Method(DELETE)",
+    selector: "PathTemplate(\"/rustfs/admin/v4/plugins/instances/{+id}\") ∧ Method(DELETE) ∨ PathTemplate(\"/minio/admin/v4/plugins/instances/{+id}\") ∧ Method(DELETE)",
     action: "admin:SetBucketTarget",
     resource: ResourceShape::Service,
     success_status: 200,

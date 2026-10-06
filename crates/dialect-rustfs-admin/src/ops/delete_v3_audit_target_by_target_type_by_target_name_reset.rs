@@ -31,7 +31,7 @@ use rustfs_gateway_core::codec::{CodecError, EncodedResponse, MetaView, Operatio
 use rustfs_gateway_core::dialect::{ClaimedRow, OverlayRow};
 use rustfs_gateway_core::op::{AuthRequirement, Operation, ResourceShape};
 use rustfs_gateway_core::registry::OperationSpec;
-use rustfs_gateway_core::route::Predicate;
+use rustfs_gateway_core::route::{Predicate, ShadowingDecl};
 use rustfs_gateway_core::{DerivedResourceError, NoDerived};
 use rustfs_gateway_sig::OperationFloor;
 
@@ -49,14 +49,22 @@ static SELECTOR: &[Predicate] = &[Predicate::Method(http::Method::DELETE)];
 /// The canonical row, then the MinIO alias RustFS serves it under.
 pub static ROWS: &[ClaimedRow] = &[
     ClaimedRow {
-        template: "/rustfs/admin/v3/audit/target/{target_type}/{target_name}/reset",
+        template: "/rustfs/admin/v3/audit/target/{+target_type}/{+target_name}/reset",
         selector: SELECTOR,
     },
     ClaimedRow {
-        template: "/minio/admin/v3/audit/target/{target_type}/{target_name}/reset",
+        template: "/minio/admin/v3/audit/target/{+target_type}/{+target_name}/reset",
         selector: SELECTOR,
     },
 ];
+
+/// Reviewed precedence over overlapping templates and authenticated fallbacks.
+pub static SHADOWS: &[ShadowingDecl] = &[ShadowingDecl {
+    winner: NAME,
+    shadowed: "rustfs:AdminFallback",
+    reason: "Registered admin routes precede their authenticated fallback.",
+    evidence: &["https://github.com/rustfs/gateway/blob/main/docs/adr/0039-authenticated-admin-fallbacks.md"],
+}];
 
 /// `DELETE /rustfs/admin/v3/audit/target/{target_type}/{target_name}/reset`.
 #[derive(Debug)]
@@ -109,13 +117,17 @@ impl AdminOperation for DeleteV3AuditTargetByTargetTypeByTargetNameReset {
     fn rows() -> &'static [ClaimedRow] {
         ROWS
     }
+
+    fn shadows() -> &'static [ShadowingDecl] {
+        SHADOWS
+    }
 }
 
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
     precedence: 105,
-    selector: "PathTemplate(\"/rustfs/admin/v3/audit/target/{target_type}/{target_name}/reset\") ∧ Method(DELETE) ∨ PathTemplate(\"/minio/admin/v3/audit/target/{target_type}/{target_name}/reset\") ∧ Method(DELETE)",
+    selector: "PathTemplate(\"/rustfs/admin/v3/audit/target/{+target_type}/{+target_name}/reset\") ∧ Method(DELETE) ∨ PathTemplate(\"/minio/admin/v3/audit/target/{+target_type}/{+target_name}/reset\") ∧ Method(DELETE)",
     action: "admin:SetBucketTarget",
     resource: ResourceShape::Service,
     success_status: 200,

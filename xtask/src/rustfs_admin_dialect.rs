@@ -22,11 +22,11 @@
 //! templates and the listed query parameters (`template.rs`), and ADR-0031's surfaces (the table
 //! catalog's `/_iceberg/v1` with its `/iceberg/v1` compat rows as aliases), refusing any route it has no rule for and any rule
 //! outside those ADRs' shapes, and writing one operation module per declared operation, the
-//! module list and the dialect's table files, each through rustfmt.
+//! module list and the dialect's table files, plus ADR-0039's two fixed fallback operations, each through rustfmt.
 //! `--check` compares instead, and fails on a stale, missing or extra file.
 //! NOT responsible for: validating the inventory (goldens' strict reader does, and binds the
 //! generated operations back to it), the claims or the shared shapes
-//! (`crates/dialect-rustfs-admin/src/{dialect,admin}.rs`), or any handler.
+//! (`crates/dialect-rustfs-admin/src/{dialect,admin}.rs`), or any backend handler.
 //! Upstream: the recorded inventory. Downstream: `rustfs-gateway-dialect-rustfs-admin`.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -43,6 +43,7 @@ use self::template::{Shadow, Template, shadowing, snake, template_params, type_n
 
 use crate::repo_root::repo_root;
 
+mod fallback;
 mod render;
 mod rule;
 mod rulings;
@@ -564,6 +565,9 @@ fn generate(root: &Path) -> Result<BTreeMap<PathBuf, String>, String> {
     let mut files = BTreeMap::new();
     for declared in &plan.declared {
         files.insert(output.join("ops").join(format!("{}.rs", declared.stem)), render_operation(declared));
+    }
+    for fallback in fallback::FALLBACKS {
+        files.insert(output.join("ops").join(format!("{}.rs", fallback.stem)), fallback.render(render::LICENSE));
     }
     files.insert(output.join("ops/mod.rs"), render_mod(&plan));
     for (path, source) in render_tables(&plan, &inventory.source.commit) {

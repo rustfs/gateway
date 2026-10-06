@@ -18,8 +18,9 @@
 //! Responsible for: an assembled service with the facade's SigV4 authenticator (handing the
 //! caller's secret over, so each operation's own opt-in decides who holds it), a recording
 //! authorizer answering by policy, the `rustfs` dialect, and one generic handler registered for
-//! every generated operation through `fold_every_operation` that records its path parameters
-//! and whether it holds the secret; and the requests the tests send — signed, unsigned,
+//! every inventory operation through `fold_every_operation`, plus the actual fixed fallback
+//! handlers; it records path parameters
+//! and whether a handler holds the secret, and stores buffered control payloads; and the requests the tests send — signed, unsigned,
 //! presigned, with a concrete or a malformed parameter value, with or without the bucket a
 //! query-bound operation names — for any row of any operation.
 //! NOT responsible for: the assertions (`tests.rs`, `subject_tests.rs`, `bucket_tests.rs`), routing without a service (the dialect
@@ -39,6 +40,11 @@ use rustfs_gateway::{
 };
 use rustfs_gateway_core::dialect::BucketParam;
 use rustfs_gateway_core::{Subject, SubjectRule, Subjects};
+use rustfs_gateway_dialect_rustfs_admin::ops::{
+    admin_fallback::AdminFallback,
+    admin_v4_fallback::AdminV4Fallback,
+    put_v3_config::{self, PutV3Config},
+};
 use rustfs_gateway_dialect_rustfs_admin::{
     AdminOperation, AdminResponse, OperationFold, ROUTES, RouteRecord, fold_every_operation, rustfs_admin_dialect,
 };
@@ -179,6 +185,7 @@ impl Handed {
 #[derive(Default)]
 struct Admin {
     handed: Mutex<Vec<Handed>>,
+    stored_bodies: Mutex<Vec<Bytes>>,
 }
 
 impl Admin {
@@ -198,14 +205,49 @@ impl<O: AdminOperation> Handler<O> for Admin {
     }
 }
 
-/// Registers the one handler for every operation, as a deployment with a generic handler would.
-struct Register(Arc<Admin>);
+/// Records the concrete buffered control's bytes without inspecting an erased input type.
+struct RecordedConfig(Arc<Admin>);
+
+impl Handler<PutV3Config> for RecordedConfig {
+    async fn call(&self, request: Req<PutV3Config>) -> HandlerResult<PutV3Config> {
+        self.0
+            .stored_bodies
+            .lock()
+            .expect("stored payloads")
+            .push(request.input().clone());
+        self.0.serve(&request)
+    }
+}
+
+/// Observes the actual fixed handlers without replacing their response or error behavior.
+struct FixedFallback(Arc<Admin>);
+
+impl Handler<AdminV4Fallback> for FixedFallback {
+    async fn call(&self, request: Req<AdminV4Fallback>) -> HandlerResult<AdminV4Fallback> {
+        self.0.handed.lock().expect("uncontended").push(Handed::of(request.context()));
+        AdminV4Fallback.call(request).await
+    }
+}
+
+impl Handler<AdminFallback> for FixedFallback {
+    async fn call(&self, request: Req<AdminFallback>) -> HandlerResult<AdminFallback> {
+        self.0.handed.lock().expect("uncontended").push(Handed::of(request.context()));
+        AdminFallback.call(request).await
+    }
+}
+
+/// Registers the generic handlers; the concrete buffered control is registered after the fold.
+struct Register(Arc<Admin>, Option<&'static str>);
 
 impl OperationFold for Register {
     type Carry = ServiceBuilder;
 
     fn step<O: AdminOperation>(&mut self, carry: ServiceBuilder) -> ServiceBuilder {
-        carry.register::<O, _>(Arc::clone(&self.0))
+        if self.1 == Some(O::NAME) || O::NAME == put_v3_config::NAME {
+            carry
+        } else {
+            carry.register::<O, _>(Arc::clone(&self.0))
+        }
     }
 }
 
@@ -262,10 +304,26 @@ pub(crate) fn rustfs_profile_floor() -> SecurityFloor {
 
 /// [`assemble`] behind `floor`.
 pub(crate) fn assemble_on(floor: SecurityFloor, policy: impl Fn(&str, &str) -> bool + Send + Sync + 'static) -> Assembled {
+    assemble_with_profile(floor, policy, false, None)
+}
+
+/// Socket controls select the existing RustFS bodyless, addressing and CORS policies explicitly;
+/// ordinary controls retain the generic pipeline.
+fn assemble_with_profile(
+    floor: SecurityFloor,
+    policy: impl Fn(&str, &str) -> bool + Send + Sync + 'static,
+    legacy_profile: bool,
+    omit_handler: Option<&'static str>,
+) -> Assembled {
     let credentials = Credentials::new(ACCESS_KEY, SECRET_KEY.as_bytes()).expect("a fixture credential");
     let regions = RegionSet::new(REGIONS).expect("fixture regions");
     let authenticator =
         SigV4Authenticator::new(Arc::new(StaticCredentials::new().with(credentials)), regions).hand_caller_secret_to_handlers();
+    let authenticator = if legacy_profile {
+        authenticator.verify_paths_as_legacy_rustfs()
+    } else {
+        authenticator
+    };
     let asked = Arc::new(Mutex::new(Vec::new()));
     let admin = Arc::new(Admin::default());
     let dialect = rustfs_admin_dialect().expect("the generated record and declarations agree");
@@ -288,7 +346,31 @@ pub(crate) fn assemble_on(floor: SecurityFloor, policy: impl Fn(&str, &str) -> b
             asked: Arc::clone(&asked),
         })
         .dialect(&dialect);
-    let builder = fold_every_operation(&mut Register(Arc::clone(&admin)), builder);
+    let builder = if legacy_profile {
+        builder
+            .accept_mismatched_payload_digests_without_a_body()
+            .leave_bodies_of_bodyless_operations_unread()
+            .address_paths_as_legacy_rustfs()
+            .accept_legacy_rustfs_object_keys_after_listing_in_the_posture_report()
+            .drain_unread_request_bodies(rustfs_gateway::UnreadBodyDrain::with_idle_timeout(std::time::Duration::from_secs(300)))
+            .answer_cors_as_legacy_rustfs(rustfs_gateway::LegacyRustfsCors::with_fallback_origins(None))
+    } else {
+        builder
+    };
+    let builder = fold_every_operation(&mut Register(Arc::clone(&admin), omit_handler), builder);
+    let builder = if omit_handler == Some(put_v3_config::NAME) {
+        builder
+    } else {
+        builder.register::<PutV3Config, _>(Arc::new(RecordedConfig(Arc::clone(&admin))))
+    };
+    let builder = builder
+        .register::<AdminV4Fallback, _>(Arc::new(FixedFallback(Arc::clone(&admin))))
+        .register::<AdminFallback, _>(Arc::new(FixedFallback(Arc::clone(&admin))))
+        .require(&rustfs_gateway_core::registry::OperationSet::of([
+            "rustfs:AdminV4Fallback",
+            "rustfs:AdminFallback",
+        ]))
+        .expect("both fixed fallback handlers are registered");
     Assembled {
         service: builder.build().expect("a complete assembly"),
         admin,
@@ -537,5 +619,7 @@ pub(crate) fn presigned(record: &RouteRecord, path: &str) -> Request<Bytes> {
 }
 
 mod bucket_tests;
+mod fallback_tests;
+mod fallback_wire_tests;
 mod subject_tests;
 mod tests;

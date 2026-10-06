@@ -36,7 +36,7 @@ use rustfs_gateway_core::codec::{CodecError, EncodedResponse, MetaView, Operatio
 use rustfs_gateway_core::dialect::{BucketParam, ClaimedRow, OverlayRow};
 use rustfs_gateway_core::op::{AuthRequirement, Operation, ResourceShape};
 use rustfs_gateway_core::registry::OperationSpec;
-use rustfs_gateway_core::route::Predicate;
+use rustfs_gateway_core::route::{Predicate, ShadowingDecl};
 use rustfs_gateway_core::{DerivedResourceError, NoDerived};
 use rustfs_gateway_sig::OperationFloor;
 
@@ -57,14 +57,22 @@ static SELECTOR: &[Predicate] = &[Predicate::Method(http::Method::GET)];
 /// The canonical row, then the MinIO alias RustFS serves it under.
 pub static ROWS: &[ClaimedRow] = &[
     ClaimedRow {
-        template: "/rustfs/admin/v3/quota-stats/{bucket}",
+        template: "/rustfs/admin/v3/quota-stats/{+bucket}",
         selector: SELECTOR,
     },
     ClaimedRow {
-        template: "/minio/admin/v3/quota-stats/{bucket}",
+        template: "/minio/admin/v3/quota-stats/{+bucket}",
         selector: SELECTOR,
     },
 ];
+
+/// Reviewed precedence over overlapping templates and authenticated fallbacks.
+pub static SHADOWS: &[ShadowingDecl] = &[ShadowingDecl {
+    winner: NAME,
+    shadowed: "rustfs:AdminFallback",
+    reason: "Registered admin routes precede their authenticated fallback.",
+    evidence: &["https://github.com/rustfs/gateway/blob/main/docs/adr/0039-authenticated-admin-fallbacks.md"],
+}];
 
 /// `GET /rustfs/admin/v3/quota-stats/{bucket}`.
 #[derive(Debug)]
@@ -118,13 +126,17 @@ impl AdminOperation for GetV3QuotaStatsByBucket {
     fn rows() -> &'static [ClaimedRow] {
         ROWS
     }
+
+    fn shadows() -> &'static [ShadowingDecl] {
+        SHADOWS
+    }
 }
 
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
     precedence: 224,
-    selector: "PathTemplate(\"/rustfs/admin/v3/quota-stats/{bucket}\") ∧ Method(GET) ∨ PathTemplate(\"/minio/admin/v3/quota-stats/{bucket}\") ∧ Method(GET) ⇒ BucketParam(\"bucket\")",
+    selector: "PathTemplate(\"/rustfs/admin/v3/quota-stats/{+bucket}\") ∧ Method(GET) ∨ PathTemplate(\"/minio/admin/v3/quota-stats/{+bucket}\") ∧ Method(GET) ⇒ BucketParam(\"bucket\")",
     action: "s3:GetBucketQuota",
     resource: ResourceShape::Bucket,
     success_status: 200,

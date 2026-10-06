@@ -1,7 +1,7 @@
 [package]
 name = "rustfs-gateway-dialect-rustfs-admin"
 description = "RustFS admin API routes as RustFS Gateway dialect operations"
-version = "0.8.0"
+version = "0.9.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

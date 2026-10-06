@@ -247,11 +247,13 @@ fn the_trailing_slash_heal_row_is_reached_by_exactly_its_path() {
 
         let without = assembled.exchange(wire(&signed(heal, &format!("{prefix}/v3/heal"))));
         assert_eq!(without.status, 501, "{prefix}: {}", without.body);
-        assert!(without.reached.is_empty() && without.asked.is_empty(), "{prefix}");
+        assert_eq!(without.reached, ["rustfs:AdminFallback"], "{prefix}");
+        super::fallback_tests::assert_general_fallback_policy(&without, prefix);
 
         let doubled = assembled.exchange(wire(&signed(heal, &format!("{prefix}/v3/heal//"))));
         assert_eq!(doubled.status, 501, "{prefix}: {}", doubled.body);
-        assert!(doubled.reached.is_empty() && doubled.asked.is_empty(), "{prefix}");
+        assert_eq!(doubled.reached, ["rustfs:AdminFallback"], "{prefix}");
+        super::fallback_tests::assert_general_fallback_policy(&doubled, prefix);
 
         let bucket = assembled.exchange(wire(&signed(by_bucket, &format!("{prefix}/v3/heal/{BUCKET}"))));
         assert_eq!(bucket.status, 200, "{prefix}: {}", bucket.body);

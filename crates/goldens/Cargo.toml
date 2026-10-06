@@ -43,7 +43,7 @@ rustfs-gateway-xml = { workspace = true }
 # The request-context diff authenticates and resolves the same raw request the way the gateway
 # does: the facade's SigV4 authenticator and virtual-host resolver, the signature crate's floor,
 # scope check and client signer. Dev-only, for the same reason as the three above.
-rustfs-gateway = { workspace = true }
+rustfs-gateway = { workspace = true, features = ["server"] }
 rustfs-gateway-sig = { workspace = true }
 # The RustFS profile of rd-put-0007: the replica write decoded through the replication dialect.
 rustfs-gateway-dialect-minio = { path = "../dialect-minio" }
@@ -56,6 +56,8 @@ http = { workspace = true }
 # The rd-loc pins read a whole gateway response body, which is an `http_body::Body`.
 http-body-util = { workspace = true }
 proptest = { workspace = true }
+# Real loopback admin fallback and body-ordering controls.
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "io-util", "time"] }
 
 [[test]]
 name = "cli"

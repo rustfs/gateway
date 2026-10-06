@@ -30,7 +30,7 @@ use rustfs_gateway_core::codec::{CodecError, EncodedResponse, MetaView, Operatio
 use rustfs_gateway_core::dialect::{ClaimedRow, OverlayRow};
 use rustfs_gateway_core::op::{AuthRequirement, Operation, ResourceShape};
 use rustfs_gateway_core::registry::OperationSpec;
-use rustfs_gateway_core::route::Predicate;
+use rustfs_gateway_core::route::{Predicate, ShadowingDecl};
 use rustfs_gateway_core::{DerivedResourceError, NoDerived};
 use rustfs_gateway_sig::OperationFloor;
 
@@ -59,6 +59,14 @@ pub static ROWS: &[ClaimedRow] = &[
         selector: SELECTOR,
     },
 ];
+
+/// Reviewed precedence over overlapping templates and authenticated fallbacks.
+pub static SHADOWS: &[ShadowingDecl] = &[ShadowingDecl {
+    winner: NAME,
+    shadowed: "rustfs:AdminFallback",
+    reason: "Registered admin routes precede their authenticated fallback.",
+    evidence: &["https://github.com/rustfs/gateway/blob/main/docs/adr/0039-authenticated-admin-fallbacks.md"],
+}];
 
 /// `POST /rustfs/admin/v3/service?action=restart`.
 #[derive(Debug)]
@@ -110,6 +118,10 @@ impl AdminOperation for PostV3ServiceRestart {
 
     fn rows() -> &'static [ClaimedRow] {
         ROWS
+    }
+
+    fn shadows() -> &'static [ShadowingDecl] {
+        SHADOWS
     }
 }
 

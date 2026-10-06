@@ -57,17 +57,24 @@ pub static ROWS: &[ClaimedRow] = &[
     },
 ];
 
-/// The later operations whose parameter meets a literal segment of this one's path: RustFS's router
-/// tries the literal first, so these requests are this operation (ADR-0027).
-pub static SHADOWS: &[ShadowingDecl] = &[ShadowingDecl {
-    winner: NAME,
-    shadowed: "rustfs:PostV3TierByTiername",
-    reason: "RustFS's router tries a literal segment before a parameter, so `clear` here is this operation, never a `{tiername}` value.",
-    evidence: &[
-        "https://github.com/rustfs/rustfs/blob/5e1bd498ce1ca33bcb0ca50aeee861e69e6c8744/rustfs/src/admin/router.rs",
-        record::ADR_0027,
-    ],
-}];
+/// Reviewed precedence over overlapping templates and authenticated fallbacks.
+pub static SHADOWS: &[ShadowingDecl] = &[
+    ShadowingDecl {
+        winner: NAME,
+        shadowed: "rustfs:PostV3TierByTiername",
+        reason: "RustFS's router tries a literal segment before a parameter, so `clear` here is this operation, never a `{tiername}` value.",
+        evidence: &[
+            "https://github.com/rustfs/rustfs/blob/5e1bd498ce1ca33bcb0ca50aeee861e69e6c8744/rustfs/src/admin/router.rs",
+            record::ADR_0027,
+        ],
+    },
+    ShadowingDecl {
+        winner: NAME,
+        shadowed: "rustfs:AdminFallback",
+        reason: "Registered admin routes precede their authenticated fallback.",
+        evidence: &["https://github.com/rustfs/gateway/blob/main/docs/adr/0039-authenticated-admin-fallbacks.md"],
+    },
+];
 
 /// `POST /rustfs/admin/v3/tier/clear`.
 #[derive(Debug)]
