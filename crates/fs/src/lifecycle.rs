@@ -137,6 +137,9 @@ impl FsBackend {
     /// first deletion. Tag selectors consume the same per-version authority as object-tagging
     /// handlers. Version-enabled buckets receive a delete marker, while never-versioned and
     /// suspended buckets apply their existing current-object deletion semantics.
+    /// Noncurrent-version and expired-marker actions preflight their full version history too,
+    /// then recheck eligibility under the version lock before permanently removing a record. These
+    /// historical removals are not included in the returned current-object count.
     ///
     /// # Errors
     ///
@@ -145,6 +148,7 @@ impl FsBackend {
     pub async fn expire_lifecycle_once(&self) -> Result<usize, HandlerError> {
         let now = self.clock.now().unix_seconds();
         let mut selected = Vec::new();
+        let mut version_selected = Vec::new();
         for bucket in self.lifecycle_buckets().await? {
             let Some(record) = self.optional_lifecycle(&bucket).await? else {
                 continue;
@@ -159,6 +163,20 @@ impl FsBackend {
                     selected.push((bucket.clone(), object.key.clone(), object.sequence));
                 }
             }
+            if record.configuration.rules.iter().any(|rule| {
+                rule.noncurrent_version_expiration.is_some()
+                    || rule
+                        .expiration
+                        .as_ref()
+                        .is_some_and(|expiration| expiration.expired_object_delete_marker == Some(true))
+            }) {
+                let candidates = self
+                    .expiring_version_candidates(&bucket, &record.configuration.rules, now)
+                    .await?;
+                if !candidates.is_empty() {
+                    version_selected.push((bucket, record.configuration.rules, candidates));
+                }
+            }
         }
 
         let mut expired = 0;
@@ -166,6 +184,9 @@ impl FsBackend {
             if self.expire_current_if_unchanged(&bucket, &key, sequence).await? {
                 expired += 1;
             }
+        }
+        for (bucket, rules, candidates) in version_selected {
+            self.expire_selected_versions(&bucket, &rules, &candidates, now).await?;
         }
         Ok(expired)
     }
@@ -193,7 +214,7 @@ pub(super) fn rule_selects(rule: &LifecycleRule, object: &CurrentObjectRecord) -
 }
 
 /// [`rule_selects`] over the three facts it reads, for a caller that holds no census record.
-fn rule_selects_parts(rule: &LifecycleRule, key: &str, size: i64, tags: &[(String, String)]) -> bool {
+pub(super) fn rule_selects_parts(rule: &LifecycleRule, key: &str, size: i64, tags: &[(String, String)]) -> bool {
     if rule.prefix.as_deref().is_some_and(|prefix| !key.starts_with(prefix)) {
         return false;
     }

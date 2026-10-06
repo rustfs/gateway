@@ -102,6 +102,8 @@ Lifecycle configuration is one atomically replaced bucket record encoded with th
 persistence XML codec. Complete standard rules, the transition minimum-size header, deletion, and
 restart recovery share that authority; malformed or symbolic-link records fail closed. A one-shot
 expiration sweep preflights every bucket before applying enabled day/date rules to current objects.
+It also expires eligible noncurrent versions and orphan delete markers, preserving retained history
+and legacy objects. Historical removals do not change the returned current-object expiration count.
 The optional lifecycle scheduler repeats that same fail-closed sweep with a joined shutdown handle
 and reports successful, failed, and object-expiration counts. The debug interval maps both one
 lifecycle day and one sweep cadence to a short duration for conformance; tag-filtered rules match
