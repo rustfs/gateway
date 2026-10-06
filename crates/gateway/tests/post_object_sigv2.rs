@@ -198,8 +198,8 @@ async fn changing_the_key_cannot_store_an_object() {
     let mut fields = fields(&policy, &signature);
     fields[0].1 = "another-key";
     let (status, response, stored) = post(true, &fields, "hello").await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
-    assert!(response.contains("<Code>AccessDenied</Code>"));
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(response.contains("<Code>InvalidPolicyDocument</Code>"));
     assert_eq!(stored, None);
 }
 
@@ -291,4 +291,69 @@ async fn the_generic_form_grammar_keeps_its_stream_failure_code() {
         assert!(response.contains("<Code>IncompleteBody</Code>"), "{response}");
         assert_eq!(stored, None);
     }
+}
+
+// Ordering measured on legacy RustFS; gateway#1185 records the separate binary identity.
+#[tokio::test]
+async fn forged_signatures_hide_policy_document_failures() {
+    let policies = [
+        encode_base64_exact(POLICY),
+        encode_base64_exact(br#"{"expiration":"2026-01-02T03:04:04Z","conditions":[{"key":"upload"}]}"#),
+        encode_base64_exact(b"{"),
+    ];
+    for policy in policies {
+        let signature = SigV2Signer::new("AKIDEXAMPLE", b"wrong")
+            .expect("valid signer")
+            .post_policy_signature(&policy);
+        let mut fields = fields(&policy, &signature);
+        fields[0].1 = "another-key";
+        let (status, response, stored) = post(true, &fields, "hello").await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{response}");
+        assert!(response.contains("<Code>SignatureDoesNotMatch</Code>"), "{response}");
+        assert_eq!(stored, None);
+    }
+}
+
+#[tokio::test]
+async fn signed_malformed_json_is_an_invalid_policy_document() {
+    let policy = encode_base64_exact(b"{");
+    let signature = signed_policy(&policy);
+    let (status, response, stored) = post(true, &fields(&policy, &signature), "hello").await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{response}");
+    assert!(response.contains("<Code>InvalidPolicyDocument</Code>"), "{response}");
+    assert_eq!(stored, None);
+}
+
+#[tokio::test]
+async fn invalid_policy_encoding_is_refused_before_signature_comparison() {
+    for policy in ["not-base64", "e===", "e0==", "e30"] {
+        for secret in [b"secret".as_slice(), b"wrong".as_slice()] {
+            let signature = SigV2Signer::new("AKIDEXAMPLE", secret)
+                .expect("valid signer")
+                .post_policy_signature(policy);
+            let (status, response, stored) = post(true, &fields(policy, &signature), "hello").await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{response}");
+            assert!(response.contains("<Code>InvalidRequest</Code>"), "{response}");
+            assert_eq!(stored, None);
+        }
+    }
+}
+
+#[tokio::test]
+async fn generic_forms_keep_their_policy_condition_error() {
+    let policy = encode_base64_exact(POLICY);
+    let signature = signed_policy(&policy);
+    let mut fields = fields(&policy, &signature);
+    fields[0].1 = "another-key";
+    let (status, response, stored) = post_with_credentials(
+        true,
+        &fields,
+        "hello",
+        Credentials::new("AKIDEXAMPLE", b"secret").expect("valid credentials"),
+        false,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{response}");
+    assert!(response.contains("<Code>AccessDenied</Code>"), "{response}");
+    assert_eq!(stored, None);
 }

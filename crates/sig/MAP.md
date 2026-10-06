@@ -17,7 +17,7 @@ Agent entry point for SigV2/SigV4 parsing, canonicalization and verification.
 | `src/mode.rs` | Authenticated payload-mode selection. | HTTP framing receives the wrong mode. |
 | `src/operation.rs` | Per-operation authentication-scheme policy. | Presigned or anonymous access reaches the wrong operation. |
 | `src/parse.rs` | Credential and authorization parsing. | Date, region, service, or credential fields parse incorrectly. |
-| `src/post_policy.rs` | Strict browser POST-policy parsing, field enforcement, and signature proof. | A POST form condition, filename, size range, or proof changes. |
+| `src/post_policy.rs` | Browser POST-policy parsing, field enforcement, and bounded SigV2 proof before JSON interpretation. | A POST form condition, filename, size range, or proof changes. |
 | `src/post_policy_unrouted.rs` | Bounded credential material for an unrouted RustFS form, without upload enforcement. | An object-path form is refused in the wrong phase. |
 | `src/post_policy_tests.rs` | Focused unit tests for POST-policy parsing and enforcement. | A POST-policy parser control or proof changes. |
 | `src/post_policy_json.rs` | Bounded duplicate-free JSON parsing for POST policies. | JSON shape, string escaping, nesting, or element limits change. |

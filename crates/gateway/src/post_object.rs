@@ -196,9 +196,19 @@ where
                 PostPolicy::parse_with(&fields, filename, PostPolicyLimits::default(), now, rule).map_err(policy_refusal)?,
             ))
         } else if fields.iter().any(|(name, _)| *name == "awsaccesskeyid") {
-            AcceptedPolicy::SigV2(
-                SigV2PostPolicy::parse(&fields, filename, PostPolicyLimits::default(), now).map_err(policy_refusal)?,
-            )
+            AcceptedPolicy::SigV2(SigV2PostPolicy::parse(&fields, filename, PostPolicyLimits::default(), now).map_err(
+                |reject| {
+                    if legacy_store && matches!(reject, PostPolicyError::Malformed | PostPolicyError::ConditionFailed) {
+                        from_handler(
+                            HandlerError::new(ErrorCode::INVALID_POLICY_DOCUMENT, "the POST policy was not accepted"),
+                            ResponseKind::Other,
+                            ConnectionIntent::MayKeepAlive,
+                        )
+                    } else {
+                        policy_refusal(reject)
+                    }
+                },
+            )?)
         } else if has_policy {
             return Err(policy_refusal(PostPolicyError::Malformed));
         } else {
