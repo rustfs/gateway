@@ -1,0 +1,43 @@
+# c-h2-0027 — GOAWAY belongs to the connection, never a client stream.
+
+[case]
+id = "c-h2-0027"
+schema_version = 4
+title = "A GOAWAY on stream 1 is a connection PROTOCOL_ERROR"
+rationale = "A nonzero GOAWAY stream identifier must fail the connection before a later request can be served; h2 before 0.4.20 instead accepted the malformed control frame."
+polarity = "negative"
+tags = ["framing"]
+timeout_ms = 1500
+quirks = []
+applies_to = { http_versions = ["h2"], tls = "forbidden" }
+
+[[case.evidence]]
+url = "https://www.rfc-editor.org/rfc/rfc9113.html#section-6.8"
+summary = "A GOAWAY frame with a nonzero stream identifier is a connection PROTOCOL_ERROR."
+kind = "rfc"
+
+[[setup.buckets]]
+name = "conf-cors-rt"
+
+[request]
+method = "OPTIONS"
+target = "/conf-cors-rt/key.txt"
+http_version = "h2"
+
+[[request.h2_frames]]
+type = "settings"
+
+[[request.h2_frames]]
+type = "goaway"
+stream_id = 1
+error_code = "NO_ERROR"
+
+[[request.h2_frames]]
+type = "headers"
+stream_id = 1
+flags = ["end_headers", "end_stream"]
+payload_hex = "02074f5054494f4e538604152f636f6e662d636f72732d72742f6b65792e747874410e73332e6578616d706c652e636f6d"
+
+[expect]
+kind = "connection_reset"
+h2_control_frames = [{ type = "goaway", last_stream_id = 0, error_code = 1 }]
