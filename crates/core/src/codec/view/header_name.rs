@@ -14,7 +14,7 @@
 
 //! Allocation-free spellings for measured fixed metadata names.
 //!
-//! Responsible for: using static HeaderName storage for the measured GetObject/PutObject names.
+//! Responsible for: static HeaderName storage for measured binding and copy-source SSE names.
 //! NOT responsible for: accepting a request, restricting other names or interpreting values.
 //! Upstream: MetaView string lookups. Downstream: the unchanged HeaderView map lookup.
 
@@ -26,6 +26,13 @@ pub(super) fn parse(name: &str) -> Result<HeaderName, InvalidHeaderName> {
         "content-md5" => "content-md5",
         "x-amz-acl" => "x-amz-acl",
         "x-amz-checksum-mode" => "x-amz-checksum-mode",
+        "x-amz-copy-source-server-side-encryption-customer-algorithm" => {
+            "x-amz-copy-source-server-side-encryption-customer-algorithm"
+        }
+        "x-amz-copy-source-server-side-encryption-customer-key" => "x-amz-copy-source-server-side-encryption-customer-key",
+        "x-amz-copy-source-server-side-encryption-customer-key-md5" => {
+            "x-amz-copy-source-server-side-encryption-customer-key-md5"
+        }
         "x-amz-expected-bucket-owner" => "x-amz-expected-bucket-owner",
         "x-amz-grant-full-control" => "x-amz-grant-full-control",
         "x-amz-grant-read" => "x-amz-grant-read",
