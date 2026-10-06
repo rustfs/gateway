@@ -22,9 +22,10 @@ use std::future::Future;
 use std::process::Command;
 use std::sync::{Arc, Barrier};
 use std::task::{Context, Poll, Waker};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use super::policy_snapshot_with_timeout;
+use crate::clock::{MonotonicClock, SystemMonotonic};
 use crate::ext::{PolicyError, PolicySnapshot, PolicySource};
 use rustfs_gateway_core::BoxFuture;
 use rustfs_gateway_sig::Identity;
@@ -250,9 +251,9 @@ fn thread_observer_tracks_held_workers_and_their_release() {
         // Linux clears the TID that wakes joiners before removing the task from the thread list:
         // <https://github.com/torvalds/linux/blob/v6.12/kernel/exit.c#L926-L959>.
         // Wait for the OS observation itself; a retained worker still fails the exact count below.
-        let deadline = Instant::now() + Duration::from_secs(1);
+        let wait_clock = SystemMonotonic::new();
         let joined = wait_for_thread_count(before, threads, || {
-            if Instant::now() >= deadline {
+            if wait_clock.monotonic().millis() >= 1_000 {
                 return false;
             }
             std::thread::sleep(Duration::from_millis(1));
