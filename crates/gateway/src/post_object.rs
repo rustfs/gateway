@@ -197,7 +197,7 @@ where
             ))
         } else if fields.iter().any(|(name, _)| *name == "awsaccesskeyid") {
             let parse = if legacy_store {
-                SigV2PostPolicy::parse_with_case_insensitive_operators
+                SigV2PostPolicy::parse_as_legacy_rustfs
             } else {
                 SigV2PostPolicy::parse
             };

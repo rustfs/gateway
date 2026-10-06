@@ -1,0 +1,142 @@
+# c-post-0014 — Legacy expiration spellings stay out of SigV4 forms.
+
+[case]
+id = "c-post-0014"
+schema_version = 1
+title = "SigV4 policies retain strict expiration spellings"
+rationale = "Legacy RustFS SigV2 expiration compatibility must not widen SigV4 policy parsing. The existing authenticator maps unreadable policies to 403 InvalidAccessKeyId. Each independently signed form is refused, and a following GET observes that no object was stored."
+polarity = "negative"
+operation = "PostObject"
+tags = ["signature", "sigv4", "validation"]
+timeout_ms = 10000
+quirks = []
+applies_to = { profiles = ["aws", "strict"] }
+
+[[case.evidence]]
+url = "https://github.com/rustfs/gateway/issues/1326"
+summary = "The measured expiration exceptions belong only to the explicit legacy RustFS SigV2 reader; SigV4 keeps its existing grammar."
+kind = "other"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+request_time = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-post"
+
+[[setup.objects]]
+bucket = "conf-post"
+key = "c-post-0014-space"
+absent = true
+
+[[setup.objects]]
+bucket = "conf-post"
+key = "c-post-0014-offset"
+absent = true
+
+[[setup.objects]]
+bucket = "conf-post"
+key = "c-post-0014-long-fraction"
+absent = true
+
+[[exchanges]]
+name = "refuse-space"
+
+[exchanges.request]
+method = "POST"
+target = "/conf-post"
+sign = { mode = "anonymous" }
+body = { utf8 = "--confpost\r\nContent-Disposition: form-data; name=\"key\"\r\n\r\nc-post-0014-space\r\n--confpost\r\nContent-Disposition: form-data; name=\"x-amz-algorithm\"\r\n\r\nAWS4-HMAC-SHA256\r\n--confpost\r\nContent-Disposition: form-data; name=\"x-amz-credential\"\r\n\r\nAKIAIOSFODNN7EXAMPLE/20260102/us-east-1/s3/aws4_request\r\n--confpost\r\nContent-Disposition: form-data; name=\"x-amz-date\"\r\n\r\n20260102T030405Z\r\n--confpost\r\nContent-Disposition: form-data; name=\"policy\"\r\n\r\neyJleHBpcmF0aW9uIjoiMjAyNi0wMS0wMiAwNDowNDowNVoiLCJjb25kaXRpb25zIjpbeyJidWNrZXQiOiJjb25mLXBvc3QifSx7ImtleSI6ImMtcG9zdC0wMDE0LXNwYWNlIn0seyJ4LWFtei1hbGdvcml0aG0iOiJBV1M0LUhNQUMtU0hBMjU2In0seyJ4LWFtei1jcmVkZW50aWFsIjoiQUtJQUlPU0ZPRE5ON0VYQU1QTEUvMjAyNjAxMDIvdXMtZWFzdC0xL3MzL2F3czRfcmVxdWVzdCJ9LHsieC1hbXotZGF0ZSI6IjIwMjYwMTAyVDAzMDQwNVoifV19\r\n--confpost\r\nContent-Disposition: form-data; name=\"x-amz-signature\"\r\n\r\nb5906af8424595d32a6db2e30f91dbe83e9d1748b837084cae814766973c0c43\r\n--confpost\r\nContent-Disposition: form-data; name=\"file\"; filename=\"upload\"\r\n\r\nhello\r\n--confpost--\r\n" }
+
+[exchanges.request.headers]
+"content-type" = "multipart/form-data; boundary=confpost"
+
+[exchanges.expect]
+kind = "response"
+status = 403
+
+[exchanges.expect.error]
+code = "InvalidAccessKeyId"
+
+[[exchanges]]
+name = "absent-space"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-post/c-post-0014-space"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 404
+
+[exchanges.expect.error]
+code = "NoSuchKey"
+
+[[exchanges]]
+name = "refuse-offset"
+
+[exchanges.request]
+method = "POST"
+target = "/conf-post"
+sign = { mode = "anonymous" }
+body = { utf8 = "--confpost\r\nContent-Disposition: form-data; name=\"key\"\r\n\r\nc-post-0014-offset\r\n--confpost\r\nContent-Disposition: form-data; name=\"x-amz-algorithm\"\r\n\r\nAWS4-HMAC-SHA256\r\n--confpost\r\nContent-Disposition: form-data; name=\"x-amz-credential\"\r\n\r\nAKIAIOSFODNN7EXAMPLE/20260102/us-east-1/s3/aws4_request\r\n--confpost\r\nContent-Disposition: form-data; name=\"x-amz-date\"\r\n\r\n20260102T030405Z\r\n--confpost\r\nContent-Disposition: form-data; name=\"policy\"\r\n\r\neyJleHBpcmF0aW9uIjoiMjAyNi0wMS0wMlQwNDowNDowNSswMDowMCIsImNvbmRpdGlvbnMiOlt7ImJ1Y2tldCI6ImNvbmYtcG9zdCJ9LHsia2V5IjoiYy1wb3N0LTAwMTQtb2Zmc2V0In0seyJ4LWFtei1hbGdvcml0aG0iOiJBV1M0LUhNQUMtU0hBMjU2In0seyJ4LWFtei1jcmVkZW50aWFsIjoiQUtJQUlPU0ZPRE5ON0VYQU1QTEUvMjAyNjAxMDIvdXMtZWFzdC0xL3MzL2F3czRfcmVxdWVzdCJ9LHsieC1hbXotZGF0ZSI6IjIwMjYwMTAyVDAzMDQwNVoifV19\r\n--confpost\r\nContent-Disposition: form-data; name=\"x-amz-signature\"\r\n\r\nc42bcdb09de7bfebebf8a79845a84bb07c66fe41c2b562c28394025554801c50\r\n--confpost\r\nContent-Disposition: form-data; name=\"file\"; filename=\"upload\"\r\n\r\nhello\r\n--confpost--\r\n" }
+
+[exchanges.request.headers]
+"content-type" = "multipart/form-data; boundary=confpost"
+
+[exchanges.expect]
+kind = "response"
+status = 403
+
+[exchanges.expect.error]
+code = "InvalidAccessKeyId"
+
+[[exchanges]]
+name = "absent-offset"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-post/c-post-0014-offset"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 404
+
+[exchanges.expect.error]
+code = "NoSuchKey"
+
+[[exchanges]]
+name = "refuse-long-fraction"
+
+[exchanges.request]
+method = "POST"
+target = "/conf-post"
+sign = { mode = "anonymous" }
+body = { utf8 = "--confpost\r\nContent-Disposition: form-data; name=\"key\"\r\n\r\nc-post-0014-long-fraction\r\n--confpost\r\nContent-Disposition: form-data; name=\"x-amz-algorithm\"\r\n\r\nAWS4-HMAC-SHA256\r\n--confpost\r\nContent-Disposition: form-data; name=\"x-amz-credential\"\r\n\r\nAKIAIOSFODNN7EXAMPLE/20260102/us-east-1/s3/aws4_request\r\n--confpost\r\nContent-Disposition: form-data; name=\"x-amz-date\"\r\n\r\n20260102T030405Z\r\n--confpost\r\nContent-Disposition: form-data; name=\"policy\"\r\n\r\neyJleHBpcmF0aW9uIjoiMjAyNi0wMS0wMlQwNDowNDowNS4xMjM0NTY3ODkwMTJaIiwiY29uZGl0aW9ucyI6W3siYnVja2V0IjoiY29uZi1wb3N0In0seyJrZXkiOiJjLXBvc3QtMDAxNC1sb25nLWZyYWN0aW9uIn0seyJ4LWFtei1hbGdvcml0aG0iOiJBV1M0LUhNQUMtU0hBMjU2In0seyJ4LWFtei1jcmVkZW50aWFsIjoiQUtJQUlPU0ZPRE5ON0VYQU1QTEUvMjAyNjAxMDIvdXMtZWFzdC0xL3MzL2F3czRfcmVxdWVzdCJ9LHsieC1hbXotZGF0ZSI6IjIwMjYwMTAyVDAzMDQwNVoifV19\r\n--confpost\r\nContent-Disposition: form-data; name=\"x-amz-signature\"\r\n\r\n0aecee60f212ededc4c20a880c435f56f78937d5c28e0002ffa2a2ced9fc29f9\r\n--confpost\r\nContent-Disposition: form-data; name=\"file\"; filename=\"upload\"\r\n\r\nhello\r\n--confpost--\r\n" }
+
+[exchanges.request.headers]
+"content-type" = "multipart/form-data; boundary=confpost"
+
+[exchanges.expect]
+kind = "response"
+status = 403
+
+[exchanges.expect.error]
+code = "InvalidAccessKeyId"
+
+[[exchanges]]
+name = "absent-long-fraction"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-post/c-post-0014-long-fraction"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 404
+
+[exchanges.expect.error]
+code = "NoSuchKey"

@@ -22,6 +22,10 @@
 mod unrouted;
 pub use unrouted::{UnroutedPostPolicy, UnroutedPostPolicyError};
 
+#[path = "post_policy_reading.rs"]
+mod reading;
+use reading::PolicyReading;
+
 #[path = "post_policy_conditions.rs"]
 mod conditions;
 use conditions::{Condition, parse_policy};
@@ -195,7 +199,7 @@ impl PostPolicy {
         if fields.required("x-amz-algorithm")? != ALGORITHM {
             return Err(PostPolicyError::Malformed);
         }
-        let (encoded, conditions) = parse_policy_document(&fields, limits, now, false)?;
+        let (encoded, conditions) = parse_policy_document(&fields, limits, now, PolicyReading::Strict)?;
 
         let credential = fields.required("x-amz-credential")?;
         let scope = CredentialScope::parse_with(credential, rule).map_err(|_| PostPolicyError::Malformed)?;
@@ -332,7 +336,7 @@ impl SigV2PostPolicy {
         limits: PostPolicyLimits,
         now: RequestNow,
     ) -> Result<Self, PostPolicyError> {
-        Self::parse_impl(fields, raw_filename, limits, now, false)
+        Self::parse_impl(fields, raw_filename, limits, now, PolicyReading::Strict)
     }
 
     /// Parses a SigV2 policy with ASCII-case-insensitive condition operator names.
@@ -348,7 +352,25 @@ impl SigV2PostPolicy {
         limits: PostPolicyLimits,
         now: RequestNow,
     ) -> Result<Self, PostPolicyError> {
-        Self::parse_impl(fields, raw_filename, limits, now, true)
+        Self::parse_impl(fields, raw_filename, limits, now, PolicyReading::CaseInsensitiveOperators)
+    }
+
+    /// Reads legacy RustFS SigV2 operator names and expiration spellings.
+    ///
+    /// This accepts ASCII-case-insensitive operators, any single ASCII date/time separator,
+    /// numeric offsets, and arbitrary nonempty decimal fractions. Expiry uses whole seconds;
+    /// leap seconds must end a UTC month and clamp to its last whole second. Field conditions,
+    /// resource limits, and signed bytes are unchanged.
+    /// The generic and operator-only readers retain their original expiration grammar.
+    /// # Errors
+    /// Returns [`PostPolicyError`] for malformed or expired policies and failed conditions.
+    pub fn parse_as_legacy_rustfs(
+        fields: &[(&str, &str)],
+        raw_filename: &str,
+        limits: PostPolicyLimits,
+        now: RequestNow,
+    ) -> Result<Self, PostPolicyError> {
+        Self::parse_impl(fields, raw_filename, limits, now, PolicyReading::LegacyRustfs)
     }
 
     fn parse_impl(
@@ -356,12 +378,12 @@ impl SigV2PostPolicy {
         raw_filename: &str,
         limits: PostPolicyLimits,
         now: RequestNow,
-        ascii_case_insensitive: bool,
+        reading: PolicyReading,
     ) -> Result<Self, PostPolicyError> {
         let fields = FieldSet::parse(fields)?;
         fields.required("awsaccesskeyid")?;
         fields.required("signature")?;
-        let (encoded, conditions) = parse_policy_document(&fields, limits, now, ascii_case_insensitive)?;
+        let (encoded, conditions) = parse_policy_document(&fields, limits, now, reading)?;
         let common = enforce_policy_fields(&fields, raw_filename, limits, encoded, &conditions)?;
         Ok(Self {
             encoded: common.encoded,
@@ -450,7 +472,7 @@ fn parse_policy_document(
     fields: &FieldSet<'_>,
     limits: PostPolicyLimits,
     now: RequestNow,
-    ascii_case_insensitive: bool,
+    reading: PolicyReading,
 ) -> Result<(String, Vec<Condition>), PostPolicyError> {
     let encoded = fields.required("policy")?;
     if encoded.is_empty() || encoded.len() > limits.max_encoded_bytes {
@@ -458,9 +480,9 @@ fn parse_policy_document(
     }
     let decoded = decode_base64(encoded, limits.max_decoded_bytes)?;
     let root = JsonParser::parse(&decoded, limits.max_json_depth, limits.max_json_elements)?;
-    let (expiration, conditions) = parse_policy(root, ascii_case_insensitive)?;
-    let expiry = parse_expiration(&expiration)?;
-    if now.unix_seconds() >= crate::clock::unix_seconds(&expiry).ok_or(PostPolicyError::Malformed)? {
+    let (expiration, conditions) = parse_policy(root, reading.folds_operators())?;
+    let expiry = reading.expiry(&expiration)?;
+    if now.unix_seconds() >= expiry {
         return Err(PostPolicyError::Expired);
     }
     Ok((encoded.to_owned(), conditions))
