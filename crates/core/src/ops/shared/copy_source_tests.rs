@@ -82,7 +82,8 @@ fn both_arn_forms_are_recognised() {
     assert_eq!(ap.form(), CopySourceForm::AccessPointArn);
     assert_eq!(ap.key().as_str(), "dir/key.txt");
 
-    let op = CopySource::parse("arn:aws:s3-outposts:us-east-1:1:outpost/op-1/bucket/src-bucket/object/k").expect("parses");
+    let op =
+        CopySource::parse("arn:aws:s3-outposts:us-east-1:123456789012:outpost/op-1/bucket/src-bucket/object/k").expect("parses");
     assert_eq!(op.form(), CopySourceForm::OutpostsArn);
     assert_eq!(op.resource.container(), Some("op-1"));
     assert_eq!(op.resource.bucket().as_str(), "src-bucket");

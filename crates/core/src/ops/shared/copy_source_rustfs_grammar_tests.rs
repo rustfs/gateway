@@ -106,3 +106,77 @@ fn n_the_default_grammar_is_untouched() {
     assert_eq!(source("src/a?b?versionId=v1", &default), found("src", "a?b", Some("v1")));
     assert_eq!(source("src/a?versionId=v?x", &default), Err(ErrorCode::INVALID_ARGUMENT));
 }
+
+/// AWS account identifiers are twelve ASCII decimal digits in either ARN form.
+/// Evidence: <https://docs.aws.amazon.com/accounts/latest/reference/manage-acct-identifiers.html>.
+fn arn_account_sources(account: &str) -> [String; 2] {
+    [
+        format!("arn:aws:s3:us-east-1:{account}:accesspoint/my-ap/object/key"),
+        format!("arn:aws:s3-outposts:us-east-1:{account}:outpost/op-1/bucket/src-bucket/object/key"),
+    ]
+}
+
+fn assert_account_refused(account: &str) {
+    use rustfs_gateway_types::dto::{UploadPartCopy, UploadPartCopyInput};
+
+    for names in [NamePolicy::default(), rustfs()] {
+        for raw in arn_account_sources(account) {
+            for suffix in ["", "?versionId=v1"] {
+                let raw = format!("{raw}{suffix}");
+                assert_eq!(source(&raw, &names), Err(ErrorCode::INVALID_ARGUMENT), "{raw}");
+                let input = UploadPartCopyInput {
+                    copy_source: raw.clone(),
+                    ..Default::default()
+                };
+                let error = prepare_input_under::<UploadPartCopy>(input, &names)
+                    .err()
+                    .expect("an invalid account cannot reach source authorization or a handler");
+                assert_eq!(error.code(), &ErrorCode::INVALID_ARGUMENT, "{raw}");
+            }
+        }
+    }
+}
+
+#[test]
+fn n_arn_accounts_must_have_twelve_digits() {
+    for account in ["", "1", "12345", "12345678901", "1234567890123"] {
+        assert_account_refused(account);
+    }
+}
+
+#[test]
+fn n_arn_accounts_refuse_non_decimal_ascii() {
+    for account in ["a23456789012", "12345678901z", "+23456789012", "12345678901 ", "12345-789012"] {
+        assert_account_refused(account);
+    }
+}
+
+#[test]
+fn n_arn_accounts_refuse_unicode_digits() {
+    // Six two-byte digits have the expected byte length but are not ASCII account digits.
+    for account in [
+        "١٢٣٤٥٦",
+        "١٢٣٤٥٦٧٨٩٠١٢",
+        "\u{ff11}\u{ff12}\u{ff13}\u{ff14}\u{ff15}\u{ff16}\u{ff17}\u{ff18}\u{ff19}\u{ff10}\u{ff11}\u{ff12}",
+    ] {
+        assert_account_refused(account);
+    }
+}
+
+#[test]
+fn arn_accounts_keep_leading_zeroes_and_full_identity() {
+    for names in [NamePolicy::default(), rustfs()] {
+        for account in ["012345678901", "123456789012"] {
+            for raw in arn_account_sources(account) {
+                let parsed = CopySource::parse_under(&raw, &names).expect("a twelve-digit account");
+                let actual = match &parsed.resource.identity {
+                    crate::ResourceIdentity::AccessPoint { account: actual, .. }
+                    | crate::ResourceIdentity::Outposts { account: actual, .. } => Some(actual.as_str()),
+                    _ => None,
+                };
+                assert_eq!(actual, Some(account));
+                assert!(source(&raw, &names).is_ok());
+            }
+        }
+    }
+}
