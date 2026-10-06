@@ -32,7 +32,7 @@ use rustfs_gateway_core::codec::{CodecError, EncodedResponse, MetaView, Operatio
 use rustfs_gateway_core::dialect::{ClaimedRow, OverlayRow};
 use rustfs_gateway_core::op::{AuthRequirement, Operation, ResourceShape};
 use rustfs_gateway_core::registry::OperationSpec;
-use rustfs_gateway_core::route::Predicate;
+use rustfs_gateway_core::route::{Predicate, ShadowingDecl};
 use rustfs_gateway_core::{DerivedResourceError, NoDerived};
 use rustfs_gateway_sig::OperationFloor;
 
@@ -50,14 +50,22 @@ static SELECTOR: &[Predicate] = &[Predicate::Method(http::Method::PUT)];
 /// The canonical row, then the MinIO alias RustFS serves it under.
 pub static ROWS: &[ClaimedRow] = &[
     ClaimedRow {
-        template: "/rustfs/admin/v3/target/{target_type}/{target_name}",
+        template: "/rustfs/admin/v3/target/{+target_type}/{+target_name}",
         selector: SELECTOR,
     },
     ClaimedRow {
-        template: "/minio/admin/v3/target/{target_type}/{target_name}",
+        template: "/minio/admin/v3/target/{+target_type}/{+target_name}",
         selector: SELECTOR,
     },
 ];
+
+/// Reviewed precedence over overlapping templates and authenticated fallbacks.
+pub static SHADOWS: &[ShadowingDecl] = &[ShadowingDecl {
+    winner: NAME,
+    shadowed: "rustfs:AdminFallback",
+    reason: "Registered admin routes precede their authenticated fallback.",
+    evidence: &["https://github.com/rustfs/gateway/blob/main/docs/adr/0039-authenticated-admin-fallbacks.md"],
+}];
 
 /// `PUT /rustfs/admin/v3/target/{target_type}/{target_name}`.
 #[derive(Debug)]
@@ -110,13 +118,17 @@ impl AdminOperation for PutV3TargetByTargetTypeByTargetName {
     fn rows() -> &'static [ClaimedRow] {
         ROWS
     }
+
+    fn shadows() -> &'static [ShadowingDecl] {
+        SHADOWS
+    }
 }
 
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
     precedence: 408,
-    selector: "PathTemplate(\"/rustfs/admin/v3/target/{target_type}/{target_name}\") ∧ Method(PUT) ∨ PathTemplate(\"/minio/admin/v3/target/{target_type}/{target_name}\") ∧ Method(PUT)",
+    selector: "PathTemplate(\"/rustfs/admin/v3/target/{+target_type}/{+target_name}\") ∧ Method(PUT) ∨ PathTemplate(\"/minio/admin/v3/target/{+target_type}/{+target_name}\") ∧ Method(PUT)",
     action: "admin:SetBucketTarget",
     resource: ResourceShape::Service,
     success_status: 200,

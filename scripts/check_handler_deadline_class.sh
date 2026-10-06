@@ -484,14 +484,16 @@ for path in sorted((root / "crates").rglob("*.rs")):
 # explicit=44: the 44th is the extra-permission registration fixture's one `const fn extra_spec` in
 # crates/core/src/registry/reject.rs (`acme:DoThing`), outside the standard authority, stating
 # Standard for the same reason.
-if central_builders != 102 or explicit_builders != 44:
+# explicit=46: the two generated authenticated admin fallbacks each declare Standard directly
+# (rustfs/gateway#1189), outside the inventory-only admin-operation fold.
+if central_builders != 102 or explicit_builders != 46:
     fail(
         "repository builder census drifted: "
-        f"central={central_builders} explicit={explicit_builders}, expected central=102 explicit=44"
+        f"central={central_builders} explicit={explicit_builders}, expected central=102 explicit=46"
     )
 
 print(
-    "check_handler_deadline_class: 151 repository builder sites are inventoried "
-    "(146 classified: 102 central standard, 44 explicit; 5 authority tests)"
+    "check_handler_deadline_class: 153 repository builder sites are inventoried "
+    "(148 classified: 102 central standard, 46 explicit; 5 authority tests)"
 )
 PY

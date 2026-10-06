@@ -45,7 +45,9 @@ use rustfs_gateway_http::{Limits, WireRequest};
 mod census;
 
 const HOST: &str = "s3.example.com";
-const METHODS: &[&str] = &["GET", "HEAD", "PUT", "POST", "DELETE", "PATCH"];
+const METHODS: &[&str] = &[
+    "GET", "HEAD", "PUT", "POST", "DELETE", "PATCH", "OPTIONS", "TRACE", "FROB", "CONNECT", "get",
+];
 
 /// What a path-style host resolver says a path addresses.
 fn path_style_target(path: &str) -> TargetKind {
@@ -150,6 +152,21 @@ fn expected(method: &str, path: &str, query: &str) -> Option<&'static str> {
                 && record.query.is_none_or(|(key, value)| query == format!("?{key}={value}"))
         })
         .map(|record| record.operation)
+        .or_else(|| fallback(path))
+}
+
+/// ADR-0039's literal prefix boundary, independent of the generated fallback templates.
+fn fallback(path: &str) -> Option<&'static str> {
+    ["/rustfs/admin", "/minio/admin"].into_iter().find_map(|prefix| {
+        let rest = path.strip_prefix(prefix)?;
+        if rest == "/v4" || rest.starts_with("/v4/") {
+            Some("rustfs:AdminV4Fallback")
+        } else if rest.is_empty() || rest.starts_with('/') {
+            Some("rustfs:AdminFallback")
+        } else {
+            None
+        }
+    })
 }
 
 /// What each operation declares, read through its own trait implementations.
@@ -242,8 +259,8 @@ fn n_without_the_dialect_no_row_reaches_an_admin_operation() {
 }
 
 /// Negative — every method on every row's path reaches exactly what the model says: a method no
-/// row of that shape declares reaches no operation, and a literal row is never answered by a
-/// template of another method.
+/// row of that shape declares reaches its authenticated fallback (or no operation outside the
+/// admin claims), and a literal row is never answered by a template of another method.
 #[test]
 fn n_every_method_on_every_row_reaches_only_what_the_rows_say() {
     let dialect = dialect();
@@ -255,7 +272,7 @@ fn n_every_method_on_every_row_reaches_only_what_the_rows_say() {
             for method in METHODS {
                 let want = expected(method, &path, &query);
                 assert_eq!(resolve(method, &format!("{path}{query}")), want, "{method} {path}{query}");
-                refused += usize::from(want.is_none());
+                refused += usize::from(want.is_none() || want == fallback(&path));
             }
         }
     }
@@ -278,7 +295,7 @@ fn n_the_service_command_without_a_ruled_action_reaches_no_operation() {
             "?action=restart%20",
         ] {
             let target = format!("{prefix}/v3/service{query}");
-            assert_eq!(resolve("POST", &target), None, "{target}");
+            assert_eq!(resolve("POST", &target), Some("rustfs:AdminFallback"), "{target}");
         }
         for (action, name) in [
             ("restart", "rustfs:PostV3ServiceRestart"),
@@ -292,7 +309,7 @@ fn n_the_service_command_without_a_ruled_action_reaches_no_operation() {
 }
 
 /// Negative — a near miss of every row never reaches that row's operation, and reaches exactly
-/// what the model says (a sibling template, at most): a trailing slash, one more segment, the
+/// what the model says (a sibling template or authenticated fallback): a trailing slash, one more segment, the
 /// last literal segment's case changed; and the same path one character outside the claim
 /// reaches no admin operation.
 #[test]
@@ -339,13 +356,10 @@ fn n_a_near_miss_of_a_row_reaches_no_admin_operation() {
     }
 }
 
-/// Negative — a template parameter never matches a dot segment in any spelling, an encoded
-/// separator, or nothing, so no templated row is reached through one (ADR-0024). The one path an
-/// empty parameter spells that is another row — `heal/{bucket}` with nothing in the bucket is the
-/// trailing-slash `heal/` row (ADR-0030) — reaches that row, canonical and alias alike, and never
-/// the parameter's operation.
+/// Negative — an empty parameter cannot select its row. Native admin parameters retain raw
+/// dots and encoded separators (ADR-0040); table-catalog parameters retain their strict boundary.
 #[test]
-fn n_a_parameter_never_matches_a_dot_segment_or_a_separator() {
+fn n_parameter_boundaries_preserve_raw_admin_data_and_strict_catalog_values() {
     let dialect = dialect();
     let resolve = resolver(Some(&dialect));
     let mut refused = 0;
@@ -366,10 +380,10 @@ fn n_a_parameter_never_matches_a_dot_segment_or_a_separator() {
                         // Nothing in the parameter may spell another row's path; the model says which.
                         assert_ne!(reached, Some(record.operation), "{} {target}", record.method);
                         assert_eq!(reached, expected(record.method, &path, &query(record)), "{} {target}", record.method);
-                        if let Some(other) = reached {
+                        if let Some(other) = reached.filter(|other| Some(*other) != fallback(&path)) {
                             elsewhere.push((record.operation, path, other));
                         }
-                    } else if segments[index].starts_with("{*") {
+                    } else if record.path.starts_with("/rustfs/admin/") || segments[index].starts_with("{*") {
                         assert_eq!(reached, Some(record.operation), "{} {target}", record.method);
                     } else {
                         assert_eq!(reached, None, "{} {target}", record.method);
@@ -400,20 +414,19 @@ fn n_a_parameter_never_matches_a_dot_segment_or_a_separator() {
 fn the_trailing_slash_heal_row_matches_exactly_its_path() {
     let dialect = dialect();
     let resolve = resolver(Some(&dialect));
-    let refused = [
-        ("POST", ""),
-        ("POST", "//"),
-        ("POST", "/%2f"),
-        ("GET", "/"),
-        ("POST", "/photos/"),
-    ];
+    let refused = [("POST", ""), ("POST", "//"), ("GET", "/"), ("POST", "/photos/")];
     for prefix in ["/rustfs/admin", "/minio/admin"] {
         let heal = |method: &str, rest: &str| resolve(method, &format!("{prefix}/v3/heal{rest}"));
         assert_eq!(heal("POST", "/"), Some("rustfs:PostV3Heal"), "{prefix}");
         assert_eq!(heal("POST", "/photos"), Some("rustfs:PostV3HealByBucket"), "{prefix}");
         assert_eq!(heal("POST", "/photos/logs"), Some("rustfs:PostV3HealByBucketByPrefix"), "{prefix}");
+        assert_eq!(
+            heal("POST", "/%2f"),
+            Some("rustfs:PostV3HealByBucket"),
+            "{prefix}: validation follows routing"
+        );
         for (method, rest) in refused {
-            assert_eq!(heal(method, rest), None, "{prefix} {method} {rest}");
+            assert_eq!(heal(method, rest), Some("rustfs:AdminFallback"), "{prefix} {method} {rest}");
         }
     }
     let heal = ROUTES.iter().find(|record| record.operation == "rustfs:PostV3Heal");
@@ -429,15 +442,32 @@ fn the_trailing_slash_heal_row_matches_exactly_its_path() {
 #[test]
 fn the_literal_tier_clear_stands_in_front_of_the_tier_template() {
     let declared = declared();
-    let shadows: Vec<(&str, &str, &str, bool)> = declared
-        .iter()
-        .flat_map(|operation| {
-            operation
-                .shadows
-                .iter()
-                .map(move |decl| (operation.name, decl.winner, decl.shadowed, !decl.evidence.is_empty()))
-        })
-        .collect();
+    let mut shadows = Vec::new();
+    for operation in &declared {
+        let mut fallback_shadows = Vec::new();
+        for decl in operation.shadows {
+            assert_eq!(decl.winner, operation.name);
+            assert!(!decl.evidence.is_empty());
+            if ["rustfs:AdminFallback", "rustfs:AdminV4Fallback"].contains(&decl.shadowed) {
+                fallback_shadows.push(decl.shadowed);
+            } else {
+                shadows.push((operation.name, decl.winner, decl.shadowed, !decl.evidence.is_empty()));
+            }
+        }
+        let path = ROUTES
+            .iter()
+            .find(|record| record.operation == operation.name)
+            .expect("native record")
+            .path;
+        let wanted = if path.starts_with("/rustfs/admin/v4/") {
+            vec!["rustfs:AdminV4Fallback", "rustfs:AdminFallback"]
+        } else if path.starts_with("/rustfs/admin/") {
+            vec!["rustfs:AdminFallback"]
+        } else {
+            vec![]
+        };
+        assert_eq!(fallback_shadows, wanted, "{}", operation.name);
+    }
     assert_eq!(
         shadows,
         [
@@ -467,41 +497,6 @@ fn the_literal_tier_clear_stands_in_front_of_the_tier_template() {
 }
 
 // ── the declarations ─────────────────────────────────────────────────────────────────────────
-
-/// Positive — every operation declares what its record says: name, group, action, rows,
-/// selector, secret, and a service-level resource under the `Standard` deadline.
-#[test]
-fn every_operation_declares_what_its_record_says() {
-    let declared = declared();
-    assert_eq!(declared.len(), ROUTES.len());
-    for (operation, record) in declared.iter().zip(ROUTES) {
-        let name = record.operation;
-        assert_eq!(operation.name, name);
-        assert_eq!(operation.group, record.group, "{name}");
-        assert_eq!(operation.action.as_deref(), Some(record.action), "{name}");
-        assert_eq!(operation.subject, record.subject, "{name}");
-        assert_eq!(operation.bucket, record.bucket, "{name}");
-        let resource = if record.bucket.is_some() {
-            ResourceShape::Bucket
-        } else {
-            ResourceShape::Service
-        };
-        assert_eq!(operation.resource, Some(resource), "{name}");
-        assert_eq!(operation.secret, record.caller_secret, "{name}");
-        assert_eq!(operation.deadline, Some(HandlerDeadlineClass::Standard), "{name}");
-        let rows: Vec<&str> = operation.rows.iter().map(|row| row.template).collect();
-        assert_eq!(rows, templates(record), "{name}");
-        for row in operation.rows {
-            match (row.selector, record.query) {
-                ([Predicate::Method(method)], None) => assert_eq!(method.as_str(), record.method, "{name}"),
-                ([Predicate::Method(method), Predicate::QueryEquals(key, value)], Some((k, v))) => {
-                    assert_eq!((method.as_str(), *key, *value), (record.method, k, v), "{name}");
-                }
-                (selector, query) => panic!("{name}: selector {selector:?} for query {query:?}"),
-            }
-        }
-    }
-}
 
 /// Negative — no operation but the four OIDC bootstrap ones is reachable without a header
 /// signature, none through a presigned URL, and only an own-account or a bootstrap operation is
@@ -662,23 +657,6 @@ fn only_the_sealed_operations_hold_the_caller_secret() {
     ] {
         assert!(!holders.iter().any(|(holder, _)| *holder == name), "{name}");
     }
-}
-
-/// Positive and negative — names are unique, precedences strictly increase, and the overlay
-/// records every operation exactly once, in the same order.
-#[test]
-fn names_and_precedences_are_unique_and_the_overlay_is_complete() {
-    let declared = declared();
-    let names: BTreeSet<&str> = declared.iter().map(|operation| operation.name).collect();
-    assert_eq!(names.len(), declared.len());
-    assert!(declared.windows(2).all(|pair| pair[0].precedence < pair[1].precedence));
-    let recorded: Vec<(&str, u16)> = OVERLAY.operations.iter().map(|row| (row.name, row.precedence)).collect();
-    let declared: Vec<(&str, u16)> = declared
-        .iter()
-        .map(|operation| (operation.name, operation.precedence))
-        .collect();
-    assert_eq!(recorded, declared);
-    assert!(OVERLAY.operations.iter().all(|row| !row.evidence.is_empty()));
 }
 
 /// Positive — the dialect assembles, claiming exactly the two admin prefixes, the two

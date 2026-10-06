@@ -1885,7 +1885,7 @@ dependencies = [
 
 [[package]]
 name = "rustfs-gateway-dialect-rustfs-admin"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "bytes",
  "http",
@@ -1957,6 +1957,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "tokio",
  "zip",
 ]
 

@@ -22,6 +22,8 @@
 //! order they are declared in (`crate::table`). Upstream: the generator. Downstream: `crate::table`
 //! and a deployment that registers handlers.
 
+pub mod admin_fallback;
+pub mod admin_v4_fallback;
 pub mod delete_iceberg_by_warehouse_catalog_migration;
 pub mod delete_iceberg_by_warehouse_namespaces_by_namespace;
 pub mod delete_iceberg_by_warehouse_namespaces_by_namespace_tables_by_table;

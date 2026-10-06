@@ -50,7 +50,7 @@ fn a_trailing_catch_all_keeps_its_name_and_bucket_binding() {
     assert_eq!(declared.path, "/rustfs/admin/v3/heal/{bucket}/{*prefix}");
     assert!(
         render_operation(declared)
-            .contains("ClaimedRow { template: \"/rustfs/admin/v3/heal/{bucket}/{*prefix}\", selector: SELECTOR }")
+            .contains("ClaimedRow { template: \"/rustfs/admin/v3/heal/{+bucket}/{*prefix}\", selector: SELECTOR }")
     );
 }
 

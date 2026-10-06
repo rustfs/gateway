@@ -66,8 +66,7 @@ pub static ROWS: &[ClaimedRow] = &[
     },
 ];
 
-/// The later operations whose parameter meets a literal segment of this one's path: RustFS's router
-/// tries the literal first, so these requests are this operation (ADR-0027).
+/// Reviewed precedence over overlapping templates and authenticated fallbacks.
 pub static SHADOWS: &[ShadowingDecl] = &[ShadowingDecl {
     winner: NAME,
     shadowed: "rustfs:GetIcebergByWarehouseNamespaces",

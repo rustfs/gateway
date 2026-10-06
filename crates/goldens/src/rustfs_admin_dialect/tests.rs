@@ -458,17 +458,19 @@ fn n_a_presigned_row_is_refused_without_asking() {
     );
 }
 
-/// Negative — a signed request whose parameter value does not decode to a plain segment (an
-/// invalid UTF-8 escape, a control character) is a `400 InvalidArgument` naming the parameter,
-/// and one whose value is a dot segment or an encoded separator reaches no ordinary parameter
-/// row (the claim's `501`). ADR-0036 catch-alls retain all valid UTF-8 for handler validation.
+/// Negative — invalid UTF-8 is refused before policy, strict catalog captures retain their
+/// restrictions, and raw bucket labels remain validated. Opaque admin data reaches its handler.
 #[test]
 fn n_a_malformed_parameter_value_is_refused_before_authorising() {
     let cases: Vec<_> = parameters()
         .flat_map(|(record, template, index, name)| {
             [("%ff", 400), ("a%01b", 400), ("%c3%28", 400), ("%2e%2e", 501), ("a%2Fb", 501)].map(|(raw, status)| {
-                let status = if name.starts_with('*') && raw != "%ff" && raw != "%c3%28" {
-                    200
+                let opaque = record.path.starts_with("/rustfs/admin/") || name.starts_with('*');
+                let bucket =
+                    matches!(record.bucket, Some(rustfs_gateway_core::dialect::BucketParam::Path(bound)) if bound == name);
+                let bucket_error = opaque && bucket && raw != "%ff" && raw != "%c3%28";
+                let status = if opaque && raw != "%ff" && raw != "%c3%28" {
+                    if bucket { 400 } else { 200 }
                 } else {
                     status
                 };
@@ -478,6 +480,7 @@ fn n_a_malformed_parameter_value_is_refused_before_authorising() {
                     name.trim_start_matches('*'),
                     raw,
                     status,
+                    bucket_error,
                 )
             })
         })
@@ -486,7 +489,7 @@ fn n_a_malformed_parameter_value_is_refused_before_authorising() {
     in_lanes(
         |_, _| true,
         &cases,
-        |assembled, (record, path, name, raw, status)| {
+        |assembled, (record, path, name, raw, status, bucket_error)| {
             let at = format!("{} {path}", record.method);
             let exchange = assembled.exchange(wire(&signed(record, path)));
             assert_eq!(exchange.status, *status, "{at}: {}", exchange.body);
@@ -505,8 +508,13 @@ fn n_a_malformed_parameter_value_is_refused_before_authorising() {
                 assert!(exchange.asked.is_empty(), "{at}: the authorizer was asked {:?}", exchange.asked);
             }
             if *status == 400 && record.method != "HEAD" {
-                assert!(exchange.body.contains("<Code>InvalidArgument</Code>"), "{at}: {}", exchange.body);
-                assert!(exchange.body.contains(name), "{at}: {}", exchange.body);
+                if *bucket_error {
+                    assert!(exchange.body.contains("<Code>InvalidBucketName</Code>"), "{at}: {}", exchange.body);
+                    assert!(exchange.body.contains("<Resource>Bucket</Resource>"), "{at}: {}", exchange.body);
+                } else {
+                    assert!(exchange.body.contains("<Code>InvalidArgument</Code>"), "{at}: {}", exchange.body);
+                    assert!(exchange.body.contains(name), "{at}: {}", exchange.body);
+                }
                 assert!(!exchange.body.contains(raw), "{at}: the value is echoed: {}", exchange.body);
             }
         },
@@ -514,7 +522,7 @@ fn n_a_malformed_parameter_value_is_refused_before_authorising() {
 }
 
 /// The real assembled heal route keeps the raw rest of the path, decodes it once, and binds
-/// only the bucket. An empty catch-all is refused before any policy or handler is consulted.
+/// only the bucket. An empty catch-all selects the caller-authorized fallback, never heal.
 #[test]
 fn heal_prefixes_reach_the_handler_after_exactly_one_decode() {
     let record = ROUTES
@@ -536,8 +544,8 @@ fn heal_prefixes_reach_the_handler_after_exactly_one_decode() {
         let path = format!("{base}photos/");
         let exchange = assemble(|_, _| true).exchange(wire(&signed(record, &path)));
         assert_eq!(exchange.status, 501, "{path}: {}", exchange.body);
-        assert!(exchange.reached.is_empty() && exchange.handed.is_empty(), "{path}");
-        assert!(exchange.asked.is_empty(), "{path}");
+        assert_eq!(exchange.reached, ["rustfs:AdminFallback"], "{path}");
+        super::fallback_tests::assert_general_fallback_policy(&exchange, &path);
     }
 }
 

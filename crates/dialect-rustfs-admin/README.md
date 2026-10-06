@@ -3,7 +3,8 @@
 RustFS's admin API and Iceberg REST table catalog as gateway dialect operations (rustfs/backlog#1744, ADR-0024 to ADR-0032).
 
 RustFS consumes this crate: it installs the dialect and registers its own handlers. Nothing here
-depends on RustFS, and no handler lives here.
+depends on RustFS. Backend handlers live in RustFS; this crate supplies only the two fixed
+authenticated fallback handlers (ADR-0039).
 
 - `rustfs_admin_dialect()`: the `/rustfs/admin`, `/minio/admin`, `/_iceberg/v1`, `/iceberg/v1`,
   `/profile/cpu` and `/profile/memory` path-prefix claims and one claimed operation per migrated
@@ -14,7 +15,7 @@ depends on RustFS, and no handler lives here.
   `cargo xtask rustfs-admin-dialect`. Each carries its name, rows, action, specification, floor
   and codec. An input is `()` when RustFS reads no body, the raw bytes when it buffers an opaque
   JSON or binary body, and the live stream when it streams one. Every output is an
-  `AdminResponse`.
+  `AdminResponse`; the two synthetic fallbacks use `()` and their fixed handlers.
 - `ROUTES` records the inventory facts each operation was generated from, `PENDING` lists the
   registration groups that are not migrated yet (none today), and `STAYING` lists the seven routes
   the gateway deliberately does not serve, each with its reason: a deployment keeps routing those
@@ -40,6 +41,26 @@ and `GET {warehouse}/namespaces`), the literal's operation declares that it stan
 RustFS's router decides (ADR-0027, ADR-0031). `POST heal/` keeps the trailing `/`
 RustFS registers it with, and matches exactly that path (ADR-0030).
 
+Admin route declarations spell native single-segment captures as `{+name}` (ADR-0040).
+They match one nonempty raw segment and decode it once as UTF-8 data, including encoded
+separators and dot segments. Handlers validate the meaning of that data; bucket bindings still
+validate the raw bucket name. `ROUTES` retains the original inventory spelling. Table-catalog
+parameters keep their strict `{name}` contract, and `{*prefix}` remains a trailing catch-all.
+
+After registered rows, the dialect declares `AdminV4Fallback` and `AdminFallback`. Both require
+a header signature and caller-only authorization at both stages, without a secret or bucket.
+The v4 prefix returns empty 426; other unmatched admin paths return 501 `NotImplemented`.
+A registered operation's denial or error is never retried through a fallback. Literal prefixes
+matter: `/v40` and an encoded spelling of `/v4` do not select the downgrade.
+
+These two synthetic operations have no native inventory record and are outside
+`fold_every_operation`. Register their fixed handlers separately, including when using that
+fold for the backend operations. For native body ordering, the deployment must select the
+existing RustFS bodyless policy as shown below. Its CORS layer remains responsible for the
+legacy `OPTIONS` answer before routing.
+Select `SigV4Authenticator::verify_paths_as_legacy_rustfs` for native percent and encoded-slash
+signature spelling; the router still receives the original target.
+
 An operation that acts on an account says whose (ADR-0025, ADR-0026, ADR-0028), and the facade
 reads it once, before authentication:
 
@@ -58,12 +79,23 @@ reads it once, before authentication:
 let dialect = rustfs_admin_dialect().expect("the generated record and declarations agree");
 let service = ServiceBuilder::new()
     .dialect(&dialect)
+    .accept_mismatched_payload_digests_without_a_body()
+    .leave_bodies_of_bodyless_operations_unread()
+    .register::<ops::admin_v4_fallback::AdminV4Fallback, _>(Arc::new(ops::admin_v4_fallback::AdminV4Fallback))
+    .register::<ops::admin_fallback::AdminFallback, _>(Arc::new(ops::admin_fallback::AdminFallback))
     .register::<ops::get_v3_info::GetV3Info, _>(Arc::clone(&admin))
     // ... one `register` per operation, or `fold_every_operation` with a generic handler.
+    .require(&OperationSet::of([ops::admin_v4_fallback::NAME, ops::admin_fallback::NAME]))?
     .build()?;
 ```
 
-Regenerate after the inventory changes:
+Migration from 0.8: add both fixed-handler registrations, permit their caller-only vendor actions
+in the authorizer where appropriate, and validate opaque admin ids in backend handlers. A
+missing fallback handler is rejected by this explicit `require` check. Without that check,
+unregistered operations retain the framework's pre-authentication 501; that deployment does
+not provide this compatibility. No native inventory record is added or removed.
+
+Regenerate after the inventory or generator changes:
 
 ```text
 cargo xtask rustfs-admin-dialect          # writes src/ops/*.rs, src/table.rs and src/table/*.rs

@@ -14,9 +14,10 @@
 
 //! RustFS's admin API as gateway dialect operations (rustfs/backlog#1744).
 //!
-//! Responsible for: the `rustfs` dialect — its two path-prefix claims, its overlay and one claimed
+//! Responsible for: the `rustfs` dialect — its path-prefix claims, its overlay and one claimed
 //! operation per migrated admin route, generated from the recorded route inventory — and the
-//! shapes those operations share. NOT responsible for: any handler (RustFS registers its own), the
+//! shapes those operations share, plus the two fixed authenticated fallback handlers.
+//! NOT responsible for: backend handlers (RustFS registers its own), the
 //! routes of registration groups not migrated yet ([`PENDING`]), or validating the inventory
 //! (`rustfs-gateway-goldens` does, and binds every operation here back to its row). Upstream:
 //! `rustfs-gateway-core`'s dialect mechanism and `cargo xtask rustfs-admin-dialect`. Downstream:
