@@ -698,7 +698,7 @@ jobs:
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - name: Install host tools
-        run: bash scripts/ci_install_host_tools.sh
+        run: bash scripts/ci_install_host_tools.sh --target-guards
       - name: Target consolidation mutations (maximum 2 minutes after setup)
         run: |
           scripts/ci_budget.sh 120 "target consolidation self-test" bash scripts/test_test_target_consolidation.sh

@@ -24542,6 +24542,9 @@ shard_case 'normalization candidate filtering preserves lexical evidence and bou
 
 shard_case 'CORS candidate filtering preserves parser semantics and fails closed' cors_prefilter_controls
 
+shard_case 'target guard host setup installs only required tools and fails closed' \
+    python3 "${SCRIPT_DIR}/test_ci_host_tools.py"
+
 shard_case 'Mint producer edits preserve failure evidence and reject source drift' \
     python3 "${SCRIPT_DIR}/test_mint_producer_patch.py"
 
