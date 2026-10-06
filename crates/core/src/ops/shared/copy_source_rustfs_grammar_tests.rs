@@ -154,7 +154,11 @@ fn n_arn_accounts_refuse_non_decimal_ascii() {
 #[test]
 fn n_arn_accounts_refuse_unicode_digits() {
     // Six two-byte digits have the expected byte length but are not ASCII account digits.
-    for account in ["١٢٣٤٥٦", "١٢٣٤٥٦٧٨٩٠١٢", "１２３４５６７８９０１２"] {
+    for account in [
+        "١٢٣٤٥٦",
+        "١٢٣٤٥٦٧٨٩٠١٢",
+        "\u{ff11}\u{ff12}\u{ff13}\u{ff14}\u{ff15}\u{ff16}\u{ff17}\u{ff18}\u{ff19}\u{ff10}\u{ff11}\u{ff12}",
+    ] {
         assert_account_refused(account);
     }
 }
