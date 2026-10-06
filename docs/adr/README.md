@@ -95,6 +95,7 @@ second copy is a second thing to keep in sync.
 | 0037 | A list whose presence is a fact of its own carries it | Accepted |
 | 0038 | All-method claimed rows | Accepted |
 | 0039 | Authenticated admin fallbacks | Accepted |
+| 0040 | Opaque single-segment captures | Accepted |
 
 The index is hand-maintained. Generating it would cost more than it saves until
 there are at least fifteen records.

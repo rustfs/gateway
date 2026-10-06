@@ -13,11 +13,11 @@
 // limitations under the License.
 
 //! The claim and template rules of the parent module, pinned by unit tests (ADR-0024, ADR-0030,
-//! ADR-0036).
+//! ADR-0036, ADR-0040).
 //!
 //! Responsible for: what a claim covers and overlaps, the dot-segment spellings, what a template
 //! matches and extracts, and how two templates overlap and refine each other — the trailing `/`
-//! and the catch-all included.
+//! and the catch-all and opaque segment included.
 //! NOT responsible for: the claimed table and the dialect rules (`crates/core/tests/dialect_claims*.rs`)
 //! or the facade pipeline (`rustfs-gateway`'s tests).
 //! Upstream: the parent module. Downstream: nothing; this is a leaf test module.
@@ -306,4 +306,163 @@ fn n_the_heal_routes_share_no_path() {
             assert!(!first.refines(second) && !second.refines(first), "{} {}", first.as_str(), second.as_str());
         }
     }
+}
+
+/// Positive — an opaque capture keeps one raw segment and decodes it exactly once.
+#[test]
+fn an_opaque_parameter_retains_its_data() {
+    let template = PathTemplate::parse("/a/admin/{+id}").expect("explicit opaque segment");
+    for (raw, decoded) in [
+        ("ordinary", "ordinary"),
+        (".", "."),
+        ("..", ".."),
+        ("%2e%2e", ".."),
+        ("a%2Fb", "a/b"),
+        ("a%5Cb", "a\\b"),
+        ("%00", "\0"),
+        ("a%252Fb", "a%2Fb"),
+        ("bad%zz", "bad%zz"),
+        ("%E4%B8%AD", "\u{4e2d}"),
+    ] {
+        let path = format!("/a/admin/{raw}");
+        assert!(template.matches(&path), "{raw}");
+        assert_eq!(template.raw_value(&path, "id"), Some(raw), "{raw}");
+        assert_eq!(template.extract(&path).expect("UTF-8 data").get("id"), Some(decoded), "{raw}");
+    }
+}
+
+/// Positive — the capture can be in the middle, without consuming its following strict segment.
+#[test]
+fn an_opaque_middle_parameter_preserves_names_and_order() {
+    let template = PathTemplate::parse("/a/admin/{+id}/{version}").expect("middle opaque capture");
+    let values = template.extract("/a/admin/a%2Fb/v4").expect("two captures");
+    assert_eq!(values.iter().collect::<Vec<_>>(), [("id", "a/b"), ("version", "v4")]);
+    assert_eq!(template.raw_value("/a/admin/a%2Fb/v4", "missing"), None);
+}
+
+/// Negative — opaque is neither an empty segment nor a catch-all and cannot escape the prefix.
+#[test]
+fn n_an_opaque_parameter_takes_exactly_one_nonempty_raw_segment() {
+    let template = PathTemplate::parse("/a/admin/{+id}/tail").expect("middle opaque capture");
+    for path in [
+        "/a/admin//tail",
+        "/a/admin/tail",
+        "/a/admin/a/b/tail",
+        "/a/admin/id/tail/",
+        "/a/admin/id/other",
+        "/a/adminx/id/tail",
+        "/b/admin/id/tail",
+        "a/admin/id/tail",
+    ] {
+        assert!(!template.matches(path), "{path}");
+        assert_eq!(template.raw_value(path, "id"), None, "{path}");
+        assert_eq!(template.extract(path), Err(PathParamError::Mismatch), "{path}");
+    }
+}
+
+/// Negative — route eligibility does not turn invalid UTF-8 into a handler value or error echo.
+#[test]
+fn n_an_opaque_parameter_rejects_non_utf8_after_matching() {
+    let template = PathTemplate::parse("/a/admin/{+id}").expect("opaque capture");
+    for raw in ["%FF", "%C3%28", "%F0%80%80%80"] {
+        let path = format!("/a/admin/{raw}");
+        assert!(template.matches(&path), "{raw}");
+        let error = template.extract(&path).expect_err("invalid UTF-8");
+        assert!(matches!(error, PathParamError::Invalid { name: "id", .. }), "{error:?}");
+        assert!(!error.to_string().contains(raw), "the invalid value is not echoed");
+    }
+}
+
+/// Negative — the new spelling does not broaden the existing strict spelling.
+#[test]
+fn n_opaque_values_do_not_weaken_strict_parameters() {
+    let strict = PathTemplate::parse("/a/admin/{id}").expect("strict capture");
+    let opaque = PathTemplate::parse("/a/admin/{+id}").expect("opaque capture");
+    for raw in [".", "..", "%2e", "%2E%2e", "a%2Fb", "a%5Cb", "a%01b", "%00"] {
+        let path = format!("/a/admin/{raw}");
+        assert!(opaque.extract(&path).is_ok(), "{raw}");
+        assert!(strict.extract(&path).is_err(), "{raw}");
+    }
+    assert!(strict.extract("/a/admin/ordinary").is_ok());
+}
+
+/// Negative — modifiers, names, affixes and duplicate bindings keep a single unambiguous grammar.
+#[test]
+fn n_opaque_parameter_grammar_refuses_ambiguous_forms() {
+    for template in [
+        "/a/admin/{+}",
+        "/a/admin/{++id}",
+        "/a/admin/{*+id}",
+        "/a/admin/{+*id}",
+        "/a/admin/{+ID}",
+        "/a/admin/{+id}.json",
+        "/a/admin/prefix{+id}",
+        "/a/admin/{id}/{+id}",
+        "/a/admin/{+id}/{*id}",
+        "/a/admin/{+id}/{+id}",
+    ] {
+        assert!(PathTemplate::parse(template).is_err(), "{template}");
+    }
+}
+
+/// Negative — every overlap has a real witness, and refinement keeps strict, opaque and rest
+/// captures distinct in both directions, including an empty literal and a longer fixed template.
+#[test]
+fn n_opaque_overlap_and_refinement_do_not_collapse_different_sets() {
+    let templates = [
+        "/a/admin/{id}",
+        "/a/admin/{+id}",
+        "/a/admin/{*rest}",
+        "/a/admin/fixed",
+        "/a/admin/",
+        "/a/admin/{id}/tail",
+    ];
+    let overlaps = ["111100", "111100", "111101", "111100", "000010", "001001"];
+    let refines = ["111000", "011000", "001000", "111100", "000010", "001001"];
+    let parsed: Vec<_> = templates.iter().map(|text| PathTemplate::parse(text).expect(text)).collect();
+    for (a, first) in parsed.iter().enumerate() {
+        for (b, second) in parsed.iter().enumerate() {
+            let witness = first.overlap_path(second);
+            assert_eq!(
+                witness.is_some(),
+                overlaps
+                    .get(a)
+                    .expect("overlap row")
+                    .as_bytes()
+                    .get(b)
+                    .expect("overlap column")
+                    == &b'1',
+                "{} ∩ {}",
+                first.as_str(),
+                second.as_str()
+            );
+            if let Some(path) = witness {
+                assert!(first.matches(&path) && second.matches(&path), "invalid witness {path}");
+            }
+            assert_eq!(
+                first.refines(second),
+                refines
+                    .get(a)
+                    .expect("refinement row")
+                    .as_bytes()
+                    .get(b)
+                    .expect("refinement column")
+                    == &b'1',
+                "{} ⊆ {}",
+                first.as_str(),
+                second.as_str()
+            );
+        }
+    }
+}
+
+/// Negative — an opaque segment cannot stand in for a literal segment in the owning claim.
+#[test]
+fn n_opaque_parameters_cannot_replace_a_claim_prefix() {
+    let owner = claim("/a/admin");
+    for text in ["/{+tenant}/admin/item", "/a/{+api}/item", "/a/adminx/{+id}"] {
+        let template = PathTemplate::parse(text).expect("well-formed template");
+        assert!(!template.is_within(&owner), "{text}");
+    }
+    assert!(PathTemplate::parse("/a/admin/{+id}").expect("inside").is_within(&owner));
 }

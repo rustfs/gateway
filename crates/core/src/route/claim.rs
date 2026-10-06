@@ -61,9 +61,18 @@
 //! RustFS's `matchit` router does (ADR-0036). Its value is decoded once by the gateway's one name
 //! decoder — a `%` without two hexadecimal digits stays as it is — and only a value that is not
 //! UTF-8 is refused: what the rest names is data its handler validates.
+//!
+//! An opaque `{+name}` capture uses that same decoding boundary for exactly one nonempty raw
+//! segment (ADR-0040). Encoded separators and dot segments are data; raw `/` still separates
+//! segments. The ordinary `{name}` spelling stays strict. Bucket bindings retain their own
+//! validation; an opaque capture is never evidence that its value is safe as a filesystem path.
 
 use std::fmt;
 use std::str::FromStr;
+
+#[path = "claim_values.rs"]
+mod values;
+use values::{decode_opaque, decode_parameter};
 
 /// RFC 3986's unreserved bytes: the only ones a claim or a template literal may spell.
 const fn is_unreserved(byte: u8) -> bool {
@@ -202,6 +211,8 @@ enum Segment {
     Literal(&'static str),
     /// Matches one raw segment and binds it to this name.
     Parameter(&'static str),
+    /// `{+name}`: one nonempty raw segment, decoded as opaque UTF-8 data (ADR-0040).
+    OpaqueParameter(&'static str),
     /// `{*name}`, only as the last segment: matches the rest of the raw path after the separator
     /// before it, one byte or more, and binds it to this name (ADR-0036). RustFS registers
     /// `POST /rustfs/admin/v3/heal/{bucket}/{*prefix}` that way.
@@ -212,7 +223,7 @@ impl Segment {
     /// The name a parameter or a catch-all binds.
     const fn name(self) -> Option<&'static str> {
         match self {
-            Self::Parameter(name) | Self::CatchAll(name) => Some(name),
+            Self::Parameter(name) | Self::OpaqueParameter(name) | Self::CatchAll(name) => Some(name),
             Self::Literal(_) => None,
         }
     }
@@ -230,7 +241,7 @@ pub enum TemplateRejection {
     DotSegment,
     /// A literal byte outside RFC 3986's unreserved set.
     ForbiddenCharacter,
-    /// A parameter that is not `{name}` or `{*name}` with a lowercase `[a-z_][a-z0-9_]*` name.
+    /// A parameter that is not `{name}`, `{+name}` or `{*name}` with a lowercase name.
     MalformedParameter,
     /// A parameter sharing its segment with literal text, such as `{id}.zip`. Not supported yet: the
     /// one RustFS route that needs it is recorded in ADR-0024's migration plan.
@@ -251,7 +262,7 @@ impl TemplateRejection {
             Self::EmptySegment => "a template has no empty segment except a trailing '/'",
             Self::DotSegment => "a template has no '.' or '..' literal segment",
             Self::ForbiddenCharacter => "a template literal spells only unreserved characters",
-            Self::MalformedParameter => "a parameter is a whole segment `{name}` or `{*name}` with a lowercase name",
+            Self::MalformedParameter => "a parameter is a whole segment `{name}`, `{+name}` or `{*name}` with a lowercase name",
             Self::ParameterWithAffix => "a parameter is a whole segment; literal text beside it is not supported",
             Self::DuplicateParameter => "a parameter name appears once per template",
             Self::CatchAllNotLast => "a catch-all parameter `{*name}` is the template's last segment",
@@ -311,61 +322,8 @@ fn is_dot_segment(raw: &str) -> bool {
     dots > 0
 }
 
-const fn hex(byte: u8) -> Option<u8> {
-    match byte {
-        b'0'..=b'9' => Some(byte.wrapping_sub(b'0')),
-        b'a'..=b'f' => Some(byte.wrapping_sub(b'a').wrapping_add(10)),
-        b'A'..=b'F' => Some(byte.wrapping_sub(b'A').wrapping_add(10)),
-        _ => None,
-    }
-}
-
-/// Decodes one parameter value, once, and refuses what no handler may be handed.
-fn decode_parameter(raw: &str) -> Result<String, &'static str> {
-    let mut bytes = Vec::with_capacity(raw.len());
-    let mut rest = raw.as_bytes();
-    while let Some((&first, tail)) = rest.split_first() {
-        if first == b'%' {
-            let [high, low, after @ ..] = tail else {
-                return Err("a percent escape is cut short");
-            };
-            let (Some(high), Some(low)) = (hex(*high), hex(*low)) else {
-                return Err("a percent escape is not two hexadecimal digits");
-            };
-            bytes.push((high << 4) | low);
-            rest = after;
-        } else {
-            bytes.push(first);
-            rest = tail;
-        }
-    }
-    let value = String::from_utf8(bytes).map_err(|_| "the decoded value is not UTF-8")?;
-    if value.is_empty() {
-        return Err("the value is empty");
-    }
-    if value.contains(['/', '\\']) {
-        return Err("the decoded value contains a path separator");
-    }
-    if value == "." || value == ".." {
-        return Err("the decoded value is a dot segment");
-    }
-    if value.chars().any(char::is_control) {
-        return Err("the decoded value contains a control character");
-    }
-    Ok(value)
-}
-
-/// Decodes a catch-all value once, with the gateway's one name decoder, which is also how RustFS's
-/// heal handler decodes the rest it captures: every `%` followed by two hexadecimal digits is that
-/// byte, any other `%` stays as it is, and the result must be UTF-8. Nothing else is refused:
-/// separators, empty and dot segments and control characters are part of the value, which its
-/// handler validates (ADR-0036).
-fn decode_catch_all(raw: &str) -> Result<String, &'static str> {
-    rustfs_gateway_types::decode_once(raw).map_err(|_| "the decoded value is not UTF-8")
-}
-
-/// A path template inside a claim: literal segments and whole-segment `{parameters}`, and at most
-/// one trailing catch-all `{*name}`.
+/// A path template inside a claim: literals, strict `{name}` or opaque `{+name}` segments,
+/// and at most one trailing catch-all `{*name}` (ADR-0036, ADR-0040).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PathTemplate {
     text: &'static str,
@@ -378,7 +336,8 @@ impl PathTemplate {
     /// A template written with a trailing `/` (`/rustfs/admin/v3/heal/`) ends in an empty literal
     /// segment: it matches a request path with that trailing `/`, and neither the path without it
     /// nor any longer path (ADR-0030). Every other empty segment is refused. A template may end in
-    /// one catch-all `{*name}`, which nothing may follow (ADR-0036).
+    /// one catch-all `{*name}`, which nothing may follow (ADR-0036). `{+name}` accepts one
+    /// nonempty raw segment at any position and decodes it as opaque UTF-8 data (ADR-0040).
     ///
     /// # Errors
     ///
@@ -402,20 +361,23 @@ impl PathTemplate {
                 continue;
             }
             if let Some(inner) = segment.strip_prefix('{').and_then(|inner| inner.strip_suffix('}')) {
-                let (name, catch_all) = inner.strip_prefix('*').map_or((inner, false), |name| (name, true));
+                let (name, kind) = inner
+                    .strip_prefix('*')
+                    .map(|name| (name, '*'))
+                    .or_else(|| inner.strip_prefix('+').map(|name| (name, '+')))
+                    .unwrap_or((inner, ' '));
                 if !is_parameter_name(name) {
                     return Err(TemplateRejection::MalformedParameter);
                 }
                 if segments.iter().any(|seen| seen.name() == Some(name)) {
                     return Err(TemplateRejection::DuplicateParameter);
                 }
-                if !catch_all {
-                    segments.push(Segment::Parameter(name));
-                } else if raw.peek().is_some() {
-                    return Err(TemplateRejection::CatchAllNotLast);
-                } else {
-                    segments.push(Segment::CatchAll(name));
-                }
+                segments.push(match kind {
+                    '+' => Segment::OpaqueParameter(name),
+                    '*' if raw.peek().is_some() => return Err(TemplateRejection::CatchAllNotLast),
+                    '*' => Segment::CatchAll(name),
+                    _ => Segment::Parameter(name),
+                });
                 continue;
             }
             if segment.contains(['{', '}']) {
@@ -470,7 +432,7 @@ impl PathTemplate {
     }
 
     /// Walks a raw path against the template without allocating, handing `bind` each binding's
-    /// name, raw value and whether it is the catch-all: one segment for a parameter, the rest of
+    /// name, raw value and whether to decode it as opaque data: one segment for a parameter, the rest of
     /// the path for a catch-all. `false` when the path does not match.
     fn walk<'p>(&self, raw_path: &'p str, mut bind: impl FnMut(&'static str, &'p str, bool)) -> bool {
         let Some(mut rest) = raw_path.strip_prefix('/') else {
@@ -502,7 +464,8 @@ impl PathTemplate {
             match segment {
                 Segment::Literal(literal) if value == *literal => {}
                 Segment::Parameter(name) if is_one_segment_value(value) => bind(name, value, false),
-                Segment::Literal(_) | Segment::Parameter(_) | Segment::CatchAll(_) => return false,
+                Segment::OpaqueParameter(name) if !value.is_empty() => bind(name, value, true),
+                Segment::Literal(_) | Segment::Parameter(_) | Segment::OpaqueParameter(_) | Segment::CatchAll(_) => return false,
             }
         }
         ended
@@ -521,17 +484,17 @@ impl PathTemplate {
     /// [`PathParamError::Mismatch`] when the path does not match, and
     /// [`PathParamError::Invalid`] naming the parameter whose value decodes to something no
     /// handler may be handed: a malformed escape, invalid UTF-8, a separator, a dot segment, or a
-    /// control character; for a catch-all, only a value that is not UTF-8 (ADR-0036). The value
+    /// control character; for an opaque capture or catch-all, only invalid UTF-8 (ADR-0036, ADR-0040). The value
     /// itself is never part of the error.
     pub fn extract(&self, raw_path: &str) -> Result<PathParams, PathParamError> {
         let mut raw = Vec::new();
-        if !self.walk(raw_path, |name, value, catch_all| raw.push((name, value, catch_all))) {
+        if !self.walk(raw_path, |name, value, opaque| raw.push((name, value, opaque))) {
             return Err(PathParamError::Mismatch);
         }
         let mut values = Vec::with_capacity(raw.len());
-        for (name, value, catch_all) in raw {
-            let decoded = if catch_all {
-                decode_catch_all(value)
+        for (name, value, opaque) in raw {
+            let decoded = if opaque {
+                decode_opaque(value)
             } else {
                 decode_parameter(value)
             };
@@ -627,9 +590,11 @@ fn meet(mine: Segment, theirs: Segment) -> Option<&'static str> {
         (Segment::Literal(a), Segment::Literal(b)) if a == b => Some(a),
         // A parameter never matches an empty segment, so a trailing `/` and a parameter in the
         // same position share no path (ADR-0030).
-        (Segment::Literal(""), Segment::Parameter(_)) | (Segment::Parameter(_), Segment::Literal("")) => None,
-        (Segment::Literal(literal), Segment::Parameter(_)) | (Segment::Parameter(_), Segment::Literal(literal)) => Some(literal),
-        (Segment::Parameter(_), Segment::Parameter(_)) => Some("p"),
+        (Segment::Literal(""), Segment::Parameter(_) | Segment::OpaqueParameter(_))
+        | (Segment::Parameter(_) | Segment::OpaqueParameter(_), Segment::Literal("")) => None,
+        (Segment::Literal(literal), Segment::Parameter(_) | Segment::OpaqueParameter(_))
+        | (Segment::Parameter(_) | Segment::OpaqueParameter(_), Segment::Literal(literal)) => Some(literal),
+        (Segment::Parameter(_) | Segment::OpaqueParameter(_), Segment::Parameter(_) | Segment::OpaqueParameter(_)) => Some("p"),
         (Segment::Literal(_), Segment::Literal(_)) | (Segment::CatchAll(_), _) | (_, Segment::CatchAll(_)) => None,
     }
 }
@@ -638,10 +603,14 @@ fn meet(mine: Segment, theirs: Segment) -> Option<&'static str> {
 fn within(mine: Segment, theirs: Segment) -> bool {
     match (mine, theirs) {
         // An empty literal is matched by no parameter (ADR-0030).
-        (Segment::Literal(""), Segment::Parameter(_)) => false,
-        (Segment::Literal(_) | Segment::Parameter(_), Segment::Parameter(_)) => true,
+        (Segment::Literal(""), Segment::Parameter(_) | Segment::OpaqueParameter(_)) => false,
+        (Segment::Literal(_) | Segment::Parameter(_), Segment::Parameter(_) | Segment::OpaqueParameter(_)) => true,
+        (Segment::OpaqueParameter(_), Segment::OpaqueParameter(_)) => true,
+        (Segment::OpaqueParameter(_), Segment::Parameter(_)) => false,
         (Segment::Literal(a), Segment::Literal(b)) => a == b,
-        (Segment::Parameter(_), Segment::Literal(_)) | (Segment::CatchAll(_), _) | (_, Segment::CatchAll(_)) => false,
+        (Segment::Parameter(_) | Segment::OpaqueParameter(_), Segment::Literal(_))
+        | (Segment::CatchAll(_), _)
+        | (_, Segment::CatchAll(_)) => false,
     }
 }
 
@@ -649,7 +618,7 @@ fn within(mine: Segment, theirs: Segment) -> bool {
 fn instance(segment: Segment) -> &'static str {
     match segment {
         Segment::Literal(literal) => literal,
-        Segment::Parameter(_) | Segment::CatchAll(_) => "p",
+        Segment::Parameter(_) | Segment::OpaqueParameter(_) | Segment::CatchAll(_) => "p",
     }
 }
 
