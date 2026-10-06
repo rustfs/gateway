@@ -1,0 +1,93 @@
+# c-mpu-0054 — the completion request may omit the composite response's part count.
+
+[case]
+id = "c-mpu-0054"
+schema_version = 1
+title = "A negotiated composite upload accepts its matching digest without a part-count suffix"
+rationale = """
+A request can carry the checksum-of-part-checksums without the response's part-count suffix. \
+The upload's negotiated COMPOSITE mode supplies that meaning. Refusing the matching bare digest \
+prevents completion; accepting it must preserve the exact bytes later read from the object."""
+polarity = "positive"
+operation = "CompleteMultipartUpload"
+tags = ["multipart", "checksum", "integrity", "round-trip"]
+quirks = []
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CompleteMultipartUpload.html"
+summary = "A completion request can carry a base64 CRC32C digest; the upload's negotiated COMPOSITE mode identifies the checksum construction."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "conf-mpu"
+
+[[exchanges]]
+name = "initiate"
+
+[exchanges.request]
+method = "POST"
+target = "/conf-mpu/bare-composite?uploads"
+headers = { "x-amz-checksum-algorithm" = "CRC32C", "x-amz-checksum-type" = "COMPOSITE", "x-amz-content-sha256" = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+
+[exchanges.expect.capture]
+upload_id = { xml_text = "UploadId" }
+
+[[exchanges]]
+name = "part-one"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-mpu/bare-composite?partNumber=1&uploadId=${capture.upload_id}"
+headers = { "x-amz-checksum-crc32c" = "WMQBEQ==" }
+body = { utf8 = "testcontent\n" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+
+[exchanges.expect.capture]
+part1_etag = { header = "etag" }
+
+[[exchanges]]
+name = "bare-completion"
+
+[exchanges.request]
+method = "POST"
+target = "/conf-mpu/bare-composite?uploadId=${capture.upload_id}"
+headers = { "content-type" = "application/xml", "x-amz-checksum-crc32c" = "3+pJYA==" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.request.body]
+utf8 = '''<CompleteMultipartUpload xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Part><PartNumber>1</PartNumber><ETag>${capture.part1_etag}</ETag><ChecksumCRC32C>WMQBEQ==</ChecksumCRC32C></Part></CompleteMultipartUpload>'''
+
+[exchanges.expect]
+kind = "response"
+status = 200
+
+[[exchanges]]
+name = "exact-object-bytes"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-mpu/bare-composite"
+headers = { "x-amz-content-sha256" = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+
+[exchanges.expect.body]
+exact_utf8 = "testcontent\n"

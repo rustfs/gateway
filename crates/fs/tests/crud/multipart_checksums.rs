@@ -373,6 +373,53 @@ async fn nonconsecutive_checksum_parts_are_rejected_without_retiring_the_upload(
     assert_eq!(element(listed.body(), "PartNumber").as_deref(), Some("2"));
 }
 
+/// A bare completion digest uses the negotiated composite type; supplied counts still bind.
+#[tokio::test]
+async fn bare_composite_completion_validates_digest_algorithm_and_optional_part_count() {
+    let root = TestRoot::new();
+    let (_, service) = service(&root);
+    create_bucket(&service, "checksum-bare").await;
+    let initiated = initiate_checksum(&service, "checksum-bare", "object", "CRC32C", "COMPOSITE").await;
+    let upload_id = element(initiated.body(), "UploadId").expect("an upload id");
+    // Independent CRC32C vectors for the twelve-byte body and its four-byte part digest (#1275).
+    let part_checksum = ChecksumSpec::parse_header("x-amz-checksum-crc32c", "WMQBEQ==").expect("a fixed part checksum");
+    let uploaded = put_checksum_part(&service, "checksum-bare", "object", &upload_id, 1, part_checksum, b"testcontent\n").await;
+    let etag = header(&uploaded, "etag")
+        .expect("an entity tag")
+        .to_str()
+        .expect("an ASCII tag");
+    let body = completion_with_checksum(1, etag, ChecksumAlgorithm::Crc32c, "WMQBEQ==");
+    for (name, value) in [
+        ("x-amz-checksum-crc32c", "k61Pow=="),
+        ("x-amz-checksum-crc32c", "3+pJYA==-2"),
+        ("x-amz-checksum-crc32", "3+pJYA=="),
+    ] {
+        let mut headers = http::HeaderMap::new();
+        headers.insert(http::HeaderName::from_static(name), http::HeaderValue::from_static(value));
+        let refused =
+            complete_checksum_with_headers(&service, "checksum-bare", "object", &upload_id, body.clone(), headers).await;
+        assert_eq!(refused.status(), 400, "{name}: {value}");
+        assert_eq!(error_code(&refused).as_deref(), Some("BadDigest"), "{name}: {value}");
+        assert_eq!(
+            exchange(&service, signed(http::Method::GET, "/checksum-bare/object", Bytes::new()))
+                .await
+                .status(),
+            404,
+            "a refused completion must not publish an object"
+        );
+    }
+    let mut headers = http::HeaderMap::new();
+    headers.insert(
+        http::HeaderName::from_static("x-amz-checksum-crc32c"),
+        http::HeaderValue::from_static("3+pJYA=="),
+    );
+    let completed = complete_checksum_with_headers(&service, "checksum-bare", "object", &upload_id, body, headers).await;
+    assert_eq!(completed.status(), 200, "{}", String::from_utf8_lossy(completed.body()));
+    let fetched = exchange(&service, signed(http::Method::GET, "/checksum-bare/object", Bytes::new())).await;
+    assert_eq!(fetched.status(), 200);
+    assert_eq!(fetched.body(), b"testcontent\n".as_slice());
+}
+
 /// Negative — completion cannot change the checksum type selected at initiation.
 #[tokio::test]
 async fn completion_checksum_type_disagreement_returns_bad_digest_and_is_retryable() {

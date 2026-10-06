@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! CRC-32/ISO-HDLC, because `x-amz-checksum-crc32` is one.
+//! Independent CRC-32/ISO-HDLC and CRC-32C/Castagnoli digests for the fixture.
 //!
 //! Responsible for: the digest the fixture backend reports for a part it was told to hold, so a
-//! case that opens a multipart upload with `x-amz-checksum-algorithm: CRC32` gets a checksum of
+//! case that opens a multipart upload with `x-amz-checksum-algorithm: CRC32` or `CRC32C` gets a checksum of
 //! the bytes it sent rather than a value invented to satisfy the assertion.
 //! NOT responsible for: verifying anything a request claimed. The framework under test parses and
 //! checks request checksums; a second checker here would agree with itself and prove nothing.
@@ -36,6 +36,9 @@
 /// The reflected CRC-32 polynomial, `0x04C1_1DB7` bit-reversed.
 const POLYNOMIAL: u32 = 0xEDB8_8320;
 
+/// The reflected Castagnoli polynomial, `0x1EDC_6F41` bit-reversed.
+const CASTAGNOLI_POLYNOMIAL: u32 = 0x82F6_3B78;
+
 /// Returns the raw big-endian CRC-32 digest of `data`.
 ///
 /// Big-endian because that is the order S3 base64-encodes into the header, and a digest assembled
@@ -45,9 +48,19 @@ pub fn digest(data: &[u8]) -> [u8; 4] {
     checksum(data).to_be_bytes()
 }
 
+/// Returns the raw big-endian CRC-32C digest of `data`, as S3 base64-encodes it.
+#[must_use]
+pub fn digest_crc32c(data: &[u8]) -> [u8; 4] {
+    checksum_with_polynomial(data, CASTAGNOLI_POLYNOMIAL).to_be_bytes()
+}
+
 /// Returns the CRC-32 of `data` as a number.
 #[must_use]
 pub fn checksum(data: &[u8]) -> u32 {
+    checksum_with_polynomial(data, POLYNOMIAL)
+}
+
+fn checksum_with_polynomial(data: &[u8], polynomial: u32) -> u32 {
     let mut crc = 0xFFFF_FFFF_u32;
     for byte in data {
         crc ^= u32::from(*byte);
@@ -55,7 +68,7 @@ pub fn checksum(data: &[u8]) -> u32 {
             let carry = crc & 1;
             crc >>= 1;
             if carry != 0 {
-                crc ^= POLYNOMIAL;
+                crc ^= polynomial;
             }
         }
     }
