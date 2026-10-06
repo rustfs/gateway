@@ -26,11 +26,14 @@
 //!
 //! RustFS's evaluator is MinIO's: principal, action, resource and a condition language of some
 //! forty keys. This one matches principal, action and resource with the same `*`/`?` wildcards,
-//! and evaluates three operators on two request-header keys, `s3:x-amz-acl` and
+//! and evaluates equality, negated equality and `Null` on two request-header keys, `s3:x-amz-acl` and
 //! `s3:x-amz-server-side-encryption` (rustfs/gateway#979): `StringEquals` (exact, case-sensitive,
 //! a string or an OR-list, no match on an absent header), `StringNotEquals` (its negation, so an
 //! absent header matches, as AWS evaluates a negated operator) and `Null` (`true` matches an
-//! absent header, `false` a present one). Every clause of a block must match. Any condition block
+//! absent header, `false` a present one). `StringEqualsIfExists` and `StringNotEqualsIfExists`
+//! also match an absent key, including in a `Deny` (rustfs/gateway#1037).
+//! Evidence: <https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_elements_condition_operators.html#Conditions_IfExists>.
+//! Every clause of a block must match. Any condition block
 //! containing another key or operator remains unsupported as a whole and neither grants nor
 //! denies. That preserves the existing limitation: unsupported Allow is fail-closed, unsupported
 //! Deny is fail-open. This is not a complete IAM condition evaluator or validator.
@@ -101,6 +104,7 @@ impl ConditionKey {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Clause {
     Equals(ConditionKey, Vec<String>),
+    EqualsIfExists(ConditionKey, Vec<String>),
     NotEquals(ConditionKey, Vec<String>),
     /// `true`: the key is absent from the request; `false`: it is present.
     Null(ConditionKey, bool),
@@ -112,6 +116,9 @@ impl Clause {
             Self::Equals(key, values) => key
                 .value(facts)
                 .is_some_and(|actual| values.iter().any(|value| value == actual)),
+            Self::EqualsIfExists(key, values) => key
+                .value(facts)
+                .is_none_or(|actual| values.iter().any(|value| value == actual)),
             Self::NotEquals(key, values) => !key
                 .value(facts)
                 .is_some_and(|actual| values.iter().any(|value| value == actual)),
@@ -135,13 +142,15 @@ impl Condition {
             for (name, value) in keys {
                 let Some(key) = ConditionKey::parse(name) else { return Self::Unsupported };
                 let clause = match operator.as_str() {
-                    "StringEquals" | "StringNotEquals" => {
+                    "StringEquals" | "StringNotEquals" | "StringEqualsIfExists" | "StringNotEqualsIfExists" => {
                         let Ok(values) = strings(Some(value)) else { return Self::Unsupported };
                         if values.is_empty() {
                             return Self::Unsupported;
                         }
                         if operator == "StringEquals" {
                             Clause::Equals(key, values)
+                        } else if operator == "StringEqualsIfExists" {
+                            Clause::EqualsIfExists(key, values)
                         } else {
                             Clause::NotEquals(key, values)
                         }
@@ -431,3 +440,7 @@ fn glob(pattern: &str, text: &str) -> bool {
 #[cfg(test)]
 #[path = "evaluate_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "ifexists_tests.rs"]
+mod ifexists_tests;
