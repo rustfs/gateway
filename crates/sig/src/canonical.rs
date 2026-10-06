@@ -60,9 +60,9 @@ use crate::contracts::{SIGNATURE_CANONICAL_HOST_RAW, SIGNATURE_RAW_PATH_FALLBACK
 use sha2::{Digest, Sha256};
 use smallvec::SmallVec;
 
-use crate::codec::encode_hex_lower;
+use crate::codec::{append_hex_lower, encode_hex_lower};
 use crate::mode::CanonicalPayloadToken;
-use crate::parse::{AmzDate, CredentialScope};
+use crate::parse::{AmzDate, CredentialScope, SCOPE_TERMINATOR};
 use crate::query::{QueryExclusion, RawQuery, percent_decode, percent_encode};
 use crate::scheme::ALGORITHM_SIGV4;
 use crate::signed_headers::SignedHeaderSet;
@@ -454,14 +454,32 @@ impl CanonicalRequest {
     /// the two is what makes a signature minted for another region or another service replay here.
     #[must_use]
     pub fn string_to_sign(&self, date: &AmzDate, scope: &CredentialScope) -> StringToSign {
-        let mut text = String::with_capacity(96);
+        let digest: [u8; 32] = Sha256::digest(self.text.as_bytes()).into();
+        let scope_date = scope.date();
+        // Three line breaks and three scope separators; lengths are bytes, including an
+        // alternate UTF-8 service name admitted by the caller's scope-reading rule.
+        let capacity = ALGORITHM_SIGV4.len()
+            + date.as_str().len()
+            + scope_date.as_str().len()
+            + scope.region().len()
+            + scope.service_name().len()
+            + SCOPE_TERMINATOR.len()
+            + digest.len() * 2
+            + 6;
+        let mut text = String::with_capacity(capacity);
         text.push_str(ALGORITHM_SIGV4);
         text.push('\n');
         text.push_str(date.as_str());
         text.push('\n');
-        text.push_str(&scope.scope_string());
+        text.push_str(scope_date.as_str());
+        text.push('/');
+        text.push_str(scope.region());
+        text.push('/');
+        text.push_str(scope.service_name());
+        text.push('/');
+        text.push_str(SCOPE_TERMINATOR);
         text.push('\n');
-        text.push_str(&self.hash_hex());
+        append_hex_lower(&mut text, &digest);
         StringToSign { text }
     }
 }
