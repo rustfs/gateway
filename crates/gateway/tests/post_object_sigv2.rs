@@ -357,3 +357,121 @@ async fn generic_forms_keep_their_policy_condition_error() {
     assert!(response.contains("<Code>AccessDenied</Code>"), "{response}");
     assert_eq!(stored, None);
 }
+
+fn operator_policy(condition: &str) -> String {
+    let document = format!(
+        r#"{{"expiration":"2026-01-02T04:04:05Z","conditions":[{{"bucket":"example-bucket"}},{{"key":"upload"}},{condition}]}}"#
+    );
+    document
+        .as_bytes()
+        .chunks(3)
+        .map(|chunk| match chunk {
+            [a, b, c] => encode_base64_exact(&[*a, *b, *c]),
+            [a, b] => encode_base64_exact(&[*a, *b]),
+            [a] => encode_base64_exact(&[*a]),
+            _ => unreachable!("chunks of three bytes are nonempty"),
+        })
+        .collect()
+}
+
+// Frozen native HTTP observations: https://github.com/rustfs/gateway/issues/1185#issuecomment-6001449377
+// Only the three operator names ignore ASCII case; field values and signed policy bytes do not.
+#[tokio::test]
+async fn mixed_case_operators_accept_matching_conditions() {
+    for condition in [
+        r#"["Eq","$key","upload"]"#,
+        r#"["StArTs-WiTh","$key","up"]"#,
+        r#"["CoNtEnT-LeNgTh-RaNgE",1,16]"#,
+    ] {
+        let policy = operator_policy(condition);
+        let signature = signed_policy(&policy);
+        for file in ["1", "1234567890123456"] {
+            let (status, response, stored) = post(true, &fields(&policy, &signature), file).await;
+            assert_eq!(status, StatusCode::NO_CONTENT, "{response}");
+            assert_eq!(stored, Some(("upload".to_owned(), file.as_bytes().to_vec())));
+        }
+    }
+}
+
+#[tokio::test]
+async fn mixed_case_operators_keep_values_case_sensitive() {
+    for condition in [
+        r#"["Eq","$key","UPLOAD"]"#,
+        r#"["Eq","$key","other"]"#,
+        r#"["Starts-With","$key","UP"]"#,
+        r#"["Starts-With","$key","other"]"#,
+    ] {
+        let policy = operator_policy(condition);
+        let signature = signed_policy(&policy);
+        let (status, response, stored) = post(true, &fields(&policy, &signature), "hello").await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{response}");
+        assert!(response.contains("<Code>InvalidPolicyDocument</Code>"), "{response}");
+        assert_eq!(stored, None);
+    }
+}
+
+#[tokio::test]
+async fn mixed_case_operators_keep_both_size_limits() {
+    let policy = operator_policy(r#"["CONTENT-LENGTH-RANGE",1,16]"#);
+    let signature = signed_policy(&policy);
+    for (file, code) in [("", "EntityTooSmall"), ("12345678901234567", "EntityTooLarge")] {
+        let (status, response, stored) = post(true, &fields(&policy, &signature), file).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{response}");
+        assert!(response.contains(&format!("<Code>{code}</Code>")), "{response}");
+        assert_eq!(stored, None);
+    }
+}
+
+#[tokio::test]
+async fn mixed_case_operators_do_not_admit_other_spellings_or_invalid_ranges() {
+    for condition in [
+        r#"["Equals","$key","upload"]"#,
+        r#"[" eq","$key","upload"]"#,
+        r#"["eq ","$key","upload"]"#,
+        r#"["ſtarts-with","$key","up"]"#,
+        r#"["CONTENT-LENGTH-RANGE",16,1]"#,
+    ] {
+        let policy = operator_policy(condition);
+        let signature = signed_policy(&policy);
+        let (status, response, stored) = post(true, &fields(&policy, &signature), "hello").await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{response}");
+        assert!(response.contains("<Code>InvalidPolicyDocument</Code>"), "{response}");
+        assert_eq!(stored, None);
+    }
+}
+
+#[tokio::test]
+async fn mixed_case_operators_cannot_change_the_signed_policy_bytes() {
+    let mixed = operator_policy(r#"["Eq","$key","upload"]"#);
+    let lower = operator_policy(r#"["eq","$key","upload"]"#);
+    for (policy, signed) in [(&mixed, &lower), (&lower, &mixed)] {
+        let signature = signed_policy(signed);
+        let (status, response, stored) = post(true, &fields(policy, &signature), "hello").await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{response}");
+        assert!(response.contains("<Code>SignatureDoesNotMatch</Code>"), "{response}");
+        assert_eq!(stored, None);
+    }
+}
+
+#[tokio::test]
+async fn mixed_case_operators_remain_opt_in_for_generic_forms() {
+    for condition in [
+        r#"["Eq","$key","upload"]"#,
+        r#"["Starts-With","$key","up"]"#,
+        r#"["Content-Length-Range",1,16]"#,
+    ] {
+        let policy = operator_policy(condition);
+        let signature = signed_policy(&policy);
+        let (status, response, stored) = post_with_credentials(
+            true,
+            &fields(&policy, &signature),
+            "hello",
+            Credentials::new("AKIDEXAMPLE", b"secret").expect("valid credentials"),
+            false,
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{response}");
+        assert!(response.contains("<Code>MalformedPOSTRequest</Code>"), "{response}");
+        assert_eq!(stored, None);
+    }
+}

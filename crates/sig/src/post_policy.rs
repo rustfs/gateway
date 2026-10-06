@@ -22,6 +22,10 @@
 mod unrouted;
 pub use unrouted::{UnroutedPostPolicy, UnroutedPostPolicyError};
 
+#[path = "post_policy_conditions.rs"]
+mod conditions;
+use conditions::{Condition, parse_policy};
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
@@ -29,7 +33,7 @@ use hmac::digest::KeyInit;
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
 
-use crate::post_policy_json::{JsonParser, JsonValue};
+use crate::post_policy_json::JsonParser;
 use crate::{
     AmzDate, AuthError, CredentialScope, CtBytes, EmptyRegion, RegionRule, RequestNow, SecretBytes, SessionToken, Signature,
     SignatureMatch, SigningKey, VerifyRejection,
@@ -191,7 +195,7 @@ impl PostPolicy {
         if fields.required("x-amz-algorithm")? != ALGORITHM {
             return Err(PostPolicyError::Malformed);
         }
-        let (encoded, conditions) = parse_policy_document(&fields, limits, now)?;
+        let (encoded, conditions) = parse_policy_document(&fields, limits, now, false)?;
 
         let credential = fields.required("x-amz-credential")?;
         let scope = CredentialScope::parse_with(credential, rule).map_err(|_| PostPolicyError::Malformed)?;
@@ -328,10 +332,36 @@ impl SigV2PostPolicy {
         limits: PostPolicyLimits,
         now: RequestNow,
     ) -> Result<Self, PostPolicyError> {
+        Self::parse_impl(fields, raw_filename, limits, now, false)
+    }
+
+    /// Parses a SigV2 policy with ASCII-case-insensitive condition operator names.
+    ///
+    /// Only `eq`, `starts-with`, and `content-length-range` ignore ASCII case. Field values,
+    /// document member names, resource limits, and the original signed bytes are unchanged.
+    /// The default [`Self::parse`] keeps exact operator spelling.
+    /// # Errors
+    /// Returns [`PostPolicyError`] for malformed or expired policies and failed conditions.
+    pub fn parse_with_case_insensitive_operators(
+        fields: &[(&str, &str)],
+        raw_filename: &str,
+        limits: PostPolicyLimits,
+        now: RequestNow,
+    ) -> Result<Self, PostPolicyError> {
+        Self::parse_impl(fields, raw_filename, limits, now, true)
+    }
+
+    fn parse_impl(
+        fields: &[(&str, &str)],
+        raw_filename: &str,
+        limits: PostPolicyLimits,
+        now: RequestNow,
+        ascii_case_insensitive: bool,
+    ) -> Result<Self, PostPolicyError> {
         let fields = FieldSet::parse(fields)?;
         fields.required("awsaccesskeyid")?;
         fields.required("signature")?;
-        let (encoded, conditions) = parse_policy_document(&fields, limits, now)?;
+        let (encoded, conditions) = parse_policy_document(&fields, limits, now, ascii_case_insensitive)?;
         let common = enforce_policy_fields(&fields, raw_filename, limits, encoded, &conditions)?;
         Ok(Self {
             encoded: common.encoded,
@@ -420,6 +450,7 @@ fn parse_policy_document(
     fields: &FieldSet<'_>,
     limits: PostPolicyLimits,
     now: RequestNow,
+    ascii_case_insensitive: bool,
 ) -> Result<(String, Vec<Condition>), PostPolicyError> {
     let encoded = fields.required("policy")?;
     if encoded.is_empty() || encoded.len() > limits.max_encoded_bytes {
@@ -427,7 +458,7 @@ fn parse_policy_document(
     }
     let decoded = decode_base64(encoded, limits.max_decoded_bytes)?;
     let root = JsonParser::parse(&decoded, limits.max_json_depth, limits.max_json_elements)?;
-    let (expiration, conditions) = parse_policy(root)?;
+    let (expiration, conditions) = parse_policy(root, ascii_case_insensitive)?;
     let expiry = parse_expiration(&expiration)?;
     if now.unix_seconds() >= crate::clock::unix_seconds(&expiry).ok_or(PostPolicyError::Malformed)? {
         return Err(PostPolicyError::Expired);
@@ -564,69 +595,6 @@ impl BucketBinding {
                 BucketRule::StartsWith(prefix) => bucket.starts_with(prefix.as_str()),
             })
     }
-}
-
-enum Condition {
-    Exact(String, String),
-    StartsWith(String, String),
-    ContentLengthRange(u64, u64),
-}
-
-fn parse_policy(root: JsonValue) -> Result<(String, Vec<Condition>), PostPolicyError> {
-    let JsonValue::Object(mut members) = root else {
-        return Err(PostPolicyError::Malformed);
-    };
-    if members.len() != 2 {
-        return Err(PostPolicyError::Malformed);
-    }
-    let expiration = take_member(&mut members, "expiration")?.into_string()?;
-    let conditions = take_member(&mut members, "conditions")?.into_array()?;
-    let parsed = conditions.into_iter().map(parse_condition).collect::<Result<Vec<_>, _>>()?;
-    if parsed.is_empty() {
-        return Err(PostPolicyError::Malformed);
-    }
-    Ok((expiration, parsed))
-}
-
-fn take_member(members: &mut Vec<(String, JsonValue)>, name: &str) -> Result<JsonValue, PostPolicyError> {
-    let index = members
-        .iter()
-        .position(|(key, _)| key == name)
-        .ok_or(PostPolicyError::Malformed)?;
-    Ok(members.swap_remove(index).1)
-}
-
-fn parse_condition(value: JsonValue) -> Result<Condition, PostPolicyError> {
-    match value {
-        JsonValue::Object(mut members) if members.len() == 1 => {
-            let (name, value) = members.pop().ok_or(PostPolicyError::Malformed)?;
-            Ok(Condition::Exact(normalize_condition_name(&name)?, value.into_string()?))
-        }
-        JsonValue::Array(values) if values.len() == 3 => {
-            let mut values = values.into_iter();
-            let operator = values.next().ok_or(PostPolicyError::Malformed)?.into_string()?;
-            let second = values.next().ok_or(PostPolicyError::Malformed)?;
-            let third = values.next().ok_or(PostPolicyError::Malformed)?;
-            match operator.as_str() {
-                "eq" => Ok(Condition::Exact(normalize_variable(second.into_string()?)?, third.into_string()?)),
-                "starts-with" => Ok(Condition::StartsWith(normalize_variable(second.into_string()?)?, third.into_string()?)),
-                "content-length-range" => Ok(Condition::ContentLengthRange(second.into_u64()?, third.into_u64()?)),
-                _ => Err(PostPolicyError::Malformed),
-            }
-        }
-        _ => Err(PostPolicyError::Malformed),
-    }
-}
-
-fn normalize_variable(value: String) -> Result<String, PostPolicyError> {
-    normalize_condition_name(value.strip_prefix('$').ok_or(PostPolicyError::Malformed)?)
-}
-
-fn normalize_condition_name(name: &str) -> Result<String, PostPolicyError> {
-    if name.is_empty() || !name.is_ascii() || name.eq_ignore_ascii_case("file") {
-        return Err(PostPolicyError::Malformed);
-    }
-    Ok(name.to_ascii_lowercase())
 }
 
 fn condition_value<'a>(fields: &'a FieldSet<'a>, name: &str, final_key: &'a str) -> Result<&'a str, PostPolicyError> {

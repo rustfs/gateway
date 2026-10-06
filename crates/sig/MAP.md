@@ -19,6 +19,7 @@ Agent entry point for SigV2/SigV4 parsing, canonicalization and verification.
 | `src/parse.rs` | Credential and authorization parsing. | Date, region, service, or credential fields parse incorrectly. |
 | `src/post_policy.rs` | Browser POST-policy parsing, field enforcement, and bounded SigV2 proof before JSON interpretation. | A POST form condition, filename, size range, or proof changes. |
 | `src/post_policy_unrouted.rs` | Bounded credential material for an unrouted RustFS form, without upload enforcement. | An object-path form is refused in the wrong phase. |
+| `src/post_policy_conditions.rs` | Condition shapes and opt-in ASCII operator case folding. | A condition operator or document member is accepted differently. |
 | `src/post_policy_tests.rs` | Focused unit tests for POST-policy parsing and enforcement. | A POST-policy parser control or proof changes. |
 | `src/post_policy_json.rs` | Bounded duplicate-free JSON parsing for POST policies. | JSON shape, string escaping, nesting, or element limits change. |
 | `src/post_policy_redirect.rs` | The `success_action_redirect` builder: scheme, authority grammar, host allowlist, and parameter placement. | A redirect URL is accepted or refused wrongly, or the `Location` shape changes. |

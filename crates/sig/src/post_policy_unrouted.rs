@@ -102,7 +102,7 @@ impl UnroutedPostPolicy {
         let decoded = decode_base64(encoded, limits.max_decoded_bytes).map_err(|_| Error::InvalidEncoding)?;
         let root =
             JsonParser::parse(&decoded, limits.max_json_depth, limits.max_json_elements).map_err(|_| Error::InvalidDocument)?;
-        let (expiration, conditions) = parse_policy(root).map_err(|_| Error::InvalidDocument)?;
+        let (expiration, conditions) = parse_policy(root, false).map_err(|_| Error::InvalidDocument)?;
         parse_expiration(&expiration).map_err(|_| Error::InvalidDocument)?;
         let bound = |name: &str, value: &str| {
             conditions
