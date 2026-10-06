@@ -63,7 +63,7 @@
 //!
 //! A header value that cannot be written is left out, as RustFS leaves it out.
 //!
-//! # What this module does not reproduce: credentials
+//! # Credentials require the operator's exact-origin policy
 //!
 //! Legacy RustFS also answers `Access-Control-Allow-Credentials: true` to every credentialed
 //! request a bucket rule matches — under a rule whose origin is `*` too, where it echoes the
@@ -71,15 +71,16 @@
 //! an origin listed in `RUSTFS_CORS_ALLOWED_ORIGINS`. That is `GHSA-x5xv-223c-8vm7`'s shape, and
 //! this crate writes that header from one place only, `rustfs_gateway_core::cors`'s answer
 //! builder, under an operator's `CorsPolicy` (`scripts/check_cors_credentials_exclusive.sh`, which
-//! admits no exemption). So these answers never allow credentials: a browser request made with
-//! `credentials: "include"` that legacy RustFS let read its answer is refused by the browser here.
-//! Whether RustFS keeps that allowance, and through which policy, is the maintainer's decision
-//! (rustfs/gateway#1120).
+//! admits no exemption). Credentials remain disabled by default. An explicit exact-origin
+//! `CorsPolicy` may enable them for a matching exact bucket origin or listed fallback origin
+//! (rustfs/gateway#1120). Wildcard and reflected matches never enable credentials, even when
+//! the request is signed. Duplicate or malformed request origins cannot enable them either.
 
 use http::{HeaderMap, HeaderName, HeaderValue, Method};
 use rustfs_gateway_core::cors::{
     ACCESS_CONTROL_ALLOW_HEADERS, ACCESS_CONTROL_ALLOW_METHODS, ACCESS_CONTROL_ALLOW_ORIGIN, ACCESS_CONTROL_EXPOSE_HEADERS,
-    ACCESS_CONTROL_MAX_AGE, ACCESS_CONTROL_REQUEST_HEADERS, ACCESS_CONTROL_REQUEST_METHOD, ORIGIN, VARY,
+    ACCESS_CONTROL_MAX_AGE, ACCESS_CONTROL_REQUEST_HEADERS, ACCESS_CONTROL_REQUEST_METHOD, AllowOrigin, CorsPolicy, ORIGIN,
+    RequestedHeaders, VARY, credentials_for_origin, is_plausible_origin,
 };
 use rustfs_gateway_types::dto::{CorsConfiguration, CorsRule};
 
@@ -122,7 +123,7 @@ const PREFLIGHT_VARY: HeaderValue = HeaderValue::from_static("Access-Control-Req
 
 /// Legacy RustFS's CORS answers, installed with [`crate::ServiceBuilder::answer_cors_as_legacy_rustfs`].
 ///
-/// Every answer but one: credentials are never allowed (see the module documentation).
+/// Credentials additionally require an explicit exact-origin `CorsPolicy` (see the module documentation).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LegacyRustfsCors {
     fallback: Fallback,
@@ -208,24 +209,59 @@ impl LegacyRustfsCors {
     }
 
     /// The deployment-wide fallback headers for a request carrying `headers`.
-    pub(crate) fn fallback_headers(&self, headers: &HeaderMap) -> Vec<(HeaderName, HeaderValue)> {
-        let Some(origin) = headers.get(ORIGIN).filter(|origin| origin.to_str().is_ok()) else {
+    pub(crate) fn fallback_headers(&self, policy: &CorsPolicy, headers: &HeaderMap) -> Vec<(HeaderName, HeaderValue)> {
+        let Some(origin) = headers.get(ORIGIN) else {
             return Vec::new();
         };
-        let allow_origin = match &self.fallback {
+        let Ok(origin_text) = origin.to_str() else { return Vec::new() };
+        let allowance = match &self.fallback {
             Fallback::None => return Vec::new(),
-            Fallback::Any => HeaderValue::from_static("*"),
-            Fallback::Listed(list) if list.iter().any(|entry| entry.as_bytes() == origin.as_bytes()) => origin.clone(),
-            Fallback::Listed(_) => return Vec::new(),
+            Fallback::Any => AllowOrigin::Wildcard,
+            Fallback::Listed(list) => match list.iter().find(|entry| entry.as_bytes() == origin.as_bytes()) {
+                Some(entry) => AllowOrigin::Exact(entry),
+                None => return Vec::new(),
+            },
         };
-        // Legacy RustFS also allows credentials to a listed origin; see the module documentation
-        // for why these answers never do.
-        vec![
+        let allow_origin = if matches!(allowance, AllowOrigin::Wildcard) {
+            HeaderValue::from_static("*")
+        } else {
+            origin.clone()
+        };
+        let mut pairs = vec![
             (ACCESS_CONTROL_ALLOW_ORIGIN, allow_origin),
             (ACCESS_CONTROL_ALLOW_METHODS, FALLBACK_METHODS),
             (ACCESS_CONTROL_ALLOW_HEADERS, FALLBACK_HEADERS),
             (ACCESS_CONTROL_EXPOSE_HEADERS, FALLBACK_EXPOSED),
-        ]
+        ];
+        if let Some(credential) = credential_allowance(policy, headers, allowance, origin_text) {
+            let vary = if headers.contains_key(ACCESS_CONTROL_REQUEST_METHOD) {
+                // A credentialed browser treats Allow-Headers: * as a literal name. Enumerate
+                // the validated names instead; Authorization always needs an explicit entry.
+                // https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Access-Control-Allow-Headers
+                if headers.get_all(ACCESS_CONTROL_REQUEST_HEADERS).iter().count() > 1 {
+                    return pairs;
+                }
+                let raw = match headers
+                    .get(ACCESS_CONTROL_REQUEST_HEADERS)
+                    .map(HeaderValue::to_str)
+                    .transpose()
+                {
+                    Ok(value) => value.unwrap_or(""),
+                    Err(_) => return pairs,
+                };
+                let Ok(requested) = RequestedHeaders::parse(raw) else { return pairs };
+                let names = requested.names().map(str::to_ascii_lowercase).collect::<Vec<_>>().join(", ");
+                let Ok(value) = HeaderValue::from_str(&names) else { return pairs };
+                pairs.retain(|(name, _)| *name != ACCESS_CONTROL_ALLOW_HEADERS);
+                pairs.push((ACCESS_CONTROL_ALLOW_HEADERS, value));
+                PREFLIGHT_VARY_ECHOED
+            } else {
+                HeaderValue::from_static("Origin")
+            };
+            pairs.push(credential);
+            pairs.push((VARY, vary));
+        }
+        pairs
     }
 }
 
@@ -254,6 +290,7 @@ pub(crate) enum ActualPlan<'a> {
 /// rule matches; `None` when the request carries no readable `Origin`, which legacy RustFS answers
 /// as it answers a bucket without a document.
 pub(crate) fn bucket_headers(
+    policy: &CorsPolicy,
     configuration: &CorsConfiguration,
     method: &Method,
     headers: &HeaderMap,
@@ -297,9 +334,11 @@ pub(crate) fn bucket_headers(
         pairs.push((ACCESS_CONTROL_ALLOW_ORIGIN, HeaderValue::from_static("*")));
     }
     let echoed = pairs.iter().any(|(name, _)| *name == VARY);
-    // Legacy RustFS also allows credentials here, to every credentialed request; see the module
-    // documentation for why these answers never do. Echoing the origin without them lets no page
-    // read what a `*` would not have let it read.
+    if let Some(allowance) = matching_origin(rule, origin)
+        && let Some(credential) = credential_allowance(policy, headers, allowance, origin)
+    {
+        pairs.push(credential);
+    }
     if (preflight || !rule.allowed_methods.is_empty())
         && let Ok(value) = HeaderValue::from_str(&rule.allowed_methods.join(", "))
     {
@@ -333,13 +372,38 @@ pub(crate) fn bucket_headers(
     Some(pairs)
 }
 
-/// Whether one stored rule admits the request.
-fn rule_matches(rule: &CorsRule, origin: &str, method: &str, requested_headers: Option<&[String]>) -> bool {
-    let origin_matches = rule
+/// Keeps the selected origin's provenance; echoing a wildcard must not turn it into an exact rule.
+fn matching_origin<'a>(rule: &'a CorsRule, origin: &'a str) -> Option<AllowOrigin<'a>> {
+    if rule.allowed_origins.iter().any(|allowed| allowed == "*") {
+        return Some(AllowOrigin::Wildcard);
+    }
+    let allowed = rule
         .allowed_origins
         .iter()
-        .any(|allowed| allowed == "*" || allowed == origin || matches_origin_pattern(allowed, origin));
-    if !origin_matches || !rule.allowed_methods.iter().any(|allowed| allowed == method) {
+        .find(|allowed| *allowed == origin || matches_origin_pattern(allowed, origin))?;
+    Some(if allowed == origin {
+        AllowOrigin::Exact(allowed)
+    } else {
+        AllowOrigin::Reflected(origin)
+    })
+}
+
+/// Ambiguous or malformed request origins cannot gain a credential allowance through compatibility parsing.
+fn credential_allowance(
+    policy: &CorsPolicy,
+    headers: &HeaderMap,
+    allowance: AllowOrigin<'_>,
+    origin: &str,
+) -> Option<(HeaderName, HeaderValue)> {
+    if headers.get_all(ORIGIN).iter().count() != 1 || !is_plausible_origin(origin) {
+        return None;
+    }
+    credentials_for_origin(policy, allowance, origin)
+}
+
+/// Whether one stored rule admits the request.
+fn rule_matches(rule: &CorsRule, origin: &str, method: &str, requested_headers: Option<&[String]>) -> bool {
+    if matching_origin(rule, origin).is_none() || !rule.allowed_methods.iter().any(|allowed| allowed == method) {
         return false;
     }
     match requested_headers {

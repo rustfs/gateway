@@ -26,8 +26,8 @@
 use http::{HeaderMap, HeaderName, HeaderValue, Method, Request, Response, StatusCode};
 use rustfs_gateway_core::TargetKind;
 use rustfs_gateway_core::cors::{
-    ACCESS_CONTROL_ALLOW_ORIGIN, CorsHeaders, ORIGIN, PreflightOutcome, PreflightRefusalCause, PreflightRequest, answer_actual,
-    answer_preflight, preflight_uses_resolved_target,
+    ACCESS_CONTROL_ALLOW_ORIGIN, CorsHeaders, ORIGIN, PreflightOutcome, PreflightRefusalCause, PreflightRequest, VARY,
+    answer_actual, answer_preflight, preflight_uses_resolved_target,
 };
 use rustfs_gateway_sig::RequestNow;
 use rustfs_gateway_stream::Body;
@@ -172,9 +172,9 @@ impl S3Service {
     /// origin, the fallback headers.
     ///
     /// Legacy RustFS leaves an answer whose handler already allowed an origin alone. Its object
-    /// handlers write the same bucket answer this computes, credentials included, so replacing it
-    /// here changes nothing on the wire but the credentials these answers never allow — including
-    /// ones a bridged handler hands over among its extra headers.
+    /// handlers write the same bucket answer this computes, credentials included. Replacing their
+    /// bucket headers here makes the operator's exact-origin credential policy authoritative,
+    /// including over credentials a bridged handler hands over among its extra headers.
     pub(super) async fn decorate_legacy_cors(&self, request: LegacyCorsRequest, response: &mut Response<Body>, now: RequestNow) {
         let Some(legacy) = self.inner.legacy_cors.as_ref() else {
             return;
@@ -202,7 +202,16 @@ impl S3Service {
                 insert_all(headers, pairs);
             }
             None if headers.contains_key(ACCESS_CONTROL_ALLOW_ORIGIN) => {}
-            None => insert_all(headers, legacy.fallback_headers(&request.headers)),
+            None => {
+                for (name, value) in legacy.fallback_headers(&self.inner.cors_policy, &request.headers) {
+                    if name == VARY {
+                        // Credentialed fallback adds Origin without erasing the handler's cache dimensions.
+                        headers.append(name, value);
+                    } else {
+                        headers.insert(name, value);
+                    }
+                }
+            }
         }
     }
 
@@ -239,14 +248,14 @@ impl S3Service {
         }
         let answer = match plan {
             PreflightPlan::BadRequest => None,
-            PreflightPlan::Fallback => Some(legacy.fallback_headers(headers)),
+            PreflightPlan::Fallback => Some(legacy.fallback_headers(&self.inner.cors_policy, headers)),
             PreflightPlan::Bucket(name) => match self.legacy_bucket_headers(name, &Method::OPTIONS, headers, now).await {
                 Some(pairs) if pairs.iter().any(|(name, _)| *name == ACCESS_CONTROL_ALLOW_ORIGIN) => Some(pairs),
                 Some(_) => {
                     hold_failure_floor(self.inner.floor.failure_floor(), self.inner.authz_clock.as_ref(), started).await;
                     return empty_answer(StatusCode::FORBIDDEN, Vec::new());
                 }
-                None => Some(legacy.fallback_headers(headers)),
+                None => Some(legacy.fallback_headers(&self.inner.cors_policy, headers)),
             },
         };
         match answer {
@@ -270,7 +279,7 @@ impl S3Service {
     ) -> Option<Vec<(HeaderName, HeaderValue)>> {
         let bucket = BucketName::materialize(name, &self.inner.names).ok()?;
         let document = self.inner.cors.get(&bucket, now).await?;
-        bucket_headers(&document, method, headers)
+        bucket_headers(&self.inner.cors_policy, &document, method, headers)
     }
 }
 

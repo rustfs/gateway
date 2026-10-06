@@ -27,7 +27,7 @@
 //! Every expectation but the credentials is legacy RustFS's answer (`ConditionalCorsLayer`,
 //! rustfs/rustfs `e870a6d25b` `rustfs/src/server/layer.rs:2012-2309`): legacy RustFS allows
 //! credentials to a listed fallback origin and to a credentialed request a rule matches, and these
-//! answers never do (`src/cors_legacy.rs` says why).
+//! answers require an explicit exact-origin operator policy (`src/cors_legacy.rs` says why).
 
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 
@@ -38,8 +38,8 @@ use rustfs_gateway::dto::{
     CorsConfiguration, CorsRule, GetBucketVersioning, GetBucketVersioningOutput, ListBuckets, ListBucketsOutput,
 };
 use rustfs_gateway::{
-    BoxFuture, BucketName, CorsSource, CorsSourceError, Handler, HandlerResult, LegacyRustfsCors, Req, Resp, S3Service,
-    WireResponse,
+    BoxFuture, BucketName, CorsOrigins, CorsPolicy, CorsSource, CorsSourceError, Handler, HandlerResult, LegacyRustfsCors, Req,
+    Resp, S3Service, WireResponse,
 };
 
 use crate::support::{exchange_wire, signed_with, wired_at_signed_time};
@@ -47,13 +47,13 @@ use crate::support::{exchange_wire, signed_with, wired_at_signed_time};
 /// The one bucket with a document: `https://app.example.com` may `GET`.
 const DOCUMENTED: &str = "documented";
 
-struct OneDocument;
+struct OneDocument(&'static str);
 
 impl CorsSource for OneDocument {
     fn load<'a>(&'a self, bucket: &'a BucketName) -> BoxFuture<'a, Result<Option<CorsConfiguration>, CorsSourceError>> {
         let found = (bucket.as_str() == DOCUMENTED).then(|| CorsConfiguration {
             cors_rules: vec![CorsRule {
-                allowed_origins: vec!["https://app.example.com".to_owned()],
+                allowed_origins: vec![self.0.to_owned()],
                 allowed_methods: vec!["GET".to_owned()],
                 ..CorsRule::default()
             }],
@@ -89,9 +89,14 @@ impl Handler<ListBuckets> for WritesItsOwn {
 }
 
 fn assembly(cors: Option<LegacyRustfsCors>) -> S3Service {
+    assembly_with_policy(cors, CorsPolicy::default(), "https://app.example.com")
+}
+
+fn assembly_with_policy(cors: Option<LegacyRustfsCors>, policy: CorsPolicy, bucket_origin: &'static str) -> S3Service {
     let backend = Arc::new(WritesItsOwn);
     let builder = wired_at_signed_time()
-        .cors_source(Arc::new(OneDocument))
+        .cors_source(Arc::new(OneDocument(bucket_origin)))
+        .cors_policy(policy)
         .register::<GetBucketVersioning, _>(Arc::clone(&backend))
         .register::<ListBuckets, _>(backend);
     match cors {
@@ -251,4 +256,233 @@ async fn n_without_the_setting_the_gateways_own_answers_stand() {
     assert!(!undocumented.body().is_empty());
     let root = exchange_wire(&service, unsigned(http::Method::OPTIONS, "/", &PREFLIGHT)).await;
     assert_ne!(root.status(), 200);
+}
+
+fn exact_policy(origin: &str, credentials: bool) -> CorsPolicy {
+    CorsPolicy::new(CorsOrigins::Exact(Box::from([origin.to_owned()])), credentials).expect("an exact origin policy")
+}
+
+fn credentialed_assembly(policy: CorsPolicy, bucket_origin: &'static str, fallback: &str) -> S3Service {
+    assembly_with_policy(Some(LegacyRustfsCors::with_fallback_origins(Some(fallback))), policy, bucket_origin)
+}
+
+const APP: &str = "https://app.example.com";
+const APP_PREFLIGHT: [(&str, &str); 2] = [("origin", APP), ("access-control-request-method", "GET")];
+
+#[tokio::test]
+async fn exact_operator_and_bucket_origins_allow_credentials_on_both_browser_requests() {
+    let service = credentialed_assembly(exact_policy(APP, true), APP, "*");
+    let preflight = exchange_wire(&service, unsigned(http::Method::OPTIONS, "/documented?versioning", &APP_PREFLIGHT)).await;
+    let actual = exchange_wire(&service, signed_with(http::Method::GET, "/documented?versioning", &[("origin", APP)])).await;
+    for response in [preflight, actual] {
+        assert_eq!(response.status(), 200);
+        assert_eq!(header(&response, "access-control-allow-origin"), Some(APP));
+        assert_eq!(header(&response, "access-control-allow-credentials"), Some("true"));
+    }
+}
+
+#[tokio::test]
+async fn exact_operator_and_fallback_origins_allow_credentials_on_preflight_and_refusal() {
+    let service = credentialed_assembly(exact_policy(APP, true), APP, APP);
+    let preflight = exchange_wire(
+        &service,
+        unsigned(
+            http::Method::OPTIONS,
+            "/undocumented/key",
+            &[
+                ("origin", APP),
+                ("access-control-request-method", "GET"),
+                ("access-control-request-headers", "Authorization, X-Amz-Date"),
+            ],
+        ),
+    )
+    .await;
+    assert_eq!(preflight.status(), 200);
+    assert_eq!(header(&preflight, "access-control-allow-headers"), Some("authorization, x-amz-date"));
+    assert_eq!(
+        header(&preflight, "vary"),
+        Some("Origin, Access-Control-Request-Method, Access-Control-Request-Headers")
+    );
+    assert_eq!(header(&preflight, "access-control-allow-credentials"), Some("true"));
+    let refused = exchange_wire(&service, unsigned(http::Method::GET, "/undocumented/key", &[("origin", APP)])).await;
+    assert!(refused.status().as_u16() >= 400);
+    assert_eq!(header(&refused, "access-control-allow-origin"), Some(APP));
+    assert_eq!(header(&refused, "access-control-allow-credentials"), Some("true"));
+}
+
+#[tokio::test]
+async fn n_a_bucket_allowance_cannot_override_the_operators_credential_policy() {
+    for policy in [
+        exact_policy("https://other.example", true),
+        exact_policy(APP, false),
+        CorsPolicy::default(),
+    ] {
+        let service = credentialed_assembly(policy, APP, APP);
+        let preflight = exchange_wire(&service, unsigned(http::Method::OPTIONS, "/documented?versioning", &APP_PREFLIGHT)).await;
+        let actual = exchange_wire(&service, signed_with(http::Method::GET, "/documented?versioning", &[("origin", APP)])).await;
+        for response in [preflight, actual] {
+            assert_eq!(response.status(), 200);
+            assert_eq!(header(&response, "access-control-allow-credentials"), None);
+        }
+    }
+}
+
+#[tokio::test]
+async fn n_a_wildcard_bucket_rule_never_supplies_credentials_even_to_a_signed_request() {
+    for origin in ["*", "https://*.example.com"] {
+        let service = credentialed_assembly(exact_policy(APP, true), origin, APP);
+        let preflight = exchange_wire(&service, unsigned(http::Method::OPTIONS, "/documented?versioning", &APP_PREFLIGHT)).await;
+        let actual = exchange_wire(&service, signed_with(http::Method::GET, "/documented?versioning", &[("origin", APP)])).await;
+        for response in [preflight, actual] {
+            assert_eq!(response.status(), 200);
+            assert_eq!(header(&response, "access-control-allow-credentials"), None);
+        }
+    }
+}
+
+#[tokio::test]
+async fn n_a_fallback_star_or_unlisted_origin_never_supplies_credentials() {
+    for (fallback, origin) in [("*", APP), (APP, "https://other.example")] {
+        let service = credentialed_assembly(exact_policy(APP, true), APP, fallback);
+        let preflight = exchange_wire(
+            &service,
+            unsigned(
+                http::Method::OPTIONS,
+                "/undocumented/key",
+                &[("origin", origin), ("access-control-request-method", "GET")],
+            ),
+        )
+        .await;
+        let actual = exchange_wire(&service, unsigned(http::Method::GET, "/undocumented/key", &[("origin", origin)])).await;
+        for response in [preflight, actual] {
+            assert_eq!(header(&response, "access-control-allow-credentials"), None);
+        }
+    }
+}
+
+#[tokio::test]
+async fn n_an_exact_operator_origin_cannot_override_a_bucket_method_refusal() {
+    let service = credentialed_assembly(exact_policy(APP, true), APP, APP);
+    let response = exchange_wire(
+        &service,
+        unsigned(
+            http::Method::OPTIONS,
+            "/documented/key",
+            &[("origin", APP), ("access-control-request-method", "PUT")],
+        ),
+    )
+    .await;
+    assert_eq!(response.status(), 403);
+    assert_eq!(header(&response, "access-control-allow-origin"), None);
+    assert_eq!(header(&response, "access-control-allow-credentials"), None);
+}
+
+#[tokio::test]
+async fn n_credentialed_cors_does_not_authenticate_an_unsigned_or_forged_request() {
+    let service = credentialed_assembly(exact_policy(APP, true), APP, APP);
+    let unsigned = unsigned(
+        http::Method::GET,
+        "/documented?versioning",
+        &[("origin", APP), ("cookie", "session=untrusted")],
+    );
+    let mut forged = signed_with(http::Method::GET, "/documented?versioning", &[("origin", APP)]);
+    forged
+        .headers_mut()
+        .insert("origin", http::HeaderValue::from_static("https://changed.example"));
+    for request in [unsigned, forged] {
+        let response = exchange_wire(&service, request).await;
+        assert_eq!(response.status(), 403);
+    }
+}
+
+#[tokio::test]
+async fn n_duplicate_origins_cannot_enable_credentials() {
+    let service = credentialed_assembly(exact_policy(APP, true), APP, APP);
+    for path in ["/documented?versioning", "/undocumented/key"] {
+        let mut request = unsigned(http::Method::OPTIONS, path, &APP_PREFLIGHT);
+        request
+            .headers_mut()
+            .append("origin", http::HeaderValue::from_static("https://other.example"));
+        let response = exchange_wire(&service, request).await;
+        assert_eq!(header(&response, "access-control-allow-credentials"), None);
+    }
+}
+
+#[tokio::test]
+async fn n_a_handlers_other_origin_cannot_inherit_the_requests_credentials() {
+    let service = credentialed_assembly(exact_policy(APP, true), APP, APP);
+    let response = exchange_wire(&service, signed_with(http::Method::GET, "/", &[("origin", APP)])).await;
+    assert_eq!(response.status(), 200);
+    assert_eq!(header(&response, "access-control-allow-origin"), Some("https://handler.example"));
+    assert_eq!(header(&response, "access-control-allow-credentials"), None);
+}
+
+#[tokio::test]
+async fn n_malformed_origins_cannot_enable_credentials_even_when_listed() {
+    for origin in ["", "https://app.example.com other"] {
+        let service = credentialed_assembly(exact_policy(origin, true), origin, origin);
+        for path in ["/documented?versioning", "/undocumented/key"] {
+            let response = exchange_wire(
+                &service,
+                unsigned(
+                    http::Method::OPTIONS,
+                    path,
+                    &[("origin", origin), ("access-control-request-method", "GET")],
+                ),
+            )
+            .await;
+            assert_eq!(header(&response, "access-control-allow-credentials"), None);
+        }
+    }
+}
+
+#[tokio::test]
+async fn n_credentialed_fallback_rejects_invalid_or_ambiguous_requested_headers() {
+    let service = credentialed_assembly(exact_policy(APP, true), APP, APP);
+    for value in ["authorization,,x-amz-date", "not a header", "authorization"] {
+        let mut request = unsigned(
+            http::Method::OPTIONS,
+            "/undocumented/key",
+            &[
+                ("origin", APP),
+                ("access-control-request-method", "GET"),
+                ("access-control-request-headers", value),
+            ],
+        );
+        if value == "authorization" {
+            request
+                .headers_mut()
+                .append("access-control-request-headers", http::HeaderValue::from_static("x-amz-date"));
+        }
+        let response = exchange_wire(&service, request).await;
+        assert_eq!(header(&response, "access-control-allow-credentials"), None);
+    }
+}
+
+#[tokio::test]
+async fn n_credentialed_fallback_must_preserve_the_handlers_vary_dimensions() {
+    struct Varying;
+    impl Handler<ListBuckets> for Varying {
+        async fn call(&self, _: Req<ListBuckets>) -> HandlerResult<ListBuckets> {
+            let mut headers = http::HeaderMap::new();
+            headers.insert("vary", http::HeaderValue::from_static("Accept-Encoding"));
+            Ok(Resp::new(ListBucketsOutput::default()).with_extra_headers(headers))
+        }
+    }
+    let service = wired_at_signed_time()
+        .cors_policy(exact_policy(APP, true))
+        .answer_cors_as_legacy_rustfs(LegacyRustfsCors::with_fallback_origins(Some(APP)))
+        .register::<ListBuckets, _>(Arc::new(Varying))
+        .build()
+        .expect("a fallback assembly");
+    let response = exchange_wire(&service, signed_with(http::Method::GET, "/", &[("origin", APP)])).await;
+    let dimensions: Vec<_> = response
+        .headers()
+        .iter()
+        .filter(|(name, _)| name == "vary")
+        .flat_map(|(_, value)| value.to_str().unwrap().split(',').map(str::trim))
+        .collect();
+    assert!(dimensions.contains(&"Accept-Encoding"));
+    assert!(dimensions.contains(&"Origin"));
+    assert_eq!(header(&response, "access-control-allow-credentials"), Some("true"));
 }

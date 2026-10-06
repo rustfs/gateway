@@ -31,7 +31,7 @@
 //!
 //! [`ACCESS_CONTROL_ALLOW_CREDENTIALS`] is named in exactly one function,
 //! [`credentials_header`]. The generated current policy makes both wildcard arms of
-//! [`credentials_for`] return `None`; its mutation alternative deliberately reaches the helper
+//! [`credentials_for_origin`] return `None`; its mutation alternative deliberately reaches the helper
 //! with the request origin, and `q-cors-0026`'s cases must turn red. The guard script separately
 //! forbids folding the header write into a function that also names a wildcard `AllowOrigin`
 //! variant, and forbids importing those variants unqualified, so the writer cannot bypass the
@@ -264,7 +264,7 @@ pub fn preflight_headers(
     requested: &RequestedHeaders<'_>,
 ) -> Result<CorsHeaders, UnrenderableRule> {
     let mut pairs = vec![(ACCESS_CONTROL_ALLOW_ORIGIN, header_value(allow_origin_value(matched))?)];
-    if let Some(credentials) = credentials_for(policy, matched) {
+    if let Some(credentials) = credentials_for_origin(policy, matched.origin, matched.request_origin) {
         pairs.push(credentials);
     }
     let methods = if contracts::cors_preflight_uses_matched_methods() {
@@ -306,7 +306,7 @@ pub fn actual_headers(policy: &CorsPolicy, matched: &RuleMatch<'_>) -> Result<Co
     if contracts::cors_actual_includes_allow_origin() {
         pairs.push((ACCESS_CONTROL_ALLOW_ORIGIN, header_value(allow_origin_value(matched))?));
     }
-    if let Some(credentials) = credentials_for(policy, matched) {
+    if let Some(credentials) = credentials_for_origin(policy, matched.origin, matched.request_origin) {
         pairs.push(credentials);
     }
     if contracts::cors_actual_includes_expose() {
@@ -331,7 +331,7 @@ pub(super) fn unmatched_actual_headers(origin: &str) -> Result<CorsHeaders, Unre
 ///
 /// The bare `*` answers `*`; every other match answers a concrete origin. Which of the two
 /// concrete forms it is decides whether credentials are available, and that decision is
-/// [`credentials_for`]'s, not this function's.
+/// [`credentials_for_origin`]'s, not this function's.
 fn allow_origin_value<'a>(matched: &'a RuleMatch<'a>) -> &'a str {
     match matched.origin {
         AllowOrigin::Wildcard if contracts::cors_bare_wildcard_is_literal() => "*",
@@ -346,11 +346,19 @@ fn allow_origin_value<'a>(matched: &'a RuleMatch<'a>) -> &'a str {
 ///
 /// Under the generated current policy, the two wildcard arms answer `None`. The other branch is
 /// the mutation control for `q-cors-0026` and must be killed by its conformance cases.
-fn credentials_for(policy: &CorsPolicy, matched: &RuleMatch<'_>) -> Option<(HeaderName, HeaderValue)> {
-    match matched.origin {
+/// Compatibility response renderers may use this alongside their own non-credential headers.
+/// `origin` must describe the rule or explicit fallback entry that admitted `request_origin`;
+/// a wildcard allowance must retain its wildcard variant even if the response echoes the origin.
+#[must_use]
+pub fn credentials_for_origin(
+    policy: &CorsPolicy,
+    origin: AllowOrigin<'_>,
+    request_origin: &str,
+) -> Option<(HeaderName, HeaderValue)> {
+    match origin {
         AllowOrigin::Exact(value) => credentials_header(policy, value),
         AllowOrigin::Reflected(_) | AllowOrigin::Wildcard if contracts::cors_wildcard_credentials_omitted() => None,
-        AllowOrigin::Reflected(_) | AllowOrigin::Wildcard => credentials_header(policy, matched.request_origin),
+        AllowOrigin::Reflected(_) | AllowOrigin::Wildcard => credentials_header(policy, request_origin),
     }
 }
 

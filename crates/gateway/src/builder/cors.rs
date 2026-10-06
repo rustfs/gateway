@@ -69,12 +69,13 @@ impl ServiceBuilder {
     /// deployment-wide fallback headers otherwise, `403` with no body when a bucket's rules admit
     /// nothing — and every other request carrying `Origin` has its answer decorated, refusals
     /// before authentication included, from the bucket named by its first path segment. See
-    /// `crate::cors_legacy` for the whole of what RustFS does. [`Self::cors_policy`] is not
-    /// consulted; the source and its cache still are.
+    /// `crate::cors_legacy` for the whole of what RustFS does. The source and its cache are shared
+    /// with the ordinary runtime. [`Self::cors_policy`] controls credentials: both the operator's
+    /// policy and the matched bucket or fallback origin must name the origin exactly.
     ///
     /// Off by default: the gateway's own runtime answers, with its uniform refusal. This switch
-    /// gives that up for RustFS's answers — every one of them but the credentials legacy RustFS
-    /// allows, which these answers never allow (`crate::cors_legacy` says why).
+    /// gives that up for RustFS's answers. Credentials remain off unless an operator explicitly
+    /// enables them through [`Self::cors_policy`]; wildcard and reflected matches never carry them.
     #[must_use]
     pub fn answer_cors_as_legacy_rustfs(mut self, cors: crate::LegacyRustfsCors) -> Self {
         self.legacy_cors = Some(cors);

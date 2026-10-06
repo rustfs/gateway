@@ -14996,13 +14996,18 @@ mut_credentials_in_the_reflected_arm() {
 import pathlib
 path = pathlib.Path("crates/core/src/cors/answer.rs")
 text = path.read_text()
-# The refactor the guard exists to catch: the credentials writer folded into the function that
-# knows about the wildcard forms, with the reflected arm now able to reach it.
-text = text.replace(
-    "        AllowOrigin::Reflected(_) | AllowOrigin::Wildcard if contracts::cors_wildcard_credentials_omitted() => None,\n        AllowOrigin::Reflected(_) | AllowOrigin::Wildcard => credentials_header(policy, matched.request_origin),",
-    "        AllowOrigin::Reflected(value) => Some((ACCESS_CONTROL_ALLOW_CREDENTIALS, HeaderValue::from_static(\"true\"))).filter(|_| !value.is_empty()),\n        AllowOrigin::Wildcard => None,",
+# Fold the writer into the wildcard match so the guard must reject it.
+old = (
+    "        AllowOrigin::Reflected(_) | AllowOrigin::Wildcard if contracts::cors_wildcard_credentials_omitted() => None,\n"
+    "        AllowOrigin::Reflected(_) | AllowOrigin::Wildcard => credentials_header(policy, request_origin),"
 )
-path.write_text(text)
+if text.count(old) != 1:
+    raise SystemExit("missing mutation subject: wildcard credential arms")
+new = (
+    "        AllowOrigin::Reflected(value) => Some((ACCESS_CONTROL_ALLOW_CREDENTIALS, HeaderValue::from_static(\"true\"))).filter(|_| !value.is_empty()),\n"
+    "        AllowOrigin::Wildcard => None,"
+)
+path.write_text(text.replace(old, new, 1))
 PYEOF
 }
 expect_fail check_cors_credentials_exclusive.sh \
