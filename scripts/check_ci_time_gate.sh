@@ -181,14 +181,16 @@ jobs.each do |job_id, job|
   next if job_id == "test"
 
   steps = job.fetch("steps")
-  install_at = steps.index { |step| step["run"] == "bash scripts/ci_install_host_tools.sh" }
+  install_run = "bash scripts/ci_install_host_tools.sh"
+  install_run += " --target-guards" if job_id == "target-consolidation-self-test"
+  install_at = steps.index { |step| step["run"] == install_run }
   abort("ERROR: #{job_id} must install host tools exactly once") if install_at.nil?
-  if steps.count { |step| step["run"] == "bash scripts/ci_install_host_tools.sh" } != 1
+  if steps.count { |step| step["run"] == install_run } != 1
     abort("ERROR: #{job_id} must install host tools exactly once")
   end
   work_at = steps.index do |step|
     run = step["run"].to_s
-    next false if run == "bash scripts/ci_install_host_tools.sh"
+    next false if run == install_run
     run.include?("cargo ") || run.include?("python3 ") || run.include?("bash scripts/") ||
       run.include?("scripts/ci_budget.sh")
   end

@@ -27,20 +27,28 @@ set -euo pipefail
 #   scripts/ci_install_host_tools.sh
 #   scripts/ci_install_host_tools.sh --with-gh
 #   scripts/ci_install_host_tools.sh --with-cxx
+#   scripts/ci_install_host_tools.sh --target-guards  # Python and timeout only
 # =============================================================================
 
 with_gh=0
 with_cxx=0
+target_guards=0
 for argument in "$@"; do
     case "$argument" in
         --with-gh) with_gh=1 ;;
         --with-cxx) with_cxx=1 ;;
+        --target-guards) target_guards=1 ;;
         *)
             printf 'ci_install_host_tools: unknown argument %s\n' "$argument" >&2
             exit 2
             ;;
     esac
 done
+
+if [[ "$target_guards" -eq 1 && ( "$with_gh" -eq 1 || "$with_cxx" -eq 1 ) ]]; then
+    printf 'ci_install_host_tools: --target-guards cannot install optional build or CLI tools\n' >&2
+    exit 2
+fi
 
 if [[ "$(id -u)" -eq 0 ]]; then
     apt=(apt-get)
@@ -51,22 +59,28 @@ else
 fi
 
 missing=()
-command -v cc >/dev/null 2>&1 || missing+=(build-essential)
-# `g++` provides the `c++` alternative cc-rs looks for.
-if [[ "$with_cxx" -eq 1 ]] && ! command -v c++ >/dev/null 2>&1; then
-    missing+=(g++)
-fi
-command -v pkg-config >/dev/null 2>&1 || missing+=(pkg-config)
-command -v python3 >/dev/null 2>&1 || missing+=(python3)
-command -v ruby >/dev/null 2>&1 || missing+=(ruby)
-command -v timeout >/dev/null 2>&1 || missing+=(coreutils)
-command -v curl >/dev/null 2>&1 || missing+=(curl ca-certificates)
-# GNU time, not the shell builtin. The chunk RSS probes exec this path.
-[[ -x /usr/bin/time ]] || missing+=(time)
-command -v ps >/dev/null 2>&1 || missing+=(procps)
-command -v ss >/dev/null 2>&1 || missing+=(iproute2)
-if [[ "$with_gh" -eq 1 ]] && ! command -v gh >/dev/null 2>&1; then
-    missing+=(gh)
+if [[ "$target_guards" -eq 1 ]]; then
+    # These two mutation suites inspect files; they do not compile or probe the network.
+    command -v python3 >/dev/null 2>&1 || missing+=(python3)
+    command -v timeout >/dev/null 2>&1 || missing+=(coreutils)
+else
+    command -v cc >/dev/null 2>&1 || missing+=(build-essential)
+    # `g++` provides the `c++` alternative cc-rs looks for.
+    if [[ "$with_cxx" -eq 1 ]] && ! command -v c++ >/dev/null 2>&1; then
+        missing+=(g++)
+    fi
+    command -v pkg-config >/dev/null 2>&1 || missing+=(pkg-config)
+    command -v python3 >/dev/null 2>&1 || missing+=(python3)
+    command -v ruby >/dev/null 2>&1 || missing+=(ruby)
+    command -v timeout >/dev/null 2>&1 || missing+=(coreutils)
+    command -v curl >/dev/null 2>&1 || missing+=(curl ca-certificates)
+    # GNU time, not the shell builtin. The chunk RSS probes exec this path.
+    [[ -x /usr/bin/time ]] || missing+=(time)
+    command -v ps >/dev/null 2>&1 || missing+=(procps)
+    command -v ss >/dev/null 2>&1 || missing+=(iproute2)
+    if [[ "$with_gh" -eq 1 ]] && ! command -v gh >/dev/null 2>&1; then
+        missing+=(gh)
+    fi
 fi
 
 if [[ "${#missing[@]}" -eq 0 ]]; then
@@ -102,6 +116,15 @@ if [[ "$want_gh" -eq 1 ]] && ! command -v gh >/dev/null 2>&1; then
         "${apt[@]}" update
         "${apt[@]}" install -y --no-install-recommends gh
     fi
+fi
+
+if [[ "$target_guards" -eq 1 ]]; then
+    for required in python3 timeout; do
+        if ! command -v "$required" >/dev/null 2>&1; then
+            printf 'ci_install_host_tools: installed packages but %s is still missing\n' "$required" >&2
+            exit 1
+        fi
+    done
 fi
 
 if [[ "$with_cxx" -eq 1 ]] && ! command -v c++ >/dev/null 2>&1; then
