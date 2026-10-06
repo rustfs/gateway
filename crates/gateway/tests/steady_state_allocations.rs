@@ -56,14 +56,15 @@ const BODY: &[u8] = b"a small object body, sixty-four bytes long, for both direc
 /// a-pf-0002 / a-pf-0003: heap blocks one warm signed `GetObject` and `PutObject` may allocate,
 /// end to end, where CI runs. The original Linux ceilings were 148 / 195 (#955); borrowing the
 /// header chunk seed removes four blocks (#1297), and metadata lookup names remove another
-/// 16 / 36 (#1301). The plan's targets remain 3 / 4, and this ceiling only moves down.
+/// 16 / 36 (#1301). Single-buffer string-to-sign construction removes six from both (#1313).
+/// The plan's targets remain 3 / 4, and this ceiling only moves down.
 #[cfg(target_os = "linux")]
-const BLOCKS_PER_REQUEST: Option<(u64, u64)> = Some((128, 155));
+const BLOCKS_PER_REQUEST: Option<(u64, u64)> = Some((122, 149));
 /// macOS's standard library and runtime allocate a few more blocks per request, and not the same
 /// number every window. The combined repairs retain the previous block of room for runtime
 /// drift, so they refuse two new allocations per request but not reliably one; Linux is exact.
 #[cfg(target_os = "macos")]
-const BLOCKS_PER_REQUEST: Option<(u64, u64)> = Some((135, 173));
+const BLOCKS_PER_REQUEST: Option<(u64, u64)> = Some((129, 167));
 /// No platform other than the two above has been measured, so there is no ceiling to hold it to.
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
 const BLOCKS_PER_REQUEST: Option<(u64, u64)> = None;
