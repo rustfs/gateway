@@ -28,7 +28,7 @@
 //!
 //! A record is a sequence of newline-terminated lines. Lines one to eight are the original,
 //! unversioned form and are unchanged: sequence, hex key, hex version id, kind, modified, entity
-//! tag, size, hex storage class. A record whose object carries **no** user metadata is written
+//! tag, size, hex storage class. A record whose object carries **no** optional sections is written
 //! with exactly those eight lines and is therefore byte-identical to what every earlier build
 //! wrote, so a downgrade keeps reading it.
 //!
@@ -46,8 +46,13 @@
 //! `Content-Language`, `Cache-Control`, and `Expires` — are a second optional section,
 //! `headers/1 <count>`, after the metadata section when both are present, with one
 //! `<header name> <hex value>` line per stored header in a fixed order. The same two properties
-//! hold for it: an object carrying none of them is still the eight-line form, and an older reader
+//! hold for it: an object carrying no optional sections is still the eight-line form, and an older reader
 //! refuses a record that carries some rather than answering it without them (rustfs/gateway#718).
+//!
+//! A stored full-object checksum adds `checksum/1 1` followed by `<algorithm> <base64 value>`,
+//! after metadata and headers when present. Old records carry no checksum. Older builds refuse
+//! this section: preserve a pre-upgrade data copy before downgrading, rather than stripping the
+//! checksum from new records. Multipart initiation records must not contain this section.
 //!
 //! Every refusal below carries its own sentence rather than one shared "storage failed", because
 //! the point of failing closed is that whoever reads the log can tell a half-written record apart
@@ -57,7 +62,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use rustfs_gateway::dto::StorageClass;
-use rustfs_gateway::{ErrorCode, HandlerError};
+use rustfs_gateway::{ChecksumAlgorithm, ChecksumSpec, ErrorCode, HandlerError};
 
 use super::content_headers::{
     CONTENT_HEADERS_SECTION, ContentHeaders, decode_content_header_entries, encode_content_headers_section,
@@ -67,6 +72,7 @@ use super::storage_error;
 
 /// The name and version of the trailing section that carries user metadata.
 const METADATA_SECTION: &str = "meta/1";
+const CHECKSUM_SECTION: &str = "checksum/1";
 
 /// Everything a write stores beside an object version's bytes.
 ///
@@ -78,6 +84,8 @@ pub(super) struct ObjectAttributes {
     pub(super) metadata: BTreeMap<String, String>,
     /// The standard representation headers.
     pub(super) headers: ContentHeaders,
+    /// The checksum stored with these object bytes, absent on older records.
+    pub(super) checksum: Option<ChecksumSpec>,
     /// The storage class the write named; `None` records `STANDARD`.
     pub(super) storage_class: Option<StorageClass>,
     /// The validated tag set the write carried, written beside the version atomically with it.
@@ -139,6 +147,8 @@ pub(super) struct VersionRecord {
     pub(super) storage_class: StorageClass,
     pub(super) metadata: BTreeMap<String, String>,
     pub(super) headers: ContentHeaders,
+    /// The checksum stored with these object bytes, absent on older records.
+    pub(super) checksum: Option<ChecksumSpec>,
 }
 
 /// Refuses a metadata pair this backend could store but could never hand back.
@@ -204,8 +214,7 @@ pub(super) fn validate_user_metadata(metadata: &BTreeMap<String, String>) -> Res
 
 /// Renders the trailing metadata section, or nothing at all for an object without metadata.
 ///
-/// The empty answer is the compatibility promise: a record with no metadata is the eight-line form
-/// every earlier build wrote, byte for byte.
+/// The empty answer preserves the eight-line form when the other optional sections are absent.
 pub(super) fn encode_metadata_section(metadata: &BTreeMap<String, String>) -> String {
     if metadata.is_empty() {
         return String::new();
@@ -220,10 +229,9 @@ pub(super) fn encode_metadata_section(metadata: &BTreeMap<String, String>) -> St
     section
 }
 
-/// Renders every trailing section a record or an upload carries, in their fixed order.
+/// Renders the metadata and header sections shared by object and upload records.
 ///
-/// An object with neither user metadata nor stored representation headers renders nothing, so its
-/// record stays the eight-line form every earlier build wrote.
+/// The object-record encoder appends its checksum separately; uploads must not carry it.
 pub(super) fn encode_trailing_sections(attributes: &ObjectAttributes) -> String {
     let mut sections = encode_metadata_section(&attributes.metadata);
     sections.push_str(&encode_content_headers_section(&attributes.headers));
@@ -237,9 +245,8 @@ fn section_header(line: &str) -> Result<(&str, &str), HandlerError> {
 
 /// Reads every trailing section out of a record's remaining lines.
 ///
-/// Absence is an empty map and no stored headers — that is the eight-line form. The sections are
-/// `meta/1` and then `headers/1`, each optional, each at most once, in that order, with nothing
-/// after them.
+/// Absence means no stored attributes — the eight-line form. The sections are `meta/1`,
+/// `headers/1`, then `checksum/1`, each optional, each at most once, with nothing after them.
 ///
 /// # Errors
 ///
@@ -247,43 +254,54 @@ fn section_header(line: &str) -> Result<(&str, &str), HandlerError> {
 /// header, a declared count the file does not contain, an entry that is not a name and a hex
 /// value, a value this backend would refuse to store, a repeated or out-of-order entry, and lines
 /// after the last section.
-pub(super) fn decode_trailing_sections(
-    lines: &mut std::str::Lines<'_>,
-) -> Result<(BTreeMap<String, String>, ContentHeaders), HandlerError> {
+pub(super) fn decode_trailing_sections(lines: &mut std::str::Lines<'_>) -> Result<ObjectAttributes, HandlerError> {
+    let mut attributes = ObjectAttributes::default();
+    let mut trailing_error = "the persisted record carries a trailing section this build does not understand";
     let mut next = lines.next();
-    let mut metadata = BTreeMap::new();
-    let mut after_metadata = false;
     if let Some(line) = next {
         let (name, count) = section_header(line)?;
         if name == METADATA_SECTION {
-            metadata = decode_metadata_entries(lines, count)?;
-            after_metadata = true;
+            attributes.metadata = decode_metadata_entries(lines, count)?;
             next = lines.next();
+            trailing_error = "the persisted metadata section is followed by lines this build cannot read";
         }
     }
-    let Some(line) = next else {
-        return Ok((metadata, ContentHeaders::default()));
-    };
-    let headers = match section_header(line) {
-        Ok((CONTENT_HEADERS_SECTION, count)) => decode_content_header_entries(lines, count)?,
-        _ if after_metadata => {
-            return Err(HandlerError::internal_error(
-                "the persisted metadata section is followed by lines this build cannot read",
-            ));
-        }
-        Err(error) => return Err(error),
-        Ok(_) => {
-            return Err(HandlerError::internal_error(
-                "the persisted record carries a trailing section this build does not understand",
-            ));
-        }
-    };
-    if lines.next().is_some() {
-        return Err(HandlerError::internal_error(
-            "the persisted representation-header section is followed by lines this build cannot read",
-        ));
+    if let Some(line) = next
+        && let Ok((CONTENT_HEADERS_SECTION, count)) = section_header(line)
+    {
+        attributes.headers = decode_content_header_entries(lines, count)?;
+        next = lines.next();
+        trailing_error = "the persisted representation-header section is followed by lines this build cannot read";
     }
-    Ok((metadata, headers))
+    if let Some(line) = next
+        && let Ok((CHECKSUM_SECTION, count)) = section_header(line)
+    {
+        if count != "1" {
+            return Err(HandlerError::internal_error("the persisted checksum section must contain one checksum"));
+        }
+        let (algorithm, value) = lines
+            .next()
+            .and_then(|line| line.split_once(' '))
+            .ok_or_else(|| HandlerError::internal_error("the persisted checksum has no algorithm and value"))?;
+        let algorithm = ChecksumAlgorithm::from_wire_name(algorithm)
+            .ok_or_else(|| HandlerError::internal_error("the persisted checksum algorithm is not supported"))?;
+        attributes.checksum = Some(
+            ChecksumSpec::parse_header(algorithm.header_name(), value)
+                .map_err(|_| HandlerError::internal_error("the persisted checksum value is malformed"))?,
+        );
+        next = lines.next();
+        trailing_error = "the persisted checksum section is followed by lines this build cannot read";
+    }
+    if next.is_some() {
+        return Err(HandlerError::internal_error(trailing_error));
+    }
+    Ok(attributes)
+}
+
+fn encode_checksum_section(checksum: Option<ChecksumSpec>) -> String {
+    checksum.map_or_else(String::new, |value| {
+        format!("{CHECKSUM_SECTION} 1\n{} {}\n", value.algorithm().wire_name(), value.render_base64())
+    })
 }
 
 fn decode_metadata_entries(lines: &mut std::str::Lines<'_>, count: &str) -> Result<BTreeMap<String, String>, HandlerError> {
@@ -330,6 +348,7 @@ pub(super) fn encode_version_record(record: &VersionRecord) -> String {
         hex::encode(record.storage_class.as_str()),
         encode_metadata_section(&record.metadata),
     ) + &encode_content_headers_section(&record.headers)
+        + &encode_checksum_section(record.checksum)
 }
 
 /// Parses one version record's bytes, pairing them with the directory they came from.
@@ -366,7 +385,7 @@ pub(super) fn decode_version_record(path: PathBuf, encoded: &str) -> Result<Vers
             .and_then(super::transitions::persisted_storage_class)
             .ok_or_else(storage_error)?,
     };
-    let (metadata, headers) = decode_trailing_sections(&mut lines)?;
+    let attributes = decode_trailing_sections(&mut lines)?;
     if version_id.is_empty() {
         return Err(storage_error());
     }
@@ -380,8 +399,9 @@ pub(super) fn decode_version_record(path: PathBuf, encoded: &str) -> Result<Vers
         e_tag,
         size,
         storage_class,
-        metadata,
-        headers,
+        metadata: attributes.metadata,
+        headers: attributes.headers,
+        checksum: attributes.checksum,
     })
 }
 
@@ -415,15 +435,16 @@ mod tests {
             storage_class: StorageClass::STANDARD,
             metadata,
             headers: ContentHeaders::default(),
+            checksum: None,
         }
     }
 
     fn decode_section(text: &str) -> Result<BTreeMap<String, String>, HandlerError> {
-        decode_trailing_sections(&mut text.lines()).map(|(metadata, _)| metadata)
+        decode_trailing_sections(&mut text.lines()).map(|attributes| attributes.metadata)
     }
 
     fn decode_headers(text: &str) -> Result<ContentHeaders, HandlerError> {
-        decode_trailing_sections(&mut text.lines()).map(|(_, headers)| headers)
+        decode_trailing_sections(&mut text.lines()).map(|attributes| attributes.headers)
     }
 
     fn typed() -> ContentHeaders {

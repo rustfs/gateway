@@ -35,7 +35,7 @@ use rustfs_gateway::dto::{
 };
 use rustfs_gateway::{
     ETag, ErrorCode, Handler, HandlerError, HandlerErrorContext, HandlerResult, MissingObject, ObjectKey, Preconditions, Req,
-    ResourceVisibility, Resp, Timestamp, validate_versioning,
+    ResourceVisibility, Resp, Timestamp, request_checksum, validate_versioning,
 };
 use sha2::{Digest as _, Sha256};
 
@@ -47,7 +47,7 @@ use super::records::{
 };
 use super::tagging::{TAGS_FILE, serialize_tags, tags_from_header};
 use super::transitions::requested_storage_class;
-use super::{FsBackend, drain, etag, no_such_key, storage_error};
+use super::{FsBackend, drain_with_trailers, etag, no_such_key, storage_error};
 
 pub(super) const STATUS_FILE: &str = "versioning-status";
 pub(super) const SEQUENCE_FILE: &str = "version-sequence";
@@ -490,6 +490,7 @@ impl FsBackend {
                 storage_class: attributes.storage_class.clone().unwrap_or(StorageClass::STANDARD),
                 metadata: attributes.metadata.clone(),
                 headers: attributes.headers.clone(),
+                checksum: attributes.checksum,
             });
             tokio::fs::write(temporary.join(RECORD_FILE), record).await?;
             tokio::fs::rename(&temporary, &destination).await
@@ -644,7 +645,8 @@ impl Handler<PutObject> for FsBackend {
         // The body is drained before any attribute is judged, so a refusal is reported as itself
         // rather than as a body the handler abandoned. Every refusal still precedes publication:
         // a malformed tag header or an unknown class fails the request with no version written.
-        let bytes = drain(input.body).await?;
+        let (bytes, trailers) = drain_with_trailers(input.body).await?;
+        let checksum = request_checksum(input.checksum_spec, &trailers)?;
         let encryption = self
             .write_encryption(
                 input.bucket.as_str(),
@@ -653,6 +655,7 @@ impl Handler<PutObject> for FsBackend {
             )
             .await?;
         let attributes = ObjectAttributes {
+            checksum,
             headers: request_content_headers!(self, input).with_encryption(encryption.clone()),
             storage_class: requested_storage_class(input.storage_class.as_ref())?,
             tags: tags_from_header(input.tagging.as_deref())?,
@@ -684,6 +687,7 @@ impl Handler<PutObject> for FsBackend {
             modified: published.last_modified.secs(),
         };
         Ok(Resp::new(PutObjectOutput {
+            checksum_spec: checksum,
             expiration: self.expiration_header(input.bucket.as_str(), &written).await.map(Into::into),
             size: Some(published.size),
             e_tag,

@@ -32,17 +32,17 @@ use super::multipart_checksums::{
 use super::*;
 
 /// What the `aws-chunked` body carries after its zero-length chunk.
-enum Trailer<'a> {
+pub(super) enum Trailer<'a> {
     /// One `name:value` trailer field — what aws-sdk-java-v2 sends for every part.
     Field(&'a str, &'a str),
     /// The terminating empty line and nothing before it: the declared trailer never arrives.
     Absent,
 }
 
-/// An unsigned-payload trailer `UploadPart`, shaped as aws-sdk-java-v2's multipart client sends it.
+/// An unsigned-payload trailer PUT, also used by the stored-object checksum controls.
 ///
 /// `declared` is the `x-amz-trailer` value; `extra` adds head fields such as a checksum header.
-fn trailer_part_request(
+pub(super) fn trailer_part_request(
     target: &str,
     body: &[u8],
     declared: &str,
@@ -59,7 +59,7 @@ fn trailer_part_request(
     let wire = Bytes::from(wire);
 
     let method = http::Method::PUT;
-    let (path, query) = target.split_once('?').expect("an UploadPart target carries a query");
+    let (path, query) = target.split_once('?').unwrap_or((target, ""));
     let payload = PayloadMode::StreamingUnsigned {
         trailer: TrailerSet::None,
     };
