@@ -348,9 +348,13 @@ impl<'r> CanonicalRequestSpec<'r> {
         tail.push_str(self.payload_token.as_str());
 
         Ok(CanonicalCandidates {
-            method: self.method.as_str().to_owned(),
-            paths: self.paths.clone(),
-            order: self.paths.order(),
+            method: self.method.clone(),
+            paths: self
+                .paths
+                .order()
+                .into_iter()
+                .map(|candidate| (candidate, self.paths.path_for(candidate).to_owned()))
+                .collect(),
             tail,
             next: 0,
         })
@@ -375,9 +379,8 @@ fn canonical_headers_error(error: CanonicalHeadersError) -> AuthError {
 /// header block, and one of those header values may be an SSE-C key.
 #[derive(Clone)]
 pub struct CanonicalCandidates {
-    method: String,
-    paths: UriPathCandidates,
-    order: SmallVec<[PathCandidate; 2]>,
+    method: Method,
+    paths: SmallVec<[(PathCandidate, String); 2]>,
     tail: String,
     next: usize,
 }
@@ -386,13 +389,13 @@ impl CanonicalCandidates {
     /// How many spellings will be tried. One or two.
     #[must_use]
     pub fn len(&self) -> usize {
-        self.order.len()
+        self.paths.len()
     }
 
     /// Always `false`: there is always at least the decoded candidate.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.order.is_empty()
+        self.paths.is_empty()
     }
 }
 
@@ -400,15 +403,17 @@ impl Iterator for CanonicalCandidates {
     type Item = CanonicalRequest;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let candidate = *self.order.get(self.next)?;
+        let (candidate, path) = self.paths.get(self.next)?;
         self.next += 1;
-        let path = self.paths.path_for(candidate);
-        let mut text = String::with_capacity(self.method.len() + path.len() + self.tail.len() + 1);
-        text.push_str(&self.method);
+        let mut text = String::with_capacity(self.method.as_str().len() + path.len() + self.tail.len() + 1);
+        text.push_str(self.method.as_str());
         text.push('\n');
         text.push_str(path);
         text.push_str(&self.tail);
-        Some(CanonicalRequest { text, candidate })
+        Some(CanonicalRequest {
+            text,
+            candidate: *candidate,
+        })
     }
 }
 
