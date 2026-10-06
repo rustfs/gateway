@@ -14,6 +14,7 @@ Source shapes reviewed for rustfs/gateway#720:
 - minio/mc@7394ce0dd2a80935aded936b09fa12cbb3cb8096
 The launcher and mc source hashes were verified against the pinned Mint image on 2026-09-23.
 The MC stdin-test diagnostic correction is tracked by rustfs/gateway#1270.
+Fixed failure-stage labels for its existing assertions are tracked by #1275.
 """
 import argparse
 import hashlib
@@ -69,6 +70,16 @@ def transform(kind: str, source: str) -> str:
         for statement in ('mc_cmd mb "${SERVER_ALIAS}/${bucket_name}"',
                           'echo "testcontent" | mc_cmd pipe "${SERVER_ALIAS}/${bucket_name}/${object_name}"'):
             body = replace_line(body, statement, statement + " >&2")
+        prefix = 'assert_success "$start_time" "${FUNCNAME[0]}" '
+        for command, stage in (("show_on_failure", "cat_status"),
+                               ("check_md5sum", "checksum"), ("mc_cmd rm", "cleanup")):
+            matches = [line.strip() for line in body.splitlines()
+                       if line.strip().startswith(prefix + command + " ")]
+            if len(matches) != 1:
+                raise ValueError(f"expected one unchanged stdin assertion: {command}")
+            statement = matches[0]
+            labelled = statement.replace('"${FUNCNAME[0]}"', '"${FUNCNAME[0]}:' + stage + '"', 1)
+            body = replace_line(body, statement, labelled)
         return source[:begin] + body + source[end:]
     raise ValueError(f"unknown producer kind: {kind}")
 
@@ -84,7 +95,7 @@ def main() -> None:
         if hashlib.sha256(original).hexdigest() != args.sha256:
             raise ValueError("source SHA-256 mismatch; refusing to patch")
         patched = transform(args.kind, original.decode("utf-8"))
-        date = "2026-10-04" if args.kind == "mc" else "2026-09-23"
+        date = "2026-10-07" if args.kind == "mc" else "2026-09-23"
         notice = f"Modified by RustFS Team on {date}: correct Mint record production.\n"
         if args.kind == "logger":
             patched = "// " + notice + patched
