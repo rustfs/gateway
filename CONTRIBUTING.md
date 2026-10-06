@@ -128,12 +128,20 @@ Never clean a directory while another build, test, or mutation run uses it. Keep
 directory for active work; do not delete source worktrees, uncommitted changes, the Cargo
 registry, or installed toolchains to recover build space. Re-run `df -h` after cleanup.
 
-For subsequent builds, `CARGO_INCREMENTAL=0` avoids accumulating incremental compilation
-state, at the cost of slower rebuilds; it does not remove existing state. Reusing one explicitly
-selected `CARGO_TARGET_DIR` across worktrees can save dependency storage, but gates and mutation
-runs using it must be serialized. After cleanup, prepare the cold cache with
-`cargo xtask bootstrap` before measuring the short verification loop. Reclamation does not
-waive any of the four required commands in `AGENTS.md`, their time budgets, or any tests.
+Keep a separate resolved artifact directory for each worktree. Serializing builds is not enough
+to make a shared `CARGO_TARGET_DIR` safe: a worktree with older source timestamps can run another
+worktree's compiled code, even with `CARGO_INCREMENTAL=0`. Both switch directions reproduced this
+in [#1322](https://github.com/rustfs/gateway/issues/1322); separate target directories ran the
+expected code in both directions. Check configuration and environment overrides with the metadata
+command above before relying on the default worktree-local `target` directory.
+
+If a run may have reused another worktree's code, rebuild in an isolated target and repeat its
+gates. Reclaim the old shared artifacts only after every user is idle, using the preview above.
+For subsequent builds, `CARGO_INCREMENTAL=0` avoids accumulating incremental compilation state,
+at the cost of slower rebuilds; it does not remove existing state or isolate worktrees. After
+cleanup, prepare the cold cache with `cargo xtask bootstrap` before measuring the short
+verification loop. Reclamation does not waive any of the four required commands in `AGENTS.md`,
+their time budgets, or any tests.
 
 ### Recording role reviews
 
