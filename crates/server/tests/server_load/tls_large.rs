@@ -25,6 +25,34 @@
 //! on cleartext and are copied on TLS (`perf_evidence.rs`), or certificate handling (`tls_h2.rs`).
 //! Upstream: `server_load.rs`. Downstream: `perf-evidence.yml`.
 
+use http_body_util::{BodyExt, Empty};
+use hyper_util::rt::TokioIo;
+
+async fn drain<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static>(stream: S, expected: u64) -> u64 {
+    let (mut sender, connection) = hyper::client::conn::http1::handshake(TokioIo::new(stream))
+        .await
+        .expect("the client connection starts");
+    let connection = tokio::spawn(connection);
+    let request = http::Request::builder()
+        .uri("/object")
+        .header("Host", "localhost")
+        .header("Connection", "close")
+        .body(Empty::<bytes::Bytes>::new())
+        .expect("the fixture request is valid");
+    let response = sender.send_request(request).await.expect("the response head reads");
+    assert_eq!(response.status(), http::StatusCode::OK, "the transfer must succeed");
+    let mut body = response.into_body();
+    let mut received = 0_u64;
+    while let Some(frame) = body.frame().await {
+        if let Some(data) = frame.expect("the complete response body reads").data_ref() {
+            received += data.len() as u64;
+        }
+    }
+    assert_eq!(received, expected, "the transfer must deliver exactly its payload");
+    let _ = connection.await;
+    received
+}
+
 #[cfg(not(debug_assertions))]
 mod release {
     use std::pin::Pin;
@@ -38,6 +66,7 @@ mod release {
     use tokio_rustls::TlsConnector;
 
     use super::super::*;
+    use super::drain;
 
     const GIB: u64 = 1 << 30;
     const CHUNK: usize = 64 * 1024;
@@ -96,26 +125,8 @@ mod release {
         .expect("server starts")
     }
 
-    async fn drain<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(mut stream: S) -> u64 {
-        stream
-            .write_all(b"GET /object HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
-            .await
-            .expect("the request writes");
-        let mut buffer = vec![0_u8; 256 * 1024];
-        let mut total = 0_u64;
-        loop {
-            match stream.read(&mut buffer).await {
-                Ok(0) => return total,
-                Ok(read) => total += read as u64,
-                // A TLS peer that closes without close_notify still delivered what was counted.
-                Err(error) if error.kind() == std::io::ErrorKind::UnexpectedEof => return total,
-                Err(error) => panic!("the response read failed: {error}"),
-            }
-        }
-    }
-
     /// a-pf-0024. Records GiB/s and CPU per byte for each (transport, write strategy) pair and
-    /// asserts that each one delivered its gibibyte plus a response head.
+    /// asserts that each one delivered exactly its gibibyte of payload.
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn a_pf_0024_one_gib_over_tls_records_the_flatten_cost() {
         const TEST_NAME: &str = "tls_large::release::a_pf_0024_one_gib_over_tls_records_the_flatten_cost";
@@ -149,20 +160,16 @@ mod release {
             let tcp = TcpStream::connect(running.local_addr).await.expect("the client connects");
             let received = if transport == "tls" {
                 let name = ServerName::try_from("localhost").expect("a name").to_owned();
-                drain(connector.connect(name, tcp).await.expect("the handshake succeeds")).await
+                drain(connector.connect(name, tcp).await.expect("the handshake succeeds"), GIB).await
             } else {
-                drain(tcp).await
+                drain(tcp, GIB).await
             };
             let elapsed = started.elapsed();
             let cpu_ns_per_byte = cpu_before
                 .zip(cpu())
                 .map(|(before, after)| format!("{:.3}", (after - before).as_nanos() as f64 / GIB as f64));
-            assert!(
-                received > GIB && received < GIB + 4096,
-                "{transport} {strategy:?} delivered {received} bytes"
-            );
             println!(
-                "perf-evidence: a-pf-0024 transport={transport} write_strategy={strategy:?} forced_flatten={} gib_s={:.2} cpu_ns_per_byte={} (client and server share this process)",
+                "perf-evidence: a-pf-0024 transport={transport} write_strategy={strategy:?} payload_bytes={received} forced_flatten={} gib_s={:.2} cpu_ns_per_byte={} (client and server share this process)",
                 strategy == WriteStrategy::Disabled,
                 GIB as f64 / elapsed.as_secs_f64() / GIB as f64,
                 cpu_ns_per_byte.unwrap_or_else(|| "unavailable".to_owned())
@@ -170,5 +177,93 @@ mod release {
             let _ = running.shutdown.trigger(Duration::from_secs(1)).await;
             let _ = running.task.await;
         }
+    }
+}
+
+#[cfg(test)]
+mod observer_tests {
+    use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    async fn observe(response: Vec<u8>, fragment: usize) -> Result<u64, tokio::task::JoinError> {
+        let (client, mut peer) = tokio::io::duplex(128);
+        let observer = tokio::spawn(drain(client, 16));
+        let mut request = Vec::new();
+        while !request.ends_with(b"\r\n\r\n") {
+            let mut byte = [0];
+            peer.read_exact(&mut byte).await.expect("the fixture request arrives");
+            request.push(byte[0]);
+        }
+        for bytes in response.chunks(fragment) {
+            if peer.write_all(bytes).await.is_err() {
+                break;
+            }
+        }
+        drop(peer);
+        observer.await
+    }
+
+    async fn refuses(response: Vec<u8>, reason: &str) {
+        let failure = observe(response, 3)
+            .await
+            .expect_err("the observer must refuse this response");
+        let message = failure.to_string();
+        assert!(message.contains(reason), "the observer failed for the wrong reason: {message}");
+    }
+
+    fn fixed(status: &str, declared: usize, payload: usize) -> Vec<u8> {
+        let mut response = format!("HTTP/1.1 {status}\r\nContent-Length: {declared}\r\nConnection: close\r\n\r\n").into_bytes();
+        response.extend(std::iter::repeat_n(b'g', payload));
+        response
+    }
+
+    #[tokio::test]
+    async fn counts_only_fragmented_http_payload() {
+        for fragment in [1, 3, 128] {
+            let received = observe(fixed("200 OK", 16, 16), fragment).await.expect("a complete response");
+            assert_eq!(received, 16, "headers must not count as payload");
+        }
+        let chunked = b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n8\r\ngggggggg\r\n8\r\ngggggggg\r\n0\r\n\r\n";
+        assert_eq!(
+            observe(chunked.to_vec(), 1).await.expect("a complete chunked response"),
+            16,
+            "chunk framing must not count as payload"
+        );
+    }
+
+    #[tokio::test]
+    async fn refuses_one_byte_short() {
+        refuses(fixed("200 OK", 15, 15), "the transfer must deliver exactly its payload").await;
+    }
+
+    #[tokio::test]
+    async fn refuses_one_byte_extra() {
+        refuses(fixed("200 OK", 17, 17), "the transfer must deliver exactly its payload").await;
+    }
+
+    #[tokio::test]
+    async fn refuses_truncated_fixed_body() {
+        refuses(fixed("200 OK", 16, 15), "the complete response body reads").await;
+    }
+
+    #[tokio::test]
+    async fn refuses_non_success_response() {
+        refuses(fixed("403 Forbidden", 16, 16), "the transfer must succeed").await;
+    }
+
+    #[tokio::test]
+    async fn refuses_missing_response_head() {
+        refuses(vec![b'g'; 32], "the response head reads").await;
+    }
+
+    #[tokio::test]
+    async fn refuses_incomplete_response_head() {
+        refuses(b"HTTP/1.1 200 OK\r\nContent-Length: 16\r\n".to_vec(), "the response head reads").await;
+    }
+
+    #[tokio::test]
+    async fn refuses_invalid_chunk_framing() {
+        let response = b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\nX\r\ngggggggggggggggg\r\n";
+        refuses(response.to_vec(), "the complete response body reads").await;
     }
 }
