@@ -47,11 +47,15 @@ CAT = '''function test_cat_stdin() {
     object_name="authored-object"
     mc_cmd mb "${SERVER_ALIAS}/${bucket_name}"
     echo "testcontent" | mc_cmd pipe "${SERVER_ALIAS}/${bucket_name}/${object_name}"
+    assert_success "$start_time" "${FUNCNAME[0]}" show_on_failure "$cat_status" "authored cat detail"
+    assert_success "$start_time" "${FUNCNAME[0]}" check_md5sum "authored digest" "authored output"
+    assert_success "$start_time" "${FUNCNAME[0]}" mc_cmd rm "authored output"
     :
 }
 '''
 MC = '''#!/bin/bash
 # license sentinel
+assert_success() { :; }
 function validate_dependencies() {
     if [[ "$1" == ready ]]; then
         echo "Dependency validation complete"
@@ -96,6 +100,50 @@ printf '{"name":"mc","function":"authored-bare","status":"PASS"}\\n'
 exit "$code"
 '''
 
+STAGE_PROBE = MC.partition('validate_dependencies "$1"\n')[0] + '''
+assert_success() {
+    label="$2"
+    shift 2
+    detail=$("$@")
+    status=$?
+    if [[ "$status" != 0 ]]; then
+        python3 -c 'import json,sys; print(json.dumps(dict(name="mc",function=sys.argv[1],status="FAIL",error=sys.argv[2])))' "$label" "$detail"
+        exit "$status"
+    fi
+}
+show_on_failure() {
+    if [[ "$1" != 0 ]]; then printf '%s' "$2"; fi
+    return "$1"
+}
+check_md5sum() {
+    if [[ "$FAIL_STAGE" == checksum ]]; then
+        printf 'authored checksum detail'
+        return 8
+    fi
+}
+mc_cmd() {
+    if [[ "$1" == pipe ]]; then cat >/dev/null; fi
+    if [[ "$1" == "$FAIL_STAGE" ]]; then return 11; fi
+    if [[ "$1" == rm && "$FAIL_STAGE" == cleanup ]]; then
+        printf 'authored cleanup detail'
+        return 9
+    fi
+}
+SERVER_ALIAS=authored-alias
+FAIL_STAGE="$1"
+start_time=0
+cat_status=0
+if [[ "$FAIL_STAGE" == cat_status ]]; then cat_status=7; fi
+test_cat_stdin
+printf '{"name":"mc","function":"test_cat_stdin","status":"PASS"}\\n'
+'''
+
+STAGE_ANCHORS = (
+    ('show_on_failure "$cat_status" "authored cat detail"', "cat_status"),
+    ('check_md5sum "authored digest" "authored output"', "checksum"),
+    ('mc_cmd rm "authored output"', "cleanup"),
+)
+
 
 class ProducerPatch(unittest.TestCase):
     def test_logger_changes_only_serialization_and_identity(self):
@@ -134,12 +182,74 @@ class ProducerPatch(unittest.TestCase):
         self.assertEqual(result.stdout, "")
         self.assertIn("jq is missing", result.stderr)
 
-    def test_mc_only_changes_uncaptured_diagnostics(self):
+    def test_mc_only_changes_uncaptured_diagnostics_and_failure_labels(self):
         expected = MC.replace('echo "Dependency validation complete"', 'echo "Dependency validation complete" >&2')
         expected = expected.replace('echo "jq is missing, please install: \'sudo apt install jq\'"', 'echo "jq is missing, please install: \'sudo apt install jq\'" >&2')
         for statement in BARE_CALLS:
             expected = expected.replace(statement, statement + " >&2")
+        for command, stage in STAGE_ANCHORS:
+            expected = expected.replace('"${FUNCNAME[0]}" ' + command,
+                                        '"${FUNCNAME[0]}:' + stage + '" ' + command)
         self.assertEqual(module.transform("mc", MC), expected)
+
+    def run_stage(self, stage, *, patched):
+        source = module.transform("mc", STAGE_PROBE) if patched else STAGE_PROBE
+        return subprocess.run(["bash", "-c", source, "fixture", stage], capture_output=True, text=True)
+
+    def test_stdin_failures_name_the_stage_without_changing_outcome(self):
+        for stage, code, detail in (("cat_status", 7, "authored cat detail"),
+                                    ("checksum", 8, "authored checksum detail"),
+                                    ("cleanup", 9, "authored cleanup detail")):
+            with self.subTest(stage=stage):
+                before = self.run_stage(stage, patched=False)
+                after = self.run_stage(stage, patched=True)
+                expected = dict(name="mc", function="test_cat_stdin", status="FAIL", error=detail)
+                self.assertEqual((before.returncode, json.loads(before.stdout)), (code, expected))
+                expected["function"] += ":" + stage
+                self.assertEqual((after.returncode, json.loads(after.stdout)), (code, expected))
+                self.assertEqual((before.stderr, after.stderr), ("", ""))
+
+    def test_stdin_success_keeps_its_single_original_record(self):
+        before = self.run_stage("none", patched=False)
+        after = self.run_stage("none", patched=True)
+        expected = dict(name="mc", function="test_cat_stdin", status="PASS")
+        self.assertEqual((before.returncode, json.loads(before.stdout)), (0, expected))
+        self.assertEqual((after.returncode, json.loads(after.stdout)), (0, expected))
+        self.assertEqual((before.stderr, after.stderr), ("", ""))
+
+    def test_stdin_unasserted_setup_failures_do_not_gain_new_outcomes(self):
+        for verb in ("mb", "pipe"):
+            with self.subTest(verb=verb):
+                before = self.run_stage(verb, patched=False)
+                after = self.run_stage(verb, patched=True)
+                expected = dict(name="mc", function="test_cat_stdin", status="PASS")
+                self.assertEqual((before.returncode, json.loads(before.stdout)), (0, expected))
+                self.assertEqual((after.returncode, json.loads(after.stdout)), (0, expected))
+                self.assertEqual((before.stderr, after.stderr), ("", ""))
+
+    def test_missing_stdin_assertion_is_refused(self):
+        for command, _ in STAGE_ANCHORS:
+            line = '    assert_success "$start_time" "${FUNCNAME[0]}" ' + command
+            with self.subTest(command=command), self.assertRaises(ValueError):
+                module.transform("mc", MC.replace(line, "    :"))
+
+    def test_duplicated_stdin_assertion_is_refused(self):
+        for command, _ in STAGE_ANCHORS:
+            line = '    assert_success "$start_time" "${FUNCNAME[0]}" ' + command
+            with self.subTest(command=command), self.assertRaises(ValueError):
+                module.transform("mc", MC.replace(line, line + "\n" + line))
+
+    def test_moved_stdin_assertion_is_refused(self):
+        for command, _ in STAGE_ANCHORS:
+            line = '    assert_success "$start_time" "${FUNCNAME[0]}" ' + command
+            with self.subTest(command=command), self.assertRaises(ValueError):
+                module.transform("mc", MC.replace(line, "    :") + "\n" + line)
+
+    def test_reapplied_stdin_labels_are_refused(self):
+        for command, stage in STAGE_ANCHORS:
+            with self.subTest(command=command), self.assertRaises(ValueError):
+                module.transform("mc", MC.replace('"${FUNCNAME[0]}" ' + command,
+                                                   '"${FUNCNAME[0]}:' + stage + '" ' + command))
 
     def run_probe(self, outcome):
         return subprocess.run(["bash", "-c", module.transform("mc", PROBE), "fixture", outcome],
@@ -265,7 +375,7 @@ class ProducerPatch(unittest.TestCase):
     def test_cli_adds_modification_notice_without_damaging_license_or_shebang(self):
         for kind, source in (("logger", LOGGER), ("dotnet-runner", RUNNER), ("mc", MC)):
             with self.subTest(kind=kind), tempfile.TemporaryDirectory() as directory:
-                date = "2026-10-04" if kind == "mc" else "2026-09-23"
+                date = "2026-10-07" if kind == "mc" else "2026-09-23"
                 notice = f"Modified by RustFS Team on {date}: correct Mint record production."
                 path = Path(directory) / "producer"
                 path.write_text(source)
