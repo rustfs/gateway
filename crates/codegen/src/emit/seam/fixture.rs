@@ -23,7 +23,7 @@
 //! generation), the per-operation round-trip tests, for every top-level member whose backward
 //! conversion can refuse the test that it refuses by that member's name, and for every member
 //! only the legacy decoder reads the test that it is handed back beside the input.
-//! NOT responsible for: the conversions themselves ([`super::render`], [`super::files`]).
+//! NOT responsible for: the conversions themselves (`super::render`, `super::files`).
 //! Upstream: [`super::expr`], [`super::overrides`], the IR. Downstream:
 //! `generated/dto/seam/fixtures/**`, test-only.
 
