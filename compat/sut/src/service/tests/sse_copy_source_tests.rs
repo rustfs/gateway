@@ -17,9 +17,9 @@
 //!
 //! Responsible for: a CopyObject carrying the copy source's customer key and a managed algorithm
 //! for the target being served, with the target encrypted as the request says; the target's own
-//! customer key beside a managed algorithm still being refused; and, over cleartext, a copy
-//! source's customer key being served while the target's is refused, as legacy RustFS does with
-//! TLS required for customer keys.
+//! customer key beside a managed algorithm still being refused; and, over cleartext, both a copy
+//! source's and the target's customer key being refused, as legacy RustFS does with TLS required
+//! for customer keys (the copy source's since rustfs/rustfs `5c9941707`).
 //! NOT responsible for: decrypting an SSE-C source (the reference backend stores no SSE-C object)
 //! or the stored metadata a RustFS backend writes, which the seam diff proves identical
 //! (`crates/difftest`, `copy-object-ssec-source-into-*` rows).
@@ -113,16 +113,25 @@ async fn n_a_managed_algorithm_beside_the_target_key_is_refused() {
     assert_eq!(head_encryption(&service, "/ssec/dst").await.0, 404);
 }
 
-/// Positive — over cleartext, a copy source's customer key is served, as legacy RustFS serves it
-/// with TLS required for customer keys.
+/// Negative — over cleartext, a copy source's customer key is refused and nothing is written, as
+/// legacy RustFS refuses it with TLS required for customer keys. Legacy RustFS served it until
+/// rustfs/rustfs `5c9941707` (rustfs#8296) added the copy source's three headers to its transport
+/// gate (`rustfs/src/server/ssec_transport.rs:69-86` at `95268a3b9`); measured on a native build of
+/// `95268a3b9` with `RUSTFS_SSE_C_REQUIRE_TLS=true`, a copy naming only a copy-source key over
+/// cleartext answers `400 InvalidRequest`. This row stated the earlier answer, `200`.
 #[tokio::test]
-async fn a_copy_source_key_over_cleartext_is_served_as_legacy_rustfs_serves_it() {
+async fn n_a_copy_source_key_over_cleartext_is_refused_as_legacy_rustfs_refuses_it() {
     let root = TestRoot::new();
     let service = served(&root).await;
 
-    let copied = copy(&service, "/ssec/dst", &source_key(), false).await;
-    assert_eq!(copied.status(), 200, "{}", body_of(&copied));
-    assert_eq!(head_encryption(&service, "/ssec/dst").await.0, 200);
+    let refused = copy(&service, "/ssec/dst", &source_key(), false).await;
+    assert_eq!(
+        (refused.status().as_u16(), code(&refused).as_deref()),
+        (400, Some("InvalidRequest")),
+        "{}",
+        body_of(&refused)
+    );
+    assert_eq!(head_encryption(&service, "/ssec/dst").await.0, 404);
 }
 
 /// Negative — over cleartext the target's customer key is refused, alone or beside a copy

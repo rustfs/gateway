@@ -175,9 +175,10 @@ impl SseConfig {
     }
 
     /// Refuses the target object's customer-provided key over cleartext and serves the copy
-    /// source's, as legacy RustFS's transport gate does when a deployment requires TLS for
-    /// customer keys (`RUSTFS_SSE_C_REQUIRE_TLS`, rustfs/backlog#1677). Requires the witness: the
-    /// copy source's key crosses a cleartext wire.
+    /// source's, as legacy RustFS's transport gate did when a deployment required TLS for customer
+    /// keys (`RUSTFS_SSE_C_REQUIRE_TLS`, rustfs/backlog#1677) until rustfs/rustfs `5c9941707` added
+    /// the copy source's headers to it; a deployment mirroring current legacy RustFS uses
+    /// [`SseConfig::strict`]. Requires the witness: the copy source's key crosses a cleartext wire.
     #[must_use]
     pub const fn refusing_only_target_keys_over_plaintext(_ack: PlaintextCustomerKeyAck) -> Self {
         Self {
@@ -401,11 +402,12 @@ impl SseEnforced {
 pub fn enforce(request: &MetaView<'_>, transport: TransportSecurity, config: &SseConfig) -> Result<SseEnforced, SseRejection> {
     let headers = SseHeaders::read(request);
 
-    // Legacy-compat (rustfs/backlog#2684): legacy RustFS's transport gate looks at the target
-    // object's customer-key headers only, so with TLS required it still serves a copy source's
-    // customer key sent over cleartext, where the key is disclosed to every hop exactly as a target
-    // key would be. Reproduced only under `SseConfig::refusing_only_target_keys_over_plaintext`;
-    // the intended future behaviour is the strict default, which gates both key positions.
+    // Legacy RustFS's transport gate looked at the target object's customer-key headers only until
+    // rustfs/rustfs `5c9941707`, so with TLS required it served a copy source's customer key sent
+    // over cleartext, where the key is disclosed to every hop exactly as a target key would be.
+    // Reproduced only under `SseConfig::refusing_only_target_keys_over_plaintext`, for a deployment
+    // mirroring that legacy revision; the strict default, which current legacy RustFS matches,
+    // gates both key positions.
     let gated = match config.over_plaintext {
         PlaintextKeys::Neither => headers.any_customer_key_header(),
         PlaintextKeys::CopySourceOnly => headers.target.any_present(),

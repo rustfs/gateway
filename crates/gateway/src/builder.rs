@@ -85,6 +85,7 @@ mod legacy_sentences;
 mod names;
 mod not_modified_headers;
 mod operation_selection;
+pub(crate) mod plaintext_customer_keys;
 mod secret_scope;
 pub(crate) mod sigv4_header_guard;
 pub(crate) mod version_actions;

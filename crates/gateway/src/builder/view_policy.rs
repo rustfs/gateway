@@ -87,6 +87,7 @@ use super::denial_sentences::DenialSentences;
 use super::legacy_chunks::ChunkReading;
 use super::legacy_heads::AnswerHeads;
 use super::legacy_sentences::BodySentences;
+use super::plaintext_customer_keys::PlaintextCustomerKeys;
 use super::sigv4_header_guard::SigV4HeaderGuard;
 use crate::integrity::IntegrityCodes;
 use crate::render::{S3Error, from_wire_reject};
@@ -169,6 +170,9 @@ pub(crate) struct ViewPolicy {
     pub(crate) post_forms: post_forms::PostFormGrammar,
     /// Whether the legacy RustFS SigV4 header guard answers first (`super::sigv4_header_guard`).
     pub(super) sigv4_header_guard: SigV4HeaderGuard,
+    /// Where a customer-provided key on a cleartext connection is answered
+    /// (`super::plaintext_customer_keys`).
+    pub(crate) plaintext_customer_keys: PlaintextCustomerKeys,
     /// Whether a bodyless request's signed digest is compared (`super::bodyless_digest`).
     pub(crate) bodyless_digest: BodylessDigest,
     /// Whether the body of an operation that takes none is read (`super::bodyless_bodies`).

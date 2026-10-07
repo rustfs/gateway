@@ -559,6 +559,11 @@ impl S3Service {
             Err(reject) => return outcome.refuse_at(Refused::Wire, self.inner.view_policy.wire_refusal(reject)),
         };
         let config = config.wire();
+        // The RustFS profile's cleartext customer-key gate, where legacy RustFS asks it: first.
+        let early = self.inner.view_policy.plaintext_customer_keys;
+        if let Some(refusal) = early.refusal(&self.inner.sse, connection, &headers, response_kind) {
+            return outcome.refuse_at(Refused::Wire, refusal);
+        }
 
         let resolved = self.inner.host_resolver.resolve(&HostQuery {
             host: wire.host(),

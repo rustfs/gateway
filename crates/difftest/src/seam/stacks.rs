@@ -219,11 +219,15 @@ impl GatewaySeam {
             .read_empty_headers_as_absent()
             .authorize_versions_as_legacy_rustfs()
             .authorize_header_permissions_as_legacy_rustfs()
-            // RustFS's transport gate with TLS required: a target's customer key is refused over
-            // cleartext, a copy source's served (rustfs/backlog#1677, R11).
-            .sse_config(SseConfig::refusing_only_target_keys_over_plaintext(
+            // RustFS's default transport posture, TLS not required for customer keys: no key is
+            // refused over cleartext, so every request reaches the hand-over this diff measures.
+            // `compat/sut` runs the TLS-required posture, where the gate answers before routing
+            // (rustfs/backlog#1677, R11; rustfs/gateway#1349); the gate's own answers are pinned
+            // there, and a request it refuses is handed over by neither stack.
+            .sse_config(SseConfig::allowing_customer_keys_over_plaintext(
                 PlaintextCustomerKeyAck::i_understand_customer_keys_will_be_sent_in_the_clear(),
             ))
+            .refuse_plaintext_customer_keys_before_routing()
             .read_request_documents_as_rustfs()
             .write_responses_as_rustfs()
             .host_resolver(Resolver::new(false))
