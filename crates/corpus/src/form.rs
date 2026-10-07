@@ -24,6 +24,11 @@
 //! none of the text rules sees it: there is no `Signature=` for the SigV4 rule, and a SigV2
 //! signature is 28 base64 characters, far short of the 40 the secret-key rule looks for. Without
 //! this module a live POST-policy signature sailed through the gate.
+//!
+//! The field name is found under every spelling a form reader in this workspace accepts, not only
+//! the quoted one: the RustFS profile reads forms with the legacy RustFS grammar, which also takes
+//! `name=x-amz-signature` bare, `name = "..."`, and `NAME=` in any case, so a recording of such a
+//! form carries its credential under one of those spellings.
 
 use crate::base64;
 use crate::redact::PLACEHOLDER;
@@ -58,19 +63,65 @@ fn find(haystack: &[u8], needle: &[u8], from: usize) -> Option<usize> {
     (from..=haystack.len() - needle.len()).find(|&start| haystack[start..start + needle.len()].eq_ignore_ascii_case(needle))
 }
 
+/// Whether `byte` is the optional whitespace a form reader skips around a parameter's `=`.
+fn is_ows(byte: u8) -> bool {
+    matches!(byte, b' ' | b'\t')
+}
+
+/// The field name a `name` parameter whose `name` ends at `at` gives, as `(start, end, resume)`:
+/// the name's byte range and where the search continues. `None` when no `=` follows, and an
+/// unterminated quote ends the search (`Err`).
+///
+/// Every spelling a form reader in this workspace accepts is read, so a credential is found
+/// whichever one recorded it: the quoted value, and — as the RustFS profile's legacy form grammar
+/// also reads it — a bare value running to the next `;` or line end, whitespace around `=`, and
+/// the parameter name in any case.
+fn name_value(bytes: &[u8], at: usize) -> Option<Result<(usize, usize, usize), ()>> {
+    let mut index = at;
+    while bytes.get(index).copied().is_some_and(is_ows) {
+        index += 1;
+    }
+    if bytes.get(index) != Some(&b'=') {
+        return None;
+    }
+    index += 1;
+    while bytes.get(index).copied().is_some_and(is_ows) {
+        index += 1;
+    }
+    if bytes.get(index) == Some(&b'"') {
+        let start = index + 1;
+        return Some(match bytes[start..].iter().position(|byte| *byte == b'"') {
+            Some(len) => Ok((start, start + len, start + len)),
+            None => Err(()),
+        });
+    }
+    let len = bytes[index..]
+        .iter()
+        .position(|byte| matches!(byte, b';' | b'\r' | b'\n'))
+        .unwrap_or(bytes.len() - index);
+    let mut end = index + len;
+    while end > index && is_ows(bytes[end - 1]) {
+        end -= 1;
+    }
+    Some(Ok((index, end, index + len)))
+}
+
 /// Every sensitive form field in `bytes`, located structurally: a `Content-Disposition` line
 /// naming the field, then the blank line that ends the part head, then the value up to the
 /// CRLF that precedes the next boundary.
 fn sensitive_fields(bytes: &[u8]) -> Vec<Field> {
     let mut fields = Vec::new();
     let mut from = 0;
-    while let Some(at) = find(bytes, b"name=\"", from) {
-        let name_start = at + b"name=\"".len();
-        let Some(name_len) = bytes[name_start..].iter().position(|byte| *byte == b'"') else {
+    while let Some(at) = find(bytes, b"name", from) {
+        let Some(value) = name_value(bytes, at + b"name".len()) else {
+            from = at + b"name".len();
+            continue;
+        };
+        let Ok((name_start, name_end, resume)) = value else {
             break;
         };
-        let name = String::from_utf8_lossy(&bytes[name_start..name_start + name_len]).to_ascii_lowercase();
-        from = name_start + name_len;
+        let name = String::from_utf8_lossy(&bytes[name_start..name_end]).to_ascii_lowercase();
+        from = resume;
         if !SENSITIVE_FORM_FIELDS.contains(&name.as_str()) {
             continue;
         }
@@ -272,6 +323,96 @@ mod tests {
         let mut posted = entry("multipart/form-data; boundary=xyz", &body);
         posted.redacted = vec!["form:key".to_owned()];
         assert!(redact::admit(&posted).is_err());
+    }
+
+    /// A form whose every field is named by `disposition`, a `Content-Disposition` header line
+    /// spelled the way a client chose to, with `{name}` standing for the field name.
+    fn form_spelled(disposition: &str, fields: &[(&str, &str)]) -> String {
+        let mut body = String::new();
+        for (name, value) in fields {
+            let line = disposition.replace("{name}", name);
+            body.push_str(&format!("--xyz\r\n{line}\r\n\r\n{value}\r\n"));
+        }
+        body.push_str("--xyz\r\nContent-Disposition: form-data; name=file; filename=a.txt\r\n\r\nhello\r\n--xyz--\r\n");
+        body
+    }
+
+    /// Every spelling of a field's `name` parameter the RustFS-profile form reader accepts besides
+    /// the quoted one (`rustfs-gateway-http`'s legacy grammar: a bare value, whitespace around
+    /// `=`, any case, the parameter after another one).
+    const UNQUOTED_SPELLINGS: &[&str] = &[
+        "Content-Disposition: form-data; name={name}",
+        "Content-Disposition: form-data; name = \"{name}\"",
+        "content-disposition:form-data;NAME={name}",
+        "Content-Disposition: form-data; filename=\"sig.txt\"; name={name}",
+        "Content-Disposition: form-data; name=\t{name}\t",
+        "Content-Disposition: form-data; name={name} ; filename=x",
+    ];
+
+    /// Negative — a live POST-policy signature whose field name is unquoted, or spelled with
+    /// whitespace or case the RustFS-profile reader accepts, is refused like a quoted one. Before
+    /// this, only `name="..."` was found and these sailed through the gate.
+    #[test]
+    fn a_live_signature_under_an_unquoted_field_name_is_refused() {
+        for spelling in UNQUOTED_SPELLINGS {
+            let body = form_spelled(spelling, &[("key", "uploads/a.txt"), ("X-Amz-Signature", SIG)]);
+            assert!(has_live_form_credential(&body), "{spelling}");
+            assert!(redact::admit(&entry("multipart/form-data; boundary=xyz", &body)).is_err(), "{spelling}");
+        }
+    }
+
+    /// Negative — every credential field, not only the signature, under the bare spelling.
+    #[test]
+    fn each_credential_field_under_a_bare_name_is_refused() {
+        for (field, value) in [
+            ("AWSAccessKeyId", "compatmatrixkey"),
+            ("signature", "0RavWzkygo6QX9caELEqKi9kDbU="),
+            ("x-amz-credential", "compatmatrixkey/20260928/us-east-1/s3/aws4_request"),
+            ("X-Amz-Security-Token", "FwoGZXIvYXdzEJr//////////wEaDOfaketoken"),
+            ("x-amz-signature", SIG),
+        ] {
+            let body = form_spelled("Content-Disposition: form-data; name={name}", &[(field, value)]);
+            assert!(has_live_form_credential(&body), "{field}");
+        }
+    }
+
+    /// Negative — a `form:` record over a live value is refused under the bare spelling too.
+    #[test]
+    fn a_form_claim_over_a_live_unquoted_value_is_refused() {
+        let body = form_spelled("Content-Disposition: form-data; name={name}", &[("x-amz-signature", SIG)]);
+        let mut posted = entry("multipart/form-data; boundary=xyz", &body);
+        posted.redacted = vec!["form:x-amz-signature".to_owned()];
+        assert!(!claim_holds(&posted, "form:x-amz-signature"));
+        assert!(redact::admit(&posted).is_err());
+    }
+
+    /// Positive — sanitizing rewrites the credential fields under every unquoted spelling, keeps
+    /// every other byte, and the entry is then admitted.
+    #[test]
+    fn sanitize_rewrites_unquoted_credential_fields() {
+        for spelling in UNQUOTED_SPELLINGS {
+            let fields = [
+                ("key", "uploads/a.txt"),
+                ("X-Amz-Credential", "compatmatrixkey/x"),
+                ("X-Amz-Signature", SIG),
+            ];
+            let mut posted = entry("multipart/form-data; boundary=xyz", &form_spelled(spelling, &fields));
+            let touched = redact::sanitize(&mut posted);
+            assert_eq!(touched, ["form:x-amz-credential", "form:x-amz-signature"], "{spelling}");
+            assert_eq!(
+                body_text(&posted),
+                form_spelled(
+                    spelling,
+                    &[
+                        ("key", "uploads/a.txt"),
+                        ("X-Amz-Credential", PLACEHOLDER),
+                        ("X-Amz-Signature", PLACEHOLDER)
+                    ]
+                ),
+                "{spelling}"
+            );
+            redact::admit(&posted).expect("a sanitized form is admitted");
+        }
     }
 
     /// Positive — sanitizing rewrites exactly the credential fields, keeps every other byte, lists
