@@ -94,7 +94,9 @@ are reported here as on GET/HEAD.
 New multipart completions also store `parts/1 <count>` followed by each completed part's length.
 The table must agree with the object size and multipart ETag. GET partNumber uses the shared core
 resolver to serve that ordinal byte window and reports the multipart part count; ordinary objects
-have one readable part without a multipart count. A part read omits whole-object checksums.
+have one readable part without a multipart count. Multipart part reads never reuse a whole-object
+checksum for a smaller window. A sole empty completed part is readable with a zero-length
+200 response and the multipart count; it does not make another ordinal readable.
 Older multipart records without the table remain readable whole and return `NotImplemented` for
 part reads. Readers without parts/1 support reject new tables, so the rollback rule also applies
 here. HEAD partNumber returns 200 with the selected length and multipart count, omitting
@@ -109,7 +111,16 @@ checksum must match the object's algorithm without a composite suffix. This pres
 numbers and verified per-part values for the part-list reader. Version rewrites preserve the
 section; ordinary PUT, POST and COPY replacements clear it. Old records remain readable without
 invented identities or checksums. Old readers reject this section, so rollback needs a pre-upgrade
-data copy. GET part checksums remain unavailable.
+data copy.
+
+With checksum mode enabled, GET/HEAD return the stored individual checksum when a part number
+or byte range selects exactly one completed part. The checksum type still describes the upload
+(COMPOSITE or FULL_OBJECT). Smaller ranges, ranges crossing part boundaries and old records
+without individual metadata omit the checksum and its type. An ignored GET If-Range serves the
+whole object and its whole checksum. Ordinary-object part reads retain their existing behavior.
+This follows the [AWS checksum guide](https://docs.aws.amazon.com/AmazonS3/latest/userguide/checking-object-integrity-upload.html).
+Native RustFS omits GET part checksums and returns whole-object values on HEAD part reads;
+those remain measured differences.
 
 Native sparse numbering has a known discrepancy: after completing uploaded numbers 2 and 5, its
 GET number 5 returns the whole object. This backend refuses that unavailable ordinal part.

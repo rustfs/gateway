@@ -69,6 +69,7 @@ Agent entry point. File → responsibility → when you need to open it.
 | `tests/crud/multipart_versioning.rs` | Multipart publication into enabled, suspended, and null version lineages. | Changing completion/version integration or its failure boundaries. |
 | `tests/crud/object_metadata.rs` | Restarted `x-amz-meta-*` persistence, initiation-time multipart metadata, size and storability refusals, and the pre-section record fixture. | Changing user-metadata persistence or the record's compatibility story. |
 | `tests/crud/head_parts.rs` | HEAD part lengths/counts, version isolation and selector refusal statuses; registered under object_parts. | Changing HEAD partNumber support. |
+| `tests/crud/part_read_checksums.rs` | Stored GET/HEAD part and aligned-range checksums, checksum mode and version isolation. | Changing checksum projection onto read windows. |
 | `tests/crud/part_metadata.rs` | Signed completion persistence, sparse numbers, per-part checksums and replacement isolation. | Changing completed part storage. |
 | `tests/crud/object_parts.rs` | Restarted GET part windows, version isolation, ordinary objects and malformed or missing part tables. | Changing GET partNumber support. |
 | `tests/crud/attributes_parts.rs` | Sparse ObjectParts pages, individual checksums, version isolation and malformed selectors. | Changing attributes part-list projection. |

@@ -28,13 +28,13 @@ use std::task::{Context, Poll};
 pub(super) const MIN_PART_SIZE: usize = 5 * 1024 * 1024;
 const FRAME_SIZE: usize = 512 * 1024;
 
-struct FramedBody {
+pub(super) struct FramedBody {
     frames: VecDeque<Bytes>,
     remaining: u64,
 }
 
 impl FramedBody {
-    fn new(mut bytes: Bytes) -> Self {
+    pub(super) fn new(mut bytes: Bytes) -> Self {
         let remaining = bytes.len() as u64;
         let mut frames = VecDeque::new();
         while !bytes.is_empty() {

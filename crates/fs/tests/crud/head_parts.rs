@@ -75,7 +75,7 @@ async fn head_parts_report_the_stored_checksum_only_when_enabled() {
     use super::super::multipart_checksums::{
         checksum, complete_checksum, completion_with_checksum, initiate_checksum, put_checksum_part,
     };
-    use rustfs_gateway::{ChecksumAlgorithm, ChecksumSpec};
+    use rustfs_gateway::ChecksumAlgorithm;
     let root = TestRoot::new();
     let (_, service) = service(&root);
     create_bucket(&service, BUCKET).await;
@@ -93,7 +93,9 @@ async fn head_parts_report_the_stored_checksum_only_when_enabled() {
     let mut headers = http::HeaderMap::new();
     headers.insert("x-amz-checksum-mode", http::HeaderValue::from_static("ENABLED"));
     let response = head(&service, "object", "partNumber=1", headers).await;
-    let expected = ChecksumSpec::composite_of(&[value]).expect("one part");
+    // AWS documents the individual checksum for HEAD part reads, not the aggregate.
+    // https://docs.aws.amazon.com/AmazonS3/latest/userguide/checking-object-integrity-upload.html
+    let expected = value;
     assert_eq!(response.status(), 200);
     assert_eq!(text(&response, "x-amz-checksum-crc32"), Some(expected.render_base64()));
     assert_eq!(text(&response, "x-amz-checksum-type"), Some("COMPOSITE"));

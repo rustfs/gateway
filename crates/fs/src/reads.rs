@@ -127,6 +127,36 @@ impl Window {
     }
 }
 
+/// Selects a stored checksum for the bytes this response actually describes.
+///
+/// AWS documents individual checksums for GET/HEAD part numbers and ranges aligned to one part:
+/// https://docs.aws.amazon.com/AmazonS3/latest/userguide/checking-object-integrity-upload.html
+/// Older records without individual values and windows crossing a boundary report no checksum.
+fn checksum_for_window(
+    representation: &Representation,
+    window: &Window,
+    mode: Option<&rustfs_gateway::dto::ChecksumMode>,
+    partial: bool,
+) -> Option<rustfs_gateway::ChecksumSpec> {
+    if mode != Some(&rustfs_gateway::dto::ChecksumMode::ENABLED) {
+        return None;
+    }
+    if !partial {
+        return representation.checksum.map(|checksum| checksum.value);
+    }
+    let lengths = representation.part_lengths.as_deref()?;
+    let metadata = representation.part_metadata.as_deref()?;
+    let mut start = 0_u64;
+    for (length, part) in lengths.iter().zip(metadata) {
+        let end = start.checked_add(*length)?;
+        if start == window.start as u64 && end == window.end_exclusive as u64 {
+            return part.checksum;
+        }
+        start = end;
+    }
+    None
+}
+
 /// Resolves the request's range selectors against a representation.
 ///
 /// Reads resolve a part selector against persisted lengths through the core part-table contract.
@@ -375,6 +405,12 @@ impl Handler<GetObject> for super::FsBackend {
             .get(window.start..window.end_exclusive)
             .unwrap_or_default()
             .to_vec();
+        let checksum = checksum_for_window(
+            &representation,
+            &window,
+            input.checksum_mode.as_ref(),
+            input.part_number.is_some() || window.content_range.is_some(),
+        );
         let mut output = GetObjectOutput {
             expiration,
             content_length: i64::try_from(body.len()).ok(),
@@ -401,13 +437,8 @@ impl Handler<GetObject> for super::FsBackend {
             body: Some(ByteStream::from_bytes(Bytes::from(body))),
             ..GetObjectOutput::default()
         };
-        let checksum = (input.checksum_mode.as_ref() == Some(&rustfs_gateway::dto::ChecksumMode::ENABLED)
-            && input.range.is_none()
-            && input.part_number.is_none())
-        .then_some(representation.checksum)
-        .flatten();
-        set_object_checksum!(output, checksum);
-        output.checksum_type = checksum.and_then(super::checksums::StoredChecksum::dto_type);
+        set_object_checksum!(output, checksum.map(super::checksums::StoredChecksum::plain));
+        output.checksum_type = checksum.and(representation.checksum.and_then(super::checksums::StoredChecksum::dto_type));
         Ok(Resp::with_status(output, window.status))
     }
 }
@@ -448,6 +479,12 @@ impl Handler<HeadObject> for super::FsBackend {
             .await
             .map(Into::into);
         let encryption = representation.headers.encryption();
+        let partial = if input.part_number.is_some() {
+            representation.e_tag.part_count().is_some()
+        } else {
+            window.content_range.is_some()
+        };
+        let checksum = checksum_for_window(&representation, &window, input.checksum_mode.as_ref(), partial);
         let mut output = HeadObjectOutput {
             expiration,
             content_length: i64::try_from(window.len()).ok(),
@@ -474,12 +511,8 @@ impl Handler<HeadObject> for super::FsBackend {
             expires: representation.headers.expires.map(Into::into),
             ..HeadObjectOutput::default()
         };
-        let checksum = (input.checksum_mode.as_ref() == Some(&rustfs_gateway::dto::ChecksumMode::ENABLED)
-            && input.range.is_none())
-        .then_some(representation.checksum)
-        .flatten();
-        set_object_checksum!(output, checksum);
-        output.checksum_type = checksum.and_then(super::checksums::StoredChecksum::dto_type);
+        set_object_checksum!(output, checksum.map(super::checksums::StoredChecksum::plain));
+        output.checksum_type = checksum.and(representation.checksum.and_then(super::checksums::StoredChecksum::dto_type));
         let status = if input.part_number.is_some() { 200 } else { window.status };
         Ok(Resp::with_status(output, status))
     }
