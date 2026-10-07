@@ -18,8 +18,9 @@
 //! Responsible for: proving that `ServiceBuilder::bound_claimed_route_bodies_as_legacy_rustfs`
 //! refuses a claimed route declaring more than 1 MiB — one that buffers its body and one that
 //! reads none — with legacy RustFS's `400 EntityTooLarge`, after the signature and before
-//! authorization, with no body byte read and no handler reached; and that 1 MiB exactly, an
-//! unclaimed operation, a bad signature and the default assembly are answered as before.
+//! authorization, with no body byte read and no handler reached; that a request presenting no
+//! credential is refused by it ahead of the floor; and that 1 MiB exactly, an unclaimed operation,
+//! a bad or malformed signature and the default assembly are answered as before.
 //! NOT responsible for: the ceiling's value (`src/builder/claimed_bodies.rs`) or which routes a
 //! dialect claims (`crates/core/tests/dialect_claims*.rs`).
 //! Upstream: `S3Service` with a claimed example dialect. Downstream: none.
@@ -373,6 +374,87 @@ async fn n_a_bad_signature_is_refused_before_the_ceiling() {
     )
     .await;
     assert_eq!(status, http::StatusCode::FORBIDDEN, "{body}");
+    assert_eq!(polled, 0);
+    assert_eq!(seen.handled.load(Ordering::SeqCst), 0);
+}
+
+/// `method target` presenting no credential, declaring `length`.
+fn anonymous(method: http::Method, target: &str, length: u64) -> http::request::Builder {
+    http::Request::builder()
+        .method(method)
+        .uri(target)
+        .header(http::header::HOST, "s3.example.com")
+        .header(http::header::CONTENT_LENGTH, length)
+}
+
+/// Positive — a request presenting no credential has no signature to verify first, and legacy
+/// RustFS bounds its admin surface's declared body before its access check: an anonymous request
+/// declaring 1 MiB and a byte is `400 EntityTooLarge`, not the floor's `403` for an anonymous
+/// admin call. Measured against frozen RustFS 5e1bd498 (rustfs/gateway#1173, 2026-10-05): above
+/// 1 MiB valid and anonymous requests answer `400 EntityTooLarge`, forged ones `403`.
+#[tokio::test]
+async fn an_anonymous_claimed_body_past_one_mebibyte_is_refused_as_too_large() {
+    let (service, seen) = service(true, Decision::Allow);
+    for (method, target) in [
+        (http::Method::PUT, "/example/admin/v1/import"),
+        (http::Method::GET, "/example/admin/v1/info"),
+    ] {
+        let length = MIB + 1;
+        let (status, body, polled) = send(&service, anonymous(method, target, length as u64), length).await;
+        assert_eq!(status, http::StatusCode::BAD_REQUEST, "{target}: {body}");
+        assert_eq!(support::element_text(&body, "Code"), Some("EntityTooLarge"), "{target}: {body}");
+        assert_eq!(support::element_text(&body, "Message"), Some(REFUSAL), "{target}: {body}");
+        assert_eq!(polled, 0, "{target}: the body was read before the refusal");
+    }
+    assert_eq!(seen.handled.load(Ordering::SeqCst), 0);
+    assert_eq!(seen.asked.load(Ordering::SeqCst), 0);
+}
+
+/// Negative — an anonymous request within the ceiling is still the floor's `403`, as legacy
+/// RustFS's access check answers it: the ceiling moved ahead of the floor, the floor stayed.
+#[tokio::test]
+async fn n_an_anonymous_claimed_body_within_the_ceiling_is_still_refused_by_the_floor() {
+    let (service, seen) = service(true, Decision::Allow);
+    let (status, body, polled) = send(&service, anonymous(http::Method::PUT, "/example/admin/v1/import", MIB as u64), MIB).await;
+    assert_eq!(status, http::StatusCode::FORBIDDEN, "{body}");
+    assert_eq!(polled, 0);
+    assert_eq!(seen.handled.load(Ordering::SeqCst), 0);
+}
+
+/// Negative — without the switch an anonymous oversized claimed request is the floor's `403`.
+#[tokio::test]
+async fn n_the_default_refuses_an_anonymous_oversized_claimed_request_at_the_floor() {
+    let (service, seen) = service(false, Decision::Allow);
+    let length = 2 * MIB;
+    let (status, body, polled) =
+        send(&service, anonymous(http::Method::PUT, "/example/admin/v1/import", length as u64), length).await;
+    assert_eq!(status, http::StatusCode::FORBIDDEN, "{body}");
+    assert_eq!(polled, 0);
+    assert_eq!(seen.handled.load(Ordering::SeqCst), 0);
+}
+
+/// Negative — under the switch an anonymous unclaimed request declaring 2 MiB is not answered
+/// with the claimed route's ceiling.
+#[tokio::test]
+async fn n_an_anonymous_unclaimed_request_is_not_bounded_by_it() {
+    let (service, _seen) = service(true, Decision::Allow);
+    let length = 2 * MIB;
+    let (status, body, _polled) = send(&service, anonymous(http::Method::GET, "/bucket/object", length as u64), length).await;
+    assert_ne!(support::element_text(&body, "Code"), Some("EntityTooLarge"), "{status}: {body}");
+    assert_ne!(support::element_text(&body, "Message"), Some(REFUSAL), "{status}: {body}");
+}
+
+/// Negative — a request presenting a credential the floor cannot read is still refused by the
+/// floor ahead of the ceiling: only a request presenting nothing skips the signature.
+#[tokio::test]
+async fn n_a_malformed_credential_is_refused_before_the_ceiling() {
+    let (service, seen) = service(true, Decision::Allow);
+    let length = 2 * MIB;
+    let request = anonymous(http::Method::PUT, "/example/admin/v1/import", length as u64)
+        .header(http::header::AUTHORIZATION, "AWS4-HMAC-SHA256 Credential=broken");
+    let (status, body, polled) = send(&service, request, length).await;
+    assert_ne!(support::element_text(&body, "Code"), Some("EntityTooLarge"), "{status}: {body}");
+    assert!(status.is_client_error(), "{status}: {body}");
     assert_eq!(polled, 0);
     assert_eq!(seen.handled.load(Ordering::SeqCst), 0);
 }
