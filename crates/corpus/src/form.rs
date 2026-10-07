@@ -68,15 +68,15 @@ fn is_ows(byte: u8) -> bool {
     matches!(byte, b' ' | b'\t')
 }
 
-/// The field name a `name` parameter whose `name` ends at `at` gives, as `(start, end, resume)`:
-/// the name's byte range and where the search continues. `None` when no `=` follows, and an
-/// unterminated quote ends the search (`Err`).
+/// The field name a `name` parameter whose `name` ends at `at` gives, as `(start, end)`.
+/// `None` when no `=` follows, and `Err` for an unterminated quoted value.
 ///
 /// Every spelling a form reader in this workspace accepts is read, so a credential is found
 /// whichever one recorded it: the quoted value, and — as the RustFS profile's legacy form grammar
 /// also reads it — a bare value running to the next `;` or line end, whitespace around `=`, and
-/// the parameter name in any case.
-fn name_value(bytes: &[u8], at: usize) -> Option<Result<(usize, usize, usize), ()>> {
+/// the parameter name in any case. The caller supplies only the current header parameter, so a
+/// quote cannot close in another header or part.
+fn name_value(bytes: &[u8], at: usize) -> Option<Result<(usize, usize), ()>> {
     let mut index = at;
     while bytes.get(index).copied().is_some_and(is_ows) {
         index += 1;
@@ -91,7 +91,7 @@ fn name_value(bytes: &[u8], at: usize) -> Option<Result<(usize, usize, usize), (
     if bytes.get(index) == Some(&b'"') {
         let start = index + 1;
         return Some(match bytes[start..].iter().position(|byte| *byte == b'"') {
-            Some(len) => Ok((start, start + len, start + len)),
+            Some(len) => Ok((start, start + len)),
             None => Err(()),
         });
     }
@@ -103,7 +103,67 @@ fn name_value(bytes: &[u8], at: usize) -> Option<Result<(usize, usize, usize), (
     while end > index && is_ows(bytes[end - 1]) {
         end -= 1;
     }
-    Some(Ok((index, end, index + len)))
+    Some(Ok((index, end)))
+}
+
+/// The end of one disposition parameter; only a value starting with a quote is quoted.
+/// Bytes after its closing quote do not turn a later separator into quoted content.
+fn parameter_end(line: &[u8], from: usize) -> usize {
+    let end = find(line, b";", from).unwrap_or(line.len());
+    let Some(equals) = line[from..end].iter().position(|byte| *byte == b'=') else {
+        return end;
+    };
+    let mut index = from + equals + 1;
+    while line.get(index).copied().is_some_and(is_ows) {
+        index += 1;
+    }
+    if line.get(index) != Some(&b'"') {
+        return end;
+    }
+    index += 1;
+    while index < line.len() {
+        match line[index] {
+            b'\\' if index + 1 < line.len() => index += 1,
+            b'"' => return find(line, b";", index + 1).unwrap_or(line.len()),
+            _ => {}
+        }
+        index += 1;
+    }
+    line.len()
+}
+
+/// A credential-bearing `name` parameter on this Content-Disposition header line.
+fn sensitive_name(line: &[u8]) -> Option<String> {
+    let colon = line.iter().position(|byte| *byte == b':')?;
+    if !line[..colon].trim_ascii().eq_ignore_ascii_case(b"content-disposition") {
+        return None;
+    }
+    let mut from = colon + 1;
+    while from < line.len() {
+        let end = parameter_end(line, from);
+        let parameter = line[from..end].trim_ascii();
+        if parameter.get(..4).is_some_and(|prefix| prefix.eq_ignore_ascii_case(b"name"))
+            && let Some(Ok((start, end))) = name_value(parameter, 4)
+        {
+            let name = String::from_utf8_lossy(&parameter[start..end]).to_ascii_lowercase();
+            if SENSITIVE_FORM_FIELDS.contains(&name.as_str()) {
+                return Some(name);
+            }
+        }
+        if end == line.len() {
+            break;
+        }
+        from = end + 1;
+    }
+    None
+}
+
+/// The earliest blank line, including the bare-LF spelling accepted by the RustFS profile.
+fn header_separator(bytes: &[u8], from: usize) -> Option<(usize, usize)> {
+    [b"\r\n\r\n".as_slice(), b"\n\n", b"\n\r\n"]
+        .into_iter()
+        .filter_map(|separator| find(bytes, separator, from).map(|at| (at, at + separator.len())))
+        .min_by_key(|(at, _)| *at)
 }
 
 /// Every sensitive form field in `bytes`, located structurally: a `Content-Disposition` line
@@ -112,26 +172,22 @@ fn name_value(bytes: &[u8], at: usize) -> Option<Result<(usize, usize, usize), (
 fn sensitive_fields(bytes: &[u8]) -> Vec<Field> {
     let mut fields = Vec::new();
     let mut from = 0;
-    while let Some(at) = find(bytes, b"name", from) {
-        let Some(value) = name_value(bytes, at + b"name".len()) else {
-            from = at + b"name".len();
-            continue;
-        };
-        let Ok((name_start, name_end, resume)) = value else {
-            break;
-        };
-        let name = String::from_utf8_lossy(&bytes[name_start..name_end]).to_ascii_lowercase();
-        from = resume;
-        if !SENSITIVE_FORM_FIELDS.contains(&name.as_str()) {
+    while let Some((head_end, start)) = header_separator(bytes, from) {
+        // An incomplete head cannot borrow the next part's header separator or body.
+        if let Some(boundary) = find(bytes, b"\r\n--", from)
+            && boundary < head_end
+        {
+            from = boundary + 2;
             continue;
         }
-        let Some(head_end) = find(bytes, b"\r\n\r\n", from) else {
-            continue;
-        };
-        let start = head_end + 4;
         let end = find(bytes, b"\r\n--", start).unwrap_or(bytes.len());
-        fields.push(Field { name, start, end });
-        from = end;
+        if let Some(name) = bytes[from..head_end].split(|byte| *byte == b'\n').find_map(sensitive_name) {
+            fields.push(Field { name, start, end });
+        }
+        if end == bytes.len() {
+            break;
+        }
+        from = end + 2;
     }
     fields
 }
@@ -335,6 +391,194 @@ mod tests {
         }
         body.push_str("--xyz\r\nContent-Disposition: form-data; name=file; filename=a.txt\r\n\r\nhello\r\n--xyz--\r\n");
         body
+    }
+
+    #[test]
+    fn n_benign_content_cannot_hide_a_later_quoted_form_credential() {
+        let body = form(&[
+            ("key", "hello name = \"ordinary text"),
+            ("signature", "0RavWzkygo6QX9caELEqKi9kDbU="),
+        ]);
+        assert!(has_live_form_credential(&body));
+        assert!(redact::admit(&entry("multipart/form-data; boundary=xyz", &body)).is_err());
+    }
+
+    const SIGV2: &str = "0RavWzkygo6QX9caELEqKi9kDbU=";
+
+    /// Negative — unrelated or malformed parameters may not hide the next part's credential.
+    #[test]
+    fn n_unrelated_headers_cannot_hide_a_later_credential() {
+        for head in [
+            "Content-Disposition: form-data; name=\"unfinished",
+            "Content-Disposition: form-data; name=\"key\"; filename=\"name = \\\"unfinished",
+            "X-Note: name = \"unfinished\r\nContent-Disposition: form-data; name=key",
+            "Content-Disposition: form-data; filename=\"x; name=signature\"; name=key",
+        ] {
+            let body = format!("--xyz\r\n{head}\r\n\r\nordinary text\r\n{}", form(&[("signature", SIGV2)]));
+            assert!(has_live_form_credential(&body), "a preceding header hid the next credential");
+        }
+    }
+
+    /// Negative — admission must independently refuse the credential after unrelated body text.
+    #[test]
+    fn n_admission_refuses_a_credential_after_unrelated_body_text() {
+        let body = form(&[("key", "hello name = \"ordinary text"), ("signature", SIGV2)]);
+        assert!(redact::admit(&entry("multipart/form-data; boundary=xyz", &body)).is_err());
+    }
+
+    /// Negative — a filename, a longer parameter name or another header is not a field name.
+    #[test]
+    fn n_non_name_parameters_and_headers_are_not_credential_fields() {
+        for head in [
+            "Content-Disposition: form-data; filename=signature",
+            "Content-Disposition: form-data; x-name=signature",
+            "Content-Disposition: form-data; filename=\"x; name=signature; ignored\"; name=key",
+            "Content-Disposition: form-data; filename=\"x\\\"; name=signature; ignored\"; name=key",
+            "X-Note: name=signature\r\nContent-Disposition: form-data; name=key",
+        ] {
+            let body = format!("--xyz\r\n{head}\r\n\r\nordinary value\r\n--xyz--\r\n");
+            let mut posted = entry("multipart/form-data; boundary=xyz", &body);
+            let detected = has_live_form_credential(&body);
+            let touched = sanitize_body(&mut posted);
+            assert!(
+                !detected && touched.is_empty() && body_text(&posted) == body,
+                "an unrelated parameter or header was treated as a credential field"
+            );
+        }
+    }
+
+    /// Negative — body text cannot establish a claimed rewrite, even if it looks like a header.
+    #[test]
+    fn n_body_text_cannot_prove_a_form_redaction_claim() {
+        for text in [
+            "name=signature\r\n\r\n__REDACTED__",
+            "Content-Disposition: form-data; name=signature\r\n\r\n__REDACTED__",
+        ] {
+            let body = form(&[("key", text)]);
+            let mut posted = entry("multipart/form-data; boundary=xyz", &body);
+            posted.redacted = vec!["form:signature".to_owned()];
+            assert!(
+                !claim_holds(&posted, "form:signature") && redact::admit(&posted).is_err(),
+                "body text laundered a form redaction claim"
+            );
+        }
+    }
+
+    /// Negative — an incomplete head cannot borrow the next part's delimiter or value.
+    #[test]
+    fn n_incomplete_headers_do_not_consume_the_next_part() {
+        for incomplete in [
+            "Content-Disposition: form-data; name=signature\r\nX-Note: ordinary",
+            "Content-Disposition: form-data; name=signature",
+        ] {
+            let body = format!("--xyz\r\n{incomplete}\r\n{}", form(&[("key", "ordinary value")]));
+            let mut posted = entry("multipart/form-data; boundary=xyz", &body);
+            let detected = has_live_form_credential(&body);
+            let touched = sanitize_body(&mut posted);
+            assert!(
+                !detected && touched.is_empty() && body_text(&posted) == body,
+                "an incomplete head claimed the next part's body"
+            );
+        }
+    }
+
+    /// Negative — a missing closing boundary does not make a complete credential disappear.
+    #[test]
+    fn n_a_complete_partial_part_still_refuses_a_live_credential() {
+        let body = format!("Content-Disposition: form-data; name=signature\r\n\r\n{SIGV2}");
+        assert!(
+            has_live_form_credential(&body) && redact::admit(&entry("application/octet-stream", &body)).is_err(),
+            "a complete header and value lost the live credential"
+        );
+    }
+
+    /// Positive — rewriting the later field preserves unrelated body and filename bytes.
+    #[test]
+    fn p_sanitize_preserves_unrelated_body_and_filename_text() {
+        for head in [
+            "Content-Disposition: form-data; name=key",
+            "Content-Disposition: form-data; filename=\"x; name=signature\"; name=key",
+            "Content-Disposition: form-data; name=\"unfinished",
+        ] {
+            let prefix = format!("--xyz\r\n{head}\r\n\r\nhello name = \"ordinary text\r\n");
+            let body = format!("{prefix}{}", form(&[("signature", SIGV2)]));
+            let expected = format!("{prefix}{}", form(&[("signature", PLACEHOLDER)]));
+            let mut posted = entry("multipart/form-data; boundary=xyz", &body);
+            let touched = redact::sanitize(&mut posted);
+            assert!(
+                touched == ["form:signature"]
+                    && posted.redacted == touched
+                    && body_text(&posted) == expected
+                    && claim_holds(&posted, "form:signature")
+                    && redact::admit(&posted).is_ok(),
+                "rewriting did not preserve the non-credential bytes and prove its own record"
+            );
+        }
+    }
+
+    const LEGACY_HEADER_TAILS: &[&str] = &[
+        "\n\n",
+        "\n\r\n",
+        "\r\n\n",
+        "\r\nX-Note: ordinary\r\n\r\n",
+        "\nX-Note: ordinary\n\n",
+    ];
+    const LEGACY_PARAMETERS: &[&str] = &[
+        "extra=\"x\"ignored\"; name=\"signature\"",
+        "extra=x\"y; name=\"signature\"",
+        "filename=\"x; name=signature; ignored\"; name=\"signature\"",
+        "ignored; name=\"signature\"",
+    ];
+
+    fn legacy_header_form(parameters: &str, separator: &str, value: &str) -> String {
+        format!(
+            "--xyz\r\nContent-Type: text/plain\nContent-Disposition: form-data; {parameters}{separator}{value}\r\n{}",
+            form(&[("key", "ordinary value")])
+        )
+    }
+
+    /// Negative — a bare-LF head must not be discarded before a later CRLF separator.
+    #[test]
+    fn n_legacy_lf_headers_still_refuse_the_credential() {
+        for separator in LEGACY_HEADER_TAILS {
+            let body = legacy_header_form("name=\"signature\"", separator, SIGV2);
+            assert!(
+                has_live_form_credential(&body) && redact::admit(&entry("multipart/form-data; boundary=xyz", &body)).is_err(),
+                "a legacy header line ending hid the credential"
+            );
+        }
+    }
+
+    /// Negative — ignored parameter bytes cannot hide a later real name parameter.
+    #[test]
+    fn n_unknown_parameter_bytes_cannot_hide_the_credential() {
+        for parameters in LEGACY_PARAMETERS {
+            let body = legacy_header_form(parameters, "\r\n\r\n", SIGV2);
+            assert!(
+                has_live_form_credential(&body) && redact::admit(&entry("multipart/form-data; boundary=xyz", &body)).is_err(),
+                "an ignored parameter hid the credential"
+            );
+        }
+    }
+
+    /// Positive — the earliest blank header line locates the exact value to rewrite.
+    #[test]
+    fn p_legacy_header_rewrite_preserves_every_other_byte() {
+        for parameters in LEGACY_PARAMETERS {
+            for separator in LEGACY_HEADER_TAILS {
+                let body = legacy_header_form(parameters, separator, SIGV2);
+                let expected = legacy_header_form(parameters, separator, PLACEHOLDER);
+                let mut posted = entry("multipart/form-data; boundary=xyz", &body);
+                let touched = redact::sanitize(&mut posted);
+                assert!(
+                    touched == ["form:signature"]
+                        && body_text(&posted) == expected
+                        && claim_holds(&posted, "form:signature")
+                        && redact::admit(&posted).is_ok(),
+                    "the legacy head did not locate and rewrite the credential value"
+                );
+            }
+        }
     }
 
     /// Every spelling of a field's `name` parameter the RustFS-profile form reader accepts besides
