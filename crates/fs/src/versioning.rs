@@ -492,6 +492,7 @@ impl FsBackend {
                 headers: attributes.headers.clone(),
                 checksum: attributes.checksum,
                 part_lengths: attributes.part_lengths.clone(),
+                part_metadata: attributes.part_metadata.clone(),
             });
             tokio::fs::write(temporary.join(RECORD_FILE), record).await?;
             tokio::fs::rename(&temporary, &destination).await
@@ -657,6 +658,7 @@ impl Handler<PutObject> for FsBackend {
             .await?;
         let attributes = ObjectAttributes {
             part_lengths: None,
+            part_metadata: None,
             checksum: checksum.map(super::checksums::StoredChecksum::plain),
             headers: request_content_headers!(self, input).with_encryption(encryption.clone()),
             storage_class: requested_storage_class(input.storage_class.as_ref())?,

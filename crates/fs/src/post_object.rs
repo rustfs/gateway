@@ -143,6 +143,7 @@ impl Handler<PostObject> for FsBackend {
         );
         let attributes = ObjectAttributes {
             part_lengths: None,
+            part_metadata: None,
             checksum: None,
             metadata: form_metadata(input.metadata)?,
             headers: headers.with_encryption(encryption),

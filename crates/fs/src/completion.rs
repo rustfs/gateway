@@ -78,6 +78,7 @@ impl Handler<CompleteMultipartUpload> for FsBackend {
         let mut completed_bytes = Vec::new();
         let mut part_digests = Vec::with_capacity(requested.len());
         let mut part_lengths = Vec::with_capacity(requested.len());
+        let mut part_metadata = Vec::with_capacity(requested.len());
         let mut part_checksums = Vec::with_capacity(requested.len());
         let final_part = requested.len().saturating_sub(1);
         for (index, (number, expected, expected_checksum)) in requested.iter().enumerate() {
@@ -106,10 +107,17 @@ impl Handler<CompleteMultipartUpload> for FsBackend {
                     "a completed part entity tag does not match the uploaded part",
                 ));
             }
-            if let Some(selection) = record.checksum {
+            let checksum = if let Some(selection) = record.checksum {
                 let actual_checksum = selection.validate_part(*expected_checksum, &bytes)?;
                 part_checksums.push(actual_checksum);
-            }
+                Some(actual_checksum)
+            } else {
+                None
+            };
+            part_metadata.push(super::part_metadata::PartMetadata {
+                number: u32::try_from(*number).map_err(|_| storage_error())?,
+                checksum,
+            });
             part_digests.push(Md5::digest(&bytes).into());
             part_lengths.push(bytes.len() as u64);
             completed_bytes.extend_from_slice(&bytes);
@@ -126,6 +134,7 @@ impl Handler<CompleteMultipartUpload> for FsBackend {
         let mut attributes = (*record.attributes).clone();
         attributes.checksum = completed_checksum.map(super::checksums::StoredChecksum::multipart);
         attributes.part_lengths = Some(part_lengths);
+        attributes.part_metadata = Some(part_metadata);
         attributes.tags = tagging::read_persisted_tags(&upload).await?;
         let tombstone = self.uploads_path(input.bucket.as_str()).join(format!(
             ".complete-{}-{}",

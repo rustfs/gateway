@@ -137,6 +137,7 @@ mod lifecycle_scheduler;
 mod listing;
 mod object_attributes;
 mod part_lengths;
+mod part_metadata;
 pub mod policy;
 mod post_object;
 mod reads;
