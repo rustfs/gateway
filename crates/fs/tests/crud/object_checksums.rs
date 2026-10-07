@@ -250,7 +250,7 @@ async fn n_a_bad_checksum_never_replaces_the_object_or_its_checksum() {
     }
 }
 
-fn one_record(root: &TestRoot) -> PathBuf {
+pub(super) fn one_record(root: &TestRoot) -> PathBuf {
     let versions = root.0.join(format!("b-{}", hex::encode("stored-checksum"))).join("versions");
     std::fs::read_dir(versions)
         .expect("the fixture version directory")

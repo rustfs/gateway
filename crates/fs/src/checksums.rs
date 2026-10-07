@@ -12,17 +12,52 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Checksum projection into the three object-response DTOs with separate checksum fields.
+//! Stored checksum attributes and their projection into object responses.
 //!
-//! Responsible for: mapping one typed checksum to its named response field.
-//! NOT responsible for: checksum computation, persistence or request-mode decisions.
-//! Upstream: the filesystem read/copy handlers. Downstream: the response codecs.
+//! Responsible for: keeping a checksum's explicit type marker and mapping both into response fields.
+//! NOT responsible for: checksum computation, the record grammar or request-mode decisions.
+//! Upstream: the filesystem record and write handlers. Downstream: read/copy handlers and response codecs.
+
+use rustfs_gateway::{ChecksumSpec, ChecksumType, dto};
+
+/// A checksum and whether its stored representation explicitly reports its type.
+///
+/// Plain PUT reports no type; multipart completion does, even for FULL_OBJECT values whose
+/// bytes alone are indistinguishable from a plain PUT checksum.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct StoredChecksum {
+    pub(super) value: ChecksumSpec,
+    pub(super) report_type: bool,
+}
+
+impl StoredChecksum {
+    pub(super) fn plain(value: ChecksumSpec) -> Self {
+        Self {
+            value,
+            report_type: false,
+        }
+    }
+
+    pub(super) fn multipart(value: ChecksumSpec) -> Self {
+        Self {
+            value,
+            report_type: true,
+        }
+    }
+
+    pub(super) fn dto_type(self) -> Option<dto::ChecksumType> {
+        self.report_type.then(|| match self.value.checksum_type() {
+            ChecksumType::Composite => dto::ChecksumType::COMPOSITE,
+            ChecksumType::FullObject => dto::ChecksumType::FULL_OBJECT,
+        })
+    }
+}
 
 macro_rules! set_object_checksum {
     ($output:expr, $checksum:expr) => {{
         if let Some(checksum) = $checksum {
             let output = &mut $output;
-            let slot = match checksum.algorithm() {
+            let slot = match checksum.value.algorithm() {
                 rustfs_gateway::ChecksumAlgorithm::Crc32 => &mut output.checksum_crc32,
                 rustfs_gateway::ChecksumAlgorithm::Crc32c => &mut output.checksum_crc32c,
                 rustfs_gateway::ChecksumAlgorithm::Crc64Nvme => &mut output.checksum_crc64nvme,
@@ -35,7 +70,7 @@ macro_rules! set_object_checksum {
                 rustfs_gateway::ChecksumAlgorithm::XxHash128 => &mut output.checksum_xxhash128,
                 _ => return Err(crate::storage_error()),
             };
-            *slot = Some(checksum.render_base64().to_owned());
+            *slot = Some(checksum.value.render_base64().to_owned());
         }
     }};
 }

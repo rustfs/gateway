@@ -188,8 +188,16 @@ impl Handler<CopyObject> for FsBackend {
             )
             .await?;
         let checksum = match checksum_algorithm {
-            Some(algorithm) => Some(super::uploads::checksum_of(algorithm, &source_representation.bytes)?),
-            None => source_representation.checksum,
+            Some(algorithm) => Some(super::checksums::StoredChecksum::plain(super::uploads::checksum_of(
+                algorithm,
+                &source_representation.bytes,
+            )?)),
+            None => source_representation.checksum.map(|mut checksum| {
+                if checksum.value.checksum_type() == rustfs_gateway::ChecksumType::FullObject {
+                    checksum.report_type = false;
+                }
+                checksum
+            }),
         };
         let attributes = ObjectAttributes {
             checksum,
@@ -226,6 +234,7 @@ impl Handler<CopyObject> for FsBackend {
             ..CopyObjectOutput::default()
         };
         set_object_checksum!(output, checksum);
+        output.checksum_type = checksum.and_then(|checksum| checksum.dto_type().map(|kind| kind.as_str().to_owned()));
         Ok(Resp::new(output))
     }
 }

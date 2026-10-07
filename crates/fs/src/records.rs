@@ -54,6 +54,13 @@
 //! this section: preserve a pre-upgrade data copy before downgrading, rather than stripping the
 //! checksum from new records. Multipart initiation records must not contain this section.
 //!
+//! Completed multipart checksums use `checksum/2 1` and `<algorithm> <type> <value>` instead.
+//! The type must agree with the value's composite suffix. It is explicit even for FULL_OBJECT,
+//! so a completed upload can report its type without inventing one for an older plain PUT.
+//! Both versions remain readable, at most one checksum section is allowed, and builds that only
+//! understand `checksum/1` refuse the new section. A rollback therefore still needs a data copy
+//! made before the upgrade; dropping the type is not a migration.
+//!
 //! Every refusal below carries its own sentence rather than one shared "storage failed", because
 //! the point of failing closed is that whoever reads the log can tell a half-written record apart
 //! from one written by a build this one does not understand.
@@ -62,7 +69,9 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use rustfs_gateway::dto::StorageClass;
-use rustfs_gateway::{ChecksumAlgorithm, ChecksumSpec, ErrorCode, HandlerError};
+use rustfs_gateway::{ChecksumAlgorithm, ChecksumSpec, ChecksumType, ErrorCode, HandlerError};
+
+use super::checksums::StoredChecksum;
 
 use super::content_headers::{
     CONTENT_HEADERS_SECTION, ContentHeaders, decode_content_header_entries, encode_content_headers_section,
@@ -73,6 +82,7 @@ use super::storage_error;
 /// The name and version of the trailing section that carries user metadata.
 const METADATA_SECTION: &str = "meta/1";
 const CHECKSUM_SECTION: &str = "checksum/1";
+const TYPED_CHECKSUM_SECTION: &str = "checksum/2";
 
 /// Everything a write stores beside an object version's bytes.
 ///
@@ -85,7 +95,7 @@ pub(super) struct ObjectAttributes {
     /// The standard representation headers.
     pub(super) headers: ContentHeaders,
     /// The checksum stored with these object bytes, absent on older records.
-    pub(super) checksum: Option<ChecksumSpec>,
+    pub(super) checksum: Option<StoredChecksum>,
     /// The storage class the write named; `None` records `STANDARD`.
     pub(super) storage_class: Option<StorageClass>,
     /// The validated tag set the write carried, written beside the version atomically with it.
@@ -148,7 +158,7 @@ pub(super) struct VersionRecord {
     pub(super) metadata: BTreeMap<String, String>,
     pub(super) headers: ContentHeaders,
     /// The checksum stored with these object bytes, absent on older records.
-    pub(super) checksum: Option<ChecksumSpec>,
+    pub(super) checksum: Option<StoredChecksum>,
 }
 
 /// Refuses a metadata pair this backend could store but could never hand back.
@@ -246,7 +256,7 @@ fn section_header(line: &str) -> Result<(&str, &str), HandlerError> {
 /// Reads every trailing section out of a record's remaining lines.
 ///
 /// Absence means no stored attributes — the eight-line form. The sections are `meta/1`,
-/// `headers/1`, then `checksum/1`, each optional, each at most once, with nothing after them.
+/// `headers/1`, then one of `checksum/1` or `checksum/2`, each optional, with nothing after them.
 ///
 /// # Errors
 ///
@@ -274,7 +284,8 @@ pub(super) fn decode_trailing_sections(lines: &mut std::str::Lines<'_>) -> Resul
         trailing_error = "the persisted representation-header section is followed by lines this build cannot read";
     }
     if let Some(line) = next
-        && let Ok((CHECKSUM_SECTION, count)) = section_header(line)
+        && let Ok((name, count)) = section_header(line)
+        && matches!(name, CHECKSUM_SECTION | TYPED_CHECKSUM_SECTION)
     {
         if count != "1" {
             return Err(HandlerError::internal_error("the persisted checksum section must contain one checksum"));
@@ -285,10 +296,26 @@ pub(super) fn decode_trailing_sections(lines: &mut std::str::Lines<'_>) -> Resul
             .ok_or_else(|| HandlerError::internal_error("the persisted checksum has no algorithm and value"))?;
         let algorithm = ChecksumAlgorithm::from_wire_name(algorithm)
             .ok_or_else(|| HandlerError::internal_error("the persisted checksum algorithm is not supported"))?;
-        attributes.checksum = Some(
-            ChecksumSpec::parse_header(algorithm.header_name(), value)
-                .map_err(|_| HandlerError::internal_error("the persisted checksum value is malformed"))?,
-        );
+        let (kind, value) = if name == TYPED_CHECKSUM_SECTION {
+            let (kind, value) = value
+                .split_once(' ')
+                .ok_or_else(|| HandlerError::internal_error("the persisted checksum has no type and value"))?;
+            let kind = ChecksumType::parse(kind)
+                .map_err(|_| HandlerError::internal_error("the persisted checksum type is not supported"))?;
+            (Some(kind), value)
+        } else {
+            (None, value)
+        };
+        let value = ChecksumSpec::parse_header(algorithm.header_name(), value)
+            .map_err(|_| HandlerError::internal_error("the persisted checksum value is malformed"))?;
+        attributes.checksum = Some(match kind {
+            Some(kind) => StoredChecksum::multipart(
+                value
+                    .with_type(kind)
+                    .map_err(|_| HandlerError::internal_error("the persisted checksum type contradicts its value"))?,
+            ),
+            None => StoredChecksum::plain(value),
+        });
         next = lines.next();
         trailing_error = "the persisted checksum section is followed by lines this build cannot read";
     }
@@ -298,9 +325,19 @@ pub(super) fn decode_trailing_sections(lines: &mut std::str::Lines<'_>) -> Resul
     Ok(attributes)
 }
 
-fn encode_checksum_section(checksum: Option<ChecksumSpec>) -> String {
-    checksum.map_or_else(String::new, |value| {
-        format!("{CHECKSUM_SECTION} 1\n{} {}\n", value.algorithm().wire_name(), value.render_base64())
+fn encode_checksum_section(checksum: Option<StoredChecksum>) -> String {
+    checksum.map_or_else(String::new, |checksum| {
+        let value = checksum.value;
+        if checksum.report_type {
+            format!(
+                "{TYPED_CHECKSUM_SECTION} 1\n{} {} {}\n",
+                value.algorithm().wire_name(),
+                value.checksum_type().wire_name(),
+                value.render_base64()
+            )
+        } else {
+            format!("{CHECKSUM_SECTION} 1\n{} {}\n", value.algorithm().wire_name(), value.render_base64())
+        }
     })
 }
 

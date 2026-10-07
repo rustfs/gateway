@@ -72,8 +72,13 @@ A verified `PutObject` checksum, supplied in a header or trailer, is stored in a
 `CopyObject` keeps the source checksum unless its `ChecksumAlgorithm` requests a recalculation.
 Earlier records remain readable without a checksum, but older builds refuse the new section;
 keep a pre-upgrade data copy for rollback instead of deleting checksums from new records.
-This does not persist completed multipart checksums or part boundaries, or implement
-`GetObjectAttributes` (rustfs/gateway#1001).
+Completed multipart uploads store their checksum and explicit type in `checksum/2 1`, followed
+by `<algorithm> <type> <value>`. The type and any composite suffix must agree. Checksum-enabled
+whole-object reads and completion retries report both after restart. Default COPY preserves a
+composite checksum's type; copying a FULL_OBJECT checksum or requesting recalculation omits the
+type, as RustFS does. Readers that only understand `checksum/1` refuse these typed records, so
+rollback still needs a pre-upgrade data copy. Part boundaries, partNumber reads and
+`GetObjectAttributes` remain separate work (rustfs/gateway#1001).
 
 A `PutObject` also stores the tag set its `x-amz-tagging` header carries, validated as the
 `?tagging` subresource's document is and written into the new version's directory before the
