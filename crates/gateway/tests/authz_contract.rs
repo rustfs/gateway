@@ -609,8 +609,6 @@ async fn p_copy_object_input_audit_contains_source_and_destination() {
         .expect("input event");
     assert_eq!(input.resources, 2);
     assert_eq!(input.resource_actions, ["s3:PutObject", "s3:GetObject"]);
-    // The audit records the scheme the verdict carried, finer than "authenticated" since
-    // rustfs/backlog#2752: a header-signed SigV4 request is `SigV4Header`.
     assert_eq!(input.auth_scheme, "SigV4Header");
 }
 
