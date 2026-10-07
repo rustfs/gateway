@@ -50,6 +50,7 @@ after it has accepted.
 | `tests/form_limits.rs` | POST Object form ceilings and the order in which they are decided. | Change `src/form/`. |
 | `tests/form_grammar.rs` | The legacy RustFS form grammar inside a part: header blocks and `Content-Disposition`, accepted and refused. | Change `src/form/legacy.rs`'s part grammar. |
 | `tests/form_legacy_edges.rs` | The legacy grammar at a form's edges — preamble, padding, closing tail, boundary, `Content-Type`, prelude bound — and the gateway grammar unchanged beside it. | Change a legacy branch of `src/form/reader.rs` or `src/form/file.rs`, or `src/form/legacy.rs`'s header grammar. |
+| `tests/form_legacy_limits.rs` | Legacy RustFS's form ceilings (`FormLimits::legacy_rustfs`) at each edge, and the default ceilings unchanged beside them. | Change `FormLimits` or a ceiling check in `src/form/reader.rs`. |
 | `tests/support/form.rs` | Form builders and a framing-checked reader shared by the two legacy-grammar suites. | Those suites need a new form shape. |
 | `tests/form_allocations.rs` | Measures file-size-independent heap and bounded allocation under fragmented text fields. | Change the file read path. |
 | `benches/parse.rs` | Asserts zero allocations for eight-query indexing and signed-header canonicalization. | Change request-head parsing or canonical-header writing. |

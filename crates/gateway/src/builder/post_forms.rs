@@ -47,16 +47,17 @@ impl PostFormGrammar {
     /// that is what legacy RustFS derives the file's exact length from, leaving no room for
     /// padding after the closing delimiter.
     pub(crate) fn read(self, headers: &HeaderMap) -> PostFormRead {
-        let grammar = if self.legacy_rustfs {
-            FormGrammar::LegacyRustfs {
-                declared_length: headers.contains_key(http::header::CONTENT_LENGTH),
-            }
-        } else {
-            FormGrammar::Gateway
-        };
+        if self.legacy_rustfs {
+            return PostFormRead {
+                limits: FormLimits::legacy_rustfs(),
+                grammar: FormGrammar::LegacyRustfs {
+                    declared_length: headers.contains_key(http::header::CONTENT_LENGTH),
+                },
+            };
+        }
         PostFormRead {
             limits: FormLimits::default(),
-            grammar,
+            grammar: FormGrammar::Gateway,
         }
     }
 }
@@ -69,9 +70,11 @@ impl ServiceBuilder {
     /// RustFS profile turns it on, so a browser upload the legacy stack stores — a preamble, a `;`
     /// inside a quoted filename, `filename*`, bare parameter values — is stored the same way here,
     /// with the key `${filename}` names the legacy way; and one it refuses — an epilogue after the
-    /// closing boundary, a boundary outside RFC 2046's characters — is refused here too. The
-    /// ceilings, the refusal of a repeated field and of a control byte in a field value, and the
-    /// policy-before-file order are unchanged by it.
+    /// closing boundary, a boundary outside RFC 2046's characters — is refused here too. The form
+    /// is read under legacy RustFS's ceilings ([`FormLimits::legacy_rustfs`]: 1 MiB per field and
+    /// per part header block, 20 MiB of field values, 1000 parts; rustfs/gateway#1173). The refusal
+    /// of a repeated field and of a control byte in a field value, and the policy-before-file
+    /// order, are unchanged by it.
     ///
     /// It also hands the registered `PostObject` handler every other `PutObject` member legacy
     /// RustFS reads from the form, in `PostObjectInput::fields` (rustfs/gateway#1129). The handler

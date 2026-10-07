@@ -29,8 +29,8 @@ use rustfs_gateway_core::{
 };
 use rustfs_gateway_http::{FormReject, WireRequest};
 use rustfs_gateway_sig::{
-    Admission, PayloadMode, PostPolicyLimits, RawQuery, RequestNow, SecurityFloor, UnroutedPostPolicy, UnroutedPostPolicyError,
-    WireView, detect_credentials,
+    Admission, PayloadMode, RawQuery, RequestNow, SecurityFloor, UnroutedPostPolicy, UnroutedPostPolicyError, WireView,
+    detect_credentials,
 };
 use rustfs_gateway_stream::Body;
 use rustfs_gateway_types::ErrorCode;
@@ -109,8 +109,9 @@ where
         Ok(prelude) => prelude,
         Err(error) => return outcome.refuse_at(Refused::Decode, error),
     };
+    let policy_limits = prelude.policy_limits();
     let fields = prelude.form_fields();
-    let policy = match UnroutedPostPolicy::read(&fields, PostPolicyLimits::default()) {
+    let policy = match UnroutedPostPolicy::read(&fields, policy_limits) {
         Ok(policy) => policy,
         Err(error) => return outcome.refuse_at(Refused::Authentication, metadata_refusal(error)),
     };
@@ -148,6 +149,7 @@ where
             &payload,
             wire.framing().declared_length(),
         )
+        .with_post_policy_limits(Some(policy_limits))
         .with_unrouted_post_policy(&policy);
         let authentication = service.inner.authenticator.authenticate(&question).await;
         let (_, legacy, _) = question.into_published();

@@ -38,6 +38,8 @@ mod form_allocations;
 mod form_grammar;
 #[path = "form_legacy_edges.rs"]
 mod form_legacy_edges;
+#[path = "form_legacy_limits.rs"]
+mod form_legacy_limits;
 #[path = "form_limits.rs"]
 mod form_limits;
 #[path = "framing_smuggling.rs"]

@@ -146,6 +146,8 @@ pub enum FormReject {
     PolicyTooLarge,
     /// The form carried more than [`FormLimits::max_field_count`] text fields.
     TooManyFields,
+    /// The text fields' values together exceeded [`FormLimits::max_fields_bytes`].
+    FieldsTooLarge,
     /// One field name appeared twice.
     ///
     /// Refused rather than resolved, for the reason the crate documentation gives: a first-wins or
@@ -187,6 +189,7 @@ impl FormReject {
             Self::FieldTooLarge => "field-too-large",
             Self::PolicyTooLarge => "policy-too-large",
             Self::TooManyFields => "too-many-fields",
+            Self::FieldsTooLarge => "fields-too-large",
             Self::DuplicateField => "duplicate-field",
             Self::WholeStreamTooLarge => "whole-stream-too-large",
             Self::FileTooLarge => "file-too-large",
@@ -223,6 +226,7 @@ pub struct FormLimits {
     max_part_header_bytes: usize,
     max_whole_stream_bytes: u64,
     max_file_bytes: u64,
+    max_fields_bytes: Option<u64>,
 }
 
 impl FormLimits {
@@ -276,6 +280,56 @@ impl FormLimits {
         + Self::DEFAULT_MAX_POLICY_BYTES as u64
         + ((Self::DEFAULT_MAX_FIELD_COUNT + 1) * Self::DEFAULT_MAX_PART_HEADER_BYTES) as u64;
 
+    /// Legacy RustFS's ceiling on one text field's value, the `policy` field included, and on one
+    /// part's header block: 1 MiB.
+    pub const LEGACY_RUSTFS_MAX_FIELD_BYTES: usize = 1024 * 1024;
+
+    /// Legacy RustFS's ceiling on every text field's value together: 20 MiB.
+    pub const LEGACY_RUSTFS_MAX_FIELDS_BYTES: u64 = 20 * 1024 * 1024;
+
+    /// Legacy RustFS's ceiling on a form's parts, the `file` part included: 1000.
+    pub const LEGACY_RUSTFS_MAX_PARTS: usize = 1000;
+
+    /// The ceilings legacy RustFS reads a POST Object form under, for the RustFS profile
+    /// (rustfs/gateway#1173): one field's value, the `policy` field's included, and one part's
+    /// header block at 1 MiB each, every field's value together at 20 MiB, and 1000 parts, the
+    /// `file` part included — so 999 text fields. RustFS leaves its legacy stack's form limits at
+    /// their defaults (`rustfs/src/server/http.rs:166-173` at rustfs/rustfs@95268a3b9), and that
+    /// stack refuses past each with `400 MalformedPOSTRequest`.
+    ///
+    /// Legacy-compat (rustfs/backlog#2684): the `policy` field is held to the ordinary field
+    /// ceiling, above [`FormLimits::HARD_MAX_POLICY_BYTES`], the one place that ceiling is raised,
+    /// and up to 1000 header blocks of 1 MiB each may arrive before authorization; legacy RustFS
+    /// reads both. The intended future behaviour is AWS's 20 KiB policy and a pre-authorization
+    /// budget no larger than the fields a policy can name.
+    #[must_use]
+    pub const fn legacy_rustfs() -> Self {
+        let field = Self::LEGACY_RUSTFS_MAX_FIELD_BYTES;
+        let mut limits = Self {
+            max_field_bytes: field,
+            max_policy_bytes: field,
+            max_field_count: Self::LEGACY_RUSTFS_MAX_PARTS - 1,
+            max_part_header_bytes: field,
+            max_whole_stream_bytes: 0,
+            max_file_bytes: Self::DEFAULT_MAX_FILE_BYTES,
+            max_fields_bytes: Some(Self::LEGACY_RUSTFS_MAX_FIELDS_BYTES),
+        };
+        // Everything before the file at every ceiling, the file at its own, and the closing line:
+        // derived, so the whole-form budget never shadows a ceiling it contains.
+        limits.max_whole_stream_bytes = Self::DEFAULT_MAX_FILE_BYTES
+            .saturating_add(limits.max_prelude_bytes())
+            .saturating_add(BOUNDARY_LINE_BYTES);
+        limits
+    }
+
+    /// The ceiling on every text field's value together, in bytes, when one applies beyond the
+    /// per-field and field-count ceilings; `None` under every ceiling but
+    /// [`FormLimits::legacy_rustfs`].
+    #[must_use]
+    pub const fn max_fields_bytes(&self) -> Option<u64> {
+        self.max_fields_bytes
+    }
+
     /// The ceiling on one ordinary text field, in bytes.
     #[must_use]
     pub const fn max_field_bytes(&self) -> usize {
@@ -310,20 +364,24 @@ impl FormLimits {
     /// [`FormGrammar::LegacyRustfs`], derived rather than chosen.
     ///
     /// It is every byte a form at every other ceiling can carry there — each text field at its
-    /// ceiling, the policy at its own, one header block and one boundary line per part — plus one
-    /// header block the reader may already hold past the file's header. A preamble and transport
-    /// padding belong to no ceiling, so without this bound they would let a peer stream the whole
-    /// form budget in before any authorization; the gateway grammar has neither, and is bounded by
-    /// its ceilings alone.
+    /// ceiling, the policy at its own, or the fields' values together where
+    /// [`FormLimits::max_fields_bytes`] is lower, one header block and one boundary line per part —
+    /// plus one header block the reader may already hold past the file's header. A preamble and
+    /// transport padding belong to no ceiling, so without this bound they would let a peer stream
+    /// the whole form budget in before any authorization; the gateway grammar has neither, and is
+    /// bounded by its ceilings alone.
     #[must_use]
     pub const fn max_prelude_bytes(&self) -> u64 {
         let parts = (self.max_field_count as u64).saturating_add(1);
         let lines = parts.saturating_mul((self.max_part_header_bytes as u64).saturating_add(BOUNDARY_LINE_BYTES));
-        (self.max_field_count as u64)
+        let values = (self.max_field_count as u64)
             .saturating_mul(self.max_field_bytes as u64)
-            .saturating_add(self.max_policy_bytes as u64)
-            .saturating_add(lines)
-            .saturating_add(self.max_part_header_bytes as u64)
+            .saturating_add(self.max_policy_bytes as u64);
+        let values = match self.max_fields_bytes {
+            Some(together) if together < values => together,
+            _ => values,
+        };
+        values.saturating_add(lines).saturating_add(self.max_part_header_bytes as u64)
     }
 
     /// The deployment ceiling on the file part, in bytes.
@@ -389,6 +447,7 @@ impl Default for FormLimits {
             max_part_header_bytes: Self::DEFAULT_MAX_PART_HEADER_BYTES,
             max_whole_stream_bytes: Self::DEFAULT_MAX_WHOLE_STREAM_BYTES,
             max_file_bytes: Self::DEFAULT_MAX_FILE_BYTES,
+            max_fields_bytes: None,
         }
     }
 }

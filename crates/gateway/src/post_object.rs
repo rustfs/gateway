@@ -157,12 +157,22 @@ where
             .collect()
     }
 
+    pub(crate) fn policy_limits(&self) -> PostPolicyLimits {
+        let mut limits = PostPolicyLimits::default();
+        if matches!(self.reader.grammar(), FormGrammar::LegacyRustfs { .. }) {
+            limits.max_encoded_bytes = self.limits.max_policy_bytes();
+            limits.max_decoded_bytes = limits.max_encoded_bytes / 4 * 3;
+        }
+        limits
+    }
+
     pub(crate) fn resolve(
         self,
         bucket: BucketName,
         names: &NamePolicy,
         now: RequestNow,
     ) -> Result<ResolvedPostObject<B>, S3Error> {
+        let policy_limits = self.policy_limits();
         let fields: Vec<(&str, &str)> = self
             .reader
             .fields()
@@ -193,7 +203,7 @@ where
                 .with_length(RegionLength::Unbounded)
                 .with_services(ServiceReading::AnyName);
             AcceptedPolicy::SigV4(Box::new(
-                PostPolicy::parse_with(&fields, filename, PostPolicyLimits::default(), now, rule).map_err(policy_refusal)?,
+                PostPolicy::parse_with(&fields, filename, policy_limits, now, rule).map_err(policy_refusal)?,
             ))
         } else if fields.iter().any(|(name, _)| *name == "awsaccesskeyid") {
             let parse = if legacy_store {
@@ -201,7 +211,7 @@ where
             } else {
                 SigV2PostPolicy::parse
             };
-            AcceptedPolicy::SigV2(parse(&fields, filename, PostPolicyLimits::default(), now).map_err(|reject| {
+            AcceptedPolicy::SigV2(parse(&fields, filename, policy_limits, now).map_err(|reject| {
                 if legacy_store && matches!(reject, PostPolicyError::Malformed | PostPolicyError::ConditionFailed) {
                     from_handler(
                         HandlerError::new(ErrorCode::INVALID_POLICY_DOCUMENT, "the POST policy was not accepted"),

@@ -25,6 +25,13 @@ use rustfs_gateway_sig::{
     RegionRule, SealedAws, SessionToken, SigLocation, SigV4Authorization, Signature,
 };
 
+impl super::Authentication<'_> {
+    pub(crate) const fn with_post_policy_limits(mut self, limits: Option<PostPolicyLimits>) -> Self {
+        self.post_policy_limits = limits;
+        self
+    }
+}
+
 /// The signature material the client presented, from whichever surface carried it.
 ///
 /// One carrier for the signature surfaces keeps their reading and session checks outside the
@@ -42,6 +49,7 @@ impl<'a> Presented<'a> {
         location: SigLocation,
         rule: RegionRule,
         unrouted: Option<&'a rustfs_gateway_sig::UnroutedPostPolicy>,
+        limits: Option<PostPolicyLimits>,
     ) -> Result<Self, AuthError> {
         match location {
             SigLocation::Query => Ok(Self::Query(Box::new(PresignedParams::parse_with(&sealed.view().query(), rule)?))),
@@ -51,7 +59,7 @@ impl<'a> Presented<'a> {
                 }
 
                 let fields = sealed.view().form_fields().ok_or(AuthError::AuthorizationHeaderMalformed)?;
-                let policy = PostPolicy::parse_with(fields, "", PostPolicyLimits::default(), sealed.clock().now(), rule)
+                let policy = PostPolicy::parse_with(fields, "", limits.unwrap_or_default(), sealed.clock().now(), rule)
                     .map_err(PostPolicyError::auth_error)?;
                 Ok(Self::Form(Box::new(policy)))
             }
