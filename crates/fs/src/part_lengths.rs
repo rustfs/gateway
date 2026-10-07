@@ -70,9 +70,12 @@ pub(super) fn window(number: u32, lengths: Option<&[u64]>, tag: &ETag, object_le
         None if tag.part_count().is_some() => {
             return Err(HandlerError::not_implemented("the stored multipart object has no part boundaries"));
         }
-        None if object_len == 0 && number == 1 => return Ok(RangeDecision::Whole),
         None => &plain,
     };
+    // A sole empty part has no byte interval, but is still a readable whole object.
+    if object_len == 0 && number == 1 && lengths == [0] {
+        return Ok(RangeDecision::Whole);
+    }
     let window =
         resolve_part(number, lengths).map_err(|rejection| HandlerError::new(rejection.code().clone(), rejection.reason()))?;
     if window.total != object_len {
@@ -110,5 +113,13 @@ mod tests {
     fn n_a_window_cannot_outlive_its_representation_length() {
         let tag = rustfs_gateway::ETag::new("00000000000000000000000000000000-1").expect("a fixture tag");
         assert!(super::window(1, Some(&[9]), &tag, 8).is_err());
+    }
+
+    #[test]
+    fn n_an_empty_window_does_not_ignore_a_different_part_table() {
+        let tag = rustfs_gateway::ETag::new("00000000000000000000000000000000-1").expect("fixture tag");
+        assert!(super::window(1, Some(&[1]), &tag, 0).is_err());
+        let two = rustfs_gateway::ETag::new("00000000000000000000000000000000-2").expect("fixture tag");
+        assert!(super::window(1, Some(&[0, 0]), &two, 0).is_err());
     }
 }

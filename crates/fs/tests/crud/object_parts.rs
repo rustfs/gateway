@@ -219,11 +219,19 @@ async fn n_a_part_read_does_not_report_the_whole_object_checksum() {
     let response = get(&service, "object", "partNumber=1").await;
     assert_eq!(response.status(), 206);
     assert_eq!(response.body().as_ref(), TAIL);
-    assert_eq!(text(&response, "x-amz-checksum-crc32"), None);
-    assert_eq!(text(&response, "x-amz-checksum-type"), None);
+    assert_eq!(text(&response, "x-amz-checksum-crc32"), Some(value.render_base64()));
+    assert_eq!(text(&response, "x-amz-checksum-type"), Some("COMPOSITE"));
     let whole = get(&service, "object", "").await;
     assert_eq!(whole.status(), 200);
-    assert!(text(&whole, "x-amz-checksum-crc32").is_some());
+    assert_eq!(
+        text(&whole, "x-amz-checksum-crc32"),
+        Some(
+            rustfs_gateway::ChecksumSpec::composite_of(&[value])
+                .expect("composite")
+                .render_base64()
+        )
+    );
+    assert_ne!(text(&response, "x-amz-checksum-crc32"), text(&whole, "x-amz-checksum-crc32"));
     assert_eq!(text(&whole, "x-amz-checksum-type"), Some("COMPOSITE"));
     assert_eq!(text(&whole, "x-amz-mp-parts-count"), None);
 }
@@ -311,3 +319,6 @@ async fn n_an_overflowing_table_cannot_match_a_negative_record_size() {
     let (_, restarted) = service(&root);
     assert_eq!(get(&restarted, "object", "").await.status(), 500);
 }
+
+#[path = "part_read_checksums.rs"]
+mod part_read_checksums;
