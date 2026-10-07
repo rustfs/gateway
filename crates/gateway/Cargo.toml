@@ -1,7 +1,7 @@
 [package]
 name = "rustfs-gateway"
 description = "A protocol-exact, security-first S3 server framework for Rust"
-version = "0.56.0"
+version = "0.57.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -75,6 +75,9 @@ tokio-rustls = { workspace = true }
 rustfs-gateway-dialect-minio = { path = "../dialect-minio" }
 # `tests/host_request_id.rs`: RustFS's admin paths, where the RustFS profile leaves the identifier to the host.
 rustfs-gateway-dialect-rustfs-admin = { path = "../dialect-rustfs-admin" }
+# `tests/rustfs_profile.rs`: the RustFS profile's posture golden is rendered over the reference
+# backend the client-matrix launcher runs, so the launcher's own assembly can be held to it.
+rustfs-gateway-fs = { path = "../fs" }
 socket2 = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "signal", "test-util"] }
 trybuild = { workspace = true }

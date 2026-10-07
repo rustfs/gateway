@@ -41,6 +41,11 @@ pub(crate) struct PostFormGrammar {
 }
 
 impl PostFormGrammar {
+    /// Whether forms are read with legacy RustFS's grammar.
+    pub(crate) const fn is_legacy_rustfs(self) -> bool {
+        self.legacy_rustfs
+    }
+
     /// How the form of a request with `headers` is read.
     ///
     /// The legacy grammar's closing rule turns on whether the request carried a `Content-Length`:

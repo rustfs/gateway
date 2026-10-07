@@ -200,6 +200,8 @@ pub(crate) struct Inner {
     /// Whether a handed-over caller secret reaches every operation, not only opted-in ones (ADR-0024).
     pub(crate) caller_secret_every_operation: bool,
     pub(crate) view_policy: crate::builder::view_policy::ViewPolicy,
+    /// The posture lines logged at assembly, kept for `S3Service::startup_posture`.
+    pub(crate) startup_report: Box<str>,
     /// Off in the RustFS profile: an anonymous aws-chunked body stays undecoded, as legacy RustFS leaves it.
     pub(crate) decode_anonymous_framing: bool,
     pub(crate) detached_work: crate::DetachedWork,

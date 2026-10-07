@@ -98,6 +98,8 @@ pub(crate) const EVENT_PRESIGNED_EXPIRY_POSTURE: &str = "gateway_presigned_expir
 pub(crate) const EVENT_NAMING_POSTURE: &str = "gateway_naming_posture";
 /// The `FORM_CLAIM_POSTURE` start-up line (ADR-0041).
 pub(crate) const EVENT_FORM_CLAIM_POSTURE: &str = "gateway_form_claim_posture";
+/// The `PROFILE_POSTURE` start-up line (rustfs/backlog#2751).
+pub(crate) const EVENT_PROFILE_POSTURE: &str = "gateway_profile_posture";
 /// An assembly that disabled or replaced a security control; `reason` says which.
 pub(crate) const EVENT_DANGEROUS_ASSEMBLY: &str = "gateway_dangerous_assembly";
 /// A report callback panicked; `callback` names which, and the answer went out unchanged.

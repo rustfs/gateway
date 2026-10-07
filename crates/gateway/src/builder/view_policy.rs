@@ -102,6 +102,7 @@ mod date_conditions;
 pub(crate) mod header_signatures;
 mod legacy_checksums;
 pub(crate) mod presigned_urls;
+mod profile_census;
 pub use self::checksum_declarations::LEGACY_CHECKSUM_DECLARATION_OPERATIONS;
 pub use self::date_conditions::STRICT_DATE_CONDITION_HEADERS;
 

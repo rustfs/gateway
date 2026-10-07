@@ -64,7 +64,7 @@ use crate::ext::{
     OpLayer, OpLayerSlot, PathStyleOnly, PolicySource, PolicyTimeout, StageFilter,
 };
 use crate::logging::{self, dangerous_assembly};
-use crate::posture::{SecurityPosture, log_dialect_posture, log_naming_posture, log_startup_posture};
+use crate::posture::{SecurityPosture, log_startup_posture};
 use crate::routing::{RoutingSnapshot, RuntimeAssembly};
 
 mod anonymous_framing;
@@ -86,6 +86,7 @@ mod names;
 mod not_modified_headers;
 mod operation_selection;
 pub(crate) mod plaintext_customer_keys;
+mod rustfs_profile;
 mod secret_scope;
 pub(crate) mod sigv4_header_guard;
 pub(crate) mod version_actions;
@@ -567,6 +568,7 @@ impl ServiceBuilder {
     /// knows and this crate has no codec for. Nothing here degrades to a warning.
     pub fn build(self) -> Result<S3Service, AssemblyError> {
         let authorizer = self.validate_assembly()?;
+        let legacy_switches = self.legacy_switches();
         let Some(authenticator) = self.authenticator else {
             return Err(AssemblyError::MissingAuthenticator {
                 rule: RuleRef::MISSING_AUTHENTICATOR,
@@ -612,9 +614,15 @@ impl ServiceBuilder {
             custom_signature_verifier,
             dangerously_replaced_signature_verifier,
         );
-        log_dialect_posture(&routing.router, self.caller_secret_every_operation);
-        crate::presigned_expiry_posture::log_presigned_expiry_posture(&self.floor);
-        log_naming_posture(&self.names);
+        let startup_report = crate::startup_report::emit(crate::startup_report::StartupInputs {
+            routing: &routing,
+            floor: &self.floor,
+            custom_signature_verifier,
+            dangerously_replaced_signature_verifier,
+            caller_secret_every_operation: self.caller_secret_every_operation,
+            names: &self.names,
+            legacy_switches,
+        });
         let governor: Arc<dyn Governor> = match self.governor {
             Some(user) => Arc::new(LayeredGovernor::new(framework_governor, user)),
             None => Arc::new(framework_governor),
@@ -660,6 +668,7 @@ impl ServiceBuilder {
             temporary_redirect_targets: Arc::from(self.temporary_redirect_targets),
             caller_secret_every_operation: self.caller_secret_every_operation,
             view_policy: self.view_policy,
+            startup_report: startup_report.into_boxed_str(),
             decode_anonymous_framing: self.decode_anonymous_framing,
             detached_work: crate::DetachedWork::default(),
         }))

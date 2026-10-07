@@ -68,30 +68,33 @@ pub(crate) fn render_form_claim_posture<'a>(forms: impl Iterator<Item = &'a Inst
     format!("FORM_CLAIM_POSTURE claimed_forms=[{}]", forms.into_iter().collect::<Vec<_>>().join(","))
 }
 
-/// Writes [`render_dialect_posture`] for an assembled router to the start-up log, and
-/// [`render_form_claim_posture`] when a dialect installed a form claim.
-pub(crate) fn log_dialect_posture(router: &Router, every_operation: bool) {
+/// The dialect lines of an assembled router, each with the event that carries it: the
+/// `DIALECT_POSTURE` line, and the `FORM_CLAIM_POSTURE` line when a dialect installed a form claim.
+pub(crate) fn dialect_lines(router: &Router, every_operation: bool) -> Vec<(&'static str, String)> {
     let registry = router.registry();
     let caller_secret_ops = registry
         .names()
         .filter(|name| registry.get(name).is_some_and(OperationSpec::receives_caller_secret));
-    tracing::info!(
-        target: logging::TARGET,
-        event = logging::EVENT_DIALECT_POSTURE,
-        component = logging::COMPONENT,
-        subsystem = logging::SUBSYSTEM_POSTURE,
-        "{}",
-        render_dialect_posture(router.claims().claims().iter(), caller_secret_ops, every_operation)
-    );
+    let mut lines = vec![(
+        logging::EVENT_DIALECT_POSTURE,
+        render_dialect_posture(router.claims().claims().iter(), caller_secret_ops, every_operation),
+    )];
     let forms = router.claims().forms();
     if !forms.is_empty() {
+        lines.push((logging::EVENT_FORM_CLAIM_POSTURE, render_form_claim_posture(forms.iter())));
+    }
+    lines
+}
+
+/// Writes [`dialect_lines`] to the start-up log, one event per line.
+pub(crate) fn log_dialect_posture(router: &Router, every_operation: bool) {
+    for (event, line) in dialect_lines(router, every_operation) {
         tracing::info!(
             target: logging::TARGET,
-            event = logging::EVENT_FORM_CLAIM_POSTURE,
+            event = event,
             component = logging::COMPONENT,
             subsystem = logging::SUBSYSTEM_POSTURE,
-            "{}",
-            render_form_claim_posture(forms.iter())
+            "{line}"
         );
     }
 }

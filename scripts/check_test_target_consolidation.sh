@@ -776,6 +776,7 @@ gateway_modules = (
     "response_stream_termination",
     "rustfs_addressing",
     "rustfs_key_floor",
+    "rustfs_profile",
     "rustfs_selection",
     "rustfs_vhost",
     "scope_refusals",

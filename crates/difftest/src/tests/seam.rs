@@ -693,21 +693,84 @@ fn profile_switches(text: &str) -> BTreeSet<String> {
         .collect()
 }
 
+/// Every switch the two preset halves of the RustFS profile turn on (rustfs/backlog#2751): each
+/// chained call inside a `fn rustfs_profile(` body of `text` — the body ends at its method's
+/// closing brace, so the file's tests and its other items are not read — the assembly calls the
+/// seam diff replaces by design left out.
+fn preset_switches(text: &str) -> BTreeSet<String> {
+    text.match_indices("fn rustfs_profile(")
+        .map(|(start, _)| {
+            let body = &text[start..];
+            let end = body
+                .match_indices('\n')
+                .map(|(at, _)| at + 1)
+                .find(|&at| body[at..].lines().next().is_some_and(|line| line == "    }"))
+                .unwrap_or(body.len());
+            chained_calls(&body[..end])
+        })
+        .fold(BTreeSet::new(), |mut all, calls| {
+            all.extend(calls);
+            all
+        })
+        .into_iter()
+        .filter(|name| !ASSEMBLY_CALLS.contains(&name.as_str()))
+        .collect()
+}
+
 /// The seam diff measures what RustFS will be handed, so its gateway runs every request-handling
-/// switch of the RustFS profile, which is spelled once, in `compat/sut`: a switch added there and
-/// not here fails, instead of the diff silently measuring another profile.
+/// switch of the RustFS profile, which is spelled once, as the gateway's two preset halves
+/// (rustfs/backlog#2751); `compat/sut` runs the preset, and what it chains beside the preset is
+/// the host's. A switch added to the preset, or to the launcher beside it, and not here fails,
+/// instead of the diff silently measuring another profile. The seam does not call the preset
+/// itself: the preset also turns on the identifiers and the legacy CORS answers, which the seam
+/// replaces by design and which have no switch back.
 #[test]
 fn the_seam_diff_runs_every_switch_of_the_rustfs_profile() {
     let read = |path: &str| {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(path);
         std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("{}: {error}", path.display()))
     };
-    let profile = profile_switches(&read("../../compat/sut/src/service.rs"));
-    assert!(profile.len() >= 12, "the RustFS profile's switches were not found: {profile:?}");
+    let launcher = read("../../compat/sut/src/service.rs");
+    let beside_the_preset = profile_switches(&launcher);
+    assert!(
+        beside_the_preset.contains("rustfs_profile"),
+        "the launcher no longer runs the preset: {beside_the_preset:?}"
+    );
+    assert_eq!(
+        launcher.matches(".rustfs_profile()").count(),
+        2,
+        "the launcher runs one half of the preset, not both"
+    );
+    let preset = preset_switches(&read("../../crates/gateway/src/builder/rustfs_profile.rs"));
+    assert!(preset.len() >= 12, "the RustFS profile's switches were not found: {preset:?}");
+    let profile: BTreeSet<&String> = preset
+        .iter()
+        .chain(beside_the_preset.iter())
+        .filter(|name| name.as_str() != "rustfs_profile")
+        .collect();
     // The whole seam stack: its authenticator is built before its builder chain.
     let seam = chained_calls(&read("src/seam/stacks.rs"));
-    let missing: Vec<&String> = profile.difference(&seam).collect();
+    let missing: Vec<&&String> = profile.iter().filter(|name| !seam.contains(name.as_str())).collect();
     assert!(missing.is_empty(), "RustFS profile switches the seam diff does not turn on: {missing:?}");
+}
+
+/// Negative — the preset reading takes each `fn rustfs_profile(` body and nothing after its
+/// closing brace: a chain in the file's tests is not a switch, and a file without the preset
+/// names none.
+#[test]
+fn n_only_the_preset_bodies_are_read_for_switches() {
+    let preset = preset_switches(
+        "impl B {\n    pub fn rustfs_profile(mut self) -> Self {\n        self.floor = floor\n            .enable_sigv2_presigned_compatibility();\n        self.framework_governor_rates(r)\n            .clamp_oversized_max_keys()\n    }\n}\nimpl A {\n    pub fn rustfs_profile(self) -> Self {\n        self\n            .accept_any_signing_region()\n    }\n}\nmod tests {\n    fn t() {\n        B::new()\n            .with_skew_window(s)\n            .rustfs_profile();\n    }\n}\n",
+    );
+    assert_eq!(
+        preset.into_iter().collect::<Vec<_>>(),
+        [
+            "accept_any_signing_region",
+            "clamp_oversized_max_keys",
+            "enable_sigv2_presigned_compatibility"
+        ]
+    );
+    assert!(preset_switches("fn other() {\n    x\n        .clamp_oversized_max_keys()\n}\n").is_empty());
 }
 
 /// Negative — the switch reading names a missing switch.

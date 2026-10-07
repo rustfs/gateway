@@ -114,6 +114,11 @@ pub(crate) struct ChecksumWaiver {
 }
 
 impl ChecksumWaiver {
+    /// Whether this assembly waives the requirement on every operation (the RustFS profile).
+    pub(crate) const fn waives_every_operation(self) -> bool {
+        self.every_operation
+    }
+
     /// Whether this assembly waives the requirement for `operation`: only when a family it
     /// accepts omits the checksum on exactly that operation, or when it accepts every omission
     /// and the model requires one there.

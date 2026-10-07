@@ -142,7 +142,9 @@ signed `x-id` first; it lowers no floor, and every decision after routing, autho
 included, is made about the operation it chose. A fourth, the `LegacyRustfsVirtualHosts` resolver
 (#1136), reads virtual hosts as legacy RustFS does, a bucket-shaped host outside every configured
 domain naming a bucket of its own; it too lowers no floor, and every later decision is made about
-the bucket it read.
+the bucket it read. The first three, and every other legacy reading of the RustFS profile, are
+applied together by `ServiceBuilder::rustfs_profile` and named on the start-up `PROFILE_POSTURE`
+line; `docs/rustfs-profile.md` is the table of what each keeps and when it goes.
 
 **What is still yours.** The framework's promise stops at handing you a validated `ObjectKey`. It
 does not map that key onto a physical location, and it cannot: only you know what the root is. You

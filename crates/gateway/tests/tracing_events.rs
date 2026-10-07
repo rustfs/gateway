@@ -197,15 +197,16 @@ fn rustfs_shaped(captured: &Captured, subsystem: &str) {
     assert!(captured.field("message").is_some_and(|message| !message.is_empty()), "{captured:?}");
 }
 
-/// Negative — a default assembly reports its posture as three `info` events carrying the start-up
+/// Negative — a default assembly reports its posture as four `info` events carrying the start-up
 /// lines, and nothing at `warn` or above: a default is not a dangerous choice.
 #[test]
-fn a_default_assembly_reports_its_posture_in_three_info_events() {
+fn a_default_assembly_reports_its_posture_in_four_info_events() {
     let (_service, capture) = captured(|_| ping_service(support::wired()));
     for (event, prefix) in [
         ("gateway_security_posture", "SECURITY_POSTURE anonymous_reachable_ops=["),
         ("gateway_dialect_posture", "DIALECT_POSTURE claimed_prefixes=["),
         ("gateway_naming_posture", "NAMING_POSTURE slash_policy="),
+        ("gateway_profile_posture", "PROFILE_POSTURE switches=[]"),
     ] {
         let events = capture.named(event);
         assert_eq!(events.len(), 1, "{event}: {:?}", capture.events());
@@ -221,6 +222,36 @@ fn a_default_assembly_reports_its_posture_in_three_info_events() {
         .filter(|captured| captured.level <= Level::WARN)
         .collect();
     assert!(loud.is_empty(), "{loud:?}");
+}
+
+/// The stored start-up report is the lines that were logged, in the order they were logged, and
+/// nothing else: a host that prints `S3Service::startup_posture` through its own logger prints
+/// what a subscriber saw, with the optional presigned-expiry line in its place when it is on.
+#[test]
+fn the_stored_startup_report_is_what_was_logged() {
+    let floor = SecurityFloor::new().with_presigned_expiry_rule(PresignedExpiryRule::LegacyRustfs);
+    let (service, capture) = captured(|_| ping_service(support::wired().security_floor(floor).clamp_oversized_max_keys()));
+    let logged: Vec<String> = capture
+        .events()
+        .into_iter()
+        .filter(|captured| captured.field("subsystem") == Some("posture"))
+        .map(|captured| {
+            captured
+                .field("message")
+                .expect("a posture event carries its line")
+                .to_owned()
+        })
+        .collect();
+    let stored: Vec<&str> = service.startup_posture().lines().collect();
+    assert_eq!(stored, logged, "{:?}", capture.events());
+    assert_eq!(logged.len(), 5, "{logged:?}");
+    assert!(
+        service
+            .startup_posture()
+            .ends_with("PROFILE_POSTURE switches=[clamp_oversized_max_keys]\n"),
+        "{}",
+        service.startup_posture()
+    );
 }
 
 /// Negative — a widened presigned-lifetime rule is reported on its own line, and only when it is on.
