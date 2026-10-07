@@ -29,7 +29,10 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use bytes::Bytes;
-use rustfs_gateway::sig::{AmzDate, PayloadMode, SigService, SigV4Signer, SigningCredentials, SigningRequest, SigningScope};
+use rustfs_gateway::sig::{
+    AmzDate, AuthError, CustomAuthRequest, CustomAuthScheme, CustomSchemeRegistry, PayloadMode, SigService, SigV4Signer,
+    SignatureVerifier, SigningCredentials, SigningRequest, SigningScope, Verdict,
+};
 use rustfs_gateway::{
     Authorizer, AuthzRequest, BoxFuture, Credentials, Decision, Handler, HandlerResult, InputAuthzRequest, InputDecisions,
     RegionSet, Req, RequestContext, Resp, S3Service, ServiceBuilder, SigV4Authenticator, StaticCredentials, dto,
@@ -455,6 +458,46 @@ async fn n_a_malformed_credential_is_refused_before_the_ceiling() {
     let (status, body, polled) = send(&service, request, length).await;
     assert_ne!(support::element_text(&body, "Code"), Some("EntityTooLarge"), "{status}: {body}");
     assert!(status.is_client_error(), "{status}: {body}");
+    assert_eq!(polled, 0);
+    assert_eq!(seen.handled.load(Ordering::SeqCst), 0);
+}
+
+/// Refuses every request presented under the custom scheme, counting each one.
+struct RefusingVerifier(Arc<AtomicUsize>);
+
+impl SignatureVerifier for RefusingVerifier {
+    fn verify(&self, _request: &CustomAuthRequest<'_>) -> Verdict {
+        self.0.fetch_add(1, Ordering::SeqCst);
+        Verdict::reject(AuthError::AccessDenied)
+    }
+}
+
+/// Negative — a credential presented under a registered custom scheme is a credential: its
+/// verifier answers first, and an oversized claimed body is not refused as too large ahead of it.
+#[tokio::test]
+async fn n_a_custom_scheme_credential_is_verified_before_the_ceiling() {
+    let seen = Arc::new(Seen::default());
+    let verified = Arc::new(AtomicUsize::new(0));
+    let mut registry = CustomSchemeRegistry::new();
+    registry
+        .register(CustomAuthScheme::new("x-vendor-auth-").expect("a legal custom prefix"))
+        .expect("the first scheme is unique");
+    let service = support::wired()
+        .security_floor(rustfs_gateway::SecurityFloor::new().with_custom_schemes(registry))
+        .custom_signature_verifier(RefusingVerifier(Arc::clone(&verified)))
+        .authorizer(Counting(Arc::clone(&seen), Decision::Allow))
+        .dialect(&dialect())
+        .register::<Info, _>(Arc::new(Backend(Arc::clone(&seen))))
+        .register::<Import, _>(Arc::new(Backend(Arc::clone(&seen))))
+        .bound_claimed_route_bodies_as_legacy_rustfs()
+        .build()
+        .expect("a complete assembly");
+    let length = 2 * MIB;
+    let request = anonymous(http::Method::PUT, "/example/admin/v1/import", length as u64).header("x-vendor-auth-token", "opaque");
+    let (status, body, polled) = send(&service, request, length).await;
+    assert_eq!(status, http::StatusCode::FORBIDDEN, "{body}");
+    assert_ne!(support::element_text(&body, "Code"), Some("EntityTooLarge"), "{body}");
+    assert_eq!(verified.load(Ordering::SeqCst), 1, "the custom verifier was not asked");
     assert_eq!(polled, 0);
     assert_eq!(seen.handled.load(Ordering::SeqCst), 0);
 }
