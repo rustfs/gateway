@@ -15,7 +15,8 @@
 //! Deployment name-policy threading for generated XML input readers.
 //!
 //! Responsible for: finding nested input shapes that contain an `ObjectKey`, then rendering the
-//! extra reader argument and matching function signature. NOT responsible for: decoding or
+//! extra reader arguments — the name policy, and the document reading a nonempty-text member needs
+//! (`nonempty`) — and the matching function signature. NOT responsible for: decoding or
 //! validating the key; generated readers delegate that to `rustfs-gateway-core`.
 //! Upstream: the operation IR. Downstream: the request decoder emitter.
 
@@ -23,7 +24,7 @@ use std::collections::BTreeSet;
 
 use rustfs_gateway_model::ir::{OperationIr, Type};
 
-use super::expr;
+use super::{CodecRules, expr, nonempty};
 use crate::emit::dto::naming;
 
 fn shape_needs_name_policy(ir: &OperationIr, name: &str) -> bool {
@@ -52,49 +53,83 @@ fn type_needs_name_policy(ir: &OperationIr, ty: &Type, visiting: &mut BTreeSet<S
     }
 }
 
+/// The extra arguments a generated reader call may pass on, as expressions in the calling scope.
+#[derive(Clone, Copy)]
+pub(super) struct ReaderArgs<'a> {
+    /// The deployment name policy, where the calling scope holds one.
+    pub(super) names: Option<&'a str>,
+    /// The deployment's document reading (`nonempty`).
+    pub(super) reading: &'a str,
+}
+
+impl ReaderArgs<'static> {
+    /// An operation's top-level decoder: both come from the request view.
+    pub(super) const TOP: Self = Self {
+        names: Some("request.names()"),
+        reading: nonempty::REQUEST_READING,
+    };
+
+    /// Inside a nested reader: its own parameters.
+    pub(super) fn nested(needs_names: bool) -> Self {
+        Self {
+            names: needs_names.then_some("names"),
+            reading: nonempty::READING,
+        }
+    }
+}
+
 pub(super) fn shape_reader_call(
     ir: &OperationIr,
+    rules: &CodecRules,
     shape: &str,
     reader: &str,
     node: &str,
-    name_policy: Option<&str>,
+    args: ReaderArgs<'_>,
 ) -> Result<String, String> {
-    if !shape_needs_name_policy(ir, shape) {
-        return Ok(format!("{reader}({node})?"));
+    let mut arguments = node.to_owned();
+    if shape_needs_name_policy(ir, shape) {
+        let names = args.names.ok_or_else(|| {
+            expr::unsupported(&ir.operation, shape, "an object-key body reader has no deployment naming policy")
+        })?;
+        arguments.push_str(", ");
+        arguments.push_str(names);
     }
-    let names = name_policy
-        .ok_or_else(|| expr::unsupported(&ir.operation, shape, "an object-key body reader has no deployment naming policy"))?;
-    Ok(format!("{reader}({node}, {names})?"))
+    if nonempty::shape_needs_reading(ir, shape, rules) {
+        arguments.push_str(", ");
+        arguments.push_str(args.reading);
+    }
+    Ok(format!("{reader}({arguments})?"))
 }
 
+/// Renders a nested shape reader's signature, and whether the reader takes the name policy.
+///
+/// A reader takes the deployment's document reading too when a member it reaches carries a
+/// nonempty-text rule (`nonempty`), so the tree reading can refuse an empty one.
 pub(super) fn shape_reader_signature(
     ir: &OperationIr,
+    rules: &CodecRules,
     name: &str,
     node: &str,
     type_name: &str,
     max_width: usize,
 ) -> (String, bool) {
     let needs_names = shape_needs_name_policy(ir, name);
+    let needs_reading = nonempty::shape_needs_reading(ir, name, rules);
     let module = naming::module_name(name);
-    let names = if needs_names {
-        ", names: &rustfs_gateway_types::NamePolicy"
-    } else {
-        ""
-    };
-    let single =
-        format!("fn read_{module}({node}: &rustfs_gateway_xml::XmlNode{names}) -> Result<dto::{type_name}, CodecError> {{\n");
+    let mut parameters = vec![format!("{node}: &rustfs_gateway_xml::XmlNode")];
+    if needs_names {
+        parameters.push("names: &rustfs_gateway_types::NamePolicy".to_owned());
+    }
+    if needs_reading {
+        parameters.push(format!("{}: crate::codec::DocumentReading", nonempty::READING));
+    }
+    let single = format!("fn read_{module}({}) -> Result<dto::{type_name}, CodecError> {{\n", parameters.join(", "));
     if single.trim_end().len() <= max_width {
         return (single, needs_names);
     }
-    let names = if needs_names {
-        "    names: &rustfs_gateway_types::NamePolicy,\n"
-    } else {
-        ""
-    };
+    let parameters: String = parameters.iter().map(|parameter| format!("    {parameter},\n")).collect();
     (
-        format!(
-            "fn read_{module}(\n    {node}: &rustfs_gateway_xml::XmlNode,\n{names}) -> Result<dto::{type_name}, CodecError> {{\n"
-        ),
+        format!("fn read_{module}(\n{parameters}) -> Result<dto::{type_name}, CodecError> {{\n"),
         needs_names,
     )
 }

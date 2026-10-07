@@ -15,21 +15,25 @@
 //! An empty element in a **required** enumeration member of a request document
 //! (rustfs/gateway#1078, row 3).
 //!
-//! Responsible for: rejecting empty required Status at the HTTP boundary, carrying other empty
-//! required enumerations as client values rather than placeholder defaults, and preserving the
-//! rejection of absent required members. The later #1078 ruling requires the Status refusal.
+//! Responsible for: rejecting empty required Status at the HTTP boundary under the tree reading,
+//! handing it over as the empty value under the RustFS reading, carrying other empty required
+//! enumerations as client values rather than placeholder defaults, and preserving the rejection
+//! of absent required members. The later #1078 ruling requires the Status refusal.
 //! NOT responsible for: backend validation of other enums or persisted configuration decoding.
 //! Upstream: generated codecs. Downstream: operation handlers.
 //!
 //! A malformed client value must never become InternalError. Empty Payer, SSEAlgorithm and
-//! restore/select enums still reach their handlers; required Status now fails with MalformedXML
-//! before any handler, while its stored-data reader remains lenient.
+//! restore/select enums still reach their handlers; required Status fails with MalformedXML
+//! before any handler under the tree reading, while its stored-data reader remains lenient. The
+//! RustFS reading hands it to RustFS's handler exactly as legacy RustFS's decoder does, so legacy
+//! RustFS's own code answers it: `MalformedXML` for a lifecycle rule, `InvalidRequest` for every
+//! replication position.
 
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 
 use bytes::Bytes;
 use http::Request;
-use rustfs_gateway_core::codec::{CodecError, MetaView, OperationCodec, RequestBody};
+use rustfs_gateway_core::codec::{CodecError, DocumentReading, MetaView, OperationCodec, RequestBody};
 use rustfs_gateway_core::route::TargetKind;
 use rustfs_gateway_http::{Limits, WireRequest};
 use rustfs_gateway_types::{ErrorCode, WirePlaceholder, dto};
@@ -39,6 +43,15 @@ use rustfs_gateway_types::{ErrorCode, WirePlaceholder, dto};
 const INTEGRITY: (&str, &str) = ("x-amz-checksum-crc32", "AAAAAA==");
 
 fn decode<O: OperationCodec>(target: &str, kind: TargetKind, document: &str) -> Result<O::Input, CodecError> {
+    decode_as::<O>(DocumentReading::Tree, target, kind, document)
+}
+
+fn decode_as<O: OperationCodec>(
+    reading: DocumentReading,
+    target: &str,
+    kind: TargetKind,
+    document: &str,
+) -> Result<O::Input, CodecError> {
     let request = Request::builder()
         .method("PUT")
         .uri(format!("http://host.invalid{target}"))
@@ -47,12 +60,17 @@ fn decode<O: OperationCodec>(target: &str, kind: TargetKind, document: &str) -> 
         .body(())
         .expect("the fixture request is well formed");
     let wire = WireRequest::accept(request, &Limits::default()).expect("the fixture request is acceptable");
-    let view = MetaView::of(&wire, kind).expect("view");
+    let view = MetaView::of(&wire, kind).expect("view").with_document_reading(reading);
     O::decode(&view, RequestBody::Buffered(Bytes::copy_from_slice(document.as_bytes())))
 }
 
 fn lifecycle(status: &str) -> Result<dto::PutBucketLifecycleConfigurationInput, CodecError> {
-    decode::<dto::PutBucketLifecycleConfiguration>(
+    lifecycle_as(DocumentReading::Tree, status)
+}
+
+fn lifecycle_as(reading: DocumentReading, status: &str) -> Result<dto::PutBucketLifecycleConfigurationInput, CodecError> {
+    decode_as::<dto::PutBucketLifecycleConfiguration>(
+        reading,
         "/photos?lifecycle",
         TargetKind::Bucket,
         &format!(
@@ -65,7 +83,12 @@ fn lifecycle(status: &str) -> Result<dto::PutBucketLifecycleConfigurationInput, 
 /// A replication document whose one rule carries `rule` inside it and `destination` inside its
 /// destination, with every other required member present.
 fn replication(rule: &str, destination: &str) -> Result<dto::ReplicationConfiguration, CodecError> {
-    decode::<dto::PutBucketReplication>(
+    replication_as(DocumentReading::Tree, rule, destination)
+}
+
+fn replication_as(reading: DocumentReading, rule: &str, destination: &str) -> Result<dto::ReplicationConfiguration, CodecError> {
+    decode_as::<dto::PutBucketReplication>(
+        reading,
         "/photos?replication",
         TargetKind::Bucket,
         &format!(
@@ -102,7 +125,8 @@ fn refused_as_malformed<T: std::fmt::Debug>(outcome: Result<T, CodecError>, posi
 
 // ── empty required members ────────────────────────────────────────────────────────────────
 
-/// Negative — both empty XML spellings fail before a lifecycle handler can run.
+/// Negative — under the tree reading, both empty XML spellings fail before a lifecycle handler
+/// can run.
 #[test]
 fn n_an_empty_lifecycle_rule_status_is_malformed_xml() {
     for status in ["<Status></Status>", "<Status/>"] {
@@ -110,7 +134,8 @@ fn n_an_empty_lifecycle_rule_status_is_malformed_xml() {
     }
 }
 
-/// Negative — every required Status of a replication rule and its nested members is refused.
+/// Negative — under the tree reading, every required Status of a replication rule and its nested
+/// members is refused.
 #[test]
 fn n_an_empty_replication_status_is_malformed_xml_wherever_it_is_required() {
     let enabled = "<Status>Enabled</Status>";
@@ -149,6 +174,97 @@ fn n_an_empty_replication_status_is_malformed_xml_wherever_it_is_required() {
     ] {
         refused_as_malformed(replication(&rule, destination), position);
     }
+}
+
+/// Positive — under the RustFS reading, `LifecycleRule.Status`, paired and self-closing, is the
+/// empty value legacy RustFS's decoder hands its handler, which refuses it with `MalformedXML`
+/// (`rustfs/src/app/bucket_usecase.rs:1272-1282`, `:2396-2398` at rustfs/rustfs@95268a3b9).
+#[test]
+fn an_empty_lifecycle_rule_status_is_decoded_as_the_empty_value_under_the_rustfs_reading() {
+    for status in ["<Status></Status>", "<Status/>"] {
+        let input = lifecycle_as(DocumentReading::RustFs, status).unwrap_or_else(|error| panic!("{status}: {error}"));
+        let configuration = input.lifecycle_configuration.expect("a configuration");
+        empty_value!(&configuration.rules[0].status, status);
+    }
+}
+
+/// Positive — under the RustFS reading, the seven required statuses of a replication rule and its
+/// nested members are the empty value legacy RustFS's decoder hands its handler, which refuses each
+/// with `InvalidRequest` (`rustfs/src/app/bucket_usecase.rs:688-704`,
+/// `crates/replication/src/config.rs:193-283` at rustfs/rustfs@95268a3b9), not `MalformedXML`.
+#[test]
+fn an_empty_replication_status_is_decoded_as_the_empty_value_wherever_it_is_required_under_the_rustfs_reading() {
+    let rule = replication_as(DocumentReading::RustFs, "<Status></Status>", "").expect("rule status");
+    empty_value!(&rule.rules[0].status, "ReplicationRule.Status");
+
+    let enabled = "<Status>Enabled</Status>";
+    let delete = replication_as(
+        DocumentReading::RustFs,
+        &format!("{enabled}<DeleteReplication><Status/></DeleteReplication>"),
+        "",
+    )
+    .expect("delete");
+    empty_value!(
+        &delete.rules[0].delete_replication.as_ref().expect("present").status,
+        "DeleteReplication.Status"
+    );
+
+    let existing = replication_as(
+        DocumentReading::RustFs,
+        &format!("{enabled}<ExistingObjectReplication><Status></Status></ExistingObjectReplication>"),
+        "",
+    )
+    .expect("existing");
+    empty_value!(
+        &existing.rules[0]
+            .existing_object_replication
+            .as_ref()
+            .expect("present")
+            .status,
+        "ExistingObjectReplication.Status",
+    );
+
+    let modifications = replication_as(
+        DocumentReading::RustFs,
+        &format!(
+            "{enabled}<SourceSelectionCriteria><ReplicaModifications><Status/></ReplicaModifications></SourceSelectionCriteria>"
+        ),
+        "",
+    )
+    .expect("replica modifications");
+    let criteria = modifications.rules[0].source_selection_criteria.as_ref().expect("criteria");
+    empty_value!(
+        &criteria.replica_modifications.as_ref().expect("present").status,
+        "ReplicaModifications.Status",
+    );
+
+    let kms = replication_as(
+        DocumentReading::RustFs,
+        &format!(
+            "{enabled}<SourceSelectionCriteria><SseKmsEncryptedObjects><Status></Status></SseKmsEncryptedObjects></SourceSelectionCriteria>"
+        ),
+        "",
+    )
+    .expect("sse-kms objects");
+    let criteria = kms.rules[0].source_selection_criteria.as_ref().expect("criteria");
+    empty_value!(
+        &criteria.sse_kms_encrypted_objects.as_ref().expect("present").status,
+        "SseKmsEncryptedObjects.Status",
+    );
+
+    let metrics = replication_as(DocumentReading::RustFs, enabled, "<Metrics><Status/></Metrics>").expect("metrics");
+    empty_value!(&metrics.rules[0].destination.metrics.as_ref().expect("present").status, "Metrics.Status",);
+
+    let time = replication_as(
+        DocumentReading::RustFs,
+        enabled,
+        "<ReplicationTime><Status></Status><Time><Minutes>15</Minutes></Time></ReplicationTime>",
+    )
+    .expect("replication time");
+    empty_value!(
+        &time.rules[0].destination.replication_time.as_ref().expect("present").status,
+        "ReplicationTime.Status",
+    );
 }
 
 /// Positive — `RequestPaymentConfiguration.Payer`, which legacy RustFS stores empty.

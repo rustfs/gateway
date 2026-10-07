@@ -59,7 +59,7 @@ impl OperationCodec for dto::PutBucketReplication {
                 CodecError::malformed_xml("the request body has the wrong root element").about("ReplicationConfiguration")
             );
         }
-        input.replication_configuration = read_replication_configuration(&root)?;
+        input.replication_configuration = read_replication_configuration(&root, request.document_reading())?;
         // Token — header `x-amz-bucket-object-lock-token`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-bucket-object-lock-token") {
             let raw = raw.as_ref();
@@ -112,10 +112,13 @@ fn read_delete_marker_replication(node: &rustfs_gateway_xml::XmlNode) -> Result<
 
 /// Reads one `DeleteReplication` element. Members are matched by local name, so a namespace-prefixed
 /// body and a bare one decode identically.
-fn read_delete_replication(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::DeleteReplication, CodecError> {
+fn read_delete_replication(
+    node: &rustfs_gateway_xml::XmlNode,
+    reading: crate::codec::DocumentReading,
+) -> Result<dto::DeleteReplication, CodecError> {
     let mut shape = dto::DeleteReplication { ..Default::default() };
     if let Some(raw) = node.child_text("Status") {
-        if raw.is_empty() {
+        if raw.is_empty() && reading == crate::codec::DocumentReading::Tree {
             return Err(CodecError::malformed_xml("a required text member is empty").about("Status"));
         }
         shape.status = dto::Status::custom(raw.to_owned());
@@ -128,7 +131,10 @@ fn read_delete_replication(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::De
 
 /// Reads one `Destination` element. Members are matched by local name, so a namespace-prefixed
 /// body and a bare one decode identically.
-fn read_destination(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::Destination, CodecError> {
+fn read_destination(
+    node: &rustfs_gateway_xml::XmlNode,
+    reading: crate::codec::DocumentReading,
+) -> Result<dto::Destination, CodecError> {
     let mut shape = dto::Destination { ..Default::default() };
     if let Some(raw) = node.child_text("Bucket") {
         shape.bucket = raw.to_owned();
@@ -148,10 +154,10 @@ fn read_destination(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::Destinati
         shape.encryption_configuration = Some(read_encryption_configuration(child)?);
     }
     if let Some(child) = node.child("ReplicationTime") {
-        shape.replication_time = Some(read_replication_time(child)?);
+        shape.replication_time = Some(read_replication_time(child, reading)?);
     }
     if let Some(child) = node.child("Metrics") {
-        shape.metrics = Some(read_metrics(child)?);
+        shape.metrics = Some(read_metrics(child, reading)?);
     }
     value::exit(shape.check_required())?;
     Ok(shape)
@@ -170,10 +176,13 @@ fn read_encryption_configuration(node: &rustfs_gateway_xml::XmlNode) -> Result<d
 
 /// Reads one `ExistingObjectReplication` element. Members are matched by local name, so a namespace-prefixed
 /// body and a bare one decode identically.
-fn read_existing_object_replication(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::ExistingObjectReplication, CodecError> {
+fn read_existing_object_replication(
+    node: &rustfs_gateway_xml::XmlNode,
+    reading: crate::codec::DocumentReading,
+) -> Result<dto::ExistingObjectReplication, CodecError> {
     let mut shape = dto::ExistingObjectReplication { ..Default::default() };
     if let Some(raw) = node.child_text("Status") {
-        if raw.is_empty() {
+        if raw.is_empty() && reading == crate::codec::DocumentReading::Tree {
             return Err(CodecError::malformed_xml("a required text member is empty").about("Status"));
         }
         shape.status = dto::Status::custom(raw.to_owned());
@@ -186,10 +195,10 @@ fn read_existing_object_replication(node: &rustfs_gateway_xml::XmlNode) -> Resul
 
 /// Reads one `Metrics` element. Members are matched by local name, so a namespace-prefixed
 /// body and a bare one decode identically.
-fn read_metrics(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::Metrics, CodecError> {
+fn read_metrics(node: &rustfs_gateway_xml::XmlNode, reading: crate::codec::DocumentReading) -> Result<dto::Metrics, CodecError> {
     let mut shape = dto::Metrics { ..Default::default() };
     if let Some(raw) = node.child_text("Status") {
-        if raw.is_empty() {
+        if raw.is_empty() && reading == crate::codec::DocumentReading::Tree {
             return Err(CodecError::malformed_xml("a required text member is empty").about("Status"));
         }
         shape.status = dto::Status::custom(raw.to_owned());
@@ -205,10 +214,13 @@ fn read_metrics(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::Metrics, Code
 
 /// Reads one `ReplicaModifications` element. Members are matched by local name, so a namespace-prefixed
 /// body and a bare one decode identically.
-fn read_replica_modifications(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::ReplicaModifications, CodecError> {
+fn read_replica_modifications(
+    node: &rustfs_gateway_xml::XmlNode,
+    reading: crate::codec::DocumentReading,
+) -> Result<dto::ReplicaModifications, CodecError> {
     let mut shape = dto::ReplicaModifications { ..Default::default() };
     if let Some(raw) = node.child_text("Status") {
-        if raw.is_empty() {
+        if raw.is_empty() && reading == crate::codec::DocumentReading::Tree {
             return Err(CodecError::malformed_xml("a required text member is empty").about("Status"));
         }
         shape.status = dto::Status::custom(raw.to_owned());
@@ -221,7 +233,10 @@ fn read_replica_modifications(node: &rustfs_gateway_xml::XmlNode) -> Result<dto:
 
 /// Reads one `ReplicationConfiguration` element. Members are matched by local name, so a namespace-prefixed
 /// body and a bare one decode identically.
-fn read_replication_configuration(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::ReplicationConfiguration, CodecError> {
+fn read_replication_configuration(
+    node: &rustfs_gateway_xml::XmlNode,
+    reading: crate::codec::DocumentReading,
+) -> Result<dto::ReplicationConfiguration, CodecError> {
     let mut shape = dto::ReplicationConfiguration { ..Default::default() };
     if let Some(raw) = node.child_text("Role") {
         shape.role = raw.to_owned();
@@ -229,7 +244,7 @@ fn read_replication_configuration(node: &rustfs_gateway_xml::XmlNode) -> Result<
         return Err(CodecError::malformed_xml("the body omits a member the schema requires").about("Role"));
     }
     for item in node.children_named("Rule") {
-        shape.rules.push(read_replication_rule(item)?);
+        shape.rules.push(read_replication_rule(item, reading)?);
     }
     if shape.rules.is_empty() {
         return Err(CodecError::malformed_xml("the body carries no entry for a member that requires one").about("Rules"));
@@ -240,7 +255,10 @@ fn read_replication_configuration(node: &rustfs_gateway_xml::XmlNode) -> Result<
 
 /// Reads one `ReplicationRule` element. Members are matched by local name, so a namespace-prefixed
 /// body and a bare one decode identically.
-fn read_replication_rule(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::ReplicationRule, CodecError> {
+fn read_replication_rule(
+    node: &rustfs_gateway_xml::XmlNode,
+    reading: crate::codec::DocumentReading,
+) -> Result<dto::ReplicationRule, CodecError> {
     let mut shape = dto::ReplicationRule { ..Default::default() };
     if let Some(raw) = node.child_text("ID") {
         shape.id = Some(raw.to_owned());
@@ -259,7 +277,7 @@ fn read_replication_rule(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::Repl
         shape.filter = Some(read_replication_rule_filter(child)?);
     }
     if let Some(raw) = node.child_text("Status") {
-        if raw.is_empty() {
+        if raw.is_empty() && reading == crate::codec::DocumentReading::Tree {
             return Err(CodecError::malformed_xml("a required text member is empty").about("Status"));
         }
         shape.status = dto::Status::custom(raw.to_owned());
@@ -267,13 +285,13 @@ fn read_replication_rule(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::Repl
         return Err(CodecError::malformed_xml("the body omits a member the schema requires").about("Status"));
     }
     if let Some(child) = node.child("SourceSelectionCriteria") {
-        shape.source_selection_criteria = Some(read_source_selection_criteria(child)?);
+        shape.source_selection_criteria = Some(read_source_selection_criteria(child, reading)?);
     }
     if let Some(child) = node.child("ExistingObjectReplication") {
-        shape.existing_object_replication = Some(read_existing_object_replication(child)?);
+        shape.existing_object_replication = Some(read_existing_object_replication(child, reading)?);
     }
     if let Some(child) = node.child("Destination") {
-        shape.destination = read_destination(child)?;
+        shape.destination = read_destination(child, reading)?;
     } else {
         return Err(CodecError::malformed_xml("the body omits a member the schema requires").about("Destination"));
     }
@@ -281,7 +299,7 @@ fn read_replication_rule(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::Repl
         shape.delete_marker_replication = Some(read_delete_marker_replication(child)?);
     }
     if let Some(child) = node.child("DeleteReplication") {
-        shape.delete_replication = Some(read_delete_replication(child)?);
+        shape.delete_replication = Some(read_delete_replication(child, reading)?);
     }
     value::exit(shape.check_required())?;
     Ok(shape)
@@ -320,10 +338,13 @@ fn read_replication_rule_filter(node: &rustfs_gateway_xml::XmlNode) -> Result<dt
 
 /// Reads one `ReplicationTime` element. Members are matched by local name, so a namespace-prefixed
 /// body and a bare one decode identically.
-fn read_replication_time(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::ReplicationTime, CodecError> {
+fn read_replication_time(
+    node: &rustfs_gateway_xml::XmlNode,
+    reading: crate::codec::DocumentReading,
+) -> Result<dto::ReplicationTime, CodecError> {
     let mut shape = dto::ReplicationTime { ..Default::default() };
     if let Some(raw) = node.child_text("Status") {
-        if raw.is_empty() {
+        if raw.is_empty() && reading == crate::codec::DocumentReading::Tree {
             return Err(CodecError::malformed_xml("a required text member is empty").about("Status"));
         }
         shape.status = dto::Status::custom(raw.to_owned());
@@ -352,13 +373,16 @@ fn read_replication_time_value(node: &rustfs_gateway_xml::XmlNode) -> Result<dto
 
 /// Reads one `SourceSelectionCriteria` element. Members are matched by local name, so a namespace-prefixed
 /// body and a bare one decode identically.
-fn read_source_selection_criteria(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::SourceSelectionCriteria, CodecError> {
+fn read_source_selection_criteria(
+    node: &rustfs_gateway_xml::XmlNode,
+    reading: crate::codec::DocumentReading,
+) -> Result<dto::SourceSelectionCriteria, CodecError> {
     let mut shape = dto::SourceSelectionCriteria { ..Default::default() };
     if let Some(child) = node.child("SseKmsEncryptedObjects") {
-        shape.sse_kms_encrypted_objects = Some(read_sse_kms_encrypted_objects(child)?);
+        shape.sse_kms_encrypted_objects = Some(read_sse_kms_encrypted_objects(child, reading)?);
     }
     if let Some(child) = node.child("ReplicaModifications") {
-        shape.replica_modifications = Some(read_replica_modifications(child)?);
+        shape.replica_modifications = Some(read_replica_modifications(child, reading)?);
     }
     value::exit(shape.check_required())?;
     Ok(shape)
@@ -366,10 +390,13 @@ fn read_source_selection_criteria(node: &rustfs_gateway_xml::XmlNode) -> Result<
 
 /// Reads one `SseKmsEncryptedObjects` element. Members are matched by local name, so a namespace-prefixed
 /// body and a bare one decode identically.
-fn read_sse_kms_encrypted_objects(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::SseKmsEncryptedObjects, CodecError> {
+fn read_sse_kms_encrypted_objects(
+    node: &rustfs_gateway_xml::XmlNode,
+    reading: crate::codec::DocumentReading,
+) -> Result<dto::SseKmsEncryptedObjects, CodecError> {
     let mut shape = dto::SseKmsEncryptedObjects { ..Default::default() };
     if let Some(raw) = node.child_text("Status") {
-        if raw.is_empty() {
+        if raw.is_empty() && reading == crate::codec::DocumentReading::Tree {
             return Err(CodecError::malformed_xml("a required text member is empty").about("Status"));
         }
         shape.status = dto::Status::custom(raw.to_owned());

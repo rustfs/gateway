@@ -187,15 +187,3 @@ fn an_invalid_output_bucket_name_is_refused_by_the_gateway_and_read_by_the_legac
         "InvalidArgument",
     );
 }
-
-/// The #1078 ruling deliberately refuses this value earlier than the legacy decoder.
-///
-/// Ruling: `rd-doc-0009`
-#[test]
-fn empty_required_status_is_refused_before_the_backend() {
-    refused_where_legacy_accepts(
-        Op::PutBucketLifecycleConfiguration,
-        "<LifecycleConfiguration><Rule><Status/></Rule></LifecycleConfiguration>",
-        "MalformedXML",
-    );
-}

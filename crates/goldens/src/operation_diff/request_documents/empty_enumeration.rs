@@ -14,9 +14,10 @@
 
 //! Empty required request enumerations and the HTTP-only Status refusal (rustfs/gateway#1078).
 //!
-//! Responsible for: refusing empty required Status values before the backend, preserving the
-//! remaining empty enumerations, and checking absent required members under both readings.
-//! Also pins the persisted-reader boundary. NOT responsible for: backend validation of other values.
+//! Responsible for: the tree reading refusing empty required Status values before the backend,
+//! the RustFS reading handing them over as the legacy decoder does, the remaining empty
+//! enumerations handed over alike, and absent required members refused alike under both readings.
+//! Also pins the persisted-reader boundary. NOT responsible for: backend validation of any value.
 //! Upstream: the parent harness. Downstream: nothing.
 
 use rustfs_gateway_core::DocumentReading;
@@ -136,24 +137,49 @@ fn n_an_absent_required_enumeration_is_refused_alike() {
     }
 }
 
-/// A request-only divergence required by the later ruling: both XML spellings are malformed,
-/// even though the legacy decoder hands the empty string to its backend.
+/// The empty spellings of a required `Status`, a CDATA section with no text among them.
+const EMPTY_STATUS: [&str; 3] = ["<Status/>", "<Status></Status>", "<Status><![CDATA[]]></Status>"];
+
+/// Negative — the later ruling on #1078: the tree reading refuses every empty spelling with
+/// `MalformedXML` before any backend runs, although the legacy decoder hands the empty string on.
 #[test]
 fn n_empty_required_status_is_malformed_xml() {
     for (op, position, body) in empty_required_enumerations()
         .into_iter()
         .filter(|(_, position, _)| position.ends_with(".Status"))
     {
-        for empty in ["<Status/>", "<Status></Status>", "<Status><![CDATA[]]></Status>"] {
+        for empty in EMPTY_STATUS {
             let body = body.replace("<Status/>", empty).replace("<Status></Status>", empty);
             assert!(legacy(op, body.as_bytes()).is_ok(), "{position}: legacy control");
-            for reading in [DocumentReading::Tree, DocumentReading::RustFs] {
-                assert_eq!(
-                    gateway(op, reading, body.as_bytes()),
-                    Err("MalformedXML".to_owned()),
-                    "{position} {reading:?}: {empty}"
-                );
-            }
+            assert_eq!(
+                gateway(op, DocumentReading::Tree, body.as_bytes()),
+                Err("MalformedXML".to_owned()),
+                "{position}: {empty}"
+            );
+        }
+    }
+}
+
+/// Positive — the RustFS reading hands an empty required `Status` to the RustFS body exactly as
+/// the legacy decoder does, so RustFS's own handler answers it with legacy RustFS's code:
+/// `MalformedXML` for a lifecycle rule (`rustfs/src/app/bucket_usecase.rs:1272-1282`, `:2396-2398`)
+/// and `InvalidRequest` for every replication position (`:688-704`;
+/// `crates/replication/src/config.rs:235-283`), at rustfs/rustfs@95268a3b9. A decoder refusal would
+/// answer a replication write `MalformedXML` instead.
+#[test]
+fn an_empty_required_status_is_handed_over_alike_under_the_rustfs_reading() {
+    for (op, position, body) in empty_required_enumerations()
+        .into_iter()
+        .filter(|(_, position, _)| position.ends_with(".Status"))
+    {
+        for empty in EMPTY_STATUS {
+            let body = body.replace("<Status/>", empty).replace("<Status></Status>", empty);
+            let legacy = legacy(op, body.as_bytes());
+            let handed = legacy
+                .clone()
+                .unwrap_or_else(|code| panic!("{position}: the legacy stack refused with {code}"));
+            assert!(handed.contains("(\"\")"), "{position}: the legacy stack handed no empty value: {handed}");
+            assert_eq!(gateway(op, DocumentReading::RustFs, body.as_bytes()), legacy, "{position}: {empty}");
         }
     }
 }
@@ -223,10 +249,11 @@ fn stored_empty_status_remains_readable_and_round_trips() {
     }
 }
 
-/// The RustFS reading inherits the old reader's CDATA omission, so this becomes an empty value
-/// there. Tree reading keeps its text. Neither reader may send an empty required Status onward.
+/// The RustFS reading inherits the legacy reader's CDATA omission, so a `Status` written only as
+/// CDATA is the empty value there, handed over as legacy RustFS hands it; the tree reading keeps
+/// its text.
 #[test]
-fn n_cdata_discarded_by_legacy_reading_cannot_supply_required_status() {
+fn cdata_status_is_read_as_each_reading_reads_it() {
     for (op, position, body) in empty_required_enumerations()
         .into_iter()
         .filter(|(_, position, _)| position.ends_with(".Status"))
@@ -239,11 +266,7 @@ fn n_cdata_discarded_by_legacy_reading_cannot_supply_required_status() {
             .replace("<Status></Status>", "<Status><![CDATA[Enabled]]></Status>");
         let handed = legacy(op, cdata.as_bytes()).expect("legacy hands over an empty value");
         assert!(handed.contains("(\"\")"), "{position}");
-        assert_eq!(
-            gateway(op, DocumentReading::RustFs, cdata.as_bytes()),
-            Err("MalformedXML".to_owned()),
-            "{position}"
-        );
+        assert_eq!(gateway(op, DocumentReading::RustFs, cdata.as_bytes()), Ok(handed), "{position}");
         assert_eq!(
             gateway(op, DocumentReading::Tree, cdata.as_bytes()),
             gateway(op, DocumentReading::Tree, plain.as_bytes()),

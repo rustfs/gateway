@@ -1664,7 +1664,7 @@ Unconfigured subresource returns `NoSuchLifecycleConfiguration`.
 **Quirks**
 
 - `q-lc-0001` (not_configured_error on `GetBucketLifecycleConfiguration`) — A bucket that never had a lifecycle document answers 404 with the operation-specific code NoSuchLifecycleConfiguration, not a generic not-found and not an empty 200.
-- `q-xml-status-0001` (nonempty_required_text on `request.required_status`) — HTTP lifecycle and replication documents refuse empty required Status members with MalformedXML; nonempty unknown values and persisted configuration readers remain lenient.
+- `q-xml-status-0001` (nonempty_required_text on `request.required_status`) — Under the tree reading, HTTP lifecycle and replication documents refuse empty required Status members with MalformedXML; the RustFS reading hands the empty value to the RustFS handler as legacy RustFS does, which answers MalformedXML for lifecycle and InvalidRequest for replication. Nonempty unknown values and persisted configuration readers remain lenient.
 - `q-lc-0003` (flattened_list on `BucketLifecycleConfiguration.Rules`) — The rules repeat as sibling Rule elements directly under the LifecycleConfiguration root; a Rules wrapper element would make every SDK read zero rules.
 
 Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
@@ -2109,7 +2109,7 @@ Unconfigured subresource returns `ReplicationConfigurationNotFoundError`.
 **Quirks**
 
 - `q-repl-0001` (not_configured_error on `GetBucketReplication`) — A bucket that never had a replication document answers 404 with the operation-specific code ReplicationConfigurationNotFoundError — one of the few AWS codes whose literal ends in Error — not a generic not-found and not an empty 200.
-- `q-xml-status-0001` (nonempty_required_text on `request.required_status`) — HTTP lifecycle and replication documents refuse empty required Status members with MalformedXML; nonempty unknown values and persisted configuration readers remain lenient.
+- `q-xml-status-0001` (nonempty_required_text on `request.required_status`) — Under the tree reading, HTTP lifecycle and replication documents refuse empty required Status members with MalformedXML; the RustFS reading hands the empty value to the RustFS handler as legacy RustFS does, which answers MalformedXML for lifecycle and InvalidRequest for replication. Nonempty unknown values and persisted configuration readers remain lenient.
 - `q-repl-0002` (flattened_list on `ReplicationConfiguration.Rules`) — The rules repeat as sibling Rule elements directly under the ReplicationConfiguration root; a Rules wrapper element would make every SDK read zero rules and conclude the bucket replicates nothing.
 - `q-repl-0011` (arn_valued_member on `Destination.Bucket`) — The destination Bucket member is typed as a bucket name in the model but carries an ARN on the wire — arn:aws:s3:::bucket — so it is decoded as a plain string and neither the bucket-name grammar nor any ARN grammar is enforced on it: the model's type is unenforceable and a stricter grammar would be this project's invention.
 - `q-repl-0014` (all_unknown_children on `ReplicationRule.Filter`) — A syntactically non-empty Filter whose children are all unknown is refused before decoding can collapse it to the explicit empty Filter that means every object; an empty Filter and a known condition beside unknown children remain accepted.
@@ -3704,7 +3704,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 
 **Quirks**
 
-- `q-xml-status-0001` (nonempty_required_text on `request.required_status`) — HTTP lifecycle and replication documents refuse empty required Status members with MalformedXML; nonempty unknown values and persisted configuration readers remain lenient.
+- `q-xml-status-0001` (nonempty_required_text on `request.required_status`) — Under the tree reading, HTTP lifecycle and replication documents refuse empty required Status members with MalformedXML; the RustFS reading hands the empty value to the RustFS handler as legacy RustFS does, which answers MalformedXML for lifecycle and InvalidRequest for replication. Nonempty unknown values and persisted configuration readers remain lenient.
 - `q-lc-0002` (xml_root on `PutBucketLifecycleConfiguration`) — The request body's root element is LifecycleConfiguration while the model names the payload shape BucketLifecycleConfiguration; a decoder keyed on the shape name would refuse every document a real client sends.
 - `q-lc-0005` (checksum_required on `PutBucketLifecycleConfiguration`) — The write demands an integrity claim on the body, so a request with neither Content-MD5 nor an x-amz-checksum header is refused with 400 before the document is parsed.
 - `q-lc-0006` (lenient_unknown_elements on `PutBucketLifecycleConfiguration`) — Unknown elements inside the request document are skipped rather than refused, because a stored configuration parsed more strictly on the next release silently turns lifecycle rules off and the first symptom is objects that stop expiring.
@@ -3928,7 +3928,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 
 **Quirks**
 
-- `q-xml-status-0001` (nonempty_required_text on `request.required_status`) — HTTP lifecycle and replication documents refuse empty required Status members with MalformedXML; nonempty unknown values and persisted configuration readers remain lenient.
+- `q-xml-status-0001` (nonempty_required_text on `request.required_status`) — Under the tree reading, HTTP lifecycle and replication documents refuse empty required Status members with MalformedXML; the RustFS reading hands the empty value to the RustFS handler as legacy RustFS does, which answers MalformedXML for lifecycle and InvalidRequest for replication. Nonempty unknown values and persisted configuration readers remain lenient.
 - `q-repl-0004` (checksum_required on `PutBucketReplication`) — The write demands an integrity claim on the body, so a request with neither Content-MD5 nor an x-amz-checksum header is refused with 400 before the document is parsed.
 - `q-repl-0005` (lenient_unknown_elements on `PutBucketReplication`) — Unknown elements inside the request document are skipped rather than refused — and the stakes are higher here than in any sibling family, because RustFS parses the stored replication document fail-closed: a decoder that got stricter on the next release would not silently switch replication off, it would make the bucket unusable.
 - `q-repl-0006` (schema_version_exclusive on `ReplicationRule`) — A rule is either V2 — a Filter, which then demands Priority and DeleteMarkerReplication beside it — or V1 — a bare rule-level Prefix, which carries neither; a rule mixing the two schema versions is refused with 400 InvalidRequest, because the version of a stored configuration is decided by exactly this distinction.

@@ -731,12 +731,17 @@
                 "id": "q-xml-status-0001",
                 "kind": "nonempty_required_text",
                 "target": "request.required_status",
-                "summary": "HTTP lifecycle and replication documents refuse empty required Status members with MalformedXML; nonempty unknown values and persisted configuration readers remain lenient.",
+                "summary": "Under the tree reading, HTTP lifecycle and replication documents refuse empty required Status members with MalformedXML; the RustFS reading hands the empty value to the RustFS handler as legacy RustFS does, which answers MalformedXML for lifecycle and InvalidRequest for replication. Nonempty unknown values and persisted configuration readers remain lenient.",
                 "evidence": [
                               {
                                 "kind": "other",
                                 "ref": "https://github.com/rustfs/gateway/issues/1078#issuecomment-5974481156",
                                 "summary": "The ruling separates empty required request Status refusals from permissive stored-data decoding."
+                              },
+                              {
+                                "kind": "other",
+                                "ref": "https://github.com/rustfs/rustfs/blob/95268a3b9e921218addfca04c0ebb5b02734cfc7/rustfs/src/app/bucket_usecase.rs",
+                                "summary": "Legacy RustFS refuses an empty replication Status in its handler with InvalidRequest and an empty lifecycle rule Status with MalformedXML."
                               },
                               {
                                 "kind": "aws-doc",
