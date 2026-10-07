@@ -61,6 +61,12 @@
 //! understand `checksum/1` refuse the new section. A rollback therefore still needs a data copy
 //! made before the upgrade; dropping the type is not a migration.
 //!
+//! Completed objects may end with `parts/1 <count>` followed by one unsigned decimal length
+//! per part, in completed order. The count is 1..10000, agrees with the multipart entity tag,
+//! and the checked sum equals the stored object size. No section may follow it. Older readers
+//! reject this section, so rollback requires a pre-upgrade data copy. Older multipart records
+//! without a table remain readable whole but cannot provide part windows.
+//!
 //! Every refusal below carries its own sentence rather than one shared "storage failed", because
 //! the point of failing closed is that whoever reads the log can tell a half-written record apart
 //! from one written by a build this one does not understand.
@@ -96,6 +102,8 @@ pub(super) struct ObjectAttributes {
     pub(super) headers: ContentHeaders,
     /// The checksum stored with these object bytes, absent on older records.
     pub(super) checksum: Option<StoredChecksum>,
+    /// Completed part lengths in ordinal order, absent on older records.
+    pub(super) part_lengths: Option<Vec<u64>>,
     /// The storage class the write named; `None` records `STANDARD`.
     pub(super) storage_class: Option<StorageClass>,
     /// The validated tag set the write carried, written beside the version atomically with it.
@@ -159,6 +167,8 @@ pub(super) struct VersionRecord {
     pub(super) headers: ContentHeaders,
     /// The checksum stored with these object bytes, absent on older records.
     pub(super) checksum: Option<StoredChecksum>,
+    /// Completed part lengths in ordinal order, absent on older records.
+    pub(super) part_lengths: Option<Vec<u64>>,
 }
 
 /// Refuses a metadata pair this backend could store but could never hand back.
@@ -256,7 +266,7 @@ fn section_header(line: &str) -> Result<(&str, &str), HandlerError> {
 /// Reads every trailing section out of a record's remaining lines.
 ///
 /// Absence means no stored attributes — the eight-line form. The sections are `meta/1`,
-/// `headers/1`, then one of `checksum/1` or `checksum/2`, each optional, with nothing after them.
+/// `headers/1`, then one checksum section, then `parts/1`, each optional, with nothing after them.
 ///
 /// # Errors
 ///
@@ -318,6 +328,13 @@ pub(super) fn decode_trailing_sections(lines: &mut std::str::Lines<'_>) -> Resul
         });
         next = lines.next();
         trailing_error = "the persisted checksum section is followed by lines this build cannot read";
+    }
+    if let Some(line) = next
+        && let Ok(("parts/1", count)) = section_header(line)
+    {
+        attributes.part_lengths = Some(super::part_lengths::decode(lines, count)?);
+        next = lines.next();
+        trailing_error = "the persisted part table is followed by lines this build cannot read";
     }
     if next.is_some() {
         return Err(HandlerError::internal_error(trailing_error));
@@ -386,6 +403,7 @@ pub(super) fn encode_version_record(record: &VersionRecord) -> String {
         encode_metadata_section(&record.metadata),
     ) + &encode_content_headers_section(&record.headers)
         + &encode_checksum_section(record.checksum)
+        + &super::part_lengths::encode(record.part_lengths.as_deref())
 }
 
 /// Parses one version record's bytes, pairing them with the directory they came from.
@@ -423,6 +441,12 @@ pub(super) fn decode_version_record(path: PathBuf, encoded: &str) -> Result<Vers
             .ok_or_else(storage_error)?,
     };
     let attributes = decode_trailing_sections(&mut lines)?;
+    if let Some(lengths) = attributes.part_lengths.as_deref() {
+        if !matches!(kind, RecordKind::Object) {
+            return Err(storage_error());
+        }
+        super::part_lengths::validate(lengths, size, &e_tag)?;
+    }
     if version_id.is_empty() {
         return Err(storage_error());
     }
@@ -439,6 +463,7 @@ pub(super) fn decode_version_record(path: PathBuf, encoded: &str) -> Result<Vers
         metadata: attributes.metadata,
         headers: attributes.headers,
         checksum: attributes.checksum,
+        part_lengths: attributes.part_lengths,
     })
 }
 
@@ -473,6 +498,7 @@ mod tests {
             metadata,
             headers: ContentHeaders::default(),
             checksum: None,
+            part_lengths: None,
         }
     }
 

@@ -77,6 +77,7 @@ impl Handler<CompleteMultipartUpload> for FsBackend {
         let upload = self.upload_path(input.bucket.as_str(), &upload_id);
         let mut completed_bytes = Vec::new();
         let mut part_digests = Vec::with_capacity(requested.len());
+        let mut part_lengths = Vec::with_capacity(requested.len());
         let mut part_checksums = Vec::with_capacity(requested.len());
         let final_part = requested.len().saturating_sub(1);
         for (index, (number, expected, expected_checksum)) in requested.iter().enumerate() {
@@ -110,6 +111,7 @@ impl Handler<CompleteMultipartUpload> for FsBackend {
                 part_checksums.push(actual_checksum);
             }
             part_digests.push(Md5::digest(&bytes).into());
+            part_lengths.push(bytes.len() as u64);
             completed_bytes.extend_from_slice(&bytes);
         }
         let composite = ETag::from_part_digests(&part_digests).map_err(|_| storage_error())?;
@@ -123,6 +125,7 @@ impl Handler<CompleteMultipartUpload> for FsBackend {
 
         let mut attributes = (*record.attributes).clone();
         attributes.checksum = completed_checksum.map(super::checksums::StoredChecksum::multipart);
+        attributes.part_lengths = Some(part_lengths);
         attributes.tags = tagging::read_persisted_tags(&upload).await?;
         let tombstone = self.uploads_path(input.bucket.as_str()).join(format!(
             ".complete-{}-{}",
