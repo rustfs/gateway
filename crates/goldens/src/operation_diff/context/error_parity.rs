@@ -123,6 +123,8 @@ pub(crate) struct Scenario {
     /// Whether the gateway reads date conditions as legacy RustFS does
     /// (`ServiceBuilder::refuse_unreadable_date_conditions`).
     legacy_date_conditions: bool,
+    /// Whether both stacks verify SigV2, as RustFS configures its legacy stack (`enable_sig_v2`).
+    sigv2: bool,
 }
 
 impl Scenario {
@@ -140,7 +142,16 @@ impl Scenario {
             legacy_buffered_ceiling: false,
             legacy_operation_selection: false,
             legacy_date_conditions: false,
+            sigv2: false,
         }
+    }
+
+    /// Both stacks verify SigV2: the legacy stack under `enable_sig_v2`, as RustFS configures it
+    /// (rustfs/rustfs `95268a3b9`, `rustfs/src/server/http.rs:169`), and the gateway under its
+    /// RustFS-profile SigV2 switch and its legacy reading of which forms are signed.
+    pub(crate) fn with_sigv2(mut self) -> Self {
+        self.sigv2 = true;
+        self
     }
 
     /// The gateway reads a buffered body under legacy RustFS's 20 MiB ceiling, as the RustFS
@@ -492,8 +503,9 @@ parity_handlers!(
 struct DenyAnonymous;
 
 impl Authorizer for DenyAnonymous {
-    fn authorize_route<'a>(&'a self, context: &'a RequestContext<'a>, _request: &'a AuthzRequest<'a>) -> BoxFuture<'a, Decision> {
-        let decision = if context.verified_scope().is_some() {
+    fn authorize_route<'a>(&'a self, _context: &'a RequestContext<'a>, request: &'a AuthzRequest<'a>) -> BoxFuture<'a, Decision> {
+        // An identity, not a credential scope: a SigV2 principal is authenticated and has no scope.
+        let decision = if request.identity.is_some() {
             Decision::Allow
         } else {
             Decision::Deny
@@ -548,6 +560,14 @@ fn gateway_service(scenario: &Scenario, reached: &Arc<AtomicBool>, now: RequestN
     let floor = if scenario.legacy_operation_selection {
         // The RustFS profile admits presigned requests before it selects a standard operation.
         floor.admit_presigned_on_every_standard_operation_after_listing_in_the_posture_report()
+    } else {
+        floor
+    };
+    let floor = if scenario.sigv2 {
+        // The RustFS profile's SigV2 switch, and its reading of which forms are signed.
+        floor
+            .enable_sigv2_presigned_compatibility()
+            .recognize_signatures_as_legacy_rustfs()
     } else {
         floor
     };
@@ -647,6 +667,12 @@ fn s3s_reply(scenario: &Scenario, target: &str, headers: &HeaderMap) -> Result<R
     // Authentication is always configured, so an anonymous request meets the default access check
     // RustFS's own access hook stands in for.
     builder.set_auth(s3s::auth::SimpleAuth::from_single(ACCESS_KEY, SECRET_KEY));
+    if scenario.sigv2 {
+        use s3s::config::{S3Config, StaticConfigProvider};
+        let mut config = S3Config::default();
+        config.enable_sig_v2 = true;
+        builder.set_config(Arc::new(StaticConfigProvider::new(Arc::new(config))));
+    }
     let service = builder.build();
     let body = if scenario.request.body.is_empty() {
         s3s::Body::empty()

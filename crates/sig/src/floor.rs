@@ -609,6 +609,9 @@ impl SecurityFloor {
     /// * [`AuthError::AuthorizationHeaderMalformed`] for a credential this crate cannot parse, and
     ///   [`AuthError::AuthorizationQueryParametersError`] for its presigned spelling. Both are
     ///   rejections: a presented credential that cannot be read is never an anonymous request.
+    ///   Under [`Self::recognize_signatures_as_legacy_rustfs`] a form `signature` of another width
+    ///   is not one of them: it is admitted as a signature nothing matches, and a form missing its
+    ///   access key or policy is [`AuthError::MissingPostFormField`].
     /// * [`AuthError::RequestTimeTooSkewed`] from the same H1 window SigV4 uses, and
     ///   [`AuthError::RequestExpired`] for an elapsed presigned URL.
     fn admit_sigv2<'a>(
@@ -630,11 +633,26 @@ impl SecurityFloor {
         refuse_framed_sigv2_payload(&view)?;
         match mode {
             SigV2Mode::PostPolicy => {
+                let legacy = self.recognition == recognition::Recognition::LegacyRustfs;
+                // Legacy RustFS reads a form carrying `signature` as SigV2 and refuses one without
+                // its access key or policy `400 InvalidRequest` before any lookup (rustfs/gateway#1185).
+                if legacy
+                    && [AWS_ACCESS_KEY_ID_PARAM, "policy"]
+                        .iter()
+                        .any(|name| view.form_value(name).is_none())
+                {
+                    return Err(AuthError::MissingPostFormField);
+                }
                 let access_key_id = view
                     .form_value(AWS_ACCESS_KEY_ID_PARAM)
                     .ok_or(AuthError::AuthorizationHeaderMalformed)?;
                 let signature = view.form_value("signature").ok_or(AuthError::AuthorizationHeaderMalformed)?;
-                let presented = crate::sig_v2::parse_post_policy_credential(access_key_id, signature)?;
+                let unreadable = if legacy {
+                    crate::sig_v2::UnreadableFormSignature::Unmatchable
+                } else {
+                    crate::sig_v2::UnreadableFormSignature::Refused
+                };
+                let presented = crate::sig_v2::parse_post_policy_credential(access_key_id, signature, unreadable)?;
                 Ok(Admission::SealedSigV2(SealedSigV2::post_policy(
                     view,
                     presented,

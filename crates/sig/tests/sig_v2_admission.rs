@@ -365,3 +365,70 @@ fn a_lowercase_access_key_alone_cannot_be_anonymous() {
     let view = WireView::new(&headers, RawQuery::new("")).with_form_fields(&fields);
     assert!(SecurityFloor::new().admit(view, &operation(), now()).is_err());
 }
+
+/// Negative — a SigV2 form whose `signature` is not twenty base64-encoded bytes is refused as a
+/// credential this crate cannot read by default, and admitted to verification under legacy RustFS
+/// recognition, where it can only fail: legacy RustFS looks the access key up and answers
+/// `SignatureDoesNotMatch` (rustfs/gateway#1185).
+#[test]
+fn n_a_malformed_sigv2_form_signature_is_admitted_only_to_fail_under_legacy_recognition() {
+    let empty = HeaderMap::new();
+    for signature in ["", "!!!", "dGVzdA==", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="] {
+        let fields = [
+            ("AWSAccessKeyId", "AKIDEXAMPLE"),
+            ("policy", POST_POLICY),
+            ("signature", signature),
+        ];
+        let view = || WireView::new(&empty, RawQuery::new("")).with_form_fields(&fields);
+        let strict = SecurityFloor::new().enable_sigv2_presigned_compatibility();
+        assert_eq!(
+            strict.admit(view(), &operation(), now()).err(),
+            Some(AuthError::AuthorizationHeaderMalformed),
+            "{signature:?}"
+        );
+        let legacy = strict.recognize_signatures_as_legacy_rustfs();
+        let Ok(Admission::SealedSigV2(sealed)) = legacy.admit(view(), &operation(), now()) else {
+            panic!("{signature:?}: admitted to verification");
+        };
+        assert_eq!(sealed.mode(), SigV2Mode::PostPolicy, "{signature:?}");
+        assert_eq!(sealed.access_key_id(), "AKIDEXAMPLE", "{signature:?}: the key is still looked up");
+        assert!(
+            !matches!(sealed.presented(), rustfs_gateway_sig::Signature::HmacSha1(_)),
+            "{signature:?}: no HMAC-SHA1 value is presented, so no secret matches it"
+        );
+    }
+}
+
+/// Negative — under legacy RustFS recognition a SigV2 form carrying `signature` without its access
+/// key or its policy is refused `MissingPostFormField` (`400 InvalidRequest`) before any lookup, as
+/// legacy RustFS refuses it; the default floor refuses it as before, never with that variant.
+#[test]
+fn n_a_sigv2_form_missing_its_key_or_policy_is_an_invalid_request_under_legacy_recognition() {
+    let empty = HeaderMap::new();
+    let complete = [
+        ("AWSAccessKeyId", "AKIDEXAMPLE"),
+        ("policy", POST_POLICY),
+        ("signature", "AAAAAAAAAAAAAAAAAAAAAAAAAAA="),
+    ];
+    for missing in ["AWSAccessKeyId", "policy"] {
+        let fields: Vec<(&str, &str)> = complete.iter().copied().filter(|(name, _)| *name != missing).collect();
+        let view = || WireView::new(&empty, RawQuery::new("")).with_form_fields(&fields);
+        let strict = || SecurityFloor::new().enable_sigv2_presigned_compatibility();
+        let legacy = strict().recognize_signatures_as_legacy_rustfs();
+        assert_eq!(
+            legacy.admit(view(), &operation(), now()).err(),
+            Some(AuthError::MissingPostFormField),
+            "{missing}"
+        );
+        assert_ne!(
+            strict().admit(view(), &operation(), now()).err(),
+            Some(AuthError::MissingPostFormField),
+            "{missing}"
+        );
+    }
+    let view = WireView::new(&empty, RawQuery::new("")).with_form_fields(&complete);
+    let legacy = SecurityFloor::new()
+        .enable_sigv2_presigned_compatibility()
+        .recognize_signatures_as_legacy_rustfs();
+    assert!(matches!(legacy.admit(view, &operation(), now()), Ok(Admission::SealedSigV2(_))));
+}

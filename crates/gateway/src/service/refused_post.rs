@@ -14,7 +14,8 @@
 
 //! The body-dependent refusal of an unrouted RustFS object-path form (rustfs/gateway#1184).
 //!
-//! Responsible for: bounded metadata, form authentication, and the final method refusal.
+//! Responsible for: bounded metadata, form authentication (a SigV4 or a SigV2 policy signature),
+//! and the final method refusal.
 //! Not responsible for: upload-policy enforcement, authorization, file reads, or dispatch.
 //! Upstream: the service's route error. Downstream: the error renderer; no operation can run here.
 
@@ -38,7 +39,7 @@ use rustfs_gateway_types::ErrorCode;
 use super::{Outcome, S3Service};
 use crate::close::ConnectionIntent;
 use crate::config::ConfigSnapshot;
-use crate::ext::{Authentication, ClassKind, ClientAddr, GovernorRequest, ResolvedHost};
+use crate::ext::{Authentication, ClassKind, ClientAddr, GovernorRequest, ResolvedHost, SigV2Authentication};
 use crate::logging::Refused;
 use crate::post_object::PostObjectPrelude;
 use crate::render::{S3Error, from_auth, from_handler};
@@ -118,12 +119,29 @@ where
     let empty_headers = HeaderMap::new();
     let view = WireView::new(&empty_headers, RawQuery::new("")).with_form_fields(&fields);
     if policy.is_none() && view.form_contains("signature") {
-        // Keep the existing unsupported-form refusal. An admitted non-V4 form still has no
-        // modeled operation here; this path must not grant a new signature scheme.
-        return match service.inner.floor.admit(view, crate::dto::PostObject::floor(), now) {
-            Err(error) => outcome.refuse_at(Refused::Authentication, from_auth(error, ResponseKind::Other, true)),
-            Ok(_) => outcome.refuse_handler(HandlerError::new(ErrorCode::NOT_IMPLEMENTED, NO_ROUTE_MESSAGE)),
+        // A SigV2 form. Legacy RustFS verifies its policy signature, then refuses the method
+        // (`v2_check_post_signature` before `S3Path::Object`; rustfs/gateway#1184, #1185). Only a
+        // scheme the floor admits is verified, and a verified form still reaches no operation.
+        let presence = detect_credentials(&view);
+        let sealed = match service.inner.floor.admit(view, crate::dto::PostObject::floor(), now) {
+            Ok(Admission::SealedSigV2(sealed)) => sealed,
+            Err(error) => return outcome.refuse_at(Refused::Authentication, from_auth(error, ResponseKind::Other, true)),
+            Ok(_) => return outcome.refuse_handler(HandlerError::new(ErrorCode::NOT_IMPLEMENTED, NO_ROUTE_MESSAGE)),
         };
+        // The form's own policy ceilings, as the routed path and the SigV4 branch below pass them.
+        let question = SigV2Authentication::new(&sealed, wire.method(), wire.raw_path().as_str(), None)
+            .with_post_policy_limits(Some(policy_limits));
+        let Ok(authentication) = service.inner.authenticator.authenticate_sigv2(&question).await else {
+            return outcome.refuse_handler_at(
+                Refused::Authentication,
+                HandlerError::internal_error("the form could not be authenticated"),
+            );
+        };
+        let (verdict, _, _) = authentication.into_parts();
+        if let Some(error) = SecurityFloor::seal_verdict(verdict, presence).rejection() {
+            return outcome.refuse_at(Refused::Authentication, from_auth(error, ResponseKind::Other, true));
+        }
+        return method_refusal(outcome);
     }
     if let Some(policy) = policy {
         // Legacy-compat (rustfs/backlog#2684): a multipart form ignores header/query signatures,
@@ -172,6 +190,11 @@ where
             return outcome.refuse_at(Refused::Authentication, refusal);
         }
     }
+    method_refusal(outcome)
+}
+
+/// Legacy RustFS's answer to a form it has authenticated, or admitted unsigned, on an object path.
+fn method_refusal(outcome: &mut Outcome<'_>) -> Response<Body> {
     let refusal = LegacyRustfsRefusal::new(
         ErrorCode::METHOD_NOT_ALLOWED,
         Some("The specified method is not allowed against this resource.".to_owned()),
@@ -210,6 +233,7 @@ fn metadata_refusal(error: UnroutedPostPolicyError) -> S3Error {
         Error::InvalidEncoding => (ErrorCode::INVALID_REQUEST, "invalid field: policy"),
         Error::DateNotBound => (ErrorCode::INVALID_POLICY_DOCUMENT, "x-amz-date does not match policy"),
         Error::CredentialNotBound => (ErrorCode::INVALID_POLICY_DOCUMENT, "x-amz-credential does not match policy"),
+        Error::AlgorithmNotBound => (ErrorCode::INVALID_POLICY_DOCUMENT, "x-amz-algorithm does not match policy"),
         _ => (ErrorCode::INVALID_POLICY_DOCUMENT, "the POST policy document was not accepted"),
     };
     from_handler(HandlerError::new(code, message), ResponseKind::Other, ConnectionIntent::MayKeepAlive)

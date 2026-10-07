@@ -471,7 +471,9 @@ fn forged_form() -> Bytes {
         ("x-amz-date", "20260102T030405Z"),
         (
             "policy",
-            "eyJleHBpcmF0aW9uIjogIjIwOTktMDEtMDFUMDA6MDA6MDBaIiwgImNvbmRpdGlvbnMiOiBbeyJ4LWFtei1kYXRlIjogIjIwMjYwMTAyVDAzMDQwNVoifSwgeyJ4LWFtei1jcmVkZW50aWFsIjogIkFLSURFWEFNUExFLzIwMjYwMTAyL3VzLWVhc3QtMS9zMy9hd3M0X3JlcXVlc3QifV19",
+            // Legacy RustFS binds the date, credential and algorithm before the signature
+            // (`v4_check_post_signature`); the forged signature is what this form refuses on.
+            "eyJleHBpcmF0aW9uIjogIjIwOTktMDEtMDFUMDA6MDA6MDBaIiwgImNvbmRpdGlvbnMiOiBbeyJ4LWFtei1kYXRlIjogIjIwMjYwMTAyVDAzMDQwNVoifSwgeyJ4LWFtei1jcmVkZW50aWFsIjogIkFLSURFWEFNUExFLzIwMjYwMTAyL3VzLWVhc3QtMS9zMy9hd3M0X3JlcXVlc3QifSwgeyJ4LWFtei1hbGdvcml0aG0iOiAiQVdTNC1ITUFDLVNIQTI1NiJ9XX0=",
         ),
         ("x-amz-signature", "0000000000000000000000000000000000000000000000000000000000000000"),
     ];
