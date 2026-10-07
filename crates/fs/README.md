@@ -82,8 +82,11 @@ rollback still needs a pre-upgrade data copy.
 `GetObjectAttributes` reports only the requested ETag, size, storage class and checksum groups,
 using the current or explicitly selected persisted version. Last-modified and version headers
 follow that same representation. A requested checksum with no stored value is an empty group;
-plain objects omit ObjectParts. Multipart ObjectParts remains `NotImplemented` pending part-list
-projection. Unknown groups select no fields, as native RustFS
+plain objects omit ObjectParts. New multipart records report original part numbers, sizes and
+individual checksums with up to 1000 parts per page. A marker selects higher original numbers,
+including when the marker itself is absent. Native RustFS instead restarts such a page; this
+remains an explicit difference. Older records without original identities return `NotImplemented`
+for ObjectParts. Unknown groups select no fields, as native RustFS
 does. The existing reader keeps its `NoSuchVersion` response for absent explicit versions, while
 native RustFS rejects malformed version IDs as `InvalidArgument`. Stored multipart checksum types
 are reported here as on GET/HEAD.
@@ -106,7 +109,7 @@ checksum must match the object's algorithm without a composite suffix. This pres
 numbers and verified per-part values for the part-list reader. Version rewrites preserve the
 section; ordinary PUT, POST and COPY replacements clear it. Old records remain readable without
 invented identities or checksums. Old readers reject this section, so rollback needs a pre-upgrade
-data copy. This does not yet enable ObjectParts pagination or GET part checksums.
+data copy. GET part checksums remain unavailable.
 
 Native sparse numbering has a known discrepancy: after completing uploaded numbers 2 and 5, its
 GET number 5 returns the whole object. This backend refuses that unavailable ordinal part.

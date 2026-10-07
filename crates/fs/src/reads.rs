@@ -65,7 +65,8 @@ pub(super) struct Representation {
     /// The representation headers stored with this version.
     pub(super) headers: ContentHeaders,
     pub(super) checksum: Option<super::checksums::StoredChecksum>,
-    part_lengths: Option<Vec<u64>>,
+    pub(super) part_lengths: Option<Vec<u64>>,
+    pub(super) part_metadata: Option<Vec<super::part_metadata::PartMetadata>>,
     /// Whether this is the key's current version — read without a version id, named by the id of
     /// the newest record, or a plain object file — which alone answers `x-amz-expiration`.
     latest: bool,
@@ -255,6 +256,7 @@ impl super::FsBackend {
                 headers: record.headers.clone(),
                 checksum: record.checksum,
                 part_lengths: record.part_lengths.clone(),
+                part_metadata: record.part_metadata.clone(),
                 directory: Some(record.path.clone()),
             })));
         }
@@ -277,6 +279,7 @@ impl super::FsBackend {
             headers: ContentHeaders::default(),
             checksum: None,
             part_lengths: None,
+            part_metadata: None,
             directory: None,
         })))
     }
