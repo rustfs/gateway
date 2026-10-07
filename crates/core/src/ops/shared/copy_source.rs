@@ -145,7 +145,7 @@ impl CopySource {
     ///
     /// The order is fixed and is the point of the function: the optional `?versionId=` suffix is
     /// split off the **raw** value at its last `?`, and only then is each half percent-decoded.
-    /// Both path and ARN forms may begin with one literal slash.
+    /// ARN structure is read after one decode and may begin with one decoded slash.
     ///
     /// # Errors
     ///
@@ -183,9 +183,10 @@ impl CopySource {
             split_version(raw)?
         };
 
-        // The CopyObject header pattern permits one leading slash, including before an ARN:
+        // CopyObject accepts URL-encoded ARN structure and one leading slash:
         // https://docs.aws.amazon.com/AmazonS3/latest/API/API_CopyObject.html
-        let arn_path = path.strip_prefix('/').unwrap_or(path);
+        let decoded_path = decode(path)?;
+        let arn_path = decoded_path.strip_prefix('/').unwrap_or(&decoded_path);
         let resource = if arn_path.starts_with("arn:") {
             parse_arn(arn_path, names)?
         } else {
@@ -555,7 +556,7 @@ fn split_bucket_key(path: &str) -> Option<(&str, &str)> {
         .map(|(at, len)| (&path[..at], &path[at + len..]))
 }
 
-/// Parses the two S3 ARN spellings, and refuses every other ARN.
+/// Parses an already decoded S3 ARN, without decoding its key a second time.
 fn parse_arn(path: &str, names: &NamePolicy) -> Result<SourceResource, CopySourceRejection> {
     // arn : partition : service : region : account : resource…, where the resource half itself
     // contains colons in neither form, so five splits is the whole grammar.
@@ -589,7 +590,7 @@ fn parse_arn(path: &str, names: &NamePolicy) -> Result<SourceResource, CopySourc
                 // control plane, so the name is what an authorizer writes its resource against and
                 // what stands in for the bucket until then.
                 bucket: bucket_of(name)?,
-                key: key_of(key, names)?,
+                key: decoded_key(key, names)?,
                 version_id: None,
             })
         }
@@ -607,7 +608,7 @@ fn parse_arn(path: &str, names: &NamePolicy) -> Result<SourceResource, CopySourc
                     outpost_id: non_empty(outpost)?.to_owned(),
                 },
                 bucket: bucket_of(bucket)?,
-                key: key_of(key, names)?,
+                key: decoded_key(key, names)?,
                 version_id: None,
             })
         }
@@ -637,7 +638,11 @@ fn decode(value: &str) -> Result<String, CopySourceRejection> {
 /// destination: authorisation reads a key, storage reads a path. The refusal names the rule and
 /// never the value — a message quoting the header back is a header echoed into every log.
 fn key_of(encoded: &str, names: &NamePolicy) -> Result<ObjectKey, CopySourceRejection> {
-    let decoded = decode(encoded)?;
+    decoded_key(&decode(encoded)?, names)
+}
+
+/// Validates a key already decoded once, retaining the recursive safety checks of the default floor.
+fn decoded_key(decoded: &str, names: &NamePolicy) -> Result<ObjectKey, CopySourceRejection> {
     if names.key_floor() == KeyFloor::RustfsLegacy {
         // Legacy-compat (rustfs/backlog#2684): legacy RustFS reads a copy source's key as the one
         // decode of the header and checks only its length, so a source it stores under a control
@@ -646,7 +651,7 @@ fn key_of(encoded: &str, names: &NamePolicy) -> Result<ObjectKey, CopySourceReje
         // build). The same materialisation as a body-carried key keeps the source under the key
         // floor the destination is held to; the intended future behaviour is the unconditional
         // check below, with the default floor.
-        return ObjectKey::materialize_decoded(&decoded, names).map_err(|_| {
+        return ObjectKey::materialize_decoded(decoded, names).map_err(|_| {
             CopySourceRejection::new(
                 ErrorCode::INVALID_ARGUMENT,
                 "the key named by x-amz-copy-source is not a valid object key",
@@ -659,7 +664,7 @@ fn key_of(encoded: &str, names: &NamePolicy) -> Result<ObjectKey, CopySourceReje
             "the key named by x-amz-copy-source is not a valid object key",
         ));
     }
-    let mut validation = decoded.clone();
+    let mut validation = decoded.to_owned();
     let mut unsafe_path = key_has_unsafe_path(&validation);
     while !unsafe_path && validation.contains('%') {
         let next = decode(&validation)?;
@@ -677,7 +682,7 @@ fn key_of(encoded: &str, names: &NamePolicy) -> Result<ObjectKey, CopySourceReje
     }
     // The same materialisation as a body-carried key, so the deployment's validator judges the
     // source as it judges the destination (the floor already ran at every decode pass above).
-    ObjectKey::materialize_decoded(&decoded, names).map_err(|_| {
+    ObjectKey::materialize_decoded(decoded, names).map_err(|_| {
         CopySourceRejection::new(
             ErrorCode::INVALID_ARGUMENT,
             "the key named by x-amz-copy-source is not a valid object key",
