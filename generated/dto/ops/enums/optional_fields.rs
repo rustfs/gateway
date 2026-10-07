@@ -68,6 +68,8 @@ impl OptionalFields {
     pub const OBJECTOWNER: Self = Self(Cow::Borrowed("ObjectOwner"));
     /// `LifecycleExpirationDate`
     pub const LIFECYCLEEXPIRATIONDATE: Self = Self(Cow::Borrowed("LifecycleExpirationDate"));
+    /// `IntelligentTieringReferenceDate`
+    pub const INTELLIGENTTIERINGREFERENCEDATE: Self = Self(Cow::Borrowed("IntelligentTieringReferenceDate"));
 
     /// Every value the pinned model declares, in model order.
     pub const VALUES: &'static [&'static str] = &[
@@ -89,6 +91,7 @@ impl OptionalFields {
         "ObjectAccessControlList",
         "ObjectOwner",
         "LifecycleExpirationDate",
+        "IntelligentTieringReferenceDate",
     ];
 
     /// Wraps a value this build has no constant for.

@@ -21,14 +21,14 @@ place; the only legal change is a reviewed bump (see [Bumping](#bumping)).
 | Upstream branch | main |
 | License | Apache-2.0 |
 | Upstream copyright line | `Copyright Amazon.com, Inc. or its affiliates.` |
-| Pinned commit | `a877f97c8964bc3d6a195c68188665ae636acb65` |
-| Pinned commit date | 2026-09-17 |
-| Pin date | 2026-09-18 |
+| Pinned commit | `7eb6ab98cd5f1e5dc6dd90ea1bdc625f9ae308ba` |
+| Pinned commit date | 2026-10-02 |
+| Pin date | 2026-10-07 |
 | Upstream has tags or releases | No — `git ls-remote --tags` is empty and the repository has zero releases, so a commit SHA is the only stable identifier |
 | Upstream release cadence | Roughly every 2–4 weeks; every commit message is `Release Model Changes:` |
-| Last upstream commit touching `models/s3` | `f9dcea0105487cb83cbe23539d24915046b6a4cd` (2026-09-11) |
+| Last upstream commit touching `models/s3` | `a0767ac42e279dfc8b311564c33436f8abfd3031` (2026-09-30) |
 | Last upstream commit touching `models/sts` | `fe627e6e30c7d9c80cd11d3f3985e1796d5e958a` (2026-09-14) |
-| Semantic diff for this bump | 51 wire-affecting changes, 0 breaking (rustfs/gateway#815): s3 gains the Object Lock event-hold members on `PutObject`/`CopyObject`/`CreateMultipartUpload` requests and `GetObject`/`HeadObject` outputs, `DefaultRetention.DefaultEventHold`, `ObjectLockRetention.EventHold`/`EventHoldDuration`, the `s3:ObjectRetention:Put` event, two `InventoryOptionalField` values, the `AWS_BACKUP_WARM`/`AWS_BACKUP_LOW_COST_WARM` storage classes and the `aws:backup` `ServerSideEncryption` value; sts gains optional `MinimumSessionTokenSize` on every request and `SessionTokenSize`/`SessionTokenUtilization` on every response. Full report in the bump PR. |
+| Semantic diff for this bump | 1 wire-affecting change, 0 breaking (rustfs/gateway#1277): `com.amazonaws.s3#InventoryOptionalField` gains `IntelligentTieringReferenceDate`; upstream GetBucketInventoryConfiguration, ListBucketInventoryConfigurations and PutBucketInventoryConfiguration are affected. STS has no wire-affecting change. The gateway's existing operation scope is unchanged. |
 
 ## Vendored files
 
@@ -36,8 +36,8 @@ place; the only legal change is a reviewed bump (see [Bumping](#bumping)).
 |---|---|
 | s3 model path | `models/s3/service/2006-03-01/s3-2006-03-01.json` |
 | s3 model file | `model/s3.json` |
-| s3 model sha256 | `e632755547997bbfbde67d5630d6f09601c909ed9026713e5ff3f71887ab4892` |
-| s3 model bytes | 2996743 |
+| s3 model sha256 | `73e4f75747396176053a0fcc910261cf670c7e133c1cebcfffefa703fad3ce68` |
+| s3 model bytes | 2996942 |
 | s3 smithy version | 2.0 |
 | s3 service shape | `com.amazonaws.s3#AmazonS3` |
 | s3 shape count | 823 |
@@ -95,7 +95,7 @@ The files are byte-for-byte what upstream serves at the pinned commit. They are
 only meaningful if it can be reproduced by re-downloading from upstream:
 
 ```bash
-SHA=7ca34eee8c313368fd1fad80566fa177ba4a1c0a
+SHA=7eb6ab98cd5f1e5dc6dd90ea1bdc625f9ae308ba
 curl -sSL "https://raw.githubusercontent.com/aws/api-models-aws/$SHA/models/s3/service/2006-03-01/s3-2006-03-01.json" \
   | shasum -a 256
 ```
