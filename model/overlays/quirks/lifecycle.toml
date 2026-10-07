@@ -228,7 +228,7 @@ id      = "q-lc-0014"
 kind    = "lenient_enum"
 classification = "contract"
 target  = "LifecycleRule.Status"
-summary = "A Status outside the documented Enabled/Disabled pair is stored and echoed rather than refused, because a stored configuration must survive reparse by a stricter release; the fail-open cost of refusing is silently disabled lifecycle rules."
+summary = "Nonempty Status values outside Enabled/Disabled remain accepted and echoed. HTTP empty required Status is refused by q-xml-status-0001; persisted configuration decoding remains lenient for both empty and unknown values."
 cases   = ["c-lifecycle-0028"]
 
   [[quirk.evidence]]

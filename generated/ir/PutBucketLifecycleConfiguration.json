@@ -311,7 +311,7 @@
                                                "binding": { "kind": "BodyXml" },
                                                "type": { "kind": "StringEnum", "values": ["Enabled", "Disabled"] },
                                                "hot": false,
-                                               "quirk_refs": []
+                                               "quirk_refs": ["q-xml-status-0001"]
                                              },
                                              {
                                                "name": "Transitions",
@@ -728,6 +728,25 @@
                 ],
   "quirks": [
               {
+                "id": "q-xml-status-0001",
+                "kind": "nonempty_required_text",
+                "target": "request.required_status",
+                "summary": "HTTP lifecycle and replication documents refuse empty required Status members with MalformedXML; nonempty unknown values and persisted configuration readers remain lenient.",
+                "evidence": [
+                              {
+                                "kind": "other",
+                                "ref": "https://github.com/rustfs/gateway/issues/1078#issuecomment-5974481156",
+                                "summary": "The ruling separates empty required request Status refusals from permissive stored-data decoding."
+                              },
+                              {
+                                "kind": "aws-doc",
+                                "ref": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ReplicationRule.html",
+                                "summary": "ReplicationRule requires Status and documents Enabled and Disabled as its values."
+                              }
+                            ],
+                "cases": ["c-lifecycle-0041", "c-replication-0038"]
+              },
+              {
                 "id": "q-lc-0002",
                 "kind": "xml_root",
                 "target": "PutBucketLifecycleConfiguration",
@@ -886,7 +905,7 @@
                 "id": "q-lc-0014",
                 "kind": "lenient_enum",
                 "target": "LifecycleRule.Status",
-                "summary": "A Status outside the documented Enabled/Disabled pair is stored and echoed rather than refused, because a stored configuration must survive reparse by a stricter release; the fail-open cost of refusing is silently disabled lifecycle rules.",
+                "summary": "Nonempty Status values outside Enabled/Disabled remain accepted and echoed. HTTP empty required Status is refused by q-xml-status-0001; persisted configuration decoding remains lenient for both empty and unknown values.",
                 "evidence": [
                               {
                                 "kind": "aws-doc",

@@ -87,14 +87,14 @@ fn reference_run(filter: &str) -> rustfs_gateway_conformance::report::Report {
 /// both directions (rustfs/gateway#221): the element the encoder used to drop, and the element it
 /// must not invent for a rule that never had one — plus `c-lifecycle-0040`, MinIO's rule and
 /// expiration extensions RustFS reads (rd-cfg-0002..0004) — plus `c-lifecycle-0041`, an empty rule
-/// `Status` stored as the out-of-set value it is rather than answered with `500` (rustfs/gateway#1078).
+/// `Status` refused with `MalformedXML` before storage (rustfs/gateway#1078).
 const FAMILY_SIZE: usize = 41;
 
 /// The polarity split, in the order `AGENTS.md` states the rule: negatives outnumber positives.
 const NEGATIVE: usize = 26;
 const POSITIVE: usize = 15;
 
-/// Every quirk `model/overlays/quirks/lifecycle.toml` declares, in id order.
+/// Every lifecycle quirk, plus the shared HTTP required-Status rule, in id order.
 ///
 /// Written out rather than parsed out of the overlay on purpose. The overlay is a Protected File:
 /// reading it here would let a quirk be deleted and this test would follow it down in the same
@@ -117,6 +117,7 @@ const DECLARED_QUIRKS: &[&str] = &[
     "q-lc-0013",
     "q-lc-0014",
     "q-lc-0015",
+    "q-xml-status-0001",
 ];
 
 /// The three operations of the family. A family whose cases all exercise one operation is a

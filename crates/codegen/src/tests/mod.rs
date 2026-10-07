@@ -36,6 +36,7 @@ mod golden_tests;
 mod ledger_tests;
 mod mutate_tests;
 mod naming_contract_tests;
+mod nonempty_tests;
 mod operations_json_tests;
 mod operations_md_tests;
 mod presence_tests;

@@ -237,7 +237,6 @@ fn omit_when(value: &OmitWhen) -> String {
         OmitWhen::RequestField { field, equals } => format!("RequestField({field}=={equals})"),
     }
 }
-
 /// Renders one quirk or contract record in the stable generated format.
 pub fn render(
     quirk: &Quirk,
@@ -260,6 +259,8 @@ pub fn render(
             let _ = writeln!(out, "codec_min = {min}");
             let _ = writeln!(out, "codec_max = {max}");
         }
+        Some(CodecValue::NonEmptyText(true)) => out.push_str("codec_value = \"reject_empty_text\"\n"),
+        Some(CodecValue::NonEmptyText(false)) => out.push_str("codec_value = \"allow_empty_text\"\n"),
         Some(CodecValue::MediaType(media)) => {
             let _ = writeln!(out, "codec_value = {}", quote(media));
         }

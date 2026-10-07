@@ -173,6 +173,9 @@ fn read_lifecycle_rule(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::Lifecy
         shape.filter = Some(read_lifecycle_rule_filter(child)?);
     }
     if let Some(raw) = node.child_text("Status") {
+        if raw.is_empty() {
+            return Err(CodecError::malformed_xml("a required text member is empty").about("Status"));
+        }
         shape.status = dto::Status::custom(raw.to_owned());
     } else {
         return Err(CodecError::malformed_xml("the body omits a member the schema requires").about("Status"));

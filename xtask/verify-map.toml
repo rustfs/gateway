@@ -294,7 +294,7 @@ cases = "c-bucketconfig-0016,c-bucketconfig-0039,c-bucketconfig-0051,c-bucketcon
 
 [[operation]]
 name = "PutBucketReplication"
-cases = "c-replication-0001,c-replication-0002,c-replication-0003,c-replication-0004,c-replication-0005,c-replication-0006,c-replication-0007,c-replication-0008,c-replication-0009,c-replication-0010,c-replication-0011,c-replication-0015,c-replication-0016,c-replication-0017,c-replication-0018,c-replication-0019,c-replication-0020,c-replication-0021,c-replication-0022,c-replication-0023,c-replication-0024,c-replication-0025,c-replication-0026,c-replication-0027,c-replication-0028,c-replication-0029,c-replication-0030,c-replication-0031,c-replication-0032,c-replication-0033,c-replication-0034,c-replication-0035,c-replication-0036,c-replication-0037"
+cases = "c-replication-0001,c-replication-0002,c-replication-0003,c-replication-0004,c-replication-0005,c-replication-0006,c-replication-0007,c-replication-0008,c-replication-0009,c-replication-0010,c-replication-0011,c-replication-0015,c-replication-0016,c-replication-0017,c-replication-0018,c-replication-0019,c-replication-0020,c-replication-0021,c-replication-0022,c-replication-0023,c-replication-0024,c-replication-0025,c-replication-0026,c-replication-0027,c-replication-0028,c-replication-0029,c-replication-0030,c-replication-0031,c-replication-0032,c-replication-0033,c-replication-0034,c-replication-0035,c-replication-0036,c-replication-0037,c-replication-0038"
 
 [[operation]]
 name = "PutBucketRequestPayment"

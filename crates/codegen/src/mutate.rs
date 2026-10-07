@@ -178,6 +178,12 @@ pub fn plan_codec(quirk: &str, rule: &CodecRule) -> std::result::Result<Mutation
             SourceValue::OptionalText(None),
             MutationDimension::IntegerRange,
         ),
+        CodecValue::NonEmptyText(value) => (
+            format!("{CODEC_PATH_PREFIX}{quirk}"),
+            SourceValue::Bool(*value),
+            SourceValue::Bool(!value),
+            MutationDimension::MemberConstraint,
+        ),
         CodecValue::MediaType(value) => {
             let alternative = if value == "text/plain" {
                 "application/octet-stream"
@@ -278,6 +284,7 @@ pub(crate) fn apply_codec(rules: &mut BTreeMap<String, CodecRule>, mutation: &Mu
 fn codec_source(value: &CodecValue) -> SourceValue {
     match value {
         CodecValue::IntegerRange { min, max } => SourceValue::OptionalText(Some(format!("{min}..={max}"))),
+        CodecValue::NonEmptyText(value) => SourceValue::Bool(*value),
         CodecValue::MediaType(value) => SourceValue::Text(value.clone()),
         CodecValue::HeaderTolerance(HeaderToleranceValue::DateCondition) => {
             SourceValue::OptionalText(Some("date_condition".to_owned()))
@@ -290,6 +297,7 @@ fn codec_source(value: &CodecValue) -> SourceValue {
 
 fn write_codec_value(current: &mut CodecValue, replacement: &SourceValue) -> std::result::Result<(), String> {
     match (current, replacement) {
+        (CodecValue::NonEmptyText(value), SourceValue::Bool(replacement)) => *value = *replacement,
         (CodecValue::MediaType(value), SourceValue::Text(replacement)) => replacement.clone_into(value),
         (CodecValue::UnknownElementPolicy(value), SourceValue::Text(replacement)) => {
             *value = parse_unknown_element_policy(replacement)?;
@@ -362,6 +370,7 @@ fn parse_boolean_spelling(value: &str) -> std::result::Result<BooleanSpellingVal
 fn codec_kind(value: &CodecValue) -> &'static str {
     match value {
         CodecValue::IntegerRange { .. } => "integer_range",
+        CodecValue::NonEmptyText(_) => "member_constraint",
         CodecValue::MediaType(_) => "media_type",
         CodecValue::HeaderTolerance(_) => "header_tolerance",
         CodecValue::UnknownElementPolicy(_) => "unknown_element_policy",

@@ -236,7 +236,7 @@ type = "StringEnum"
 required = true
 hot = false
 values = ["Enabled", "Disabled"]
-quirks = []
+quirks = ["q-xml-status-0001"]
 
 [[shape.LifecycleRule.field]]
 name = "Transitions"

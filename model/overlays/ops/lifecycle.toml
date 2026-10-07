@@ -122,6 +122,10 @@ type = "Timestamp:Iso8601"
 [shape.LifecycleRule]
 
 [[shape.LifecycleRule.field]]
+name = "Status"
+quirks = ["q-xml-status-0001"]
+
+[[shape.LifecycleRule.field]]
 name = "DelMarkerExpiration"
 synthesize = true
 after = "Expiration"

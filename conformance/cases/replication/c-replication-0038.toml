@@ -1,0 +1,273 @@
+[case]
+id = "c-replication-0038"
+schema_version = 3
+title = "Empty required replication Status members are refused before storage"
+rationale = """
+Each required Status position must reject both empty XML spellings without replacing a valid configuration. Unknown nonempty Status and persisted metadata use their existing lenient readers."""
+polarity = "negative"
+operation = "PutBucketReplication"
+tags = ["replication", "xml", "error-shape"]
+timeout_ms = 10000
+quirks = ["q-xml-status-0001"]
+
+[[case.evidence]]
+url = "https://github.com/rustfs/gateway/issues/1078#issuecomment-5974481156"
+summary = "The ruling requires empty required Status refusals on HTTP requests and preserves stored configuration decoding."
+kind = "other"
+
+[[setup.buckets]]
+name = "conf-replication"
+
+[[exchanges]]
+name = "store-valid-configuration"
+[exchanges.request]
+method = "PUT"
+target = "/conf-replication?replication"
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
+body = { utf8 = '<ReplicationConfiguration><Role>arn:aws:iam::111122223333:role/replication-role</Role><Rule><ID>kept</ID><Priority>1</Priority><Filter><Prefix>logs/</Prefix></Filter><DeleteMarkerReplication><Status>Disabled</Status></DeleteMarkerReplication><Status>Enabled</Status><Destination><Bucket>arn:aws:s3:::replica-bucket</Bucket></Destination></Rule></ReplicationConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+[exchanges.expect.body]
+size = 0
+
+[[exchanges]]
+name = "rule-self-closing"
+[exchanges.request]
+method = "PUT"
+target = "/conf-replication?replication"
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
+body = { utf8 = '<ReplicationConfiguration><Role>arn:aws:iam::111122223333:role/replication-role</Role><Rule><ID>rejected</ID><Priority>1</Priority><Filter><Prefix>logs/</Prefix></Filter><DeleteMarkerReplication><Status>Disabled</Status></DeleteMarkerReplication><Status/><Destination><Bucket>arn:aws:s3:::replica-bucket</Bucket></Destination></Rule></ReplicationConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+[exchanges.expect]
+kind = "response"
+status = 400
+connection_after = "open"
+[exchanges.expect.body]
+contains_utf8 = ["<Code>MalformedXML</Code>"]
+
+[[exchanges]]
+name = "rule-paired"
+[exchanges.request]
+method = "PUT"
+target = "/conf-replication?replication"
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
+body = { utf8 = '<ReplicationConfiguration><Role>arn:aws:iam::111122223333:role/replication-role</Role><Rule><ID>rejected</ID><Priority>1</Priority><Filter><Prefix>logs/</Prefix></Filter><DeleteMarkerReplication><Status>Disabled</Status></DeleteMarkerReplication><Status></Status><Destination><Bucket>arn:aws:s3:::replica-bucket</Bucket></Destination></Rule></ReplicationConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+[exchanges.expect]
+kind = "response"
+status = 400
+connection_after = "open"
+[exchanges.expect.body]
+contains_utf8 = ["<Code>MalformedXML</Code>"]
+
+[[exchanges]]
+name = "delete-self-closing"
+[exchanges.request]
+method = "PUT"
+target = "/conf-replication?replication"
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
+body = { utf8 = '<ReplicationConfiguration><Role>arn:aws:iam::111122223333:role/replication-role</Role><Rule><ID>rejected</ID><Priority>1</Priority><Filter><Prefix>logs/</Prefix></Filter><DeleteMarkerReplication><Status>Disabled</Status></DeleteMarkerReplication><Status>Enabled</Status><DeleteReplication><Status/></DeleteReplication><Destination><Bucket>arn:aws:s3:::replica-bucket</Bucket></Destination></Rule></ReplicationConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+[exchanges.expect]
+kind = "response"
+status = 400
+connection_after = "open"
+[exchanges.expect.body]
+contains_utf8 = ["<Code>MalformedXML</Code>"]
+
+[[exchanges]]
+name = "delete-paired"
+[exchanges.request]
+method = "PUT"
+target = "/conf-replication?replication"
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
+body = { utf8 = '<ReplicationConfiguration><Role>arn:aws:iam::111122223333:role/replication-role</Role><Rule><ID>rejected</ID><Priority>1</Priority><Filter><Prefix>logs/</Prefix></Filter><DeleteMarkerReplication><Status>Disabled</Status></DeleteMarkerReplication><Status>Enabled</Status><DeleteReplication><Status></Status></DeleteReplication><Destination><Bucket>arn:aws:s3:::replica-bucket</Bucket></Destination></Rule></ReplicationConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+[exchanges.expect]
+kind = "response"
+status = 400
+connection_after = "open"
+[exchanges.expect.body]
+contains_utf8 = ["<Code>MalformedXML</Code>"]
+
+[[exchanges]]
+name = "existing-self-closing"
+[exchanges.request]
+method = "PUT"
+target = "/conf-replication?replication"
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
+body = { utf8 = '<ReplicationConfiguration><Role>arn:aws:iam::111122223333:role/replication-role</Role><Rule><ID>rejected</ID><Priority>1</Priority><Filter><Prefix>logs/</Prefix></Filter><DeleteMarkerReplication><Status>Disabled</Status></DeleteMarkerReplication><Status>Enabled</Status><ExistingObjectReplication><Status/></ExistingObjectReplication><Destination><Bucket>arn:aws:s3:::replica-bucket</Bucket></Destination></Rule></ReplicationConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+[exchanges.expect]
+kind = "response"
+status = 400
+connection_after = "open"
+[exchanges.expect.body]
+contains_utf8 = ["<Code>MalformedXML</Code>"]
+
+[[exchanges]]
+name = "existing-paired"
+[exchanges.request]
+method = "PUT"
+target = "/conf-replication?replication"
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
+body = { utf8 = '<ReplicationConfiguration><Role>arn:aws:iam::111122223333:role/replication-role</Role><Rule><ID>rejected</ID><Priority>1</Priority><Filter><Prefix>logs/</Prefix></Filter><DeleteMarkerReplication><Status>Disabled</Status></DeleteMarkerReplication><Status>Enabled</Status><ExistingObjectReplication><Status></Status></ExistingObjectReplication><Destination><Bucket>arn:aws:s3:::replica-bucket</Bucket></Destination></Rule></ReplicationConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+[exchanges.expect]
+kind = "response"
+status = 400
+connection_after = "open"
+[exchanges.expect.body]
+contains_utf8 = ["<Code>MalformedXML</Code>"]
+
+[[exchanges]]
+name = "replica-modifications-self-closing"
+[exchanges.request]
+method = "PUT"
+target = "/conf-replication?replication"
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
+body = { utf8 = '<ReplicationConfiguration><Role>arn:aws:iam::111122223333:role/replication-role</Role><Rule><ID>rejected</ID><Priority>1</Priority><Filter><Prefix>logs/</Prefix></Filter><DeleteMarkerReplication><Status>Disabled</Status></DeleteMarkerReplication><Status>Enabled</Status><SourceSelectionCriteria><ReplicaModifications><Status/></ReplicaModifications></SourceSelectionCriteria><Destination><Bucket>arn:aws:s3:::replica-bucket</Bucket></Destination></Rule></ReplicationConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+[exchanges.expect]
+kind = "response"
+status = 400
+connection_after = "open"
+[exchanges.expect.body]
+contains_utf8 = ["<Code>MalformedXML</Code>"]
+
+[[exchanges]]
+name = "replica-modifications-paired"
+[exchanges.request]
+method = "PUT"
+target = "/conf-replication?replication"
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
+body = { utf8 = '<ReplicationConfiguration><Role>arn:aws:iam::111122223333:role/replication-role</Role><Rule><ID>rejected</ID><Priority>1</Priority><Filter><Prefix>logs/</Prefix></Filter><DeleteMarkerReplication><Status>Disabled</Status></DeleteMarkerReplication><Status>Enabled</Status><SourceSelectionCriteria><ReplicaModifications><Status></Status></ReplicaModifications></SourceSelectionCriteria><Destination><Bucket>arn:aws:s3:::replica-bucket</Bucket></Destination></Rule></ReplicationConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+[exchanges.expect]
+kind = "response"
+status = 400
+connection_after = "open"
+[exchanges.expect.body]
+contains_utf8 = ["<Code>MalformedXML</Code>"]
+
+[[exchanges]]
+name = "sse-kms-self-closing"
+[exchanges.request]
+method = "PUT"
+target = "/conf-replication?replication"
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
+body = { utf8 = '<ReplicationConfiguration><Role>arn:aws:iam::111122223333:role/replication-role</Role><Rule><ID>rejected</ID><Priority>1</Priority><Filter><Prefix>logs/</Prefix></Filter><DeleteMarkerReplication><Status>Disabled</Status></DeleteMarkerReplication><Status>Enabled</Status><SourceSelectionCriteria><SseKmsEncryptedObjects><Status/></SseKmsEncryptedObjects></SourceSelectionCriteria><Destination><Bucket>arn:aws:s3:::replica-bucket</Bucket></Destination></Rule></ReplicationConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+[exchanges.expect]
+kind = "response"
+status = 400
+connection_after = "open"
+[exchanges.expect.body]
+contains_utf8 = ["<Code>MalformedXML</Code>"]
+
+[[exchanges]]
+name = "sse-kms-paired"
+[exchanges.request]
+method = "PUT"
+target = "/conf-replication?replication"
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
+body = { utf8 = '<ReplicationConfiguration><Role>arn:aws:iam::111122223333:role/replication-role</Role><Rule><ID>rejected</ID><Priority>1</Priority><Filter><Prefix>logs/</Prefix></Filter><DeleteMarkerReplication><Status>Disabled</Status></DeleteMarkerReplication><Status>Enabled</Status><SourceSelectionCriteria><SseKmsEncryptedObjects><Status></Status></SseKmsEncryptedObjects></SourceSelectionCriteria><Destination><Bucket>arn:aws:s3:::replica-bucket</Bucket></Destination></Rule></ReplicationConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+[exchanges.expect]
+kind = "response"
+status = 400
+connection_after = "open"
+[exchanges.expect.body]
+contains_utf8 = ["<Code>MalformedXML</Code>"]
+
+[[exchanges]]
+name = "metrics-self-closing"
+[exchanges.request]
+method = "PUT"
+target = "/conf-replication?replication"
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
+body = { utf8 = '<ReplicationConfiguration><Role>arn:aws:iam::111122223333:role/replication-role</Role><Rule><ID>rejected</ID><Priority>1</Priority><Filter><Prefix>logs/</Prefix></Filter><DeleteMarkerReplication><Status>Disabled</Status></DeleteMarkerReplication><Status>Enabled</Status><Destination><Bucket>arn:aws:s3:::replica-bucket</Bucket><Metrics><Status/></Metrics></Destination></Rule></ReplicationConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+[exchanges.expect]
+kind = "response"
+status = 400
+connection_after = "open"
+[exchanges.expect.body]
+contains_utf8 = ["<Code>MalformedXML</Code>"]
+
+[[exchanges]]
+name = "metrics-paired"
+[exchanges.request]
+method = "PUT"
+target = "/conf-replication?replication"
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
+body = { utf8 = '<ReplicationConfiguration><Role>arn:aws:iam::111122223333:role/replication-role</Role><Rule><ID>rejected</ID><Priority>1</Priority><Filter><Prefix>logs/</Prefix></Filter><DeleteMarkerReplication><Status>Disabled</Status></DeleteMarkerReplication><Status>Enabled</Status><Destination><Bucket>arn:aws:s3:::replica-bucket</Bucket><Metrics><Status></Status></Metrics></Destination></Rule></ReplicationConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+[exchanges.expect]
+kind = "response"
+status = 400
+connection_after = "open"
+[exchanges.expect.body]
+contains_utf8 = ["<Code>MalformedXML</Code>"]
+
+[[exchanges]]
+name = "replication-time-self-closing"
+[exchanges.request]
+method = "PUT"
+target = "/conf-replication?replication"
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
+body = { utf8 = '<ReplicationConfiguration><Role>arn:aws:iam::111122223333:role/replication-role</Role><Rule><ID>rejected</ID><Priority>1</Priority><Filter><Prefix>logs/</Prefix></Filter><DeleteMarkerReplication><Status>Disabled</Status></DeleteMarkerReplication><Status>Enabled</Status><Destination><Bucket>arn:aws:s3:::replica-bucket</Bucket><ReplicationTime><Status/><Time><Minutes>15</Minutes></Time></ReplicationTime></Destination></Rule></ReplicationConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+[exchanges.expect]
+kind = "response"
+status = 400
+connection_after = "open"
+[exchanges.expect.body]
+contains_utf8 = ["<Code>MalformedXML</Code>"]
+
+[[exchanges]]
+name = "replication-time-paired"
+[exchanges.request]
+method = "PUT"
+target = "/conf-replication?replication"
+headers = { "content-type" = "application/xml" }
+content_md5 = "computed"
+body = { utf8 = '<ReplicationConfiguration><Role>arn:aws:iam::111122223333:role/replication-role</Role><Rule><ID>rejected</ID><Priority>1</Priority><Filter><Prefix>logs/</Prefix></Filter><DeleteMarkerReplication><Status>Disabled</Status></DeleteMarkerReplication><Status>Enabled</Status><Destination><Bucket>arn:aws:s3:::replica-bucket</Bucket><ReplicationTime><Status></Status><Time><Minutes>15</Minutes></Time></ReplicationTime></Destination></Rule></ReplicationConfiguration>' }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+[exchanges.expect]
+kind = "response"
+status = 400
+connection_after = "open"
+[exchanges.expect.body]
+contains_utf8 = ["<Code>MalformedXML</Code>"]
+
+[[exchanges]]
+name = "prior-configuration-survives"
+[exchanges.request]
+method = "GET"
+target = "/conf-replication?replication"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+[exchanges.expect.body]
+contains_utf8 = ["<ID>kept</ID>", "<Status>Enabled</Status>", "<Prefix>logs/</Prefix>"]
+not_contains_utf8 = ["<ID>rejected</ID>", "<Metrics>", "<ReplicationTime>", "<SourceSelectionCriteria>", "<DeleteReplication>", "<ExistingObjectReplication>"]

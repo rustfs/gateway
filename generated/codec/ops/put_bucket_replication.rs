@@ -115,6 +115,9 @@ fn read_delete_marker_replication(node: &rustfs_gateway_xml::XmlNode) -> Result<
 fn read_delete_replication(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::DeleteReplication, CodecError> {
     let mut shape = dto::DeleteReplication { ..Default::default() };
     if let Some(raw) = node.child_text("Status") {
+        if raw.is_empty() {
+            return Err(CodecError::malformed_xml("a required text member is empty").about("Status"));
+        }
         shape.status = dto::Status::custom(raw.to_owned());
     } else {
         return Err(CodecError::malformed_xml("the body omits a member the schema requires").about("Status"));
@@ -170,6 +173,9 @@ fn read_encryption_configuration(node: &rustfs_gateway_xml::XmlNode) -> Result<d
 fn read_existing_object_replication(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::ExistingObjectReplication, CodecError> {
     let mut shape = dto::ExistingObjectReplication { ..Default::default() };
     if let Some(raw) = node.child_text("Status") {
+        if raw.is_empty() {
+            return Err(CodecError::malformed_xml("a required text member is empty").about("Status"));
+        }
         shape.status = dto::Status::custom(raw.to_owned());
     } else {
         return Err(CodecError::malformed_xml("the body omits a member the schema requires").about("Status"));
@@ -183,6 +189,9 @@ fn read_existing_object_replication(node: &rustfs_gateway_xml::XmlNode) -> Resul
 fn read_metrics(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::Metrics, CodecError> {
     let mut shape = dto::Metrics { ..Default::default() };
     if let Some(raw) = node.child_text("Status") {
+        if raw.is_empty() {
+            return Err(CodecError::malformed_xml("a required text member is empty").about("Status"));
+        }
         shape.status = dto::Status::custom(raw.to_owned());
     } else {
         return Err(CodecError::malformed_xml("the body omits a member the schema requires").about("Status"));
@@ -199,6 +208,9 @@ fn read_metrics(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::Metrics, Code
 fn read_replica_modifications(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::ReplicaModifications, CodecError> {
     let mut shape = dto::ReplicaModifications { ..Default::default() };
     if let Some(raw) = node.child_text("Status") {
+        if raw.is_empty() {
+            return Err(CodecError::malformed_xml("a required text member is empty").about("Status"));
+        }
         shape.status = dto::Status::custom(raw.to_owned());
     } else {
         return Err(CodecError::malformed_xml("the body omits a member the schema requires").about("Status"));
@@ -247,6 +259,9 @@ fn read_replication_rule(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::Repl
         shape.filter = Some(read_replication_rule_filter(child)?);
     }
     if let Some(raw) = node.child_text("Status") {
+        if raw.is_empty() {
+            return Err(CodecError::malformed_xml("a required text member is empty").about("Status"));
+        }
         shape.status = dto::Status::custom(raw.to_owned());
     } else {
         return Err(CodecError::malformed_xml("the body omits a member the schema requires").about("Status"));
@@ -308,6 +323,9 @@ fn read_replication_rule_filter(node: &rustfs_gateway_xml::XmlNode) -> Result<dt
 fn read_replication_time(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::ReplicationTime, CodecError> {
     let mut shape = dto::ReplicationTime { ..Default::default() };
     if let Some(raw) = node.child_text("Status") {
+        if raw.is_empty() {
+            return Err(CodecError::malformed_xml("a required text member is empty").about("Status"));
+        }
         shape.status = dto::Status::custom(raw.to_owned());
     } else {
         return Err(CodecError::malformed_xml("the body omits a member the schema requires").about("Status"));
@@ -351,6 +369,9 @@ fn read_source_selection_criteria(node: &rustfs_gateway_xml::XmlNode) -> Result<
 fn read_sse_kms_encrypted_objects(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::SseKmsEncryptedObjects, CodecError> {
     let mut shape = dto::SseKmsEncryptedObjects { ..Default::default() };
     if let Some(raw) = node.child_text("Status") {
+        if raw.is_empty() {
+            return Err(CodecError::malformed_xml("a required text member is empty").about("Status"));
+        }
         shape.status = dto::Status::custom(raw.to_owned());
     } else {
         return Err(CodecError::malformed_xml("the body omits a member the schema requires").about("Status"));

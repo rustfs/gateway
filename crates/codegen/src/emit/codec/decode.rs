@@ -659,6 +659,7 @@ fn xml_member(
                 name_policy.unwrap_or("names"),
             )?;
             let _ = writeln!(out, "{pad}if let Some(raw) = {node}.child_text(\"{wire}\") {{");
+            out.push_str(&super::nonempty::guard(field, rules, inner)?);
             out.push_str(&assign(inner, target, &wrap(field, &conversion)));
             out.push_str(&required_member_refusal(field, &wire, indent));
         }

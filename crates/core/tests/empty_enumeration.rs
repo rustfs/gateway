@@ -15,25 +15,15 @@
 //! An empty element in a **required** enumeration member of a request document
 //! (rustfs/gateway#1078, row 3).
 //!
-//! Responsible for: every required string-enumeration member a request document carries — fourteen
-//! positions across seven operations — decoding `<Status></Status>` and `<Status/>` into the empty
-//! value a client sent, which the handler then judges like any other value outside the model's
-//! set, rather than into the member's placeholder default, which the decoder's exit check turned
-//! into this side's `500 InternalError`.
-//! NOT responsible for: whether an operation accepts the empty value — that is the backend's
-//! question, asked with the backend's code (legacy RustFS refuses an empty lifecycle `Status` with
-//! `MalformedXML` and stores an empty `Payer`), which the RustFS-profile suites pin; or a missing
-//! element, which stays the schema's `MalformedXML` and is pinned below as the control.
-//! Upstream: the generated codecs of the seven operations. Downstream: nothing.
+//! Responsible for: rejecting empty required Status at the HTTP boundary, carrying other empty
+//! required enumerations as client values rather than placeholder defaults, and preserving the
+//! rejection of absent required members. The later #1078 ruling requires the Status refusal.
+//! NOT responsible for: backend validation of other enums or persisted configuration decoding.
+//! Upstream: generated codecs. Downstream: operation handlers.
 //!
-//! # Why the empty value has to reach the handler
-//!
-//! A client error is never a `5xx`: a `500` reads to every SDK as a retryable server fault, so an
-//! empty `<Status/>` was retried until the client gave up, and the answer it finally reported named
-//! the server. Legacy RustFS hands the empty value to its handlers, which answer `400` or store it
-//! (`rustfs/src/app/bucket_usecase.rs:1220-1227` refuses an empty lifecycle status,
-//! `rustfs/src/storage/ecfs.rs:1468-1477` stores an empty `Payer`, at rustfs/rustfs@5851d9eb5), so a
-//! decoder that refused it itself would answer those two differently from legacy RustFS.
+//! A malformed client value must never become InternalError. Empty Payer, SSEAlgorithm and
+//! restore/select enums still reach their handlers; required Status now fails with MalformedXML
+//! before any handler, while its stored-data reader remains lenient.
 
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 
@@ -110,83 +100,55 @@ fn refused_as_malformed<T: std::fmt::Debug>(outcome: Result<T, CodecError>, posi
     assert_eq!(error.code(), &ErrorCode::MALFORMED_XML, "{position}: {error}");
 }
 
-// ── the empty value is decoded ────────────────────────────────────────────────────────────────
+// ── empty required members ────────────────────────────────────────────────────────────────
 
-/// Positive — `LifecycleRule.Status`, paired and self-closing.
+/// Negative — both empty XML spellings fail before a lifecycle handler can run.
 #[test]
-fn an_empty_lifecycle_rule_status_is_decoded_as_the_empty_value() {
+fn n_an_empty_lifecycle_rule_status_is_malformed_xml() {
     for status in ["<Status></Status>", "<Status/>"] {
-        let input = lifecycle(status).unwrap_or_else(|error| panic!("{status}: {error}"));
-        let configuration = input.lifecycle_configuration.expect("a configuration");
-        empty_value!(&configuration.rules[0].status, status);
+        refused_as_malformed(lifecycle(status), "LifecycleRule.Status");
     }
 }
 
-/// Positive — the seven required statuses of a replication rule and its nested members.
+/// Negative — every required Status of a replication rule and its nested members is refused.
 #[test]
-fn an_empty_replication_status_is_decoded_as_the_empty_value_wherever_it_is_required() {
-    let rule = replication("<Status></Status>", "").expect("rule status");
-    empty_value!(&rule.rules[0].status, "ReplicationRule.Status");
-
+fn n_an_empty_replication_status_is_malformed_xml_wherever_it_is_required() {
     let enabled = "<Status>Enabled</Status>";
-    let delete = replication(&format!("{enabled}<DeleteReplication><Status/></DeleteReplication>"), "").expect("delete");
-    empty_value!(
-        &delete.rules[0].delete_replication.as_ref().expect("present").status,
-        "DeleteReplication.Status"
-    );
-
-    let existing = replication(
-        &format!("{enabled}<ExistingObjectReplication><Status></Status></ExistingObjectReplication>"),
-        "",
-    )
-    .expect("existing");
-    empty_value!(
-        &existing.rules[0]
-            .existing_object_replication
-            .as_ref()
-            .expect("present")
-            .status,
-        "ExistingObjectReplication.Status",
-    );
-
-    let modifications = replication(
-        &format!(
-            "{enabled}<SourceSelectionCriteria><ReplicaModifications><Status/></ReplicaModifications></SourceSelectionCriteria>"
+    for (rule, destination, position) in [
+        ("<Status></Status>".to_owned(), "", "ReplicationRule.Status"),
+        (
+            format!("{enabled}<DeleteReplication><Status/></DeleteReplication>"),
+            "",
+            "DeleteReplication.Status",
         ),
-        "",
-    )
-    .expect("replica modifications");
-    let criteria = modifications.rules[0].source_selection_criteria.as_ref().expect("criteria");
-    empty_value!(
-        &criteria.replica_modifications.as_ref().expect("present").status,
-        "ReplicaModifications.Status",
-    );
-
-    let kms = replication(
-        &format!(
-            "{enabled}<SourceSelectionCriteria><SseKmsEncryptedObjects><Status></Status></SseKmsEncryptedObjects></SourceSelectionCriteria>"
+        (
+            format!("{enabled}<ExistingObjectReplication><Status></Status></ExistingObjectReplication>"),
+            "",
+            "ExistingObjectReplication.Status",
         ),
-        "",
-    )
-    .expect("sse-kms objects");
-    let criteria = kms.rules[0].source_selection_criteria.as_ref().expect("criteria");
-    empty_value!(
-        &criteria.sse_kms_encrypted_objects.as_ref().expect("present").status,
-        "SseKmsEncryptedObjects.Status",
-    );
-
-    let metrics = replication(enabled, "<Metrics><Status/></Metrics>").expect("metrics");
-    empty_value!(&metrics.rules[0].destination.metrics.as_ref().expect("present").status, "Metrics.Status",);
-
-    let time = replication(
-        enabled,
-        "<ReplicationTime><Status></Status><Time><Minutes>15</Minutes></Time></ReplicationTime>",
-    )
-    .expect("replication time");
-    empty_value!(
-        &time.rules[0].destination.replication_time.as_ref().expect("present").status,
-        "ReplicationTime.Status",
-    );
+        (
+            format!(
+                "{enabled}<SourceSelectionCriteria><ReplicaModifications><Status/></ReplicaModifications></SourceSelectionCriteria>"
+            ),
+            "",
+            "ReplicaModifications.Status",
+        ),
+        (
+            format!(
+                "{enabled}<SourceSelectionCriteria><SseKmsEncryptedObjects><Status></Status></SseKmsEncryptedObjects></SourceSelectionCriteria>"
+            ),
+            "",
+            "SseKmsEncryptedObjects.Status",
+        ),
+        (enabled.to_owned(), "<Metrics><Status/></Metrics>", "Metrics.Status"),
+        (
+            enabled.to_owned(),
+            "<ReplicationTime><Status></Status><Time><Minutes>15</Minutes></Time></ReplicationTime>",
+            "ReplicationTime.Status",
+        ),
+    ] {
+        refused_as_malformed(replication(&rule, destination), position);
+    }
 }
 
 /// Positive — `RequestPaymentConfiguration.Payer`, which legacy RustFS stores empty.

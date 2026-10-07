@@ -94,6 +94,16 @@ pub(super) fn codec_rule(table: &Toml, id: &str) -> Result<Option<CodecRule>> {
             }
             (CodecValue::IntegerRange { min, max }, MutationDimension::IntegerRange)
         }
+        "member_constraint" => {
+            reject_range_keys(table, &what)?;
+            let value = required_str(table, "codec_value", &what)?;
+            let reject = match value.as_str() {
+                "reject_empty_text" => true,
+                "allow_empty_text" => false,
+                _ => return Err(Error::Overlay(format!("{what}: unknown text constraint `{value}`"))),
+            };
+            (CodecValue::NonEmptyText(reject), MutationDimension::MemberConstraint)
+        }
         "media_type" => {
             reject_range_keys(table, &what)?;
             let media = required_str(table, "codec_value", &what)?;

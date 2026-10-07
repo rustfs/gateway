@@ -225,7 +225,7 @@ id      = "q-repl-0012"
 kind    = "lenient_value_set"
 classification = "contract"
 target  = "ReplicationRule.Status"
-summary = "A Status outside the documented Enabled/Disabled pair is stored and echoed rather than refused: the stored document is re-parsed by every future release, RustFS parses this one configuration fail-closed, and a spelling refused tomorrow that was accepted yesterday would make the bucket unusable rather than merely switch a feature off."
+summary = "Nonempty Status values outside Enabled/Disabled remain accepted and echoed. HTTP empty required Status is refused by q-xml-status-0001; persisted configuration decoding remains lenient for both empty and unknown values."
 cases   = ["c-replication-0030"]
 
   [[quirk.evidence]]
