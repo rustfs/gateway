@@ -24,6 +24,8 @@ use super::*;
 
 #[path = "grandchild_tests.rs"]
 mod grandchild_tests;
+#[path = "lock_deadline_tests.rs"]
+mod lock_deadline_tests;
 
 #[path = "observation_tests.rs"]
 mod observation_tests;
@@ -414,37 +416,6 @@ fn a_batch_that_finishes_reports_no_killed_step() {
 
     assert!(!batch.timed_out, "a completed batch was reported as a timeout");
     assert!(batch.cancelled.is_empty(), "a completed batch reported a killed step");
-}
-
-#[test]
-fn deadline_expires_while_waiting_for_supervisor_lock_without_starting_command() {
-    let root = test_root("lock-deadline");
-    let marker = root.join("started");
-    let lock = SUPERVISOR_LOCK.lock().expect("test must hold the supervisor lock");
-    let (sender, receiver) = mpsc::channel();
-    let (ready_sender, ready_receiver) = mpsc::channel();
-    let worker_root = root.clone();
-    let worker_marker = marker.clone();
-    let worker = thread::spawn(move || {
-        let commands = vec![shell(
-            vec!["-c".to_owned(), format!("touch '{}'", worker_marker.display())],
-            "must not start",
-        )];
-        ready_sender.send(()).expect("test readiness receiver must remain available");
-        let batch = run(&commands, &worker_root, Some(Instant::now() + Duration::from_millis(50)));
-        sender.send(batch).expect("test result receiver must remain available");
-    });
-
-    ready_receiver.recv().expect("deadline worker must become ready");
-    let result = receiver.recv_timeout(Duration::from_millis(250));
-    drop(lock);
-    let batch = result.expect("the expired deadline waited for the supervisor lock");
-    worker.join().expect("deadline worker must finish");
-
-    assert!(batch.timed_out, "lock contention was not reported as a timeout");
-    assert!(batch.results.is_empty(), "a command was reported before the supervisor lock was acquired");
-    assert!(!marker.exists(), "an expired command started after waiting for the supervisor lock");
-    fs::remove_dir_all(root).expect("test directory must be removable");
 }
 
 /// The lock wait reads the injected clock as well: a deadline that clock has already passed ends
