@@ -361,6 +361,36 @@ fn n_a_repeated_discriminator_reads_its_first_value() {
     assert_eq!(reached("GET", "/bkt?events&events=x"), Some(LISTEN_BUCKET));
 }
 
+/// Negative — a discriminator is a query key, never a path segment: a bucket or a key named like
+/// one is the ordinary bucket or object request, and the extension needs the key in the query
+/// even then, on that bucket. Nothing a path spells can reach an extension row.
+#[test]
+fn n_a_bucket_or_key_named_like_a_discriminator_is_not_the_extension() {
+    for (method, target, standard) in [
+        ("GET", "/replication-check", "ListObjects"),
+        ("GET", "/replication-metrics", "ListObjects"),
+        ("GET", "/events", "ListObjects"),
+        ("GET", "/lambdaArn", "ListObjects"),
+        ("PUT", "/replication-reset", "CreateBucket"),
+        ("GET", "/bkt/replication-check", "GetObject"),
+        ("GET", "/bkt/events", "GetObject"),
+        ("GET", "/bkt/lambdaArn", "GetObject"),
+        ("GET", "/lambdaArn/obj", "GetObject"),
+        ("GET", "/events/replication-check", "GetObject"),
+        ("GET", "/replication-check?replication-check=1", "ListObjects"),
+        ("GET", "/bkt/events?events", "GetObject"),
+        ("GET", "/bkt/replication-check?replication-check", "GetObject"),
+    ] {
+        assert_eq!(reached(method, target), Some(standard), "{method} {target}");
+        assert_eq!(reach(false, Selection::Table, method, target), Some(standard), "{method} {target}");
+    }
+    // The key in the query selects the extension on a bucket of any name, these included.
+    assert_eq!(reached("GET", "/replication-check?replication-check"), Some(CHECK));
+    assert_eq!(reached("GET", "/events?events=x"), Some(LISTEN_BUCKET));
+    assert_eq!(reached("GET", "/lambdaArn/obj?lambdaArn=x"), Some(LAMBDA));
+    assert_eq!(reached("PUT", "/replication-reset?replication-reset"), Some(RESET));
+}
+
 /// Negative — a near miss of the zip pair reaches the admin fallback, never the pair: a missing
 /// id, a second segment, another method, or a trailing slash.
 #[test]
