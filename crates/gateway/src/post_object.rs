@@ -264,7 +264,8 @@ where
                         .map(|suffix| (suffix.to_owned(), (*value).to_owned()))
                 })
                 .collect();
-            let object_fields = fields::LockAndCustomerKey::read(&fields)?.into_fields(PostObjectFields::default());
+            let object_fields = fields::LockAndCustomerKey::read(&fields, fields::DateGrammar::Iso8601Header)?
+                .into_fields(PostObjectFields::default());
             (metadata, None, object_fields)
         };
         let permission_fields = fields::permission_fields(&fields);
@@ -630,7 +631,9 @@ fn policy_refusal(reject: PostPolicyError) -> S3Error {
 mod fields;
 #[path = "post_object/legacy.rs"]
 mod legacy;
-pub(crate) use fields::permission_value;
+#[path = "post_object/legacy_date.rs"]
+mod legacy_date;
+pub(crate) use fields::permission_applies;
 
 #[cfg(test)]
 #[path = "post_object/tests.rs"]

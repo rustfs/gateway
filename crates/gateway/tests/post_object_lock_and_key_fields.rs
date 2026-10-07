@@ -19,10 +19,12 @@
 //! Responsible for: the three `x-amz-object-lock-*` fields and the three
 //! `x-amz-server-side-encryption-customer-*` fields reaching `PostObjectInput::fields` under both
 //! grammars; `s3:PutObjectRetention` and `s3:PutObjectLegalHold` asked for a form naming a lock,
-//! by the form's fields and never by the request's headers; a retain-until date the decoder cannot
-//! read refused before authorization; and a form key refused over cleartext, incomplete, with
-//! another algorithm, beside a managed algorithm, or disagreeing with its digest, exactly as the
-//! header gate refuses it, never reaching a handler and never echoed.
+//! an empty field included, by the form's fields and never by the request's headers; a
+//! retain-until date its grammar cannot read (legacy RustFS's RFC 3339 reading under the RustFS
+//! profile, the header's ISO 8601 one otherwise) refused before authorization; and a form key
+//! refused over cleartext, incomplete, with another algorithm, beside a managed algorithm, or
+//! disagreeing with its digest, exactly as the header gate refuses it, never reaching a handler
+//! and never echoed.
 //! NOT responsible for: the other members (`post_object_legacy_fields.rs`), the closed value sets
 //! of the mode and hold, which the handler holds a header to as well (the conformance fixture), or
 //! what a backend stores.
@@ -250,33 +252,50 @@ async fn the_lock_and_customer_key_fields_reach_the_handler_as_the_same_named_me
 }
 
 /// Positive — a form naming a mode or a date is asked `s3:PutObjectRetention`, one naming a hold
-/// (`OFF` included, as legacy RustFS reads it) `s3:PutObjectLegalHold`, each after the base action.
+/// (`OFF` included, as legacy RustFS reads it) `s3:PutObjectLegalHold`, each after the base action,
+/// under either grammar. A field sent empty is set, never absent for being empty: legacy RustFS's
+/// decoder reads it as `Some("")` and its hook asks the action for it, and the handler is handed
+/// the empty member, so the action is asked exactly when the member reaches the handler.
 #[tokio::test]
 async fn a_form_naming_a_lock_is_asked_the_lock_actions() {
-    for (fields, expected) in [
-        (LOCK.to_vec(), vec!["s3:PutObjectRetention", "s3:PutObjectLegalHold"]),
-        (
-            vec![("x-amz-object-lock-retain-until-date", "2030-01-01T00:00:00Z")],
-            vec!["s3:PutObjectRetention"],
-        ),
-        (vec![("x-amz-object-lock-legal-hold", "OFF")], vec!["s3:PutObjectLegalHold"]),
-    ] {
-        let answer = post(&fields, OVER_TLS).await;
-        assert_eq!(answer.status, StatusCode::NO_CONTENT, "{fields:?}: {}", answer.body);
-        assert_eq!(answer.extras_asked(), expected, "{fields:?}");
+    for legacy_grammar in [true, false] {
+        for (fields, expected) in [
+            (LOCK.to_vec(), vec!["s3:PutObjectRetention", "s3:PutObjectLegalHold"]),
+            (
+                vec![("x-amz-object-lock-retain-until-date", "2030-01-01T00:00:00Z")],
+                vec!["s3:PutObjectRetention"],
+            ),
+            (vec![("x-amz-object-lock-legal-hold", "OFF")], vec!["s3:PutObjectLegalHold"]),
+            (vec![("x-amz-object-lock-mode", "")], vec!["s3:PutObjectRetention"]),
+            (vec![("x-amz-object-lock-legal-hold", "")], vec!["s3:PutObjectLegalHold"]),
+        ] {
+            let setup = Setup {
+                legacy_grammar,
+                ..OVER_TLS
+            };
+            let answer = post(&fields, setup).await;
+            let context = format!("{legacy_grammar} {fields:?}");
+            assert_eq!(answer.status, StatusCode::NO_CONTENT, "{context}: {}", answer.body);
+            assert_eq!(answer.extras_asked(), expected, "{context}");
+            let handed = answer.handed.expect("the handler ran");
+            let handed_lock = handed.object_lock_mode.is_some()
+                || handed.object_lock_retain_until_date.is_some()
+                || handed.object_lock_legal_hold_status.is_some();
+            assert!(handed_lock, "{context}: the member that asked was not handed");
+        }
     }
 }
 
 // ── negative ──────────────────────────────────────────────────────────────────────────────────
 
-/// Negative — a form without a lock field asks the base action alone, and an empty lock field
-/// triggers nothing; lock headers on the request itself trigger nothing and set nothing, since a
-/// form upload reads none of its request's headers.
+/// Negative — a form without a lock field asks the base action alone, and a field whose name only
+/// starts with a lock field's triggers nothing; lock headers on the request itself trigger nothing
+/// and set nothing, since a form upload reads none of its request's headers.
 #[tokio::test]
 async fn n_a_form_without_lock_fields_asks_only_the_base_action_whatever_its_headers_say() {
     for (fields, setup) in [
         (Vec::new(), OVER_TLS),
-        (vec![("x-amz-object-lock-mode", "")], OVER_TLS),
+        (vec![("x-amz-object-lock-mode-extra", "")], OVER_TLS),
         (
             Vec::new(),
             Setup {
@@ -308,6 +327,43 @@ async fn n_an_unreadable_retain_until_date_is_refused_before_authorization() {
             let answer = post(&[("x-amz-object-lock-retain-until-date", value)], setup).await;
             refused_before_the_handler(&answer, "InvalidArgument", &format!("{legacy_grammar} {value:?}"));
             assert!(answer.asked.is_empty(), "{value:?}: the authorizer was asked first");
+        }
+    }
+}
+
+/// Negative — the retain-until date is read with the grammar of the profile that reads the form:
+/// the RustFS profile reads it as legacy RustFS's RFC 3339 reader does
+/// (`post_object/legacy_date.rs`), the gateway grammar as the ISO 8601 instant the header is
+/// (`q-timestamp-0011`). Each spelling here is read by one of them, as the instant it names, and
+/// refused by the other `400 InvalidArgument` before authorization.
+#[tokio::test]
+async fn n_each_grammar_refuses_the_dates_only_the_other_reads() {
+    for (value, legacy_reads, instant) in [
+        ("2030-01-01t00:00:00z", true, "2030-01-01T00:00:00Z"),
+        ("2030-01-01 00:00:00Z", true, "2030-01-01T00:00:00Z"),
+        ("2030-12-31T23:59:60Z", true, "2030-12-31T23:59:59.999999999Z"),
+        ("2030-01-01T08:00:00+0800", false, "2030-01-01T00:00:00Z"),
+        ("2030-01-01T00:00:00.Z", false, "2030-01-01T00:00:00Z"),
+    ] {
+        for legacy_grammar in [true, false] {
+            let setup = Setup {
+                legacy_grammar,
+                ..OVER_TLS
+            };
+            let answer = post(&[("x-amz-object-lock-retain-until-date", value)], setup).await;
+            let context = format!("{legacy_grammar} {value:?}");
+            if legacy_grammar == legacy_reads {
+                assert_eq!(answer.status, StatusCode::NO_CONTENT, "{context}: {}", answer.body);
+                let handed = answer.handed.expect("the handler ran");
+                assert_eq!(
+                    handed.object_lock_retain_until_date,
+                    Some(Timestamp::parse(instant, TimestampFormat::Iso8601).expect("an instant")),
+                    "{context}"
+                );
+            } else {
+                refused_before_the_handler(&answer, "InvalidArgument", &context);
+                assert!(answer.asked.is_empty(), "{context}: the authorizer was asked first");
+            }
         }
     }
 }

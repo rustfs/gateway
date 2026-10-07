@@ -78,10 +78,12 @@ pub struct PostObjectInput {
 /// key passes the same transport, trio and digest rules a header key does before any handler
 /// sees it (`rustfs-gateway-core`'s `sse::enforce_with`), and the retain-until instant is parsed
 /// before authorization; the mode and hold values reach the handler as sent, for the closed-set
-/// rule the header path applies there.
+/// rule the header path applies there. A lock member sent empty is handed as `Some` and was asked
+/// its lock action like any other value.
 ///
-/// `Debug` never prints the customer key, the KMS key id or the context. There is no `Clone`, as
-/// the key cannot be copied, and no `PartialEq`, as on every operation input: the key is never
+/// `Debug` never prints the customer key, the KMS key id or the context. There is no `Clone`:
+/// [`SseCustomerKey`] has none by contract, so its backing storage is never duplicated outside
+/// the zeroizing carrier. There is no `PartialEq`, as on every operation input: the key is never
 /// compared with `==`.
 #[derive(Default)]
 pub struct PostObjectFields {
@@ -141,7 +143,8 @@ pub struct PostObjectFields {
     pub object_lock_legal_hold_status: Option<ObjectLockLegalHoldStatus>,
     /// `x-amz-object-lock-mode`, as sent.
     pub object_lock_mode: Option<ObjectLockMode>,
-    /// `x-amz-object-lock-retain-until-date`, read as the ISO 8601 instant the header is.
+    /// `x-amz-object-lock-retain-until-date`: under the RustFS profile the RFC 3339 date-time
+    /// legacy RustFS reads, under the gateway's own grammar the ISO 8601 instant the header is.
     pub object_lock_retain_until_date: Option<Timestamp>,
     /// `x-amz-request-payer`.
     pub request_payer: Option<RequestPayer>,

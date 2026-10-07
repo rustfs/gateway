@@ -1169,7 +1169,7 @@ impl S3Service {
                         continue;
                     }
                     // Read off the raw map by name, or off a form's fields: no `HeaderName` per trigger on the warm path.
-                    if !extra.applies(|name| crate::post_object::permission_value(route_post_fields, route_headers, name)) {
+                    if !crate::post_object::permission_applies(route_post_fields, route_headers, extra) {
                         continue;
                     }
                     route_extras.push(AuthzRequest {

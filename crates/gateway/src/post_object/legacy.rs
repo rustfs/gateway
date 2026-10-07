@@ -89,11 +89,11 @@ pub(super) fn content_type(fields: &[(&str, &str)]) -> Option<String> {
 /// Legacy RustFS reads each field named like a `PutObject` header with that member's own text
 /// parser: a text or enumeration member is the field as sent, empty included; a `bool` or `i64`
 /// member is Rust's own parse of it; an entity-tag condition is read with its grammar
-/// ([`is_entity_tag_condition`]); the retain-until date is an ISO 8601 instant
-/// (`super::fields`). Only those five can fail, and the first that does — the bucket-key flag,
-/// then `If-Match`, then `If-None-Match`, then the retain-until date, then the write offset, the
-/// member order the other four were observed in — refuses the upload before authorization, naming
-/// the field and the value as sent.
+/// ([`is_entity_tag_condition`]); the retain-until date is the RFC 3339 date-time legacy
+/// RustFS's reader reads (`super::legacy_date`, through `super::fields`). Only those five can
+/// fail, and the first that does — the bucket-key flag, then `If-Match`, then `If-None-Match`,
+/// then the retain-until date, then the write offset, the member order the other four were
+/// observed in — refuses the upload before authorization, naming the field and the value as sent.
 pub(super) fn object_fields(fields: &[(&str, &str)]) -> Result<PostObjectFields, S3Error> {
     let text = |name: &str| field(fields, name).map(str::to_owned);
     let condition = |value: &str| is_entity_tag_condition(value).then(|| value.to_owned());
@@ -102,7 +102,7 @@ pub(super) fn object_fields(fields: &[(&str, &str)]) -> Result<PostObjectFields,
     })?;
     let if_match = read(fields, "if-match", condition)?;
     let if_none_match = read(fields, "if-none-match", condition)?;
-    let lock_and_key = super::fields::LockAndCustomerKey::read(fields)?;
+    let lock_and_key = super::fields::LockAndCustomerKey::read(fields, super::fields::DateGrammar::LegacyRustfs)?;
     let write_offset_bytes = read(fields, "x-amz-write-offset-bytes", |value| value.parse::<i64>().ok())?;
     let base = PostObjectFields {
         acl: text("x-amz-acl").map(Acl::custom),
