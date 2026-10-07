@@ -17,8 +17,7 @@
 //! The `InputSerialization` shape conversions.
 
 #[allow(unused_imports)] // Not every conversion needs a leaf function.
-use crate::compat::s3s_0_17_0::leaf;
-use crate::compat::s3s_0_17_0::s3s;
+use super::super::{leaf, s3s};
 use crate::compat::ConversionError;
 
 /// Converts one `InputSerialization` from the gateway shape to the s3s shape.
@@ -33,5 +32,26 @@ pub fn input_serialization_to_s3s(value: crate::ops::shapes::InputSerialization)
         compression_type: value.compression_type.map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::CompressionType::from(x.as_str().to_owned())) }).transpose()?,
         json: value.json.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::json_input::json_input_to_s3s(x)?) }).transpose()?,
         parquet: value.parquet.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::parquet_input::parquet_input_to_s3s(x)?) }).transpose()?,
+    })
+}
+
+/// Converts one `InputSerialization` from the s3s shape to the gateway shape.
+///
+/// # Errors
+///
+/// [`ConversionError`] naming a member the other side cannot hold.
+#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
+pub fn input_serialization_from_s3s(value: s3s::dto::InputSerialization) -> Result<crate::ops::shapes::InputSerialization, ConversionError> {
+    let s3s::dto::InputSerialization {
+        csv,
+        compression_type,
+        json,
+        parquet,
+    } = value;
+    Ok(crate::ops::shapes::InputSerialization {
+        csv: csv.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::csv_input::csv_input_from_s3s(x)?) }).transpose()?,
+        compression_type: compression_type.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::CompressionType::custom(x.as_str().to_owned())) }).transpose()?,
+        json: json.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::json_input::json_input_from_s3s(x)?) }).transpose()?,
+        parquet: parquet.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::parquet_input::parquet_input_from_s3s(x)?) }).transpose()?,
     })
 }

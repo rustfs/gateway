@@ -17,9 +17,23 @@
 //! The `Error` shape conversions.
 
 #[allow(unused_imports)] // Not every conversion needs a leaf function.
-use crate::compat::s3s_0_17_0::leaf;
-use crate::compat::s3s_0_17_0::s3s;
+use super::super::{leaf, s3s};
 use crate::compat::ConversionError;
+
+/// Converts one `Error` from the gateway shape to the s3s shape.
+///
+/// # Errors
+///
+/// [`ConversionError`] naming a member the other side cannot hold.
+#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
+pub fn error_to_s3s(value: crate::ops::shapes::Error) -> Result<s3s::dto::Error, ConversionError> {
+    Ok(s3s::dto::Error {
+        code: value.code,
+        key: value.key.map(|x| -> Result<_, ConversionError> { Ok(x.as_str().to_owned()) }).transpose()?,
+        message: value.message,
+        version_id: value.version_id,
+    })
+}
 
 /// Converts one `Error` from the s3s shape to the gateway shape.
 ///

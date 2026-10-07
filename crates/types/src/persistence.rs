@@ -194,10 +194,10 @@ impl fmt::Debug for RedactedKeyId<'_> {
 ///
 /// Its only caller is `crate::compat`, so it is compiled under the same features: ungated it is
 /// dead code in every build without them, which `-D warnings` refuses.
-#[cfg(any(feature = "compat-s3s", feature = "compat-s3s-0-17-0"))]
+#[cfg(any(feature = "compat-s3s", feature = "compat-s3s-0-17-0", feature = "compat-s3s-rustfs"))]
 pub(crate) struct RedactedEncryptionRuleBehavior<'a>(pub(crate) &'a EncryptionRuleBehavior);
 
-#[cfg(any(feature = "compat-s3s", feature = "compat-s3s-0-17-0"))]
+#[cfg(any(feature = "compat-s3s", feature = "compat-s3s-0-17-0", feature = "compat-s3s-rustfs"))]
 impl fmt::Debug for RedactedEncryptionRuleBehavior<'_> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         let (algorithm, key_id, bucket_key_enabled, blocked) = self.0;

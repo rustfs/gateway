@@ -17,11 +17,14 @@
 //!
 //! Responsible for: invoking the exact old persistence codecs of every pinned s3s revision,
 //! selecting which revision answers, and exposing family-scoped adapters over owned values (feature
-//! `compat-s3s`); and the migration seam — the single-operation DTO conversions (`put_object`,
-//! `get_bucket_location`) and the request-context conversion (`request_context`) — compiled once
-//! per seam revision: [`s3s_0_17_0`](crate::compat::s3s_0_17_0), the revision RustFS main
-//! links (feature `compat-s3s-0-17-0`), and `s3s_9c4690d8`, the baseline oracle the goldens also
-//! measure (feature `compat-s3s`). The seam modules are the only ones whose API names s3s types.
+//! `compat-s3s`); and the migration seam — the generated conversions of every covered operation
+//! in both directions, the hand-written ones (`put_object`, `get_bucket_location`), the error seam
+//! and the request-context conversion (`request_context`) — compiled once per seam revision:
+//! [`s3s_5761ddfe`](crate::compat::s3s_5761ddfe), the revision RustFS main links (feature
+//! `compat-s3s-rustfs`, rustfs/backlog#2759); [`s3s_0_17_0`](crate::compat::s3s_0_17_0), the
+//! release it linked at 528a3681, which the goldens and difftest measure (feature
+//! `compat-s3s-0-17-0`); and `s3s_9c4690d8`, the baseline oracle the goldens also measure
+//! (feature `compat-s3s`). The seam modules are the only ones whose API names s3s types.
 //! NOT responsible for: production XML behavior, golden assertions, or the RustFS side of any
 //! conversion (its extensions, its hooks, its call order).
 //! Upstream: the three s3s revisions named by [`OracleRevision`](crate::compat::OracleRevision).
@@ -30,12 +33,13 @@
 //!
 //! # One seam source, one compilation per revision
 //!
-//! `compat/seam/*.rs` names s3s only as `super::s3s`, so each seam module below binds its own
-//! revision and the same source compiles against it. The DTO and request shapes the seam touches
-//! are identical in `9c4690d8` and `0.17.0` but for one member: `PutObjectInput.expires` is a
-//! parsed `Timestamp` in `9c4690d8` and the wire text in `0.17.0`. That difference is the
-//! `expires` hook each seam module defines, as `encryption_rule` is for the oracles; the file is
-//! never copied.
+//! `compat/seam/*.rs` names s3s only as `super::s3s`, and the generated tree only as
+//! `super::super::s3s`, so each seam module below binds its own revision and the same source —
+//! hand-written and generated alike — compiles against it. `5761ddfe` is `0.17.0`'s DTO and error
+//! tables exactly. The shapes the seam touches are identical in `9c4690d8` and `0.17.0` but for
+//! one member: `PutObjectInput.expires` is a parsed `Timestamp` in `9c4690d8` and the wire text in
+//! `0.17.0`. That difference is the `expires` and `expires_text` hooks each seam module defines,
+//! as `encryption_rule` is for the oracles; the file is never copied.
 //!
 //! # One adapter source, three compilations
 //!
@@ -61,22 +65,9 @@ use crate::persistence::{
     ReplicationBehaviorProjection,
 };
 
-/// The generated half of the `s3s_0_17_0` seam, mounted here so its `#[path]` goes through the
-/// `crates/types/generated` symlink like every other generated file (ADR-0005). Not formatted by
-/// hand: the generator's output is what is reviewed. Reach it as `s3s_0_17_0::generated`.
-#[cfg(feature = "compat-s3s-0-17-0")]
-#[rustfmt::skip]
-#[doc(hidden)]
-#[path = "../generated/seam/mod.rs"]
-pub mod seam_generated_0_17_0;
-
-/// The migration seam against s3s `0.17.0`, the revision RustFS `main` links
-/// (`OracleRevision::Candidate`): what the RustFS ring-2 adapter converts through, and what the
-/// goldens decode, encode and context diffs measure a second time.
-///
-/// Its `s3s` is the crate RustFS itself names, unified by Cargo because this crate declares it
-/// with the same source, revision and version, so the converted values are the ones
-/// `impl s3s::S3 for FS` takes.
+/// The migration seam against s3s `0.17.0`, the release RustFS `main` linked at 528a3681
+/// (`OracleRevision::Candidate`): what the goldens decode, encode and context diffs and the
+/// difftest runners measure a second time.
 #[cfg(feature = "compat-s3s-0-17-0")]
 #[path = "compat/seam"]
 pub mod s3s_0_17_0 {
@@ -86,9 +77,14 @@ pub mod s3s_0_17_0 {
     pub use ::s3s_candidate as s3s;
 
     pub mod error;
-    /// Every covered operation's conversions, generated from the IR against the s3s 0.17.0 facts
-    /// (rustfs/gateway#967).
-    pub use super::seam_generated_0_17_0 as generated;
+    /// Every covered operation's conversions both ways, the member and error-code census, and the
+    /// test-only fixtures, generated from the IR against the s3s 0.17.0 facts (rustfs/gateway#967)
+    /// and converting against this module's `s3s` and `leaf`. Not formatted by hand: the
+    /// generator's output is what is reviewed. Its `#[path]` goes through the
+    /// `crates/types/generated` symlink like every other generated file (ADR-0005).
+    #[rustfmt::skip]
+    #[path = "../../../generated/seam/mod.rs"]
+    pub mod generated;
     #[cfg(test)]
     mod census_tests;
     #[cfg(test)]
@@ -97,6 +93,8 @@ pub mod s3s_0_17_0 {
     pub mod leaf;
     pub mod put_object;
     pub mod request_context;
+    #[cfg(test)]
+    mod reverse_tests;
     pub mod trailers;
     #[cfg(test)]
     mod trailers_tests;
@@ -109,9 +107,69 @@ pub mod s3s_0_17_0 {
 
     /// `0.17.0` holds `PutObjectInput.expires` as the wire text, exactly as the gateway keeps it
     /// (`q-timestamp-0005`), so every value crosses unchanged and nothing is refused.
-    #[allow(clippy::unnecessary_wraps)] // The signature is the one both revisions' hooks share.
+    #[allow(clippy::unnecessary_wraps)] // The signature is the one every revision's hook shares.
     fn expires(value: &str) -> Result<s3s::dto::Expires, super::ConversionError> {
         Ok(value.to_owned())
+    }
+
+    /// The reverse of `expires`: the wire text, unchanged.
+    #[allow(clippy::unnecessary_wraps)] // The signature is the one every revision's hook shares.
+    fn expires_text(value: &s3s::dto::Expires) -> Result<String, super::ConversionError> {
+        Ok(value.clone())
+    }
+}
+
+/// The migration seam against s3s-project/s3s@5761ddfe, the revision RustFS `main` links today
+/// (rustfs/rustfs@6b155400): what `impl s3s::S3 for FS` converts through while its use cases are
+/// ported to gateway types (rustfs/backlog#2749), and what the RustFS ring-2 adapter converts
+/// through after the flip (rustfs/backlog#2759).
+///
+/// Its `s3s` is the crate RustFS itself names, unified by Cargo because this crate declares it
+/// with the same source and revision, so the converted values are the ones `impl s3s::S3 for FS`
+/// takes. The revision is s3s `0.17.0` plus fixes outside the DTO and error tables, so the seam
+/// source and the generated tree are the ones `s3s_0_17_0` compiles, compiled once more.
+#[cfg(feature = "compat-s3s-rustfs")]
+#[path = "compat/seam"]
+#[allow(clippy::duplicate_mod)] // Deliberate: one seam source is compiled once per revision.
+pub mod s3s_5761ddfe {
+    /// The s3s revision every signature in this module names: RustFS main's own.
+    pub use ::s3s_rustfs as s3s;
+
+    pub mod error;
+    /// As `s3s_0_17_0::generated`, compiled against this module's `s3s`.
+    #[rustfmt::skip]
+    #[path = "../../../generated/seam/mod.rs"]
+    pub mod generated;
+    #[cfg(test)]
+    mod census_tests;
+    #[cfg(test)]
+    mod generated_tests;
+    pub mod get_bucket_location;
+    pub mod leaf;
+    pub mod put_object;
+    pub mod request_context;
+    #[cfg(test)]
+    mod reverse_tests;
+    pub mod trailers;
+    #[cfg(test)]
+    mod trailers_tests;
+
+    /// `5761ddfe` fills a message from the code's default sentence when a body names none, as
+    /// `0.17.0` does.
+    fn default_message(code: &s3s::S3ErrorCode) -> Option<&'static str> {
+        code.default_message()
+    }
+
+    /// `5761ddfe` holds `PutObjectInput.expires` as the wire text, as `0.17.0` does.
+    #[allow(clippy::unnecessary_wraps)] // The signature is the one every revision's hook shares.
+    fn expires(value: &str) -> Result<s3s::dto::Expires, super::ConversionError> {
+        Ok(value.to_owned())
+    }
+
+    /// The reverse of `expires`: the wire text, unchanged.
+    #[allow(clippy::unnecessary_wraps)] // The signature is the one every revision's hook shares.
+    fn expires_text(value: &s3s::dto::Expires) -> Result<String, super::ConversionError> {
+        Ok(value.clone())
     }
 }
 
@@ -144,6 +202,22 @@ pub mod s3s_9c4690d8 {
         s3s::dto::Timestamp::parse(s3s::dto::TimestampFormat::HttpDate, value).map_err(|_| super::ConversionError {
             field: "expires",
             reason: "not an HTTP-date, and the s3s input holds this member parsed",
+        })
+    }
+
+    /// The reverse of `expires`: the parsed instant spelled as the HTTP-date the legacy decoder
+    /// read, refused by member name when it has none.
+    fn expires_text(value: &s3s::dto::Expires) -> Result<String, super::ConversionError> {
+        let mut spelled = Vec::new();
+        value
+            .format(s3s::dto::TimestampFormat::HttpDate, &mut spelled)
+            .map_err(|_| super::ConversionError {
+                field: "expires",
+                reason: "an instant that has no HTTP-date spelling",
+            })?;
+        String::from_utf8(spelled).map_err(|_| super::ConversionError {
+            field: "expires",
+            reason: "an instant spelled outside ASCII",
         })
     }
 }
@@ -658,5 +732,7 @@ dispatch! {
     fn serialize_s3s_replication(value: &PersistedReplicationConfiguration) -> Vec<u8>;
 }
 
+#[cfg(all(test, feature = "compat-s3s-rustfs"))]
+mod rustfs_tests;
 #[cfg(all(test, feature = "compat-s3s"))]
 mod tests;

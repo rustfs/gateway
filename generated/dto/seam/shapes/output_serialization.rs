@@ -17,8 +17,7 @@
 //! The `OutputSerialization` shape conversions.
 
 #[allow(unused_imports)] // Not every conversion needs a leaf function.
-use crate::compat::s3s_0_17_0::leaf;
-use crate::compat::s3s_0_17_0::s3s;
+use super::super::{leaf, s3s};
 use crate::compat::ConversionError;
 
 /// Converts one `OutputSerialization` from the gateway shape to the s3s shape.
@@ -31,5 +30,22 @@ pub fn output_serialization_to_s3s(value: crate::ops::shapes::OutputSerializatio
     Ok(s3s::dto::OutputSerialization {
         csv: value.csv.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::csv_output::csv_output_to_s3s(x)?) }).transpose()?,
         json: value.json.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::json_output::json_output_to_s3s(x)?) }).transpose()?,
+    })
+}
+
+/// Converts one `OutputSerialization` from the s3s shape to the gateway shape.
+///
+/// # Errors
+///
+/// [`ConversionError`] naming a member the other side cannot hold.
+#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
+pub fn output_serialization_from_s3s(value: s3s::dto::OutputSerialization) -> Result<crate::ops::shapes::OutputSerialization, ConversionError> {
+    let s3s::dto::OutputSerialization {
+        csv,
+        json,
+    } = value;
+    Ok(crate::ops::shapes::OutputSerialization {
+        csv: csv.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::csv_output::csv_output_from_s3s(x)?) }).transpose()?,
+        json: json.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::json_output::json_output_from_s3s(x)?) }).transpose()?,
     })
 }

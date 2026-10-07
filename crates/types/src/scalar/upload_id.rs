@@ -105,7 +105,7 @@ impl UploadIdClaim {
 
     /// The claimed bytes, for the migration seam only: the s3s input holds an upload id as a plain
     /// string, and the RustFS body it reaches resolves that id against its own bucket and key.
-    #[cfg(feature = "compat-s3s-0-17-0")]
+    #[cfg(any(feature = "compat-s3s-0-17-0", feature = "compat-s3s-rustfs"))]
     pub(crate) fn wire_for_compat_seam(&self) -> &str {
         &self.raw
     }

@@ -17,8 +17,7 @@
 //! The `ObjectIdentifier` shape conversions.
 
 #[allow(unused_imports)] // Not every conversion needs a leaf function.
-use crate::compat::s3s_0_17_0::leaf;
-use crate::compat::s3s_0_17_0::s3s;
+use super::super::{leaf, s3s};
 use crate::compat::ConversionError;
 
 /// Converts one `ObjectIdentifier` from the gateway shape to the s3s shape.
@@ -34,5 +33,28 @@ pub fn object_identifier_to_s3s(value: crate::ops::shapes::ObjectIdentifier) -> 
         last_modified_time: value.last_modified_time.map(|x| -> Result<_, ConversionError> { Ok(leaf::timestamp_to_s3s("last_modified_time", x)?) }).transpose()?,
         size: value.size,
         version_id: value.version_id,
+    })
+}
+
+/// Converts one `ObjectIdentifier` from the s3s shape to the gateway shape.
+///
+/// # Errors
+///
+/// [`ConversionError`] naming a member the other side cannot hold.
+#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
+pub fn object_identifier_from_s3s(value: s3s::dto::ObjectIdentifier) -> Result<crate::ops::shapes::ObjectIdentifier, ConversionError> {
+    let s3s::dto::ObjectIdentifier {
+        e_tag,
+        key,
+        last_modified_time,
+        size,
+        version_id,
+    } = value;
+    Ok(crate::ops::shapes::ObjectIdentifier {
+        key: { let x = key; leaf::object_key("key", x)? },
+        version_id,
+        e_tag: e_tag.map(|x| -> Result<_, ConversionError> { Ok(leaf::etag_from_s3s("e_tag", x)?) }).transpose()?,
+        last_modified_time: last_modified_time.map(|x| -> Result<_, ConversionError> { Ok(leaf::timestamp_from_s3s("last_modified_time", &x)?) }).transpose()?,
+        size,
     })
 }

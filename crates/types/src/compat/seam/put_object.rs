@@ -17,9 +17,11 @@
 //!
 //! Responsible for: turning a decoded gateway `PutObjectInput` into the s3s `PutObjectInput` a
 //! RustFS app body receives today; turning the s3s `PutObjectOutput` that body returns into the
-//! gateway `PutObjectOutput` the gateway codec writes; and moving the live request body across
-//! without reading a byte of it. A value one side cannot hold is a [`ConversionError`] naming the
-//! member, never a silent drop or a default.
+//! gateway `PutObjectOutput` the gateway codec writes; the same two conversions the other way
+//! round for a RustFS use case ported to gateway types behind the legacy stack
+//! (rustfs/backlog#2749); and moving a live body across in either direction without reading a
+//! byte of it. A value one side cannot hold is a [`ConversionError`] naming the member, never a
+//! silent drop or a default.
 //! NOT responsible for: request context (`uri`, headers, extensions, credentials, region,
 //! trailers), routing, authentication, or choosing a revision: this one source is compiled once per
 //! seam revision in `compat.rs`.
@@ -31,7 +33,9 @@
 //!
 //! Input goes gateway → s3s and output goes s3s → gateway, because that is the migration: the
 //! gateway decodes and encodes the wire, and the RustFS app body in between keeps its s3s
-//! signatures until it is ported.
+//! signatures until it is ported. While it is being ported the legacy stack still decodes and
+//! encodes the wire, so the reverse pair ([`input_from_s3s`], [`output_to_s3s`]) carries a
+//! gateway-typed use case behind it.
 
 use core::pin::Pin;
 use core::task::{Context, Poll};
@@ -39,11 +43,11 @@ use std::sync::{Mutex, PoisonError};
 
 use super::s3s;
 use bytes::Bytes;
-use rustfs_gateway_stream::{ByteStream, PayloadRead, PayloadStream};
+use rustfs_gateway_stream::{ByteStream, PayloadCaps, PayloadRead, PayloadStream, StreamError, TrailingHeaders};
 use s3s::dto as oracle;
 
 use crate::compat::ConversionError;
-use crate::{ChecksumAlgorithm, ChecksumSpec, ETag, OpaqueString, Timestamp, dto};
+use crate::{BucketName, ChecksumAlgorithm, ChecksumSpec, ETag, ObjectKey, OpaqueString, SseCustomerKey, Timestamp, dto};
 
 /// Every member of the gateway `PutObjectInput` that [`input_to_s3s`] maps.
 ///
@@ -349,7 +353,7 @@ pub fn output_from_s3s(output: oracle::PutObjectOutput) -> Result<dto::PutObject
         size,
         version_id,
     } = output;
-    let mut present = [
+    let checksum_spec = checksum_spec_from([
         ("checksum_crc32", ChecksumAlgorithm::Crc32, checksum_crc32),
         ("checksum_crc32c", ChecksumAlgorithm::Crc32c, checksum_crc32c),
         ("checksum_crc64nvme", ChecksumAlgorithm::Crc64Nvme, checksum_crc64nvme),
@@ -360,24 +364,7 @@ pub fn output_from_s3s(output: oracle::PutObjectOutput) -> Result<dto::PutObject
         ("checksum_xxhash128", ChecksumAlgorithm::XxHash128, checksum_xxhash128),
         ("checksum_xxhash3", ChecksumAlgorithm::XxHash3, checksum_xxhash3),
         ("checksum_xxhash64", ChecksumAlgorithm::XxHash64, checksum_xxhash64),
-    ]
-    .into_iter()
-    .filter_map(|(field, algorithm, value)| value.map(|value| (field, algorithm, value)));
-    let checksum_spec = match (present.next(), present.next()) {
-        (None, _) => None,
-        (Some(_), Some(_)) => {
-            return Err(ConversionError {
-                field: "checksum_spec",
-                reason: "the gateway output carries one checksum, so a second would be lost",
-            });
-        }
-        (Some((field, algorithm, value)), None) => {
-            Some(ChecksumSpec::parse_header(algorithm.header_name(), &value).map_err(|_| ConversionError {
-                field,
-                reason: "not a checksum value of this algorithm's width",
-            })?)
-        }
-    };
+    ])?;
     let e_tag = match e_tag {
         Some(oracle::ETag::Strong(value)) => ETag::new(value),
         Some(oracle::ETag::Weak(value)) => ETag::new_weak(value),
@@ -406,6 +393,258 @@ pub fn output_from_s3s(output: oracle::PutObjectOutput) -> Result<dto::PutObject
         bucket_key_enabled,
         size,
         request_charged: request_charged.map(|value| dto::RequestCharged::custom(value.as_str().to_owned())),
+    })
+}
+
+/// The per-algorithm s3s checksum members as the one gateway spec.
+fn checksum_spec_from(
+    members: [(&'static str, ChecksumAlgorithm, Option<String>); 10],
+) -> Result<Option<ChecksumSpec>, ConversionError> {
+    let mut present = members
+        .into_iter()
+        .filter_map(|(field, algorithm, value)| value.map(|value| (field, algorithm, value)));
+    match (present.next(), present.next()) {
+        (None, _) => Ok(None),
+        (Some(_), Some(_)) => Err(ConversionError {
+            field: "checksum_spec",
+            reason: "the gateway output carries one checksum, so a second would be lost",
+        }),
+        (Some((field, algorithm, value)), None) => {
+            ChecksumSpec::parse_header(algorithm.header_name(), &value)
+                .map(Some)
+                .map_err(|_| ConversionError {
+                    field,
+                    reason: "not a checksum value of this algorithm's width",
+                })
+        }
+    }
+}
+
+/// Members only the legacy decoder reads, which no gateway member holds: handed back beside the
+/// gateway input by [`input_from_s3s`], never dropped, for the ported use case to apply as the
+/// legacy stack did (rustfs/backlog#2749). Forward, only the authorised replica write carries
+/// the member, through [`replica_input_to_s3s`].
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct LegacyInput {
+    /// MinIO's `?versionId=` on a PUT: the version the legacy stack stores a replica under.
+    pub version_id: Option<String>,
+}
+
+/// Converts the s3s input the legacy stack decoded into the gateway input a ported RustFS use
+/// case takes (rustfs/backlog#2749), with the legacy-only member beside it. The body is moved,
+/// not read.
+///
+/// # Errors
+///
+/// [`ConversionError`] naming a member the gateway input cannot hold: no `Content-Length` (the
+/// gateway requires one), a bucket or key outside the gateway grammar, an instant the gateway
+/// cannot spell, two checksums at once or one of the wrong width, an `Expires` the revision holds
+/// parsed and cannot spell (the enclosing module's `expires_text` hook), or an entity-tag
+/// condition that is not a header value.
+#[allow(clippy::too_many_lines)]
+pub fn input_from_s3s(input: oracle::PutObjectInput) -> Result<(dto::PutObjectInput, LegacyInput), ConversionError> {
+    // Exhaustive on purpose: an s3s re-pin that adds a member is a compile error, never a drop.
+    let oracle::PutObjectInput {
+        acl,
+        body,
+        bucket,
+        bucket_key_enabled,
+        cache_control,
+        checksum_algorithm,
+        checksum_crc32,
+        checksum_crc32c,
+        checksum_crc64nvme,
+        checksum_md5,
+        checksum_sha1,
+        checksum_sha256,
+        checksum_sha512,
+        checksum_xxhash128,
+        checksum_xxhash3,
+        checksum_xxhash64,
+        content_disposition,
+        content_encoding,
+        content_language,
+        content_length,
+        content_md5,
+        content_type,
+        expected_bucket_owner,
+        expires,
+        grant_full_control,
+        grant_read,
+        grant_read_acp,
+        grant_write_acp,
+        if_match,
+        if_none_match,
+        key,
+        metadata,
+        object_lock_legal_hold_status,
+        object_lock_mode,
+        object_lock_retain_until_date,
+        request_payer,
+        sse_customer_algorithm,
+        sse_customer_key,
+        sse_customer_key_md5,
+        ssekms_encryption_context,
+        ssekms_key_id,
+        server_side_encryption,
+        storage_class,
+        tagging,
+        version_id,
+        website_redirect_location,
+        write_offset_bytes,
+    } = input;
+    let Some(content_length) = content_length else {
+        return Err(ConversionError {
+            field: "content_length",
+            reason: "the gateway input requires a content length",
+        });
+    };
+    let checksum_spec = checksum_spec_from([
+        ("checksum_crc32", ChecksumAlgorithm::Crc32, checksum_crc32),
+        ("checksum_crc32c", ChecksumAlgorithm::Crc32c, checksum_crc32c),
+        ("checksum_crc64nvme", ChecksumAlgorithm::Crc64Nvme, checksum_crc64nvme),
+        ("checksum_md5", ChecksumAlgorithm::Md5, checksum_md5),
+        ("checksum_sha1", ChecksumAlgorithm::Sha1, checksum_sha1),
+        ("checksum_sha256", ChecksumAlgorithm::Sha256, checksum_sha256),
+        ("checksum_sha512", ChecksumAlgorithm::Sha512, checksum_sha512),
+        ("checksum_xxhash128", ChecksumAlgorithm::XxHash128, checksum_xxhash128),
+        ("checksum_xxhash3", ChecksumAlgorithm::XxHash3, checksum_xxhash3),
+        ("checksum_xxhash64", ChecksumAlgorithm::XxHash64, checksum_xxhash64),
+    ])?;
+    let gateway = dto::PutObjectInput {
+        acl: acl.map(|value| dto::Acl::custom(value.as_str().to_owned())),
+        body: body.map(byte_stream),
+        bucket: BucketName::new(bucket).map_err(|_| ConversionError {
+            field: "bucket",
+            reason: "not a bucket name the gateway can write",
+        })?,
+        cache_control,
+        content_disposition,
+        content_encoding,
+        content_language,
+        content_length,
+        content_md5,
+        checksum_spec,
+        content_type,
+        checksum_algorithm: checksum_algorithm.map(|value| dto::ChecksumAlgorithm::custom(value.as_str().to_owned())),
+        expires: expires
+            .map(|value| super::expires_text(&value))
+            .transpose()?
+            .map(OpaqueString::from),
+        if_match: if_match.map(|value| condition_text("if_match", &value)).transpose()?,
+        if_none_match: if_none_match
+            .map(|value| condition_text("if_none_match", &value))
+            .transpose()?,
+        grant_full_control,
+        grant_read,
+        grant_read_acp,
+        grant_write_acp,
+        key: ObjectKey::new(key).map_err(|_| ConversionError {
+            field: "key",
+            reason: "not an object key the gateway can write",
+        })?,
+        write_offset_bytes,
+        metadata: metadata.map(|map| map.into_iter().collect()).unwrap_or_default(),
+        server_side_encryption: server_side_encryption.map(|value| dto::ServerSideEncryption::custom(value.as_str().to_owned())),
+        storage_class: storage_class.map(|value| dto::StorageClass::custom(value.as_str().to_owned())),
+        website_redirect_location,
+        sse_customer_algorithm,
+        // The s3s input holds the key as a plain `String`; the gateway rewraps it, never reads it.
+        sse_customer_key: sse_customer_key.map(SseCustomerKey::new),
+        sse_customer_key_md5,
+        ssekms_key_id,
+        ssekms_encryption_context,
+        bucket_key_enabled,
+        request_payer: request_payer.map(|value| dto::RequestPayer::custom(value.as_str().to_owned())),
+        tagging,
+        object_lock_mode: object_lock_mode.map(|value| dto::ObjectLockMode::custom(value.as_str().to_owned())),
+        object_lock_retain_until_date: object_lock_retain_until_date
+            .map(|at| instant_from("object_lock_retain_until_date", &at))
+            .transpose()?,
+        object_lock_legal_hold_status: object_lock_legal_hold_status
+            .map(|value| dto::ObjectLockLegalHoldStatus::custom(value.as_str().to_owned())),
+        // No pinned s3s input holds an event hold (`EVENT_HOLD_MEMBERS`), so none crosses.
+        object_lock_event_hold: None,
+        object_lock_event_hold_duration_days: None,
+        object_lock_event_hold_duration_years: None,
+        expected_bucket_owner,
+    };
+    Ok((gateway, LegacyInput { version_id }))
+}
+
+/// Converts the gateway output a ported RustFS use case returned into the s3s output the legacy
+/// stack writes (rustfs/backlog#2749). Total: every gateway value has exactly one s3s spelling.
+#[must_use]
+pub fn output_to_s3s(output: dto::PutObjectOutput) -> oracle::PutObjectOutput {
+    let checksum = output.checksum_spec;
+    let checksum_value = |algorithm: ChecksumAlgorithm| {
+        checksum
+            .as_ref()
+            .filter(|spec| spec.algorithm() == algorithm)
+            .map(|spec| spec.render_base64().to_owned())
+    };
+    oracle::PutObjectOutput {
+        bucket_key_enabled: output.bucket_key_enabled,
+        checksum_crc32: checksum_value(ChecksumAlgorithm::Crc32),
+        checksum_crc32c: checksum_value(ChecksumAlgorithm::Crc32c),
+        checksum_crc64nvme: checksum_value(ChecksumAlgorithm::Crc64Nvme),
+        checksum_md5: checksum_value(ChecksumAlgorithm::Md5),
+        checksum_sha1: checksum_value(ChecksumAlgorithm::Sha1),
+        checksum_sha256: checksum_value(ChecksumAlgorithm::Sha256),
+        checksum_sha512: checksum_value(ChecksumAlgorithm::Sha512),
+        checksum_type: output.checksum_type.map(|value| value.as_str().to_owned().into()),
+        checksum_xxhash128: checksum_value(ChecksumAlgorithm::XxHash128),
+        checksum_xxhash3: checksum_value(ChecksumAlgorithm::XxHash3),
+        checksum_xxhash64: checksum_value(ChecksumAlgorithm::XxHash64),
+        e_tag: Some(entity_tag(&output.e_tag)),
+        expiration: output.expiration.map(OpaqueString::into_string),
+        request_charged: output.request_charged.map(|value| value.as_str().to_owned().into()),
+        sse_customer_algorithm: output.sse_customer_algorithm,
+        sse_customer_key_md5: output.sse_customer_key_md5,
+        ssekms_encryption_context: output.ssekms_encryption_context,
+        ssekms_key_id: output.ssekms_key_id,
+        server_side_encryption: output.server_side_encryption.map(|value| value.as_str().to_owned().into()),
+        size: output.size,
+        version_id: output.version_id,
+    }
+}
+
+fn entity_tag(etag: &ETag) -> oracle::ETag {
+    if etag.is_weak() {
+        oracle::ETag::Weak(etag.opaque_tag().to_owned())
+    } else {
+        oracle::ETag::Strong(etag.opaque_tag().to_owned())
+    }
+}
+
+/// The s3s condition as the conditional header text the gateway input holds.
+fn condition_text(field: &'static str, condition: &oracle::ETagCondition) -> Result<String, ConversionError> {
+    let header = condition.to_http_header().map_err(|_| ConversionError {
+        field,
+        reason: "an entity-tag condition that is not a header value",
+    })?;
+    header.to_str().map(str::to_owned).map_err(|_| ConversionError {
+        field,
+        reason: "an entity-tag condition spelled outside ASCII",
+    })
+}
+
+/// The s3s instant as a gateway instant, to the millisecond s3s spells: a sub-millisecond digit
+/// never reached a client of the legacy stack either.
+fn instant_from(field: &'static str, at: &oracle::Timestamp) -> Result<Timestamp, ConversionError> {
+    let mut spelled = Vec::new();
+    at.format(oracle::TimestampFormat::DateTime, &mut spelled)
+        .map_err(|_| ConversionError {
+            field,
+            reason: "an s3s instant that has no RFC 3339 spelling",
+        })?;
+    let spelled = String::from_utf8(spelled).map_err(|_| ConversionError {
+        field,
+        reason: "an s3s instant spelled outside ASCII",
+    })?;
+    Timestamp::parse(&spelled, crate::TimestampFormat::Iso8601).map_err(|_| ConversionError {
+        field,
+        reason: "an instant outside what the gateway timestamp can hold",
     })
 }
 
@@ -483,5 +722,67 @@ impl s3s::stream::ByteStream for GatewayBody {
             Some(length) => s3s::stream::RemainingLength::new_exact(length),
             None => s3s::stream::RemainingLength::unknown(),
         }
+    }
+}
+
+/// The s3s streaming body a RustFS answer carries, as the gateway body, unread.
+#[must_use]
+pub(super) fn byte_stream(blob: oracle::StreamingBlob) -> ByteStream {
+    let remaining = s3s::stream::ByteStream::remaining_length(&blob)
+        .exact()
+        .and_then(|len| u64::try_from(len).ok());
+    let body = S3sBody {
+        blob,
+        remaining,
+        done: false,
+    };
+    ByteStream::new(Box::pin(body)).expect("S3sBody declares KNOWN_LENGTH exactly when it has a length") // caps are derived from the hint
+}
+
+/// An s3s body presented as a gateway push-model body.
+struct S3sBody {
+    blob: oracle::StreamingBlob,
+    remaining: Option<u64>,
+    done: bool,
+}
+
+impl PayloadStream for S3sBody {
+    fn poll_read(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<PayloadRead, StreamError>> {
+        let this = self.get_mut();
+        if this.done {
+            return Poll::Ready(Err(StreamError::new(rustfs_gateway_stream::StreamErrorKind::PolledAfterEof)));
+        }
+        match futures_core::Stream::poll_next(Pin::new(&mut this.blob), cx) {
+            Poll::Pending => Poll::Pending,
+            Poll::Ready(None) => {
+                this.done = true;
+                Poll::Ready(Ok(PayloadRead::Eof {
+                    trailers: TrailingHeaders::empty(),
+                }))
+            }
+            Poll::Ready(Some(Ok(chunk))) => {
+                let chunk: Bytes = chunk;
+                if let Some(remaining) = this.remaining.as_mut() {
+                    *remaining = remaining.saturating_sub(chunk.len() as u64);
+                }
+                Poll::Ready(Ok(PayloadRead::Chunk(chunk)))
+            }
+            Poll::Ready(Some(Err(error))) => {
+                this.done = true;
+                Poll::Ready(Err(StreamError::upstream(error)))
+            }
+        }
+    }
+
+    fn caps(&self) -> PayloadCaps {
+        if self.remaining.is_some() {
+            PayloadCaps::PUSH | PayloadCaps::KNOWN_LENGTH
+        } else {
+            PayloadCaps::PUSH
+        }
+    }
+
+    fn len_hint(&self) -> Option<u64> {
+        self.remaining
     }
 }

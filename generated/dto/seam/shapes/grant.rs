@@ -17,9 +17,21 @@
 //! The `Grant` shape conversions.
 
 #[allow(unused_imports)] // Not every conversion needs a leaf function.
-use crate::compat::s3s_0_17_0::leaf;
-use crate::compat::s3s_0_17_0::s3s;
+use super::super::{leaf, s3s};
 use crate::compat::ConversionError;
+
+/// Converts one `Grant` from the gateway shape to the s3s shape.
+///
+/// # Errors
+///
+/// [`ConversionError`] naming a member the other side cannot hold.
+#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
+pub fn grant_to_s3s(value: crate::ops::shapes::Grant) -> Result<s3s::dto::Grant, ConversionError> {
+    Ok(s3s::dto::Grant {
+        grantee: value.grantee.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::grantee::grantee_to_s3s(x)?) }).transpose()?,
+        permission: value.permission.map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::Permission::from(x.as_str().to_owned())) }).transpose()?,
+    })
+}
 
 /// Converts one `Grant` from the s3s shape to the gateway shape.
 ///
@@ -35,18 +47,5 @@ pub fn grant_from_s3s(value: s3s::dto::Grant) -> Result<crate::ops::shapes::Gran
     Ok(crate::ops::shapes::Grant {
         grantee: grantee.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::grantee::grantee_from_s3s(x)?) }).transpose()?,
         permission: permission.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::Permission::custom(x.as_str().to_owned())) }).transpose()?,
-    })
-}
-
-/// Converts one `Grant` from the gateway shape to the s3s shape.
-///
-/// # Errors
-///
-/// [`ConversionError`] naming a member the other side cannot hold.
-#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn grant_to_s3s(value: crate::ops::shapes::Grant) -> Result<s3s::dto::Grant, ConversionError> {
-    Ok(s3s::dto::Grant {
-        grantee: value.grantee.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::grantee::grantee_to_s3s(x)?) }).transpose()?,
-        permission: value.permission.map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::Permission::from(x.as_str().to_owned())) }).transpose()?,
     })
 }

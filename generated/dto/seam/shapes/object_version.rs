@@ -17,9 +17,30 @@
 //! The `ObjectVersion` shape conversions.
 
 #[allow(unused_imports)] // Not every conversion needs a leaf function.
-use crate::compat::s3s_0_17_0::leaf;
-use crate::compat::s3s_0_17_0::s3s;
+use super::super::{leaf, s3s};
 use crate::compat::ConversionError;
+
+/// Converts one `ObjectVersion` from the gateway shape to the s3s shape.
+///
+/// # Errors
+///
+/// [`ConversionError`] naming a member the other side cannot hold.
+#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
+pub fn object_version_to_s3s(value: crate::ops::shapes::ObjectVersion) -> Result<s3s::dto::ObjectVersion, ConversionError> {
+    Ok(s3s::dto::ObjectVersion {
+        checksum_algorithm: if value.checksum_algorithm.is_empty() { None } else { Some({ let x = value.checksum_algorithm; x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(s3s::dto::ChecksumAlgorithm::from(e.as_str().to_owned())) }).collect::<Result<Vec<_>, ConversionError>>()? }) },
+        checksum_type: value.checksum_type.map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::ChecksumType::from(x.as_str().to_owned())) }).transpose()?,
+        e_tag: Some({ let x = value.e_tag; leaf::etag_to_s3s(&x) }),
+        is_latest: Some(value.is_latest),
+        key: Some({ let x = value.key; x.as_str().to_owned() }),
+        last_modified: Some({ let x = value.last_modified; leaf::timestamp_to_s3s("last_modified", x)? }),
+        owner: value.owner.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::owner::owner_to_s3s(x)?) }).transpose()?,
+        restore_status: value.restore_status.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::restore_status::restore_status_to_s3s(x)?) }).transpose()?,
+        size: Some(value.size),
+        storage_class: Some({ let x = value.storage_class; s3s::dto::ObjectVersionStorageClass::from(x.as_str().to_owned()) }),
+        version_id: Some({ let x = value.version_id; x.into_string() }),
+    })
+}
 
 /// Converts one `ObjectVersion` from the s3s shape to the gateway shape.
 ///

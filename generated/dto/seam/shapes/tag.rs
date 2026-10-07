@@ -17,9 +17,21 @@
 //! The `Tag` shape conversions.
 
 #[allow(unused_imports)] // Not every conversion needs a leaf function.
-use crate::compat::s3s_0_17_0::leaf;
-use crate::compat::s3s_0_17_0::s3s;
+use super::super::{leaf, s3s};
 use crate::compat::ConversionError;
+
+/// Converts one `Tag` from the gateway shape to the s3s shape.
+///
+/// # Errors
+///
+/// [`ConversionError`] naming a member the other side cannot hold.
+#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
+pub fn tag_to_s3s(value: crate::ops::shapes::Tag) -> Result<s3s::dto::Tag, ConversionError> {
+    Ok(s3s::dto::Tag {
+        key: Some(value.key),
+        value: Some(value.value),
+    })
+}
 
 /// Converts one `Tag` from the s3s shape to the gateway shape.
 ///
@@ -35,18 +47,5 @@ pub fn tag_from_s3s(value: s3s::dto::Tag) -> Result<crate::ops::shapes::Tag, Con
     Ok(crate::ops::shapes::Tag {
         key: match key { Some(x) => x, None => return Err(ConversionError { field: "key", reason: "the gateway shape requires this member" }) },
         value: match value { Some(x) => x, None => return Err(ConversionError { field: "value", reason: "the gateway shape requires this member" }) },
-    })
-}
-
-/// Converts one `Tag` from the gateway shape to the s3s shape.
-///
-/// # Errors
-///
-/// [`ConversionError`] naming a member the other side cannot hold.
-#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn tag_to_s3s(value: crate::ops::shapes::Tag) -> Result<s3s::dto::Tag, ConversionError> {
-    Ok(s3s::dto::Tag {
-        key: Some(value.key),
-        value: Some(value.value),
     })
 }

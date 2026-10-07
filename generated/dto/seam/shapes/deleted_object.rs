@@ -17,9 +17,23 @@
 //! The `DeletedObject` shape conversions.
 
 #[allow(unused_imports)] // Not every conversion needs a leaf function.
-use crate::compat::s3s_0_17_0::leaf;
-use crate::compat::s3s_0_17_0::s3s;
+use super::super::{leaf, s3s};
 use crate::compat::ConversionError;
+
+/// Converts one `DeletedObject` from the gateway shape to the s3s shape.
+///
+/// # Errors
+///
+/// [`ConversionError`] naming a member the other side cannot hold.
+#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
+pub fn deleted_object_to_s3s(value: crate::ops::shapes::DeletedObject) -> Result<s3s::dto::DeletedObject, ConversionError> {
+    Ok(s3s::dto::DeletedObject {
+        delete_marker: value.delete_marker,
+        delete_marker_version_id: value.delete_marker_version_id,
+        key: value.key.map(|x| -> Result<_, ConversionError> { Ok(x.as_str().to_owned()) }).transpose()?,
+        version_id: value.version_id,
+    })
+}
 
 /// Converts one `DeletedObject` from the s3s shape to the gateway shape.
 ///

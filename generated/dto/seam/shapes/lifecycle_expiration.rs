@@ -17,9 +17,23 @@
 //! The `LifecycleExpiration` shape conversions.
 
 #[allow(unused_imports)] // Not every conversion needs a leaf function.
-use crate::compat::s3s_0_17_0::leaf;
-use crate::compat::s3s_0_17_0::s3s;
+use super::super::{leaf, s3s};
 use crate::compat::ConversionError;
+
+/// Converts one `LifecycleExpiration` from the gateway shape to the s3s shape.
+///
+/// # Errors
+///
+/// [`ConversionError`] naming a member the other side cannot hold.
+#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
+pub fn lifecycle_expiration_to_s3s(value: crate::ops::shapes::LifecycleExpiration) -> Result<s3s::dto::LifecycleExpiration, ConversionError> {
+    Ok(s3s::dto::LifecycleExpiration {
+        date: value.date.map(|x| -> Result<_, ConversionError> { Ok(leaf::timestamp_to_s3s("date", x)?) }).transpose()?,
+        days: value.days,
+        expired_object_all_versions: value.expired_object_all_versions,
+        expired_object_delete_marker: value.expired_object_delete_marker,
+    })
+}
 
 /// Converts one `LifecycleExpiration` from the s3s shape to the gateway shape.
 ///
@@ -39,20 +53,5 @@ pub fn lifecycle_expiration_from_s3s(value: s3s::dto::LifecycleExpiration) -> Re
         days,
         expired_object_delete_marker,
         expired_object_all_versions,
-    })
-}
-
-/// Converts one `LifecycleExpiration` from the gateway shape to the s3s shape.
-///
-/// # Errors
-///
-/// [`ConversionError`] naming a member the other side cannot hold.
-#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn lifecycle_expiration_to_s3s(value: crate::ops::shapes::LifecycleExpiration) -> Result<s3s::dto::LifecycleExpiration, ConversionError> {
-    Ok(s3s::dto::LifecycleExpiration {
-        date: value.date.map(|x| -> Result<_, ConversionError> { Ok(leaf::timestamp_to_s3s("date", x)?) }).transpose()?,
-        days: value.days,
-        expired_object_all_versions: value.expired_object_all_versions,
-        expired_object_delete_marker: value.expired_object_delete_marker,
     })
 }

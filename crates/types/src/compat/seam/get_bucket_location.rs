@@ -17,8 +17,10 @@
 //!
 //! Responsible for: turning a decoded gateway `GetBucketLocationInput` into the s3s input the
 //! RustFS `get_bucket_location` body receives, and the s3s output that body returns into the
-//! gateway output the gateway codec writes. Both directions are total: every value one side holds
-//! has exactly one spelling on the other.
+//! gateway output the gateway codec writes; and the same pair the other way round for a use case
+//! ported to gateway types behind the legacy stack (rustfs/backlog#2749). Every direction but the
+//! s3s input's is total: every value one side holds has exactly one spelling on the other; the
+//! s3s input's bucket is text the gateway name grammar may refuse.
 //! NOT responsible for: the request context ([`super::request_context`]), looking the bucket's
 //! region up, or rendering the `LocationConstraint` body, which is the gateway codec's.
 //! Upstream: the generated dto. Downstream: the goldens context diff under every seam revision, and
@@ -26,7 +28,8 @@
 
 use super::s3s::dto as oracle;
 
-use crate::dto;
+use crate::compat::ConversionError;
+use crate::{BucketName, dto};
 
 /// Every member of the gateway `GetBucketLocationInput` that [`input_to_s3s`] maps.
 ///
@@ -70,4 +73,34 @@ pub fn answer_from_legacy(
     headers: http::HeaderMap,
 ) -> (dto::GetBucketLocationOutput, http::HeaderMap) {
     (output_from_s3s(output), headers)
+}
+
+/// Converts the s3s input the legacy stack decoded into the gateway input a ported RustFS use
+/// case takes (rustfs/backlog#2749).
+///
+/// # Errors
+///
+/// [`ConversionError`] naming the bucket when it is not a name the gateway can write.
+pub fn input_from_s3s(input: oracle::GetBucketLocationInput) -> Result<dto::GetBucketLocationInput, ConversionError> {
+    // Exhaustive on purpose, as `output_from_s3s` is.
+    let oracle::GetBucketLocationInput {
+        bucket,
+        expected_bucket_owner,
+    } = input;
+    Ok(dto::GetBucketLocationInput {
+        bucket: BucketName::new(bucket).map_err(|_| ConversionError {
+            field: "bucket",
+            reason: "not a bucket name the gateway can write",
+        })?,
+        expected_bucket_owner,
+    })
+}
+
+/// Converts the gateway output a ported RustFS use case returned into the s3s output the legacy
+/// stack writes, keeping the constraint's exact spelling as [`output_from_s3s`] does.
+#[must_use]
+pub fn output_to_s3s(output: dto::GetBucketLocationOutput) -> oracle::GetBucketLocationOutput {
+    oracle::GetBucketLocationOutput {
+        location_constraint: output.location_constraint.map(|value| value.as_str().to_owned().into()),
+    }
 }

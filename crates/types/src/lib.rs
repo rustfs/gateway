@@ -72,7 +72,7 @@ pub mod secret;
 ///   oracle, `compat::s3s_9c4690d8`, for the goldens.
 ///
 /// It owns no gateway XML behavior, golden assertion, or production decision.
-#[cfg(any(feature = "compat-s3s", feature = "compat-s3s-0-17-0"))]
+#[cfg(any(feature = "compat-s3s", feature = "compat-s3s-0-17-0", feature = "compat-s3s-rustfs"))]
 pub mod compat;
 
 #[cfg(test)]

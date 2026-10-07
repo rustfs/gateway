@@ -17,9 +17,20 @@
 //! The `S3KeyFilter` shape conversions.
 
 #[allow(unused_imports)] // Not every conversion needs a leaf function.
-use crate::compat::s3s_0_17_0::leaf;
-use crate::compat::s3s_0_17_0::s3s;
+use super::super::{leaf, s3s};
 use crate::compat::ConversionError;
+
+/// Converts one `S3KeyFilter` from the gateway shape to the s3s shape.
+///
+/// # Errors
+///
+/// [`ConversionError`] naming a member the other side cannot hold.
+#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
+pub fn s3key_filter_to_s3s(value: crate::ops::shapes::S3KeyFilter) -> Result<s3s::dto::S3KeyFilter, ConversionError> {
+    Ok(s3s::dto::S3KeyFilter {
+        filter_rules: if value.filter_rules.is_empty() { None } else { Some({ let x = value.filter_rules; x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::filter_rule::filter_rule_to_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()? }) },
+    })
+}
 
 /// Converts one `S3KeyFilter` from the s3s shape to the gateway shape.
 ///
@@ -33,17 +44,5 @@ pub fn s3key_filter_from_s3s(value: s3s::dto::S3KeyFilter) -> Result<crate::ops:
     } = value;
     Ok(crate::ops::shapes::S3KeyFilter {
         filter_rules: match filter_rules { Some(x) => x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::filter_rule::filter_rule_from_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()?, None => Default::default() },
-    })
-}
-
-/// Converts one `S3KeyFilter` from the gateway shape to the s3s shape.
-///
-/// # Errors
-///
-/// [`ConversionError`] naming a member the other side cannot hold.
-#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn s3key_filter_to_s3s(value: crate::ops::shapes::S3KeyFilter) -> Result<s3s::dto::S3KeyFilter, ConversionError> {
-    Ok(s3s::dto::S3KeyFilter {
-        filter_rules: if value.filter_rules.is_empty() { None } else { Some({ let x = value.filter_rules; x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::filter_rule::filter_rule_to_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()? }) },
     })
 }

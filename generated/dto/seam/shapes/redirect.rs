@@ -17,9 +17,24 @@
 //! The `Redirect` shape conversions.
 
 #[allow(unused_imports)] // Not every conversion needs a leaf function.
-use crate::compat::s3s_0_17_0::leaf;
-use crate::compat::s3s_0_17_0::s3s;
+use super::super::{leaf, s3s};
 use crate::compat::ConversionError;
+
+/// Converts one `Redirect` from the gateway shape to the s3s shape.
+///
+/// # Errors
+///
+/// [`ConversionError`] naming a member the other side cannot hold.
+#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
+pub fn redirect_to_s3s(value: crate::ops::shapes::Redirect) -> Result<s3s::dto::Redirect, ConversionError> {
+    Ok(s3s::dto::Redirect {
+        host_name: value.host_name,
+        http_redirect_code: value.http_redirect_code,
+        protocol: value.protocol.map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::Protocol::from(x.as_str().to_owned())) }).transpose()?,
+        replace_key_prefix_with: value.replace_key_prefix_with,
+        replace_key_with: value.replace_key_with,
+    })
+}
 
 /// Converts one `Redirect` from the s3s shape to the gateway shape.
 ///
@@ -41,21 +56,5 @@ pub fn redirect_from_s3s(value: s3s::dto::Redirect) -> Result<crate::ops::shapes
         protocol: protocol.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::Protocol::custom(x.as_str().to_owned())) }).transpose()?,
         replace_key_prefix_with,
         replace_key_with,
-    })
-}
-
-/// Converts one `Redirect` from the gateway shape to the s3s shape.
-///
-/// # Errors
-///
-/// [`ConversionError`] naming a member the other side cannot hold.
-#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn redirect_to_s3s(value: crate::ops::shapes::Redirect) -> Result<s3s::dto::Redirect, ConversionError> {
-    Ok(s3s::dto::Redirect {
-        host_name: value.host_name,
-        http_redirect_code: value.http_redirect_code,
-        protocol: value.protocol.map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::Protocol::from(x.as_str().to_owned())) }).transpose()?,
-        replace_key_prefix_with: value.replace_key_prefix_with,
-        replace_key_with: value.replace_key_with,
     })
 }

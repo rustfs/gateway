@@ -17,8 +17,7 @@
 //! The `VersioningConfiguration` shape conversions.
 
 #[allow(unused_imports)] // Not every conversion needs a leaf function.
-use crate::compat::s3s_0_17_0::leaf;
-use crate::compat::s3s_0_17_0::s3s;
+use super::super::{leaf, s3s};
 use crate::compat::ConversionError;
 
 /// Converts one `VersioningConfiguration` from the gateway shape to the s3s shape.
@@ -33,5 +32,26 @@ pub fn versioning_configuration_to_s3s(value: crate::ops::shapes::VersioningConf
         excluded_prefixes: if value.excluded_prefixes.is_empty() { None } else { Some({ let x = value.excluded_prefixes; x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::excluded_prefix::excluded_prefix_to_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()? }) },
         mfa_delete: value.mfa_delete.map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::MFADelete::from(x.as_str().to_owned())) }).transpose()?,
         status: value.status.map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::BucketVersioningStatus::from(x.as_str().to_owned())) }).transpose()?,
+    })
+}
+
+/// Converts one `VersioningConfiguration` from the s3s shape to the gateway shape.
+///
+/// # Errors
+///
+/// [`ConversionError`] naming a member the other side cannot hold.
+#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
+pub fn versioning_configuration_from_s3s(value: s3s::dto::VersioningConfiguration) -> Result<crate::ops::shapes::VersioningConfiguration, ConversionError> {
+    let s3s::dto::VersioningConfiguration {
+        exclude_folders,
+        excluded_prefixes,
+        mfa_delete,
+        status,
+    } = value;
+    Ok(crate::ops::shapes::VersioningConfiguration {
+        mfa_delete: mfa_delete.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::MfaDelete::custom(x.as_str().to_owned())) }).transpose()?,
+        status: status.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::Status::custom(x.as_str().to_owned())) }).transpose()?,
+        excluded_prefixes: match excluded_prefixes { Some(x) => x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::excluded_prefix::excluded_prefix_from_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()?, None => Default::default() },
+        exclude_folders,
     })
 }

@@ -17,9 +17,21 @@
 //! The `TargetObjectKeyFormat` shape conversions.
 
 #[allow(unused_imports)] // Not every conversion needs a leaf function.
-use crate::compat::s3s_0_17_0::leaf;
-use crate::compat::s3s_0_17_0::s3s;
+use super::super::{leaf, s3s};
 use crate::compat::ConversionError;
+
+/// Converts one `TargetObjectKeyFormat` from the gateway shape to the s3s shape.
+///
+/// # Errors
+///
+/// [`ConversionError`] naming a member the other side cannot hold.
+#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
+pub fn target_object_key_format_to_s3s(value: crate::ops::shapes::TargetObjectKeyFormat) -> Result<s3s::dto::TargetObjectKeyFormat, ConversionError> {
+    Ok(s3s::dto::TargetObjectKeyFormat {
+        partitioned_prefix: value.partitioned_prefix.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::partitioned_prefix::partitioned_prefix_to_s3s(x)?) }).transpose()?,
+        simple_prefix: value.simple_prefix.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::simple_prefix::simple_prefix_to_s3s(x)?) }).transpose()?,
+    })
+}
 
 /// Converts one `TargetObjectKeyFormat` from the s3s shape to the gateway shape.
 ///
@@ -35,18 +47,5 @@ pub fn target_object_key_format_from_s3s(value: s3s::dto::TargetObjectKeyFormat)
     Ok(crate::ops::shapes::TargetObjectKeyFormat {
         simple_prefix: simple_prefix.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::simple_prefix::simple_prefix_from_s3s(x)?) }).transpose()?,
         partitioned_prefix: partitioned_prefix.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::partitioned_prefix::partitioned_prefix_from_s3s(x)?) }).transpose()?,
-    })
-}
-
-/// Converts one `TargetObjectKeyFormat` from the gateway shape to the s3s shape.
-///
-/// # Errors
-///
-/// [`ConversionError`] naming a member the other side cannot hold.
-#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn target_object_key_format_to_s3s(value: crate::ops::shapes::TargetObjectKeyFormat) -> Result<s3s::dto::TargetObjectKeyFormat, ConversionError> {
-    Ok(s3s::dto::TargetObjectKeyFormat {
-        partitioned_prefix: value.partitioned_prefix.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::partitioned_prefix::partitioned_prefix_to_s3s(x)?) }).transpose()?,
-        simple_prefix: value.simple_prefix.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::simple_prefix::simple_prefix_to_s3s(x)?) }).transpose()?,
     })
 }

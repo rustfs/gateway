@@ -17,8 +17,7 @@
 //! The `ParquetInput` shape conversions.
 
 #[allow(unused_imports)] // Not every conversion needs a leaf function.
-use crate::compat::s3s_0_17_0::leaf;
-use crate::compat::s3s_0_17_0::s3s;
+use super::super::{leaf, s3s};
 use crate::compat::ConversionError;
 
 /// Converts one `ParquetInput` from the gateway shape to the s3s shape.
@@ -30,5 +29,18 @@ use crate::compat::ConversionError;
 pub fn parquet_input_to_s3s(value: crate::ops::shapes::ParquetInput) -> Result<s3s::dto::ParquetInput, ConversionError> {
     let _ = value;
     Ok(s3s::dto::ParquetInput {
+    })
+}
+
+/// Converts one `ParquetInput` from the s3s shape to the gateway shape.
+///
+/// # Errors
+///
+/// [`ConversionError`] naming a member the other side cannot hold.
+#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
+pub fn parquet_input_from_s3s(value: s3s::dto::ParquetInput) -> Result<crate::ops::shapes::ParquetInput, ConversionError> {
+    let s3s::dto::ParquetInput {
+    } = value;
+    Ok(crate::ops::shapes::ParquetInput {
     })
 }

@@ -17,9 +17,29 @@
 //! The `LifecycleRule` shape conversions.
 
 #[allow(unused_imports)] // Not every conversion needs a leaf function.
-use crate::compat::s3s_0_17_0::leaf;
-use crate::compat::s3s_0_17_0::s3s;
+use super::super::{leaf, s3s};
 use crate::compat::ConversionError;
+
+/// Converts one `LifecycleRule` from the gateway shape to the s3s shape.
+///
+/// # Errors
+///
+/// [`ConversionError`] naming a member the other side cannot hold.
+#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
+pub fn lifecycle_rule_to_s3s(value: crate::ops::shapes::LifecycleRule) -> Result<s3s::dto::LifecycleRule, ConversionError> {
+    Ok(s3s::dto::LifecycleRule {
+        abort_incomplete_multipart_upload: value.abort_incomplete_multipart_upload.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::abort_incomplete_multipart_upload::abort_incomplete_multipart_upload_to_s3s(x)?) }).transpose()?,
+        del_marker_expiration: value.del_marker_expiration.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::del_marker_expiration::del_marker_expiration_to_s3s(x)?) }).transpose()?,
+        expiration: value.expiration.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::lifecycle_expiration::lifecycle_expiration_to_s3s(x)?) }).transpose()?,
+        filter: value.filter.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::lifecycle_rule_filter::lifecycle_rule_filter_to_s3s(x)?) }).transpose()?,
+        id: value.id,
+        noncurrent_version_expiration: value.noncurrent_version_expiration.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::noncurrent_version_expiration::noncurrent_version_expiration_to_s3s(x)?) }).transpose()?,
+        noncurrent_version_transitions: if value.noncurrent_version_transitions.is_empty() { None } else { Some({ let x = value.noncurrent_version_transitions; x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::noncurrent_version_transition::noncurrent_version_transition_to_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()? }) },
+        prefix: value.prefix,
+        status: { let x = value.status; s3s::dto::ExpirationStatus::from(x.as_str().to_owned()) },
+        transitions: if value.transitions.is_empty() { None } else { Some({ let x = value.transitions; x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::transition::transition_to_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()? }) },
+    })
+}
 
 /// Converts one `LifecycleRule` from the s3s shape to the gateway shape.
 ///
@@ -51,26 +71,5 @@ pub fn lifecycle_rule_from_s3s(value: s3s::dto::LifecycleRule) -> Result<crate::
         noncurrent_version_transitions: match noncurrent_version_transitions { Some(x) => x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::noncurrent_version_transition::noncurrent_version_transition_from_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()?, None => Default::default() },
         noncurrent_version_expiration: noncurrent_version_expiration.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::noncurrent_version_expiration::noncurrent_version_expiration_from_s3s(x)?) }).transpose()?,
         abort_incomplete_multipart_upload: abort_incomplete_multipart_upload.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::abort_incomplete_multipart_upload::abort_incomplete_multipart_upload_from_s3s(x)?) }).transpose()?,
-    })
-}
-
-/// Converts one `LifecycleRule` from the gateway shape to the s3s shape.
-///
-/// # Errors
-///
-/// [`ConversionError`] naming a member the other side cannot hold.
-#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn lifecycle_rule_to_s3s(value: crate::ops::shapes::LifecycleRule) -> Result<s3s::dto::LifecycleRule, ConversionError> {
-    Ok(s3s::dto::LifecycleRule {
-        abort_incomplete_multipart_upload: value.abort_incomplete_multipart_upload.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::abort_incomplete_multipart_upload::abort_incomplete_multipart_upload_to_s3s(x)?) }).transpose()?,
-        del_marker_expiration: value.del_marker_expiration.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::del_marker_expiration::del_marker_expiration_to_s3s(x)?) }).transpose()?,
-        expiration: value.expiration.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::lifecycle_expiration::lifecycle_expiration_to_s3s(x)?) }).transpose()?,
-        filter: value.filter.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::lifecycle_rule_filter::lifecycle_rule_filter_to_s3s(x)?) }).transpose()?,
-        id: value.id,
-        noncurrent_version_expiration: value.noncurrent_version_expiration.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::noncurrent_version_expiration::noncurrent_version_expiration_to_s3s(x)?) }).transpose()?,
-        noncurrent_version_transitions: if value.noncurrent_version_transitions.is_empty() { None } else { Some({ let x = value.noncurrent_version_transitions; x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::noncurrent_version_transition::noncurrent_version_transition_to_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()? }) },
-        prefix: value.prefix,
-        status: { let x = value.status; s3s::dto::ExpirationStatus::from(x.as_str().to_owned()) },
-        transitions: if value.transitions.is_empty() { None } else { Some({ let x = value.transitions; x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::transition::transition_to_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()? }) },
     })
 }

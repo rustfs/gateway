@@ -17,9 +17,25 @@
 //! The `CORSRule` shape conversions.
 
 #[allow(unused_imports)] // Not every conversion needs a leaf function.
-use crate::compat::s3s_0_17_0::leaf;
-use crate::compat::s3s_0_17_0::s3s;
+use super::super::{leaf, s3s};
 use crate::compat::ConversionError;
+
+/// Converts one `CORSRule` from the gateway shape to the s3s shape.
+///
+/// # Errors
+///
+/// [`ConversionError`] naming a member the other side cannot hold.
+#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
+pub fn cors_rule_to_s3s(value: crate::ops::shapes::CorsRule) -> Result<s3s::dto::CORSRule, ConversionError> {
+    Ok(s3s::dto::CORSRule {
+        allowed_headers: if value.allowed_headers.is_empty() { None } else { Some(value.allowed_headers) },
+        allowed_methods: value.allowed_methods,
+        allowed_origins: value.allowed_origins,
+        expose_headers: if value.expose_headers.is_empty() { None } else { Some(value.expose_headers) },
+        id: value.id,
+        max_age_seconds: value.max_age_seconds,
+    })
+}
 
 /// Converts one `CORSRule` from the s3s shape to the gateway shape.
 ///
@@ -43,22 +59,5 @@ pub fn cors_rule_from_s3s(value: s3s::dto::CORSRule) -> Result<crate::ops::shape
         allowed_origins,
         expose_headers: expose_headers.unwrap_or_default(),
         max_age_seconds,
-    })
-}
-
-/// Converts one `CORSRule` from the gateway shape to the s3s shape.
-///
-/// # Errors
-///
-/// [`ConversionError`] naming a member the other side cannot hold.
-#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn cors_rule_to_s3s(value: crate::ops::shapes::CorsRule) -> Result<s3s::dto::CORSRule, ConversionError> {
-    Ok(s3s::dto::CORSRule {
-        allowed_headers: if value.allowed_headers.is_empty() { None } else { Some(value.allowed_headers) },
-        allowed_methods: value.allowed_methods,
-        allowed_origins: value.allowed_origins,
-        expose_headers: if value.expose_headers.is_empty() { None } else { Some(value.expose_headers) },
-        id: value.id,
-        max_age_seconds: value.max_age_seconds,
     })
 }

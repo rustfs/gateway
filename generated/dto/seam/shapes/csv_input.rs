@@ -17,8 +17,7 @@
 //! The `CSVInput` shape conversions.
 
 #[allow(unused_imports)] // Not every conversion needs a leaf function.
-use crate::compat::s3s_0_17_0::leaf;
-use crate::compat::s3s_0_17_0::s3s;
+use super::super::{leaf, s3s};
 use crate::compat::ConversionError;
 
 /// Converts one `CSVInput` from the gateway shape to the s3s shape.
@@ -36,5 +35,32 @@ pub fn csv_input_to_s3s(value: crate::ops::shapes::CsvInput) -> Result<s3s::dto:
         quote_character: value.quote_character,
         quote_escape_character: value.quote_escape_character,
         record_delimiter: value.record_delimiter,
+    })
+}
+
+/// Converts one `CSVInput` from the s3s shape to the gateway shape.
+///
+/// # Errors
+///
+/// [`ConversionError`] naming a member the other side cannot hold.
+#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
+pub fn csv_input_from_s3s(value: s3s::dto::CSVInput) -> Result<crate::ops::shapes::CsvInput, ConversionError> {
+    let s3s::dto::CSVInput {
+        allow_quoted_record_delimiter,
+        comments,
+        field_delimiter,
+        file_header_info,
+        quote_character,
+        quote_escape_character,
+        record_delimiter,
+    } = value;
+    Ok(crate::ops::shapes::CsvInput {
+        file_header_info: file_header_info.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::FileHeaderInfo::custom(x.as_str().to_owned())) }).transpose()?,
+        comments,
+        quote_escape_character,
+        record_delimiter,
+        field_delimiter,
+        quote_character,
+        allow_quoted_record_delimiter,
     })
 }

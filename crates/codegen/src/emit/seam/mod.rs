@@ -14,14 +14,17 @@
 
 //! `generated/dto/seam/**`: the migration seam's s3s conversions for every RustFS operation.
 //!
-//! Responsible for: one module per covered operation — `input_to_s3s` (gateway input → s3s input)
-//! and `output_from_s3s` (s3s output → gateway output) — and one module per nested shape either
-//! direction reaches, mounted by `rustfs-gateway-types` as `compat::s3s_0_17_0::generated` and
-//! converting against that module's `s3s` and hand-written `leaf` functions.
+//! Responsible for: one module per covered operation — `input_to_s3s` and `output_from_s3s` for
+//! the gateway in front of a RustFS app body, `input_from_s3s` and `output_to_s3s` for the legacy
+//! stack in front of a ported RustFS use case (rustfs/backlog#2749) — one module per nested shape
+//! either direction reaches, the member and error-code census, and the test-only fixtures the
+//! round trips start from. The tree is mounted by `rustfs-gateway-types` inside each seam revision
+//! module (`compat::s3s_0_17_0::generated`, `compat::s3s_5761ddfe::generated`) and converts
+//! against the mounting module's `s3s` and hand-written `leaf` functions.
 //! NOT responsible for: request context, errors, or the hand-written operations
 //! ([`overrides::HAND_WRITTEN`]).
 //! Upstream: the IR and [`facts`]. Downstream: the RustFS ring-2 adapter (rustfs/backlog#1752,
-//! rustfs/gateway#967). Deleted by P9-09 with the rest of `compat-s3s`.
+//! rustfs/gateway#967) and the ported use cases. Deleted by P9-09 with the rest of `compat-s3s`.
 //!
 //! # The one rule
 //!
@@ -35,8 +38,14 @@
 pub mod census;
 pub mod expr;
 pub mod facts;
+mod files;
+pub mod fixture;
+#[cfg(test)]
+mod fixture_tests;
 pub mod overrides;
 mod render;
+#[cfg(test)]
+mod reverse_tests;
 #[cfg(test)]
 mod tests;
 
@@ -48,7 +57,10 @@ use rustfs_gateway_model::ir::{OperationIr, Shape};
 use expr::Ctx;
 use facts::S3sFacts;
 
-/// The s3s release RustFS links, as facts.
+/// The s3s release the seam is generated against, as facts. The revision RustFS main links,
+/// s3s-project/s3s@5761ddfe, is that release plus fixes outside the DTO and error tables:
+/// `scripts/extract_s3s_shapes.py` extracts the same facts from it, byte for byte below the
+/// header line (rustfs/backlog#2759).
 const FACTS: &str = include_str!("s3s_0_17_0.facts");
 
 /// The legacy stack's DTO facts, parsed once: each structure's members in the order the legacy
@@ -95,9 +107,13 @@ pub fn emit(operations: &[OperationIr], generated_dir: &Path) -> Result<Vec<(Pat
             errors.push(format!("{operation}: not in the IR"));
             continue;
         };
-        match render::operation(&ctx, ir) {
-            Ok((module, body)) => {
+        match files::operation(&ctx, ir) {
+            Ok((module, body, params)) => {
                 files.push((dir.join("ops").join(format!("{module}.rs")), body));
+                match fixture::op_file(&ctx, &shapes, ir, &params) {
+                    Ok(body) => files.push((dir.join("fixtures").join("ops").join(format!("{module}.rs")), body)),
+                    Err(mut found) => errors.append(&mut found),
+                }
                 modules.push(module);
             }
             Err(mut found) => errors.append(&mut found),
@@ -126,11 +142,24 @@ pub fn emit(operations: &[OperationIr], generated_dir: &Path) -> Result<Vec<(Pat
                 errors.push(format!("shape {name}: not in the IR"));
                 continue;
             };
-            match render::shape_fn(&ctx, &name, shape, forward) {
+            match files::shape_fn(&ctx, &name, shape, forward) {
                 Ok(body) => shape_modules.entry(name).or_default().push(body),
                 Err(mut found) => errors.append(&mut found),
             }
         }
+    }
+    let mut shape_names = Vec::new();
+    for (name, bodies) in shape_modules {
+        let module = crate::emit::dto::naming::module_name(&name);
+        files.push((dir.join("shapes").join(format!("{module}.rs")), files::shape_file(&name, &bodies)));
+        match shapes.get(name.as_str()) {
+            Some(shape) => match fixture::shape_file(&ctx, &shapes, &name, shape) {
+                Ok(body) => files.push((dir.join("fixtures").join("shapes").join(format!("{module}.rs")), body)),
+                Err(mut found) => errors.append(&mut found),
+            },
+            None => errors.push(format!("shape {name}: not in the IR")),
+        }
+        shape_names.push(module);
     }
     if !errors.is_empty() {
         errors.sort();
@@ -141,15 +170,18 @@ pub fn emit(operations: &[OperationIr], generated_dir: &Path) -> Result<Vec<(Pat
             errors.join("\n  ")
         ));
     }
-    let mut shape_names = Vec::new();
-    for (name, bodies) in shape_modules {
-        let module = crate::emit::dto::naming::module_name(&name);
-        files.push((dir.join("shapes").join(format!("{module}.rs")), render::shape_file(&name, &bodies)));
-        shape_names.push(module);
-    }
     files.extend(census::emit(&facts, overrides::OPERATIONS, &dir.join("census"))?);
-    files.push((dir.join("ops").join("mod.rs"), render::facade("ops", &modules)));
-    files.push((dir.join("shapes").join("mod.rs"), render::facade("shapes", &shape_names)));
-    files.push((dir.join("mod.rs"), render::root()));
+    files.push((dir.join("ops").join("mod.rs"), files::facade("ops", &modules)));
+    files.push((dir.join("shapes").join("mod.rs"), files::facade("shapes", &shape_names)));
+    files.push((
+        dir.join("fixtures").join("ops").join("mod.rs"),
+        files::facade("fixtures, one per operation", &modules),
+    ));
+    files.push((
+        dir.join("fixtures").join("shapes").join("mod.rs"),
+        files::facade("fixtures, one per shape", &shape_names),
+    ));
+    files.push((dir.join("fixtures").join("mod.rs"), fixture::root()));
+    files.push((dir.join("mod.rs"), files::root()));
     Ok(files)
 }

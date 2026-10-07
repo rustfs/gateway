@@ -17,7 +17,7 @@
 //! The `DeleteMarkerEntry` member census: every member path, and the paths two values differ at or one holds.
 
 #[allow(unused_imports)] // A structure whose every member is skipped names no pinned type.
-use crate::compat::s3s_0_17_0::s3s;
+use super::super::s3s;
 
 /// Every member path of `DeleteMarkerEntry`, nested structures expanded, `[]` marking a list element.
 pub const PATHS: &[&str] = &[

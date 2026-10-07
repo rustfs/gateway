@@ -283,3 +283,4 @@ pub mod upload_part_input;
 pub mod upload_part_output;
 pub mod versioning_configuration;
 pub mod website_configuration;
+pub mod error_codes;

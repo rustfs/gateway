@@ -17,9 +17,21 @@
 //! The `RoutingRule` shape conversions.
 
 #[allow(unused_imports)] // Not every conversion needs a leaf function.
-use crate::compat::s3s_0_17_0::leaf;
-use crate::compat::s3s_0_17_0::s3s;
+use super::super::{leaf, s3s};
 use crate::compat::ConversionError;
+
+/// Converts one `RoutingRule` from the gateway shape to the s3s shape.
+///
+/// # Errors
+///
+/// [`ConversionError`] naming a member the other side cannot hold.
+#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
+pub fn routing_rule_to_s3s(value: crate::ops::shapes::RoutingRule) -> Result<s3s::dto::RoutingRule, ConversionError> {
+    Ok(s3s::dto::RoutingRule {
+        condition: value.condition.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::condition::condition_to_s3s(x)?) }).transpose()?,
+        redirect: { let x = value.redirect; super::super::shapes::redirect::redirect_to_s3s(x)? },
+    })
+}
 
 /// Converts one `RoutingRule` from the s3s shape to the gateway shape.
 ///
@@ -35,18 +47,5 @@ pub fn routing_rule_from_s3s(value: s3s::dto::RoutingRule) -> Result<crate::ops:
     Ok(crate::ops::shapes::RoutingRule {
         condition: condition.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::condition::condition_from_s3s(x)?) }).transpose()?,
         redirect: { let x = redirect; super::super::shapes::redirect::redirect_from_s3s(x)? },
-    })
-}
-
-/// Converts one `RoutingRule` from the gateway shape to the s3s shape.
-///
-/// # Errors
-///
-/// [`ConversionError`] naming a member the other side cannot hold.
-#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn routing_rule_to_s3s(value: crate::ops::shapes::RoutingRule) -> Result<s3s::dto::RoutingRule, ConversionError> {
-    Ok(s3s::dto::RoutingRule {
-        condition: value.condition.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::condition::condition_to_s3s(x)?) }).transpose()?,
-        redirect: { let x = value.redirect; super::super::shapes::redirect::redirect_to_s3s(x)? },
     })
 }

@@ -15,8 +15,8 @@
 //! The s3s DTO fact table the seam generator converts against.
 //!
 //! Responsible for: parsing `s3s_<version>.facts` — one line per s3s struct member, string
-//! enumeration and union, with every type alias already resolved by
-//! `scripts/extract_s3s_shapes.py` — into [`S3sFacts`].
+//! enumeration, union and error code (with the status it carries), with every type alias already
+//! resolved by `scripts/extract_s3s_shapes.py` — into [`S3sFacts`].
 //! NOT responsible for: deciding how a gateway member maps onto an s3s one (`super::expr`), or
 //! extracting the facts (the script does, from the s3s release RustFS links).
 //! Upstream: the checked-in fact file. Downstream: [`super`].
@@ -111,6 +111,9 @@ pub struct S3sFacts {
     pub unions: BTreeMap<String, Vec<(String, S3sType)>>,
     /// Structs: member name and type, in declaration order.
     pub structs: BTreeMap<String, Vec<(String, S3sType)>>,
+    /// Every `S3ErrorCode` variant but `Custom`, in declaration order, with the HTTP status its
+    /// `status_code` names, or `None` for a code that names none.
+    pub errors: Vec<(String, Option<u16>)>,
 }
 
 impl S3sFacts {
@@ -141,6 +144,24 @@ impl S3sFacts {
             } else if let Some(name) = line.strip_prefix("enum ") {
                 facts.enums.insert(name.to_owned());
                 current = None;
+            } else if let Some(rest) = line.strip_prefix("error ") {
+                let mut columns = rest.split(' ');
+                let (Some(name), Some(status), None) = (columns.next(), columns.next(), columns.next()) else {
+                    return Err(format!("seam facts:{}: an error line is `error <Code> <status|->`", number + 1));
+                };
+                if !is_identifier(name) {
+                    return Err(format!("seam facts:{}: `{name}` is not an error code identifier", number + 1));
+                }
+                let status = match status {
+                    "-" => None,
+                    digits => Some(
+                        digits
+                            .parse::<u16>()
+                            .map_err(|_| format!("seam facts:{}: `{digits}` is not an HTTP status", number + 1))?,
+                    ),
+                };
+                facts.errors.push((name.to_owned(), status));
+                current = None;
             } else if let Some(rest) = line.strip_prefix("union ") {
                 let (name, body) = rest
                     .split_once(" { ")
@@ -161,6 +182,12 @@ impl S3sFacts {
         }
         Ok(facts)
     }
+}
+
+/// Whether `name` is a Rust identifier as the s3s error enum spells its variants.
+fn is_identifier(name: &str) -> bool {
+    let mut chars = name.chars();
+    chars.next().is_some_and(|first| first.is_ascii_alphabetic()) && chars.all(|c| c.is_ascii_alphanumeric())
 }
 
 #[cfg(test)]
@@ -186,6 +213,26 @@ mod tests {
         assert!(S3sFacts::parse("widget X\n").is_err());
         assert!(S3sFacts::parse("  a: String\n").is_err());
         assert!(S3sFacts::parse("union F And: struct A\n").is_err());
+    }
+
+    #[test]
+    fn parses_error_codes_with_and_without_a_status() {
+        let facts = S3sFacts::parse("error NoSuchKey 404\nerror MissingAttachment -\n").expect("parses");
+        assert_eq!(
+            facts.errors,
+            [("NoSuchKey".to_owned(), Some(404)), ("MissingAttachment".to_owned(), None)]
+        );
+    }
+
+    #[test]
+    fn n_refuses_a_malformed_error_line() {
+        assert!(S3sFacts::parse("error NoSuchKey\n").is_err(), "no status column");
+        assert!(S3sFacts::parse("error NoSuchKey 4o4\n").is_err(), "a status that is not a number");
+        assert!(S3sFacts::parse("error NoSuchKey 404 extra\n").is_err(), "a third column");
+        assert!(
+            S3sFacts::parse("error no-such-key 404\n").is_err(),
+            "a name that is not a Rust identifier"
+        );
     }
 
     #[test]
