@@ -45,8 +45,9 @@
 //! to make, after decoding, with the specific codes AWS answers — and with constant reasons
 //! that never repeat the KMS key id or the destination account (`q-repl-0010`).
 
-//! HTTP requests additionally reject empty required Status before the backend (`q-xml-status-0001`).
-//! This does not change persisted configuration readers or nonempty unknown enum values.
+//! Under the tree reading, HTTP requests additionally reject empty required Status before the
+//! backend (`q-xml-status-0001`); the RustFS reading hands it to the RustFS handler as legacy
+//! RustFS does. This does not change persisted configuration readers or nonempty unknown values.
 
 use rustfs_gateway_sig::{OperationFloor, SigService};
 use rustfs_gateway_types::dto::{PutBucketReplication, PutBucketReplicationInput, PutBucketReplicationOutput};

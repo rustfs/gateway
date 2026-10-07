@@ -67,6 +67,7 @@ use std::fmt::Write as _;
 use rustfs_gateway_model::UnknownElementPolicyValue;
 use rustfs_gateway_model::ir::{AttributeSource, Binding, Field, OperationIr, Shape, ShapeKind, Type};
 
+use super::name_policy::ReaderArgs;
 use super::{CodecRules, attribute_name, bounds, carried_as_attribute, expr, media, tolerance};
 use crate::emit::dto::naming;
 use crate::emit::error_status::Constants;
@@ -386,7 +387,7 @@ fn one_field(
                 }
                 let _ = writeln!(out, "{indent}}}");
                 let indent_len = indent.len();
-                let read = super::name_policy::shape_reader_call(ir, shape, &reader, "&root", Some("request.names()"))?;
+                let read = super::name_policy::shape_reader_call(ir, rules, shape, &reader, "&root", ReaderArgs::TOP)?;
                 out.push_str(&assign(indent_len, target, &wrap(field, &read)));
                 out.push_str(close);
             }
@@ -419,7 +420,7 @@ fn one_field(
                 out.push_str(&open_request_document(ir, super::unknown_element_policy(ir, rules)?)?);
             }
             let owner = format!("{}Input", naming::type_name(op));
-            out.push_str(&xml_member(ir, (&owner, field), target, rules, "root", Some("request.names()"), 8)?);
+            out.push_str(&xml_member(ir, (&owner, field), target, rules, "root", ReaderArgs::TOP, 8)?);
         }
         Binding::StatusCode => {
             return Err(expr::unsupported(op, member, "a status code is a response member"));
@@ -563,10 +564,11 @@ fn xml_member(
     target: &str,
     rules: &CodecRules,
     node: &str,
-    name_policy: Option<&str>,
+    args: ReaderArgs<'_>,
     indent: usize,
 ) -> Result<String, String> {
     let operation = &ir.operation;
+    let name_policy = args.names;
     let member = &field.name;
     let wire = field.wire_name.clone().unwrap_or_else(|| member.clone());
     let pad = " ".repeat(indent);
@@ -611,7 +613,7 @@ fn xml_member(
             let reader = format!("read_{}", naming::module_name(entry_name));
             let links = list_source(*flattened, member_name.as_deref(), &wire)?;
             out.push_str(&for_header(indent, node, &links));
-            let read = super::name_policy::shape_reader_call(ir, entry_name, &reader, "item", name_policy)?;
+            let read = super::name_policy::shape_reader_call(ir, rules, entry_name, &reader, "item", args)?;
             out.push_str(&push_stmt(inner, presence.entries(), &read));
             let _ = writeln!(out, "{pad}}}");
             out.push_str(&presence.assign(indent, node, super::list_elements(*flattened, member_name.as_deref(), &wire)?)?);
@@ -644,7 +646,7 @@ fn xml_member(
             let reader = format!("read_{}", naming::module_name(entry_name));
             let _ = writeln!(out, "{pad}if let Some(child) = {node}.child(\"{wire}\") {{");
             out.push_str(&super::all_unknown::guard(ir, field, rules, entry_name, "child", inner)?);
-            let read = super::name_policy::shape_reader_call(ir, entry_name, &reader, "child", name_policy)?;
+            let read = super::name_policy::shape_reader_call(ir, rules, entry_name, &reader, "child", args)?;
             out.push_str(&assign(inner, target, &wrap(field, &read)));
             out.push_str(&required_member_refusal(field, member, indent));
         }
@@ -659,7 +661,7 @@ fn xml_member(
                 name_policy.unwrap_or("names"),
             )?;
             let _ = writeln!(out, "{pad}if let Some(raw) = {node}.child_text(\"{wire}\") {{");
-            out.push_str(&super::nonempty::guard(field, rules, inner)?);
+            out.push_str(&super::nonempty::guard(field, rules, args.reading, inner)?);
             out.push_str(&assign(inner, target, &wrap(field, &conversion)));
             out.push_str(&required_member_refusal(field, &wire, indent));
         }
@@ -762,7 +764,8 @@ pub fn shape_reader(
     } else {
         format!("let mut shape = dto::{type_name} {{ ..Default::default() }};")
     };
-    let (signature, needs_names) = super::name_policy::shape_reader_signature(ir, name, node, &type_name, MAX_WIDTH);
+    let (signature, needs_names) = super::name_policy::shape_reader_signature(ir, rules, name, node, &type_name, MAX_WIDTH);
+    let args = ReaderArgs::nested(needs_names);
     out.push_str(&signature);
     let _ = writeln!(out, "    {construct}");
 
@@ -782,18 +785,10 @@ pub fn shape_reader(
         // from the attribute — under the namespace the shape's own `xmlns:` constant binds, never
         // under the prefix, which is the sender's private alias.
         if carried_as_attribute(shape, &field.name) {
-            out.push_str(&xml_attribute_member(
-                ir,
-                name,
-                shape,
-                field,
-                &target,
-                rules,
-                needs_names.then_some("names"),
-            )?);
+            out.push_str(&xml_attribute_member(ir, name, shape, field, &target, rules, args.names)?);
             continue;
         }
-        out.push_str(&xml_member(ir, (name, field), &target, rules, "node", needs_names.then_some("names"), 4)?);
+        out.push_str(&xml_member(ir, (name, field), &target, rules, "node", args, 4)?);
     }
     out.push_str("    value::exit(shape.check_required())?;\n    Ok(shape)\n}\n");
     Ok(out)
@@ -806,7 +801,8 @@ pub fn shape_reader(
 /// the handler as a fabricated default or an ambiguous projection.
 fn union_reader(ir: &OperationIr, name: &str, shape: &Shape, rules: &CodecRules) -> Result<String, String> {
     let type_name = naming::type_name(name);
-    let (signature, needs_names) = super::name_policy::shape_reader_signature(ir, name, "node", &type_name, MAX_WIDTH);
+    let (signature, needs_names) = super::name_policy::shape_reader_signature(ir, rules, name, "node", &type_name, MAX_WIDTH);
+    let args = ReaderArgs::nested(needs_names);
     let mut out = String::new();
     let _ = writeln!(
         out,
@@ -825,7 +821,7 @@ fn union_reader(ir: &OperationIr, name: &str, shape: &Shape, rules: &CodecRules)
                 let reader = format!("read_{}", naming::module_name(inner));
                 let _ = writeln!(out, "            \"{wire}\" => {{");
                 out.push_str(&super::all_unknown::guard(ir, field, rules, inner, "child", 16)?);
-                let read = super::name_policy::shape_reader_call(ir, inner, &reader, "child", needs_names.then_some("names"))?;
+                let read = super::name_policy::shape_reader_call(ir, rules, inner, &reader, "child", args)?;
                 let _ = writeln!(out, "                let value = {read};");
                 let _ = writeln!(out, "                dto::{type_name}::{variant}(value)");
                 out.push_str("            }\n");

@@ -58,7 +58,7 @@ impl OperationCodec for dto::PutBucketLifecycleConfiguration {
                     CodecError::malformed_xml("the request body has the wrong root element").about("LifecycleConfiguration")
                 );
             }
-            input.lifecycle_configuration = Some(read_bucket_lifecycle_configuration(&root)?);
+            input.lifecycle_configuration = Some(read_bucket_lifecycle_configuration(&root, request.document_reading())?);
         }
         // ExpectedBucketOwner — header `x-amz-expected-bucket-owner`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-expected-bucket-owner") {
@@ -107,10 +107,11 @@ fn read_abort_incomplete_multipart_upload(
 /// body and a bare one decode identically.
 fn read_bucket_lifecycle_configuration(
     node: &rustfs_gateway_xml::XmlNode,
+    reading: crate::codec::DocumentReading,
 ) -> Result<dto::BucketLifecycleConfiguration, CodecError> {
     let mut shape = dto::BucketLifecycleConfiguration { ..Default::default() };
     for item in node.children_named("Rule") {
-        shape.rules.push(read_lifecycle_rule(item)?);
+        shape.rules.push(read_lifecycle_rule(item, reading)?);
     }
     if shape.rules.is_empty() {
         return Err(CodecError::malformed_xml("the body carries no entry for a member that requires one").about("Rules"));
@@ -155,7 +156,10 @@ fn read_lifecycle_expiration(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::
 
 /// Reads one `LifecycleRule` element. Members are matched by local name, so a namespace-prefixed
 /// body and a bare one decode identically.
-fn read_lifecycle_rule(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::LifecycleRule, CodecError> {
+fn read_lifecycle_rule(
+    node: &rustfs_gateway_xml::XmlNode,
+    reading: crate::codec::DocumentReading,
+) -> Result<dto::LifecycleRule, CodecError> {
     let mut shape = dto::LifecycleRule { ..Default::default() };
     if let Some(child) = node.child("Expiration") {
         shape.expiration = Some(read_lifecycle_expiration(child)?);
@@ -173,7 +177,7 @@ fn read_lifecycle_rule(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::Lifecy
         shape.filter = Some(read_lifecycle_rule_filter(child)?);
     }
     if let Some(raw) = node.child_text("Status") {
-        if raw.is_empty() {
+        if raw.is_empty() && reading == crate::codec::DocumentReading::Tree {
             return Err(CodecError::malformed_xml("a required text member is empty").about("Status"));
         }
         shape.status = dto::Status::custom(raw.to_owned());

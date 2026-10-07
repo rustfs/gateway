@@ -148,16 +148,6 @@ const REGISTERED: &[Registered] = &[
         gateway: |_| "InvalidArgument",
         covers: |case| is(case, "value") && member(case) == "BucketName",
     },
-    Registered {
-        id: "rd-doc-0009",
-        gateway: |_| "MalformedXML",
-        covers: |case| {
-            matches!(case.op, Op::PutBucketLifecycleConfiguration | Op::PutBucketReplication)
-                && member(case) == "Status"
-                && value_of(case, &["empty", "cdata"])
-                && !case.variant.contains("/DeleteMarkerReplication[")
-        },
-    },
 ];
 
 /// Negative-majority — every perturbation answered alike, bar the registered divergences: each
