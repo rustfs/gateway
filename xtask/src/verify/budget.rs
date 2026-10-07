@@ -12,14 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Wording for a verification run that failed its feedback budget.
+//! Wording for a verification run that failed its feedback budget, or that built inside it.
 //!
 //! Responsible for: keeping a run that was killed at its deadline distinguishable from a run that
-//! finished and was timed. NOT responsible for: enforcing the deadline, choosing commands, or
-//! deciding what a crate should cost.
+//! finished and was timed, and attributing a build inside the budget to the prebuild that should
+//! have run it. NOT responsible for: enforcing the deadline, choosing commands, or deciding what a
+//! crate should cost.
 //! Upstream: bounded verification. Downstream: the `what` / `where` / `rule` diagnostic lines.
 
 use std::time::Duration;
+
+use super::{GateCommand, GateResult, process, rerun_command};
 
 /// One command that was still running when the deadline killed it.
 pub(super) struct KilledStep {
@@ -85,15 +88,46 @@ impl BudgetFailure<'_> {
                 "{} was still running at the deadline; measure its real cost with: {}",
                 step.step, step.command
             ));
-            if step.compiled_crates > 0 {
-                notes.push(format!(
-                    "{} compiled {} crates inside the budget; the deadline covered a build, not just the work",
-                    step.step, step.compiled_crates
-                ));
-            }
+            notes.extend(build_inside_budget(&step.step, &step.command, step.compiled_crates));
         }
         notes
     }
+}
+
+/// Notes for every finished step of a batch that compiled crates inside the budget.
+///
+/// A loop that finished used to report nothing here, so a build inside the budget was visible only
+/// when it cost a kill: the first `verify --crate` after an edit relinted the crate's workspace
+/// closure inside the 30 seconds and still read as a clean pass (rustfs/gateway#1264).
+pub(super) fn builds_inside_budget(commands: &[GateCommand], results: &[GateResult]) -> Vec<String> {
+    results
+        .iter()
+        .filter_map(|(step, output)| {
+            let (program, args, _) = commands.iter().find(|(_, _, label)| label == step)?;
+            let compiled_crates = output.as_ref().map_or(0, |output| process::build_line_count(&output.stderr));
+            Some(build_inside_budget(step, &rerun_command(program, args), compiled_crates))
+        })
+        .flatten()
+        .collect()
+}
+
+/// Lines for a loop step that compiled crates inside the budget, whether it then finished or was
+/// killed.
+///
+/// The prebuild runs every command the loop runs, minus the run, so a crate compiled inside the
+/// budget is one the prebuild did not cover. That is a defect in xtask, not a cost of the crate:
+/// the note says so and names the command, so the issue it prompts is filed against the tooling
+/// (rustfs/gateway#1264, #1336 and #1367 were each filed against a crate instead).
+fn build_inside_budget(step: &str, command: &str, compiled_crates: usize) -> Vec<String> {
+    if compiled_crates == 0 {
+        return Vec::new();
+    }
+    vec![
+        format!("{step} compiled {compiled_crates} crates inside the budget; the deadline covered a build, not just the work"),
+        format!(
+            "{step} built what the prebuild did not cover; that is an xtask defect, not this crate's cost: file an xtask issue naming `{command}`"
+        ),
+    ]
 }
 
 fn compiled_crates(killed: &[KilledStep]) -> usize {

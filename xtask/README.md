@@ -25,6 +25,29 @@ verify: crate xtask passed in 16.72s
   `/usr/bin/time -p cargo xtask verify --crate rustfs-gateway-sig`. Keep that `real` duration alongside
   both verifier measurements; do not label their rounded sum as an independently measured total.
 
+The prebuild runs the loop's own commands minus the run: each `test` selection with `--no-run` and
+without its filter tail, and each `clippy` step as itself, `-- -D warnings` included. It used to
+run a `cargo check` of the Clippy targets instead, which prepares nothing Clippy reuses for a
+workspace crate: Cargo fingerprints a workspace member's lint pass against the Clippy driver and
+the lint arguments, so every workspace crate with a stale lint pass was relinted inside the
+budget. That was the build behind the killed loops in
+[#1264](https://github.com/rustfs/gateway/issues/1264),
+[#1336](https://github.com/rustfs/gateway/issues/1336) and
+[#1367](https://github.com/rustfs/gateway/issues/1367). A lint failure now fails the prebuild,
+before the loop starts, and names the command that failed.
+
+On a prepared tree the loop compiles nothing. A loop step that does compile is reported whether
+the loop then passes or is killed. With the old `check` mapping restored, the first goldens run
+after `crates/types/src/lib.rs` was touched passed and printed:
+
+```text
+verify: crate rustfs-gateway-goldens step 2 compiled 8 crates inside the budget; the deadline covered a build, not just the work
+verify: crate rustfs-gateway-goldens step 2 built what the prebuild did not cover; that is an xtask defect, not this crate's cost: file an xtask issue naming `cargo clippy -p rustfs-gateway-goldens --all-targets -- -D warnings`
+```
+
+That pair of lines is a prebuild defect, not a cost of the crate: file it against xtask with the
+command it names.
+
 A complete invocation over 30 seconds can still have a passing prepared loop. A loop killed at
 its deadline is a failure whose unfinished work has not been timed to completion; retain the
 diagnostic and the step it names. Investigate that failure without increasing the budget or
