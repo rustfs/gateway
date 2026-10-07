@@ -136,8 +136,8 @@ use crate::close::ConnectionIntent;
 use crate::config::{ConfigSnapshot, ConfigStore};
 use crate::ext::{
     AuthSchemeRef, Authentication, AuthenticationOutcome, Authenticator, AuthzAuditEvent, AuthzRequest, AuthzStage,
-    BucketOwnerSource, CachedCorsSource, ClassKind, ClientAddr, Governor, GovernorRequest, HostResolver, InputAuthzRequest,
-    PolicySnapshot, RequestContext, RequestEvent, ResponseView, RoutedView, ServerExtensions, SigV2Authentication, WireHead,
+    BucketOwnerSource, CachedCorsSource, ClassKind, ClientAddr, ClientFacts, Governor, GovernorRequest, HostResolver,
+    InputAuthzRequest, PolicySnapshot, RequestContext, RequestEvent, ResponseView, RoutedView, SigV2Authentication, WireHead,
     emit_safely,
 };
 use crate::gate::{BodyCeilings, BodyDigestObligation, MetadataAdmission, SealedBody};
@@ -541,6 +541,9 @@ impl S3Service {
         let (mut parts, body) = request.into_parts();
         crate::legacy_addressing::rewrite_double_slash_root(&self.inner.names, &mut parts);
         let headers = parts.headers.clone();
+        // The client facts, installed where the wire seam below can correct them and acceptance
+        // then freezes them for both authorization stages and the handler (rustfs/backlog#2752).
+        ClientFacts::install(&mut parts.extensions);
 
         // The wire seam, before acceptance so that whatever it writes is subject to every
         // acceptance rule — the framing conflict, the duplicate headers, the limits — exactly as a
@@ -1007,15 +1010,15 @@ impl S3Service {
         // Header-conditional actions AWS requires on top of the base one (`ExtraPermission`).
         let extra_permissions = M::extra_permissions(&op);
         let authz_started = self.inner.authz_clock.monotonic();
-        let auth_scheme = if verdict.is_authenticated() {
+        // A rejected verdict was answered above; refused here rather than reported as anonymous.
+        let Some(auth_scheme) = AuthSchemeRef::of_verdict(&verdict) else {
+            return outcome.refuse_handler(HandlerError::internal_error("an unsettled verdict reached authorization"));
+        };
+        if auth_scheme.is_authenticated() {
             let governed = GovernorRequest::new(operation, meta.bucket(), declared_length, client_addr, class);
             self.inner.governor.verified(&governed);
-            AuthSchemeRef::Authenticated
-        } else {
-            AuthSchemeRef::Anonymous
-        };
+        }
         let request_id = outcome.trace.request_id();
-        let server_extensions = &ServerExtensions::new();
 
         let route_service = self;
         let route_runtime = runtime;
@@ -1111,14 +1114,8 @@ impl S3Service {
                 }
             };
             let policy = Arc::new(policy);
-            let authz_context = RequestContext::from_request(
-                now,
-                policy.as_ref(),
-                auth_scheme,
-                route_verdict.verified_scope(),
-                server_extensions,
-                route_wire.headers(),
-            );
+            let authz_context =
+                RequestContext::from_request(now, policy.as_ref(), auth_scheme, route_verdict.verified_scope(), route_wire);
             let route_started = route_service.inner.authz_clock.monotonic();
             let mut decisions = Vec::with_capacity(if questions.is_empty() { 0 } else { asked.len() });
             // A subject is an account, and an anonymous caller has none: refused without asking,
@@ -1406,14 +1403,8 @@ impl S3Service {
                 });
             }
             let input_request = InputAuthzRequest::new(&route_request, &input_resources);
-            let authz_context = RequestContext::from_request(
-                now,
-                state.policy.as_ref(),
-                auth_scheme,
-                input_verdict.verified_scope(),
-                server_extensions,
-                input_wire.headers(),
-            );
+            let authz_context =
+                RequestContext::from_request(now, state.policy.as_ref(), auth_scheme, input_verdict.verified_scope(), input_wire);
             let input_started = input_service.inner.authz_clock.monotonic();
             let input_decisions =
                 match catch_boxed_future(|| input_runtime.authorizer.authorize_input(&authz_context, &input_request)).await {

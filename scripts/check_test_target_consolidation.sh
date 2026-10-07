@@ -693,6 +693,7 @@ gateway_modules = (
     "assembly_order",
     "assembly_snapshot",
     "authz_consumption",
+    "authz_context_facts",
     "authz_contract",
     "authz_implementations",
     "backend_reachability",

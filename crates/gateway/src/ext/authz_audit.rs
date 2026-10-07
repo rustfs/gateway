@@ -103,7 +103,8 @@ pub struct AuthzAuditEvent<'a> {
     /// Every resource relevant to this stage. Input-stage events include the route target followed
     /// by every normalized derived resource.
     pub resources: &'a [AuthzRequest<'a>],
-    /// Whether authentication was verified, or [`AuthSchemeRef::Anonymous`].
+    /// How the request was authenticated — the verdict's family and carrier — or
+    /// [`AuthSchemeRef::Anonymous`].
     pub auth_scheme: AuthSchemeRef,
     /// Who the request ran as. `None` is an anonymous caller — a request that presented nothing and
     /// was confirmed to have presented nothing, never one whose verification failed.

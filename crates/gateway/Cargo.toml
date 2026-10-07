@@ -67,6 +67,10 @@ dhat = { workspace = true }
 hyper = { workspace = true, features = ["http1", "server"] }
 hyper-util = { workspace = true, features = ["tokio"] }
 md-5 = { workspace = true }
+# `tests/authz_context_facts.rs` drives the authorizer over a real TLS listener (rustfs/backlog#2752).
+rcgen = { workspace = true }
+rustls = { workspace = true }
+tokio-rustls = { workspace = true }
 # `tests/replica_put.rs`: the replication dialect's replica write, assembled through this facade.
 rustfs-gateway-dialect-minio = { path = "../dialect-minio" }
 # `tests/host_request_id.rs`: RustFS's admin paths, where the RustFS profile leaves the identifier to the host.

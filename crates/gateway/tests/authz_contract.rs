@@ -609,7 +609,7 @@ async fn p_copy_object_input_audit_contains_source_and_destination() {
         .expect("input event");
     assert_eq!(input.resources, 2);
     assert_eq!(input.resource_actions, ["s3:PutObject", "s3:GetObject"]);
-    assert_eq!(input.auth_scheme, "Authenticated");
+    assert_eq!(input.auth_scheme, "SigV4Header");
 }
 
 /// Negative — a refused request produces an event too, carrying the state that refused it. An
