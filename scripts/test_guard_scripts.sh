@@ -8239,6 +8239,127 @@ probe_protected_missing_inputs() {
 }
 probe_protected_missing_inputs
 
+# CI hands the guard the base *tip* and the head (`github.event.pull_request.base.sha` and
+# `head.sha`), so after the base advances the two tips diverge and the base tip holds commits the
+# branch never contained. The pull request's change is `merge-base..head`; what the base added must
+# neither be charged to the branch nor hide what the branch did (rustfs/gateway#1327, reproduced on
+# #1325 and #1335). Each case commits the feature first, parks it under a ref, rewinds to the branch
+# point and commits the base's own advance on top, then compares as CI does. A negative must name the
+# branch's own protected change and demand BREAKING; an unrelated exit 1 is not a catch, and a
+# base-only reason in the output is a miss even when the exit code is right.
+#   expect_protected_pr <desc> <pass|fail> <base mutator> <feature mutator> [required] [forbidden]
+expect_protected_pr() {
+    local desc="$1" expect="$2" mutate_base="$3" mutate_feature="$4" required="${5:-}" forbidden="${6:-}"
+    local sandbox output rc=0
+    cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
+    make_sandbox
+    sandbox="$SANDBOX"
+    (
+        cd "$sandbox" &&
+            "$mutate_feature" >/dev/null && git add -A &&
+            git -c user.name=t -c user.email=t@t commit -qm feature &&
+            git update-ref refs/heads/guard-feature HEAD &&
+            git reset -q --hard HEAD^ &&
+            "$mutate_base" >/dev/null && git add -A &&
+            git -c user.name=t -c user.email=t@t commit -qm 'base advances'
+    ) || { fail_msg "cannot build the divergent history: ${desc}"; return; }
+    output="$(GATEWAY_CHECK_ROOT="$sandbox" GATEWAY_PROTECTED_BASE=HEAD GATEWAY_PROTECTED_HEAD=guard-feature \
+        GATEWAY_PR_BODY_JSON='""' "${SCRIPT_DIR}/check_protected_files.sh" 2>&1)" || rc=$?
+    git -C "$sandbox" update-ref -d refs/heads/guard-feature
+    if [[ -n "$forbidden" && "$output" == *"$forbidden"* ]]; then
+        fail_msg "check_protected_files.sh charged the branch for a base-only change: ${desc}"
+    elif [[ "$expect" == pass ]]; then
+        if [[ "$rc" -eq 0 && "$output" == *'no protected contract change'* ]]; then
+            pass_msg "check_protected_files.sh allows: ${desc}"
+        else
+            fail_msg "check_protected_files.sh rejected: ${desc}"
+        fi
+    elif [[ "$rc" -ne 0 && "$output" == *"$required"* &&
+        "$output" == *'protected change requires literal BREAKING in the PR description'* ]]; then
+        pass_msg "check_protected_files.sh catches: ${desc}"
+    elif [[ "$rc" -ne 0 ]]; then
+        fail_msg "check_protected_files.sh failed without its policy diagnostic: ${desc}"
+    else
+        fail_msg "check_protected_files.sh did NOT catch: ${desc}"
+    fi
+}
+
+mut_pr_base_new_adr() { add_next_indexed_adr 'Base-only decision' 'base-only-decision'; }
+mut_pr_base_new_case_and_notice() {
+    printf '[case]\nid = "c-base-9998"\n' >conformance/cases/c-base-9998.toml
+    printf '\nBase-only contract note.\n' >>NOTICE
+}
+mut_pr_base_unprotected() { printf '\nBase-only note.\n' >>README.md; }
+mut_pr_feature_unprotected() { printf 'fixture\n' >docs/guard-pr-fixture.md; }
+mut_pr_feature_deleted_adr() { rm docs/adr/0003-no-global-registry-crates.md; }
+mut_pr_feature_renamed_adr() {
+    mv docs/adr/0003-no-global-registry-crates.md docs/adr/0003-no-global-registry.md
+}
+
+expect_protected_pr 'a base-only ADR and index row after the branch point' pass \
+    mut_pr_base_new_adr mut_pr_feature_unprotected
+expect_protected_pr 'a base-only rust-version change after the branch point' pass \
+    mut_protected_rust_version mut_pr_feature_unprotected
+expect_protected_pr 'a base-only conformance case and NOTICE change after the branch point' pass \
+    mut_pr_base_new_case_and_notice mut_pr_feature_unprotected
+expect_protected_pr 'a feature ADR taking the same next number as a base-only ADR' pass \
+    mut_pr_base_new_adr mut_new_adr_with_required_index_row
+expect_protected_pr 'an existing ADR modified on the branch while the base added an ADR' fail \
+    mut_pr_base_new_adr mut_protected_existing_adr 'accepted ADR changed or moved'
+expect_protected_pr 'an ADR deleted on the branch while the base changed rust-version' fail \
+    mut_protected_rust_version mut_pr_feature_deleted_adr \
+    'accepted ADR changed or moved' 'rust-version contract changed'
+expect_protected_pr 'an ADR renamed on the branch after the base advanced' fail \
+    mut_pr_base_unprotected mut_pr_feature_renamed_adr 'accepted ADR changed or moved'
+expect_protected_pr 'a rust-version change on the branch while the base added an ADR' fail \
+    mut_pr_base_new_adr mut_protected_rust_version \
+    'rust-version contract changed' 'accepted ADR changed or moved'
+expect_protected_pr 'a conformance case deleted on the branch while the base added one' fail \
+    mut_pr_base_new_case_and_notice mut_deleted_conformance_case \
+    'conformance case deleted or moved' 'protected contract path changed'
+
+# Two tips with no common ancestor are not a pull request. The guard cannot know what the branch
+# proposes, so it must say so rather than diff the tips (which reports the whole tree deleted and
+# demands BREAKING for the wrong reason) or report green.
+probe_protected_no_common_ancestor() {
+    local sandbox output orphan rc=0
+    cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
+    make_sandbox
+    sandbox="$SANDBOX"
+    orphan="$(cd "$sandbox" && git -c user.name=t -c user.email=t@t commit-tree \
+        "$(git hash-object -t tree /dev/null)" -m orphan)" ||
+        { fail_msg 'cannot build an orphan tip for check_protected_files.sh'; return; }
+    git -C "$sandbox" update-ref refs/heads/guard-orphan "$orphan"
+    output="$(GATEWAY_CHECK_ROOT="$sandbox" GATEWAY_PROTECTED_BASE=HEAD GATEWAY_PROTECTED_HEAD=guard-orphan \
+        GATEWAY_PR_BODY_JSON='""' "${SCRIPT_DIR}/check_protected_files.sh" 2>&1)" || rc=$?
+    git -C "$sandbox" update-ref -d refs/heads/guard-orphan
+    if [[ "$rc" -ne 0 && "$output" == *'cannot resolve the common ancestor'* ]]; then
+        pass_msg 'check_protected_files.sh refuses tips with no common ancestor'
+    elif [[ "$rc" -ne 0 ]]; then
+        fail_msg 'check_protected_files.sh failed tips with no common ancestor for another reason'
+    else
+        fail_msg 'check_protected_files.sh reported green for tips with no common ancestor'
+    fi
+}
+probe_protected_no_common_ancestor
+
+probe_protected_unresolvable_head() {
+    local output rc=0
+    cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
+    make_sandbox
+    output="$(GATEWAY_CHECK_ROOT="$SANDBOX" GATEWAY_PROTECTED_BASE=HEAD GATEWAY_PROTECTED_HEAD=guard-absent \
+        GATEWAY_PR_BODY_JSON='""' "${SCRIPT_DIR}/check_protected_files.sh" 2>&1)" || rc=$?
+    if [[ "$rc" -ne 0 && "$output" == *'git rev-parse --verify guard-absent failed'* ]]; then
+        pass_msg 'check_protected_files.sh refuses an unresolvable head ref'
+    else
+        fail_msg 'check_protected_files.sh did not refuse an unresolvable head ref'
+    fi
+}
+probe_protected_unresolvable_head
+
 # The differential's pull-request guards (rustfs/backlog#1762): the known-diffs register grows
 # only with an argument, and the differential never changes alongside gateway source silently.
 # Each case commits its mutation so the guard compares HEAD^ with HEAD as CI compares base

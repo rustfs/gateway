@@ -5,7 +5,8 @@ set -euo pipefail
 # Checks the Breaking Change marker for the protected surface declared in AGENTS.md.
 # New ADRs and new conformance cases are deliberately unrestricted; changing an
 # accepted ADR or deleting a case is not. There is no allowance outside the
-# Breaking Change process described by AGENTS.md (rustfs/backlog#1723).
+# Breaking Change process described by AGENTS.md (rustfs/backlog#1723). The change
+# judged is the pull request's own, merge-base..head, never base-tip..head.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="${GATEWAY_CHECK_ROOT:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
@@ -104,6 +105,23 @@ if actual_rows != expected_rows:
 
 git("rev-parse", "--verify", base)
 git("rev-parse", "--verify", head)
+# `base` arrives as the base branch tip (`github.event.pull_request.base.sha`). Judged against
+# it, a branch is charged with everything the base did after the branch point: an ADR or a
+# conformance case added on main reads here as a deletion by the branch (rustfs/gateway#1327,
+# seen on #1325 and #1335). The evidence owed is for the change the pull request proposes,
+# merge-base..head. That one ancestor serves every comparison below -- the path status, the
+# ADR index baseline and the Cargo diff -- so no two of them can disagree about "before".
+try:
+    fork = subprocess.run(
+        ["git", "merge-base", base, head], cwd=root, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+    )
+except OSError as error:
+    fail(f"git merge-base {base} {head} failed: {error}")
+ancestor = fork.stdout.decode("utf-8", "replace").strip()
+if fork.returncode != 0 or not re.fullmatch(r"[0-9a-f]{40,64}", ancestor):
+    detail = fork.stderr.decode("utf-8", "replace").strip()
+    fail(f"cannot resolve the common ancestor of {base} and {head}" + (f": {detail}" if detail else ""))
+base = ancestor
 fields = git("diff", "--name-status", "-z", "--find-renames", base, head).split(b"\0")
 changes: list[tuple[str, str | None, str]] = []
 index = 0
