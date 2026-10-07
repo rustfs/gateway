@@ -14,7 +14,7 @@
 
 //! The error-response slice of the request-divergence register: `rd-err-NNNN`.
 //!
-//! Responsible for: the thirteen pinned divergences in how the two stacks answer a refused request —
+//! Responsible for: the pinned divergences in how the two stacks answer a refused request —
 //! status, code, `<Resource>`, `<RequestId>`, headers — each with its ruling and its pinned test
 //! in `operation_diff/context/error_parity/divergences.rs`.
 //! NOT responsible for: the register's validation and rendering, which the parent module does over
@@ -35,7 +35,7 @@
 
 use super::{DivergenceFollowUp, DivergenceRuling, ERROR_PARITY, ERROR_RESPONSES, M1_ADAPTER, RequestDivergence};
 
-pub(super) const ERROR_DIVERGENCES: [RequestDivergence; 14] = [
+pub(super) const ERROR_DIVERGENCES: [RequestDivergence; 16] = [
     RequestDivergence {
         id: "rd-err-0001",
         operation: "every operation",
@@ -265,5 +265,40 @@ pub(super) const ERROR_DIVERGENCES: [RequestDivergence; 14] = [
         follow_up: DivergenceFollowUp::None,
         test_file: ERROR_PARITY,
         test: "a_buffered_body_past_twenty_mebibytes_is_a_client_error_only_on_the_gateway",
+    },
+    RequestDivergence {
+        id: "rd-err-0015",
+        operation: "GetObject, HeadObject, CopyObject, UploadPartCopy (the RustFS profile's date reading)",
+        request: "an unreadable date condition beside another header the legacy decoder refuses and reads first \
+                  (an If-Match it cannot read)",
+        aws: "a request with an invalid header is refused with a client error; which of two invalid headers is named is \
+              not specified",
+        aws_evidence: ERROR_RESPONSES,
+        s3s: "decodes members in its own order and names the first it refuses: 400 InvalidArgument invalid header: if-match",
+        gateway: "answers the date conditions before its decoder: 400 InvalidArgument invalid header: if-modified-since",
+        client_impact: "the same status and code; the sentence names the other header; nothing is read or stored either way",
+        ruling: DivergenceRuling::KeepGateway,
+        follow_up: DivergenceFollowUp::None,
+        test_file: ERROR_PARITY,
+        test: "two_unreadable_conditions_are_named_in_a_different_order_by_each_stack",
+    },
+    RequestDivergence {
+        id: "rd-err-0016",
+        operation: "every operation",
+        request: "two faults from different stages: one the gateway checks before decoding (encryption headers, \
+                  authorization) and one the legacy decoder meets first (a member it cannot read)",
+        aws: "a request with several faults is refused for one of them; the order is not specified",
+        aws_evidence: ERROR_RESPONSES,
+        s3s: "decodes before RustFS's per-operation access check and before RustFS judges encryption headers in its \
+              handler, so it names the decode fault: 400 InvalidArgument invalid header: if-modified-since",
+        gateway: "refuses in its stage order, wire, authentication, authorization, encryption, pre-decode checks, decode: \
+                  400 InvalidArgument for the KMS qualifier without its algorithm",
+        client_impact: "a request with two faults is told about the other one, with the same status where both are \
+                        client errors (a denial beside a decode fault is 403 on the gateway, 400 on legacy RustFS); \
+                        nothing is read or stored either way",
+        ruling: DivergenceRuling::KeepGateway,
+        follow_up: DivergenceFollowUp::None,
+        test_file: ERROR_PARITY,
+        test: "two_faults_from_different_stages_are_answered_in_each_stack_s_own_order",
     },
 ];

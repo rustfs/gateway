@@ -495,3 +495,111 @@ fn a_signature_covering_the_payload_hash_only_in_the_payload_line_is_verified_by
         assert_eq!((gateway.status, oracle.status), (200, 200), "{gateway:?} {oracle:?}");
     }
 }
+
+/// A presigned GetBucketLocation query naming `X-Amz-Date` twice; the signature is never reached.
+fn presigned_with_a_repeated_date(stamp: &str) -> ContextRequest {
+    let day = &stamp[..8];
+    let signature = "0".repeat(64);
+    ContextRequest::get(
+        PATH_HOST,
+        "/photos",
+        &format!(
+            "location&X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential={ACCESS_KEY}%2F{day}%2Fus-east-1%2Fs3%2Faws4_request\
+             &X-Amz-Date={stamp}&X-Amz-Date={stamp}&X-Amz-Expires=300&X-Amz-SignedHeaders=host&X-Amz-Signature={signature}"
+        ),
+    )
+}
+
+/// `x-amz-date` sent on two lines. The gateway refuses the head before routing under both profiles
+/// with `400 InvalidRequest`: a repeated signing input is two answers to one question, and reading
+/// either one would let the other travel unsigned beside it. The legacy stack reads a repeated
+/// header as absent: a header-signed request is then `400 InvalidRequest` "missing header:
+/// x-amz-date" there too, but an anonymous one is served with the duplicate ignored. Kept on
+/// security grounds by the coordinator's ruling (rustfs/backlog#2684, intentionally not kept).
+///
+/// Ruling: `rd-loc-0012`
+#[test]
+fn a_repeated_signing_date_is_refused_by_the_gateway_and_read_as_absent_by_the_legacy_stack() {
+    let stamp = amz_date(rustfs_gateway_sig::RequestNow::capture().unix_seconds());
+    let signed = location_signed_by_hand("us-east-1", SECRET_KEY).header("x-amz-date", stamp.as_bytes());
+    for request in [signed.clone(), signed.rustfs_profile()] {
+        let (gateway, oracle) = answers(&request).expect("both stacks answer");
+        assert_eq!((gateway.status, gateway.code()), (400, Some("InvalidRequest")), "{gateway:?}");
+        assert_eq!((oracle.status, oracle.message()), (400, Some("missing header: x-amz-date")), "{oracle:?}");
+    }
+    let anonymous = location_request()
+        .header("x-amz-date", stamp.as_bytes())
+        .header("x-amz-date", stamp.as_bytes());
+    let (gateway, oracle) = answers(&anonymous.rustfs_profile()).expect("both stacks answer");
+    assert_eq!((gateway.status, oracle.status), (400, 200), "{gateway:?} {oracle:?}");
+}
+
+/// `x-amz-content-sha256` sent on two lines: refused by the gateway before routing under both
+/// profiles; read as absent by the legacy stack, which then answers a header-signed request `400
+/// InvalidRequest` "missing header: x-amz-content-sha256". Kept on security grounds by the
+/// coordinator's ruling (rustfs/backlog#2684, intentionally not kept): the declaration is what a
+/// body is held to, and one of two declarations would go unchecked.
+///
+/// Ruling: `rd-loc-0013`
+#[test]
+fn a_repeated_payload_declaration_is_refused_by_the_gateway_and_read_as_absent_by_the_legacy_stack() {
+    let signed = location_signed_by_hand("us-east-1", SECRET_KEY).header("x-amz-content-sha256", b"UNSIGNED-PAYLOAD");
+    for request in [signed.clone(), signed.rustfs_profile()] {
+        let (gateway, oracle) = answers(&request).expect("both stacks answer");
+        assert_eq!((gateway.status, gateway.code()), (400, Some("InvalidRequest")), "{gateway:?}");
+        assert_eq!(
+            (oracle.status, oracle.message()),
+            (400, Some("missing header: x-amz-content-sha256")),
+            "{oracle:?}"
+        );
+    }
+}
+
+/// A presigned query naming one of its signing parameters twice: the gateway refuses the query
+/// before routing under both profiles with `400 InvalidArgument`; the legacy stack reads the
+/// repeated parameter as absent and refuses the presigned URL as incomplete, `400
+/// AuthorizationQueryParametersError`. Both refuse; the code differs. Kept on security grounds by
+/// the coordinator's ruling (rustfs/backlog#2684, intentionally not kept).
+///
+/// Ruling: `rd-loc-0014`
+#[test]
+fn a_repeated_presigned_parameter_is_refused_by_both_stacks_under_different_codes() {
+    let stamp = amz_date(rustfs_gateway_sig::RequestNow::capture().unix_seconds());
+    let request = presigned_with_a_repeated_date(&stamp);
+    for request in [request.clone(), request.rustfs_profile()] {
+        let (gateway, oracle) = answers(&request).expect("both stacks answer");
+        assert_eq!((gateway.status, gateway.code()), (400, Some("InvalidArgument")), "{gateway:?}");
+        assert_eq!(
+            (oracle.status, oracle.code()),
+            (400, Some("AuthorizationQueryParametersError")),
+            "{oracle:?}"
+        );
+    }
+}
+
+/// An `x-amz-*` header whose value is not UTF-8: the gateway refuses the head before routing under
+/// both profiles with `400 InvalidRequest`. The legacy stack reads it as absent: an anonymous
+/// request is served; a header-signed one is refused by its unsigned-header rule on the revision
+/// RustFS links (`403 AccessDenied`) and served on the baseline revision. Kept on security grounds
+/// by the coordinator's ruling (rustfs/backlog#2684, intentionally not kept): a value one reader
+/// cannot decode is a value two readers can disagree on.
+///
+/// Ruling: `rd-loc-0015`
+#[test]
+fn a_non_utf8_amz_header_is_refused_by_the_gateway_and_read_as_absent_by_the_legacy_stack() {
+    let anonymous = location_request().header("x-amz-meta-note", b"\xff");
+    for request in [anonymous.clone(), anonymous.rustfs_profile()] {
+        let (gateway, oracle) = answers(&request).expect("both stacks answer");
+        assert_eq!((gateway.status, gateway.code()), (400, Some("InvalidRequest")), "{gateway:?}");
+        assert_eq!(oracle.status, 200, "{oracle:?}");
+    }
+    let signed = location_signed_by_hand("us-east-1", SECRET_KEY).header("x-amz-meta-note", b"\xff");
+    let (gateway, oracle) = answers(&signed.rustfs_profile()).expect("both stacks answer");
+    assert_eq!((gateway.status, gateway.code()), (400, Some("InvalidRequest")), "{gateway:?}");
+    let expected = if super::super::SEAM_REVISION == rustfs_gateway_types::compat::OracleRevision::Baseline {
+        200
+    } else {
+        403
+    };
+    assert_eq!(oracle.status, expected, "{oracle:?}");
+}
