@@ -18,8 +18,9 @@
 //! Responsible for: proving that `ServiceBuilder::bound_claimed_route_bodies_as_legacy_rustfs`
 //! refuses a claimed route declaring more than 1 MiB — one that buffers its body and one that
 //! reads none — with legacy RustFS's `400 EntityTooLarge`, after the signature and before
-//! authorization, with no body byte read and no handler reached; and that 1 MiB exactly, an
-//! unclaimed operation, a bad signature and the default assembly are answered as before.
+//! authorization, with no body byte read and no handler reached; that a request presenting no
+//! credential is refused by it ahead of the floor; and that 1 MiB exactly, an unclaimed operation,
+//! a bad or malformed signature and the default assembly are answered as before.
 //! NOT responsible for: the ceiling's value (`src/builder/claimed_bodies.rs`) or which routes a
 //! dialect claims (`crates/core/tests/dialect_claims*.rs`).
 //! Upstream: `S3Service` with a claimed example dialect. Downstream: none.
@@ -28,7 +29,10 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use bytes::Bytes;
-use rustfs_gateway::sig::{AmzDate, PayloadMode, SigService, SigV4Signer, SigningCredentials, SigningRequest, SigningScope};
+use rustfs_gateway::sig::{
+    AmzDate, AuthError, CustomAuthRequest, CustomAuthScheme, CustomSchemeRegistry, PayloadMode, SigService, SigV4Signer,
+    SignatureVerifier, SigningCredentials, SigningRequest, SigningScope, Verdict,
+};
 use rustfs_gateway::{
     Authorizer, AuthzRequest, BoxFuture, Credentials, Decision, Handler, HandlerResult, InputAuthzRequest, InputDecisions,
     RegionSet, Req, RequestContext, Resp, S3Service, ServiceBuilder, SigV4Authenticator, StaticCredentials, dto,
@@ -38,7 +42,7 @@ use rustfs_gateway_core::{
     AuthRequirement, ClaimedRoute, ClaimedRow, Dialect, DialectOverlay, HandlerDeadlineClass, Operation, OperationSpec,
     OverlayRow, PathClaim, Predicate, ResourceShape,
 };
-use rustfs_gateway_sig::OperationFloor;
+use rustfs_gateway_sig::{OperationFloor, SecurityFloor};
 
 use crate::support::{self, CountingBody};
 
@@ -215,6 +219,10 @@ impl Authorizer for Counting {
 }
 
 fn service(bounded: bool, decision: Decision) -> (S3Service, Arc<Seen>) {
+    service_with_floor(bounded, decision, SecurityFloor::new())
+}
+
+fn service_with_floor(bounded: bool, decision: Decision, floor: SecurityFloor) -> (S3Service, Arc<Seen>) {
     let seen = Arc::new(Seen::default());
     let credentials = Credentials::new("AKIDEXAMPLE", b"secret").expect("a valid key");
     let mut builder = ServiceBuilder::new()
@@ -222,6 +230,7 @@ fn service(bounded: bool, decision: Decision) -> (S3Service, Arc<Seen>) {
             Arc::new(StaticCredentials::new().with(credentials)),
             RegionSet::new(["us-east-1"]).expect("non-empty"),
         ))
+        .security_floor(floor)
         .authorizer(Counting(Arc::clone(&seen), decision))
         .clock_with_skew_ack(
             support::fixed_clock(),
@@ -375,4 +384,211 @@ async fn n_a_bad_signature_is_refused_before_the_ceiling() {
     assert_eq!(status, http::StatusCode::FORBIDDEN, "{body}");
     assert_eq!(polled, 0);
     assert_eq!(seen.handled.load(Ordering::SeqCst), 0);
+}
+
+/// `method target` presenting no credential, declaring `length`.
+fn anonymous(method: http::Method, target: &str, length: u64) -> http::request::Builder {
+    http::Request::builder()
+        .method(method)
+        .uri(target)
+        .header(http::header::HOST, "s3.example.com")
+        .header(http::header::CONTENT_LENGTH, length)
+}
+
+/// Positive — a request presenting no credential has no signature to verify first, and legacy
+/// RustFS bounds its admin surface's declared body before its access check: an anonymous request
+/// declaring 1 MiB and a byte is `400 EntityTooLarge`, not the floor's `403` for an anonymous
+/// admin call. Measured against frozen RustFS 5e1bd498 (rustfs/gateway#1173, 2026-10-05): above
+/// 1 MiB valid and anonymous requests answer `400 EntityTooLarge`, forged ones `403`.
+#[tokio::test]
+async fn an_anonymous_claimed_body_past_one_mebibyte_is_refused_as_too_large() {
+    let (service, seen) = service(true, Decision::Allow);
+    for (method, target) in [
+        (http::Method::PUT, "/example/admin/v1/import"),
+        (http::Method::GET, "/example/admin/v1/info"),
+    ] {
+        let length = MIB + 1;
+        let (status, body, polled) = send(&service, anonymous(method, target, length as u64), length).await;
+        assert_eq!(status, http::StatusCode::BAD_REQUEST, "{target}: {body}");
+        assert_eq!(support::element_text(&body, "Code"), Some("EntityTooLarge"), "{target}: {body}");
+        assert_eq!(support::element_text(&body, "Message"), Some(REFUSAL), "{target}: {body}");
+        assert_eq!(polled, 0, "{target}: the body was read before the refusal");
+    }
+    assert_eq!(seen.handled.load(Ordering::SeqCst), 0);
+    assert_eq!(seen.asked.load(Ordering::SeqCst), 0);
+}
+
+/// Negative — an anonymous request within the ceiling is still the floor's `403`, as legacy
+/// RustFS's access check answers it: the ceiling moved ahead of the floor, the floor stayed.
+#[tokio::test]
+async fn n_an_anonymous_claimed_body_within_the_ceiling_is_still_refused_by_the_floor() {
+    let (service, seen) = service(true, Decision::Allow);
+    let (status, body, polled) = send(&service, anonymous(http::Method::PUT, "/example/admin/v1/import", MIB as u64), MIB).await;
+    assert_eq!(status, http::StatusCode::FORBIDDEN, "{body}");
+    assert_eq!(polled, 0);
+    assert_eq!(seen.handled.load(Ordering::SeqCst), 0);
+}
+
+/// Negative — without the switch an anonymous oversized claimed request is the floor's `403`.
+#[tokio::test]
+async fn n_the_default_refuses_an_anonymous_oversized_claimed_request_at_the_floor() {
+    let (service, seen) = service(false, Decision::Allow);
+    let length = 2 * MIB;
+    let (status, body, polled) =
+        send(&service, anonymous(http::Method::PUT, "/example/admin/v1/import", length as u64), length).await;
+    assert_eq!(status, http::StatusCode::FORBIDDEN, "{body}");
+    assert_eq!(polled, 0);
+    assert_eq!(seen.handled.load(Ordering::SeqCst), 0);
+}
+
+/// Negative — under the switch an anonymous unclaimed request declaring 2 MiB is not answered
+/// with the claimed route's ceiling.
+#[tokio::test]
+async fn n_an_anonymous_unclaimed_request_is_not_bounded_by_it() {
+    let (service, _seen) = service(true, Decision::Allow);
+    let length = 2 * MIB;
+    let (status, body, _polled) = send(&service, anonymous(http::Method::GET, "/bucket/object", length as u64), length).await;
+    assert_ne!(support::element_text(&body, "Code"), Some("EntityTooLarge"), "{status}: {body}");
+    assert_ne!(support::element_text(&body, "Message"), Some(REFUSAL), "{status}: {body}");
+}
+
+/// Negative — a request presenting a credential the floor cannot read is still refused by the
+/// floor ahead of the ceiling: only a request presenting nothing skips the signature.
+#[tokio::test]
+async fn n_a_malformed_credential_is_refused_before_the_ceiling() {
+    let (service, seen) = service(true, Decision::Allow);
+    let length = 2 * MIB;
+    let request = anonymous(http::Method::PUT, "/example/admin/v1/import", length as u64)
+        .header(http::header::AUTHORIZATION, "AWS4-HMAC-SHA256 Credential=broken");
+    let (status, body, polled) = send(&service, request, length).await;
+    assert_ne!(support::element_text(&body, "Code"), Some("EntityTooLarge"), "{status}: {body}");
+    assert!(status.is_client_error(), "{status}: {body}");
+    assert_eq!(polled, 0);
+    assert_eq!(seen.handled.load(Ordering::SeqCst), 0);
+}
+
+/// Refuses every request presented under the custom scheme, counting each one.
+struct RefusingVerifier(Arc<AtomicUsize>);
+
+impl SignatureVerifier for RefusingVerifier {
+    fn verify(&self, _request: &CustomAuthRequest<'_>) -> Verdict {
+        self.0.fetch_add(1, Ordering::SeqCst);
+        Verdict::reject(AuthError::AccessDenied)
+    }
+}
+
+/// Negative — a credential presented under a registered custom scheme is a credential: its
+/// verifier answers first, and an oversized claimed body is not refused as too large ahead of it.
+#[tokio::test]
+async fn n_a_custom_scheme_credential_is_verified_before_the_ceiling() {
+    let seen = Arc::new(Seen::default());
+    let verified = Arc::new(AtomicUsize::new(0));
+    let mut registry = CustomSchemeRegistry::new();
+    registry
+        .register(CustomAuthScheme::new("x-vendor-auth-").expect("a legal custom prefix"))
+        .expect("the first scheme is unique");
+    let service = support::wired()
+        .security_floor(rustfs_gateway::SecurityFloor::new().with_custom_schemes(registry))
+        .custom_signature_verifier(RefusingVerifier(Arc::clone(&verified)))
+        .authorizer(Counting(Arc::clone(&seen), Decision::Allow))
+        .dialect(&dialect())
+        .register::<Info, _>(Arc::new(Backend(Arc::clone(&seen))))
+        .register::<Import, _>(Arc::new(Backend(Arc::clone(&seen))))
+        .bound_claimed_route_bodies_as_legacy_rustfs()
+        .build()
+        .expect("a complete assembly");
+    let length = 2 * MIB;
+    let request = anonymous(http::Method::PUT, "/example/admin/v1/import", length as u64).header("x-vendor-auth-token", "opaque");
+    let (status, body, polled) = send(&service, request, length).await;
+    assert_eq!(status, http::StatusCode::FORBIDDEN, "{body}");
+    assert_ne!(support::element_text(&body, "Code"), Some("EntityTooLarge"), "{body}");
+    assert_eq!(verified.load(Ordering::SeqCst), 1, "the custom verifier was not asked");
+    assert_eq!(polled, 0);
+    assert_eq!(seen.handled.load(Ordering::SeqCst), 0);
+}
+
+/// Observe both claimed routes under the floor's chosen recognition policy.
+async fn assert_query_credential_response(
+    query: &str,
+    legacy: bool,
+    bounded: bool,
+    length: usize,
+    expected: (http::StatusCode, &str),
+) {
+    for (method, path) in [
+        (http::Method::PUT, "/example/admin/v1/import"),
+        (http::Method::GET, "/example/admin/v1/info"),
+    ] {
+        let target = format!("{path}?{query}");
+        let floor = if legacy {
+            SecurityFloor::new().recognize_signatures_as_legacy_rustfs()
+        } else {
+            SecurityFloor::new()
+        };
+        let (service, _seen) = service_with_floor(bounded, Decision::Allow, floor);
+        let (status, body, polled) = send(&service, anonymous(method, &target, length as u64), length).await;
+        assert_eq!(status, expected.0, "{target}, legacy={legacy}, bounded={bounded}: {body}");
+        assert_eq!(
+            support::element_text(&body, "Code"),
+            Some(expected.1),
+            "{target}, legacy={legacy}, bounded={bounded}: {body}"
+        );
+        assert_eq!(
+            polled, 0,
+            "{target}, legacy={legacy}, bounded={bounded}: the body was read before the refusal"
+        );
+    }
+}
+
+/// An incomplete query credential keeps the unbounded assembly's floor refusal on both routes.
+async fn assert_query_credential_is_refused_before_the_ceiling(query: &str) {
+    for bounded in [false, true] {
+        assert_query_credential_response(query, false, bounded, MIB + 1, (http::StatusCode::FORBIDDEN, "AccessDenied")).await;
+    }
+}
+
+/// Negative — a query carrying only a SigV4 credential is still an AWS credential attempt.
+#[tokio::test]
+async fn n_a_query_credential_is_refused_before_the_ceiling() {
+    assert_query_credential_is_refused_before_the_ceiling("X-Amz-Credential=broken").await;
+}
+
+/// Negative — a query carrying only a SigV4 algorithm is not a request presenting nothing.
+#[tokio::test]
+async fn n_a_query_algorithm_is_refused_before_the_ceiling() {
+    assert_query_credential_is_refused_before_the_ceiling("X-Amz-Algorithm=AWS4-HMAC-SHA256").await;
+}
+
+/// Negative — a query carrying only a SigV2 access key is still an AWS credential attempt.
+#[tokio::test]
+async fn n_a_query_access_key_is_refused_before_the_ceiling() {
+    assert_query_credential_is_refused_before_the_ceiling("AWSAccessKeyId=broken").await;
+}
+
+/// Positive — under legacy recognition these unsigned query cues remain anonymous, so the
+/// anonymous ceiling still precedes the floor.
+#[tokio::test]
+async fn an_unsigned_query_under_legacy_recognition_is_bounded_as_anonymous() {
+    for query in [
+        "X-Amz-Credential=broken",
+        "X-Amz-Algorithm=AWS4-HMAC-SHA256",
+        "AWSAccessKeyId=broken",
+    ] {
+        assert_query_credential_response(query, true, true, MIB + 1, (http::StatusCode::BAD_REQUEST, "EntityTooLarge")).await;
+    }
+}
+
+/// Negative — legacy recognition still refuses anonymous access at the floor when the ceiling
+/// is not exceeded or the ceiling switch is off.
+#[tokio::test]
+async fn n_an_unsigned_query_under_legacy_recognition_keeps_the_floor_without_a_ceiling_refusal() {
+    for query in [
+        "X-Amz-Credential=broken",
+        "X-Amz-Algorithm=AWS4-HMAC-SHA256",
+        "AWSAccessKeyId=broken",
+    ] {
+        for (bounded, length) in [(true, MIB), (false, MIB + 1)] {
+            assert_query_credential_response(query, true, bounded, length, (http::StatusCode::FORBIDDEN, "AccessDenied")).await;
+        }
+    }
 }

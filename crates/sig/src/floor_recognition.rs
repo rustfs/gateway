@@ -69,11 +69,17 @@ impl SecurityFloor {
         self
     }
 
-    /// The sealing predicate this floor applies: [`detect_aws_credential_marker`], or legacy
-    /// RustFS's reading of it under [`Self::recognize_signatures_as_legacy_rustfs`]: an
+    /// Classifies an AWS credential attempt using this floor's configured recognition policy.
+    ///
+    /// By default this is [`detect_aws_credential_marker`], including incomplete credential
+    /// surfaces. Under [`Self::recognize_signatures_as_legacy_rustfs`] it recognises an
     /// `Authorization` header as before; else a query `Signature` (SigV2, which legacy RustFS asks
     /// about first) or `X-Amz-Signature`; else a form's `x-amz-signature` or `signature`.
-    pub(super) fn credential_marker(&self, view: &WireView<'_>) -> Option<AwsCredentialMarker> {
+    ///
+    /// This predicate does not verify credentials or admit a request. Checks for unsigned
+    /// requests ahead of [`Self::admit`] must use the same recognition policy. Registered custom
+    /// schemes and isolated security tokens must be identified separately.
+    pub fn credential_marker(&self, view: &WireView<'_>) -> Option<AwsCredentialMarker> {
         if self.recognition == Recognition::Aws || view.headers().contains_key(AUTHORIZATION_HEADER) {
             return detect_aws_credential_marker(view);
         }

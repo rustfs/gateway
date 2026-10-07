@@ -33,8 +33,13 @@
 //! (`rustfs/src/server/http.rs:166-173` on rustfs/rustfs `3268c42e00`). Observed against a legacy
 //! RustFS build: `PUT /rustfs/admin/v3/add-user` declaring 1 MiB + 1 byte and
 //! `GET /rustfs/admin/v3/info` declaring 2 MiB each answer that refusal with `Connection: close`;
-//! a body of exactly 1 MiB reaches the handler. The core bounds a claimed route's body by its
-//! body mode alone: a buffered one up to the assembly's buffered ceiling, an unread one not at all.
+//! a body of exactly 1 MiB reaches the handler. A request presenting no credential has no
+//! signature to verify, so legacy RustFS bounds it before its access check refuses an anonymous
+//! admin call: measured against frozen RustFS 5e1bd498 (rustfs/gateway#1173, 2026-10-05), an
+//! anonymous request declaring more than 1 MiB answers `400 EntityTooLarge` and one within it
+//! `403`, while a forged signature is `403` either way. The core bounds a claimed route's body by
+//! its body mode alone: a buffered one up to the assembly's buffered ceiling, an unread one not at
+//! all.
 
 use super::ServiceBuilder;
 
@@ -66,7 +71,9 @@ impl ServiceBuilder {
     /// Refuses a request to a claimed route whose `Content-Length` declares more than 1 MiB, as
     /// legacy RustFS refuses one to its admin surface: `400 EntityTooLarge` with legacy RustFS's
     /// sentence, once the signature has been verified and before authorization or any of the body
-    /// is read, whatever the route reads (rustfs/gateway#1173).
+    /// is read, whatever the route reads (rustfs/gateway#1173). A request presenting no credential
+    /// has no signature to verify and is refused before the floor's anonymous refusal; a presented
+    /// one, valid or forged, is still verified first.
     ///
     /// Off by default: the core bounds a claimed route's body by its body mode, as every
     /// operation's is. Unclaimed operations are unchanged, and a claimed route's body within the

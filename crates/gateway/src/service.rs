@@ -795,6 +795,16 @@ impl S3Service {
             return outcome.refuse(refusal);
         }
 
+        // Presenting nothing leaves no signature to verify first: legacy RustFS's claimed-route ceiling precedes the floor.
+        let claimed_ceiling = self.inner.view_policy.claimed_bodies.ceiling(claimed);
+        let presented = presence.any()
+            || self.inner.floor.credential_marker(&view).is_some()
+            || self.inner.floor.custom_schemes().matching(&view).is_some();
+        if let (false, RoutedBody::Ordinary(sealed)) = (presented, &routed_body)
+            && let Some(refusal) = sealed.past_claimed_ceiling(claimed_ceiling).await
+        {
+            return outcome.refuse(refusal);
+        }
         let chunk_sink = crate::ext::ChunkSink::new();
         // Kept out of the `match` so the read at the bottom can consult it. A custom admission has no
         // payload mode; an anonymous one has only the unsigned streaming mode its head declares.
@@ -959,12 +969,9 @@ impl S3Service {
             return outcome
                 .refuse_handler(HandlerError::internal_error("the request could not be shown to have been authenticated"));
         };
-        // A claimed route's declared body past the profile's ceiling is refused here: after the
-        // signature and before authorization, as legacy RustFS refuses one (`builder/claimed_bodies.rs`).
+        // A presented credential is verified before the claimed-route ceiling, which precedes authorization as in legacy RustFS.
         if let RoutedBody::Ordinary(sealed) = &routed_body
-            && let Some(refusal) = sealed
-                .past_claimed_ceiling(self.inner.view_policy.claimed_bodies.ceiling(claimed))
-                .await
+            && let Some(refusal) = sealed.past_claimed_ceiling(claimed_ceiling).await
         {
             return outcome.refuse(refusal);
         }
