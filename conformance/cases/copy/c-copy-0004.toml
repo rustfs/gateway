@@ -81,3 +81,46 @@ connection_after = "open"
 [exchanges.expect.body]
 contains_utf8 = ["<CopyObjectResult", "<ETag>"]
 not_contains_utf8 = ["<Code>NoSuchBucket</Code>"]
+
+[[exchanges]]
+name = "encoded-arn"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-copy/dst/0004-encoded-arn"
+headers = { "x-amz-copy-source" = "arn%3Aaws%3As3%3Aus-east-1%3A123456789012%3Aaccesspoint%2Fconf-copy%2Fobject%2Fsrc%2Fplain.txt" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+"content-type" = "application/xml"
+
+[exchanges.expect.body]
+contains_utf8 = ["<CopyObjectResult", "<ETag>"]
+not_contains_utf8 = ["<Code>NoSuchBucket</Code>"]
+
+
+[[exchanges]]
+name = "encoded-leading-slash-and-arn"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-copy/dst/0004-encoded-leading-slash-and-arn"
+headers = { "x-amz-copy-source" = "%2Farn%3Aaws%3As3%3Aus-east-1%3A123456789012%3Aaccesspoint%2Fconf-copy%2Fobject%2Fsrc%2Fplain.txt" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+"content-type" = "application/xml"
+
+[exchanges.expect.body]
+contains_utf8 = ["<CopyObjectResult", "<ETag>"]
+not_contains_utf8 = ["<Code>NoSuchBucket</Code>"]

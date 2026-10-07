@@ -18,7 +18,8 @@
 //! Responsible for: pinning, to legacy RustFS's answers on a legacy build, a source in a bucket
 //! the AWS rules reserve, a source key holding a `?`, and the version after the first
 //! `?versionId=`; the unchanged default path grammar; and one leading slash before either ARN
-//! form under both naming profiles, with the full source authorization identity preserved.
+//! form under both naming profiles; and encoded ARN structure with one key decode and the full
+//! source authorization identity preserved.
 //! NOT responsible for: the source key's floor (`copy_source_rustfs_tests.rs`) or the default
 //! grammar's own cases (`copy_source_tests.rs`).
 //! Upstream: `super`. Downstream: nothing.
@@ -359,6 +360,186 @@ fn n_arn_leading_slash_cannot_skip_source_denial() {
                 .expect("source denied");
                 assert_eq!(reads, 1);
                 assert_eq!(error.decision(), Decision::Deny);
+            }
+        }
+    }
+}
+
+fn encoded_arn_spellings(raw: &str) -> [String; 4] {
+    [
+        raw.replace(':', "%3A"),
+        raw.replace(':', "%3a").replace('/', "%2f"),
+        format!("/{}", raw.replace(':', "%3A").replace('/', "%2F")),
+        format!("%2f{}", raw.replace(':', "%3a").replace('/', "%2F")),
+    ]
+}
+
+#[test]
+fn encoded_arn_structure_keeps_one_key_decode_and_the_full_source() {
+    use rustfs_gateway_types::dto::{UploadPartCopy, UploadPartCopyInput};
+
+    for names in [NamePolicy::default(), rustfs()] {
+        for raw in arn_account_sources("012345678901") {
+            let raw = raw.replace("/object/key", "/object/literal%252Fkey");
+            let bare = CopySource::parse_under(&raw, &names).expect("bare ARN");
+            let (form, identity) = if raw.contains(":s3-outposts:") {
+                (
+                    CopySourceForm::OutpostsArn,
+                    crate::ResourceIdentity::Outposts {
+                        partition: "aws".to_owned(),
+                        region: "us-east-1".to_owned(),
+                        account: "012345678901".to_owned(),
+                        outpost_id: "op-1".to_owned(),
+                    },
+                )
+            } else {
+                (
+                    CopySourceForm::AccessPointArn,
+                    crate::ResourceIdentity::AccessPoint {
+                        partition: "aws".to_owned(),
+                        region: "us-east-1".to_owned(),
+                        account: "012345678901".to_owned(),
+                        name: "my-ap".to_owned(),
+                    },
+                )
+            };
+            for encoded in encoded_arn_spellings(&raw) {
+                for suffix in ["", "?versionId=v%252F1"] {
+                    let wire = format!("{encoded}{suffix}");
+                    let parsed = CopySource::parse_under(&wire, &names).expect("encoded ARN");
+                    assert_eq!(parsed.resource.identity, bare.resource.identity);
+                    assert_eq!(parsed.resource.form, form);
+                    assert_eq!(parsed.resource.identity, identity);
+                    assert_eq!(parsed.resource.bucket, bare.resource.bucket);
+                    assert_eq!(parsed.resource.key.as_str(), "literal%2Fkey");
+                    assert_eq!(parsed.resource.version_id.as_deref(), (!suffix.is_empty()).then_some("v%2F1"));
+                    assert_eq!(source(&wire, &names), source(&format!("{raw}{suffix}"), &names));
+                    let input = UploadPartCopyInput {
+                        copy_source: wire,
+                        ..Default::default()
+                    };
+                    let authorized =
+                        authorize_input(prepare_input_under::<UploadPartCopy>(input, &names).expect("part source"), |_| {
+                            Decision::Allow
+                        })
+                        .expect("authorized part source");
+                    let resolved = authorized
+                        .resources()
+                        .source()
+                        .resolve(authorized.read_proof())
+                        .expect("proof");
+                    assert_eq!(resolved.resource, parsed.resource);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn n_encoded_arns_keep_malformed_identities_and_multiple_slashes_refused() {
+    for names in [NamePolicy::default(), rustfs()] {
+        for raw in [
+            "arn:aws:s3:us-east-1:12345:accesspoint/source/object/key",
+            "arn:aws:s3:us-east-1:12345678901x:accesspoint/source/object/key",
+            "arn:aws:iam:us-east-1:123456789012:user/name",
+            "arn:aws:s3:us-east-1:123456789012:accesspoint/source/object/",
+            "arn:aws:s3-outposts:us-east-1:123456789012:outpost/op-1/object/key",
+            "arn:aws:s3:us-east-1:123456789012:accesspoint/source/object/%FF",
+            "//arn:aws:s3:us-east-1:123456789012:accesspoint/source/object/key",
+        ] {
+            for encoded in encoded_arn_spellings(raw) {
+                assert_eq!(source(&encoded, &names), Err(ErrorCode::INVALID_ARGUMENT));
+            }
+        }
+        let twice = "arn%253Aaws%253As3%253Aus-east-1%253A123456789012%253Aaccesspoint/source/object/key";
+        assert_eq!(source(twice, &names), Err(ErrorCode::INVALID_ARGUMENT));
+    }
+}
+
+#[test]
+fn n_encoded_arn_key_does_not_create_a_version_suffix_after_decoding() {
+    for names in [NamePolicy::default(), rustfs()] {
+        for raw in arn_account_sources("123456789012") {
+            let raw = raw.replace("/object/key", "/object/key%3FversionId%3Dinside");
+            for encoded in encoded_arn_spellings(&raw) {
+                let parsed = CopySource::parse_under(&encoded, &names).expect("encoded question mark in key");
+                assert_eq!(parsed.resource.key.as_str(), "key?versionId=inside");
+                assert_eq!(parsed.resource.version_id, None);
+                let versioned = CopySource::parse_under(&format!("{encoded}?versionId=outside"), &names).expect("version");
+                assert_eq!(versioned.resource.key.as_str(), "key?versionId=inside");
+                assert_eq!(versioned.resource.version_id.as_deref(), Some("outside"));
+            }
+        }
+    }
+}
+
+#[test]
+fn n_encoded_arn_cannot_use_a_different_source_proof() {
+    for names in [NamePolicy::default(), rustfs()] {
+        for raw in arn_account_sources("123456789012") {
+            let source_arn = CopySource::parse_under(&raw, &names).expect("source");
+            for other in [
+                format!("{}/key", source_arn.resource.bucket.as_str()),
+                raw.replace("123456789012", "012345678901"),
+                format!("{raw}?versionId=v1"),
+            ] {
+                let input = CopyObjectInput {
+                    copy_source: other,
+                    ..Default::default()
+                };
+                let authorized =
+                    authorize_input(prepare_input_under::<CopyObject>(input, &names).expect("other"), |_| Decision::Allow)
+                        .expect("other proof");
+                for encoded in encoded_arn_spellings(&raw) {
+                    let input = CopyObjectInput {
+                        copy_source: encoded,
+                        ..Default::default()
+                    };
+                    let decoded = prepare_input_under::<CopyObject>(input, &names).expect("encoded source");
+                    assert!(decoded.resources().source().resolve(authorized.read_proof()).is_none());
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn n_encoded_arn_source_denial_cannot_be_skipped() {
+    for names in [NamePolicy::default(), rustfs()] {
+        for raw in arn_account_sources("123456789012") {
+            for encoded in encoded_arn_spellings(&raw) {
+                for suffix in ["", "?versionId=v1"] {
+                    let input = CopyObjectInput {
+                        copy_source: format!("{encoded}{suffix}"),
+                        ..Default::default()
+                    };
+                    let decoded = prepare_input_under::<CopyObject>(input, &names).expect("encoded source");
+                    let mut reads = 0;
+                    let error = authorize_input(decoded, |resource| {
+                        if resource.action() == "s3:GetObject" || resource.action() == "s3:GetObjectVersion" {
+                            reads += 1;
+                            Decision::Deny
+                        } else {
+                            Decision::Allow
+                        }
+                    })
+                    .err()
+                    .expect("source denied");
+                    assert_eq!(reads, 1);
+                    assert_eq!(error.decision(), Decision::Deny);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn n_encoded_arn_cannot_bypass_the_default_key_floor() {
+    for raw in arn_account_sources("123456789012") {
+        for key in ["%00", "%252e%252e/escape", "%5Cescape"] {
+            let raw = raw.replace("/object/key", &format!("/object/{key}"));
+            for encoded in encoded_arn_spellings(&raw) {
+                assert_eq!(source(&encoded, &NamePolicy::default()), Err(ErrorCode::INVALID_ARGUMENT));
             }
         }
     }
