@@ -8827,17 +8827,30 @@ mut_strip_header() {
 expect_fail check_license_headers.sh \
     'a Rust file with the licence header removed' mut_strip_header
 
+probe_license_scan_batching() {
+    local output rc=0
+    cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
+    output="$(python3 "${SCRIPT_DIR}/test_license_scan_batching.py" 2>&1)" || rc=$?
+    if [[ "$rc" -eq 0 ]]; then
+        pass_msg 'license scans preserve their scope without per-file scanner processes'
+    else
+        fail_msg 'license scan batching or refusal controls failed'
+        printf '%s\n' "$output" >&2
+    fi
+}
+probe_license_scan_batching
+
 mut_restore_license_grep_q_pipeline() {
     python3 - <<'PY'
 from pathlib import Path
 
 path = Path("scripts/check_license_headers.sh")
-text = path.read_text().replace(
-    'head -n "$HEADER_WINDOW" "$file" | grep -F "$HEADER_MARKER" >/dev/null',
-    'head -n "$HEADER_WINDOW" "$file" | grep -qF "$HEADER_MARKER"',
-    1,
-)
-path.write_text(text)
+text = path.read_text()
+anchor = "status=0\n"
+if text.count(anchor) != 1:
+    raise SystemExit("license guard shell anchor is not unique")
+path.write_text(text.replace(anchor, anchor + 'head -n "$HEADER_WINDOW" "$0" | grep -qF "$HEADER_MARKER"\n', 1))
 PY
 }
 expect_fail check_guard_grep_pipelines.sh \
@@ -8864,12 +8877,11 @@ mut_restore_multiline_combined_grep_q_pipeline() {
 from pathlib import Path
 
 path = Path("scripts/check_license_headers.sh")
-text = path.read_text().replace(
-    'head -n "$HEADER_WINDOW" "$file" | grep -F "$HEADER_MARKER" >/dev/null',
-    'head -n "$HEADER_WINDOW" "$file" |\n        grep -Fqi "$HEADER_MARKER"',
-    1,
-)
-path.write_text(text)
+text = path.read_text()
+anchor = "status=0\n"
+if text.count(anchor) != 1:
+    raise SystemExit("license guard shell anchor is not unique")
+path.write_text(text.replace(anchor, anchor + 'head -n "$HEADER_WINDOW" "$0" |\n        grep -Fqi "$HEADER_MARKER"\n', 1))
 PY
 }
 expect_fail check_guard_grep_pipelines.sh \
@@ -8897,8 +8909,8 @@ from pathlib import Path
 
 path = Path("scripts/check_license_headers.sh")
 text = path.read_text().replace(
-    'checked=0',
-    'status="$(head -n 1 "$0" | grep -qF marker)"\nchecked=0',
+    'status=0',
+    'status="$(head -n 1 "$0" | grep -qF marker)"\nstatus=0',
     1,
 )
 path.write_text(text)
@@ -8929,8 +8941,8 @@ from pathlib import Path
 
 path = Path("scripts/check_license_headers.sh")
 text = path.read_text().replace(
-    'checked=0',
-    'grep -eq pattern input\nchecked=0',
+    'status=0',
+    'grep -eq pattern input\nstatus=0',
     1,
 )
 path.write_text(text)
@@ -8945,8 +8957,8 @@ from pathlib import Path
 
 path = Path("scripts/check_license_headers.sh")
 text = path.read_text().replace(
-    'checked=0',
-    'grep \\\n+    -eq pattern input\nchecked=0',
+    'status=0',
+    'grep \\\n+    -eq pattern input\nstatus=0',
     1,
 )
 path.write_text(text)
