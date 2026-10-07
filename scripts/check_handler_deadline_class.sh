@@ -486,14 +486,18 @@ for path in sorted((root / "crates").rglob("*.rs")):
 # Standard for the same reason.
 # explicit=46: the two generated authenticated admin fallbacks each declare Standard directly
 # (rustfs/gateway#1189), outside the inventory-only admin-operation fold.
-if central_builders != 102 or explicit_builders != 46:
+# explicit=48: ADR-0041's form-claim fixtures, each stating Standard for the same reason as the
+# vendor fixtures above: the `acme:*Token` family's one `const fn spec` in
+# crates/core/tests/dialect_form_claims.rs, and `acme:Token` in crates/gateway/src/dialect_posture.rs
+# (rustfs/gateway#1232). The generated STS operation builds its spec through the admin `spec`.
+if central_builders != 102 or explicit_builders != 48:
     fail(
         "repository builder census drifted: "
-        f"central={central_builders} explicit={explicit_builders}, expected central=102 explicit=46"
+        f"central={central_builders} explicit={explicit_builders}, expected central=102 explicit=48"
     )
 
 print(
-    "check_handler_deadline_class: 153 repository builder sites are inventoried "
-    "(148 classified: 102 central standard, 46 explicit; 5 authority tests)"
+    "check_handler_deadline_class: 155 repository builder sites are inventoried "
+    "(150 classified: 102 central standard, 48 explicit; 5 authority tests)"
 )
 PY

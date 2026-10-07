@@ -29,7 +29,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use rustfs_gateway_core::SubjectRule;
-use rustfs_gateway_dialect_rustfs_admin::{BodyKind, PENDING, ROUTES, RouteRecord, STAYING};
+use rustfs_gateway_dialect_rustfs_admin::{BodyKind, FORM_ROUTES, PENDING, ROUTES, RouteRecord, STAYING};
 
 use super::{
     Exchange, actions, assemble, assemble_on, declared, expected_bucket, expected_subject, expected_subjects, in_lanes,
@@ -89,8 +89,9 @@ fn parameters() -> impl Iterator<Item = (&'static RouteRecord, &'static str, usi
 /// Positive — every route of a migrated group is declared as its inventory row records it:
 /// group, alias, handler, body kinds, secret, and the recorded action or ADR-0025's ruling of its
 /// custom class; a `/iceberg/v1` compat row is the alias of its `/_iceberg/v1` route and no
-/// operation of its own (ADR-0031 (b)); and every declared operation is bound to exactly one
-/// canonical inventory route.
+/// operation of its own (ADR-0031 (b)); the STS endpoint is the form-claimed operation its record
+/// names, anonymous as the inventory records it (ADR-0041); and every declared operation is bound
+/// to exactly one canonical inventory route.
 #[test]
 fn every_migrated_route_is_declared_as_the_inventory_records_it() {
     let inventory = rustfs_admin_route_inventory().expect("the recorded inventory validates");
@@ -102,6 +103,7 @@ fn every_migrated_route_is_declared_as_the_inventory_records_it() {
     let mut canonical = 0;
     let mut compat = 0;
     let mut staying = 0;
+    let mut formed = 0;
     for route in inventory
         .routes()
         .iter()
@@ -120,6 +122,28 @@ fn every_migrated_route_is_declared_as_the_inventory_records_it() {
                 "{at}: a staying route is declared"
             );
             staying += 1;
+            continue;
+        }
+        if let Some(record) = FORM_ROUTES
+            .iter()
+            .find(|record| record.method == route.method.as_str() && record.path == route.path)
+        {
+            // Served behind its form claim (ADR-0041), and no path-claimed operation.
+            assert!(
+                !ROUTES
+                    .iter()
+                    .any(|declared| declared.method == route.method.as_str() && declared.path == route.path),
+                "{at}: a form-claimed route is also path-claimed"
+            );
+            assert_eq!(record.group, route.group, "{at}");
+            assert_eq!(record.rustfs_handler, route.handler, "{at}");
+            assert_eq!(record.request_body, request_kind(route.request_body), "{at}");
+            assert_eq!(record.response_body, response_kind(route.response_body), "{at}");
+            assert!(!route.caller_secret_body.needs_caller_secret(), "{at}");
+            assert!(matches!(route.auth_mode, AdminAuthMode::Anonymous), "{at}");
+            assert_eq!(route.auth_detail.as_deref(), Some("StsFormPost"), "{at}");
+            assert!(record.action.starts_with("rustfs:"), "{at}: {}", record.action);
+            formed += 1;
             continue;
         }
         if route.path.starts_with("/iceberg/v1/") {
@@ -175,7 +199,8 @@ fn every_migrated_route_is_declared_as_the_inventory_records_it() {
     }
     assert_eq!(canonical, ROUTES.len(), "a declared operation has no inventory route");
     assert_eq!(compat, 50, "every table-catalog route has its compat row");
-    assert_eq!((staying, STAYING.len()), (7, 7), "every staying route is an inventory route");
+    assert_eq!((staying, STAYING.len()), (6, 6), "every staying route is an inventory route");
+    assert_eq!((formed, FORM_ROUTES.len()), (1, 1), "every form-claimed route is an inventory route");
 }
 
 /// Positive — the pending groups are exactly the inventory's other groups, each with its
@@ -210,7 +235,10 @@ fn the_pending_groups_are_the_rest_of_the_inventory() {
         })
         .collect();
     let pending_routes: usize = PENDING.iter().map(|pending| usize::from(pending.routes)).sum();
-    assert_eq!(declared_routes.len() + pending_routes + STAYING.len(), inventory.routes().len());
+    assert_eq!(
+        declared_routes.len() + pending_routes + STAYING.len() + FORM_ROUTES.len(),
+        inventory.routes().len()
+    );
 }
 
 // ── every row through the assembled service ─────────────────────────────────────────────────

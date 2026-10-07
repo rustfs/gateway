@@ -471,7 +471,8 @@ fn n_an_anonymous_operation_is_the_inventorys_and_the_rulings_together() {
 
 /// Positive and negative — a route listed as staying with RustFS is declared as no operation and
 /// recorded with its group and reason; a listed route the fully migrated inventory does not record
-/// is refused; and the recorded plan keeps exactly seven routes with RustFS (ADR-0032 (b)).
+/// is refused; and the recorded plan keeps exactly six routes with RustFS (ADR-0032 (b)), the STS
+/// endpoint having moved behind its form claim (ADR-0041).
 #[test]
 fn n_a_staying_route_is_recorded_and_never_declared() {
     let stays: &[(&str, &str, &'static str)] = &[("GET", "/health", "the probe layer (ADR-0026 (h))")];
@@ -483,7 +484,7 @@ fn n_a_staying_route_is_recorded_and_never_declared() {
     };
     let mut fixture = routes();
     fixture[1].minio_admin_alias = false;
-    let plan = super::plan(&inventory(fixture), &[], &[], stays).expect("the staying route plans");
+    let plan = super::plan(&inventory(fixture), &[], &[], stays, &[]).expect("the staying route plans");
     assert_eq!(plan.declared.len(), 1);
     assert_eq!(
         (plan.declared[0].name.as_str(), plan.declared[0].alias.as_deref()),
@@ -501,7 +502,7 @@ fn n_a_staying_route_is_recorded_and_never_declared() {
     let mut only_profile = routes();
     only_profile.remove(0);
     only_profile[0].minio_admin_alias = false;
-    let stale = super::plan(&inventory(only_profile), &[], &[], stays)
+    let stale = super::plan(&inventory(only_profile), &[], &[], stays, &[])
         .err()
         .expect("a stale staying route");
     assert!(stale.contains("the staying route GET /health is not in the inventory"), "{stale}");
@@ -520,7 +521,6 @@ fn n_a_staying_route_is_recorded_and_never_declared() {
             ("GET", "/rustfs/admin/v3/object-zip-downloads/{id}.zip"),
             ("HEAD", "/health"),
             ("HEAD", "/health/ready"),
-            ("POST", "/"),
             ("POST", "/rustfs/admin/v3/object-zip-downloads"),
         ]
     );

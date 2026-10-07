@@ -114,18 +114,31 @@ impl Identification {
         let host = request.extensions().get::<HostRequestId>();
         let answer = match self {
             Self::Aws => Answer::Aws,
-            Self::LegacyRustfs if claimed(request.uri().path(), router) => Answer::HostWritten,
+            Self::LegacyRustfs if claimed(request, router) => Answer::HostWritten,
             Self::LegacyRustfs => Answer::LegacyRustfs,
         };
         minted.identified(host, answer)
     }
 }
 
-/// Whether `path` is one of the router's claimed prefixes or continues one with `/`: the claim's own
-/// test, which is RustFS's (`has_path_prefix`, rustfs/rustfs `e870a6d25b`,
-/// `rustfs/src/server/prefix.rs:75-77`), asked of the path alone.
-fn claimed(path: &str, router: &Router) -> bool {
+/// Whether the request's path is one of the router's claimed prefixes or continues one with `/`:
+/// the claim's own test, which is RustFS's (`has_path_prefix`, rustfs/rustfs `e870a6d25b`,
+/// `rustfs/src/server/prefix.rs:75-77`), asked of the path alone; or whether a form claim covers
+/// it (ADR-0041). RustFS writes its own identifier on an STS answer (`StsQueryApiCompatLayer`, and
+/// `uses_server_owned_s3_request_id` excludes it, rustfs/rustfs `95268a3b9`,
+/// `rustfs/src/server/layer.rs:172-179`).
+fn claimed<B>(request: &http::Request<B>, router: &Router) -> bool {
+    let path = request.uri().path();
+    let content_type = request
+        .headers()
+        .get(http::header::CONTENT_TYPE)
+        .map(http::HeaderValue::as_bytes);
     router.claims().claims().iter().any(|installed| installed.claim.covers(path))
+        || router
+            .claims()
+            .forms()
+            .iter()
+            .any(|installed| installed.claim().covers_head(request.method(), path, content_type))
 }
 
 #[cfg(test)]

@@ -24,7 +24,7 @@ use std::fmt;
 
 use crate::op::ResourceShape;
 use crate::registry::RegistryError;
-use crate::route::{ClaimRejection, HostClass, TemplateRejection};
+use crate::route::{ClaimRejection, FormClaimRejection, HostClass, TemplateRejection};
 
 /// Why a dialect could not be assembled. Every variant is a start-up failure.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -235,6 +235,20 @@ pub enum DialectError {
         /// Why.
         why: &'static str,
     },
+    /// A form claim that breaks the form-claim grammar (ADR-0041).
+    RefusedFormClaim {
+        /// The operation behind it.
+        name: &'static str,
+        /// The rule it breaks.
+        rejection: FormClaimRejection,
+    },
+    /// Two operations of one dialect behind form claims that could cover one request.
+    OverlappingFormClaims {
+        /// The later operation.
+        name: &'static str,
+        /// The operation declared first.
+        earlier: &'static str,
+    },
 }
 
 impl DialectError {
@@ -264,7 +278,9 @@ impl DialectError {
             | Self::ClaimedRowSelector { name, .. }
             | Self::DuplicateClaimedRow { name, .. }
             | Self::ClaimedOperationNamesAResource { name, .. }
-            | Self::ClaimedBucketParam { name, .. } => Some(name),
+            | Self::ClaimedBucketParam { name, .. }
+            | Self::RefusedFormClaim { name, .. }
+            | Self::OverlappingFormClaims { name, .. } => Some(name),
             Self::ForeignShadowing { .. }
             | Self::RefusedClaim { .. }
             | Self::OverlappingClaims { .. }
@@ -389,6 +405,11 @@ impl fmt::Display for DialectError {
             Self::ClaimedBucketParam { name, param, why } => {
                 write!(f, "{name} binds the template parameter {param:?} as its bucket, which is refused: {why}")
             }
+            Self::RefusedFormClaim { name, rejection } => write!(f, "the form claim of {name} is refused: {rejection}"),
+            Self::OverlappingFormClaims { name, earlier } => write!(
+                f,
+                "the form claims of {earlier} and {name} could both cover one request; one request has one owner"
+            ),
         }
     }
 }

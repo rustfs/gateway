@@ -14,9 +14,9 @@
 
 //! The `rustfs` dialect: its claims, its reviewed record, and its assembly.
 //!
-//! Responsible for: [`CLAIMS`], the two path prefixes RustFS's admin router answers ahead of its
-//! S3 service; [`OVERLAY`], the record of every generated operation; and [`rustfs_admin_dialect`],
-//! which declares each against it.
+//! Responsible for: [`CLAIMS`], the path prefixes RustFS's admin router answers ahead of its S3
+//! service; [`OVERLAY`], the record of every generated operation; and [`rustfs_admin_dialect`],
+//! which declares each against it, the STS endpoint behind its own form claim (ADR-0041).
 //! NOT responsible for: the operations or their record rows (generated: [`crate::ops`] and
 //! `crate::table`), or registering handlers (the deployment).
 //! Upstream: `rustfs-gateway-core`'s dialect mechanism and the generated table. Downstream: a
@@ -33,7 +33,7 @@ use rustfs_gateway_core::dialect::{ClaimedRoute, Dialect, DialectBuilder, Dialec
 use rustfs_gateway_core::route::PathClaim;
 
 use crate::admin::{AdminOperation, OperationFold};
-use crate::ops::{admin_fallback, admin_v4_fallback};
+use crate::ops::{admin_fallback, admin_v4_fallback, sts_form_post};
 use crate::table::{OVERLAY_ROWS, fold_every_operation};
 
 /// The RustFS router that answers the admin prefixes ahead of its S3 service, at the commit the
@@ -109,7 +109,8 @@ impl OperationFold for Declare {
     }
 }
 
-/// The `rustfs` dialect: both claims, and every generated operation declared against [`OVERLAY`].
+/// The `rustfs` dialect: its claims, every generated operation declared against [`OVERLAY`], and
+/// RustFS's STS endpoint behind its form claim (ADR-0041).
 ///
 /// Installing it is the deployment's choice (`ServiceBuilder::dialect`), and so is each handler;
 /// an operation installed without one answers `501`.
@@ -122,5 +123,6 @@ pub fn rustfs_admin_dialect() -> Result<Dialect, Vec<DialectError>> {
     fold_every_operation(&mut Declare, Dialect::assemble(&OVERLAY))
         .declare_claimed::<admin_v4_fallback::AdminV4Fallback>(admin_v4_fallback::ROUTE)
         .declare_claimed::<admin_fallback::AdminFallback>(admin_fallback::ROUTE)
+        .declare_form::<sts_form_post::StsFormPost>(sts_form_post::ROUTE)
         .build()
 }

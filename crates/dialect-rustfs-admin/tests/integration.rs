@@ -44,6 +44,9 @@ use rustfs_gateway_http::{Limits, WireRequest};
 #[path = "integration/census.rs"]
 mod census;
 
+#[path = "integration/sts_form.rs"]
+mod sts_form;
+
 const HOST: &str = "s3.example.com";
 const METHODS: &[&str] = &[
     "GET", "HEAD", "PUT", "POST", "DELETE", "PATCH", "OPTIONS", "TRACE", "FROB", "CONNECT", "get",

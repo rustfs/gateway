@@ -22,7 +22,8 @@
 //! templates and the listed query parameters (`template.rs`), and ADR-0031's surfaces (the table
 //! catalog's `/_iceberg/v1` with its `/iceberg/v1` compat rows as aliases), refusing any route it has no rule for and any rule
 //! outside those ADRs' shapes, and writing one operation module per declared operation, the
-//! module list and the dialect's table files, plus ADR-0039's two fixed fallback operations, each through rustfmt.
+//! module list and the dialect's table files, plus ADR-0039's two fixed fallback operations and ADR-0041's
+//! form-claimed STS operation (`form.rs`), each through rustfmt.
 //! `--check` compares instead, and fails on a stale, missing or extra file.
 //! NOT responsible for: validating the inventory (goldens' strict reader does, and binds the
 //! generated operations back to it), the claims or the shared shapes
@@ -38,12 +39,13 @@ use serde::Deserialize;
 
 use self::render::{render_mod, render_operation, render_tables};
 use self::rule::{Rule, is_parameter};
-use self::rulings::{QUERY_BUCKETS, RULINGS, Ruling, STAYS};
+use self::rulings::{FORMS, QUERY_BUCKETS, RULINGS, Ruling, STAYS};
 use self::template::{Shadow, Template, shadowing, snake, template_params, type_name};
 
 use crate::repo_root::repo_root;
 
 mod fallback;
+mod form;
 mod render;
 mod rule;
 mod rulings;
@@ -249,6 +251,8 @@ struct Plan {
     pending: Vec<(String, u8, usize)>,
     /// The routes that stay with RustFS: `(method, path, group, reason)` (ADR-0032 (b)).
     staying: Vec<(String, String, String, &'static str)>,
+    /// The routes served behind a form claim (ADR-0041).
+    forms: Vec<form::Formed>,
 }
 
 fn body_kind(recorded: &str, route: &Route) -> Result<&'static str, String> {
@@ -342,8 +346,9 @@ fn plan(
     rulings: &[Ruling],
     query_buckets: &[(&str, &str, &'static str)],
     stays: &[(&str, &str, &'static str)],
+    form_routes: &[(&str, &str, &str)],
 ) -> Result<Plan, String> {
-    plan_through(MIGRATED_THROUGH, inventory, rulings, query_buckets, stays)
+    plan_through(MIGRATED_THROUGH, inventory, rulings, query_buckets, stays, form_routes)
 }
 
 /// [`plan`] with the groups up to `through` migrated and the later ones pending. Every group of
@@ -355,6 +360,7 @@ fn plan_through(
     rulings: &[Ruling],
     query_buckets: &[(&str, &str, &'static str)],
     stays: &[(&str, &str, &'static str)],
+    form_routes: &[(&str, &str, &str)],
 ) -> Result<Plan, String> {
     if inventory.format != FORMAT {
         return Err(format!("the inventory is {:?}, not {FORMAT:?}", inventory.format));
@@ -367,11 +373,21 @@ fn plan_through(
     let mut twins_used = BTreeSet::new();
     let mut staying = Vec::new();
     let mut stays_used = BTreeSet::new();
+    let mut formed = Vec::new();
+    let mut forms_used = BTreeSet::new();
     for route in &inventory.routes {
         let at = format!("{} {}", route.method, route.path);
         let order = order_of(&route.group).ok_or_else(|| format!("{at}: group {:?} has no place in the plan", route.group))?;
         if order > through {
             pending.entry(route.group.clone()).or_insert((order, 0)).1 += 1;
+            continue;
+        }
+        if let Some(index) = form_routes
+            .iter()
+            .position(|(method, path, _)| *method == route.method && *path == route.path)
+        {
+            forms_used.insert(index);
+            formed.push(form::Formed::of(route, form_routes[index].2, &at, &inventory.source.commit)?);
             continue;
         }
         if let Some(index) = stays
@@ -483,6 +499,15 @@ fn plan_through(
     {
         return Err(format!("the staying route {} {} is not in the inventory", stays[stale].0, stays[stale].1));
     }
+    // A form route the inventory no longer records is refused on the same terms.
+    if pending.is_empty()
+        && let Some(stale) = (0..form_routes.len()).find(|index| !forms_used.contains(index))
+    {
+        return Err(format!(
+            "the form route {} {} is not in the inventory",
+            form_routes[stale].0, form_routes[stale].1
+        ));
+    }
     if let Some(stale) = (0..rulings.len()).find(|index| !used.contains(index)) {
         return Err(format!(
             "the ruling for {} {} names no custom-auth route of a migrated group",
@@ -499,6 +524,7 @@ fn plan_through(
     }
     Ok(Plan {
         staying,
+        forms: formed,
         declared,
         pending: pending
             .into_iter()
@@ -560,7 +586,7 @@ fn format_all(root: &Path, files: BTreeMap<PathBuf, String>) -> Result<BTreeMap<
 fn generate(root: &Path) -> Result<BTreeMap<PathBuf, String>, String> {
     let recorded = std::fs::read_to_string(root.join(INVENTORY)).map_err(|error| format!("cannot read {INVENTORY}: {error}"))?;
     let inventory: Inventory = serde_json::from_str(&recorded).map_err(|error| format!("cannot parse {INVENTORY}: {error}"))?;
-    let plan = plan(&inventory, RULINGS, QUERY_BUCKETS, STAYS)?;
+    let plan = plan(&inventory, RULINGS, QUERY_BUCKETS, STAYS, FORMS)?;
     let output = Path::new(OUTPUT);
     let mut files = BTreeMap::new();
     for declared in &plan.declared {
@@ -568,6 +594,9 @@ fn generate(root: &Path) -> Result<BTreeMap<PathBuf, String>, String> {
     }
     for fallback in fallback::FALLBACKS {
         files.insert(output.join("ops").join(format!("{}.rs", fallback.stem)), fallback.render(render::LICENSE));
+    }
+    for formed in &plan.forms {
+        files.insert(output.join("ops").join(format!("{}.rs", form::STEM)), formed.render(render::LICENSE));
     }
     files.insert(output.join("ops/mod.rs"), render_mod(&plan));
     for (path, source) in render_tables(&plan, &inventory.source.commit) {
@@ -657,6 +686,9 @@ pub(crate) fn command(args: &[String]) -> ExitCode {
 #[cfg(test)]
 #[path = "rustfs_admin_dialect/bucket_tests.rs"]
 mod bucket_tests;
+#[cfg(test)]
+#[path = "rustfs_admin_dialect/form_tests.rs"]
+mod form_tests;
 #[cfg(test)]
 #[path = "rustfs_admin_dialect/tests.rs"]
 mod tests;

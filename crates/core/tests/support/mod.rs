@@ -140,6 +140,20 @@ impl Req {
         self
     }
 
+    /// Appends a header whose value is raw bytes, which need not be text.
+    ///
+    /// # Panics
+    ///
+    /// On a header value `http` refuses.
+    #[must_use]
+    pub fn header_bytes(mut self, name: &'static str, value: &[u8]) -> Self {
+        self.headers.append(
+            HeaderName::from_static(name),
+            HeaderValue::from_bytes(value).expect("fixture header bytes"),
+        );
+        self
+    }
+
     /// The borrowed view the router matches against.
     #[must_use]
     pub fn parts(&self) -> RouteRequestParts<'_> {

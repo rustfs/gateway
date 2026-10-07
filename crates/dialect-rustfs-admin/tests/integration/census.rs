@@ -22,7 +22,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use rustfs_gateway_core::dialect::BucketParam;
-use rustfs_gateway_dialect_rustfs_admin::{PENDING, ROUTES, RouteRecord, STAYING};
+use rustfs_gateway_dialect_rustfs_admin::{FORM_ROUTES, PENDING, ROUTES, RouteRecord, STAYING};
 
 use super::{HandlerDeadlineClass, OVERLAY, Predicate, ResourceShape, declared, dialect, param, templates};
 
@@ -93,10 +93,11 @@ fn exactly_the_bucket_and_warehouse_routes_bind_their_bucket() {
 }
 
 /// Positive — every order of ADR-0024's plan is declared, each inventory route once (the service
-/// command as its four forms; the table catalog's compat rows as aliases), no group is pending, and
-/// exactly seven routes stay with RustFS, each with its recorded reason (ADR-0032).
+/// command as its four forms; the table catalog's compat rows as aliases), no group is pending,
+/// exactly six routes stay with RustFS, each with its recorded reason (ADR-0032), and the STS
+/// endpoint ADR-0032 (b) left with RustFS is served behind its form claim (ADR-0041).
 #[test]
-fn every_order_is_declared_and_seven_routes_stay_with_rustfs() {
+fn every_order_is_declared_and_six_routes_stay_with_rustfs() {
     let order_seven = ["oidc", "sts"];
     let order_five = [
         "durability_handler",
@@ -181,7 +182,8 @@ fn every_order_is_declared_and_seven_routes_stay_with_rustfs() {
     assert_eq!(ROUTES.len(), 312);
     assert!(PENDING.is_empty(), "{PENDING:?}");
     // 259 admin and profiling routes declared, the 100 table-catalog routes as 50 operations with
-    // 50 alias rows, and seven routes that stay with RustFS: the whole inventory (ADR-0032).
+    // 50 alias rows, six routes that stay with RustFS (ADR-0032) and the form-claimed STS endpoint
+    // (ADR-0041): the whole inventory.
     let staying: Vec<(&str, &str, &str)> = STAYING.iter().map(|route| (route.group, route.method, route.path)).collect();
     assert_eq!(
         staying,
@@ -191,7 +193,6 @@ fn every_order_is_declared_and_seven_routes_stay_with_rustfs() {
             ("object_zip_download", "GET", "/rustfs/admin/v3/object-zip-downloads/{id}.zip"),
             ("health", "HEAD", "/health"),
             ("health", "HEAD", "/health/ready"),
-            ("sts", "POST", "/"),
             ("object_zip_download", "POST", "/rustfs/admin/v3/object-zip-downloads"),
         ]
     );
@@ -201,8 +202,13 @@ fn every_order_is_declared_and_seven_routes_stay_with_rustfs() {
             .iter()
             .any(|record| record.method == route.method && record.path == route.path)
     }));
+    let formed: Vec<(&str, &str, &str)> = FORM_ROUTES
+        .iter()
+        .map(|route| (route.group, route.method, route.path))
+        .collect();
+    assert_eq!(formed, [("sts", "POST", "/")]);
     let declared: usize = by_group.values().map(BTreeSet::len).sum();
-    assert_eq!(declared + 50 + STAYING.len(), 366);
+    assert_eq!(declared + 50 + STAYING.len() + FORM_ROUTES.len(), 366);
 }
 
 /// Positive and negative — names are unique, precedences strictly increase, and the overlay
@@ -218,7 +224,11 @@ fn names_and_precedences_are_unique_and_the_overlay_is_complete() {
         .iter()
         .map(|operation| (operation.name, operation.precedence))
         .collect();
-    declared.extend([("rustfs:AdminV4Fallback", u16::MAX - 1), ("rustfs:AdminFallback", u16::MAX)]);
+    declared.extend([
+        ("rustfs:AdminV4Fallback", u16::MAX - 1),
+        ("rustfs:AdminFallback", u16::MAX),
+        ("rustfs:StsFormPost", 99),
+    ]);
     assert_eq!(recorded, declared);
     assert!(OVERLAY.operations.iter().all(|row| !row.evidence.is_empty()));
 }

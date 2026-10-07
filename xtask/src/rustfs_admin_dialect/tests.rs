@@ -27,7 +27,7 @@
 
 use super::rulings::{About, Absent, Form, Ruled};
 use super::{
-    FIRST_PRECEDENCE, FORMAT, INVENTORY, Inventory, Plan, QUERY_BUCKETS, RULINGS, Route, Ruling, STAYS, SURFACES, Source,
+    FIRST_PRECEDENCE, FORMAT, FORMS, INVENTORY, Inventory, Plan, QUERY_BUCKETS, RULINGS, Route, Ruling, STAYS, SURFACES, Source,
     Surface, drift, generate, plan, repo_root, snake, type_name,
 };
 
@@ -75,7 +75,7 @@ pub(super) fn planned(routes: Vec<Route>, rulings: &[Ruling]) -> Plan {
 
 /// The plan of `routes` under `rulings` and `query_buckets`.
 pub(super) fn planned_with(routes: Vec<Route>, rulings: &[Ruling], query_buckets: &[(&str, &str, &'static str)]) -> Plan {
-    match plan(&inventory(routes), rulings, query_buckets, &[]) {
+    match plan(&inventory(routes), rulings, query_buckets, &[], &[]) {
         Ok(plan) => plan,
         Err(error) => panic!("refused: {error}"),
     }
@@ -87,7 +87,7 @@ pub(super) fn refusal(routes: Vec<Route>, rulings: &[Ruling]) -> String {
 
 /// Why `routes` under `rulings` and `query_buckets` are refused.
 pub(super) fn refusal_with(routes: Vec<Route>, rulings: &[Ruling], query_buckets: &[(&str, &str, &'static str)]) -> String {
-    match plan(&inventory(routes), rulings, query_buckets, &[]) {
+    match plan(&inventory(routes), rulings, query_buckets, &[], &[]) {
         Ok(plan) => panic!("planned {} operation(s)", plan.declared.len()),
         Err(error) => error,
     }
@@ -115,8 +115,8 @@ fn the_committed_dialect_is_what_the_inventory_generates() {
     assert_eq!(drift(&root, &files), Vec::<String>::new());
     assert_eq!(
         files.len(),
-        319,
-        "312 native operations, two fallbacks, the module list and four table files"
+        320,
+        "312 native operations, two fallbacks, the form-claimed STS operation (ADR-0041), the module list and four table files"
     );
 }
 
@@ -188,7 +188,7 @@ fn a_plain_route_is_declared_and_a_later_group_is_pending() {
         route("GET", "/rustfs/admin/v3/kms/status", "kms", "sigv4-admin", Some("kms:ServiceControl")),
         route("GET", "/rustfs/admin/v3/oidc/status", "oidc", "sigv4-admin", Some("admin:ServerInfo")),
     ];
-    let plan = super::plan_through(3, &inventory(routes), &[], &[], &[]).expect("the fixture plans");
+    let plan = super::plan_through(3, &inventory(routes), &[], &[], &[], &[]).expect("the fixture plans");
     assert_eq!(plan.declared.len(), 1);
     let declared = &plan.declared[0];
     assert_eq!(declared.name, "rustfs:GetV3KmsStatus");
@@ -211,7 +211,7 @@ pub(super) fn custom(method: &str, path: &str, detail: &str) -> Route {
 pub(super) fn recorded_plan() -> Plan {
     let recorded = std::fs::read_to_string(repo_root().join(INVENTORY)).expect("the inventory");
     let inventory: Inventory = serde_json::from_str(&recorded).expect("the inventory parses");
-    plan(&inventory, RULINGS, QUERY_BUCKETS, STAYS).expect("the recorded inventory plans")
+    plan(&inventory, RULINGS, QUERY_BUCKETS, STAYS, FORMS).expect("the recorded inventory plans")
 }
 
 /// Positive — the own-account routes are about the caller under their vendor label, the

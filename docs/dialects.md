@@ -225,6 +225,25 @@ operation at one or more `ClaimedRow { template, selector }` inside it.
 - **Reported.** Start-up prints `DIALECT_POSTURE claimed_prefixes=[prefix@dialect,…]
   caller_secret_ops=[…]` beside `SECURITY_POSTURE`.
 
+## Form claims (ADR-0041)
+
+- **What one covers.** A `FormClaim` names an exact raw path. It takes a `POST` of exactly that
+  path whose first `Content-Type` value is visible ASCII and names
+  `application/x-www-form-urlencoded` before its first `;` (spaces and tabs trimmed, ASCII case
+  ignored), on every host, every endpoint face and whatever the query. The router asks form
+  claims before path claims and the S3 table, and nothing else about the request is read.
+- **One operation each.** `DialectBuilder::declare_form::<O>(FormRoute { precedence, claim })`.
+  The overlay row records the claim as its selector, `FormClaim(POST "/")`, and the operation is
+  service-level. A form-claimed request is treated as claimed: no bucket from the host, no bucket
+  CORS, the RustFS profile's claimed-route body ceiling.
+- **Refused.** A path that is not absolute, has an empty or dot segment or a trailing `/` (the root
+  aside) or a byte outside RFC 3986's unreserved set; a one-segment path, the bucket position; no
+  reason or evidence; two claims on one path; a form claim whose path a path claim covers.
+- **Reported.** Start-up prints `FORM_CLAIM_POSTURE claimed_forms=[POST path@dialect]` when one is
+  installed.
+- **Who uses it.** The `rustfs` dialect serves RustFS's STS endpoint, `POST /` with
+  `application/x-www-form-urlencoded`, as `rustfs:StsFormPost`.
+
 ## Action rules, subjects and bound buckets (ADR-0025)
 
 - **Several actions.** `AuthRequirement::any_of(&[..], shape)` or `all_of(&[..], shape)`. The

@@ -188,6 +188,15 @@ impl HostResolver for LegacyRustfsVirtualHosts {
             Reading::Bucket(_) | Reading::Path => None,
         }
     }
+
+    // The label even when `refusal` refuses it: legacy RustFS signs what its host reading found,
+    // and a form claim answers before the refusal (Legacy-compat on the trait method).
+    fn signing_bucket(&self, query: &HostQuery<'_>, _resolved: &ResolvedHost) -> Option<String> {
+        match self.read(query.host.raw_for_signing().as_str()) {
+            Reading::Bucket(label) => Some(label.into_owned()),
+            Reading::Unusable | Reading::Path => None,
+        }
+    }
 }
 
 /// `host` without a trailing `:<port>` that is a 16-bit number; a bracketed address is kept whole.

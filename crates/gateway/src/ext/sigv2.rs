@@ -257,17 +257,6 @@ impl SigV4Authenticator {
     }
 }
 
-/// The bucket a virtual-hosted-style request addressed, for SigV2's `CanonicalizedResource`.
-///
-/// SigV2 prefixes `/{bucket}` for a virtual-hosted-style request and not for a path-style one,
-/// where the bucket is already inside the raw path. So this is the *host's* bucket only, taken
-/// from the resolver's answer rather than from a second parse of the `Host` header — a second host
-/// parser is a second answer to "which bucket did this request address", and it is the answer the
-/// signature is built from.
-pub(crate) fn vhost_signing_bucket(resolved: &super::ResolvedHost) -> Option<String> {
-    resolved.bucket().map(|bucket| bucket.as_str().to_owned())
-}
-
 /// The refusal every [`super::Authenticator`] answers a SigV2 request with until it overrides the
 /// method.
 ///

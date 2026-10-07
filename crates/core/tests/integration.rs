@@ -56,6 +56,9 @@ mod dialect_claims;
 #[path = "dialect_claims_refusals.rs"]
 mod dialect_claims_refusals;
 
+#[path = "dialect_form_claims.rs"]
+mod dialect_form_claims;
+
 #[path = "dto_cold_split.rs"]
 mod dto_cold_split;
 

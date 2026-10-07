@@ -136,9 +136,9 @@ use crate::close::ConnectionIntent;
 use crate::config::{ConfigSnapshot, ConfigStore};
 use crate::ext::{
     AuthSchemeRef, Authentication, AuthenticationOutcome, Authenticator, AuthzAuditEvent, AuthzRequest, AuthzStage,
-    BucketOwnerSource, CachedCorsSource, ClassKind, ClientAddr, Governor, GovernorRequest, HostQuery, HostResolver,
-    InputAuthzRequest, PolicySnapshot, RequestContext, RequestEvent, ResponseView, RoutedView, ServerExtensions,
-    SigV2Authentication, WireHead, emit_safely,
+    BucketOwnerSource, CachedCorsSource, ClassKind, ClientAddr, Governor, GovernorRequest, HostResolver, InputAuthzRequest,
+    PolicySnapshot, RequestContext, RequestEvent, ResponseView, RoutedView, ServerExtensions, SigV2Authentication, WireHead,
+    emit_safely,
 };
 use crate::gate::{BodyCeilings, BodyDigestObligation, MetadataAdmission, SealedBody};
 use crate::logging::{Extension, Refused};
@@ -565,11 +565,8 @@ impl S3Service {
             return outcome.refuse_at(Refused::Wire, refusal);
         }
 
-        let resolved = self.inner.host_resolver.resolve(&HostQuery {
-            host: wire.host(),
-            path: wire.raw_path().as_str(),
-            method: wire.method(),
-        });
+        // The host's one reading, and the bucket label SigV2 signs from it (rustfs/gateway#1232).
+        let (resolved, vhost_bucket) = crate::ext::resolve_host(&*self.inner.host_resolver, &wire);
         let config = config.targeted();
         let target_origin = resolved.origin();
 
@@ -689,7 +686,6 @@ impl S3Service {
         // the single normalisation under the deployment's policy. Routing above read the raw path
         // and the signature below reads the raw path; everything after this line reads `meta` and
         // is never handed the path to parse again.
-        let vhost_bucket = crate::ext::vhost_signing_bucket(&resolved);
         // A claimed row's bound bucket, already validated as a path-style bucket is (ADR-0025),
         // takes the host's place; `vhost_key` then reads no key for a bucket target.
         let host_bucket = match &bound_bucket {

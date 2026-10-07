@@ -109,8 +109,8 @@ pub use self::governor::{
     BodyQuota, BodyQuotaExceeded, ClassKind, ClientAddr, DefaultGovernor, Governor, GovernorRates, GovernorRequest,
     LayeredGovernor, Lease, Rate, Unlimited, VerifiedBodyProgress,
 };
-pub(crate) use self::host::target_of_path;
 pub use self::host::{Addressing, HostQuery, HostRefusal, HostResolver, PathStyleOnly, ResolvedHost, TargetOrigin, VhostHint};
+pub(crate) use self::host::{resolve_host, target_of_path};
 pub use self::legacy_vhost::{LegacyDomainError, LegacyRustfsVirtualHosts};
 pub(crate) use self::observer::observe_safely;
 pub use self::observer::{NoObserver, Observer, RequestEvent};
@@ -121,5 +121,4 @@ pub use self::policy::{
     PolicyTimeout, PolicyTimeoutError, SnapshotId, policy_from,
 };
 pub use self::sigv2::SigV2Authentication;
-pub(crate) use self::sigv2::vhost_signing_bucket;
 pub use self::vhost::{BaseDomain, DomainError, MAX_BASE_DOMAIN_BYTES, VirtualHostStyle};

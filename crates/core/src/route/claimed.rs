@@ -15,16 +15,19 @@
 //! The claimed rows and the table that routes a claimed request without consulting the S3 table
 //! (ADR-0024).
 //!
-//! Responsible for: [`ClaimedEntry`] — one reviewed row inside a claim — [`ClaimedTable`], which
-//! decides whether a request is inside an installed claim and which claimed row accepts it, and the
-//! build-time refusals inside a claim: a same-precedence conflict, an undeclared cross-precedence
-//! overlap, and a stale or unsourced declaration, exactly as the S3 table applies them to its rows.
+//! Responsible for: [`ClaimedEntry`] — one reviewed row inside a claim — [`InstalledFormClaim`] —
+//! one form claim and its operation (ADR-0041) — [`ClaimedTable`], which decides whether a request
+//! is inside an installed claim and which row accepts it, and the build-time refusals: a
+//! same-precedence conflict, an undeclared cross-precedence overlap, and a stale or unsourced
+//! declaration inside a path claim, exactly as the S3 table applies them to its rows, and a refused,
+//! overlapping or path-claimed form claim.
 //! NOT responsible for: the claim and template grammar or the parameter values (`claim`), the S3
 //! table (`table`, `compiled`), or whether a dialect may claim a prefix (`crate::dialect`).
 //! Upstream: `claim`, `selector`, `lattice`, `shadowing`, `shape`, `table`. Downstream:
 //! `crate::dispatch::Router`, `crate::dialect`, `crate::registry::RouterBuilder`.
 
 use super::claim::{PathClaim, PathTemplate};
+use super::form_claim::FormClaim;
 use super::lattice::{Constraints, OverlapError};
 use super::selector::{HostClass, Predicate, RouteEntry, RouteRequestParts, RouteSelector, TargetKind};
 use super::shadowing::{ShadowingDecls, ShadowingPolicy};
@@ -173,6 +176,43 @@ pub struct InstalledClaim {
     pub claim: PathClaim,
 }
 
+/// A form claim as installed: the dialect that brought it, the claim, and the one operation that
+/// answers every request inside it (ADR-0041).
+///
+/// Produced only by [`crate::registry::RouterBuilder::dialect`] from an assembled dialect, so the
+/// overlay review has already compared the claim with the operation's record.
+#[derive(Clone, Debug)]
+pub struct InstalledFormClaim {
+    dialect: &'static str,
+    claim: FormClaim,
+    entry: RouteEntry,
+}
+
+impl InstalledFormClaim {
+    pub(crate) const fn new(dialect: &'static str, claim: FormClaim, entry: RouteEntry) -> Self {
+        Self { dialect, claim, entry }
+    }
+
+    /// The dialect that installed it.
+    #[must_use]
+    pub const fn dialect(&self) -> &'static str {
+        self.dialect
+    }
+
+    /// The claim.
+    #[must_use]
+    pub const fn claim(&self) -> &FormClaim {
+        &self.claim
+    }
+
+    /// The route entry of the operation that answers inside it. Its selector is empty: the claim
+    /// decides the method, the path and the media type, and nothing else is read.
+    #[must_use]
+    pub const fn entry(&self) -> &RouteEntry {
+        &self.entry
+    }
+}
+
 /// What the claim table says about one request.
 #[derive(Clone, Copy, Debug)]
 pub enum ClaimLookup<'a> {
@@ -186,22 +226,39 @@ pub enum ClaimLookup<'a> {
         /// The accepting row.
         entry: Option<&'a ClaimedEntry>,
     },
+    /// A form claim covers the request, on whatever host it arrived (ADR-0041). Its one operation
+    /// answers it; neither a path claim nor S3 routing sees it.
+    Form {
+        /// The covering form claim and its operation.
+        claim: &'a InstalledFormClaim,
+    },
 }
 
 impl<'a> ClaimLookup<'a> {
-    /// The accepting claimed row, when there is one.
+    /// The accepting claimed row, when a path claim covers the request and a row accepts it.
+    /// `None` for a form claim, which has no rows: [`ClaimLookup::route_entry`] names its operation.
     #[must_use]
     pub const fn entry(&self) -> Option<&'a ClaimedEntry> {
         match self {
-            Self::Outside => None,
+            Self::Outside | Self::Form { .. } => None,
             Self::Inside { entry, .. } => *entry,
         }
     }
 
-    /// Whether a claim covers the request.
+    /// The route entry of the operation that answers, inside either kind of claim.
+    #[must_use]
+    pub fn route_entry(&self) -> Option<&'a RouteEntry> {
+        match self {
+            Self::Outside => None,
+            Self::Inside { entry, .. } => entry.map(ClaimedEntry::entry),
+            Self::Form { claim } => Some(claim.entry()),
+        }
+    }
+
+    /// Whether a claim of either kind covers the request.
     #[must_use]
     pub const fn is_inside(&self) -> bool {
-        matches!(self, Self::Inside { .. })
+        matches!(self, Self::Inside { .. } | Self::Form { .. })
     }
 }
 
@@ -211,6 +268,8 @@ pub struct ClaimedTable {
     claims: Box<[InstalledClaim]>,
     /// Each row with the index of its claim, sorted by claim, then precedence, then name.
     entries: Box<[(usize, ClaimedEntry)]>,
+    /// Every form claim, in installation order (ADR-0041).
+    forms: Box<[InstalledFormClaim]>,
 }
 
 impl ClaimedTable {
@@ -289,6 +348,7 @@ impl ClaimedTable {
         let table = Self {
             claims: claims.into_boxed_slice(),
             entries: owned.into_boxed_slice(),
+            forms: Box::default(),
         };
         // Declarations first, for the reason `RouteTable::build` gives: a rotted declaration is a
         // more specific diagnostic than the undeclared overlap it fails to cover.
@@ -299,11 +359,14 @@ impl ClaimedTable {
 
     /// Whether a claim covers the request and, if so, which claimed row accepts it.
     ///
-    /// Not `async`, holds nothing, allocates nothing. A virtual-hosted request, a request on a face
-    /// other than the standard endpoint, and a request with an ARN in the bucket position are
-    /// never inside a claim.
+    /// Not `async`, holds nothing, allocates nothing. A form claim is asked first, on every host
+    /// (ADR-0041). Otherwise a virtual-hosted request, a request on a face other than the standard
+    /// endpoint, and a request with an ARN in the bucket position are never inside a claim.
     #[must_use]
     pub fn lookup(&self, request: &RouteRequestParts<'_>) -> ClaimLookup<'_> {
+        if let Some(claim) = self.forms.iter().find(|form| form.claim.covers(request)) {
+            return ClaimLookup::Form { claim };
+        }
         if self.claims.is_empty()
             || request.host_named_bucket
             || request.host_class != HostClass::Standard
@@ -328,10 +391,47 @@ impl ClaimedTable {
         ClaimLookup::Inside { claim, entry }
     }
 
-    /// Every installed claim, in installation order.
+    /// The same table with `forms` installed beside its path claims (ADR-0041).
+    ///
+    /// # Errors
+    ///
+    /// [`RouteBuildError::OverlappingFormClaims`] when two could cover one request, and
+    /// [`RouteBuildError::FormClaimInsideClaim`] for one whose path an installed path claim covers.
+    /// The grammar ([`super::FormClaim::rejection`]) is the dialect's to check: every claim here
+    /// comes from an assembled dialect.
+    pub fn with_forms(mut self, forms: Vec<InstalledFormClaim>) -> Result<Self, RouteBuildError> {
+        for (index, form) in forms.iter().enumerate() {
+            if let Some(installed) = self.claims.iter().find(|installed| installed.claim.covers(form.claim.path)) {
+                return Err(RouteBuildError::FormClaimInsideClaim {
+                    op_name: form.entry.op_name,
+                    claim: installed.claim.prefix,
+                });
+            }
+            if let Some(later) = forms
+                .iter()
+                .skip(index.saturating_add(1))
+                .find(|later| later.claim.overlaps(&form.claim))
+            {
+                return Err(RouteBuildError::OverlappingFormClaims {
+                    first: form.entry.op_name,
+                    second: later.entry.op_name,
+                });
+            }
+        }
+        self.forms = forms.into_boxed_slice();
+        Ok(self)
+    }
+
+    /// Every installed path claim, in installation order.
     #[must_use]
     pub fn claims(&self) -> &[InstalledClaim] {
         &self.claims
+    }
+
+    /// Every installed form claim, in installation order.
+    #[must_use]
+    pub fn forms(&self) -> &[InstalledFormClaim] {
+        &self.forms
     }
 
     /// Every claimed row, by claim and then precedence.
@@ -339,10 +439,10 @@ impl ClaimedTable {
         self.entries.iter().map(|(_, entry)| entry)
     }
 
-    /// Whether no claim is installed.
+    /// Whether no claim of either kind is installed.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.claims.is_empty()
+        self.claims.is_empty() && self.forms.is_empty()
     }
 
     /// A request both rows accept, or `None` when no request does.

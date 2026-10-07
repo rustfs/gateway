@@ -25,7 +25,6 @@
 use http::Method;
 use http::request::Parts;
 use rustfs_gateway_core::codec::{legacy_rustfs_decodable, legacy_rustfs_target};
-use rustfs_gateway_core::route::ClaimLookup;
 use rustfs_gateway_core::{CodecError, RouteRequestParts, Router};
 use rustfs_gateway_http::WireRequest;
 use rustfs_gateway_types::{ErrorCode, NamePolicy, PathSplit};
@@ -114,7 +113,8 @@ pub(crate) fn classify<B>(
     Ok(resolved)
 }
 
-/// Whether a dialect's claim covers the request under this reading of its host.
+/// Whether a dialect's path or form claim covers the request under this reading of its host. A form
+/// claim covers it on every host (ADR-0041), as legacy RustFS's STS route does.
 fn claimed<B>(router: &Router, wire: &WireRequest<B>, resolved: &ResolvedHost) -> bool {
     let parts = RouteRequestParts {
         method: wire.method(),
@@ -126,7 +126,7 @@ fn claimed<B>(router: &Router, wire: &WireRequest<B>, resolved: &ResolvedHost) -
         headers: wire.headers(),
         host_named_bucket: resolved.bucket().is_some(),
     };
-    matches!(router.claims().lookup(&parts), ClaimLookup::Inside { .. })
+    router.claims().lookup(&parts).is_inside()
 }
 
 #[cfg(test)]
