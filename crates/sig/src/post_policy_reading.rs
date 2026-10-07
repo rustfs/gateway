@@ -12,14 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Explicit POST-policy operator and expiration readings.
+//! Explicit POST-policy operator, expiration and field-coverage readings.
 //!
-//! Responsible for: operator-case selection, measured expiration spellings and UTC normalization.
+//! Responsible for: operator-case selection, measured expiration spellings and UTC normalization,
+//! and which form fields need no condition and when an unnamed one is refused (rustfs/gateway#1185).
 //! NOT responsible for: signature verification or multipart framing.
 //! Upstream: the bounded policy reader. Downstream: expiry comparison against the request clock snapshot.
 //! Evidence: <https://github.com/rustfs/gateway/issues/1326> records native POST/storage probes.
 
 use super::PostPolicyError;
+
+/// The form fields legacy RustFS's POST policy check needs no condition for, besides the
+/// `x-amz-server-side-encryption*` and `x-ignore-*` families (`is_field_exempt_from_policy`).
+const LEGACY_EXEMPT_FIELDS: [&str; 6] = ["x-amz-signature", "signature", "awsaccesskeyid", "file", "submit", "policy"];
 
 /// Keeps the generic, operator-only, and native readings separate.
 #[derive(Clone, Copy)]
@@ -32,6 +37,29 @@ pub(super) enum PolicyReading {
 impl PolicyReading {
     pub(super) const fn folds_operators(self) -> bool {
         !matches!(self, Self::Strict)
+    }
+
+    /// Whether a form field needs no policy condition: legacy RustFS's own set
+    /// ([`LEGACY_EXEMPT_FIELDS`] and the `x-amz-server-side-encryption*` fields, so a signed form
+    /// may choose its KMS key or customer key without naming it, as there), else the gateway's
+    /// ([`super::EXEMPT_FIELDS`]); every `x-ignore-*` field in both.
+    pub(super) fn exempts(self, name: &str) -> bool {
+        name.starts_with("x-ignore-")
+            || match self {
+                Self::LegacyRustfs => LEGACY_EXEMPT_FIELDS.contains(&name) || name.starts_with("x-amz-server-side-encryption"),
+                Self::Strict | Self::CaseInsensitiveOperators => super::EXEMPT_FIELDS.contains(&name),
+            }
+    }
+
+    /// What a field no condition names is: under legacy RustFS's reading, nothing yet — it is
+    /// refused after every condition, the routed bucket and the file's size included, as
+    /// [`PostPolicyError::FieldNotInPolicy`], because legacy checks coverage last and answers it
+    /// apart from a failed condition; under the other readings, a failed condition at once.
+    pub(super) const fn defer_unlisted_field(self) -> Result<(), PostPolicyError> {
+        match self {
+            Self::LegacyRustfs => Ok(()),
+            Self::Strict | Self::CaseInsensitiveOperators => Err(PostPolicyError::ConditionFailed),
+        }
     }
 
     pub(super) fn expiry(self, value: &str) -> Result<i64, PostPolicyError> {

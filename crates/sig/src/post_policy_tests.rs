@@ -435,7 +435,15 @@ fn ignored_fields_still_obey_explicit_conditions() {
             condition,
         ];
         assert_eq!(
-            enforce_policy_fields(&fields, "", PostPolicyLimits::default(), String::new(), &conditions).err(),
+            enforce_policy_fields(
+                &fields,
+                "",
+                PostPolicyLimits::default(),
+                String::new(),
+                &conditions,
+                PolicyReading::Strict
+            )
+            .err(),
             Some(PostPolicyError::ConditionFailed)
         );
     }
@@ -546,5 +554,81 @@ fn n_expiration_compatibility_is_not_enabled_by_operator_folding() {
     assert_eq!(
         SigV2PostPolicy::parse_with_case_insensitive_operators(&fields, "", limits, now).err(),
         Some(PostPolicyError::Malformed)
+    );
+}
+
+/// A SigV2 form over `{"bucket":"example-bucket"},{"key":"upload"},["content-length-range",1,16]`,
+/// carrying `extra` besides its credential, key, bucket and policy fields.
+fn sigv2_form_with<'a>(encoded: &'a str, extra: &[(&'a str, &'a str)]) -> Vec<(&'a str, &'a str)> {
+    let mut fields = vec![
+        ("awsaccesskeyid", "fixture"),
+        ("signature", "fixture"),
+        ("key", "upload"),
+        ("bucket", "example-bucket"),
+        ("policy", encoded),
+    ];
+    fields.extend_from_slice(extra);
+    fields
+}
+
+const COVERAGE_POLICY: &[u8; 127] = br#"{"expiration":"2030-01-02T12:34:56Z","conditions":[{"bucket":"example-bucket"},{"key":"upload"},["content-length-range",1,16]]}"#;
+
+/// Positive and negative — legacy RustFS's coverage under its reading only: `submit` and the
+/// encryption fields need no condition there, while the gateway's readings refuse them at once;
+/// a session token or an algorithm field needs one there, refused only by the final check, while
+/// the gateway's readings exempt them (rustfs/gateway#1185).
+#[test]
+fn legacy_coverage_is_the_legacy_readings_alone() {
+    let encoded = crate::codec::encode_base64_exact(COVERAGE_POLICY);
+    let limits = PostPolicyLimits::default();
+    let now = RequestNow::from_unix_seconds(0);
+    for extra in [("submit", "Upload"), ("x-amz-server-side-encryption-customer-key", "k")] {
+        let fields = sigv2_form_with(&encoded, &[extra]);
+        let legacy = SigV2PostPolicy::parse_as_legacy_rustfs(&fields, "", limits, now).expect("legacy exempts it");
+        assert!(legacy.enforce_final("example-bucket", "upload", 4).is_ok(), "{extra:?}");
+        assert_eq!(
+            SigV2PostPolicy::parse(&fields, "", limits, now).err(),
+            Some(PostPolicyError::ConditionFailed),
+            "{extra:?}"
+        );
+    }
+    for extra in [("x-amz-security-token", "token"), ("x-amz-algorithm", "AWS4-HMAC-SHA256")] {
+        let fields = sigv2_form_with(&encoded, &[extra]);
+        let legacy = SigV2PostPolicy::parse_as_legacy_rustfs(&fields, "", limits, now).expect("refused only at the end");
+        assert_eq!(
+            legacy.enforce_final("example-bucket", "upload", 4).err(),
+            Some(PostPolicyError::FieldNotInPolicy),
+            "{extra:?}"
+        );
+        let generic = SigV2PostPolicy::parse(&fields, "", limits, now).expect("the gateway exempts it");
+        assert!(generic.enforce_final("example-bucket", "upload", 4).is_ok(), "{extra:?}");
+    }
+}
+
+/// Negative — under legacy RustFS's reading an unnamed field is refused after the routed bucket
+/// and the size range, as legacy checks coverage last: their own refusals come first.
+#[test]
+fn n_an_unnamed_field_is_refused_after_the_bucket_and_the_size() {
+    let encoded = crate::codec::encode_base64_exact(COVERAGE_POLICY);
+    let fields = sigv2_form_with(&encoded, &[("x-amz-meta-color", "red")]);
+    let policy =
+        SigV2PostPolicy::parse_as_legacy_rustfs(&fields, "", PostPolicyLimits::default(), RequestNow::from_unix_seconds(0))
+            .expect("coverage is deferred");
+    assert_eq!(
+        policy.enforce_final("another-bucket", "upload", 4).err(),
+        Some(PostPolicyError::ConditionFailed)
+    );
+    // `matches!`, so `c-sig-0427`'s size assertions stay the coverage guard's only `Some(…)` ones.
+    assert!(matches!(
+        policy.enforce_final("example-bucket", "upload", 0),
+        Err(PostPolicyError::EntityTooSmall)
+    ));
+    assert!(matches!(
+        policy.enforce_final("example-bucket", "upload", 17),
+        Err(PostPolicyError::EntityTooLarge)
+    ));
+    assert_eq!(
+        policy.enforce_final("example-bucket", "upload", 4).err(),
+        Some(PostPolicyError::FieldNotInPolicy)
     );
 }

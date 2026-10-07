@@ -47,6 +47,7 @@ mod legacy_reading;
 mod mapping;
 mod matrix;
 mod rustfs_profile;
+mod sigv2_forms;
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
