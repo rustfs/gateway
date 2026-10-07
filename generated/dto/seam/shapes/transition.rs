@@ -17,9 +17,22 @@
 //! The `Transition` shape conversions.
 
 #[allow(unused_imports)] // Not every conversion needs a leaf function.
-use crate::compat::s3s_0_17_0::leaf;
-use crate::compat::s3s_0_17_0::s3s;
+use super::super::{leaf, s3s};
 use crate::compat::ConversionError;
+
+/// Converts one `Transition` from the gateway shape to the s3s shape.
+///
+/// # Errors
+///
+/// [`ConversionError`] naming a member the other side cannot hold.
+#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
+pub fn transition_to_s3s(value: crate::ops::shapes::Transition) -> Result<s3s::dto::Transition, ConversionError> {
+    Ok(s3s::dto::Transition {
+        date: value.date.map(|x| -> Result<_, ConversionError> { Ok(leaf::timestamp_to_s3s("date", x)?) }).transpose()?,
+        days: value.days,
+        storage_class: value.storage_class.map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::TransitionStorageClass::from(x.as_str().to_owned())) }).transpose()?,
+    })
+}
 
 /// Converts one `Transition` from the s3s shape to the gateway shape.
 ///
@@ -37,19 +50,5 @@ pub fn transition_from_s3s(value: s3s::dto::Transition) -> Result<crate::ops::sh
         date: date.map(|x| -> Result<_, ConversionError> { Ok(leaf::timestamp_from_s3s("date", &x)?) }).transpose()?,
         days,
         storage_class: storage_class.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::StorageClass::custom(x.as_str().to_owned())) }).transpose()?,
-    })
-}
-
-/// Converts one `Transition` from the gateway shape to the s3s shape.
-///
-/// # Errors
-///
-/// [`ConversionError`] naming a member the other side cannot hold.
-#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn transition_to_s3s(value: crate::ops::shapes::Transition) -> Result<s3s::dto::Transition, ConversionError> {
-    Ok(s3s::dto::Transition {
-        date: value.date.map(|x| -> Result<_, ConversionError> { Ok(leaf::timestamp_to_s3s("date", x)?) }).transpose()?,
-        days: value.days,
-        storage_class: value.storage_class.map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::TransitionStorageClass::from(x.as_str().to_owned())) }).transpose()?,
     })
 }

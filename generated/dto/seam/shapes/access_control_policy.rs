@@ -17,8 +17,7 @@
 //! The `AccessControlPolicy` shape conversions.
 
 #[allow(unused_imports)] // Not every conversion needs a leaf function.
-use crate::compat::s3s_0_17_0::leaf;
-use crate::compat::s3s_0_17_0::s3s;
+use super::super::{leaf, s3s};
 use crate::compat::ConversionError;
 
 /// Converts one `AccessControlPolicy` from the gateway shape to the s3s shape.
@@ -31,5 +30,22 @@ pub fn access_control_policy_to_s3s(value: crate::ops::shapes::AccessControlPoli
     Ok(s3s::dto::AccessControlPolicy {
         grants: value.grants.map(|x| -> Result<_, ConversionError> { Ok(x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::grant::grant_to_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()?) }).transpose()?,
         owner: value.owner.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::owner::owner_to_s3s(x)?) }).transpose()?,
+    })
+}
+
+/// Converts one `AccessControlPolicy` from the s3s shape to the gateway shape.
+///
+/// # Errors
+///
+/// [`ConversionError`] naming a member the other side cannot hold.
+#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
+pub fn access_control_policy_from_s3s(value: s3s::dto::AccessControlPolicy) -> Result<crate::ops::shapes::AccessControlPolicy, ConversionError> {
+    let s3s::dto::AccessControlPolicy {
+        grants,
+        owner,
+    } = value;
+    Ok(crate::ops::shapes::AccessControlPolicy {
+        grants: grants.map(|x| -> Result<_, ConversionError> { Ok(x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::grant::grant_from_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()?) }).transpose()?,
+        owner: owner.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::owner::owner_from_s3s(x)?) }).transpose()?,
     })
 }

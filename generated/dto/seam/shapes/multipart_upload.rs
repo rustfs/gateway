@@ -17,9 +17,27 @@
 //! The `MultipartUpload` shape conversions.
 
 #[allow(unused_imports)] // Not every conversion needs a leaf function.
-use crate::compat::s3s_0_17_0::leaf;
-use crate::compat::s3s_0_17_0::s3s;
+use super::super::{leaf, s3s};
 use crate::compat::ConversionError;
+
+/// Converts one `MultipartUpload` from the gateway shape to the s3s shape.
+///
+/// # Errors
+///
+/// [`ConversionError`] naming a member the other side cannot hold.
+#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
+pub fn multipart_upload_to_s3s(value: crate::ops::shapes::MultipartUpload) -> Result<s3s::dto::MultipartUpload, ConversionError> {
+    Ok(s3s::dto::MultipartUpload {
+        checksum_algorithm: value.checksum_algorithm.map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::ChecksumAlgorithm::from(x.as_str().to_owned())) }).transpose()?,
+        checksum_type: value.checksum_type.map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::ChecksumType::from(x.as_str().to_owned())) }).transpose()?,
+        initiated: value.initiated.map(|x| -> Result<_, ConversionError> { Ok(leaf::timestamp_to_s3s("initiated", x)?) }).transpose()?,
+        initiator: value.initiator.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::initiator::initiator_to_s3s(x)?) }).transpose()?,
+        key: value.key.map(|x| -> Result<_, ConversionError> { Ok(x.as_str().to_owned()) }).transpose()?,
+        owner: value.owner.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::owner::owner_to_s3s(x)?) }).transpose()?,
+        storage_class: value.storage_class.map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::StorageClass::from(x.as_str().to_owned())) }).transpose()?,
+        upload_id: value.upload_id,
+    })
+}
 
 /// Converts one `MultipartUpload` from the s3s shape to the gateway shape.
 ///

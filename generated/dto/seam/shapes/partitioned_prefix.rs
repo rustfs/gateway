@@ -17,9 +17,20 @@
 //! The `PartitionedPrefix` shape conversions.
 
 #[allow(unused_imports)] // Not every conversion needs a leaf function.
-use crate::compat::s3s_0_17_0::leaf;
-use crate::compat::s3s_0_17_0::s3s;
+use super::super::{leaf, s3s};
 use crate::compat::ConversionError;
+
+/// Converts one `PartitionedPrefix` from the gateway shape to the s3s shape.
+///
+/// # Errors
+///
+/// [`ConversionError`] naming a member the other side cannot hold.
+#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
+pub fn partitioned_prefix_to_s3s(value: crate::ops::shapes::PartitionedPrefix) -> Result<s3s::dto::PartitionedPrefix, ConversionError> {
+    Ok(s3s::dto::PartitionedPrefix {
+        partition_date_source: value.partition_date_source.map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::PartitionDateSource::from(x.as_str().to_owned())) }).transpose()?,
+    })
+}
 
 /// Converts one `PartitionedPrefix` from the s3s shape to the gateway shape.
 ///
@@ -33,17 +44,5 @@ pub fn partitioned_prefix_from_s3s(value: s3s::dto::PartitionedPrefix) -> Result
     } = value;
     Ok(crate::ops::shapes::PartitionedPrefix {
         partition_date_source: partition_date_source.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::PartitionDateSource::custom(x.as_str().to_owned())) }).transpose()?,
-    })
-}
-
-/// Converts one `PartitionedPrefix` from the gateway shape to the s3s shape.
-///
-/// # Errors
-///
-/// [`ConversionError`] naming a member the other side cannot hold.
-#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn partitioned_prefix_to_s3s(value: crate::ops::shapes::PartitionedPrefix) -> Result<s3s::dto::PartitionedPrefix, ConversionError> {
-    Ok(s3s::dto::PartitionedPrefix {
-        partition_date_source: value.partition_date_source.map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::PartitionDateSource::from(x.as_str().to_owned())) }).transpose()?,
     })
 }

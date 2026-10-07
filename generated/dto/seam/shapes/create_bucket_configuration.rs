@@ -17,8 +17,7 @@
 //! The `CreateBucketConfiguration` shape conversions.
 
 #[allow(unused_imports)] // Not every conversion needs a leaf function.
-use crate::compat::s3s_0_17_0::leaf;
-use crate::compat::s3s_0_17_0::s3s;
+use super::super::{leaf, s3s};
 use crate::compat::ConversionError;
 
 /// Converts one `CreateBucketConfiguration` from the gateway shape to the s3s shape.
@@ -33,5 +32,32 @@ pub fn create_bucket_configuration_to_s3s(value: crate::ops::shapes::CreateBucke
         location: Default::default(),
         location_constraint: value.location_constraint.map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::BucketLocationConstraint::from(x.as_str().to_owned())) }).transpose()?,
         tags: Default::default(),
+    })
+}
+
+/// Converts one `CreateBucketConfiguration` from the s3s shape to the gateway shape.
+///
+/// # Errors
+///
+/// [`ConversionError`] naming a member the other side cannot hold.
+#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
+pub fn create_bucket_configuration_from_s3s(value: s3s::dto::CreateBucketConfiguration) -> Result<crate::ops::shapes::CreateBucketConfiguration, ConversionError> {
+    let s3s::dto::CreateBucketConfiguration {
+        bucket,
+        location,
+        location_constraint,
+        tags,
+    } = value;
+    if bucket.is_some() {
+        return Err(ConversionError { field: "bucket", reason: "a legacy member the gateway shape cannot hold, refused rather than dropped" });
+    }
+    if location.is_some() {
+        return Err(ConversionError { field: "location", reason: "a legacy member the gateway shape cannot hold, refused rather than dropped" });
+    }
+    if tags.is_some() {
+        return Err(ConversionError { field: "tags", reason: "a legacy member the gateway shape cannot hold, refused rather than dropped" });
+    }
+    Ok(crate::ops::shapes::CreateBucketConfiguration {
+        location_constraint: location_constraint.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::LocationConstraint::custom(x.as_str().to_owned())) }).transpose()?,
     })
 }

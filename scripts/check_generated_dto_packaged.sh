@@ -98,11 +98,59 @@ while IFS= read -r source; do
 done < <(git ls-files -- 'crates/*/src/*.rs' 'crates/*/src/**/*.rs' 2>/dev/null || true)
 
 path_candidates() {
-    # The exact sed expression below requires this literal prefix, including in comment decoys.
+    # The exact awk expression below requires this literal prefix, including in comment decoys.
     # Do not invoke grep with no operands: that would wait on stdin for an empty source census.
     if [[ "${#sources[@]}" -gt 0 ]]; then
         grep -lF -- '#[path' "${sources[@]}" || true
     fi
+}
+
+# Every `#[path = "..."]` in a source, one per line as `target<TAB>base`, where `base` is the
+# directory rustc resolves the target from, relative to the source's own directory: empty at the
+# top level; inside an inline module, the directory that module's own `#[path]` names, else its
+# name under the enclosing one (under the file's stem in a non-mod-rs file). An attribute no
+# module declaration consumes — a comment decoy — is reported where it stands, as before.
+path_targets() {
+    local source="$1" stem
+    stem="${source##*/}"
+    stem="${stem%.rs}"
+    case "$stem" in mod | lib | main) stem="" ;; esac
+    awk -v stem="$stem" '
+        function join(a, b) { return a == "" ? b : a "/" b }
+        function emit(target) { print target "\t" (top > 0 ? dir[top] : "") }
+        BEGIN { top = 0; depth = 0; pending = "" }
+        {
+            line = $0
+            if (match(line, /#\[path[[:space:]]*=[[:space:]]*"[^"]*"\]/)) {
+                attr = substr(line, RSTART, RLENGTH)
+                sub(/^#\[path[[:space:]]*=[[:space:]]*"/, "", attr)
+                sub(/"\]$/, "", attr)
+                if (pending != "") emit(pending)
+                pending = attr
+            }
+            if (match(line, /(^|[^A-Za-z0-9_])mod[[:space:]]+[A-Za-z_][A-Za-z0-9_]*[[:space:]]*[{;]/)) {
+                decl = substr(line, RSTART, RLENGTH)
+                inline = (substr(decl, length(decl), 1) == "{")
+                sub(/[[:space:]]*[{;]$/, "", decl)
+                sub(/^.*mod[[:space:]]+/, "", decl)
+                if (inline) {
+                    outer_for_path = (top > 0 ? dir[top] : "")
+                    outer_for_name = (top > 0 ? dir[top] : stem)
+                    top++
+                    opened[top] = depth
+                    dir[top] = (pending != "" ? join(outer_for_path, pending) : join(outer_for_name, decl))
+                } else if (pending != "") {
+                    emit(pending)
+                }
+                pending = ""
+            }
+            opens = gsub(/\{/, "{", line)
+            closes = gsub(/\}/, "}", line)
+            depth += opens - closes
+            while (top > 0 && depth <= opened[top]) top--
+        }
+        END { if (pending != "") emit(pending) }
+    ' "$source"
 }
 
 while IFS= read -r source; do
@@ -111,15 +159,15 @@ while IFS= read -r source; do
     # Git emits relative crate/src paths containing a slash, with no trailing slash.
     source_dir="${source%/*}"
 
-    while IFS= read -r target; do
+    while IFS=$'\t' read -r target base; do
         [[ -n "$target" ]] || continue
-        resolved="$(normalize "${source_dir}/${target}")"
+        resolved="$(normalize "${source_dir}/${base:+$base/}${target}")"
         if [[ "$resolved" != "$crate_dir"/* ]]; then
             printf '%s: #[path = "%s"] resolves to %s, outside the crate directory %s\n' \
                 "$source" "$target" "$resolved" "$crate_dir" >&2
             status=1
         fi
-    done < <(sed -n 's/.*#\[path[[:space:]]*=[[:space:]]*"\([^"]*\)"\].*/\1/p' "$source")
+    done < <(path_targets "$source")
 done < <(path_candidates)
 
 # -----------------------------------------------------------------------------
@@ -156,8 +204,10 @@ Restore it with:
 
     ln -s ../../generated/dto crates/types/generated
 
-and keep every `#[path]` in `crates/types/src/lib.rs` relative to that link
-(`../generated/...`), never to `../../../generated/dto/...`.
+and keep every `#[path]` in `crates/types/src/**` relative to that link from
+the directory rustc resolves it in (`../generated/...` at the top level of
+`lib.rs`, `../../../generated/...` inside an inline module mounted at
+`compat/seam`), never to the top-level `generated/dto/...` itself.
 EOF
 fi
 

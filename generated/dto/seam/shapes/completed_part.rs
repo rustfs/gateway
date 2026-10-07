@@ -17,8 +17,7 @@
 //! The `CompletedPart` shape conversions.
 
 #[allow(unused_imports)] // Not every conversion needs a leaf function.
-use crate::compat::s3s_0_17_0::leaf;
-use crate::compat::s3s_0_17_0::s3s;
+use super::super::{leaf, s3s};
 use crate::compat::ConversionError;
 
 /// Converts one `CompletedPart` from the gateway shape to the s3s shape.
@@ -41,5 +40,42 @@ pub fn completed_part_to_s3s(value: crate::ops::shapes::CompletedPart) -> Result
         checksum_xxhash64: value.checksum_xxhash64,
         e_tag: value.e_tag.map(|x| -> Result<_, ConversionError> { Ok(leaf::etag_to_s3s(&x)) }).transpose()?,
         part_number: Some(value.part_number),
+    })
+}
+
+/// Converts one `CompletedPart` from the s3s shape to the gateway shape.
+///
+/// # Errors
+///
+/// [`ConversionError`] naming a member the other side cannot hold.
+#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
+pub fn completed_part_from_s3s(value: s3s::dto::CompletedPart) -> Result<crate::ops::shapes::CompletedPart, ConversionError> {
+    let s3s::dto::CompletedPart {
+        checksum_crc32,
+        checksum_crc32c,
+        checksum_crc64nvme,
+        checksum_md5,
+        checksum_sha1,
+        checksum_sha256,
+        checksum_sha512,
+        checksum_xxhash128,
+        checksum_xxhash3,
+        checksum_xxhash64,
+        e_tag,
+        part_number,
+    } = value;
+    Ok(crate::ops::shapes::CompletedPart {
+        e_tag: e_tag.map(|x| -> Result<_, ConversionError> { Ok(leaf::etag_from_s3s("e_tag", x)?) }).transpose()?,
+        checksum_crc32,
+        checksum_crc32c,
+        checksum_crc64nvme,
+        checksum_sha1,
+        checksum_sha256,
+        checksum_sha512,
+        checksum_md5,
+        checksum_xxhash64,
+        checksum_xxhash3,
+        checksum_xxhash128,
+        part_number: match part_number { Some(x) => x, None => return Err(ConversionError { field: "part_number", reason: "the gateway shape requires this member" }) },
     })
 }

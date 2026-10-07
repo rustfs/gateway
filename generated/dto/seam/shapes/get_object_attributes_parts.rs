@@ -17,9 +17,25 @@
 //! The `GetObjectAttributesParts` shape conversions.
 
 #[allow(unused_imports)] // Not every conversion needs a leaf function.
-use crate::compat::s3s_0_17_0::leaf;
-use crate::compat::s3s_0_17_0::s3s;
+use super::super::{leaf, s3s};
 use crate::compat::ConversionError;
+
+/// Converts one `GetObjectAttributesParts` from the gateway shape to the s3s shape.
+///
+/// # Errors
+///
+/// [`ConversionError`] naming a member the other side cannot hold.
+#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
+pub fn get_object_attributes_parts_to_s3s(value: crate::ops::shapes::GetObjectAttributesParts) -> Result<s3s::dto::GetObjectAttributesParts, ConversionError> {
+    Ok(s3s::dto::GetObjectAttributesParts {
+        is_truncated: Some(value.is_truncated),
+        max_parts: Some(value.max_parts),
+        next_part_number_marker: value.next_part_number_marker.map(|x| -> Result<_, ConversionError> { Ok(leaf::parse_i32("next_part_number_marker", &x)?) }).transpose()?,
+        part_number_marker: value.part_number_marker.map(|x| -> Result<_, ConversionError> { Ok(leaf::parse_i32("part_number_marker", &x)?) }).transpose()?,
+        parts: if value.parts.is_empty() { None } else { Some({ let x = value.parts; x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(super::super::shapes::object_part::object_part_to_s3s(e)?) }).collect::<Result<Vec<_>, ConversionError>>()? }) },
+        total_parts_count: Some(value.total_parts_count),
+    })
+}
 
 /// Converts one `GetObjectAttributesParts` from the s3s shape to the gateway shape.
 ///

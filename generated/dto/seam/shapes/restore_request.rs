@@ -17,8 +17,7 @@
 //! The `RestoreRequest` shape conversions.
 
 #[allow(unused_imports)] // Not every conversion needs a leaf function.
-use crate::compat::s3s_0_17_0::leaf;
-use crate::compat::s3s_0_17_0::s3s;
+use super::super::{leaf, s3s};
 use crate::compat::ConversionError;
 
 /// Converts one `RestoreRequest` from the gateway shape to the s3s shape.
@@ -36,5 +35,32 @@ pub fn restore_request_to_s3s(value: crate::ops::shapes::RestoreRequest) -> Resu
         select_parameters: value.select_parameters.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::select_parameters::select_parameters_to_s3s(x)?) }).transpose()?,
         tier: value.tier.map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::Tier::from(x.as_str().to_owned())) }).transpose()?,
         type_: value.r#type.map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::RestoreRequestType::from(x.as_str().to_owned())) }).transpose()?,
+    })
+}
+
+/// Converts one `RestoreRequest` from the s3s shape to the gateway shape.
+///
+/// # Errors
+///
+/// [`ConversionError`] naming a member the other side cannot hold.
+#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
+pub fn restore_request_from_s3s(value: s3s::dto::RestoreRequest) -> Result<crate::ops::shapes::RestoreRequest, ConversionError> {
+    let s3s::dto::RestoreRequest {
+        days,
+        description,
+        glacier_job_parameters,
+        output_location,
+        select_parameters,
+        tier,
+        type_,
+    } = value;
+    Ok(crate::ops::shapes::RestoreRequest {
+        days,
+        glacier_job_parameters: glacier_job_parameters.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::glacier_job_parameters::glacier_job_parameters_from_s3s(x)?) }).transpose()?,
+        r#type: type_.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::Type::custom(x.as_str().to_owned())) }).transpose()?,
+        tier: tier.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::Tier::custom(x.as_str().to_owned())) }).transpose()?,
+        description,
+        select_parameters: select_parameters.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::select_parameters::select_parameters_from_s3s(x)?) }).transpose()?,
+        output_location: output_location.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::output_location::output_location_from_s3s(x)?) }).transpose()?,
     })
 }

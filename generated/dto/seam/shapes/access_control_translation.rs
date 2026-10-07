@@ -17,8 +17,7 @@
 //! The `AccessControlTranslation` shape conversions.
 
 #[allow(unused_imports)] // Not every conversion needs a leaf function.
-use crate::compat::s3s_0_17_0::leaf;
-use crate::compat::s3s_0_17_0::s3s;
+use super::super::{leaf, s3s};
 use crate::compat::ConversionError;
 
 /// Converts one `AccessControlTranslation` from the gateway shape to the s3s shape.

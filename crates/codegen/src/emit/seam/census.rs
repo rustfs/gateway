@@ -262,7 +262,7 @@ pub fn module(facts: &S3sFacts, name: &str) -> Result<String, String> {
         out,
         "\n//! The `{name}` member census: every member path, and the paths two values differ at or one holds.\n\n\
          #[allow(unused_imports)] // A structure whose every member is skipped names no pinned type.\n\
-         use crate::compat::s3s_0_17_0::s3s;\n\n\
+         use super::super::s3s;\n\n\
          /// Every member path of `{name}`, nested structures expanded, `[]` marking a list element.\n\
          pub const PATHS: &[&str] = &[\n"
     );
@@ -311,6 +311,27 @@ pub fn root(modules: &[String]) -> String {
     out
 }
 
+/// The error-code census: every `S3ErrorCode` variant the fact table lists, with the HTTP status
+/// its `status_code` names, so a test can hold the error seam to every code without naming the
+/// pinned revision's list by hand (rustfs/backlog#2759).
+#[must_use]
+pub fn error_codes(facts: &S3sFacts) -> String {
+    let mut out = String::from(super::render::HEADER);
+    out.push_str(
+        "\n//! The error-code census: every `S3ErrorCode` variant but `Custom`, with the status it names.\n\n\
+         #[allow(unused_imports)] // Named so a stale list fails to compile against the pinned crate.\n\
+         use super::super::s3s;\n\n\
+         /// Every pinned error code and the HTTP status its `status_code` names, `None` for a code that\n\
+         /// names none, in the order the pinned enum declares them.\n\
+         pub const CODES: &[(&str, Option<u16>)] = &[\n",
+    );
+    for (name, status) in &facts.errors {
+        let _ = writeln!(out, "    (\"{name}\", {status:?}),");
+    }
+    out.push_str("];\n");
+    out
+}
+
 /// Every census file for the covered operations, under `dir`.
 ///
 /// # Errors
@@ -328,6 +349,8 @@ pub fn emit(facts: &S3sFacts, operations: &[&str], dir: &Path) -> Result<Vec<(st
         files.push((dir.join(format!("{}.rs", naming::module_name(name))), module(facts, name)?));
         modules.push(naming::module_ident(name));
     }
+    files.push((dir.join("error_codes.rs"), error_codes(facts)));
+    modules.push("error_codes".to_owned());
     files.push((dir.join("mod.rs"), root(&modules)));
     Ok(files)
 }

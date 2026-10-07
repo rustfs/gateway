@@ -399,7 +399,12 @@ for crate, (relative, source, document) in packages.items():
             # A narrower feature may enable one s3s revision (the production seam), but only under
             # the name of the revision it links, only as a part of compat-s3s, and only with the
             # same expiry marker; otherwise a second feature would be a second, unreviewed s3s door.
+            # The one admitted exception to the naming rule is `compat-s3s-rustfs`, the feature
+            # that tracks RustFS main's own s3s pin (rustfs/backlog#2759): its alias must be
+            # `s3s_rustfs`, a git dependency pinned to a full 40-hex commit, so the feature name
+            # may stay while the pin moves with RustFS.
             s3s_revisions = {}
+            s3s_full_git_revs = {}
             for _, dependency_table in tables(document):
                 for alias, declaration in dependency_table.items():
                     package, merged = resolve(alias, declaration, workspace_dependencies)
@@ -412,6 +417,8 @@ for crate, (relative, source, document) in packages.items():
                         version = str(merged.get("version", ""))
                         if "git" in merged:
                             s3s_revisions[alias] = rev[:8] if len(rev) >= 8 else ""
+                            if re.fullmatch(r"[0-9a-f]{40}", rev):
+                                s3s_full_git_revs[alias] = rev
                         else:
                             s3s_revisions[alias] = version.replace(".", "-") if re.fullmatch(r"\d+\.\d+\.\d+", version) else ""
             umbrella = features.get("compat-s3s") or []
@@ -423,8 +430,10 @@ for crate, (relative, source, document) in packages.items():
                     continue
                 line_index = next((index for index, line in enumerate(lines) if re.match(rf"^\s*{re.escape(name)}\s*=", line)), 0)
                 expected = {f"compat-s3s-{s3s_revisions[alias]}" for alias in enabled}
+                if enabled == ["s3s_rustfs"] and "s3s_rustfs" in s3s_full_git_revs:
+                    expected.add("compat-s3s-rustfs")
                 if len(enabled) != 1 or name not in expected or not s3s_revisions[enabled[0]]:
-                    violations.append((relative, line_index + 1, f"feature {name} enables {', '.join(enabled)} but is not compat-s3s-<rev8|X-Y-Z> of exactly one s3s revision"))
+                    violations.append((relative, line_index + 1, f"feature {name} enables {', '.join(enabled)} but is not compat-s3s-<rev8|X-Y-Z> of exactly one s3s revision (or compat-s3s-rustfs enabling the full-rev git alias s3s_rustfs)"))
                 if name not in umbrella:
                     violations.append((relative, line_index + 1, f"feature {name} enables s3s but compat-s3s does not include it"))
                 window = lines[max(0, line_index - 6) : line_index + 1]

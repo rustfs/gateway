@@ -17,9 +17,30 @@
 //! The `Checksum` shape conversions.
 
 #[allow(unused_imports)] // Not every conversion needs a leaf function.
-use crate::compat::s3s_0_17_0::leaf;
-use crate::compat::s3s_0_17_0::s3s;
+use super::super::{leaf, s3s};
 use crate::compat::ConversionError;
+
+/// Converts one `Checksum` from the gateway shape to the s3s shape.
+///
+/// # Errors
+///
+/// [`ConversionError`] naming a member the other side cannot hold.
+#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
+pub fn checksum_to_s3s(value: crate::ops::shapes::Checksum) -> Result<s3s::dto::Checksum, ConversionError> {
+    Ok(s3s::dto::Checksum {
+        checksum_crc32: value.checksum_crc32,
+        checksum_crc32c: value.checksum_crc32c,
+        checksum_crc64nvme: value.checksum_crc64nvme,
+        checksum_md5: value.checksum_md5,
+        checksum_sha1: value.checksum_sha1,
+        checksum_sha256: value.checksum_sha256,
+        checksum_sha512: value.checksum_sha512,
+        checksum_type: value.checksum_type.map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::ChecksumType::from(x.as_str().to_owned())) }).transpose()?,
+        checksum_xxhash128: value.checksum_xxhash128,
+        checksum_xxhash3: value.checksum_xxhash3,
+        checksum_xxhash64: value.checksum_xxhash64,
+    })
+}
 
 /// Converts one `Checksum` from the s3s shape to the gateway shape.
 ///

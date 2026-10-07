@@ -26,7 +26,7 @@ use super::expr::Ctx;
 use super::facts::S3sFacts;
 use super::render;
 
-fn field(name: &str, ty: Type, required: bool) -> Field {
+pub(super) fn field(name: &str, ty: Type, required: bool) -> Field {
     Field {
         name: name.to_owned(),
         wire_name: Some(name.to_owned()),
@@ -41,11 +41,11 @@ fn field(name: &str, ty: Type, required: bool) -> Field {
     }
 }
 
-fn facts(text: &str) -> S3sFacts {
+pub(super) fn facts(text: &str) -> S3sFacts {
     S3sFacts::parse(text).expect("facts")
 }
 
-fn ctx(facts: &S3sFacts) -> Ctx<'_> {
+pub(super) fn ctx(facts: &S3sFacts) -> Ctx<'_> {
     Ctx {
         facts,
         reached: Default::default(),
@@ -194,11 +194,16 @@ fn a_supplied_member_becomes_a_parameter_and_is_never_converted() {
 }
 
 #[test]
-fn n_a_supplied_member_has_no_backward_conversion() {
-    let facts = facts("struct CopyObjectInput\n  copy_source: Option<String>\n");
+fn n_a_supplied_member_is_still_held_to_the_pairing_table_backward() {
+    // Backward, a supplied member converts like any other (rustfs/backlog#2759); an s3s type the
+    // table cannot pair with the gateway member still fails generation rather than being guessed.
+    let facts = facts("struct CopyObjectInput\n  copy_source: Option<bool>\n");
     let errors = render::backward_struct(&ctx(&facts), "CopyObjectInput", &[field("CopySource", Type::String, false)], "G", "v")
-        .expect_err("forward only");
-    assert!(errors[0].contains("forward only"), "{errors:?}");
+        .expect_err("no pair");
+    assert!(
+        errors[0].starts_with("CopyObjectInput.copy_source: no s3s → gateway conversion"),
+        "{errors:?}"
+    );
 }
 
 // ── legacy header and query semantics ────────────────────────────────────────────────────────
@@ -291,10 +296,15 @@ mod legacy_semantics {
     }
 
     #[test]
-    fn n_a_member_decoded_from_the_raw_request_has_no_backward_conversion() {
-        let facts = facts("struct CopyObjectInput\n  version_id: Option<String>\n");
-        let errors = render::backward_struct(&ctx(&facts), "CopyObjectInput", &[], "G", "v").expect_err("forward only");
-        assert!(errors[0].contains("forward only"), "{errors:?}");
+    fn n_a_member_decoded_from_the_raw_request_is_refused_backward_only_when_it_can_be_unset() {
+        // Backward, a legacy-only member is refused when set rather than dropped (rustfs/backlog#2759);
+        // a required one could never be unset, so it cannot be converted at all.
+        let facts = facts("struct CopyObjectInput\n  version_id: String\n");
+        let errors = render::backward_struct(&ctx(&facts), "CopyObjectInput", &[], "G", "v").expect_err("never unset");
+        assert_eq!(
+            errors,
+            ["CopyObjectInput.version_id: a required legacy-only member Leaf(\"String\") cannot be refused when set"]
+        );
     }
 }
 

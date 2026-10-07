@@ -17,9 +17,24 @@
 //! The `Grantee` shape conversions.
 
 #[allow(unused_imports)] // Not every conversion needs a leaf function.
-use crate::compat::s3s_0_17_0::leaf;
-use crate::compat::s3s_0_17_0::s3s;
+use super::super::{leaf, s3s};
 use crate::compat::ConversionError;
+
+/// Converts one `Grantee` from the gateway shape to the s3s shape.
+///
+/// # Errors
+///
+/// [`ConversionError`] naming a member the other side cannot hold.
+#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
+pub fn grantee_to_s3s(value: crate::ops::shapes::Grantee) -> Result<s3s::dto::Grantee, ConversionError> {
+    Ok(s3s::dto::Grantee {
+        display_name: value.display_name,
+        email_address: value.email_address,
+        id: value.id,
+        type_: match value.r#type { Some(x) => s3s::dto::Type::from(x.as_str().to_owned()), None => return Err(ConversionError { field: "type", reason: "the s3s shape requires this member" }) },
+        uri: value.uri,
+    })
+}
 
 /// Converts one `Grantee` from the s3s shape to the gateway shape.
 ///
@@ -41,21 +56,5 @@ pub fn grantee_from_s3s(value: s3s::dto::Grantee) -> Result<crate::ops::shapes::
         id,
         uri,
         r#type: Some({ let x = type_; crate::ops::enums::Type::custom(x.as_str().to_owned()) }),
-    })
-}
-
-/// Converts one `Grantee` from the gateway shape to the s3s shape.
-///
-/// # Errors
-///
-/// [`ConversionError`] naming a member the other side cannot hold.
-#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn grantee_to_s3s(value: crate::ops::shapes::Grantee) -> Result<s3s::dto::Grantee, ConversionError> {
-    Ok(s3s::dto::Grantee {
-        display_name: value.display_name,
-        email_address: value.email_address,
-        id: value.id,
-        type_: match value.r#type { Some(x) => s3s::dto::Type::from(x.as_str().to_owned()), None => return Err(ConversionError { field: "type", reason: "the s3s shape requires this member" }) },
-        uri: value.uri,
     })
 }

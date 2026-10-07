@@ -17,9 +17,33 @@
 //! The `Part` shape conversions.
 
 #[allow(unused_imports)] // Not every conversion needs a leaf function.
-use crate::compat::s3s_0_17_0::leaf;
-use crate::compat::s3s_0_17_0::s3s;
+use super::super::{leaf, s3s};
 use crate::compat::ConversionError;
+
+/// Converts one `Part` from the gateway shape to the s3s shape.
+///
+/// # Errors
+///
+/// [`ConversionError`] naming a member the other side cannot hold.
+#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
+pub fn part_to_s3s(value: crate::ops::shapes::Part) -> Result<s3s::dto::Part, ConversionError> {
+    Ok(s3s::dto::Part {
+        checksum_crc32: value.checksum_crc32,
+        checksum_crc32c: value.checksum_crc32c,
+        checksum_crc64nvme: value.checksum_crc64nvme,
+        checksum_md5: value.checksum_md5,
+        checksum_sha1: value.checksum_sha1,
+        checksum_sha256: value.checksum_sha256,
+        checksum_sha512: value.checksum_sha512,
+        checksum_xxhash128: value.checksum_xxhash128,
+        checksum_xxhash3: value.checksum_xxhash3,
+        checksum_xxhash64: value.checksum_xxhash64,
+        e_tag: Some({ let x = value.e_tag; leaf::etag_to_s3s(&x) }),
+        last_modified: value.last_modified.map(|x| -> Result<_, ConversionError> { Ok(leaf::timestamp_to_s3s("last_modified", x)?) }).transpose()?,
+        part_number: Some(value.part_number),
+        size: Some(value.size),
+    })
+}
 
 /// Converts one `Part` from the s3s shape to the gateway shape.
 ///

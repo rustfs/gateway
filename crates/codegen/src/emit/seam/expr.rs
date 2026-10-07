@@ -157,6 +157,11 @@ impl Ctx<'_> {
             (S3sType::Leaf(l), Type::String) if l == "String" => v.to_owned(),
             (S3sType::Enum(_), Type::String) => format!("{v}.as_str().to_owned()"),
             (S3sType::Leaf(l), Type::String) if l == "i32" => format!("{v}.to_string()"),
+            (S3sType::Leaf(l), Type::String) if l == "CopySource" => format!("leaf::copy_source_from_s3s(&{v})"),
+            (S3sType::Leaf(l), Type::String) if l == "ETagCondition" => {
+                format!("leaf::etag_condition_to_text(\"{field}\", &{v})?")
+            }
+            (S3sType::Leaf(l), Type::Range) if l == "Range" => format!("leaf::range_from_s3s(&{v})"),
             (S3sType::Leaf(l), Type::StringEnum(_)) if l == "Event" => {
                 format!("{}::custom(String::from({v}))", gateway_enum(member))
             }

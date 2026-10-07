@@ -17,8 +17,7 @@
 //! The `Encryption` shape conversions.
 
 #[allow(unused_imports)] // Not every conversion needs a leaf function.
-use crate::compat::s3s_0_17_0::leaf;
-use crate::compat::s3s_0_17_0::s3s;
+use super::super::{leaf, s3s};
 use crate::compat::ConversionError;
 
 /// Converts one `Encryption` from the gateway shape to the s3s shape.
@@ -32,5 +31,24 @@ pub fn encryption_to_s3s(value: crate::ops::shapes::Encryption) -> Result<s3s::d
         encryption_type: { let x = value.encryption_type; s3s::dto::ServerSideEncryption::from(x.as_str().to_owned()) },
         kms_context: value.kms_context,
         kms_key_id: value.kms_key_id,
+    })
+}
+
+/// Converts one `Encryption` from the s3s shape to the gateway shape.
+///
+/// # Errors
+///
+/// [`ConversionError`] naming a member the other side cannot hold.
+#[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
+pub fn encryption_from_s3s(value: s3s::dto::Encryption) -> Result<crate::ops::shapes::Encryption, ConversionError> {
+    let s3s::dto::Encryption {
+        encryption_type,
+        kms_context,
+        kms_key_id,
+    } = value;
+    Ok(crate::ops::shapes::Encryption {
+        encryption_type: { let x = encryption_type; crate::ops::enums::EncryptionType::custom(x.as_str().to_owned()) },
+        kms_key_id,
+        kms_context,
     })
 }

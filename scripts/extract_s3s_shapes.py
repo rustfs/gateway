@@ -16,8 +16,10 @@
 
 Reads `src/dto/generated.rs` of one s3s release and prints, one fact per line, every struct
 member with its type resolved through the type aliases, every string enumeration, and every
-union. Only names and type spellings are extracted — no s3s code or documentation — so the output
-is a fact table, not a copy of s3s (AGENTS.md Provenance).
+union; and reads `src/error/generated.rs` for every `S3ErrorCode` variant but `Custom` with the
+HTTP status its `status_code` names (`-` when it names none). Only names, type spellings and
+status numbers are extracted — no s3s code or documentation — so the output is a fact table, not
+a copy of s3s (AGENTS.md Provenance).
 
 Usage: scripts/extract_s3s_shapes.py <path to s3s-X.Y.Z crate> > crates/codegen/src/emit/seam/s3s_X_Y_Z.facts
 """
@@ -28,6 +30,37 @@ from pathlib import Path
 root = Path(sys.argv[1])
 version = root.name.removeprefix("s3s-")
 source = (root / "src/dto/generated.rs").read_text()
+errors_source = (root / "src/error/generated.rs").read_text()
+
+# The `http::StatusCode` constants the s3s error table names, by number.
+STATUS = {
+    "MULTIPLE_CHOICES": 300, "MOVED_PERMANENTLY": 301, "FOUND": 302, "SEE_OTHER": 303, "NOT_MODIFIED": 304,
+    "USE_PROXY": 305, "TEMPORARY_REDIRECT": 307, "PERMANENT_REDIRECT": 308,
+    "BAD_REQUEST": 400, "UNAUTHORIZED": 401, "PAYMENT_REQUIRED": 402, "FORBIDDEN": 403, "NOT_FOUND": 404,
+    "METHOD_NOT_ALLOWED": 405, "NOT_ACCEPTABLE": 406, "PROXY_AUTHENTICATION_REQUIRED": 407, "REQUEST_TIMEOUT": 408,
+    "CONFLICT": 409, "GONE": 410, "LENGTH_REQUIRED": 411, "PRECONDITION_FAILED": 412, "PAYLOAD_TOO_LARGE": 413,
+    "URI_TOO_LONG": 414, "UNSUPPORTED_MEDIA_TYPE": 415, "RANGE_NOT_SATISFIABLE": 416, "EXPECTATION_FAILED": 417,
+    "IM_A_TEAPOT": 418, "MISDIRECTED_REQUEST": 421, "UNPROCESSABLE_ENTITY": 422, "LOCKED": 423,
+    "FAILED_DEPENDENCY": 424, "TOO_EARLY": 425, "UPGRADE_REQUIRED": 426, "PRECONDITION_REQUIRED": 428,
+    "TOO_MANY_REQUESTS": 429, "REQUEST_HEADER_FIELDS_TOO_LARGE": 431, "UNAVAILABLE_FOR_LEGAL_REASONS": 451,
+    "INTERNAL_SERVER_ERROR": 500, "NOT_IMPLEMENTED": 501, "BAD_GATEWAY": 502, "SERVICE_UNAVAILABLE": 503,
+    "GATEWAY_TIMEOUT": 504, "HTTP_VERSION_NOT_SUPPORTED": 505, "VARIANT_ALSO_NEGOTIATES": 506,
+    "INSUFFICIENT_STORAGE": 507, "LOOP_DETECTED": 508, "NOT_EXTENDED": 510, "NETWORK_AUTHENTICATION_REQUIRED": 511,
+}
+
+enum_body = re.search(r"^pub enum S3ErrorCode \{\n(.*?)^\}", errors_source, re.M | re.S).group(1)
+error_codes = re.findall(r"^    (\w+),$", enum_body, re.M)
+status_body = re.search(r"pub fn status_code\(&self\) -> Option<StatusCode> \{\n(.*?)^    \}", errors_source, re.M | re.S).group(1)
+error_status = {}
+for name, status in re.findall(r"Self::(\w+) => Some\(StatusCode::(\w+)\)", status_body):
+    if status not in STATUS:
+        raise SystemExit(f"unknown status constant {status!r} for {name}")
+    error_status[name] = STATUS[status]
+for name in re.findall(r"Self::(\w+) => None", status_body):
+    error_status[name] = None
+missing = [name for name in error_codes if name not in error_status]
+if missing:
+    raise SystemExit(f"error codes without a status arm: {missing}")
 
 aliases = {"List": None, "Map": None}
 for name, target in re.findall(r"^pub type (\w+) = (.+);$", source, re.M):
@@ -76,7 +109,10 @@ def resolve(ty: str) -> str:
     raise SystemExit(f"unresolved s3s type {ty!r}")
 
 
-print(f"# s3s {version} DTO facts, extracted by scripts/extract_s3s_shapes.py. Do not edit.")
+print(f"# s3s {version} DTO and error-code facts, extracted by scripts/extract_s3s_shapes.py. Do not edit.")
+for name in error_codes:
+    status = error_status[name]
+    print(f"error {name} {'-' if status is None else status}")
 for name in sorted(enums):
     print(f"enum {name}")
 for name in sorted(unions):

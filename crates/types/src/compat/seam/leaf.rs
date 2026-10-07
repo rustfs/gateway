@@ -13,22 +13,19 @@
 // limitations under the License.
 
 //! The hand-written leaf conversions the generated seam (`super::generated`) calls: one function
-//! per gateway scalar whose s3s spelling differs.
+//! per gateway scalar whose s3s spelling differs, in each direction the seam converts.
 //!
 //! Responsible for: timestamps, entity tags and conditions, checksum values and the checksum
 //! fan-out, names, ranges, copy sources, upload ids, numbers carried as text, and moving a body
 //! stream across in either direction without buffering it. A value the other side cannot hold is
 //! a [`ConversionError`] naming the member, never a default.
 //! NOT responsible for: structure and member matching, which is generated
-//! (`crates/codegen/src/emit/seam`, rustfs/gateway#967).
+//! (`crates/codegen/src/emit/seam`, rustfs/gateway#967), or the body adapters themselves, which
+//! live beside the hand-written PutObject seam (`super::put_object`) and are only named here.
 //! Upstream: the gateway scalars and `super::s3s`. Downstream: `super::generated`.
 
-use core::pin::Pin;
-use core::task::{Context, Poll};
-
 use super::s3s;
-use bytes::Bytes;
-use rustfs_gateway_stream::{ByteStream, PayloadCaps, PayloadRead, PayloadStream, StreamError, TrailingHeaders};
+use rustfs_gateway_stream::ByteStream;
 use s3s::dto as oracle;
 
 use crate::compat::ConversionError;
@@ -106,6 +103,34 @@ pub fn etag_condition_from_text(field: &'static str, value: &str) -> Result<orac
 /// A value the s3s copy-source grammar rejects.
 pub fn copy_source_to_s3s(field: &'static str, value: &str) -> Result<oracle::CopySource, ConversionError> {
     oracle::CopySource::parse(value).map_err(|_| refusal(field, "not a copy source the s3s input can hold"))
+}
+
+/// The s3s copy source as the `x-amz-copy-source` text the gateway input holds: the one spelling
+/// s3s itself writes for the value, which its grammar reads back to the same value.
+#[must_use]
+pub fn copy_source_from_s3s(source: &oracle::CopySource) -> String {
+    source.format_to_string()
+}
+
+/// The s3s condition as the conditional header text the gateway input holds.
+///
+/// # Errors
+///
+/// A condition that is not a header value, or one spelled outside ASCII.
+pub fn etag_condition_to_text(field: &'static str, condition: &oracle::ETagCondition) -> Result<String, ConversionError> {
+    let header = condition
+        .to_http_header()
+        .map_err(|_| refusal(field, "an entity-tag condition that is not a header value"))?;
+    header
+        .to_str()
+        .map(str::to_owned)
+        .map_err(|_| refusal(field, "an entity-tag condition spelled outside ASCII"))
+}
+
+/// The s3s range as the gateway `Range` value, spelled as the s3s grammar would read it back.
+#[must_use]
+pub fn range_from_s3s(range: &oracle::Range) -> RangeSpec {
+    RangeSpec::new(&range.to_header_string())
 }
 
 /// The `Range` header as the s3s range.
@@ -277,61 +302,5 @@ pub fn streaming_blob(stream: ByteStream) -> oracle::StreamingBlob {
 /// The s3s streaming body a RustFS answer carries, as the gateway body, unread.
 #[must_use]
 pub fn byte_stream(blob: oracle::StreamingBlob) -> ByteStream {
-    let remaining = s3s::stream::ByteStream::remaining_length(&blob)
-        .exact()
-        .and_then(|len| u64::try_from(len).ok());
-    let body = S3sBody {
-        blob,
-        remaining,
-        done: false,
-    };
-    ByteStream::new(Box::pin(body)).expect("S3sBody declares KNOWN_LENGTH exactly when it has a length") // caps are derived from the hint
-}
-
-/// An s3s body presented as a gateway push-model body.
-struct S3sBody {
-    blob: oracle::StreamingBlob,
-    remaining: Option<u64>,
-    done: bool,
-}
-
-impl PayloadStream for S3sBody {
-    fn poll_read(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<PayloadRead, StreamError>> {
-        let this = self.get_mut();
-        if this.done {
-            return Poll::Ready(Err(StreamError::new(rustfs_gateway_stream::StreamErrorKind::PolledAfterEof)));
-        }
-        match futures_core::Stream::poll_next(Pin::new(&mut this.blob), cx) {
-            Poll::Pending => Poll::Pending,
-            Poll::Ready(None) => {
-                this.done = true;
-                Poll::Ready(Ok(PayloadRead::Eof {
-                    trailers: TrailingHeaders::empty(),
-                }))
-            }
-            Poll::Ready(Some(Ok(chunk))) => {
-                let chunk: Bytes = chunk;
-                if let Some(remaining) = this.remaining.as_mut() {
-                    *remaining = remaining.saturating_sub(chunk.len() as u64);
-                }
-                Poll::Ready(Ok(PayloadRead::Chunk(chunk)))
-            }
-            Poll::Ready(Some(Err(error))) => {
-                this.done = true;
-                Poll::Ready(Err(StreamError::upstream(error)))
-            }
-        }
-    }
-
-    fn caps(&self) -> PayloadCaps {
-        if self.remaining.is_some() {
-            PayloadCaps::PUSH | PayloadCaps::KNOWN_LENGTH
-        } else {
-            PayloadCaps::PUSH
-        }
-    }
-
-    fn len_hint(&self) -> Option<u64> {
-        self.remaining
-    }
+    super::put_object::byte_stream(blob)
 }
