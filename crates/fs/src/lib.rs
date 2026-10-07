@@ -134,6 +134,7 @@ mod encryption;
 mod lifecycle;
 mod lifecycle_scheduler;
 mod listing;
+mod part_lengths;
 pub mod policy;
 mod post_object;
 mod reads;

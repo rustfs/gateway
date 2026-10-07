@@ -13,9 +13,7 @@
 // limitations under the License.
 
 //! Production-registry contract for the filesystem reference backend.
-//!
-//! Responsible for: proving bucket, object, multipart, versioning, listing, tagging, and lifecycle CRUD through
-//! signed requests to a real `S3Service`, including storage-boundary refusals and not-found behavior.
+//! Responsible for: signed service tests of CRUD, versioning, multipart, lifecycle and storage refusals.
 //! NOT responsible for: expanded example binaries or production durability.
 //! Upstream: `rustfs-gateway-fs` and the public gateway facade. Downstream: the crate verification gate.
 
@@ -87,6 +85,8 @@ mod object_checksums;
 mod object_encryption;
 #[path = "crud/object_metadata.rs"]
 mod object_metadata;
+#[path = "crud/object_parts.rs"]
+mod object_parts;
 #[path = "crud/object_tagging.rs"]
 mod object_tagging;
 #[path = "crud/paging_limits.rs"]

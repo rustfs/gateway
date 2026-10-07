@@ -65,6 +65,7 @@ pub(super) struct Representation {
     /// The representation headers stored with this version.
     pub(super) headers: ContentHeaders,
     pub(super) checksum: Option<super::checksums::StoredChecksum>,
+    part_lengths: Option<Vec<u64>>,
     /// Whether this is the key's current version — read without a version id, named by the id of
     /// the newest record, or a plain object file — which alone answers `x-amz-expiration`.
     latest: bool,
@@ -114,6 +115,7 @@ struct Window {
     start: usize,
     end_exclusive: usize,
     content_range: Option<String>,
+    parts_count: Option<i32>,
     status: u16,
 }
 
@@ -126,21 +128,21 @@ impl Window {
 
 /// Resolves the request's range selectors against a representation.
 ///
-/// `part_number` is passed through even though this backend cannot answer one: its presence is
-/// what makes `evaluate_range` refuse a `Range` sent beside it, and dropping it here would
-/// silently un-refuse the combination S3 answers neither half of.
+/// GET resolves a part selector against persisted lengths through the core part-table contract.
+/// HEAD retains its explicit unsupported result. Both still pass the selector to `evaluate_range`,
+/// so a Range sent beside partNumber cannot accidentally become an ordinary range.
 ///
 /// # Errors
 ///
 /// The contract's own refusals: `Range` together with `partNumber`, and an unsatisfiable range,
-/// which becomes the `416` carrying `Content-Range: bytes */<length>`. A `partNumber` on its own
-/// is refused by name — this backend stores an object's assembled bytes and no part table, so a
-/// window for a part is a fact it does not hold, and answering one would be inventing it.
+/// which becomes the `416` carrying `Content-Range: bytes */<length>`. GET also refuses invalid or
+/// unavailable parts and older multipart records without boundaries; HEAD part reads remain unsupported.
 fn resolve_window(
     range: Option<&str>,
     if_range: Option<&IfRange>,
     part_number: Option<i32>,
     representation: &Representation,
+    resolve_parts: bool,
 ) -> Result<Window, HandlerError> {
     let length = representation.bytes.len();
     let selectors = RangeSelectors {
@@ -155,6 +157,20 @@ fn resolve_window(
     };
     let decision = evaluate_range(&selectors, &validators, length as u64)
         .map_err(|rejection| HandlerError::new(rejection.code().clone(), rejection.reason()))?;
+    let parts_count = representation
+        .part_lengths
+        .as_ref()
+        .and_then(|lengths| decision.part_count_header(lengths.len() as u32))
+        .and_then(|count| i32::try_from(count).ok());
+    let decision = match decision {
+        RangeDecision::Part { part_number } if resolve_parts => super::part_lengths::window(
+            part_number,
+            representation.part_lengths.as_deref(),
+            &representation.e_tag,
+            length as u64,
+        )?,
+        decision => decision,
+    };
     let content_range = decision.content_range();
     let served = decision.content_length(length as u64);
     let status = decision.status().as_u16();
@@ -163,6 +179,7 @@ fn resolve_window(
             start: 0,
             end_exclusive: length,
             content_range: None,
+            parts_count,
             status,
         }),
         RangeDecision::Partial { start, .. } => {
@@ -172,12 +189,12 @@ fn resolve_window(
                 start,
                 end_exclusive: start.saturating_add(served).min(length),
                 content_range,
+                parts_count,
                 status,
             })
         }
         RangeDecision::Part { .. } => Err(HandlerError::not_implemented(
-            "this reference backend stores an object's assembled bytes and no part table, so a partNumber \
-             selector names a window it cannot resolve",
+            "HEAD partNumber reads are not implemented by this reference backend",
         )),
         RangeDecision::Unsatisfiable {
             actual_object_size,
@@ -240,6 +257,7 @@ impl super::FsBackend {
                 metadata: record.metadata.clone(),
                 headers: record.headers.clone(),
                 checksum: record.checksum,
+                part_lengths: record.part_lengths.clone(),
                 directory: Some(record.path.clone()),
             })));
         }
@@ -261,6 +279,7 @@ impl super::FsBackend {
             metadata: std::collections::BTreeMap::new(),
             headers: ContentHeaders::default(),
             checksum: None,
+            part_lengths: None,
             directory: None,
         })))
     }
@@ -332,6 +351,7 @@ impl Handler<GetObject> for super::FsBackend {
             if_range.as_ref(),
             input.part_number,
             &representation,
+            true,
         )?;
         let encryption = representation.headers.encryption();
         let tag_count = tag_count(&representation).await;
@@ -347,6 +367,7 @@ impl Handler<GetObject> for super::FsBackend {
         let mut output = GetObjectOutput {
             expiration,
             content_length: i64::try_from(body.len()).ok(),
+            parts_count: window.parts_count,
             content_range: window.content_range,
             accept_ranges: Some("bytes".to_owned()),
             // The validators describe the representation, never the window, so a 206 reports
@@ -370,7 +391,8 @@ impl Handler<GetObject> for super::FsBackend {
             ..GetObjectOutput::default()
         };
         let checksum = (input.checksum_mode.as_ref() == Some(&rustfs_gateway::dto::ChecksumMode::ENABLED)
-            && input.range.is_none())
+            && input.range.is_none()
+            && input.part_number.is_none())
         .then_some(representation.checksum)
         .flatten();
         set_object_checksum!(output, checksum);
@@ -408,7 +430,13 @@ impl Handler<HeadObject> for super::FsBackend {
         // `HeadObject` declares no `If-Range`: RFC 9110 attaches the switch to a retrieval, and the
         // operation's IR carries no such field, so there is nothing to read rather than something
         // being ignored.
-        let window = resolve_window(input.range.as_ref().map(|range| range.as_str()), None, input.part_number, &representation)?;
+        let window = resolve_window(
+            input.range.as_ref().map(|range| range.as_str()),
+            None,
+            input.part_number,
+            &representation,
+            false,
+        )?;
         let tag_count = tag_count(&representation).await;
         let expiration = self
             .read_expiration(input.bucket.as_str(), input.key.as_str(), &representation)

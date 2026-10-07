@@ -77,8 +77,17 @@ by `<algorithm> <type> <value>`. The type and any composite suffix must agree. C
 whole-object reads and completion retries report both after restart. Default COPY preserves a
 composite checksum's type; copying a FULL_OBJECT checksum or requesting recalculation omits the
 type, as RustFS does. Readers that only understand `checksum/1` refuse these typed records, so
-rollback still needs a pre-upgrade data copy. Part boundaries, partNumber reads and
-`GetObjectAttributes` remain separate work (rustfs/gateway#1001).
+rollback still needs a pre-upgrade data copy.
+
+New multipart completions also store `parts/1 <count>` followed by each completed part's length.
+The table must agree with the object size and multipart ETag. GET partNumber uses the shared core
+resolver to serve that ordinal byte window and reports the multipart part count; ordinary objects
+have one readable part without a multipart count. A part read omits whole-object checksums.
+Older multipart records without the table remain readable whole and return `NotImplemented` for
+part reads. Readers without parts/1 support reject new tables, so the rollback rule also applies
+here. HEAD partNumber and `GetObjectAttributes` remain separate work (rustfs/gateway#1001).
+Native sparse numbering has a known discrepancy: after completing uploaded numbers 2 and 5, its
+GET number 5 returns the whole object. This backend refuses that unavailable ordinal part.
 
 A `PutObject` also stores the tag set its `x-amz-tagging` header carries, validated as the
 `?tagging` subresource's document is and written into the new version's directory before the
