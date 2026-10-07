@@ -142,6 +142,9 @@ only the errors. A browser `POST` Object upload is stored through the same publi
 `PutObject`, with its `x-amz-meta-*` form fields.
 
 `CopyObject` resolves its source only through the framework's derived-resource authorization proof.
+Both copy handlers refuse access-point and Outposts ARNs with `501 NotImplemented` after source
+authorization and before filesystem lookup. An ordinary bucket with the same name cannot stand in
+for that ARN. This includes a single leading slash; it does not implement either ARN backend.
 It selects current or explicit-version bytes before opening the destination, applies the shared
 copy-source conditional contract before publication, inherits metadata for `COPY`, rebuilds it from
 the request for `REPLACE` (including an empty map), and refuses a self copy that changes nothing.

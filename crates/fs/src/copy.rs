@@ -46,6 +46,16 @@ fn tagging_directive(input: &CopyObjectInput) -> Result<MetadataSource, HandlerE
         .ok_or_else(|| HandlerError::new(ErrorCode::INVALID_ARGUMENT, "x-amz-tagging-directive must be COPY or REPLACE"))
 }
 
+/// Refuses ARN identities this backend cannot resolve, before any local bucket lookup.
+pub(super) fn guard_copy_source_form(form: rustfs_gateway::CopySourceForm) -> Result<(), HandlerError> {
+    if form != rustfs_gateway::CopySourceForm::Path {
+        return Err(HandlerError::not_implemented(
+            "ARN copy sources are not supported by the filesystem backend",
+        ));
+    }
+    Ok(())
+}
+
 fn conditional_etag(value: Option<&str>) -> Result<Option<ETag>, HandlerError> {
     value
         .map(parse_conditional_etag)
@@ -137,6 +147,7 @@ impl Handler<CopyObject> for FsBackend {
             .source()
             .resolve(request.read_proof())
             .ok_or_else(|| HandlerError::internal_error("the copy-source authorization proof did not match"))?;
+        guard_copy_source_form(source.form())?;
         let input = request.into_input();
         let metadata_source = directive(&input)?;
         let tag_source = tagging_directive(&input)?;

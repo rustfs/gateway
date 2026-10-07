@@ -25,7 +25,7 @@
 use rustfs_gateway::dto::{UploadPartCopy, UploadPartCopyOutput};
 use rustfs_gateway::{Handler, HandlerError, HandlerResult, Req, Resp, Timestamp, resolve_copy_range};
 
-use super::copy::{SourceConditions, guard_copy_source};
+use super::copy::{SourceConditions, guard_copy_source, guard_copy_source_form};
 use super::{FsBackend, etag};
 
 impl Handler<UploadPartCopy> for FsBackend {
@@ -35,6 +35,7 @@ impl Handler<UploadPartCopy> for FsBackend {
             .source()
             .resolve(request.read_proof())
             .ok_or_else(|| HandlerError::internal_error("the copy-source authorization proof did not match"))?;
+        guard_copy_source_form(source.form())?;
         let input = request.into_input();
         self.require_bucket(input.bucket.as_str()).await?;
         let (upload_id, record) = self.resolve_upload(&input.upload_id, &input.bucket, &input.key)?;

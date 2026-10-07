@@ -145,6 +145,7 @@ impl CopySource {
     ///
     /// The order is fixed and is the point of the function: the optional `?versionId=` suffix is
     /// split off the **raw** value at its last `?`, and only then is each half percent-decoded.
+    /// Both path and ARN forms may begin with one literal slash.
     ///
     /// # Errors
     ///
@@ -182,8 +183,11 @@ impl CopySource {
             split_version(raw)?
         };
 
-        let resource = if path.starts_with("arn:") {
-            parse_arn(path, names)?
+        // The CopyObject header pattern permits one leading slash, including before an ARN:
+        // https://docs.aws.amazon.com/AmazonS3/latest/API/API_CopyObject.html
+        let arn_path = path.strip_prefix('/').unwrap_or(path);
+        let resource = if arn_path.starts_with("arn:") {
+            parse_arn(arn_path, names)?
         } else {
             parse_path(path, names)?
         };
