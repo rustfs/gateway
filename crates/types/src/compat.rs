@@ -20,11 +20,11 @@
 //! `compat-s3s`); and the migration seam — the generated conversions of every covered operation
 //! in both directions, the hand-written ones (`put_object`, `get_bucket_location`), the error seam
 //! and the request-context conversion (`request_context`) — compiled once per seam revision:
-//! [`s3s_5761ddfe`](crate::compat::s3s_5761ddfe), the revision RustFS main links (feature
-//! `compat-s3s-rustfs`, rustfs/backlog#2759); [`s3s_0_17_0`](crate::compat::s3s_0_17_0), the
-//! release it linked at 528a3681, which the goldens and difftest measure (feature
-//! `compat-s3s-0-17-0`); and `s3s_9c4690d8`, the baseline oracle the goldens also measure
-//! (feature `compat-s3s`). The seam modules are the only ones whose API names s3s types.
+//! `s3s_5761ddfe`, the revision RustFS main links (feature `compat-s3s-rustfs`,
+//! rustfs/backlog#2759); `s3s_0_17_0`, the release it linked at 528a3681, which the goldens and
+//! difftest measure (feature `compat-s3s-0-17-0`); and `s3s_9c4690d8`, the baseline oracle the
+//! goldens also measure (feature `compat-s3s`). The seam modules are the only ones whose API names
+//! s3s types, and each exists only under its own feature, so none of them is an intra-doc link.
 //! NOT responsible for: production XML behavior, golden assertions, or the RustFS side of any
 //! conversion (its extensions, its hooks, its call order).
 //! Upstream: the three s3s revisions named by [`OracleRevision`](crate::compat::OracleRevision).
