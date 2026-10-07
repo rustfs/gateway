@@ -166,7 +166,7 @@ s3tests.functional.test_s3::test_non_multipart_get_part
 s3tests.functional.test_s3::test_object_checksum_crc64nvme
 s3tests.functional.test_s3::test_object_checksum_sha256
 
-# --- fs-gap: bucket-policy condition keys beyond ACL and encryption (12) — https://github.com/rustfs/gateway/issues/1037 ---
+# --- not-a-defect: bucket-policy condition keys beyond ACL and encryption are outside the reference evaluator's scope; RustFS-parity condition keys are measured against a real RustFS binary, not this fs backend (12) — decision recorded on https://github.com/rustfs/gateway/issues/1037 ---
 s3tests.functional.test_s3::test_bucket_policy_get_obj_acl_existing_tag
 s3tests.functional.test_s3::test_bucket_policy_get_obj_existing_tag
 s3tests.functional.test_s3::test_bucket_policy_get_obj_tagging_existing_tag
@@ -183,7 +183,7 @@ s3tests.functional.test_s3::test_head_object_404_with_policy_prefix
 # --- not-a-defect: an unsatisfiable copy-source range is InvalidArgument under the shared resolver's quirk, not InvalidRange (1) ---
 s3tests.functional.test_s3::test_multipart_copy_invalid_range
 
-# --- unattributed: cleanup succeeds, but the case requires a false delete-marker header that native RustFS omits (1) — https://github.com/rustfs/gateway/issues/999 ---
+# --- not-a-defect: the lifecycle gap landed in #1335; the case still fails because the Ceph helper demands an `x-amz-delete-marker: false` header on a 404, which AWS documents as omitted and native RustFS omits (1) — decision recorded on https://github.com/rustfs/gateway/issues/999 ---
 s3tests.functional.test_s3::test_delete_marker_expiration
 
 # --- rustfs-parity: If-Match on a missing key is 404 NoSuchKey, as RustFS answers it (5) — https://github.com/rustfs/gateway/issues/1002 ---
