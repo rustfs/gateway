@@ -231,7 +231,7 @@ async fn n_delete_markers_do_not_become_object_attributes() {
 }
 
 #[tokio::test]
-async fn n_multipart_detail_is_refused_until_original_part_numbers_are_stored() {
+async fn n_legacy_multipart_detail_is_refused_without_original_part_numbers() {
     let root = TestRoot::new();
     let (_, service) = service(&root);
     create_bucket(&service, BUCKET).await;
@@ -250,6 +250,10 @@ async fn n_multipart_detail_is_refused_until_original_part_numbers_are_stored() 
         .status(),
         200
     );
+    let record = super::one_record(&root);
+    let encoded = std::fs::read_to_string(&record).expect("record");
+    let legacy = encoded.split("part-meta/1").next().expect("legacy prefix");
+    std::fs::write(record, legacy).expect("old record without identities");
     assert_eq!(attributes(&service, BUCKET, "object", "ObjectParts", None).await.status(), 501);
     let response = attributes(&service, BUCKET, "object", "ObjectSize", None).await;
     assert_eq!(response.status(), 200);
@@ -272,3 +276,6 @@ async fn n_unknown_groups_do_not_select_known_fields() {
     assert!(element(mixed.body(), "ETag").is_some());
     assert!(element(mixed.body(), "ObjectSize").is_none());
 }
+
+#[path = "attributes_parts.rs"]
+mod attributes_parts;

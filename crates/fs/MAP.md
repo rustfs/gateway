@@ -17,7 +17,7 @@ Agent entry point. File → responsibility → when you need to open it.
 | `src/lifecycle.rs` | Durable lifecycle documents, filter evaluation, one-shot object/version/marker expiration, and the `x-amz-expiration` a current version answers. | Changing lifecycle configuration or expiration semantics. |
 | `src/lifecycle_scheduler.rs` | Repeated lifecycle cadence, failure accounting, and bounded shutdown. | Changing automatic expiration scheduling or worker lifetime. |
 | `src/listing.rs` | Object/upload filtering, owner projection, delimiter rollup, V1/paired markers, and scoped V2 cursors. | Changing object or upload listing pagination semantics. |
-| `src/object_attributes.rs` | Selected GetObjectAttributes metadata and stored checksums; refuses unavailable multipart detail. | Changing attribute selection or version-aware metadata. |
+| `src/object_attributes.rs` | Selected GetObjectAttributes metadata, checksums and original-part pagination; refuses unavailable old detail. | Changing attribute selection or version-aware metadata. |
 | `src/part_metadata.rs` | Original completed part numbers/checksums and their bounded private record section. | Changing persisted part identities or checksums. |
 | `src/part_metadata_tests.rs` | Version-record round trips, bounded metadata rows and rejected inconsistencies. | Changing the part metadata grammar. |
 | `src/part_lengths.rs` | Completed part lengths, record validation and GET/HEAD window projection through the core resolver. | Changing persisted part boundaries or partNumber reads. |
@@ -71,6 +71,7 @@ Agent entry point. File → responsibility → when you need to open it.
 | `tests/crud/head_parts.rs` | HEAD part lengths/counts, version isolation and selector refusal statuses; registered under object_parts. | Changing HEAD partNumber support. |
 | `tests/crud/part_metadata.rs` | Signed completion persistence, sparse numbers, per-part checksums and replacement isolation. | Changing completed part storage. |
 | `tests/crud/object_parts.rs` | Restarted GET part windows, version isolation, ordinary objects and malformed or missing part tables. | Changing GET partNumber support. |
+| `tests/crud/attributes_parts.rs` | Sparse ObjectParts pages, individual checksums, version isolation and malformed selectors. | Changing attributes part-list projection. |
 | `tests/crud/object_attributes.rs` | Selected metadata, checksums, versions and unsupported multipart detail. | Changing GetObjectAttributes. |
 | `tests/crud/object_checksums.rs` | Header/trailer checksums, restarted reads, version isolation, copy preservation/recalculation and corrupt-record refusals. | Changing stored full-object checksums. |
 | `tests/crud/content_encoding.rs` | Under `normalizing_content_encoding`: `aws-chunked` members dropped from an unframed upload's stored value, the rest joined with `, `, on `PutObject`, multipart and `REPLACE` copies; values without the token, lookalikes, `COPY` sources and other headers kept; the default stores the value as sent. | Changing how a stored `Content-Encoding` is written. |
