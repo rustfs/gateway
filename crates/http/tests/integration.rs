@@ -34,6 +34,8 @@ mod checksum_unknown_algorithms;
 mod chunked_decode_replay;
 #[path = "form_allocations.rs"]
 mod form_allocations;
+#[path = "form_file_length.rs"]
+mod form_file_length;
 #[path = "form_grammar.rs"]
 mod form_grammar;
 #[path = "form_legacy_edges.rs"]
