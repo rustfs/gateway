@@ -120,6 +120,9 @@ pub(crate) struct Scenario {
     legacy_buffered_ceiling: bool,
     /// Whether the gateway selects operations as the RustFS profile does.
     legacy_operation_selection: bool,
+    /// Whether the gateway reads date conditions as legacy RustFS does
+    /// (`ServiceBuilder::refuse_unreadable_date_conditions`).
+    legacy_date_conditions: bool,
 }
 
 impl Scenario {
@@ -136,6 +139,7 @@ impl Scenario {
             rustfs_identified: false,
             legacy_buffered_ceiling: false,
             legacy_operation_selection: false,
+            legacy_date_conditions: false,
         }
     }
 
@@ -156,6 +160,13 @@ impl Scenario {
     /// ([`legacy_adapter_error`]).
     pub(crate) fn rustfs_profile(mut self) -> Self {
         self.reading = Reading::Legacy;
+        self
+    }
+
+    /// The gateway reads date conditions in legacy RustFS's one spelling and refuses the rest, as
+    /// the RustFS profile does (rustfs/backlog#1677, R14).
+    pub(crate) fn reading_dates_as_legacy_rustfs(mut self) -> Self {
+        self.legacy_date_conditions = true;
         self
     }
 
@@ -525,6 +536,11 @@ fn gateway_service(scenario: &Scenario, reached: &Arc<AtomicBool>, now: RequestN
     };
     let builder = if scenario.rustfs_identified {
         builder.identify_requests_as_legacy_rustfs()
+    } else {
+        builder
+    };
+    let builder = if scenario.legacy_date_conditions {
+        builder.refuse_unreadable_date_conditions()
     } else {
         builder
     };
