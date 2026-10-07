@@ -14,9 +14,10 @@
 
 //! Live-socket evidence for the request-body throughput floor.
 //!
-//! Responsible for: signed `aws-chunked` slow-body refusal, the sustained-progress control, and
-//! concurrent slow-upload RSS and healthy-peer latency. NOT responsible for: idle-body or
-//! back-pressure contracts. Upstream: the streaming request fixture. Downstream: c-ing-0062.
+//! Responsible for: signed `aws-chunked` slow-body refusal, the sustained-progress control and the
+//! self-measuring pacer it relies on, and concurrent slow-upload RSS and healthy-peer latency. NOT
+//! responsible for: idle-body or back-pressure contracts. Upstream: the streaming request fixture.
+//! Downstream: c-ing-0062.
 
 #![allow(clippy::expect_used, clippy::panic)]
 
@@ -25,7 +26,7 @@ use super::streaming_request::{
 };
 use crate::support;
 
-use std::net::SocketAddr;
+use std::net::{Ipv4Addr, SocketAddr};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -35,10 +36,62 @@ use http_body_util::BodyExt;
 use rustfs_gateway::sig::{AmzDate, PayloadMode, SigService, SigV4Signer, SigningCredentials, SigningRequest, SigningScope};
 use rustfs_gateway::{Handler, HandlerCancellation, HandlerError, HandlerResult, Req, RequestBodyDeadlineConfig, Resp};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpStream;
+use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Barrier;
 
 pub(super) const SIGNED_CHUNK_BYTES: usize = 256;
+
+/// How many requested pacer pauses fit inside the read-idle deadline of the sustained-progress
+/// control. The old 60 ms deadline left a 20 ms pacer a 3x margin, and one injected 100 ms pause
+/// was enough to reproduce the `BrokenPipe` (#507). The margin is a count of pauses the control
+/// checks before it starts; how far the host actually stalled is measured, never assumed.
+const SUSTAINED_PACE_MARGIN: u32 = 15;
+
+/// The measured outcome of a paced upload whose every inter-write gap stayed under the read-idle
+/// deadline: the widest gap the host opened between two consecutive write completions.
+#[derive(Debug)]
+struct PaceReport {
+    max_gap: Duration,
+}
+
+/// The pacer stalled: an inter-write gap reached the read-idle deadline, so the server was entitled
+/// to refuse the body and nothing about its response can be asserted.
+#[derive(Debug)]
+struct PaceViolation {
+    max_gap: Duration,
+}
+
+/// Writes `wire` in `piece`-byte writes `pause` apart, measuring every gap between consecutive
+/// write completions against `read_idle`. A gap that reaches `read_idle` is reported before the
+/// next write is attempted, so a peer that has already refused the idle body is never observed as
+/// a `BrokenPipe`; a write that fails inside the deadline is a real failure and panics with the gap.
+async fn paced_upload(
+    stream: &mut TcpStream,
+    wire: &[u8],
+    piece: usize,
+    pause: Duration,
+    read_idle: Duration,
+) -> Result<PaceReport, PaceViolation> {
+    let mut max_gap = Duration::ZERO;
+    let mut last_write = Instant::now();
+    for bytes in wire.chunks(piece) {
+        max_gap = max_gap.max(last_write.elapsed());
+        if max_gap >= read_idle {
+            return Err(PaceViolation { max_gap });
+        }
+        let written = stream.write_all(bytes).await;
+        max_gap = max_gap.max(last_write.elapsed());
+        if max_gap >= read_idle {
+            return Err(PaceViolation { max_gap });
+        }
+        if let Err(error) = written {
+            panic!("the paced body write failed after a {max_gap:?} gap, inside the {read_idle:?} read-idle deadline: {error}");
+        }
+        last_write = Instant::now();
+        tokio::time::sleep(pause).await;
+    }
+    Ok(PaceReport { max_gap })
+}
 
 struct ThroughputBackend {
     entered: AtomicUsize,
@@ -307,20 +360,33 @@ async fn c_ing_0062_one_byte_per_second_is_closed_for_body_throughput() {
 }
 
 /// `c-ing-0062`. Positive control — sustained progress above the floor completes even though the
-/// total transfer spans many read-idle intervals.
+/// total transfer spans many read-idle intervals. The pacer measures its own gaps: a host that
+/// stalls it past the deadline is reported as an unmet precondition, not as a refusal.
 #[tokio::test]
 async fn c_ing_0062_sustained_progress_outlives_one_idle_interval() {
-    let read_idle = Duration::from_millis(60);
+    const PIECE: usize = 32;
+    let read_idle = Duration::from_millis(300);
+    let pause = Duration::from_millis(20);
+    assert!(
+        pause * SUSTAINED_PACE_MARGIN <= read_idle,
+        "the {pause:?} pacer needs {SUSTAINED_PACE_MARGIN} pauses inside the {read_idle:?} read-idle deadline"
+    );
     let backend = Arc::new(ThroughputBackend::new());
-    let running = live_server(service_with_deadlines(backend, deadlines(64, Duration::from_millis(100), read_idle)));
-    let (head, wire) = signed_chunked_request(4 * SIGNED_CHUNK_BYTES);
+    let running = live_server(service_with_deadlines(backend, deadlines(64, Duration::from_millis(500), read_idle)));
+    let (head, wire) = signed_chunked_request(16 * SIGNED_CHUNK_BYTES);
     let started = Instant::now();
     let mut stream = TcpStream::connect(running.local_addr).await.expect("the client connects");
     stream.write_all(&head).await.expect("the signed head writes");
-    for chunk in wire.chunks(32) {
-        stream.write_all(chunk).await.expect("the sustained body writes");
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
+    let report = match paced_upload(&mut stream, &wire, PIECE, pause, read_idle).await {
+        Ok(report) => report,
+        Err(PaceViolation { max_gap }) => {
+            eprintln!("skipped: host stalled the pacer {max_gap:?} >= read_idle {read_idle:?}");
+            // Drain the server's refusal so the shutdown report below still counts nothing in flight.
+            let _ = tokio::time::timeout(Duration::from_secs(2), stream.read_to_end(&mut Vec::new())).await;
+            stop(running).await;
+            return;
+        }
+    };
     let mut response = Vec::new();
     tokio::time::timeout(Duration::from_secs(2), stream.read_to_end(&mut response))
         .await
@@ -330,7 +396,46 @@ async fn c_ing_0062_sustained_progress_outlives_one_idle_interval() {
     let text = String::from_utf8(response).expect("an HTTP/1.1 response");
     assert!(text.starts_with("HTTP/1.1 200"), "{text}");
     assert!(elapsed > read_idle * 4, "the {elapsed:?} transfer did not span several idle intervals");
+    eprintln!(
+        "c-ing-0062 sustained: pieces={} max_gap={:?} read_idle={read_idle:?} elapsed={elapsed:?}",
+        wire.chunks(PIECE).len(),
+        report.max_gap
+    );
     stop(running).await;
+}
+
+/// Negative — a pacer that stalls past the read-idle deadline against a peer that has closed
+/// reports the measured gap as an unmet precondition, never the peer's refusal as a `BrokenPipe`.
+#[tokio::test]
+async fn n_a_pacer_that_stalls_past_read_idle_reports_the_gap() {
+    const PIECE: usize = 32;
+    let read_idle = Duration::from_millis(40);
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.expect("the peer binds");
+    let address = listener.local_addr().expect("the peer has an address");
+    let peer = tokio::spawn(async move {
+        let (mut accepted, _) = listener.accept().await.expect("the peer accepts");
+        let mut first = [0u8; PIECE];
+        accepted.read_exact(&mut first).await.expect("the peer takes the first piece");
+        drop(accepted);
+        first
+    });
+    let wire: Vec<u8> = (0..3 * PIECE).map(|index| (index % 251) as u8).collect();
+    let mut stream = TcpStream::connect(address).await.expect("the client connects");
+
+    let violation = paced_upload(&mut stream, &wire, PIECE, 5 * read_idle, read_idle)
+        .await
+        .expect_err("a stalled pacer reports the gap");
+
+    assert!(
+        violation.max_gap >= read_idle,
+        "the reported {:?} gap is under the {read_idle:?} read-idle deadline",
+        violation.max_gap
+    );
+    assert_eq!(
+        peer.await.expect("the peer finishes").as_slice(),
+        &wire[..PIECE],
+        "the peer took the first piece before closing"
+    );
 }
 
 async fn healthy_p99(address: SocketAddr, head: &[u8], wire: &[u8]) -> Duration {
