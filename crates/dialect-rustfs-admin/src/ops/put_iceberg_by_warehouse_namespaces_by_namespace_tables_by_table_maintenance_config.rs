@@ -125,7 +125,7 @@ impl AdminOperation for PutIcebergByWarehouseNamespacesByNamespaceTablesByTableM
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 365,
+    precedence: 367,
     selector: "PathTemplate(\"/_iceberg/v1/{+warehouse}/namespaces/{+namespace}/tables/{+table}/maintenance/config\") ∧ Method(PUT) ∨ PathTemplate(\"/iceberg/v1/{+warehouse}/namespaces/{+namespace}/tables/{+table}/maintenance/config\") ∧ Method(PUT) ⇒ BucketParam(\"warehouse\")",
     action: "admin:SetTableLifecycle",
     resource: ResourceShape::Bucket,

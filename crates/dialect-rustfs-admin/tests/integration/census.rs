@@ -13,18 +13,19 @@
 // limitations under the License.
 
 //! The dialect's census against ADR-0024's plan: which groups are declared at which order, which
-//! are pending, and which operations bind a bucket (ADR-0030, ADR-0031).
+//! are pending, which operations bind a bucket (ADR-0030, ADR-0031), and which prefixes the
+//! dialect claims, the table catalog's among them (rustfs/gateway#1232).
 //!
-//! Responsible for: those assertions over `ROUTES`, `PENDING` and the assembled dialect.
+//! Responsible for: those assertions over `ROUTES`, `PENDING`, `CLAIMS` and the assembled dialect.
 //! NOT responsible for: routing (`super`), or the binding to the inventory (goldens).
 //! Upstream: `super`. Downstream: nothing.
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use rustfs_gateway_core::dialect::BucketParam;
-use rustfs_gateway_dialect_rustfs_admin::{FORM_ROUTES, PENDING, ROUTES, RouteRecord, STAYING};
+use rustfs_gateway_dialect_rustfs_admin::{CLAIMS, FORM_ROUTES, PENDING, ROUTES, RouteRecord, STAYING, TABLE_CATALOG_PREFIXES};
 
-use super::{HandlerDeadlineClass, OVERLAY, Predicate, ResourceShape, declared, dialect, param, templates};
+use super::{HandlerDeadlineClass, OVERLAY, Predicate, ResourceShape, captured, declared, dialect, param, templates};
 
 /// Positive and negative — exactly the twenty-one `{bucket}` and 49 `{warehouse}` templates bind
 /// their bucket (`BucketParam::Path`) and exactly the two compat quota routes bind a `bucket` query
@@ -34,7 +35,7 @@ use super::{HandlerDeadlineClass, OVERLAY, Predicate, ResourceShape, declared, d
 #[test]
 fn exactly_the_bucket_and_warehouse_routes_bind_their_bucket() {
     let templated: Vec<&RouteRecord> = ROUTES.iter().filter(|record| record.path.contains('{')).collect();
-    assert_eq!(templated.len(), 102);
+    assert_eq!(templated.len(), 103);
     let mut by_path = 0;
     let mut by_query = 0;
     for record in ROUTES {
@@ -88,17 +89,18 @@ fn exactly_the_bucket_and_warehouse_routes_bind_their_bucket() {
             entries += 1;
         }
     }
-    assert_eq!(entries, 622);
+    assert_eq!(entries, 626);
     assert_eq!(synthetic, [("rustfs:AdminV4Fallback", 6), ("rustfs:AdminFallback", 6)]);
 }
 
 /// Positive — every order of ADR-0024's plan is declared, each inventory route once (the service
 /// command as its four forms; the table catalog's compat rows as aliases), no group is pending,
-/// exactly six routes stay with RustFS, each with its recorded reason (ADR-0032), and the STS
-/// endpoint ADR-0032 (b) left with RustFS is served behind its form claim (ADR-0041).
+/// exactly the four `/health` routes stay with RustFS, each with its recorded reason (ADR-0032),
+/// the STS endpoint ADR-0032 (b) left with RustFS is served behind its form claim (ADR-0041), and
+/// the object-zip-download pair it left there is claimed (rustfs/backlog#2753).
 #[test]
-fn every_order_is_declared_and_six_routes_stay_with_rustfs() {
-    let order_seven = ["oidc", "sts"];
+fn every_order_is_declared_and_four_routes_stay_with_rustfs() {
+    let order_seven = ["oidc", "sts", "object_zip_download"];
     let order_five = [
         "durability_handler",
         "heal",
@@ -159,6 +161,7 @@ fn every_order_is_declared_and_six_routes_stay_with_rustfs() {
             ("mfa", 8),
             ("module_switch", 2),
             ("object_data_cache", 2),
+            ("object_zip_download", 2),
             ("oidc", 8),
             ("on_demand_migration", 6),
             ("plugins_catalog", 1),
@@ -179,10 +182,10 @@ fn every_order_is_declared_and_six_routes_stay_with_rustfs() {
             ("user", 38),
         ]
     );
-    assert_eq!(ROUTES.len(), 312);
+    assert_eq!(ROUTES.len(), 314);
     assert!(PENDING.is_empty(), "{PENDING:?}");
-    // 259 admin and profiling routes declared, the 100 table-catalog routes as 50 operations with
-    // 50 alias rows, six routes that stay with RustFS (ADR-0032) and the form-claimed STS endpoint
+    // 261 admin and profiling routes declared, the 100 table-catalog routes as 50 operations with
+    // 50 alias rows, four routes that stay with RustFS (ADR-0032) and the form-claimed STS endpoint
     // (ADR-0041): the whole inventory.
     let staying: Vec<(&str, &str, &str)> = STAYING.iter().map(|route| (route.group, route.method, route.path)).collect();
     assert_eq!(
@@ -190,10 +193,8 @@ fn every_order_is_declared_and_six_routes_stay_with_rustfs() {
         [
             ("health", "GET", "/health"),
             ("health", "GET", "/health/ready"),
-            ("object_zip_download", "GET", "/rustfs/admin/v3/object-zip-downloads/{id}.zip"),
             ("health", "HEAD", "/health"),
             ("health", "HEAD", "/health/ready"),
-            ("object_zip_download", "POST", "/rustfs/admin/v3/object-zip-downloads"),
         ]
     );
     assert!(STAYING.iter().all(|route| route.reason.contains("ADR-00")));
@@ -229,6 +230,14 @@ fn names_and_precedences_are_unique_and_the_overlay_is_complete() {
         ("rustfs:AdminFallback", u16::MAX),
         ("rustfs:StsFormPost", 99),
     ]);
+    // Then the S3-shaped extension rows, in their own order (rustfs/backlog#2753).
+    let dialect = dialect();
+    declared.extend(
+        dialect
+            .operations()
+            .iter()
+            .map(|operation| (operation.name(), operation.entry().precedence)),
+    );
     assert_eq!(recorded, declared);
     assert!(OVERLAY.operations.iter().all(|row| !row.evidence.is_empty()));
 }
@@ -268,7 +277,8 @@ fn every_operation_declares_what_its_record_says() {
                 row.template.replace("{+", "{")
             })
             .collect();
-        assert_eq!(native, templates(record), "{name}");
+        let recorded: Vec<String> = templates(record).into_iter().map(captured).collect();
+        assert_eq!(native, recorded, "{name}");
         for row in operation.rows {
             match (row.selector, record.query) {
                 ([Predicate::Method(method)], None) => assert_eq!(method.as_str(), record.method, "{name}"),
@@ -278,5 +288,42 @@ fn every_operation_declares_what_its_record_says() {
                 (selector, query) => panic!("{name}: selector {selector:?} for query {query:?}"),
             }
         }
+    }
+}
+
+/// Positive — the dialect assembles, claiming exactly the two admin prefixes, the two
+/// table-catalog prefixes and the two profiling triggers (ADR-0024, ADR-0031, ADR-0032).
+#[test]
+fn the_dialect_assembles_with_its_six_claims() {
+    let _ = dialect();
+    let prefixes: Vec<&str> = CLAIMS.iter().map(|claim| claim.prefix).collect();
+    assert_eq!(
+        prefixes,
+        [
+            "/rustfs/admin",
+            "/minio/admin",
+            "/_iceberg/v1",
+            "/iceberg/v1",
+            "/profile/cpu",
+            "/profile/memory"
+        ]
+    );
+}
+
+/// Positive and negative — the table-catalog prefixes a RustFS assembly signs as generic SigV4
+/// does are exactly the table catalog's two claims, and no admin or profiling claim
+/// (rustfs/gateway#1232).
+#[test]
+fn the_table_catalog_prefixes_are_exactly_its_two_claims() {
+    assert_eq!(TABLE_CATALOG_PREFIXES, ["/_iceberg/v1", "/iceberg/v1"]);
+    for prefix in TABLE_CATALOG_PREFIXES {
+        let claim = CLAIMS
+            .iter()
+            .find(|claim| claim.prefix == *prefix)
+            .expect("a table-catalog prefix is a claim");
+        assert!(claim.reason.contains("table catalog"), "{prefix}: {}", claim.reason);
+    }
+    for claim in CLAIMS.iter().filter(|claim| !TABLE_CATALOG_PREFIXES.contains(&claim.prefix)) {
+        assert!(!claim.reason.contains("table catalog"), "{}", claim.prefix);
     }
 }

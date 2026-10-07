@@ -20,7 +20,8 @@
 //! Responsible for: [`RULINGS`], one per custom-auth route of a migrated group, and the shapes a
 //! ruling is written in: an action rule, an optional subject rule, and the query value that
 //! selects a form; [`QUERY_BUCKETS`], the routes that name their bucket in the query; [`STAYS`],
-//! the routes that stay with RustFS; and [`FORMS`], the routes served behind a form claim.
+//! the routes that stay with RustFS; [`FORMS`], the routes served behind a form claim; and
+//! [`EXTENSIONS`], the S3-shaped extension routes and the operation each becomes.
 //! NOT responsible for: matching a ruling or a query bucket to its route, refusing a stale or
 //! missing one, or checking a rule's shape (`super::plan` and `super::Rule::fault`).
 //! Upstream: the ADRs, read against RustFS's handlers at the inventory's commit. Downstream:
@@ -80,6 +81,9 @@ pub(super) struct Ruling {
     /// The custom-auth class the inventory must still record, so a changed row reopens the ruling.
     pub(super) auth_detail: &'static str,
     pub(super) forms: &'static [Form],
+    /// A paragraph the generated module's documentation carries, when the ruling needs one that
+    /// its shape alone does not say; empty for almost every ruling.
+    pub(super) note: &'static str,
 }
 
 const fn one(action: &'static str) -> Form {
@@ -170,7 +174,13 @@ const fn ruling(method: &'static str, path: &'static str, auth_detail: &'static 
         path,
         auth_detail,
         forms,
+        note: "",
     }
+}
+
+/// `ruling` with a paragraph for the generated module's documentation.
+const fn noted(ruling: Ruling, note: &'static str) -> Ruling {
+    Ruling { note, ..ruling }
 }
 
 /// The routes that name their bucket in a query parameter, read exactly once before
@@ -187,16 +197,6 @@ pub(super) const QUERY_BUCKETS: &[(&str, &str, &str)] = &[
 /// `(method, path, reason)`. They are declared as no operation and listed in the dialect's
 /// `STAYING`, so the census stays exact.
 pub(super) const STAYS: &[(&str, &str, &str)] = &[
-    (
-        "GET",
-        "/rustfs/admin/v3/object-zip-downloads/{id}.zip",
-        "An affixed `{id}.zip` parameter and a bearer token in the query: it needs a per-operation bearer scheme on the floor (ADR-0026 (g)).",
-    ),
-    (
-        "POST",
-        "/rustfs/admin/v3/object-zip-downloads",
-        "It authorises S3 resources named in its body and only mints the token the download route consumes, which stays with RustFS (ADR-0025 (d), ADR-0026 (g), ADR-0032 (b)).",
-    ),
     (
         "GET",
         "/health",
@@ -223,6 +223,20 @@ pub(super) const STAYS: &[(&str, &str, &str)] = &[
 /// `(method, path, auth_detail)`, the custom-auth class the inventory must still record, so a changed
 /// row reopens the ruling. Each is one generated operation outside `fold_every_operation`.
 pub(super) const FORMS: &[(&str, &str, &str)] = &[("POST", "/", "StsFormPost")];
+
+/// RustFS's S3-shaped extension routes (rustfs/backlog#2753): the variant name the inventory
+/// records, and the operation it becomes. The inventory's order is the order RustFS's router tries
+/// the discriminators in, which is the order of the generated rows.
+pub(super) const EXTENSIONS: &[(&str, &str)] = &[
+    ("ReplicationExtRoute::ResetStart", "ResetBucketReplication"),
+    ("ReplicationExtRoute::ResetStatus", "GetReplicationResetStatus"),
+    ("ReplicationExtRoute::MetricsV2", "GetReplicationMetricsV2"),
+    ("ReplicationExtRoute::MetricsV1", "GetReplicationMetrics"),
+    ("ReplicationExtRoute::Check", "CheckReplication"),
+    ("MiscExtRoute::ObjectLambda[object]", "InvokeObjectLambda"),
+    ("MiscExtRoute::ListenNotification[service]", "ListenNotification"),
+    ("MiscExtRoute::ListenNotification[bucket]", "ListenBucketNotification"),
+];
 
 /// The rulings for the migrated groups' custom-auth routes, in the inventory's order within each
 /// migrated order.
@@ -394,5 +408,26 @@ pub(super) const RULINGS: &[Ruling] = &[
         "/rustfs/admin/v3/oidc/providers",
         "OidcBootstrap",
         &[bootstrap("rustfs:ListOidcProviders")],
+    ),
+    // ── order 7: the object-zip-download pair, under the caller's own vendor labels
+    //    (rustfs/backlog#2753). Both floors are privileged: ADR-0026 (g) refused admitting the
+    //    download anonymously, and the bearer scheme it points to is not built yet. ──
+    noted(
+        ruling(
+            "POST",
+            "/rustfs/admin/v3/object-zip-downloads",
+            "S3Action",
+            &[own("rustfs:CreateObjectZipDownload")],
+        ),
+        "RustFS's handler authorises `s3:ListBucket` and `s3:GetObject` on each resource the JSON body names, after reading it, and then mints a download token for the caller; the gateway cannot ask those questions before the body is read (ADR-0025 (d), ADR-0032 (b)), so it authorises the caller's own label and hands the body over for the handler's own checks (rustfs/backlog#2753).",
+    ),
+    noted(
+        ruling(
+            "GET",
+            "/rustfs/admin/v3/object-zip-downloads/{id}.zip",
+            "CredentialOnly",
+            &[own("rustfs:DownloadObjectZip")],
+        ),
+        "RustFS answers this route to whoever presents the `token` query parameter the POST minted, with no signature; the gateway has no bearer scheme on its floor (ADR-0026 (g)), and admitting the route anonymously was refused there, so the floor is privileged: a download URL presented without a header signature is `403` here until that scheme exists (rustfs/backlog#2753). The `{id}.zip` segment is matched as one opaque `{+id}` capture (ADR-0040): the handler reads `id` as the whole segment, suffix included, and validates it against the token.",
     ),
 ];

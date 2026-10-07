@@ -131,7 +131,7 @@ impl AdminOperation for GetV4RuntimeCapabilities {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 260,
+    precedence: 261,
     selector: "PathTemplate(\"/rustfs/admin/v4/runtime/capabilities\") ∧ Method(GET) ∨ PathTemplate(\"/minio/admin/v4/runtime/capabilities\") ∧ Method(GET)",
     action: "admin:ServerInfo",
     resource: ResourceShape::Service,

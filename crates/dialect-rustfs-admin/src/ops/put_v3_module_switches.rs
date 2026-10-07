@@ -124,7 +124,7 @@ impl AdminOperation for PutV3ModuleSwitches {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 381,
+    precedence: 383,
     selector: "PathTemplate(\"/rustfs/admin/v3/module-switches\") ∧ Method(PUT) ∨ PathTemplate(\"/minio/admin/v3/module-switches\") ∧ Method(PUT)",
     action: "admin:ConfigUpdate",
     resource: ResourceShape::Service,

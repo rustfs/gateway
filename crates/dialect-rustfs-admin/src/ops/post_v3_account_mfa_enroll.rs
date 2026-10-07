@@ -132,7 +132,7 @@ impl AdminOperation for PostV3AccountMfaEnroll {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 285,
+    precedence: 286,
     selector: "PathTemplate(\"/rustfs/admin/v3/account/mfa/enroll\") ∧ Method(POST) ∨ PathTemplate(\"/minio/admin/v3/account/mfa/enroll\") ∧ Method(POST)",
     action: "rustfs:AccountMfaEnroll about caller",
     resource: ResourceShape::Service,

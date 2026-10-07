@@ -126,7 +126,7 @@ impl AdminOperation for PostV3RevokeTokensByUserProvider {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 340,
+    precedence: 342,
     selector: "PathTemplate(\"/rustfs/admin/v3/revoke-tokens/{+user_provider}\") ∧ Method(POST) ∨ PathTemplate(\"/minio/admin/v3/revoke-tokens/{+user_provider}\") ∧ Method(POST)",
     action: "admin:RemoveServiceAccount",
     resource: ResourceShape::Service,

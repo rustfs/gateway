@@ -127,7 +127,7 @@ impl AdminOperation for PostV3Heal {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 290,
+    precedence: 291,
     selector: "PathTemplate(\"/rustfs/admin/v3/heal/\") ∧ Method(POST) ∨ PathTemplate(\"/minio/admin/v3/heal/\") ∧ Method(POST)",
     action: "admin:Heal",
     resource: ResourceShape::Service,

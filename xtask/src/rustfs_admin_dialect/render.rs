@@ -56,11 +56,12 @@ fn selector(declared: &Declared) -> String {
 /// Native RustFS routing matches raw segments before interpreting their data (ADR-0040): its admin
 /// routes and its table catalog alike hand the handler the raw segment, so an Iceberg namespace
 /// whose levels are joined by `%1F` reaches the catalog (rustfs/gateway#1232). Inventory paths are
-/// kept untouched; only the rendered templates capture opaquely.
+/// kept untouched; only the rendered templates capture opaquely. An affixed parameter (`{id}.zip`)
+/// is one opaque capture of its whole segment, suffix included.
 fn claimed_template(path: &str) -> String {
     path.split('/')
-        .map(|segment| match segment.strip_prefix('{').and_then(|name| name.strip_suffix('}')) {
-            Some(name) if !name.starts_with('*') => format!("{{+{name}}}"),
+        .map(|segment| match segment.strip_prefix('{').and_then(|inner| inner.split_once('}')) {
+            Some((name, _)) if !name.starts_with('*') => format!("{{+{name}}}"),
             _ => segment.to_owned(),
         })
         .collect::<Vec<_>>()
@@ -236,6 +237,26 @@ fn bucket_doc(d: &Declared) -> String {
     doc
 }
 
+/// `text` as module documentation: wrapped at the repository's line width, every line `//! `.
+pub(super) fn doc_paragraph(text: &str) -> String {
+    let mut out = String::new();
+    let mut line = String::from("//!");
+    for word in text.split_whitespace() {
+        if line.len() + 1 + word.len() > 100 && line != "//!" {
+            out.push_str(&line);
+            out.push('\n');
+            line = String::from("//!");
+        }
+        line.push(' ');
+        line.push_str(word);
+    }
+    if line != "//!" {
+        out.push_str(&line);
+        out.push('\n');
+    }
+    out
+}
+
 pub(super) fn render_operation(declared: &Declared) -> String {
     let mut out = String::from(LICENSE);
     let d = declared;
@@ -258,6 +279,10 @@ pub(super) fn render_operation(declared: &Declared) -> String {
     if let Some(about) = d.rule.about {
         out.push_str("//!\n");
         out.push_str(&subject_doc(about, &d.rule.actions()));
+    }
+    if !d.note.is_empty() {
+        out.push_str("//!\n");
+        out.push_str(&doc_paragraph(d.note));
     }
     if d.rule.anonymous {
         let _ = write!(
@@ -531,6 +556,9 @@ pub(super) fn render_mod(plan: &Plan) -> String {
     if !plan.forms.is_empty() {
         let _ = writeln!(out, "pub mod {};", super::form::STEM);
     }
+    for extended in &plan.extensions {
+        let _ = writeln!(out, "pub mod {};", extended.stem);
+    }
     out
 }
 
@@ -541,17 +569,20 @@ fn render_table_root(plan: &Plan, commit: &str) -> String {
     out.push_str("//! The dialect's generated table: the overlay rows, the route records, the pending groups, and the\n");
     out.push_str("//! one list of every operation.\n//!\n");
     out.push_str(
-        "//! Responsible for: [`RUSTFS_SOURCE_COMMIT`], [`PENDING`], [`STAYING`] and [`FORM_ROUTES`] here, and the three\n",
+        "//! Responsible for: [`RUSTFS_SOURCE_COMMIT`], [`PENDING`], [`STAYING`], [`FORM_ROUTES`] and\n\
+         //! [`EXTENSION_ROUTES`] here, and the per-operation lists in their own files (`overlay`, `routes`, `fold`),\n\
+         //! each in inventory order.\n",
     );
-    out.push_str("//! per-operation lists in their own files (`overlay`, `routes`, `fold`), each in inventory order.\n");
     out.push_str("//! NOT responsible for: the claims or the assembly (`crate::dialect`), or any operation's\n");
     out.push_str("//! declaration (`crate::ops`).\n");
     out.push_str("//! Upstream: the generator and `crate::ops`. Downstream: `crate::dialect`, the tests, and a deployment\n");
     out.push_str("//! that walks every operation.\n\n");
     out.push_str("mod fold;\nmod overlay;\nmod routes;\n\n");
-    out.push_str("pub use fold::fold_every_operation;\npub(crate) use overlay::OVERLAY_ROWS;\npub use routes::ROUTES;\n\n");
-    out.push_str("use crate::record::{FormRouteRecord, PendingGroup, StayingRoute};\n");
-    if !plan.forms.is_empty() {
+    out.push_str(
+        "pub use fold::{fold_every_extension, fold_every_operation};\npub(crate) use overlay::OVERLAY_ROWS;\npub use routes::ROUTES;\n\n",
+    );
+    out.push_str("use crate::record::{ExtensionRouteRecord, FormRouteRecord, PendingGroup, StayingRoute};\n");
+    if !plan.forms.is_empty() || !plan.extensions.is_empty() {
         out.push_str("use crate::ops;\n");
     }
     out.push('\n');
@@ -579,6 +610,15 @@ fn render_table_root(plan: &Plan, commit: &str) -> String {
     if !plan.forms.is_empty() {
         let _ = writeln!(out, "    ops::{}::RECORD,", super::form::STEM);
     }
+    out.push_str("];\n\n");
+    out.push_str(
+        "/// Every S3-shaped extension route served as an S3-table row rather than inside a claim\n\
+         /// (rustfs/backlog#2753), in the inventory's order, which is the order RustFS's router tries them in.\n",
+    );
+    out.push_str("pub static EXTENSION_ROUTES: &[ExtensionRouteRecord] = &[\n");
+    for extended in &plan.extensions {
+        let _ = writeln!(out, "    ops::{}::RECORD,", extended.stem);
+    }
     out.push_str("];\n");
     out
 }
@@ -599,6 +639,9 @@ fn render_list(plan: &Plan, doc: &str, header: &str, item: &str) -> String {
         if !plan.forms.is_empty() {
             let _ = writeln!(out, "    ops::{}::OVERLAY_ROW,", super::form::STEM);
         }
+        for extended in &plan.extensions {
+            let _ = writeln!(out, "    ops::{}::OVERLAY_ROW,", extended.stem);
+        }
     }
     out.push_str("];\n");
     out
@@ -606,11 +649,13 @@ fn render_list(plan: &Plan, doc: &str, header: &str, item: &str) -> String {
 
 fn render_fold(plan: &Plan) -> String {
     let mut out = String::from(LICENSE);
-    out.push_str("//! Every generated operation in one generic walk.\n//!\n");
-    out.push_str("//! Responsible for: [`fold_every_operation`], in inventory order. NOT responsible for: what a step does\n");
-    out.push_str("//! (the caller's `OperationFold`). Upstream: `crate::ops`. Downstream: `crate::dialect` and a deployment\n");
-    out.push_str("//! that registers a handler for every operation.\n\n");
-    out.push_str("use crate::admin::OperationFold;\nuse crate::ops;\n\n");
+    out.push_str("//! Every generated operation in one generic walk: the claimed operations, and the S3-shaped\n");
+    out.push_str("//! extension operations in theirs.\n//!\n");
+    out.push_str("//! Responsible for: [`fold_every_operation`] and [`fold_every_extension`], each in inventory order.\n");
+    out.push_str("//! NOT responsible for: what a step does (the caller's `OperationFold` or `ExtensionFold`).\n");
+    out.push_str("//! Upstream: `crate::ops`. Downstream: `crate::dialect` and a deployment that registers a handler for\n");
+    out.push_str("//! every operation.\n\n");
+    out.push_str("use crate::admin::{ExtensionFold, OperationFold};\nuse crate::ops;\n\n");
     out.push_str("/// Takes `fold`'s step for every operation in turn, in [`crate::ROUTES`] order.\n");
     out.push_str("pub fn fold_every_operation<F: OperationFold>(fold: &mut F, carry: F::Carry) -> F::Carry {\n");
     let count = plan.declared.len();
@@ -619,6 +664,21 @@ fn render_fold(plan: &Plan) -> String {
             let _ = writeln!(out, "    fold.step::<ops::{}::{}>(carry)", d.stem, d.type_name);
         } else {
             let _ = writeln!(out, "    let carry = fold.step::<ops::{}::{}>(carry);", d.stem, d.type_name);
+        }
+    }
+    if count == 0 {
+        out.push_str("    let _ = fold;\n    carry\n");
+    }
+    out.push_str("}\n\n");
+    out.push_str("/// Takes `fold`'s step for every S3-shaped extension operation in turn, in [`crate::EXTENSION_ROUTES`]\n");
+    out.push_str("/// order (rustfs/backlog#2753).\n");
+    out.push_str("pub fn fold_every_extension<F: ExtensionFold>(fold: &mut F, carry: F::Carry) -> F::Carry {\n");
+    let count = plan.extensions.len();
+    for (index, extended) in plan.extensions.iter().enumerate() {
+        if index + 1 == count {
+            let _ = writeln!(out, "    fold.step::<ops::{}::{}>(carry)", extended.stem, extended.type_name);
+        } else {
+            let _ = writeln!(out, "    let carry = fold.step::<ops::{}::{}>(carry);", extended.stem, extended.type_name);
         }
     }
     if count == 0 {

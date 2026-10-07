@@ -123,7 +123,7 @@ impl AdminOperation for GetV3ProfilingDownload {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 223,
+    precedence: 224,
     selector: "PathTemplate(\"/rustfs/admin/v3/profiling/download\") ∧ Method(GET) ∨ PathTemplate(\"/minio/admin/v3/profiling/download\") ∧ Method(GET)",
     action: "admin:Profiling",
     resource: ResourceShape::Service,

@@ -126,7 +126,7 @@ impl AdminOperation for PostV3IdpLdapPolicyByOperation {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 296,
+    precedence: 297,
     selector: "PathTemplate(\"/rustfs/admin/v3/idp/ldap/policy/{+operation}\") ∧ Method(POST) ∨ PathTemplate(\"/minio/admin/v3/idp/ldap/policy/{+operation}\") ∧ Method(POST)",
     action: "admin:AttachUserOrGroupPolicy",
     resource: ResourceShape::Service,

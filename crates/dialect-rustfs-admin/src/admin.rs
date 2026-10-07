@@ -16,8 +16,9 @@
 //!
 //! Responsible for: [`AdminResponse`], what every handler answers; [`spec`] and [`floor`], which
 //! every operation is built from; the body decoders and the one response encoder the generated
-//! codecs call; and [`AdminOperation`] with [`OperationFold`], which let a deployment walk every
-//! operation without naming each one.
+//! codecs call; [`AdminOperation`] with [`OperationFold`], which let a deployment walk every
+//! claimed operation without naming each one; and [`ExtensionOperation`] with [`ExtensionFold`],
+//! the same for the S3-shaped extension operations (rustfs/backlog#2753).
 //! NOT responsible for: any one route (the generated [`crate::ops`]), the claims and the overlay
 //! ([`crate::dialect`]), or what RustFS does in a handler.
 //! Upstream: `rustfs-gateway-core`'s operation, codec and dialect types. Downstream: every
@@ -34,7 +35,7 @@ use core::fmt;
 
 use bytes::Bytes;
 use rustfs_gateway_core::codec::{CodecError, EncodedResponse, OperationCodec, RequestBody, ResponseBody};
-use rustfs_gateway_core::dialect::{BucketParam, ClaimedRow};
+use rustfs_gateway_core::dialect::{BucketParam, ClaimedRow, DialectRoute};
 use rustfs_gateway_core::op::{AuthRequirement, Operation};
 use rustfs_gateway_core::registry::{HandlerDeadlineClass, OperationSpec};
 use rustfs_gateway_core::route::ShadowingDecl;
@@ -247,4 +248,23 @@ pub trait OperationFold {
 
     /// Takes one operation's step.
     fn step<O: AdminOperation>(&mut self, carry: Self::Carry) -> Self::Carry;
+}
+
+/// A generated S3-shaped extension operation (rustfs/backlog#2753): one of RustFS's
+/// query-discriminated routes outside its path table, served as an S3-table row ahead of every
+/// standard row of its method and target rather than inside a claim. Its codec answers an
+/// [`AdminResponse`], and it knows its row.
+pub trait ExtensionOperation: OperationCodec + Operation<Output = AdminResponse> {
+    /// Its row in the S3 table: precedence, selector, path shape, and every overlap it declares.
+    const ROUTE: DialectRoute;
+}
+
+/// A step over every extension operation in turn, carrying a value from one to the next, as
+/// [`OperationFold`] does over the claimed operations.
+pub trait ExtensionFold {
+    /// What is carried from one operation to the next.
+    type Carry;
+
+    /// Takes one operation's step.
+    fn step<O: ExtensionOperation>(&mut self, carry: Self::Carry) -> Self::Carry;
 }

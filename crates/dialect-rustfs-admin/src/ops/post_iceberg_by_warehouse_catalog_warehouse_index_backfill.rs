@@ -121,7 +121,7 @@ impl AdminOperation for PostIcebergByWarehouseCatalogWarehouseIndexBackfill {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 265,
+    precedence: 266,
     selector: "PathTemplate(\"/_iceberg/v1/{+warehouse}/catalog/warehouse-index/backfill\") ∧ Method(POST) ∨ PathTemplate(\"/iceberg/v1/{+warehouse}/catalog/warehouse-index/backfill\") ∧ Method(POST) ⇒ BucketParam(\"warehouse\")",
     action: "admin:MigrateTableCatalog",
     resource: ResourceShape::Bucket,

@@ -131,7 +131,7 @@ impl AdminOperation for GetV3OidcProviders {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 217,
+    precedence: 218,
     selector: "PathTemplate(\"/rustfs/admin/v3/oidc/providers\") ∧ Method(GET) ∨ PathTemplate(\"/minio/admin/v3/oidc/providers\") ∧ Method(GET)",
     action: "rustfs:ListOidcProviders",
     resource: ResourceShape::Service,

@@ -126,7 +126,7 @@ impl AdminOperation for GetV3ScannerUsageStateRecoveryIntentsByIntentId {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 231,
+    precedence: 232,
     selector: "PathTemplate(\"/rustfs/admin/v3/scanner/usage-state/recovery-intents/{+intent_id}\") ∧ Method(GET) ∨ PathTemplate(\"/minio/admin/v3/scanner/usage-state/recovery-intents/{+intent_id}\") ∧ Method(GET)",
     action: "admin:ConfigUpdate",
     resource: ResourceShape::Service,

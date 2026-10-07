@@ -14,10 +14,11 @@
 
 //! RustFS's admin API as gateway dialect operations (rustfs/backlog#1744).
 //!
-//! Responsible for: the `rustfs` dialect — its path-prefix claims, its overlay and one claimed
-//! operation per migrated admin route, generated from the recorded route inventory — and the
-//! shapes those operations share, plus the two fixed authenticated fallback handlers, and RustFS's
-//! STS endpoint behind a form claim (ADR-0041).
+//! Responsible for: the `rustfs` dialect — its path-prefix claims, its overlay, one claimed
+//! operation per migrated admin route and one S3-table operation per S3-shaped extension route
+//! (rustfs/backlog#2753), generated from the recorded route inventory — and the shapes those
+//! operations share, plus the two fixed authenticated fallback handlers, and RustFS's STS endpoint
+//! behind a form claim (ADR-0041).
 //! NOT responsible for: backend handlers (RustFS registers its own), the
 //! routes of registration groups not migrated yet ([`PENDING`]), or validating the inventory
 //! (`rustfs-gateway-goldens` does, and binds every operation here back to its row). Upstream:
@@ -35,7 +36,9 @@ pub mod ops;
 pub mod record;
 mod table;
 
-pub use admin::{AdminBody, AdminOperation, AdminResponse, OperationFold};
+pub use admin::{AdminBody, AdminOperation, AdminResponse, ExtensionFold, ExtensionOperation, OperationFold};
 pub use dialect::{CLAIMS, OVERLAY, TABLE_CATALOG_PREFIXES, rustfs_admin_dialect};
-pub use record::{BodyKind, FormRouteRecord, PendingGroup, RouteRecord, StayingRoute};
-pub use table::{FORM_ROUTES, PENDING, ROUTES, RUSTFS_SOURCE_COMMIT, STAYING, fold_every_operation};
+pub use record::{BodyKind, ExtensionRouteRecord, FormRouteRecord, PendingGroup, RouteRecord, StayingRoute};
+pub use table::{
+    EXTENSION_ROUTES, FORM_ROUTES, PENDING, ROUTES, RUSTFS_SOURCE_COMMIT, STAYING, fold_every_extension, fold_every_operation,
+};

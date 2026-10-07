@@ -132,7 +132,7 @@ impl AdminOperation for PostV4InspectArchive {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 362,
+    precedence: 364,
     selector: "PathTemplate(\"/rustfs/admin/v4/inspect/archive\") ∧ Method(POST) ∨ PathTemplate(\"/minio/admin/v4/inspect/archive\") ∧ Method(POST)",
     action: "admin:InspectData",
     resource: ResourceShape::Service,

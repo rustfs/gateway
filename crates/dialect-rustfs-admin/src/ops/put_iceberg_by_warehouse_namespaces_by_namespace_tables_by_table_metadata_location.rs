@@ -125,7 +125,7 @@ impl AdminOperation for PutIcebergByWarehouseNamespacesByNamespaceTablesByTableM
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 366,
+    precedence: 368,
     selector: "PathTemplate(\"/_iceberg/v1/{+warehouse}/namespaces/{+namespace}/tables/{+table}/metadata-location\") ∧ Method(PUT) ∨ PathTemplate(\"/iceberg/v1/{+warehouse}/namespaces/{+namespace}/tables/{+table}/metadata-location\") ∧ Method(PUT) ⇒ BucketParam(\"warehouse\")",
     action: "admin:SetTableMetadataLocation",
     resource: ResourceShape::Bucket,

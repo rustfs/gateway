@@ -124,7 +124,7 @@ impl AdminOperation for PutV3Config {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 375,
+    precedence: 377,
     selector: "PathTemplate(\"/rustfs/admin/v3/config\") ∧ Method(PUT) ∨ PathTemplate(\"/minio/admin/v3/config\") ∧ Method(PUT)",
     action: "admin:ConfigUpdate",
     resource: ResourceShape::Service,

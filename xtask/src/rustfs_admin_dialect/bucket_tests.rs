@@ -117,8 +117,9 @@ fn a_templated_route_is_declared_with_its_parameters() {
 }
 
 /// Negative — two bucket parameters, an empty segment that is not a trailing `/`, an affixed
-/// parameter, a parameter that is not a lowercase identifier, a repeated one, and a template the
-/// inventory's list disagrees with are refused.
+/// parameter that is a catch-all, a bucket or not a lowercase identifier, a parameter that is not
+/// a lowercase identifier, a repeated one, and a template the inventory's list disagrees with are
+/// refused.
 #[test]
 fn n_a_template_outside_the_rule_is_refused() {
     for (path, params, why) in [
@@ -129,7 +130,18 @@ fn n_a_template_outside_the_rule_is_refused() {
         ),
         ("/rustfs/admin/v3/heal//", &[][..], "an empty segment that is not a trailing '/'"),
         ("/rustfs/admin/v3//heal", &[][..], "an empty segment that is not a trailing '/'"),
-        ("/rustfs/admin/v3/zip/{id}.zip", &["id"][..], "shares its segment"),
+        ("/rustfs/admin/v3/zip/{*id}.zip", &["*id"][..], "never a catch-all"),
+        (
+            "/rustfs/admin/v3/zip/{bucket}.zip",
+            &["bucket"][..],
+            "an affixed parameter cannot bind a bucket",
+        ),
+        (
+            "/rustfs/admin/v3/zip/{Id}.zip",
+            &["Id"][..],
+            "an affixed parameter is one lowercase identifier",
+        ),
+        ("/rustfs/admin/v3/zip/{id}.{zip}", &["id"][..], "shares its segment"),
         ("/rustfs/admin/v3/tier/{Tier}", &["Tier"][..], "not a lowercase identifier"),
         ("/rustfs/admin/v3/tier/{tier-name}", &["tier-name"][..], "not a lowercase identifier"),
         ("/rustfs/admin/v3/tier/{}", &[""][..], "not a lowercase identifier"),
@@ -307,7 +319,7 @@ fn the_recorded_bucket_bindings_are_exactly_the_order_five_ones() {
             ("rustfs:PostV3QuotaCheckByBucket", "s3:GetBucketQuota"),
         ]
     );
-    assert_eq!(plan.declared.len(), 312);
+    assert_eq!(plan.declared.len(), 314);
     assert!(plan.pending.is_empty(), "{:?}", plan.pending);
 }
 
@@ -451,6 +463,7 @@ fn n_an_anonymous_operation_is_the_inventorys_and_the_rulings_together() {
             path,
             auth_detail,
             forms,
+            note: "",
         }]
     };
     let user_info = "/rustfs/admin/v3/user-info";
@@ -471,8 +484,9 @@ fn n_an_anonymous_operation_is_the_inventorys_and_the_rulings_together() {
 
 /// Positive and negative — a route listed as staying with RustFS is declared as no operation and
 /// recorded with its group and reason; a listed route the fully migrated inventory does not record
-/// is refused; and the recorded plan keeps exactly six routes with RustFS (ADR-0032 (b)), the STS
-/// endpoint having moved behind its form claim (ADR-0041).
+/// is refused; and the recorded plan keeps exactly the four `/health` routes with RustFS (ADR-0032
+/// (b)), the STS endpoint having moved behind its form claim (ADR-0041) and the object-zip-download
+/// pair being claimed (rustfs/backlog#2753).
 #[test]
 fn n_a_staying_route_is_recorded_and_never_declared() {
     let stays: &[(&str, &str, &'static str)] = &[("GET", "/health", "the probe layer (ADR-0026 (h))")];
@@ -484,7 +498,7 @@ fn n_a_staying_route_is_recorded_and_never_declared() {
     };
     let mut fixture = routes();
     fixture[1].minio_admin_alias = false;
-    let plan = super::plan(&inventory(fixture), &[], &[], stays, &[]).expect("the staying route plans");
+    let plan = super::plan(&inventory(fixture), &[], &[], stays, &[], &[]).expect("the staying route plans");
     assert_eq!(plan.declared.len(), 1);
     assert_eq!(
         (plan.declared[0].name.as_str(), plan.declared[0].alias.as_deref()),
@@ -502,7 +516,7 @@ fn n_a_staying_route_is_recorded_and_never_declared() {
     let mut only_profile = routes();
     only_profile.remove(0);
     only_profile[0].minio_admin_alias = false;
-    let stale = super::plan(&inventory(only_profile), &[], &[], stays, &[])
+    let stale = super::plan(&inventory(only_profile), &[], &[], stays, &[], &[])
         .err()
         .expect("a stale staying route");
     assert!(stale.contains("the staying route GET /health is not in the inventory"), "{stale}");
@@ -518,10 +532,8 @@ fn n_a_staying_route_is_recorded_and_never_declared() {
         [
             ("GET", "/health"),
             ("GET", "/health/ready"),
-            ("GET", "/rustfs/admin/v3/object-zip-downloads/{id}.zip"),
             ("HEAD", "/health"),
-            ("HEAD", "/health/ready"),
-            ("POST", "/rustfs/admin/v3/object-zip-downloads"),
+            ("HEAD", "/health/ready")
         ]
     );
     let anonymous: Vec<&str> = recorded

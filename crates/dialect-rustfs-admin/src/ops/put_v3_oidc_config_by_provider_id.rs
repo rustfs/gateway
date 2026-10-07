@@ -127,7 +127,7 @@ impl AdminOperation for PutV3OidcConfigByProviderId {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 382,
+    precedence: 384,
     selector: "PathTemplate(\"/rustfs/admin/v3/oidc/config/{+provider_id}\") ∧ Method(PUT) ∨ PathTemplate(\"/minio/admin/v3/oidc/config/{+provider_id}\") ∧ Method(PUT)",
     action: "admin:ConfigUpdate",
     resource: ResourceShape::Service,

@@ -123,7 +123,7 @@ impl AdminOperation for GetV3SpeedtestClientDevnull {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 237,
+    precedence: 238,
     selector: "PathTemplate(\"/rustfs/admin/v3/speedtest/client/devnull\") ∧ Method(GET) ∨ PathTemplate(\"/minio/admin/v3/speedtest/client/devnull\") ∧ Method(GET)",
     action: "admin:OBDInfo",
     resource: ResourceShape::Service,

@@ -19,8 +19,9 @@
 //! The dialect's generated table: the overlay rows, the route records, the pending groups, and the
 //! one list of every operation.
 //!
-//! Responsible for: [`RUSTFS_SOURCE_COMMIT`], [`PENDING`], [`STAYING`] and [`FORM_ROUTES`] here, and the three
-//! per-operation lists in their own files (`overlay`, `routes`, `fold`), each in inventory order.
+//! Responsible for: [`RUSTFS_SOURCE_COMMIT`], [`PENDING`], [`STAYING`], [`FORM_ROUTES`] and
+//! [`EXTENSION_ROUTES`] here, and the per-operation lists in their own files (`overlay`, `routes`, `fold`),
+//! each in inventory order.
 //! NOT responsible for: the claims or the assembly (`crate::dialect`), or any operation's
 //! declaration (`crate::ops`).
 //! Upstream: the generator and `crate::ops`. Downstream: `crate::dialect`, the tests, and a deployment
@@ -30,12 +31,12 @@ mod fold;
 mod overlay;
 mod routes;
 
-pub use fold::fold_every_operation;
+pub use fold::{fold_every_extension, fold_every_operation};
 pub(crate) use overlay::OVERLAY_ROWS;
 pub use routes::ROUTES;
 
 use crate::ops;
-use crate::record::{FormRouteRecord, PendingGroup, StayingRoute};
+use crate::record::{ExtensionRouteRecord, FormRouteRecord, PendingGroup, StayingRoute};
 
 /// The RustFS commit the inventory was recorded from.
 pub const RUSTFS_SOURCE_COMMIT: &str = "5e1bd498ce1ca33bcb0ca50aeee861e69e6c8744";
@@ -58,12 +59,6 @@ pub static STAYING: &[StayingRoute] = &[
         reason: "The server's probe layer, ahead of the S3 service (ADR-0026 (h)).",
     },
     StayingRoute {
-        method: "GET",
-        path: "/rustfs/admin/v3/object-zip-downloads/{id}.zip",
-        group: "object_zip_download",
-        reason: "An affixed `{id}.zip` parameter and a bearer token in the query: it needs a per-operation bearer scheme on the floor (ADR-0026 (g)).",
-    },
-    StayingRoute {
         method: "HEAD",
         path: "/health",
         group: "health",
@@ -75,13 +70,20 @@ pub static STAYING: &[StayingRoute] = &[
         group: "health",
         reason: "The server's probe layer, ahead of the S3 service (ADR-0026 (h)).",
     },
-    StayingRoute {
-        method: "POST",
-        path: "/rustfs/admin/v3/object-zip-downloads",
-        group: "object_zip_download",
-        reason: "It authorises S3 resources named in its body and only mints the token the download route consumes, which stays with RustFS (ADR-0025 (d), ADR-0026 (g), ADR-0032 (b)).",
-    },
 ];
 
 /// Every route of a migrated group served behind a form claim rather than a path claim (ADR-0041).
 pub static FORM_ROUTES: &[FormRouteRecord] = &[ops::sts_form_post::RECORD];
+
+/// Every S3-shaped extension route served as an S3-table row rather than inside a claim
+/// (rustfs/backlog#2753), in the inventory's order, which is the order RustFS's router tries them in.
+pub static EXTENSION_ROUTES: &[ExtensionRouteRecord] = &[
+    ops::reset_bucket_replication::RECORD,
+    ops::get_replication_reset_status::RECORD,
+    ops::get_replication_metrics_v2::RECORD,
+    ops::get_replication_metrics::RECORD,
+    ops::check_replication::RECORD,
+    ops::invoke_object_lambda::RECORD,
+    ops::listen_notification::RECORD,
+    ops::listen_bucket_notification::RECORD,
+];

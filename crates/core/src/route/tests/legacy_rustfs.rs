@@ -187,12 +187,80 @@ fn a_key_that_needs_a_second_one_selects_by_it() {
     assert_eq!(post("select-type=2&restore"), op("RestoreObject"));
 }
 
-/// MinIO's bucket notification listener is ahead of every other key.
+/// RustFS's eight S3-shaped extension routes (rustfs/backlog#2753): its admin router claims each
+/// by method, target and one query discriminator before its S3 service reads anything else, so
+/// every one is ahead of every operation key and of `x-id`, and `replication-metrics` splits on
+/// its value.
 #[test]
-fn events_on_a_bucket_is_the_notification_listener() {
-    assert_eq!(select(Method::GET, TargetKind::Bucket, "events", &[]), op("ListenBucketNotification"));
-    assert_eq!(select(Method::GET, TargetKind::Bucket, "acl&events", &[]), op("ListenBucketNotification"));
+fn an_extension_discriminator_selects_the_dialect_operation_ahead_of_every_key() {
+    let bucket = |query| select(Method::GET, TargetKind::Bucket, query, &[]);
+    assert_eq!(
+        select(Method::PUT, TargetKind::Bucket, "replication-reset", &[]),
+        op("rustfs:ResetBucketReplication")
+    );
+    assert_eq!(bucket("replication-reset-status"), op("rustfs:GetReplicationResetStatus"));
+    assert_eq!(bucket("replication-metrics=2"), op("rustfs:GetReplicationMetricsV2"));
+    assert_eq!(bucket("replication-metrics"), op("rustfs:GetReplicationMetrics"));
+    assert_eq!(bucket("replication-metrics="), op("rustfs:GetReplicationMetrics"));
+    assert_eq!(bucket("replication-check"), op("rustfs:CheckReplication"));
+    assert_eq!(bucket("replication-check="), op("rustfs:CheckReplication"));
+    assert_eq!(
+        select(Method::GET, TargetKind::Object, "lambdaArn=arn", &[]),
+        op("rustfs:InvokeObjectLambda")
+    );
+    assert_eq!(select(Method::GET, TargetKind::Service, "events=x", &[]), op("rustfs:ListenNotification"));
+    assert_eq!(bucket("events"), op("rustfs:ListenBucketNotification"));
+    // Ahead of every operation key, of `x-id`, and of each other in RustFS's order.
+    assert_eq!(bucket("acl&events"), op("rustfs:ListenBucketNotification"));
+    assert_eq!(bucket("replication&replication-check"), op("rustfs:CheckReplication"));
+    assert_eq!(bucket("x-id=ListObjects&replication-check"), op("rustfs:CheckReplication"));
+    assert_eq!(bucket("x-id=GetBucketAcl&events"), op("rustfs:ListenBucketNotification"));
+    assert_eq!(
+        select(Method::PUT, TargetKind::Bucket, "x-id=CreateBucket&replication-reset", &[]),
+        op("rustfs:ResetBucketReplication")
+    );
+    assert_eq!(
+        bucket("replication-check&replication-reset-status"),
+        op("rustfs:GetReplicationResetStatus")
+    );
+    assert_eq!(bucket("replication-check&replication-metrics=2"), op("rustfs:GetReplicationMetricsV2"));
+    assert_eq!(bucket("events&replication-check"), op("rustfs:CheckReplication"));
+    assert_eq!(
+        select(Method::GET, TargetKind::Service, "x-id=ListBuckets&events", &[]),
+        op("rustfs:ListenNotification")
+    );
+}
+
+/// Negative — a discriminator with the wrong value, method or target is no extension route: the
+/// request is whatever its keys name, as on RustFS, whose router reads the first value of the key
+/// still encoded and takes nothing a later value says.
+#[test]
+fn n_an_extension_near_miss_is_the_ordinary_operation() {
+    let bucket = |query| select(Method::GET, TargetKind::Bucket, query, &[]);
+    assert_eq!(bucket("replication-check=1"), op("ListObjects"));
+    assert_eq!(bucket("replication-check=%20"), op("ListObjects"));
+    assert_eq!(bucket("replication-metrics=3"), op("ListObjects"));
+    assert_eq!(bucket("replication-metrics=%32"), op("ListObjects"));
+    assert_eq!(bucket("replication-reset"), op("ListObjects"));
+    assert_eq!(bucket("Replication-Check"), op("ListObjects"));
+    assert_eq!(bucket("replication-check=1&replication-check"), op("ListObjects"));
+    assert_eq!(bucket("lambdaArn=arn"), op("ListObjects"));
+    assert_eq!(bucket("acl&lambdaArn=arn"), op("GetBucketAcl"));
     assert_eq!(select(Method::PUT, TargetKind::Bucket, "events", &[]), op("CreateBucket"));
+    assert_eq!(select(Method::PUT, TargetKind::Bucket, "replication-check", &[]), op("CreateBucket"));
+    assert_eq!(select(Method::PUT, TargetKind::Bucket, "replication-reset=1", &[]), op("CreateBucket"));
+    assert_eq!(select(Method::PUT, TargetKind::Object, "replication-reset", &[]), op("PutObject"));
+    assert_eq!(select(Method::GET, TargetKind::Object, "replication-check", &[]), op("GetObject"));
+    assert_eq!(select(Method::GET, TargetKind::Object, "events", &[]), op("GetObject"));
+    assert_eq!(select(Method::GET, TargetKind::Service, "lambdaArn=arn", &[]), op("ListBuckets"));
+    assert_eq!(select(Method::GET, TargetKind::Service, "replication-check", &[]), op("ListBuckets"));
+    assert_eq!(select(Method::HEAD, TargetKind::Bucket, "events", &[]), op("HeadBucket"));
+    assert_eq!(select(Method::DELETE, TargetKind::Bucket, "events", &[]), op("DeleteBucket"));
+    assert_eq!(select(Method::POST, TargetKind::Bucket, "events", &[]), LegacySelection::Unknown);
+    // Naming an extension operation by `x-id` names nothing: legacy RustFS's `x-id` set is its
+    // S3 operations.
+    assert_eq!(bucket("x-id=rustfs:CheckReplication"), LegacySelection::Undeclared);
+    assert_eq!(bucket("x-id=ListenBucketNotification"), LegacySelection::Undeclared);
 }
 
 /// A browser-form upload to a bucket is PostObject, whatever its query names.
@@ -369,6 +437,16 @@ fn n_a_legacy_router_refuses_what_legacy_rustfs_refuses() {
         "an operation the table does not define is still the one refused"
     );
     assert_eq!(routed(&legacy, Method::PUT, TargetKind::Service, ""), Err("NotImplemented".to_owned()));
+    // An extension route names the dialect's operation; a table without the dialect refuses it by
+    // that name rather than serving the S3 operation legacy RustFS never reaches.
+    assert_eq!(
+        routed(&legacy, Method::GET, TargetKind::Bucket, "replication-check"),
+        Ok("rustfs:CheckReplication")
+    );
+    assert_eq!(
+        routed(&legacy, Method::GET, TargetKind::Service, "events"),
+        Ok("rustfs:ListenNotification")
+    );
 }
 
 /// Negative — the default router is untouched: its own precedences, and `x-id` ignored.
@@ -382,4 +460,5 @@ fn n_the_table_router_is_unchanged() {
     );
     assert_eq!(routed(&table, Method::PUT, TargetKind::Object, "x-id=PutObjectTagging"), Ok("PutObject"));
     assert_eq!(routed(&table, Method::GET, TargetKind::Bucket, "x-id=NoSuchOp"), Ok("ListObjects"));
+    assert_eq!(routed(&table, Method::GET, TargetKind::Bucket, "replication-check"), Ok("ListObjects"));
 }

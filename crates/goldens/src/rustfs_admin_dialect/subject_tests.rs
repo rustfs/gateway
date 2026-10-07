@@ -254,7 +254,11 @@ fn n_two_spellings_of_one_account_are_refused_before_authorising() {
 fn an_own_account_operation_is_about_the_caller_whatever_the_query_names() {
     let query = format!("accessKey={ACCOUNT}&user={ACCOUNT}&userDN={ACCOUNT}&users={ACCOUNT}&all=true");
     let cases = cases(|rule| rule == SubjectRule::Caller, |_| vec![String::new(), query.clone()]);
-    assert_eq!(cases.len(), 9 * 2 * 2);
+    assert_eq!(
+        cases.len(),
+        11 * 2 * 2,
+        "nine order-4 own-account operations and the zip pair, two rows, two queries"
+    );
     let assembled = super::assemble(declared);
     for (record, path, query) in &cases {
         let exchange = assembled.exchange(wire(&signed_with(record, path, query)));

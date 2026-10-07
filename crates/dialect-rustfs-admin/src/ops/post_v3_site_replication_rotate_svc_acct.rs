@@ -123,7 +123,7 @@ impl AdminOperation for PostV3SiteReplicationRotateSvcAcct {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 349,
+    precedence: 351,
     selector: "PathTemplate(\"/rustfs/admin/v3/site-replication/rotate-svc-acct\") ∧ Method(POST) ∨ PathTemplate(\"/minio/admin/v3/site-replication/rotate-svc-acct\") ∧ Method(POST)",
     action: "admin:SiteReplicationOperation",
     resource: ResourceShape::Service,

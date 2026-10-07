@@ -131,7 +131,7 @@ impl AdminOperation for GetV4PluginsInstances {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 258,
+    precedence: 259,
     selector: "PathTemplate(\"/rustfs/admin/v4/plugins/instances\") ∧ Method(GET) ∨ PathTemplate(\"/minio/admin/v4/plugins/instances\") ∧ Method(GET)",
     action: "admin:GetBucketTarget",
     resource: ResourceShape::Service,

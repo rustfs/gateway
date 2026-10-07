@@ -131,7 +131,7 @@ impl AdminOperation for GetV4HealMrfResponsibilities {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 255,
+    precedence: 256,
     selector: "PathTemplate(\"/rustfs/admin/v4/heal/mrf/responsibilities\") ∧ Method(GET) ∨ PathTemplate(\"/minio/admin/v4/heal/mrf/responsibilities\") ∧ Method(GET)",
     action: "admin:Heal",
     resource: ResourceShape::Service,

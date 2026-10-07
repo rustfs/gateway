@@ -124,7 +124,7 @@ impl AdminOperation for PutV3Tier {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 409,
+    precedence: 411,
     selector: "PathTemplate(\"/rustfs/admin/v3/tier\") ∧ Method(PUT) ∨ PathTemplate(\"/minio/admin/v3/tier\") ∧ Method(PUT)",
     action: "admin:SetTier",
     resource: ResourceShape::Service,

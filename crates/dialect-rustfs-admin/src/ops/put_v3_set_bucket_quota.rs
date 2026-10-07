@@ -133,7 +133,7 @@ impl AdminOperation for PutV3SetBucketQuota {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 386,
+    precedence: 388,
     selector: "PathTemplate(\"/rustfs/admin/v3/set-bucket-quota\") ∧ Method(PUT) ∨ PathTemplate(\"/minio/admin/v3/set-bucket-quota\") ∧ Method(PUT) ⇒ BucketQuery(\"bucket\")",
     action: "admin:SetBucketQuota",
     resource: ResourceShape::Bucket,

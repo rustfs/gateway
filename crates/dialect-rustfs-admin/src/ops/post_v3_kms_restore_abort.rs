@@ -124,7 +124,7 @@ impl AdminOperation for PostV3KmsRestoreAbort {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 323,
+    precedence: 324,
     selector: "PathTemplate(\"/rustfs/admin/v3/kms/restore/abort\") ∧ Method(POST) ∨ PathTemplate(\"/minio/admin/v3/kms/restore/abort\") ∧ Method(POST)",
     action: "kms:Restore",
     resource: ResourceShape::Service,

@@ -124,7 +124,7 @@ impl AdminOperation for PutV3AddCannedPolicy {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 369,
+    precedence: 371,
     selector: "PathTemplate(\"/rustfs/admin/v3/add-canned-policy\") ∧ Method(PUT) ∨ PathTemplate(\"/minio/admin/v3/add-canned-policy\") ∧ Method(PUT)",
     action: "admin:CreatePolicy",
     resource: ResourceShape::Service,
