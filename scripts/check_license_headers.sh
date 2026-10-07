@@ -60,45 +60,62 @@ HEADER_WINDOW=14
 
 status=0
 
-ALLOWANCES=""
-if [[ -f "$ALLOWANCE_FILE" ]]; then
-    while IFS= read -r line; do
-        line="${line%%#*}"
-        line="$(printf '%s' "$line" | tr -d ' \t')"
-        [[ -z "$line" ]] && continue
-        ALLOWANCES="${ALLOWANCES}${line}
-"
-    done <"$ALLOWANCE_FILE"
-fi
+source "${SCRIPT_DIR}/lib/python.sh"
+PYTHON="$(gateway_python check_license_headers)" || exit 1
 
-is_allowed() {
-    [[ -z "$ALLOWANCES" ]] && return 1
-    printf '%s' "$ALLOWANCES" | grep -xF "$1" >/dev/null
-}
+# Open each header in this interpreter instead of spawning head/grep for every source.
+"$PYTHON" - "$ROOT_DIR" "$ALLOWANCE_FILE" "$HEADER_MARKER" "$HEADER_WINDOW" <<'PY' || status=1
+import itertools
+import os
+from pathlib import Path
+import subprocess
+import sys
 
-checked=0
-while IFS= read -r file; do
-    [[ -z "$file" ]] && continue
-    [[ -f "$file" ]] || continue
-    if is_allowed "$file"; then
+root, allowance_file, marker, window = sys.argv[1:]
+marker = marker.encode()
+allowances = set()
+try:
+    if os.path.isfile(allowance_file):
+        # Keep the shell reader's newline-terminated records and space/tab normalization.
+        for line in Path(allowance_file).read_bytes().split(b"\n")[:-1]:
+            path = line.split(b"#", 1)[0].replace(b" ", b"").replace(b"\t", b"")
+            if path:
+                allowances.add(path)
+except OSError as error:
+    raise SystemExit(f"check_license_headers: cannot read allowances: {error}")
+
+try:
+    files = subprocess.run(
+        ["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z", "--",
+         "*.rs", ":!:target/*", ":!:generated/*", ":!:*/generated/*"],
+        cwd=root, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    ).stdout.split(b"\0")
+except (OSError, subprocess.CalledProcessError) as error:
+    raise SystemExit(f"check_license_headers: cannot enumerate Rust sources: {error}")
+
+checked = 0
+failed = False
+for relative in files:
+    if not relative or relative in allowances:
         continue
-    fi
-    checked=$((checked + 1))
-    if ! head -n "$HEADER_WINDOW" "$file" | grep -F "$HEADER_MARKER" >/dev/null; then
-        printf '%s: missing the Apache-2.0 licence header in the first %s lines\n' \
-            "$file" "$HEADER_WINDOW" >&2
-        status=1
-    fi
-# `--cached --others --exclude-standard` rather than a bare `git ls-files`: the bare form lists
-# only *tracked* files, so a brand-new file stays invisible to this guard right up until the
-# moment `git add -A` commits it. That is how CJK text reached commit 343f044 past a guard run
-# that had just reported success. `--exclude-standard` keeps ignored files out.
-done < <(git ls-files --cached --others --exclude-standard -- '*.rs' ':!:target/*' ':!:generated/*' ':!:*/generated/*' 2>/dev/null || true)
-
-if [[ "$checked" -eq 0 ]]; then
-    printf 'check_license_headers: no tracked Rust sources to check.\n'
-    exit 0
-fi
+    path = os.path.join(os.fsencode(root), relative)
+    if not os.path.isfile(path):
+        continue
+    checked += 1
+    try:
+        with open(path, "rb") as source:
+            lines = list(itertools.islice(source, int(window)))
+        if any(marker in line for line in lines):
+            continue
+        print(f"{os.fsdecode(relative)}: missing the Apache-2.0 licence header in the first {window} lines",
+              file=sys.stderr)
+    except OSError as error:
+        print(f"{os.fsdecode(relative)}: cannot read Rust source: {error}", file=sys.stderr)
+    failed = True
+if checked == 0:
+    print("check_license_headers: no tracked Rust sources to check.")
+sys.exit(1 if failed else 0)
+PY
 
 if [[ "$status" -ne 0 ]]; then
     cat >&2 <<'EOF'
