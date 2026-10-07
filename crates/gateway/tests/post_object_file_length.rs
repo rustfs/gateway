@@ -223,3 +223,12 @@ async fn n_a_fixed_empty_file_never_reaches_the_handler() {
     assert!(answer.contains("<Code>UnexpectedContent</Code>"), "{answer}");
     assert!(handed.is_empty(), "the handler ran for an empty file: {handed:?}");
 }
+
+/// Positive — the gateway's own grammar still hands an empty file to the handler: the #1167
+/// ruling found no evidence for refusing one outside the RustFS profile.
+#[tokio::test]
+async fn the_gateway_grammar_still_stores_an_empty_file() {
+    let (status, answer, handed) = post(false, form("", "", &[("key", "upload")], b""), true).await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{answer}");
+    assert_eq!(handed, vec![(None, Vec::new())]);
+}
