@@ -260,6 +260,13 @@ fn control_headers(body_len: usize, extra: &[(String, String)]) -> Vec<(String, 
         ("connection".to_owned(), "close".to_owned()),
     ];
     headers.extend_from_slice(extra);
+    if body_len == 0
+        && !headers
+            .iter()
+            .any(|(name, _)| name.eq_ignore_ascii_case("x-amz-content-sha256"))
+    {
+        headers.push(("x-amz-content-sha256".to_owned(), crate::sha256::hex_digest(&[])));
+    }
     headers
 }
 
