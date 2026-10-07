@@ -34,6 +34,8 @@ mod assembly_order;
 mod assembly_snapshot;
 #[path = "authz_consumption.rs"]
 mod authz_consumption;
+#[path = "authz_context_facts.rs"]
+mod authz_context_facts;
 #[path = "authz_contract.rs"]
 mod authz_contract;
 #[path = "authz_implementations.rs"]

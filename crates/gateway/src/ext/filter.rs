@@ -16,7 +16,8 @@
 //!
 //! Responsible for: [`StageFilter`] and its three seams, the views each seam is handed
 //! ([`WireHead`], [`RoutedView`], [`ResponseView`]), the closed set of head fields a filter may
-//! **not** rewrite ([`FrozenHeader`]), and the three closure adapters.
+//! **not** rewrite ([`FrozenHeader`]), the host's client-facts override
+//! ([`WireHead::set_client_facts`], rustfs/backlog#2752), and the three closure adapters.
 //! NOT responsible for: calling them — the seams live in `crate::service`, which is the one file
 //! that knows where a stage ends; deciding any protocol behaviour; or per-operation middleware,
 //! which is [`crate::OpLayer`] one level in.
@@ -80,6 +81,7 @@ use rustfs_gateway_core::{HandlerError, OperationSpec, TargetKind};
 use rustfs_gateway_stream::Body;
 use rustfs_gateway_types::{BucketName, ErrorCode, ObjectKey};
 
+use super::ClientFacts;
 use crate::trace::RequestId;
 
 /// The header fields a [`StageFilter::on_wire`] may not write, lowercase.
@@ -214,6 +216,25 @@ impl<'a> WireHead<'a> {
         Self::allowed(name)?;
         self.parts.headers.remove(name);
         Ok(())
+    }
+
+    /// What the transport knew about the client, as the facade derived it before this seam from
+    /// the listener's connection value, a host's `TransportSecurity` and its `ClientAddr`; `None`
+    /// when none of them was installed.
+    #[must_use]
+    pub fn client_facts(&self) -> Option<&ClientFacts> {
+        self.parts.extensions.get::<ClientFacts>()
+    }
+
+    /// Replaces the client facts both authorization stages and the handler will read.
+    ///
+    /// The whole value is replaced: a host behind a trusted proxy that wants to keep the socket
+    /// peer reads [`Self::client_facts`] first and corrects the one field it knows better. This is
+    /// the one place a host can say `transport_secure: true` about a connection the listener saw
+    /// as cleartext, and it is the host's word, not the client's — nothing a request carries
+    /// reaches this method, and the seam runs before acceptance freezes the bag.
+    pub fn set_client_facts(&mut self, facts: ClientFacts) {
+        self.parts.extensions.insert(facts);
     }
 
     /// The frozen check, in one place so that the two writers cannot disagree about the set.

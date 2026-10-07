@@ -15,8 +15,11 @@
 //! Whether an authenticated caller may perform the operation routing already chose.
 //!
 //! Responsible for: the two-stage [`Authorizer`] contract, the requests it is asked about
-//! ([`AuthzRequest`] and [`InputAuthzRequest`]), and the closure adapters ADR-0002 requires every
-//! `BoxFuture` extension point to ship ([`allow_when`] and [`decide_with`]).
+//! ([`AuthzRequest`] and [`InputAuthzRequest`]), the [`RequestContext`] both stages share — its
+//! clock, policy, [`AuthSchemeRef`], verified scope, headers, raw query and [`ClientFacts`] — with
+//! the typed [`ServerExtensions`] read path onto the accepted request's transport bag, and the
+//! closure adapters ADR-0002 requires every `BoxFuture` extension point to ship ([`allow_when`]
+//! and [`decide_with`]).
 //! NOT responsible for: authentication (`super::authenticator`), deciding which operation was
 //! named (`rustfs_gateway_core::route`), or the action-to-resource mapping, which is
 //! `OperationSpec::auth` and is registered rather than computed here.
@@ -38,32 +41,88 @@
 //! explained which condition failed would let that caller map the policy one request at a time.
 
 use rustfs_gateway_core::{BoxFuture, ResourceIdentity, ResourceShape, Subject};
-use rustfs_gateway_sig::{Identity, RequestNow, VerifiedScope};
+use rustfs_gateway_http::{TransportExtensions, WireRequest};
+use rustfs_gateway_sig::{AuthScheme, Identity, RequestNow, SigFamily, SigLocation, Verdict, VerifiedScope};
 use rustfs_gateway_types::{BucketName, ObjectKey};
 
 pub use rustfs_gateway_core::{Decision, Denied as Denial};
 
-use super::{PolicySnapshot, TargetOrigin};
+use super::{ClientFacts, PolicySnapshot, TargetOrigin};
 
-/// The authentication scheme exposed to authorization without exposing session-token material.
+/// How the request was authenticated, as far as a policy may branch on it: the signature family
+/// and where it was carried, never the session token or the signature itself.
+///
+/// Read off the verdict's own scheme by [`AuthSchemeRef::of_scheme`]; nothing here verifies.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum AuthSchemeRef {
-    /// The request presented no authentication material.
+    /// The request presented no authentication material, and that was confirmed.
     Anonymous,
-    /// The request carried a signature that was verified.
-    Authenticated,
+    /// `AWS4-HMAC-SHA256` in the `Authorization` header.
+    SigV4Header,
+    /// `AWS4-HMAC-SHA256` in the query: a presigned URL.
+    SigV4Presigned,
+    /// SigV2 in the `Authorization` header.
+    SigV2Header,
+    /// SigV2 in the query: a presigned URL.
+    SigV2Presigned,
+    /// A signed POST policy in a browser form field, of either family.
+    PostPolicy,
+    /// Verified by a family this enum has no spelling for — SigV4a, or one the signing crate adds
+    /// later. Its own answer rather than the nearest SigV4 variant, so a policy that names a
+    /// scheme never admits one it did not name.
+    OtherSigned,
 }
 
-/// Server-derived request state available to an authorizer.
+impl AuthSchemeRef {
+    /// The scheme a verdict's [`AuthScheme`] spells, read from its family and its location.
+    #[must_use]
+    pub fn of_scheme(scheme: &AuthScheme) -> Self {
+        match (scheme.family, scheme.location) {
+            (SigFamily::V4 | SigFamily::V2, SigLocation::FormField) => Self::PostPolicy,
+            (SigFamily::V4, SigLocation::Header) => Self::SigV4Header,
+            (SigFamily::V4, SigLocation::Query) => Self::SigV4Presigned,
+            (SigFamily::V2, SigLocation::Header) => Self::SigV2Header,
+            (SigFamily::V2, SigLocation::Query) => Self::SigV2Presigned,
+            _ => Self::OtherSigned,
+        }
+    }
+
+    /// The scheme a settled verdict carries: `None` for a rejected verdict, and for any variant
+    /// added later, so that a caller refuses rather than reports "presented nothing".
+    #[must_use]
+    pub fn of_verdict(verdict: &Verdict) -> Option<Self> {
+        match verdict {
+            Verdict::Authenticated { scheme, .. } => Some(Self::of_scheme(scheme)),
+            Verdict::Anonymous(_) => Some(Self::Anonymous),
+            _ => None,
+        }
+    }
+
+    /// Whether a signature was verified: everything but [`Self::Anonymous`].
+    #[must_use]
+    pub const fn is_authenticated(self) -> bool {
+        !matches!(self, Self::Anonymous)
+    }
+
+    /// Whether the signature was carried in the query, so the URL itself is the credential.
+    #[must_use]
+    pub const fn is_presigned(self) -> bool {
+        matches!(self, Self::SigV4Presigned | Self::SigV2Presigned)
+    }
+}
+
+/// Server-derived request state available to an authorizer: the values the transport and the
+/// host installed in the request before acceptance, read by type.
 ///
-/// This type has no public constructor or mutation API. Client request extensions are deliberately
-/// a different type and are not reachable through [`RequestContext`].
-#[derive(Debug)]
-pub struct ServerExtensions {
-    _private: (),
+/// This type has no public constructor or mutation API. It borrows the accepted request's
+/// [`TransportExtensions`] — the same bag `RequestContextView::transport_extensions` hands a
+/// handler — so a value is installed once and read by both. Client request headers are a
+/// different thing and are not reachable through here: nothing on the wire can put a value in
+/// this bag.
+#[derive(Clone, Copy, Debug)]
+pub struct ServerExtensions<'a> {
+    transport: Option<&'a TransportExtensions>,
 }
-
-static EMPTY_SERVER_EXTENSIONS: ServerExtensions = ServerExtensions { _private: () };
 
 /// The immutable values every authorization stage in one request must share.
 pub struct RequestContext<'a> {
@@ -71,11 +130,13 @@ pub struct RequestContext<'a> {
     policy: &'a PolicySnapshot,
     auth_scheme: AuthSchemeRef,
     verified_scope: Option<&'a VerifiedScope>,
-    server_extensions: &'a ServerExtensions,
+    server_extensions: ServerExtensions<'a>,
     headers: Option<rustfs_gateway_http::HeaderView<'a>>,
+    raw_query: Option<&'a str>,
 }
 
 impl std::fmt::Debug for RequestContext<'_> {
+    /// Prints the query's length and never the query: a presigned query is a credential.
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("RequestContext")
@@ -85,6 +146,8 @@ impl std::fmt::Debug for RequestContext<'_> {
             .field("verified_scope", &self.verified_scope)
             .field("server_extensions", &self.server_extensions)
             .field("headers_available", &self.headers.is_some())
+            .field("raw_query_bytes", &self.raw_query.map(str::len))
+            .field("client", &self.client())
             .finish()
     }
 }
@@ -101,26 +164,29 @@ impl<'a> RequestContext<'a> {
             policy,
             auth_scheme: AuthSchemeRef::Anonymous,
             verified_scope: None,
-            server_extensions: &EMPTY_SERVER_EXTENSIONS,
+            server_extensions: ServerExtensions::none(),
             headers: None,
+            raw_query: None,
         }
     }
 
-    pub(crate) const fn from_request(
+    /// The context both stages share, read off the accepted request: its transport bag, its
+    /// headers after the wire seam, and its query exactly as it arrived.
+    pub(crate) fn from_request<B>(
         now: RequestNow,
         policy: &'a PolicySnapshot,
         auth_scheme: AuthSchemeRef,
         verified_scope: Option<&'a VerifiedScope>,
-        server_extensions: &'a ServerExtensions,
-        headers: rustfs_gateway_http::HeaderView<'a>,
+        wire: &'a WireRequest<B>,
     ) -> Self {
         Self {
             now,
             policy,
             auth_scheme,
             verified_scope,
-            server_extensions,
-            headers: Some(headers),
+            server_extensions: ServerExtensions::of(wire.transport_extensions()),
+            headers: Some(wire.headers()),
+            raw_query: Some(wire.query().as_str()),
         }
     }
 
@@ -136,6 +202,28 @@ impl<'a> RequestContext<'a> {
     #[must_use]
     pub fn headers(&self) -> Option<rustfs_gateway_http::HeaderView<'a>> {
         self.headers
+    }
+
+    /// The query exactly as it arrived, without its `?`: `Some("")` for a pipeline request that
+    /// had none, `None` for a manually constructed context whose request is unknown.
+    ///
+    /// A presigned query carries the signature, so this is for a policy's own condition keys and
+    /// not for a log line; this context's `Debug` prints the length only.
+    #[must_use]
+    pub const fn raw_query(&self) -> Option<&'a str> {
+        self.raw_query
+    }
+
+    /// What the transport knew about the client: the socket peer, whether the transport was
+    /// secure, and the client address a host attested (rustfs/backlog#2752).
+    ///
+    /// `None` when nothing was installed — a context built by hand, or a request that reached the
+    /// service without a listener's connection value, a host's `TransportSecurity` or
+    /// `ClientAddr`, and without a `WireHead::set_client_facts` override. `None` is "unknown",
+    /// never "cleartext from nowhere", and no field of a `Some` leans towards allow.
+    #[must_use]
+    pub fn client(&self) -> Option<&'a ClientFacts> {
+        self.server_extensions.get::<ClientFacts>()
     }
 
     /// The credential scope this request's signature was verified under (ADR-0020).
@@ -165,16 +253,32 @@ impl<'a> RequestContext<'a> {
         self.auth_scheme
     }
 
-    /// Server-derived extensions. Client-controlled request extensions are not exposed here.
+    /// Server-derived extensions, read by type. Client-controlled request headers are not
+    /// exposed here.
     #[must_use]
-    pub const fn server_extensions(&self) -> &'a ServerExtensions {
+    pub const fn server_extensions(&self) -> ServerExtensions<'a> {
         self.server_extensions
     }
 }
 
-impl ServerExtensions {
-    pub(crate) const fn new() -> Self {
-        Self { _private: () }
+impl<'a> ServerExtensions<'a> {
+    /// A context built by hand has no bag to read.
+    const fn none() -> Self {
+        Self { transport: None }
+    }
+
+    /// A view onto the accepted request's bag. Borrowed, so reading one costs nothing.
+    pub(crate) const fn of(transport: &'a TransportExtensions) -> Self {
+        Self {
+            transport: Some(transport),
+        }
+    }
+
+    /// Borrows the value of type `T` the transport or the host installed before acceptance, when
+    /// one was.
+    #[must_use]
+    pub fn get<T: Send + Sync + 'static>(self) -> Option<&'a T> {
+        self.transport.and_then(TransportExtensions::get::<T>)
     }
 }
 
@@ -486,140 +590,5 @@ where
 
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
-mod tests {
-    use super::*;
-
-    fn request<'a>(operation: &'a str, identity: Option<&'a Identity>) -> AuthzRequest<'a> {
-        AuthzRequest {
-            operation,
-            action: "s3:GetObject",
-            resource: ResourceShape::Object,
-            bucket: None,
-            key: None,
-            copy_source_identity: None,
-            version_id: None,
-            route_action: "s3:GetObject",
-            route_bucket: None,
-            route_key: None,
-            identity,
-            target_origin: TargetOrigin::Path,
-            subject: None,
-        }
-    }
-
-    #[test]
-    fn authz_headers_observed_empty_is_distinct_from_unavailable() {
-        let policy = PolicySnapshot::of(std::sync::Arc::new(()));
-        let now = RequestNow::from_unix_seconds(0);
-        let headers = http::HeaderMap::new();
-        let context = RequestContext::from_request(
-            now,
-            &policy,
-            AuthSchemeRef::Anonymous,
-            None,
-            &EMPTY_SERVER_EXTENSIONS,
-            rustfs_gateway_http::HeaderView::new(&headers),
-        );
-        assert!(context.headers().is_some(), "an observed empty map is still available");
-        assert!(context.headers().expect("available").iter_raw().next().is_none());
-        assert!(RequestContext::new(now, &policy).headers().is_none());
-    }
-
-    /// Negative — the closure adapter refuses when the predicate is false, and the refusal is the
-    /// ordinary 403 rather than something a caller can mistake for a routing failure.
-    #[tokio::test]
-    async fn a_false_predicate_refuses_with_access_denied() {
-        let authorizer = allow_when(|request| request.operation == "ListBuckets");
-        let policy = PolicySnapshot::empty();
-        let context = RequestContext::new(RequestNow::from_unix_seconds(0), &policy);
-        assert_eq!(authorizer.authorize_route(&context, &request("GetObject", None)).await, Decision::Deny);
-    }
-
-    /// Negative — a denial renders nothing about the request, so it cannot become a policy oracle.
-    #[test]
-    fn a_denial_carries_nothing_from_the_request() {
-        let rendered = format!("{:?}", Denial::access_denied());
-        assert!(!rendered.contains("GetObject"), "{rendered}");
-    }
-
-    /// Negative — an anonymous request is the one with no identity, and nothing else may produce
-    /// that answer.
-    #[test]
-    fn anonymity_is_the_absence_of_an_identity() {
-        let identity = Identity::new("AKIDEXAMPLE").expect("a valid access key id");
-        assert!(request("GetObject", None).is_anonymous());
-        assert!(!request("GetObject", Some(&identity)).is_anonymous());
-    }
-
-    /// Positive — a true predicate permits, and the adapter is usable behind `Arc<dyn _>`, which
-    /// is the property ADR-0002 exists to protect.
-    #[tokio::test]
-    async fn the_adapter_is_dyn_compatible() {
-        let authorizer: std::sync::Arc<dyn Authorizer> = std::sync::Arc::new(allow_when(|_| true));
-        let policy = PolicySnapshot::empty();
-        let context = RequestContext::new(RequestNow::from_unix_seconds(0), &policy);
-        let route = request("GetObject", None);
-        assert_eq!(authorizer.authorize_route(&context, &route).await, Decision::Allow);
-        let resources = [request("GetObject", None), request("HeadObject", None)];
-        let input = InputAuthzRequest::new(&route, &resources);
-        let decisions = authorizer.authorize_input(&context, &input).await;
-        assert_eq!(decisions.stage(), Decision::Allow);
-        assert_eq!(decisions.as_slice(), [Decision::Allow, Decision::Allow]);
-        assert_eq!(decisions.visibility(), Some(Decision::Allow));
-    }
-
-    /// Negative — the disclosure check is a separate, non-gating ListBucket decision and retains
-    /// the addressed key so a prefix-scoped policy can decide the exact read target.
-    #[tokio::test]
-    async fn n_get_object_asks_for_its_missing_key_visibility_without_gating_the_read() {
-        let bucket = BucketName::new("example-bucket").expect("a valid bucket name");
-        let key = ObjectKey::new("private/report.txt").expect("a valid object key");
-        let route = AuthzRequest {
-            bucket: Some(&bucket),
-            key: Some(&key),
-            route_bucket: Some(&bucket),
-            route_key: Some(&key),
-            ..request("GetObject", None)
-        };
-        let input = InputAuthzRequest::new(&route, &[]);
-        let visibility = input.visibility().expect("GetObject asks the auxiliary question");
-        assert_eq!(visibility.action, "s3:ListBucket");
-        assert_eq!(visibility.resource, ResourceShape::Bucket);
-        assert_eq!(visibility.key.map(ObjectKey::as_str), Some("private/report.txt"));
-        assert_eq!(visibility.route_action, "s3:GetObject");
-
-        let decisions = input.decide_all(Decision::Allow, |request| {
-            if request.action == "s3:ListBucket" {
-                Decision::Deny
-            } else {
-                Decision::Allow
-            }
-        });
-        assert_eq!(decisions.stage(), Decision::Allow);
-        assert!(decisions.as_slice().is_empty());
-        assert_eq!(decisions.visibility(), Some(Decision::Deny));
-    }
-
-    /// Negative — an operation that happens to reuse the GetObject IAM action does not silently
-    /// inherit this operation-specific error transition without its own end-to-end contract.
-    #[test]
-    fn n_a_sibling_operation_does_not_inherit_get_objects_visibility_transition() {
-        let route = request("GetObjectAttributes", None);
-        assert!(InputAuthzRequest::new(&route, &[]).visibility().is_none());
-    }
-
-    #[cfg(feature = "dangerous-allow-all-authorizer")]
-    #[tokio::test]
-    async fn the_dangerous_authorizer_requires_acknowledgement_and_allows_both_stages() {
-        let acknowledgement = DangerAck::i_understand_this_disables_authorization();
-        let authorizer = AllowAllAuthorizer::new(acknowledgement);
-        let policy = PolicySnapshot::empty();
-        let context = RequestContext::new(RequestNow::from_unix_seconds(0), &policy);
-        let route = request("GetObject", None);
-        assert_eq!(authorizer.authorize_route(&context, &route).await, Decision::Allow);
-        let input = InputAuthzRequest::new(&route, &[]);
-        let decisions = authorizer.authorize_input(&context, &input).await;
-        assert_eq!(decisions.stage(), Decision::Allow);
-        assert!(decisions.as_slice().is_empty());
-    }
-}
+#[path = "authorizer_tests.rs"]
+mod tests;
