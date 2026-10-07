@@ -434,6 +434,14 @@ pub struct LegacyInput {
 /// case takes (rustfs/backlog#2749), with the legacy-only member beside it. The body is moved,
 /// not read.
 ///
+/// The gateway input requires `content_length`, which the legacy decoder leaves unset on an
+/// upload with no wire `Content-Length` (an aws-chunked body over chunked transfer coding, whose
+/// size is `x-amz-decoded-content-length`). The legacy stack resolves the authoritative size from
+/// the request headers before it sizes anything (`resolve_put_object_authoritative_size` in
+/// rustfs/rustfs `rustfs/src/app/object/put.rs`), and so must a caller of this conversion: fill
+/// the s3s member from that resolution first, or the upload is refused here by name rather than
+/// sized from the wrong length.
+///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the gateway input cannot hold: no `Content-Length` (the

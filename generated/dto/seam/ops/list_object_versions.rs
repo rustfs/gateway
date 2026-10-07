@@ -44,7 +44,10 @@ pub fn input_to_s3s(input: crate::ops::list_object_versions::Input) -> Result<s3
 
 /// Converts the s3s `ListObjectVersions` input the legacy stack decoded into the gateway input a ported
 /// RustFS use case takes (rustfs/backlog#2749). A member only the legacy decoder reads, which
-/// no gateway member holds, is handed back beside it as `LegacyInput`, never dropped.
+/// no gateway member holds, is handed back beside it as `LegacyInput`, never dropped. A member
+/// the gateway input requires and the legacy decoder may leave unset (an upload's
+/// `content_length` with no wire `Content-Length`) is refused by name: resolve it before
+/// converting, as the legacy stack resolves an upload's size from the decoded length.
 ///
 /// # Errors
 ///

@@ -130,7 +130,10 @@ pub(super) fn operation(ctx: &Ctx<'_>, ir: &OperationIr) -> Result<Rendered, Vec
          {legacy_struct}\
          /// Converts the s3s `{op}` input the legacy stack decoded into the gateway input a ported\n\
          /// RustFS use case takes (rustfs/backlog#2749). A member only the legacy decoder reads, which\n\
-         /// no gateway member holds, is handed back beside it as `LegacyInput`, never dropped.\n\
+         /// no gateway member holds, is handed back beside it as `LegacyInput`, never dropped. A member\n\
+         /// the gateway input requires and the legacy decoder may leave unset (an upload's\n\
+         /// `content_length` with no wire `Content-Length`) is refused by name: resolve it before\n\
+         /// converting, as the legacy stack resolves an upload's size from the decoded length.\n\
          ///\n/// # Errors\n///\n/// [`ConversionError`] naming a member the gateway input cannot hold.\n\
          {ALLOWS}\n\
          pub fn input_from_s3s(input: s3s::dto::{op}Input) -> Result<{input_back_type}, ConversionError> {{\n{input_back}}}\n\n\
