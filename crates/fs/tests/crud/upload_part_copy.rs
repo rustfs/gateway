@@ -25,6 +25,9 @@
 use super::*;
 use rustfs_gateway::WireResponse;
 
+#[path = "copy_source_arns.rs"]
+mod arn_sources;
+
 async fn put(service: &S3Service, target: &str, body: &'static [u8]) -> WireResponse {
     exchange(service, signed(http::Method::PUT, target, Bytes::from_static(body))).await
 }
