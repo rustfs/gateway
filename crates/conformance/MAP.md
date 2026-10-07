@@ -30,7 +30,7 @@ ADRs; this map only selects files.
 | `src/inprocess/payload.rs` | Deterministic payload generation and hexadecimal decoding. | Authored payload bytes or fill patterns differ from the case. |
 | `src/inprocess/payload_literal.rs` | Turns `sign.payload_hash_literal` into the exact digest the signer signs as stated. | A case must sign the digest of bytes it does not send (c-sig-0596). |
 | `src/inprocess/profile.rs` | Maps conformance profiles and deadlines onto measured facade policy. | A profile or timeout appears in cases but does not change target behavior. |
-| `src/inprocess/security.rs` | Fixed authorization, dispatch observations, and bucket-owner sources for security cases. | A security case needs a deterministic policy, dispatch count, or metadata-source outcome. |
+| `src/inprocess/security.rs`, `src/inprocess/post_object.rs` | Fixed authorization, dispatch observations and bucket-owner sources for security cases, and the c-post-0020 assembly under the RustFS form grammar with its handler-entry observation of `PostObjectInput::content_length`. | A security case needs a deterministic policy, dispatch count or metadata-source outcome, or a form case needs a handler-entry fact. |
 | `src/observation.rs` | Response, event-stream, ordered HTTP/2 control and receive-side termination facts. | A transport fact or event stream is classified incorrectly. |
 | `src/observation/select_error_tests.rs` | Independent Select error goldens, malformed-frame controls, and production transport tests. | The encoder or observer changes request-level error framing. |
 | `src/parity.rs` | Per-case verdict, phase, failure and skip-reason comparison. | Production transport results disagree or a case is missing. |

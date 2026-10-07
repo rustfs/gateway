@@ -1,0 +1,79 @@
+# c-post-0017 — A form's customer key that disagrees with its MD5 is refused over TLS.
+
+[case]
+id = "c-post-0017"
+schema_version = 1
+title = "A form's customer key that disagrees with its MD5 is refused over TLS"
+rationale = """
+Over TLS the transport gate is satisfied and the value rules decide: the key and its digest must \
+agree, as they must for the header trio. This case is stated over TLS on purpose — over cleartext \
+the transport gate answers first, whatever the key says (c-post-0016), so a cleartext mismatch case \
+would pass for the wrong reason. The refusal names no key material and echoes no key header, and \
+the read afterwards proves nothing was stored."""
+polarity = "negative"
+operation = "PostObject"
+tags = ["sse", "encryption", "security", "tls"]
+timeout_ms = 10000
+quirks = ["q-sse-0010"]
+
+[case.applies_to]
+tls = "required"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/ServerSideEncryptionCustomerKeys.html"
+summary = "The key MD5 exists so the server can check the key it received; a key that does not match its digest is an argument error."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+request_time = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-post"
+
+[[setup.objects]]
+bucket = "conf-post"
+key = "c-post-0017.bin"
+absent = true
+
+[[exchanges]]
+name = "refused-over-tls"
+
+[exchanges.request]
+method = "POST"
+target = "/conf-post"
+sign = { mode = "anonymous" }
+body = { utf8 = "--confpost\r\nContent-Disposition: form-data; name=\"key\"\r\n\r\nc-post-0017.bin\r\n--confpost\r\nContent-Disposition: form-data; name=\"x-amz-algorithm\"\r\n\r\nAWS4-HMAC-SHA256\r\n--confpost\r\nContent-Disposition: form-data; name=\"x-amz-credential\"\r\n\r\nAKIAIOSFODNN7EXAMPLE/20260102/us-east-1/s3/aws4_request\r\n--confpost\r\nContent-Disposition: form-data; name=\"x-amz-date\"\r\n\r\n20260102T030405Z\r\n--confpost\r\nContent-Disposition: form-data; name=\"x-amz-server-side-encryption-customer-algorithm\"\r\n\r\nAES256\r\n--confpost\r\nContent-Disposition: form-data; name=\"x-amz-server-side-encryption-customer-key\"\r\n\r\nAAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=\r\n--confpost\r\nContent-Disposition: form-data; name=\"x-amz-server-side-encryption-customer-key-md5\"\r\n\r\nv2HomVYPq94vbXb0BabrcA==\r\n--confpost\r\nContent-Disposition: form-data; name=\"policy\"\r\n\r\neyJleHBpcmF0aW9uIjoiMjAyNi0wMS0wMlQwNDowNDowNVoiLCJjb25kaXRpb25zIjpbeyJidWNrZXQiOiJjb25mLXBvc3QifSx7ImtleSI6ImMtcG9zdC0wMDE3LmJpbiJ9LHsieC1hbXotYWxnb3JpdGhtIjoiQVdTNC1ITUFDLVNIQTI1NiJ9LHsieC1hbXotY3JlZGVudGlhbCI6IkFLSUFJT1NGT0ROTjdFWEFNUExFLzIwMjYwMTAyL3VzLWVhc3QtMS9zMy9hd3M0X3JlcXVlc3QifSx7IngtYW16LWRhdGUiOiIyMDI2MDEwMlQwMzA0MDVaIn0seyJ4LWFtei1zZXJ2ZXItc2lkZS1lbmNyeXB0aW9uLWN1c3RvbWVyLWFsZ29yaXRobSI6IkFFUzI1NiJ9LHsieC1hbXotc2VydmVyLXNpZGUtZW5jcnlwdGlvbi1jdXN0b21lci1rZXkiOiJBQUVDQXdRRkJnY0lDUW9MREEwT0R4QVJFaE1VRlJZWEdCa2FHeHdkSGg4PSJ9LHsieC1hbXotc2VydmVyLXNpZGUtZW5jcnlwdGlvbi1jdXN0b21lci1rZXktbWQ1IjoidjJIb21WWVBxOTR2YlhiMEJhYnJjQT09In1dfQ==\r\n--confpost\r\nContent-Disposition: form-data; name=\"x-amz-signature\"\r\n\r\n04b07c2c6f8c92adf1547054a3d075392a01c7edb555fe4c9c0fc7801ed5d9ec\r\n--confpost\r\nContent-Disposition: form-data; name=\"file\"; filename=\"upload\"\r\n\r\nnever-stored\r\n--confpost--\r\n" }
+
+[exchanges.request.headers]
+"content-type" = "multipart/form-data; boundary=confpost"
+
+[exchanges.expect]
+kind = "response"
+status = 400
+connection_after = "open"
+headers_absent = ["etag", "x-amz-server-side-encryption-customer-key", "x-amz-server-side-encryption-customer-key-md5"]
+
+[exchanges.expect.error]
+code = "InvalidArgument"
+request_id_present = true
+
+[exchanges.expect.body]
+contains_utf8 = ["<Code>InvalidArgument</Code>", "must be base64 of 32 and 16 bytes and must agree"]
+
+[[exchanges]]
+name = "nothing-was-stored"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-post/c-post-0017.bin"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 404
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "NoSuchKey"
+request_id_present = true

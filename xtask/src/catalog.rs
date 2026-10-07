@@ -109,6 +109,14 @@ fn verify_operation_contract_with(
     crate::route_contract::verify_operation_route(name)
 }
 
+/// The corpus's cases for `name`, in path order: the cases a manually implemented operation is
+/// verified against, which has no generated verify-map row to compare the corpus with.
+#[cfg(feature = "operation")]
+pub(crate) fn corpus_cases(name: &str) -> Result<Vec<String>, String> {
+    let cases = operation_cases(&repo_root().join("conformance/cases"))?;
+    Ok(cases.get(name).cloned().unwrap_or_default())
+}
+
 #[cfg(feature = "operation")]
 fn verify_case_mapping(name: &str, mapped: &[String], discovered: &[String]) -> Result<(), String> {
     if mapped == discovered {
@@ -245,6 +253,18 @@ fn distance(left: &str, right: &str) -> usize {
 
 #[cfg(test)]
 mod tests {
+    /// A manually implemented operation has no verify-map row, so its cases are the corpus's own:
+    /// `PostObject`'s in path order, and none for a name the corpus does not know.
+    #[cfg(feature = "operation")]
+    #[test]
+    fn a_manual_operation_takes_its_cases_from_the_corpus() {
+        let cases = super::corpus_cases("PostObject").expect("the corpus reads");
+        assert_eq!(cases.first().map(String::as_str), Some("c-post-0001"));
+        assert!(cases.iter().any(|case| case == "c-post-0020"), "{cases:?}");
+        assert!(cases.windows(2).all(|pair| pair[0] < pair[1]), "{cases:?}");
+        assert!(super::corpus_cases("NoSuchOperation").expect("the corpus reads").is_empty());
+    }
+
     use super::*;
     use std::collections::BTreeSet;
 

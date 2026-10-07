@@ -13,9 +13,9 @@
 // limitations under the License.
 
 //! `PostObject`: one browser form upload written as one object.
-//! Shares: nothing. POST carries object-lock, tagging and ACL as form fields, not HTTP headers,
-//! so `write_permissions` (which triggers on headers) does not apply; those form-field permissions
-//! are the POST-form seam's (`rustfs-gateway`'s legacy POST forms and rustfs/gateway#1167).
+//! Shares: write_permissions. POST carries its object-lock, tagging and ACL values as form fields
+//! rather than HTTP headers, so the facade's route stage reads the shared triggers off the form
+//! for this operation (rustfs/gateway#1167); the actions and their profiles are the same.
 //!
 //! Responsible for: the standard operation identity, security floor, authorization shape, and
 //! the hand-authored codec needed because the Smithy S3 model omits this documented operation.
@@ -31,12 +31,15 @@ use rustfs_gateway_types::dto::{PostObject, PostObjectInput, PostObjectOutput};
 use crate::codec::response::{EncodedResponse, status_code};
 use crate::codec::{CodecError, MetaView, OperationCodec, RequestBody, RequestBodyMode};
 use crate::op::{AuthRequirement, HasOperation, Operation, OperationOrigin, ResourceShape, StandardOperation};
+use crate::ops::shared::write_permissions;
 use crate::registry::OperationSpec;
 
-/// What this operation requires after routing selected the bucket form surface.
+/// What this operation requires after routing selected the bucket form surface. The extra
+/// permissions are the object-write family's; their triggers name form fields here.
 static SPEC: OperationSpec = OperationSpec::standard("PostObject")
     .required_params(&[])
     .auth(AuthRequirement::new("s3:PutObject", ResourceShape::Object))
+    .extra_permissions(&write_permissions::OBJECT_WRITE)
     .build();
 
 /// Browser policies and anonymous public-write forms are explicit opt-ins for this operation.

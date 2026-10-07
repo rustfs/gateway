@@ -251,22 +251,33 @@ impl<'a> SseHeaders<'a> {
     /// value the strict decoders refuse rather than a value one of two spellings of.
     #[must_use]
     pub fn read(request: &MetaView<'a>) -> Self {
+        Self::read_with(|name| request.header(name))
+    }
+
+    /// Reads the family off `lookup`, a function from one exact header name to its value.
+    ///
+    /// For a request whose SSE members did not travel as headers: a POST Object form carries the
+    /// customer-key trio as fields. The ten names are the same ten exact lookups [`Self::read`]
+    /// makes, so a lookup that answers by exact name reads a form exactly as a head is read, and a
+    /// prefix match is as wrong here as it is there.
+    #[must_use]
+    pub fn read_with(lookup: impl Fn(&str) -> Option<Cow<'a, str>>) -> Self {
         Self {
             managed: ManagedChannel {
-                algorithm: request.header(SSE_ALGORITHM),
-                kms_key_id: request.header(SSE_KMS_KEY_ID),
-                context: request.header(SSE_CONTEXT),
-                bucket_key_enabled: request.header(SSE_BUCKET_KEY_ENABLED),
+                algorithm: lookup(SSE_ALGORITHM),
+                kms_key_id: lookup(SSE_KMS_KEY_ID),
+                context: lookup(SSE_CONTEXT),
+                bucket_key_enabled: lookup(SSE_BUCKET_KEY_ENABLED),
             },
             target: CustomerTrio {
-                algorithm: request.header(SSEC_ALGORITHM),
-                key: request.header(SSEC_KEY).map(KeyText),
-                digest: request.header(SSEC_KEY_MD5),
+                algorithm: lookup(SSEC_ALGORITHM),
+                key: lookup(SSEC_KEY).map(KeyText),
+                digest: lookup(SSEC_KEY_MD5),
             },
             copy_source: CustomerTrio {
-                algorithm: request.header(COPY_SSEC_ALGORITHM),
-                key: request.header(COPY_SSEC_KEY).map(KeyText),
-                digest: request.header(COPY_SSEC_KEY_MD5),
+                algorithm: lookup(COPY_SSEC_ALGORITHM),
+                key: lookup(COPY_SSEC_KEY).map(KeyText),
+                digest: lookup(COPY_SSEC_KEY_MD5),
             },
         }
     }

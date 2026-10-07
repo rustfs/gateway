@@ -606,3 +606,99 @@ fn n_the_gate_is_the_same_for_a_bucket_target_as_for_an_object() {
         SseRejection::PlaintextCustomerKey
     );
 }
+
+// ── a lookup that is not a request head ──────────────────────────────────────────────────────
+
+/// Runs [`enforce_with`] over `fields`, read by exact name, the way the facade reads a POST
+/// Object form's customer-key fields: the same rules, the same order, no header involved.
+fn enforce_fields(
+    fields: &[(&'static str, &'static str)],
+    transport: TransportSecurity,
+    config: &SseConfig,
+) -> Result<SseEnforced, SseRejection> {
+    let lookup = |name: &str| {
+        fields
+            .iter()
+            .find(|(field, _)| *field == name)
+            .map(|(_, value)| std::borrow::Cow::Borrowed(*value))
+    };
+    crate::sse::enforce_with(lookup, transport, config)
+}
+
+/// Negative — a customer key read off a form over cleartext is refused exactly as a header is:
+/// the transport gate first, whatever the key says, a lone fragment of the trio included.
+#[test]
+fn n_a_form_customer_key_over_cleartext_is_refused_before_its_shape_is_judged() {
+    let strict = SseConfig::strict();
+    for fields in [
+        target_trio(KEY_A, MD5_A),
+        target_trio(KEY_A, MD5_B),
+        vec![(SSEC_KEY_MD5, "")],
+        vec![(SSEC_ALGORITHM, "nonsense")],
+    ] {
+        assert_eq!(
+            refused(enforce_fields(&fields, TransportSecurity::Plaintext, &strict)),
+            SseRejection::PlaintextCustomerKey
+        );
+    }
+}
+
+/// Negative — over TLS, the value rules are the header path's: all three or none, `AES256`, and a
+/// key that agrees with its digest; and a managed algorithm beside the key is the contradiction.
+#[test]
+fn n_a_form_customer_key_over_tls_is_held_to_the_header_rules() {
+    let strict = SseConfig::strict();
+    let over_tls = |fields: &[(&'static str, &'static str)]| enforce_fields(fields, TransportSecurity::Encrypted, &strict);
+    assert_eq!(
+        refused(over_tls(&[(SSEC_ALGORITHM, CUSTOMER_ALGORITHM), (SSEC_KEY, KEY_A)])),
+        SseRejection::CustomerTrioIncomplete(KeySide::Target)
+    );
+    assert_eq!(
+        refused(over_tls(&[(SSEC_ALGORITHM, "aes256"), (SSEC_KEY, KEY_A), (SSEC_KEY_MD5, MD5_A)])),
+        SseRejection::CustomerAlgorithmUnknown(KeySide::Target)
+    );
+    assert_eq!(
+        refused(over_tls(&target_trio(KEY_A, MD5_B))),
+        SseRejection::CustomerKeyMalformed(KeySide::Target)
+    );
+    assert_eq!(
+        refused(over_tls(&target_trio(KEY_B, MD5_A))),
+        SseRejection::CustomerKeyMalformed(KeySide::Target)
+    );
+    let mut contradiction = target_trio(KEY_A, MD5_A);
+    contradiction.push((SSE_ALGORITHM, "AES256"));
+    assert_eq!(refused(over_tls(&contradiction)), SseRejection::ChannelsContradict);
+}
+
+/// Negative — the lookup is by exact name: a field whose name merely starts with the key's name
+/// is not the key, and an empty form carries nothing.
+#[test]
+fn n_the_field_lookup_is_exact_and_an_empty_form_carries_no_key() {
+    let strict = SseConfig::strict();
+    let served_empty = served(enforce_fields(&[], TransportSecurity::Plaintext, &strict));
+    assert!(served_empty.customer_key_fingerprint().is_none());
+    let near_miss = [("x-amz-server-side-encryption-customer-key-extra", KEY_A)];
+    let served_near_miss = served(enforce_fields(&near_miss, TransportSecurity::Plaintext, &strict));
+    assert!(served_near_miss.customer_key_fingerprint().is_none());
+}
+
+/// Positive — over TLS, a well-formed form trio yields the fingerprint the header path yields
+/// for the same key, which is what lets a backend bind one upload to one key whichever way it
+/// arrived.
+#[test]
+fn a_form_trio_over_tls_fingerprints_as_the_header_trio_does() {
+    let strict = SseConfig::strict();
+    let from_fields = served(enforce_fields(&target_trio(KEY_A, MD5_A), TransportSecurity::Encrypted, &strict));
+    let from_headers = served(over_tls(&target_trio(KEY_A, MD5_A)));
+    let (Some(field_print), Some(header_print)) =
+        (from_fields.customer_key_fingerprint(), from_headers.customer_key_fingerprint())
+    else {
+        panic!("both readings carry the target key's fingerprint");
+    };
+    assert!(field_print.matches(header_print));
+    let other = served(enforce_fields(&target_trio(KEY_B, MD5_B), TransportSecurity::Encrypted, &strict));
+    let Some(other_print) = other.customer_key_fingerprint() else {
+        panic!("the other key fingerprints too");
+    };
+    assert!(!field_print.matches(other_print));
+}

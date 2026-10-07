@@ -984,13 +984,12 @@ impl S3Service {
             Ok(body) => body,
             Err(error) => return outcome.refuse_as(Refused::reading_a_form(&error), error),
         };
-        let effective_key = match &accepted_body {
-            AcceptedBody::Ordinary(_) => meta.key().cloned(),
-            AcceptedBody::PostObject(post) => Some(post.key().clone()),
-        };
-        let post_response = match &accepted_body {
-            AcceptedBody::Ordinary(_) => None,
-            AcceptedBody::PostObject(post) => Some(post.response_plan()),
+        // A form's key, success plan and permission fields, cloned so the route stage borrows no body.
+        let (effective_key, post_response, post_fields) = match &accepted_body {
+            AcceptedBody::Ordinary(_) => (meta.key().cloned(), None, None),
+            AcceptedBody::PostObject(post) => {
+                (Some(post.key().clone()), Some(post.response_plan()), Some(post.permission_fields()))
+            }
         };
         let config = config.meta_auth();
         outcome.identity = verdict.identity().cloned();
@@ -1027,6 +1026,7 @@ impl S3Service {
         let route_wire = &wire;
         let route_verdict = &verdict;
         let route_effective_key = effective_key.as_ref();
+        let route_post_fields = post_fields.as_deref();
         let route_subjects = subjects.as_ref();
         let cors_slot = Mutex::new(None);
         let route_cors = &cors_slot;
@@ -1168,8 +1168,8 @@ impl S3Service {
                     if !route_service.inner.view_policy.requires_extra_permission(*extra) {
                         continue;
                     }
-                    // Read off the raw map by name: no `HeaderName` per trigger on the warm path.
-                    if !extra.applies(|name| route_headers.get(name).and_then(|value| value.to_str().ok())) {
+                    // Read off the raw map by name, or off a form's fields: no `HeaderName` per trigger on the warm path.
+                    if !extra.applies(|name| crate::post_object::permission_value(route_post_fields, route_headers, name)) {
                         continue;
                     }
                     route_extras.push(AuthzRequest {
@@ -1268,6 +1268,10 @@ impl S3Service {
         let view_policy = self.inner.view_policy;
         let read_body = move |state: AuthorizedRoute| async move {
             let sse = rustfs_gateway_core::sse::enforce(body_meta, connection, &body_service.inner.sse)
+                .and_then(|proof| match &accepted_body {
+                    AcceptedBody::PostObject(post) => post.sse_proof(proof, connection, &body_service.inner.sse),
+                    AcceptedBody::Ordinary(_) => Ok(proof),
+                })
                 .map_err(|rejection| from_sse(rejection, response_kind))?;
             if let Some(refusal) = view_policy.refusal_before_decode(operation, &body_wire.headers()) {
                 return Err(from_handler(refusal, response_kind, ConnectionIntent::MayKeepAlive));

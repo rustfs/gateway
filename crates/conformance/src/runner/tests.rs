@@ -73,10 +73,23 @@ fn with_no_target_every_runnable_case_is_skipped_and_says_why() {
         .map(|outcome| outcome.id.as_str())
         .collect();
     assert_eq!(profile_gated, ["c-naming-0025", "c-naming-0026", "c-naming-0027", "c-naming-0032"]);
+    // The TLS gate fires before any target is consulted, so a case that requires TLS is skipped
+    // for that reason under a target configured in cleartext, this unwired one included.
+    let tls_gated: Vec<&str> = skipped
+        .iter()
+        .filter(|outcome| {
+            outcome
+                .skip_reason
+                .as_deref()
+                .is_some_and(|reason| reason.contains("applies_to.tls is `required`"))
+        })
+        .map(|outcome| outcome.id.as_str())
+        .collect();
+    assert_eq!(tls_gated, ["c-post-0017"]);
     assert!(
         skipped
             .iter()
-            .filter(|outcome| !profile_gated.contains(&outcome.id.as_str()))
+            .filter(|outcome| !profile_gated.contains(&outcome.id.as_str()) && !tls_gated.contains(&outcome.id.as_str()))
             .all(|outcome| { outcome.skip_reason.as_deref().is_some_and(|reason| reason.contains("facade")) })
     );
 }

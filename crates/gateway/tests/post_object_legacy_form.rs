@@ -395,14 +395,14 @@ async fn an_unnamed_or_malformed_part_is_refused_before_the_handler() {
     assert_eq!(refused_before_the_handler(&content_type(), empty).await, StatusCode::BAD_REQUEST);
 }
 
-/// A field legacy RustFS applies to the stored object and this profile cannot carry yet is refused
-/// before the handler, rather than stored without it.
+/// The Object Lock and customer-key fields are carried (`post_object_lock_and_key_fields.rs`);
+/// what is still refused before the handler is a retain-until date that is not an ISO 8601
+/// instant, as legacy RustFS's decoder refuses it, and a customer key on a cleartext connection,
+/// as the gate refuses a header key. A mode or hold value reaches the handler as sent.
 #[tokio::test]
-async fn a_field_the_profile_cannot_carry_is_refused_before_the_handler() {
+async fn an_unreadable_lock_date_or_a_cleartext_key_is_refused_before_the_handler() {
     for name in [
-        "x-amz-object-lock-mode",
         "X-Amz-Object-Lock-Retain-Until-Date",
-        "x-amz-object-lock-legal-hold",
         "x-amz-server-side-encryption-customer-key",
     ] {
         let body = form(&[
@@ -410,11 +410,22 @@ async fn a_field_the_profile_cannot_carry_is_refused_before_the_handler() {
             field(name, "value"),
             part("Content-Disposition: form-data; name=\"file\"", "c"),
         ]);
-        assert_eq!(
-            refused_before_the_handler(&content_type(), body).await,
-            StatusCode::NOT_IMPLEMENTED,
-            "{name}"
-        );
+        assert_eq!(refused_before_the_handler(&content_type(), body).await, StatusCode::BAD_REQUEST, "{name}");
+    }
+    for name in ["x-amz-object-lock-mode", "x-amz-object-lock-legal-hold"] {
+        let body = form(&[
+            field("key", "k"),
+            field(name, "value"),
+            part("Content-Disposition: form-data; name=\"file\"", "c"),
+        ]);
+        let stored = Stored {
+            key: "k".to_owned(),
+            content_type: None,
+            metadata: Vec::new(),
+            bytes: b"c".to_vec(),
+            clean_end: true,
+        };
+        assert_eq!(accepted(&content_type(), body).await, stored, "{name}");
     }
 }
 
@@ -431,12 +442,11 @@ async fn a_repeated_field_or_a_control_byte_is_still_refused_before_the_handler(
     }
 }
 
-/// A form carrying a field the profile cannot carry is refused with 501 only where legacy RustFS
-/// would have stored it. A refusal legacy RustFS answers before it stores — authorization, an
-/// invalid `success_action_status` (its access hook, `rustfs/src/storage/access.rs:2024-2029`) —
-/// is answered the same way here, not with 501.
+/// A refusal legacy RustFS answers before it stores — authorization, an invalid
+/// `success_action_status` (its access hook, `rustfs/src/storage/access.rs:2024-2029`) — is
+/// answered the same way here, before any member of the form reaches a handler.
 #[tokio::test]
-async fn an_earlier_refusal_wins_over_the_uncarried_field_refusal() {
+async fn a_refusal_legacy_rustfs_answers_before_storing_answers_before_the_handler() {
     let file = part("Content-Disposition: form-data; name=\"file\"", "c");
     let body = form(&[field("key", "k"), field("Cache-Control", "no-cache"), file.clone()]);
     let (status, stored) = post_authorizing(&content_type(), body, false, false).await;

@@ -267,7 +267,7 @@ async fn the_members_rustfs_ignores_change_nothing() {
 }
 
 /// Negative — a value RustFS cannot read, a member this backend cannot store as RustFS does, and a
-/// member the profile does not carry each store nothing.
+/// customer key on this cleartext service each store nothing.
 #[tokio::test]
 async fn a_form_member_that_cannot_be_stored_as_rustfs_stores_it_stores_nothing() {
     let (_root, service) = public_bucket().await;
@@ -275,6 +275,7 @@ async fn a_form_member_that_cannot_be_stored_as_rustfs_stores_it_stores_nothing(
         ("x-amz-server-side-encryption-bucket-key-enabled", "yes"),
         ("If-None-Match", "no quotes"),
         ("x-amz-write-offset-bytes", "-"),
+        ("x-amz-object-lock-retain-until-date", "Tue, 01 Jan 2030 00:00:00 GMT"),
     ] {
         refused(&service, "unreadable", &[(name, value)], 400, "InvalidArgument").await;
     }
@@ -282,11 +283,29 @@ async fn a_form_member_that_cannot_be_stored_as_rustfs_stores_it_stores_nothing(
         ("x-amz-website-redirect-location", "/elsewhere"),
         ("Expires", "Tue, 01 Jan 2030 00:00:00 GMT"),
         ("Content-MD5", "1B2M2Y8AsgTpgAmY7PhCfg=="),
-        ("x-amz-object-lock-mode", "GOVERNANCE"),
-        ("x-amz-server-side-encryption-customer-algorithm", "AES256"),
     ] {
         refused(&service, "unstored", &[(name, value)], 501, "NotImplemented").await;
     }
+    // A form naming a lock is asked `s3:PutObjectRetention` or `s3:PutObjectLegalHold` on top of
+    // `s3:PutObject`, as legacy RustFS's `put_object` access hook asks them for a POST
+    // (rustfs/gateway#1167); a public-write policy granting `s3:PutObject` alone denies both, so
+    // the anonymous uploader is refused before the backend's own refusal of the member.
+    for (name, value) in [
+        ("x-amz-object-lock-mode", "GOVERNANCE"),
+        ("x-amz-object-lock-legal-hold", "ON"),
+    ] {
+        refused(&service, "lock-denied", &[(name, value)], 403, "AccessDenied").await;
+    }
+    // A customer key, or a fragment of its trio, is the gate's refusal on this cleartext service,
+    // as it is for a header (rustfs/gateway#1167); it never reaches the backend's own refusal.
+    refused(
+        &service,
+        "cleartext-key",
+        &[("x-amz-server-side-encryption-customer-algorithm", "AES256")],
+        400,
+        "InvalidRequest",
+    )
+    .await;
     // A refusal RustFS answers itself comes first: it never reaches the member this backend
     // cannot store.
     for (name, value) in [

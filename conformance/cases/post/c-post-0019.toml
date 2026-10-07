@@ -1,0 +1,77 @@
+# c-post-0019 — A retain-until field in HTTP-date form is refused before authorization.
+
+[case]
+id = "c-post-0019"
+schema_version = 1
+title = "A retain-until field in HTTP-date form is refused before authorization"
+rationale = """
+x-amz-object-lock-retain-until-date is the one date header that is ISO 8601, and the form field is \
+read with the same format (c-lock-0037). The form here is anonymous on a bucket that grants the \
+public nothing, which otherwise answers 403 AccessDenied (c-post-0001): the 400 InvalidArgument \
+observed instead proves the unreadable date is refused before authorization decides, where the \
+decoder refuses it, and the read afterwards proves nothing was stored."""
+polarity = "negative"
+operation = "PostObject"
+tags = ["object-lock", "validation", "error-shape"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObject.html"
+summary = "x-amz-object-lock-retain-until-date is documented as an ISO 8601 timestamp, unlike the other date headers."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://github.com/rustfs/gateway/issues/1167"
+summary = "Legacy RustFS's form decoder answers 400 InvalidArgument for a retain-until date it cannot read, before its access hook runs."
+kind = "other"
+
+[[setup.buckets]]
+name = "conf-post"
+
+[[setup.objects]]
+bucket = "conf-post"
+key = "c-post-0019.txt"
+absent = true
+
+[[exchanges]]
+name = "refused-before-authorization"
+
+[exchanges.request]
+method = "POST"
+target = "/conf-post"
+sign = { mode = "anonymous" }
+body = { utf8 = "--confpost\r\nContent-Disposition: form-data; name=\"key\"\r\n\r\nc-post-0019.txt\r\n--confpost\r\nContent-Disposition: form-data; name=\"x-amz-object-lock-retain-until-date\"\r\n\r\nTue, 01 Jan 2030 00:00:00 GMT\r\n--confpost\r\nContent-Disposition: form-data; name=\"file\"; filename=\"upload\"\r\n\r\nnever-stored\r\n--confpost--\r\n" }
+
+[exchanges.request.headers]
+"content-type" = "multipart/form-data; boundary=confpost"
+
+[exchanges.expect]
+kind = "response"
+status = 400
+connection_after = "open"
+headers_absent = ["etag"]
+
+[exchanges.expect.error]
+code = "InvalidArgument"
+request_id_present = true
+
+[exchanges.expect.body]
+contains_utf8 = ["<Code>InvalidArgument</Code>", "x-amz-object-lock-retain-until-date"]
+
+[[exchanges]]
+name = "nothing-was-stored"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-post/c-post-0019.txt"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 404
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "NoSuchKey"
+request_id_present = true

@@ -164,6 +164,8 @@ mod post_object_file_length;
 mod post_object_legacy_fields;
 #[path = "post_object_legacy_form.rs"]
 mod post_object_legacy_form;
+#[path = "post_object_lock_and_key_fields.rs"]
+mod post_object_lock_and_key_fields;
 #[path = "post_object_redirect_field.rs"]
 mod post_object_redirect_field;
 #[path = "post_object_runtime.rs"]

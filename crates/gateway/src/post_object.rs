@@ -28,6 +28,7 @@ use std::fmt;
 
 use bytes::Bytes;
 use http_body::{Body, Frame, SizeHint};
+use rustfs_gateway_core::{SseConfig, SseEnforced, SseRejection, TransportSecurity};
 use rustfs_gateway_http::{BodyIntegrity, FileReader, FileStep, FormGrammar, FormLimits, FormReader, FormReject, FormStep};
 use rustfs_gateway_sig::{
     EmptyRegion, PostPolicy, PostPolicyError, PostPolicyLimits, RegionLength, RegionRule, RequestNow, ServiceReading,
@@ -196,15 +197,9 @@ where
             .map(|field| (field.name(), field.value()))
             .collect();
         // The RustFS profile stores what legacy RustFS stores from this form, or refuses it before
-        // the file is read (`legacy`). A field this bridge cannot carry is refused only at the
-        // hand-off, after authorization: every refusal legacy RustFS answers before it stores —
-        // the signature, the policy, the success controls, authorization — keeps its own answer.
+        // the file is read (`legacy`); the gateway grammar reads the Object Lock and customer-key
+        // fields and nothing else besides the key, media type and metadata (`fields`).
         let legacy_store = matches!(self.reader.grammar(), FormGrammar::LegacyRustfs { .. });
-        let not_carried = if legacy_store {
-            legacy::refuse_uncarried(&fields).err()
-        } else {
-            None
-        };
         // What `${filename}` stands for: the `filename` parameter, or under the legacy RustFS
         // grammar the file part's own name when it carried none (`FormReader::file_name`).
         let filename = self.reader.file_name().unwrap_or_default();
@@ -269,8 +264,10 @@ where
                         .map(|suffix| (suffix.to_owned(), (*value).to_owned()))
                 })
                 .collect();
-            (metadata, None, PostObjectFields::default())
+            let object_fields = fields::LockAndCustomerKey::read(&fields)?.into_fields(PostObjectFields::default());
+            (metadata, None, object_fields)
         };
+        let permission_fields = fields::permission_fields(&fields);
         let response = PostObjectResponsePlan::parse(&fields, &bucket, &key, legacy_store)?;
         let ceiling = policy.read_ceiling(self.limits);
         let file_length = self
@@ -288,8 +285,8 @@ where
             content_type,
             metadata,
             object_fields,
+            permission_fields,
             response,
-            not_carried,
             legacy_policy_errors: legacy_store,
             timeouts: self.timeouts,
         })
@@ -309,12 +306,12 @@ pub(crate) struct ResolvedPostObject<B: Body> {
     /// The `Content-Type` field under the RustFS profile; `None` under the gateway grammar.
     content_type: Option<String>,
     metadata: Vec<(String, String)>,
-    /// The other `PutObject` members the form set, under the RustFS profile; none under the
-    /// gateway grammar.
+    /// The other `PutObject` members the form set: every one legacy RustFS reads under the RustFS
+    /// profile, the Object Lock and customer-key members under either grammar.
     object_fields: PostObjectFields,
+    /// The fields an extra-permission trigger may read, as sent (`fields::permission_fields`).
+    permission_fields: Vec<(String, String)>,
     response: PostObjectResponsePlan,
-    /// Under the RustFS profile, why this form cannot be stored as legacy RustFS stores it.
-    not_carried: Option<legacy::NotCarried>,
     legacy_policy_errors: bool,
     timeouts: BodyTimeouts,
 }
@@ -333,13 +330,35 @@ where
         self.response.clone()
     }
 
+    /// The fields the route stage reads an extra-permission trigger off, in place of headers.
+    pub(crate) fn permission_fields(&self) -> Vec<(String, String)> {
+        self.permission_fields.clone()
+    }
+
+    /// The SSE proof the handler is handed: `from_headers` unless the form carries a customer-key
+    /// field, in which case the form is judged by the same gate, over the same rules in the same
+    /// order (`rustfs_gateway_core::sse::enforce_with`) — a key in a field is on the wire exactly
+    /// as a key in a header is, so a cleartext connection refuses it the same way.
+    ///
+    /// # Errors
+    ///
+    /// The gate's refusal, rendered by the caller as a header refusal is.
+    pub(crate) fn sse_proof(
+        &self,
+        from_headers: SseEnforced,
+        transport: TransportSecurity,
+        config: &SseConfig,
+    ) -> Result<SseEnforced, SseRejection> {
+        if !fields::carries_customer_key(&self.object_fields) {
+            return Ok(from_headers);
+        }
+        rustfs_gateway_core::sse::enforce_with(fields::sse_lookup(&self.object_fields), transport, config)
+    }
+
     pub(crate) fn handoff(self, _proof: &MetadataAdmission<'_>) -> Result<(RequestBody, Option<BodyMonitor>), S3Error> {
         // After authorization and before a file byte is read or the handler runs: the last point
         // at which legacy RustFS would have refused nothing and gone on to store.
         self.response.before_storage().map_err(policy_refusal)?;
-        if let Some(refusal) = self.not_carried {
-            return Err(refusal.into_error());
-        }
         // A file whose exact length the declared body fixes is judged by the policy before the
         // handler runs, as legacy RustFS judges it on the length it derived; only the legacy
         // grammar fixes one, so the answer is legacy RustFS's (rustfs/gateway#1167).
@@ -380,6 +399,7 @@ where
                 bucket: self.bucket,
                 key: self.key,
                 body: stream,
+                content_length: self.file_length,
                 content_type: self.content_type,
                 metadata: self.metadata,
                 fields: self.object_fields,
@@ -606,8 +626,11 @@ fn policy_refusal(reject: PostPolicyError) -> S3Error {
     )
 }
 
+#[path = "post_object/fields.rs"]
+mod fields;
 #[path = "post_object/legacy.rs"]
 mod legacy;
+pub(crate) use fields::permission_value;
 
 #[cfg(test)]
 #[path = "post_object/tests.rs"]

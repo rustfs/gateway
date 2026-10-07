@@ -95,6 +95,7 @@ mod conditional_race;
 pub(crate) mod h2_frames;
 mod payload;
 mod payload_literal;
+mod post_object;
 mod profile;
 mod security;
 mod sigv2;
@@ -290,6 +291,7 @@ pub struct InProcess {
     credential_exchanges: AtomicUsize,
     credential_governor_calls: Arc<AtomicUsize>,
     persistent_credentials: Mutex<Option<Arc<dyn CredentialProvider>>>,
+    post_object_lengths: post_object::Observed,
 }
 
 impl InProcess {
@@ -315,6 +317,7 @@ impl InProcess {
             credential_exchanges: AtomicUsize::new(0),
             credential_governor_calls: Arc::new(AtomicUsize::new(0)),
             persistent_credentials: Mutex::new(None),
+            post_object_lengths: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -530,6 +533,7 @@ impl InProcess {
             })),
         };
         let builder = sigv2::configure_case(builder, &self.case_id);
+        let builder = post_object::configure_case(builder, &self.case_id, Arc::clone(&self.post_object_lengths));
         let builder = security::configure_version_list(builder, &self.case_id, Arc::clone(&self.authz_backend_calls));
         let backend_calls = Arc::clone(&self.authz_backend_calls);
         let copy_backend_calls = Arc::clone(&self.authz_backend_calls);
@@ -1037,6 +1041,9 @@ impl Sut for InProcess {
         self.credential_backend_calls.store(0, Ordering::SeqCst);
         self.credential_exchanges.store(0, Ordering::SeqCst);
         self.credential_governor_calls.store(0, Ordering::SeqCst);
+        if let Ok(mut lengths) = self.post_object_lengths.lock() {
+            lengths.clear();
+        }
         if let Ok(mut provider) = self.persistent_credentials.lock() {
             *provider = None;
             match case_id {
@@ -1244,6 +1251,7 @@ impl Sut for InProcess {
     fn finish(&mut self, case_id: &str) -> Result<(), SutError> {
         let calls = |counter: &AtomicUsize| counter.load(Ordering::SeqCst);
         security::finish_version_list(case_id, calls(&self.authz_backend_calls))?;
+        post_object::finish(case_id, &self.post_object_lengths)?;
         let violation = match case_id {
             "c-authz-1018" if calls(&self.authz_backend_calls) != 1 => {
                 "c-authz-1018 must dispatch only the ordinary copy control".to_owned()

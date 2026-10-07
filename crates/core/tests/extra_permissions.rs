@@ -53,12 +53,13 @@ fn the_object_writes_require_the_lock_tag_and_acl_actions_by_header() {
     assert_eq!(shape(extras::<dto::CreateMultipartUpload>()), OBJECT_WRITE);
 }
 
-/// Negative — `PostObject` declares none of the header extras: its object-lock, tagging and ACL
-/// values are form fields, not HTTP headers, so a header trigger would never fire for it. Those
-/// form-field permissions are the POST-form seam's (rustfs/gateway#1167).
+/// `PostObject` declares the same four: its object-lock, tagging and ACL values are form fields
+/// rather than HTTP headers, and the facade's route stage reads the triggers off the form for it
+/// (rustfs/gateway#1167), so legacy RustFS's `s3:PutObjectRetention` / `s3:PutObjectLegalHold`
+/// question for a form naming a lock is asked here too.
 #[test]
-fn n_post_object_declares_no_header_extra_permission() {
-    assert!(extras::<dto::PostObject>().is_empty());
+fn post_object_requires_the_same_actions_by_form_field() {
+    assert_eq!(shape(extras::<dto::PostObject>()), OBJECT_WRITE);
 }
 
 /// A delete and a retention change require `s3:BypassGovernanceRetention` by the bypass header, and

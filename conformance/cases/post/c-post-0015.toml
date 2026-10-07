@@ -1,0 +1,116 @@
+# c-post-0015 — A form's Object Lock fields set the stored object's retention and legal hold.
+
+[case]
+id = "c-post-0015"
+schema_version = 1
+title = "A form's Object Lock fields set the stored object's retention and legal hold"
+rationale = """
+A browser form carries x-amz-object-lock-mode, x-amz-object-lock-retain-until-date and \
+x-amz-object-lock-legal-hold as fields with the meaning the PutObject headers have. A gateway that \
+dropped them would answer 204 for an object the client believes is held, which is the one wrong \
+answer the lock family exists to prevent; one that refused them would break every upload page that \
+sets a hold. The policy signs all three, the upload is accepted, and the two reads afterwards prove \
+the retention and the hold are on the stored object."""
+polarity = "positive"
+operation = "PostObject"
+tags = ["object-lock", "signature", "sigv4"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/RESTObjectPOST.html"
+summary = "The browser upload form carries the object lock fields with the meaning the PutObject headers of the same name have."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://github.com/rustfs/gateway/issues/1167"
+summary = "Legacy RustFS stores a form's Object Lock fields and asks the retention and legal-hold actions for them before storing."
+kind = "other"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+request_time = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-post-lock"
+object_lock = true
+
+[[setup.objects]]
+bucket = "conf-post-lock"
+key = "c-post-0015.txt"
+absent = true
+
+[[exchanges]]
+name = "upload"
+
+[exchanges.request]
+method = "POST"
+target = "/conf-post-lock"
+sign = { mode = "anonymous" }
+body = { utf8 = "--confpost\r\nContent-Disposition: form-data; name=\"key\"\r\n\r\nc-post-0015.txt\r\n--confpost\r\nContent-Disposition: form-data; name=\"x-amz-algorithm\"\r\n\r\nAWS4-HMAC-SHA256\r\n--confpost\r\nContent-Disposition: form-data; name=\"x-amz-credential\"\r\n\r\nAKIAIOSFODNN7EXAMPLE/20260102/us-east-1/s3/aws4_request\r\n--confpost\r\nContent-Disposition: form-data; name=\"x-amz-date\"\r\n\r\n20260102T030405Z\r\n--confpost\r\nContent-Disposition: form-data; name=\"x-amz-object-lock-mode\"\r\n\r\nGOVERNANCE\r\n--confpost\r\nContent-Disposition: form-data; name=\"x-amz-object-lock-retain-until-date\"\r\n\r\n2030-01-01T00:00:00Z\r\n--confpost\r\nContent-Disposition: form-data; name=\"x-amz-object-lock-legal-hold\"\r\n\r\nON\r\n--confpost\r\nContent-Disposition: form-data; name=\"policy\"\r\n\r\neyJleHBpcmF0aW9uIjoiMjAyNi0wMS0wMlQwNDowNDowNVoiLCJjb25kaXRpb25zIjpbeyJidWNrZXQiOiJjb25mLXBvc3QtbG9jayJ9LHsia2V5IjoiYy1wb3N0LTAwMTUudHh0In0seyJ4LWFtei1hbGdvcml0aG0iOiJBV1M0LUhNQUMtU0hBMjU2In0seyJ4LWFtei1jcmVkZW50aWFsIjoiQUtJQUlPU0ZPRE5ON0VYQU1QTEUvMjAyNjAxMDIvdXMtZWFzdC0xL3MzL2F3czRfcmVxdWVzdCJ9LHsieC1hbXotZGF0ZSI6IjIwMjYwMTAyVDAzMDQwNVoifSx7IngtYW16LW9iamVjdC1sb2NrLW1vZGUiOiJHT1ZFUk5BTkNFIn0seyJ4LWFtei1vYmplY3QtbG9jay1yZXRhaW4tdW50aWwtZGF0ZSI6IjIwMzAtMDEtMDFUMDA6MDA6MDBaIn0seyJ4LWFtei1vYmplY3QtbG9jay1sZWdhbC1ob2xkIjoiT04ifV19\r\n--confpost\r\nContent-Disposition: form-data; name=\"x-amz-signature\"\r\n\r\n7ea0adcda8538902b4fe398ff0763bacb9e76885d651e378895e41a315995a85\r\n--confpost\r\nContent-Disposition: form-data; name=\"file\"; filename=\"upload\"\r\n\r\nlock-bound-bytes\r\n--confpost--\r\n" }
+
+[exchanges.request.headers]
+"content-type" = "multipart/form-data; boundary=confpost"
+
+[exchanges.expect]
+kind = "response"
+status = 204
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+etag = '"38b179f40c598599b794fc01f49822d2"'
+
+[exchanges.expect.body]
+exact_utf8 = ""
+
+[[exchanges]]
+name = "the-retention-was-set"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-post-lock/c-post-0015.txt?retention"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<Retention xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Mode>GOVERNANCE</Mode><RetainUntilDate>2030-01-01T00:00:00.000Z</RetainUntilDate></Retention>'''
+
+[[exchanges]]
+name = "the-hold-was-set"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-post-lock/c-post-0015.txt?legal-hold"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+exact_utf8 = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<LegalHold xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Status>ON</Status></LegalHold>'''
+
+[[exchanges]]
+name = "stored-bytes"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-post-lock/c-post-0015.txt"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.body]
+exact_utf8 = "lock-bound-bytes"

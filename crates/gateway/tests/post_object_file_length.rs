@@ -15,10 +15,10 @@
 //! The length a POST Object handler is handed for the file, under the RustFS profile
 //! (rustfs/gateway#1167).
 //!
-//! Responsible for: `PostObjectInput::body` reporting the file's exact length when the request
-//! declared its body's and the legacy grammar fixes the file's from it — preamble, padding and a
-//! multi-frame file included — and no length otherwise; and the policy's size range judged on that
-//! length before the handler runs.
+//! Responsible for: `PostObjectInput::content_length` and `PostObjectInput::body` both reporting
+//! the file's exact length when the request declared its body's and the legacy grammar fixes the
+//! file's from it — preamble, padding and a multi-frame file included — and no length otherwise;
+//! and the policy's size range judged on that length before the handler runs.
 //! NOT responsible for: the grammar (`post_object_legacy_form.rs`), the members a form sets
 //! (`post_object_legacy_fields.rs`) or SigV2 verification (`post_object_sigv2.rs`).
 //! Upstream: the facade's public API. Downstream: nothing.
@@ -51,18 +51,24 @@ const BOUNDARY: &str = "file-length-form";
 const POLICY: &[u8; 127] =
     br#"{"expiration":"2026-01-02T04:04:05Z","conditions":[{"bucket":"example-bucket"},{"key":"upload"},["content-length-range",1,16]]}"#;
 
-/// What the handler was handed: the body's remaining length on entry, and the bytes it then read.
+/// What the handler was handed: the input's `content_length` on entry, and the bytes it then
+/// read; and, beside it, what the body's own remaining length said, which must be the same number.
 #[derive(Default)]
 struct Backend {
     entered: AtomicUsize,
     handed: Mutex<Vec<(Option<u64>, Vec<u8>)>>,
+    stream_lengths: Mutex<Vec<Option<u64>>>,
 }
 
 impl Handler<PostObject> for Backend {
     async fn call(&self, request: Req<PostObject>) -> HandlerResult<PostObject> {
         self.entered.fetch_add(1, Ordering::SeqCst);
         let input = request.into_input();
-        let length = input.body.remaining_length().get();
+        let length = input.content_length;
+        self.stream_lengths
+            .lock()
+            .expect("observation lock")
+            .push(input.body.remaining_length().get());
         let mut body = input.body.into_body();
         let mut bytes = Vec::new();
         while let Some(frame) = body.frame().await {
@@ -134,6 +140,12 @@ async fn post(legacy_forms: bool, body: Vec<u8>, declared: bool) -> (StatusCode,
     let request = request.body(Bytes::from(body)).expect("valid request");
     let (status, answer) = support::exchange(&service, request).await;
     let handed = backend.handed.lock().expect("observation lock").clone();
+    let stream_lengths = backend.stream_lengths.lock().expect("observation lock").clone();
+    let member_lengths: Vec<Option<u64>> = handed.iter().map(|(length, _)| *length).collect();
+    assert_eq!(
+        member_lengths, stream_lengths,
+        "`content_length` and the body's remaining length disagree"
+    );
     (status, answer, handed, backend.entered.load(Ordering::SeqCst))
 }
 
