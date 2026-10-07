@@ -47,3 +47,12 @@ A successful build proves that the runner is present, not that its tests pass.
 Review the complete aggregate and require attributable `.minio-dotnet` and `mc`
 records before treating either exclusion as recovered. Keep the image-pin change
 and baseline update in separate pull requests, as required by `pins.env`.
+
+The raw SDK logs never leave the runner, so the aggregate names each failing
+function with a class drawn from its record's `error`: `function:<exception>/<status>/<code>`,
+for example `S3Client.putObject versions:S3Exception/400/-`. The exception is the first
+`...Exception` or `...Error` token, the status is the number after `Status Code`, and the code is
+the S3 error code where the text puts one in a defined place; each is `-` where the text names
+none. Nothing else of the text is carried. The class says which failure it was and not where in
+the test it happened; a failure that stays `-/-/-` is one the grammar cannot read, and the answer
+is a wider grammar, never a wider baseline.

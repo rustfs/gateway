@@ -14448,11 +14448,38 @@ expect_fail check_mint_report.sh 'mint evidence redaction reduced to the secret 
     mut_mint_report_redacts_nothing 'redaction left'
 
 mut_mint_report_leaks_error_text() {
-    mint_mutate "$MINT_REPORT" '            tally.failing.append(printable(document.get("function")))' \
-        '            tally.failing.append(printable(document.get("function")) + str(document.get("error")))'
+    mint_mutate "$MINT_REPORT" '            tally.failing.append(f"{function}:{error}")' \
+        '            tally.failing.append(function + str(document.get("error")))'
 }
 expect_fail check_mint_report.sh "upstream failure text carried into the uploaded mint aggregate" \
     mut_mint_report_leaks_error_text "the aggregate report never carries a record's error text"
+
+# The class a FAIL row carries (rustfs/gateway#1083): each slot below is read by one pattern, and
+# each case takes one of them away.
+mut_mint_report_drops_failure_class() {
+    mint_mutate "$MINT_REPORT" '            tally.failing.append(f"{function}:{error}")' '            tally.failing.append(function)'
+}
+expect_fail check_mint_report.sh 'a mint FAIL row that stops naming the class of its error' \
+    mut_mint_report_drops_failure_class "a FAIL row carries the class of its record's error"
+
+mut_mint_report_class_ignores_status() {
+    mint_mutate "$MINT_REPORT" 'ERROR_STATUS = re.compile(r"(?i)\bstatus ?code:? ([0-9]{3})\b")' \
+        'ERROR_STATUS = re.compile(r"(?!)()")'
+}
+expect_fail check_mint_report.sh 'a mint failure class that no longer reads the HTTP status' \
+    mut_mint_report_class_ignores_status "a FAIL row carries the class of its record's error"
+
+mut_mint_report_class_reads_a_stack_frame() {
+    mint_mutate "$MINT_REPORT" '        match = pattern.search(text)' '        match = (list(pattern.finditer(text)) or [None])[-1]'
+}
+expect_fail check_mint_report.sh 'a mint failure class read from a stack frame instead of the thrown exception' \
+    mut_mint_report_class_reads_a_stack_frame "a FAIL row carries the class of its record's error"
+
+mut_mint_report_class_ignores_go_code() {
+    mint_mutate "$MINT_REPORT" '|\bapi error ([A-Z][A-Za-z0-9.]{0,63}):"' '|(?!)()"'
+}
+expect_fail check_mint_report.sh 'a mint failure class that no longer reads the S3 error code' \
+    mut_mint_report_class_ignores_go_code "a FAIL row carries the class of its record's error"
 
 # Excluded SDKs (rustfs/backlog#1764, generation 1): run and reported, never judged, and never
 # a place for a counted SDK's records to disappear into.

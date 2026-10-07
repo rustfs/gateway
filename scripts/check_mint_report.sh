@@ -34,7 +34,8 @@ set -euo pipefail
 #                   exclusion is carried into the proposal unchanged
 #     redaction     Authorization, presigned-query signatures, StringToSign and
 #                   the secret leave the evidence files, and the aggregate
-#                   report carries no record's `error` text
+#                   report carries a record's `error` only as the class
+#                   `<exception>/<status>/<code>` drawn from it, never its text
 #
 # WHY THIS IS A GUARD AND NOT A UNIT TEST
 #   The zombie failure mode for an external suite is that the judgement
@@ -406,10 +407,10 @@ probe("an excluded SDK that writes valid records again is flagged RECOVERED and 
 # the same redaction and cap as a counted SDK's.
 def names_recovered_failures(work: Path, proposal: Path) -> str | None:
     summary = (work / "summary.md").read_text(encoding="utf-8")
-    if "\n- `.minio-dotnet` (recovered): PutObject\n" not in summary:
+    if "\n- `.minio-dotnet` (recovered): PutObject:-/-/-\n" not in summary:
         return f"the summary does not name the recovered SDK's failing function:\n{summary}"
     excluded = json.loads((work / "report.json").read_text(encoding="utf-8"))["excluded"]
-    if excluded[".minio-dotnet"].get("failing_functions") != ["PutObject"]:
+    if excluded[".minio-dotnet"].get("failing_functions") != ["PutObject:-/-/-"]:
         return f"report.json does not name the recovered SDK's failing function: {excluded}"
     return None
 
@@ -421,7 +422,7 @@ probe("a recovered excluded SDK names its failing functions in the summary and t
 
 def proposes_recovered_failures(work: Path, proposal: Path) -> str | None:
     text = proposal.read_text(encoding="utf-8")
-    expected = (f"#   .minio-dotnet failed: PutObject\n"
+    expected = (f"#   .minio-dotnet failed: PutObject:-/-/-\n"
                 f".minio-dotnet excluded {OWNER_URL} {EXCLUSION_REASON}\n")
     if expected not in text:
         return f"the proposal does not name the recovered SDK's failure above its unchanged exclusion:\n{text}"
@@ -535,6 +536,52 @@ probe("record mode carries an exclusion into the proposal unchanged and gives it
 
 # --- what leaves the run -------------------------------------------------------------------
 probe("the aggregate report never carries a record's error text", 0, ["SelectObjectContent(ctx)"], [UNIQUE_ERROR])
+
+# A FAIL row names the class of its record's `error` and nothing else of it: the raw log stays on
+# the runner, so this is all an aggregate can say about why a function failed (rustfs/gateway#1083).
+# The Java text is what mint's suite writes: `ex.toString()`, ` >>> `, then the stack frames.
+JAVA_REFUSED = ("software.amazon.awssdk.services.s3.model.S3Exception: The request is not valid. "
+                "(Service: S3, Status Code: 400, Request ID: 7F2A1C9E4B3D5A60, Extended Request ID: "
+                "c2lnbmF0dXJlLWxvb2tpbmctYmFzZTY0LXRleHQ=) >>> [software.amazon.awssdk.core.internal.http."
+                "CombinedResponseHandler.handleErrorResponse(CombinedResponseHandler.java:125), software.amazon."
+                "awssdk.awscore.exception.AwsServiceException$BuilderImpl.build(AwsServiceException.java:238)]")
+JAVA_CLIENT = ("software.amazon.awssdk.core.exception.SdkClientException: Unable to execute HTTP request: "
+               "Acquire operation took longer than the configured maximum time. >>> [software.amazon.awssdk."
+               "core.internal.http.pipeline.stages.utils.RetryableStageHelper.retryPolicyDisallowedRetryException("
+               "RetryableStageHelper.java:143)]")
+GO_REFUSED = ("operation error S3: PutObject, https response error StatusCode: 403, RequestID: 7F2A1C9E4B3D5A60, "
+              "HostID: c2lnbmF0dXJl, api error AccessDenied: Access Denied")
+CLASSED = [
+    ("S3Client.putObject versions", JAVA_REFUSED, "S3Exception/400/-"),
+    ("S3Client.getObject", JAVA_CLIENT, "SdkClientException/-/-"),
+    ("PresignedPut", GO_REFUSED, "-/403/AccessDenied"),
+]
+CLASSED_ROWS = [f"{function}:{kind}" for function, _, kind in CLASSED]
+classed = healthy_logs()
+classed["awscli"] = "\n".join([rec("awscli", "list-buckets", "PASS")]
+                              + [rec("awscli", function, "FAIL", error=error) for function, error, _ in CLASSED])
+
+
+def names_the_class(work: Path, proposal: Path) -> str | None:
+    summary = (work / "summary.md").read_text(encoding="utf-8")
+    if "\n- `awscli`: " + "; ".join(CLASSED_ROWS) + "\n" not in summary:
+        return f"the summary does not give each failing function its class:\n{summary}"
+    row = json.loads((work / "report.json").read_text(encoding="utf-8"))["sdks"]["awscli"]
+    if row["failing_functions"] != CLASSED_ROWS:
+        return f"report.json does not give each failing function its class: {row}"
+    text = proposal.read_text(encoding="utf-8")
+    for failing in CLASSED_ROWS:
+        if f"\n#   awscli failed: {failing}\n" not in text:
+            return f"the proposal does not give {failing!r} its class:\n{text}"
+    return None
+
+
+probe("a FAIL row carries the class of its record's error in the summary, the JSON and the proposal, never the text", 0,
+      ["KNOWN      awscli fail=3 baseline=3"],
+      ["7F2A1C9E4B3D5A60", "c2lnbmF0dXJl", "The request is not valid", "Extended Request ID", "CombinedResponseHandler",
+       "Acquire operation", "Access Denied", "AwsServiceException"],
+      logs=classed, base=baseline({"awscli": 3, "minio-go": 1, ".minio-dotnet": 0}),
+      progress=console({**HEALTHY_PROGRESS, "awscli": "FAILED"}), record=True, after=names_the_class)
 
 leaky = healthy_logs()
 leaky["minio-go"] = leaky["minio-go"].replace(
