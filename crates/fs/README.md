@@ -79,6 +79,15 @@ composite checksum's type; copying a FULL_OBJECT checksum or requesting recalcul
 type, as RustFS does. Readers that only understand `checksum/1` refuse these typed records, so
 rollback still needs a pre-upgrade data copy.
 
+`GetObjectAttributes` reports only the requested ETag, size, storage class and checksum groups,
+using the current or explicitly selected persisted version. Last-modified and version headers
+follow that same representation. A requested checksum with no stored value is an empty group;
+plain objects omit ObjectParts. Multipart ObjectParts remains `NotImplemented`: ordinal lengths
+cannot recover original sparse upload numbers. Unknown groups select no fields, as native RustFS
+does. The existing reader keeps its `NoSuchVersion` response for absent explicit versions, while
+native RustFS rejects malformed version IDs as `InvalidArgument`. Stored multipart checksum types
+are reported here as on GET/HEAD.
+
 New multipart completions also store `parts/1 <count>` followed by each completed part's length.
 The table must agree with the object size and multipart ETag. GET partNumber uses the shared core
 resolver to serve that ordinal byte window and reports the multipart part count; ordinary objects
@@ -89,8 +98,7 @@ here. HEAD partNumber returns 200 with the selected length and multipart count, 
 Content-Range; malformed numbers are 400 and an unavailable ordinal part is 416, as the core
 part-table contract specifies. GET retains RustFS's 400 InvalidPart for that unavailable part.
 Native RustFS currently returns the whole length without PartsCount on HEAD and 500 for an
-unavailable part; these remain explicit compatibility differences. `GetObjectAttributes` is
-still separate work (rustfs/gateway#1001).
+unavailable part; these remain explicit compatibility differences.
 Native sparse numbering has a known discrepancy: after completing uploaded numbers 2 and 5, its
 GET number 5 returns the whole object. This backend refuses that unavailable ordinal part.
 
