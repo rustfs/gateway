@@ -83,6 +83,7 @@ pub mod production;
 pub mod report;
 #[cfg(test)]
 mod report_tests;
+pub mod rulings;
 pub mod runner;
 pub mod schema;
 pub mod sha256;

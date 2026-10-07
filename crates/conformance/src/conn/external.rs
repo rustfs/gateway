@@ -78,9 +78,10 @@ impl Conn {
             .external
             .clone()
             .ok_or_else(|| SutError::Environment("external exchange has no configured endpoint".to_owned()))?;
-        let (fixed, request_time, _) = crate::inprocess::clock_of(plan.clock)?;
+        let clock = super::external_clock::external_clock(plan.clock, super::external_fixture::clock::current_request_time()?)?;
+        let request_time = clock.request_time;
         let reuse = read_connection(plan.connection)?;
-        self.inner.set_fixture_now(fixed.unix_seconds);
+        self.inner.set_fixture_now(clock.now.unix_seconds);
         let wire = self.inner.read_wire(&plan.request)?;
         self.external_fixtures.ensure_read_only(plan.case_id, &wire)?;
         if !wire.h2_frames.is_empty() {

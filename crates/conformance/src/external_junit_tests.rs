@@ -84,36 +84,42 @@ fn run(corpus: &Corpus, response_status: u16, report: &std::path::Path) -> ExitC
     let address = listener.local_addr().expect("endpoint address");
     let server = thread::spawn(move || {
         let deadline = Instant::now() + Duration::from_secs(10);
-        let (mut stream, _) = loop {
-            match listener.accept() {
-                Ok(accepted) => break accepted,
-                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock && Instant::now() < deadline => {
-                    thread::sleep(Duration::from_millis(1));
+        // Two exchanges: the identity probe `run --endpoint` sends first (an unsigned `HEAD /`),
+        // then the one case request, which is the only one `response_status` answers.
+        let probe_response =
+            "HTTP/1.1 403 Forbidden\r\nServer: RustFS\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_owned();
+        let case_response = format!("HTTP/1.1 {response_status} Result\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+        for (expected_line, response) in [("HEAD / HTTP/1.1\r\n", probe_response), ("", case_response)] {
+            let (mut stream, _) = loop {
+                match listener.accept() {
+                    Ok(accepted) => break accepted,
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock && Instant::now() < deadline => {
+                        thread::sleep(Duration::from_millis(1));
+                    }
+                    Err(error) => panic!("accept external CLI request: {error}"),
                 }
-                Err(error) => panic!("accept external CLI request: {error}"),
+            };
+            // The listener is non-blocking so the accept loop can watch its own deadline, and on
+            // macOS an accepted socket inherits that flag; a non-blocking read answers `WouldBlock`
+            // instead of waiting for the request head, and the read timeout below never applies.
+            // Linux hands back a blocking socket, which is why this only flaked on one platform.
+            stream.set_nonblocking(false).expect("blocking exchange");
+            stream.set_read_timeout(Some(Duration::from_secs(10))).expect("read deadline");
+            stream
+                .set_write_timeout(Some(Duration::from_secs(10)))
+                .expect("write deadline");
+            let mut request = Vec::new();
+            while !request.windows(4).any(|bytes| bytes == b"\r\n\r\n") {
+                let mut block = [0; 1024];
+                let read = stream.read(&mut block).expect("read request head");
+                if read == 0 {
+                    panic!("external request ended before the head terminator");
+                }
+                request.extend_from_slice(&block[..read]);
             }
-        };
-        // The listener is non-blocking so the accept loop can watch its own deadline, and on
-        // macOS an accepted socket inherits that flag; a non-blocking read answers `WouldBlock`
-        // instead of waiting for the request head, and the read timeout below never applies.
-        // Linux hands back a blocking socket, which is why this only flaked on one platform.
-        stream.set_nonblocking(false).expect("blocking exchange");
-        stream.set_read_timeout(Some(Duration::from_secs(10))).expect("read deadline");
-        stream
-            .set_write_timeout(Some(Duration::from_secs(10)))
-            .expect("write deadline");
-        let mut request = Vec::new();
-        while !request.windows(4).any(|bytes| bytes == b"\r\n\r\n") {
-            let mut block = [0; 1024];
-            let read = stream.read(&mut block).expect("read request head");
-            if read == 0 {
-                panic!("external request ended before the head terminator");
-            }
-            request.extend_from_slice(&block[..read]);
+            assert!(request.starts_with(expected_line.as_bytes()), "unexpected request order");
+            stream.write_all(response.as_bytes()).expect("write response");
         }
-        stream
-            .write_all(format!("HTTP/1.1 {response_status} Result\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").as_bytes())
-            .expect("write response");
     });
     let result = cli::main(&[
         "run".into(),

@@ -49,6 +49,13 @@ pub enum Profile {
     Minio,
     /// The strictest reading, where implementations legitimately diverge.
     Strict,
+    /// Legacy RustFS behaviour: the readings `ServiceBuilder::rustfs_profile` applies
+    /// (`docs/rustfs-profile.md`, rustfs/backlog#2751), measured on an external candidate.
+    ///
+    /// Never inherits another profile's expectations: a case that names `minio` is skipped under
+    /// it exactly as under `aws`. The bundled reference target does not run the preset, so the
+    /// claim is only accepted with `--endpoint` (rustfs/backlog#2757).
+    Rustfs,
 }
 
 impl Profile {
@@ -59,6 +66,7 @@ impl Profile {
             Profile::Aws => "aws",
             Profile::Minio => "minio",
             Profile::Strict => "strict",
+            Profile::Rustfs => "rustfs",
         }
     }
 
@@ -69,9 +77,24 @@ impl Profile {
             "aws" => Some(Profile::Aws),
             "minio" => Some(Profile::Minio),
             "strict" => Some(Profile::Strict),
+            "rustfs" => Some(Profile::Rustfs),
             _ => None,
         }
     }
+}
+
+/// What a target reports about itself when asked, beyond [`Sut::describe`].
+///
+/// Both fields are observations or absent. The endpoint is the URL the run was pointed at; the
+/// build is the `Server` header the target sent on an unsigned `HEAD /`, verbatim. A target that
+/// sends no such header has no build here — the report says `null`, never a product name the probe
+/// did not see.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TargetIdentity {
+    /// The URL the run was pointed at, when it was pointed at one.
+    pub endpoint: Option<String>,
+    /// The target's `Server` header, when it sent one.
+    pub build: Option<String>,
 }
 
 /// Everything a target needs to perform one exchange.
@@ -188,6 +211,18 @@ pub trait Sut {
     fn finish(&mut self, case_id: &str) -> Result<(), SutError> {
         let _ = case_id;
         Ok(())
+    }
+
+    /// Asks the target what it is, for the report header: its endpoint and its `Server` header.
+    ///
+    /// The default reports nothing, which is the truth for every target that was not pointed at
+    /// a URL. An external target probes once, before the run, and reports what it observed.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SutError`] when the target could not be reached for the probe.
+    fn identity(&mut self) -> Result<TargetIdentity, SutError> {
+        Ok(TargetIdentity::default())
     }
 }
 
@@ -339,7 +374,25 @@ mod tests {
         assert_eq!(Transport::parse("conn"), Some(Transport::Conn));
         assert_eq!(Transport::parse("h3"), None);
         assert_eq!(Profile::parse("minio").map(Profile::as_str), Some("minio"));
+        assert_eq!(Profile::parse("rustfs"), Some(Profile::Rustfs));
+        assert_eq!(Profile::Rustfs.as_str(), "rustfs");
+        assert_eq!(Profile::parse("RustFS"), None, "the spelling is the command line's, lower-case");
         assert_eq!(Profile::parse("nope"), None);
+    }
+
+    /// Negative — a target that was never asked reports nothing about itself: no endpoint, no
+    /// build. The default must never invent either.
+    #[test]
+    fn a_target_without_an_endpoint_has_no_identity_to_report() {
+        assert_eq!(Unwired.identity().expect("nothing to ask"), TargetIdentity::default());
+        assert_eq!(Scripted::new().identity().expect("nothing to ask"), TargetIdentity::default());
+        assert_eq!(
+            TargetIdentity::default(),
+            TargetIdentity {
+                endpoint: None,
+                build: None
+            }
+        );
     }
 
     #[test]

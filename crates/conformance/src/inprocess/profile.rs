@@ -26,10 +26,22 @@ use rustfs_gateway::{
 
 use crate::sut::{Profile, SutError};
 
-pub(super) fn name_policy(profile: Profile) -> NamePolicy {
+/// The naming policy the bundled assembly runs for a claimed profile.
+///
+/// # Errors
+///
+/// Returns [`SutError::Environment`] for `rustfs`: the bundled reference assembly does not run the
+/// RustFS preset, and a service that claimed the profile without running it would report an
+/// intention as an observation. The profile is measured on an external candidate (`--endpoint`).
+pub(super) fn name_policy(profile: Profile) -> Result<NamePolicy, SutError> {
     match profile {
-        Profile::Minio => NamePolicy::default().with_slash_policy(SlashPolicy::Collapse),
-        Profile::Aws | Profile::Strict => NamePolicy::default(),
+        Profile::Minio => Ok(NamePolicy::default().with_slash_policy(SlashPolicy::Collapse)),
+        Profile::Aws | Profile::Strict => Ok(NamePolicy::default()),
+        Profile::Rustfs => Err(SutError::Environment(
+            "the `rustfs` profile names an external RustFS candidate (`--endpoint`); the bundled \
+             reference assembly does not run the RustFS preset and cannot claim it"
+                .to_owned(),
+        )),
     }
 }
 
@@ -48,18 +60,27 @@ mod tests {
     /// Positive — the named vendor profile selects its observable slash semantics.
     #[test]
     fn minio_selects_the_collapse_policy() {
-        assert_eq!(name_policy(Profile::Minio).slash_policy(), SlashPolicy::Collapse);
+        assert_eq!(name_policy(Profile::Minio).expect("assembled").slash_policy(), SlashPolicy::Collapse);
     }
 
     /// Negative — the default profile must not inherit a vendor compatibility rewrite.
     #[test]
     fn aws_does_not_collapse_object_keys() {
-        assert_eq!(name_policy(Profile::Aws).slash_policy(), SlashPolicy::AwsPreserve);
+        assert_eq!(name_policy(Profile::Aws).expect("assembled").slash_policy(), SlashPolicy::AwsPreserve);
     }
 
     /// Negative — strict is an explicit divergence selector, not an alias for one vendor.
     #[test]
     fn strict_does_not_silently_select_the_minio_rewrite() {
-        assert_eq!(name_policy(Profile::Strict).slash_policy(), SlashPolicy::AwsPreserve);
+        assert_eq!(name_policy(Profile::Strict).expect("assembled").slash_policy(), SlashPolicy::AwsPreserve);
+    }
+
+    /// Negative — the bundled assembly does not run the RustFS preset, so it must not claim the
+    /// profile: a `rustfs` run over it would report a profile the target never had.
+    #[test]
+    fn rustfs_is_refused_by_the_bundled_assembly() {
+        let error = name_policy(Profile::Rustfs).expect_err("not this target");
+        assert!(matches!(error, SutError::Environment(_)), "{error:?}");
+        assert!(error.to_string().contains("--endpoint"), "{error}");
     }
 }

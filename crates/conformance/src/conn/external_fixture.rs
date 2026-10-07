@@ -26,7 +26,7 @@ use crate::inprocess::Wire;
 use crate::sut::SutError;
 use crate::value::Value;
 
-mod clock;
+pub(super) mod clock;
 #[cfg(test)]
 mod h2_guard_tests;
 mod lifecycle;

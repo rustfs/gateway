@@ -23,7 +23,7 @@
 
 use crate::diagnostic::Diagnostic;
 use crate::json;
-use crate::report::{Baseline, CaseOutcome, Phase, Report, Verdict};
+use crate::report::{Baseline, CaseOutcome, Phase, Report, RunContext, Verdict};
 use crate::value::Value;
 
 fn outcome(id: &str, domain: &str, verdict: Verdict) -> CaseOutcome {
@@ -388,4 +388,91 @@ fn the_json_report_is_parseable() {
     let rendered = report().render_json();
     let parsed = json::parse(&rendered).expect("valid JSON");
     assert_eq!(parsed.path("cases").and_then(Value::as_array).map(<[Value]>::len), Some(3));
+}
+
+// The run context: what the JSON and JUnit renderers say about the endpoint, the build and a
+// ruling, beyond the verdicts.
+
+fn ruled() -> crate::rulings::Rulings {
+    crate::rulings::Rulings::parse(
+        "[[ruling]]\nid = \"c-sig-0001\"\nverdict = \"accepted-change\"\nissue = \"rustfs/backlog#2684\"\n\
+         approved_by = \"maintainer\"\nexpires = \"2027-01-31\"\n",
+    )
+    .expect("a complete ruling")
+}
+
+/// Positive — the JSON report carries what the run observed about its target and its ledger.
+#[test]
+fn the_json_report_names_the_endpoint_the_build_and_the_ruling() {
+    let rulings = ruled();
+    let context = RunContext {
+        endpoint: Some("http://127.0.0.1:9100"),
+        target_build: Some("RustFS"),
+        rulings: Some(("rulings.toml", &rulings)),
+    };
+    let document = json::parse(&report().render_json_in(&context)).expect("well-formed JSON");
+    assert_eq!(document.get("endpoint").and_then(Value::as_str), Some("http://127.0.0.1:9100"));
+    assert_eq!(document.get("target_build").and_then(Value::as_str), Some("RustFS"));
+    assert_eq!(document.get("rulings").and_then(Value::as_str), Some("rulings.toml"));
+    let cases = document.get("cases").and_then(Value::as_array).expect("cases");
+    let failed = cases
+        .iter()
+        .find(|c| c.get("id").and_then(Value::as_str) == Some("c-sig-0001"))
+        .expect("the failure");
+    assert_eq!(
+        failed.get("verdict").and_then(Value::as_str),
+        Some("failed"),
+        "a ruled failure stays a failure"
+    );
+    let ruling = failed.get("ruling").expect("ruling key");
+    assert_eq!(ruling.get("verdict").and_then(Value::as_str), Some("accepted-change"));
+    assert_eq!(ruling.get("approved_by").and_then(Value::as_str), Some("maintainer"));
+    assert_eq!(ruling.get("expires").and_then(Value::as_str), Some("2027-01-31"));
+    let rendered = report().render_json_in(&context);
+    assert!(
+        rendered.contains("\"id\": \"c-etag-0001\"") && rendered.contains("\"ruling\": null"),
+        "an unruled case carries null, not a missing key: {rendered}"
+    );
+}
+
+/// Negative — a run without an endpoint or a ledger says so with `null`, never with a name it
+/// did not observe.
+#[test]
+fn a_run_without_an_endpoint_or_a_ledger_reports_null_not_a_name() {
+    // The reader models `null` as an empty table, so the literal is checked on the text.
+    let rendered = report().render_json();
+    json::parse(&rendered).expect("well-formed JSON");
+    for key in ["endpoint", "target_build", "rulings"] {
+        assert!(rendered.contains(&format!("\"{key}\": null")), "{key}: {rendered}");
+    }
+    let validated = validated_report().render_json_in(&RunContext {
+        endpoint: Some("http://127.0.0.1:9100"),
+        target_build: Some("RustFS"),
+        rulings: None,
+    });
+    json::parse(&validated).expect("well-formed JSON");
+    assert!(
+        validated.contains("\"endpoint\": null") && validated.contains("\"target_build\": null"),
+        "a validate-only run contacted no target, whatever the caller passed: {validated}"
+    );
+}
+
+/// Negative — JUnit has no colour for "failed, but ruled", and must not borrow green.
+#[test]
+fn a_ruled_failure_stays_a_junit_failure_with_the_ruling_noted() {
+    let rulings = ruled();
+    let context = RunContext {
+        endpoint: None,
+        target_build: None,
+        rulings: Some(("rulings.toml", &rulings)),
+    };
+    let rendered = report().render_junit_in(&context);
+    assert!(rendered.contains("failures=\"1\""), "{rendered}");
+    assert!(rendered.contains("<failure message=\"expect/status\">"), "{rendered}");
+    assert!(
+        rendered.contains("ruling: accepted-change rustfs/backlog#2684 approved by maintainer, expires 2027-01-31"),
+        "{rendered}"
+    );
+    let unruled = report().render_junit();
+    assert!(!unruled.contains("ruling:"), "{unruled}");
 }

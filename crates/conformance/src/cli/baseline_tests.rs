@@ -32,6 +32,7 @@ fn options(command: Command, filter: &str) -> Options {
         ca_cert: None,
         external_fixtures: false,
         baseline: None,
+        rulings: None,
         json: None,
         junit: None,
         exclude_slow: false,
