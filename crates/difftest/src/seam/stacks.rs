@@ -211,6 +211,7 @@ impl GatewaySeam {
             .select_operations_as_legacy_rustfs()
             .accept_empty_uploads_without_content_length()
             .refuse_unreadable_date_conditions()
+            .read_checksum_declarations_as_legacy_rustfs()
             .url_encode_listings_like_rustfs()
             .legacy_rustfs_post_forms()
             .answer_heads_as_legacy_rustfs()
