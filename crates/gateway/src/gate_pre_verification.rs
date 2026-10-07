@@ -118,6 +118,7 @@ where
         form: crate::builder::view_policy::post_forms::PostFormRead,
         timeouts: BodyTimeouts,
     ) -> Result<crate::post_object::PostObjectPrelude<B>, S3Error> {
+        let declared_length = self.declared_length;
         crate::post_object::PostObjectPrelude::read_with_grammar(
             self.body.into_inner(),
             content_type,
@@ -126,6 +127,7 @@ where
             timeouts,
         )
         .await
+        .map(|prelude| prelude.with_declared_length(declared_length))
     }
 
     /// Consumed only by the ordinary body read, which still requires metadata admission.

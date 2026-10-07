@@ -203,6 +203,26 @@ impl FormReader {
         self.grammar
     }
 
+    /// The exact length of the file part, derived from the request's declared body length as
+    /// legacy RustFS derives it, once the file part is reached under
+    /// [`FormGrammar::LegacyRustfs`] with a declared length.
+    ///
+    /// That grammar lets nothing but CRLF follow the closing delimiter of such a request, so the
+    /// file is the declared length less every byte before the file and the closing
+    /// `\r\n--boundary--\r\n`. `None` before the file part, under any other grammar, and when
+    /// `declared_body_bytes` cannot hold what was already read and the closing delimiter; a body
+    /// that does not then end exactly so is refused by the [`FileReader`].
+    #[must_use]
+    pub fn declared_file_length(&self, declared_body_bytes: u64) -> Option<u64> {
+        if self.state != State::FileReached || self.grammar != (FormGrammar::LegacyRustfs { declared_length: true }) {
+            return None;
+        }
+        let before_file = self.bytes_seen.checked_sub(self.buffer.len() as u64)?;
+        // `\r\n--boundary`, then the closing `--` and the final CRLF.
+        let closing = (self.terminator.len() as u64).checked_add(4)?;
+        declared_body_bytes.checked_sub(before_file)?.checked_sub(closing)
+    }
+
     /// The name `${filename}` in a `key` stands for, once the `file` part's header has been read.
     ///
     /// Under [`FormGrammar::Gateway`] this is [`FormReader::filename`]. Under

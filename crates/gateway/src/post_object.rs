@@ -85,6 +85,8 @@ pub(crate) struct PostObjectPrelude<B: Body> {
     first_file_bytes: Option<Bytes>,
     limits: FormLimits,
     timeouts: BodyTimeouts,
+    /// The request's declared body length, from which the legacy grammar fixes the file's.
+    declared_length: Option<u64>,
 }
 
 impl<B> PostObjectPrelude<B>
@@ -143,10 +145,20 @@ where
                         first_file_bytes,
                         limits,
                         timeouts,
+                        declared_length: None,
                     });
                 }
             }
         }
+    }
+
+    /// Records the request's declared body length. Under the legacy RustFS grammar with a declared
+    /// length, the file part's exact length follows from it, as legacy RustFS derives it, and is
+    /// handed to the handler as the body's length (rustfs/gateway#1167).
+    #[must_use]
+    pub(crate) fn with_declared_length(mut self, declared_length: Option<u64>) -> Self {
+        self.declared_length = declared_length;
+        self
     }
 
     pub(crate) fn form_fields(&self) -> Vec<(&str, &str)> {
@@ -247,11 +259,15 @@ where
         };
         let response = PostObjectResponsePlan::parse(&fields, &bucket, &key, legacy_store)?;
         let ceiling = policy.read_ceiling(self.limits);
+        let file_length = self
+            .declared_length
+            .and_then(|declared| self.reader.declared_file_length(declared));
         let file = self.reader.into_file(ceiling).map_err(form_refusal)?;
         Ok(ResolvedPostObject {
             frames: self.frames,
             first_file_bytes: self.first_file_bytes,
             file,
+            file_length,
             policy,
             bucket,
             key,
@@ -271,6 +287,8 @@ pub(crate) struct ResolvedPostObject<B: Body> {
     frames: WireFrames<B>,
     first_file_bytes: Option<Bytes>,
     file: FileReader,
+    /// The file part's exact length, when the grammar and the declared body length fix it.
+    file_length: Option<u64>,
     policy: AcceptedPolicy,
     bucket: BucketName,
     key: ObjectKey,
@@ -308,6 +326,19 @@ where
         if let Some(refusal) = self.not_carried {
             return Err(refusal.into_error());
         }
+        // A file whose exact length the declared body fixes is judged by the policy before the
+        // handler runs, as legacy RustFS judges it on the length it derived; only the legacy
+        // grammar fixes one, so the answer is legacy RustFS's (rustfs/gateway#1167).
+        if let Some(length) = self.file_length {
+            self.policy
+                .enforce_final(self.bucket.as_str(), self.key.as_str(), length)
+                .map_err(|error| self.frames.mark_refusal_if_unfinished(legacy_file_policy_refusal(error)))?;
+            // An empty file is refused here too, before the handler, as legacy RustFS refuses the
+            // upload it derived no length for (see `PostFileBody::complete`).
+            if length == 0 {
+                return Err(self.frames.mark_refusal_if_unfinished(legacy_empty_file_refusal()));
+            }
+        }
         let body = PostFileBody {
             frames: self.frames,
             first: self.first_file_bytes,
@@ -322,7 +353,7 @@ where
         };
         let opened = StreamingRead::new_with_refusal(
             Some(body),
-            (None, None),
+            (self.file_length, None),
             (BodyCeilings::streaming(None), self.timeouts, None),
             None,
             BodyDigestObligation::None,
@@ -381,6 +412,31 @@ struct PostFileBody<B: Body> {
     pending: VecDeque<Bytes>,
 }
 
+/// Legacy RustFS's answer to an empty form file: `400 UnexpectedContent`.
+fn legacy_empty_file_refusal() -> S3Error {
+    from_handler(
+        HandlerError::new(ErrorCode::UNEXPECTED_CONTENT, LEGACY_EMPTY_FILE),
+        ResponseKind::Other,
+        ConnectionIntent::MayKeepAlive,
+    )
+}
+
+/// Legacy RustFS's answer to a file its POST policy refuses: the policy's own code where it has
+/// one, `AccessDenied` otherwise.
+fn legacy_file_policy_refusal(error: PostPolicyError) -> S3Error {
+    let code = match error {
+        PostPolicyError::ConditionFailed => ErrorCode::INVALID_POLICY_DOCUMENT,
+        PostPolicyError::EntityTooSmall => ErrorCode::ENTITY_TOO_SMALL,
+        PostPolicyError::EntityTooLarge => ErrorCode::ENTITY_TOO_LARGE,
+        _ => ErrorCode::ACCESS_DENIED,
+    };
+    from_handler(
+        HandlerError::new(code, "the POST file did not satisfy its policy"),
+        ResponseKind::Other,
+        ConnectionIntent::MayKeepAlive,
+    )
+}
+
 /// Retains input subslices without copying; only the parser's bounded carry needs new ownership.
 fn retain_file_bytes(frame: &Bytes, bytes: &[u8]) -> Bytes {
     let start = (bytes.as_ptr() as usize).wrapping_sub(frame.as_ptr() as usize);
@@ -394,17 +450,7 @@ fn retain_file_bytes(frame: &Bytes, bytes: &[u8]) -> Bytes {
 impl<B: Body> PostFileBody<B> {
     fn policy_error(&self, message: &'static str, error: PostPolicyError) -> PostBodyError {
         let refusal = self.legacy_policy_errors.then(|| {
-            let code = match error {
-                PostPolicyError::ConditionFailed => ErrorCode::INVALID_POLICY_DOCUMENT,
-                PostPolicyError::EntityTooSmall => ErrorCode::ENTITY_TOO_SMALL,
-                PostPolicyError::EntityTooLarge => ErrorCode::ENTITY_TOO_LARGE,
-                _ => ErrorCode::ACCESS_DENIED,
-            };
-            let refusal = from_handler(
-                HandlerError::new(code, "the POST file did not satisfy its policy"),
-                ResponseKind::Other,
-                ConnectionIntent::MayKeepAlive,
-            );
+            let refusal = legacy_file_policy_refusal(error);
             Box::new(self.frames.mark_refusal_if_unfinished(refusal))
         });
         PostBodyError(message, refusal)
@@ -424,12 +470,7 @@ impl<B: Body> PostFileBody<B> {
         // behaviour is to store it, as `PutObject` does (rustfs/gateway#1167).
         if self.legacy_policy_errors && file_bytes == 0 {
             self.pending.clear();
-            let refusal = from_handler(
-                HandlerError::new(ErrorCode::UNEXPECTED_CONTENT, LEGACY_EMPTY_FILE),
-                ResponseKind::Other,
-                ConnectionIntent::MayKeepAlive,
-            );
-            let refusal = Box::new(self.frames.mark_refusal_if_unfinished(refusal));
+            let refusal = Box::new(self.frames.mark_refusal_if_unfinished(legacy_empty_file_refusal()));
             return Poll::Ready(Some(Err(PostBodyError("the POST file was empty", Some(refusal)))));
         }
         Poll::Ready(self.pending.pop_front().map(|bytes| Ok(Frame::data(bytes))))

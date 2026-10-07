@@ -156,6 +156,8 @@ mod perf_evidence;
 mod pipeline;
 #[path = "policy_reachability.rs"]
 mod policy_reachability;
+#[path = "post_object_file_length.rs"]
+mod post_object_file_length;
 #[path = "post_object_legacy_fields.rs"]
 mod post_object_legacy_fields;
 #[path = "post_object_legacy_form.rs"]
