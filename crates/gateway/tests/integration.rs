@@ -162,6 +162,8 @@ mod post_object_file_length;
 mod post_object_legacy_fields;
 #[path = "post_object_legacy_form.rs"]
 mod post_object_legacy_form;
+#[path = "post_object_redirect_field.rs"]
+mod post_object_redirect_field;
 #[path = "post_object_runtime.rs"]
 mod post_object_runtime;
 #[path = "post_object_sigv2.rs"]
