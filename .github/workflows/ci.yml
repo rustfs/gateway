@@ -462,7 +462,9 @@ jobs:
   # against the ten-minute ceiling, so no budget can help it. The corpus is now cut in two by
   # `--shard`, which numbers the selected cases in corpus order and hands each runner every
   # second one; the two green jobs together are the complete comparison, and each child pair
-  # reports how many cases it left to the other shard.
+  # reports how many cases it left to the other shard. A case that fails identically on both
+  # drivers fails the job (rustfs/gateway#1378): this is the only job that runs the socket-only
+  # cases, so parity between two wrong answers must not read as a pass.
   transport-parity:
     name: Production transport parity
     runs-on: sm-standard-4

@@ -119,3 +119,29 @@ fn parent_rejects_wrong_refusal_and_failed_hyper_observations() {
         assert_ne!(drive(id, &fixture), ExitCode::SUCCESS);
     }
 }
+
+fn failed_report(id: &str) -> String {
+    format!(
+        r#"{{"cases":[{{"id":"{id}","verdict":"failed","phase":"execute","reason":"","failures":["expect/status: expected 200, observed 500"]}}]}}"#
+    )
+}
+
+#[test]
+fn parent_reports_an_identical_failure_on_both_drivers_as_a_regression() {
+    let id = "c-object-0001";
+    for (hyper_exit, conn_exit) in [(1, 1), (0, 0)] {
+        let fixture = fixture(&failed_report(id), &failed_report(id), hyper_exit, conn_exit, true);
+        assert_eq!(
+            drive(id, &fixture),
+            ExitCode::from(exit::REGRESSION),
+            "child exits {hyper_exit}/{conn_exit}"
+        );
+    }
+}
+
+#[test]
+fn parent_still_accepts_an_identical_pass_on_both_drivers() {
+    let id = "c-object-0001";
+    let fixture = fixture(&report(id, "passed", ""), &report(id, "passed", ""), 0, 0, true);
+    assert_eq!(drive(id, &fixture), ExitCode::SUCCESS);
+}
