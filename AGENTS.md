@@ -352,6 +352,16 @@ closes the cycle.
         rustfs-gateway-server                    listener, TLS, hyper, admission, shutdown
         rustfs-gateway ──▶ rustfs-gateway-server          optional self-held listener assembly; server remains internally independent
         xtask ──▶ gateway + conformance + core + codegen + model   generation and diagnostics only
+
+  ring-1 products and evidence crates, never in the facade's runtime dependency tree
+  (the complete edge table is `scripts/check_layer_dependencies.sh`):
+        rustfs-gateway-fs ──▶ rustfs-gateway                          filesystem reference backend behind compat/sut
+        rustfs-gateway-dialect-rustfs-admin ──▶ core + sig + stream   RustFS admin, STS and Iceberg routes as claimed dialect operations
+        rustfs-gateway-dialect-minio ──▶ core + sig + types + xml     MinIO extension field and replica operation
+        rustfs-gateway-corpus-recorder ──▶ gateway + core + corpus    feature-gated tower recording layer
+        rustfs-gateway-goldens ──▶ types[compat-s3s] + corpus         persistence and migration goldens against pinned s3s; DELETE BY P9-09
+        rustfs-gateway-difftest ──▶ gateway + core + corpus + http + sig + stream + types[compat-s3s-0-17-0]   decode/encode differential against pinned s3s; DELETE BY P9-09
+        rustfs-gateway-corpus                                         recorded-request corpus schema and redaction; ring 0, no internal dependency
 ```
 
 Three annotations you must not lose:

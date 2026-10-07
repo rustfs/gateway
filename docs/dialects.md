@@ -40,13 +40,14 @@ mechanisms, different blast radii and different rules.
 | 2 | **Extension fields on existing types** | `ExtField` codec vtable | add a child element to an existing parent shape | change an existing field's type, order or name; add a field to a security-relevant type |
 | 3 | **Parsing leniency** | runtime `CodecPolicy` | relax request-XML strictness — unknown elements, bare-literal bodies | relax anything about a security-relevant configuration, a signature, or an authorisation decision |
 
-**Only dimension 1 exists today.** The `ExtField` feasibility spike and its ADR have now landed —
-`docs/adr/ADR-0007-ext-field-codec.md`, evidenced by the `spikes/ext-field` crate — so dimensions 2
-and 3 have an accepted conclusion, but they still have no production code. The ADR says so in
-terms: the spike "does not authorize moving its implementation into production crates; that is a
-separate task using this ADR as input." No workspace crate names `ExtField` or `CodecPolicy`, and
-no generated codec carries an extension slot. So the rows for 2 and 3 remain the contract their
-implementation has to satisfy rather than a description of code that exists.
+**All three dimensions have production code.** Dimension 1 is `Dialect::operations` and the
+claimed-operation rows described below. Dimensions 2 and 3 are `ExtField` and `CodecPolicy` in
+`rustfs_gateway_types::ext` (`crates/types/src/ext.rs`): a typed vtable registered below a static
+parent shape, and a borrowed per-codec policy. `rustfs-gateway-dialect-minio` is the first
+consumer, registering the lifecycle `DelMarkerExpiration` field through that mechanism. The
+feasibility spike that decided the mechanism, `docs/adr/ADR-0007-ext-field-codec.md` with the
+`spikes/ext-field` crate as its evidence, remains the record of why a runtime vtable won over a
+second generated codec; the spike itself is not the production implementation.
 
 One vendor exception does not wait for dimension 2. ADR-0033 makes six MinIO bucket-configuration
 members (`ExpiryUpdatedAt`, `DelMarkerExpiration`, `ExpiredObjectAllVersions`, `DeleteReplication`,
@@ -62,9 +63,9 @@ turn a parse or registration miss into an absent configuration.
 handler request layout — and leaves the vtable decision standing; read the two together rather
 than reading the header as retiring the dialect mechanism.)
 
-The reason the split matters even while two thirds of it is pending: dimension 1 is the one that
-touches routing and authorisation, which is where a mistake is a security incident rather than a
-compatibility gap. Keeping it separate is what lets it land first.
+The reason the split matters: dimension 1 is the one that touches routing and authorisation,
+which is where a mistake is a security incident rather than a compatibility gap. Keeping it
+separate is what let it land first and what keeps its review bar separate now.
 
 ## What a dialect operation must state
 

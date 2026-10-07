@@ -14,8 +14,9 @@
 
 //! Responsible for: assembling the corpus store — schema, redaction gate, deduplication,
 //! storage layout, and conformance case drafting — into one public surface.
-//! Not responsible for: recording requests. The recorder is a feature-gated tower layer
-//! in the RustFS main repository and must never compile into a production build.
+//! Not responsible for: recording requests. The recorder is the feature-gated tower layer in
+//! `rustfs-gateway-corpus-recorder` (`crates/corpus-recorder`) and must never compile into a
+//! production build.
 //! Upstream: JSONL produced by that recorder, or by an adapter over a test suite capture.
 //! Downstream: `corpus/**`, the `corpus` binary, and the corpus guard scripts.
 
