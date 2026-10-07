@@ -157,12 +157,22 @@ where
             .collect()
     }
 
+    pub(crate) fn policy_limits(&self) -> PostPolicyLimits {
+        let mut limits = PostPolicyLimits::default();
+        if matches!(self.reader.grammar(), FormGrammar::LegacyRustfs { .. }) {
+            limits.max_encoded_bytes = self.limits.max_policy_bytes();
+            limits.max_decoded_bytes = limits.max_encoded_bytes / 4 * 3;
+        }
+        limits
+    }
+
     pub(crate) fn resolve(
         self,
         bucket: BucketName,
         names: &NamePolicy,
         now: RequestNow,
     ) -> Result<ResolvedPostObject<B>, S3Error> {
+        let policy_limits = self.policy_limits();
         let fields: Vec<(&str, &str)> = self
             .reader
             .fields()
@@ -193,7 +203,7 @@ where
                 .with_length(RegionLength::Unbounded)
                 .with_services(ServiceReading::AnyName);
             AcceptedPolicy::SigV4(Box::new(
-                PostPolicy::parse_with(&fields, filename, PostPolicyLimits::default(), now, rule).map_err(policy_refusal)?,
+                PostPolicy::parse_with(&fields, filename, policy_limits, now, rule).map_err(policy_refusal)?,
             ))
         } else if fields.iter().any(|(name, _)| *name == "awsaccesskeyid") {
             let parse = if legacy_store {
@@ -201,7 +211,7 @@ where
             } else {
                 SigV2PostPolicy::parse
             };
-            AcceptedPolicy::SigV2(parse(&fields, filename, PostPolicyLimits::default(), now).map_err(|reject| {
+            AcceptedPolicy::SigV2(parse(&fields, filename, policy_limits, now).map_err(|reject| {
                 if legacy_store && matches!(reject, PostPolicyError::Malformed | PostPolicyError::ConditionFailed) {
                     from_handler(
                         HandlerError::new(ErrorCode::INVALID_POLICY_DOCUMENT, "the POST policy was not accepted"),
@@ -344,6 +354,10 @@ where
     }
 }
 
+/// Legacy RustFS's sentence for an empty form file: the legacy stack's text for
+/// `UnexpectedContent`.
+const LEGACY_EMPTY_FILE: &str = "This request does not support content.";
+
 #[derive(Debug)]
 struct PostBodyError(&'static str, Option<Box<S3Error>>);
 
@@ -365,6 +379,7 @@ struct PostFileBody<B: Body> {
     frames: WireFrames<B>,
     first: Option<Bytes>,
     initial: bool,
+    /// The RustFS profile: a policy refusal in legacy RustFS's words, and an empty file refused.
     legacy_policy_errors: bool,
     file: FileReader,
     policy: AcceptedPolicy,
@@ -411,6 +426,21 @@ impl<B: Body> PostFileBody<B> {
         if let Err(error) = self.policy.enforce_final(&self.bucket, &self.key, file_bytes) {
             self.pending.clear();
             return Poll::Ready(Some(Err(self.policy_error("the POST file did not satisfy its policy", error))));
+        }
+        // Legacy-compat (rustfs/backlog#2684): legacy RustFS hands its upload path no length for an
+        // empty file, and that path refuses `400 UnexpectedContent` before storing anything
+        // (`rustfs/src/app/object/put.rs:91-116` at rustfs/rustfs@95268a3b9), after the policy's
+        // own checks. An empty upload is a valid object everywhere else; the intended future
+        // behaviour is to store it, as `PutObject` does (rustfs/gateway#1167).
+        if self.legacy_policy_errors && file_bytes == 0 {
+            self.pending.clear();
+            let refusal = from_handler(
+                HandlerError::new(ErrorCode::UNEXPECTED_CONTENT, LEGACY_EMPTY_FILE),
+                ResponseKind::Other,
+                ConnectionIntent::MayKeepAlive,
+            );
+            let refusal = Box::new(self.frames.mark_refusal_if_unfinished(refusal));
+            return Poll::Ready(Some(Err(PostBodyError("the POST file was empty", Some(refusal)))));
         }
         Poll::Ready(self.pending.pop_front().map(|bytes| Ok(Frame::data(bytes))))
     }

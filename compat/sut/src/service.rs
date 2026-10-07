@@ -292,6 +292,11 @@ pub(crate) fn build_service(
             // RustFS ignores a checksum header naming an algorithm it does not know, and stores the
             // body; every claim it can verify is still compared (rustfs/backlog#1677).
             .ignore_unknown_checksum_algorithms()
+            // And it reads checksum declarations as its storage reader does: an SDK algorithm or a
+            // checksum type it ignores is ignored, and a type or an upload's
+            // `x-amz-checksum-algorithm` it cannot apply is `BadDigest`; the value header present is
+            // still compared (rustfs/gateway#1349).
+            .read_checksums_as_legacy_rustfs()
             // RustFS reads a request document against its shape and refuses an unknown nested
             // element, a repeated member and a value its grammar does not read, with `MalformedXML`
             // (rustfs/gateway#1078), so the launcher stores no configuration RustFS would refuse.

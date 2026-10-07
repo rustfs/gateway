@@ -295,6 +295,7 @@ pub struct Authentication<'a> {
     declared_content_length: Option<u64>,
     chunks: Option<&'a ChunkSink>,
     unrouted_post_policy: Option<&'a rustfs_gateway_sig::UnroutedPostPolicy>,
+    post_policy_limits: Option<rustfs_gateway_sig::PostPolicyLimits>,
     signature_mismatch: std::sync::OnceLock<rustfs_gateway_sig::SignatureMismatchDetail>,
     /// Legacy RustFS's words for a refusal under a RustFS-profile reading; only the built-in
     /// authenticator publishes one, and only on a refusal.
@@ -339,6 +340,7 @@ impl<'a> Authentication<'a> {
             declared_content_length,
             chunks: None,
             unrouted_post_policy: None,
+            post_policy_limits: None,
             signature_mismatch: std::sync::OnceLock::new(),
             legacy_refusal: std::sync::OnceLock::new(),
             sts_body: None,
@@ -573,8 +575,13 @@ impl SigV4Authenticator {
         // Once a credential surface is present, parsing failure is still a credential failure.
         // Normalising it here keeps malformed material on the same 403 path and prevents a caller
         // from learning how far parsing got before an access key could be recovered.
-        let Ok(presented) = Presented::read(sealed, location, self.scope_policy.region_rule(), request.unrouted_post_policy)
-        else {
+        let Ok(presented) = Presented::read(
+            sealed,
+            location,
+            self.scope_policy.region_rule(),
+            request.unrouted_post_policy,
+            request.post_policy_limits,
+        ) else {
             if let Some((error, refusal)) = self.scope_policy.unreadable_scope_refusal(sealed, location) {
                 let _ = request.legacy_refusal.set(refusal);
                 return Err(error.into());

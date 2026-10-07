@@ -86,6 +86,9 @@ use rustfs_gateway_types::{
 
 use crate::header_view::HeaderView;
 
+#[path = "checksum_legacy.rs"]
+mod legacy;
+
 /// The header carrying the legacy whole-body digest.
 const CONTENT_MD5: HeaderName = HeaderName::from_static("content-md5");
 const X_AMZ_TRAILER: HeaderName = HeaderName::from_static("x-amz-trailer");

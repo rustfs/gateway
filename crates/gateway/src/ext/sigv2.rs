@@ -66,6 +66,7 @@ pub struct SigV2Authentication<'a> {
     method: &'a http::Method,
     raw_path: &'a str,
     virtual_host_bucket: Option<&'a str>,
+    post_policy_limits: Option<PostPolicyLimits>,
 }
 
 impl core::fmt::Debug for SigV2Authentication<'_> {
@@ -93,7 +94,13 @@ impl<'a> SigV2Authentication<'a> {
             method,
             raw_path,
             virtual_host_bucket,
+            post_policy_limits: None,
         }
+    }
+
+    pub(crate) const fn with_post_policy_limits(mut self, limits: Option<PostPolicyLimits>) -> Self {
+        self.post_policy_limits = limits;
+        self
     }
 
     /// The admitted request. Holding one is proof the floor has run.
@@ -179,7 +186,12 @@ impl SigV4Authenticator {
                 let encoded = view.form_value("policy").ok_or(AuthError::AuthorizationHeaderMalformed)?;
                 // Refuse invalid encoding first; JSON and conditions belong to the authenticated
                 // form resolution, with its actual filename, rather than this signature check.
-                match SigV2PostPolicy::verify_encoded(encoded, PostPolicyLimits::default(), &key, sealed.presented()) {
+                match SigV2PostPolicy::verify_encoded(
+                    encoded,
+                    request.post_policy_limits.unwrap_or_default(),
+                    &key,
+                    sealed.presented(),
+                ) {
                     Ok(proof) => Some(proof),
                     Err(PostPolicyError::SignatureMismatch) => None,
                     Err(_) => return Err(AuthError::InvalidPostPolicyEncoding),

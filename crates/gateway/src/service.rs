@@ -747,7 +747,6 @@ impl S3Service {
             Err(()) => return outcome.refuse_for_load(),
         };
         let config = config.governed(lease);
-
         // POST Object's credentials live in its bounded prelude. Ordinary bodies remain sealed,
         // including a body the RustFS authenticator may bound and hash for an STS-scoped signature.
         let sealed = SealedBody::seal(pending, declared_length);
@@ -771,16 +770,15 @@ impl S3Service {
         } else {
             RoutedBody::Ordinary(sealed)
         };
-        let form_fields = match &routed_body {
-            RoutedBody::PostObject(prelude) => Some(prelude.form_fields()),
-            RoutedBody::Ordinary(_) => None,
+        let (form_fields, post_policy_limits) = match &routed_body {
+            RoutedBody::PostObject(prelude) => (Some(prelude.form_fields()), Some(prelude.policy_limits())),
+            RoutedBody::Ordinary(_) => (None, None),
         };
         let view = match form_fields.as_deref() {
             Some(fields) => head_view.with_form_fields(fields),
             None => head_view,
         };
         let presence = detect_credentials(&view);
-
         // Legacy RustFS's answers to a header signature or a presigned URL it refuses before its
         // credential lookup, in its order, when the assembly answers with them (rustfs/gateway#1130).
         let signed_head = crate::builder::view_policy::header_signatures::SignedHead {
@@ -859,6 +857,7 @@ impl S3Service {
                         &payload,
                         declared_length,
                     )
+                    .with_post_policy_limits(post_policy_limits)
                     // Offered before the verdict and read long after it. An `aws-chunked` body's chunk
                     // chain is verified with the same key and seed the request signature was, and
                     // neither survives `Verdict` — see `crate::ext::ChunkVerification`.
@@ -883,7 +882,8 @@ impl S3Service {
             // `None` and the body read at the bottom is a plain one.
             Ok(Admission::SealedSigV2(sealed)) => {
                 let question =
-                    SigV2Authentication::new(&sealed, wire.method(), wire.raw_path().as_str(), vhost_bucket.as_deref());
+                    SigV2Authentication::new(&sealed, wire.method(), wire.raw_path().as_str(), vhost_bucket.as_deref())
+                        .with_post_policy_limits(post_policy_limits);
                 match self.inner.authenticator.authenticate_sigv2(&question).await {
                     Ok(authentication) => (authentication, None),
                     Err(_) => {

@@ -577,6 +577,12 @@ impl FormReader {
         let Some(raw) = self.buffer.get(..end) else {
             return Err(FormReject::MalformedPart);
         };
+        if let Some(together) = self.limits.max_fields_bytes() {
+            let held = self.fields.iter().map(|field| field.value().len() as u64).sum::<u64>();
+            if held.saturating_add(raw.len() as u64) > together {
+                return Err(FormReject::FieldsTooLarge);
+            }
+        }
         // Under both grammars. Legacy RustFS stores a value holding CR, LF or another control
         // byte as sent; the RustFS profile fails closed rather than store a header-injection
         // primitive (an open item on rustfs/backlog#1677).

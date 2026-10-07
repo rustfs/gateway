@@ -193,6 +193,7 @@ impl GatewaySeam {
             .answer_presigned_urls_as_legacy_rustfs()
             .answer_checksum_failures_with_bad_digest()
             .ignore_unknown_checksum_algorithms()
+            .read_checksums_as_legacy_rustfs()
             .accept_mismatched_payload_digests_without_a_body()
             .leave_bodies_of_bodyless_operations_unread()
             .refuse_unsized_buffered_bodies_as_legacy_rustfs()

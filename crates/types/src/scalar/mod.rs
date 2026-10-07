@@ -35,6 +35,7 @@
 mod addressing;
 mod base64;
 mod checksum;
+mod checksum_legacy;
 mod checksummer;
 mod error_code;
 mod etag;
@@ -56,6 +57,7 @@ pub use self::checksum::{
     ChecksumAlgorithm, ChecksumDigest, ChecksumError, ChecksumSpec, ChecksumType, ContentMd5, Md5Digest,
     names_unknown_checksum_algorithm, parse_request_checksum,
 };
+pub use self::checksum_legacy::legacy_rustfs_request_checksum;
 pub use self::checksummer::Checksummer;
 pub use self::error_code::ErrorCode;
 pub use self::etag::{ETag, EtagRender};

@@ -239,7 +239,12 @@ pub(crate) fn resolve_in(
     } else {
         EmptyIntegrityHeaders::Read
     };
-    let claims = BodyIntegrity::resolve_reading(headers, checksum_subject(method, operation), unknown, empty).map_err(refuse)?;
+    let subject = checksum_subject(method, operation);
+    let claims = match view.legacy_rustfs_checksum_reading() {
+        Some(reads_algorithm_header) => BodyIntegrity::resolve_as_legacy_rustfs(headers, subject, empty, reads_algorithm_header),
+        None => BodyIntegrity::resolve_reading(headers, subject, unknown, empty),
+    }
+    .map_err(refuse)?;
     Ok(Integrity { claims, codes })
 }
 

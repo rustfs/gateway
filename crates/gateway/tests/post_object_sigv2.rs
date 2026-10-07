@@ -31,6 +31,9 @@ use rustfs_gateway_sig::{SecurityFloor, SessionBinding, SigV2Signer, codec::enco
 
 use crate::support;
 
+#[path = "post_object_sigv2/policy_bytes.rs"]
+mod policy_bytes;
+
 const POLICY: &[u8; 127] = br#"{"expiration":"2026-01-02T04:04:05Z","conditions":[{"bucket":"example-bucket"},{"key":"upload"},["content-length-range",1,16]]}"#;
 const BOUNDARY: &str = "sigv2-browser-form";
 
@@ -76,6 +79,27 @@ async fn post_with_credentials(
     credentials: Credentials,
     legacy_forms: bool,
 ) -> (StatusCode, String, Option<(String, Vec<u8>)>) {
+    post_at_uri(
+        opt_in,
+        fields,
+        file,
+        credentials,
+        legacy_forms,
+        "http://host.invalid/example-bucket",
+        false,
+    )
+    .await
+}
+
+async fn post_at_uri(
+    opt_in: bool,
+    fields: &[(&str, &str)],
+    file: &str,
+    credentials: Credentials,
+    legacy_forms: bool,
+    uri: &str,
+    legacy_routing: bool,
+) -> (StatusCode, String, Option<(String, Vec<u8>)>) {
     let backend = Arc::new(Backend::default());
     let floor = if opt_in {
         SecurityFloor::new()
@@ -97,6 +121,11 @@ async fn post_with_credentials(
     } else {
         builder
     };
+    let builder = if legacy_routing {
+        builder.select_operations_as_legacy_rustfs()
+    } else {
+        builder
+    };
     let service = builder.build().expect("complete service");
     let mut body = String::new();
     for (name, value) in fields {
@@ -107,13 +136,17 @@ async fn post_with_credentials(
     body.push_str(&format!("--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"upload\"\r\nContent-Type: application/octet-stream\r\n\r\n{file}\r\n--{BOUNDARY}--\r\n"));
     let request = Request::builder()
         .method("POST")
-        .uri("http://host.invalid/example-bucket")
+        .uri(uri)
         .header("host", "host.invalid")
         .header("content-type", format!("multipart/form-data; boundary={BOUNDARY}"))
         .header("content-length", body.len())
         .body(Bytes::from(body))
         .expect("valid request");
-    let (status, response) = support::exchange(&service, request).await;
+    // Large policy fixtures arrive in ordinary frames under the unchanged streaming window.
+    let response = service.call(request.map(policy_bytes::PolicyFrames)).await;
+    let response = rustfs_gateway::collect(response).await.expect("in-memory response");
+    let status = response.status();
+    let response = String::from_utf8(response.body().to_vec()).expect("UTF-8 response");
     let stored = backend.stored.lock().expect("observation lock").clone();
     (status, response, stored)
 }

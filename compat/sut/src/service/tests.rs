@@ -751,6 +751,13 @@ mod legacy_heads_tests;
 /// What a browser form's `PutObject` members store, as legacy RustFS stores them (rustfs/gateway#1129).
 mod post_object_field_tests;
 
+/// A browser form read under legacy RustFS's ceilings (rustfs/gateway#1173).
+mod post_form_ceiling_tests;
+
+/// A browser form's file and request head, stored as legacy RustFS stores them or kept out by the
+/// #1167 ruling (rustfs/gateway#1167).
+mod post_form_file_tests;
+
 /// `If-Match` on a delete, judged as legacy RustFS judges it (rustfs/gateway#1191).
 mod conditional_delete_tests;
 
@@ -775,6 +782,8 @@ mod denial_sentence_tests;
 mod expiration_header_tests;
 /// The header-conditional extra permissions, enforced as legacy RustFS enforces them.
 mod extra_permission_tests;
+/// Request checksum claims read as legacy RustFS reads them (rustfs/gateway#1349).
+mod legacy_checksum_claim_tests;
 /// A customer-provided key over cleartext, gated before routing as legacy RustFS gates it
 /// (rustfs/gateway#1349).
 mod sse_transport_gate_tests;
