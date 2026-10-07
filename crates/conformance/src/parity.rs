@@ -101,8 +101,8 @@ pub(crate) struct SelectedComparison {
     pub case_count: usize,
     /// Results that match exactly on the shared capability surface.
     pub identical_count: usize,
-    /// Matching failures retained from the strict comparator.
-    pub common_failures: usize,
+    /// Cases that failed identically on both transports, with both results.
+    pub common_failures: Vec<Difference>,
     /// Unexpected differences, including capability-contract violations.
     pub differences: Vec<Difference>,
     /// Measured Hyper passes paired with the expected self-held capability refusal.
@@ -127,7 +127,7 @@ pub(crate) fn compare_selected_json(
     let mut comparison = SelectedComparison {
         case_count: selected.len(),
         identical_count: 0,
-        common_failures: 0,
+        common_failures: Vec::new(),
         differences: Vec::new(),
         capability_differences: Vec::new(),
     };
@@ -143,7 +143,7 @@ pub(crate) fn compare_selected_json(
             ExpectedCapability::Shared if hyper_result == conn_result => {
                 comparison.identical_count += 1;
                 if hyper_result.is_some_and(|result| result.verdict == "failed") {
-                    comparison.common_failures += 1;
+                    comparison.common_failures.push(difference());
                 }
             }
             ExpectedCapability::HyperScriptedH2

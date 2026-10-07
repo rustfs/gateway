@@ -60,7 +60,7 @@ fn selected_h2_pass_and_refusal_are_retained_as_capability_difference() {
         .expect("complete selected reports");
     assert_eq!(comparison.case_count, 1);
     assert_eq!(comparison.identical_count, 0);
-    assert_eq!(comparison.common_failures, 0);
+    assert!(comparison.common_failures.is_empty());
     assert!(comparison.differences.is_empty());
     assert_eq!(comparison.capability_differences.len(), 1);
     let difference = &comparison.capability_differences[0];
@@ -87,7 +87,7 @@ fn mixed_census_counts_shared_results_separately() {
     .expect("mixed complete reports");
     assert_eq!(comparison.case_count, 2);
     assert_eq!(comparison.identical_count, 1);
-    assert_eq!(comparison.common_failures, 0);
+    assert!(comparison.common_failures.is_empty());
     assert_eq!(comparison.capability_differences.len(), 1);
     assert!(comparison.differences.is_empty());
 }
@@ -131,7 +131,9 @@ fn shared_common_failures_remain_visible_and_are_not_capability_differences() {
         .expect("complete shared failures");
     assert_eq!(result.case_count, 1);
     assert_eq!(result.identical_count, 1);
-    assert_eq!(result.common_failures, 1);
+    assert_eq!(result.common_failures.len(), 1);
+    assert_eq!(result.common_failures[0].id, id);
+    assert_eq!(result.common_failures[0].hyper, result.common_failures[0].conn);
     assert!(result.capability_differences.is_empty());
     assert!(result.differences.is_empty());
 }

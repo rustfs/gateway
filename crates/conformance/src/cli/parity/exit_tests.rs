@@ -23,7 +23,7 @@ fn h2_only() -> SelectedComparison {
     SelectedComparison {
         case_count: 1,
         identical_count: 0,
-        common_failures: 0,
+        common_failures: Vec::new(),
         differences: Vec::new(),
         capability_differences: vec![Difference {
             id: "c-h2-0001".to_owned(),
@@ -73,7 +73,7 @@ fn mixed_or_empty_selection_does_not_explain_an_all_unsupported_exit() {
     let empty = SelectedComparison {
         case_count: 0,
         identical_count: 0,
-        common_failures: 0,
+        common_failures: Vec::new(),
         differences: Vec::new(),
         capability_differences: Vec::new(),
     };
@@ -86,7 +86,11 @@ fn incomplete_or_failed_comparison_cannot_authorize_exit_three() {
     missing.case_count = 2;
     assert!(validate_child_exit(Some(3), Transport::Conn, &missing).is_err());
     let mut failed = h2_only();
-    failed.common_failures = 1;
+    failed.common_failures.push(Difference {
+        id: "c-object-0001".to_owned(),
+        hyper: None,
+        conn: None,
+    });
     assert!(validate_child_exit(Some(3), Transport::Conn, &failed).is_err());
     let mut differing = h2_only();
     differing.differences.push(Difference {

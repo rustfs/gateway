@@ -283,8 +283,10 @@ cargo run -p rustfs-gateway-conformance --bin rustfs-gateway-conformance -- \
 
 The parent independently loads and selects the corpus before comparing its two child reports.
 Both reports must contain every selected case exactly once, with no extra cases. Shared capabilities
-require identical results. Matching failures remain visible as common failures; parity alone does
-not establish conformance success.
+require identical results. A case that fails identically on both drivers is listed under
+`failed identically on both production drivers` and exits `1`: two matching wrong answers are
+parity, not success. This is the only gate the socket-only cases (`applies_to.http_versions`
+without `http/1.1` in-process coverage) pass through, so it must be able to fail on them.
 
 An applicable scripted HTTP/2 case has a separate capability contract: Hyper must actually pass,
 and the self-held driver must report its exact HTTP/1.1-only refusal. The output retains both

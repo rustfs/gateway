@@ -14,9 +14,10 @@
 
 //! Process isolation and report comparison for the production transport parity command.
 //!
-//! Responsible for: running both production drivers in isolated child processes and comparing
-//! their serialized reports. NOT responsible for: argument parsing or case assertions. Upstream:
-//! `super`. Downstream: `crate::parity`.
+//! Responsible for: running both production drivers in isolated child processes, comparing their
+//! serialized reports, and turning a failure shared by both drivers into a regression exit: two
+//! identical wrong answers are parity, not success (rustfs/gateway#1378). NOT responsible for:
+//! argument parsing or case assertions. Upstream: `super`. Downstream: `crate::parity`.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command as ProcessCommand, ExitCode};
@@ -104,7 +105,7 @@ fn execute_transport_diff_with_executable(options: &Options, root: PathBuf, exec
         "transport parity: {} selected case(s); {} identical; {} common failure(s); {} capability difference(s)",
         comparison.case_count,
         comparison.identical_count,
-        comparison.common_failures,
+        comparison.common_failures.len(),
         comparison.capability_differences.len(),
     );
     for difference in &comparison.capability_differences {
@@ -112,14 +113,27 @@ fn execute_transport_diff_with_executable(options: &Options, root: PathBuf, exec
         println!("    hyper: {:?}", difference.hyper);
         println!("    conn:  {:?}", difference.conn);
     }
-    if comparison.differences.is_empty() {
+    if comparison.differences.is_empty() && comparison.common_failures.is_empty() {
         return ExitCode::from(exit::SUCCESS);
     }
-    eprintln!("transport parity: {} case result(s) differ", comparison.differences.len());
-    for difference in comparison.differences {
-        eprintln!("  {}", difference.id);
-        eprintln!("    hyper: {:?}", difference.hyper);
-        eprintln!("    conn:  {:?}", difference.conn);
+    if !comparison.common_failures.is_empty() {
+        eprintln!(
+            "transport parity: {} case(s) failed identically on both production drivers",
+            comparison.common_failures.len()
+        );
+        for failure in &comparison.common_failures {
+            eprintln!("  {}", failure.id);
+            eprintln!("    hyper: {:?}", failure.hyper);
+            eprintln!("    conn:  {:?}", failure.conn);
+        }
+    }
+    if !comparison.differences.is_empty() {
+        eprintln!("transport parity: {} case result(s) differ", comparison.differences.len());
+        for difference in &comparison.differences {
+            eprintln!("  {}", difference.id);
+            eprintln!("    hyper: {:?}", difference.hyper);
+            eprintln!("    conn:  {:?}", difference.conn);
+        }
     }
     ExitCode::from(exit::REGRESSION)
 }
@@ -210,7 +224,7 @@ fn validate_child_exit(
             && matches!(transport, Transport::Conn)
             && comparison.case_count > 0
             && comparison.identical_count == 0
-            && comparison.common_failures == 0
+            && comparison.common_failures.is_empty()
             && comparison.differences.is_empty()
             && comparison.capability_differences.len() == comparison.case_count)
     {
