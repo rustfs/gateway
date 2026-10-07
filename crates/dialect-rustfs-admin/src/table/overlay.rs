@@ -341,4 +341,5 @@ pub(crate) static OVERLAY_ROWS: &[OverlayRow] = &[
     ops::put_v4_plugins_instances_by_id::OVERLAY_ROW,
     ops::admin_v4_fallback::OVERLAY_ROW,
     ops::admin_fallback::OVERLAY_ROW,
+    ops::sts_form_post::OVERLAY_ROW,
 ];

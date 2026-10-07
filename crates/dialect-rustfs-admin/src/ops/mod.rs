@@ -336,3 +336,4 @@ pub mod put_v3_target_by_target_type_by_target_name;
 pub mod put_v3_tier;
 pub mod put_v3_update_group_members;
 pub mod put_v4_plugins_instances_by_id;
+pub mod sts_form_post;

@@ -27,10 +27,11 @@
 //!
 //! # Why a claimed or service-level request has no bucket
 //!
-//! Inside a claim the path is not S3 addressing, and a `ResourceShape::Service` operation names no
-//! resource a path could supply. Addressing either as `TargetKind::Service` is what keeps a
-//! path-style `/rustfs/admin/…` from reaching the governor, both authorizer stages, the audit
-//! event and the handler context as bucket `rustfs`. The raw path is untouched, so the signature
+//! Inside a claim the path is not S3 addressing, a form claim (ADR-0041) addresses no bucket
+//! whatever the host names, and a `ResourceShape::Service` operation names no resource a path
+//! could supply. Addressing each as `TargetKind::Service` is what keeps a path-style
+//! `/rustfs/admin/…` from reaching the governor, both authorizer stages, the audit event and the
+//! handler context as bucket `rustfs`. The raw path is untouched, so the signature
 //! and the context still read it exactly as it arrived.
 //!
 //! # Why a bound bucket is read from the raw segment
@@ -53,7 +54,8 @@ use crate::dispatch::target_of;
 pub(crate) struct RoutedFacts {
     /// No bucket and no key reach any later stage.
     pub(crate) service_level: bool,
-    /// A claimed row answered: its path is not S3 addressing, so no bucket CORS applies.
+    /// A claimed row or a form claim answered: its path is not S3 addressing, so no bucket CORS
+    /// applies, and the profile's claimed-route body ceiling does.
     pub(crate) claimed: bool,
     /// The target every later stage addresses: `Service` for a service-level request, `Bucket`
     /// for a claimed row that binds its bucket.
@@ -122,8 +124,9 @@ impl RoutedFacts {
             })?),
             None => None,
         };
+        let claimed = dispatched.claimed.is_some() || dispatched.form.is_some();
         let service_level = bound_bucket.is_none()
-            && (dispatched.claimed.is_some()
+            && (claimed
                 || dispatched
                     .spec
                     .auth
@@ -137,7 +140,7 @@ impl RoutedFacts {
         };
         Ok(Self {
             service_level,
-            claimed: dispatched.claimed.is_some(),
+            claimed,
             target,
             bound_bucket,
             hands_caller_secret: dispatched.spec.receives_caller_secret(),

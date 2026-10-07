@@ -19,9 +19,10 @@
 //! The dialect's generated table: the overlay rows, the route records, the pending groups, and the
 //! one list of every operation.
 //!
-//! Responsible for: [`RUSTFS_SOURCE_COMMIT`], [`PENDING`] and [`STAYING`] here, and the three per-operation lists
-//! in their own files (`overlay`, `routes`, `fold`), each in inventory order. NOT responsible for: the
-//! claims or the assembly (`crate::dialect`), or any operation's declaration (`crate::ops`).
+//! Responsible for: [`RUSTFS_SOURCE_COMMIT`], [`PENDING`], [`STAYING`] and [`FORM_ROUTES`] here, and the three
+//! per-operation lists in their own files (`overlay`, `routes`, `fold`), each in inventory order.
+//! NOT responsible for: the claims or the assembly (`crate::dialect`), or any operation's
+//! declaration (`crate::ops`).
 //! Upstream: the generator and `crate::ops`. Downstream: `crate::dialect`, the tests, and a deployment
 //! that walks every operation.
 
@@ -33,7 +34,8 @@ pub use fold::fold_every_operation;
 pub(crate) use overlay::OVERLAY_ROWS;
 pub use routes::ROUTES;
 
-use crate::record::{PendingGroup, StayingRoute};
+use crate::ops;
+use crate::record::{FormRouteRecord, PendingGroup, StayingRoute};
 
 /// The RustFS commit the inventory was recorded from.
 pub const RUSTFS_SOURCE_COMMIT: &str = "5e1bd498ce1ca33bcb0ca50aeee861e69e6c8744";
@@ -75,14 +77,11 @@ pub static STAYING: &[StayingRoute] = &[
     },
     StayingRoute {
         method: "POST",
-        path: "/",
-        group: "sts",
-        reason: "STS: the action is in the form body and authentication is mixed; it needs its own ADR and is inside no claim (ADR-0026 (g)).",
-    },
-    StayingRoute {
-        method: "POST",
         path: "/rustfs/admin/v3/object-zip-downloads",
         group: "object_zip_download",
         reason: "It authorises S3 resources named in its body and only mints the token the download route consumes, which stays with RustFS (ADR-0025 (d), ADR-0026 (g), ADR-0032 (b)).",
     },
 ];
+
+/// Every route of a migrated group served behind a form claim rather than a path claim (ADR-0041).
+pub static FORM_ROUTES: &[FormRouteRecord] = &[ops::sts_form_post::RECORD];

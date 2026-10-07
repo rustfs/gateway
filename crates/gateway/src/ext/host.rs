@@ -279,6 +279,22 @@ pub trait HostResolver: Send + Sync + 'static {
     fn refusal(&self, _query: &HostQuery<'_>) -> Option<HostRefusal> {
         None
     }
+
+    /// The bucket a SigV2 string-to-sign names for this host, given the request's one
+    /// [`HostResolver::resolve`] answer, taken before the legacy split re-reads a claimed
+    /// virtual-hosted request path-style (`crate::legacy_addressing`). The default is the bucket
+    /// `resolved` holds. [`crate::LegacyRustfsVirtualHosts`] reads its host again and names the
+    /// label even when its bucket rules refuse it, as legacy RustFS signs it (rustfs/gateway#1232).
+    ///
+    /// Legacy-compat (rustfs/backlog#2684): under the legacy split a claimed request on a bucket's
+    /// host signs `/{bucket}/{claimed path}`, the resource a path-style SigV2 request for the key
+    /// `{claimed path}` in that bucket signs, so a captured signature of one replays, within its
+    /// `Date` window and with the same method and headers, as the other. Kept because legacy RustFS
+    /// reads the host before any route claims the request, so a SigV2 client signs that resource;
+    /// the intended future behaviour is the classified bucket, none for a claimed request.
+    fn signing_bucket(&self, _query: &HostQuery<'_>, resolved: &ResolvedHost) -> Option<String> {
+        resolved.bucket().map(|bucket| bucket.as_str().to_owned())
+    }
 }
 
 impl<T: HostResolver + ?Sized> HostResolver for std::sync::Arc<T> {
@@ -288,6 +304,10 @@ impl<T: HostResolver + ?Sized> HostResolver for std::sync::Arc<T> {
 
     fn refusal(&self, query: &HostQuery<'_>) -> Option<HostRefusal> {
         (**self).refusal(query)
+    }
+
+    fn signing_bucket(&self, query: &HostQuery<'_>, resolved: &ResolvedHost) -> Option<String> {
+        (**self).signing_bucket(query, resolved)
     }
 }
 
@@ -319,6 +339,22 @@ impl HostResolver for PathStyleOnly {
         // preconditions are the only thing left to check.
         ResolvedHost::standard(target_of_path(query.path)).with_diagnostic(vhost_hint(query))
     }
+}
+
+/// The request's one [`HostResolver::resolve`] answer, and the bucket label a SigV2 signature names
+/// from it ([`HostResolver::signing_bucket`]), read before any claim reads the path.
+pub(crate) fn resolve_host<B>(
+    resolver: &dyn HostResolver,
+    wire: &rustfs_gateway_http::WireRequest<B>,
+) -> (ResolvedHost, Option<String>) {
+    let query = HostQuery {
+        host: wire.host(),
+        path: wire.raw_path().as_str(),
+        method: wire.method(),
+    };
+    let resolved = resolver.resolve(&query);
+    let signing_bucket = resolver.signing_bucket(&query, &resolved);
+    (resolved, signing_bucket)
 }
 
 /// Whether an unmatched host and a path with no bucket in it look like a virtual-hosted request
@@ -425,6 +461,34 @@ mod tests {
     #[test]
     fn a_deep_path_is_still_one_object() {
         assert_eq!(resolve("/bucket/a/b/c"), TargetKind::Object);
+    }
+
+    /// Positive and negative — the default `signing_bucket` is the bucket `resolve` read from the
+    /// host, so a virtual-hosted SigV2 request signs `/{bucket}/{key}`; a path-style request and a
+    /// resolver that reads no host name none.
+    #[test]
+    fn the_default_signing_bucket_is_the_resolved_bucket() {
+        let virtual_hosts = crate::VirtualHostStyle::new(["example.com"]).expect("a valid domain");
+        for (resolver, host, path, expected) in [
+            (&virtual_hosts as &dyn HostResolver, "photos.example.com", "/key", Some("photos")),
+            (&virtual_hosts, "example.com", "/photos/key", None),
+            (&PathStyleOnly, "photos.example.com", "/key", None),
+        ] {
+            let request = http::Request::builder()
+                .method(Method::GET)
+                .uri(path)
+                .header("host", host)
+                .body(())
+                .expect("a valid request");
+            let host = rustfs_gateway_http::effective_host(&request).expect("a valid host");
+            let query = HostQuery {
+                host: &host,
+                path,
+                method: &Method::GET,
+            };
+            let resolved = resolver.resolve(&query);
+            assert_eq!(resolver.signing_bucket(&query, &resolved).as_deref(), expected, "{path}");
+        }
     }
 
     /// a-asm-0005. Negative — the default ignores the host, which is the documented gap rather than a bug to

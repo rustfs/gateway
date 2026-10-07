@@ -50,6 +50,7 @@ change, `debug` and `trace` for diagnostics.
 | `gateway_security_posture` | `info` | `posture` | message: the `SECURITY_POSTURE` line | once per assembly (`ServiceBuilder::build`) |
 | `gateway_dialect_posture` | `info` | `posture` | message: the `DIALECT_POSTURE` line (ADR-0024) | once per assembly |
 | `gateway_naming_posture` | `info` | `posture` | message: the `NAMING_POSTURE` line | once per assembly |
+| `gateway_form_claim_posture` | `info` | `posture` | message: the `FORM_CLAIM_POSTURE` line (ADR-0041) | once per assembly, only when a dialect installed a form claim |
 | `gateway_presigned_expiry_posture` | `info` | `posture` | message: the `PRESIGNED_EXPIRY_POSTURE` line | once per assembly, only when a non-default presigned-lifetime rule is on |
 | `gateway_dangerous_assembly` | `warn` | `assembly` | `reason`: `custom_wall_clock`, `allow_all_authorizer`, `allow_all_authorizer_constructed` or `replaced_aws_signature_verifier`; message: the sentence the start-up log always carried | once per assembly, or per construction of the allow-all authorizer |
 | `gateway_report_panicked` | `error` | `report` | `result = "contained"`, `callback`: `request observer` or `authorization audit sink`, `suppressed`; message | when a deployment's report callback panics, at most once per five seconds per callback, `suppressed` counting the panics since the last; the answer went out unchanged |

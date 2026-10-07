@@ -72,4 +72,5 @@ pub(crate) mod s3s_0_17_0 {
     mod put_object;
     mod request_documents;
     mod response_order;
+    mod sts_parity;
 }

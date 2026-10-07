@@ -47,8 +47,8 @@
 use crate::error::PreAuthError;
 use crate::registry::{OperationSpec, Registry, check_required};
 use crate::route::{
-    ClaimLookup, ClaimedEntry, ClaimedTable, CompileError, CompiledRouter, LegacySelection, RouteBuildError, RouteEntry,
-    RouteRequestParts, RouteTable, RowError, SHADOWING, Selection, generated_entries, legacy_rustfs_selection,
+    ClaimLookup, ClaimedEntry, ClaimedTable, CompileError, CompiledRouter, InstalledFormClaim, LegacySelection, RouteBuildError,
+    RouteEntry, RouteRequestParts, RouteTable, RowError, SHADOWING, Selection, generated_entries, legacy_rustfs_selection,
 };
 
 /// The message a request that names no operation receives.
@@ -85,6 +85,9 @@ pub struct Dispatch<'a> {
     /// The claimed row that accepted the request, when a dialect's path-prefix claim covered it;
     /// `None` for an S3-table row. Its template is what path parameters are extracted with.
     pub claimed: Option<&'a ClaimedEntry>,
+    /// The form claim that covered the request, when one did (ADR-0041); `None` otherwise. Its
+    /// operation has no path parameters and is service-level.
+    pub form: Option<&'a InstalledFormClaim>,
 }
 
 /// Why a router could not be built.
@@ -218,16 +221,17 @@ impl Router {
         &self.registry
     }
 
-    /// Which operation this request names: the claimed row when a path-prefix claim covers the
-    /// request, and otherwise the compiled S3 table's answer. A request inside a claim that no
-    /// claimed row accepts names nothing; it is never handed to the S3 table.
+    /// Which operation this request names: a form claim's operation when one covers the request,
+    /// the claimed row when a path-prefix claim covers it, and otherwise the compiled S3 table's
+    /// answer. A request inside a claim that no claimed row accepts names nothing; it is never
+    /// handed to the S3 table.
     ///
     /// Not `async`, holds nothing, allocates nothing.
     #[must_use]
     pub fn resolve(&self, request: &RouteRequestParts<'_>) -> Option<&RouteEntry> {
         match self.claims.lookup(request) {
             ClaimLookup::Outside => self.select(request).ok().flatten(),
-            ClaimLookup::Inside { entry, .. } => entry.map(ClaimedEntry::entry),
+            inside @ (ClaimLookup::Inside { .. } | ClaimLookup::Form { .. }) => inside.route_entry(),
         }
     }
 
@@ -261,7 +265,7 @@ impl Router {
     pub fn resolve_readable(&self, request: &RouteRequestParts<'_>) -> Option<&RouteEntry> {
         match self.claims.lookup(request) {
             ClaimLookup::Outside => self.table.resolve(request),
-            ClaimLookup::Inside { entry, .. } => entry.map(ClaimedEntry::entry),
+            inside @ (ClaimLookup::Inside { .. } | ClaimLookup::Form { .. }) => inside.route_entry(),
         }
     }
 
@@ -274,24 +278,30 @@ impl Router {
     /// `501` with [`NOT_REGISTERED_MESSAGE`] when the operation is not handled here, and otherwise
     /// the operation's own code for the first missing required parameter.
     pub fn dispatch(&self, request: &RouteRequestParts<'_>) -> Result<Dispatch<'_>, PreAuthError> {
-        let (entry, claimed) = match self.claims.lookup(request) {
+        let (entry, claimed, form) = match self.claims.lookup(request) {
             ClaimLookup::Outside => {
                 let Some(entry) = self.select(request)? else {
                     return Err(PreAuthError::not_implemented(NO_ROUTE_MESSAGE));
                 };
-                (entry, None)
+                (entry, None, None)
             }
             ClaimLookup::Inside {
                 entry: Some(claimed), ..
-            } => (claimed.entry(), Some(claimed)),
+            } => (claimed.entry(), Some(claimed), None),
             ClaimLookup::Inside { entry: None, .. } => {
                 return Err(PreAuthError::not_implemented(NO_CLAIMED_ROUTE_MESSAGE));
             }
+            ClaimLookup::Form { claim } => (claim.entry(), None, Some(claim)),
         };
         let Some(spec) = self.registry.get(entry.op_name) else {
             return Err(PreAuthError::not_implemented(NOT_REGISTERED_MESSAGE).about(entry.op_name));
         };
         check_required(spec, request)?;
-        Ok(Dispatch { entry, spec, claimed })
+        Ok(Dispatch {
+            entry,
+            spec,
+            claimed,
+            form,
+        })
     }
 }

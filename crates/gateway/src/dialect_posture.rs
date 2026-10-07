@@ -12,11 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The `DIALECT_POSTURE` start-up line (ADR-0024).
+//! The `DIALECT_POSTURE` start-up line (ADR-0024), and the `FORM_CLAIM_POSTURE` line (ADR-0041).
 //!
 //! Responsible for: naming every path prefix a dialect claimed away from S3 routing, every
 //! operation whose handler may be handed the caller's secret, and whether the assembly widened
-//! that to every operation, as one tagged start-up line.
+//! that to every operation, as one tagged start-up line; and, on a line of its own so that line
+//! keeps its shape, every form claim a dialect installed.
 //! NOT responsible for: the `SECURITY_POSTURE` line, whose exact shape the dry-run and
 //! `check_sig_case_coverage.sh` pin in `crate::posture` by once-only anchors this module keeps
 //! unambiguous; installing claims, or deciding which handler receives the secret.
@@ -25,7 +26,7 @@
 
 use std::collections::BTreeSet;
 
-use rustfs_gateway_core::{InstalledClaim, OperationSpec, Router};
+use rustfs_gateway_core::{InstalledClaim, InstalledFormClaim, OperationSpec, Router};
 
 use crate::logging;
 use crate::posture::format_names;
@@ -53,7 +54,22 @@ pub(crate) fn render_dialect_posture<'a>(
     )
 }
 
-/// Writes [`render_dialect_posture`] for an assembled router to the start-up log.
+/// The form-claim half of the start-up report (ADR-0041): every form `POST` a dialect took away
+/// from S3 routing on every host, as `POST path@dialect`.
+///
+/// A line of its own, as `NAMING_POSTURE` is, so that `DIALECT_POSTURE` keeps its shape.
+pub(crate) fn render_form_claim_posture<'a>(forms: impl Iterator<Item = &'a InstalledFormClaim>) -> String {
+    let forms: BTreeSet<String> = forms
+        .map(|installed| {
+            let claim = installed.claim();
+            format!("POST {}@{}", claim.path, installed.dialect())
+        })
+        .collect();
+    format!("FORM_CLAIM_POSTURE claimed_forms=[{}]", forms.into_iter().collect::<Vec<_>>().join(","))
+}
+
+/// Writes [`render_dialect_posture`] for an assembled router to the start-up log, and
+/// [`render_form_claim_posture`] when a dialect installed a form claim.
 pub(crate) fn log_dialect_posture(router: &Router, every_operation: bool) {
     let registry = router.registry();
     let caller_secret_ops = registry
@@ -67,13 +83,25 @@ pub(crate) fn log_dialect_posture(router: &Router, every_operation: bool) {
         "{}",
         render_dialect_posture(router.claims().claims().iter(), caller_secret_ops, every_operation)
     );
+    let forms = router.claims().forms();
+    if !forms.is_empty() {
+        tracing::info!(
+            target: logging::TARGET,
+            event = logging::EVENT_FORM_CLAIM_POSTURE,
+            component = logging::COMPONENT,
+            subsystem = logging::SUBSYSTEM_POSTURE,
+            "{}",
+            render_form_claim_posture(forms.iter())
+        );
+    }
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used)]
 mod tests {
-    use rustfs_gateway_core::{InstalledClaim, PathClaim};
+    use rustfs_gateway_core::{HandlerDeadlineClass, InstalledClaim, OperationSpec, PathClaim};
 
-    use super::render_dialect_posture;
+    use super::{render_dialect_posture, render_form_claim_posture};
 
     const EVIDENCE: &[&str] = &["https://github.com/rustfs/backlog/issues/1744"];
 
@@ -97,6 +125,89 @@ mod tests {
             report,
             "DIALECT_POSTURE claimed_prefixes=[/minio/admin@rustfs,/rustfs/admin@rustfs] caller_secret_ops=[rustfs:AddServiceAccount] caller_secret_scope=opted-in"
         );
+    }
+
+    /// Positive — every form claim is named with its path, media type and dialect, sorted; with none
+    /// the list is empty.
+    #[test]
+    fn the_form_claim_report_names_every_form_claim() {
+        use rustfs_gateway_core::FormClaim;
+        use rustfs_gateway_core::dialect::{Dialect, DialectOverlay, FormRoute, OverlayRow};
+
+        assert_eq!(render_form_claim_posture(core::iter::empty()), "FORM_CLAIM_POSTURE claimed_forms=[]");
+        let router = rustfs_gateway_core::RouterBuilder::new()
+            .dialect(&fixture_form_dialect())
+            .build()
+            .expect("the router builds");
+        assert_eq!(
+            render_form_claim_posture(router.claims().forms().iter()),
+            "FORM_CLAIM_POSTURE claimed_forms=[POST /@acme]"
+        );
+
+        fn fixture_form_dialect() -> Dialect {
+            static CLAIM: FormClaim = FormClaim {
+                path: "/",
+                reason: "fixture",
+                evidence: EVIDENCE,
+            };
+            static OVERLAY: DialectOverlay = DialectOverlay {
+                name: "acme",
+                vendor: "acme",
+                claims: &[],
+                operations: &[OverlayRow {
+                    name: "acme:Token",
+                    precedence: 1,
+                    selector: "FormClaim(POST \"/\")",
+                    action: "acme:IssueToken",
+                    resource: rustfs_gateway_core::ResourceShape::Service,
+                    success_status: 200,
+                    anonymous: false,
+                    evidence: EVIDENCE,
+                }],
+            };
+            Dialect::assemble(&OVERLAY)
+                .declare_form::<Token>(FormRoute {
+                    precedence: 1,
+                    claim: &CLAIM,
+                })
+                .build()
+                .expect("the fixture assembles")
+        }
+    }
+
+    /// The fixture operation behind the form claim.
+    struct Token;
+
+    static TOKEN_SPEC: OperationSpec = OperationSpec::builder("acme:Token", 200, None)
+        .handler_deadline_class(HandlerDeadlineClass::Standard)
+        .required_params(&[])
+        .auth(rustfs_gateway_core::AuthRequirement::new(
+            "acme:IssueToken",
+            rustfs_gateway_core::ResourceShape::Service,
+        ))
+        .build();
+    static TOKEN_FLOOR: rustfs_gateway_sig::OperationFloor =
+        rustfs_gateway_sig::OperationFloor::custom("acme:Token", rustfs_gateway_sig::SigService::Sts);
+
+    impl rustfs_gateway_core::Operation for Token {
+        const NAME: &'static str = "acme:Token";
+        type Input = ();
+        type Output = ();
+        type DerivedResources = rustfs_gateway_core::NoDerived;
+
+        fn derive_resources(_input: &()) -> Result<rustfs_gateway_core::NoDerived, rustfs_gateway_core::DerivedResourceError> {
+            Ok(rustfs_gateway_core::NoDerived)
+        }
+
+        fn seal_derived_input(_input: &mut ()) {}
+
+        fn spec() -> &'static OperationSpec {
+            &TOKEN_SPEC
+        }
+
+        fn floor() -> &'static rustfs_gateway_sig::OperationFloor {
+            &TOKEN_FLOOR
+        }
     }
 
     /// Negative — an assembly with no claim and no opt-in says so, rather than omitting the line.

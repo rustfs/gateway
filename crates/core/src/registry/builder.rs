@@ -50,8 +50,8 @@ use crate::registry::Registry;
 use crate::registry::opset::{MissingHandlers, OperationSet};
 use crate::registry::reject::RegistryError;
 use crate::route::{
-    ClaimedEntry, ClaimedTable, InstalledClaim, Predicate, RouteBuildError, RouteEntry, RouteTable, SHADOWING, Selection,
-    ShadowingDecl, ShadowingDecls, generated_entries,
+    ClaimedEntry, ClaimedTable, InstalledClaim, InstalledFormClaim, Predicate, RouteBuildError, RouteEntry, RouteTable,
+    SHADOWING, Selection, ShadowingDecl, ShadowingDecls, generated_entries,
 };
 
 /// Why a router refused to be built.
@@ -139,6 +139,8 @@ pub struct RouterBuilder {
     /// The declarations between claimed rows. Checked by the claimed table, never by the S3 table:
     /// a claimed row is not in it.
     claimed_shadowing: Vec<&'static [ShadowingDecl]>,
+    /// Every form claim with its operation (ADR-0041).
+    forms: Vec<InstalledFormClaim>,
     errors: Vec<RegistryError>,
     /// How the router chooses among the operations a request names (rustfs/gateway#1127).
     selection: Selection,
@@ -244,6 +246,10 @@ impl RouterBuilder {
                 self.claimed_shadowing.push(operation.shadows());
             }
         }
+        for operation in dialect.form_operations() {
+            self.forms
+                .push(InstalledFormClaim::new(dialect.name(), *operation.claim(), operation.entry().clone()));
+        }
         self
     }
 
@@ -316,8 +322,9 @@ impl RouterBuilder {
         for group in self.claimed_shadowing {
             claimed_shadowing = claimed_shadowing.and(group);
         }
-        let claims =
-            ClaimedTable::build(self.claims, self.claimed_entries, &claimed_shadowing).map_err(RouterBuildError::from)?;
+        let claims = ClaimedTable::build(self.claims, self.claimed_entries, &claimed_shadowing)
+            .and_then(|claims| claims.with_forms(self.forms))
+            .map_err(RouterBuildError::from)?;
         Ok(Router::with_claims(table, claims, self.registry)?.selecting(self.selection))
     }
 }

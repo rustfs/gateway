@@ -16,7 +16,8 @@
 //!
 //! Responsible for: the `rustfs` dialect — its path-prefix claims, its overlay and one claimed
 //! operation per migrated admin route, generated from the recorded route inventory — and the
-//! shapes those operations share, plus the two fixed authenticated fallback handlers.
+//! shapes those operations share, plus the two fixed authenticated fallback handlers, and RustFS's
+//! STS endpoint behind a form claim (ADR-0041).
 //! NOT responsible for: backend handlers (RustFS registers its own), the
 //! routes of registration groups not migrated yet ([`PENDING`]), or validating the inventory
 //! (`rustfs-gateway-goldens` does, and binds every operation here back to its row). Upstream:
@@ -36,5 +37,5 @@ mod table;
 
 pub use admin::{AdminBody, AdminOperation, AdminResponse, OperationFold};
 pub use dialect::{CLAIMS, OVERLAY, rustfs_admin_dialect};
-pub use record::{BodyKind, PendingGroup, RouteRecord, StayingRoute};
-pub use table::{PENDING, ROUTES, RUSTFS_SOURCE_COMMIT, STAYING, fold_every_operation};
+pub use record::{BodyKind, FormRouteRecord, PendingGroup, RouteRecord, StayingRoute};
+pub use table::{FORM_ROUTES, PENDING, ROUTES, RUSTFS_SOURCE_COMMIT, STAYING, fold_every_operation};

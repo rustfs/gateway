@@ -19,7 +19,8 @@
 //!
 //! Responsible for: [`RULINGS`], one per custom-auth route of a migrated group, and the shapes a
 //! ruling is written in: an action rule, an optional subject rule, and the query value that
-//! selects a form; and [`QUERY_BUCKETS`], the routes that name their bucket in the query.
+//! selects a form; [`QUERY_BUCKETS`], the routes that name their bucket in the query; [`STAYS`],
+//! the routes that stay with RustFS; and [`FORMS`], the routes served behind a form claim.
 //! NOT responsible for: matching a ruling or a query bucket to its route, refusing a stale or
 //! missing one, or checking a rule's shape (`super::plan` and `super::Rule::fault`).
 //! Upstream: the ADRs, read against RustFS's handlers at the inventory's commit. Downstream:
@@ -197,11 +198,6 @@ pub(super) const STAYS: &[(&str, &str, &str)] = &[
         "It authorises S3 resources named in its body and only mints the token the download route consumes, which stays with RustFS (ADR-0025 (d), ADR-0026 (g), ADR-0032 (b)).",
     ),
     (
-        "POST",
-        "/",
-        "STS: the action is in the form body and authentication is mixed; it needs its own ADR and is inside no claim (ADR-0026 (g)).",
-    ),
-    (
         "GET",
         "/health",
         "The server's probe layer, ahead of the S3 service; a one-segment path is no claim (ADR-0026 (h)).",
@@ -222,6 +218,11 @@ pub(super) const STAYS: &[(&str, &str, &str)] = &[
         "The server's probe layer, ahead of the S3 service (ADR-0026 (h)).",
     ),
 ];
+
+/// The routes the dialect serves behind a form claim rather than a path claim (ADR-0041):
+/// `(method, path, auth_detail)`, the custom-auth class the inventory must still record, so a changed
+/// row reopens the ruling. Each is one generated operation outside `fold_every_operation`.
+pub(super) const FORMS: &[(&str, &str, &str)] = &[("POST", "/", "StsFormPost")];
 
 /// The rulings for the migrated groups' custom-auth routes, in the inventory's order within each
 /// migrated order.

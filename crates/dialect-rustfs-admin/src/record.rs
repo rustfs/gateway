@@ -14,8 +14,9 @@
 
 //! What each generated operation was generated from, and what is not migrated yet.
 //!
-//! Responsible for: the shapes of [`crate::ROUTES`] and [`crate::PENDING`] — the inventory facts
-//! behind each declared operation, and the registration groups still served by RustFS.
+//! Responsible for: the shapes of [`crate::ROUTES`], [`crate::PENDING`], [`crate::STAYING`] and
+//! [`crate::FORM_ROUTES`] — the inventory facts behind each declared operation, the registration
+//! groups still served by RustFS, the routes that stay with it, and the form-claimed routes.
 //! NOT responsible for: the values (the generated `crate::table`), or checking them against the
 //! inventory (`rustfs-gateway-goldens` and this crate's tests do).
 //! Upstream: nothing. Downstream: `crate::table`, the tests, and a deployment that reports which
@@ -122,6 +123,28 @@ pub struct StayingRoute {
     pub group: &'static str,
     /// Why the gateway does not serve it, with the ADR that decided so.
     pub reason: &'static str,
+}
+
+/// A route of a migrated group the dialect serves behind a form claim rather than a path claim
+/// (ADR-0041), and the inventory row its operation was generated from.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct FormRouteRecord {
+    /// The operation name, `rustfs:…`.
+    pub operation: &'static str,
+    /// The ADR-0024 registration group.
+    pub group: &'static str,
+    /// The method.
+    pub method: &'static str,
+    /// The path, as the inventory records it.
+    pub path: &'static str,
+    /// The action rule, rendered as the overlay records it.
+    pub action: &'static str,
+    /// The RustFS handler the inventory names.
+    pub rustfs_handler: &'static str,
+    /// How RustFS reads the request body.
+    pub request_body: BodyKind,
+    /// How RustFS writes the response body.
+    pub response_body: BodyKind,
 }
 
 /// A registration group whose routes RustFS still serves itself.

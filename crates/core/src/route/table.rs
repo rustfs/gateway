@@ -202,6 +202,21 @@ pub enum RouteBuildError {
         /// The prefix that covers its literal.
         claim: &'static str,
     },
+    /// Two installed form claims could cover one request: the same path (ADR-0041).
+    OverlappingFormClaims {
+        /// The operation behind the first.
+        first: &'static str,
+        /// The operation behind the second.
+        second: &'static str,
+    },
+    /// A form claim whose path an installed path claim covers: which dialect answers a `POST` there
+    /// would depend on the request's media type rather than on one reviewed owner.
+    FormClaimInsideClaim {
+        /// The operation behind the form claim.
+        op_name: &'static str,
+        /// The path claim's prefix.
+        claim: &'static str,
+    },
 }
 
 impl fmt::Display for RouteBuildError {
@@ -271,6 +286,15 @@ impl fmt::Display for RouteBuildError {
                 f,
                 "{op_name} pins a path literal inside the claim {claim:?}, where S3 routing never looks; \
                  declare it as a claimed row instead"
+            ),
+            Self::OverlappingFormClaims { first, second } => write!(
+                f,
+                "the form claims of {first} and {second} could both cover one request; which operation answers must \
+                 not depend on installation order"
+            ),
+            Self::FormClaimInsideClaim { op_name, claim } => write!(
+                f,
+                "the form claim of {op_name} names a path inside the path claim {claim:?}; one path has one owner"
             ),
         }
     }

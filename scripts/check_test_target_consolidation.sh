@@ -200,6 +200,7 @@ core_modules = (
     "dialect",
     "dialect_claims",
     "dialect_claims_refusals",
+    "dialect_form_claims",
     "dto_cold_split",
     "empty_enumeration",
     "encryption_roundtrip",

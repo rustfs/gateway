@@ -40,7 +40,7 @@ Agent entry point for operations, routing, codecs, authorization state and handl
 | `src/route/table.rs` | Ordered table construction and resolution. | A request selects the wrong operation. |
 | `src/route/legacy_rustfs.rs` | Legacy RustFS's `x-id` and operation-key order, for a router built with `Selection::RustfsLegacy` (#1127). | A RustFS-profile request selects another operation than legacy RustFS. |
 | `src/route/claim.rs`, `src/route/claim_values.rs` | A dialect's path-prefix claims, path templates (trailing catch-alls and opaque segments, ADR-0036/0040) and their typed values (ADR-0024). | A claim or template refuses, matches or extracts the wrong thing. |
-| `src/route/claimed.rs` | Claimed rows, and the table the router asks before the S3 table. | A claimed request reaches the wrong row, or reaches S3. |
+| `src/route/claimed.rs`, `src/route/form_claim.rs` | Claimed rows and installed form claims, and the table the router asks before the S3 table; `form_claim.rs` is a dialect's form claim (ADR-0041): a `POST` of one exact path whose first `Content-Type` names the form media type, on every host. | A claimed request reaches the wrong row or reaches S3, or a form `POST` is taken or left wrongly. |
 | `src/route/shadowing.rs` | Declaration types; mounts the generated record from `model/overlays/route.toml`. | A route intentionally stands before another. |
 | `src/route/compiled.rs` | Fast lookup equivalent to the readable table. | Routing performance or equivalence fails. |
 | `src/route/explain.rs` | Route explanation data. | `cargo xtask route explain` omits a reason. |
@@ -65,7 +65,7 @@ Agent entry point for operations, routing, codecs, authorization state and handl
 | `src/handler.rs` | Typed handler request/response contracts, including the carried SSE proof. | Implement a backend or represent a committed failure. |
 | `src/static_dispatch.rs` | Sealed generic codec and concrete-handler entry. | Build or audit the monomorphic facade path. |
 | `src/dialect/error.rs` | `DialectError`, every dialect refusal as one enum. | A dialect refusal's wording or variant changes. |
-| `src/dialect/claimed.rs` | Operations a dialect serves inside its own claims: rows, aliases, the overlay cross-check. | A claimed route is refused, or its alias is not reviewed. |
+| `src/dialect/claimed.rs`, `src/dialect/form.rs` | Operations a dialect serves inside its own claims (rows, aliases, the overlay cross-check) and behind a form claim (ADR-0041: one per claim, the claim as the overlay selector). | A claimed or form-claimed route is refused, or its record is not reviewed. |
 | `src/registry/` | Handler/codec registration and erasure. | Registration, completeness or dynamic dispatch fails. |
 | `src/dispatch.rs` | Route, registration and parameter refusal order. | A request fails in the wrong stage. |
 | `src/error.rs` | Closed pre-authentication errors. | A refusal before authentication has the wrong status. |
@@ -77,7 +77,7 @@ Agent entry point for operations, routing, codecs, authorization state and handl
 | `tests/route_table.rs` | Route-table positive/negative matrix. | Any route row changes. |
 | `tests/selector_required_params.rs` | c-param-1003 on `GetBucketAnalyticsConfiguration`: `id` routes to the read (listing without it) and the read decoded without it is a static 400. | A parameter is both a route discriminator and a required member. |
 | `tests/dialect_claims.rs` | Claim capture, templates, aliases, typed values, the secret default, all-method filtering and overlaps. | A claim captures too much or too little, or a methodless row changes. |
-| `tests/dialect_claims_refusals.rs` | Every claim, template and claimed-row refusal, one variant each. | A claimed-route refusal changes. |
+| `tests/dialect_claims_refusals.rs`, `tests/dialect_form_claims.rs` | Every claim, template and claimed-row refusal, one variant each; form claims (ADR-0041): coverage on every host and query, media-type spellings, near misses, dispatch and every refusal. | A claimed-route or form-claim refusal changes, or a form claim covers too much or too little. |
 | `tests/route_sizes.rs` | Independent compile-time size ceiling for the copied hot-path bucket. | The compiled router's bucket layout changes. |
 | `benches/route.rs` | Allocation gate and non-blocking timing record for compiled route lookup. | Routing hot-path cost changes. |
 | `benches/codec.rs` | Allocation ceilings and timing records for ListObjectsV2 encode, DeleteObjects decode and the GetObject head. | A codec change moves an allocation ceiling. |

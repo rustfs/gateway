@@ -28,6 +28,7 @@
 //! ```text
 //!   overlay.rs  the reviewed record: name, precedence, selector, spec, evidence, claims
 //!   claimed.rs  operations served inside the dialect's own path-prefix claims (ADR-0024)
+//!   form.rs     operations served behind the dialect's form claims (ADR-0041)
 //!   error.rs    every refusal, as one enum
 //!   mod.rs      assembly: the record checked against the code, or a list of refusals
 //! ```
@@ -57,12 +58,14 @@
 
 mod claimed;
 mod error;
+mod form;
 mod overlay;
 
 use std::collections::BTreeSet;
 
 pub use self::claimed::{ClaimedOperation, ClaimedRoute, ClaimedRow, render_claimed_route, render_claimed_rows};
 pub use self::error::DialectError;
+pub use self::form::{FormOperation, FormRoute};
 pub use self::overlay::{DialectOverlay, OverlayRow, RESERVED_HOST_CLASSES, vendor_of};
 pub use crate::route::BucketParam;
 
@@ -132,6 +135,7 @@ pub struct Dialect {
     operations: Vec<DialectOperation>,
     claims: &'static [PathClaim],
     claimed: Vec<ClaimedOperation>,
+    forms: Vec<FormOperation>,
 }
 
 impl Dialect {
@@ -170,6 +174,7 @@ impl Dialect {
             overlay,
             operations: Vec::new(),
             claimed: Vec::new(),
+            forms: Vec::new(),
             attempted: BTreeSet::new(),
             used_claims: BTreeSet::new(),
             errors,
@@ -188,6 +193,12 @@ impl Dialect {
         &self.claimed
     }
 
+    /// The operations it serves behind form claims, in declaration order (ADR-0041).
+    #[must_use]
+    pub fn form_operations(&self) -> &[FormOperation] {
+        &self.forms
+    }
+
     /// The dialect's name, as a start-up report prints it.
     #[must_use]
     pub const fn name(&self) -> &'static str {
@@ -200,13 +211,14 @@ impl Dialect {
         &self.operations
     }
 
-    /// Every operation name it contributes, S3-table rows first and then claimed routes, each in
-    /// declaration order. For a start-up report and for assertions.
+    /// Every operation name it contributes, S3-table rows first, then claimed routes, then form
+    /// claims, each in declaration order. For a start-up report and for assertions.
     pub fn operation_names(&self) -> impl Iterator<Item = &'static str> {
         self.operations
             .iter()
             .map(DialectOperation::name)
             .chain(self.claimed.iter().map(ClaimedOperation::name))
+            .chain(self.forms.iter().map(FormOperation::name))
     }
 }
 
@@ -222,6 +234,8 @@ pub struct DialectBuilder {
     operations: Vec<DialectOperation>,
     /// Accepted claimed routes (`claimed`).
     claimed: Vec<ClaimedOperation>,
+    /// Accepted form claims (`form`).
+    forms: Vec<FormOperation>,
     /// Every claim prefix some row's template sits inside, accepted or not, so that a rejected row
     /// does not also report its claim as unused.
     used_claims: BTreeSet<&'static str>,
@@ -302,10 +316,11 @@ impl DialectBuilder {
         self.check_record::<O>(route.precedence, render_selector(&RouteSelector::new(route.selector)));
     }
 
-    /// Whether an S3-table row or a claimed route already declares this name.
+    /// Whether an S3-table row, a claimed route or a form claim already declares this name.
     fn is_declared(&self, name: &str) -> bool {
         self.operations.iter().any(|declared| declared.name == name)
             || self.claimed.iter().any(|declared| declared.name() == name)
+            || self.forms.iter().any(|declared| declared.name() == name)
     }
 
     /// The overlay row and the five facts it restates, for a declaration of either kind:
@@ -413,6 +428,7 @@ impl DialectBuilder {
             .iter()
             .map(|operation| operation.name)
             .chain(self.claimed.iter().map(ClaimedOperation::name))
+            .chain(self.forms.iter().map(FormOperation::name))
             .collect();
         let declarations = self
             .operations
@@ -434,6 +450,7 @@ impl DialectBuilder {
                 operations: self.operations,
                 claims: self.overlay.claims,
                 claimed: self.claimed,
+                forms: self.forms,
             })
         } else {
             Err(self.errors)

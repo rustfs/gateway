@@ -529,6 +529,9 @@ pub(super) fn render_mod(plan: &Plan) -> String {
     for fallback in super::fallback::FALLBACKS {
         let _ = writeln!(out, "pub mod {};", fallback.stem);
     }
+    if !plan.forms.is_empty() {
+        let _ = writeln!(out, "pub mod {};", super::form::STEM);
+    }
     out
 }
 
@@ -539,15 +542,20 @@ fn render_table_root(plan: &Plan, commit: &str) -> String {
     out.push_str("//! The dialect's generated table: the overlay rows, the route records, the pending groups, and the\n");
     out.push_str("//! one list of every operation.\n//!\n");
     out.push_str(
-        "//! Responsible for: [`RUSTFS_SOURCE_COMMIT`], [`PENDING`] and [`STAYING`] here, and the three per-operation lists\n",
+        "//! Responsible for: [`RUSTFS_SOURCE_COMMIT`], [`PENDING`], [`STAYING`] and [`FORM_ROUTES`] here, and the three\n",
     );
-    out.push_str("//! in their own files (`overlay`, `routes`, `fold`), each in inventory order. NOT responsible for: the\n");
-    out.push_str("//! claims or the assembly (`crate::dialect`), or any operation's declaration (`crate::ops`).\n");
+    out.push_str("//! per-operation lists in their own files (`overlay`, `routes`, `fold`), each in inventory order.\n");
+    out.push_str("//! NOT responsible for: the claims or the assembly (`crate::dialect`), or any operation's\n");
+    out.push_str("//! declaration (`crate::ops`).\n");
     out.push_str("//! Upstream: the generator and `crate::ops`. Downstream: `crate::dialect`, the tests, and a deployment\n");
     out.push_str("//! that walks every operation.\n\n");
     out.push_str("mod fold;\nmod overlay;\nmod routes;\n\n");
     out.push_str("pub use fold::fold_every_operation;\npub(crate) use overlay::OVERLAY_ROWS;\npub use routes::ROUTES;\n\n");
-    out.push_str("use crate::record::{PendingGroup, StayingRoute};\n\n");
+    out.push_str("use crate::record::{FormRouteRecord, PendingGroup, StayingRoute};\n");
+    if !plan.forms.is_empty() {
+        out.push_str("use crate::ops;\n");
+    }
+    out.push('\n');
     let _ = writeln!(
         out,
         "/// The RustFS commit the inventory was recorded from.\npub const RUSTFS_SOURCE_COMMIT: &str = {commit:?};\n"
@@ -566,6 +574,12 @@ fn render_table_root(plan: &Plan, commit: &str) -> String {
             "    StayingRoute {{ method: {method:?}, path: {path:?}, group: {group:?}, reason: {reason:?} }},"
         );
     }
+    out.push_str("];\n\n");
+    out.push_str("/// Every route of a migrated group served behind a form claim rather than a path claim (ADR-0041).\n");
+    out.push_str("pub static FORM_ROUTES: &[FormRouteRecord] = &[\n");
+    if !plan.forms.is_empty() {
+        let _ = writeln!(out, "    ops::{}::RECORD,", super::form::STEM);
+    }
     out.push_str("];\n");
     out
 }
@@ -582,6 +596,9 @@ fn render_list(plan: &Plan, doc: &str, header: &str, item: &str) -> String {
     if item == "OVERLAY_ROW" {
         for fallback in super::fallback::FALLBACKS {
             let _ = writeln!(out, "    ops::{}::OVERLAY_ROW,", fallback.stem);
+        }
+        if !plan.forms.is_empty() {
+            let _ = writeln!(out, "    ops::{}::OVERLAY_ROW,", super::form::STEM);
         }
     }
     out.push_str("];\n");
