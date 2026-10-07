@@ -122,6 +122,7 @@ impl Handler<CompleteMultipartUpload> for FsBackend {
         }
 
         let mut attributes = (*record.attributes).clone();
+        attributes.checksum = completed_checksum.map(super::checksums::StoredChecksum::multipart);
         attributes.tags = tagging::read_persisted_tags(&upload).await?;
         let tombstone = self.uploads_path(input.bucket.as_str()).join(format!(
             ".complete-{}-{}",

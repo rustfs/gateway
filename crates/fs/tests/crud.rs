@@ -69,6 +69,8 @@ mod multipart_checksums;
 mod multipart_conditions;
 #[path = "crud/multipart_listing.rs"]
 mod multipart_listing;
+#[path = "crud/multipart_object_checksums.rs"]
+mod multipart_object_checksums;
 #[path = "crud/multipart_replay.rs"]
 mod multipart_replay;
 #[path = "crud/multipart_sizing.rs"]

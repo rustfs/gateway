@@ -64,7 +64,7 @@ pub(super) struct Representation {
     pub(super) metadata: std::collections::BTreeMap<String, String>,
     /// The representation headers stored with this version.
     pub(super) headers: ContentHeaders,
-    pub(super) checksum: Option<rustfs_gateway::ChecksumSpec>,
+    pub(super) checksum: Option<super::checksums::StoredChecksum>,
     /// Whether this is the key's current version — read without a version id, named by the id of
     /// the newest record, or a plain object file — which alone answers `x-amz-expiration`.
     latest: bool,
@@ -374,6 +374,7 @@ impl Handler<GetObject> for super::FsBackend {
         .then_some(representation.checksum)
         .flatten();
         set_object_checksum!(output, checksum);
+        output.checksum_type = checksum.and_then(super::checksums::StoredChecksum::dto_type);
         Ok(Resp::with_status(output, window.status))
     }
 }
@@ -440,6 +441,7 @@ impl Handler<HeadObject> for super::FsBackend {
         .then_some(representation.checksum)
         .flatten();
         set_object_checksum!(output, checksum);
+        output.checksum_type = checksum.and_then(super::checksums::StoredChecksum::dto_type);
         Ok(Resp::with_status(output, window.status))
     }
 }

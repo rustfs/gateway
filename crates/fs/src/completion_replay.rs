@@ -151,15 +151,20 @@ impl FsBackend {
             ));
         }
         let encryption = current.headers.encryption();
-        Ok(Resp::new(CompleteMultipartUploadOutput {
+        let mut output = CompleteMultipartUploadOutput {
             location: Some(format!("/{bucket}/{key}")),
             bucket: Some(input.bucket.clone()),
             key: Some(input.key.clone()),
             e_tag: Some(current.e_tag),
             version_id: completion.version_id,
+            checksum_type: current.checksum.and_then(super::checksums::StoredChecksum::dto_type),
             server_side_encryption: encryption.reported_algorithm(),
             ssekms_key_id: encryption.kms_key_id,
             ..CompleteMultipartUploadOutput::default()
-        }))
+        };
+        if let Some(checksum) = current.checksum {
+            super::uploads::render_completed_checksum(&mut output, checksum.value)?;
+        }
+        Ok(Resp::new(output))
     }
 }
