@@ -36,11 +36,14 @@ impl Handler<UploadPartCopy> for FsBackend {
             .resolve(request.read_proof())
             .ok_or_else(|| HandlerError::internal_error("the copy-source authorization proof did not match"))?;
         guard_copy_source_form(source.form())?;
+        let source_bucket = source
+            .bucket()
+            .ok_or_else(|| HandlerError::internal_error("a path copy source has no bucket"))?;
         let input = request.into_input();
         self.require_bucket(input.bucket.as_str()).await?;
         let (upload_id, record) = self.resolve_upload(&input.upload_id, &input.bucket, &input.key)?;
         let representation = self
-            .representation(source.bucket().as_str(), source.key().as_str(), source.version_id())
+            .representation(source_bucket.as_str(), source.key().as_str(), source.version_id())
             .await?;
         guard_copy_source(
             &SourceConditions {

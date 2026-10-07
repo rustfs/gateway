@@ -156,7 +156,7 @@ impl Handler<dto::CopyObject> for CopyBackend {
         )?;
         let mut derived = self.0.lock().expect("the record is never poisoned");
         derived.source = Some((
-            source.bucket().as_str().to_owned(),
+            source.bucket().expect("source names a bucket").as_str().to_owned(),
             source.key().as_str().to_owned(),
             source.version_id().map(str::to_owned),
         ));
@@ -183,7 +183,7 @@ impl Handler<dto::UploadPartCopy> for CopyBackend {
             .map_err(|rejection| HandlerError::new(rejection.code().clone(), rejection.reason()))?;
         let mut derived = self.0.lock().expect("the record is never poisoned");
         derived.source = Some((
-            source.bucket().as_str().to_owned(),
+            source.bucket().expect("source names a bucket").as_str().to_owned(),
             source.key().as_str().to_owned(),
             source.version_id().map(str::to_owned),
         ));

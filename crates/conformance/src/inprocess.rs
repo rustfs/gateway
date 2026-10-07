@@ -503,6 +503,7 @@ impl InProcess {
                 .authorizer(allow_when(|_| true)),
             "c-authz-1010" => builder.authorizer(FixedDecision(Decision::Indeterminate)),
             "c-object-0053" => builder.authorizer(security::HeadObjectPolicy),
+            "c-authz-1018" => builder.authorizer(decide_with(security::bucketless_outposts_decision)),
             "c-authz-1014" => {
                 let source = Arc::clone(&self.authz_policy_version);
                 builder
@@ -1244,6 +1245,9 @@ impl Sut for InProcess {
         let calls = |counter: &AtomicUsize| counter.load(Ordering::SeqCst);
         security::finish_version_list(case_id, calls(&self.authz_backend_calls))?;
         let violation = match case_id {
+            "c-authz-1018" if calls(&self.authz_backend_calls) != 1 => {
+                "c-authz-1018 must dispatch only the ordinary copy control".to_owned()
+            }
             "c-authz-1001" | "c-authz-1011" | "c-authz-1012" if calls(&self.authz_backend_calls) != 0 => {
                 format!("{case_id} reached the copy backend after authorization refused the source")
             }

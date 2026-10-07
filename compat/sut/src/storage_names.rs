@@ -331,9 +331,9 @@ macro_rules! prefix_layers {
 
 prefix_layers!(ListMultipartUploads, ListObjectVersions, ListObjects, ListObjectsV2);
 
-/// A copy: both buckets are looked up before either name is judged, and a missing source bucket
+/// A bucket/key copy: both buckets are looked up before either name is judged, and a missing source bucket
 /// is answered as the reference backend answers it for a copy; then the handler's control check,
-/// source before destination, then the storage and the disk.
+/// source before destination, then the storage and the disk. ARN sources go to the backend refusal.
 impl OpLayer<dto::CopyObject> for StorageNames {
     fn wrap<'a>(
         &'a self,
@@ -341,8 +341,14 @@ impl OpLayer<dto::CopyObject> for StorageNames {
         next: Next<'a, dto::CopyObject>,
     ) -> BoxFuture<'a, HandlerResult<dto::CopyObject>> {
         Box::pin(async move {
-            let input = request.input();
             let source = request.resources().source().resolve(request.read_proof());
+            if source
+                .as_ref()
+                .is_some_and(|source| source.form() != rustfs_gateway::CopySourceForm::Path)
+            {
+                return next.run(request).await;
+            }
+            let input = request.input();
             let source_key = source.as_ref().map(|source| source.key().as_str());
             let names = [source_key, Some(input.key.as_str())];
             let controlled = names.into_iter().flatten().find(|name| rustfs_handlers_refuse(name));
@@ -350,8 +356,8 @@ impl OpLayer<dto::CopyObject> for StorageNames {
                 if self.bucket_missing(input.bucket.as_str()).await {
                     return Err(missing_bucket());
                 }
-                if let Some(source) = &source
-                    && self.bucket_missing(source.bucket().as_str()).await
+                if let Some(bucket) = source.as_ref().and_then(|source| source.bucket())
+                    && self.bucket_missing(bucket.as_str()).await
                 {
                     return Err(missing_bucket().as_copy_source_refusal());
                 }
@@ -362,8 +368,9 @@ impl OpLayer<dto::CopyObject> for StorageNames {
     }
 }
 
-/// A part copy: its own key is judged before its upload is looked up, and its source after, by the
+/// A bucket/key part copy: its own key is judged before its upload is looked up, and its source after, by the
 /// storage rule and the disk's segment length; its handler does not check control characters.
+/// ARN sources go to the backend refusal before ordinary bucket/disk rules.
 ///
 /// This backend cannot be asked whether an upload exists without running the part copy, so a
 /// refused source under an upload that does not exist is `400 InvalidArgument` here where RustFS
@@ -375,15 +382,24 @@ impl OpLayer<dto::UploadPartCopy> for StorageNames {
         next: Next<'a, dto::UploadPartCopy>,
     ) -> BoxFuture<'a, HandlerResult<dto::UploadPartCopy>> {
         Box::pin(async move {
+            let source = request.resources().source().resolve(request.read_proof());
+            if source
+                .as_ref()
+                .is_some_and(|source| source.form() != rustfs_gateway::CopySourceForm::Path)
+            {
+                return next.run(request).await;
+            }
             let input = request.input();
             if let Some(refusal) = self.judge(KeyRules::UPLOAD, input.bucket.as_str(), input.key.as_str()).await {
                 return Err(refusal);
             }
-            let source = request.resources().source().resolve(request.read_proof());
             if let Some(source) = &source
                 && rustfs_storage_or_disk_refuses(source.key().as_str())
             {
-                if self.bucket_missing(input.bucket.as_str()).await || self.bucket_missing(source.bucket().as_str()).await {
+                let bucket = source
+                    .bucket()
+                    .ok_or_else(|| rustfs_gateway::HandlerError::internal_error("a path copy source has no bucket"))?;
+                if self.bucket_missing(input.bucket.as_str()).await || self.bucket_missing(bucket.as_str()).await {
                     return Err(missing_bucket());
                 }
                 return Err(refused());

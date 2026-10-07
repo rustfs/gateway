@@ -86,7 +86,7 @@ fn both_arn_forms_are_recognised() {
         CopySource::parse("arn:aws:s3-outposts:us-east-1:123456789012:outpost/op-1/bucket/src-bucket/object/k").expect("parses");
     assert_eq!(op.form(), CopySourceForm::OutpostsArn);
     assert_eq!(op.resource.container(), Some("op-1"));
-    assert_eq!(op.resource.bucket().as_str(), "src-bucket");
+    assert_eq!(op.resource.bucket().expect("source names a bucket").as_str(), "src-bucket");
 }
 
 #[test]
@@ -106,7 +106,7 @@ fn an_empty_or_keyless_value_is_refused() {
 #[test]
 fn the_handler_resolves_the_same_normalized_resource_authorization_saw() {
     let resolved = resolved("bucket/a%2Fb?versionId=v1");
-    assert_eq!(resolved.bucket().as_str(), "bucket");
+    assert_eq!(resolved.bucket().expect("source names a bucket").as_str(), "bucket");
     assert_eq!(resolved.key().as_str(), "a/b");
     assert_eq!(resolved.version_id(), Some("v1"));
 }
@@ -219,7 +219,7 @@ fn through_both_members(raw: &str) -> [Named; 2] {
             .resolve(authorized.read_proof())
             .expect("the proof belongs to this source");
         Ok((
-            source.bucket().as_str().to_owned(),
+            source.bucket().expect("source names a bucket").as_str().to_owned(),
             source.key().as_str().to_owned(),
             source.version_id().map(str::to_owned),
         ))

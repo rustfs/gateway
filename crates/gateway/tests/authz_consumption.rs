@@ -127,7 +127,7 @@ impl Handler<dto::CopyObject> for CopyBackend {
             .source()
             .resolve(request.read_proof())
             .expect("the proof belongs to this source");
-        assert_eq!(source.bucket().as_str(), "source");
+        assert_eq!(source.bucket().expect("source names a bucket").as_str(), "source");
         assert_eq!(source.key().as_str(), "secret");
         Ok(Resp::new(dto::CopyObjectOutput::default()))
     }
@@ -147,7 +147,7 @@ impl Handler<dto::CopyObject> for CopyBackend {
             .source()
             .resolve(request.read_proof())
             .expect("the proof belongs to this source");
-        assert_eq!(source.bucket().as_str(), "source");
+        assert_eq!(source.bucket().expect("source names a bucket").as_str(), "source");
         assert_eq!(source.key().as_str(), "secret");
         Ok(Resp::new(dto::CopyObjectOutput::default()))
     }
@@ -346,4 +346,155 @@ async fn list_versions_fix_preserves_ordinary_list_authorization() {
     for target in ["/bucket", "/bucket?list-type=2"] {
         assert_eq!(list_authorization(target, "s3:ListBucket", "bucket").await, (200, 1), "{target}");
     }
+}
+
+#[derive(Debug)]
+struct OutpostsSource {
+    bucket: Option<String>,
+    key: Option<String>,
+    identity: rustfs_gateway::ResourceIdentity,
+    version: Option<String>,
+    route_bucket: Option<String>,
+}
+
+async fn bucketless_copy_authorization(
+    source: &str,
+    part: bool,
+    allow_source: bool,
+) -> (u16, String, Vec<OutpostsSource>, usize) {
+    let reached = Arc::new(AtomicUsize::new(0));
+    let backend = Arc::new(ListBackend(Arc::clone(&reached)));
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let observations = Arc::clone(&seen);
+    let service = support::wired_at_signed_time()
+        .authorizer(rustfs_gateway::allow_when(move |request| {
+            if let Some(identity) = request.copy_source_identity {
+                observations.lock().expect("observations").push(OutpostsSource {
+                    bucket: request.bucket.map(|value| value.as_str().to_owned()),
+                    key: request.key.map(|value| value.as_str().to_owned()),
+                    identity: identity.clone(),
+                    version: request.version_id.map(str::to_owned),
+                    route_bucket: request.route_bucket.map(|value| value.as_str().to_owned()),
+                });
+                allow_source
+            } else {
+                true
+            }
+        }))
+        .register::<dto::CopyObject, _>(Arc::clone(&backend))
+        .register::<dto::UploadPartCopy, _>(backend)
+        .build()
+        .expect("copy operations registered");
+    let target = if part {
+        "/destination/object?partNumber=1&uploadId=upload-one"
+    } else {
+        "/destination/object"
+    };
+    let (status, body) = exchange(&service, signed_with(http::Method::PUT, target, &[("x-amz-copy-source", source)])).await;
+    let seen = std::mem::take(&mut *seen.lock().expect("observations"));
+    (status.as_u16(), body, seen, reached.load(Ordering::SeqCst))
+}
+
+fn assert_bucketless_source(seen: &[OutpostsSource], version: Option<&str>) {
+    assert_eq!(seen.len(), 1);
+    let source = &seen[0];
+    assert_eq!(source.bucket, None);
+    assert_eq!(source.route_bucket.as_deref(), Some("destination"));
+    assert_eq!(source.key.as_deref(), Some("literal%2Fkey"));
+    assert_eq!(source.version.as_deref(), version);
+    assert_eq!(
+        source.identity,
+        rustfs_gateway::ResourceIdentity::Outposts {
+            partition: "aws".to_owned(),
+            region: "us-east-1".to_owned(),
+            account: "123456789012".to_owned(),
+            outpost_id: "op-1".to_owned(),
+        }
+    );
+}
+
+const BUCKETLESS_OUTPOSTS: &str = "arn:aws:s3-outposts:us-east-1:123456789012:outpost/op-1/object/literal%252Fkey";
+
+#[tokio::test]
+async fn bucketless_outposts_authorization_keeps_the_destination_separate() {
+    for part in [false, true] {
+        for source in [
+            BUCKETLESS_OUTPOSTS.to_owned(),
+            format!("/{BUCKETLESS_OUTPOSTS}"),
+            BUCKETLESS_OUTPOSTS.replace(':', "%3A"),
+        ] {
+            for (suffix, version) in [("", None), ("?versionId=v1", Some("v1"))] {
+                let (status, body, seen, reached) = bucketless_copy_authorization(&format!("{source}{suffix}"), part, true).await;
+                assert_eq!(status, 200, "{body}");
+                assert_bucketless_source(&seen, version);
+                assert_eq!(reached, 1);
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn n_bucketless_outposts_source_denial_never_reaches_either_handler() {
+    for part in [false, true] {
+        for (suffix, version) in [("", None), ("?versionId=v1", Some("v1"))] {
+            let (status, body, seen, reached) =
+                bucketless_copy_authorization(&format!("{BUCKETLESS_OUTPOSTS}{suffix}"), part, false).await;
+            assert_eq!(status, 403, "{body}");
+            assert!(body.contains("<Code>AccessDenied</Code>"));
+            assert_bucketless_source(&seen, version);
+            assert_eq!(reached, 0);
+        }
+    }
+}
+
+#[tokio::test]
+async fn n_malformed_bucketless_outposts_reaches_no_source_authorizer_or_handler() {
+    for part in [false, true] {
+        for source in [
+            BUCKETLESS_OUTPOSTS.replace("op-1", ""),
+            BUCKETLESS_OUTPOSTS.replace("123456789012", "123"),
+        ] {
+            let (status, body, seen, reached) = bucketless_copy_authorization(&source, part, true).await;
+            assert_eq!(status, 400, "{body}");
+            assert!(body.contains("<Code>InvalidArgument</Code>"));
+            assert!(seen.is_empty());
+            assert_eq!(reached, 0);
+        }
+    }
+}
+
+#[tokio::test]
+async fn derived_delete_keys_still_inherit_the_routed_bucket() {
+    let reached = Arc::new(AtomicUsize::new(0));
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let observations = Arc::clone(&seen);
+    let service = support::wired_at_signed_time()
+        .authorizer(rustfs_gateway::allow_when(move |request| {
+            if let Some(key) = request.key {
+                observations
+                    .lock()
+                    .expect("observations")
+                    .push((request.bucket.map(|bucket| bucket.as_str().to_owned()), key.as_str().to_owned()));
+            }
+            true
+        }))
+        .register::<dto::DeleteObjects, _>(Arc::new(ListBackend(Arc::clone(&reached))))
+        .build()
+        .expect("delete registered");
+    let request = support::signed_target_with_body_and_headers(
+        http::Method::POST,
+        "/destination?delete",
+        &[("content-md5", "iQR1tr4J3iyw2ElG8CAWPA==")],
+        bytes::Bytes::from_static(b"<Delete><Object><Key>one</Key></Object><Object><Key>two</Key></Object></Delete>"),
+    );
+    let (status, body) = exchange(&service, request).await;
+    assert_eq!(status.as_u16(), 200, "{body}");
+    assert_eq!(
+        *seen.lock().expect("observations"),
+        [
+            (Some("destination".to_owned()), "one".to_owned()),
+            (Some("destination".to_owned()), "two".to_owned()),
+        ]
+    );
+    assert_eq!(reached.load(Ordering::SeqCst), 1);
 }

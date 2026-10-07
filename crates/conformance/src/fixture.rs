@@ -2177,16 +2177,6 @@ struct CopySource {
     version_id: Option<String>,
 }
 
-impl CopySource {
-    fn from_resolved(source: &rustfs_gateway::ResolvedCopySource) -> Self {
-        Self {
-            bucket: source.bucket().clone(),
-            key: source.key().clone(),
-            version_id: source.version_id().map(str::to_owned),
-        }
-    }
-}
-
 /// `InvalidArgument`, in AWS's own wording, for a copy source this fixture will not read.
 ///
 /// The explanation is a `&'static str` chosen from a fixed set, never assembled from the rejected

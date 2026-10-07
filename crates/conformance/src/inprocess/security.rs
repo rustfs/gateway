@@ -68,6 +68,26 @@ pub(super) fn finish_version_list(case_id: &str, calls: usize) -> Result<(), Sut
     Err(SutError::Environment(violation))
 }
 
+/// The case's denied source is an ARN identity with no inherited bucket.
+pub(super) fn bucketless_outposts_decision(request: &AuthzRequest<'_>) -> Decision {
+    if matches!(request.action, "s3:GetObject" | "s3:GetObjectVersion")
+        && request.bucket.is_none()
+        && request.key.is_some_and(|key| key.as_str() == "secret")
+        && matches!(
+            request.copy_source_identity,
+            Some(rustfs_gateway::ResourceIdentity::Outposts { partition, region, account, outpost_id })
+                if partition == "aws"
+                    && region == "us-east-1"
+                    && account == "123456789012"
+                    && outpost_id == "op-denied"
+        )
+    {
+        Decision::Deny
+    } else {
+        Decision::Allow
+    }
+}
+
 pub(super) struct HeadObjectPolicy;
 
 fn head_object_decision(request: &AuthzRequest<'_>) -> Decision {

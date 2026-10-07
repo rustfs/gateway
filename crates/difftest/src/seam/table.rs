@@ -261,7 +261,11 @@ where
         return Err(refused("copy_source", "only a bucket/key copy source has a legacy spelling"));
     }
     Ok(legacy::CopySource::Bucket {
-        bucket: source.bucket().as_str().into(),
+        bucket: source
+            .bucket()
+            .ok_or(refused("copy_source", "a bucket/key source has no bucket"))?
+            .as_str()
+            .into(),
         key: source.key().as_str().into(),
         version_id: source.version_id().map(Into::into),
     })

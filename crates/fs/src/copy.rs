@@ -148,6 +148,9 @@ impl Handler<CopyObject> for FsBackend {
             .resolve(request.read_proof())
             .ok_or_else(|| HandlerError::internal_error("the copy-source authorization proof did not match"))?;
         guard_copy_source_form(source.form())?;
+        let source_bucket = source
+            .bucket()
+            .ok_or_else(|| HandlerError::internal_error("a path copy source has no bucket"))?;
         let input = request.into_input();
         let metadata_source = directive(&input)?;
         let tag_source = tagging_directive(&input)?;
@@ -164,7 +167,7 @@ impl Handler<CopyObject> for FsBackend {
         // record it.
         let storage_class = requested_storage_class(input.storage_class.as_ref())?;
         let source_representation = self
-            .representation(source.bucket().as_str(), source.key().as_str(), source.version_id())
+            .representation(source_bucket.as_str(), source.key().as_str(), source.version_id())
             .await
             .map_err(HandlerError::as_copy_source_refusal)?;
         // Naming a storage class is itself a change, so a self copy that only moves the object to
