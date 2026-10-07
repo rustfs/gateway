@@ -37,6 +37,8 @@ fn at_file(body: &[u8], grammar: FormGrammar, frame: usize) -> FormReader {
     panic!("the form never reached its file part");
 }
 
+// ── positive — the length a declared body fixes ─────────────────────────────────────────────
+
 /// Positive — the declared length fixes the file's exactly, after a preamble and padding and in
 /// every framing.
 #[test]
@@ -65,6 +67,8 @@ fn an_empty_file_is_length_zero() {
     let body = form(&[field("key", "k"), file("a.txt", "")]);
     assert_eq!(at_file(&body, LEGACY, body.len()).declared_file_length(body.len() as u64), Some(0));
 }
+
+// ── negative — wherever nothing fixes it ─────────────────────────────────────────────────────
 
 /// Negative — the gateway grammar, and the legacy one without a declared length, fix nothing.
 #[test]
