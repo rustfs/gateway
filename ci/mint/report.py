@@ -68,6 +68,15 @@ but never out of the run or the report. An excluded SDK:
       the aggregate is all a run uploads (rustfs/gateway#720). A log that is not a complete
       measurement is never a source of names.
 
+# Failure classes
+
+The raw per-SDK log stays on the runner, so a failing function's name is followed by a class
+drawn from its record's `error` through a fixed grammar, `function:<class>/<status>/<code>`
+(see ERROR_CLASS): enough to tell a refused request from a client-side failure and to read the
+status a service answered, without any of the text leaving the runner. The class says which
+failure it was, not where in the test it happened, and a failure the grammar cannot read is
+`function:-/-/-`.
+
 # Passes
 
 `ci/mint/run.sh` may run the SDKs in more than one container: the SDKs a TLS-only suite needs
@@ -112,6 +121,25 @@ REASON_MIN_WORDS = 3
 # characters and capped, and only this many are listed per SDK.
 FUNCTION_LIMIT = 160
 FUNCTIONS_PER_SDK = 50
+# A FAIL record's `error` is the suite's free text, a stack trace or a response body, and none
+# of it reaches the aggregate. What does is the class `classify_error` draws from it, three slots
+# with a fixed alphabet and `-` where the text names nothing (rustfs/gateway#1083):
+#   class   the first `…Exception` or `…Error` token. The Java and .NET SDKs start a FAIL's text
+#           with the thrown class (mint's Java suites write `ex.toString()`, ` >>> `, then the
+#           stack), so the first one is the thrown one and not a stack frame's;
+#   status  the HTTP status the AWS SDKs print as `Status Code: 400` (Java, .NET) or
+#           `StatusCode: 400` (Go), and never a number from a request id or an elapsed time;
+#   code    the S3 error code where its position is defined: the response body's `<Code>`
+#           element, Go's `api error NoSuchKey:` and boto's `An error occurred (NoSuchKey)`.
+# Class and code are at most 64 characters, so a long token (a key, a signature, a base64 run)
+# that merely ends in `Error` fits no slot either. A request id fits none of the three.
+ERROR_CLASS = re.compile(r"\b([A-Z][A-Za-z0-9]{0,54}(?:Exception|Error))\b")
+ERROR_STATUS = re.compile(r"(?i)\bstatus ?code:? ([0-9]{3})\b")
+ERROR_CODE = re.compile(
+    r"<Code>([A-Z][A-Za-z0-9.]{0,63})</Code>|\bapi error ([A-Z][A-Za-z0-9.]{0,63}):"
+    r"|An error occurred \(([A-Z][A-Za-z0-9.]{0,63})\)"
+)
+UNCLASSIFIED = "-"
 
 # Each pattern's first group is kept and everything the rest matches is replaced. Together they
 # cover the places an S3 client or server puts signing material into text: the Authorization
@@ -195,6 +223,16 @@ def printable(value: object, limit: int = FUNCTION_LIMIT) -> str:
     if len(text) > limit:
         text = text[: limit - 3] + "..."
     return text
+
+
+def classify_error(value: object) -> str:
+    """`<class>/<status>/<code>` drawn from a FAIL record's `error`; see ERROR_CLASS above."""
+    text = value if isinstance(value, str) else ""
+    slots = []
+    for pattern in (ERROR_CLASS, ERROR_STATUS, ERROR_CODE):
+        match = pattern.search(text)
+        slots.append(next(group for group in match.groups() if group) if match else UNCLASSIFIED)
+    return "/".join(slots)
 
 
 @dataclass
@@ -295,7 +333,8 @@ def read_records(log_dir: Path, sdk: str, problems: list[str]) -> Tally | None:
             tally.passed += 1
         elif status == "FAIL":
             tally.failed += 1
-            tally.failing.append(printable(document.get("function")))
+            function, error = printable(document.get("function")), classify_error(document.get("error"))
+            tally.failing.append(f"{function}:{error}")
         elif status == "NA":
             tally.na += 1
         else:

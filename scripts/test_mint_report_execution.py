@@ -5,6 +5,8 @@
 import json
 import os
 from pathlib import Path
+import re
+import runpy
 import shutil
 import subprocess
 import sys
@@ -13,6 +15,25 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 GUARD = ROOT / "scripts/check_mint_report.sh"
+
+# What mint's aws-sdk-java-v2 suite writes into a FAIL record's `error`: `ex.toString()`, then
+# ` >>> ` and the stack frames. The SDK's AwsServiceException.getMessage() appends
+# `(Service: S3, Status Code: NNN, Request ID: ..., Extended Request ID: ...)`.
+JAVA_REFUSED = (
+    "software.amazon.awssdk.services.s3.model.S3Exception: The request is not valid. "
+    "(Service: S3, Status Code: 400, Request ID: 7F2A1C9E4B3D5A60, Extended Request ID: "
+    "c2lnbmF0dXJlLWxvb2tpbmctYmFzZTY0LXRleHQ=) >>> [software.amazon.awssdk.core.internal.http."
+    "CombinedResponseHandler.handleErrorResponse(CombinedResponseHandler.java:125), software.amazon."
+    "awssdk.awscore.exception.AwsServiceException.builder(AwsServiceException.java:40)]"
+)
+JAVA_CLIENT = (
+    "software.amazon.awssdk.core.exception.SdkClientException: Unable to execute HTTP request: "
+    "Acquire operation took longer than the configured maximum time. >>> [software.amazon.awssdk."
+    "core.internal.http.pipeline.stages.utils.RetryableStageHelper.retryPolicyDisallowedRetryException("
+    "RetryableStageHelper.java:143)]"
+)
+# The whole output alphabet of the classifier: three slots, each `-` when the text names none.
+CLASS_SHAPE = re.compile(r"(?:[A-Z][A-Za-z0-9]{0,54}(?:Exception|Error)|-)/(?:[0-9]{3}|-)/(?:[A-Z][A-Za-z0-9.]{0,63}|-)")
 
 
 def exercise(guard=GUARD, report=None, child_change="", extra_probes=""):
@@ -145,7 +166,7 @@ for key, value, delimiter in (
         record=True, stale_proposal=True, after=late_delimiter_preserved)
 ''')
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn("OK: 112 mint report probes;", result.stdout)
+        self.assertIn("OK: 113 mint report probes;", result.stdout)
 
     def test_noninteger_system_exit_matches_python(self):
         run = self.runner()
@@ -212,11 +233,99 @@ finally:
     def test_complete_census_uses_bounded_judge_subprocesses(self):
         result, commands = exercise()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn("OK: 110 mint report probes;", result.stdout)
+        self.assertIn("OK: 111 mint report probes;", result.stdout)
         judges = [cmd for cmd in commands if len(cmd) > 2 and cmd[2] == "judge"]
         self.assertEqual(len(judges), 4, "all four CLI exit classes need one boundary control; remaining judges must reuse the interpreter")
         self.assertEqual(sum(len(cmd) > 2 and cmd[2] == "redact" for cmd in commands), 1)
         self.assertEqual(sum(cmd[0] == "bash" for cmd in commands), 7)
+
+
+class MintFailureClassTests(unittest.TestCase):
+    """A FAIL row carries a class drawn from its record's `error` through a fixed grammar, never
+    the text itself, so the aggregate can attribute a failure whose raw log stays on the runner
+    (rustfs/gateway#1083)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.report = runpy.run_path(str(ROOT / "ci/mint/report.py"))
+
+    def classified(self, error):
+        classify = self.report.get("classify_error")
+        self.assertIsNotNone(classify, "ci/mint/report.py defines no classify_error")
+        value = classify(error)
+        self.assertTrue(CLASS_SHAPE.fullmatch(value), f"{value!r} is outside the class alphabet")
+        return value
+
+    def test_java_v2_service_refusal_names_the_thrown_class_and_the_status(self):
+        # The frames name AwsServiceException after the thrown S3Exception; the thrown one wins.
+        self.assertEqual(self.classified(JAVA_REFUSED), "S3Exception/400/-")
+
+    def test_java_v2_client_failure_names_the_class_without_a_status(self):
+        self.assertEqual(self.classified(JAVA_CLIENT), "SdkClientException/-/-")
+
+    def test_go_boto_and_xml_locations_name_the_status_and_the_code(self):
+        for error, expected in (
+            ("operation error S3: PutObject, https response error StatusCode: 400, RequestID: "
+             "7F2A1C9E4B3D5A60, HostID: c2lnbmF0dXJl, api error InvalidRequest: The request is not valid.",
+             "-/400/InvalidRequest"),
+            ('<?xml version="1.0"?><Error><Code>NoSuchKey</Code><Message>The specified key does not '
+             "exist.</Message><RequestId>7F2A1C9E4B3D5A60</RequestId></Error>", "-/-/NoSuchKey"),
+            ("An error occurred (AccessDenied) when calling the PutObject operation: Access Denied",
+             "-/-/AccessDenied"),
+        ):
+            with self.subTest(error=error):
+                self.assertEqual(self.classified(error), expected)
+
+    def test_missing_or_non_string_error_is_unclassified(self):
+        for error in (None, "", "   ", 400, ["S3Exception"], {"class": "S3Exception", "status": 400}):
+            with self.subTest(error=error):
+                self.assertEqual(self.classified(error), "-/-/-")
+
+    def test_free_text_is_unclassified(self):
+        self.assertEqual(self.classified("UNIQUE-UPSTREAM-ERROR-TEXT-7f3a"), "-/-/-")
+
+    def test_status_is_read_only_from_a_three_digit_status_code(self):
+        for error in (
+            "software.amazon.awssdk.services.s3.model.S3Exception: refused (Service: S3, Request ID: "
+            "404ABC, Extended Request ID: 500)",
+            "S3Exception: refused (Service: S3, Status Code: 4000, Request ID: X)",
+            "S3Exception: refused after 400 ms",
+        ):
+            with self.subTest(error=error):
+                self.assertEqual(self.classified(error), "S3Exception/-/-")
+
+    def test_signing_material_and_identifiers_never_reach_the_class(self):
+        error = ("software.amazon.awssdk.core.exception.SdkClientException: AKIAIOSFODNN7EXAMPLE "
+                 "feedfacefeedface0001 Authorization: AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/"
+                 "20261008/us-east-1/s3/aws4_request (Service: S3, Status Code: 403, Request ID: 7F2A1C9E4B3D5A60)")
+        value = self.classified(error)
+        self.assertEqual(value, "SdkClientException/403/-")
+        for material in ("AKIA", "feedface", "Credential", "7F2A1C9E4B3D5A60", "aws4_request"):
+            self.assertNotIn(material, value)
+
+    def test_a_namespace_or_a_lowercase_word_is_not_a_class(self):
+        for error in ("Aws::S3::Errors::NoSuchKey: The specified key does not exist.",
+                      "operation error S3: PutObject failed with an error", "errors::not_found Error"):
+            with self.subTest(error=error):
+                self.assertEqual(self.classified(error), "-/-/-")
+
+    def test_a_code_outside_a_recognised_location_is_not_read(self):
+        for error in ("code: NoSuchKey, message: missing", "ErrorResponse(code = NoSuchKey, message = missing)",
+                      '<Code attr="x">NoSuchKey</Code>', "api error : missing", "An error occurred () when calling"):
+            with self.subTest(error=error):
+                self.assertEqual(self.classified(error), "-/-/-")
+
+    def test_a_token_longer_than_an_identifier_is_not_a_class_or_a_code(self):
+        # A signature or a key that happens to end in `Error` is not a thrown class, and the longest
+        # identifier either slot reads is 64 characters.
+        longest_class = "A" + "b" * 54 + "Exception"
+        longest_code = "A" + "b" * 63
+        self.assertEqual(self.classified(longest_class + ": refused"), longest_class + "/-/-")
+        self.assertEqual(self.classified(f"<Code>{longest_code}</Code>"), f"-/-/{longest_code}")
+        for error in ("A" + "b" * 55 + "Exception: refused", "K" + "A" * 80 + "Error", "Q" + "z" * 200 + "Error",
+                      f"<Code>{longest_code}x</Code>", f"An error occurred ({longest_code}x) when calling"):
+            with self.subTest(error=error[:40]):
+                self.assertEqual(self.classified(error), "-/-/-")
 
 
 if __name__ == "__main__":
