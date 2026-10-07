@@ -797,7 +797,9 @@ impl S3Service {
 
         // Presenting nothing leaves no signature to verify first: legacy RustFS's claimed-route ceiling precedes the floor.
         let claimed_ceiling = self.inner.view_policy.claimed_bodies.ceiling(claimed);
-        let presented = presence.any() || self.inner.floor.custom_schemes().matching(&view).is_some();
+        let presented = presence.any()
+            || self.inner.floor.credential_marker(&view).is_some()
+            || self.inner.floor.custom_schemes().matching(&view).is_some();
         if let (false, RoutedBody::Ordinary(sealed)) = (presented, &routed_body)
             && let Some(refusal) = sealed.past_claimed_ceiling(claimed_ceiling).await
         {

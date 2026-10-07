@@ -42,7 +42,7 @@ use rustfs_gateway_core::{
     AuthRequirement, ClaimedRoute, ClaimedRow, Dialect, DialectOverlay, HandlerDeadlineClass, Operation, OperationSpec,
     OverlayRow, PathClaim, Predicate, ResourceShape,
 };
-use rustfs_gateway_sig::OperationFloor;
+use rustfs_gateway_sig::{OperationFloor, SecurityFloor};
 
 use crate::support::{self, CountingBody};
 
@@ -219,6 +219,10 @@ impl Authorizer for Counting {
 }
 
 fn service(bounded: bool, decision: Decision) -> (S3Service, Arc<Seen>) {
+    service_with_floor(bounded, decision, SecurityFloor::new())
+}
+
+fn service_with_floor(bounded: bool, decision: Decision, floor: SecurityFloor) -> (S3Service, Arc<Seen>) {
     let seen = Arc::new(Seen::default());
     let credentials = Credentials::new("AKIDEXAMPLE", b"secret").expect("a valid key");
     let mut builder = ServiceBuilder::new()
@@ -226,6 +230,7 @@ fn service(bounded: bool, decision: Decision) -> (S3Service, Arc<Seen>) {
             Arc::new(StaticCredentials::new().with(credentials)),
             RegionSet::new(["us-east-1"]).expect("non-empty"),
         ))
+        .security_floor(floor)
         .authorizer(Counting(Arc::clone(&seen), decision))
         .clock_with_skew_ack(
             support::fixed_clock(),
@@ -500,4 +505,90 @@ async fn n_a_custom_scheme_credential_is_verified_before_the_ceiling() {
     assert_eq!(verified.load(Ordering::SeqCst), 1, "the custom verifier was not asked");
     assert_eq!(polled, 0);
     assert_eq!(seen.handled.load(Ordering::SeqCst), 0);
+}
+
+/// Observe both claimed routes under the floor's chosen recognition policy.
+async fn assert_query_credential_response(
+    query: &str,
+    legacy: bool,
+    bounded: bool,
+    length: usize,
+    expected: (http::StatusCode, &str),
+) {
+    for (method, path) in [
+        (http::Method::PUT, "/example/admin/v1/import"),
+        (http::Method::GET, "/example/admin/v1/info"),
+    ] {
+        let target = format!("{path}?{query}");
+        let floor = if legacy {
+            SecurityFloor::new().recognize_signatures_as_legacy_rustfs()
+        } else {
+            SecurityFloor::new()
+        };
+        let (service, _seen) = service_with_floor(bounded, Decision::Allow, floor);
+        let (status, body, polled) = send(&service, anonymous(method, &target, length as u64), length).await;
+        assert_eq!(status, expected.0, "{target}, legacy={legacy}, bounded={bounded}: {body}");
+        assert_eq!(
+            support::element_text(&body, "Code"),
+            Some(expected.1),
+            "{target}, legacy={legacy}, bounded={bounded}: {body}"
+        );
+        assert_eq!(
+            polled, 0,
+            "{target}, legacy={legacy}, bounded={bounded}: the body was read before the refusal"
+        );
+    }
+}
+
+/// An incomplete query credential keeps the unbounded assembly's floor refusal on both routes.
+async fn assert_query_credential_is_refused_before_the_ceiling(query: &str) {
+    for bounded in [false, true] {
+        assert_query_credential_response(query, false, bounded, MIB + 1, (http::StatusCode::FORBIDDEN, "AccessDenied")).await;
+    }
+}
+
+/// Negative — a query carrying only a SigV4 credential is still an AWS credential attempt.
+#[tokio::test]
+async fn n_a_query_credential_is_refused_before_the_ceiling() {
+    assert_query_credential_is_refused_before_the_ceiling("X-Amz-Credential=broken").await;
+}
+
+/// Negative — a query carrying only a SigV4 algorithm is not a request presenting nothing.
+#[tokio::test]
+async fn n_a_query_algorithm_is_refused_before_the_ceiling() {
+    assert_query_credential_is_refused_before_the_ceiling("X-Amz-Algorithm=AWS4-HMAC-SHA256").await;
+}
+
+/// Negative — a query carrying only a SigV2 access key is still an AWS credential attempt.
+#[tokio::test]
+async fn n_a_query_access_key_is_refused_before_the_ceiling() {
+    assert_query_credential_is_refused_before_the_ceiling("AWSAccessKeyId=broken").await;
+}
+
+/// Positive — under legacy recognition these unsigned query cues remain anonymous, so the
+/// anonymous ceiling still precedes the floor.
+#[tokio::test]
+async fn an_unsigned_query_under_legacy_recognition_is_bounded_as_anonymous() {
+    for query in [
+        "X-Amz-Credential=broken",
+        "X-Amz-Algorithm=AWS4-HMAC-SHA256",
+        "AWSAccessKeyId=broken",
+    ] {
+        assert_query_credential_response(query, true, true, MIB + 1, (http::StatusCode::BAD_REQUEST, "EntityTooLarge")).await;
+    }
+}
+
+/// Negative — legacy recognition still refuses anonymous access at the floor when the ceiling
+/// is not exceeded or the ceiling switch is off.
+#[tokio::test]
+async fn n_an_unsigned_query_under_legacy_recognition_keeps_the_floor_without_a_ceiling_refusal() {
+    for query in [
+        "X-Amz-Credential=broken",
+        "X-Amz-Algorithm=AWS4-HMAC-SHA256",
+        "AWSAccessKeyId=broken",
+    ] {
+        for (bounded, length) in [(true, MIB), (false, MIB + 1)] {
+            assert_query_credential_response(query, true, bounded, length, (http::StatusCode::FORBIDDEN, "AccessDenied")).await;
+        }
+    }
 }
