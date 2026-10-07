@@ -21,7 +21,7 @@
 
 use std::future::Future;
 use std::future::poll_fn;
-use std::pin::Pin;
+use std::pin::{Pin, pin};
 use std::task::Poll;
 use std::time::Duration;
 
@@ -99,7 +99,7 @@ pub(crate) async fn handler_with_body_monitor<T>(
     let Some(ref mut monitor) = monitor else {
         return BodyMonitoredOutcome::Completed(handler.await);
     };
-    let mut body_event = Box::pin(monitor.next_event());
+    let mut body_event = pin!(monitor.next_event());
     let raced = poll_fn(|context| {
         // The terminal body verdict wins a wake shared with the handler result. An unread drop is
         // not a verdict: both orders end in `Unread`, and the handler's answer decides it.
@@ -195,10 +195,13 @@ pub(crate) fn armed(deadline: Duration) -> Option<futures_timer::Delay> {
 }
 
 /// [`armed`] as the future a deadline race polls: one that never completes when nothing is armed.
-fn expiry(deadline: Duration) -> Pin<Box<dyn Future<Output = ()> + Send>> {
-    match armed(deadline) {
-        Some(delay) => Box::pin(delay),
-        None => Box::pin(core::future::pending()),
+fn expiry(deadline: Duration) -> impl Future<Output = ()> + Send {
+    let delay = armed(deadline);
+    async move {
+        match delay {
+            Some(delay) => delay.await,
+            None => core::future::pending().await,
+        }
     }
 }
 
@@ -209,7 +212,7 @@ pub(crate) async fn handler_with_request_cancellation<T>(
     cleanup_grace: Duration,
     request_cancellation: Option<tokio::sync::watch::Receiver<bool>>,
 ) -> HandlerCancellationOutcome<T> {
-    let mut deadline = expiry(deadline);
+    let mut deadline = pin!(expiry(deadline));
     let mut request_cancellation = request_cancellation.map(|mut cancellation| {
         Box::pin(async move {
             while !*cancellation.borrow() {
@@ -291,7 +294,7 @@ where
     }
     let mut work = work;
     Box::pin(async move {
-        let mut expired = expiry(deadline);
+        let mut expired = pin!(expiry(deadline));
         poll_fn(|context| {
             // The work first, and the order is load-bearing: a continuation whose outcome is ready
             // in the same wake as the expiry is an outcome, not a timeout. Polling the timer first
@@ -316,7 +319,7 @@ pub(crate) async fn policy_snapshot_with_timeout<'a>(
     timeout: Duration,
 ) -> Option<Result<PolicySnapshot, PolicyError>> {
     let mut snapshot = source.snapshot(identity);
-    let mut deadline = Box::pin(wait_without_runtime(timeout));
+    let mut deadline = pin!(wait_without_runtime(timeout));
     let mut first_poll = true;
     poll_fn(move |context| {
         if first_poll {

@@ -657,7 +657,7 @@ fn timer_cost(config: ServiceConfig) -> u64 {
 }
 
 /// Negative — lifted deadlines arm no timer at all. A timer's heap cost differs by platform (the
-/// boxed `Delay`, its registered node, and on macOS the node's lazily boxed mutexes), so it is
+/// registered node, and on macOS the node's lazily boxed mutexes), so it is
 /// measured here rather than written down: lifting the handler class alone saves one timer's
 /// worth per request, and lifting everything must save exactly [`TIMERS_PER_PUT`] of them. A lifted
 /// deadline that still armed a long timer would save nothing and fail here.
@@ -691,16 +691,23 @@ fn lifted_deadlines_arm_no_timer() {
         "{lifted} blocks for {TIMER_MEASURED} requests: the allocator is not observing this binary"
     );
     let one_timer = bounded.saturating_sub(handler_lifted);
-    // One block of slack per request: macOS moves a window's total by up to half a block per
-    // request, and a timer costs at least two, so one armed timer cannot hide in the slack.
+    // macOS moves a window's total by up to half a block per request. Linux's inline mutexes
+    // leave only the timer node allocation after removing the outer Box, so its slack must be
+    // smaller than one block. In either case a measured timer must cost at least twice the slack:
+    // leaving one armed cannot hide inside the accepted measurement noise.
+    let slack = if cfg!(target_os = "macos") {
+        TIMER_MEASURED
+    } else {
+        TIMER_MEASURED / 4
+    };
     assert!(
-        one_timer >= 2 * TIMER_MEASURED - TIMER_MEASURED / 2,
-        "lifting the handler deadline saved {:.2} blocks per request, less than one timer",
+        one_timer >= 2 * slack,
+        "lifting the handler deadline saved {:.2} blocks per request, too little to distinguish a timer from measurement noise",
         per_request(one_timer)
     );
     let saved = bounded.saturating_sub(lifted);
     assert!(
-        saved.abs_diff(TIMERS_PER_PUT * one_timer) <= TIMER_MEASURED,
+        saved.abs_diff(TIMERS_PER_PUT * one_timer) <= slack,
         "lifting every deadline saved {:.2} blocks per request, not {TIMERS_PER_PUT} timers of {:.2}",
         per_request(saved),
         per_request(one_timer)
