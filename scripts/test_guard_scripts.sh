@@ -16370,6 +16370,20 @@ mut_clock_monotonic_source_deleted() {
 expect_fail check_clock_single_source.sh \
     "the monotonic source deleted, which must fail rather than skip" mut_clock_monotonic_source_deleted
 
+probe_clock_scan_batching() {
+    local output rc=0
+    cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
+    output="$(python3 "${SCRIPT_DIR}/test_clock_scan_batching.py" 2>&1)" || rc=$?
+    if [[ "$rc" -eq 0 ]]; then
+        pass_msg 'clock scans keep refusal coverage without per-file scanner processes'
+    else
+        fail_msg 'clock scan batching or refusal controls failed'
+        printf '%s\n' "$output" >&2
+    fi
+}
+probe_clock_scan_batching
+
 mut_baseline_value_edited_by_hand() {
     python3 - <<'PYEOF'
 import json
