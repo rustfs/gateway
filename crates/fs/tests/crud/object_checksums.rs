@@ -18,6 +18,9 @@
 //! NOT responsible for: multipart part boundaries or GetObjectAttributes.
 //! Upstream: the production registry and persisted object records. Downstream: the FS verification gate.
 
+#[path = "object_attributes.rs"]
+mod object_attributes;
+
 use super::multipart_checksums::checksum;
 use super::multipart_trailer_checksums::{Trailer, trailer_part_request};
 use super::*;

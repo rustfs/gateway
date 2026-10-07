@@ -22,7 +22,7 @@
 //! [`rustfs_gateway::evaluate_range`]; version publication, delete markers, or the version census,
 //! which belong to `super::versioning`.
 //! Upstream: the persisted version records and the plain object files. Downstream: the production
-//! `GetObject`, `HeadObject`, and `CopyObject` registrations.
+//! `GetObject`, `HeadObject`, `GetObjectAttributes`, and `CopyObject` registrations.
 //!
 //! # Why the decision is not made here
 //!
@@ -53,7 +53,7 @@ pub(super) struct Representation {
     pub(super) bytes: Vec<u8>,
     pub(super) e_tag: ETag,
     pub(super) last_modified: Timestamp,
-    storage_class: Option<rustfs_gateway::dto::StorageClass>,
+    pub(super) storage_class: Option<rustfs_gateway::dto::StorageClass>,
     pub(super) version_id: Option<String>,
     /// The user metadata stored with this version, keyed by the lowercase `x-amz-meta-` suffix.
     ///

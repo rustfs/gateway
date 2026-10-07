@@ -383,6 +383,7 @@ async fn bucket_and_object_crud_runs_through_the_production_registry() {
             "GetBucketVersioning",
             "GetObject",
             "GetObjectAcl",
+            "GetObjectAttributes",
             "GetObjectTagging",
             "GetPublicAccessBlock",
             "HeadBucket",
@@ -413,7 +414,6 @@ async fn bucket_and_object_crud_runs_through_the_production_registry() {
         service.operations().collect::<Vec<_>>(),
         backend.supported_operations().collect::<Vec<_>>()
     );
-
     let created = exchange(&service, signed(http::Method::PUT, "/photos", Bytes::new())).await;
     assert_eq!(created.status(), 200);
     assert_eq!(header(&created, "location").expect("a location"), "/photos");

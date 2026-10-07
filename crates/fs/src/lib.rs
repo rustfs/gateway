@@ -79,6 +79,7 @@ macro_rules! reference_operations {
             versioning GetBucketVersioning => "GetBucketVersioning",
             crud GetObject => "GetObject",
             acl GetObjectAcl => "GetObjectAcl",
+            crud GetObjectAttributes => "GetObjectAttributes",
             tagging GetObjectTagging => "GetObjectTagging",
             policy GetPublicAccessBlock => "GetPublicAccessBlock",
             crud HeadBucket => "HeadBucket",
@@ -134,6 +135,7 @@ mod encryption;
 mod lifecycle;
 mod lifecycle_scheduler;
 mod listing;
+mod object_attributes;
 mod part_lengths;
 pub mod policy;
 mod post_object;
