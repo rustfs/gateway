@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Completed part lengths, their record grammar and their GET window projection.
+//! Completed part lengths, their record grammar and their read window projection.
 //!
 //! Responsible for: validating persisted boundaries and feeding them to the shared part resolver.
 //! NOT responsible for: checksum storage, range arithmetic or HEAD policy.
-//! Upstream: completion, records and GET. Downstream: the core part-table contract.
+//! Upstream: completion, records, GET and HEAD. Downstream: the core part-table contract.
 
 use rustfs_gateway::{ETag, ErrorCode, HandlerError, RangeDecision, resolve_part};
 
@@ -73,8 +73,8 @@ pub(super) fn window(number: u32, lengths: Option<&[u64]>, tag: &ETag, object_le
         None if object_len == 0 && number == 1 => return Ok(RangeDecision::Whole),
         None => &plain,
     };
-    let window = resolve_part(number, lengths)
-        .map_err(|_| HandlerError::new(ErrorCode::INVALID_PART, "the object has no readable part with that number"))?;
+    let window =
+        resolve_part(number, lengths).map_err(|rejection| HandlerError::new(rejection.code().clone(), rejection.reason()))?;
     if window.total != object_len {
         return Err(HandlerError::internal_error(
             "the stored part table and object bytes have different lengths",

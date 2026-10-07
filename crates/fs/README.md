@@ -85,7 +85,12 @@ resolver to serve that ordinal byte window and reports the multipart part count;
 have one readable part without a multipart count. A part read omits whole-object checksums.
 Older multipart records without the table remain readable whole and return `NotImplemented` for
 part reads. Readers without parts/1 support reject new tables, so the rollback rule also applies
-here. HEAD partNumber and `GetObjectAttributes` remain separate work (rustfs/gateway#1001).
+here. HEAD partNumber returns 200 with the selected length and multipart count, omitting
+Content-Range; malformed numbers are 400 and an unavailable ordinal part is 416, as the core
+part-table contract specifies. GET retains RustFS's 400 InvalidPart for that unavailable part.
+Native RustFS currently returns the whole length without PartsCount on HEAD and 500 for an
+unavailable part; these remain explicit compatibility differences. `GetObjectAttributes` is
+still separate work (rustfs/gateway#1001).
 Native sparse numbering has a known discrepancy: after completing uploaded numbers 2 and 5, its
 GET number 5 returns the whole object. This backend refuses that unavailable ordinal part.
 

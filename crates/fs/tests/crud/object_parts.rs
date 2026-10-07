@@ -19,6 +19,9 @@
 //! Upstream: the production service and stored object records. Downstream: the FS verification gate.
 
 use super::multipart_sizing::{MIN_PART_SIZE, upload_owned};
+#[path = "head_parts.rs"]
+mod head_parts;
+
 use super::*;
 
 const BUCKET: &str = "stored-checksum";

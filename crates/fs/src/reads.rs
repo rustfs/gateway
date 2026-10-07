@@ -128,21 +128,20 @@ impl Window {
 
 /// Resolves the request's range selectors against a representation.
 ///
-/// GET resolves a part selector against persisted lengths through the core part-table contract.
-/// HEAD retains its explicit unsupported result. Both still pass the selector to `evaluate_range`,
+/// Reads resolve a part selector against persisted lengths through the core part-table contract.
+/// Both operations still pass the selector to `evaluate_range`,
 /// so a Range sent beside partNumber cannot accidentally become an ordinary range.
 ///
 /// # Errors
 ///
 /// The contract's own refusals: `Range` together with `partNumber`, and an unsatisfiable range,
-/// which becomes the `416` carrying `Content-Range: bytes */<length>`. GET also refuses invalid or
-/// unavailable parts and older multipart records without boundaries; HEAD part reads remain unsupported.
+/// which becomes the `416` carrying `Content-Range: bytes */<length>`. Part selection also refuses invalid or
+/// unavailable parts and older multipart records without boundaries.
 fn resolve_window(
     range: Option<&str>,
     if_range: Option<&IfRange>,
     part_number: Option<i32>,
     representation: &Representation,
-    resolve_parts: bool,
 ) -> Result<Window, HandlerError> {
     let length = representation.bytes.len();
     let selectors = RangeSelectors {
@@ -163,7 +162,7 @@ fn resolve_window(
         .and_then(|lengths| decision.part_count_header(lengths.len() as u32))
         .and_then(|count| i32::try_from(count).ok());
     let decision = match decision {
-        RangeDecision::Part { part_number } if resolve_parts => super::part_lengths::window(
+        RangeDecision::Part { part_number } => super::part_lengths::window(
             part_number,
             representation.part_lengths.as_deref(),
             &representation.e_tag,
@@ -193,9 +192,7 @@ fn resolve_window(
                 status,
             })
         }
-        RangeDecision::Part { .. } => Err(HandlerError::not_implemented(
-            "HEAD partNumber reads are not implemented by this reference backend",
-        )),
+        RangeDecision::Part { .. } => Err(HandlerError::internal_error("the part resolver returned an unresolved selector")),
         RangeDecision::Unsatisfiable {
             actual_object_size,
             range_requested,
@@ -351,8 +348,19 @@ impl Handler<GetObject> for super::FsBackend {
             if_range.as_ref(),
             input.part_number,
             &representation,
-            true,
-        )?;
+        )
+        .map_err(|error| {
+            // RustFS GET names an unavailable ordinal part InvalidPart; HEAD keeps the core
+            // representation-backed 416. Neither changes the resolver's byte-window decision.
+            if error.code().as_str() == rustfs_gateway::ErrorCode::INVALID_PART_NUMBER.as_str() {
+                HandlerError::new(
+                    rustfs_gateway::ErrorCode::INVALID_PART,
+                    "the object has no readable part with that number",
+                )
+            } else {
+                error
+            }
+        })?;
         let encryption = representation.headers.encryption();
         let tag_count = tag_count(&representation).await;
         let expiration = self
@@ -430,13 +438,7 @@ impl Handler<HeadObject> for super::FsBackend {
         // `HeadObject` declares no `If-Range`: RFC 9110 attaches the switch to a retrieval, and the
         // operation's IR carries no such field, so there is nothing to read rather than something
         // being ignored.
-        let window = resolve_window(
-            input.range.as_ref().map(|range| range.as_str()),
-            None,
-            input.part_number,
-            &representation,
-            false,
-        )?;
+        let window = resolve_window(input.range.as_ref().map(|range| range.as_str()), None, input.part_number, &representation)?;
         let tag_count = tag_count(&representation).await;
         let expiration = self
             .read_expiration(input.bucket.as_str(), input.key.as_str(), &representation)
@@ -446,7 +448,12 @@ impl Handler<HeadObject> for super::FsBackend {
         let mut output = HeadObjectOutput {
             expiration,
             content_length: i64::try_from(window.len()).ok(),
-            content_range: window.content_range,
+            content_range: if input.part_number.is_some() {
+                None
+            } else {
+                window.content_range
+            },
+            parts_count: window.parts_count,
             accept_ranges: Some("bytes".to_owned()),
             e_tag: Some(representation.e_tag),
             last_modified: Some(representation.last_modified),
@@ -470,6 +477,7 @@ impl Handler<HeadObject> for super::FsBackend {
         .flatten();
         set_object_checksum!(output, checksum);
         output.checksum_type = checksum.and_then(super::checksums::StoredChecksum::dto_type);
-        Ok(Resp::with_status(output, window.status))
+        let status = if input.part_number.is_some() { 200 } else { window.status };
+        Ok(Resp::with_status(output, status))
     }
 }
