@@ -116,33 +116,45 @@ READING_PATTERN="\\b(SystemTime|Instant)[[:space:]]*>?[[:space:]]*::[[:space:]]*
 # A renamed clock type: `SystemTime as Wall`, or `type Wall = std::time::Instant;`.
 RENAME_PATTERN="\\b(SystemTime|Instant)[[:space:]]+as[[:space:]]+[A-Za-z_]|\\btype[[:space:]]+[A-Za-z_][A-Za-z0-9_]*[[:space:]]*(<[^>]*>)?[[:space:]]*=[[:space:]]*[A-Za-z0-9_:]*\\b(SystemTime|Instant)[[:space:]]*;"
 
-# --- 3. Nothing else on the protocol path reads either clock. ----------------
-while IFS= read -r file; do
-    [[ -z "$file" ]] && continue
-    case "$file" in
-        crates/conformance/*) continue ;;
-        "$WALL_SOURCE" | "$MONOTONIC_SOURCE" | "$TRANSPORT_TIMER_SOURCE") continue ;;
-    esac
+# Preserve grep's regex and symlink behavior, but pass it batches of NUL-delimited paths.
+# xargs bounds each argument list; its child maps only grep's no-match status to success.
+clock_inputs="$(mktemp "${TMPDIR:-/tmp}/gateway-clock-inputs.XXXXXX")"
+trap 'rm -f "$clock_inputs"' EXIT
+
+scan_clock_inputs() {
+    local pattern="$1" diagnostic="$2" output rc=0 hit
+    shift 2
+    if ! git ls-files --cached --others --exclude-standard -z -- \
+        'crates/*/src/*.rs' 'crates/*/src/**/*.rs' ':(exclude)crates/conformance/**' "$@" >"$clock_inputs"; then
+        fail 'cannot scan clock inputs: Git input enumeration failed'
+        return
+    fi
+    output="$(xargs -0 sh -c '
+        pattern="$1"; shift
+        [ "$#" -gt 0 ] || exit 0
+        grep -nHE -- "$pattern" "$@"
+        code=$?
+        [ "$code" -ne 1 ] || exit 0
+        exit "$code"
+    ' clock-scan "$pattern" <"$clock_inputs" 2>&1)" || rc=$?
+    if [[ "$rc" -ne 0 ]]; then
+        fail "cannot scan clock inputs: ${output}"
+        return
+    fi
     while IFS= read -r hit; do
         [[ -z "$hit" ]] && continue
-        fail "${file}:${hit} — the protocol path reads a clock outside ${WALL_SOURCE} and ${MONOTONIC_SOURCE}"
-    done < <(grep -nE "$READING_PATTERN" "$file" || true)
-# The index and the working tree together, for the reason recorded in
-# check_no_planning_docs.sh: a bare `git ls-files` cannot see a brand-new file, so
-# a stray clock read in one would stay invisible until the commit that lands it.
-done < <(git ls-files --cached --others --exclude-standard -- 'crates/*/src/*.rs' 'crates/*/src/**/*.rs' 2>/dev/null || true)
+        fail "${hit} — ${diagnostic}"
+    done <<<"$output"
+}
+
+# --- 3. Nothing else on the protocol path reads either clock. ----------------
+scan_clock_inputs "$READING_PATTERN" \
+    "the protocol path reads a clock outside ${WALL_SOURCE} and ${MONOTONIC_SOURCE}" \
+    ":(exclude)${WALL_SOURCE}" ":(exclude)${MONOTONIC_SOURCE}" ":(exclude)${TRANSPORT_TIMER_SOURCE}"
 
 # --- 4. Nothing renames either clock type, the sources included. -------------
-while IFS= read -r file; do
-    [[ -z "$file" ]] && continue
-    case "$file" in
-        crates/conformance/*) continue ;;
-    esac
-    while IFS= read -r hit; do
-        [[ -z "$hit" ]] && continue
-        fail "${file}:${hit} — a renamed clock type hides every later reading from this guard; name SystemTime and Instant as themselves"
-    done < <(grep -nE "$RENAME_PATTERN" "$file" || true)
-done < <(git ls-files --cached --others --exclude-standard -- 'crates/*/src/*.rs' 'crates/*/src/**/*.rs' 2>/dev/null || true)
+scan_clock_inputs "$RENAME_PATTERN" \
+    'a renamed clock type hides every later reading from this guard; name SystemTime and Instant as themselves'
 
 if [[ "$status" -ne 0 ]]; then
     cat >&2 <<'EOF'
