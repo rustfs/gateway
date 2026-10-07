@@ -261,16 +261,29 @@ fn a_malformed_configuration_document_is_malformed_xml_on_both_stacks() {
     refused_alike(&Scenario::new(request).length(Length::Declared(body.len() as u64)), expect);
 }
 
-/// The gateway refuses the header before its handler; s3s hands it to the RustFS body, which
-/// answers the same code.
+/// Both stacks refuse the header, but not alike. The gateway refuses it before its handler with the
+/// AWS code, in a document holding the shared contract. The legacy stack hands it to the RustFS
+/// body, which does not answer `InvalidDigest`: it decodes the value as base64 for its storage
+/// reader and maps the decoding failure to `500 InternalError`, storing nothing (rustfs/rustfs
+/// `95268a3b9`, `rustfs/src/app/object/put.rs:1724-1729` and `rustfs/src/error.rs:677`; observed on
+/// a legacy RustFS build, as `rd-err-0012` records). The body is scripted here as RustFS answers it,
+/// so this row no longer states an answer legacy RustFS never gives; the difference is ruled in the
+/// register as `rd-err-0012`.
 #[test]
-fn a_content_md5_that_is_not_base64_is_invalid_digest_on_both_stacks() {
+fn a_content_md5_that_is_not_base64_is_invalid_digest_on_the_gateway_and_a_server_error_behind_the_legacy_stack() {
     let scenario = Scenario::new(object_put(b"hello").header("content-md5", b"not-base64!").signed("us-east-1"))
-        .app_refuses(|| S3Error::with_message(S3ErrorCode::InvalidDigest, "The Content-Md5 you specified is not valid."));
-    refused_alike(
-        &scenario,
-        Expect::gateway_first(400, "InvalidDigest", "The Content-MD5 you specified is not valid", true),
-    );
+        .app_refuses(|| S3Error::new(S3ErrorCode::InternalError));
+    let pair = both(&scenario).expect("both stacks answer");
+    let Pair { gateway, oracle } = &pair;
+    assert_eq!((gateway.status, gateway.code()), (400, Some("InvalidDigest")), "{pair:#?}");
+    assert_eq!((oracle.status, oracle.code()), (500, Some("InternalError")), "{pair:#?}");
+    assert_eq!((gateway.reached, oracle.reached), (false, true), "{pair:#?}");
+    document_contract(gateway);
+    document_contract(oracle);
+    identifiers(gateway, oracle);
+    assert_eq!(gateway.message(), Some("The Content-MD5 you specified is not valid"), "{pair:#?}");
+    assert_eq!(gateway.element("Resource"), None, "{pair:#?}");
+    assert_eq!((gateway.closes, oracle.closes), (Some(false), None), "{pair:#?}");
 }
 
 /// An empty body whose Content-MD5 is that of `hello`: the gateway checks it at the gate, the RustFS
