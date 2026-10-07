@@ -58,14 +58,15 @@ const BODY: &[u8] = b"a small object body, sixty-four bytes long, for both direc
 /// header chunk seed removes four blocks (#1297), and metadata lookup names remove another
 /// 16 / 36 (#1301). Single-buffer string-to-sign construction removes six from both (#1313).
 /// Static metadata names remove 13 / 33 more (#1317); copy-source SSE names remove three from both (#1319).
+/// Request-local deadline futures remove two from GET and four from PUT (#1012).
 /// The plan's targets remain 3 / 4, and this ceiling only moves down.
 #[cfg(target_os = "linux")]
-const BLOCKS_PER_REQUEST: Option<(u64, u64)> = Some((106, 113));
+const BLOCKS_PER_REQUEST: Option<(u64, u64)> = Some((104, 109));
 /// macOS's standard library and runtime allocate a few more blocks per request, and not the same
 /// number every window. The combined repairs retain the previous block of room for runtime
 /// drift, so they refuse two new allocations per request but not reliably one; Linux is exact.
 #[cfg(target_os = "macos")]
-const BLOCKS_PER_REQUEST: Option<(u64, u64)> = Some((113, 131));
+const BLOCKS_PER_REQUEST: Option<(u64, u64)> = Some((111, 127));
 /// No platform other than the two above has been measured, so there is no ceiling to hold it to.
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
 const BLOCKS_PER_REQUEST: Option<(u64, u64)> = None;
