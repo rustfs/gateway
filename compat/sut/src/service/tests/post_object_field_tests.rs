@@ -35,8 +35,16 @@ const BUCKET: &str = "forms";
 const PUBLIC_WRITE: &str = r#"{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":"*","Action":"s3:PutObject","Resource":"arn:aws:s3:::forms/*"}]}"#;
 const BOUNDARY: &str = "----RustFSFormFields";
 
+/// [`PUBLIC_WRITE`] with the two Object Lock actions a form's lock fields ask granted too.
+const PUBLIC_WRITE_WITH_LOCK: &str = r#"{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":"*","Action":["s3:PutObject","s3:PutObjectRetention","s3:PutObjectLegalHold"],"Resource":"arn:aws:s3:::forms/*"}]}"#;
+
 /// A bucket anyone may write to, as a browser upload page's bucket is.
 async fn public_bucket() -> (TestRoot, S3Service) {
+    bucket_with_policy(PUBLIC_WRITE).await
+}
+
+/// A bucket whose policy is `policy`.
+async fn bucket_with_policy(policy: &'static str) -> (TestRoot, S3Service) {
     let root = TestRoot::new();
     let options = two_identity_options(&root, &[]);
     let (_backend, service) = assembled(&options);
@@ -44,11 +52,7 @@ async fn public_bucket() -> (TestRoot, S3Service) {
     assert_eq!(created.status(), 200, "{}", body_of(&created));
     let policy = exchange(
         &service,
-        as_main(
-            http::Method::PUT,
-            &format!("/{BUCKET}?policy"),
-            Bytes::from_static(PUBLIC_WRITE.as_bytes()),
-        ),
+        as_main(http::Method::PUT, &format!("/{BUCKET}?policy"), Bytes::from_static(policy.as_bytes())),
     )
     .await;
     assert!(policy.status().is_success(), "{}", body_of(&policy));
@@ -267,7 +271,7 @@ async fn the_members_rustfs_ignores_change_nothing() {
 }
 
 /// Negative — a value RustFS cannot read, a member this backend cannot store as RustFS does, and a
-/// member the profile does not carry each store nothing.
+/// customer key on this cleartext service each store nothing.
 #[tokio::test]
 async fn a_form_member_that_cannot_be_stored_as_rustfs_stores_it_stores_nothing() {
     let (_root, service) = public_bucket().await;
@@ -275,6 +279,7 @@ async fn a_form_member_that_cannot_be_stored_as_rustfs_stores_it_stores_nothing(
         ("x-amz-server-side-encryption-bucket-key-enabled", "yes"),
         ("If-None-Match", "no quotes"),
         ("x-amz-write-offset-bytes", "-"),
+        ("x-amz-object-lock-retain-until-date", "Tue, 01 Jan 2030 00:00:00 GMT"),
     ] {
         refused(&service, "unreadable", &[(name, value)], 400, "InvalidArgument").await;
     }
@@ -282,11 +287,19 @@ async fn a_form_member_that_cannot_be_stored_as_rustfs_stores_it_stores_nothing(
         ("x-amz-website-redirect-location", "/elsewhere"),
         ("Expires", "Tue, 01 Jan 2030 00:00:00 GMT"),
         ("Content-MD5", "1B2M2Y8AsgTpgAmY7PhCfg=="),
-        ("x-amz-object-lock-mode", "GOVERNANCE"),
-        ("x-amz-server-side-encryption-customer-algorithm", "AES256"),
     ] {
         refused(&service, "unstored", &[(name, value)], 501, "NotImplemented").await;
     }
+    // A customer key, or a fragment of its trio, is the gate's refusal on this cleartext service,
+    // as it is for a header (rustfs/gateway#1167); it never reaches the backend's own refusal.
+    refused(
+        &service,
+        "cleartext-key",
+        &[("x-amz-server-side-encryption-customer-algorithm", "AES256")],
+        400,
+        "InvalidRequest",
+    )
+    .await;
     // A refusal RustFS answers itself comes first: it never reaches the member this backend
     // cannot store.
     for (name, value) in [
@@ -302,5 +315,29 @@ async fn a_form_member_that_cannot_be_stored_as_rustfs_stores_it_stores_nothing(
             "InvalidStorageClass",
         )
         .await;
+    }
+}
+
+/// Negative — an Object Lock field asks the action legacy RustFS's `put_object` access hook asks
+/// for it, an empty value included (rustfs/gateway#1167): under a policy granting anonymous
+/// writers `s3:PutObject` alone the form is refused `403 AccessDenied`; under one granting the
+/// lock actions too it is authorized, and this backend, which keeps no Object Lock state, refuses
+/// it `501`. Nothing is stored either way.
+#[tokio::test]
+async fn n_an_object_lock_field_asks_its_action_and_stores_nothing_here() {
+    let fields: [(&str, &str); 5] = [
+        ("x-amz-object-lock-mode", "GOVERNANCE"),
+        ("x-amz-object-lock-mode", ""),
+        ("x-amz-object-lock-retain-until-date", "2030-01-01T00:00:00Z"),
+        ("x-amz-object-lock-legal-hold", "ON"),
+        ("x-amz-object-lock-legal-hold", ""),
+    ];
+    let (_root, service) = public_bucket().await;
+    for field in fields {
+        refused(&service, "locked", &[field], 403, "AccessDenied").await;
+    }
+    let (_root, service) = bucket_with_policy(PUBLIC_WRITE_WITH_LOCK).await;
+    for field in fields {
+        refused(&service, "locked", &[field], 501, "NotImplemented").await;
     }
 }

@@ -159,7 +159,8 @@ const GATES: &[(&str, Wiring)] = &[
             "c-object-0060",
         ]),
     ),
-    ("post", Wiring::Runs(&[])),
+    // c-post-0017 requires TLS, which no in-process call presents; its gate skips it by name.
+    ("post", Wiring::Runs(&["c-post-0017"])),
     ("range", Wiring::Runs(&[])),
     ("replication", Wiring::Runs(&[])),
     ("select-restore", Wiring::Runs(&[])),

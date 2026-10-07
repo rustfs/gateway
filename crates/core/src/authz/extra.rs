@@ -40,7 +40,8 @@ pub enum HeaderTrigger {
     ///
     /// This is how a DTO header binding reads as set: an object-lock mode, a retain-until date, a
     /// legal-hold status (`OFF` included, as legacy RustFS reads it), a tag set, or a canned ACL
-    /// or grant header.
+    /// or grant header. A POST Object form field is not a header: the facade reads one as set
+    /// whenever it was sent, an empty one included (its `post_object::permission_applies`).
     Present(&'static str),
     /// The header is present and its trimmed value is `true`, case-insensitively.
     ///

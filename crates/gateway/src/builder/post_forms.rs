@@ -79,9 +79,10 @@ impl ServiceBuilder {
     /// It also hands the registered `PostObject` handler every other `PutObject` member legacy
     /// RustFS reads from the form, in `PostObjectInput::fields` (rustfs/gateway#1129). The handler
     /// must give each the effect its store gives that field, or refuse the upload: one it ignored
-    /// would store another object than legacy RustFS stores from the same form. The members this
-    /// profile cannot carry yet — Object Lock, SSE-C, `redirect` — are refused before any handler
-    /// runs.
+    /// would store another object than legacy RustFS stores from the same form. The Object Lock
+    /// and customer-key fields are read under either grammar (rustfs/gateway#1167): a form naming
+    /// a lock is asked the lock actions, and a form's customer key passes the gate a header key
+    /// passes.
     #[must_use]
     pub fn legacy_rustfs_post_forms(mut self) -> Self {
         self.view_policy.post_forms.legacy_rustfs = true;

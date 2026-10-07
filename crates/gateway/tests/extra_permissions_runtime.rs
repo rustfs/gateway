@@ -219,6 +219,23 @@ async fn n_a_header_less_write_asks_only_the_base_action() {
     assert_eq!(reached.load(Ordering::SeqCst), 1);
 }
 
+/// Negative — an empty lock header sets nothing on a `PutObject`, so it asks no lock action and the
+/// base permission alone stores the write. Only a form field counts as set for being sent, empty
+/// or not (rustfs/gateway#1167, `post_object_lock_and_key_fields.rs`); the header keeps the
+/// trigger's own non-empty rule.
+#[tokio::test]
+async fn n_an_empty_lock_header_asks_no_lock_action() {
+    for legacy_headers in [false, true] {
+        for header in ["x-amz-object-lock-mode", "x-amz-object-lock-legal-hold"] {
+            let (service, reached, asked) = service(&["s3:PutObject"], legacy_headers);
+            assert_eq!(exchange(&service, put(&[(header, "")])).await.0, 200, "{legacy_headers} {header}");
+            let asked = asked.lock().expect("uncontended").clone();
+            assert!(asked.iter().all(|a| a == "s3:PutObject"), "{legacy_headers} {header}: {asked:?}");
+            assert_eq!(reached.load(Ordering::SeqCst), 1, "{legacy_headers} {header}");
+        }
+    }
+}
+
 /// Negative — a `DeleteObject` with `x-amz-bypass-governance-retention: true` needs
 /// `s3:BypassGovernanceRetention`; a `false` (or absent) value asks only the delete action.
 #[tokio::test]

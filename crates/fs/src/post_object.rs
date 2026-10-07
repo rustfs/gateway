@@ -43,12 +43,22 @@ const POST_SSE_KMS_REFUSED: &str = "SSE-KMS is not supported for POST object upl
 /// RustFS does. RustFS keeps `x-amz-website-redirect-location` with the object, re-renders a
 /// readable `Expires` and refuses any other, and checks the file against `Content-MD5`
 /// (`rustfs/src/app/object/shared.rs:706-771`, `put.rs:1724-1729`); this backend keeps no redirect,
-/// and keeps `Expires` and the digest check to the `PutObject` header path.
+/// and keeps `Expires` and the digest check to the `PutObject` header path. RustFS stores a form's
+/// retention and legal hold and encrypts with the customer key it carries
+/// (`rustfs/src/app/object/put.rs:1283-1287` at rustfs/rustfs `19978b2cb6`); this backend holds no
+/// object lock and encrypts with no customer key, so a form naming either is refused rather than
+/// stored without it.
 fn refuse_unstored(fields: &PostObjectFields) -> Result<(), HandlerError> {
     for (member, present) in [
         ("x-amz-website-redirect-location", fields.website_redirect_location.is_some()),
         ("Expires", fields.expires.is_some()),
         ("Content-MD5", fields.content_md5.is_some()),
+        ("x-amz-object-lock-mode", fields.object_lock_mode.is_some()),
+        ("x-amz-object-lock-retain-until-date", fields.object_lock_retain_until_date.is_some()),
+        ("x-amz-object-lock-legal-hold", fields.object_lock_legal_hold_status.is_some()),
+        ("x-amz-server-side-encryption-customer-algorithm", fields.sse_customer_algorithm.is_some()),
+        ("x-amz-server-side-encryption-customer-key", fields.sse_customer_key.is_some()),
+        ("x-amz-server-side-encryption-customer-key-MD5", fields.sse_customer_key_md5.is_some()),
     ] {
         if present {
             return Err(HandlerError::not_implemented(format!(
@@ -168,6 +178,86 @@ mod tests {
 
     fn field(key: &str, value: &str) -> (String, String) {
         (key.to_owned(), value.to_owned())
+    }
+
+    /// Negative — each member this backend cannot store as RustFS does is refused, naming the
+    /// member; the control, a form naming none of them, passes.
+    #[test]
+    fn n_each_unstored_member_is_refused_by_name() {
+        use rustfs_gateway::dto::{ObjectLockLegalHoldStatus, ObjectLockMode};
+        use rustfs_gateway::{SseCustomerKey, Timestamp};
+        let text = |value: &str| Some(value.to_owned());
+        let each: Vec<(&str, PostObjectFields)> = vec![
+            (
+                "x-amz-website-redirect-location",
+                PostObjectFields {
+                    website_redirect_location: text("/elsewhere"),
+                    ..PostObjectFields::default()
+                },
+            ),
+            (
+                "Expires",
+                PostObjectFields {
+                    expires: Some(String::from("x").into()),
+                    ..PostObjectFields::default()
+                },
+            ),
+            (
+                "Content-MD5",
+                PostObjectFields {
+                    content_md5: text("x"),
+                    ..PostObjectFields::default()
+                },
+            ),
+            (
+                "x-amz-object-lock-mode",
+                PostObjectFields {
+                    object_lock_mode: Some(ObjectLockMode::custom("GOVERNANCE".to_owned())),
+                    ..PostObjectFields::default()
+                },
+            ),
+            (
+                "x-amz-object-lock-retain-until-date",
+                PostObjectFields {
+                    object_lock_retain_until_date: Some(Timestamp::from_secs(0)),
+                    ..PostObjectFields::default()
+                },
+            ),
+            (
+                "x-amz-object-lock-legal-hold",
+                PostObjectFields {
+                    object_lock_legal_hold_status: Some(ObjectLockLegalHoldStatus::custom("ON".to_owned())),
+                    ..PostObjectFields::default()
+                },
+            ),
+            (
+                "x-amz-server-side-encryption-customer-algorithm",
+                PostObjectFields {
+                    sse_customer_algorithm: text("AES256"),
+                    ..PostObjectFields::default()
+                },
+            ),
+            (
+                "x-amz-server-side-encryption-customer-key",
+                PostObjectFields {
+                    sse_customer_key: Some(SseCustomerKey::from_wire("k")),
+                    ..PostObjectFields::default()
+                },
+            ),
+            (
+                "x-amz-server-side-encryption-customer-key-MD5",
+                PostObjectFields {
+                    sse_customer_key_md5: text("d"),
+                    ..PostObjectFields::default()
+                },
+            ),
+        ];
+        for (member, fields) in each {
+            let error = refuse_unstored(&fields).expect_err(member);
+            assert_eq!(error.code(), &ErrorCode::NOT_IMPLEMENTED, "{member}");
+            assert!(error.message().contains(member), "{member}: {}", error.message());
+        }
+        assert!(refuse_unstored(&PostObjectFields::default()).is_ok());
     }
 
     /// Negative — a repeated field is refused rather than resolved by picking one value.

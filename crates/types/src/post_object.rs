@@ -24,8 +24,10 @@ use core::fmt;
 
 use rustfs_gateway_stream::ByteStream;
 
-use crate::dto::{Acl, ChecksumAlgorithm, RequestPayer, ServerSideEncryption, StorageClass};
-use crate::{BucketName, ETag, ObjectKey, OpaqueString};
+use crate::dto::{
+    Acl, ChecksumAlgorithm, ObjectLockLegalHoldStatus, ObjectLockMode, RequestPayer, ServerSideEncryption, StorageClass,
+};
+use crate::{BucketName, ETag, ObjectKey, OpaqueString, SseCustomerKey, Timestamp};
 
 /// The standard S3 POST Object operation marker.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -40,13 +42,20 @@ pub struct PostObjectInput {
     pub key: ObjectKey,
     /// The file part as a live, policy-bounded stream.
     pub body: ByteStream,
+    /// The file part's exact length, when the request fixed it before the handler ran: under the
+    /// RustFS profile's legacy form grammar with a declared `Content-Length`, the length legacy
+    /// RustFS derives and sizes its upload from (rustfs/gateway#1167). `Some` is the same number
+    /// `body.remaining_length()` reports; `None` means the length is known only once `body` has
+    /// been read to its end, and a store that must know it first reads the file first.
+    pub content_length: Option<u64>,
     /// The file part's media type, or `None` for the S3 default.
     pub content_type: Option<String>,
     /// User metadata from accepted `x-amz-meta-*` form fields.
     pub metadata: Vec<(String, String)>,
-    /// The other `PutObject` members the form set by field, as the RustFS profile reads them
-    /// (`ServiceBuilder::legacy_rustfs_post_forms`); empty under the gateway's own grammar, which
-    /// does not read them.
+    /// The other `PutObject` members the form set by field. The RustFS profile
+    /// (`ServiceBuilder::legacy_rustfs_post_forms`) reads every one legacy RustFS reads; the
+    /// gateway's own grammar reads only the three Object Lock fields and the three customer-key
+    /// fields, which a browser form may carry on any profile, and leaves the rest unset.
     pub fields: PostObjectFields,
 }
 
@@ -63,9 +72,20 @@ pub struct PostObjectInput {
 /// members, the KMS context, the write offset and the two conditions: its conditional write and
 /// checksum verification read the request's own headers, never the form.
 ///
-/// `Debug` never prints the KMS key id or context. There is no `PartialEq`, as on every operation
-/// input: a member added later may hold an SSE-C key, which is never compared with `==`.
-#[derive(Clone, Default)]
+/// The three Object Lock fields and the three customer-key fields are read on every profile: a
+/// lock a form asked for and did not get is a protection the client believes it has, and a
+/// customer key the pipeline did not see is a key that went on the wire unjudged. The customer
+/// key passes the same transport, trio and digest rules a header key does before any handler
+/// sees it (`rustfs-gateway-core`'s `sse::enforce_with`), and the retain-until instant is parsed
+/// before authorization; the mode and hold values reach the handler as sent, for the closed-set
+/// rule the header path applies there. A lock member sent empty is handed as `Some` and was asked
+/// its lock action like any other value.
+///
+/// `Debug` never prints the customer key, the KMS key id or the context. There is no `Clone`:
+/// [`SseCustomerKey`] has none by contract, so its backing storage is never duplicated outside
+/// the zeroizing carrier. There is no `PartialEq`, as on every operation input: the key is never
+/// compared with `==`.
+#[derive(Default)]
 pub struct PostObjectFields {
     /// `x-amz-acl`.
     pub acl: Option<Acl>,
@@ -119,6 +139,13 @@ pub struct PostObjectFields {
     pub if_match: Option<String>,
     /// `If-None-Match`, the condition as sent.
     pub if_none_match: Option<String>,
+    /// `x-amz-object-lock-legal-hold`, as sent.
+    pub object_lock_legal_hold_status: Option<ObjectLockLegalHoldStatus>,
+    /// `x-amz-object-lock-mode`, as sent.
+    pub object_lock_mode: Option<ObjectLockMode>,
+    /// `x-amz-object-lock-retain-until-date`: under the RustFS profile the RFC 3339 date-time
+    /// legacy RustFS reads, under the gateway's own grammar the ISO 8601 instant the header is.
+    pub object_lock_retain_until_date: Option<Timestamp>,
     /// `x-amz-request-payer`.
     pub request_payer: Option<RequestPayer>,
     /// `x-amz-server-side-encryption`.
@@ -127,6 +154,12 @@ pub struct PostObjectFields {
     pub ssekms_encryption_context: Option<String>,
     /// `x-amz-server-side-encryption-aws-kms-key-id`.
     pub ssekms_key_id: Option<String>,
+    /// `x-amz-server-side-encryption-customer-algorithm`, as sent.
+    pub sse_customer_algorithm: Option<String>,
+    /// `x-amz-server-side-encryption-customer-key`: the key, unrenderable and cleared on drop.
+    pub sse_customer_key: Option<SseCustomerKey>,
+    /// `x-amz-server-side-encryption-customer-key-MD5`, as sent.
+    pub sse_customer_key_md5: Option<String>,
     /// `x-amz-storage-class`.
     pub storage_class: Option<StorageClass>,
     /// `x-amz-tagging`: the tag set as URL query-string pairs.
@@ -169,10 +202,16 @@ impl PostObjectFields {
             grant_write_acp,
             if_match,
             if_none_match,
+            object_lock_legal_hold_status,
+            object_lock_mode,
+            object_lock_retain_until_date,
             request_payer,
             server_side_encryption,
             ssekms_encryption_context,
             ssekms_key_id,
+            sse_customer_algorithm,
+            sse_customer_key,
+            sse_customer_key_md5,
             storage_class,
             tagging,
             website_redirect_location,
@@ -203,6 +242,8 @@ impl PostObjectFields {
             if_none_match,
             ssekms_encryption_context,
             ssekms_key_id,
+            sse_customer_algorithm,
+            sse_customer_key_md5,
             tagging,
             website_redirect_location,
         ];
@@ -211,8 +252,12 @@ impl PostObjectFields {
             && bucket_key_enabled.is_none()
             && checksum_algorithm.is_none()
             && expires.is_none()
+            && object_lock_legal_hold_status.is_none()
+            && object_lock_mode.is_none()
+            && object_lock_retain_until_date.is_none()
             && request_payer.is_none()
             && server_side_encryption.is_none()
+            && sse_customer_key.is_none()
             && storage_class.is_none()
             && write_offset_bytes.is_none()
     }
@@ -248,10 +293,16 @@ impl fmt::Debug for PostObjectFields {
             grant_write_acp,
             if_match,
             if_none_match,
+            object_lock_legal_hold_status,
+            object_lock_mode,
+            object_lock_retain_until_date,
             request_payer,
             server_side_encryption,
             ssekms_encryption_context,
             ssekms_key_id,
+            sse_customer_algorithm,
+            sse_customer_key,
+            sse_customer_key_md5,
             storage_class,
             tagging,
             website_redirect_location,
@@ -285,10 +336,16 @@ impl fmt::Debug for PostObjectFields {
             .field("grant_write_acp", grant_write_acp)
             .field("if_match", if_match)
             .field("if_none_match", if_none_match)
+            .field("object_lock_legal_hold_status", object_lock_legal_hold_status)
+            .field("object_lock_mode", object_lock_mode)
+            .field("object_lock_retain_until_date", object_lock_retain_until_date)
             .field("request_payer", request_payer)
             .field("server_side_encryption", server_side_encryption)
             .field("ssekms_encryption_context", &ssekms_encryption_context.as_ref().map(|_| REDACTED))
             .field("ssekms_key_id", &ssekms_key_id.as_ref().map(|_| REDACTED))
+            .field("sse_customer_algorithm", sse_customer_algorithm)
+            .field("sse_customer_key", &sse_customer_key.as_ref().map(|_| REDACTED))
+            .field("sse_customer_key_md5", sse_customer_key_md5)
             .field("storage_class", storage_class)
             .field("tagging", tagging)
             .field("website_redirect_location", website_redirect_location)
@@ -325,6 +382,60 @@ mod tests {
         assert!(!printed.contains("eyJkby1ub3QiOiJwcmludCJ9"), "{printed}");
         assert!(printed.contains("ssekms_key_id: Some(\"<redacted>\")"), "{printed}");
         assert!(printed.contains("max-age=60"), "{printed}");
+    }
+
+    /// Negative — `Debug` names a customer-provided key as present and never prints it; the
+    /// algorithm and the key digest, which a response echoes, print as sent.
+    #[test]
+    fn debug_never_prints_the_customer_provided_key() {
+        let fields = PostObjectFields {
+            sse_customer_algorithm: Some("AES256".to_owned()),
+            sse_customer_key: Some(SseCustomerKey::from_wire("do-not-print-this-key")),
+            sse_customer_key_md5: Some("digest-text".to_owned()),
+            ..PostObjectFields::default()
+        };
+        let printed = format!("{fields:?}");
+        assert!(!printed.contains("do-not-print-this-key"), "{printed}");
+        assert!(printed.contains("sse_customer_key: Some(\"<redacted>\")"), "{printed}");
+        assert!(printed.contains("AES256"), "{printed}");
+        assert!(printed.contains("digest-text"), "{printed}");
+        let absent = format!("{:?}", PostObjectFields::default());
+        assert!(absent.contains("sse_customer_key: None"), "{absent}");
+    }
+
+    /// Negative — each Object Lock and customer-key member alone makes the form non-empty, so a
+    /// handler that stores by `is_empty` never drops one.
+    #[test]
+    fn n_each_lock_and_customer_key_member_alone_is_not_empty() {
+        let each = [
+            PostObjectFields {
+                object_lock_legal_hold_status: Some(ObjectLockLegalHoldStatus::custom("ON".to_owned())),
+                ..PostObjectFields::default()
+            },
+            PostObjectFields {
+                object_lock_mode: Some(ObjectLockMode::custom("GOVERNANCE".to_owned())),
+                ..PostObjectFields::default()
+            },
+            PostObjectFields {
+                object_lock_retain_until_date: Some(Timestamp::from_secs(0)),
+                ..PostObjectFields::default()
+            },
+            PostObjectFields {
+                sse_customer_algorithm: Some(String::new()),
+                ..PostObjectFields::default()
+            },
+            PostObjectFields {
+                sse_customer_key: Some(SseCustomerKey::from_wire("")),
+                ..PostObjectFields::default()
+            },
+            PostObjectFields {
+                sse_customer_key_md5: Some(String::new()),
+                ..PostObjectFields::default()
+            },
+        ];
+        for fields in each {
+            assert!(!fields.is_empty(), "{fields:?}");
+        }
     }
 
     /// Positive and negative — a form that set nothing is empty; one member, an empty value

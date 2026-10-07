@@ -1,0 +1,96 @@
+# c-post-0018 — Lock fields outside their closed value sets are refused rather than stored.
+
+[case]
+id = "c-post-0018"
+schema_version = 1
+title = "Lock fields outside their closed value sets are refused rather than stored"
+rationale = """
+The form fields of mode and hold are held to the same closed sets as the headers (c-lock-0039): \
+GOVERNANCE or COMPLIANCE, ON or OFF, case-sensitive. ARCHIVE is a mode no enforcement path can \
+read, and a lowercase on is not the ON a compliance audit looks for, so storing either records a \
+lock that protects nothing while telling the uploader it succeeded. Both forms are correctly signed \
+so the refusal is the value's, and the read afterwards proves neither left an object behind."""
+polarity = "negative"
+operation = "PostObject"
+tags = ["object-lock", "error-shape", "signature", "sigv4"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObject.html"
+summary = "The object write documents the closed value sets of the mode and legal hold, which the form fields of the same name share."
+kind = "aws-doc"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+request_time = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-post-lock"
+object_lock = true
+
+[[setup.objects]]
+bucket = "conf-post-lock"
+key = "c-post-0018.txt"
+absent = true
+
+[[exchanges]]
+name = "write-with-an-unknown-mode"
+
+[exchanges.request]
+method = "POST"
+target = "/conf-post-lock"
+sign = { mode = "anonymous" }
+body = { utf8 = "--confpost\r\nContent-Disposition: form-data; name=\"key\"\r\n\r\nc-post-0018.txt\r\n--confpost\r\nContent-Disposition: form-data; name=\"x-amz-algorithm\"\r\n\r\nAWS4-HMAC-SHA256\r\n--confpost\r\nContent-Disposition: form-data; name=\"x-amz-credential\"\r\n\r\nAKIAIOSFODNN7EXAMPLE/20260102/us-east-1/s3/aws4_request\r\n--confpost\r\nContent-Disposition: form-data; name=\"x-amz-date\"\r\n\r\n20260102T030405Z\r\n--confpost\r\nContent-Disposition: form-data; name=\"x-amz-object-lock-mode\"\r\n\r\nARCHIVE\r\n--confpost\r\nContent-Disposition: form-data; name=\"x-amz-object-lock-retain-until-date\"\r\n\r\n2030-01-01T00:00:00Z\r\n--confpost\r\nContent-Disposition: form-data; name=\"policy\"\r\n\r\neyJleHBpcmF0aW9uIjoiMjAyNi0wMS0wMlQwNDowNDowNVoiLCJjb25kaXRpb25zIjpbeyJidWNrZXQiOiJjb25mLXBvc3QtbG9jayJ9LHsia2V5IjoiYy1wb3N0LTAwMTgudHh0In0seyJ4LWFtei1hbGdvcml0aG0iOiJBV1M0LUhNQUMtU0hBMjU2In0seyJ4LWFtei1jcmVkZW50aWFsIjoiQUtJQUlPU0ZPRE5ON0VYQU1QTEUvMjAyNjAxMDIvdXMtZWFzdC0xL3MzL2F3czRfcmVxdWVzdCJ9LHsieC1hbXotZGF0ZSI6IjIwMjYwMTAyVDAzMDQwNVoifSx7IngtYW16LW9iamVjdC1sb2NrLW1vZGUiOiJBUkNISVZFIn0seyJ4LWFtei1vYmplY3QtbG9jay1yZXRhaW4tdW50aWwtZGF0ZSI6IjIwMzAtMDEtMDFUMDA6MDA6MDBaIn1dfQ==\r\n--confpost\r\nContent-Disposition: form-data; name=\"x-amz-signature\"\r\n\r\ne6bdea38e1c14d9c90772e929710cd731c7e8a9701964c9423cb3bfa2702444f\r\n--confpost\r\nContent-Disposition: form-data; name=\"file\"; filename=\"upload\"\r\n\r\nnever-stored\r\n--confpost--\r\n" }
+
+[exchanges.request.headers]
+"content-type" = "multipart/form-data; boundary=confpost"
+
+[exchanges.expect]
+kind = "response"
+status = 400
+connection_after = "open"
+headers_absent = ["etag"]
+
+[exchanges.expect.error]
+code = "InvalidArgument"
+request_id_present = true
+
+[[exchanges]]
+name = "write-with-a-lowercase-hold"
+
+[exchanges.request]
+method = "POST"
+target = "/conf-post-lock"
+sign = { mode = "anonymous" }
+body = { utf8 = "--confpost\r\nContent-Disposition: form-data; name=\"key\"\r\n\r\nc-post-0018.txt\r\n--confpost\r\nContent-Disposition: form-data; name=\"x-amz-algorithm\"\r\n\r\nAWS4-HMAC-SHA256\r\n--confpost\r\nContent-Disposition: form-data; name=\"x-amz-credential\"\r\n\r\nAKIAIOSFODNN7EXAMPLE/20260102/us-east-1/s3/aws4_request\r\n--confpost\r\nContent-Disposition: form-data; name=\"x-amz-date\"\r\n\r\n20260102T030405Z\r\n--confpost\r\nContent-Disposition: form-data; name=\"x-amz-object-lock-legal-hold\"\r\n\r\non\r\n--confpost\r\nContent-Disposition: form-data; name=\"policy\"\r\n\r\neyJleHBpcmF0aW9uIjoiMjAyNi0wMS0wMlQwNDowNDowNVoiLCJjb25kaXRpb25zIjpbeyJidWNrZXQiOiJjb25mLXBvc3QtbG9jayJ9LHsia2V5IjoiYy1wb3N0LTAwMTgudHh0In0seyJ4LWFtei1hbGdvcml0aG0iOiJBV1M0LUhNQUMtU0hBMjU2In0seyJ4LWFtei1jcmVkZW50aWFsIjoiQUtJQUlPU0ZPRE5ON0VYQU1QTEUvMjAyNjAxMDIvdXMtZWFzdC0xL3MzL2F3czRfcmVxdWVzdCJ9LHsieC1hbXotZGF0ZSI6IjIwMjYwMTAyVDAzMDQwNVoifSx7IngtYW16LW9iamVjdC1sb2NrLWxlZ2FsLWhvbGQiOiJvbiJ9XX0=\r\n--confpost\r\nContent-Disposition: form-data; name=\"x-amz-signature\"\r\n\r\nce416cc91a64f8622e7bb02e1e5f307888e219742bccd10af7147961f3d4b7cd\r\n--confpost\r\nContent-Disposition: form-data; name=\"file\"; filename=\"upload\"\r\n\r\nnever-stored\r\n--confpost--\r\n" }
+
+[exchanges.request.headers]
+"content-type" = "multipart/form-data; boundary=confpost"
+
+[exchanges.expect]
+kind = "response"
+status = 400
+connection_after = "open"
+headers_absent = ["etag"]
+
+[exchanges.expect.error]
+code = "InvalidArgument"
+request_id_present = true
+
+[[exchanges]]
+name = "no-object-was-created"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-post-lock/c-post-0018.txt"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 404
+connection_after = "open"
+
+[exchanges.expect.error]
+code = "NoSuchKey"
+request_id_present = true

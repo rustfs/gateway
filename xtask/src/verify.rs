@@ -203,9 +203,14 @@ fn verify_operation(name: &str, json: bool) -> ExitCode {
         return ExitCode::from(2);
     }
     let entry = if manual {
-        catalog::VerifyEntry {
-            name: name.to_owned(),
-            cases: Vec::new(),
+        // A manual operation has no generated verify-map row; the corpus is its case list, so the
+        // mapping check holds and a representative case runs (rustfs/gateway#1167 found it empty).
+        match catalog::corpus_cases(name) {
+            Ok(cases) => catalog::VerifyEntry {
+                name: name.to_owned(),
+                cases,
+            },
+            Err(error) => return diagnostic("conformance corpus could not be read", "conformance/cases", &error),
         }
     } else {
         match catalog::verify_entry(name) {

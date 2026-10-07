@@ -44,6 +44,7 @@ fn prepared() -> PostObjectInput {
         bucket: BucketName::new("example-bucket").expect("valid bucket"),
         key: ObjectKey::new("uploads/report.txt").expect("valid key"),
         body: ByteStream::from_bytes(Bytes::from_static(b"report")),
+        content_length: Some(6),
         content_type: Some("text/plain".to_owned()),
         metadata: vec![("source".to_owned(), "browser".to_owned())],
         fields: PostObjectFields::default(),
@@ -57,6 +58,7 @@ fn a_policy_prepared_form_survives_the_erased_decoder() {
     assert_eq!(input.bucket.as_str(), "example-bucket");
     assert_eq!(input.key.as_str(), "uploads/report.txt");
     assert_eq!(input.body.remaining_length().get(), Some(6));
+    assert_eq!(input.content_length, Some(6), "the fixed length crosses the decoder with the stream");
 }
 
 #[test]

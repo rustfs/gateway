@@ -16,12 +16,12 @@
 //! sets besides its key, content type and metadata (rustfs/gateway#1129): every one legacy RustFS
 //! reads, as it reads it, or the refusal it answers before anything is stored.
 //!
-//! Responsible for: the handler's `PostObjectInput::fields` for each member, the refusal of a value
-//! legacy RustFS cannot read (before authorization, as legacy RustFS decodes the form before its
-//! access hook runs), and a member that stays uncarried still reaching no handler.
+//! Responsible for: the handler's `PostObjectInput::fields` for each member, and the refusal of a
+//! value legacy RustFS cannot read (before authorization, as legacy RustFS decodes the form before
+//! its access hook runs).
 //! NOT responsible for: what a backend stores from a member (`compat-sut`'s
-//! `post_object_field_tests.rs`), the form grammar (`post_object_legacy_form.rs`), or signed
-//! policies.
+//! `post_object_field_tests.rs`), the form grammar (`post_object_legacy_form.rs`), signed
+//! policies, or the Object Lock and customer-key fields (`post_object_lock_and_key_fields.rs`).
 //! Upstream: the facade's public API. Downstream: nothing.
 //!
 //! Evidence: legacy RustFS (rustfs/rustfs `e870a6d25b`, the S3 stack its `Cargo.toml:318` pins)
@@ -104,7 +104,7 @@ async fn post(fields: &[(&str, &str)], allow: bool) -> (StatusCode, String, Opti
     let response = service(Arc::clone(&backend), allow).call_bytes(request).await;
     let status = response.status();
     let answer = response.into_body().collect().await.expect("the answer body").to_bytes();
-    let handed = backend.handed.lock().expect("observation lock").clone();
+    let handed = backend.handed.lock().expect("observation lock").take();
     (status, String::from_utf8_lossy(&answer).into_owned(), handed)
 }
 
@@ -253,25 +253,5 @@ async fn an_unreadable_member_is_refused_before_authorization() {
             assert!(answer.contains(&format!("<Message>{message}</Message>")), "{name}: {answer}");
             assert!(handed.is_none(), "{name}");
         }
-    }
-}
-
-/// Negative — an Object Lock or SSE-C field still reaches no handler: `501` once authorized, the
-/// authorizer's answer first.
-#[tokio::test]
-async fn an_uncarried_member_still_reaches_no_handler() {
-    for (name, value) in [
-        ("x-amz-object-lock-legal-hold", "ON"),
-        ("x-amz-object-lock-mode", "GOVERNANCE"),
-        ("x-amz-object-lock-retain-until-date", "2030-01-01T00:00:00Z"),
-        ("x-amz-server-side-encryption-customer-algorithm", "AES256"),
-        ("x-amz-server-side-encryption-customer-key-md5", "md5"),
-    ] {
-        let (status, answer, handed) = post(&[(name, value)], true).await;
-        assert_eq!(status, StatusCode::NOT_IMPLEMENTED, "{name}: {answer}");
-        assert!(handed.is_none(), "{name}");
-        let (status, _, handed) = post(&[(name, value)], false).await;
-        assert_eq!(status, StatusCode::FORBIDDEN, "{name}");
-        assert!(handed.is_none(), "{name}");
     }
 }

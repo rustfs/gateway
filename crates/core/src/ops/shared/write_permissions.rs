@@ -14,7 +14,7 @@
 
 //! The header-conditional IAM actions the object-write operations share.
 //!
-//! Members: PutObject, CopyObject, CreateMultipartUpload, DeleteObject, PutObjectRetention
+//! Members: PutObject, PostObject, CopyObject, CreateMultipartUpload, DeleteObject, PutObjectRetention
 //!
 //! Responsible for: [`OBJECT_WRITE`], the extra permissions a request that stores an object
 //! requires when it sets an object-lock, tagging or ACL header, and [`GOVERNANCE_BYPASS`], the one
@@ -22,10 +22,10 @@
 //! rule added to it reaches every member instead of three of four.
 //! NOT responsible for: the base action ([`crate::AuthRequirement`] on each op), reading a header
 //! (the facade), or asking the authorizer (the facade route stage).
-//! Upstream: `crate::authz`. Downstream: the operation modules that list it. `PostObject` is
-//! deliberately not a member: its object-lock, tagging and ACL values are form fields, not HTTP
-//! headers, so these header triggers never fire for it; its form-field permissions are the
-//! POST-form seam's (rustfs/gateway#1167).
+//! Upstream: `crate::authz`. Downstream: the operation modules that list it. `PostObject` is a
+//! member whose values are form fields rather than HTTP headers: the facade's route stage reads
+//! these triggers off the form for it, as legacy RustFS's `put_object` access hook reads them off
+//! the input its form decoder built (rustfs/gateway#1167).
 //!
 //! # Where the actions come from
 //!

@@ -704,3 +704,75 @@ fn an_object_form_policy_is_read_with_legacy_rustfs_grammar() {
         assert_eq!((pair.gateway.reached, pair.oracle.reached), (false, false), "{pair:#?}");
     }
 }
+
+/// Positive and negative — the retain-until date of a bucket form is read with legacy RustFS's
+/// grammar on both stacks (rustfs/gateway#1167): every spelling either reaches `PostObject` on both,
+/// or is refused alike before it, `400 InvalidArgument` with the same message.
+#[test]
+fn a_retain_until_date_is_read_as_legacy_rustfs_reads_it() {
+    let mut differences = Vec::new();
+    for date in [
+        "2030-01-01T00:00:00Z",
+        "2030-01-01T00:00:00.123Z",
+        "2030-01-01T00:00:00.123456789Z",
+        "2030-01-01T00:00:00.1234567891Z",
+        "2030-01-01T00:00:00+08:00",
+        "2030-01-01T00:00:00-00:00",
+        "2030-01-01t00:00:00z",
+        "2030-01-01 00:00:00Z",
+        "2030-01-01T00:00:00",
+        "2030-01-01T00:00Z",
+        "2030-01-01T24:00:00Z",
+        "2030-02-30T00:00:00Z",
+        "2030-12-31T23:59:60Z",
+        "2030-01-01T00:00:00.Z",
+        "+2030-01-01T00:00:00Z",
+        "2030-1-01T00:00:00Z",
+        "20300101T000000Z",
+        "Tue, 01 Jan 2030 00:00:00 GMT",
+        "2030-01-01_00:00:00Z",
+        "2030-06-15T12:00:60Z",
+        "2031-01-01T07:59:60+08:00",
+        "2030-01-01T00:00:00+24:00",
+        "2030-01-01T00:00:00+08:60",
+        "2029-02-29T00:00:00Z",
+        "2028-02-29T00:00:00Z",
+        "2030-01-01T00:00:00Zx",
+        "2030-12-31T23:59:60+01:00",
+        "2030-01-01\u{e9}00:00:00Z",
+        "2030-01-01T00:00:00+0800",
+        "2030-01-01T00:60:00Z",
+        "2030-00-01T00:00:00Z",
+        "2030-13-01T00:00:00Z",
+        "tomorrow",
+        "",
+    ] {
+        let form = Form::signed_policy(|signed_at, credential| {
+            json!({
+                "expiration": "2099-01-01T00:00:00Z",
+                "conditions": [
+                    {"x-amz-date": signed_at}, {"x-amz-credential": credential}, {"x-amz-algorithm": ALGORITHM},
+                    {"bucket": "photos"}, ["starts-with", "$key", ""],
+                    ["starts-with", "$x-amz-object-lock-retain-until-date", ""]
+                ]
+            })
+        })
+        .with("x-amz-object-lock-retain-until-date", date);
+        let body = form.bytes();
+        let request =
+            ContextRequest::new(Method::POST, PATH_HOST, "/photos", "", &body).header("content-type", CONTENT_TYPE.as_bytes());
+        let pair = both(&Scenario::new(request).selecting_as_legacy_rustfs()).expect("both stacks answer");
+        let outcome = |reply: &super::Reply| {
+            if reply.reached {
+                None
+            } else {
+                Some((reply.status, reply.code().map(str::to_owned), reply.message().map(str::to_owned)))
+            }
+        };
+        let (gateway, oracle) = (outcome(&pair.gateway), outcome(&pair.oracle));
+        if gateway != oracle {
+            differences.push((date, gateway, oracle));
+        }
+    }
+    assert!(differences.is_empty(), "(date, gateway, legacy): {differences:#?}");
+}

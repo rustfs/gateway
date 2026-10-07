@@ -400,8 +400,30 @@ impl SseEnforced {
 ///
 /// [`SseRejection`] naming the first rule the request breaks.
 pub fn enforce(request: &MetaView<'_>, transport: TransportSecurity, config: &SseConfig) -> Result<SseEnforced, SseRejection> {
-    let headers = SseHeaders::read(request);
+    enforce_read(&SseHeaders::read(request), transport, config)
+}
 
+/// [`enforce`] over a lookup by exact header name rather than a request head.
+///
+/// For the one request whose SSE members travel elsewhere than its headers: a POST Object form
+/// carries the customer-key trio as form fields, and a key in a field is on the wire exactly as a
+/// key in a header is. The rules and their order are [`enforce`]'s, applied to
+/// [`SseHeaders::read_with`]'s reading of `lookup`; there is no second rule set, so a form key
+/// cannot become more tolerated than a header key.
+///
+/// # Errors
+///
+/// [`SseRejection`] naming the first rule the request breaks.
+pub fn enforce_with<'a>(
+    lookup: impl Fn(&str) -> Option<std::borrow::Cow<'a, str>>,
+    transport: TransportSecurity,
+    config: &SseConfig,
+) -> Result<SseEnforced, SseRejection> {
+    enforce_read(&SseHeaders::read_with(lookup), transport, config)
+}
+
+/// The rules, in their fixed order, over one reading of the family.
+fn enforce_read(headers: &SseHeaders<'_>, transport: TransportSecurity, config: &SseConfig) -> Result<SseEnforced, SseRejection> {
     // Legacy RustFS's transport gate looked at the target object's customer-key headers only until
     // rustfs/rustfs `5c9941707`, so with TLS required it served a copy source's customer key sent
     // over cleartext, where the key is disclosed to every hop exactly as a target key would be.
