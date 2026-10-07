@@ -23,6 +23,9 @@ use rustfs_gateway::{ChecksumAlgorithm, ChecksumSpec};
 
 use super::*;
 
+#[path = "completion_manifest_checksums.rs"]
+mod completion_manifest_checksums;
+
 pub(super) fn checksum(algorithm: ChecksumAlgorithm, bytes: &[u8]) -> ChecksumSpec {
     let mut checksummer = algorithm.checksummer();
     checksummer.update(bytes);

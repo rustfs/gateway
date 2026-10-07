@@ -153,9 +153,13 @@ or changing object bytes. The same validated tag pairs drive lifecycle `Tag` and
 
 Multipart state remains separate from published objects. Completion validates a strictly ordered,
 duplicate-free part list, retires the upload capability, and publishes the assembled bytes through
-the version authority. Negotiated multipart checksums persist with the upload, require matching
-composite part claims, validate completion claims, and report either a composite checksum or the
-assembled full-object CRC. Abort retires the capability before removing its parts.
+the version authority. Negotiated multipart checksums persist with the upload and require matching
+composite claims on `UploadPart`. Completion may omit those already-verified claims; it computes
+each selected part's checksum from its stored bytes, validates any supplied claim, and reports
+either a composite checksum or the assembled full-object CRC. Empty, malformed, conflicting or
+wrong supplied values still fail before publication, leaving the upload retryable. Native RustFS
+ignores a completion field for another algorithm; this backend keeps its existing refusal.
+Abort retires the capability before removing its parts.
 
 Lifecycle configuration is one atomically replaced bucket record encoded with the historical
 persistence XML codec. Complete standard rules, the transition minimum-size header, deletion, and
