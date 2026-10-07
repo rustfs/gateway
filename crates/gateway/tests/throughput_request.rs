@@ -15,9 +15,9 @@
 //! Live-socket evidence for the request-body throughput floor.
 //!
 //! Responsible for: signed `aws-chunked` slow-body refusal, the sustained-progress control and the
-//! self-measuring pacer it relies on, and concurrent slow-upload RSS and healthy-peer latency. NOT
-//! responsible for: idle-body or back-pressure contracts. Upstream: the streaming request fixture.
-//! Downstream: c-ing-0062.
+//! self-measuring pacer it relies on, and concurrent slow-upload RSS and healthy-peer latency.
+//! NOT responsible for: idle-body or back-pressure contracts.
+//! Upstream: the streaming request fixture. Downstream: c-ing-0062.
 
 #![allow(clippy::expect_used, clippy::panic)]
 
