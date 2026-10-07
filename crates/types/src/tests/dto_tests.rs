@@ -25,7 +25,7 @@
 //! exists to preserve.
 
 use crate::dto;
-use crate::ops::enums::{ChecksumAlgorithm, EncodingType, StorageClass};
+use crate::ops::enums::{ChecksumAlgorithm, EncodingType, OptionalFields, StorageClass};
 use crate::ops::shapes::Object;
 use crate::ops::{get_bucket_location, list_objects_v2, put_object};
 use crate::{BucketName, ETag, ObjectKey, SseCustomerKey, Timestamp, WirePlaceholder};
@@ -86,6 +86,21 @@ fn c_dto_0005_a_string_enumeration_exposes_its_model_values() {
     assert_eq!(StorageClass::GLACIER.as_str(), "GLACIER");
     assert!(StorageClass::STANDARD.is_known());
     assert_eq!(EncodingType::URL.as_str(), "url");
+}
+
+#[test]
+fn inventory_reference_date_is_a_known_model_value() {
+    assert!(OptionalFields::from("IntelligentTieringReferenceDate").is_known());
+}
+
+#[test]
+fn n_inventory_reference_date_does_not_fold_case() {
+    assert!(!OptionalFields::from("intelligentTieringReferenceDate").is_known());
+}
+
+#[test]
+fn n_inventory_reference_date_does_not_trim_whitespace() {
+    assert!(!OptionalFields::from("IntelligentTieringReferenceDate ").is_known());
 }
 
 #[test]

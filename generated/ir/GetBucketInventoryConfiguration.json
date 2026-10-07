@@ -146,7 +146,8 @@
                                                                                           "ChecksumAlgorithm",
                                                                                           "ObjectAccessControlList",
                                                                                           "ObjectOwner",
-                                                                                          "LifecycleExpirationDate"
+                                                                                          "LifecycleExpirationDate",
+                                                                                          "IntelligentTieringReferenceDate"
                                                                                         ]
                                                                             },
                                                                   "flattened": false,
