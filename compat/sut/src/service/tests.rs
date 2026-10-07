@@ -751,6 +751,10 @@ mod legacy_heads_tests;
 /// What a browser form's `PutObject` members store, as legacy RustFS stores them (rustfs/gateway#1129).
 mod post_object_field_tests;
 
+/// A browser form's file and request head, stored as legacy RustFS stores them or kept out by the
+/// #1167 ruling (rustfs/gateway#1167).
+mod post_form_file_tests;
+
 /// `If-Match` on a delete, judged as legacy RustFS judges it (rustfs/gateway#1191).
 mod conditional_delete_tests;
 

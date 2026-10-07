@@ -344,6 +344,10 @@ where
     }
 }
 
+/// Legacy RustFS's sentence for an empty form file: the legacy stack's text for
+/// `UnexpectedContent`.
+const LEGACY_EMPTY_FILE: &str = "This request does not support content.";
+
 #[derive(Debug)]
 struct PostBodyError(&'static str, Option<Box<S3Error>>);
 
@@ -365,6 +369,7 @@ struct PostFileBody<B: Body> {
     frames: WireFrames<B>,
     first: Option<Bytes>,
     initial: bool,
+    /// The RustFS profile: a policy refusal in legacy RustFS's words, and an empty file refused.
     legacy_policy_errors: bool,
     file: FileReader,
     policy: AcceptedPolicy,
@@ -411,6 +416,21 @@ impl<B: Body> PostFileBody<B> {
         if let Err(error) = self.policy.enforce_final(&self.bucket, &self.key, file_bytes) {
             self.pending.clear();
             return Poll::Ready(Some(Err(self.policy_error("the POST file did not satisfy its policy", error))));
+        }
+        // Legacy-compat (rustfs/backlog#2684): legacy RustFS hands its upload path no length for an
+        // empty file, and that path refuses `400 UnexpectedContent` before storing anything
+        // (`rustfs/src/app/object/put.rs:91-116` at rustfs/rustfs@95268a3b9), after the policy's
+        // own checks. An empty upload is a valid object everywhere else; the intended future
+        // behaviour is to store it, as `PutObject` does (rustfs/gateway#1167).
+        if self.legacy_policy_errors && file_bytes == 0 {
+            self.pending.clear();
+            let refusal = from_handler(
+                HandlerError::new(ErrorCode::UNEXPECTED_CONTENT, LEGACY_EMPTY_FILE),
+                ResponseKind::Other,
+                ConnectionIntent::MayKeepAlive,
+            );
+            let refusal = Box::new(self.frames.mark_refusal_if_unfinished(refusal));
+            return Poll::Ready(Some(Err(PostBodyError("the POST file was empty", Some(refusal)))));
         }
         Poll::Ready(self.pending.pop_front().map(|bytes| Ok(Frame::data(bytes))))
     }
