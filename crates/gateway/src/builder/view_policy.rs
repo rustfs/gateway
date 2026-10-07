@@ -99,6 +99,7 @@ use rustfs_gateway_sig::PayloadMode;
 mod checksum_declarations;
 mod date_conditions;
 pub(crate) mod header_signatures;
+mod legacy_checksums;
 pub(crate) mod presigned_urls;
 pub use self::checksum_declarations::LEGACY_CHECKSUM_DECLARATION_OPERATIONS;
 pub use self::date_conditions::STRICT_DATE_CONDITION_HEADERS;
@@ -206,6 +207,8 @@ pub(crate) struct ViewPolicy {
     pub(super) legacy_checksum_declarations: bool,
     body_literals: bool,
     unknown_checksum_algorithms_ignored: bool,
+    /// Whether checksum claims are read as legacy RustFS reads them (`legacy_checksums`).
+    legacy_checksums: bool,
     empty_headers_absent: bool,
     /// Who answers a header signature's pre-lookup refusals (`header_signatures`).
     pub(crate) header_signatures: header_signatures::HeaderRefusals,
@@ -340,6 +343,11 @@ impl ViewPolicy {
         // storing the body damages nothing; the intended future behaviour is the core's refusal.
         let meta = if self.unknown_checksum_algorithms_ignored {
             meta.with_unknown_checksum_algorithms_ignored()
+        } else {
+            meta
+        };
+        let meta = if self.legacy_checksums && legacy_checksums::covers(operation) {
+            meta.with_legacy_rustfs_checksums(legacy_checksums::reads_algorithm_header(operation))
         } else {
             meta
         };

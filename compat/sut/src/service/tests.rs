@@ -778,6 +778,8 @@ mod denial_sentence_tests;
 mod expiration_header_tests;
 /// The header-conditional extra permissions, enforced as legacy RustFS enforces them.
 mod extra_permission_tests;
+/// Request checksum claims read as legacy RustFS reads them (rustfs/gateway#1349).
+mod legacy_checksum_claim_tests;
 /// A request naming one object version, authorised as legacy RustFS authorises it (GHSA-3ppv).
 mod version_action_tests;
 
