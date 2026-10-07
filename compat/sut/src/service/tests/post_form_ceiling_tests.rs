@@ -34,6 +34,33 @@ const PUBLIC_WRITE: &str = r#"{"Version":"2012-10-17","Statement":[{"Effect":"Al
 const BOUNDARY: &str = "----RustFSFormCeilings";
 const MIB: usize = 1024 * 1024;
 
+/// Delivers the same form bytes as DATA frames below the service's resident-frame bound.
+struct FormFrames(Bytes);
+
+impl http_body::Body for FormFrames {
+    type Data = Bytes;
+    type Error = std::convert::Infallible;
+
+    fn poll_frame(
+        mut self: std::pin::Pin<&mut Self>,
+        _: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Result<http_body::Frame<Bytes>, Self::Error>>> {
+        if self.0.is_empty() {
+            return std::task::Poll::Ready(None);
+        }
+        let length = self.0.len().min(64 * 1024);
+        std::task::Poll::Ready(Some(Ok(http_body::Frame::data(self.0.split_to(length)))))
+    }
+
+    fn is_end_stream(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    fn size_hint(&self) -> http_body::SizeHint {
+        http_body::SizeHint::with_exact(self.0.len() as u64)
+    }
+}
+
 async fn public_bucket() -> (TestRoot, S3Service) {
     let root = TestRoot::new();
     let options = two_identity_options(&root, &[]);
@@ -70,9 +97,9 @@ async fn post_form(service: &S3Service, key: &str, fields: &[(String, String)]) 
         .header(http::header::HOST, "s3.example.com")
         .header(http::header::CONTENT_TYPE, format!("multipart/form-data; boundary={BOUNDARY}"))
         .header(http::header::CONTENT_LENGTH, body.len())
-        .body(Bytes::from(body))
+        .body(FormFrames(Bytes::from(body)))
         .expect("a valid form request");
-    exchange(service, request).await
+    collect(service.call(request).await).await.expect("a finite response")
 }
 
 async fn head(service: &S3Service, key: &str) -> WireResponse {
