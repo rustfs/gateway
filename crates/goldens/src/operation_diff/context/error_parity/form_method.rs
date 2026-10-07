@@ -15,8 +15,10 @@
 //! Object-path multipart refusal parity (rustfs/gateway#1184).
 //!
 //! Responsible for: metadata and signature ordering before the RustFS profile's 405, with no
-//! handler call. Not responsible for: upload storage or file consumption. Upstream: the two
-//! pinned oracles and the assembled gateway. Downstream: no runtime code.
+//! handler call, for SigV4 and SigV2 forms, and the legacy policy grammar and algorithm binding
+//! the SigV4 metadata check reads (rustfs/gateway#1185).
+//! NOT responsible for: upload storage or file consumption.
+//! Upstream: the two pinned oracles and the assembled gateway. Downstream: no runtime code.
 
 use http::Method;
 use rustfs_gateway_sig::RequestNow;
@@ -47,8 +49,7 @@ impl Form {
     }
 
     fn signed_at(access_key: &str, date: &str, expiration: &str, key_condition: &str) -> Self {
-        let credential = format!("{access_key}/{}/us-east-1/s3/aws4_request", &date[..8]);
-        let policy = base64(
+        Self::signed_document(access_key, date, |date, credential| {
             json!({
                 "expiration": expiration,
                 "conditions": [
@@ -56,9 +57,18 @@ impl Form {
                     {"x-amz-algorithm": ALGORITHM}, {"key": key_condition}, {"bucket": "photos"}
                 ]
             })
-            .to_string()
-            .as_bytes(),
-        );
+        })
+    }
+
+    /// A SigV4 form signed now over the policy `document` builds from its date and credential.
+    fn signed_policy(document: impl FnOnce(&str, &str) -> serde_json::Value) -> Self {
+        let date = amz_date(RequestNow::capture().unix_seconds());
+        Self::signed_document(ACCESS_KEY, &date, document)
+    }
+
+    fn signed_document(access_key: &str, date: &str, document: impl FnOnce(&str, &str) -> serde_json::Value) -> Self {
+        let credential = format!("{access_key}/{}/us-east-1/s3/aws4_request", &date[..8]);
+        let policy = base64(document(date, &credential).to_string().as_bytes());
         let mut key = hmac(format!("AWS4{SECRET_KEY}").as_bytes(), &date.as_bytes()[..8]);
         for part in [b"us-east-1".as_slice(), b"s3", b"aws4_request"] {
             key = hmac(&key, part);
@@ -72,6 +82,36 @@ impl Form {
                 ("x-amz-date", date.into()),
                 ("policy", policy),
                 ("x-amz-signature", signature),
+            ],
+        }
+    }
+
+    /// A SigV2 form: `AWSAccessKeyId`, a policy, and its signature with `secret`.
+    fn sigv2(secret: &str) -> Self {
+        Self::sigv2_over(
+            base64(
+                json!({
+                    "expiration": "2099-01-01T00:00:00Z",
+                    "conditions": [{"bucket": "photos"}, ["starts-with", "$key", ""]]
+                })
+                .to_string()
+                .as_bytes(),
+            ),
+            secret,
+        )
+    }
+
+    /// A SigV2 form over `policy`, already encoded, signed with `secret`.
+    fn sigv2_over(policy: String, secret: &str) -> Self {
+        let signature = rustfs_gateway_sig::SigV2Signer::new(ACCESS_KEY, secret.as_bytes())
+            .expect("a signer")
+            .post_policy_signature(&policy);
+        Self {
+            fields: vec![
+                ("key", "a.txt".into()),
+                ("AWSAccessKeyId", ACCESS_KEY.into()),
+                ("policy", policy),
+                ("signature", signature),
             ],
         }
     }
@@ -442,4 +482,225 @@ fn a_valid_bucket_form_can_reach_the_handler() {
         ContextRequest::new(Method::POST, PATH_HOST, "/photos", "", &body).header("content-type", CONTENT_TYPE.as_bytes());
     let pair = both(&Scenario::new(request).selecting_as_legacy_rustfs()).expect("both stacks answer");
     assert!(pair.gateway.reached, "{pair:#?}");
+}
+
+/// Positive and negative — a SigV2 form on an object path is verified as legacy RustFS verifies one
+/// (`v2_check_post_signature`), then refused `405` with nothing reached; a forged signature, an
+/// unreadable policy and a missing access key or policy are refused first, with legacy RustFS's
+/// code (rustfs/gateway#1184, #1185). The SigV2 check reads no condition and no expiry, so a policy
+/// that names another key, has expired, is past the default 32 KiB policy ceiling or is not JSON
+/// still reaches the method refusal.
+#[test]
+fn n_a_sigv2_object_form_is_verified_before_the_method_refusal() {
+    let document = |expiration: &str, key: &str| {
+        base64(
+            json!({"expiration": expiration, "conditions": [{"bucket": "photos"}, {"key": key}]})
+                .to_string()
+                .as_bytes(),
+        )
+    };
+    let padded = base64(
+        json!({"expiration": "2099-01-01T00:00:00Z", "conditions": [{"bucket": "photos"}, ["starts-with", "$key", ""],
+            ["starts-with", "$x-ignore-pad", "p".repeat(40 * 1024)]]})
+        .to_string()
+        .as_bytes(),
+    );
+    let mut observed = Vec::new();
+    let mut expected = Vec::new();
+    for (kind, form, status, code) in [
+        ("valid", Form::sigv2(SECRET_KEY), 405, "MethodNotAllowed"),
+        ("forged", Form::sigv2("not-the-secret"), 403, "SignatureDoesNotMatch"),
+        ("unreadable", Form::sigv2(SECRET_KEY).with("policy", "not-base64"), 400, "InvalidRequest"),
+        (
+            "empty-signature",
+            Form::sigv2(SECRET_KEY).with("signature", ""),
+            403,
+            "SignatureDoesNotMatch",
+        ),
+        (
+            "another key",
+            Form::sigv2_over(document("2099-01-01T00:00:00Z", "a.txt"), SECRET_KEY).with("key", "elsewhere.txt"),
+            405,
+            "MethodNotAllowed",
+        ),
+        (
+            "expired",
+            Form::sigv2_over(document("2000-01-01T00:00:00Z", "a.txt"), SECRET_KEY),
+            405,
+            "MethodNotAllowed",
+        ),
+        ("past 32 KiB", Form::sigv2_over(padded, SECRET_KEY), 405, "MethodNotAllowed"),
+        ("not JSON", Form::sigv2_over(base64(b"not json"), SECRET_KEY), 405, "MethodNotAllowed"),
+        ("no access key", Form::sigv2(SECRET_KEY).without("AWSAccessKeyId"), 400, "InvalidRequest"),
+        ("no policy", Form::sigv2(SECRET_KEY).without("policy"), 400, "InvalidRequest"),
+    ] {
+        let scenario = Scenario::new(request(&form.bytes(), "", CONTENT_TYPE))
+            .selecting_as_legacy_rustfs()
+            .with_sigv2();
+        let pair = both(&scenario).expect("both stacks answer");
+        observed.push((
+            kind,
+            pair.gateway.status,
+            pair.gateway.code().map(str::to_owned),
+            pair.gateway.reached,
+            pair.oracle.status,
+            pair.oracle.code().map(str::to_owned),
+            pair.oracle.reached,
+        ));
+        expected.push((kind, status, Some(code.to_owned()), false, status, Some(code.to_owned()), false));
+    }
+    assert_eq!(observed, expected);
+}
+
+/// Positive and negative — on the bucket path a SigV2 form whose signature verifies reaches
+/// `PostObject` on both stacks, and one whose signature is empty or is not twenty base64 bytes is
+/// looked up and refused `403 SignatureDoesNotMatch` with nothing reached, as legacy RustFS's
+/// `v2_check_post_signature` refuses it (rustfs/gateway#1185). The fixture backend does not read
+/// the file, so the answer after a reached handler is not compared, as for a SigV4 form above.
+#[test]
+fn n_a_sigv2_bucket_form_with_an_unreadable_signature_is_a_mismatch() {
+    let thirty_two = base64(&[7; 32]);
+    let nineteen = base64(&[7; 19]);
+    let mut observed = Vec::new();
+    let mut expected = Vec::new();
+    for (kind, signature) in [
+        ("valid", None),
+        ("empty", Some("")),
+        ("not-base64", Some("!!!!")),
+        ("nineteen-bytes", Some(nineteen.as_str())),
+        ("thirty-two-bytes", Some(thirty_two.as_str())),
+    ] {
+        let form = match signature {
+            Some(signature) => Form::sigv2(SECRET_KEY).with("signature", signature),
+            None => Form::sigv2(SECRET_KEY),
+        };
+        let body = form.bytes();
+        let request =
+            ContextRequest::new(Method::POST, PATH_HOST, "/photos", "", &body).header("content-type", CONTENT_TYPE.as_bytes());
+        let pair = both(&Scenario::new(request).selecting_as_legacy_rustfs().with_sigv2()).expect("both stacks answer");
+        if signature.is_none() {
+            observed.push((kind, None, None, pair.gateway.reached, None, None, pair.oracle.reached));
+            expected.push((kind, None, None, true, None, None, true));
+            continue;
+        }
+        observed.push((
+            kind,
+            Some(pair.gateway.status),
+            pair.gateway.code().map(str::to_owned),
+            pair.gateway.reached,
+            Some(pair.oracle.status),
+            pair.oracle.code().map(str::to_owned),
+            pair.oracle.reached,
+        ));
+        let code = Some("SignatureDoesNotMatch".to_owned());
+        expected.push((kind, Some(403), code.clone(), false, Some(403), code, false));
+    }
+    assert_eq!(observed, expected);
+}
+
+/// Negative — a SigV2 form naming an access key nobody issued is refused `403` on both stacks and
+/// reaches nothing; the oracle's callback answers `NotSignedUp` where RustFS IAM and the facade's
+/// provider contract answer `InvalidAccessKeyId`, as for a SigV4 form.
+#[test]
+fn n_a_sigv2_object_form_with_an_unknown_key_is_refused() {
+    let form = Form::sigv2(SECRET_KEY).with("AWSAccessKeyId", "AKIDUNKNOWN");
+    let scenario = Scenario::new(request(&form.bytes(), "", CONTENT_TYPE))
+        .selecting_as_legacy_rustfs()
+        .with_sigv2();
+    let pair = both(&scenario).expect("both stacks answer");
+    assert_eq!((pair.gateway.status, pair.oracle.status), (403, 403), "{pair:#?}");
+    assert_eq!(pair.gateway.code(), Some("InvalidAccessKeyId"), "{pair:#?}");
+    assert_eq!(pair.oracle.code(), Some("NotSignedUp"), "{pair:#?}");
+    assert_eq!((pair.gateway.reached, pair.oracle.reached), (false, false), "{pair:#?}");
+}
+
+/// Negative — a SigV4 form's policy must bind its algorithm as it binds its date and credential:
+/// an absent or different `x-amz-algorithm` condition is `400 InvalidPolicyDocument` on both
+/// stacks, before the signature and the method check.
+#[test]
+fn n_an_object_form_policy_must_bind_its_algorithm() {
+    for algorithm in [None, Some("AWS4-HMAC-SHA512"), Some("aws4-hmac-sha256")] {
+        let form = Form::signed_policy(|date, credential| {
+            let mut conditions = vec![json!({"x-amz-date": date}), json!({"x-amz-credential": credential})];
+            if let Some(algorithm) = algorithm {
+                conditions.push(json!({"x-amz-algorithm": algorithm}));
+            }
+            json!({"expiration": "2099-01-01T00:00:00Z", "conditions": conditions})
+        });
+        let pair = both(&Scenario::new(request(&form.bytes(), "", CONTENT_TYPE)).selecting_as_legacy_rustfs())
+            .expect("both stacks answer");
+        assert_eq!((pair.gateway.status, pair.oracle.status), (400, 400), "{algorithm:?}: {pair:#?}");
+        assert_eq!(
+            (pair.gateway.code(), pair.oracle.code()),
+            (Some("InvalidPolicyDocument"), Some("InvalidPolicyDocument")),
+            "{algorithm:?}: {pair:#?}"
+        );
+        assert_eq!(pair.gateway.message(), pair.oracle.message(), "{algorithm:?}: {pair:#?}");
+        assert_eq!((pair.gateway.reached, pair.oracle.reached), (false, false), "{pair:#?}");
+    }
+}
+
+/// Negative — the first exact condition naming a credential field decides, as legacy RustFS's
+/// `eq_condition_value` reads it: a wrong first one is refused `400 InvalidPolicyDocument` on both
+/// stacks although a later one names the right value.
+#[test]
+fn n_the_first_condition_naming_a_credential_field_decides() {
+    for field in ["x-amz-algorithm", "x-amz-date", "x-amz-credential"] {
+        let form = Form::signed_policy(|date, credential| {
+            let right = |name: &str| match name {
+                "x-amz-algorithm" => ALGORITHM.to_owned(),
+                "x-amz-date" => date.to_owned(),
+                _ => credential.to_owned(),
+            };
+            let mut conditions = vec![json!({field: "wrong"})];
+            for name in ["x-amz-date", "x-amz-credential", "x-amz-algorithm"] {
+                conditions.push(json!({name: right(name)}));
+            }
+            json!({"expiration": "2099-01-01T00:00:00Z", "conditions": conditions})
+        });
+        let pair = both(&Scenario::new(request(&form.bytes(), "", CONTENT_TYPE)).selecting_as_legacy_rustfs())
+            .expect("both stacks answer");
+        assert_eq!((pair.gateway.status, pair.oracle.status), (400, 400), "{field}: {pair:#?}");
+        assert_eq!(
+            (pair.gateway.code(), pair.oracle.code()),
+            (Some("InvalidPolicyDocument"), Some("InvalidPolicyDocument")),
+            "{field}: {pair:#?}"
+        );
+        assert_eq!(pair.gateway.message(), pair.oracle.message(), "{field}: {pair:#?}");
+        assert_eq!((pair.gateway.reached, pair.oracle.reached), (false, false), "{field}: {pair:#?}");
+    }
+}
+
+/// Positive — a SigV4 form's policy is read with legacy RustFS's grammar: operators in any ASCII
+/// case and an expiration spelled with a space bind its credentials, and the form is refused `405`
+/// on both stacks; an expired one too, because expiry belongs to the upload it never reaches.
+#[test]
+fn an_object_form_policy_is_read_with_legacy_rustfs_grammar() {
+    for (kind, expiration, operator) in [
+        ("mixed-case operators", "2099-01-01T00:00:00Z", "EQ"),
+        // A control: the strict grammar already reads `eq`.
+        ("lowercase operators", "2099-01-01T00:00:00Z", "eq"),
+        ("space-separated expiration", "2099-01-01 00:00:00Z", "eq"),
+        ("expired", "2000-01-01T00:00:00Z", "Eq"),
+    ] {
+        let form = Form::signed_policy(|date, credential| {
+            json!({
+                "expiration": expiration,
+                "conditions": [
+                    [operator, "$x-amz-date", date],
+                    [operator, "$x-amz-credential", credential],
+                    [operator, "$x-amz-algorithm", ALGORITHM]
+                ]
+            })
+        });
+        let pair = both(&Scenario::new(request(&form.bytes(), "", CONTENT_TYPE)).selecting_as_legacy_rustfs())
+            .expect("both stacks answer");
+        assert_eq!((pair.gateway.status, pair.oracle.status), (405, 405), "{kind}: {pair:#?}");
+        assert_eq!(
+            (pair.gateway.code(), pair.oracle.code()),
+            (Some("MethodNotAllowed"), Some("MethodNotAllowed")),
+            "{kind}: {pair:#?}"
+        );
+        assert_eq!((pair.gateway.reached, pair.oracle.reached), (false, false), "{pair:#?}");
+    }
 }

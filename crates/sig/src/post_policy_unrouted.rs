@@ -19,7 +19,7 @@
 //! prelude. Downstream: the existing authenticator; this type cannot produce upload enforcement.
 
 use super::{
-    ALGORITHM, Condition, FieldSet, JsonParser, PostPolicyError, PostPolicyLimits, decode_base64, hmac_sha256, parse_expiration,
+    ALGORITHM, Condition, FieldSet, JsonParser, PolicyReading, PostPolicyError, PostPolicyLimits, decode_base64, hmac_sha256,
     parse_policy, parse_signature,
 };
 use crate::{
@@ -55,6 +55,8 @@ pub enum UnroutedPostPolicyError {
     DateNotBound,
     /// The policy has no exact condition binding the form credential.
     CredentialNotBound,
+    /// The policy has no exact condition binding the form algorithm.
+    AlgorithmNotBound,
 }
 
 /// Credential material of a form that will be refused without running an upload operation.
@@ -102,18 +104,27 @@ impl UnroutedPostPolicy {
         let decoded = decode_base64(encoded, limits.max_decoded_bytes).map_err(|_| Error::InvalidEncoding)?;
         let root =
             JsonParser::parse(&decoded, limits.max_json_depth, limits.max_json_elements).map_err(|_| Error::InvalidDocument)?;
-        let (expiration, conditions) = parse_policy(root, false).map_err(|_| Error::InvalidDocument)?;
-        parse_expiration(&expiration).map_err(|_| Error::InvalidDocument)?;
+        // Legacy RustFS reads the document with its own grammar before the signature: operators in
+        // any ASCII case and its expiration spellings (rustfs/gateway#1305, #1326).
+        let reading = PolicyReading::LegacyRustfs;
+        let (expiration, conditions) = parse_policy(root, reading.folds_operators()).map_err(|_| Error::InvalidDocument)?;
+        reading.expiry(&expiration).map_err(|_| Error::InvalidDocument)?;
+        // The first exact condition naming the field decides, as legacy RustFS's `eq_condition_value`
+        // reads one: a later condition with the right value does not rescue a wrong first one.
         let bound = |name: &str, value: &str| {
-            conditions
-                .iter()
-                .any(|condition| matches!(condition, Condition::Exact(field, expected) if field == name && expected == value))
+            conditions.iter().find_map(|condition| match condition {
+                Condition::Exact(field, expected) if field == name => Some(expected.as_str()),
+                _ => None,
+            }) == Some(value)
         };
         if !bound("x-amz-date", date) {
             return Err(Error::DateNotBound);
         }
         if !bound("x-amz-credential", credential) {
             return Err(Error::CredentialNotBound);
+        }
+        if !bound("x-amz-algorithm", algorithm) {
+            return Err(Error::AlgorithmNotBound);
         }
         // Legacy-compat (rustfs/backlog#2684): the method check follows the form HMAC, while
         // expiry and upload conditions follow the method check. Keep only credential material

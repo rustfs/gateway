@@ -61,8 +61,11 @@ impl SecurityFloor {
     /// `400 AuthorizationQueryParametersError` for an incomplete presigned URL). The switch admits
     /// nothing as signed that was not: a request it no longer treats as signed carries no
     /// signature, is authenticated as nobody, and reaches only what anonymous access reaches; one
-    /// carrying a signature, a session token or an `Authorization` header is read exactly as
-    /// before.
+    /// carrying a signature, a session token or an `Authorization` header is read as before, with
+    /// two exceptions for a SigV2 form, both refusals as legacy RustFS's: a `signature` that is not
+    /// twenty base64 bytes is verified as one nothing matches (`SignatureDoesNotMatch` after a
+    /// readable access key is looked up), and a form without its access key or policy is `400
+    /// InvalidRequest` (rustfs/gateway#1185).
     #[must_use]
     pub const fn recognize_signatures_as_legacy_rustfs(mut self) -> Self {
         self.recognition = Recognition::LegacyRustfs;

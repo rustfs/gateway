@@ -289,6 +289,9 @@ pub enum AuthError {
     InvalidCredentialRegion,
     /// A browser POST policy is not bounded, valid base64; refused before signature comparison.
     InvalidPostPolicyEncoding,
+    /// A SigV2 browser form carries a signature but not its access key or policy: refused
+    /// `InvalidRequest` before any lookup, as legacy RustFS refuses it (rustfs/gateway#1185).
+    MissingPostFormField,
 }
 
 impl AuthError {
@@ -306,7 +309,7 @@ impl AuthError {
             Self::RequestTimeTooSkewed => "RequestTimeTooSkewed",
             Self::AuthorizationQueryParametersError => "AuthorizationQueryParametersError",
             Self::NotImplemented(_) => "NotImplemented",
-            Self::InvalidCredentialRegion | Self::InvalidPostPolicyEncoding => "InvalidRequest",
+            Self::InvalidCredentialRegion | Self::InvalidPostPolicyEncoding | Self::MissingPostFormField => "InvalidRequest",
         }
     }
 
@@ -331,6 +334,7 @@ impl AuthError {
             Self::NotImplemented(feature) => feature.message(),
             Self::InvalidCredentialRegion => "the credential scope names a region this service cannot read",
             Self::InvalidPostPolicyEncoding => "the POST policy encoding is not valid",
+            Self::MissingPostFormField => "a POST form field the signature needs is missing",
         }
     }
 

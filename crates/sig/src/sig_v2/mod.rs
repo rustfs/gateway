@@ -209,16 +209,39 @@ pub fn parse_presigned_credential(access_key_id: &str, signature: &str) -> Resul
     })
 }
 
+/// What a SigV2 form `signature` that is not twenty base64-encoded bytes is.
+#[derive(Clone, Copy)]
+pub(crate) enum UnreadableFormSignature {
+    /// A credential this crate cannot read: `AuthorizationHeaderMalformed`.
+    Refused,
+    /// A signature nothing matches, so a readable access key is still looked up and the form is
+    /// refused `SignatureDoesNotMatch` after it, as legacy RustFS's `v2_check_post_signature`
+    /// refuses it (rustfs/gateway#1185). An access key [`Identity::new`] cannot read is still
+    /// refused before any lookup, as on every other signing path.
+    Unmatchable,
+}
+
 /// Reads the credential carried by SigV2 browser-POST form fields.
 ///
 /// The form uses the same standard-base64, exact-width signature as the header and query shapes;
-/// only the error category follows the form/header surface rather than query parameters.
-pub(crate) fn parse_post_policy_credential(access_key_id: &str, signature: &str) -> Result<SigV2Authorization, AuthError> {
+/// only the error category follows the form/header surface rather than query parameters, and
+/// `unreadable` decides what a signature of another width is.
+pub(crate) fn parse_post_policy_credential(
+    access_key_id: &str,
+    signature: &str,
+    unreadable: UnreadableFormSignature,
+) -> Result<SigV2Authorization, AuthError> {
     let access_key_id = Identity::new(access_key_id).map_err(|_| AuthError::AuthorizationHeaderMalformed)?;
-    let bytes = decode_base64_exact::<20>(signature).map_err(|_| AuthError::AuthorizationHeaderMalformed)?;
+    let presented = match (decode_base64_exact::<20>(signature), unreadable) {
+        (Ok(bytes), _) => Signature::HmacSha1(CtBytes::from_array(bytes)),
+        (Err(_), UnreadableFormSignature::Refused) => return Err(AuthError::AuthorizationHeaderMalformed),
+        // A width no SigV2 signature has: `ct_verify` refuses another algorithm before comparing,
+        // so the comparison fails as a mismatch, never as a match.
+        (Err(_), UnreadableFormSignature::Unmatchable) => Signature::HmacSha256(CtBytes::from_array([0; 32])),
+    };
     Ok(SigV2Authorization {
         access_key_id: access_key_id.access_key_id().to_owned(),
-        presented: Signature::HmacSha1(CtBytes::from_array(bytes)),
+        presented,
     })
 }
 

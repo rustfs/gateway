@@ -195,6 +195,31 @@ async fn a_wrong_secret_cannot_store_an_object() {
     assert_eq!(stored, None);
 }
 
+/// Negative — under the RustFS profile a form `signature` that is not twenty base64-encoded bytes
+/// is refused `403 SignatureDoesNotMatch` after the access key is looked up, as legacy RustFS's
+/// `v2_check_post_signature` refuses it; an unknown key is still `InvalidAccessKeyId` first, and
+/// nothing is stored either way (rustfs/gateway#1185).
+#[tokio::test]
+async fn n_a_malformed_sigv2_form_signature_is_a_mismatch_after_the_key_lookup() {
+    let policy = encode_base64_exact(POLICY);
+    for signature in ["", "!!!", "dGVzdA==", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="] {
+        let (status, response, stored) = post(true, &fields(&policy, signature), "hello").await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{signature:?}: {response}");
+        assert!(response.contains("<Code>SignatureDoesNotMatch</Code>"), "{signature:?}: {response}");
+        assert_eq!(stored, None, "{signature:?}");
+        let unknown = [
+            ("key", "upload"),
+            ("AWSAccessKeyId", "AKIDUNKNOWN"),
+            ("policy", policy.as_str()),
+            ("signature", signature),
+        ];
+        let (status, response, stored) = post(true, &unknown, "hello").await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{signature:?}: {response}");
+        assert!(response.contains("<Code>InvalidAccessKeyId</Code>"), "{signature:?}: {response}");
+        assert_eq!(stored, None, "{signature:?}");
+    }
+}
+
 fn signed_policy(policy: &str) -> String {
     SigV2Signer::new("AKIDEXAMPLE", b"secret")
         .expect("valid signer")
