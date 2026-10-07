@@ -34,19 +34,25 @@ pub(super) struct Shadow {
     pub(super) param: String,
 }
 
-/// One segment of an inventory path: literal text, or a whole-segment `{parameter}`.
+/// One segment of an inventory path: literal text, a whole-segment `{parameter}`, or a
+/// `{parameter}` followed by literal text in the same segment (`{id}.zip`), which the dialect
+/// matches as one opaque capture of the whole segment (ADR-0040; rustfs/backlog#2753).
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(super) enum Segment<'a> {
     Literal(&'a str),
     Param(&'a str),
+    Affixed(&'a str, &'a str),
 }
 
 pub(super) fn segments(path: &str) -> impl Iterator<Item = Segment<'_>> {
-    path.split('/')
-        .map(|segment| match segment.strip_prefix('{').and_then(|inner| inner.strip_suffix('}')) {
-            Some(name) => Segment::Param(name),
-            None => Segment::Literal(segment),
-        })
+    path.split('/').map(|segment| match segment.strip_prefix('{') {
+        Some(inner) => match inner.split_once('}') {
+            Some((name, "")) => Segment::Param(name),
+            Some((name, suffix)) if !suffix.contains(['{', '}']) => Segment::Affixed(name, suffix),
+            _ => Segment::Literal(segment),
+        },
+        None => Segment::Literal(segment),
+    })
 }
 
 /// A route's template: its parameters in path order, and the one ADR-0025 (c) binds as the
@@ -76,7 +82,7 @@ pub(super) fn template_params(route: &Route, at: &str) -> Result<Template, Strin
     let raw_params: Vec<String> = all
         .iter()
         .filter_map(|segment| match segment {
-            Segment::Param(name) => Some((*name).to_owned()),
+            Segment::Param(name) | Segment::Affixed(name, _) => Some((*name).to_owned()),
             Segment::Literal(_) => None,
         })
         .collect();
@@ -88,11 +94,15 @@ pub(super) fn template_params(route: &Route, at: &str) -> Result<Template, Strin
                 return Err(format!("{at}: a parameter shares its segment with literal text"));
             }
             Segment::Literal(_) => {}
-            Segment::Param(name) => {
+            Segment::Param(name) | Segment::Affixed(name, _) => {
+                let affixed = matches!(segment, Segment::Affixed(..));
                 let catch_all = name.starts_with('*');
                 let name = name.strip_prefix('*').unwrap_or(name);
                 if catch_all && index + 1 != count {
                     return Err(format!("{at}: a catch-all must be last"));
+                }
+                if affixed && (catch_all || !name.bytes().all(|byte| byte.is_ascii_lowercase() || byte == b'_')) {
+                    return Err(format!("{at}: an affixed parameter is one lowercase identifier, never a catch-all"));
                 }
                 if name.is_empty() || !name.bytes().all(|byte| byte.is_ascii_lowercase() || byte == b'_') {
                     return Err(format!("{at}: the parameter {{{name}}} is not a lowercase identifier"));
@@ -103,6 +113,9 @@ pub(super) fn template_params(route: &Route, at: &str) -> Result<Template, Strin
                 if BUCKET_PARAMS.contains(&name) {
                     if catch_all {
                         return Err(format!("{at}: a catch-all cannot bind a bucket"));
+                    }
+                    if affixed {
+                        return Err(format!("{at}: an affixed parameter cannot bind a bucket"));
                     }
                     if bucket.is_some() {
                         return Err(format!("{at}: two parameters name a bucket"));
@@ -135,6 +148,8 @@ pub(super) fn shadowing(declared: &[Declared]) -> Result<Vec<(usize, usize, Shad
             }
             let (x, y): (Vec<Segment<'_>>, Vec<Segment<'_>>) =
                 (segments(&first.path).collect(), segments(&second.path).collect());
+            let (x, y): (Vec<Segment<'_>>, Vec<Segment<'_>>) =
+                (x.into_iter().map(as_param).collect(), y.into_iter().map(as_param).collect());
             if x.iter()
                 .chain(&y)
                 .any(|segment| matches!(segment, Segment::Param(name) if name.starts_with('*')))
@@ -188,6 +203,15 @@ pub(super) fn shadowing(declared: &[Declared]) -> Result<Vec<(usize, usize, Shad
     Ok(pairs)
 }
 
+/// An affixed parameter is one opaque capture of its whole segment, so for overlap it is the
+/// parameter it names.
+fn as_param(segment: Segment<'_>) -> Segment<'_> {
+    match segment {
+        Segment::Affixed(name, _) => Segment::Param(name),
+        other => other,
+    }
+}
+
 /// A catch-all consumes a nonempty remainder; incompatible fixed prefixes share no path.
 fn catch_all_overlap(first: &[Segment<'_>], second: &[Segment<'_>]) -> bool {
     for (index, (a, b)) in first.iter().zip(second).enumerate() {
@@ -217,6 +241,11 @@ pub(super) fn type_name(method: &str, surface: &Surface, path: &str, query: Opti
             Segment::Param(param) => {
                 words.push("By");
                 words.extend(param.strip_prefix('*').unwrap_or(param).split('_'));
+            }
+            Segment::Affixed(param, suffix) => {
+                words.push("By");
+                words.extend(param.split('_'));
+                words.extend(suffix.split(['-', '_', '.']));
             }
             Segment::Literal(text) => words.extend(text.split(['-', '_', '.'])),
         }

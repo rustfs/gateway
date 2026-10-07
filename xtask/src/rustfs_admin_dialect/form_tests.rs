@@ -47,7 +47,7 @@ const STS_FORM: &[(&str, &str, &str)] = &[("POST", "/", "StsFormPost")];
 /// the STS endpoint.
 #[test]
 fn a_form_route_is_planned_and_rendered_behind_its_form_claim() {
-    let plan = plan(&inventory(vec![sts()]), &[], &[], &[], STS_FORM).expect("the form route plans");
+    let plan = plan(&inventory(vec![sts()]), &[], &[], &[], STS_FORM, &[]).expect("the form route plans");
     assert!(plan.declared.is_empty());
     assert!(plan.staying.is_empty());
     assert_eq!(plan.forms.len(), 1);
@@ -101,7 +101,7 @@ fn a_form_route_is_planned_and_rendered_behind_its_form_claim() {
 fn n_a_stale_form_route_is_refused() {
     let mut other = route("GET", "/profile/cpu", "health", "sigv4-admin", Some("admin:Profiling"));
     other.minio_admin_alias = false;
-    let stale = plan(&inventory(vec![other]), &[], &[], &[], STS_FORM)
+    let stale = plan(&inventory(vec![other]), &[], &[], &[], STS_FORM, &[])
         .err()
         .expect("a stale form route");
     assert!(stale.contains("the form route POST / is not in the inventory"), "{stale}");
@@ -125,14 +125,14 @@ fn n_a_form_route_the_inventory_records_differently_is_refused() {
         (streamed, "no longer records a buffered request and response"),
         (sealed, "no longer records a buffered request and response"),
     ] {
-        let refused = plan(&inventory(vec![changed]), &[], &[], &[], STS_FORM)
+        let refused = plan(&inventory(vec![changed]), &[], &[], &[], STS_FORM, &[])
             .err()
             .expect("a changed row is refused");
         assert!(refused.contains(why), "{refused}");
     }
     let mut elsewhere = sts();
     elsewhere.path = "/sts".to_owned();
-    let refused = plan(&inventory(vec![elsewhere]), &[], &[], &[], &[("POST", "/sts", "StsFormPost")])
+    let refused = plan(&inventory(vec![elsewhere]), &[], &[], &[], &[("POST", "/sts", "StsFormPost")], &[])
         .err()
         .expect("only the STS endpoint");
     assert!(refused.contains("only RustFS's STS endpoint"), "{refused}");

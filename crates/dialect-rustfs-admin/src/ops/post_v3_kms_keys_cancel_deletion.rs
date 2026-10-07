@@ -124,7 +124,7 @@ impl AdminOperation for PostV3KmsKeysCancelDeletion {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 311,
+    precedence: 312,
     selector: "PathTemplate(\"/rustfs/admin/v3/kms/keys/cancel-deletion\") ∧ Method(POST) ∨ PathTemplate(\"/minio/admin/v3/kms/keys/cancel-deletion\") ∧ Method(POST)",
     action: "kms:DeleteKey",
     resource: ResourceShape::Service,

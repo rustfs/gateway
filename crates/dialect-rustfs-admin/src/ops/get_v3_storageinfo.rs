@@ -123,7 +123,7 @@ impl AdminOperation for GetV3Storageinfo {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 239,
+    precedence: 240,
     selector: "PathTemplate(\"/rustfs/admin/v3/storageinfo\") ∧ Method(GET) ∨ PathTemplate(\"/minio/admin/v3/storageinfo\") ∧ Method(GET)",
     action: "admin:StorageInfo",
     resource: ResourceShape::Service,

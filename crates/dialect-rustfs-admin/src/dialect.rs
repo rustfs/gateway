@@ -16,7 +16,9 @@
 //!
 //! Responsible for: [`CLAIMS`], the path prefixes RustFS's admin router answers ahead of its S3
 //! service; [`OVERLAY`], the record of every generated operation; and [`rustfs_admin_dialect`],
-//! which declares each against it, the STS endpoint behind its own form claim (ADR-0041).
+//! which declares each against it — the claimed operations inside the claims, the eight
+//! S3-shaped extension operations as S3-table rows (rustfs/backlog#2753), the two authenticated
+//! fallbacks, and the STS endpoint behind its own form claim (ADR-0041).
 //! NOT responsible for: the operations or their record rows (generated: [`crate::ops`] and
 //! `crate::table`), or registering handlers (the deployment).
 //! Upstream: `rustfs-gateway-core`'s dialect mechanism and the generated table. Downstream: a
@@ -25,16 +27,23 @@
 //! A claimed row cannot overlap an S3 row: the router asks the claim first, and a request inside
 //! `/rustfs/admin`, `/minio/admin`, `/_iceberg/v1`, `/iceberg/v1`, `/profile/cpu` or `/profile/memory` is answered by a claimed row or
 //! by nothing, which is how RustFS's own router takes those prefixes ahead of its S3 service. So
-//! no operation here declares a shadowing decision against S3, and a path-style bucket named
+//! no claimed operation declares a shadowing decision against S3, and a path-style bucket named
 //! `rustfs`, `minio`, `iceberg` or `profile` loses these keys, as it does on RustFS today (ADR-0024,
 //! ADR-0031, ADR-0032).
+//!
+//! The extension operations are the other case: RustFS's router claims `PUT /{bucket}?replication-reset`,
+//! `GET /{bucket}?replication-metrics=2`, `GET /{bucket}/{key}?lambdaArn=…`, `GET /?events=…` and the
+//! rest by one query discriminator, so nothing in the path marks them and no claim can take them.
+//! Each is an S3-table row placed ahead of every standard row of its method and target, and every
+//! one of those overlaps is a real routing decision the row declares, computed from the generated
+//! route table by the generator and refused by core when stale or missing.
 
 use rustfs_gateway_core::dialect::{ClaimedRoute, Dialect, DialectBuilder, DialectError, DialectOverlay};
 use rustfs_gateway_core::route::PathClaim;
 
-use crate::admin::{AdminOperation, OperationFold};
+use crate::admin::{AdminOperation, ExtensionFold, ExtensionOperation, OperationFold};
 use crate::ops::{admin_fallback, admin_v4_fallback, sts_form_post};
-use crate::table::{OVERLAY_ROWS, fold_every_operation};
+use crate::table::{OVERLAY_ROWS, fold_every_extension, fold_every_operation};
 
 /// The RustFS router that answers the admin prefixes ahead of its S3 service, at the commit the
 /// inventory was recorded from.
@@ -115,8 +124,20 @@ impl OperationFold for Declare {
     }
 }
 
-/// The `rustfs` dialect: its claims, every generated operation declared against [`OVERLAY`], and
-/// RustFS's STS endpoint behind its form claim (ADR-0041).
+/// Declares one extension operation's S3-table row, with the overlaps it owes.
+struct DeclareExtension;
+
+impl ExtensionFold for DeclareExtension {
+    type Carry = DialectBuilder;
+
+    fn step<O: ExtensionOperation>(&mut self, carry: DialectBuilder) -> DialectBuilder {
+        carry.declare::<O>(O::ROUTE)
+    }
+}
+
+/// The `rustfs` dialect: its claims, every generated operation declared against [`OVERLAY`] —
+/// the claimed ones inside the claims and the extension ones as S3-table rows — and RustFS's STS
+/// endpoint behind its form claim (ADR-0041).
 ///
 /// Installing it is the deployment's choice (`ServiceBuilder::dialect`), and so is each handler;
 /// an operation installed without one answers `501`.
@@ -126,7 +147,8 @@ impl OperationFold for Declare {
 /// Every refusal [`DialectBuilder::build`] finds. None is expected: the record and the
 /// declarations are generated from the same inventory rows, and the tests pin that they agree.
 pub fn rustfs_admin_dialect() -> Result<Dialect, Vec<DialectError>> {
-    fold_every_operation(&mut Declare, Dialect::assemble(&OVERLAY))
+    let builder = fold_every_operation(&mut Declare, Dialect::assemble(&OVERLAY));
+    fold_every_extension(&mut DeclareExtension, builder)
         .declare_claimed::<admin_v4_fallback::AdminV4Fallback>(admin_v4_fallback::ROUTE)
         .declare_claimed::<admin_fallback::AdminFallback>(admin_fallback::ROUTE)
         .declare_form::<sts_form_post::StsFormPost>(sts_form_post::ROUTE)

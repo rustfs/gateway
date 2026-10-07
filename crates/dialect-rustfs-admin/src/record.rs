@@ -14,9 +14,10 @@
 
 //! What each generated operation was generated from, and what is not migrated yet.
 //!
-//! Responsible for: the shapes of [`crate::ROUTES`], [`crate::PENDING`], [`crate::STAYING`] and
-//! [`crate::FORM_ROUTES`] — the inventory facts behind each declared operation, the registration
-//! groups still served by RustFS, the routes that stay with it, and the form-claimed routes.
+//! Responsible for: the shapes of [`crate::ROUTES`], [`crate::PENDING`], [`crate::STAYING`],
+//! [`crate::FORM_ROUTES`] and [`crate::EXTENSION_ROUTES`] — the inventory facts behind each
+//! declared operation, the registration groups still served by RustFS, the routes that stay with
+//! it, the form-claimed routes, and the S3-shaped extension routes.
 //! NOT responsible for: the values (the generated `crate::table`), or checking them against the
 //! inventory (`rustfs-gateway-goldens` and this crate's tests do).
 //! Upstream: nothing. Downstream: `crate::table`, the tests, and a deployment that reports which
@@ -27,6 +28,9 @@ use rustfs_gateway_core::dialect::BucketParam;
 
 /// The migration issue, which every overlay row cites.
 pub(crate) const ISSUE: &str = "https://github.com/rustfs/backlog/issues/1744";
+
+/// The extension-route issue, which every S3-shaped extension row cites.
+pub(crate) const EXTENSION_ISSUE: &str = "https://github.com/rustfs/backlog/issues/2753";
 
 /// ADR-0025, which every row whose action is a ruling cites.
 pub(crate) const ADR_0025: &str = "https://github.com/rustfs/gateway/blob/main/docs/adr/0025-admin-authorization-classes.md";
@@ -145,6 +149,26 @@ pub struct FormRouteRecord {
     pub request_body: BodyKind,
     /// How RustFS writes the response body.
     pub response_body: BodyKind,
+}
+
+/// One S3-shaped extension operation (rustfs/backlog#2753) and the inventory's `extension_routes`
+/// row it was generated from: a route RustFS's admin router claims by method, target and one
+/// query discriminator before its S3 service, served here as an S3-table row.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ExtensionRouteRecord {
+    /// The operation name, `rustfs:…`.
+    pub operation: &'static str,
+    /// The RustFS route variant the inventory names, such as `ReplicationExtRoute::Check`.
+    pub name: &'static str,
+    /// The method.
+    pub method: &'static str,
+    /// What the path addresses: `service`, `bucket` or `object`, as the inventory spells it.
+    pub target: &'static str,
+    /// The discriminating query key and the inventory's rule on its first value: `present`, or
+    /// `equals:<value>` (`equals:` for an empty value).
+    pub query: (&'static str, &'static str),
+    /// The IAM action RustFS's handler checks, in its wire spelling: the operation's action.
+    pub action: &'static str,
 }
 
 /// A registration group whose routes RustFS still serves itself.

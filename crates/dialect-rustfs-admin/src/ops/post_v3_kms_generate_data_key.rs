@@ -124,7 +124,7 @@ impl AdminOperation for PostV3KmsGenerateDataKey {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 308,
+    precedence: 309,
     selector: "PathTemplate(\"/rustfs/admin/v3/kms/generate-data-key\") ∧ Method(POST) ∨ PathTemplate(\"/minio/admin/v3/kms/generate-data-key\") ∧ Method(POST)",
     action: "kms:GenerateDataKey",
     resource: ResourceShape::Service,

@@ -124,7 +124,7 @@ impl AdminOperation for PostV3ReplicationDiff {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 339,
+    precedence: 341,
     selector: "PathTemplate(\"/rustfs/admin/v3/replication/diff\") ∧ Method(POST) ∨ PathTemplate(\"/minio/admin/v3/replication/diff\") ∧ Method(POST)",
     action: "admin:ReplicationDiff",
     resource: ResourceShape::Service,

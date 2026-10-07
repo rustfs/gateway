@@ -124,7 +124,7 @@ impl AdminOperation for PostV3SiteReplicationDevnull {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 347,
+    precedence: 349,
     selector: "PathTemplate(\"/rustfs/admin/v3/site-replication/devnull\") ∧ Method(POST) ∨ PathTemplate(\"/minio/admin/v3/site-replication/devnull\") ∧ Method(POST)",
     action: "admin:SiteReplicationOperation",
     resource: ResourceShape::Service,

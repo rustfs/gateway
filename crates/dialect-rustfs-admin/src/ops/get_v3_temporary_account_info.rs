@@ -123,7 +123,7 @@ impl AdminOperation for GetV3TemporaryAccountInfo {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 243,
+    precedence: 244,
     selector: "PathTemplate(\"/rustfs/admin/v3/temporary-account-info\") ∧ Method(GET) ∨ PathTemplate(\"/minio/admin/v3/temporary-account-info\") ∧ Method(GET)",
     action: "admin:ListTemporaryAccounts",
     resource: ResourceShape::Service,

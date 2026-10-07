@@ -18,12 +18,13 @@
 //! Responsible for: an assembled service with the facade's SigV4 authenticator (handing the
 //! caller's secret over, so each operation's own opt-in decides who holds it), a recording
 //! authorizer answering by policy, the `rustfs` dialect, and one generic handler registered for
-//! every inventory operation through `fold_every_operation`, plus the actual fixed fallback
+//! every inventory operation through `fold_every_operation` and every S3-shaped extension
+//! operation through `fold_every_extension` (rustfs/backlog#2753), plus the actual fixed fallback
 //! handlers; it records path parameters
 //! and whether a handler holds the secret, and stores buffered control payloads; and the requests the tests send — signed, unsigned,
 //! presigned, with a concrete or a malformed parameter value, with or without the bucket a
 //! query-bound operation names — for any row of any operation.
-//! NOT responsible for: the assertions (`tests.rs`, `subject_tests.rs`, `bucket_tests.rs`), routing without a service (the dialect
+//! NOT responsible for: the assertions (`tests.rs`, `subject_tests.rs`, `bucket_tests.rs`, `extension_tests.rs`), routing without a service (the dialect
 //! crate's own tests), the generator's rules (xtask's), or the hand-written proof
 //! (`rustfs_admin_proof`).
 //! Upstream: `rustfs-gateway-dialect-rustfs-admin`, the facade, `operation_diff::context`'s
@@ -46,7 +47,8 @@ use rustfs_gateway_dialect_rustfs_admin::ops::{
     put_v3_config::{self, PutV3Config},
 };
 use rustfs_gateway_dialect_rustfs_admin::{
-    AdminOperation, AdminResponse, OperationFold, ROUTES, RouteRecord, fold_every_operation, rustfs_admin_dialect,
+    AdminOperation, AdminResponse, ExtensionFold, ExtensionOperation, OperationFold, ROUTES, RouteRecord, fold_every_extension,
+    fold_every_operation, rustfs_admin_dialect,
 };
 use rustfs_gateway_http::RawHost;
 use rustfs_gateway_sig::{
@@ -57,7 +59,7 @@ use crate::operation_diff::s3s_0_17_0::context::{ACCESS_KEY, ContextRequest, PAT
 use crate::operation_diff::s3s_0_17_0::harness::block_on;
 use crate::rustfs_admin_proof::same_bytes;
 
-const REGION: &str = "us-east-1";
+pub(crate) const REGION: &str = "us-east-1";
 
 /// One question the authorizer was asked.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -189,7 +191,7 @@ struct Admin {
 }
 
 impl Admin {
-    fn serve<O: AdminOperation>(&self, request: &Req<O>) -> HandlerResult<O> {
+    fn serve<O: rustfs_gateway_core::op::Operation<Output = AdminResponse>>(&self, request: &Req<O>) -> HandlerResult<O> {
         self.handed.lock().expect("uncontended").push(Handed::of(request.context()));
         Ok(Resp::new(AdminResponse::json(format!("{{\"operation\":\"{}\"}}", O::NAME))))
     }
@@ -202,6 +204,30 @@ impl<O: AdminOperation> Handler<O> for Admin {
 
     async fn call_with_context(&self, request: Req<O>, _context: HandlerContext) -> HandlerResult<O> {
         self.serve(&request)
+    }
+}
+
+/// The generic handler for every S3-shaped extension operation: the same record and answer.
+struct Extension(Arc<Admin>);
+
+impl<O: ExtensionOperation> Handler<O> for Extension {
+    async fn call(&self, request: Req<O>) -> HandlerResult<O> {
+        self.0.serve(&request)
+    }
+
+    async fn call_with_context(&self, request: Req<O>, _context: HandlerContext) -> HandlerResult<O> {
+        self.0.serve(&request)
+    }
+}
+
+/// Registers the generic extension handler for every extension operation.
+struct RegisterExtension(Arc<Admin>);
+
+impl ExtensionFold for RegisterExtension {
+    type Carry = ServiceBuilder;
+
+    fn step<O: ExtensionOperation>(&mut self, carry: ServiceBuilder) -> ServiceBuilder {
+        carry.register::<O, _>(Arc::new(Extension(Arc::clone(&self.0))))
     }
 }
 
@@ -358,6 +384,7 @@ fn assemble_with_profile(
         builder
     };
     let builder = fold_every_operation(&mut Register(Arc::clone(&admin), omit_handler), builder);
+    let builder = fold_every_extension(&mut RegisterExtension(Arc::clone(&admin)), builder);
     let builder = if omit_handler == Some(put_v3_config::NAME) {
         builder
     } else {
@@ -501,14 +528,37 @@ pub(crate) fn templates(record: &RouteRecord) -> Vec<&'static str> {
     std::iter::once(record.path).chain(record.alias).collect()
 }
 
-/// The parameter a template segment names, if it is one.
+/// The parameter a template segment names and the literal text after it in the same segment
+/// (`{id}.zip`), if it is one; the dialect matches such a segment as one opaque capture of the
+/// whole segment, so the handler is handed the suffix too (rustfs/backlog#2753).
+pub(crate) fn affixed(segment: &str) -> Option<(&str, &str)> {
+    segment
+        .strip_prefix('{')
+        .and_then(|inner| inner.split_once('}'))
+        .filter(|(_, suffix)| !suffix.is_empty() && !suffix.contains(['{', '}']))
+}
+
+/// The parameter a template segment names, affixed or not, if it is one.
 pub(crate) fn param(segment: &str) -> Option<&str> {
-    segment.strip_prefix('{').and_then(|inner| inner.strip_suffix('}'))
+    segment
+        .strip_prefix('{')
+        .and_then(|inner| inner.strip_suffix('}'))
+        .or_else(|| affixed(segment).map(|(name, _)| name))
 }
 
 /// The value every parameter is given in a well-formed request: its name then `-1`.
 pub(crate) fn value_of(name: &str) -> String {
     format!("{name}-1")
+}
+
+/// The well-formed value of a parameter segment, as the handler is handed it: the parameter's
+/// value, with the segment's suffix when it has one; `None` for a literal segment.
+pub(crate) fn well_formed(segment: &str) -> Option<String> {
+    match (affixed(segment), param(segment)) {
+        (Some((name, suffix)), _) => Some(format!("{}{suffix}", value_of(name))),
+        (None, Some(name)) => Some(value_of(name.trim_start_matches('*'))),
+        (None, None) => None,
+    }
 }
 
 /// `template` with its `index`-th segment spelled `raw`, and every other parameter given its
@@ -517,9 +567,9 @@ pub(crate) fn with_segment(template: &str, index: Option<usize>, raw: &str) -> S
     template
         .split('/')
         .enumerate()
-        .map(|(at, segment)| match (Some(at) == index, param(segment)) {
+        .map(|(at, segment)| match (Some(at) == index, well_formed(segment)) {
             (true, _) => raw.to_owned(),
-            (false, Some(name)) => value_of(name.trim_start_matches('*')),
+            (false, Some(value)) => value,
             (false, None) => segment.to_owned(),
         })
         .collect::<Vec<_>>()
@@ -619,6 +669,7 @@ pub(crate) fn presigned(record: &RouteRecord, path: &str) -> Request<Bytes> {
 }
 
 mod bucket_tests;
+mod extension_tests;
 mod fallback_tests;
 mod fallback_wire_tests;
 mod subject_tests;

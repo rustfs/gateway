@@ -123,7 +123,7 @@ impl AdminOperation for PostV3KmsReload {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 321,
+    precedence: 322,
     selector: "PathTemplate(\"/rustfs/admin/v3/kms/reload\") ∧ Method(POST) ∨ PathTemplate(\"/minio/admin/v3/kms/reload\") ∧ Method(POST)",
     action: "kms:ServiceControl",
     resource: ResourceShape::Service,

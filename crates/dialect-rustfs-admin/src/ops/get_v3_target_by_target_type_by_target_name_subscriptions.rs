@@ -126,7 +126,7 @@ impl AdminOperation for GetV3TargetByTargetTypeByTargetNameSubscriptions {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 242,
+    precedence: 243,
     selector: "PathTemplate(\"/rustfs/admin/v3/target/{+target_type}/{+target_name}/subscriptions\") ∧ Method(GET) ∨ PathTemplate(\"/minio/admin/v3/target/{+target_type}/{+target_name}/subscriptions\") ∧ Method(GET)",
     action: "admin:GetBucketTarget",
     resource: ResourceShape::Service,

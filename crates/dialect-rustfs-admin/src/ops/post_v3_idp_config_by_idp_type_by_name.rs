@@ -126,7 +126,7 @@ impl AdminOperation for PostV3IdpConfigByIdpTypeByName {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 293,
+    precedence: 294,
     selector: "PathTemplate(\"/rustfs/admin/v3/idp-config/{+idp_type}/{+name}\") ∧ Method(POST) ∨ PathTemplate(\"/minio/admin/v3/idp-config/{+idp_type}/{+name}\") ∧ Method(POST)",
     action: "admin:ConfigUpdate",
     resource: ResourceShape::Service,

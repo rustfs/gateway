@@ -123,7 +123,7 @@ impl AdminOperation for PutV3SiteReplicationPeerEditCapabilities {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 400,
+    precedence: 402,
     selector: "PathTemplate(\"/rustfs/admin/v3/site-replication/peer/edit-capabilities\") ∧ Method(PUT) ∨ PathTemplate(\"/minio/admin/v3/site-replication/peer/edit-capabilities\") ∧ Method(PUT)",
     action: "admin:SiteReplicationOperation",
     resource: ResourceShape::Service,

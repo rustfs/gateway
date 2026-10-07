@@ -27,8 +27,8 @@
 
 use super::rulings::{About, Absent, Form, Ruled};
 use super::{
-    FIRST_PRECEDENCE, FORMAT, FORMS, INVENTORY, Inventory, Plan, QUERY_BUCKETS, RULINGS, Route, Ruling, STAYS, SURFACES, Source,
-    Surface, drift, generate, plan, repo_root, snake, type_name,
+    EXTENSIONS, FIRST_PRECEDENCE, FORMAT, FORMS, INVENTORY, Inventory, Plan, QUERY_BUCKETS, RULINGS, Route, Ruling, STAYS,
+    SURFACES, Source, Surface, drift, generate, plan, repo_root, snake, type_name,
 };
 
 /// The admin API surface and the table catalog's.
@@ -66,6 +66,7 @@ pub(super) fn inventory(routes: Vec<Route>) -> Inventory {
         format: FORMAT.to_owned(),
         source: Source { commit: "c".to_owned() },
         routes,
+        extension_routes: Vec::new(),
     }
 }
 
@@ -75,7 +76,7 @@ pub(super) fn planned(routes: Vec<Route>, rulings: &[Ruling]) -> Plan {
 
 /// The plan of `routes` under `rulings` and `query_buckets`.
 pub(super) fn planned_with(routes: Vec<Route>, rulings: &[Ruling], query_buckets: &[(&str, &str, &'static str)]) -> Plan {
-    match plan(&inventory(routes), rulings, query_buckets, &[], &[]) {
+    match plan(&inventory(routes), rulings, query_buckets, &[], &[], &[]) {
         Ok(plan) => plan,
         Err(error) => panic!("refused: {error}"),
     }
@@ -87,7 +88,7 @@ pub(super) fn refusal(routes: Vec<Route>, rulings: &[Ruling]) -> String {
 
 /// Why `routes` under `rulings` and `query_buckets` are refused.
 pub(super) fn refusal_with(routes: Vec<Route>, rulings: &[Ruling], query_buckets: &[(&str, &str, &'static str)]) -> String {
-    match plan(&inventory(routes), rulings, query_buckets, &[], &[]) {
+    match plan(&inventory(routes), rulings, query_buckets, &[], &[], &[]) {
         Ok(plan) => panic!("planned {} operation(s)", plan.declared.len()),
         Err(error) => error,
     }
@@ -115,8 +116,9 @@ fn the_committed_dialect_is_what_the_inventory_generates() {
     assert_eq!(drift(&root, &files), Vec::<String>::new());
     assert_eq!(
         files.len(),
-        320,
-        "312 native operations, two fallbacks, the form-claimed STS operation (ADR-0041), the module list and four table files"
+        330,
+        "314 native operations, two fallbacks, the form-claimed STS operation (ADR-0041), the eight S3-shaped extension \
+         operations (rustfs/backlog#2753), the module list and four table files"
     );
 }
 
@@ -157,6 +159,11 @@ fn names_follow_the_method_the_path_and_the_query() {
         type_name("DELETE", ADMIN, "/rustfs/admin/v3/audit/target/{target_type}/{target_name}/reset", None).as_deref(),
         Some("DeleteV3AuditTargetByTargetTypeByTargetNameReset")
     );
+    // An affixed parameter: `By`, its words, then the suffix's (rustfs/backlog#2753).
+    assert_eq!(
+        type_name("GET", ADMIN, "/rustfs/admin/v3/object-zip-downloads/{id}.zip", None).as_deref(),
+        Some("GetV3ObjectZipDownloadsByIdZip")
+    );
     assert_eq!(snake("PostV3SpeedtestClientDevnull"), "post_v3_speedtest_client_devnull");
     assert_eq!(
         type_name("GET", ICEBERG, "/_iceberg/v1/config", None).as_deref(),
@@ -171,11 +178,12 @@ fn names_follow_the_method_the_path_and_the_query() {
 }
 
 /// Negative — a path outside the admin prefix, or with a character a type name cannot carry
-/// (an affixed parameter among them), has no name.
+/// (a brace or a reserved character inside an affix among them), has no name.
 #[test]
 fn n_a_path_without_a_type_name_has_none() {
     assert_eq!(type_name("GET", ADMIN, "/minio/admin/v3/info", None), None);
-    assert_eq!(type_name("GET", ADMIN, "/rustfs/admin/v3/object-zip-downloads/{id}.zip", None), None);
+    assert_eq!(type_name("GET", ADMIN, "/rustfs/admin/v3/object-zip-downloads/{id}.z{ip", None), None);
+    assert_eq!(type_name("GET", ADMIN, "/rustfs/admin/v3/object-zip-downloads/{id}+zip", None), None);
     assert_eq!(type_name("GET", ADMIN, "/rustfs/admin/v3/a+b", None), None);
 }
 
@@ -188,7 +196,7 @@ fn a_plain_route_is_declared_and_a_later_group_is_pending() {
         route("GET", "/rustfs/admin/v3/kms/status", "kms", "sigv4-admin", Some("kms:ServiceControl")),
         route("GET", "/rustfs/admin/v3/oidc/status", "oidc", "sigv4-admin", Some("admin:ServerInfo")),
     ];
-    let plan = super::plan_through(3, &inventory(routes), &[], &[], &[], &[]).expect("the fixture plans");
+    let plan = super::plan_through(3, &inventory(routes), &[], &[], &[], &[], &[]).expect("the fixture plans");
     assert_eq!(plan.declared.len(), 1);
     let declared = &plan.declared[0];
     assert_eq!(declared.name, "rustfs:GetV3KmsStatus");
@@ -211,7 +219,7 @@ pub(super) fn custom(method: &str, path: &str, detail: &str) -> Route {
 pub(super) fn recorded_plan() -> Plan {
     let recorded = std::fs::read_to_string(repo_root().join(INVENTORY)).expect("the inventory");
     let inventory: Inventory = serde_json::from_str(&recorded).expect("the inventory parses");
-    plan(&inventory, RULINGS, QUERY_BUCKETS, STAYS, FORMS).expect("the recorded inventory plans")
+    plan(&inventory, RULINGS, QUERY_BUCKETS, STAYS, FORMS, EXTENSIONS).expect("the recorded inventory plans")
 }
 
 /// Positive — the own-account routes are about the caller under their vendor label, the
@@ -265,10 +273,10 @@ fn a_subject_ruling_is_declared_about_its_subject() {
     }
 }
 
-/// Positive — in the recorded inventory, exactly the order-4 custom-auth routes carry a subject
-/// rule: nine own-account, nine named-account (four refusing an absent account, where RustFS
-/// answers `400`), and the three bulk listings; `list-remote-targets` is plain
-/// `admin:GetBucketTarget`, and the two policy-entities routes are any-of the three listings.
+/// Positive — in the recorded inventory, exactly the order-4 custom-auth routes and the order-7
+/// zip pair carry a subject rule: eleven own-account, nine named-account (four refusing an absent
+/// account, where RustFS answers `400`), and the three bulk listings; `list-remote-targets` is
+/// plain `admin:GetBucketTarget`, and the two policy-entities routes are any-of the three listings.
 #[test]
 fn the_recorded_subject_rulings_are_exactly_the_order_four_custom_routes() {
     let plan = recorded_plan();
@@ -282,7 +290,7 @@ fn the_recorded_subject_rulings_are_exactly_the_order_four_custom_routes() {
         plan.declared
             .iter()
             .filter(|declared| declared.rule.about.is_some())
-            .all(|declared| declared.order == 4)
+            .all(|declared| declared.order == 4 || (declared.order == 7 && declared.group == "object_zip_download"))
     );
     let own: Vec<&str> = about
         .iter()
@@ -296,11 +304,13 @@ fn the_recorded_subject_rulings_are_exactly_the_order_four_custom_routes() {
             "rustfs:AccountMfaStatus",
             "rustfs:AccountInfo",
             "rustfs:MfaChallenge",
+            "rustfs:DownloadObjectZip",
             "rustfs:AccountMfaActivate",
             "rustfs:AccountMfaDisable",
             "rustfs:AccountMfaEnroll",
             "rustfs:AccountMfaRecoveryCodes",
             "rustfs:ChangeOwnPassword",
+            "rustfs:CreateObjectZipDownload",
         ]
     );
     let named: Vec<(&str, &str)> = about
@@ -359,7 +369,7 @@ fn the_recorded_subject_rulings_are_exactly_the_order_four_custom_routes() {
             "rustfs:GetV3ListAccessKeysBulk",
         ]
     );
-    assert_eq!(about.len(), 21);
+    assert_eq!(about.len(), 23, "nine own-account, nine named-account, three bulk, and the zip pair");
     let rule_of = |name: &str| {
         plan.declared
             .iter()
@@ -510,6 +520,7 @@ fn n_a_subject_rule_outside_the_adrs_shapes_is_refused() {
             path: "/rustfs/admin/v3/x",
             auth_detail: "CredentialOnly",
             forms,
+            note: "",
         }];
         let error = refusal(vec![custom("GET", "/rustfs/admin/v3/x", "CredentialOnly")], &rulings);
         assert!(error.contains(why), "{why}: {error}");

@@ -16,13 +16,15 @@
 // crates/goldens/src/migration_inventory/rustfs_admin_routes.json. Do not edit by hand: change the
 // inventory or xtask/src/rustfs_admin_dialect.rs, then regenerate.
 
-//! Every generated operation in one generic walk.
+//! Every generated operation in one generic walk: the claimed operations, and the S3-shaped
+//! extension operations in theirs.
 //!
-//! Responsible for: [`fold_every_operation`], in inventory order. NOT responsible for: what a step does
-//! (the caller's `OperationFold`). Upstream: `crate::ops`. Downstream: `crate::dialect` and a deployment
-//! that registers a handler for every operation.
+//! Responsible for: [`fold_every_operation`] and [`fold_every_extension`], each in inventory order.
+//! NOT responsible for: what a step does (the caller's `OperationFold` or `ExtensionFold`).
+//! Upstream: `crate::ops`. Downstream: `crate::dialect` and a deployment that registers a handler for
+//! every operation.
 
-use crate::admin::OperationFold;
+use crate::admin::{ExtensionFold, OperationFold};
 use crate::ops;
 
 /// Takes `fold`'s step for every operation in turn, in [`crate::ROUTES`] order.
@@ -150,6 +152,7 @@ pub fn fold_every_operation<F: OperationFold>(fold: &mut F, carry: F::Carry) -> 
     let carry = fold.step::<ops::get_v3_module_switches::GetV3ModuleSwitches>(carry);
     let carry = fold.step::<ops::get_v3_obdinfo::GetV3Obdinfo>(carry);
     let carry = fold.step::<ops::get_v3_object_data_cache_stats::GetV3ObjectDataCacheStats>(carry);
+    let carry = fold.step::<ops::get_v3_object_zip_downloads_by_id_zip::GetV3ObjectZipDownloadsByIdZip>(carry);
     let carry = fold.step::<ops::get_v3_oidc_authorize_by_provider_id::GetV3OidcAuthorizeByProviderId>(carry);
     let carry = fold.step::<ops::get_v3_oidc_callback_by_provider_id::GetV3OidcCallbackByProviderId>(carry);
     let carry = fold.step::<ops::get_v3_oidc_config::GetV3OidcConfig>(carry);
@@ -281,6 +284,7 @@ pub fn fold_every_operation<F: OperationFold>(fold: &mut F, carry: F::Carry) -> 
     let carry = fold.step::<ops::post_v3_kms_status::PostV3KmsStatus>(carry);
     let carry = fold.step::<ops::post_v3_kms_stop::PostV3KmsStop>(carry);
     let carry = fold.step::<ops::post_v3_object_data_cache_flush::PostV3ObjectDataCacheFlush>(carry);
+    let carry = fold.step::<ops::post_v3_object_zip_downloads::PostV3ObjectZipDownloads>(carry);
     let carry = fold.step::<ops::post_v3_oidc_validate::PostV3OidcValidate>(carry);
     let carry = fold.step::<ops::post_v3_on_demand_migration_by_bucket_backfill::PostV3OnDemandMigrationByBucketBackfill>(carry);
     let carry = fold.step::<ops::post_v3_pools_cancel::PostV3PoolsCancel>(carry);
@@ -365,4 +369,17 @@ pub fn fold_every_operation<F: OperationFold>(fold: &mut F, carry: F::Carry) -> 
     let carry = fold.step::<ops::put_v3_tier::PutV3Tier>(carry);
     let carry = fold.step::<ops::put_v3_update_group_members::PutV3UpdateGroupMembers>(carry);
     fold.step::<ops::put_v4_plugins_instances_by_id::PutV4PluginsInstancesById>(carry)
+}
+
+/// Takes `fold`'s step for every S3-shaped extension operation in turn, in [`crate::EXTENSION_ROUTES`]
+/// order (rustfs/backlog#2753).
+pub fn fold_every_extension<F: ExtensionFold>(fold: &mut F, carry: F::Carry) -> F::Carry {
+    let carry = fold.step::<ops::reset_bucket_replication::ResetBucketReplication>(carry);
+    let carry = fold.step::<ops::get_replication_reset_status::GetReplicationResetStatus>(carry);
+    let carry = fold.step::<ops::get_replication_metrics_v2::GetReplicationMetricsV2>(carry);
+    let carry = fold.step::<ops::get_replication_metrics::GetReplicationMetrics>(carry);
+    let carry = fold.step::<ops::check_replication::CheckReplication>(carry);
+    let carry = fold.step::<ops::invoke_object_lambda::InvokeObjectLambda>(carry);
+    let carry = fold.step::<ops::listen_notification::ListenNotification>(carry);
+    fold.step::<ops::listen_bucket_notification::ListenBucketNotification>(carry)
 }

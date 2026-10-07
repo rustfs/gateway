@@ -123,7 +123,7 @@ impl AdminOperation for PostV3PoolsDecommission {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 333,
+    precedence: 335,
     selector: "PathTemplate(\"/rustfs/admin/v3/pools/decommission\") ∧ Method(POST) ∨ PathTemplate(\"/minio/admin/v3/pools/decommission\") ∧ Method(POST)",
     action: "admin:Decommission",
     resource: ResourceShape::Service,

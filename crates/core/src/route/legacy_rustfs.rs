@@ -18,15 +18,23 @@
 //! Responsible for: [`Selection`], the choice a [`crate::Router`] is built with, and
 //! [`legacy_rustfs_selection`], the operation legacy RustFS selects for a request outside every
 //! dialect claim — from its method, its target, the keys its query names, the `list-type`,
-//! `select-type` and `x-id` values, and three headers.
+//! `select-type` and `x-id` values, and three headers — and, ahead of all of that, the eight
+//! S3-shaped extension routes its admin router claims by one query discriminator
+//! ([`EXTENSIONS`], rustfs/backlog#2753).
 //! NOT responsible for: the operation's own parameter checks (`crate::registry`), dialect claims
-//! (asked first, by the router), the name of the bucket or key, or anything after selection.
+//! (asked first, by the router), the extension operations themselves (the `rustfs` dialect
+//! declares them as S3-table rows; a table without them refuses the request `501` by name), the
+//! name of the bucket or key, or anything after selection.
 //! Upstream: `super::selector`'s request parts. Downstream: `crate::dispatch::Router::dispatch`.
 //!
 //! # What legacy RustFS does, measured on a legacy build
 //!
-//! An `x-id` named exactly once is the operation, among the operations of the request's method and
-//! target, whatever else the query names: `GET /bkt?x-id=GetBucketVersioning&acl` is
+//! Before its S3 service reads anything, RustFS's admin router claims a request whose method,
+//! target and one query discriminator name an extension route — `PUT /bkt?replication-reset`,
+//! `GET /bkt?replication-metrics=2`, `GET /bkt/obj?lambdaArn=…`, `GET /?events=…` — whatever
+//! else the query names, `x-id` included; the discriminators are tried in [`EXTENSIONS`]' order.
+//! Then an `x-id` named exactly once is the operation, among the operations of the request's
+//! method and target, whatever else the query names: `GET /bkt?x-id=GetBucketVersioning&acl` is
 //! GetBucketVersioning, and `PUT /bkt/obj?x-id=PutObjectTagging` stores tags rather than an
 //! object. An `x-id` named twice, naming no operation, or naming one of another method or target
 //! is `400 InvalidRequest`. Without it, the first present key in a fixed order per method and
@@ -35,10 +43,11 @@
 //! is none. A browser-form `POST` is read by neither rule: to a bucket it is `PostObject`, and
 //! anywhere else it is left to the route table, as legacy RustFS's own form path is.
 
+use http::Method;
 use rustfs_gateway_types::decode_once;
 
 use super::selector::{RouteRequestParts, TargetKind};
-use Cond::{Header, Key, NoHeader, NoKey, Value};
+use Cond::{First, Header, Key, NoHeader, NoKey, Value};
 
 /// How a router chooses the operation a request outside every dialect claim names.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -91,6 +100,10 @@ enum Cond {
     NoKey(&'static str),
     /// The query names the key exactly once, and its value, decoded, is this text.
     Value(&'static str, &'static str),
+    /// The query's first value for the key, still encoded, is this text: RustFS's extension
+    /// discriminators read the first pair and ignore a repeat, and the dialect's S3-table rows
+    /// compare the encoded value as every `QueryEquals` row does, so both selections agree.
+    First(&'static str, &'static str),
     /// The header is present.
     Header(&'static str),
     /// The header is absent.
@@ -117,6 +130,60 @@ struct Partition {
     otherwise: Option<&'static str>,
 }
 
+/// One extension route RustFS's admin router claims ahead of its S3 service: a method, a target,
+/// one discriminating condition, and the `rustfs` dialect's operation for it.
+#[derive(Clone, Debug)]
+struct Extension {
+    method: Method,
+    target: TargetKind,
+    when: Cond,
+    op: &'static str,
+}
+
+const fn extension(method: Method, target: TargetKind, when: Cond, op: &'static str) -> Extension {
+    Extension {
+        method,
+        target,
+        when,
+        op,
+    }
+}
+
+/// RustFS's eight S3-shaped extension routes, in the order its router tries them
+/// (rustfs/backlog#2753): the replication discriminators, then object lambda, then the two
+/// notification listeners. Each names the `rustfs` dialect's operation, declared there as an
+/// S3-table row with the same selector; the two are pinned to agree by that crate's tests.
+const EXTENSIONS: &[Extension] = &[
+    extension(
+        Method::PUT,
+        TargetKind::Bucket,
+        First("replication-reset", ""),
+        "rustfs:ResetBucketReplication",
+    ),
+    extension(
+        Method::GET,
+        TargetKind::Bucket,
+        First("replication-reset-status", ""),
+        "rustfs:GetReplicationResetStatus",
+    ),
+    extension(
+        Method::GET,
+        TargetKind::Bucket,
+        First("replication-metrics", "2"),
+        "rustfs:GetReplicationMetricsV2",
+    ),
+    extension(
+        Method::GET,
+        TargetKind::Bucket,
+        First("replication-metrics", ""),
+        "rustfs:GetReplicationMetrics",
+    ),
+    extension(Method::GET, TargetKind::Bucket, First("replication-check", ""), "rustfs:CheckReplication"),
+    extension(Method::GET, TargetKind::Object, Key("lambdaArn"), "rustfs:InvokeObjectLambda"),
+    extension(Method::GET, TargetKind::Service, Key("events"), "rustfs:ListenNotification"),
+    extension(Method::GET, TargetKind::Bucket, Key("events"), "rustfs:ListenBucketNotification"),
+];
+
 const COPY_SOURCE: &str = "x-amz-copy-source";
 
 const GET_SERVICE: Partition = Partition {
@@ -126,8 +193,6 @@ const GET_SERVICE: Partition = Partition {
 
 const GET_BUCKET: Partition = Partition {
     candidates: &[
-        // MinIO's bucket notification listener, ahead of every other key.
-        when("ListenBucketNotification", &[Key("events")]),
         when("GetBucketAnalyticsConfiguration", &[Key("analytics"), Key("id")]),
         when("GetBucketIntelligentTieringConfiguration", &[Key("intelligent-tiering"), Key("id")]),
         when("GetBucketInventoryConfiguration", &[Key("inventory"), Key("id")]),
@@ -291,7 +356,6 @@ const DELETE_OBJECT: Partition = Partition {
 /// The operations of one method and target, in legacy RustFS's order; `None` where legacy RustFS
 /// defines none (a `PUT`, `POST`, `DELETE` or `HEAD` of `/`, and every other method).
 fn partition(parts: &RouteRequestParts<'_>) -> Option<&'static Partition> {
-    use http::Method;
     let method = parts.method;
     Some(match parts.target {
         TargetKind::Service if *method == Method::GET => &GET_SERVICE,
@@ -315,6 +379,7 @@ fn holds(cond: Cond, parts: &RouteRequestParts<'_>) -> bool {
         Key(key) => parts.query.contains(key),
         NoKey(key) => !parts.query.contains(key),
         Value(key, expected) => parts.query.count(key) == 1 && parts.query.get(key).is_some_and(|raw| spells(raw, expected)),
+        First(key, expected) => parts.query.get(key) == Some(expected),
         Header(name) => has_header(parts, name),
         NoHeader(name) => !has_header(parts, name),
     }
@@ -353,6 +418,12 @@ fn is_form_post(parts: &RouteRequestParts<'_>) -> bool {
 /// answers instead: see the module documentation for the rules and where they were measured.
 #[must_use]
 pub fn legacy_rustfs_selection(parts: &RouteRequestParts<'_>) -> LegacySelection {
+    if let Some(extension) = EXTENSIONS
+        .iter()
+        .find(|extension| *parts.method == extension.method && parts.target == extension.target && holds(extension.when, parts))
+    {
+        return LegacySelection::Selected(extension.op);
+    }
     if is_form_post(parts) {
         return match parts.target {
             TargetKind::Bucket => LegacySelection::Selected("PostObject"),

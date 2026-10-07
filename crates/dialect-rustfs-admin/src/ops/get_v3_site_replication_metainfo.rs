@@ -123,7 +123,7 @@ impl AdminOperation for GetV3SiteReplicationMetainfo {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 233,
+    precedence: 234,
     selector: "PathTemplate(\"/rustfs/admin/v3/site-replication/metainfo\") ∧ Method(GET) ∨ PathTemplate(\"/minio/admin/v3/site-replication/metainfo\") ∧ Method(GET)",
     action: "admin:SiteReplicationInfo",
     resource: ResourceShape::Service,

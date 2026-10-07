@@ -18,7 +18,8 @@
 //!
 //! Responsible for: routing every row of every operation through core's router — with concrete
 //! values for template parameters, and against a matcher written here from ADR-0024's rule — and
-//! every operation's declared facts against its record and against each other.
+//! every operation's declared facts against its record and against each other; the S3-shaped
+//! extension rows and the zip pair are `integration/extensions.rs`.
 //! NOT responsible for: authentication, authorisation, parameter decoding and the caller's secret
 //! through an assembled service, or the binding to the recorded inventory
 //! (`rustfs-gateway-goldens`'s `rustfs_admin_dialect`).
@@ -37,13 +38,15 @@ use rustfs_gateway_core::route::{HostClass, Predicate, RouteRequestParts, Shadow
 use rustfs_gateway_core::{Everyone, SubjectRule, WhenAbsent};
 use rustfs_gateway_dialect_rustfs_admin::admin::{self, AdminResponse};
 use rustfs_gateway_dialect_rustfs_admin::{
-    AdminOperation, BodyKind, CLAIMS, OVERLAY, OperationFold, ROUTES, RouteRecord, TABLE_CATALOG_PREFIXES, fold_every_operation,
-    rustfs_admin_dialect,
+    AdminOperation, BodyKind, OVERLAY, OperationFold, ROUTES, RouteRecord, fold_every_operation, rustfs_admin_dialect,
 };
 use rustfs_gateway_http::{Limits, WireRequest};
 
 #[path = "integration/census.rs"]
 mod census;
+
+#[path = "integration/extensions.rs"]
+mod extensions;
 
 #[path = "integration/sts_form.rs"]
 mod sts_form;
@@ -109,16 +112,43 @@ fn templates(record: &RouteRecord) -> Vec<&'static str> {
     std::iter::once(record.path).chain(record.alias).collect()
 }
 
-/// The parameter a template segment names, if it is one.
-fn param(segment: &str) -> Option<&str> {
-    segment.strip_prefix('{').and_then(|inner| inner.strip_suffix('}'))
+/// The parameter a template segment names and the literal text after it in the same segment
+/// (`{id}.zip`), if it is one; the dialect matches such a segment as one opaque capture.
+fn affixed(segment: &str) -> Option<(&str, &str)> {
+    segment
+        .strip_prefix('{')
+        .and_then(|inner| inner.split_once('}'))
+        .filter(|(_, suffix)| !suffix.is_empty() && !suffix.contains(['{', '}']))
 }
 
-/// `template` with every parameter given a concrete value, its name then `-1`.
+/// The parameter a template segment names, affixed or not, if it is one.
+fn param(segment: &str) -> Option<&str> {
+    segment
+        .strip_prefix('{')
+        .and_then(|inner| inner.strip_suffix('}'))
+        .or_else(|| affixed(segment).map(|(name, _)| name))
+}
+
+/// `template` with every affixed parameter as the opaque capture of its whole segment, which is
+/// how the dialect spells `{id}.zip`.
+fn captured(template: &str) -> String {
+    template
+        .split('/')
+        .map(|segment| affixed(segment).map_or_else(|| segment.to_owned(), |(name, _)| format!("{{{name}}}")))
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+/// `template` with every parameter given a concrete value, its name then `-1`, an affixed one
+/// keeping its suffix.
 fn concrete(template: &str) -> String {
     template
         .split('/')
-        .map(|segment| param(segment).map_or_else(|| segment.to_owned(), |name| format!("{}-1", name.trim_start_matches('*'))))
+        .map(|segment| match (affixed(segment), param(segment)) {
+            (Some((name, suffix)), _) => format!("{name}-1{suffix}"),
+            (None, Some(name)) => format!("{}-1", name.trim_start_matches('*')),
+            (None, None) => segment.to_owned(),
+        })
         .collect::<Vec<_>>()
         .join("/")
 }
@@ -240,8 +270,8 @@ fn every_declared_row_reaches_its_operation() {
         }
     }
     assert_eq!(
-        rows, 622,
-        "312 operations, each with its MinIO or compat alias but the two profiling triggers"
+        rows, 626,
+        "314 operations, each with its MinIO or compat alias but the two profiling triggers"
     );
 }
 
@@ -398,8 +428,8 @@ fn n_parameter_boundaries_preserve_raw_data() {
     }
     assert_eq!(
         checked,
-        10 * 2 * 190,
-        "190 parameters across 102 templates, each with its alias; catch-all values included"
+        10 * 2 * 191,
+        "191 parameters across 103 templates, each with its alias; catch-all values included"
     );
     assert_eq!(
         elsewhere,
@@ -546,7 +576,9 @@ fn the_subject_rules_are_the_order_four_rulings() {
             .map(|operation| operation.name)
             .collect::<Vec<_>>()
     };
-    assert_eq!(with(&|rule| rule == SubjectRule::Caller).len(), 9);
+    let own = with(&|rule| rule == SubjectRule::Caller);
+    assert_eq!(own.len(), 11, "nine order-4 own-account operations and the order-7 zip pair");
+    assert!(own.contains(&"rustfs:GetV3ObjectZipDownloadsByIdZip") && own.contains(&"rustfs:PostV3ObjectZipDownloads"));
     let refused = with(&|rule| {
         matches!(
             rule,
@@ -599,7 +631,7 @@ fn the_subject_rules_are_the_order_four_rulings() {
             "rustfs:GetV3ListAccessKeysBulk"
         ]
     );
-    assert_eq!(declared.iter().filter(|operation| operation.subject.is_some()).count(), 21);
+    assert_eq!(declared.iter().filter(|operation| operation.subject.is_some()).count(), 23);
 }
 
 /// Negative — a subject parameter selects nothing: every row of a subject-ruled operation reaches
@@ -624,7 +656,7 @@ fn n_a_subject_parameter_does_not_change_the_route() {
             }
         }
     }
-    assert_eq!(checked, 21 * 2 * 5);
+    assert_eq!(checked, 23 * 2 * 5);
 }
 
 /// Positive and negative — exactly the thirty-one operations whose body RustFS seals opt in to
@@ -659,43 +691,6 @@ fn only_the_sealed_operations_hold_the_caller_secret() {
         "rustfs:GetV3IdpLdapListAccessKeysBulk",
     ] {
         assert!(!holders.iter().any(|(holder, _)| *holder == name), "{name}");
-    }
-}
-
-/// Positive — the dialect assembles, claiming exactly the two admin prefixes, the two
-/// table-catalog prefixes and the two profiling triggers (ADR-0024, ADR-0031, ADR-0032).
-#[test]
-fn the_dialect_assembles_with_its_six_claims() {
-    let _ = dialect();
-    let prefixes: Vec<&str> = CLAIMS.iter().map(|claim| claim.prefix).collect();
-    assert_eq!(
-        prefixes,
-        [
-            "/rustfs/admin",
-            "/minio/admin",
-            "/_iceberg/v1",
-            "/iceberg/v1",
-            "/profile/cpu",
-            "/profile/memory"
-        ]
-    );
-}
-
-/// Positive and negative — the table-catalog prefixes a RustFS assembly signs as generic SigV4
-/// does are exactly the table catalog's two claims, and no admin or profiling claim
-/// (rustfs/gateway#1232).
-#[test]
-fn the_table_catalog_prefixes_are_exactly_its_two_claims() {
-    assert_eq!(TABLE_CATALOG_PREFIXES, ["/_iceberg/v1", "/iceberg/v1"]);
-    for prefix in TABLE_CATALOG_PREFIXES {
-        let claim = CLAIMS
-            .iter()
-            .find(|claim| claim.prefix == *prefix)
-            .expect("a table-catalog prefix is a claim");
-        assert!(claim.reason.contains("table catalog"), "{prefix}: {}", claim.reason);
-    }
-    for claim in CLAIMS.iter().filter(|claim| !TABLE_CATALOG_PREFIXES.contains(&claim.prefix)) {
-        assert!(!claim.reason.contains("table catalog"), "{}", claim.prefix);
     }
 }
 

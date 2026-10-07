@@ -123,7 +123,7 @@ impl AdminOperation for GetV3OidcConfig {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 215,
+    precedence: 216,
     selector: "PathTemplate(\"/rustfs/admin/v3/oidc/config\") ∧ Method(GET) ∨ PathTemplate(\"/minio/admin/v3/oidc/config\") ∧ Method(GET)",
     action: "admin:ServerInfo",
     resource: ResourceShape::Service,

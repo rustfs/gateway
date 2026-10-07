@@ -134,7 +134,7 @@ impl AdminOperation for PostV3AccountMfaRecoveryCodes {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 286,
+    precedence: 287,
     selector: "PathTemplate(\"/rustfs/admin/v3/account/mfa/recovery-codes\") ∧ Method(POST) ∨ PathTemplate(\"/minio/admin/v3/account/mfa/recovery-codes\") ∧ Method(POST)",
     action: "rustfs:AccountMfaRecoveryCodes about caller",
     resource: ResourceShape::Service,

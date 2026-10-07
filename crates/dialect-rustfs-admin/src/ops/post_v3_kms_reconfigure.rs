@@ -124,7 +124,7 @@ impl AdminOperation for PostV3KmsReconfigure {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 320,
+    precedence: 321,
     selector: "PathTemplate(\"/rustfs/admin/v3/kms/reconfigure\") ∧ Method(POST) ∨ PathTemplate(\"/minio/admin/v3/kms/reconfigure\") ∧ Method(POST)",
     action: "kms:Configure",
     resource: ResourceShape::Service,

@@ -22,8 +22,9 @@
 //! templates and the listed query parameters (`template.rs`), and ADR-0031's surfaces (the table
 //! catalog's `/_iceberg/v1` with its `/iceberg/v1` compat rows as aliases), refusing any route it has no rule for and any rule
 //! outside those ADRs' shapes, and writing one operation module per declared operation, the
-//! module list and the dialect's table files, plus ADR-0039's two fixed fallback operations and ADR-0041's
-//! form-claimed STS operation (`form.rs`), each through rustfmt.
+//! module list and the dialect's table files, plus ADR-0039's two fixed fallback operations, ADR-0041's
+//! form-claimed STS operation (`form.rs`) and the eight S3-shaped extension operations
+//! (`extension.rs`, rustfs/backlog#2753), each through rustfmt.
 //! `--check` compares instead, and fails on a stale, missing or extra file.
 //! NOT responsible for: validating the inventory (goldens' strict reader does, and binds the
 //! generated operations back to it), the claims or the shared shapes
@@ -39,11 +40,12 @@ use serde::Deserialize;
 
 use self::render::{render_mod, render_operation, render_tables};
 use self::rule::{Rule, is_parameter};
-use self::rulings::{FORMS, QUERY_BUCKETS, RULINGS, Ruling, STAYS};
+use self::rulings::{EXTENSIONS, FORMS, QUERY_BUCKETS, RULINGS, Ruling, STAYS};
 use self::template::{Shadow, Template, shadowing, snake, template_params, type_name};
 
 use crate::repo_root::repo_root;
 
+mod extension;
 mod fallback;
 mod form;
 mod render;
@@ -162,6 +164,8 @@ struct Inventory {
     format: String,
     source: Source,
     routes: Vec<Route>,
+    /// The S3-shaped routes RustFS's router claims by query discriminator (rustfs/backlog#2753).
+    extension_routes: Vec<extension::ExtensionRoute>,
 }
 
 #[derive(Deserialize)]
@@ -204,6 +208,8 @@ struct Declared {
     query: Option<(&'static str, &'static str)>,
     rule: Rule,
     ruled: Option<String>,
+    /// The ruling's paragraph for the module documentation, or nothing.
+    note: &'static str,
     handler: String,
     handler_url: String,
     router_url: String,
@@ -253,6 +259,8 @@ struct Plan {
     staying: Vec<(String, String, String, &'static str)>,
     /// The routes served behind a form claim (ADR-0041).
     forms: Vec<form::Formed>,
+    /// The S3-shaped extension routes, as S3-table rows (rustfs/backlog#2753).
+    extensions: Vec<extension::Extended>,
 }
 
 fn body_kind(recorded: &str, route: &Route) -> Result<&'static str, String> {
@@ -265,8 +273,14 @@ fn body_kind(recorded: &str, route: &Route) -> Result<&'static str, String> {
     }
 }
 
-/// The forms `route` is declared as: its own action, or its ruling's forms.
-fn forms(route: &Route, at: &str, rulings: &[Ruling], used: &mut BTreeSet<usize>) -> Result<Vec<Planned>, String> {
+/// The forms `route` is declared as — its own action, or its ruling's forms — and the ruling's
+/// note for the module documentation, empty without one.
+fn forms(
+    route: &Route,
+    at: &str,
+    rulings: &[Ruling],
+    used: &mut BTreeSet<usize>,
+) -> Result<(Vec<Planned>, &'static str), String> {
     let ruling = rulings
         .iter()
         .position(|ruling| ruling.method == route.method && ruling.path == route.path);
@@ -279,7 +293,7 @@ fn forms(route: &Route, at: &str, rulings: &[Ruling], used: &mut BTreeSet<usize>
             let rule = Rule::plain(action);
             match rule.fault(None) {
                 Some(why) => Err(format!("{at}: {why}")),
-                None => Ok(vec![(None, rule, None)]),
+                None => Ok((vec![(None, rule, None)], "")),
             }
         }
         (mode @ ("custom" | "anonymous"), Some(index)) => {
@@ -298,7 +312,7 @@ fn forms(route: &Route, at: &str, rulings: &[Ruling], used: &mut BTreeSet<usize>
                     ruling.auth_detail, route.auth_detail
                 ));
             }
-            ruling
+            let forms = ruling
                 .forms
                 .iter()
                 .map(|form| {
@@ -308,7 +322,8 @@ fn forms(route: &Route, at: &str, rulings: &[Ruling], used: &mut BTreeSet<usize>
                         None => Ok((form.query, rule, Some(ruling.auth_detail.to_owned()))),
                     }
                 })
-                .collect()
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok((forms, ruling.note))
         }
         ("sigv4-admin", Some(_)) => Err(format!("{at}: a ruling for a route the inventory authorises itself")),
         (mode, None) => Err(format!("{at}: a {mode} route in a migrated group has no ruling")),
@@ -347,8 +362,9 @@ fn plan(
     query_buckets: &[(&str, &str, &'static str)],
     stays: &[(&str, &str, &'static str)],
     form_routes: &[(&str, &str, &str)],
+    extensions: &[(&str, &str)],
 ) -> Result<Plan, String> {
-    plan_through(MIGRATED_THROUGH, inventory, rulings, query_buckets, stays, form_routes)
+    plan_through(MIGRATED_THROUGH, inventory, rulings, query_buckets, stays, form_routes, extensions)
 }
 
 /// [`plan`] with the groups up to `through` migrated and the later ones pending. Every group of
@@ -361,6 +377,7 @@ fn plan_through(
     query_buckets: &[(&str, &str, &'static str)],
     stays: &[(&str, &str, &'static str)],
     form_routes: &[(&str, &str, &str)],
+    extensions: &[(&str, &str)],
 ) -> Result<Plan, String> {
     if inventory.format != FORMAT {
         return Err(format!("the inventory is {:?}, not {FORMAT:?}", inventory.format));
@@ -429,7 +446,7 @@ fn plan_through(
             (None, Some(param)) => Some(Bound::Query(param)),
             (None, None) => None,
         };
-        let forms = forms(route, &at, rulings, &mut used)?;
+        let (forms, note) = forms(route, &at, rulings, &mut used)?;
         let rest = route
             .path
             .strip_prefix(surface.prefix)
@@ -475,6 +492,7 @@ fn plan_through(
                 query,
                 rule,
                 ruled,
+                note,
                 handler: route.handler.clone(),
                 handler_url: format!("https://github.com/rustfs/rustfs/blob/{}/{}", inventory.source.commit, route.handler_file),
                 router_url: format!("https://github.com/rustfs/rustfs/blob/{}/{RUSTFS_ROUTER}", inventory.source.commit),
@@ -492,6 +510,33 @@ fn plan_through(
         declared[winner].shadows.push(shadow);
     }
     let _ = twins_used;
+    // The S3-shaped extension routes: each needs a ruling naming its operation, every ruling needs
+    // its route, and the rows take the inventory's order, which is RustFS's router's.
+    let mut extended = Vec::new();
+    let mut extensions_used = BTreeSet::new();
+    for (index, route) in inventory.extension_routes.iter().enumerate() {
+        let at = format!("extension route {}", route.name);
+        let ruling = extensions
+            .iter()
+            .position(|(name, _)| *name == route.name)
+            .ok_or_else(|| format!("{at}: an extension route the generator has no ruling for"))?;
+        extensions_used.insert(ruling);
+        let precedence = u16::try_from(index)
+            .ok()
+            .and_then(|index| extension::FIRST_PRECEDENCE.checked_add(index))
+            .ok_or_else(|| format!("{at}: out of precedences"))?;
+        extended.push(extension::Extended::of(
+            route,
+            extensions[ruling].1,
+            &at,
+            &inventory.source.commit,
+            precedence,
+        )?);
+    }
+    if let Some(stale) = (0..extensions.len()).find(|index| !extensions_used.contains(index)) {
+        return Err(format!("the extension route {} is not in the inventory", extensions[stale].0));
+    }
+    extension::shadowing(&mut extended)?;
     // A staying route the inventory no longer records is refused only once every group is
     // migrated: until then its group may simply be pending.
     if pending.is_empty()
@@ -522,9 +567,13 @@ fn plan_through(
     if let Some(twice) = declared.iter().find(|declared| !names.insert(declared.stem.clone())) {
         return Err(format!("two routes derive the operation {}", twice.name));
     }
+    if let Some(twice) = extended.iter().find(|extended| !names.insert(extended.stem.clone())) {
+        return Err(format!("two routes derive the operation {}", twice.operation));
+    }
     Ok(Plan {
         staying,
         forms: formed,
+        extensions: extended,
         declared,
         pending: pending
             .into_iter()
@@ -586,7 +635,7 @@ fn format_all(root: &Path, files: BTreeMap<PathBuf, String>) -> Result<BTreeMap<
 fn generate(root: &Path) -> Result<BTreeMap<PathBuf, String>, String> {
     let recorded = std::fs::read_to_string(root.join(INVENTORY)).map_err(|error| format!("cannot read {INVENTORY}: {error}"))?;
     let inventory: Inventory = serde_json::from_str(&recorded).map_err(|error| format!("cannot parse {INVENTORY}: {error}"))?;
-    let plan = plan(&inventory, RULINGS, QUERY_BUCKETS, STAYS, FORMS)?;
+    let plan = plan(&inventory, RULINGS, QUERY_BUCKETS, STAYS, FORMS, EXTENSIONS)?;
     let output = Path::new(OUTPUT);
     let mut files = BTreeMap::new();
     for declared in &plan.declared {
@@ -597,6 +646,9 @@ fn generate(root: &Path) -> Result<BTreeMap<PathBuf, String>, String> {
     }
     for formed in &plan.forms {
         files.insert(output.join("ops").join(format!("{}.rs", form::STEM)), formed.render(render::LICENSE));
+    }
+    for extended in &plan.extensions {
+        files.insert(output.join("ops").join(format!("{}.rs", extended.stem)), extended.render(render::LICENSE));
     }
     files.insert(output.join("ops/mod.rs"), render_mod(&plan));
     for (path, source) in render_tables(&plan, &inventory.source.commit) {
@@ -686,6 +738,9 @@ pub(crate) fn command(args: &[String]) -> ExitCode {
 #[cfg(test)]
 #[path = "rustfs_admin_dialect/bucket_tests.rs"]
 mod bucket_tests;
+#[cfg(test)]
+#[path = "rustfs_admin_dialect/extension_tests.rs"]
+mod extension_tests;
 #[cfg(test)]
 #[path = "rustfs_admin_dialect/form_tests.rs"]
 mod form_tests;

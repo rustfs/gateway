@@ -134,7 +134,7 @@ impl AdminOperation for PostV3IntegrityByBucketJobs {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 302,
+    precedence: 303,
     selector: "PathTemplate(\"/rustfs/admin/v3/integrity/{+bucket}/jobs\") ∧ Method(POST) ∨ PathTemplate(\"/minio/admin/v3/integrity/{+bucket}/jobs\") ∧ Method(POST) ⇒ BucketParam(\"bucket\")",
     action: "admin:StartBatchJob",
     resource: ResourceShape::Bucket,

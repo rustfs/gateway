@@ -17,9 +17,30 @@ authenticated fallback handlers (ADR-0039).
   JSON or binary body, and the live stream when it streams one. Every output is an
   `AdminResponse`; the two synthetic fallbacks use `()` and their fixed handlers.
 - `ROUTES` records the inventory facts each operation was generated from, `PENDING` lists the
-  registration groups that are not migrated yet (none today), and `STAYING` lists the seven routes
-  the gateway deliberately does not serve, each with its reason: a deployment keeps routing those
-  itself (ADR-0032).
+  registration groups that are not migrated yet (none today), and `STAYING` lists the four
+  `/health` routes the gateway deliberately does not serve, each with its reason: a deployment
+  keeps routing those itself (ADR-0032).
+- `EXTENSION_ROUTES` records RustFS's eight S3-shaped extension routes (rustfs/backlog#2753):
+  `PUT /{bucket}?replication-reset`, `GET /{bucket}?replication-reset-status`,
+  `?replication-metrics=2` and `?replication-metrics` (two operations, as RustFS splits them),
+  `?replication-check`, `GET /{bucket}/{key}?lambdaArn=…`, and `?events=…` on the service and on a
+  bucket. RustFS's router claims each by method, target and that one query discriminator before
+  its S3 service reads anything else, so no path-prefix claim can take them: each is an S3-table
+  row (`ExtensionOperation::ROUTE`, declared with `DialectBuilder::declare`) placed ahead of every
+  standard row of its method and target, and every one of those overlaps is declared, computed
+  from the generated route table. Under legacy RustFS's selection (`Selection::RustfsLegacy`) the
+  same discriminators name the same operations, ahead of `x-id` and every operation key. Each is
+  authorised by the inventory's IAM action on the bucket or object the path names, reads no body,
+  and is walked by `fold_every_extension`. The two notification listeners are long-lived streams:
+  a handler answers `AdminResponse::stream`.
+- The object-zip-download pair (`POST object-zip-downloads`, `GET object-zip-downloads/{id}.zip`)
+  is claimed like every other admin route (rustfs/backlog#2753). Both floors are privileged, under
+  the caller's own vendor labels `rustfs:CreateObjectZipDownload` and `rustfs:DownloadObjectZip`;
+  RustFS's handler keeps its own per-resource S3 checks on the minting body. The download's
+  `{id}.zip` segment is one opaque `{+id}` capture (ADR-0040): the handler reads `id` as the whole
+  segment, suffix included, and validates it against the token. A minted download URL presented
+  with its `?token=` and no header signature is `403` here: ADR-0026 (g) refused admitting the
+  route anonymously, and the bearer scheme it points to is not built yet.
 
 Every operation is privileged and header-signed only: never anonymous, never presigned, and never
 handed the caller's secret unless its inventory row says RustFS seals a body with it. The one

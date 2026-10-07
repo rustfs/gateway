@@ -124,7 +124,7 @@ impl AdminOperation for PostV3IdpBuiltinPolicyAttach {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 294,
+    precedence: 295,
     selector: "PathTemplate(\"/rustfs/admin/v3/idp/builtin/policy/attach\") ∧ Method(POST) ∨ PathTemplate(\"/minio/admin/v3/idp/builtin/policy/attach\") ∧ Method(POST)",
     action: "admin:AttachUserOrGroupPolicy",
     resource: ResourceShape::Service,

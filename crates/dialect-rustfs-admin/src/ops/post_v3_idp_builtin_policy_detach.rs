@@ -124,7 +124,7 @@ impl AdminOperation for PostV3IdpBuiltinPolicyDetach {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 295,
+    precedence: 296,
     selector: "PathTemplate(\"/rustfs/admin/v3/idp/builtin/policy/detach\") ∧ Method(POST) ∨ PathTemplate(\"/minio/admin/v3/idp/builtin/policy/detach\") ∧ Method(POST)",
     action: "admin:AttachUserOrGroupPolicy",
     resource: ResourceShape::Service,

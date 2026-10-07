@@ -123,7 +123,7 @@ impl AdminOperation for GetV3ScannerStatus {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 230,
+    precedence: 231,
     selector: "PathTemplate(\"/rustfs/admin/v3/scanner/status\") ∧ Method(GET) ∨ PathTemplate(\"/minio/admin/v3/scanner/status\") ∧ Method(GET)",
     action: "admin:ServerInfo",
     resource: ResourceShape::Service,

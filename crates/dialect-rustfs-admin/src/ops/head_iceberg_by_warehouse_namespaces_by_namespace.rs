@@ -124,7 +124,7 @@ impl AdminOperation for HeadIcebergByWarehouseNamespacesByNamespace {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 261,
+    precedence: 262,
     selector: "PathTemplate(\"/_iceberg/v1/{+warehouse}/namespaces/{+namespace}\") ∧ Method(HEAD) ∨ PathTemplate(\"/iceberg/v1/{+warehouse}/namespaces/{+namespace}\") ∧ Method(HEAD) ⇒ BucketParam(\"warehouse\")",
     action: "admin:GetTableNamespace",
     resource: ResourceShape::Bucket,

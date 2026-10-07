@@ -140,7 +140,7 @@ impl AdminOperation for PutV3AddUser {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 372,
+    precedence: 374,
     selector: "PathTemplate(\"/rustfs/admin/v3/add-user\") ∧ Method(PUT) ∨ PathTemplate(\"/minio/admin/v3/add-user\") ∧ Method(PUT)",
     action: "admin:CreateUser about query(accessKey|access-key, absent=refused)",
     resource: ResourceShape::Service,

@@ -123,7 +123,7 @@ impl AdminOperation for GetV3SiteReplicationRepairStatus {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 235,
+    precedence: 236,
     selector: "PathTemplate(\"/rustfs/admin/v3/site-replication/repair/status\") ∧ Method(GET) ∨ PathTemplate(\"/minio/admin/v3/site-replication/repair/status\") ∧ Method(GET)",
     action: "admin:SiteReplicationOperation",
     resource: ResourceShape::Service,
