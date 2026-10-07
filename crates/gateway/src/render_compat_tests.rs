@@ -122,7 +122,7 @@ fn closed_scope_contexts_preserve_authentication_teardown() {
 
 #[test]
 fn an_authorisation_denial_keeps_the_connection() {
-    let denied = from_denial(Denial::access_denied(), ResponseKind::Other);
+    let denied = from_denial(Denial::access_denied(), ResponseKind::Other, DenialSentences::Gateway);
     assert_eq!(denied.status(), StatusCode::FORBIDDEN);
     assert!(!denied.must_close_connection());
     assert!(!announces_close(&denied));

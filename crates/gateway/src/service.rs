@@ -1094,7 +1094,11 @@ impl S3Service {
                         authz_started,
                     )
                     .await;
-                    return Err(from_denial(rustfs_gateway_core::Denied::indeterminate(), response_kind));
+                    return Err(from_denial(
+                        rustfs_gateway_core::Denied::indeterminate(),
+                        response_kind,
+                        route_service.inner.view_policy.denial_sentences(),
+                    ));
                 }
             };
             let policy = Arc::new(policy);
@@ -1225,7 +1229,7 @@ impl S3Service {
                     authz_started,
                 )
                 .await;
-                return Err(from_denial(denial, response_kind));
+                return Err(from_denial(denial, response_kind, route_service.inner.view_policy.denial_sentences()));
             }
 
             // A claimed row's path is not a bucket surface: a bound bucket's CORS rules do not
@@ -1456,7 +1460,7 @@ impl S3Service {
                     authz_started,
                 )
                 .await;
-                return Err(from_denial(denial, response_kind));
+                return Err(from_denial(denial, response_kind, input_service.inner.view_policy.denial_sentences()));
             }
             let config = config.with_missing_object_visibility(visibility).authorized();
             let map = |error| from_handler(error, response_kind, ConnectionIntent::MayKeepAlive);
@@ -1506,7 +1510,7 @@ impl S3Service {
             }
             Err(StaticDispatchError::Denied(denial)) => {
                 hold_failure_floor(self.inner.floor.failure_floor(), self.inner.authz_clock.as_ref(), authz_started).await;
-                return outcome.refuse(from_denial(denial, response_kind));
+                return outcome.refuse(from_denial(denial, response_kind, self.inner.view_policy.denial_sentences()));
             }
             Err(StaticDispatchError::Handler(error)) => {
                 return outcome.refuse(from_handler(error, response_kind, ConnectionIntent::MayKeepAlive));
