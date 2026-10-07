@@ -66,7 +66,19 @@ fn fields(count: usize, bytes: usize) -> Vec<u8> {
     form(&parts)
 }
 
-// ── one field ────────────────────────────────────────────────────────────────────────────────
+/// A field whose header block, its terminating blank line included, is `bytes` long.
+fn padded_header(bytes: usize) -> Vec<u8> {
+    let disposition = "Content-Disposition: form-data; name=\"key\"";
+    let filler = "X-Filler: ";
+    // The block is the headers, a CRLF between them, and the CRLF CRLF that ends it.
+    let fixed = disposition.len() + 2 + filler.len() + 4;
+    let headers = format!("{disposition}\r\n{filler}{}", "f".repeat(bytes - fixed));
+    let mut parts = vec![part(&headers, "k")];
+    parts.push(file("a.txt", "c"));
+    form(&parts)
+}
+
+// ── positive — each ceiling read exactly at its edge ─────────────────────────────────────────
 
 /// Positive — a field value of exactly 1 MiB is read whole.
 #[test]
@@ -74,17 +86,37 @@ fn a_field_of_one_mebibyte_is_read() {
     assert_eq!(head(&fields(1, MIB), FormLimits::legacy_rustfs()), Ok(1));
 }
 
-/// Negative — one byte more is refused as a field too large.
-#[test]
-fn n_a_field_past_one_mebibyte_is_refused() {
-    assert_eq!(head(&fields(1, MIB + 1), FormLimits::legacy_rustfs()), Err(FormReject::FieldTooLarge));
-}
-
 /// Positive — the `policy` field is held to the same 1 MiB, above AWS's 20 KiB.
 #[test]
 fn a_policy_field_of_one_mebibyte_is_read() {
     let body = form(&[field("policy", &value(MIB)), file("a.txt", "c")]);
     assert_eq!(head(&body, FormLimits::legacy_rustfs()), Ok(1));
+}
+
+/// Positive — twenty fields of 1 MiB, 20 MiB of values together, are read.
+#[test]
+fn twenty_mebibytes_of_field_values_are_read() {
+    assert_eq!(head(&fields(20, MIB), FormLimits::legacy_rustfs()), Ok(20));
+}
+
+/// Positive — 999 fields and the file, 1000 parts, are read.
+#[test]
+fn a_thousand_parts_with_the_file_are_read() {
+    assert_eq!(head(&fields(999, 1), FormLimits::legacy_rustfs()), Ok(999));
+}
+
+/// Positive — a header block of exactly 1 MiB is read.
+#[test]
+fn a_header_block_of_one_mebibyte_is_read() {
+    assert_eq!(head(&padded_header(MIB), FormLimits::legacy_rustfs()), Ok(1));
+}
+
+// ── negative — one past each ceiling, and the default ceilings unchanged ─────────────────────
+
+/// Negative — one byte more is refused as a field too large.
+#[test]
+fn n_a_field_past_one_mebibyte_is_refused() {
+    assert_eq!(head(&fields(1, MIB + 1), FormLimits::legacy_rustfs()), Err(FormReject::FieldTooLarge));
 }
 
 /// Negative — and refused one byte past it.
@@ -105,14 +137,6 @@ fn n_the_default_ceilings_still_refuse_what_they_refused() {
     assert_eq!(limits.max_fields_bytes(), None);
 }
 
-// ── every field together ─────────────────────────────────────────────────────────────────────
-
-/// Positive — twenty fields of 1 MiB, 20 MiB of values together, are read.
-#[test]
-fn twenty_mebibytes_of_field_values_are_read() {
-    assert_eq!(head(&fields(20, MIB), FormLimits::legacy_rustfs()), Ok(20));
-}
-
 /// Negative — one byte more across them is refused as the fields together too large.
 #[test]
 fn n_field_values_past_twenty_mebibytes_are_refused() {
@@ -124,38 +148,10 @@ fn n_field_values_past_twenty_mebibytes_are_refused() {
     assert_eq!(head(&form(&parts), FormLimits::legacy_rustfs()), Err(FormReject::FieldsTooLarge));
 }
 
-// ── parts ────────────────────────────────────────────────────────────────────────────────────
-
-/// Positive — 999 fields and the file, 1000 parts, are read.
-#[test]
-fn a_thousand_parts_with_the_file_are_read() {
-    assert_eq!(head(&fields(999, 1), FormLimits::legacy_rustfs()), Ok(999));
-}
-
 /// Negative — a thousandth field, the 1001st part, is refused.
 #[test]
 fn n_a_thousand_fields_and_the_file_are_refused() {
     assert_eq!(head(&fields(1000, 1), FormLimits::legacy_rustfs()), Err(FormReject::TooManyFields));
-}
-
-// ── one part's header block ──────────────────────────────────────────────────────────────────
-
-/// A field whose header block, its terminating blank line included, is `bytes` long.
-fn padded_header(bytes: usize) -> Vec<u8> {
-    let disposition = "Content-Disposition: form-data; name=\"key\"";
-    let filler = "X-Filler: ";
-    // The block is the headers, a CRLF between them, and the CRLF CRLF that ends it.
-    let fixed = disposition.len() + 2 + filler.len() + 4;
-    let headers = format!("{disposition}\r\n{filler}{}", "f".repeat(bytes - fixed));
-    let mut parts = vec![part(&headers, "k")];
-    parts.push(file("a.txt", "c"));
-    form(&parts)
-}
-
-/// Positive — a header block of exactly 1 MiB is read.
-#[test]
-fn a_header_block_of_one_mebibyte_is_read() {
-    assert_eq!(head(&padded_header(MIB), FormLimits::legacy_rustfs()), Ok(1));
 }
 
 /// Negative — one byte more is refused as a header block too large, and the default refuses far
