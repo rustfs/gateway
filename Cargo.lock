@@ -2051,6 +2051,7 @@ dependencies = [
  "bytes",
  "http",
  "http-body",
+ "tokio",
 ]
 
 [[package]]

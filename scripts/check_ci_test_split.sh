@@ -228,7 +228,7 @@ require_equal(error_status_steps.last.keys, ["name", "run"],
               "error-status-self-test command can skip or hide failure")
 
 workspace_runs = [<<~'RUN', <<~'RUN', <<~'RUN']
-  scripts/ci_budget.sh 480 "workspace tests 1/3" cargo test --workspace --exclude rustfs-gateway-conformance --exclude rustfs-gateway --exclude rustfs-gateway-goldens --exclude rustfs-gateway-difftest --exclude rustfs-gateway-types --exclude rustfs-gateway-sig
+  scripts/ci_budget.sh 480 "workspace tests 1/3" cargo test --workspace --exclude rustfs-gateway-conformance --exclude rustfs-gateway --exclude rustfs-gateway-goldens --exclude rustfs-gateway-difftest --exclude rustfs-gateway-types --exclude rustfs-gateway-sig --features rustfs-gateway-stream/tokio-io
 RUN
   scripts/ci_budget.sh 480 "workspace tests 2/3" bash -c 'cargo test --package rustfs-gateway-conformance && cargo check --package rustfs-gateway'
   scripts/ci_budget.sh 60 "handlers facade fixture" scripts/test_handlers_facade_fixture.sh

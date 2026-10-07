@@ -40,5 +40,7 @@ mod pay_ledger;
 #[cfg(unix)]
 mod pay_scale;
 mod support;
+#[cfg(feature = "tokio-io")]
+mod tokio_io;
 mod trailers;
 mod zero_copy;

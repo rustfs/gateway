@@ -8,15 +8,14 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="${GATEWAY_CHECK_ROOT:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
 
-if ! command -v python3 >/dev/null 2>&1; then
-    printf 'check_no_spawn_in_stream: required command is missing: python3\n' >&2
-    exit 1
-fi
+source "${SCRIPT_DIR}/lib/python.sh"
+PYTHON="$(gateway_python check_no_spawn_in_stream)" || exit 1
 
-python3 - "$ROOT_DIR" <<'PY'
+"$PYTHON" - "$ROOT_DIR" <<'PY'
 from pathlib import Path
 import re
 import sys
+import tomllib
 
 root = Path(sys.argv[1])
 stream = root / "crates/stream/src"
@@ -43,6 +42,20 @@ for crate in PLANE:
         print(f"check_no_spawn_in_stream: required input is missing: {crate}/src", file=sys.stderr)
         raise SystemExit(1)
     manifests.append((crate, manifest))
+
+# The sanctioned edge below is checked against the workspace entry it could inherit from, so
+# the workspace manifest is a required input, not an optional one.
+workspace_manifest = root / "Cargo.toml"
+if not workspace_manifest.is_file():
+    print("check_no_spawn_in_stream: required input is missing: Cargo.toml", file=sys.stderr)
+    raise SystemExit(1)
+try:
+    workspace_dependencies = tomllib.loads(workspace_manifest.read_text()).get("workspace", {}).get("dependencies", {})
+except (OSError, UnicodeError, tomllib.TOMLDecodeError) as error:
+    print(f"check_no_spawn_in_stream: cannot parse Cargo.toml: {error}", file=sys.stderr)
+    raise SystemExit(1)
+if not isinstance(workspace_dependencies, dict):
+    workspace_dependencies = {}
 
 
 # Compiled once, then matched with an offset. Cutting a fresh `text[index:]` slice copies the
@@ -138,15 +151,109 @@ IMPL = re.compile(
 
 violations = []
 
-# Rule 1 — the crate that owns the pull/push adapters has no runtime and must not grow
-# one. This is the structural half: with no async runtime in the dependency tree, a
-# read-ahead task is not merely forbidden here, it is unwritable.
-for crate, manifest in manifests:
-    for dependency in sorted(set(re.findall(r"^\s*(tokio|async-std|smol|futures-executor)\b", manifest.read_text(), re.M))):
-        violations.append(
-            f"{crate}/Cargo.toml: declares the async runtime '{dependency}'; "
-            "the payload data plane must have no runtime, so a read-ahead task cannot be written in it"
+# Rule 1 — the structural half. The payload data plane has no runtime, so a read-ahead task is
+# not merely forbidden here, it is unwritable. One edge is sanctioned, and every word of it is
+# checked rather than listed: `crates/stream` may name `tokio` behind its `tokio-io` feature —
+# optional, default features off, `io-util` as its only feature, and that feature its only door.
+# A task can only be spawned under `rt` (`tokio::spawn`, `JoinHandle` and `JoinSet` do not exist
+# without it), so the edge adds no way to write one. Feature unification in a workspace build
+# can still bring `rt` in through a neighbouring crate, which is why Rule 2 scans the sources
+# regardless of what this rule concludes.
+RUNTIMES = {"tokio", "async-std", "smol", "futures-executor"}
+RUNTIME_LINE = re.compile(r"^\s*(?:tokio|async-std|smol|futures-executor)\s*(?:=|\.)", re.M)
+SANCTIONED = {"crates/stream": ("tokio", "tokio-io", frozenset({"io-util"}))}
+NO_RUNTIME = "the payload data plane must have no runtime, so a read-ahead task cannot be written in it"
+
+
+def dependency_tables(document):
+    for kind in ("dependencies", "dev-dependencies", "build-dependencies"):
+        table = document.get(kind, {})
+        if isinstance(table, dict):
+            yield kind, table
+    targets = document.get("target", {})
+    if not isinstance(targets, dict):
+        return
+    for selector, target in targets.items():
+        if not isinstance(target, dict):
+            continue
+        for kind in ("dependencies", "dev-dependencies", "build-dependencies"):
+            table = target.get(kind, {})
+            if isinstance(table, dict):
+                yield f"target.{selector}.{kind}", table
+
+
+def runtime_edge_problem(crate, kind, alias, package, declaration, document):
+    """Why this runtime dependency is not the one sanctioned edge, or None when it is."""
+    rule = SANCTIONED.get(crate)
+    if rule is None or package != rule[0]:
+        return f"declares the async runtime '{package}'; {NO_RUNTIME}"
+    _, gate, allowed_features = rule
+    if kind != "dependencies":
+        return f"[{kind}].{alias} declares '{package}'; the runtime-free edge is sanctioned under [dependencies] alone"
+    if not isinstance(declaration, dict):
+        return (
+            f"[dependencies].{alias} declares '{package}' as a bare version; the sanctioned edge is "
+            f"optional, default-features = false, features = {sorted(allowed_features)}"
         )
+    features = {feature for feature in declaration.get("features", []) if isinstance(feature, str)}
+    merged = dict(declaration)
+    if declaration.get("workspace") is True:
+        inherited = workspace_dependencies.get(alias, {})
+        inherited = inherited if isinstance(inherited, dict) else {}
+        # Cargo unions the features of a workspace-inherited dependency with the member's own.
+        features |= {feature for feature in inherited.get("features", []) if isinstance(feature, str)}
+        merged = {**inherited, **declaration}
+    if merged.get("optional") is not True:
+        return f"[dependencies].{alias} declares '{package}' as a mandatory dependency; the sanctioned edge is optional, behind the '{gate}' feature"
+    if merged.get("default-features", True) is not False:
+        return f"[dependencies].{alias} leaves the default features of '{package}' on; the sanctioned edge disables them so a future default cannot carry a runtime in"
+    extra = sorted(feature for feature in features if feature not in allowed_features)
+    if extra:
+        return f"[dependencies].{alias} enables the {package} features {extra}; only {sorted(allowed_features)} are sanctioned, because a task can only be spawned under 'rt'"
+    features_table = document.get("features", {})
+    if not isinstance(features_table, dict):
+        features_table = {}
+    door = features_table.get(gate)
+    if not isinstance(door, list) or f"dep:{alias}" not in door:
+        return f"[dependencies].{alias} is optional but feature '{gate}' does not name 'dep:{alias}'; that feature is the sanctioned edge's only door"
+    for name, members in features_table.items():
+        if not isinstance(members, list):
+            continue
+        for member in members:
+            if not isinstance(member, str):
+                continue
+            if member.startswith((f"{alias}/", f"{alias}?/")):
+                return f"feature '{name}' enables '{member}', widening the sanctioned {package} feature set"
+            if name != gate and member == f"dep:{alias}":
+                return f"feature '{name}' also enables '{alias}'; '{gate}' must be the sanctioned edge's only door"
+            if name == "default" and member == gate:
+                return f"the default feature set enables '{gate}'; the runtime-free edge must stay off by default"
+    return None
+
+
+for crate, manifest in manifests:
+    text = manifest.read_text()
+    named = len(RUNTIME_LINE.findall(text))
+    try:
+        document = tomllib.loads(text)
+    except tomllib.TOMLDecodeError as error:
+        if named:
+            violations.append(f"{crate}/Cargo.toml: names an async runtime in a manifest that does not parse ({error}); {NO_RUNTIME}")
+        else:
+            violations.append(f"{crate}/Cargo.toml: cannot be parsed: {error}")
+        continue
+    recognised = 0
+    for kind, table in dependency_tables(document):
+        for alias, declaration in table.items():
+            package = declaration.get("package", alias) if isinstance(declaration, dict) else alias
+            if not isinstance(package, str) or package not in RUNTIMES:
+                continue
+            recognised += 1
+            problem = runtime_edge_problem(crate, kind, alias, package, declaration, document)
+            if problem is not None:
+                violations.append(f"{crate}/Cargo.toml: {problem}")
+    if named > recognised:
+        violations.append(f"{crate}/Cargo.toml: names an async runtime outside its dependency tables; {NO_RUNTIME}")
 
 # Every file in both crates, not only the ones carrying an impl: a producer can call a spawning
 # helper that lives in a neighbouring module, and a file-scoped rule would read that as clean.
