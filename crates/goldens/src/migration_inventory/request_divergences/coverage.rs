@@ -18,8 +18,10 @@
 //!
 //! Responsible for: `rd-loc-0009` (`host` left unsigned) and `rd-loc-0010` (`x-amz-content-sha256`
 //! covered only by the payload line), each with its ruling and its pinned test in
-//! `operation_diff/context/get_bucket_location.rs`, and `rd-adm-0001` (a presigned URL on a RustFS
-//! admin route), pinned in `rustfs_admin_dialect/tests.rs`. The Host and presigned-admin refusals
+//! `operation_diff/context/get_bucket_location.rs`; `rd-loc-0012` to `rd-loc-0015`, the signing
+//! inputs the gateway refuses to read twice or undecoded (rustfs/gateway#1349), pinned there too;
+//! and `rd-adm-0001` (a presigned URL on a RustFS admin route), pinned in
+//! `rustfs_admin_dialect/tests.rs`. The Host and presigned-admin refusals
 //! remain security floors under both profiles (rustfs/backlog#2684, GHSA-xm99-m3gq-83g8 and
 //! MinIO #5411). The payload declaration follows AWS header-authentication rules: its canonical
 //! payload line provides coverage without a second entry in `SignedHeaders`.
@@ -36,7 +38,7 @@ const SIGNED_REQUEST: &str = "https://docs.aws.amazon.com/IAM/latest/UserGuide/r
 /// Where AWS states that a presigned URL grants what its signer could do, to whoever holds it.
 const PRESIGNED_URLS: &str = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/using-presigned-url.html";
 
-pub(super) const COVERAGE_DIVERGENCES: [RequestDivergence; 3] = [
+pub(super) const COVERAGE_DIVERGENCES: [RequestDivergence; 7] = [
     RequestDivergence {
         id: "rd-loc-0009",
         operation: "GetBucketLocation",
@@ -94,5 +96,72 @@ pub(super) const COVERAGE_DIVERGENCES: [RequestDivergence; 3] = [
         follow_up: DivergenceFollowUp::None,
         test_file: ADMIN_DIALECT,
         test: "a_presigned_admin_request_is_refused_under_the_rustfs_profile_floor",
+    },
+    RequestDivergence {
+        id: "rd-loc-0012",
+        operation: "every operation",
+        request: "x-amz-date sent on two lines",
+        aws: "x-amz-date is one value of the signature's string to sign",
+        aws_evidence: SIGNED_REQUEST,
+        s3s: "reads a repeated header as absent: a header-signed request is 400 InvalidRequest missing header: x-amz-date; \
+              an anonymous one is served with the duplicate ignored",
+        gateway: "400 InvalidRequest before routing under every profile: a repeated signing input is refused at the wire",
+        client_impact: "no SDK repeats it; a signed request is refused by both, an anonymous one only by the gateway. Kept on \
+                        security grounds by the coordinator's ruling (rustfs/backlog#2684, intentionally not kept): reading \
+                        either line would leave the other one unsigned beside it",
+        ruling: DivergenceRuling::KeepGateway,
+        follow_up: DivergenceFollowUp::None,
+        test_file: LOCATION_CONTEXT,
+        test: "a_repeated_signing_date_is_refused_by_the_gateway_and_read_as_absent_by_the_legacy_stack",
+    },
+    RequestDivergence {
+        id: "rd-loc-0013",
+        operation: "every operation",
+        request: "x-amz-content-sha256 sent on two lines",
+        aws: "x-amz-content-sha256 declares the one payload digest the signature covers",
+        aws_evidence: SIGNED_REQUEST,
+        s3s: "reads a repeated header as absent: a header-signed request is 400 InvalidRequest missing header: \
+              x-amz-content-sha256",
+        gateway: "400 InvalidRequest before routing under every profile",
+        client_impact: "no SDK repeats it; both refuse a signed request, with different sentences and at different stages. \
+                        Kept on security grounds by the coordinator's ruling (rustfs/backlog#2684, intentionally not kept): \
+                        the declaration is what the body is held to, and one of two would go unchecked",
+        ruling: DivergenceRuling::KeepGateway,
+        follow_up: DivergenceFollowUp::None,
+        test_file: LOCATION_CONTEXT,
+        test: "a_repeated_payload_declaration_is_refused_by_the_gateway_and_read_as_absent_by_the_legacy_stack",
+    },
+    RequestDivergence {
+        id: "rd-loc-0014",
+        operation: "every operation",
+        request: "a presigned query naming one of its X-Amz-* signing parameters twice",
+        aws: "each presigned parameter appears once in the query the signature covers",
+        aws_evidence: PRESIGNED_URLS,
+        s3s: "reads the repeated parameter as absent and refuses the presigned URL as incomplete: 400 \
+              AuthorizationQueryParametersError",
+        gateway: "400 InvalidArgument before routing under every profile: the query is not read as a set of parameters",
+        client_impact: "no SDK repeats one; both refuse it, with different codes. Kept on security grounds by the \
+                        coordinator's ruling (rustfs/backlog#2684, intentionally not kept)",
+        ruling: DivergenceRuling::KeepGateway,
+        follow_up: DivergenceFollowUp::None,
+        test_file: LOCATION_CONTEXT,
+        test: "a_repeated_presigned_parameter_is_refused_by_both_stacks_under_different_codes",
+    },
+    RequestDivergence {
+        id: "rd-loc-0015",
+        operation: "every operation",
+        request: "an x-amz-* header whose value is not UTF-8",
+        aws: "x-amz-* values are text the signature canonicalizes",
+        aws_evidence: SIGNED_REQUEST,
+        s3s: "reads it as absent: an anonymous request is served; a header-signed one is refused by its unsigned-header \
+              rule on the revision RustFS links (403 AccessDenied)",
+        gateway: "400 InvalidRequest before routing under every profile",
+        client_impact: "no SDK sends one; an anonymous request carrying one is refused by the gateway and served by legacy \
+                        RustFS. Kept on security grounds by the coordinator's ruling (rustfs/backlog#2684, intentionally \
+                        not kept): a value one reader cannot decode is a value two readers can disagree on",
+        ruling: DivergenceRuling::KeepGateway,
+        follow_up: DivergenceFollowUp::None,
+        test_file: LOCATION_CONTEXT,
+        test: "a_non_utf8_amz_header_is_refused_by_the_gateway_and_read_as_absent_by_the_legacy_stack",
     },
 ];

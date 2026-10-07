@@ -399,3 +399,68 @@ fn a_buffered_body_past_twenty_mebibytes_is_a_client_error_only_on_the_gateway()
     );
     assert!(!pair.oracle.reached);
 }
+
+/// Two faults in one GetObject under the RustFS profile's date reading (rustfs/backlog#1677,
+/// R14): an `If-Match` the legacy decoder cannot read beside an unreadable `If-Modified-Since`.
+/// Both stacks answer `400 InvalidArgument`, but not for the same header: the legacy stack decodes
+/// its members in its own order and names `if-match`, the first it meets; the gateway answers the
+/// date conditions before its decoder runs and names the date. Registered, not aligned: both
+/// refuse with the same code, nothing is stored or read, and reproducing the legacy decoder's
+/// member order before every pre-decode check is not worth its weight (rustfs/gateway#1349).
+///
+/// Ruling: `rd-err-0015`
+#[test]
+fn two_unreadable_conditions_are_named_in_a_different_order_by_each_stack() {
+    let request = object_get()
+        .header("if-match", b"W/abc")
+        .header("if-modified-since", b"Invalid Date")
+        .signed("us-east-1");
+    let pair = answered(&Scenario::new(request).reading_dates_as_legacy_rustfs());
+    assert_eq!((pair.gateway.status, pair.gateway.code()), (400, Some("InvalidArgument")), "{pair:#?}");
+    assert_eq!((pair.oracle.status, pair.oracle.code()), (400, Some("InvalidArgument")), "{pair:#?}");
+    let named = |reply: &super::Reply| {
+        reply
+            .message()
+            .map(|message| message.split(':').nth(1).unwrap_or_default().trim().to_owned())
+    };
+    assert_eq!(
+        (named(&pair.gateway).as_deref(), named(&pair.oracle).as_deref()),
+        (Some("if-modified-since"), Some("if-match")),
+        "{pair:#?}"
+    );
+}
+
+/// A request carrying a fault the gateway checks before its decoder and one the legacy stack meets
+/// first: a KMS key id with no `x-amz-server-side-encryption`, beside an unreadable date condition.
+/// The gateway applies its server-side-encryption rules before it decodes and names the KMS
+/// qualifier; the legacy stack decodes first (its RustFS body judges encryption headers later) and
+/// names the date. Both answer `400 InvalidArgument`. The class: the gateway refuses in its own
+/// stage order — wire, authentication, authorization, encryption, pre-decode checks, decode — and
+/// legacy RustFS decodes before its per-operation access check and judges encryption in its
+/// handler, so a request with two faults from different stages can be answered for the other one.
+/// Registered by the coordinator's ruling (rustfs/gateway#1349): nothing is stored or read either
+/// way.
+///
+/// Ruling: `rd-err-0016`
+#[test]
+fn two_faults_from_different_stages_are_answered_in_each_stack_s_own_order() {
+    let request = object_get()
+        .header("x-amz-server-side-encryption-aws-kms-key-id", b"k")
+        .header("if-modified-since", b"Invalid Date")
+        .signed("us-east-1");
+    let pair = answered(&Scenario::new(request).reading_dates_as_legacy_rustfs());
+    assert_eq!((pair.gateway.status, pair.gateway.code()), (400, Some("InvalidArgument")), "{pair:#?}");
+    assert!(
+        pair.gateway
+            .message()
+            .is_some_and(|message| message.contains("x-amz-server-side-encryption")),
+        "{pair:#?}"
+    );
+    assert_eq!((pair.oracle.status, pair.oracle.code()), (400, Some("InvalidArgument")), "{pair:#?}");
+    assert!(
+        pair.oracle
+            .message()
+            .is_some_and(|message| message.contains("if-modified-since")),
+        "{pair:#?}"
+    );
+}
