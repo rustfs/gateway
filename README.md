@@ -18,8 +18,8 @@ change whenever it suits RustFS.
 
 | Ring                | Crates                                                                                | Rule                              |
 |---------------------|---------------------------------------------------------------------------------------|-----------------------------------|
-| 0 — protocol kernel | `rustfs-gateway-types`, `-xml`, `-stream`, `-http`, `-sig`, `-model`, `-codegen`      | No dependency on any rustfs crate |
-| 1 — service runtime | `rustfs-gateway-core`, `rustfs-gateway`, `-server`, `-conformance`                    | No dependency on any rustfs crate |
+| 0 — protocol kernel | `rustfs-gateway-types`, `-xml`, `-stream`, `-http`, `-sig`, `-model`, `-codegen`, `-macros`, `-corpus` | No dependency on any rustfs crate |
+| 1 — service runtime and test tools | `rustfs-gateway-core`, `rustfs-gateway`, `-server`, `-conformance`, `-fs`, `-goldens`, `-difftest`, `-corpus-recorder`, `-dialect-minio`, `-dialect-rustfs-admin` | No dependency on any rustfs crate |
 | 2 — RustFS edge     | `rustfs-gateway-admin`, `-console`, `-sts`, `-metadata-ext`, `-rpc` (not created yet) | May depend on rustfs crates       |
 
 The rule survives the narrowed scope because it is not about reuse: `rustfs-gateway-types` is consumed by

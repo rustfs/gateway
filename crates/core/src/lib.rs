@@ -12,11 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Operations, routing, the typed pipeline, and the extension points.
+//! Operations, routing, the typed pipeline, and handler registration.
 //!
 //! Responsible for: `Operation`/`OperationSpec`, the ordered route table, the type-state
-//! pipeline, and every extension trait (`Authorizer`, `HostResolver`, `Governor`, ...).
-//! NOT responsible for: HTTP transport assembly (that is the `rustfs-gateway` facade).
+//! pipeline, and typed handler registration.
+//! NOT responsible for: HTTP transport assembly or host extension traits (`Authorizer`,
+//! `HostResolver`, `Governor`, ...); those live in the `rustfs-gateway` facade.
 //! Upstream: `rustfs-gateway-sig`. Downstream: `rustfs-gateway`.
 //!
 //! # What P4-01 to P4-03 and P4-06 landed
@@ -50,9 +51,10 @@
 //!     .build()?;
 //! ```
 //!
-//! An operation with no handler is answered with `501`, so a backend implementing two of the
-//! seventy-three compiles and runs. Nothing has 73 default methods, and nothing needs a bundle
-//! trait: completeness is asserted where a deployment wants it, by `require`.
+//! An operation with no handler is answered with `501`, so a backend implementing only a subset
+//! compiles and runs. There is no trait full of default methods and no required bundle trait:
+//! completeness is asserted where a deployment wants it, by `require`. See `OPERATIONS.md` for
+//! the current operation list.
 //!
 //! Each `handle` call also installs the operation's wire codec, because it is the only place that
 //! holds the operation type and its name at once. Everything above the registry then works from a

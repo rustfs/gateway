@@ -326,7 +326,7 @@ closes the cycle.
                  rustfs-gateway                  public facade: ServiceBuilder, hyper/tower adapters
                     │
                     ▼
-              rustfs-gateway-core                Operation, route table, typed pipeline, extension traits
+              rustfs-gateway-core                Operation, route table, typed pipeline, handler registration
                     │
                     ▼
                rustfs-gateway-sig                SigV2/SigV4 state machine; freezes PayloadMode
@@ -349,6 +349,15 @@ closes the cycle.
         rustfs-gateway-server                    listener, TLS, hyper, admission, shutdown
         rustfs-gateway ──▶ rustfs-gateway-server          optional self-held listener assembly; server remains internally independent
         xtask ──▶ gateway + conformance + core + codegen + model   generation and diagnostics only
+
+  dialects and test tooling (names below share the rustfs-gateway prefix):
+        dialect-minio ──▶ core + sig + types + xml          vendor operations and XML extensions
+        dialect-rustfs-admin ──▶ core + sig + stream        route declarations; no RustFS business dependencies
+        fs ──▶ gateway                                    reference filesystem backend
+        corpus                                            corpus store; no internal dependency
+        goldens ──▶ types + corpus                         persisted-configuration compatibility checks
+        corpus-recorder ──▶ gateway + core + corpus         feature-gated test capture
+        difftest ──▶ gateway + core + corpus + http + sig + stream + types   migration comparison
 ```
 
 Three annotations you must not lose:

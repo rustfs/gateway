@@ -40,16 +40,14 @@ mechanisms, different blast radii and different rules.
 | 2 | **Extension fields on existing types** | `ExtField` codec vtable | add a child element to an existing parent shape | change an existing field's type, order or name; add a field to a security-relevant type |
 | 3 | **Parsing leniency** | runtime `CodecPolicy` | relax request-XML strictness — unknown elements, bare-literal bodies | relax anything about a security-relevant configuration, a signature, or an authorisation decision |
 
-**Only dimension 1 exists today.** The `ExtField` feasibility spike and its ADR have now landed —
-`docs/adr/ADR-0007-ext-field-codec.md`, evidenced by the `spikes/ext-field` crate — so dimensions 2
-and 3 have an accepted conclusion, but they still have no production code. The ADR says so in
-terms: the spike "does not authorize moving its implementation into production crates; that is a
-separate task using this ADR as input." No workspace crate names `ExtField` or `CodecPolicy`, and
-no generated codec carries an extension slot. So the rows for 2 and 3 remain the contract their
-implementation has to satisfy rather than a description of code that exists.
+All three mechanisms exist. `crates/types/src/ext.rs` owns `ExtField`, the borrowed `CodecPolicy`,
+known-sibling insertion and persisted-document rewrite safety. `crates/dialect-minio/src/lib.rs`
+uses that API for registered XML elements. These are explicit codec extension points; they do not
+make every generated shape extensible. The vtable decision remains in force under
+[ADR-0018](adr/0018-dialect-vtables-stand-after-adr-0010.md).
 
-One vendor exception does not wait for dimension 2. ADR-0033 makes six MinIO bucket-configuration
-members (`ExpiryUpdatedAt`, `DelMarkerExpiration`, `ExpiredObjectAllVersions`, `DeleteReplication`,
+Separately, ADR-0033 makes six MinIO bucket-configuration members (`ExpiryUpdatedAt`,
+`DelMarkerExpiration`, `ExpiredObjectAllVersions`, `DeleteReplication`,
 `ExcludedPrefixes`, `ExcludeFolders`) ordinary model members that every assembly decodes and
 re-encodes, because RustFS, the only product the gateway serves, reads them. `c-lifecycle-0018`
 pins that on the wire and `crates/core/tests/lifecycle_roundtrip.rs` at the codec seam, together
@@ -58,13 +56,12 @@ document. ADR-0007's persistence boundary still applies: `lenient` is not a loss
 read-modify-write policy, so production persistence must retain the original bytes and must never
 turn a parse or registration miss into an absent configuration.
 
-(ADR-0007's header says "Superseded by ADR-0010". ADR-0010 replaces one finding of it — Q6, the
-handler request layout — and leaves the vtable decision standing; read the two together rather
-than reading the header as retiring the dialect mechanism.)
+(ADR-0007's header says "Superseded by ADR-0010". As ADR-0018 clarifies, ADR-0010 replaces only Q6,
+the handler request layout; it does not retire the vtable mechanism.)
 
-The reason the split matters even while two thirds of it is pending: dimension 1 is the one that
-touches routing and authorisation, which is where a mistake is a security incident rather than a
-compatibility gap. Keeping it separate is what lets it land first.
+The split matters because dimension 1 touches routing and authorisation,
+which is where a mistake is a security incident rather than a
+compatibility gap. Its registration rules remain separate from XML extension and parsing policy.
 
 ## What a dialect operation must state
 
