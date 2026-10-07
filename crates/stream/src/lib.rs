@@ -27,7 +27,9 @@
 //! It also does no framing, no back-pressure policy and no kernel-side transfer: it names the
 //! shapes those layers need, and stops there.
 //!
-//! Upstream: `bytes`, `http` and `bitflags` — and nothing internal, by construction.
+//! Upstream: `bytes`, `http` and `bitflags` — and nothing internal, by construction. Behind the
+//! optional `tokio-io` feature, `tokio` with `io-util` alone: no runtime, so nothing here can
+//! spawn, and the default dependency tree is unchanged.
 //! Downstream: `rustfs-gateway-types` (streaming fields), `rustfs-gateway-http` (the wire layer that produces
 //! bodies), and every layer above them.
 //!
@@ -67,6 +69,8 @@ mod observer;
 mod payload;
 mod read;
 mod stream;
+#[cfg(feature = "tokio-io")]
+mod tokio_io;
 mod trailers;
 mod zero_copy;
 
@@ -87,5 +91,7 @@ pub use crate::observer::{ByteCounter, ByteObserver, MAX_OBSERVER_DIGEST_BYTES, 
 pub use crate::payload::{AdaptRefusal, Payload};
 pub use crate::read::{AsyncPayloadRead, BoxPayloadReader, ReadProgress};
 pub use crate::stream::{BoxPayloadStream, PayloadRead, PayloadStream};
+#[cfg(feature = "tokio-io")]
+pub use crate::tokio_io::{PayloadReader, TokioReadPayload};
 pub use crate::trailers::TrailingHeaders;
 pub use crate::zero_copy::{NoZeroCopy, TransportCaps, VerificationObligation, ZeroCopyQuery};

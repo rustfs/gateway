@@ -340,6 +340,9 @@ closes the cycle.
                  ▼
            rustfs-gateway-xml ──▶ quick-xml
 
+  optional and off by default, absent from the default dependency tree of every crate above:
+        rustfs-gateway-stream ──▶ tokio (io-util only)   optional `tokio-io` feature; no runtime feature, so nothing there can spawn
+
   build-time only, never present in a runtime dependency tree:
         rustfs-gateway ──▶ rustfs-gateway-macros          public facade re-export of optional registration sugar
         rustfs-gateway-codegen ──▶ rustfs-gateway-model   codegen emits generated/**, spec/, OPERATIONS.md

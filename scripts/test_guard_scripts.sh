@@ -6088,12 +6088,99 @@ expect_fail check_no_spawn_in_stream.sh \
     'a read-ahead thread rather than a task' mut_stream_thread_spawn_read_ahead
 
 # The structural half: with no runtime in the dependency tree, a read-ahead task is not
-# merely forbidden in this crate, it is unwritable.
+# merely forbidden in this crate, it is unwritable. The append lands in `[dependencies]`, which
+# the manifest keeps as its last table and says why.
 mut_stream_declares_runtime() {
-    printf 'tokio = { workspace = true }\n' >>crates/stream/Cargo.toml
+    printf 'smol = "2"\n' >>crates/stream/Cargo.toml
 }
 expect_fail check_no_spawn_in_stream.sh \
-    'the payload crate declaring an async runtime' mut_stream_declares_runtime
+    'the payload crate declaring an async runtime' mut_stream_declares_runtime \
+    "declares the async runtime 'smol'"
+
+# The one sanctioned runtime edge: `crates/stream` names tokio optionally, behind `tokio-io`,
+# with default features off and `io-util` as its only feature. Each case below bends one word
+# of that declaration, and the guard has to name the word.
+set_stream_tokio_dependency() {
+    GATEWAY_MUTATION_DEPENDENCY="$1" python3 - <<'PYEOF'
+import os
+import re
+from pathlib import Path
+
+manifest = Path("crates/stream/Cargo.toml")
+text = manifest.read_text()
+pattern = re.compile(r"^tokio = \{[^\n]*\}$", re.M)
+if len(pattern.findall(text)) != 1:
+    raise SystemExit("crates/stream/Cargo.toml has no unique tokio declaration to mutate")
+manifest.write_text(pattern.sub(lambda _: os.environ["GATEWAY_MUTATION_DEPENDENCY"], text, 1))
+PYEOF
+}
+
+add_stream_feature() {
+    GATEWAY_MUTATION_FEATURE="$1" python3 - <<'PYEOF'
+import os
+from pathlib import Path
+
+manifest = Path("crates/stream/Cargo.toml")
+text = manifest.read_text()
+marker = "[features]\n"
+if text.count(marker) != 1:
+    raise SystemExit("crates/stream/Cargo.toml has no unique [features] table to mutate")
+manifest.write_text(text.replace(marker, marker + os.environ["GATEWAY_MUTATION_FEATURE"] + "\n", 1))
+PYEOF
+}
+
+mut_stream_tokio_mandatory() {
+    set_stream_tokio_dependency 'tokio = { version = "1.53", default-features = false, features = ["io-util"] }'
+}
+expect_fail check_no_spawn_in_stream.sh \
+    'the payload crate making tokio a mandatory dependency' mut_stream_tokio_mandatory \
+    'as a mandatory dependency'
+expect_fail check_layer_dependencies.sh \
+    'the payload crate making its optional tokio edge mandatory' mut_stream_tokio_mandatory
+
+mut_stream_tokio_runtime_feature() {
+    set_stream_tokio_dependency 'tokio = { version = "1.53", default-features = false, features = ["io-util", "rt"], optional = true }'
+}
+expect_fail check_no_spawn_in_stream.sh \
+    'the payload crate enabling the tokio runtime feature behind its optional edge' \
+    mut_stream_tokio_runtime_feature "enables the tokio features ['rt']"
+
+mut_stream_tokio_default_features() {
+    set_stream_tokio_dependency 'tokio = { version = "1.53", features = ["io-util"], optional = true }'
+}
+expect_fail check_no_spawn_in_stream.sh \
+    'the payload crate leaving the default tokio features on' mut_stream_tokio_default_features \
+    'leaves the default features'
+
+# The workspace entry carries `rt` and `macros`; Cargo unions them with the member's own list.
+mut_stream_tokio_inherits_workspace() {
+    set_stream_tokio_dependency 'tokio = { workspace = true, features = ["io-util"], optional = true }'
+}
+expect_fail check_no_spawn_in_stream.sh \
+    'the payload crate inheriting the workspace tokio entry, which carries rt' \
+    mut_stream_tokio_inherits_workspace 'enables the tokio features'
+
+mut_stream_tokio_io_on_by_default() {
+    add_stream_feature 'default = ["tokio-io"]'
+}
+expect_fail check_no_spawn_in_stream.sh \
+    'the payload crate enabling tokio-io by default' mut_stream_tokio_io_on_by_default \
+    'must stay off by default'
+
+mut_stream_tokio_second_door() {
+    add_stream_feature 'runtime = ["tokio/rt"]'
+}
+expect_fail check_no_spawn_in_stream.sh \
+    'a second feature widening the sanctioned tokio feature set' mut_stream_tokio_second_door \
+    'widening the sanctioned tokio feature set'
+
+mut_stream_tokio_dev_dependency() {
+    printf '\n[dev-dependencies]\ntokio = { version = "1.53", default-features = false, features = ["io-util"] }\n' \
+        >>crates/stream/Cargo.toml
+}
+expect_fail check_no_spawn_in_stream.sh \
+    'the payload crate pulling tokio in as a dev-dependency' mut_stream_tokio_dev_dependency \
+    'under [dependencies] alone'
 
 mut_payload_traits_renamed() {
     python3 - <<'PYEOF'
@@ -18819,10 +18906,19 @@ expect_fail check_ci_test_split.sh \
     'the third workspace test job being renamed away' mut_ci_third_workspace_job_missing
 
 mut_ci_workspace_command_weakened() {
-    replace_ci_text 'scripts/ci_budget.sh 480 "workspace tests 1/3" cargo test --workspace --exclude rustfs-gateway-conformance --exclude rustfs-gateway --exclude rustfs-gateway-goldens --exclude rustfs-gateway-difftest --exclude rustfs-gateway-types --exclude rustfs-gateway-sig' 'scripts/ci_budget.sh 480 "workspace tests 1/3" cargo test -p xtask'
+    replace_ci_text 'scripts/ci_budget.sh 480 "workspace tests 1/3" cargo test --workspace --exclude rustfs-gateway-conformance --exclude rustfs-gateway --exclude rustfs-gateway-goldens --exclude rustfs-gateway-difftest --exclude rustfs-gateway-types --exclude rustfs-gateway-sig --features rustfs-gateway-stream/tokio-io' 'scripts/ci_budget.sh 480 "workspace tests 1/3" cargo test -p xtask'
 }
 expect_fail check_ci_test_split.sh \
     'the workspace test job running only one package' mut_ci_workspace_command_weakened
+
+# The stream crate's `tokio-io` adapters compile nowhere else in the gate: without this flag the
+# feature and its tests rot while every job stays green.
+mut_ci_workspace_tokio_io_feature_dropped() {
+    replace_ci_text 'scripts/ci_budget.sh 480 "workspace tests 1/3" cargo test --workspace --exclude rustfs-gateway-conformance --exclude rustfs-gateway --exclude rustfs-gateway-goldens --exclude rustfs-gateway-difftest --exclude rustfs-gateway-types --exclude rustfs-gateway-sig --features rustfs-gateway-stream/tokio-io' 'scripts/ci_budget.sh 480 "workspace tests 1/3" cargo test --workspace --exclude rustfs-gateway-conformance --exclude rustfs-gateway --exclude rustfs-gateway-goldens --exclude rustfs-gateway-difftest --exclude rustfs-gateway-types --exclude rustfs-gateway-sig'
+}
+expect_fail check_ci_test_split.sh \
+    'the first workspace shard dropping the stream crate tokio-io feature' \
+    mut_ci_workspace_tokio_io_feature_dropped
 
 mut_ci_second_workspace_command_weakened() {
     replace_ci_text 'scripts/ci_budget.sh 480 "workspace tests 2/3" bash -c '\''cargo test --package rustfs-gateway-conformance && cargo check --package rustfs-gateway'\''' 'scripts/ci_budget.sh 480 "workspace tests 2/3" cargo test -p xtask'
@@ -18894,8 +18990,8 @@ expect_fail check_ci_test_split.sh \
     mut_ci_handlers_facade_fixture_moved_before_gateway_prebuild
 
 mut_ci_workspace_failure_swallowed() {
-    replace_ci_text '          scripts/ci_budget.sh 480 "workspace tests 1/3" cargo test --workspace --exclude rustfs-gateway-conformance --exclude rustfs-gateway --exclude rustfs-gateway-goldens --exclude rustfs-gateway-difftest --exclude rustfs-gateway-types --exclude rustfs-gateway-sig' \
-        '          scripts/ci_budget.sh 480 "workspace tests 1/3" cargo test --workspace --exclude rustfs-gateway-conformance --exclude rustfs-gateway --exclude rustfs-gateway-goldens --exclude rustfs-gateway-difftest --exclude rustfs-gateway-types --exclude rustfs-gateway-sig || true'
+    replace_ci_text '          scripts/ci_budget.sh 480 "workspace tests 1/3" cargo test --workspace --exclude rustfs-gateway-conformance --exclude rustfs-gateway --exclude rustfs-gateway-goldens --exclude rustfs-gateway-difftest --exclude rustfs-gateway-types --exclude rustfs-gateway-sig --features rustfs-gateway-stream/tokio-io' \
+        '          scripts/ci_budget.sh 480 "workspace tests 1/3" cargo test --workspace --exclude rustfs-gateway-conformance --exclude rustfs-gateway --exclude rustfs-gateway-goldens --exclude rustfs-gateway-difftest --exclude rustfs-gateway-types --exclude rustfs-gateway-sig --features rustfs-gateway-stream/tokio-io || true'
 }
 expect_fail check_ci_test_split.sh \
     'the workspace test job swallowing a failure or timeout' mut_ci_workspace_failure_swallowed

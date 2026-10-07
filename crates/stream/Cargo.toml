@@ -25,11 +25,26 @@ rustdoc-args = ["--cfg", "docsrs"]
 [lints]
 workspace = true
 
+[features]
+# Bridges to `tokio::io::AsyncRead` in both directions (`TokioReadPayload`, `PayloadReader`).
+# Off by default, and the only door to the optional dependency below: with the default feature
+# set `cargo tree -p rustfs-gateway-stream -e normal` shows the four crates and nothing else.
+tokio-io = ["dep:tokio"]
+
+# `[dependencies]` stays the last table in this file: the guard suite appends a line to the file
+# to plant a forbidden dependency, and an append lands in whichever table is last.
 [dependencies]
-# Deliberately four dependencies, none of them internal. This crate sits below `rustfs-gateway-types`
-# so that it is reachable from both `rustfs-gateway-types` and `rustfs-gateway-http`; every extra edge declared
-# here becomes an edge in every downstream dependency tree.
+# Deliberately four unconditional dependencies, none of them internal. This crate sits below
+# `rustfs-gateway-types` so that it is reachable from both `rustfs-gateway-types` and
+# `rustfs-gateway-http`; every extra edge declared here becomes an edge in every downstream
+# dependency tree.
 bitflags = { workspace = true }
 bytes = { workspace = true }
 http = { workspace = true }
 http-body = { workspace = true }
+# The one optional fifth, declared here rather than inherited: the workspace entry carries `rt`
+# and `macros`, and a task can only be spawned under `rt`. With `io-util` alone there is no
+# `tokio::spawn`, no `JoinHandle` and no `JoinSet`, so a read-ahead task is not merely forbidden
+# in this crate, it is unwritable. scripts/check_no_spawn_in_stream.sh checks every word of this
+# declaration instead of listing it.
+tokio = { version = "1.53", default-features = false, features = ["io-util"], optional = true }

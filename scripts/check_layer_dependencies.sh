@@ -115,6 +115,11 @@ layers = [
 allowed = dict(layers)
 rank = {name: index for index, (name, _) in enumerate(layers)}
 stream_external = {"bitflags", "bytes", "http", "http-body"}
+# The stream kernel's one optional external edge: `tokio` behind its `tokio-io` feature.
+# Optional is the whole point — the default dependency tree of every downstream crate stays at
+# the four crates above — and scripts/check_no_spawn_in_stream.sh checks the rest of that
+# declaration (default features off, `io-util` alone, one feature door).
+stream_optional_external = {"tokio"}
 dispatcher_name = "rustfs-gateway-xtask-dispatch"
 dispatcher_manifest = "crates/xtask-dispatch/Cargo.toml"
 dispatcher_allowed_dependencies: set[str] = set()
@@ -124,6 +129,7 @@ required_agents_fragments = [
     "- **Ring 0/1 — protocol kernel and runtime**: every package under `crates/`. Zero rustfs dependencies.",
     "  runtime host, with no internal crate dependency:\n        rustfs-gateway-server                    listener, TLS, hyper, admission, shutdown",
     "        rustfs-gateway-types ──▶ rustfs-gateway-stream ──▶ bitflags / bytes / http / http-body",
+    "        rustfs-gateway-stream ──▶ tokio (io-util only)   optional `tokio-io` feature; no runtime feature, so nothing there can spawn",
     "        rustfs-gateway ──▶ rustfs-gateway-macros          public facade re-export of optional registration sugar",
     "        rustfs-gateway ──▶ rustfs-gateway-server          optional self-held listener assembly; server remains internally independent",
     "        rustfs-gateway-xtask-dispatch (crates/xtask-dispatch)   std-only cargo xtask process selection",
@@ -331,10 +337,17 @@ if mode == "layer":
             if kind == "dev-dependencies" and crate not in {"rustfs-gateway-server", "xtask"}:
                 continue
             for alias, declaration in dependency_table.items():
-                package, _ = resolve(alias, declaration, workspace_dependencies)
+                package, merged = resolve(alias, declaration, workspace_dependencies)
                 if package in packages and package in allowed[crate]:
                     continue
                 if package not in packages and (crate != "rustfs-gateway-stream" or package in stream_external):
+                    continue
+                if (
+                    package not in packages
+                    and crate == "rustfs-gateway-stream"
+                    and package in stream_optional_external
+                    and merged.get("optional") is True
+                ):
                     continue
                 violations.append((relative, line_for(source, alias, package), crate, kind, alias, package))
     for relative, line, crate, kind, alias, package in violations:
