@@ -27,6 +27,9 @@ kind = "aws-doc"
 [clock]
 fixed = "2026-01-02T03:04:05Z"
 
+[connection]
+reuse = true
+
 [[setup.buckets]]
 name = "conf-copy"
 
@@ -37,20 +40,44 @@ content_type = "text/plain"
 body = { utf8 = "hello world" }
 metadata = { "origin" = "source" }
 
-[request]
+[[exchanges]]
+name = "bare-arn"
+
+[exchanges.request]
 method = "PUT"
 target = "/conf-copy/dst/0004"
 headers = { "x-amz-copy-source" = "arn:aws:s3:us-east-1:123456789012:accesspoint/conf-copy/object/src/plain.txt" }
 sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
 
-[expect]
+[exchanges.expect]
 kind = "response"
 status = 200
 connection_after = "open"
 
-[expect.headers_present]
+[exchanges.expect.headers_present]
 "content-type" = "application/xml"
 
-[expect.body]
+[exchanges.expect.body]
+contains_utf8 = ["<CopyObjectResult", "<ETag>"]
+not_contains_utf8 = ["<Code>NoSuchBucket</Code>"]
+
+[[exchanges]]
+name = "arn-with-one-leading-slash"
+
+[exchanges.request]
+method = "PUT"
+target = "/conf-copy/dst/0004-slash"
+headers = { "x-amz-copy-source" = "/arn:aws:s3:us-east-1:123456789012:accesspoint/conf-copy/object/src/plain.txt" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+connection_after = "open"
+
+[exchanges.expect.headers_present]
+"content-type" = "application/xml"
+
+[exchanges.expect.body]
 contains_utf8 = ["<CopyObjectResult", "<ETag>"]
 not_contains_utf8 = ["<Code>NoSuchBucket</Code>"]
