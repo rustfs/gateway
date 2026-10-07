@@ -19,7 +19,8 @@
 //! object already under the key untouched; and the two legacy behaviours the #1167 ruling keeps out
 //! of the product, each proven unable to change stored data: a `?versionId=` on the request never
 //! overwrites the version it names, and the request's own headers never override or add to what
-//! the form stores.
+//! the form stores; and the `redirect` field read as the success redirect, as legacy RustFS's POST
+//! decoding reads it when the form carries no `success_action_redirect`.
 //! NOT responsible for: the form members' effects (`post_object_field_tests.rs`) or the form's
 //! ceilings (`post_form_ceiling_tests.rs`).
 //! Upstream: the parent module's two-identity assembly. Downstream: nothing.
@@ -212,4 +213,45 @@ async fn n_the_requests_own_headers_never_change_what_the_form_stores() {
     let tagging = get(&service, &format!("/{BUCKET}/page?tagging")).await;
     assert_eq!(tagging.status(), 200, "{}", body_of(&tagging));
     assert!(!body_of(&tagging).contains("<Key>from</Key>"), "{}", body_of(&tagging));
+}
+
+// ── the `redirect` field ─────────────────────────────────────────────────────────────────────
+
+/// Positive — without `success_action_redirect`, the `redirect` field redirects to the stored
+/// object as legacy RustFS's POST decoding reads it, and the object is stored.
+#[tokio::test]
+async fn a_redirect_field_redirects_to_the_stored_object() {
+    let (_root, service) = public_bucket().await;
+    let posted = post(
+        &service,
+        &format!("/{BUCKET}"),
+        form("routed", &[("redirect", "https://client.example/done")], "routed body"),
+        true,
+        &[],
+    )
+    .await;
+    assert_eq!(posted.status(), 303, "{}", body_of(&posted));
+    let location = header(&posted, "location").expect("a Location");
+    assert!(
+        location.starts_with("https://client.example/done?bucket=uploads&key=routed&etag="),
+        "{location}"
+    );
+    assert_eq!(get(&service, &format!("/{BUCKET}/routed")).await.body().as_ref(), b"routed body");
+}
+
+/// Negative — a `redirect` that is not an absolute URL is refused before storage.
+#[tokio::test]
+async fn n_an_unparseable_redirect_field_stores_nothing() {
+    let (_root, service) = public_bucket().await;
+    let posted = post(
+        &service,
+        &format!("/{BUCKET}"),
+        form("unrouted", &[("redirect", "://nowhere")], "x"),
+        true,
+        &[],
+    )
+    .await;
+    assert_eq!(posted.status(), 400, "{}", body_of(&posted));
+    assert!(body_of(&posted).contains("<Code>MalformedPOSTRequest</Code>"), "{}", body_of(&posted));
+    assert_eq!(get(&service, &format!("/{BUCKET}/unrouted")).await.status(), 404);
 }

@@ -53,6 +53,12 @@ impl PostObjectResponsePlan {
         let normalized = status.filter(|_| legacy).map(legacy::success_status).transpose()?;
         let status = normalized.as_deref().or(status);
         let redirect = unique_success_field(fields, "success_action_redirect")?;
+        // Legacy RustFS reads the `redirect` field as the success redirect when the form carries no
+        // `success_action_redirect`, with every rule of that one (rustfs/gateway#1167).
+        let redirect = match redirect {
+            None if legacy => unique_success_field(fields, "redirect")?,
+            redirect => redirect,
+        };
         let action = if legacy {
             let status_action = match status {
                 Some("200") => SuccessAction::Ok,

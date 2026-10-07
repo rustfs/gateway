@@ -50,15 +50,13 @@ use crate::render::from_handler;
 /// (`rustfs/src/storage/access.rs:1504-1513`, `:3182-3188`), a second authorization this
 /// gateway's operation model does not ask. The SSE-C fields: legacy RustFS encrypts with the key the
 /// form carries (`rustfs/src/app/object/put.rs:1259-1263`), which this gateway's customer-key
-/// rules, stated over headers, have not been extended to. And `redirect`, which legacy RustFS reads
-/// as the success redirect when `success_action_redirect` is absent and refuses the upload by when
-/// it is not an absolute URL.
+/// rules, stated over headers, have not been extended to. (`redirect` is carried: the response
+/// plan reads it as legacy RustFS does, `super::response`.)
 ///
 /// The refusal comes after authorization, so it cannot mirror one refusal legacy RustFS answers
 /// before: a retain-until date its decoder cannot read, `400 InvalidArgument` to any caller there,
 /// is `403` or `501` here.
-pub(super) const UNCARRIED_FIELDS: [&str; 7] = [
-    "redirect",
+pub(super) const UNCARRIED_FIELDS: [&str; 6] = [
     "x-amz-object-lock-legal-hold",
     "x-amz-object-lock-mode",
     "x-amz-object-lock-retain-until-date",

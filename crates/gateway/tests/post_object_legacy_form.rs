@@ -404,7 +404,6 @@ async fn a_field_the_profile_cannot_carry_is_refused_before_the_handler() {
         "X-Amz-Object-Lock-Retain-Until-Date",
         "x-amz-object-lock-legal-hold",
         "x-amz-server-side-encryption-customer-key",
-        "redirect",
     ] {
         let body = form(&[
             field("key", "k"),
