@@ -82,8 +82,8 @@ rollback still needs a pre-upgrade data copy.
 `GetObjectAttributes` reports only the requested ETag, size, storage class and checksum groups,
 using the current or explicitly selected persisted version. Last-modified and version headers
 follow that same representation. A requested checksum with no stored value is an empty group;
-plain objects omit ObjectParts. Multipart ObjectParts remains `NotImplemented`: ordinal lengths
-cannot recover original sparse upload numbers. Unknown groups select no fields, as native RustFS
+plain objects omit ObjectParts. Multipart ObjectParts remains `NotImplemented` pending part-list
+projection. Unknown groups select no fields, as native RustFS
 does. The existing reader keeps its `NoSuchVersion` response for absent explicit versions, while
 native RustFS rejects malformed version IDs as `InvalidArgument`. Stored multipart checksum types
 are reported here as on GET/HEAD.
@@ -99,6 +99,15 @@ Content-Range; malformed numbers are 400 and an unavailable ordinal part is 416,
 part-table contract specifies. GET retains RustFS's 400 InvalidPart for that unavailable part.
 Native RustFS currently returns the whole length without PartsCount on HEAD and 500 for an
 unavailable part; these remain explicit compatibility differences.
+New completions append `part-meta/1 <count>` after `parts/1`, with one row containing the original
+part number, checksum algorithm and checksum value (`- -` when no checksum was negotiated).
+Numbers must increase within 1..10000, counts must match the length table, and each individual
+checksum must match the object's algorithm without a composite suffix. This preserves sparse
+numbers and verified per-part values for the part-list reader. Version rewrites preserve the
+section; ordinary PUT, POST and COPY replacements clear it. Old records remain readable without
+invented identities or checksums. Old readers reject this section, so rollback needs a pre-upgrade
+data copy. This does not yet enable ObjectParts pagination or GET part checksums.
+
 Native sparse numbering has a known discrepancy: after completing uploaded numbers 2 and 5, its
 GET number 5 returns the whole object. This backend refuses that unavailable ordinal part.
 

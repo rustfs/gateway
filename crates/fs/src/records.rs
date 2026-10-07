@@ -104,6 +104,8 @@ pub(super) struct ObjectAttributes {
     pub(super) checksum: Option<StoredChecksum>,
     /// Completed part lengths in ordinal order, absent on older records.
     pub(super) part_lengths: Option<Vec<u64>>,
+    /// Original upload numbers and verified part checksums; absent on older records.
+    pub(super) part_metadata: Option<Vec<super::part_metadata::PartMetadata>>,
     /// The storage class the write named; `None` records `STANDARD`.
     pub(super) storage_class: Option<StorageClass>,
     /// The validated tag set the write carried, written beside the version atomically with it.
@@ -169,6 +171,8 @@ pub(super) struct VersionRecord {
     pub(super) checksum: Option<StoredChecksum>,
     /// Completed part lengths in ordinal order, absent on older records.
     pub(super) part_lengths: Option<Vec<u64>>,
+    /// Original upload numbers and verified part checksums; absent on older records.
+    pub(super) part_metadata: Option<Vec<super::part_metadata::PartMetadata>>,
 }
 
 /// Refuses a metadata pair this backend could store but could never hand back.
@@ -266,7 +270,8 @@ fn section_header(line: &str) -> Result<(&str, &str), HandlerError> {
 /// Reads every trailing section out of a record's remaining lines.
 ///
 /// Absence means no stored attributes — the eight-line form. The sections are `meta/1`,
-/// `headers/1`, then one checksum section, then `parts/1`, each optional, with nothing after them.
+/// `headers/1`, then one checksum section, `parts/1` and `part-meta/1`, each optional,
+/// with nothing after them. Part metadata requires the matching completed length table.
 ///
 /// # Errors
 ///
@@ -336,6 +341,15 @@ pub(super) fn decode_trailing_sections(lines: &mut std::str::Lines<'_>) -> Resul
         next = lines.next();
         trailing_error = "the persisted part table is followed by lines this build cannot read";
     }
+    if let Some(line) = next
+        && let Ok(("part-meta/1", count)) = section_header(line)
+    {
+        let parts = super::part_metadata::decode(lines, count)?;
+        super::part_metadata::validate(&parts, attributes.part_lengths.as_deref(), attributes.checksum)?;
+        attributes.part_metadata = Some(parts);
+        next = lines.next();
+        trailing_error = "the persisted part metadata is followed by lines this build cannot read";
+    }
     if next.is_some() {
         return Err(HandlerError::internal_error(trailing_error));
     }
@@ -404,6 +418,7 @@ pub(super) fn encode_version_record(record: &VersionRecord) -> String {
     ) + &encode_content_headers_section(&record.headers)
         + &encode_checksum_section(record.checksum)
         + &super::part_lengths::encode(record.part_lengths.as_deref())
+        + &super::part_metadata::encode(record.part_metadata.as_deref())
 }
 
 /// Parses one version record's bytes, pairing them with the directory they came from.
@@ -464,6 +479,7 @@ pub(super) fn decode_version_record(path: PathBuf, encoded: &str) -> Result<Vers
         headers: attributes.headers,
         checksum: attributes.checksum,
         part_lengths: attributes.part_lengths,
+        part_metadata: attributes.part_metadata,
     })
 }
 
@@ -499,6 +515,7 @@ mod tests {
             headers: ContentHeaders::default(),
             checksum: None,
             part_lengths: None,
+            part_metadata: None,
         }
     }
 
@@ -738,3 +755,7 @@ mod tests {
         assert_eq!(error.message(), "a user metadata value must be free of control characters");
     }
 }
+
+#[cfg(test)]
+#[path = "part_metadata_tests.rs"]
+mod part_metadata_tests;

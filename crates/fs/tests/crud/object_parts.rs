@@ -22,6 +22,9 @@ use super::multipart_sizing::{MIN_PART_SIZE, upload_owned};
 #[path = "head_parts.rs"]
 mod head_parts;
 
+#[path = "part_metadata.rs"]
+mod part_metadata;
+
 use super::*;
 
 const BUCKET: &str = "stored-checksum";

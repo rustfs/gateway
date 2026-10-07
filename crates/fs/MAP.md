@@ -18,6 +18,8 @@ Agent entry point. File → responsibility → when you need to open it.
 | `src/lifecycle_scheduler.rs` | Repeated lifecycle cadence, failure accounting, and bounded shutdown. | Changing automatic expiration scheduling or worker lifetime. |
 | `src/listing.rs` | Object/upload filtering, owner projection, delimiter rollup, V1/paired markers, and scoped V2 cursors. | Changing object or upload listing pagination semantics. |
 | `src/object_attributes.rs` | Selected GetObjectAttributes metadata and stored checksums; refuses unavailable multipart detail. | Changing attribute selection or version-aware metadata. |
+| `src/part_metadata.rs` | Original completed part numbers/checksums and their bounded private record section. | Changing persisted part identities or checksums. |
+| `src/part_metadata_tests.rs` | Version-record round trips, bounded metadata rows and rejected inconsistencies. | Changing the part metadata grammar. |
 | `src/part_lengths.rs` | Completed part lengths, record validation and GET/HEAD window projection through the core resolver. | Changing persisted part boundaries or partNumber reads. |
 | `src/records.rs` | The on-disk version grammar, optional metadata, representation headers and checksum sections, including explicit multipart types and completed part lengths. | Changing persisted object attributes or record compatibility. |
 | `src/reads.rs` | Representation selection for `GetObject`/`HeadObject`, the `Range` window `evaluate_range` decides, and whether the version read is current (for `x-amz-expiration`). | Changing ranged or version-selected reads. |
@@ -67,6 +69,7 @@ Agent entry point. File → responsibility → when you need to open it.
 | `tests/crud/multipart_versioning.rs` | Multipart publication into enabled, suspended, and null version lineages. | Changing completion/version integration or its failure boundaries. |
 | `tests/crud/object_metadata.rs` | Restarted `x-amz-meta-*` persistence, initiation-time multipart metadata, size and storability refusals, and the pre-section record fixture. | Changing user-metadata persistence or the record's compatibility story. |
 | `tests/crud/head_parts.rs` | HEAD part lengths/counts, version isolation and selector refusal statuses; registered under object_parts. | Changing HEAD partNumber support. |
+| `tests/crud/part_metadata.rs` | Signed completion persistence, sparse numbers, per-part checksums and replacement isolation. | Changing completed part storage. |
 | `tests/crud/object_parts.rs` | Restarted GET part windows, version isolation, ordinary objects and malformed or missing part tables. | Changing GET partNumber support. |
 | `tests/crud/object_attributes.rs` | Selected metadata, checksums, versions and unsupported multipart detail. | Changing GetObjectAttributes. |
 | `tests/crud/object_checksums.rs` | Header/trailer checksums, restarted reads, version isolation, copy preservation/recalculation and corrupt-record refusals. | Changing stored full-object checksums. |

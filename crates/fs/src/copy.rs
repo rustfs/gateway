@@ -201,6 +201,7 @@ impl Handler<CopyObject> for FsBackend {
         };
         let attributes = ObjectAttributes {
             part_lengths: None,
+            part_metadata: None,
             checksum,
             metadata,
             headers: headers.with_encryption(encryption.clone()),
