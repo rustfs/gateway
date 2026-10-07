@@ -52,6 +52,7 @@ change, `debug` and `trace` for diagnostics.
 | `gateway_naming_posture` | `info` | `posture` | message: the `NAMING_POSTURE` line | once per assembly |
 | `gateway_form_claim_posture` | `info` | `posture` | message: the `FORM_CLAIM_POSTURE` line (ADR-0041) | once per assembly, only when a dialect installed a form claim |
 | `gateway_presigned_expiry_posture` | `info` | `posture` | message: the `PRESIGNED_EXPIRY_POSTURE` line | once per assembly, only when a non-default presigned-lifetime rule is on |
+| `gateway_profile_posture` | `info` | `posture` | message: the `PROFILE_POSTURE` line (rustfs/backlog#2751): every legacy RustFS reading the assembly applies, by the builder method that turns it on, `switches=[]` for none | once per assembly, last of the posture lines |
 | `gateway_dangerous_assembly` | `warn` | `assembly` | `reason`: `custom_wall_clock`, `allow_all_authorizer`, `allow_all_authorizer_constructed` or `replaced_aws_signature_verifier`; message: the sentence the start-up log always carried | once per assembly, or per construction of the allow-all authorizer |
 | `gateway_report_panicked` | `error` | `report` | `result = "contained"`, `callback`: `request observer` or `authorization audit sink`, `suppressed`; message | when a deployment's report callback panics, at most once per five seconds per callback, `suppressed` counting the panics since the last; the answer went out unchanged |
 | `gateway_request_refused` | `warn` | `authentication` | `result = "refused"`, `request_id`, `operation` (`unknown` before routing), `status`, `code`; message | the signature, the credential, the signed-payload declaration, a POST policy or the security floor refused the request, the authenticator could not answer, or no verifier serves the request's custom scheme |
@@ -64,7 +65,10 @@ change, `debug` and `trace` for diagnostics.
 The posture lines keep their exact text — each module's unit tests pin its line, and
 `scripts/check_sig_case_coverage.sh` pins the `SECURITY_POSTURE` format and the event that carries
 it — and so do the dangerous-assembly sentences, less the `WARN:` prefix the level now carries; only
-the way they reach a log changed.
+the way they reach a log changed. The same lines, in the order they were logged, are what
+`S3Service::startup_posture` returns, so a host without a subscriber at assembly time can print
+them through its own logger; `tests/tracing_events.rs` holds the two to each other, and
+`docs/rustfs-profile.md` pins the RustFS profile's to a golden.
 
 `rustfs-gateway-server`, the listener a deployment without one of its own can use, emits four
 unstructured events under its module targets (`rustfs_gateway_server::…`): a TLS reload refused

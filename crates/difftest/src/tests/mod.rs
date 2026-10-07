@@ -38,4 +38,5 @@ mod seam;
 mod seam_answers;
 mod seam_outputs;
 mod seam_overrides;
+mod seam_switches;
 mod shadow;

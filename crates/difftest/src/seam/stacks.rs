@@ -139,7 +139,8 @@ impl GatewaySeam {
         let credentials =
             Credentials::new(ACCESS_KEY, SECRET_KEY.as_bytes()).map_err(|error| format!("credential: {error:?}"))?;
         let regions = RegionSet::new([REGION]).map_err(|error| format!("regions: {error:?}"))?;
-        // The RustFS profile's scope handling, as `compat/sut` assembles it.
+        // The RustFS profile's scope handling, switch for switch what `SigV4Authenticator::rustfs_profile`
+        // applies; `tests/seam.rs` holds this chain to the preset (rustfs/backlog#2751).
         let authenticator = SigV4Authenticator::new(Arc::new(StaticCredentials::new().with(credentials)), regions)
             .accept_any_signing_region()
             .accept_empty_signing_region()
@@ -179,7 +180,10 @@ impl GatewaySeam {
             )
             .bucket_owner_source(FixtureOwner)
             // The RustFS profile: the seam is only ever reached behind it, so its decode choices
-            // are what the RustFS app layer is handed (`compat/sut` turns on the same ones).
+            // are what the RustFS app layer is handed — switch for switch what
+            // `ServiceBuilder::rustfs_profile` turns on, less the identifiers and the legacy CORS
+            // answers this diff replaces by design; `tests/seam.rs` holds this chain to the preset
+            // (rustfs/backlog#2751).
             .accept_all_checksum_omissions()
             .clamp_oversized_max_keys()
             .accept_minio_body_literals()

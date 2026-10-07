@@ -202,6 +202,8 @@ mod response_stream_termination;
 mod rustfs_addressing;
 #[path = "rustfs_key_floor.rs"]
 mod rustfs_key_floor;
+#[path = "rustfs_profile.rs"]
+mod rustfs_profile;
 #[path = "rustfs_selection.rs"]
 mod rustfs_selection;
 #[path = "rustfs_vhost.rs"]
