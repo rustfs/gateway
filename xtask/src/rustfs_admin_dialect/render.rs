@@ -53,12 +53,11 @@ fn selector(declared: &Declared) -> String {
     predicates
 }
 
-/// Native admin routing matches raw segments before interpreting their data (ADR-0040).
-/// Keep inventory paths untouched, and keep the table-catalog and profiling contracts strict.
+/// Native RustFS routing matches raw segments before interpreting their data (ADR-0040): its admin
+/// routes and its table catalog alike hand the handler the raw segment, so an Iceberg namespace
+/// whose levels are joined by `%1F` reaches the catalog (rustfs/gateway#1232). Inventory paths are
+/// kept untouched; only the rendered templates capture opaquely.
 fn claimed_template(path: &str) -> String {
-    if !path.starts_with("/rustfs/admin/") && !path.starts_with("/minio/admin/") {
-        return path.to_owned();
-    }
     path.split('/')
         .map(|segment| match segment.strip_prefix('{').and_then(|name| name.strip_suffix('}')) {
             Some(name) if !name.starts_with('*') => format!("{{+{name}}}"),

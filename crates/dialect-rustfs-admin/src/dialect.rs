@@ -83,6 +83,12 @@ pub static CLAIMS: &[PathClaim] = &[
     },
 ];
 
+/// The table catalog's two prefixes, whose SigV4 paths legacy RustFS verifies as generic AWS
+/// SigV4 signs them (rustfs/rustfs#8291): what a RustFS assembly hands
+/// `SigV4Authenticator::verify_paths_double_encoded_under` (rustfs/gateway#1232). Both are claims
+/// in [`CLAIMS`].
+pub static TABLE_CATALOG_PREFIXES: &[&str] = &["/_iceberg/v1", "/iceberg/v1"];
+
 /// The reviewed record: the six claims and every generated operation.
 pub static OVERLAY: DialectOverlay = DialectOverlay {
     name: "rustfs-admin",

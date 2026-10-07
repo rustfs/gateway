@@ -55,11 +55,11 @@ static SELECTOR: &[Predicate] = &[Predicate::Method(http::Method::DELETE)];
 /// The canonical row, then the compat row RustFS serves it under.
 pub static ROWS: &[ClaimedRow] = &[
     ClaimedRow {
-        template: "/_iceberg/v1/{warehouse}/catalog/migration",
+        template: "/_iceberg/v1/{+warehouse}/catalog/migration",
         selector: SELECTOR,
     },
     ClaimedRow {
-        template: "/iceberg/v1/{warehouse}/catalog/migration",
+        template: "/iceberg/v1/{+warehouse}/catalog/migration",
         selector: SELECTOR,
     },
 ];
@@ -122,7 +122,7 @@ impl AdminOperation for DeleteIcebergByWarehouseCatalogMigration {
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
     precedence: 100,
-    selector: "PathTemplate(\"/_iceberg/v1/{warehouse}/catalog/migration\") ∧ Method(DELETE) ∨ PathTemplate(\"/iceberg/v1/{warehouse}/catalog/migration\") ∧ Method(DELETE) ⇒ BucketParam(\"warehouse\")",
+    selector: "PathTemplate(\"/_iceberg/v1/{+warehouse}/catalog/migration\") ∧ Method(DELETE) ∨ PathTemplate(\"/iceberg/v1/{+warehouse}/catalog/migration\") ∧ Method(DELETE) ⇒ BucketParam(\"warehouse\")",
     action: "admin:MigrateTableCatalog",
     resource: ResourceShape::Bucket,
     success_status: 200,

@@ -258,17 +258,14 @@ fn every_operation_declares_what_its_record_says() {
             .rows
             .iter()
             .map(|row| {
-                if record.path.starts_with("/rustfs/admin/") {
-                    assert!(
-                        !row.template
-                            .split('/')
-                            .any(|part| part.starts_with('{') && !part.starts_with("{+") && !part.starts_with("{*")),
-                        "{name}: strict admin capture"
-                    );
-                    row.template.replace("{+", "{")
-                } else {
-                    row.template.to_owned()
-                }
+                // Admin and table-catalog rows alike capture raw segments (ADR-0040).
+                assert!(
+                    !row.template
+                        .split('/')
+                        .any(|part| part.starts_with('{') && !part.starts_with("{+") && !part.starts_with("{*")),
+                    "{name}: strict capture"
+                );
+                row.template.replace("{+", "{")
             })
             .collect();
         assert_eq!(native, templates(record), "{name}");

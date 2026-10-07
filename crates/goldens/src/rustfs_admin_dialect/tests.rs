@@ -486,22 +486,21 @@ fn n_a_presigned_row_is_refused_without_asking() {
     );
 }
 
-/// Negative — invalid UTF-8 is refused before policy, strict catalog captures retain their
-/// restrictions, and raw bucket labels remain validated. Opaque admin data reaches its handler.
+/// Negative — invalid UTF-8 is refused before policy and raw bucket labels remain validated;
+/// every other value, a control, a dot segment and an encoded separator included, reaches its
+/// handler as opaque data (ADR-0040). Native RustFS hands its admin and table-catalog handlers the
+/// raw segment alike, so an Iceberg namespace whose levels are joined by `%1F` reaches the catalog
+/// (rustfs/gateway#1232).
 #[test]
 fn n_a_malformed_parameter_value_is_refused_before_authorising() {
     let cases: Vec<_> = parameters()
         .flat_map(|(record, template, index, name)| {
-            [("%ff", 400), ("a%01b", 400), ("%c3%28", 400), ("%2e%2e", 501), ("a%2Fb", 501)].map(|(raw, status)| {
-                let opaque = record.path.starts_with("/rustfs/admin/") || name.starts_with('*');
+            ["%ff", "a%01b", "%c3%28", "%2e%2e", "a%2Fb"].map(|raw| {
                 let bucket =
                     matches!(record.bucket, Some(rustfs_gateway_core::dialect::BucketParam::Path(bound)) if bound == name);
-                let bucket_error = opaque && bucket && raw != "%ff" && raw != "%c3%28";
-                let status = if opaque && raw != "%ff" && raw != "%c3%28" {
-                    if bucket { 400 } else { 200 }
-                } else {
-                    status
-                };
+                let unreadable = raw == "%ff" || raw == "%c3%28";
+                let bucket_error = bucket && !unreadable;
+                let status = if unreadable || bucket { 400 } else { 200 };
                 (
                     record,
                     with_segment(template, Some(index), raw),

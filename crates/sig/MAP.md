@@ -6,6 +6,7 @@ Agent entry point for SigV2/SigV4 parsing, canonicalization and verification.
 |---|---|---|
 | `src/lib.rs` | Public signature state machine and generated policy wiring. | Start here for an authentication task or a missing signature-policy consumer. |
 | `src/canonical.rs` | Canonical request construction, including the explicit RustFS path constructor (#1314, #1315; `tests/legacy_paths.rs`). | A signature differs despite the same request. |
+| `src/canonical_tests.rs` | The canonical request's own unit suite, split out at the 800-line limit. | A canonical-request rule decidable from the module's private items changes. |
 | `src/clock.rs` | Single request-time snapshot, skew policy, and why a presigned URL's past bound is its lifetime. | Header, query, and POST-policy paths disagree about time. |
 | `src/codec.rs` | Authorization wire parsing and rendering helpers. | Header authentication syntax is decoded incorrectly. |
 | `src/derive.rs` | Verified scope and signing-key derivation. | An unchecked credential scope reaches HMAC derivation. |

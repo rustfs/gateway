@@ -57,11 +57,11 @@ static SELECTOR: &[Predicate] = &[Predicate::Method(http::Method::GET)];
 /// The canonical row, then the compat row RustFS serves it under.
 pub static ROWS: &[ClaimedRow] = &[
     ClaimedRow {
-        template: "/_iceberg/v1/buckets/{warehouse}",
+        template: "/_iceberg/v1/buckets/{+warehouse}",
         selector: SELECTOR,
     },
     ClaimedRow {
-        template: "/iceberg/v1/buckets/{warehouse}",
+        template: "/iceberg/v1/buckets/{+warehouse}",
         selector: SELECTOR,
     },
 ];
@@ -140,7 +140,7 @@ impl AdminOperation for GetIcebergBucketsByWarehouse {
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
     precedence: 126,
-    selector: "PathTemplate(\"/_iceberg/v1/buckets/{warehouse}\") ∧ Method(GET) ∨ PathTemplate(\"/iceberg/v1/buckets/{warehouse}\") ∧ Method(GET) ⇒ BucketParam(\"warehouse\")",
+    selector: "PathTemplate(\"/_iceberg/v1/buckets/{+warehouse}\") ∧ Method(GET) ∨ PathTemplate(\"/iceberg/v1/buckets/{+warehouse}\") ∧ Method(GET) ⇒ BucketParam(\"warehouse\")",
     action: "admin:GetTableBucket",
     resource: ResourceShape::Bucket,
     success_status: 200,

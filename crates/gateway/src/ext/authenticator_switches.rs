@@ -33,7 +33,7 @@ use super::legacy_credential::{
 use super::legacy_refusal::LegacyRefusal;
 use rustfs_gateway_sig::{
     AUTHORIZATION_HEADER, AuthError, CredentialScope, EmptyRegion, ExpectedScope, RegionLength, RegionRule, RegionSet, SealedAws,
-    ServiceReading, SigLocation, SignedHeaderSet, X_AMZ_DATE, X_AMZ_DATE_HEADER,
+    ServiceReading, SigLocation, SignedHeaderSet, UriPathCandidates, X_AMZ_DATE, X_AMZ_DATE_HEADER,
 };
 use rustfs_gateway_types::ErrorCode;
 
@@ -439,6 +439,25 @@ impl SigV4Authenticator {
         self
     }
 
+    /// Verifies header and query signatures of a request routed into a dialect's claim whose raw
+    /// path is under one of `prefixes` — a prefix itself, or a prefix continued by `/`, byte for
+    /// byte — as generic AWS SigV4 signers compute them for a service other than S3: the wire
+    /// spelling encoded once more, with no other candidate (rustfs/gateway#1232). A prefix that is
+    /// empty, `/`, relative or ends with `/` names nothing.
+    ///
+    /// Legacy RustFS verifies its Iceberg table catalog, `/iceberg/v1` and `/_iceberg/v1`, this
+    /// way since rustfs/rustfs#8291, because Iceberg clients sign with botocore's generic signer:
+    /// a namespace `ods%1Forders` is signed as `ods%251Forders`, and its S3 spelling is refused.
+    /// The `rustfs` dialect publishes the two prefixes as claims. Off by default. A request no
+    /// claim took — an S3 object whose key starts with a prefix, a virtual-hosted one outside the
+    /// legacy split — is verified as before; SigV2, POST policies, routing and the public signer
+    /// are unchanged, and literal controls remain forbidden.
+    #[must_use]
+    pub fn verify_paths_double_encoded_under(mut self, prefixes: &'static [&'static str]) -> Self {
+        self.double_encoded_prefixes = prefixes;
+        self
+    }
+
     /// Hands the secret this authenticator's own credential lookup returned for an authenticated
     /// principal to the handler, as `RequestPrincipal::secret_key_from_authenticator_lookup`
     /// (ADR-0022).
@@ -456,5 +475,106 @@ impl SigV4Authenticator {
     pub fn hand_caller_secret_to_handlers(mut self) -> Self {
         self.hand_secret = true;
         self
+    }
+}
+
+impl SigV4Authenticator {
+    /// The canonical paths a SigV4 signature over `raw_path` is tried against, as this
+    /// authenticator's path switches choose them: for a `claimed` request under a prefix
+    /// [`Self::verify_paths_double_encoded_under`] names, the doubly encoded one alone; else legacy
+    /// RustFS's candidates; else the S3 candidates with this authenticator's raw-path fallback.
+    pub(super) fn path_candidates(&self, raw_path: &str, claimed: bool) -> Result<UriPathCandidates, AuthError> {
+        if claimed && under_any(self.double_encoded_prefixes, raw_path) {
+            UriPathCandidates::double_encoded(raw_path)
+        } else if self.legacy_paths {
+            UriPathCandidates::for_legacy_rustfs(raw_path)
+        } else {
+            UriPathCandidates::new(raw_path).map(|paths| paths.with_raw_fallback(self.raw_path))
+        }
+    }
+}
+
+/// Whether `raw_path` is one of `prefixes`, or continues one with `/`. Only an absolute prefix of
+/// at least one segment, without a trailing `/`, names anything.
+fn under_any(prefixes: &[&str], raw_path: &str) -> bool {
+    prefixes.iter().any(|prefix| {
+        prefix.len() > 1
+            && prefix.starts_with('/')
+            && !prefix.ends_with('/')
+            && raw_path
+                .strip_prefix(prefix)
+                .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
+    })
+}
+
+impl super::Authentication<'_> {
+    /// Says whether routing placed the request inside a dialect's claim, which
+    /// [`SigV4Authenticator::verify_paths_double_encoded_under`] reads. The service sets it from
+    /// the routed request before it asks.
+    #[must_use]
+    pub(crate) const fn with_claimed_route(mut self, claimed: bool) -> Self {
+        self.claimed = claimed;
+        self
+    }
+}
+
+impl core::fmt::Debug for SigV4Authenticator {
+    /// Hand-written: a credential provider is not required to be `Debug`, and requiring it would
+    /// push a derive onto every implementation for the sake of one line here.
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("SigV4Authenticator")
+            .field("regions", &self.regions)
+            .field("credential_guard", self.credentials.config())
+            .field("hands_caller_secret_to_handlers", &self.hand_secret)
+            .field("accepts_any_signing_region", &self.scope_policy.any_region)
+            .field("accepts_empty_signing_region", &self.scope_policy.empty_region)
+            .field("verifies_unreadable_signing_regions", &self.scope_policy.any_spelling)
+            .field("reads_signing_regions_of_any_length", &self.scope_policy.any_length)
+            .field("accepts_legacy_rustfs_signing_services", &self.scope_policy.legacy_services)
+            .field("answers_scope_refusals_as_legacy_rustfs", &self.scope_policy.legacy_scope_refusals)
+            .field("raw_path_fallback", &self.raw_path)
+            .field("verifies_paths_as_legacy_rustfs", &self.legacy_paths)
+            .field("verifies_paths_double_encoded_under", &self.double_encoded_prefixes)
+            .field("reads_signed_headers_as_legacy_rustfs", &self.legacy_signed_headers)
+            .finish()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    const PREFIXES: [&str; 2] = ["/_iceberg/v1", "/iceberg/v1"];
+
+    /// Positive — a path is under a prefix when it is the prefix or continues it with `/`.
+    #[test]
+    fn a_path_is_under_a_prefix_at_a_segment_boundary() {
+        for path in [
+            "/_iceberg/v1",
+            "/_iceberg/v1/",
+            "/_iceberg/v1/wh/namespaces",
+            "/iceberg/v1/config",
+        ] {
+            assert!(super::under_any(&PREFIXES, path), "{path}");
+        }
+    }
+
+    /// Negative — byte for byte: a longer segment, another version, a deeper position, another
+    /// case and an escaped spelling are outside; and a prefix that is empty, `/`, relative or ends
+    /// with `/` names nothing.
+    #[test]
+    fn n_nothing_else_is_under_a_prefix() {
+        for path in [
+            "/_iceberg/v10",
+            "/_iceberg/v2/a",
+            "/iceberg/v1suffix",
+            "/bucket/iceberg/v1",
+            "/ICEBERG/v1",
+            "/%5Ficeberg/v1/x",
+            "",
+        ] {
+            assert!(!super::under_any(&PREFIXES, path), "{path}");
+        }
+        for prefixes in [&[""][..], &["/"], &["iceberg/v1"], &["/iceberg/v1/"]] {
+            assert!(!super::under_any(prefixes, "/iceberg/v1/config"), "{prefixes:?}");
+        }
     }
 }

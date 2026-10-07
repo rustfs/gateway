@@ -36,6 +36,6 @@ pub mod record;
 mod table;
 
 pub use admin::{AdminBody, AdminOperation, AdminResponse, OperationFold};
-pub use dialect::{CLAIMS, OVERLAY, rustfs_admin_dialect};
+pub use dialect::{CLAIMS, OVERLAY, TABLE_CATALOG_PREFIXES, rustfs_admin_dialect};
 pub use record::{BodyKind, FormRouteRecord, PendingGroup, RouteRecord, StayingRoute};
 pub use table::{FORM_ROUTES, PENDING, ROUTES, RUSTFS_SOURCE_COMMIT, STAYING, fold_every_operation};

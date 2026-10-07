@@ -41,11 +41,11 @@ and `GET {warehouse}/namespaces`), the literal's operation declares that it stan
 RustFS's router decides (ADR-0027, ADR-0031). `POST heal/` keeps the trailing `/`
 RustFS registers it with, and matches exactly that path (ADR-0030).
 
-Admin route declarations spell native single-segment captures as `{+name}` (ADR-0040).
-They match one nonempty raw segment and decode it once as UTF-8 data, including encoded
-separators and dot segments. Handlers validate the meaning of that data; bucket bindings still
-validate the raw bucket name. `ROUTES` retains the original inventory spelling. Table-catalog
-parameters keep their strict `{name}` contract, and `{*prefix}` remains a trailing catch-all.
+Admin and table-catalog route declarations spell native single-segment captures as `{+name}`
+(ADR-0040). They match one nonempty raw segment and decode it once as UTF-8 data, including
+encoded separators, dot segments and controls. Handlers validate the meaning of that data; bucket
+bindings still validate the raw bucket name. `ROUTES` retains the original inventory spelling, and
+`{*prefix}` remains a trailing catch-all.
 
 After registered rows, the dialect declares `AdminV4Fallback` and `AdminFallback`. Both require
 a header signature and caller-only authorization at both stages, without a secret or bucket.
@@ -59,7 +59,14 @@ fold for the backend operations. For native body ordering, the deployment must s
 existing RustFS bodyless policy as shown below. Its CORS layer remains responsible for the
 legacy `OPTIONS` answer before routing.
 Select `SigV4Authenticator::verify_paths_as_legacy_rustfs` for native percent and encoded-slash
-signature spelling; the router still receives the original target.
+signature spelling; the router still receives the original target. Add
+`verify_paths_double_encoded_under(TABLE_CATALOG_PREFIXES)` so the table catalog verifies the path
+Iceberg clients sign, the wire spelling encoded once more, as RustFS does since rustfs/rustfs#8291.
+Table-catalog parameters, like admin ones, capture one raw segment (ADR-0040): a namespace whose
+levels are joined by `%1F` reaches its handler, which validates what the value means. A handler
+that decides by the spelling as sent, as RustFS's `namespace_from_path_value` does by looking for
+`.`, reads the raw segment (`PathTemplate::raw_value` over the request's raw path), not the decoded
+one.
 
 An operation that acts on an account says whose (ADR-0025, ADR-0026, ADR-0028), and the facade
 reads it once, before authentication:
@@ -94,6 +101,11 @@ in the authorizer where appropriate, and validate opaque admin ids in backend ha
 missing fallback handler is rejected by this explicit `require` check. Without that check,
 unregistered operations retain the framework's pre-authentication 501; that deployment does
 not provide this compatibility. No native inventory record is added or removed.
+
+Migration from 0.10: table-catalog handlers now receive every nonempty raw segment their
+parameters capture, `/`, `..` and controls included once decoded, where 0.10 refused them before
+authentication; validate them as RustFS's catalog does. Install
+`verify_paths_double_encoded_under(TABLE_CATALOG_PREFIXES)` so Iceberg clients authenticate.
 
 Regenerate after the inventory or generator changes:
 

@@ -58,11 +58,11 @@ static SELECTOR: &[Predicate] = &[Predicate::Method(http::Method::HEAD)];
 /// The canonical row, then the compat row RustFS serves it under.
 pub static ROWS: &[ClaimedRow] = &[
     ClaimedRow {
-        template: "/_iceberg/v1/{warehouse}/namespaces/{namespace}/tables/{table}",
+        template: "/_iceberg/v1/{+warehouse}/namespaces/{+namespace}/tables/{+table}",
         selector: SELECTOR,
     },
     ClaimedRow {
-        template: "/iceberg/v1/{warehouse}/namespaces/{namespace}/tables/{table}",
+        template: "/iceberg/v1/{+warehouse}/namespaces/{+namespace}/tables/{+table}",
         selector: SELECTOR,
     },
 ];
@@ -125,7 +125,7 @@ impl AdminOperation for HeadIcebergByWarehouseNamespacesByNamespaceTablesByTable
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
     precedence: 262,
-    selector: "PathTemplate(\"/_iceberg/v1/{warehouse}/namespaces/{namespace}/tables/{table}\") ∧ Method(HEAD) ∨ PathTemplate(\"/iceberg/v1/{warehouse}/namespaces/{namespace}/tables/{table}\") ∧ Method(HEAD) ⇒ BucketParam(\"warehouse\")",
+    selector: "PathTemplate(\"/_iceberg/v1/{+warehouse}/namespaces/{+namespace}/tables/{+table}\") ∧ Method(HEAD) ∨ PathTemplate(\"/iceberg/v1/{+warehouse}/namespaces/{+namespace}/tables/{+table}\") ∧ Method(HEAD) ⇒ BucketParam(\"warehouse\")",
     action: "admin:GetTable",
     resource: ResourceShape::Bucket,
     success_status: 200,

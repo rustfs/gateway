@@ -37,7 +37,8 @@ use rustfs_gateway_core::route::{HostClass, Predicate, RouteRequestParts, Shadow
 use rustfs_gateway_core::{Everyone, SubjectRule, WhenAbsent};
 use rustfs_gateway_dialect_rustfs_admin::admin::{self, AdminResponse};
 use rustfs_gateway_dialect_rustfs_admin::{
-    AdminOperation, BodyKind, CLAIMS, OVERLAY, OperationFold, ROUTES, RouteRecord, fold_every_operation, rustfs_admin_dialect,
+    AdminOperation, BodyKind, CLAIMS, OVERLAY, OperationFold, ROUTES, RouteRecord, TABLE_CATALOG_PREFIXES, fold_every_operation,
+    rustfs_admin_dialect,
 };
 use rustfs_gateway_http::{Limits, WireRequest};
 
@@ -359,45 +360,44 @@ fn n_a_near_miss_of_a_row_reaches_no_admin_operation() {
     }
 }
 
-/// Negative — an empty parameter cannot select its row. Native admin parameters retain raw
-/// dots and encoded separators (ADR-0040); table-catalog parameters retain their strict boundary.
+/// Positive and negative — an empty parameter cannot select its row, and every other value, raw
+/// dots and encoded separators included, selects it: native RustFS hands its admin and
+/// table-catalog handlers alike the raw segment (ADR-0040, rustfs/gateway#1232).
 #[test]
-fn n_parameter_boundaries_preserve_raw_admin_data_and_strict_catalog_values() {
+fn n_parameter_boundaries_preserve_raw_data() {
     let dialect = dialect();
     let resolve = resolver(Some(&dialect));
-    let mut refused = 0;
+    let mut checked = 0;
     let mut elsewhere = Vec::new();
     for record in ROUTES {
         for template in templates(record) {
             let segments: Vec<&str> = template.split('/').collect();
             for (index, _) in segments.iter().enumerate().filter(|(_, segment)| param(segment).is_some()) {
-                for bad in [
+                for value in [
                     "%2e", "%2E", "%2e%2e", "%2E%2e", ".%2e", "a%2Fb", "a%2fb", "a%5Cb", "a%5cb", "",
                 ] {
                     let mut path: Vec<String> = segments.iter().map(|segment| concrete(segment)).collect();
-                    path[index] = bad.to_owned();
+                    path[index] = value.to_owned();
                     let path = path.join("/");
                     let target = format!("{path}{}", query(record));
                     let reached = resolve(record.method, &target);
-                    if bad.is_empty() {
+                    if value.is_empty() {
                         // Nothing in the parameter may spell another row's path; the model says which.
                         assert_ne!(reached, Some(record.operation), "{} {target}", record.method);
                         assert_eq!(reached, expected(record.method, &path, &query(record)), "{} {target}", record.method);
                         if let Some(other) = reached.filter(|other| Some(*other) != fallback(&path)) {
                             elsewhere.push((record.operation, path, other));
                         }
-                    } else if record.path.starts_with("/rustfs/admin/") || segments[index].starts_with("{*") {
-                        assert_eq!(reached, Some(record.operation), "{} {target}", record.method);
                     } else {
-                        assert_eq!(reached, None, "{} {target}", record.method);
+                        assert_eq!(reached, Some(record.operation), "{} {target}", record.method);
                     }
-                    refused += 1;
+                    checked += 1;
                 }
             }
         }
     }
     assert_eq!(
-        refused,
+        checked,
         10 * 2 * 190,
         "190 parameters across 102 templates, each with its alias; catch-all values included"
     );
@@ -679,6 +679,24 @@ fn the_dialect_assembles_with_its_six_claims() {
             "/profile/memory"
         ]
     );
+}
+
+/// Positive and negative — the table-catalog prefixes a RustFS assembly signs as generic SigV4
+/// does are exactly the table catalog's two claims, and no admin or profiling claim
+/// (rustfs/gateway#1232).
+#[test]
+fn the_table_catalog_prefixes_are_exactly_its_two_claims() {
+    assert_eq!(TABLE_CATALOG_PREFIXES, ["/_iceberg/v1", "/iceberg/v1"]);
+    for prefix in TABLE_CATALOG_PREFIXES {
+        let claim = CLAIMS
+            .iter()
+            .find(|claim| claim.prefix == *prefix)
+            .expect("a table-catalog prefix is a claim");
+        assert!(claim.reason.contains("table catalog"), "{prefix}: {}", claim.reason);
+    }
+    for claim in CLAIMS.iter().filter(|claim| !TABLE_CATALOG_PREFIXES.contains(&claim.prefix)) {
+        assert!(!claim.reason.contains("table catalog"), "{}", claim.prefix);
+    }
 }
 
 // ── the answer ───────────────────────────────────────────────────────────────────────────────
