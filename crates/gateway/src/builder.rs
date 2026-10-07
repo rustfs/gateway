@@ -77,6 +77,7 @@ mod claimed_bodies;
 mod client_quirks;
 mod cors;
 pub(crate) mod credential_sentences;
+pub(crate) mod denial_sentences;
 mod identifiers;
 mod legacy_chunks;
 mod legacy_heads;

@@ -201,6 +201,7 @@ impl GatewaySeam {
             .bound_buffered_bodies_as_legacy_rustfs()
             .answer_body_refusals_with_legacy_rustfs_sentences()
             .answer_credential_refusals_with_legacy_rustfs_sentences()
+            .answer_denials_with_legacy_rustfs_sentence()
             .slash_policy(SlashPolicy::RustfsLegacy)
             .accept_legacy_rustfs_object_keys_after_listing_in_the_posture_report()
             // Reached only through a transport entry, which the seam's in-process calls are not;

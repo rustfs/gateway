@@ -32,6 +32,7 @@ use rustfs_gateway_stream::Body;
 use rustfs_gateway_types::{ETag, ErrorCode, EtagRender};
 use rustfs_gateway_xml::{DECLARATION, XmlWriter};
 
+use crate::builder::denial_sentences::DenialSentences;
 use crate::{close::ConnectionIntent, ext::Denial, trace::RequestTrace};
 
 /// Optional refusal headers, details, and redacted signature diagnostics behind one pointer.
@@ -309,15 +310,15 @@ pub(crate) fn from_auth_context(error: AuthError, context: ErrorContext, respons
     rendered
 }
 
-pub(crate) fn from_denial(denial: Denial, response: ResponseKind) -> S3Error {
-    // One sentence for every denial. A message that named the failing condition would let an
-    // authenticated caller map the policy one request at a time.
+pub(crate) fn from_denial(denial: Denial, response: ResponseKind, sentences: DenialSentences) -> S3Error {
+    // One sentence for every denial (the gateway's or legacy RustFS's, `DenialSentences`). A message
+    // that named the failing condition would let an authenticated caller map the policy.
     //
     // The connection survives: the caller is known, so none of the reasoning that closes on an
     // authentication failure applies. `c-copy-0019` asserts exactly this, and it is the case
     // that stops "every 403 closes" from being written here.
     from_handler(
-        HandlerError::new(denial.code().clone(), "the request is not allowed"),
+        HandlerError::new(denial.code().clone(), sentences.sentence()),
         response,
         crate::close::after_denial(),
     )
@@ -572,7 +573,7 @@ mod tests {
     #[test]
     fn a_denial_renders_one_sentence() {
         assert_eq!(
-            from_denial(Denial::access_denied(), ResponseKind::Other).message(),
+            from_denial(Denial::access_denied(), ResponseKind::Other, DenialSentences::Gateway).message(),
             Some("the request is not allowed")
         );
     }

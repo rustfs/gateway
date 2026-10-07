@@ -83,6 +83,7 @@ use super::buffered_lengths::BufferedLengths;
 use super::claimed_bodies::ClaimedBodies;
 use super::client_quirks::ChecksumWaiver;
 use super::credential_sentences::CredentialSentences;
+use super::denial_sentences::DenialSentences;
 use super::legacy_chunks::ChunkReading;
 use super::legacy_heads::AnswerHeads;
 use super::legacy_sentences::BodySentences;
@@ -159,6 +160,8 @@ pub(crate) struct ViewPolicy {
     pub(super) body_sentences: BodySentences,
     /// The sentences a credential refusal carries (`super::credential_sentences`).
     pub(super) credential_sentences: CredentialSentences,
+    /// The sentence an authorization denial carries (`super::denial_sentences`).
+    pub(super) denial_sentences: DenialSentences,
     /// Which grammar POST Object forms are read with (`post_forms`).
     pub(crate) post_forms: post_forms::PostFormGrammar,
     /// Whether the legacy RustFS SigV4 header guard answers first (`super::sigv4_header_guard`).
@@ -226,6 +229,12 @@ impl ViewPolicy {
     /// ([`ServiceBuilder::answer_credential_refusals_with_legacy_rustfs_sentences`]).
     pub(crate) const fn credential_sentences(&self) -> CredentialSentences {
         self.credential_sentences
+    }
+
+    /// The sentence this assembly answers an authorization denial with
+    /// ([`ServiceBuilder::answer_denials_with_legacy_rustfs_sentence`]).
+    pub(crate) const fn denial_sentences(&self) -> DenialSentences {
+        self.denial_sentences
     }
 
     /// Which identifiers this assembly's answers carry

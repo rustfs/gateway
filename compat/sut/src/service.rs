@@ -331,6 +331,9 @@ pub(crate) fn build_service(
             // RustFS words its two credential refusals itself: a signature that does not match
             // and an access key nobody issued each carry RustFS's own sentence (rustfs/gateway#1120).
             .answer_credential_refusals_with_legacy_rustfs_sentences()
+            // And it words every authorization denial `Access Denied`, an anonymous caller's and a
+            // signed one's alike (rustfs/gateway#1349).
+            .answer_denials_with_legacy_rustfs_sentence()
             // RustFS folds the slashes of a key only when the key starts with one: `/b//x` stores
             // `x` and `/b/a//b` reaches storage as `a//b` (#1101).
             .slash_policy(SlashPolicy::RustfsLegacy)
