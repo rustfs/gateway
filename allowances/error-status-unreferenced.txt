@@ -37,6 +37,5 @@ OperationAborted|concurrent-modification conflict the storage side detects
 RequestIsNotMultiPartContent|browser POST upload; same owner as IncorrectNumberOfFilesInPostRequest
 TokenRefreshRequired|session-credential path; same owner as CredentialsNotSupported
 TooManyBuckets|account-level quota; same owner as AccountProblem
-UnexpectedContent|body-present-where-forbidden refusal; not raised in this layer yet
 UnresolvableGrantByEmailAddress|grant-by-email ACL; same owner as AmbiguousGrantByEmailAddress
 UserKeyMustBeSpecified|browser POST upload; same owner as IncorrectNumberOfFilesInPostRequest
