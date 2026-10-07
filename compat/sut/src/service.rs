@@ -343,6 +343,9 @@ pub(crate) fn build_service(
             // RustFS reads a conditional date in one spelling and refuses the rest, minio-js's
             // `Invalid Date` included, where the core ignores it (rustfs/backlog#1677, R14).
             .refuse_unreadable_date_conditions()
+            // RustFS refuses an `x-amz-checksum-algorithm` sent twice and an `x-amz-trailer` naming
+            // two checksums when it decodes the request, with its own codes (rustfs/gateway#1349).
+            .read_checksum_declarations_as_legacy_rustfs()
             // RustFS writes a response document's members in its own declaration order, with no
             // line end after the XML declaration and no namespace on a payload root
             // (rustfs/gateway#1078), so a client reads the bytes it reads from RustFS.

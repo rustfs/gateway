@@ -96,9 +96,11 @@ use rustfs_gateway_core::{DocumentReading, EncodedResponse, HandlerError, MetaVi
 use rustfs_gateway_http::{HeaderView, WireReject};
 use rustfs_gateway_sig::PayloadMode;
 
+mod checksum_declarations;
 mod date_conditions;
 pub(crate) mod header_signatures;
 pub(crate) mod presigned_urls;
+pub use self::checksum_declarations::LEGACY_CHECKSUM_DECLARATION_OPERATIONS;
 pub use self::date_conditions::STRICT_DATE_CONDITION_HEADERS;
 
 /// The page size RustFS lowers an oversized `max-keys` to (`S3_MAX_KEYS`).
@@ -199,6 +201,9 @@ pub(crate) struct ViewPolicy {
     rustfs_listings: bool,
     /// Whether date conditions are read in legacy RustFS's one spelling (`date_conditions`).
     pub(super) strict_date_conditions: bool,
+    /// Whether a checksum-algorithm declaration is read as legacy RustFS reads it
+    /// (`checksum_declarations`).
+    pub(super) legacy_checksum_declarations: bool,
     body_literals: bool,
     unknown_checksum_algorithms_ignored: bool,
     empty_headers_absent: bool,
@@ -380,14 +385,22 @@ impl ViewPolicy {
     }
 
     /// The refusal this assembly owes `operation` before decode, when there is one the codec
-    /// cannot phrase: legacy RustFS's answer to a date condition it cannot read, which quotes the
-    /// value, when the RustFS profile reads them strictly. `headers` is the accepted head the codec
+    /// cannot phrase: legacy RustFS's answer to a checksum-algorithm declaration it refuses, and to
+    /// a date condition it cannot read, each quoting what it refuses, when the RustFS profile reads
+    /// them as legacy RustFS does. `headers` is the accepted head the codec
     /// binds from.
     ///
     /// Unrendered: the service renders it where it renders every other refusal, after
     /// authorization and before the body read and the codec — where legacy RustFS's own decode
     /// refuses it, after its signature check and before its access check and handler.
     pub(crate) fn refusal_before_decode(self, operation: &str, headers: &HeaderView<'_>) -> Option<HandlerError> {
+        // Legacy RustFS decodes the checksum-algorithm member before the date conditions on the
+        // one operation that has both (`CopyObject`), so its refusal is answered first.
+        if self.legacy_checksum_declarations
+            && let Some(refusal) = checksum_declarations::refusal(operation, headers)
+        {
+            return Some(refusal);
+        }
         if self.strict_date_conditions {
             date_conditions::refusal(operation, headers)
         } else {

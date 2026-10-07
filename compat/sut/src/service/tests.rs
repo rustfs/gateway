@@ -767,6 +767,8 @@ mod request_id_tests;
 /// A stored `Content-Encoding` normalized as legacy RustFS normalizes it (rustfs/gateway#1203).
 mod content_encoding_tests;
 
+/// A checksum-algorithm declaration read as legacy RustFS reads it (rustfs/gateway#1349).
+mod checksum_declaration_tests;
 /// Authorization denials worded as legacy RustFS words them (rustfs/gateway#1349).
 mod denial_sentence_tests;
 /// `x-amz-expiration` in real days, as the s3-tests suite runs the launcher (rustfs/gateway#999).
