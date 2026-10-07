@@ -59,11 +59,11 @@ static SELECTOR: &[Predicate] = &[Predicate::Method(http::Method::PUT)];
 /// The canonical row, then the compat row RustFS serves it under.
 pub static ROWS: &[ClaimedRow] = &[
     ClaimedRow {
-        template: "/_iceberg/v1/{warehouse}/namespaces/{namespace}/tables/{table}/catalog/external",
+        template: "/_iceberg/v1/{+warehouse}/namespaces/{+namespace}/tables/{+table}/catalog/external",
         selector: SELECTOR,
     },
     ClaimedRow {
-        template: "/iceberg/v1/{warehouse}/namespaces/{namespace}/tables/{table}/catalog/external",
+        template: "/iceberg/v1/{+warehouse}/namespaces/{+namespace}/tables/{+table}/catalog/external",
         selector: SELECTOR,
     },
 ];
@@ -126,7 +126,7 @@ impl AdminOperation for PutIcebergByWarehouseNamespacesByNamespaceTablesByTableC
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
     precedence: 364,
-    selector: "PathTemplate(\"/_iceberg/v1/{warehouse}/namespaces/{namespace}/tables/{table}/catalog/external\") ∧ Method(PUT) ∨ PathTemplate(\"/iceberg/v1/{warehouse}/namespaces/{namespace}/tables/{table}/catalog/external\") ∧ Method(PUT) ⇒ BucketParam(\"warehouse\")",
+    selector: "PathTemplate(\"/_iceberg/v1/{+warehouse}/namespaces/{+namespace}/tables/{+table}/catalog/external\") ∧ Method(PUT) ∨ PathTemplate(\"/iceberg/v1/{+warehouse}/namespaces/{+namespace}/tables/{+table}/catalog/external\") ∧ Method(PUT) ⇒ BucketParam(\"warehouse\")",
     action: "admin:RegisterTable",
     resource: ResourceShape::Bucket,
     success_status: 200,

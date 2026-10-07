@@ -187,3 +187,6 @@ async fn n_the_default_verifies_every_spelling_the_switch_narrows() {
 
 #[path = "raw_path_fallback/legacy_paths.rs"]
 mod legacy_paths;
+
+#[path = "raw_path_fallback/table_catalog_paths.rs"]
+mod table_catalog_paths;

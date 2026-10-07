@@ -65,8 +65,8 @@ use http::Method;
 use rustfs_gateway_core::BoxFuture;
 use rustfs_gateway_sig::{
     AuthError, AuthScheme, CanonicalRequestSpec, ExpectedScope, PayloadMode, RawHost, RawPathFallback, RegionSet, ScopeRejection,
-    SealedAws, SigFamily, SigIdentity, SigLocation, SignatureMatch, Unimplemented, UriPathCandidates, Verdict,
-    calculate_signature, enforce_scope, signing_key, timing,
+    SealedAws, SigFamily, SigIdentity, SigLocation, SignatureMatch, Unimplemented, Verdict, calculate_signature, enforce_scope,
+    signing_key, timing,
 };
 
 use super::credential_guard::{CredentialGuardConfig, GuardedCredentialProvider};
@@ -302,6 +302,8 @@ pub struct Authentication<'a> {
     legacy_refusal: std::sync::OnceLock<LegacyRefusal>,
     sts_body: Option<sts_body::StsBodyReading<'a>>,
     body_refusal: std::sync::OnceLock<crate::render::S3Error>,
+    /// Whether routing placed the request inside a dialect's claim (`with_claimed_route`).
+    pub(super) claimed: bool,
 }
 
 impl core::fmt::Debug for Authentication<'_> {
@@ -316,6 +318,7 @@ impl core::fmt::Debug for Authentication<'_> {
             .field("chunks", &self.chunks)
             .field("signature_mismatch_published", &self.signature_mismatch.get().is_some())
             .field("legacy_refusal_published", &self.legacy_refusal.get().is_some())
+            .field("claimed", &self.claimed)
             .finish()
     }
 }
@@ -345,6 +348,7 @@ impl<'a> Authentication<'a> {
             legacy_refusal: std::sync::OnceLock::new(),
             sts_body: None,
             body_refusal: std::sync::OnceLock::new(),
+            claimed: false,
         }
     }
 
@@ -497,7 +501,7 @@ pub struct SigV4Authenticator {
     /// store, one negative cache, one timing posture — a second authenticator holding its own
     /// would be two of each, kept in step by hand.
     pub(super) credentials: Arc<GuardedCredentialProvider>,
-    regions: RegionSet,
+    pub(super) regions: RegionSet,
     /// Whether a successful lookup's secret is handed to the handler (ADR-0022). Off by default;
     /// `pub(super)` so the SigV2 half honours the same switch.
     pub(super) hand_secret: bool,
@@ -509,6 +513,8 @@ pub struct SigV4Authenticator {
     pub(super) raw_path: RawPathFallback,
     /// Whether canonical paths and raw fallback follow legacy RustFS (#1314, #1315).
     pub(super) legacy_paths: bool,
+    /// The path prefixes signed as generic AWS SigV4 signs a non-S3 path (rustfs/gateway#1232).
+    pub(super) double_encoded_prefixes: &'static [&'static str],
     /// Whether `SignedHeaders` is read, and its refusals answered, as legacy RustFS does
     /// (rustfs/gateway#1130).
     pub(super) legacy_signed_headers: bool,
@@ -516,27 +522,6 @@ pub struct SigV4Authenticator {
 
 /// An authenticated verdict, and the looked-up secret when the authenticator hands it on.
 pub(super) type VerifiedWithSecret = (Verdict, Option<rustfs_gateway_sig::SecretBytes>);
-
-impl core::fmt::Debug for SigV4Authenticator {
-    /// Hand-written: a credential provider is not required to be `Debug`, and requiring it would
-    /// push a derive onto every implementation for the sake of one line here.
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("SigV4Authenticator")
-            .field("regions", &self.regions)
-            .field("credential_guard", self.credentials.config())
-            .field("hands_caller_secret_to_handlers", &self.hand_secret)
-            .field("accepts_any_signing_region", &self.scope_policy.any_region)
-            .field("accepts_empty_signing_region", &self.scope_policy.empty_region)
-            .field("verifies_unreadable_signing_regions", &self.scope_policy.any_spelling)
-            .field("reads_signing_regions_of_any_length", &self.scope_policy.any_length)
-            .field("accepts_legacy_rustfs_signing_services", &self.scope_policy.legacy_services)
-            .field("answers_scope_refusals_as_legacy_rustfs", &self.scope_policy.legacy_scope_refusals)
-            .field("raw_path_fallback", &self.raw_path)
-            .field("verifies_paths_as_legacy_rustfs", &self.legacy_paths)
-            .field("reads_signed_headers_as_legacy_rustfs", &self.legacy_signed_headers)
-            .finish()
-    }
-}
 
 impl SigV4Authenticator {
     /// Builds the verifier over a credential source and the regions this deployment serves.
@@ -563,6 +548,7 @@ impl SigV4Authenticator {
             scope_policy: super::authenticator_switches::ScopePolicy::default(),
             raw_path: RawPathFallback::WhenRespelled,
             legacy_paths: false,
+            double_encoded_prefixes: &[],
             legacy_signed_headers: false,
         }
     }
@@ -654,11 +640,7 @@ impl SigV4Authenticator {
                     let signed = self
                         .read_signed_headers(signed_headers, view.headers(), request.declared_content_length(), location)
                         .map_err(legacy_answer)?;
-                    let paths = if self.legacy_paths {
-                        UriPathCandidates::for_legacy_rustfs(request.raw_path())
-                    } else {
-                        UriPathCandidates::new(request.raw_path()).map(|paths| paths.with_raw_fallback(self.raw_path))
-                    }?;
+                    let paths = self.path_candidates(request.raw_path(), request.claimed)?;
                     let query = view.query();
                     let mut spec = CanonicalRequestSpec::new(
                         request.method(),

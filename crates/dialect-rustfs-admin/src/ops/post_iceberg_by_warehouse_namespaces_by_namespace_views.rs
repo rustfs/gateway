@@ -59,11 +59,11 @@ static SELECTOR: &[Predicate] = &[Predicate::Method(http::Method::POST)];
 /// The canonical row, then the compat row RustFS serves it under.
 pub static ROWS: &[ClaimedRow] = &[
     ClaimedRow {
-        template: "/_iceberg/v1/{warehouse}/namespaces/{namespace}/views",
+        template: "/_iceberg/v1/{+warehouse}/namespaces/{+namespace}/views",
         selector: SELECTOR,
     },
     ClaimedRow {
-        template: "/iceberg/v1/{warehouse}/namespaces/{namespace}/views",
+        template: "/iceberg/v1/{+warehouse}/namespaces/{+namespace}/views",
         selector: SELECTOR,
     },
 ];
@@ -126,7 +126,7 @@ impl AdminOperation for PostIcebergByWarehouseNamespacesByNamespaceViews {
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
     precedence: 280,
-    selector: "PathTemplate(\"/_iceberg/v1/{warehouse}/namespaces/{namespace}/views\") ∧ Method(POST) ∨ PathTemplate(\"/iceberg/v1/{warehouse}/namespaces/{namespace}/views\") ∧ Method(POST) ⇒ BucketParam(\"warehouse\")",
+    selector: "PathTemplate(\"/_iceberg/v1/{+warehouse}/namespaces/{+namespace}/views\") ∧ Method(POST) ∨ PathTemplate(\"/iceberg/v1/{+warehouse}/namespaces/{+namespace}/views\") ∧ Method(POST) ⇒ BucketParam(\"warehouse\")",
     action: "admin:CreateTable",
     resource: ResourceShape::Bucket,
     success_status: 200,

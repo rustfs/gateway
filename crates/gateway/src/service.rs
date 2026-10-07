@@ -854,6 +854,7 @@ impl S3Service {
                         declared_length,
                     )
                     .with_post_policy_limits(post_policy_limits)
+                    .with_claimed_route(claimed)
                     // Offered before the verdict and read long after it. An `aws-chunked` body's chunk
                     // chain is verified with the same key and seed the request signature was, and
                     // neither survives `Verdict` — see `crate::ext::ChunkVerification`.

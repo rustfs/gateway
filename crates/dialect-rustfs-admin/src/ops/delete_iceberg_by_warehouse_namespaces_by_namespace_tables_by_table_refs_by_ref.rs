@@ -59,11 +59,11 @@ static SELECTOR: &[Predicate] = &[Predicate::Method(http::Method::DELETE)];
 /// The canonical row, then the compat row RustFS serves it under.
 pub static ROWS: &[ClaimedRow] = &[
     ClaimedRow {
-        template: "/_iceberg/v1/{warehouse}/namespaces/{namespace}/tables/{table}/refs/{ref}",
+        template: "/_iceberg/v1/{+warehouse}/namespaces/{+namespace}/tables/{+table}/refs/{+ref}",
         selector: SELECTOR,
     },
     ClaimedRow {
-        template: "/iceberg/v1/{warehouse}/namespaces/{namespace}/tables/{table}/refs/{ref}",
+        template: "/iceberg/v1/{+warehouse}/namespaces/{+namespace}/tables/{+table}/refs/{+ref}",
         selector: SELECTOR,
     },
 ];
@@ -126,7 +126,7 @@ impl AdminOperation for DeleteIcebergByWarehouseNamespacesByNamespaceTablesByTab
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
     precedence: 103,
-    selector: "PathTemplate(\"/_iceberg/v1/{warehouse}/namespaces/{namespace}/tables/{table}/refs/{ref}\") ∧ Method(DELETE) ∨ PathTemplate(\"/iceberg/v1/{warehouse}/namespaces/{namespace}/tables/{table}/refs/{ref}\") ∧ Method(DELETE) ⇒ BucketParam(\"warehouse\")",
+    selector: "PathTemplate(\"/_iceberg/v1/{+warehouse}/namespaces/{+namespace}/tables/{+table}/refs/{+ref}\") ∧ Method(DELETE) ∨ PathTemplate(\"/iceberg/v1/{+warehouse}/namespaces/{+namespace}/tables/{+table}/refs/{+ref}\") ∧ Method(DELETE) ⇒ BucketParam(\"warehouse\")",
     action: "admin:CommitTable",
     resource: ResourceShape::Bucket,
     success_status: 200,

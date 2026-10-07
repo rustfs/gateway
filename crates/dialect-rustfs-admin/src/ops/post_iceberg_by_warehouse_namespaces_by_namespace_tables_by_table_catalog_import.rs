@@ -59,11 +59,11 @@ static SELECTOR: &[Predicate] = &[Predicate::Method(http::Method::POST)];
 /// The canonical row, then the compat row RustFS serves it under.
 pub static ROWS: &[ClaimedRow] = &[
     ClaimedRow {
-        template: "/_iceberg/v1/{warehouse}/namespaces/{namespace}/tables/{table}/catalog/import",
+        template: "/_iceberg/v1/{+warehouse}/namespaces/{+namespace}/tables/{+table}/catalog/import",
         selector: SELECTOR,
     },
     ClaimedRow {
-        template: "/iceberg/v1/{warehouse}/namespaces/{namespace}/tables/{table}/catalog/import",
+        template: "/iceberg/v1/{+warehouse}/namespaces/{+namespace}/tables/{+table}/catalog/import",
         selector: SELECTOR,
     },
 ];
@@ -126,7 +126,7 @@ impl AdminOperation for PostIcebergByWarehouseNamespacesByNamespaceTablesByTable
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
     precedence: 272,
-    selector: "PathTemplate(\"/_iceberg/v1/{warehouse}/namespaces/{namespace}/tables/{table}/catalog/import\") ∧ Method(POST) ∨ PathTemplate(\"/iceberg/v1/{warehouse}/namespaces/{namespace}/tables/{table}/catalog/import\") ∧ Method(POST) ⇒ BucketParam(\"warehouse\")",
+    selector: "PathTemplate(\"/_iceberg/v1/{+warehouse}/namespaces/{+namespace}/tables/{+table}/catalog/import\") ∧ Method(POST) ∨ PathTemplate(\"/iceberg/v1/{+warehouse}/namespaces/{+namespace}/tables/{+table}/catalog/import\") ∧ Method(POST) ⇒ BucketParam(\"warehouse\")",
     action: "admin:RegisterTable",
     resource: ResourceShape::Bucket,
     success_status: 200,
