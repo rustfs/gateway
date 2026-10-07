@@ -174,6 +174,10 @@ where
         if matches!(self.reader.grammar(), FormGrammar::LegacyRustfs { .. }) {
             limits.max_encoded_bytes = self.limits.max_policy_bytes();
             limits.max_decoded_bytes = limits.max_encoded_bytes / 4 * 3;
+            // Legacy RustFS bounds a policy's conditions only by the policy field's bytes
+            // (rustfs/gateway#1173): every JSON element takes at least one decoded byte, so this
+            // ceiling never refuses before the byte ceiling does.
+            limits.max_json_elements = limits.max_decoded_bytes;
         }
         limits
     }

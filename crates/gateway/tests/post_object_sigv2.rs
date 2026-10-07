@@ -33,6 +33,8 @@ use crate::support;
 
 #[path = "post_object_sigv2/policy_bytes.rs"]
 mod policy_bytes;
+#[path = "post_object_sigv2/policy_elements.rs"]
+mod policy_elements;
 
 const POLICY: &[u8; 127] = br#"{"expiration":"2026-01-02T04:04:05Z","conditions":[{"bucket":"example-bucket"},{"key":"upload"},["content-length-range",1,16]]}"#;
 const BOUNDARY: &str = "sigv2-browser-form";
