@@ -30,6 +30,7 @@ async fn fixture(service: &S3Service) -> Vec<String> {
     let mut sources = Vec::new();
     for (bucket, arn) in [
         ("source", "arn:aws:s3:us-east-1:123456789012:accesspoint/source/object/key"),
+        ("op-1", "arn:aws:s3-outposts:us-east-1:123456789012:outpost/op-1/object/key"),
         (
             "src-bucket",
             "arn:aws:s3-outposts:us-east-1:123456789012:outpost/op-1/bucket/src-bucket/object/key",
@@ -115,6 +116,7 @@ async fn n_missing_arn_buckets_have_the_same_unsupported_refusal() {
     let id = initiate(&service, "destination", "kept").await;
     for source in [
         "arn:aws:s3:us-east-1:123456789012:accesspoint/missing/object/key",
+        "arn:aws:s3-outposts:us-east-1:123456789012:outpost/missing/object/key",
         "arn:aws:s3-outposts:us-east-1:123456789012:outpost/op-1/bucket/missing/object/key",
     ] {
         for prefix in ["", "/"] {

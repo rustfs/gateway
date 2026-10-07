@@ -37,6 +37,19 @@ impl Stub {
     }
 }
 
+impl CopySource {
+    fn from_resolved(source: &rustfs_gateway::ResolvedCopySource) -> Result<Self, HandlerError> {
+        let bucket = source
+            .bucket()
+            .ok_or_else(|| HandlerError::not_implemented("bucketless copy sources are not supported by the fixture"))?;
+        Ok(Self {
+            bucket: bucket.clone(),
+            key: source.key().clone(),
+            version_id: source.version_id().map(str::to_owned),
+        })
+    }
+}
+
 impl Handler<dto::GetObject> for Stub {
     fn call(&self, request: Req<dto::GetObject>) -> impl core::future::Future<Output = HandlerResult<dto::GetObject>> + Send {
         let outcome = self.get_object(request.input());
@@ -91,12 +104,13 @@ impl Handler<dto::HeadObject> for Stub {
 impl Handler<dto::CopyObject> for Stub {
     fn call(&self, request: Req<dto::CopyObject>) -> impl core::future::Future<Output = HandlerResult<dto::CopyObject>> + Send {
         // The target's key is the write the bucket may block; the copy source's key only reads.
-        let outcome = self
-            .refuse_blocked_encryption_type(request.input().bucket.as_str(), request.sse())
-            .and_then(|()| match request.resources().source().resolve(request.read_proof()) {
-                Some(resolved) => self.copy_object_with_source(request.input(), CopySource::from_resolved(&resolved)),
-                None => Err(HandlerError::internal_error("the copy-source authorization proof did not match")),
-            });
+        let outcome =
+            self.refuse_blocked_encryption_type(request.input().bucket.as_str(), request.sse())
+                .and_then(|()| match request.resources().source().resolve(request.read_proof()) {
+                    Some(resolved) => CopySource::from_resolved(&resolved)
+                        .and_then(|source| self.copy_object_with_source(request.input(), source)),
+                    None => Err(HandlerError::internal_error("the copy-source authorization proof did not match")),
+                });
         async move { outcome }
     }
 
@@ -105,12 +119,13 @@ impl Handler<dto::CopyObject> for Stub {
         request: Req<dto::CopyObject>,
         _context: rustfs_gateway::HandlerContext,
     ) -> impl core::future::Future<Output = HandlerResult<dto::CopyObject>> + Send {
-        let outcome = self
-            .refuse_blocked_encryption_type(request.input().bucket.as_str(), request.sse())
-            .and_then(|()| match request.resources().source().resolve(request.read_proof()) {
-                Some(resolved) => self.copy_object_with_source(request.input(), CopySource::from_resolved(&resolved)),
-                None => Err(HandlerError::internal_error("the copy-source authorization proof did not match")),
-            });
+        let outcome =
+            self.refuse_blocked_encryption_type(request.input().bucket.as_str(), request.sse())
+                .and_then(|()| match request.resources().source().resolve(request.read_proof()) {
+                    Some(resolved) => CopySource::from_resolved(&resolved)
+                        .and_then(|source| self.copy_object_with_source(request.input(), source)),
+                    None => Err(HandlerError::internal_error("the copy-source authorization proof did not match")),
+                });
         async move { outcome }
     }
 }
@@ -121,7 +136,9 @@ impl Handler<dto::UploadPartCopy> for Stub {
         request: Req<dto::UploadPartCopy>,
     ) -> impl core::future::Future<Output = HandlerResult<dto::UploadPartCopy>> + Send {
         let outcome = match request.resources().source().resolve(request.read_proof()) {
-            Some(resolved) => self.upload_part_copy_with_source(request.input(), CopySource::from_resolved(&resolved)),
+            Some(resolved) => {
+                CopySource::from_resolved(&resolved).and_then(|source| self.upload_part_copy_with_source(request.input(), source))
+            }
             None => Err(HandlerError::internal_error("the copy-source authorization proof did not match")),
         };
         async move { outcome }
@@ -133,7 +150,9 @@ impl Handler<dto::UploadPartCopy> for Stub {
         _context: rustfs_gateway::HandlerContext,
     ) -> impl core::future::Future<Output = HandlerResult<dto::UploadPartCopy>> + Send {
         let outcome = match request.resources().source().resolve(request.read_proof()) {
-            Some(resolved) => self.upload_part_copy_with_source(request.input(), CopySource::from_resolved(&resolved)),
+            Some(resolved) => {
+                CopySource::from_resolved(&resolved).and_then(|source| self.upload_part_copy_with_source(request.input(), source))
+            }
             None => Err(HandlerError::internal_error("the copy-source authorization proof did not match")),
         };
         async move { outcome }

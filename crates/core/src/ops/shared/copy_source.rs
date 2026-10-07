@@ -63,7 +63,8 @@ pub enum CopySourceForm {
     Path,
     /// `arn:<partition>:s3:<region>:<account>:accesspoint/<name>/object/<key>`.
     AccessPointArn,
-    /// `arn:<partition>:s3-outposts:<region>:<account>:outpost/<id>/bucket/<bucket>/object/<key>`.
+    /// `arn:<partition>:s3-outposts:<region>:<account>:outpost/<id>/object/<key>`.
+    /// Also accepts the existing `/outpost/<id>/bucket/<bucket>/object/<key>` form.
     OutpostsArn,
 }
 
@@ -108,7 +109,7 @@ struct SourceResource {
     /// The access point name, or the Outposts bucket's outpost id. `None` for the path form.
     container: Option<String>,
     identity: crate::ResourceIdentity,
-    bucket: BucketName,
+    bucket: Option<BucketName>,
     key: ObjectKey,
     version_id: Option<String>,
 }
@@ -124,8 +125,8 @@ impl SourceResource {
     /// The source bucket.
     #[cfg(test)]
     #[must_use]
-    const fn bucket(&self) -> &BucketName {
-        &self.bucket
+    const fn bucket(&self) -> Option<&BucketName> {
+        self.bucket.as_ref()
     }
 }
 
@@ -208,17 +209,17 @@ impl CopySource {
     #[must_use]
     pub fn resolve(&self, proof: &crate::AuthorizedRead) -> Option<ResolvedCopySource> {
         proof
-            .permits(crate::ResourceRef::copy_source(
-                if self.resource.version_id.is_some() {
+            .permits(crate::ResourceRef::CopySource {
+                action: if self.resource.version_id.is_some() {
                     "s3:GetObjectVersion"
                 } else {
                     "s3:GetObject"
                 },
-                &self.resource.bucket,
-                &self.resource.key,
-                &self.resource.identity,
-                self.resource.version_id.as_deref(),
-            ))
+                bucket: self.resource.bucket.as_ref(),
+                key: &self.resource.key,
+                identity: &self.resource.identity,
+                version_id: self.resource.version_id.as_deref(),
+            })
             .then(|| ResolvedCopySource {
                 resource: self.resource.clone(),
             })
@@ -252,17 +253,17 @@ impl CopySourceResources {
 
 impl crate::DerivedResourceSet for CopySourceResources {
     fn visit(&self, visitor: &mut dyn FnMut(crate::ResourceRef<'_>)) {
-        visitor(crate::ResourceRef::copy_source(
-            if self.source.resource.version_id.is_some() {
+        visitor(crate::ResourceRef::CopySource {
+            action: if self.source.resource.version_id.is_some() {
                 "s3:GetObjectVersion"
             } else {
                 "s3:GetObject"
             },
-            &self.source.resource.bucket,
-            &self.source.resource.key,
-            &self.source.resource.identity,
-            self.source.resource.version_id.as_deref(),
-        ));
+            bucket: self.source.resource.bucket.as_ref(),
+            key: &self.source.resource.key,
+            identity: &self.source.resource.identity,
+            version_id: self.source.resource.version_id.as_deref(),
+        });
     }
 }
 
@@ -273,10 +274,11 @@ pub struct ResolvedCopySource {
 }
 
 impl ResolvedCopySource {
-    /// The source bucket.
+    /// The source bucket, absent for an Outposts ARN that names only an outpost and object.
+    /// An embedding backend must resolve that identity or refuse it; never substitute the target.
     #[must_use]
-    pub const fn bucket(&self) -> &BucketName {
-        &self.resource.bucket
+    pub const fn bucket(&self) -> Option<&BucketName> {
+        self.resource.bucket.as_ref()
     }
 
     /// The source key.
@@ -304,7 +306,9 @@ impl ResolvedCopySource {
     /// two answers oblige a handler to do.
     #[must_use]
     pub fn is_self_copy(&self, target_bucket: &BucketName, target_key: &ObjectKey) -> bool {
-        self.resource.version_id.is_none() && self.resource.bucket == *target_bucket && self.resource.key == *target_key
+        self.resource.version_id.is_none()
+            && self.resource.bucket.as_ref() == Some(target_bucket)
+            && self.resource.key == *target_key
     }
 }
 
@@ -536,7 +540,7 @@ fn parse_path(path: &str, names: &NamePolicy) -> Result<SourceResource, CopySour
         form: CopySourceForm::Path,
         container: None,
         identity: crate::ResourceIdentity::Path,
-        bucket: path_bucket_of(&decode(bucket)?, names)?,
+        bucket: Some(path_bucket_of(&decode(bucket)?, names)?),
         key: key_of(key, names)?,
         version_id: None,
     })
@@ -589,15 +593,21 @@ fn parse_arn(path: &str, names: &NamePolicy) -> Result<SourceResource, CopySourc
                 // An access point is addressed by name; the bucket behind it is resolved by the
                 // control plane, so the name is what an authorizer writes its resource against and
                 // what stands in for the bucket until then.
-                bucket: bucket_of(name)?,
+                bucket: Some(bucket_of(name)?),
                 key: decoded_key(key, names)?,
                 version_id: None,
             })
         }
         "s3-outposts" => {
             let rest = resource.strip_prefix("outpost/").ok_or_else(unknown_arn)?;
-            let (outpost, rest) = rest.split_once("/bucket/").ok_or_else(unknown_arn)?;
-            let (bucket, key) = rest.split_once("/object/").ok_or_else(unknown_arn)?;
+            let (outpost, rest) = rest.split_once('/').ok_or_else(unknown_arn)?;
+            let (bucket, key) = if let Some(key) = rest.strip_prefix("object/") {
+                (None, key)
+            } else {
+                let rest = rest.strip_prefix("bucket/").ok_or_else(unknown_arn)?;
+                let (bucket, key) = rest.split_once("/object/").ok_or_else(unknown_arn)?;
+                (Some(bucket_of(bucket)?), key)
+            };
             Ok(SourceResource {
                 form: CopySourceForm::OutpostsArn,
                 container: Some(non_empty(outpost)?.to_owned()),
@@ -607,7 +617,7 @@ fn parse_arn(path: &str, names: &NamePolicy) -> Result<SourceResource, CopySourc
                     account: non_empty(account)?.to_owned(),
                     outpost_id: non_empty(outpost)?.to_owned(),
                 },
-                bucket: bucket_of(bucket)?,
+                bucket,
                 key: decoded_key(key, names)?,
                 version_id: None,
             })

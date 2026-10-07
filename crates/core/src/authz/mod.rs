@@ -118,6 +118,7 @@ impl Denied {
 pub struct OwnedResource {
     action: &'static str,
     bucket: Option<BucketName>,
+    inherit_bucket: bool,
     key: Option<ObjectKey>,
     identity: Option<ResourceIdentity>,
     version_id: Option<String>,
@@ -130,6 +131,7 @@ impl OwnedResource {
         Self {
             action: resource.action(),
             bucket: resource.bucket().cloned(),
+            inherit_bucket: resource.inherits_routed_bucket(),
             key: resource.key().cloned(),
             identity: resource.identity().cloned(),
             version_id: resource.version_id().map(ToOwned::to_owned),
@@ -146,6 +148,14 @@ impl OwnedResource {
     #[must_use]
     pub const fn bucket(&self) -> Option<&BucketName> {
         self.bucket.as_ref()
+    }
+
+    /// Resolves a routed bucket only for a resource that explicitly inherits it.
+    ///
+    /// A bucketless copy source stays bucketless even when its destination has a bucket.
+    #[must_use]
+    pub fn resolved_bucket<'a>(&'a self, routed: Option<&'a BucketName>) -> Option<&'a BucketName> {
+        if self.inherit_bucket { routed } else { self.bucket() }
     }
 
     /// The object key, when this is an object resource.
@@ -169,6 +179,7 @@ impl OwnedResource {
     fn matches(&self, resource: ResourceRef<'_>) -> bool {
         self.action == resource.action()
             && self.bucket.as_ref() == resource.bucket()
+            && self.inherit_bucket == resource.inherits_routed_bucket()
             && self.key.as_ref() == resource.key()
             && self.identity.as_ref() == resource.identity()
             && self.version_id() == resource.version_id()
@@ -249,6 +260,19 @@ pub enum ResourceRef<'a> {
         /// The bucket.
         bucket: &'a BucketName,
     },
+    /// A complete copy-source identity. An absent bucket never inherits the destination bucket.
+    CopySource {
+        /// The IAM action required on the source.
+        action: &'static str,
+        /// The source bucket, if this ARN or path names one.
+        bucket: Option<&'a BucketName>,
+        /// The source object key.
+        key: &'a ObjectKey,
+        /// The full addressing identity required by the source proof.
+        identity: &'a ResourceIdentity,
+        /// The exact source version, when present.
+        version_id: Option<&'a str>,
+    },
     /// An object resource. The bucket is absent only when the operation's primary routed bucket
     /// supplies it and the derived value contributes only the key.
     Object {
@@ -287,11 +311,11 @@ impl<'a> ResourceRef<'a> {
         identity: &'a ResourceIdentity,
         version_id: Option<&'a str>,
     ) -> Self {
-        Self::Object {
+        Self::CopySource {
             action,
             bucket: Some(bucket),
             key,
-            identity: Some(identity),
+            identity,
             version_id,
         }
     }
@@ -313,11 +337,18 @@ impl<'a> ResourceRef<'a> {
         }
     }
 
+    const fn inherits_routed_bucket(self) -> bool {
+        matches!(self, Self::Service { .. } | Self::Object { bucket: None, .. })
+    }
+
     /// The IAM action required on this resource.
     #[must_use]
     pub const fn action(self) -> &'static str {
         match self {
-            Self::Service { action } | Self::Bucket { action, .. } | Self::Object { action, .. } => action,
+            Self::Service { action }
+            | Self::Bucket { action, .. }
+            | Self::Object { action, .. }
+            | Self::CopySource { action, .. } => action,
         }
     }
 
@@ -328,8 +359,11 @@ impl<'a> ResourceRef<'a> {
             Self::Bucket { bucket, .. }
             | Self::Object {
                 bucket: Some(bucket), ..
+            }
+            | Self::CopySource {
+                bucket: Some(bucket), ..
             } => Some(bucket),
-            Self::Service { .. } | Self::Object { bucket: None, .. } => None,
+            Self::Service { .. } | Self::Object { bucket: None, .. } | Self::CopySource { bucket: None, .. } => None,
         }
     }
 
@@ -337,7 +371,7 @@ impl<'a> ResourceRef<'a> {
     #[must_use]
     pub const fn key(self) -> Option<&'a ObjectKey> {
         match self {
-            Self::Object { key, .. } => Some(key),
+            Self::Object { key, .. } | Self::CopySource { key, .. } => Some(key),
             Self::Service { .. } | Self::Bucket { .. } => None,
         }
     }
@@ -347,6 +381,7 @@ impl<'a> ResourceRef<'a> {
     pub const fn identity(self) -> Option<&'a ResourceIdentity> {
         match self {
             Self::Object { identity, .. } => identity,
+            Self::CopySource { identity, .. } => Some(identity),
             Self::Service { .. } | Self::Bucket { .. } => None,
         }
     }
@@ -355,7 +390,7 @@ impl<'a> ResourceRef<'a> {
     #[must_use]
     pub const fn version_id(self) -> Option<&'a str> {
         match self {
-            Self::Object { version_id, .. } => version_id,
+            Self::Object { version_id, .. } | Self::CopySource { version_id, .. } => version_id,
             Self::Service { .. } | Self::Bucket { .. } => None,
         }
     }

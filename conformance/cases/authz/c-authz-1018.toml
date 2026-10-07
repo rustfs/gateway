@@ -1,0 +1,140 @@
+[case]
+id = "c-authz-1018"
+schema_version = 1
+title = "A bucketless Outposts source keeps its own authorization identity"
+rationale = "The fixture denies the named Outposts identity without a bucket. Substituting the destination bucket must not turn that source denial into an allowed backend call. An ordinary source remains readable."
+polarity = "negative"
+operation = "CopyObject"
+tags = ["security", "routing", "multipart"]
+timeout_ms = 10000
+quirks = ["q-copy-source-authz-0086", "q-copy-source-arn-0078"]
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CopyObject.html"
+summary = "An Outposts source can name an outpost and object without a bucket segment, and copying requires source read permission."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_UploadPartCopy.html"
+summary = "Copying a part requires read permission on the source separately from permission on the destination upload."
+kind = "aws-doc"
+
+[connection]
+reuse = true
+
+[[setup.buckets]]
+name = "authz-destination"
+
+[[setup.objects]]
+bucket = "authz-destination"
+key = "public"
+body = { utf8 = "ordinary source" }
+
+[[setup.objects]]
+bucket = "authz-destination"
+key = "copy"
+body = { utf8 = "keep me" }
+
+[[setup.multipart_uploads]]
+bucket = "authz-destination"
+key = "copy"
+capture_upload_id_as = "upload"
+
+[[exchanges]]
+name = "object-literal-source-denied"
+
+[exchanges.request]
+method = "PUT"
+target = "/authz-destination/copy"
+headers = { "x-amz-copy-source" = "arn:aws:s3-outposts:us-east-1:123456789012:outpost/op-denied/object/secret" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 403
+headers_absent = ["etag", "x-amz-version-id", "x-amz-copy-source-version-id"]
+
+[exchanges.expect.error]
+code = "AccessDenied"
+
+[[exchanges]]
+name = "object-encoded-version-source-denied"
+
+[exchanges.request]
+method = "PUT"
+target = "/authz-destination/copy"
+headers = { "x-amz-copy-source" = "%2Farn%3Aaws%3As3-outposts%3Aus-east-1%3A123456789012%3Aoutpost%2Fop-denied%2Fobject%2Fsecret?versionId=v1" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 403
+headers_absent = ["etag", "x-amz-version-id", "x-amz-copy-source-version-id"]
+
+[exchanges.expect.error]
+code = "AccessDenied"
+
+[[exchanges]]
+name = "part-literal-source-denied"
+
+[exchanges.request]
+method = "PUT"
+target = "/authz-destination/copy?partNumber=1&uploadId=${capture.upload}"
+headers = { "x-amz-copy-source" = "arn:aws:s3-outposts:us-east-1:123456789012:outpost/op-denied/object/secret" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 403
+headers_absent = ["etag", "x-amz-version-id", "x-amz-copy-source-version-id"]
+
+[exchanges.expect.error]
+code = "AccessDenied"
+
+[[exchanges]]
+name = "part-encoded-version-source-denied"
+
+[exchanges.request]
+method = "PUT"
+target = "/authz-destination/copy?partNumber=1&uploadId=${capture.upload}"
+headers = { "x-amz-copy-source" = "%2Farn%3Aaws%3As3-outposts%3Aus-east-1%3A123456789012%3Aoutpost%2Fop-denied%2Fobject%2Fsecret?versionId=v1" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 403
+headers_absent = ["etag", "x-amz-version-id", "x-amz-copy-source-version-id"]
+
+[exchanges.expect.error]
+code = "AccessDenied"
+
+[[exchanges]]
+name = "ordinary-source-remains-readable"
+
+[exchanges.request]
+method = "PUT"
+target = "/authz-destination/control"
+headers = { "x-amz-copy-source" = "/authz-destination/public" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+
+[exchanges.expect.body]
+contains_utf8 = ["<CopyObjectResult", "<ETag>"]
+
+[[exchanges]]
+name = "denials-preserved-the-destination"
+
+[exchanges.request]
+method = "GET"
+target = "/authz-destination/copy"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 200
+
+[exchanges.expect.body]
+exact_utf8 = "keep me"

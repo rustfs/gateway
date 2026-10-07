@@ -89,14 +89,15 @@ macro_rules! gateway_copy_source {
     ($fields:ident, $request:ident) => {{
         let rendered = $request.resources().source().resolve($request.read_proof()).map_or_else(
             || "<not resolvable under the request's read proof>".to_owned(),
-            |source| match source.form() {
-                rustfs_gateway::CopySourceForm::Path => format!(
+            |source| match (source.form(), source.bucket()) {
+                (rustfs_gateway::CopySourceForm::Path, Some(bucket)) => format!(
                     "bucket={}\nkey={}\nversion={}",
-                    source.bucket().as_str(),
+                    bucket.as_str(),
                     source.key().as_str(),
                     source.version_id().unwrap_or("<none>")
                 ),
-                other => format!("access-point:{other:?}"),
+                (rustfs_gateway::CopySourceForm::Path, None) => "<path source without a bucket>".to_owned(),
+                (other, _) => format!("access-point:{other:?}"),
             },
         );
         $fields.set("copy_source", FieldValue::Present(rendered));

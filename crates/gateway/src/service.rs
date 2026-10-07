@@ -1396,7 +1396,7 @@ impl S3Service {
                     operation,
                     action: resource.action(),
                     resource: shape,
-                    bucket: resource.bucket().or_else(|| input_meta.bucket()),
+                    bucket: resource.resolved_bucket(input_meta.bucket()),
                     key: resource.key(),
                     copy_source_identity: resource.identity(),
                     version_id: resource.version_id(),
