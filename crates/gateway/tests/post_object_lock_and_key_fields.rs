@@ -313,9 +313,10 @@ async fn n_an_unreadable_retain_until_date_is_refused_before_authorization() {
 }
 
 /// Negative — a customer key in a form over cleartext is refused as a header key is: the same
-/// code and sentence, before its shape is judged, a lone fragment of the trio included, under
-/// either grammar and whether or not the RustFS profile's header-only pre-routing gate is on. It
-/// sits where the header gate sits, after authorization, so a refused caller is told `403` first.
+/// code and sentence, before its shape is judged, a lone fragment of the trio and a mixed-case
+/// spelling included, under either grammar and whether or not the RustFS profile's header-only
+/// pre-routing gate is on. It sits where the header gate sits, after authorization, so a refused
+/// caller is told `403` first.
 #[tokio::test]
 async fn n_a_form_customer_key_over_cleartext_is_refused_as_a_header_key_is() {
     for legacy_grammar in [true, false] {
@@ -325,7 +326,14 @@ async fn n_a_form_customer_key_over_cleartext_is_refused_as_a_header_key_is() {
                 plaintext_keys_before_routing,
                 ..OVER_CLEARTEXT
             };
-            for fields in [trio(KEY_A, MD5_A), trio(KEY_A, MD5_B), vec![(SSEC_KEY_MD5, "")]] {
+            // The third spelling is the trio in mixed case: a field name is read without regard to
+            // case, so a differently cased key field cannot slip past the gate as "some other field".
+            let mixed_case = vec![
+                ("X-Amz-Server-Side-Encryption-Customer-Algorithm", "AES256"),
+                ("X-Amz-Server-Side-Encryption-Customer-Key", KEY_A),
+                ("X-Amz-Server-Side-Encryption-Customer-Key-MD5", MD5_A),
+            ];
+            for fields in [trio(KEY_A, MD5_A), trio(KEY_A, MD5_B), mixed_case, vec![(SSEC_KEY_MD5, "")]] {
                 let answer = post(&fields, setup).await;
                 let context = format!("{legacy_grammar} {plaintext_keys_before_routing} {fields:?}");
                 refused_before_the_handler(&answer, "InvalidRequest", &context);
