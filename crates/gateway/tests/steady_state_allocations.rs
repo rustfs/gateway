@@ -59,7 +59,8 @@ const BODY: &[u8] = b"a small object body, sixty-four bytes long, for both direc
 /// 16 / 36 (#1301). Single-buffer string-to-sign construction removes six from both (#1313).
 /// Static metadata names remove 13 / 33 more (#1317); copy-source SSE names remove three from both (#1319).
 /// Request-local deadline futures remove two from GET and four from PUT (#1012).
-/// The plan's targets remain 3 / 4, and this ceiling only moves down.
+/// The plan's 3 / 4 figures are no longer a binding acceptance criterion (decided on #1012): this
+/// ceiling is a ratchet that only moves down, and every further reduction carries its own issue.
 #[cfg(target_os = "linux")]
 const BLOCKS_PER_REQUEST: Option<(u64, u64)> = Some((104, 109));
 /// macOS's standard library and runtime allocate a few more blocks per request, and not the same
