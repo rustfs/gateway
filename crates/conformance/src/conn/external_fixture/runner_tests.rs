@@ -182,6 +182,21 @@ fn request_line(request: &[u8]) -> &str {
         .expect("fixture request line")
 }
 
+fn request_header<'a>(request: &'a [u8], name: &str) -> Option<&'a str> {
+    let head_end = request
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .expect("fixture request head terminator");
+    std::str::from_utf8(&request[..head_end])
+        .expect("fixture request head is UTF-8")
+        .lines()
+        .skip(1)
+        .find_map(|line| {
+            let (header_name, value) = line.split_once(':')?;
+            header_name.eq_ignore_ascii_case(name).then(|| value.trim())
+        })
+}
+
 #[test]
 fn cli_runner_orders_owned_object_fixture_around_an_authored_read_only_exchange() {
     let corpus = isolated_corpus();
@@ -236,5 +251,20 @@ fn cli_runner_orders_owned_object_fixture_around_an_authored_read_only_exchange(
         assert!(control.to_ascii_lowercase().contains("authorization: aws4-hmac-sha256 "));
         assert!(control.contains("/us-west-2/s3/aws4_request"));
         assert!(control.contains("x-amz-date:"));
+    }
+    let empty_digest = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+    for index in [0, 2, 5, 6] {
+        assert_eq!(
+            request_header(&requests[index], "x-amz-content-sha256"),
+            Some(empty_digest),
+            "empty fixture body digest at request {index}"
+        );
+        let signed = request_header(&requests[index], "authorization")
+            .and_then(|authorization| authorization.split_once("SignedHeaders="))
+            .and_then(|(_, remaining)| remaining.split(',').next());
+        assert!(
+            signed.is_some_and(|names| names.split(';').any(|name| name == "x-amz-content-sha256")),
+            "empty fixture body digest is signed at request {index}"
+        );
     }
 }
