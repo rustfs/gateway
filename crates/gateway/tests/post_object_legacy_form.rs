@@ -396,14 +396,13 @@ async fn an_unnamed_or_malformed_part_is_refused_before_the_handler() {
 }
 
 /// A field legacy RustFS applies to the stored object and this profile cannot carry yet is refused
-/// before the handler, rather than stored without it.
+/// before the handler, rather than stored without it. (The Object Lock fields are carried since
+/// rustfs/gateway#1167: `post_object_legacy_fields.rs`.)
 #[tokio::test]
 async fn a_field_the_profile_cannot_carry_is_refused_before_the_handler() {
     for name in [
-        "x-amz-object-lock-mode",
-        "X-Amz-Object-Lock-Retain-Until-Date",
-        "x-amz-object-lock-legal-hold",
         "x-amz-server-side-encryption-customer-key",
+        "X-Amz-Server-Side-Encryption-Customer-Algorithm",
     ] {
         let body = form(&[
             field("key", "k"),

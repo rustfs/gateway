@@ -333,6 +333,12 @@ where
         self.response.clone()
     }
 
+    /// The actions this form's Object Lock fields require on top of the base one, in legacy
+    /// RustFS's order (`legacy::object_lock_actions`); none under the gateway grammar.
+    pub(crate) fn object_lock_actions(&self) -> &'static [&'static str] {
+        legacy::object_lock_actions(&self.object_fields)
+    }
+
     pub(crate) fn handoff(self, _proof: &MetadataAdmission<'_>) -> Result<(RequestBody, Option<BodyMonitor>), S3Error> {
         // After authorization and before a file byte is read or the handler runs: the last point
         // at which legacy RustFS would have refused nothing and gone on to store.
@@ -608,6 +614,8 @@ fn policy_refusal(reject: PostPolicyError) -> S3Error {
 
 #[path = "post_object/legacy.rs"]
 mod legacy;
+#[path = "post_object/legacy_date.rs"]
+mod legacy_date;
 
 #[cfg(test)]
 #[path = "post_object/tests.rs"]

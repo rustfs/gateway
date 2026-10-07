@@ -59,7 +59,8 @@ impl Handler<PostObject> for Backend {
     }
 }
 
-fn service(backend: Arc<Backend>, allow: bool) -> S3Service {
+/// The service, its authorizer deciding each route-stage action by `allow`.
+fn service_deciding(backend: Arc<Backend>, allow: impl Fn(&str) -> bool + Send + Sync + 'static) -> S3Service {
     let credentials =
         Arc::new(StaticCredentials::new().with(Credentials::new("AKIDEXAMPLE", b"secret").expect("valid credentials")));
     ServiceBuilder::new()
@@ -68,7 +69,7 @@ fn service(backend: Arc<Backend>, allow: bool) -> S3Service {
             credentials,
             rustfs_gateway::RegionSet::new(["us-east-1"]).expect("non-empty region set"),
         ))
-        .authorizer(rustfs_gateway::allow_when(move |_| allow))
+        .authorizer(rustfs_gateway::allow_when(move |request| allow(request.action)))
         .legacy_rustfs_post_forms()
         .build()
         .expect("complete POST Object service")
@@ -91,6 +92,14 @@ fn form(fields: &[(&str, &str)]) -> Vec<u8> {
 /// Posts the form through a service whose authorizer allows everything or nothing; the answer's
 /// status and body, and what the handler was handed.
 async fn post(fields: &[(&str, &str)], allow: bool) -> (StatusCode, String, Option<PostObjectFields>) {
+    post_deciding(fields, move |_| allow).await
+}
+
+/// [`post`], the authorizer deciding each action by `allow`.
+async fn post_deciding(
+    fields: &[(&str, &str)],
+    allow: impl Fn(&str) -> bool + Send + Sync + 'static,
+) -> (StatusCode, String, Option<PostObjectFields>) {
     let backend = Arc::new(Backend::default());
     let body = form(fields);
     let request = Request::builder()
@@ -101,7 +110,7 @@ async fn post(fields: &[(&str, &str)], allow: bool) -> (StatusCode, String, Opti
         .header("content-length", body.len())
         .body(Bytes::from(body))
         .expect("valid request");
-    let response = service(Arc::clone(&backend), allow).call_bytes(request).await;
+    let response = service_deciding(Arc::clone(&backend), allow).call_bytes(request).await;
     let status = response.status();
     let answer = response.into_body().collect().await.expect("the answer body").to_bytes();
     let handed = backend.handed.lock().expect("observation lock").clone();
@@ -241,6 +250,11 @@ async fn an_unreadable_member_is_refused_before_authorization() {
         ("If-Match", "etag one", "invalid field value: if-match: &quot;etag one&quot;"),
         ("If-None-Match", "", "invalid field value: if-none-match: &quot;&quot;"),
         (
+            "x-amz-object-lock-retain-until-date",
+            "tomorrow",
+            "invalid field value: x-amz-object-lock-retain-until-date: &quot;tomorrow&quot;",
+        ),
+        (
             "x-amz-write-offset-bytes",
             "1.5",
             "invalid field value: x-amz-write-offset-bytes: &quot;1.5&quot;",
@@ -256,14 +270,11 @@ async fn an_unreadable_member_is_refused_before_authorization() {
     }
 }
 
-/// Negative — an Object Lock or SSE-C field still reaches no handler: `501` once authorized, the
-/// authorizer's answer first.
+/// Negative — an SSE-C field still reaches no handler: `501` once authorized, the authorizer's
+/// answer first.
 #[tokio::test]
 async fn an_uncarried_member_still_reaches_no_handler() {
     for (name, value) in [
-        ("x-amz-object-lock-legal-hold", "ON"),
-        ("x-amz-object-lock-mode", "GOVERNANCE"),
-        ("x-amz-object-lock-retain-until-date", "2030-01-01T00:00:00Z"),
         ("x-amz-server-side-encryption-customer-algorithm", "AES256"),
         ("x-amz-server-side-encryption-customer-key-md5", "md5"),
     ] {
@@ -273,5 +284,87 @@ async fn an_uncarried_member_still_reaches_no_handler() {
         let (status, _, handed) = post(&[(name, value)], false).await;
         assert_eq!(status, StatusCode::FORBIDDEN, "{name}");
         assert!(handed.is_none(), "{name}");
+    }
+}
+
+/// The actions a form's route stage asked, in order, and the handed members, with every action
+/// allowed.
+async fn ask(fields: &[(&str, &str)]) -> (Vec<String>, Option<PostObjectFields>) {
+    let asked = Arc::new(Mutex::new(Vec::new()));
+    let record = Arc::clone(&asked);
+    let (status, answer, handed) = post_deciding(fields, move |action| {
+        record.lock().expect("observation lock").push(action.to_owned());
+        true
+    })
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{answer}");
+    let asked = asked.lock().expect("observation lock").clone();
+    (asked, handed)
+}
+
+/// Positive — the Object Lock fields reach the handler as legacy RustFS reads them, and each asks
+/// the action legacy RustFS's `put_object` access hook asks for it, after the base action: a legal
+/// hold `s3:PutObjectLegalHold`, a mode or a retain-until date `s3:PutObjectRetention`, the legal
+/// hold first. A field sent empty still asks, as legacy RustFS reads it as set; `OFF` asks too.
+#[tokio::test]
+async fn object_lock_fields_reach_the_handler_and_ask_their_actions() {
+    const HOLD: &str = "s3:PutObjectLegalHold";
+    const RETENTION: &str = "s3:PutObjectRetention";
+    let (asked, handed) = ask(&[
+        ("x-amz-object-lock-mode", "GOVERNANCE"),
+        ("x-amz-object-lock-retain-until-date", "2030-01-02T03:04:05.678Z"),
+        ("x-amz-object-lock-legal-hold", "ON"),
+    ])
+    .await;
+    let handed = handed.expect("the handler ran");
+    assert_eq!(handed.object_lock_mode.as_ref().map(|mode| mode.as_str()), Some("GOVERNANCE"));
+    assert_eq!(handed.object_lock_legal_hold_status.as_ref().map(|status| status.as_str()), Some("ON"));
+    let date = handed.object_lock_retain_until_date.expect("a retain-until date");
+    assert_eq!(
+        date.render(rustfs_gateway::TimestampFormat::Iso8601).expect("renders"),
+        "2030-01-02T03:04:05.678Z"
+    );
+    let extra: Vec<&str> = asked
+        .iter()
+        .map(String::as_str)
+        .filter(|action| [HOLD, RETENTION].contains(action))
+        .collect();
+    assert_eq!(extra, [HOLD, RETENTION], "{asked:?}");
+    assert_eq!(asked.first().map(String::as_str), Some("s3:PutObject"), "{asked:?}");
+    for (field, value, action) in [
+        ("x-amz-object-lock-mode", "", RETENTION),
+        ("x-amz-object-lock-mode", "COMPLIANCE", RETENTION),
+        ("x-amz-object-lock-retain-until-date", "2030-01-01T00:00:00Z", RETENTION),
+        ("x-amz-object-lock-legal-hold", "OFF", HOLD),
+        ("x-amz-object-lock-legal-hold", "", HOLD),
+    ] {
+        let (asked, handed) = ask(&[(field, value)]).await;
+        let extra: Vec<&str> = asked
+            .iter()
+            .map(String::as_str)
+            .filter(|action| [HOLD, RETENTION].contains(action))
+            .collect();
+        assert_eq!(extra, [action], "{field}={value:?}: {asked:?}");
+        assert!(handed.is_some(), "{field}");
+    }
+    let (asked, _) = ask(&[("x-amz-meta-color", "red")]).await;
+    assert!(!asked.iter().any(|action| action == HOLD || action == RETENTION), "{asked:?}");
+}
+
+/// Negative — when the authorizer denies the action an Object Lock field asks, the form is refused
+/// `403 AccessDenied` and nothing reaches the handler.
+#[tokio::test]
+async fn n_a_denied_object_lock_action_stores_nothing() {
+    for (field, value, denied) in [
+        ("x-amz-object-lock-legal-hold", "ON", "s3:PutObjectLegalHold"),
+        ("x-amz-object-lock-mode", "GOVERNANCE", "s3:PutObjectRetention"),
+        ("x-amz-object-lock-retain-until-date", "2030-01-01T00:00:00Z", "s3:PutObjectRetention"),
+        ("X-Amz-Object-Lock-Retain-Until-Date", "2030-01-01T00:00:00Z", "s3:PutObjectRetention"),
+        ("X-AMZ-OBJECT-LOCK-LEGAL-HOLD", "ON", "s3:PutObjectLegalHold"),
+    ] {
+        let (status, answer, handed) = post_deciding(&[(field, value)], move |action| action != denied).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{field}: {answer}");
+        assert!(answer.contains("<Code>AccessDenied</Code>"), "{field}: {answer}");
+        assert!(handed.is_none(), "{field}");
     }
 }

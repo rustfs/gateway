@@ -41,14 +41,18 @@ const POST_SSE_KMS_REFUSED: &str = "SSE-KMS is not supported for POST object upl
 
 /// Refuses a form member RustFS applies to the object it stores and this backend cannot store as
 /// RustFS does. RustFS keeps `x-amz-website-redirect-location` with the object, re-renders a
-/// readable `Expires` and refuses any other, and checks the file against `Content-MD5`
-/// (`rustfs/src/app/object/shared.rs:706-771`, `put.rs:1724-1729`); this backend keeps no redirect,
-/// and keeps `Expires` and the digest check to the `PutObject` header path.
+/// readable `Expires` and refuses any other, checks the file against `Content-MD5`
+/// (`rustfs/src/app/object/shared.rs:706-771`, `put.rs:1724-1729`), and applies the Object Lock
+/// members to the version it writes; this backend keeps no redirect and no Object Lock state
+/// (rustfs/backlog#1726), and keeps `Expires` and the digest check to the `PutObject` header path.
 fn refuse_unstored(fields: &PostObjectFields) -> Result<(), HandlerError> {
     for (member, present) in [
         ("x-amz-website-redirect-location", fields.website_redirect_location.is_some()),
         ("Expires", fields.expires.is_some()),
         ("Content-MD5", fields.content_md5.is_some()),
+        ("x-amz-object-lock-legal-hold", fields.object_lock_legal_hold_status.is_some()),
+        ("x-amz-object-lock-mode", fields.object_lock_mode.is_some()),
+        ("x-amz-object-lock-retain-until-date", fields.object_lock_retain_until_date.is_some()),
     ] {
         if present {
             return Err(HandlerError::not_implemented(format!(
@@ -168,6 +172,31 @@ mod tests {
 
     fn field(key: &str, value: &str) -> (String, String) {
         (key.to_owned(), value.to_owned())
+    }
+
+    /// Negative — each Object Lock member is refused: this backend keeps no Object Lock state, and
+    /// one it ignored would store another object than RustFS stores from the same form.
+    #[test]
+    fn n_an_object_lock_member_is_refused() {
+        use rustfs_gateway::dto::{ObjectLockLegalHoldStatus, ObjectLockMode};
+        let date = rustfs_gateway::Timestamp::from_secs_nanos(1_893_456_000, 0).expect("a date");
+        for fields in [
+            PostObjectFields {
+                object_lock_legal_hold_status: Some(ObjectLockLegalHoldStatus::custom("ON")),
+                ..PostObjectFields::default()
+            },
+            PostObjectFields {
+                object_lock_mode: Some(ObjectLockMode::custom("GOVERNANCE")),
+                ..PostObjectFields::default()
+            },
+            PostObjectFields {
+                object_lock_retain_until_date: Some(date),
+                ..PostObjectFields::default()
+            },
+        ] {
+            assert!(refuse_unstored(&fields).is_err(), "{fields:?}");
+        }
+        assert!(refuse_unstored(&PostObjectFields::default()).is_ok());
     }
 
     /// Negative — a repeated field is refused rather than resolved by picking one value.

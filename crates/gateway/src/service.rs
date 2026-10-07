@@ -985,9 +985,9 @@ impl S3Service {
             AcceptedBody::Ordinary(_) => meta.key().cloned(),
             AcceptedBody::PostObject(post) => Some(post.key().clone()),
         };
-        let post_response = match &accepted_body {
-            AcceptedBody::Ordinary(_) => None,
-            AcceptedBody::PostObject(post) => Some(post.response_plan()),
+        let (post_response, form_lock_actions) = match &accepted_body {
+            AcceptedBody::Ordinary(_) => (None, &[][..]),
+            AcceptedBody::PostObject(post) => (Some(post.response_plan()), post.object_lock_actions()),
         };
         let config = config.meta_auth();
         outcome.identity = verdict.identity().cloned();
@@ -1167,6 +1167,13 @@ impl S3Service {
             // Each triggered, profile-required extra is all-of on top of the base decision.
             let mut route_extras: Vec<AuthzRequest<'_>> = Vec::new();
             if route_decision == Decision::Allow {
+                let extra_question = |action| AuthzRequest {
+                    action,
+                    route_action: action,
+                    copy_source_identity: None,
+                    subject: None,
+                    ..route_request
+                };
                 for extra in extra_permissions {
                     if !route_service.inner.view_policy.requires_extra_permission(*extra) {
                         continue;
@@ -1175,14 +1182,10 @@ impl S3Service {
                     if !extra.applies(|name| route_headers.get(name).and_then(|value| value.to_str().ok())) {
                         continue;
                     }
-                    route_extras.push(AuthzRequest {
-                        action: extra.action(),
-                        route_action: extra.action(),
-                        copy_source_identity: None,
-                        subject: None,
-                        ..route_request
-                    });
+                    route_extras.push(extra_question(extra.action()));
                 }
+                // A RustFS-profile form's Object Lock fields, after the header extras (rustfs/gateway#1167).
+                route_extras.extend(form_lock_actions.iter().map(|&action| extra_question(action)));
                 for extra_request in &route_extras {
                     match catch_boxed_future(|| route_runtime.authorizer.authorize_route(&authz_context, extra_request)).await {
                         Ok(decision) => {

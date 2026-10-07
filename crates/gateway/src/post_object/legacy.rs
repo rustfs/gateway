@@ -37,7 +37,10 @@
 //! store one it refuses, so a form carrying one is refused until this bridge honours it.
 
 use rustfs_gateway_types::OpaqueString;
-use rustfs_gateway_types::dto::{Acl, ChecksumAlgorithm, PostObjectFields, RequestPayer, ServerSideEncryption, StorageClass};
+use rustfs_gateway_types::dto::{
+    Acl, ChecksumAlgorithm, ObjectLockLegalHoldStatus, ObjectLockMode, PostObjectFields, RequestPayer, ServerSideEncryption,
+    StorageClass,
+};
 
 use super::{ErrorCode, HandlerError, ResponseKind, S3Error};
 use crate::close::ConnectionIntent;
@@ -45,21 +48,12 @@ use crate::render::from_handler;
 
 /// Form fields legacy RustFS acts on that this bridge cannot honour yet.
 ///
-/// The Object Lock fields: legacy RustFS's access hook demands `s3:PutObjectLegalHold` for a form
-/// naming a legal hold and `s3:PutObjectRetention` for one naming a mode or a date
-/// (`rustfs/src/storage/access.rs:1504-1513`, `:3182-3188`), a second authorization this
-/// gateway's operation model does not ask. The SSE-C fields: legacy RustFS encrypts with the key the
-/// form carries (`rustfs/src/app/object/put.rs:1259-1263`), which this gateway's customer-key
-/// rules, stated over headers, have not been extended to. (`redirect` is carried: the response
-/// plan reads it as legacy RustFS does, `super::response`.)
-///
-/// The refusal comes after authorization, so it cannot mirror one refusal legacy RustFS answers
-/// before: a retain-until date its decoder cannot read, `400 InvalidArgument` to any caller there,
-/// is `403` or `501` here.
-pub(super) const UNCARRIED_FIELDS: [&str; 6] = [
-    "x-amz-object-lock-legal-hold",
-    "x-amz-object-lock-mode",
-    "x-amz-object-lock-retain-until-date",
+/// The SSE-C fields: legacy RustFS encrypts with the key the form carries
+/// (`rustfs/src/app/object/put.rs:1259-1263`), which this gateway's customer-key rules, stated over
+/// headers, have not been extended to. (`redirect` is carried: the response plan reads it as legacy
+/// RustFS does, `super::response`. The Object Lock fields are carried, and the route stage asks the
+/// actions they require, `ResolvedPostObject::object_lock_actions`.)
+pub(super) const UNCARRIED_FIELDS: [&str; 3] = [
     "x-amz-server-side-encryption-customer-algorithm",
     "x-amz-server-side-encryption-customer-key",
     "x-amz-server-side-encryption-customer-key-md5",
@@ -87,6 +81,25 @@ pub(super) fn refuse_uncarried(fields: &[(&str, &str)]) -> Result<(), NotCarried
         return Err(NotCarried("a POST form field this profile cannot honour yet was sent"));
     }
     Ok(())
+}
+
+/// The actions a form's Object Lock fields require on top of the base one, asked in legacy RustFS's
+/// order: `s3:PutObjectLegalHold` for a legal hold, then `s3:PutObjectRetention` for a mode or a
+/// retain-until date. A field counts as soon as it is sent, empty included, as legacy RustFS's
+/// `put_object` access hook reads the input its POST operation built from the form
+/// (`rustfs/src/storage/access.rs` `legal_hold_write_requested`, `retention_write_requested`; the
+/// hook at `:3220-3226` on rustfs/rustfs `95268a3b9`).
+pub(super) fn object_lock_actions(fields: &PostObjectFields) -> &'static [&'static str] {
+    const HOLD: &str = "s3:PutObjectLegalHold";
+    const RETENTION: &str = "s3:PutObjectRetention";
+    let hold = fields.object_lock_legal_hold_status.is_some();
+    let retention = fields.object_lock_mode.is_some() || fields.object_lock_retain_until_date.is_some();
+    match (hold, retention) {
+        (true, true) => &[HOLD, RETENTION],
+        (true, false) => &[HOLD],
+        (false, true) => &[RETENTION],
+        (false, false) => &[],
+    }
 }
 
 /// The key legacy RustFS stores: the `key` field, every `${filename}` in it replaced by the file's
@@ -119,8 +132,9 @@ pub(super) fn content_type(fields: &[(&str, &str)]) -> Option<String> {
 /// Legacy RustFS reads each field named like a `PutObject` header with that member's own text
 /// parser: a text or enumeration member is the field as sent, empty included; a `bool` or `i64`
 /// member is Rust's own parse of it; an entity-tag condition is read with its grammar
-/// ([`is_entity_tag_condition`]). Only those four can fail, and the first that does — the bucket-key
-/// flag, then `If-Match`, then `If-None-Match`, then the write offset — refuses the upload before
+/// ([`is_entity_tag_condition`]); a date-time member is an RFC 3339 date-time. Only those five can
+/// fail, and the first that does — the bucket-key flag, then `If-Match`, then `If-None-Match`, then
+/// the Object Lock retain-until date, then the write offset — refuses the upload before
 /// authorization, naming the field and the value as sent.
 pub(super) fn object_fields(fields: &[(&str, &str)]) -> Result<PostObjectFields, S3Error> {
     let text = |name: &str| field(fields, name).map(str::to_owned);
@@ -130,6 +144,7 @@ pub(super) fn object_fields(fields: &[(&str, &str)]) -> Result<PostObjectFields,
     })?;
     let if_match = read(fields, "if-match", condition)?;
     let if_none_match = read(fields, "if-none-match", condition)?;
+    let object_lock_retain_until_date = read(fields, "x-amz-object-lock-retain-until-date", super::legacy_date::read)?;
     let write_offset_bytes = read(fields, "x-amz-write-offset-bytes", |value| value.parse::<i64>().ok())?;
     Ok(PostObjectFields {
         acl: text("x-amz-acl").map(Acl::custom),
@@ -158,6 +173,9 @@ pub(super) fn object_fields(fields: &[(&str, &str)]) -> Result<PostObjectFields,
         grant_write_acp: text("x-amz-grant-write-acp"),
         if_match,
         if_none_match,
+        object_lock_legal_hold_status: text("x-amz-object-lock-legal-hold").map(ObjectLockLegalHoldStatus::custom),
+        object_lock_mode: text("x-amz-object-lock-mode").map(ObjectLockMode::custom),
+        object_lock_retain_until_date,
         request_payer: text("x-amz-request-payer").map(RequestPayer::custom),
         server_side_encryption: text("x-amz-server-side-encryption").map(ServerSideEncryption::custom),
         ssekms_encryption_context: text("x-amz-server-side-encryption-context"),

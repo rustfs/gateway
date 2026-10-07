@@ -24,8 +24,10 @@ use core::fmt;
 
 use rustfs_gateway_stream::ByteStream;
 
-use crate::dto::{Acl, ChecksumAlgorithm, RequestPayer, ServerSideEncryption, StorageClass};
-use crate::{BucketName, ETag, ObjectKey, OpaqueString};
+use crate::dto::{
+    Acl, ChecksumAlgorithm, ObjectLockLegalHoldStatus, ObjectLockMode, RequestPayer, ServerSideEncryption, StorageClass,
+};
+use crate::{BucketName, ETag, ObjectKey, OpaqueString, Timestamp};
 
 /// The standard S3 POST Object operation marker.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -58,7 +60,8 @@ pub struct PostObjectInput {
 ///
 /// A handler gives each member the effect the store it fronts gives that form field, or refuses
 /// the upload; it never ignores a member its store would act on. Legacy RustFS, for one, stores
-/// the representation, tagging, class and encryption members, and reads but never acts on the ACL
+/// the representation, tagging, class, encryption and Object Lock members (the last checked against
+/// the bucket's Object Lock configuration first), and reads but never acts on the ACL
 /// and grant members, the expected owner, the request payer, the bucket-key flag, the checksum
 /// members, the KMS context, the write offset and the two conditions: its conditional write and
 /// checksum verification read the request's own headers, never the form.
@@ -119,6 +122,13 @@ pub struct PostObjectFields {
     pub if_match: Option<String>,
     /// `If-None-Match`, the condition as sent.
     pub if_none_match: Option<String>,
+    /// `x-amz-object-lock-legal-hold`, as sent. Asking for it requires `s3:PutObjectLegalHold`.
+    pub object_lock_legal_hold_status: Option<ObjectLockLegalHoldStatus>,
+    /// `x-amz-object-lock-mode`, as sent. Asking for it requires `s3:PutObjectRetention`.
+    pub object_lock_mode: Option<ObjectLockMode>,
+    /// `x-amz-object-lock-retain-until-date`, read as an RFC 3339 date-time. Asking for it
+    /// requires `s3:PutObjectRetention`.
+    pub object_lock_retain_until_date: Option<Timestamp>,
     /// `x-amz-request-payer`.
     pub request_payer: Option<RequestPayer>,
     /// `x-amz-server-side-encryption`.
@@ -169,6 +179,9 @@ impl PostObjectFields {
             grant_write_acp,
             if_match,
             if_none_match,
+            object_lock_legal_hold_status,
+            object_lock_mode,
+            object_lock_retain_until_date,
             request_payer,
             server_side_encryption,
             ssekms_encryption_context,
@@ -211,6 +224,9 @@ impl PostObjectFields {
             && bucket_key_enabled.is_none()
             && checksum_algorithm.is_none()
             && expires.is_none()
+            && object_lock_legal_hold_status.is_none()
+            && object_lock_mode.is_none()
+            && object_lock_retain_until_date.is_none()
             && request_payer.is_none()
             && server_side_encryption.is_none()
             && storage_class.is_none()
@@ -248,6 +264,9 @@ impl fmt::Debug for PostObjectFields {
             grant_write_acp,
             if_match,
             if_none_match,
+            object_lock_legal_hold_status,
+            object_lock_mode,
+            object_lock_retain_until_date,
             request_payer,
             server_side_encryption,
             ssekms_encryption_context,
@@ -285,6 +304,9 @@ impl fmt::Debug for PostObjectFields {
             .field("grant_write_acp", grant_write_acp)
             .field("if_match", if_match)
             .field("if_none_match", if_none_match)
+            .field("object_lock_legal_hold_status", object_lock_legal_hold_status)
+            .field("object_lock_mode", object_lock_mode)
+            .field("object_lock_retain_until_date", object_lock_retain_until_date)
             .field("request_payer", request_payer)
             .field("server_side_encryption", server_side_encryption)
             .field("ssekms_encryption_context", &ssekms_encryption_context.as_ref().map(|_| REDACTED))
