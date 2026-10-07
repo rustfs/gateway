@@ -312,13 +312,16 @@ async fn a_session_token_is_required_for_temporary_credentials() {
     }
 }
 
+/// Under the gateway's own form grammar, whose policy coverage exempts a session token. The RustFS
+/// profile's grammar holds the token to legacy RustFS's coverage instead
+/// (`a_legacy_sigv2_form_is_held_to_legacy_policy_coverage`, rustfs/gateway#1185).
 #[tokio::test]
 async fn a_valid_session_token_allows_the_signed_upload() {
     let policy = encode_base64_exact(POLICY);
     let signature = signed_policy(&policy);
     let mut fields = fields(&policy, &signature);
     fields.push(("x-amz-security-token", "session-token"));
-    let (status, response, stored) = post_with_credentials(true, &fields, "hello", temporary_credentials(), true).await;
+    let (status, response, stored) = post_with_credentials(true, &fields, "hello", temporary_credentials(), false).await;
     assert_eq!(status, StatusCode::NO_CONTENT, "{response}");
     assert_eq!(stored, Some(("upload".to_owned(), b"hello".to_vec())));
 }
@@ -636,4 +639,54 @@ async fn legacy_expiration_is_not_enabled_for_generic_forms() {
         assert!(response.contains("<Code>MalformedPOSTRequest</Code>"), "{response}");
         assert_eq!(stored, None);
     }
+}
+
+/// A policy naming the bucket and the key, and nothing else.
+const COVERAGE: &[u8; 97] =
+    br#"{"expiration":"2026-01-02T04:04:05Z","conditions":[{"bucket":"example-bucket"},{"key":"upload"}]}"#;
+
+/// Posts the coverage fixture's form with `extra` appended, under the RustFS profile's form
+/// grammar when `legacy_forms`.
+async fn post_coverage(
+    extra: (&str, &str),
+    credentials: Credentials,
+    legacy_forms: bool,
+) -> (StatusCode, String, Option<(String, Vec<u8>)>) {
+    let policy = encode_base64_exact(COVERAGE);
+    let signature = signed_policy(&policy);
+    let mut form = fields(&policy, &signature);
+    form.push(extra);
+    post_with_credentials(true, &form, "hello", credentials, legacy_forms).await
+}
+
+/// Positive and negative — under the RustFS profile a SigV2 form is held to legacy RustFS's policy
+/// coverage (rustfs/gateway#1185): a `submit` field and an `x-ignore-*` field need no condition and
+/// the upload is stored; an unlisted metadata field or session token is refused `403 AccessDenied`
+/// and nothing is stored; an unlisted SSE-C field needs no condition but is still refused `501`
+/// before anything is stored, as the profile does not carry it yet (rustfs/gateway#1167). The
+/// gateway's own grammar keeps its own coverage: an unlisted `submit` is refused there.
+#[tokio::test]
+async fn a_legacy_sigv2_form_is_held_to_legacy_policy_coverage() {
+    let credentials = || Credentials::new("AKIDEXAMPLE", b"secret").expect("valid credentials");
+    for extra in [("submit", "Upload"), ("x-ignore-note", "n")] {
+        let (status, response, stored) = post_coverage(extra, credentials(), true).await;
+        assert_eq!(status, StatusCode::NO_CONTENT, "{extra:?}: {response}");
+        assert_eq!(stored, Some(("upload".to_owned(), b"hello".to_vec())), "{extra:?}");
+    }
+    for (extra, credentials) in [
+        (("x-amz-meta-color", "red"), credentials()),
+        (("x-amz-security-token", "session-token"), temporary_credentials()),
+    ] {
+        let (status, response, stored) = post_coverage(extra, credentials, true).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{extra:?}: {response}");
+        assert!(response.contains("<Code>AccessDenied</Code>"), "{response}");
+        assert_eq!(stored, None, "{extra:?}");
+    }
+    let (status, response, stored) =
+        post_coverage(("x-amz-server-side-encryption-customer-algorithm", "AES256"), credentials(), true).await;
+    assert_eq!(status, StatusCode::NOT_IMPLEMENTED, "{response}");
+    assert_eq!(stored, None);
+    let (status, response, stored) = post_coverage(("submit", "Upload"), credentials(), false).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{response}");
+    assert_eq!(stored, None);
 }

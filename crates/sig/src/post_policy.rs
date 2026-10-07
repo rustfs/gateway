@@ -106,6 +106,8 @@ pub enum PostPolicyError {
     EntityTooLarge,
     /// The policy signature did not match.
     SignatureMismatch,
+    /// A form field no condition names, under legacy RustFS's reading only (rustfs/gateway#1185).
+    FieldNotInPolicy,
 }
 
 impl fmt::Display for PostPolicyError {
@@ -117,6 +119,7 @@ impl fmt::Display for PostPolicyError {
             Self::EntityTooSmall => "the POST body is smaller than the policy permits",
             Self::EntityTooLarge => "the POST body is larger than the policy permits",
             Self::SignatureMismatch => "the POST policy signature did not match",
+            Self::FieldNotInPolicy => "a POST form field is not named by the policy",
         })
     }
 }
@@ -130,7 +133,9 @@ impl PostPolicyError {
         match self {
             Self::Malformed => AuthError::AuthorizationHeaderMalformed,
             Self::SignatureMismatch => AuthError::SignatureDoesNotMatch,
-            Self::Expired | Self::ConditionFailed | Self::EntityTooSmall | Self::EntityTooLarge => AuthError::AccessDenied,
+            Self::Expired | Self::ConditionFailed | Self::EntityTooSmall | Self::EntityTooLarge | Self::FieldNotInPolicy => {
+                AuthError::AccessDenied
+            }
         }
     }
 }
@@ -208,7 +213,7 @@ impl PostPolicy {
             return Err(PostPolicyError::Malformed);
         }
         let signature = parse_signature(fields.required("x-amz-signature")?)?;
-        let common = enforce_policy_fields(&fields, raw_filename, limits, encoded, &conditions)?;
+        let common = enforce_policy_fields(&fields, raw_filename, limits, encoded, &conditions, PolicyReading::Strict)?;
 
         Ok(Self {
             encoded: common.encoded,
@@ -278,8 +283,8 @@ impl PostPolicy {
         enforce_final_values(
             &self.bucket,
             &self.final_key,
-            self.minimum_file_bytes,
-            self.maximum_file_bytes,
+            (self.minimum_file_bytes, self.maximum_file_bytes),
+            false,
             bucket,
             key,
             file_bytes,
@@ -294,6 +299,7 @@ pub struct SigV2PostPolicy {
     final_key: String,
     minimum_file_bytes: u64,
     maximum_file_bytes: u64,
+    unlisted_field: bool,
 }
 
 impl fmt::Debug for SigV2PostPolicy {
@@ -355,13 +361,13 @@ impl SigV2PostPolicy {
         Self::parse_impl(fields, raw_filename, limits, now, PolicyReading::CaseInsensitiveOperators)
     }
 
-    /// Reads legacy RustFS SigV2 operator names and expiration spellings.
+    /// Reads legacy RustFS SigV2 operator names, expiration spellings and field coverage.
     ///
     /// This accepts ASCII-case-insensitive operators, any single ASCII date/time separator,
     /// numeric offsets, and arbitrary nonempty decimal fractions. Expiry uses whole seconds;
-    /// leap seconds must end a UTC month and clamp to its last whole second. Field conditions,
-    /// resource limits, and signed bytes are unchanged.
-    /// The generic and operator-only readers retain their original expiration grammar.
+    /// leap seconds must end a UTC month and clamp to its last whole second. Coverage is legacy
+    /// RustFS's: its exempt fields, and an unnamed field refused last, by [`Self::enforce_final`].
+    /// The generic and operator-only readers retain their original expiration grammar and coverage.
     /// # Errors
     /// Returns [`PostPolicyError`] for malformed or expired policies and failed conditions.
     pub fn parse_as_legacy_rustfs(
@@ -384,13 +390,14 @@ impl SigV2PostPolicy {
         fields.required("awsaccesskeyid")?;
         fields.required("signature")?;
         let (encoded, conditions) = parse_policy_document(&fields, limits, now, reading)?;
-        let common = enforce_policy_fields(&fields, raw_filename, limits, encoded, &conditions)?;
+        let common = enforce_policy_fields(&fields, raw_filename, limits, encoded, &conditions, reading)?;
         Ok(Self {
             encoded: common.encoded,
             bucket: common.bucket,
             final_key: common.final_key,
             minimum_file_bytes: common.minimum_file_bytes,
             maximum_file_bytes: common.maximum_file_bytes,
+            unlisted_field: common.unlisted_field,
         })
     }
 
@@ -415,15 +422,17 @@ impl SigV2PostPolicy {
         crate::sig_v2::verify_presented(presented, &expected).map_err(|_| PostPolicyError::SignatureMismatch)
     }
 
-    /// Rechecks final routing values and the observed file size.
+    /// Rechecks final routing values and the observed file size, then, under legacy RustFS's
+    /// reading, whether every field was named.
     /// # Errors
-    /// Returns [`PostPolicyError`] when bucket, key, or size does not satisfy the parsed policy.
+    /// Returns [`PostPolicyError`] when bucket, key, or size does not satisfy the parsed policy, and
+    /// [`PostPolicyError::FieldNotInPolicy`] for a field it does not name.
     pub fn enforce_final(&self, bucket: &str, key: &str, file_bytes: u64) -> Result<PostPolicyEnforcement, PostPolicyError> {
         enforce_final_values(
             &self.bucket,
             &self.final_key,
-            self.minimum_file_bytes,
-            self.maximum_file_bytes,
+            (self.minimum_file_bytes, self.maximum_file_bytes),
+            self.unlisted_field,
             bucket,
             key,
             file_bytes,
@@ -437,6 +446,7 @@ struct CommonPolicy {
     final_key: String,
     minimum_file_bytes: u64,
     maximum_file_bytes: u64,
+    unlisted_field: bool,
 }
 
 struct FieldSet<'a>(BTreeMap<String, &'a str>);
@@ -494,6 +504,7 @@ fn enforce_policy_fields(
     limits: PostPolicyLimits,
     encoded: String,
     conditions: &[Condition],
+    reading: PolicyReading,
 ) -> Result<CommonPolicy, PostPolicyError> {
     let filename = if raw_filename.is_empty() {
         None
@@ -548,9 +559,11 @@ fn enforce_policy_fields(
     if minimum_file_bytes > maximum_file_bytes {
         return Err(PostPolicyError::ConditionFailed);
     }
+    let mut unlisted_field = false;
     for name in fields.names() {
-        if !EXEMPT_FIELDS.contains(&name.as_str()) && !name.starts_with("x-ignore-") && !mentioned.contains(name) {
-            return Err(PostPolicyError::ConditionFailed);
+        if !reading.exempts(name) && !mentioned.contains(name) {
+            reading.defer_unlisted_field()?;
+            unlisted_field = true;
         }
     }
 
@@ -567,14 +580,15 @@ fn enforce_policy_fields(
         final_key,
         minimum_file_bytes,
         maximum_file_bytes,
+        unlisted_field,
     })
 }
 
 fn enforce_final_values(
     expected_bucket: &BucketBinding,
     expected_key: &str,
-    minimum_file_bytes: u64,
-    maximum_file_bytes: u64,
+    (minimum_file_bytes, maximum_file_bytes): (u64, u64),
+    unlisted_field: bool,
     bucket: &str,
     key: &str,
     file_bytes: u64,
@@ -587,6 +601,9 @@ fn enforce_final_values(
     }
     if file_bytes > maximum_file_bytes {
         return Err(PostPolicyError::EntityTooLarge);
+    }
+    if unlisted_field {
+        return Err(PostPolicyError::FieldNotInPolicy);
     }
     Ok(PostPolicyEnforcement(()))
 }
