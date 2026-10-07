@@ -108,7 +108,7 @@ impl Handler<CompleteMultipartUpload> for FsBackend {
                 ));
             }
             let checksum = if let Some(selection) = record.checksum {
-                let actual_checksum = selection.validate_part(*expected_checksum, &bytes)?;
+                let actual_checksum = selection.validate_completed_part(*expected_checksum, &bytes)?;
                 part_checksums.push(actual_checksum);
                 Some(actual_checksum)
             } else {

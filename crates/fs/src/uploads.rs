@@ -212,6 +212,19 @@ impl UploadChecksum {
         Ok(actual)
     }
 
+    pub(super) fn validate_completed_part(
+        self,
+        claimed: Option<ChecksumSpec>,
+        bytes: &[u8],
+    ) -> Result<ChecksumSpec, HandlerError> {
+        // CompletedPart checksum fields are optional; supplied values still validate the bytes.
+        // https://docs.aws.amazon.com/AmazonS3/latest/API/API_CompletedPart.html
+        match claimed {
+            Some(_) => self.validate_part(claimed, bytes),
+            None => checksum_of(self.algorithm, bytes),
+        }
+    }
+
     pub(super) fn completed_part(self, part: &CompletedPart) -> Result<Option<ChecksumSpec>, HandlerError> {
         let values = [
             (ChecksumAlgorithm::Crc32, part.checksum_crc32.as_deref()),
@@ -227,9 +240,6 @@ impl UploadChecksum {
         ];
         let mut present = values.into_iter().filter(|(_, value)| value.is_some());
         let Some((algorithm, Some(value))) = present.next() else {
-            if self.kind == ChecksumType::Composite {
-                return Err(invalid_part_checksum("a composite-checksum completed part has no checksum"));
-            }
             return Ok(None);
         };
         if present.next().is_some() || algorithm != self.algorithm {
