@@ -37,8 +37,15 @@
 //! compat-sut --data <dir> --port 9100 --tls-port 9443 --tls-cert <chain.pem> --tls-key <key.pem>
 //! compat-sut --data <dir> --port 9100 --corpus-record <file.jsonl> --corpus-src <src>   # corpus-record builds
 //! compat-sut --data <dir> --port 9100 --server-domains s3.example.com:9100,s3.local   # RUSTFS_SERVER_DOMAINS
+//! compat-sut --data <dir> --port 9100 --register-only ListBuckets   # every other operation is 501
+//! compat-sut --external http://127.0.0.1:9000 --port 9100 --probe-log <path> [--tls-port 9443 --tls-self-signed <ca.pem>]
 //! compat-sut --print-capabilities
 //! ```
+//!
+//! `--external` starts no backend at all: the listeners forward every request, unchanged, to an S3
+//! endpoint started elsewhere (a RustFS candidate, rustfs/backlog#2776) and record what crossed
+//! them, so the client matrix and mint grade an external endpoint from the same wire evidence as
+//! the launcher's own (`crate::forward`, rustfs/backlog#2758).
 //!
 //! Some client behaviour exists only over TLS — botocore's `STREAMING-UNSIGNED-PAYLOAD-TRAILER`
 //! uploads, and every test of MinIO mint's `aws-sdk-java-v2` suite (rustfs/gateway#719) — so the
@@ -46,9 +53,11 @@
 //! nothing that already points at it changes.
 
 mod corpus;
+mod forward;
 mod identity;
 mod logging;
 mod ownership;
+mod partial;
 mod policy_authorizer;
 mod probe;
 mod service;
@@ -64,8 +73,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use rustfs_gateway_fs::FsBackend;
-use rustfs_gateway_server::{Server, ServerConfig, TlsHandle};
+use rustfs_gateway_server::{RunningServer, Server, ServerConfig, ShutdownReport, TlsHandle};
 
+use crate::forward::{Forward, Upstream};
 use crate::identity::{AccountArgs, Accounts};
 use crate::ownership::BucketOwners;
 use crate::probe::{ProbeLog, ProbeService};
@@ -95,6 +105,50 @@ pub(crate) struct Options {
     /// The virtual-hosted domains, as RustFS reads `RUSTFS_SERVER_DOMAINS` (rustfs/gateway#1136):
     /// comma-separated, each with an optional port. Empty reads every request path-style.
     pub(crate) server_domains: Vec<String>,
+    /// `--external <url>`: serve no backend and forward every request to this endpoint instead.
+    pub(crate) external: Option<Upstream>,
+    /// `--register-only <names>`: register exactly these operations of the reference backend.
+    pub(crate) register_only: Option<Vec<String>>,
+}
+
+/// The flags that configure the backend, which `--external` does not start. Given beside it, each
+/// would be a precondition the endpoint never saw, so each is refused by name.
+const BACKEND_FLAGS: &[&str] = &[
+    "--data",
+    "--access-key",
+    "--secret-key",
+    "--owner-id",
+    "--display-name",
+    "--alt-access-key",
+    "--alt-secret-key",
+    "--alt-owner-id",
+    "--alt-display-name",
+    "--tenant-access-key",
+    "--tenant-secret-key",
+    "--tenant-owner-id",
+    "--tenant-display-name",
+    "--lc-debug-interval",
+    "--region",
+    "--corpus-record",
+    "--corpus-src",
+    "--server-domains",
+    "--register-only",
+];
+
+/// Parses `--register-only`'s comma-separated list against the reference backend's registry.
+fn register_only_names(raw: &str) -> Result<Vec<String>, io::Error> {
+    let invalid = |why: String| io::Error::new(io::ErrorKind::InvalidInput, format!("--register-only: {why}"));
+    let mut names: Vec<String> = Vec::new();
+    for name in raw.split(',').map(str::trim) {
+        if !partial::REGISTRABLE.contains(&name) {
+            return Err(invalid(format!("{name:?} is not an operation the reference backend registers")));
+        }
+        if names.iter().any(|seen| seen == name) {
+            return Err(invalid(format!("{name} is named twice")));
+        }
+        names.push(name.to_owned());
+    }
+    Ok(names)
 }
 
 /// Where recorded requests go and which suite produced them. Both are required together: an entry
@@ -123,8 +177,16 @@ where
     let mut corpus_output = None;
     let mut corpus_src = None;
     let mut server_domains = Vec::new();
+    let mut external = None;
+    let mut register_only = None;
+    let mut backend_flags_given: Vec<&'static str> = Vec::new();
     let mut arguments = arguments.into_iter();
     while let Some(argument) = arguments.next() {
+        if let Some(flag) = BACKEND_FLAGS.iter().find(|flag| **flag == argument.as_ref())
+            && !backend_flags_given.contains(flag)
+        {
+            backend_flags_given.push(flag);
+        }
         let mut value = || -> Result<String, io::Error> {
             arguments
                 .next()
@@ -190,10 +252,22 @@ where
                     .filter(|domain| !domain.is_empty())
                     .map(str::to_owned),
             ),
+            "--external" => external = Some(Upstream::parse(&value()?)?),
+            "--register-only" => register_only = Some(register_only_names(&value()?)?),
             unknown => {
                 return Err(io::Error::new(io::ErrorKind::InvalidInput, format!("unknown argument: {unknown}")));
             }
         }
+    }
+    if external.is_some() && !backend_flags_given.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "--external starts no backend, so {} would configure nothing the endpoint sees; \
+                 configure the endpoint where it is started",
+                backend_flags_given.join(", ")
+            ),
+        ));
     }
     let tls = tls.resolve(host)?;
     if let Some(listener) = tls.as_ref()
@@ -225,6 +299,8 @@ where
         tls,
         corpus,
         server_domains,
+        external,
+        register_only,
     })
 }
 
@@ -262,6 +338,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let options = parse_options(raw)?;
     // Before the assembly, whose start-up report is a set of `tracing` events.
     logging::install();
+    let log = match options.probe_log.as_deref() {
+        Some(path) => Some(Arc::new(ProbeLog::create(path)?)),
+        None => None,
+    };
+    if let Some(upstream) = options.external.clone() {
+        return observe(&options, upstream, log).await;
+    }
     std::fs::create_dir_all(&options.data)?;
     let backend = Arc::new(service::open_backend(&options)?);
     let owners = Arc::new(BucketOwners::default());
@@ -274,10 +357,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         None => None,
     };
 
-    let log = match options.probe_log.as_deref() {
-        Some(path) => Some(Arc::new(ProbeLog::create(path)?)),
-        None => None,
-    };
     // Refused before any port is bound: a recorder that cannot start must stop the launcher, not
     // leave it serving unrecorded while a suite believes it is being recorded.
     let recorder = corpus::recorder(&options)?;
@@ -288,36 +367,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let served = tower::ServiceBuilder::new()
         .option_layer(recorder.clone())
         .service(DeclareTransport::new(ProbeService::new(service, log.clone())));
-
-    // The encrypted listener is bound first. The plaintext port is what `ci/lib/sut.sh` polls for
-    // readiness, so once it answers, the TLS port is bound too and a generated authority is
-    // already on disk for the runner to hand out.
-    let encrypted = match options.tls.as_ref() {
-        Some(listener) => {
-            let handle = TlsHandle::new(listener.source.load()?)?;
-            let config = ServerConfig {
-                bind_addr: SocketAddr::new(options.address.ip(), listener.port),
-                ..ServerConfig::default()
-            };
-            Some(Server::new(config, served.clone()).with_tls(handle).serve()?)
-        }
-        None => None,
-    };
-    let config = ServerConfig {
-        bind_addr: options.address,
-        plaintext: true,
-        ..ServerConfig::default()
-    };
-    let running = Server::new(config, served).serve()?;
-    // The banner is the readiness signal `ci/compat/run_matrix.sh` waits for. It names the ports
-    // that were actually bound, so `--port 0` and `--tls-port 0` are usable for a local run.
-    println!("compat-sut listening on http://{}", running.local_addr);
-    if let Some(encrypted) = encrypted.as_ref() {
-        println!("compat-sut listening on https://{}", encrypted.local_addr);
-    }
-    if let Some(TlsSource::SelfSigned { authority_out, .. }) = options.tls.as_ref().map(|listener| &listener.source) {
-        println!("compat-sut tls authority {}", authority_out.display());
-    }
+    let listeners = Listeners::bind(&options, served)?;
     println!("compat-sut region {}", options.region);
     for line in identity_lines(&options.accounts) {
         println!("{line}");
@@ -327,12 +377,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     tokio::signal::ctrl_c().await?;
-    if let Some(encrypted) = encrypted {
-        let report = encrypted.shutdown.trigger(Duration::from_secs(30)).await;
-        println!("compat-sut tls shutdown drained={} aborted={}", report.drained, report.aborted);
-        encrypted.task.await??;
-    }
-    let report = running.shutdown.trigger(Duration::from_secs(30)).await;
+    let (report, task) = listeners.shut_down().await?;
     if let Some(scheduler) = scheduler {
         let sweeps = scheduler.shutdown().await?;
         println!(
@@ -347,9 +392,92 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("{line}");
     }
     println!("compat-sut shutdown drained={} aborted={}", report.drained, report.aborted);
-    running.task.await??;
+    task.await??;
     Ok(())
 }
+
+/// `--external`: no backend, the same listeners and probe, every request forwarded to `upstream`.
+///
+/// The last banner line names the endpoint; it is what a runner waits for, and it carries no
+/// credential because the observer holds none.
+async fn observe(options: &Options, upstream: Upstream, log: Option<Arc<ProbeLog>>) -> Result<(), Box<dyn std::error::Error>> {
+    let authority = upstream.authority().to_owned();
+    let served = DeclareTransport::new(ProbeService::new(Forward::new(upstream), log.clone()));
+    let listeners = Listeners::bind(options, served)?;
+    println!("compat-sut forwarding to http://{authority}");
+    tokio::signal::ctrl_c().await?;
+    let (report, task) = listeners.shut_down().await?;
+    if let Some(log) = log.as_ref() {
+        println!("compat-sut recorded {} probe record(s)", log.records());
+    }
+    println!("compat-sut shutdown drained={} aborted={}", report.drained, report.aborted);
+    task.await??;
+    Ok(())
+}
+
+/// The plaintext listener and, when configured, the encrypted one, serving one service value.
+struct Listeners {
+    plaintext: RunningServer,
+    encrypted: Option<RunningServer>,
+}
+
+impl Listeners {
+    /// Binds both listeners and prints the banner lines that name them.
+    ///
+    /// The encrypted listener is bound first. The plaintext port is what `ci/lib/sut.sh` polls for
+    /// readiness, so once it answers, the TLS port is bound too and a generated authority is
+    /// already on disk for the runner to hand out. The banner names the ports that were actually
+    /// bound, so `--port 0` and `--tls-port 0` are usable for a local run.
+    fn bind<S, B>(options: &Options, served: S) -> Result<Self, Box<dyn std::error::Error>>
+    where
+        S: tower::Service<http::Request<hyper::body::Incoming>, Response = http::Response<B>> + Clone + Send + 'static,
+        S::Future: Send + 'static,
+        S::Error: Into<Box<dyn std::error::Error + Send + Sync>> + Send + Sync + 'static,
+        B: http_body::Body<Data = bytes::Bytes> + Send + 'static,
+        B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+    {
+        let encrypted = match options.tls.as_ref() {
+            Some(listener) => {
+                let handle = TlsHandle::new(listener.source.load()?)?;
+                let config = ServerConfig {
+                    bind_addr: SocketAddr::new(options.address.ip(), listener.port),
+                    ..ServerConfig::default()
+                };
+                Some(Server::new(config, served.clone()).with_tls(handle).serve()?)
+            }
+            None => None,
+        };
+        let config = ServerConfig {
+            bind_addr: options.address,
+            plaintext: true,
+            ..ServerConfig::default()
+        };
+        let plaintext = Server::new(config, served).serve()?;
+        println!("compat-sut listening on http://{}", plaintext.local_addr);
+        if let Some(encrypted) = encrypted.as_ref() {
+            println!("compat-sut listening on https://{}", encrypted.local_addr);
+        }
+        if let Some(TlsSource::SelfSigned { authority_out, .. }) = options.tls.as_ref().map(|listener| &listener.source) {
+            println!("compat-sut tls authority {}", authority_out.display());
+        }
+        Ok(Self { plaintext, encrypted })
+    }
+
+    /// Drains the encrypted listener, then triggers the plaintext one's shutdown and hands back its
+    /// report and task for the caller to finish after its own teardown.
+    async fn shut_down(self) -> Result<(ShutdownReport, PlaintextTask), Box<dyn std::error::Error>> {
+        if let Some(encrypted) = self.encrypted {
+            let report = encrypted.shutdown.trigger(Duration::from_secs(30)).await;
+            println!("compat-sut tls shutdown drained={} aborted={}", report.drained, report.aborted);
+            encrypted.task.await??;
+        }
+        let report = self.plaintext.shutdown.trigger(Duration::from_secs(30)).await;
+        Ok((report, self.plaintext.task))
+    }
+}
+
+/// The plaintext listener's task, awaited last so its error is the one that ends the process.
+type PlaintextTask = tokio::task::JoinHandle<Result<(), rustfs_gateway_server::ServerError>>;
 
 /// A throwaway directory for `--print-capabilities`, which must not disturb a real data root.
 fn tempdir_for_capability_probe() -> io::Result<PathBuf> {
@@ -561,6 +689,82 @@ mod tests {
             lines[1],
             "compat-sut identity alt access-key ALT owner-id s3gate-alt display-name Alt Fixture Owner"
         );
+    }
+
+    /// Positive — `--external` keeps the listener, TLS and probe flags and names the endpoint.
+    #[test]
+    fn external_keeps_the_listener_and_probe_flags() {
+        let options = parse_options([
+            "--external",
+            "http://127.0.0.1:9000/",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            "0",
+            "--probe-log",
+            "probe.jsonl",
+        ])
+        .expect("an observer command line");
+        assert_eq!(options.external.as_ref().map(|upstream| upstream.authority()), Some("127.0.0.1:9000"));
+        assert!(options.probe_log.is_some());
+        assert!(parse_options(["--data", "."]).expect("a launcher line").external.is_none());
+    }
+
+    /// Negative — every flag that configures the backend is refused beside `--external`: the
+    /// observer starts no backend, so a credential, a data root or a lifecycle cadence given to it
+    /// would be a precondition the endpoint never saw.
+    #[test]
+    fn n_external_refuses_every_backend_flag() {
+        for (flag, value) in [
+            ("--data", "."),
+            ("--access-key", "MAIN"),
+            ("--secret-key", "secret"),
+            ("--owner-id", "owner"),
+            ("--display-name", "owner"),
+            ("--alt-access-key", "ALT"),
+            ("--alt-secret-key", "secret"),
+            ("--alt-owner-id", "alt"),
+            ("--alt-display-name", "alt"),
+            ("--tenant-access-key", "TENANT"),
+            ("--tenant-secret-key", "secret"),
+            ("--tenant-owner-id", "tenant"),
+            ("--tenant-display-name", "tenant"),
+            ("--lc-debug-interval", "10"),
+            ("--region", "us-east-1"),
+            ("--corpus-record", "out.jsonl"),
+            ("--corpus-src", "handwritten:gateway"),
+            ("--server-domains", "s3.local"),
+            ("--register-only", "ListBuckets"),
+        ] {
+            let refused = parse_options(["--external", "http://127.0.0.1:9000", flag, value]);
+            let error = refused
+                .err()
+                .unwrap_or_else(|| panic!("{flag} was accepted beside --external"));
+            assert!(error.to_string().contains(flag), "{flag}: {error}");
+        }
+    }
+
+    /// Negative — an endpoint the observer cannot forward to as given is refused before anything
+    /// is bound: only `http://host:port`, with no path, query or credentials.
+    #[test]
+    fn n_external_refuses_an_endpoint_it_cannot_forward_to() {
+        for endpoint in [
+            "",
+            "127.0.0.1:9000",
+            "https://127.0.0.1:9000",
+            "ftp://127.0.0.1:9000",
+            "http://127.0.0.1",
+            "http://127.0.0.1:",
+            "http://127.0.0.1:port",
+            "http://127.0.0.1:99999",
+            "http://:9000",
+            "http://127.0.0.1:9000/bucket",
+            "http://127.0.0.1:9000?x=1",
+            "http://user:secret@127.0.0.1:9000",
+        ] {
+            assert!(parse_options(["--external", endpoint]).is_err(), "--external {endpoint:?} was accepted");
+        }
+        assert!(parse_options(["--external"]).is_err());
     }
 
     /// Negative — no banner line may carry a signing secret. This launcher's stdout is captured to

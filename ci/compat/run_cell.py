@@ -2,7 +2,9 @@
 """Run one client against one scenario and record what the server saw while it ran.
 
 Responsible for: deciding whether the scenario can run against the system under test's declared
-capabilities, executing the driver under a wall-clock limit that a hung client cannot outlive, and
+capabilities (the launcher's registry; an external endpoint declares none, so nothing is skipped
+before it runs and what it does not serve is read from its answers by `report.py`), executing the
+driver under a wall-clock limit that a hung client cannot outlive, and
 writing the cell's raw record — the driver's own result object plus the slice of the server's probe
 log that belongs to this cell.
 NOT responsible for: deciding pass or fail. `ci/compat/report.py` does that, so that one
@@ -33,7 +35,11 @@ def main() -> int:
     parser.add_argument("--scenario", required=True)
     parser.add_argument("--driver", required=True)
     parser.add_argument("--scenario-file", required=True)
-    parser.add_argument("--capabilities", required=True)
+    parser.add_argument(
+        "--capabilities",
+        default="",
+        help="the launcher's registry; omitted for an external endpoint, whose registry is unknown",
+    )
     parser.add_argument("--probe-log", required=True)
     parser.add_argument("--workdir", required=True)
     parser.add_argument("--bucket", required=True)
@@ -43,8 +49,12 @@ def main() -> int:
     arguments = parser.parse_args()
 
     document = yaml.safe_load(Path(arguments.scenario_file).read_text(encoding="utf-8"))
-    declared = {line.strip() for line in Path(arguments.capabilities).read_text(encoding="utf-8").splitlines() if line.strip()}
-    missing = sorted(set(document.get("requires_operations") or []) - declared)
+    missing = []
+    if arguments.capabilities:
+        declared = {
+            line.strip() for line in Path(arguments.capabilities).read_text(encoding="utf-8").splitlines() if line.strip()
+        }
+        missing = sorted(set(document.get("requires_operations") or []) - declared)
     skip_reason = "the system under test registers no " + ", ".join(missing) if missing else ""
 
     probe = Path(arguments.probe_log)
@@ -124,7 +134,7 @@ def main() -> int:
         + "\n",
         encoding="utf-8",
     )
-    reported = "unsupported" if skip_reason else (driver_result or {}).get("status", "driver-error")
+    reported = "sut-unregistered" if skip_reason else (driver_result or {}).get("status", "driver-error")
     print(reported)
     return 0
 

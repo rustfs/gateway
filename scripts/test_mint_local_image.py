@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Exercise the real Mint runner and reporter through a fake Docker subprocess.
 
-Owns image-selection, census, and evidence provenance controls, not SDK behavior.
+Owns image-selection, census, and evidence provenance controls, not SDK behavior, and
+the `--external` path: what it launches in front of an endpoint started elsewhere, what it
+refuses, and what the report says answered the run (rustfs/backlog#2758).
 The guard suite invokes this file; only Docker and SUT lifecycle are fixtures.
 """
 import json
@@ -59,7 +61,7 @@ elif a[0] != "rm":
 
 
 class MintLocalImage(unittest.TestCase):
-    def probe(self, args, scenario=""):
+    def probe(self, args, scenario="", extra_env=None):
         with tempfile.TemporaryDirectory(prefix="mint-local-test-") as directory:
             root = Path(directory)
             for name in ("ci/mint/run.sh", "ci/mint/pins.env", "ci/mint/report.py", "ci/mint/_redaction.py"):
@@ -70,9 +72,22 @@ class MintLocalImage(unittest.TestCase):
             (root / "ci/lib/sut.sh").write_text('''
 SUT_PID=""
 sut_die() { printf '%s\\n' "$*" >&2; exit 3; }
-sut_start() { SUT_HOST=127.0.0.1; SUT_PORT=9200; }
+sut_start() {
+    SUT_HOST=127.0.0.1; SUT_PORT=9200
+    printf '%s' "$GATEWAY_SUT_COMMAND" >"$FAKE_STATE/sut-command"
+    # What the observer would have recorded while mint ran: the endpoint's answers, one the
+    # observer wrote itself, or no log at all.
+    if [[ -n "${MINT_EXTERNAL:-}" ]]; then
+        case "${FAKE_OBSERVER:-upstream}" in
+        upstream) printf '{"status":200,"answered_by":"upstream"}\n' >"$MINT_OBSERVER_PROBE" ;;
+        observer) printf '{"status":200,"answered_by":"upstream"}\n{"status":502,"answered_by":"observer"}\n' >"$MINT_OBSERVER_PROBE" ;;
+        esac
+    fi
+}
 sut_stop() { :; }
 sut_wait_ready() { return 0; }
+sut_external_endpoint() { SUT_EXTERNAL_HOST=127.0.0.1; SUT_EXTERNAL_PORT=9000; }
+sut_server_header() { printf '%s\n' "${FAKE_SERVER_HEADER-RustFS}"; }
 ''')
             (root / "ci/mint/baseline.txt").write_text("# generation: 3\n" + "".join(f"{sdk} 0\n" for sdk in SDKS))
             binary = root / "bin"
@@ -85,10 +100,14 @@ sut_wait_ready() { return 0; }
             env = {k: v for k, v in os.environ.items() if not k.startswith(("MINT_", "GATEWAY_SUT_", "FAKE_"))}
             env.update(PATH=str(binary) + os.pathsep + os.environ["PATH"], FAKE_STATE=str(state),
                        FAKE_SDKS=" ".join(SDKS), FAKE_SCENARIO=scenario)
+            env.update(extra_env or {})
+            baseline = (root / "ci/mint/baseline.txt").read_bytes()
             result = subprocess.run(["bash", str(root / "ci/mint/run.sh"), "--work", str(root / "work"),
                                      "--out", str(root / "out"), *args], env=env, capture_output=True, text=True, timeout=15)
             calls = [json.loads(line) for line in (state / "calls").read_text().splitlines()] if (state / "calls").exists() else []
             report = json.loads((root / "out/report.json").read_text()) if (root / "out/report.json").exists() else None
+            self.assertEqual((root / "ci/mint/baseline.txt").read_bytes(), baseline, "the reviewed baseline changed")
+            self.launched = (state / "sut-command").read_text() if (state / "sut-command").exists() else None
             return result, calls, report
 
     def assert_success(self, args, local):
@@ -118,6 +137,8 @@ sut_wait_ready() { return 0; }
         self.assertCountEqual(selected, SDKS)
         self.assertEqual(len(selected), 15)
         self.assertEqual(creates[1][-1], "aws-sdk-java-v2")
+        self.assertEqual(report["measured_against"], {"sut": "gateway-fs"})
+        self.assertNotIn("--external", self.launched)
 
     def test_help_lists_local_usage(self):
         result, calls, report = self.probe(["--help"])
@@ -164,6 +185,58 @@ sut_wait_ready() { return 0; }
                 self.assertIsNone(report)
                 if scenario != "copy-fails":
                     self.assertFalse(any(c[0] == "create" for c in calls))
+
+    EXTERNAL = ["--external", "http://127.0.0.1:9000", "--local-image", LOCAL]
+    CREDENTIALS = {"MINT_ACCESS_KEY": "AKIAEXTERNALPROBE000", "MINT_SECRET_KEY": "external-probe-secret"}
+
+    def test_external_runs_through_the_observer_and_says_so(self):
+        result, calls, report = self.probe(self.EXTERNAL, extra_env=self.CREDENTIALS)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(report["measured_against"], {"sut": "external", "endpoint_build": "RustFS"})
+        self.assertTrue(report["complete"])
+        # The observer is launched in front of the endpoint, with no data root and no credential.
+        self.assertIn('--external "$MINT_EXTERNAL"', self.launched)
+        for flag in ("--data", "--access-key", "--secret-key", "--region"):
+            self.assertNotIn(flag, self.launched)
+        # Both passes still run, the TLS one against the observer's encrypted listener.
+        self.assertEqual(len([c for c in calls if c[0] == "create"]), 2)
+
+    def test_external_without_a_server_header_records_null(self):
+        _, _, report = self.probe(self.EXTERNAL, extra_env={**self.CREDENTIALS, "FAKE_SERVER_HEADER": ""})
+        self.assertEqual(report["measured_against"], {"sut": "external", "endpoint_build": None})
+
+    def test_n_external_without_the_endpoints_credentials_is_refused(self):
+        for missing in ("MINT_ACCESS_KEY", "MINT_SECRET_KEY"):
+            with self.subTest(missing=missing):
+                env = {name: value for name, value in self.CREDENTIALS.items() if name != missing}
+                result, calls, report = self.probe(self.EXTERNAL, extra_env=env)
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertIn("the endpoint's own credentials", result.stderr)
+                self.assertEqual((calls, report, self.launched), ([], None, None))
+
+    def test_n_external_beside_an_adopted_endpoint_is_refused(self):
+        env = {**self.CREDENTIALS, "GATEWAY_SUT_ENDPOINT": "http://127.0.0.1:9000"}
+        result, calls, report = self.probe(self.EXTERNAL, extra_env=env)
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("unset GATEWAY_SUT_ENDPOINT", result.stderr)
+        self.assertEqual((calls, report), ([], None))
+
+    def test_n_external_without_a_url_is_refused(self):
+        result, calls, _ = self.probe(["--external"], extra_env=self.CREDENTIALS)
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertEqual(calls, [])
+
+    def test_n_an_answer_the_observer_wrote_makes_the_run_incomplete(self):
+        result, _, report = self.probe(self.EXTERNAL, extra_env={**self.CREDENTIALS, "FAKE_OBSERVER": "observer"})
+        self.assertEqual(result.returncode, 3, result.stderr)
+        self.assertIn("could not reach http://127.0.0.1:9000 for 1 request(s)", result.stderr)
+        self.assertIsNone(report)
+
+    def test_n_an_observer_that_recorded_nothing_makes_the_run_incomplete(self):
+        result, _, report = self.probe(self.EXTERNAL, extra_env={**self.CREDENTIALS, "FAKE_OBSERVER": "none"})
+        self.assertEqual(result.returncode, 3, result.stderr)
+        self.assertIn("wrote no probe log", result.stderr)
+        self.assertIsNone(report)
 
     def test_pinned_pull_failure(self):
         result, calls, report = self.probe([], "pull-fails")

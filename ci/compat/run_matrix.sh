@@ -17,8 +17,22 @@ set -euo pipefail
 #   only works on a CI image cannot be exercised before it is pushed, and an unexercised runner is
 #   where a matrix quietly stops measuring anything.
 #
+# AGAINST AN EXTERNAL ENDPOINT (rustfs/backlog#2758)
+#   `--external <http://host:port> --product <name>` measures an S3 endpoint started elsewhere — a
+#   RustFS candidate (rustfs/backlog#2776) — instead of the launcher's filesystem backend. No backend
+#   is started: `compat-sut --external` stands in front of the endpoint, forwards every request to it
+#   unchanged and records the same wire evidence the launcher records, so wire assertions are still
+#   judged from what the server side saw and a 501/405 the endpoint answered is observed, not
+#   inferred. The drivers get the observer's address and the endpoint's credentials, which must be
+#   given in GATEWAY_COMPAT_ACCESS_KEY / GATEWAY_COMPAT_SECRET_KEY: the launcher's defaults belong to
+#   the launcher. The manifest records `measured_against` with the endpoint's own `Server` header and
+#   the declared product, and `scripts/check_compat_matrix.sh --matrix <out>` then requires
+#   `sut-unregistered = 0` for a RustFS endpoint.
+#
 # USAGE
 #   ci/compat/run_matrix.sh [--run-dir <dir>] [--clients a,b] [--scenarios x,y]
+#                           [--external <http://host:port> --product <name>]
+#   (or GATEWAY_COMPAT_EXTERNAL_ENDPOINT / GATEWAY_COMPAT_PRODUCT)
 #
 # EXIT
 #   0 no regression   1 at least one regression   3 environment or driver problem
@@ -30,6 +44,8 @@ SCENARIO_FILTER=""
 CLIENT_FILTER=""
 PORT="${GATEWAY_COMPAT_PORT:-9100}"
 SCENARIO_TIMEOUT="${GATEWAY_COMPAT_SCENARIO_TIMEOUT:-300}"
+EXTERNAL="${GATEWAY_COMPAT_EXTERNAL_ENDPOINT:-}"
+PRODUCT="${GATEWAY_COMPAT_PRODUCT:-}"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -45,12 +61,35 @@ while [[ $# -gt 0 ]]; do
         SCENARIO_FILTER="${2:?--scenarios requires a list}"
         shift 2
         ;;
+    --external)
+        EXTERNAL="${2:?--external requires an http://host:port URL}"
+        shift 2
+        ;;
+    --product)
+        PRODUCT="${2:?--product requires a name}"
+        shift 2
+        ;;
     *)
         printf 'run_matrix: unknown argument %s\n' "$1" >&2
         exit 3
         ;;
     esac
 done
+
+problem() {
+    printf 'run_matrix: %s\n' "$*" >&2
+    exit 3
+}
+
+if [[ -n "$EXTERNAL" ]]; then
+    # Refused before anything starts. A run against the wrong credentials records every cell as a
+    # signature failure, and a run without a product silently switches off the RustFS rule.
+    [[ -n "${GATEWAY_COMPAT_ACCESS_KEY:-}" && -n "${GATEWAY_COMPAT_SECRET_KEY:-}" ]] ||
+        problem 'an external endpoint needs its own credentials in GATEWAY_COMPAT_ACCESS_KEY and GATEWAY_COMPAT_SECRET_KEY'
+    [[ -n "$PRODUCT" ]] || problem '--external needs --product, the name of what the endpoint is (e.g. rustfs)'
+elif [[ -n "$PRODUCT" ]]; then
+    problem '--product names an external endpoint; give --external as well, or neither'
+fi
 
 export GATEWAY_COMPAT_ACCESS_KEY="${GATEWAY_COMPAT_ACCESS_KEY:-compatmatrixkey}"
 export GATEWAY_COMPAT_SECRET_KEY="${GATEWAY_COMPAT_SECRET_KEY:-compatmatrixsecret0123456789}"
@@ -60,11 +99,6 @@ export GATEWAY_COMPAT_REGION="${GATEWAY_COMPAT_REGION:-us-east-1}"
 export COMPAT_CLIENTS_DIR="${COMPAT_CLIENTS_DIR:-$ROOT_DIR/target/compat-clients}"
 export PATH="$COMPAT_CLIENTS_DIR/bin:$PATH"
 
-problem() {
-    printf 'run_matrix: %s\n' "$*" >&2
-    exit 3
-}
-
 command -v python3 >/dev/null 2>&1 || problem 'required command is missing: python3'
 [[ -n "${GATEWAY_COMPAT_SUT_BIN:-}" ]] ||
     problem 'GATEWAY_COMPAT_SUT_BIN is unset; build it with: cargo build --release -p rustfs-gateway-compat-sut'
@@ -73,15 +107,27 @@ rm -rf "$RUN_DIR"
 mkdir -p "$RUN_DIR/results" "$RUN_DIR/work" "$RUN_DIR/data"
 PROBE_LOG="$RUN_DIR/probe.jsonl"
 
+# shellcheck source=../lib/sut.sh
+source "$ROOT_DIR/ci/lib/sut.sh"
+
 # ---- capability boundary ---------------------------------------------------------------------
 # The launcher prints the registry it actually built. Preflight compares it with the declared
 # boundary and refuses to run on a mismatch, so a scenario is never skipped against a stale list.
-"$GATEWAY_COMPAT_SUT_BIN" --print-capabilities >"$RUN_DIR/sut-capabilities.txt"
+# An external endpoint prints none: nothing is skipped before it runs, and run_cell is given no
+# registry, so what it does not serve is read from its answers.
+CAPABILITY_ARGS=()
+SUT_CAPABILITY_ARGS=()
+if [[ -z "$EXTERNAL" ]]; then
+    "$GATEWAY_COMPAT_SUT_BIN" --print-capabilities >"$RUN_DIR/sut-capabilities.txt"
+    CAPABILITY_ARGS=(--capabilities "$RUN_DIR/sut-capabilities.txt")
+    SUT_CAPABILITY_ARGS=(--sut-capabilities "$RUN_DIR/sut-capabilities.txt")
+fi
 
 python3 "$ROOT_DIR/ci/compat/report.py" preflight \
     --versions "$ROOT_DIR/compat/versions.toml" \
     --capabilities "$ROOT_DIR/compat/capabilities.toml" \
-    --sut-capabilities "$RUN_DIR/sut-capabilities.txt" || exit 3
+    --clients "$CLIENT_FILTER" \
+    ${SUT_CAPABILITY_ARGS[@]+"${SUT_CAPABILITY_ARGS[@]}"} || exit 3
 
 CLIENTS="$(python3 -c 'import sys, tomllib
 from pathlib import Path
@@ -115,18 +161,34 @@ TLS_AUTHORITY="$RUN_DIR/tls/ca.pem"
 export GATEWAY_SUT_HOST=127.0.0.1
 export GATEWAY_SUT_PORT="$PORT"
 export GATEWAY_SUT_LOG="$RUN_DIR/sut.log"
-export GATEWAY_SUT_COMMAND="$(printf '%q ' \
-    "$GATEWAY_COMPAT_SUT_BIN" \
-    --data "$RUN_DIR/data" \
-    --host 127.0.0.1 \
-    --port "$PORT" \
-    --tls-port "$TLS_PORT" \
-    --tls-self-signed "$TLS_AUTHORITY" \
-    --access-key "$GATEWAY_COMPAT_ACCESS_KEY" \
-    --secret-key "$GATEWAY_COMPAT_SECRET_KEY" \
-    --probe-log "$PROBE_LOG")"
-# shellcheck source=../lib/sut.sh
-source "$ROOT_DIR/ci/lib/sut.sh"
+AGGREGATE_SUT_ARGS=()
+if [[ -n "$EXTERNAL" ]]; then
+    # The endpoint names itself once, before the observer stands in front of it: its own `Server`
+    # header, read directly, is the build the manifest records.
+    sut_external_endpoint "$EXTERNAL"
+    ENDPOINT_BUILD="$(sut_server_header "$EXTERNAL")" || problem "the external endpoint ${EXTERNAL} did not say what it is"
+    printf 'run_matrix: external endpoint %s answers as Server: %s\n' "$EXTERNAL" "${ENDPOINT_BUILD:-(none)}"
+    AGGREGATE_SUT_ARGS=(--sut-kind external --endpoint "$EXTERNAL" --endpoint-build "$ENDPOINT_BUILD" --product "$PRODUCT")
+    export GATEWAY_SUT_COMMAND="$(printf '%q ' \
+        "$GATEWAY_COMPAT_SUT_BIN" \
+        --external "$EXTERNAL" \
+        --host 127.0.0.1 \
+        --port "$PORT" \
+        --tls-port "$TLS_PORT" \
+        --tls-self-signed "$TLS_AUTHORITY" \
+        --probe-log "$PROBE_LOG")"
+else
+    export GATEWAY_SUT_COMMAND="$(printf '%q ' \
+        "$GATEWAY_COMPAT_SUT_BIN" \
+        --data "$RUN_DIR/data" \
+        --host 127.0.0.1 \
+        --port "$PORT" \
+        --tls-port "$TLS_PORT" \
+        --tls-self-signed "$TLS_AUTHORITY" \
+        --access-key "$GATEWAY_COMPAT_ACCESS_KEY" \
+        --secret-key "$GATEWAY_COMPAT_SECRET_KEY" \
+        --probe-log "$PROBE_LOG")"
+fi
 sut_start
 trap sut_stop EXIT
 [[ -s "$TLS_AUTHORITY" ]] || problem "compat-sut wrote no TLS authority at $TLS_AUTHORITY"
@@ -154,7 +216,7 @@ for client in $CLIENTS; do
                 --scenario "$scenario" \
                 --driver "$driver" \
                 --scenario-file "$ROOT_DIR/compat/scenarios/$scenario.yaml" \
-                --capabilities "$RUN_DIR/sut-capabilities.txt" \
+                ${CAPABILITY_ARGS[@]+"${CAPABILITY_ARGS[@]}"} \
                 --probe-log "$PROBE_LOG" \
                 --workdir "$RUN_DIR/work/$client/$scenario" \
                 --bucket "$bucket" \
@@ -192,6 +254,7 @@ python3 "$ROOT_DIR/ci/compat/report.py" aggregate \
     --known-fail "$ROOT_DIR/compat/known-fail.txt" \
     --out "${GATEWAY_COMPAT_MATRIX_OUT:-$ROOT_DIR/compat/matrix.json}" \
     --sut-version "$SUT_VERSION" \
+    ${AGGREGATE_SUT_ARGS[@]+"${AGGREGATE_SUT_ARGS[@]}"} \
     $ALLOW_MISSING
 report_status=$?
 set -e

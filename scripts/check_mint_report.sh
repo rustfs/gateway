@@ -32,6 +32,11 @@ set -euo pipefail
 #                   incomplete run proposes nothing and removes a stale proposal;
 #                   a proposal aimed at the baseline itself is refused; an
 #                   exclusion is carried into the proposal unchanged
+#     measured      the JSON report says what answered the run: the launcher by
+#                   default, or `--sut external` with the endpoint's own Server
+#                   header (null when it sent none), judged against the same
+#                   unchanged baseline; an endpoint build without an external SUT,
+#                   or an unknown SUT, is a usage error (rustfs/backlog#2758)
 #     redaction     Authorization, presigned-query signatures, StringToSign and
 #                   the secret leave the evidence files, and the aggregate
 #                   report carries a record's `error` only as the class
@@ -187,6 +192,7 @@ def probe(
     passes: list[tuple[list[str], str]] | None = None,
     also_progress: bool = False,
     redact: bool = False,
+    extra_args: list[str] | None = None,
 ) -> None:
     global probes
     probes += 1
@@ -229,6 +235,7 @@ def probe(
             command += ["--pass", " ".join(pass_sdks), str(pass_path)]
         if record or record_at_baseline:
             command += ["--record", str(proposal)]
+        command += extra_args or []
         if redact:
             redaction = run_report([sys.executable, report, "redact", "--secret-env", "MINT_JSON_REDACTION_PROBE",
                                    str(log_dir), str(progress_path)])
@@ -836,6 +843,37 @@ for mode, statuses in (("ratchet", (0, 1, 3, 124)), ("record", (0, 3, 124))):
 
 if cli_codes != {0, 1, 2, 3}:
     failures.append(f"incomplete real CLI exit census: {sorted(cli_codes)}")
+
+# --- what answered the run (rustfs/backlog#2758) -----------------------------------------
+def measured(expected: dict):
+    def check(work: Path, _proposal: Path) -> str | None:
+        try:
+            found = json.loads((work / "report.json").read_text(encoding="utf-8")).get("measured_against")
+        except (OSError, ValueError) as error:
+            return f"report.json is unreadable: {error}"
+        return None if found == expected else f"measured_against is {found!r}, expected {expected!r}"
+    return check
+
+
+probe("the launcher is what answered a run that names no SUT", 0, ["Measured against: the launcher"],
+      after=measured({"sut": "gateway-fs"}))
+probe("an external endpoint is recorded with its own Server header", 0,
+      ["Measured against: an external endpoint (`Server: RustFS`)"],
+      extra_args=["--sut", "external", "--endpoint-build", "RustFS"],
+      after=measured({"sut": "external", "endpoint_build": "RustFS"}))
+probe("an external endpoint that sent no Server header is recorded as null", 0,
+      ["Measured against: an external endpoint (no `Server` header)"],
+      extra_args=["--sut", "external"], after=measured({"sut": "external", "endpoint_build": None}))
+external_above = healthy_logs()
+external_above["awscli"] += "\n" + rec("awscli", "delete-bucket-policy", "FAIL")
+probe("an external endpoint is judged against the same baseline, and regresses on it", 1,
+      ["REGRESSION awscli fail=1 baseline=0"], logs=external_above,
+      progress=console({**HEALTHY_PROGRESS, "awscli": "FAILED"}),
+      extra_args=["--sut", "external", "--endpoint-build", "RustFS"],
+      after=measured({"sut": "external", "endpoint_build": "RustFS"}))
+probe("an endpoint build without an external SUT is a usage error", 2,
+      ["--endpoint-build describes an external endpoint"], extra_args=["--endpoint-build", "RustFS"])
+probe("an unknown SUT is a usage error", 2, ["invalid choice: 'rustfs'"], extra_args=["--sut", "rustfs"])
 
 if failures:
     for failure in failures:

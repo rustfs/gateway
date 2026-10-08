@@ -60,8 +60,8 @@ EXCEPTIONS = {
     "compat/sut": (
         1,
         "rustfs/gateway#277",
-        "one target, tests/tls.rs, which spawns the built binary; consolidating a single source buys "
-        "nothing until a second one is added",
+        "one target, tests/binary/, whose topic modules (tls, external) each spawn the built binary; "
+        "a new binary-level topic is a module there, not another linked target",
     ),
     "crates/fs": (
         1,
