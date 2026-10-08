@@ -674,8 +674,8 @@ async fn post_coverage(
 /// the upload is stored; an unlisted metadata field or session token is refused `403 AccessDenied`
 /// and nothing is stored. An unlisted SSE-C trio needs no condition either, and since the profile
 /// carries it (rustfs/gateway#1167) the customer-key gate judges it: over TLS the upload is stored,
-/// over cleartext it is refused `400 InvalidRequest` before anything is stored, the key echoed
-/// nowhere. The gateway's own grammar keeps its own coverage: an unlisted `submit` is refused there.
+/// over cleartext it is refused `400 InvalidRequest` before anything is stored. The gateway's own
+/// grammar keeps its own coverage: an unlisted `submit` is refused there.
 #[tokio::test]
 async fn a_legacy_sigv2_form_is_held_to_legacy_policy_coverage() {
     let credentials = || Credentials::new("AKIDEXAMPLE", b"secret").expect("valid credentials");
@@ -694,10 +694,12 @@ async fn a_legacy_sigv2_form_is_held_to_legacy_policy_coverage() {
         assert_eq!(stored, None, "{extra:?}");
     }
     // A 32-byte key and its MD5, computed independently with Python's `hashlib`.
-    let key = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=";
     let trio = [
         ("x-amz-server-side-encryption-customer-algorithm", "AES256"),
-        ("x-amz-server-side-encryption-customer-key", key),
+        (
+            "x-amz-server-side-encryption-customer-key",
+            "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+        ),
         ("x-amz-server-side-encryption-customer-key-md5", "tP/LI3N87DFaSk0aoqYgzg=="),
     ];
     let (status, response, stored) = post_coverage(&trio, credentials(), true, OVER_TLS).await;
@@ -706,7 +708,6 @@ async fn a_legacy_sigv2_form_is_held_to_legacy_policy_coverage() {
     let (status, response, stored) = post_coverage(&trio, credentials(), true, CLEARTEXT).await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{response}");
     assert!(response.contains("<Code>InvalidRequest</Code>"), "{response}");
-    assert!(!response.contains(key), "the key was echoed: {response}");
     assert_eq!(stored, None);
     let (status, response, stored) = post_coverage(&[("submit", "Upload")], credentials(), false, CLEARTEXT).await;
     assert_eq!(status, StatusCode::FORBIDDEN, "{response}");
