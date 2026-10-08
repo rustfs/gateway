@@ -325,9 +325,13 @@ impl Handler<DeleteBucket> for FsBackend {
                 Err(_) => return Err(storage_error()),
             }
         }
+        // Retire only after the final removal succeeds, under the allocator's lock so there is
+        // no suspension between a successful removal and discarding its in-memory window.
+        let mut windows = self.upload_id_windows.lock().await;
         tokio::fs::remove_dir(self.bucket_path(bucket))
             .await
             .map_err(|_| storage_error())?;
+        windows.remove(bucket);
         Ok(Resp::new(DeleteBucketOutput::default()))
     }
 }
