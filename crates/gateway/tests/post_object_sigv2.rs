@@ -25,7 +25,8 @@ use http::{Request, StatusCode};
 use http_body_util::BodyExt;
 use rustfs_gateway::dto::{PostObject, PostObjectOutput};
 use rustfs_gateway::{
-    Credentials, Handler, HandlerError, HandlerResult, RegionSet, Req, Resp, SigV4Authenticator, StaticCredentials, allow_when,
+    Credentials, Handler, HandlerError, HandlerResult, RegionSet, Req, Resp, SigV4Authenticator, StaticCredentials,
+    TransportSecurity, allow_when,
 };
 use rustfs_gateway_sig::{SecurityFloor, SessionBinding, SigV2Signer, codec::encode_base64_exact};
 
@@ -136,7 +137,7 @@ async fn post_at_uri(
         ));
     }
     body.push_str(&format!("--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"upload\"\r\nContent-Type: application/octet-stream\r\n\r\n{file}\r\n--{BOUNDARY}--\r\n"));
-    let request = Request::builder()
+    let mut request = Request::builder()
         .method("POST")
         .uri(uri)
         .header("host", "host.invalid")
@@ -144,6 +145,10 @@ async fn post_at_uri(
         .header("content-length", body.len())
         .body(Bytes::from(body))
         .expect("valid request");
+    // An `https` URI arrives as a TLS-terminating transport marks it; any other stays cleartext.
+    if uri.starts_with("https://") {
+        request.extensions_mut().insert(TransportSecurity::Encrypted);
+    }
     // Large policy fixtures arrive in ordinary frames under the unchanged streaming window.
     let response = service.call(request.map(policy_bytes::PolicyFrames)).await;
     let response = rustfs_gateway::collect(response).await.expect("in-memory response");
@@ -645,31 +650,37 @@ async fn legacy_expiration_is_not_enabled_for_generic_forms() {
 const COVERAGE: &[u8; 97] =
     br#"{"expiration":"2026-01-02T04:04:05Z","conditions":[{"bucket":"example-bucket"},{"key":"upload"}]}"#;
 
-/// Posts the coverage fixture's form with `extra` appended, under the RustFS profile's form
-/// grammar when `legacy_forms`.
+/// The bucket the coverage fixture names, over cleartext and over TLS (see `post_at_uri`).
+const CLEARTEXT: &str = "http://host.invalid/example-bucket";
+const OVER_TLS: &str = "https://host.invalid/example-bucket";
+
+/// Posts the coverage fixture's form with `extra` appended to `uri`, under the RustFS profile's
+/// form grammar when `legacy_forms`.
 async fn post_coverage(
-    extra: (&str, &str),
+    extra: &[(&str, &str)],
     credentials: Credentials,
     legacy_forms: bool,
+    uri: &str,
 ) -> (StatusCode, String, Option<(String, Vec<u8>)>) {
     let policy = encode_base64_exact(COVERAGE);
     let signature = signed_policy(&policy);
     let mut form = fields(&policy, &signature);
-    form.push(extra);
-    post_with_credentials(true, &form, "hello", credentials, legacy_forms).await
+    form.extend_from_slice(extra);
+    post_at_uri(true, &form, "hello", credentials, legacy_forms, uri, false).await
 }
 
 /// Positive and negative — under the RustFS profile a SigV2 form is held to legacy RustFS's policy
 /// coverage (rustfs/gateway#1185): a `submit` field and an `x-ignore-*` field need no condition and
 /// the upload is stored; an unlisted metadata field or session token is refused `403 AccessDenied`
-/// and nothing is stored; an unlisted SSE-C field needs no condition but is still refused `501`
-/// before anything is stored, as the profile does not carry it yet (rustfs/gateway#1167). The
-/// gateway's own grammar keeps its own coverage: an unlisted `submit` is refused there.
+/// and nothing is stored. An unlisted SSE-C trio needs no condition either, and since the profile
+/// carries it (rustfs/gateway#1167) the customer-key gate judges it: over TLS the upload is stored,
+/// over cleartext it is refused `400 InvalidRequest` before anything is stored, the key echoed
+/// nowhere. The gateway's own grammar keeps its own coverage: an unlisted `submit` is refused there.
 #[tokio::test]
 async fn a_legacy_sigv2_form_is_held_to_legacy_policy_coverage() {
     let credentials = || Credentials::new("AKIDEXAMPLE", b"secret").expect("valid credentials");
     for extra in [("submit", "Upload"), ("x-ignore-note", "n")] {
-        let (status, response, stored) = post_coverage(extra, credentials(), true).await;
+        let (status, response, stored) = post_coverage(&[extra], credentials(), true, CLEARTEXT).await;
         assert_eq!(status, StatusCode::NO_CONTENT, "{extra:?}: {response}");
         assert_eq!(stored, Some(("upload".to_owned(), b"hello".to_vec())), "{extra:?}");
     }
@@ -677,16 +688,27 @@ async fn a_legacy_sigv2_form_is_held_to_legacy_policy_coverage() {
         (("x-amz-meta-color", "red"), credentials()),
         (("x-amz-security-token", "session-token"), temporary_credentials()),
     ] {
-        let (status, response, stored) = post_coverage(extra, credentials, true).await;
+        let (status, response, stored) = post_coverage(&[extra], credentials, true, CLEARTEXT).await;
         assert_eq!(status, StatusCode::FORBIDDEN, "{extra:?}: {response}");
         assert!(response.contains("<Code>AccessDenied</Code>"), "{response}");
         assert_eq!(stored, None, "{extra:?}");
     }
-    let (status, response, stored) =
-        post_coverage(("x-amz-server-side-encryption-customer-algorithm", "AES256"), credentials(), true).await;
-    assert_eq!(status, StatusCode::NOT_IMPLEMENTED, "{response}");
+    // A 32-byte key and its MD5, computed independently with Python's `hashlib`.
+    let key = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=";
+    let trio = [
+        ("x-amz-server-side-encryption-customer-algorithm", "AES256"),
+        ("x-amz-server-side-encryption-customer-key", key),
+        ("x-amz-server-side-encryption-customer-key-md5", "tP/LI3N87DFaSk0aoqYgzg=="),
+    ];
+    let (status, response, stored) = post_coverage(&trio, credentials(), true, OVER_TLS).await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{response}");
+    assert_eq!(stored, Some(("upload".to_owned(), b"hello".to_vec())));
+    let (status, response, stored) = post_coverage(&trio, credentials(), true, CLEARTEXT).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{response}");
+    assert!(response.contains("<Code>InvalidRequest</Code>"), "{response}");
+    assert!(!response.contains(key), "the key was echoed: {response}");
     assert_eq!(stored, None);
-    let (status, response, stored) = post_coverage(("submit", "Upload"), credentials(), false).await;
+    let (status, response, stored) = post_coverage(&[("submit", "Upload")], credentials(), false, CLEARTEXT).await;
     assert_eq!(status, StatusCode::FORBIDDEN, "{response}");
     assert_eq!(stored, None);
 }
