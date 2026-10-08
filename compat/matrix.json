@@ -1,5 +1,8 @@
 {
   "generated_at": "2026-09-30T03:55:49Z",
+  "measured_against": {
+    "sut": "gateway-fs"
+  },
   "sut": {
     "name": "rustfs-gateway-fs",
     "version": "0.1.4",
@@ -70,7 +73,7 @@
       "scenarios": [
         {
           "id": "backup-restore",
-          "status": "unsupported",
+          "status": "client-unsupported",
           "detail": "aws-cli is not a backup tool; it has no repository format to restore",
           "verdict": null,
           "issue": null,
@@ -126,7 +129,7 @@
         },
         {
           "id": "presigned-put",
-          "status": "unsupported",
+          "status": "client-unsupported",
           "detail": "aws s3 presign signs GetObject URLs only",
           "verdict": null,
           "issue": null,
@@ -150,7 +153,7 @@
         },
         {
           "id": "streaming-chunked-upload",
-          "status": "unsupported",
+          "status": "client-unsupported",
           "detail": "aws-cli (botocore) declares the whole-payload SHA-256 for every upload over a plaintext endpoint and offers no signed aws-chunked mode",
           "verdict": null,
           "issue": null,
@@ -213,7 +216,7 @@
       "scenarios": [
         {
           "id": "backup-restore",
-          "status": "unsupported",
+          "status": "client-unsupported",
           "detail": "aws-sdk-dotnet is an SDK, not a backup tool; it has no repository format to restore",
           "verdict": null,
           "issue": null,
@@ -317,7 +320,7 @@
         },
         {
           "id": "sync-directory",
-          "status": "unsupported",
+          "status": "client-unsupported",
           "detail": "aws-sdk-dotnet offers no directory mirroring primitive",
           "verdict": null,
           "issue": null,
@@ -363,7 +366,7 @@
       "scenarios": [
         {
           "id": "backup-restore",
-          "status": "unsupported",
+          "status": "client-unsupported",
           "detail": "aws-sdk-go-v2 is an SDK, not a backup tool; it has no repository format to restore",
           "verdict": null,
           "issue": null,
@@ -443,7 +446,7 @@
         },
         {
           "id": "streaming-chunked-upload",
-          "status": "unsupported",
+          "status": "client-unsupported",
           "detail": "aws-sdk-go-v2 signs whole payloads over plaintext and has no signed aws-chunked mode",
           "verdict": null,
           "issue": null,
@@ -460,7 +463,7 @@
         },
         {
           "id": "sync-directory",
-          "status": "unsupported",
+          "status": "client-unsupported",
           "detail": "aws-sdk-go-v2 offers no directory mirroring primitive",
           "verdict": null,
           "issue": null,
@@ -506,7 +509,7 @@
       "scenarios": [
         {
           "id": "backup-restore",
-          "status": "unsupported",
+          "status": "client-unsupported",
           "detail": "aws-sdk-java-v1 is an SDK, not a backup tool; it has no repository format to restore",
           "verdict": null,
           "issue": null,
@@ -606,7 +609,7 @@
         },
         {
           "id": "sync-directory",
-          "status": "unsupported",
+          "status": "client-unsupported",
           "detail": "aws-sdk-java-v1 offers no directory mirroring primitive",
           "verdict": null,
           "issue": null,
@@ -614,7 +617,7 @@
         },
         {
           "id": "trailer-chunked-upload",
-          "status": "unsupported",
+          "status": "client-unsupported",
           "detail": "aws-sdk-java-v1 predates flexible checksums and has no way to declare an x-amz-trailer",
           "verdict": null,
           "issue": null,
@@ -645,7 +648,7 @@
       "scenarios": [
         {
           "id": "backup-restore",
-          "status": "unsupported",
+          "status": "client-unsupported",
           "detail": "aws-sdk-java-v2 is an SDK, not a backup tool; it has no repository format to restore",
           "verdict": null,
           "issue": null,
@@ -749,7 +752,7 @@
         },
         {
           "id": "sync-directory",
-          "status": "unsupported",
+          "status": "client-unsupported",
           "detail": "aws-sdk-java-v2 offers no directory mirroring primitive",
           "verdict": null,
           "issue": null,
@@ -795,7 +798,7 @@
       "scenarios": [
         {
           "id": "backup-restore",
-          "status": "unsupported",
+          "status": "client-unsupported",
           "detail": "aws-sdk-js is an SDK, not a backup tool; it has no repository format to restore",
           "verdict": null,
           "issue": null,
@@ -875,7 +878,7 @@
         },
         {
           "id": "streaming-chunked-upload",
-          "status": "unsupported",
+          "status": "client-unsupported",
           "detail": "aws-sdk-js v3 frames streams as STREAMING-UNSIGNED-PAYLOAD-TRAILER and has no signed aws-chunked mode",
           "verdict": null,
           "issue": null,
@@ -892,7 +895,7 @@
         },
         {
           "id": "sync-directory",
-          "status": "unsupported",
+          "status": "client-unsupported",
           "detail": "aws-sdk-js offers no directory mirroring primitive",
           "verdict": null,
           "issue": null,
@@ -938,7 +941,7 @@
       "scenarios": [
         {
           "id": "backup-restore",
-          "status": "unsupported",
+          "status": "client-unsupported",
           "detail": "aws-sdk-rust is an SDK, not a backup tool; it has no repository format to restore",
           "verdict": null,
           "issue": null,
@@ -1042,7 +1045,7 @@
         },
         {
           "id": "sync-directory",
-          "status": "unsupported",
+          "status": "client-unsupported",
           "detail": "aws-sdk-rust offers no directory mirroring primitive",
           "verdict": null,
           "issue": null,
@@ -1088,7 +1091,7 @@
       "scenarios": [
         {
           "id": "backup-restore",
-          "status": "unsupported",
+          "status": "client-unsupported",
           "detail": "boto3 is a client library, not a backup tool; it has no repository format to restore",
           "verdict": null,
           "issue": null,
@@ -1184,7 +1187,7 @@
         },
         {
           "id": "streaming-chunked-upload",
-          "status": "unsupported",
+          "status": "client-unsupported",
           "detail": "botocore signs the whole payload over a plaintext endpoint and offers no switch that selects aws-chunked framing",
           "verdict": null,
           "issue": null,
@@ -1201,7 +1204,7 @@
         },
         {
           "id": "sync-directory",
-          "status": "unsupported",
+          "status": "client-unsupported",
           "detail": "boto3 offers no directory mirroring primitive; rclone and mc are the sync clients",
           "verdict": null,
           "issue": null,
@@ -1251,7 +1254,7 @@
       "scenarios": [
         {
           "id": "backup-restore",
-          "status": "unsupported",
+          "status": "client-unsupported",
           "detail": "mc exposes no command that isolates this operation",
           "verdict": null,
           "issue": null,
@@ -1267,7 +1270,7 @@
         },
         {
           "id": "copy-object",
-          "status": "unsupported",
+          "status": "client-unsupported",
           "detail": "mc exposes no command that isolates this operation",
           "verdict": null,
           "issue": null,
@@ -1275,7 +1278,7 @@
         },
         {
           "id": "delete-batch",
-          "status": "unsupported",
+          "status": "client-unsupported",
           "detail": "mc exposes no command that isolates this operation",
           "verdict": null,
           "issue": null,
@@ -1283,7 +1286,7 @@
         },
         {
           "id": "large-multipart-upload",
-          "status": "unsupported",
+          "status": "client-unsupported",
           "detail": "mc exposes no command that isolates this operation",
           "verdict": null,
           "issue": null,
@@ -1299,7 +1302,7 @@
         },
         {
           "id": "presigned-get",
-          "status": "unsupported",
+          "status": "client-unsupported",
           "detail": "mc share generates a URL but redeems it with the same client, which would not test cross-implementation presigning",
           "verdict": null,
           "issue": null,
@@ -1307,7 +1310,7 @@
         },
         {
           "id": "presigned-put",
-          "status": "unsupported",
+          "status": "client-unsupported",
           "detail": "mc share generates a URL but redeems it with the same client, which would not test cross-implementation presigning",
           "verdict": null,
           "issue": null,
@@ -1315,7 +1318,7 @@
         },
         {
           "id": "range-download",
-          "status": "unsupported",
+          "status": "client-unsupported",
           "detail": "mc exposes no command that isolates this operation",
           "verdict": null,
           "issue": null,
@@ -1360,7 +1363,7 @@
         },
         {
           "id": "trailer-chunked-upload",
-          "status": "unsupported",
+          "status": "client-unsupported",
           "detail": "mc does not expose a trailing-checksum upload; minio-go signs the chunks instead",
           "verdict": null,
           "issue": null,
@@ -1377,7 +1380,7 @@
         },
         {
           "id": "versioned-object",
-          "status": "unsupported",
+          "status": "client-unsupported",
           "detail": "mc version enable requires the bucket-versioning admin surface this matrix does not target",
           "verdict": null,
           "issue": null,
@@ -1391,7 +1394,7 @@
       "scenarios": [
         {
           "id": "backup-restore",
-          "status": "unsupported",
+          "status": "client-unsupported",
           "detail": "OpenDAL is a storage access library, not a backup tool",
           "verdict": null,
           "issue": null,
@@ -1399,7 +1402,7 @@
         },
         {
           "id": "bucket-lifecycle",
-          "status": "unsupported",
+          "status": "client-unsupported",
           "detail": "OpenDAL addresses objects inside one configured bucket and has no bucket operations",
           "verdict": null,
           "issue": null,
@@ -1471,7 +1474,7 @@
         },
         {
           "id": "streaming-chunked-upload",
-          "status": "unsupported",
+          "status": "client-unsupported",
           "detail": "OpenDAL's S3 backend declares UNSIGNED-PAYLOAD for writes and has no aws-chunked mode",
           "verdict": null,
           "issue": null,
@@ -1488,7 +1491,7 @@
         },
         {
           "id": "sync-directory",
-          "status": "unsupported",
+          "status": "client-unsupported",
           "detail": "OpenDAL offers no directory mirroring primitive",
           "verdict": null,
           "issue": null,
@@ -1496,7 +1499,7 @@
         },
         {
           "id": "trailer-chunked-upload",
-          "status": "unsupported",
+          "status": "client-unsupported",
           "detail": "OpenDAL's S3 backend sends no trailing checksum; it has no aws-chunked mode",
           "verdict": null,
           "issue": null,
@@ -1527,7 +1530,7 @@
       "scenarios": [
         {
           "id": "backup-restore",
-          "status": "unsupported",
+          "status": "client-unsupported",
           "detail": "rclone exposes no command that isolates this operation",
           "verdict": null,
           "issue": null,
@@ -1543,7 +1546,7 @@
         },
         {
           "id": "copy-object",
-          "status": "unsupported",
+          "status": "client-unsupported",
           "detail": "rclone exposes no command that isolates this operation",
           "verdict": null,
           "issue": null,
@@ -1551,7 +1554,7 @@
         },
         {
           "id": "delete-batch",
-          "status": "unsupported",
+          "status": "client-unsupported",
           "detail": "rclone exposes no command that isolates this operation",
           "verdict": null,
           "issue": null,
@@ -1575,7 +1578,7 @@
         },
         {
           "id": "presigned-get",
-          "status": "unsupported",
+          "status": "client-unsupported",
           "detail": "rclone link produces a URL only for backends it can sign for interactively, not as a scenario step",
           "verdict": null,
           "issue": null,
@@ -1583,7 +1586,7 @@
         },
         {
           "id": "presigned-put",
-          "status": "unsupported",
+          "status": "client-unsupported",
           "detail": "rclone link produces a URL only for backends it can sign for interactively, not as a scenario step",
           "verdict": null,
           "issue": null,
@@ -1607,7 +1610,7 @@
         },
         {
           "id": "streaming-chunked-upload",
-          "status": "unsupported",
+          "status": "client-unsupported",
           "detail": "aws-sdk-go-v2 declares UNSIGNED-PAYLOAD for object uploads and offers no signed aws-chunked mode",
           "verdict": null,
           "issue": null,
@@ -1632,7 +1635,7 @@
         },
         {
           "id": "trailer-chunked-upload",
-          "status": "unsupported",
+          "status": "client-unsupported",
           "detail": "rclone offers no trailing-checksum upload switch; it declares UNSIGNED-PAYLOAD instead",
           "verdict": null,
           "issue": null,
@@ -1649,7 +1652,7 @@
         },
         {
           "id": "versioned-object",
-          "status": "unsupported",
+          "status": "client-unsupported",
           "detail": "rclone exposes no command that isolates this operation",
           "verdict": null,
           "issue": null,
@@ -1671,7 +1674,7 @@
         },
         {
           "id": "bucket-lifecycle",
-          "status": "unsupported",
+          "status": "client-unsupported",
           "detail": "restic creates its repository bucket on init but has no command that removes a bucket",
           "verdict": null,
           "issue": null,
@@ -1679,7 +1682,7 @@
         },
         {
           "id": "copy-object",
-          "status": "unsupported",
+          "status": "client-unsupported",
           "detail": "restic addresses a repository, not individual objects; it exposes no command for this scenario",
           "verdict": null,
           "issue": null,
@@ -1687,7 +1690,7 @@
         },
         {
           "id": "delete-batch",
-          "status": "unsupported",
+          "status": "client-unsupported",
           "detail": "restic addresses a repository, not individual objects; it exposes no command for this scenario",
           "verdict": null,
           "issue": null,
@@ -1695,7 +1698,7 @@
         },
         {
           "id": "large-multipart-upload",
-          "status": "unsupported",
+          "status": "client-unsupported",
           "detail": "restic addresses a repository, not individual objects; it exposes no command for this scenario",
           "verdict": null,
           "issue": null,
@@ -1703,7 +1706,7 @@
         },
         {
           "id": "list-pagination",
-          "status": "unsupported",
+          "status": "client-unsupported",
           "detail": "restic addresses a repository, not individual objects; it exposes no command for this scenario",
           "verdict": null,
           "issue": null,
@@ -1711,7 +1714,7 @@
         },
         {
           "id": "presigned-get",
-          "status": "unsupported",
+          "status": "client-unsupported",
           "detail": "restic addresses a repository, not individual objects; it exposes no command for this scenario",
           "verdict": null,
           "issue": null,
@@ -1719,7 +1722,7 @@
         },
         {
           "id": "presigned-put",
-          "status": "unsupported",
+          "status": "client-unsupported",
           "detail": "restic addresses a repository, not individual objects; it exposes no command for this scenario",
           "verdict": null,
           "issue": null,
@@ -1727,7 +1730,7 @@
         },
         {
           "id": "range-download",
-          "status": "unsupported",
+          "status": "client-unsupported",
           "detail": "restic addresses a repository, not individual objects; it exposes no command for this scenario",
           "verdict": null,
           "issue": null,
@@ -1735,7 +1738,7 @@
         },
         {
           "id": "small-object-roundtrip",
-          "status": "unsupported",
+          "status": "client-unsupported",
           "detail": "restic addresses a repository, not individual objects; it exposes no command for this scenario",
           "verdict": null,
           "issue": null,
@@ -1764,7 +1767,7 @@
         },
         {
           "id": "sync-directory",
-          "status": "unsupported",
+          "status": "client-unsupported",
           "detail": "restic addresses a repository, not individual objects; it exposes no command for this scenario",
           "verdict": null,
           "issue": null,
@@ -1772,7 +1775,7 @@
         },
         {
           "id": "trailer-chunked-upload",
-          "status": "unsupported",
+          "status": "client-unsupported",
           "detail": "restic addresses a repository, not individual objects; it exposes no command for this scenario",
           "verdict": null,
           "issue": null,
@@ -1789,7 +1792,7 @@
         },
         {
           "id": "versioned-object",
-          "status": "unsupported",
+          "status": "client-unsupported",
           "detail": "restic addresses a repository, not individual objects; it exposes no command for this scenario",
           "verdict": null,
           "issue": null,
@@ -1803,7 +1806,7 @@
       "scenarios": [
         {
           "id": "backup-restore",
-          "status": "unsupported",
+          "status": "client-unsupported",
           "detail": "s3cmd is not a backup tool; it has no repository format to restore",
           "verdict": null,
           "issue": null,
@@ -1843,7 +1846,7 @@
         },
         {
           "id": "list-pagination",
-          "status": "unsupported",
+          "status": "client-unsupported",
           "detail": "s3cmd ls always asks for the server's maximum page and exposes no page-size option, so it cannot walk a 7-key page",
           "verdict": null,
           "issue": null,
@@ -1859,7 +1862,7 @@
         },
         {
           "id": "presigned-put",
-          "status": "unsupported",
+          "status": "client-unsupported",
           "detail": "s3cmd signurl signs GET URLs only",
           "verdict": null,
           "issue": null,
@@ -1883,7 +1886,7 @@
         },
         {
           "id": "streaming-chunked-upload",
-          "status": "unsupported",
+          "status": "client-unsupported",
           "detail": "s3cmd declares the whole-payload SHA-256 for every upload and has no aws-chunked mode",
           "verdict": null,
           "issue": null,
@@ -1908,7 +1911,7 @@
         },
         {
           "id": "trailer-chunked-upload",
-          "status": "unsupported",
+          "status": "client-unsupported",
           "detail": "s3cmd sends no trailing checksum; it has no aws-chunked mode",
           "verdict": null,
           "issue": null,
@@ -1925,7 +1928,7 @@
         },
         {
           "id": "versioned-object",
-          "status": "unsupported",
+          "status": "client-unsupported",
           "detail": "s3cmd has no bucket-versioning or version-id commands",
           "verdict": null,
           "issue": null,
@@ -1937,7 +1940,8 @@
   "summary": {
     "pass": 121,
     "fail": 0,
-    "unsupported": 61,
+    "client-unsupported": 61,
+    "sut-unregistered": 0,
     "known": 0,
     "regression": 0,
     "fixed": 0,

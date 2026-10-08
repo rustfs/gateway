@@ -784,6 +784,8 @@ mod expiration_header_tests;
 mod extra_permission_tests;
 /// Request checksum claims read as legacy RustFS reads them (rustfs/gateway#1349).
 mod legacy_checksum_claim_tests;
+/// `--register-only`: every other operation answered `501`, as the matrix's negative control needs.
+mod register_only_tests;
 /// The served assembly's posture, held to the RustFS profile's golden (rustfs/backlog#2751).
 mod rustfs_profile_tests;
 /// A customer-provided key over cleartext, gated before routing as legacy RustFS gates it

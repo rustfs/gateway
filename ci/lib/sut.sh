@@ -38,6 +38,8 @@
 #   sut_start                    # sets SUT_ENDPOINT, SUT_HOST, SUT_PORT
 #   trap sut_stop EXIT
 #   sut_render <template> <out>  # @NAME@ -> $NAME, refusing unset names
+#   sut_external_endpoint <url>  # validate and wait for an endpoint started elsewhere
+#   sut_server_header <url>      # that endpoint's own Server header, or nothing
 #
 # ENVIRONMENT
 #   GATEWAY_SUT_ENDPOINT   an already-running `http://host:port` to use as-is.
@@ -142,6 +144,49 @@ if missing:
 with open(output, "w", encoding="utf-8") as handle:
     handle.write(rendered)
 print(f"sut: rendered {output}")
+PY
+}
+
+# sut_external_endpoint <url>
+# Validates an external endpoint the way `compat-sut --external` will parse it — `http://host:port`
+# and nothing else — waits until it accepts connections, and sets SUT_EXTERNAL_HOST/PORT. Refusing
+# here, before an observer is launched, names the operator's URL as the problem rather than leaving
+# the observer's own refusal in a log nobody reads.
+SUT_EXTERNAL_HOST=""
+SUT_EXTERNAL_PORT=""
+sut_external_endpoint() {
+    local url="$1" authority
+    authority="${url#http://}"
+    [[ "$authority" != "$url" ]] || sut_die "an external endpoint must be an http://host:port URL, got ${url}"
+    authority="${authority%/}"
+    [[ "$authority" =~ ^[^/?#@]+:[0-9]+$ ]] || sut_die "an external endpoint must be http://host:port with no path, got ${url}"
+    SUT_EXTERNAL_HOST="${authority%:*}"
+    SUT_EXTERNAL_PORT="${authority##*:}"
+    sut_wait_ready "$SUT_EXTERNAL_HOST" "$SUT_EXTERNAL_PORT" "${GATEWAY_SUT_READY_SECONDS:-60}" ||
+        sut_die "the external endpoint ${url} is not accepting connections"
+}
+
+# sut_server_header <url>
+# Prints the `Server` header of one unsigned `HEAD /` answered by <url>, or nothing when the answer
+# carries none. Any status counts — an unsigned request is refused, and the refusal still names the
+# server — but no answer at all exits 3: an endpoint that cannot say what it is has not been measured.
+sut_server_header() {
+    python3 - "$1" <<'PY' || exit "$SUT_EXIT_ENVIRONMENT"
+import http.client
+import sys
+import urllib.parse
+
+url = urllib.parse.urlsplit(sys.argv[1])
+try:
+    connection = http.client.HTTPConnection(url.hostname, url.port, timeout=10)
+    connection.request("HEAD", "/")
+    server = connection.getresponse().getheader("Server")
+except OSError as error:
+    print(f"sut: {sys.argv[1]} did not answer HEAD /: {error}", file=sys.stderr)
+    raise SystemExit(1)
+# The value is echoed into a CI log line and a manifest. One line of printable characters, so a
+# folded or control-laden header cannot start a line of its own (a `::` workflow command) there.
+print(" ".join("".join(ch if ch.isprintable() else " " for ch in (server or "")).split())[:200])
 PY
 }
 

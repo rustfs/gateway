@@ -11,6 +11,10 @@ set -euo pipefail
 #   The table is generated because a hand-written one drifts from the manifest within a release and
 #   nobody notices: the table is what a reader believes, and the manifest is what was measured.
 #
+#   The two skips are never shown as one (rustfs/backlog#2758): a cell the client cannot express is
+#   `—`, a cell whose server does not register an operation it needs is `unregistered`, and each
+#   scenario row counts them in two columns of their own.
+#
 # USAGE
 #   scripts/gen_compat_table.sh          # rewrite README.md
 #   scripts/gen_compat_table.sh --check  # fail if it would change (this is what CI runs)
@@ -45,20 +49,38 @@ if not matrix_path.is_file():
 matrix = json.loads(matrix_path.read_text(encoding="utf-8"))
 clients = matrix["clients"]
 scenarios = sorted({row["id"] for client in clients for row in client["scenarios"]})
-mark = {"pass": "pass", "fail": "FAIL", "unsupported": "—"}
+mark = {"pass": "pass", "fail": "FAIL", "client-unsupported": "—", "sut-unregistered": "unregistered"}
+SKIPS = ("client-unsupported", "sut-unregistered")
 
+against = matrix.get("measured_against") or {}
+if against.get("sut") == "external":
+    build = against.get("endpoint_build")
+    measured = (
+        f"Measured against an external `{against.get('product')}` endpoint "
+        f"({'`Server: ' + build + '`' if build else 'no `Server` header'}) through `compat-sut --external` "
+        f"at harness commit `{matrix['sut'].get('harness_commit')}` on {matrix['generated_at']}."
+    )
+else:
+    measured = (
+        f"Measured against `{matrix['sut']['name']}` {matrix['sut']['version']} at commit "
+        f"`{matrix['sut']['commit']}` on {matrix['generated_at']}."
+    )
 lines = [BEGIN, ""]
 lines.append(
-    f"Measured against `{matrix['sut']['name']}` {matrix['sut']['version']} at commit "
-    f"`{matrix['sut']['commit']}` on {matrix['generated_at']}. "
-    f"`—` is a skip with a recorded reason, never a pass: see `compat/matrix.json`."
+    f"{measured} `—` is a scenario the client cannot express and `unregistered` one the server "
+    f"does not serve; both are skips with a recorded reason, never a pass: see `compat/matrix.json`."
 )
 lines.append("")
-header = "| Scenario | " + " | ".join(f"{client['name']} {client['version']}" for client in clients) + " |"
+header = (
+    "| Scenario | "
+    + " | ".join(f"{client['name']} {client['version']}" for client in clients)
+    + " | client-unsupported | sut-unregistered |"
+)
 lines.append(header)
-lines.append("| --- |" + " --- |" * len(clients))
+lines.append("| --- |" + " --- |" * (len(clients) + len(SKIPS)))
 for scenario in scenarios:
     cells = []
+    counts = {status: 0 for status in SKIPS}
     for client in clients:
         row = next((entry for entry in client["scenarios"] if entry["id"] == scenario), None)
         if row is None:
@@ -67,13 +89,17 @@ for scenario in scenarios:
         text = mark[row["status"]]
         if row["status"] == "fail":
             text = "FAIL (known)" if row.get("verdict") == "KNOWN" else "FAIL"
+        if row["status"] in counts:
+            counts[row["status"]] += 1
         cells.append(text)
+    cells.extend(str(counts[status]) for status in SKIPS)
     lines.append(f"| `{scenario}` | " + " | ".join(cells) + " |")
 lines.append("")
 summary = matrix["summary"]
 lines.append(
     f"{summary['pass']} pass, {summary['fail']} fail ({summary['known']} known), "
-    f"{summary['unsupported']} not expressible by the client or not registered by the server."
+    f"{summary['client-unsupported']} not expressible by the client, "
+    f"{summary['sut-unregistered']} not registered by the server."
 )
 streaming = matrix.get("streaming_signed_clients") or []
 lines.append("")

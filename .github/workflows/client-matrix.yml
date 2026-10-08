@@ -4,6 +4,13 @@
 # (AGENTS.md, "CI budget"); `scripts/check_compat_matrix.sh` fails if anyone attaches it to
 # `pull_request`. What the gate does check is cheap and static: that the pins are exact, that the
 # known-failure list only shrank, and that the README table still matches the manifest.
+#
+# `sut: external` measures an S3 endpoint started elsewhere (a RustFS candidate, rustfs/backlog#2776)
+# instead of the launcher: ci/compat/run_matrix.sh --external puts `compat-sut --external` in front of
+# it, so the wire evidence is still the server side's, and the manifest records `measured_against`.
+# The endpoint's credentials come from the COMPAT_EXTERNAL_ACCESS_KEY / COMPAT_EXTERNAL_SECRET_KEY
+# secrets. Such a run never overwrites the published manifest; its artifact is checked with
+# `scripts/check_compat_matrix.sh --matrix`, which requires sut-unregistered = 0 for RustFS.
 name: Client matrix
 
 on:
@@ -20,6 +27,24 @@ on:
         description: "Comma-separated scenario subset (default: every scenario)"
         required: false
         default: ""
+      sut:
+        description: >-
+          `gateway-fs` measures the in-repository launcher. `external` measures the endpoint below
+          through `compat-sut --external`, with the endpoint's own credentials from the
+          COMPAT_EXTERNAL_ACCESS_KEY / COMPAT_EXTERNAL_SECRET_KEY secrets.
+        type: choice
+        default: gateway-fs
+        options:
+          - gateway-fs
+          - external
+      endpoint:
+        description: "The external endpoint, http://host:port (sut: external only)"
+        required: false
+        default: ""
+      product:
+        description: "What the external endpoint is; rustfs requires sut-unregistered = 0 (sut: external only)"
+        required: false
+        default: rustfs
 
 permissions:
   contents: read
@@ -103,10 +128,28 @@ jobs:
           # A partial run must not overwrite the published manifest; a full run writes it and the
           # artifact below is what a reviewer compares with the committed one.
           GATEWAY_COMPAT_MATRIX_OUT: target/compat/matrix.json
+          # Inputs and secrets reach the runner as environment, never spliced into the script.
+          MATRIX_SUT: ${{ inputs.sut || 'gateway-fs' }}
+          MATRIX_ENDPOINT: ${{ inputs.endpoint || '' }}
+          MATRIX_PRODUCT: ${{ inputs.product || 'rustfs' }}
+          COMPAT_EXTERNAL_ACCESS_KEY: ${{ secrets.COMPAT_EXTERNAL_ACCESS_KEY }}
+          COMPAT_EXTERNAL_SECRET_KEY: ${{ secrets.COMPAT_EXTERNAL_SECRET_KEY }}
         run: |
+          if [ "$MATRIX_SUT" = external ]; then
+            # The runner refuses an external run with no endpoint, product or credentials (exit 3).
+            export GATEWAY_COMPAT_EXTERNAL_ENDPOINT="$MATRIX_ENDPOINT" GATEWAY_COMPAT_PRODUCT="$MATRIX_PRODUCT"
+            export GATEWAY_COMPAT_ACCESS_KEY="$COMPAT_EXTERNAL_ACCESS_KEY" GATEWAY_COMPAT_SECRET_KEY="$COMPAT_EXTERNAL_SECRET_KEY"
+            [ -n "$MATRIX_ENDPOINT" ] || { echo "::error title=matrix usage::sut=external needs the endpoint input"; exit 3; }
+          fi
           bash ci/compat/run_matrix.sh \
             ${{ inputs.clients && format('--clients {0}', inputs.clients) || '' }} \
             ${{ inputs.scenarios && format('--scenarios {0}', inputs.scenarios) || '' }}
+
+      # An external run is held to the manifest rules here, including sut-unregistered = 0 for a
+      # RustFS endpoint (rustfs/backlog#2758); the launcher's own manifest is checked on every PR.
+      - name: Check an external run's manifest
+        if: (success() || failure()) && inputs.sut == 'external' && steps.matrix.outcome != 'skipped'
+        run: bash scripts/check_compat_matrix.sh --matrix target/compat/matrix.json
 
       # The run's probe records become corpus material (rustfs/backlog#1765 a-cm-0008): converted,
       # sanitized, deduplicated and verified into target/compat/corpus, never into the repository's
@@ -126,7 +169,8 @@ jobs:
           import json
           matrix = json.load(open("target/compat/matrix.json"))
           summary = matrix["summary"]
-          print(f"- pass {summary['pass']} / fail {summary['fail']} / unsupported {summary['unsupported']}")
+          print(f"- measured against {json.dumps(matrix.get('measured_against'), sort_keys=True)}")
+          print(f"- pass {summary['pass']} / fail {summary['fail']} / client-unsupported {summary['client-unsupported']} / sut-unregistered {summary['sut-unregistered']}")
           print(f"- known {summary['known']} / regression {summary['regression']} / fixed {summary['fixed']}")
           streaming = matrix.get("streaming_signed_clients") or []
           print(f"- STREAMING-AWS4-HMAC-SHA256 observed from: {', '.join(streaming) or 'no client'}")

@@ -5,7 +5,7 @@ set -euo pipefail
 # check_compat_matrix.sh
 #
 # WHAT THIS CHECKS
-#   Five properties of the compatibility manifest that can be judged without running any client:
+#   Six properties of the compatibility manifest that can be judged without running any client:
 #
 #     1. The known-failure list only ever shrinks. Every entry in `compat/known-fail.txt` was
 #        already in the committed version. Adding one is how a regression gets silenced in the same
@@ -27,6 +27,17 @@ set -euo pipefail
 #     5. The matrix workflow is cron and manual dispatch only. A full run is tens of minutes and
 #        the pull-request gate budget is ten (AGENTS.md, "CI budget"), so attaching it to
 #        `pull_request` fails here rather than on the day the gate goes over.
+#     6. The manifest says what answered it (`measured_against`), and the two skip statuses stay
+#        apart: `client-unsupported` (the client cannot express the scenario) and `sut-unregistered`
+#        (the server does not serve an operation it needs), each with a reason and its own count.
+#        When an external endpoint answered and it is RustFS — declared so, or naming itself so in
+#        its `Server` header — `sut-unregistered` must be zero: a RustFS candidate serves every
+#        operation the matrix needs (rustfs/backlog#2758).
+#
+# USAGE
+#   scripts/check_compat_matrix.sh                    # the committed compat/matrix.json
+#   scripts/check_compat_matrix.sh --matrix <file>    # a manifest a run produced, e.g. an
+#                                                     # external run's target/compat/matrix.json
 #
 # WHY
 #   Compatibility is an external promise. `rustfs/backlog#1765` §4.5: the manifest is baseline-aware
@@ -45,11 +56,24 @@ fail() {
     exit 1
 }
 
+MATRIX="$ROOT_DIR/compat/matrix.json"
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+    --matrix)
+        MATRIX="${2:?--matrix requires a path}"
+        shift 2
+        ;;
+    *)
+        fail "unknown argument $1"
+        ;;
+    esac
+done
+
 source "${SCRIPT_DIR}/lib/python.sh"
 PYTHON="$(gateway_python check_compat_matrix)" || exit 1
 command -v git >/dev/null 2>&1 || fail 'required command is missing: git'
 [[ -f "$ROOT_DIR/compat/known-fail.txt" ]] || fail 'required input is missing: compat/known-fail.txt'
-[[ -f "$ROOT_DIR/compat/matrix.json" ]] || fail 'required input is missing: compat/matrix.json'
+[[ -f "$MATRIX" ]] || fail "required input is missing: ${MATRIX#"$ROOT_DIR"/}"
 [[ -f "$ROOT_DIR/compat/versions.toml" ]] || fail 'required input is missing: compat/versions.toml'
 [[ -f "$ROOT_DIR/.github/workflows/client-matrix.yml" ]] || fail 'required input is missing: .github/workflows/client-matrix.yml'
 
@@ -81,7 +105,7 @@ if ! git -C "$ROOT_DIR" show "${baseline_ref}:compat/versions.toml" >"$previous_
     cp "$ROOT_DIR/compat/versions.toml" "$previous_versions"
 fi
 
-"$PYTHON" - "$ROOT_DIR" "$previous" "$previous_versions" "$previous_state" <<'PY'
+"$PYTHON" - "$ROOT_DIR" "$previous" "$previous_versions" "$previous_state" "$MATRIX" <<'PY'
 import json
 import re
 import sys
@@ -92,6 +116,7 @@ root, previous, previous_versions = Path(sys.argv[1]), Path(sys.argv[2]), Path(s
 # Whether the comparison commit had a known-failure list at all. Only its absence waives the
 # ratchet; an empty list is a list, and a fully fixed one must not reopen (rustfs/gateway#1073).
 previous_present = sys.argv[4] == "present"
+matrix_path = Path(sys.argv[5])
 failures = []
 
 
@@ -151,27 +176,65 @@ for driver in sorted((root / "compat/drivers").glob("*/run.sh")):
     if driver.parent.name not in clients:
         failures.append(f"{driver.parent.name} has a driver but is not declared in compat/versions.toml")
 
-matrix = json.loads((root / "compat/matrix.json").read_text(encoding="utf-8"))
+matrix = json.loads(matrix_path.read_text(encoding="utf-8"))
+# Named as given, so a manifest checked with --matrix is the one the diagnostics name.
+try:
+    label = str(matrix_path.resolve().relative_to(root.resolve()))
+except ValueError:
+    label = str(matrix_path)
+
+# What answered the rows. `gateway-fs` is the launcher, named in full by the sut block below; an
+# external endpoint's own `Server` header is recorded (null when it sent none — an observation, while
+# an absent key is none), and so is the product it was declared to be.
+against = matrix.get("measured_against")
+external = False
+rustfs_endpoint = False
+if not isinstance(against, dict):
+    failures.append(f"{label} has no measured_against block saying what answered it")
+elif against.get("sut") == "gateway-fs":
+    pass
+elif against.get("sut") == "external":
+    external = True
+    product = str(against.get("product") or "").strip()
+    if not product:
+        failures.append(
+            f"{label} was measured against an external endpoint but names no product; the "
+            "RustFS rule keys on it, so a missing product would switch that rule off"
+        )
+    if "endpoint_build" not in against:
+        failures.append(f"{label} was measured against an external endpoint and records no endpoint_build")
+    build = str(against.get("endpoint_build") or "")
+    names_rustfs = build.lower().startswith("rustfs")
+    if names_rustfs and product and product != "rustfs":
+        failures.append(
+            f"{label} declares the external endpoint as {product!r}, but its Server header names "
+            f"RustFS ({build!r}); declare it as rustfs"
+        )
+    rustfs_endpoint = product == "rustfs" or names_rustfs
+else:
+    failures.append(f"{label} measured_against names an unknown system under test {against.get('sut')!r}")
 
 # The manifest must say what answered it. A compatibility row whose system under test is unnamed
 # cannot be re-measured, and a provisional one that stops saying so silently becomes a claim about
 # a server nobody checked.
 sut = matrix.get("sut")
 if not isinstance(sut, dict):
-    failures.append("compat/matrix.json has no sut block")
+    failures.append(f"{label} has no sut block")
 else:
     for field in ("name", "version", "commit", "generation", "binary", "package", "assembly"):
         if not sut.get(field):
-            failures.append(f"compat/matrix.json sut block has no {field}")
+            failures.append(f"{label} sut block has no {field}")
     if sut.get("provisional") and not str(sut.get("provisional_reason", "")).strip():
-        failures.append("compat/matrix.json marks the system under test provisional with no reason")
-counted = {"pass": 0, "fail": 0, "unsupported": 0}
+        failures.append(f"{label} marks the system under test provisional with no reason")
+counted = {"pass": 0, "fail": 0, "client-unsupported": 0, "sut-unregistered": 0}
+skips = ("client-unsupported", "sut-unregistered")
+unregistered_cells = []
 verdicts = {"known": 0, "regression": 0, "fixed": 0, "stale": 0}
 for client in matrix.get("clients", []):
     for row in client.get("scenarios", []):
         status = row.get("status")
         if status not in counted:
-            failures.append(f"compat/matrix.json records an unknown status {status!r} for {client['name']}/{row.get('id')}")
+            failures.append(f"{label} records an unknown status {status!r} for {client['name']}/{row.get('id')}")
             continue
         counted[status] += 1
         cell = f"{client['name']}/{row['id']}"
@@ -182,28 +245,37 @@ for client in matrix.get("clients", []):
             expected = "FIXED" if status == "pass" else "STALE"
         if row.get("verdict") != expected:
             failures.append(
-                f"compat/matrix.json records verdict {row.get('verdict')!r} for {cell} where the "
+                f"{label} records verdict {row.get('verdict')!r} for {cell} where the "
                 f"known-failure list implies {expected!r}"
             )
         if expected:
             verdicts[expected.lower()] += 1
-        # A skip must be a skip with a reason. An `unsupported` row whose reason is empty is
+        # A skip must be a skip with a reason. A skipped row whose reason is empty is
         # indistinguishable from a pass to anything that reads only the status.
-        if status == "unsupported" and not (row.get("detail") or "").strip():
-            failures.append(f"compat/matrix.json records {cell} as unsupported with no reason")
+        if status in skips and not (row.get("detail") or "").strip():
+            failures.append(f"{label} records {cell} as {status} with no reason")
+        if status == "sut-unregistered":
+            unregistered_cells.append(cell)
         # A known failure carries its owning issue in the manifest, not only in the excuse list.
         if expected == "KNOWN" and row.get("issue") != current[cell]["issue"]:
             failures.append(
-                f"compat/matrix.json records issue {row.get('issue')!r} for {cell} where "
+                f"{label} records issue {row.get('issue')!r} for {cell} where "
                 f"compat/known-fail.txt names {current[cell]['issue']!r}"
             )
         if status == "fail" and expected == "REGRESSION" and row.get("issue"):
-            failures.append(f"compat/matrix.json attributes an unexcused failure {cell} to an issue")
+            failures.append(f"{label} attributes an unexcused failure {cell} to an issue")
 
 summary = matrix.get("summary", {})
 for key, value in list(counted.items()) + list(verdicts.items()):
     if summary.get(key) != value:
-        failures.append(f"compat/matrix.json summary says {key}={summary.get(key)}, its own cells say {value}")
+        failures.append(f"{label} summary says {key}={summary.get(key)}, its own cells say {value}")
+
+if external and rustfs_endpoint and unregistered_cells:
+    failures.append(
+        f"{label} was measured against an external RustFS endpoint, which must register every "
+        f"operation the matrix needs; sut-unregistered is {len(unregistered_cells)}, not 0: "
+        + ", ".join(unregistered_cells)
+    )
 
 workflow = (root / ".github/workflows/client-matrix.yml").read_text(encoding="utf-8")
 triggers = re.search(r"(?m)^on:\n((?:[ \t]+.*\n|\n)*)", workflow)
@@ -227,6 +299,7 @@ if failures:
 
 print(
     f"OK: known-fail {len(current)} <= previous {len(before) if before else len(current)}, "
-    f"matrix {counted['pass']} pass / {counted['fail']} fail / {counted['unsupported']} unsupported"
+    f"matrix {counted['pass']} pass / {counted['fail']} fail / {counted['client-unsupported']} client-unsupported / "
+    f"{counted['sut-unregistered']} sut-unregistered against {(against or {}).get('sut')}"
 )
 PY

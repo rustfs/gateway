@@ -22,7 +22,11 @@
 //! signature material. The chunk signatures themselves are counted and discarded; nothing here
 //! writes a signature, an `Authorization` header, or a credential into the log — including the
 //! ones a presigned request carries in its query string, whose values are redacted.
-//! Upstream: `crate::main`, which wraps the assembled `S3Service` in [`ProbeService`].
+//! Every record also names who answered: `service` (the launcher's own `S3Service`), `upstream`
+//! (an external endpoint behind `--external`) or `observer` (the observer itself, when that
+//! endpoint could not be reached), so an answer nobody measured can never pass for a measured one.
+//! Upstream: `crate::main`, which wraps the assembled `S3Service`, or `crate::forward::Forward`
+//! under `--external`, in [`ProbeService`].
 //! Downstream: `ci/compat/report.py`, which reads the log to decide whether a client really
 //! emitted `STREAMING-AWS4-HMAC-SHA256` framing rather than merely exiting zero.
 
@@ -39,6 +43,8 @@ use std::task::{Context, Poll};
 use bytes::Buf as _;
 use http::Request;
 use rustfs_gateway::{S3Service, TransportSecurity};
+
+use crate::forward::AnsweredBy;
 
 /// The chunk-extension every signed `aws-chunked` frame carries.
 ///
@@ -223,33 +229,40 @@ where
     }
 }
 
-/// The assembled S3 service, wrapped so that every request leaves one evidence record.
+/// The served service, wrapped so that every request leaves one evidence record.
+///
+/// `S` is the launcher's own `S3Service`, or `crate::forward::Forward` when `--external` puts an
+/// endpoint started elsewhere behind the same listeners; the record is the same either way, plus
+/// who answered.
 #[derive(Clone)]
-pub(crate) struct ProbeService {
-    inner: S3Service,
+pub(crate) struct ProbeService<S = S3Service> {
+    inner: S,
     log: Option<Arc<ProbeLog>>,
 }
 
-impl ProbeService {
+impl<S> ProbeService<S> {
     /// Wraps `inner`, appending one record per served request to `log` when there is one.
     ///
     /// `None` records nothing, and is what a launch without `--probe-log` gets: the probe is
     /// opt-in so that a driver being debugged by hand does not overwrite a matrix run's evidence.
     /// It is one type either way so that the plaintext and the encrypted listener serve the same
     /// value.
-    pub(crate) fn new(inner: S3Service, log: Option<Arc<ProbeLog>>) -> Self {
+    pub(crate) fn new(inner: S, log: Option<Arc<ProbeLog>>) -> Self {
         Self { inner, log }
     }
 }
 
 type ProbeFuture<R> = Pin<Box<dyn Future<Output = Result<R, Infallible>> + Send>>;
 
-impl<B> tower::Service<Request<B>> for ProbeService
+impl<S, B, R> tower::Service<Request<B>> for ProbeService<S>
 where
+    S: tower::Service<Request<ProbeBody<B>>, Response = http::Response<R>, Error = Infallible> + Clone + Send + 'static,
+    S::Future: Send + 'static,
+    R: Send + 'static,
     B: http_body::Body<Data = bytes::Bytes> + Send + Unpin + 'static,
     B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
 {
-    type Response = <S3Service as tower::Service<Request<ProbeBody<B>>>>::Response;
+    type Response = http::Response<R>;
     type Error = Infallible;
     type Future = ProbeFuture<Self::Response>;
 
@@ -267,15 +280,22 @@ where
         let call = tower::Service::call(&mut inner, request);
         Box::pin(async move {
             let response: Result<Self::Response, Infallible> = call.await;
-            let status = match &response {
-                Ok(answered) => answered.status().as_u16(),
+            let (status, answered_by) = match &response {
+                Ok(answered) => (
+                    answered.status().as_u16(),
+                    // The launcher's own service marks nothing: it answered in-process.
+                    answered
+                        .extensions()
+                        .get::<AnsweredBy>()
+                        .map_or("service", |who| who.as_str()),
+                ),
                 // The inner service's error is `Infallible`, so this arm is unreachable in
                 // practice; it is spelled out rather than unwrapped because the record must not
                 // be the thing that panics.
-                Err(_) => 0,
+                Err(_) => (0, "service"),
             };
             if let Some(log) = log {
-                log.append(&record.render(status, &facts));
+                log.append(&record.render(status, answered_by, &facts));
             }
             response
         })
@@ -332,10 +352,10 @@ impl RequestFacts {
         }
     }
 
-    fn render(&self, status: u16, facts: &BodyFacts) -> String {
+    fn render(&self, status: u16, answered_by: &str, facts: &BodyFacts) -> String {
         format!(
             concat!(
-                "{{\"method\":{},\"path\":{},\"query\":{},\"status\":{},",
+                "{{\"method\":{},\"path\":{},\"query\":{},\"status\":{},\"answered_by\":{},",
                 "\"payload_mode\":{},\"content_encoding\":{},\"decoded_content_length\":{},",
                 "\"declared_trailer\":{},\"signed_chunks\":{},\"trailer_signature\":{},",
                 "\"request_wire_bytes\":{},\"user_agent\":{},\"transport\":{}}}"
@@ -344,6 +364,7 @@ impl RequestFacts {
             quote(&self.path),
             quote(&self.query),
             status,
+            quote(answered_by),
             quote(&self.payload_mode),
             quote(&self.content_encoding),
             quote(&self.decoded_length),

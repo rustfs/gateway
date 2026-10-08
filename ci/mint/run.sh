@@ -67,6 +67,18 @@
 #   THIRD-PARTY-NOTICES.md; `scripts/check_no_vendored_suites.sh` asserts that no suite
 #   implementation is committed here.
 #
+# AGAINST AN EXTERNAL ENDPOINT (rustfs/backlog#2758, rustfs/gateway#1199)
+#   --external http://host:port measures an S3 endpoint started elsewhere — a RustFS binary —
+#   instead of the launcher's filesystem backend. No backend is started: `compat-sut --external`
+#   is launched on MINT_SUT_HOST:MINT_SUT_PORT (and MINT_SUT_TLS_PORT for the TLS pass) and forwards
+#   every request to the endpoint unchanged, so both passes, the readiness wait and the survival
+#   checks below work exactly as they do for the launcher. TLS terminates at the observer. The
+#   endpoint's own credentials must be given in MINT_ACCESS_KEY / MINT_SECRET_KEY; the throwaway
+#   defaults belong to the launcher. Any request the observer had to answer itself, because the
+#   endpoint did not, makes the run incomplete (exit 3). The report records `measured_against`
+#   with the endpoint's own `Server` header, and the run is judged against the same, unchanged
+#   ci/mint/baseline.txt.
+#
 # LOCAL IMAGE TRIALS
 #   --local-image sha256:<64 lowercase hex> accepts an already built Docker image ID, in
 #   either mode: the workflow passes the image ci/mint/Dockerfile built from the pinned
@@ -76,6 +88,7 @@
 #
 # USAGE
 #   ci/mint/run.sh [--mode ratchet|record] [--work <dir>] [--out <dir>] [--local-image <id>]
+#                  [--external <http://host:port>]   (or MINT_EXTERNAL_ENDPOINT)
 # =============================================================================
 
 set -euo pipefail
@@ -87,6 +100,7 @@ EXIT_USAGE=2
 
 MODE="ratchet"
 LOCAL_IMAGE=""
+MINT_EXTERNAL="${MINT_EXTERNAL_ENDPOINT:-}"
 WORK_DIR=""
 OUT_DIR=""
 while [[ "$#" -gt 0 ]]; do
@@ -111,8 +125,16 @@ while [[ "$#" -gt 0 ]]; do
         OUT_DIR="${2:-}"
         shift 2
         ;;
+    --external)
+        MINT_EXTERNAL="${2:-}"
+        [[ -n "$MINT_EXTERNAL" ]] || {
+            printf 'run: --external requires an http://host:port URL\n' >&2
+            exit "$EXIT_USAGE"
+        }
+        shift 2
+        ;;
     -h | --help)
-        sed -n '17,79p' "${BASH_SOURCE[0]}"
+        sed -n '17,92p' "${BASH_SOURCE[0]}"
         exit 0
         ;;
     *)
@@ -128,6 +150,22 @@ ratchet | record) ;;
     exit "$EXIT_USAGE"
     ;;
 esac
+# An external endpoint is measured with its own credentials, never the launcher's defaults: a run
+# signed with a key the endpoint does not hold records every SDK as failing, which reads exactly
+# like a regression.
+if [[ -n "$MINT_EXTERNAL" && -n "${GATEWAY_SUT_ENDPOINT:-}" ]]; then
+    # Adopting a running endpoint directly would put nothing in front of it to say whether an
+    # answer was the endpoint's, and the runner would then refuse the run for lacking that record.
+    printf 'run: --external launches its own observer; unset GATEWAY_SUT_ENDPOINT\n' >&2
+    exit "$EXIT_USAGE"
+fi
+if [[ -n "$MINT_EXTERNAL" && ( -z "${MINT_ACCESS_KEY:-}" || -z "${MINT_SECRET_KEY:-}" ) ]]; then
+    printf 'run: --external needs the endpoint'"'"'s own credentials in MINT_ACCESS_KEY and MINT_SECRET_KEY\n' >&2
+    exit "$EXIT_USAGE"
+fi
+# Every value the container and the SUT are given, and its default, is here. The defaults
+# are for a throwaway loopback service and are not secrets; `:=` means an empty override,
+# which is what an unset GitHub secret renders as, falls back to the default.
 
 WORK_DIR="${WORK_DIR:-$(mktemp -d "${TMPDIR:-/tmp}/gateway-mint.XXXXXX")}"
 OUT_DIR="${OUT_DIR:-${WORK_DIR}/out}"
@@ -158,9 +196,6 @@ read -r -a MINT_SDK_LIST <<<"${MINT_SDKS:-}"
 command -v docker >/dev/null 2>&1 || sut_die "docker is not installed; mint runs only as its pinned image"
 
 # --- the configuration values --------------------------------------------------------------
-# Every value the container and the SUT are given, and its default, is here. The defaults
-# are for a throwaway loopback service and are not secrets; `:=` means an empty override,
-# which is what an unset GitHub secret renders as, falls back to the default.
 : "${MINT_ACCESS_KEY:=AKIAGATEWAYMINT00000}"
 : "${MINT_SECRET_KEY:=gateway-mint-secret-for-a-throwaway-service}"
 : "${MINT_REGION:=us-east-1}"
@@ -220,6 +255,24 @@ if ((${#MINT_TLS_LIST[@]} > 0)); then
     if [[ -n "$MINT_SERVER_HOST" ]]; then
         MINT_TLS_FLAGS+=" --tls-san \"\$MINT_SERVER_HOST\""
     fi
+fi
+REPORT_SUT_ARGS=(--sut gateway-fs)
+MINT_OBSERVER_PROBE="${WORK_DIR}/observer-probe.jsonl"
+if [[ -n "$MINT_EXTERNAL" ]]; then
+    # The endpoint names itself once, read directly before the observer stands in front of it.
+    sut_external_endpoint "$MINT_EXTERNAL"
+    MINT_ENDPOINT_BUILD="$(sut_server_header "$MINT_EXTERNAL")" ||
+        sut_die "the external endpoint ${MINT_EXTERNAL} did not say what it is"
+    printf 'run: external endpoint %s answers as Server: %s\n' "$MINT_EXTERNAL" "${MINT_ENDPOINT_BUILD:-(none)}"
+    REPORT_SUT_ARGS=(--sut external --endpoint-build "$MINT_ENDPOINT_BUILD")
+    export MINT_EXTERNAL MINT_OBSERVER_PROBE
+    # No data root, no credentials: the observer holds neither, and refuses both.
+    # shellcheck disable=SC2089
+    GATEWAY_SUT_COMMAND="${GATEWAY_SUT_COMMAND:-\"\$MINT_SUT_BINARY\" \
+        --external \"\$MINT_EXTERNAL\" \
+        --host \"\$MINT_SUT_HOST\" \
+        --port \"\$MINT_SUT_PORT\" \
+        --probe-log \"\$MINT_OBSERVER_PROBE\"${MINT_TLS_FLAGS}}"
 fi
 # shellcheck disable=SC2089,SC2090
 : "${GATEWAY_SUT_COMMAND:=\"\$MINT_SUT_BINARY\" \
@@ -364,6 +417,16 @@ if [[ -n "$SUT_PID" ]] && ! kill -0 "$SUT_PID" 2>/dev/null; then
 fi
 sut_wait_ready "$SUT_HOST" "$SUT_PORT" 5 ||
     sut_die "the system under test stopped accepting connections during the run"
+if [[ -n "$MINT_EXTERNAL" ]]; then
+    # The observer stayed up; the endpoint behind it must have too, and every answer an SDK got
+    # must have been the endpoint's. One `502` the observer wrote itself measured the network.
+    sut_wait_ready "$SUT_EXTERNAL_HOST" "$SUT_EXTERNAL_PORT" 5 ||
+        sut_die "the external endpoint ${MINT_EXTERNAL} stopped accepting connections during the run"
+    [[ -f "$MINT_OBSERVER_PROBE" ]] || sut_die "the observer wrote no probe log at ${MINT_OBSERVER_PROBE}"
+    UNREACHED="$(grep -c '"answered_by":"observer"' "$MINT_OBSERVER_PROBE" || true)"
+    [[ "$UNREACHED" == 0 ]] ||
+        sut_die "the observer could not reach ${MINT_EXTERNAL} for ${UNREACHED} request(s); nothing mint recorded is a measurement of it"
+fi
 if ((${#MINT_TLS_LIST[@]} > 0)); then
     sut_wait_ready "$SUT_HOST" "$MINT_SUT_TLS_PORT" 5 ||
         sut_die "the system under test's TLS listener stopped accepting connections during the run"
@@ -377,6 +440,7 @@ REPORT_ARGS=(
     --baseline "${ROOT_DIR}/ci/mint/baseline.txt"
     --sdks "${MINT_SDK_LIST[*]}"
     --image "$MINT_IMAGE"
+    "${REPORT_SUT_ARGS[@]}"
     --markdown "${OUT_DIR}/summary.md"
     --json "${OUT_DIR}/report.json"
 )

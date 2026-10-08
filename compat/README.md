@@ -52,17 +52,58 @@ re-measure: the rows below describe server answers, and server answers belong to
 Client-side facts do not depend on that. Which payload mode an SDK chooses, and whether it frames a
 body as `aws-chunked`, is a property of the client and holds against whatever answered.
 
+The manifest's `measured_against` block says which kind of server that was: `{"sut": "gateway-fs"}`
+for the launcher, or `{"sut": "external", "endpoint_build": ..., "product": ...}` for an endpoint
+started elsewhere (next section).
+
+## Against an external endpoint
+
+`ci/compat/run_matrix.sh --external http://host:port --product rustfs` measures an S3 endpoint
+started elsewhere — a RustFS candidate (rustfs/backlog#2776) — with the same thirteen drivers. No
+filesystem backend starts. `compat-sut --external <url>` stands in front of the endpoint instead: it
+forwards every request unchanged (the `Host` header the client signed included) and hands the
+endpoint's answer back unchanged, while recording the same wire evidence the launcher records, plus
+who answered. The wire assertions are therefore still judged from what the server side saw, and an
+endpoint that does not serve an operation is observed answering `501`/`405`, not inferred from a
+client's error text. TLS, when a client needs it, terminates at the observer; the endpoint is
+dialled in plaintext. The endpoint's credentials go in `GATEWAY_COMPAT_ACCESS_KEY` /
+`GATEWAY_COMPAT_SECRET_KEY` — the launcher's defaults are refused here — and its own `Server`
+header, read once before the run, is recorded as `endpoint_build` (`null` when it sends none).
+
+`scripts/check_compat_matrix.sh --matrix <the run's matrix.json>` then requires `sut-unregistered = 0`
+when the endpoint is RustFS, declared so or naming itself so in its `Server` header. A request the
+observer had to answer itself, because the endpoint did not, stops the run with exit `3`.
+
+```bash
+cargo build --release -p rustfs-gateway-compat-sut
+GATEWAY_COMPAT_SUT_BIN=target/release/compat-sut \
+  GATEWAY_COMPAT_ACCESS_KEY=... GATEWAY_COMPAT_SECRET_KEY=... \
+  GATEWAY_COMPAT_MATRIX_OUT=target/compat/matrix.json \
+  ci/compat/run_matrix.sh --external http://127.0.0.1:9000 --product rustfs
+scripts/check_compat_matrix.sh --matrix target/compat/matrix.json
+```
+
+`compat-sut --register-only ListBuckets` (any comma-separated list of the operations the launcher
+registers) is the negative control: started on its own and addressed with `--external`, every
+scenario that needs another operation is recorded `sut-unregistered`, while a scenario the client
+cannot express stays `client-unsupported`. MinIO mint takes the same mode
+(`ci/mint/run.sh --external`, `e2e-mint.yml`'s `sut` and `endpoint` inputs).
+
 ## What a status means
 
 | Status | Meaning |
 | --- | --- |
 | `pass` | The client did the thing, the bytes matched, and any wire assertion the scenario declares was satisfied by what the server recorded. |
 | `fail` | The client tried and the server answered wrongly, or a wire assertion was not met. A `fail` listed in `known-fail.txt` is `KNOWN`; one that is not is a `REGRESSION` and fails the job. |
-| `unsupported` | Either the client has no way to express the scenario, or the system under test does not register an operation the scenario needs. **Never a pass.** It is counted separately, printed as `—` in the README table, and always carries a reason. |
+| `client-unsupported` | The client has no way to express the scenario. Only a driver says so, before it talks to the server. **Never a pass.** Printed as `—` in the README table and always carries a reason. |
+| `sut-unregistered` | The server does not serve an operation the scenario needs: the launcher's own registry (`--print-capabilities`) lacks it, so the cell never ran, or an external endpoint answered `501` or `405` to a request of a cell whose driver then failed. **Never a pass.** Printed as `unregistered` and always carries a reason naming the operation or the answer. Must be `0` for an external RustFS endpoint. |
 
 Recording a client's inability as a failure would pollute the manifest and stop the ratchet from
-ever moving; recording it as a pass would claim coverage that does not exist. That is why there are
-three statuses and not two.
+ever moving; recording it as a pass would claim coverage that does not exist. The two skips are kept
+apart, and counted in two columns of the README table, because they have different owners: a
+client gap is nobody's bug, while an unregistered operation on a RustFS endpoint is RustFS's.
+Against the launcher a `501` is not reclassified — its registry is known before any client runs, so
+a `501` behind a registered operation stays a `fail` and the ratchet sees it.
 
 ## Scenarios and drivers are separate on purpose
 
@@ -119,4 +160,4 @@ ci/compat/record_corpus.sh --run-dir target/compat --corpus-bin target/release/c
 | `../ci/compat/record_corpus.sh` | Turns a run's probe records into a verified corpus under the run directory. |
 | `known-fail.txt` | Excused failures. Shrinks only. |
 | `matrix.json` | The generated manifest. A protected file: it is an external promise. |
-| `sut/` | The `compat-sut` binary: puts `rustfs-gateway-fs` behind a real socket and records what crossed it. It is the runnable server rustfs/gateway#624 says the workspace lacked. Started through `ci/lib/sut.sh`, the launcher shared with the P8-05 external-suite runner (rustfs/backlog#1764). The matrix also starts its TLS listener (`--tls-port`, `--tls-self-signed`) and hands drivers `COMPAT_TLS_ENDPOINT` and `COMPAT_CA_BUNDLE`; only a scenario a client can express solely over TLS uses them (rustfs/gateway#719). |
+| `sut/` | The `compat-sut` binary: puts `rustfs-gateway-fs` behind a real socket and records what crossed it — or, with `--external`, stands in front of an endpoint started elsewhere and records the same. It is the runnable server rustfs/gateway#624 says the workspace lacked. Started through `ci/lib/sut.sh`, the launcher shared with the P8-05 external-suite runner (rustfs/backlog#1764). The matrix also starts its TLS listener (`--tls-port`, `--tls-self-signed`) and hands drivers `COMPAT_TLS_ENDPOINT` and `COMPAT_CA_BUNDLE`; only a scenario a client can express solely over TLS uses them (rustfs/gateway#719). |

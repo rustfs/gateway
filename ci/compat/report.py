@@ -10,6 +10,12 @@ table. Those are `ci/compat/run_matrix.sh` and `scripts/gen_compat_table.sh`.
 Exit codes: 0 = no regression, 1 = at least one regression, 3 = the environment or a driver is
 broken, which is deliberately not the same as "every scenario failed": recording a broken
 environment as a wall of failures is how a baseline gets poisoned.
+
+A cell that is neither a pass nor a fail is one of two skips, and they are never merged:
+`client-unsupported` is a driver's statement that its client cannot express the scenario, and
+`sut-unregistered` is the server's: the launcher's own registry lacks an operation the scenario
+needs, or — against an external endpoint, whose registry nobody here can read — the endpoint
+answered `501` or `405` to a request of a cell that then failed.
 """
 
 from __future__ import annotations
@@ -30,6 +36,18 @@ REGRESSION = 1
 ENVIRONMENT = 3
 
 STREAMING_SIGNED = re.compile(r"^STREAMING-AWS4-HMAC-SHA256-PAYLOAD(-TRAILER)?$")
+
+# Every status a manifest cell may carry, in the order the summary prints them.
+STATUSES = ("pass", "fail", "client-unsupported", "sut-unregistered")
+
+# The answers by which a server says it does not serve what it was asked: `501 NotImplemented`
+# for an operation with no handler, `405 MethodNotAllowed` for a method its router does not route.
+UNREGISTERED_ANSWERS = (501, 405)
+
+# What answered the rows. `gateway-fs` is this repository's launcher, whose registry the run
+# reads before any client starts; `external` is an endpoint started elsewhere and observed through
+# `compat-sut --external`, whose registry is known only from its answers.
+SUT_KINDS = ("gateway-fs", "external")
 
 
 def problem(message: str) -> int:
@@ -175,20 +193,34 @@ def declared_capabilities(path: Path) -> list[str]:
 
 def preflight(arguments: argparse.Namespace) -> int:
     clients = load_versions(Path(arguments.versions))
-    declared = declared_capabilities(Path(arguments.capabilities))
-    actual = sorted(
-        line.strip()
-        for line in Path(arguments.sut_capabilities).read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    )
     failures = []
-    if declared != actual:
-        failures.append(
-            "compat/capabilities.toml does not match the system under test's registry: "
-            f"undeclared={sorted(set(actual) - set(declared))}, "
-            f"declared-but-absent={sorted(set(declared) - set(actual))}"
+    actual: list[str] = []
+    if arguments.sut_capabilities:
+        declared = declared_capabilities(Path(arguments.capabilities))
+        actual = sorted(
+            line.strip()
+            for line in Path(arguments.sut_capabilities).read_text(encoding="utf-8").splitlines()
+            if line.strip()
         )
+        if declared != actual:
+            failures.append(
+                "compat/capabilities.toml does not match the system under test's registry: "
+                f"undeclared={sorted(set(actual) - set(declared))}, "
+                f"declared-but-absent={sorted(set(declared) - set(actual))}"
+            )
+    else:
+        # An external endpoint publishes no registry. Nothing is skipped before it runs; what it
+        # does not serve is read from its answers, cell by cell.
+        print("compat: the system under test is external; its registry is read from its answers")
+    selected = {name for name in (arguments.clients or "").split(",") if name}
+    unknown = sorted(selected - set(clients))
+    if unknown:
+        failures.append(f"--clients names undeclared client(s) {unknown}")
     for name, spec in sorted(clients.items()):
+        # A filtered run checks the clients it is about to run, and only those: a local run of one
+        # cell must not need all thirteen toolchains installed.
+        if selected and name not in selected:
+            continue
         pinned = str(spec.get("version", ""))
         found = observed_version(name, spec)
         if found != pinned:
@@ -199,7 +231,8 @@ def preflight(arguments: argparse.Namespace) -> int:
         for line in failures:
             print(f"compat: {line}", file=sys.stderr)
         return ENVIRONMENT
-    print(f"OK: {len(clients)} client(s) pinned, {len(actual)} operation(s) declared")
+    checked = len(selected) if selected else len(clients)
+    print(f"OK: {checked} client(s) pinned, {len(actual)} operation(s) declared")
     return OK
 
 
@@ -262,8 +295,95 @@ def git_commit(root: Path) -> str:
     return result.stdout.strip() or "unknown"
 
 
+def measured_against(kind: str, endpoint_build: str | None, product: str | None) -> dict:
+    """The manifest's record of what answered it.
+
+    `endpoint_build` is the endpoint's own `Server` header, read once before any client runs, or
+    `None` when it sent none. `product` is the operator's declaration of what the endpoint is; it
+    is required for an external endpoint because the rule that a RustFS endpoint registers every
+    operation the matrix needs (`scripts/check_compat_matrix.sh`) keys on it, and a missing input
+    must stop the run rather than switch that rule off.
+    """
+    if kind not in SUT_KINDS:
+        raise ValueError(f"the system under test must be one of {SUT_KINDS}, not {kind!r}")
+    if kind == "gateway-fs":
+        if endpoint_build is not None or product is not None:
+            raise ValueError("the launcher is named by the sut block; an endpoint build or product belongs to an external endpoint")
+        return {"sut": "gateway-fs"}
+    if not (product or "").strip():
+        raise ValueError("an external system under test needs --product, the name of what it is")
+    return {"sut": "external", "endpoint_build": endpoint_build, "product": product.strip()}
+
+
+def sut_block(arguments: argparse.Namespace, root: Path, capabilities: list[str]) -> dict:
+    """The `sut` block: the launcher's full identity, or the external endpoint's known part."""
+    if arguments.sut_kind == "external":
+        # Nothing here can read an external server's commit or registry. What is known is
+        # recorded, what is not is said, and the harness commit is named as the harness's.
+        return {
+            "name": arguments.product,
+            "version": arguments.endpoint_build or "unreported",
+            "commit": "unreported",
+            "generation": SUT_GENERATION,
+            "binary": "external",
+            "package": "external",
+            "assembly": (
+                f"an external endpoint at {arguments.endpoint}, observed through compat-sut --external: no "
+                "filesystem backend; the observer forwards every request unchanged, and TLS, when a scenario "
+                "uses it, terminates at the observer"
+            ),
+            "provisional": False,
+            "harness_commit": git_commit(root),
+        }
+    return {
+        # Named in full, and machine-readable, so a later reader can tell exactly what answered
+        # these rows. Generation 1 was measured against `compat-sut`: the binary this task added
+        # to assemble the reference backend behind a real listener, because until then the
+        # workspace shipped no runnable S3 server at all (rustfs/gateway#624). It is the
+        # production `S3Service` with real SigV4 verification, not a mock — but it is also not
+        # the general-purpose server binary that issue asks for, so the identity is recorded
+        # rather than assumed, and these rows must be re-measured when that binary lands.
+        # Generation 2 (rustfs/gateway#719): the same binary also serves a TLS listener with a
+        # throwaway authority, and a scenario a client can only express over TLS (boto3's
+        # x-amz-trailer upload) is measured there. The assembly changed, so the rows are a new
+        # generation even though the binary name did not.
+        "name": "rustfs-gateway-fs",
+        "version": arguments.sut_version,
+        "commit": git_commit(root),
+        "generation": SUT_GENERATION,
+        "binary": "compat-sut",
+        "package": "rustfs-gateway-compat-sut",
+        "assembly": (
+            "rustfs-gateway-fs behind rustfs-gateway-server, SigV4 verified, plaintext plus a TLS "
+            "listener (throwaway self-signed authority) for TLS-only scenarios"
+        ),
+        "provisional": True,
+        "provisional_reason": (
+            "measured against the matrix's own launcher; the general-purpose server binary is "
+            "tracked in rustfs/gateway#624 and these rows are re-measured when it lands"
+        ),
+        "capabilities": capabilities,
+    }
+
+
+SUT_GENERATION = 2
+
+
 def aggregate(arguments: argparse.Namespace) -> int:
     root = Path(arguments.root)
+    try:
+        against = measured_against(
+            arguments.sut_kind,
+            (arguments.endpoint_build or None) if arguments.sut_kind == "external" else None,
+            arguments.product if arguments.sut_kind == "external" else None,
+        )
+    except ValueError as error:
+        return problem(str(error))
+    if arguments.sut_kind == "gateway-fs" and (arguments.product or arguments.endpoint):
+        return problem("--product and --endpoint describe an external endpoint; the launcher is named by its build")
+    if arguments.sut_kind == "external" and not arguments.endpoint:
+        return problem("an external system under test needs --endpoint")
+    external = arguments.sut_kind == "external"
     scenarios = load_scenarios(Path(arguments.scenarios))
     clients = load_versions(Path(arguments.versions))
     known_fail = load_known_fail(Path(arguments.known_fail))
@@ -271,7 +391,7 @@ def aggregate(arguments: argparse.Namespace) -> int:
 
     driver_errors: list[str] = []
     clients_out = []
-    summary = {"pass": 0, "fail": 0, "unsupported": 0}
+    summary = {status: 0 for status in STATUSES}
     verdicts = {"KNOWN": 0, "REGRESSION": 0, "FIXED": 0, "STALE": 0}
     regressions: list[str] = []
     fixed: list[str] = []
@@ -290,7 +410,7 @@ def aggregate(arguments: argparse.Namespace) -> int:
                 driver_errors.append(f"{cell}: the runner recorded no result file")
                 continue
             raw = json.loads(path.read_text(encoding="utf-8"))
-            status, detail, evidence = resolve_cell(raw, scenarios[scenario_id], driver_errors, cell)
+            status, detail, evidence = resolve_cell(raw, scenarios[scenario_id], driver_errors, cell, external=external)
             if any(STREAMING_SIGNED.match(record.get("payload_mode", "")) for record in raw.get("probe", [])):
                 streaming_clients.add(client)
             verdict = None
@@ -328,38 +448,11 @@ def aggregate(arguments: argparse.Namespace) -> int:
             print(f"compat: {line}", file=sys.stderr)
         return ENVIRONMENT
 
-    capabilities = declared_capabilities(Path(arguments.capabilities))
+    capabilities = [] if external else declared_capabilities(Path(arguments.capabilities))
     matrix = {
         "generated_at": dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
-        "sut": {
-            # Named in full, and machine-readable, so a later reader can tell exactly what answered
-            # these rows. Generation 1 was measured against `compat-sut`: the binary this task added
-            # to assemble the reference backend behind a real listener, because until then the
-            # workspace shipped no runnable S3 server at all (rustfs/gateway#624). It is the
-            # production `S3Service` with real SigV4 verification, not a mock — but it is also not
-            # the general-purpose server binary that issue asks for, so the identity is recorded
-            # rather than assumed, and these rows must be re-measured when that binary lands.
-            # Generation 2 (rustfs/gateway#719): the same binary also serves a TLS listener with a
-            # throwaway authority, and a scenario a client can only express over TLS (boto3's
-            # x-amz-trailer upload) is measured there. The assembly changed, so the rows are a new
-            # generation even though the binary name did not.
-            "name": "rustfs-gateway-fs",
-            "version": arguments.sut_version,
-            "commit": git_commit(root),
-            "generation": 2,
-            "binary": "compat-sut",
-            "package": "rustfs-gateway-compat-sut",
-            "assembly": (
-                "rustfs-gateway-fs behind rustfs-gateway-server, SigV4 verified, plaintext plus a TLS "
-                "listener (throwaway self-signed authority) for TLS-only scenarios"
-            ),
-            "provisional": True,
-            "provisional_reason": (
-                "measured against the matrix's own launcher; the general-purpose server binary is "
-                "tracked in rustfs/gateway#624 and these rows are re-measured when it lands"
-            ),
-            "capabilities": capabilities,
-        },
+        "measured_against": against,
+        "sut": sut_block(arguments, root, capabilities),
         "clients": clients_out,
         "summary": summary | {key.lower(): value for key, value in verdicts.items()},
         "streaming_signed_clients": sorted(streaming_clients),
@@ -367,9 +460,11 @@ def aggregate(arguments: argparse.Namespace) -> int:
     Path(arguments.out).write_text(json.dumps(matrix, indent=2) + "\n", encoding="utf-8")
 
     print(
-        f"compat: pass={summary['pass']} fail={summary['fail']} unsupported={summary['unsupported']} "
+        f"compat: pass={summary['pass']} fail={summary['fail']} "
+        f"client-unsupported={summary['client-unsupported']} sut-unregistered={summary['sut-unregistered']} "
         f"known={verdicts['KNOWN']} regression={verdicts['REGRESSION']} fixed={verdicts['FIXED']}"
     )
+    print(f"compat: measured against {json.dumps(against, sort_keys=True)}")
     print(f"compat: clients emitting STREAMING-AWS4-HMAC-SHA256: {sorted(streaming_clients) or 'none'}")
     for line in fixed:
         print(f"compat: FIXED — remove it from compat/known-fail.txt: {line}")
@@ -380,13 +475,34 @@ def aggregate(arguments: argparse.Namespace) -> int:
     return OK
 
 
-def resolve_cell(raw: dict, scenario: dict, driver_errors: list[str], cell: str) -> tuple[str, str, dict]:
+def unregistered_answers(records: list[dict]) -> list[dict]:
+    """The requests an external endpoint answered as not served: `501` or `405`, from upstream."""
+    return [
+        {"method": record.get("method", ""), "path": record.get("path", ""), "status": record.get("status")}
+        for record in records
+        if record.get("answered_by") == "upstream" and record.get("status") in UNREGISTERED_ANSWERS
+    ]
+
+
+def resolve_cell(
+    raw: dict, scenario: dict, driver_errors: list[str], cell: str, *, external: bool = False
+) -> tuple[str, str, dict]:
     client, scenario_id = cell.split("/", 1)
     if raw.get("client") != client or raw.get("scenario") != scenario_id:
         driver_errors.append(f"{cell}: the raw result does not identify the requested cell")
         return "fail", "driver output format error", {}
     if raw.get("skipped_reason"):
-        return "unsupported", raw["skipped_reason"], {}
+        # Decided before the client ran, from the launcher's own registry.
+        return "sut-unregistered", raw["skipped_reason"], {}
+    unreached = [record for record in raw.get("probe", []) if record.get("answered_by") == "observer"]
+    if unreached:
+        # The observer answered these itself because the endpoint did not: nothing about the
+        # endpoint was measured, so the run is an environment failure, never a cell verdict.
+        driver_errors.append(
+            f"{cell}: the observer could not reach the external endpoint for {len(unreached)} request(s); "
+            "this run measured the network, not the endpoint"
+        )
+        return "fail", "the external endpoint was unreachable", {}
     if raw.get("timed_out"):
         return "fail", f"the client did not finish within {raw.get('timeout_seconds')}s", {}
     driver = raw.get("driver")
@@ -410,6 +526,21 @@ def resolve_cell(raw: dict, scenario: dict, driver_errors: list[str], cell: str)
         return "fail", "driver output format error", {}
     detail = driver.get("detail") or ""
     evidence = dict(driver.get("evidence") or {})
+    if status == "unsupported":
+        # The driver protocol keeps one word for it: a driver only ever knows its own client.
+        return "client-unsupported", detail, evidence
+    if status == "fail" and external:
+        unregistered = unregistered_answers(raw.get("probe", []))
+        if unregistered:
+            first = unregistered[0]
+            more = f" (and {len(unregistered) - 1} more)" if len(unregistered) > 1 else ""
+            evidence["unregistered"] = unregistered
+            return (
+                "sut-unregistered",
+                f"the system under test answered {first['status']} to {first['method']} {first['path']}{more}; "
+                f"the driver reported: {detail or 'no detail'}",
+                evidence,
+            )
     assertions = scenario.get("wire_assertions") or []
     if assertions and status == "pass":
         satisfied, reason, wire = evaluate_wire_assertions(assertions, raw.get("probe", []))
@@ -428,7 +559,12 @@ def main() -> int:
     check = subcommands.add_parser("preflight", help="refuse to run against unpinned or drifted clients")
     check.add_argument("--versions", required=True)
     check.add_argument("--capabilities", required=True)
-    check.add_argument("--sut-capabilities", required=True)
+    check.add_argument(
+        "--sut-capabilities",
+        default="",
+        help="the launcher's --print-capabilities output; omitted only for an external endpoint",
+    )
+    check.add_argument("--clients", default="", help="the comma-separated clients a filtered run will run")
     check.set_defaults(handler=preflight)
 
     build = subcommands.add_parser("aggregate", help="turn per-cell results into compat/matrix.json")
@@ -440,6 +576,12 @@ def main() -> int:
     build.add_argument("--known-fail", required=True)
     build.add_argument("--out", required=True)
     build.add_argument("--sut-version", required=True)
+    build.add_argument("--sut-kind", choices=SUT_KINDS, default="gateway-fs", help="what answered the rows")
+    build.add_argument("--endpoint", default="", help="the external endpoint's URL")
+    build.add_argument(
+        "--endpoint-build", default="", help="the external endpoint's Server header; empty when it sent none"
+    )
+    build.add_argument("--product", default="", help="what the external endpoint is, e.g. rustfs")
     build.add_argument(
         "--allow-missing",
         action="store_true",

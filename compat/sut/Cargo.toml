@@ -36,12 +36,17 @@ rustfs-gateway-server = { workspace = true }
 bytes = { workspace = true }
 http = { workspace = true }
 http-body = { workspace = true }
+# `--external` (rustfs/backlog#2758): the observer forwards each request to an endpoint started
+# elsewhere over one HTTP/1.1 client connection, and answers with that endpoint's own response.
+http-body-util = { workspace = true }
+hyper = { workspace = true, features = ["client", "http1"] }
+hyper-util = { workspace = true, features = ["tokio"] }
 # The optional encrypted listener (rustfs/gateway#719): rcgen generates the throwaway authority for
 # `--tls-self-signed`, and rustls' re-exported PEM reader loads `--tls-cert`/`--tls-key`. Both are
 # already workspace dependencies of the server crate's own TLS tests.
 rcgen = { workspace = true }
 rustls = { workspace = true }
-tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal", "sync", "time"] }
+tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
 tower = { workspace = true, features = ["util"] }
 # The launcher's own log (`src/logging.rs`): the gateway reports through `tracing`.
 tracing = { workspace = true }
@@ -54,6 +59,6 @@ sha2 = { workspace = true }
 # `X-Amz-Expires` spellings legacy RustFS accepts (`0`, a leading `+`) and hand-framed aws-chunked
 # uploads whose trailers disagree with their head.
 hmac = { workspace = true }
-# `tests/tls.rs` dials the real binary over both listeners, as a client would.
+# `tests/binary/` dials the real binary over both listeners, as a client would.
 tokio = { workspace = true, features = ["io-util", "net"] }
 tokio-rustls = { workspace = true }

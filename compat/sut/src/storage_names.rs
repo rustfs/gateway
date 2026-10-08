@@ -411,32 +411,51 @@ impl OpLayer<dto::UploadPartCopy> for StorageNames {
 
 /// Installs the layers on every operation of the reference backend that names a key, a copy
 /// source or a listing prefix; a batch delete is the backend's (`crate::service::open_backend`).
-pub(crate) fn refuse_where_rustfs_storage_does(builder: ServiceBuilder, backend: &Arc<FsBackend>) -> ServiceBuilder {
+///
+/// `registered` says which operations the assembly registers: a layer on an operation with no
+/// handler is refused by the builder, so under `--register-only` only the registered ones get it.
+pub(crate) fn refuse_where_rustfs_storage_does(
+    builder: ServiceBuilder,
+    backend: &Arc<FsBackend>,
+    registered: &dyn Fn(&str) -> bool,
+) -> ServiceBuilder {
     let names = Arc::new(StorageNames {
         backend: Arc::clone(backend),
     });
-    builder
-        .op_layer::<dto::AbortMultipartUpload, _>(Arc::clone(&names))
-        .op_layer::<dto::CompleteMultipartUpload, _>(Arc::clone(&names))
-        .op_layer::<dto::CopyObject, _>(Arc::clone(&names))
-        .op_layer::<dto::CreateMultipartUpload, _>(Arc::clone(&names))
-        .op_layer::<dto::DeleteObject, _>(Arc::clone(&names))
-        .op_layer::<dto::DeleteObjectTagging, _>(Arc::clone(&names))
-        .op_layer::<dto::GetObject, _>(Arc::clone(&names))
-        .op_layer::<dto::GetObjectAcl, _>(Arc::clone(&names))
-        .op_layer::<dto::GetObjectTagging, _>(Arc::clone(&names))
-        .op_layer::<dto::HeadObject, _>(Arc::clone(&names))
-        .op_layer::<dto::ListMultipartUploads, _>(Arc::clone(&names))
-        .op_layer::<dto::ListObjectVersions, _>(Arc::clone(&names))
-        .op_layer::<dto::ListObjects, _>(Arc::clone(&names))
-        .op_layer::<dto::ListObjectsV2, _>(Arc::clone(&names))
-        .op_layer::<dto::ListParts, _>(Arc::clone(&names))
-        .op_layer::<dto::PostObject, _>(Arc::clone(&names))
-        .op_layer::<dto::PutObject, _>(Arc::clone(&names))
-        .op_layer::<dto::PutObjectAcl, _>(Arc::clone(&names))
-        .op_layer::<dto::PutObjectTagging, _>(Arc::clone(&names))
-        .op_layer::<dto::UploadPart, _>(Arc::clone(&names))
-        .op_layer::<dto::UploadPartCopy, _>(names)
+    macro_rules! layered {
+        ($builder:expr; $($operation:ident,)+) => {{
+            let mut builder = $builder;
+            $(
+                if registered(stringify!($operation)) {
+                    builder = builder.op_layer::<dto::$operation, _>(Arc::clone(&names));
+                }
+            )+
+            builder
+        }};
+    }
+    layered!(builder;
+        AbortMultipartUpload,
+        CompleteMultipartUpload,
+        CopyObject,
+        CreateMultipartUpload,
+        DeleteObject,
+        DeleteObjectTagging,
+        GetObject,
+        GetObjectAcl,
+        GetObjectTagging,
+        HeadObject,
+        ListMultipartUploads,
+        ListObjectVersions,
+        ListObjects,
+        ListObjectsV2,
+        ListParts,
+        PostObject,
+        PutObject,
+        PutObjectAcl,
+        PutObjectTagging,
+        UploadPart,
+        UploadPartCopy,
+    )
 }
 
 #[cfg(test)]

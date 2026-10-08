@@ -24946,6 +24946,9 @@ shard_case 'Mint judges retain complete probes and isolated CLI exit boundaries'
 shard_case 'compatibility verdicts bind cell identities and successful driver exits' \
     python3 "${SCRIPT_DIR}/test_compat_report_cells.py"
 
+shard_case "an external endpoint's Server header is read as one bounded printable line" \
+    python3 "${SCRIPT_DIR}/test_sut_server_header.py"
+
 shard_case 'S3Tests workflow preserves failed suite receipts under inherited errexit' \
     python3 "${SCRIPT_DIR}/test_s3tests_workflow_receipts.py"
 
@@ -25580,11 +25583,11 @@ path = Path("compat/matrix.json")
 matrix = json.loads(path.read_text())
 for client in matrix["clients"]:
     for row in client["scenarios"]:
-        if row["status"] == "unsupported":
+        if row["status"] == "client-unsupported":
             row["detail"] = None
             path.write_text(json.dumps(matrix, indent=2) + "\n")
             raise SystemExit(0)
-raise SystemExit("no unsupported cell to strip")
+raise SystemExit("no client-unsupported cell to strip")
 PYEOF
 }
 # A skip with no reason reads exactly like a pass to anything that looks only at the status.
@@ -25592,6 +25595,157 @@ expect_fail check_compat_matrix.sh \
     'an unsupported compatibility cell that records no reason' \
     mut_compat_unsupported_without_reason \
     'unsupported with no reason'
+
+# compat_matrix_rewrite <python>: loads compat/matrix.json as `matrix`, runs the given statements,
+# and writes it back. The two skip statuses are moved between cells with their summary counts, so
+# each case below fails on exactly the rule it names and not on the counts.
+compat_matrix_rewrite() {
+    python3 - "$1" <<'PYEOF'
+import json
+import sys
+from pathlib import Path
+
+path = Path("compat/matrix.json")
+matrix = json.loads(path.read_text())
+
+
+def make_external(product="rustfs", build="RustFS"):
+    matrix["measured_against"] = {"sut": "external", "endpoint_build": build, "product": product}
+    matrix["sut"].update(
+        name=product, version=build or "unreported", commit="unreported", binary="external",
+        package="external", provisional=False, harness_commit="0000000",
+    )
+    matrix["sut"].pop("provisional_reason", None)
+    matrix["sut"].pop("capabilities", None)
+
+
+def first_cell(status):
+    for client in matrix["clients"]:
+        for row in client["scenarios"]:
+            if row["status"] == status:
+                return row
+    raise SystemExit(f"no {status} cell to rewrite")
+
+
+def move(row, status, detail):
+    matrix["summary"][row["status"]] -= 1
+    matrix["summary"][status] += 1
+    row["status"], row["detail"] = status, detail
+
+
+exec(sys.argv[1])
+path.write_text(json.dumps(matrix, indent=2) + "\n")
+PYEOF
+}
+
+mut_compat_sut_unregistered_without_reason() {
+    compat_matrix_rewrite 'move(first_cell("client-unsupported"), "sut-unregistered", None)'
+}
+expect_fail check_compat_matrix.sh \
+    'a sut-unregistered compatibility cell that records no reason' \
+    mut_compat_sut_unregistered_without_reason \
+    'sut-unregistered with no reason'
+
+mut_compat_skips_merged_back() {
+    compat_matrix_rewrite '
+row = first_cell("client-unsupported")
+matrix["summary"]["client-unsupported"] -= 1
+matrix["summary"]["unsupported"] = 1
+row["status"] = "unsupported"
+'
+}
+# rustfs/backlog#2758 forbids showing the two skips as one again; the old single status is refused.
+expect_fail check_compat_matrix.sh \
+    'a compatibility cell recorded under the merged pre-split unsupported status' \
+    mut_compat_skips_merged_back \
+    "unknown status 'unsupported'"
+
+mut_compat_unregistered_count_hidden() {
+    compat_matrix_rewrite '
+move(first_cell("client-unsupported"), "sut-unregistered", "the system under test registers no CopyObject")
+matrix["summary"]["sut-unregistered"] -= 1
+matrix["summary"]["client-unsupported"] += 1
+'
+}
+expect_fail check_compat_matrix.sh \
+    'a sut-unregistered cell counted as client-unsupported in the summary' \
+    mut_compat_unregistered_count_hidden \
+    'its own cells say'
+
+mut_compat_measured_against_missing() {
+    compat_matrix_rewrite 'del matrix["measured_against"]'
+}
+expect_fail check_compat_matrix.sh \
+    'a compatibility manifest that does not say what kind of endpoint answered it' \
+    mut_compat_measured_against_missing \
+    'no measured_against'
+
+mut_compat_external_rustfs_unregistered() {
+    compat_matrix_rewrite '
+make_external()
+move(first_cell("client-unsupported"), "sut-unregistered", "the system under test answered 501 to PUT /cm-x")
+'
+}
+# The point of the external mode: a RustFS endpoint must serve every operation the matrix needs.
+expect_fail check_compat_matrix.sh \
+    'an external RustFS endpoint that left an operation unregistered' \
+    mut_compat_external_rustfs_unregistered \
+    'must register every operation'
+
+mut_compat_external_rustfs_complete() {
+    compat_matrix_rewrite 'make_external()'
+}
+# The positive control for the rule above: an external RustFS manifest with no gap is accepted.
+expect_guard_pass check_compat_matrix.sh \
+    'an external RustFS endpoint that registers every operation the matrix needs' \
+    mut_compat_external_rustfs_complete
+
+mut_compat_external_other_product_unregistered() {
+    compat_matrix_rewrite '
+make_external(product="minio", build="MinIO")
+move(first_cell("client-unsupported"), "sut-unregistered", "the system under test answered 501 to PUT /cm-x")
+'
+}
+# The zero rule is RustFS's; another product's unregistered operations are recorded, not refused.
+expect_guard_pass check_compat_matrix.sh \
+    'an external non-RustFS endpoint with an unregistered operation recorded' \
+    mut_compat_external_other_product_unregistered
+
+mut_compat_external_without_product() {
+    compat_matrix_rewrite '
+make_external()
+del matrix["measured_against"]["product"]
+'
+}
+# The rule keys on the product, so a manifest without one must not quietly switch the rule off.
+expect_fail check_compat_matrix.sh \
+    'an external compatibility manifest that names no product' \
+    mut_compat_external_without_product \
+    'names no product'
+
+mut_compat_external_rustfs_misnamed() {
+    compat_matrix_rewrite '
+make_external(product="other-s3")
+move(first_cell("client-unsupported"), "sut-unregistered", "the system under test answered 501 to PUT /cm-x")
+'
+}
+# The endpoint said it is RustFS; declaring another product must not exempt it from the zero rule.
+expect_fail check_compat_matrix.sh \
+    'an endpoint whose Server header says RustFS declared as another product' \
+    mut_compat_external_rustfs_misnamed \
+    'its Server header names RustFS'
+
+mut_compat_external_build_key_missing() {
+    compat_matrix_rewrite '
+make_external()
+del matrix["measured_against"]["endpoint_build"]
+'
+}
+# `null` is an observation (the endpoint sent no Server header); an absent key is no observation.
+expect_fail check_compat_matrix.sh \
+    'an external compatibility manifest that never read the endpoint build' \
+    mut_compat_external_build_key_missing \
+    'no endpoint_build'
 
 mut_compat_matrix_unnamed_sut() {
     python3 - <<'PYEOF'
@@ -25816,6 +25970,24 @@ PYEOF
 expect_fail check_compat_table.sh \
     'the README compatibility table edited away from the manifest' \
     mut_compat_readme_table_edited \
+    'does not match compat/matrix.json'
+
+mut_compat_readme_skips_merged() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("README.md")
+text = path.read_text()
+old = " client-unsupported | sut-unregistered |"
+if text.count(old) != 1:
+    raise SystemExit("compatibility table skip-column mutation subject is not unique")
+path.write_text(text.replace(old, " unsupported |", 1))
+PYEOF
+}
+# The table must count the two skips in two columns (rustfs/backlog#2758), never as one.
+expect_fail check_compat_table.sh \
+    'the README compatibility table showing the two skips as one column' \
+    mut_compat_readme_skips_merged \
     'does not match compat/matrix.json'
 
 

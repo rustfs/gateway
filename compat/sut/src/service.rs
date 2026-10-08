@@ -161,80 +161,96 @@ pub(crate) fn build_service(
         credentials = credentials.with(Credentials::new(&account.access_key, account.secret_key.as_bytes())?);
     }
     let supported = capability_names(backend);
-    let builder = backend.register_crud(
-        ServiceBuilder::new()
-            // The whole RustFS profile, in one reviewable place (rustfs/backlog#2751): every
-            // legacy RustFS reading of a request, a credential scope and an answer, the security
-            // floor's delegation and presigned widenings, and the lifted framework governor. What
-            // each switch keeps, and where rustfs/backlog#2684 registers it, is the table in
-            // `rustfs-gateway`'s `builder/rustfs_profile.rs` and `docs/rustfs-profile.md`; the
-            // posture this assembly reports is held to the gateway's golden by
-            // `service/tests/rustfs_profile_tests.rs`. Everything below the two halves is the
-            // host's: its credentials, its authorizer, its sources and its settings.
-            .rustfs_profile()
-            .authenticator(
-                SigV4Authenticator::new(Arc::new(credentials), RegionSet::new([options.region.clone()])?).rustfs_profile(),
-            )
-            // Not an allow-all, and not a bare operation-set filter either: the matrix must see a
-            // refusal for anything outside the reference backend's registered set, and the
-            // external suites must see one identity refused on another identity's bucket, unless
-            // the bucket's stored policy allows it. Ownership is `crate::ownership::decide`; the
-            // policy is the second word, evaluated as RustFS evaluates one.
-            .authorizer(PolicyAuthorizer::new(
-                Arc::clone(backend),
-                Arc::clone(owners),
-                options.accounts.clone(),
-                supported,
-            ))
-            // The same registry answers `x-amz-expected-bucket-owner`, so the owner id a caller
-            // asserts is the very id the authorization decision was made against.
-            .bucket_owner_source(Arc::clone(owners))
-            // RustFS's transport gate, with TLS required for customer keys
-            // (`RUSTFS_SSE_C_REQUIRE_TLS`), refuses both the target's and the copy source's key over
-            // cleartext (rustfs/backlog#1677, R11); whether TLS is required at all is a deployment
-            // choice the bridge takes from that variable, so it stays outside the profile. Its
-            // default, TLS not required, serves both with a warning.
-            .sse_config(SseConfig::strict())
-            // RustFS reads virtual hosts against `RUSTFS_SERVER_DOMAINS`, ports ignored, the whole
-            // prefix as the bucket and a CNAME-style fallback; none configured reads every request
-            // path-style (#1136).
-            .host_resolver(LegacyRustfsVirtualHosts::new(&options.server_domains)?)
-            // The backend's stored CORS documents feed the gateway's CORS answers, as RustFS's do
-            // behind the gateway; no cache lifetime, so a suite sees a `PutBucketCors` at once.
-            .cors_source(Arc::clone(backend))
-            .cors_cache(CorsCacheConfig {
-                entries: 4096,
-                ttl_seconds: 0,
-                jitter_seconds: 0,
-            })
-            // No host stands in front of this launcher to hand its identifier over, so the
-            // identifier is minted in RustFS's shape (ruling R10).
-            .trace_source(MintedTraces::with_uuid_request_ids())
-            // And the same registry decides whether a name is taken: another identity's
-            // re-creation is `409 BucketAlreadyExists` before the backend is asked, and a
-            // creation the backend admitted is what gets recorded.
-            .op_layer::<dto::CreateBucket, _>(TakenNames::new(Arc::clone(owners), options.accounts.clone()))
-            // And released once the backend deleted the bucket, so the name is free again.
-            .op_layer::<dto::DeleteBucket, _>(ReleasedNames::new(Arc::clone(owners))),
-    );
+    let assembly = ServiceBuilder::new()
+        // The whole RustFS profile, in one reviewable place (rustfs/backlog#2751): every
+        // legacy RustFS reading of a request, a credential scope and an answer, the security
+        // floor's delegation and presigned widenings, and the lifted framework governor. What
+        // each switch keeps, and where rustfs/backlog#2684 registers it, is the table in
+        // `rustfs-gateway`'s `builder/rustfs_profile.rs` and `docs/rustfs-profile.md`; the
+        // posture this assembly reports is held to the gateway's golden by
+        // `service/tests/rustfs_profile_tests.rs`. Everything below the two halves is the
+        // host's: its credentials, its authorizer, its sources and its settings.
+        .rustfs_profile()
+        .authenticator(SigV4Authenticator::new(Arc::new(credentials), RegionSet::new([options.region.clone()])?).rustfs_profile())
+        // Not an allow-all, and not a bare operation-set filter either: the matrix must see a
+        // refusal for anything outside the reference backend's registered set, and the
+        // external suites must see one identity refused on another identity's bucket, unless
+        // the bucket's stored policy allows it. Ownership is `crate::ownership::decide`; the
+        // policy is the second word, evaluated as RustFS evaluates one.
+        .authorizer(PolicyAuthorizer::new(
+            Arc::clone(backend),
+            Arc::clone(owners),
+            options.accounts.clone(),
+            supported,
+        ))
+        // The same registry answers `x-amz-expected-bucket-owner`, so the owner id a caller
+        // asserts is the very id the authorization decision was made against.
+        .bucket_owner_source(Arc::clone(owners))
+        // RustFS's transport gate, with TLS required for customer keys
+        // (`RUSTFS_SSE_C_REQUIRE_TLS`), refuses both the target's and the copy source's key over
+        // cleartext (rustfs/backlog#1677, R11); whether TLS is required at all is a deployment
+        // choice the bridge takes from that variable, so it stays outside the profile. Its
+        // default, TLS not required, serves both with a warning.
+        .sse_config(SseConfig::strict())
+        // RustFS reads virtual hosts against `RUSTFS_SERVER_DOMAINS`, ports ignored, the whole
+        // prefix as the bucket and a CNAME-style fallback; none configured reads every request
+        // path-style (#1136).
+        .host_resolver(LegacyRustfsVirtualHosts::new(&options.server_domains)?)
+        // The backend's stored CORS documents feed the gateway's CORS answers, as RustFS's do
+        // behind the gateway; no cache lifetime, so a suite sees a `PutBucketCors` at once.
+        .cors_source(Arc::clone(backend))
+        .cors_cache(CorsCacheConfig {
+            entries: 4096,
+            ttl_seconds: 0,
+            jitter_seconds: 0,
+        })
+        // No host stands in front of this launcher to hand its identifier over, so the
+        // identifier is minted in RustFS's shape (ruling R10).
+        .trace_source(MintedTraces::with_uuid_request_ids());
+    // `--register-only` keeps everything above and registers just the named operations, so every
+    // other one is `501 NotImplemented` behind the same profile, signer and authorizer
+    // (rustfs/backlog#2758). The authorizer keeps the full `supported` set on purpose: narrowing it
+    // would turn the registry's `501` into an authorization `403`, a different answer. An
+    // operation layer needs its operation's handler, so each layer below is attached only where
+    // the handler is registered — which, without the flag, is everywhere.
+    let partial = options.register_only.as_deref();
+    let registered = |name: &str| partial.is_none_or(|names| names.iter().any(|listed| listed == name));
+    let builder = match partial {
+        Some(names) => crate::partial::register_only(assembly, backend, names)?,
+        None => backend.register_crud(assembly),
+    };
+    // And the same registry decides whether a name is taken: another identity's re-creation is
+    // `409 BucketAlreadyExists` before the backend is asked, and a creation the backend admitted
+    // is what gets recorded.
+    let builder = if registered("CreateBucket") {
+        builder.op_layer::<dto::CreateBucket, _>(TakenNames::new(Arc::clone(owners), options.accounts.clone()))
+    } else {
+        builder
+    };
+    // And released once the backend deleted the bucket, so the name is free again.
+    let builder = if registered("DeleteBucket") {
+        builder.op_layer::<dto::DeleteBucket, _>(ReleasedNames::new(Arc::clone(owners)))
+    } else {
+        builder
+    };
     // RustFS's storage refuses a key or a listing prefix with a `.` or `..` segment, `//` or a NUL,
     // in its handlers and mostly after the bucket lookup; this backend would store them, so the
     // launcher answers them as RustFS does before the backend is reached (#1145).
-    let builder = crate::storage_names::refuse_where_rustfs_storage_does(builder, backend);
+    let builder = crate::storage_names::refuse_where_rustfs_storage_does(builder, backend, &registered);
     // No framework deadline, as RustFS runs none; RustFS's ceiling on an upload's object, and the
     // wire ceiling widened to the framing that object may carry.
     let settings = rustfs_service_config()?.with_upload_object_ceiling(RUSTFS_MAX_SINGLE_UPLOAD_BYTES);
     let (builder, _settings) = builder.limits(rustfs_limits()).config(settings);
-    let service = backend
-        .register_cors(backend.register_encryption(backend.register_policy(backend.register_acl(
-            backend.register_tagging(
-                backend.register_lifecycle(
+    let builder =
+        match partial {
+            Some(_) => builder,
+            None => backend.register_cors(backend.register_encryption(backend.register_policy(backend.register_acl(
+                backend.register_tagging(backend.register_lifecycle(
                     backend.register_listing(backend.register_versioning(backend.register_multipart(builder))),
-                ),
-            ),
-        ))))
-        .build()?;
-    Ok(service)
+                )),
+            )))),
+        };
+    Ok(builder.build()?)
 }
 
 #[cfg(test)]

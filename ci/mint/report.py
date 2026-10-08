@@ -481,12 +481,42 @@ def recovered_failures(row: ExcludedRow) -> list[str]:
     return row.tally.failing[:FUNCTIONS_PER_SDK]
 
 
+def measured_against(sut: str, endpoint_build: str) -> dict:
+    """What answered the run: the launcher, or an external endpoint and its own `Server` header.
+
+    An empty `endpoint_build` for an external endpoint is recorded as `null`: the endpoint was
+    asked and sent no `Server` header. The launcher is named by the workflow's own build, so a
+    build string beside it would describe nothing that ran.
+    """
+    if sut == "external":
+        return {"sut": "external", "endpoint_build": endpoint_build or None}
+    if endpoint_build:
+        raise ReportError("--endpoint-build describes an external endpoint; pass --sut external with it", EXIT_USAGE)
+    return {"sut": "gateway-fs"}
+
+
+def describe_measured(against: dict) -> str:
+    if against["sut"] != "external":
+        return "Measured against: the launcher (`compat-sut`, the filesystem reference backend)"
+    build = against.get("endpoint_build")
+    shown = f"`Server: {printable(build, 80)}`" if build else "no `Server` header"
+    return f"Measured against: an external endpoint ({shown}) through `compat-sut --external`"
+
+
 def render_markdown(
-    image: str, generation: int, rows: list[Row], excluded: list[ExcludedRow], problems: list[str], code: int
+    image: str,
+    generation: int,
+    rows: list[Row],
+    excluded: list[ExcludedRow],
+    problems: list[str],
+    code: int,
+    against: dict | None = None,
 ) -> str:
     lines = ["## MinIO mint", ""]
     if image:
         lines += [f"Image: `{image}`", ""]
+    if against is not None:
+        lines += [describe_measured(against), ""]
     if problems:
         lines += [
             "**Incomplete run.** It measured nothing that may be compared with the baseline, "
@@ -564,6 +594,7 @@ def resolve_passes(args: argparse.Namespace, sdks: list[str]) -> list[tuple[list
 
 
 def judge(args: argparse.Namespace) -> int:
+    against = measured_against(args.sut, args.endpoint_build)
     sdks = args.sdks.split()
     if not sdks or len(set(sdks)) != len(sdks) or not all(SDK_NAME.fullmatch(sdk) for sdk in sdks):
         raise ReportError("--sdks must name each SDK the runner asked for exactly once", EXIT_USAGE)
@@ -663,6 +694,7 @@ def judge(args: argparse.Namespace) -> int:
             )
     for problem in problems:
         print(f"mint: INCOMPLETE {problem}")
+    print(f"mint: {describe_measured(against)}")
     print(
         f"mint: sdks={len(sdks)} measured={len(rows)} "
         f"pass={sum(row.tally.passed for row in rows)} fail={sum(row.tally.failed for row in rows)} "
@@ -677,11 +709,12 @@ def judge(args: argparse.Namespace) -> int:
 
     if args.markdown:
         Path(args.markdown).write_text(
-            render_markdown(args.image, generation, rows, excluded, problems, code), encoding="utf-8"
+            render_markdown(args.image, generation, rows, excluded, problems, code, against), encoding="utf-8"
         )
     if args.json:
         payload = {
             "image": args.image,
+            "measured_against": against,
             "generation": generation,
             "exit": code,
             "complete": not problems,
@@ -749,6 +782,13 @@ def main(argv: list[str]) -> int:
     judging.add_argument("--baseline", required=True)
     judging.add_argument("--sdks", required=True, help="the SDKs the runner asked for, in order")
     judging.add_argument("--image", default="")
+    judging.add_argument(
+        "--sut",
+        choices=("gateway-fs", "external"),
+        default="gateway-fs",
+        help="what answered the run: the launcher, or an endpoint started elsewhere (ci/mint/run.sh --external)",
+    )
+    judging.add_argument("--endpoint-build", default="", help="the external endpoint's own Server header")
     judging.add_argument("--markdown")
     judging.add_argument("--json")
     judging.add_argument("--record", help="write a proposed baseline here; the reviewed one is never edited")

@@ -33,6 +33,17 @@ name: e2e-mint
 #   an Authorization header, a presigned query or a signature diagnostic in
 #   upstream failure text never reaches an artifact or this log.
 #
+# AGAINST AN EXTERNAL ENDPOINT
+#
+#   `sut: external` with `endpoint: http://host:port` measures an S3 endpoint
+#   started elsewhere, such as a RustFS binary (rustfs/gateway#1199), instead
+#   of the launcher: ci/mint/run.sh --external puts `compat-sut --external` in
+#   front of it on the usual MINT_SUT_* host and ports, and the report records
+#   `measured_against` with the endpoint's own Server header. The endpoint's
+#   credentials come from the MINT_EXTERNAL_ACCESS_KEY / MINT_EXTERNAL_SECRET_KEY
+#   secrets. The run is judged against the same, unchanged ci/mint/baseline.txt.
+#   The same shape as client-matrix.yml's `sut` / `endpoint` inputs.
+#
 # WHO READS A RED RUN
 #
 #   A regression files an issue against this repository, one per run. An
@@ -56,6 +67,20 @@ on:
         options:
           - ratchet
           - record
+      sut:
+        description: >-
+          `gateway-fs` measures the in-repository launcher. `external` measures the
+          endpoint below through `compat-sut --external`, with the endpoint's own
+          credentials from the MINT_EXTERNAL_ACCESS_KEY / MINT_EXTERNAL_SECRET_KEY secrets.
+        type: choice
+        default: gateway-fs
+        options:
+          - gateway-fs
+          - external
+      endpoint:
+        description: "The external endpoint, http://host:port (sut: external only)"
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -105,6 +130,12 @@ jobs:
 
       - name: Run the suite
         id: suite
+        # Inputs and secrets reach the script as environment, never spliced into it.
+        env:
+          MINT_SUT: ${{ inputs.sut || 'gateway-fs' }}
+          MINT_SUT_ENDPOINT_INPUT: ${{ inputs.endpoint || '' }}
+          MINT_EXTERNAL_ACCESS_KEY: ${{ secrets.MINT_EXTERNAL_ACCESS_KEY }}
+          MINT_EXTERNAL_SECRET_KEY: ${{ secrets.MINT_EXTERNAL_SECRET_KEY }}
         run: |
           set -uo pipefail
           mode="${{ inputs.mode || 'ratchet' }}"
@@ -113,6 +144,24 @@ jobs:
           mkdir -p "$work" "$out"
           image="$(cat "${RUNNER_TEMP}/mint-candidate.id")" || exit 2
           set -- --local-image "$image"
+          # `external` without an endpoint is refused rather than quietly measuring the launcher.
+          case "${MINT_SUT:-gateway-fs}" in
+            gateway-fs) ;;
+            external)
+              if [ -z "${MINT_SUT_ENDPOINT_INPUT:-}" ]; then
+                echo "::error title=mint usage::sut=external needs the endpoint input"
+                echo "status=2" >>"$GITHUB_OUTPUT"
+                exit 2
+              fi
+              set -- "$@" --external "$MINT_SUT_ENDPOINT_INPUT"
+              export MINT_ACCESS_KEY="${MINT_EXTERNAL_ACCESS_KEY:-}" MINT_SECRET_KEY="${MINT_EXTERNAL_SECRET_KEY:-}"
+              ;;
+            *)
+              echo "::error title=mint usage::unknown sut ${MINT_SUT}"
+              echo "status=2" >>"$GITHUB_OUTPUT"
+              exit 2
+              ;;
+          esac
           # 90 minutes. The wrapper reports the margin on every run, so the cliff
           # announces itself before it is hit.
           # Capture failures explicitly: the runner invokes this script with -e.
@@ -160,15 +209,18 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          # The launcher or an external endpoint; the report's measured_against says which build.
+          MEASURED: ${{ inputs.sut || 'gateway-fs' }}
         run: |
           set -euo pipefail
-          title="ci(mint): regression against the pinned image (run ${{ github.run_id }})"
+          title="ci(mint): regression against the pinned image on ${MEASURED} (run ${{ github.run_id }})"
           body="${RUNNER_TEMP}/issue.md"
           {
             echo "The scheduled MinIO mint run found at least one SDK failing more often"
             echo "than \`ci/mint/baseline.txt\` allows."
             echo
             echo "- Run: $RUN_URL"
+            echo "- Measured against: $MEASURED"
             echo
             head -c 55000 "${{ steps.suite.outputs.out }}/summary.md"
             echo

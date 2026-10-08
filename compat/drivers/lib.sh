@@ -10,7 +10,10 @@
 # `unsupported` is a first-class status and never a failure: a client that has no way to express a
 # scenario has told us nothing about the server, and recording that as a failure would pollute the
 # manifest and stop the ratchet from ever moving. It is also not a pass — the summary counts it
-# separately and the README table prints it as a skip with its reason.
+# separately and the README table prints it as a skip with its reason. The manifest records it as
+# `client-unsupported`. A driver never reports the other skip, `sut-unregistered`: whether the server
+# serves an operation is read from the server's registry or its observed answer by
+# `ci/compat/report.py`, never from a client's error text.
 #
 # Everything a driver writes to stderr is captured by the runner and attached to the result, so
 # diagnostics belong there rather than on stdout, which must hold the result object and nothing
