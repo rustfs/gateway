@@ -7,20 +7,13 @@ cheaper to redirect a plan than a finished pull request.
 Participation is governed by our [Code of Conduct](CODE_OF_CONDUCT.md). Security problems go
 through [SECURITY.md](SECURITY.md), never through a public issue or pull request.
 
-## Contributor License Agreement
+## License of contributions
 
-Every contributor must sign the RustFS CLA, version 2, before their first pull request can be
-merged. The CLA text is at <https://github.com/rustfs/cla/blob/main/cla/v2.md>.
-
-Signing is done by comment: on your pull request, post a comment whose body is exactly
-
-```text
-I have read and agree to the CLA.
-```
-
-The `CLA Check` status turns green once the signature is recorded in the
-[rustfs/cla](https://github.com/rustfs/cla) registry. You only sign once; it covers all your
-later contributions across RustFS repositories that use this CLA.
+There is no contributor license agreement and nothing to sign. By submitting a contribution you
+agree that it is licensed under the [Apache License, Version 2.0](LICENSE), the same license as
+the project (section 5 of the license: inbound equals outbound), unless you explicitly state
+otherwise in the pull request. Do not submit code you are not entitled to license that way; the
+rule on code taken from s3s below is one instance of it.
 
 ## The s3s rule: copy knowledge, never code
 
