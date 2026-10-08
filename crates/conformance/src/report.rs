@@ -25,6 +25,7 @@
 
 use crate::diagnostic::{Diagnostic, Severity};
 use crate::json;
+use crate::rulings::{Ruling, Rulings};
 use crate::value::Value;
 use std::collections::BTreeMap;
 
@@ -196,6 +197,28 @@ pub struct Report {
     /// describe a target this run never contacted, and printing them over a corpus check is the
     /// half of the defect the verdict alone does not cover.
     pub validate_only: bool,
+}
+
+/// What the renderers know about a run beyond its verdicts.
+///
+/// The endpoint and build are what the target reported about itself before the run
+/// (`crate::sut::TargetIdentity`); the ledger is the one the run was judged against, named by the
+/// path the command line gave. Every field is absent by default, and an absent field renders as
+/// `null` — a report must never carry a name the run did not observe.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct RunContext<'a> {
+    /// The URL the run was pointed at, when it was pointed at one.
+    pub endpoint: Option<&'a str>,
+    /// The target's `Server` header on an unsigned `HEAD /`, when it sent one.
+    pub target_build: Option<&'a str>,
+    /// The rulings ledger, as the path the command line named and the rulings it holds.
+    pub rulings: Option<(&'a str, &'a Rulings)>,
+}
+
+impl RunContext<'_> {
+    fn ruling_on(&self, id: &str) -> Option<&Ruling> {
+        self.rulings.and_then(|(_, rulings)| rulings.get(id))
+    }
 }
 
 impl Report {
@@ -401,9 +424,19 @@ impl Report {
         out
     }
 
-    /// The machine-readable report.
+    /// The machine-readable report, for a run that observed nothing about its target and was
+    /// judged against no ledger.
     #[must_use]
     pub fn render_json(&self) -> String {
+        self.render_json_in(&RunContext::default())
+    }
+
+    /// The machine-readable report, with what the run learned about its target and its ledger.
+    ///
+    /// A ruled case keeps its verdict and gains a `ruling` object; an unruled one carries
+    /// `"ruling": null`, so the key is always present.
+    #[must_use]
+    pub fn render_json_in(&self, context: &RunContext<'_>) -> String {
         let mut out = String::from("{\n");
         out.push_str(&format!("  \"validate_only\": {},\n", self.validate_only));
         // `null`, not the name, and not the field's absence. A validate-only run contacted no
@@ -412,15 +445,34 @@ impl Report {
         // report did before it was split. The keys stay present so that reading one is never a
         // missing-key error in a consumer that does not branch on `validate_only`.
         let named = |value: &str| if self.validate_only { "null".to_owned() } else { quote(value) };
+        let observed = |value: Option<&str>| value.map_or_else(|| "null".to_owned(), &named);
         out.push_str(&format!("  \"target\": {},\n", named(&self.target)));
         out.push_str(&format!("  \"transport\": {},\n", named(&self.transport)));
         out.push_str(&format!("  \"profile\": {},\n", named(&self.profile)));
+        out.push_str(&format!("  \"endpoint\": {},\n", observed(context.endpoint)));
+        out.push_str(&format!("  \"target_build\": {},\n", observed(context.target_build)));
+        out.push_str(&format!(
+            "  \"rulings\": {},\n",
+            context.rulings.map_or_else(|| "null".to_owned(), |(ledger, _)| quote(ledger))
+        ));
         out.push_str("  \"cases\": [\n");
         for (index, outcome) in self.outcomes.iter().enumerate() {
             let comma = if index + 1 == self.outcomes.len() { "" } else { "," };
             let failures: Vec<String> = outcome.failures().iter().map(|d| quote(&d.to_string())).collect();
+            let ruling = context.ruling_on(&outcome.id).map_or_else(
+                || "null".to_owned(),
+                |ruling| {
+                    format!(
+                        "{{\"verdict\": {}, \"issue\": {}, \"approved_by\": {}, \"expires\": {}}}",
+                        quote(ruling.verdict.as_str()),
+                        quote(&ruling.issue),
+                        quote(&ruling.approved_by),
+                        quote(&ruling.expires)
+                    )
+                },
+            );
             out.push_str(&format!(
-                "    {{\"id\": {}, \"domain\": {}, \"file\": {}, \"verdict\": {}, \"phase\": {}, \"reason\": {}, \"failures\": [{}]}}{comma}\n",
+                "    {{\"id\": {}, \"domain\": {}, \"file\": {}, \"verdict\": {}, \"phase\": {}, \"reason\": {}, \"failures\": [{}], \"ruling\": {ruling}}}{comma}\n",
                 quote(&outcome.id),
                 quote(&outcome.domain),
                 quote(&outcome.relative),
@@ -437,6 +489,16 @@ impl Report {
     /// A JUnit document, for a CI system that already knows how to read one.
     #[must_use]
     pub fn render_junit(&self) -> String {
+        self.render_junit_in(&RunContext::default())
+    }
+
+    /// A JUnit document that also notes each ruling beside the failure or skip it covers.
+    ///
+    /// JUnit has no colour for "failed, and ruled": the `<failure>` stays, and the ruling is a
+    /// `<system-out>` line a reader finds next to it. Rendering a ruled case as a bare pass would
+    /// be the report borrowing green it did not measure.
+    #[must_use]
+    pub fn render_junit_in(&self, context: &RunContext<'_>) -> String {
         let failures = self.outcomes.iter().filter(|o| o.verdict == Verdict::Failed).count();
         // A validated case counts as skipped, never as a JUnit pass: JUnit has no third colour,
         // and a bare `<testcase/>` is how a CI dashboard renders "this ran and held".
@@ -472,6 +534,7 @@ impl Report {
                         "    <skipped message=\"{}\"/>\n",
                         escape_xml(outcome.skip_reason.as_deref().unwrap_or("not run"))
                     ));
+                    out.push_str(&ruling_note(context.ruling_on(&outcome.id)));
                     out.push_str("  </testcase>\n");
                 }
                 Verdict::Failed => {
@@ -483,6 +546,7 @@ impl Report {
                             escape_xml(&failure.to_string())
                         ));
                     }
+                    out.push_str(&ruling_note(context.ruling_on(&outcome.id)));
                     out.push_str("  </testcase>\n");
                 }
             }
@@ -548,6 +612,19 @@ impl Baseline {
         out.push_str("  }\n}\n");
         out
     }
+}
+
+/// The JUnit line that names a ruling, or nothing when the case has none.
+fn ruling_note(ruling: Option<&Ruling>) -> String {
+    ruling.map_or_else(String::new, |ruling| {
+        format!(
+            "    <system-out>ruling: {} {} approved by {}, expires {}</system-out>\n",
+            escape_xml(ruling.verdict.as_str()),
+            escape_xml(&ruling.issue),
+            escape_xml(&ruling.approved_by),
+            escape_xml(&ruling.expires)
+        )
+    })
 }
 
 fn quote(text: &str) -> String {

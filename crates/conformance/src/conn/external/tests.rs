@@ -289,15 +289,52 @@ fn conn_sends_the_authored_target_host_and_nonempty_body() {
     assert_eq!(observation.request_body_bytes_sent_at_response, None);
 }
 
+/// The probe's request and the case's request, as the server read them.
+type ProbedRequests = (Vec<u8>, Vec<u8>);
+
+/// A server that answers the identity probe `run --endpoint` sends first, then one case request.
+fn probed_then_responding_server(response: &'static [u8]) -> (String, thread::JoinHandle<ProbedRequests>) {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind listener");
+    listener.set_nonblocking(true).expect("bound accept wait");
+    let address = listener.local_addr().expect("listener address");
+    let handle = thread::spawn(move || {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        let answer = |response: &[u8]| {
+            let mut stream = loop {
+                match listener.accept() {
+                    Ok((stream, _)) => break stream,
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock && Instant::now() < deadline => {
+                        thread::sleep(Duration::from_millis(1));
+                    }
+                    Err(error) => panic!("accept client before deadline: {error}"),
+                }
+            };
+            stream.set_nonblocking(false).expect("blocking request reads");
+            let request = read_complete_request(&mut stream);
+            stream.write_all(response).expect("write response");
+            request
+        };
+        let probe = answer(b"HTTP/1.1 403 Forbidden\r\nServer: RustFS\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+        let case = answer(response);
+        (probe, case)
+    });
+    (format!("http://{address}"), handle)
+}
+
 #[test]
 fn cli_main_reaches_the_supplied_endpoint_and_judges_its_response() {
     let corpus = isolated_corpus();
-    let (url, server) = responding_server(b"HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n");
+    let (url, server) = probed_then_responding_server(b"HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n");
 
     let code = cli::main(&cli_args(corpus.path(), &url));
     assert_eq!(code, ExitCode::from(exit::SUCCESS));
 
-    let captured = server.join().expect("server exits");
+    let (probe, captured) = server.join().expect("server exits");
+    assert!(probe.starts_with(b"HEAD / HTTP/1.1\r\n"), "the identity probe comes first");
+    assert!(
+        !String::from_utf8_lossy(&probe).to_ascii_lowercase().contains("authorization"),
+        "the probe is unsigned"
+    );
     assert!(captured.ends_with(b"cli-body"));
 }
 

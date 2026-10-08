@@ -23,6 +23,7 @@ use std::path::PathBuf;
 
 use super::tests::{args, corpus};
 use super::*;
+use crate::runner::Shard;
 
 #[test]
 fn a_shard_option_parses() {

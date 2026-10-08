@@ -518,6 +518,93 @@ The ratchet only ever tightens: the `failed` set may shrink and never grow, and 
 `passed` may not be re-recorded as `skipped`. A refresh that would violate either is a regression
 being written down instead of fixed.
 
+## Profiles, the `rustfs` profile, and the rulings ledger
+
+`--profile` names what the target claims to be, and gates `case.applies_to.profiles`: a case that
+declares `profiles = ["minio"]` is skipped under every other claim, with the gate named as the
+reason, and a case that declares nothing applies to every profile. Four claims exist:
+
+| profile | what it claims | where it runs |
+| --- | --- | --- |
+| `aws` | AWS S3 behaviour; the default, and the one `baseline.json` records | in process, on a socket, or `--endpoint` |
+| `minio` | MinIO behaviour (the slash-collapsing name policy) | the same |
+| `strict` | the strictest reading where implementations legitimately diverge | the same |
+| `rustfs` | legacy RustFS behaviour — the readings `ServiceBuilder::rustfs_profile` applies (`docs/rustfs-profile.md`, rustfs/backlog#2751) | `--endpoint` only |
+
+The `rustfs` claim needs `--endpoint` because the bundled reference target does not run the RustFS
+preset: a run that claimed the profile over it would report an intention as an observation, so
+`Options::parse` refuses the combination and `inprocess::profile` refuses the assembly. The
+profile inherits nothing from `minio`: a `minio`-only case is skipped under it exactly as under
+`aws`.
+
+**The frozen schema does not yet name `rustfs`.** `case.schema.json` closes the `profiles` enum at
+`aws`, `minio` and `strict`, and that file is a Protected File, so a case cannot declare
+`profiles = ["rustfs"]` and there is no per-profile `expect` override until the Breaking Change
+process widens it (`runner::profile_tests` pins the refusal). Until then, what the `rustfs` profile
+expects differently is written in the rulings ledger below, one row per case, each cited to its
+rustfs/backlog#2684 entry — not in the cases.
+
+### Running against a RustFS candidate
+
+The suite signs with its own fixture credentials (`sign.credential = "valid"` is
+`AKIAIOSFODNN7EXAMPLE` / `wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY`, `inprocess.rs`), so the
+candidate is started with them rather than the suite being told the candidate's. Against the
+repository's own launcher, which assembles the preset:
+
+```bash
+cargo run -p rustfs-gateway-compat-sut --bin compat-sut -- --data /tmp/sut --port 9100 \
+    --access-key AKIAIOSFODNN7EXAMPLE --secret-key wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+cargo xtask conformance run --profile rustfs --endpoint http://127.0.0.1:9100 \
+    --allow-external-fixtures --rulings conformance/rulings/rustfs-profile.toml --json report.json
+```
+
+The JSON report carries `profile`, `endpoint` (the URL the run was pointed at) and `target_build`:
+the `Server` header the target sent on one unsigned `HEAD /` before the run, verbatim, or `null`
+when it sent none. The gateway's own header is the product name and nothing else (`stamp.rs`), so
+a run against this repository's launcher reports `"target_build": "RustFS"`; a build string the
+probe did not observe is never substituted.
+
+### The rulings ledger (`--rulings <toml>`)
+
+A run against a candidate that is not the reference target leaves cases red for reasons that were
+reviewed, and the ledger is where that review is written down — with a date, so it cannot become
+permanent by being forgotten:
+
+```toml
+[[ruling]]
+id = "c-sig-0597"
+verdict = "legacy-identical"          # or "accepted-change"
+issue = "rustfs/backlog#2684"
+approved_by = "maintainer"
+expires = "2027-01-31"
+```
+
+Every row carries exactly those five fields; a missing field, an unknown key, an unknown verdict,
+an `issue` that is not `<owner>/<repository>#<number>`, an `expires` that is not a calendar date,
+or a case ruled twice is refused before any exchange, and so is a row naming a case the corpus does
+not hold (exit 2). An unreadable file is exit 3. At the end of the run **every failed or skipped
+case must have an unexpired ruling** — a skip included, whether the target could not answer or the
+case declared itself inapplicable: a case that did not run is not evidence, and the ledger is where
+the reason it is tolerated belongs. A ruling holds through its `expires` day and not past it. A
+case without one, or with a lapsed one, exits 1; a ruling on a case that passed is reported as
+stale and can be removed. `validate` refuses `--rulings` because it evaluates no assertion, and
+`--baseline` refuses it because the two are two ledgers for one run.
+
+A ruled case is never rendered as passed. The text report lists it under `rulings:`, the JSON
+report keeps its `verdict` and adds a `ruling` object (`null` on an unruled case), and the JUnit
+document keeps the `<failure>` or `<skipped>` element and notes the ruling in a `<system-out>`
+line beside it. A green that was bought by a ruling is still visible as what it is.
+
+`conformance/rulings/rustfs-profile.toml` is the committed ledger for `--profile rustfs` against
+the preset (rustfs/backlog#2757); every row names the review that tolerates the difference in
+`issue` — a rustfs/backlog#2684 entry, a rustfs/gateway#1349 ledger row, or the issue an
+unregistered profile reading cites in `docs/rustfs-profile.md` — and the ledger is read with the
+same reader, so it fails the same way a hand-written one does. It rules behaviour only. A case the
+harness cannot measure against an external target — one that pins `clock.fixed`, needs a fixture
+the external path does not establish, an operation the launcher does not register, or an authored
+HTTP/2 script — is left unruled on purpose, so a run with this ledger still exits 1 and its
+`rulings:` block names exactly what is unmeasured rather than excusing it.
+
 ## Evidence and compliance
 
 `case.evidence[]` records where a behavioural fact was observed: a URL plus one original sentence

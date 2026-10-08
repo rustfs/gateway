@@ -138,7 +138,9 @@ fn fixture_server() -> (String, thread::JoinHandle<Vec<Vec<u8>>>) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind fixture endpoint");
     listener.set_nonblocking(true).expect("bound fixture accept wait");
     let address = listener.local_addr().expect("fixture endpoint address");
-    let responses: [&[u8]; 7] = [
+    let responses: [&[u8]; 8] = [
+        // The identity probe `run --endpoint` sends before any case: an unsigned `HEAD /`.
+        b"HTTP/1.1 403 Forbidden\r\nServer: RustFS\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
         b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
         b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
         b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
@@ -213,9 +215,14 @@ fn cli_runner_orders_owned_object_fixture_around_an_authored_read_only_exchange(
     ];
 
     let code = cli::main(&args);
-    let requests = server.join().expect("fixture server exits");
+    let mut requests = server.join().expect("fixture server exits");
 
     assert_eq!(code, ExitCode::from(exit::SUCCESS));
+    // The identity probe comes first, unsigned, and touches no fixture; the fixture sequence
+    // below is asserted exactly as before it existed.
+    let probe = requests.remove(0);
+    assert_eq!(request_line(&probe), "HEAD / HTTP/1.1");
+    assert_eq!(request_header(&probe, "authorization"), None, "the probe is unsigned");
     assert_eq!(
         requests.iter().map(|request| request_line(request)).collect::<Vec<_>>(),
         [

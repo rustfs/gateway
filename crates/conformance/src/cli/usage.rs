@@ -36,8 +36,10 @@ commands:
 options:
   --filter <glob>           select cases whose path or id matches (`etag/`, `*mpu*`, `c-sig-0001`)
   --transport <hyper|conn>  assembly path to inject (default hyper)
-  --profile <aws|minio|strict>
-                            the profile the target claims (default aws)
+  --profile <aws|minio|strict|rustfs>
+                            the profile the target claims (default aws); `rustfs` is the legacy
+                            RustFS reading and needs `--endpoint`, because the bundled target does
+                            not run the RustFS preset
   --root <dir>              corpus directory holding case.schema.json
   --endpoint <http(s)-url>  external target (raw HTTP/1.1; authored HTTP/2 frames over
                             http:// with prior knowledge or https:// with ALPN h2)
@@ -45,6 +47,10 @@ options:
                             allow isolated owned bucket/object setup and automatic cleanup
   --ca-cert <pem-path>      additional CA certificates for an HTTPS endpoint
   --baseline <file>         tolerate the failures this file records; fail only on a regression
+  --rulings <toml>          judge the run against a ledger of reviewed, dated `[[ruling]]` rows:
+                            every failed or skipped case needs an unexpired ruling or the run
+                            exits 1; a ruled case is still reported failed or skipped. `run`
+                            only, and not beside `--baseline`
   --json <file>             write the machine-readable report
   --junit <file>            write a JUnit document
   --exclude-slow            leave `slow` cases out, as the pull-request gate does
@@ -53,5 +59,7 @@ options:
                             `diff-transports` hands it to both of its children
   -h, --help                print this text
 
-exit codes: 0 ok, 1 regression against the baseline, 2 usage, 3 environment
+exit codes: 0 ok, 1 regression against the baseline or a case without an unexpired ruling,
+            2 usage (a malformed ledger, or one naming a case the corpus lacks, included),
+            3 environment
 ";

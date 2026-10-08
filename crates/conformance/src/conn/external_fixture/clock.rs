@@ -15,20 +15,34 @@
 //! Wall-clock conversion for external fixture signatures.
 //!
 //! Responsible for: converting the current Unix second into the UTC basic-ISO stamp SigV4 needs.
-//! NOT responsible for: case clocks, signing, or fixture deadlines. Upstream: `super`; downstream:
+//! NOT responsible for: case clocks, signing, or fixture deadlines. Upstream: `super`; downstream: `super::super::external_clock` (the now a case is mapped onto) and
 //! `crate::inprocess::sign_request` through one control request.
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::sut::SutError;
 
-pub(super) fn current_request_time() -> Result<crate::time::Instant, SutError> {
+pub(in crate::conn) fn current_request_time() -> Result<crate::time::Instant, SutError> {
     let seconds = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_err(|error| SutError::Environment(format!("system clock precedes the Unix epoch: {error}")))?
         .as_secs();
     let seconds = i64::try_from(seconds)
         .map_err(|_| SutError::Environment("current Unix time does not fit the signer clock".to_owned()))?;
+    instant_at(seconds)
+}
+
+/// The instant `seconds` after the Unix epoch, with the stamp SigV4 signs.
+///
+/// # Errors
+///
+/// Returns [`SutError::Environment`] when the second is before the epoch.
+pub(in crate::conn) fn instant_at(seconds: i64) -> Result<crate::time::Instant, SutError> {
+    if seconds < 0 {
+        return Err(SutError::Environment(
+            "a signing instant before the Unix epoch cannot be stamped".to_owned(),
+        ));
+    }
     let days = seconds.div_euclid(86_400);
     let second_of_day = seconds.rem_euclid(86_400);
     let (year, month, day) = civil_from_days(days);

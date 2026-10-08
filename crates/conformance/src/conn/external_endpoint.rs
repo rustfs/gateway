@@ -114,6 +114,12 @@ impl ExternalEndpoint {
         })
     }
 
+    /// The endpoint as the URL the run was pointed at, for the report.
+    pub(super) fn url(&self) -> String {
+        let scheme = if self.is_tls() { "https" } else { "http" };
+        format!("{scheme}://{}", self.authority)
+    }
+
     pub(super) fn authority(&self) -> &str {
         &self.authority
     }

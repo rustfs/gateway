@@ -74,13 +74,15 @@ use crate::production::{ProductionDriver, ProductionServer};
 #[cfg(test)]
 use crate::socket::{Announce, honour_the_services_intent};
 use crate::socket::{Connection, Demand, Listener, Pacer, ReadFailure, parse_head};
-use crate::sut::{ExchangePlan, Sut, SutError};
+use crate::sut::{ExchangePlan, Sut, SutError, TargetIdentity};
 use crate::value::Value;
 mod bind;
 mod exchange;
 mod external;
+mod external_clock;
 mod external_endpoint;
 mod external_fixture;
+mod external_identity;
 mod external_pacing;
 mod external_tls;
 mod h2;
@@ -292,6 +294,12 @@ struct BodyProgress {
 }
 
 impl Sut for Conn {
+    fn identity(&mut self) -> Result<TargetIdentity, SutError> {
+        if self.external.is_some() {
+            return self.external_identity();
+        }
+        Ok(TargetIdentity::default())
+    }
     fn describe(&self) -> String {
         if let Some(endpoint) = &self.external {
             return endpoint.description();

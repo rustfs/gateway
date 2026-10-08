@@ -6,7 +6,7 @@ ADRs; this map only selects files.
 | File | Responsibility | Read it when |
 |---|---|---|
 | `src/lib.rs` | Module wiring and public runner surface. | Start here for a conformance task. |
-| `src/main.rs` | CLI arguments and process exit classes. | The binary accepts or reports an option incorrectly. |
+| `src/main.rs`, `src/cli/options.rs`, `src/cli/usage.rs` | CLI arguments, their refusals, the usage text, and process exit classes. | The binary accepts, refuses or documents an option incorrectly. |
 | `src/corpus.rs` | Corpus discovery, loading and selection. | A case is missing, duplicated or filtered wrongly. |
 | `src/schema.rs`, `src/schema/computed_md5_tests.rs`, `src/schema/h2_reset_tests.rs`, `src/schema/h2_goaway_tests.rs`, `src/schema/h2_ping_tests.rs` | Frozen schema validation and digest/control-frame version boundaries. | A TOML shape is accepted or rejected incorrectly. |
 | `src/toml.rs` | Minimal TOML value parser used by the corpus. | Syntax parsing fails before schema validation. |
@@ -14,7 +14,7 @@ ADRs; this map only selects files.
 | `src/runner/deadline.rs`, `src/runner/reference.rs` | Case clock and expiry receipts; the reference evaluation the baseline records. | A claimed timeout lacks a measured boundary, or a refresh and the gate disagree. |
 | `src/runner/h2_receipt_tests.rs` | Serial and concurrent scripted HTTP/2 receipt controls. | A synthetic outcome bypasses clock validation. |
 | `src/runner/budget_tests.rs` | The `case.timeout_ms` verdict: the target is charged, the harness's own waiting is not. | A timeout is judged on the wrong share of the wall time. |
-| `src/runner/http_version_tests.rs`, `src/runner/tls_tests.rs` | Declared HTTP-version and configured TLS applicability with retained transport refusals. | An applicability gate skips runnable requests or claims unsupported coverage. |
+| `src/runner/http_version_tests.rs`, `src/runner/tls_tests.rs`, `src/runner/profile_tests.rs` | Declared HTTP-version, configured TLS and claimed-profile applicability, with retained transport refusals; the frozen schema's closed profile enum is pinned there. | An applicability gate skips runnable requests, claims unsupported coverage, or selects a profile's cases wrongly. |
 | `src/runner/lifecycle_tests.rs` | Post-prepare cleanup and failure-classification regression coverage. | A runner early return may bypass fixture cleanup. |
 | `src/runner/shard_tests.rs` | The `--shard` partition: every selected case exactly once, in corpus order, and the partial-run note. | Shards overlap, skip a case, or run silently as a whole. |
 | `src/expect.rs` | Expected observation matching. | A response, stream error or timing assertion is judged wrongly. |
@@ -29,7 +29,7 @@ ADRs; this map only selects files.
 | `src/inprocess/computed_md5_transport_tests.rs` | Captured-body digests, signing, and refusal controls over real sockets. | Computed MD5 or capture interpolation changes. |
 | `src/inprocess/payload.rs` | Deterministic payload generation and hexadecimal decoding. | Authored payload bytes or fill patterns differ from the case. |
 | `src/inprocess/payload_literal.rs` | Turns `sign.payload_hash_literal` into the exact digest the signer signs as stated. | A case must sign the digest of bytes it does not send (c-sig-0596). |
-| `src/inprocess/profile.rs` | Maps conformance profiles and deadlines onto measured facade policy. | A profile or timeout appears in cases but does not change target behavior. |
+| `src/inprocess/profile.rs` | Maps conformance profiles and deadlines onto measured facade policy; refuses `rustfs`, which only an external candidate can claim. | A profile or timeout appears in cases but does not change target behavior. |
 | `src/inprocess/security.rs`, `src/inprocess/post_object.rs` | Fixed authorization, dispatch observations and bucket-owner sources for security cases, and the c-post-0020 assembly under the RustFS form grammar with its handler-entry observation of `PostObjectInput::content_length`. | A security case needs a deterministic policy, dispatch count or metadata-source outcome, or a form case needs a handler-entry fact. |
 | `src/observation.rs` | Response, event-stream, ordered HTTP/2 control and receive-side termination facts. | A transport fact or event stream is classified incorrectly. |
 | `src/observation/select_error_tests.rs` | Independent Select error goldens, malformed-frame controls, and production transport tests. | The encoder or observer changes request-level error framing. |
@@ -40,8 +40,8 @@ ADRs; this map only selects files.
 | `src/cli/parity/exit_tests.rs` | Child exit-code controls after complete capability comparison. | Checking that an environment failure cannot masquerade as an expected refusal. |
 | `src/cli/parity/selection_tests.rs` | Independent selection and capability metadata controls. | Checking filtering, sharding, applicability and census integrity. |
 | `src/cli/parity/integration_tests.rs` | Parent orchestration controls with explicit child-process reports. | Checking independent census and exit validation across the CLI boundary. |
-| `src/cli/usage.rs` | The usage text: every command, option, and exit code as the reader sees them. | An option is added, renamed, or its wording changes. |
-| `src/cli/shard_tests.rs`, `src/cli/baseline_tests.rs` | The `--shard` command-line contract; `baseline` rendering the reference evaluation. | A shard option is parsed, forwarded, or classified wrongly. |
+| `src/rulings.rs`, `src/rulings/tests.rs` | The `--rulings` ledger: `[[ruling]]` rows read strictly, bound to the corpus, and judged against a finished report; a ruled case stays failed or skipped. | A failed or skipped case is excused, or not, by the wrong rule, or a ledger row is accepted it should not be. |
+| `src/cli/shard_tests.rs`, `src/cli/baseline_tests.rs`, `src/cli/rulings_tests.rs`, `src/cli/profile_tests.rs` | The `--shard`, `--rulings` and `--profile rustfs` command-line contracts, and `baseline` rendering the reference evaluation. | An option is parsed or refused wrongly, or the exit code under a ledger is wrong. |
 | `src/socket.rs` | Real socket transport and connection observations. | A wire-level close/reuse fact is wrong. |
 | `src/socket/connect.rs` | Plain and TLS client connection setup, including absolute setup deadlines. | A TCP connect or TLS handshake escapes the case budget. |
 | `src/socket/response.rs` | Fixed-length and chunked HTTP/1.1 response decoding. | A raw response body is truncated or framed incorrectly. |
@@ -49,16 +49,15 @@ ADRs; this map only selects files.
 | `src/conn/` | Connection state and reusable transport helpers. | A multi-exchange case loses connection state. |
 | `src/conn/control_chunks.rs`, `src/conn/options.rs` | Control chunks on a socket exchange (body catch-up, stalls, teardowns, harness charges), and the `[connection]` reader. | A `stall`, `half_close`, or `close` control chunk is carried out or timed wrongly. |
 | `src/conn/bind.rs` | Queues a pacing rendezvous before a fresh socket connects. | A socket case skips only under scheduler load. |
-| `src/conn/external.rs` | Authored HTTP/1.1 exchange against an external endpoint; authored HTTP/2 scripts go to `conn/h2.rs`. | `--endpoint` connects, writes, or reports unavailable observations incorrectly. |
+| `src/conn/external.rs`, `src/conn/external_clock.rs` | Authored HTTP/1.1 exchange against an external endpoint, signed at the wall clock (a pinned `clock.fixed` is refused with the reason); authored HTTP/2 scripts go to `conn/h2.rs`. | `--endpoint` connects, writes, signs at the wrong instant, or reports unavailable observations incorrectly. |
 | `src/conn/external/tests.rs` | Authored-byte capture, early-response, refusal, and CLI controls for external endpoints. | External exchange or fixture behavior changes. |
 | `src/conn/external_pacing.rs` | Cleartext external-body delays and early-response observation. | A delayed chunk is sent too early or after a response already exists. |
-| `src/conn/external_endpoint.rs` | Strict HTTP(S) endpoint parsing, resolution, and protocol selection. | An endpoint scheme, authority, host, or default port is handled incorrectly. |
+| `src/conn/external_endpoint.rs`, `src/conn/external_identity.rs` | Strict HTTP(S) endpoint parsing, resolution, and protocol selection; the one `HEAD /` probe whose `Server` header is the report's `target_build`. | An endpoint scheme, authority, host, or default port is handled incorrectly, or the report names a build the target did not send. |
 | `src/conn/external_fixture.rs` | Opt-in external owned-bucket/object planning and read-only enforcement. | A remote fixture shape or authored mutation is accepted incorrectly. |
 | `src/conn/external_fixture/clock.rs` | Current UTC signing time for external fixture controls. | A control request is rejected as stale or future-dated. |
 | `src/conn/external_fixture/lifecycle.rs` | Applies validated external plans and cleans owned objects before buckets. | A remote create, ownership transition, rollback, or cleanup order is wrong. |
-| `src/conn/external_fixture/object.rs` | Decodes and validates unversioned object fixture payloads, headers, and paths. | An external object fixture loses bytes or sends an unsafe control request. |
+| `src/conn/external_fixture/object.rs`, `src/conn/external_fixture/object_tests.rs` | Decodes and validates unversioned object fixture payloads, headers, and paths, with real-socket ownership and refusal controls. | An external object fixture loses bytes, sends an unsafe control request, or its planning or cleanup changes. |
 | `src/conn/external_fixture/h2_guard_tests.rs` | The read-only guard classifying authored HTTP/2 scripts by their decoded `:method`. | An h2 script could mutate a remote fixture. |
-| `src/conn/external_fixture/object_tests.rs` | Real-socket ownership and refusal controls for external object fixtures. | Object fixture planning or cleanup behavior changes. |
 | `src/conn/external_fixture/region.rs` | Fixture region validation, signing scope, and CreateBucketConfiguration XML. | A remote bucket is created or signed for the wrong region. |
 | `src/conn/external_fixture/runner_tests.rs` | Full CLI-to-external-endpoint fixture lifecycle regression coverage. | The runner does not create, exercise, or clean up an opted-in remote fixture. |
 | `src/conn/external_tls.rs` | Verified TLS client setup with public and explicit CA roots. | HTTPS trust, ALPN, or certificate failure classification is wrong. |
@@ -91,10 +90,11 @@ ADRs; this map only selects files.
 | `src/fixture/handlers_object.rs`, `src/fixture/post_object.rs` | Object, multipart, listing, event and browser `POST` upload Handler entries for the deterministic fixture. | An object-family operation stops reaching existing fixture behavior. |
 | `src/keys/` | Schema-key consumption audit. | A declared case key is parsed but ignored. |
 | `src/external_junit_tests.rs` | Independently parses external CLI JUnit reports and tests write failures. | The external CLI reporting composition changes. |
-| `src/report.rs` | Verdicts, the baseline table, and human/JSON/JUnit reports. | A verdict is rendered, grouped or compared against the baseline wrongly. |
+| `src/report.rs` | Verdicts, the baseline table, and human/JSON/JUnit reports, with the run's endpoint, build and rulings beside them. | A verdict is rendered, grouped or compared against the baseline wrongly, or a ruled case reads as passed. |
 | `tests/corpus.rs` | Corpus-wide invariants and the whole-corpus baseline gate. | A case has no baseline row, or the corpus regressed against it. |
 | `tests/encryption_blocked_types.rs` | The SSE-C `BlockedEncryptionTypes` refusal over a declared TLS transport, which the cleartext corpus cannot reach, in both directions. | Changing how the fixture enforces a bucket's blocked encryption types. |
 | `src/lint.rs` | Corpus conventions beyond the JSON schema. | Case naming or evidence lint fails. |
 | `tests/` | Process and corpus integration contracts. | Change runner behavior or CLI output. |
 | `../../conformance/cases/**` | Executable S3 behavior cases. | Add or diagnose one protocol behavior. |
-| `../../conformance/case.schema.json` | Frozen case format. | Never edit without the Breaking Change process. |
+| `../../conformance/case.schema.json` | Frozen case format; its `profiles` enum does not yet name `rustfs`. | Never edit without the Breaking Change process. |
+| `../../conformance/rulings/rustfs-profile.toml` | The rulings ledger for `--profile rustfs` against the RustFS preset, each row cited to rustfs/backlog#2684. | A `rustfs` run fails or skips a case the ledger does not yet rule, or a ruling expired. |

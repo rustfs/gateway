@@ -757,6 +757,8 @@ mod http_version_tests;
 #[cfg(test)]
 mod lifecycle_tests;
 #[cfg(test)]
+mod profile_tests;
+#[cfg(test)]
 mod shard_tests;
 #[cfg(test)]
 mod tests;

@@ -32,10 +32,11 @@ use crate::inprocess::InProcess;
 use crate::keys;
 #[cfg(feature = "production-transports")]
 use crate::production::ProductionDriver;
-use crate::report::{Baseline, Report, Verdict};
-use crate::runner::{self, RunOptions, Shard};
-use crate::sut::{Profile, Sut, Transport};
-use std::path::PathBuf;
+use crate::report::{Baseline, Report, RunContext, Verdict};
+use crate::rulings::{Judgement, Rulings};
+use crate::runner::{self, RunOptions};
+use crate::sut::{Profile, Sut, TargetIdentity, Transport};
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 /// Exit codes. An environment problem is deliberately not exit 1: a run that could not reach the
@@ -216,6 +217,29 @@ fn execute_prepared(options: &Options, sut: &mut dyn Sut, corpus: &Corpus, basel
         shard: options.shard,
         validate_only: options.command == Command::Validate,
     };
+    // The ledger is read and bound before any exchange: a ledger the corpus cannot honour must
+    // not cost a run to find out, and must never excuse one.
+    let rulings = match options.rulings.as_deref().map(|path| load_rulings(path, corpus)) {
+        None => None,
+        Some(Ok(rulings)) => Some(rulings),
+        Some(Err((code, message))) => {
+            eprintln!("conformance: {message}");
+            return ExitCode::from(code);
+        }
+    };
+    // Asked on `run` only: `validate` contacts no target, and the other commands render something
+    // that is not the run report.
+    let identity = if options.command == Command::Run {
+        match sut.identity() {
+            Ok(identity) => identity,
+            Err(error) => {
+                eprintln!("conformance: {error}");
+                return ExitCode::from(exit::ENVIRONMENT);
+            }
+        }
+    } else {
+        TargetIdentity::default()
+    };
     let report = evaluate(options, sut, corpus, &run_options);
 
     if options.command == Command::Baseline {
@@ -235,25 +259,63 @@ fn execute_prepared(options: &Options, sut: &mut dyn Sut, corpus: &Corpus, basel
     }
 
     print!("{}", report.render_text(baseline));
+    let judgement = match rulings.as_ref() {
+        None => None,
+        Some(rulings) => match crate::rulings::today() {
+            Ok(today) => Some(rulings.judge(&report, today)),
+            Err(message) => {
+                eprintln!("conformance: {message}");
+                return ExitCode::from(exit::ENVIRONMENT);
+            }
+        },
+    };
+    let ledger = options.rulings.as_ref().map(|path| path.display().to_string());
+    if let (Some(judgement), Some(ledger)) = (&judgement, &ledger) {
+        print!("{}", judgement.render(ledger));
+    }
+    let context = RunContext {
+        endpoint: identity.endpoint.as_deref(),
+        target_build: identity.build.as_deref(),
+        rulings: ledger.as_deref().zip(rulings.as_ref()),
+    };
     if let Some(path) = &options.json
-        && let Err(error) = std::fs::write(path, report.render_json())
+        && let Err(error) = std::fs::write(path, report.render_json_in(&context))
     {
         eprintln!("conformance: cannot write {}: {error}", path.display());
         return ExitCode::from(exit::ENVIRONMENT);
     }
     if let Some(path) = &options.junit
-        && let Err(error) = std::fs::write(path, report.render_junit())
+        && let Err(error) = std::fs::write(path, report.render_junit_in(&context))
     {
         eprintln!("conformance: cannot write {}: {error}", path.display());
         return ExitCode::from(exit::ENVIRONMENT);
     }
-    ExitCode::from(status(&report, baseline, options.command))
+    let code = match &judgement {
+        Some(judgement) => status_code_under_rulings(&report, judgement, options.command),
+        None => status_code(&report, baseline, options.command),
+    };
+    announce(&report, code);
+    ExitCode::from(code)
 }
 
-fn status(report: &Report, baseline: Option<&Baseline>, command: Command) -> u8 {
-    let code = status_code(report, baseline, command);
+/// Reads and binds the ledger, before any exchange.
+///
+/// An unreadable file is an environment problem; a ledger that is malformed or names a case the
+/// corpus lacks is a wrong command line, because the file is what the command line pointed at.
+fn load_rulings(path: &Path, corpus: &Corpus) -> Result<Rulings, (u8, String)> {
+    let text =
+        std::fs::read_to_string(path).map_err(|error| (exit::ENVIRONMENT, format!("cannot read {}: {error}", path.display())))?;
+    let rulings = Rulings::parse(&text).map_err(|message| (exit::USAGE, format!("{}: {message}", path.display())))?;
+    rulings
+        .bind(corpus.cases().iter().map(|case| case.id.as_str()))
+        .map_err(|message| (exit::USAGE, format!("{}: {message}", path.display())))?;
+    Ok(rulings)
+}
+
+/// Says on stderr why an environment exit is one, so the reader does not take it for a pass.
+fn announce(report: &Report, code: u8) {
     if code != exit::ENVIRONMENT {
-        return code;
+        return;
     }
     if report.outcomes.is_empty() {
         eprintln!(
@@ -267,7 +329,6 @@ fn status(report: &Report, baseline: Option<&Baseline>, command: Command) -> u8 
              The corpus loaded and validated, but nothing was measured."
         );
     }
-    code
 }
 
 /// Classifies a report without rendering diagnostics or mutating output streams.
@@ -280,13 +341,29 @@ pub fn status_code(report: &Report, baseline: Option<&Baseline>, command: Comman
     if regressions > 0 {
         return exit::REGRESSION;
     }
+    environment_code(report, command).unwrap_or(exit::SUCCESS)
+}
+
+/// The exit classification under a rulings ledger: the judgement decides between 0 and 1, and the
+/// environment refusals of [`status_code`] still come first — a ruling on every case cannot turn
+/// a run in which nothing executed into a pass.
+#[must_use]
+pub fn status_code_under_rulings(report: &Report, judgement: &Judgement<'_>, command: Command) -> u8 {
+    if let Some(code) = environment_code(report, command) {
+        return code;
+    }
+    if judgement.blocks() { exit::REGRESSION } else { exit::SUCCESS }
+}
+
+/// The two ways a run is an environment failure whatever its verdicts say.
+fn environment_code(report: &Report, command: Command) -> Option<u8> {
     // A selector that named no case is an environment problem for every command, `validate`
     // included. `--filter '<case-id>'` is how the feedback-loop table selects one case, so a typo
     // in the id checked nothing and exited 0 — the same shape as a command that checked something.
     // A shard that owns none of a non-empty selection is a partial run, not an empty one: the
     // cases exist and the other shards run them, and this report says so in its notes.
     if report.outcomes.is_empty() && report.left_to_other_shards == 0 {
-        return exit::ENVIRONMENT;
+        return Some(exit::ENVIRONMENT);
     }
     // A run in which nothing executed is an environment problem, not a pass. Reporting it as
     // success is how a suite quietly stops asserting anything.
@@ -294,9 +371,9 @@ pub fn status_code(report: &Report, baseline: Option<&Baseline>, command: Comman
         && !report.outcomes.is_empty()
         && report.outcomes.iter().all(|outcome| outcome.verdict == Verdict::Skipped)
     {
-        return exit::ENVIRONMENT;
+        return Some(exit::ENVIRONMENT);
     }
-    exit::SUCCESS
+    None
 }
 
 fn read_baseline(path: &PathBuf) -> Result<Baseline, String> {
@@ -304,141 +381,18 @@ fn read_baseline(path: &PathBuf) -> Result<Baseline, String> {
     Baseline::from_json(&text).map_err(|message| format!("{}: {message}", path.display()))
 }
 
-/// Which command was asked for.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Command {
-    /// Run the corpus against a target.
-    Run,
-    /// Run and compare both production connection drivers.
-    DiffTransports,
-    /// Check the corpus only.
-    Validate,
-    /// Print a baseline document.
-    Baseline,
-    /// Check the harness against the frozen schema's list of declarations.
-    AuditKeys,
-}
-
-/// A parsed command line.
-#[derive(Debug, Clone)]
-pub struct Options {
-    /// The command.
-    pub command: Command,
-    /// Case selector.
-    pub filter: Option<String>,
-    /// Assembly path.
-    pub transport: Transport,
-    /// Claimed profile.
-    pub profile: Profile,
-    /// Corpus directory.
-    pub root: Option<PathBuf>,
-    /// Target endpoint, when one is given.
-    pub endpoint: Option<String>,
-    /// Additional PEM-encoded roots for an HTTPS endpoint.
-    pub ca_cert: Option<PathBuf>,
-    /// Explicit permission to create and automatically remove external owned bucket/object fixtures.
-    pub external_fixtures: bool,
-    /// Baseline document.
-    pub baseline: Option<PathBuf>,
-    /// Where to write the JSON report.
-    pub json: Option<PathBuf>,
-    /// Where to write the JUnit report.
-    pub junit: Option<PathBuf>,
-    /// This worker's share of the selected cases, when the run is split across workers.
-    pub shard: Option<Shard>,
-    /// Whether to leave `slow` cases out.
-    pub exclude_slow: bool,
-}
-
-impl Options {
-    /// Parses the command line.
-    ///
-    /// Returns `Ok(None)` when help was requested.
-    ///
-    /// # Errors
-    ///
-    /// Returns a message naming the offending argument.
-    pub fn parse(args: &[String]) -> Result<Option<Options>, String> {
-        let mut options = Options {
-            command: Command::Run,
-            filter: None,
-            transport: Transport::Hyper,
-            profile: Profile::Aws,
-            root: None,
-            endpoint: None,
-            ca_cert: None,
-            external_fixtures: false,
-            baseline: None,
-            json: None,
-            junit: None,
-            exclude_slow: false,
-            shard: None,
-        };
-        let mut transport_explicit = false;
-        let mut iter = args.iter();
-        let Some(first) = iter.next() else {
-            return Err("no command given".to_owned());
-        };
-        options.command = match first.as_str() {
-            "run" => Command::Run,
-            "diff-transports" => Command::DiffTransports,
-            "validate" => Command::Validate,
-            "baseline" => Command::Baseline,
-            "audit-keys" => Command::AuditKeys,
-            "-h" | "--help" => return Ok(None),
-            other => return Err(format!("unknown command `{other}`")),
-        };
-        while let Some(flag) = iter.next() {
-            let mut value = || iter.next().cloned().ok_or_else(|| format!("`{flag}` needs a value"));
-            match flag.as_str() {
-                "-h" | "--help" => return Ok(None),
-                "--exclude-slow" => options.exclude_slow = true,
-                "--shard" => options.shard = Some(Shard::parse(&value()?)?),
-                "--filter" => options.filter = Some(value()?),
-                "--root" => options.root = Some(PathBuf::from(value()?)),
-                "--endpoint" => options.endpoint = Some(value()?),
-                "--ca-cert" => options.ca_cert = Some(PathBuf::from(value()?)),
-                "--allow-external-fixtures" => options.external_fixtures = true,
-                "--baseline" => options.baseline = Some(PathBuf::from(value()?)),
-                "--json" => options.json = Some(PathBuf::from(value()?)),
-                "--junit" => options.junit = Some(PathBuf::from(value()?)),
-                "--transport" => {
-                    transport_explicit = true;
-                    let text = value()?;
-                    options.transport = Transport::parse(&text).ok_or_else(|| format!("unknown transport `{text}`"))?;
-                }
-                "--profile" => {
-                    let text = value()?;
-                    options.profile = Profile::parse(&text).ok_or_else(|| format!("unknown profile `{text}`"))?;
-                }
-                other => return Err(format!("unknown option `{other}`")),
-            }
-        }
-        if options.endpoint.is_some() {
-            if transport_explicit {
-                return Err(
-                    "`--transport` selects an in-process assembly path and cannot be combined with `--endpoint`".to_owned(),
-                );
-            }
-            options.transport = Transport::Conn;
-        }
-        if let Some(endpoint) = options.endpoint.as_deref() {
-            if options.ca_cert.is_some() && !endpoint.starts_with("https://") {
-                return Err("`--ca-cert` requires an `https://` endpoint".to_owned());
-            }
-        } else if options.ca_cert.is_some() {
-            return Err("`--ca-cert` requires `--endpoint`".to_owned());
-        }
-        if options.external_fixtures && options.endpoint.is_none() {
-            return Err("`--allow-external-fixtures` requires `--endpoint`".to_owned());
-        }
-        Ok(Some(options))
-    }
-}
+mod options;
+pub use options::{Command, Options};
 
 #[cfg(all(test, feature = "production-transports"))]
 #[path = "cli/baseline_tests.rs"]
 mod baseline_tests;
+#[cfg(test)]
+#[path = "cli/profile_tests.rs"]
+mod profile_tests;
+#[cfg(test)]
+#[path = "cli/rulings_tests.rs"]
+mod rulings_tests;
 #[cfg(test)]
 #[path = "cli/shard_tests.rs"]
 mod shard_tests;
@@ -518,6 +472,7 @@ mod tests {
             ca_cert: None,
             external_fixtures: false,
             baseline: None,
+            rulings: None,
             json: None,
             junit: None,
             exclude_slow: false,
@@ -736,9 +691,8 @@ mod tests {
             polarity: (1, 0),
             validate_only: false,
         };
-        assert_eq!(status(&report, None, Command::Run), exit::ENVIRONMENT);
         assert_eq!(status_code(&report, None, Command::Run), exit::ENVIRONMENT);
-        assert_eq!(status(&report, None, Command::Validate), exit::SUCCESS);
+        assert_eq!(status_code(&report, None, Command::Validate), exit::SUCCESS);
     }
 
     #[test]

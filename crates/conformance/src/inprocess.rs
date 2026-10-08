@@ -393,7 +393,7 @@ impl InProcess {
         let deadlines = HandlerDeadlineConfig::default()
             .try_with_commit_progress(crate::sut::COMMIT_PROGRESS_DEADLINE)
             .unwrap_or_default();
-        let names = profile::name_policy(profile);
+        let names = profile::name_policy(profile)?;
         let builder = ServiceBuilder::new()
             .name_policy(names)
             .register::<dto::AbortMultipartUpload, _>(Arc::clone(&backend))
