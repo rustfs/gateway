@@ -53,3 +53,28 @@ its deadline is a failure whose unfinished work has not been timed to completion
 diagnostic and the step it names. Investigate that failure without increasing the budget or
 dropping checks. This clarification changes no clock, check or shared-runner CI timing rule, and
 does not extend the crate prebuild exclusion to `verify --op` or `verify --all`.
+
+### Full gate
+
+`cargo xtask verify --all` runs three stages in order — `workspace test build`, `workspace tests`,
+`guard self-test` — and each stage runs under a deadline, not a share of one. The build opens a
+480-second deadline and the tests inherit it, because CI's `cargo test` compiles inside its own
+480 seconds; the guard self-test opens a fresh 480 seconds, the budget the suite declares for
+itself. A stage over its budget fails the gate however much time an earlier stage left, and a
+later stage never starts after one that failed, was killed or finished late. Until
+[#1247](https://github.com/rustfs/gateway/issues/1247) every stage shared one 600-second deadline,
+which two suites costing 227-461 and 265-453 seconds on a loaded host could not fit by construction.
+
+Every started stage gets a line against its budget. The first run of this contract, on a host
+other builds were loading, printed:
+
+```text
+verify: workspace test build finished in 0.89s, 0.89s into its 480s budget
+verify: workspace tests finished in 249.24s, 250.13s into the 480s budget it shares with workspace test build
+verify: guard self-test finished in 341.35s, 341.35s into its 480s budget
+verify: workspace tests and build guards passed in 591.48s
+```
+
+A killed stage reads `the deadline ran out during <stage>, <n>s into <budget>; the gate was
+stopped <m>s after it started`, and its `rule:` line quotes that stage's budget. A standalone
+`bash scripts/test_guard_scripts.sh` pass is a diagnostic, not a full-gate pass.

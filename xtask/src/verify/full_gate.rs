@@ -12,12 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The full gate's stages, run in order under one deadline.
+//! The full gate's stages, run in order, each under the deadline it declares.
 //!
-//! Responsible for: starting each stage only after every earlier stage succeeded, handing every
-//! stage the same supervised deadline so time an earlier stage spent is never given back, and
-//! reporting which stage the deadline ran out in together with what the finished stages measured.
-//! NOT responsible for: choosing the gate's commands or its budget, or supervising processes.
+//! Responsible for: starting each stage only after every earlier stage succeeded within its budget,
+//! opening a fresh supervised deadline for a stage that declares its own and handing an inheriting
+//! stage the deadline already in force so time spent under it is never given back, and reporting
+//! every started stage against its budget: what the finished stages measured, and which stage the
+//! deadline ran out in.
+//! NOT responsible for: choosing the gate's commands or budgets, or supervising processes.
 //! Upstream: `cargo xtask verify` and `cargo xtask verify --all`. Downstream: the process
 //! supervisor, which kills a stage's whole process group at the deadline.
 
@@ -25,7 +27,7 @@ use std::path::Path;
 use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
-use super::budget::BudgetFailure;
+use super::budget::{BudgetFailure, KilledStep};
 use super::process::{self, Batch};
 use super::{GateCommand, budget_diagnostic, diagnostic, killed_steps, print_cargo_failure, print_json_failure, print_success};
 
@@ -33,6 +35,29 @@ use super::{GateCommand, budget_diagnostic, diagnostic, killed_steps, print_carg
 pub(super) struct Stage {
     pub(super) name: String,
     pub(super) commands: Vec<GateCommand>,
+    pub(super) deadline: Deadline,
+}
+
+/// The deadline a stage runs under.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum Deadline {
+    /// A deadline of its own, this long after the stage starts: time an earlier stage spent is
+    /// neither charged to this stage nor handed to it.
+    Own(Duration),
+    /// The deadline the previous stage ran under: time the previous stage spent is not given back.
+    Previous,
+}
+
+/// What the gate's clock measured for one stage it started.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct StageClock {
+    /// From the stage's start until its batch returned, kills and reaping included.
+    elapsed: Duration,
+    /// From the start of the deadline the stage ran under until its batch returned. Larger than
+    /// `elapsed` when the stage inherited a deadline an earlier stage opened.
+    charged: Duration,
+    /// The budget of the deadline the stage ran under.
+    budget: Duration,
 }
 
 /// Where a gate stopped, and what its clock measured on the way there.
@@ -41,36 +66,48 @@ struct GateRun {
     stage: usize,
     /// The last stage's batch. Its step and cancellation indices refer to that stage's commands.
     batch: Batch,
-    /// Measured wall time of each earlier stage, every one of which finished and succeeded.
-    finished: Vec<Duration>,
+    /// One reading per started stage, in order. Every one before `stage` finished and succeeded.
+    clocks: Vec<StageClock>,
     /// Measured wall time from the gate's start until `batch` returned, kills and reaping included.
     elapsed: Duration,
 }
 
-/// Runs `stages` under one `budget` and renders the outcome as the gate's exit.
-pub(super) fn verify(stages: &[Stage], current_dir: &Path, budget: Duration, subject: &str, rule: &str, json: bool) -> ExitCode {
-    let run = run_stages(stages, current_dir, budget, &Instant::now);
-    report(run, stages, budget, subject, rule, json)
+/// Runs `stages` in order, each under its own deadline, and renders the outcome as the gate's exit.
+pub(super) fn verify(stages: &[Stage], current_dir: &Path, subject: &str, rule: &str, json: bool) -> ExitCode {
+    let run = run_stages(stages, current_dir, &Instant::now);
+    report(run, stages, subject, rule, json)
 }
 
-fn run_stages(stages: &[Stage], current_dir: &Path, budget: Duration, clock: &dyn Fn() -> Instant) -> GateRun {
+fn run_stages(stages: &[Stage], current_dir: &Path, clock: &dyn Fn() -> Instant) -> GateRun {
     let started = clock();
-    // One deadline for every stage: a stage that starts late inherits what is left, not a budget.
-    let deadline = started + budget;
-    let mut finished = Vec::new();
+    // When the deadline in force opened, and its budget.
+    let mut open: Option<(Instant, Duration)> = None;
+    let mut clocks = Vec::new();
     for (index, stage) in stages.iter().enumerate() {
         let stage_started = clock();
-        let batch = process::run_with_clock(&stage.commands, current_dir, Some(deadline), clock);
+        let (opened, budget) = match stage.deadline {
+            Deadline::Own(budget) => *open.insert((stage_started, budget)),
+            // With no earlier deadline to inherit there is no time to run in: fail closed rather
+            // than run without a deadline.
+            Deadline::Previous => *open.get_or_insert((stage_started, Duration::ZERO)),
+        };
+        let batch = process::run_with_clock(&stage.commands, current_dir, Some(opened + budget), clock);
         let now = clock();
-        if index + 1 == stages.len() || !succeeded(&batch) {
+        clocks.push(StageClock {
+            elapsed: now.saturating_duration_since(stage_started),
+            charged: now.saturating_duration_since(opened),
+            budget,
+        });
+        // A stage can finish between two supervisor polls after its deadline passed: over budget
+        // without being killed. The next stage would start on a fresh deadline, so stop here.
+        if index + 1 == stages.len() || !succeeded(&batch) || overrun(&clocks).is_some() {
             return GateRun {
                 stage: index,
                 batch,
-                finished,
+                clocks,
                 elapsed: now.saturating_duration_since(started),
             };
         }
-        finished.push(now.saturating_duration_since(stage_started));
     }
     GateRun {
         stage: 0,
@@ -80,7 +117,7 @@ fn run_stages(stages: &[Stage], current_dir: &Path, budget: Duration, clock: &dy
             interrupted: false,
             cancelled: Vec::new(),
         },
-        finished,
+        clocks,
         elapsed: clock().saturating_duration_since(started),
     }
 }
@@ -94,63 +131,108 @@ fn succeeded(batch: &Batch) -> bool {
             .all(|(_, output)| output.as_ref().is_ok_and(|output| output.status.success()))
 }
 
-fn report(run: GateRun, stages: &[Stage], budget: Duration, subject: &str, rule: &str, json: bool) -> ExitCode {
+fn report(run: GateRun, stages: &[Stage], subject: &str, rule: &str, json: bool) -> ExitCode {
     if run.batch.interrupted {
         return diagnostic("verification interrupted", subject, rule);
     }
-    if run.batch.timed_out {
-        let (where_, notes) = timeout_report(&run, stages, subject);
-        for note in notes {
-            eprintln!("verify: {note}");
-        }
-        let commands = stages.get(run.stage).map_or(&[][..], |stage| stage.commands.as_slice());
-        let killed = killed_steps(commands, &run.batch.cancelled);
-        return budget_diagnostic(BudgetFailure::KilledAtDeadline { budget, killed: &killed }, &where_, rule);
+    for note in stage_notes(&run, stages) {
+        eprintln!("verify: {note}");
     }
-    for (step, output) in run.batch.results {
+    let results = if run.batch.timed_out {
+        &[][..]
+    } else {
+        run.batch.results.as_slice()
+    };
+    for (step, output) in results {
         match output {
             Ok(output) if output.status.success() => {}
             Ok(output) => {
-                print_cargo_failure(&output);
-                print_json_failure(json, "verification command failed", &step);
+                print_cargo_failure(output);
+                print_json_failure(json, "verification command failed", step);
                 return diagnostic(
                     "verification command failed",
-                    &step,
+                    step,
                     &format!("{rule}; command exited with {}", output.status),
                 );
             }
             Err(error) => {
-                return diagnostic("verification command could not start", &step, &format!("{rule}; {error}"));
+                return diagnostic("verification command could not start", step, &format!("{rule}; {error}"));
             }
         }
     }
-    if run.elapsed > budget {
-        return budget_diagnostic(BudgetFailure::Overran { elapsed: run.elapsed }, subject, rule);
+    let commands = stages.get(run.stage).map_or(&[][..], |stage| stage.commands.as_slice());
+    let killed = killed_steps(commands, &run.batch.cancelled);
+    if let Some((index, failure)) = budget_failure(&run, &killed) {
+        return budget_diagnostic(failure, &stage_subject(subject, stages, index), rule);
     }
     print_success(subject, run.elapsed, json, None);
     ExitCode::SUCCESS
 }
 
-/// The `where` line and the notes for a gate the deadline stopped.
+/// The stage that failed its budget, and how: killed at its deadline, or finished past it.
 ///
-/// A finished stage ran to completion, so its time is a measurement and is printed as one. The
-/// stage the deadline stopped is named, with the time the gate actually stopped at — kills and
-/// reaping included — which is when the gate gave up, not what that stage's work would have cost.
-fn timeout_report(run: &GateRun, stages: &[Stage], subject: &str) -> (String, Vec<String>) {
-    let mut notes: Vec<String> = stages
+/// Either verdict quotes the budget of the deadline that stage ran under, never another stage's.
+fn budget_failure<'a>(run: &GateRun, killed: &'a [KilledStep]) -> Option<(usize, BudgetFailure<'a>)> {
+    if run.batch.timed_out {
+        let budget = run.clocks.get(run.stage).map_or(Duration::ZERO, |clock| clock.budget);
+        return Some((run.stage, BudgetFailure::KilledAtDeadline { budget, killed }));
+    }
+    overrun(&run.clocks).map(|index| {
+        let elapsed = run.clocks[index].charged;
+        (index, BudgetFailure::Overran { elapsed })
+    })
+}
+
+/// The first stage that finished further into its deadline than its budget allows.
+fn overrun(clocks: &[StageClock]) -> Option<usize> {
+    clocks.iter().position(|clock| clock.charged > clock.budget)
+}
+
+/// The `where` line for a verdict on one stage.
+fn stage_subject(subject: &str, stages: &[Stage], index: usize) -> String {
+    stages
+        .get(index)
+        .map_or_else(|| subject.to_owned(), |stage| format!("{subject}: {} stage", stage.name))
+}
+
+/// One line per stage the gate started, each against the budget of the deadline it ran under.
+///
+/// A stage that finished is a measurement and is printed as one. The stage the deadline stopped is
+/// named with how far into its budget it was stopped, kills and reaping included, and when the gate
+/// gave up: neither is what that stage's work would have cost. A failed stage gets no line; its
+/// diagnostic follows.
+fn stage_notes(run: &GateRun, stages: &[Stage]) -> Vec<String> {
+    let mut notes = Vec::new();
+    for (index, (stage, clock)) in stages.iter().zip(&run.clocks).enumerate() {
+        let budget = budget_phrase(stages, index, clock.budget);
+        let charged = clock.charged.as_secs_f64();
+        if index < run.stage || succeeded(&run.batch) {
+            notes.push(format!(
+                "{} finished in {:.2}s, {charged:.2}s into {budget}",
+                stage.name,
+                clock.elapsed.as_secs_f64()
+            ));
+        } else if run.batch.timed_out {
+            notes.push(format!(
+                "the deadline ran out during {}, {charged:.2}s into {budget}; the gate was stopped {:.2}s after it started",
+                stage.name,
+                run.elapsed.as_secs_f64()
+            ));
+        }
+    }
+    notes
+}
+
+/// Names the budget a stage ran under, and the stage that opened it when that was another one.
+fn budget_phrase(stages: &[Stage], index: usize, budget: Duration) -> String {
+    let budget = budget.as_secs();
+    let opener = stages[..=index]
         .iter()
-        .zip(&run.finished)
-        .map(|(stage, elapsed)| format!("{} finished in {:.2}s", stage.name, elapsed.as_secs_f64()))
-        .collect();
-    let Some(stage) = stages.get(run.stage) else {
-        return (subject.to_owned(), notes);
-    };
-    notes.push(format!(
-        "the deadline ran out during {}; the gate was stopped {:.2}s after it started",
-        stage.name,
-        run.elapsed.as_secs_f64()
-    ));
-    (format!("{subject}: {} stage", stage.name), notes)
+        .rposition(|stage| matches!(stage.deadline, Deadline::Own(_)));
+    match opener {
+        Some(opener) if opener != index => format!("the {budget}s budget it shares with {}", stages[opener].name),
+        _ => format!("its {budget}s budget"),
+    }
 }
 
 #[cfg(all(test, unix))]

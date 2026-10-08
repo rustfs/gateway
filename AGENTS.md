@@ -96,8 +96,13 @@ Use this map rather than guessing a broader command:
 | Cross-crate wiring, scripts, or CI | `cargo xtask verify --all` |
 
 `verify --op` has a 30-second budget; `verify --crate` has the prepared-loop budget described above.
-Do not apply the crate prebuild exclusion to other modes. `verify --all` is the CI surface and has
-a 10-minute budget. A budget failure is a tooling defect; do not replace the command with a wider,
+Do not apply the crate prebuild exclusion to other modes. `verify --all` runs the CI surface's
+workspace tests and guard self-test in sequence on one host and holds each stage to its own budget,
+not the sum to one deadline: 480 seconds for the workspace test build and tests together, 480
+seconds for the guard self-test, each reported on its own line. A stage never borrows time another
+stage left. The 10-minute limit in "CI budget" is the PR gate's CI wall time, which CI meets by
+running these stages as separate parallel jobs; the serial local run is bounded by the sum of its
+stage budgets. A budget failure is a tooling defect; do not replace the command with a wider,
 slower one. See [xtask's timing guide](xtask/README.md#verification-timing) for the output fields.
 
 `conformance validate` checks the corpus — the frozen schema and the conventions — and stops. It is

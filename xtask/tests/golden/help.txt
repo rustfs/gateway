@@ -5,7 +5,7 @@ use --json to request a machine-readable result
 commands:
   verify --op <operation>   run the affected operation crates (<=30 seconds)
   verify --crate <name>     run one crate's tests (<=30 seconds)
-  verify --all              run the workspace tests (<=10 minutes)
+  verify --all              run the workspace tests, then the guard self-test (<=480 seconds each)
   codegen                   regenerate spec/operations, OPERATIONS.md and generated/
   codegen diff --semantic   print a semantic diff capped at 50 lines
   codegen --check           fail when generated output or the verify map drifted
