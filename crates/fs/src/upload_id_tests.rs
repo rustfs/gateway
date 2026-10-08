@@ -18,9 +18,10 @@
 //! first of them and issues the rest from memory; that the persisted counter exceeds every issued
 //! ID wherever a caller can observe it; that a crash at any offset inside a window never lets a
 //! reopened backend re-issue an ID; and that a corrupt, truncated, symlinked, reset, exhausted or
-//! half-replaced counter fails closed. NOT responsible for: the wire answers of
-//! `CreateMultipartUpload` (`tests/crud/multipart_upload_ids.rs`), upload records, or bucket
-//! deletion. Upstream: `FsBackend::allocate_upload_id` in `uploads`. Downstream: the filesystem
+//! half-replaced counter fails closed; and that successful bucket deletion retires only its own
+//! window while refused deletion preserves it. NOT responsible for: the wire answers of
+//! `CreateMultipartUpload` (`tests/crud/multipart_upload_ids.rs`) or upload records.
+//! Upstream: `FsBackend::allocate_upload_id` and `DeleteBucket`. Downstream: the filesystem
 //! verification gate.
 
 use std::collections::HashSet;
@@ -354,4 +355,94 @@ async fn n_a_reservation_interrupted_mid_write_leaves_the_counter_authoritative(
     assert_eq!(std::fs::read(root.temporary()).expect("the test temporary"), b"12");
     std::fs::remove_file(root.temporary()).expect("remove the test temporary");
     assert_eq!(allocate(&backend, &root).await, WINDOW);
+}
+
+fn bucket_request_proof() -> rustfs_gateway::SseEnforced {
+    let request = http::Request::builder()
+        .uri("/")
+        .header("host", "s3.example.com")
+        .body(bytes::Bytes::new())
+        .expect("a valid bucket fixture");
+    let wire = rustfs_gateway::WireRequest::accept(request, &rustfs_gateway::Limits::default()).expect("an accepted fixture");
+    let meta = rustfs_gateway::MetaView::of(&wire, rustfs_gateway::TargetKind::Service).expect("a service fixture");
+    rustfs_gateway::enforce_sse(&meta, rustfs_gateway::TransportSecurity::Encrypted, &rustfs_gateway::SseConfig::strict())
+        .expect("an empty encrypted request passes SSE enforcement")
+}
+
+async fn create_bucket_with_window(backend: &FsBackend, bucket: &str) {
+    use rustfs_gateway::{BucketName, Handler, Req, dto};
+    let input = dto::CreateBucketInput {
+        bucket: BucketName::new(bucket).expect("a valid test bucket"),
+        ..dto::CreateBucketInput::default()
+    };
+    Handler::<dto::CreateBucket>::call(backend, Req::new(input, bucket_request_proof()))
+        .await
+        .expect("a created test bucket");
+    backend.allocate_upload_id(bucket).await.expect("a reserved test window");
+}
+
+async fn delete_bucket(backend: &FsBackend, bucket: &str) -> Result<(), rustfs_gateway::HandlerError> {
+    use rustfs_gateway::{BucketName, Handler, Req, dto};
+    let input = dto::DeleteBucketInput {
+        bucket: BucketName::new(bucket).expect("a valid test bucket"),
+        ..dto::DeleteBucketInput::default()
+    };
+    Handler::<dto::DeleteBucket>::call(backend, Req::new(input, bucket_request_proof()))
+        .await
+        .map(|_| ())
+}
+
+/// Negative — distinct deleted names must not accumulate windows in a long-lived backend.
+#[tokio::test]
+async fn n_deleted_buckets_do_not_accumulate_windows() {
+    let root = Root::new();
+    let backend = FsBackend::open(&root.0).expect("a usable test root");
+    for index in 0..16 {
+        let bucket = format!("retired-{index}");
+        create_bucket_with_window(&backend, &bucket).await;
+        delete_bucket(&backend, &bucket).await.expect("a deleted test bucket");
+        assert!(
+            backend.upload_id_windows.lock().await.is_empty(),
+            "deleted bucket {bucket} retained a window"
+        );
+    }
+}
+
+/// Negative — retiring one bucket must not discard another live bucket's reserved window.
+#[tokio::test]
+async fn n_deleting_one_bucket_preserves_another_window() {
+    let root = Root::new();
+    let backend = FsBackend::open(&root.0).expect("a usable test root");
+    create_bucket_with_window(&backend, "retired").await;
+    create_bucket_with_window(&backend, "retained").await;
+    delete_bucket(&backend, "retired").await.expect("a deleted test bucket");
+    assert_eq!(
+        backend.allocate_upload_id("retained").await.expect("the next live ID"),
+        "fs-v2-0000000000000001"
+    );
+}
+
+/// Negative — a bucket refused at the emptiness check keeps its reserved window.
+#[tokio::test]
+async fn n_refused_bucket_deletion_preserves_its_window() {
+    let root = Root::new();
+    let backend = FsBackend::open(&root.0).expect("a usable test root");
+    create_bucket_with_window(&backend, "retained").await;
+    std::fs::write(backend.objects_path("retained").join("object"), b"content").expect("a nonempty test bucket");
+    assert!(delete_bucket(&backend, "retained").await.is_err());
+    assert_eq!(
+        backend.allocate_upload_id("retained").await.expect("the next live ID"),
+        "fs-v2-0000000000000001"
+    );
+}
+
+/// Negative — retirement follows the final directory removal, not an earlier partial deletion.
+#[tokio::test]
+async fn n_failed_final_bucket_removal_preserves_its_window() {
+    let root = Root::new();
+    let backend = FsBackend::open(&root.0).expect("a usable test root");
+    create_bucket_with_window(&backend, "retained").await;
+    std::fs::write(backend.bucket_path("retained").join("unexplained"), b"content").expect("a blocked final removal");
+    assert!(delete_bucket(&backend, "retained").await.is_err());
+    assert!(backend.upload_id_windows.lock().await.contains_key("retained"));
 }
