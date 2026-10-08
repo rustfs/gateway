@@ -147,8 +147,8 @@ Clients observed sending real `STREAMING-AWS4-HMAC-SHA256` chunk-signed uploads:
 
 ## Contributing
 
-Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request — it covers the CLA, the
-"no s3s code" rule, and the commit conventions. Participation is governed by our
+Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request — it covers the
+license of contributions, the "no s3s code" rule, and the commit conventions. Participation is governed by our
 [Code of Conduct](CODE_OF_CONDUCT.md). To report a vulnerability, follow
 [SECURITY.md](SECURITY.md); please do not open a public issue for security problems.
 
