@@ -4,6 +4,7 @@ set -euo pipefail
 # WHAT THIS CHECKS
 #   Ordinary core, gateway, and conformance integrations each use one explicit Cargo target.
 #   Conformance isolates its listing allocator in one additional, exactly named target (#1257).
+#   Gateway registers its socket-timing suites in one additional, exactly named target (#1264).
 #   Every source is registered once; gateway's compile-fail cases share one trybuild batch.
 # WHY
 #   rustfs/gateway#60 measured separate integration targets and trybuild batches rebuilding the
@@ -12,6 +13,11 @@ set -euo pipefail
 #   No arbitrary extra targets are admitted for the three crates below. Update the source
 #   inventory and harness together.
 #   The exact conformance allocation target keeps dhat's global lock out of unrelated tests.
+#   The exact gateway socket_timing target holds the suites that wait on real sockets and timers:
+#   `cargo xtask verify --crate rustfs-gateway` runs it as a second loop under 30 seconds of its
+#   own, because the facade outgrew one loop and the budget is not raised (rustfs/gateway#1264).
+#   It is the only second gateway link the consolidation pays for; every other source stays in the
+#   integration target.
 #
 #   That sentence used to be written without the qualifier, and for the workspace it was not true:
 #   this guard names three crates, and every other member was exempt by omission with nothing
@@ -671,20 +677,38 @@ if gateway_autotests is not False:
     fail("crates/gateway must set package.autotests = false")
 
 explicit_tests = gateway_manifest.get("test", [])
-if not isinstance(explicit_tests, list) or len(explicit_tests) != 1 or not isinstance(explicit_tests[0], dict):
-    fail("crates/gateway must declare exactly one explicit [[test]] target")
-gateway_target = explicit_tests[0]
-if gateway_target.get("name") != "integration" or gateway_target.get("path") != "tests/integration.rs":
-    fail("crates/gateway explicit test target must be integration at tests/integration.rs")
-gateway_required_features = gateway_target.get("required-features", [])
 if (
-    gateway_target.get("test", True) is not True
-    or gateway_target.get("harness", True) is not True
-    or not isinstance(gateway_required_features, list)
-    or gateway_required_features
+    not isinstance(explicit_tests, list)
+    or len(explicit_tests) != 2
+    or any(not isinstance(target, dict) for target in explicit_tests)
 ):
-    fail("crates/gateway integration target must use the active harness without required features")
+    fail("crates/gateway must declare exactly the integration and socket_timing [[test]] targets")
+if {(target.get("name"), target.get("path")) for target in explicit_tests} != {
+    ("integration", "tests/integration.rs"),
+    ("socket_timing", "tests/socket_timing.rs"),
+}:
+    fail("crates/gateway targets must use the exact integration and socket_timing names and paths")
+for gateway_target in explicit_tests:
+    gateway_required_features = gateway_target.get("required-features", [])
+    if (
+        gateway_target.get("test", True) is not True
+        or gateway_target.get("harness", True) is not True
+        or not isinstance(gateway_required_features, list)
+        or gateway_required_features
+    ):
+        fail("crates/gateway targets must use active harnesses without required features")
 
+gateway_socket_timing_modules = (
+    "committed_progress",
+    "connection_teardown",
+    "file_transfer",
+    "payload_transport",
+    "self_held_expect_continue",
+    "self_held_http1",
+    "self_held_refusal_drain",
+    "streaming_request",
+    "throughput_request",
+)
 gateway_modules = (
     "action_rules_runtime",
     "anonymous_chunked_upload",
@@ -709,10 +733,8 @@ gateway_modules = (
     "claimed_body_ceiling",
     "classification",
     "committed_head_runtime",
-    "committed_progress",
     "compat_aliases",
     "compile_fail",
-    "connection_teardown",
     "copy_source_reachability",
     "cors_runtime",
     "credential_runtime",
@@ -726,7 +748,6 @@ gateway_modules = (
     "extra_response_headers",
     "facade_probe",
     "file_responses",
-    "file_transfer",
     "governor_runtime",
     "governor_streaming",
     "handler_panic",
@@ -751,7 +772,6 @@ gateway_modules = (
     "operation_registry_hot_update",
     "operation_registry_wire",
     "patch_layer_landings",
-    "payload_transport",
     "perf_evidence",
     "pipeline",
     "policy_reachability",
@@ -784,9 +804,6 @@ gateway_modules = (
     "select_frame_records",
     "select_restore_intent",
     "select_restore_reachability",
-    "self_held_expect_continue",
-    "self_held_http1",
-    "self_held_refusal_drain",
     "service_clone_allocations",
     "service_concurrency",
     "service_config",
@@ -797,11 +814,9 @@ gateway_modules = (
     "sse_runtime",
     "static_header_allocations",
     "steady_state_allocations",
-    "streaming_request",
     "streaming_without_length",
     "sts_body_signature",
     "tagging_reachability",
-    "throughput_request",
     "tracing_events",
     "unknown_checksum_algorithms",
     "unread_body_drain",
@@ -813,13 +828,13 @@ gateway_modules = (
 )
 gateway_tests = gateway_root / "tests"
 actual_gateway_sources = tuple(
-    sorted(path.stem for path in gateway_tests.glob("*.rs") if path.name != "integration.rs")
+    sorted(path.stem for path in gateway_tests.glob("*.rs") if path.name not in {"integration.rs", "socket_timing.rs"})
 )
-if actual_gateway_sources != gateway_modules:
+if actual_gateway_sources != tuple(sorted(gateway_modules + gateway_socket_timing_modules)):
     fail("gateway test source inventory does not match the consolidated module suite")
 
 resolved_gateway_sources: dict[Path, str] = {}
-for module in gateway_modules:
+for module in gateway_modules + gateway_socket_timing_modules:
     source_path = gateway_tests / f"{module}.rs"
     if source_path.is_symlink():
         fail(f"{source_path.relative_to(root)} may not be a symlink")
@@ -844,7 +859,8 @@ gateway_integration_path = gateway_tests / "integration.rs"
 gateway_integration = license_header + """
 //! Consolidated integration-test entry point for `rustfs-gateway`.
 //!
-//! Responsible for: registering every gateway integration-test source in one Cargo target.
+//! Responsible for: registering every gateway integration-test source in one Cargo target, except
+//! the socket-timing suites that `tests/socket_timing.rs` registers.
 //! NOT responsible for: test behavior or production implementation.
 //! Upstream: the gateway integration-test modules. Downstream: Cargo's test harness.
 
@@ -857,6 +873,26 @@ except OSError as error:
     fail(f"cannot read crates/gateway/tests/integration.rs: {error}")
 if actual_gateway_integration != gateway_integration:
     fail("gateway integration harness must register each frozen source exactly once")
+
+gateway_socket_timing_path = gateway_tests / "socket_timing.rs"
+gateway_socket_timing = license_header + """
+//! Socket-timing integration-test entry point for `rustfs-gateway`.
+//!
+//! Responsible for: registering the gateway suites that wait on real sockets and timers in a second
+//! Cargo target, which `cargo xtask verify --crate rustfs-gateway` runs as its own 30-second loop.
+//! NOT responsible for: test behavior or production implementation.
+//! Upstream: the gateway socket-timing test modules. Downstream: Cargo's test harness.
+
+#[allow(unused_imports)] // The re-exports for suites in `tests/integration.rs` go unused in this target.
+mod support;
+
+""" + "\n".join(f'#[path = "{module}.rs"]\nmod {module};' for module in gateway_socket_timing_modules) + "\n"
+try:
+    actual_gateway_socket_timing = gateway_socket_timing_path.read_text()
+except OSError as error:
+    fail(f"cannot read crates/gateway/tests/socket_timing.rs: {error}")
+if actual_gateway_socket_timing != gateway_socket_timing:
+    fail("gateway socket-timing harness must register each frozen source exactly once")
 
 for kind, default_test in (("lib", True), ("bin", True), ("example", False), ("bench", False)):
     raw_targets = gateway_manifest.get(kind, [] if kind != "lib" else None)
@@ -879,6 +915,8 @@ for kind, default_test in (("lib", True), ("bin", True), ("example", False), ("b
                 fail(f"crates/gateway/Cargo.toml reuses the unified trybuild harness as a {kind} target")
             if resolved_target == gateway_integration_path.resolve():
                 fail(f"crates/gateway/Cargo.toml reuses the consolidated integration harness as a {kind} target")
+            if resolved_target == gateway_socket_timing_path.resolve():
+                fail(f"crates/gateway/Cargo.toml reuses the socket-timing harness as a {kind} target")
 
 for source_path in gateway_root.rglob("*.rs"):
     try:
@@ -891,6 +929,8 @@ for source_path in gateway_root.rglob("*.rs"):
         continue
     if resolved == gateway_integration_path.resolve() and source_path != gateway_integration_path:
         fail(f"{source_path.relative_to(root)} aliases the consolidated gateway integration harness")
+    if resolved == gateway_socket_timing_path.resolve() and source_path != gateway_socket_timing_path:
+        fail(f"{source_path.relative_to(root)} aliases the socket-timing harness")
     try:
         source = source_path.read_text()
     except OSError as error:
@@ -922,6 +962,8 @@ for source_path in gateway_root.rglob("*.rs"):
                 fail(f"{source_path.relative_to(root)} reuses the unified gateway trybuild harness through #[path]")
             if target == gateway_integration_path.resolve():
                 fail(f"{source_path.relative_to(root)} reuses the consolidated gateway integration harness through #[path]")
+            if target == gateway_socket_timing_path.resolve():
+                fail(f"{source_path.relative_to(root)} reuses the socket-timing harness through #[path]")
 
     for include in re.finditer(r"\binclude\s*!\s*([({\[])", code_only):
         opening = include.end() - 1
@@ -937,6 +979,8 @@ for source_path in gateway_root.rglob("*.rs"):
             fail(f"{source_path.relative_to(root)} includes the unified gateway trybuild harness")
         if target == gateway_integration_path.resolve():
             fail(f"{source_path.relative_to(root)} includes the consolidated gateway integration harness")
+        if target == gateway_socket_timing_path.resolve():
+            fail(f"{source_path.relative_to(root)} includes the socket-timing harness")
 
 # A list, not a dict keyed by directory: two sets share crates/gateway/tests/compile_fail, and a
 # dict silently kept only the last one, so the azc_* pairs were never checked.

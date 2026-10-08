@@ -88,6 +88,10 @@ tracing-core = { workspace = true }
 name = "integration"
 path = "tests/integration.rs"
 
+[[test]]
+name = "socket_timing"
+path = "tests/socket_timing.rs"
+
 [[bench]]
 name = "post_object"
 harness = false

@@ -46,8 +46,8 @@ mod release {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpStream;
 
-    use super::super::streaming_request::{StreamingOutput, StreamingPut, streaming_dialect};
     use crate::support;
+    use crate::support::streaming::{StreamingOutput, StreamingPut, streaming_dialect};
 
     const SMALL: usize = 4 * 1024;
     const GIB: usize = 1 << 30;

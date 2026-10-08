@@ -315,6 +315,51 @@ PYEOF
 }
 expect_fail 'conformance coverage rejects an allocation target alias' mut_conformance_coverage_alias
 
+# The facade's socket-timing suites are the other covered two-target layout (#1264).
+mut_gateway_coverage_target_field() {
+    "$PYTHON" - "$1" <<'PYEOF'
+from pathlib import Path
+import sys
+path = Path("crates/gateway/Cargo.toml")
+entry = 'name = "socket_timing"\npath = "tests/socket_timing.rs"\n'
+text = path.read_text()
+assert entry in text
+path.write_text(text.replace(entry, entry + sys.argv[1] + '\n', 1))
+PYEOF
+}
+mut_gateway_coverage_active() {
+    mut_gateway_coverage_target_field 'test = true'
+    mut_gateway_coverage_target_field 'harness = true'
+}
+expect_pass 'the exact socket-timing layout admits explicit active harness flags' mut_gateway_coverage_active
+
+mut_gateway_coverage_disabled() { mut_gateway_coverage_target_field 'test = false'; }
+mut_gateway_coverage_feature_gated() { mut_gateway_coverage_target_field 'required-features = ["server"]'; }
+expect_fail 'the covered socket-timing target cannot disable its tests' mut_gateway_coverage_disabled
+expect_fail 'the covered socket-timing target cannot require a feature' mut_gateway_coverage_feature_gated
+
+mut_gateway_coverage_single_target() {
+    "$PYTHON" - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/gateway/Cargo.toml")
+entry = '\n[[test]]\nname = "socket_timing"\npath = "tests/socket_timing.rs"\n'
+text = path.read_text()
+assert entry in text
+path.write_text(text.replace(entry, '', 1))
+PYEOF
+}
+expect_fail 'gateway coverage requires the socket-timing target' mut_gateway_coverage_single_target
+
+mut_gateway_coverage_extra_target() {
+    cat >>crates/gateway/Cargo.toml <<'TOMLEOF'
+
+[[test]]
+name = "extra"
+path = "tests/socket_timing.rs"
+TOMLEOF
+}
+expect_fail 'gateway coverage rejects a third target' mut_gateway_coverage_extra_target
+
 mut_other_covered_member_extra_target() {
     cat >>crates/sig/Cargo.toml <<'TOMLEOF'
 

@@ -16,6 +16,7 @@
 //! NOT responsible for: defining production verification scopes or process supervision.
 //! Upstream: `super`. Downstream: the xtask unit-test runner.
 
+use super::budget::builds_inside_budget;
 use super::*;
 
 #[test]
@@ -216,9 +217,18 @@ fn core_fast_scope_runs_both_runtime_targets_concurrently() {
 fn facade_fast_scope_keeps_heavy_contracts_in_the_workspace_gate() {
     let batches = crate_step_batches("rustfs-gateway");
 
-    assert_eq!(batches.len(), 1);
+    assert_eq!(batches.len(), 2, "the socket-timing suites run as a loop of their own (#1264)");
     assert_eq!(batches[0].len(), 2);
     assert_eq!(batches[0][1][0], "clippy");
+    assert_eq!(
+        batches[1],
+        [["test", "-p", "rustfs-gateway", "--test", "socket_timing"].map(str::to_owned)]
+    );
+    assert!(
+        include_str!("../../../crates/gateway/Cargo.toml")
+            .contains("[[test]]\nname = \"socket_timing\"\npath = \"tests/socket_timing.rs\"\n"),
+        "the second loop must name the facade's declared socket-timing target"
+    );
     assert_eq!(standalone_crate_case("rustfs-gateway"), None);
     assert_eq!(
         batches[0][0],

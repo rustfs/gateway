@@ -14,7 +14,8 @@
 
 //! Consolidated integration-test entry point for `rustfs-gateway`.
 //!
-//! Responsible for: registering every gateway integration-test source in one Cargo target.
+//! Responsible for: registering every gateway integration-test source in one Cargo target, except
+//! the socket-timing suites that `tests/socket_timing.rs` registers.
 //! NOT responsible for: test behavior or production implementation.
 //! Upstream: the gateway integration-test modules. Downstream: Cargo's test harness.
 
@@ -66,14 +67,10 @@ mod claimed_body_ceiling;
 mod classification;
 #[path = "committed_head_runtime.rs"]
 mod committed_head_runtime;
-#[path = "committed_progress.rs"]
-mod committed_progress;
 #[path = "compat_aliases.rs"]
 mod compat_aliases;
 #[path = "compile_fail.rs"]
 mod compile_fail;
-#[path = "connection_teardown.rs"]
-mod connection_teardown;
 #[path = "copy_source_reachability.rs"]
 mod copy_source_reachability;
 #[path = "cors_runtime.rs"]
@@ -100,8 +97,6 @@ mod extra_response_headers;
 mod facade_probe;
 #[path = "file_responses.rs"]
 mod file_responses;
-#[path = "file_transfer.rs"]
-mod file_transfer;
 #[path = "governor_runtime.rs"]
 mod governor_runtime;
 #[path = "governor_streaming.rs"]
@@ -150,8 +145,6 @@ mod operation_registry_hot_update;
 mod operation_registry_wire;
 #[path = "patch_layer_landings.rs"]
 mod patch_layer_landings;
-#[path = "payload_transport.rs"]
-mod payload_transport;
 #[path = "perf_evidence.rs"]
 mod perf_evidence;
 #[path = "pipeline.rs"]
@@ -216,12 +209,6 @@ mod select_frame_records;
 mod select_restore_intent;
 #[path = "select_restore_reachability.rs"]
 mod select_restore_reachability;
-#[path = "self_held_expect_continue.rs"]
-mod self_held_expect_continue;
-#[path = "self_held_http1.rs"]
-mod self_held_http1;
-#[path = "self_held_refusal_drain.rs"]
-mod self_held_refusal_drain;
 #[path = "service_clone_allocations.rs"]
 mod service_clone_allocations;
 #[path = "service_concurrency.rs"]
@@ -242,16 +229,12 @@ mod sse_runtime;
 mod static_header_allocations;
 #[path = "steady_state_allocations.rs"]
 mod steady_state_allocations;
-#[path = "streaming_request.rs"]
-mod streaming_request;
 #[path = "streaming_without_length.rs"]
 mod streaming_without_length;
 #[path = "sts_body_signature.rs"]
 mod sts_body_signature;
 #[path = "tagging_reachability.rs"]
 mod tagging_reachability;
-#[path = "throughput_request.rs"]
-mod throughput_request;
 #[path = "tracing_events.rs"]
 mod tracing_events;
 #[path = "unknown_checksum_algorithms.rs"]

@@ -152,19 +152,32 @@ def target_count(member: str, manifest: dict) -> int:
     return len(set(autodiscovered(member)) | {e.get("name") for e in explicit if e.get("name")})
 
 
+# The covered members whose consolidation guard admits exactly one second, named target, and why:
+# conformance isolates its listing allocator (#1257); gateway runs its socket-timing suites as a
+# second verification loop (#1264).
+TWO_TARGET_LAYOUTS = {
+    "crates/conformance": {
+        ("integration", "tests/integration.rs"),
+        ("list_allocations", "tests/list_allocations.rs"),
+    },
+    "crates/gateway": {
+        ("integration", "tests/integration.rs"),
+        ("socket_timing", "tests/socket_timing.rs"),
+    },
+}
+
+
 def is_consolidated(member: str, manifest: dict) -> bool:
     package = manifest.get("package")
     if not isinstance(package, dict) or package.get("autotests") is not False:
         return False
     explicit = explicit_test_targets(manifest)
-    if member == "crates/conformance":
+    layout = TWO_TARGET_LAYOUTS.get(member)
+    if layout is not None:
         return (
             len(explicit) == 2
             and all(isinstance(target.get("name"), str) and isinstance(target.get("path"), str) for target in explicit)
-            and {(target["name"], target["path"]) for target in explicit} == {
-                ("integration", "tests/integration.rs"),
-                ("list_allocations", "tests/list_allocations.rs"),
-            }
+            and {(target["name"], target["path"]) for target in explicit} == layout
             and all(
                 target.get("test", True) is True
                 and target.get("harness", True) is True

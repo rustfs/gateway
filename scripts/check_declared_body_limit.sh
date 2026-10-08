@@ -7,7 +7,7 @@ set -euo pipefail
 
 ROOT="${GATEWAY_CHECK_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 SOURCE="${ROOT}/crates/gateway/tests/connection_teardown.rs"
-INTEGRATION="${ROOT}/crates/gateway/tests/integration.rs"
+SOCKET_TIMING="${ROOT}/crates/gateway/tests/socket_timing.rs"
 WIRE_GUARD="${ROOT}/scripts/check_wire_case_coverage.sh"
 
 fail() {
@@ -16,11 +16,11 @@ fail() {
 }
 
 command -v python3 >/dev/null 2>&1 || fail 'required command is missing: python3'
-for path in "$SOURCE" "$INTEGRATION" "$WIRE_GUARD"; do
+for path in "$SOURCE" "$SOCKET_TIMING" "$WIRE_GUARD"; do
     [[ -f "$path" ]] || fail "required evidence is missing: ${path#"$ROOT"/}"
 done
 
-python3 - "$SOURCE" "$INTEGRATION" "$WIRE_GUARD" <<'PYEOF'
+python3 - "$SOURCE" "$SOCKET_TIMING" "$WIRE_GUARD" <<'PYEOF'
 import re
 import sys
 from pathlib import Path
@@ -124,7 +124,7 @@ def function_bounds(code: str, name: str) -> tuple[int, int]:
     fail("c-lim-0021 socket evidence has an unterminated body")
 
 
-source_path, integration_path, wire_guard_path = map(Path, sys.argv[1:])
+source_path, socket_timing_path, wire_guard_path = map(Path, sys.argv[1:])
 source = source_path.read_text()
 code = code_view(source)
 name = "c_wire_0063_c_lim_0021_an_over_large_body_is_refused_on_the_socket_before_it_is_sent"
@@ -134,8 +134,8 @@ raw_body = source[start:end]
 
 if source.count(f"#[tokio::test]\nasync fn {name}()") != 1:
     fail("c-lim-0021 evidence is not an active tokio test")
-if integration_path.read_text().count('#[path = "connection_teardown.rs"]\nmod connection_teardown;') != 1:
-    fail("c-lim-0021 socket module is not active in the integration target")
+if socket_timing_path.read_text().count('#[path = "connection_teardown.rs"]\nmod connection_teardown;') != 1:
+    fail("c-lim-0021 socket module is not active in the socket-timing target")
 if wire_guard_path.read_text().count(f"crates/gateway/tests/connection_teardown.rs::{name}") != 1:
     fail("c-lim-0021 no longer shares the c-wire-0063 evidence edge")
 

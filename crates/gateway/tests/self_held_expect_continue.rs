@@ -21,11 +21,11 @@
 //! NOT responsible for: the Hyper driver, which already invites only on the first body read, or
 //! unsupported expectations (`417`, `self_held_http1.rs`).
 //! Upstream: `rustfs-gateway`'s self-held driver over the streaming fixture in
-//! `streaming_request.rs`. Downstream: none.
+//! `support/streaming.rs`. Downstream: none.
 
 #![allow(clippy::expect_used, clippy::panic)]
 
-use super::streaming_request::{StreamingPut, service_with_deadlines};
+use crate::support::streaming::{StreamingPut, service_with_deadlines};
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;

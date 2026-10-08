@@ -89,7 +89,7 @@ for request order and `docs/assembly-order.md` for extension call counts.
 | `tests/refusal_order_guards.rs` | Body-proof source guards |
 | `tests/precondition_contract.rs` | Real adapter controls for conditional-race and completed-part contract inputs |
 | `tests/custom_signature_verifier.rs` | Custom verifier wiring and AWS sealed-path isolation |
-| `tests/support/mod.rs` | Shared operations, backends, signing, probes |
+| `tests/integration.rs`, `tests/socket_timing.rs`, `tests/support/mod.rs`, `tests/support/streaming.rs` | The two test targets: the socket-timing suites (`self_held_*`, `connection_teardown`, `throughput_request`, `streaming_request`, `file_transfer`, `committed_progress`, `payload_transport`) register in the second, which `verify --crate` runs as a loop of its own (#1264), every other suite in the first; shared operations, backends, signing, probes, and the live-socket streaming fixture both use |
 | `examples/minimal.rs`, `benches/post_object.rs` | Minimal assembly example and production POST Object throughput measurement |
 ## Known gaps
 
