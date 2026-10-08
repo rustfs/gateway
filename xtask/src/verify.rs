@@ -35,7 +35,7 @@ use std::time::{Duration, Instant};
 
 use serde::Deserialize;
 
-use budget::{BudgetFailure, KilledStep};
+use budget::{BudgetFailure, KilledStep, builds_inside_budget};
 use launcher::launcher_started;
 use prebuild::{prebuild_commands, run_prebuild};
 use process::CancelledStep;
@@ -531,6 +531,9 @@ fn run_step_batches(
         if batch.timed_out {
             let killed = killed_steps(&commands, &batch.cancelled);
             return budget_diagnostic(BudgetFailure::KilledAtDeadline { budget, killed: &killed }, subject, rule);
+        }
+        for note in builds_inside_budget(&commands, &batch.results) {
+            eprintln!("verify: {note}");
         }
         for (_, output) in batch.results {
             match output {

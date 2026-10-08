@@ -395,14 +395,122 @@ fn a_build_inside_the_budget_is_reported_as_a_build_rather_than_as_the_work() {
         failure.rule("a crate verification loop must finish within 30 seconds"),
         "a crate verification loop must finish within 30 seconds; killed at the 30s deadline after 63 crate compilations inside it, so what the work costs was never measured"
     );
+    let notes = failure.notes();
     assert!(
-        failure
-            .notes()
-            .iter()
-            .any(|note| note.contains("compiled 63 crates inside the budget")),
-        "{:?}",
-        failure.notes()
+        notes.iter().any(|note| note.contains("compiled 63 crates inside the budget")),
+        "{notes:?}"
     );
+    assert!(
+        notes.contains(
+            &"crate rustfs-gateway-fs step 1 built what the prebuild did not cover; that is an xtask defect, not this crate's cost: file an xtask issue naming `cargo test -p rustfs-gateway-fs`"
+                .to_owned()
+        ),
+        "a build inside the budget must be attributed to the prebuild, not to the crate: {notes:?}"
+    );
+}
+
+fn goldens_loop() -> Vec<GateCommand> {
+    crate_steps("rustfs-gateway-goldens")
+        .into_iter()
+        .enumerate()
+        .map(|(index, args)| (env!("CARGO").to_owned(), args, format!("crate rustfs-gateway-goldens step {}", index + 1)))
+        .collect()
+}
+
+fn finished(step: &str, stderr: &str) -> GateResult {
+    (
+        step.to_owned(),
+        Ok(Output {
+            status: std::process::ExitStatus::default(),
+            stdout: Vec::new(),
+            stderr: stderr.as_bytes().to_vec(),
+        }),
+    )
+}
+
+/// rustfs/gateway#1367: the goldens loop passed while its Clippy step relinted the crate's
+/// workspace closure inside the 30 seconds, and the only line it printed was `passed in`. A build
+/// inside a loop that finishes is the same prebuild defect as one inside a loop that is killed.
+#[test]
+fn a_finished_step_that_built_inside_the_budget_is_attributed_to_the_prebuild() {
+    let results = [
+        finished(
+            "crate rustfs-gateway-goldens step 1",
+            "    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.20s\n     Running unittests src/lib.rs\n",
+        ),
+        finished(
+            "crate rustfs-gateway-goldens step 2",
+            "    Checking rustfs-gateway-types v0.31.0\n    Checking rustfs-gateway-goldens v0.1.0\n    Finished `dev` profile\n",
+        ),
+    ];
+
+    assert_eq!(
+        builds_inside_budget(&goldens_loop(), &results),
+        vec![
+            "crate rustfs-gateway-goldens step 2 compiled 2 crates inside the budget; the deadline covered a build, not just the work",
+            "crate rustfs-gateway-goldens step 2 built what the prebuild did not cover; that is an xtask defect, not this crate's cost: file an xtask issue naming `cargo clippy -p rustfs-gateway-goldens --all-targets -- -D warnings`",
+        ]
+    );
+}
+
+#[test]
+fn n_a_loop_that_built_nothing_says_nothing_about_a_build() {
+    let results = [
+        finished("crate rustfs-gateway-goldens step 1", "    Finished `test` profile\n"),
+        finished("crate rustfs-gateway-goldens step 2", "    Finished `dev` profile\n"),
+    ];
+
+    assert!(builds_inside_budget(&goldens_loop(), &results).is_empty());
+}
+
+/// Lock waits and warnings that mention a verb are not builds; only cargo's status lines are.
+#[test]
+fn n_a_step_that_only_waited_or_warned_did_not_build() {
+    let results = [finished(
+        "crate rustfs-gateway-goldens step 2",
+        "    Blocking waiting for file lock on build directory\nwarning: Checking this later\n    Finished `dev` profile\n",
+    )];
+
+    assert!(builds_inside_budget(&goldens_loop(), &results).is_empty());
+}
+
+#[test]
+fn n_a_step_that_could_not_start_reports_no_build() {
+    let results = [(
+        "crate rustfs-gateway-goldens step 2".to_owned(),
+        Err(std::io::Error::other("cargo could not be started")),
+    )];
+
+    assert!(builds_inside_budget(&goldens_loop(), &results).is_empty());
+}
+
+/// A batch whose second command fails to start reports one result, for that command only: the
+/// note must name the command that built, which a positional pairing would get wrong.
+#[test]
+fn n_a_lone_result_is_paired_with_its_own_command_not_the_first_one() {
+    let results = [finished(
+        "crate rustfs-gateway-goldens step 2",
+        "   Compiling rustfs-gateway-macros v0.1.4\n",
+    )];
+
+    let notes = builds_inside_budget(&goldens_loop(), &results);
+
+    assert_eq!(notes.len(), 2, "{notes:?}");
+    assert!(
+        notes[1].ends_with("`cargo clippy -p rustfs-gateway-goldens --all-targets -- -D warnings`"),
+        "{notes:?}"
+    );
+    assert!(notes.iter().all(|note| !note.contains("cargo test")), "{notes:?}");
+}
+
+#[test]
+fn n_a_result_with_no_matching_command_is_not_attributed() {
+    let results = [finished(
+        "crate rustfs-gateway-fs step 9",
+        "   Compiling rustfs-gateway-fs v0.1.0\n",
+    )];
+
+    assert!(builds_inside_budget(&goldens_loop(), &results).is_empty());
 }
 
 /// The rerun command is the one thing a killed run can honestly offer: run it with no deadline over

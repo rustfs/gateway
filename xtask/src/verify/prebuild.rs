@@ -23,7 +23,7 @@ use std::path::Path;
 use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
-use super::{diagnostic, print_cargo_failure, process};
+use super::{diagnostic, print_cargo_failure, process, rerun_command};
 
 /// What the build that ran ahead of the deadline cost, so the deadline can start after it.
 pub(super) struct Prebuild {
@@ -33,10 +33,17 @@ pub(super) struct Prebuild {
 
 /// The Cargo commands that produce every artifact the measured steps will need, and nothing else.
 ///
-/// A `test` step becomes the same selection with `--no-run` and without its filter tail; a
-/// `clippy` step becomes a `check` of the same targets, which shares the dependency artifacts
-/// Clippy then reuses while leaving the workspace crate's own lint pass inside the budget. The
-/// crate's conformance case builds the conformance library once, without the case filter.
+/// The loop's own commands, minus the run: a `test` step becomes the same selection with
+/// `--no-run` and without its filter tail, and a `clippy` step runs as itself, lint arguments
+/// included. The crate's conformance case builds the conformance library once, without the case
+/// filter.
+///
+/// Clippy is prepared by Clippy because nothing else prepares it. Cargo fingerprints a workspace
+/// member's lint pass against the Clippy driver and against the lint arguments, so the `check` of
+/// the same targets this used to run warmed only the dependencies and left every workspace crate
+/// with a stale lint pass to be relinted inside the budget (the "compiled N crates inside the
+/// budget" receipts on rustfs/gateway#1264, #1336 and #1367), and a `clippy` without the
+/// `-- -D warnings` tail would relint the whole closure there again.
 ///
 /// This is the fix for the build the four-command gate does not produce (rustfs/gateway#642): a
 /// `-p <crate>` selection resolves a different artifact universe from `--workspace`, so the first
@@ -59,7 +66,7 @@ pub(super) fn prebuild_commands(step_batches: &[Vec<Vec<String>>], conformance_c
                 .chain(selection.filter(|argument| argument != "--no-run"))
                 .chain(std::iter::once("--no-run".to_owned()))
                 .collect(),
-            Some("clippy") => std::iter::once("check".to_owned()).chain(selection).collect(),
+            Some("clippy") => step.clone(),
             _ => continue,
         };
         if !commands.contains(&command) {
@@ -93,7 +100,11 @@ pub(super) fn run_prebuild(commands: &[Vec<String>], subject: &str) -> Result<Pr
                     return Err(diagnostic(
                         "verification build failed",
                         subject,
-                        &format!("the crate must build before its loop is measured; cargo exited with {}", output.status),
+                        &format!(
+                            "the crate must build and lint clean before its loop is measured; `{}` exited with {}",
+                            rerun_command(env!("CARGO"), args),
+                            output.status
+                        ),
                     ));
                 }
                 Err(error) => {
@@ -148,22 +159,13 @@ mod tests {
         );
     }
 
+    /// Neither a `check` of the same targets nor a `clippy` without its lint arguments prepares
+    /// what the loop's Clippy step runs (rustfs/gateway#1264), so the step is prebuilt as itself.
     #[test]
-    fn a_clippy_step_is_prebuilt_as_a_check_of_the_same_targets() {
-        let steps = vec![vec![owned(&[
-            "clippy",
-            "-p",
-            "rustfs-gateway-http",
-            "--all-targets",
-            "--",
-            "-D",
-            "warnings",
-        ])]];
+    fn a_clippy_step_is_prebuilt_as_itself() {
+        let step = owned(&["clippy", "-p", "rustfs-gateway-http", "--all-targets", "--", "-D", "warnings"]);
 
-        assert_eq!(
-            prebuild_commands(&steps, None),
-            vec![owned(&["check", "-p", "rustfs-gateway-http", "--all-targets"])]
-        );
+        assert_eq!(prebuild_commands(&[vec![step.clone()]], None), vec![step]);
     }
 
     #[test]
@@ -213,25 +215,29 @@ mod tests {
     }
 
     #[test]
-    fn the_real_crate_scopes_all_prebuild_to_a_no_run_test_and_a_check() {
+    fn the_real_crate_scopes_prebuild_no_run_tests_and_their_clippy_steps_as_themselves() {
         for package in [
             "rustfs-gateway-core",
             "rustfs-gateway",
             "rustfs-gateway-server",
+            "rustfs-gateway-fs",
+            "rustfs-gateway-goldens",
             "xtask",
             "rustfs-gateway-sig",
         ] {
-            let commands = prebuild_commands(&crate_step_batches(package), crate_case(package));
+            let step_batches = crate_step_batches(package);
+            let commands = prebuild_commands(&step_batches, crate_case(package));
             let kinds: Vec<&str> = commands.iter().map(|command| command[0].as_str()).collect();
-            assert!(kinds.iter().all(|kind| *kind == "test" || *kind == "check"), "{package}: {kinds:?}");
-            assert!(
-                commands
-                    .iter()
-                    .filter(|command| command[0] == "test")
-                    .all(|command| command.last().map(String::as_str) == Some("--no-run")),
-                "{package}: {commands:?}"
-            );
-            assert!(commands.iter().flatten().all(|argument| argument != "--"), "{package}: {commands:?}");
+            assert!(kinds.iter().all(|kind| *kind == "test" || *kind == "clippy"), "{package}: {kinds:?}");
+            for command in commands.iter().filter(|command| command[0] == "test") {
+                assert_eq!(command.last().map(String::as_str), Some("--no-run"), "{package}: {command:?}");
+                assert!(command.iter().all(|argument| argument != "--"), "{package}: {command:?}");
+            }
+            let clippy_steps: Vec<&Vec<String>> = step_batches.iter().flatten().filter(|step| step[0] == "clippy").collect();
+            assert!(!clippy_steps.is_empty(), "{package} has no clippy step to prebuild");
+            for step in clippy_steps {
+                assert!(commands.contains(step), "{package}: {step:?} is not prebuilt as itself in {commands:?}");
+            }
         }
     }
 
@@ -250,12 +256,15 @@ mod tests {
                     "--no-run"
                 ]),
                 owned(&[
-                    "check",
+                    "clippy",
                     "-p",
                     "rustfs-gateway-conformance",
                     "--lib",
                     "--test",
-                    "list_allocations"
+                    "list_allocations",
+                    "--",
+                    "-D",
+                    "warnings"
                 ]),
             ]
         );
