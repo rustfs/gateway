@@ -603,16 +603,22 @@ fn run_all(json: bool) -> ExitCode {
     full_gate::verify(
         &stages,
         &root,
-        Duration::from_secs(600),
         "workspace tests and build guards",
-        "the full gate must finish within 10 minutes",
+        "each full-gate stage must finish within its own budget",
         json,
     )
 }
 
-/// The full gate's stages, in the order they run.
+/// The full gate's stages, in the order they run, each with the deadline it runs under.
+///
+/// Each stage is held to the budget CI gives it, not to a share of one deadline (rustfs/gateway#1247):
+/// CI runs the workspace tests and the guard self-test as separate jobs, and summed in sequence on
+/// one host they cost 500-900s, so a single 600s deadline failed by construction. The build opens
+/// the workspace budget and the tests inherit it, because CI's `cargo test` compiles inside its
+/// own 480s; the guard self-test gets a fresh 480s, the budget the suite already declares for itself.
 #[cfg(feature = "full")]
 fn full_gate_stages(root: &Path) -> [full_gate::Stage; 3] {
+    use full_gate::Deadline;
     let scripts = root.join("scripts");
     [
         full_gate::Stage {
@@ -622,19 +628,20 @@ fn full_gate_stages(root: &Path) -> [full_gate::Stage; 3] {
                 vec!["test".to_owned(), "--workspace".to_owned(), "--no-run".to_owned()],
                 "workspace test build".to_owned(),
             )],
+            deadline: Deadline::Own(Duration::from_secs(480)),
         },
         // The guard self-test used to share this stage with the workspace tests and run beside
         // them. Both are the heaviest work the gate does, and the guard suite watches its own clock:
         // beside `cargo test --workspace` it stopped itself at case 784 of 1402 on a ten-core host
         // with every case still printing ok (rustfs/gateway#563), and the server timing suites it
         // was competing with reported the contention as protocol observations (rustfs/gateway#611
-        // and the class it names). One stage each, in sequence, under the same ten-minute deadline:
-        // no check is skipped, and each suite is judged on a host it is not itself loading.
+        // and the class it names). One stage each, in sequence: no check is skipped, and each suite
+        // is judged on a host it is not itself loading.
         //
         // The tests run with libtest's default parallelism, the configuration CI's workspace shards
         // run and judge them under. The `--test-threads=1` this stage used to pass had no recorded
-        // reason; measured in sequence it cost 438s of the 600s and left the guard suite 112s, and
-        // rustfs/gateway#708 records the allocation probes failing under one thread.
+        // reason; measured in sequence it cost 438s and rustfs/gateway#708 records the allocation
+        // probes failing under one thread.
         full_gate::Stage {
             name: "workspace tests".to_owned(),
             commands: vec![(
@@ -642,6 +649,7 @@ fn full_gate_stages(root: &Path) -> [full_gate::Stage; 3] {
                 vec!["test".to_owned(), "--workspace".to_owned()],
                 "workspace tests".to_owned(),
             )],
+            deadline: Deadline::Previous,
         },
         full_gate::Stage {
             name: "guard self-test".to_owned(),
@@ -650,12 +658,16 @@ fn full_gate_stages(root: &Path) -> [full_gate::Stage; 3] {
                 vec![scripts.join("test_guard_scripts.sh").display().to_string()],
                 "guard self-test".to_owned(),
             )],
+            deadline: Deadline::Own(Duration::from_secs(480)),
         },
     ]
 }
 
 #[cfg(all(test, feature = "full"))]
 mod full_gate_shape_tests {
+    use std::time::Duration;
+
+    use super::full_gate::Deadline;
     use super::full_gate_stages;
 
     /// The guard self-test runs in a stage of its own, after the workspace tests, never beside
@@ -678,6 +690,15 @@ mod full_gate_shape_tests {
         );
         assert_eq!(stages[1].commands[0].1, ["test", "--workspace"], "default parallelism, as CI runs it");
     }
+
+    /// The build and the tests share CI's 480s workspace budget; the guard suite has its own 480s
+    /// and is neither charged for nor handed the time the workspace stages took (rustfs/gateway#1247).
+    #[test]
+    fn n_each_suite_runs_under_its_own_480_second_budget() {
+        let deadlines = full_gate_stages(std::path::Path::new("/repo")).map(|stage| stage.deadline);
+        let budget = Deadline::Own(Duration::from_secs(480));
+        assert_eq!(deadlines, [budget, Deadline::Previous, budget]);
+    }
 }
 
 type GateCommand = (String, Vec<String>, String);
@@ -692,8 +713,9 @@ fn run(args: &[&str], budget: Duration, subject: &str, rule: &str, json: bool) -
             args.iter().map(|argument| (*argument).to_owned()).collect(),
             subject.to_owned(),
         )],
+        deadline: full_gate::Deadline::Own(budget),
     }];
-    full_gate::verify(&stages, Path::new("."), budget, subject, rule, json)
+    full_gate::verify(&stages, Path::new("."), subject, rule, json)
 }
 
 fn take_json(args: &[String]) -> (Vec<String>, bool) {
