@@ -18,7 +18,7 @@ fail() {
 
 source "${SCRIPT_DIR}/lib/python.sh"
 PYTHON="$(gateway_python check_xtask_codegen_surface)" || exit 1
-for required in .cargo/config.toml Cargo.toml xtask-launcher/Cargo.toml xtask-launcher/src/main.rs xtask/Cargo.toml xtask/src/main.rs xtask/src/catalog.rs xtask/src/verify.rs xtask/src/verify/launcher.rs \
+for required in .cargo/config.toml Cargo.toml xtask-launcher/Cargo.toml xtask-launcher/src/main.rs xtask/Cargo.toml xtask/src/main.rs xtask/src/catalog.rs xtask/src/verify.rs xtask/src/verify/launcher.rs xtask/src/verify/loops.rs \
     crates/conformance/Cargo.toml crates/conformance/src/cli.rs scripts/check_case_keys_honoured.sh \
     crates/gateway/tests/cors_runtime.rs crates/server/tests/server_load.rs \
     crates/server/tests/server_load/per_ip.rs; do
@@ -784,20 +784,26 @@ vec![
 ''')
 if compact(conformance_test_items[0][1]) != expected_conformance_test_body:
     fail("crate verification must reuse the workspace-built conformance library target")
-run_step_batches_items = functions_named("run_step_batches", syntax, comments_removed)
-run_step_batches_body = compact(run_step_batches_items[0][1])
+# The step batches become loops in `verify/loops.rs` (rustfs/gateway#1264); the conformance case
+# runs first, and only in the first loop.
+loops_comments, loops_syntax = rust_views((root / "xtask/src/verify/loops.rs").read_text())
+feedback_loops_items = functions_named("feedback_loops", loops_syntax, loops_comments)
+if len(feedback_loops_items) != 1:
+    fail("standalone crate conformance verification must precede the scheduled command batches")
 expected_crate_batch_order = compact('''
-let mut command_batches = Vec::new();
-if let Some(case) = conformance_case {
-    command_batches.push(vec![(
+let mut batches = Vec::new();
+if index == 0
+    && let Some(case) = conformance_case
+{
+    batches.push(vec![(
         env!("CARGO").to_owned(),
         conformance_test_step(case),
         format!("{subject} conformance case {case}"),
     )]);
 }
-let mut step_number = 0;
+batches.push(
 ''')
-if run_step_batches_body.count(expected_crate_batch_order) != 1:
+if compact(feedback_loops_items[0][1]).count(expected_crate_batch_order) != 1:
     fail("standalone crate conformance verification must precede the scheduled command batches")
 crate_step_batches_items = functions_named("crate_step_batches", syntax, comments_removed)
 expected_gateway_batch = compact('''
@@ -809,10 +815,16 @@ test.extend([
     GATEWAY_ADDRESS_TABLE_TEST.to_owned(),
 ]);
 let clippy = steps.remove(0);
-return vec![vec![test, clippy]];
+let socket_timing = ["test", "-p", package, "--test", GATEWAY_SOCKET_TIMING_TARGET]
+    .map(str::to_owned)
+    .to_vec();
+return vec![vec![test, clippy], vec![socket_timing]];
 ''')
 if compact(crate_step_batches_items[0][1]).count(expected_gateway_batch) != 1:
-    fail("gateway fast verification must retain ordinary runtime tests and all-target Clippy")
+    fail(
+        "gateway fast verification must retain ordinary runtime tests and all-target Clippy, "
+        "and run the socket-timing target as a loop of its own"
+    )
 expected_server_batch = compact('''
 let mut test = steps.remove(0);
 test.extend([

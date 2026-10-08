@@ -21,13 +21,13 @@
 //! body the handler never read (`c-ck-0062`), are both still refused for the body.
 //! NOT responsible for: the stream's own terminal verdicts (`request_body_tests.rs`) or the body
 //! deadlines (`streaming_request.rs`).
-//! Upstream: `rustfs-gateway`, the streaming fixture in `streaming_request.rs`. Downstream:
+//! Upstream: `rustfs-gateway`, the streaming fixture in `support/streaming.rs`. Downstream:
 //! goldens `rd-err-0004`, conformance `c-mpu-0053`.
 
 #![allow(clippy::expect_used, clippy::panic)]
 
-use super::streaming_request::{StreamingOutput, StreamingPut, service_with_deadlines};
 use crate::support;
+use crate::support::streaming::{StreamingOutput, StreamingPut, service_with_deadlines};
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;

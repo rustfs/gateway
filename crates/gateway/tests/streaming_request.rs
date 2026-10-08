@@ -21,113 +21,21 @@
 
 #![allow(clippy::expect_used, clippy::panic)]
 
-use crate::support;
+use crate::support::streaming::{StreamingOutput, StreamingPut, SwallowingBackend, live_server, service_with_deadlines, stop};
 
-use std::convert::Infallible;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use http_body_util::{BodyExt, Full};
+use http_body_util::BodyExt;
 use rustfs_gateway::{
-    AuthRequirement, ByteStream, CodecError, EncodedResponse, Handler, HandlerCancellation, HandlerDeadlineClass, HandlerError,
-    HandlerResult, MetaView, NoDerived, Operation, OperationCodec, OperationFloor, OperationSpec, Predicate, Req, RequestBody,
-    RequestBodyDeadlineConfig, RequestBodyMode, ResourceShape, Resp, ResponseBody, S3Service, ServiceConfig, SigService,
-    TargetKind,
+    Handler, HandlerCancellation, HandlerError, HandlerResult, Req, RequestBodyDeadlineConfig, Resp, S3Service,
 };
-use rustfs_gateway_core::{Dialect, DialectOverlay, DialectRoute, OverlayRow};
-use rustfs_gateway_server::{RunningServer, Server, ServerConfig, ShutdownReport};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::Notify;
 use tokio::sync::{Barrier, watch};
-
-pub(super) struct StreamingPut;
-
-pub(super) struct StreamingInput {
-    pub(super) body: ByteStream,
-}
-
-pub(super) struct StreamingOutput;
-
-static STREAMING_SPEC: OperationSpec = OperationSpec::builder("example:StreamingPut", 200, None)
-    .handler_deadline_class(HandlerDeadlineClass::Standard)
-    .required_params(&[])
-    .auth(AuthRequirement::new("example:StreamingPut", ResourceShape::Service))
-    .build();
-
-static STREAMING_FLOOR: OperationFloor =
-    OperationFloor::custom("example:StreamingPut", SigService::S3).allow_anonymous_after_listing_in_the_posture_report();
-
-static STREAMING_PREDICATES: &[Predicate] = &[Predicate::Method(http::Method::PUT), Predicate::Target(TargetKind::Service)];
-
-static STREAMING_OVERLAY: DialectOverlay = DialectOverlay {
-    name: "example-streaming-test",
-    vendor: "example",
-    claims: &[],
-    operations: &[OverlayRow {
-        name: "example:StreamingPut",
-        precedence: 50,
-        selector: "Method(PUT) ∧ Target(Service)",
-        action: "example:StreamingPut",
-        resource: ResourceShape::Service,
-        success_status: 200,
-        anonymous: true,
-        evidence: &["https://github.com/rustfs/gateway/issues/37"],
-    }],
-};
-
-impl Operation for StreamingPut {
-    const NAME: &'static str = "example:StreamingPut";
-
-    type Input = StreamingInput;
-    type Output = StreamingOutput;
-    type DerivedResources = NoDerived;
-
-    fn derive_resources(_input: &Self::Input) -> Result<Self::DerivedResources, rustfs_gateway::DerivedResourceError> {
-        Ok(NoDerived)
-    }
-
-    fn seal_derived_input(_input: &mut Self::Input) {}
-
-    fn spec() -> &'static OperationSpec {
-        &STREAMING_SPEC
-    }
-
-    fn floor() -> &'static OperationFloor {
-        &STREAMING_FLOOR
-    }
-}
-
-impl OperationCodec for StreamingPut {
-    const REQUEST_BODY: RequestBodyMode = RequestBodyMode::Streaming;
-
-    fn decode(_request: &MetaView<'_>, body: RequestBody) -> Result<Self::Input, CodecError> {
-        body.into_stream()
-            .map(|body| StreamingInput { body })
-            .ok_or_else(|| CodecError::internal("the streaming operation was not handed a live body"))
-    }
-
-    fn encode(_output: Self::Output, _request: &MetaView<'_>, status: u16) -> Result<EncodedResponse, CodecError> {
-        let mut response = EncodedResponse::of(status);
-        response.body = ResponseBody::Complete(b"ok".to_vec());
-        Ok(response)
-    }
-}
-
-pub(super) fn streaming_dialect() -> Dialect {
-    Dialect::assemble(&STREAMING_OVERLAY)
-        .declare::<StreamingPut>(DialectRoute {
-            precedence: 50,
-            selector: STREAMING_PREDICATES,
-            path_shape: "/",
-            shadows: &[],
-        })
-        .build()
-        .expect("the streaming overlay and codec declaration must agree")
-}
 
 async fn first_frame(body: &mut rustfs_gateway::Body) -> Result<usize, HandlerError> {
     match body.frame().await {
@@ -183,20 +91,6 @@ struct ResidentBackend {
     barrier: Arc<Barrier>,
     release: watch::Sender<bool>,
     entered: AtomicUsize,
-}
-
-pub(super) struct SwallowingBackend;
-
-impl Handler<StreamingPut> for SwallowingBackend {
-    async fn call(&self, request: Req<StreamingPut>) -> HandlerResult<StreamingPut> {
-        let mut body = request.into_input().body.into_body();
-        while let Some(frame) = body.frame().await {
-            if frame.is_err() {
-                break;
-            }
-        }
-        Ok(Resp::new(StreamingOutput))
-    }
 }
 
 impl Handler<StreamingPut> for ResidentBackend {
@@ -270,52 +164,6 @@ where
     service_with_deadlines(backend, deadlines)
 }
 
-pub(super) fn service_with_deadlines<B>(backend: Arc<B>, deadlines: RequestBodyDeadlineConfig) -> S3Service
-where
-    B: Handler<StreamingPut>,
-{
-    let (builder, _handle) = support::wired()
-        .clock_with_skew_ack(
-            support::fixed_clock(),
-            rustfs_gateway::ClockSkewAck::i_understand_a_skewed_clock_can_disable_signature_expiry(),
-        )
-        .register::<StreamingPut, _>(backend)
-        .dialect(&streaming_dialect())
-        .config(ServiceConfig::new(1024 * 1024).with_request_body_deadlines(deadlines));
-    builder.build().expect("a complete streaming assembly")
-}
-
-pub(super) fn live_server(service: S3Service) -> RunningServer {
-    let service = tower::service_fn(move |request| {
-        let mut service = service.clone();
-        async move {
-            let response = <S3Service as tower::Service<_>>::call(&mut service, request)
-                .await
-                .expect("the adapter is infallible");
-            let collected = rustfs_gateway::collect(response).await.expect("the response is finite");
-            let (status, headers, body, _trailers) = collected.into_parts();
-            let mut response = http::Response::new(Full::new(body));
-            *response.status_mut() = status;
-            for (name, value) in headers {
-                response.headers_mut().append(name, value);
-            }
-            Ok::<_, Infallible>(response)
-        }
-    });
-    Server::new(
-        ServerConfig {
-            bind_addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
-            plaintext: true,
-            so_rcvbuf: Some(8 * 1024),
-            lingering_close_time: Duration::from_millis(20),
-            ..ServerConfig::default()
-        },
-        service,
-    )
-    .serve()
-    .expect("the loopback server starts")
-}
-
 fn head(content_length: usize) -> Vec<u8> {
     format!("PUT / HTTP/1.1\r\nHost: localhost\r\nContent-Length: {content_length}\r\nConnection: close\r\n\r\n").into_bytes()
 }
@@ -323,14 +171,6 @@ fn head(content_length: usize) -> Vec<u8> {
 fn head_with(content_length: usize, header: &str) -> Vec<u8> {
     format!("PUT / HTTP/1.1\r\nHost: localhost\r\nContent-Length: {content_length}\r\n{header}\r\nConnection: close\r\n\r\n")
         .into_bytes()
-}
-
-pub(super) async fn stop(running: RunningServer) {
-    assert_eq!(
-        running.shutdown.trigger(Duration::from_secs(1)).await,
-        ShutdownReport { drained: 0, aborted: 0 }
-    );
-    assert!(running.task.await.expect("the server task joins").is_ok());
 }
 
 pub(super) fn rss_bytes() -> Option<usize> {

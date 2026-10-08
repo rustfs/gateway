@@ -2302,6 +2302,58 @@ expect_fail check_xtask_codegen_surface.sh \
     'the gateway fast scope rerunning its million-address governor contract' \
     mut_xtask_gateway_fast_scope_runs_address_table_stress
 
+# rustfs/gateway#1264: the socket-timing target is a loop of its own, under its own 30 seconds.
+mut_xtask_gateway_socket_timing_joins_the_first_loop() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("xtask/src/verify.rs")
+text = path.read_text()
+old = "return vec![vec![test, clippy], vec![socket_timing]];"
+if text.count(old) != 1:
+    raise SystemExit("gateway socket-timing loop is missing")
+path.write_text(text.replace(old, "return vec![vec![test, clippy, socket_timing]];", 1))
+PYEOF
+}
+expect_fail check_xtask_codegen_surface.sh \
+    'the gateway socket-timing suites rejoining the first loop and its deadline' \
+    mut_xtask_gateway_socket_timing_joins_the_first_loop \
+    'gateway fast verification must retain ordinary runtime tests and all-target Clippy'
+
+mut_xtask_gateway_socket_timing_loop_dropped() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("xtask/src/verify.rs")
+text = path.read_text()
+old = "return vec![vec![test, clippy], vec![socket_timing]];"
+if text.count(old) != 1:
+    raise SystemExit("gateway socket-timing loop is missing")
+path.write_text(text.replace(old, "drop(socket_timing);\n        return vec![vec![test, clippy]];", 1))
+PYEOF
+}
+expect_fail check_xtask_codegen_surface.sh \
+    'the gateway fast scope dropping its socket-timing loop' \
+    mut_xtask_gateway_socket_timing_loop_dropped \
+    'gateway fast verification must retain ordinary runtime tests and all-target Clippy'
+
+mut_xtask_conformance_case_joins_every_loop() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("xtask/src/verify/loops.rs")
+text = path.read_text()
+old = "            if index == 0\n                && let Some(case) = conformance_case\n"
+if text.count(old) != 1:
+    raise SystemExit("first-loop conformance case is missing")
+path.write_text(text.replace(old, "            if let Some(case) = conformance_case\n", 1))
+PYEOF
+}
+expect_fail check_xtask_codegen_surface.sh \
+    'the crate conformance case running again in every later loop' \
+    mut_xtask_conformance_case_joins_every_loop \
+    'standalone crate conformance verification must precede the scheduled command batches'
+
 mut_xtask_server_fast_scope_runs_c_lim_0006() {
     python3 - <<'PYEOF'
 from pathlib import Path
@@ -3797,6 +3849,44 @@ PYEOF
 }
 expect_fail check_error_resolution_surface.sh \
     'the consolidated gateway target being redirected to another path' mut_gateway_manifest_redirects_consolidated_target
+
+# rustfs/gateway#1264 split the facade into two targets: the trybuild harness stays in the integration
+# target, the socket-timing target registers no trybuild entry, and nothing else is admitted.
+mut_gateway_manifest_adds_third_target() {
+    cat >>crates/gateway/Cargo.toml <<'TOMLEOF'
+
+[[test]]
+name = "third"
+path = "tests/facade_probe.rs"
+TOMLEOF
+}
+expect_fail check_error_resolution_surface.sh \
+    'a third Cargo test target beside the integration and socket-timing targets' mut_gateway_manifest_adds_third_target \
+    'crates/gateway must declare exactly the integration and socket_timing [[test]] targets'
+
+mut_gateway_manifest_restores_single_target() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/gateway/Cargo.toml")
+text = path.read_text()
+block = '\n[[test]]\nname = "socket_timing"\npath = "tests/socket_timing.rs"\n'
+if text.count(block) != 1:
+    raise SystemExit("gateway socket-timing target is missing")
+path.write_text(text.replace(block, "", 1))
+PYEOF
+}
+expect_fail check_error_resolution_surface.sh \
+    'the gateway manifest returning to one test target' mut_gateway_manifest_restores_single_target \
+    'crates/gateway must declare exactly the integration and socket_timing [[test]] targets'
+
+mut_gateway_socket_timing_registers_trybuild_harness() {
+    printf '#[path = "compile_fail.rs"]\nmod compile_fail;\n' >>crates/gateway/tests/socket_timing.rs
+}
+expect_fail check_error_resolution_surface.sh \
+    'the socket-timing target registering the unified trybuild harness a second time' \
+    mut_gateway_socket_timing_registers_trybuild_harness \
+    'tests/socket_timing.rs reuses the unified gateway trybuild harness'
 
 mut_gateway_trybuild_receiver_shadowed() {
     python3 - <<'PYEOF'
@@ -17662,18 +17752,18 @@ expect_fail check_declared_body_limit.sh \
 mut_declared_body_module_disabled() {
     python3 - <<'PYEOF'
 from pathlib import Path
-path = Path("crates/gateway/tests/integration.rs")
+path = Path("crates/gateway/tests/socket_timing.rs")
 text = path.read_text()
 old = '#[path = "connection_teardown.rs"]\nmod connection_teardown;'
 new = '#[path = "connection_teardown.rs"]\nmod removed_connection_teardown;'
 if text.count(old) != 1:
-    raise SystemExit("c-lim-0021 integration-module anchor drifted")
+    raise SystemExit("c-lim-0021 socket-timing module anchor drifted")
 path.write_text(text.replace(old, new, 1))
 PYEOF
 }
 expect_fail check_declared_body_limit.sh \
-    'c-lim-0021 leaving the consolidated integration target' mut_declared_body_module_disabled \
-    'c-lim-0021 socket module is not active in the integration target'
+    'c-lim-0021 leaving the socket-timing target' mut_declared_body_module_disabled \
+    'c-lim-0021 socket module is not active in the socket-timing target'
 
 mut_declared_body_wire_edge_removed() {
     python3 - <<'PYEOF'

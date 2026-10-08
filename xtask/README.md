@@ -48,6 +48,22 @@ verify: crate rustfs-gateway-goldens step 2 built what the prebuild did not cove
 That pair of lines is a prebuild defect, not a cost of the crate: file it against xtask with the
 command it names.
 
+`cargo xtask verify --crate rustfs-gateway` runs two loops, each under 30 seconds of its own: the
+library and `integration` tests beside the Clippy step, then the `socket_timing` target, whose suites
+wait on real sockets and timers rather than on the CPU
+([#1264](https://github.com/rustfs/gateway/issues/1264)). Each loop prints its own line, and the
+second starts its clock when the first has passed. The run recorded on #1264 after
+`crates/gateway/src/lib.rs` was touched printed (the subject's middle elided here):
+
+```text
+verify: crate rustfs-gateway ... build compiled 5 crate(s) in 26.97s outside the budget
+verify: crate rustfs-gateway ..., loop 1 of 2 passed in 15.82s
+verify: crate rustfs-gateway ..., loop 2 of 2 passed in 6.23s
+```
+
+The two numbers are two measurements against two budgets; do not add them and compare the sum with
+30 seconds. Every other crate runs one loop and prints one `passed in` line, as before.
+
 A complete invocation over 30 seconds can still have a passing prepared loop. A loop killed at
 its deadline is a failure whose unfinished work has not been timed to completion; retain the
 diagnostic and the step it names. Investigate that failure without increasing the budget or

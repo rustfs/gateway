@@ -17,14 +17,14 @@
 //! Responsible for: signed `aws-chunked` slow-body refusal, the sustained-progress control and the
 //! self-measuring pacer it relies on, and concurrent slow-upload RSS and healthy-peer latency.
 //! NOT responsible for: idle-body or back-pressure contracts.
-//! Upstream: the streaming request fixture. Downstream: c-ing-0062.
+//! Upstream: the streaming fixture in `support/streaming.rs`. Downstream: c-ing-0062.
 
 #![allow(clippy::expect_used, clippy::panic)]
 
-use super::streaming_request::{
-    StreamingOutput, StreamingPut, live_server, resident_ballast, rss_bytes, service_with_deadlines, stop,
+use super::streaming_request::{resident_ballast, rss_bytes};
+use crate::support::streaming::{
+    SIGNED_CHUNK_BYTES, StreamingOutput, StreamingPut, live_server, service_with_deadlines, signed_chunked_request, stop,
 };
-use crate::support;
 
 use std::net::{Ipv4Addr, SocketAddr};
 use std::process::Command;
@@ -33,13 +33,10 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use http_body_util::BodyExt;
-use rustfs_gateway::sig::{AmzDate, PayloadMode, SigService, SigV4Signer, SigningCredentials, SigningRequest, SigningScope};
 use rustfs_gateway::{Handler, HandlerCancellation, HandlerError, HandlerResult, Req, RequestBodyDeadlineConfig, Resp};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Barrier;
-
-pub(super) const SIGNED_CHUNK_BYTES: usize = 256;
 
 /// How many requested pacer pauses fit inside the read-idle deadline of the sustained-progress
 /// control. The old 60 ms deadline left a 20 ms pacer a 3x margin, and one injected 100 ms pause
@@ -134,70 +131,6 @@ impl Handler<StreamingPut> for ThroughputBackend {
             }
         }
     }
-}
-
-pub(super) fn signed_chunked_request(decoded_len: usize) -> (Vec<u8>, Vec<u8>) {
-    signed_chunked_request_with_chunk_bytes(decoded_len, SIGNED_CHUNK_BYTES)
-}
-
-pub(super) fn signed_chunked_request_with_chunk_bytes(decoded_len: usize, chunk_bytes: usize) -> (Vec<u8>, Vec<u8>) {
-    let decoded: Vec<u8> = (0..decoded_len).map(|index| (index % 251) as u8).collect();
-    let credentials = SigningCredentials::new("AKIDEXAMPLE", b"secret").expect("valid credentials");
-    let stamp = AmzDate::parse(support::SIGNED_AT_STAMP).expect("a SigV4 stamp");
-    let scope = SigningScope::new(stamp.day(), "us-east-1", SigService::S3).expect("a well-formed scope");
-    let mut signer = SigV4Signer::new(credentials, scope);
-    let probe = http::Request::builder()
-        .method(http::Method::PUT)
-        .uri("/")
-        .header("host", "localhost")
-        .body(())
-        .expect("a valid request");
-    let accepted = rustfs_gateway::WireRequest::accept(probe, &rustfs_gateway::Limits::default()).expect("an acceptable host");
-    let wire_len = decoded
-        .chunks(chunk_bytes)
-        .map(|chunk| chunk.len() + format!("{:x}", chunk.len()).len() + 17 + 64 + 4)
-        .sum::<usize>()
-        + 1
-        + 17
-        + 64
-        + 4;
-    let mut headers = http::HeaderMap::new();
-    headers.insert(http::header::HOST, http::HeaderValue::from_static("localhost"));
-    headers.insert(
-        http::header::CONTENT_LENGTH,
-        http::HeaderValue::from_str(&wire_len.to_string()).expect("a digit run"),
-    );
-    let signing = SigningRequest::new(
-        &http::Method::PUT,
-        "/",
-        "",
-        &headers,
-        accepted.host().raw_for_signing(),
-        PayloadMode::StreamingSigned {
-            trailer: rustfs_gateway::sig::TrailerSet::None,
-        },
-        stamp,
-    )
-    .with_wire_content_length(wire_len as u64)
-    .with_decoded_content_length(decoded_len as u64);
-    let signed = signer.sign_headers(&signing).expect("a signable request");
-    let mut chain = signer.chunk_signer(&signed).expect("a chunk chain");
-    let mut wire = Vec::with_capacity(wire_len);
-    for chunk in decoded.chunks(chunk_bytes) {
-        wire.extend_from_slice(&chain.encode_chunk(chunk));
-    }
-    wire.extend_from_slice(&chain.encode_chunk(b""));
-    assert_eq!(wire.len(), wire_len, "the signed wire length must be the one that was signed");
-
-    let mut head = b"PUT / HTTP/1.1\r\n".to_vec();
-    for (name, value) in signed.headers() {
-        head.extend_from_slice(name.as_str().as_bytes());
-        head.extend_from_slice(b": ");
-        head.extend_from_slice(value.as_bytes());
-        head.extend_from_slice(b"\r\n");
-    }
-    head.extend_from_slice(b"Connection: close\r\n\r\n");
-    (head, wire)
 }
 
 fn deadlines(minimum_bytes: u64, window: Duration, read_idle: Duration) -> RequestBodyDeadlineConfig {

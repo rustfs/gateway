@@ -23,12 +23,12 @@
 //! seeing a complete body are the same either way.
 //! NOT responsible for: the sentence table (`builder/legacy_sentences.rs`) or the launcher that
 //! turns the switch on (`compat/sut`).
-//! Upstream: the streaming fixture in `streaming_request.rs`. Downstream: none.
+//! Upstream: the streaming fixture in `support/streaming.rs`. Downstream: none.
 
 #![allow(clippy::expect_used, clippy::panic)]
 
-use super::streaming_request::{StreamingPut, SwallowingBackend, live_server, stop, streaming_dialect};
 use crate::support;
+use crate::support::streaming::{StreamingPut, SwallowingBackend, live_server, stop, streaming_dialect};
 
 use std::sync::Arc;
 use std::time::Duration;

@@ -588,15 +588,21 @@ for kind, target, default_test in testable_targets:
     if enabled and kind != "test" and target_path is not None and (gateway_root / target_path).resolve() == gateway_harness_target:
         fail(f"crates/gateway/Cargo.toml reuses the unified trybuild harness as a {kind} target")
 
+# The trybuild harness runs in the integration target. The socket-timing target beside it
+# (rustfs/gateway#1264) registers no trybuild entry, which the path scan below enforces.
 explicit_tests = manifest.get("test", [])
-if not isinstance(explicit_tests, list) or len(explicit_tests) != 1 or not isinstance(explicit_tests[0], dict):
-    fail("crates/gateway must declare exactly one consolidated [[test]] target")
-integration_target = explicit_tests[0]
+if (
+    not isinstance(explicit_tests, list)
+    or len(explicit_tests) != 2
+    or any(not isinstance(target, dict) for target in explicit_tests)
+    or {(target.get("name"), target.get("path")) for target in explicit_tests}
+    != {("integration", "tests/integration.rs"), ("socket_timing", "tests/socket_timing.rs")}
+):
+    fail("crates/gateway must declare exactly the integration and socket_timing [[test]] targets")
+integration_target = next(target for target in explicit_tests if target.get("name") == "integration")
 required_features = integration_target.get("required-features", [])
 if (
-    integration_target.get("name") != "integration"
-    or integration_target.get("path") != "tests/integration.rs"
-    or integration_target.get("test", True) is not True
+    integration_target.get("test", True) is not True
     or integration_target.get("harness", True) is not True
     or not isinstance(required_features, list)
     or required_features

@@ -17,7 +17,7 @@
 //! Responsible for: a vendor operation that is anonymously reachable, the backends the suites
 //! register, a body that counts how much of itself was read, and the two builder shortcuts.
 //! NOT responsible for: asserting anything. Every assertion lives in the suite that makes it.
-//! Upstream: `rustfs-gateway`. Downstream: `tests/assembly.rs`, `tests/pipeline.rs`.
+//! Upstream: `rustfs-gateway`. Downstream: the targets `tests/integration.rs`, `tests/socket_timing.rs`.
 //!
 //! # Why the reachable operation is a vendor one
 //!
@@ -29,12 +29,12 @@
 // Each suite uses a subset of this module, and `unreachable_pub` sees a test binary that never
 // re-exports it. Both are properties of a shared test fixture rather than of the code under test.
 #![allow(dead_code, unreachable_pub, clippy::expect_used, clippy::panic, clippy::unwrap_used)]
-
 pub mod allocations;
 mod committed;
 mod dialect;
 mod handlers;
 pub mod select;
+pub mod streaming;
 pub mod vhost_stub;
 
 pub use committed::{CopyCommit, copy_commit_backend, copy_commit_builder, copy_commit_request};

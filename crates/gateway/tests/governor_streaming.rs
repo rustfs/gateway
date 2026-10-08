@@ -21,9 +21,11 @@
 
 #![allow(clippy::expect_used, clippy::panic)]
 
-use super::streaming_request::{StreamingOutput, StreamingPut, live_server, stop, streaming_dialect};
-use super::throughput_request::{signed_chunked_request, signed_chunked_request_with_chunk_bytes};
 use crate::support;
+use crate::support::streaming::{
+    StreamingOutput, StreamingPut, live_server, signed_chunked_request, signed_chunked_request_with_chunk_bytes, stop,
+    streaming_dialect,
+};
 
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};

@@ -23,20 +23,23 @@ mod budget;
 #[cfg(feature = "full")]
 mod full_gate;
 mod launcher;
+mod loops;
 mod prebuild;
 mod process;
 mod selection;
 
 use std::collections::HashSet;
 use std::fmt;
+#[cfg(feature = "full")]
 use std::path::Path;
 use std::process::{Command, ExitCode, Output};
 use std::time::{Duration, Instant};
 
 use serde::Deserialize;
 
-use budget::{BudgetFailure, KilledStep, builds_inside_budget};
+use budget::{BudgetFailure, KilledStep};
 use launcher::launcher_started;
+use loops::run_step_batches;
 use prebuild::{prebuild_commands, run_prebuild};
 use process::CancelledStep;
 use selection::crate_steps;
@@ -47,6 +50,8 @@ use crate::{catalog, codegen};
 
 const GATEWAY_RSS_TEST: &str = "cors_runtime::a_million_unique_keys_keep_rss_within_the_entry_budget";
 const GATEWAY_ADDRESS_TABLE_TEST: &str = "ext::governor::allocation_tests::c_gov_0013_a_million_addresses_do_not_grow_memory";
+/// The facade's second test target: the suites that wait on real sockets and timers.
+const GATEWAY_SOCKET_TIMING_TARGET: &str = "socket_timing";
 
 #[cfg(not(feature = "full"))]
 pub(crate) fn is_available_request(args: &[String]) -> bool {
@@ -130,6 +135,7 @@ fn verify_crate(name: &str, json: bool) -> ExitCode {
     )
 }
 
+/// A crate's loops: each batch runs under a 30-second deadline of its own, its steps started together.
 fn crate_step_batches(package: &str) -> Vec<Vec<Vec<String>>> {
     let mut steps = crate_steps(package);
     if package == "rustfs-gateway" {
@@ -141,7 +147,12 @@ fn crate_step_batches(package: &str) -> Vec<Vec<Vec<String>>> {
             GATEWAY_ADDRESS_TABLE_TEST.to_owned(),
         ]);
         let clippy = steps.remove(0);
-        return vec![vec![test, clippy]];
+        // The socket-timing suites wait on real sockets and timers rather than on the CPU, so they
+        // run as a loop of their own: the facade outgrew one 30-second loop (rustfs/gateway#1264).
+        let socket_timing = ["test", "-p", package, "--test", GATEWAY_SOCKET_TIMING_TARGET]
+            .map(str::to_owned)
+            .to_vec();
+        return vec![vec![test, clippy], vec![socket_timing]];
     }
     if package == "rustfs-gateway-server" {
         let mut test = steps.remove(0);
@@ -488,75 +499,6 @@ fn conformance_test_step(case: &str) -> Vec<String> {
 #[cfg(feature = "operation")]
 fn run_steps(steps: &[Vec<String>], budget: Duration, subject: &str, rule: &str, options: RunOptions<'_>) -> ExitCode {
     run_step_batches(&[steps.to_vec()], budget, subject, rule, options)
-}
-
-fn run_step_batches(
-    step_batches: &[Vec<Vec<String>>],
-    budget: Duration,
-    subject: &str,
-    rule: &str,
-    options: RunOptions<'_>,
-) -> ExitCode {
-    let RunOptions {
-        json,
-        operation_cases,
-        started,
-        conformance_case,
-    } = options;
-    let started = started.unwrap_or_else(Instant::now);
-    let mut command_batches = Vec::new();
-    if let Some(case) = conformance_case {
-        command_batches.push(vec![(
-            env!("CARGO").to_owned(),
-            conformance_test_step(case),
-            format!("{subject} conformance case {case}"),
-        )]);
-    }
-    let mut step_number = 0;
-    for steps in step_batches {
-        let commands = steps
-            .iter()
-            .map(|step| {
-                step_number += 1;
-                (env!("CARGO").to_owned(), step.clone(), format!("{subject} step {step_number}"))
-            })
-            .collect();
-        command_batches.push(commands);
-    }
-    for commands in command_batches {
-        let batch = process::run(&commands, Path::new("."), Some(started + budget));
-        if batch.interrupted {
-            return diagnostic("verification interrupted", subject, rule);
-        }
-        if batch.timed_out {
-            let killed = killed_steps(&commands, &batch.cancelled);
-            return budget_diagnostic(BudgetFailure::KilledAtDeadline { budget, killed: &killed }, subject, rule);
-        }
-        for note in builds_inside_budget(&commands, &batch.results) {
-            eprintln!("verify: {note}");
-        }
-        for (_, output) in batch.results {
-            match output {
-                Ok(output) if output.status.success() => {}
-                Ok(output) => {
-                    print_cargo_failure(&output);
-                    print_json_failure(json, "verification command failed", subject);
-                    return diagnostic(
-                        "verification command failed",
-                        subject,
-                        &format!("{rule}; cargo exited with {}", output.status),
-                    );
-                }
-                Err(error) => return diagnostic("cargo could not be started", subject, &format!("{rule}; {error}")),
-            }
-        }
-    }
-    let elapsed = started.elapsed();
-    if elapsed > budget {
-        return budget_diagnostic(BudgetFailure::Overran { elapsed }, subject, rule);
-    }
-    print_success(subject, elapsed, json, operation_cases);
-    ExitCode::SUCCESS
 }
 
 /// Pairs each killed command with the label and rerun command a reader needs to measure it.
