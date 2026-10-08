@@ -22,7 +22,7 @@
 use std::collections::BTreeSet;
 
 use super::super::{Conn, Head, budget_of};
-use crate::inprocess::{ChunkStep, Wire};
+use crate::inprocess::{ChunkStep, Wire, post_object};
 use crate::interpolate::Captures;
 use crate::sut::{Sut, SutError};
 use crate::value::Value;
@@ -36,6 +36,13 @@ impl Conn {
     }
 
     pub(in crate::conn) fn prepare_external(&mut self, case_id: &str, setup: Option<&Value>) -> Result<Captures, SutError> {
+        // Before anything is sent: a case whose verdict reads a hook only the in-process target has
+        // cannot be judged on an endpoint, and running it would create and delete remote fixtures
+        // to learn nothing. The runner turns this into a skip that carries the reason
+        // (rustfs/gateway#1406).
+        if let Some(reason) = post_object::unavailable_externally(case_id) {
+            return Err(SutError::Environment(reason));
+        }
         self.connection = None;
         let Some(setup) = setup else {
             if self.external_fixtures.active_case.is_some()
