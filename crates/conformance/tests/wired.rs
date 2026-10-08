@@ -26,6 +26,7 @@
 use rustfs_gateway_conformance::conn::Conn;
 use rustfs_gateway_conformance::corpus::Corpus;
 use rustfs_gateway_conformance::inprocess::InProcess;
+#[cfg(feature = "production-transports")]
 use rustfs_gateway_conformance::production::ProductionDriver;
 use rustfs_gateway_conformance::report::{CaseOutcome, Verdict};
 use rustfs_gateway_conformance::runner::{self, RunOptions};
@@ -60,6 +61,7 @@ fn run_over_a_socket(filter: &str) -> rustfs_gateway_conformance::report::Report
     runner::run(&corpus, &mut sut, &options)
 }
 
+#[cfg(feature = "production-transports")]
 fn run_over_production(filter: &str, driver: ProductionDriver) -> rustfs_gateway_conformance::report::Report {
     let _wire = WIRE_RUN.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let root = Corpus::discover_root().expect("a corpus sits next to this crate");
@@ -298,6 +300,7 @@ fn an_aborted_object_write_never_becomes_readable() {
 /// Both requests are dispatched on distinct connections, and the fixture rendezvous holds the
 /// first successful check until the second has checked the same absent generation. The loser is
 /// therefore judged on the stale commit token and not on a condition observed after the winner.
+#[cfg(feature = "production-transports")]
 #[test]
 fn a_conditional_create_race_executes_over_two_sockets() {
     let report = run_over_production("c-cond-0013", ProductionDriver::Hyper);
@@ -366,6 +369,7 @@ fn a_refusal_over_a_drainable_body_keeps_the_connection_over_a_socket() {
 }
 
 /// Positive — both production drivers drain a bounded remainder before reusing the connection.
+#[cfg(feature = "production-transports")]
 #[test]
 fn both_production_drivers_keep_alive_after_a_small_drainable_body() {
     for driver in [ProductionDriver::Hyper, ProductionDriver::SelfHeld] {
@@ -385,6 +389,7 @@ fn both_production_drivers_keep_alive_after_a_small_drainable_body() {
 /// direction, and `socket::tests::a_server_that_closes_without_lingering_is_observed_reset` is the
 /// opposite wire classification. Without both controls, an observer stuck on `closed` could make
 /// this test green without measuring the production socket.
+#[cfg(feature = "production-transports")]
 #[test]
 fn both_production_drivers_close_orderly_after_undeclared_length_refusal() {
     for driver in [ProductionDriver::Hyper, ProductionDriver::SelfHeld] {
@@ -396,6 +401,7 @@ fn both_production_drivers_close_orderly_after_undeclared_length_refusal() {
 
 /// Positive — the raw observer must decode the chunked body both production writers use for an
 /// application response whose length is not frozen in advance.
+#[cfg(feature = "production-transports")]
 #[test]
 fn both_production_drivers_expose_a_chunked_copy_result_body() {
     for driver in [ProductionDriver::Hyper, ProductionDriver::SelfHeld] {
@@ -408,6 +414,7 @@ fn both_production_drivers_expose_a_chunked_copy_result_body() {
 /// Negative — a production Hyper response cannot leak an authorization error document merely
 /// because the refused operation uses HEAD. The case carries allowed HeadObject and same-action
 /// GetObject controls so a fixture stuck on deny cannot satisfy this test.
+#[cfg(feature = "production-transports")]
 #[test]
 fn a_denied_head_object_is_bodyless_over_production_hyper() {
     let report = run_over_production("c-object-0053", ProductionDriver::Hyper);

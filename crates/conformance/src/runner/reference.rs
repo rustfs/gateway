@@ -23,10 +23,16 @@
 //! NOT responsible for: judging a case, rendering the baseline, or external endpoints.
 //! Upstream: `crate::cli` (`conformance baseline`) and `tests/corpus.rs`. Downstream: `super::run`.
 
-use super::{Corpus, Phase, Report, RunOptions, Severity, Verdict};
+use super::{Corpus, Report, RunOptions};
+// The predicate and what it reads exist where a socket re-run can happen, and in the tests that
+// pin it, so a build without `production-transports` carries no dead copy of either.
+#[cfg(any(test, feature = "production-transports"))]
+use super::{Phase, Severity, Verdict};
+#[cfg(any(test, feature = "production-transports"))]
 use crate::report::CaseOutcome;
 
 /// Whether the in-process outcome is a limit of that target rather than a fact about the service.
+#[cfg(any(test, feature = "production-transports"))]
 pub(crate) fn needs_a_socket(outcome: &CaseOutcome) -> bool {
     match outcome.verdict {
         // Only a typed transport limit while executing; an environment failure of the harness, a
@@ -48,32 +54,40 @@ pub(crate) fn needs_a_socket(outcome: &CaseOutcome) -> bool {
 /// production Hyper driver. Without `production-transports` it is the in-process run alone.
 #[must_use]
 pub fn reference_report(corpus: &Corpus, options: &RunOptions) -> Report {
-    let root = corpus.root().to_path_buf();
-    let mut report = super::run(corpus, &mut crate::inprocess::InProcess::new(root.clone()), options);
-    #[cfg(feature = "production-transports")]
-    {
-        let rerun: Vec<String> = report
+    let report = super::run(corpus, &mut crate::inprocess::InProcess::new(corpus.root().to_path_buf()), options);
+    rerun_on_a_socket(corpus, options, report)
+}
+
+/// Replaces each in-process outcome that [`needs_a_socket`] with the one production Hyper reaches.
+#[cfg(feature = "production-transports")]
+fn rerun_on_a_socket(corpus: &Corpus, options: &RunOptions, mut report: Report) -> Report {
+    let rerun: Vec<String> = report
+        .outcomes
+        .iter()
+        .filter(|outcome| needs_a_socket(outcome))
+        .map(|outcome| outcome.id.clone())
+        .collect();
+    let mut hyper = crate::conn::Conn::production(corpus.root().to_path_buf(), crate::production::ProductionDriver::Hyper);
+    for id in rerun {
+        let one = RunOptions {
+            filter: Some(id.clone()),
+            shard: None,
+            ..options.clone()
+        };
+        let executed = super::run(corpus, &mut hyper, &one)
             .outcomes
-            .iter()
-            .filter(|outcome| needs_a_socket(outcome))
-            .map(|outcome| outcome.id.clone())
-            .collect();
-        let mut hyper = crate::conn::Conn::production(root, crate::production::ProductionDriver::Hyper);
-        for id in rerun {
-            let one = RunOptions {
-                filter: Some(id.clone()),
-                shard: None,
-                ..options.clone()
-            };
-            let executed = super::run(corpus, &mut hyper, &one)
-                .outcomes
-                .into_iter()
-                .find(|outcome| outcome.id == id);
-            if let (Some(executed), Some(slot)) = (executed, report.outcomes.iter_mut().find(|outcome| outcome.id == id)) {
-                *slot = executed;
-            }
+            .into_iter()
+            .find(|outcome| outcome.id == id);
+        if let (Some(executed), Some(slot)) = (executed, report.outcomes.iter_mut().find(|outcome| outcome.id == id)) {
+            *slot = executed;
         }
     }
+    report
+}
+
+/// There is no socket driver to re-run on: the in-process report stands as it is.
+#[cfg(not(feature = "production-transports"))]
+fn rerun_on_a_socket(_corpus: &Corpus, _options: &RunOptions, report: Report) -> Report {
     report
 }
 
