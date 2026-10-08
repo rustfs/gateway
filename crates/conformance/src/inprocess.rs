@@ -95,7 +95,7 @@ mod conditional_race;
 pub(crate) mod h2_frames;
 mod payload;
 mod payload_literal;
-mod post_object;
+pub(crate) mod post_object;
 mod profile;
 mod security;
 mod sigv2;

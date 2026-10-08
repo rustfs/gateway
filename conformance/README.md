@@ -601,9 +601,11 @@ the preset (rustfs/backlog#2757); every row names the review that tolerates the 
 unregistered profile reading cites in `docs/rustfs-profile.md` — and the ledger is read with the
 same reader, so it fails the same way a hand-written one does. It rules behaviour only. A case the
 harness cannot measure against an external target — one that pins `clock.fixed`, needs a fixture
-the external path does not establish, an operation the launcher does not register, or an authored
-HTTP/2 script — is left unruled on purpose, so a run with this ledger still exits 1 and its
-`rulings:` block names exactly what is unmeasured rather than excusing it.
+the external path does not establish, an operation the launcher does not register, an authored
+HTTP/2 script, or a verdict that reads a handler hook only the in-process target has
+(`c-post-0020`, skipped before any request is sent: rustfs/gateway#1406) — is left unruled on
+purpose, so a run with this ledger still exits 1 and its `rulings:` block names exactly what is
+unmeasured rather than excusing it.
 
 ## Evidence and compliance
 

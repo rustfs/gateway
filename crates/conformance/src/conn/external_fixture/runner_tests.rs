@@ -15,7 +15,9 @@
 //! Full runner coverage for external owned bucket and object fixtures.
 //!
 //! Responsible for: proving the CLI opt-in reaches bucket and object fixture controls, an authored
-//! read-only exchange, and cleanup in dependency order. NOT responsible for: unit-level ownership
+//! read-only exchange, and cleanup in dependency order; and that a case whose verdict reads an
+//! in-process hook is skipped with that reason, before any fixture traffic, while an ordinary case
+//! beside it still runs (rustfs/gateway#1406). NOT responsible for: unit-level ownership
 //! and failure cases or production S3 behavior. Upstream: `crate::cli`; downstream: a bounded
 //! loopback HTTP endpoint.
 
@@ -24,7 +26,8 @@ use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -274,4 +277,163 @@ fn cli_runner_orders_owned_object_fixture_around_an_authored_read_only_exchange(
             "empty fixture body digest is signed at request {index}"
         );
     }
+}
+
+/// An endpoint that records every request it is sent, answers each with a bare 403, and stops when
+/// told to. Unlike [`fixture_server`] it expects no particular sequence: a request nobody expected
+/// is exactly what the test below is looking for.
+fn recording_endpoint() -> (String, Arc<AtomicBool>, thread::JoinHandle<Vec<Vec<u8>>>) {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind recording endpoint");
+    listener.set_nonblocking(true).expect("bound recording accept wait");
+    let address = listener.local_addr().expect("recording endpoint address");
+    let stop = Arc::new(AtomicBool::new(false));
+    let stopped = Arc::clone(&stop);
+    let server = thread::spawn(move || {
+        let mut requests = Vec::new();
+        while !stopped.load(Ordering::SeqCst) {
+            match listener.accept() {
+                Ok((mut stream, _)) => {
+                    requests.push(read_request(&mut stream));
+                    stream
+                        .write_all(b"HTTP/1.1 403 Forbidden\r\nServer: RustFS\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                        .expect("write recording response");
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => thread::sleep(Duration::from_millis(1)),
+                Err(error) => panic!("accept recording request: {error}"),
+            }
+        }
+        requests
+    });
+    (format!("http://{address}"), stop, server)
+}
+
+/// The real `c-post-0020` beside two ordinary external cases, in a corpus of their own.
+fn hook_corpus() -> TestCorpus {
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let root = std::env::temp_dir().join(format!(
+        "rustfs-gateway-external-hook-corpus-{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    ));
+    fs::create_dir_all(root.join("cases/external-fixture")).expect("create cases directory");
+    fs::create_dir_all(root.join("cases/post")).expect("create post cases directory");
+    let repository = crate::corpus::Corpus::discover_root().expect("repository corpus");
+    fs::copy(repository.join("case.schema.json"), root.join("case.schema.json")).expect("copy frozen schema");
+    fs::copy(repository.join("cases/post/c-post-0020.toml"), root.join("cases/post/c-post-0020.toml"))
+        .expect("copy the real case");
+    write_case(&root, "c-external-fixture-0002", "negative", 403, "");
+    write_case(&root, "c-external-fixture-0003", "negative", 403, "");
+    TestCorpus(root)
+}
+
+/// The one line of a JSON report that describes `id`.
+fn report_line<'a>(report: &'a str, id: &str) -> &'a str {
+    report
+        .lines()
+        .find(|line| line.contains(&format!("\"id\": \"{id}\"")))
+        .unwrap_or_else(|| panic!("{id} is not in the report:\n{report}"))
+}
+
+/// Negative — `conformance run --profile rustfs --endpoint ... --allow-external-fixtures`, the
+/// command of rustfs/gateway#1406. `c-post-0020` asserts on a handler-entry hook that exists only
+/// in the in-process target, so against an endpoint it is skipped with that reason: never failed at
+/// `runner/cleanup` over "the handler saw []", and never sent anywhere. The two ordinary cases
+/// beside it are the other direction — they still reach the endpoint and pass, so the gate is not
+/// a blanket skip.
+#[test]
+fn cli_runner_skips_a_case_that_reads_an_in_process_hook_and_still_runs_the_others() {
+    let corpus = hook_corpus();
+    let (url, stop, server) = recording_endpoint();
+    let report_path = corpus.path().join("report.json");
+    let args = [
+        "run".to_owned(),
+        "--profile".to_owned(),
+        "rustfs".to_owned(),
+        "--root".to_owned(),
+        corpus.path().display().to_string(),
+        "--endpoint".to_owned(),
+        url,
+        "--allow-external-fixtures".to_owned(),
+        "--json".to_owned(),
+        report_path.display().to_string(),
+    ];
+
+    let code = cli::main(&args);
+    stop.store(true, Ordering::SeqCst);
+    let requests = server.join().expect("recording endpoint exits");
+    let report = fs::read_to_string(&report_path).expect("the JSON report");
+
+    let hooked = report_line(&report, "c-post-0020");
+    assert!(hooked.contains("\"verdict\": \"skipped\""), "{hooked}");
+    assert!(hooked.contains("\"failures\": []"), "a skip carries no failure: {hooked}");
+    for needle in ["PostObjectInput::content_length", "in-process", "external endpoint"] {
+        assert!(hooked.contains(needle), "{needle:?} missing from the skip reason: {hooked}");
+    }
+    assert!(
+        !hooked.contains("the handler saw"),
+        "the cleanup verdict must not run on an endpoint: {hooked}"
+    );
+    for id in ["c-external-fixture-0002", "c-external-fixture-0003"] {
+        assert!(
+            report_line(&report, id).contains("\"verdict\": \"passed\""),
+            "{}",
+            report_line(&report, id)
+        );
+    }
+    // One skip beside two passes is a run that measured something and found nothing wrong.
+    assert_eq!(code, ExitCode::from(exit::SUCCESS));
+
+    // The identity probe and the two ordinary cases' one read each reach the endpoint. Nothing for
+    // the hooked case does: no bucket probe, no create, no upload, no delete.
+    let lines: Vec<&str> = requests.iter().map(|request| request_line(request)).collect();
+    assert_eq!(
+        lines,
+        [
+            "HEAD / HTTP/1.1",
+            "GET /fixture-runner?location HTTP/1.1",
+            "GET /fixture-runner?location HTTP/1.1"
+        ]
+    );
+}
+
+/// Negative — the same run, selecting only the hooked case, is an all-skipped run: exit 3 (nothing
+/// measured), never exit 1 (a regression), and still nothing for the case reaches the endpoint.
+#[test]
+fn cli_runner_reports_a_run_of_only_the_hooked_case_as_unmeasured_not_as_a_regression() {
+    let corpus = hook_corpus();
+    let (url, stop, server) = recording_endpoint();
+    let args = [
+        "run".to_owned(),
+        "--profile".to_owned(),
+        "rustfs".to_owned(),
+        "--root".to_owned(),
+        corpus.path().display().to_string(),
+        "--filter".to_owned(),
+        "c-post-0020".to_owned(),
+        "--endpoint".to_owned(),
+        url,
+        "--allow-external-fixtures".to_owned(),
+    ];
+
+    let code = cli::main(&args);
+    stop.store(true, Ordering::SeqCst);
+    let requests = server.join().expect("recording endpoint exits");
+
+    assert_eq!(code, ExitCode::from(exit::ENVIRONMENT));
+    let lines: Vec<&str> = requests.iter().map(|request| request_line(request)).collect();
+    assert_eq!(lines, ["HEAD / HTTP/1.1"], "only the identity probe may reach the endpoint");
+}
+
+/// Negative — the committed rustfs ledger rules nothing for the hooked case. A ruling is a claim
+/// about the target, and this skip is a claim about the harness (rustfs/gateway#1406): it stays
+/// unruled so a run with the ledger still names it as unmeasured.
+#[test]
+fn the_rustfs_ledger_does_not_rule_the_hooked_case() {
+    let ledger = crate::corpus::Corpus::discover_root()
+        .expect("repository corpus")
+        .join("rulings/rustfs-profile.toml");
+    let text = fs::read_to_string(&ledger).expect("the committed ledger");
+    let rulings = crate::rulings::Rulings::parse(&text).expect("the committed ledger parses");
+    assert!(!rulings.is_empty(), "the control ledger is empty, so this test proves nothing");
+    assert!(rulings.get("c-post-0020").is_none(), "c-post-0020 must stay unruled");
 }
