@@ -19,12 +19,14 @@
 
 use std::time::{Duration, Instant};
 
+#[cfg(feature = "production-transports")]
 use super::tests::{ANONYMOUS_GET_ROOT_HPACK, h2_plan, h2_request};
 use super::*;
 use crate::toml;
 
 /// Longer than the whole target budget below, as a loaded host can make a server start.
 const SETUP_STALL: Duration = Duration::from_millis(600);
+#[cfg(feature = "production-transports")]
 const TARGET_BUDGET: Duration = Duration::from_millis(150);
 
 fn stalled(mut conn: Conn, stall: Duration) -> Conn {
