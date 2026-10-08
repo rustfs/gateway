@@ -35,11 +35,18 @@
 //! # Why allocation has its own root authority
 //!
 //! Upload directories are capability storage, not an index from which the next capability may be
-//! inferred. A bucket-scoped sequence is advanced and synchronized before its ID is returned, so
-//! a reopen cannot replay an active capability and allocation never enumerates upload directories.
-//! Upload IDs are resolved together with their bucket and key, so that bucket is the complete
-//! uniqueness scope and the counter can live beside the upload records whose scanner already
-//! ignores exact dot-prefixed authority files.
+//! inferred, so allocation never enumerates them. A bucket-scoped sequence holds the first ID no
+//! allocation has reserved. Allocation reserves a window of 64 IDs by advancing that sequence and
+//! synchronizing it before the first ID of the window is returned, then issues the rest of the
+//! window from memory (rustfs/gateway#1336). The persisted value therefore exceeds every issued
+//! ID, and a reopen, which resumes at it, cannot replay an active capability; a crash skips at
+//! most the unissued rest of one window, which an opaque ID never misses. Every allocation
+//! still reads and validates the sequence, and a window is used only while the sequence holds
+//! exactly its high-water mark: a corrupt or symlinked sequence fails closed, and one this backend
+//! did not write last — removed with its bucket, or advanced by another writer — voids the window
+//! as a reopen would. Upload IDs are resolved together with their bucket and key, so that bucket is
+//! the complete uniqueness scope and the counter can live beside the upload records whose scanner
+//! already ignores exact dot-prefixed authority files.
 
 use std::io::{self, Write as _};
 use std::path::Path;
@@ -55,15 +62,26 @@ use super::{FsBackend, PARTS_DIR, UPLOAD_RECORD, storage_error};
 
 const UPLOAD_ID_SEQUENCE: &str = ".multipart-upload-id-sequence";
 const UPLOAD_ID_SEQUENCE_TEMP: &str = ".tmp-multipart-upload-id-sequence";
+/// How many upload IDs one synchronized write of the sequence reserves.
+const UPLOAD_ID_WINDOW: u64 = 64;
 
-fn initialize_upload_id_sequence(uploads: &Path) -> io::Result<()> {
+/// The IDs `next..high` one bucket's last reservation left unissued, where `high` is the value this
+/// backend wrote to that bucket's sequence.
+pub(super) struct UploadIdWindow {
+    next: u64,
+    high: u64,
+}
+
+/// The bucket's validated sequence, created at zero when absent.
+fn initialize_upload_id_sequence(uploads: &Path) -> io::Result<u64> {
     let sequence = uploads.join(UPLOAD_ID_SEQUENCE);
     match std::fs::symlink_metadata(&sequence) {
-        Ok(_) => read_upload_id_sequence(uploads).map(|_| ()),
+        Ok(_) => read_upload_id_sequence(uploads),
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
             let mut file = std::fs::OpenOptions::new().write(true).create_new(true).open(sequence)?;
             file.write_all(b"0\n")?;
-            file.sync_all()
+            file.sync_all()?;
+            Ok(0)
         }
         Err(error) => Err(error),
     }
@@ -383,14 +401,33 @@ impl RecordedUpload for UploadRecord {
 }
 
 impl FsBackend {
+    /// Issues the next ID of the bucket's window, reserving a new window first when the current one
+    /// is spent or the sequence no longer holds its high-water mark. A sequence that cannot hold
+    /// one more full window is exhausted: the reservation is refused and nothing wraps.
     async fn allocate_upload_id(&self, bucket: &str) -> Result<String, HandlerError> {
-        let _guard = self.upload_id_lock.lock().await;
+        let mut windows = self.upload_id_windows.lock().await;
         let uploads = self.uploads_path(bucket);
-        initialize_upload_id_sequence(&uploads).map_err(|_| storage_error())?;
-        let current = read_upload_id_sequence(&uploads).map_err(|_| storage_error())?;
-        let next = current.checked_add(1).ok_or_else(storage_error)?;
-        persist_upload_id_sequence(&uploads, next).map_err(|_| storage_error())?;
-        Ok(format!("fs-v2-{current:016x}"))
+        let persisted = initialize_upload_id_sequence(&uploads).map_err(|_| storage_error())?;
+        let issued = match windows.get_mut(bucket) {
+            Some(window) if window.high == persisted && window.next < window.high => {
+                let issued = window.next;
+                window.next += 1;
+                issued
+            }
+            _ => {
+                let high = persisted.checked_add(UPLOAD_ID_WINDOW).ok_or_else(storage_error)?;
+                persist_upload_id_sequence(&uploads, high).map_err(|_| storage_error())?;
+                windows.insert(
+                    bucket.to_owned(),
+                    UploadIdWindow {
+                        next: persisted + 1,
+                        high,
+                    },
+                );
+                persisted
+            }
+        };
+        Ok(format!("fs-v2-{issued:016x}"))
     }
 
     /// Whether the upload directory lets its bucket be deleted.
@@ -651,3 +688,7 @@ pub(super) fn render_completed_checksum(
     *slot = Some(checksum.render_base64().to_owned());
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "upload_id_tests.rs"]
+mod upload_id_tests;

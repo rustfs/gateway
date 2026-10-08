@@ -15,10 +15,11 @@
 //! Restart and storage-boundary evidence for multipart upload ID allocation.
 //!
 //! Responsible for: proving that one backend root mints distinct opaque upload capabilities after
-//! reopen and that every minted capability remains active, and that a bucket deletion discards
-//! pending uploads and nothing else. NOT responsible for: upload listing,
-//! part checksum semantics, or completion. Upstream: the persistent allocator in `uploads`.
-//! Downstream: the filesystem CRUD verification target.
+//! reopen and that every minted capability remains active, that a damaged allocator authority
+//! refuses initiation before and inside a reserved window, and that a bucket deletion discards
+//! pending uploads and nothing else. NOT responsible for: window arithmetic and crash offsets
+//! (`src/upload_id_tests.rs`), upload listing, part checksum semantics, or completion. Upstream:
+//! the persistent allocator in `uploads`. Downstream: the filesystem CRUD verification target.
 
 use bytes::Bytes;
 
@@ -112,6 +113,72 @@ async fn n_exhausted_sequence_refuses_allocation_without_creating_an_upload() {
     let response = initiate_response(&service, "exhausted-upload-id").await;
     assert_eq!(response.status(), 500, "{}", String::from_utf8_lossy(response.body()));
     assert_no_upload_was_created(&service, "exhausted-upload-id").await;
+}
+
+/// Negative — the authority is read and validated on every allocation, not only when a window is
+/// reserved: corrupting it while the window reserved by the first upload still holds 63 unissued
+/// IDs refuses the second initiation, and the first upload is the only one listed.
+#[tokio::test]
+async fn n_corrupt_sequence_inside_a_window_refuses_allocation_without_creating_an_upload() {
+    let root = TestRoot::new();
+    let (_, service) = service(&root);
+    create_bucket(&service, "corrupt-window-id").await;
+    let first = initiate(&service, "corrupt-window-id", "same-key").await;
+    std::fs::write(upload_id_sequence(&root, "corrupt-window-id"), b"not-a-counter\n").expect("corrupt the exact test authority");
+
+    let response = initiate_response(&service, "corrupt-window-id").await;
+    assert_eq!(response.status(), 500, "{}", String::from_utf8_lossy(response.body()));
+    let listed = exchange(&service, signed(http::Method::GET, "/corrupt-window-id?uploads", Bytes::new())).await;
+    assert_eq!(listed.status(), 200, "{}", String::from_utf8_lossy(listed.body()));
+    let listed = String::from_utf8_lossy(listed.body()).into_owned();
+    assert_eq!(listed.matches("<UploadId>").count(), 1, "{listed}");
+    assert!(listed.contains(&format!("<UploadId>{first}</UploadId>")), "{listed}");
+}
+
+/// Negative — a symlink replacing the authority inside a window is refused even though its target
+/// spells the window's exact high-water mark, and the target is not written.
+#[cfg(unix)]
+#[tokio::test]
+async fn n_symlinked_sequence_inside_a_window_is_refused_without_touching_its_target() {
+    use std::os::unix::fs::symlink;
+
+    let root = TestRoot::new();
+    let outside = TestRoot::new();
+    let (_, service) = service(&root);
+    create_bucket(&service, "symlink-window-id").await;
+    initiate(&service, "symlink-window-id", "same-key").await;
+    let sequence = upload_id_sequence(&root, "symlink-window-id");
+    let high_water = std::fs::read(&sequence).expect("read the exact test authority");
+    let target = outside.0.join("counter");
+    std::fs::write(&target, &high_water).expect("copy the authority to the outside test file");
+    std::fs::remove_file(&sequence).expect("remove the exact test authority");
+    symlink(&target, &sequence).expect("replace the authority with a test symlink");
+
+    let response = initiate_response(&service, "symlink-window-id").await;
+    assert_eq!(response.status(), 500, "{}", String::from_utf8_lossy(response.body()));
+    assert_eq!(std::fs::read(&target).expect("read the outside test file"), high_water);
+}
+
+/// Positive — a bucket deleted and recreated by the same running backend starts a new authority,
+/// and the first upload of the new bucket is issued from a window reserved in that authority, not
+/// from the window the deleted bucket left in memory: the counter holds one full window above it.
+#[tokio::test]
+async fn a_recreated_bucket_reserves_from_its_new_authority() {
+    let root = TestRoot::new();
+    let (_, service) = service(&root);
+    create_bucket(&service, "recreated-upload-id").await;
+    for _ in 0..3 {
+        let upload_id = initiate(&service, "recreated-upload-id", "same-key").await;
+        abort_upload(&service, "recreated-upload-id", &upload_id).await;
+    }
+    let deleted = delete_bucket_response(&service, "recreated-upload-id").await;
+    assert_eq!(deleted.status(), 204, "{}", String::from_utf8_lossy(deleted.body()));
+    create_bucket(&service, "recreated-upload-id").await;
+
+    let upload_id = initiate(&service, "recreated-upload-id", "same-key").await;
+    let issued = u64::from_str_radix(upload_id.strip_prefix("fs-v2-").expect("the fs-v2 form"), 16).expect("a hexadecimal ID");
+    let counter = std::fs::read_to_string(upload_id_sequence(&root, "recreated-upload-id")).expect("the new test authority");
+    assert_eq!(counter, format!("{}\n", issued + 64), "upload ID {upload_id}");
 }
 
 /// Negative — reopening does not let a corrupt durable authority silently restart at zero.

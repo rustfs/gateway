@@ -169,7 +169,8 @@ pub struct FsBackend {
     region_match_policy: RegionMatchPolicy,
     owner: Option<Owner>,
     temporary_id: AtomicU64,
-    upload_id_lock: tokio::sync::Mutex<()>,
+    /// Each bucket's reserved upload-ID window, keyed by bucket name; the lock serializes allocation.
+    upload_id_windows: tokio::sync::Mutex<std::collections::HashMap<String, uploads::UploadIdWindow>>,
     version_lock: tokio::sync::Mutex<()>,
     clock: Arc<dyn Clock>,
     lifecycle_day_seconds: i64,
@@ -216,7 +217,7 @@ impl FsBackend {
             region_match_policy: REGION_MATCH_POLICY,
             owner: None,
             temporary_id: AtomicU64::new(0),
-            upload_id_lock: tokio::sync::Mutex::new(()),
+            upload_id_windows: tokio::sync::Mutex::default(),
             version_lock: tokio::sync::Mutex::new(()),
             clock,
             lifecycle_day_seconds: 24 * 60 * 60,
