@@ -4,6 +4,13 @@
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![MSRV](https://img.shields.io/badge/MSRV-1.97.1-orange.svg)](docs/msrv.md)
 
+> [!IMPORTANT]
+> **For internal RustFS use only.** We do not recommend using this project directly as a dependency
+> in other projects, and we do not provide external support.
+>
+> If you need an S3 integration layer, we recommend [s3s](https://github.com/s3s-project/s3s):
+> **it is the best choice for your project.**
+
 **The HTTP layer of [RustFS](https://github.com/rustfs/rustfs).** It turns S3 traffic on the wire into typed operations
 and back, and leaves storage semantics to RustFS itself.
 
