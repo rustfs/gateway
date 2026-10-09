@@ -119,6 +119,9 @@ violations) must outnumber positive ones.
 
 ### Multi-device and multi-agent collaboration
 
+- When fixing a bug or making an improvement, check whether the change also applies to
+  [s3s](https://github.com/s3s-project/s3s). If it does, open an issue or pull request in that
+  project and link it from the gateway issue or pull request.
 - **The GitHub issue is the single source of truth.** Progress, decisions, dead ends, and surprises
   go into issue comments — never into a file in this repository.
 - Before handing off or ending a session, append a **Handoff comment** to the issue in exactly this
