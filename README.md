@@ -156,6 +156,11 @@ Working on this repository — whether you are a human or an AI agent — is gov
 [AGENTS.md](AGENTS.md): rule precedence, the verification gate, protected files, the dependency ring boundaries, and the
 do-not-read list. Read it before your first change.
 
+## Acknowledgements
+
+We thank [s3s](https://github.com/s3s-project/s3s) and its contributors for their work on
+S3-compatible services in Rust and for sharing protocol findings with the community.
+
 ## License
 
 Licensed under the [Apache License, Version 2.0](LICENSE) — a single license, not a dual MIT/Apache offering, chosen so
