@@ -12,16 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The in-process observation of what a POST Object handler is handed for the file's length
-//! (c-post-0020, rustfs/gateway#1167).
+//! POST Object case assembly and observations that require the bundled fixture.
 //!
 //! Responsible for: assembling that case under the RustFS profile's form grammar, which is the
 //! grammar that fixes a file's length from a declared `Content-Length`; recording, at the
 //! handler's entry, `PostObjectInput::content_length` and the body's own remaining length; failing
 //! the case when either is not the file's exact length; and declaring that reading unavailable on
-//! an external endpoint, which reports nothing to the hook (rustfs/gateway#1406).
-//! NOT responsible for: judging the response (`crate::expect`), any other case's assembly, or
-//! skipping the case (the external target returns the declared reason and the runner skips).
+//! an external endpoint, which reports nothing to the hook (rustfs/gateway#1406); selecting the
+//! legacy grammar for c-post-0022; and declaring c-post-0026 unavailable externally, since its
+//! refusal depends on the bundled fixture's lack of KMS (rustfs/gateway#1399).
+//! NOT responsible for: judging the response (`crate::expect`), the fixture's storage capability,
+//! or skipping the case (the external target returns the declared reason and the runner skips).
 //! Upstream: the selected case id. Downstream: `super::InProcess` service assembly and `finish`,
 //! and `crate::conn::external_fixture` through [`unavailable_externally`].
 
@@ -41,6 +42,9 @@ const OBSERVED_FILE_BYTES: u64 = 24;
 pub(super) type Observed = Arc<Mutex<Vec<(Option<u64>, Option<u64>)>>>;
 
 pub(super) fn configure_case(builder: ServiceBuilder, case_id: &str, observed: Observed) -> ServiceBuilder {
+    if case_id == "c-post-0022" {
+        return builder.legacy_rustfs_post_forms();
+    }
     if case_id != OBSERVED_CASE {
         return builder;
     }
@@ -59,8 +63,8 @@ pub(super) fn configure_case(builder: ServiceBuilder, case_id: &str, observed: O
     ))
 }
 
-/// Why an external endpoint cannot answer for `case_id`, when its verdict reads this module's
-/// handler-entry observation; `None` for every case that does not.
+/// Why an external endpoint cannot answer for `case_id`, when its verdict requires the handler
+/// observation or the bundled fixture's lack of KMS; `None` for every other case.
 ///
 /// The hook is a layer on the service this target assembles, so only a request that passes through
 /// that service can reach it. An external endpoint is assembled by someone else: nothing it does
@@ -68,6 +72,13 @@ pub(super) fn configure_case(builder: ServiceBuilder, case_id: &str, observed: O
 /// an observation rather than for anything the endpoint did. The external target asks this before
 /// it sends anything and skips the case with the reason returned here.
 pub(crate) fn unavailable_externally(case_id: &str) -> Option<String> {
+    if case_id == "c-post-0026" {
+        return Some(
+            "c-post-0026: the reference fixture cannot provide KMS; an external host's managed encryption \
+             capability is not controlled by this case, so it is unavailable on an external endpoint"
+                .to_owned(),
+        );
+    }
     (case_id == OBSERVED_CASE).then(|| {
         format!(
             "{OBSERVED_CASE} observes PostObjectInput::content_length at the handler's entry, a reading only the \
@@ -126,12 +137,25 @@ mod tests {
         assert!(finish(OBSERVED_CASE, &observed).is_ok());
     }
 
-    /// Negative — only the observed case reads the hook. A neighbouring id, a near miss and the
-    /// empty id are answerable on an external endpoint, so a gate that skipped every case, or every
-    /// PostObject case, would turn real measurements into skips.
+    /// Negative — portable cases, neighbouring ids, near misses and the empty id stay answerable
+    /// on an external endpoint. A gate that skipped every PostObject case would hide measurements.
     #[test]
-    fn n_only_the_observed_case_is_unavailable_externally() {
-        for other in ["c-post-0019", "c-post-0021", "c-post-0001", "c-post-00200", "C-POST-0020", ""] {
+    fn n_only_fixture_dependent_cases_are_unavailable_externally() {
+        for other in [
+            "c-post-0019",
+            "c-post-0021",
+            "c-post-0022",
+            "c-post-0023",
+            "c-post-0024",
+            "c-post-0025",
+            "c-post-0027",
+            "c-post-0001",
+            "c-post-00200",
+            "c-post-00260",
+            "C-POST-0020",
+            "C-POST-0026",
+            "",
+        ] {
             assert_eq!(unavailable_externally(other), None, "{other:?}");
         }
     }
@@ -144,6 +168,13 @@ mod tests {
         for needle in [OBSERVED_CASE, "PostObjectInput::content_length", "in-process", "external"] {
             assert!(reason.contains(needle), "{needle:?} missing from {reason:?}");
         }
+    }
+
+    /// The unsupported-KMS fixture case cannot declare that capability on an external host.
+    #[test]
+    fn the_unsupported_managed_fixture_case_is_unavailable_externally() {
+        let reason = unavailable_externally("c-post-0026").expect("the fixture capability is unavailable externally");
+        assert!(reason.contains("reference fixture cannot provide KMS"), "{reason}");
     }
 
     /// The real `c-post-0020` file, with `replace` applied to its text, in a corpus of its own.

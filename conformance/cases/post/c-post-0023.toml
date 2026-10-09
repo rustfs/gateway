@@ -1,0 +1,65 @@
+# c-post-0023 — An unknown managed form algorithm is refused without storing an object.
+
+[case]
+id = "c-post-0023"
+schema_version = 1
+title = "An unknown managed form algorithm is refused without storing an object"
+rationale = "Managed form fields are subject to the same SSE gate as request headers. The form is signed and authorized; the refusal must identify the invalid managed declaration, and a subsequent read must observe that no object was stored."
+polarity = "negative"
+operation = "PostObject"
+tags = ["security", "validation"]
+timeout_ms = 10000
+quirks = []
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/developerguide/RESTObjectPOST.html"
+summary = "POST Object carries managed encryption settings in form fields, including the algorithm and KMS qualifiers."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://github.com/rustfs/gateway/issues/1399"
+summary = "Managed encryption requested by a form must reach enforcement and storage rather than be dropped by its grammar."
+kind = "other"
+
+[clock]
+fixed = "2026-01-02T03:04:05Z"
+request_time = "2026-01-02T03:04:05Z"
+
+[[setup.buckets]]
+name = "conf-post"
+
+[[setup.objects]]
+bucket = "conf-post"
+key = "c-post-0023.txt"
+absent = true
+
+[[exchanges]]
+name = "upload"
+
+[exchanges.request]
+method = "POST"
+target = "/conf-post"
+sign = { mode = "anonymous" }
+body = { utf8 = "--confpost\r\nContent-Disposition: form-data; name=\"bucket\"\r\n\r\nconf-post\r\n--confpost\r\nContent-Disposition: form-data; name=\"key\"\r\n\r\nc-post-0023.txt\r\n--confpost\r\nContent-Disposition: form-data; name=\"x-amz-algorithm\"\r\n\r\nAWS4-HMAC-SHA256\r\n--confpost\r\nContent-Disposition: form-data; name=\"x-amz-credential\"\r\n\r\nAKIAIOSFODNN7EXAMPLE/20260102/us-east-1/s3/aws4_request\r\n--confpost\r\nContent-Disposition: form-data; name=\"x-amz-date\"\r\n\r\n20260102T030405Z\r\n--confpost\r\nContent-Disposition: form-data; name=\"x-amz-server-side-encryption\"\r\n\r\naes256\r\n--confpost\r\nContent-Disposition: form-data; name=\"policy\"\r\n\r\neyJleHBpcmF0aW9uIjoiMjAyNi0wMS0wMlQwNDowNDowNVoiLCJjb25kaXRpb25zIjpbeyJidWNrZXQiOiJjb25mLXBvc3QifSx7ImtleSI6ImMtcG9zdC0wMDIzLnR4dCJ9LHsieC1hbXotYWxnb3JpdGhtIjoiQVdTNC1ITUFDLVNIQTI1NiJ9LHsieC1hbXotY3JlZGVudGlhbCI6IkFLSUFJT1NGT0ROTjdFWEFNUExFLzIwMjYwMTAyL3VzLWVhc3QtMS9zMy9hd3M0X3JlcXVlc3QifSx7IngtYW16LWRhdGUiOiIyMDI2MDEwMlQwMzA0MDVaIn0seyJ4LWFtei1zZXJ2ZXItc2lkZS1lbmNyeXB0aW9uIjoiYWVzMjU2In1dfQ==\r\n--confpost\r\nContent-Disposition: form-data; name=\"x-amz-signature\"\r\n\r\n5d0eaf519d6b9c668bd28d71eb76f8032cdc9aa7a6c058955e02728a0ace03da\r\n--confpost\r\nContent-Disposition: form-data; name=\"file\"; filename=\"upload\"\r\n\r\nmanaged-sse-payload\r\n--confpost--\r\n" }
+
+[exchanges.request.headers]
+"content-type" = "multipart/form-data; boundary=confpost"
+
+[exchanges.expect]
+kind = "response"
+status = 400
+
+[exchanges.expect.error]
+code = "InvalidArgument"
+
+[[exchanges]]
+name = "nothing-was-stored"
+
+[exchanges.request]
+method = "GET"
+target = "/conf-post/c-post-0023.txt"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[exchanges.expect]
+kind = "response"
+status = 404

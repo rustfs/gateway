@@ -198,7 +198,7 @@ where
             .collect();
         // The RustFS profile stores what legacy RustFS stores from this form, or refuses it before
         // the file is read (`legacy`); the gateway grammar reads the Object Lock and customer-key
-        // fields and nothing else besides the key, media type and metadata (`fields`).
+        // and managed-encryption fields besides the key, media type and metadata (`fields`).
         let legacy_store = matches!(self.reader.grammar(), FormGrammar::LegacyRustfs { .. });
         // What `${filename}` stands for: the `filename` parameter, or under the legacy RustFS
         // grammar the file part's own name when it carried none (`FormReader::file_name`).
@@ -250,12 +250,12 @@ where
         let key_text = policy.final_key(&anonymous_key);
         let key =
             ObjectKey::materialize_decoded(key_text, names).map_err(|_| policy_refusal(PostPolicyError::ConditionFailed))?;
-        let (metadata, content_type, object_fields) = if legacy_store {
+        let (metadata, content_type, object_fields, gateway_bucket_key) = if legacy_store {
             // Legacy RustFS's own refusal of an unreadable field answers before this bridge's.
             let object_fields = legacy::object_fields(&fields)?;
             legacy::refuse_other_key(key.as_str(), &legacy::stored_key(key_field, filename))
                 .map_err(legacy::NotCarried::into_error)?;
-            (legacy::metadata(&fields), legacy::content_type(&fields), object_fields)
+            (legacy::metadata(&fields), legacy::content_type(&fields), object_fields, None)
         } else {
             let metadata = fields
                 .iter()
@@ -265,8 +265,11 @@ where
                 })
                 .collect();
             let object_fields = fields::LockAndCustomerKey::read(&fields, fields::DateGrammar::Iso8601Header)?
-                .into_fields(PostObjectFields::default());
-            (metadata, None, object_fields)
+                .into_fields(fields::managed_fields(&fields, false)?);
+            let gateway_bucket_key = fields.iter().find_map(|(name, value)| {
+                (*name == rustfs_gateway_core::sse::headers::SSE_BUCKET_KEY_ENABLED).then(|| (*value).to_owned())
+            });
+            (metadata, None, object_fields, gateway_bucket_key)
         };
         let permission_fields = fields::permission_fields(&fields);
         let response = PostObjectResponsePlan::parse(&fields, &bucket, &key, legacy_store)?;
@@ -286,9 +289,10 @@ where
             content_type,
             metadata,
             object_fields,
+            gateway_bucket_key,
             permission_fields,
             response,
-            legacy_policy_errors: legacy_store,
+            legacy_grammar: legacy_store,
             timeouts: self.timeouts,
         })
     }
@@ -308,12 +312,14 @@ pub(crate) struct ResolvedPostObject<B: Body> {
     content_type: Option<String>,
     metadata: Vec<(String, String)>,
     /// The other `PutObject` members the form set: every one legacy RustFS reads under the RustFS
-    /// profile, the Object Lock and customer-key members under either grammar.
+    /// profile, the Object Lock and encryption members under either grammar.
     object_fields: PostObjectFields,
+    /// As sent, including an unreadable flag: the gateway SSE gate decides its refusal order.
+    gateway_bucket_key: Option<String>,
     /// The fields an extra-permission trigger may read, as sent (`fields::permission_fields`).
     permission_fields: Vec<(String, String)>,
     response: PostObjectResponsePlan,
-    legacy_policy_errors: bool,
+    legacy_grammar: bool,
     timeouts: BodyTimeouts,
 }
 
@@ -336,10 +342,10 @@ where
         self.permission_fields.clone()
     }
 
-    /// The SSE proof the handler is handed: `from_headers` unless the form carries a customer-key
-    /// field, in which case the form is judged by the same gate, over the same rules in the same
-    /// order (`rustfs_gateway_core::sse::enforce_with`) — a key in a field is on the wire exactly
-    /// as a key in a header is, so a cleartext connection refuses it the same way.
+    /// The handler's SSE proof, judged by the shared gate for form encryption. The legacy grammar
+    /// retains its customer-key rules, ignores the qualifiers its host ignores, and preserves
+    /// `from_headers` when it has no recognized form intent. A KMS header stays effective on a
+    /// legacy POST even beside form AES, as RustFS refuses it before validating form algorithms.
     ///
     /// # Errors
     ///
@@ -350,10 +356,20 @@ where
         transport: TransportSecurity,
         config: &SseConfig,
     ) -> Result<SseEnforced, SseRejection> {
-        if !fields::carries_customer_key(&self.object_fields) {
+        if !fields::carries_encryption(&self.object_fields, self.legacy_grammar, self.gateway_bucket_key.as_deref())
+            || (self.legacy_grammar
+                && !fields::carries_customer_key(&self.object_fields)
+                && from_headers
+                    .managed_algorithm()
+                    .is_some_and(|algorithm| algorithm.as_str() == "aws:kms"))
+        {
             return Ok(from_headers);
         }
-        rustfs_gateway_core::sse::enforce_with(fields::sse_lookup(&self.object_fields), transport, config)
+        rustfs_gateway_core::sse::enforce_with(
+            fields::sse_lookup(&self.object_fields, self.legacy_grammar, self.gateway_bucket_key.as_deref()),
+            transport,
+            config,
+        )
     }
 
     pub(crate) fn handoff(self, _proof: &MetadataAdmission<'_>) -> Result<(RequestBody, Option<BodyMonitor>), S3Error> {
@@ -377,7 +393,7 @@ where
             frames: self.frames,
             first: self.first_file_bytes,
             initial: true,
-            legacy_policy_errors: self.legacy_policy_errors,
+            legacy_policy_errors: self.legacy_grammar,
             file: self.file,
             policy: self.policy,
             bucket: self.bucket.as_str().to_owned(),
@@ -682,7 +698,7 @@ mod tests {
             frames: resolved.frames,
             first: resolved.first_file_bytes,
             initial: true,
-            legacy_policy_errors: resolved.legacy_policy_errors,
+            legacy_policy_errors: resolved.legacy_grammar,
             file: resolved.file,
             policy: resolved.policy,
             bucket: resolved.bucket.as_str().to_owned(),

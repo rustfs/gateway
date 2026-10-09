@@ -16,8 +16,9 @@
 //!
 //! Responsible for: storing an authorized POST Object's file under its resolved key, with its
 //! content type, user metadata and the retention and legal hold its Object Lock fields set, the
-//! way `PutObject` stores a body and its lock headers, and reporting the stored entity tag and
-//! version for the framework's success action.
+//! way `PutObject` stores a body and its lock headers, recording an SSE-S3 declaration for reads,
+//! refusing managed algorithms this fixture cannot model, and reporting the stored entity tag
+//! and version for the framework's success action.
 //! NOT responsible for: the form grammar, the POST policy, the success action, or the customer
 //! key's transport and digest rules — the gateway's form pipeline decides all of those before
 //! this handler is reached (`Req::sse` is the proof).
@@ -49,8 +50,17 @@ async fn post_object(state: &Arc<Mutex<Fixture>>, input: dto::PostObjectInput) -
     drop(fields.sse_customer_algorithm.take());
     drop(fields.sse_customer_key.take());
     drop(fields.sse_customer_key_md5.take());
-    // The fixture stores a form's key, media type, metadata and lock only. The gateway grammar
-    // these cases run under hands it no other member; one it did would be refused, never dropped.
+    let server_side_encryption = fields.server_side_encryption.take();
+    if server_side_encryption
+        .as_ref()
+        .is_some_and(|algorithm| algorithm.as_str() != "AES256")
+    {
+        return Err(HandlerError::not_implemented(
+            "the fixture cannot provide the requested managed encryption",
+        ));
+    }
+    // The fixture records SSE-S3 metadata but encrypts nothing. It refuses other managed
+    // algorithms and unmodelled members rather than storing a downgraded request.
     if !fields.is_empty() {
         return Err(HandlerError::not_implemented(
             "the fixture does not store a form's other PutObject members",
@@ -68,6 +78,7 @@ async fn post_object(state: &Arc<Mutex<Fixture>>, input: dto::PostObjectInput) -
             .map_err(|rejection| HandlerError::new(rejection.code(), rejection.reason()))?;
     }
     let mut object = StoredObject::new(bytes, input.content_type, fixture.now);
+    object.server_side_encryption = server_side_encryption;
     // Validated above: a mode and an instant arrive together or not at all.
     if let (Some(mode), Some(until)) = (lock_mode, lock_until) {
         object.retention = Some(dto::ObjectLockRetention {
