@@ -97,6 +97,7 @@ second copy is a second thing to keep in sync.
 | 0039 | Authenticated admin fallbacks | Accepted |
 | 0040 | Opaque single-segment captures | Accepted |
 | 0041 | Form claims, and RustFS's STS endpoint behind one | Accepted |
+| 0042 | A route-bound bearer floor for zip downloads | Accepted |
 
 The index is hand-maintained. Generating it would cost more than it saves until
 there are at least fifteen records.
