@@ -240,6 +240,37 @@ async fn a_forms_encryption_is_recorded_or_refused_as_rustfs_does() {
     }
 }
 
+/// Negative — an opaque algorithm stays the host's input. RustFS refuses an effective KMS
+/// request before validating that algorithm, including a key-id sent empty or a request header.
+#[tokio::test]
+async fn n_opaque_form_algorithms_keep_the_legacy_kms_refusal_order() {
+    let (_root, service) = public_bucket().await;
+    for algorithm in ["", "opaque"] {
+        let fields = [("x-amz-server-side-encryption", algorithm)];
+        let body = refused(&service, "opaque", &fields, 400, "InvalidArgument").await;
+        assert!(body.contains("The SSE algorithm specified is not supported."), "{algorithm:?}: {body}");
+        let with_key = [
+            ("x-amz-server-side-encryption", algorithm),
+            ("x-amz-server-side-encryption-aws-kms-key-id", ""),
+        ];
+        let body = refused(&service, "opaque-kms", &with_key, 501, "NotImplemented").await;
+        assert!(body.contains("SSE-KMS is not supported for POST object uploads"), "{algorithm:?}: {body}");
+        let posted = post_form_with_header(
+            &service,
+            "opaque-header",
+            &fields,
+            "must not land",
+            Some(("x-amz-server-side-encryption", "aws:kms")),
+        )
+        .await;
+        let body = body_of(&posted);
+        assert_eq!(posted.status(), 501, "{algorithm:?}: {body}");
+        assert!(body.contains("<Code>NotImplemented</Code>"), "{algorithm:?}: {body}");
+        assert!(body.contains("SSE-KMS is not supported for POST object uploads"), "{algorithm:?}: {body}");
+        assert_eq!(head(&service, "opaque-header").await.status(), 404, "{algorithm:?} stored an object");
+    }
+}
+
 /// Positive — the members RustFS reads and never uses change nothing: with every one set, a wrong
 /// checksum, a foreign expected owner and conditions that would fail included, the form overwrites
 /// the object exactly as a form without them does.

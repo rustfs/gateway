@@ -49,7 +49,9 @@ use rustfs_gateway::{
     Credentials, Decision, ETag, Handler, HandlerResult, Req, Resp, S3Service, ServiceBuilder, StaticCredentials, Timestamp,
     TimestampFormat, TransportSecurity, decide_with,
 };
-use rustfs_gateway_core::sse::headers::{SSE_ALGORITHM, SSEC_ALGORITHM, SSEC_KEY, SSEC_KEY_MD5};
+use rustfs_gateway_core::sse::headers::{
+    SSE_ALGORITHM, SSE_BUCKET_KEY_ENABLED, SSE_CONTEXT, SSE_KMS_KEY_ID, SSEC_ALGORITHM, SSEC_KEY, SSEC_KEY_MD5,
+};
 
 const BOUNDARY: &str = "----RustFSLockAndKeyFields";
 
@@ -64,10 +66,17 @@ const PLAINTEXT_SENTENCE: &str = "requests specifying a customer-provided encryp
 #[derive(Default)]
 struct Backend {
     handed: Mutex<Option<PostObjectFields>>,
+    managed_algorithm: Mutex<Option<String>>,
+    customer_proof: Mutex<Option<bool>>,
 }
 
 impl Handler<PostObject> for Backend {
     async fn call(&self, request: Req<PostObject>) -> HandlerResult<PostObject> {
+        *self.managed_algorithm.lock().expect("observation lock") = request
+            .sse()
+            .managed_algorithm()
+            .map(|algorithm| algorithm.as_str().to_owned());
+        *self.customer_proof.lock().expect("observation lock") = Some(request.sse().customer_key_fingerprint().is_some());
         let input = request.into_input();
         let _ = input.body.into_body().collect().await;
         *self.handed.lock().expect("observation lock") = Some(input.fields);
@@ -88,6 +97,7 @@ struct Setup {
     plaintext_keys_before_routing: bool,
     /// Lock headers on the request itself, which a form upload never reads.
     lock_request_headers: bool,
+    managed_request_header: Option<&'static str>,
 }
 
 const OVER_TLS: Setup = Setup {
@@ -96,6 +106,7 @@ const OVER_TLS: Setup = Setup {
     transport: TransportSecurity::Encrypted,
     plaintext_keys_before_routing: false,
     lock_request_headers: false,
+    managed_request_header: None,
 };
 
 const OVER_CLEARTEXT: Setup = Setup {
@@ -109,6 +120,8 @@ struct Answer {
     status: StatusCode,
     body: String,
     handed: Option<PostObjectFields>,
+    managed_algorithm: Option<String>,
+    customer_proof: Option<bool>,
     asked: Vec<String>,
 }
 
@@ -163,6 +176,10 @@ fn form(fields: &[(&str, &str)]) -> Vec<u8> {
 }
 
 async fn post(fields: &[(&str, &str)], setup: Setup) -> Answer {
+    post_with_headers(fields, &[], setup).await
+}
+
+async fn post_with_headers(fields: &[(&str, &str)], headers: &[(&str, &str)], setup: Setup) -> Answer {
     let backend = Arc::new(Backend::default());
     let asked = Arc::new(Mutex::new(Vec::new()));
     let body = form(fields);
@@ -178,6 +195,12 @@ async fn post(fields: &[(&str, &str)], setup: Setup) -> Answer {
             .header("x-amz-object-lock-retain-until-date", "2030-01-01T00:00:00Z")
             .header("x-amz-object-lock-legal-hold", "ON");
     }
+    if let Some(algorithm) = setup.managed_request_header {
+        request = request.header(SSE_ALGORITHM, algorithm);
+    }
+    for (name, value) in headers {
+        request = request.header(*name, *value);
+    }
     let mut request = request.body(Bytes::from(body)).expect("valid request");
     // Exactly what a TLS-terminating transport does, and the only channel that is believed.
     request.extensions_mut().insert(setup.transport);
@@ -187,11 +210,15 @@ async fn post(fields: &[(&str, &str)], setup: Setup) -> Answer {
     let status = response.status();
     let answer = response.into_body().collect().await.expect("the answer body").to_bytes();
     let handed = backend.handed.lock().expect("observation lock").take();
+    let managed_algorithm = backend.managed_algorithm.lock().expect("observation lock").take();
+    let customer_proof = backend.customer_proof.lock().expect("observation lock").take();
     let asked = asked.lock().expect("observation lock").clone();
     Answer {
         status,
         body: String::from_utf8_lossy(&answer).into_owned(),
         handed,
+        managed_algorithm,
+        customer_proof,
         asked,
     }
 }
@@ -411,9 +438,8 @@ async fn n_a_form_customer_key_over_cleartext_is_refused_as_a_header_key_is() {
 }
 
 /// Negative — over TLS, a form key is held to the header rules with the header sentences: all
-/// three or none, `AES256`, a key that agrees with its digest, and — under the RustFS profile,
-/// the one grammar that reads a form's `x-amz-server-side-encryption` — no managed algorithm
-/// beside it.
+/// three or none, `AES256`, a key that agrees with its digest, and no managed algorithm beside it
+/// under either grammar.
 #[tokio::test]
 async fn n_a_form_customer_key_over_tls_is_held_to_the_header_rules() {
     let mut contradiction = trio(KEY_A, MD5_A);
@@ -430,7 +456,7 @@ async fn n_a_form_customer_key_over_tls_is_held_to_the_header_rules() {
             &[true, false][..],
         ),
         (trio(KEY_A, MD5_B), "must be base64 of 32 and 16 bytes and must agree", &[true, false][..]),
-        (contradiction, "not both", &[true][..]),
+        (contradiction, "not both", &[true, false][..]),
     ] {
         for legacy_grammar in grammars.iter().copied() {
             let answer = post(
@@ -446,4 +472,289 @@ async fn n_a_form_customer_key_over_tls_is_held_to_the_header_rules() {
             assert!(answer.body.contains(sentence), "{context}: {}", answer.body);
         }
     }
+}
+
+/// Positive — both grammars carry all four managed fields and the proof selected from them.
+#[tokio::test]
+async fn managed_form_fields_reach_the_handler_with_the_matching_proof() {
+    for legacy_grammar in [true, false] {
+        let answer = post(
+            &[
+                (SSE_ALGORITHM, "aws:kms"),
+                ("x-amz-server-side-encryption-aws-kms-key-id", "example-key"),
+                ("x-amz-server-side-encryption-context", "e30="),
+                ("x-amz-server-side-encryption-bucket-key-enabled", "true"),
+            ],
+            Setup {
+                legacy_grammar,
+                ..OVER_TLS
+            },
+        )
+        .await;
+        assert_eq!(answer.status, StatusCode::NO_CONTENT, "{legacy_grammar}: {}", answer.body);
+        assert_eq!(answer.managed_algorithm.as_deref(), Some("aws:kms"), "{legacy_grammar}");
+        let fields = answer.handed.expect("the handler ran");
+        assert_eq!(
+            fields.server_side_encryption.as_ref().map(|algorithm| algorithm.as_str()),
+            Some("aws:kms")
+        );
+        assert_eq!(fields.ssekms_key_id.as_deref(), Some("example-key"));
+        assert_eq!(fields.ssekms_encryption_context.as_deref(), Some("e30="));
+        assert_eq!(fields.bucket_key_enabled, Some(true));
+    }
+}
+
+/// Negative — gateway-grammar managed declarations use the header rules, including orphan qualifiers,
+/// the closed algorithm set, KMS-only qualifiers, and the bounded JSON context grammar.
+#[tokio::test]
+async fn n_managed_form_fields_are_held_to_the_header_rules() {
+    let legacy_grammar = false;
+    for fields in [
+        vec![(SSE_ALGORITHM, "aes256")],
+        vec![(SSE_ALGORITHM, "")],
+        vec![("x-amz-server-side-encryption-aws-kms-key-id", "example-key")],
+        vec![("x-amz-server-side-encryption-context", "e30=")],
+        vec![("x-amz-server-side-encryption-bucket-key-enabled", "false")],
+        vec![
+            (SSE_ALGORITHM, "AES256"),
+            ("x-amz-server-side-encryption-aws-kms-key-id", "example-key"),
+        ],
+        vec![(SSE_ALGORITHM, "AES256"), ("x-amz-server-side-encryption-context", "e30=")],
+        vec![
+            (SSE_ALGORITHM, "aws:kms"),
+            ("x-amz-server-side-encryption-context", "not-base64"),
+        ],
+        vec![(SSE_ALGORITHM, "aws:kms"), ("x-amz-server-side-encryption-context", "W10=")],
+        vec![
+            (SSE_ALGORITHM, "aws:kms"),
+            ("x-amz-server-side-encryption-bucket-key-enabled", "yes"),
+        ],
+    ] {
+        let answer = post(
+            &fields,
+            Setup {
+                legacy_grammar,
+                ..OVER_TLS
+            },
+        )
+        .await;
+        refused_before_the_handler(&answer, "InvalidArgument", &format!("{legacy_grammar}: {fields:?}"));
+    }
+}
+
+/// Negative — only the legacy grammar delegates ignored qualifiers and opaque algorithms to
+/// the host. Its proof describes the effective legacy request, while every raw member is retained.
+#[tokio::test]
+async fn n_legacy_managed_intent_does_not_change_raw_fields_or_relax_the_gateway_grammar() {
+    for (fields, header, effective) in [
+        (vec![(SSE_CONTEXT, "not-base64")], None, None),
+        (vec![(SSE_BUCKET_KEY_ENABLED, "false")], None, None),
+        (vec![(SSE_ALGORITHM, "AES256"), (SSE_CONTEXT, "not-base64")], None, Some("AES256")),
+        (vec![(SSE_ALGORITHM, "AES256"), (SSE_KMS_KEY_ID, "key")], None, Some("aws:kms")),
+        (vec![(SSE_ALGORITHM, "AWS:KMS")], None, Some("aws:kms")),
+        (vec![(SSE_KMS_KEY_ID, "")], None, Some("aws:kms")),
+        (vec![(SSE_ALGORITHM, "opaque"), (SSE_KMS_KEY_ID, "key")], None, Some("aws:kms")),
+        (vec![(SSE_ALGORITHM, "aes256")], None, None),
+        (vec![(SSE_ALGORITHM, "")], None, None),
+        (vec![(SSE_ALGORITHM, "opaque")], Some("AES256"), Some("AES256")),
+    ] {
+        let context = format!("{fields:?} header={header:?}");
+        let legacy = post(
+            &fields,
+            Setup {
+                managed_request_header: header,
+                ..OVER_TLS
+            },
+        )
+        .await;
+        assert_eq!(legacy.status, StatusCode::NO_CONTENT, "{context}: {}", legacy.body);
+        assert_eq!(legacy.managed_algorithm.as_deref(), effective, "{context}");
+        assert_eq!(legacy.customer_proof, Some(false), "{context}");
+        let handed = legacy.handed.expect("the legacy handler ran");
+        let raw = |name| fields.iter().find_map(|(field, value)| (*field == name).then_some(*value));
+        assert_eq!(
+            handed.server_side_encryption.as_ref().map(|algorithm| algorithm.as_str()),
+            raw(SSE_ALGORITHM),
+            "{context}"
+        );
+        assert_eq!(handed.ssekms_key_id.as_deref(), raw(SSE_KMS_KEY_ID), "{context}");
+        assert_eq!(handed.ssekms_encryption_context.as_deref(), raw(SSE_CONTEXT), "{context}");
+        assert_eq!(
+            handed.bucket_key_enabled,
+            raw(SSE_BUCKET_KEY_ENABLED).map(|value| value == "true"),
+            "{context}"
+        );
+        let gateway = post(
+            &fields,
+            Setup {
+                legacy_grammar: false,
+                managed_request_header: header,
+                ..OVER_TLS
+            },
+        )
+        .await;
+        refused_before_the_handler(&gateway, "InvalidArgument", &context);
+    }
+}
+
+/// Negative — an opaque legacy algorithm receives no managed proof; the gateway grammar's
+/// recognized DSSE declaration does, and a real legacy KMS header remains effective beside AES.
+#[tokio::test]
+async fn n_legacy_opaque_values_and_header_kms_keep_their_existing_proof_boundary() {
+    for (fields, header, legacy_proof, gateway_proof) in [
+        (vec![(SSE_ALGORITHM, "aws:kms:dsse")], None, None, Some("aws:kms:dsse")),
+        (vec![(SSE_ALGORITHM, "AES256")], Some("aws:kms"), Some("aws:kms"), Some("AES256")),
+    ] {
+        for (legacy_grammar, expected) in [(true, legacy_proof), (false, gateway_proof)] {
+            let answer = post(
+                &fields,
+                Setup {
+                    legacy_grammar,
+                    managed_request_header: header,
+                    ..OVER_TLS
+                },
+            )
+            .await;
+            assert_eq!(answer.status, StatusCode::NO_CONTENT, "{legacy_grammar} {fields:?}: {}", answer.body);
+            assert_eq!(answer.managed_algorithm.as_deref(), expected, "{legacy_grammar} {fields:?}");
+            assert_eq!(answer.customer_proof, Some(false));
+            assert_eq!(
+                answer
+                    .handed
+                    .expect("the handler ran")
+                    .server_side_encryption
+                    .as_ref()
+                    .map(|algorithm| algorithm.as_str()),
+                Some(fields[0].1)
+            );
+        }
+    }
+}
+
+/// Negative — the legacy customer-key gate still ignores KMS qualifiers, without ignoring the
+/// raw managed algorithm's contradiction. The gateway grammar judges all of the fields.
+#[tokio::test]
+async fn n_legacy_customer_key_lookup_preserves_its_original_contradictions() {
+    for qualifier in [
+        (SSE_CONTEXT, "not-base64"),
+        (SSE_KMS_KEY_ID, ""),
+        (SSE_BUCKET_KEY_ENABLED, "false"),
+    ] {
+        let mut fields = trio(KEY_A, MD5_A);
+        fields.push(qualifier);
+        let legacy = post(&fields, OVER_TLS).await;
+        assert_eq!(legacy.status, StatusCode::NO_CONTENT, "{qualifier:?}: {}", legacy.body);
+        assert_eq!(legacy.customer_proof, Some(true), "{qualifier:?}");
+        assert_eq!(legacy.managed_algorithm, None, "{qualifier:?}");
+        let handed = legacy.handed.expect("the legacy handler ran");
+        match qualifier.0 {
+            SSE_CONTEXT => assert_eq!(handed.ssekms_encryption_context.as_deref(), Some(qualifier.1)),
+            SSE_KMS_KEY_ID => assert_eq!(handed.ssekms_key_id.as_deref(), Some(qualifier.1)),
+            _ => assert_eq!(handed.bucket_key_enabled, Some(false)),
+        }
+        let gateway = post(
+            &fields,
+            Setup {
+                legacy_grammar: false,
+                ..OVER_TLS
+            },
+        )
+        .await;
+        refused_before_the_handler(&gateway, "InvalidArgument", &format!("{qualifier:?}"));
+    }
+    for algorithm in ["opaque", ""] {
+        let mut fields = trio(KEY_A, MD5_A);
+        fields.push((SSE_ALGORITHM, algorithm));
+        let answer = post(&fields, OVER_TLS).await;
+        refused_before_the_handler(&answer, "InvalidArgument", algorithm);
+        assert!(answer.body.contains("not both"), "{}", answer.body);
+    }
+}
+
+/// Negative — decoding a form's malformed flag must not reorder the shared gate's refusals.
+/// Header controls measure the same raw family; mixed plaintext requests also retain the header
+/// transport refusal. Legacy keeps its earlier unreadable-field refusal under either transport.
+#[tokio::test]
+async fn n_managed_flag_keeps_the_gateway_header_order_and_the_legacy_decode_order() {
+    let mut gateway = Vec::new();
+    let mut headers = Vec::new();
+    let mut legacy = Vec::new();
+    let mut legacy_expected = Vec::new();
+    for (name, mut fields, transport) in [
+        ("complete-plaintext", trio(KEY_A, MD5_A), TransportSecurity::Plaintext),
+        ("partial-plaintext", vec![(SSEC_ALGORITHM, "AES256")], TransportSecurity::Plaintext),
+        ("contradiction-tls", trio(KEY_A, MD5_A), TransportSecurity::Encrypted),
+        ("algorithm-tls", vec![(SSE_ALGORITHM, "opaque")], TransportSecurity::Encrypted),
+    ] {
+        let setup = Setup {
+            legacy_grammar: false,
+            transport,
+            ..OVER_TLS
+        };
+        fields.push((SSE_BUCKET_KEY_ENABLED, "yes"));
+        let core = rustfs_gateway_core::sse::enforce_with(
+            |name| {
+                fields
+                    .iter()
+                    .find_map(|(field, value)| (*field == name).then_some(std::borrow::Cow::Borrowed(*value)))
+            },
+            transport,
+            &rustfs_gateway_core::sse::SseConfig::default(),
+        );
+        println!("{name} core refusal: {:?}", core.err());
+        let control = post_with_headers(&[], &fields, setup).await;
+        let form = post(&fields, setup).await;
+        headers.push((name, "form", refusal_tuple(&control)));
+        gateway.push((name, "form", refusal_tuple(&form)));
+        let old_form = post(
+            &fields,
+            Setup {
+                legacy_grammar: true,
+                ..setup
+            },
+        )
+        .await;
+        legacy.push((name, "form", refusal_tuple(&old_form)));
+        legacy_expected.push((name, "form", unreadable_flag_tuple()));
+        if transport == TransportSecurity::Plaintext {
+            let form_flag = [(SSE_BUCKET_KEY_ENABLED, "yes")];
+            let customer_headers = &fields[..fields.len() - 1];
+            let mixed = post_with_headers(&form_flag, customer_headers, setup).await;
+            headers.push((name, "mixed", refusal_tuple(&control)));
+            gateway.push((name, "mixed", refusal_tuple(&mixed)));
+            let old_mixed = post_with_headers(
+                &form_flag,
+                customer_headers,
+                Setup {
+                    legacy_grammar: true,
+                    ..setup
+                },
+            )
+            .await;
+            legacy.push((name, "mixed", refusal_tuple(&old_mixed)));
+            legacy_expected.push((name, "mixed", unreadable_flag_tuple()));
+        }
+    }
+    println!("header controls: {headers:?}; gateway forms: {gateway:?}; legacy forms: {legacy:?}");
+    assert_eq!(gateway, headers, "gateway form/header refusal order");
+    assert_eq!(legacy, legacy_expected, "unchanged legacy boolean decode order");
+}
+
+fn refusal_tuple(answer: &Answer) -> (u16, Option<String>, Option<String>) {
+    let text = |tag| {
+        answer
+            .body
+            .split_once(&format!("<{tag}>"))
+            .and_then(|(_, tail)| tail.split_once(&format!("</{tag}>")))
+            .map(|(value, _)| value.replace("&quot;", "\""))
+    };
+    (answer.status.as_u16(), text("Code"), text("Message"))
+}
+
+fn unreadable_flag_tuple() -> (u16, Option<String>, Option<String>) {
+    (
+        400,
+        Some("InvalidArgument".to_owned()),
+        Some("invalid field value: x-amz-server-side-encryption-bucket-key-enabled: \"yes\"".to_owned()),
+    )
 }

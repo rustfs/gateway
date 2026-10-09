@@ -12,13 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The Object Lock and customer-key fields of a POST Object form, read under either grammar
+//! The Object Lock and encryption fields of a POST Object form, read under either grammar
 //! (rustfs/gateway#1167).
 //!
 //! Responsible for: reading `x-amz-object-lock-mode`, `x-amz-object-lock-retain-until-date`,
 //! `x-amz-object-lock-legal-hold` and the three `x-amz-server-side-encryption-customer-*` fields
-//! into the `PutObject` members of the same name ([`LockAndCustomerKey`]); the lookups the
-//! pipeline runs over a form in place of request headers — the customer-key gate's
+//! into the `PutObject` members of the same name ([`LockAndCustomerKey`]), the four managed
+//! encryption fields ([`managed_fields`]); the lookups the
+//! pipeline runs over a form in place of request headers — the encryption gate's
 //! ([`sse_lookup`]) and the extra-permission triggers' ([`permission_fields`],
 //! [`permission_applies`]: a field sent is set, an empty one included).
 //! NOT responsible for: the retain-until date's RustFS-profile grammar (`super::legacy_date`),
@@ -27,7 +28,7 @@
 //! closed value sets of the mode and hold (the handler's rule, as for the header), or any other
 //! member (`super::legacy`).
 //! Upstream: `super::PostObjectPrelude::resolve` and `super::legacy::object_fields`.
-//! Downstream: `PostObjectInput::fields`, the route stage, the customer-key gate.
+//! Downstream: `PostObjectInput::fields`, the route stage, the encryption gate.
 //!
 //! # Why both grammars read these six
 //!
@@ -40,9 +41,11 @@
 use std::borrow::Cow;
 
 use http::HeaderMap;
-use rustfs_gateway_core::sse::headers::{SSE_ALGORITHM, SSEC_ALGORITHM, SSEC_KEY, SSEC_KEY_MD5};
+use rustfs_gateway_core::sse::headers::{
+    SSE_ALGORITHM, SSE_BUCKET_KEY_ENABLED, SSE_CONTEXT, SSE_KMS_KEY_ID, SSEC_ALGORITHM, SSEC_KEY, SSEC_KEY_MD5,
+};
 use rustfs_gateway_core::{ExtraPermission, HeaderTrigger, Operation};
-use rustfs_gateway_types::dto::{ObjectLockLegalHoldStatus, ObjectLockMode, PostObject, PostObjectFields};
+use rustfs_gateway_types::dto::{ObjectLockLegalHoldStatus, ObjectLockMode, PostObject, PostObjectFields, ServerSideEncryption};
 use rustfs_gateway_types::{SseCustomerKey, Timestamp, TimestampFormat};
 
 use super::S3Error;
@@ -51,6 +54,33 @@ use super::legacy::unreadable;
 const LOCK_MODE: &str = "x-amz-object-lock-mode";
 const LOCK_RETAIN_UNTIL: &str = "x-amz-object-lock-retain-until-date";
 const LOCK_LEGAL_HOLD: &str = "x-amz-object-lock-legal-hold";
+
+/// The four managed-encryption members, read under either grammar. Text is carried as sent;
+/// the bucket-key flag is materialized when readable. The gateway grammar carries its raw flag
+/// separately to the SSE gate, so decoding cannot reorder that gate's refusals; legacy keeps its
+/// original early boolean refusal and the host's validation of the other raw fields.
+///
+/// # Errors
+///
+/// Legacy refuses an unreadable bucket-key flag with `400 InvalidArgument`.
+pub(super) fn managed_fields(fields: &[(&str, &str)], legacy_grammar: bool) -> Result<PostObjectFields, S3Error> {
+    let field = |name: &str| fields.iter().find_map(|(field, value)| (*field == name).then_some(*value));
+    let bucket_key_enabled = match field(SSE_BUCKET_KEY_ENABLED) {
+        Some(value) => match value.parse::<bool>() {
+            Ok(enabled) => Some(enabled),
+            Err(_) if legacy_grammar => return Err(unreadable(SSE_BUCKET_KEY_ENABLED, value)),
+            Err(_) => None,
+        },
+        None => None,
+    };
+    Ok(PostObjectFields {
+        server_side_encryption: field(SSE_ALGORITHM).map(|value| ServerSideEncryption::custom(value.to_owned())),
+        ssekms_key_id: field(SSE_KMS_KEY_ID).map(str::to_owned),
+        ssekms_encryption_context: field(SSE_CONTEXT).map(str::to_owned),
+        bucket_key_enabled,
+        ..PostObjectFields::default()
+    })
+}
 
 /// The grammar a form's `x-amz-object-lock-retain-until-date` is read with.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -124,21 +154,61 @@ pub(super) fn carries_customer_key(fields: &PostObjectFields) -> bool {
     fields.sse_customer_algorithm.is_some() || fields.sse_customer_key.is_some() || fields.sse_customer_key_md5.is_some()
 }
 
-/// The customer-key gate's reading of a form: the target trio and the managed algorithm by the
-/// header names the gate asks for, nothing else. The copy-source names answer nothing, as a form
-/// has no copy source; the KMS qualifiers answer nothing, since the gate is run only for a form
-/// carrying a customer key, beside which any managed algorithm is already the contradiction. The
-/// managed algorithm is the `x-amz-server-side-encryption` member, which only the RustFS profile
-/// reads from a form: under the gateway grammar the field is not read, so there is nothing for
-/// the key to contradict there.
-pub(super) fn sse_lookup<'a>(fields: &'a PostObjectFields) -> impl Fn(&str) -> Option<Cow<'a, str>> + 'a {
+/// Legacy RustFS's effective managed request, without changing its raw input. It classifies
+/// any key-id or case-insensitive `aws:kms` as KMS before validating the raw algorithm; only exact
+/// `AES256` otherwise requests an algorithm it supports. Context and bucket-key fields are ignored
+/// (rustfs/rustfs `5972a09cc3`, `rustfs/src/app/object/put.rs:898-913,1227-1229`). An opaque or
+/// empty algorithm without a key-id remains the host's validation responsibility, not a proof.
+pub(super) fn legacy_managed_algorithm(fields: &PostObjectFields) -> Option<&'static str> {
+    let algorithm = fields.server_side_encryption.as_ref().map(|algorithm| algorithm.as_str());
+    if fields.ssekms_key_id.is_some() || algorithm.is_some_and(|value| value.eq_ignore_ascii_case("aws:kms")) {
+        Some("aws:kms")
+    } else if algorithm == Some("AES256") {
+        Some("AES256")
+    } else {
+        None
+    }
+}
+
+/// Whether the form requires its own proof: every encryption field under the gateway grammar;
+/// the unchanged customer-key gate or a recognized effective managed request under legacy.
+pub(super) fn carries_encryption(fields: &PostObjectFields, legacy_grammar: bool, gateway_bucket_key: Option<&str>) -> bool {
+    carries_customer_key(fields)
+        || if legacy_grammar {
+            legacy_managed_algorithm(fields).is_some()
+        } else {
+            fields.server_side_encryption.is_some()
+                || fields.ssekms_key_id.is_some()
+                || fields.ssekms_encryption_context.is_some()
+                || fields.bucket_key_enabled.is_some()
+                || gateway_bucket_key.is_some()
+        }
+}
+
+/// The gateway grammar reads the same seven names as the header gate. Legacy retains its old
+/// customer-key lookup (the trio and raw algorithm only); without a customer key it judges only
+/// the recognized effective managed request. All raw members still reach the host unchanged.
+/// A form has no copy source, so copy-source names read nothing.
+pub(super) fn sse_lookup<'a>(
+    fields: &'a PostObjectFields,
+    legacy_grammar: bool,
+    gateway_bucket_key: Option<&'a str>,
+) -> impl Fn(&str) -> Option<Cow<'a, str>> + 'a {
     move |name: &str| {
         let value = match name {
             SSEC_ALGORITHM => fields.sse_customer_algorithm.as_deref(),
             // The one place the key is read as text, to be hashed by the gate and nothing else.
             SSEC_KEY => fields.sse_customer_key.as_ref().map(SseCustomerKey::expose_secret),
             SSEC_KEY_MD5 => fields.sse_customer_key_md5.as_deref(),
+            SSE_ALGORITHM if legacy_grammar && !carries_customer_key(fields) => legacy_managed_algorithm(fields),
             SSE_ALGORITHM => fields.server_side_encryption.as_ref().map(|algorithm| algorithm.as_str()),
+            SSE_KMS_KEY_ID if !legacy_grammar => fields.ssekms_key_id.as_deref(),
+            SSE_CONTEXT if !legacy_grammar => fields.ssekms_encryption_context.as_deref(),
+            SSE_BUCKET_KEY_ENABLED if !legacy_grammar => gateway_bucket_key.or_else(|| {
+                fields
+                    .bucket_key_enabled
+                    .map(|enabled| if enabled { "true" } else { "false" })
+            }),
             _ => None,
         };
         value.map(Cow::Borrowed)
@@ -277,8 +347,8 @@ mod tests {
         assert!(carries_customer_key(&fields));
     }
 
-    /// Negative — the gate's lookup answers the four names it reads and nothing for any other,
-    /// the copy-source and KMS names included.
+    /// Negative — legacy retains its four-name customer-key lookup, including its ignored KMS
+    /// qualifier; the gateway grammar also reads that qualifier. Neither reads a copy source.
     #[test]
     fn n_the_gate_lookup_answers_only_the_names_it_reads() {
         let fields = LockAndCustomerKey::read(
@@ -295,7 +365,7 @@ mod tests {
             ssekms_key_id: Some("key-id".to_owned()),
             ..PostObjectFields::default()
         });
-        let lookup = sse_lookup(&fields);
+        let lookup = sse_lookup(&fields, true, None);
         assert_eq!(lookup(SSEC_ALGORITHM).as_deref(), Some("AES256"));
         assert_eq!(lookup(SSEC_KEY).as_deref(), Some("key-text"));
         assert_eq!(lookup(SSEC_KEY_MD5).as_deref(), Some("digest-text"));
@@ -308,6 +378,8 @@ mod tests {
         ] {
             assert_eq!(lookup(name), None, "{name}");
         }
+        let lookup = sse_lookup(&fields, false, None);
+        assert_eq!(lookup(SSE_KMS_KEY_ID).as_deref(), Some("key-id"));
     }
 
     /// Positive and negative — the permission fields are exactly those a trigger names, as sent;

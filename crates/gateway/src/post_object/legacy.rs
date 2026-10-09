@@ -38,7 +38,7 @@
 //! legacy RustFS stores from the same request.
 
 use rustfs_gateway_types::OpaqueString;
-use rustfs_gateway_types::dto::{Acl, ChecksumAlgorithm, PostObjectFields, RequestPayer, ServerSideEncryption, StorageClass};
+use rustfs_gateway_types::dto::{Acl, ChecksumAlgorithm, PostObjectFields, RequestPayer, StorageClass};
 
 use super::{ErrorCode, HandlerError, ResponseKind, S3Error};
 use crate::close::ConnectionIntent;
@@ -97,16 +97,13 @@ pub(super) fn content_type(fields: &[(&str, &str)]) -> Option<String> {
 pub(super) fn object_fields(fields: &[(&str, &str)]) -> Result<PostObjectFields, S3Error> {
     let text = |name: &str| field(fields, name).map(str::to_owned);
     let condition = |value: &str| is_entity_tag_condition(value).then(|| value.to_owned());
-    let bucket_key_enabled = read(fields, "x-amz-server-side-encryption-bucket-key-enabled", |value| {
-        value.parse::<bool>().ok()
-    })?;
+    let managed_fields = super::fields::managed_fields(fields, true)?;
     let if_match = read(fields, "if-match", condition)?;
     let if_none_match = read(fields, "if-none-match", condition)?;
     let lock_and_key = super::fields::LockAndCustomerKey::read(fields, super::fields::DateGrammar::LegacyRustfs)?;
     let write_offset_bytes = read(fields, "x-amz-write-offset-bytes", |value| value.parse::<i64>().ok())?;
     let base = PostObjectFields {
         acl: text("x-amz-acl").map(Acl::custom),
-        bucket_key_enabled,
         cache_control: text("cache-control"),
         checksum_algorithm: text("x-amz-sdk-checksum-algorithm").map(ChecksumAlgorithm::custom),
         checksum_crc32: text("x-amz-checksum-crc32"),
@@ -132,14 +129,11 @@ pub(super) fn object_fields(fields: &[(&str, &str)]) -> Result<PostObjectFields,
         if_match,
         if_none_match,
         request_payer: text("x-amz-request-payer").map(RequestPayer::custom),
-        server_side_encryption: text("x-amz-server-side-encryption").map(ServerSideEncryption::custom),
-        ssekms_encryption_context: text("x-amz-server-side-encryption-context"),
-        ssekms_key_id: text("x-amz-server-side-encryption-aws-kms-key-id"),
         storage_class: text("x-amz-storage-class").map(StorageClass::custom),
         tagging: text("x-amz-tagging"),
         website_redirect_location: text("x-amz-website-redirect-location"),
         write_offset_bytes,
-        ..PostObjectFields::default()
+        ..managed_fields
     };
     Ok(lock_and_key.into_fields(base))
 }

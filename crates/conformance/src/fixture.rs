@@ -175,6 +175,8 @@ pub struct StoredObject {
     pub body: Vec<u8>,
     /// The declared content type, when the writer named one.
     pub content_type: Option<String>,
+    /// The managed algorithm a form wrote. This fixture records the declaration, not ciphertext.
+    pub server_side_encryption: Option<dto::ServerSideEncryption>,
     /// `Cache-Control`, as written.
     pub cache_control: Option<String>,
     /// `Content-Disposition`, as written.
@@ -2713,6 +2715,7 @@ impl Stub {
             dto::GetObjectOutput {
                 content_length: Some(body.len() as i64),
                 content_type: object.content_type.clone(),
+                server_side_encryption: object.server_side_encryption.clone(),
                 content_range: slice.content_range,
                 // How many parts the object holds, which is the only way a client parallelising a
                 // download learns how many requests to issue. Absent on every read that did not
@@ -2831,6 +2834,7 @@ impl Stub {
             dto::HeadObjectOutput {
                 content_length: Some(served as i64),
                 content_type: object.content_type.clone(),
+                server_side_encryption: object.server_side_encryption.clone(),
                 content_range: slice.content_range,
                 // The same rule as `GetObject`'s: a `HEAD` carries the head a `GET` would, and a
                 // client that sized its download from a `HEAD` needs the same part count.
