@@ -103,3 +103,124 @@ async fn load_child_waits_for_exclusive_drain_lease() {
     drop(exclusive);
     assert!(!child.await, "the parent observed a successful real child and its test census");
 }
+
+#[tokio::test]
+async fn tls_h2_idle_waits_for_load_and_excludes_it_through_shutdown() {
+    let competing_load = shared_server_load_lease().await;
+    let checkpoints = AtomicUsize::new(0);
+    let fixture = crate::tls_h2::idle::observed_idle_tls_h2(|| {
+        if checkpoints.fetch_add(1, Ordering::SeqCst) == 1 {
+            assert!(
+                SERVER_LOAD_ISOLATION.try_read().is_err(),
+                "the TLS h2 idle fixture still excludes load after shutdown"
+            );
+        }
+    });
+    tokio::pin!(fixture);
+    std::future::poll_fn(|cx| {
+        assert!(
+            fixture.as_mut().poll(cx).is_pending(),
+            "the actual TLS h2 idle fixture waits for active load"
+        );
+        Poll::Ready(())
+    })
+    .await;
+    assert_eq!(checkpoints.load(Ordering::SeqCst), 0, "TLS h2 idle setup must not start beside load");
+    drop(competing_load);
+    fixture.await;
+    assert_eq!(checkpoints.load(Ordering::SeqCst), 2, "both pre-setup and post-shutdown checks ran");
+}
+
+#[tokio::test]
+async fn final_frame_drain_waits_for_load_holds_exclusion_through_join_and_releases_it() {
+    let competing_load = shared_server_load_lease().await;
+    let checkpoints = AtomicUsize::new(0);
+    let fixture = crate::server_runtime::shutdown_drain::observed_final_frame_drain(|| {
+        if checkpoints.fetch_add(1, Ordering::SeqCst) == 1 {
+            assert!(
+                SERVER_LOAD_ISOLATION.try_read().is_err(),
+                "the final-frame fixture still excludes load after its server joins"
+            );
+        }
+    });
+    tokio::pin!(fixture);
+    std::future::poll_fn(|cx| {
+        assert!(
+            fixture.as_mut().poll(cx).is_pending(),
+            "the actual final-frame fixture waits for active load"
+        );
+        Poll::Ready(())
+    })
+    .await;
+    assert_eq!(checkpoints.load(Ordering::SeqCst), 0, "final-frame setup must not start beside load");
+    drop(competing_load);
+    fixture.await;
+    assert_eq!(checkpoints.load(Ordering::SeqCst), 2, "both pre-setup and post-join checks ran");
+    let _load_after_completion = tokio::time::timeout(Duration::from_secs(30), shared_server_load_lease())
+        .await
+        .expect("the completed final-frame fixture releases its load lease");
+}
+
+#[tokio::test]
+async fn listener_close_waits_for_load_holds_exclusion_through_join_and_releases_it() {
+    let competing_load = shared_server_load_lease().await;
+    let checkpoints = AtomicUsize::new(0);
+    let fixture = crate::server_runtime::observed_listener_close(|| {
+        if checkpoints.fetch_add(1, Ordering::SeqCst) == 1 {
+            assert!(
+                SERVER_LOAD_ISOLATION.try_read().is_err(),
+                "the listener-close fixture still excludes load after its server joins"
+            );
+        }
+    });
+    tokio::pin!(fixture);
+    std::future::poll_fn(|cx| {
+        assert!(
+            fixture.as_mut().poll(cx).is_pending(),
+            "the actual listener-close fixture waits for active load"
+        );
+        Poll::Ready(())
+    })
+    .await;
+    assert_eq!(checkpoints.load(Ordering::SeqCst), 0, "listener-close setup must not start beside load");
+    drop(competing_load);
+    fixture.await;
+    assert_eq!(checkpoints.load(Ordering::SeqCst), 2, "both pre-setup and post-join checks ran");
+    let _load_after_completion = tokio::time::timeout(Duration::from_secs(30), shared_server_load_lease())
+        .await
+        .expect("the completed listener-close fixture releases its load lease");
+}
+
+#[tokio::test]
+async fn established_h1_shutdown_waits_for_load_holds_exclusion_through_join_and_releases_it() {
+    let competing_load = shared_server_load_lease().await;
+    let checkpoints = AtomicUsize::new(0);
+    let fixture = crate::server_runtime::observed_established_h1_shutdown(|| {
+        if checkpoints.fetch_add(1, Ordering::SeqCst) == 1 {
+            assert!(
+                SERVER_LOAD_ISOLATION.try_read().is_err(),
+                "the established H1 shutdown fixture still excludes load after its server joins"
+            );
+        }
+    });
+    tokio::pin!(fixture);
+    std::future::poll_fn(|cx| {
+        assert!(
+            fixture.as_mut().poll(cx).is_pending(),
+            "the actual established H1 shutdown fixture waits for active load"
+        );
+        Poll::Ready(())
+    })
+    .await;
+    assert_eq!(
+        checkpoints.load(Ordering::SeqCst),
+        0,
+        "established H1 shutdown setup must not start beside load"
+    );
+    drop(competing_load);
+    fixture.await;
+    assert_eq!(checkpoints.load(Ordering::SeqCst), 2, "both pre-setup and post-join checks ran");
+    let _load_after_completion = tokio::time::timeout(Duration::from_secs(30), shared_server_load_lease())
+        .await
+        .expect("the completed established H1 shutdown fixture releases its load lease");
+}

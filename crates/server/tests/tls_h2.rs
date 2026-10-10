@@ -407,6 +407,7 @@ fn c_lim_0062_per_ip_half_open_limit_survives_a_scheduling_stall_before_the_thir
 
 #[tokio::test]
 async fn c_lim_0062_a_srv_0015_per_ip_half_open_limit_and_header_deadline_recover() {
+    let _exclusive_load_lease = crate::server_load::exclusive_server_load_lease().await;
     let stall = C_LIM_0062_STALL.with(std::cell::Cell::get);
     let mut server_config = config();
     server_config.max_connections_per_ip = Some(2);
@@ -506,7 +507,7 @@ async fn a_half_tls_handshake_releases_its_admission_permit_at_the_header_deadli
 #[path = "tls_h2/alpn.rs"]
 mod alpn;
 #[path = "tls_h2/idle.rs"]
-mod idle;
+pub(crate) mod idle;
 #[path = "tls_h2/prior_knowledge.rs"]
 mod prior_knowledge;
 #[path = "tls_h2/send_deadline.rs"]

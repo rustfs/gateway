@@ -121,6 +121,13 @@ async fn a_final_frame_blocked_on_the_socket_is_aborted_at_shutdown_grace() {
 /// within the grace and is counted drained.
 #[tokio::test]
 async fn a_final_frame_written_after_shutdown_began_is_drained() {
+    observed_final_frame_drain(|| {}).await;
+}
+
+/// Runs the actual final-frame fixture with checkpoints before setup and after the server joins.
+pub(crate) async fn observed_final_frame_drain(mut checkpoint: impl FnMut()) {
+    let _exclusive_load_lease = crate::server_load::exclusive_server_load_lease().await;
+    checkpoint();
     let (running, mut client) = final_frame_taken().await;
     let addr = running.local_addr;
     let shutdown = tokio::spawn(running.shutdown.trigger(Duration::from_secs(20)));
@@ -131,4 +138,5 @@ async fn a_final_frame_written_after_shutdown_began_is_drained() {
     let report = shutdown.await.expect("shutdown joins");
     assert_eq!(report, ShutdownReport { drained: 1, aborted: 0 });
     assert!(running.task.await.expect("server task joins").is_ok());
+    checkpoint();
 }
