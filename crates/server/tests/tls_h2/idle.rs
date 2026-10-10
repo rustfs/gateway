@@ -133,6 +133,13 @@ async fn an_idle_h2_connection_closes_while_the_client_pings_it() {
 /// Negative — the same over TLS with `h2` negotiated by ALPN.
 #[tokio::test]
 async fn an_idle_tls_h2_connection_closes_while_both_sides_ping_it() {
+    observed_idle_tls_h2(|| {}).await;
+}
+
+/// Runs the real TLS idle fixture with checkpoints before setup and after shutdown.
+pub(crate) async fn observed_idle_tls_h2(mut checkpoint: impl FnMut()) {
+    let _exclusive_load_lease = crate::server_load::exclusive_server_load_lease().await;
+    checkpoint();
     let certified = rcgen::generate_simple_self_signed(["localhost".to_owned()]).expect("certificate generation succeeds");
     let certificate = CertificateDer::from(certified.cert.der().to_vec());
     let material = TlsMaterial::from_der(vec![certified.cert.der().to_vec()], certified.signing_key.serialize_der());
@@ -154,6 +161,7 @@ async fn an_idle_tls_h2_connection_closes_while_both_sides_ping_it() {
     get(&mut sender).await;
     closes_idle(connection, &server.metrics).await;
     let _ = server.shutdown.trigger(Duration::from_secs(1)).await;
+    checkpoint();
 }
 
 /// Negative, and a positive control in one — a request whose handler runs four intervals is not

@@ -35,7 +35,7 @@ pub(crate) mod frozen_clock;
 #[path = "server_runtime/global_admission.rs"]
 mod global_admission;
 #[path = "server_runtime/shutdown_drain.rs"]
-mod shutdown_drain;
+pub(crate) mod shutdown_drain;
 #[path = "server_runtime/task_reaping.rs"]
 mod task_reaping;
 #[path = "server_runtime/unbounded_timeouts.rs"]
@@ -464,6 +464,12 @@ async fn a_srv_0016_expired_grace_reports_one_aborted_request() {
 
 #[tokio::test]
 async fn a_srv_0017_shutdown_closes_the_listener_before_new_connections() {
+    observed_listener_close(|| {}).await;
+}
+
+pub(crate) async fn observed_listener_close(mut checkpoint: impl FnMut()) {
+    let _exclusive_load_lease = crate::server_load::exclusive_server_load_lease().await;
+    checkpoint();
     let entered = std::sync::Arc::new(tokio::sync::Barrier::new(2));
     let release = std::sync::Arc::new(tokio::sync::Barrier::new(2));
     let service = service_fn({
@@ -507,6 +513,7 @@ async fn a_srv_0017_shutdown_closes_the_listener_before_new_connections() {
     assert_eq!(report, ShutdownReport { drained: 1, aborted: 0 });
     assert!(client.await.expect("client task joins").starts_with(b"HTTP/1.1 200"));
     assert!(task.await.expect("server task joins").is_ok());
+    checkpoint();
 }
 
 #[tokio::test]
@@ -526,6 +533,12 @@ async fn dropping_the_trigger_does_not_become_an_implicit_shutdown_path() {
 
 #[tokio::test]
 async fn a_srv_0018_shutdown_announces_close_on_an_established_h1_connection() {
+    observed_established_h1_shutdown(|| {}).await;
+}
+
+pub(crate) async fn observed_established_h1_shutdown(mut checkpoint: impl FnMut()) {
+    let _exclusive_load_lease = crate::server_load::exclusive_server_load_lease().await;
+    checkpoint();
     let entered = std::sync::Arc::new(tokio::sync::Barrier::new(2));
     let release = std::sync::Arc::new(tokio::sync::Barrier::new(2));
     let service = service_fn({
@@ -576,6 +589,7 @@ async fn a_srv_0018_shutdown_announces_close_on_an_established_h1_connection() {
         ShutdownReport { drained: 1, aborted: 0 }
     );
     assert!(task.await.expect("server task joins").is_ok());
+    checkpoint();
 }
 
 #[tokio::test]
