@@ -46,7 +46,10 @@
 //! did not write last — removed with its bucket, or advanced by another writer — voids the window
 //! as a reopen would. Upload IDs are resolved together with their bucket and key, so that bucket is
 //! the complete uniqueness scope and the counter can live beside the upload records whose scanner
-//! already ignores exact dot-prefixed authority files.
+//! already ignores exact dot-prefixed authority files. Each allocation holds an exclusive lock on
+//! that directory's stable handle before reading the sequence, so a temporary file found under
+//! the lock belongs to an interrupted writer and can be replaced safely (rustfs/gateway#1412).
+//! A reservation synchronizes the directory after rename before any reserved ID is returned.
 
 use std::io::{self, Write as _};
 use std::path::Path;
@@ -101,9 +104,21 @@ fn read_upload_id_sequence(uploads: &Path) -> io::Result<u64> {
     digits.parse().map_err(|_| sequence_error())
 }
 
-fn persist_upload_id_sequence(uploads: &Path, next: u64) -> io::Result<()> {
+/// The caller holds the upload directory's exclusive lock through publication and synchronization.
+fn persist_upload_id_sequence(uploads: &Path, next: u64, directory: &std::fs::File) -> io::Result<()> {
+    persist_upload_id_sequence_with_sync(uploads, next, |_| directory.sync_all())
+}
+
+fn persist_upload_id_sequence_with_sync(
+    uploads: &Path,
+    next: u64,
+    sync_directory: impl FnOnce(&Path) -> io::Result<()>,
+) -> io::Result<()> {
     let sequence = uploads.join(UPLOAD_ID_SEQUENCE);
     let temporary = uploads.join(UPLOAD_ID_SEQUENCE_TEMP);
+    if validate_upload_id_sequence_temp(uploads)? {
+        std::fs::remove_file(&temporary)?;
+    }
     let mut file = std::fs::OpenOptions::new().write(true).create_new(true).open(&temporary)?;
     let written = (|| {
         file.write_all(format!("{next}\n").as_bytes())?;
@@ -112,7 +127,8 @@ fn persist_upload_id_sequence(uploads: &Path, next: u64) -> io::Result<()> {
         if !metadata.is_file() || metadata.file_type().is_symlink() {
             return Err(sequence_error());
         }
-        std::fs::rename(&temporary, sequence)
+        std::fs::rename(&temporary, sequence)?;
+        sync_directory(uploads)
     })();
     if written.is_err() {
         let _ = std::fs::remove_file(temporary);
@@ -139,7 +155,7 @@ fn validate_upload_id_sequence_for_delete(uploads: &Path) -> io::Result<bool> {
     }
 }
 
-fn validate_upload_id_sequence_temp_for_delete(uploads: &Path) -> io::Result<bool> {
+fn validate_upload_id_sequence_temp(uploads: &Path) -> io::Result<bool> {
     let temporary = uploads.join(UPLOAD_ID_SEQUENCE_TEMP);
     match std::fs::symlink_metadata(temporary) {
         Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => Ok(true),
@@ -407,6 +423,8 @@ impl FsBackend {
     async fn allocate_upload_id(&self, bucket: &str) -> Result<String, HandlerError> {
         let mut windows = self.upload_id_windows.lock().await;
         let uploads = self.uploads_path(bucket);
+        let directory = std::fs::File::open(&uploads).map_err(|_| storage_error())?;
+        directory.try_lock().map_err(|_| storage_error())?;
         let persisted = initialize_upload_id_sequence(&uploads).map_err(|_| storage_error())?;
         let issued = match windows.get_mut(bucket) {
             Some(window) if window.high == persisted && window.next < window.high => {
@@ -416,7 +434,7 @@ impl FsBackend {
             }
             _ => {
                 let high = persisted.checked_add(UPLOAD_ID_WINDOW).ok_or_else(storage_error)?;
-                persist_upload_id_sequence(&uploads, high).map_err(|_| storage_error())?;
+                persist_upload_id_sequence(&uploads, high, &directory).map_err(|_| storage_error())?;
                 windows.insert(
                     bucket.to_owned(),
                     UploadIdWindow {
@@ -450,7 +468,7 @@ impl FsBackend {
                     validate_upload_id_sequence_for_delete(&uploads).map_err(|_| storage_error())?;
                 }
                 UPLOAD_ID_SEQUENCE_TEMP => {
-                    validate_upload_id_sequence_temp_for_delete(&uploads).map_err(|_| storage_error())?;
+                    validate_upload_id_sequence_temp(&uploads).map_err(|_| storage_error())?;
                 }
                 upload if upload.starts_with("u-") => {
                     pending_upload_directory(&entry.path())?;
@@ -481,7 +499,7 @@ impl FsBackend {
     pub(super) fn remove_upload_id_authority_for_delete(&self, bucket: &str) -> Result<(), HandlerError> {
         let uploads = self.uploads_path(bucket);
         let sequence_exists = validate_upload_id_sequence_for_delete(&uploads).map_err(|_| storage_error())?;
-        let temporary_exists = validate_upload_id_sequence_temp_for_delete(&uploads).map_err(|_| storage_error())?;
+        let temporary_exists = validate_upload_id_sequence_temp(&uploads).map_err(|_| storage_error())?;
         if temporary_exists {
             std::fs::remove_file(uploads.join(UPLOAD_ID_SEQUENCE_TEMP)).map_err(|_| storage_error())?;
         }

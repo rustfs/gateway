@@ -18,7 +18,7 @@
 //! first of them and issues the rest from memory; that the persisted counter exceeds every issued
 //! ID wherever a caller can observe it; that a crash at any offset inside a window never lets a
 //! reopened backend re-issue an ID; and that a corrupt, truncated, symlinked, reset, exhausted or
-//! half-replaced counter fails closed; and that successful bucket deletion retires only its own
+//! unsafe temporary counter fails closed; and that successful bucket deletion retires only its own
 //! window while refused deletion preserves it. NOT responsible for: the wire answers of
 //! `CreateMultipartUpload` (`tests/crud/multipart_upload_ids.rs`) or upload records.
 //! Upstream: `FsBackend::allocate_upload_id` and `DeleteBucket`. Downstream: the filesystem
@@ -29,7 +29,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use super::{UPLOAD_ID_SEQUENCE, UPLOAD_ID_SEQUENCE_TEMP};
+use super::{UPLOAD_ID_SEQUENCE, UPLOAD_ID_SEQUENCE_TEMP, persist_upload_id_sequence_with_sync};
 use crate::FsBackend;
 
 /// The decided window (rustfs/gateway#1336), written out so that a changed constant is a red test.
@@ -338,22 +338,121 @@ async fn n_a_removed_counter_voids_the_window_it_held() {
     assert_eq!(root.persisted(), id + WINDOW, "ID {id} was not issued from a new reservation");
 }
 
-/// Negative — a reservation interrupted between creating its temporary file and renaming it leaves
-/// the counter authoritative: the half-written temporary is neither read nor overwritten, nothing is
-/// issued while it stands, and once it is removed allocation resumes at the counter.
+/// Negative — a reservation interrupted before rename leaves only its old counter authoritative.
+/// A reopened backend discards the half-written temporary instead of adopting its value or requiring
+/// manual cleanup, then reserves a whole window before returning the next ID.
 #[tokio::test]
-async fn n_a_reservation_interrupted_mid_write_leaves_the_counter_authoritative() {
+async fn n_a_reservation_interrupted_mid_write_recovers_from_the_counter() {
     let root = Root::new();
     let backend = root.open();
     for expected in 0..WINDOW {
         assert_eq!(allocate(&backend, &root).await, expected);
     }
-    std::fs::write(root.temporary(), b"12").expect("a half-written test temporary");
+    drop(backend);
+    for stale in [&b"12"[..], b"999999", b""] {
+        std::fs::write(root.temporary(), stale).expect("a crash-left test temporary");
+        let expected = root.persisted();
+        assert_eq!(allocate(&root.open(), &root).await, expected);
+        assert_eq!(root.persisted(), expected + WINDOW);
+        assert!(!root.temporary().exists(), "the stale temporary survived publication");
+    }
+}
+
+/// Negative — recovery refuses a directory at the temporary path and leaves its contents alone.
+#[tokio::test]
+async fn n_a_temporary_directory_is_refused_without_removing_it() {
+    let root = Root::new();
+    let backend = root.open();
+    root.write_counter(b"64\n");
+    std::fs::create_dir(root.temporary()).expect("a directory occupying the test temporary");
+    let child = root.temporary().join("kept");
+    std::fs::write(&child, b"untouched").expect("the occupied directory's child");
 
     assert!(refused(&backend).await);
     assert_eq!(root.persisted(), WINDOW);
-    assert_eq!(std::fs::read(root.temporary()).expect("the test temporary"), b"12");
-    std::fs::remove_file(root.temporary()).expect("remove the test temporary");
+    assert_eq!(std::fs::read(child).expect("the retained child"), b"untouched");
+}
+
+/// Negative — recovery never follows or removes a temporary symlink, even to a regular file.
+#[cfg(unix)]
+#[tokio::test]
+async fn n_a_temporary_symlink_is_refused_without_touching_it_or_its_target() {
+    use std::os::unix::fs::symlink;
+
+    let root = Root::new();
+    let outside = Root::new();
+    let backend = root.open();
+    root.write_counter(b"64\n");
+    let target = outside.0.join("temporary");
+    std::fs::write(&target, b"untouched").expect("the outside test temporary");
+    symlink(&target, root.temporary()).expect("a temporary symlink");
+
+    assert!(refused(&backend).await);
+    assert_eq!(root.persisted(), WINDOW);
+    assert!(
+        std::fs::symlink_metadata(root.temporary())
+            .expect("the retained symlink")
+            .file_type()
+            .is_symlink()
+    );
+    assert_eq!(std::fs::read(target).expect("the retained target"), b"untouched");
+}
+
+/// Negative — a live writer holding the upload directory lock keeps its temporary file and counter.
+/// Once the writer's handle closes (including after a crash), the next allocator can recover it.
+#[cfg(unix)]
+#[tokio::test]
+async fn n_a_live_writer_is_not_mistaken_for_a_crash_left_temporary() {
+    let root = Root::new();
+    let backend = root.open();
+    root.write_counter(b"64\n");
+    let directory = std::fs::File::open(root.sequence().parent().expect("the counter directory"))
+        .expect("a directory handle for the live test writer");
+    directory.try_lock().expect("the live test writer's exclusive lock");
+
+    assert!(refused(&backend).await, "allocation ignored the live writer's directory lock");
+    assert_eq!(root.persisted(), WINDOW);
+    std::fs::write(root.temporary(), b"128").expect("the live writer's incomplete temporary");
+    assert!(refused(&backend).await);
+    assert_eq!(root.persisted(), WINDOW);
+    assert_eq!(std::fs::read(root.temporary()).expect("the live writer's temporary"), b"128");
+    drop(directory);
+    assert_eq!(allocate(&backend, &root).await, WINDOW);
+    assert!(!root.temporary().exists());
+}
+
+/// Positive — the directory is synchronized after the new counter is published, exactly once.
+/// The callback performs the real directory synchronization; ordering is observed from the files,
+/// not inferred from a return value or from the allocator's intended sequence.
+#[test]
+fn directory_synchronization_observes_the_published_counter() {
+    let root = Root::new();
+    let _backend = root.open();
+    root.write_counter(b"0\n");
+    let mut synchronizations = 0;
+    persist_upload_id_sequence_with_sync(root.sequence().parent().expect("the counter directory"), WINDOW, |directory| {
+        assert_eq!(root.persisted(), WINDOW, "directory synchronization preceded publication");
+        assert!(!root.temporary().exists(), "the temporary was not renamed before synchronization");
+        std::fs::File::open(directory)?.sync_all()?;
+        synchronizations += 1;
+        Ok(())
+    })
+    .expect("the synchronized test reservation");
+    assert_eq!(synchronizations, 1);
+}
+
+/// Negative — a directory synchronization failure is returned rather than treated as a durable
+/// reservation. Its renamed counter still causes the next allocator to skip the unissued window.
+#[tokio::test]
+async fn n_directory_synchronization_failure_does_not_issue_the_unsynchronized_window() {
+    let root = Root::new();
+    let backend = root.open();
+    root.write_counter(b"0\n");
+    let result = persist_upload_id_sequence_with_sync(root.sequence().parent().expect("the counter directory"), WINDOW, |_| {
+        Err(std::io::Error::other("injected directory synchronization failure"))
+    });
+    assert!(result.is_err());
+    assert_eq!(root.persisted(), WINDOW);
     assert_eq!(allocate(&backend, &root).await, WINDOW);
 }
 
