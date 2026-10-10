@@ -54,7 +54,25 @@ body as `aws-chunked`, is a property of the client and holds against whatever an
 
 The manifest's `measured_against` block says which kind of server that was: `{"sut": "gateway-fs"}`
 for the launcher, or `{"sut": "external", "endpoint_build": ..., "product": ...}` for an endpoint
-started elsewhere (next section).
+started elsewhere ([external endpoint mode](#against-an-external-endpoint)).
+
+## Filesystem reference-backend PUT limitations
+
+The `compat-sut` filesystem backend has three PUT attribute limitations recorded in
+[rustfs/gateway#1390](https://github.com/rustfs/gateway/issues/1390), row R-036 of the RustFS-profile
+parity ledger:
+
+| Attribute | Filesystem reference backend | Legacy RustFS behavior recorded in the issue |
+| --- | --- | --- |
+| `x-amz-website-redirect-location` | Does not persist or report the redirect. | Stores the redirect and reports it on reads. |
+| Invalid `Expires` | Stores the supplied text without the legacy date validation. | Refuses it with `400 InvalidArgument`, `Invalid Expires header`. |
+| Storage class | Accepts recognized S3 classes, including `STANDARD_IA`. | Accepts exactly `STANDARD` and `REDUCED_REDUNDANCY`; `STANDARD_IA` is `400 InvalidStorageClass`. |
+
+In the product, redirect persistence and these refusals belong to the native RustFS object
+handler. This disclosure registers a reference-backend limitation; it does not establish PUT
+parity for those attributes. Measure them against an externally started RustFS target using the
+mode below. Browser POST fixtures already refuse unsupported redirect and `Expires` fields and
+restrict storage classes to `STANDARD` and `REDUCED_REDUNDANCY`.
 
 ## Against an external endpoint
 
