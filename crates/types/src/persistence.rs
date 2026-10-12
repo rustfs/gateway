@@ -270,6 +270,8 @@ pub enum PersistenceCodecError {
     MissingLifecycleRule,
     /// A Replication configuration contains no rules.
     MissingReplicationRule,
+    /// A nested Versioning element is not recognized by the pinned old decoder.
+    UnexpectedVersioningElement,
     /// A nested Object Lock element is not recognized by the pinned old decoder.
     UnexpectedObjectLockElement,
     /// A nested Lifecycle element is not recognized by the pinned old decoder.
@@ -310,6 +312,7 @@ impl fmt::Display for PersistenceCodecError {
             Self::MissingLifecycleStatus => formatter.write_str("persisted Lifecycle XML has a rule without Status"),
             Self::MissingLifecycleRule => formatter.write_str("persisted Lifecycle XML has no Rule"),
             Self::MissingReplicationRule => formatter.write_str("persisted Replication XML has no Rule"),
+            Self::UnexpectedVersioningElement => formatter.write_str("persisted Versioning XML has an unexpected nested element"),
             Self::UnexpectedObjectLockElement => {
                 formatter.write_str("persisted Object Lock XML has an unexpected nested element")
             }
@@ -395,14 +398,14 @@ pub(super) fn strip_inert_doctype<'a>(input: &'a [u8], expected: &str) -> Cow<'a
 
 /// Parses persisted Versioning bytes without applying HTTP request policy.
 ///
-/// Unknown children are ignored because persisted configuration must remain forward-readable
-/// during rolling upgrades. Repeated scalar children are rejected like the pinned old decoder;
+/// Unknown top-level children are ignored for rolling upgrades. Unknown children inside
+/// `ExcludedPrefixes` and repeated scalar fields are rejected like the pinned old decoder;
 /// the flattened prefix extension retains every occurrence.
 ///
 /// # Errors
 ///
 /// Returns [`PersistenceCodecError`] for malformed/bounded XML, a wrong root, an invalid
-/// `ExcludeFolders` boolean, or a repeated scalar field.
+/// `ExcludeFolders` boolean, an unknown nested child, or a repeated scalar field.
 pub fn parse_versioning(input: &[u8]) -> Result<PersistedVersioningConfiguration, PersistenceCodecError> {
     // Persistence input is already buffered. Deriving every parser ceiling from that buffer
     // prevents HTTP request limits from rejecting metadata the old persistence codec accepted.
@@ -423,7 +426,12 @@ pub fn parse_versioning(input: &[u8]) -> Result<PersistedVersioningConfiguration
     };
     let excluded_prefixes = root
         .children_named("ExcludedPrefixes")
-        .map(|entry| optional_child_text(entry, "Prefix"))
+        .map(|entry| {
+            if entry.children.iter().any(|child| child.name != "Prefix") {
+                return Err(PersistenceCodecError::UnexpectedVersioningElement);
+            }
+            optional_child_text(entry, "Prefix")
+        })
         .collect::<Result<Vec<_>, _>>()?;
     Ok(PersistedVersioningConfiguration {
         status: optional_child_text(&root, "Status")?,
@@ -742,4 +750,44 @@ pub fn serialize_public_access_block(value: &PersistedPublicAccessBlockConfigura
     }
     writer.close();
     writer.finish().into_bytes()
+}
+
+#[cfg(all(test, feature = "compat-s3s-rustfs"))]
+mod versioning_compat_tests {
+    use crate::compat::s3s_5761ddfe::s3s;
+    use s3s::xml::Deserialize as _;
+
+    #[test]
+    fn excluded_prefix_unknown_child_matches_pinned_reader() {
+        let cases: [(&str, &[u8], bool); 3] = [
+            (
+                "unknown root child",
+                b"<VersioningConfiguration><Unknown/></VersioningConfiguration>",
+                true,
+            ),
+            (
+                "unknown excluded-prefix child",
+                b"<VersioningConfiguration><ExcludedPrefixes><Unknown/></ExcludedPrefixes></VersioningConfiguration>",
+                false,
+            ),
+            (
+                "unknown child alongside a known prefix",
+                b"<VersioningConfiguration><ExcludedPrefixes><Prefix>logs/</Prefix><Unknown/></ExcludedPrefixes></VersioningConfiguration>",
+                false,
+            ),
+        ];
+        let actual: Vec<_> = cases
+            .iter()
+            .map(|(name, bytes, _)| {
+                let mut old = s3s::xml::Deserializer::new(bytes);
+                let old_accepts = s3s::dto::VersioningConfiguration::deserialize(&mut old)
+                    .and_then(|_| old.expect_eof())
+                    .is_ok();
+                let new_accepts = super::parse_versioning(bytes).is_ok();
+                (*name, old_accepts, new_accepts)
+            })
+            .collect();
+        let expected: Vec<_> = cases.iter().map(|(name, _, accepts)| (*name, *accepts, *accepts)).collect();
+        assert_eq!(actual, expected);
+    }
 }
