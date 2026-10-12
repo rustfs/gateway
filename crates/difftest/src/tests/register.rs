@@ -403,3 +403,19 @@ when_bucket = "%2F"
         assert!(refused(&format!("{VALID}when_bucket = {text:?}\n")).contains("when_bucket"), "{text:?}");
     }
 }
+
+/// Negative — annotation route differences are accepted only for the triggering query and pair.
+#[test]
+fn annotation_route_registration_rejects_unrelated_findings() {
+    let register = KnownDiffs::checked_in().expect("the register parses");
+    for target in ["/bkt/k?uploadId=u", "/bkt/k?uploadId=u&prefix=annotation"] {
+        let request = crate::RawRequest::put(target, b"");
+        let differences = vec![finding("PutObject", Item::Route, "PutObject", "PutObjectAnnotation")];
+        assert!(!register.verdict_for(&request, differences).passed(), "{target}");
+    }
+    let request = crate::RawRequest::put("/bkt/k?annotation=1&uploadId=u", b"");
+    for (gateway, s3s) in [("UploadPart", "PutObjectAnnotation"), ("PutObject", "PutObjectAcl")] {
+        let differences = vec![finding("PutObject", Item::Route, gateway, s3s)];
+        assert!(!register.verdict_for(&request, differences).passed(), "{gateway}/{s3s}");
+    }
+}

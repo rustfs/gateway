@@ -334,6 +334,12 @@ pub(super) fn requests() -> Vec<RequestRow> {
     let (delete_crc_header, delete_crc) = checksum(rustfs_gateway_types::ChecksumAlgorithm::Crc32, DELETE_BODY);
     let (versioning_crc_header, versioning_crc) = checksum(rustfs_gateway_types::ChecksumAlgorithm::Crc32, VERSIONING_BODY);
     let mut rows = vec![
+        row(
+            "annotation-upload-id-nightly-artifact",
+            RawRequest::put("/bkt/k?annotation=1&uploadId=u", b"")
+                .header("x-amz-checksum-sha512", "MJ7MSJwS1utMxA9QyQLydNbxf9JlnDaNCVbRbDP2DDoH2Bdz33Fd"),
+            &["kd-decode-0085", "kd-decode-0086"],
+        ),
         // ── GetObject / HeadObject ──
         row("get-full", get_full(), &[]),
         row("get-bare", RawRequest::get("/bkt/k"), &[]),
