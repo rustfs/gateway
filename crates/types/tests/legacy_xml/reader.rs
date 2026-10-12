@@ -13,6 +13,10 @@
 // limitations under the License.
 
 //! Real-reader comparison for the RustFS 5761 persistence contract.
+//!
+//! Responsible for: comparing legacy and Gateway persistence reader results on stored XML.
+//! NOT responsible for: request-body policy or serialization compatibility.
+//! Upstream: the pinned RustFS s3s oracle and Gateway readers. Downstream: persistence migration regressions.
 #![cfg(feature = "compat-s3s-rustfs")]
 
 use s3s_rustfs::xml::{Deserialize, Deserializer};

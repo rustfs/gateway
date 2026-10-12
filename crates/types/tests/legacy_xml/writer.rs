@@ -13,6 +13,10 @@
 // limitations under the License.
 
 //! Real-writer and self-read comparison for the RustFS 5761 persistence contract.
+//!
+//! Responsible for: comparing legacy and Gateway writer bytes, typed readback, and input preservation.
+//! NOT responsible for: request-body policy or persistence families outside Acceleration and Tagging.
+//! Upstream: the pinned RustFS s3s oracle and Gateway codecs. Downstream: persistence migration regressions.
 #![cfg(feature = "compat-s3s-rustfs")]
 
 use rustfs_gateway_types::cors_tagging::{PersistedTag, PersistedTagging, parse_tagging, serialize_tagging};

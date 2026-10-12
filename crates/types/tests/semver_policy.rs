@@ -12,11 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Cross-crate compiler evidence for ADR-0004's functional-update policy.
+//! Integration evidence for DTO functional-update and stored XML compatibility.
 //!
-//! Responsible for: proving `#[non_exhaustive]` rejects DTO functional update syntax with E0639.
+//! Responsible for: proving `#[non_exhaustive]` rejects DTO functional update syntax with E0639,
+//! and comparing legacy persistence reader and writer behavior.
 //! NOT responsible for: inspecting generated source text; repository guards own that. Upstream:
-//! rustc. Downstream: DTO SemVer policy.
+//! rustc and the pinned legacy XML oracle. Downstream: DTO SemVer and persistence migration policy.
+
+#[cfg(feature = "compat-s3s-rustfs")]
+#[path = "legacy_xml/reader.rs"]
+mod legacy_xml_text_contract;
+#[cfg(feature = "compat-s3s-rustfs")]
+#[path = "legacy_xml/writer.rs"]
+mod legacy_xml_writer_contract;
 
 use std::path::PathBuf;
 use std::process::Command;
