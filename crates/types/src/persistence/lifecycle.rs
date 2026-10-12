@@ -24,6 +24,10 @@ use super::{PersistenceCodecError, optional_child, optional_child_text};
 use crate::ext::{CodecPolicy, ExtError, Extensions, PersistedXml};
 use crate::{Timestamp, TimestampFormat};
 
+mod legacy_dates;
+
+type TimestampCodec = fn(&str) -> Result<String, PersistenceCodecError>;
+
 /// The complete Lifecycle configuration persisted by the old RustFS path.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct PersistedLifecycleConfiguration {
@@ -180,6 +184,13 @@ pub struct PersistedTransition {
 /// Returns [`PersistenceCodecError`] for malformed XML, a wrong root, a missing rule status,
 /// duplicate optional fields, or invalid integer/boolean lexemes.
 pub fn parse_lifecycle(input: &[u8]) -> Result<PersistedLifecycleConfiguration, PersistenceCodecError> {
+    parse_lifecycle_with_dates(input, canonical_timestamp)
+}
+
+fn parse_lifecycle_with_dates(
+    input: &[u8],
+    parse_date: TimestampCodec,
+) -> Result<PersistedLifecycleConfiguration, PersistenceCodecError> {
     let bound = input.len().max(1);
     let Some(limits) = XmlLimits::new(bound, bound, bound, bound, bound) else {
         unreachable!("max(1) makes every persistence XML limit non-zero");
@@ -188,14 +199,30 @@ pub fn parse_lifecycle(input: &[u8]) -> Result<PersistedLifecycleConfiguration, 
     if root.name != "LifecycleConfiguration" {
         return Err(PersistenceCodecError::WrongRoot);
     }
-    let rules = root.children_named("Rule").map(parse_rule).collect::<Result<Vec<_>, _>>()?;
+    let rules = root
+        .children_named("Rule")
+        .map(|rule| parse_rule_with_dates(rule, parse_date))
+        .collect::<Result<Vec<_>, _>>()?;
     if rules.is_empty() {
         return Err(PersistenceCodecError::MissingLifecycleRule);
     }
     Ok(PersistedLifecycleConfiguration {
-        expiry_updated_at: optional_timestamp(&root, "ExpiryUpdatedAt")?,
+        expiry_updated_at: optional_timestamp_with_dates(&root, "ExpiryUpdatedAt", parse_date)?,
         rules,
     })
+}
+
+/// Parses persisted Lifecycle XML through the legacy-date compatibility entry point.
+///
+/// This separate entry point lets a historical persistence consumer retain its date contract
+/// without changing the canonical codec or the runtime extension policy.
+/// Valid date strings retain their original offset, spelling, and fractional precision.
+///
+/// # Errors
+///
+/// Returns [`PersistenceCodecError`] when the stored document cannot be decoded.
+pub fn parse_lifecycle_legacy_dates(input: &[u8]) -> Result<PersistedLifecycleConfiguration, PersistenceCodecError> {
+    parse_lifecycle_with_dates(input, legacy_dates::read)
 }
 
 /// Decodes persisted Lifecycle bytes with a borrowed runtime extension policy.
@@ -267,6 +294,10 @@ fn parse_extensible_rule(rule: &XmlNode, policy: &CodecPolicy) -> Result<(Persis
 }
 
 fn parse_rule(rule: &XmlNode) -> Result<PersistedLifecycleRule, PersistenceCodecError> {
+    parse_rule_with_dates(rule, canonical_timestamp)
+}
+
+fn parse_rule_with_dates(rule: &XmlNode, parse_date: TimestampCodec) -> Result<PersistedLifecycleRule, PersistenceCodecError> {
     reject_unknown(
         rule,
         &[
@@ -289,7 +320,9 @@ fn parse_rule(rule: &XmlNode) -> Result<PersistedLifecycleRule, PersistenceCodec
         del_marker_expiration: optional_child(rule, "DelMarkerExpiration")?
             .map(parse_del_marker_expiration)
             .transpose()?,
-        expiration: optional_child(rule, "Expiration")?.map(parse_expiration).transpose()?,
+        expiration: optional_child(rule, "Expiration")?
+            .map(|node| parse_expiration(node, parse_date))
+            .transpose()?,
         filter: optional_child(rule, "Filter")?.map(parse_filter).transpose()?,
         id: optional_child_text(rule, "ID")?,
         noncurrent_version_expiration: optional_child(rule, "NoncurrentVersionExpiration")?
@@ -298,7 +331,7 @@ fn parse_rule(rule: &XmlNode) -> Result<PersistedLifecycleRule, PersistenceCodec
         noncurrent_version_transitions: optional_vec(rule, "NoncurrentVersionTransition", parse_noncurrent_transition)?,
         prefix: optional_child_text(rule, "Prefix")?,
         status: optional_child_text(rule, "Status")?.ok_or(PersistenceCodecError::MissingLifecycleStatus)?,
-        transitions: optional_vec(rule, "Transition", parse_transition)?,
+        transitions: optional_vec(rule, "Transition", |node| parse_transition(node, parse_date))?,
     })
 }
 
@@ -316,10 +349,10 @@ fn parse_del_marker_expiration(node: &XmlNode) -> Result<PersistedDelMarkerExpir
     })
 }
 
-fn parse_expiration(node: &XmlNode) -> Result<PersistedLifecycleExpiration, PersistenceCodecError> {
+fn parse_expiration(node: &XmlNode, parse_date: TimestampCodec) -> Result<PersistedLifecycleExpiration, PersistenceCodecError> {
     reject_unknown(node, &["Date", "Days", "ExpiredObjectAllVersions", "ExpiredObjectDeleteMarker"])?;
     Ok(PersistedLifecycleExpiration {
-        date: optional_timestamp(node, "Date")?,
+        date: optional_timestamp_with_dates(node, "Date", parse_date)?,
         days: optional_i32(node, "Days")?,
         expired_object_all_versions: optional_bool(node, "ExpiredObjectAllVersions")?,
         expired_object_delete_marker: optional_bool(node, "ExpiredObjectDeleteMarker")?,
@@ -372,10 +405,10 @@ fn parse_noncurrent_transition(node: &XmlNode) -> Result<PersistedNoncurrentVers
     })
 }
 
-fn parse_transition(node: &XmlNode) -> Result<PersistedTransition, PersistenceCodecError> {
+fn parse_transition(node: &XmlNode, parse_date: TimestampCodec) -> Result<PersistedTransition, PersistenceCodecError> {
     reject_unknown(node, &["Date", "Days", "StorageClass"])?;
     Ok(PersistedTransition {
-        date: optional_timestamp(node, "Date")?,
+        date: optional_timestamp_with_dates(node, "Date", parse_date)?,
         days: optional_i32(node, "Days")?,
         storage_class: optional_child_text(node, "StorageClass")?,
     })
@@ -384,7 +417,7 @@ fn parse_transition(node: &XmlNode) -> Result<PersistedTransition, PersistenceCo
 fn optional_vec<T>(
     parent: &XmlNode,
     name: &str,
-    parse: fn(&XmlNode) -> Result<T, PersistenceCodecError>,
+    parse: impl FnMut(&XmlNode) -> Result<T, PersistenceCodecError>,
 ) -> Result<Option<Vec<T>>, PersistenceCodecError> {
     let values = parent.children_named(name).map(parse).collect::<Result<Vec<_>, _>>()?;
     Ok((!values.is_empty()).then_some(values))
@@ -422,9 +455,15 @@ fn optional_bool(parent: &XmlNode, name: &str) -> Result<Option<bool>, Persisten
 }
 
 fn optional_timestamp(parent: &XmlNode, name: &str) -> Result<Option<String>, PersistenceCodecError> {
-    optional_child_text(parent, name)?
-        .map(|value| canonical_timestamp(&value))
-        .transpose()
+    optional_timestamp_with_dates(parent, name, canonical_timestamp)
+}
+
+fn optional_timestamp_with_dates(
+    parent: &XmlNode,
+    name: &str,
+    parse_date: TimestampCodec,
+) -> Result<Option<String>, PersistenceCodecError> {
+    optional_child_text(parent, name)?.map(|value| parse_date(&value)).transpose()
 }
 
 fn canonical_timestamp(value: &str) -> Result<String, PersistenceCodecError> {
@@ -441,17 +480,36 @@ fn canonical_timestamp(value: &str) -> Result<String, PersistenceCodecError> {
 
 /// Serializes Lifecycle into the exact old persistence field order and element form.
 pub fn serialize_lifecycle(value: &PersistedLifecycleConfiguration) -> Result<Vec<u8>, PersistenceCodecError> {
+    serialize_lifecycle_with_dates(value, canonical_timestamp)
+}
+
+fn serialize_lifecycle_with_dates(
+    value: &PersistedLifecycleConfiguration,
+    write_date: TimestampCodec,
+) -> Result<Vec<u8>, PersistenceCodecError> {
     if value.rules.is_empty() {
         return Err(PersistenceCodecError::MissingLifecycleRule);
     }
     let mut writer = XmlWriter::fragment();
     writer.open("LifecycleConfiguration", None);
-    write_timestamp(&mut writer, "ExpiryUpdatedAt", value.expiry_updated_at.as_deref())?;
+    write_timestamp_with_dates(&mut writer, "ExpiryUpdatedAt", value.expiry_updated_at.as_deref(), write_date)?;
     for rule in &value.rules {
-        write_rule(&mut writer, rule)?;
+        write_rule(&mut writer, rule, write_date)?;
     }
     writer.close();
     Ok(writer.finish().into_bytes())
+}
+
+/// Serializes Lifecycle XML through the legacy-date compatibility entry point.
+///
+/// This entry point is separate from canonical serialization and runtime extension policy.
+/// Dates use their local calendar fields, exactly three fractional digits, and a literal `Z`.
+///
+/// # Errors
+///
+/// Returns [`PersistenceCodecError`] when the configuration cannot be encoded.
+pub fn serialize_lifecycle_legacy_dates(value: &PersistedLifecycleConfiguration) -> Result<Vec<u8>, PersistenceCodecError> {
+    serialize_lifecycle_with_dates(value, legacy_dates::write)
 }
 
 /// Serializes a completely decoded Lifecycle document with registered extensions.
@@ -533,7 +591,11 @@ fn write_extensible_rule(
     Ok(())
 }
 
-fn write_rule(writer: &mut XmlWriter, value: &PersistedLifecycleRule) -> Result<(), PersistenceCodecError> {
+fn write_rule(
+    writer: &mut XmlWriter,
+    value: &PersistedLifecycleRule,
+    write_date: TimestampCodec,
+) -> Result<(), PersistenceCodecError> {
     writer.open("Rule", None);
     if let Some(action) = value.abort_incomplete_multipart_upload.as_ref() {
         writer.open("AbortIncompleteMultipartUpload", None);
@@ -547,7 +609,7 @@ fn write_rule(writer: &mut XmlWriter, value: &PersistedLifecycleRule) -> Result<
     }
     if let Some(action) = value.expiration.as_ref() {
         writer.open("Expiration", None);
-        write_timestamp(writer, "Date", action.date.as_deref())?;
+        write_timestamp_with_dates(writer, "Date", action.date.as_deref(), write_date)?;
         write_number(writer, "Days", action.days);
         write_bool(writer, "ExpiredObjectAllVersions", action.expired_object_all_versions);
         write_bool(writer, "ExpiredObjectDeleteMarker", action.expired_object_delete_marker);
@@ -577,7 +639,7 @@ fn write_rule(writer: &mut XmlWriter, value: &PersistedLifecycleRule) -> Result<
     if let Some(actions) = value.transitions.as_deref() {
         for action in actions {
             writer.open("Transition", None);
-            write_timestamp(writer, "Date", action.date.as_deref())?;
+            write_timestamp_with_dates(writer, "Date", action.date.as_deref(), write_date)?;
             write_number(writer, "Days", action.days);
             write_optional(writer, "StorageClass", action.storage_class.as_deref());
             writer.close();
@@ -624,8 +686,17 @@ fn write_optional(writer: &mut XmlWriter, name: &str, value: Option<&str>) {
 }
 
 fn write_timestamp(writer: &mut XmlWriter, name: &str, value: Option<&str>) -> Result<(), PersistenceCodecError> {
+    write_timestamp_with_dates(writer, name, value, canonical_timestamp)
+}
+
+fn write_timestamp_with_dates(
+    writer: &mut XmlWriter,
+    name: &str,
+    value: Option<&str>,
+    write_date: TimestampCodec,
+) -> Result<(), PersistenceCodecError> {
     if let Some(value) = value {
-        writer.element(name, &canonical_timestamp(value)?);
+        writer.element(name, &write_date(value)?);
     }
     Ok(())
 }
@@ -641,3 +712,6 @@ fn write_bool(writer: &mut XmlWriter, name: &str, value: Option<bool>) {
         writer.element_bool(name, value);
     }
 }
+
+#[cfg(all(test, feature = "compat-s3s-rustfs"))]
+mod legacy_date_tests;

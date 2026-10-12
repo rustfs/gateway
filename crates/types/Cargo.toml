@@ -40,6 +40,8 @@ http = { workspace = true }
 percent-encoding = { workspace = true }
 sha2 = { workspace = true }
 unicode-normalization = { workspace = true }
+# Historical Lifecycle dates need RFC3339 validation; no workspace time entry is defined.
+time = { version = "0.3", features = ["parsing"] }
 # The three s3s revisions persistence migration is admitted against, each read from the
 # `Cargo.lock` of the RustFS build named beside it and each listed in `compat::OracleRevision`,
 # and the fourth, `s3s_rustfs`, that RustFS main links today. Every alias is renamed so no crate
