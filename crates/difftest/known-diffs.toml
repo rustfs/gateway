@@ -837,6 +837,30 @@ s3s = "handled"
 reason = "An anonymous request that declares STREAMING-AWS4-HMAC-SHA256-PAYLOAD has no seed signature to verify its chunk signatures against, so the gateway refuses it before authorization and before the handler (rustfs/gateway#1060). The legacy stack hands the framed body to the handler, and legacy RustFS refuses it either with AccessDenied from its bucket-policy check or, on a public-write bucket, with 400 UnexpectedContent once the framing overruns the decoded length, as in kd-decode-0078. Both refuse; the code differs, and nothing is stored on either. The RustFS profile does not refuse it: it hands the undecoded body over, as the legacy stack does."
 expires = "2027-03-31"
 
+# ── Decode: annotation and multipart query precedence (nightly artifact, issue #1441) ──
+
+[[diff]]
+id = "kd-decode-0085"
+kind = "decode"
+operation = "PutObject"
+item = "route"
+gateway = "PutObject"
+s3s = "PutObjectAnnotation"
+when_query = "annotation"
+reason = "The default annotation route excludes uploadId in spec/operations/PutObjectAnnotation.toml; the legacy route gives annotation precedence in crates/core/src/route/legacy_rustfs.rs. With annotation and uploadId but no partNumber, the default falls through to PutObject. This records the existing route policy, not a protocol change (https://github.com/rustfs/gateway/issues/1441); both operation names are pinned so other selector conflicts remain new differences."
+expires = "2027-03-31"
+
+[[diff]]
+id = "kd-decode-0086"
+kind = "decode"
+operation = "PutObject"
+item = "error.message"
+gateway = "The checksum value is not valid for the named algorithm"
+s3s = "missing query: annotationName"
+when_query = "annotation"
+reason = "The original issue #1441 artifact follows the routes in kd-decode-0085: PutObject rejects its malformed SHA512 checksum, while the legacy annotation decoder rejects the absent annotationName. The full comparison observes no status or code difference; only the exact observed message pair is accepted (https://github.com/rustfs/gateway/issues/1441)."
+expires = "2027-03-31"
+
 # ── Encode: what the gateway writes on every answer ─────────────────────────────────────────
 
 [[diff]]

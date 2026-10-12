@@ -116,6 +116,14 @@ fn every_committed_seed_passes_the_decode_property() {
     }
 }
 
+/// Positive — the original annotation/upload-id nightly artifact remains a compared request.
+#[test]
+fn annotation_upload_id_artifact_passes_the_decode_property() {
+    let input = include_bytes!("../../../../fuzz/seeds/decode_diff/annotation-upload-id");
+    let request = request_of(input).expect("the original artifact is a compared request");
+    check_decode(&render(&request)).expect("the exact annotation route difference is registered");
+}
+
 /// Positive — a fixed sample of mutated seeds passes the decode property on stable: the fuzzer's
 /// search, a few hundred steps of it, in every CI run.
 #[test]
