@@ -265,6 +265,30 @@ pub fn parse(body: &[u8]) -> Result<XmlNode, XmlError> {
 ///
 /// [`XmlError`], one variant per refusal. No variant carries a fragment of the input.
 pub fn parse_with_limits(body: &[u8], limits: XmlLimits) -> Result<XmlNode, XmlError> {
+    parse_with_text_reading(body, limits, TextReading::Xml10)
+}
+
+/// Parses stored XML using the historical RustFS text interpretation.
+///
+/// Legacy-compat (rustfs/backlog#2734): stored text keeps literal CR/CRLF and raw characters such
+/// as NUL, while CDATA is ignored. Request XML should use [`parse_with_limits`] instead. Structure,
+/// limits, attributes, and character-reference validation remain unchanged. Accepted text is not
+/// necessarily representable by the XML writer.
+///
+/// # Errors
+///
+/// [`XmlError`] for malformed or bounded XML, invalid UTF-8, or an unsupported reference.
+pub fn parse_legacy_persistence_with_limits(body: &[u8], limits: XmlLimits) -> Result<XmlNode, XmlError> {
+    parse_with_text_reading(body, limits, TextReading::LegacyPersistence)
+}
+
+#[derive(Clone, Copy)]
+enum TextReading {
+    Xml10,
+    LegacyPersistence,
+}
+
+fn parse_with_text_reading(body: &[u8], limits: XmlLimits, text_reading: TextReading) -> Result<XmlNode, XmlError> {
     if body.len() > limits.max_body_bytes {
         return Err(XmlError::BodyTooLarge);
     }
@@ -354,13 +378,22 @@ pub fn parse_with_limits(body: &[u8], limits: XmlLimits) -> Result<XmlNode, XmlE
                 let Some(node) = stack.last_mut() else {
                     continue;
                 };
-                // XML 1.0 §2.11 applies before parsing: a literal CR and CRLF each become one LF.
-                // `xml10_content` performs that byte-level normalisation without touching a CR
-                // introduced later by a numeric character reference.
-                let decoded = chunk.xml10_content().map_err(|_| XmlError::UnsupportedEntity)?;
-                node.text.push_str(representable(decoded.as_ref())?);
+                match text_reading {
+                    TextReading::Xml10 => {
+                        // XML 1.0 §2.11 normalises literal line ends, but not numeric references.
+                        let decoded = chunk.xml10_content().map_err(|_| XmlError::UnsupportedEntity)?;
+                        node.text.push_str(representable(decoded.as_ref())?);
+                    }
+                    TextReading::LegacyPersistence => {
+                        let decoded = chunk.decode().map_err(|_| XmlError::UnsupportedEntity)?;
+                        node.text.push_str(decoded.as_ref());
+                    }
+                }
             }
             Ok(Event::CData(chunk)) => {
+                if matches!(text_reading, TextReading::LegacyPersistence) {
+                    continue;
+                }
                 let Some(node) = stack.last_mut() else {
                     continue;
                 };

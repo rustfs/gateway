@@ -278,6 +278,27 @@ impl XmlWriter {
         self.out.push('>');
     }
 
+    /// Writes a persisted scalar without replacing characters the legacy reader preserves.
+    ///
+    /// Legacy-compat (rustfs/backlog#2734): persisted Acceleration and Tagging escape the five
+    /// XML entity characters and CR, retaining every other UTF-8 scalar, including XML-forbidden
+    /// characters. Only these persistence callers opt in; wire encoders use [`Self::element`].
+    pub fn legacy_persistence_element(&mut self, name: &str, text: &str) {
+        self.open(name, None);
+        for character in text.chars() {
+            match character {
+                '&' => self.out.push_str("&amp;"),
+                '<' => self.out.push_str("&lt;"),
+                '>' => self.out.push_str("&gt;"),
+                '"' => self.out.push_str("&quot;"),
+                '\'' => self.out.push_str("&apos;"),
+                '\r' => self.out.push_str("&#13;"),
+                other => self.out.push(other),
+            }
+        }
+        self.close();
+    }
+
     /// Writes escaped text into the element that is currently open.
     ///
     /// The unwrapped-output form needs it: there the single body member *is* the root, so its text

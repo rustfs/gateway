@@ -21,7 +21,7 @@
 
 use std::borrow::Cow;
 
-use rustfs_gateway_xml::{XmlLimits, XmlWriter, parse_with_limits};
+use rustfs_gateway_xml::{XmlError, XmlLimits, XmlNode, XmlWriter, parse_legacy_persistence_with_limits, parse_with_limits};
 
 use super::{PersistenceCodecError, optional_child};
 
@@ -56,12 +56,20 @@ impl PersistedRequestPaymentConfiguration {
 }
 
 fn parse_root(input: &[u8], expected: &str) -> Result<rustfs_gateway_xml::XmlNode, PersistenceCodecError> {
+    parse_root_with(input, expected, parse_with_limits)
+}
+
+fn parse_root_with(
+    input: &[u8],
+    expected: &str,
+    read: fn(&[u8], XmlLimits) -> Result<XmlNode, XmlError>,
+) -> Result<XmlNode, PersistenceCodecError> {
     let bound = input.len().max(1);
     let Some(limits) = XmlLimits::new(bound, bound, bound, bound, bound) else {
         unreachable!("max(1) makes every persistence XML limit non-zero");
     };
     let body = strip_inert_doctype(input, expected);
-    let root = parse_with_limits(body.as_ref(), limits)?;
+    let root = read(body.as_ref(), limits)?;
     if root.name != expected {
         return Err(PersistenceCodecError::WrongRoot);
     }
@@ -122,7 +130,7 @@ fn strip_inert_doctype<'a>(input: &'a [u8], expected: &str) -> Cow<'a, [u8]> {
 ///
 /// Returns [`PersistenceCodecError`] for malformed/bounded XML, a wrong root, or duplicate status.
 pub fn parse_accelerate(input: &[u8]) -> Result<PersistedAccelerateConfiguration, PersistenceCodecError> {
-    let root = parse_root(input, "AccelerateConfiguration")?;
+    let root = parse_root_with(input, "AccelerateConfiguration", parse_legacy_persistence_with_limits)?;
     Ok(PersistedAccelerateConfiguration {
         status: optional_scalar_text(&root, "Status")?,
     })
@@ -134,7 +142,7 @@ pub fn serialize_accelerate(value: &PersistedAccelerateConfiguration) -> Vec<u8>
     let mut writer = XmlWriter::fragment();
     writer.open("AccelerateConfiguration", None);
     if let Some(status) = value.status.as_deref() {
-        writer.element("Status", status);
+        writer.legacy_persistence_element("Status", status);
     }
     writer.close();
     writer.finish().into_bytes()

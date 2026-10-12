@@ -28,6 +28,7 @@ mod dto_bridge;
 mod lifecycle;
 mod logging_website;
 mod notification;
+mod public_access_block;
 mod replication;
 
 pub use accelerate_payment::{
@@ -699,14 +700,14 @@ pub fn serialize_bucket_encryption(value: &PersistedBucketEncryptionConfiguratio
 /// # Errors
 ///
 /// Returns [`PersistenceCodecError`] for malformed XML, a wrong root, a repeated switch, or an
-/// invalid boolean lexical form.
+/// invalid boolean lexical form or an element nested inside a switch.
 pub fn parse_public_access_block(input: &[u8]) -> Result<PersistedPublicAccessBlockConfiguration, PersistenceCodecError> {
     let root = parse_persistence_root(input, "PublicAccessBlockConfiguration")?;
     Ok(PersistedPublicAccessBlockConfiguration {
-        block_public_acls: optional_bool_child(&root, "BlockPublicAcls")?,
-        ignore_public_acls: optional_bool_child(&root, "IgnorePublicAcls")?,
-        block_public_policy: optional_bool_child(&root, "BlockPublicPolicy")?,
-        restrict_public_buckets: optional_bool_child(&root, "RestrictPublicBuckets")?,
+        block_public_acls: public_access_block::optional_bool_child(&root, "BlockPublicAcls")?,
+        ignore_public_acls: public_access_block::optional_bool_child(&root, "IgnorePublicAcls")?,
+        block_public_policy: public_access_block::optional_bool_child(&root, "BlockPublicPolicy")?,
+        restrict_public_buckets: public_access_block::optional_bool_child(&root, "RestrictPublicBuckets")?,
     })
 }
 

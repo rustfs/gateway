@@ -20,7 +20,7 @@
 
 use core::fmt;
 
-use rustfs_gateway_xml::{XmlError, XmlLimits, XmlNode, XmlWriter, parse_with_limits};
+use rustfs_gateway_xml::{XmlError, XmlLimits, XmlNode, XmlWriter, parse_legacy_persistence_with_limits, parse_with_limits};
 
 use crate::ext::{CodecPolicy, ExtError, Extensions, PersistedXml, UnknownElementPolicy};
 
@@ -133,11 +133,19 @@ impl From<XmlError> for CorsTaggingCodecError {
 }
 
 fn parse_root(input: &[u8], name: &str) -> Result<XmlNode, CorsTaggingCodecError> {
+    parse_root_with(input, name, parse_with_limits)
+}
+
+fn parse_root_with(
+    input: &[u8],
+    name: &str,
+    read: fn(&[u8], XmlLimits) -> Result<XmlNode, XmlError>,
+) -> Result<XmlNode, CorsTaggingCodecError> {
     let bound = input.len().max(1);
     let Some(limits) = XmlLimits::new(bound, bound, bound, bound, bound) else {
         unreachable!("max(1) makes every persistence XML limit non-zero");
     };
-    let root = parse_with_limits(input, limits)?;
+    let root = read(input, limits)?;
     if root.name != name {
         return Err(CorsTaggingCodecError::WrongRoot);
     }
@@ -254,7 +262,7 @@ fn parse_cors_rule(rule: &XmlNode) -> Result<PersistedCorsRule, CorsTaggingCodec
         return Err(CorsTaggingCodecError::MissingField("AllowedOrigin"));
     }
     let max_age_seconds = optional_text(rule, "MaxAgeSeconds")?
-        .map(|value| value.parse().map_err(|_| CorsTaggingCodecError::InvalidMaxAge))
+        .map(|value| parse_legacy_i32(&value))
         .transpose()?;
     let allowed_headers: Vec<_> = rule.children_named("AllowedHeader").map(|node| node.text.clone()).collect();
     let expose_headers: Vec<_> = rule.children_named("ExposeHeader").map(|node| node.text.clone()).collect();
@@ -266,6 +274,36 @@ fn parse_cors_rule(rule: &XmlNode) -> Result<PersistedCorsRule, CorsTaggingCodec
         id: optional_text(rule, "ID")?,
         max_age_seconds,
     })
+}
+
+// Legacy-compat (rustfs/backlog#2734): the stored integer is a signed digit prefix, with a
+// sign alone yielding zero. Whole-text parsing would reject old readable suffixes; trimming
+// would accept leading whitespace that the old reader refuses.
+fn parse_legacy_i32(raw: &str) -> Result<i32, CorsTaggingCodecError> {
+    let (negative, digits) = match raw.as_bytes() {
+        [b'-', digits @ ..] => (true, digits),
+        [b'+', digits @ ..] => (false, digits),
+        digits => (false, digits),
+    };
+    if digits.len() == raw.len() && !digits.first().is_some_and(u8::is_ascii_digit) {
+        return Err(CorsTaggingCodecError::InvalidMaxAge);
+    }
+    digits
+        .iter()
+        .take_while(|digit| digit.is_ascii_digit())
+        .try_fold(0i32, |value, digit| {
+            let digit = i32::from(*digit - b'0');
+            value
+                .checked_mul(10)
+                .and_then(|value| {
+                    if negative {
+                        value.checked_sub(digit)
+                    } else {
+                        value.checked_add(digit)
+                    }
+                })
+                .ok_or(CorsTaggingCodecError::InvalidMaxAge)
+        })
 }
 
 /// Serializes CORS with the pinned old field order and element form.
@@ -308,9 +346,9 @@ pub fn serialize_cors(value: &PersistedCorsConfiguration) -> Vec<u8> {
 /// # Errors
 ///
 /// Returns [`CorsTaggingCodecError`] for malformed XML, a wrong root, a missing or repeated
-/// `TagSet`, or a repeated tag key or value.
+/// `TagSet`, a repeated tag key or value, or an element nested inside either scalar.
 pub fn parse_tagging(input: &[u8]) -> Result<PersistedTagging, CorsTaggingCodecError> {
-    let root = parse_root(input, "Tagging")?;
+    let root = parse_root_with(input, "Tagging", parse_legacy_persistence_with_limits)?;
     let mut tag_sets = root.children_named("TagSet");
     let tag_set = tag_sets.next().ok_or(CorsTaggingCodecError::MissingField("TagSet"))?;
     if tag_sets.next().is_some() {
@@ -322,7 +360,7 @@ pub fn parse_tagging(input: &[u8]) -> Result<PersistedTagging, CorsTaggingCodecE
             if tag
                 .children
                 .iter()
-                .any(|child| !["Key", "Value"].contains(&child.name.as_str()))
+                .any(|child| !["Key", "Value"].contains(&child.name.as_str()) || !child.children.is_empty())
             {
                 return Err(CorsTaggingCodecError::UnexpectedElement);
             }
@@ -344,10 +382,10 @@ pub fn serialize_tagging(value: &PersistedTagging) -> Vec<u8> {
     for tag in &value.tag_set {
         writer.open("Tag", None);
         if let Some(key) = tag.key.as_deref() {
-            writer.element("Key", key);
+            writer.legacy_persistence_element("Key", key);
         }
         if let Some(value) = tag.value.as_deref() {
-            writer.element("Value", value);
+            writer.legacy_persistence_element("Value", value);
         }
         writer.close();
     }
