@@ -117,6 +117,10 @@ difference only where an `x-id` hint caused it, so the same difference from any 
 a real misroute — fails. `when_bucket` does the same for text the first path segment must hold (the escaped
 bucket separator `%2F`).
 
+A `when_header` entry additionally requires that HTTP field in the request, with case-insensitive
+name matching. Without request context it cannot apply. Annotation/copy entries require both
+`annotation` and `x-amz-copy-source`, so a copy misroute without the selector remains a failure.
+
 When an s3s output member cannot be held by the gateway output, the diff reports that member and
 compares nothing else for that output: there is no gateway answer to compare it with.
 

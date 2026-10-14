@@ -20,7 +20,8 @@
 //! id refuses the whole file); judging a request's findings against it — a finding matched by an
 //! entry is known, a message wording difference is reported as information, and every other
 //! finding fails; an entry that names a `when_query` parameter applies only to a request that
-//! carries it, and one that names a `when_bucket` text only to a request whose first path segment
+//! carries it, a `when_header` field only to a request carrying that header, and one that names
+//! a `when_bucket` text only to a request whose first path segment
 //! holds it; and
 //! naming the entries whose review date has passed.
 //! NOT responsible for: finding differences (`decode.rs`), or comparing the entry set with the
@@ -90,6 +91,9 @@ pub struct KnownDiff {
     /// same finding from a request without it is a new difference.
     #[serde(default)]
     pub when_query: Option<String>,
+    /// A header the request must carry for this entry to apply, matched case-insensitively.
+    #[serde(default)]
+    pub when_header: Option<String>,
     /// Text the first path segment (where a path-style request names its bucket) must contain,
     /// ASCII case aside, for the entry to apply, such as `%2F`: like `when_query`, it confines a
     /// difference to the request feature that causes it, and the same text in a key does not
@@ -105,12 +109,18 @@ impl KnownDiff {
             (Some(name), Some(scope)) => scope.query.iter().any(|carried| carried == name),
             (Some(_), None) => false,
         };
+        let header_applies = match (&self.when_header, request) {
+            (None, _) => true,
+            (Some(name), Some(scope)) => scope.headers.iter().any(|carried| carried.eq_ignore_ascii_case(name)),
+            (Some(_), None) => false,
+        };
         let path_applies = match (&self.when_bucket, request) {
             (None, _) => true,
             (Some(text), Some(scope)) => scope.bucket.contains(&text.to_ascii_lowercase()),
             (Some(_), None) => false,
         };
         query_applies
+            && header_applies
             && path_applies
             && self.kind == finding.kind
             && (self.operation == finding.operation || self.operation == ANY_OPERATION)
@@ -259,6 +269,11 @@ impl KnownDiffs {
             {
                 return Err(RegisterError(format!("{}: when_query {name:?} is not a query parameter name", entry.id)));
             }
+            if let Some(name) = &entry.when_header
+                && http::HeaderName::from_bytes(name.as_bytes()).is_err()
+            {
+                return Err(RegisterError(format!("{}: when_header {name:?} is not an HTTP field name", entry.id)));
+            }
             if entry
                 .when_bucket
                 .as_deref()
@@ -306,7 +321,7 @@ impl KnownDiffs {
     }
 
     /// Judges `findings` against the register, knowing nothing of the request: an entry with a
-    /// `when_query` never applies.
+    /// `when_query` or `when_header` never applies.
     #[must_use]
     pub fn verdict(&self, findings: Vec<Finding>) -> Verdict {
         self.judge(findings, None)
@@ -317,6 +332,7 @@ impl KnownDiffs {
     pub fn verdict_for(&self, request: &RawRequest, findings: Vec<Finding>) -> Verdict {
         let scope = Scope {
             query: query_names(&request.target),
+            headers: request.headers.iter().map(|(name, _)| name.clone()).collect(),
             bucket: request
                 .target
                 .split_once('?')
@@ -346,6 +362,8 @@ impl KnownDiffs {
 struct Scope {
     /// The query parameter names, as sent.
     query: Vec<String>,
+    /// The header names as supplied; matching is ASCII case-insensitive.
+    headers: Vec<String>,
     /// The first path segment, ASCII-lowercased.
     bucket: String,
 }

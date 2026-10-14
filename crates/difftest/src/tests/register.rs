@@ -419,3 +419,56 @@ fn annotation_route_registration_rejects_unrelated_findings() {
         assert!(!register.verdict_for(&request, differences).passed(), "{gateway}/{s3s}");
     }
 }
+
+/// Negative — copy/annotation registrations require the query, exact operation and exact values.
+#[test]
+fn copy_annotation_registration_rejects_unrelated_findings() {
+    let register = KnownDiffs::checked_in().expect("the register parses");
+    for (item, gateway, s3s) in [
+        (Item::Route, "CopyObject", "PutObjectAnnotation"),
+        (Item::Outcome, "handled", "400 InvalidRequest: missing query: annotationName"),
+    ] {
+        let found = || vec![finding("CopyObject", item.clone(), gateway, s3s)];
+        for target in ["/bkt/k", "/bkt/k?prefix=annotation", "/bkt/k?annotationName=a"] {
+            let request = crate::RawRequest::put(target, b"").header("x-amz-copy-source", "/src/k");
+            assert!(!register.verdict_for(&request, found()).passed(), "{target}/{item}");
+        }
+        assert!(!register.verdict(found()).passed(), "a request scope is required for {item}");
+        let no_copy = crate::RawRequest::put("/bkt/k?annotation=1", b"");
+        assert!(
+            !register.verdict_for(&no_copy, found()).passed(),
+            "a copy-source header is required for {item}"
+        );
+        let upper = crate::RawRequest::put("/bkt/k?annotation=1", b"").header("X-Amz-Copy-Source", "/src/k");
+        assert!(
+            register.verdict_for(&upper, found()).passed(),
+            "header spelling is case-insensitive for {item}"
+        );
+        let request = crate::RawRequest::put("/bkt/k?annotation=1", b"").header("x-amz-copy-source", "/src/k");
+        for (operation, gateway, s3s) in [
+            ("PutObject", gateway, s3s),
+            ("CopyObject", "unrelated gateway value", s3s),
+            ("CopyObject", gateway, "unrelated legacy value"),
+        ] {
+            let differences = vec![finding(operation, item.clone(), gateway, s3s)];
+            assert!(!register.verdict_for(&request, differences).passed(), "{operation}/{gateway}/{s3s}");
+        }
+    }
+}
+
+/// Negative — a header scope must name a valid HTTP field, not an empty name or separator.
+#[test]
+fn header_scope_rejects_invalid_names() {
+    for name in ["", "copy source", "x-amz-copy-source:"] {
+        let text = format!(
+            r#"{VALID}when_header = "{name}"
+"#
+        );
+        assert!(refused(&text).contains("when_header"), "{name:?}");
+    }
+    let text = format!(
+        r#"{VALID}when_header = "X-Amz-Copy-Source"
+"#
+    );
+    assert!(KnownDiffs::parse(&text).is_ok(), "a valid field name is accepted");
+}

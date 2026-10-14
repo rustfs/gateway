@@ -861,6 +861,32 @@ when_query = "annotation"
 reason = "The original issue #1441 artifact follows the routes in kd-decode-0085: PutObject rejects its malformed SHA512 checksum, while the legacy annotation decoder rejects the absent annotationName. The full comparison observes no status or code difference; only the exact observed message pair is accepted (https://github.com/rustfs/gateway/issues/1441)."
 expires = "2027-03-31"
 
+# ── Decode: annotation and copy-header precedence (nightly artifact, issue #1446) ──
+
+[[diff]]
+id = "kd-decode-0087"
+kind = "decode"
+operation = "CopyObject"
+item = "route"
+gateway = "CopyObject"
+s3s = "PutObjectAnnotation"
+when_query = "annotation"
+when_header = "x-amz-copy-source"
+reason = "The default annotation route excludes x-amz-copy-source in spec/operations/PutObjectAnnotation.toml; the legacy route selects annotation before copy in crates/core/src/route/legacy_rustfs.rs. The copy header selects CopyObject in the default route. This records the existing selector policy (https://github.com/rustfs/gateway/issues/1446); the exact operation pair and annotation query leave other routing defects unregistered."
+expires = "2027-03-31"
+
+[[diff]]
+id = "kd-decode-0088"
+kind = "decode"
+operation = "CopyObject"
+item = "outcome"
+gateway = "handled"
+s3s = "400 InvalidRequest: missing query: annotationName"
+when_query = "annotation"
+when_header = "x-amz-copy-source"
+reason = "For the original issue #1446 artifact and a minimal annotation/copy-header row, the default CopyObject decoder reaches its handler while the legacy annotation decoder refuses the missing annotationName. Only this exact outcome pair under the triggering query is accepted (https://github.com/rustfs/gateway/issues/1446); other statuses, codes, messages and outcomes remain new findings."
+expires = "2027-03-31"
+
 # ── Encode: what the gateway writes on every answer ─────────────────────────────────────────
 
 [[diff]]

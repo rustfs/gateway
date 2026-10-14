@@ -340,6 +340,7 @@ pub(super) fn requests() -> Vec<RequestRow> {
                 .header("x-amz-checksum-sha512", "MJ7MSJwS1utMxA9QyQLydNbxf9JlnDaNCVbRbDP2DDoH2Bdz33Fd"),
             &["kd-decode-0085", "kd-decode-0086"],
         ),
+        row("copy-annotation-query", RawRequest::put("/bkt/k?annotation=1", b"").header("x-amz-copy-source", "/src/k"), &["kd-decode-0087", "kd-decode-0088"]),
         // ── GetObject / HeadObject ──
         row("get-full", get_full(), &[]),
         row("get-bare", RawRequest::get("/bkt/k"), &[]),

@@ -1,0 +1,13 @@
+PUT /bkt/k?annotation=1&uploadIdPUT /bkt/dst
+x-amz-copy-source: /src/dir/a%20b.txt?versionId=v9
+x-x-amz-copy-source-server-side-encryption-customer-key-md5: hRasmdxgYDKV3nvbahU1MA==
+x-amz-metadata-directive: REPLACE
+x-amz-tagging-directive: REPLACE
+x-amz-tagging: a=b
+x-amz-meta-a: 1
+content-type: te/txp01 Jan 2026 00:00:00 GMT
+x-amz-acl: private
+x-amz-grant-rexpected-bucket-owner-directive: REPLACE
+x-amz-tagging-directive: 
+x-amz-sdk-checkserver-side-encryption-customer-key: MDExxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxr-side-encryption-c=nDaNCVuschtomer-key-md5: dhRascmdxgYDK3dV3nvbahU1MA==
+
