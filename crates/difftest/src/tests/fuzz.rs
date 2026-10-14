@@ -124,6 +124,18 @@ fn annotation_upload_id_artifact_passes_the_decode_property() {
     check_decode(&render(&request)).expect("the exact annotation route difference is registered");
 }
 
+/// Positive — the original copy/annotation artifact is compared in full and route-fuzzed.
+#[test]
+fn copy_annotation_artifact_passes_the_decode_property() {
+    let input = include_bytes!("../../../../fuzz/seeds/decode_diff/copy-annotation");
+    let request = request_of(input).expect("the original artifact is a compared request");
+    check_decode(input).expect("the exact copy/annotation route difference is registered");
+    let diff = crate::decode_diff(&request).expect("both stacks run");
+    let register = crate::KnownDiffs::checked_in().expect("the register parses");
+    let verdict = register.verdict_for(&request, diff.findings());
+    assert!(verdict.passed(), "{:?}", verdict.failures);
+}
+
 /// Positive — a fixed sample of mutated seeds passes the decode property on stable: the fuzzer's
 /// search, a few hundred steps of it, in every CI run.
 #[test]
