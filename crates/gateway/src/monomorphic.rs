@@ -89,6 +89,26 @@ where
         self.call(Request::from_parts(parts, http_body_util::Full::new(body))).await
     }
 
+    /// Receives an external exchange using the same explicit refusal as the dynamic facade.
+    ///
+    /// External wire registration is not connected in this revision; the exchange is never
+    /// prepared, and the existing monomorphic pipeline refuses it before invoking a handler.
+    #[cfg(feature = "external-payload")]
+    pub async fn call_with_external_payload<B>(
+        &self,
+        mut request: Request<B>,
+        exchange: crate::external_payload::ExternalPayloadExchange,
+    ) -> Response<Body>
+    where
+        B: http_body::Body + Send + 'static,
+        B::Data: Send,
+        B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+    {
+        drop(exchange);
+        request.extensions_mut().insert(crate::external_marker::ExternalEntry);
+        self.call(request).await
+    }
+
     /// The operations this service answers, sorted.
     pub fn operations(&self) -> impl Iterator<Item = &'static str> {
         self.service.operations()

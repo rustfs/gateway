@@ -541,6 +541,7 @@ impl S3Service {
         // a filter that writes an `Authorization` header does not make an anonymous request
         // authenticated, and one that deletes it does not make a signed request fail.
         let (mut parts, body) = request.into_parts();
+        let external_entry = crate::external_marker::explicit_entry(&parts.extensions);
         crate::legacy_addressing::rewrite_double_slash_root(&self.inner.names, &mut parts);
         let headers = parts.headers.clone();
         // The client facts, installed where the wire seam below can correct them and acceptance
@@ -559,10 +560,15 @@ impl S3Service {
             }
         }
 
+        let external_headers = crate::external_marker::present(&headers) || crate::external_marker::present(&parts.headers);
         let wire = match WireRequest::accept(Request::from_parts(parts, body), &self.inner.limits) {
             Ok(wire) => wire,
             Err(reject) => return outcome.refuse_at(Refused::Wire, self.inner.view_policy.wire_refusal(reject)),
         };
+        // Check caller and filter markers so external uploads cannot commit their empty wire bodies as ordinary objects.
+        if external_entry || external_headers {
+            return outcome.refuse_at(Refused::Wire, crate::external_marker::refusal(response_kind));
+        }
         let config = config.wire();
         // The RustFS profile's cleartext customer-key gate, where legacy RustFS asks it: first.
         let early = self.inner.view_policy.plaintext_customer_keys;

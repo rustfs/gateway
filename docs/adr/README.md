@@ -98,6 +98,7 @@ second copy is a second thing to keep in sync.
 | 0040 | Opaque single-segment captures | Accepted |
 | 0041 | Form claims, and RustFS's STS endpoint behind one | Accepted |
 | 0042 | A route-bound bearer floor for zip downloads | Accepted |
+| 0043 | Owned external object-data ports | Accepted |
 
 The index is hand-maintained. Generating it would cost more than it saves until
 there are at least fifteen records.

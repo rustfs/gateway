@@ -80,7 +80,7 @@ enumeration surface instead of changing the wire error code.
 
 ## Building
 
-- **MSRV: 1.97.1.** Every crate declares `rust-version = "1.97.1"`; CI verifies it in a dedicated job. The policy —
+- **MSRV: 1.97.1.** Every workspace crate declares `rust-version = "1.97.1"`; CI verifies it in a dedicated job. The policy —
   including when an MSRV bump is allowed — is in [docs/msrv.md](docs/msrv.md).
 - **Development toolchain: 1.97.1**, pinned in `rust-toolchain.toml` together with the components (`rustfmt`, `clippy`,
   `rust-src`, `rust-analyzer`) that repository automation expects. `rustup` picks it up automatically inside a checkout.
@@ -100,6 +100,10 @@ cargo fmt --all                  # format (settings in rustfmt.toml)
 
 `cargo xtask` is the repository's automation entry point; prefer it over hand-rolled scripts so that local runs and CI
 stay identical.
+
+Optional external payload interfaces and the independent private build are documented
+in [RDMA builds](docs/rdma-build.md). That integration uses Rust 1.98.1; ordinary
+workspace builds retain the toolchain above and require no private source.
 
 ## Relationship to s3s
 
