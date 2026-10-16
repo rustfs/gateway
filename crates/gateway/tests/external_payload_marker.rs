@@ -99,6 +99,196 @@ mod execution {
     };
     use rustfs_gateway::{BoxFuture, ByteStream, HandlerContext, HandlerError, TransportSecurity, collect};
 
+    struct Query(Arc<AtomicUsize>);
+    impl rustfs_gateway::external_payload::ExternalControlQuery for Query {
+        fn query(
+            self: Box<Self>,
+            request: ExternalRequest,
+        ) -> BoxFuture<'static, Result<rustfs_gateway::external_payload::ExternalControlResponse, HandlerError>> {
+            Box::pin(async move {
+                assert!(matches!(request.context().operation(), "PutObject" | "GetObject"));
+                assert!(request.context().principal().is_some());
+                assert_eq!(request.binding_digest(), &[3; 32]);
+                self.0.fetch_add(1, Ordering::SeqCst);
+                rustfs_gateway::external_payload::ExternalControlResponse::new(
+                    StatusCode::OK,
+                    HeaderMap::new(),
+                    b"original-result".to_vec(),
+                )
+                .map_err(|_| HandlerError::internal_error("control output is invalid"))
+            })
+        }
+    }
+    struct QueryGetBackend(Arc<AtomicUsize>);
+    impl Handler<dto::GetObject> for QueryGetBackend {
+        async fn call(&self, _: Req<dto::GetObject>) -> HandlerResult<dto::GetObject> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Ok(Resp::new(dto::GetObjectOutput::default()))
+        }
+    }
+    fn get_query_request() -> http::Request<Full<Bytes>> {
+        let request = support::signed_with(Method::GET, "/bucket/object", &[("x-rustfs-rdma-binding", "opaque")]);
+        let (mut parts, body) = request.into_parts();
+        parts.extensions.insert(TransportSecurity::Encrypted);
+        http::Request::from_parts(parts, Full::new(body))
+    }
+    struct QueryGate {
+        route: bool,
+        input: bool,
+        route_calls: Arc<AtomicUsize>,
+        input_calls: Arc<AtomicUsize>,
+    }
+    impl rustfs_gateway::Authorizer for QueryGate {
+        fn authorize_route<'a>(
+            &'a self,
+            _: &'a rustfs_gateway::RequestContext<'a>,
+            _: &'a rustfs_gateway::AuthzRequest<'a>,
+        ) -> BoxFuture<'a, rustfs_gateway::Decision> {
+            self.route_calls.fetch_add(1, Ordering::SeqCst);
+            Box::pin(async move {
+                if self.route {
+                    rustfs_gateway::Decision::Allow
+                } else {
+                    rustfs_gateway::Decision::Deny
+                }
+            })
+        }
+        fn authorize_input<'a>(
+            &'a self,
+            _: &'a rustfs_gateway::RequestContext<'a>,
+            request: &'a rustfs_gateway::InputAuthzRequest<'a>,
+        ) -> BoxFuture<'a, rustfs_gateway::InputDecisions> {
+            self.input_calls.fetch_add(1, Ordering::SeqCst);
+            let decision = if self.input {
+                rustfs_gateway::Decision::Allow
+            } else {
+                rustfs_gateway::Decision::Deny
+            };
+            let decisions = request.decide_all(decision, |_| decision);
+            Box::pin(async move { decisions })
+        }
+    }
+    #[tokio::test]
+    async fn authorized_control_query_observes_without_executing_the_backend() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let queries = Arc::new(AtomicUsize::new(0));
+        let service = support::wired_at_signed_time()
+            .register_external_payload::<dto::PutObject, _>(Arc::new(VerifiedBackend(calls.clone())))
+            .build()
+            .unwrap();
+        let response = service
+            .call_with_external_control_bound(request(&[]), binding(), Box::new(Query(queries.clone())))
+            .await;
+        let response = collect(response).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK, "{:?}", response.body());
+        assert_eq!(response.body().as_ref(), b"original-result");
+        assert_eq!(queries.load(Ordering::SeqCst), 1);
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+    }
+    #[tokio::test]
+    async fn authorized_get_control_query_observes_without_executing_the_backend() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let queries = Arc::new(AtomicUsize::new(0));
+        let service = support::wired_at_signed_time()
+            .register::<dto::GetObject, _>(Arc::new(QueryGetBackend(calls.clone())))
+            .build()
+            .unwrap();
+        let response = service
+            .call_with_external_control_bound(get_query_request(), binding(), Box::new(Query(queries.clone())))
+            .await;
+        let response = collect(response).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK, "{:?}", response.body());
+        assert_eq!(response.body().as_ref(), b"original-result");
+        assert_eq!(queries.load(Ordering::SeqCst), 1);
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+    }
+    #[tokio::test]
+    async fn get_control_query_cannot_bypass_either_authorization_stage() {
+        for (route, input) in [(false, true), (true, false)] {
+            let calls = Arc::new(AtomicUsize::new(0));
+            let queries = Arc::new(AtomicUsize::new(0));
+            let route_calls = Arc::new(AtomicUsize::new(0));
+            let input_calls = Arc::new(AtomicUsize::new(0));
+            let service = support::wired_at_signed_time()
+                .authorizer(QueryGate {
+                    route,
+                    input,
+                    route_calls: route_calls.clone(),
+                    input_calls: input_calls.clone(),
+                })
+                .register::<dto::GetObject, _>(Arc::new(QueryGetBackend(calls.clone())))
+                .build()
+                .unwrap();
+            let response = service
+                .call_with_external_control_bound(get_query_request(), binding(), Box::new(Query(queries.clone())))
+                .await;
+            assert_eq!(response.status(), StatusCode::FORBIDDEN);
+            assert!(route_calls.load(Ordering::SeqCst) > 0);
+            assert_eq!(input_calls.load(Ordering::SeqCst) > 0, route);
+            assert_eq!(queries.load(Ordering::SeqCst), 0);
+            assert_eq!(calls.load(Ordering::SeqCst), 0);
+        }
+    }
+    #[tokio::test]
+    async fn control_query_cannot_bypass_either_authorization_stage() {
+        for (route, input) in [(false, true), (true, false)] {
+            let calls = Arc::new(AtomicUsize::new(0));
+            let queries = Arc::new(AtomicUsize::new(0));
+            let route_calls = Arc::new(AtomicUsize::new(0));
+            let input_calls = Arc::new(AtomicUsize::new(0));
+            let service = support::wired_at_signed_time()
+                .authorizer(QueryGate {
+                    route,
+                    input,
+                    route_calls: route_calls.clone(),
+                    input_calls: input_calls.clone(),
+                })
+                .register_external_payload::<dto::PutObject, _>(Arc::new(VerifiedBackend(calls.clone())))
+                .build()
+                .unwrap();
+            let response = service
+                .call_with_external_control_bound(request(&[]), binding(), Box::new(Query(queries.clone())))
+                .await;
+            assert_eq!(response.status(), StatusCode::FORBIDDEN);
+            assert!(route_calls.load(Ordering::SeqCst) > 0);
+            assert_eq!(input_calls.load(Ordering::SeqCst) > 0, route);
+            assert_eq!(queries.load(Ordering::SeqCst), 0);
+            assert_eq!(calls.load(Ordering::SeqCst), 0);
+        }
+    }
+    #[tokio::test]
+    async fn control_query_cannot_bypass_signature_or_binding() {
+        for signature in [false, true] {
+            let calls = Arc::new(AtomicUsize::new(0));
+            let queries = Arc::new(AtomicUsize::new(0));
+            let service = support::wired_at_signed_time()
+                .register_external_payload::<dto::PutObject, _>(Arc::new(VerifiedBackend(calls.clone())))
+                .build()
+                .unwrap();
+            let mut request = request(&[]);
+            if signature {
+                request
+                    .headers_mut()
+                    .insert("x-amz-date", HeaderValue::from_static("20200101T000000Z"));
+            } else {
+                // A valid signature over a different value isolates the expected-binding guard.
+                let signed = support::signed_external(
+                    Method::PUT,
+                    "/bucket/object",
+                    &[("content-length", "0"), ("x-rustfs-rdma-binding", "different")],
+                );
+                let (mut parts, body) = signed.into_parts();
+                parts.extensions.insert(TransportSecurity::Encrypted);
+                request = http::Request::from_parts(parts, Full::new(body));
+            }
+            let response = service
+                .call_with_external_control_bound(request, binding(), Box::new(Query(queries.clone())))
+                .await;
+            assert!(!response.status().is_success());
+            assert_eq!(queries.load(Ordering::SeqCst), 0);
+            assert_eq!(calls.load(Ordering::SeqCst), 0);
+        }
+    }
     struct Control;
     impl ExternalPayloadControl for Control {
         fn accept(&self) -> BoxFuture<'_, Result<(), ExternalPayloadError>> {

@@ -176,7 +176,7 @@ impl crate::S3Service {
             }
         }
     }
-    fn external_refusal(&self, message: &'static str) -> ExternalPayloadResponse {
+    pub(super) fn external_refusal(&self, message: &'static str) -> ExternalPayloadResponse {
         let error = crate::render::from_handler(
             HandlerError::new(rustfs_gateway_types::ErrorCode::INVALID_REQUEST, message),
             rustfs_gateway_core::ResponseKind::Other,
@@ -195,7 +195,9 @@ impl Drop for CancelOnDrop {
     }
 }
 pub(crate) fn bound_entry(extensions: &Extensions) -> bool {
-    extensions.get::<UploadEntry>().is_some() || extensions.get::<DownloadEntry>().is_some()
+    extensions.get::<UploadEntry>().is_some()
+        || extensions.get::<DownloadEntry>().is_some()
+        || extensions.get::<super::control::ControlEntry>().is_some()
 }
 pub(crate) fn upload_entry(extensions: &TransportExtensions) -> bool {
     extensions.get::<UploadEntry>().is_some()
@@ -320,6 +322,27 @@ async fn consume_until_cancelled(
 mod tests {
     use super::*;
 
+    #[test]
+    fn finite_control_response_accepts_bounded_bytes() {
+        let response = super::super::ExternalControlResponse::new(StatusCode::OK, HeaderMap::new(), vec![1; 16]);
+        assert!(response.is_ok());
+    }
+    #[test]
+    fn finite_control_response_rejects_oversized_payload() {
+        assert!(super::super::ExternalControlResponse::new(StatusCode::OK, HeaderMap::new(), vec![1; 65537]).is_err());
+    }
+    #[test]
+    fn finite_control_response_rejects_unbounded_header_inventory() -> Result<(), http::header::InvalidHeaderName> {
+        let mut headers = HeaderMap::new();
+        for index in 0..65 {
+            headers.insert(
+                http::HeaderName::from_bytes(format!("x-test-{index}").as_bytes())?,
+                HeaderValue::from_static("v"),
+            );
+        }
+        assert!(super::super::ExternalControlResponse::new(StatusCode::OK, headers, Vec::new()).is_err());
+        Ok(())
+    }
     #[tokio::test]
     async fn a_closed_request_observer_does_not_cancel_successful_output() {
         let (sender, receiver) = tokio::sync::watch::channel(false);

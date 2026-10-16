@@ -23,6 +23,9 @@
 //! control metadata, native execution and the final finite HTTPS response envelope.
 
 mod binding;
+mod control;
+pub(crate) use control::dispatch_control;
+pub use control::{ExternalControlQuery, ExternalControlResponse};
 mod dispatch;
 mod entry;
 mod upload;

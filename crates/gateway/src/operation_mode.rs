@@ -154,6 +154,13 @@ impl OperationMode for DynamicMode<'_> {
                 .await
                 .map_err(StaticDispatchError::Input)?;
             let authorized = entry.authorize(decoded, &decisions).map_err(StaticDispatchError::Denied)?;
+            #[cfg(feature = "external-payload")]
+            if let Some(response) = crate::external_payload::dispatch_control(&request_context).await {
+                drop(authorized);
+                return response
+                    .map(StaticDispatchOutcome::Settled)
+                    .map_err(StaticDispatchError::Handler);
+            }
             let hide_missing_object = request_config.hide_missing_object();
             let body_monitor = request_config.take_body_monitor();
             let cleanup_grace = request_config.config().handler_cleanup_grace();
