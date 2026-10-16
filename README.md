@@ -101,8 +101,8 @@ cargo fmt --all                  # format (settings in rustfmt.toml)
 `cargo xtask` is the repository's automation entry point; prefer it over hand-rolled scripts so that local runs and CI
 stay identical.
 
-Optional external payload interfaces and the independent private build are documented
-in [RDMA builds](docs/rdma-build.md). That integration uses Rust 1.98.1; ordinary
+Optional [external object-data execution](docs/external-object-data.md) and the independent private
+build are documented in [RDMA builds](docs/rdma-build.md). That integration uses Rust 1.98.1; ordinary
 workspace builds retain the toolchain above and require no private source.
 
 ## Relationship to s3s

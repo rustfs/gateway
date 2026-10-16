@@ -69,6 +69,46 @@ impl fmt::Display for ExternalPayloadError {
 }
 impl std::error::Error for ExternalPayloadError {}
 
+impl ExternalPayloadError {
+    /// Supplies an explicit producer classification while retaining this error as its source.
+    #[must_use]
+    pub fn into_stream_error(self) -> rustfs_gateway_stream::StreamError {
+        let class = rustfs_gateway_stream::ProducerFailureClass::from(self);
+        rustfs_gateway_stream::StreamError::classified_upstream(Box::new(self), class)
+    }
+}
+
+impl From<ExternalPayloadError> for rustfs_gateway_stream::ProducerFailureClass {
+    fn from(error: ExternalPayloadError) -> Self {
+        match error {
+            ExternalPayloadError::NotAccepted => Self::NotAccepted,
+            ExternalPayloadError::Cancelled => Self::Cancelled,
+            ExternalPayloadError::AlreadyBound => Self::AlreadyBound,
+            ExternalPayloadError::LengthMismatch => Self::LengthMismatch,
+            ExternalPayloadError::UnconsumedInput => Self::UnconsumedInput,
+            ExternalPayloadError::Integrity => Self::Integrity,
+            ExternalPayloadError::Transport => Self::Transport,
+            ExternalPayloadError::Unavailable => Self::Unavailable,
+        }
+    }
+}
+
+impl From<rustfs_gateway_stream::ProducerFailureClass> for ExternalPayloadError {
+    fn from(class: rustfs_gateway_stream::ProducerFailureClass) -> Self {
+        use rustfs_gateway_stream::ProducerFailureClass;
+        match class {
+            ProducerFailureClass::NotAccepted => Self::NotAccepted,
+            ProducerFailureClass::Cancelled => Self::Cancelled,
+            ProducerFailureClass::AlreadyBound => Self::AlreadyBound,
+            ProducerFailureClass::LengthMismatch => Self::LengthMismatch,
+            ProducerFailureClass::UnconsumedInput => Self::UnconsumedInput,
+            ProducerFailureClass::Integrity => Self::Integrity,
+            ProducerFailureClass::Transport => Self::Transport,
+            ProducerFailureClass::Unavailable => Self::Unavailable,
+        }
+    }
+}
+
 /// Trusted transport control for one authenticated binding.
 ///
 /// Implementations own progress and cleanup independently of observer futures. Cancellation is

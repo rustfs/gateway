@@ -45,6 +45,10 @@ pub(crate) trait OperationMode {
     fn extra_permissions(entry: &Self::Entry) -> &'static [rustfs_gateway_core::ExtraPermission];
 
     fn request_body_mode(entry: &Self::Entry) -> RequestBodyMode;
+    #[cfg(feature = "external-payload")]
+    fn supports_external_payload(_entry: &Self::Entry) -> bool {
+        false
+    }
 
     fn dispatch<'a, S, T, E, Route, RouteFuture, Read, ReadFuture, Input, InputFuture>(
         &'a self,
@@ -83,6 +87,11 @@ pub(crate) struct DynamicMode<'a> {
 }
 
 impl OperationMode for DynamicMode<'_> {
+    #[cfg(feature = "external-payload")]
+    fn supports_external_payload(entry: &Self::Entry) -> bool {
+        entry.supports_external_payload()
+    }
+
     type Entry = crate::dispatch::OperationDispatch;
 
     fn entry(&self, operation: &str) -> Option<Self::Entry> {

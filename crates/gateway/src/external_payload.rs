@@ -18,9 +18,18 @@
 //! NOT responsible for: device access, peer control, authentication, or storage publication.
 //! Upstream: the ordinary authenticated S3 pipeline. Downstream: trusted host integrations.
 //!
-//! These ports prepare the integration boundary. This revision rejects external wire requests:
-//! the signature-bound codec, logical checksum monitor and operation registration are not yet
-//! connected. Enabling the feature does not advertise successful external-data execution.
+//! Bound requests use the ordinary S3 security and logical integrity pipeline. Explicit upload
+//! registration retains business admission and publication verification. The private host owns
+//! control metadata, native execution and the final finite HTTPS response envelope.
+
+mod binding;
+mod dispatch;
+mod entry;
+mod upload;
+pub use binding::ExternalPayloadBinding;
+pub use entry::ExternalPayloadResponse;
+pub(crate) use entry::{apply_logical_head, bound_entry, record_download_context, upload_entry};
+pub(crate) use upload::bind_input;
 
 use http::{HeaderMap, Request, Response, StatusCode};
 use rustfs_gateway_core::{BoxFuture, HandlerContext, RequestContextView};
@@ -35,11 +44,10 @@ pub use rustfs_gateway_core::external_payload::{
 };
 
 impl crate::S3Service {
-    /// Receives a single-use external exchange from trusted host assembly.
+    /// Refuses an unbound external exchange with `501 NotImplemented`.
     ///
-    /// The signature-bound wire codec and external operation registration are not connected in
-    /// this revision. Every call is therefore explicitly refused with `501 NotImplemented`, and
-    /// the exchange is dropped without preparing or activating it. Ordinary S3 calls are unchanged.
+    /// Use `call_with_external_payload_bound` with exact signature-bound fields to execute an
+    /// external request. This unbound entry drops its exchange without preparation or activation.
     pub async fn call_with_external_payload<B>(
         &self,
         mut request: Request<B>,

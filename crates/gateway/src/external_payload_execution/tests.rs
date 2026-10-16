@@ -314,10 +314,15 @@ async fn input_transport_failures_keep_their_first_reason() {
 #[tokio::test]
 async fn input_typed_failures_keep_their_first_reason() {
     for expected in [
+        ExternalPayloadError::NotAccepted,
+        ExternalPayloadError::Cancelled,
+        ExternalPayloadError::AlreadyBound,
+        ExternalPayloadError::LengthMismatch,
+        ExternalPayloadError::UnconsumedInput,
         ExternalPayloadError::Integrity,
         ExternalPayloadError::Unavailable,
         ExternalPayloadError::Transport,
     ] {
-        assert_input_failure_is_preserved(StreamError::upstream(Box::new(expected)), expected).await;
+        assert_input_failure_is_preserved(expected.into_stream_error(), expected).await;
     }
 }

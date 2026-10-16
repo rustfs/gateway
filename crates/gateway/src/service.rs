@@ -347,10 +347,6 @@ impl S3Service {
         B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
         M: OperationMode,
     {
-        // One minting and one reading of the clock, at the top, side by side. Everything below is
-        // handed both values; nothing below holds either source, so neither a second identifier nor
-        // a second instant can be produced — which is what lets the `Date` header and the skew
-        // window name the same moment.
         // Settings and middleware came from the same entry snapshot. No stage reloads the store.
         let request_cancellation = request.extensions().get::<tokio::sync::watch::Receiver<bool>>().cloned();
         let config = RequestConfig::enter(config).with_request_cancellation(request_cancellation);
@@ -363,8 +359,6 @@ impl S3Service {
             .identification()
             .settle(self.inner.traces.mint(), &request, &runtime.routing.router);
         let now = self.inner.clock.now();
-        // Read before the request is consumed, and the only thing kept out of it: the RFC 9110 body rules are
-        // stated over the request method, and every stage below has either forgotten it or never had it.
         let method = request.method().clone();
         // Read here for the same reason as the method: this is the last place the whole request exists, and
         // `WireRequest::accept` publishes no way back to its extensions. Absent means cleartext, which is what
@@ -542,8 +536,11 @@ impl S3Service {
         // authenticated, and one that deletes it does not make a signed request fail.
         let (mut parts, body) = request.into_parts();
         let external_entry = crate::external_marker::explicit_entry(&parts.extensions);
+        let external_bound = crate::external_marker::bound_entry(&parts.extensions);
         crate::legacy_addressing::rewrite_double_slash_root(&self.inner.names, &mut parts);
         let headers = parts.headers.clone();
+        #[cfg(feature = "external-payload")]
+        crate::external_payload::apply_logical_head(&mut parts);
         // The client facts, installed where the wire seam below can correct them and acceptance
         // then freezes them for both authorization stages and the handler (rustfs/backlog#2752).
         ClientFacts::install(&mut parts.extensions);
@@ -565,18 +562,15 @@ impl S3Service {
             Ok(wire) => wire,
             Err(reject) => return outcome.refuse_at(Refused::Wire, self.inner.view_policy.wire_refusal(reject)),
         };
-        // Check caller and filter markers so external uploads cannot commit their empty wire bodies as ordinary objects.
-        if external_entry || external_headers {
+        if external_entry || (external_headers && !external_bound) {
             return outcome.refuse_at(Refused::Wire, crate::external_marker::refusal(response_kind));
         }
         let config = config.wire();
-        // The RustFS profile's cleartext customer-key gate, where legacy RustFS asks it: first.
         let early = self.inner.view_policy.plaintext_customer_keys;
         if let Some(refusal) = early.refusal(&self.inner.sse, connection, &headers, response_kind) {
             return outcome.refuse_at(Refused::Wire, refusal);
         }
 
-        // The host's one reading, and the bucket label SigV2 signs from it (rustfs/gateway#1232).
         let (resolved, vhost_bucket) = crate::ext::resolve_host(&*self.inner.host_resolver, &wire);
         let config = config.targeted();
         let target_origin = resolved.origin();
@@ -683,13 +677,18 @@ impl S3Service {
             return outcome.refuse_handler(HandlerError::new(ErrorCode::NOT_IMPLEMENTED, NOT_REGISTERED_MESSAGE));
         };
         let request_body_mode = M::request_body_mode(&op);
+        #[cfg(feature = "external-payload")]
+        if external_bound
+            && crate::external_payload::upload_entry(wire.transport_extensions())
+            && !M::supports_external_payload(&op)
+        {
+            return outcome
+                .refuse_handler(HandlerError::not_implemented("the registered handler does not support external uploads"));
+        }
         let declared_length = wire.framing().declared_length();
 
-        // The body is taken out before anything borrows the head, so the head can be read across
-        // every await below while the body is owned separately.
         let mut pending = None;
         let wire = wire.map_body(|body| pending = Some(body));
-        // What the transport knows of the body's length, before anything reads it.
         let transport_length = pending.as_ref().and_then(|body| http_body::Body::size_hint(body).exact());
 
         // Two decisions, one call. The bucket has one source — the host's, when the resolver read
@@ -710,10 +709,6 @@ impl S3Service {
         };
         let config = config.routed();
 
-        // The routed seam. Read-only, and this is the position that makes it so: the operation, the
-        // bucket and the key are all decided by the line above, and the whole point of the single
-        // normalisation is that they have one producer. A seam able to write them would be a
-        // second.
         if !runtime.filters.is_empty() {
             let view = RoutedView {
                 operation,
@@ -862,7 +857,7 @@ impl S3Service {
                         wire.raw_path().as_str(),
                         wire.host().raw_for_signing(),
                         &payload,
-                        declared_length,
+                        if external_bound { Some(0) } else { declared_length },
                     )
                     .with_post_policy_limits(post_policy_limits)
                     .with_claimed_route(claimed)
@@ -1344,6 +1339,9 @@ impl S3Service {
                 }
                 AcceptedBody::PostObject(post) => (*post).handoff(&metadata_admission)?,
             };
+            #[cfg(feature = "external-payload")]
+            let body = crate::external_payload::bind_input(body, body_wire.transport_extensions())
+                .map_err(|error| from_handler(error, response_kind, ConnectionIntent::MayKeepAlive))?;
             Ok((
                 ReadForDecode {
                     policy: state.policy,
@@ -1480,6 +1478,8 @@ impl S3Service {
             let context = RequestContextView::from_pipeline(operation, input_wire, addressed, input_verdict, caller_secret)
                 .map(|context| context.with_path_params(path_params).with_subjects(input_subjects.cloned()));
             let context = context.ok_or_else(|| map(HandlerError::internal_error("a rejected request reached its handler")))?;
+            #[cfg(feature = "external-payload")]
+            crate::external_payload::record_download_context(&context);
             Ok((decisions, config, sse, context))
         };
         let execution = match std::panic::catch_unwind(AssertUnwindSafe(|| {
@@ -1608,7 +1608,7 @@ struct Outcome<'a> {
 /// Absent is cleartext. The alternative — assuming encryption when nobody said — is the failure
 /// mode where a development deployment that was never given a transport quietly serves customer
 /// keys over HTTP.
-fn connection_security(extensions: &http::Extensions) -> TransportSecurity {
+pub(crate) fn connection_security(extensions: &http::Extensions) -> TransportSecurity {
     extensions
         .get::<TransportSecurity>()
         .copied()

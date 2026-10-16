@@ -27,6 +27,18 @@ pub(crate) fn present(headers: &http::HeaderMap) -> bool {
     headers.keys().any(|name| name.as_str().starts_with("x-rustfs-rdma-"))
 }
 
+pub(crate) fn bound_entry(extensions: &http::Extensions) -> bool {
+    #[cfg(feature = "external-payload")]
+    {
+        crate::external_payload::bound_entry(extensions)
+    }
+    #[cfg(not(feature = "external-payload"))]
+    {
+        let _ = extensions;
+        false
+    }
+}
+
 pub(crate) fn explicit_entry(extensions: &http::Extensions) -> bool {
     #[cfg(feature = "external-payload")]
     {

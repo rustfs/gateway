@@ -283,16 +283,16 @@ impl PayloadStream for DormantInput {
             }
             Poll::Ready(Err(error)) => {
                 this.ended = true;
-                let reason = match error.kind() {
-                    StreamErrorKind::IncompleteBody | StreamErrorKind::LengthMismatch { .. } => {
-                        ExternalPayloadError::LengthMismatch
-                    }
-                    StreamErrorKind::Upstream(source) => source
-                        .downcast_ref::<ExternalPayloadError>()
-                        .copied()
-                        .unwrap_or(ExternalPayloadError::Transport),
-                    StreamErrorKind::Io(_) | StreamErrorKind::PolledAfterEof => ExternalPayloadError::Transport,
-                };
+                let reason = error.producer_failure_class().map_or_else(
+                    || match error.kind() {
+                        StreamErrorKind::IncompleteBody | StreamErrorKind::LengthMismatch { .. } => {
+                            ExternalPayloadError::LengthMismatch
+                        }
+                        StreamErrorKind::Upstream(_) => ExternalPayloadError::Transport,
+                        StreamErrorKind::Io(_) | StreamErrorKind::PolledAfterEof => ExternalPayloadError::Transport,
+                    },
+                    ExternalPayloadError::from,
+                );
                 state.stop(reason, this.context.control.as_ref());
                 Poll::Ready(Err(error))
             }
