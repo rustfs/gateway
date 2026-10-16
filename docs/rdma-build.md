@@ -20,6 +20,7 @@ git submodule update --init vendor/rustfs-ucx
 The equivalent Cargo command is:
 
 ```sh
+source vendor/rustfs-ucx/scripts/build-env.sh
 cargo +1.98.1 build --manifest-path rdma/Cargo.toml --features rdma --release -j 2
 ```
 
@@ -40,8 +41,9 @@ Requests carrying the reserved external-payload markers are rejected until a
 complete authenticated wire integration is installed; an empty HTTP PUT cannot
 silently become a normal zero-byte object.
 
-This branch prepares the typed integration interfaces. The connected data engine
-and authenticated external S3 wire protocol remain unavailable, and capability
-absence is returned explicitly. Interface tests establish API compatibility and
-failure behaviour; operational transfer and performance require later execution
-evidence.
+The pinned private integration implements authenticated S3 HTTPS coordination and
+external upload/download data. The host explicitly installs the integration and
+supplies its trusted connection and authorization context. Production RustFS
+storage composition remains host adapter work. Functional tests using software
+transports establish API and lifecycle behavior; NIC RDMA, DPU compatibility and
+performance require validation on the target deployment.
