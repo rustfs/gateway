@@ -25,6 +25,7 @@ use rustfs_gateway_xml::{XmlError, XmlLimits, XmlWriter, parse_with_limits};
 
 mod accelerate_payment;
 mod dto_bridge;
+mod encryption;
 mod lifecycle;
 mod logging_website;
 mod notification;
@@ -585,7 +586,7 @@ pub fn serialize_object_lock(value: &PersistedObjectLockConfiguration) -> Vec<u8
 /// Returns [`PersistenceCodecError`] for malformed XML, a wrong root, an invalid boolean,
 /// an unexpected nested element, or a repeated known field.
 pub fn parse_bucket_encryption(input: &[u8]) -> Result<PersistedBucketEncryptionConfiguration, PersistenceCodecError> {
-    let root = parse_persistence_root(input, "ServerSideEncryptionConfiguration")?;
+    let root = encryption::parse_root(input)?;
     let rules = root
         .children_named("Rule")
         .map(parse_bucket_encryption_rule)
@@ -643,12 +644,12 @@ fn parse_encryption_by_default(
     default: &rustfs_gateway_xml::XmlNode,
 ) -> Result<PersistedEncryptionByDefault, PersistenceCodecError> {
     reject_unknown_encryption_children(default, &["SSEAlgorithm", "KMSMasterKeyID"])?;
-    let Some(sse_algorithm) = optional_child_text(default, "SSEAlgorithm")? else {
+    let Some(sse_algorithm) = encryption::optional_text(default, "SSEAlgorithm")? else {
         return Err(PersistenceCodecError::MissingRequiredField);
     };
     Ok(PersistedEncryptionByDefault {
         sse_algorithm,
-        kms_master_key_id: optional_child_text(default, "KMSMasterKeyID")?,
+        kms_master_key_id: encryption::optional_text(default, "KMSMasterKeyID")?,
     })
 }
 
@@ -672,7 +673,7 @@ pub fn serialize_bucket_encryption(value: &PersistedBucketEncryptionConfiguratio
         if let Some(default) = rule.apply_server_side_encryption_by_default.as_ref() {
             writer.open("ApplyServerSideEncryptionByDefault", None);
             if let Some(key_id) = default.kms_master_key_id.as_deref() {
-                writer.element("KMSMasterKeyID", key_id);
+                writer.legacy_persistence_element("KMSMasterKeyID", key_id);
             }
             writer.element("SSEAlgorithm", &default.sse_algorithm);
             writer.close();
@@ -702,7 +703,7 @@ pub fn serialize_bucket_encryption(value: &PersistedBucketEncryptionConfiguratio
 /// Returns [`PersistenceCodecError`] for malformed XML, a wrong root, a repeated switch, or an
 /// invalid boolean lexical form or an element nested inside a switch.
 pub fn parse_public_access_block(input: &[u8]) -> Result<PersistedPublicAccessBlockConfiguration, PersistenceCodecError> {
-    let root = parse_persistence_root(input, "PublicAccessBlockConfiguration")?;
+    let root = public_access_block::parse_root(input)?;
     Ok(PersistedPublicAccessBlockConfiguration {
         block_public_acls: public_access_block::optional_bool_child(&root, "BlockPublicAcls")?,
         ignore_public_acls: public_access_block::optional_bool_child(&root, "IgnorePublicAcls")?,
@@ -712,7 +713,7 @@ pub fn parse_public_access_block(input: &[u8]) -> Result<PersistedPublicAccessBl
 }
 
 fn optional_bool_child(parent: &rustfs_gateway_xml::XmlNode, name: &str) -> Result<Option<bool>, PersistenceCodecError> {
-    match optional_child_text(parent, name)?.as_deref() {
+    match encryption::optional_text(parent, name)?.as_deref() {
         Some("true" | "TRUE") => Ok(Some(true)),
         Some("false" | "FALSE") => Ok(Some(false)),
         Some(_) => Err(PersistenceCodecError::InvalidBoolean),

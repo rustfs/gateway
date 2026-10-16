@@ -168,10 +168,19 @@ fn optional_text(parent: &XmlNode, name: &'static str) -> Result<Option<String>,
 /// Returns [`CorsTaggingCodecError`] for malformed XML, a wrong root, a repeated scalar, a
 /// missing required list member, or an invalid max-age integer.
 pub fn parse_cors(input: &[u8]) -> Result<PersistedCorsConfiguration, CorsTaggingCodecError> {
-    let root = parse_root(input, "CORSConfiguration")?;
+    let root = parse_root_with(input, "CORSConfiguration", parse_legacy_persistence_with_limits)?;
     let cors_rules: Vec<_> = root
         .children_named("CORSRule")
-        .map(parse_cors_rule)
+        .map(|rule| {
+            if rule
+                .children
+                .iter()
+                .any(|child| STATIC_CORS_RULE_CHILDREN.contains(&child.name.as_str()) && !child.children.is_empty())
+            {
+                return Err(CorsTaggingCodecError::UnexpectedElement);
+            }
+            parse_cors_rule(rule)
+        })
         .collect::<Result<_, _>>()?;
     if cors_rules.is_empty() {
         return Err(CorsTaggingCodecError::MissingField("CORSRule"));
@@ -322,7 +331,7 @@ pub fn serialize_cors(value: &PersistedCorsConfiguration) -> Vec<u8> {
             writer.element("AllowedMethod", method);
         }
         for origin in &rule.allowed_origins {
-            writer.element("AllowedOrigin", origin);
+            writer.legacy_persistence_element("AllowedOrigin", origin);
         }
         if let Some(headers) = rule.expose_headers.as_deref() {
             for header in headers {

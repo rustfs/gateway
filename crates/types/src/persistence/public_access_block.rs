@@ -14,13 +14,26 @@
 
 //! Public Access Block persistence scalar checks.
 //!
-//! Responsible for: rejecting nested elements in the four stored boolean fields.
+//! Responsible for: legacy text decoding and nested-element checks for stored boolean fields.
 //! NOT responsible for: HTTP policy or scalar rules in other configuration families.
-//! Upstream: bounded XML nodes. Downstream: the Public Access Block persistence reader.
+//! Upstream: stored XML bytes. Downstream: the Public Access Block persistence reader.
 
-use rustfs_gateway_xml::XmlNode;
+use rustfs_gateway_xml::{XmlLimits, XmlNode, parse_legacy_persistence_with_limits};
 
 use super::{PersistenceCodecError, optional_child};
+
+/// Keeps the historical text interpretation local to persisted Public Access Block.
+pub(super) fn parse_root(input: &[u8]) -> Result<XmlNode, PersistenceCodecError> {
+    let bound = input.len().max(1);
+    let Some(limits) = XmlLimits::new(bound, bound, bound, bound, bound) else {
+        unreachable!("max(1) makes every persistence XML limit non-zero");
+    };
+    let root = parse_legacy_persistence_with_limits(input, limits)?;
+    if root.name != "PublicAccessBlockConfiguration" {
+        return Err(PersistenceCodecError::WrongRoot);
+    }
+    Ok(root)
+}
 
 pub(super) fn optional_bool_child(parent: &XmlNode, name: &str) -> Result<Option<bool>, PersistenceCodecError> {
     let Some(child) = optional_child(parent, name)? else {

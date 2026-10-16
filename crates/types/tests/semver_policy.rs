@@ -25,6 +25,9 @@ mod legacy_xml_text_contract;
 #[cfg(feature = "compat-s3s-rustfs")]
 #[path = "legacy_xml/writer.rs"]
 mod legacy_xml_writer_contract;
+#[cfg(feature = "compat-s3s-rustfs")]
+#[path = "legacy_xml/writer_scalar_contract.rs"]
+mod legacy_xml_writer_scalar_contract;
 
 use std::path::PathBuf;
 use std::process::Command;

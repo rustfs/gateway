@@ -21,7 +21,7 @@
 
 use std::borrow::Cow;
 
-use rustfs_gateway_xml::{XmlError, XmlLimits, XmlNode, XmlWriter, parse_legacy_persistence_with_limits, parse_with_limits};
+use rustfs_gateway_xml::{XmlError, XmlLimits, XmlNode, XmlWriter, parse_legacy_persistence_with_limits};
 
 use super::{PersistenceCodecError, optional_child};
 
@@ -53,10 +53,6 @@ impl PersistedRequestPaymentConfiguration {
     pub fn requester_pays(&self) -> bool {
         self.payer == "Requester"
     }
-}
-
-fn parse_root(input: &[u8], expected: &str) -> Result<rustfs_gateway_xml::XmlNode, PersistenceCodecError> {
-    parse_root_with(input, expected, parse_with_limits)
 }
 
 fn parse_root_with(
@@ -158,7 +154,7 @@ pub fn serialize_accelerate(value: &PersistedAccelerateConfiguration) -> Vec<u8>
 /// Returns [`PersistenceCodecError`] for malformed/bounded XML, a wrong root, missing payer, or a
 /// duplicate payer.
 pub fn parse_request_payment(input: &[u8]) -> Result<PersistedRequestPaymentConfiguration, PersistenceCodecError> {
-    let root = parse_root(input, "RequestPaymentConfiguration")?;
+    let root = parse_root_with(input, "RequestPaymentConfiguration", parse_legacy_persistence_with_limits)?;
     let payer = optional_scalar_text(&root, "Payer")?.ok_or(PersistenceCodecError::MissingRequiredField)?;
     Ok(PersistedRequestPaymentConfiguration { payer })
 }
@@ -178,7 +174,7 @@ fn optional_scalar_text(parent: &rustfs_gateway_xml::XmlNode, name: &str) -> Res
 pub fn serialize_request_payment(value: &PersistedRequestPaymentConfiguration) -> Vec<u8> {
     let mut writer = XmlWriter::fragment();
     writer.open("RequestPaymentConfiguration", None);
-    writer.element("Payer", &value.payer);
+    writer.legacy_persistence_element("Payer", &value.payer);
     writer.close();
     writer.finish().into_bytes()
 }
