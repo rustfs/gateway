@@ -264,3 +264,60 @@ async fn an_admission_failure_keeps_its_reason_for_later_observers() {
     let second = context.verify_before_publish().await.unwrap_err();
     assert_eq!(first.message(), second.message());
 }
+
+struct FailingInput(Option<StreamError>);
+impl PayloadStream for FailingInput {
+    fn poll_read(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<PayloadRead, StreamError>> {
+        Poll::Ready(Err(self.get_mut().0.take().expect("the failing fixture is polled once")))
+    }
+    fn caps(&self) -> PayloadCaps {
+        PayloadCaps::PUSH | PayloadCaps::KNOWN_LENGTH
+    }
+    fn len_hint(&self) -> Option<u64> {
+        Some(1)
+    }
+}
+
+async fn assert_input_failure_is_preserved(error: StreamError, expected: ExternalPayloadError) {
+    let (context, _) = setup(1, false);
+    let original = error.to_string();
+    let body = ByteStream::new(Box::pin(FailingInput(Some(error)))).unwrap();
+    let mut body = context.bind_input(body).unwrap();
+    context.accept_after_admission().await.unwrap();
+    assert_eq!(read(&mut body).await.unwrap_err().to_string(), original);
+    let first = context.verify_before_publish().await.unwrap_err();
+    assert_eq!(first.message(), expected.to_string());
+    context.cancel();
+    let second = context.verify_before_publish().await.unwrap_err();
+    assert_eq!(second.message(), expected.to_string());
+    assert!(!context.is_verified());
+}
+
+#[tokio::test]
+async fn input_length_failures_keep_their_first_reason() {
+    for error in [StreamError::incomplete_body(), StreamError::length_mismatch(1, 2)] {
+        assert_input_failure_is_preserved(error, ExternalPayloadError::LengthMismatch).await;
+    }
+}
+
+#[tokio::test]
+async fn input_transport_failures_keep_their_first_reason() {
+    for error in [
+        StreamError::from(std::io::Error::other("input read failed")),
+        StreamError::upstream(Box::new(std::io::Error::other("external producer failed"))),
+        StreamError::polled_after_eof(),
+    ] {
+        assert_input_failure_is_preserved(error, ExternalPayloadError::Transport).await;
+    }
+}
+
+#[tokio::test]
+async fn input_typed_failures_keep_their_first_reason() {
+    for expected in [
+        ExternalPayloadError::Integrity,
+        ExternalPayloadError::Unavailable,
+        ExternalPayloadError::Transport,
+    ] {
+        assert_input_failure_is_preserved(StreamError::upstream(Box::new(expected)), expected).await;
+    }
+}

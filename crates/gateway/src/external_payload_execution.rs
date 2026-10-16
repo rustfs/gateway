@@ -27,7 +27,7 @@ use rustfs_gateway_core::external_payload::{
 use rustfs_gateway_core::{
     BoxFuture, HandlerCancellation, HandlerCancellationSource, HandlerContext, HandlerError, HandlerResult, Operation, Req,
 };
-use rustfs_gateway_stream::{ByteStream, PayloadCaps, PayloadRead, PayloadStream, StreamError};
+use rustfs_gateway_stream::{ByteStream, PayloadCaps, PayloadRead, PayloadStream, StreamError, StreamErrorKind};
 use std::pin::Pin;
 use std::sync::{
     Arc, Mutex,
@@ -283,7 +283,17 @@ impl PayloadStream for DormantInput {
             }
             Poll::Ready(Err(error)) => {
                 this.ended = true;
-                this.context.cancel();
+                let reason = match error.kind() {
+                    StreamErrorKind::IncompleteBody | StreamErrorKind::LengthMismatch { .. } => {
+                        ExternalPayloadError::LengthMismatch
+                    }
+                    StreamErrorKind::Upstream(source) => source
+                        .downcast_ref::<ExternalPayloadError>()
+                        .copied()
+                        .unwrap_or(ExternalPayloadError::Transport),
+                    StreamErrorKind::Io(_) | StreamErrorKind::PolledAfterEof => ExternalPayloadError::Transport,
+                };
+                state.stop(reason, this.context.control.as_ref());
                 Poll::Ready(Err(error))
             }
             Poll::Pending => Poll::Pending,
