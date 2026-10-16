@@ -197,10 +197,22 @@ reader = re.search(
 )
 if reader is None:
     fail("cannot locate the persisted PublicAccessBlock reader")
-if 'parse_persistence_root(input, "PublicAccessBlockConfiguration")' not in reader.group(1):
+if 'public_access_block::parse_root(input)' not in reader.group(1):
     fail("the persisted PublicAccessBlock reader no longer reads its root")
 if "children" in reader.group(1) or "nknown" in reader.group(1):
     fail("the persisted PublicAccessBlock reader inspects unknown children; persisted reads stay lenient (ADR-0007)")
+root_reader = re.search(
+    r'pub\(super\) fn parse_root\(input: &\[u8\]\) -> Result<XmlNode, PersistenceCodecError> \{\n(.*?)\n\}\n',
+    source("crates/types/src/persistence/public_access_block.rs"),
+    re.DOTALL,
+)
+if root_reader is None or not re.search(
+    r'if root\.name != "PublicAccessBlockConfiguration" \{\s*return Err\(PersistenceCodecError::WrongRoot\);\s*\}',
+    root_reader.group(1),
+):
+    fail("the persisted PublicAccessBlock root helper no longer checks its root")
+if "children" in root_reader.group(1) or "nknown" in root_reader.group(1):
+    fail("the persisted PublicAccessBlock root helper inspects unknown children; persisted reads stay lenient (ADR-0007)")
 boundary = source("crates/core/tests/security_request_policy.rs")
 for name in [
     "n_a_security_request_refuses_unknown_public_access_root",

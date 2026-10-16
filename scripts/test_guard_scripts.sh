@@ -15901,7 +15901,7 @@ mut_codec_policy_persisted_pab_made_strict() {
 from pathlib import Path
 path = Path("crates/types/src/persistence.rs")
 text = path.read_text()
-old = '    let root = parse_persistence_root(input, "PublicAccessBlockConfiguration")?;\n'
+old = '    let root = public_access_block::parse_root(input)?;\n'
 if text.count(old) != 1:
     raise SystemExit("persisted public access block mutation anchor is not unique")
 strict = old + '    if root.children.iter().any(|child| child.name == "FutureSetting") {\n        return Err(PersistenceCodecError::InvalidBoolean);\n    }\n'
@@ -15911,6 +15911,39 @@ PYEOF
 expect_fail check_codec_policy.sh \
     'the persisted PublicAccessBlock reader refusing an unknown element' \
     mut_codec_policy_persisted_pab_made_strict
+
+mut_codec_policy_pab_root_check_removed() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/types/src/persistence/public_access_block.rs")
+text = path.read_text()
+old = '    if root.name != "PublicAccessBlockConfiguration" {\n        return Err(PersistenceCodecError::WrongRoot);\n    }\n'
+if text.count(old) != 1:
+    raise SystemExit("public access block root-check mutation anchor is not unique")
+path.write_text(text.replace(old, "", 1))
+PYEOF
+}
+expect_fail check_codec_policy.sh \
+    'the persisted PublicAccessBlock root helper losing its root check' \
+    mut_codec_policy_pab_root_check_removed \
+    'the persisted PublicAccessBlock root helper no longer checks its root'
+
+mut_codec_policy_pab_root_made_strict() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/types/src/persistence/public_access_block.rs")
+text = path.read_text()
+old = '    let root = parse_legacy_persistence_with_limits(input, limits)?;\n'
+if text.count(old) != 1:
+    raise SystemExit("public access block root-leniency mutation anchor is not unique")
+strict = old + '    if root.children.iter().any(|child| child.name == "FutureSetting") {\n        return Err(PersistenceCodecError::InvalidBoolean);\n    }\n'
+path.write_text(text.replace(old, strict, 1))
+PYEOF
+}
+expect_fail check_codec_policy.sh \
+    'the persisted PublicAccessBlock root helper refusing an unknown element' \
+    mut_codec_policy_pab_root_made_strict \
+    'the persisted PublicAccessBlock root helper inspects unknown children'
 
 # The object-lock family's grading (rustfs/backlog#1726): the same four moves against the three
 # lock writes and the persisted ObjectLockConfiguration reader.
