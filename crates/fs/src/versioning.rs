@@ -31,23 +31,21 @@ use std::path::PathBuf;
 
 use rustfs_gateway::dto::{
     DeleteObject, DeleteObjectOutput, GetBucketVersioning, GetBucketVersioningOutput, PutBucketVersioning,
-    PutBucketVersioningOutput, PutObject, PutObjectOutput, ServerSideEncryption, Status, StorageClass,
+    PutBucketVersioningOutput, Status, StorageClass,
 };
 use rustfs_gateway::{
     ETag, ErrorCode, Handler, HandlerError, HandlerErrorContext, HandlerResult, MissingObject, ObjectKey, Preconditions, Req,
-    ResourceVisibility, Resp, Timestamp, request_checksum, validate_versioning,
+    ResourceVisibility, Resp, Timestamp, validate_versioning,
 };
 use sha2::{Digest as _, Sha256};
 
-use super::conditions::{self, conditions, guard_write};
-use super::lifecycle::ExpiringObject;
+use super::conditions::guard_write;
 use super::reads::Selected;
 use super::records::{
     ObjectAttributes, RecordKind, VersionRecord, decode_version_record, encode_version_record, validate_attributes,
 };
-use super::tagging::{TAGS_FILE, serialize_tags, tags_from_header};
-use super::transitions::requested_storage_class;
-use super::{FsBackend, drain_with_trailers, etag, no_such_key, storage_error};
+use super::tagging::{TAGS_FILE, serialize_tags};
+use super::{FsBackend, no_such_key, storage_error};
 
 pub(super) const STATUS_FILE: &str = "versioning-status";
 pub(super) const SEQUENCE_FILE: &str = "version-sequence";
@@ -637,68 +635,6 @@ impl Handler<GetBucketVersioning> for FsBackend {
         Ok(Resp::new(GetBucketVersioningOutput {
             status,
             mfa_delete: None,
-        }))
-    }
-}
-
-impl Handler<PutObject> for FsBackend {
-    async fn call(&self, request: Req<PutObject>) -> HandlerResult<PutObject> {
-        let input = request.into_input();
-        // The body is drained before any attribute is judged, so a refusal is reported as itself
-        // rather than as a body the handler abandoned. Every refusal still precedes publication:
-        // a malformed tag header or an unknown class fails the request with no version written.
-        let (bytes, trailers) = drain_with_trailers(input.body).await?;
-        let checksum = request_checksum(input.checksum_spec, &trailers)?;
-        let encryption = self
-            .write_encryption(
-                input.bucket.as_str(),
-                input.server_side_encryption.as_ref().map(ServerSideEncryption::as_str),
-                input.ssekms_key_id.as_deref(),
-            )
-            .await?;
-        let attributes = ObjectAttributes {
-            part_lengths: None,
-            part_metadata: None,
-            checksum: checksum.map(super::checksums::StoredChecksum::plain),
-            headers: request_content_headers!(self, input).with_encryption(encryption.clone()),
-            storage_class: requested_storage_class(input.storage_class.as_ref())?,
-            tags: tags_from_header(input.tagging.as_deref())?,
-            metadata: input.metadata,
-        };
-        let e_tag = etag(&bytes)?;
-        // A write reads only `If-Match` and `If-None-Match`; the two date conditions are a read's.
-        let write_conditions = conditions(
-            input.if_match.as_deref(),
-            None,
-            input.if_none_match.as_deref(),
-            None,
-            Timestamp::from_secs(self.clock.now().unix_seconds()),
-        )?;
-        let published = self
-            .publish_object_if(
-                input.bucket.as_str(),
-                input.key.as_str(),
-                &bytes,
-                &e_tag,
-                &attributes,
-                conditions::any(&write_conditions).then_some(&write_conditions),
-            )
-            .await?;
-        let written = ExpiringObject {
-            key: input.key.as_str(),
-            size: published.size,
-            tags: &attributes.tags,
-            modified: published.last_modified.secs(),
-        };
-        Ok(Resp::new(PutObjectOutput {
-            checksum_spec: checksum,
-            expiration: self.expiration_header(input.bucket.as_str(), &written).await.map(Into::into),
-            size: Some(published.size),
-            e_tag,
-            version_id: published.version_id,
-            server_side_encryption: encryption.reported_algorithm(),
-            ssekms_key_id: encryption.kms_key_id,
-            ..PutObjectOutput::default()
         }))
     }
 }

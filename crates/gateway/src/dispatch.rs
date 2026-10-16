@@ -59,6 +59,9 @@
 //! workspace forbids `unsafe` — so what it proves is that the code path holding the allocations was
 //! not taken.
 
+#[cfg(feature = "external-payload")]
+mod external_payload;
+
 use std::collections::BTreeMap;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -135,6 +138,8 @@ type Encode = Arc<dyn Fn(ErasedOutput, &MetaView<'_>, u16, http::HeaderMap) -> R
 /// Everything the service needs about one registered operation, with `O` erased.
 #[derive(Clone)]
 pub(crate) struct OperationDispatch {
+    #[cfg(feature = "external-payload")]
+    external_payload: bool,
     codec: ErasedCodec,
     invoke: Invoke,
     encode: Encode,
@@ -257,6 +262,8 @@ impl OperationDispatch {
         });
 
         Self {
+            #[cfg(feature = "external-payload")]
+            external_payload: false,
             codec,
             invoke,
             encode,

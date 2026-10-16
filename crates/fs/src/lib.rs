@@ -33,12 +33,12 @@ use std::time::{Duration, UNIX_EPOCH};
 use md5::{Digest as _, Md5};
 use rustfs_gateway::dto::{
     AbortMultipartUpload, AbortMultipartUploadOutput, CreateMultipartUpload, CreateMultipartUploadOutput, ListParts,
-    ListPartsOutput, Owner, Part, ServerSideEncryption, UploadPart, UploadPartOutput,
+    ListPartsOutput, Owner, Part, ServerSideEncryption,
 };
 use rustfs_gateway::{
     BucketName, ByteStream, Clock, ETag, ErrorCode, Handler, HandlerError, HandlerErrorContext, HandlerResult, MissingObject,
     ObjectKey, REGION_MATCH_POLICY, RegionMatchPolicy, RegionSet, Req, ResourceVisibility, Resp, Timestamp, TrailingHeaders,
-    US_EAST_1, UploadIdClaim, collect, normalize_location_constraint, request_checksum, resolve_upload, system_clock,
+    US_EAST_1, UploadIdClaim, collect, normalize_location_constraint, resolve_upload, system_clock,
 };
 use sha2::Sha256;
 use tokio::io::AsyncWriteExt as _;
@@ -132,6 +132,7 @@ mod checksums;
 pub(crate) mod copy;
 mod deletes;
 mod encryption;
+mod external_input;
 mod lifecycle;
 mod lifecycle_scheduler;
 mod listing;
@@ -140,12 +141,14 @@ mod part_lengths;
 mod part_metadata;
 pub mod policy;
 mod post_object;
+mod put_object;
 mod reads;
 mod records;
 mod registry;
 mod rustfs_parity;
 mod tagging;
 mod transitions;
+mod upload_part;
 mod upload_part_copy;
 mod uploads;
 mod version_listing;
@@ -566,37 +569,6 @@ impl FsBackend {
     }
 }
 
-impl Handler<UploadPart> for FsBackend {
-    async fn call(&self, request: Req<UploadPart>) -> HandlerResult<UploadPart> {
-        let input = request.into_input();
-        self.require_bucket(input.bucket.as_str()).await?;
-        let (bytes, trailers) = drain_with_trailers(input.body).await?;
-        if i64::try_from(bytes.len()).ok() != Some(input.content_length) {
-            return Err(HandlerError::new(
-                ErrorCode::INCOMPLETE_BODY,
-                "the request body did not match its declared content length",
-            ));
-        }
-        let (upload_id, record) = self.resolve_upload(&input.upload_id, &input.bucket, &input.key)?;
-        let claimed = request_checksum(input.checksum_spec, &trailers)?;
-        let checksum_spec = match record.checksum {
-            Some(checksum) => Some(checksum.validate_part(claimed, &bytes)?),
-            None => claimed,
-        };
-        self.store_part(input.bucket.as_str(), &upload_id, input.part_number, &bytes)
-            .await?;
-        // A part reports the encryption its upload was initiated under.
-        let encryption = record.attributes.headers.encryption();
-        Ok(Resp::new(UploadPartOutput {
-            e_tag: etag(&bytes)?,
-            checksum_spec,
-            server_side_encryption: encryption.reported_algorithm(),
-            ssekms_key_id: encryption.kms_key_id,
-            ..UploadPartOutput::default()
-        }))
-    }
-}
-
 impl Handler<ListParts> for FsBackend {
     async fn call(&self, request: Req<ListParts>) -> HandlerResult<ListParts> {
         let input = request.into_input();
@@ -667,4 +639,15 @@ impl Handler<AbortMultipartUpload> for FsBackend {
         tokio::fs::remove_dir_all(tombstone).await.map_err(|_| storage_error())?;
         Ok(Resp::new(AbortMultipartUploadOutput::default()))
     }
+}
+
+#[cfg(all(test, feature = "external-payload"))]
+#[test]
+fn object_uploads_explicitly_implement_external_publication_verification() {
+    fn capable<
+        T: rustfs_gateway::external_payload::ExternalPayloadHandler<rustfs_gateway::dto::PutObject>
+            + rustfs_gateway::external_payload::ExternalPayloadHandler<rustfs_gateway::dto::UploadPart>,
+    >() {
+    }
+    capable::<FsBackend>();
 }

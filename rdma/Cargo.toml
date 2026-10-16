@@ -1,0 +1,31 @@
+[package]
+name = "rustfs-gateway-rdma"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.98.1"
+license = "Apache-2.0"
+publish = false
+
+[workspace]
+resolver = "3"
+
+[package.metadata.gateway]
+ring = 2
+
+[features]
+default = []
+rdma = ["rustfs-ucx/native"]
+
+[lib]
+path = "../vendor/rustfs-ucx/integrations/gateway/src/lib.rs"
+
+[dependencies]
+rustfs-gateway = { path = "../crates/gateway", default-features = false, features = ["external-payload"] }
+rustfs-gateway-core = { path = "../crates/core", features = ["external-payload"] }
+rustfs-gateway-stream = { path = "../crates/stream" }
+rustfs-ucx = { path = "../vendor/rustfs-ucx", default-features = false }
+bytes = "1"
+http = "1"
+http-body = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["io-util", "rt", "sync", "time"] }
