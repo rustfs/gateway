@@ -135,10 +135,13 @@ fn read_backup_archive(bytes: &[u8]) -> Result<BTreeMap<String, Vec<u8>>, Backup
         let mut entry = archive
             .by_index(index)
             .map_err(|error| BackupArchiveError::Archive(error.to_string()))?;
+        let path = entry
+            .name()
+            .map_err(|error| BackupArchiveError::Archive(error.to_string()))?
+            .into_owned();
         if entry.is_dir() {
-            return Err(BackupArchiveError::Archive(format!("{} is a directory", entry.name())));
+            return Err(BackupArchiveError::Archive(format!("{path} is a directory")));
         }
-        let path = entry.name().to_owned();
         let mut content = Vec::new();
         entry
             .read_to_end(&mut content)

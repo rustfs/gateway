@@ -60,6 +60,7 @@ proptest = { workspace = true }
 # and cannot depend on this one, so the draft it renders is loaded here, in tests only.
 rustfs-gateway-corpus = { workspace = true }
 rcgen = { workspace = true }
+socket2 = { workspace = true }
 
 [dependencies]
 rustfs-gateway.workspace = true

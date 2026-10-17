@@ -32,7 +32,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 
 [dev-dependencies]
-zip = { version = "8.6.0", default-features = false }
+zip = { version = "9.0.4", default-features = false }
 # The operation decode/encode diff (rustfs/backlog#1762) runs the real gateway route and codec
 # against the pinned s3s oracle. Dev-only: the goldens library itself never links the runtime.
 rustfs-gateway-core = { workspace = true }

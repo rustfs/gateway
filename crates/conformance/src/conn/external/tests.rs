@@ -17,9 +17,10 @@
 //! Upstream: the external endpoint transport. Downstream: loopback peers and isolated case fixtures.
 
 use super::*;
+use socket2::{Domain, Protocol, Socket, Type};
 use std::fs;
 use std::io::{Read, Write};
-use std::net::TcpListener;
+use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::Path;
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -28,6 +29,17 @@ use std::time::Duration;
 
 use crate::cli::{self, exit};
 use crate::sut::{Profile, Sut, Transport};
+
+fn refused_endpoint() -> ((TcpStream, TcpStream), SocketAddr) {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind temporary listener");
+    let client = TcpStream::connect_timeout(&listener.local_addr().expect("listener address"), Duration::from_secs(1))
+        .expect("connect reserved client");
+    let (peer, _) = listener.accept().expect("accept reserved client");
+    let address = client.local_addr().expect("reserved address");
+    drop(listener);
+    // The live pair keeps the client port allocated without listening for new connections.
+    ((client, peer), address)
+}
 
 fn responding_server(response: &'static [u8]) -> (String, thread::JoinHandle<Vec<u8>>) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind listener");
@@ -341,13 +353,12 @@ fn cli_main_reaches_the_supplied_endpoint_and_judges_its_response() {
 #[test]
 fn cli_main_maps_refused_connection_to_environment() {
     let corpus = isolated_corpus();
-    let listener = TcpListener::bind("127.0.0.1:0").expect("reserve address");
-    let address = listener.local_addr().expect("reserved address");
-    drop(listener);
+    let (reservation, address) = refused_endpoint();
 
     let code = cli::main(&cli_args(corpus.path(), &format!("http://{address}")));
 
     assert_eq!(code, ExitCode::from(exit::ENVIRONMENT));
+    drop(reservation);
 }
 
 #[test]
@@ -631,9 +642,20 @@ fn body_delay_beyond_the_exchange_budget_fails_before_connecting() {
 
 #[test]
 fn reports_connection_refusal_as_an_environment_error() {
-    let listener = TcpListener::bind("127.0.0.1:0").expect("reserve address");
-    let address = listener.local_addr().expect("reserved address");
-    drop(listener);
+    let (reservation, address) = refused_endpoint();
+    let bind_probe = Socket::new(Domain::IPV4, Type::STREAM, Some(Protocol::TCP)).expect("create bind probe");
+    bind_probe.set_reuse_address(false).expect("disable address reuse");
+    assert!(
+        matches!(bind_probe.bind(&address.into()), Err(error) if error.kind() == std::io::ErrorKind::AddrInUse),
+        "the refused endpoint keeps its address reserved"
+    );
+    assert!(
+        matches!(
+            TcpStream::connect_timeout(&address, Duration::from_secs(1)),
+            Err(error) if error.kind() == std::io::ErrorKind::ConnectionRefused
+        ),
+        "the reserved endpoint refuses TCP connections"
+    );
     let endpoint = ExternalEndpoint::parse(&format!("http://{address}")).expect("local endpoint");
 
     let error = match endpoint.open(Instant::now() + Duration::from_secs(1)) {
@@ -642,4 +664,5 @@ fn reports_connection_refusal_as_an_environment_error() {
     };
 
     assert!(error.to_string().contains("connect"));
+    drop(reservation);
 }
