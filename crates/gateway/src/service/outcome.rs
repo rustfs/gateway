@@ -33,6 +33,13 @@ use crate::logging::Refused;
 use crate::render::{S3Error, from_handler, from_pre_auth, render};
 use crate::trace::RequestTrace;
 
+/// Whether an answer reached legacy RustFS's CORS layer.
+#[derive(PartialEq, Eq)]
+pub(super) enum LegacyCorsDisposition {
+    Decorate,
+    PlaintextCustomerKeyRefusal,
+}
+
 impl<'a> Outcome<'a> {
     /// An outcome that knows nothing yet, except which request it is about.
     pub(super) fn new(trace: &'a RequestTrace, method: &Method, credential_sentences: CredentialSentences) -> Self {
@@ -42,6 +49,7 @@ impl<'a> Outcome<'a> {
             identity: None,
             error: None,
             cors: None,
+            legacy_cors_disposition: LegacyCorsDisposition::Decorate,
             credential_sentences,
             refused: None,
             response_kind: if *method == Method::HEAD {

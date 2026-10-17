@@ -32,17 +32,20 @@
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use bytes::Bytes;
 use rustfs_gateway::dto::{
     CorsConfiguration, CorsRule, GetBucketVersioning, GetBucketVersioningOutput, ListBuckets, ListBucketsOutput,
 };
 use rustfs_gateway::{
-    BoxFuture, BucketName, CorsOrigins, CorsPolicy, CorsSource, CorsSourceError, Handler, HandlerResult, LegacyRustfsCors, Req,
-    Resp, S3Service, WireResponse,
+    BoxFuture, BucketName, CorsOrigins, CorsPolicy, CorsSource, CorsSourceError, Handler, HandlerError, HandlerResult,
+    LegacyRustfsCors, Req, Resp, S3Service, SseConfig, TransportSecurity, WireResponse,
 };
+use rustfs_gateway_core::PlaintextCustomerKeyAck;
+use rustfs_gateway_types::ErrorCode;
 
-use crate::support::{exchange_wire, signed_with, wired_at_signed_time};
+use crate::support::{element_text, exchange_wire, signed_with, wired_at_signed_time};
 
 /// The one bucket with a document: `https://app.example.com` may `GET`.
 const DOCUMENTED: &str = "documented";
@@ -485,4 +488,202 @@ async fn n_credentialed_fallback_must_preserve_the_handlers_vary_dimensions() {
     assert!(dimensions.contains(&"Accept-Encoding"));
     assert!(dimensions.contains(&"Origin"));
     assert_eq!(header(&response, "access-control-allow-credentials"), Some("true"));
+}
+
+const CUSTOMER_KEY_HEADERS: [&str; 6] = [
+    "x-amz-server-side-encryption-customer-algorithm",
+    "x-amz-server-side-encryption-customer-key",
+    "x-amz-server-side-encryption-customer-key-md5",
+    "x-amz-copy-source-server-side-encryption-customer-algorithm",
+    "x-amz-copy-source-server-side-encryption-customer-key",
+    "x-amz-copy-source-server-side-encryption-customer-key-md5",
+];
+const CUSTOMER_KEY_REFUSAL: &str =
+    "Requests specifying Server Side Encryption with Customer provided keys must be made over a secure connection.";
+
+struct CountedDocument {
+    reads: AtomicUsize,
+    document: OneDocument,
+}
+
+impl CorsSource for CountedDocument {
+    fn load<'a>(&'a self, bucket: &'a BucketName) -> BoxFuture<'a, Result<Option<CorsConfiguration>, CorsSourceError>> {
+        self.reads.fetch_add(1, Ordering::SeqCst);
+        self.document.load(bucket)
+    }
+}
+
+struct CountedVersioning {
+    calls: AtomicUsize,
+    refuse: bool,
+}
+
+impl Handler<GetBucketVersioning> for CountedVersioning {
+    async fn call(&self, _request: Req<GetBucketVersioning>) -> HandlerResult<GetBucketVersioning> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        if self.refuse {
+            return Err(HandlerError::new(ErrorCode::INVALID_REQUEST, CUSTOMER_KEY_REFUSAL));
+        }
+        Ok(Resp::new(GetBucketVersioningOutput::default()))
+    }
+}
+
+fn customer_key_assembly(
+    sse: SseConfig,
+    legacy: bool,
+    handler_refuses: bool,
+) -> (S3Service, Arc<CountedVersioning>, Arc<CountedDocument>) {
+    let backend = Arc::new(CountedVersioning {
+        calls: AtomicUsize::new(0),
+        refuse: handler_refuses,
+    });
+    let source = Arc::new(CountedDocument {
+        reads: AtomicUsize::new(0),
+        document: OneDocument(APP),
+    });
+    let mut builder = wired_at_signed_time()
+        .sse_config(sse)
+        .cors_source(source.clone())
+        .register::<GetBucketVersioning, _>(Arc::clone(&backend));
+    if legacy {
+        builder = builder
+            .refuse_plaintext_customer_keys_before_routing()
+            .answer_cors_as_legacy_rustfs(LegacyRustfsCors::with_fallback_origins(Some(APP)));
+    }
+    (builder.build().expect("a customer-key CORS assembly"), backend, source)
+}
+
+fn assert_no_cors(response: &WireResponse, what: &str) {
+    let names: Vec<_> = response
+        .headers()
+        .iter()
+        .map(|(name, _)| name.as_str())
+        .filter(|name| name.starts_with("access-control-"))
+        .collect();
+    assert!(names.is_empty(), "{what}: unexpected CORS headers {names:?} on {}", response.status());
+    assert_eq!(header(response, "vary"), None, "{what}: refusal must not vary by origin");
+}
+
+fn assert_invalid_request(response: &WireResponse, what: &str) {
+    assert_eq!(response.status(), 400, "{what}");
+    let body = String::from_utf8_lossy(response.body());
+    assert_eq!(element_text(&body, "Code"), Some("InvalidRequest"), "{what}");
+}
+
+fn assert_customer_key_refusal(response: &WireResponse, what: &str) {
+    assert_invalid_request(response, what);
+    let body = String::from_utf8_lossy(response.body());
+    assert_eq!(element_text(&body, "Message"), Some(CUSTOMER_KEY_REFUSAL), "{what}");
+}
+
+fn assert_customer_key_cors(response: &WireResponse, what: &str) {
+    assert_eq!(header(response, "access-control-allow-origin"), Some(APP), "{what}");
+    assert!(
+        response
+            .headers()
+            .iter()
+            .filter(|(name, _)| name == "vary")
+            .filter_map(|(_, value)| value.to_str().ok())
+            .flat_map(|value| value.split(','))
+            .any(|value| value.trim().eq_ignore_ascii_case("Origin")),
+        "{what}: the CORS answer must vary by origin"
+    );
+}
+
+fn valid_customer_key_request(copy_source: bool) -> http::Request<Bytes> {
+    let start = if copy_source { 3 } else { 0 };
+    let mut headers = vec![("origin", APP)];
+    // The same 32-byte test key and its true MD5 used by the SSE runtime fixtures.
+    headers.extend(CUSTOMER_KEY_HEADERS[start..start + 3].iter().copied().zip([
+        "AES256",
+        "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+        "tP/LI3N87DFaSk0aoqYgzg==",
+    ]));
+    signed_with(http::Method::GET, "/documented?versioning", &headers)
+}
+
+async fn customer_key_refusals(method: http::Method) {
+    for target in ["/documented?versioning", "/undocumented?versioning"] {
+        for name in CUSTOMER_KEY_HEADERS {
+            for value in ["AES256", ""] {
+                let (service, _, _) = customer_key_assembly(SseConfig::strict(), true, false);
+                let request = if method == http::Method::OPTIONS {
+                    unsigned(
+                        method.clone(),
+                        target,
+                        &[("origin", APP), ("access-control-request-method", "GET"), (name, value)],
+                    )
+                } else {
+                    signed_with(method.clone(), target, &[("origin", APP), (name, value)])
+                };
+                let response = exchange_wire(&service, request).await;
+                let what = format!("{method} {target}, {name}, empty={}", value.is_empty());
+                assert_no_cors(&response, &what);
+                assert_customer_key_refusal(&response, &what);
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn n_customer_key_refusal_omits_cors_on_actual_requests() {
+    customer_key_refusals(http::Method::GET).await;
+}
+
+#[tokio::test]
+async fn n_customer_key_refusal_precedes_preflight_cors() {
+    customer_key_refusals(http::Method::OPTIONS).await;
+}
+
+#[tokio::test]
+async fn n_customer_key_refusal_has_no_side_effects() {
+    let (service, backend, source) = customer_key_assembly(SseConfig::strict(), true, false);
+    let response = exchange_wire(&service, valid_customer_key_request(false)).await;
+    assert_eq!(backend.calls.load(Ordering::SeqCst), 0, "the early refusal must not call the handler");
+    assert_eq!(source.reads.load(Ordering::SeqCst), 0, "the early refusal must not load CORS rules");
+    assert_no_cors(&response, "early refusal");
+    assert_customer_key_refusal(&response, "early refusal");
+}
+
+#[tokio::test]
+async fn n_other_invalid_request_keeps_cors() {
+    let (service, _, _) = customer_key_assembly(SseConfig::strict(), true, true);
+    let response = exchange_wire(&service, signed_with(http::Method::GET, "/documented?versioning", &[("origin", APP)])).await;
+    assert_customer_key_cors(&response, "handler refusal with the same code and message");
+    assert_customer_key_refusal(&response, "handler refusal with the same code and message");
+}
+
+#[tokio::test]
+async fn n_standard_profile_refusal_keeps_cors() {
+    let (service, _, _) = customer_key_assembly(SseConfig::strict(), false, false);
+    let response = exchange_wire(&service, valid_customer_key_request(false)).await;
+    assert_customer_key_cors(&response, "standard post-authorization refusal");
+    assert_invalid_request(&response, "standard post-authorization refusal");
+}
+
+#[tokio::test]
+async fn allowed_customer_keys_keep_cors() {
+    let ack = PlaintextCustomerKeyAck::i_understand_customer_keys_will_be_sent_in_the_clear;
+    for (sse, connection, copy_source) in [
+        (SseConfig::strict(), TransportSecurity::Encrypted, false),
+        (
+            SseConfig::allowing_customer_keys_over_plaintext(ack()),
+            TransportSecurity::Plaintext,
+            false,
+        ),
+        (
+            SseConfig::refusing_only_target_keys_over_plaintext(ack()),
+            TransportSecurity::Plaintext,
+            true,
+        ),
+    ] {
+        let (service, backend, source) = customer_key_assembly(sse, true, false);
+        let mut request = valid_customer_key_request(copy_source);
+        request.extensions_mut().insert(connection);
+        let response = exchange_wire(&service, request).await;
+        assert_eq!(backend.calls.load(Ordering::SeqCst), 1, "an allowed request must reach the handler");
+        assert_eq!(source.reads.load(Ordering::SeqCst), 1, "an allowed request must load its CORS rules");
+        assert_eq!(response.status(), 200, "an allowed request must succeed");
+        assert_customer_key_cors(&response, "allowed customer keys");
+    }
 }

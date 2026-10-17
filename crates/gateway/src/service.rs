@@ -165,6 +165,7 @@ mod update;
 
 use self::cors::CorsDecoration;
 pub(crate) use self::cors::preflight_bucket;
+use self::outcome::LegacyCorsDisposition;
 
 /// The one sentence a request gets when the authenticator itself could not answer.
 ///
@@ -417,9 +418,11 @@ impl S3Service {
                 headers.insert(VARY, VARY_ORIGIN);
             }
         }
-        // Legacy RustFS's decoration instead, on every answer, refusals before authentication
-        // included (`crate::cors_legacy`).
-        if let Some(legacy_cors) = legacy_cors {
+        // Legacy RustFS decorates answers that reach its CORS layer, including authentication
+        // refusals, but its earlier cleartext customer-key gate is outside that layer.
+        if outcome.legacy_cors_disposition == LegacyCorsDisposition::Decorate
+            && let Some(legacy_cors) = legacy_cors
+        {
             self.decorate_legacy_cors(legacy_cors, &mut response, now).await;
         }
         // The response seam. After the CORS decoration, so a filter sees the response a browser
@@ -567,6 +570,7 @@ impl S3Service {
         // The RustFS profile's cleartext customer-key gate, where legacy RustFS asks it: first.
         let early = self.inner.view_policy.plaintext_customer_keys;
         if let Some(refusal) = early.refusal(&self.inner.sse, connection, &headers, response_kind) {
+            outcome.legacy_cors_disposition = LegacyCorsDisposition::PlaintextCustomerKeyRefusal;
             return outcome.refuse_at(Refused::Wire, refusal);
         }
 
@@ -1574,6 +1578,7 @@ struct Outcome<'a> {
     /// every request that never got that far, which is what keeps a pre-authentication refusal
     /// from costing a configuration read.
     cors: Option<CorsDecoration>,
+    legacy_cors_disposition: LegacyCorsDisposition,
     response_kind: ResponseKind,
     credential_sentences: CredentialSentences,
     /// The stage that refused the request, when the gateway refused it; reported once, at the end
