@@ -13,6 +13,11 @@
 // limitations under the License.
 
 //! Authorized, bounded control observations over the ordinary S3 request security pipeline.
+//!
+//! Responsible for: admitting host control queries through S3 authorization and bounding responses.
+//! NOT responsible for: object data transport, storage publication, or host session state.
+//! Upstream: host integrations calling `S3Service`. Downstream: authenticated S3 dispatch and
+//! the transport-neutral `ExternalControlQuery` callback.
 
 use super::{
     ExternalPayload, ExternalPayloadBinding, ExternalPayloadError, ExternalPayloadProvider, ExternalRequest, upload::UploadEntry,

@@ -30,6 +30,10 @@ submodule. `RUSTFS_RDMA_TOOLCHAIN` selects a compatible installed toolchain and
 `CARGO_BUILD_JOBS` selects build parallelism. The ordinary gateway toolchain
 configuration remains applicable to its own workspace.
 
+Build and install the matching native dependencies using the pinned private
+engine's installation guide. Client and server must advertise compatible
+capacity capabilities before either endpoint admits an external transfer.
+
 Without the private checkout, the build helper stops before invoking Cargo and
 prints the initialization command. Reading the submodule requires repository
 authorization. A normal build does not fetch it.
@@ -43,7 +47,8 @@ silently become a normal zero-byte object.
 
 The pinned private integration implements authenticated S3 HTTPS coordination and
 external upload/download data. The host explicitly installs the integration and
-supplies its trusted connection and authorization context. Production RustFS
-storage composition remains host adapter work. Functional tests using software
+supplies its trusted connection and authorization context. The enterprise
+repository's optional server composes this integration with RustFS storage.
+Functional tests using software
 transports establish API and lifecycle behavior; NIC RDMA, DPU compatibility and
 performance require validation on the target deployment.
