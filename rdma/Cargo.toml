@@ -29,3 +29,7 @@ http = "1"
 http-body = "1"
 thiserror = "2"
 tokio = { version = "1", features = ["io-util", "rt", "sync", "time"] }
+tracing = { version = "0.1", default-features = false, features = ["std"] }
+
+[dev-dependencies]
+tracing-subscriber = { version = "0.3", default-features = false, features = ["registry", "std"] }
