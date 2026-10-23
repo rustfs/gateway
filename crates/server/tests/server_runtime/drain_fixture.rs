@@ -16,6 +16,7 @@
 //! NOT responsible for: load orchestration or production shutdown accounting.
 //! Upstream: runtime and isolation tests. Downstream: the public server API and real TCP client.
 
+use super::listener_stop::wait_for_listener_stop;
 use super::*;
 
 /// The body a-srv-0006 drains. It tests graceful-drain semantics, not throughput: the response
@@ -60,13 +61,9 @@ pub(crate) async fn observed_shutdown_drain(mut checkpoint: impl FnMut()) {
     let report = tokio::spawn(shutdown.trigger(Duration::from_secs(2)));
     // The listener closes in the same server poll that begins shutdown, so a refused connection
     // proves shutdown began while this request was still waiting for its answer.
-    tokio::time::timeout(Duration::from_secs(1), async {
-        while TcpStream::connect(local_addr).await.is_ok() {
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .expect("the listener closes once shutdown begins");
+    wait_for_listener_stop(|| async { TcpStream::connect(local_addr).await.map(drop) })
+        .await
+        .expect("the listener closes once shutdown begins");
     assert!(
         !answered.load(Ordering::SeqCst),
         "the response must still be in flight when shutdown begins, or nothing was drained"
