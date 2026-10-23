@@ -63,7 +63,7 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use crate::inprocess::{ChunkStep, HOST, InProcess, Wire, clock_of, sign_request};
+use crate::inprocess::{ChunkStep, InProcess, Wire, clock_of};
 use crate::interpolate::Captures;
 use crate::observation::{
     ConnectionState, Observation, Outcome, StreamTermination, decode_event_stream, has_event_stream_content_type,
@@ -86,6 +86,7 @@ mod external_identity;
 mod external_pacing;
 mod external_tls;
 mod h2;
+mod head;
 mod options;
 mod server;
 #[cfg(test)]
@@ -170,104 +171,6 @@ impl Conn {
 struct Head {
     bytes: Vec<u8>,
     declared_length: u64,
-}
-
-impl Conn {
-    /// Builds the request head, signed, in the form the case asked for.
-    fn head(&self, wire: &Wire, request_time: &crate::time::Instant) -> Result<Head, SutError> {
-        match &wire.raw_head {
-            Some(raw) => self.raw_head(wire, raw, request_time),
-            None => self.structured_head(wire, request_time),
-        }
-    }
-
-    /// A head assembled from `method`, `target` and the header table.
-    fn structured_head(&self, wire: &Wire, request_time: &crate::time::Instant) -> Result<Head, SutError> {
-        let mut headers = wire.headers.clone();
-        if !headers.iter().any(|(name, _)| name.eq_ignore_ascii_case("host")) {
-            let host = self.external.as_ref().map_or(HOST, ExternalEndpoint::authority);
-            headers.push(("host".to_owned(), host.to_owned()));
-        }
-        if !wire.body.is_empty() && !headers.iter().any(|(name, _)| name.eq_ignore_ascii_case("content-length")) {
-            headers.push(("content-length".to_owned(), wire.body.len().to_string()));
-        }
-        // The framing is the header's, not the payload's: a case that announces five gigabytes and
-        // writes ten bytes is announcing five gigabytes, and both the signature and the server's
-        // body reader have to agree with what went on the wire.
-        let declared_length = declared_content_length(&headers).unwrap_or(wire.body.len() as u64);
-        let (headers, target) = match &wire.sign {
-            None => (headers, wire.target.clone()),
-            Some(sign) => sign_request(sign, wire, &headers, request_time, self.inner.limits(), declared_length)?,
-        };
-        let mut bytes = format!("{} {} HTTP/1.1\r\n", wire.method, target).into_bytes();
-        for (name, value) in &headers {
-            bytes.extend_from_slice(format!("{name}: {value}\r\n").as_bytes());
-        }
-        bytes.extend_from_slice(b"\r\n");
-        Ok(Head { bytes, declared_length })
-    }
-
-    /// A head the case wrote out byte for byte.
-    ///
-    /// The bytes are preserved and the signature is **appended**, never merged in. A raw head is an
-    /// escape hatch for framing — `c-mpu-0045`'s whole subject is the `content-length` that is not
-    /// there — and rewriting it to carry a signature would edit the very thing under test. What is
-    /// added is what a real client adds and nothing else: the headers the signer minted that the
-    /// head does not already carry.
-    fn raw_head(&self, wire: &Wire, raw: &[u8], request_time: &crate::time::Instant) -> Result<Head, SutError> {
-        let Some(sign) = &wire.sign else {
-            return Ok(Head {
-                bytes: raw.to_vec(),
-                declared_length: parse_head(raw).map_or(0, |head| declared_content_length(&head.headers).unwrap_or(0)),
-            });
-        };
-        let parsed = parse_head(raw).ok_or_else(|| {
-            SutError::Environment(
-                "`request.raw_head_utf8` declares a signature and this head cannot be parsed well \
-                 enough to compute one; a head that malformed has to be sent unsigned, which is a \
-                 different case"
-                    .to_owned(),
-            )
-        })?;
-        let declared_length = declared_content_length(&parsed.headers).unwrap_or(0);
-        // Signing needs a `Wire`, and the one the case wrote has no method or target of its own —
-        // the raw head is where they live. Rebuilt from the parse so the signer sees what the wire
-        // will carry.
-        let signable = Wire {
-            method: parsed.method.clone(),
-            target: parsed.target.clone(),
-            headers: parsed.headers.clone(),
-            raw_head: None,
-            h2_frames: Vec::new(),
-            http_version: None,
-            body: wire.body.clone(),
-            frames: Vec::new(),
-            steps: Vec::new(),
-            sign: wire.sign.clone(),
-        };
-        let (signed, target) =
-            sign_request(sign, &signable, &parsed.headers, request_time, self.inner.limits(), declared_length)?;
-        if target != parsed.target {
-            return Err(SutError::Environment(
-                "`sign.tamper` rewrote the request target of a raw head. Sending it would mean \
-                 re-spelling the request line the case pinned, and sending the original would mean \
-                 measuring a request nobody meant to send"
-                    .to_owned(),
-            ));
-        }
-        // Everything up to and including the last CRLF that ends the final header line; the blank
-        // line is re-added after the appended headers so the head stays one message.
-        let body_start = raw.len().saturating_sub(2);
-        let mut bytes = raw.get(..body_start).unwrap_or_default().to_vec();
-        for (name, value) in &signed {
-            if parsed.headers.iter().any(|(have, _)| have.eq_ignore_ascii_case(name)) {
-                continue;
-            }
-            bytes.extend_from_slice(format!("{name}: {value}\r\n").as_bytes());
-        }
-        bytes.extend_from_slice(b"\r\n");
-        Ok(Head { bytes, declared_length })
-    }
 }
 
 /// The length the head declares, when it declares one.
@@ -774,3 +677,6 @@ mod setup_tests;
 mod tests;
 
 use control_chunks::{catch_up, control};
+
+#[cfg(test)]
+mod profile_signing_tests;
