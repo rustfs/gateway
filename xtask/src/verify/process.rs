@@ -163,11 +163,23 @@ fn run_supervised(commands: &[GateCommand], current_dir: &Path, deadline: Option
         match supervisor.spawn_before_deadline(index, program, args, step, current_dir, deadline) {
             Ok(true) => {}
             Ok(false) => {
+                // No wait poll has run yet. Observe completed commands before labelling
+                // anything cancelled, but still terminate every process group below.
+                for child in &mut supervisor.children {
+                    match child.child.try_wait() {
+                        Ok(Some(status)) => child.completion = Some(Ok(status)),
+                        Ok(None) => {}
+                        Err(error) => child.completion = Some(Err(error)),
+                    }
+                }
+                supervisor.cancel_running();
+                let cancelled = supervisor.cancelled_steps();
+                let results = supervisor.results();
                 return supervisor.finish(Batch {
-                    results: Vec::new(),
+                    results,
                     timed_out: true,
                     interrupted: false,
-                    cancelled: Vec::new(),
+                    cancelled,
                 });
             }
             Err(error) => return failed_to_start(step, error),
@@ -354,14 +366,24 @@ impl Supervisor<'_> {
     /// The steps that were still running when the deadline arrived, with what they had compiled.
     ///
     /// Call after `cancel_running`, which is what marks a child cancelled and reaps it: the
-    /// captured output is only complete once the process group is gone.
+    /// captured output is only complete once the process group is gone. Emit both captures
+    /// before cleanup removes them, so the deadline report retains actual build and test progress.
     fn cancelled_steps(&self) -> Vec<CancelledStep> {
         self.children
             .iter()
             .filter(|child| child.cancelled)
-            .map(|child| CancelledStep {
-                index: child.index,
-                compiled_crates: compiled_crates(&child.stderr),
+            .map(|child| {
+                eprintln!("verify: output captured from {} before deadline termination:", child.step);
+                for (stream, path) in [("stdout", &child.stdout), ("stderr", &child.stderr)] {
+                    match fs::read(path) {
+                        Ok(output) => eprint!("{}", String::from_utf8_lossy(&output)),
+                        Err(error) => eprintln!("verify: could not read captured {stream} for {}: {error}", child.step),
+                    }
+                }
+                CancelledStep {
+                    index: child.index,
+                    compiled_crates: compiled_crates(&child.stderr),
+                }
             })
             .collect()
     }
