@@ -31,6 +31,7 @@ Agent entry point for repository automation commands.
 | `src/verify/loops.rs` | A crate's step batches as feedback loops, each under a 30-second deadline of its own that starts when the loop before it passed; every loop prints its own measured time. | A loop is charged for another loop's work, or a later loop runs without a deadline. |
 | `src/verify/loops/tests.rs` | Loop shape, and scripted-clock controls that each loop is held to its own budget, isolated per test process. | A loop deadline is shared again or dropped. |
 | `src/verify/process.rs` | Deadline-aware child supervision against an injectable clock, and output capture. | Verification children block, leak, or report out of order. |
+| `src/verify/process/capture_tests.rs` | Real-child controls for retained deadline output and unreadable capture diagnostics. | A killed stage loses build identities or test progress. |
 | `src/verify/process/lock_deadline_tests.rs` | Lock expiry after observed contention, independent of host scheduling. | A held lock hides an elapsed deadline or a deadline fixture mistakes a host pause for a failure. |
 | `src/verify/process/grandchild_tests.rs` | Descendant cleanup measured after complete live PID publication, with delayed and missing-readiness controls. | A termination fixture expires before it can observe a descendant. |
 | `src/verify/process/observation_tests.rs` | Live, stopped, and unreaped-child controls for the process-state observer. | A timeout test confuses a visible PID with an executing descendant. |
