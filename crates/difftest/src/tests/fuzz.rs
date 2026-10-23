@@ -148,6 +148,22 @@ fn multipart_annotation_artifact_passes_the_decode_property() {
     check_decode(input).expect("the exact multipart/annotation route difference is registered");
 }
 
+/// Positive — both the original and minimized bucket-events artifacts remain compared requests.
+#[test]
+fn bucket_events_artifacts_pass_the_decode_property() {
+    for input in [
+        &include_bytes!("../../../../fuzz/seeds/decode_diff/bucket-events-original")[..],
+        &include_bytes!("../../../../fuzz/seeds/decode_diff/bucket-events-minimal")[..],
+    ] {
+        let request = request_of(input).expect("the artifact is a compared request");
+        let diff = crate::decode_diff(&request).expect("both stacks run");
+        let register = crate::KnownDiffs::checked_in().expect("the register parses");
+        let verdict = register.verdict_for(&request, diff.findings());
+        assert!(verdict.passed(), "{:?}", verdict.failures);
+        check_decode(input).expect("the exact events extension route difference is registered");
+    }
+}
+
 /// Positive — a fixed sample of mutated seeds passes the decode property on stable: the fuzzer's
 /// search, a few hundred steps of it, in every CI run.
 #[test]

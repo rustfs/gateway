@@ -911,6 +911,30 @@ when_query = "annotation"
 reason = "For the original issue #1454 artifact and the minimal annotation/multipart row, the default UploadPart decoder reaches its handler while the legacy annotation decoder refuses the missing annotationName. Only this exact outcome pair under the annotation selector is accepted (https://github.com/rustfs/gateway/issues/1454); other refusals and outcomes remain new findings."
 expires = "2027-03-31"
 
+# ── Decode: legacy bucket events extension (nightly artifact, issue #1455) ──
+
+[[diff]]
+id = "kd-decode-0091"
+kind = "decode"
+operation = "ListObjects"
+item = "route"
+gateway = "ListObjects"
+s3s = "ListenBucketNotification"
+when_query = "events"
+reason = "A bucket GET carrying events selects the legacy notification extension, represented in crates/core/src/route/legacy_rustfs.rs, while the default S3 route remains ListObjects. This records the existing default versus legacy extension policy (https://github.com/rustfs/gateway/issues/1455); only this operation pair under the events selector is accepted."
+expires = "2027-03-31"
+
+[[diff]]
+id = "kd-decode-0092"
+kind = "decode"
+operation = "ListObjects"
+item = "outcome"
+gateway = "handled"
+s3s = "501 NotImplemented: ListenBucketNotification is not implemented yet"
+when_query = "events"
+reason = "For the original and minimized issue #1455 inputs, the default ListObjects decoder reaches its handler and the pinned legacy backend refuses ListenBucketNotification as unimplemented. Only this exact observed outcome pair under the events selector is registered (https://github.com/rustfs/gateway/issues/1455); other extension outcomes and refusals remain new findings."
+expires = "2027-03-31"
+
 # ── Encode: what the gateway writes on every answer ─────────────────────────────────────────
 
 [[diff]]

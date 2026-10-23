@@ -502,3 +502,33 @@ fn multipart_annotation_registration_rejects_unrelated_findings() {
         }
     }
 }
+
+/// Negative — bucket-events entries require the selector, request context and exact values.
+#[test]
+fn bucket_events_registration_rejects_unrelated_findings() {
+    let register = KnownDiffs::checked_in().expect("the register parses");
+    for (item, gateway, s3s) in [
+        (Item::Route, "ListObjects", "ListenBucketNotification"),
+        (
+            Item::Outcome,
+            "handled",
+            "501 NotImplemented: ListenBucketNotification is not implemented yet",
+        ),
+    ] {
+        let found = || vec![finding("ListObjects", item.clone(), gateway, s3s)];
+        for target in ["/bkt", "/bkt?prefix=events", "/bkt?event=a"] {
+            let request = crate::RawRequest::get(target);
+            assert!(!register.verdict_for(&request, found()).passed(), "{target}/{item}");
+        }
+        assert!(!register.verdict(found()).passed(), "request context is required for {item}");
+        let request = crate::RawRequest::get("/bkt?events");
+        for (operation, gateway, s3s) in [
+            ("ListObjectsV2", gateway, s3s),
+            ("ListObjects", "unrelated gateway value", s3s),
+            ("ListObjects", gateway, "unrelated legacy value"),
+        ] {
+            let differences = vec![finding(operation, item.clone(), gateway, s3s)];
+            assert!(!register.verdict_for(&request, differences).passed(), "{operation}/{gateway}/{s3s}");
+        }
+    }
+}
