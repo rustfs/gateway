@@ -30,6 +30,8 @@ Ring-1 generic HTTP runtime. Start at `src/lib.rs`; read only the row needed for
 | `tests/acceptance.rs` | Deterministic config, dispatch and TLS reload cases | A source-only contract regresses |
 | `tests/server_load/isolation.rs` | Real load-child and drain-fixture lease exclusion controls | Saturating load overlaps the healthy shutdown fixture |
 | `tests/server_runtime.rs` | Live h1 admission and shutdown cases | Socket lifecycle behaviour regresses |
+| `tests/server_runtime/established_h1.rs` | Established-H1 shutdown with lease checkpoints | Changing connection-close, EOF, accounting or isolation controls |
+| `tests/server_runtime/listener_stop.rs` | Shared listener-stop probes and adversarial observer controls | A stalled connect hides listener stop or a probe reports closure without a real connection error |
 | `tests/server_runtime/drain_fixture.rs` | Healthy 8 MiB shutdown drain, in flight when shutdown begins, with lease checkpoints | Changing the full-body drain or its resource-isolation controls |
 | `tests/server_runtime/shutdown_drain.rs` | A final frame blocked on the socket is aborted at the grace; the same frame written after shutdown began is drained | Drained/aborted accounting diverges from what reached the socket |
 | `tests/server_runtime/client_ceiling.rs` | IPv4 and IPv6 loopback clients on one dual-stack listener at a ceiling of one | Dual-stack peers are keyed into the wrong client |
