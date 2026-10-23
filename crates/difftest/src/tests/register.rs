@@ -472,3 +472,33 @@ fn header_scope_rejects_invalid_names() {
     );
     assert!(KnownDiffs::parse(&text).is_ok(), "a valid field name is accepted");
 }
+
+/// Negative — multipart/annotation entries require the selector, request context and exact values.
+#[test]
+fn multipart_annotation_registration_rejects_unrelated_findings() {
+    let register = KnownDiffs::checked_in().expect("the register parses");
+    for (item, gateway, s3s) in [
+        (Item::Route, "UploadPart", "PutObjectAnnotation"),
+        (Item::Outcome, "handled", "400 InvalidRequest: missing query: annotationName"),
+    ] {
+        let found = || vec![finding("UploadPart", item.clone(), gateway, s3s)];
+        for target in [
+            "/bkt/k?uploadId=u&partNumber=2",
+            "/bkt/k?uploadId=u&partNumber=2&prefix=annotation",
+            "/bkt/k?uploadId=u&partNumber=2&annotationName=a",
+        ] {
+            let request = crate::RawRequest::put(target, b"");
+            assert!(!register.verdict_for(&request, found()).passed(), "{target}/{item}");
+        }
+        assert!(!register.verdict(found()).passed(), "request context is required for {item}");
+        let request = crate::RawRequest::put("/bkt/k?annotation=1&uploadId=u&partNumber=2", b"");
+        for (operation, gateway, s3s) in [
+            ("PutObject", gateway, s3s),
+            ("UploadPart", "unrelated gateway value", s3s),
+            ("UploadPart", gateway, "unrelated legacy value"),
+        ] {
+            let differences = vec![finding(operation, item.clone(), gateway, s3s)];
+            assert!(!register.verdict_for(&request, differences).passed(), "{operation}/{gateway}/{s3s}");
+        }
+    }
+}
