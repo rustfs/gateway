@@ -28,7 +28,8 @@ use crate::keys::Inventory;
 use crate::schema::Schema;
 use crate::toml;
 use crate::value::Value;
-use std::path::{Path, PathBuf};
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Component, Path, PathBuf};
 
 /// The corpus could not be located or read at all.
 ///
@@ -176,6 +177,7 @@ pub struct Corpus {
     root: PathBuf,
     cases: Vec<Case>,
     inventory: Inventory,
+    profile_goldens: BTreeMap<(String, String), String>,
 }
 
 impl Corpus {
@@ -244,11 +246,13 @@ impl Corpus {
         let mut files = Vec::new();
         collect_case_files(&cases_dir, &mut files)?;
         files.sort();
-        let cases = files.iter().map(|path| load_case(root, path, &schema)).collect();
+        let cases: Vec<Case> = files.iter().map(|path| load_case(root, path, &schema)).collect();
+        let profile_goldens = load_profile_goldens(root, &cases)?;
         Ok(Corpus {
             root: root.to_path_buf(),
             cases,
             inventory,
+            profile_goldens,
         })
     }
 
@@ -285,6 +289,22 @@ impl Corpus {
         &mut self.cases
     }
 
+    /// Reads a declared profile override, or the original golden when no mapping exists.
+    pub(crate) fn read_profile_golden(&self, profile: &str, relative: &str) -> Result<Vec<u8>, CorpusError> {
+        let Some(target) = self.profile_goldens.get(&(profile.to_owned(), relative.to_owned())) else {
+            return self.read_relative(relative);
+        };
+        let error = |reason| CorpusError {
+            message: format!("cannot read profile golden `{target}`: {reason}"),
+        };
+        let root = self.root.canonicalize().map_err(|e| error(e.to_string()))?;
+        let path = self.root.join(target).canonicalize().map_err(|e| error(e.to_string()))?;
+        if !path.starts_with(&root) {
+            return Err(error("target leaves the corpus directory".to_owned()));
+        }
+        std::fs::read(path).map_err(|e| error(e.to_string()))
+    }
+
     /// Reads a corpus-relative file, such as a golden.
     ///
     /// # Errors
@@ -301,6 +321,70 @@ impl Corpus {
             message: format!("cannot read {}: {error}", path.display()),
         })
     }
+}
+
+/// The optional index is separate from case schemas; its keys must still name actual expectations.
+fn load_profile_goldens(root: &Path, cases: &[Case]) -> Result<BTreeMap<(String, String), String>, CorpusError> {
+    let path = root.join("profile-goldens.toml");
+    let error = |reason| CorpusError {
+        message: format!("{}: {reason}", path.display()),
+    };
+    let text = match std::fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(BTreeMap::new()),
+        Err(e) => return Err(error(e.to_string())),
+    };
+    let index = toml::parse(&text).map_err(|e| error(e.to_string()))?;
+    let mut references = BTreeSet::new();
+    for case in cases {
+        for exchange in case.exchanges() {
+            let Some(expect) = exchange.expect else { continue };
+            if let Some(body) = expect.read("expect.body")
+                && let Some(name) = body.read("bodyExpectation.golden").and_then(Value::as_str)
+            {
+                references.insert(name);
+            }
+            if let Some(events) = expect.read("expect.events").and_then(Value::as_array) {
+                for event in events {
+                    if let Some(name) = event
+                        .read("expect.events[].payload")
+                        .and_then(|body| body.read("bodyExpectation.golden"))
+                        .and_then(Value::as_str)
+                    {
+                        references.insert(name);
+                    }
+                }
+            }
+        }
+    }
+    let mut mappings = BTreeMap::new();
+    for (profile, entries) in index.as_table().ok_or_else(|| error("index must be a table".to_owned()))? {
+        if crate::sut::Profile::parse(profile).is_none() {
+            return Err(error(format!("unknown profile `{profile}`")));
+        }
+        let entries = entries
+            .as_table()
+            .ok_or_else(|| error(format!("profile `{profile}` must be a table")))?;
+        for (reference, target) in entries {
+            if !references.contains(reference.as_str()) {
+                return Err(error(format!("golden `{reference}` is not referenced by a case expectation")));
+            }
+            let target = target
+                .as_str()
+                .ok_or_else(|| error(format!("target for `{reference}` must be a string")))?;
+            if target.is_empty() || Path::new(target).is_absolute() {
+                return Err(error(format!("target `{target}` must be a nonempty relative path")));
+            }
+            if Path::new(target)
+                .components()
+                .any(|part| matches!(part, Component::ParentDir))
+            {
+                return Err(error(format!("target `{target}` contains a parent-directory component")));
+            }
+            mappings.insert((profile.clone(), reference.clone()), target.to_owned());
+        }
+    }
+    Ok(mappings)
 }
 
 fn collect_case_files(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), CorpusError> {
