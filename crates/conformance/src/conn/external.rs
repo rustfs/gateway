@@ -101,7 +101,7 @@ impl Conn {
             .ok_or_else(|| SutError::Environment("external endpoint setup deadline cannot be represented".to_owned()))?;
         let cleartext = !endpoint.is_tls();
         validate_authored_steps(&wire, cleartext, budget)?;
-        let head = self.head(&wire, &request_time)?;
+        let head = self.head_for_profile(&wire, &request_time, plan.profile)?;
         let existing = self.connection.as_ref().map(Connection::observe_pending);
         if reuse && existing.is_some_and(|(_, pending)| pending) {
             self.connection = None;
