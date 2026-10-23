@@ -1935,6 +1935,7 @@ dependencies = [
  "hex",
  "http",
  "http-body",
+ "http-body-util",
  "md-5",
  "rustfs-gateway",
  "serde_json",

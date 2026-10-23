@@ -23,3 +23,7 @@
 # Python bytecode caches, written by the report tool and its guard.
 __pycache__/
 *.pyc
+
+# The independent opt-in build owns its artifacts and lockfile.
+/rdma/target/
+/rdma/Cargo.lock
