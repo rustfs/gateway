@@ -55,7 +55,7 @@ fn listing() -> dto::ListObjectsV2Output {
         .map(|index| dto::Object {
             key: ObjectKey::new(format!("photos/2026/09/{index:06}.jpg")).expect("a key"),
             last_modified: Timestamp::from_secs(1_767_225_600 + index as i64),
-            e_tag: ETag::new(format!("\"{index:032x}\"")).expect("an entity tag"),
+            e_tag: Some(ETag::new(format!("\"{index:032x}\"")).expect("an entity tag")),
             size: 4096 + index as i64,
             ..dto::Object::default()
         })

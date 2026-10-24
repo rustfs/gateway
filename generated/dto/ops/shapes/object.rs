@@ -33,8 +33,8 @@ pub struct Object {
     pub key: crate::ObjectKey,
     /// Wire `LastModified`, bound as BodyXml. Required.
     pub last_modified: crate::Timestamp,
-    /// Wire `ETag`, bound as BodyXml. Required.
-    pub e_tag: crate::ETag,
+    /// Wire `ETag`, bound as BodyXml. Optional.
+    pub e_tag: Option<crate::ETag>,
     /// Wire `ChecksumAlgorithm`, bound as BodyXml. Optional.
     pub checksum_algorithm: Vec<crate::ops::enums::ChecksumAlgorithm>,
     /// Wire `ChecksumType`, bound as BodyXml. Optional.
@@ -67,7 +67,6 @@ impl Object {
     pub fn check_required(&self) -> Result<(), crate::PlaceholderDefault> {
         crate::reject_placeholder("Object", "Key", &self.key)?;
         crate::reject_placeholder("Object", "LastModified", &self.last_modified)?;
-        crate::reject_placeholder("Object", "ETag", &self.e_tag)?;
         crate::reject_placeholder("Object", "Size", &self.size)?;
         crate::reject_placeholder("Object", "StorageClass", &self.storage_class)?;
         Ok(())

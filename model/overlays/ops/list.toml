@@ -404,7 +404,7 @@ quirks = ["q-token-0021"]
 # Nested shapes owned by this family
 # =============================================================================================
 [shape.Object]
-required = ["Key", "LastModified", "ETag", "Size", "StorageClass"]
+required = ["Key", "LastModified", "Size", "StorageClass"]
 hot = ["Key", "LastModified", "ETag", "Size"]
 
 [[shape.Object.field]]

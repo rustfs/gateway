@@ -264,7 +264,7 @@
                                       {
                                         "name": "ETag",
                                         "wire_name": "ETag",
-                                        "required": true,
+                                        "required": false,
                                         "binding": { "kind": "BodyXml" },
                                         "type": { "kind": "ETag", "render": "XmlQuoted" },
                                         "hot": true,
