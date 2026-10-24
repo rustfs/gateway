@@ -97,7 +97,7 @@ dhat = "0.3.3"
 insta = "1.48"
 prettyplease = "0.3"                                # renders the macro expansion goldens; no `cargo expand` needed
 proptest = "1.11"
-tokio = { version = "1.53", default-features = false, features = ["macros", "rt"] }
+tokio = { version = "1.53.3", default-features = false, features = ["macros", "rt"] }
 trybuild = "1.0"
 rcgen = { version = "0.14", default-features = false, features = ["crypto", "pem", "ring"] }
 
