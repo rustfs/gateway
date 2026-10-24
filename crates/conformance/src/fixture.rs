@@ -4823,7 +4823,7 @@ impl Stub {
                         version_id: held.version.version_id.clone().into(),
                         is_latest: held.is_latest,
                         last_modified: Timestamp::from_secs(held.version.last_modified),
-                        e_tag: entity_tag(&object.etag)?,
+                        e_tag: Some(entity_tag(&object.etag)?),
                         size: object.body.len() as i64,
                         storage_class: dto::StorageClass::custom(object.storage_class.clone()),
                         owner: Some(owner()),

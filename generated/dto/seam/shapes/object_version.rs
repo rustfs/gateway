@@ -30,7 +30,7 @@ pub fn object_version_to_s3s(value: crate::ops::shapes::ObjectVersion) -> Result
     Ok(s3s::dto::ObjectVersion {
         checksum_algorithm: if value.checksum_algorithm.is_empty() { None } else { Some({ let x = value.checksum_algorithm; x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(s3s::dto::ChecksumAlgorithm::from(e.as_str().to_owned())) }).collect::<Result<Vec<_>, ConversionError>>()? }) },
         checksum_type: value.checksum_type.map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::ChecksumType::from(x.as_str().to_owned())) }).transpose()?,
-        e_tag: Some({ let x = value.e_tag; leaf::etag_to_s3s(&x) }),
+        e_tag: value.e_tag.map(|x| -> Result<_, ConversionError> { Ok(leaf::etag_to_s3s(&x)) }).transpose()?,
         is_latest: Some(value.is_latest),
         key: Some({ let x = value.key; x.as_str().to_owned() }),
         last_modified: Some({ let x = value.last_modified; leaf::timestamp_to_s3s("last_modified", x)? }),
@@ -63,7 +63,7 @@ pub fn object_version_from_s3s(value: s3s::dto::ObjectVersion) -> Result<crate::
         version_id,
     } = value;
     Ok(crate::ops::shapes::ObjectVersion {
-        e_tag: match e_tag { Some(x) => leaf::etag_from_s3s("e_tag", x)?, None => return Err(ConversionError { field: "e_tag", reason: "the gateway shape requires this member" }) },
+        e_tag: e_tag.map(|x| -> Result<_, ConversionError> { Ok(leaf::etag_from_s3s("e_tag", x)?) }).transpose()?,
         checksum_algorithm: match checksum_algorithm { Some(x) => x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(crate::ops::enums::ChecksumAlgorithm::custom(e.as_str().to_owned())) }).collect::<Result<Vec<_>, ConversionError>>()?, None => Default::default() },
         checksum_type: checksum_type.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::ChecksumType::custom(x.as_str().to_owned())) }).transpose()?,
         size: match size { Some(x) => x, None => return Err(ConversionError { field: "size", reason: "the gateway shape requires this member" }) },

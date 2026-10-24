@@ -464,7 +464,7 @@ element_order = [
   "Owner",
   "RestoreStatus",
 ]
-required = ["Key", "VersionId", "IsLatest", "LastModified", "ETag", "Size", "StorageClass"]
+required = ["Key", "VersionId", "IsLatest", "LastModified", "Size", "StorageClass"]
 hot = ["Key", "VersionId", "IsLatest", "LastModified", "ETag", "Size"]
 
 [[shape.ObjectVersion.field]]
