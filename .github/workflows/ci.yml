@@ -598,7 +598,7 @@ jobs:
           toolchain: 1.97.1
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Install host tools
-        run: bash scripts/ci_install_host_tools.sh
+        run: bash scripts/ci_install_host_tools.sh --script-guards
       - name: Guard mutations 1 of 6 (maximum 5 minutes after setup)
         run: |
           scripts/ci_budget.sh 300 "guard mutations 1/6" env GATEWAY_GUARD_BUDGET_SECONDS=300 GATEWAY_GUARD_SHARD_GROUPS=6 GATEWAY_GUARD_SHARD_GROUP=0 bash scripts/test_guard_scripts.sh
@@ -616,7 +616,7 @@ jobs:
           toolchain: 1.97.1
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Install host tools
-        run: bash scripts/ci_install_host_tools.sh
+        run: bash scripts/ci_install_host_tools.sh --script-guards
       - name: Guard mutations 2 of 6 (maximum 5 minutes after setup)
         run: |
           scripts/ci_budget.sh 300 "guard mutations 2/6" env GATEWAY_GUARD_BUDGET_SECONDS=300 GATEWAY_GUARD_SHARD_GROUPS=6 GATEWAY_GUARD_SHARD_GROUP=1 bash scripts/test_guard_scripts.sh
@@ -634,7 +634,7 @@ jobs:
           toolchain: 1.97.1
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Install host tools
-        run: bash scripts/ci_install_host_tools.sh
+        run: bash scripts/ci_install_host_tools.sh --script-guards
       - name: Guard mutations 3 of 6 (maximum 5 minutes after setup)
         run: |
           scripts/ci_budget.sh 300 "guard mutations 3/6" env GATEWAY_GUARD_BUDGET_SECONDS=300 GATEWAY_GUARD_SHARD_GROUPS=6 GATEWAY_GUARD_SHARD_GROUP=2 bash scripts/test_guard_scripts.sh
@@ -652,7 +652,7 @@ jobs:
           toolchain: 1.97.1
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Install host tools
-        run: bash scripts/ci_install_host_tools.sh
+        run: bash scripts/ci_install_host_tools.sh --script-guards
       - name: Guard mutations 4 of 6 (maximum 5 minutes after setup)
         run: |
           scripts/ci_budget.sh 300 "guard mutations 4/6" env GATEWAY_GUARD_BUDGET_SECONDS=300 GATEWAY_GUARD_SHARD_GROUPS=6 GATEWAY_GUARD_SHARD_GROUP=3 bash scripts/test_guard_scripts.sh
@@ -670,7 +670,7 @@ jobs:
           toolchain: 1.97.1
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Install host tools
-        run: bash scripts/ci_install_host_tools.sh
+        run: bash scripts/ci_install_host_tools.sh --script-guards
       - name: Guard mutations 5 of 6 (maximum 5 minutes after setup)
         run: |
           scripts/ci_budget.sh 300 "guard mutations 5/6" env GATEWAY_GUARD_BUDGET_SECONDS=300 GATEWAY_GUARD_SHARD_GROUPS=6 GATEWAY_GUARD_SHARD_GROUP=4 bash scripts/test_guard_scripts.sh
@@ -688,7 +688,7 @@ jobs:
           toolchain: 1.97.1
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Install host tools
-        run: bash scripts/ci_install_host_tools.sh
+        run: bash scripts/ci_install_host_tools.sh --script-guards
       - name: Guard mutations 6 of 6 (maximum 5 minutes after setup)
         run: |
           scripts/ci_budget.sh 300 "guard mutations 6/6" env GATEWAY_GUARD_BUDGET_SECONDS=300 GATEWAY_GUARD_SHARD_GROUPS=6 GATEWAY_GUARD_SHARD_GROUP=5 bash scripts/test_guard_scripts.sh

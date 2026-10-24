@@ -28,16 +28,19 @@ set -euo pipefail
 #   scripts/ci_install_host_tools.sh --with-gh
 #   scripts/ci_install_host_tools.sh --with-cxx
 #   scripts/ci_install_host_tools.sh --target-guards  # Python and timeout only
+#   scripts/ci_install_host_tools.sh --script-guards  # Python, Ruby and timeout
 # =============================================================================
 
 with_gh=0
 with_cxx=0
 target_guards=0
+script_guards=0
 for argument in "$@"; do
     case "$argument" in
         --with-gh) with_gh=1 ;;
         --with-cxx) with_cxx=1 ;;
         --target-guards) target_guards=1 ;;
+        --script-guards) script_guards=1 ;;
         *)
             printf 'ci_install_host_tools: unknown argument %s\n' "$argument" >&2
             exit 2
@@ -45,8 +48,12 @@ for argument in "$@"; do
     esac
 done
 
-if [[ "$target_guards" -eq 1 && ( "$with_gh" -eq 1 || "$with_cxx" -eq 1 ) ]]; then
-    printf 'ci_install_host_tools: --target-guards cannot install optional build or CLI tools\n' >&2
+if [[ "$target_guards" -eq 1 && "$script_guards" -eq 1 ]]; then
+    printf 'ci_install_host_tools: guard profiles are mutually exclusive\n' >&2
+    exit 2
+fi
+if [[ ( "$target_guards" -eq 1 || "$script_guards" -eq 1 ) && ( "$with_gh" -eq 1 || "$with_cxx" -eq 1 ) ]]; then
+    printf 'ci_install_host_tools: guard profiles cannot install optional build or CLI tools\n' >&2
     exit 2
 fi
 
@@ -59,9 +66,12 @@ else
 fi
 
 missing=()
-if [[ "$target_guards" -eq 1 ]]; then
-    # These two mutation suites inspect files; they do not compile or probe the network.
+if [[ "$target_guards" -eq 1 || "$script_guards" -eq 1 ]]; then
+    # Guard mutations inspect files; they do not compile or probe the network.
     command -v python3 >/dev/null 2>&1 || missing+=(python3)
+    if [[ "$script_guards" -eq 1 ]]; then
+        command -v ruby >/dev/null 2>&1 || missing+=(ruby)
+    fi
     command -v timeout >/dev/null 2>&1 || missing+=(coreutils)
 else
     command -v cc >/dev/null 2>&1 || missing+=(build-essential)
@@ -118,8 +128,12 @@ if [[ "$want_gh" -eq 1 ]] && ! command -v gh >/dev/null 2>&1; then
     fi
 fi
 
-if [[ "$target_guards" -eq 1 ]]; then
-    for required in python3 timeout; do
+if [[ "$target_guards" -eq 1 || "$script_guards" -eq 1 ]]; then
+    required_tools=(python3 timeout)
+    if [[ "$script_guards" -eq 1 ]]; then
+        required_tools+=(ruby)
+    fi
+    for required in "${required_tools[@]}"; do
         if ! command -v "$required" >/dev/null 2>&1; then
             printf 'ci_install_host_tools: installed packages but %s is still missing\n' "$required" >&2
             exit 1
