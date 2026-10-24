@@ -499,17 +499,9 @@ pub(crate) async fn observed_listener_close(mut checkpoint: impl FnMut()) {
     let client = tokio::spawn(get(local_addr));
     entered.wait().await;
     let shutdown_task = tokio::spawn(shutdown.trigger(Duration::from_secs(5)));
-    tokio::time::timeout(Duration::from_secs(1), async {
-        loop {
-            match TcpStream::connect(local_addr).await {
-                Ok(stream) => drop(stream),
-                Err(_) => break,
-            }
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .expect("listener closes while the in-flight handler remains blocked");
+    listener_stop::wait_for_listener_stop(|| async { TcpStream::connect(local_addr).await.map(drop) })
+        .await
+        .expect("listener closes while the in-flight handler remains blocked");
     assert!(!shutdown_task.is_finished(), "shutdown waits for the in-flight handler");
     assert!(!client.is_finished(), "the in-flight response has not completed");
 

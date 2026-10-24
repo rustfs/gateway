@@ -22,6 +22,8 @@ use std::sync::mpsc;
 
 use super::*;
 
+#[path = "capture_tests.rs"]
+mod capture_tests;
 #[path = "grandchild_tests.rs"]
 mod grandchild_tests;
 #[path = "lock_deadline_tests.rs"]

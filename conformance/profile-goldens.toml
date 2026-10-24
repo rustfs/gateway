@@ -1,0 +1,4 @@
+# Exact profile layouts; unmapped references retain their default golden.
+# Reference capture: https://github.com/rustfs/gateway/issues/1436#issuecomment-6117268048
+[rustfs]
+"goldens/c-acl-0001.xml" = "goldens/rustfs/c-acl-0001.xml"
