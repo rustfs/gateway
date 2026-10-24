@@ -22,4 +22,17 @@ path = "src/main.rs"
 [dependencies]
 aws-config = { version = "=1.12.0", default-features = false, features = ["behavior-version-latest", "default-https-client", "rt-tokio"] }
 aws-sdk-s3 = { version = "=1.150.0", default-features = false, features = ["behavior-version-latest", "default-https-client", "http-1x", "rt-tokio", "sigv4a"] }
-tokio = { version = "=1.53.1", features = ["macros", "rt", "time"] }
+tokio = { version = "=1.53.3", features = ["macros", "rt", "time"] }
+
+# Keep SigV4a enabled while using the upstream crypto-bigint fix until its release.
+# This is the same signer revision pinned by RustFS (smithy-rs#4958).
+[patch.crates-io]
+aws-sigv4 = { git = "https://github.com/smithy-lang/smithy-rs", rev = "5c1c4bca2ea7af97496e077c9f1a718eaac64bf8" }
+
+# Keep the signer's path dependencies on the SDK's registry types.
+[patch."https://github.com/smithy-lang/smithy-rs"]
+aws-credential-types = { version = "=1.3.1" }
+aws-smithy-eventstream = { version = "=0.61.6" }
+aws-smithy-http = { version = "=0.64.2" }
+aws-smithy-runtime-api = { version = "=1.19.1" }
+aws-smithy-types = { version = "=1.9.0" }
