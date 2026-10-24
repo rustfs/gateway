@@ -153,6 +153,8 @@ pub struct Output {
     pub start_after: Option<String>,
     /// Wire `x-amz-request-charged`, bound as Header. Optional.
     pub request_charged: Option<crate::ops::enums::RequestCharged>,
+    /// Wire `x-rustfs-on-demand-migration-list`, bound as Header. Optional.
+    pub rustfs_on_demand_migration_list: Option<String>,
 }
 
 impl Output {

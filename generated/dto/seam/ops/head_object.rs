@@ -212,6 +212,7 @@ pub fn output_from_s3s(output: s3s::dto::HeadObjectOutput) -> Result<crate::ops:
         object_lock_event_hold: Default::default(),
         object_lock_event_hold_duration_days: Default::default(),
         object_lock_event_hold_duration_years: Default::default(),
+        rustfs_on_demand_migration: Default::default(),
     })
 }
 
@@ -231,6 +232,9 @@ pub fn output_to_s3s(output: crate::ops::head_object::Output) -> Result<s3s::dto
     }
     if output.object_lock_event_hold_duration_years.is_some() {
         return Err(ConversionError { field: "object_lock_event_hold_duration_years", reason: "an Object Lock event hold, which no pinned s3s shape holds and RustFS does not store" });
+    }
+    if output.rustfs_on_demand_migration.is_some() {
+        return Err(ConversionError { field: "rustfs_on_demand_migration", reason: "the legacy DTO has no carrier for this migration response header" });
     }
     Ok(s3s::dto::HeadObjectOutput {
         accept_ranges: output.accept_ranges,

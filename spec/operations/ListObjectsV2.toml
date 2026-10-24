@@ -285,6 +285,15 @@ hot = false
 values = ["requester"]
 quirks = []
 
+[[output]]
+name = "RustfsOnDemandMigrationList"
+wire_name = "x-rustfs-on-demand-migration-list"
+binding = "Header"
+type = "String"
+required = false
+hot = false
+quirks = []
+
 [shape.CommonPrefix]
 kind = "Structure"
 element_order = ["Prefix"]

@@ -14,7 +14,7 @@
 
 //! Response headers, metadata RFC 2047 symmetry and forced URL encoding regressions.
 //!
-//! Responsible for: metadata safety, CompleteMultipartUpload headers and listing-wide URL encoding.
+//! Responsible for: metadata safety, response-header carriers and listing-wide URL encoding.
 //! NOT responsible for: parser internals or generated source shape.
 //! Upstream: the parent codec test helpers. Downstream: nothing; this is a leaf test module.
 
@@ -199,4 +199,56 @@ fn complete_headers_are_bound_before_the_body_is_committed() {
         .map(|(name, value)| (http::HeaderName::from_static(name), http::HeaderValue::from_static(value)))
         .collect();
     assert!(crate::HeadPart::<dto::CompleteMultipartUpload>::new(headers).is_ok());
+}
+
+#[test]
+fn migration_headers_keep_get_and_head_markers_explicit() {
+    let get_request = accepted("GET", "/photos/key", &[]);
+    let head_request = accepted("HEAD", "/photos/key", &[]);
+    let get_view = MetaView::of(&get_request, TargetKind::Object).expect("get view");
+    let head_view = MetaView::of(&head_request, TargetKind::Object).expect("head view");
+    for value in [Some("source"), Some(""), None] {
+        let get = dto::GetObject::encode(
+            dto::GetObjectOutput {
+                rustfs_on_demand_migration: value.map(str::to_owned),
+                ..Default::default()
+            },
+            &get_view,
+            200,
+        )
+        .expect("get response");
+        let head = dto::HeadObject::encode(
+            dto::HeadObjectOutput {
+                rustfs_on_demand_migration: value.map(str::to_owned),
+                ..Default::default()
+            },
+            &head_view,
+            200,
+        )
+        .expect("head response");
+        assert_eq!(
+            [
+                header(&get, "x-rustfs-on-demand-migration"),
+                header(&head, "x-rustfs-on-demand-migration")
+            ],
+            [value.map(str::to_owned), value.map(str::to_owned)]
+        );
+    }
+}
+
+#[test]
+fn migration_headers_keep_the_listing_marker_outside_the_xml() {
+    let request = accepted("GET", "/conf-list?list-type=2", &[]);
+    let view = MetaView::of(&request, TargetKind::Bucket).expect("view");
+    let baseline = dto::ListObjectsV2::encode(one_entry_listing("raw key", "tag"), &view, 200).expect("baseline");
+    let body = body_text(&baseline.body);
+    for value in [Some("local_only"), Some(""), None] {
+        let mut output = one_entry_listing("raw key", "tag");
+        output.rustfs_on_demand_migration_list = value.map(str::to_owned);
+        let response = dto::ListObjectsV2::encode(output, &view, 200).expect("listing response");
+        assert_eq!(
+            (header(&response, "x-rustfs-on-demand-migration-list"), body_text(&response.body)),
+            (value.map(str::to_owned), body.clone())
+        );
+    }
 }

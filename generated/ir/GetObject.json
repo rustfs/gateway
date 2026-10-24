@@ -661,6 +661,15 @@
                             "type": { "kind": "Integer" },
                             "hot": false,
                             "quirk_refs": []
+                          },
+                          {
+                            "name": "RustfsOnDemandMigration",
+                            "wire_name": "x-rustfs-on-demand-migration",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "String" },
+                            "hot": false,
+                            "quirk_refs": []
                           }
                         ]
             },

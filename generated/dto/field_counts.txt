@@ -138,7 +138,7 @@ GetObjectLegalHoldInput 5
 GetObjectLegalHoldOutput 1
 GetObjectLockConfigurationInput 2
 GetObjectLockConfigurationOutput 1
-GetObjectOutput 46
+GetObjectOutput 47
 GetObjectRetentionInput 5
 GetObjectRetentionOutput 1
 GetObjectTaggingInput 5
@@ -153,7 +153,7 @@ Grantee 5
 HeadBucketInput 2
 HeadBucketOutput 1
 HeadObjectInput 21
-HeadObjectOutput 46
+HeadObjectOutput 47
 IndexDocument 1
 Initiator 2
 InputSerialization 4
@@ -196,7 +196,7 @@ ListObjectVersionsOutput 14
 ListObjectsInput 9
 ListObjectsOutput 11
 ListObjectsV2Input 11
-ListObjectsV2Output 13
+ListObjectsV2Output 14
 ListPartsInput 10
 ListPartsOutput 16
 LoggingEnabled 4

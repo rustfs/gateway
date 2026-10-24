@@ -161,6 +161,7 @@ pub(crate) fn list_objects_v2(output: oracle::ListObjectsV2Output) -> Converted<
         next_continuation_token: opaque(next_continuation_token),
         start_after,
         request_charged: enumeration(request_charged),
+        rustfs_on_demand_migration_list: None,
     })
 }
 

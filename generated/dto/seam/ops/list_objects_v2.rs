@@ -119,6 +119,7 @@ pub fn output_from_s3s(output: s3s::dto::ListObjectsV2Output) -> Result<crate::o
         next_continuation_token: next_continuation_token.map(|x| -> Result<_, ConversionError> { Ok(crate::OpaqueString::from(x)) }).transpose()?,
         start_after,
         request_charged: request_charged.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::RequestCharged::custom(x.as_str().to_owned())) }).transpose()?,
+        rustfs_on_demand_migration_list: Default::default(),
     })
 }
 
@@ -130,6 +131,9 @@ pub fn output_from_s3s(output: s3s::dto::ListObjectsV2Output) -> Result<crate::o
 /// [`ConversionError`] naming a member the s3s output cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
 pub fn output_to_s3s(output: crate::ops::list_objects_v2::Output) -> Result<s3s::dto::ListObjectsV2Output, ConversionError> {
+    if output.rustfs_on_demand_migration_list.is_some() {
+        return Err(ConversionError { field: "rustfs_on_demand_migration_list", reason: "the legacy DTO has no carrier for this migration response header" });
+    }
     Ok(s3s::dto::ListObjectsV2Output {
         name: Some({ let x = output.name; x.as_str().to_owned() }),
         prefix: Some(output.prefix),
