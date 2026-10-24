@@ -385,3 +385,90 @@ fn v1_listing_etag_present_values_are_preserved() {
 fn v2_listing_etag_present_values_are_preserved() {
     assert_listing_entity_tags(true, [Some("a"), Some("b"), Some("c")]);
 }
+
+fn assert_version_listing_entity_tags(tags: [Option<&str>; 3]) {
+    for rustfs in [false, true] {
+        let request = accepted("GET", "/conf-list?versions", &[]);
+        let view = MetaView::of(&request, TargetKind::Bucket).expect("view");
+        let view = if rustfs {
+            view.with_rustfs_response_layout()
+                .with_rustfs_listing_encoding(RustFsListing::new(
+                    &[
+                        "Prefix",
+                        "Delimiter",
+                        "KeyMarker",
+                        "NextKeyMarker",
+                        "ObjectVersion.Key",
+                        "DeleteMarkerEntry.Key",
+                        "CommonPrefix.Prefix",
+                    ],
+                    true,
+                ))
+        } else {
+            view
+        };
+        let versions = tags
+            .iter()
+            .enumerate()
+            .map(|(index, tag)| dto::ObjectVersion {
+                key: ObjectKey::new("entry").expect("key"),
+                version_id: format!("version-{index}").into(),
+                is_latest: index == 0,
+                last_modified: Timestamp::from_secs(1_700_000_000),
+                e_tag: tag.map(|value| ETag::new(value.to_owned()).expect("a fixture tag")),
+                size: 1,
+                storage_class: dto::StorageClass::STANDARD,
+                ..Default::default()
+            })
+            .collect();
+        let output = dto::ListObjectVersionsOutput {
+            name: BucketName::new("conf-list").expect("bucket"),
+            version_id_marker: "".into(),
+            max_keys: 1000,
+            versions,
+            ..Default::default()
+        };
+        let response = dto::ListObjectVersions::encode(output, &view, 200).expect("encodes");
+        let body = body_text(&response.body);
+        let entries: Vec<_> = body
+            .split("<Version>")
+            .skip(1)
+            .map(|tail| tail.split_once("</Version>").expect("closed version").0)
+            .collect();
+        assert_eq!(entries.len(), tags.len(), "missing tags must not erase versions: {body}");
+        for (entry, tag) in entries.iter().zip(tags) {
+            match tag {
+                None => assert!(!entry.contains("<ETag"), "a missing version tag must be omitted: {body}"),
+                Some(tag) => assert!(
+                    entry.replace("&quot;", "\"").contains(&format!("<ETag>\"{tag}\"</ETag>")),
+                    "a neighboring version tag must keep its value and position: {body}"
+                ),
+            }
+        }
+    }
+}
+
+#[test]
+fn n_version_listing_etag_missing_first() {
+    assert_version_listing_entity_tags([None, Some("b"), Some("c")]);
+}
+
+#[test]
+fn n_version_listing_etag_missing_middle() {
+    assert_version_listing_entity_tags([Some("a"), None, Some("c")]);
+}
+
+#[test]
+fn n_version_listing_etag_missing_last() {
+    assert_version_listing_entity_tags([Some("a"), Some("b"), None]);
+}
+
+#[test]
+fn n_version_listing_etag_all_missing() {
+    assert_version_listing_entity_tags([None, None, None]);
+}
+
+#[test]
+fn version_listing_etag_present_values_are_preserved() {
+    assert_version_listing_entity_tags([Some("a"), Some("b"), Some("c")]);
+}

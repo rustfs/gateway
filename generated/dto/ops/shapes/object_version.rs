@@ -29,8 +29,8 @@
 /// [`ObjectVersion::check_required`] refuses to let off the decode path.
 #[derive(Debug, Clone, Default)]
 pub struct ObjectVersion {
-    /// Wire `ETag`, bound as BodyXml. Required.
-    pub e_tag: crate::ETag,
+    /// Wire `ETag`, bound as BodyXml. Optional.
+    pub e_tag: Option<crate::ETag>,
     /// Wire `ChecksumAlgorithm`, bound as BodyXml. Optional.
     pub checksum_algorithm: Vec<crate::ops::enums::ChecksumAlgorithm>,
     /// Wire `ChecksumType`, bound as BodyXml. Optional.
@@ -69,7 +69,6 @@ impl ObjectVersion {
     ///
     /// Returns [`crate::PlaceholderDefault`] naming the first offending member.
     pub fn check_required(&self) -> Result<(), crate::PlaceholderDefault> {
-        crate::reject_placeholder("ObjectVersion", "ETag", &self.e_tag)?;
         crate::reject_placeholder("ObjectVersion", "Size", &self.size)?;
         crate::reject_placeholder("ObjectVersion", "StorageClass", &self.storage_class)?;
         crate::reject_placeholder("ObjectVersion", "Key", &self.key)?;

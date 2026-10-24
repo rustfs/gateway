@@ -200,7 +200,7 @@ pub(crate) fn list_object_versions(output: oracle::ListObjectVersionsOutput) -> 
                  version_id,
              }| {
                 Ok(dto::ObjectVersion {
-                    e_tag: required("versions.e_tag", entity_tag("versions.e_tag", e_tag)?)?,
+                    e_tag: entity_tag("versions.e_tag", e_tag)?,
                     checksum_algorithm: checksum_algorithms(checksum_algorithm),
                     checksum_type: enumeration(checksum_type),
                     size: required("versions.size", size)?,

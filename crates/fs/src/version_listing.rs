@@ -154,7 +154,7 @@ impl Handler<ListObjectVersions> for FsBackend {
                     version_id: record.version_id.clone().into(),
                     is_latest,
                     last_modified: Timestamp::from_secs(record.modified),
-                    e_tag: rustfs_gateway::ETag::new(record.e_tag.clone()).map_err(|_| storage_error())?,
+                    e_tag: Some(rustfs_gateway::ETag::new(record.e_tag.clone()).map_err(|_| storage_error())?),
                     size: record.size,
                     storage_class: record.storage_class.clone(),
                     owner: self.reported_owner().cloned(),
