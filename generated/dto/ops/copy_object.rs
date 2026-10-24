@@ -38,7 +38,7 @@ impl CopyObject {
     pub const REQUIRED_INPUT: &'static [&'static str] = &["Bucket", "CopySource", "Key"];
 
     /// Output members the wire contract requires, under their model names.
-    pub const REQUIRED_OUTPUT: &'static [&'static str] = &["ETag"];
+    pub const REQUIRED_OUTPUT: &'static [&'static str] = &[];
 
     /// Input members the IR keeps on the hot path.
     pub const HOT_INPUT: &'static [&'static str] = &["Bucket", "CopySource", "Key", "MetadataDirective"];
@@ -269,8 +269,8 @@ pub struct Output {
     pub bucket_key_enabled: Option<bool>,
     /// Wire `x-amz-request-charged`, bound as Header. Optional.
     pub request_charged: Option<crate::ops::enums::RequestCharged>,
-    /// Wire `ETag`, bound as BodyXml. Required.
-    pub e_tag: crate::ETag,
+    /// Wire `ETag`, bound as BodyXml. Optional.
+    pub e_tag: Option<crate::ETag>,
     /// Wire `LastModified`, bound as BodyXml. Optional.
     pub last_modified: Option<crate::Timestamp>,
     /// Wire `ChecksumType`, bound as BodyXml. Optional.
@@ -313,7 +313,6 @@ impl Output {
     ///
     /// Returns [`crate::PlaceholderDefault`] naming the first offending member.
     pub fn check_required(&self) -> Result<(), crate::PlaceholderDefault> {
-        crate::reject_placeholder("CopyObjectOutput", "ETag", &self.e_tag)?;
         Ok(())
     }
 }

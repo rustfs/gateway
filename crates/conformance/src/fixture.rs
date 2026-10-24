@@ -3031,7 +3031,7 @@ impl Stub {
                 drop(fixture);
 
                 Ok(dto::CopyObjectOutput {
-                    e_tag: entity_tag(&etag)?,
+                    e_tag: Some(entity_tag(&etag)?),
                     last_modified: Some(Timestamp::from_secs(now)),
                     // Two headers, never one value written into both: one names the version the copy
                     // read and the other the version it created, and a client told they are the same
