@@ -198,6 +198,22 @@ pub const MEMBERS: &[MemberOverride] = &[
             "no legacy input holds If-Range and RustFS reads no If-Range header, so it serves the range as before",
         ),
     ),
+    // Migration markers live in the legacy response HeaderMap, outside its operation DTO.
+    (
+        "GetObjectOutput",
+        "rustfs_on_demand_migration",
+        Rule::GatewayOnly("the legacy DTO has no carrier for this migration response header"),
+    ),
+    (
+        "HeadObjectOutput",
+        "rustfs_on_demand_migration",
+        Rule::GatewayOnly("the legacy DTO has no carrier for this migration response header"),
+    ),
+    (
+        "ListObjectsV2Output",
+        "rustfs_on_demand_migration_list",
+        Rule::GatewayOnly("the legacy DTO has no carrier for this migration response header"),
+    ),
     // Complete response headers live outside the legacy DTO; a DTO-only conversion must
     // refuse a present value rather than discard it or invent it from an XML checksum.
     (

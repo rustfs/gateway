@@ -666,3 +666,12 @@ type = "Integer"
 required = false
 hot = false
 quirks = []
+
+[[output]]
+name = "RustfsOnDemandMigration"
+wire_name = "x-rustfs-on-demand-migration"
+binding = "Header"
+type = "String"
+required = false
+hot = false
+quirks = []

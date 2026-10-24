@@ -265,6 +265,8 @@ pub struct Output {
     pub object_lock_event_hold_duration_days: Option<i32>,
     /// Wire `x-amz-object-lock-event-hold-duration-years`, bound as Header. Optional.
     pub object_lock_event_hold_duration_years: Option<i32>,
+    /// Wire `x-rustfs-on-demand-migration`, bound as Header. Optional.
+    pub rustfs_on_demand_migration: Option<String>,
 }
 
 impl Output {
@@ -340,6 +342,7 @@ impl std::fmt::Debug for Output {
             .field("object_lock_event_hold", &self.object_lock_event_hold)
             .field("object_lock_event_hold_duration_days", &self.object_lock_event_hold_duration_days)
             .field("object_lock_event_hold_duration_years", &self.object_lock_event_hold_duration_years)
+            .field("rustfs_on_demand_migration", &self.rustfs_on_demand_migration)
             .finish()
     }
 }

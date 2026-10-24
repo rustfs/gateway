@@ -258,6 +258,15 @@
                             "type": { "kind": "StringEnum", "values": ["requester"] },
                             "hot": false,
                             "quirk_refs": []
+                          },
+                          {
+                            "name": "RustfsOnDemandMigrationList",
+                            "wire_name": "x-rustfs-on-demand-migration-list",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "String" },
+                            "hot": false,
+                            "quirk_refs": []
                           }
                         ]
             },

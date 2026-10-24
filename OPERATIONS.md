@@ -205,6 +205,8 @@ such a row as though the key selected the operation is the opposite of what the 
 | `x-amz-version-id` | [CompleteMultipartUpload](#completemultipartupload), [CopyObject](#copyobject), [DeleteObject](#deleteobject), [DeleteObjectTagging](#deleteobjecttagging), [GetObject](#getobject), [GetObjectAttributes](#getobjectattributes), [GetObjectTagging](#getobjecttagging), [HeadObject](#headobject), [PutObject](#putobject), [PutObjectTagging](#putobjecttagging) |
 | `x-amz-website-redirect-location` | [CopyObject](#copyobject), [CreateMultipartUpload](#createmultipartupload), [GetObject](#getobject), [HeadObject](#headobject), [PutObject](#putobject) |
 | `x-amz-write-offset-bytes` | [PutObject](#putobject) |
+| `x-rustfs-on-demand-migration` | [GetObject](#getobject), [HeadObject](#headobject) |
+| `x-rustfs-on-demand-migration-list` | [ListObjectsV2](#listobjectsv2) |
 
 ## Reverse index: error code to operations
 
@@ -2335,7 +2337,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 **Headers**
 
 - request: `if-match`, `if-modified-since`, `if-none-match`, `if-range`, `if-unmodified-since`, `range`, `x-amz-checksum-mode`, `x-amz-expected-bucket-owner`, `x-amz-request-payer`, `x-amz-server-side-encryption-customer-algorithm`, `x-amz-server-side-encryption-customer-key`, `x-amz-server-side-encryption-customer-key-md5`
-- response: `accept-ranges`, `cache-control`, `content-disposition`, `content-encoding`, `content-language`, `content-length`, `content-range`, `content-type`, `etag`, `expires`, `last-modified`, `x-amz-checksum-crc32`, `x-amz-checksum-crc32c`, `x-amz-checksum-crc64nvme`, `x-amz-checksum-md5`, `x-amz-checksum-sha1`, `x-amz-checksum-sha256`, `x-amz-checksum-sha512`, `x-amz-checksum-type`, `x-amz-checksum-xxhash128`, `x-amz-checksum-xxhash3`, `x-amz-checksum-xxhash64`, `x-amz-delete-marker`, `x-amz-expiration`, `x-amz-meta-`, `x-amz-missing-meta`, `x-amz-mp-parts-count`, `x-amz-object-lock-event-hold`, `x-amz-object-lock-event-hold-duration-days`, `x-amz-object-lock-event-hold-duration-years`, `x-amz-object-lock-legal-hold`, `x-amz-object-lock-mode`, `x-amz-object-lock-retain-until-date`, `x-amz-replication-status`, `x-amz-request-charged`, `x-amz-restore`, `x-amz-server-side-encryption`, `x-amz-server-side-encryption-aws-kms-key-id`, `x-amz-server-side-encryption-bucket-key-enabled`, `x-amz-server-side-encryption-customer-algorithm`, `x-amz-server-side-encryption-customer-key-md5`, `x-amz-storage-class`, `x-amz-tagging-count`, `x-amz-version-id`, `x-amz-website-redirect-location`
+- response: `accept-ranges`, `cache-control`, `content-disposition`, `content-encoding`, `content-language`, `content-length`, `content-range`, `content-type`, `etag`, `expires`, `last-modified`, `x-amz-checksum-crc32`, `x-amz-checksum-crc32c`, `x-amz-checksum-crc64nvme`, `x-amz-checksum-md5`, `x-amz-checksum-sha1`, `x-amz-checksum-sha256`, `x-amz-checksum-sha512`, `x-amz-checksum-type`, `x-amz-checksum-xxhash128`, `x-amz-checksum-xxhash3`, `x-amz-checksum-xxhash64`, `x-amz-delete-marker`, `x-amz-expiration`, `x-amz-meta-`, `x-amz-missing-meta`, `x-amz-mp-parts-count`, `x-amz-object-lock-event-hold`, `x-amz-object-lock-event-hold-duration-days`, `x-amz-object-lock-event-hold-duration-years`, `x-amz-object-lock-legal-hold`, `x-amz-object-lock-mode`, `x-amz-object-lock-retain-until-date`, `x-amz-replication-status`, `x-amz-request-charged`, `x-amz-restore`, `x-amz-server-side-encryption`, `x-amz-server-side-encryption-aws-kms-key-id`, `x-amz-server-side-encryption-bucket-key-enabled`, `x-amz-server-side-encryption-customer-algorithm`, `x-amz-server-side-encryption-customer-key-md5`, `x-amz-storage-class`, `x-amz-tagging-count`, `x-amz-version-id`, `x-amz-website-redirect-location`, `x-rustfs-on-demand-migration`
 - required: —
 
 **Body**
@@ -2828,7 +2830,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 **Headers**
 
 - request: `if-match`, `if-modified-since`, `if-none-match`, `if-unmodified-since`, `range`, `x-amz-checksum-mode`, `x-amz-expected-bucket-owner`, `x-amz-request-payer`, `x-amz-server-side-encryption-customer-algorithm`, `x-amz-server-side-encryption-customer-key`, `x-amz-server-side-encryption-customer-key-md5`
-- response: `accept-ranges`, `cache-control`, `content-disposition`, `content-encoding`, `content-language`, `content-length`, `content-range`, `content-type`, `etag`, `expires`, `last-modified`, `x-amz-archive-status`, `x-amz-checksum-crc32`, `x-amz-checksum-crc32c`, `x-amz-checksum-crc64nvme`, `x-amz-checksum-md5`, `x-amz-checksum-sha1`, `x-amz-checksum-sha256`, `x-amz-checksum-sha512`, `x-amz-checksum-type`, `x-amz-checksum-xxhash128`, `x-amz-checksum-xxhash3`, `x-amz-checksum-xxhash64`, `x-amz-delete-marker`, `x-amz-expiration`, `x-amz-meta-`, `x-amz-missing-meta`, `x-amz-mp-parts-count`, `x-amz-object-lock-event-hold`, `x-amz-object-lock-event-hold-duration-days`, `x-amz-object-lock-event-hold-duration-years`, `x-amz-object-lock-legal-hold`, `x-amz-object-lock-mode`, `x-amz-object-lock-retain-until-date`, `x-amz-replication-status`, `x-amz-request-charged`, `x-amz-restore`, `x-amz-server-side-encryption`, `x-amz-server-side-encryption-aws-kms-key-id`, `x-amz-server-side-encryption-bucket-key-enabled`, `x-amz-server-side-encryption-customer-algorithm`, `x-amz-server-side-encryption-customer-key-md5`, `x-amz-storage-class`, `x-amz-tagging-count`, `x-amz-version-id`, `x-amz-website-redirect-location`
+- response: `accept-ranges`, `cache-control`, `content-disposition`, `content-encoding`, `content-language`, `content-length`, `content-range`, `content-type`, `etag`, `expires`, `last-modified`, `x-amz-archive-status`, `x-amz-checksum-crc32`, `x-amz-checksum-crc32c`, `x-amz-checksum-crc64nvme`, `x-amz-checksum-md5`, `x-amz-checksum-sha1`, `x-amz-checksum-sha256`, `x-amz-checksum-sha512`, `x-amz-checksum-type`, `x-amz-checksum-xxhash128`, `x-amz-checksum-xxhash3`, `x-amz-checksum-xxhash64`, `x-amz-delete-marker`, `x-amz-expiration`, `x-amz-meta-`, `x-amz-missing-meta`, `x-amz-mp-parts-count`, `x-amz-object-lock-event-hold`, `x-amz-object-lock-event-hold-duration-days`, `x-amz-object-lock-event-hold-duration-years`, `x-amz-object-lock-legal-hold`, `x-amz-object-lock-mode`, `x-amz-object-lock-retain-until-date`, `x-amz-replication-status`, `x-amz-request-charged`, `x-amz-restore`, `x-amz-server-side-encryption`, `x-amz-server-side-encryption-aws-kms-key-id`, `x-amz-server-side-encryption-bucket-key-enabled`, `x-amz-server-side-encryption-customer-algorithm`, `x-amz-server-side-encryption-customer-key-md5`, `x-amz-storage-class`, `x-amz-tagging-count`, `x-amz-version-id`, `x-amz-website-redirect-location`, `x-rustfs-on-demand-migration`
 - required: —
 
 **Body**
@@ -3356,7 +3358,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 **Headers**
 
 - request: `x-amz-expected-bucket-owner`, `x-amz-optional-object-attributes`, `x-amz-request-payer`
-- response: `x-amz-request-charged`
+- response: `x-amz-request-charged`, `x-rustfs-on-demand-migration-list`
 - required: —
 
 **Body**

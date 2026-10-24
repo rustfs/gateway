@@ -396,6 +396,11 @@ impl OperationCodec for dto::GetObject {
             let rendered = &v.to_string();
             response.set_header("x-amz-object-lock-event-hold-duration-years", rendered);
         }
+        // RustfsOnDemandMigration — header `x-rustfs-on-demand-migration`.
+        if let Some(v) = output.rustfs_on_demand_migration.as_ref() {
+            let rendered = v.as_str();
+            response.set_header("x-rustfs-on-demand-migration", rendered);
+        }
         // The `response-*` overrides are applied once, after every header this operation
         // declares — so "the override wins" is true by construction and not by ordering.
         response.apply_response_overrides(request, Self::RESPONSE_OVERRIDES);

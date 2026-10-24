@@ -110,6 +110,11 @@ impl OperationCodec for dto::ListObjectsV2 {
             let rendered = v.as_str();
             response.set_header("x-amz-request-charged", rendered);
         }
+        // RustfsOnDemandMigrationList — header `x-rustfs-on-demand-migration-list`.
+        if let Some(v) = output.rustfs_on_demand_migration_list.as_ref() {
+            let rendered = v.as_str();
+            response.set_header("x-rustfs-on-demand-migration-list", rendered);
+        }
         let mut output = output;
         let force_url_encoding = value::requires_url_encoding(request, &output.prefix)
             || value::requires_url_encoding(request, &output.delimiter)

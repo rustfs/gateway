@@ -707,3 +707,37 @@ fn complete_headers_absent_in_legacy_do_not_get_invented_from_xml_checksums() {
         )
     );
 }
+
+#[test]
+fn n_migration_headers_are_refused_by_dto_only_legacy_conversion() {
+    for value in ["source", ""] {
+        let mut get = ops::get_object::output_from_s3s(oracle::GetObjectOutput::default()).expect("get output");
+        get.rustfs_on_demand_migration = Some(value.to_owned());
+        let get_refused =
+            matches!(ops::get_object::output_to_s3s(get), Err(error) if error.field == "rustfs_on_demand_migration");
+        let mut head = ops::head_object::output_from_s3s(oracle::HeadObjectOutput::default()).expect("head output");
+        head.rustfs_on_demand_migration = Some(value.to_owned());
+        let head_refused =
+            matches!(ops::head_object::output_to_s3s(head), Err(error) if error.field == "rustfs_on_demand_migration");
+        let mut list = ops::list_objects_v2::output_from_s3s(listing(vec![])).expect("listing output");
+        list.rustfs_on_demand_migration_list = Some(value.to_owned());
+        let list_refused =
+            matches!(ops::list_objects_v2::output_to_s3s(list), Err(error) if error.field == "rustfs_on_demand_migration_list");
+        assert_eq!([get_refused, head_refused, list_refused], [true; 3]);
+    }
+}
+
+#[test]
+fn migration_headers_are_absent_when_the_legacy_dto_has_no_marker() {
+    let get = ops::get_object::output_from_s3s(oracle::GetObjectOutput::default()).expect("get output");
+    let head = ops::head_object::output_from_s3s(oracle::HeadObjectOutput::default()).expect("head output");
+    let list = ops::list_objects_v2::output_from_s3s(listing(vec![])).expect("listing output");
+    assert_eq!(
+        [
+            get.rustfs_on_demand_migration,
+            head.rustfs_on_demand_migration,
+            list.rustfs_on_demand_migration_list
+        ],
+        [None, None, None]
+    );
+}

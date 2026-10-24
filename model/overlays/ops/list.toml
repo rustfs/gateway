@@ -63,6 +63,15 @@ url_encoded_fields = [
   "CommonPrefixes.Prefix",
 ]
 
+# The RustFS adapter chooses this response marker; the protocol layer only carries it.
+[[op.ListObjectsV2.field]]
+side = "output"
+name = "RustfsOnDemandMigrationList"
+synthesize = true
+binding = "Header"
+wire_name = "x-rustfs-on-demand-migration-list"
+type = "String"
+
 [[op.ListObjectsV2.field]]
 side = "input"
 name = "MaxKeys"
