@@ -397,7 +397,7 @@ pub(crate) fn copy_object(output: oracle::CopyObjectOutput) -> Converted<dto::Co
         last_modified,
     } = required("copy_object_result", copy_object_result)?;
     Ok(dto::CopyObjectOutput {
-        e_tag: required("copy_object_result.e_tag", entity_tag("copy_object_result.e_tag", e_tag)?)?,
+        e_tag: entity_tag("copy_object_result.e_tag", e_tag)?,
         last_modified: instant("copy_object_result.last_modified", last_modified)?,
         expiration: opaque(expiration),
         copy_source_version_id,
