@@ -330,8 +330,7 @@ impl OperationCodec for dto::CopyObject {
         };
         writer.open("CopyObjectResult", xmlns);
         writer.order_children(rustfs_order::RESPONSE);
-        {
-            let v = &output.e_tag;
+        if let Some(v) = output.e_tag.as_ref() {
             writer.entity_tag_element("ETag", &value::render_etag(v, EtagRender::XmlQuoted));
         }
         if let Some(v) = output.last_modified.as_ref() {

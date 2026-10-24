@@ -238,7 +238,7 @@ impl Handler<CopyObject> for FsBackend {
         };
 
         let mut output = CopyObjectOutput {
-            e_tag,
+            e_tag: Some(e_tag),
             last_modified: Some(published.last_modified),
             copy_source_version_id: source
                 .version_id()

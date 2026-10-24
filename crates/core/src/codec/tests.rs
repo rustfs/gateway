@@ -39,6 +39,7 @@ use crate::route::TargetKind;
 
 mod body_literals;
 mod content_type_default;
+mod copy_object;
 mod empty_headers_absent;
 mod header_lists;
 mod metadata_and_url;
