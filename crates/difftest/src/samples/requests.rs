@@ -40,7 +40,6 @@ pub struct RequestRow {
 fn row(name: &'static str, request: RawRequest, expect: &'static [&'static str]) -> RequestRow {
     RequestRow { name, request, expect }
 }
-
 const HTTP_DATE: &str = "Thu, 01 Jan 2026 00:00:00 GMT";
 const DELETE_BODY: &[u8] =
     b"<Delete><Object><Key>a</Key></Object><Object><Key>b</Key><VersionId>v1</VersionId></Object><Quiet>true</Quiet></Delete>";
@@ -326,7 +325,6 @@ fn checksum_rows(rows: &mut Vec<RequestRow>) {
         ));
     }
 }
-
 /// Every request row. Names are unique; the expectation is the exact set of register ids.
 #[must_use]
 #[allow(clippy::too_many_lines, reason = "one table, read row by row")]
@@ -341,6 +339,8 @@ pub(super) fn requests() -> Vec<RequestRow> {
             &["kd-decode-0085", "kd-decode-0086"],
         ),
         row("copy-annotation-query", RawRequest::put("/bkt/k?annotation=1", b"").header("x-amz-copy-source", "/src/k"), &["kd-decode-0087", "kd-decode-0088"]),
+        row("part-annotation-query", RawRequest::put("/bkt/k?annotation=1&uploadId=u&partNumber=2", b""), &["kd-decode-0089", "kd-decode-0090"]),
+        row("bucket-events-query", RawRequest::get("/bkt?events"), &["kd-decode-0091", "kd-decode-0092"]),
         // ── GetObject / HeadObject ──
         row("get-full", get_full(), &[]),
         row("get-bare", RawRequest::get("/bkt/k"), &[]),

@@ -472,3 +472,63 @@ fn header_scope_rejects_invalid_names() {
     );
     assert!(KnownDiffs::parse(&text).is_ok(), "a valid field name is accepted");
 }
+
+/// Negative — multipart/annotation entries require the selector, request context and exact values.
+#[test]
+fn multipart_annotation_registration_rejects_unrelated_findings() {
+    let register = KnownDiffs::checked_in().expect("the register parses");
+    for (item, gateway, s3s) in [
+        (Item::Route, "UploadPart", "PutObjectAnnotation"),
+        (Item::Outcome, "handled", "400 InvalidRequest: missing query: annotationName"),
+    ] {
+        let found = || vec![finding("UploadPart", item.clone(), gateway, s3s)];
+        for target in [
+            "/bkt/k?uploadId=u&partNumber=2",
+            "/bkt/k?uploadId=u&partNumber=2&prefix=annotation",
+            "/bkt/k?uploadId=u&partNumber=2&annotationName=a",
+        ] {
+            let request = crate::RawRequest::put(target, b"");
+            assert!(!register.verdict_for(&request, found()).passed(), "{target}/{item}");
+        }
+        assert!(!register.verdict(found()).passed(), "request context is required for {item}");
+        let request = crate::RawRequest::put("/bkt/k?annotation=1&uploadId=u&partNumber=2", b"");
+        for (operation, gateway, s3s) in [
+            ("PutObject", gateway, s3s),
+            ("UploadPart", "unrelated gateway value", s3s),
+            ("UploadPart", gateway, "unrelated legacy value"),
+        ] {
+            let differences = vec![finding(operation, item.clone(), gateway, s3s)];
+            assert!(!register.verdict_for(&request, differences).passed(), "{operation}/{gateway}/{s3s}");
+        }
+    }
+}
+
+/// Negative — bucket-events entries require the selector, request context and exact values.
+#[test]
+fn bucket_events_registration_rejects_unrelated_findings() {
+    let register = KnownDiffs::checked_in().expect("the register parses");
+    for (item, gateway, s3s) in [
+        (Item::Route, "ListObjects", "ListenBucketNotification"),
+        (
+            Item::Outcome,
+            "handled",
+            "501 NotImplemented: ListenBucketNotification is not implemented yet",
+        ),
+    ] {
+        let found = || vec![finding("ListObjects", item.clone(), gateway, s3s)];
+        for target in ["/bkt", "/bkt?prefix=events", "/bkt?event=a"] {
+            let request = crate::RawRequest::get(target);
+            assert!(!register.verdict_for(&request, found()).passed(), "{target}/{item}");
+        }
+        assert!(!register.verdict(found()).passed(), "request context is required for {item}");
+        let request = crate::RawRequest::get("/bkt?events");
+        for (operation, gateway, s3s) in [
+            ("ListObjectsV2", gateway, s3s),
+            ("ListObjects", "unrelated gateway value", s3s),
+            ("ListObjects", gateway, "unrelated legacy value"),
+        ] {
+            let differences = vec![finding(operation, item.clone(), gateway, s3s)];
+            assert!(!register.verdict_for(&request, differences).passed(), "{operation}/{gateway}/{s3s}");
+        }
+    }
+}

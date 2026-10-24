@@ -30,10 +30,15 @@ mod connection_driver;
 #[path = "server_runtime/drain_fixture.rs"]
 mod drain_fixture;
 pub(crate) use drain_fixture::observed_shutdown_drain;
+#[path = "server_runtime/established_h1.rs"]
+mod established_h1;
+pub(crate) use established_h1::observed_established_h1_shutdown;
 #[path = "server_runtime/frozen_clock.rs"]
 pub(crate) mod frozen_clock;
 #[path = "server_runtime/global_admission.rs"]
 mod global_admission;
+#[path = "server_runtime/listener_stop.rs"]
+mod listener_stop;
 #[path = "server_runtime/shutdown_drain.rs"]
 pub(crate) mod shutdown_drain;
 #[path = "server_runtime/task_reaping.rs"]
@@ -494,17 +499,9 @@ pub(crate) async fn observed_listener_close(mut checkpoint: impl FnMut()) {
     let client = tokio::spawn(get(local_addr));
     entered.wait().await;
     let shutdown_task = tokio::spawn(shutdown.trigger(Duration::from_secs(5)));
-    tokio::time::timeout(Duration::from_secs(1), async {
-        loop {
-            match TcpStream::connect(local_addr).await {
-                Ok(stream) => drop(stream),
-                Err(_) => break,
-            }
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .expect("listener closes while the in-flight handler remains blocked");
+    listener_stop::wait_for_listener_stop(|| async { TcpStream::connect(local_addr).await.map(drop) })
+        .await
+        .expect("listener closes while the in-flight handler remains blocked");
     assert!(!shutdown_task.is_finished(), "shutdown waits for the in-flight handler");
     assert!(!client.is_finished(), "the in-flight response has not completed");
 
@@ -534,62 +531,6 @@ async fn dropping_the_trigger_does_not_become_an_implicit_shutdown_path() {
 #[tokio::test]
 async fn a_srv_0018_shutdown_announces_close_on_an_established_h1_connection() {
     observed_established_h1_shutdown(|| {}).await;
-}
-
-pub(crate) async fn observed_established_h1_shutdown(mut checkpoint: impl FnMut()) {
-    let _exclusive_load_lease = crate::server_load::exclusive_server_load_lease().await;
-    checkpoint();
-    let entered = std::sync::Arc::new(tokio::sync::Barrier::new(2));
-    let release = std::sync::Arc::new(tokio::sync::Barrier::new(2));
-    let service = service_fn({
-        let entered = std::sync::Arc::clone(&entered);
-        let release = std::sync::Arc::clone(&release);
-        move |_request: Request<hyper::body::Incoming>| {
-            let entered = std::sync::Arc::clone(&entered);
-            let release = std::sync::Arc::clone(&release);
-            async move {
-                entered.wait().await;
-                release.wait().await;
-                Ok::<_, Infallible>(Response::new(Full::new(Bytes::from_static(b"ok"))))
-            }
-        }
-    });
-    let RunningServer {
-        local_addr,
-        task,
-        shutdown,
-        ..
-    } = Server::new(plaintext_config(), service).serve().expect("server starts");
-    let mut stream = TcpStream::connect(local_addr).await.expect("connect succeeds");
-    stream
-        .write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n")
-        .await
-        .expect("request writes");
-    entered.wait().await;
-    let shutdown_task = tokio::spawn(shutdown.trigger(Duration::from_secs(5)));
-    tokio::time::timeout(Duration::from_secs(1), async {
-        loop {
-            match TcpStream::connect(local_addr).await {
-                Ok(stream) => drop(stream),
-                Err(_) => break,
-            }
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .expect("shutdown has stopped accept before the handler is released");
-    assert!(!shutdown_task.is_finished(), "shutdown is still draining the established request");
-    release.wait().await;
-    let mut response = Vec::new();
-    stream.read_to_end(&mut response).await.expect("draining response reads");
-    let lower = String::from_utf8_lossy(&response).to_ascii_lowercase();
-    assert!(lower.contains("connection: close"));
-    assert_eq!(
-        shutdown_task.await.expect("shutdown task joins"),
-        ShutdownReport { drained: 1, aborted: 0 }
-    );
-    assert!(task.await.expect("server task joins").is_ok());
-    checkpoint();
 }
 
 #[tokio::test]
