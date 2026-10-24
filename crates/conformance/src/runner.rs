@@ -125,11 +125,13 @@ impl Default for RunOptions {
     }
 }
 
-struct CorpusGoldens<'a>(&'a Corpus);
+struct CorpusGoldens<'a>(&'a Corpus, Profile);
 
 impl GoldenSource for CorpusGoldens<'_> {
     fn read_golden(&self, relative: &str) -> Result<Vec<u8>, String> {
-        self.0.read_relative(relative).map_err(|error| error.message)
+        self.0
+            .read_profile_golden(self.1.as_str(), relative)
+            .map_err(|error| error.message)
     }
 }
 
@@ -148,7 +150,7 @@ pub fn prepare_corpus(root: &std::path::Path) -> Result<Corpus, crate::corpus::C
 /// Runs the corpus against `sut`.
 #[must_use]
 pub fn run(corpus: &Corpus, sut: &mut dyn Sut, options: &RunOptions) -> Report {
-    let goldens = CorpusGoldens(corpus);
+    let goldens = CorpusGoldens(corpus, options.profile);
     let mut outcomes = Vec::new();
     let mut notes = Vec::new();
     if options.validate_only {
@@ -764,3 +766,6 @@ mod shard_tests;
 mod tests;
 #[cfg(test)]
 mod tls_tests;
+
+#[cfg(test)]
+mod profile_golden_tests;
