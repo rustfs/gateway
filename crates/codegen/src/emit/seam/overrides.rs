@@ -198,6 +198,43 @@ pub const MEMBERS: &[MemberOverride] = &[
             "no legacy input holds If-Range and RustFS reads no If-Range header, so it serves the range as before",
         ),
     ),
+    // Complete response headers live outside the legacy DTO; a DTO-only conversion must
+    // refuse a present value rather than discard it or invent it from an XML checksum.
+    (
+        "CompleteMultipartUploadOutput",
+        "sse_customer_algorithm",
+        Rule::GatewayOnly("the legacy CompleteMultipartUpload DTO has no carrier for this response header"),
+    ),
+    (
+        "CompleteMultipartUploadOutput",
+        "sse_customer_key_md5",
+        Rule::GatewayOnly("the legacy CompleteMultipartUpload DTO has no carrier for this response header"),
+    ),
+    (
+        "CompleteMultipartUploadOutput",
+        "checksum_header_md5",
+        Rule::GatewayOnly("the legacy CompleteMultipartUpload DTO has no carrier for this response header"),
+    ),
+    (
+        "CompleteMultipartUploadOutput",
+        "checksum_header_sha512",
+        Rule::GatewayOnly("the legacy CompleteMultipartUpload DTO has no carrier for this response header"),
+    ),
+    (
+        "CompleteMultipartUploadOutput",
+        "checksum_header_xxhash3",
+        Rule::GatewayOnly("the legacy CompleteMultipartUpload DTO has no carrier for this response header"),
+    ),
+    (
+        "CompleteMultipartUploadOutput",
+        "checksum_header_xxhash64",
+        Rule::GatewayOnly("the legacy CompleteMultipartUpload DTO has no carrier for this response header"),
+    ),
+    (
+        "CompleteMultipartUploadOutput",
+        "checksum_header_xxhash128",
+        Rule::GatewayOnly("the legacy CompleteMultipartUpload DTO has no carrier for this response header"),
+    ),
     // The gateway flattens the CopyObject/UploadPartCopy result element into its output.
     ("CopyObjectOutput", "e_tag", Rule::Nested("copy_object_result")),
     ("CopyObjectOutput", "last_modified", Rule::Nested("copy_object_result")),

@@ -170,6 +170,13 @@ pub(crate) fn complete_multipart_upload(
         ssekms_key_id,
         bucket_key_enabled,
         request_charged: enumeration(request_charged),
+        sse_customer_algorithm: None,
+        sse_customer_key_md5: None,
+        checksum_header_md5: None,
+        checksum_header_sha512: None,
+        checksum_header_xxhash3: None,
+        checksum_header_xxhash64: None,
+        checksum_header_xxhash128: None,
     })
 }
 

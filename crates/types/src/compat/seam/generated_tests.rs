@@ -649,3 +649,61 @@ fn n_a_deferred_completion_is_refused_not_dropped() {
     let converted = ops::complete_multipart_upload::output_from_s3s(complete()).expect("an immediate completion converts");
     assert_eq!(converted.e_tag.map(|etag| etag.opaque_tag().to_owned()).as_deref(), Some("abc-2"));
 }
+
+/// A DTO-only legacy response cannot carry these separately bound HTTP headers.
+#[test]
+fn n_complete_headers_are_refused_by_the_dto_only_legacy_conversion() {
+    for field in [
+        "sse_customer_algorithm",
+        "sse_customer_key_md5",
+        "checksum_header_md5",
+        "checksum_header_sha512",
+        "checksum_header_xxhash3",
+        "checksum_header_xxhash64",
+        "checksum_header_xxhash128",
+    ] {
+        let mut output = ops::complete_multipart_upload::output_from_s3s(oracle::CompleteMultipartUploadOutput::default())
+            .expect("absent headers");
+        let slot = match field {
+            "sse_customer_algorithm" => &mut output.sse_customer_algorithm,
+            "sse_customer_key_md5" => &mut output.sse_customer_key_md5,
+            "checksum_header_md5" => &mut output.checksum_header_md5,
+            "checksum_header_sha512" => &mut output.checksum_header_sha512,
+            "checksum_header_xxhash3" => &mut output.checksum_header_xxhash3,
+            "checksum_header_xxhash64" => &mut output.checksum_header_xxhash64,
+            "checksum_header_xxhash128" => &mut output.checksum_header_xxhash128,
+            _ => unreachable!("fixture field"),
+        };
+        *slot = Some("opaque-header-value".to_owned());
+        assert!(matches!(ops::complete_multipart_upload::output_to_s3s(output), Err(error) if error.field == field));
+    }
+}
+
+#[test]
+fn complete_headers_absent_in_legacy_do_not_get_invented_from_xml_checksums() {
+    let output = oracle::CompleteMultipartUploadOutput {
+        checksum_md5: Some("xml-md5".to_owned()),
+        checksum_sha512: Some("xml-sha512".to_owned()),
+        ..Default::default()
+    };
+    let converted = ops::complete_multipart_upload::output_from_s3s(output).expect("legacy output");
+    let headers = [
+        converted.sse_customer_algorithm.clone(),
+        converted.sse_customer_key_md5.clone(),
+        converted.checksum_header_md5.clone(),
+        converted.checksum_header_sha512.clone(),
+        converted.checksum_header_xxhash3.clone(),
+        converted.checksum_header_xxhash64.clone(),
+        converted.checksum_header_xxhash128.clone(),
+    ];
+    let back = ops::complete_multipart_upload::output_to_s3s(converted)
+        .map(|output| (output.checksum_md5, output.checksum_sha512))
+        .map_err(|error| error.field.to_owned());
+    assert_eq!(
+        (headers, back),
+        (
+            [None, None, None, None, None, None, None],
+            Ok((Some("xml-md5".to_owned()), Some("xml-sha512".to_owned())))
+        )
+    );
+}

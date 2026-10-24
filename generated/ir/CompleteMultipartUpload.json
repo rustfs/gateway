@@ -343,6 +343,69 @@
                             "type": { "kind": "StringEnum", "values": ["requester"] },
                             "hot": false,
                             "quirk_refs": []
+                          },
+                          {
+                            "name": "SSECustomerAlgorithm",
+                            "wire_name": "x-amz-server-side-encryption-customer-algorithm",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "String" },
+                            "hot": false,
+                            "quirk_refs": ["q-sse-0010", "q-mpu-late-error-0033"]
+                          },
+                          {
+                            "name": "SSECustomerKeyMD5",
+                            "wire_name": "x-amz-server-side-encryption-customer-key-md5",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "String" },
+                            "hot": false,
+                            "quirk_refs": ["q-sse-0010", "q-mpu-late-error-0033"]
+                          },
+                          {
+                            "name": "ChecksumHeaderMD5",
+                            "wire_name": "x-amz-checksum-md5",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "String" },
+                            "hot": false,
+                            "quirk_refs": ["q-checksum-0006", "q-mpu-late-error-0033"]
+                          },
+                          {
+                            "name": "ChecksumHeaderSHA512",
+                            "wire_name": "x-amz-checksum-sha512",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "String" },
+                            "hot": false,
+                            "quirk_refs": ["q-checksum-0006", "q-mpu-late-error-0033"]
+                          },
+                          {
+                            "name": "ChecksumHeaderXXHASH3",
+                            "wire_name": "x-amz-checksum-xxhash3",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "String" },
+                            "hot": false,
+                            "quirk_refs": ["q-checksum-0006", "q-mpu-late-error-0033"]
+                          },
+                          {
+                            "name": "ChecksumHeaderXXHASH64",
+                            "wire_name": "x-amz-checksum-xxhash64",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "String" },
+                            "hot": false,
+                            "quirk_refs": ["q-checksum-0006", "q-mpu-late-error-0033"]
+                          },
+                          {
+                            "name": "ChecksumHeaderXXHASH128",
+                            "wire_name": "x-amz-checksum-xxhash128",
+                            "required": false,
+                            "binding": { "kind": "Header" },
+                            "type": { "kind": "String" },
+                            "hot": false,
+                            "quirk_refs": ["q-checksum-0006", "q-mpu-late-error-0033"]
                           }
                         ]
             },

@@ -386,6 +386,69 @@ hot = false
 values = ["requester"]
 quirks = []
 
+[[output]]
+name = "SSECustomerAlgorithm"
+wire_name = "x-amz-server-side-encryption-customer-algorithm"
+binding = "Header"
+type = "String"
+required = false
+hot = false
+quirks = ["q-sse-0010", "q-mpu-late-error-0033"]
+
+[[output]]
+name = "SSECustomerKeyMD5"
+wire_name = "x-amz-server-side-encryption-customer-key-md5"
+binding = "Header"
+type = "String"
+required = false
+hot = false
+quirks = ["q-sse-0010", "q-mpu-late-error-0033"]
+
+[[output]]
+name = "ChecksumHeaderMD5"
+wire_name = "x-amz-checksum-md5"
+binding = "Header"
+type = "String"
+required = false
+hot = false
+quirks = ["q-checksum-0006", "q-mpu-late-error-0033"]
+
+[[output]]
+name = "ChecksumHeaderSHA512"
+wire_name = "x-amz-checksum-sha512"
+binding = "Header"
+type = "String"
+required = false
+hot = false
+quirks = ["q-checksum-0006", "q-mpu-late-error-0033"]
+
+[[output]]
+name = "ChecksumHeaderXXHASH3"
+wire_name = "x-amz-checksum-xxhash3"
+binding = "Header"
+type = "String"
+required = false
+hot = false
+quirks = ["q-checksum-0006", "q-mpu-late-error-0033"]
+
+[[output]]
+name = "ChecksumHeaderXXHASH64"
+wire_name = "x-amz-checksum-xxhash64"
+binding = "Header"
+type = "String"
+required = false
+hot = false
+quirks = ["q-checksum-0006", "q-mpu-late-error-0033"]
+
+[[output]]
+name = "ChecksumHeaderXXHASH128"
+wire_name = "x-amz-checksum-xxhash128"
+binding = "Header"
+type = "String"
+required = false
+hot = false
+quirks = ["q-checksum-0006", "q-mpu-late-error-0033"]
+
 [shape.CompletedMultipartUpload]
 kind = "Structure"
 element_order = ["Parts"]

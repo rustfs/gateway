@@ -53,7 +53,7 @@ Agent entry point for operations, routing, codecs, authorization state and handl
 | `src/codec/strict_date.rs` | The one HTTP-date spelling legacy RustFS reads a conditional date in (RustFS profile, rustfs/backlog#1677 R14). | A RustFS-profile date condition reads differently from legacy RustFS. |
 | `src/codec/response.rs` | Encoded response/body allowance. | A response has the wrong body/status shape. |
 | `src/codec/extra_headers.rs` | A handler's extra response headers and the gateway-owned names they may not use (rustfs/gateway#1018). | A backend header is refused, dropped or allowed to override the encoder. |
-| `src/codec/tests/metadata_and_url.rs` | Metadata symmetry and forced listing-encoding regressions. | RFC 2047 or `encoding-type=url` behavior changes. |
+| `src/codec/tests/metadata_and_url.rs` | Metadata symmetry, CompleteMultipartUpload headers and forced listing-encoding regressions. | RFC 2047 or `encoding-type=url` behavior changes. |
 | `src/authz.rs` | Authorization type-state and derived resources. | A handler can run without the intended proof. |
 | `src/authz/rule.rs` | ADR-0025's action rules (any-of, all-of, fail-closed combination) and subject rules, and ADR-0026's set rule (strict single and set extraction into `Subjects`). | Several actions or named accounts decide an operation. |
 | `src/authz/plan.rs` | The route-stage questions for a requirement and its subjects (one per action and account, plus every account's broader action), and their fail-closed settling. | A set, or every account, is authorised wrongly. |

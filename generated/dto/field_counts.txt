@@ -18,7 +18,7 @@ BucketLoggingStatus 1
 Checksum 11
 CommonPrefix 1
 CompleteMultipartUploadInput 14
-CompleteMultipartUploadOutput 21
+CompleteMultipartUploadOutput 28
 CompletedMultipartUpload 1
 CompletedPart 12
 Condition 2

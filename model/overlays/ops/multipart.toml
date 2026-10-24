@@ -438,6 +438,71 @@ side = "output"
 name = "SSEKMSKeyId"
 quirks = ["q-sse-0010"]
 
+# RustFS supplies these independently of the XML checksum members. They must be declared
+# before a committed response freezes its head; preserve the backend's raw HTTP values.
+[[op.CompleteMultipartUpload.field]]
+side = "output"
+name = "SSECustomerAlgorithm"
+synthesize = true
+binding = "Header"
+wire_name = "x-amz-server-side-encryption-customer-algorithm"
+type = "String"
+quirks = ["q-sse-0010", "q-mpu-late-error-0033"]
+
+[[op.CompleteMultipartUpload.field]]
+side = "output"
+name = "SSECustomerKeyMD5"
+synthesize = true
+binding = "Header"
+wire_name = "x-amz-server-side-encryption-customer-key-md5"
+type = "String"
+quirks = ["q-sse-0010", "q-mpu-late-error-0033"]
+
+[[op.CompleteMultipartUpload.field]]
+side = "output"
+name = "ChecksumHeaderMD5"
+synthesize = true
+binding = "Header"
+wire_name = "x-amz-checksum-md5"
+type = "String"
+quirks = ["q-checksum-0006", "q-mpu-late-error-0033"]
+
+[[op.CompleteMultipartUpload.field]]
+side = "output"
+name = "ChecksumHeaderSHA512"
+synthesize = true
+binding = "Header"
+wire_name = "x-amz-checksum-sha512"
+type = "String"
+quirks = ["q-checksum-0006", "q-mpu-late-error-0033"]
+
+[[op.CompleteMultipartUpload.field]]
+side = "output"
+name = "ChecksumHeaderXXHASH3"
+synthesize = true
+binding = "Header"
+wire_name = "x-amz-checksum-xxhash3"
+type = "String"
+quirks = ["q-checksum-0006", "q-mpu-late-error-0033"]
+
+[[op.CompleteMultipartUpload.field]]
+side = "output"
+name = "ChecksumHeaderXXHASH64"
+synthesize = true
+binding = "Header"
+wire_name = "x-amz-checksum-xxhash64"
+type = "String"
+quirks = ["q-checksum-0006", "q-mpu-late-error-0033"]
+
+[[op.CompleteMultipartUpload.field]]
+side = "output"
+name = "ChecksumHeaderXXHASH128"
+synthesize = true
+binding = "Header"
+wire_name = "x-amz-checksum-xxhash128"
+type = "String"
+quirks = ["q-checksum-0006", "q-mpu-late-error-0033"]
+
 # =============================================================================================
 # AbortMultipartUpload
 #
