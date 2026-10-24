@@ -536,7 +536,7 @@ fn one_entry_listing(key: &str, etag: &str) -> dto::ListObjectsV2Output {
         is_truncated: false,
         contents: vec![dto::Object {
             key: ObjectKey::new(key).expect("key"),
-            e_tag: ETag::new(etag.to_owned()).expect("an entity tag"),
+            e_tag: Some(ETag::new(etag.to_owned()).expect("an entity tag")),
             // `LastModified` is required and its placeholder default has no rendering, so a
             // fixture that leaves it out fails on the timestamp rather than on what it asserts.
             last_modified: Timestamp::from_secs(1_767_322_745),

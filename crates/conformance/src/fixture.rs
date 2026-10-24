@@ -1292,7 +1292,7 @@ fn object_entry(key: &str, object: &StoredObject, with_owner: bool) -> Result<dt
     Ok(dto::Object {
         key: object_key(key)?,
         last_modified: Timestamp::from_secs(object.last_modified),
-        e_tag: entity_tag(&object.etag)?,
+        e_tag: Some(entity_tag(&object.etag)?),
         size: object.body.len() as i64,
         storage_class: dto::StorageClass::custom(object.storage_class.clone()),
         owner: with_owner.then(owner),

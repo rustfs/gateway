@@ -216,8 +216,7 @@ fn write_object(
         let v = &value.last_modified;
         writer.element("LastModified", &value::render_timestamp(v, TimestampFormat::Iso8601)?);
     }
-    {
-        let v = &value.e_tag;
+    if let Some(v) = value.e_tag.as_ref() {
         writer.entity_tag_element("ETag", &value::render_etag(v, EtagRender::XmlQuoted));
     }
     for v in &value.checksum_algorithm {

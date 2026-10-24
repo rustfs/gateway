@@ -12,11 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Legacy RustFS's `encoding-type=url` rule, seen through the generated listing encoders.
+//! Legacy RustFS listing encoding and optional entity tags, seen through the generated encoders.
 //!
 //! Responsible for: a view carrying a [`RustFsListing`] encoding exactly the members it names,
 //! with `/` kept literal, only for exactly `url`, and echoing `encoding-type` as legacy RustFS
 //! does — while a view without one, and a value XML cannot carry, keep the AWS-model encoding.
+//! Also verifies that a missing entity tag does not erase or shift a listing entry.
 //! NOT responsible for: which listing uses which table (`rustfs-gateway`'s RustFS profile).
 //! Upstream: `crate::codec::rustfs_listing`. Downstream: nothing.
 
@@ -284,4 +285,103 @@ fn n_a_listing_legacy_never_encodes_is_written_raw_without_an_echo() {
     assert!(body.contains("<Delimiter>/</Delimiter>"), "{body}");
     assert!(!body.contains("<EncodingType>"), "{body}");
     assert!(!body.contains('%'), "{body}");
+}
+
+fn assert_listing_entity_tags(v2: bool, tags: [Option<&str>; 3]) {
+    for rustfs in [false, true] {
+        let request = accepted("GET", if v2 { "/conf-list?list-type=2" } else { "/conf-list" }, &[]);
+        let view = MetaView::of(&request, TargetKind::Bucket).expect("view");
+        let view = if rustfs {
+            view.with_rustfs_response_layout()
+                .with_rustfs_listing_encoding(if v2 { V2 } else { V1 })
+        } else {
+            view
+        };
+        let contents = tags
+            .iter()
+            .enumerate()
+            .map(|(index, tag)| {
+                let mut entry = one_entry_listing(&format!("entry-{index}"), "seed")
+                    .contents
+                    .pop()
+                    .expect("one entry");
+                entry.e_tag = tag.map(|value| ETag::new(value.to_owned()).expect("a fixture tag"));
+                entry
+            })
+            .collect();
+        let response = if v2 {
+            let output = dto::ListObjectsV2Output {
+                name: BucketName::new("conf-list").expect("bucket"),
+                key_count: 3,
+                max_keys: 1000,
+                contents,
+                ..Default::default()
+            };
+            dto::ListObjectsV2::encode(output, &view, 200).expect("encodes")
+        } else {
+            let output = dto::ListObjectsOutput {
+                name: BucketName::new("conf-list").expect("bucket"),
+                max_keys: 1000,
+                contents,
+                ..Default::default()
+            };
+            dto::ListObjects::encode(output, &view, 200).expect("encodes")
+        };
+        let body = body_text(&response.body);
+        let entries: Vec<_> = body
+            .split("<Contents>")
+            .skip(1)
+            .map(|tail| tail.split_once("</Contents>").expect("closed entry").0)
+            .collect();
+        assert_eq!(entries.len(), tags.len(), "missing tags must not erase entries: {body}");
+        for (entry, tag) in entries.iter().zip(tags) {
+            match tag {
+                None => assert!(!entry.contains("<ETag"), "a missing tag must be omitted: {body}"),
+                Some(tag) => assert!(
+                    entry.replace("&quot;", "\"").contains(&format!("<ETag>\"{tag}\"</ETag>")),
+                    "a neighboring tag must keep its value and position: {body}"
+                ),
+            }
+        }
+    }
+}
+
+#[test]
+fn n_v1_listing_etag_missing_first() {
+    assert_listing_entity_tags(false, [None, Some("b"), Some("c")]);
+}
+
+#[test]
+fn n_v1_listing_etag_missing_middle() {
+    assert_listing_entity_tags(false, [Some("a"), None, Some("c")]);
+}
+
+#[test]
+fn n_v1_listing_etag_missing_last() {
+    assert_listing_entity_tags(false, [Some("a"), Some("b"), None]);
+}
+
+#[test]
+fn n_v2_listing_etag_missing_first() {
+    assert_listing_entity_tags(true, [None, Some("b"), Some("c")]);
+}
+
+#[test]
+fn n_v2_listing_etag_missing_middle() {
+    assert_listing_entity_tags(true, [Some("a"), None, Some("c")]);
+}
+
+#[test]
+fn n_v2_listing_etag_missing_last() {
+    assert_listing_entity_tags(true, [Some("a"), Some("b"), None]);
+}
+
+#[test]
+fn v1_listing_etag_present_values_are_preserved() {
+    assert_listing_entity_tags(false, [Some("a"), Some("b"), Some("c")]);
+}
+
+#[test]
+fn v2_listing_etag_present_values_are_preserved() {
+    assert_listing_entity_tags(true, [Some("a"), Some("b"), Some("c")]);
 }

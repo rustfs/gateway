@@ -87,7 +87,7 @@ fn objects(value: Option<Vec<oracle::Object>>) -> Converted<Vec<dto::Object>> {
                 Ok(dto::Object {
                     key: required_key("contents.key", key)?,
                     last_modified: required("contents.last_modified", instant("contents.last_modified", last_modified)?)?,
-                    e_tag: required("contents.e_tag", entity_tag("contents.e_tag", e_tag)?)?,
+                    e_tag: entity_tag("contents.e_tag", e_tag)?,
                     checksum_algorithm: checksum_algorithms(checksum_algorithm),
                     checksum_type: enumeration(checksum_type),
                     size: required("contents.size", size)?,

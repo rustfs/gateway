@@ -151,7 +151,7 @@ fn page_entries(page: &[Candidate], owner: Option<&Owner>) -> Result<(Vec<Object
             Candidate::Object(record) => contents.push(Object {
                 key: ObjectKey::new(record.key.clone()).map_err(|_| storage_error())?,
                 last_modified: Timestamp::from_secs(record.modified),
-                e_tag: ETag::new(record.e_tag.clone()).map_err(|_| storage_error())?,
+                e_tag: Some(ETag::new(record.e_tag.clone()).map_err(|_| storage_error())?),
                 size: record.size,
                 storage_class: record.storage_class.clone(),
                 owner: owner.cloned(),

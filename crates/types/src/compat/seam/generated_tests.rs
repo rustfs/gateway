@@ -225,7 +225,7 @@ fn a_generated_output_carries_nested_shapes() {
     assert_eq!(output.contents.len(), 1);
     let object = &output.contents[0];
     assert_eq!(object.key, ObjectKey::new("k").expect("key"));
-    assert_eq!(object.e_tag.opaque_tag(), "abc");
+    assert_eq!(object.e_tag.as_ref().expect("a present tag").opaque_tag(), "abc");
     assert_eq!(object.size, 5);
     assert_eq!(object.storage_class.as_str(), "STANDARD");
 }

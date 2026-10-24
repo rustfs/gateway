@@ -30,7 +30,7 @@ pub fn object_to_s3s(value: crate::ops::shapes::Object) -> Result<s3s::dto::Obje
     Ok(s3s::dto::Object {
         checksum_algorithm: if value.checksum_algorithm.is_empty() { None } else { Some({ let x = value.checksum_algorithm; x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(s3s::dto::ChecksumAlgorithm::from(e.as_str().to_owned())) }).collect::<Result<Vec<_>, ConversionError>>()? }) },
         checksum_type: value.checksum_type.map(|x| -> Result<_, ConversionError> { Ok(s3s::dto::ChecksumType::from(x.as_str().to_owned())) }).transpose()?,
-        e_tag: Some({ let x = value.e_tag; leaf::etag_to_s3s(&x) }),
+        e_tag: value.e_tag.map(|x| -> Result<_, ConversionError> { Ok(leaf::etag_to_s3s(&x)) }).transpose()?,
         key: Some({ let x = value.key; x.as_str().to_owned() }),
         last_modified: Some({ let x = value.last_modified; leaf::timestamp_to_s3s("last_modified", x)? }),
         owner: value.owner.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::owner::owner_to_s3s(x)?) }).transpose()?,
@@ -61,7 +61,7 @@ pub fn object_from_s3s(value: s3s::dto::Object) -> Result<crate::ops::shapes::Ob
     Ok(crate::ops::shapes::Object {
         key: match key { Some(x) => leaf::object_key("key", x)?, None => return Err(ConversionError { field: "key", reason: "the gateway shape requires this member" }) },
         last_modified: match last_modified { Some(x) => leaf::timestamp_from_s3s("last_modified", &x)?, None => return Err(ConversionError { field: "last_modified", reason: "the gateway shape requires this member" }) },
-        e_tag: match e_tag { Some(x) => leaf::etag_from_s3s("e_tag", x)?, None => return Err(ConversionError { field: "e_tag", reason: "the gateway shape requires this member" }) },
+        e_tag: e_tag.map(|x| -> Result<_, ConversionError> { Ok(leaf::etag_from_s3s("e_tag", x)?) }).transpose()?,
         checksum_algorithm: match checksum_algorithm { Some(x) => x.into_iter().map(|e| -> Result<_, ConversionError> { Ok(crate::ops::enums::ChecksumAlgorithm::custom(e.as_str().to_owned())) }).collect::<Result<Vec<_>, ConversionError>>()?, None => Default::default() },
         checksum_type: checksum_type.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::ChecksumType::custom(x.as_str().to_owned())) }).transpose()?,
         size: match size { Some(x) => x, None => return Err(ConversionError { field: "size", reason: "the gateway shape requires this member" }) },

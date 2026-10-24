@@ -234,7 +234,7 @@ fn c_dto_n031_a_nested_shape_is_checked_as_deeply_as_it_is_required() {
     let filled = Object {
         key: ObjectKey::new("a/b.txt").expect("a valid key"),
         last_modified: Timestamp::from_secs(1_700_000_000),
-        e_tag: ETag::new("d41d8cd98f00b204e9800998ecf8427e").expect("a valid tag"),
+        e_tag: Some(ETag::new("d41d8cd98f00b204e9800998ecf8427e").expect("a valid tag")),
         size: 0,
         storage_class: StorageClass::STANDARD,
         ..Default::default()
