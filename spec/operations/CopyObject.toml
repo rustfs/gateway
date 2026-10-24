@@ -585,7 +585,7 @@ name = "ETag"
 wire_name = "ETag"
 binding = "BodyXml"
 type = "ETag(XmlQuoted)"
-required = true
+required = false
 hot = false
 quirks = ["q-etag-0004"]
 

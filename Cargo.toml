@@ -26,7 +26,7 @@ rustfs-gateway-model = { path = "crates/model", version = "0.16.0" }
 rustfs-gateway-sig = { path = "crates/sig", version = "0.13.0" }
 rustfs-gateway-server = { path = "crates/server", version = "0.3.0" }
 rustfs-gateway-stream = { path = "crates/stream", version = "0.2.0" }
-rustfs-gateway-types = { path = "crates/types", version = "0.32.0" }
+rustfs-gateway-types = { path = "crates/types", version = "0.33.0" }
 rustfs-gateway-xml = { path = "crates/xml", version = "0.4.0" }
 
 # Third-party. Versions verified against crates.io on 2026-08-05; MSRV 1.97.1 constrains this set.
@@ -97,7 +97,7 @@ dhat = "0.3.3"
 insta = "1.48"
 prettyplease = "0.3"                                # renders the macro expansion goldens; no `cargo expand` needed
 proptest = "1.11"
-tokio = { version = "1.53", default-features = false, features = ["macros", "rt"] }
+tokio = { version = "1.53.3", default-features = false, features = ["macros", "rt"] }
 trybuild = "1.0"
 rcgen = { version = "0.14", default-features = false, features = ["crypto", "pem", "ring"] }
 

@@ -106,7 +106,7 @@ synthesize = true
 binding = "BodyXml"
 wire_name = "ETag"
 type = "ETag"
-required = true
+required = false
 quirks = ["q-etag-0004"]
 
 [[op.CopyObject.field]]
