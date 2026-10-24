@@ -141,6 +141,41 @@ impl OperationCodec for dto::CompleteMultipartUpload {
             let rendered = v.as_str();
             response.set_header("x-amz-request-charged", rendered);
         }
+        // SSECustomerAlgorithm — header `x-amz-server-side-encryption-customer-algorithm`.
+        if let Some(v) = output.sse_customer_algorithm.as_ref() {
+            let rendered = v.as_str();
+            response.set_header("x-amz-server-side-encryption-customer-algorithm", rendered);
+        }
+        // SSECustomerKeyMD5 — header `x-amz-server-side-encryption-customer-key-md5`.
+        if let Some(v) = output.sse_customer_key_md5.as_ref() {
+            let rendered = v.as_str();
+            response.set_header("x-amz-server-side-encryption-customer-key-md5", rendered);
+        }
+        // ChecksumHeaderMD5 — header `x-amz-checksum-md5`.
+        if let Some(v) = output.checksum_header_md5.as_ref() {
+            let rendered = v.as_str();
+            response.set_header("x-amz-checksum-md5", rendered);
+        }
+        // ChecksumHeaderSHA512 — header `x-amz-checksum-sha512`.
+        if let Some(v) = output.checksum_header_sha512.as_ref() {
+            let rendered = v.as_str();
+            response.set_header("x-amz-checksum-sha512", rendered);
+        }
+        // ChecksumHeaderXXHASH3 — header `x-amz-checksum-xxhash3`.
+        if let Some(v) = output.checksum_header_xxhash3.as_ref() {
+            let rendered = v.as_str();
+            response.set_header("x-amz-checksum-xxhash3", rendered);
+        }
+        // ChecksumHeaderXXHASH64 — header `x-amz-checksum-xxhash64`.
+        if let Some(v) = output.checksum_header_xxhash64.as_ref() {
+            let rendered = v.as_str();
+            response.set_header("x-amz-checksum-xxhash64", rendered);
+        }
+        // ChecksumHeaderXXHASH128 — header `x-amz-checksum-xxhash128`.
+        if let Some(v) = output.checksum_header_xxhash128.as_ref() {
+            let rendered = v.as_str();
+            response.set_header("x-amz-checksum-xxhash128", rendered);
+        }
         let mut writer = rustfs_gateway_xml::XmlWriter::document();
         writer.legacy_layout(request.rustfs_response_layout());
         writer.open("CompleteMultipartUploadResult", Some(rustfs_gateway_xml::S3_XMLNS));
@@ -205,11 +240,18 @@ impl crate::handler::deferred_sealed::Sealed for dto::CompleteMultipartUpload {}
 
 impl crate::handler::DeferredOperation for dto::CompleteMultipartUpload {
     const RESPONSE_HEADERS: &'static [&'static str] = &[
+        "x-amz-checksum-md5",
+        "x-amz-checksum-sha512",
+        "x-amz-checksum-xxhash128",
+        "x-amz-checksum-xxhash3",
+        "x-amz-checksum-xxhash64",
         "x-amz-expiration",
         "x-amz-request-charged",
         "x-amz-server-side-encryption",
         "x-amz-server-side-encryption-aws-kms-key-id",
         "x-amz-server-side-encryption-bucket-key-enabled",
+        "x-amz-server-side-encryption-customer-algorithm",
+        "x-amz-server-side-encryption-customer-key-md5",
         "x-amz-version-id",
     ];
     const RESPONSE_HEADER_PREFIXES: &'static [&'static str] = &[];

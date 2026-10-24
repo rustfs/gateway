@@ -196,6 +196,20 @@ pub struct Output {
     pub bucket_key_enabled: Option<bool>,
     /// Wire `x-amz-request-charged`, bound as Header. Optional.
     pub request_charged: Option<crate::ops::enums::RequestCharged>,
+    /// Wire `x-amz-server-side-encryption-customer-algorithm`, bound as Header. Optional.
+    pub sse_customer_algorithm: Option<String>,
+    /// Wire `x-amz-server-side-encryption-customer-key-md5`, bound as Header. Optional. Secret: `Debug` prints a placeholder.
+    pub sse_customer_key_md5: Option<String>,
+    /// Wire `x-amz-checksum-md5`, bound as Header. Optional.
+    pub checksum_header_md5: Option<String>,
+    /// Wire `x-amz-checksum-sha512`, bound as Header. Optional.
+    pub checksum_header_sha512: Option<String>,
+    /// Wire `x-amz-checksum-xxhash3`, bound as Header. Optional.
+    pub checksum_header_xxhash3: Option<String>,
+    /// Wire `x-amz-checksum-xxhash64`, bound as Header. Optional.
+    pub checksum_header_xxhash64: Option<String>,
+    /// Wire `x-amz-checksum-xxhash128`, bound as Header. Optional.
+    pub checksum_header_xxhash128: Option<String>,
 }
 
 impl Output {
@@ -246,6 +260,13 @@ impl std::fmt::Debug for Output {
             .field("ssekms_key_id", &redact(&self.ssekms_key_id))
             .field("bucket_key_enabled", &self.bucket_key_enabled)
             .field("request_charged", &self.request_charged)
+            .field("sse_customer_algorithm", &self.sse_customer_algorithm)
+            .field("sse_customer_key_md5", &redact(&self.sse_customer_key_md5))
+            .field("checksum_header_md5", &self.checksum_header_md5)
+            .field("checksum_header_sha512", &self.checksum_header_sha512)
+            .field("checksum_header_xxhash3", &self.checksum_header_xxhash3)
+            .field("checksum_header_xxhash64", &self.checksum_header_xxhash64)
+            .field("checksum_header_xxhash128", &self.checksum_header_xxhash128)
             .finish()
     }
 }

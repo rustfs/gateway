@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Metadata RFC 2047 symmetry and response-wide forced URL encoding regressions.
+//! Response headers, metadata RFC 2047 symmetry and forced URL encoding regressions.
 //!
-//! Responsible for: executable coverage of metadata decode/encode safety and listing-wide URL encoding.
+//! Responsible for: metadata safety, CompleteMultipartUpload headers and listing-wide URL encoding.
 //! NOT responsible for: parser internals or generated source shape.
 //! Upstream: the parent codec test helpers. Downstream: nothing; this is a leaf test module.
 
@@ -132,4 +132,71 @@ fn n_writes_a_metadata_control_character_only_inside_an_encoded_word() {
         Some("=?UTF-8?B?YQ0KSW5qZWN0ZWQ6IHllcw==?=")
     );
     assert!(header(&response, "injected").is_none(), "no header is split off the value");
+}
+
+const HEADERS: [&str; 7] = [
+    "x-amz-server-side-encryption-customer-algorithm",
+    "x-amz-server-side-encryption-customer-key-md5",
+    "x-amz-checksum-md5",
+    "x-amz-checksum-sha512",
+    "x-amz-checksum-xxhash3",
+    "x-amz-checksum-xxhash64",
+    "x-amz-checksum-xxhash128",
+];
+const VALUES: [&str; 7] = [
+    "AES256",
+    "key-md5",
+    "raw-md5",
+    "raw-sha512",
+    "raw-xxhash3",
+    "raw-xxhash64",
+    "raw-xxhash128",
+];
+
+fn output(values: [Option<&str>; 7]) -> dto::CompleteMultipartUploadOutput {
+    let [algorithm, key_md5, md5, sha512, xxhash3, xxhash64, xxhash128] = values;
+    dto::CompleteMultipartUploadOutput {
+        sse_customer_algorithm: algorithm.map(str::to_owned),
+        sse_customer_key_md5: key_md5.map(str::to_owned),
+        checksum_header_md5: md5.map(str::to_owned),
+        checksum_header_sha512: sha512.map(str::to_owned),
+        checksum_header_xxhash3: xxhash3.map(str::to_owned),
+        checksum_header_xxhash64: xxhash64.map(str::to_owned),
+        checksum_header_xxhash128: xxhash128.map(str::to_owned),
+        checksum_md5: Some("xml-md5".to_owned()),
+        checksum_sha512: Some("xml-sha512".to_owned()),
+        ..Default::default()
+    }
+}
+
+#[test]
+fn complete_headers_keep_present_empty_and_missing_values_without_changing_xml() {
+    let request = accepted("POST", "/photos/key?uploadId=upload", &[]);
+    let view = MetaView::of(&request, TargetKind::Object).expect("view");
+    let baseline = dto::CompleteMultipartUpload::encode(output([None; 7]), &view, 200).expect("baseline");
+    let body = body_text(&baseline.body);
+    let mut cases = vec![VALUES.map(Some), [Some(""); 7], [None; 7]];
+    for missing in 0..HEADERS.len() {
+        let mut values = VALUES.map(Some);
+        *values.get_mut(missing).expect("the header index has a value slot") = None;
+        cases.push(values);
+    }
+    for values in cases {
+        let response = dto::CompleteMultipartUpload::encode(output(values), &view, 200).expect("encodes");
+        let observed = HEADERS.map(|name| header(&response, name));
+        assert_eq!(
+            (observed, body_text(&response.body)),
+            (values.map(|v| v.map(str::to_owned)), body.clone())
+        );
+    }
+}
+
+#[test]
+fn complete_headers_are_bound_before_the_body_is_committed() {
+    let headers = HEADERS
+        .into_iter()
+        .zip(VALUES)
+        .map(|(name, value)| (http::HeaderName::from_static(name), http::HeaderValue::from_static(value)))
+        .collect();
+    assert!(crate::HeadPart::<dto::CompleteMultipartUpload>::new(headers).is_ok());
 }

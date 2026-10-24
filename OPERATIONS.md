@@ -125,15 +125,15 @@ such a row as though the key selected the operation is the opposite of what the 
 | `x-amz-checksum-crc32` | [GetObject](#getobject), [GetObjectAnnotation](#getobjectannotation), [HeadObject](#headobject), [PutObjectAnnotation](#putobjectannotation) |
 | `x-amz-checksum-crc32c` | [GetObject](#getobject), [GetObjectAnnotation](#getobjectannotation), [HeadObject](#headobject), [PutObjectAnnotation](#putobjectannotation) |
 | `x-amz-checksum-crc64nvme` | [GetObject](#getobject), [GetObjectAnnotation](#getobjectannotation), [HeadObject](#headobject), [PutObjectAnnotation](#putobjectannotation) |
-| `x-amz-checksum-md5` | [GetObject](#getobject), [GetObjectAnnotation](#getobjectannotation), [HeadObject](#headobject), [PutObjectAnnotation](#putobjectannotation) |
+| `x-amz-checksum-md5` | [CompleteMultipartUpload](#completemultipartupload), [GetObject](#getobject), [GetObjectAnnotation](#getobjectannotation), [HeadObject](#headobject), [PutObjectAnnotation](#putobjectannotation) |
 | `x-amz-checksum-mode` | [GetObject](#getobject), [GetObjectAnnotation](#getobjectannotation), [HeadObject](#headobject) |
 | `x-amz-checksum-sha1` | [GetObject](#getobject), [GetObjectAnnotation](#getobjectannotation), [HeadObject](#headobject), [PutObjectAnnotation](#putobjectannotation) |
 | `x-amz-checksum-sha256` | [GetObject](#getobject), [GetObjectAnnotation](#getobjectannotation), [HeadObject](#headobject), [PutObjectAnnotation](#putobjectannotation) |
-| `x-amz-checksum-sha512` | [GetObject](#getobject), [GetObjectAnnotation](#getobjectannotation), [HeadObject](#headobject), [PutObjectAnnotation](#putobjectannotation) |
+| `x-amz-checksum-sha512` | [CompleteMultipartUpload](#completemultipartupload), [GetObject](#getobject), [GetObjectAnnotation](#getobjectannotation), [HeadObject](#headobject), [PutObjectAnnotation](#putobjectannotation) |
 | `x-amz-checksum-type` | [CompleteMultipartUpload](#completemultipartupload), [CreateMultipartUpload](#createmultipartupload), [GetObject](#getobject), [GetObjectAnnotation](#getobjectannotation), [HeadObject](#headobject), [PutObject](#putobject), [PutObjectAnnotation](#putobjectannotation) |
-| `x-amz-checksum-xxhash128` | [GetObject](#getobject), [GetObjectAnnotation](#getobjectannotation), [HeadObject](#headobject), [PutObjectAnnotation](#putobjectannotation) |
-| `x-amz-checksum-xxhash3` | [GetObject](#getobject), [GetObjectAnnotation](#getobjectannotation), [HeadObject](#headobject), [PutObjectAnnotation](#putobjectannotation) |
-| `x-amz-checksum-xxhash64` | [GetObject](#getobject), [GetObjectAnnotation](#getobjectannotation), [HeadObject](#headobject), [PutObjectAnnotation](#putobjectannotation) |
+| `x-amz-checksum-xxhash128` | [CompleteMultipartUpload](#completemultipartupload), [GetObject](#getobject), [GetObjectAnnotation](#getobjectannotation), [HeadObject](#headobject), [PutObjectAnnotation](#putobjectannotation) |
+| `x-amz-checksum-xxhash3` | [CompleteMultipartUpload](#completemultipartupload), [GetObject](#getobject), [GetObjectAnnotation](#getobjectannotation), [HeadObject](#headobject), [PutObjectAnnotation](#putobjectannotation) |
+| `x-amz-checksum-xxhash64` | [CompleteMultipartUpload](#completemultipartupload), [GetObject](#getobject), [GetObjectAnnotation](#getobjectannotation), [HeadObject](#headobject), [PutObjectAnnotation](#putobjectannotation) |
 | `x-amz-client-token` | [RenameObject](#renameobject) |
 | `x-amz-confirm-remove-self-bucket-access` | [PutBucketPolicy](#putbucketpolicy) |
 | `x-amz-copy-source` | [CopyObject](#copyobject), [PutObjectAnnotation](#putobjectannotation), [UploadPartCopy](#uploadpartcopy) |
@@ -542,7 +542,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 **Headers**
 
 - request: `if-match`, `if-none-match`, `x-amz-checksum-`, `x-amz-checksum-type`, `x-amz-expected-bucket-owner`, `x-amz-mp-object-size`, `x-amz-request-payer`, `x-amz-server-side-encryption-customer-algorithm`, `x-amz-server-side-encryption-customer-key`, `x-amz-server-side-encryption-customer-key-md5`
-- response: `x-amz-expiration`, `x-amz-request-charged`, `x-amz-server-side-encryption`, `x-amz-server-side-encryption-aws-kms-key-id`, `x-amz-server-side-encryption-bucket-key-enabled`, `x-amz-version-id`
+- response: `x-amz-checksum-md5`, `x-amz-checksum-sha512`, `x-amz-checksum-xxhash128`, `x-amz-checksum-xxhash3`, `x-amz-checksum-xxhash64`, `x-amz-expiration`, `x-amz-request-charged`, `x-amz-server-side-encryption`, `x-amz-server-side-encryption-aws-kms-key-id`, `x-amz-server-side-encryption-bucket-key-enabled`, `x-amz-server-side-encryption-customer-algorithm`, `x-amz-server-side-encryption-customer-key-md5`, `x-amz-version-id`
 - required: —
 
 **Body**

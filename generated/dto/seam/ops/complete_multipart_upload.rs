@@ -167,6 +167,13 @@ pub fn output_from_s3s(output: s3s::dto::CompleteMultipartUploadOutput) -> Resul
         ssekms_key_id,
         bucket_key_enabled,
         request_charged: request_charged.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::RequestCharged::custom(x.as_str().to_owned())) }).transpose()?,
+        sse_customer_algorithm: Default::default(),
+        sse_customer_key_md5: Default::default(),
+        checksum_header_md5: Default::default(),
+        checksum_header_sha512: Default::default(),
+        checksum_header_xxhash3: Default::default(),
+        checksum_header_xxhash64: Default::default(),
+        checksum_header_xxhash128: Default::default(),
     })
 }
 
@@ -178,6 +185,27 @@ pub fn output_from_s3s(output: s3s::dto::CompleteMultipartUploadOutput) -> Resul
 /// [`ConversionError`] naming a member the s3s output cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
 pub fn output_to_s3s(output: crate::ops::complete_multipart_upload::Output) -> Result<s3s::dto::CompleteMultipartUploadOutput, ConversionError> {
+    if output.sse_customer_algorithm.is_some() {
+        return Err(ConversionError { field: "sse_customer_algorithm", reason: "the legacy CompleteMultipartUpload DTO has no carrier for this response header" });
+    }
+    if output.sse_customer_key_md5.is_some() {
+        return Err(ConversionError { field: "sse_customer_key_md5", reason: "the legacy CompleteMultipartUpload DTO has no carrier for this response header" });
+    }
+    if output.checksum_header_md5.is_some() {
+        return Err(ConversionError { field: "checksum_header_md5", reason: "the legacy CompleteMultipartUpload DTO has no carrier for this response header" });
+    }
+    if output.checksum_header_sha512.is_some() {
+        return Err(ConversionError { field: "checksum_header_sha512", reason: "the legacy CompleteMultipartUpload DTO has no carrier for this response header" });
+    }
+    if output.checksum_header_xxhash3.is_some() {
+        return Err(ConversionError { field: "checksum_header_xxhash3", reason: "the legacy CompleteMultipartUpload DTO has no carrier for this response header" });
+    }
+    if output.checksum_header_xxhash64.is_some() {
+        return Err(ConversionError { field: "checksum_header_xxhash64", reason: "the legacy CompleteMultipartUpload DTO has no carrier for this response header" });
+    }
+    if output.checksum_header_xxhash128.is_some() {
+        return Err(ConversionError { field: "checksum_header_xxhash128", reason: "the legacy CompleteMultipartUpload DTO has no carrier for this response header" });
+    }
     Ok(s3s::dto::CompleteMultipartUploadOutput {
         bucket: output.bucket.map(|x| -> Result<_, ConversionError> { Ok(x.as_str().to_owned()) }).transpose()?,
         bucket_key_enabled: output.bucket_key_enabled,
