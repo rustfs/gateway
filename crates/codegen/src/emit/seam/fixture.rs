@@ -36,7 +36,7 @@ use super::expr::Ctx;
 use super::facts::S3sType;
 use super::overrides::Rule;
 use super::render::{self, CHECKSUM_FAN_OUT, HEADER, NestedParents, Target, bare_name, find, member_rule, push_field, target};
-use crate::emit::dto::naming;
+use crate::emit::dto::{naming, registry::Registry};
 
 /// One rendered fixture: the s3s literal, and the member paths it holds, spelled as the census
 /// `present` reports them, sorted, each once.
@@ -450,7 +450,7 @@ fn refusals(ctx: &Ctx<'_>, owner: &str, fields: &[Field]) -> Result<Vec<Refusal>
             Ok(Target::ChecksumFanOut) => fan_out = true,
             Ok(Target::Member(member, ty)) => {
                 let (core, optional) = ty.unwrap_option();
-                if field.required && optional && !render::is_container(&field.ty) {
+                if Registry::is_bare(owner, field) && optional && !render::is_container(&field.ty) {
                     let (bad, why) = if matches!(member_rule(owner, member), Some(Rule::AbsentAsEmpty(_))) {
                         ("Some(String::new())", "an empty legacy value the gateway would write as unset")
                     } else {

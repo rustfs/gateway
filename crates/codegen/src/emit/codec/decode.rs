@@ -69,7 +69,7 @@ use rustfs_gateway_model::ir::{AttributeSource, Binding, Field, OperationIr, Sha
 
 use super::name_policy::ReaderArgs;
 use super::{CodecRules, attribute_name, bounds, carried_as_attribute, expr, media, tolerance};
-use crate::emit::dto::naming;
+use crate::emit::dto::{naming, registry::Registry};
 use crate::emit::error_status::Constants;
 
 use self::layout::{MAX_WIDTH, assign, for_header, push_stmt};
@@ -205,6 +205,7 @@ fn one_field(
     codes: &Constants,
 ) -> Result<String, String> {
     let op = &ir.operation;
+    let owner = format!("{}Input", naming::type_name(op));
     let member = &field.name;
     let wire = field.wire_name.clone().unwrap_or_default();
     let mut out = String::new();
@@ -244,7 +245,7 @@ fn one_field(
             let _ = writeln!(out, "            for raw in value::header_list(raw.as_ref()) {{");
             out.push_str(&push_stmt(16, target, &conversion));
             out.push_str("            }\n");
-            out.push_str(&otherwise(field, target, codes)?);
+            out.push_str(&otherwise(&owner, field, target, codes)?);
         }
         Binding::Header => {
             // A tolerated binding produces the stored `Option` itself, so it is emitted instead of
@@ -258,6 +259,7 @@ fn one_field(
                     .call(&field.ty)
                     .ok_or_else(|| expr::unsupported(op, member, "this tolerance has no reading for the member's type"))?,
                 None => wrap(
+                    &owner,
                     field,
                     &expr::from_wire(
                         &field.ty,
@@ -281,7 +283,7 @@ fn one_field(
             let _ = writeln!(out, "        if let Some(raw) = request.header(\"{wire}\") {{");
             let _ = writeln!(out, "            let raw = raw.as_ref();");
             out.push_str(&assign(12, target, &assignment));
-            out.push_str(&otherwise(field, target, codes)?);
+            out.push_str(&otherwise(&owner, field, target, codes)?);
         }
         Binding::Query => {
             let conversion = expr::from_wire(
@@ -296,8 +298,8 @@ fn one_field(
             let _ = writeln!(out, "        // {member} — query `{wire}`, percent-decoded once.");
             let _ = writeln!(out, "        if let Some(raw) = request.query(\"{wire}\") {{");
             let _ = writeln!(out, "            let raw = raw.as_ref();");
-            out.push_str(&assign(12, target, &wrap(field, &conversion)));
-            out.push_str(&otherwise(field, target, codes)?);
+            out.push_str(&assign(12, target, &wrap(&owner, field, &conversion)));
+            out.push_str(&otherwise(&owner, field, target, codes)?);
         }
         Binding::PrefixHeaders => match &field.ty {
             Type::Map { .. } => {
@@ -324,7 +326,7 @@ fn one_field(
             Type::Blob { streaming: false } => {
                 let _ = writeln!(out, "        // {member} — the buffered request body.");
                 out.push_str(BUFFER_BODY);
-                out.push_str(&assign(8, target, &wrap(field, "raw_body")));
+                out.push_str(&assign(8, target, &wrap(&owner, field, "raw_body")));
             }
             Type::Structure(shape) | Type::Union(shape) => {
                 let root = if ir.xml.request_root.as_deref().unwrap_or("").is_empty() {
@@ -388,7 +390,7 @@ fn one_field(
                 let _ = writeln!(out, "{indent}}}");
                 let indent_len = indent.len();
                 let read = super::name_policy::shape_reader_call(ir, rules, shape, &reader, "&root", ReaderArgs::TOP)?;
-                out.push_str(&assign(indent_len, target, &wrap(field, &read)));
+                out.push_str(&assign(indent_len, target, &wrap(&owner, field, &read)));
                 out.push_str(close);
             }
             // A text payload is the body verbatim, once it is text at all. The decoder's whole
@@ -405,7 +407,7 @@ fn one_field(
                     Type::OpaqueString => format!("value::opaque(&{read})"),
                     _ => read,
                 };
-                out.push_str(&assign(8, target, &wrap(field, &read)));
+                out.push_str(&assign(8, target, &wrap(&owner, field, &read)));
             }
             _ => {
                 return Err(expr::unsupported(
@@ -419,7 +421,6 @@ fn one_field(
             if open_document {
                 out.push_str(&open_request_document(ir, super::unknown_element_policy(ir, rules)?)?);
             }
-            let owner = format!("{}Input", naming::type_name(op));
             out.push_str(&xml_member(ir, (&owner, field), target, rules, "root", ReaderArgs::TOP, 8)?);
         }
         Binding::StatusCode => {
@@ -433,14 +434,14 @@ fn one_field(
 }
 
 /// The `else` arm of a header or query binding: a wire default, a refusal, or nothing.
-fn otherwise(field: &Field, target: &str, codes: &Constants) -> Result<String, String> {
+fn otherwise(owner: &str, field: &Field, target: &str, codes: &Constants) -> Result<String, String> {
     let member = &field.name;
     let mut out = String::new();
     match (&field.default, field.required) {
         (Some(default), _) => {
             let literal = default_literal(field, default)?;
             out.push_str("        } else {\n");
-            out.push_str(&assign(12, target, &wrap(field, &literal)));
+            out.push_str(&assign(12, target, &wrap(owner, field, &literal)));
             out.push_str("        }\n");
         }
         (None, true) => {
@@ -473,13 +474,10 @@ fn default_literal(field: &Field, default: &rustfs_gateway_model::json::Value) -
 }
 
 /// Wraps a value in `Some` unless the field is stored bare.
-fn wrap(field: &Field, inner: &str) -> String {
-    // A container and a required member are both stored bare. `Type::Range` is *not* on this list
-    // any more: it used to produce an `Option` of its own, whose `None` conflated "no Range header"
-    // with "a Range header we will not honour" and threw away the text a 416 has to echo. It now
-    // yields a `RangeSpec` and is wrapped like any other optional binding, so absence is spelled
-    // once and by the wrapper.
-    let bare = field.required || matches!(field.ty, Type::List { .. } | Type::Map { .. } | Type::ChecksumSpec);
+fn wrap(owner: &str, field: &Field, inner: &str) -> String {
+    // Stored presence comes from the DTO registry, not wire requiredness. ChecksumSpec is
+    // assembled as a value of its own; unlike RangeSpec, its binding already supplies its wrapper.
+    let bare = Registry::is_bare(owner, field) || matches!(field.ty, Type::ChecksumSpec);
     if bare { inner.to_owned() } else { format!("Some({inner})") }
 }
 
@@ -647,7 +645,7 @@ fn xml_member(
             let _ = writeln!(out, "{pad}if let Some(child) = {node}.child(\"{wire}\") {{");
             out.push_str(&super::all_unknown::guard(ir, field, rules, entry_name, "child", inner)?);
             let read = super::name_policy::shape_reader_call(ir, rules, entry_name, &reader, "child", args)?;
-            out.push_str(&assign(inner, target, &wrap(field, &read)));
+            out.push_str(&assign(inner, target, &wrap(owner, field, &read)));
             out.push_str(&required_member_refusal(field, member, indent));
         }
         other => {
@@ -662,7 +660,7 @@ fn xml_member(
             )?;
             let _ = writeln!(out, "{pad}if let Some(raw) = {node}.child_text(\"{wire}\") {{");
             out.push_str(&super::nonempty::guard(field, rules, args.reading, inner)?);
-            out.push_str(&assign(inner, target, &wrap(field, &conversion)));
+            out.push_str(&assign(inner, target, &wrap(owner, field, &conversion)));
             out.push_str(&required_member_refusal(field, &wire, indent));
         }
     }
@@ -698,7 +696,7 @@ fn xml_attribute_member(
     let mut out = String::new();
     let _ = writeln!(out, "    // {member} — the `{qualified}` attribute, not a child element.");
     let _ = writeln!(out, "    if let Some(raw) = node.{accessor} {{");
-    out.push_str(&assign(8, target, &wrap(field, &conversion)));
+    out.push_str(&assign(8, target, &wrap(shape_name, field, &conversion)));
     out.push_str(&required_member_refusal(field, &qualified, 4));
     Ok(out)
 }
