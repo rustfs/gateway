@@ -49,5 +49,25 @@ pub(super) fn rows() -> Vec<RequestRow> {
             RawRequest::get("/bkt?uploads&events"),
             &["kd-decode-0093", "kd-decode-0094"],
         ),
+        row(
+            "versions-events-query",
+            RawRequest::get("/bkt?versions&events"),
+            &["kd-decode-0095", "kd-decode-0096"],
+        ),
+        row(
+            "list-v2-events-query",
+            RawRequest::get("/bkt?list-type=2&events"),
+            &["kd-decode-0097", "kd-decode-0098"],
+        ),
+        row(
+            "location-events-query",
+            RawRequest::get("/bkt?location&events"),
+            &["kd-decode-0099", "kd-decode-0100"],
+        ),
+        row(
+            "versioning-events-query",
+            RawRequest::get("/bkt?versioning&events"),
+            &["kd-decode-0101", "kd-decode-0102"],
+        ),
     ]
 }

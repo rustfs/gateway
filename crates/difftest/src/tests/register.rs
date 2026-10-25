@@ -633,3 +633,57 @@ fn multipart_events_registration_rejects_unrelated_findings() {
         }
     }
 }
+
+/// Negative — measured bucket selector overlaps require both names and the exact finding.
+#[test]
+fn bucket_selector_events_registration_rejects_unrelated_findings() {
+    let register = KnownDiffs::checked_in().expect("the register parses");
+    for (operation, selector) in [
+        ("ListObjectVersions", "versions"),
+        ("ListObjectsV2", "list-type"),
+        ("GetBucketLocation", "location"),
+        ("GetBucketVersioning", "versioning"),
+    ] {
+        for (item, gateway, s3s) in [
+            (Item::Route, operation, "ListenBucketNotification"),
+            (
+                Item::Outcome,
+                "handled",
+                "501 NotImplemented: ListenBucketNotification is not implemented yet",
+            ),
+        ] {
+            let found = || finding(operation, item.clone(), gateway, s3s);
+            let mut cases: Vec<_> = [
+                "/bkt".to_owned(),
+                "/bkt?events".to_owned(),
+                format!("/bkt?{selector}=2"),
+                format!("/bkt?{selector}=2&prefix=events"),
+                format!("/bkt?events&prefix={selector}"),
+                format!("/bkt?{}=2&events", selector.to_uppercase()),
+                format!("/bkt?{selector}=2&event"),
+            ]
+            .into_iter()
+            .map(|target| (Some(crate::RawRequest::get(&target)), found()))
+            .collect();
+            cases.push((None, found()));
+            for (other, left, right) in [
+                ("GetObject", gateway, s3s),
+                (operation, "changed gateway value", s3s),
+                (operation, gateway, "changed legacy value"),
+            ] {
+                cases.push((
+                    Some(crate::RawRequest::get(&format!("/bkt?{selector}=2&events"))),
+                    finding(other, item.clone(), left, right),
+                ));
+            }
+            for (request, difference) in cases {
+                let differences = vec![difference];
+                let verdict = match &request {
+                    Some(request) => register.verdict_for(request, differences),
+                    None => register.verdict(differences),
+                };
+                assert!(!verdict.passed(), "{operation}/{request:?}/{item}");
+            }
+        }
+    }
+}

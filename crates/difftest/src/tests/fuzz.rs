@@ -176,6 +176,18 @@ fn multipart_events_artifacts_pass_the_decode_property() {
     }
 }
 
+/// Positive — the nightly version-listing/events overlap remains in the compared input domain.
+#[test]
+fn version_events_artifacts_pass_the_decode_property() {
+    for input in [
+        &include_bytes!("../../../../fuzz/seeds/decode_diff/version-events-original")[..],
+        &include_bytes!("../../../../fuzz/seeds/decode_diff/version-events-minimal")[..],
+    ] {
+        request_of(input).expect("the artifact is a compared request");
+        assert_eq!(check_decode(input), Ok(()), "{}", String::from_utf8_lossy(input));
+    }
+}
+
 /// Positive — a fixed sample of mutated seeds passes the decode property on stable: the fuzzer's
 /// search, a few hundred steps of it, in every CI run.
 #[test]
