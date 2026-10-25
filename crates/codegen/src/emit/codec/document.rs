@@ -47,8 +47,8 @@ use rustfs_gateway_model::ir::{AttributeSource, Binding, Field, OperationIr, Sha
 
 use super::{carried_as_attribute, list_elements};
 
-/// Members the model requires and legacy RustFS reads as optional. A document without one is
-/// read; the generated decoder then refuses it, because the gateway's member cannot say "absent".
+/// Members the model requires and legacy RustFS reads as optional. Tag members carry absence;
+/// the generated decoder still refuses an absent PartNumber, whose DTO has no absent spelling.
 pub const OPTIONAL: &[(&str, &str)] = &[("Tag", "Key"), ("Tag", "Value"), ("CompletedPart", "PartNumber")];
 
 /// Attribute members legacy RustFS requires where the model does not: a `Grantee` without a

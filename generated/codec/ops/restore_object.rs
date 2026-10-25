@@ -62,7 +62,7 @@ impl OperationCodec for dto::RestoreObject {
         if !["RestoreRequest"].contains(&root.name.as_str()) {
             return Err(CodecError::malformed_xml("the request body has the wrong root element").about("RestoreRequest"));
         }
-        input.restore_request = read_restore_request(&root)?;
+        input.restore_request = read_restore_request(&root, request.document_reading())?;
         // RequestPayer — header `x-amz-request-payer`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-request-payer") {
             let raw = raw.as_ref();
@@ -283,10 +283,13 @@ fn read_metadata_entry(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::Metada
 
 /// Reads one `OutputLocation` element. Members are matched by local name, so a namespace-prefixed
 /// body and a bare one decode identically.
-fn read_output_location(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::OutputLocation, CodecError> {
+fn read_output_location(
+    node: &rustfs_gateway_xml::XmlNode,
+    reading: crate::codec::DocumentReading,
+) -> Result<dto::OutputLocation, CodecError> {
     let mut shape = dto::OutputLocation { ..Default::default() };
     if let Some(child) = node.child("S3") {
-        shape.s3 = Some(read_s3location(child)?);
+        shape.s3 = Some(read_s3location(child, reading)?);
     }
     value::exit(shape.check_required())?;
     Ok(shape)
@@ -316,7 +319,10 @@ fn read_parquet_input(_node: &rustfs_gateway_xml::XmlNode) -> Result<dto::Parque
 
 /// Reads one `RestoreRequest` element. Members are matched by local name, so a namespace-prefixed
 /// body and a bare one decode identically.
-fn read_restore_request(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::RestoreRequest, CodecError> {
+fn read_restore_request(
+    node: &rustfs_gateway_xml::XmlNode,
+    reading: crate::codec::DocumentReading,
+) -> Result<dto::RestoreRequest, CodecError> {
     let mut shape = dto::RestoreRequest { ..Default::default() };
     if let Some(raw) = node.child_text("Days") {
         shape.days = Some(value::integer(raw, "Days")?);
@@ -337,7 +343,7 @@ fn read_restore_request(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::Resto
         shape.select_parameters = Some(read_select_parameters(child)?);
     }
     if let Some(child) = node.child("OutputLocation") {
-        shape.output_location = Some(read_output_location(child)?);
+        shape.output_location = Some(read_output_location(child, reading)?);
     }
     value::exit(shape.check_required())?;
     Ok(shape)
@@ -345,7 +351,10 @@ fn read_restore_request(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::Resto
 
 /// Reads one `S3Location` element. Members are matched by local name, so a namespace-prefixed
 /// body and a bare one decode identically.
-fn read_s3location(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::S3Location, CodecError> {
+fn read_s3location(
+    node: &rustfs_gateway_xml::XmlNode,
+    reading: crate::codec::DocumentReading,
+) -> Result<dto::S3Location, CodecError> {
     let mut shape = dto::S3Location { ..Default::default() };
     if let Some(raw) = node.child_text("BucketName") {
         shape.bucket_name = value::bucket_name(raw, "BucketName")?;
@@ -373,7 +382,7 @@ fn read_s3location(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::S3Location
     }
     shape.access_control_list = node.child("AccessControlList").map(|_| access_control_list);
     if let Some(child) = node.child("Tagging") {
-        shape.tagging = Some(read_tagging(child)?);
+        shape.tagging = Some(read_tagging(child, reading)?);
     }
     let mut user_metadata = Vec::new();
     for item in node
@@ -421,16 +430,16 @@ fn read_select_parameters(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::Sel
 
 /// Reads one `Tag` element. Members are matched by local name, so a namespace-prefixed
 /// body and a bare one decode identically.
-fn read_tag(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::Tag, CodecError> {
+fn read_tag(node: &rustfs_gateway_xml::XmlNode, reading: crate::codec::DocumentReading) -> Result<dto::Tag, CodecError> {
     let mut shape = dto::Tag { ..Default::default() };
     if let Some(raw) = node.child_text("Key") {
         shape.key = Some(raw.to_owned());
-    } else {
+    } else if reading == crate::codec::DocumentReading::Tree {
         return Err(CodecError::malformed_xml("the body omits a member the schema requires").about("Key"));
     }
     if let Some(raw) = node.child_text("Value") {
         shape.value = Some(raw.to_owned());
-    } else {
+    } else if reading == crate::codec::DocumentReading::Tree {
         return Err(CodecError::malformed_xml("the body omits a member the schema requires").about("Value"));
     }
     value::exit(shape.check_required())?;
@@ -439,10 +448,10 @@ fn read_tag(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::Tag, CodecError> 
 
 /// Reads one `Tagging` element. Members are matched by local name, so a namespace-prefixed
 /// body and a bare one decode identically.
-fn read_tagging(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::Tagging, CodecError> {
+fn read_tagging(node: &rustfs_gateway_xml::XmlNode, reading: crate::codec::DocumentReading) -> Result<dto::Tagging, CodecError> {
     let mut shape = dto::Tagging { ..Default::default() };
     for item in node.child("TagSet").into_iter().flat_map(|w| w.children_named("Tag")) {
-        shape.tag_set.push(read_tag(item)?);
+        shape.tag_set.push(read_tag(item, reading)?);
     }
     if node.child("TagSet").is_none() {
         return Err(CodecError::malformed_xml("the body omits a member the schema requires").about("TagSet"));

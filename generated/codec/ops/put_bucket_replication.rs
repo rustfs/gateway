@@ -274,7 +274,7 @@ fn read_replication_rule(
         if !child.children.is_empty() && !child.children.iter().any(|nested| recognized.contains(&nested.name.as_str())) {
             return Err(CodecError::malformed_xml("a non-empty structure contains no recognized child element").about("Filter"));
         }
-        shape.filter = Some(read_replication_rule_filter(child)?);
+        shape.filter = Some(read_replication_rule_filter(child, reading)?);
     }
     if let Some(raw) = node.child_text("Status") {
         if raw.is_empty() && reading == crate::codec::DocumentReading::Tree {
@@ -307,13 +307,16 @@ fn read_replication_rule(
 
 /// Reads one `ReplicationRuleAndOperator` element. Members are matched by local name, so a namespace-prefixed
 /// body and a bare one decode identically.
-fn read_replication_rule_and_operator(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::ReplicationRuleAndOperator, CodecError> {
+fn read_replication_rule_and_operator(
+    node: &rustfs_gateway_xml::XmlNode,
+    reading: crate::codec::DocumentReading,
+) -> Result<dto::ReplicationRuleAndOperator, CodecError> {
     let mut shape = dto::ReplicationRuleAndOperator { ..Default::default() };
     if let Some(raw) = node.child_text("Prefix") {
         shape.prefix = Some(raw.to_owned());
     }
     for item in node.children_named("Tag") {
-        shape.tags.push(read_tag(item)?);
+        shape.tags.push(read_tag(item, reading)?);
     }
     value::exit(shape.check_required())?;
     Ok(shape)
@@ -321,16 +324,19 @@ fn read_replication_rule_and_operator(node: &rustfs_gateway_xml::XmlNode) -> Res
 
 /// Reads one `ReplicationRuleFilter` element. Members are matched by local name, so a namespace-prefixed
 /// body and a bare one decode identically.
-fn read_replication_rule_filter(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::ReplicationRuleFilter, CodecError> {
+fn read_replication_rule_filter(
+    node: &rustfs_gateway_xml::XmlNode,
+    reading: crate::codec::DocumentReading,
+) -> Result<dto::ReplicationRuleFilter, CodecError> {
     let mut shape = dto::ReplicationRuleFilter { ..Default::default() };
     if let Some(raw) = node.child_text("Prefix") {
         shape.prefix = Some(raw.to_owned());
     }
     if let Some(child) = node.child("Tag") {
-        shape.tag = Some(read_tag(child)?);
+        shape.tag = Some(read_tag(child, reading)?);
     }
     if let Some(child) = node.child("And") {
-        shape.and = Some(read_replication_rule_and_operator(child)?);
+        shape.and = Some(read_replication_rule_and_operator(child, reading)?);
     }
     value::exit(shape.check_required())?;
     Ok(shape)
@@ -409,16 +415,16 @@ fn read_sse_kms_encrypted_objects(
 
 /// Reads one `Tag` element. Members are matched by local name, so a namespace-prefixed
 /// body and a bare one decode identically.
-fn read_tag(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::Tag, CodecError> {
+fn read_tag(node: &rustfs_gateway_xml::XmlNode, reading: crate::codec::DocumentReading) -> Result<dto::Tag, CodecError> {
     let mut shape = dto::Tag { ..Default::default() };
     if let Some(raw) = node.child_text("Key") {
         shape.key = Some(raw.to_owned());
-    } else {
+    } else if reading == crate::codec::DocumentReading::Tree {
         return Err(CodecError::malformed_xml("the body omits a member the schema requires").about("Key"));
     }
     if let Some(raw) = node.child_text("Value") {
         shape.value = Some(raw.to_owned());
-    } else {
+    } else if reading == crate::codec::DocumentReading::Tree {
         return Err(CodecError::malformed_xml("the body omits a member the schema requires").about("Value"));
     }
     value::exit(shape.check_required())?;

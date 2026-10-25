@@ -69,6 +69,48 @@ fn every_baseline_is_handed_over_alike() {
     }
 }
 
+#[test]
+fn nullable_tag_members_reach_the_rustfs_handler_without_changing_tree_requiredness() {
+    for tag in [
+        "",
+        "<Key>key</Key>",
+        "<Value>value</Value>",
+        "<Key></Key>",
+        "<Value></Value>",
+        "<Key></Key><Value></Value>",
+        "<Key>key</Key><Value>value</Value>",
+    ] {
+        let tagging = format!("<Tagging><TagSet><Tag>{tag}</Tag></TagSet></Tagging>");
+        let mut documents = vec![(Op::PutBucketTagging, tagging.clone()), (Op::PutObjectTagging, tagging)];
+        for selector in [format!("<Tag>{tag}</Tag>"), format!("<And><Tag>{tag}</Tag></And>")] {
+            documents.push((
+                Op::PutBucketLifecycleConfiguration,
+                format!(
+                    "<LifecycleConfiguration><Rule><Filter>{selector}</Filter><Status>Enabled</Status></Rule></LifecycleConfiguration>"
+                ),
+            ));
+            documents.push((
+                Op::PutBucketReplication,
+                format!(
+                    "<ReplicationConfiguration><Role>role</Role><Rule><Destination><Bucket>arn:aws:s3:::backup</Bucket></Destination><Filter>{selector}</Filter><Status>Enabled</Status></Rule></ReplicationConfiguration>"
+                ),
+            ));
+        }
+        for (op, document) in documents {
+            let legacy = legacy(op, document.as_bytes());
+            let rustfs = gateway(op, DocumentReading::RustFs, document.as_bytes());
+            assert_eq!((legacy.is_ok(), rustfs), (true, legacy), "{op:?}: {document}");
+            let tree = gateway(op, DocumentReading::Tree, document.as_bytes()).map(|_| ());
+            let required = if tag.contains("<Key>") && tag.contains("<Value>") {
+                Ok(())
+            } else {
+                Err("MalformedXML".to_owned())
+            };
+            assert_eq!(tree, required, "{op:?}: {document}");
+        }
+    }
+}
+
 /// The last element a variant's label names, without its index: `Part` for
 /// `removed CompleteMultipartUpload/Part[0]`.
 fn member(case: &Case) -> &str {
@@ -108,8 +150,8 @@ const REGISTERED: &[Registered] = &[
         id: "rd-doc-0003",
         gateway: |_| "MalformedXML",
         covers: |case| {
-            (is(case, "removed") && ["PartNumber", "Key", "Value"].contains(&member(case)))
-                || (is(case, "emptied") && ["Part", "Tag"].contains(&member(case)))
+            case.op == Op::CompleteMultipartUpload
+                && ((is(case, "removed") && member(case) == "PartNumber") || (is(case, "emptied") && member(case) == "Part"))
         },
     },
     Registered {

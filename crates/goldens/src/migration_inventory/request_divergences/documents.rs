@@ -31,7 +31,7 @@
 use super::{DOCUMENT_DECODE, DivergenceFollowUp, DivergenceRuling, RequestDivergence};
 
 const XML_REFERENCE: &str = "https://www.w3.org/TR/xml/";
-const API_TAGGING: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_Tag.html";
+const API_COMPLETED_PART: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CompletedPart.html";
 const API_LIFECYCLE_EXPIRATION: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_LifecycleExpiration.html";
 const API_OBJECT_LOCK: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObjectLockConfiguration.html";
 const API_DELETE_OBJECTS: &str = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteObjects.html";
@@ -73,17 +73,14 @@ pub(super) const DOCUMENT_DIVERGENCES: [RequestDivergence; 7] = [
     },
     RequestDivergence {
         id: "rd-doc-0003",
-        operation: "PutBucketTagging, PutObjectTagging, PutBucketLifecycleConfiguration, PutBucketReplication, \
-                    CompleteMultipartUpload",
-        request: "a Tag without its Key or its Value, or a completed Part without its PartNumber",
-        aws: "Key and Value are required members of a Tag; PartNumber identifies a completed part",
-        aws_evidence: API_TAGGING,
-        s3s: "the legacy stack reads each as absent; RustFS then stores a key-only or value-only bucket tag, refuses an \
-              object tag with 400 InvalidTag, and treats a part without a number as part 0 and refuses it with InvalidPart",
+        operation: "CompleteMultipartUpload",
+        request: "a completed Part without its PartNumber",
+        aws: "PartNumber identifies a completed part",
+        aws_evidence: API_COMPLETED_PART,
+        s3s: "the legacy stack reads it as absent; RustFS treats a part without a number as part 0 and refuses it with InvalidPart",
         gateway: "400 MalformedXML: the model requires the member and the gateway's member has no absent spelling, so the \
                   document is refused rather than handed over with an invented value",
-        client_impact: "a bucket-tagging client sending a key-only or value-only tag gets 400 where RustFS stored it; the other \
-                        documents were refused by RustFS too, with another code",
+        client_impact: "a multipart completion without a part number gets MalformedXML where RustFS answered InvalidPart",
         ruling: DivergenceRuling::KeepGateway,
         follow_up: DivergenceFollowUp::None,
         test_file: DOCUMENT_DECODE,
