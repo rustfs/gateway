@@ -219,12 +219,10 @@ fn write_storage_class_analysis_data_export(
 
 /// Writes one `Tag` element's children, in the wire order the IR records.
 fn write_tag(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::Tag) -> Result<(), CodecError> {
-    {
-        let v = &value.key;
+    if let Some(v) = value.key.as_ref() {
         writer.element("Key", v.as_str());
     }
-    {
-        let v = &value.value;
+    if let Some(v) = value.value.as_ref() {
         writer.element("Value", v.as_str());
     }
     Ok(())

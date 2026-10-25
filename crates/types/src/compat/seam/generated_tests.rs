@@ -741,3 +741,29 @@ fn migration_headers_are_absent_when_the_legacy_dto_has_no_marker() {
         [None, None, None]
     );
 }
+
+#[test]
+fn nullable_tag_members_survive_both_legacy_directions() {
+    for (key, value) in [
+        (None, None),
+        (Some("key"), None),
+        (None, Some("value")),
+        (Some(""), None),
+        (None, Some("")),
+        (Some(""), Some("")),
+        (Some("key"), Some("value")),
+    ] {
+        let expected = (key.map(str::to_owned), value.map(str::to_owned));
+        let legacy = oracle::GetBucketTaggingOutput {
+            tag_set: vec![oracle::Tag {
+                key: expected.0.clone(),
+                value: expected.1.clone(),
+            }],
+        };
+        let actual = ops::get_bucket_tagging::output_from_s3s(legacy)
+            .and_then(ops::get_bucket_tagging::output_to_s3s)
+            .map(|output| output.tag_set.into_iter().map(|tag| (tag.key, tag.value)).collect::<Vec<_>>())
+            .map_err(|error| error.field.to_owned());
+        assert_eq!(actual, Ok(vec![expected]));
+    }
+}

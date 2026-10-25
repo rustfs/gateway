@@ -161,7 +161,7 @@ type FilterProjection = (
 );
 
 fn tag_projection(tag: &dto::Tag) -> (String, String) {
-    (tag.key.as_str().to_owned(), tag.value.clone())
+    (tag.key.clone().expect("complete key"), tag.value.clone().expect("complete value"))
 }
 
 fn filter_projection(filter: &dto::LifecycleRuleFilter) -> FilterProjection {
@@ -276,15 +276,15 @@ fn prefix() -> impl Strategy<Value = String> {
     "[a-z0-9&<>\"'é/_-]{0,24}"
 }
 
-/// A tag for a filter, on the direct `<Tag>` or inside an `<And>`.
-///
-/// Nothing is filtered out of the key alphabet. It had to be, while `Tag.Key` was typed as an
-/// `ObjectKey` and the decoder ran the *path* floor over a label: `..` was the one spelling in this
-/// alphabet that tripped it, and roughly one run in thirty went red on it. A generator that avoids
-/// the values its own decoder cannot read is a property that cannot see the asymmetry it exists to
-/// find, so the narrowing comes out with the defect.
+/// A complete tag for a direct `<Tag>` or an `<And>` filter.
+/// The key alphabet includes `..`: it is label text, not an ObjectKey path.
+/// The former ObjectKey floor refused that spelling; keeping it in this generator
+/// catches that regression rather than excluding roughly one in thirty samples.
 fn tag() -> impl Strategy<Value = dto::Tag> {
-    ("[a-zA-Z0-9&<>_.-]{1,20}", "[a-zA-Z0-9&<>\"' _.-]{0,20}").prop_map(|(key, value)| dto::Tag { key, value })
+    ("[a-zA-Z0-9&<>_.-]{1,20}", "[a-zA-Z0-9&<>\"' _.-]{0,20}").prop_map(|(key, value)| dto::Tag {
+        key: Some(key),
+        value: Some(value),
+    })
 }
 
 /// A filter with exactly one direct child, or an `<And>` holding two or more conditions. Both
@@ -612,8 +612,8 @@ fn an_identifier_of_awkward_text_comes_back_unchanged() {
         id: Some(awkward.to_owned()),
         filter: Some(dto::LifecycleRuleFilter {
             tag: Some(dto::Tag {
-                key: "k&y".to_owned(),
-                value: awkward.to_owned(),
+                key: Some("k&y".to_owned()),
+                value: Some(awkward.to_owned()),
             }),
             ..dto::LifecycleRuleFilter::default()
         }),
@@ -894,8 +894,8 @@ fn scoped_rule(filter: dto::LifecycleRuleFilter) -> Vec<dto::LifecycleRule> {
 /// only one of them is a repair or a regression this pair still sees.
 fn tag_filters(key: &str) -> [dto::LifecycleRuleFilter; 2] {
     let tag = || dto::Tag {
-        key: key.to_owned(),
-        value: String::new(),
+        key: Some(key.to_owned()),
+        value: Some(String::new()),
     };
     [
         dto::LifecycleRuleFilter {

@@ -201,8 +201,8 @@ fn the_controls_xml_admits_are_still_accepted_and_survive_the_round_trip() {
         .expect("the filter carries an <And>");
     assert_eq!(and.prefix.as_deref(), Some("photos/\u{7f}/"));
     let tag = and.tags.first().expect("one tag");
-    assert_eq!(tag.key.as_str(), "line\nbreak");
-    assert_eq!(tag.value, "carriage\rreturn");
+    assert_eq!(tag.key.as_deref(), Some("line\nbreak"));
+    assert_eq!(tag.value.as_deref(), Some("carriage\rreturn"));
 
     // And the same four values go back out unchanged — the tab and the newline raw, the carriage
     // return as the reference the writer has always used for it, which is legal XML 1.0.
@@ -235,8 +235,8 @@ fn n_a_stored_value_the_ingress_never_saw_is_not_written_raw_into_a_read() {
             filter: Some(dto::LifecycleRuleFilter {
                 prefix: Some(format!("stored{character}prefix")),
                 tag: Some(dto::Tag {
-                    key: format!("stored{character}key"),
-                    value: format!("stored{character}value"),
+                    key: Some(format!("stored{character}key")),
+                    value: Some(format!("stored{character}value")),
                 }),
                 ..dto::LifecycleRuleFilter::default()
             }),

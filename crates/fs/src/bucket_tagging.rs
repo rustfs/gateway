@@ -41,8 +41,13 @@ impl Handler<PutBucketTagging> for FsBackend {
             .tagging
             .tag_set
             .iter()
-            .map(|tag| (tag.key.clone(), tag.value.clone()))
-            .collect::<Vec<_>>();
+            .map(|tag| {
+                tag.key
+                    .clone()
+                    .zip(tag.value.clone())
+                    .ok_or_else(|| HandlerError::new(ErrorCode::MALFORMED_XML, "a tag requires both Key and Value"))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
         validate_tag_set(&pairs, TagScope::Bucket)
             .map_err(|rejection| HandlerError::new(rejection.code().clone(), rejection.reason()))?;
         self.write_bucket_record(bucket, BUCKET_TAGGING_FILE, serialize_tagging_dto(&input.tagging).as_ref())

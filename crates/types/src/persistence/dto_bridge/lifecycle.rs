@@ -52,7 +52,7 @@ fn to_dto_rule(value: PersistedLifecycleRule) -> Result<crate::dto::LifecycleRul
             }
         }),
         expiration: value.expiration.map(to_dto_expiration).transpose()?,
-        filter: value.filter.map(to_dto_filter).transpose()?,
+        filter: value.filter.map(to_dto_filter),
         id: value.id,
         noncurrent_version_expiration: value.noncurrent_version_expiration.map(|action| {
             crate::dto::NoncurrentVersionExpiration {
@@ -90,46 +90,30 @@ fn to_dto_expiration(value: PersistedLifecycleExpiration) -> Result<crate::dto::
     })
 }
 
-fn to_dto_filter(value: PersistedLifecycleFilter) -> Result<crate::dto::LifecycleRuleFilter, PersistenceBridgeError> {
-    Ok(crate::dto::LifecycleRuleFilter {
-        and: value.and.map(to_dto_and).transpose()?,
+fn to_dto_filter(value: PersistedLifecycleFilter) -> crate::dto::LifecycleRuleFilter {
+    crate::dto::LifecycleRuleFilter {
+        and: value.and.map(to_dto_and),
         object_size_greater_than: value.object_size_greater_than,
         object_size_less_than: value.object_size_less_than,
         prefix: value.prefix,
-        tag: value
-            .tag
-            .map(|tag| to_dto_tag(tag, "LifecycleRule.Filter.Tag.Key", "LifecycleRule.Filter.Tag.Value"))
-            .transpose()?,
-    })
+        tag: value.tag.map(to_dto_tag),
+    }
 }
 
-fn to_dto_and(value: PersistedLifecycleAnd) -> Result<crate::dto::LifecycleRuleAndOperator, PersistenceBridgeError> {
-    Ok(crate::dto::LifecycleRuleAndOperator {
+fn to_dto_and(value: PersistedLifecycleAnd) -> crate::dto::LifecycleRuleAndOperator {
+    crate::dto::LifecycleRuleAndOperator {
         object_size_greater_than: value.object_size_greater_than,
         object_size_less_than: value.object_size_less_than,
         prefix: value.prefix,
-        tags: value
-            .tags
-            .unwrap_or_default()
-            .into_iter()
-            .map(|tag| to_dto_tag(tag, "LifecycleRule.Filter.And.Tag.Key", "LifecycleRule.Filter.And.Tag.Value"))
-            .collect::<Result<Vec<_>, _>>()?,
-    })
+        tags: value.tags.unwrap_or_default().into_iter().map(to_dto_tag).collect(),
+    }
 }
 
-fn to_dto_tag(
-    value: PersistedLifecycleTag,
-    key_path: &'static str,
-    value_path: &'static str,
-) -> Result<crate::dto::Tag, PersistenceBridgeError> {
-    Ok(crate::dto::Tag {
-        key: value
-            .key
-            .ok_or(PersistenceBridgeError::UnsupportedPersistedMember(key_path))?,
-        value: value
-            .value
-            .ok_or(PersistenceBridgeError::UnsupportedPersistedMember(value_path))?,
-    })
+fn to_dto_tag(value: PersistedLifecycleTag) -> crate::dto::Tag {
+    crate::dto::Tag {
+        key: value.key,
+        value: value.value,
+    }
 }
 
 fn to_dto_transition(value: PersistedTransition) -> Result<crate::dto::Transition, PersistenceBridgeError> {
@@ -228,8 +212,8 @@ fn from_dto_filter(value: &crate::dto::LifecycleRuleFilter) -> PersistedLifecycl
 
 fn from_dto_tag(value: &crate::dto::Tag) -> PersistedLifecycleTag {
     PersistedLifecycleTag {
-        key: Some(value.key.clone()),
-        value: Some(value.value.clone()),
+        key: value.key.clone(),
+        value: value.value.clone(),
     }
 }
 
@@ -317,24 +301,6 @@ mod tests {
     }
 
     #[test]
-    fn lifecycle_dto_bridge_rejects_a_tag_without_a_key() {
-        assert_eq!(
-            parse_lifecycle_dto(b"<LifecycleConfiguration><Rule><Filter><Tag><Value>storage</Value></Tag></Filter><Status>Enabled</Status></Rule></LifecycleConfiguration>")
-                .expect_err("the generated tag requires a key"),
-            PersistenceBridgeError::UnsupportedPersistedMember("LifecycleRule.Filter.Tag.Key")
-        );
-    }
-
-    #[test]
-    fn lifecycle_dto_bridge_rejects_an_and_tag_without_a_value() {
-        assert_eq!(
-            parse_lifecycle_dto(b"<LifecycleConfiguration><Rule><Filter><And><Tag><Key>team</Key></Tag></And></Filter><Status>Enabled</Status></Rule></LifecycleConfiguration>")
-                .expect_err("the generated tag requires a value"),
-            PersistenceBridgeError::UnsupportedPersistedMember("LifecycleRule.Filter.And.Tag.Value")
-        );
-    }
-
-    #[test]
     fn lifecycle_dto_bridge_rejects_an_invalid_integer() {
         assert_eq!(
             parse_lifecycle_dto(b"<LifecycleConfiguration><Rule><Expiration><Days>soon</Days></Expiration><Status>Enabled</Status></Rule></LifecycleConfiguration>")
@@ -353,5 +319,29 @@ mod tests {
             serialize_lifecycle_dto(&dto).expect_err("historical persistence requires a rule"),
             PersistenceBridgeError::Codec(PersistenceCodecError::MissingLifecycleRule)
         );
+    }
+    #[test]
+    fn lifecycle_dto_bridge_preserves_nullable_tag_members() {
+        for tag in [
+            "",
+            "<Key>key</Key>",
+            "<Value>value</Value>",
+            "<Key></Key>",
+            "<Value></Value>",
+            "<Key></Key><Value></Value>",
+            "<Key>key</Key><Value>value</Value>",
+        ] {
+            for tags in [format!("<Tag>{tag}</Tag>"), format!("<And><Tag>{tag}</Tag></And>")] {
+                let bytes = format!(
+                    "<LifecycleConfiguration><Rule><Filter>{tags}</Filter><Status>Enabled</Status></Rule></LifecycleConfiguration>"
+                );
+                let expected = crate::persistence::parse_lifecycle(bytes.as_bytes()).expect("legacy document");
+                let actual = parse_lifecycle_dto(bytes.as_bytes())
+                    .ok()
+                    .and_then(|value| serialize_lifecycle_dto(&value).ok())
+                    .and_then(|bytes| crate::persistence::parse_lifecycle(&bytes).ok());
+                assert_eq!(actual, Some(expected), "{tags}");
+            }
+        }
     }
 }

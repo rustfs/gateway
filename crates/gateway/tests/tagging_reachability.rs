@@ -165,13 +165,13 @@ fn as_str_pairs(owned: &[(String, String)]) -> Vec<(&str, &str)> {
     owned.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect()
 }
 
-/// The bridge a backend has to write itself for the XML channel: `dto::Tag`'s two `String`
+/// The bridge a backend has to write itself for the XML channel: `dto::Tag`'s two present string
 /// fields, collected into the pairs [`validate_tag_set`] wants.
 fn tag_pairs(document: &dto::Tagging) -> Vec<(String, String)> {
     document
         .tag_set
         .iter()
-        .map(|tag| (tag.key.clone(), tag.value.clone()))
+        .map(|tag| (tag.key.clone().expect("complete key"), tag.value.clone().expect("complete value")))
         .collect()
 }
 

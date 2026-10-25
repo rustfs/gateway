@@ -63,8 +63,8 @@ pub(super) fn serialize_tags(pairs: &[(String, String)]) -> impl AsRef<[u8]> {
         tag_set: pairs
             .iter()
             .map(|(key, value)| Tag {
-                key: key.clone(),
-                value: value.clone(),
+                key: Some(key.clone()),
+                value: Some(value.clone()),
             })
             .collect(),
     })
@@ -88,12 +88,12 @@ async fn read_tagging(directory: &Path) -> Result<Tagging, HandlerError> {
 }
 
 pub(super) async fn read_persisted_tags(directory: &Path) -> Result<Vec<(String, String)>, HandlerError> {
-    Ok(read_tagging(directory)
+    read_tagging(directory)
         .await?
         .tag_set
         .into_iter()
-        .map(|tag| (tag.key, tag.value))
-        .collect())
+        .map(|tag| tag.key.zip(tag.value).ok_or_else(storage_error))
+        .collect()
 }
 
 impl FsBackend {
@@ -162,8 +162,13 @@ impl Handler<PutObjectTagging> for FsBackend {
             .tagging
             .tag_set
             .iter()
-            .map(|tag| (tag.key.clone(), tag.value.clone()))
-            .collect::<Vec<_>>();
+            .map(|tag| {
+                tag.key
+                    .clone()
+                    .zip(tag.value.clone())
+                    .ok_or_else(|| HandlerError::new(ErrorCode::MALFORMED_XML, "a tag requires both Key and Value"))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
         validate_tag_set(&pairs, TagScope::Object)
             .map_err(|rejection| HandlerError::new(rejection.code().clone(), rejection.reason()))?;
         let _guard = self.version_lock.lock().await;

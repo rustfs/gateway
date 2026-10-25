@@ -2408,15 +2408,15 @@ fn refused_tagging(rejection: TaggingRejection) -> HandlerError {
 
 /// The stored pairs, rendered as the `<TagSet>` a tagging read answers with.
 ///
-/// Total, and that is the point: `Tag.Key` is a `String`, so every pair this fixture stored has a
+/// Total, and that is the point: a present `Tag.Key` is a string, so every pair this fixture stored has a
 /// representation on the way out. It used to be fallible — the dto typed the key as an `ObjectKey`
 /// and a key that type would not hold had to become an `InvalidTag` on a *read* — which put a
 /// refusal on the answering path for a value the writing path had already accepted.
 fn tag_elements(tags: &[(String, String)]) -> Vec<dto::Tag> {
     tags.iter()
         .map(|(key, value)| dto::Tag {
-            key: key.clone(),
-            value: value.clone(),
+            key: Some(key.clone()),
+            value: Some(value.clone()),
         })
         .collect()
 }
@@ -2436,8 +2436,13 @@ fn tag_pairs(document: &dto::Tagging, scope: TagScope) -> Result<Vec<(String, St
     let pairs: Vec<(String, String)> = document
         .tag_set
         .iter()
-        .map(|tag| (tag.key.as_str().to_owned(), tag.value.clone()))
-        .collect();
+        .map(|tag| {
+            tag.key
+                .clone()
+                .zip(tag.value.clone())
+                .ok_or_else(|| HandlerError::new(ErrorCode::MALFORMED_XML, "a tag requires both Key and Value"))
+        })
+        .collect::<Result<_, _>>()?;
     validate_tag_set(&pairs, scope).map_err(refused_tagging)?;
     Ok(pairs)
 }

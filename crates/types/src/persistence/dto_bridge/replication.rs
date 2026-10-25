@@ -57,7 +57,7 @@ fn to_dto_rule(value: PersistedReplicationRule) -> Result<crate::dto::Replicatio
             .map(|wrapper| crate::dto::ExistingObjectReplication {
                 status: crate::dto::Status::custom(wrapper.status),
             }),
-        filter: value.filter.map(to_dto_filter).transpose()?,
+        filter: value.filter.map(to_dto_filter),
         id: value.id,
         prefix: value.prefix,
         priority: value.priority,
@@ -96,42 +96,22 @@ fn to_dto_destination(value: PersistedReplicationDestination) -> crate::dto::Des
     }
 }
 
-fn to_dto_filter(value: PersistedReplicationFilter) -> Result<crate::dto::ReplicationRuleFilter, PersistenceBridgeError> {
-    Ok(crate::dto::ReplicationRuleFilter {
-        and: value
-            .and
-            .map(|and| -> Result<_, PersistenceBridgeError> {
-                Ok(crate::dto::ReplicationRuleAndOperator {
-                    prefix: and.prefix,
-                    tags: and
-                        .tags
-                        .unwrap_or_default()
-                        .into_iter()
-                        .map(|tag| to_dto_tag(tag, "ReplicationRule.Filter.And.Tag.Key", "ReplicationRule.Filter.And.Tag.Value"))
-                        .collect::<Result<Vec<_>, _>>()?,
-                })
-            })
-            .transpose()?,
+fn to_dto_filter(value: PersistedReplicationFilter) -> crate::dto::ReplicationRuleFilter {
+    crate::dto::ReplicationRuleFilter {
+        and: value.and.map(|and| crate::dto::ReplicationRuleAndOperator {
+            prefix: and.prefix,
+            tags: and.tags.unwrap_or_default().into_iter().map(to_dto_tag).collect(),
+        }),
         prefix: value.prefix,
-        tag: value
-            .tag
-            .map(|tag| to_dto_tag(tag, "ReplicationRule.Filter.Tag.Key", "ReplicationRule.Filter.Tag.Value"))
-            .transpose()?,
-    })
+        tag: value.tag.map(to_dto_tag),
+    }
 }
 
-fn to_dto_tag(
-    value: PersistedReplicationTag,
-    key_path: &'static str,
-    value_path: &'static str,
-) -> Result<crate::dto::Tag, PersistenceBridgeError> {
-    let key = value
-        .key
-        .ok_or(PersistenceBridgeError::UnsupportedPersistedMember(key_path))?;
-    let value = value
-        .value
-        .ok_or(PersistenceBridgeError::UnsupportedPersistedMember(value_path))?;
-    Ok(crate::dto::Tag { key, value })
+fn to_dto_tag(value: PersistedReplicationTag) -> crate::dto::Tag {
+    crate::dto::Tag {
+        key: value.key,
+        value: value.value,
+    }
 }
 
 fn to_dto_source_selection(value: PersistedSourceSelectionCriteria) -> crate::dto::SourceSelectionCriteria {
@@ -240,8 +220,8 @@ fn from_dto_filter(value: &crate::dto::ReplicationRuleFilter) -> PersistedReplic
 
 fn from_dto_tag(value: &crate::dto::Tag) -> PersistedReplicationTag {
     PersistedReplicationTag {
-        key: Some(value.key.clone()),
-        value: Some(value.value.clone()),
+        key: value.key.clone(),
+        value: value.value.clone(),
     }
 }
 
@@ -292,8 +272,8 @@ mod tests {
             .and_then(|filter| filter.and.as_ref())
             .expect("the And selector remains present");
         assert_eq!(and.prefix.as_deref(), Some(""));
-        assert_eq!(and.tags[0].key, "team");
-        assert_eq!(and.tags[0].value, "storage");
+        assert_eq!(and.tags[0].key.as_deref(), Some("team"));
+        assert_eq!(and.tags[0].value.as_deref(), Some("storage"));
         assert_eq!(serialize_replication_dto(&parsed).expect("the DTO remains representable"), HISTORICAL);
     }
 
@@ -333,24 +313,6 @@ mod tests {
     }
 
     #[test]
-    fn replication_dto_bridge_rejects_a_tag_without_a_key() {
-        assert_eq!(
-            parse_replication_dto(b"<ReplicationConfiguration><Role>role</Role><Rule><Destination><Bucket>arn:aws:s3:::backup</Bucket></Destination><Filter><Tag><Value>storage</Value></Tag></Filter><Status>Enabled</Status></Rule></ReplicationConfiguration>")
-                .expect_err("the generated tag requires a key"),
-            PersistenceBridgeError::UnsupportedPersistedMember("ReplicationRule.Filter.Tag.Key")
-        );
-    }
-
-    #[test]
-    fn replication_dto_bridge_rejects_a_tag_without_a_value() {
-        assert_eq!(
-            parse_replication_dto(b"<ReplicationConfiguration><Role>role</Role><Rule><Destination><Bucket>arn:aws:s3:::backup</Bucket></Destination><Filter><Tag><Key>team</Key></Tag></Filter><Status>Enabled</Status></Rule></ReplicationConfiguration>")
-                .expect_err("the generated tag requires a value"),
-            PersistenceBridgeError::UnsupportedPersistedMember("ReplicationRule.Filter.Tag.Value")
-        );
-    }
-
-    #[test]
     fn replication_dto_bridge_rejects_an_invalid_priority() {
         assert_eq!(
             parse_replication_dto(b"<ReplicationConfiguration><Role>role</Role><Rule><Destination><Bucket>arn:aws:s3:::backup</Bucket></Destination><Priority>high</Priority><Status>Enabled</Status></Rule></ReplicationConfiguration>")
@@ -369,5 +331,29 @@ mod tests {
             serialize_replication_dto(&dto).expect_err("historical persistence requires a rule"),
             PersistenceBridgeError::Codec(PersistenceCodecError::MissingReplicationRule)
         );
+    }
+    #[test]
+    fn replication_dto_bridge_preserves_nullable_tag_members() {
+        for tag in [
+            "",
+            "<Key>key</Key>",
+            "<Value>value</Value>",
+            "<Key></Key>",
+            "<Value></Value>",
+            "<Key></Key><Value></Value>",
+            "<Key>key</Key><Value>value</Value>",
+        ] {
+            for tags in [format!("<Tag>{tag}</Tag>"), format!("<And><Tag>{tag}</Tag></And>")] {
+                let bytes = format!(
+                    "<ReplicationConfiguration><Role>role</Role><Rule><Destination><Bucket>arn:aws:s3:::backup</Bucket></Destination><Filter>{tags}</Filter><Status>Enabled</Status></Rule></ReplicationConfiguration>"
+                );
+                let expected = crate::persistence::parse_replication(bytes.as_bytes()).expect("legacy document");
+                let actual = parse_replication_dto(bytes.as_bytes())
+                    .ok()
+                    .and_then(|value| serialize_replication_dto(&value).ok())
+                    .and_then(|bytes| crate::persistence::parse_replication(&bytes).ok());
+                assert_eq!(actual, Some(expected), "{tags}");
+            }
+        }
     }
 }

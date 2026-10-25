@@ -30,9 +30,9 @@
 #[derive(Debug, Clone, Default)]
 pub struct Tag {
     /// Wire `Key`, bound as BodyXml. Required.
-    pub key: String,
+    pub key: Option<String>,
     /// Wire `Value`, bound as BodyXml. Required.
-    pub value: String,
+    pub value: Option<String>,
 }
 
 impl Tag {
@@ -51,8 +51,6 @@ impl Tag {
     ///
     /// Returns [`crate::PlaceholderDefault`] naming the first offending member.
     pub fn check_required(&self) -> Result<(), crate::PlaceholderDefault> {
-        crate::reject_placeholder("Tag", "Key", &self.key)?;
-        crate::reject_placeholder("Tag", "Value", &self.value)?;
         Ok(())
     }
 }
