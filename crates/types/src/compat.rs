@@ -18,7 +18,8 @@
 //! Responsible for: invoking the exact old persistence codecs of every pinned s3s revision,
 //! selecting which revision answers, and exposing family-scoped adapters over owned values (feature
 //! `compat-s3s`); and the migration seam — the generated conversions of every covered operation
-//! in both directions, the hand-written ones (`put_object`, `get_bucket_location`), the error seam
+//! in both directions, the hand-written adapters (`put_object`, `get_bucket_location`, Select
+//! responses in `select`), the error seam
 //! and the request-context conversion (`request_context`) — compiled once per seam revision:
 //! `s3s_5761ddfe`, the revision RustFS main links (feature `compat-s3s-rustfs`,
 //! rustfs/backlog#2759); `s3s_0_17_0`, the release it linked at 528a3681, which the goldens and
@@ -95,6 +96,7 @@ pub mod s3s_0_17_0 {
     pub mod request_context;
     #[cfg(test)]
     mod reverse_tests;
+    pub mod select;
     pub mod trailers;
     #[cfg(test)]
     mod trailers_tests;
@@ -150,6 +152,7 @@ pub mod s3s_5761ddfe {
     pub mod request_context;
     #[cfg(test)]
     mod reverse_tests;
+    pub mod select;
     pub mod trailers;
     #[cfg(test)]
     mod trailers_tests;
@@ -187,6 +190,7 @@ pub mod s3s_9c4690d8 {
     pub mod get_bucket_location;
     pub mod put_object;
     pub mod request_context;
+    pub mod select;
     pub mod trailers;
 
     /// `9c4690d8` has no default sentences: a body that names no message gets a document with no
