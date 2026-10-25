@@ -687,3 +687,97 @@ fn bucket_selector_events_registration_rejects_unrelated_findings() {
         }
     }
 }
+
+/// Negative — annotation/multipart overlaps require every selector and the exact finding.
+#[test]
+fn annotation_multipart_registration_rejects_unrelated_findings() {
+    let register = KnownDiffs::checked_in().expect("the register parses");
+    let basic = &["annotation", "uploadId"][..];
+    let named = &["annotation", "uploadId", "annotationName"][..];
+    for (operation, method, item, gateway, legacy, selectors) in [
+        ("ListParts", http::Method::GET, Item::Route, "ListParts", "ListObjectAnnotations", basic),
+        (
+            "ListParts",
+            http::Method::GET,
+            Item::Outcome,
+            "handled",
+            "501 NotImplemented: ListObjectAnnotations is not implemented yet",
+            basic,
+        ),
+        ("ListParts", http::Method::GET, Item::Route, "ListParts", "GetObjectAnnotation", named),
+        (
+            "ListParts",
+            http::Method::GET,
+            Item::Outcome,
+            "handled",
+            "501 NotImplemented: GetObjectAnnotation is not implemented yet",
+            named,
+        ),
+        (
+            "AbortMultipartUpload",
+            http::Method::DELETE,
+            Item::Route,
+            "AbortMultipartUpload",
+            "DeleteObjectAnnotation",
+            basic,
+        ),
+        (
+            "AbortMultipartUpload",
+            http::Method::DELETE,
+            Item::Outcome,
+            "handled",
+            "400 InvalidRequest: missing query: annotationName",
+            basic,
+        ),
+        (
+            "AbortMultipartUpload",
+            http::Method::DELETE,
+            Item::Outcome,
+            "handled",
+            "501 NotImplemented: DeleteObjectAnnotation is not implemented yet",
+            named,
+        ),
+    ] {
+        let query = |names: Vec<String>| {
+            names
+                .into_iter()
+                .map(|name| format!("{name}=a"))
+                .collect::<Vec<_>>()
+                .join("&")
+        };
+        let request = |names| crate::RawRequest::new(method.clone(), &format!("/bkt/k?{}", query(names)));
+        let found = || finding(operation, item.clone(), gateway, legacy);
+        let mut cases = vec![(None, found())];
+        for omitted in selectors {
+            let others: Vec<_> = selectors
+                .iter()
+                .filter(|name| *name != omitted)
+                .map(|name| (*name).to_owned())
+                .collect();
+            cases.push((Some(request(others.clone())), found()));
+            for replacement in [omitted.to_uppercase(), format!("prefix={omitted}")] {
+                let mut changed = others.clone();
+                changed.push(replacement);
+                cases.push((Some(request(changed)), found()));
+            }
+        }
+        for (other, left, right) in [
+            ("GetObject", gateway, legacy),
+            (operation, "changed gateway value", legacy),
+            (operation, gateway, "changed legacy value"),
+        ] {
+            cases.push((
+                Some(request(selectors.iter().map(|name| (*name).to_owned()).collect())),
+                finding(other, item.clone(), left, right),
+            ));
+        }
+        for (request, difference) in cases {
+            let differences = vec![difference];
+            let verdict = match &request {
+                Some(request) => register.verdict_for(request, differences),
+                None => register.verdict(differences),
+            };
+            assert!(!verdict.passed(), "{operation}/{request:?}/{item}");
+        }
+    }
+}
