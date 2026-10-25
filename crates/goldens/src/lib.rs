@@ -61,6 +61,9 @@ mod rustfs_admin_proof;
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 mod rustfs_admin_dialect;
+#[cfg(test)]
+#[allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
+mod select_seam;
 mod source_a_boundary;
 mod source_a_census;
 mod source_a_create_defaults;
