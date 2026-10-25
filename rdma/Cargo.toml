@@ -32,4 +32,6 @@ tokio = { version = "1", features = ["io-util", "rt", "sync", "time"] }
 tracing = { version = "0.1", default-features = false, features = ["std"] }
 
 [dev-dependencies]
+metrics = "0.24.6"
+metrics-util = { version = "0.20", default-features = false, features = ["debugging"] }
 tracing-subscriber = { version = "0.3", default-features = false, features = ["registry", "std"] }
