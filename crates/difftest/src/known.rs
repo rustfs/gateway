@@ -91,6 +91,10 @@ pub struct KnownDiff {
     /// same finding from a request without it is a new difference.
     #[serde(default)]
     pub when_query: Option<String>,
+    /// All query parameter names the request must carry. Requires at least two distinct names
+    /// and cannot be combined with `when_query`; absent request context never satisfies it.
+    #[serde(default)]
+    pub when_queries: Option<Vec<String>>,
     /// A header the request must carry for this entry to apply, matched case-insensitively.
     #[serde(default)]
     pub when_header: Option<String>,
@@ -109,6 +113,11 @@ impl KnownDiff {
             (Some(name), Some(scope)) => scope.query.iter().any(|carried| carried == name),
             (Some(_), None) => false,
         };
+        let queries_apply = match (&self.when_queries, request) {
+            (None, _) => true,
+            (Some(names), Some(scope)) => names.iter().all(|name| scope.query.contains(name)),
+            (Some(_), None) => false,
+        };
         let header_applies = match (&self.when_header, request) {
             (None, _) => true,
             (Some(name), Some(scope)) => scope.headers.iter().any(|carried| carried.eq_ignore_ascii_case(name)),
@@ -120,6 +129,7 @@ impl KnownDiff {
             (Some(_), None) => false,
         };
         query_applies
+            && queries_apply
             && header_applies
             && path_applies
             && self.kind == finding.kind
@@ -261,13 +271,27 @@ impl KnownDiffs {
                     entry.id
                 )));
             }
-            if let Some(name) = &entry.when_query
-                && (name.is_empty()
-                    || !name
+            let valid_query_name = |name: &str| {
+                !name.is_empty()
+                    && name
                         .bytes()
-                        .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_'))
+                        .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
+            };
+            if let Some(name) = &entry.when_query
+                && !valid_query_name(name)
             {
                 return Err(RegisterError(format!("{}: when_query {name:?} is not a query parameter name", entry.id)));
+            }
+            if let Some(names) = &entry.when_queries
+                && (names.len() < 2
+                    || names.iter().collect::<BTreeSet<_>>().len() != names.len()
+                    || names.iter().any(|name| !valid_query_name(name))
+                    || entry.when_query.is_some())
+            {
+                return Err(RegisterError(format!(
+                    "{}: when_queries requires at least two distinct query names and cannot combine with when_query",
+                    entry.id
+                )));
             }
             if let Some(name) = &entry.when_header
                 && http::HeaderName::from_bytes(name.as_bytes()).is_err()

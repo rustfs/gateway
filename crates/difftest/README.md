@@ -117,6 +117,12 @@ difference only where an `x-id` hint caused it, so the same difference from any 
 a real misroute — fails. `when_bucket` does the same for text the first path segment must hold (the escaped
 bucket separator `%2F`).
 
+`when_queries = ["uploads", "events"]` requires every listed query name, with exact spelling.
+It requires at least two distinct valid names and cannot be combined with `when_query`.
+Missing request context or either selector keeps the finding unregistered. Existing singular
+scopes are unchanged. Tools reading the register must use difftest 0.2.0 or later for this field;
+Rust callers constructing `KnownDiff` literals add `when_queries: None` unless they need a conjunction.
+
 A `when_header` entry additionally requires that HTTP field in the request, with case-insensitive
 name matching. Without request context it cannot apply. Annotation/copy entries require both
 `annotation` and `x-amz-copy-source`, so a copy misroute without the selector remains a failure.

@@ -21,6 +21,8 @@
 //! NOT responsible for: judging the rows (`tests/matrix.rs`) or the negative controls.
 //! Upstream: the library's request type. Downstream: tests, the runners, the fuzz seeds.
 
+mod selectors;
+
 use http::Method;
 
 use super::{OWNER, sse};
@@ -331,16 +333,8 @@ fn checksum_rows(rows: &mut Vec<RequestRow>) {
 pub(super) fn requests() -> Vec<RequestRow> {
     let (delete_crc_header, delete_crc) = checksum(rustfs_gateway_types::ChecksumAlgorithm::Crc32, DELETE_BODY);
     let (versioning_crc_header, versioning_crc) = checksum(rustfs_gateway_types::ChecksumAlgorithm::Crc32, VERSIONING_BODY);
-    let mut rows = vec![
-        row(
-            "annotation-upload-id-nightly-artifact",
-            RawRequest::put("/bkt/k?annotation=1&uploadId=u", b"")
-                .header("x-amz-checksum-sha512", "MJ7MSJwS1utMxA9QyQLydNbxf9JlnDaNCVbRbDP2DDoH2Bdz33Fd"),
-            &["kd-decode-0085", "kd-decode-0086"],
-        ),
-        row("copy-annotation-query", RawRequest::put("/bkt/k?annotation=1", b"").header("x-amz-copy-source", "/src/k"), &["kd-decode-0087", "kd-decode-0088"]),
-        row("part-annotation-query", RawRequest::put("/bkt/k?annotation=1&uploadId=u&partNumber=2", b""), &["kd-decode-0089", "kd-decode-0090"]),
-        row("bucket-events-query", RawRequest::get("/bkt?events"), &["kd-decode-0091", "kd-decode-0092"]),
+    let mut rows = selectors::rows();
+    rows.extend([
         // ── GetObject / HeadObject ──
         row("get-full", get_full(), &[]),
         row("get-bare", RawRequest::get("/bkt/k"), &[]),
@@ -759,7 +753,7 @@ pub(super) fn requests() -> Vec<RequestRow> {
             RawRequest::put("/bkt/k", b"x").header("x-amz-sdk-checksum-algorithm", "CRC32"),
             &["kd-decode-0036"],
         ),
-    ];
+    ]);
     checksum_rows(&mut rows);
     rows
 }
