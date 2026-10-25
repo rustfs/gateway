@@ -207,14 +207,35 @@ pub(super) fn xml_root(model: &Model, shape_id: Option<&str>, fields: &[Field]) 
     )
 }
 
-pub(super) fn payload_spec(fields: &[Field], ov: &PayloadOverlay, operation: &str) -> Result<PayloadSpec> {
+pub(super) fn payload_spec(model: &Model, fields: &[Field], ov: &PayloadOverlay, operation: &str) -> Result<PayloadSpec> {
     let streaming = fields
         .iter()
         .any(|f| f.binding == Binding::Payload && matches!(f.ty, Type::Blob { streaming: true }));
-    let has_payload = fields.iter().any(|f| f.binding == Binding::Payload);
+    let mut event_stream = false;
+    for field in fields {
+        if !matches!(&field.ty, Type::Union(name) if model.shape_local(name)
+            .is_some_and(|shape| trait_of(shape, "smithy.api#streaming").is_some()))
+        {
+            continue;
+        }
+        if field.binding != Binding::Payload {
+            return Err(Error::ir(
+                operation,
+                format!("field `{}`: streaming union must use httpPayload", field.name),
+            ));
+        }
+        event_stream = true;
+    }
+    let payload_count = fields.iter().filter(|field| field.binding == Binding::Payload).count();
+    if event_stream && payload_count != 1 {
+        return Err(Error::ir(operation, "event stream must be the only payload member"));
+    }
+    let has_payload = payload_count != 0;
     let has_body_xml = fields.iter().any(|f| f.binding == Binding::BodyXml);
     let (kind, buffering) = if streaming {
         (PayloadKind::StreamingBlob, Buffering::Streaming)
+    } else if event_stream {
+        (PayloadKind::EventStream, Buffering::Streaming)
     } else if has_payload || has_body_xml {
         (PayloadKind::XmlBody, Buffering::Full)
     } else {
