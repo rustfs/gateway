@@ -138,14 +138,15 @@ fn n_stale_nonempty_mutation_is_refused() {
 /// The refusal is the tree reading's alone (rustfs/gateway#1078): every guard is conditioned on
 /// it, the top-level decoder hands the request's reading down once, and exactly the readers that
 /// reach a guarded member take it — so the RustFS reading hands the empty value to the handler as
-/// legacy RustFS does, and the mutant that lifts the rule threads nothing at all.
+/// legacy RustFS does. Lifting the rule still threads the reading to Tag members, whose presence
+/// has an independent Tree-only refusal.
 #[test]
 fn required_text_guard_is_the_tree_readings_alone() {
     let artifacts = artifacts();
     let mut lifted = artifacts.codec_rules.clone();
     let mutation = plan_codec(RULE, &lifted[RULE]).expect("typed rule is mutable");
     apply_codec(&mut lifted, &mutation).expect("the mutation writes");
-    for (name, guards, readers) in [("PutBucketLifecycleConfiguration", 1, 2), ("PutBucketReplication", 7, 10)] {
+    for (name, guards, readers) in [("PutBucketLifecycleConfiguration", 1, 5), ("PutBucketReplication", 7, 13)] {
         let op = artifacts
             .operations
             .iter()
@@ -160,26 +161,37 @@ fn required_text_guard_is_the_tree_readings_alone() {
             "{name}"
         );
         assert_eq!(current.matches("if raw.is_empty() {").count(), 0, "{name}: an unconditioned guard");
-        assert_eq!(current.matches("request.document_reading())").count(), 1, "{name}");
-        assert_eq!(current.matches("reading: crate::codec::DocumentReading").count(), readers, "{name}");
         let mutant = operation_for_test(op, &lifted, &artifacts.error_codes).expect("mutant renders");
-        assert!(
-            !mutant.contains("crate::codec::DocumentReading"),
-            "{name}: the lifted rule still threads the reading"
+        assert_eq!(
+            (
+                current.matches("reading: crate::codec::DocumentReading").count(),
+                current.matches("request.document_reading())").count(),
+                mutant.matches("reading: crate::codec::DocumentReading").count(),
+                mutant.matches("request.document_reading())").count(),
+            ),
+            (readers, 1, 5, 1),
+            "{name}: lifting the text rule must retain the Tag reading"
         );
-        assert!(!mutant.contains("request.document_reading()"), "{name}");
     }
 }
 
-/// Negative — an operation with no guarded member renders no reading parameter anywhere.
+/// Only readers reaching conditional text or Tag members take the reading; all others omit it.
 #[test]
-fn n_readers_without_a_guarded_member_take_no_reading() {
+fn only_readers_with_conditional_members_take_the_reading() {
     let artifacts = artifacts();
     for op in &artifacts.operations {
-        if matches!(op.operation.as_str(), "PutBucketLifecycleConfiguration" | "PutBucketReplication") {
-            continue;
-        }
+        let expected = match op.operation.as_str() {
+            "PutBucketLifecycleConfiguration" | "RestoreObject" => 5,
+            "PutBucketReplication" => 13,
+            "PutBucketTagging" | "PutObjectTagging" => 2,
+            _ => 0,
+        };
         let rendered = operation_for_test(op, &artifacts.codec_rules, &artifacts.error_codes).expect("renders");
-        assert!(!rendered.contains("crate::codec::DocumentReading"), "{}", op.operation);
+        assert_eq!(
+            rendered.matches("reading: crate::codec::DocumentReading").count(),
+            expected,
+            "{}",
+            op.operation
+        );
     }
 }

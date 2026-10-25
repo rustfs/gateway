@@ -646,7 +646,7 @@ fn xml_member(
             out.push_str(&super::all_unknown::guard(ir, field, rules, entry_name, "child", inner)?);
             let read = super::name_policy::shape_reader_call(ir, rules, entry_name, &reader, "child", args)?;
             out.push_str(&assign(inner, target, &wrap(owner, field, &read)));
-            out.push_str(&required_member_refusal(field, member, indent));
+            out.push_str(&required_member_refusal(field, member, indent, None));
         }
         other => {
             let conversion = expr::from_wire(
@@ -661,7 +661,8 @@ fn xml_member(
             let _ = writeln!(out, "{pad}if let Some(raw) = {node}.child_text(\"{wire}\") {{");
             out.push_str(&super::nonempty::guard(field, rules, args.reading, inner)?);
             out.push_str(&assign(inner, target, &wrap(owner, field, &conversion)));
-            out.push_str(&required_member_refusal(field, &wire, indent));
+            let tag_reading = crate::emit::dto::presence::carries_tag_presence(owner, field).then_some(args.reading);
+            out.push_str(&required_member_refusal(field, &wire, indent, tag_reading));
         }
     }
     Ok(out)
@@ -697,7 +698,7 @@ fn xml_attribute_member(
     let _ = writeln!(out, "    // {member} — the `{qualified}` attribute, not a child element.");
     let _ = writeln!(out, "    if let Some(raw) = node.{accessor} {{");
     out.push_str(&assign(8, target, &wrap(shape_name, field, &conversion)));
-    out.push_str(&required_member_refusal(field, &qualified, 4));
+    out.push_str(&required_member_refusal(field, &qualified, 4, None));
     Ok(out)
 }
 
@@ -874,13 +875,18 @@ fn union_reader(ir: &OperationIr, name: &str, shape: &Shape, rules: &CodecRules)
 /// A member whose absence reads as the default document is left holding that default instead:
 /// that is the mutation violating the requirement without changing the member's type
 /// (`crate::mutate::plan`), and the lowered model never carries it.
-fn required_member_refusal(field: &Field, wire: &str, indent: usize) -> String {
+/// Tag Key/Value can carry absence; only the Tree reading refuses it before the handler.
+fn required_member_refusal(field: &Field, wire: &str, indent: usize, tag_reading: Option<&str>) -> String {
     let pad = " ".repeat(indent);
     if !field.required || crate::emit::reads_default_document(field) {
         return format!("{pad}}}\n");
     }
     let mut out = String::new();
-    let _ = writeln!(out, "{pad}}} else {{");
+    if let Some(reading) = tag_reading {
+        let _ = writeln!(out, "{pad}}} else if {reading} == crate::codec::DocumentReading::Tree {{");
+    } else {
+        let _ = writeln!(out, "{pad}}} else {{");
+    }
     let inner = " ".repeat(indent.saturating_add(4));
     let refusal = format!("CodecError::malformed_xml(\"the body omits a member the schema requires\").about(\"{wire}\")");
     let single = format!("{inner}return Err({refusal});");

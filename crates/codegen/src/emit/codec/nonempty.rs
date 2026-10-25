@@ -16,8 +16,8 @@
 //!
 //! Responsible for: emitting the tree reading's HTTP request refusal for explicitly bound nonempty
 //! text members, and finding the nested reader shapes that need the deployment's document reading
-//! to decide it. NOT responsible for: persisted XML or enum membership. Upstream: typed overlay
-//! bindings. Downstream: the request shape reader emitter.
+//! to decide it or preserve absent Tag members. NOT responsible for: persisted XML or enum membership.
+//! Upstream: typed overlay bindings and Tag presence facts. Downstream: the request shape reader emitter.
 //!
 //! # Why the refusal is the tree reading's alone
 //!
@@ -60,7 +60,7 @@ fn rejects_empty(field: &Field, rules: &CodecRules) -> Result<bool, String> {
 }
 
 /// Whether the reader of shape `name` needs the deployment's document reading: true exactly when
-/// a member with an active nonempty-text rule is reachable from it.
+/// a member with an active nonempty-text rule or Tag presence is reachable from it.
 pub(super) fn shape_needs_reading(ir: &OperationIr, name: &str, rules: &CodecRules) -> bool {
     type_needs_reading(ir, &Type::Structure(name.to_owned()), rules, &mut BTreeSet::new())
 }
@@ -79,7 +79,9 @@ fn type_needs_reading(ir: &OperationIr, ty: &Type, rules: &CodecRules, visiting:
                 shape.fields.iter().any(|field| {
                     // A binding no reader can enforce still threads the reading; `guard` then
                     // refuses to render it, so the error names the member rather than a caller.
-                    rejects_empty(field, rules).unwrap_or(true) || type_needs_reading(ir, &field.ty, rules, visiting)
+                    crate::emit::dto::presence::carries_tag_presence(name, field)
+                        || rejects_empty(field, rules).unwrap_or(true)
+                        || type_needs_reading(ir, &field.ty, rules, visiting)
                 })
             });
             visiting.remove(name);

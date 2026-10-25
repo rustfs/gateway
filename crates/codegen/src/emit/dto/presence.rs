@@ -45,7 +45,7 @@ pub fn carries_presence(owner: &str, field: &Field) -> bool {
 /// Whether a Tag string carries historical absence independently of HTTP requiredness.
 ///
 /// This does not select list-presence code: scalar readers and writers use the DTO storage
-/// predicate, while request bindings still enforce the model's required members (rustfs/gateway#1470).
+/// predicate; the request's document reading controls missing-member refusals (rustfs/gateway#1470).
 #[must_use]
 pub fn carries_tag_presence(owner: &str, field: &Field) -> bool {
     owner == "Tag"

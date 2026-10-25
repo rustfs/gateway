@@ -104,7 +104,7 @@ pub(super) fn shape_reader_call(
 /// Renders a nested shape reader's signature, and whether the reader takes the name policy.
 ///
 /// A reader takes the deployment's document reading too when a member it reaches carries a
-/// nonempty-text rule (`nonempty`), so the tree reading can refuse an empty one.
+/// nonempty-text rule or Tag presence (`nonempty`), so the tree reading can enforce its contract.
 pub(super) fn shape_reader_signature(
     ir: &OperationIr,
     rules: &CodecRules,

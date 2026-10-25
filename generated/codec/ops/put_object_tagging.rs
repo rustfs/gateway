@@ -64,7 +64,7 @@ impl OperationCodec for dto::PutObjectTagging {
         if !["Tagging"].contains(&root.name.as_str()) {
             return Err(CodecError::malformed_xml("the request body has the wrong root element").about("Tagging"));
         }
-        input.tagging = read_tagging(&root)?;
+        input.tagging = read_tagging(&root, request.document_reading())?;
         // ExpectedBucketOwner — header `x-amz-expected-bucket-owner`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-expected-bucket-owner") {
             let raw = raw.as_ref();
@@ -97,16 +97,16 @@ impl OperationCodec for dto::PutObjectTagging {
 
 /// Reads one `Tag` element. Members are matched by local name, so a namespace-prefixed
 /// body and a bare one decode identically.
-fn read_tag(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::Tag, CodecError> {
+fn read_tag(node: &rustfs_gateway_xml::XmlNode, reading: crate::codec::DocumentReading) -> Result<dto::Tag, CodecError> {
     let mut shape = dto::Tag { ..Default::default() };
     if let Some(raw) = node.child_text("Key") {
         shape.key = Some(raw.to_owned());
-    } else {
+    } else if reading == crate::codec::DocumentReading::Tree {
         return Err(CodecError::malformed_xml("the body omits a member the schema requires").about("Key"));
     }
     if let Some(raw) = node.child_text("Value") {
         shape.value = Some(raw.to_owned());
-    } else {
+    } else if reading == crate::codec::DocumentReading::Tree {
         return Err(CodecError::malformed_xml("the body omits a member the schema requires").about("Value"));
     }
     value::exit(shape.check_required())?;
@@ -115,10 +115,10 @@ fn read_tag(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::Tag, CodecError> 
 
 /// Reads one `Tagging` element. Members are matched by local name, so a namespace-prefixed
 /// body and a bare one decode identically.
-fn read_tagging(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::Tagging, CodecError> {
+fn read_tagging(node: &rustfs_gateway_xml::XmlNode, reading: crate::codec::DocumentReading) -> Result<dto::Tagging, CodecError> {
     let mut shape = dto::Tagging { ..Default::default() };
     for item in node.child("TagSet").into_iter().flat_map(|w| w.children_named("Tag")) {
-        shape.tag_set.push(read_tag(item)?);
+        shape.tag_set.push(read_tag(item, reading)?);
     }
     if node.child("TagSet").is_none() {
         return Err(CodecError::malformed_xml("the body omits a member the schema requires").about("TagSet"));

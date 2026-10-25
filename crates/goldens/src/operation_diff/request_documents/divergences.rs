@@ -79,23 +79,13 @@ fn a_character_xml_cannot_represent_is_refused_by_the_gateway_and_stored_by_the_
     );
 }
 
-/// A member the model requires and the legacy stack reads as optional, absent: a tag without its
-/// `Key` or `Value`, a completed part without its `PartNumber`. The gateway's member has no absent
+/// A member the model requires and the legacy stack reads as optional, absent: a completed part
+/// without its `PartNumber`. The gateway's member has no absent
 /// spelling, so the document is refused rather than handed over with an invented value.
 ///
 /// Ruling: `rd-doc-0003`
 #[test]
 fn an_absent_member_the_model_requires_is_refused_by_the_gateway_and_read_by_the_legacy_stack() {
-    refused_where_legacy_accepts(
-        Op::PutBucketTagging,
-        "<Tagging><TagSet><Tag><Key>key-only</Key></Tag></TagSet></Tagging>",
-        "MalformedXML",
-    );
-    refused_where_legacy_accepts(
-        Op::PutObjectTagging,
-        "<Tagging><TagSet><Tag><Value>value-only</Value></Tag></TagSet></Tagging>",
-        "MalformedXML",
-    );
     refused_where_legacy_accepts(
         Op::CompleteMultipartUpload,
         "<CompleteMultipartUpload><Part><ETag>\"abc\"</ETag></Part></CompleteMultipartUpload>",
