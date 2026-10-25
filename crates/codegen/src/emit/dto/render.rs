@@ -29,22 +29,35 @@ use rustfs_gateway_model::ir::{Field, OperationIr};
 
 use super::registry::Registry;
 use super::{
-    DtoReport, LICENSE, check_required_impl, controlled_required_body, debug_impl, derives, field_decl, name_list, naming,
+    DtoReport, LICENSE, check_required_impl, controlled_required_body, debug_impl, derives, field_decl_typed, name_list, naming,
     registry, requires_explicit_input_construction, use_group,
 };
 
 #[derive(Clone, Copy)]
-enum InputConstruction<'a> {
+enum Construction<'a> {
     Default,
     RequiredBody(&'a Field),
     RequiredUnion,
+    EventStreamOutput(&'a Field),
 }
 
-impl<'a> InputConstruction<'a> {
+impl<'a> Construction<'a> {
     fn controlled_body(self) -> Option<&'a Field> {
         match self {
             Self::RequiredBody(body) => Some(body),
-            Self::Default | Self::RequiredUnion => None,
+            Self::Default | Self::RequiredUnion | Self::EventStreamOutput(_) => None,
+        }
+    }
+
+    fn defaultable(self) -> bool {
+        matches!(self, Self::Default | Self::EventStreamOutput(_))
+    }
+
+    fn field_type(self, owner: &str, field: &Field) -> String {
+        if matches!(self, Self::EventStreamOutput(payload) if payload.name == field.name) {
+            "Option<crate::SelectEventStream>".to_owned()
+        } else {
+            Registry::field_type(owner, field)
         }
     }
 }
@@ -112,9 +125,9 @@ pub fn operation(ir: &OperationIr, registry: &Registry, report: &mut DtoReport) 
     let controlled_body = controlled_required_body(&ir.input);
     let explicit_input = ir.input.iter().any(requires_explicit_input_construction);
     let input_construction = match (controlled_body, explicit_input) {
-        (Some(body), false) => InputConstruction::RequiredBody(body),
-        (None, true) => InputConstruction::RequiredUnion,
-        (None, false) => InputConstruction::Default,
+        (Some(body), false) => Construction::RequiredBody(body),
+        (None, true) => Construction::RequiredUnion,
+        (None, false) => Construction::Default,
         (Some(_), true) => unreachable!("an input cannot require both streaming-body and union construction"),
     };
     out.push_str(&data_struct(
@@ -133,7 +146,7 @@ pub fn operation(ir: &OperationIr, registry: &Registry, report: &mut DtoReport) 
         registry,
         report,
         &format!("{marker}Output"),
-        InputConstruction::Default,
+        registry::select_event_stream_field(ir).map_or(Construction::Default, Construction::EventStreamOutput),
     ));
     out.push_str(&builder(&format!("{marker}Input"), &ir.input, registry, input_construction));
     report.builders += 1;
@@ -148,13 +161,14 @@ fn data_struct(
     registry: &Registry,
     report: &mut DtoReport,
     baseline_name: &str,
-    construction: InputConstruction<'_>,
+    construction: Construction<'_>,
 ) -> String {
-    let clonable = fields.iter().all(|f| registry.is_field_clonable(f));
+    let clonable =
+        !matches!(construction, Construction::EventStreamOutput(_)) && fields.iter().all(|f| registry.is_field_clonable(f));
     let has_secret = fields.iter().any(registry::is_redacted);
     let mut out = String::new();
 
-    if matches!(construction, InputConstruction::RequiredBody(_)) {
+    if matches!(construction, Construction::RequiredBody(_)) {
         let _ = write!(
             out,
             "/// {summary}\n\
@@ -170,7 +184,7 @@ fn data_struct(
              /// members are refused by [`{name}::check_required`] before the value leaves the decode\n\
              /// path.\n"
         );
-    } else if matches!(construction, InputConstruction::RequiredUnion) {
+    } else if matches!(construction, Construction::RequiredUnion) {
         let _ = writeln!(out, "/// {summary}");
         let _ = write!(
             out,
@@ -202,7 +216,7 @@ fn data_struct(
     if !clonable {
         out.push_str("///\n/// Not `Clone`: it owns a streaming body.\n");
     }
-    out.push_str(&derives(clonable, has_secret, matches!(construction, InputConstruction::Default)));
+    out.push_str(&derives(clonable, has_secret, construction.defaultable()));
     if fields.is_empty() {
         // An operation whose output is `smithy.api#Unit` has no members at all, and rustfmt
         // spells the empty struct `{}` on one line. Emitting anything else would make the first
@@ -211,7 +225,7 @@ fn data_struct(
     } else {
         let _ = writeln!(out, "pub struct {name} {{");
         for field in fields {
-            out.push_str(&field_decl(baseline_name, field));
+            out.push_str(&field_decl_typed(field, &construction.field_type(baseline_name, field)));
         }
         out.push_str("}\n\n");
     }
@@ -232,9 +246,9 @@ fn data_struct(
 const MAX_WIDTH: usize = 130;
 
 /// Renders the input builder. ADR-0004 P7: recommended, never the only path.
-fn builder(owner: &str, fields: &[Field], registry: &Registry, construction: InputConstruction<'_>) -> String {
+fn builder(owner: &str, fields: &[Field], registry: &Registry, construction: Construction<'_>) -> String {
     let mut out = String::new();
-    if let InputConstruction::RequiredBody(body) = construction {
+    if let Construction::RequiredBody(body) = construction {
         let name = naming::field_name(&body.name);
         let ty = Registry::type_with_enums(&body.ty, &body.name);
         out.push_str(
@@ -268,7 +282,7 @@ fn builder(owner: &str, fields: &[Field], registry: &Registry, construction: Inp
              pub fn builder({name}: {ty}) -> InputBuilder {{\n        \
                  InputBuilder {{\n            input: Self::from_required_body({name}),\n        }}\n    }}\n}}\n\n"
         );
-    } else if matches!(construction, InputConstruction::RequiredUnion) {
+    } else if matches!(construction, Construction::RequiredUnion) {
         out.push_str(
             "/// A builder for [`Input`].\n\
              ///\n\

@@ -25,8 +25,8 @@ buffering = "Full"
 max_bytes = 327680
 
 [payload.response]
-kind = "None"
-buffering = "None"
+kind = "EventStream"
+buffering = "Streaming"
 # max_bytes: unbounded
 
 [checksum]
@@ -156,6 +156,15 @@ binding = "Header"
 type = "String"
 required = false
 hot = false
+quirks = []
+
+[[output]]
+name = "Payload"
+wire_name = ""
+binding = "Payload"
+type = "Union(SelectObjectContentEventStream)"
+required = false
+hot = true
 quirks = []
 
 [shape.CSVInput]
@@ -292,6 +301,14 @@ required = false
 hot = false
 quirks = []
 
+[shape.ContinuationEvent]
+kind = "Structure"
+element_order = []
+
+[shape.EndEvent]
+kind = "Structure"
+element_order = []
+
 [shape.InputSerialization]
 kind = "Structure"
 element_order = ["CSV", "CompressionType", "JSON", "Parquet"]
@@ -402,6 +419,74 @@ quirks = []
 kind = "Structure"
 element_order = []
 
+[shape.Progress]
+kind = "Structure"
+element_order = ["BytesScanned", "BytesProcessed", "BytesReturned"]
+
+[shape.Progress.empty_value]
+BytesScanned = "emit"
+BytesProcessed = "emit"
+BytesReturned = "emit"
+
+[[shape.Progress.field]]
+name = "BytesScanned"
+wire_name = "BytesScanned"
+binding = "BodyXml"
+type = "Long"
+required = false
+hot = false
+quirks = []
+
+[[shape.Progress.field]]
+name = "BytesProcessed"
+wire_name = "BytesProcessed"
+binding = "BodyXml"
+type = "Long"
+required = false
+hot = false
+quirks = []
+
+[[shape.Progress.field]]
+name = "BytesReturned"
+wire_name = "BytesReturned"
+binding = "BodyXml"
+type = "Long"
+required = false
+hot = false
+quirks = []
+
+[shape.ProgressEvent]
+kind = "Structure"
+element_order = ["Details"]
+
+[shape.ProgressEvent.empty_value]
+Details = "emit"
+
+[[shape.ProgressEvent.field]]
+name = "Details"
+wire_name = "Details"
+binding = "BodyXml"
+type = "Structure(Progress)"
+required = false
+hot = false
+quirks = []
+
+[shape.RecordsEvent]
+kind = "Structure"
+element_order = ["Payload"]
+
+[shape.RecordsEvent.empty_value]
+Payload = "emit"
+
+[[shape.RecordsEvent.field]]
+name = "Payload"
+wire_name = "Payload"
+binding = "BodyXml"
+type = "Blob"
+required = false
+hot = false
+quirks = []
+
 [shape.RequestProgress]
 kind = "Structure"
 element_order = ["Enabled"]
@@ -440,6 +525,114 @@ name = "End"
 wire_name = "End"
 binding = "BodyXml"
 type = "Long"
+required = false
+hot = false
+quirks = []
+
+[shape.SelectObjectContentEventStream]
+kind = "Union"
+element_order = ["Records", "Stats", "Progress", "Cont", "End"]
+
+[shape.SelectObjectContentEventStream.empty_value]
+Records = "emit"
+Stats = "emit"
+Progress = "emit"
+Cont = "emit"
+End = "emit"
+
+[[shape.SelectObjectContentEventStream.field]]
+name = "Records"
+wire_name = "Records"
+binding = "BodyXml"
+type = "Structure(RecordsEvent)"
+required = false
+hot = false
+quirks = []
+
+[[shape.SelectObjectContentEventStream.field]]
+name = "Stats"
+wire_name = "Stats"
+binding = "BodyXml"
+type = "Structure(StatsEvent)"
+required = false
+hot = false
+quirks = []
+
+[[shape.SelectObjectContentEventStream.field]]
+name = "Progress"
+wire_name = "Progress"
+binding = "BodyXml"
+type = "Structure(ProgressEvent)"
+required = false
+hot = false
+quirks = []
+
+[[shape.SelectObjectContentEventStream.field]]
+name = "Cont"
+wire_name = "Cont"
+binding = "BodyXml"
+type = "Structure(ContinuationEvent)"
+required = false
+hot = false
+quirks = []
+
+[[shape.SelectObjectContentEventStream.field]]
+name = "End"
+wire_name = "End"
+binding = "BodyXml"
+type = "Structure(EndEvent)"
+required = false
+hot = false
+quirks = []
+
+[shape.Stats]
+kind = "Structure"
+element_order = ["BytesScanned", "BytesProcessed", "BytesReturned"]
+
+[shape.Stats.empty_value]
+BytesScanned = "emit"
+BytesProcessed = "emit"
+BytesReturned = "emit"
+
+[[shape.Stats.field]]
+name = "BytesScanned"
+wire_name = "BytesScanned"
+binding = "BodyXml"
+type = "Long"
+required = false
+hot = false
+quirks = []
+
+[[shape.Stats.field]]
+name = "BytesProcessed"
+wire_name = "BytesProcessed"
+binding = "BodyXml"
+type = "Long"
+required = false
+hot = false
+quirks = []
+
+[[shape.Stats.field]]
+name = "BytesReturned"
+wire_name = "BytesReturned"
+binding = "BodyXml"
+type = "Long"
+required = false
+hot = false
+quirks = []
+
+[shape.StatsEvent]
+kind = "Structure"
+element_order = ["Details"]
+
+[shape.StatsEvent.empty_value]
+Details = "emit"
+
+[[shape.StatsEvent.field]]
+name = "Details"
+wire_name = "Details"
+binding = "BodyXml"
+type = "Structure(Stats)"
 required = false
 hot = false
 quirks = []

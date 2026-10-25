@@ -28,7 +28,7 @@
 use rustfs_gateway_types::dto;
 use rustfs_gateway_types::ops::select_object_content::Input;
 
-use crate::codec::response::{EncodedResponse, status_code};
+use crate::codec::response::{EncodedResponse, ResponseBody, status_code};
 use crate::codec::{CodecError, MetaView, OperationCodec, RequestBody, RequestBodyMode, value};
 
 impl OperationCodec for dto::SelectObjectContent {
@@ -110,7 +110,9 @@ impl OperationCodec for dto::SelectObjectContent {
     fn encode(output: Self::Output, request: &MetaView<'_>, status: u16) -> Result<EncodedResponse, CodecError> {
         let mut response = EncodedResponse::of(status);
         response.status = status_code(status)?;
-        let _ = output;
+        if let Some(events) = output.payload {
+            response.body = ResponseBody::Stream(crate::ops::shared::event_stream::select::encode_stream(events)?);
+        }
         // The `response-*` overrides are applied once, after every header this operation
         // declares — so "the override wins" is true by construction and not by ordering.
         response.apply_response_overrides(request, Self::RESPONSE_OVERRIDES);

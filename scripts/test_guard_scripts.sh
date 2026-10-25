@@ -7607,10 +7607,10 @@ mut_rustfs_feature_enabling_another_alias() {
 from pathlib import Path
 path = Path("crates/types/Cargo.toml")
 text = path.read_text()
-old = 'compat-s3s-rustfs = ["dep:s3s_rustfs", '
+old = 'compat-s3s-rustfs = ["dep:s3s_rustfs"'
 if text.count(old) != 1:
     raise SystemExit(f"{old} is not unique")
-path.write_text(text.replace(old, 'compat-s3s-rustfs = ["dep:s3s_candidate", '))
+path.write_text(text.replace(old, 'compat-s3s-rustfs = ["dep:s3s_candidate"'))
 PYEOF
 }
 expect_fail check_ring_boundaries.sh \
@@ -7653,8 +7653,8 @@ from pathlib import Path
 path = Path("crates/types/Cargo.toml")
 text = path.read_text()
 for old, new in (('s3s_rustfs = { package = "s3s", git', 's3s_main = { package = "s3s", git'),
-                 ('compat-s3s-rustfs = ["dep:s3s_rustfs", ', 'compat-s3s-rustfs = ["dep:s3s_main", '),
-                 ('"dep:s3s_rustfs", "dep:futures-core"]', '"dep:s3s_main", "dep:futures-core"]')):
+                 ('compat-s3s-rustfs = ["dep:s3s_rustfs"', 'compat-s3s-rustfs = ["dep:s3s_main"'),
+                 ('"dep:s3s_rustfs"', '"dep:s3s_main"')):
     if text.count(old) != 1:
         raise SystemExit(f"{old} is not unique")
     text = text.replace(old, new)

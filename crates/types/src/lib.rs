@@ -56,6 +56,7 @@ pub mod placeholder;
 mod post_object;
 mod scalar;
 pub mod secret;
+mod select_event_stream;
 
 /// Temporary, feature-gated adapters to the pinned s3s revisions.
 ///
@@ -102,6 +103,8 @@ pub mod dto {
     pub use crate::generated_dto::*;
     pub use crate::post_object::{PostObject, PostObjectFields, PostObjectInput, PostObjectOutput};
 }
+
+pub use crate::select_event_stream::{SelectEventError, SelectEventStream};
 
 pub use crate::placeholder::{PlaceholderDefault, WirePlaceholder, reject_placeholder};
 pub use crate::scalar::{

@@ -18,7 +18,7 @@
   "auth": { "requirement": "Required", "action": "s3:GetObject", "presigned_allowed": true, "service": "s3" },
   "payload": {
                "request": { "kind": "XmlBody", "buffering": "Full", "max_bytes": 327680 },
-               "response": { "kind": "None", "buffering": "None", "max_bytes": null }
+               "response": { "kind": "EventStream", "buffering": "Streaming", "max_bytes": null }
              },
   "checksum": { "http_checksum_required": false, "request_algorithms": [], "response_algorithms": [] },
   "input": {
@@ -133,7 +133,19 @@
                          }
                        ]
            },
-  "output": { "fields": [] },
+  "output": {
+              "fields": [
+                          {
+                            "name": "Payload",
+                            "wire_name": null,
+                            "required": false,
+                            "binding": { "kind": "Payload" },
+                            "type": { "kind": "Union", "shape": "SelectObjectContentEventStream" },
+                            "hot": true,
+                            "quirk_refs": []
+                          }
+                        ]
+            },
   "shapes": {
               "CSVInput": {
                             "kind": "Structure",
@@ -291,6 +303,16 @@
                                       "attributes": []
                                     }
                            },
+              "ContinuationEvent": {
+                                     "kind": "Structure",
+                                     "fields": [],
+                                     "xml": { "element_order": [], "empty_value_policy": {}, "attributes": [] }
+                                   },
+              "EndEvent": {
+                            "kind": "Structure",
+                            "fields": [],
+                            "xml": { "element_order": [], "empty_value_policy": {}, "attributes": [] }
+                          },
               "InputSerialization": {
                                       "kind": "Structure",
                                       "fields": [
@@ -416,6 +438,85 @@
                                 "fields": [],
                                 "xml": { "element_order": [], "empty_value_policy": {}, "attributes": [] }
                               },
+              "Progress": {
+                            "kind": "Structure",
+                            "fields": [
+                                        {
+                                          "name": "BytesScanned",
+                                          "wire_name": "BytesScanned",
+                                          "required": false,
+                                          "binding": { "kind": "BodyXml" },
+                                          "type": { "kind": "Long" },
+                                          "hot": false,
+                                          "quirk_refs": []
+                                        },
+                                        {
+                                          "name": "BytesProcessed",
+                                          "wire_name": "BytesProcessed",
+                                          "required": false,
+                                          "binding": { "kind": "BodyXml" },
+                                          "type": { "kind": "Long" },
+                                          "hot": false,
+                                          "quirk_refs": []
+                                        },
+                                        {
+                                          "name": "BytesReturned",
+                                          "wire_name": "BytesReturned",
+                                          "required": false,
+                                          "binding": { "kind": "BodyXml" },
+                                          "type": { "kind": "Long" },
+                                          "hot": false,
+                                          "quirk_refs": []
+                                        }
+                                      ],
+                            "xml": {
+                                     "element_order": ["BytesScanned", "BytesProcessed", "BytesReturned"],
+                                     "empty_value_policy": {
+                                                             "BytesScanned": "emit",
+                                                             "BytesProcessed": "emit",
+                                                             "BytesReturned": "emit"
+                                                           },
+                                     "attributes": []
+                                   }
+                          },
+              "ProgressEvent": {
+                                 "kind": "Structure",
+                                 "fields": [
+                                             {
+                                               "name": "Details",
+                                               "wire_name": "Details",
+                                               "required": false,
+                                               "binding": { "kind": "BodyXml" },
+                                               "type": { "kind": "Structure", "shape": "Progress" },
+                                               "hot": false,
+                                               "quirk_refs": []
+                                             }
+                                           ],
+                                 "xml": {
+                                          "element_order": ["Details"],
+                                          "empty_value_policy": { "Details": "emit" },
+                                          "attributes": []
+                                        }
+                               },
+              "RecordsEvent": {
+                                "kind": "Structure",
+                                "fields": [
+                                            {
+                                              "name": "Payload",
+                                              "wire_name": "Payload",
+                                              "required": false,
+                                              "binding": { "kind": "BodyXml" },
+                                              "type": { "kind": "Blob", "streaming": false },
+                                              "hot": false,
+                                              "quirk_refs": []
+                                            }
+                                          ],
+                                "xml": {
+                                         "element_order": ["Payload"],
+                                         "empty_value_policy": { "Payload": "emit" },
+                                         "attributes": []
+                                       }
+                              },
               "RequestProgress": {
                                    "kind": "Structure",
                                    "fields": [
@@ -462,7 +563,140 @@
                                       "empty_value_policy": { "Start": "emit", "End": "emit" },
                                       "attributes": []
                                     }
-                           }
+                           },
+              "SelectObjectContentEventStream": {
+                                                  "kind": "Union",
+                                                  "fields": [
+                                                              {
+                                                                "name": "Records",
+                                                                "wire_name": "Records",
+                                                                "required": false,
+                                                                "binding": { "kind": "BodyXml" },
+                                                                "type": { "kind": "Structure", "shape": "RecordsEvent" },
+                                                                "hot": false,
+                                                                "quirk_refs": []
+                                                              },
+                                                              {
+                                                                "name": "Stats",
+                                                                "wire_name": "Stats",
+                                                                "required": false,
+                                                                "binding": { "kind": "BodyXml" },
+                                                                "type": { "kind": "Structure", "shape": "StatsEvent" },
+                                                                "hot": false,
+                                                                "quirk_refs": []
+                                                              },
+                                                              {
+                                                                "name": "Progress",
+                                                                "wire_name": "Progress",
+                                                                "required": false,
+                                                                "binding": { "kind": "BodyXml" },
+                                                                "type": {
+                                                                          "kind": "Structure",
+                                                                          "shape": "ProgressEvent"
+                                                                        },
+                                                                "hot": false,
+                                                                "quirk_refs": []
+                                                              },
+                                                              {
+                                                                "name": "Cont",
+                                                                "wire_name": "Cont",
+                                                                "required": false,
+                                                                "binding": { "kind": "BodyXml" },
+                                                                "type": {
+                                                                          "kind": "Structure",
+                                                                          "shape": "ContinuationEvent"
+                                                                        },
+                                                                "hot": false,
+                                                                "quirk_refs": []
+                                                              },
+                                                              {
+                                                                "name": "End",
+                                                                "wire_name": "End",
+                                                                "required": false,
+                                                                "binding": { "kind": "BodyXml" },
+                                                                "type": { "kind": "Structure", "shape": "EndEvent" },
+                                                                "hot": false,
+                                                                "quirk_refs": []
+                                                              }
+                                                            ],
+                                                  "xml": {
+                                                           "element_order": [
+                                                                              "Records",
+                                                                              "Stats",
+                                                                              "Progress",
+                                                                              "Cont",
+                                                                              "End"
+                                                                            ],
+                                                           "empty_value_policy": {
+                                                                                   "Records": "emit",
+                                                                                   "Stats": "emit",
+                                                                                   "Progress": "emit",
+                                                                                   "Cont": "emit",
+                                                                                   "End": "emit"
+                                                                                 },
+                                                           "attributes": []
+                                                         }
+                                                },
+              "Stats": {
+                         "kind": "Structure",
+                         "fields": [
+                                     {
+                                       "name": "BytesScanned",
+                                       "wire_name": "BytesScanned",
+                                       "required": false,
+                                       "binding": { "kind": "BodyXml" },
+                                       "type": { "kind": "Long" },
+                                       "hot": false,
+                                       "quirk_refs": []
+                                     },
+                                     {
+                                       "name": "BytesProcessed",
+                                       "wire_name": "BytesProcessed",
+                                       "required": false,
+                                       "binding": { "kind": "BodyXml" },
+                                       "type": { "kind": "Long" },
+                                       "hot": false,
+                                       "quirk_refs": []
+                                     },
+                                     {
+                                       "name": "BytesReturned",
+                                       "wire_name": "BytesReturned",
+                                       "required": false,
+                                       "binding": { "kind": "BodyXml" },
+                                       "type": { "kind": "Long" },
+                                       "hot": false,
+                                       "quirk_refs": []
+                                     }
+                                   ],
+                         "xml": {
+                                  "element_order": ["BytesScanned", "BytesProcessed", "BytesReturned"],
+                                  "empty_value_policy": {
+                                                          "BytesScanned": "emit",
+                                                          "BytesProcessed": "emit",
+                                                          "BytesReturned": "emit"
+                                                        },
+                                  "attributes": []
+                                }
+                       },
+              "StatsEvent": {
+                              "kind": "Structure",
+                              "fields": [
+                                          {
+                                            "name": "Details",
+                                            "wire_name": "Details",
+                                            "required": false,
+                                            "binding": { "kind": "BodyXml" },
+                                            "type": { "kind": "Structure", "shape": "Stats" },
+                                            "hot": false,
+                                            "quirk_refs": []
+                                          }
+                                        ],
+                              "xml": {
+                                       "element_order": ["Details"],
+                                       "empty_value_policy": { "Details": "emit" },
+                                       "attributes": []
+                                     }
+                            }
             },
   "xml": {
            "request_root": "SelectObjectContentRequest",

@@ -58,7 +58,7 @@ impl SelectObjectContent {
     ];
 
     /// Output members the IR keeps on the hot path.
-    pub const HOT_OUTPUT: &'static [&'static str] = &[];
+    pub const HOT_OUTPUT: &'static [&'static str] = &["Payload"];
 }
 
 /// The `SelectObjectContent` request.
@@ -162,8 +162,13 @@ impl std::fmt::Debug for Input {
 /// read off the type instead of unwrapped. `Default` fills a required member with a
 /// wire-invalid placeholder (P10), and [`Output::check_required`] is what keeps one from
 /// leaving the decode path.
-#[derive(Debug, Clone, Default)]
-pub struct Output {}
+///
+/// Not `Clone`: it owns a streaming body.
+#[derive(Debug, Default)]
+pub struct Output {
+    /// The message body. Optional.
+    pub payload: Option<crate::SelectEventStream>,
+}
 
 impl Output {
     /// Rejects a required member still holding its placeholder default (ADR-0004 P10).

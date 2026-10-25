@@ -89,9 +89,9 @@ quirk_refs = [
 # decoder emitter grew the symmetric case of the response side's `xml_body` to read it
 # (q-select-0008).
 #
-# `Payload` — the model's event union — stays dropped from the generated output because a generated
-# document encoder for frame variants would be wrong. A backend instead returns the explicit
-# `Resp::event_stream` shape, whose bytes are already framed by the shared encoder (q-select-0009).
+# `Payload` retains a live owned event producer. Its codec frames one event per poll through the
+# shared encoder; event variants are not an XML response document. The explicit preframed
+# `Resp::event_stream` response remains available to existing backends (q-select-0009).
 # =============================================================================================
 [op.SelectObjectContent]
 precedence = 580
@@ -106,7 +106,6 @@ request_max_bytes = 327680
 # client's query into MalformedXML on the switch. The alias decodes into the same DTO through the
 # same member rules; the canonical root and the response are unchanged (q-select-0008).
 request_root_aliases = ["SelectRequest"]
-output_drop = ["Payload"]
 error_codes = [
   "NoSuchBucket",
   "NoSuchKey",

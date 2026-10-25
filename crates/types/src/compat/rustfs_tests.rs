@@ -62,7 +62,14 @@ fn the_feature_enables_the_alias_alone_and_only_the_umbrella_includes_it() {
         .lines()
         .find(|line| line.starts_with("compat-s3s-rustfs = "))
         .expect("the feature is declared");
-    assert_eq!(feature, r#"compat-s3s-rustfs = ["dep:s3s_rustfs", "dep:futures-core"]"#);
+    let stream_trait = MANIFEST
+        .lines()
+        .find(|line| line.starts_with("futures-core = "))
+        .expect("the owned Select producer's trait is declared");
+    assert_eq!(
+        (feature, stream_trait),
+        (r#"compat-s3s-rustfs = ["dep:s3s_rustfs"]"#, "futures-core = { workspace = true }")
+    );
     let umbrella = MANIFEST
         .lines()
         .find(|line| line.starts_with("compat-s3s = "))

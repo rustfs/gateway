@@ -27,6 +27,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 workspace = true
 
 [dependencies]
+futures-core = { workspace = true }
 rustfs-gateway-sig = { workspace = true }
 rustfs-gateway-http = { workspace = true }
 rustfs-gateway-types = { workspace = true }

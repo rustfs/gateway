@@ -4722,7 +4722,7 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 **Body**
 
 - request: XmlBody (Full, at most 327680 bytes)
-- response: None (None)
+- response: EventStream (Streaming)
 
 **Error codes**
 
@@ -4747,13 +4747,21 @@ Run `cargo xtask why <quirk-id>` for the evidence behind any of these.
 
 - `CSVInput` (Structure) — `FileHeaderInfo: StringEnum`, `Comments: String`, `QuoteEscapeCharacter: String`, `RecordDelimiter: String`, `FieldDelimiter: String`, `QuoteCharacter: String`, `AllowQuotedRecordDelimiter: Boolean`
 - `CSVOutput` (Structure) — `QuoteFields: StringEnum`, `QuoteEscapeCharacter: String`, `RecordDelimiter: String`, `FieldDelimiter: String`, `QuoteCharacter: String`
+- `ContinuationEvent` (Structure)
+- `EndEvent` (Structure)
 - `InputSerialization` (Structure) — `CSV: Structure(CSVInput)`, `CompressionType: StringEnum`, `JSON: Structure(JSONInput)`, `Parquet: Structure(ParquetInput)`
 - `JSONInput` (Structure) — `Type: StringEnum`
 - `JSONOutput` (Structure) — `RecordDelimiter: String`
 - `OutputSerialization` (Structure) — `CSV: Structure(CSVOutput)`, `JSON: Structure(JSONOutput)`
 - `ParquetInput` (Structure)
+- `Progress` (Structure) — `BytesScanned: Long`, `BytesProcessed: Long`, `BytesReturned: Long`
+- `ProgressEvent` (Structure) — `Details: Structure(Progress)`
+- `RecordsEvent` (Structure) — `Payload: Blob`
 - `RequestProgress` (Structure) — `Enabled: Boolean`
 - `ScanRange` (Structure) — `Start: Long`, `End: Long`
+- `SelectObjectContentEventStream` (Union) — `Records: Structure(RecordsEvent)`, `Stats: Structure(StatsEvent)`, `Progress: Structure(ProgressEvent)`, `Cont: Structure(ContinuationEvent)`, `End: Structure(EndEvent)`
+- `Stats` (Structure) — `BytesScanned: Long`, `BytesProcessed: Long`, `BytesReturned: Long`
+- `StatsEvent` (Structure) — `Details: Structure(Stats)`
 
 ### UpdateObjectEncryption
 
