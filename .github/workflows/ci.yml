@@ -724,7 +724,7 @@ jobs:
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - name: Install host tools
-        run: bash scripts/ci_install_host_tools.sh
+        run: bash scripts/ci_install_host_tools.sh --script-guards
       - name: Quirk ledger mutations 1/3 (maximum 2.5 minutes after setup)
         run: |
           scripts/ci_budget.sh 150 "quirk ledger mutations 1/3" env GATEWAY_GUARD_BUDGET_SECONDS=150 GATEWAY_GUARD_QUIRK_LEDGER_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=3 GATEWAY_GUARD_SHARD_GROUP=0 bash scripts/test_guard_scripts.sh
@@ -736,7 +736,7 @@ jobs:
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - name: Install host tools
-        run: bash scripts/ci_install_host_tools.sh
+        run: bash scripts/ci_install_host_tools.sh --script-guards
       - name: Quirk ledger mutations 2/3 (maximum 2.5 minutes after setup)
         run: |
           scripts/ci_budget.sh 150 "quirk ledger mutations 2/3" env GATEWAY_GUARD_BUDGET_SECONDS=150 GATEWAY_GUARD_QUIRK_LEDGER_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=3 GATEWAY_GUARD_SHARD_GROUP=1 bash scripts/test_guard_scripts.sh
@@ -748,7 +748,7 @@ jobs:
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - name: Install host tools
-        run: bash scripts/ci_install_host_tools.sh
+        run: bash scripts/ci_install_host_tools.sh --script-guards
       - name: Quirk ledger mutations 3/3 (maximum 2.5 minutes after setup)
         run: |
           scripts/ci_budget.sh 150 "quirk ledger mutations 3/3" env GATEWAY_GUARD_BUDGET_SECONDS=150 GATEWAY_GUARD_QUIRK_LEDGER_ONLY=1 GATEWAY_GUARD_SHARD_GROUPS=3 GATEWAY_GUARD_SHARD_GROUP=2 bash scripts/test_guard_scripts.sh

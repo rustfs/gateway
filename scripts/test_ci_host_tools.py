@@ -151,7 +151,8 @@ class HostTools(unittest.TestCase):
         workflow = (ROOT / '.github/workflows/ci.yml').read_text()
         normal = 'bash scripts/ci_install_host_tools.sh'
         scoped = normal + ' --script-guards'
-        for job in ('guard-self-test', *(f'guard-self-test-{n}' for n in range(2, 7))):
+        for job in ('guard-self-test', *(f'guard-self-test-{n}' for n in range(2, 7)),
+                    'quirk-ledger-self-test', *(f'quirk-ledger-self-test-{n}' for n in range(2, 4))):
             start = workflow.index('  ' + job + ':\n')
             end = next(match.start() for match in re.finditer(r'(?m)^  [\w-]+:\n', workflow)
                        if match.start() > start)
