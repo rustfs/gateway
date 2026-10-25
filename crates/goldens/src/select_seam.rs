@@ -12,13 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Select response seam evidence through the public codec and every bound legacy serializer.
+//! Select request/response seam evidence through the public codec and every bound legacy serializer.
 //!
-//! Responsible for: three compilations of the same wire, presence, header and polling checks.
-//! NOT responsible for: Select request conversion or native query execution.
+//! Responsible for: three compilations of wire, presence, header, name-policy and polling checks.
+//! NOT responsible for: implementing conversion or native query execution.
 //! Upstream: independent public-API measurements. Downstream: migration regression gates.
 
 mod checks;
+mod input;
 
 checks::define_tests!(release, s3s_0_17_0, "0.17.0", "Access Denied");
 checks::define_tests!(rustfs, s3s_5761ddfe, "5761ddfe", "Access Denied");

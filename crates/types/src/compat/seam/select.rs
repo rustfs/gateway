@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The live Select response migration seam, compiled once per legacy revision.
+//! The Select request and live response migration seam, compiled once per legacy revision.
 //!
 //! Responsible for: moving optional event producers and whole-response extra headers in either
-//! output direction without polling or normalizing fields.
-//! NOT responsible for: nested Select inputs, query execution, HTTP policy or event framing.
+//! output direction without polling or normalizing fields, and explicit nested request conversion.
+//! NOT responsible for: query execution, authorization, deployment policy or event framing.
 //! Upstream: the owned DTO and the bound legacy revision. Downstream: RustFS migration adapters.
 
 use std::pin::Pin;
@@ -28,6 +28,9 @@ use futures_core::Stream;
 use super::s3s;
 use super::s3s::dto as legacy;
 use crate::{SelectEventError, SelectEventStream, dto};
+
+mod input;
+pub use input::{GATEWAY_INPUT_MEMBERS, input_from_s3s, input_to_s3s};
 
 /// Every owned Select output member that the response seam carries.
 pub const GATEWAY_OUTPUT_MEMBERS: &[&str] = &["payload"];
