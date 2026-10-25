@@ -532,3 +532,104 @@ fn bucket_events_registration_rejects_unrelated_findings() {
         }
     }
 }
+
+/// Positive and negative — a query conjunction requires every exact name and request context.
+#[test]
+fn query_conjunction_requires_every_selector() {
+    let text = format!("{VALID}when_queries = [\"uploads\", \"events\"]\n");
+    let register = KnownDiffs::parse(&text).expect("a query conjunction parses");
+    for (target, expected) in [
+        (Some("/bkt?uploads&events"), true),
+        (Some("/bkt?events=x&prefix=k&uploads="), true),
+        (Some("/bkt?uploads"), false),
+        (Some("/bkt?events"), false),
+        (Some("/bkt?prefix=uploads&events"), false),
+        (Some("/bkt?uploads&prefix=events"), false),
+        (Some("/bkt?Uploads&events"), false),
+        (Some("/bkt?uploads&event"), false),
+        (Some("/bkt?%75ploads&events"), false),
+        (None, false),
+    ] {
+        let differences = vec![finding(
+            "GetObject",
+            Item::Member("GetObjectInput.range".into()),
+            "\"bytes=0-1\"",
+            "other",
+        )];
+        let passed = match target {
+            Some(target) => register.verdict_for(&crate::RawRequest::get(target), differences).passed(),
+            None => register.verdict(differences).passed(),
+        };
+        assert_eq!(passed, expected, "{target:?}");
+    }
+}
+
+/// Negative — conjunctions cannot be empty, redundant, malformed or mixed with the singular scope.
+#[test]
+fn query_conjunction_refuses_malformed_scopes() {
+    for scope in [
+        "when_queries = []",
+        "when_queries = [\"events\"]",
+        "when_queries = [\"events\", \"events\"]",
+        "when_queries = [\"\", \"uploads\"]",
+        "when_queries = [\"event&other\", \"uploads\"]",
+        "when_queries = [\"ev ents\", \"uploads\"]",
+        "when_queries = [\"événements\", \"uploads\"]",
+        "when_queries = [\"events\", \"uploads\"]\nwhen_query = \"events\"",
+    ] {
+        let error = KnownDiffs::parse(&format!("{VALID}{scope}\n"))
+            .err()
+            .map(|error| error.to_string());
+        assert!(
+            error.as_ref().is_some_and(|message| message.contains("when_queries")),
+            "{scope}: {error:?}"
+        );
+    }
+}
+
+/// Negative — the multipart/events entries never accept a missing selector or changed finding.
+#[test]
+fn multipart_events_registration_rejects_unrelated_findings() {
+    let register = KnownDiffs::checked_in().expect("the register parses");
+    for (item, gateway, s3s) in [
+        (Item::Route, "ListMultipartUploads", "ListenBucketNotification"),
+        (
+            Item::Outcome,
+            "handled",
+            "501 NotImplemented: ListenBucketNotification is not implemented yet",
+        ),
+    ] {
+        let found = || finding("ListMultipartUploads", item.clone(), gateway, s3s);
+        let mut cases: Vec<_> = [
+            "/bkt",
+            "/bkt?events",
+            "/bkt?uploads",
+            "/bkt?uploads&prefix=events",
+            "/bkt?events&prefix=uploads",
+            "/bkt?Uploads&events",
+            "/bkt?uploads&event",
+        ]
+        .into_iter()
+        .map(|target| (Some(crate::RawRequest::get(target)), found()))
+        .collect();
+        cases.push((None, found()));
+        for (operation, left, right) in [
+            ("ListObjectsV2", gateway, s3s),
+            ("ListMultipartUploads", "changed gateway value", s3s),
+            ("ListMultipartUploads", gateway, "changed legacy value"),
+        ] {
+            cases.push((
+                Some(crate::RawRequest::get("/bkt?uploads&events")),
+                finding(operation, item.clone(), left, right),
+            ));
+        }
+        for (request, difference) in cases {
+            let differences = vec![difference];
+            let verdict = match &request {
+                Some(request) => register.verdict_for(request, differences),
+                None => register.verdict(differences),
+            };
+            assert!(!verdict.passed(), "{request:?}/{item}");
+        }
+    }
+}

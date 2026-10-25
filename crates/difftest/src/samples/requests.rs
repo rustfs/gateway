@@ -341,6 +341,7 @@ pub(super) fn requests() -> Vec<RequestRow> {
         row("copy-annotation-query", RawRequest::put("/bkt/k?annotation=1", b"").header("x-amz-copy-source", "/src/k"), &["kd-decode-0087", "kd-decode-0088"]),
         row("part-annotation-query", RawRequest::put("/bkt/k?annotation=1&uploadId=u&partNumber=2", b""), &["kd-decode-0089", "kd-decode-0090"]),
         row("bucket-events-query", RawRequest::get("/bkt?events"), &["kd-decode-0091", "kd-decode-0092"]),
+        row("multipart-events-query", RawRequest::get("/bkt?uploads&events"), &["kd-decode-0093", "kd-decode-0094"]),
         // ── GetObject / HeadObject ──
         row("get-full", get_full(), &[]),
         row("get-bare", RawRequest::get("/bkt/k"), &[]),
