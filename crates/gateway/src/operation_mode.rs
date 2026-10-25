@@ -45,6 +45,10 @@ pub(crate) trait OperationMode {
     fn extra_permissions(entry: &Self::Entry) -> &'static [rustfs_gateway_core::ExtraPermission];
 
     fn request_body_mode(entry: &Self::Entry) -> RequestBodyMode;
+    #[cfg(feature = "external-payload")]
+    fn supports_external_payload(_entry: &Self::Entry) -> bool {
+        false
+    }
 
     fn dispatch<'a, S, T, E, Route, RouteFuture, Read, ReadFuture, Input, InputFuture>(
         &'a self,
@@ -83,6 +87,11 @@ pub(crate) struct DynamicMode<'a> {
 }
 
 impl OperationMode for DynamicMode<'_> {
+    #[cfg(feature = "external-payload")]
+    fn supports_external_payload(entry: &Self::Entry) -> bool {
+        entry.supports_external_payload()
+    }
+
     type Entry = crate::dispatch::OperationDispatch;
 
     fn entry(&self, operation: &str) -> Option<Self::Entry> {
@@ -145,6 +154,13 @@ impl OperationMode for DynamicMode<'_> {
                 .await
                 .map_err(StaticDispatchError::Input)?;
             let authorized = entry.authorize(decoded, &decisions).map_err(StaticDispatchError::Denied)?;
+            #[cfg(feature = "external-payload")]
+            if let Some(response) = crate::external_payload::dispatch_control(&request_context).await {
+                drop(authorized);
+                return response
+                    .map(StaticDispatchOutcome::Settled)
+                    .map_err(StaticDispatchError::Handler);
+            }
             let hide_missing_object = request_config.hide_missing_object();
             let body_monitor = request_config.take_body_monitor();
             let cleanup_grace = request_config.config().handler_cleanup_grace();

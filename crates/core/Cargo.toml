@@ -23,6 +23,10 @@ ring = 1
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
+[features]
+default = []
+external-payload = []
+
 [lints]
 workspace = true
 

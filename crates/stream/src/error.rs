@@ -32,6 +32,31 @@ use core::fmt;
 pub struct StreamError {
     kind: StreamErrorKind,
     bytes_before_error: u64,
+    producer_failure_class: Option<ProducerFailureClass>,
+}
+
+/// Explicit, protocol-independent classification supplied by a stream producer.
+///
+/// An opaque upstream error has no classification. Consumers never inspect a producer's
+/// concrete error type to choose resource, admission or completion behavior.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ProducerFailureClass {
+    /// The producer has not accepted the operation.
+    NotAccepted,
+    /// The producer observed cancellation.
+    Cancelled,
+    /// A single-consumer resource was bound more than once.
+    AlreadyBound,
+    /// An exact byte length disagrees with the producer's length.
+    LengthMismatch,
+    /// Required input remains unconsumed.
+    UnconsumedInput,
+    /// A payload integrity check failed.
+    Integrity,
+    /// The underlying data transport failed.
+    Transport,
+    /// The selected producer cannot execute the operation.
+    Unavailable,
 }
 
 /// The exhaustive set of reasons a body stream ends other than by reaching [`PayloadRead::Eof`].
@@ -69,6 +94,7 @@ impl StreamError {
         Self {
             kind,
             bytes_before_error: 0,
+            producer_failure_class: None,
         }
     }
 
@@ -94,6 +120,22 @@ impl StreamError {
     #[must_use]
     pub fn upstream(source: Box<dyn std::error::Error + Send + Sync>) -> Self {
         Self::new(StreamErrorKind::Upstream(source))
+    }
+
+    /// Preserves an upstream source together with its explicit producer classification.
+    #[must_use]
+    pub fn classified_upstream(source: Box<dyn std::error::Error + Send + Sync>, class: ProducerFailureClass) -> Self {
+        Self {
+            kind: StreamErrorKind::Upstream(source),
+            bytes_before_error: 0,
+            producer_failure_class: Some(class),
+        }
+    }
+
+    /// The producer's explicit classification, when it supplied one at construction.
+    #[must_use]
+    pub fn producer_failure_class(&self) -> Option<ProducerFailureClass> {
+        self.producer_failure_class
     }
 
     /// Records how many body bytes had already been delivered when the failure occurred.
@@ -167,6 +209,51 @@ impl std::error::Error for StreamError {
             StreamErrorKind::Io(err) => Some(err),
             StreamErrorKind::Upstream(err) => Some(err.as_ref()),
             StreamErrorKind::IncompleteBody | StreamErrorKind::LengthMismatch { .. } | StreamErrorKind::PolledAfterEof => None,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::error::Error as _;
+
+    #[test]
+    fn producer_failure_classification_preserves_source_and_byte_accounting() {
+        for class in [
+            ProducerFailureClass::NotAccepted,
+            ProducerFailureClass::Cancelled,
+            ProducerFailureClass::AlreadyBound,
+            ProducerFailureClass::LengthMismatch,
+            ProducerFailureClass::UnconsumedInput,
+            ProducerFailureClass::Integrity,
+            ProducerFailureClass::Transport,
+            ProducerFailureClass::Unavailable,
+        ] {
+            let error = StreamError::classified_upstream(Box::new(std::io::Error::other("producer failure")), class)
+                .with_bytes_before_error(7);
+            assert_eq!(error.producer_failure_class(), Some(class));
+            assert_eq!(error.bytes_before_error(), 7);
+            assert!(matches!(error.kind(), StreamErrorKind::Upstream(_)));
+            assert_eq!(error.source().map(ToString::to_string).as_deref(), Some("producer failure"));
+        }
+    }
+
+    #[test]
+    fn opaque_upstream_errors_do_not_invent_a_producer_failure_class() {
+        let error = StreamError::upstream(Box::new(std::io::Error::other("opaque producer")));
+        assert_eq!(error.producer_failure_class(), None);
+    }
+
+    #[test]
+    fn builtin_errors_do_not_invent_a_producer_failure_class() {
+        for error in [
+            StreamError::incomplete_body(),
+            StreamError::length_mismatch(1, 2),
+            StreamError::polled_after_eof(),
+            StreamError::from(std::io::Error::other("transport")),
+        ] {
+            assert_eq!(error.producer_failure_class(), None);
         }
     }
 }

@@ -83,7 +83,7 @@ pub use crate::body::{Body, BodyTransport};
 pub use crate::body::{CopiedFileBody, RefusedBodyTransport};
 pub use crate::byte_stream::{ByteStream, RemainingLength};
 pub use crate::caps::{CapsInconsistency, PayloadCaps, validate_caps};
-pub use crate::error::{StreamError, StreamErrorKind};
+pub use crate::error::{ProducerFailureClass, StreamError, StreamErrorKind};
 #[cfg(unix)]
 pub use crate::file_region::{FileRegion, FileRegionError};
 pub use crate::metrics::StreamMetrics;
