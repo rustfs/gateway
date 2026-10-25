@@ -959,6 +959,96 @@ when_queries = ["uploads", "events"]
 reason = "The reduced uploads/events request reaches the default multipart-listing handler while the pinned legacy backend refuses its notification extension as unimplemented (https://github.com/rustfs/gateway/issues/1485). This pins only that complete outcome pair; malformed listing refusals and other extension outcomes remain unregistered."
 expires = "2027-03-31"
 
+# ── Decode: measured bucket selectors with legacy events (nightly issue #1488) ──
+
+[[diff]]
+id = "kd-decode-0095"
+kind = "decode"
+operation = "ListObjectVersions"
+item = "route"
+gateway = "ListObjectVersions"
+s3s = "ListenBucketNotification"
+when_queries = ["versions", "events"]
+reason = "The measured bucket GET carrying versions and events selects ListObjectVersions under the default S3 policy and the legacy notification extension under the pinned service. Both selectors and the exact operation pair are required; neither router changes (https://github.com/rustfs/gateway/issues/1488)."
+expires = "2027-03-31"
+
+[[diff]]
+id = "kd-decode-0096"
+kind = "decode"
+operation = "ListObjectVersions"
+item = "outcome"
+gateway = "handled"
+s3s = "501 NotImplemented: ListenBucketNotification is not implemented yet"
+when_queries = ["versions", "events"]
+reason = "The valid reduced versions/events request reaches the default ListObjectVersions handler, while the pinned legacy backend refuses its notification extension. Only this complete outcome pair is registered; malformed-input refusals remain new findings (https://github.com/rustfs/gateway/issues/1488)."
+expires = "2027-03-31"
+
+[[diff]]
+id = "kd-decode-0097"
+kind = "decode"
+operation = "ListObjectsV2"
+item = "route"
+gateway = "ListObjectsV2"
+s3s = "ListenBucketNotification"
+when_queries = ["list-type", "events"]
+reason = "The measured bucket GET carrying list-type and events selects ListObjectsV2 under the default S3 policy and the legacy notification extension under the pinned service. Both selectors and the exact operation pair are required; neither router changes (https://github.com/rustfs/gateway/issues/1488)."
+expires = "2027-03-31"
+
+[[diff]]
+id = "kd-decode-0098"
+kind = "decode"
+operation = "ListObjectsV2"
+item = "outcome"
+gateway = "handled"
+s3s = "501 NotImplemented: ListenBucketNotification is not implemented yet"
+when_queries = ["list-type", "events"]
+reason = "The valid reduced list-type/events request reaches the default ListObjectsV2 handler, while the pinned legacy backend refuses its notification extension. Only this complete outcome pair is registered; malformed-input refusals remain new findings (https://github.com/rustfs/gateway/issues/1488)."
+expires = "2027-03-31"
+
+[[diff]]
+id = "kd-decode-0099"
+kind = "decode"
+operation = "GetBucketLocation"
+item = "route"
+gateway = "GetBucketLocation"
+s3s = "ListenBucketNotification"
+when_queries = ["location", "events"]
+reason = "The measured bucket GET carrying location and events selects GetBucketLocation under the default S3 policy and the legacy notification extension under the pinned service. Both selectors and the exact operation pair are required; neither router changes (https://github.com/rustfs/gateway/issues/1488)."
+expires = "2027-03-31"
+
+[[diff]]
+id = "kd-decode-0100"
+kind = "decode"
+operation = "GetBucketLocation"
+item = "outcome"
+gateway = "handled"
+s3s = "501 NotImplemented: ListenBucketNotification is not implemented yet"
+when_queries = ["location", "events"]
+reason = "The valid reduced location/events request reaches the default GetBucketLocation handler, while the pinned legacy backend refuses its notification extension. Only this complete outcome pair is registered; malformed-input refusals remain new findings (https://github.com/rustfs/gateway/issues/1488)."
+expires = "2027-03-31"
+
+[[diff]]
+id = "kd-decode-0101"
+kind = "decode"
+operation = "GetBucketVersioning"
+item = "route"
+gateway = "GetBucketVersioning"
+s3s = "ListenBucketNotification"
+when_queries = ["versioning", "events"]
+reason = "The measured bucket GET carrying versioning and events selects GetBucketVersioning under the default S3 policy and the legacy notification extension under the pinned service. Both selectors and the exact operation pair are required; neither router changes (https://github.com/rustfs/gateway/issues/1488)."
+expires = "2027-03-31"
+
+[[diff]]
+id = "kd-decode-0102"
+kind = "decode"
+operation = "GetBucketVersioning"
+item = "outcome"
+gateway = "handled"
+s3s = "501 NotImplemented: ListenBucketNotification is not implemented yet"
+when_queries = ["versioning", "events"]
+reason = "The valid reduced versioning/events request reaches the default GetBucketVersioning handler, while the pinned legacy backend refuses its notification extension. Only this complete outcome pair is registered; malformed-input refusals remain new findings (https://github.com/rustfs/gateway/issues/1488)."
+expires = "2027-03-31"
+
 # ── Encode: what the gateway writes on every answer ─────────────────────────────────────────
 
 [[diff]]

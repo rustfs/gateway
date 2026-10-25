@@ -1,3 +1,5 @@
 # Replay fixtures retain every byte, including the terminating HTTP separator.
 fuzz/seeds/decode_diff/multipart-events-original binary
 fuzz/seeds/decode_diff/multipart-events-minimal binary
+fuzz/seeds/decode_diff/version-events-original binary
+fuzz/seeds/decode_diff/version-events-minimal binary
