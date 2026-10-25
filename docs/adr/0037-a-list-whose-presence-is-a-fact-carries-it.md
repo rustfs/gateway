@@ -69,22 +69,3 @@ listings. Every other list stays the bare container P1 makes it.
   is the evidence.
 - A list the legacy stack adds as an `Option` in a later pinned release joins the set when the
   facts are re-extracted; `presence_tests` in `rustfs-gateway-codegen` pins today's set.
-
-## Required Tag members with persisted absence (2026-10-25)
-
-Issue #1470 exposes the same loss of information in a scalar: historical Tagging, Lifecycle
-and Replication records can omit `Tag.Key` or `Tag.Value`, but an ordinary HTTP request requires
-both elements. Refusing an existing record or inventing an empty string changes that record.
-
-The two Tag members therefore use `Option<String>` in types 0.38. The presence predicate checks
-these two string members and their optional legacy facts. This narrow exception does not change
-Smithy requiredness, any other required scalar, or the request decoder's missing-member refusal.
-The XML writer omits `None` and writes a present empty value as an empty element. The existing
-persistence bridges and both legacy seams preserve absence in both directions. RustFS-specific
-request acceptance and handler validation order remain a separate change.
-
-Callers wrap a present key or value in `Some`, preserve `None` through storage and conversion,
-and explicitly reject absence when their semantic contract requires a complete pair. They must
-not use `unwrap_or_default` to erase that distinction. The public `TaggingBridgeError` variant
-for an unrepresentable required member is retained for source compatibility, but these two
-members no longer cause it.

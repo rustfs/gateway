@@ -291,8 +291,8 @@ fn is_container_type(ty: &str) -> bool {
 fn c_dto_0009_a_required_member_is_bare_except_persisted_tags() {
     // The arbitration on issue 1722: requiredness is expressed by the type. Wrapping a required
     // member in an `Option` makes the type lie about the wire contract and forces an unwrap at
-    // every consumer, which is what the earlier all-`Option` reading of P1 produced. ADR-0037
-    // makes exactly two exceptions: persisted Tag members can be absent despite wire requiredness.
+    // every consumer, which is what the earlier all-`Option` reading of P1 produced. Issue #1470
+    // requires exactly two exceptions: persisted Tag members can be absent despite wire requiredness.
     for (name, doc, line) in declared_fields() {
         if !doc.contains(" Required.") {
             continue;
@@ -304,7 +304,7 @@ fn c_dto_0009_a_required_member_is_bare_except_persisted_tags() {
             } else {
                 !field_type_of(&line).starts_with("Option<")
             },
-            "{name} declares `{line}` against the required-member storage contract in ADR-0004 and ADR-0037"
+            "{name} declares `{line}` against the required-member storage contract in ADR-0004 and issue #1470"
         );
     }
 }

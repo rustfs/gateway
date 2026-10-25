@@ -276,13 +276,10 @@ fn prefix() -> impl Strategy<Value = String> {
     "[a-z0-9&<>\"'é/_-]{0,24}"
 }
 
-/// A tag for a filter, on the direct `<Tag>` or inside an `<And>`.
-///
-/// Nothing is filtered out of the key alphabet. It had to be, while `Tag.Key` was typed as an
-/// `ObjectKey` and the decoder ran the *path* floor over a label: `..` was the one spelling in this
-/// alphabet that tripped it, and roughly one run in thirty went red on it. A generator that avoids
-/// the values its own decoder cannot read is a property that cannot see the asymmetry it exists to
-/// find, so the narrowing comes out with the defect.
+/// A complete tag for a direct `<Tag>` or an `<And>` filter.
+/// The key alphabet includes `..`: it is label text, not an ObjectKey path.
+/// The former ObjectKey floor refused that spelling; keeping it in this generator
+/// catches that regression rather than excluding roughly one in thirty samples.
 fn tag() -> impl Strategy<Value = dto::Tag> {
     ("[a-zA-Z0-9&<>_.-]{1,20}", "[a-zA-Z0-9&<>\"' _.-]{0,20}").prop_map(|(key, value)| dto::Tag {
         key: Some(key),
