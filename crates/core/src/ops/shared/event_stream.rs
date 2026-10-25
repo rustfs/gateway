@@ -51,6 +51,8 @@
 //! `0xCBF43926` — reached through [`ChecksumAlgorithm::Crc32`], so this module has no arithmetic
 //! of its own to get wrong.
 
+pub(crate) mod select;
+
 use rustfs_gateway_types::ChecksumAlgorithm;
 
 use crate::contracts::{

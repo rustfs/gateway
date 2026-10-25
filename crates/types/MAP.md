@@ -5,6 +5,7 @@ Agent entry point for handwritten protocol scalars and the mounted generated DTO
 | File | Responsibility | Read it when |
 |---|---|---|
 | `src/lib.rs` | Scalar modules and generated DTO mounts. | Start here for a types task. |
+| `src/select_event_stream.rs` | Owned live Select events and in-band failures. | Moving a Select producer across the handler boundary or checking polling and cancellation. |
 | `src/ext.rs` | Runtime XML extension vtables, borrowed codec policy, typed values, and persisted rewrite guard. | Registering an extension field, selecting unknown-element behavior, or preventing lossy persisted XML replacement. |
 | `src/persistence.rs` | Feature-independent persisted bucket-configuration codecs and decision seams for the implemented families. | Adding a persistence family or changing production metadata behavior. |
 | `src/persistence/dto_bridge.rs` | Lossless bridges between generated HTTP DTOs and historical persistence shapes. | Connecting a generated configuration DTO to persisted XML without duplicating a codec. |

@@ -22,6 +22,7 @@ CompleteMultipartUploadOutput 28
 CompletedMultipartUpload 1
 CompletedPart 12
 Condition 2
+ContinuationEvent 0
 CopyObjectInput 46
 CopyObjectOutput 23
 CorsConfiguration 1
@@ -70,6 +71,7 @@ Destination 7
 DestinationResult 3
 Encryption 3
 EncryptionConfiguration 1
+EndEvent 0
 Error 4
 ErrorDetails 2
 ErrorDocument 1
@@ -228,6 +230,8 @@ ParquetInput 0
 Part 14
 PartitionedPrefix 1
 PolicyStatus 1
+Progress 3
+ProgressEvent 1
 PublicAccessBlockConfiguration 4
 PutBucketAccelerateConfigurationInput 4
 PutBucketAccelerateConfigurationOutput 0
@@ -273,6 +277,7 @@ PutPublicAccessBlockInput 5
 PutPublicAccessBlockOutput 0
 QueueConfiguration 4
 RecordExpiration 2
+RecordsEvent 1
 Redirect 5
 RedirectAllRequestsTo 2
 RenameObjectInput 12
@@ -296,7 +301,7 @@ S3Location 8
 S3TablesDestinationResult 4
 ScanRange 2
 SelectObjectContentInput 12
-SelectObjectContentOutput 0
+SelectObjectContentOutput 1
 SelectParameters 4
 ServerSideEncryptionByDefault 2
 ServerSideEncryptionConfiguration 1
@@ -307,6 +312,8 @@ SseKmsEncryptedObjects 1
 Ssekms 1
 SsekmsEncryption 2
 Sses3 0
+Stats 3
+StatsEvent 1
 StorageClassAnalysis 1
 StorageClassAnalysisDataExport 2
 Tag 2

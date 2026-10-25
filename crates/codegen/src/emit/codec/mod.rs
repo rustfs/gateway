@@ -376,7 +376,15 @@ fn reachable_from(ir: &OperationIr, shape: &str, side: Side) -> bool {
         Side::Output => &ir.output,
     };
     let mut seen: BTreeSet<&str> = BTreeSet::new();
-    let mut frontier: Vec<&Type> = roots.iter().map(|f| &f.ty).collect();
+    let stream_payload = match side {
+        Side::Input => None,
+        Side::Output => super::dto::registry::select_event_stream_field(ir),
+    };
+    let mut frontier: Vec<&Type> = roots
+        .iter()
+        .filter(|field| !stream_payload.is_some_and(|payload| payload.name == field.name))
+        .map(|field| &field.ty)
+        .collect();
     while let Some(ty) = frontier.pop() {
         match ty {
             Type::Structure(name) | Type::Union(name) => {

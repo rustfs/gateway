@@ -3,6 +3,20 @@
 Handwritten protocol scalars plus the generated DTO surface. Operation and field shapes are indexed
 in `OPERATIONS.md` and `spec/operations/`.
 
+## Select response producer
+
+Since types 0.39, `SelectObjectContentOutput.payload` is an `Option<SelectEventStream>`.
+The generated `dto::SelectObjectContentEventStream` union represents one event; the root
+`SelectEventStream` owns a live `Send` producer of those events and `SelectEventError` values.
+Construction does not poll it, and dropping the response drops the producer. Event ordering,
+including when to stop after an End or error event, remains the producer's responsibility.
+
+Migrate empty output literals to `SelectObjectContentOutput::default()` or set `payload`
+explicitly. The output no longer implements `Clone`; move the response and its producer.
+The codec retains absent details and counters, resolved error messages, and the producer's
+wire event order. It adds no Content-Type header. The existing preframed response API remains
+available to backends that already encode their own frames.
+
 ## Tag field presence
 
 Since types 0.38, `Tag.key` and `Tag.value` are `Option<String>`. Historical Tagging,

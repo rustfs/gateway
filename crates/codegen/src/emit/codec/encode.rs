@@ -40,6 +40,9 @@ use crate::emit::dto::{naming, registry::Registry};
 
 pub mod layout;
 pub mod order;
+mod signature;
+
+use signature::shape_writer_signature;
 
 /// Renders the body of one operation's `encode`.
 pub fn body(ir: &OperationIr, rules: &CodecRules) -> Result<String, String> {
@@ -114,6 +117,10 @@ fn one_field(ir: &OperationIr, field: &Field, rules: &CodecRules) -> Result<Stri
             }
         },
         Binding::Payload => match &field.ty {
+            Type::Union(_) if super::super::dto::registry::select_event_stream_field(ir).is_some() => {
+                let _ = writeln!(out, "        if let Some(events) = {source} {{");
+                out.push_str("            response.body = ResponseBody::Stream(crate::ops::shared::event_stream::select::encode_stream(events)?);\n        }\n");
+            }
             Type::Blob { streaming: true } => {
                 let _ = writeln!(out, "        // {member} — the streaming response body.");
                 let _ = writeln!(out, "        if let Some(stream) = {source} {{");
@@ -766,32 +773,4 @@ fn union_writer(ir: &OperationIr, name: &str, shape: &Shape) -> Result<String, S
          }\n",
     );
     Ok(out)
-}
-
-/// rustfmt's `max_width` for this repository.
-const MAX_WIDTH: usize = 130;
-
-/// The signature of one shape writer, laid out the way rustfmt would lay it out.
-///
-/// `cargo fmt` follows `#[path]` into `generated/`, so a signature past `max_width` makes
-/// `cargo xtask spec verify` fail the moment anybody formats the tree — and the shape names are
-/// upstream's, so how long they get is not something this emitter controls.
-///
-/// `encodes` adds the url-encoding decision, for a shape that has a member to apply it to.
-fn shape_writer_signature(module: &str, type_name: &str, encodes: bool) -> String {
-    let encoding = if encodes { ", url_encoding: value::UrlEncoding" } else { "" };
-    let single = format!(
-        "fn write_{module}(writer: &mut rustfs_gateway_xml::XmlWriter, value: &dto::{type_name}{encoding}) -> Result<(), CodecError> {{\n"
-    );
-    if single.len().saturating_sub(1) <= MAX_WIDTH {
-        return single;
-    }
-    let wrapped = if encodes {
-        "\n    url_encoding: value::UrlEncoding,"
-    } else {
-        ""
-    };
-    format!(
-        "fn write_{module}(\n    writer: &mut rustfs_gateway_xml::XmlWriter,\n    value: &dto::{type_name},{wrapped}\n) -> Result<(), CodecError> {{\n"
-    )
 }

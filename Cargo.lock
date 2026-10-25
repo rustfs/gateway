@@ -1834,6 +1834,7 @@ version = "0.54.0"
 dependencies = [
  "bytes",
  "dhat",
+ "futures-core",
  "http",
  "md-5",
  "percent-encoding",
@@ -2064,7 +2065,7 @@ dependencies = [
 
 [[package]]
 name = "rustfs-gateway-types"
-version = "0.38.0+aws.2026-10-02"
+version = "0.39.0+aws.2026-10-02"
 dependencies = [
  "bytes",
  "crc-fast",

@@ -31,7 +31,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use rustfs_gateway_model::ir::{Field, OperationIr, ShapeKind, Type};
+use rustfs_gateway_model::ir::{Binding, Buffering, Field, OperationIr, PayloadKind, ShapeKind, Type};
 
 use super::naming;
 
@@ -78,6 +78,7 @@ impl Registry {
     pub fn collect(operations: &[&OperationIr]) -> Result<Self, String> {
         let mut registry = Registry::default();
         for ir in operations {
+            validate_event_stream(ir)?;
             for field in ir.input.iter().chain(ir.output.iter()) {
                 registry.walk(&field.ty, &field.name, ir)?;
             }
@@ -329,6 +330,42 @@ impl Registry {
     pub fn is_field_clonable(&self, field: &Field) -> bool {
         !is_secret_string_field(field) && self.is_clonable(&field.ty)
     }
+}
+
+/// The one supported live output carrier, selected by the lowered payload contract.
+pub(crate) fn select_event_stream_field(ir: &OperationIr) -> Option<&Field> {
+    if ir.operation != "SelectObjectContent"
+        || ir.payload.response.kind != PayloadKind::EventStream
+        || ir.payload.response.buffering != Buffering::Streaming
+    {
+        return None;
+    }
+    ir.output.iter().find(|field| {
+        field.name == "Payload"
+            && field.binding == Binding::Payload
+            && !field.required
+            && matches!(&field.ty, Type::Union(name) if name == "SelectObjectContentEventStream")
+    })
+}
+
+fn validate_event_stream(ir: &OperationIr) -> Result<(), String> {
+    if ir.payload.request.kind == PayloadKind::EventStream {
+        return Err(format!("dto: operation `{}` has an unsupported inbound event stream", ir.operation));
+    }
+    // A dropped payload keeps the existing manually framed response path available.
+    if ir.payload.response.kind != PayloadKind::EventStream || ir.output.is_empty() {
+        return Ok(());
+    }
+    if select_event_stream_field(ir).is_none()
+        || ir.output.iter().filter(|field| field.binding == Binding::Payload).count() != 1
+        || ir.output.iter().any(|field| field.binding == Binding::BodyXml)
+    {
+        return Err(format!(
+            "dto: operation `{}` has an unsupported response event-stream carrier",
+            ir.operation
+        ));
+    }
+    Ok(())
 }
 
 fn same_members(left: &[Field], right: &[Field]) -> bool {

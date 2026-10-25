@@ -84,7 +84,14 @@ fn the_production_seam_links_the_very_s3s_rustfs_main_declares() {
         .lines()
         .find(|line| line.starts_with("compat-s3s-0-17-0 = "))
         .expect("the production feature is declared");
-    assert_eq!(feature, r#"compat-s3s-0-17-0 = ["dep:s3s_candidate", "dep:futures-core"]"#);
+    let stream_trait = manifest
+        .lines()
+        .find(|line| line.starts_with("futures-core = "))
+        .expect("the owned Select producer's trait is declared");
+    assert_eq!(
+        (feature, stream_trait),
+        (r#"compat-s3s-0-17-0 = ["dep:s3s_candidate"]"#, "futures-core = { workspace = true }")
+    );
     let everything = manifest
         .lines()
         .find(|line| line.starts_with("compat-s3s = "))

@@ -244,12 +244,12 @@ pub fn field_doc(field: &Field) -> String {
 /// Renders one `pub` field, doc comment included.
 #[must_use]
 pub fn field_decl(owner: &str, field: &Field) -> String {
-    format!(
-        "    /// {}\n    pub {}: {},\n",
-        field_doc(field),
-        naming::field_name(&field.name),
-        Registry::field_type(owner, field)
-    )
+    field_decl_typed(field, &Registry::field_type(owner, field))
+}
+
+/// Renders a field whose operation payload supplies its storage type.
+pub(super) fn field_decl_typed(field: &Field, storage: &str) -> String {
+    format!("    /// {}\n    pub {}: {storage},\n", field_doc(field), naming::field_name(&field.name))
 }
 
 /// The derive list for a generated struct.

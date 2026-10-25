@@ -31,6 +31,7 @@ mod document_tests;
 mod dto_tests;
 mod empty_value_tests;
 mod error_status_tests;
+mod event_stream_tests;
 mod forms_tests;
 mod golden_tests;
 mod ledger_tests;
