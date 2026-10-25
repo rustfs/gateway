@@ -88,6 +88,7 @@ pub mod s3s_0_17_0 {
     pub mod generated;
     #[cfg(test)]
     mod census_tests;
+    pub mod copy_source;
     #[cfg(test)]
     mod generated_tests;
     pub mod get_bucket_location;
@@ -144,6 +145,7 @@ pub mod s3s_5761ddfe {
     pub mod generated;
     #[cfg(test)]
     mod census_tests;
+    pub mod copy_source;
     #[cfg(test)]
     mod generated_tests;
     pub mod get_bucket_location;
@@ -186,6 +188,7 @@ pub mod s3s_9c4690d8 {
     /// The s3s revision every signature in this module names.
     pub use ::s3s_baseline as s3s;
 
+    pub mod copy_source;
     pub mod error;
     pub mod get_bucket_location;
     pub mod put_object;

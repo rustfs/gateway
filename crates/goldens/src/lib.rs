@@ -30,6 +30,8 @@ use sha2::{Digest, Sha256};
 mod accelerate_payment;
 mod acceptance_census;
 mod bucket_encryption;
+#[cfg(test)]
+mod copy_source_seam;
 mod corpus;
 mod cors;
 mod ecstore_source_a;

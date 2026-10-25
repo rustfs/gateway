@@ -49,6 +49,7 @@
 #![deny(missing_docs)]
 #![forbid(unsafe_code)]
 
+mod copy_source;
 pub mod cors_tagging;
 pub mod ext;
 pub mod persistence;
@@ -104,6 +105,7 @@ pub mod dto {
     pub use crate::post_object::{PostObject, PostObjectFields, PostObjectInput, PostObjectOutput};
 }
 
+pub use crate::copy_source::CopySourceValue;
 pub use crate::select_event_stream::{SelectEventError, SelectEventStream};
 
 pub use crate::placeholder::{PlaceholderDefault, WirePlaceholder, reject_placeholder};
