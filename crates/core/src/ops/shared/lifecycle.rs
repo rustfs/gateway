@@ -246,8 +246,8 @@ mod tests {
 
     fn tag(key: &str, value: &str) -> Tag {
         Tag {
-            key: key.to_owned(),
-            value: value.to_owned(),
+            key: Some(key.to_owned()),
+            value: Some(value.to_owned()),
         }
     }
 

@@ -28,8 +28,8 @@ use crate::compat::ConversionError;
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
 pub fn tag_to_s3s(value: crate::ops::shapes::Tag) -> Result<s3s::dto::Tag, ConversionError> {
     Ok(s3s::dto::Tag {
-        key: Some(value.key),
-        value: Some(value.value),
+        key: value.key,
+        value: value.value,
     })
 }
 
@@ -45,7 +45,7 @@ pub fn tag_from_s3s(value: s3s::dto::Tag) -> Result<crate::ops::shapes::Tag, Con
         value,
     } = value;
     Ok(crate::ops::shapes::Tag {
-        key: match key { Some(x) => x, None => return Err(ConversionError { field: "key", reason: "the gateway shape requires this member" }) },
-        value: match value { Some(x) => x, None => return Err(ConversionError { field: "value", reason: "the gateway shape requires this member" }) },
+        key,
+        value,
     })
 }

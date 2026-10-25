@@ -150,14 +150,14 @@ type Projection = Vec<(String, String)>;
 
 fn projection(tags: &[dto::Tag]) -> Projection {
     tags.iter()
-        .map(|tag| (tag.key.as_str().to_owned(), tag.value.clone()))
+        .map(|tag| (tag.key.clone().expect("complete key"), tag.value.clone().expect("complete value")))
         .collect()
 }
 
 fn tag(key: &str, value: &str) -> dto::Tag {
     dto::Tag {
-        key: key.to_owned(),
-        value: value.to_owned(),
+        key: Some(key.to_owned()),
+        value: Some(value.to_owned()),
     }
 }
 
@@ -398,4 +398,30 @@ fn n_an_empty_or_oversized_tag_key_is_refused_by_the_validator() {
     let decoded = decode_object_write(&document).expect("an oversized key is text, and text round-trips");
     let pairs = projection(&decoded.tag_set);
     validate_tag_set(&pairs, TagScope::Object).expect_err("128 UTF-16 units is the validator's ceiling");
+}
+
+#[test]
+fn nullable_tag_members_are_written_without_inventing_empty_elements() {
+    for tag in [
+        "",
+        "<Key>key</Key>",
+        "<Value>value</Value>",
+        "<Key></Key>",
+        "<Value></Value>",
+        "<Key></Key><Value></Value>",
+        "<Key>key</Key><Value>value</Value>",
+    ] {
+        let document = format!("<Tagging><TagSet><Tag>{tag}</Tag></TagSet></Tagging>");
+        for encode in [encode_object_read, encode_bucket_read] {
+            let actual = rustfs_gateway_types::persistence::parse_tagging_dto(document.as_bytes())
+                .ok()
+                .map(|value| encode(value.tag_set));
+            assert!(actual.is_some_and(|xml| xml.contains(&format!("<Tag>{tag}</Tag>"))), "{tag}");
+        }
+        if !tag.contains("<Key>") || !tag.contains("<Value>") {
+            let codes = [decode_object_write(&document), decode_bucket_write(&document)]
+                .map(|result| result.err().map(|error| error.code().as_str().to_owned()));
+            assert_eq!(codes, [Some("MalformedXML".to_owned()), Some("MalformedXML".to_owned())]);
+        }
+    }
 }

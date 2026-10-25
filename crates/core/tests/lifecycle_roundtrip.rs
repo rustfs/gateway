@@ -161,7 +161,7 @@ type FilterProjection = (
 );
 
 fn tag_projection(tag: &dto::Tag) -> (String, String) {
-    (tag.key.as_str().to_owned(), tag.value.clone())
+    (tag.key.clone().expect("complete key"), tag.value.clone().expect("complete value"))
 }
 
 fn filter_projection(filter: &dto::LifecycleRuleFilter) -> FilterProjection {
@@ -284,7 +284,10 @@ fn prefix() -> impl Strategy<Value = String> {
 /// the values its own decoder cannot read is a property that cannot see the asymmetry it exists to
 /// find, so the narrowing comes out with the defect.
 fn tag() -> impl Strategy<Value = dto::Tag> {
-    ("[a-zA-Z0-9&<>_.-]{1,20}", "[a-zA-Z0-9&<>\"' _.-]{0,20}").prop_map(|(key, value)| dto::Tag { key, value })
+    ("[a-zA-Z0-9&<>_.-]{1,20}", "[a-zA-Z0-9&<>\"' _.-]{0,20}").prop_map(|(key, value)| dto::Tag {
+        key: Some(key),
+        value: Some(value),
+    })
 }
 
 /// A filter with exactly one direct child, or an `<And>` holding two or more conditions. Both
@@ -612,8 +615,8 @@ fn an_identifier_of_awkward_text_comes_back_unchanged() {
         id: Some(awkward.to_owned()),
         filter: Some(dto::LifecycleRuleFilter {
             tag: Some(dto::Tag {
-                key: "k&y".to_owned(),
-                value: awkward.to_owned(),
+                key: Some("k&y".to_owned()),
+                value: Some(awkward.to_owned()),
             }),
             ..dto::LifecycleRuleFilter::default()
         }),
@@ -894,8 +897,8 @@ fn scoped_rule(filter: dto::LifecycleRuleFilter) -> Vec<dto::LifecycleRule> {
 /// only one of them is a repair or a regression this pair still sees.
 fn tag_filters(key: &str) -> [dto::LifecycleRuleFilter; 2] {
     let tag = || dto::Tag {
-        key: key.to_owned(),
-        value: String::new(),
+        key: Some(key.to_owned()),
+        value: Some(String::new()),
     };
     [
         dto::LifecycleRuleFilter {

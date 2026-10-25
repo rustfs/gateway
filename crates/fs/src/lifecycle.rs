@@ -221,10 +221,7 @@ pub(super) fn rule_selects_parts(rule: &LifecycleRule, key: &str, size: i64, tag
     let Some(filter) = rule.filter.as_ref() else {
         return true;
     };
-    if filter
-        .tag
-        .as_ref()
-        .is_some_and(|required| !tag_matches(tags, required.key.as_str(), &required.value))
+    if filter.tag.as_ref().is_some_and(|required| !tag_matches(tags, required))
         || filter.prefix.as_deref().is_some_and(|prefix| !key.starts_with(prefix))
         || filter.object_size_greater_than.is_some_and(|minimum| size <= minimum)
         || filter.object_size_less_than.is_some_and(|maximum| size >= maximum)
@@ -234,9 +231,7 @@ pub(super) fn rule_selects_parts(rule: &LifecycleRule, key: &str, size: i64, tag
     let Some(and) = filter.and.as_ref() else {
         return true;
     };
-    and.tags
-        .iter()
-        .all(|required| tag_matches(tags, required.key.as_str(), &required.value))
+    and.tags.iter().all(|required| tag_matches(tags, required))
         && and.prefix.as_deref().is_none_or(|prefix| key.starts_with(prefix))
         && and.object_size_greater_than.is_none_or(|minimum| size > minimum)
         && and.object_size_less_than.is_none_or(|maximum| size < maximum)
@@ -322,7 +317,10 @@ fn answered_expiry(modified: i64, days: i32) -> i64 {
     }
 }
 
-fn tag_matches(tags: &[(String, String)], key: &str, value: &str) -> bool {
+fn tag_matches(tags: &[(String, String)], required: &Tag) -> bool {
+    let Some((key, value)) = required.key.as_deref().zip(required.value.as_deref()) else {
+        return false;
+    };
     tags.iter()
         .any(|(held_key, held_value)| held_key == key && held_value == value)
 }
@@ -541,8 +539,8 @@ fn filter_to_persisted(value: &LifecycleRuleFilter) -> Result<PersistedLifecycle
 
 fn tag_to_persisted(value: &Tag) -> PersistedLifecycleTag {
     PersistedLifecycleTag {
-        key: Some(value.key.clone()),
-        value: Some(value.value.clone()),
+        key: value.key.clone(),
+        value: value.value.clone(),
     }
 }
 
@@ -584,7 +582,7 @@ fn rule_from_persisted(value: PersistedLifecycleRule) -> Result<LifecycleRule, (
                 })
             })
             .transpose()?,
-        filter: value.filter.map(filter_from_persisted).transpose()?,
+        filter: value.filter.map(filter_from_persisted),
         id: value.id,
         prefix: value.prefix,
         status: Status::custom(value.status),
@@ -620,36 +618,26 @@ fn rule_from_persisted(value: PersistedLifecycleRule) -> Result<LifecycleRule, (
     })
 }
 
-fn filter_from_persisted(value: PersistedLifecycleFilter) -> Result<LifecycleRuleFilter, ()> {
-    Ok(LifecycleRuleFilter {
+fn filter_from_persisted(value: PersistedLifecycleFilter) -> LifecycleRuleFilter {
+    LifecycleRuleFilter {
         prefix: value.prefix,
-        tag: value.tag.map(tag_from_persisted).transpose()?,
+        tag: value.tag.map(tag_from_persisted),
         object_size_greater_than: value.object_size_greater_than,
         object_size_less_than: value.object_size_less_than,
-        and: value
-            .and
-            .map(|and| {
-                Ok(LifecycleRuleAndOperator {
-                    prefix: and.prefix,
-                    tags: and
-                        .tags
-                        .unwrap_or_default()
-                        .into_iter()
-                        .map(tag_from_persisted)
-                        .collect::<Result<Vec<_>, _>>()?,
-                    object_size_greater_than: and.object_size_greater_than,
-                    object_size_less_than: and.object_size_less_than,
-                })
-            })
-            .transpose()?,
-    })
+        and: value.and.map(|and| LifecycleRuleAndOperator {
+            prefix: and.prefix,
+            tags: and.tags.unwrap_or_default().into_iter().map(tag_from_persisted).collect(),
+            object_size_greater_than: and.object_size_greater_than,
+            object_size_less_than: and.object_size_less_than,
+        }),
+    }
 }
 
-fn tag_from_persisted(value: PersistedLifecycleTag) -> Result<Tag, ()> {
-    Ok(Tag {
-        key: value.key.ok_or(())?,
-        value: value.value.ok_or(())?,
-    })
+fn tag_from_persisted(value: PersistedLifecycleTag) -> Tag {
+    Tag {
+        key: value.key,
+        value: value.value,
+    }
 }
 
 fn no_such_lifecycle() -> HandlerError {
@@ -658,4 +646,50 @@ fn no_such_lifecycle() -> HandlerError {
 
 fn unsafe_record() -> HandlerError {
     HandlerError::new(ErrorCode::INVALID_REQUEST, "the lifecycle storage path is not a safe regular file")
+}
+
+#[cfg(test)]
+mod tag_presence_tests {
+    use super::{Tag, from_persisted, parse_lifecycle, tag_matches, to_persisted};
+
+    #[test]
+    fn nullable_tag_filters_do_not_select_objects() {
+        let held = [(String::new(), String::new()), ("key".to_owned(), "value".to_owned())];
+        for (key, value, expected) in [
+            (None, None, false),
+            (Some(""), None, false),
+            (None, Some(""), false),
+            (Some("key"), Some("different"), false),
+            (Some(""), Some(""), true),
+            (Some("key"), Some("value"), true),
+        ] {
+            let required = Tag {
+                key: key.map(str::to_owned),
+                value: value.map(str::to_owned),
+            };
+            assert_eq!(tag_matches(&held, &required), expected, "{key:?}/{value:?}");
+        }
+    }
+    #[test]
+    fn nullable_tag_members_survive_fs_lifecycle_storage() -> Result<(), Box<dyn std::error::Error>> {
+        for tag in [
+            "",
+            "<Key>key</Key>",
+            "<Value>value</Value>",
+            "<Key></Key>",
+            "<Value></Value>",
+            "<Key></Key><Value></Value>",
+            "<Key>key</Key><Value>value</Value>",
+        ] {
+            for tags in [format!("<Tag>{tag}</Tag>"), format!("<And><Tag>{tag}</Tag></And>")] {
+                let bytes = format!(
+                    "<LifecycleConfiguration><Rule><Filter>{tags}</Filter><Status>Enabled</Status></Rule></LifecycleConfiguration>"
+                );
+                let expected = parse_lifecycle(bytes.as_bytes())?;
+                let actual = from_persisted(expected.clone()).and_then(|value| to_persisted(&value));
+                assert_eq!(actual, Ok(expected), "{tags}");
+            }
+        }
+        Ok(())
+    }
 }

@@ -12,12 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The list members whose presence is a fact of their own (rustfs/gateway#1078).
+//! Members whose presence is a fact of their own (rustfs/gateway#1078, #1470).
 //!
 //! Responsible for: [`carries_presence`] — a wrapped list the legacy stack holds as an `Option`,
 //! whose empty wrapper and whose absence are two different documents on the legacy wire, so its
 //! DTO member is `Option<Vec<_>>` rather than the bare container every other list is (the
-//! exception to ADR-0004 P1 that ADR-0037 records).
+//! exception to ADR-0004 P1 that ADR-0037 records). Tag Key/Value also carry absence: legacy
+//! persisted tags can omit either member even though ordinary requests require both.
 //! NOT responsible for: how a present or absent list is read, written or converted (the codec and
 //! seam emitters, which consult this).
 //! Upstream: the IR, the seam generator's checked-in legacy facts. Downstream: every emitter that
@@ -38,6 +39,23 @@ pub fn carries_presence(owner: &str, field: &Field) -> bool {
     if field.required || !in_document || !matches!(field.ty, Type::List { flattened: false, .. }) {
         return false;
     }
+    legacy_optional(owner, field)
+}
+
+/// Whether a Tag string carries historical absence independently of HTTP requiredness.
+///
+/// This does not select list-presence code: scalar readers and writers use the DTO storage
+/// predicate, while request bindings still enforce the model's required members (ADR-0037).
+#[must_use]
+pub fn carries_tag_presence(owner: &str, field: &Field) -> bool {
+    owner == "Tag"
+        && matches!(field.name.as_str(), "Key" | "Value")
+        && matches!(field.ty, Type::String)
+        && matches!(field.binding, Binding::BodyXml | Binding::Payload)
+        && legacy_optional(owner, field)
+}
+
+fn legacy_optional(owner: &str, field: &Field) -> bool {
     let Ok(facts) = crate::emit::seam::legacy_facts() else {
         return false;
     };

@@ -257,9 +257,8 @@ fn c_dto_n018_secret_fields_are_redacted_in_debug() {
 
 /// Every generated `pub` field, as `(file, doc line, declaration line)`.
 ///
-/// The doc line above a field states `Required.` or `Optional.`, which is the same IR bit the
-/// emitter branches on — so a wrapper that disagrees with the documentation is caught here without
-/// the test having to re-derive requiredness from the model.
+/// The doc line above a field states wire requiredness. The policy guard checks its storage
+/// contract, including the two historical Tag members, without re-deriving the model's IR bit.
 fn declared_fields() -> Vec<(String, String, String)> {
     let mut found = Vec::new();
     for (name, body) in rust_bodies() {
@@ -289,18 +288,23 @@ fn is_container_type(ty: &str) -> bool {
 }
 
 #[test]
-fn c_dto_0009_a_required_member_is_generated_bare() {
+fn c_dto_0009_a_required_member_is_bare_except_persisted_tags() {
     // The arbitration on issue 1722: requiredness is expressed by the type. Wrapping a required
     // member in an `Option` makes the type lie about the wire contract and forces an unwrap at
-    // every consumer, which is what the earlier all-`Option` reading of P1 produced.
+    // every consumer, which is what the earlier all-`Option` reading of P1 produced. ADR-0037
+    // makes exactly two exceptions: persisted Tag members can be absent despite wire requiredness.
     for (name, doc, line) in declared_fields() {
         if !doc.contains(" Required.") {
             continue;
         }
+        let tag_member = name == "ops/shapes/tag.rs" && (line.starts_with("pub key: ") || line.starts_with("pub value: "));
         assert!(
-            !field_type_of(&line).starts_with("Option<"),
-            "{name} declares `{line}` for a required member; ADR-0004 P1 wants it bare so that no \
-             consumer unwraps a value the wire contract guarantees"
+            if tag_member {
+                field_type_of(&line) == "Option<String>"
+            } else {
+                !field_type_of(&line).starts_with("Option<")
+            },
+            "{name} declares `{line}` against the required-member storage contract in ADR-0004 and ADR-0037"
         );
     }
 }

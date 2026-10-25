@@ -273,10 +273,12 @@ impl Registry {
 
     /// Whether `owner`'s member `field` is stored bare: a required member, or a container whose
     /// presence is not a fact of its own ([`super::presence::carries_presence`]). Every other
-    /// member is an `Option`.
+    /// member is an `Option`. Tag Key/Value carry legacy absence even when the wire requires them.
     #[must_use]
     pub fn is_bare(owner: &str, field: &Field) -> bool {
-        field.required || (Self::is_container(&field.ty) && !super::presence::carries_presence(owner, field))
+        (field.required || Self::is_container(&field.ty))
+            && !super::presence::carries_presence(owner, field)
+            && !super::presence::carries_tag_presence(owner, field)
     }
 
     /// The unwrapped Rust spelling for one field, including secret scalar overrides.

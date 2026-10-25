@@ -78,7 +78,8 @@ impl From<PersistenceCodecError> for PersistenceBridgeError {
 pub enum TaggingBridgeError {
     /// The historical Tagging codec refused the bytes.
     Codec(CorsTaggingCodecError),
-    /// A generated required member is absent in historically accepted persistence bytes.
+    /// A generated required member cannot represent persisted absence. Retained for source
+    /// compatibility; Tag Key/Value have represented absence since types 0.38.
     MissingRequiredMember(&'static str),
 }
 
@@ -103,21 +104,18 @@ impl From<CorsTaggingCodecError> for TaggingBridgeError {
 ///
 /// # Errors
 ///
-/// Returns [`TaggingBridgeError::Codec`] when the historical parser rejects the bytes, and
-/// [`TaggingBridgeError::MissingRequiredMember`] when historically accepted optional tag fields
-/// cannot satisfy the generated DTO's required members.
+/// Returns [`TaggingBridgeError::Codec`] when the historical parser rejects the bytes.
+/// Missing tag keys and values are preserved as `None`, independently of request validation.
 pub fn parse_tagging_dto(input: &[u8]) -> Result<crate::dto::Tagging, TaggingBridgeError> {
     let persisted = parse_tagging(input)?;
     let tag_set = persisted
         .tag_set
         .into_iter()
-        .map(|tag| {
-            Ok(crate::dto::Tag {
-                key: tag.key.ok_or(TaggingBridgeError::MissingRequiredMember("Tag.Key"))?,
-                value: tag.value.ok_or(TaggingBridgeError::MissingRequiredMember("Tag.Value"))?,
-            })
+        .map(|tag| crate::dto::Tag {
+            key: tag.key,
+            value: tag.value,
         })
-        .collect::<Result<Vec<_>, TaggingBridgeError>>()?;
+        .collect();
     Ok(crate::dto::Tagging { tag_set })
 }
 
@@ -129,8 +127,8 @@ pub fn serialize_tagging_dto(value: &crate::dto::Tagging) -> Vec<u8> {
             .tag_set
             .iter()
             .map(|tag| PersistedTag {
-                key: Some(tag.key.clone()),
-                value: Some(tag.value.clone()),
+                key: tag.key.clone(),
+                value: tag.value.clone(),
             })
             .collect(),
     })
@@ -336,8 +334,8 @@ mod tests {
     fn tagging_dto_bridge_preserves_required_members_and_the_old_writer_order() {
         let dto = Tagging {
             tag_set: vec![Tag {
-                key: "project".to_owned(),
-                value: "launch".to_owned(),
+                key: Some("project".to_owned()),
+                value: Some("launch".to_owned()),
             }],
         };
 
@@ -347,8 +345,8 @@ mod tests {
             b"<Tagging><TagSet><Tag><Key>project</Key><Value>launch</Value></Tag></TagSet></Tagging>"
         );
         let parsed = parse_tagging_dto(&bytes).expect("the bridge reads its own persistence bytes");
-        assert_eq!(parsed.tag_set[0].key, "project");
-        assert_eq!(parsed.tag_set[0].value, "launch");
+        assert_eq!(parsed.tag_set[0].key.as_deref(), Some("project"));
+        assert_eq!(parsed.tag_set[0].value.as_deref(), Some("launch"));
     }
 
     #[test]
@@ -364,15 +362,6 @@ mod tests {
         assert_eq!(
             parse_tagging_dto(b"<Tagging></Tagging>").expect_err("the required wrapper must be present"),
             TaggingBridgeError::Codec(crate::cors_tagging::CorsTaggingCodecError::MissingField("TagSet"))
-        );
-    }
-
-    #[test]
-    fn tagging_dto_bridge_rejects_a_missing_required_tag_member() {
-        assert_eq!(
-            parse_tagging_dto(b"<Tagging><TagSet><Tag><Value>value</Value></Tag></TagSet></Tagging>")
-                .expect_err("a generated required key cannot be invented"),
-            TaggingBridgeError::MissingRequiredMember("Tag.Key")
         );
     }
 
@@ -718,5 +707,25 @@ mod tests {
             .expect_err("a duplicate nested switch must fail"),
             PersistenceCodecError::DuplicateField
         );
+    }
+    #[test]
+    fn tagging_dto_bridge_preserves_nullable_tag_members() {
+        for tag in [
+            "",
+            "<Key>key</Key>",
+            "<Value>value</Value>",
+            "<Key></Key>",
+            "<Value></Value>",
+            "<Key></Key><Value></Value>",
+            "<Key>key</Key><Value>value</Value>",
+        ] {
+            let bytes = format!("<Tagging><TagSet><Tag>{tag}</Tag></TagSet></Tagging>");
+            let expected = crate::cors_tagging::parse_tagging(bytes.as_bytes()).expect("legacy document");
+            let actual = parse_tagging_dto(bytes.as_bytes())
+                .ok()
+                .map(|value| serialize_tagging_dto(&value))
+                .and_then(|bytes| crate::cors_tagging::parse_tagging(&bytes).ok());
+            assert_eq!(actual, Some(expected), "{tag}");
+        }
     }
 }

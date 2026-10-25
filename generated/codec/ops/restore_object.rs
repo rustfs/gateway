@@ -424,12 +424,12 @@ fn read_select_parameters(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::Sel
 fn read_tag(node: &rustfs_gateway_xml::XmlNode) -> Result<dto::Tag, CodecError> {
     let mut shape = dto::Tag { ..Default::default() };
     if let Some(raw) = node.child_text("Key") {
-        shape.key = raw.to_owned();
+        shape.key = Some(raw.to_owned());
     } else {
         return Err(CodecError::malformed_xml("the body omits a member the schema requires").about("Key"));
     }
     if let Some(raw) = node.child_text("Value") {
-        shape.value = raw.to_owned();
+        shape.value = Some(raw.to_owned());
     } else {
         return Err(CodecError::malformed_xml("the body omits a member the schema requires").about("Value"));
     }

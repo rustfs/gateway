@@ -164,7 +164,7 @@ type DestinationProjection = (
 );
 
 fn tag_projection(tag: &dto::Tag) -> (String, String) {
-    (tag.key.as_str().to_owned(), tag.value.clone())
+    (tag.key.clone().expect("complete key"), tag.value.clone().expect("complete value"))
 }
 
 fn filter_projection(filter: &dto::ReplicationRuleFilter) -> FilterProjection {
@@ -287,7 +287,10 @@ fn tag_key() -> impl Strategy<Value = String> {
 }
 
 fn tag() -> impl Strategy<Value = dto::Tag> {
-    (tag_key(), "[a-zA-Z0-9&<>\"' _.-]{0,20}").prop_map(|(key, value)| dto::Tag { key, value })
+    (tag_key(), "[a-zA-Z0-9&<>\"' _.-]{0,20}").prop_map(|(key, value)| dto::Tag {
+        key: Some(key),
+        value: Some(value),
+    })
 }
 
 /// A filter with exactly one direct child, or an `<And>` holding two or more conditions. A filter
@@ -587,8 +590,8 @@ fn configuration_scoped_by_tag(key: &str, priority: Option<i32>) -> dto::Replica
         rules: vec![dto::ReplicationRule {
             filter: Some(dto::ReplicationRuleFilter {
                 tag: Some(dto::Tag {
-                    key: key.to_owned(),
-                    value: "v".to_owned(),
+                    key: Some(key.to_owned()),
+                    value: Some("v".to_owned()),
                 }),
                 ..dto::ReplicationRuleFilter::default()
             }),
@@ -630,7 +633,7 @@ fn a_filter_tag_key_naming_a_traversal_segment_survives_the_round_trip() {
             .filter
             .as_ref()
             .and_then(|filter| filter.tag.as_ref())
-            .map(|tag| tag.key.as_str());
+            .and_then(|tag| tag.key.as_deref());
         assert_eq!(key, Some(label), "label: {label}: {document}");
     }
 }
