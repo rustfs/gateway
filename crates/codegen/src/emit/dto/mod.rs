@@ -346,7 +346,7 @@ fn debug_chain(links: &[String]) -> String {
 pub fn check_required_impl(type_name: &str, baseline_name: &str, fields: &[Field], constructed: Option<&Field>) -> String {
     let mut body = String::new();
     for field in fields {
-        if !field.required || Registry::is_container(&field.ty) {
+        if !Registry::is_bare(baseline_name, field) || Registry::is_container(&field.ty) {
             continue;
         }
         if constructed.is_some_and(|body| body.name == field.name) {

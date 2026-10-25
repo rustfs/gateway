@@ -256,7 +256,7 @@ pub(super) fn forward_struct_as(
                 match ctx.forward(&field.ty, core, "x", &name) {
                     Err(error) => errors.push(format!("{owner}.{name}: {error}")),
                     Ok(conv) => {
-                        let value = wrap_forward((field, is_bare_container(owner, field)), optional, &access, &conv, &name);
+                        let value = wrap_forward((owner, field), optional, &access, &conv, &name);
                         match nested.iter_mut().find(|(p, _, _)| *p == parent) {
                             Some((_, _, taken)) => taken.push((member, value)),
                             None => nested.push((parent, nested_struct, vec![(member, value)])),
@@ -321,7 +321,7 @@ pub(super) fn forward_struct_as(
                         }
                     }
                     Ok(conv) => {
-                        let value = wrap_forward((field, is_bare_container(owner, field)), optional, &access, &conv, &name);
+                        let value = wrap_forward((owner, field), optional, &access, &conv, &name);
                         assigned.push((member.to_owned(), value));
                     }
                 }
@@ -407,7 +407,7 @@ pub(super) fn forward_struct_as(
     Ok(format!("{prelude}    Ok(s3s::dto::{owner} {{\n{body}    }})\n"))
 }
 
-fn wrap_forward((field, container): (&Field, bool), s3s_optional: bool, access: &str, conv: &str, name: &str) -> String {
+fn wrap_forward((owner, field): (&str, &Field), s3s_optional: bool, access: &str, conv: &str, name: &str) -> String {
     let direct = conv == "x";
     let apply = |v: &str| {
         if direct {
@@ -418,14 +418,14 @@ fn wrap_forward((field, container): (&Field, bool), s3s_optional: bool, access: 
             format!("{{ let x = {v}; {conv} }}")
         }
     };
-    if container {
+    if is_bare_container(owner, field) {
         return if s3s_optional {
             format!("if {access}.is_empty() {{ None }} else {{ Some({}) }}", apply(access))
         } else {
             apply(access)
         };
     }
-    match (field.required, s3s_optional) {
+    match (Registry::is_bare(owner, field), s3s_optional) {
         (true, true) => format!("Some({})", apply(access)),
         (true, false) => apply(access),
         (false, true) if direct => access.to_owned(),
@@ -509,7 +509,7 @@ pub(super) fn backward_struct_with(
                     Err(error) => errors.push(format!("{owner}.{name}: {error}")),
                     Ok(conv) => {
                         let source = format!("{parent}.{member}");
-                        let value = wrap_backward((field, is_bare_container(owner, field)), optional, &source, &conv, &name);
+                        let value = wrap_backward((owner, field), optional, &source, &conv, &name);
                         push_field(&mut body, &gw_name, &value);
                     }
                 }
@@ -534,7 +534,7 @@ pub(super) fn backward_struct_with(
                         }
                     }
                     Ok(conv) => {
-                        let value = wrap_backward((field, is_bare_container(owner, field)), optional, member, &conv, &name);
+                        let value = wrap_backward((owner, field), optional, member, &conv, &name);
                         push_field(&mut body, &gw_name, &value);
                     }
                 }
@@ -634,7 +634,7 @@ fn absent_as_empty(field: &Field, s3s_optional: bool, member: &str, conv: &str, 
     ))
 }
 
-fn wrap_backward((field, container): (&Field, bool), s3s_optional: bool, member: &str, conv: &str, name: &str) -> String {
+fn wrap_backward((owner, field): (&str, &Field), s3s_optional: bool, member: &str, conv: &str, name: &str) -> String {
     let direct = conv == "x";
     let apply = |v: &str| {
         if direct {
@@ -645,7 +645,7 @@ fn wrap_backward((field, container): (&Field, bool), s3s_optional: bool, member:
             format!("{{ let x = {v}; {conv} }}")
         }
     };
-    if container {
+    if is_bare_container(owner, field) {
         return if s3s_optional && direct {
             format!("{member}.unwrap_or_default()")
         } else if s3s_optional {
@@ -654,7 +654,7 @@ fn wrap_backward((field, container): (&Field, bool), s3s_optional: bool, member:
             apply(member)
         };
     }
-    match (field.required, s3s_optional) {
+    match (Registry::is_bare(owner, field), s3s_optional) {
         (false, true) if direct => member.to_owned(),
         (false, true) => format!("{member}.map(|x| -> Result<_, ConversionError> {{ Ok({conv}) }}).transpose()?"),
         (false, false) => format!("Some({})", apply(member)),

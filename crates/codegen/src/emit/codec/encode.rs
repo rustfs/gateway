@@ -36,7 +36,7 @@ use std::fmt::Write as _;
 use rustfs_gateway_model::ir::{AttributeSource, Binding, EmptyValue, Field, OmitWhen, OperationIr, Shape, ShapeKind, Type};
 
 use super::{CodecRules, attribute_name, carried_as_attribute, expr, media, url};
-use crate::emit::dto::naming;
+use crate::emit::dto::{naming, registry::Registry};
 
 pub mod layout;
 pub mod order;
@@ -620,7 +620,7 @@ pub fn shape_writer(ir: &OperationIr, name: &str, shape: &Shape) -> Result<Strin
                 let rendered = wire_expr(other, &field.name, &ir.operation, encoded)?;
                 let call = layout::element_call(other, policy);
                 let narrowed = url::member_binding("        ", &format!("{name}.{}", field.name), encoded);
-                if field.required {
+                if Registry::is_bare(name, field) {
                     let _ = writeln!(out, "    {{");
                     let _ = writeln!(out, "        let v = &{source};");
                     out.push_str(&narrowed);
