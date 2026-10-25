@@ -207,8 +207,8 @@ fn lower_one(model: &Model, overlay: &Overlay, name: &str) -> Result<OperationIr
     };
 
     let payload = Payload {
-        request: payload_spec(&input, &ov.request, name)?,
-        response: payload_spec(&output, &ov.response, name)?,
+        request: payload_spec(model, &input, &ov.request, name)?,
+        response: payload_spec(model, &output, &ov.response, name)?,
     };
 
     let checksum = Checksum {
