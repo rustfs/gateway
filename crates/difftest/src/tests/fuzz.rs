@@ -188,6 +188,20 @@ fn version_events_artifacts_pass_the_decode_property() {
     }
 }
 
+/// Positive — the original ListParts/annotation crash and its reduced input remain compared.
+#[test]
+fn list_parts_annotation_artifacts_pass_the_decode_property() {
+    let observed = [
+        &include_bytes!("../../../../fuzz/seeds/decode_diff/list-parts-annotation-original")[..],
+        &include_bytes!("../../../../fuzz/seeds/decode_diff/list-parts-annotation-minimal")[..],
+    ]
+    .map(|input| {
+        request_of(input).expect("the artifact remains in the compared domain");
+        check_decode(input)
+    });
+    assert_eq!(observed, [Ok(()), Ok(())]);
+}
+
 /// Positive — a fixed sample of mutated seeds passes the decode property on stable: the fuzzer's
 /// search, a few hundred steps of it, in every CI run.
 #[test]

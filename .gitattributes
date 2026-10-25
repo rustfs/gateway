@@ -3,3 +3,5 @@ fuzz/seeds/decode_diff/multipart-events-original binary
 fuzz/seeds/decode_diff/multipart-events-minimal binary
 fuzz/seeds/decode_diff/version-events-original binary
 fuzz/seeds/decode_diff/version-events-minimal binary
+fuzz/seeds/decode_diff/list-parts-annotation-original binary
+fuzz/seeds/decode_diff/list-parts-annotation-minimal binary

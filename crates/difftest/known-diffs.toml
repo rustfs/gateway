@@ -1049,6 +1049,85 @@ when_queries = ["versioning", "events"]
 reason = "The valid reduced versioning/events request reaches the default GetBucketVersioning handler, while the pinned legacy backend refuses its notification extension. Only this complete outcome pair is registered; malformed-input refusals remain new findings (https://github.com/rustfs/gateway/issues/1488)."
 expires = "2027-03-31"
 
+# ── Decode: multipart selectors with legacy annotations (nightly issue #1492) ──
+
+[[diff]]
+id = "kd-decode-0103"
+kind = "decode"
+operation = "ListParts"
+item = "route"
+gateway = "ListParts"
+s3s = "ListObjectAnnotations"
+when_queries = ["annotation", "uploadId"]
+reason = "The original nightly input and its reduced form select multipart listing in the default S3 router and the annotation-listing extension in the pinned service. Both query selectors and both operation names are required; neither route policy changes (https://github.com/rustfs/gateway/issues/1492)."
+expires = "2027-03-31"
+
+[[diff]]
+id = "kd-decode-0104"
+kind = "decode"
+operation = "ListParts"
+item = "outcome"
+gateway = "handled"
+s3s = "501 NotImplemented: ListObjectAnnotations is not implemented yet"
+when_queries = ["annotation", "uploadId"]
+reason = "The valid reduced annotation/uploadId GET reaches the default ListParts handler while the pinned service refuses its unimplemented annotation-listing operation. Only this complete outcome pair is registered; malformed listing refusals remain visible (https://github.com/rustfs/gateway/issues/1492)."
+expires = "2027-03-31"
+
+[[diff]]
+id = "kd-decode-0105"
+kind = "decode"
+operation = "ListParts"
+item = "route"
+gateway = "ListParts"
+s3s = "GetObjectAnnotation"
+when_queries = ["annotation", "uploadId", "annotationName"]
+reason = "Adding annotationName to the measured annotation/uploadId GET selects the named annotation operation in the pinned service while the default router still selects ListParts. All three query names and the exact operation pair are required (https://github.com/rustfs/gateway/issues/1492)."
+expires = "2027-03-31"
+
+[[diff]]
+id = "kd-decode-0106"
+kind = "decode"
+operation = "ListParts"
+item = "outcome"
+gateway = "handled"
+s3s = "501 NotImplemented: GetObjectAnnotation is not implemented yet"
+when_queries = ["annotation", "uploadId", "annotationName"]
+reason = "The named-annotation multipart-listing row reaches the default ListParts handler and receives the pinned service rejection for GetObjectAnnotation. This registers only the observed complete outcome under all three selectors (https://github.com/rustfs/gateway/issues/1492)."
+expires = "2027-03-31"
+
+[[diff]]
+id = "kd-decode-0107"
+kind = "decode"
+operation = "AbortMultipartUpload"
+item = "route"
+gateway = "AbortMultipartUpload"
+s3s = "DeleteObjectAnnotation"
+when_queries = ["annotation", "uploadId"]
+reason = "The bounded method probe shows that an annotation/uploadId DELETE selects AbortMultipartUpload by default and DeleteObjectAnnotation in the pinned service, with or without annotationName. Both selectors and the exact operation pair confine the existing route-policy difference (https://github.com/rustfs/gateway/issues/1492)."
+expires = "2027-03-31"
+
+[[diff]]
+id = "kd-decode-0108"
+kind = "decode"
+operation = "AbortMultipartUpload"
+item = "outcome"
+gateway = "handled"
+s3s = "400 InvalidRequest: missing query: annotationName"
+when_queries = ["annotation", "uploadId"]
+reason = "The annotation/uploadId DELETE without annotationName reaches the default abort handler while the pinned annotation decoder refuses the missing name. Only this exact refusal is accepted; other annotation errors and abort failures remain new findings (https://github.com/rustfs/gateway/issues/1492)."
+expires = "2027-03-31"
+
+[[diff]]
+id = "kd-decode-0109"
+kind = "decode"
+operation = "AbortMultipartUpload"
+item = "outcome"
+gateway = "handled"
+s3s = "501 NotImplemented: DeleteObjectAnnotation is not implemented yet"
+when_queries = ["annotation", "uploadId", "annotationName"]
+reason = "With annotationName present, the same DELETE reaches the default abort handler while the pinned service refuses its unimplemented DeleteObjectAnnotation operation. All three selectors and the exact complete outcome are required (https://github.com/rustfs/gateway/issues/1492)."
+expires = "2027-03-31"
+
 # ── Encode: what the gateway writes on every answer ─────────────────────────────────────────
 
 [[diff]]

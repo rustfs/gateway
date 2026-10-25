@@ -69,5 +69,25 @@ pub(super) fn rows() -> Vec<RequestRow> {
             RawRequest::get("/bkt?versioning&events"),
             &["kd-decode-0101", "kd-decode-0102"],
         ),
+        row(
+            "list-parts-annotations-query",
+            RawRequest::get("/bkt/k?annotation&uploadId=u"),
+            &["kd-decode-0103", "kd-decode-0104"],
+        ),
+        row(
+            "list-parts-named-annotation-query",
+            RawRequest::get("/bkt/k?annotation&annotationName=a&uploadId=u"),
+            &["kd-decode-0105", "kd-decode-0106"],
+        ),
+        row(
+            "abort-part-annotation-query",
+            RawRequest::new(http::Method::DELETE, "/bkt/k?annotation&uploadId=u"),
+            &["kd-decode-0107", "kd-decode-0108"],
+        ),
+        row(
+            "abort-part-named-annotation-query",
+            RawRequest::new(http::Method::DELETE, "/bkt/k?annotation&annotationName=a&uploadId=u"),
+            &["kd-decode-0107", "kd-decode-0109"],
+        ),
     ]
 }
