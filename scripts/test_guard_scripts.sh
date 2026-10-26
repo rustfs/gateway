@@ -15211,6 +15211,96 @@ mut_runner_unlisted_client_dependency() {
 expect_fail check_runner_raw_bytes.sh \
     'an unlisted HTTP client dependency bypassing a name deny-list' mut_runner_unlisted_client_dependency
 
+mut_runner_fixture_xml_manifest_widened() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/conformance/Cargo.toml")
+source = path.read_text()
+old = "quick-xml = { workspace = true }"
+if source.count(old) != 1:
+    raise SystemExit("fixture XML dependency is not unique")
+path.write_text(source.replace(old, 'quick-xml = { workspace = true, features = ["serialize"] }', 1))
+PYEOF
+}
+expect_fail check_runner_raw_bytes.sh \
+    'the fixture XML dependency gaining an unreviewed feature' mut_runner_fixture_xml_manifest_widened \
+    'quick-xml must use only the workspace dependency'
+
+mut_runner_fixture_xml_parser_missing() {
+    rm crates/conformance/src/conn/external_fixture/multipart.rs
+}
+expect_fail check_runner_raw_bytes.sh \
+    'the required fixture XML parser file missing' mut_runner_fixture_xml_parser_missing \
+    'external UploadId parser source is missing'
+
+mut_runner_fixture_xml_function_missing() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/conformance/src/conn/external_fixture/multipart.rs")
+source = path.read_text()
+old = "pub(super) fn upload_id("
+if source.count(old) != 1:
+    raise SystemExit("fixture UploadId function is not unique")
+path.write_text(source.replace(old, "pub(super) fn renamed_upload_id(", 1))
+PYEOF
+}
+expect_fail check_runner_raw_bytes.sh \
+    'the scoped fixture UploadId function missing' mut_runner_fixture_xml_function_missing \
+    'external UploadId parser must have exactly one scoped upload_id function'
+
+mut_runner_fixture_xml_function_duplicated() {
+    cat >>crates/conformance/src/conn/external_fixture/multipart.rs <<'RUST'
+pub(super) fn upload_id(body: &[u8]) -> Result<String, SutError> { todo!() }
+RUST
+}
+expect_fail check_runner_raw_bytes.sh \
+    'a second function claiming the fixture XML exception' mut_runner_fixture_xml_function_duplicated \
+    'external UploadId parser must have exactly one scoped upload_id function'
+
+mut_runner_fixture_xml_module_import() {
+    printf '\nuse quick_xml::Reader as UnexpectedReader;\n' \
+        >>crates/conformance/src/conn/external_fixture/multipart.rs
+}
+expect_fail check_runner_raw_bytes.sh \
+    'a fixture XML import escaping the UploadId function' mut_runner_fixture_xml_module_import \
+    'quick_xml is restricted to the external UploadId parser body'
+
+mut_runner_fixture_xml_aliased_import() {
+    printf 'use quick_xml as fixture_xml;\n' >crates/conformance/src/fixture_xml_escape.rs
+}
+expect_fail check_runner_raw_bytes.sh \
+    'an aliased XML import in another conformance source' mut_runner_fixture_xml_aliased_import \
+    'quick_xml is restricted to the external UploadId parser body'
+
+mut_runner_fixture_xml_qualified_call() {
+    cat >>crates/conformance/src/conn.rs <<'RUST'
+fn fixture_xml_escape(bytes: &[u8]) { let _ = quick_xml::Reader::from_reader(bytes); }
+RUST
+}
+expect_fail check_runner_raw_bytes.sh \
+    'a qualified XML reader call in the authored transport' mut_runner_fixture_xml_qualified_call \
+    'quick_xml is restricted to the external UploadId parser body'
+
+mut_runner_fixture_xml_reexport() {
+    printf 'pub use quick_xml::Reader as FixtureReader;\n' >crates/conformance/tests/fixture_xml_escape.rs
+}
+expect_fail check_runner_raw_bytes.sh \
+    'an XML re-export outside the fixture parser source tree' mut_runner_fixture_xml_reexport \
+    'quick_xml is restricted to the external UploadId parser body'
+
+mut_runner_fixture_xml_token_decoys() {
+    cat >crates/conformance/src/fixture_xml_decoys.rs <<'RUST'
+// use quick_xml::Reader;
+/* outer /* quick_xml::Reader */ comment */
+const XML_COMMENT: &str = "quick_xml::Reader";
+const XML_RAW_COMMENT: &str = r#"use quick_xml as reader;"#;
+RUST
+}
+expect_guard_pass check_runner_raw_bytes.sh \
+    'XML names only in comments and strings' mut_runner_fixture_xml_token_decoys
+
 # -----------------------------------------------------------------------------
 # check_resolver_pure.sh has four rules and each gets its own control, because
 # three of them are regexes over source text and the fourth is an awk field

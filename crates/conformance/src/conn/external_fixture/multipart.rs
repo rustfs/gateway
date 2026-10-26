@@ -20,9 +20,6 @@
 
 use std::collections::BTreeSet;
 
-use quick_xml::Reader;
-use quick_xml::events::Event;
-
 use crate::sut::SutError;
 use crate::value::Value;
 
@@ -105,6 +102,9 @@ pub(super) fn unresolved_id() -> SutError {
 }
 
 pub(super) fn upload_id(body: &[u8]) -> Result<String, SutError> {
+    use quick_xml::Reader;
+    use quick_xml::events::Event;
+
     let mut reader = Reader::from_reader(body);
     reader.config_mut().expand_empty_elements = true;
     reader.config_mut().check_comments = true;

@@ -14,7 +14,8 @@ polarity = "positive"
 operation = "ListMultipartUploads"
 tags = ["multipart", "delimiter"]
 timeout_ms = 10000
-quirks = ["q-mpu-upload-0032", "q-flat-0019"]
+# Fixture-presence coverage; these substring assertions do not prove XML list wrapping.
+quirks = []
 
 [[case.evidence]]
 url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CreateMultipartUpload.html"
