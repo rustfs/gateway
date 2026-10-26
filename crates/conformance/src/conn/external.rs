@@ -44,7 +44,7 @@ impl Conn {
         Self::external_configured(root, endpoint, ca_path, false)
     }
 
-    /// Builds an HTTP(S) target whose explicit opt-in permits isolated owned bucket/object/empty-upload fixtures.
+    /// Builds an HTTP(S) target permitting isolated owned bucket, object, version, and empty-upload fixtures.
     pub fn external_with_fixtures(root: std::path::PathBuf, endpoint: &str, ca_path: Option<&Path>) -> Result<Conn, SutError> {
         Self::external_configured(root, endpoint, ca_path, true)
     }
@@ -83,7 +83,7 @@ impl Conn {
         let reuse = read_connection(plan.connection)?;
         self.inner.set_fixture_now(clock.now.unix_seconds);
         let wire = self.inner.read_wire(&plan.request)?;
-        self.external_fixtures.ensure_read_only(plan.case_id, &wire)?;
+        let version_write = self.external_fixtures.version_write(plan.case_id, &wire)?;
         if !wire.h2_frames.is_empty() {
             return self.exchange_h2_external(plan, &wire, &endpoint, reuse);
         }
@@ -102,6 +102,10 @@ impl Conn {
         let cleartext = !endpoint.is_tls();
         validate_authored_steps(&wire, cleartext, budget)?;
         let head = self.head_for_profile(&wire, &request_time, plan.profile)?;
+        if version_write.is_some() {
+            self.external_fixtures
+                .validate_version_head(&wire, &head, endpoint.authority())?;
+        }
         let existing = self.connection.as_ref().map(Connection::observe_pending);
         if reuse && existing.is_some_and(|(_, pending)| pending) {
             self.connection = None;
@@ -117,7 +121,11 @@ impl Conn {
             .connection
             .as_mut()
             .ok_or_else(|| SutError::Environment("external endpoint connection was not opened".to_owned()))?;
+        let pending_version = version_write.map(|version| self.external_fixtures.begin_version_write(version));
         let result = execute_socket_exchange(connection, &wire, &head, started, deadline, cleartext)?;
+        if let Some(index) = pending_version {
+            self.external_fixtures.observe_version_write(index, &result.observation)?;
+        }
         if result.torn_down || endpoint.is_tls() {
             self.connection = None;
         }
