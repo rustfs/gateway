@@ -73,8 +73,7 @@ rcgen = { workspace = true, optional = true }
 # The two crates whose types appear in the signature of the facade's own entry point:
 # `S3Service::call_bytes(http::Request<bytes::Bytes>)`. A caller cannot name that call without
 # them, so they are not a dependency this crate chose — they are the facade's public surface.
-# Everything else this crate needs (TOML, JSON, schema, patterns, digests) is still hand-written
-# here, so a foreign implementation running this suite inherits nothing else.
+# The general case formats (TOML, JSON, schema, patterns, digests) stay local.
 bytes = { workspace = true }
 http = { workspace = true }
 # The request-body trait `S3Service::call` is generic over. The socket target must hand the service
@@ -87,3 +86,7 @@ http-body = { workspace = true }
 # in-process and socket targets therefore keep one current-thread runtime alive while they call the
 # facade and drain that response; no work-stealing scheduler or I/O driver is enabled.
 tokio = { workspace = true, features = ["time"] }
+
+# Remote fixture ownership must parse returned UploadId XML without adopting malformed identities.
+# The case verdict scanner deliberately does not validate XML and cannot serve this boundary.
+quick-xml = { workspace = true }

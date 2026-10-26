@@ -150,7 +150,7 @@ fn push_header(headers: &mut Vec<(String, String)>, name: &str, value: &str) -> 
     Ok(())
 }
 
-fn object_target(bucket: &str, key: &str) -> Result<String, SutError> {
+pub(super) fn object_target(bucket: &str, key: &str) -> Result<String, SutError> {
     if key.is_empty() {
         return Err(SutError::Environment(
             "an external fixture object key cannot be empty because it would address the bucket control path".to_owned(),

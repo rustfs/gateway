@@ -1818,6 +1818,7 @@ dependencies = [
  "http",
  "http-body",
  "proptest",
+ "quick-xml 0.41.0",
  "rcgen",
  "rustfs-gateway",
  "rustfs-gateway-corpus",

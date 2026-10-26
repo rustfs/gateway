@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Opt-in owned bucket and object fixtures for an external conformance endpoint.
+//! Opt-in owned bucket, object, and empty-upload fixtures for an external conformance endpoint.
 //!
 //! Responsible for: validating the narrow remote-setup subset, refusing authored mutations while
-//! ownership is active, and holding ownership state for successful unversioned creates.
-//! NOT responsible for: versioned, locked, multipart, or fault fixtures; endpoint resolution; authored
+//! ownership is active, and holding successful or unresolved remote ownership.
+//! NOT responsible for: versioned, locked, uploaded-part, or fault fixtures; endpoint resolution; authored
 //! exchange pacing; or response judgement. Upstream: `external`; downstream: the endpoint selected
 //! by `crate::cli`.
 
@@ -30,6 +30,9 @@ pub(super) mod clock;
 #[cfg(test)]
 mod h2_guard_tests;
 mod lifecycle;
+mod multipart;
+#[cfg(test)]
+mod multipart_tests;
 mod object;
 #[cfg(test)]
 mod object_tests;
@@ -43,6 +46,7 @@ pub(super) struct ExternalFixtures {
     active_case: Option<String>,
     owned_buckets: Vec<OwnedBucket>,
     owned_objects: Vec<object::OwnedObject>,
+    owned_uploads: Vec<multipart::OwnedUpload>,
 }
 
 #[derive(Debug)]
@@ -56,6 +60,7 @@ struct BucketPlan {
 struct FixturePlan {
     buckets: Vec<BucketPlan>,
     objects: Vec<object::ObjectPlan>,
+    uploads: Vec<multipart::UploadPlan>,
 }
 
 #[derive(Debug)]
@@ -75,6 +80,7 @@ impl ExternalFixtures {
             active_case: None,
             owned_buckets: Vec::new(),
             owned_objects: Vec::new(),
+            owned_uploads: Vec::new(),
         }
     }
 
@@ -85,12 +91,16 @@ impl ExternalFixtures {
                     .to_owned(),
             ));
         }
-        if self.active_case.is_some() || !self.owned_buckets.is_empty() || !self.owned_objects.is_empty() {
+        if self.active_case.is_some()
+            || !self.owned_buckets.is_empty()
+            || !self.owned_objects.is_empty()
+            || !self.owned_uploads.is_empty()
+        {
             return Err(SutError::Environment(
                 "external fixture setup cannot start because cleanup from the previous case is incomplete".to_owned(),
             ));
         }
-        only_keys(setup, &["cleanup", "buckets", "objects"], "setup")?;
+        only_keys(setup, &["cleanup", "buckets", "objects", "multipart_uploads"], "setup")?;
         if setup
             .read("setup.cleanup")
             .and_then(Value::as_str)
@@ -137,7 +147,12 @@ impl ExternalFixtures {
             });
         }
         let objects = object::plans(setup, &plan, decoder)?;
-        Ok(FixturePlan { buckets: plan, objects })
+        let uploads = multipart::plans(setup, &plan)?;
+        Ok(FixturePlan {
+            buckets: plan,
+            objects,
+            uploads,
+        })
     }
 
     pub(super) fn ensure_read_only(&self, case_id: &str, wire: &Wire) -> Result<(), SutError> {
@@ -187,7 +202,7 @@ fn only_keys(value: &Value, allowed: &[&str], context: &str) -> Result<(), SutEr
         .find(|key| !allowed.contains(&key.as_str()))
     {
         return Err(SutError::Environment(format!(
-            "`{context}.{key}` is not supported by external owned bucket/object fixtures"
+            "`{context}.{key}` is not supported by external owned bucket/object/empty-upload fixtures"
         )));
     }
     Ok(())
@@ -419,7 +434,7 @@ mod tests {
     fn every_setup_shape_outside_owned_bucket_and_object_state_is_rejected_before_mutation() {
         for unsupported in [
             "unknown = true\n",
-            "multipart_uploads = []\n",
+            "[[buckets]]\nname = \"fixture-one\"\n[[multipart_uploads]]\nbucket = \"fixture-one\"\nkey = \"one\"\nparts = [{ part_number = 1, body = { utf8 = \"part\" } }]\n",
             "fault = { operation = \"PutObject\", at = \"after_commit\", code = \"InternalError\" }\n",
             "[[buckets]]\nname = \"fixture-one\"\nversioning = \"enabled\"\n",
             "[[buckets]]\nname = \"fixture-one\"\nobject_lock = true\n",
