@@ -673,6 +673,8 @@ impl S3Service {
         let (service_level, target, hands_caller_secret) = (facts.service_level, facts.target, facts.hands_caller_secret);
         let (path_params, subjects, claimed, bound_bucket) =
             (facts.path_params, facts.subjects, facts.claimed, facts.bound_bucket);
+        // Claimed routes sign their declared path; only ordinary S3 requests retain the host-derived bucket.
+        let vhost_bucket = if claimed { None } else { vhost_bucket };
         outcome.operation = Some(operation);
 
         let Some(op) = mode.entry(operation) else {
@@ -805,9 +807,9 @@ impl S3Service {
 
         // Presenting nothing leaves no signature to verify first: legacy RustFS's claimed-route ceiling precedes the floor.
         let claimed_ceiling = self.inner.view_policy.claimed_bodies.ceiling(claimed);
-        let presented = presence.any()
-            || self.inner.floor.credential_marker(&view).is_some()
-            || self.inner.floor.custom_schemes().matching(&view).is_some();
+        let aws_credential_marker = self.inner.floor.credential_marker(&view);
+        let presented =
+            presence.any() || aws_credential_marker.is_some() || self.inner.floor.custom_schemes().matching(&view).is_some();
         if let (false, RoutedBody::Ordinary(sealed)) = (presented, &routed_body)
             && let Some(refusal) = sealed.past_claimed_ceiling(claimed_ceiling).await
         {
@@ -972,14 +974,13 @@ impl S3Service {
                 ),
             );
         }
-        // The proof, minted from the verdict that has just been checked. The `else` arm is
-        // unreachable — `rejection()` was `None` one line ago — and is refused rather than
-        // unwrapped, because "the signature was fine, take my word for it" is exactly the sentence
-        // this type exists to make unspellable.
+        // Metadata admission and credential location follow the settled verdict; a missing proof
+        // is refused, and codec-facing header rewrites cannot supply or erase the original AWS fact.
         let Some(metadata_admission) = MetadataAdmission::of(&verdict) else {
             return outcome
                 .refuse_handler(HandlerError::internal_error("the request could not be shown to have been authenticated"));
         };
+        let meta = meta.with_authenticated_aws_marker(&verdict, aws_credential_marker);
         // A presented credential is verified before the claimed-route ceiling, which precedes authorization as in legacy RustFS.
         if let RoutedBody::Ordinary(sealed) = &routed_body
             && let Some(refusal) = sealed.past_claimed_ceiling(claimed_ceiling).await

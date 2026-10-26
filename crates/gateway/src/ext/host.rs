@@ -286,12 +286,8 @@ pub trait HostResolver: Send + Sync + 'static {
     /// `resolved` holds. [`crate::LegacyRustfsVirtualHosts`] reads its host again and names the
     /// label even when its bucket rules refuse it, as legacy RustFS signs it (rustfs/gateway#1232).
     ///
-    /// Legacy-compat (rustfs/backlog#2684): under the legacy split a claimed request on a bucket's
-    /// host signs `/{bucket}/{claimed path}`, the resource a path-style SigV2 request for the key
-    /// `{claimed path}` in that bucket signs, so a captured signature of one replays, within its
-    /// `Date` window and with the same method and headers, as the other. Kept because legacy RustFS
-    /// reads the host before any route claims the request, so a SigV2 client signs that resource;
-    /// the intended future behaviour is the classified bucket, none for a claimed request.
+    /// This is a candidate for an ordinary S3 request. After dispatch, a declared route
+    /// discards it and signs its own path without a host-derived bucket (ADR-0044).
     fn signing_bucket(&self, _query: &HostQuery<'_>, resolved: &ResolvedHost) -> Option<String> {
         resolved.bucket().map(|bucket| bucket.as_str().to_owned())
     }

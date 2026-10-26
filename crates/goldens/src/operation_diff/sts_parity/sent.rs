@@ -118,6 +118,10 @@ impl Sent {
         }
     }
 
+    pub(super) fn signing(&self) -> Signing {
+        self.signing
+    }
+
     pub(super) fn host(mut self, host: &'static str) -> Self {
         self.host = host;
         self

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! RustFS's STS endpoint through both stacks (rustfs/gateway#1232, ADR-0041): the same signed or
+//! RustFS's STS endpoint through both stacks (rustfs/gateway#1232, ADR-0041 and ADR-0044): the same signed or
 //! unsigned `POST /` sent to the legacy stack, configured as RustFS configures it with RustFS's STS
 //! route in front, and to an assembled gateway with the RustFS profile's authentication, routing and
 //! answer switches and the `rustfs` dialect.
@@ -59,6 +59,7 @@ use super::block_on;
 use super::context::{ACCESS_KEY, BASE_DOMAIN, SECRET_KEY, verifying_at};
 use super::s3s as legacy;
 
+mod sec1;
 mod sent;
 
 const FORM: &str = "application/x-www-form-urlencoded";
@@ -283,6 +284,16 @@ impl Authorizer for StsLabelOnly {
 /// The RustFS profile's authentication, routing and answer switches, as `compat/sut` assembles
 /// them, with the `rustfs` dialect and an STS handler.
 fn gateway(now: RequestNow, handed: &Arc<Mutex<Option<Handed>>>, asked: &Asked) -> S3Service {
+    gateway_builder(now, asked)
+        .register::<StsFormPost, _>(Arc::new(Sts {
+            handed: Arc::clone(handed),
+        }))
+        .build()
+        .expect("a complete assembly")
+}
+
+/// The same assembly, before the test selects its recording or refusing handler.
+fn gateway_builder(now: RequestNow, asked: &Asked) -> ServiceBuilder {
     let credentials = Credentials::new(ACCESS_KEY, SECRET_KEY.as_bytes()).expect("a fixture credential");
     let authenticator = SigV4Authenticator::new(
         Arc::new(StaticCredentials::new().with(credentials)),
@@ -303,7 +314,7 @@ fn gateway(now: RequestNow, handed: &Arc<Mutex<Option<Handed>>>, asked: &Asked) 
         .admit_presigned_on_every_standard_operation_after_listing_in_the_posture_report()
         .recognize_signatures_as_legacy_rustfs();
     let dialect = rustfs_admin_dialect().expect("the generated record and declarations agree");
-    let builder = verifying_at(ServiceBuilder::new(), now)
+    verifying_at(ServiceBuilder::new(), now)
         .authenticator(authenticator)
         .security_floor(floor)
         .authorizer(StsLabelOnly {
@@ -326,10 +337,6 @@ fn gateway(now: RequestNow, handed: &Arc<Mutex<Option<Handed>>>, asked: &Asked) 
         .host_resolver(LegacyRustfsVirtualHosts::new([BASE_DOMAIN]).expect("the base domain"))
         .identify_requests_as_legacy_rustfs()
         .dialect(&dialect)
-        .register::<StsFormPost, _>(Arc::new(Sts {
-            handed: Arc::clone(handed),
-        }));
-    builder.build().expect("a complete assembly")
 }
 
 fn unlimited_rates() -> rustfs_gateway::GovernorRates {
@@ -386,13 +393,10 @@ fn handed(caller: Option<&str>, sent: &Sent) -> Option<Handed> {
     })
 }
 
-/// Positive — every signature form legacy RustFS verifies reaches the STS handler with the caller's
-/// access key and the body as sent, on both stacks: SigV4 under `sts` with and without the payload
-/// digest header, under `s3` and `s3tables` over the digest and over `UNSIGNED-PAYLOAD`, presigned
-/// under `s3` and `sts`, and SigV2 by header and presigned. Neither stack writes a request
-/// identifier on an STS answer: RustFS's STS layer writes its own.
+/// Header signatures preserve legacy parity; ordinary AssumeRole query credentials are refused
+/// by the gateway under ADR-0044. The legacy observations remain explicit for every signing mode.
 #[test]
-fn every_signature_legacy_rustfs_verifies_reaches_the_sts_handler_as_its_caller() {
+fn ordinary_assume_role_preserves_header_modes_and_refuses_query_credentials() {
     for signing in [
         Signing::Header {
             service: "sts",
@@ -427,18 +431,24 @@ fn every_signature_legacy_rustfs_verifies_reaches_the_sts_handler_as_its_caller(
         Signing::V2Presigned,
     ] {
         let sent = Sent::new(signing);
-        let answer = same(&sent);
-        assert_eq!(answer.status, 200, "{signing:?}");
-        assert_eq!(answer.handed, handed(Some(ACCESS_KEY), &sent), "{signing:?}");
-        assert!(!answer.identified, "{signing:?}");
+        let (legacy, gateway, _) = both(&sent);
+        assert_eq!(legacy.status, 200);
+        assert!(legacy.handed == handed(Some(ACCESS_KEY), &sent));
+        assert!(!legacy.identified);
+        if matches!(signing, Signing::Presigned { .. } | Signing::V2Presigned) {
+            assert_eq!(gateway.status, 403);
+            assert_eq!(gateway.code.as_deref(), Some("AccessDenied"));
+            assert!(gateway.handed.is_none());
+        } else {
+            assert!(gateway == legacy, "header authentication retains the legacy result");
+        }
     }
 }
 
-/// Positive — an anonymous `POST /` reaches the STS handler with no caller on both stacks, whatever
-/// `Action` its body names, and both of the gateway's authorization stages ask the STS label with
-/// no identity.
+/// Anonymous Web Identity and other downstream action contracts retain parity; ordinary
+/// AssumeRole is refused before its handler under ADR-0044.
 #[test]
-fn an_anonymous_form_reaches_the_sts_handler_with_no_caller() {
+fn anonymous_form_admission_obeys_the_decoded_action_contract() {
     for body in [
         &b"Action=AssumeRoleWithWebIdentity&Version=2011-06-15&WebIdentityToken=x.y.z"[..],
         b"Action=AssumeRoleWithClientGrants&Token=x.y.z",
@@ -447,9 +457,16 @@ fn an_anonymous_form_reaches_the_sts_handler_with_no_caller() {
     ] {
         let sent = Sent::new(Signing::Anonymous).body(Bytes::from_static(body));
         let (legacy, gateway, asked) = both(&sent);
-        assert_eq!(gateway, legacy, "{sent:?}");
         assert_eq!(legacy.status, 200);
-        assert_eq!(legacy.handed, handed(None, &sent));
+        assert!(legacy.handed == handed(None, &sent));
+        if body == b"Action=AssumeRole&Version=2011-06-15" {
+            assert_eq!(gateway.status, 403);
+            assert_eq!(gateway.code.as_deref(), Some("AccessDenied"));
+            assert!(gateway.handed.is_none());
+            assert_eq!(asked, [("rustfs:AssumeRoleHandle".to_owned(), None)]);
+            continue;
+        }
+        assert!(gateway == legacy, "independent action admission retains the legacy result");
         // Both stages ask the STS label, with no identity.
         assert_eq!(
             asked,
@@ -461,9 +478,8 @@ fn an_anonymous_form_reaches_the_sts_handler_with_no_caller() {
     }
 }
 
-/// Positive — legacy RustFS's predicate decides, not S3 addressing: a virtual host whose bucket label
-/// RustFS would refuse, and S3 operation keys in the query, are the STS endpoint on both stacks; the
-/// media type's case and parameters do not matter.
+/// The STS route retains its host, query and media-type predicate. Its ordinary-action
+/// admission and claimed SigV2 canonical resource follow ADR-0044 after that route is selected.
 #[test]
 fn the_sts_endpoint_is_taken_on_every_host_and_query_and_media_type_spelling() {
     let signed = Signing::Header {
@@ -490,19 +506,28 @@ fn the_sts_endpoint_is_taken_on_every_host_and_query_and_media_type_spelling() {
         })
         .host("photos.example.test"),
     ] {
-        let answer = same(&sent);
-        assert_eq!(answer.status, 200, "{sent:?}");
-        assert!(answer.handed.is_some(), "{sent:?}");
+        let (legacy, gateway, _) = both(&sent);
+        assert_eq!(legacy.status, 200);
+        assert!(legacy.handed.is_some());
+        let expected_code = match sent.signing() {
+            Signing::V2Header { .. } | Signing::V2Presigned => Some("SignatureDoesNotMatch"),
+            Signing::Anonymous | Signing::Presigned { .. } => Some("AccessDenied"),
+            _ => None,
+        };
+        if let Some(code) = expected_code {
+            assert_eq!(gateway.status, 403);
+            assert_eq!(gateway.code.as_deref(), Some(code));
+            assert!(gateway.handed.is_none());
+        } else {
+            assert!(gateway == legacy, "header authentication retains the legacy result");
+        }
     }
 }
 
-/// Positive — Legacy-compat (rustfs/backlog#2684): a virtual-hosted presigned `DeleteObjects` URL,
-/// `POST /?delete` on a bucket's host, resent with a form body nobody signed reaches the STS handler
-/// as its signer on both stacks, under SigV4 and SigV2. The predicate reads neither host nor query,
-/// and a presigned URL signs neither the media type nor the body; the generated floor records the
-/// item.
+/// Negative — ordinary AssumeRole on a virtual host remains subject to its action-specific
+/// credential contract and declared-request canonical resource (ADR-0044).
 #[test]
-fn a_presigned_bucket_post_url_resent_as_a_form_reaches_the_sts_handler_as_its_signer() {
+fn ordinary_assume_role_on_a_virtual_host_refuses_query_credentials() {
     for signing in [
         Signing::Presigned {
             service: SigService::S3,
@@ -514,9 +539,17 @@ fn a_presigned_bucket_post_url_resent_as_a_form_reaches_the_sts_handler_as_its_s
             .host("photos.example.test")
             .query("delete")
             .body(Bytes::from_static(b"Action=AssumeRole&Version=2011-06-15&DurationSeconds=43200"));
-        let answer = same(&sent);
-        assert_eq!(answer.status, 200, "{signing:?}");
-        assert_eq!(answer.handed, handed(Some(ACCESS_KEY), &sent), "{signing:?}");
+        let (legacy, gateway, _) = both(&sent);
+        assert_eq!(legacy.status, 200);
+        assert!(legacy.handed == handed(Some(ACCESS_KEY), &sent));
+        assert_eq!(gateway.status, 403);
+        let code = if matches!(signing, Signing::V2Presigned) {
+            "SignatureDoesNotMatch"
+        } else {
+            "AccessDenied"
+        };
+        assert_eq!(gateway.code.as_deref(), Some(code));
+        assert!(gateway.handed.is_none());
     }
 }
 
