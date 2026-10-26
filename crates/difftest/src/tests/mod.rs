@@ -40,3 +40,4 @@ mod seam_outputs;
 mod seam_overrides;
 mod seam_switches;
 mod shadow;
+mod uri_scope;

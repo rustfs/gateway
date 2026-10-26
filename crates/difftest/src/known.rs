@@ -352,15 +352,18 @@ impl KnownDiffs {
     }
 
     /// Judges the findings of `request` against the register.
+    ///
+    /// Scopes use the parsed URI supplied to both stacks. An invalid URI supplies no request scope.
     #[must_use]
     pub fn verdict_for(&self, request: &RawRequest, findings: Vec<Finding>) -> Verdict {
+        let Ok(uri) = request.target.parse::<http::Uri>() else {
+            return self.judge(findings, None);
+        };
         let scope = Scope {
-            query: query_names(&request.target),
+            query: query_names(&uri),
             headers: request.headers.iter().map(|(name, _)| name.clone()).collect(),
-            bucket: request
-                .target
-                .split_once('?')
-                .map_or(request.target.as_str(), |(path, _)| path)
+            bucket: uri
+                .path()
                 .trim_start_matches('/')
                 .split('/')
                 .next()
@@ -384,7 +387,7 @@ impl KnownDiffs {
 
 /// What of the request an entry's scope reads.
 struct Scope {
-    /// The query parameter names, as sent.
+    /// The query parameter names passed to both stacks, without percent-decoding.
     query: Vec<String>,
     /// The header names as supplied; matching is ASCII case-insensitive.
     headers: Vec<String>,
@@ -392,11 +395,10 @@ struct Scope {
     bucket: String,
 }
 
-/// The names of the query parameters in an origin-form target, as sent.
-fn query_names(target: &str) -> Vec<String> {
-    target
-        .split_once('?')
-        .map(|(_, query)| {
+/// The query parameter names in the parsed request URI, without decoding.
+fn query_names(uri: &http::Uri) -> Vec<String> {
+    uri.query()
+        .map(|query| {
             query
                 .split('&')
                 .filter(|pair| !pair.is_empty())
