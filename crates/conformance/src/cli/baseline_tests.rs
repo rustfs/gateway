@@ -29,6 +29,7 @@ fn options(command: Command, filter: &str) -> Options {
         profile: Profile::Aws,
         root: None,
         endpoint: None,
+        endpoint_fixed_time: None,
         ca_cert: None,
         external_fixtures: false,
         baseline: None,

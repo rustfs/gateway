@@ -114,11 +114,13 @@ pub(crate) fn external_target(options: &Options, root: PathBuf) -> Result<Conn, 
         .endpoint
         .as_deref()
         .ok_or_else(|| crate::sut::SutError::Environment("external target has no endpoint".to_owned()))?;
-    if options.external_fixtures {
+    let mut target = if options.external_fixtures {
         Conn::external_with_fixtures(root, endpoint, options.ca_cert.as_deref())
     } else {
         Conn::external_with_ca(root, endpoint, options.ca_cert.as_deref())
-    }
+    }?;
+    target.endpoint_fixed_time.clone_from(&options.endpoint_fixed_time);
+    Ok(target)
 }
 
 fn target(transport: Transport, root: PathBuf) -> Box<dyn Sut> {
@@ -469,6 +471,7 @@ mod tests {
             profile: Profile::Aws,
             root: None,
             endpoint: None,
+            endpoint_fixed_time: None,
             ca_cert: None,
             external_fixtures: false,
             baseline: None,

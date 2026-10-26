@@ -45,6 +45,8 @@ options:
                             http:// with prior knowledge or https:// with ALPN h2)
   --allow-external-fixtures
                             allow isolated owned bucket/object/version/empty-upload setup and automatic cleanup
+  --endpoint-fixed-time <YYYY-MM-DDTHH:MM:SSZ>
+                            declare the separately configured endpoint clock (run/baseline only)
   --ca-cert <pem-path>      additional CA certificates for an HTTPS endpoint
   --baseline <file>         tolerate the failures this file records; fail only on a regression
   --rulings <toml>          judge the run against a ledger of reviewed, dated `[[ruling]]` rows:

@@ -31,9 +31,9 @@ use std::io;
 use std::sync::Arc;
 
 use rustfs_gateway::{
-    CorsCacheConfig, Credentials, DEFAULT_MAX_BUFFERED_BODY_BYTES, HandlerDeadlineClass, HandlerDeadlineConfig,
-    LegacyRustfsVirtualHosts, MintedTraces, RegionMatchPolicy, RegionSet, RequestBodyDeadlineConfig, S3Service, ServiceBuilder,
-    ServiceConfig, SigV4Authenticator, SseConfig, StaticCredentials, dto,
+    ClockSkewAck, CorsCacheConfig, Credentials, DEFAULT_MAX_BUFFERED_BODY_BYTES, FixedClock, HandlerDeadlineClass,
+    HandlerDeadlineConfig, LegacyRustfsVirtualHosts, MintedTraces, RegionMatchPolicy, RegionSet, RequestBodyDeadlineConfig,
+    S3Service, ServiceBuilder, ServiceConfig, SigV4Authenticator, SseConfig, StaticCredentials, dto,
 };
 use rustfs_gateway_fs::FsBackend;
 
@@ -53,7 +53,11 @@ use crate::policy_authorizer::PolicyAuthorizer;
 /// root, so that same id and display name are installed once for every listing response.
 pub(crate) fn open_backend(options: &Options) -> io::Result<FsBackend> {
     let (owner_id, display_name) = options.accounts.data_root_owner();
-    let backend = FsBackend::open(&options.data)?
+    let backend = match options.fixed_time {
+        Some(seconds) => FsBackend::open_with_clock(&options.data, Arc::new(FixedClock::at_unix_seconds(seconds)))?,
+        None => FsBackend::open(&options.data)?,
+    };
+    let backend = backend
         .with_region(&options.region)?
         // RustFS ignores a creation's `LocationConstraint` — minio-java's explicit us-east-1
         // included — and creates the bucket in its own region; so does this launcher (#914).
@@ -207,6 +211,13 @@ pub(crate) fn build_service(
         // No host stands in front of this launcher to hand its identifier over, so the
         // identifier is minted in RustFS's shape (ruling R10).
         .trace_source(MintedTraces::with_uuid_request_ids());
+    let assembly = match options.fixed_time {
+        Some(seconds) => assembly.clock_with_skew_ack(
+            FixedClock::at_unix_seconds(seconds),
+            ClockSkewAck::i_understand_a_skewed_clock_can_disable_signature_expiry(),
+        ),
+        None => assembly,
+    };
     // `--register-only` keeps everything above and registers just the named operations, so every
     // other one is `501 NotImplemented` behind the same profile, signer and authorizer
     // (rustfs/backlog#2758). The authorizer keeps the full `supported` set on purpose: narrowing it
