@@ -167,8 +167,8 @@ impl Conn {
             let result = self.fixture_control("POST", &format!("{}?uploads", upload.target), &upload.region, &[], &[]);
             let mut owned = super::multipart::OwnedUpload {
                 bucket: upload.bucket,
-                target: upload.target,
-                region: upload.region,
+                target: upload.target.clone(),
+                region: upload.region.clone(),
                 upload_id: None,
             };
             let body = match result {
@@ -193,8 +193,18 @@ impl Conn {
             if let Some(name) = upload.capture {
                 captures.insert(name, upload_id.clone());
             }
+            let upload_target = super::multipart::abort_target(&upload.target, &upload_id);
             owned.upload_id = Some(upload_id);
             self.external_fixtures.owned_uploads.push(owned);
+            for part in upload.parts {
+                let etag = match self.put_fixture_part(&upload_target, &upload.region, &part) {
+                    Ok(etag) => etag,
+                    Err(error) => return Err(self.abort_external_prepare(error)),
+                };
+                if let (Some(name), Some(etag)) = (part.capture, etag) {
+                    captures.insert(name, etag);
+                }
+            }
         }
         Ok(captures)
     }
