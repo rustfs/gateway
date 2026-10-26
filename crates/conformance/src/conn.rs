@@ -112,6 +112,7 @@ pub struct Conn {
     /// Reused rather than copied, so the two transports cannot disagree about what a case says.
     inner: InProcess,
     external: Option<ExternalEndpoint>,
+    pub(crate) endpoint_fixed_time: Option<crate::time::Instant>,
     external_fixtures: external_fixture::ExternalFixtures,
     listener: Option<Listener>,
     connection: Option<Connection>,
@@ -134,6 +135,7 @@ impl Conn {
         Conn {
             inner: InProcess::new(root),
             external: None,
+            endpoint_fixed_time: None,
             external_fixtures: external_fixture::ExternalFixtures::disabled(),
             listener: None,
             connection: None,
@@ -155,6 +157,7 @@ impl Conn {
         Conn {
             inner: InProcess::new(root),
             external: None,
+            endpoint_fixed_time: None,
             external_fixtures: external_fixture::ExternalFixtures::disabled(),
             listener: None,
             connection: None,
@@ -197,6 +200,14 @@ struct BodyProgress {
 }
 
 impl Sut for Conn {
+    fn validate_clock(&self, clock: Option<&Value>) -> Result<(), SutError> {
+        if self.external.is_some()
+            && let Some(fixed) = &self.endpoint_fixed_time
+        {
+            external_clock::external_clock(clock, fixed.clone(), Some(fixed))?;
+        }
+        Ok(())
+    }
     fn identity(&mut self) -> Result<TargetIdentity, SutError> {
         if self.external.is_some() {
             return self.external_identity();

@@ -14,15 +14,17 @@
 
 //! The instant an external exchange is signed at.
 //!
-//! Responsible for: translating a case's `[clock]` onto the wall clock an external target runs on.
-//! A case that pins nothing is signed now; a case whose `request_time` is an offset from its
-//! `fixed` instant is signed at the same offset from now, so a skew case still measures the skew;
+//! Responsible for: translating a case's `[clock]` onto wall time or a caller-declared endpoint clock.
+//! Without an endpoint clock, a case that pins nothing is signed now; a `request_time` offset from
+//! its `fixed` instant is signed at the same offset from now, so a skew case still measures the skew;
 //! a case that pins `fixed` alone, or a server-side `skew_ms`, asks for an instant the wire cannot
 //! give the target and is refused with that reason — before this module the external path signed
 //! every case at the pinned instant and every signed request failed `RequestTimeTooSkewed`, which
 //! reads exactly like a failed assertion (rustfs/backlog#2757).
-//! NOT responsible for: the in-process clock (`crate::inprocess::clock_of`, which this reuses for
-//! the `[clock]` reading and its refusals) or fixture signing (`super::external_fixture::clock`).
+//! An explicit endpoint clock permits matching `clock.fixed` declarations. It configures signing;
+//! it neither changes a remote clock nor claims to have observed it.
+//! NOT responsible for: the in-process clock (`crate::inprocess::clock_of`, reused for declarations)
+//! or fixture signing. Fixture controls use the endpoint instant without authored request offsets.
 //! Upstream: `crate::inprocess`. Downstream: `super::external`.
 
 use super::external_fixture::clock::instant_at;
@@ -31,23 +33,37 @@ use crate::sut::SutError;
 use crate::time::Instant;
 use crate::value::Value;
 
-/// The two instants an external exchange needs: the target's own now, and the one to sign at.
+impl super::Conn {
+    /// Time for fixture controls; authored request offsets never affect setup or cleanup.
+    pub(super) fn external_now(&self) -> Result<Instant, SutError> {
+        match &self.endpoint_fixed_time {
+            Some(fixed) => Ok(fixed.clone()),
+            None => super::external_fixture::clock::current_request_time(),
+        }
+    }
+}
+
+/// The two instants an external exchange needs: its time base, and the one to sign at.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct ExternalClock {
-    /// The wall clock the target observes; what the fixture state is dated at.
+    /// Wall time or the caller-declared endpoint instant; not a remote clock observation.
     pub(super) now: Instant,
     /// The instant the request is signed at.
     pub(super) request_time: Instant,
 }
 
-/// Maps the case's `[clock]` onto `now`, the wall clock at the moment of the exchange.
+/// Maps the case's `[clock]` onto the configured endpoint instant, or otherwise wall time.
 ///
 /// # Errors
 ///
 /// Returns [`SutError::Environment`] with the reason when the case asks for an instant the target
-/// cannot be driven to: `clock.fixed` without a `request_time` offset, a non-zero `skew_ms`, or
-/// the declarations `clock_of` refuses for every target.
-pub(super) fn external_clock(clock: Option<&Value>, now: Instant) -> Result<ExternalClock, SutError> {
+/// cannot be driven to: a fixed-time mismatch, an unconfigured `clock.fixed` without a request
+/// offset, a non-zero `skew_ms`, or the declarations `clock_of` refuses for every target.
+pub(super) fn external_clock(
+    clock: Option<&Value>,
+    now: Instant,
+    configured: Option<&Instant>,
+) -> Result<ExternalClock, SutError> {
     let (fixed, request_time, skew_ms) = clock_of(clock)?;
     let pins_fixed = clock.is_some_and(|clock| clock.read("clock.fixed").is_some());
     let shifts_request = clock.is_some_and(|clock| clock.read("clock.request_time").is_some());
@@ -58,24 +74,41 @@ pub(super) fn external_clock(clock: Option<&Value>, now: Instant) -> Result<Exte
                 .to_owned(),
         ));
     }
-    if pins_fixed && !shifts_request {
+    if let Some(configured) = configured {
+        if let Some(text) = clock.and_then(|clock| clock.read("clock.fixed")).and_then(Value::as_str) {
+            let authored = crate::time::parse_fixed_time(text).map_err(SutError::Environment)?;
+            if authored != *configured {
+                return Err(SutError::Environment(
+                    "`clock.fixed` must equal the configured `--endpoint-fixed-time` before fixture contact".to_owned(),
+                ));
+            }
+        }
+    } else if pins_fixed && !shifts_request {
         return Err(SutError::Environment(
             "`clock.fixed` pins the instant the target observes; an external target runs on its own \
              wall clock and cannot be driven to it, so this case is measured in process only"
                 .to_owned(),
         ));
     }
-    // `request_time` is an offset from the case's `fixed` instant, and the offset is what the
-    // case measures: keep it, from the instant the target actually observes.
+    let now = configured.cloned().unwrap_or(now);
+    // Preserve the authored offset from the declared endpoint time, or from wall time when the
+    // endpoint has no explicit clock configuration. This does not observe a remote clock.
     let offset = request_time.unix_seconds.saturating_sub(fixed.unix_seconds);
     let signed_at = now
         .unix_seconds
         .checked_add(offset)
         .ok_or_else(|| SutError::Environment("the case's request-time offset does not fit a signing instant".to_owned()))?;
-    Ok(ExternalClock {
-        now,
-        request_time: instant_at(signed_at)?,
-    })
+    let request_time = if configured.is_some() {
+        Instant {
+            unix_seconds: signed_at,
+            amz_stamp: rustfs_gateway::Timestamp::from_secs(signed_at)
+                .render(rustfs_gateway::TimestampFormat::Iso8601Basic)
+                .map_err(|_| SutError::Environment("fixed-time request offset exceeds the signing date range".to_owned()))?,
+        }
+    } else {
+        instant_at(signed_at)?
+    };
+    Ok(ExternalClock { now, request_time })
 }
 
 #[cfg(test)]
@@ -98,7 +131,7 @@ mod tests {
     /// dated there too.
     #[test]
     fn a_case_without_a_clock_is_signed_now() {
-        let mapped = external_clock(None, now()).expect("mapped");
+        let mapped = external_clock(None, now(), None).expect("mapped");
         assert_eq!(mapped.now, now());
         assert_eq!(mapped.request_time, now());
     }
@@ -106,7 +139,8 @@ mod tests {
     /// Negative — `fixed` alone pins the target's instant, which the wire cannot set.
     #[test]
     fn a_pinned_instant_is_refused_with_the_reason() {
-        let error = external_clock(Some(&clock("[clock]\nfixed = \"2026-01-02T03:04:05Z\"\n")), now()).expect_err("refused");
+        let error =
+            external_clock(Some(&clock("[clock]\nfixed = \"2026-01-02T03:04:05Z\"\n")), now(), None).expect_err("refused");
         assert!(
             matches!(&error, SutError::Environment(reason) if reason.contains("clock.fixed")),
             "{error}"
@@ -118,12 +152,12 @@ mod tests {
     #[test]
     fn a_request_time_offset_is_kept_relative_to_now() {
         let declared = clock("[clock]\nfixed = \"2026-01-02T03:04:05Z\"\nrequest_time = \"2026-01-02T03:20:05Z\"\n");
-        let mapped = external_clock(Some(&declared), now()).expect("mapped");
+        let mapped = external_clock(Some(&declared), now(), None).expect("mapped");
         assert_eq!(mapped.now, now());
         assert_eq!(mapped.request_time.unix_seconds, now().unix_seconds + 16 * 60);
         assert_eq!(mapped.request_time.amz_stamp, "20261007T121600Z");
         let behind = clock("[clock]\nfixed = \"2026-01-02T03:04:05Z\"\nrequest_time = \"2026-01-01T03:04:05Z\"\n");
-        let mapped = external_clock(Some(&behind), now()).expect("mapped");
+        let mapped = external_clock(Some(&behind), now(), None).expect("mapped");
         assert_eq!(mapped.request_time.unix_seconds, now().unix_seconds - 86_400);
     }
 
@@ -131,14 +165,14 @@ mod tests {
     #[test]
     fn a_request_time_without_fixed_is_an_offset_from_the_default_instant() {
         let declared = clock("[clock]\nrequest_time = \"2026-01-02T03:05:05Z\"\n");
-        let mapped = external_clock(Some(&declared), now()).expect("mapped");
+        let mapped = external_clock(Some(&declared), now(), None).expect("mapped");
         assert_eq!(mapped.request_time.unix_seconds, now().unix_seconds + 60);
     }
 
     /// Negative — a server-side skew is the target's clock moving, which the wire cannot do.
     #[test]
     fn a_server_skew_is_refused_with_the_reason() {
-        let error = external_clock(Some(&clock("[clock]\nskew_ms = 1000\n")), now()).expect_err("refused");
+        let error = external_clock(Some(&clock("[clock]\nskew_ms = 1000\n")), now(), None).expect_err("refused");
         assert!(matches!(&error, SutError::Environment(reason) if reason.contains("skew_ms")), "{error}");
     }
 
@@ -149,7 +183,7 @@ mod tests {
             "[clock]\npresign_expires_s = 60\n",
             "[clock]\nadvance_ms_between_exchanges = 1000\n",
         ] {
-            assert!(external_clock(Some(&clock(text)), now()).is_err(), "{text}");
+            assert!(external_clock(Some(&clock(text)), now(), None).is_err(), "{text}");
         }
     }
 }

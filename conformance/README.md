@@ -565,8 +565,29 @@ may write within owned versioned buckets; the runner records each returned versi
 delete markers, and deletes those exact versions before removing the bucket. Copy sources must
 also use owned versioned buckets. Unclassified raw or HTTP/2 mutations, request subresources,
 ambiguous framing and Host overrides remain unsupported. Missing version identities or failed
-cleanup retain ownership and block the next case. Object Lock, uploaded parts and a fixed external
-clock remain unsupported and report their capability reason.
+cleanup retain ownership and block the next case. Object Lock and uploaded parts remain unsupported
+and report their capability reason.
+
+For fixed-clock cases, start the reference launcher with `--fixed-time 2026-01-02T03:04:05Z`
+and pass `--endpoint-fixed-time 2026-01-02T03:04:05Z` to conformance `run` or `baseline` alongside
+`--endpoint`. Both options require a valid whole-second UTC instant; fractional seconds, offsets,
+leap seconds and repeated declarations are refused. The launcher sets both authentication and
+backend timestamps; its option cannot accompany `--external`, which starts no backend.
+
+The conformance option declares a separately configured endpoint clock. It neither sets nor
+observes that remote clock. Any authored `clock.fixed` must match exactly, and a mismatch or an
+unsupported server skew, clock advance or presigned lifetime is refused before fixture contact.
+Setup and cleanup signatures use the configured instant, while authored `request_time` keeps its
+offset from the case's fixed instant (or its default). Without either option, the launcher and
+external signing keep their existing wall-clock behavior. Fixed clocks are for isolated tests:
+the launcher's explicit clock acknowledgement keeps captured signatures valid at that instant.
+
+**BREAKING: migrating conformance 0.16 to 0.17.** The public `cli::Options` struct now includes
+`endpoint_fixed_time`. Add `endpoint_fixed_time: None` to manually constructed `Options` values
+to retain wall-time signing; callers using `Options::parse` need no source change. A `Sut` wrapper
+must forward `validate_clock(&self, clock: Option<&Value>) -> Result<(), SutError>` to its wrapped
+target so its fixed-clock preflight still runs before fixture preparation. Implementations that
+do not wrap another target retain the default no-op hook and their existing exchange validation.
 
 The JSON report carries `profile`, `endpoint` (the URL the run was pointed at) and `target_build`:
 the `Server` header the target sent on one unsigned `HEAD /` before the run, verbatim, or `null`
@@ -610,7 +631,7 @@ the preset (rustfs/backlog#2757); every row names the review that tolerates the 
 `issue` — a rustfs/backlog#2684 entry, a rustfs/gateway#1349 ledger row, or the issue an
 unregistered profile reading cites in `docs/rustfs-profile.md` — and the ledger is read with the
 same reader, so it fails the same way a hand-written one does. It rules behaviour only. A case the
-harness cannot measure against an external target — one that pins `clock.fixed`, needs a fixture
+harness cannot measure against an external target — one that pins an unconfigured `clock.fixed`, needs a fixture
 the external path does not establish, an operation the launcher does not register, an authored
 HTTP/2 script, or a verdict that reads a handler hook only the in-process target has
 (`c-post-0020`, skipped before any request is sent: rustfs/gateway#1406) — is left unruled on

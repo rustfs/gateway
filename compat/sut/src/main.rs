@@ -52,6 +52,7 @@
 //! encrypted listener is what makes those measurable. Plaintext stays on `--port` either way, so
 //! nothing that already points at it changes.
 
+mod clock;
 mod corpus;
 mod forward;
 mod identity;
@@ -93,6 +94,8 @@ pub(crate) struct Options {
     pub(crate) address: SocketAddr,
     pub(crate) accounts: Accounts,
     pub(crate) region: String,
+    /// Explicit whole-second UTC time for authentication and reference storage.
+    pub(crate) fixed_time: Option<i64>,
     pub(crate) probe_log: Option<PathBuf>,
     /// How long one lifecycle day and one automatic sweep last. `None` leaves the reference
     /// backend's 24-hour cadence alone and starts no sweeper, which is what a matrix run wants and
@@ -133,6 +136,7 @@ const BACKEND_FLAGS: &[&str] = &[
     "--corpus-src",
     "--server-domains",
     "--register-only",
+    "--fixed-time",
 ];
 
 /// Parses `--register-only`'s comma-separated list against the reference backend's registry.
@@ -179,6 +183,7 @@ where
     let mut server_domains = Vec::new();
     let mut external = None;
     let mut register_only = None;
+    let mut fixed_time = None;
     let mut backend_flags_given: Vec<&'static str> = Vec::new();
     let mut arguments = arguments.into_iter();
     while let Some(argument) = arguments.next() {
@@ -254,6 +259,7 @@ where
             ),
             "--external" => external = Some(Upstream::parse(&value()?)?),
             "--register-only" => register_only = Some(register_only_names(&value()?)?),
+            "--fixed-time" => fixed_time = Some(clock::parse_option(fixed_time, &value()?)?),
             unknown => {
                 return Err(io::Error::new(io::ErrorKind::InvalidInput, format!("unknown argument: {unknown}")));
             }
@@ -301,6 +307,7 @@ where
         server_domains,
         external,
         register_only,
+        fixed_time,
     })
 }
 

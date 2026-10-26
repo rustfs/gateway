@@ -101,6 +101,13 @@ GATEWAY_COMPAT_SUT_BIN=target/release/compat-sut \
 scripts/check_compat_matrix.sh --matrix target/compat/matrix.json
 ```
 
+`compat-sut --fixed-time 2026-01-02T03:04:05Z` pins authentication and filesystem timestamps for
+isolated clock tests. It accepts one valid whole-second UTC instant and cannot accompany
+`--external`. The default remains the system clock. A fixed clock explicitly acknowledges that
+captured signatures remain valid at that instant; signature verification and skew checks still run.
+The conformance client declares the same endpoint setting with `--endpoint-fixed-time`; see
+[the external fixture guide](../conformance/README.md#running-against-a-rustfs-candidate).
+
 `compat-sut --register-only ListBuckets` (any comma-separated list of the operations the launcher
 registers) is the negative control: started on its own and addressed with `--external`, every
 scenario that needs another operation is recorded `sut-unregistered`, while a scenario the client

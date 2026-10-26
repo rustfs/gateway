@@ -249,6 +249,9 @@ fn run_case(
 
     outcome.phase = Phase::Execute;
     let document = case.document.as_ref().unwrap_or(&Value::Bool(false));
+    if let Err(error) = sut.validate_clock(document.read("clock")) {
+        return not_run(outcome, &error, notes);
+    }
     let mut captures: Captures = match sut.prepare(&case.id, document.read("setup")) {
         Ok(captures) => captures,
         Err(error) => return not_run(outcome, &error, notes),
@@ -769,3 +772,6 @@ mod tls_tests;
 
 #[cfg(test)]
 mod profile_golden_tests;
+
+#[cfg(test)]
+mod fixed_clock_tests;

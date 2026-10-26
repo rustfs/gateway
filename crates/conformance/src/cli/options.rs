@@ -68,6 +68,8 @@ pub struct Options {
     pub root: Option<PathBuf>,
     /// Target endpoint, when one is given.
     pub endpoint: Option<String>,
+    /// Caller-declared fixed clock of an independently configured external endpoint.
+    pub endpoint_fixed_time: Option<crate::time::Instant>,
     /// Additional PEM-encoded roots for an HTTPS endpoint.
     pub ca_cert: Option<PathBuf>,
     /// Explicit permission to create and automatically remove external owned bucket/object fixtures.
@@ -102,6 +104,7 @@ impl Options {
             profile: Profile::Aws,
             root: None,
             endpoint: None,
+            endpoint_fixed_time: None,
             ca_cert: None,
             external_fixtures: false,
             baseline: None,
@@ -134,6 +137,12 @@ impl Options {
                 "--filter" => options.filter = Some(value()?),
                 "--root" => options.root = Some(PathBuf::from(value()?)),
                 "--endpoint" => options.endpoint = Some(value()?),
+                "--endpoint-fixed-time" => {
+                    if options.endpoint_fixed_time.is_some() {
+                        return Err("`--endpoint-fixed-time` may be given only once".to_owned());
+                    }
+                    options.endpoint_fixed_time = Some(crate::time::parse_fixed_time(&value()?)?);
+                }
                 "--ca-cert" => options.ca_cert = Some(PathBuf::from(value()?)),
                 "--allow-external-fixtures" => options.external_fixtures = true,
                 "--baseline" => options.baseline = Some(PathBuf::from(value()?)),
@@ -169,6 +178,14 @@ impl Options {
         }
         if options.external_fixtures && options.endpoint.is_none() {
             return Err("`--allow-external-fixtures` requires `--endpoint`".to_owned());
+        }
+        if options.endpoint_fixed_time.is_some() {
+            if options.endpoint.is_none() {
+                return Err("`--endpoint-fixed-time` requires `--endpoint`".to_owned());
+            }
+            if !matches!(options.command, Command::Run | Command::Baseline) {
+                return Err("`--endpoint-fixed-time` is only meaningful for run and baseline commands".to_owned());
+            }
         }
         if options.rulings.is_some() {
             // A ledger judges verdicts. `validate` evaluates no assertion, `baseline` and

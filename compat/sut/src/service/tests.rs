@@ -796,3 +796,5 @@ mod version_action_tests;
 
 #[path = "tests/legacy_paths.rs"]
 mod legacy_paths;
+
+mod fixed_clock_tests;

@@ -58,6 +58,7 @@ impl Conn {
         Ok(Conn {
             inner: InProcess::new(root),
             external: Some(ExternalEndpoint::parse_with_ca(endpoint, ca_path)?),
+            endpoint_fixed_time: None,
             external_fixtures: super::external_fixture::ExternalFixtures::new(external_fixtures),
             listener: None,
             connection: None,
@@ -78,7 +79,7 @@ impl Conn {
             .external
             .clone()
             .ok_or_else(|| SutError::Environment("external exchange has no configured endpoint".to_owned()))?;
-        let clock = super::external_clock::external_clock(plan.clock, super::external_fixture::clock::current_request_time()?)?;
+        let clock = super::external_clock::external_clock(plan.clock, self.external_now()?, self.endpoint_fixed_time.as_ref())?;
         let request_time = clock.request_time;
         let reuse = read_connection(plan.connection)?;
         self.inner.set_fixture_now(clock.now.unix_seconds);

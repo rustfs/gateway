@@ -88,6 +88,9 @@ impl<S> Recorded<S> {
 }
 
 impl<S: Sut> Sut for Recorded<S> {
+    fn validate_clock(&self, clock: Option<&Value>) -> Result<(), SutError> {
+        self.inner.validate_clock(clock)
+    }
     fn describe(&self) -> String {
         self.inner.describe()
     }

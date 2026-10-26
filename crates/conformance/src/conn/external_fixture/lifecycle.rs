@@ -378,7 +378,7 @@ impl Conn {
                 .collect(),
             sign: Some(region.sign_spec()),
         };
-        let request_time = super::clock::current_request_time()?;
+        let request_time = self.external_now()?;
         let head: Head = self.head(&wire, &request_time)?;
         let started = std::time::Instant::now();
         let deadline = started

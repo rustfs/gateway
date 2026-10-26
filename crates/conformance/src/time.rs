@@ -19,7 +19,8 @@
 //! `YYYYMMDDTHHMMSSZ` stamp that goes into `x-amz-date` and the credential scope.
 //! NOT responsible for: reading the wall clock. A case that declares no clock still gets a pinned
 //! one, because a run whose answer depends on the day it was run cannot be compared to a baseline.
-//! Upstream: nothing. Downstream: `crate::inprocess`.
+//! Explicit endpoint configuration also uses strict whole-second parsing through the facade's
+//! timestamp type. Upstream: `rustfs_gateway::Timestamp`. Downstream: `crate::inprocess`, `crate::cli`.
 
 /// A parsed instant: the second, and the stamp SigV4 signs.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -35,6 +36,20 @@ pub struct Instant {
 /// Any fixed value would do; this one matches what most of the corpus pins, so a case that
 /// declares a clock and a case that does not are not gratuitously an hour apart in a diff.
 pub const DEFAULT_FIXED: &str = "2026-01-02T03:04:05Z";
+
+/// Reads an explicit endpoint clock without truncating precision or normalizing invalid dates.
+pub(crate) fn parse_fixed_time(text: &str) -> Result<Instant, String> {
+    use rustfs_gateway::{Timestamp, TimestampFormat};
+    let bad = || "fixed time requires a valid whole-second UTC instant `YYYY-MM-DDTHH:MM:SSZ`".to_owned();
+    if text.len() != 20 || !text.ends_with('Z') {
+        return Err(bad());
+    }
+    let timestamp = Timestamp::parse(text, TimestampFormat::Iso8601).map_err(|_| bad())?;
+    Ok(Instant {
+        unix_seconds: timestamp.secs(),
+        amz_stamp: timestamp.render(TimestampFormat::Iso8601Basic).map_err(|_| bad())?,
+    })
+}
 
 /// Parses the RFC 3339 UTC form the schema pins: `YYYY-MM-DDTHH:MM:SS[.fff]Z`.
 ///

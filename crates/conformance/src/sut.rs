@@ -171,6 +171,18 @@ pub trait Sut {
         false
     }
 
+    /// Checks case clock compatibility before any fixture is prepared.
+    ///
+    /// This validates configuration only and must not contact or mutate the target. The default
+    /// preserves targets that validate their clocks during exchange. Wrappers must forward it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SutError`] when the target cannot honor the authored clock configuration.
+    fn validate_clock(&self, _clock: Option<&Value>) -> Result<(), SutError> {
+        Ok(())
+    }
+
     /// Establishes the fixtures a case declares, returning any captures the setup minted.
     ///
     /// Setup traffic is not under test: a target may use normalised, correctly signed requests
