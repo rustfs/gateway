@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Opt-in owned bucket, object, and empty-upload fixtures for an external conformance endpoint.
+//! Opt-in owned bucket, object, version, and empty-upload fixtures for an external endpoint.
 //!
-//! Responsible for: validating the narrow remote-setup subset, refusing authored mutations while
-//! ownership is active, and holding successful or unresolved remote ownership.
-//! NOT responsible for: versioned, locked, uploaded-part, or fault fixtures; endpoint resolution; authored
+//! Responsible for: validating the narrow remote-setup subset, restricting authored writes to
+//! classified owned versions, and holding successful or unresolved remote ownership.
+//! NOT responsible for: locked, uploaded-part, or fault fixtures; endpoint resolution; authored
 //! exchange pacing; or response judgement. Upstream: `external`; downstream: the endpoint selected
 //! by `crate::cli`.
 
@@ -39,6 +39,9 @@ mod object_tests;
 mod region;
 #[cfg(test)]
 mod runner_tests;
+mod versioned;
+#[cfg(test)]
+mod versioned_tests;
 
 #[derive(Debug)]
 pub(super) struct ExternalFixtures {
@@ -47,6 +50,7 @@ pub(super) struct ExternalFixtures {
     owned_buckets: Vec<OwnedBucket>,
     owned_objects: Vec<object::OwnedObject>,
     owned_uploads: Vec<multipart::OwnedUpload>,
+    owned_versions: Vec<versioned::OwnedVersion>,
 }
 
 #[derive(Debug)]
@@ -54,6 +58,7 @@ struct BucketPlan {
     name: String,
     absent: bool,
     region: region::FixtureRegion,
+    versioned: bool,
 }
 
 #[derive(Debug)]
@@ -67,6 +72,7 @@ struct FixturePlan {
 struct OwnedBucket {
     name: String,
     region: region::FixtureRegion,
+    versioned: bool,
 }
 
 impl ExternalFixtures {
@@ -81,6 +87,7 @@ impl ExternalFixtures {
             owned_buckets: Vec::new(),
             owned_objects: Vec::new(),
             owned_uploads: Vec::new(),
+            owned_versions: Vec::new(),
         }
     }
 
@@ -95,6 +102,7 @@ impl ExternalFixtures {
             || !self.owned_buckets.is_empty()
             || !self.owned_objects.is_empty()
             || !self.owned_uploads.is_empty()
+            || !self.owned_versions.is_empty()
         {
             return Err(SutError::Environment(
                 "external fixture setup cannot start because cleanup from the previous case is incomplete".to_owned(),
@@ -130,11 +138,12 @@ impl ExternalFixtures {
                     "external fixture bucket `{name}` is declared more than once"
                 )));
             }
-            if !matches!(bucket.read("setup.buckets[].versioning").and_then(Value::as_str), None | Some("disabled"))
+            let versioning = bucket.read("setup.buckets[].versioning").and_then(Value::as_str);
+            if !matches!(versioning, None | Some("disabled" | "enabled"))
                 || bucket.read("setup.buckets[].object_lock").and_then(Value::as_bool) == Some(true)
             {
                 return Err(SutError::Environment(format!(
-                    "external bucket state for `{name}` is not supported; object fixtures require an owned, non-absent, unversioned and unlocked bucket"
+                    "external bucket state for `{name}` is not supported; object fixtures require an owned, non-absent, unlocked bucket with versioning disabled or enabled"
                 )));
             }
             plan.push(BucketPlan {
@@ -144,6 +153,7 @@ impl ExternalFixtures {
                     .and_then(Value::as_bool)
                     .unwrap_or(false),
                 region: region::FixtureRegion::parse(bucket.read("setup.buckets[].region").and_then(Value::as_str))?,
+                versioned: versioning == Some("enabled"),
             });
         }
         let objects = object::plans(setup, &plan, decoder)?;
@@ -436,7 +446,7 @@ mod tests {
             "unknown = true\n",
             "[[buckets]]\nname = \"fixture-one\"\n[[multipart_uploads]]\nbucket = \"fixture-one\"\nkey = \"one\"\nparts = [{ part_number = 1, body = { utf8 = \"part\" } }]\n",
             "fault = { operation = \"PutObject\", at = \"after_commit\", code = \"InternalError\" }\n",
-            "[[buckets]]\nname = \"fixture-one\"\nversioning = \"enabled\"\n",
+            "[[buckets]]\nname = \"fixture-one\"\nversioning = \"suspended\"\n",
             "[[buckets]]\nname = \"fixture-one\"\nobject_lock = true\n",
             "[[buckets]]\nname = \"fixture-one\"\nregion = \"../us-west-2\"\n",
             "[[buckets]]\nname = \"../escape\"\n",
@@ -466,7 +476,7 @@ mod tests {
         let mut target = Conn::external_with_fixtures(std::path::PathBuf::from("."), &format!("http://{address}"), None)
             .expect("opted-in target");
         let setup = request_block(
-            "cleanup = \"auto\"\n[[buckets]]\nname = \"fixture-one\"\n[[buckets]]\nname = \"fixture-two\"\nversioning = \"enabled\"\n",
+            "cleanup = \"auto\"\n[[buckets]]\nname = \"fixture-one\"\n[[buckets]]\nname = \"fixture-two\"\nversioning = \"suspended\"\n",
         );
 
         target

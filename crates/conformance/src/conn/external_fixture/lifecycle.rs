@@ -49,6 +49,7 @@ impl Conn {
                 || !self.external_fixtures.owned_buckets.is_empty()
                 || !self.external_fixtures.owned_objects.is_empty()
                 || !self.external_fixtures.owned_uploads.is_empty()
+                || !self.external_fixtures.owned_versions.is_empty()
             {
                 return Err(SutError::Environment(
                     "external fixture cleanup from the previous case is incomplete".to_owned(),
@@ -97,10 +98,20 @@ impl Conn {
                     bucket.name
                 ))));
             }
-            self.external_fixtures.owned_buckets.push(super::OwnedBucket {
+            let owned = super::OwnedBucket {
                 name: bucket.name,
                 region: bucket.region,
-            });
+                versioned: bucket.versioned,
+            };
+            let enablement = if owned.versioned {
+                self.enable_fixture_versioning(&owned)
+            } else {
+                Ok(())
+            };
+            self.external_fixtures.owned_buckets.push(owned);
+            if let Err(error) = enablement {
+                return Err(self.abort_external_prepare(error));
+            }
         }
         for object in plan.objects {
             let status = match self.fixture_control_status("HEAD", &object.target, &object.region, &[], &[]) {
@@ -122,6 +133,17 @@ impl Conn {
                 return Err(self.abort_external_prepare(error));
             }
             if object.absent {
+                continue;
+            }
+            if self
+                .external_fixtures
+                .owned_buckets
+                .iter()
+                .any(|bucket| bucket.name == object.bucket && bucket.versioned)
+            {
+                if let Err(error) = self.put_fixture_version(&object) {
+                    return Err(self.abort_external_prepare(error));
+                }
                 continue;
             }
             let status = match self.fixture_control_status("PUT", &object.target, &object.region, &object.body, &object.headers) {
@@ -221,6 +243,28 @@ impl Conn {
         }
         failed_uploads.reverse();
         self.external_fixtures.owned_uploads = failed_uploads;
+        let mut failed_versions = Vec::new();
+        while let Some(version) = self.external_fixtures.owned_versions.pop() {
+            let Some(id) = version.version_id.as_deref() else {
+                messages.push(super::versioned::unresolved().to_string());
+                failed_versions.push(version);
+                continue;
+            };
+            let target = super::versioned::delete_target(&version, id);
+            match self.fixture_control_status("DELETE", &target, &version.region, &[], &[]) {
+                Ok(204) => {}
+                Ok(status) => {
+                    messages.push(format!("version DELETE for bucket `{}` returned status {status}", version.bucket));
+                    failed_versions.push(version);
+                }
+                Err(error) => {
+                    messages.push(format!("version DELETE for bucket `{}` failed: {error}", version.bucket));
+                    failed_versions.push(version);
+                }
+            }
+        }
+        failed_versions.reverse();
+        self.external_fixtures.owned_versions = failed_versions;
         while let Some(object) = self.external_fixtures.owned_objects.pop() {
             match self.fixture_control_status("DELETE", &object.target, &object.region, &[], &[]) {
                 Ok(204) => {}
@@ -243,6 +287,12 @@ impl Conn {
                     .owned_uploads
                     .iter()
                     .map(|upload| upload.bucket.clone()),
+            )
+            .chain(
+                self.external_fixtures
+                    .owned_versions
+                    .iter()
+                    .map(|version| version.bucket.clone()),
             )
             .collect::<BTreeSet<_>>();
         self.external_fixtures.owned_objects = failed_objects;
@@ -294,6 +344,21 @@ impl Conn {
         body: &[u8],
         extra_headers: &[(String, String)],
     ) -> Result<(u16, Vec<u8>), SutError> {
+        let observation = self.fixture_control_observation(method, target, region, body, extra_headers)?;
+        let status = observation
+            .status
+            .ok_or_else(|| SutError::Environment(format!("external fixture {method} returned no status")))?;
+        Ok((status, observation.body))
+    }
+
+    pub(super) fn fixture_control_observation(
+        &self,
+        method: &str,
+        target: &str,
+        region: &super::region::FixtureRegion,
+        body: &[u8],
+        extra_headers: &[(String, String)],
+    ) -> Result<crate::observation::Observation, SutError> {
         let endpoint = self
             .external
             .clone()
@@ -328,11 +393,7 @@ impl Conn {
             deadline,
             !endpoint.is_tls(),
         )?;
-        let status = result
-            .observation
-            .status
-            .ok_or_else(|| SutError::Environment(format!("external fixture {method} returned no status")))?;
-        Ok((status, result.observation.body))
+        Ok(result.observation)
     }
 }
 

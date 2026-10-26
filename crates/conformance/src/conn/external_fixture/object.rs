@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Validation and wire plans for unversioned external object fixtures.
+//! Validation and wire plans for external object fixtures.
 //!
 //! Responsible for: binding objects to owned bucket plans, decoding every payload source,
 //! validating object headers before remote mutation, and encoding path-style control targets.
@@ -93,10 +93,14 @@ pub(super) fn plans(setup: &Value, buckets: &[BucketPlan], decoder: &InProcess) 
             None => Vec::new(),
         };
         let headers = object_headers(content_type, storage_class, metadata)?;
+        let target = object_target(bucket, key)?;
+        if bucket_plan.versioned {
+            super::versioned::object_bucket(&target)?;
+        }
         plans.push(ObjectPlan {
             bucket: bucket.to_owned(),
             key: key.to_owned(),
-            target: object_target(bucket, key)?,
+            target,
             absent,
             region: bucket_plan.region.clone(),
             body,

@@ -558,6 +558,16 @@ cargo xtask conformance run --profile rustfs --endpoint http://127.0.0.1:9100 \
     --allow-external-fixtures --rulings conformance/rulings/rustfs-profile.toml --json report.json
 ```
 
+The fixture opt-in supports owned buckets, objects, empty multipart uploads, and enabled versioning.
+An existing bucket is never adopted. Versioned buckets are enabled and read back before setup
+objects or authored writes run. Structured path-style object PUT, CopyObject and DELETE exchanges
+may write within owned versioned buckets; the runner records each returned version ID, including
+delete markers, and deletes those exact versions before removing the bucket. Copy sources must
+also use owned versioned buckets. Unclassified raw or HTTP/2 mutations, request subresources,
+ambiguous framing and Host overrides remain unsupported. Missing version identities or failed
+cleanup retain ownership and block the next case. Object Lock, uploaded parts and a fixed external
+clock remain unsupported and report their capability reason.
+
 The JSON report carries `profile`, `endpoint` (the URL the run was pointed at) and `target_build`:
 the `Server` header the target sent on one unsigned `HEAD /` before the run, verbatim, or `null`
 when it sent none. The gateway's own header is the product name and nothing else (`stamp.rs`), so
