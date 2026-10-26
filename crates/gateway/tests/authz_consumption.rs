@@ -588,10 +588,28 @@ impl Handler<dto::CopyObject> for CopyVersionBackend {
         self.observe(&request.input().copy_source, request.resources().source().resolve(request.read_proof()))?;
         Ok(Resp::new(dto::CopyObjectOutput::default()))
     }
+
+    async fn call_with_context(
+        &self,
+        request: Req<dto::CopyObject>,
+        _context: rustfs_gateway::HandlerContext,
+    ) -> HandlerResult<dto::CopyObject> {
+        self.observe(&request.input().copy_source, request.resources().source().resolve(request.read_proof()))?;
+        Ok(Resp::new(dto::CopyObjectOutput::default()))
+    }
 }
 
 impl Handler<dto::UploadPartCopy> for CopyVersionBackend {
     async fn call(&self, request: Req<dto::UploadPartCopy>) -> HandlerResult<dto::UploadPartCopy> {
+        self.observe(&request.input().copy_source, request.resources().source().resolve(request.read_proof()))?;
+        Ok(Resp::new(dto::UploadPartCopyOutput::default()))
+    }
+
+    async fn call_with_context(
+        &self,
+        request: Req<dto::UploadPartCopy>,
+        _context: rustfs_gateway::HandlerContext,
+    ) -> HandlerResult<dto::UploadPartCopy> {
         self.observe(&request.input().copy_source, request.resources().source().resolve(request.read_proof()))?;
         Ok(Resp::new(dto::UploadPartCopyOutput::default()))
     }
