@@ -46,9 +46,15 @@ fn tagging_directive(input: &CopyObjectInput) -> Result<MetadataSource, HandlerE
         .ok_or_else(|| HandlerError::new(ErrorCode::INVALID_ARGUMENT, "x-amz-tagging-directive must be COPY or REPLACE"))
 }
 
-/// Refuses ARN identities this backend cannot resolve, before any local bucket lookup.
-pub(super) fn guard_copy_source_form(form: rustfs_gateway::CopySourceForm) -> Result<(), HandlerError> {
-    if form != rustfs_gateway::CopySourceForm::Path {
+/// Refuses invalid versions and unsupported identities before any local bucket lookup.
+pub(super) fn guard_copy_source_address(source: &rustfs_gateway::ResolvedCopySource) -> Result<(), HandlerError> {
+    if source.version_id() == Some("") {
+        return Err(HandlerError::new(
+            ErrorCode::INVALID_ARGUMENT,
+            "the versionId of x-amz-copy-source must not be empty",
+        ));
+    }
+    if source.form() != rustfs_gateway::CopySourceForm::Path {
         return Err(HandlerError::not_implemented(
             "ARN copy sources are not supported by the filesystem backend",
         ));
@@ -147,7 +153,7 @@ impl Handler<CopyObject> for FsBackend {
             .source()
             .resolve(request.read_proof())
             .ok_or_else(|| HandlerError::internal_error("the copy-source authorization proof did not match"))?;
-        guard_copy_source_form(source.form())?;
+        guard_copy_source_address(&source)?;
         let source_bucket = source
             .bucket()
             .ok_or_else(|| HandlerError::internal_error("a path copy source has no bucket"))?;

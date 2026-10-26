@@ -498,3 +498,190 @@ async fn derived_delete_keys_still_inherit_the_routed_bucket() {
     );
     assert_eq!(reached.load(Ordering::SeqCst), 1);
 }
+
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+struct CopyVersionTrace {
+    route_calls: usize,
+    input_calls: usize,
+    actions: Vec<String>,
+    versions: Vec<Option<String>>,
+    handler_calls: usize,
+    sealed: Option<bool>,
+    resolved_version: Option<Option<String>>,
+}
+
+#[derive(Clone, Copy)]
+enum CopyVersionDecision {
+    Allow,
+    DenyRoute,
+    DenySource,
+}
+
+struct CopyVersionAuthorizer {
+    trace: Arc<Mutex<CopyVersionTrace>>,
+    decision: CopyVersionDecision,
+}
+
+impl rustfs_gateway::Authorizer for CopyVersionAuthorizer {
+    fn authorize_route<'a>(
+        &'a self,
+        _context: &'a RequestContext<'a>,
+        _request: &'a AuthzRequest<'a>,
+    ) -> BoxFuture<'a, Decision> {
+        self.trace.lock().expect("trace lock").route_calls += 1;
+        let decision = if matches!(self.decision, CopyVersionDecision::DenyRoute) {
+            Decision::Deny
+        } else {
+            Decision::Allow
+        };
+        Box::pin(async move { decision })
+    }
+
+    fn authorize_input<'a>(
+        &'a self,
+        _context: &'a RequestContext<'a>,
+        request: &'a InputAuthzRequest<'a>,
+    ) -> BoxFuture<'a, InputDecisions> {
+        let mut trace = self.trace.lock().expect("trace lock");
+        trace.input_calls += 1;
+        trace.actions = request
+            .resources()
+            .iter()
+            .map(|resource| resource.action.to_owned())
+            .collect();
+        trace.versions = request
+            .resources()
+            .iter()
+            .map(|resource| resource.version_id.map(str::to_owned))
+            .collect();
+        let decision = if matches!(self.decision, CopyVersionDecision::DenySource) {
+            Decision::Deny
+        } else {
+            Decision::Allow
+        };
+        let decisions = request.decide_all(Decision::Allow, |_| decision);
+        Box::pin(async move { decisions })
+    }
+}
+
+struct CopyVersionBackend(Arc<Mutex<CopyVersionTrace>>);
+
+impl CopyVersionBackend {
+    fn observe(&self, raw: &str, source: Option<rustfs_gateway::ResolvedCopySource>) -> Result<(), rustfs_gateway::HandlerError> {
+        let mut trace = self.0.lock().expect("trace lock");
+        trace.handler_calls += 1;
+        trace.sealed = Some(raw.is_empty());
+        trace.resolved_version = source.map(|source| source.version_id().map(str::to_owned));
+        // This fixture's storage rejects an empty version, after the source authorization hook.
+        if trace.resolved_version == Some(Some(String::new())) {
+            return Err(rustfs_gateway::HandlerError::new(
+                rustfs_gateway::ErrorCode::INVALID_ARGUMENT,
+                "storage rejected an empty source version",
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl Handler<dto::CopyObject> for CopyVersionBackend {
+    async fn call(&self, request: Req<dto::CopyObject>) -> HandlerResult<dto::CopyObject> {
+        self.observe(&request.input().copy_source, request.resources().source().resolve(request.read_proof()))?;
+        Ok(Resp::new(dto::CopyObjectOutput::default()))
+    }
+}
+
+impl Handler<dto::UploadPartCopy> for CopyVersionBackend {
+    async fn call(&self, request: Req<dto::UploadPartCopy>) -> HandlerResult<dto::UploadPartCopy> {
+        self.observe(&request.input().copy_source, request.resources().source().resolve(request.read_proof()))?;
+        Ok(Resp::new(dto::UploadPartCopyOutput::default()))
+    }
+}
+
+#[tokio::test]
+async fn an_empty_copy_version_keeps_source_denial_ahead_of_storage_validation() {
+    for decision in [
+        CopyVersionDecision::Allow,
+        CopyVersionDecision::DenyRoute,
+        CopyVersionDecision::DenySource,
+    ] {
+        let trace = Arc::new(Mutex::new(CopyVersionTrace::default()));
+        let service = wired()
+            .rustfs_profile()
+            .authorizer(CopyVersionAuthorizer {
+                trace: Arc::clone(&trace),
+                decision,
+            })
+            .register::<dto::CopyObject, _>(Arc::new(CopyVersionBackend(Arc::clone(&trace))))
+            .register::<dto::UploadPartCopy, _>(Arc::new(CopyVersionBackend(Arc::clone(&trace))))
+            .build()
+            .expect("copy assembly");
+        for part in [false, true] {
+            for (source, version, malformed) in [
+                ("src/key", None, false),
+                ("src/key?versionId=v1", Some("v1"), false),
+                ("src/key?versionId=", Some(""), false),
+                ("src/key?versionId=%FF", None, true),
+                ("src/", None, true),
+                ("src/%00", None, true),
+                ("arn:bad", None, true),
+            ] {
+                *trace.lock().expect("trace lock") = CopyVersionTrace::default();
+                let target = if part {
+                    "/dst/key?partNumber=1&uploadId=u"
+                } else {
+                    "/dst/key"
+                };
+                let request = http::Request::builder()
+                    .method(http::Method::PUT)
+                    .uri(target)
+                    .header("host", "host.invalid")
+                    .header("content-length", "0")
+                    .header("x-amz-copy-source", source)
+                    .body(bytes::Bytes::new())
+                    .expect("request");
+                let (status, body) = exchange(&service, request).await;
+                let code = body
+                    .split_once("<Code>")
+                    .and_then(|(_, tail)| tail.split_once("</Code>"))
+                    .map(|(code, _)| code);
+                let mut expected = CopyVersionTrace {
+                    route_calls: 1,
+                    ..Default::default()
+                };
+                let (expected_status, expected_code) = if matches!(decision, CopyVersionDecision::DenyRoute) {
+                    (403, Some("AccessDenied"))
+                } else if malformed {
+                    (400, Some("InvalidArgument"))
+                } else {
+                    expected.input_calls = 1;
+                    expected.actions.push(
+                        if version.is_some() {
+                            "s3:GetObjectVersion"
+                        } else {
+                            "s3:GetObject"
+                        }
+                        .to_owned(),
+                    );
+                    expected.versions.push(version.map(str::to_owned));
+                    if matches!(decision, CopyVersionDecision::DenySource) {
+                        (403, Some("AccessDenied"))
+                    } else {
+                        expected.handler_calls = 1;
+                        expected.sealed = Some(true);
+                        expected.resolved_version = Some(version.map(str::to_owned));
+                        if version == Some("") {
+                            (400, Some("InvalidArgument"))
+                        } else {
+                            (200, None)
+                        }
+                    }
+                };
+                assert_eq!(
+                    (status.as_u16(), code, trace.lock().expect("trace lock").clone()),
+                    (expected_status, expected_code, expected),
+                    "part={part}, source={source}, response={body}"
+                );
+            }
+        }
+    }
+}
