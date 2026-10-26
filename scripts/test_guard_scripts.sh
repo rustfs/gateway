@@ -2302,6 +2302,24 @@ expect_fail check_xtask_codegen_surface.sh \
     'the gateway fast scope rerunning its million-address governor contract' \
     mut_xtask_gateway_fast_scope_runs_address_table_stress
 
+# rustfs/gateway#1496: keep the facade's worker count bounded without changing its checks.
+mut_xtask_gateway_fast_scope_loses_worker_limit() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("xtask/src/verify.rs")
+text = path.read_text()
+old = '            "--test-threads=4".to_owned(),\n'
+if text.count(old) != 1:
+    raise SystemExit("gateway test worker limit is missing")
+path.write_text(text.replace(old, "", 1))
+PYEOF
+}
+expect_fail check_xtask_codegen_surface.sh \
+    'the gateway fast scope losing its test worker limit' \
+    mut_xtask_gateway_fast_scope_loses_worker_limit \
+    'use four libtest workers'
+
 # rustfs/gateway#1264: the socket-timing target is a loop of its own, under its own 30 seconds.
 mut_xtask_gateway_socket_timing_joins_the_first_loop() {
     python3 - <<'PYEOF'

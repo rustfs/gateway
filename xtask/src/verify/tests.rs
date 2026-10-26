@@ -246,6 +246,7 @@ fn facade_fast_scope_keeps_heavy_contracts_in_the_workspace_gate() {
             GATEWAY_RSS_TEST,
             "--skip",
             GATEWAY_ADDRESS_TABLE_TEST,
+            "--test-threads=4",
         ]
         .into_iter()
         .map(str::to_owned)

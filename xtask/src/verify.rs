@@ -145,6 +145,8 @@ fn crate_step_batches(package: &str) -> Vec<Vec<Vec<String>>> {
             GATEWAY_RSS_TEST.to_owned(),
             "--skip".to_owned(),
             GATEWAY_ADDRESS_TABLE_TEST.to_owned(),
+            // Bound libtest workers for the facade's fixture-heavy fast loop (#1496).
+            "--test-threads=4".to_owned(),
         ]);
         let clippy = steps.remove(0);
         // The socket-timing suites wait on real sockets and timers rather than on the CPU, so they
