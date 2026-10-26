@@ -167,9 +167,12 @@ impl CopySource {
     /// produced, held to that floor and the deployment's validator through the same
     /// materialisation a body-carried key goes through, as legacy RustFS reads a copy source's key.
     ///
+    /// RustFS path addressing preserves an explicitly empty version for source authorization;
+    /// the backend remains responsible for validating that version before accessing storage.
+    ///
     /// # Errors
     ///
-    /// As [`CopySource::parse`].
+    /// As [`CopySource::parse`], except that RustFS path addressing permits an empty version.
     pub fn parse_under(raw: &str, names: &NamePolicy) -> Result<Self, CopySourceRejection> {
         if raw.is_empty() {
             return Err(CopySourceRejection::new(
@@ -484,13 +487,8 @@ fn split_version_as_legacy_rustfs(raw: &str) -> Result<(&str, Option<String>), C
         return Ok((raw, None));
     };
     let value = decode(value)?;
-    if value.is_empty() {
-        // Legacy RustFS's storage refuses an empty version with this code, after authorization.
-        return Err(CopySourceRejection::new(
-            ErrorCode::INVALID_ARGUMENT,
-            "the versionId of x-amz-copy-source must not be empty",
-        ));
-    }
+    // An empty version still selects GetObjectVersion. Storage validates it after authorization.
+    // Public-service evidence: https://github.com/rustfs/gateway/issues/1470#issuecomment-6405119839
     Ok((path, Some(value)))
 }
 

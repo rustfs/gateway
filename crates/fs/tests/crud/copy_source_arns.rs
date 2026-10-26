@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! ARN copy sources must not alias ordinary filesystem buckets.
+//! Unsupported copy sources and empty versions must not reach filesystem writes.
 //!
-//! Responsible for: object/part refusal, same-name and missing buckets, and authorization order.
+//! Responsible for: object/part refusal, same-name and missing buckets, empty versions, and authorization order.
 //! NOT responsible for: parsing ARN spellings or implementing access points and Outposts.
 //! Upstream: the production copy routes. Downstream: filesystem data and the verification gate.
 
@@ -194,4 +194,62 @@ async fn plain_sources_still_copy_objects_and_parts() {
     let tag = copied_etag(&part_copy(&service, DESTINATION, &id, 1, "/source/key", &[]).await);
     assert_eq!(complete(&service, "destination", "kept", &id, &[(1, &tag)]).await.status(), 200);
     assert_eq!(read(&service, DESTINATION).await, SOURCE);
+}
+
+#[tokio::test]
+async fn n_empty_copy_versions_keep_backend_refusal_after_authorization() {
+    let root = TestRoot::new();
+    let (backend, ordinary) = service(&root);
+    fixture(&ordinary).await;
+    let id = initiate(&ordinary, "destination", "kept").await;
+    let tag = upload_part(&ordinary, "destination", "kept", &id, 1, ORIGINAL).await;
+    let mut observed = Vec::new();
+    let mut expected = Vec::new();
+    for deny in [false, true] {
+        let credentials =
+            Arc::new(StaticCredentials::new().with(Credentials::new("AKIDEXAMPLE", b"secret").expect("credentials")));
+        let builder = rustfs_gateway::ServiceBuilder::new()
+            .rustfs_profile()
+            .authenticator(SigV4Authenticator::new(credentials, RegionSet::new(["us-east-1"]).expect("region")))
+            .authorizer(allow_when(move |request| !deny || request.action != "s3:GetObjectVersion"))
+            .clock_with_skew_ack(
+                FixedClock::at_unix_seconds(SIGNED_AT_SECONDS),
+                ClockSkewAck::i_understand_a_skewed_clock_can_disable_signature_expiry(),
+            );
+        let service = backend
+            .register_multipart(backend.register_crud(builder))
+            .build()
+            .expect("copy registry");
+        for source in [
+            "/source/key?versionId=",
+            "/missing/key?versionId=",
+            "arn:aws:s3:us-east-1:123456789012:accesspoint/source/object/key?versionId=",
+            "arn:aws:s3-outposts:us-east-1:123456789012:outpost/op-1/object/key?versionId=",
+        ] {
+            for part in [false, true] {
+                let response = if part {
+                    part_copy(&service, DESTINATION, &id, 1, source, &[]).await
+                } else {
+                    object_copy(&service, source, false).await
+                };
+                observed.push((
+                    response.status().as_u16(),
+                    element(response.body(), "Code"),
+                    read(&ordinary, DESTINATION).await,
+                    part_count(&ordinary, DESTINATION, &id).await,
+                ));
+                expected.push((
+                    if deny { 403 } else { 400 },
+                    Some(if deny { "AccessDenied" } else { "InvalidArgument" }.to_owned()),
+                    ORIGINAL.to_vec(),
+                    1,
+                ));
+            }
+        }
+    }
+    let completed = complete(&ordinary, "destination", "kept", &id, &[(1, &tag)]).await;
+    assert_eq!(
+        (observed, completed.status().as_u16(), read(&ordinary, DESTINATION).await),
+        (expected, 200, ORIGINAL.to_vec())
+    );
 }

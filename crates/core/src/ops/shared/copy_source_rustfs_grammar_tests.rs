@@ -86,15 +86,7 @@ fn a_question_mark_is_key_bytes_until_the_first_version() {
 /// Negative — what legacy RustFS refuses as a copy source is still refused, `InvalidArgument`.
 #[test]
 fn n_a_source_legacy_rustfs_refuses_is_refused() {
-    for raw in [
-        "Bad_Bucket/obj",
-        "1.2.3.4/obj",
-        "xn--abc/obj",
-        "src",
-        "/src",
-        "//src/obj",
-        "src/obj?versionId=",
-    ] {
+    for raw in ["Bad_Bucket/obj", "1.2.3.4/obj", "xn--abc/obj", "src", "/src", "//src/obj"] {
         assert_eq!(source(raw, &rustfs()), Err(ErrorCode::INVALID_ARGUMENT), "{raw}");
     }
 }
@@ -252,13 +244,12 @@ fn n_arn_leading_slash_does_not_accept_two_or_more_slashes() {
 }
 
 #[test]
-fn n_arn_leading_slash_keeps_malformed_arns_and_versions_refused() {
+fn n_arn_leading_slash_keeps_malformed_components_refused() {
     for names in [NamePolicy::default(), rustfs()] {
         for raw in [
             "/arn:aws:iam:us-east-1:123456789012:user/name",
             "/arn:aws:s3:us-east-1:12345:accesspoint/my-ap/object/key",
             "/arn:aws:s3:us-east-1:123456789012:accesspoint/my-ap/object/",
-            "/arn:aws:s3:us-east-1:123456789012:accesspoint/my-ap/object/key?versionId=",
             "/arn:aws:s3-outposts:us-east-1:123456789012:outpost//object/key",
         ] {
             assert_eq!(source(raw, &names), Err(ErrorCode::INVALID_ARGUMENT), "{raw}");
@@ -693,9 +684,73 @@ fn n_bucketless_outposts_keeps_malformed_components_refused() {
             BUCKETLESS_OUTPOSTS.replace("123456789012", "123"),
             BUCKETLESS_OUTPOSTS.replace("/object/literal%252Fkey", "/object/"),
             BUCKETLESS_OUTPOSTS.replace("/object/", "/extra/object/"),
-            format!("{BUCKETLESS_OUTPOSTS}?versionId="),
         ] {
             assert_eq!(source(&raw, &names), Err(ErrorCode::INVALID_ARGUMENT));
+        }
+    }
+}
+
+/// Legacy decoding preserves version presence; storage validates its value after authorization.
+#[test]
+fn an_empty_legacy_copy_version_reaches_versioned_authorization() {
+    for raw in [
+        "src/key?versionId=",
+        "src/obj?versionId=",
+        "/src/key?versionId=",
+        "/arn:aws:s3:us-east-1:123456789012:accesspoint/my-ap/object/key?versionId=",
+        "arn:aws:s3-outposts:us-east-1:123456789012:outpost/op-1/object/literal%252Fkey?versionId=",
+    ] {
+        let input = CopyObjectInput {
+            copy_source: raw.to_owned(),
+            ..Default::default()
+        };
+        let result = prepare_input_under::<CopyObject>(input, &rustfs()).map(|decoded| {
+            let mut resources = Vec::new();
+            crate::DerivedResourceSet::visit(decoded.resources(), &mut |resource| {
+                resources.push((resource.action().to_owned(), resource.version_id().map(str::to_owned)));
+            });
+            let authorized = authorize_input(decoded, |_| Decision::Allow).expect("source authorized");
+            let resolved = authorized.resources().source().resolve(authorized.read_proof());
+            (
+                resources,
+                authorized.input().copy_source.is_empty(),
+                resolved.map(|source| source.version_id().map(str::to_owned)),
+            )
+        });
+        assert_eq!(
+            result.ok(),
+            Some((
+                vec![("s3:GetObjectVersion".to_owned(), Some(String::new()))],
+                true,
+                Some(Some(String::new()))
+            )),
+            "{raw}"
+        );
+        assert_eq!(source(raw, &NamePolicy::default()), Err(ErrorCode::INVALID_ARGUMENT), "{raw}");
+    }
+}
+
+#[test]
+fn empty_absent_and_nonempty_copy_versions_need_their_own_proof() {
+    let mut sources = Vec::new();
+    for suffix in ["", "?versionId=", "?versionId=v1"] {
+        let input = CopyObjectInput {
+            copy_source: format!("src/key{suffix}"),
+            ..Default::default()
+        };
+        sources.push(
+            prepare_input_under::<CopyObject>(input, &rustfs())
+                .map(|decoded| authorize_input(decoded, |_| Decision::Allow).expect("source authorized")),
+        );
+    }
+    for (index, source) in sources.iter().enumerate() {
+        for (proof_index, proof_source) in sources.iter().enumerate() {
+            let matched = source
+                .as_ref()
+                .ok()
+                .zip(proof_source.as_ref().ok())
+                .map(|(source, proof_source)| source.resources().source().resolve(proof_source.read_proof()).is_some());
+            assert_eq!(matched, Some(index == proof_index), "source {index}, proof {proof_index}");
         }
     }
 }
