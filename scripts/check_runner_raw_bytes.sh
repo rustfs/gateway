@@ -6,6 +6,7 @@ set -euo pipefail
 #   The conformance runner keeps a raw TCP request path, writes the declared
 #   byte slice directly, and does not acquire an HTTP or S3 client dependency.
 #   A TLS record layer is not such a client: it carries the same bytes.
+#   XML reading is confined to returned external fixture upload identities.
 #
 # WHY
 #   P8-01 cases include malformed framing. A client library would normalise the
@@ -50,7 +51,9 @@ except (OSError, tomllib.TOMLDecodeError) as error:
 # negative case exists to send; every other addition still has to be argued for here. `rcgen` only
 # mints the throwaway certificate the production listener serves when a case declares
 # `[connection.tls]`; it never sees a request byte.
-allowed_dependencies = {"rustfs-gateway", "bytes", "http", "http-body", "tokio", "rustls", "webpki-roots", "rcgen"}
+# `quick-xml` reads only an external fixture's returned UploadId. Its dependency declaration
+# and every Rust reference are restricted below; it is not a general case-byte parser.
+allowed_dependencies = {"rustfs-gateway", "bytes", "http", "http-body", "tokio", "rustls", "webpki-roots", "rcgen", "quick-xml"}
 dependencies = manifest.get("dependencies", {})
 if not isinstance(dependencies, dict):
     print("check_runner_raw_bytes: [dependencies] must be a table", file=sys.stderr)
@@ -70,6 +73,10 @@ if actual_dependencies != allowed_dependencies:
             "check_runner_raw_bytes: expected facade dependency is missing: " + ", ".join(missing),
             file=sys.stderr,
         )
+    raise SystemExit(1)
+
+if dependencies["quick-xml"] != {"workspace": True}:
+    print("check_runner_raw_bytes: quick-xml must use only the workspace dependency", file=sys.stderr)
     raise SystemExit(1)
 
 
@@ -139,7 +146,7 @@ def strip_non_code(source):
     return "".join(output)
 
 
-def function_body(source, signature, label):
+def function_span(source, signature, label):
     match = re.search(signature, source)
     if match is None:
         print(f"check_runner_raw_bytes: {label} is missing", file=sys.stderr)
@@ -155,8 +162,50 @@ def function_body(source, signature, label):
         elif source[index] == "}":
             depth -= 1
             if depth == 0:
-                return source[opening + 1:index]
+                return opening + 1, index
     print(f"check_runner_raw_bytes: {label} has an unterminated body", file=sys.stderr)
+    raise SystemExit(1)
+
+
+def function_body(source, signature, label):
+    start, end = function_span(source, signature, label)
+    return source[start:end]
+
+
+source_root = manifest_path.parent
+parser_path = source_root / "src/conn/external_fixture/multipart.rs"
+if not parser_path.is_file():
+    print("check_runner_raw_bytes: external UploadId parser source is missing", file=sys.stderr)
+    raise SystemExit(1)
+
+try:
+    parser_code = strip_non_code(parser_path.read_text())
+    parser_signature = (
+        r"pub\s*\(\s*super\s*\)\s+fn\s+upload_id\s*"
+        r"\(\s*body\s*:\s*&\s*\[\s*u8\s*\]\s*\)\s*"
+        r"->\s*Result\s*<\s*String\s*,\s*SutError\s*>"
+    )
+    if len(list(re.finditer(parser_signature, parser_code))) != 1:
+        print(
+            "check_runner_raw_bytes: external UploadId parser must have exactly one scoped upload_id function",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    parser_start, parser_end = function_span(parser_code, parser_signature, "external UploadId parser")
+    for path in sorted(source_root.rglob("*.rs")):
+        if path == parser_path:
+            code = parser_code[:parser_start] + " " * (parser_end - parser_start) + parser_code[parser_end:]
+        else:
+            code = strip_non_code(path.read_text())
+        if re.search(r"\bquick_xml\b", code):
+            print(
+                "check_runner_raw_bytes: quick_xml is restricted to the external UploadId parser body: "
+                + str(path.relative_to(source_root)),
+                file=sys.stderr,
+            )
+            raise SystemExit(1)
+except OSError as error:
+    print(f"check_runner_raw_bytes: {error}", file=sys.stderr)
     raise SystemExit(1)
 
 

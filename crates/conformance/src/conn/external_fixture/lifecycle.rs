@@ -14,7 +14,7 @@
 
 //! External fixture preparation, ownership transitions, and cleanup.
 //!
-//! Responsible for: applying a fully validated fixture plan, recording only successful creates,
+//! Responsible for: applying a fully validated fixture plan, retaining successful or unresolved creates,
 //! and cleaning owned resources in dependency order. NOT responsible for: parsing setup values,
 //! endpoint selection, or authored exchange judgement. Upstream: `super`; downstream: the signed
 //! external socket control path.
@@ -48,6 +48,7 @@ impl Conn {
             if self.external_fixtures.active_case.is_some()
                 || !self.external_fixtures.owned_buckets.is_empty()
                 || !self.external_fixtures.owned_objects.is_empty()
+                || !self.external_fixtures.owned_uploads.is_empty()
             {
                 return Err(SutError::Environment(
                     "external fixture cleanup from the previous case is incomplete".to_owned(),
@@ -56,7 +57,7 @@ impl Conn {
             return self.inner.prepare(case_id, None);
         };
         let plan = self.external_fixtures.plan(setup, &self.inner)?;
-        let captures = self.inner.prepare(case_id, None)?;
+        let mut captures = self.inner.prepare(case_id, None)?;
         self.external_fixtures.active_case = Some(case_id.to_owned());
         for bucket in plan.buckets {
             let target = format!("/{}", bucket.name);
@@ -140,6 +141,39 @@ impl Conn {
                 region: object.region,
             });
         }
+        for upload in plan.uploads {
+            let result = self.fixture_control("POST", &format!("{}?uploads", upload.target), &upload.region, &[], &[]);
+            let mut owned = super::multipart::OwnedUpload {
+                bucket: upload.bucket,
+                target: upload.target,
+                region: upload.region,
+                upload_id: None,
+            };
+            let body = match result {
+                Ok((200, body)) => body,
+                Ok((status, _)) => {
+                    return Err(self.abort_external_prepare(SutError::Environment(format!(
+                        "external fixture initiation returned status {status}; the failed create is not owned"
+                    ))));
+                }
+                Err(_) => {
+                    self.external_fixtures.owned_uploads.push(owned);
+                    return Err(self.abort_external_prepare(super::multipart::unresolved_id()));
+                }
+            };
+            let upload_id = match super::multipart::upload_id(&body) {
+                Ok(id) => id,
+                Err(error) => {
+                    self.external_fixtures.owned_uploads.push(owned);
+                    return Err(self.abort_external_prepare(error));
+                }
+            };
+            if let Some(name) = upload.capture {
+                captures.insert(name, upload_id.clone());
+            }
+            owned.upload_id = Some(upload_id);
+            self.external_fixtures.owned_uploads.push(owned);
+        }
         Ok(captures)
     }
 
@@ -165,6 +199,28 @@ impl Conn {
     fn cleanup_owned_external_fixtures(&mut self) -> Result<(), SutError> {
         let mut failed_objects = Vec::new();
         let mut messages = Vec::new();
+        let mut failed_uploads = Vec::new();
+        while let Some(upload) = self.external_fixtures.owned_uploads.pop() {
+            let Some(id) = upload.upload_id.as_deref() else {
+                messages.push(format!("UploadId for bucket `{}` remains unresolved", upload.bucket));
+                failed_uploads.push(upload);
+                continue;
+            };
+            let target = super::multipart::abort_target(&upload.target, id);
+            match self.fixture_control_status("DELETE", &target, &upload.region, &[], &[]) {
+                Ok(204) => {}
+                Ok(status) => {
+                    messages.push(format!("upload abort for bucket `{}` returned status {status}", upload.bucket));
+                    failed_uploads.push(upload);
+                }
+                Err(error) => {
+                    messages.push(format!("upload abort for bucket `{}` failed: {error}", upload.bucket));
+                    failed_uploads.push(upload);
+                }
+            }
+        }
+        failed_uploads.reverse();
+        self.external_fixtures.owned_uploads = failed_uploads;
         while let Some(object) = self.external_fixtures.owned_objects.pop() {
             match self.fixture_control_status("DELETE", &object.target, &object.region, &[], &[]) {
                 Ok(204) => {}
@@ -182,6 +238,12 @@ impl Conn {
         let blocked_buckets = failed_objects
             .iter()
             .map(|object| object.bucket.clone())
+            .chain(
+                self.external_fixtures
+                    .owned_uploads
+                    .iter()
+                    .map(|upload| upload.bucket.clone()),
+            )
             .collect::<BTreeSet<_>>();
         self.external_fixtures.owned_objects = failed_objects;
         let mut failed_buckets = Vec::new();
@@ -220,6 +282,18 @@ impl Conn {
         body: &[u8],
         extra_headers: &[(String, String)],
     ) -> Result<u16, SutError> {
+        self.fixture_control(method, target, region, body, extra_headers)
+            .map(|(status, _)| status)
+    }
+
+    fn fixture_control(
+        &self,
+        method: &str,
+        target: &str,
+        region: &super::region::FixtureRegion,
+        body: &[u8],
+        extra_headers: &[(String, String)],
+    ) -> Result<(u16, Vec<u8>), SutError> {
         let endpoint = self
             .external
             .clone()
@@ -254,10 +328,11 @@ impl Conn {
             deadline,
             !endpoint.is_tls(),
         )?;
-        result
+        let status = result
             .observation
             .status
-            .ok_or_else(|| SutError::Environment(format!("external fixture {method} returned no status")))
+            .ok_or_else(|| SutError::Environment(format!("external fixture {method} returned no status")))?;
+        Ok((status, result.observation.body))
     }
 }
 

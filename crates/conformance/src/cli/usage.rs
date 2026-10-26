@@ -44,7 +44,7 @@ options:
   --endpoint <http(s)-url>  external target (raw HTTP/1.1; authored HTTP/2 frames over
                             http:// with prior knowledge or https:// with ALPN h2)
   --allow-external-fixtures
-                            allow isolated owned bucket/object setup and automatic cleanup
+                            allow isolated owned bucket/object/empty-upload setup and automatic cleanup
   --ca-cert <pem-path>      additional CA certificates for an HTTPS endpoint
   --baseline <file>         tolerate the failures this file records; fail only on a regression
   --rulings <toml>          judge the run against a ledger of reviewed, dated `[[ruling]]` rows:

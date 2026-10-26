@@ -1,0 +1,55 @@
+# c-mpu-0055 — empty uploads are observable without controlling the target clock.
+
+[case]
+id = "c-mpu-0055"
+schema_version = 1
+title = "A wall-clock listing observes owned empty multipart uploads"
+rationale = """
+An external fixture must initiate uploads on the addressed target before a listing can observe \
+them. This case leaves the target clock unconstrained and checks both an individual upload key \
+and a prefix formed from another upload. An empty fixture or a request sent to another target \
+cannot satisfy those observations. Dynamic upload identities and initiation times do not affect \
+the asserted listing content."""
+polarity = "positive"
+operation = "ListMultipartUploads"
+tags = ["multipart", "delimiter"]
+timeout_ms = 10000
+# Fixture-presence coverage; these substring assertions do not prove XML list wrapping.
+quirks = []
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_CreateMultipartUpload.html"
+summary = "An initiation returns the upload identifier needed to operate on that multipart upload."
+kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListMultipartUploads.html"
+summary = "The listing reports initiated uploads that have not completed or been aborted, with delimiter-based common prefixes."
+kind = "aws-doc"
+
+[[setup.buckets]]
+name = "conf-empty-multipart-fixture"
+
+[[setup.multipart_uploads]]
+bucket = "conf-empty-multipart-fixture"
+key = "logs/first.txt"
+
+[[setup.multipart_uploads]]
+bucket = "conf-empty-multipart-fixture"
+key = "top-level.txt"
+
+[request]
+method = "GET"
+target = "/conf-empty-multipart-fixture?uploads&delimiter=%2F&max-uploads=100"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+
+[expect]
+kind = "response"
+status = 200
+
+[expect.body]
+redact = ["UploadId", "Initiated"]
+contains_utf8 = [
+  "<Key>top-level.txt</Key>",
+  "<CommonPrefixes><Prefix>logs/</Prefix></CommonPrefixes>",
+]
