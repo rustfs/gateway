@@ -15265,14 +15265,14 @@ mut_runner_fixture_xml_module_import() {
 }
 expect_fail check_runner_raw_bytes.sh \
     'a fixture XML import escaping the UploadId function' mut_runner_fixture_xml_module_import \
-    'quick_xml is restricted to the external UploadId parser body'
+    'quick_xml is restricted to external fixture parser bodies'
 
 mut_runner_fixture_xml_aliased_import() {
     printf 'use quick_xml as fixture_xml;\n' >crates/conformance/src/fixture_xml_escape.rs
 }
 expect_fail check_runner_raw_bytes.sh \
     'an aliased XML import in another conformance source' mut_runner_fixture_xml_aliased_import \
-    'quick_xml is restricted to the external UploadId parser body'
+    'quick_xml is restricted to external fixture parser bodies'
 
 mut_runner_fixture_xml_qualified_call() {
     cat >>crates/conformance/src/conn.rs <<'RUST'
@@ -15281,14 +15281,14 @@ RUST
 }
 expect_fail check_runner_raw_bytes.sh \
     'a qualified XML reader call in the authored transport' mut_runner_fixture_xml_qualified_call \
-    'quick_xml is restricted to the external UploadId parser body'
+    'quick_xml is restricted to external fixture parser bodies'
 
 mut_runner_fixture_xml_reexport() {
     printf 'pub use quick_xml::Reader as FixtureReader;\n' >crates/conformance/tests/fixture_xml_escape.rs
 }
 expect_fail check_runner_raw_bytes.sh \
     'an XML re-export outside the fixture parser source tree' mut_runner_fixture_xml_reexport \
-    'quick_xml is restricted to the external UploadId parser body'
+    'quick_xml is restricted to external fixture parser bodies'
 
 mut_runner_fixture_xml_token_decoys() {
     cat >crates/conformance/src/fixture_xml_decoys.rs <<'RUST'
@@ -15300,6 +15300,105 @@ RUST
 }
 expect_guard_pass check_runner_raw_bytes.sh \
     'XML names only in comments and strings' mut_runner_fixture_xml_token_decoys
+
+mut_runner_versioning_xml_parser_missing() {
+    rm crates/conformance/src/conn/external_fixture/versioned.rs
+}
+expect_fail check_runner_raw_bytes.sh \
+    'the required versioning XML parser file missing' mut_runner_versioning_xml_parser_missing \
+    'external versioning parser source is missing'
+
+mut_runner_versioning_xml_function_missing() {
+    sed 's/fn enabled(body:/fn renamed_enabled(body:/' crates/conformance/src/conn/external_fixture/versioned.rs \
+        >crates/conformance/src/conn/external_fixture/versioned.rs.mut
+    mv crates/conformance/src/conn/external_fixture/versioned.rs.mut crates/conformance/src/conn/external_fixture/versioned.rs
+}
+expect_fail check_runner_raw_bytes.sh \
+    'the private versioning XML function missing' mut_runner_versioning_xml_function_missing \
+    'external versioning parser must have exactly one private enabled function'
+
+mut_runner_versioning_xml_function_duplicated() {
+    printf '\nfn enabled(body: &[u8]) -> bool { false }\n' \
+        >>crates/conformance/src/conn/external_fixture/versioned.rs
+}
+expect_fail check_runner_raw_bytes.sh \
+    'a second function claiming the versioning XML exception' mut_runner_versioning_xml_function_duplicated \
+    'external versioning parser must have exactly one private enabled function'
+
+mut_runner_versioning_xml_function_exported() {
+    sed 's/^fn enabled(body:/pub fn enabled(body:/' crates/conformance/src/conn/external_fixture/versioned.rs \
+        >crates/conformance/src/conn/external_fixture/versioned.rs.mut
+    mv crates/conformance/src/conn/external_fixture/versioned.rs.mut crates/conformance/src/conn/external_fixture/versioned.rs
+}
+expect_fail check_runner_raw_bytes.sh \
+    'the versioning XML function exported beyond its fixture module' mut_runner_versioning_xml_function_exported \
+    'external versioning parser must have exactly one private enabled function'
+
+mut_runner_versioning_xml_function_exported_newline() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/conformance/src/conn/external_fixture/versioned.rs")
+source = path.read_text()
+old = "fn enabled(body:"
+if source.count(old) != 1:
+    raise SystemExit("versioning XML function is not unique")
+path.write_text(source.replace(old, "pub(super)\nfn enabled(body:", 1))
+PYEOF
+}
+expect_fail check_runner_raw_bytes.sh \
+    'a split visibility declaration exporting the versioning XML function' mut_runner_versioning_xml_function_exported_newline \
+    'external versioning parser must have exactly one private enabled function'
+
+mut_runner_versioning_xml_declaration_decoy() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/conformance/src/conn/external_fixture/versioned.rs")
+source = path.read_text()
+old = "fn enabled(body: &[u8]) -> bool {"
+new = ("trait VersioningDeclaration { fn marker(); fn enabled(body: &[u8]) -> bool; }\n"
+       "fn renamed_enabled(body: &[u8]) -> bool {")
+if source.count(old) != 1:
+    raise SystemExit("versioning XML function is not unique")
+path.write_text(source.replace(old, new, 1))
+PYEOF
+}
+expect_fail check_runner_raw_bytes.sh \
+    'a declaration claiming the next function body as the versioning parser' mut_runner_versioning_xml_declaration_decoy \
+    'external versioning parser must have exactly one private enabled function'
+
+mut_runner_versioning_xml_module_import() {
+    printf '\nuse quick_xml::Reader as UnexpectedReader;\n' \
+        >>crates/conformance/src/conn/external_fixture/versioned.rs
+}
+expect_fail check_runner_raw_bytes.sh \
+    'an XML import escaping the private versioning function' mut_runner_versioning_xml_module_import \
+    'quick_xml is restricted to external fixture parser bodies'
+
+mut_runner_versioning_xml_extra_helper() {
+    cat >>crates/conformance/src/conn/external_fixture/versioned.rs <<'RUST'
+fn extra_versioning_xml(bytes: &[u8]) { let _ = quick_xml::Reader::from_reader(bytes); }
+RUST
+}
+expect_fail check_runner_raw_bytes.sh \
+    'an XML helper beside the private versioning function' mut_runner_versioning_xml_extra_helper \
+    'quick_xml is restricted to external fixture parser bodies'
+
+mut_runner_versioning_xml_brace_decoys() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/conformance/src/conn/external_fixture/versioned.rs")
+source = path.read_text()
+old = "fn enabled(body: &[u8]) -> bool {"
+if source.count(old) != 1:
+    raise SystemExit("versioning XML function is not unique")
+path.write_text(source.replace(old, old + '\n    let _decoy = "} quick_xml::Reader {"; // }', 1))
+PYEOF
+}
+expect_guard_pass check_runner_raw_bytes.sh \
+    'versioning XML span ignores braces inside comments and strings' mut_runner_versioning_xml_brace_decoys
 
 # -----------------------------------------------------------------------------
 # check_resolver_pure.sh has four rules and each gets its own control, because

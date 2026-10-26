@@ -6,7 +6,7 @@ set -euo pipefail
 #   The conformance runner keeps a raw TCP request path, writes the declared
 #   byte slice directly, and does not acquire an HTTP or S3 client dependency.
 #   A TLS record layer is not such a client: it carries the same bytes.
-#   XML reading is confined to returned external fixture upload identities.
+#   XML reading is confined to external fixture identity and versioning readback bodies.
 #
 # WHY
 #   P8-01 cases include malformed framing. A client library would normalise the
@@ -51,7 +51,7 @@ except (OSError, tomllib.TOMLDecodeError) as error:
 # negative case exists to send; every other addition still has to be argued for here. `rcgen` only
 # mints the throwaway certificate the production listener serves when a case declares
 # `[connection.tls]`; it never sees a request byte.
-# `quick-xml` reads only an external fixture's returned UploadId. Its dependency declaration
+# `quick-xml` reads only an external fixture's returned UploadId and versioning state. Its declaration
 # and every Rust reference are restricted below; it is not a general case-byte parser.
 allowed_dependencies = {"rustfs-gateway", "bytes", "http", "http-body", "tokio", "rustls", "webpki-roots", "rcgen", "quick-xml"}
 dependencies = manifest.get("dependencies", {})
@@ -173,33 +173,41 @@ def function_body(source, signature, label):
 
 
 source_root = manifest_path.parent
-parser_path = source_root / "src/conn/external_fixture/multipart.rs"
-if not parser_path.is_file():
-    print("check_runner_raw_bytes: external UploadId parser source is missing", file=sys.stderr)
-    raise SystemExit(1)
-
-try:
-    parser_code = strip_non_code(parser_path.read_text())
-    parser_signature = (
+parsers = [
+    (
+        "src/conn/external_fixture/multipart.rs",
+        "external UploadId parser",
+        "scoped upload_id",
         r"pub\s*\(\s*super\s*\)\s+fn\s+upload_id\s*"
         r"\(\s*body\s*:\s*&\s*\[\s*u8\s*\]\s*\)\s*"
-        r"->\s*Result\s*<\s*String\s*,\s*SutError\s*>"
-    )
-    if len(list(re.finditer(parser_signature, parser_code))) != 1:
-        print(
-            "check_runner_raw_bytes: external UploadId parser must have exactly one scoped upload_id function",
-            file=sys.stderr,
-        )
-        raise SystemExit(1)
-    parser_start, parser_end = function_span(parser_code, parser_signature, "external UploadId parser")
+        r"->\s*Result\s*<\s*String\s*,\s*SutError\s*>",
+    ),
+    (
+        "src/conn/external_fixture/versioned.rs",
+        "external versioning parser",
+        "private enabled",
+        r"(?:^|[;}])\s*fn\s+enabled\s*\(\s*body\s*:\s*&\s*\[\s*u8\s*\]\s*\)\s*->\s*bool\s*(?=\{)",
+    ),
+]
+
+try:
+    masked_parsers = {}
+    for relative, label, function, signature in parsers:
+        path = source_root / relative
+        if not path.is_file():
+            print(f"check_runner_raw_bytes: {label} source is missing", file=sys.stderr)
+            raise SystemExit(1)
+        code = strip_non_code(path.read_text())
+        if len(list(re.finditer(signature, code))) != 1:
+            print(f"check_runner_raw_bytes: {label} must have exactly one {function} function", file=sys.stderr)
+            raise SystemExit(1)
+        start, end = function_span(code, signature, label)
+        masked_parsers[path] = code[:start] + " " * (end - start) + code[end:]
     for path in sorted(source_root.rglob("*.rs")):
-        if path == parser_path:
-            code = parser_code[:parser_start] + " " * (parser_end - parser_start) + parser_code[parser_end:]
-        else:
-            code = strip_non_code(path.read_text())
+        code = masked_parsers[path] if path in masked_parsers else strip_non_code(path.read_text())
         if re.search(r"\bquick_xml\b", code):
             print(
-                "check_runner_raw_bytes: quick_xml is restricted to the external UploadId parser body: "
+                "check_runner_raw_bytes: quick_xml is restricted to external fixture parser bodies: "
                 + str(path.relative_to(source_root)),
                 file=sys.stderr,
             )
