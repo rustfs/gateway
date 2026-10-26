@@ -67,7 +67,7 @@ fn a_form_route_is_planned_and_rendered_behind_its_form_claim() {
         "AuthRequirement::new(\"rustfs:AssumeRoleHandle\", ResourceShape::Service)",
         "    path: \"/\",\n    reason:",
         "OperationFloor::builtin(NAME, SigService::Sts).allow_anonymous_after_listing_in_the_posture_report()",
-        "Legacy-compat (rustfs/backlog#2684)",
+        "//! `AssumeRole` additionally requires that credential in the Authorization header.",
         "const REQUEST_BODY: RequestBodyMode = RequestBodyMode::Full;",
         "selector: \"FormClaim(POST \\\"/\\\")\",",
         "anonymous: true,",

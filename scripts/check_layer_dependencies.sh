@@ -64,7 +64,7 @@ layers = [
     # depends on it, never the reverse.
     (
         "rustfs-gateway-dialect-rustfs-admin",
-        {"rustfs-gateway-core", "rustfs-gateway-sig", "rustfs-gateway-stream"},
+        {"rustfs-gateway-core", "rustfs-gateway-sig", "rustfs-gateway-stream", "rustfs-gateway-types"},
     ),
     ("rustfs-gateway-server", set()),
     (

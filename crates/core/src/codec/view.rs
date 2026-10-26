@@ -53,6 +53,7 @@ use crate::codec::document::DocumentReading;
 use crate::codec::error::CodecError;
 use crate::route::TargetKind;
 
+mod derived;
 mod header_name;
 mod legacy_checksums;
 mod page_size;
@@ -97,6 +98,8 @@ pub struct MetaView<'a> {
     rustfs_response_layout: bool,
     /// The most bytes an XML request document may hold, when the deployment sets its own.
     document_body_ceiling: Option<usize>,
+    /// The original AWS credential location, published only from an accepted matching verdict.
+    authenticated_aws_location: Option<rustfs_gateway_sig::SigLocation>,
 }
 
 impl<'a> MetaView<'a> {
@@ -187,40 +190,8 @@ impl<'a> MetaView<'a> {
             document_reading: DocumentReading::Tree,
             rustfs_response_layout: false,
             document_body_ceiling: None,
+            authenticated_aws_location: None,
         })
-    }
-
-    /// This view, with `content-length` answered by an `aws-chunked` body's object length.
-    ///
-    /// For a framed body the object's size is `x-amz-decoded-content-length`, not the wire
-    /// `Content-Length`, which counts the chunk framing too — and which a body the transport ends
-    /// (`Transfer-Encoding: chunked`, HTTP/2) does not carry at all. The assembly calls this once,
-    /// with the decoded length its ingest layer validated against the signature's payload mode, so
-    /// that a codec binding `Content-Length` reads the number the decoder holds the body to
-    /// (rustfs/gateway#750). Every other header reads exactly as before.
-    #[must_use]
-    pub fn with_framed_content_length(&self, length: u64) -> Self {
-        Self {
-            method: self.method,
-            headers: self.headers,
-            query: self.query,
-            bucket: self.bucket.clone(),
-            key: self.key.clone(),
-            names: self.names.clone(),
-            framed_content_length: Some(length),
-            integrity_optional: self.integrity_optional,
-            checksum_failures_as_bad_digest: self.checksum_failures_as_bad_digest,
-            checksum_reading: self.checksum_reading,
-            page_size_ceiling: self.page_size_ceiling,
-            ended_empty: self.ended_empty,
-            rustfs_listing: self.rustfs_listing,
-            strict_date_conditions: self.strict_date_conditions,
-            body_literals: self.body_literals,
-            empty_headers_absent: self.empty_headers_absent,
-            document_reading: self.document_reading,
-            rustfs_response_layout: self.rustfs_response_layout,
-            document_body_ceiling: self.document_body_ceiling,
-        }
     }
 
     /// This view, with the operation's modelled integrity requirement waived.
@@ -798,3 +769,8 @@ mod content_encoding_tests;
 #[cfg(test)]
 #[path = "tests/view_request_body.rs"]
 mod request_body_tests;
+
+#[cfg(test)]
+#[allow(clippy::expect_used, clippy::panic)] // Fixture panics are test failure reports, not request-path behavior.
+#[path = "tests/view_authenticated_location.rs"]
+mod authenticated_location_tests;

@@ -17,22 +17,19 @@
 // inventory or xtask/src/rustfs_admin_dialect.rs, then regenerate.
 
 //! `rustfs:StsFormPost`: `POST /` with an `application/x-www-form-urlencoded` body on every host, registration group `sts`
-//! (ADR-0041).
+//! (ADR-0041, refined by ADR-0044).
 //!
 //! Responsible for: the operation's type, name, form claim, action, specification, floor and codec, as the
 //! inventory records RustFS's `AssumeRoleHandle` route.
 //! NOT responsible for: the handler, which the deployment registers, or matching the claim
 //! (`rustfs_gateway_core::route::FormClaim`).
-//! Upstream: the recorded inventory, ADR-0041 and `crate::admin`. Downstream: `crate::dialect`, which declares
+//! Upstream: the recorded inventory, ADR-0041, ADR-0044 and `crate::admin`. Downstream: `crate::dialect`, which declares
 //! it behind [`CLAIM`], and a deployment that registers a handler for [`StsFormPost`].
 //!
-//! RustFS's STS endpoint. Its router takes the request before its S3 path parser runs, whatever the host's
-//! bucket label and whatever the query, verifies whatever signature it carries (a header signature under any
-//! service RustFS accepts, a presigned URL, SigV2), and then lets an unsigned request through as well: the
-//! handler reads `Action` from the body, refuses `AssumeRole` without credentials, and authenticates
-//! `AssumeRoleWithWebIdentity` by the token in the body. So the operation is reachable anonymously, its action
-//! is the vendor label `rustfs:AssumeRoleHandle`, the authorizer is still asked, with no identity, and the body is handed over
-//! as it arrived.
+//! RustFS's STS endpoint carries two action-specific authentication contracts. The signature
+//! pipeline verifies any presented credential before this codec reads the bounded form. Ordinary
+//! `AssumeRole` additionally requires that credential in the Authorization header. Web Identity
+//! keeps its independent downstream token verification. The codec preserves the original bytes.
 
 use bytes::Bytes;
 use rustfs_gateway_core::codec::{CodecError, EncodedResponse, MetaView, OperationCodec, RequestBody, RequestBodyMode};
@@ -41,7 +38,8 @@ use rustfs_gateway_core::op::{AuthRequirement, Operation, ResourceShape};
 use rustfs_gateway_core::registry::OperationSpec;
 use rustfs_gateway_core::route::FormClaim;
 use rustfs_gateway_core::{DerivedResourceError, NoDerived};
-use rustfs_gateway_sig::{OperationFloor, SigService};
+use rustfs_gateway_sig::{OperationFloor, SigLocation, SigService};
+use rustfs_gateway_types::ErrorCode;
 
 use crate::admin::{self, AdminResponse};
 use crate::record::{self, BodyKind, FormRouteRecord};
@@ -76,17 +74,9 @@ pub struct StsFormPost;
 
 static SPEC: OperationSpec = admin::spec(NAME, AUTH, false);
 
-/// Not privileged, and reachable anonymously by its own opt-in, which the start-up posture report lists: a
-/// header signature, a presigned URL where the assembly admits one on a standard operation, SigV2 where the
-/// floor admits it, or nothing at all.
-///
-/// Legacy-compat (rustfs/backlog#2684): legacy RustFS verifies a presigned URL (SigV4 or SigV2) on its STS
-/// endpoint and hands the handler its credentials. A presigned URL signs neither the `Content-Type` nor the
-/// body, and the claim reads neither host nor query, so any `POST` URL presigned for the path `/` (one for
-/// `POST /`, or a virtual-hosted `DeleteObjects` URL, `POST /?delete` on a bucket's host) resent with a form
-/// body lets whoever holds it choose the `Action`, the session policy and the duration of the credentials it
-/// mints under the signer's identity. Kept so a client that presigns its STS call keeps working; the intended
-/// future behaviour is a privileged floor, header signatures only.
+/// The shared envelope admits Web Identity's independently authenticated form. Ordinary
+/// `AssumeRole` has an additional header-only credential requirement in the codec, after the
+/// signature pipeline and bounded body read. An assembly cannot widen that action requirement.
 static FLOOR: OperationFloor =
     OperationFloor::builtin(NAME, SigService::Sts).allow_anonymous_after_listing_in_the_posture_report();
 
@@ -116,8 +106,20 @@ impl Operation for StsFormPost {
 impl OperationCodec for StsFormPost {
     const REQUEST_BODY: RequestBodyMode = RequestBodyMode::Full;
 
-    fn decode(_request: &MetaView<'_>, body: RequestBody) -> Result<Self::Input, CodecError> {
-        admin::buffered(body)
+    fn decode(request: &MetaView<'_>, body: RequestBody) -> Result<Self::Input, CodecError> {
+        let body = admin::buffered(body)?;
+        let mut action = None;
+        for (name, value) in form_urlencoded::parse(&body) {
+            if name == "Action" && action.replace(value).is_some() {
+                return Err(CodecError::invalid_request("The STS form must name at most one Action"));
+            }
+        }
+        // Only the settled verdict and original AWS marker supply this location. Stage
+        // filters may rewrite displayed headers, but cannot supply or erase this fact.
+        if action.as_deref() == Some("AssumeRole") && request.authenticated_aws_location() != Some(SigLocation::Header) {
+            return Err(CodecError::new(ErrorCode::ACCESS_DENIED, "AssumeRole requires header authentication"));
+        }
+        Ok(body)
     }
 
     fn encode(output: Self::Output, _request: &MetaView<'_>, status: u16) -> Result<EncodedResponse, CodecError> {
@@ -137,6 +139,7 @@ pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     evidence: &[
         "https://github.com/rustfs/rustfs/blob/5e1bd498ce1ca33bcb0ca50aeee861e69e6c8744/rustfs/src/admin/handlers/sts.rs",
         "https://github.com/rustfs/gateway/blob/main/docs/adr/0041-form-claims-and-the-rustfs-sts-endpoint.md",
+        "https://github.com/rustfs/gateway/blob/main/docs/adr/0044-sts-action-credentials-and-claimed-signing.md",
         record::ISSUE,
     ],
 };

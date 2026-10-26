@@ -1737,7 +1737,7 @@ checksum = "08d43f7aa6b08d49f382cde6a7982047c3426db949b1424bc4b7ec9ae12c6ce2"
 
 [[package]]
 name = "rustfs-gateway"
-version = "0.57.0"
+version = "0.58.0"
 dependencies = [
  "arc-swap",
  "bytes",
@@ -1831,7 +1831,7 @@ dependencies = [
 
 [[package]]
 name = "rustfs-gateway-core"
-version = "0.54.0"
+version = "0.55.0"
 dependencies = [
  "bytes",
  "dhat",
@@ -1895,14 +1895,16 @@ dependencies = [
 
 [[package]]
 name = "rustfs-gateway-dialect-rustfs-admin"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "bytes",
+ "form_urlencoded",
  "http",
  "rustfs-gateway-core",
  "rustfs-gateway-http",
  "rustfs-gateway-sig",
  "rustfs-gateway-stream",
+ "rustfs-gateway-types",
 ]
 
 [[package]]

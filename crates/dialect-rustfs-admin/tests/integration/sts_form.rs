@@ -25,7 +25,7 @@
 //! Upstream: this crate's public surface and `rustfs-gateway-core`'s router. Downstream: nothing.
 
 use bytes::Bytes;
-use http::Request;
+use http::{HeaderMap, HeaderValue, Request};
 use rustfs_gateway_core::codec::{MetaView, OperationCodec, RequestBody, RequestBodyMode, ResponseBody};
 use rustfs_gateway_core::op::{Operation, ResourceShape};
 use rustfs_gateway_core::registry::RouterBuilder;
@@ -34,7 +34,10 @@ use rustfs_gateway_dialect_rustfs_admin::admin::AdminResponse;
 use rustfs_gateway_dialect_rustfs_admin::ops::sts_form_post::{self, CLAIM, StsFormPost};
 use rustfs_gateway_dialect_rustfs_admin::{BodyKind, FORM_ROUTES, OVERLAY};
 use rustfs_gateway_http::{Limits, WireRequest};
-use rustfs_gateway_sig::SigService;
+use rustfs_gateway_sig::{
+    AuthScheme, CtBytes, Identity, RawQuery, SigFamily, SigIdentity, SigLocation, SigService, Signature, Verdict, WireView,
+    detect_aws_credential_marker,
+};
 
 use super::dialect;
 
@@ -174,7 +177,7 @@ fn the_sts_operation_declares_its_claim_floor_action_and_record() {
     assert!(row.anonymous);
     let floor = StsFormPost::floor();
     assert!(floor.allows_anonymous());
-    assert!(!floor.privileged(), "legacy RustFS verifies a presigned URL on its STS endpoint");
+    assert!(!floor.privileged(), "the shared envelope preserves Web Identity admission");
     assert_eq!(floor.service(), SigService::Sts);
     assert!(
         !floor.allowed_schemes().allows_presigned(),
@@ -206,14 +209,142 @@ fn the_sts_codec_hands_the_body_over_unchanged() {
         .uri("http://s3.example.com/")
         .header("host", "s3.example.com")
         .header("content-type", FORM)
+        .header("authorization", "AWS fixture:fixture")
         .body(())
         .expect("a fixture request");
     let wire = WireRequest::accept(request, &Limits::default()).expect("an acceptable fixture request");
     let meta = MetaView::of(&wire, TargetKind::Service).expect("a view");
+    let meta = sec1_authenticated(meta, "AWS fixture:fixture");
     let decoded = StsFormPost::decode(&meta, RequestBody::Buffered(body.clone())).expect("the body decodes");
     assert_eq!(decoded, body);
     let encoded = StsFormPost::encode(AdminResponse::bytes("text/xml", b"<AssumeRoleResponse/>".to_vec()), &meta, 200)
         .expect("the answer encodes");
     assert_eq!(encoded.status, 200);
     assert!(matches!(&encoded.body, ResponseBody::Complete(bytes) if bytes.as_slice() == b"<AssumeRoleResponse/>"));
+}
+
+/// Install a matching signature-proof fixture for codec tests, without claiming a real request verification.
+fn sec1_authenticated<'a>(meta: MetaView<'a>, authorization: &str) -> MetaView<'a> {
+    let mut headers = HeaderMap::new();
+    headers.insert(http::header::AUTHORIZATION, HeaderValue::from_str(authorization).expect("fixture header"));
+    let marker = detect_aws_credential_marker(&WireView::new(&headers, RawQuery::new("")));
+    let family = if authorization.starts_with("AWS4-") {
+        SigFamily::V4
+    } else {
+        SigFamily::V2
+    };
+    let signature = Signature::HmacSha256(CtBytes::from_array([3; 32]));
+    let proof = signature.ct_verify(&signature).expect("matching fixture proof");
+    let verdict = Verdict::authenticated(
+        Identity::new("fixture-access").expect("fixture identity"),
+        AuthScheme::new(family, SigLocation::Header, SigIdentity::LongTerm, SigService::Sts),
+        proof,
+    );
+    meta.with_authenticated_aws_marker(&verdict, marker)
+}
+
+/// Decode the bounded form with the request metadata the signature stage accepted.
+/// These codec tests use proof fixtures; assembled-service tests verify actual signatures.
+fn sec1_decode(body: &'static [u8], query: &str, authorization: Option<&str>) -> Result<Bytes, rustfs_gateway_core::CodecError> {
+    let mut request = Request::builder()
+        .method("POST")
+        .uri(format!("http://s3.example.com/?{query}"))
+        .header("host", "s3.example.com")
+        .header("content-type", FORM);
+    if let Some(authorization) = authorization {
+        request = request.header("authorization", authorization);
+    }
+    let wire = WireRequest::accept(request.body(()).expect("a fixture request"), &Limits::default())
+        .expect("an acceptable fixture request");
+    let meta = MetaView::of(&wire, TargetKind::Service).expect("a service view");
+    let meta = match authorization {
+        Some(authorization) => sec1_authenticated(meta, authorization),
+        None => meta,
+    };
+    StsFormPost::decode(&meta, RequestBody::Buffered(Bytes::from_static(body)))
+}
+
+const SEC1_ORDINARY: &[u8] = b"Action=AssumeRole&Version=2011-06-15";
+const SEC1_WEB_IDENTITY: &[u8] = b"Action=AssumeRoleWithWebIdentity&Version=2011-06-15&WebIdentityToken=fixture";
+
+fn sec1_denied(body: &'static [u8], query: &str) {
+    let error = sec1_decode(body, query, None).expect_err("ordinary AssumeRole requires header authentication");
+    assert_eq!(error.status().as_u16(), 403);
+    assert_eq!(error.code().as_str(), "AccessDenied");
+}
+
+/// Negative — an ordinary action without a header credential is refused by its codec.
+#[test]
+fn sec1_01() {
+    sec1_denied(SEC1_ORDINARY, "");
+}
+
+/// Negative — a SigV4 query credential does not satisfy the ordinary action contract.
+#[test]
+fn sec1_02() {
+    sec1_denied(
+        SEC1_ORDINARY,
+        "X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=fixture&X-Amz-Signature=fixture",
+    );
+}
+
+/// Negative — a SigV2 query credential does not satisfy the ordinary action contract.
+#[test]
+fn sec1_03() {
+    sec1_denied(SEC1_ORDINARY, "AWSAccessKeyId=fixture&Expires=1&Signature=fixture");
+}
+
+/// Negative — action names and values are interpreted after form decoding.
+#[test]
+fn sec1_04() {
+    for body in [
+        &b"%41ction=AssumeRole&Version=2011-06-15"[..],
+        &b"Action=Assume%52ole&Version=2011-06-15"[..],
+    ] {
+        sec1_denied(body, "");
+    }
+}
+
+/// Negative — duplicate actions cannot choose different contracts at two decoding stages.
+#[test]
+fn sec1_05() {
+    for body in [
+        &b"Action=AssumeRoleWithWebIdentity&Action=AssumeRole"[..],
+        &b"Action=AssumeRole&Action=AssumeRoleWithWebIdentity"[..],
+        &b"Action=AssumeRoleWithWebIdentity&%41ction=AssumeRole"[..],
+    ] {
+        let error = sec1_decode(body, "", None).expect_err("duplicate actions are refused");
+        assert_eq!(error.status().as_u16(), 400);
+        assert_eq!(error.code().as_str(), "InvalidRequest");
+    }
+}
+
+/// Negative — a query action cannot select the body action's authentication contract.
+#[test]
+fn sec1_06() {
+    sec1_denied(SEC1_ORDINARY, "Action=AssumeRoleWithWebIdentity");
+}
+
+/// Positive — ordinary header credential modes retain the exact form bytes.
+#[test]
+fn sec1_07() {
+    for authorization in [
+        "AWS4-HMAC-SHA256 Credential=fixture/20261026/us-east-1/sts/aws4_request, SignedHeaders=host, Signature=fixture",
+        "AWS fixture:fixture",
+    ] {
+        let body = sec1_decode(SEC1_ORDINARY, "", Some(authorization)).expect("the header action decodes");
+        assert_eq!(body.as_ref(), SEC1_ORDINARY);
+    }
+}
+
+/// Positive — Web Identity keeps its unsigned form and downstream token bytes unchanged.
+#[test]
+fn sec1_08() {
+    for body in [
+        SEC1_WEB_IDENTITY,
+        &b"%41ction=AssumeRoleWithWebIdentity&WebIdentityToken=fixture%2Btoken"[..],
+    ] {
+        let decoded = sec1_decode(body, "Action=AssumeRole", None).expect("Web Identity retains its separate contract");
+        assert!(decoded.as_ref() == body, "Web Identity form bytes remain unchanged");
+    }
 }

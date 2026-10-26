@@ -5527,6 +5527,41 @@ mut_unregistered_crate() {
 expect_fail check_layer_dependencies.sh \
     'a new crate that is not registered in the allow matrix' mut_unregistered_crate
 
+mut_admin_types_layer_edge_deleted() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("scripts/check_layer_dependencies.sh")
+text = path.read_text()
+old = '{"rustfs-gateway-core", "rustfs-gateway-sig", "rustfs-gateway-stream", "rustfs-gateway-types"}'
+new = '{"rustfs-gateway-core", "rustfs-gateway-sig", "rustfs-gateway-stream"}'
+if text.count(old) != 1:
+    raise SystemExit("the admin types edge is not unique")
+path.write_text(text.replace(old, new, 1))
+PYEOF
+}
+expect_fail_self_mutation check_layer_dependencies.sh \
+    'the admin dialect types edge disappearing from the executable layer matrix' \
+    mut_admin_types_layer_edge_deleted
+
+mut_types_admin_reverse_edge() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+
+path = Path("crates/types/Cargo.toml")
+text = path.read_text()
+marker = "[dependencies]" + chr(10)
+if text.count(marker) != 1:
+    raise SystemExit("the types dependency table is not unique")
+edge = 'rustfs-gateway-dialect-rustfs-admin = { path = "../dialect-rustfs-admin" }' + chr(10)
+path.write_text(text.replace(marker, marker + edge, 1))
+PYEOF
+}
+expect_fail_with_diagnostic check_layer_dependencies.sh \
+    'a types-to-admin reverse edge after admitting admin-to-types' \
+    'rustfs-gateway-types [dependencies].rustfs-gateway-dialect-rustfs-admin resolves to forbidden internal package' \
+    mut_types_admin_reverse_edge
+
 mut_gateway_macro_layer_edge_deleted() {
     python3 - <<'PYEOF'
 from pathlib import Path
