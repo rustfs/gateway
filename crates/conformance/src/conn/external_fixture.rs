@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Opt-in owned bucket, object, version, and empty-upload fixtures for an external endpoint.
+//! Opt-in owned bucket, object, version, and multipart fixtures for an external endpoint.
 //!
 //! Responsible for: validating the narrow remote-setup subset, restricting authored writes to
 //! classified owned versions, and holding successful or unresolved remote ownership.
-//! NOT responsible for: locked, uploaded-part, or fault fixtures; endpoint resolution; authored
+//! NOT responsible for: locked or fault fixtures; endpoint resolution; authored
 //! exchange pacing; or response judgement. Upstream: `external`; downstream: the endpoint selected
 //! by `crate::cli`.
 
@@ -157,7 +157,7 @@ impl ExternalFixtures {
             });
         }
         let objects = object::plans(setup, &plan, decoder)?;
-        let uploads = multipart::plans(setup, &plan)?;
+        let uploads = multipart::plans(setup, &plan, decoder)?;
         Ok(FixturePlan {
             buckets: plan,
             objects,
@@ -212,7 +212,7 @@ fn only_keys(value: &Value, allowed: &[&str], context: &str) -> Result<(), SutEr
         .find(|key| !allowed.contains(&key.as_str()))
     {
         return Err(SutError::Environment(format!(
-            "`{context}.{key}` is not supported by external owned bucket/object/empty-upload fixtures"
+            "`{context}.{key}` is not supported by external owned bucket/object/multipart fixtures"
         )));
     }
     Ok(())
@@ -444,7 +444,7 @@ mod tests {
     fn every_setup_shape_outside_owned_bucket_and_object_state_is_rejected_before_mutation() {
         for unsupported in [
             "unknown = true\n",
-            "[[buckets]]\nname = \"fixture-one\"\n[[multipart_uploads]]\nbucket = \"fixture-one\"\nkey = \"one\"\nparts = [{ part_number = 1, body = { utf8 = \"part\" } }]\n",
+            "[[buckets]]\nname = \"fixture-one\"\n[[multipart_uploads]]\nbucket = \"fixture-one\"\nkey = \"one\"\nparts = [{ part_number = 1, unknown = true }]\n",
             "fault = { operation = \"PutObject\", at = \"after_commit\", code = \"InternalError\" }\n",
             "[[buckets]]\nname = \"fixture-one\"\nversioning = \"suspended\"\n",
             "[[buckets]]\nname = \"fixture-one\"\nobject_lock = true\n",

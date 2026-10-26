@@ -18,6 +18,9 @@
 //! NOT responsible for: uploaded parts, versioned or locked objects, or target protocol behavior.
 //! Upstream: external fixture preparation and cleanup. Downstream: a real loopback HTTP peer.
 
+#[path = "parts_tests.rs"]
+mod parts_tests;
+
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::{Mutex, MutexGuard, mpsc};
@@ -229,9 +232,9 @@ fn absent_upload_bucket_is_rejected_before_contact() {
 }
 
 #[test]
-fn uploaded_parts_are_rejected_before_any_bucket_is_created() {
+fn invalid_part_number_is_rejected_before_any_bucket_is_created() {
     preflight_refusal(&format!(
-        "{BUCKET}{ONE_UPLOAD}parts = [{{ part_number = 1, body = {{ utf8 = \"part\" }} }}]\n"
+        "{BUCKET}{ONE_UPLOAD}parts = [{{ part_number = 0, body = {{ utf8 = \"part\" }} }}]\n"
     ));
 }
 

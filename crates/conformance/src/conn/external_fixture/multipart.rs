@@ -12,14 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Plans and returned identities for owned external uploads without parts.
+//! Plans, part uploads, and returned identities for owned external uploads.
 //!
-//! Responsible for: preflight ownership validation, validated initiation identities, and abort targets.
-//! NOT responsible for: sockets, uploaded parts, or case response judgement.
-//! Upstream: external fixture planning and lifecycle. Downstream: the pinned XML reader.
+//! Responsible for: preflight payload validation, observed part ETags, initiation identities, and abort targets.
+//! NOT responsible for: socket framing, cleanup ownership, or case response judgement.
+//! Upstream: external fixture planning and lifecycle. Downstream: control observations and the pinned XML reader.
 
 use std::collections::BTreeSet;
 
+use crate::inprocess::InProcess;
 use crate::sut::SutError;
 use crate::value::Value;
 
@@ -31,6 +32,14 @@ pub(super) struct UploadPlan {
     pub(super) target: String,
     pub(super) capture: Option<String>,
     pub(super) region: super::region::FixtureRegion,
+    pub(super) parts: Vec<PartPlan>,
+}
+
+#[derive(Debug)]
+pub(super) struct PartPlan {
+    pub(super) number: i64,
+    pub(super) body: Vec<u8>,
+    pub(super) capture: Option<String>,
 }
 
 #[derive(Debug)]
@@ -42,7 +51,7 @@ pub(super) struct OwnedUpload {
     pub(super) upload_id: Option<String>,
 }
 
-pub(super) fn plans(setup: &Value, buckets: &[BucketPlan]) -> Result<Vec<UploadPlan>, SutError> {
+pub(super) fn plans(setup: &Value, buckets: &[BucketPlan], decoder: &InProcess) -> Result<Vec<UploadPlan>, SutError> {
     let Some(value) = setup.read("setup.multipart_uploads") else {
         return Ok(Vec::new());
     };
@@ -65,11 +74,7 @@ pub(super) fn plans(setup: &Value, buckets: &[BucketPlan]) -> Result<Vec<UploadP
             .iter()
             .find(|candidate| candidate.name == bucket && !candidate.absent)
             .ok_or_else(|| invalid_plan("upload bucket must be owned and non-absent"))?;
-        if let Some(parts) = upload.read("setup.multipart_uploads[].parts")
-            && !parts.as_array().is_some_and(|parts| parts.is_empty())
-        {
-            return Err(invalid_plan("uploaded parts are not supported"));
-        }
+        let parts = part_plans(upload, decoder)?;
         let capture = match upload.read("setup.multipart_uploads[].capture_upload_id_as") {
             Some(value) => {
                 let name = value
@@ -88,13 +93,84 @@ pub(super) fn plans(setup: &Value, buckets: &[BucketPlan]) -> Result<Vec<UploadP
             target: super::object::object_target(bucket, key)?,
             capture,
             region: bucket_plan.region.clone(),
+            parts,
         });
     }
     Ok(plans)
 }
 
+fn part_plans(upload: &Value, decoder: &InProcess) -> Result<Vec<PartPlan>, SutError> {
+    let Some(parts) = upload.read("setup.multipart_uploads[].parts") else {
+        return Ok(Vec::new());
+    };
+    let parts = parts.as_array().ok_or_else(|| invalid_plan("parts must be an array"))?;
+    let mut plans = Vec::with_capacity(parts.len());
+    for part in parts {
+        super::only_keys(part, &["part_number", "body", "capture_etag_as"], "setup.multipart_uploads[].parts[]")?;
+        let number = part
+            .read("setup.multipart_uploads[].parts[].part_number")
+            .and_then(Value::as_integer)
+            .filter(|number| (1..=10000).contains(number))
+            .ok_or_else(|| invalid_plan("part_number must be an integer between 1 and 10000"))?;
+        let capture = part
+            .read("setup.multipart_uploads[].parts[].capture_etag_as")
+            .map(|value| {
+                value
+                    .as_str()
+                    .filter(|name| !name.is_empty())
+                    .map(str::to_owned)
+                    .ok_or_else(|| invalid_plan("capture_etag_as must be a nonempty string"))
+            })
+            .transpose()?;
+        let body = part
+            .read("setup.multipart_uploads[].parts[].body")
+            .map(|payload| {
+                decoder
+                    .payload(payload)
+                    .map_err(|error| invalid_plan(&format!("part payload is invalid: {error}")))
+            })
+            .transpose()?
+            .unwrap_or_default();
+        plans.push(PartPlan { number, body, capture });
+    }
+    Ok(plans)
+}
+
+impl super::super::Conn {
+    pub(super) fn put_fixture_part(
+        &self,
+        upload_target: &str,
+        region: &super::region::FixtureRegion,
+        part: &PartPlan,
+    ) -> Result<Option<String>, SutError> {
+        let target = format!("{upload_target}&partNumber={}", part.number);
+        let observation = self
+            .fixture_control_observation("PUT", &target, region, &part.body, &[])
+            .map_err(|error| invalid_plan(&format!("part upload failed: {error}")))?;
+        if observation.status != Some(200) {
+            return Err(invalid_plan(&format!("part upload returned status {:?}", observation.status)));
+        }
+        if part.capture.is_none() {
+            return Ok(None);
+        }
+        let mut etags = observation
+            .headers
+            .iter()
+            .filter(|(name, _)| name.eq_ignore_ascii_case("etag"))
+            .map(|(_, value)| value);
+        let etag = etags
+            .next()
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| invalid_plan("part upload did not return one nonempty ETag"))?;
+        if etags.next().is_some() {
+            return Err(invalid_plan("part upload returned more than one ETag"));
+        }
+        Ok(Some(etag.clone()))
+    }
+}
+
 fn invalid_plan(reason: &str) -> SutError {
-    SutError::Environment(format!("external empty-upload fixture: {reason}"))
+    SutError::Environment(format!("external multipart fixture: {reason}"))
 }
 
 pub(super) fn unresolved_id() -> SutError {
