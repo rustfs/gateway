@@ -813,6 +813,7 @@ test.extend([
     GATEWAY_RSS_TEST.to_owned(),
     "--skip".to_owned(),
     GATEWAY_ADDRESS_TABLE_TEST.to_owned(),
+    "--test-threads=4".to_owned(),
 ]);
 let clippy = steps.remove(0);
 let socket_timing = ["test", "-p", package, "--test", GATEWAY_SOCKET_TIMING_TARGET]
@@ -823,7 +824,7 @@ return vec![vec![test, clippy], vec![socket_timing]];
 if compact(crate_step_batches_items[0][1]).count(expected_gateway_batch) != 1:
     fail(
         "gateway fast verification must retain ordinary runtime tests and all-target Clippy, "
-        "and run the socket-timing target as a loop of its own"
+        "use four libtest workers and run the socket-timing target as a loop of its own"
     )
 expected_server_batch = compact('''
 let mut test = steps.remove(0);
