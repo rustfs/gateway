@@ -200,10 +200,22 @@ fn required_gap(registry: &Registry, field: &Field) -> Option<&'static str> {
     registry.required_gap(&field.ty)
 }
 
-/// Whether this top-level input field selects the explicit-construction path from ADR-0016.
+/// The required string header whose decoded request storage is governed by ADR-0043.
+#[must_use]
+pub(crate) fn is_required_copy_source_header(field: &Field) -> bool {
+    field.required
+        && field.binding == Binding::Header
+        && matches!(field.ty, Type::String)
+        && field
+            .wire_name
+            .as_deref()
+            .is_some_and(|name| name.eq_ignore_ascii_case("x-amz-copy-source"))
+}
+
+/// Whether this top-level input needs explicit construction under ADR-0016 or ADR-0043.
 #[must_use]
 pub(super) fn requires_explicit_input_construction(field: &Field) -> bool {
-    field.required && matches!(field.ty, rustfs_gateway_model::ir::Type::Union(_))
+    (field.required && matches!(field.ty, Type::Union(_))) || is_required_copy_source_header(field)
 }
 
 /// The ADR-0004 P9 baseline: `<TypeName> <public field count>`, one per line, sorted by name.
@@ -343,29 +355,17 @@ fn debug_chain(links: &[String]) -> String {
 /// `BucketName` or `ObjectKey` reaching a handler is a value authorization and storage would both
 /// accept and neither would recognise. The check costs one comparison per required member.
 #[must_use]
-pub fn check_required_impl(type_name: &str, baseline_name: &str, fields: &[Field], constructed: Option<&Field>) -> String {
-    let mut body = String::new();
-    for field in fields {
-        if !Registry::is_bare(baseline_name, field) || Registry::is_container(&field.ty) {
-            continue;
-        }
-        if constructed.is_some_and(|body| body.name == field.name) {
-            continue;
-        }
-        let name = naming::field_name(&field.name);
-        if matches!(field.ty, rustfs_gateway_model::ir::Type::Union(_)) {
-            // ADR-0016: a required union has no placeholder. The constructor or decoder must
-            // provide a real variant before the struct can exist, so there is nothing to recheck.
-            continue;
-        } else if matches!(field.ty, rustfs_gateway_model::ir::Type::Structure(_)) {
-            body.push_str(&format!("        self.{name}.check_required()?;\n"));
-        } else {
-            body.push_str(&format!(
-                "        crate::reject_placeholder(\"{baseline_name}\", \"{}\", &self.{name})?;\n",
-                field.name
-            ));
-        }
-    }
+pub fn check_required_impl(
+    type_name: &str,
+    baseline_name: &str,
+    fields: &[Field],
+    constructed: Option<&Field>,
+    explicit_input: bool,
+) -> String {
+    let body: String = required_checks(baseline_name, fields, constructed, explicit_input, "self.", "crate")
+        .into_iter()
+        .map(|check| format!("        {check}?;\n"))
+        .collect();
     format!(
         "impl {type_name} {{\n    \
              /// Rejects a required member still holding its placeholder default (ADR-0004 P10).\n    \
@@ -386,6 +386,39 @@ pub fn check_required_impl(type_name: &str, baseline_name: &str, fields: &[Field
              {body}        Ok(())\n    }}\n\
          }}\n"
     )
+}
+
+/// The same ordered placeholder checks for a constructed DTO or request-local wire values.
+pub(crate) fn required_checks(
+    owner: &str,
+    fields: &[Field],
+    constructed: Option<&Field>,
+    explicit_input: bool,
+    receiver: &str,
+    types_path: &str,
+) -> Vec<String> {
+    let mut checks = Vec::new();
+    for field in fields {
+        if !Registry::is_bare(owner, field) || Registry::is_container(&field.ty) {
+            continue;
+        }
+        if constructed.is_some_and(|body| body.name == field.name) {
+            continue;
+        }
+        let name = naming::field_name(&field.name);
+        if matches!(field.ty, Type::Union(_)) || (explicit_input && is_required_copy_source_header(field)) {
+            // ADR-0016/0043: explicit construction supplies a real value, not a placeholder.
+            continue;
+        } else if matches!(field.ty, Type::Structure(_)) {
+            checks.push(format!("{receiver}{name}.check_required()"));
+        } else {
+            checks.push(format!(
+                "{types_path}::reject_placeholder(\"{owner}\", \"{}\", &{receiver}{name})",
+                field.name
+            ));
+        }
+    }
+    checks
 }
 
 /// A `&'static [&'static str]` literal of model member names.

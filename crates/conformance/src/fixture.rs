@@ -134,6 +134,8 @@ mod committed;
 mod conditional_write;
 mod copy_checksum;
 #[cfg(test)]
+mod copy_test_support;
+#[cfg(test)]
 mod crc32c_tests;
 mod handlers_bucket;
 mod handlers_object;
@@ -2878,33 +2880,6 @@ impl Stub {
         ))
     }
 
-    /// A server-side copy: read the source, then write the destination. In that order.
-    ///
-    /// The order is the whole of this handler. Every refusal below happens before a single byte of
-    /// the destination is touched, because the two published failures on this path are not wrong
-    /// answers — they are correct answers delivered after the destination was already gone. A self
-    /// copy that opens the target for writing before reading the source truncates the object it was
-    /// asked to rewrite, and an authorization stage that runs after the write refuses the caller
-    /// and destroys the object anyway.
-    ///
-    /// Reading the source into an owned [`StoredObject`] before anything else is what makes that
-    /// impossible here rather than merely unlikely: the bytes the copy will write are already in
-    /// hand when the destination is opened, so `source == dest` is not a special case to remember.
-    ///
-    /// # Where the head is committed, and why the source is not below it
-    ///
-    /// AWS documents a copy as flushing `200` before it knows the outcome, and the boundary it
-    /// documents alongside is the one used here: *"if the error occurs before the copy action
-    /// starts, you receive a standard Amazon S3 error"*. Naming the source, resolving it, gating it
-    /// and evaluating both sets of conditions all happen before the copy action starts, so all of
-    /// them keep their own status — which is what `c-copy-0026` and `c-copy-0034` assert, each a
-    /// `404` for a source that is not there. What the commit covers is the copy itself.
-    #[cfg(test)]
-    fn copy_object(&self, input: &dto::CopyObjectInput) -> HandlerResult<dto::CopyObject> {
-        let source = parse_copy_source(&input.copy_source)?;
-        self.copy_object_with_source(input, source)
-    }
-
     fn copy_object_with_source(&self, input: &dto::CopyObjectInput, source: CopySource) -> HandlerResult<dto::CopyObject> {
         let metadata_from = directive_of(
             input.metadata_directive.as_ref().map(dto::MetadataDirective::as_str),
@@ -5135,12 +5110,15 @@ mod tests {
     }
 
     fn copy(source: &str, destination: &str) -> dto::CopyObjectInput {
-        dto::CopyObjectInput {
-            bucket: name("conf-bucket"),
-            key: object_key(destination),
-            copy_source: source.to_owned(),
-            ..dto::CopyObjectInput::default()
-        }
+        let source = parse_copy_source(source).expect("fixture source");
+        dto::CopyObjectInput::builder(rustfs_gateway::CopySourceValue::Bucket {
+            bucket: source.bucket.as_str().to_owned(),
+            key: source.key.as_str().to_owned(),
+            version_id: source.version_id,
+        })
+        .bucket(name("conf-bucket"))
+        .key(object_key(destination))
+        .build()
     }
 
     /// The refusal a committed answer eventually produced, or `None` if it answered.
@@ -5364,11 +5342,18 @@ mod tests {
             "/conf-bucket/missing",
             // A bucket that is not there.
             "/conf-absent/src",
-            // A source that names no bucket and key at all.
-            "not-a-copy-source",
         ] {
             assert!(stub.copy_object(&copy(source, "dst")).is_err(), "{source}");
         }
+        // A decoded source without a key is refused before looking up or copying an object.
+        let mut input = copy("/conf-bucket/src", "dst");
+        input.copy_source = rustfs_gateway::CopySourceValue::Bucket {
+            bucket: "conf-bucket".to_owned(),
+            key: String::new(),
+            version_id: None,
+        };
+        let error = stub.copy_object(&input).expect_err("a missing source key must not commit");
+        assert_eq!(*error.code(), ErrorCode::INVALID_ARGUMENT);
         // A copy onto itself that changes nothing is refused as well.
         assert!(stub.copy_object(&copy("/conf-bucket/src", "src")).is_err());
     }
@@ -6007,6 +5992,7 @@ mod tests {
     #[test]
     fn a_copy_source_that_names_no_object_is_refused_without_faulting() {
         for raw in [
+            "not-a-copy-source",
             "",
             "bucket",
             "bucket/",

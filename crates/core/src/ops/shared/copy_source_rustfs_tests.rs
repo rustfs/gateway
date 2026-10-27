@@ -22,12 +22,11 @@
 //! refusals (`copy_source_security_tests.rs`).
 //! Upstream: `super`. Downstream: nothing.
 
-use rustfs_gateway_types::dto::{CopyObject, CopyObjectInput, UploadPartCopy, UploadPartCopyInput};
 use rustfs_gateway_types::{NamePolicy, SlashPolicy};
 
 use super::*;
 use crate::Decision;
-use crate::authz::{authorize_input, prepare_input_under};
+use crate::authz::authorize_input;
 
 fn legacy() -> NamePolicy {
     NamePolicy::default()
@@ -37,11 +36,8 @@ fn legacy() -> NamePolicy {
 
 /// The source key `CopyObject` resolves for `raw` under `names`, or the refusal's code.
 fn copy_object_key(raw: &str, names: &NamePolicy) -> Result<String, ErrorCode> {
-    let input = CopyObjectInput {
-        copy_source: raw.to_owned(),
-        ..Default::default()
-    };
-    let decoded = prepare_input_under::<CopyObject>(input, names).map_err(|error| error.code().clone())?;
+    let input = raw.to_owned();
+    let decoded = prepare_copy(&input, names).map_err(|error| error.code().clone())?;
     let authorized = authorize_input(decoded, |_| Decision::Allow).expect("authorized");
     let source = authorized
         .resources()
@@ -54,11 +50,8 @@ fn copy_object_key(raw: &str, names: &NamePolicy) -> Result<String, ErrorCode> {
 /// The same through `UploadPartCopy`, so a rule that reached one copy operation and not the other
 /// fails here.
 fn upload_part_copy_key(raw: &str, names: &NamePolicy) -> Result<String, ErrorCode> {
-    let input = UploadPartCopyInput {
-        copy_source: raw.to_owned(),
-        ..Default::default()
-    };
-    let decoded = prepare_input_under::<UploadPartCopy>(input, names).map_err(|error| error.code().clone())?;
+    let input = raw.to_owned();
+    let decoded = prepare_part_copy(&input, names).map_err(|error| error.code().clone())?;
     let authorized = authorize_input(decoded, |_| Decision::Allow).expect("authorized");
     let source = authorized
         .resources()

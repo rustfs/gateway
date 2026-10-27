@@ -49,9 +49,17 @@
 //! bytes, at the last `?`, and each half is decoded afterwards — `q-copy-source-split-0077`.
 
 use percent_encoding::percent_decode_str;
-use rustfs_gateway_types::{BucketName, ByteRange, ErrorCode, KeyFloor, NamePolicy, ObjectKey, PathSplit, RangeParse};
+use rustfs_gateway_types::{
+    BucketName, ByteRange, CopySourceValue, ErrorCode, KeyFloor, NamePolicy, ObjectKey, PathSplit, RangeParse,
+};
 
 use crate::contracts::{COPY_RANGE_LENGTH_ARITHMETIC, CopyRangeLengthArithmetic};
+
+mod value;
+
+pub(crate) use value::{decode_value, seal_value};
+#[cfg(test)]
+use value::{prepare_copy, prepare_part_copy, source_erased};
 
 /// Which of the three grammars a copy-source value was written in.
 ///
@@ -174,32 +182,7 @@ impl CopySource {
     ///
     /// As [`CopySource::parse`], except that RustFS path addressing permits an empty version.
     pub fn parse_under(raw: &str, names: &NamePolicy) -> Result<Self, CopySourceRejection> {
-        if raw.is_empty() {
-            return Err(CopySourceRejection::new(
-                ErrorCode::INVALID_ARGUMENT,
-                "x-amz-copy-source must name a source object",
-            ));
-        }
-
-        let (path, version_id) = if names.path_split() == PathSplit::RustfsLegacy {
-            split_version_as_legacy_rustfs(raw)?
-        } else {
-            split_version(raw)?
-        };
-
-        // CopyObject accepts URL-encoded ARN structure and one leading slash:
-        // https://docs.aws.amazon.com/AmazonS3/latest/API/API_CopyObject.html
-        let decoded_path = decode(path)?;
-        let arn_path = decoded_path.strip_prefix('/').unwrap_or(&decoded_path);
-        let resource = if arn_path.starts_with("arn:") {
-            parse_arn(arn_path, names)?
-        } else {
-            parse_path(path, names)?
-        };
-
-        Ok(Self {
-            resource: SourceResource { version_id, ..resource },
-        })
+        value::bind_value(&parse_value_under(raw, names)?, names)
     }
 
     /// The grammar the header was written in.
@@ -236,13 +219,13 @@ pub struct CopySourceResources {
 }
 
 impl CopySourceResources {
-    pub(crate) fn parse(raw: &str) -> Result<Self, crate::DerivedResourceError> {
-        Self::parse_under(raw, &NamePolicy::default())
+    pub(crate) fn bind(value: &CopySourceValue) -> Result<Self, crate::DerivedResourceError> {
+        Self::bind_under(value, &NamePolicy::default())
     }
 
-    /// The source, parsed under the naming policy the request was materialised under.
-    pub(crate) fn parse_under(raw: &str, names: &NamePolicy) -> Result<Self, crate::DerivedResourceError> {
-        CopySource::parse_under(raw, names)
+    /// The decoded source, validated under the request's naming policy.
+    pub(crate) fn bind_under(value: &CopySourceValue, names: &NamePolicy) -> Result<Self, crate::DerivedResourceError> {
+        value::bind_value(value, names)
             .map(|source| Self { source })
             .map_err(|error| crate::DerivedResourceError::new(error.code().clone(), error.reason()))
     }
@@ -518,15 +501,46 @@ fn split_version(raw: &str) -> Result<(&str, Option<String>), CopySourceRejectio
     Ok((path, Some(value)))
 }
 
+/// Decodes the source grammar without applying deployment naming rules.
+/// The typed operation derives and validates this caller-owned value before authorization.
+fn parse_value_under(raw: &str, names: &NamePolicy) -> Result<CopySourceValue, CopySourceRejection> {
+    if raw.is_empty() {
+        return Err(CopySourceRejection::new(
+            ErrorCode::INVALID_ARGUMENT,
+            "x-amz-copy-source must name a source object",
+        ));
+    }
+    let (path, version) = if names.path_split() == PathSplit::RustfsLegacy {
+        split_version_as_legacy_rustfs(raw)?
+    } else {
+        split_version(raw)?
+    };
+    // CopyObject accepts URL-encoded ARN structure and one leading slash:
+    // https://docs.aws.amazon.com/AmazonS3/latest/API/API_CopyObject.html
+    let decoded_path = decode(path)?;
+    let arn_path = decoded_path.strip_prefix('/').unwrap_or(&decoded_path);
+    let mut value = if arn_path.starts_with("arn:") {
+        parse_arn(arn_path)?
+    } else {
+        parse_path(path)?
+    };
+    match &mut value {
+        CopySourceValue::Bucket { version_id, .. }
+        | CopySourceValue::AccessPoint { version_id, .. }
+        | CopySourceValue::Outpost { version_id, .. } => *version_id = version,
+    }
+    Ok(value)
+}
+
 /// Parses `bucket/key`, with or without the leading slash AWS also accepts.
 ///
 /// The separator is the first `/` of the *decoded* value, whether the client sent it literally or
 /// as `%2F`: aws-sdk-dotnet percent-encodes the whole `bucket/key` value (rustfs/gateway#926). A
 /// bucket name cannot contain `/`, so the first decoded slash is always the separator and every
 /// later one — literal or encoded — is key bytes. The split is found on the raw value rather than
-/// by decoding it whole, so the key half still reaches [`key_of`] undecoded and is decoded exactly
+/// by decoding it whole, so the key half still reaches [`decode`] undecoded and is decoded exactly
 /// once: decoding the whole value first would decode the key a second time.
-fn parse_path(path: &str, names: &NamePolicy) -> Result<SourceResource, CopySourceRejection> {
+fn parse_path(path: &str) -> Result<CopySourceValue, CopySourceRejection> {
     let path = path.strip_prefix('/').unwrap_or(path);
     let Some((bucket, key)) = split_bucket_key(path) else {
         return Err(CopySourceRejection::new(
@@ -534,12 +548,9 @@ fn parse_path(path: &str, names: &NamePolicy) -> Result<SourceResource, CopySour
             "x-amz-copy-source must name a key as well as a bucket",
         ));
     };
-    Ok(SourceResource {
-        form: CopySourceForm::Path,
-        container: None,
-        identity: crate::ResourceIdentity::Path,
-        bucket: Some(path_bucket_of(&decode(bucket)?, names)?),
-        key: key_of(key, names)?,
+    Ok(CopySourceValue::Bucket {
+        bucket: decode(bucket)?,
+        key: decode(key)?,
         version_id: None,
     })
 }
@@ -559,7 +570,7 @@ fn split_bucket_key(path: &str) -> Option<(&str, &str)> {
 }
 
 /// Parses an already decoded S3 ARN, without decoding its key a second time.
-fn parse_arn(path: &str, names: &NamePolicy) -> Result<SourceResource, CopySourceRejection> {
+fn parse_arn(path: &str) -> Result<CopySourceValue, CopySourceRejection> {
     // arn : partition : service : region : account : resource…, where the resource half itself
     // contains colons in neither form, so five splits is the whole grammar.
     let mut parts = path.splitn(6, ':');
@@ -569,33 +580,20 @@ fn parse_arn(path: &str, names: &NamePolicy) -> Result<SourceResource, CopySourc
         return Err(unknown_arn());
     };
 
-    // AWS account IDs are twelve ASCII decimal digits, including any leading zeroes.
-    // Evidence: https://docs.aws.amazon.com/accounts/latest/reference/manage-acct-identifiers.html
-    if account.len() != 12 || !account.bytes().all(|byte| byte.is_ascii_digit()) {
-        return Err(unknown_arn());
-    }
-
     match service {
         "s3" => {
             let rest = resource.strip_prefix("accesspoint/").ok_or_else(unknown_arn)?;
             let (name, key) = rest.split_once("/object/").ok_or_else(unknown_arn)?;
-            Ok(SourceResource {
-                form: CopySourceForm::AccessPointArn,
-                container: Some(non_empty(name)?.to_owned()),
-                identity: crate::ResourceIdentity::AccessPoint {
-                    partition: non_empty(partition)?.to_owned(),
-                    region: non_empty(region)?.to_owned(),
-                    account: non_empty(account)?.to_owned(),
-                    name: non_empty(name)?.to_owned(),
-                },
-                // An access point is addressed by name; the bucket behind it is resolved by the
-                // control plane, so the name is what an authorizer writes its resource against and
-                // what stands in for the bucket until then.
-                bucket: Some(bucket_of(name)?),
-                key: decoded_key(key, names)?,
+            Ok(CopySourceValue::AccessPoint {
+                partition: partition.to_owned(),
+                region: region.to_owned(),
+                account_id: account.to_owned(),
+                access_point_name: name.to_owned(),
+                key: key.to_owned(),
                 version_id: None,
             })
         }
+
         "s3-outposts" => {
             let rest = resource.strip_prefix("outpost/").ok_or_else(unknown_arn)?;
             let (outpost, rest) = rest.split_once('/').ok_or_else(unknown_arn)?;
@@ -604,22 +602,18 @@ fn parse_arn(path: &str, names: &NamePolicy) -> Result<SourceResource, CopySourc
             } else {
                 let rest = rest.strip_prefix("bucket/").ok_or_else(unknown_arn)?;
                 let (bucket, key) = rest.split_once("/object/").ok_or_else(unknown_arn)?;
-                (Some(bucket_of(bucket)?), key)
+                (Some(bucket), key)
             };
-            Ok(SourceResource {
-                form: CopySourceForm::OutpostsArn,
-                container: Some(non_empty(outpost)?.to_owned()),
-                identity: crate::ResourceIdentity::Outposts {
-                    partition: non_empty(partition)?.to_owned(),
-                    region: non_empty(region)?.to_owned(),
-                    account: non_empty(account)?.to_owned(),
-                    outpost_id: non_empty(outpost)?.to_owned(),
-                },
-                bucket,
-                key: decoded_key(key, names)?,
+            Ok(CopySourceValue::Outpost {
+                partition: partition.to_owned(),
+                region: region.to_owned(),
+                account_id: account.to_owned(),
+                outpost_id: bucket.map_or_else(|| outpost.to_owned(), |bucket| format!("{outpost}/bucket/{bucket}")),
+                key: key.to_owned(),
                 version_id: None,
             })
         }
+
         _ => Err(unknown_arn()),
     }
 }
@@ -638,15 +632,6 @@ fn decode(value: &str) -> Result<String, CopySourceRejection> {
         .decode_utf8()
         .map(std::borrow::Cow::into_owned)
         .map_err(|_| CopySourceRejection::new(ErrorCode::INVALID_ARGUMENT, "x-amz-copy-source is not valid UTF-8 once decoded"))
-}
-
-/// Decodes and validates the key half through the same normalisation the request path uses.
-///
-/// `GHSA-f4vq-9ffr-m8m3` is what happens when this half is judged by looser rules than the
-/// destination: authorisation reads a key, storage reads a path. The refusal names the rule and
-/// never the value — a message quoting the header back is a header echoed into every log.
-fn key_of(encoded: &str, names: &NamePolicy) -> Result<ObjectKey, CopySourceRejection> {
-    decoded_key(&decode(encoded)?, names)
 }
 
 /// Validates a key already decoded once, retaining the recursive safety checks of the default floor.

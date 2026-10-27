@@ -81,7 +81,7 @@ ADRs; this map only selects files.
 | `src/conn/server.rs` | Lazily assembles test and production listeners with the case clock and profile. | The socket transports assemble a different policy from in-process execution. |
 | `src/conn/setup_tests.rs` | Test-only: a stalled server start is charged to the harness, not the case's target budget, on the HTTP/1.1 and production HTTP/2 paths. | A case fails `runner/timeout` or `setup deadline expired before TCP connect` because the harness's own server start was slow. |
 | `src/sign.rs` | Request signing for corpus inputs. | A signed case sends the wrong request. |
-| `src/fixture.rs` | Deterministic fixture backend used by local runs. | Setup state or a fixture operation behaves wrongly. |
+| `src/fixture.rs`, `src/fixture/copy_test_support.rs` | Deterministic fixture backend and its direct CopyObject test adapter. | Setup state or a fixture operation behaves wrongly. |
 | `src/fixture/committed.rs` | Late-failure work and frozen response heads for committed fixture operations. | Copy or multipart completion loses its pre-commit metadata. |
 | `src/fixture/handlers_bucket.rs` | Bucket Handler entries for the deterministic fixture. | A bucket operation stops reaching existing fixture behavior. |
 | `src/token.rs` | The continuation-token codec: an HMAC-authenticated page position bound to its listing. | A cursor is honoured that this service did not issue, or a real one is refused. |

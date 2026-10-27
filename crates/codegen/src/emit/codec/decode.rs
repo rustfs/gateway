@@ -59,6 +59,7 @@
 //! and AWS's user guide contradicts by documenting the empty tag set as *deleting* the existing
 //! one. This gateway wrote those bytes itself (`q-tag-object-unconfigured-0090`) and refused them.
 
+mod copy_source;
 mod layout;
 mod lists;
 
@@ -108,8 +109,7 @@ pub fn body(ir: &OperationIr, rules: &CodecRules, codes: &Constants) -> Result<S
     let controlled_body = crate::emit::dto::controlled_required_body(&ir.input);
     let explicit_input = ir.input.iter().any(crate::emit::dto::requires_explicit_input_construction);
     if explicit_input {
-        // ADR-0016: a required structural union has no honest Default. Decode into field-local
-        // state and construct Input only after the union selected a real variant.
+        // ADR-0016/0043: required members without defaults are decoded into field-local state.
         for field in &ir.input {
             let name = naming::field_name(&field.name);
             if initializes_directly(field) {
@@ -167,6 +167,7 @@ pub fn body(ir: &OperationIr, rules: &CodecRules, codes: &Constants) -> Result<S
         out.push_str("        let _ = body;\n");
     }
     if explicit_input {
+        copy_source::prepare(&mut out, ir);
         out.push_str("        let input = Input {\n");
         for field in &ir.input {
             let name = naming::field_name(&field.name);
@@ -182,14 +183,15 @@ fn uses_body(field: &Field) -> bool {
     matches!(field.binding, Binding::Payload | Binding::BodyXml | Binding::FormField)
 }
 
-/// Whether a required field is decoded on one unconditional straight-line binding.
+/// Whether a field is decoded on one unconditional straight-line binding.
 ///
 /// Such fields can be declared at their assignment site. Conditional head bindings still need
 /// field-local state before their `if`/`else`, while containers need mutable accumulation.
 fn initializes_directly(field: &Field) -> bool {
-    field.required
-        && !crate::emit::dto::registry::Registry::is_container(&field.ty)
-        && matches!(field.binding, Binding::UriLabel { .. } | Binding::Payload)
+    field.binding == Binding::PrefixHeaders
+        || (field.required
+            && !crate::emit::dto::registry::Registry::is_container(&field.ty)
+            && matches!(field.binding, Binding::UriLabel { .. } | Binding::Payload))
 }
 
 /// Renders the lines that read one input field.

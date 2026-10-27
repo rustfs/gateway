@@ -187,7 +187,7 @@ mod tests {
     #[test]
     fn input_round_trips() {
         let (gateway, _) = ops::copy_object::input_from_s3s(super::input()).expect("the fixture converts into the gateway input");
-        let copy_source = leaf::copy_source_to_s3s("copy_source", &gateway.copy_source).expect("the fixture's copy source");
+        let copy_source = super::super::super::super::copy_source::to_s3s(gateway.copy_source.clone());
         let headers = http::HeaderMap::new();
         let wire = leaf::RequestWire { raw_query: "", headers: &headers };
         let back = ops::copy_object::input_to_s3s(gateway, copy_source, &wire).expect("and back into the s3s input");

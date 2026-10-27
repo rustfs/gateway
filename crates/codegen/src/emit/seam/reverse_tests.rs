@@ -47,6 +47,35 @@ fn a_supplied_member_converts_back_into_the_gateway_member() {
 }
 
 #[test]
+fn required_copy_header_converts_decoded_fields_without_a_wire_round_trip() {
+    use rustfs_gateway_model::ir::Binding;
+    for operation in ["CopyObject", "UploadPartCopy"] {
+        let owner = format!("{operation}Input");
+        let facts = facts(&format!("struct {owner}\n  copy_source: CopySource\n"));
+        let mut source = field("CopySource", Type::String, true);
+        source.wire_name = Some("x-amz-copy-source".to_owned());
+        for (binding, required, wire, typed) in [
+            (Binding::Header, true, "x-amz-copy-source", true),
+            (Binding::Header, true, "X-Amz-Copy-Source", true),
+            (Binding::Header, false, "x-amz-copy-source", false),
+            (Binding::BodyXml, true, "x-amz-copy-source", false),
+            (Binding::Query, true, "x-amz-copy-source", false),
+            (Binding::Header, true, "different-header", false),
+        ] {
+            source.binding = binding.clone();
+            source.required = required;
+            source.wire_name = Some(wire.to_owned());
+            let text = render::backward_struct(&ctx(&facts), &owner, &[source.clone()], "G", "input").expect("renders");
+            assert_eq!(
+                text.contains("super::super::copy_source::from_s3s(x)"),
+                typed,
+                "{owner}: {binding:?}/{required}/{wire}"
+            );
+        }
+    }
+}
+
+#[test]
 fn n_a_supplied_member_without_a_backward_pair_fails_generation() {
     let facts = facts("struct CopyObjectInput\n  copy_source: Timestamp\n");
     let errors =
@@ -179,7 +208,7 @@ fn ranges_and_conditions_have_a_backward_spelling() {
 #[test]
 fn the_rendered_files_name_s3s_relative_to_their_mount() {
     let root = files::root();
-    assert!(root.contains("use super::{leaf, s3s};"), "{root}");
+    assert!(root.contains("use super::{copy_source, leaf, s3s};"), "{root}");
     let shape = files::shape_file("T", &[]);
     assert!(shape.contains("use super::super::{leaf, s3s};"), "{shape}");
     for text in [&root, &shape, &census::root(&[])] {

@@ -149,8 +149,13 @@ fn exactly_the_five_upload_ownership_inputs_are_capabilities() {
         "UploadPart",
         "UploadPartCopy",
     ] {
+        let target = if operation == "UploadPartCopy" {
+            "upload_id"
+        } else {
+            "input.upload_id"
+        };
         assert!(
-            decoder(operation).contains("input.upload_id = rustfs_gateway_types::UploadIdClaim::from_wire(raw);"),
+            decoder(operation).contains(&format!("{target} = rustfs_gateway_types::UploadIdClaim::from_wire(raw);")),
             "{operation} must construct the owned claim at the wire boundary"
         );
     }
