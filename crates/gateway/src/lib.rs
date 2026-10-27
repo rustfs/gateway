@@ -497,7 +497,8 @@ pub use crate::gate::max_framed_upload_bytes;
 pub use rustfs_gateway_core::ops::create_bucket::REGION_MATCH_POLICY;
 pub use rustfs_gateway_http::{EffectiveHost, Limits, TransportExtensions, WireReject, WireRequest};
 pub use rustfs_gateway_sig::{
-    Identity, OperationFloor, PresignedExpiryRule, RegionSet, RequestNow, SecurityFloor, SigService, SkewWindow, Verdict,
+    BearerGrant, BearerRefused, BearerTokenRequest, BearerTokenVerifier, Identity, OperationFloor, PresignedExpiryRule,
+    RegionSet, RequestNow, SecurityFloor, SigService, SkewWindow, Verdict,
 };
 pub use rustfs_gateway_stream::{Body, ByteStream, Payload, TrailingHeaders};
 /// Tower's service trait, exposed so facade-only consumers can wrap [`S3Service`].

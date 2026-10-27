@@ -85,6 +85,7 @@
 #![deny(missing_docs)]
 #![forbid(unsafe_code)]
 
+mod bearer;
 mod canonical;
 mod contracts {
     include!("../../../generated/signature_contracts.rs");
@@ -117,6 +118,9 @@ mod verifier;
 #[cfg(test)]
 mod full_chain_tests;
 
+pub use bearer::{
+    BearerAdmission, BearerGrant, BearerReceipt, BearerRefused, BearerTokenRequest, BearerTokenVerifier, QueryBearerClaim,
+};
 pub use canonical::{
     CanonicalCandidates, CanonicalRequest, CanonicalRequestSpec, PathCandidate, RawPathFallback, SignatureMismatchDetail,
     StringToSign, UriPathCandidates,

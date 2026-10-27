@@ -1,5 +1,19 @@
 # Changelog
 
+## Zip-download bearer claim (sig 0.14.0, core 0.57.0, gateway 0.60.0, dialect-rustfs-admin 0.13.0)
+
+BREAKING: `AuthSchemeRef` gains `Bearer`, the scheme of a request admitted by an operation's query
+bearer claim and verified by the host (ADR-0042, rustfs/gateway#1400). Migration: a `match` on
+`AuthSchemeRef` adds an explicit `Bearer` arm; do not fold it into a signed arm. Additive:
+`OperationFloor::with_query_bearer_claim`, `QueryBearerClaim`, `Admission::Bearer`,
+`Verdict::Bearer`, the `BearerTokenVerifier` host trait with `BearerTokenRequest`, `BearerGrant`
+and `BearerRefused`, `ServiceBuilder::bearer_token_verifier`, and
+`RequestContextView::bearer()` returning a `BearerContext`. The RustFS admin dialect's zip
+download now declares the `token` claim. Without an installed verifier its token-only URL stays
+`403`, and a header-signed download is unchanged. With a verifier, the token is verified on the
+signed path too and must name the signed principal; a handler reads the host's verified state
+through `RequestContextView::bearer()`, and no authorization or handler context holds the token.
+
 ## Required Copy inputs (types 0.40.0, core 0.56.0, gateway 0.59.0, codegen 0.20.0)
 
 BREAKING: `CopyObjectInput.copy_source` and `UploadPartCopyInput.copy_source` now hold

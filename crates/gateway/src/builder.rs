@@ -144,6 +144,7 @@ pub struct ServiceBuilder {
     decode_anonymous_framing: bool,
     authenticator: Option<Arc<dyn Authenticator>>,
     custom_signature_verifier: Option<Arc<dyn SignatureVerifier>>,
+    bearer_token_verifier: Option<Arc<dyn rustfs_gateway_sig::BearerTokenVerifier>>,
     #[cfg(feature = "dangerous-replace-signature-verifier")]
     dangerously_replaced_signature_verifier: Option<Arc<dyn AwsSignatureVerifier>>,
     policy_source: Arc<dyn PolicySource>,
@@ -172,6 +173,7 @@ impl core::fmt::Debug for ServiceBuilder {
             .field("has_authorizer", &self.authorizer.is_some())
             .field("has_authenticator", &self.authenticator.is_some())
             .field("has_custom_signature_verifier", &self.custom_signature_verifier.is_some())
+            .field("has_bearer_token_verifier", &self.bearer_token_verifier.is_some())
             .field("stage_filters", &self.filters.len())
             .field("op_layers", &self.op_layers.values().map(Vec::len).sum::<usize>())
             .finish_non_exhaustive()
@@ -208,6 +210,7 @@ impl ServiceBuilder {
             decode_anonymous_framing: true,
             authenticator: None,
             custom_signature_verifier: None,
+            bearer_token_verifier: None,
             #[cfg(feature = "dangerous-replace-signature-verifier")]
             dangerously_replaced_signature_verifier: None,
             policy_source: Arc::new(NoPolicy),
@@ -370,6 +373,20 @@ impl ServiceBuilder {
     #[must_use]
     pub fn custom_signature_verifier(mut self, verifier: impl SignatureVerifier) -> Self {
         self.custom_signature_verifier = Some(Arc::new(verifier));
+        self
+    }
+
+    /// Installs the host's verifier for operations whose floor declares a query bearer claim
+    /// (ADR-0042) — RustFS's minted zip-download URL.
+    ///
+    /// Nothing is installed by default, and without a verifier a claimed operation refuses every
+    /// token-only request `403 AccessDenied`; a header-signed request keeps its signature path.
+    /// Once installed, the token is verified on that operation's signed path too, must name the
+    /// signed principal, and is stripped from both authorization contexts and the handler context.
+    /// No other operation reads the parameter.
+    #[must_use]
+    pub fn bearer_token_verifier(mut self, verifier: impl rustfs_gateway_sig::BearerTokenVerifier) -> Self {
+        self.bearer_token_verifier = Some(Arc::new(verifier));
         self
     }
 
@@ -650,6 +667,7 @@ impl ServiceBuilder {
             config: self.config,
             authenticator,
             custom_signature_verifier: self.custom_signature_verifier,
+            bearer_token_verifier: self.bearer_token_verifier,
             #[cfg(feature = "dangerous-replace-signature-verifier")]
             dangerously_replaced_signature_verifier: self.dangerously_replaced_signature_verifier,
             authz_clock: Arc::new(SystemMonotonic::new()),

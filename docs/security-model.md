@@ -276,8 +276,8 @@ has exactly one source (rustfs/backlog#2752):
 | Socket peer | `RequestContext::client()`, `ClientFacts::peer` | `rustfs-gateway-server`'s `ConnectionInfo`, installed per request by the listener; or the host's `WireHead::set_client_facts` | `None`; no loopback guess |
 | Secure transport | `ClientFacts::transport_secure` | TLS completed on the listener (`ConnectionInfo`), or the host's `TransportSecurity::Encrypted` — the value the customer-key gate reads; or the override | `false`, never `true` by default; `client()` is `None` when nothing at all was installed |
 | Client address | `ClientFacts::client_ip`, `ClientFacts::source_ip()` | the host's `ClientAddr` — the governor's input, attested after the host's trusted-proxy rules; or the override. Never a request header | `None`; `source_ip()` falls back to the peer |
-| Raw query | `RequestContext::raw_query()` | the accepted request target, unchanged | `Some("")` for a request without one; `None` only for a context built by hand |
-| Signature scheme | `RequestContext::auth_scheme()` | the verdict's family and location (`AuthSchemeRef::of_scheme`); nothing re-verified | `Anonymous` only for a confirmed anonymous verdict; a family without a spelling is `OtherSigned` |
+| Raw query | `RequestContext::raw_query()` | the accepted request target, unchanged — except that an operation's query bearer token is removed once a host bearer verifier is installed (ADR-0042) | `Some("")` for a request without one; `None` only for a context built by hand |
+| Signature scheme | `RequestContext::auth_scheme()` | the verdict's family and location (`AuthSchemeRef::of_scheme`); nothing re-verified | `Anonymous` only for a confirmed anonymous verdict; a family without a spelling is `OtherSigned`; a host-verified query bearer token is `Bearer`, never a signed spelling (ADR-0042) |
 | Anything else the transport installed | `ServerExtensions::get::<T>()` | the request extensions frozen at acceptance — the bag `RequestContextView::transport_extensions` hands a handler | `None` |
 
 A host that computes the client address outside the gateway (RustFS's trusted-proxy rules) writes

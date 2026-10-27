@@ -64,6 +64,7 @@ use core::fmt;
 
 use http::HeaderMap;
 
+use crate::bearer::BearerAdmission;
 use crate::clock::{RequestNow, SkewWindow, enforce_clock_skew, enforce_presigned_clock_skew};
 use crate::mode::{
     STREAMING_ECDSA, STREAMING_ECDSA_TRAILER, STREAMING_SIGNED, STREAMING_SIGNED_TRAILER, STREAMING_UNSIGNED_TRAILER,
@@ -360,6 +361,10 @@ pub enum Admission<'a> {
     Custom(CustomAuthRequest<'a>),
     /// Nothing was presented, and the operation is anonymously reachable.
     Anonymous(AnonymousAck),
+    /// No AWS credential surface, and the operation's query bearer claim found its token
+    /// (ADR-0042). Only the facade's installed [`crate::BearerTokenVerifier`] can turn it into a
+    /// verdict; without one it is refused.
+    Bearer(BearerAdmission),
 }
 
 impl fmt::Debug for Admission<'_> {
@@ -371,6 +376,7 @@ impl fmt::Debug for Admission<'_> {
             Self::SealedSigV2(sealed) => f.debug_tuple("SealedSigV2").field(sealed).finish(),
             Self::Custom(request) => f.debug_tuple("Custom").field(request).finish(),
             Self::Anonymous(_) => f.write_str("Anonymous"),
+            Self::Bearer(admission) => f.debug_tuple("Bearer").field(admission).finish(),
         }
     }
 }
@@ -727,6 +733,15 @@ impl SecurityFloor {
             self.enforce_scheme_allowed(operation, SchemeSlot::Header, SigFamily::V4)?;
             return Ok(Admission::Custom(CustomAuthRequest::new(view, scheme, presence, now)));
         }
+        // ADR-0042: only an operation that declared a query bearer claim reads its parameter, and
+        // only once no AWS surface was touched — a presented AWS credential was refused or sealed
+        // above and is never laundered through a token. A repeated, empty or undecodable token is
+        // refused here; an absent one leaves the request to the anonymous rule below.
+        if let Some(claim) = operation.query_bearer_claim()
+            && let Some(token) = claim.read_token(&view)?
+        {
+            return Ok(Admission::Bearer(BearerAdmission::new(operation.name(), claim, token, now)));
+        }
         self.enforce_scheme_allowed(operation, SchemeSlot::Anonymous, SigFamily::V4)?;
         // Infallible here — `presence.any()` is false — but spelled as the fallible call it is, so
         // that the evidence still comes from the presence record and not from this branch.
@@ -734,6 +749,30 @@ impl SecurityFloor {
             .into_evidence()
             .map(Admission::Anonymous)
             .map_err(|_| AuthError::AuthorizationHeaderMalformed)
+    }
+
+    /// The bearer token a signed request on a bearer-claimed operation also carries (ADR-0042).
+    ///
+    /// Run by the facade after the signature verified, and only when a verifier for the claim is
+    /// installed: the token is then validated on the signed path too, and must name the signed
+    /// principal ([`BearerAdmission::verify_alongside`]). `Ok(None)` for an operation without a
+    /// claim, whose signed path is unchanged.
+    ///
+    /// # Errors
+    ///
+    /// [`AuthError::AccessDenied`] when the claimed operation's token is absent, repeated, empty or
+    /// undecodable.
+    pub fn bearer_alongside_signature(
+        &self,
+        view: &WireView<'_>,
+        operation: &OperationFloor,
+        now: RequestNow,
+    ) -> Result<Option<BearerAdmission>, AuthError> {
+        let Some(claim) = operation.query_bearer_claim() else {
+            return Ok(None);
+        };
+        let token = claim.read_token(view)?.ok_or(AuthError::AccessDenied)?;
+        Ok(Some(BearerAdmission::new(operation.name(), claim, token, now)))
     }
 
     /// Reads the signed timestamp from whichever surface this signing path uses.
