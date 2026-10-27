@@ -196,7 +196,7 @@ fn a_requests_heap_does_not_grow_with_its_body() {
         for len in sizes {
             let sha256 = if len == SMALL { SMALL_SHA256 } else { LARGE_SHA256 };
             let (blocks, bytes) = cost(len, sha256);
-            println!("{PROBE_SENTINEL}{blocks} {bytes}");
+            support::allocations::report(PROBE_SENTINEL, &[blocks, bytes]);
         }
         return;
     }

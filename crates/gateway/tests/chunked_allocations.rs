@@ -332,7 +332,7 @@ fn c_ing_0063_an_aws_chunked_upload_holds_one_copy_of_its_body() {
     if let Some(sizes) = support::allocations::requested_sizes(PROBE_ENV) {
         for len in sizes {
             let (blocks, bytes, peak, frames) = cost(len);
-            println!("{PROBE_SENTINEL}{blocks} {bytes} {peak} {frames}");
+            support::allocations::report(PROBE_SENTINEL, &[blocks, bytes, peak, frames]);
         }
         return;
     }

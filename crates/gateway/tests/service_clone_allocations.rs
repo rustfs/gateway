@@ -69,5 +69,5 @@ fn cloning_a_service_has_zero_allocations() {
 
     let stats = dhat::HeapStats::get();
     assert_eq!(stats.total_blocks, 0, "S3Service::clone allocated heap blocks");
-    println!("{ALLOCATION_PROBE_SENTINEL}");
+    support::allocations::report(ALLOCATION_PROBE_SENTINEL, &[]);
 }

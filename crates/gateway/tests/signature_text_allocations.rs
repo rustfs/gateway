@@ -136,7 +136,7 @@ fn string_to_sign_owns_only_its_final_text() {
     if let Some(kinds) = support::allocations::requested_sizes(ENV) {
         for kind in kinds {
             let (blocks, bytes, matched) = cost(kind);
-            println!("{SENTINEL}{blocks} {bytes} {matched}");
+            support::allocations::report(SENTINEL, &[blocks, bytes, matched]);
         }
         return;
     }

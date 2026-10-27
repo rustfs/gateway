@@ -197,7 +197,7 @@ fn a_warm_request_allocates_at_most_its_committed_budget() {
         for kind in kinds {
             let kind = if kind == 0 { Kind::Get } else { Kind::Put };
             let (blocks, bytes) = cost(kind);
-            println!("{PROBE_SENTINEL}{blocks} {bytes}");
+            support::allocations::report(PROBE_SENTINEL, &[blocks, bytes]);
         }
         return;
     }

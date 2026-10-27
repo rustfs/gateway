@@ -109,7 +109,7 @@ fn fixed_names_cost_only_borrowed_lookup() {
     if let Some(kinds) = support::allocations::requested_sizes(ENV) {
         for kind in kinds {
             let (blocks, bytes, matched) = cost(kind);
-            println!("{SENTINEL}{blocks} {bytes} {matched}");
+            support::allocations::report(SENTINEL, &[blocks, bytes, matched]);
         }
         return;
     }
