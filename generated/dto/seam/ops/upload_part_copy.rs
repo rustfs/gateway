@@ -86,7 +86,7 @@ pub fn input_from_s3s(input: s3s::dto::UploadPartCopyInput) -> Result<crate::ops
     } = input;
     Ok(crate::ops::upload_part_copy::Input {
         bucket: { let x = bucket; leaf::bucket_name("bucket", x)? },
-        copy_source: { let x = copy_source; leaf::copy_source_from_s3s(&x) },
+        copy_source: { let x = copy_source; super::super::copy_source::from_s3s(x) },
         copy_source_if_match: copy_source_if_match.map(|x| -> Result<_, ConversionError> { Ok(leaf::etag_condition_to_text("copy_source_if_match", &x)?) }).transpose()?,
         copy_source_if_modified_since: copy_source_if_modified_since.map(|x| -> Result<_, ConversionError> { Ok(leaf::timestamp_from_s3s("copy_source_if_modified_since", &x)?) }).transpose()?,
         copy_source_if_none_match: copy_source_if_none_match.map(|x| -> Result<_, ConversionError> { Ok(leaf::etag_condition_to_text("copy_source_if_none_match", &x)?) }).transpose()?,

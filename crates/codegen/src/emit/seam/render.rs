@@ -522,6 +522,11 @@ pub(super) fn backward_struct_with(
                 // gateway side; it is rewrapped, never read.
                 let conv = if crate::emit::dto::registry::is_secret_string_field(field) && super::expr::is_string(core) {
                     Ok("crate::SseCustomerKey::new(x)".to_owned())
+                } else if owner.ends_with("Input") && crate::emit::dto::is_required_copy_source_header(field) {
+                    match core {
+                        S3sType::Leaf(ty) if ty == "CopySource" => Ok("super::super::copy_source::from_s3s(x)".to_owned()),
+                        _ => Err(format!("no s3s → gateway conversion from {core:?} to CopySourceValue")),
+                    }
                 } else {
                     ctx.backward(core, &field.ty, &field.name, "x", &name)
                 };

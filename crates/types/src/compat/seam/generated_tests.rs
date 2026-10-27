@@ -287,13 +287,15 @@ fn an_upload_id_reaches_the_s3s_input_as_claimed() {
 
 #[test]
 fn a_copy_takes_the_authorized_source_not_the_sealed_input_member() {
-    let input = crate::ops::copy_object::Input {
-        bucket: BucketName::new("target").expect("bucket"),
-        key: ObjectKey::new("k").expect("key"),
-        // The gateway clears this once it has authorized the source as a derived resource.
-        copy_source: String::new(),
-        ..Default::default()
-    };
+    // The gateway erases every source component after deriving the authorized resource.
+    let input = crate::ops::copy_object::Input::builder(crate::CopySourceValue::Bucket {
+        bucket: String::new(),
+        key: String::new(),
+        version_id: None,
+    })
+    .bucket(BucketName::new("target").expect("bucket"))
+    .key(ObjectKey::new("k").expect("key"))
+    .build();
     let source = oracle::CopySource::Bucket {
         bucket: "source".into(),
         key: "a/b".into(),

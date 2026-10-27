@@ -143,7 +143,7 @@ macro_rules! define_tests {
                 }
             }
 
-            fn direct_pairs() -> Vec<(Owned, Legacy)> {
+            pub(super) fn direct_pairs() -> Vec<(Owned, Legacy)> {
                 let normal = ["bucket", "object/key", "aws", "us-west-2", "123456789012", "container"].map(str::to_owned);
                 let mut fields = vec![normal.clone()];
                 for replacement in ["", "\0", "a//b", "../x", "%2F", "Legacy_Bucket", "a?versionId=x"] {
@@ -248,3 +248,35 @@ macro_rules! define_tests {
 define_tests!(release, s3s_0_17_0);
 define_tests!(rustfs, s3s_5761ddfe);
 define_tests!(baseline, s3s_9c4690d8);
+
+// Only the release and RustFS revision expose the full generated operation seam.
+// Baseline evidence continues through the three carrier tests above.
+macro_rules! operation_input_test {
+    ($test:ident, $name:ident, $revision:ident) => {
+        #[test]
+        fn $test() {
+            use rustfs_gateway_types::compat::$revision as seam;
+            for (expected, source) in $name::direct_pairs() {
+                let copy = seam::s3s::dto::CopyObjectInput::builder()
+                    .bucket("target".to_owned())
+                    .key("key".to_owned())
+                    .copy_source(source.clone())
+                    .build()
+                    .expect("copy input");
+                let (copy, _) = seam::generated::ops::copy_object::input_from_s3s(copy).expect("decoded copy conversion");
+                let part = seam::s3s::dto::UploadPartCopyInput::builder()
+                    .bucket("target".to_owned())
+                    .key("key".to_owned())
+                    .part_number(1)
+                    .upload_id("upload".to_owned())
+                    .copy_source(source)
+                    .build()
+                    .expect("part copy input");
+                let part = seam::generated::ops::upload_part_copy::input_from_s3s(part).expect("decoded part conversion");
+                assert_eq!((copy.copy_source, part.copy_source), (expected.clone(), expected));
+            }
+        }
+    };
+}
+operation_input_test!(release_operation_inputs_keep_direct_sources, release, s3s_0_17_0);
+operation_input_test!(rustfs_operation_inputs_keep_direct_sources, rustfs, s3s_5761ddfe);

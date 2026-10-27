@@ -50,7 +50,7 @@ use rustfs_gateway_sig::{OperationFloor, SigService};
 use rustfs_gateway_types::dto::{CopyObject, CopyObjectInput, CopyObjectOutput};
 
 use crate::op::{AuthRequirement, HasOperation, Operation, OperationOrigin, ResourceShape, StandardOperation};
-use crate::ops::shared::copy_source::CopySourceResources;
+use crate::ops::shared::copy_source::{CopySourceResources, seal_value};
 use crate::ops::shared::write_permissions;
 use crate::registry::OperationSpec;
 
@@ -79,18 +79,18 @@ impl Operation for CopyObject {
     type DerivedResources = CopySourceResources;
 
     fn derive_resources(input: &Self::Input) -> Result<Self::DerivedResources, crate::authz::DerivedResourceError> {
-        CopySourceResources::parse(&input.copy_source)
+        CopySourceResources::bind(&input.copy_source)
     }
 
     fn derive_resources_under(
         input: &Self::Input,
         names: &rustfs_gateway_types::NamePolicy,
     ) -> Result<Self::DerivedResources, crate::authz::DerivedResourceError> {
-        CopySourceResources::parse_under(&input.copy_source, names)
+        CopySourceResources::bind_under(&input.copy_source, names)
     }
 
     fn seal_derived_input(input: &mut Self::Input) {
-        input.copy_source.clear();
+        seal_value(&mut input.copy_source);
     }
 
     fn spec() -> &'static OperationSpec {

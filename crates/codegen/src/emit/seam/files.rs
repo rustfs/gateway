@@ -255,8 +255,8 @@ pub(super) fn root() -> String {
          //!\n\
          //! `census` holds the member census of every pinned structure they reach (rustfs/gateway#1076)\n\
          //! and the error-code census; `fixtures`, test-only, the s3s values the round trips start from.\n\n\
-         // The mounting revision's bindings, reached by every module below as `super::super::{{leaf, s3s}}`.\n\
-         use super::{{leaf, s3s}};\n\n\
+         // The mounting revision's bindings, reached by every module below as `super::super::{{copy_source, leaf, s3s}}`.\n\
+         use super::{{copy_source, leaf, s3s}};\n\n\
          pub mod census;\n#[cfg(test)]\npub mod fixtures;\npub mod ops;\npub mod shapes;\n"
     )
 }

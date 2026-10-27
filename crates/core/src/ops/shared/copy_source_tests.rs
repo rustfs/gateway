@@ -20,10 +20,9 @@
 //! Upstream: `copy_source`. Downstream: `copy_source_security_tests`.
 
 use super::*;
-use rustfs_gateway_types::dto::{CopyObject, CopyObjectInput};
 
 use crate::Decision;
-use crate::authz::{DerivedResourceSet, authorize_input, prepare_input};
+use crate::authz::{DerivedResourceSet, authorize_input};
 
 pub(super) fn rejected(raw: &str) -> CopySourceRejection {
     match CopySource::parse(raw) {
@@ -33,11 +32,8 @@ pub(super) fn rejected(raw: &str) -> CopySourceRejection {
 }
 
 pub(super) fn resolved(raw: &str) -> ResolvedCopySource {
-    let input = CopyObjectInput {
-        copy_source: raw.to_owned(),
-        ..Default::default()
-    };
-    let decoded = prepare_input::<CopyObject>(input).expect("parses");
+    let input = raw.to_owned();
+    let decoded = prepare_copy(&input, &NamePolicy::default()).expect("parses");
     let authorized = authorize_input(decoded, |_| Decision::Allow).expect("authorized");
     authorized
         .resources()
@@ -55,11 +51,8 @@ fn the_version_suffix_is_split_before_the_key_is_decoded() {
 
 #[test]
 fn a_versioned_source_requires_get_object_version() {
-    let input = CopyObjectInput {
-        copy_source: "bucket/key?versionId=v1".to_owned(),
-        ..Default::default()
-    };
-    let decoded = prepare_input::<CopyObject>(input).expect("parses");
+    let input = "bucket/key?versionId=v1".to_owned();
+    let decoded = prepare_copy(&input, &NamePolicy::default()).expect("parses");
     let mut actions = Vec::new();
     decoded.resources().visit(&mut |resource| actions.push(resource.action()));
     assert_eq!(actions, ["s3:GetObjectVersion"]);
@@ -205,13 +198,11 @@ type Named = Result<(String, String, Option<String>), ErrorCode>;
 /// Both members go through their own `prepare_input`, so a rule that reached `CopyObject` and not
 /// `UploadPartCopy` (or the reverse) shows up as the two answers disagreeing.
 fn through_both_members(raw: &str) -> [Named; 2] {
-    use rustfs_gateway_types::dto::{UploadPartCopy, UploadPartCopyInput};
-
-    fn resolve<O>(input: O::Input) -> Named
+    fn resolve<O>(decoded: Result<crate::authz::Decoded<O>, crate::DerivedResourceError>) -> Named
     where
         O: crate::Operation<DerivedResources = CopySourceResources>,
     {
-        let decoded = prepare_input::<O>(input).map_err(|error| error.code().clone())?;
+        let decoded = decoded.map_err(|error| error.code().clone())?;
         let authorized = authorize_input(decoded, |_| Decision::Allow).expect("authorized");
         let source = authorized
             .resources()
@@ -226,14 +217,8 @@ fn through_both_members(raw: &str) -> [Named; 2] {
     }
 
     [
-        resolve::<CopyObject>(CopyObjectInput {
-            copy_source: raw.to_owned(),
-            ..Default::default()
-        }),
-        resolve::<UploadPartCopy>(UploadPartCopyInput {
-            copy_source: raw.to_owned(),
-            ..Default::default()
-        }),
+        resolve(prepare_copy(raw, &NamePolicy::default())),
+        resolve(prepare_part_copy(raw, &NamePolicy::default())),
     ]
 }
 

@@ -129,7 +129,7 @@ mod tests {
     #[test]
     fn input_round_trips() {
         let gateway = ops::upload_part_copy::input_from_s3s(super::input()).expect("the fixture converts into the gateway input");
-        let copy_source = leaf::copy_source_to_s3s("copy_source", &gateway.copy_source).expect("the fixture's copy source");
+        let copy_source = super::super::super::super::copy_source::to_s3s(gateway.copy_source.clone());
         let back = ops::upload_part_copy::input_to_s3s(gateway, copy_source).expect("and back into the s3s input");
         let value = super::input();
         let mut differences = Vec::new();

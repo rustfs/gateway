@@ -247,7 +247,7 @@ fn structure(def: &ShapeDef, registry: &Registry, report: &mut DtoReport) -> Str
         }
         out.push_str("}\n\n");
     }
-    out.push_str(&super::check_required_impl(name, name, &def.fields, None));
+    out.push_str(&super::check_required_impl(name, name, &def.fields, None, false));
     if has_secret {
         out.push('\n');
         out.push_str(&debug_impl(name, &def.fields));

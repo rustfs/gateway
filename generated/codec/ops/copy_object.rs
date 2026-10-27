@@ -38,232 +38,325 @@ impl OperationCodec for dto::CopyObject {
     const REQUEST_BODY: RequestBodyMode = RequestBodyMode::None;
 
     fn decode(request: &MetaView<'_>, body: RequestBody) -> Result<Self::Input, CodecError> {
-        let mut input = Input { ..Default::default() };
+        let mut acl = Default::default();
+        let mut cache_control = Default::default();
+        let mut checksum_algorithm = Default::default();
+        let mut content_disposition = Default::default();
+        let mut content_encoding = Default::default();
+        let mut content_language = Default::default();
+        let mut content_type = Default::default();
+        let copy_source;
+        let mut copy_source_if_match = Default::default();
+        let mut copy_source_if_modified_since = Default::default();
+        let mut copy_source_if_none_match = Default::default();
+        let mut copy_source_if_unmodified_since = Default::default();
+        let mut expires = Default::default();
+        let mut grant_full_control = Default::default();
+        let mut grant_read = Default::default();
+        let mut grant_read_acp = Default::default();
+        let mut grant_write_acp = Default::default();
+        let mut if_match = Default::default();
+        let mut if_none_match = Default::default();
+        let mut metadata_directive = Default::default();
+        let mut tagging_directive = Default::default();
+        let mut server_side_encryption = Default::default();
+        let mut storage_class = Default::default();
+        let mut website_redirect_location = Default::default();
+        let mut sse_customer_algorithm = Default::default();
+        let mut sse_customer_key = Default::default();
+        let mut sse_customer_key_md5 = Default::default();
+        let mut ssekms_key_id = Default::default();
+        let mut ssekms_encryption_context = Default::default();
+        let mut bucket_key_enabled = Default::default();
+        let mut copy_source_sse_customer_algorithm = Default::default();
+        let mut copy_source_sse_customer_key = Default::default();
+        let mut copy_source_sse_customer_key_md5 = Default::default();
+        let mut request_payer = Default::default();
+        let mut tagging = Default::default();
+        let mut object_lock_mode = Default::default();
+        let mut object_lock_retain_until_date = Default::default();
+        let mut object_lock_legal_hold_status = Default::default();
+        let mut object_lock_event_hold = Default::default();
+        let mut object_lock_event_hold_duration_days = Default::default();
+        let mut object_lock_event_hold_duration_years = Default::default();
+        let mut expected_bucket_owner = Default::default();
+        let mut expected_source_bucket_owner = Default::default();
         // ACL — header `x-amz-acl`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-acl") {
             let raw = raw.as_ref();
-            input.acl = Some(dto::Acl::custom(raw.to_owned()));
+            acl = Some(dto::Acl::custom(raw.to_owned()));
         }
         // Bucket — URI label, decoded once by `MetaView::of`.
-        input.bucket = request.require_bucket()?;
+        let bucket = request.require_bucket()?;
         // CacheControl — header `cache-control`, repeated field lines joined.
         if let Some(raw) = request.header("cache-control") {
             let raw = raw.as_ref();
-            input.cache_control = Some(raw.to_owned());
+            cache_control = Some(raw.to_owned());
         }
         // ChecksumAlgorithm — header `x-amz-checksum-algorithm`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-checksum-algorithm") {
             let raw = raw.as_ref();
-            input.checksum_algorithm = Some(dto::ChecksumAlgorithm::custom(raw.to_owned()));
+            checksum_algorithm = Some(dto::ChecksumAlgorithm::custom(raw.to_owned()));
         }
         // ContentDisposition — header `content-disposition`, repeated field lines joined.
         if let Some(raw) = request.header("content-disposition") {
             let raw = raw.as_ref();
-            input.content_disposition = Some(raw.to_owned());
+            content_disposition = Some(raw.to_owned());
         }
         // ContentEncoding — header `content-encoding`, repeated field lines joined.
         if let Some(raw) = request.header("content-encoding") {
             let raw = raw.as_ref();
-            input.content_encoding = Some(raw.to_owned());
+            content_encoding = Some(raw.to_owned());
         }
         // ContentLanguage — header `content-language`, repeated field lines joined.
         if let Some(raw) = request.header("content-language") {
             let raw = raw.as_ref();
-            input.content_language = Some(raw.to_owned());
+            content_language = Some(raw.to_owned());
         }
         // ContentType — header `content-type`, repeated field lines joined.
         if let Some(raw) = request.header("content-type") {
             let raw = raw.as_ref();
-            input.content_type = Some(raw.to_owned());
+            content_type = Some(raw.to_owned());
         }
         // CopySource — header `x-amz-copy-source`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-copy-source") {
             let raw = raw.as_ref();
-            input.copy_source = raw.to_owned();
+            copy_source = raw.to_owned();
         } else {
             return Err(value::missing(ErrorCode::INVALID_ARGUMENT, "CopySource"));
         }
         // CopySourceIfMatch — header `x-amz-copy-source-if-match`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-copy-source-if-match") {
             let raw = raw.as_ref();
-            input.copy_source_if_match = Some(raw.to_owned());
+            copy_source_if_match = Some(raw.to_owned());
         }
         // CopySourceIfModifiedSince — header `x-amz-copy-source-if-modified-since`, read tolerantly: a value that is not a date is ignored.
         if let Some(raw) = request.header("x-amz-copy-source-if-modified-since") {
             let raw = raw.as_ref();
-            input.copy_source_if_modified_since = value::date_condition_in(request, raw, TimestampFormat::HttpDate).honoured();
+            copy_source_if_modified_since = value::date_condition_in(request, raw, TimestampFormat::HttpDate).honoured();
         }
         // CopySourceIfNoneMatch — header `x-amz-copy-source-if-none-match`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-copy-source-if-none-match") {
             let raw = raw.as_ref();
-            input.copy_source_if_none_match = Some(raw.to_owned());
+            copy_source_if_none_match = Some(raw.to_owned());
         }
         // CopySourceIfUnmodifiedSince — header `x-amz-copy-source-if-unmodified-since`, read tolerantly: a value that is not a date is ignored.
         if let Some(raw) = request.header("x-amz-copy-source-if-unmodified-since") {
             let raw = raw.as_ref();
-            input.copy_source_if_unmodified_since = value::date_condition_in(request, raw, TimestampFormat::HttpDate).honoured();
+            copy_source_if_unmodified_since = value::date_condition_in(request, raw, TimestampFormat::HttpDate).honoured();
         }
         // Expires — header `expires`, repeated field lines joined.
         if let Some(raw) = request.header("expires") {
             let raw = raw.as_ref();
-            input.expires = Some(value::opaque(raw));
+            expires = Some(value::opaque(raw));
         }
         // GrantFullControl — header `x-amz-grant-full-control`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-grant-full-control") {
             let raw = raw.as_ref();
-            input.grant_full_control = Some(raw.to_owned());
+            grant_full_control = Some(raw.to_owned());
         }
         // GrantRead — header `x-amz-grant-read`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-grant-read") {
             let raw = raw.as_ref();
-            input.grant_read = Some(raw.to_owned());
+            grant_read = Some(raw.to_owned());
         }
         // GrantReadACP — header `x-amz-grant-read-acp`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-grant-read-acp") {
             let raw = raw.as_ref();
-            input.grant_read_acp = Some(raw.to_owned());
+            grant_read_acp = Some(raw.to_owned());
         }
         // GrantWriteACP — header `x-amz-grant-write-acp`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-grant-write-acp") {
             let raw = raw.as_ref();
-            input.grant_write_acp = Some(raw.to_owned());
+            grant_write_acp = Some(raw.to_owned());
         }
         // IfMatch — header `if-match`, repeated field lines joined.
         if let Some(raw) = request.header("if-match") {
             let raw = raw.as_ref();
-            input.if_match = Some(raw.to_owned());
+            if_match = Some(raw.to_owned());
         }
         // IfNoneMatch — header `if-none-match`, repeated field lines joined.
         if let Some(raw) = request.header("if-none-match") {
             let raw = raw.as_ref();
-            input.if_none_match = Some(raw.to_owned());
+            if_none_match = Some(raw.to_owned());
         }
         // Key — URI label, decoded once by `MetaView::of`.
-        input.key = request.require_key()?;
+        let key = request.require_key()?;
         // Metadata — every header under `x-amz-meta-`.
-        input.metadata = value::metadata_map(request, "x-amz-meta-", "Metadata")?;
+        let metadata = value::metadata_map(request, "x-amz-meta-", "Metadata")?;
         // MetadataDirective — header `x-amz-metadata-directive`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-metadata-directive") {
             let raw = raw.as_ref();
-            input.metadata_directive = Some(dto::MetadataDirective::custom(raw.to_owned()));
+            metadata_directive = Some(dto::MetadataDirective::custom(raw.to_owned()));
         }
         // TaggingDirective — header `x-amz-tagging-directive`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-tagging-directive") {
             let raw = raw.as_ref();
-            input.tagging_directive = Some(dto::TaggingDirective::custom(raw.to_owned()));
+            tagging_directive = Some(dto::TaggingDirective::custom(raw.to_owned()));
         }
         // ServerSideEncryption — header `x-amz-server-side-encryption`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-server-side-encryption") {
             let raw = raw.as_ref();
-            input.server_side_encryption = Some(dto::ServerSideEncryption::custom(raw.to_owned()));
+            server_side_encryption = Some(dto::ServerSideEncryption::custom(raw.to_owned()));
         }
         // StorageClass — header `x-amz-storage-class`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-storage-class") {
             let raw = raw.as_ref();
-            input.storage_class = Some(dto::StorageClass::custom(raw.to_owned()));
+            storage_class = Some(dto::StorageClass::custom(raw.to_owned()));
         }
         // WebsiteRedirectLocation — header `x-amz-website-redirect-location`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-website-redirect-location") {
             let raw = raw.as_ref();
-            input.website_redirect_location = Some(raw.to_owned());
+            website_redirect_location = Some(raw.to_owned());
         }
         // SSECustomerAlgorithm — header `x-amz-server-side-encryption-customer-algorithm`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-server-side-encryption-customer-algorithm") {
             let raw = raw.as_ref();
-            input.sse_customer_algorithm = Some(raw.to_owned());
+            sse_customer_algorithm = Some(raw.to_owned());
         }
         // SSECustomerKey — header `x-amz-server-side-encryption-customer-key`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-server-side-encryption-customer-key") {
             let raw = raw.as_ref();
-            input.sse_customer_key = Some(rustfs_gateway_types::SseCustomerKey::from_wire(raw));
+            sse_customer_key = Some(rustfs_gateway_types::SseCustomerKey::from_wire(raw));
         }
         // SSECustomerKeyMD5 — header `x-amz-server-side-encryption-customer-key-md5`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-server-side-encryption-customer-key-md5") {
             let raw = raw.as_ref();
-            input.sse_customer_key_md5 = Some(raw.to_owned());
+            sse_customer_key_md5 = Some(raw.to_owned());
         }
         // SSEKMSKeyId — header `x-amz-server-side-encryption-aws-kms-key-id`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-server-side-encryption-aws-kms-key-id") {
             let raw = raw.as_ref();
-            input.ssekms_key_id = Some(raw.to_owned());
+            ssekms_key_id = Some(raw.to_owned());
         }
         // SSEKMSEncryptionContext — header `x-amz-server-side-encryption-context`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-server-side-encryption-context") {
             let raw = raw.as_ref();
-            input.ssekms_encryption_context = Some(raw.to_owned());
+            ssekms_encryption_context = Some(raw.to_owned());
         }
         // BucketKeyEnabled — header `x-amz-server-side-encryption-bucket-key-enabled`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-server-side-encryption-bucket-key-enabled") {
             let raw = raw.as_ref();
-            input.bucket_key_enabled = Some(value::boolean(raw, "BucketKeyEnabled")?);
+            bucket_key_enabled = Some(value::boolean(raw, "BucketKeyEnabled")?);
         }
         // CopySourceSSECustomerAlgorithm — header `x-amz-copy-source-server-side-encryption-customer-algorithm`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-copy-source-server-side-encryption-customer-algorithm") {
             let raw = raw.as_ref();
-            input.copy_source_sse_customer_algorithm = Some(raw.to_owned());
+            copy_source_sse_customer_algorithm = Some(raw.to_owned());
         }
         // CopySourceSSECustomerKey — header `x-amz-copy-source-server-side-encryption-customer-key`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-copy-source-server-side-encryption-customer-key") {
             let raw = raw.as_ref();
-            input.copy_source_sse_customer_key = Some(rustfs_gateway_types::SseCustomerKey::from_wire(raw));
+            copy_source_sse_customer_key = Some(rustfs_gateway_types::SseCustomerKey::from_wire(raw));
         }
         // CopySourceSSECustomerKeyMD5 — header `x-amz-copy-source-server-side-encryption-customer-key-md5`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-copy-source-server-side-encryption-customer-key-md5") {
             let raw = raw.as_ref();
-            input.copy_source_sse_customer_key_md5 = Some(raw.to_owned());
+            copy_source_sse_customer_key_md5 = Some(raw.to_owned());
         }
         // RequestPayer — header `x-amz-request-payer`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-request-payer") {
             let raw = raw.as_ref();
-            input.request_payer = Some(dto::RequestPayer::custom(raw.to_owned()));
+            request_payer = Some(dto::RequestPayer::custom(raw.to_owned()));
         }
         // Tagging — header `x-amz-tagging`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-tagging") {
             let raw = raw.as_ref();
-            input.tagging = Some(raw.to_owned());
+            tagging = Some(raw.to_owned());
         }
         // ObjectLockMode — header `x-amz-object-lock-mode`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-object-lock-mode") {
             let raw = raw.as_ref();
-            input.object_lock_mode = Some(dto::ObjectLockMode::custom(raw.to_owned()));
+            object_lock_mode = Some(dto::ObjectLockMode::custom(raw.to_owned()));
         }
         // ObjectLockRetainUntilDate — header `x-amz-object-lock-retain-until-date`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-object-lock-retain-until-date") {
             let raw = raw.as_ref();
-            input.object_lock_retain_until_date =
-                Some(value::timestamp(raw, TimestampFormat::Iso8601, "ObjectLockRetainUntilDate")?);
+            object_lock_retain_until_date = Some(value::timestamp(raw, TimestampFormat::Iso8601, "ObjectLockRetainUntilDate")?);
         }
         // ObjectLockLegalHoldStatus — header `x-amz-object-lock-legal-hold`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-object-lock-legal-hold") {
             let raw = raw.as_ref();
-            input.object_lock_legal_hold_status = Some(dto::ObjectLockLegalHoldStatus::custom(raw.to_owned()));
+            object_lock_legal_hold_status = Some(dto::ObjectLockLegalHoldStatus::custom(raw.to_owned()));
         }
         // ObjectLockEventHold — header `x-amz-object-lock-event-hold`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-object-lock-event-hold") {
             let raw = raw.as_ref();
-            input.object_lock_event_hold = Some(dto::ObjectLockEventHold::custom(raw.to_owned()));
+            object_lock_event_hold = Some(dto::ObjectLockEventHold::custom(raw.to_owned()));
         }
         // ObjectLockEventHoldDurationDays — header `x-amz-object-lock-event-hold-duration-days`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-object-lock-event-hold-duration-days") {
             let raw = raw.as_ref();
-            input.object_lock_event_hold_duration_days = Some(value::integer(raw, "ObjectLockEventHoldDurationDays")?);
+            object_lock_event_hold_duration_days = Some(value::integer(raw, "ObjectLockEventHoldDurationDays")?);
         }
         // ObjectLockEventHoldDurationYears — header `x-amz-object-lock-event-hold-duration-years`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-object-lock-event-hold-duration-years") {
             let raw = raw.as_ref();
-            input.object_lock_event_hold_duration_years = Some(value::integer(raw, "ObjectLockEventHoldDurationYears")?);
+            object_lock_event_hold_duration_years = Some(value::integer(raw, "ObjectLockEventHoldDurationYears")?);
         }
         // ExpectedBucketOwner — header `x-amz-expected-bucket-owner`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-expected-bucket-owner") {
             let raw = raw.as_ref();
-            input.expected_bucket_owner = Some(raw.to_owned());
+            expected_bucket_owner = Some(raw.to_owned());
         }
         // ExpectedSourceBucketOwner — header `x-amz-source-expected-bucket-owner`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-source-expected-bucket-owner") {
             let raw = raw.as_ref();
-            input.expected_source_bucket_owner = Some(raw.to_owned());
+            expected_source_bucket_owner = Some(raw.to_owned());
         }
         let _ = body;
+        value::exit(rustfs_gateway_types::reject_placeholder("CopyObjectInput", "Bucket", &bucket))?;
+        value::exit(rustfs_gateway_types::reject_placeholder("CopyObjectInput", "CopySource", &copy_source))?;
+        value::exit(rustfs_gateway_types::reject_placeholder("CopyObjectInput", "Key", &key))?;
+        let copy_source = crate::ops::shared::copy_source::decode_value(&copy_source, request.names())?;
+        let input = Input {
+            acl,
+            bucket,
+            cache_control,
+            checksum_algorithm,
+            content_disposition,
+            content_encoding,
+            content_language,
+            content_type,
+            copy_source,
+            copy_source_if_match,
+            copy_source_if_modified_since,
+            copy_source_if_none_match,
+            copy_source_if_unmodified_since,
+            expires,
+            grant_full_control,
+            grant_read,
+            grant_read_acp,
+            grant_write_acp,
+            if_match,
+            if_none_match,
+            key,
+            metadata,
+            metadata_directive,
+            tagging_directive,
+            server_side_encryption,
+            storage_class,
+            website_redirect_location,
+            sse_customer_algorithm,
+            sse_customer_key,
+            sse_customer_key_md5,
+            ssekms_key_id,
+            ssekms_encryption_context,
+            bucket_key_enabled,
+            copy_source_sse_customer_algorithm,
+            copy_source_sse_customer_key,
+            copy_source_sse_customer_key_md5,
+            request_payer,
+            tagging,
+            object_lock_mode,
+            object_lock_retain_until_date,
+            object_lock_legal_hold_status,
+            object_lock_event_hold,
+            object_lock_event_hold_duration_days,
+            object_lock_event_hold_duration_years,
+            expected_bucket_owner,
+            expected_source_bucket_owner,
+        };
         value::exit(input.check_required())?;
         Ok(input)
     }

@@ -26,12 +26,11 @@
 
 use std::sync::Arc;
 
-use rustfs_gateway_types::dto::{CopyObject, CopyObjectInput};
 use rustfs_gateway_types::{LegacyRustfsNameValidator, NamePolicy, SlashPolicy};
 
 use super::*;
 use crate::Decision;
-use crate::authz::{authorize_input, prepare_input_under};
+use crate::authz::authorize_input;
 
 /// The RustFS profile's naming: the slash rule, the key floor and the path addressing.
 fn rustfs() -> NamePolicy {
@@ -44,11 +43,8 @@ fn rustfs() -> NamePolicy {
 
 /// The bucket, key and version `CopyObject` resolves for `raw` under `names`, or the code.
 fn source(raw: &str, names: &NamePolicy) -> Result<(String, String, Option<String>), ErrorCode> {
-    let input = CopyObjectInput {
-        copy_source: raw.to_owned(),
-        ..Default::default()
-    };
-    let decoded = prepare_input_under::<CopyObject>(input, names).map_err(|error| error.code().clone())?;
+    let input = raw.to_owned();
+    let decoded = prepare_copy(&input, names).map_err(|error| error.code().clone())?;
     let authorized = authorize_input(decoded, |_| Decision::Allow).expect("authorized");
     let source = authorized
         .resources()
@@ -111,18 +107,13 @@ fn arn_account_sources(account: &str) -> [String; 2] {
 }
 
 fn assert_account_refused(account: &str) {
-    use rustfs_gateway_types::dto::{UploadPartCopy, UploadPartCopyInput};
-
     for names in [NamePolicy::default(), rustfs()] {
         for raw in arn_account_sources(account) {
             for suffix in ["", "?versionId=v1"] {
                 let raw = format!("{raw}{suffix}");
                 assert_eq!(source(&raw, &names), Err(ErrorCode::INVALID_ARGUMENT), "{raw}");
-                let input = UploadPartCopyInput {
-                    copy_source: raw.clone(),
-                    ..Default::default()
-                };
-                let error = prepare_input_under::<UploadPartCopy>(input, &names)
+                let input = raw.clone();
+                let error = prepare_part_copy(&input, &names)
                     .err()
                     .expect("an invalid account cannot reach source authorization or a handler");
                 assert_eq!(error.code(), &ErrorCode::INVALID_ARGUMENT, "{raw}");
@@ -179,8 +170,6 @@ fn arn_accounts_keep_leading_zeroes_and_full_identity() {
 /// Evidence: https://docs.aws.amazon.com/AmazonS3/latest/API/API_CopyObject.html.
 #[test]
 fn arn_leading_slash_preserves_the_authorized_resource_for_both_operations() {
-    use rustfs_gateway_types::dto::{UploadPartCopy, UploadPartCopyInput};
-
     for names in [NamePolicy::default(), rustfs()] {
         for raw in arn_account_sources("012345678901") {
             let raw = raw.replace("/object/key", "/object/literal%252Fkey");
@@ -209,11 +198,8 @@ fn arn_leading_slash_preserves_the_authorized_resource_for_both_operations() {
                 assert_eq!(parsed.resource.key.as_str(), "literal%2Fkey");
                 assert_eq!(parsed.resource.version_id.as_deref(), (!suffix.is_empty()).then_some("v%2F1"));
                 assert_eq!(source(&prefixed, &names), source(&raw, &names));
-                let input = UploadPartCopyInput {
-                    copy_source: prefixed,
-                    ..Default::default()
-                };
-                let decoded = prepare_input_under::<UploadPartCopy>(input, &names).expect("part-copy source");
+                let input = prefixed;
+                let decoded = prepare_part_copy(&input, &names).expect("part-copy source");
                 let authorized = authorize_input(decoded, |_| Decision::Allow).expect("authorized part-copy source");
                 let resolved = authorized
                     .resources()
@@ -262,17 +248,11 @@ fn n_arn_leading_slash_cannot_use_a_path_source_proof() {
     for names in [NamePolicy::default(), rustfs()] {
         for raw in arn_account_sources("123456789012") {
             let bare = CopySource::parse_under(&raw, &names).expect("ARN");
-            let path = CopyObjectInput {
-                copy_source: format!("{}/key", bare.resource.bucket.as_ref().expect("bucketful source").as_str()),
-                ..Default::default()
-            };
-            let authorized = authorize_input(prepare_input_under::<CopyObject>(path, &names).expect("path"), |_| Decision::Allow)
-                .expect("path proof");
-            let arn = CopyObjectInput {
-                copy_source: format!("/{raw}"),
-                ..Default::default()
-            };
-            let decoded = prepare_input_under::<CopyObject>(arn, &names).expect("prefixed ARN");
+            let path = format!("{}/key", bare.resource.bucket.as_ref().expect("bucketful source").as_str());
+            let authorized =
+                authorize_input(prepare_copy(&path, &names).expect("path"), |_| Decision::Allow).expect("path proof");
+            let arn = format!("/{raw}");
+            let decoded = prepare_copy(&arn, &names).expect("prefixed ARN");
             assert!(decoded.resources().source().resolve(authorized.read_proof()).is_none());
         }
     }
@@ -282,24 +262,17 @@ fn n_arn_leading_slash_cannot_use_a_path_source_proof() {
 fn n_arn_leading_slash_does_not_reuse_another_arn_identity_proof() {
     for names in [NamePolicy::default(), rustfs()] {
         for raw in arn_account_sources("123456789012") {
-            let input = CopyObjectInput {
-                copy_source: raw.clone(),
-                ..Default::default()
-            };
+            let input = raw.clone();
             let authorized =
-                authorize_input(prepare_input_under::<CopyObject>(input, &names).expect("bare ARN"), |_| Decision::Allow)
-                    .expect("source proof");
+                authorize_input(prepare_copy(&input, &names).expect("bare ARN"), |_| Decision::Allow).expect("source proof");
             for changed in [
                 raw.replace("arn:aws:", "arn:aws-cn:"),
                 raw.replace("us-east-1", "us-west-2"),
                 raw.replace("123456789012", "012345678901"),
                 raw.replace("my-ap", "other-ap").replace("op-1", "op-2"),
             ] {
-                let input = CopyObjectInput {
-                    copy_source: format!("/{changed}"),
-                    ..Default::default()
-                };
-                let decoded = prepare_input_under::<CopyObject>(input, &names).expect("other ARN");
+                let input = format!("/{changed}");
+                let decoded = prepare_copy(&input, &names).expect("other ARN");
                 assert!(decoded.resources().source().resolve(authorized.read_proof()).is_none());
             }
         }
@@ -310,19 +283,11 @@ fn n_arn_leading_slash_does_not_reuse_another_arn_identity_proof() {
 fn n_arn_leading_slash_does_not_reuse_another_version_proof() {
     for names in [NamePolicy::default(), rustfs()] {
         for raw in arn_account_sources("123456789012") {
-            let input = CopyObjectInput {
-                copy_source: format!("{raw}?versionId=v1"),
-                ..Default::default()
-            };
-            let authorized = authorize_input(prepare_input_under::<CopyObject>(input, &names).expect("version one"), |_| {
-                Decision::Allow
-            })
-            .expect("source proof");
-            let input = CopyObjectInput {
-                copy_source: format!("/{raw}?versionId=v2"),
-                ..Default::default()
-            };
-            let decoded = prepare_input_under::<CopyObject>(input, &names).expect("version two");
+            let input = format!("{raw}?versionId=v1");
+            let authorized =
+                authorize_input(prepare_copy(&input, &names).expect("version one"), |_| Decision::Allow).expect("source proof");
+            let input = format!("/{raw}?versionId=v2");
+            let decoded = prepare_copy(&input, &names).expect("version two");
             assert!(decoded.resources().source().resolve(authorized.read_proof()).is_none());
         }
     }
@@ -333,11 +298,8 @@ fn n_arn_leading_slash_cannot_skip_source_denial() {
     for names in [NamePolicy::default(), rustfs()] {
         for raw in arn_account_sources("123456789012") {
             for suffix in ["", "?versionId=v1"] {
-                let input = CopyObjectInput {
-                    copy_source: format!("/{raw}{suffix}"),
-                    ..Default::default()
-                };
-                let decoded = prepare_input_under::<CopyObject>(input, &names).expect("prefixed ARN");
+                let input = format!("/{raw}{suffix}");
+                let decoded = prepare_copy(&input, &names).expect("prefixed ARN");
                 let mut reads = 0;
                 let error = authorize_input(decoded, |resource| {
                     if resource.action() == "s3:GetObject" || resource.action() == "s3:GetObjectVersion" {
@@ -367,8 +329,6 @@ fn encoded_arn_spellings(raw: &str) -> [String; 4] {
 
 #[test]
 fn encoded_arn_structure_keeps_one_key_decode_and_the_full_source() {
-    use rustfs_gateway_types::dto::{UploadPartCopy, UploadPartCopyInput};
-
     for names in [NamePolicy::default(), rustfs()] {
         for raw in arn_account_sources("012345678901") {
             let raw = raw.replace("/object/key", "/object/literal%252Fkey");
@@ -405,15 +365,10 @@ fn encoded_arn_structure_keeps_one_key_decode_and_the_full_source() {
                     assert_eq!(parsed.resource.key.as_str(), "literal%2Fkey");
                     assert_eq!(parsed.resource.version_id.as_deref(), (!suffix.is_empty()).then_some("v%2F1"));
                     assert_eq!(source(&wire, &names), source(&format!("{raw}{suffix}"), &names));
-                    let input = UploadPartCopyInput {
-                        copy_source: wire,
-                        ..Default::default()
-                    };
+                    let input = wire;
                     let authorized =
-                        authorize_input(prepare_input_under::<UploadPartCopy>(input, &names).expect("part source"), |_| {
-                            Decision::Allow
-                        })
-                        .expect("authorized part source");
+                        authorize_input(prepare_part_copy(&input, &names).expect("part source"), |_| Decision::Allow)
+                            .expect("authorized part source");
                     let resolved = authorized
                         .resources()
                         .source()
@@ -474,19 +429,12 @@ fn n_encoded_arn_cannot_use_a_different_source_proof() {
                 raw.replace("123456789012", "012345678901"),
                 format!("{raw}?versionId=v1"),
             ] {
-                let input = CopyObjectInput {
-                    copy_source: other,
-                    ..Default::default()
-                };
+                let input = other;
                 let authorized =
-                    authorize_input(prepare_input_under::<CopyObject>(input, &names).expect("other"), |_| Decision::Allow)
-                        .expect("other proof");
+                    authorize_input(prepare_copy(&input, &names).expect("other"), |_| Decision::Allow).expect("other proof");
                 for encoded in encoded_arn_spellings(&raw) {
-                    let input = CopyObjectInput {
-                        copy_source: encoded,
-                        ..Default::default()
-                    };
-                    let decoded = prepare_input_under::<CopyObject>(input, &names).expect("encoded source");
+                    let input = encoded;
+                    let decoded = prepare_copy(&input, &names).expect("encoded source");
                     assert!(decoded.resources().source().resolve(authorized.read_proof()).is_none());
                 }
             }
@@ -500,11 +448,8 @@ fn n_encoded_arn_source_denial_cannot_be_skipped() {
         for raw in arn_account_sources("123456789012") {
             for encoded in encoded_arn_spellings(&raw) {
                 for suffix in ["", "?versionId=v1"] {
-                    let input = CopyObjectInput {
-                        copy_source: format!("{encoded}{suffix}"),
-                        ..Default::default()
-                    };
-                    let decoded = prepare_input_under::<CopyObject>(input, &names).expect("encoded source");
+                    let input = format!("{encoded}{suffix}");
+                    let decoded = prepare_copy(&input, &names).expect("encoded source");
                     let mut reads = 0;
                     let error = authorize_input(decoded, |resource| {
                         if resource.action() == "s3:GetObject" || resource.action() == "s3:GetObjectVersion" {
@@ -541,17 +486,13 @@ const BUCKETLESS_OUTPOSTS: &str = "arn:aws:s3-outposts:us-east-1:123456789012:ou
 #[test]
 fn bucketless_outposts_preserves_the_source_without_inventing_a_bucket() {
     use crate::DerivedResourceSet;
-    use rustfs_gateway_types::dto::{UploadPartCopy, UploadPartCopyInput};
 
     for names in [NamePolicy::default(), rustfs()] {
         for raw in std::iter::once(BUCKETLESS_OUTPOSTS.to_owned()).chain(encoded_arn_spellings(BUCKETLESS_OUTPOSTS)) {
             for suffix in ["", "?versionId=v%252F1"] {
                 let raw = format!("{raw}{suffix}");
-                let input = CopyObjectInput {
-                    copy_source: raw.clone(),
-                    ..Default::default()
-                };
-                let decoded = prepare_input_under::<CopyObject>(input, &names).expect("bucketless source");
+                let input = raw.clone();
+                let decoded = prepare_copy(&input, &names).expect("bucketless source");
                 let identity = crate::ResourceIdentity::Outposts {
                     partition: "aws".to_owned(),
                     region: "us-east-1".to_owned(),
@@ -583,14 +524,9 @@ fn bucketless_outposts_preserves_the_source_without_inventing_a_bucket() {
                     .expect("source proof");
                 assert_eq!(resolved.form(), CopySourceForm::OutpostsArn);
                 assert!(!resolved.is_self_copy(&BucketName::new("op-1").expect("bucket"), &resolved.resource.key));
-                let input = UploadPartCopyInput {
-                    copy_source: raw,
-                    ..Default::default()
-                };
-                let part = authorize_input(prepare_input_under::<UploadPartCopy>(input, &names).expect("part source"), |_| {
-                    Decision::Allow
-                })
-                .expect("part source allowed");
+                let input = raw;
+                let part = authorize_input(prepare_part_copy(&input, &names).expect("part source"), |_| Decision::Allow)
+                    .expect("part source allowed");
                 let part = part.resources().source().resolve(part.read_proof()).expect("part proof");
                 assert_eq!(part.resource, resolved.resource);
             }
@@ -601,14 +537,9 @@ fn bucketless_outposts_preserves_the_source_without_inventing_a_bucket() {
 #[test]
 fn n_bucketless_outposts_cannot_use_an_inherited_bucket_proof() {
     for names in [NamePolicy::default(), rustfs()] {
-        let input = CopyObjectInput {
-            copy_source: BUCKETLESS_OUTPOSTS.to_owned(),
-            ..Default::default()
-        };
-        let authorized = authorize_input(prepare_input_under::<CopyObject>(input, &names).expect("bucketless source"), |_| {
-            Decision::Allow
-        })
-        .expect("authorized source");
+        let input = BUCKETLESS_OUTPOSTS.to_owned();
+        let authorized = authorize_input(prepare_copy(&input, &names).expect("bucketless source"), |_| Decision::Allow)
+            .expect("authorized source");
         let source = authorized
             .resources()
             .source()
@@ -628,11 +559,8 @@ fn n_bucketless_outposts_cannot_use_an_inherited_bucket_proof() {
 #[test]
 fn n_bucketless_outposts_cannot_reuse_a_bucketful_or_different_source_proof() {
     for names in [NamePolicy::default(), rustfs()] {
-        let original = CopyObjectInput {
-            copy_source: BUCKETLESS_OUTPOSTS.to_owned(),
-            ..Default::default()
-        };
-        let decoded = prepare_input_under::<CopyObject>(original, &names).expect("bucketless source");
+        let original = BUCKETLESS_OUTPOSTS.to_owned();
+        let decoded = prepare_copy(&original, &names).expect("bucketless source");
         for other in [
             "destination/literal%252Fkey".to_owned(),
             BUCKETLESS_OUTPOSTS.replace("/object/", "/bucket/source/object/"),
@@ -641,14 +569,9 @@ fn n_bucketless_outposts_cannot_reuse_a_bucketful_or_different_source_proof() {
             BUCKETLESS_OUTPOSTS.replace("us-east-1", "us-west-2"),
             format!("{BUCKETLESS_OUTPOSTS}?versionId=other"),
         ] {
-            let input = CopyObjectInput {
-                copy_source: other,
-                ..Default::default()
-            };
-            let other = authorize_input(prepare_input_under::<CopyObject>(input, &names).expect("different source"), |_| {
-                Decision::Allow
-            })
-            .expect("different proof");
+            let input = other;
+            let other = authorize_input(prepare_copy(&input, &names).expect("different source"), |_| Decision::Allow)
+                .expect("different proof");
             assert!(decoded.resources().source().resolve(other.read_proof()).is_none());
         }
     }
@@ -658,11 +581,8 @@ fn n_bucketless_outposts_cannot_reuse_a_bucketful_or_different_source_proof() {
 fn n_bucketless_outposts_source_denial_prevents_authorization() {
     for names in [NamePolicy::default(), rustfs()] {
         for suffix in ["", "?versionId=v1"] {
-            let input = CopyObjectInput {
-                copy_source: format!("{BUCKETLESS_OUTPOSTS}{suffix}"),
-                ..Default::default()
-            };
-            let decoded = prepare_input_under::<CopyObject>(input, &names).expect("bucketless source");
+            let input = format!("{BUCKETLESS_OUTPOSTS}{suffix}");
+            let decoded = prepare_copy(&input, &names).expect("bucketless source");
             let mut visits = 0;
             let error = authorize_input(decoded, |_| {
                 visits += 1;
@@ -700,11 +620,8 @@ fn an_empty_legacy_copy_version_reaches_versioned_authorization() {
         "/arn:aws:s3:us-east-1:123456789012:accesspoint/my-ap/object/key?versionId=",
         "arn:aws:s3-outposts:us-east-1:123456789012:outpost/op-1/object/literal%252Fkey?versionId=",
     ] {
-        let input = CopyObjectInput {
-            copy_source: raw.to_owned(),
-            ..Default::default()
-        };
-        let result = prepare_input_under::<CopyObject>(input, &rustfs()).map(|decoded| {
+        let input = raw.to_owned();
+        let result = prepare_copy(&input, &rustfs()).map(|decoded| {
             let mut resources = Vec::new();
             crate::DerivedResourceSet::visit(decoded.resources(), &mut |resource| {
                 resources.push((resource.action().to_owned(), resource.version_id().map(str::to_owned)));
@@ -713,7 +630,7 @@ fn an_empty_legacy_copy_version_reaches_versioned_authorization() {
             let resolved = authorized.resources().source().resolve(authorized.read_proof());
             (
                 resources,
-                authorized.input().copy_source.is_empty(),
+                source_erased(&authorized.input().copy_source),
                 resolved.map(|source| source.version_id().map(str::to_owned)),
             )
         });
@@ -734,12 +651,9 @@ fn an_empty_legacy_copy_version_reaches_versioned_authorization() {
 fn empty_absent_and_nonempty_copy_versions_need_their_own_proof() {
     let mut sources = Vec::new();
     for suffix in ["", "?versionId=", "?versionId=v1"] {
-        let input = CopyObjectInput {
-            copy_source: format!("src/key{suffix}"),
-            ..Default::default()
-        };
+        let input = format!("src/key{suffix}");
         sources.push(
-            prepare_input_under::<CopyObject>(input, &rustfs())
+            prepare_copy(&input, &rustfs())
                 .map(|decoded| authorize_input(decoded, |_| Decision::Allow).expect("source authorized")),
         );
     }

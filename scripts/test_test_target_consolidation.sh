@@ -129,6 +129,18 @@ PYEOF
 }
 expect_fail 'the core error-resolution integration module omission is rejected' mut_core_error_resolution_registration_omitted
 
+mut_core_copy_source_registration_omitted() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/core/tests/integration.rs")
+text = path.read_text()
+entry = '#[path = "copy_source_input.rs"]\nmod copy_source_input;\n'
+assert entry in text
+path.write_text(text.replace(entry, '', 1))
+PYEOF
+}
+expect_fail 'the core copy-source integration module omission is rejected' mut_core_copy_source_registration_omitted
+
 mut_core_registration_duplicated() {
     python3 - <<'PYEOF'
 from pathlib import Path

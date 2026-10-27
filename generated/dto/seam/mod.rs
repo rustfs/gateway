@@ -22,8 +22,8 @@
 //! `census` holds the member census of every pinned structure they reach (rustfs/gateway#1076)
 //! and the error-code census; `fixtures`, test-only, the s3s values the round trips start from.
 
-// The mounting revision's bindings, reached by every module below as `super::super::{leaf, s3s}`.
-use super::{leaf, s3s};
+// The mounting revision's bindings, reached by every module below as `super::super::{copy_source, leaf, s3s}`.
+use super::{copy_source, leaf, s3s};
 
 pub mod census;
 #[cfg(test)]

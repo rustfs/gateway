@@ -119,7 +119,7 @@ impl Handler<dto::CopyObject> for CopyBackend {
     async fn call(&self, request: Req<dto::CopyObject>) -> HandlerResult<dto::CopyObject> {
         self.0.fetch_add(1, Ordering::SeqCst);
         assert!(
-            request.input().copy_source.is_empty(),
+            source_erased(&request.input().copy_source),
             "the raw source remained visible after authorization"
         );
         let source = request
@@ -139,7 +139,7 @@ impl Handler<dto::CopyObject> for CopyBackend {
     ) -> HandlerResult<dto::CopyObject> {
         self.0.fetch_add(1, Ordering::SeqCst);
         assert!(
-            request.input().copy_source.is_empty(),
+            source_erased(&request.input().copy_source),
             "the raw source remained visible after authorization"
         );
         let source = request
@@ -567,10 +567,14 @@ impl rustfs_gateway::Authorizer for CopyVersionAuthorizer {
 struct CopyVersionBackend(Arc<Mutex<CopyVersionTrace>>);
 
 impl CopyVersionBackend {
-    fn observe(&self, raw: &str, source: Option<rustfs_gateway::ResolvedCopySource>) -> Result<(), rustfs_gateway::HandlerError> {
+    fn observe(
+        &self,
+        raw: &rustfs_gateway::CopySourceValue,
+        source: Option<rustfs_gateway::ResolvedCopySource>,
+    ) -> Result<(), rustfs_gateway::HandlerError> {
         let mut trace = self.0.lock().expect("trace lock");
         trace.handler_calls += 1;
-        trace.sealed = Some(raw.is_empty());
+        trace.sealed = Some(source_erased(raw));
         trace.resolved_version = source.map(|source| source.version_id().map(str::to_owned));
         // This fixture's storage rejects an empty version, after the source authorization hook.
         if trace.resolved_version == Some(Some(String::new())) {
@@ -700,6 +704,40 @@ async fn an_empty_copy_version_keeps_source_denial_ahead_of_storage_validation()
                     "part={part}, source={source}, response={body}"
                 );
             }
+        }
+    }
+}
+
+fn source_erased(value: &rustfs_gateway::CopySourceValue) -> bool {
+    match value {
+        rustfs_gateway::CopySourceValue::Bucket { bucket, key, version_id } => {
+            bucket.is_empty() && key.is_empty() && version_id.is_none()
+        }
+        rustfs_gateway::CopySourceValue::AccessPoint {
+            partition,
+            region,
+            account_id,
+            access_point_name,
+            key,
+            version_id,
+        } => {
+            [partition, region, account_id, access_point_name, key]
+                .into_iter()
+                .all(String::is_empty)
+                && version_id.is_none()
+        }
+        rustfs_gateway::CopySourceValue::Outpost {
+            partition,
+            region,
+            account_id,
+            outpost_id,
+            key,
+            version_id,
+        } => {
+            [partition, region, account_id, outpost_id, key]
+                .into_iter()
+                .all(String::is_empty)
+                && version_id.is_none()
         }
     }
 }

@@ -29,15 +29,15 @@ use rustfs_gateway_model::ir::{Field, OperationIr};
 
 use super::registry::Registry;
 use super::{
-    DtoReport, LICENSE, check_required_impl, controlled_required_body, debug_impl, derives, field_decl_typed, name_list, naming,
-    registry, requires_explicit_input_construction, use_group,
+    DtoReport, LICENSE, check_required_impl, controlled_required_body, debug_impl, derives, field_decl_typed,
+    is_required_copy_source_header, name_list, naming, registry, requires_explicit_input_construction, use_group,
 };
 
 #[derive(Clone, Copy)]
 enum Construction<'a> {
     Default,
     RequiredBody(&'a Field),
-    RequiredUnion,
+    RequiredMembers,
     EventStreamOutput(&'a Field),
 }
 
@@ -45,7 +45,7 @@ impl<'a> Construction<'a> {
     fn controlled_body(self) -> Option<&'a Field> {
         match self {
             Self::RequiredBody(body) => Some(body),
-            Self::Default | Self::RequiredUnion | Self::EventStreamOutput(_) => None,
+            Self::Default | Self::RequiredMembers | Self::EventStreamOutput(_) => None,
         }
     }
 
@@ -56,8 +56,18 @@ impl<'a> Construction<'a> {
     fn field_type(self, owner: &str, field: &Field) -> String {
         if matches!(self, Self::EventStreamOutput(payload) if payload.name == field.name) {
             "Option<crate::SelectEventStream>".to_owned()
+        } else if Registry::is_bare(owner, field) {
+            self.field_inner_type(field)
         } else {
-            Registry::field_type(owner, field)
+            format!("Option<{}>", self.field_inner_type(field))
+        }
+    }
+
+    fn field_inner_type(self, field: &Field) -> String {
+        if matches!(self, Self::RequiredMembers) && is_required_copy_source_header(field) {
+            "crate::CopySourceValue".to_owned()
+        } else {
+            Registry::field_inner_type(field)
         }
     }
 }
@@ -126,9 +136,9 @@ pub fn operation(ir: &OperationIr, registry: &Registry, report: &mut DtoReport) 
     let explicit_input = ir.input.iter().any(requires_explicit_input_construction);
     let input_construction = match (controlled_body, explicit_input) {
         (Some(body), false) => Construction::RequiredBody(body),
-        (None, true) => Construction::RequiredUnion,
+        (None, true) => Construction::RequiredMembers,
         (None, false) => Construction::Default,
-        (Some(_), true) => unreachable!("an input cannot require both streaming-body and union construction"),
+        (Some(_), true) => unreachable!("an input cannot require both streaming-body and explicit-member construction"),
     };
     out.push_str(&data_struct(
         "Input",
@@ -184,14 +194,17 @@ fn data_struct(
              /// members are refused by [`{name}::check_required`] before the value leaves the decode\n\
              /// path.\n"
         );
-    } else if matches!(construction, Construction::RequiredUnion) {
+    } else if matches!(construction, Construction::RequiredMembers) {
         let _ = writeln!(out, "/// {summary}");
+        let requirement = if fields.iter().any(is_required_copy_source_header) {
+            "Public fields, no `#[non_exhaustive]`, and deliberately no `Default` — ADR-0043.\n/// The required copy source has no neutral value, so the builder requires it up front\n/// rather than fabricating a variant or wrapping the public field in `Option`."
+        } else {
+            "Public fields, no `#[non_exhaustive]`, and deliberately no `Default` — ADR-0016. A\n/// required structural union has no neutral value, so the builder requires it up front\n/// rather than fabricating a variant or wrapping the public field in `Option`."
+        };
         let _ = write!(
             out,
             "///\n\
-             /// Public fields, no `#[non_exhaustive]`, and deliberately no `Default` — ADR-0016. A\n\
-             /// required structural union has no neutral value, so the builder requires it up front\n\
-             /// rather than fabricating a variant or wrapping the public field in `Option`.\n\
+             /// {requirement}\n\
              ///\n\
              /// Required members remain bare and optional members remain `Option<T>`. Construct this\n\
              /// request with [`{name}::builder`] or a complete struct literal, and never destructure it\n\
@@ -229,7 +242,13 @@ fn data_struct(
         }
         out.push_str("}\n\n");
     }
-    out.push_str(&check_required_impl(name, baseline_name, fields, construction.controlled_body()));
+    out.push_str(&check_required_impl(
+        name,
+        baseline_name,
+        fields,
+        construction.controlled_body(),
+        matches!(construction, Construction::RequiredMembers),
+    ));
     out.push('\n');
     if has_secret {
         out.push_str(&debug_impl(name, fields));
@@ -282,12 +301,15 @@ fn builder(owner: &str, fields: &[Field], registry: &Registry, construction: Con
              pub fn builder({name}: {ty}) -> InputBuilder {{\n        \
                  InputBuilder {{\n            input: Self::from_required_body({name}),\n        }}\n    }}\n}}\n\n"
         );
-    } else if matches!(construction, Construction::RequiredUnion) {
-        out.push_str(
-            "/// A builder for [`Input`].\n\
-             ///\n\
-             /// The required structural union is supplied up front; public fields remain public.\n\
-             pub struct InputBuilder {\n    input: Input,\n}\n\nimpl Input {\n",
+    } else if matches!(construction, Construction::RequiredMembers) {
+        let required_kind = if fields.iter().any(is_required_copy_source_header) {
+            "copy source"
+        } else {
+            "structural union"
+        };
+        let _ = write!(
+            out,
+            "/// A builder for [`Input`].\n///\n/// The required {required_kind} is supplied up front; public fields remain public.\npub struct InputBuilder {{\n    input: Input,\n}}\n\nimpl Input {{\n"
         );
         let required = fields
             .iter()
@@ -295,7 +317,7 @@ fn builder(owner: &str, fields: &[Field], registry: &Registry, construction: Con
             .collect::<Vec<_>>();
         let arguments = required
             .iter()
-            .map(|field| format!("{}: {}", naming::field_name(&field.name), Registry::field_inner_type(field)))
+            .map(|field| format!("{}: {}", naming::field_name(&field.name), construction.field_inner_type(field)))
             .collect::<Vec<_>>()
             .join(", ");
         let _ = writeln!(out, "    /// Starts a builder with every required non-default member.");
@@ -333,7 +355,7 @@ fn builder(owner: &str, fields: &[Field], registry: &Registry, construction: Con
     out.push_str("impl InputBuilder {\n");
     for field in fields {
         let name = naming::field_name(&field.name);
-        let inner = Registry::field_inner_type(field);
+        let inner = construction.field_inner_type(field);
         // A container and a required member are both stored bare, so only an optional one is
         // wrapped. The setter's argument is the unwrapped type in every case.
         let bare = Registry::is_bare(owner, field);

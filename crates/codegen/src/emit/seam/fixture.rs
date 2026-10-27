@@ -622,7 +622,9 @@ pub fn op_file(
     for (name, _) in params {
         match name.as_str() {
             "copy_source" => {
-                setup.push_str("        let copy_source = leaf::copy_source_to_s3s(\"copy_source\", &gateway.copy_source).expect(\"the fixture's copy source\");\n");
+                setup.push_str(
+                    "        let copy_source = super::super::super::super::copy_source::to_s3s(gateway.copy_source.clone());\n",
+                );
                 args.push_str(", copy_source");
             }
             "wire" => {

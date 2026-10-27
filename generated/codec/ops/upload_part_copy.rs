@@ -38,103 +38,154 @@ impl OperationCodec for dto::UploadPartCopy {
     const REQUEST_BODY: RequestBodyMode = RequestBodyMode::None;
 
     fn decode(request: &MetaView<'_>, body: RequestBody) -> Result<Self::Input, CodecError> {
-        let mut input = Input { ..Default::default() };
+        let copy_source;
+        let mut copy_source_if_match = Default::default();
+        let mut copy_source_if_modified_since = Default::default();
+        let mut copy_source_if_none_match = Default::default();
+        let mut copy_source_if_unmodified_since = Default::default();
+        let mut copy_source_range = Default::default();
+        let part_number;
+        let upload_id;
+        let mut sse_customer_algorithm = Default::default();
+        let mut sse_customer_key = Default::default();
+        let mut sse_customer_key_md5 = Default::default();
+        let mut copy_source_sse_customer_algorithm = Default::default();
+        let mut copy_source_sse_customer_key = Default::default();
+        let mut copy_source_sse_customer_key_md5 = Default::default();
+        let mut request_payer = Default::default();
+        let mut expected_bucket_owner = Default::default();
+        let mut expected_source_bucket_owner = Default::default();
         // Bucket — URI label, decoded once by `MetaView::of`.
-        input.bucket = request.require_bucket()?;
+        let bucket = request.require_bucket()?;
         // CopySource — header `x-amz-copy-source`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-copy-source") {
             let raw = raw.as_ref();
-            input.copy_source = raw.to_owned();
+            copy_source = raw.to_owned();
         } else {
             return Err(value::missing(ErrorCode::INVALID_ARGUMENT, "CopySource"));
         }
         // CopySourceIfMatch — header `x-amz-copy-source-if-match`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-copy-source-if-match") {
             let raw = raw.as_ref();
-            input.copy_source_if_match = Some(raw.to_owned());
+            copy_source_if_match = Some(raw.to_owned());
         }
         // CopySourceIfModifiedSince — header `x-amz-copy-source-if-modified-since`, read tolerantly: a value that is not a date is ignored.
         if let Some(raw) = request.header("x-amz-copy-source-if-modified-since") {
             let raw = raw.as_ref();
-            input.copy_source_if_modified_since = value::date_condition_in(request, raw, TimestampFormat::HttpDate).honoured();
+            copy_source_if_modified_since = value::date_condition_in(request, raw, TimestampFormat::HttpDate).honoured();
         }
         // CopySourceIfNoneMatch — header `x-amz-copy-source-if-none-match`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-copy-source-if-none-match") {
             let raw = raw.as_ref();
-            input.copy_source_if_none_match = Some(raw.to_owned());
+            copy_source_if_none_match = Some(raw.to_owned());
         }
         // CopySourceIfUnmodifiedSince — header `x-amz-copy-source-if-unmodified-since`, read tolerantly: a value that is not a date is ignored.
         if let Some(raw) = request.header("x-amz-copy-source-if-unmodified-since") {
             let raw = raw.as_ref();
-            input.copy_source_if_unmodified_since = value::date_condition_in(request, raw, TimestampFormat::HttpDate).honoured();
+            copy_source_if_unmodified_since = value::date_condition_in(request, raw, TimestampFormat::HttpDate).honoured();
         }
         // CopySourceRange — header `x-amz-copy-source-range`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-copy-source-range") {
             let raw = raw.as_ref();
-            input.copy_source_range = Some(raw.to_owned());
+            copy_source_range = Some(raw.to_owned());
         }
         // Key — URI label, decoded once by `MetaView::of`.
-        input.key = request.require_key()?;
+        let key = request.require_key()?;
         // PartNumber — query `partNumber`, percent-decoded once.
         if let Some(raw) = request.query("partNumber") {
             let raw = raw.as_ref();
-            input.part_number = value::integer(raw, "PartNumber")?;
+            part_number = value::integer(raw, "PartNumber")?;
         } else {
             return Err(value::missing(ErrorCode::INVALID_ARGUMENT, "PartNumber"));
         }
         // UploadId — query `uploadId`, percent-decoded once.
         if let Some(raw) = request.query("uploadId") {
             let raw = raw.as_ref();
-            input.upload_id = rustfs_gateway_types::UploadIdClaim::from_wire(raw);
+            upload_id = rustfs_gateway_types::UploadIdClaim::from_wire(raw);
         } else {
             return Err(value::missing(ErrorCode::INVALID_ARGUMENT, "UploadId"));
         }
         // SSECustomerAlgorithm — header `x-amz-server-side-encryption-customer-algorithm`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-server-side-encryption-customer-algorithm") {
             let raw = raw.as_ref();
-            input.sse_customer_algorithm = Some(raw.to_owned());
+            sse_customer_algorithm = Some(raw.to_owned());
         }
         // SSECustomerKey — header `x-amz-server-side-encryption-customer-key`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-server-side-encryption-customer-key") {
             let raw = raw.as_ref();
-            input.sse_customer_key = Some(rustfs_gateway_types::SseCustomerKey::from_wire(raw));
+            sse_customer_key = Some(rustfs_gateway_types::SseCustomerKey::from_wire(raw));
         }
         // SSECustomerKeyMD5 — header `x-amz-server-side-encryption-customer-key-md5`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-server-side-encryption-customer-key-md5") {
             let raw = raw.as_ref();
-            input.sse_customer_key_md5 = Some(raw.to_owned());
+            sse_customer_key_md5 = Some(raw.to_owned());
         }
         // CopySourceSSECustomerAlgorithm — header `x-amz-copy-source-server-side-encryption-customer-algorithm`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-copy-source-server-side-encryption-customer-algorithm") {
             let raw = raw.as_ref();
-            input.copy_source_sse_customer_algorithm = Some(raw.to_owned());
+            copy_source_sse_customer_algorithm = Some(raw.to_owned());
         }
         // CopySourceSSECustomerKey — header `x-amz-copy-source-server-side-encryption-customer-key`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-copy-source-server-side-encryption-customer-key") {
             let raw = raw.as_ref();
-            input.copy_source_sse_customer_key = Some(rustfs_gateway_types::SseCustomerKey::from_wire(raw));
+            copy_source_sse_customer_key = Some(rustfs_gateway_types::SseCustomerKey::from_wire(raw));
         }
         // CopySourceSSECustomerKeyMD5 — header `x-amz-copy-source-server-side-encryption-customer-key-md5`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-copy-source-server-side-encryption-customer-key-md5") {
             let raw = raw.as_ref();
-            input.copy_source_sse_customer_key_md5 = Some(raw.to_owned());
+            copy_source_sse_customer_key_md5 = Some(raw.to_owned());
         }
         // RequestPayer — header `x-amz-request-payer`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-request-payer") {
             let raw = raw.as_ref();
-            input.request_payer = Some(dto::RequestPayer::custom(raw.to_owned()));
+            request_payer = Some(dto::RequestPayer::custom(raw.to_owned()));
         }
         // ExpectedBucketOwner — header `x-amz-expected-bucket-owner`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-expected-bucket-owner") {
             let raw = raw.as_ref();
-            input.expected_bucket_owner = Some(raw.to_owned());
+            expected_bucket_owner = Some(raw.to_owned());
         }
         // ExpectedSourceBucketOwner — header `x-amz-source-expected-bucket-owner`, repeated field lines joined.
         if let Some(raw) = request.header("x-amz-source-expected-bucket-owner") {
             let raw = raw.as_ref();
-            input.expected_source_bucket_owner = Some(raw.to_owned());
+            expected_source_bucket_owner = Some(raw.to_owned());
         }
         let _ = body;
+        value::exit(rustfs_gateway_types::reject_placeholder("UploadPartCopyInput", "Bucket", &bucket))?;
+        value::exit(rustfs_gateway_types::reject_placeholder(
+            "UploadPartCopyInput",
+            "CopySource",
+            &copy_source,
+        ))?;
+        value::exit(rustfs_gateway_types::reject_placeholder("UploadPartCopyInput", "Key", &key))?;
+        value::exit(rustfs_gateway_types::reject_placeholder(
+            "UploadPartCopyInput",
+            "PartNumber",
+            &part_number,
+        ))?;
+        value::exit(rustfs_gateway_types::reject_placeholder("UploadPartCopyInput", "UploadId", &upload_id))?;
+        let copy_source = crate::ops::shared::copy_source::decode_value(&copy_source, request.names())?;
+        let input = Input {
+            bucket,
+            copy_source,
+            copy_source_if_match,
+            copy_source_if_modified_since,
+            copy_source_if_none_match,
+            copy_source_if_unmodified_since,
+            copy_source_range,
+            key,
+            part_number,
+            upload_id,
+            sse_customer_algorithm,
+            sse_customer_key,
+            sse_customer_key_md5,
+            copy_source_sse_customer_algorithm,
+            copy_source_sse_customer_key,
+            copy_source_sse_customer_key_md5,
+            request_payer,
+            expected_bucket_owner,
+            expected_source_bucket_owner,
+        };
         value::exit(input.check_required())?;
         Ok(input)
     }

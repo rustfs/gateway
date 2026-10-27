@@ -361,10 +361,13 @@ fn c_dto_n035_only_a_controlled_required_member_removes_input_default() {
             .rev()
             .find(|line| line.starts_with("#[derive("))
             .expect("Input has an explicit derive policy");
-        if matches!(name.as_str(), "ops/put_object_annotation.rs" | "ops/update_object_encryption.rs") {
+        if matches!(
+            name.as_str(),
+            "ops/put_object_annotation.rs" | "ops/update_object_encryption.rs" | "ops/copy_object.rs" | "ops/upload_part_copy.rs"
+        ) {
             assert!(
                 !derive.contains("Default"),
-                "a required stream or structural union has no truthful default"
+                "a controlled required member has no truthful default (ADR-0015/0016/0043)"
             );
         } else {
             assert!(
@@ -373,6 +376,155 @@ fn c_dto_n035_only_a_controlled_required_member_removes_input_default() {
             );
         }
     }
+}
+
+#[test]
+fn required_copy_source_inputs_need_explicit_decoded_values() {
+    let files = dto_files();
+    let observed = ["copy_object", "upload_part_copy"].map(|operation| {
+        let body = &files[&format!("ops/{operation}.rs")];
+        let input = body.find("pub struct Input").expect("operation input");
+        let derive = body[..input]
+            .lines()
+            .rev()
+            .find(|line| line.starts_with("#[derive("))
+            .expect("input derive policy");
+        (
+            body.contains("pub copy_source: crate::CopySourceValue,"),
+            body.contains("pub fn builder(copy_source: crate::CopySourceValue) -> InputBuilder"),
+            derive.contains("Default"),
+            body.contains("#[derive(Default)]\npub struct InputBuilder"),
+            body.contains("pub fn builder() -> InputBuilder"),
+            body.contains("copy_source: Default::default()"),
+            body.contains(", \"CopySource\", &self.copy_source)"),
+        )
+    });
+    assert_eq!(
+        observed,
+        [(true, true, false, false, false, false, false); 2],
+        "ADR-0043 keeps the decoded source required without inventing a default variant"
+    );
+}
+
+#[test]
+fn required_copy_source_storage_follows_the_header_binding() {
+    use rustfs_gateway_model::ir::{Binding, Type};
+
+    let operation = super::codegen_tests::artifacts()
+        .operations
+        .into_iter()
+        .find(|operation| operation.operation == "CopyObject")
+        .expect("CopyObject IR");
+    let field = operation
+        .input
+        .iter()
+        .find(|field| field.name == "CopySource")
+        .expect("CopySource field");
+    let mut cases = Vec::new();
+    for (label, expected) in [
+        ("required header", "crate::CopySourceValue"),
+        ("header casing", "crate::CopySourceValue"),
+        ("optional", "Option<String>"),
+        ("XML member", "String"),
+        ("query member", "String"),
+        ("different header", "String"),
+        ("missing wire name", "String"),
+        ("non-string header", "bool"),
+        ("response header", "String"),
+    ] {
+        let mut candidate = field.clone();
+        match label {
+            "header casing" => candidate.wire_name = Some("X-Amz-Copy-Source".to_owned()),
+            "optional" => candidate.required = false,
+            "XML member" => candidate.binding = Binding::BodyXml,
+            "query member" => candidate.binding = Binding::Query,
+            "different header" => candidate.wire_name = Some("x-amz-copy-source-if-match".to_owned()),
+            "missing wire name" => candidate.wire_name = None,
+            "non-string header" => candidate.ty = Type::Boolean,
+            _ => {}
+        }
+        let mut ir = operation.clone();
+        ir.operation = "BindingProbe".to_owned();
+        ir.input.clear();
+        ir.output.clear();
+        if label == "response header" {
+            ir.output.push(candidate);
+        } else {
+            ir.input.push(candidate);
+        }
+        let registry = dto::registry::Registry::collect(&[&ir]).expect("probe vocabulary");
+        let source = dto::render::operation(&ir, &registry, &mut dto::DtoReport::default());
+        let declaration = source
+            .lines()
+            .find(|line| line.trim_start().starts_with("pub copy_source: "))
+            .expect("source field");
+        cases.push((label, field_type_of(declaration).to_owned(), expected));
+    }
+    assert!(
+        cases.iter().all(|(_, actual, expected)| actual == expected),
+        "only the required string Copy header uses decoded storage: {cases:?}"
+    );
+}
+
+#[test]
+fn copy_source_decoding_follows_bindings_and_required_checks() {
+    let artifacts = super::codegen_tests::artifacts();
+    let observed = ["CopyObject", "UploadPartCopy"].map(|name| {
+        let ir = artifacts.operations.iter().find(|ir| ir.operation == name).expect("Copy IR");
+        let body = crate::emit::codec::decode::body(ir, &artifacts.codec_rules, &artifacts.error_codes).expect("Copy codec");
+        let parser = "decode_value(&copy_source, request.names())?";
+        let parsing = body.find(parser);
+        let last_binding = body
+            .find(&format!("// {} —", ir.input.last().expect("Copy bindings").name))
+            .expect("last binding marker");
+        let required = body.find("value::exit(").expect("required-member exit check");
+        let construction = body.find("let input = Input {").expect("explicit input construction");
+        (
+            body.matches(parser).count(),
+            parsing.is_some_and(|at| last_binding < at && required < at && at < construction),
+            body.contains("let mut input = Input { ..Default::default() }"),
+        )
+    });
+    assert_eq!(
+        observed,
+        [(1, true, false); 2],
+        "decode the source once, after every ordinary binding and required check, without a placeholder DTO"
+    );
+}
+
+#[test]
+fn copy_request_decoders_match_rustfmt() {
+    let artifacts = super::codegen_tests::artifacts();
+    for name in ["CopyObject", "UploadPartCopy"] {
+        let ir = artifacts.operations.iter().find(|ir| ir.operation == name).expect("Copy IR");
+        let body = crate::emit::codec::decode::body(ir, &artifacts.codec_rules, &artifacts.error_codes).expect("Copy codec");
+        let source = format!("impl Decoder {{\n    fn decode() {{\n{body}    }}\n}}\n");
+        let output = rustfmt(&source).expect("the repository toolchain includes rustfmt");
+        assert!(output.status.success(), "rustfmt rejected {name}");
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            source,
+            "{name} request decoding must already be in rustfmt normal form"
+        );
+    }
+}
+
+#[test]
+fn copy_metadata_is_initialized_at_its_unconditional_binding() {
+    let artifacts = super::codegen_tests::artifacts();
+    let ir = artifacts
+        .operations
+        .iter()
+        .find(|ir| ir.operation == "CopyObject")
+        .expect("Copy IR");
+    let body = crate::emit::codec::decode::body(ir, &artifacts.codec_rules, &artifacts.error_codes).expect("Copy codec");
+    assert_eq!(
+        (
+            body.matches("let metadata = value::metadata_map").count(),
+            body.contains("let mut metadata =")
+        ),
+        (1, false)
+    );
 }
 
 #[test]

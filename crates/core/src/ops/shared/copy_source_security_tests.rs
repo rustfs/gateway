@@ -20,10 +20,9 @@
 
 use super::tests::{rejected, resolved};
 use super::*;
-use rustfs_gateway_types::dto::{CopyObject, CopyObjectInput};
 
 use crate::Decision;
-use crate::authz::{authorize_input, prepare_input};
+use crate::authz::authorize_input;
 
 #[test]
 fn a_query_that_is_not_a_version_is_refused_rather_than_folded_into_the_key() {
@@ -77,75 +76,50 @@ fn n_a_source_key_the_destination_refuses_is_refused() {
 
 #[test]
 fn a_denied_source_yields_no_proof_and_no_bucket() {
-    let input = CopyObjectInput {
-        copy_source: "bucket/key".to_owned(),
-        ..Default::default()
-    };
-    let decoded = prepare_input::<CopyObject>(input).expect("parses");
+    let input = "bucket/key".to_owned();
+    let decoded = prepare_copy(&input, &NamePolicy::default()).expect("parses");
     let err = authorize_input(decoded, |_| Decision::Deny).err().expect("denied");
     assert_eq!(err.decision(), Decision::Deny);
 }
 
 #[test]
 fn a_proof_for_one_source_cannot_resolve_another_source() {
-    let first = CopyObjectInput {
-        copy_source: "bucket/first".to_owned(),
-        ..Default::default()
-    };
-    let first = authorize_input(prepare_input::<CopyObject>(first).expect("first parses"), |_| Decision::Allow)
+    let first = "bucket/first".to_owned();
+    let first = authorize_input(prepare_copy(&first, &NamePolicy::default()).expect("first parses"), |_| Decision::Allow)
         .expect("first authorized");
-    let second = CopyObjectInput {
-        copy_source: "bucket/second".to_owned(),
-        ..Default::default()
-    };
-    let second = prepare_input::<CopyObject>(second).expect("second parses");
+    let second = "bucket/second".to_owned();
+    let second = prepare_copy(&second, &NamePolicy::default()).expect("second parses");
     assert!(second.resources().source().resolve(first.read_proof()).is_none());
 }
 
 #[test]
 fn a_path_proof_cannot_resolve_an_access_point_with_the_same_name_and_key() {
-    let path = CopyObjectInput {
-        copy_source: "my-ap/key".to_owned(),
-        ..Default::default()
-    };
-    let path =
-        authorize_input(prepare_input::<CopyObject>(path).expect("path parses"), |_| Decision::Allow).expect("path authorized");
-    let access_point = CopyObjectInput {
-        copy_source: "arn:aws:s3:us-east-1:123456789012:accesspoint/my-ap/object/key".to_owned(),
-        ..Default::default()
-    };
-    let access_point = prepare_input::<CopyObject>(access_point).expect("access point parses");
+    let path = "my-ap/key".to_owned();
+    let path = authorize_input(prepare_copy(&path, &NamePolicy::default()).expect("path parses"), |_| Decision::Allow)
+        .expect("path authorized");
+    let access_point = "arn:aws:s3:us-east-1:123456789012:accesspoint/my-ap/object/key".to_owned();
+    let access_point = prepare_copy(&access_point, &NamePolicy::default()).expect("access point parses");
     assert!(access_point.resources().source().resolve(path.read_proof()).is_none());
 }
 
 #[test]
 fn an_access_point_proof_is_scoped_to_its_full_arn_identity() {
-    let first = CopyObjectInput {
-        copy_source: "arn:aws:s3:us-east-1:111111111111:accesspoint/shared/object/key".to_owned(),
-        ..Default::default()
-    };
-    let first = authorize_input(prepare_input::<CopyObject>(first).expect("first ARN parses"), |_| Decision::Allow)
-        .expect("first ARN authorized");
-    let second = CopyObjectInput {
-        copy_source: "arn:aws:s3:us-east-1:222222222222:accesspoint/shared/object/key".to_owned(),
-        ..Default::default()
-    };
-    let second = prepare_input::<CopyObject>(second).expect("second ARN parses");
+    let first = "arn:aws:s3:us-east-1:111111111111:accesspoint/shared/object/key".to_owned();
+    let first = authorize_input(prepare_copy(&first, &NamePolicy::default()).expect("first ARN parses"), |_| {
+        Decision::Allow
+    })
+    .expect("first ARN authorized");
+    let second = "arn:aws:s3:us-east-1:222222222222:accesspoint/shared/object/key".to_owned();
+    let second = prepare_copy(&second, &NamePolicy::default()).expect("second ARN parses");
     assert!(second.resources().source().resolve(first.read_proof()).is_none());
 }
 
 #[test]
 fn a_version_proof_cannot_resolve_another_version_of_the_same_key() {
-    let first = CopyObjectInput {
-        copy_source: "bucket/key?versionId=v1".to_owned(),
-        ..Default::default()
-    };
-    let first =
-        authorize_input(prepare_input::<CopyObject>(first).expect("v1 parses"), |_| Decision::Allow).expect("v1 authorized");
-    let second = CopyObjectInput {
-        copy_source: "bucket/key?versionId=v2".to_owned(),
-        ..Default::default()
-    };
-    let second = prepare_input::<CopyObject>(second).expect("v2 parses");
+    let first = "bucket/key?versionId=v1".to_owned();
+    let first = authorize_input(prepare_copy(&first, &NamePolicy::default()).expect("v1 parses"), |_| Decision::Allow)
+        .expect("v1 authorized");
+    let second = "bucket/key?versionId=v2".to_owned();
+    let second = prepare_copy(&second, &NamePolicy::default()).expect("v2 parses");
     assert!(second.resources().source().resolve(first.read_proof()).is_none());
 }

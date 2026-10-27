@@ -202,6 +202,7 @@ core_modules = (
     "committed_head",
     "compile_fail",
     "configuration_error_declarations",
+    "copy_source_input",
     "cors_roundtrip",
     "dialect",
     "dialect_claims",

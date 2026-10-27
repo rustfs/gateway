@@ -44,6 +44,9 @@ mod compile_fail;
 #[path = "configuration_error_declarations.rs"]
 mod configuration_error_declarations;
 
+#[path = "copy_source_input.rs"]
+mod copy_source_input;
+
 #[path = "cors_roundtrip.rs"]
 mod cors_roundtrip;
 

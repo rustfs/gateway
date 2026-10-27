@@ -1,5 +1,16 @@
 # Changelog
 
+## Required Copy inputs (types 0.40.0, core 0.56.0, gateway 0.59.0, codegen 0.20.0)
+
+BREAKING: `CopyObjectInput.copy_source` and `UploadPartCopyInput.copy_source` now hold
+`CopySourceValue`. Both inputs and their builders no longer implement `Default`.
+Migration: construct a decoded Bucket, AccessPoint or Outpost variant and pass it to
+`Input::builder(source)`, then set the remaining fields and call `build()`. Complete
+struct literals remain supported. Existing decoded legacy inputs cross through
+`input_from_s3s` without parsing or validating their source fields. Handlers continue
+to resolve the source with `request.read_proof()`; the pipeline erases every source
+component from the input before input authorization and dispatch. See ADR-0043.
+
 ## rustfs-gateway-types 0.32.0+aws.2026-10-02
 
 BREAKING: `PostObjectFields` gains `object_lock_legal_hold_status`, `object_lock_mode`,

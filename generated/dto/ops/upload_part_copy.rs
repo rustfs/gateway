@@ -49,23 +49,21 @@ impl UploadPartCopy {
 
 /// The `UploadPartCopy` request.
 ///
-/// Public fields plus `Default`, and never `#[non_exhaustive]` — ADR-0004 P1. Construct it
-/// with functional update syntax (`Input { .. }` with `..Default::default()`) or with the
-/// builder; a member added upstream stays a minor version bump either way. Do not
-/// destructure it exhaustively (P3): that is the one usage a new member breaks.
+/// Public fields, no `#[non_exhaustive]`, and deliberately no `Default` — ADR-0043.
+/// The required copy source has no neutral value, so the builder requires it up front
+/// rather than fabricating a variant or wrapping the public field in `Option`.
 ///
-/// A required member is a bare type and an optional one is `Option<T>`, so requiredness is
-/// read off the type instead of unwrapped. `Default` fills a required member with a
-/// wire-invalid placeholder (P10), and [`Input::check_required`] is what keeps one from
-/// leaving the decode path.
+/// Required members remain bare and optional members remain `Option<T>`. Construct this
+/// request with [`Input::builder`] or a complete struct literal, and never destructure it
+/// exhaustively.
 ///
 /// Not `Clone`: it owns a streaming body.
-#[derive(Default)]
+#[derive()]
 pub struct Input {
     /// Wire `Bucket`, bound as UriLabel. Required.
     pub bucket: crate::BucketName,
     /// Wire `x-amz-copy-source`, bound as Header. Required.
-    pub copy_source: String,
+    pub copy_source: crate::CopySourceValue,
     /// Wire `x-amz-copy-source-if-match`, bound as Header. Optional.
     pub copy_source_if_match: Option<String>,
     /// Wire `x-amz-copy-source-if-modified-since`, bound as Header. Optional.
@@ -119,7 +117,6 @@ impl Input {
     /// Returns [`crate::PlaceholderDefault`] naming the first offending member.
     pub fn check_required(&self) -> Result<(), crate::PlaceholderDefault> {
         crate::reject_placeholder("UploadPartCopyInput", "Bucket", &self.bucket)?;
-        crate::reject_placeholder("UploadPartCopyInput", "CopySource", &self.copy_source)?;
         crate::reject_placeholder("UploadPartCopyInput", "Key", &self.key)?;
         crate::reject_placeholder("UploadPartCopyInput", "PartNumber", &self.part_number)?;
         crate::reject_placeholder("UploadPartCopyInput", "UploadId", &self.upload_id)?;
@@ -263,18 +260,38 @@ impl std::fmt::Debug for Output {
 
 /// A builder for [`Input`].
 ///
-/// The recommended construction path, not the only one — the public fields stay public
-/// (ADR-0004 P7), so a caller that prefers a struct literal keeps it.
-#[derive(Default)]
+/// The required copy source is supplied up front; public fields remain public.
 pub struct InputBuilder {
     input: Input,
 }
 
 impl Input {
-    /// Starts a builder.
+    /// Starts a builder with every required non-default member.
     #[must_use]
-    pub fn builder() -> InputBuilder {
-        InputBuilder::default()
+    pub fn builder(copy_source: crate::CopySourceValue) -> InputBuilder {
+        InputBuilder {
+            input: Input {
+                bucket: Default::default(),
+                copy_source,
+                copy_source_if_match: Default::default(),
+                copy_source_if_modified_since: Default::default(),
+                copy_source_if_none_match: Default::default(),
+                copy_source_if_unmodified_since: Default::default(),
+                copy_source_range: Default::default(),
+                key: Default::default(),
+                part_number: Default::default(),
+                upload_id: Default::default(),
+                sse_customer_algorithm: Default::default(),
+                sse_customer_key: Default::default(),
+                sse_customer_key_md5: Default::default(),
+                copy_source_sse_customer_algorithm: Default::default(),
+                copy_source_sse_customer_key: Default::default(),
+                copy_source_sse_customer_key_md5: Default::default(),
+                request_payer: Default::default(),
+                expected_bucket_owner: Default::default(),
+                expected_source_bucket_owner: Default::default(),
+            },
+        }
     }
 }
 
@@ -288,7 +305,7 @@ impl InputBuilder {
 
     /// Sets `CopySource`.
     #[must_use]
-    pub fn copy_source(mut self, value: String) -> Self {
+    pub fn copy_source(mut self, value: crate::CopySourceValue) -> Self {
         self.input.copy_source = value;
         self
     }
