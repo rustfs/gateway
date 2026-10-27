@@ -398,6 +398,13 @@ async fn n_a_plain_object_file_is_judged_by_its_bytes() {
 /// the old tag while a replacement is written either lands first or is refused, so the
 /// replacement survives every interleaving. A delete that judged, let the lock go and took it back
 /// to delete would remove a replacement written in between.
+///
+/// Each key's writer and deleter race each other, and the next key's pair starts only once both
+/// have answered. The backend serializes every write and delete on one lock and each request's
+/// handler deadline counts its wait for that lock, so launching every pair at once made the last
+/// request's latency the sum of all 128 requests' work: on a loaded host that sum passed the
+/// standard deadline and a writer answered `500` before the invariant was checked
+/// (rustfs/gateway#1430). Only the two requests on one key can interleave around its verdict.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn n_a_racing_replacement_is_never_deleted() {
     let root = TestRoot::new();
@@ -407,7 +414,6 @@ async fn n_a_racing_replacement_is_never_deleted() {
     for key in &keys {
         put(&service, key, BODY).await;
     }
-    let mut tasks = Vec::new();
     for (index, key) in keys.iter().enumerate() {
         let (deleter, writer) = (Arc::clone(&service), Arc::clone(&service));
         let (delete_key, write_key) = (key.clone(), key.clone());
@@ -416,17 +422,15 @@ async fn n_a_racing_replacement_is_never_deleted() {
             put(&writer, &write_key, REPLACEMENT).await;
             200
         };
-        if index % 2 == 0 {
-            tasks.push(tokio::spawn(writing));
-            tasks.push(tokio::spawn(deleting));
+        let pair = if index % 2 == 0 {
+            [tokio::spawn(writing), tokio::spawn(deleting)]
         } else {
-            tasks.push(tokio::spawn(deleting));
-            tasks.push(tokio::spawn(writing));
+            [tokio::spawn(deleting), tokio::spawn(writing)]
+        };
+        for task in pair {
+            let status = task.await.expect("the request task completes");
+            assert!([200, 204, 412].contains(&status), "{key}: {status}");
         }
-    }
-    for task in tasks {
-        let status = task.await.expect("the request task completes");
-        assert!([200, 204, 412].contains(&status), "{status}");
     }
     for key in &keys {
         let read = exchange(&service, signed(http::Method::GET, key, Bytes::new())).await;
