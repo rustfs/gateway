@@ -539,7 +539,7 @@ fn sigv4_default_parser_still_refuses_mixed_case_operators() {
 #[test]
 fn n_expiration_compatibility_is_not_enabled_by_operator_folding() {
     let encoded = crate::codec::encode_base64_exact(
-        br#"{"expiration":"2030-01-02 12:34:56Z","conditions":[{"bucket":"example-bucket"},{"key":"upload"}]}"#,
+        br#"{"expiration":"2030-01-02T12:34:56+00:00","conditions":[{"bucket":"example-bucket"},{"key":"upload"}]}"#,
     );
     let fields = [
         ("awsaccesskeyid", "fixture"),

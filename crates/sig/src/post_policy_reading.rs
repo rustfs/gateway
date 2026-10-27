@@ -32,6 +32,11 @@ pub(super) enum PolicyReading {
     Strict,
     CaseInsensitiveOperators,
     LegacyRustfs,
+    /// [`Self::LegacyRustfs`] for the routed SigV2 form, except that the expiration's date and
+    /// time must be joined by the `T` designator (either case, as RFC 3339 permits): AWS refuses
+    /// any other spelling as a malformed policy, and the decision on rustfs/gateway#1444 follows
+    /// AWS there. The unrouted SigV4 form keeps legacy RustFS's single-byte separator.
+    LegacyRustfsSigV2Form,
 }
 
 impl PolicyReading {
@@ -46,7 +51,9 @@ impl PolicyReading {
     pub(super) fn exempts(self, name: &str) -> bool {
         name.starts_with("x-ignore-")
             || match self {
-                Self::LegacyRustfs => LEGACY_EXEMPT_FIELDS.contains(&name) || name.starts_with("x-amz-server-side-encryption"),
+                Self::LegacyRustfs | Self::LegacyRustfsSigV2Form => {
+                    LEGACY_EXEMPT_FIELDS.contains(&name) || name.starts_with("x-amz-server-side-encryption")
+                }
                 Self::Strict | Self::CaseInsensitiveOperators => super::EXEMPT_FIELDS.contains(&name),
             }
     }
@@ -57,7 +64,7 @@ impl PolicyReading {
     /// apart from a failed condition; under the other readings, a failed condition at once.
     pub(super) const fn defer_unlisted_field(self) -> Result<(), PostPolicyError> {
         match self {
-            Self::LegacyRustfs => Ok(()),
+            Self::LegacyRustfs | Self::LegacyRustfsSigV2Form => Ok(()),
             Self::Strict | Self::CaseInsensitiveOperators => Err(PostPolicyError::ConditionFailed),
         }
     }
@@ -65,6 +72,10 @@ impl PolicyReading {
     pub(super) fn expiry(self, value: &str) -> Result<i64, PostPolicyError> {
         match self {
             Self::LegacyRustfs => parse_legacy(value),
+            Self::LegacyRustfsSigV2Form => match value.as_bytes().get(10) {
+                Some(b'T' | b't') => parse_legacy(value),
+                _ => Err(PostPolicyError::Malformed),
+            },
             Self::Strict | Self::CaseInsensitiveOperators => {
                 crate::clock::unix_seconds(&super::parse_expiration(value)?).ok_or(PostPolicyError::Malformed)
             }
@@ -178,6 +189,49 @@ mod tests {
             if separator != b'T' {
                 assert_eq!(super::super::parse_expiration(&value).err(), Some(PostPolicyError::Malformed));
             }
+        }
+    }
+
+    /// Negative — the routed SigV2 form reads legacy RustFS's spellings, but its expiration's date
+    /// and time must be joined by the `T` designator (either case, as RFC 3339 permits): every other
+    /// single ASCII byte, the space the Ceph suite signs included, is malformed (rustfs/gateway#1444).
+    #[test]
+    fn n_the_sigv2_form_reading_requires_the_time_designator() {
+        for separator in 0u8..=127 {
+            let value = format!("2030-01-02{}12:34:56Z", char::from(separator));
+            let expected = if matches!(separator, b'T' | b't') {
+                Ok(INSTANT)
+            } else {
+                Err(PostPolicyError::Malformed)
+            };
+            assert_eq!(PolicyReading::LegacyRustfsSigV2Form.expiry(&value), expected, "separator {separator}");
+            // The unrouted SigV4 form keeps legacy RustFS's reading of any single separator byte.
+            assert_eq!(PolicyReading::LegacyRustfs.expiry(&value), Ok(INSTANT), "separator {separator}");
+        }
+        // The spelling Ceph's `test_post_object_invalid_date_format` signs: Python's `str(datetime)`.
+        assert_eq!(
+            PolicyReading::LegacyRustfsSigV2Form.expiry("2030-01-02 12:34:56.123456+00:00"),
+            Err(PostPolicyError::Malformed)
+        );
+    }
+
+    /// Positive — apart from the designator, the routed SigV2 form keeps every legacy spelling.
+    #[test]
+    fn the_sigv2_form_reading_keeps_legacy_spellings_with_the_designator() {
+        for value in [
+            "2030-01-02T12:34:56Z",
+            "2030-01-02t12:34:56z",
+            "2030-01-02T18:04:56+05:30",
+            "2030-01-02T12:34:56.123456789012345678901234567890Z",
+        ] {
+            assert_eq!(PolicyReading::LegacyRustfsSigV2Form.expiry(value), Ok(INSTANT), "{value:?}");
+        }
+        for value in ["2030-01-02T12:34:60Z", "2030-01-02T12:34:56", ""] {
+            assert_eq!(
+                PolicyReading::LegacyRustfsSigV2Form.expiry(value),
+                Err(PostPolicyError::Malformed),
+                "{value:?}"
+            );
         }
     }
 
