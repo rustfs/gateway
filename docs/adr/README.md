@@ -100,6 +100,7 @@ second copy is a second thing to keep in sync.
 | 0042 | A route-bound bearer floor for zip downloads | Accepted |
 | 0043 | Explicit construction for required copy-source inputs | Accepted |
 | 0044 | STS action credentials and claimed-route signing | Accepted |
+| 0045 | Copy source capability before resource authorization | Accepted |
 
 The index is hand-maintained. Generating it would cost more than it saves until
 there are at least fifteen records.
