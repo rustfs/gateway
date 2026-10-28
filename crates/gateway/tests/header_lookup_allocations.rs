@@ -80,7 +80,7 @@ fn metadata_lookup_does_not_copy_its_parsed_name() {
     if let Some(kinds) = support::allocations::requested_sizes(ENV) {
         for kind in kinds {
             let (blocks, bytes, matched) = cost(kind);
-            println!("{SENTINEL}{blocks} {bytes} {matched}");
+            support::allocations::report(SENTINEL, &[blocks, bytes, matched]);
         }
         return;
     }

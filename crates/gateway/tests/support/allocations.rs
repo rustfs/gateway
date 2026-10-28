@@ -71,6 +71,9 @@ pub fn probe_service() -> S3Service {
 /// Runs `test` as an isolated process with `env` set to `sizes`, and returns the `fields` numbers
 /// from each line it printed after `sentinel` — one line per size, in order.
 ///
+/// The probe side must print each line through [`report`]; only a line that *starts* with
+/// `sentinel` counts, and nothing else guarantees that.
+///
 /// # Panics
 ///
 /// When the probe process fails, prints a different number of sentinel lines than there were
@@ -113,6 +116,21 @@ pub fn measure(test: &str, env: &str, sentinel: &str, sizes: &[usize], fields: u
         );
     }
     rows
+}
+
+/// Prints one probe record — `sentinel` followed by `fields` separated by spaces — as a line of its
+/// own, for [`measure`] (or a parent comparing whole lines) to find.
+///
+/// The record opens with a line break because the probe does not own the start of its line. When
+/// libtest runs on one thread (`RUST_TEST_THREADS=1`, which the probe process inherits), it prints
+/// `test <name> ... ` without a line break before the test body runs, so a plain `println!` would
+/// land the first record behind that prefix, where an exact-prefix parser cannot see it
+/// (rustfs/gateway#1447). With several threads libtest prints nothing before the body, and the
+/// extra break only adds an empty line. The parent keeps matching on the exact line start, so the
+/// framing is fixed by the probe rather than loosened in the parser.
+pub fn report(sentinel: &str, fields: &[u64]) {
+    let fields = fields.iter().map(u64::to_string).collect::<Vec<_>>().join(" ");
+    println!("\n{sentinel}{fields}");
 }
 
 /// Parses the comma-separated sizes a probe process was asked for.

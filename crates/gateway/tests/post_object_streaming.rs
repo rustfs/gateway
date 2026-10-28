@@ -248,7 +248,7 @@ fn the_production_adapter_does_not_copy_each_file_frame() {
     if let Some(sizes) = support::allocations::requested_sizes(PROBE_ENV) {
         for size in sizes {
             let (blocks, bytes) = allocation_cost(size);
-            println!("{SENTINEL}{blocks} {bytes}");
+            support::allocations::report(SENTINEL, &[blocks, bytes]);
         }
         return;
     }

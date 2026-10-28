@@ -674,7 +674,7 @@ fn lifted_deadlines_arm_no_timer() {
                         .without_deadline(rustfs_gateway::HandlerDeadlineClass::Extended),
                 ),
             };
-            println!("{TIMER_PROBE_SENTINEL}{}", timer_cost(config));
+            support::allocations::report(TIMER_PROBE_SENTINEL, &[timer_cost(config)]);
         }
         return;
     }
