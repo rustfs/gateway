@@ -1128,6 +1128,30 @@ when_queries = ["annotation", "uploadId", "annotationName"]
 reason = "With annotationName present, the same DELETE reaches the default abort handler while the pinned service refuses its unimplemented DeleteObjectAnnotation operation. All three selectors and the exact complete outcome are required (https://github.com/rustfs/gateway/issues/1492)."
 expires = "2027-03-31"
 
+# ── Decode: multipart listing with attributes (nightly issue #1517) ──
+
+[[diff]]
+id = "kd-decode-0110"
+kind = "decode"
+operation = "ListParts"
+item = "route"
+gateway = "ListParts"
+s3s = "GetObjectAttributes"
+when_queries = ["uploadId", "attributes"]
+reason = "The original nightly input and its 30-byte reduction exercise existing selector policies: default ListParts precedence 440 wins over GetObjectAttributes at 470, while the legacy selector checks attributes before uploadId. Only both selectors and this exact operation pair are accepted; neither runtime policy changes (https://github.com/rustfs/gateway/issues/1517)."
+expires = "2027-03-31"
+
+[[diff]]
+id = "kd-decode-0111"
+kind = "decode"
+operation = "ListParts"
+item = "outcome"
+gateway = "handled"
+s3s = "400 InvalidRequest: missing header: x-amz-object-attributes"
+when_queries = ["uploadId", "attributes"]
+reason = "The original nightly input supplies a nonempty uploadId but no object-attributes header: the default ListParts decoder reaches its handler and the pinned attributes decoder refuses the missing header. Only this complete outcome pair under both selectors is recorded; empty-upload-id and other malformed-input refusals remain unregistered (https://github.com/rustfs/gateway/issues/1517)."
+expires = "2027-03-31"
+
 # ── Encode: what the gateway writes on every answer ─────────────────────────────────────────
 
 [[diff]]

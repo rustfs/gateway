@@ -132,3 +132,85 @@ fn fragment_events_artifacts_keep_the_decode_property() {
         assert_eq!(crate::fuzz::check_decode(input), Ok(()), "{}", String::from_utf8_lossy(input));
     }
 }
+
+/// Positive — both nightly artifacts remain compared requests with their exact route difference.
+#[test]
+fn attributes_upload_id_artifacts_keep_the_decode_property() {
+    for input in [
+        &include_bytes!("../../../../fuzz/seeds/decode_diff/attributes-upload-id-original")[..],
+        &include_bytes!("../../../../fuzz/seeds/decode_diff/attributes-upload-id-minimal")[..],
+    ] {
+        crate::fuzz::request_of(input).expect("the artifact remains in the compared request domain");
+        assert_eq!(crate::fuzz::check_decode(input), Ok(()), "{}", String::from_utf8_lossy(input));
+    }
+}
+
+fn attributes_upload_id_route() -> Finding {
+    Finding {
+        kind: Kind::Decode,
+        operation: "ListParts".to_owned(),
+        priority: Priority::Route,
+        item: Item::Route,
+        gateway: "ListParts".to_owned(),
+        s3s: "GetObjectAttributes".to_owned(),
+    }
+}
+
+/// Negative — neither selector alone, an encoded lookalike, nor a fragment can scope the finding.
+#[test]
+fn attributes_upload_id_requires_both_selectors() {
+    let register = KnownDiffs::checked_in().expect("the register parses");
+    for target in [
+        "/bkt/k",
+        "/bkt/k?uploadId=u",
+        "/bkt/k?attributes",
+        "/bkt/k?uploadId=u#&attributes",
+        "/bkt/k?attributes#&uploadId=u",
+        "/bkt/k?%75ploadId=u&attributes",
+        "/bkt/k?uploadId=u&%61ttributes",
+        "/bkt/k?UploadId=u&attributes",
+        "/bkt/k?uploadId=u&Attributes",
+        "/bkt/k?uploadId=u&prefix=attributes",
+    ] {
+        assert!(
+            !register
+                .verdict_for(&RawRequest::get(target), vec![attributes_upload_id_route()])
+                .passed(),
+            "{target}"
+        );
+    }
+}
+
+/// Negative — the conjunction accepts neither another operation pair nor a different item.
+#[test]
+fn attributes_upload_id_rejects_other_route_findings() {
+    let register = KnownDiffs::checked_in().expect("the register parses");
+    let request = RawRequest::get("/bkt/k?uploadId=u&attributes");
+    let mut findings = Vec::new();
+    let mut other = attributes_upload_id_route();
+    other.operation = "GetObject".to_owned();
+    findings.push(other);
+    let mut other = attributes_upload_id_route();
+    other.gateway = "GetObject".to_owned();
+    findings.push(other);
+    let mut other = attributes_upload_id_route();
+    other.s3s = "GetObject".to_owned();
+    findings.push(other);
+    let mut other = attributes_upload_id_route();
+    other.item = Item::Outcome;
+    findings.push(other);
+    for finding in findings {
+        assert!(!register.verdict_for(&request, vec![finding.clone()]).passed(), "{finding:?}");
+    }
+}
+
+/// Negative — missing scope and the minimized input's malformed-input refusals remain failures.
+#[test]
+fn attributes_upload_id_does_not_accept_unscoped_or_malformed_outcomes() {
+    let register = KnownDiffs::checked_in().expect("the register parses");
+    assert!(!register.verdict(vec![attributes_upload_id_route()]).passed());
+    let request = RawRequest::get("/bkt/k?uploadId&attributes");
+    let diff = crate::decode_diff(&request).expect("both stacks run");
+    let verdict = register.verdict_for(&request, diff.findings());
+    assert!(!verdict.passed(), "empty uploadId refusals are not accepted by a route record");
+}

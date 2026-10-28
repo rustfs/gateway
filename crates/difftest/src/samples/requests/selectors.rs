@@ -24,6 +24,11 @@ use crate::RawRequest;
 pub(super) fn rows() -> Vec<RequestRow> {
     vec![
         row(
+            "attributes-upload-id-nightly-artifact",
+            RawRequest::get("/bkt/k?uploadId=up=aS&g-inture=4&attributes=cted-bucket-o"),
+            &["kd-decode-0110", "kd-decode-0111"],
+        ),
+        row(
             "annotation-upload-id-nightly-artifact",
             RawRequest::put("/bkt/k?annotation=1&uploadId=u", b"")
                 .header("x-amz-checksum-sha512", "MJ7MSJwS1utMxA9QyQLydNbxf9JlnDaNCVbRbDP2DDoH2Bdz33Fd"),
