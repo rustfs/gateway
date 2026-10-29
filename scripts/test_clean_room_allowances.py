@@ -98,6 +98,11 @@ class Allowances(unittest.TestCase):
             with self.subTest(content=content):
                 self.assert_rejected("", {"probe.txt": content}, diagnostic)
 
+    def test_prefilter_scans_the_final_batch(self):
+        files = {f"probe-{i:04d}-{'x' * 60}.txt": "Min" + "IO" for i in range(600)}
+        files[f"probe-9999-{'x' * 60}.txt"] = "co" + "pied from Min" + "IO server"
+        self.assert_rejected("", files, "claims its contents came")
+
     def test_prefilter_failure_is_not_treated_as_no_match(self):
         result, _ = self.run_guard("", {"plain.txt": "ordinary"}, fail_prefilter=True)
         self.assertNotEqual(result.returncode, 0, "prefilter failure was ignored")

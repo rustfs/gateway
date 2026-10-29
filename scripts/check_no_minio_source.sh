@@ -185,6 +185,19 @@ scan_files() {
     : >"$hits"
 }
 
+scan_tracked_candidates() {
+    local pattern="$1" rc=0
+    shift
+    if grep -IlEi -- "$pattern" "$@" >>"$hits"; then
+        return
+    else
+        rc=$?
+    fi
+    if [[ "$rc" -ne 1 ]]; then
+        fail "check_no_minio_source: tracked-tree scan failed"
+    fi
+}
+
 scan_tree() {
     local pattern="$1" rc=0
     local -a extra_files=()
@@ -207,20 +220,22 @@ scan_tree() {
         fi
     fi
     local -a candidates=()
-    local candidate
+    local candidate candidate_size=0
     while IFS= read -r candidate; do
-        [[ -n "$candidate" ]] && candidates+=("$candidate")
-    done <"$prefilter"
-    for ((offset = 0; offset < ${#candidates[@]}; offset += 64)); do
-        if grep -IlEi -- "$pattern" "${candidates[@]:offset:64}" >>"$hits"; then
-            :
-        else
-            rc=$?
-            if [[ "$rc" -ne 1 ]]; then
-                fail "check_no_minio_source: tracked-tree scan failed"
-            fi
+        [[ -n "$candidate" ]] || continue
+        # Four bytes per character conservatively bounds UTF-8 paths. Keep the actual argv well
+        # below platform limits without spawning a scanner for every small group of files.
+        if ((candidate_size + ${#candidate} * 4 + 1 > 131072)) && ((${#candidates[@]} > 0)); then
+            scan_tracked_candidates "$pattern" "${candidates[@]}"
+            candidates=()
+            candidate_size=0
         fi
-    done
+        candidates+=("$candidate")
+        candidate_size=$((candidate_size + ${#candidate} * 4 + 1))
+    done <"$prefilter"
+    if ((${#candidates[@]} > 0)); then
+        scan_tracked_candidates "$pattern" "${candidates[@]}"
+    fi
     # git grep deliberately does not follow tracked symlinks. Scan their ordinary-file targets,
     # together with untracked files, in bounded batches so neither class can evade provenance
     # checks and a large tree cannot exceed the process argument limit.
