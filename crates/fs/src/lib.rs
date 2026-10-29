@@ -43,6 +43,7 @@ use rustfs_gateway::{
 use sha2::Sha256;
 use tokio::io::AsyncWriteExt as _;
 
+const VERSION_SEQUENCE_LOCK_FILE: &str = ".gateway-version-sequence.lock";
 const OBJECTS_DIR: &str = "objects";
 const UPLOADS_DIR: &str = "uploads";
 const VERSIONS_DIR: &str = "versions";

@@ -466,3 +466,6 @@ async fn n_failed_protection_record_write_publishes_nothing() {
 
 #[path = "coordination_tests.rs"]
 mod coordination_tests;
+
+#[path = "cross_process_tests.rs"]
+mod cross_process_tests;

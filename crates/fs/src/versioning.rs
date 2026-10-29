@@ -514,30 +514,6 @@ impl FsBackend {
         self.read_version_record(destination).await
     }
 
-    async fn next_version_sequence(&self, bucket: &str, held: &[VersionRecord]) -> Result<u64, HandlerError> {
-        let path = self.bucket_path(bucket).join(SEQUENCE_FILE);
-        let previous = match tokio::fs::symlink_metadata(&path).await {
-            Err(error) if error.kind() == io::ErrorKind::NotFound => held.iter().map(|record| record.sequence).max().unwrap_or(0),
-            Err(_) => return Err(storage_error()),
-            Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => tokio::fs::read_to_string(&path)
-                .await
-                .map_err(|_| storage_error())?
-                .strip_suffix('\n')
-                .and_then(|value| value.parse::<u64>().ok())
-                .ok_or_else(storage_error)?,
-            Ok(_) => {
-                return Err(HandlerError::new(
-                    ErrorCode::INVALID_REQUEST,
-                    "the version sequence path is not a safe regular file",
-                ));
-            }
-        };
-        let next = previous.checked_add(1).ok_or_else(storage_error)?;
-        self.write_atomic(&self.bucket_path(bucket), &path, format!("{next}\n").as_bytes())
-            .await?;
-        Ok(next)
-    }
-
     pub(super) async fn read_version_body(&self, record: &VersionRecord) -> Result<Vec<u8>, HandlerError> {
         tokio::fs::read(record.path.join(BODY_FILE))
             .await
@@ -788,6 +764,7 @@ impl Handler<DeleteObject> for FsBackend {
 mod configuration;
 mod delete_conditions;
 mod lifecycle;
+mod sequence;
 
 use delete_conditions::DeleteIfMatch;
 
