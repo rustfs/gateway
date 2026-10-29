@@ -417,21 +417,25 @@ async fn named_deletion_rejects_a_directory_lock_path() {
     std::fs::remove_dir_all(root).expect("remove test root");
 }
 
-/// Null and implicit deletions do not create the named-version transaction lock.
+/// Explicit null deletion uses the transaction lock; implicit deletion still does not.
 #[tokio::test]
-async fn null_and_implicit_deletions_do_not_create_transaction_lock() {
+async fn null_and_implicit_deletions_use_their_transaction_boundaries() {
     let (root, backend) = backend_with_bucket("transaction-null");
     backend
         .delete_object_version("racing", "object", Some("null"))
         .await
         .expect("delete null");
-    backend
+    assert!(root.join(super::super::transaction::LOCK_FILE).is_file());
+    drop(backend);
+    std::fs::remove_dir_all(root).expect("remove test root");
+    let (implicit_root, implicit_backend) = backend_with_bucket("transaction-implicit");
+    implicit_backend
         .delete_object_version("racing", "object", None)
         .await
         .expect("delete current");
-    assert!(!root.join(super::super::transaction::LOCK_FILE).exists());
-    drop(backend);
-    std::fs::remove_dir_all(root).expect("remove test root");
+    assert!(!implicit_root.join(super::super::transaction::LOCK_FILE).exists());
+    drop(implicit_backend);
+    std::fs::remove_dir_all(implicit_root).expect("remove test root");
 }
 
 /// A symlink at the coordination path cannot redirect the named deletion lock.

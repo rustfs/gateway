@@ -475,3 +475,6 @@ mod transaction_tests;
 
 #[path = "lifecycle_transaction_tests.rs"]
 mod lifecycle_transaction_tests;
+
+#[path = "null_transaction_tests.rs"]
+mod null_transaction_tests;

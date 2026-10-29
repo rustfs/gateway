@@ -733,8 +733,11 @@ impl FsBackend {
                     ..DeleteObjectOutput::default()
                 });
             }
-            if version_id == "null" {
-                self.remove_legacy_object(bucket, key).await?;
+            if version_id == "null"
+                && let Some(path) = self.preflight_legacy_object(bucket, key).await?
+            {
+                let process_guard = process_guard.ok_or_else(storage_error)?;
+                transaction::remove_legacy_file(process_guard, local_guard, &path).await?;
             }
             return Ok(DeleteObjectOutput::default());
         }
