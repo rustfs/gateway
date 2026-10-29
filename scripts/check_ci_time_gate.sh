@@ -182,8 +182,8 @@ jobs.each do |job_id, job|
 
   steps = job.fetch("steps")
   install_run = "bash scripts/ci_install_host_tools.sh"
-  install_run += " --target-guards" if job_id == "target-consolidation-self-test"
-  install_run += " --script-guards" if job_id.match?(/\A(?:guard-self-test(?:-[2-6])?|quirk-ledger-self-test(?:-[2-3])?)\z/)
+  install_run += " --python-guards" if job_id.match?(/\A(?:target-consolidation-self-test|quirk-ledger-self-test(?:-[2-3])?)\z/)
+  install_run += " --script-guards" if job_id.match?(/\Aguard-self-test(?:-[2-6])?\z/)
   install_at = steps.index { |step| step["run"] == install_run }
   abort("ERROR: #{job_id} must install host tools exactly once") if install_at.nil?
   if steps.count { |step| step["run"] == install_run } != 1
