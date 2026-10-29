@@ -713,6 +713,7 @@ async fn cross_process_controls_driver() {
     println!("completed: sequence_rename_failure_does_not_report_success");
     sequence_sync_failure_does_not_report_success().await;
     println!("completed: sequence_sync_failure_does_not_report_success");
+    super::transaction_tests::run_transaction_controls().await;
 }
 
 /// Existing non-file lock paths fail before any counter is written.
