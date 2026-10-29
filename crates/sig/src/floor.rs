@@ -64,6 +64,7 @@ use core::fmt;
 
 use http::HeaderMap;
 
+use crate::bearer::BearerAdmission;
 use crate::clock::{RequestNow, SkewWindow, enforce_clock_skew, enforce_presigned_clock_skew};
 use crate::mode::{
     STREAMING_ECDSA, STREAMING_ECDSA_TRAILER, STREAMING_SIGNED, STREAMING_SIGNED_TRAILER, STREAMING_UNSIGNED_TRAILER,
@@ -360,6 +361,10 @@ pub enum Admission<'a> {
     Custom(CustomAuthRequest<'a>),
     /// Nothing was presented, and the operation is anonymously reachable.
     Anonymous(AnonymousAck),
+    /// No AWS credential surface, and the operation's query bearer claim found its token
+    /// (ADR-0042). Only the facade's installed [`crate::BearerTokenVerifier`] can turn it into a
+    /// verdict; without one it is refused.
+    Bearer(BearerAdmission),
 }
 
 impl fmt::Debug for Admission<'_> {
@@ -371,6 +376,7 @@ impl fmt::Debug for Admission<'_> {
             Self::SealedSigV2(sealed) => f.debug_tuple("SealedSigV2").field(sealed).finish(),
             Self::Custom(request) => f.debug_tuple("Custom").field(request).finish(),
             Self::Anonymous(_) => f.write_str("Anonymous"),
+            Self::Bearer(admission) => f.debug_tuple("Bearer").field(admission).finish(),
         }
     }
 }
@@ -708,34 +714,6 @@ impl SecurityFloor {
             .ok_or(AuthError::AuthorizationQueryParametersError)
     }
 
-    /// The branch for a request that carried no AWS credential marker.
-    fn admit_without_aws_marker<'a>(
-        &self,
-        view: WireView<'a>,
-        operation: &OperationFloor,
-        presence: CredentialPresence,
-        now: RequestNow,
-    ) -> Result<Admission<'a>, AuthError> {
-        if presence.any() {
-            // An AWS surface was touched without an AWS marker — a session token with no
-            // signature, say. There is nothing to verify and it is not anonymous, so it is a
-            // rejection. Handing it to a custom verifier would be a way to launder an AWS
-            // credential surface through a third-party scheme.
-            return Err(AuthError::AuthorizationHeaderMalformed);
-        }
-        if let Some(scheme) = self.custom_schemes.matching(&view) {
-            self.enforce_scheme_allowed(operation, SchemeSlot::Header, SigFamily::V4)?;
-            return Ok(Admission::Custom(CustomAuthRequest::new(view, scheme, presence, now)));
-        }
-        self.enforce_scheme_allowed(operation, SchemeSlot::Anonymous, SigFamily::V4)?;
-        // Infallible here — `presence.any()` is false — but spelled as the fallible call it is, so
-        // that the evidence still comes from the presence record and not from this branch.
-        presence
-            .into_evidence()
-            .map(Admission::Anonymous)
-            .map_err(|_| AuthError::AuthorizationHeaderMalformed)
-    }
-
     /// Reads the signed timestamp from whichever surface this signing path uses.
     fn signed_timestamp(&self, view: &WireView<'_>, location: SigLocation) -> Result<AmzDate, AuthError> {
         match location {
@@ -780,6 +758,8 @@ impl SecurityFloor {
 
 #[path = "floor_anonymous.rs"]
 mod anonymous;
+#[path = "floor_bearer.rs"]
+mod bearer;
 #[path = "floor_presigned.rs"]
 mod presigned;
 #[path = "floor_recognition.rs"]

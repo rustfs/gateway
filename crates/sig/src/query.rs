@@ -44,6 +44,11 @@ use crate::secret::SessionToken;
 use crate::signature::ct_bytes_equal;
 use crate::verdict::AuthError;
 
+/// Matches a query name using the strict query decoder, retaining raw comparison on invalid input.
+pub(crate) fn query_name_matches(raw: &str, name: &str) -> bool {
+    percent_decode(raw).map_or_else(|_| raw.as_bytes() == name.as_bytes(), |key| key == name.as_bytes())
+}
+
 /// The unreserved set of RFC 3986, which SigV4 leaves unencoded: `A-Z a-z 0-9 - _ . ~`.
 const fn is_unreserved(byte: u8) -> bool {
     byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~')

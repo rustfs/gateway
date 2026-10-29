@@ -337,3 +337,73 @@ fn the_security_posture_names_both_verifier_states() {
             .contains("AWS signature verifier: dangerously replaced")
     );
 }
+
+struct CachedBearerVerifier {
+    receipt: std::sync::Mutex<Option<rustfs_gateway_sig::BearerReceipt>>,
+    calls: Arc<AtomicUsize>,
+}
+
+impl SignatureVerifier for CachedBearerVerifier {
+    fn verify(&self, _request: &CustomAuthRequest<'_>) -> Verdict {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        match self.receipt.lock().expect("fixture mutex").take() {
+            Some(receipt) => Verdict::bearer(receipt),
+            None => Verdict::reject(AuthError::AccessDenied),
+        }
+    }
+}
+
+struct BearerFixture;
+
+impl rustfs_gateway_sig::BearerTokenVerifier for BearerFixture {
+    fn verify(
+        &self,
+        _request: &rustfs_gateway_sig::BearerTokenRequest<'_>,
+    ) -> Result<rustfs_gateway_sig::BearerGrant, rustfs_gateway_sig::BearerRefused> {
+        Ok(rustfs_gateway_sig::BearerGrant::new(
+            Identity::new("BEARERACCESSKEY").expect("fixture identity"),
+            Arc::new(()),
+        ))
+    }
+}
+
+/// A valid receipt minted by a different admission cannot authenticate a custom-scheme request.
+#[tokio::test]
+async fn a_custom_verifier_cannot_reuse_another_bearer_admission() {
+    use rustfs_gateway_sig::{Admission, OperationFloor, QueryBearerClaim, RawQuery, RequestNow, WireView};
+
+    let headers = http::HeaderMap::new();
+    let view = WireView::new(&headers, RawQuery::new("token=fixture"));
+    let operation = OperationFloor::custom("example:PriorDownload", SigService::S3)
+        .with_query_bearer_claim(QueryBearerClaim::new("token", ".zip"));
+    let admission = rustfs_gateway::SecurityFloor::new()
+        .admit(view, &operation, RequestNow::from_unix_seconds(1))
+        .expect("fixture admission");
+    let Admission::Bearer(admission) = admission else {
+        panic!("the fixture must exercise bearer admission");
+    };
+    let receipt = admission
+        .verify(&BearerFixture, "/downloads/first.zip")
+        .expect("verified fixture");
+    let calls = Arc::new(AtomicUsize::new(0));
+    let reached = Arc::new(AtomicUsize::new(0));
+    let service = support::wired()
+        .security_floor(custom_floor())
+        .custom_signature_verifier(CachedBearerVerifier {
+            receipt: std::sync::Mutex::new(Some(receipt)),
+            calls: Arc::clone(&calls),
+        })
+        .register::<Ping, _>(Arc::new(CountingBackend::new(&reached)))
+        .dialect(&crate::support::ping_dialect())
+        .build()
+        .expect("a complete assembly");
+    let request = support::plain(http::Method::POST, "/");
+    let (mut parts, body) = request.into_parts();
+    parts
+        .headers
+        .insert("x-vendor-auth-token", http::HeaderValue::from_static("opaque"));
+    let (status, _) = exchange(&service, http::Request::from_parts(parts, body)).await;
+    assert_eq!(status, http::StatusCode::FORBIDDEN);
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert_eq!(reached.load(Ordering::SeqCst), 0);
+}

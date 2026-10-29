@@ -31,11 +31,14 @@
 //! authorizer is still asked (ADR-0025, ADR-0028).
 //!
 //! RustFS answers this route to whoever presents the `token` query parameter the POST minted, with
-//! no signature; the gateway has no bearer scheme on its floor (ADR-0026 (g)), and admitting the
-//! route anonymously was refused there, so the floor is privileged: a download URL presented
-//! without a header signature is `403` here until that scheme exists (rustfs/backlog#2753). The
-//! `{id}.zip` segment is matched as one opaque `{+id}` capture (ADR-0040): the handler reads `id`
-//! as the whole segment, suffix included, and validates it against the token.
+//! no signature. Admitting it anonymously was refused (ADR-0026 (g)), so the floor stays privileged
+//! and header-signed and adds a `token` query bearer claim (ADR-0042, rustfs/gateway#1400): a
+//! request presenting no AWS credential and exactly one non-empty `token` is admitted only as far
+//! as the host's installed bearer verifier, which binds it to the path's last raw segment less its
+//! literal `.zip` and authenticates the principal the token was issued to. Without that verifier
+//! the minted URL is `403`; with it, a header-signed request must also carry a token issued to its
+//! signed principal. The `{id}.zip` segment is matched as one opaque `{+id}` capture (ADR-0040):
+//! the handler reads `id` as the whole segment, suffix included.
 //!
 //! Its path parameter (`id`) names no bucket (ADR-0027): a handler reads each decoded value from
 //! `RequestContextView::path_params()`.
@@ -88,8 +91,9 @@ pub struct GetV3ObjectZipDownloadsByIdZip;
 
 static SPEC: OperationSpec = admin::spec(NAME, AUTH, false);
 
-/// Privileged and header-signed only: never anonymous, never presigned.
-static FLOOR: OperationFloor = admin::floor(NAME);
+/// Privileged and header-signed, never anonymous, never presigned, plus the minted URL's `token`
+/// query bearer claim, which only the host's installed verifier can accept (ADR-0042).
+static FLOOR: OperationFloor = admin::zip_token_floor(NAME);
 
 impl Operation for GetV3ObjectZipDownloadsByIdZip {
     const NAME: &'static str = NAME;

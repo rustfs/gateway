@@ -161,6 +161,7 @@ mod body_preparation;
 mod cors;
 mod outcome;
 pub(crate) mod refused_post;
+mod state;
 mod update;
 
 use self::cors::CorsDecoration;
@@ -181,6 +182,8 @@ pub(crate) struct Inner {
     pub(crate) config: ConfigStore,
     pub(crate) authenticator: Arc<dyn Authenticator>,
     pub(crate) custom_signature_verifier: Option<Arc<dyn rustfs_gateway_sig::SignatureVerifier>>,
+    /// The host's query bearer verifier (ADR-0042); `None` refuses every bearer admission.
+    pub(crate) bearer_token_verifier: Option<Arc<dyn rustfs_gateway_sig::BearerTokenVerifier>>,
     #[cfg(feature = "dangerous-replace-signature-verifier")]
     pub(crate) dangerously_replaced_signature_verifier: Option<Arc<dyn rustfs_gateway_sig::AwsSignatureVerifier>>,
     pub(crate) authz_clock: Arc<dyn MonotonicClock>,
@@ -208,35 +211,7 @@ pub(crate) struct Inner {
     pub(crate) detached_work: crate::DetachedWork,
 }
 
-struct AuthorizedRoute {
-    policy: Arc<PolicySnapshot>,
-    config: RequestConfig<RouteAuthorized>,
-    /// The index of the question that decided the route stage, which the input stage re-asks
-    /// (ADR-0025, ADR-0026).
-    deciding: usize,
-}
-
-struct ReadForDecode {
-    policy: Arc<PolicySnapshot>,
-    config: RequestConfig<Guarded>,
-    deciding: usize,
-}
-
-struct RequestEntryContext {
-    now: RequestNow,
-    connection: TransportSecurity,
-    client_addr: Option<ClientAddr>,
-}
-
-enum RoutedBody<B: http_body::Body> {
-    Ordinary(SealedBody<B>),
-    PostObject(Box<PostObjectPrelude<B>>),
-}
-
-enum AcceptedBody<B: http_body::Body> {
-    Ordinary(SealedBody<B>),
-    PostObject(Box<ResolvedPostObject<B>>),
-}
+use self::state::{AcceptedBody, AuthorizedRoute, ReadForDecode, RequestEntryContext, RoutedBody, connection_security};
 
 /// An assembled S3 service.
 ///
@@ -249,53 +224,11 @@ pub struct S3Service {
     pub(crate) inner: Arc<Inner>,
 }
 
-impl core::fmt::Debug for S3Service {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        let snapshot = self.inner.config.load();
-        f.debug_struct("S3Service")
-            .field("operations", &snapshot.runtime().routing.dispatch.names().collect::<Vec<_>>())
-            .finish_non_exhaustive()
-    }
-}
-
 impl S3Service {
-    /// The drain this assembly runs behind an answer that left an HTTP/1 request body unread.
-    pub(crate) fn unread_body_drain(&self) -> Option<crate::UnreadBodyDrain> {
-        self.inner.view_policy.unread_body_drain()
-    }
-
-    pub(crate) fn from_inner(inner: Inner) -> Self {
-        Self { inner: Arc::new(inner) }
-    }
-
     /// The operations this service answers, sorted. Everything else is `501`.
     pub fn operations(&self) -> impl Iterator<Item = &'static str> {
         let snapshot = self.inner.config.load();
         snapshot.runtime().routing.dispatch.names().collect::<Vec<_>>().into_iter()
-    }
-
-    /// The acceptance ceilings in force.
-    #[must_use]
-    pub fn limits(&self) -> &Limits {
-        &self.inner.limits
-    }
-
-    /// Whether the service uses the system clock, a checked custom source, or an acknowledged one.
-    #[must_use]
-    pub fn clock_posture(&self) -> ClockPosture {
-        self.inner.clock_posture
-    }
-
-    /// The credential-cache and pre-authentication per-client posture selected at assembly.
-    #[must_use]
-    pub fn security_posture(&self) -> SecurityPosture {
-        self.inner.security_posture
-    }
-
-    /// Number of forbidden response bodies removed by this service's final invariant pass.
-    #[must_use]
-    pub fn response_body_corrections_total(&self) -> u64 {
-        self.inner.response_body_corrections.load(Ordering::Relaxed)
     }
 
     /// Answers one request.
@@ -501,15 +434,6 @@ impl S3Service {
             crate::ext::observe_safely(runtime.observer.as_ref(), &event);
         }
         file_body_path.adapt(response)
-    }
-
-    /// Answers one request whose body is already in memory.
-    ///
-    /// The shape an in-process caller has, and the one the conformance runner uses: it builds a
-    /// request from raw bytes and wants the response without a socket in between.
-    pub async fn call_bytes(&self, request: Request<Bytes>) -> Response<Body> {
-        let (parts, body) = request.into_parts();
-        self.call(Request::from_parts(parts, http_body_util::Full::new(body))).await
     }
 
     async fn run<B, M>(
@@ -736,7 +660,14 @@ impl S3Service {
         let head_view = WireView::new(&headers, query);
         let head_presence = detect_credentials(&head_view);
         let is_post_object = request_body_mode == RequestBodyMode::PostObject;
-        let class = if is_post_object || head_presence.any() {
+        // ADR-0042: only an operation whose floor declares a query bearer claim reads its token, and
+        // a presented token is credential-verification work like any other credential.
+        let bearer_claim = M::floor(&op).query_bearer_claim();
+        let bearer_presented = bearer_claim.is_some_and(|claim| claim.presented(&head_view));
+        // Once the host's verifier is installed the token is verified on this operation's signed
+        // path too, and no authorization or handler context ever holds it.
+        let bearer_verified_claim = bearer_claim.filter(|_| self.inner.bearer_token_verifier.is_some());
+        let class = if is_post_object || head_presence.any() || bearer_presented {
             ClassKind::CredentialLookup
         } else {
             ClassKind::Unauthenticated
@@ -808,8 +739,10 @@ impl S3Service {
         // Presenting nothing leaves no signature to verify first: legacy RustFS's claimed-route ceiling precedes the floor.
         let claimed_ceiling = self.inner.view_policy.claimed_bodies.ceiling(claimed);
         let aws_credential_marker = self.inner.floor.credential_marker(&view);
-        let presented =
-            presence.any() || aws_credential_marker.is_some() || self.inner.floor.custom_schemes().matching(&view).is_some();
+        let presented = presence.any()
+            || aws_credential_marker.is_some()
+            || self.inner.floor.custom_schemes().matching(&view).is_some()
+            || bearer_presented;
         if let (false, RoutedBody::Ordinary(sealed)) = (presented, &routed_body)
             && let Some(refusal) = sealed.past_claimed_ceiling(claimed_ceiling).await
         {
@@ -823,6 +756,9 @@ impl S3Service {
         let mut body_digest = BodyDigestObligation::None;
         // Legacy RustFS's words for a RustFS-profile refusal, when the authenticator published them.
         let mut legacy = None;
+        // Whether this request's own floor admission was a bearer one: a bearer verdict from any
+        // other path is a receipt carried over from another request, and is refused below.
+        let mut bearer_admitted = false;
         let (authentication, signature_mismatch) = match self.inner.floor.admit(view, M::floor(&op), now) {
             Ok(Admission::Anonymous(evidence)) => {
                 framing_mode = match crate::payload_header::anonymous_framing(&headers, self.inner.decode_anonymous_framing) {
@@ -919,6 +855,19 @@ impl S3Service {
                     );
                 }
             },
+            // ADR-0042: only the installed host verifier turns a bearer admission into a verdict, on
+            // this request's own raw path; without one, and on any refusal, the token is refused.
+            Ok(Admission::Bearer(admission)) => {
+                let verdict = match &self.inner.bearer_token_verifier {
+                    Some(verifier) => match admission.verify(verifier.as_ref(), wire.raw_path().as_str()) {
+                        Ok(receipt) => Verdict::bearer(receipt),
+                        Err(error) => Verdict::reject(error),
+                    },
+                    None => Verdict::reject(AuthError::AccessDenied),
+                };
+                bearer_admitted = true;
+                (AuthenticationOutcome::ordinary(verdict), None)
+            }
             // `Admission` is `#[non_exhaustive]`: a variant added later must not be answered by a
             // wildcard that falls through to "authenticated". Refused, loudly.
             Ok(_) => {
@@ -941,6 +890,11 @@ impl S3Service {
         // Zeroized on drop: an operation outside the assembly's secret scope never holds the key past this line (ADR-0024).
         let caller_secret = caller_secret.filter(|_| hands_caller_secret || self.inner.caller_secret_every_operation);
         let verdict = SecurityFloor::seal_verdict(verdict, presence);
+        let verdict = if verdict.bearer_receipt().is_some() && !bearer_admitted {
+            Verdict::reject(AuthError::AccessDenied)
+        } else {
+            verdict
+        };
         if let Some(error) = verdict.rejection() {
             // A RustFS-profile reading's refusal, in legacy RustFS's words (rustfs/gateway#1130).
             if let Some(legacy) = legacy {
@@ -974,6 +928,34 @@ impl S3Service {
                 ),
             );
         }
+        // ADR-0042: with the host verifier installed, a signed request on a bearer-claimed operation
+        // must also carry a token the verifier accepts for this download and for the signed
+        // principal. The signature verdict stays as it is; the receipt only carries host state.
+        let signed_bearer = match (bearer_verified_claim, &self.inner.bearer_token_verifier, verdict.identity()) {
+            (Some(_), Some(verifier), Some(signed)) if verdict.is_authenticated() => {
+                let verified = self
+                    .inner
+                    .floor
+                    .bearer_alongside_signature(&view, M::floor(&op), now)
+                    .and_then(|admission| {
+                        admission.map_or(Err(AuthError::AccessDenied), |admission| {
+                            admission.verify_alongside(verifier.as_ref(), wire.raw_path().as_str(), signed)
+                        })
+                    });
+                match verified {
+                    Ok(receipt) => Some(receipt),
+                    Err(error) => {
+                        return outcome
+                            .refuse_at(Refused::Authentication, from_auth(error, response_kind, wire.framing().has_body()));
+                    }
+                }
+            }
+            _ => None,
+        };
+        let context_query: std::borrow::Cow<'_, str> = match bearer_verified_claim {
+            Some(claim) => std::borrow::Cow::Owned(claim.strip_from(wire.query().as_str())),
+            None => std::borrow::Cow::Borrowed(wire.query().as_str()),
+        };
         // Metadata admission and credential location follow the settled verdict; a missing proof
         // is refused, and codec-facing header rewrites cannot supply or erase the original AWS fact.
         let Some(metadata_admission) = MetadataAdmission::of(&verdict) else {
@@ -1031,6 +1013,7 @@ impl S3Service {
         let route_meta = &meta;
         let route_headers = &headers;
         let route_wire = &wire;
+        let route_query: &str = &context_query;
         let route_verdict = &verdict;
         let route_effective_key = effective_key.as_ref();
         let route_post_fields = post_fields.as_deref();
@@ -1121,8 +1104,14 @@ impl S3Service {
                 }
             };
             let policy = Arc::new(policy);
-            let authz_context =
-                RequestContext::from_request(now, policy.as_ref(), auth_scheme, route_verdict.verified_scope(), route_wire);
+            let authz_context = RequestContext::from_request(
+                now,
+                policy.as_ref(),
+                auth_scheme,
+                route_verdict.verified_scope(),
+                route_wire,
+                route_query,
+            );
             let route_started = route_service.inner.authz_clock.monotonic();
             let mut decisions = Vec::with_capacity(if questions.is_empty() { 0 } else { asked.len() });
             // A subject is an account, and an anonymous caller has none: refused without asking,
@@ -1358,6 +1347,8 @@ impl S3Service {
         let input_meta = &meta;
         let input_verdict = &verdict;
         let input_wire = &wire;
+        let input_query: &str = &context_query;
+        let input_bearer = signed_bearer.as_ref();
         let addressed = resolved.addressed(meta.bucket(), effective_key.as_ref());
         let input_effective_key = effective_key.as_ref();
         let input_subjects = subjects.as_ref();
@@ -1414,8 +1405,14 @@ impl S3Service {
                 });
             }
             let input_request = InputAuthzRequest::new(&route_request, &input_resources);
-            let authz_context =
-                RequestContext::from_request(now, state.policy.as_ref(), auth_scheme, input_verdict.verified_scope(), input_wire);
+            let authz_context = RequestContext::from_request(
+                now,
+                state.policy.as_ref(),
+                auth_scheme,
+                input_verdict.verified_scope(),
+                input_wire,
+                input_query,
+            );
             let input_started = input_service.inner.authz_clock.monotonic();
             let input_decisions =
                 match catch_boxed_future(|| input_runtime.authorizer.authorize_input(&authz_context, &input_request)).await {
@@ -1477,7 +1474,15 @@ impl S3Service {
             let map = |error| from_handler(error, response_kind, ConnectionIntent::MayKeepAlive);
             let sse = config.sse().cloned().map_err(map)?;
             let context = RequestContextView::from_pipeline(operation, input_wire, addressed, input_verdict, caller_secret)
-                .map(|context| context.with_path_params(path_params).with_subjects(input_subjects.cloned()));
+                .map(|context| context.with_path_params(path_params).with_subjects(input_subjects.cloned()))
+                .map(|context| match input_bearer {
+                    Some(receipt) => context.with_bearer_receipt(receipt),
+                    None => context,
+                })
+                .map(|context| match bearer_verified_claim {
+                    Some(claim) => context.without_bearer_token(claim),
+                    None => context,
+                });
             let context = context.ok_or_else(|| map(HandlerError::internal_error("a rejected request reached its handler")))?;
             Ok((decisions, config, sse, context))
         };
@@ -1585,34 +1590,6 @@ struct Outcome<'a> {
     /// The stage that refused the request, when the gateway refused it; reported once, at the end
     /// (`crate::logging::request_refused`).
     refused: Option<Refused>,
-}
-
-/// What the transport said about this connection, or [`TransportSecurity::Plaintext`].
-///
-/// The **only** source. A transport that terminates TLS, or that is handed a connection by one
-/// that did, inserts a `TransportSecurity` into the request's extensions:
-///
-/// ```
-/// # use rustfs_gateway::TransportSecurity;
-/// let mut request = http::Request::new(());
-/// request.extensions_mut().insert(TransportSecurity::Encrypted);
-/// ```
-///
-/// Extensions cannot be written from the wire, which is the property that makes this trustworthy
-/// and `X-Forwarded-Proto` not. A deployment behind a TLS-terminating proxy that cannot be taught
-/// to set the extension has one other option, and it is an explicit one:
-/// `ServiceBuilder::sse_config` with
-/// `rustfs_gateway_core::SseConfig::allowing_customer_keys_over_plaintext`, whose witness has to be
-/// named in full.
-///
-/// Absent is cleartext. The alternative — assuming encryption when nobody said — is the failure
-/// mode where a development deployment that was never given a transport quietly serves customer
-/// keys over HTTP.
-fn connection_security(extensions: &http::Extensions) -> TransportSecurity {
-    extensions
-        .get::<TransportSecurity>()
-        .copied()
-        .unwrap_or(TransportSecurity::Plaintext)
 }
 
 #[cfg(test)]
