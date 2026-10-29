@@ -407,3 +407,81 @@ async fn a_custom_verifier_cannot_reuse_another_bearer_admission() {
     assert_eq!(calls.load(Ordering::SeqCst), 1);
     assert_eq!(reached.load(Ordering::SeqCst), 0);
 }
+
+struct ConcurrentCachedBearerVerifier {
+    receipts: std::sync::Mutex<Vec<rustfs_gateway_sig::BearerReceipt>>,
+    arrivals: std::sync::Mutex<usize>,
+    changed: std::sync::Condvar,
+    overlaps: Arc<AtomicUsize>,
+}
+
+impl SignatureVerifier for ConcurrentCachedBearerVerifier {
+    fn verify(&self, _request: &CustomAuthRequest<'_>) -> Verdict {
+        let mut arrivals = self.arrivals.lock().expect("fixture mutex");
+        *arrivals += 1;
+        self.changed.notify_all();
+        let (arrivals, _) = self
+            .changed
+            .wait_timeout_while(arrivals, std::time::Duration::from_secs(5), |count| *count < 2)
+            .expect("fixture mutex");
+        if *arrivals == 2 {
+            self.overlaps.fetch_add(1, Ordering::SeqCst);
+        }
+        drop(arrivals);
+        match self.receipts.lock().expect("fixture mutex").pop() {
+            Some(receipt) => Verdict::bearer(receipt),
+            None => Verdict::reject(AuthError::AccessDenied),
+        }
+    }
+}
+
+/// Concurrent custom requests cannot consume receipts minted by other admissions.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn concurrent_custom_requests_cannot_reuse_bearer_admissions() {
+    use rustfs_gateway_sig::{Admission, OperationFloor, QueryBearerClaim, RawQuery, RequestNow, WireView};
+
+    let receipts = (0..2)
+        .map(|_| {
+            let headers = http::HeaderMap::new();
+            let view = WireView::new(&headers, RawQuery::new("token=fixture"));
+            let operation = OperationFloor::custom("example:PriorDownload", SigService::S3)
+                .with_query_bearer_claim(QueryBearerClaim::new("token", ".zip"));
+            let Admission::Bearer(admission) = rustfs_gateway::SecurityFloor::new()
+                .admit(view, &operation, RequestNow::from_unix_seconds(1))
+                .expect("fixture admission")
+            else {
+                panic!("the fixture must exercise bearer admission")
+            };
+            admission
+                .verify(&BearerFixture, "/downloads/first.zip")
+                .expect("verified fixture")
+        })
+        .collect();
+    let overlaps = Arc::new(AtomicUsize::new(0));
+    let reached = Arc::new(AtomicUsize::new(0));
+    let service = support::wired()
+        .security_floor(custom_floor())
+        .custom_signature_verifier(ConcurrentCachedBearerVerifier {
+            receipts: std::sync::Mutex::new(receipts),
+            arrivals: std::sync::Mutex::new(0),
+            changed: std::sync::Condvar::new(),
+            overlaps: Arc::clone(&overlaps),
+        })
+        .register::<Ping, _>(Arc::new(CountingBackend::new(&reached)))
+        .dialect(&crate::support::ping_dialect())
+        .build()
+        .expect("a complete assembly");
+    let send = |service: rustfs_gateway::S3Service| async move {
+        let request = support::plain(http::Method::POST, "/");
+        let (mut parts, body) = request.into_parts();
+        parts
+            .headers
+            .insert("x-vendor-auth-token", http::HeaderValue::from_static("opaque"));
+        exchange(&service, http::Request::from_parts(parts, body)).await.0
+    };
+    let (first, second) = tokio::join!(tokio::spawn(send(service.clone())), tokio::spawn(send(service)));
+    assert_eq!(overlaps.load(Ordering::SeqCst), 2, "both verifier calls overlapped");
+    assert_eq!(first.expect("first request"), http::StatusCode::FORBIDDEN);
+    assert_eq!(second.expect("second request"), http::StatusCode::FORBIDDEN);
+    assert_eq!(reached.load(Ordering::SeqCst), 0);
+}
