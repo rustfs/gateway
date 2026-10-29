@@ -32,6 +32,8 @@ use rustfs_gateway_sig::{SecurityFloor, SessionBinding, SigV2Signer, codec::enco
 
 use crate::support;
 
+#[path = "post_object_sigv2/aws_policy_errors.rs"]
+mod aws_policy_errors;
 #[path = "post_object_sigv2/policy_bytes.rs"]
 mod policy_bytes;
 #[path = "post_object_sigv2/policy_elements.rs"]
@@ -250,9 +252,9 @@ async fn a_policy_for_another_bucket_cannot_store_an_object() {
     );
     let signature = signed_policy(&policy);
     let (status, response, stored) = post(true, &fields(&policy, &signature), "hello").await;
-    // Measured against legacy RustFS; gateway#1185 records the HTTP comparison.
-    assert_eq!(status, StatusCode::BAD_REQUEST);
-    assert!(response.contains("<Code>InvalidPolicyDocument</Code>"), "{response}");
+    // AWS's answer, where legacy RustFS answers 400 InvalidPolicyDocument (rustfs/gateway#1444).
+    assert_eq!(status, StatusCode::FORBIDDEN, "{response}");
+    assert!(response.contains("<Code>AccessDenied</Code>"), "{response}");
     assert_eq!(stored, None);
 }
 
@@ -263,8 +265,8 @@ async fn changing_the_key_cannot_store_an_object() {
     let mut fields = fields(&policy, &signature);
     fields[0].1 = "another-key";
     let (status, response, stored) = post(true, &fields, "hello").await;
-    assert_eq!(status, StatusCode::BAD_REQUEST);
-    assert!(response.contains("<Code>InvalidPolicyDocument</Code>"));
+    assert_eq!(status, StatusCode::FORBIDDEN, "{response}");
+    assert!(response.contains("<Code>AccessDenied</Code>"), "{response}");
     assert_eq!(stored, None);
 }
 
@@ -476,8 +478,8 @@ async fn mixed_case_operators_keep_values_case_sensitive() {
         let policy = operator_policy(condition);
         let signature = signed_policy(&policy);
         let (status, response, stored) = post(true, &fields(&policy, &signature), "hello").await;
-        assert_eq!(status, StatusCode::BAD_REQUEST, "{response}");
-        assert!(response.contains("<Code>InvalidPolicyDocument</Code>"), "{response}");
+        assert_eq!(status, StatusCode::FORBIDDEN, "{response}");
+        assert!(response.contains("<Code>AccessDenied</Code>"), "{response}");
         assert_eq!(stored, None);
     }
 }
@@ -558,11 +560,9 @@ fn expiration_policy(expiration: &str) -> String {
 #[tokio::test]
 async fn legacy_expiration_spellings_store_the_exact_file() {
     for expiration in [
-        "2026-01-02 04:04:05Z",
         "2026-01-02t05:04:05+01:00",
         "2026-01-02T02:04:05-02:00",
         "2026-01-02T04:04:05.123456789012Z",
-        r"2026-01-02\u000004:04:05Z",
         "2030-01-31T23:59:60Z",
         "2030-07-01T00:59:60+01:00",
     ] {
@@ -577,9 +577,9 @@ async fn legacy_expiration_spellings_store_the_exact_file() {
 #[tokio::test]
 async fn legacy_expiration_offsets_cannot_extend_an_expired_policy() {
     for expiration in [
-        "2026-01-02 04:04:05+01:00",
+        "2026-01-02T04:04:05+01:00",
         "2026-01-02T02:04:04-01:00",
-        "2026-01-02 03:04:05.9Z",
+        "2026-01-02T03:04:05.9Z",
         "2016-12-31T23:59:60Z",
     ] {
         let policy = expiration_policy(expiration);
@@ -601,6 +601,12 @@ async fn legacy_expiration_malformed_fields_cannot_store_an_object() {
         "2026-01-02T04:04:05.Z",
         "2026-01-02  04:04:05Z",
         "2026-01-02\u{a0}04:04:05Z",
+        // A separator other than the `T` designator is malformed, as AWS reads it, where legacy
+        // RustFS accepts any single ASCII byte (rustfs/gateway#1444).
+        "2026-01-02 04:04:05Z",
+        "2026-01-02 04:04:05+01:00",
+        "2026-01-02_04:04:05Z",
+        r"2026-01-02\u000004:04:05Z",
     ] {
         let policy = expiration_policy(expiration);
         let signature = signed_policy(&policy);

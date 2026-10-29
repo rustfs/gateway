@@ -223,12 +223,14 @@ where
                 SigV2PostPolicy::parse
             };
             AcceptedPolicy::SigV2(parse(&fields, filename, policy_limits, now).map_err(|reject| {
-                if legacy_store && matches!(reject, PostPolicyError::Malformed | PostPolicyError::ConditionFailed) {
+                if legacy_store && matches!(reject, PostPolicyError::Malformed) {
                     from_handler(
                         HandlerError::new(ErrorCode::INVALID_POLICY_DOCUMENT, "the POST policy was not accepted"),
                         ResponseKind::Other,
                         ConnectionIntent::MayKeepAlive,
                     )
+                } else if legacy_store {
+                    aws_policy_violation(reject).unwrap_or_else(|| policy_refusal(reject))
                 } else {
                     policy_refusal(reject)
                 }
@@ -472,11 +474,34 @@ fn legacy_empty_file_refusal() -> S3Error {
     )
 }
 
-/// Legacy RustFS's answer to a file its POST policy refuses: the policy's own code where it has
-/// one, `AccessDenied` otherwise.
+/// AWS's answer to a form its POST policy does not admit, under the RustFS profile: `403
+/// AccessDenied` "Invalid according to Policy", for a field failing its condition (a named field
+/// the form lacks and a policy for another bucket included) and for a field no condition names.
+/// `None` for every other refusal.
+///
+/// Legacy-compat (rustfs/backlog#2684): legacy RustFS answers a failed condition `400
+/// InvalidPolicyDocument`; the decision on rustfs/gateway#1444 follows AWS instead. The messages
+/// are fixed and never echo the condition or the value.
+fn aws_policy_violation(error: PostPolicyError) -> Option<S3Error> {
+    let message = match error {
+        PostPolicyError::ConditionFailed => "Invalid according to Policy: Policy Condition failed",
+        PostPolicyError::FieldNotInPolicy => "Invalid according to Policy: Extra input fields",
+        _ => return None,
+    };
+    Some(from_handler(
+        HandlerError::new(ErrorCode::ACCESS_DENIED, message),
+        ResponseKind::Other,
+        ConnectionIntent::MayKeepAlive,
+    ))
+}
+
+/// The RustFS profile's answer to a file its POST policy refuses: a policy violation as AWS answers
+/// it (`aws_policy_violation`), the size range's own code, `AccessDenied` otherwise.
 fn legacy_file_policy_refusal(error: PostPolicyError) -> S3Error {
+    if let Some(refusal) = aws_policy_violation(error) {
+        return refusal;
+    }
     let code = match error {
-        PostPolicyError::ConditionFailed => ErrorCode::INVALID_POLICY_DOCUMENT,
         PostPolicyError::EntityTooSmall => ErrorCode::ENTITY_TOO_SMALL,
         PostPolicyError::EntityTooLarge => ErrorCode::ENTITY_TOO_LARGE,
         _ => ErrorCode::ACCESS_DENIED,

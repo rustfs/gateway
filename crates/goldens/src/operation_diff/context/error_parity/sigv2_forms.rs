@@ -226,26 +226,12 @@ fn a_sigv2_form_its_policy_admits_reaches_the_upload_on_both_stacks() {
 
 /// Negative — forms whose policy, credentials or fields legacy RustFS refuses are refused on both
 /// stacks with the same status and code, and neither reaches `PostObject`. Coverage is checked
-/// last on both: a bucket or size refusal wins over an unnamed field.
+/// last on both: a size refusal wins over an unnamed field. A failed condition is answered
+/// otherwise by decision (`n_a_failed_condition_is_access_denied_where_legacy_rustfs_says_invalid`).
 #[test]
 fn n_a_sigv2_form_legacy_rustfs_refuses_is_refused_alike_and_reaches_nothing() {
     let starts = json!(["starts-with", "$key", ""]);
     let answered = assert_alike(vec![
-        (
-            "key eq mismatch",
-            Form::signed(&policy(LATER, [json!(["eq", "$key", "b.txt"])]), SECRET_KEY),
-        ),
-        (
-            "key prefix mismatch",
-            Form::signed(&policy(LATER, [json!(["starts-with", "$key", "b"])]), SECRET_KEY),
-        ),
-        (
-            "bucket mismatch",
-            Form::signed(
-                &json!({"expiration": LATER, "conditions": [{"bucket": "other"}, starts.clone()]}),
-                SECRET_KEY,
-            ),
-        ),
         (
             "file above the range",
             Form::signed(&policy(LATER, [starts.clone(), json!(["content-length-range", 1, 5])]), SECRET_KEY),
@@ -253,14 +239,6 @@ fn n_a_sigv2_form_legacy_rustfs_refuses_is_refused_alike_and_reaches_nothing() {
         (
             "file below the range",
             Form::signed(&policy(LATER, [starts.clone(), json!(["content-length-range", 100, 200])]), SECRET_KEY),
-        ),
-        (
-            "bucket mismatch and an unnamed field",
-            Form::signed(
-                &json!({"expiration": LATER, "conditions": [{"bucket": "other"}, starts.clone()]}),
-                SECRET_KEY,
-            )
-            .with("x-amz-meta-color", "red"),
         ),
         (
             "file above the range and an unnamed field",
@@ -281,11 +259,6 @@ fn n_a_sigv2_form_legacy_rustfs_refuses_is_refused_alike_and_reaches_nothing() {
         (
             "unchecked metadata",
             Form::signed(&policy(LATER, [starts.clone()]), SECRET_KEY).with("x-amz-meta-color", "red"),
-        ),
-        (
-            "metadata eq mismatch",
-            Form::signed(&policy(LATER, [starts.clone(), json!(["eq", "$x-amz-meta-color", "blue"])]), SECRET_KEY)
-                .with("x-amz-meta-color", "red"),
         ),
         (
             "no expiration",
@@ -310,6 +283,52 @@ fn n_a_sigv2_form_legacy_rustfs_refuses_is_refused_alike_and_reaches_nothing() {
     ]);
     for (kind, outcome) in answered {
         assert!(matches!(outcome, Outcome::Refused { .. }), "{kind}: {outcome:?}");
+    }
+}
+
+/// Negative — an accepted difference toward AWS (rustfs/gateway#1444, rustfs/backlog#2684): a form
+/// failing a policy condition — the key, the routed bucket, a metadata value — is refused `403
+/// AccessDenied` by the gateway, as AWS refuses it, and `400 InvalidPolicyDocument` by legacy
+/// RustFS. Neither reaches `PostObject`, and a bucket refusal still wins over an unnamed field.
+#[test]
+fn n_a_failed_condition_is_access_denied_where_legacy_rustfs_says_invalid() {
+    let starts = json!(["starts-with", "$key", ""]);
+    let other_bucket = || json!({"expiration": LATER, "conditions": [{"bucket": "other"}, starts.clone()]});
+    let refused = |status, code: &str| Outcome::Refused {
+        status,
+        code: Some(code.to_owned()),
+    };
+    for (kind, form) in [
+        (
+            "key eq mismatch",
+            Form::signed(&policy(LATER, [json!(["eq", "$key", "b.txt"])]), SECRET_KEY),
+        ),
+        (
+            "key prefix mismatch",
+            Form::signed(&policy(LATER, [json!(["starts-with", "$key", "b"])]), SECRET_KEY),
+        ),
+        ("bucket mismatch", Form::signed(&other_bucket(), SECRET_KEY)),
+        (
+            "bucket mismatch and an unnamed field",
+            Form::signed(&other_bucket(), SECRET_KEY).with("x-amz-meta-color", "red"),
+        ),
+        (
+            "metadata eq mismatch",
+            Form::signed(&policy(LATER, [starts.clone(), json!(["eq", "$x-amz-meta-color", "blue"])]), SECRET_KEY)
+                .with("x-amz-meta-color", "red"),
+        ),
+    ] {
+        let pair = sent(&form);
+        assert_eq!(
+            outcomes(&pair),
+            (refused(403, "AccessDenied"), refused(400, "InvalidPolicyDocument")),
+            "{kind}"
+        );
+        assert_eq!(
+            pair.gateway.message(),
+            Some("Invalid according to Policy: Policy Condition failed"),
+            "{kind}"
+        );
     }
 }
 
