@@ -65,6 +65,12 @@ fn run_private_cross_process_controls() {
         "cancelled_queued_lifecycle_retains_the_version",
         "started_lifecycle_retains_both_locks_after_cancellation",
         "lifecycle_rechecks_protection_time_for_each_removal",
+        "protected_null_record_waits_for_process_boundary",
+        "legacy_null_deletion_waits_for_process_boundary",
+        "queued_null_record_cancellation_retains_version",
+        "queued_legacy_null_cancellation_retains_object",
+        "started_null_record_cancellation_retains_locks",
+        "started_legacy_null_cancellation_retains_locks",
     ] {
         assert!(stdout.contains(&format!("completed: {control}")), "missing process control: {control}");
     }

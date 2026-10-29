@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The cooperating-process boundary for explicitly named version deletion.
+//! The cooperating-process boundary for explicit version deletion.
 //!
 //! Responsible for: cancellation-aware acquisition and lock-owned version removal.
-//! NOT responsible for: publication, null versions, non-cooperating updates, or crash durability.
+//! NOT responsible for: publication, implicit deletion, non-cooperating updates, or crash durability.
 //! Upstream: named version deletion. Downstream: the root lock and filesystem removal.
 
 use std::io;
@@ -39,7 +39,7 @@ impl Drop for CancelQueued {
 }
 
 pub(super) async fn named_guard(root: &Path, version_id: Option<&str>) -> Result<Option<std::fs::File>, HandlerError> {
-    if !version_id.is_some_and(|id| id != "null") {
+    if version_id.is_none() {
         return Ok(None);
     }
     root_guard(root).await.map(Some)
@@ -111,6 +111,24 @@ pub(super) async fn remove_version(
         #[cfg(test)]
         observe_removal_start();
         let result = std::fs::remove_dir_all(path).map_err(|_| storage_error());
+        drop(lock);
+        drop(local_guard);
+        result
+    })
+    .await
+    .map_err(|_| storage_error())?
+}
+
+pub(super) async fn remove_legacy_file(
+    lock: std::fs::File,
+    local_guard: tokio::sync::OwnedMutexGuard<()>,
+    path: &Path,
+) -> Result<(), HandlerError> {
+    let path = path.to_owned();
+    tokio::task::spawn_blocking(move || {
+        #[cfg(test)]
+        observe_removal_start();
+        let result = std::fs::remove_file(path).map_err(|_| storage_error());
         drop(lock);
         drop(local_guard);
         result
