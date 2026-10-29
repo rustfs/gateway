@@ -92,7 +92,8 @@ file_list="$(mktemp "${TMPDIR:-/tmp}/gateway-clean-room-files.XXXXXX")"
 tracked_list="$(mktemp "${TMPDIR:-/tmp}/gateway-clean-room-tracked.XXXXXX")"
 untracked_list="$(mktemp "${TMPDIR:-/tmp}/gateway-clean-room-untracked.XXXXXX")"
 hits="$(mktemp "${TMPDIR:-/tmp}/gateway-clean-room-hits.XXXXXX")"
-cleanup() { rm -f "$file_list" "$tracked_list" "$untracked_list" "$hits"; }
+prefilter="$(mktemp "${TMPDIR:-/tmp}/gateway-clean-room-prefilter.XXXXXX")"
+cleanup() { rm -f "$file_list" "$tracked_list" "$untracked_list" "$hits" "$prefilter"; }
 trap cleanup EXIT
 
 if ! git ls-files --cached --others --exclude-standard >"$file_list"; then
@@ -194,15 +195,32 @@ scan_tree() {
     if [[ "${#tracked_symlink_files[@]}" -gt 0 ]]; then
         extra_files+=("${tracked_symlink_files[@]}")
     fi
+    # Every alternative in the full expression contains one of these fixed words.
+    # Find candidate files cheaply, then apply the unchanged expression to each candidate.
     : >"$hits"
-    if git grep -IlEi -- "$pattern" -- >>"$hits"; then
+    if git grep -IlFi -e minio -e garage -e agpl -e affero -- >"$prefilter"; then
         :
     else
         rc=$?
         if [[ "$rc" -ne 1 ]]; then
-            fail "check_no_minio_source: tracked-tree scan failed"
+            fail "check_no_minio_source: tracked-tree prefilter failed"
         fi
     fi
+    local -a candidates=()
+    local candidate
+    while IFS= read -r candidate; do
+        [[ -n "$candidate" ]] && candidates+=("$candidate")
+    done <"$prefilter"
+    for ((offset = 0; offset < ${#candidates[@]}; offset += 64)); do
+        if grep -IlEi -- "$pattern" "${candidates[@]:offset:64}" >>"$hits"; then
+            :
+        else
+            rc=$?
+            if [[ "$rc" -ne 1 ]]; then
+                fail "check_no_minio_source: tracked-tree scan failed"
+            fi
+        fi
+    done
     # git grep deliberately does not follow tracked symlinks. Scan their ordinary-file targets,
     # together with untracked files, in bounded batches so neither class can evade provenance
     # checks and a large tree cannot exceed the process argument limit.
