@@ -135,6 +135,7 @@ mod encryption;
 mod lifecycle;
 mod lifecycle_scheduler;
 mod listing;
+mod lock_record;
 mod object_attributes;
 mod part_lengths;
 mod part_metadata;

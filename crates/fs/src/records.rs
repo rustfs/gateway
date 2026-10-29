@@ -106,6 +106,7 @@ pub(super) struct ObjectAttributes {
     pub(super) part_lengths: Option<Vec<u64>>,
     /// Original upload numbers and verified part checksums; absent on older records.
     pub(super) part_metadata: Option<Vec<super::part_metadata::PartMetadata>>,
+    pub(super) lock: Option<super::lock_record::LockState>,
     /// The storage class the write named; `None` records `STANDARD`.
     pub(super) storage_class: Option<StorageClass>,
     /// The validated tag set the write carried, written beside the version atomically with it.
@@ -173,6 +174,7 @@ pub(super) struct VersionRecord {
     pub(super) part_lengths: Option<Vec<u64>>,
     /// Original upload numbers and verified part checksums; absent on older records.
     pub(super) part_metadata: Option<Vec<super::part_metadata::PartMetadata>>,
+    pub(super) lock: Option<super::lock_record::LockState>,
 }
 
 /// Refuses a metadata pair this backend could store but could never hand back.
@@ -350,6 +352,13 @@ pub(super) fn decode_trailing_sections(lines: &mut std::str::Lines<'_>) -> Resul
         next = lines.next();
         trailing_error = "the persisted part metadata is followed by lines this build cannot read";
     }
+    if let Some(line) = next
+        && let Ok(("lock/1", count)) = section_header(line)
+    {
+        attributes.lock = Some(super::lock_record::decode(lines, count)?);
+        next = lines.next();
+        trailing_error = "the persisted protection section is followed by unreadable lines";
+    }
     if next.is_some() {
         return Err(HandlerError::internal_error(trailing_error));
     }
@@ -419,6 +428,7 @@ pub(super) fn encode_version_record(record: &VersionRecord) -> String {
         + &encode_checksum_section(record.checksum)
         + &super::part_lengths::encode(record.part_lengths.as_deref())
         + &super::part_metadata::encode(record.part_metadata.as_deref())
+        + &super::lock_record::encode(record.lock.as_ref())
 }
 
 /// Parses one version record's bytes, pairing them with the directory they came from.
@@ -456,6 +466,9 @@ pub(super) fn decode_version_record(path: PathBuf, encoded: &str) -> Result<Vers
             .ok_or_else(storage_error)?,
     };
     let attributes = decode_trailing_sections(&mut lines)?;
+    if attributes.lock.is_some() && !matches!(kind, RecordKind::Object) {
+        return Err(storage_error());
+    }
     if let Some(lengths) = attributes.part_lengths.as_deref() {
         if !matches!(kind, RecordKind::Object) {
             return Err(storage_error());
@@ -480,6 +493,7 @@ pub(super) fn decode_version_record(path: PathBuf, encoded: &str) -> Result<Vers
         checksum: attributes.checksum,
         part_lengths: attributes.part_lengths,
         part_metadata: attributes.part_metadata,
+        lock: attributes.lock,
     })
 }
 
@@ -516,6 +530,7 @@ mod tests {
             checksum: None,
             part_lengths: None,
             part_metadata: None,
+            lock: None,
         }
     }
 

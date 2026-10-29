@@ -155,6 +155,9 @@ impl FsBackend {
         } else {
             Some("null")
         };
+        if version_id.is_some() {
+            super::lock_record::ensure_null_deletable(&existing, key, self.clock.now().unix_seconds())?;
+        }
         let legacy_object = if version_id.is_some() {
             self.preflight_legacy_object(bucket, key).await?
         } else {
@@ -304,6 +307,9 @@ impl FsBackend {
         state: VersioningState,
         records: Vec<VersionRecord>,
     ) -> Result<Option<VersionRecord>, HandlerError> {
+        if !matches!(state, VersioningState::Enabled) {
+            super::lock_record::ensure_null_deletable(&records, key, self.clock.now().unix_seconds())?;
+        }
         match state {
             VersioningState::Never => {
                 self.remove_null_versions(&records, key).await?;
@@ -493,7 +499,10 @@ impl FsBackend {
                 checksum: attributes.checksum,
                 part_lengths: attributes.part_lengths.clone(),
                 part_metadata: attributes.part_metadata.clone(),
+                lock: attributes.lock.clone(),
             });
+            #[cfg(test)]
+            tests::block_version_record_write(&temporary);
             tokio::fs::write(temporary.join(RECORD_FILE), record).await?;
             tokio::fs::rename(&temporary, &destination).await
         }
@@ -657,6 +666,7 @@ impl Handler<PutObject> for FsBackend {
             )
             .await?;
         let attributes = ObjectAttributes {
+            lock: None,
             part_lengths: None,
             part_metadata: None,
             checksum: checksum.map(super::checksums::StoredChecksum::plain),
@@ -736,6 +746,7 @@ impl FsBackend {
                 self.judge_named(condition, bucket, key, version_id, record).await?;
             }
             if let Some(record) = record {
+                super::lock_record::ensure_deletable(record.lock.as_ref(), self.clock.now().unix_seconds())?;
                 let delete_marker = matches!(record.kind, RecordKind::DeleteMarker);
                 tokio::fs::remove_dir_all(&record.path).await.map_err(|_| storage_error())?;
                 return Ok(DeleteObjectOutput {

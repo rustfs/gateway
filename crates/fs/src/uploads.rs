@@ -551,7 +551,7 @@ impl FsBackend {
             _ => return Err(storage_error()),
         };
         let attributes = decode_trailing_sections(&mut lines)?;
-        if attributes.checksum.is_some() || attributes.part_lengths.is_some() {
+        if attributes.checksum.is_some() || attributes.part_lengths.is_some() || attributes.lock.is_some() {
             return Err(storage_error());
         }
         Ok(UploadRecord {

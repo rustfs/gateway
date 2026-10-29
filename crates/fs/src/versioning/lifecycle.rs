@@ -55,7 +55,12 @@ impl FsBackend {
         // Re-read under the same lock held through deletion: a removed successor can make a
         // historical version current again, and a new write can stop a marker being orphaned.
         for record in self.expiring_version_records(bucket, rules, now).await? {
-            if selected.contains(&(record.key.as_str(), record.sequence)) {
+            if selected.contains(&(record.key.as_str(), record.sequence))
+                && !record
+                    .lock
+                    .as_ref()
+                    .is_some_and(|lock| lock.prevents_deletion(self.clock.now().unix_seconds()))
+            {
                 tokio::fs::remove_dir_all(&record.path).await.map_err(|_| storage_error())?;
             }
         }
