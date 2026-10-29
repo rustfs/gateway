@@ -472,3 +472,6 @@ mod cross_process_tests;
 
 #[path = "transaction_tests.rs"]
 mod transaction_tests;
+
+#[path = "lifecycle_transaction_tests.rs"]
+mod lifecycle_transaction_tests;

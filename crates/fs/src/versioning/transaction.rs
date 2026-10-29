@@ -42,6 +42,10 @@ pub(super) async fn named_guard(root: &Path, version_id: Option<&str>) -> Result
     if !version_id.is_some_and(|id| id != "null") {
         return Ok(None);
     }
+    root_guard(root).await.map(Some)
+}
+
+pub(super) async fn root_guard(root: &Path) -> Result<std::fs::File, HandlerError> {
     let path = root.join(LOCK_FILE);
     let cancelled = Arc::new(AtomicBool::new(false));
     let cancel_on_drop = CancelQueued(Arc::clone(&cancelled));
@@ -73,7 +77,7 @@ pub(super) async fn named_guard(root: &Path, version_id: Option<&str>) -> Result
     });
     let lock = worker.await.map_err(|_| storage_error())??;
     drop(cancel_on_drop);
-    Ok(Some(lock))
+    Ok(lock)
 }
 
 fn open_lock(path: &Path) -> Result<std::fs::File, HandlerError> {
@@ -113,6 +117,37 @@ pub(super) async fn remove_version(
     })
     .await
     .map_err(|_| storage_error())?
+}
+
+pub(super) async fn remove_versions(
+    lock: std::fs::File,
+    local_guard: tokio::sync::OwnedMutexGuard<()>,
+    records: Vec<super::VersionRecord>,
+    clock: Arc<dyn rustfs_gateway::Clock>,
+) -> Result<(), HandlerError> {
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let cancel_on_drop = CancelQueued(Arc::clone(&cancelled));
+    let worker = tokio::task::spawn_blocking(move || {
+        let result = records.into_iter().try_for_each(|record| {
+            if cancelled.load(Ordering::SeqCst)
+                || record
+                    .lock
+                    .as_ref()
+                    .is_some_and(|state| state.prevents_deletion(clock.now().unix_seconds()))
+            {
+                return Ok(());
+            }
+            #[cfg(test)]
+            observe_removal_start();
+            std::fs::remove_dir_all(record.path).map_err(|_| storage_error())
+        });
+        drop(lock);
+        drop(local_guard);
+        result
+    });
+    let result = worker.await.map_err(|_| storage_error())?;
+    drop(cancel_on_drop);
+    result
 }
 
 #[cfg(test)]

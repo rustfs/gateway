@@ -50,21 +50,18 @@ impl FsBackend {
         candidates: &[(String, u64)],
         now: i64,
     ) -> Result<(), HandlerError> {
-        let _guard = self.version_lock.lock().await;
+        let process_guard = super::transaction::root_guard(&self.root).await?;
+        let local_guard = self.version_lock.clone().lock_owned().await;
         let selected: BTreeSet<_> = candidates.iter().map(|(key, sequence)| (key.as_str(), *sequence)).collect();
         // Re-read under the same lock held through deletion: a removed successor can make a
         // historical version current again, and a new write can stop a marker being orphaned.
-        for record in self.expiring_version_records(bucket, rules, now).await? {
-            if selected.contains(&(record.key.as_str(), record.sequence))
-                && !record
-                    .lock
-                    .as_ref()
-                    .is_some_and(|lock| lock.prevents_deletion(self.clock.now().unix_seconds()))
-            {
-                tokio::fs::remove_dir_all(&record.path).await.map_err(|_| storage_error())?;
-            }
-        }
-        Ok(())
+        let records = self
+            .expiring_version_records(bucket, rules, now)
+            .await?
+            .into_iter()
+            .filter(|record| selected.contains(&(record.key.as_str(), record.sequence)))
+            .collect();
+        super::transaction::remove_versions(process_guard, local_guard, records, self.clock.clone()).await
     }
 
     /// Caller holds the version lock; this method performs no mutation.
