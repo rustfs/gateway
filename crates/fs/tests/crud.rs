@@ -83,6 +83,8 @@ mod multipart_versioning;
 mod object_checksums;
 #[path = "crud/object_encryption.rs"]
 mod object_encryption;
+#[path = "crud/object_lock_write.rs"]
+mod object_lock_write;
 #[path = "crud/object_metadata.rs"]
 mod object_metadata;
 #[path = "crud/object_parts.rs"]

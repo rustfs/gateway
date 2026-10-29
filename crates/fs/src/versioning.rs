@@ -657,6 +657,7 @@ impl Handler<PutObject> for FsBackend {
         // rather than as a body the handler abandoned. Every refusal still precedes publication:
         // a malformed tag header or an unknown class fails the request with no version written.
         let (bytes, trailers) = drain_with_trailers(input.body).await?;
+        refuse_unstored_object_lock!(input)?;
         let checksum = request_checksum(input.checksum_spec, &trailers)?;
         let encryption = self
             .write_encryption(
