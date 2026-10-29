@@ -680,24 +680,25 @@ if gateway_autotests is not False:
 explicit_tests = gateway_manifest.get("test", [])
 if (
     not isinstance(explicit_tests, list)
-    or len(explicit_tests) != 2
+    or len(explicit_tests) != 3
     or any(not isinstance(target, dict) for target in explicit_tests)
 ):
-    fail("crates/gateway must declare exactly the integration and socket_timing [[test]] targets")
+    fail("crates/gateway must declare exactly the integration and socket_timing [[test]] targets plus the standalone signature_text_allocations target")
 if {(target.get("name"), target.get("path")) for target in explicit_tests} != {
     ("integration", "tests/integration.rs"),
     ("socket_timing", "tests/socket_timing.rs"),
+    ("signature_text_allocations", "tests/signature_text_allocations.rs"),
 }:
-    fail("crates/gateway targets must use the exact integration and socket_timing names and paths")
+    fail("crates/gateway targets must use the exact integration and socket_timing names and paths plus signature_text_allocations")
 for gateway_target in explicit_tests:
     gateway_required_features = gateway_target.get("required-features", [])
     if (
         gateway_target.get("test", True) is not True
-        or gateway_target.get("harness", True) is not True
+        or gateway_target.get("harness", True) is not (gateway_target.get("name") != "signature_text_allocations")
         or not isinstance(gateway_required_features, list)
         or gateway_required_features
     ):
-        fail("crates/gateway targets must use active harnesses without required features")
+        fail("crates/gateway targets must be active with the declared harness mode and no required features")
 
 gateway_socket_timing_modules = (
     "committed_progress",
@@ -808,7 +809,6 @@ gateway_modules = (
     "service_clone_allocations",
     "service_concurrency",
     "service_config",
-    "signature_text_allocations",
     "signed_header_reading",
     "signing_services",
     "sigv2_runtime",
@@ -831,11 +831,11 @@ gateway_tests = gateway_root / "tests"
 actual_gateway_sources = tuple(
     sorted(path.stem for path in gateway_tests.glob("*.rs") if path.name not in {"integration.rs", "socket_timing.rs"})
 )
-if actual_gateway_sources != tuple(sorted(gateway_modules + gateway_socket_timing_modules)):
+if actual_gateway_sources != tuple(sorted(gateway_modules + gateway_socket_timing_modules + ("signature_text_allocations",))):
     fail("gateway test source inventory does not match the consolidated module suite")
 
 resolved_gateway_sources: dict[Path, str] = {}
-for module in gateway_modules + gateway_socket_timing_modules:
+for module in gateway_modules + gateway_socket_timing_modules + ("signature_text_allocations",):
     source_path = gateway_tests / f"{module}.rs"
     if source_path.is_symlink():
         fail(f"{source_path.relative_to(root)} may not be a symlink")
@@ -855,13 +855,24 @@ for module in gateway_modules + gateway_socket_timing_modules:
         fail(f"{source_path.relative_to(root)} may not disable its registered module with a file-level cfg")
     if re.search(r"\bmod\s+support\s*;", code_only):
         fail(f"{source_path.relative_to(root)} must use the consolidated crate-root support module")
+    if module == "signature_text_allocations":
+        if re.search(r"#\s*\[\s*test\s*\]", code_only):
+            fail("the standalone signature allocation target may not declare unexecuted libtest tests")
+        mains = list(re.finditer(r"\bfn\s+main\s*\(\s*\)\s*\{", code_only))
+        if len(mains) != 1:
+            fail("the signature allocation target must have exactly one main entry")
+        opening = code_only.index("{", mains[0].start())
+        end = balanced_end(code_only, opening, source_path)
+        body = code_only[opening + 1 : end - 1]
+        if re.fullmatch(r"\s*string_to_sign_owns_only_its_final_text\s*\(\s*\)\s*;\s*", body) is None:
+            fail("the signature allocation main must execute the complete allocation suite")
 
 gateway_integration_path = gateway_tests / "integration.rs"
 gateway_integration = license_header + """
 //! Consolidated integration-test entry point for `rustfs-gateway`.
 //!
 //! Responsible for: registering every gateway integration-test source in one Cargo target, except
-//! the socket-timing suites that `tests/socket_timing.rs` registers.
+//! the socket-timing suites and the standalone signature-allocation probe.
 //! NOT responsible for: test behavior or production implementation.
 //! Upstream: the gateway integration-test modules. Downstream: Cargo's test harness.
 

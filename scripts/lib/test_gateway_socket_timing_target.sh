@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 
-# Sourced by the target-consolidation self-test: the only extra gateway target is the socket-timing
+# Sourced by the target-consolidation self-test: the socket-timing
 # suite that `cargo xtask verify --crate rustfs-gateway` runs as its own loop (rustfs/gateway#1264),
-# and neither target may silently lose, share or alias a registered source. Each rejection must
+# and no target may silently lose, share or alias a registered source. Each rejection must
 # name its invariant; a different rejecting branch is not evidence.
 
 expect_socket_timing_failure() { run_case fail "$@"; }
@@ -16,7 +16,7 @@ path = "tests/third.rs"
 TOMLEOF
     cp crates/gateway/tests/integration.rs crates/gateway/tests/third.rs
 }
-expect_socket_timing_failure 'a third gateway test target is rejected' mut_gateway_third_target \
+expect_socket_timing_failure 'an additional gateway test target is rejected' mut_gateway_third_target \
     'must declare exactly the integration and socket_timing'
 
 # The layout before rustfs/gateway#1264: one target registering every source, with the socket-timing
@@ -94,11 +94,11 @@ mut_gateway_socket_timing_harness_disabled() { mut_gateway_socket_timing_target_
 mut_gateway_socket_timing_feature_gated() { mut_gateway_socket_timing_target_field '' 'required-features = ["server"]'; }
 expect_pass 'the exact socket-timing target admits explicit active harness flags' mut_gateway_socket_timing_target_active
 expect_socket_timing_failure 'the socket-timing target cannot be disabled' mut_gateway_socket_timing_test_disabled \
-    'targets must use active harnesses without required features'
+    'targets must be active with the declared harness mode and no required features'
 expect_socket_timing_failure 'the socket-timing harness cannot be disabled' mut_gateway_socket_timing_harness_disabled \
-    'targets must use active harnesses without required features'
+    'targets must be active with the declared harness mode and no required features'
 expect_socket_timing_failure 'the socket-timing target cannot require a feature' mut_gateway_socket_timing_feature_gated \
-    'targets must use active harnesses without required features'
+    'targets must be active with the declared harness mode and no required features'
 
 mut_gateway_socket_timing_registration_omitted() {
     python3 - <<'PYEOF'

@@ -819,12 +819,15 @@ let clippy = steps.remove(0);
 let socket_timing = ["test", "-p", package, "--test", GATEWAY_SOCKET_TIMING_TARGET]
     .map(str::to_owned)
     .to_vec();
-return vec![vec![test, clippy], vec![socket_timing]];
+let signature_allocations = ["test", "-p", package, "--test", "signature_text_allocations"]
+    .map(str::to_owned)
+    .to_vec();
+return vec![vec![test, clippy], vec![socket_timing, signature_allocations]];
 ''')
 if compact(crate_step_batches_items[0][1]).count(expected_gateway_batch) != 1:
     fail(
         "gateway fast verification must retain ordinary runtime tests and all-target Clippy, "
-        "use four libtest workers and run the socket-timing target as a loop of its own"
+        "use four libtest workers and run socket timing plus the standalone signature allocation probe in the second loop"
     )
 expected_server_batch = compact('''
 let mut test = steps.remove(0);

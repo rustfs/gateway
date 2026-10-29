@@ -92,6 +92,11 @@ path = "tests/integration.rs"
 name = "socket_timing"
 path = "tests/socket_timing.rs"
 
+[[test]]
+name = "signature_text_allocations"
+path = "tests/signature_text_allocations.rs"
+harness = false
+
 [[bench]]
 name = "post_object"
 harness = false

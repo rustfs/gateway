@@ -3868,8 +3868,8 @@ PYEOF
 expect_fail check_error_resolution_surface.sh \
     'the consolidated gateway target being redirected to another path' mut_gateway_manifest_redirects_consolidated_target
 
-# rustfs/gateway#1264 split the facade into two targets: the trybuild harness stays in the integration
-# target, the socket-timing target registers no trybuild entry, and nothing else is admitted.
+# The facade keeps trybuild in integration, socket timing in its own target (#1264), and the pure
+# signature allocation probe outside libtest (#1525). No unregistered target is admitted.
 mut_gateway_manifest_adds_third_target() {
     cat >>crates/gateway/Cargo.toml <<'TOMLEOF'
 
@@ -3879,7 +3879,7 @@ path = "tests/facade_probe.rs"
 TOMLEOF
 }
 expect_fail check_error_resolution_surface.sh \
-    'a third Cargo test target beside the integration and socket-timing targets' mut_gateway_manifest_adds_third_target \
+    'an unregistered Cargo test target beside the declared facade targets' mut_gateway_manifest_adds_third_target \
     'crates/gateway must declare exactly the integration and socket_timing [[test]] targets'
 
 mut_gateway_manifest_restores_single_target() {
@@ -3895,7 +3895,7 @@ path.write_text(text.replace(block, "", 1))
 PYEOF
 }
 expect_fail check_error_resolution_surface.sh \
-    'the gateway manifest returning to one test target' mut_gateway_manifest_restores_single_target \
+    'the gateway manifest dropping its socket-timing target' mut_gateway_manifest_restores_single_target \
     'crates/gateway must declare exactly the integration and socket_timing [[test]] targets'
 
 mut_gateway_socket_timing_registers_trybuild_harness() {
