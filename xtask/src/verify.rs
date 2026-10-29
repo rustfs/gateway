@@ -22,7 +22,7 @@
 mod budget;
 #[cfg(feature = "full")]
 mod full_gate;
-mod launcher;
+pub(crate) mod launcher;
 mod loops;
 mod prebuild;
 mod process;
