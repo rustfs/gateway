@@ -2327,10 +2327,10 @@ from pathlib import Path
 
 path = Path("xtask/src/verify.rs")
 text = path.read_text()
-old = "return vec![vec![test, clippy], vec![socket_timing]];"
+old = "return vec![vec![test, clippy], vec![socket_timing, signature_allocations]];"
 if text.count(old) != 1:
     raise SystemExit("gateway socket-timing loop is missing")
-path.write_text(text.replace(old, "return vec![vec![test, clippy, socket_timing]];", 1))
+path.write_text(text.replace(old, "return vec![vec![test, clippy, socket_timing, signature_allocations]];", 1))
 PYEOF
 }
 expect_fail check_xtask_codegen_surface.sh \
@@ -2344,10 +2344,10 @@ from pathlib import Path
 
 path = Path("xtask/src/verify.rs")
 text = path.read_text()
-old = "return vec![vec![test, clippy], vec![socket_timing]];"
+old = "return vec![vec![test, clippy], vec![socket_timing, signature_allocations]];"
 if text.count(old) != 1:
     raise SystemExit("gateway socket-timing loop is missing")
-path.write_text(text.replace(old, "drop(socket_timing);\n        return vec![vec![test, clippy]];", 1))
+path.write_text(text.replace(old, "drop(socket_timing);\n        return vec![vec![test, clippy], vec![signature_allocations]];", 1))
 PYEOF
 }
 expect_fail check_xtask_codegen_surface.sh \
