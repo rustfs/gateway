@@ -250,7 +250,7 @@ fn one_page_costs_one_page_whatever_the_bucket_costs() {
     if let Some(count) = std::env::var_os(PROBE_ENV) {
         let count: usize = count.to_string_lossy().parse().expect("a bucket size");
         let (blocks, bytes) = cost(count);
-        println!("{PROBE_SENTINEL}{blocks} {bytes}");
+        println!("\n{PROBE_SENTINEL}{blocks} {bytes}");
         return;
     }
 

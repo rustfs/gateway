@@ -226,7 +226,7 @@ fn a_form_reads_a_file_without_a_heap_that_grows_with_it() {
     if let Some(len) = std::env::var_os(PROBE_ENV) {
         let len: usize = len.to_string_lossy().parse().expect("a file size");
         let (blocks, bytes) = cost(len);
-        println!("{PROBE_SENTINEL}{blocks} {bytes}");
+        println!("\n{PROBE_SENTINEL}{blocks} {bytes}");
         return;
     }
 
@@ -286,7 +286,7 @@ fn fragmented_fields_do_not_allocate_per_push() {
         let stats = dhat::HeapStats::get();
         drop(profiler);
         assert_eq!(reader.field("policy"), Some(policy.as_str()), "the entire field must be parsed");
-        println!("{PROBE_SENTINEL}{} {}", stats.total_blocks, stats.total_bytes);
+        println!("\n{PROBE_SENTINEL}{} {}", stats.total_blocks, stats.total_bytes);
         return;
     }
 
