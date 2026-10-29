@@ -40,7 +40,7 @@ use rustfs_gateway::{
     Req, RequestBodyDeadlineConfig, Resp, RunningServer, S3Service, SelfHeldHttp1Driver, dto,
 };
 use rustfs_gateway_server::{Server, ServerConfig, UnfinishedRequestBody};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
 fn no_such_bucket() -> HandlerError {
@@ -262,9 +262,59 @@ async fn halt(running: RunningServer) {
     let _ = running.task.await;
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum ReadEnd {
+    Eof,
+    Error(std::io::ErrorKind),
+    Timeout,
+}
+
+async fn observe_response(reader: &mut (impl AsyncRead + Unpin)) -> (String, ReadEnd) {
+    let mut response = Vec::new();
+    let mut buffer = [0_u8; 4096];
+    let end = loop {
+        match tokio::time::timeout(Duration::from_millis(400), reader.read(&mut buffer)).await {
+            Ok(Ok(0)) => break ReadEnd::Eof,
+            Ok(Err(error)) => break ReadEnd::Error(error.kind()),
+            Ok(Ok(read)) => response.extend_from_slice(&buffer[..read]),
+            Err(_) => break ReadEnd::Timeout,
+        }
+    };
+    (String::from_utf8_lossy(&response).into_owned(), end)
+}
+
+#[tokio::test]
+async fn response_observer_distinguishes_eof_from_read_failure_and_timeout() {
+    let mut eof = std::io::Cursor::new(b"head".as_slice());
+    assert_eq!(observe_response(&mut eof).await, ("head".into(), ReadEnd::Eof));
+
+    struct Broken(bool);
+    impl AsyncRead for Broken {
+        fn poll_read(
+            mut self: std::pin::Pin<&mut Self>,
+            _cx: &mut std::task::Context<'_>,
+            buf: &mut tokio::io::ReadBuf<'_>,
+        ) -> std::task::Poll<std::io::Result<()>> {
+            if !self.0 {
+                self.0 = true;
+                buf.put_slice(b"head");
+                return std::task::Poll::Ready(Ok(()));
+            }
+            std::task::Poll::Ready(Err(std::io::ErrorKind::ConnectionReset.into()))
+        }
+    }
+    assert_eq!(
+        observe_response(&mut Broken(false)).await,
+        ("head".into(), ReadEnd::Error(std::io::ErrorKind::ConnectionReset))
+    );
+
+    let (_writer, mut reader) = tokio::io::duplex(16);
+    assert_eq!(observe_response(&mut reader).await, (String::new(), ReadEnd::Timeout));
+}
+
 /// Sends one `PUT /` with a 30-byte body, `first` of it before `settle` resolves and the rest
 /// after, and reads until the server closes or goes quiet.
-async fn exchange(address: SocketAddr, first: usize, settle: impl core::future::Future<Output = ()>) -> (String, bool) {
+async fn exchange(address: SocketAddr, first: usize, settle: impl core::future::Future<Output = ()>) -> (String, ReadEnd) {
     const BODY: &[u8; 30] = b"a part the backend never reads";
     let mut stream = TcpStream::connect(address).await.expect("the client connects");
     stream
@@ -274,16 +324,7 @@ async fn exchange(address: SocketAddr, first: usize, settle: impl core::future::
     stream.write_all(&BODY[..first]).await.expect("the first octets write");
     settle.await;
     let _ = stream.write_all(&BODY[first..]).await;
-    let mut response = Vec::new();
-    let mut buffer = [0_u8; 4096];
-    let closed = loop {
-        match tokio::time::timeout(Duration::from_millis(400), stream.read(&mut buffer)).await {
-            Ok(Ok(0)) | Ok(Err(_)) => break true,
-            Ok(Ok(read)) => response.extend_from_slice(&buffer[..read]),
-            Err(_) => break false,
-        }
-    };
-    (String::from_utf8_lossy(&response).into_owned(), closed)
+    observe_response(&mut stream).await
 }
 
 /// rustfs/gateway#794 on the wire. Negative — both production drivers answer the backend's
@@ -293,10 +334,10 @@ async fn exchange(address: SocketAddr, first: usize, settle: impl core::future::
 async fn both_drivers_answer_a_refusal_before_the_body_as_itself() {
     for driver in [Driver::Hyper, Driver::SelfHeld] {
         let running = serve(streaming_service(RefusesUnread), driver);
-        let (text, _) = exchange(running.local_addr, 30, async {}).await;
-        assert!(text.starts_with("HTTP/1.1 404"), "{driver:?}: {text}");
-        assert!(text.contains("<Code>NoSuchBucket</Code>"), "{driver:?}: {text}");
-        assert!(!text.to_ascii_lowercase().contains("connection: close"), "{driver:?}: {text}");
+        let (text, end) = exchange(running.local_addr, 30, async {}).await;
+        assert!(text.starts_with("HTTP/1.1 404"), "{driver:?}, {end:?}: {text}");
+        assert!(text.contains("<Code>NoSuchBucket</Code>"), "{driver:?}, {end:?}: {text}");
+        assert!(!text.to_ascii_lowercase().contains("connection: close"), "{driver:?}, {end:?}: {text}");
         halt(running).await;
     }
 }
@@ -307,11 +348,14 @@ async fn both_drivers_answer_a_refusal_before_the_body_as_itself() {
 async fn both_drivers_still_refuse_a_body_abandoned_mid_read() {
     for driver in [Driver::Hyper, Driver::SelfHeld] {
         let running = serve(streaming_service(AbandonsMidBody), driver);
-        let (text, closed) = exchange(running.local_addr, 10, tokio::time::sleep(Duration::from_millis(100))).await;
-        assert!(text.starts_with("HTTP/1.1 400"), "{driver:?}: {text}");
-        assert!(text.contains("<Code>IncompleteBody</Code>"), "{driver:?}: {text}");
-        assert!(text.to_ascii_lowercase().contains("connection: close"), "{driver:?}: {text}");
-        assert!(closed, "{driver:?}: the connection outlived a body in an unknown state");
+        let (text, end) = exchange(running.local_addr, 10, tokio::time::sleep(Duration::from_millis(100))).await;
+        assert!(text.starts_with("HTTP/1.1 400"), "{driver:?}, {end:?}: {text}");
+        assert!(text.contains("<Code>IncompleteBody</Code>"), "{driver:?}, {end:?}: {text}");
+        assert!(text.to_ascii_lowercase().contains("connection: close"), "{driver:?}, {end:?}: {text}");
+        assert!(
+            end != ReadEnd::Timeout,
+            "{driver:?}, {end:?}: the connection outlived a body in an unknown state"
+        );
         halt(running).await;
     }
 }
