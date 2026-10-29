@@ -48,12 +48,12 @@ class HostTools(unittest.TestCase):
                                     env=env, capture_output=True, text=True)
             return result, log.read_text().splitlines() if log.exists() else []
 
-    def test_target_guards_use_existing_tools_without_apt(self):
-        result, calls = self.run_installer('--target-guards')
+    def test_python_guards_use_existing_tools_without_apt(self):
+        result, calls = self.run_installer('--python-guards')
         self.assertEqual((result.returncode, calls), (0, []))
 
-    def test_target_guards_ignore_absent_unrelated_tools(self):
-        result, calls = self.run_installer('--target-guards', missing='cc c++ pkg-config ruby curl ps ss gh')
+    def test_python_guards_ignore_absent_unrelated_tools(self):
+        result, calls = self.run_installer('--python-guards', missing='cc c++ pkg-config ruby curl ps ss gh')
         self.assertEqual((result.returncode, calls), (0, []))
 
     def test_script_guards_ignore_absent_unrelated_tools(self):
@@ -73,7 +73,7 @@ class HostTools(unittest.TestCase):
                                  (0, ['update', 'install -y --no-install-recommends ' + packages]))
 
     def test_script_guards_refuse_unrelated_opt_ins(self):
-        for option in ('--with-gh', '--with-cxx', '--target-guards'):
+        for option in ('--with-gh', '--with-cxx', '--python-guards'):
             for args in (('--script-guards', option), (option, '--script-guards')):
                 with self.subTest(args=args):
                     result, calls = self.run_installer(*args)
@@ -94,34 +94,34 @@ class HostTools(unittest.TestCase):
                 result, calls = self.run_installer('--script-guards', missing='ruby', **settings)
                 self.assertEqual((result.returncode, calls), expected)
 
-    def test_target_guards_install_only_missing_requirements(self):
+    def test_python_guards_install_only_missing_requirements(self):
         for missing, packages in (('python3', 'python3'), ('timeout', 'coreutils'),
                                   ('python3 timeout', 'python3 coreutils')):
             with self.subTest(missing=missing):
-                result, calls = self.run_installer('--target-guards', missing=missing)
+                result, calls = self.run_installer('--python-guards', missing=missing)
                 self.assertEqual((result.returncode, calls),
                                  (0, ['update', 'install -y --no-install-recommends ' + packages]))
 
     def test_failed_update_stops_before_install(self):
-        result, calls = self.run_installer('--target-guards', missing='python3', UPDATE_STATUS='23')
+        result, calls = self.run_installer('--python-guards', missing='python3', UPDATE_STATUS='23')
         self.assertEqual((result.returncode, calls), (23, ['update']))
 
     def test_failed_install_is_not_success(self):
-        result, calls = self.run_installer('--target-guards', missing='timeout', INSTALL_STATUS='24')
+        result, calls = self.run_installer('--python-guards', missing='timeout', INSTALL_STATUS='24')
         self.assertEqual((result.returncode, calls),
                          (24, ['update', 'install -y --no-install-recommends coreutils']))
 
     def test_install_success_without_required_tool_is_refused(self):
         for missing in ('python3', 'timeout'):
             with self.subTest(missing=missing):
-                result, calls = self.run_installer('--target-guards', missing=missing, STILL_MISSING='1')
+                result, calls = self.run_installer('--python-guards', missing=missing, STILL_MISSING='1')
                 self.assertEqual(result.returncode, 1)
                 self.assertEqual(len(calls), 2)
                 self.assertIn(missing, result.stderr)
 
-    def test_target_guards_refuse_unrelated_opt_ins(self):
+    def test_python_guards_refuse_unrelated_opt_ins(self):
         for option in ('--with-gh', '--with-cxx'):
-            for args in (('--target-guards', option), (option, '--target-guards')):
+            for args in (('--python-guards', option), (option, '--python-guards')):
                 with self.subTest(args=args):
                     result, calls = self.run_installer(*args)
                     self.assertEqual((result.returncode, calls), (2, []))
@@ -132,7 +132,7 @@ class HostTools(unittest.TestCase):
 
     def test_ci_requires_the_correct_installation_scope(self):
         workflow = (ROOT / '.github/workflows/ci.yml').read_text()
-        narrow = 'bash scripts/ci_install_host_tools.sh --target-guards'
+        narrow = 'bash scripts/ci_install_host_tools.sh --python-guards'
         normal = 'bash scripts/ci_install_host_tools.sh'
         for name, text, expected in (
             ('correct', workflow, 0),
@@ -147,17 +147,16 @@ class HostTools(unittest.TestCase):
                     env=dict(os.environ, GATEWAY_CHECK_ROOT=directory), capture_output=True, text=True)
                 self.assertEqual(result.returncode, expected, result.stderr)
 
-    def test_ci_script_guards_require_their_exact_scope(self):
+    def assert_ci_jobs_require_scope(self, jobs, scope, replacements):
         workflow = (ROOT / '.github/workflows/ci.yml').read_text()
         normal = 'bash scripts/ci_install_host_tools.sh'
-        scoped = normal + ' --script-guards'
-        for job in ('guard-self-test', *(f'guard-self-test-{n}' for n in range(2, 7)),
-                    'quirk-ledger-self-test', *(f'quirk-ledger-self-test-{n}' for n in range(2, 4))):
+        scoped = normal + ' ' + scope
+        for job in jobs:
             start = workflow.index('  ' + job + ':\n')
             end = next(match.start() for match in re.finditer(r'(?m)^  [\w-]+:\n', workflow)
                        if match.start() > start)
             block = workflow[start:end]
-            for replacement in (normal, normal + ' --target-guards'):
+            for replacement in (normal, *(normal + ' ' + option for option in replacements)):
                 with self.subTest(job=job, replacement=replacement), tempfile.TemporaryDirectory() as directory:
                     self.assertIn(scoped, block)
                     target = Path(directory) / '.github/workflows'
@@ -167,6 +166,19 @@ class HostTools(unittest.TestCase):
                     result = subprocess.run(['bash', str(ROOT / 'scripts/check_ci_time_gate.sh')],
                         env=dict(os.environ, GATEWAY_CHECK_ROOT=directory), capture_output=True, text=True)
                     self.assertEqual(result.returncode, 1, result.stderr)
+                    self.assertIn(f'ERROR: {job} must install host tools exactly once', result.stderr)
+
+    def test_ci_script_guards_require_their_exact_scope(self):
+        self.assert_ci_jobs_require_scope(
+            ('guard-self-test', *(f'guard-self-test-{n}' for n in range(2, 7))),
+            '--script-guards', ('--python-guards',))
+
+    def test_ci_python_guards_require_their_exact_scope(self):
+        # The quirk ledger shards run no Ruby; installing it cost run 40315690990 its deadline.
+        self.assert_ci_jobs_require_scope(
+            ('target-consolidation-self-test',
+             'quirk-ledger-self-test', *(f'quirk-ledger-self-test-{n}' for n in range(2, 4))),
+            '--python-guards', ('--script-guards',))
 
     def test_default_mode_keeps_its_existing_tools(self):
         result, calls = self.run_installer(missing='cc pkg-config python3 ruby timeout curl ps ss')
