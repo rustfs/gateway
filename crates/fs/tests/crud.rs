@@ -12,9 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Production-registry contract for the filesystem reference backend.
-//! Responsible for: signed service tests of CRUD, versioning, multipart, lifecycle and storage refusals.
-//! NOT responsible for: expanded example binaries or production durability.
+//! Signed CRUD, versioning, multipart, lifecycle and storage-refusal tests, not production durability or examples.
 //! Upstream: `rustfs-gateway-fs` and the public gateway facade. Downstream: the crate verification gate.
 
 #[path = "crud/acl.rs"]
@@ -39,6 +37,8 @@ mod content_encoding;
 mod content_headers;
 #[path = "crud/copy_object.rs"]
 mod copy_object;
+#[path = "crud/cross_process_controls.rs"]
+mod cross_process_controls;
 #[path = "crud/delete_conditions.rs"]
 mod delete_conditions;
 #[path = "crud/delete_objects.rs"]
