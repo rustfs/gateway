@@ -38,14 +38,17 @@ fn elapsed(raw: Option<&str>, now: SystemTime) -> Result<Option<Duration>, &'sta
     Ok(Some(Duration::from_nanos(elapsed)))
 }
 
-pub(super) fn launcher_started() -> Result<Option<Instant>, String> {
+pub(crate) fn launcher_elapsed() -> Result<Option<Duration>, String> {
     let raw = match std::env::var(STARTED_ENV) {
         Ok(raw) => Some(raw),
         Err(std::env::VarError::NotPresent) => None,
         Err(std::env::VarError::NotUnicode(_)) => return Err("launcher timestamp is not Unicode".to_owned()),
     };
-    let elapsed = elapsed(raw.as_deref(), SystemTime::now()).map_err(str::to_owned)?;
-    elapsed
+    elapsed(raw.as_deref(), SystemTime::now()).map_err(str::to_owned)
+}
+
+pub(super) fn launcher_started() -> Result<Option<Instant>, String> {
+    launcher_elapsed()?
         .map(|elapsed| {
             Instant::now()
                 .checked_sub(elapsed)
