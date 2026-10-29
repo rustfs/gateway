@@ -24,6 +24,9 @@
 
 use super::*;
 
+#[path = "object_lock_write.rs"]
+mod object_lock_write;
+
 fn with_headers(pairs: &[(&str, &str)]) -> http::HeaderMap {
     let mut headers = http::HeaderMap::new();
     for (name, value) in pairs {
