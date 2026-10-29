@@ -214,33 +214,25 @@ mod tests {
         }
     }
     #[tokio::test]
-    async fn paired_refuses_missing_mismatched_and_incomplete_pools() {
-        for mode in 0..3 {
-            let task = tokio::spawn(async move {
-                let mut control = Vec::new();
-                let mut loaded = Vec::new();
-                if mode != 0 {
-                    control.push(fixture(b"", Duration::ZERO).await);
-                }
-                if mode == 2 {
-                    loaded.push(fixture(b"", Duration::ZERO).await);
-                }
-                super::paired(&control, &loaded, 0, Duration::from_secs(1)).await
-            });
-            let panic = task.await.expect_err("invalid probe pools must be rejected").into_panic();
-            let message = panic
-                .downcast_ref::<String>()
-                .map(String::as_str)
-                .or_else(|| panic.downcast_ref::<&str>().copied())
-                .unwrap_or("");
-            let expected = [
-                "the probe pool must not be empty",
-                "the paired pools must have equal size",
-                "each sample needs its own retained connection",
-            ][mode];
-            assert!(message.contains(expected), "mode {mode} failed for the wrong reason: {message}");
-        }
+    #[should_panic(expected = "the probe pool must not be empty")]
+    async fn paired_refuses_an_empty_pool() {
+        super::paired(&[], &[], 0, Duration::from_secs(1)).await;
     }
+
+    #[tokio::test]
+    #[should_panic(expected = "the paired pools must have equal size")]
+    async fn paired_refuses_mismatched_pools() {
+        let address = fixture(b"", Duration::ZERO).await;
+        super::paired(&[address], &[], 0, Duration::from_secs(1)).await;
+    }
+
+    #[tokio::test]
+    #[should_panic(expected = "each sample needs its own retained connection")]
+    async fn paired_refuses_incomplete_pools() {
+        let address = fixture(b"", Duration::ZERO).await;
+        super::paired(&[address], &[address], 0, Duration::from_secs(1)).await;
+    }
+
     #[tokio::test]
     async fn paired_counts_stalls_and_charges_the_ceiling_on_each_side() {
         let answer = b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok";
