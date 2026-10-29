@@ -152,6 +152,7 @@ impl Handler<PostObject> for FsBackend {
             None,
         );
         let attributes = ObjectAttributes {
+            lock: None,
             part_lengths: None,
             part_metadata: None,
             checksum: None,

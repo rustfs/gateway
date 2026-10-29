@@ -220,6 +220,7 @@ impl Handler<CopyObject> for FsBackend {
             }),
         };
         let attributes = ObjectAttributes {
+            lock: None,
             part_lengths: None,
             part_metadata: None,
             checksum,
