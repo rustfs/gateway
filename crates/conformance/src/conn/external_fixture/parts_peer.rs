@@ -268,6 +268,41 @@ impl Drop for TestRoot {
 mod tests {
     use super::*;
 
+    fn observe_reply(mut reader: impl Read, phase: &str) -> String {
+        let mut bytes = Vec::new();
+        if let Err(error) = reader.read_to_end(&mut bytes) {
+            panic!("{phase}: received {} bytes before read error: {error:?}", bytes.len());
+        }
+        String::from_utf8(bytes).expect("calibration response is text")
+    }
+
+    #[test]
+    fn reply_diagnostic_reports_phase_partial_count_and_read_error() {
+        struct ResetAfterHead(bool);
+        impl Read for ResetAfterHead {
+            fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+                if !self.0 {
+                    self.0 = true;
+                    buffer[..4].copy_from_slice(b"head");
+                    Ok(4)
+                } else {
+                    Err(std::io::ErrorKind::ConnectionReset.into())
+                }
+            }
+        }
+        let error = std::panic::catch_unwind(|| observe_reply(ResetAfterHead(false), "extra response"))
+            .expect_err("the reset is not a response");
+        let message = error.downcast_ref::<String>().expect("diagnostic text");
+        assert!(message.contains("extra response"), "{message}");
+        assert!(message.contains("4 bytes"), "{message}");
+        assert!(message.contains("ConnectionReset"), "{message}");
+    }
+
+    #[test]
+    fn reply_diagnostic_preserves_a_complete_response() {
+        assert_eq!(observe_reply(&b"response"[..], "normal response"), "response");
+    }
+
     fn send(peer: &Peer, line: &str) -> TcpStream {
         let mut stream =
             TcpStream::connect(peer.url.strip_prefix("http://").expect("plain peer URL")).expect("connect calibration client");
@@ -280,13 +315,11 @@ mod tests {
         stream
     }
 
-    fn reply(mut stream: TcpStream) -> String {
+    fn reply(stream: TcpStream, phase: &str) -> String {
         stream
             .set_read_timeout(Some(Duration::from_secs(2)))
             .expect("bound calibration response");
-        let mut bytes = Vec::new();
-        stream.read_to_end(&mut bytes).expect("receive calibration response");
-        String::from_utf8(bytes).expect("calibration response is text")
+        observe_reply(stream, phase)
     }
 
     fn expected() -> Vec<Step> {
@@ -301,7 +334,7 @@ mod tests {
     fn observer_accepts_exact_script_without_extra_requests() {
         let steps = expected();
         let peer = Peer::new(steps.clone());
-        let response = reply(send(&peer, "GET /calibration HTTP/1.1"));
+        let response = reply(send(&peer, "GET /calibration HTTP/1.1"), "expected response");
         let observed = peer.finish();
         assert!(
             response.starts_with("HTTP/1.1 200 "),
@@ -314,11 +347,11 @@ mod tests {
     fn observer_drains_and_rejects_an_extra_request_queued_before_stop() {
         let steps = expected();
         let peer = Peer::new(steps.clone());
-        let _ = reply(send(&peer, "GET /calibration HTTP/1.1"));
+        let _ = reply(send(&peer, "GET /calibration HTTP/1.1"), "expected response");
         let extra = send(&peer, "GET /unexpected-extra HTTP/1.1");
         // Do not await the extra response before stop: the queued request must still be drained.
         let observed = peer.finish();
-        let response = reply(extra);
+        let response = reply(extra, "extra response");
         assert!(response.starts_with("HTTP/1.1 500 "), "the extra request received a controlled refusal");
         assert_eq!(observed.requests.len(), 2, "the queued extra request was observed");
         assert_eq!(observed.requests[1].line, "GET /unexpected-extra HTTP/1.1");
