@@ -116,6 +116,24 @@ macro_rules! capability_names {
 
 reference_operations!(capability_names);
 
+// Until Object Lock is fully enforced, never accept a write that asks for protection the
+// filesystem backend would discard. The same six model members appear on all three write inputs.
+macro_rules! refuse_unstored_object_lock {
+    ($input:ident) => {{
+        if $input.object_lock_mode.is_some()
+            || $input.object_lock_retain_until_date.is_some()
+            || $input.object_lock_legal_hold_status.is_some()
+            || $input.object_lock_event_hold.is_some()
+            || $input.object_lock_event_hold_duration_days.is_some()
+            || $input.object_lock_event_hold_duration_years.is_some()
+        {
+            Err(HandlerError::not_implemented("the filesystem backend does not yet enforce Object Lock"))
+        } else {
+            Ok(())
+        }
+    }};
+}
+
 // First, so the `request_content_headers!` reader it defines is in scope for every module below.
 #[macro_use]
 mod content_headers;
@@ -511,6 +529,7 @@ async fn drain_with_trailers(body: Option<ByteStream>) -> Result<(Vec<u8>, Trail
 impl Handler<CreateMultipartUpload> for FsBackend {
     async fn call(&self, request: Req<CreateMultipartUpload>) -> HandlerResult<CreateMultipartUpload> {
         let input = request.into_input();
+        refuse_unstored_object_lock!(input)?;
         let checksum = uploads::UploadChecksum::negotiate(input.checksum_algorithm.as_ref(), input.checksum_type.as_ref())?;
         let checksum_type = checksum.map(uploads::UploadChecksum::dto_type);
         // S3 carries user metadata and the representation headers on the initiating request and on
