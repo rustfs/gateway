@@ -44,7 +44,8 @@ options:
   --endpoint <http(s)-url>  external target (raw HTTP/1.1; authored HTTP/2 frames over
                             http:// with prior knowledge or https:// with ALPN h2)
   --allow-external-fixtures
-                            allow isolated owned bucket/object/version/empty-upload setup and automatic cleanup
+                            allow isolated owned bucket/object/version setup, multipart uploads and parts
+                            with automatic cleanup; authored multipart writes remain unsupported
   --endpoint-fixed-time <YYYY-MM-DDTHH:MM:SSZ>
                             declare the separately configured endpoint clock (run/baseline only)
   --ca-cert <pem-path>      additional CA certificates for an HTTPS endpoint
@@ -65,3 +66,13 @@ exit codes: 0 ok, 1 regression against the baseline or a case without an unexpir
             2 usage (a malformed ledger, or one naming a case the corpus lacks, included),
             3 environment
 ";
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn external_fixture_help_distinguishes_setup_from_authored_writes() {
+        assert!(super::USAGE.contains("multipart uploads and parts"));
+        assert!(super::USAGE.contains("authored multipart writes remain unsupported"));
+        assert!(!super::USAGE.contains("empty-upload setup"));
+    }
+}
