@@ -102,7 +102,16 @@
 #   before #1188 enabled the independently measured RustFS header-signature profile.
 #   Remove the newly passing list-prefix case and eighteen POST cases fixed by #1281.
 #
-# generation: 4
+# REFRESH 2026-10-27, GENERATION 5 (rustfs/gateway#1444): run
+#   https://github.com/rustfs/gateway/actions/runs/40268639961 on main e1ed9808b4d01907d8e840b3d625bde8e740fb86
+#   passed=423 failed=247 errored=0 skipped=70 collected=740, the same verdict as runs
+#   38203886039 and 39198973358. Shrink only: its 22 FIXED entries are removed (the whole #1001
+#   GetObjectAttributes/partNumber/checksum group and three POST cases), and nothing is added.
+#   The generation moves with ci/s3tests/outcomes.txt, now that run's record, as the decision on
+#   #1444 asks. The run's five unlisted POST failures are not tolerated: the same change answers
+#   them as AWS does (400 for a malformed expiration, 403 AccessDenied for a policy violation).
+#
+# generation: 5
 
 # --- fs-gap: Object Lock refused by the reference backend (39) — https://github.com/rustfs/backlog/issues/1726 ---
 s3tests.functional.test_s3::test_object_lock_changing_mode_from_compliance
@@ -144,27 +153,6 @@ s3tests.functional.test_s3::test_object_lock_put_obj_retention_shorten_period_by
 s3tests.functional.test_s3::test_object_lock_put_obj_retention_versionid
 s3tests.functional.test_s3::test_object_lock_suspend_versioning
 s3tests.functional.test_s3::test_object_lock_uploading_obj
-
-# --- fs-gap: GetObjectAttributes, partNumber reads and stored checksums (19) — https://github.com/rustfs/gateway/issues/1001 ---
-s3tests.functional.test_s3::test_get_checksum_object_attributes
-s3tests.functional.test_s3::test_get_multipart_checksum_object_attributes
-s3tests.functional.test_s3::test_get_multipart_object_attributes
-s3tests.functional.test_s3::test_get_object_attributes
-s3tests.functional.test_s3::test_get_paginated_multipart_object_attributes
-s3tests.functional.test_s3::test_get_single_multipart_object_attributes
-s3tests.functional.test_s3::test_get_versioned_object_attributes
-s3tests.functional.test_s3::test_multipart_checksum_sha256
-s3tests.functional.test_s3::test_multipart_get_part
-s3tests.functional.test_s3::test_multipart_reupload_checksum_and_etag
-s3tests.functional.test_s3::test_multipart_single_get_part
-s3tests.functional.test_s3::test_multipart_use_cksum_helper_crc32
-s3tests.functional.test_s3::test_multipart_use_cksum_helper_crc32c
-s3tests.functional.test_s3::test_multipart_use_cksum_helper_crc64nvme
-s3tests.functional.test_s3::test_multipart_use_cksum_helper_sha1
-s3tests.functional.test_s3::test_multipart_use_cksum_helper_sha256
-s3tests.functional.test_s3::test_non_multipart_get_part
-s3tests.functional.test_s3::test_object_checksum_crc64nvme
-s3tests.functional.test_s3::test_object_checksum_sha256
 
 # --- not-a-defect: bucket-policy condition keys beyond ACL and encryption are outside the reference evaluator's scope; RustFS-parity condition keys are measured against a real RustFS binary, not this fs backend (12) — decision recorded on https://github.com/rustfs/gateway/issues/1037 ---
 s3tests.functional.test_s3::test_bucket_policy_get_obj_acl_existing_tag
@@ -417,15 +405,12 @@ s3tests.functional.test_headers::test_object_create_bad_date_before_today_aws2
 s3tests.functional.test_headers::test_object_create_bad_date_empty_aws2
 s3tests.functional.test_headers::test_object_create_bad_date_invalid_aws2
 s3tests.functional.test_headers::test_object_create_date_and_amz_date
-# --- Remaining measured POST failures (11) — https://github.com/rustfs/gateway/issues/1185 ---
+# --- Remaining measured POST failures (8) — https://github.com/rustfs/gateway/issues/1185 ---
 # #1281 made eighteen POST cases pass, so these are not a blanket SigV2 refusal.
-# This 7f5ebaed record still measures status, policy/field and SSE differences.
+# The e1ed9808 record still measures status, success-action and SSE differences.
 # Keep the failures visible under the POST owner; this is not acceptance of them.
 s3tests.functional.test_s3::test_post_object_anonymous_request
-s3tests.functional.test_s3::test_post_object_case_insensitive_condition_fields
-s3tests.functional.test_s3::test_post_object_ignored_header
 s3tests.functional.test_s3::test_post_object_set_invalid_success_code
-s3tests.functional.test_s3::test_post_object_set_key_from_filename
 s3tests.functional.test_s3::test_post_object_set_success_code
 s3tests.functional.test_s3::test_post_object_success_redirect_action
 s3tests.functional.test_s3::test_post_object_upload_checksum
