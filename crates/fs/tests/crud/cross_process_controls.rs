@@ -60,6 +60,11 @@ fn run_private_cross_process_controls() {
         "unprotected_deletion_completes_after_the_boundary_is_released",
         "cancelled_queued_deletion_does_not_remove_the_version",
         "started_deletion_keeps_the_boundary_after_request_cancellation",
+        "lifecycle_does_not_pass_an_inflight_protection_update",
+        "unprotected_lifecycle_waits_then_removes_the_selected_version",
+        "cancelled_queued_lifecycle_retains_the_version",
+        "started_lifecycle_retains_both_locks_after_cancellation",
+        "lifecycle_rechecks_protection_time_for_each_removal",
     ] {
         assert!(stdout.contains(&format!("completed: {control}")), "missing process control: {control}");
     }
