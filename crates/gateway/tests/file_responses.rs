@@ -49,6 +49,27 @@ mod unix {
     /// Larger than any socket buffer, so both drivers make many writes or transfers.
     const LEN: usize = 4 * 1024 * 1024;
 
+    fn short_delivery_diagnostic(
+        received: usize,
+        kernel: u64,
+        copied: u64,
+        fallbacks: u64,
+        adapted: u64,
+        refused: u64,
+    ) -> String {
+        format!(
+            "the self-held driver delivered {received} of {LEN} bytes, or the wrong ones; kernel={kernel} copied={copied} fallbacks={fallbacks} adapted={adapted} refused={refused}"
+        )
+    }
+
+    #[test]
+    fn short_delivery_diagnostic_reports_each_counter() {
+        assert_eq!(
+            short_delivery_diagnostic(11, 22, 33, 44, 55, 66),
+            "the self-held driver delivered 11 of 4194304 bytes, or the wrong ones; kernel=22 copied=33 fallbacks=44 adapted=55 refused=66"
+        );
+    }
+
     struct Fixture {
         path: PathBuf,
         bytes: Vec<u8>,
@@ -187,8 +208,15 @@ mod unix {
         assert_eq!(status, 200);
         assert!(
             body == fixture.bytes,
-            "the self-held driver delivered {} of {LEN} bytes, or the wrong ones",
-            body.len()
+            "{}",
+            short_delivery_diagnostic(
+                body.len(),
+                transport.kernel_transferred_bytes(),
+                transport.copied_payload_bytes(),
+                transport.fallback_responses_total(),
+                metrics.adapt_copies_total(),
+                metrics.zero_copy_refusals_total(),
+            )
         );
         assert_eq!(transport.kernel_transferred_bytes(), LEN as u64);
         assert_eq!(transport.copied_payload_bytes(), 0);
