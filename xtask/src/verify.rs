@@ -154,7 +154,11 @@ fn crate_step_batches(package: &str) -> Vec<Vec<Vec<String>>> {
         let socket_timing = ["test", "-p", package, "--test", GATEWAY_SOCKET_TIMING_TARGET]
             .map(str::to_owned)
             .to_vec();
-        return vec![vec![test, clippy], vec![socket_timing]];
+        // Process-wide allocation counters must run without libtest's monitoring thread.
+        let signature_allocations = ["test", "-p", package, "--test", "signature_text_allocations"]
+            .map(str::to_owned)
+            .to_vec();
+        return vec![vec![test, clippy], vec![socket_timing, signature_allocations]];
     }
     if package == "rustfs-gateway-server" {
         let mut test = steps.remove(0);
