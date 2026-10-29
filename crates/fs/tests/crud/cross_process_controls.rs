@@ -56,6 +56,10 @@ fn run_private_cross_process_controls() {
         "aborted_started_reservation_retains_lock_until_counter_published",
         "sequence_rename_failure_does_not_report_success",
         "sequence_sync_failure_does_not_report_success",
+        "deletion_cannot_pass_an_inflight_protection_update",
+        "unprotected_deletion_completes_after_the_boundary_is_released",
+        "cancelled_queued_deletion_does_not_remove_the_version",
+        "started_deletion_keeps_the_boundary_after_request_cancellation",
     ] {
         assert!(stdout.contains(&format!("completed: {control}")), "missing process control: {control}");
     }

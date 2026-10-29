@@ -469,3 +469,6 @@ mod coordination_tests;
 
 #[path = "cross_process_tests.rs"]
 mod cross_process_tests;
+
+#[path = "transaction_tests.rs"]
+mod transaction_tests;

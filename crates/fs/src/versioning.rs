@@ -714,7 +714,8 @@ impl FsBackend {
         version_id: Option<&str>,
         condition: Option<&DeleteIfMatch>,
     ) -> Result<DeleteObjectOutput, HandlerError> {
-        let _guard = self.version_lock.lock().await;
+        let process_guard = transaction::named_guard(&self.root, version_id).await?;
+        let local_guard = self.version_lock.clone().lock_owned().await;
         let state = self.versioning_state(bucket).await?;
         let records = self.version_records(bucket).await?;
         if let Some(version_id) = version_id {
@@ -725,7 +726,7 @@ impl FsBackend {
             if let Some(record) = record {
                 super::lock_record::ensure_deletable(record.lock.as_ref(), self.clock.now().unix_seconds())?;
                 let delete_marker = matches!(record.kind, RecordKind::DeleteMarker);
-                tokio::fs::remove_dir_all(&record.path).await.map_err(|_| storage_error())?;
+                transaction::remove_version(process_guard, local_guard, &record.path).await?;
                 return Ok(DeleteObjectOutput {
                     delete_marker: Some(delete_marker),
                     version_id: Some(record.version_id.clone()),
@@ -765,6 +766,7 @@ mod configuration;
 mod delete_conditions;
 mod lifecycle;
 mod sequence;
+pub(super) mod transaction;
 
 use delete_conditions::DeleteIfMatch;
 

@@ -103,7 +103,7 @@ impl FsBackend {
         let mut buckets = Vec::new();
         while let Some(entry) = entries.next_entry().await.map_err(|_| storage_error())? {
             let name = entry.file_name();
-            if name == super::VERSION_SEQUENCE_LOCK_FILE {
+            if name == super::VERSION_SEQUENCE_LOCK_FILE || name == super::versioning::transaction::LOCK_FILE {
                 let kind = entry.file_type().await.map_err(|_| storage_error())?;
                 if !kind.is_file() || kind.is_symlink() {
                     return Err(storage_error());
