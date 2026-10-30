@@ -482,3 +482,18 @@ fn an_s3s_service_failure_is_a_500_refusal() {
 fn a_draft_escapes_quotes_backslashes_and_controls() {
     assert_eq!(crate::fuzz_case::escape("a\u{1}b\"c\\d\u{9f}"), "a\\u0001b\\\"c\\\\d\\u009F");
 }
+
+/// Positive — the original and minimized multipart selector overlap remain compared requests.
+#[test]
+fn multipart_selector_overlap_artifacts_pass_the_decode_property() {
+    for input in [
+        &include_bytes!("../../../../fuzz/seeds/decode_diff/multipart-create-complete-original")[..],
+        &include_bytes!("../../../../fuzz/seeds/decode_diff/multipart-create-complete-minimal")[..],
+    ] {
+        let request = request_of(input).expect("the artifact remains a compared request");
+        let diff = crate::decode_diff(&request).expect("both stacks run");
+        assert_eq!(diff.operation.gateway.as_deref(), Some("CompleteMultipartUpload"));
+        assert_eq!(diff.operation.s3s.as_deref(), Some("CreateMultipartUpload"));
+        check_decode(input).expect("only the exact multipart overlap is registered");
+    }
+}

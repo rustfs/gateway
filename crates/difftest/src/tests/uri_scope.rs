@@ -214,3 +214,55 @@ fn attributes_upload_id_does_not_accept_unscoped_or_malformed_outcomes() {
     let verdict = register.verdict_for(&request, diff.findings());
     assert!(!verdict.passed(), "empty uploadId refusals are not accepted by a route record");
 }
+
+fn multipart_selector_overlap_finding() -> Finding {
+    Finding {
+        kind: Kind::Decode,
+        operation: "CompleteMultipartUpload".to_owned(),
+        priority: Priority::Route,
+        item: Item::Route,
+        gateway: "CompleteMultipartUpload".to_owned(),
+        s3s: "CreateMultipartUpload".to_owned(),
+    }
+}
+
+/// Negative — both literal query names must occur in the parsed request, never in a value or fragment.
+#[test]
+fn multipart_selector_overlap_rejects_missing_or_disguised_selectors() {
+    let register = KnownDiffs::checked_in().expect("the checked-in register parses");
+    for target in [
+        "/bkt/k",
+        "/bkt/k?uploads",
+        "/bkt/k?uploadId=u",
+        "/bkt/k?uploads&prefix=uploadId",
+        "/bkt/k?uploadId=u&prefix=uploads",
+        "/bkt/k?Uploads&uploadId=u",
+        "/bkt/k?uploads&uploadid=u",
+        "/bkt/k?%75ploads&uploadId=u",
+        "/bkt/k?uploads&%75ploadId=u",
+        "/bkt/k?uploads#&uploadId=u",
+        "/bkt/k?uploadId=u#&uploads",
+    ] {
+        let verdict = register.verdict_for(&RawRequest::post(target, b""), vec![multipart_selector_overlap_finding()]);
+        assert!(!verdict.passed(), "{target}");
+    }
+}
+
+/// Negative — missing request context and changes to either operation pin remain unregistered.
+#[test]
+fn multipart_selector_overlap_rejects_other_findings() {
+    let register = KnownDiffs::checked_in().expect("the checked-in register parses");
+    assert!(!register.verdict(vec![multipart_selector_overlap_finding()]).passed());
+    let mut operation = multipart_selector_overlap_finding();
+    operation.operation = "RestoreObject".to_owned();
+    let mut gateway = multipart_selector_overlap_finding();
+    gateway.gateway = "RestoreObject".to_owned();
+    let mut legacy = multipart_selector_overlap_finding();
+    legacy.s3s = "RestoreObject".to_owned();
+    let mut outcome = multipart_selector_overlap_finding();
+    outcome.item = Item::Outcome;
+    for finding in [operation, gateway, legacy, outcome] {
+        let verdict = register.verdict_for(&RawRequest::post("/bkt/k?uploads&uploadId=u", b""), vec![finding]);
+        assert!(!verdict.passed(), "the registration must not accept a different finding");
+    }
+}
