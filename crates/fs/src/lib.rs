@@ -168,6 +168,7 @@ mod transitions;
 mod upload_part_copy;
 mod uploads;
 mod version_listing;
+mod version_lock_registry;
 mod versioning;
 
 use records::ObjectAttributes;
@@ -180,7 +181,8 @@ pub use lifecycle_scheduler::{LifecycleScheduler, LifecycleSchedulerReport};
 /// Bucket names and object keys are never appended to the root as raw path components. Bucket
 /// names are hex encoded and object keys select a SHA-256-named file, so S3 keys such as
 /// `../outside` remain data rather than paths. This is a reference implementation, not a claim of
-/// crash-consistent or hostile-concurrent-filesystem durability.
+/// crash-consistent or hostile-concurrent-filesystem durability. Backends opened on the same
+/// canonical root in one process share their version mutex; different processes do not.
 pub struct FsBackend {
     root: PathBuf,
     region: String,
@@ -190,7 +192,7 @@ pub struct FsBackend {
     temporary_id: AtomicU64,
     /// Each bucket's reserved upload-ID window, keyed by bucket name; the lock serializes allocation.
     upload_id_windows: tokio::sync::Mutex<std::collections::HashMap<String, uploads::UploadIdWindow>>,
-    version_lock: tokio::sync::Mutex<()>,
+    version_lock: Arc<tokio::sync::Mutex<()>>,
     clock: Arc<dyn Clock>,
     lifecycle_day_seconds: i64,
     lifecycle_scheduler_running: AtomicBool,
@@ -227,17 +229,19 @@ impl FsBackend {
         if !metadata.is_dir() {
             return Err(io::Error::new(io::ErrorKind::InvalidInput, "the backend root must be a directory"));
         }
+        let root = std::fs::canonicalize(root.as_ref())?;
+        let version_lock = version_lock_registry::for_root(&root)?;
         let regions = RegionSet::new([US_EAST_1])
             .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "us-east-1 is not a usable region name"))?;
         Ok(Self {
-            root: std::fs::canonicalize(root.as_ref())?,
+            root,
             region: US_EAST_1.to_owned(),
             regions,
             region_match_policy: REGION_MATCH_POLICY,
             owner: None,
             temporary_id: AtomicU64::new(0),
             upload_id_windows: tokio::sync::Mutex::default(),
-            version_lock: tokio::sync::Mutex::new(()),
+            version_lock,
             clock,
             lifecycle_day_seconds: 24 * 60 * 60,
             lifecycle_scheduler_running: AtomicBool::new(false),

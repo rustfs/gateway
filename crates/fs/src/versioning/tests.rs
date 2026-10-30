@@ -463,3 +463,6 @@ async fn n_failed_protection_record_write_publishes_nothing() {
     assert_eq!(records[0].version_id, "v1");
     let _ = std::fs::remove_dir_all(root);
 }
+
+#[path = "coordination_tests.rs"]
+mod coordination_tests;
