@@ -147,9 +147,17 @@ impl From<FrozenHeader> for HandlerError {
 /// There is no accessor for the request target and no way to change the method. Both feed the
 /// canonical request, and unlike the `Host` header they are not reachable from here at all, so
 /// there is nothing to freeze.
-#[derive(Debug)]
 pub struct WireHead<'a> {
     parts: &'a mut http::request::Parts,
+}
+
+impl std::fmt::Debug for WireHead<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WireHead")
+            .field("method", &self.parts.method)
+            .field("version", &self.parts.version)
+            .finish_non_exhaustive()
+    }
 }
 
 impl<'a> WireHead<'a> {
@@ -503,6 +511,22 @@ mod tests {
             .expect("a valid request")
             .into_parts()
             .0
+    }
+
+    #[test]
+    fn wire_head_debug_does_not_expose_credentials() {
+        let mut parts = http::Request::builder()
+            .uri("/export.zip?token=secret-token&note=ok")
+            .header("authorization", "secret-authorization")
+            .body(())
+            .expect("valid request")
+            .into_parts()
+            .0;
+        let view = WireHead::new(&mut parts);
+        let rendered = format!("{view:?}");
+        assert!(!rendered.contains("secret-token"), "token leaked in Debug: {rendered}");
+        assert!(!rendered.contains("secret-authorization"), "authorization leaked in Debug: {rendered}");
+        assert_eq!(view.query(), Some("token=secret-token&note=ok"));
     }
 
     /// Negative — the `Host` header cannot be written, and the refusal names it. Every other

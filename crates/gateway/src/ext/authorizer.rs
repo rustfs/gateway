@@ -71,6 +71,9 @@ pub enum AuthSchemeRef {
     /// later. Its own answer rather than the nearest SigV4 variant, so a policy that names a
     /// scheme never admits one it did not name.
     OtherSigned,
+    /// No signature: an operation's query bearer token, verified by the host's installed
+    /// verifier (ADR-0042). The principal is the one the token was issued to.
+    Bearer,
 }
 
 impl AuthSchemeRef {
@@ -94,11 +97,13 @@ impl AuthSchemeRef {
         match verdict {
             Verdict::Authenticated { scheme, .. } => Some(Self::of_scheme(scheme)),
             Verdict::Anonymous(_) => Some(Self::Anonymous),
+            Verdict::Bearer(_) => Some(Self::Bearer),
             _ => None,
         }
     }
 
-    /// Whether a signature was verified: everything but [`Self::Anonymous`].
+    /// Whether a credential was verified — a signature, or a [`Self::Bearer`] token: everything
+    /// but [`Self::Anonymous`].
     #[must_use]
     pub const fn is_authenticated(self) -> bool {
         !matches!(self, Self::Anonymous)
@@ -171,13 +176,15 @@ impl<'a> RequestContext<'a> {
     }
 
     /// The context both stages share, read off the accepted request: its transport bag, its
-    /// headers after the wire seam, and its query exactly as it arrived.
+    /// headers after the wire seam, and its query as it arrived — less a verified bearer token,
+    /// which the facade strips before either stage sees it (ADR-0042).
     pub(crate) fn from_request<B>(
         now: RequestNow,
         policy: &'a PolicySnapshot,
         auth_scheme: AuthSchemeRef,
         verified_scope: Option<&'a VerifiedScope>,
         wire: &'a WireRequest<B>,
+        raw_query: &'a str,
     ) -> Self {
         Self {
             now,
@@ -186,7 +193,7 @@ impl<'a> RequestContext<'a> {
             verified_scope,
             server_extensions: ServerExtensions::of(wire.transport_extensions()),
             headers: Some(wire.headers()),
-            raw_query: Some(wire.query().as_str()),
+            raw_query: Some(raw_query),
         }
     }
 

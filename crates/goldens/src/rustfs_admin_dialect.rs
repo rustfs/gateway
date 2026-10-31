@@ -74,6 +74,10 @@ pub(crate) struct Asked {
     /// Whose account the question is about: `None` for no account, `Some(None)` for the caller,
     /// `Some(Some(name))` for a named one.
     pub(crate) subject: Option<Option<String>>,
+    /// The authorization context's query, which never holds a verified bearer token (ADR-0042).
+    pub(crate) query: Option<String>,
+    /// The authorization context's scheme, as `AuthSchemeRef`'s `Debug` spells it.
+    pub(crate) scheme: String,
 }
 
 type Policy = Box<dyn Fn(&str, &str) -> bool + Send + Sync>;
@@ -85,8 +89,10 @@ struct RecordingAuthorizer {
 }
 
 impl RecordingAuthorizer {
-    fn decide(&self, stage: &'static str, request: &AuthzRequest<'_>) -> Decision {
+    fn decide(&self, stage: &'static str, context: &RequestContext<'_>, request: &AuthzRequest<'_>) -> Decision {
         self.asked.lock().expect("uncontended").push(Asked {
+            query: context.raw_query().map(str::to_owned),
+            scheme: format!("{:?}", context.auth_scheme()),
             stage,
             operation: request.operation.to_owned(),
             action: request.action.to_owned(),
@@ -104,18 +110,18 @@ impl RecordingAuthorizer {
 }
 
 impl Authorizer for RecordingAuthorizer {
-    fn authorize_route<'a>(&'a self, _context: &'a RequestContext<'a>, request: &'a AuthzRequest<'a>) -> BoxFuture<'a, Decision> {
-        let decision = self.decide("route", request);
+    fn authorize_route<'a>(&'a self, context: &'a RequestContext<'a>, request: &'a AuthzRequest<'a>) -> BoxFuture<'a, Decision> {
+        let decision = self.decide("route", context, request);
         Box::pin(async move { decision })
     }
 
     fn authorize_input<'a>(
         &'a self,
-        _context: &'a RequestContext<'a>,
+        context: &'a RequestContext<'a>,
         request: &'a InputAuthzRequest<'a>,
     ) -> BoxFuture<'a, InputDecisions> {
-        let stage = self.decide("input", request.route());
-        let decisions = request.decide_all(stage, |resource| self.decide("resource", resource));
+        let stage = self.decide("input", context, request.route());
+        let decisions = request.decide_all(stage, |resource| self.decide("resource", context, resource));
         Box::pin(async move { decisions })
     }
 }
@@ -148,6 +154,15 @@ pub(crate) struct Handed {
     /// The bucket the context carries: the bound one (ADR-0030), or none for a service-level
     /// operation.
     pub(crate) bucket: Option<String>,
+    /// The context's query as the handler reads it.
+    pub(crate) raw_query: String,
+    /// The signed principal's access key, when a signature authenticated the request.
+    pub(crate) principal: Option<String>,
+    /// The bearer principal's access key and the host's verified state, when a bearer verifier
+    /// established them (ADR-0042).
+    pub(crate) bearer: Option<(String, Option<String>)>,
+    /// Whether the context reports the request anonymous.
+    pub(crate) anonymous: bool,
 }
 
 /// The accounts a context carries, spelled as [`Handed::subjects`] records them.
@@ -178,6 +193,12 @@ impl Handed {
                 .collect(),
             holds_secret: secret.is_some(),
             secret_is_the_callers: secret.is_some_and(|secret| same_bytes(secret.expose_secret(), SECRET_KEY.as_bytes())),
+            raw_query: context.raw_query().to_owned(),
+            principal: context.principal().map(|principal| principal.access_key_id().to_owned()),
+            bearer: context
+                .bearer()
+                .map(|bearer| (bearer.identity().access_key_id().to_owned(), bearer.state::<String>().cloned())),
+            anonymous: context.is_anonymous(),
         }
     }
 }
@@ -333,6 +354,16 @@ pub(crate) fn assemble_on(floor: SecurityFloor, policy: impl Fn(&str, &str) -> b
     assemble_with_profile(floor, policy, false, None)
 }
 
+/// [`assemble`] with `verifier` installed as the host's query bearer verifier (ADR-0042).
+pub(crate) fn assemble_with_bearer_verifier(
+    policy: impl Fn(&str, &str) -> bool + Send + Sync + 'static,
+    verifier: impl rustfs_gateway::BearerTokenVerifier,
+) -> Assembled {
+    assemble_installing(SecurityFloor::new(), policy, false, None, |builder| {
+        builder.bearer_token_verifier(verifier)
+    })
+}
+
 /// Socket controls select the existing RustFS bodyless, addressing and CORS policies explicitly;
 /// ordinary controls retain the generic pipeline.
 fn assemble_with_profile(
@@ -340,6 +371,18 @@ fn assemble_with_profile(
     policy: impl Fn(&str, &str) -> bool + Send + Sync + 'static,
     legacy_profile: bool,
     omit_handler: Option<&'static str>,
+) -> Assembled {
+    assemble_installing(floor, policy, legacy_profile, omit_handler, |builder| builder)
+}
+
+/// [`assemble_with_profile`], with `install` applied to the builder before any operation is
+/// registered.
+fn assemble_installing(
+    floor: SecurityFloor,
+    policy: impl Fn(&str, &str) -> bool + Send + Sync + 'static,
+    legacy_profile: bool,
+    omit_handler: Option<&'static str>,
+    install: impl FnOnce(ServiceBuilder) -> ServiceBuilder,
 ) -> Assembled {
     let credentials = Credentials::new(ACCESS_KEY, SECRET_KEY.as_bytes()).expect("a fixture credential");
     let regions = RegionSet::new(REGIONS).expect("fixture regions");
@@ -372,6 +415,7 @@ fn assemble_with_profile(
             asked: Arc::clone(&asked),
         })
         .dialect(&dialect);
+    let builder = install(builder);
     let builder = if legacy_profile {
         builder
             .accept_mismatched_payload_digests_without_a_body()
@@ -674,3 +718,4 @@ mod fallback_tests;
 mod fallback_wire_tests;
 mod subject_tests;
 mod tests;
+mod zip_token_tests;
