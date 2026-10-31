@@ -41,6 +41,52 @@ fn rustfs() -> NamePolicy {
         .with_validator(Arc::new(LegacyRustfsNameValidator))
 }
 
+#[test]
+fn outposts_access_point_is_retained_before_resource_binding() {
+    for (outpost, access_point) in [("op-1", "ap-1"), ("", "ap-1"), ("op-1", "")] {
+        let raw = format!(
+            "arn:aws:s3-outposts:us-east-1:123456789012:outpost/{outpost}/accesspoint/{access_point}/object/key?versionId=v1"
+        );
+        let value = parse_value_under(&raw, &rustfs()).expect("legacy grammar retains the source");
+        assert_eq!(
+            value,
+            CopySourceValue::Outpost {
+                partition: "aws".into(),
+                region: "us-east-1".into(),
+                account_id: "123456789012".into(),
+                outpost_id: format!("{outpost}/accesspoint/{access_point}"),
+                key: "key".into(),
+                version_id: Some("v1".into()),
+            }
+        );
+        let error = CopySource::parse_under(&raw, &rustfs())
+            .err()
+            .expect("unsupported resource identity");
+        assert_eq!(error.code(), &ErrorCode::INVALID_ARGUMENT);
+    }
+}
+
+#[test]
+fn n_outposts_access_point_requires_an_object_separator() {
+    for suffix in ["accesspoint/ap", "accesspoint/ap/key", "accesspoint/ap/object"] {
+        let raw = format!("arn:aws:s3-outposts:us-east-1:123456789012:outpost/op-1/{suffix}");
+        assert!(matches!(parse_value_under(&raw, &rustfs()), Err(error) if error.code() == &ErrorCode::INVALID_ARGUMENT));
+    }
+}
+
+#[test]
+fn n_outposts_access_point_does_not_become_an_authorized_outpost() {
+    for account in ["", "123", "123456789012"] {
+        for key in ["", "key"] {
+            let raw = format!("arn:aws:s3-outposts:us-east-1:{account}:outpost/op-1/accesspoint/ap/object/{key}");
+            let error = CopySource::parse_under(&raw, &rustfs())
+                .err()
+                .expect("unsupported resource identity");
+            assert_eq!(error.code(), &ErrorCode::INVALID_ARGUMENT);
+        }
+    }
+}
+
 /// The bucket, key and version `CopyObject` resolves for `raw` under `names`, or the code.
 fn source(raw: &str, names: &NamePolicy) -> Result<(String, String, Option<String>), ErrorCode> {
     let input = raw.to_owned();

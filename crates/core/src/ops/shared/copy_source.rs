@@ -597,18 +597,21 @@ fn parse_arn(path: &str) -> Result<CopySourceValue, CopySourceRejection> {
         "s3-outposts" => {
             let rest = resource.strip_prefix("outpost/").ok_or_else(unknown_arn)?;
             let (outpost, rest) = rest.split_once('/').ok_or_else(unknown_arn)?;
-            let (bucket, key) = if let Some(key) = rest.strip_prefix("object/") {
-                (None, key)
+            let (outpost_id, key) = if let Some(key) = rest.strip_prefix("object/") {
+                (outpost.to_owned(), key)
+            } else if let Some(rest) = rest.strip_prefix("accesspoint/") {
+                let (name, key) = rest.split_once("/object/").ok_or_else(unknown_arn)?;
+                (format!("{outpost}/accesspoint/{name}"), key)
             } else {
                 let rest = rest.strip_prefix("bucket/").ok_or_else(unknown_arn)?;
                 let (bucket, key) = rest.split_once("/object/").ok_or_else(unknown_arn)?;
-                (Some(bucket), key)
+                (format!("{outpost}/bucket/{bucket}"), key)
             };
             Ok(CopySourceValue::Outpost {
                 partition: partition.to_owned(),
                 region: region.to_owned(),
                 account_id: account.to_owned(),
-                outpost_id: bucket.map_or_else(|| outpost.to_owned(), |bucket| format!("{outpost}/bucket/{bucket}")),
+                outpost_id,
                 key: key.to_owned(),
                 version_id: None,
             })

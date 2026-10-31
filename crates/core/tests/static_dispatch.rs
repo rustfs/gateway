@@ -30,6 +30,7 @@ use rustfs_gateway_core::{
 use rustfs_gateway_http::{Limits, WireRequest};
 use rustfs_gateway_sig::{OperationFloor, SigService};
 use rustfs_gateway_types::dto::{CompleteMultipartUpload, CompleteMultipartUploadOutput};
+use rustfs_gateway_types::dto::{CopyObject, UploadPartCopy};
 
 use crate::support::sse_proof;
 
@@ -76,6 +77,36 @@ impl OperationCodec for StaticProbe {
 
 struct Backend(Arc<Mutex<Vec<&'static str>>>);
 
+impl Handler<CopyObject> for Backend {
+    async fn call(&self, request: Req<CopyObject>) -> HandlerResult<CopyObject> {
+        let (_source, context) = rustfs_gateway_core::HandlerCancellationSource::pair();
+        self.call_with_context(request, context).await
+    }
+
+    async fn call_with_context(
+        &self,
+        _request: Req<CopyObject>,
+        _context: rustfs_gateway_core::HandlerContext,
+    ) -> HandlerResult<CopyObject> {
+        panic!("an unbound CopyObject must not reach the handler")
+    }
+}
+
+impl Handler<UploadPartCopy> for Backend {
+    async fn call(&self, request: Req<UploadPartCopy>) -> HandlerResult<UploadPartCopy> {
+        let (_source, context) = rustfs_gateway_core::HandlerCancellationSource::pair();
+        self.call_with_context(request, context).await
+    }
+
+    async fn call_with_context(
+        &self,
+        _request: Req<UploadPartCopy>,
+        _context: rustfs_gateway_core::HandlerContext,
+    ) -> HandlerResult<UploadPartCopy> {
+        panic!("an unbound UploadPartCopy must not reach the handler")
+    }
+}
+
 impl Handler<StaticProbe> for Backend {
     async fn call(&self, request: Req<StaticProbe>) -> HandlerResult<StaticProbe> {
         let (_source, context) = rustfs_gateway_core::HandlerCancellationSource::pair();
@@ -101,6 +132,59 @@ fn meta() -> MetaView<'static> {
         .expect("valid request");
     let wire = Box::leak(Box::new(WireRequest::accept(request, &Limits::default()).expect("accepted")));
     MetaView::of(wire, TargetKind::Service).expect("service meta")
+}
+
+async fn refuse_outposts_access_point<O: OperationCodec>(query: &str)
+where
+    Backend: Handler<O>,
+{
+    let request = http::Request::builder()
+        .method("PUT")
+        .uri(format!("http://s3.example.com/target/key{query}"))
+        .header("host", "s3.example.com")
+        .header(
+            "x-amz-copy-source",
+            "arn:aws:s3-outposts:us-east-1:123456789012:outpost/op/accesspoint/ap/object/key",
+        )
+        .body(Bytes::new())
+        .expect("valid request");
+    let wire = WireRequest::accept(request, &Limits::default()).expect("accepted request");
+    let meta = MetaView::of(&wire, TargetKind::Object).expect("object metadata");
+    let result = StaticOperation::<O>::dispatch(
+        O::NAME,
+        &meta,
+        Arc::new(Backend(Arc::new(Mutex::new(Vec::new())))),
+        || async { Ok::<_, &'static str>(()) },
+        |()| async { Ok::<_, &'static str>(((), RequestBody::None)) },
+        |(), _| async {
+            Err::<
+                (
+                    Vec<rustfs_gateway_core::Decision>,
+                    (),
+                    rustfs_gateway_core::SseEnforced,
+                    rustfs_gateway_core::RequestContextView,
+                ),
+                _,
+            >("an unbound source reached input authorization")
+        },
+    )
+    .await;
+    match result {
+        Err(StaticDispatchError::Codec(error)) => {
+            assert_eq!(error.code(), &rustfs_gateway_types::ErrorCode::INVALID_ARGUMENT);
+            assert_eq!(
+                error.message(),
+                "x-amz-copy-source accepts an access point or Outposts ARN, or a bucket and key"
+            );
+        }
+        _ => panic!("an access-point source must not bind as an Outpost"),
+    }
+}
+
+#[tokio::test]
+async fn outposts_access_point_is_refused_before_input_authorization() {
+    refuse_outposts_access_point::<CopyObject>("").await;
+    refuse_outposts_access_point::<UploadPartCopy>("?partNumber=1&uploadId=upload").await;
 }
 
 /// a-asm-0007. The sealed entry calls route authorization before body work, input authorization
