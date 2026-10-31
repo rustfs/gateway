@@ -134,6 +134,74 @@ fn both_copy_inputs_hold_decoded_values_and_preserve_empty_version_policy() {
 }
 
 #[test]
+fn outposts_access_point_is_preserved_by_both_copy_codecs_but_not_bound() {
+    use rustfs_gateway_core::Operation;
+
+    let source = "arn:aws:s3-outposts:us-east-1:123456789012:outpost/op-1/accesspoint/ap-1/object/key?versionId=v1";
+    for names in [NamePolicy::default(), rustfs()] {
+        for (part, query) in [(false, ""), (true, "?partNumber=1&uploadId=upload")] {
+            let value = decode(part, source, query, &[], &names).expect("source grammar");
+            assert_eq!(
+                value,
+                CopySourceValue::Outpost {
+                    partition: "aws".into(),
+                    region: "us-east-1".into(),
+                    account_id: "123456789012".into(),
+                    outpost_id: "op-1/accesspoint/ap-1".into(),
+                    key: "key".into(),
+                    version_id: Some("v1".into()),
+                }
+            );
+            let error = if part {
+                dto::UploadPartCopy::derive_resources_under(&dto::UploadPartCopyInput::builder(value).build(), &names).err()
+            } else {
+                dto::CopyObject::derive_resources_under(&dto::CopyObjectInput::builder(value).build(), &names).err()
+            }
+            .expect("unsupported identity must not bind");
+            assert_eq!(error.code(), &ErrorCode::INVALID_ARGUMENT);
+            assert_eq!(
+                error.message(),
+                "x-amz-copy-source accepts an access point or Outposts ARN, or a bucket and key"
+            );
+        }
+    }
+}
+
+#[test]
+fn erased_dispatch_still_refuses_outposts_access_point_sources() {
+    use rustfs_gateway_core::ErasedCodec;
+
+    for (part, query) in [(false, ""), (true, "?partNumber=1&uploadId=upload")] {
+        let request = http::Request::builder()
+            .method("PUT")
+            .uri(format!("http://host.invalid/target/key{query}"))
+            .header("host", "host.invalid")
+            .header(
+                "x-amz-copy-source",
+                "arn:aws:s3-outposts:us-east-1:123456789012:outpost/op/accesspoint/ap/object/key",
+            )
+            .body(())
+            .expect("request");
+        let wire = WireRequest::accept(request, &Limits::default()).expect("accepted request");
+        let view = MetaView::of_with(&wire, TargetKind::Object, &rustfs()).expect("request metadata");
+        let codec = if part {
+            ErasedCodec::for_operation::<dto::UploadPartCopy>()
+        } else {
+            ErasedCodec::for_operation::<dto::CopyObject>()
+        };
+        let error = match codec.decode(&view, RequestBody::None) {
+            Err(error) => error,
+            Ok(_) => panic!("unbound source"),
+        };
+        assert_eq!(error.code(), &ErrorCode::INVALID_ARGUMENT);
+        assert_eq!(
+            error.message(),
+            "x-amz-copy-source accepts an access point or Outposts ARN, or a bucket and key"
+        );
+    }
+}
+
+#[test]
 fn source_deployment_validation_runs_once_at_resource_derivation() {
     use rustfs_gateway_core::Operation;
     use rustfs_gateway_types::{NameValidator, Stricter};
