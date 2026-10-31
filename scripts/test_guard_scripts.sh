@@ -23568,8 +23568,8 @@ from pathlib import Path
 path = Path("crates/core/tests/static_dispatch.rs")
 text = path.read_text()
 subject = "    async fn call_with_context(\n"
-if text.count(subject) != 1:
-    raise SystemExit("missing unique Handler context-entry mutation subject")
+if text.count(subject) != 3:
+    raise SystemExit("expected three reviewed Handler context-entry mutation subjects")
 path.write_text(text.replace(subject, "    async fn call_without_context(\n", 1))
 PYEOF
 }
@@ -23589,8 +23589,8 @@ replacement = '''    const CONTEXT_ENTRY_DECOY: &'static str = "fn call_with_con
     // fn call_with_context(request) is not an active method.
     async fn call_without_context(
 '''
-if text.count(subject) != 1:
-    raise SystemExit("missing unique Handler context-decoy mutation subject")
+if text.count(subject) != 3:
+    raise SystemExit("expected three reviewed Handler context-decoy mutation subjects")
 path.write_text(text.replace(subject, replacement, 1))
 PYEOF
 }
@@ -23614,8 +23614,8 @@ replacement = '''        self.call_with_context(
         )
         .await
 '''
-if text.count(subject) != 1:
-    raise SystemExit("missing unique Handler context-source mutation subject")
+if text.count(subject) != 3:
+    raise SystemExit("expected three reviewed Handler context-source mutation subjects")
 path.write_text(text.replace(subject, replacement, 1))
 PYEOF
 }
