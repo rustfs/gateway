@@ -39,6 +39,14 @@ use tokio::net::{TcpSocket, TcpStream};
 use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use tower::service_fn;
 
+#[path = "server_load/calibration.rs"]
+mod calibration;
+use calibration::rss_bytes;
+
+#[path = "server_load/paired_probe.rs"]
+mod paired_probe;
+use paired_probe::paired_probe_p99;
+
 #[path = "server_load/isolation.rs"]
 mod isolation;
 
@@ -116,15 +124,6 @@ fn resident_growth_ps_can_see() -> Option<usize> {
     assert_eq!(ballast.len(), BALLAST_BYTES / BALLAST_CHUNK, "the ballast is still held");
     drop(ballast);
     Some(after.saturating_sub(before))
-}
-
-fn rss_bytes() -> Option<usize> {
-    let output = Command::new("ps")
-        .args(["-o", "rss=", "-p", &std::process::id().to_string()])
-        .output()
-        .ok()?;
-    let kibibytes = String::from_utf8(output.stdout).ok()?.trim().parse::<usize>().ok()?;
-    kibibytes.checked_mul(1024)
 }
 
 /// Tells a re-executed copy of this test binary that it is the isolated child.
@@ -367,48 +366,6 @@ async fn warm_up(addr: SocketAddr, count: usize, ceiling: Duration) {
     }
 }
 
-/// Samples `control` and `loaded` in lock-step and returns a 99th percentile for each.
-///
-/// Lock-step is the point. The two probes of a round are issued microseconds apart, so a host
-/// that stalls for a scheduler quantum stalls whichever of them it lands on, and over `count`
-/// rounds that weather is charged to both listeners in equal measure; what survives the
-/// comparison is the part only the parked readers can explain. A baseline measured *before* the
-/// readers were parked cannot do that — several seconds of unrelated host activity sit between it
-/// and the measurement it is the denominator of, and on a busy machine those seconds are the
-/// larger term.
-///
-/// The order within a round alternates so that neither listener permanently owns the position
-/// that follows an idle gap.
-async fn paired_probe_p99(control: SocketAddr, loaded: SocketAddr, count: usize, ceiling: Duration) -> (ProbeSet, ProbeSet) {
-    let mut control_samples = Vec::with_capacity(count);
-    let mut loaded_samples = Vec::with_capacity(count);
-    let mut control_stalls = 0;
-    let mut loaded_stalls = 0;
-    for round in 0..count {
-        let (control_sample, loaded_sample) = if round % 2 == 0 {
-            let control_sample = healthy_probe(control, ceiling).await;
-            (control_sample, healthy_probe(loaded, ceiling).await)
-        } else {
-            let loaded_sample = healthy_probe(loaded, ceiling).await;
-            (healthy_probe(control, ceiling).await, loaded_sample)
-        };
-        control_samples.push(control_sample.0);
-        control_stalls += usize::from(control_sample.1);
-        loaded_samples.push(loaded_sample.0);
-        loaded_stalls += usize::from(loaded_sample.1);
-    }
-    (
-        ProbeSet {
-            p99: p99(control_samples),
-            stalled: control_stalls,
-        },
-        ProbeSet {
-            p99: p99(loaded_samples),
-            stalled: loaded_stalls,
-        },
-    )
-}
-
 /// Opens `count` connections and returns once the listener reports every one of them as active.
 ///
 /// No request is written here on purpose. The write-progress deadline starts at a connection's
@@ -416,12 +373,13 @@ async fn paired_probe_p99(control: SocketAddr, loaded: SocketAddr, count: usize,
 /// opened would have its earliest members retired before its last ones were admitted, and the
 /// census below would never see the whole wave at once.
 async fn park_slow_readers(addr: SocketAddr, metrics: &rustfs_gateway_server::ServerMetrics, count: usize) -> Vec<TcpStream> {
+    let baseline = metrics.active_connections();
     let mut readers = Vec::with_capacity(count);
     for _ in 0..count {
         readers.push(pinhole_connect(addr).await);
     }
     if tokio::time::timeout(Duration::from_secs(15), async {
-        while metrics.active_connections() < count {
+        while metrics.active_connections() < baseline + count {
             tokio::task::yield_now().await;
         }
     })
@@ -640,6 +598,7 @@ async fn c_lim_0061_a_srv_0026_one_thousand_slow_readers_close_without_starving_
     /// readers caused moves the whole distribution and survives the discarded tail; a lone host
     /// hiccup does not, and never should have.
     const PROBES: usize = 500;
+    const PROBE_POOL: usize = PROBES;
     /// Discarded probes, paying up front for whatever each listener's first connection allocates
     /// once, so that neither listener carries that cost into the comparison.
     const WARMUP_PROBES: usize = 20;
@@ -673,6 +632,13 @@ async fn c_lim_0061_a_srv_0026_one_thousand_slow_readers_close_without_starving_
     let (control_runtime, control) = server_on_own_runtime(slow_reader_config(), stalling_body);
     warm_up(control.local_addr, WARMUP_PROBES, PROBE_CEILING).await;
     warm_up(loaded.local_addr, WARMUP_PROBES, PROBE_CEILING).await;
+    tokio::time::timeout(Duration::from_secs(15), async {
+        while control.metrics.active_connections() != 0 || loaded.metrics.active_connections() != 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("warmup connections must close before measurement");
     let Some(before) = rss_bytes() else {
         eprintln!("SKIP c-lim-0061 / a-srv-0026: this runner cannot report RSS through ps");
         shut_down(control, control_runtime, "the control listener").await;
@@ -680,6 +646,7 @@ async fn c_lim_0061_a_srv_0026_one_thousand_slow_readers_close_without_starving_
         return;
     };
 
+    let calibration = calibration::Census::begin(&loaded, &control);
     let first_wave = park_slow_readers(loaded.local_addr, &loaded.metrics, SLOW_READERS).await;
     let first_wave = stall_slow_readers(first_wave).await;
 
@@ -692,44 +659,9 @@ async fn c_lim_0061_a_srv_0026_one_thousand_slow_readers_close_without_starving_
         "{SLOW_READERS} parked slow readers grew the resident set by {parked_growth} bytes, past the {parked_budget}-byte per-connection budget"
     );
 
-    let (control_probes, loaded_probes) = paired_probe_p99(control.local_addr, loaded.local_addr, PROBES, PROBE_CEILING).await;
-    eprintln!(
-        "c-lim-0061 p99: control={:?} (stalled {}/{PROBES}) loaded={:?} (stalled {}/{PROBES})",
-        control_probes.p99, control_probes.stalled, loaded_probes.p99, loaded_probes.stalled
-    );
-    if control_probes.stalled > 0 {
-        // Not a pass. The control listener is holding nothing open at all, so a probe it failed to
-        // answer inside the ceiling is a statement about the host, and every stalled probe is
-        // charged the ceiling — comparing two saturated percentiles would return a ratio of one on
-        // a machine where no latency claim is measurable at all.
-        eprintln!(
-            "SKIP c-lim-0061 / a-srv-0026 latency: {} of {PROBES} probes against the control listener, which has no slow reader on it, went unanswered inside {PROBE_CEILING:?}; this host cannot hold a latency baseline still, so no difference measured against it would be attributable to the parked readers",
-            control_probes.stalled
-        );
-    } else {
-        // A stalled probe is charged the ceiling, and the ceiling sits in the one percent of
-        // samples the rank discards, so up to four of them per listener are invisible to the
-        // percentile below. On a host quiet enough that the idle control answered all of its
-        // probes, a probe the loaded listener left unanswered for whole seconds is the starvation
-        // this case is named after, and it must not be able to hide in a discarded tail.
-        assert!(
-            loaded_probes.stalled <= control_probes.stalled,
-            "{} of {PROBES} probes against the listener holding {SLOW_READERS} parked slow readers went unanswered inside {PROBE_CEILING:?}, against {} on the idle control listener probed in lock-step with it",
-            loaded_probes.stalled,
-            control_probes.stalled
-        );
-        let ceiling = control_probes.p99.saturating_mul(8) + Duration::from_millis(100);
-        eprintln!("c-lim-0061 p99 ceiling: {ceiling:?}");
-        assert!(
-            loaded_probes.p99 <= ceiling,
-            "a healthy connection's p99 was {:?} on the listener holding {SLOW_READERS} parked slow readers against {:?} on an idle control listener probed in lock-step with it, past the {ceiling:?} ceiling",
-            loaded_probes.p99,
-            control_probes.p99
-        );
-    }
-
     let first_closure = retire_slow_readers(first_wave, &loaded.metrics).await;
     let after_first = rss_bytes().expect("RSS remains readable");
+    calibration.assert_only_slow_readers(SLOW_READERS);
     let first_growth = after_first.saturating_sub(before);
 
     // Waves two onward. Each is identical to the first, so under accumulation each costs what the
@@ -781,6 +713,82 @@ async fn c_lim_0061_a_srv_0026_one_thousand_slow_readers_close_without_starving_
             WAVES - 1
         );
     }
+
+    // Keep probe allocations out of the RSS calibration by using a separate latency wave.
+    let first_wave = park_slow_readers(loaded.local_addr, &loaded.metrics, SLOW_READERS).await;
+    let first_wave = stall_slow_readers(first_wave).await;
+    let control_addresses = vec![control.local_addr; PROBES];
+    let loaded_addresses = vec![loaded.local_addr; PROBES];
+    let (control_probes, loaded_probes, retained_probes) =
+        paired_probe::paired(&control_addresses, &loaded_addresses, PROBES, PROBE_CEILING).await;
+    assert_eq!(
+        retained_probes.len(),
+        PROBES * 2,
+        "every paired probe must finish and retain its connection"
+    );
+    let active_after_probes = loaded.metrics.active_connections();
+    eprintln!(
+        "c-lim-0061 pooled census: active={active_after_probes} slow_readers={} probes={PROBE_POOL}",
+        first_wave.len()
+    );
+    assert!(
+        active_after_probes >= SLOW_READERS + PROBE_POOL,
+        "the slow-reader wave must remain active throughout the latency samples"
+    );
+    assert_eq!(control_probes.stalled, 0, "every pooled control probe must complete");
+    assert_eq!(loaded_probes.stalled, 0, "every pooled loaded probe must complete");
+    let pooled_ceiling = control_probes.p99.saturating_mul(8) + Duration::from_millis(100);
+    eprintln!(
+        "c-lim-0061 pooled p99: control={:?} loaded={:?} ceiling={pooled_ceiling:?} active={}",
+        control_probes.p99,
+        loaded_probes.p99,
+        loaded.metrics.active_connections()
+    );
+    assert!(
+        loaded_probes.p99 <= pooled_ceiling,
+        "loaded pooled p99 exceeds its paired control ceiling"
+    );
+    drop(retained_probes);
+    // Retain the original fresh-connection measurement, including connection setup and close.
+    // The wave may expire during this longer comparison; only the retained samples above have a
+    // bounded slow-reader census for the entire measurement.
+    let (control_probes, loaded_probes) = paired_probe_p99(control.local_addr, loaded.local_addr, PROBES, PROBE_CEILING).await;
+    eprintln!(
+        "c-lim-0061 fresh-connection p99: control={:?} (stalled {}/{PROBES}) loaded={:?} (stalled {}/{PROBES})",
+        control_probes.p99, control_probes.stalled, loaded_probes.p99, loaded_probes.stalled
+    );
+    if control_probes.stalled > 0 {
+        // Not a pass. The control listener is holding nothing open at all, so a probe it failed to
+        // answer inside the ceiling is a statement about the host, and every stalled probe is
+        // charged the ceiling — comparing two saturated percentiles would return a ratio of one on
+        // a machine where no latency claim is measurable at all.
+        eprintln!(
+            "SKIP c-lim-0061 / a-srv-0026 latency: {} of {PROBES} probes against the control listener, which has no slow reader on it, went unanswered inside {PROBE_CEILING:?}; this host cannot hold a latency baseline still, so no difference measured against it would be attributable to the parked readers",
+            control_probes.stalled
+        );
+    } else {
+        // A stalled probe is charged the ceiling, and the ceiling sits in the one percent of
+        // samples the rank discards, so up to four of them per listener are invisible to the
+        // percentile below. On a host quiet enough that the idle control answered all of its
+        // probes, a probe the loaded listener left unanswered for whole seconds is the starvation
+        // this case is named after, and it must not be able to hide in a discarded tail.
+        assert!(
+            loaded_probes.stalled <= control_probes.stalled,
+            "{} of {PROBES} fresh probes against the loaded listener went unanswered inside {PROBE_CEILING:?}, against {} on the control listener probed in lock-step with it",
+            loaded_probes.stalled,
+            control_probes.stalled
+        );
+        let ceiling = control_probes.p99.saturating_mul(8) + Duration::from_millis(100);
+        eprintln!("c-lim-0061 p99 ceiling: {ceiling:?}");
+        assert!(
+            loaded_probes.p99 <= ceiling,
+            "a fresh connection's p99 was {:?} on the loaded listener against {:?} on a control listener probed in lock-step with it, past the {ceiling:?} ceiling",
+            loaded_probes.p99,
+            control_probes.p99
+        );
+    }
+
+    let _latency_closure = retire_slow_readers(first_wave, &loaded.metrics).await;
 
     shut_down(control, control_runtime, "the control listener").await;
     shut_down(loaded, loaded_runtime, "the loaded listener").await;
