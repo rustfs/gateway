@@ -78,13 +78,31 @@ impl OperationCodec for StaticProbe {
 struct Backend(Arc<Mutex<Vec<&'static str>>>);
 
 impl Handler<CopyObject> for Backend {
-    async fn call(&self, _request: Req<CopyObject>) -> HandlerResult<CopyObject> {
+    async fn call(&self, request: Req<CopyObject>) -> HandlerResult<CopyObject> {
+        let (_source, context) = rustfs_gateway_core::HandlerCancellationSource::pair();
+        self.call_with_context(request, context).await
+    }
+
+    async fn call_with_context(
+        &self,
+        _request: Req<CopyObject>,
+        _context: rustfs_gateway_core::HandlerContext,
+    ) -> HandlerResult<CopyObject> {
         panic!("an unbound CopyObject must not reach the handler")
     }
 }
 
 impl Handler<UploadPartCopy> for Backend {
-    async fn call(&self, _request: Req<UploadPartCopy>) -> HandlerResult<UploadPartCopy> {
+    async fn call(&self, request: Req<UploadPartCopy>) -> HandlerResult<UploadPartCopy> {
+        let (_source, context) = rustfs_gateway_core::HandlerCancellationSource::pair();
+        self.call_with_context(request, context).await
+    }
+
+    async fn call_with_context(
+        &self,
+        _request: Req<UploadPartCopy>,
+        _context: rustfs_gateway_core::HandlerContext,
+    ) -> HandlerResult<UploadPartCopy> {
         panic!("an unbound UploadPartCopy must not reach the handler")
     }
 }
