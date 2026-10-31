@@ -202,6 +202,27 @@ fn erased_dispatch_still_refuses_outposts_access_point_sources() {
 }
 
 #[test]
+fn both_copy_codecs_decode_outposts_access_point_identity_and_key_once() {
+    let source = "arn%3Aaws%3As3-outposts%3Aus-east-1%3A123456789012%3Aoutpost%2Fop%2Faccesspoint%2Fap%2Fobject%2Fliteral%252Fkey?versionId=v%252F1";
+    for names in [NamePolicy::default(), rustfs()] {
+        for (part, query) in [(false, ""), (true, "?partNumber=1&uploadId=upload")] {
+            assert_eq!(
+                decode(part, source, query, &[], &names),
+                Ok(CopySourceValue::Outpost {
+                    partition: "aws".into(),
+                    region: "us-east-1".into(),
+                    account_id: "123456789012".into(),
+                    outpost_id: "op/accesspoint/ap".into(),
+                    key: "literal%2Fkey".into(),
+                    version_id: Some("v%2F1".into()),
+                }),
+                "part={part}"
+            );
+        }
+    }
+}
+
+#[test]
 fn source_deployment_validation_runs_once_at_resource_derivation() {
     use rustfs_gateway_core::Operation;
     use rustfs_gateway_types::{NameValidator, Stricter};
