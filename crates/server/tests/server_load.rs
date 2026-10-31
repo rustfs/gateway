@@ -651,6 +651,8 @@ async fn c_lim_0061_a_srv_0026_one_thousand_slow_readers_close_without_starving_
         return;
     };
 
+    let loaded_before_first = loaded.metrics.accepted_connections();
+    let control_before_first = control.metrics.accepted_connections();
     let first_wave = park_slow_readers(loaded.local_addr, &loaded.metrics, SLOW_READERS).await;
     let first_wave = stall_slow_readers(first_wave).await;
 
@@ -663,6 +665,74 @@ async fn c_lim_0061_a_srv_0026_one_thousand_slow_readers_close_without_starving_
         "{SLOW_READERS} parked slow readers grew the resident set by {parked_growth} bytes, past the {parked_budget}-byte per-connection budget"
     );
 
+    let first_closure = retire_slow_readers(first_wave, &loaded.metrics).await;
+    let after_first = rss_bytes().expect("RSS remains readable");
+    assert_eq!(
+        loaded.metrics.accepted_connections() - loaded_before_first,
+        SLOW_READERS,
+        "the RSS calibration wave must contain only slow-reader connections"
+    );
+    assert_eq!(
+        control.metrics.accepted_connections() - control_before_first,
+        0,
+        "the RSS calibration wave must contain no control probes"
+    );
+    let first_growth = after_first.saturating_sub(before);
+
+    // Waves two onward. Each is identical to the first, so under accumulation each costs what the
+    // first cost; under reuse each finds the memory the last one gave back already there.
+    let mut closures = vec![first_closure];
+    let mut tail_waves = Vec::with_capacity(WAVES - 1);
+    let mut previous = after_first;
+    for _ in 1..WAVES {
+        let wave = park_slow_readers(loaded.local_addr, &loaded.metrics, SLOW_READERS).await;
+        let wave = stall_slow_readers(wave).await;
+        closures.push(retire_slow_readers(wave, &loaded.metrics).await);
+        let after = rss_bytes().expect("RSS remains readable");
+        tail_waves.push(after.saturating_sub(previous));
+        previous = after;
+    }
+    // The aggregate, not the sum of the per-wave figures: a wave that hands pages back should be
+    // allowed to pay for one that took some, and `saturating_sub` per wave would round that away.
+    let tail_growth = previous.saturating_sub(after_first);
+    let tail_mean = tail_growth / (WAVES - 1);
+    eprintln!("c-lim-0061 closure: {closures:?}");
+    eprintln!("c-lim-0061 waves: first_bytes={first_growth} tail_bytes={tail_waves:?} tail_mean={tail_mean}");
+
+    let ballast_seen = resident_growth_ps_can_see().expect("RSS remains readable");
+    eprintln!("c-lim-0061 instrument: ballast_bytes={BALLAST_BYTES} seen_bytes={ballast_seen}");
+
+    if ballast_seen < BALLAST_BYTES / BALLAST_SHARE_SEEN {
+        // Not a pass, and not a tight bound either — this host cannot make the observation at all.
+        // The control retained 64 MiB of incompressible memory and `ps` accounted for
+        // `ballast_seen` of it, so a wave whose memory was never given back would be reported the
+        // same way as one whose memory was reused, and the assertion below could not go red for
+        // the defect it is named after. It is reported instead of run.
+        eprintln!(
+            "SKIP c-lim-0061 / a-srv-0026 reuse: this host's `ps` accounted for only {ballast_seen} of {BALLAST_BYTES} bytes of deliberately retained, incompressible memory {BALLAST_SETTLE:?} after it was allocated, so a resident-set delta here cannot distinguish a wave that accumulated memory from one that reused it; the reuse reading above is reported, not asserted"
+        );
+    } else if first_growth < MIN_SCALE {
+        // Not a pass. Every wave here is the same workload, so the claim is about the ratio
+        // between them; a first wave that did not move the resident set leaves nothing to take a
+        // ratio against, and asserting a tail against a ceiling near zero would fail whichever
+        // way the allocator happened to round.
+        eprintln!(
+            "SKIP c-lim-0061 / a-srv-0026 reuse: the first wave of {SLOW_READERS} slow readers moved the resident set by only {first_growth} bytes, under the {MIN_SCALE} bytes needed to derive a reuse ceiling from it; this host reports no first-wave scale, so a later wave being smaller than it would say nothing"
+        );
+    } else {
+        let reuse_ceiling = first_growth / TAIL_SHARE_OF_FIRST;
+        eprintln!("c-lim-0061 reuse: tail_mean={tail_mean} ceiling_bytes={reuse_ceiling}");
+        assert!(
+            tail_mean <= reuse_ceiling,
+            "{} further waves of {SLOW_READERS} slow readers averaged {tail_mean} bytes of resident growth each ({tail_waves:?}) against a {reuse_ceiling}-byte ceiling, half of the {first_growth} bytes the first wave cost: the memory a retired slow reader owned is accumulating, not being reused",
+            WAVES - 1
+        );
+    }
+
+    // Probe allocations must not contribute to the four-wave RSS calibration.
+    // Use a separate wave for the original paired and fresh latency samples.
+    let first_wave = park_slow_readers(loaded.local_addr, &loaded.metrics, SLOW_READERS).await;
+    let first_wave = stall_slow_readers(first_wave).await;
     let control_addresses = vec![control.local_addr; PROBES];
     let loaded_addresses = vec![loaded.local_addr; PROBES];
     let (control_probes, loaded_probes, retained_probes) =
@@ -734,59 +804,7 @@ async fn c_lim_0061_a_srv_0026_one_thousand_slow_readers_close_without_starving_
         );
     }
 
-    let first_closure = retire_slow_readers(first_wave, &loaded.metrics).await;
-    let after_first = rss_bytes().expect("RSS remains readable");
-    let first_growth = after_first.saturating_sub(before);
-
-    // Waves two onward. Each is identical to the first, so under accumulation each costs what the
-    // first cost; under reuse each finds the memory the last one gave back already there.
-    let mut closures = vec![first_closure];
-    let mut tail_waves = Vec::with_capacity(WAVES - 1);
-    let mut previous = after_first;
-    for _ in 1..WAVES {
-        let wave = park_slow_readers(loaded.local_addr, &loaded.metrics, SLOW_READERS).await;
-        let wave = stall_slow_readers(wave).await;
-        closures.push(retire_slow_readers(wave, &loaded.metrics).await);
-        let after = rss_bytes().expect("RSS remains readable");
-        tail_waves.push(after.saturating_sub(previous));
-        previous = after;
-    }
-    // The aggregate, not the sum of the per-wave figures: a wave that hands pages back should be
-    // allowed to pay for one that took some, and `saturating_sub` per wave would round that away.
-    let tail_growth = previous.saturating_sub(after_first);
-    let tail_mean = tail_growth / (WAVES - 1);
-    eprintln!("c-lim-0061 closure: {closures:?}");
-    eprintln!("c-lim-0061 waves: first_bytes={first_growth} tail_bytes={tail_waves:?} tail_mean={tail_mean}");
-
-    let ballast_seen = resident_growth_ps_can_see().expect("RSS remains readable");
-    eprintln!("c-lim-0061 instrument: ballast_bytes={BALLAST_BYTES} seen_bytes={ballast_seen}");
-
-    if ballast_seen < BALLAST_BYTES / BALLAST_SHARE_SEEN {
-        // Not a pass, and not a tight bound either — this host cannot make the observation at all.
-        // The control retained 64 MiB of incompressible memory and `ps` accounted for
-        // `ballast_seen` of it, so a wave whose memory was never given back would be reported the
-        // same way as one whose memory was reused, and the assertion below could not go red for
-        // the defect it is named after. It is reported instead of run.
-        eprintln!(
-            "SKIP c-lim-0061 / a-srv-0026 reuse: this host's `ps` accounted for only {ballast_seen} of {BALLAST_BYTES} bytes of deliberately retained, incompressible memory {BALLAST_SETTLE:?} after it was allocated, so a resident-set delta here cannot distinguish a wave that accumulated memory from one that reused it; the reuse reading above is reported, not asserted"
-        );
-    } else if first_growth < MIN_SCALE {
-        // Not a pass. Every wave here is the same workload, so the claim is about the ratio
-        // between them; a first wave that did not move the resident set leaves nothing to take a
-        // ratio against, and asserting a tail against a ceiling near zero would fail whichever
-        // way the allocator happened to round.
-        eprintln!(
-            "SKIP c-lim-0061 / a-srv-0026 reuse: the first wave of {SLOW_READERS} slow readers moved the resident set by only {first_growth} bytes, under the {MIN_SCALE} bytes needed to derive a reuse ceiling from it; this host reports no first-wave scale, so a later wave being smaller than it would say nothing"
-        );
-    } else {
-        let reuse_ceiling = first_growth / TAIL_SHARE_OF_FIRST;
-        eprintln!("c-lim-0061 reuse: tail_mean={tail_mean} ceiling_bytes={reuse_ceiling}");
-        assert!(
-            tail_mean <= reuse_ceiling,
-            "{} further waves of {SLOW_READERS} slow readers averaged {tail_mean} bytes of resident growth each ({tail_waves:?}) against a {reuse_ceiling}-byte ceiling, half of the {first_growth} bytes the first wave cost: the memory a retired slow reader owned is accumulating, not being reused",
-            WAVES - 1
-        );
-    }
+    let _latency_closure = retire_slow_readers(first_wave, &loaded.metrics).await;
 
     shut_down(control, control_runtime, "the control listener").await;
     shut_down(loaded, loaded_runtime, "the loaded listener").await;
