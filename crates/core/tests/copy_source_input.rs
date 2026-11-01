@@ -94,6 +94,7 @@ fn later_bindings_keep_their_error_ahead_of_invalid_copy_sources() {
                 "src/%FF",
                 "arn:bad",
                 "arn:aws:s3:us-east-1:123:accesspoint/ap/object/key",
+                "arn:aws:s3-outposts:us-east-1:123456789012:outpost/op/custom/object/key",
             ] {
                 assert_eq!(
                     decode(part, source, query, &headers, &names),
@@ -172,32 +173,34 @@ fn erased_dispatch_still_refuses_outposts_access_point_sources() {
     use rustfs_gateway_core::ErasedCodec;
 
     for (part, query) in [(false, ""), (true, "?partNumber=1&uploadId=upload")] {
-        let request = http::Request::builder()
-            .method("PUT")
-            .uri(format!("http://host.invalid/target/key{query}"))
-            .header("host", "host.invalid")
-            .header(
-                "x-amz-copy-source",
-                "arn:aws:s3-outposts:us-east-1:123456789012:outpost/op/accesspoint/ap/object/key",
-            )
-            .body(())
-            .expect("request");
-        let wire = WireRequest::accept(request, &Limits::default()).expect("accepted request");
-        let view = MetaView::of_with(&wire, TargetKind::Object, &rustfs()).expect("request metadata");
-        let codec = if part {
-            ErasedCodec::for_operation::<dto::UploadPartCopy>()
-        } else {
-            ErasedCodec::for_operation::<dto::CopyObject>()
-        };
-        let error = match codec.decode(&view, RequestBody::None) {
-            Err(error) => error,
-            Ok(_) => panic!("unbound source"),
-        };
-        assert_eq!(error.code(), &ErrorCode::INVALID_ARGUMENT);
-        assert_eq!(
-            error.message(),
-            "x-amz-copy-source accepts an access point or Outposts ARN, or a bucket and key"
-        );
+        for source in [
+            "arn:aws:s3-outposts:us-east-1:123456789012:outpost/op/accesspoint/ap/object/key",
+            "arn:aws:s3-outposts:us-east-1:123456789012:outpost/op/custom/object/key",
+        ] {
+            let request = http::Request::builder()
+                .method("PUT")
+                .uri(format!("http://host.invalid/target/key{query}"))
+                .header("host", "host.invalid")
+                .header("x-amz-copy-source", source)
+                .body(())
+                .expect("request");
+            let wire = WireRequest::accept(request, &Limits::default()).expect("accepted request");
+            let view = MetaView::of_with(&wire, TargetKind::Object, &rustfs()).expect("request metadata");
+            let codec = if part {
+                ErasedCodec::for_operation::<dto::UploadPartCopy>()
+            } else {
+                ErasedCodec::for_operation::<dto::CopyObject>()
+            };
+            let error = match codec.decode(&view, RequestBody::None) {
+                Err(error) => error,
+                Ok(_) => panic!("unbound source"),
+            };
+            assert_eq!(error.code(), &ErrorCode::INVALID_ARGUMENT);
+            assert_eq!(
+                error.message(),
+                "x-amz-copy-source accepts an access point or Outposts ARN, or a bucket and key"
+            );
+        }
     }
 }
 
@@ -218,6 +221,29 @@ fn both_copy_codecs_decode_outposts_access_point_identity_and_key_once() {
                 }),
                 "part={part}"
             );
+        }
+    }
+}
+
+#[test]
+fn both_copy_codecs_preserve_outposts_resource_components() {
+    for names in [NamePolicy::default(), rustfs()] {
+        for (part, query) in [(false, ""), (true, "?partNumber=1&uploadId=upload")] {
+            for component in ["op", "op/custom", "op/accesspoint/ap", "/accesspoint/"] {
+                let source = format!("arn:aws:s3-outposts:us-east-1:123456789012:outpost/{component}/object/key");
+                assert_eq!(
+                    decode(part, &source, query, &[], &names),
+                    Ok(CopySourceValue::Outpost {
+                        partition: "aws".into(),
+                        region: "us-east-1".into(),
+                        account_id: "123456789012".into(),
+                        outpost_id: component.into(),
+                        key: "key".into(),
+                        version_id: None,
+                    }),
+                    "part={part}, component={component}"
+                );
+            }
         }
     }
 }
