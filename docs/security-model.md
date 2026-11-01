@@ -247,6 +247,7 @@ The framework's half:
   snapshot cannot tell "the store is down" from "this deployment installed no source". The one
   read has a hard timeout: 250 ms by default, configurable to a non-zero value no greater than five
   seconds. A timeout follows the same `Indeterminate` path.
+- **The source-only Copy method is an opt-in contract.** `Authorizer::authorize_copy_source` defaults to `Indeterminate`, including for an existing authorizer that allows both older stages. An override must decide the source action, bucket, key, identity and version; the `route` argument supplies destination context and is not an authorization grant. Wrappers must forward the method. The `allow_when` and `decide_with` adapters apply their predicates to the source. This API does not change the service's current authorization order or enable a profile mode.
 - **The audit event is the framework's, and the sink cannot answer back.** `AuthzAuditSink` takes
   shared references and returns `()`, and it is called after the outcome has been settled. The
   event carries the principal, authentication scheme, operation, action, every resource judged,

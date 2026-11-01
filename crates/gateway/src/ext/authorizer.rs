@@ -438,6 +438,21 @@ pub trait Authorizer: Send + Sync + 'static {
     /// Decides the routed action and destination before the body is read.
     fn authorize_route<'a>(&'a self, context: &'a RequestContext<'a>, request: &'a AuthzRequest<'a>) -> BoxFuture<'a, Decision>;
 
+    /// Decides a normalized Copy source before the destination policy is evaluated.
+    ///
+    /// `route` describes the destination for context only; it has not been authorized. An
+    /// implementation must evaluate only `source` here and leave destination authorization to
+    /// the framework. The default is indeterminate so an authorizer that has not implemented
+    /// source-first evaluation cannot grant access when that mode is selected.
+    fn authorize_copy_source<'a>(
+        &'a self,
+        _context: &'a RequestContext<'a>,
+        _route: &'a AuthzRequest<'a>,
+        _source: &'a AuthzRequest<'a>,
+    ) -> BoxFuture<'a, Decision> {
+        Box::pin(async { Decision::Indeterminate })
+    }
+
     /// Decides the decoded input and every normalized resource derived from it.
     ///
     /// There is deliberately no default body: omitting the second stage is a compile error.
@@ -460,6 +475,15 @@ impl<T: Authorizer + ?Sized> Authorizer for std::sync::Arc<T> {
     ) -> BoxFuture<'a, InputDecisions> {
         (**self).authorize_input(context, request)
     }
+
+    fn authorize_copy_source<'a>(
+        &'a self,
+        context: &'a RequestContext<'a>,
+        route: &'a AuthzRequest<'a>,
+        source: &'a AuthzRequest<'a>,
+    ) -> BoxFuture<'a, Decision> {
+        (**self).authorize_copy_source(context, route, source)
+    }
 }
 
 /// The only built-in authorizer: both stages refuse every request.
@@ -470,6 +494,15 @@ impl Authorizer for DenyAllAuthorizer {
         &'a self,
         _context: &'a RequestContext<'a>,
         _request: &'a AuthzRequest<'a>,
+    ) -> BoxFuture<'a, Decision> {
+        Box::pin(async { Decision::Deny })
+    }
+
+    fn authorize_copy_source<'a>(
+        &'a self,
+        _context: &'a RequestContext<'a>,
+        _route: &'a AuthzRequest<'a>,
+        _source: &'a AuthzRequest<'a>,
     ) -> BoxFuture<'a, Decision> {
         Box::pin(async { Decision::Deny })
     }
@@ -526,6 +559,15 @@ impl Authorizer for AllowAllAuthorizer {
         Box::pin(async { Decision::Allow })
     }
 
+    fn authorize_copy_source<'a>(
+        &'a self,
+        _context: &'a RequestContext<'a>,
+        _route: &'a AuthzRequest<'a>,
+        _source: &'a AuthzRequest<'a>,
+    ) -> BoxFuture<'a, Decision> {
+        Box::pin(async { Decision::Allow })
+    }
+
     fn authorize_input<'a>(
         &'a self,
         _context: &'a RequestContext<'a>,
@@ -571,6 +613,16 @@ where
             request: &'a AuthzRequest<'a>,
         ) -> BoxFuture<'a, Decision> {
             let decision = (self.0)(request);
+            Box::pin(async move { decision })
+        }
+
+        fn authorize_copy_source<'a>(
+            &'a self,
+            _context: &'a RequestContext<'a>,
+            _route: &'a AuthzRequest<'a>,
+            source: &'a AuthzRequest<'a>,
+        ) -> BoxFuture<'a, Decision> {
+            let decision = (self.0)(source);
             Box::pin(async move { decision })
         }
 
