@@ -355,7 +355,21 @@ fn poll_committed_work<T>(
 
 pub(crate) fn decode<O: OperationCodec>(meta: &MetaView<'_>, body: RequestBody) -> Result<Decoded<O>, CodecError> {
     let input = O::decode(meta, body)?;
+    if meta.copy_source_arns_unsupported() {
+        let kind = O::classify_copy_source(&input).map_err(|error| CodecError::new(error.code().clone(), error.message()))?;
+        refuse_unsupported_copy_arn(kind)?;
+    }
     prepare_input_under::<O>(input, meta.names()).map_err(|error| CodecError::new(error.code().clone(), error.message()))
+}
+
+fn refuse_unsupported_copy_arn(kind: Option<crate::CopySourceKind>) -> Result<(), CodecError> {
+    if kind == Some(crate::CopySourceKind::Arn) {
+        return Err(CodecError::new(
+            rustfs_gateway_types::ErrorCode::NOT_IMPLEMENTED,
+            "A header you provided implies functionality that is not implemented.",
+        ));
+    }
+    Ok(())
 }
 
 pub(crate) fn resources<O: OperationCodec>(decoded: &Decoded<O>) -> Result<Vec<OwnedResource>, CodecError> {

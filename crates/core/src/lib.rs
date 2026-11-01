@@ -148,8 +148,8 @@ pub use crate::fault::{
 };
 pub use crate::handler::{Answer, BoxFuture, Handler, HandlerError, HandlerResult, Req, Resp};
 pub use crate::op::{
-    AuthRequirement, HasOperation, Operation, OperationOrigin, ResourceShape, StandardOperation, is_standard_operation_name,
-    standard_operation_names,
+    AuthRequirement, CopySourceKind, HasOperation, Operation, OperationOrigin, ResourceShape, StandardOperation,
+    is_standard_operation_name, standard_operation_names,
 };
 pub use crate::registry::{
     BuildError, ErasedAuthorize, ErasedCodec, ErasedDecode, ErasedDecoded, ErasedEncode, ErasedHandler, ErasedRequest,

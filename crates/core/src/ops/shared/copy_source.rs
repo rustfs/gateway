@@ -55,8 +55,10 @@ use rustfs_gateway_types::{
 
 use crate::contracts::{COPY_RANGE_LENGTH_ARITHMETIC, CopyRangeLengthArithmetic};
 
+mod capability;
 mod value;
 
+pub(crate) use capability::classify;
 pub(crate) use value::{decode_value, seal_value};
 #[cfg(test)]
 use value::{prepare_copy, prepare_part_copy, source_erased};

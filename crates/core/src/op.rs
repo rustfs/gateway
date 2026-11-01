@@ -359,6 +359,15 @@ pub(crate) fn is_well_formed_action(action: &str) -> bool {
     }
 }
 
+/// The bounded class of a decoded Copy source, without its resource identity.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CopySourceKind {
+    /// A bucket and key source.
+    Bucket,
+    /// An access point or Outposts ARN source.
+    Arn,
+}
+
 /// One S3 operation, as a type.
 ///
 /// One of the two traits in this workspace allowed to use RPITIT (`impl Future` in return
@@ -389,6 +398,18 @@ pub trait Operation: Send + Sync + 'static {
     /// There is deliberately no default. Operations without any write
     /// `type DerivedResources = NoDerived` and return the ZST explicitly.
     type DerivedResources: DerivedResourceSet;
+
+    /// Classifies a decoded Copy source before capability evaluation.
+    ///
+    /// Non-Copy operations return `None`. Copy operations check the source's parser floor
+    /// and return only its class, without deriving or authorizing a resource.
+    ///
+    /// # Errors
+    ///
+    /// Returns an input refusal for a malformed Copy source.
+    fn classify_copy_source(_input: &Self::Input) -> Result<Option<CopySourceKind>, DerivedResourceError> {
+        Ok(None)
+    }
 
     /// Extracts every resource that requires the second authorization stage.
     fn derive_resources(input: &Self::Input) -> Result<Self::DerivedResources, DerivedResourceError>;

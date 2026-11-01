@@ -71,6 +71,8 @@ pub struct MetaView<'a> {
     bucket: Option<BucketName>,
     key: Option<ObjectKey>,
     names: NamePolicy,
+    /// Whether the assembly refuses ARN copy sources before resource derivation.
+    copy_source_arns_unsupported: bool,
     /// The object length `content-length` answers with, for an `aws-chunked` body.
     framed_content_length: Option<u64>,
     /// Whether the deployment waived this operation's modelled integrity requirement.
@@ -103,6 +105,20 @@ pub struct MetaView<'a> {
 }
 
 impl<'a> MetaView<'a> {
+    /// Selects an assembly that does not support ARN Copy sources.
+    ///
+    /// The caller must arrange authentication and destination-policy ordering separately.
+    /// This setting does not defer or perform route authorization.
+    #[must_use]
+    pub fn with_copy_source_arns_unsupported(mut self) -> Self {
+        self.copy_source_arns_unsupported = true;
+        self
+    }
+
+    pub(crate) const fn copy_source_arns_unsupported(&self) -> bool {
+        self.copy_source_arns_unsupported
+    }
+
     /// Splits an accepted request's path under the default naming policy.
     ///
     /// # Errors
@@ -177,6 +193,7 @@ impl<'a> MetaView<'a> {
             bucket,
             key,
             names: names.clone(),
+            copy_source_arns_unsupported: false,
             framed_content_length: None,
             integrity_optional: false,
             checksum_failures_as_bad_digest: false,
