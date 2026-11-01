@@ -134,7 +134,7 @@ fn meta() -> MetaView<'static> {
     MetaView::of(wire, TargetKind::Service).expect("service meta")
 }
 
-async fn refuse_outposts_access_point<O: OperationCodec>(query: &str)
+async fn refuse_outposts_suffix<O: OperationCodec>(query: &str, source: &str)
 where
     Backend: Handler<O>,
 {
@@ -142,10 +142,7 @@ where
         .method("PUT")
         .uri(format!("http://s3.example.com/target/key{query}"))
         .header("host", "s3.example.com")
-        .header(
-            "x-amz-copy-source",
-            "arn:aws:s3-outposts:us-east-1:123456789012:outpost/op/accesspoint/ap/object/key",
-        )
+        .header("x-amz-copy-source", source)
         .body(Bytes::new())
         .expect("valid request");
     let wire = WireRequest::accept(request, &Limits::default()).expect("accepted request");
@@ -177,14 +174,19 @@ where
                 "x-amz-copy-source accepts an access point or Outposts ARN, or a bucket and key"
             );
         }
-        _ => panic!("an access-point source must not bind as an Outpost"),
+        _ => panic!("an unsupported source must not bind as an Outpost"),
     }
 }
 
 #[tokio::test]
-async fn outposts_access_point_is_refused_before_input_authorization() {
-    refuse_outposts_access_point::<CopyObject>("").await;
-    refuse_outposts_access_point::<UploadPartCopy>("?partNumber=1&uploadId=upload").await;
+async fn unrepresentable_outposts_source_is_refused_before_input_authorization() {
+    for source in [
+        "arn:aws:s3-outposts:us-east-1:123456789012:outpost/op/accesspoint/ap/object/key",
+        "arn:aws:s3-outposts:us-east-1:123456789012:outpost/op/custom/object/key",
+    ] {
+        refuse_outposts_suffix::<CopyObject>("", source).await;
+        refuse_outposts_suffix::<UploadPartCopy>("?partNumber=1&uploadId=upload", source).await;
+    }
 }
 
 /// a-asm-0007. The sealed entry calls route authorization before body work, input authorization
