@@ -30,14 +30,15 @@
 //! It is a separate type from [`crate::PreAuthError`] for one measured reason: that type's status
 //! set is `{400, 403, 501}`, and `MissingContentLength` is a `411`. A decode failure is not a
 //! pre-authentication statement about the caller, it is a statement about bytes the caller sent,
-//! so it may carry any 4xx the IR names.
+//! so it may carry any 4xx the IR names. Dispatch also uses it for a fixed capability refusal
+//! after decoding, which can carry `NotImplemented`.
 
 use std::fmt;
 
 use http::StatusCode;
 use rustfs_gateway_types::ErrorCode;
 
-/// Why a request could not be decoded, or a response could not be encoded.
+/// Why a request could not be decoded, a dispatch capability refused it, or a response could not be encoded.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CodecError {
     code: ErrorCode,
