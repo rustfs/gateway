@@ -31,6 +31,17 @@ status = 200
 version = { header = "x-amz-version-id" }
 
 [[exchanges]]
+name = "write-newer-version"
+[exchanges.request]
+method = "PUT"
+target = "/authz-version/source"
+body = { utf8 = "version-two" }
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+[exchanges.expect]
+kind = "response"
+status = 200
+
+[[exchanges]]
 name = "copy-version"
 [exchanges.request]
 method = "PUT"
@@ -40,3 +51,15 @@ sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential
 [exchanges.expect]
 kind = "response"
 status = 200
+
+[[exchanges]]
+name = "read-copied-version"
+[exchanges.request]
+method = "GET"
+target = "/authz-version/destination"
+sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential = "valid" }
+[exchanges.expect]
+kind = "response"
+status = 200
+[exchanges.expect.body]
+exact_utf8 = "version-one"
