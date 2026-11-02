@@ -390,6 +390,9 @@ pub use options::{Command, Options};
 #[path = "cli/baseline_tests.rs"]
 mod baseline_tests;
 #[cfg(test)]
+#[path = "cli/feedback_diagnostics.rs"]
+mod feedback_diagnostics;
+#[cfg(test)]
 #[path = "cli/profile_tests.rs"]
 mod profile_tests;
 #[cfg(test)]
@@ -398,6 +401,7 @@ mod rulings_tests;
 #[cfg(test)]
 #[path = "cli/shard_tests.rs"]
 mod shard_tests;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -440,10 +444,15 @@ mod tests {
             shard: None,
         };
         let report = runner::run(corpus, target(selected_transport, root.clone()).as_mut(), &options);
+        let diagnostics = report
+            .outcomes
+            .iter()
+            .map(super::feedback_diagnostics::summary)
+            .collect::<Vec<_>>();
         assert_eq!(
             status_code(&report, None, Command::Run),
             exit::SUCCESS,
-            "{case} is a crate's feedback evidence and did not execute green over {transport}"
+            "{case} is a crate's feedback evidence and did not execute green over {transport}: {diagnostics:?}"
         );
     }
 
