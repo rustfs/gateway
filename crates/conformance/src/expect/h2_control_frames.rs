@@ -48,10 +48,14 @@ pub(super) fn check_socket_read_after(expect: &Value, observed: &Observation, po
     let expected = expected.as_str();
     let actual = observed.socket_read_after.map(|state| state.as_str());
     if expected.is_none() || actual.is_none() || expected != actual {
+        let expected_label = expected
+            .filter(|value| matches!(*value, "eof" | "reset" | "no_termination_observed"))
+            .unwrap_or("invalid");
+        let actual_label = actual.unwrap_or("not_measured");
         out.push(Diagnostic::deny(
             "expect/socket_read_after",
             &format!("{pointer}/socket_read_after"),
-            "receive-side termination differs or was not measured within the observation window",
+            format!("receive-side termination: expected {expected_label}, observed {actual_label}"),
         ));
     }
 }
