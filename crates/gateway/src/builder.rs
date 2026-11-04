@@ -279,6 +279,21 @@ impl ServiceBuilder {
         self
     }
 
+    #[cfg(feature = "external-payload")]
+    pub(crate) fn enable_external_payload_registration(mut self, operation: &'static str) -> Self {
+        if let Some(pending) = self.pending.remove(operation) {
+            self.pending.insert(
+                operation,
+                Box::new(move |layers| {
+                    let mut dispatch = pending(layers)?;
+                    dispatch.enable_external_payload();
+                    Ok(dispatch)
+                }),
+            );
+        }
+        self
+    }
+
     /// Installs a [`StageFilter`]. Every seam it implements runs in registration order.
     ///
     /// A filter may observe, may rewrite and may refuse; it may not answer, may not affect a

@@ -119,7 +119,34 @@ macro_rules! register_lifecycle_entries {
     };
 }
 
+#[cfg(feature = "external-payload")]
+macro_rules! register_external_entries {
+    ($backend:expr, $builder:expr;) => { $builder };
+    ($backend:expr, $builder:expr; $group:ident PutObject => $name:literal, $($rest:tt)*) => {
+        register_external_entries!($backend, $builder.register_external_payload::<PutObject, _>(Arc::clone($backend)); $($rest)*)
+    };
+    ($backend:expr, $builder:expr; $group:ident UploadPart => $name:literal, $($rest:tt)*) => {
+        register_external_entries!($backend, $builder.register_external_payload::<UploadPart, _>(Arc::clone($backend)); $($rest)*)
+    };
+    ($backend:expr, $builder:expr; $group:ident $operation:ident => $name:literal, $($rest:tt)*) => {
+        register_external_entries!($backend, $builder.register::<$operation, _>(Arc::clone($backend)); $($rest)*)
+    };
+}
+
 impl FsBackend {
+    /// Registers every reference operation, enabling verified external input on PutObject and UploadPart.
+    ///
+    /// Existing family-specific registration methods keep their ordinary behavior. This explicit
+    /// composition is suitable for exercising a complete external-data host against the reference backend.
+    #[cfg(feature = "external-payload")]
+    #[must_use]
+    pub fn register_with_external_payload(self: &Arc<Self>, builder: ServiceBuilder) -> ServiceBuilder {
+        macro_rules! register {
+            ($($operations:tt)*) => { register_external_entries!(self, builder; $($operations)*) };
+        }
+        reference_operations!(register)
+    }
+
     /// Registers the bucket and object CRUD operations with the production service builder.
     #[must_use]
     pub fn register_crud(self: &Arc<Self>, builder: ServiceBuilder) -> ServiceBuilder {

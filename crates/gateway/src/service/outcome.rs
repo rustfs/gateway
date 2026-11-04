@@ -26,7 +26,7 @@ use rustfs_gateway_core::{ErrorContext, HandlerError, ResponseKind, resolve};
 use rustfs_gateway_stream::Body;
 use rustfs_gateway_types::ErrorCode;
 
-use super::Outcome;
+use super::cors::CorsDecoration;
 use crate::builder::credential_sentences::CredentialSentences;
 use crate::close::ConnectionIntent;
 use crate::logging::Refused;
@@ -38,6 +38,29 @@ use crate::trace::RequestTrace;
 pub(super) enum LegacyCorsDisposition {
     Decorate,
     PlaintextCustomerKeyRefusal,
+}
+
+/// What the observer is told, accumulated as the pipeline learns it.
+///
+/// Borrows the request's [`RequestTrace`] rather than owning a source, which is what makes the one
+/// identifier per request a property of the type: every refusal below renders through
+/// [`Outcome::refuse`], and `refuse` has exactly one trace it can render with.
+pub(super) struct Outcome<'a> {
+    pub(super) trace: &'a RequestTrace,
+    pub(super) operation: Option<&'static str>,
+    pub(super) identity: Option<rustfs_gateway_sig::Identity>,
+    pub(super) error: Option<ErrorCode>,
+    /// The CORS decoration for an ordinary response, set once authorisation has been granted and
+    /// applied by [`super::S3Service::call`] to whatever the pipeline produced afterwards. `None` for
+    /// every request that never got that far, which is what keeps a pre-authentication refusal
+    /// from costing a configuration read.
+    pub(super) cors: Option<CorsDecoration>,
+    pub(super) legacy_cors_disposition: LegacyCorsDisposition,
+    pub(super) response_kind: ResponseKind,
+    pub(super) credential_sentences: CredentialSentences,
+    /// The stage that refused the request, when the gateway refused it; reported once, at the end
+    /// (`crate::logging::request_refused`).
+    pub(super) refused: Option<Refused>,
 }
 
 impl<'a> Outcome<'a> {

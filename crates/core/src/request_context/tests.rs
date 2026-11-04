@@ -263,3 +263,48 @@ fn n_a_detached_context_names_no_target_and_debug_prints_only_the_authoritys_pre
         .expect("an anonymous context");
     assert!(format!("{context:?}").contains("target_authority: false"));
 }
+
+#[test]
+fn external_context_copy_preserves_request_facts_without_copying_the_caller_secret() {
+    let wire = transport_wire();
+    let verdict = anonymous_verdict(&wire);
+    let mut context =
+        RequestContextView::from_pipeline("HeadObject", &wire, path_style(), &verdict, None).expect("valid context fixture");
+    context.principal = Some(RequestPrincipal {
+        identity: Identity::new("fixture-access-key").expect("valid context fixture"),
+        scheme: AuthenticatedScheme {
+            family: SigFamily::V4,
+            location: SigLocation::Header,
+            service: SigService::S3,
+            temporary: false,
+        },
+        scope: None,
+        secret: Some(CallerSecretKey(SecretBytes::new(b"private-caller-key"))),
+    });
+    let copy = context.clone_without_caller_secret();
+    assert_eq!(copy.operation(), context.operation());
+    assert_eq!(copy.raw_path(), context.raw_path());
+    assert_eq!(copy.principal().expect("valid context fixture").access_key_id(), "fixture-access-key");
+    assert!(
+        copy.principal()
+            .expect("valid context fixture")
+            .secret_key_from_authenticator_lookup()
+            .is_none()
+    );
+    assert!(
+        context
+            .principal()
+            .expect("valid context fixture")
+            .secret_key_from_authenticator_lookup()
+            .is_some()
+    );
+    assert!(core::ptr::eq(
+        copy.transport_extensions()
+            .get::<TransportNote>()
+            .expect("valid context fixture"),
+        context
+            .transport_extensions()
+            .get::<TransportNote>()
+            .expect("valid context fixture")
+    ));
+}

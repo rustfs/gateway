@@ -22,6 +22,7 @@
 #![allow(clippy::expect_used)]
 
 use super::*;
+use crate::etag;
 use rustfs_gateway::{BucketName, Handler, Req, dto};
 
 fn backend_with_bucket(tag: &str) -> (std::path::PathBuf, std::sync::Arc<FsBackend>) {
