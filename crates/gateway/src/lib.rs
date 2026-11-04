@@ -97,6 +97,11 @@ mod cors_legacy;
 mod dialect_posture;
 mod dispatch;
 mod ext;
+mod external_marker;
+#[cfg(feature = "external-payload")]
+pub mod external_payload;
+#[cfg(feature = "external-payload")]
+mod external_payload_execution;
 mod file_fallback;
 mod gate;
 mod integrity;

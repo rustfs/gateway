@@ -78,7 +78,23 @@
 
 use rustfs_gateway_core::Router;
 
-use super::{HostRequestId, RequestTrace};
+use super::{HostRequestId, RequestTrace, TraceSource};
+
+/// One minted trace shared with external completion; the ordinary pipeline selects its profile.
+#[cfg(feature = "external-payload")]
+#[derive(Clone)]
+pub(crate) struct CapturedTrace(std::sync::Arc<std::sync::Mutex<RequestTrace>>);
+
+#[cfg(feature = "external-payload")]
+impl CapturedTrace {
+    pub(crate) fn new(trace: RequestTrace) -> Self {
+        Self(std::sync::Arc::new(std::sync::Mutex::new(trace)))
+    }
+
+    pub(crate) fn get(&self) -> RequestTrace {
+        *self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+}
 
 /// Which identifiers one answer carries, and where. Settled once per request.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -107,6 +123,17 @@ pub(crate) enum Identification {
 }
 
 impl Identification {
+    /// Settles the request trace under the entry's configuration snapshot before any dispatch.
+    pub(crate) fn trace<B>(self, source: &dyn TraceSource, request: &http::Request<B>, router: &Router) -> RequestTrace {
+        #[cfg(feature = "external-payload")]
+        if let Some(captured) = request.extensions().get::<CapturedTrace>() {
+            let mut trace = captured.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            *trace = self.settle(*trace, request, router);
+            return *trace;
+        }
+        self.settle(source.mint(), request, router)
+    }
+
     /// The trace one request is answered and reported with: `minted`, identified by the host's own
     /// identifier when the request carries a [`HostRequestId`], and answered as this assembly and the
     /// request's path select.

@@ -108,6 +108,8 @@ pub mod dialect;
 pub mod dispatch;
 pub mod error;
 mod error_resolution;
+#[cfg(feature = "external-payload")]
+pub mod external_payload;
 pub mod fault;
 pub mod handler;
 pub mod op;

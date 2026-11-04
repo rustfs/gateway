@@ -280,6 +280,35 @@ pub struct RequestContextView {
 }
 
 impl RequestContextView {
+    /// Copies verified request facts while excluding the caller secret obtained from credential lookup.
+    ///
+    /// Transport extensions retain their original shared identity. This is suitable for a trusted
+    /// secondary data consumer that needs the already-authorized request without another credential lookup.
+    #[must_use]
+    pub fn clone_without_caller_secret(&self) -> Self {
+        Self {
+            operation: self.operation,
+            method: self.method.clone(),
+            version: self.version,
+            raw_path: self.raw_path.clone(),
+            raw_query: self.raw_query.clone(),
+            host: self.host.clone(),
+            target_scheme: self.target_scheme.clone(),
+            target_authority: self.target_authority.clone(),
+            addressed: self.addressed.clone(),
+            headers: self.headers.clone(),
+            transport_extensions: self.transport_extensions.clone(),
+            principal: self.principal.as_ref().map(|principal| RequestPrincipal {
+                identity: principal.identity.clone(),
+                scheme: principal.scheme,
+                scope: principal.scope.clone(),
+                secret: None,
+            }),
+            path_params: self.path_params.clone(),
+            subjects: self.subjects.clone(),
+        }
+    }
+
     /// Builds the context of one request the pipeline has accepted, routed and authenticated.
     ///
     /// Every fact is copied from the stage that decided it: the method, raw target, effective host

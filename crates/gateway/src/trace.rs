@@ -105,6 +105,8 @@ use rustfs_gateway_xml::XmlWriter;
 mod answer;
 mod host;
 
+#[cfg(feature = "external-payload")]
+pub(crate) use self::answer::CapturedTrace;
 pub(crate) use self::answer::{Answer, Identification};
 pub use self::host::{HostRequestId, InvalidRequestId};
 

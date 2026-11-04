@@ -119,8 +119,8 @@ use rustfs_gateway_core::cors::{
 };
 use rustfs_gateway_core::{
     Decision, EncodedResponse, ErrorContext, HandlerError, MetaView, OwnedResource, RedirectTarget, RegionLabel, RequestBodyMode,
-    RequestContextView, ResourceShape, ResponseBody, ResponseKind, RouteRequestParts, SseConfig, StaticDispatchError,
-    StaticDispatchOutcome, TransportSecurity,
+    RequestContextView, ResourceShape, ResponseBody, RouteRequestParts, SseConfig, StaticDispatchError, StaticDispatchOutcome,
+    TransportSecurity,
     dispatch::{NO_ROUTE_MESSAGE, NOT_REGISTERED_MESSAGE},
 };
 use rustfs_gateway_http::{Limits, WireRequest};
@@ -130,7 +130,6 @@ use rustfs_gateway_sig::{
 use rustfs_gateway_stream::Body;
 use rustfs_gateway_types::{ErrorCode, NamePolicy};
 
-use crate::builder::credential_sentences::CredentialSentences;
 use crate::clock::{Clock, ClockPosture, MonotonicClock};
 use crate::close::ConnectionIntent;
 use crate::config::{ConfigSnapshot, ConfigStore};
@@ -154,7 +153,7 @@ use crate::render::{
 use crate::request_config::{Entered, Guarded, HandlerDeadlineReport, RequestConfig, RouteAuthorized};
 use crate::request_deadline::{elapsed_since, hold_failure_floor, policy_snapshot_with_timeout};
 use crate::routed_facts::RoutedFacts;
-use crate::trace::{RequestTrace, TraceSource};
+use crate::trace::TraceSource;
 use crate::{response::into_response, routing::RuntimeAssembly};
 
 mod body_preparation;
@@ -163,9 +162,8 @@ mod outcome;
 pub(crate) mod refused_post;
 mod update;
 
-use self::cors::CorsDecoration;
 pub(crate) use self::cors::preflight_bucket;
-use self::outcome::LegacyCorsDisposition;
+use self::outcome::{LegacyCorsDisposition, Outcome};
 
 /// The one sentence a request gets when the authenticator itself could not answer.
 ///
@@ -348,10 +346,7 @@ impl S3Service {
         B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
         M: OperationMode,
     {
-        // One minting and one reading of the clock, at the top, side by side. Everything below is
-        // handed both values; nothing below holds either source, so neither a second identifier nor
-        // a second instant can be produced — which is what lets the `Date` header and the skew
-        // window name the same moment.
+        // Select one trace and read the clock once; external completion retains the selected trace.
         // Settings and middleware came from the same entry snapshot. No stage reloads the store.
         let request_cancellation = request.extensions().get::<tokio::sync::watch::Receiver<bool>>().cloned();
         let config = RequestConfig::enter(config).with_request_cancellation(request_cancellation);
@@ -362,7 +357,7 @@ impl S3Service {
             .inner
             .view_policy
             .identification()
-            .settle(self.inner.traces.mint(), &request, &runtime.routing.router);
+            .trace(self.inner.traces.as_ref(), &request, &runtime.routing.router);
         let now = self.inner.clock.now();
         // Read before the request is consumed, and the only thing kept out of it: the RFC 9110 body rules are
         // stated over the request method, and every stage below has either forgotten it or never had it.
@@ -528,6 +523,9 @@ impl S3Service {
         M: OperationMode,
     {
         let router = &runtime.routing.router;
+        if let Some(error) = crate::external_marker::rejection(request.extensions()) {
+            return outcome.refuse_handler(error);
+        }
         let RequestEntryContext {
             now,
             connection,
@@ -544,8 +542,12 @@ impl S3Service {
         // a filter that writes an `Authorization` header does not make an anonymous request
         // authenticated, and one that deletes it does not make a signed request fail.
         let (mut parts, body) = request.into_parts();
+        let external_entry = crate::external_marker::explicit_entry(&parts.extensions);
+        let external_bound = crate::external_marker::bound_entry(&parts.extensions);
         crate::legacy_addressing::rewrite_double_slash_root(&self.inner.names, &mut parts);
         let headers = parts.headers.clone();
+        #[cfg(feature = "external-payload")]
+        crate::external_payload::apply_logical_head(&mut parts);
         // The client facts, installed where the wire seam below can correct them and acceptance
         // then freezes them for both authorization stages and the handler (rustfs/backlog#2752).
         ClientFacts::install(&mut parts.extensions);
@@ -562,10 +564,14 @@ impl S3Service {
             }
         }
 
+        let external_headers = crate::external_marker::present(&headers) || crate::external_marker::present(&parts.headers);
         let wire = match WireRequest::accept(Request::from_parts(parts, body), &self.inner.limits) {
             Ok(wire) => wire,
             Err(reject) => return outcome.refuse_at(Refused::Wire, self.inner.view_policy.wire_refusal(reject)),
         };
+        if external_entry || (external_headers && !external_bound) {
+            return outcome.refuse_at(Refused::Wire, crate::external_marker::refusal(response_kind));
+        }
         let config = config.wire();
         // The RustFS profile's cleartext customer-key gate, where legacy RustFS asks it: first.
         let early = self.inner.view_policy.plaintext_customer_keys;
@@ -683,6 +689,14 @@ impl S3Service {
             return outcome.refuse_handler(HandlerError::new(ErrorCode::NOT_IMPLEMENTED, NOT_REGISTERED_MESSAGE));
         };
         let request_body_mode = M::request_body_mode(&op);
+        #[cfg(feature = "external-payload")]
+        if external_bound
+            && crate::external_payload::upload_entry(wire.transport_extensions())
+            && !M::supports_external_payload(&op)
+        {
+            return outcome
+                .refuse_handler(HandlerError::not_implemented("the registered handler does not support external uploads"));
+        }
         let declared_length = wire.framing().declared_length();
 
         // The body is taken out before anything borrows the head, so the head can be read across
@@ -862,7 +876,7 @@ impl S3Service {
                         wire.raw_path().as_str(),
                         wire.host().raw_for_signing(),
                         &payload,
-                        declared_length,
+                        if external_bound { Some(0) } else { declared_length },
                     )
                     .with_post_policy_limits(post_policy_limits)
                     .with_claimed_route(claimed)
@@ -1343,6 +1357,9 @@ impl S3Service {
                 }
                 AcceptedBody::PostObject(post) => (*post).handoff(&metadata_admission)?,
             };
+            #[cfg(feature = "external-payload")]
+            let body = crate::external_payload::bind_input(body, body_wire.transport_extensions())
+                .map_err(|error| from_handler(error, response_kind, ConnectionIntent::MayKeepAlive))?;
             Ok((
                 ReadForDecode {
                     policy: state.policy,
@@ -1479,6 +1496,8 @@ impl S3Service {
             let context = RequestContextView::from_pipeline(operation, input_wire, addressed, input_verdict, caller_secret)
                 .map(|context| context.with_path_params(path_params).with_subjects(input_subjects.cloned()));
             let context = context.ok_or_else(|| map(HandlerError::internal_error("a rejected request reached its handler")))?;
+            #[cfg(feature = "external-payload")]
+            crate::external_payload::record_download_context(&context);
             Ok((decisions, config, sse, context))
         };
         let execution = match std::panic::catch_unwind(AssertUnwindSafe(|| {
@@ -1564,29 +1583,6 @@ impl S3Service {
     }
 }
 
-/// What the observer is told, accumulated as the pipeline learns it.
-///
-/// Borrows the request's [`RequestTrace`] rather than owning a source, which is what makes the one
-/// identifier per request a property of the type: every refusal below renders through
-/// [`Outcome::refuse`], and `refuse` has exactly one trace it can render with.
-struct Outcome<'a> {
-    trace: &'a RequestTrace,
-    operation: Option<&'static str>,
-    identity: Option<rustfs_gateway_sig::Identity>,
-    error: Option<ErrorCode>,
-    /// The CORS decoration for an ordinary response, set once authorisation has been granted and
-    /// applied by [`S3Service::call`] to whatever the pipeline produced afterwards. `None` for
-    /// every request that never got that far, which is what keeps a pre-authentication refusal
-    /// from costing a configuration read.
-    cors: Option<CorsDecoration>,
-    legacy_cors_disposition: LegacyCorsDisposition,
-    response_kind: ResponseKind,
-    credential_sentences: CredentialSentences,
-    /// The stage that refused the request, when the gateway refused it; reported once, at the end
-    /// (`crate::logging::request_refused`).
-    refused: Option<Refused>,
-}
-
 /// What the transport said about this connection, or [`TransportSecurity::Plaintext`].
 ///
 /// The **only** source. A transport that terminates TLS, or that is handed a connection by one
@@ -1608,7 +1604,7 @@ struct Outcome<'a> {
 /// Absent is cleartext. The alternative — assuming encryption when nobody said — is the failure
 /// mode where a development deployment that was never given a transport quietly serves customer
 /// keys over HTTP.
-fn connection_security(extensions: &http::Extensions) -> TransportSecurity {
+pub(crate) fn connection_security(extensions: &http::Extensions) -> TransportSecurity {
     extensions
         .get::<TransportSecurity>()
         .copied()
