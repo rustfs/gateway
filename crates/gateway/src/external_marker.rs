@@ -23,6 +23,25 @@
 #[derive(Clone, Copy)]
 pub(crate) struct ExternalEntry;
 
+/// A bound entry's validation refusal, rendered by the ordinary request pipeline.
+#[cfg(feature = "external-payload")]
+#[derive(Clone, Copy)]
+pub(crate) struct RejectedBinding(pub(crate) &'static str);
+
+pub(crate) fn rejection(extensions: &http::Extensions) -> Option<rustfs_gateway_core::HandlerError> {
+    #[cfg(feature = "external-payload")]
+    {
+        extensions
+            .get::<RejectedBinding>()
+            .map(|rejected| rustfs_gateway_core::HandlerError::new(rustfs_gateway_types::ErrorCode::INVALID_REQUEST, rejected.0))
+    }
+    #[cfg(not(feature = "external-payload"))]
+    {
+        let _ = extensions;
+        None
+    }
+}
+
 pub(crate) fn present(headers: &http::HeaderMap) -> bool {
     headers.keys().any(|name| name.as_str().starts_with("x-rustfs-rdma-"))
 }

@@ -346,10 +346,7 @@ impl S3Service {
         B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
         M: OperationMode,
     {
-        // One minting and one reading of the clock, at the top, side by side. Everything below is
-        // handed both values; nothing below holds either source, so neither a second identifier nor
-        // a second instant can be produced — which is what lets the `Date` header and the skew
-        // window name the same moment.
+        // Select one trace and read the clock once; external completion retains the selected trace.
         // Settings and middleware came from the same entry snapshot. No stage reloads the store.
         let request_cancellation = request.extensions().get::<tokio::sync::watch::Receiver<bool>>().cloned();
         let config = RequestConfig::enter(config).with_request_cancellation(request_cancellation);
@@ -360,7 +357,7 @@ impl S3Service {
             .inner
             .view_policy
             .identification()
-            .settle(self.inner.traces.mint(), &request, &runtime.routing.router);
+            .trace(self.inner.traces.as_ref(), &request, &runtime.routing.router);
         let now = self.inner.clock.now();
         // Read before the request is consumed, and the only thing kept out of it: the RFC 9110 body rules are
         // stated over the request method, and every stage below has either forgotten it or never had it.
@@ -526,6 +523,9 @@ impl S3Service {
         M: OperationMode,
     {
         let router = &runtime.routing.router;
+        if let Some(error) = crate::external_marker::rejection(request.extensions()) {
+            return outcome.refuse_handler(error);
+        }
         let RequestEntryContext {
             now,
             connection,

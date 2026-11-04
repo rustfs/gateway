@@ -99,6 +99,184 @@ mod execution {
     };
     use rustfs_gateway::{BoxFuture, ByteStream, HandlerContext, HandlerError, TransportSecurity, collect};
 
+    mod request_trace {
+        use super::*;
+        use rustfs_gateway::external_payload::{ExternalGetResponse, ExternalResponseConsumer, ExternalResponseResult};
+        use rustfs_gateway::{HostId, HostRequestId, Observer, RequestEvent, RequestId, RequestTrace, TraceSource};
+        use std::sync::Mutex;
+
+        const HOST_REQUEST_ID: &str = "7c9e6679-7425-40de-944b-e07fc1f90ae7";
+
+        #[derive(Default)]
+        struct Traces {
+            minted: AtomicUsize,
+            observed: Mutex<Vec<String>>,
+        }
+        impl TraceSource for Traces {
+            fn mint(&self) -> RequestTrace {
+                let ordinal = self.minted.fetch_add(1, Ordering::SeqCst) + 1;
+                RequestTrace::new(RequestId::from_bits(ordinal as u64), HostId::from_bits(17))
+            }
+        }
+        impl Observer for Traces {
+            fn on_response(&self, event: &RequestEvent<'_>) {
+                self.observed.lock().unwrap().push(event.request_id.as_str().to_owned());
+            }
+        }
+        fn builder(legacy: bool, traces: &Arc<Traces>) -> rustfs_gateway::ServiceBuilder {
+            let builder = support::wired_at_signed_time()
+                .trace_source(traces.clone())
+                .observer(traces.clone());
+            if legacy { builder.rustfs_profile() } else { builder }
+        }
+        fn identify(request: &mut http::Request<Full<Bytes>>, host: bool) -> String {
+            if host {
+                request.extensions_mut().insert(HostRequestId::new(HOST_REQUEST_ID).unwrap());
+                HOST_REQUEST_ID.to_owned()
+            } else {
+                RequestId::from_bits(1).as_str().to_owned()
+            }
+        }
+        fn assert_head(headers: &HeaderMap, legacy: bool, expected: &str) {
+            let value = |name: &str| headers.get(name).map(|value| value.to_str().unwrap().to_owned());
+            assert_eq!(
+                (value("x-amz-request-id"), value("x-request-id"), value("x-amz-id-2")),
+                (
+                    Some(expected.to_owned()),
+                    legacy.then(|| expected.to_owned()),
+                    (!legacy).then(|| HostId::from_bits(17).as_str().to_owned()),
+                ),
+            );
+        }
+        async fn assert_error(response: http::Response<rustfs_gateway::Body>, legacy: bool, expected: &str) {
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+            assert_head(response.headers(), legacy, expected);
+            let response = collect(response).await.unwrap();
+            let xml = std::str::from_utf8(response.body()).unwrap();
+            assert!(xml.contains(&format!("<RequestId>{expected}</RequestId>")));
+            assert_eq!(xml.contains("<HostId>"), !legacy);
+        }
+        async fn invalid_binding(control: bool) {
+            for legacy in [false, true] {
+                for host in [false, true] {
+                    let traces = Arc::new(Traces::default());
+                    let service = builder(legacy, &traces)
+                        .register_external_payload::<dto::PutObject, _>(Arc::new(VerifiedBackend(Arc::default())))
+                        .build()
+                        .unwrap();
+                    let mut request = request(&[]);
+                    let expected = identify(&mut request, host);
+                    request.extensions_mut().remove::<TransportSecurity>();
+                    let response = if control {
+                        service
+                            .call_with_external_control_bound(request, binding(), Box::new(Query(Arc::default())))
+                            .await
+                    } else {
+                        service
+                            .call_with_external_payload_bound(request, binding(), exchange(Arc::default(), b"object"))
+                            .await
+                            .into_parts()
+                            .0
+                    };
+                    assert_error(response, legacy, &expected).await;
+                    assert_eq!(traces.observed.lock().unwrap().as_slice(), std::slice::from_ref(&expected));
+                    assert_eq!(traces.minted.load(Ordering::SeqCst), 1);
+                }
+            }
+        }
+        #[tokio::test]
+        async fn payload_binding_refusal_preserves_request_identity() {
+            invalid_binding(false).await;
+        }
+        #[tokio::test]
+        async fn control_binding_refusal_preserves_request_identity() {
+            invalid_binding(true).await;
+        }
+
+        struct Get;
+        impl Handler<dto::GetObject> for Get {
+            async fn call(&self, _: Req<dto::GetObject>) -> HandlerResult<dto::GetObject> {
+                Ok(Resp::new(dto::GetObjectOutput {
+                    body: Some(ByteStream::from_bytes(Bytes::from_static(b"object"))),
+                    content_length: Some(6),
+                    ..Default::default()
+                }))
+            }
+        }
+        struct Consumer {
+            fail: bool,
+            head: Arc<Mutex<Option<HeaderMap>>>,
+        }
+        impl ExternalResponseConsumer for Consumer {
+            fn protection(&self) -> PayloadProtection {
+                PayloadProtection::ConfidentialAuthenticated
+            }
+            fn consume(
+                self: Box<Self>,
+                response: ExternalGetResponse,
+            ) -> BoxFuture<'static, Result<ExternalResponseResult, ExternalPayloadError>> {
+                Box::pin(async move {
+                    let (_, _, headers, body, _) = response.into_parts();
+                    *self.head.lock().unwrap() = Some(headers);
+                    if self.fail {
+                        return Err(ExternalPayloadError::Transport);
+                    }
+                    let response = collect(http::Response::new(body.into_body())).await.unwrap();
+                    Ok(ExternalResponseResult::new(
+                        response.body().len() as u64,
+                        rustfs_gateway_stream::TrailingHeaders::empty(),
+                    ))
+                })
+            }
+        }
+        async fn download(fail: bool) {
+            for legacy in [false, true] {
+                for host in [false, true] {
+                    let traces = Arc::new(Traces::default());
+                    let service = builder(legacy, &traces)
+                        .register::<dto::GetObject, _>(Arc::new(Get))
+                        .build()
+                        .unwrap();
+                    let mut request = get_query_request();
+                    let expected = identify(&mut request, host);
+                    let head = Arc::new(Mutex::new(None));
+                    let (response, _) = service
+                        .call_with_external_payload_bound(
+                            request,
+                            binding(),
+                            ExternalPayloadExchange::Download(Box::new(Consumer {
+                                fail,
+                                head: head.clone(),
+                            })),
+                        )
+                        .await
+                        .into_parts();
+                    if head.lock().unwrap().is_none() {
+                        let response = collect(response).await.unwrap();
+                        panic!("consumer was not called: {}", String::from_utf8_lossy(response.body()));
+                    }
+                    assert_head(head.lock().unwrap().as_ref().unwrap(), legacy, &expected);
+                    assert_eq!(traces.observed.lock().unwrap().as_slice(), std::slice::from_ref(&expected));
+                    if fail {
+                        assert_error(response, legacy, &expected).await;
+                    } else {
+                        assert_head(response.headers(), legacy, &expected);
+                        assert_eq!(response.status(), StatusCode::OK);
+                    }
+                    assert_eq!(traces.minted.load(Ordering::SeqCst), 1);
+                }
+            }
+        }
+        #[tokio::test]
+        async fn download_failure_preserves_the_observed_request_identity() {
+            download(true).await;
+        }
+        #[tokio::test]
+        async fn download_success_uses_one_request_identity() {
+            download(false).await;
+        }
+    }
+
     struct Query(Arc<AtomicUsize>);
     impl rustfs_gateway::external_payload::ExternalControlQuery for Query {
         fn query(
@@ -127,7 +305,7 @@ mod execution {
         }
     }
     fn get_query_request() -> http::Request<Full<Bytes>> {
-        let request = support::signed_with(Method::GET, "/bucket/object", &[("x-rustfs-rdma-binding", "opaque")]);
+        let request = support::signed_external(Method::GET, "/bucket/object", &[("x-rustfs-rdma-binding", "opaque")]);
         let (mut parts, body) = request.into_parts();
         parts.extensions.insert(TransportSecurity::Encrypted);
         http::Request::from_parts(parts, Full::new(body))

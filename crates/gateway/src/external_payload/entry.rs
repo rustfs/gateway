@@ -90,7 +90,15 @@ impl crate::S3Service {
             || !matches!((upload, request.method()), (true, &Method::PUT) | (false, &Method::GET))
             || binding.validate_head(request.headers(), encrypted, upload).is_err()
         {
-            return self.external_refusal("external request binding, signature coverage or empty control body is invalid");
+            return ExternalPayloadResponse {
+                response: self
+                    .refuse_external_request(
+                        request,
+                        "external request binding, signature coverage or empty control body is invalid",
+                    )
+                    .await,
+                output: None,
+            };
         }
         let (mut parts, original) = request.into_parts();
         drop(original);
@@ -103,6 +111,8 @@ impl crate::S3Service {
                 ExternalPayloadResponse { response, output: None }
             }
             ExternalPayloadExchange::Download(consumer) => {
+                let trace = crate::trace::CapturedTrace::new(self.inner.traces.mint());
+                parts.extensions.insert(trace.clone());
                 let entry = DownloadEntry(Arc::new(Mutex::new(None)));
                 let owner = ContextOwner(entry.clone());
                 parts.extensions.insert(entry.clone());
@@ -112,11 +122,12 @@ impl crate::S3Service {
                 if !matches!(response.status(), StatusCode::OK | StatusCode::PARTIAL_CONTENT) {
                     return ExternalPayloadResponse { response, output: None };
                 }
+                let trace = trace.get();
                 let Some(context) = context else {
-                    return self.external_refusal("external download did not reach authorized dispatch");
+                    return external_refusal(&trace, "external download did not reach authorized dispatch");
                 };
                 let Some(principal) = context.principal() else {
-                    return self.external_refusal("external data requires authenticated SigV4");
+                    return external_refusal(&trace, "external data requires authenticated SigV4");
                 };
                 let scheme = principal.scheme();
                 if context.operation() != "GetObject"
@@ -124,15 +135,18 @@ impl crate::S3Service {
                     || scheme.location() != SigLocation::Header
                     || scheme.service() != SigService::S3
                 {
-                    return self.external_refusal("external data requires an S3 SigV4 object request");
+                    return external_refusal(&trace, "external data requires an S3 SigV4 object request");
                 }
                 if requires_confidentiality(&context) && consumer.protection() != PayloadProtection::ConfidentialAuthenticated {
-                    return self.external_refusal("customer-key data requires a confidential authenticated external transport");
+                    return external_refusal(
+                        &trace,
+                        "customer-key data requires a confidential authenticated external transport",
+                    );
                 }
                 let response = crate::file_fallback::FileBodyPath::Copied(NoZeroCopy::TransportLacksSendfile).adapt(response);
                 let length = response.body().len_hint();
                 let Some(length) = length.filter(|length| *length <= binding.length) else {
-                    return self.external_refusal("external download has no permitted exact response length");
+                    return external_refusal(&trace, "external download has no permitted exact response length");
                 };
                 let (parts, body) = response.into_parts();
                 let progress = Arc::new(Mutex::new(ResponseProgress::default()));
@@ -144,7 +158,7 @@ impl crate::S3Service {
                     progress: progress.clone(),
                 })) {
                     Ok(body) => body,
-                    Err(_) => return self.external_refusal("external response stream has inconsistent bounds"),
+                    Err(_) => return external_refusal(&trace, "external response stream has inconsistent bounds"),
                 };
                 let (cancel, cancellation) = HandlerCancellationSource::pair();
                 let guard = CancelOnDrop(cancel);
@@ -171,23 +185,36 @@ impl crate::S3Service {
                             output: Some(output),
                         }
                     }
-                    _ => self.external_refusal("external download did not finish with verified bytes"),
+                    _ => external_refusal(&trace, "external download did not finish with verified bytes"),
                 }
             }
         }
     }
-    pub(super) fn external_refusal(&self, message: &'static str) -> ExternalPayloadResponse {
-        let error = crate::render::from_handler(
-            HandlerError::new(rustfs_gateway_types::ErrorCode::INVALID_REQUEST, message),
-            rustfs_gateway_core::ResponseKind::Other,
-            crate::close::ConnectionIntent::MayKeepAlive,
-        );
-        ExternalPayloadResponse {
-            response: crate::render::render(&error, &self.inner.traces.mint()),
-            output: None,
-        }
+    pub(super) async fn refuse_external_request<B>(&self, mut request: Request<B>, message: &'static str) -> Response<Body>
+    where
+        B: http_body::Body + Send + 'static,
+        B::Data: Send,
+        B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+    {
+        request
+            .extensions_mut()
+            .insert(crate::external_marker::RejectedBinding(message));
+        self.call(request).await
     }
 }
+
+pub(super) fn external_refusal(trace: &crate::RequestTrace, message: &'static str) -> ExternalPayloadResponse {
+    let error = crate::render::from_handler(
+        HandlerError::new(rustfs_gateway_types::ErrorCode::INVALID_REQUEST, message),
+        rustfs_gateway_core::ResponseKind::Other,
+        crate::close::ConnectionIntent::MayKeepAlive,
+    );
+    ExternalPayloadResponse {
+        response: crate::render::render(&error, trace),
+        output: None,
+    }
+}
+
 struct CancelOnDrop(HandlerCancellationSource);
 impl Drop for CancelOnDrop {
     fn drop(&mut self) {

@@ -92,9 +92,8 @@ impl crate::S3Service {
             || binding.validate_head(request.headers(), encrypted, upload).is_err()
         {
             return self
-                .external_refusal("external control request binding is invalid")
-                .into_parts()
-                .0;
+                .refuse_external_request(request, "external control request binding is invalid")
+                .await;
         }
         let (mut parts, body) = request.into_parts();
         drop(body);
