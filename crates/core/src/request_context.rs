@@ -59,10 +59,14 @@
 //! zeroized on drop, no `Clone`, no `PartialEq`, a `Debug` that prints `<redacted>`.
 
 use core::fmt;
+use std::any::Any;
 
 use http::{HeaderMap, Method, Version};
 use rustfs_gateway_http::{HeaderView, TransportExtensions, WireRequest};
-use rustfs_gateway_sig::{Identity, SecretBytes, SigFamily, SigIdentity, SigLocation, SigService, Verdict, VerifiedScope};
+use rustfs_gateway_sig::{
+    BearerReceipt, Identity, QueryBearerClaim, SecretBytes, SigFamily, SigIdentity, SigLocation, SigService, Verdict,
+    VerifiedScope,
+};
 use rustfs_gateway_types::{BucketName, ObjectKey};
 
 use crate::authz::{Subject, Subjects};
@@ -238,6 +242,47 @@ impl fmt::Debug for RequestPrincipal {
     }
 }
 
+/// What a host's bearer verifier established about one request (ADR-0042): the principal the
+/// token was issued to and read-only access to the host's own verified state.
+///
+/// Built only from a [`rustfs_gateway_sig::BearerReceipt`], which only a verification produces.
+/// It never holds the token.
+pub struct BearerContext {
+    identity: Identity,
+    state: rustfs_gateway_sig::VerifiedBearerState,
+}
+
+impl BearerContext {
+    fn of(receipt: &BearerReceipt) -> Self {
+        Self {
+            identity: receipt.identity().clone(),
+            state: receipt.state().clone(),
+        }
+    }
+
+    /// The principal the verified token was issued to.
+    #[must_use]
+    pub const fn identity(&self) -> &Identity {
+        &self.identity
+    }
+
+    /// The host's verified state, when it is a `T`: the same value the verifier returned, never a
+    /// second decode of the token.
+    #[must_use]
+    pub fn state<T: Any + Send + Sync>(&self) -> Option<&T> {
+        self.state.get::<T>()
+    }
+}
+
+impl fmt::Debug for BearerContext {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("BearerContext")
+            .field("identity", &self.identity)
+            .field("state", &"<opaque>")
+            .finish()
+    }
+}
+
 /// What the pipeline verified and routed about one request, as its handler may read it.
 ///
 /// Read-only. The header lines are reachable only as a borrowed [`HeaderView`], so a value cannot
@@ -275,6 +320,7 @@ pub struct RequestContextView {
     headers: HeaderMap,
     transport_extensions: TransportExtensions,
     principal: Option<RequestPrincipal>,
+    bearer: Option<BearerContext>,
     path_params: PathParams,
     subjects: Option<Subjects>,
 }
@@ -311,9 +357,10 @@ impl RequestContextView {
                 scope: scope.clone(),
                 secret: caller_secret.map(CallerSecretKey),
             }),
-            Verdict::Anonymous(_) => None,
+            Verdict::Anonymous(_) | Verdict::Bearer(_) => None,
             _ => return None,
         };
+        let bearer = verdict.bearer_receipt().map(BearerContext::of);
         let mut headers = HeaderMap::new();
         for (name, value) in wire.headers().iter_raw() {
             headers.append(name.clone(), value.clone());
@@ -331,6 +378,7 @@ impl RequestContextView {
             headers,
             transport_extensions: wire.transport_extensions().clone(),
             principal,
+            bearer,
             path_params: PathParams::none(),
             subjects: None,
         })
@@ -343,6 +391,23 @@ impl RequestContextView {
     #[must_use]
     pub fn with_path_params(mut self, path_params: PathParams) -> Self {
         self.path_params = path_params;
+        self
+    }
+
+    /// This context, with the host state a bearer verification established for a request whose
+    /// signature also verified (ADR-0042). The facade calls it once, with the receipt it produced
+    /// for this request; the signed principal stays [`Self::principal`].
+    #[must_use]
+    pub fn with_bearer_receipt(mut self, receipt: &BearerReceipt) -> Self {
+        self.bearer = Some(BearerContext::of(receipt));
+        self
+    }
+
+    /// This context, with every `claim` parameter removed from its query, so a handler never holds
+    /// the bearer token (ADR-0042).
+    #[must_use]
+    pub fn without_bearer_token(mut self, claim: QueryBearerClaim) -> Self {
+        self.raw_query = Box::from(claim.strip_from(&self.raw_query));
         self
     }
 
@@ -378,6 +443,7 @@ impl RequestContextView {
             headers: HeaderMap::new(),
             transport_extensions: TransportExtensions::default(),
             principal: None,
+            bearer: None,
             path_params: PathParams::none(),
             subjects: None,
         }
@@ -486,10 +552,17 @@ impl RequestContextView {
         self.principal.as_ref().and_then(RequestPrincipal::verified_scope)
     }
 
+    /// What a host bearer verifier established, when the request was admitted by a query bearer
+    /// token: alone, with [`Self::principal`] `None`, or beside a verified signature (ADR-0042).
+    #[must_use]
+    pub const fn bearer(&self) -> Option<&BearerContext> {
+        self.bearer.as_ref()
+    }
+
     /// Whether the request presented no credentials and was confirmed anonymous.
     #[must_use]
     pub const fn is_anonymous(&self) -> bool {
-        self.principal.is_none()
+        self.principal.is_none() && self.bearer.is_none()
     }
 
     /// The path parameters of the claimed row that accepted the request, decoded once and
@@ -547,6 +620,7 @@ impl fmt::Debug for RequestContextView {
             .field("addressed", &self.addressed)
             .field("header_names", &HeaderNames(&self.headers))
             .field("principal", &self.principal)
+            .field("bearer", &self.bearer)
             .field("path_params", &self.path_params)
             .field("subjects", &self.subjects)
             .finish()

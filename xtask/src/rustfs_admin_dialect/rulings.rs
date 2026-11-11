@@ -411,7 +411,7 @@ pub(super) const RULINGS: &[Ruling] = &[
     ),
     // ── order 7: the object-zip-download pair, under the caller's own vendor labels
     //    (rustfs/backlog#2753). Both floors are privileged: ADR-0026 (g) refused admitting the
-    //    download anonymously, and the bearer scheme it points to is not built yet. ──
+    //    download anonymously; the download's floor adds ADR-0042's `token` bearer claim. ──
     noted(
         ruling(
             "POST",
@@ -428,6 +428,6 @@ pub(super) const RULINGS: &[Ruling] = &[
             "CredentialOnly",
             &[own("rustfs:DownloadObjectZip")],
         ),
-        "RustFS answers this route to whoever presents the `token` query parameter the POST minted, with no signature; the gateway has no bearer scheme on its floor (ADR-0026 (g)), and admitting the route anonymously was refused there, so the floor is privileged: a download URL presented without a header signature is `403` here until that scheme exists (rustfs/backlog#2753). The `{id}.zip` segment is matched as one opaque `{+id}` capture (ADR-0040): the handler reads `id` as the whole segment, suffix included, and validates it against the token.",
+        "RustFS answers this route to whoever presents the `token` query parameter the POST minted, with no signature. Admitting it anonymously was refused (ADR-0026 (g)), so the floor stays privileged and header-signed and adds a `token` query bearer claim (ADR-0042, rustfs/gateway#1400): a request presenting no AWS credential and exactly one non-empty `token` is admitted only as far as the host's installed bearer verifier, which binds it to the path's last raw segment less its literal `.zip` and authenticates the principal the token was issued to. Without that verifier the minted URL is `403`; with it, a header-signed request must also carry a token issued to its signed principal. The `{id}.zip` segment is matched as one opaque `{+id}` capture (ADR-0040): the handler reads `id` as the whole segment, suffix included.",
     ),
 ];

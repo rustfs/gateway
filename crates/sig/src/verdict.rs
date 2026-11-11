@@ -519,6 +519,11 @@ pub enum Verdict {
     Anonymous(AnonymousAck),
     /// Authentication failed. Carries no request bytes.
     Reject(AuthError),
+    /// A query bearer token was verified by the host's installed verifier (ADR-0042). No signature
+    /// was compared: this is not [`Verdict::Authenticated`] and carries no [`SignatureMatch`], no
+    /// scheme and no scope. The [`crate::BearerReceipt`] has no public constructor; only
+    /// [`crate::BearerAdmission::verify`] produces one.
+    Bearer(crate::bearer::BearerReceipt),
 }
 
 impl Verdict {
@@ -581,7 +586,23 @@ impl Verdict {
         Self::Reject(error)
     }
 
-    /// The principal, when the request was authenticated.
+    /// Builds a bearer verdict from a receipt only a verification produces.
+    #[must_use]
+    pub fn bearer(receipt: crate::bearer::BearerReceipt) -> Self {
+        Self::Bearer(receipt)
+    }
+
+    /// The bearer receipt, when a query bearer token authenticated the request.
+    #[must_use]
+    pub const fn bearer_receipt(&self) -> Option<&crate::bearer::BearerReceipt> {
+        match self {
+            Self::Bearer(receipt) => Some(receipt),
+            _ => None,
+        }
+    }
+
+    /// The principal, when the request was authenticated by a signature or a verified bearer
+    /// token.
     ///
     /// `None` for both anonymous and rejected: an anonymous request has no principal, and a
     /// rejected one must not be attributed to the access key it claimed.
@@ -589,6 +610,7 @@ impl Verdict {
     pub fn identity(&self) -> Option<&Identity> {
         match self {
             Self::Authenticated { identity, .. } => Some(identity),
+            Self::Bearer(receipt) => Some(receipt.identity()),
             _ => None,
         }
     }
@@ -647,6 +669,7 @@ impl fmt::Debug for Verdict {
                 .finish(),
             Self::Anonymous(_) => f.write_str("Anonymous"),
             Self::Reject(error) => f.debug_tuple("Reject").field(error).finish(),
+            Self::Bearer(receipt) => f.debug_tuple("Bearer").field(receipt).finish(),
         }
     }
 }

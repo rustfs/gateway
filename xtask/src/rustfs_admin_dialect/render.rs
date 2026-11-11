@@ -181,6 +181,15 @@ fn evidence(d: &Declared) -> String {
     format!("&[{}]", cited.join(", "))
 }
 
+/// The one route whose floor carries the zip-download `token` bearer claim (ADR-0042,
+/// rustfs/gateway#1400): RustFS's minted download URL. No other route reads the parameter.
+const ZIP_TOKEN_ROUTE: (&str, &str) = ("GET", "/rustfs/admin/v3/object-zip-downloads/{id}.zip");
+
+/// Whether `d` is [`ZIP_TOKEN_ROUTE`]; its MinIO alias is a row of the same operation.
+fn is_zip_token_route(d: &Declared) -> bool {
+    (d.method.as_str(), d.path.as_str()) == ZIP_TOKEN_ROUTE
+}
+
 /// The module documentation's paragraph on the service-level path parameters `params`.
 fn service_level_doc(params: &[&String], other: bool) -> String {
     let listed: Vec<String> = params.iter().map(|param| format!("`{param}`")).collect();
@@ -416,6 +425,12 @@ pub(super) fn render_operation(declared: &Declared) -> String {
              /// start-up posture report lists, and the authorizer is still asked, with no identity (ADR-0026 (f)).\n",
         );
         out.push_str("static FLOOR: OperationFloor = admin::anonymous_floor(NAME);\n\n");
+    } else if is_zip_token_route(d) {
+        out.push_str(
+            "/// Privileged and header-signed, never anonymous, never presigned, plus the minted URL's `token`\n\
+             /// query bearer claim, which only the host's installed verifier can accept (ADR-0042).\n",
+        );
+        out.push_str("static FLOOR: OperationFloor = admin::zip_token_floor(NAME);\n\n");
     } else {
         out.push_str("/// Privileged and header-signed only: never anonymous, never presigned.\n");
         out.push_str("static FLOOR: OperationFloor = admin::floor(NAME);\n\n");
