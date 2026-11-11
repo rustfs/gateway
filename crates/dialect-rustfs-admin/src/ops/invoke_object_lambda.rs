@@ -55,7 +55,8 @@ pub static VERSION_AUTH: AuthRequirement = AuthRequirement::new("s3:GetObjectVer
 
 /// What authorises it, on the object the path names: the action RustFS's handler checks, and [`VERSION_AUTH`] when the
 /// request names a version.
-pub const AUTH: AuthRequirement = AuthRequirement::new("s3:GetObject", ResourceShape::Object);
+pub const AUTH: AuthRequirement =
+    AuthRequirement::new("s3:GetObject", ResourceShape::Object).with_version_requirement(&VERSION_AUTH);
 
 /// RustFS's admin router, whose extension matching this row mirrors.
 const ROUTER: &str = "https://github.com/rustfs/rustfs/blob/443e8afee194fe38b32d62a9289a99c1f703715c/rustfs/src/admin/router.rs";
@@ -156,7 +157,7 @@ pub const PRESIGNED_EVIDENCE: &str = "https://github.com/rustfs/rustfs/blob/443e
 /// SigV4 header-signed or presigned, never anonymous, never SigV2: RustFS answers both `403 AccessDenied`
 /// here, and a RustFS client presigns it with `lambdaArn` inside the signed query ([`PRESIGNED_EVIDENCE`]).
 /// The floor is not privileged, so it admits that URL, and the authorizer still decides the request.
-static FLOOR: OperationFloor = admin::presigned_floor(NAME);
+static FLOOR: OperationFloor = admin::floor(NAME);
 
 impl Operation for InvokeObjectLambda {
     const NAME: &'static str = NAME;
@@ -202,7 +203,7 @@ pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
     precedence: 85,
     selector: "Method(GET) ∧ Target(Object) ∧ QueryPresent(\"lambdaArn\")",
-    action: "s3:GetObject",
+    action: "s3:GetObject; versionId: s3:GetObjectVersion",
     resource: ResourceShape::Object,
     success_status: 200,
     anonymous: false,

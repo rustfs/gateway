@@ -183,7 +183,9 @@ fn n_an_unsigned_or_signature_stripped_lambda_request_is_refused_under_the_rustf
 fn n_an_unsigned_amz_header_beside_a_presigned_lambda_url_is_refused_under_the_rustfs_profile() {
     let assembled = assemble_rustfs_profile(|_, _| true);
     let mut request = presigned_lambda();
-    let _ = request.headers_mut();
+    request
+        .headers_mut()
+        .insert("x-amz-tagging", HeaderValue::from_static("owner=attacker"));
     refused_without_asking(&assembled.exchange(request), "unsigned x-amz-tagging");
 }
 
