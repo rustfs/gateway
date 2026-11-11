@@ -366,6 +366,8 @@ pub(crate) static OVERLAY_ROWS: &[OverlayRow] = &[
     ops::admin_v4_fallback::OVERLAY_ROW,
     ops::admin_fallback::OVERLAY_ROW,
     ops::sts_form_post::OVERLAY_ROW,
+    ops::list_object_versions_with_metadata::OVERLAY_ROW,
+    ops::list_objects_v2_with_metadata::OVERLAY_ROW,
     ops::reset_bucket_replication::OVERLAY_ROW,
     ops::get_replication_reset_status::OVERLAY_ROW,
     ops::get_replication_metrics_v2::OVERLAY_ROW,

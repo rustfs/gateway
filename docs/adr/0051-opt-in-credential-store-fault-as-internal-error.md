@@ -1,4 +1,4 @@
-# ADR-0050: An opt-in internal error for a credential-store fault
+# ADR-0051: An opt-in internal error for a credential-store fault
 
 - Status: Accepted
 - Date: 2026-11-11

@@ -61,7 +61,7 @@ fn signed_v4(method: http::Method, region: &str, token: Option<&str>) -> http::R
 }
 
 /// Negative — the STS body path answers a fault before it reads the body, as it answers an unknown
-/// key (the stated deviation of ADR-0050). A body past the 8192-byte bound would be refused
+/// key (the stated deviation of ADR-0051). A body past the 8192-byte bound would be refused
 /// `400 InvalidRequest` once read; a fault is `500` under the switch and the closed `403` without
 /// it, so the read did not happen.
 #[tokio::test]

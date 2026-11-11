@@ -234,6 +234,85 @@ fn n_an_extension_route_with_an_unknown_rule_is_refused() {
     assert!(matches!(reparse(&value), Err(RouteInventoryError::Row { .. })));
 }
 
+/// Positive — RustFS's two metadata listing routes are recorded first, as its metadata route is
+/// asked before its admin router: each gated on `metadata=true`, claimed by the metadata route,
+/// signed or anonymous, and authorised as the matching listing action (rustfs/gateway#1588).
+#[test]
+fn the_metadata_listing_routes_are_recorded_first_with_their_gate_and_action() {
+    let inventory = rustfs_admin_route_inventory().expect("the recorded inventory validates");
+    let names: Vec<&str> = inventory
+        .extension_routes()
+        .iter()
+        .take(2)
+        .map(|route| route.name.as_str())
+        .collect();
+    assert_eq!(names, ["MetadataOperation::ListObjectVersions", "MetadataOperation::ListObjectsV2"]);
+    let gate = [super::QueryDiscriminator {
+        key: "metadata".to_owned(),
+        rule: "equals:true".to_owned(),
+    }];
+    for (name, key, rule, action) in [
+        ("MetadataOperation::ListObjectVersions", "versions", "present", "s3:ListBucketVersions"),
+        ("MetadataOperation::ListObjectsV2", "list-type", "equals:2", "s3:ListBucket"),
+    ] {
+        let route = inventory.extension_route(name).expect("recorded");
+        assert_eq!((route.method, route.target.as_str()), (RouteMethod::Get, "bucket"), "{name}");
+        assert_eq!(
+            (route.query_discriminator.key.as_str(), route.query_discriminator.rule.as_str()),
+            (key, rule)
+        );
+        assert_eq!(route.query_requires, gate, "{name}");
+        assert_eq!(route.claimed_by.as_deref(), Some("rustfs/src/app/metadata_route.rs"), "{name}");
+        assert_eq!(route.auth_detail, "SignedOrAnonymousThenBucketListing", "{name}");
+        assert_eq!(route.iam_action_wire, action, "{name}");
+    }
+    // Every admin-router extension route still has no second rule and names no other claimer.
+    for route in inventory.extension_routes().iter().skip(2) {
+        assert!(route.query_requires.is_empty() && route.claimed_by.is_none(), "{}", route.name);
+        assert_eq!(route.auth_detail, "SignatureRequiredThenHandlerCheck", "{}", route.name);
+    }
+}
+
+/// Negative — a gate rule outside `present` / `equals:` is refused, as a discriminator's is.
+#[test]
+fn n_an_extension_route_with_an_unknown_gate_rule_is_refused() {
+    let mut value = recorded();
+    value["extension_routes"][0]["query_requires"][0]["rule"] = Value::from("prefix:t");
+    assert!(matches!(reparse(&value), Err(RouteInventoryError::Row { .. })));
+}
+
+/// Negative — a gate with an empty key is refused.
+#[test]
+fn n_an_extension_route_with_an_empty_gate_key_is_refused() {
+    let mut value = recorded();
+    value["extension_routes"][0]["query_requires"][0]["key"] = Value::from("");
+    assert!(matches!(reparse(&value), Err(RouteInventoryError::Row { .. })));
+}
+
+/// Negative — a gate on the discriminator's own key is refused: one key, one rule.
+#[test]
+fn n_an_extension_route_gated_on_its_own_key_is_refused() {
+    let mut value = recorded();
+    value["extension_routes"][1]["query_requires"][0]["key"] = Value::from("list-type");
+    assert!(matches!(reparse(&value), Err(RouteInventoryError::Row { .. })));
+}
+
+/// Negative — a claimer outside RustFS's server sources is refused.
+#[test]
+fn n_an_extension_route_claimed_outside_rustfs_sources_is_refused() {
+    let mut value = recorded();
+    value["extension_routes"][0]["claimed_by"] = Value::from("../elsewhere.rs");
+    assert!(matches!(reparse(&value), Err(RouteInventoryError::Row { .. })));
+}
+
+/// Negative — an authorisation class the generator has no floor for is refused.
+#[test]
+fn n_an_extension_route_with_an_unknown_auth_class_is_refused() {
+    let mut value = recorded();
+    value["extension_routes"][0]["auth_detail"] = Value::from("AnonymousOnly");
+    assert!(matches!(reparse(&value), Err(RouteInventoryError::Row { .. })));
+}
+
 // ── counts ────────────────────────────────────────────────────────────────────────────────────
 
 /// Negative — a hand-edited total is refused: the census is what the rows add up to.

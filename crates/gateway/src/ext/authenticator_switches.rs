@@ -16,7 +16,7 @@
 //! handlers (ADR-0022), verifying any signing region (ADR-0023), the RustFS profile's reading of
 //! signing regions — empty, outside the grammar, of any length (rustfs/backlog#1677) — and of
 //! signing services (rustfs/gateway#1130), its narrower raw-path fallback
-//! (rustfs/rustfs#2593), and a credential-store fault answered `500` (ADR-0050). All are off by
+//! (rustfs/rustfs#2593), and a credential-store fault answered `500` (ADR-0051). All are off by
 //! default.
 //!
 //! Responsible for: the builder methods, their documented posture, [`ScopePolicy`], which
@@ -484,14 +484,14 @@ impl SigV4Authenticator {
     /// timeout, an isolated provider panic, or a record the provider reports as a fault (an empty
     /// secret converted with `ProviderError::from`) — with
     /// [`super::Unavailable`], which the service renders `500 InternalError`, as legacy RustFS
-    /// answers a credential store it cannot read (rustfs/gateway#1585, ADR-0050). SDKs retry a
+    /// answers a credential store it cannot read (rustfs/gateway#1585, ADR-0051). SDKs retry a
     /// `500` with backoff, and treat `InvalidAccessKeyId` as terminal.
     ///
     /// Off by default: the default answers a fault with the closed `403 InvalidAccessKeyId` an
     /// unknown key gets, byte for byte. Only a fault changes its answer: an unknown key, a session
     /// or disabled credential and a wrong signature keep theirs. Timing parity is kept — the fault
     /// still derives from the placeholder secret and completes the comparison, and is answered
-    /// where an unknown key is. The one exception is a stated deviation (ADR-0050): under
+    /// where an unknown key is. The one exception is a stated deviation (ADR-0051): under
     /// [`accept_legacy_rustfs_signing_services`](Self::accept_legacy_rustfs_signing_services), any
     /// header signature whose scope names `sts` and which omits `x-amz-content-sha256`, on any
     /// route, refuses an unknown key — and so answers a fault — before its body is read, earlier
@@ -502,7 +502,7 @@ impl SigV4Authenticator {
     /// the switch: SigV4 header, presigned, streaming and POST policy, SigV2, and the STS-scoped
     /// header signature above.
     ///
-    /// The trade-off, and why it is opt-in (ADR-0050 has the whole list): a fault confined to a
+    /// The trade-off, and why it is opt-in (ADR-0051 has the whole list): a fault confined to a
     /// disabled, expired or tokenless-session record answers `500` and so exposes a record those
     /// cases otherwise hide as an unknown key; a store slower for existing records than for misses
     /// becomes a `500`/`403` existence oracle at the guard's deadline; during a full outage a

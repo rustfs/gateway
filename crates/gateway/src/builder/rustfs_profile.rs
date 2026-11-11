@@ -99,7 +99,7 @@
 //! | `accept_legacy_rustfs_signing_services` | `s3`, `sts` and `s3tables` verified on every operation, others `501` | "signature verification as legacy" (GW-SIG, items 1–2) |
 //! | `answer_credential_scope_refusals_as_legacy_rustfs` | a scope date or region refusal in RustFS's code and words | "signature verification as legacy" (GW-SIG, item 6) |
 //! | `read_signed_headers_as_legacy_rustfs` | `SignedHeaders` read verbatim, refusals in RustFS's words | "signature verification as legacy" (GW-SIG, items 7–8) |
-//! | `answer_credential_store_faults_as_unavailable` | a credential-store fault answered `500 InternalError` | R-068 (rustfs/gateway#1585, ADR-0050) |
+//! | `answer_credential_store_faults_as_unavailable` | a credential-store fault answered `500 InternalError` | R-068 (rustfs/gateway#1585, ADR-0051) |
 //!
 //! # Why one method and not a configuration file
 //!
@@ -336,7 +336,7 @@ impl SigV4Authenticator {
             // must in its own words (rustfs/gateway#1130).
             .read_signed_headers_as_legacy_rustfs()
             // It answers a credential store it cannot read with `500 InternalError`, which SDKs
-            // retry, not the terminal `InvalidAccessKeyId` (rustfs/gateway#1585, ADR-0050).
+            // retry, not the terminal `InvalidAccessKeyId` (rustfs/gateway#1585, ADR-0051).
             .answer_credential_store_faults_as_unavailable()
     }
 }

@@ -59,11 +59,11 @@
 //! A credential store that cannot answer has not authenticated the caller and is never treated
 //! as anonymous; the guarded provider counts the fault. By default the client gets the closed
 //! `403` of every other credential failure. Under
-//! [`SigV4Authenticator::answer_credential_store_faults_as_unavailable`] (ADR-0050) it gets
+//! [`SigV4Authenticator::answer_credential_store_faults_as_unavailable`] (ADR-0051) it gets
 //! [`Unavailable`], a `500`, where an unknown key is answered: after the derivation and comparison,
 //! except for a header signature scoped to `sts` without `x-amz-content-sha256` under the legacy
 //! signing services, answered before its body is read — earlier than a wrong signature. Opt-in:
-//! it can reveal a record an unknown key's answer hides (ADR-0050 lists how).
+//! it can reveal a record an unknown key's answer hides (ADR-0051 lists how).
 
 use std::sync::Arc;
 

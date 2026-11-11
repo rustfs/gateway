@@ -75,7 +75,7 @@ impl SigV4Authenticator {
         // trigger a read or have its credential refusal replaced by the body's length refusal. A
         // store fault is answered at the same point, so the two keep one latency class here; both
         // answer before the body read and the comparison, so earlier than a wrong signature does.
-        // That is a stated deviation from ADR-0050's "no earlier than a wrong signature".
+        // That is a stated deviation from ADR-0051's "no earlier than a wrong signature".
         if !matches!(resolved, Ok(CredentialLookup::Found(_))) {
             return Err(self.unresolved_lookup(resolved));
         }
