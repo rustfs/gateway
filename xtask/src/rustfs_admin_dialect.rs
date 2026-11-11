@@ -128,6 +128,7 @@ const PLAN: &[(&str, u8)] = &[
     ("inspect_archive", 2),
     ("plugins_catalog", 2),
     ("tls_debug", 2),
+    ("tls_certificate", 2),
     ("kms", 3),
     ("site_replication", 3),
     ("config_admin", 3),
@@ -137,6 +138,8 @@ const PLAN: &[(&str, u8)] = &[
     ("scanner", 3),
     ("audit", 3),
     ("plugins_instances", 3),
+    ("plugin_delegation", 3),
+    ("plugin_attempt", 3),
     ("pools", 3),
     ("user", 4),
     ("idp_compat", 4),
@@ -149,6 +152,7 @@ const PLAN: &[(&str, u8)] = &[
     ("heal", 5),
     ("integrity", 5),
     ("usage_prefix", 5),
+    ("bucket_recovery", 5),
     ("table_catalog", 6),
     ("oidc", 7),
     ("sts", 7),
@@ -744,6 +748,9 @@ mod extension_tests;
 #[cfg(test)]
 #[path = "rustfs_admin_dialect/form_tests.rs"]
 mod form_tests;
+#[cfg(test)]
+#[path = "rustfs_admin_dialect/refresh_tests.rs"]
+mod refresh_tests;
 #[cfg(test)]
 #[path = "rustfs_admin_dialect/tests.rs"]
 mod tests;

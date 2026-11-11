@@ -123,14 +123,14 @@ impl AdminOperation for GetV3ObjectDataCacheStats {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 212,
+    precedence: 213,
     selector: "PathTemplate(\"/rustfs/admin/v3/object-data-cache/stats\") ∧ Method(GET) ∨ PathTemplate(\"/minio/admin/v3/object-data-cache/stats\") ∧ Method(GET)",
     action: "admin:ServerInfo",
     resource: ResourceShape::Service,
     success_status: 200,
     anonymous: false,
     evidence: &[
-        "https://github.com/rustfs/rustfs/blob/5e1bd498ce1ca33bcb0ca50aeee861e69e6c8744/rustfs/src/admin/handlers/object_data_cache.rs",
+        "https://github.com/rustfs/rustfs/blob/443e8afee194fe38b32d62a9289a99c1f703715c/rustfs/src/admin/handlers/object_data_cache.rs",
         record::ISSUE,
     ],
 };

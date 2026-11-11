@@ -23,6 +23,14 @@
 //! NOT responsible for: the handler, which the deployment registers, or the overlay row (`crate::table`).
 //! Upstream: the recorded inventory and `crate::admin`. Downstream: `crate::table`, which lists it,
 //! and a deployment that registers a handler for [`PutV3UpdateGroupMembers`].
+//!
+//! The inventory records this route as custom-auth (`MultipleActions`); its action is ADR-0025's ruling.
+//!
+//! RustFS's handler first admits the caller on either group-membership action, and only after
+//! reading the JSON body asks again for the one its `isRemove` field selects (`group.rs`,
+//! `UpdateGroupMembers`); the gateway cannot ask the second question before the body is read
+//! (ADR-0025 (d), ADR-0032 (b)), so its floor is the first, any-of gate, and the body goes to the
+//! handler for the second.
 
 use bytes::Bytes;
 use rustfs_gateway_core::codec::{CodecError, EncodedResponse, MetaView, OperationCodec, RequestBody, RequestBodyMode};
@@ -40,7 +48,8 @@ use crate::record::{self, BodyKind, RouteRecord};
 pub const NAME: &str = "rustfs:PutV3UpdateGroupMembers";
 
 /// What authorises it, on no bucket.
-pub const AUTH: AuthRequirement = AuthRequirement::new("admin:AddUserToGroup", ResourceShape::Service);
+pub const AUTH: AuthRequirement =
+    AuthRequirement::any_of(&["admin:AddUserToGroup", "admin:RemoveUserFromGroup"], ResourceShape::Service);
 
 static SELECTOR: &[Predicate] = &[Predicate::Method(http::Method::PUT)];
 
@@ -124,14 +133,15 @@ impl AdminOperation for PutV3UpdateGroupMembers {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 412,
+    precedence: 434,
     selector: "PathTemplate(\"/rustfs/admin/v3/update-group-members\") ∧ Method(PUT) ∨ PathTemplate(\"/minio/admin/v3/update-group-members\") ∧ Method(PUT)",
-    action: "admin:AddUserToGroup",
+    action: "anyOf(admin:AddUserToGroup, admin:RemoveUserFromGroup)",
     resource: ResourceShape::Service,
     success_status: 200,
     anonymous: false,
     evidence: &[
-        "https://github.com/rustfs/rustfs/blob/5e1bd498ce1ca33bcb0ca50aeee861e69e6c8744/rustfs/src/admin/handlers/group.rs",
+        "https://github.com/rustfs/rustfs/blob/443e8afee194fe38b32d62a9289a99c1f703715c/rustfs/src/admin/handlers/group.rs",
+        record::ADR_0025,
         record::ISSUE,
     ],
 };
@@ -145,8 +155,8 @@ pub const RECORD: RouteRecord = RouteRecord {
     path: "/rustfs/admin/v3/update-group-members",
     alias: Some("/minio/admin/v3/update-group-members"),
     query: None,
-    action: "admin:AddUserToGroup",
-    ruled: None,
+    action: "anyOf(admin:AddUserToGroup, admin:RemoveUserFromGroup)",
+    ruled: Some("MultipleActions"),
     subject: None,
     bucket: None,
     anonymous: false,

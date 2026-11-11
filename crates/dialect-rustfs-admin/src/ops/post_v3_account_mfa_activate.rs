@@ -134,14 +134,14 @@ impl AdminOperation for PostV3AccountMfaActivate {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 284,
+    precedence: 293,
     selector: "PathTemplate(\"/rustfs/admin/v3/account/mfa/activate\") ∧ Method(POST) ∨ PathTemplate(\"/minio/admin/v3/account/mfa/activate\") ∧ Method(POST)",
     action: "rustfs:AccountMfaActivate about caller",
     resource: ResourceShape::Service,
     success_status: 200,
     anonymous: false,
     evidence: &[
-        "https://github.com/rustfs/rustfs/blob/5e1bd498ce1ca33bcb0ca50aeee861e69e6c8744/rustfs/src/admin/handlers/mfa.rs",
+        "https://github.com/rustfs/rustfs/blob/443e8afee194fe38b32d62a9289a99c1f703715c/rustfs/src/admin/handlers/mfa.rs",
         record::ADR_0025,
         record::ADR_0028,
         record::ISSUE,

@@ -271,8 +271,8 @@ fn n_a_query_bucket_outside_the_rule_is_refused() {
     assert!(stale.contains("names no route of a migrated group"), "{stale}");
 }
 
-/// Positive — in the recorded inventory, exactly the seventeen order-5 `{bucket}` routes and the
-/// 48 order-6 `{warehouse}` routes bind their bucket by template and exactly the two compat quota
+/// Positive — in the recorded inventory, exactly the twenty-two order-5 `{bucket}` routes and the
+/// 55 order-6 `{warehouse}` routes bind their bucket by template and exactly the two compat quota
 /// routes by query; the `{prefix}` beside a bucket stays service-level; and the four quota rulings
 /// plus `usage/{bucket}` are the only order-5 custom-auth routes (ADR-0030, ADR-0031).
 #[test]
@@ -284,7 +284,7 @@ fn the_recorded_bucket_bindings_are_exactly_the_order_five_ones() {
         .filter(|declared| matches!(declared.bucket, Some(Bound::Path(_))))
         .map(|declared| declared.name.as_str())
         .collect();
-    assert_eq!(by_path.len(), 21 + 49, "{by_path:?}");
+    assert_eq!(by_path.len(), 22 + 55, "{by_path:?}");
     let by_query: Vec<&str> = plan
         .declared
         .iter()
@@ -319,11 +319,11 @@ fn the_recorded_bucket_bindings_are_exactly_the_order_five_ones() {
             ("rustfs:PostV3QuotaCheckByBucket", "s3:GetBucketQuota"),
         ]
     );
-    assert_eq!(plan.declared.len(), 314);
+    assert_eq!(plan.declared.len(), 336);
     assert!(plan.pending.is_empty(), "{:?}", plan.pending);
 }
 
-/// Positive — in the recorded inventory, the 49 table-catalog operations are the `/_iceberg/v1`
+/// Positive — in the recorded inventory, the 56 table-catalog operations are the `/_iceberg/v1`
 /// routes, each with its `/iceberg/v1` compat row as alias, named after the surface; the two
 /// `config` routes are service-level and every other one binds `{warehouse}`; and the one
 /// shadowing is `buckets/{warehouse}` in front of `{warehouse}/namespaces` (ADR-0031).
@@ -331,7 +331,7 @@ fn the_recorded_bucket_bindings_are_exactly_the_order_five_ones() {
 fn the_recorded_table_catalog_is_one_operation_per_surface_pair() {
     let plan = recorded_plan();
     let catalog: Vec<&super::Declared> = plan.declared.iter().filter(|declared| declared.order == 6).collect();
-    assert_eq!(catalog.len(), 50);
+    assert_eq!(catalog.len(), 56);
     for declared in &catalog {
         assert!(declared.path.starts_with("/_iceberg/v1/"), "{}", declared.name);
         assert_eq!(

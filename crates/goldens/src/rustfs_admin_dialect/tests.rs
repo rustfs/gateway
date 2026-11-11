@@ -198,7 +198,7 @@ fn every_migrated_route_is_declared_as_the_inventory_records_it() {
         canonical += records.len();
     }
     assert_eq!(canonical, ROUTES.len(), "a declared operation has no inventory route");
-    assert_eq!(compat, 50, "every table-catalog route has its compat row");
+    assert_eq!(compat, 56, "every table-catalog route has its compat row");
     assert_eq!((staying, STAYING.len()), (4, 4), "every staying route is an inventory route");
     assert_eq!((formed, FORM_ROUTES.len()), (1, 1), "every form-claimed route is an inventory route");
 }
@@ -319,7 +319,7 @@ fn the_caller_secret_reaches_exactly_the_sealed_rows() {
 }
 
 /// Positive — each any-of row is authorised by any one of its actions alone: `datausageinfo`,
-/// both policy-entities routes, both pools routes and `usage/{bucket}`.
+/// both policy-entities routes, both pools routes, `usage/{bucket}` and `update-group-members`.
 #[test]
 fn every_any_of_row_is_authorised_by_either_action() {
     let any_of: Vec<&RouteRecord> = ROUTES.iter().filter(|record| actions(record).len() > 1).collect();
@@ -332,7 +332,8 @@ fn every_any_of_row_is_authorised_by_either_action() {
             "rustfs:GetV3IdpLdapPolicyEntities",
             "rustfs:GetV3PoolsList",
             "rustfs:GetV3PoolsStatus",
-            "rustfs:GetV3UsageByBucket"
+            "rustfs:GetV3UsageByBucket",
+            "rustfs:PutV3UpdateGroupMembers"
         ]
     );
     for record in any_of {
@@ -389,7 +390,7 @@ fn n_every_other_action_does_not_authorise_a_row() {
 #[test]
 fn n_an_unsigned_row_is_refused_without_asking() {
     let privileged: Vec<_> = rows().filter(|(record, _)| !record.anonymous).collect();
-    assert_eq!(privileged.len(), 626 - 8, "every row but the four bootstrap operations' eight");
+    assert_eq!(privileged.len(), 670 - 8, "every row but the four bootstrap operations' eight");
     in_lanes(
         |_, _| true,
         &privileged,
@@ -464,7 +465,7 @@ fn n_a_forged_or_unknown_key_row_is_refused_without_asking() {
 #[test]
 fn n_a_presigned_row_is_refused_without_asking() {
     let presignable: Vec<_> = rows().filter(|(record, _)| record.query.is_none()).collect();
-    assert_eq!(presignable.len(), 618, "every row but the service command's eight");
+    assert_eq!(presignable.len(), 662, "every row but the service command's eight");
     in_lanes(
         |_, _| true,
         &presignable,
@@ -508,7 +509,7 @@ fn n_a_malformed_parameter_value_is_refused_before_authorising() {
             })
         })
         .collect();
-    assert_eq!(cases.len(), 5 * 2 * 191, "191 parameters across 103 templates, each with its alias");
+    assert_eq!(cases.len(), 5 * 2 * 209, "209 parameters across 121 templates, each with its alias");
     in_lanes(
         |_, _| true,
         &cases,
@@ -587,7 +588,7 @@ fn heal_prefixes_reach_the_handler_after_exactly_one_decode() {
 #[test]
 fn a_presigned_admin_request_is_refused_under_the_rustfs_profile_floor() {
     let presignable: Vec<_> = rows().filter(|(record, _)| record.query.is_none()).collect();
-    assert_eq!(presignable.len(), 618, "every row but the service command's eight");
+    assert_eq!(presignable.len(), 662, "every row but the service command's eight");
     in_lanes_on(
         &rustfs_profile_floor(),
         |_, _| true,

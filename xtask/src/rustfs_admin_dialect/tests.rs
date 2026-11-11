@@ -116,8 +116,8 @@ fn the_committed_dialect_is_what_the_inventory_generates() {
     assert_eq!(drift(&root, &files), Vec::<String>::new());
     assert_eq!(
         files.len(),
-        330,
-        "314 native operations, two fallbacks, the form-claimed STS operation (ADR-0041), the eight S3-shaped extension \
+        352,
+        "336 native operations, two fallbacks, the form-claimed STS operation (ADR-0041), the eight S3-shaped extension \
          operations (rustfs/backlog#2753), the module list and four table files"
     );
 }

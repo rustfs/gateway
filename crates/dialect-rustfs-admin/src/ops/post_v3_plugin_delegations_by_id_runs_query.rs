@@ -16,25 +16,23 @@
 // crates/goldens/src/migration_inventory/rustfs_admin_routes.json. Do not edit by hand: change the
 // inventory or xtask/src/rustfs_admin_dialect.rs, then regenerate.
 
-//! `rustfs:PostIcebergByWarehouseCatalogMigration`: `POST /_iceberg/v1/{warehouse}/catalog/migration`, registration group `table_catalog`.
+//! `rustfs:PostV3PluginDelegationsByIdRunsQuery`: `POST /rustfs/admin/v3/plugin-delegations/{id}/runs/query`, registration group `plugin_delegation`.
 //!
 //! Responsible for: the operation's type, name, rows, action, specification, floor and codec, as the
-//! inventory records RustFS's `MaterializeTableCatalogMigrationHandler` route.
+//! inventory records RustFS's `QueryRun` route.
 //! NOT responsible for: the handler, which the deployment registers, or the overlay row (`crate::table`).
 //! Upstream: the recorded inventory and `crate::admin`. Downstream: `crate::table`, which lists it,
-//! and a deployment that registers a handler for [`PostIcebergByWarehouseCatalogMigration`].
+//! and a deployment that registers a handler for [`PostV3PluginDelegationsByIdRunsQuery`].
 //!
-//! Its `{warehouse}` parameter is the bucket the operation is authorised on (`BucketParam::Path`,
-//! ADR-0025 (c), ADR-0030): the raw segment meets the S3 bucket-name rules before authentication, and
-//! the governor, both authorizer stages, the audit event and the handler's `RequestContextView::bucket()`
-//! see that bucket and no key. Where RustFS authorises this action on no bucket and reads the segment
-//! afterwards, handing the authorizer the bucket is a deliberate tightening.
+//! Its path parameter (`id`) names no bucket (ADR-0027): a handler reads each decoded value from
+//! `RequestContextView::path_params()`.
 
+use bytes::Bytes;
 use rustfs_gateway_core::codec::{CodecError, EncodedResponse, MetaView, OperationCodec, RequestBody, RequestBodyMode};
-use rustfs_gateway_core::dialect::{BucketParam, ClaimedRow, OverlayRow};
+use rustfs_gateway_core::dialect::{ClaimedRow, OverlayRow};
 use rustfs_gateway_core::op::{AuthRequirement, Operation, ResourceShape};
 use rustfs_gateway_core::registry::OperationSpec;
-use rustfs_gateway_core::route::Predicate;
+use rustfs_gateway_core::route::{Predicate, ShadowingDecl};
 use rustfs_gateway_core::{DerivedResourceError, NoDerived};
 use rustfs_gateway_sig::OperationFloor;
 
@@ -42,42 +40,47 @@ use crate::admin::{self, AdminOperation, AdminResponse};
 use crate::record::{self, BodyKind, RouteRecord};
 
 /// The operation name.
-pub const NAME: &str = "rustfs:PostIcebergByWarehouseCatalogMigration";
+pub const NAME: &str = "rustfs:PostV3PluginDelegationsByIdRunsQuery";
 
-/// What authorises it, on the bucket its `{warehouse}` parameter names.
-pub const AUTH: AuthRequirement = AuthRequirement::new("admin:MigrateTableCatalog", ResourceShape::Bucket);
-
-/// The bucket it is authorised on, which the facade reads before authentication.
-pub const BUCKET: BucketParam = BucketParam::Path("warehouse");
+/// What authorises it, on no bucket.
+pub const AUTH: AuthRequirement = AuthRequirement::new("admin:GetPluginRun", ResourceShape::Service);
 
 static SELECTOR: &[Predicate] = &[Predicate::Method(http::Method::POST)];
 
-/// The canonical row, then the compat row RustFS serves it under.
+/// The canonical row, then the MinIO alias RustFS serves it under.
 pub static ROWS: &[ClaimedRow] = &[
     ClaimedRow {
-        template: "/_iceberg/v1/{+warehouse}/catalog/migration",
+        template: "/rustfs/admin/v3/plugin-delegations/{+id}/runs/query",
         selector: SELECTOR,
     },
     ClaimedRow {
-        template: "/iceberg/v1/{+warehouse}/catalog/migration",
+        template: "/minio/admin/v3/plugin-delegations/{+id}/runs/query",
         selector: SELECTOR,
     },
 ];
 
-/// `POST /_iceberg/v1/{warehouse}/catalog/migration`.
+/// Reviewed precedence over overlapping templates and authenticated fallbacks.
+pub static SHADOWS: &[ShadowingDecl] = &[ShadowingDecl {
+    winner: NAME,
+    shadowed: "rustfs:AdminFallback",
+    reason: "Registered admin routes precede their authenticated fallback.",
+    evidence: &["https://github.com/rustfs/gateway/blob/main/docs/adr/0039-authenticated-admin-fallbacks.md"],
+}];
+
+/// `POST /rustfs/admin/v3/plugin-delegations/{id}/runs/query`.
 #[derive(Debug)]
-pub struct PostIcebergByWarehouseCatalogMigration;
+pub struct PostV3PluginDelegationsByIdRunsQuery;
 
 static SPEC: OperationSpec = admin::spec(NAME, AUTH, false);
 
 /// Privileged and header-signed only: never anonymous, never presigned.
 static FLOOR: OperationFloor = admin::floor(NAME);
 
-impl Operation for PostIcebergByWarehouseCatalogMigration {
+impl Operation for PostV3PluginDelegationsByIdRunsQuery {
     const NAME: &'static str = NAME;
 
-    /// RustFS reads no request body.
-    type Input = ();
+    /// The body as it arrived, which RustFS buffers and parses.
+    type Input = Bytes;
     type Output = AdminResponse;
     type DerivedResources = NoDerived;
 
@@ -96,11 +99,11 @@ impl Operation for PostIcebergByWarehouseCatalogMigration {
     }
 }
 
-impl OperationCodec for PostIcebergByWarehouseCatalogMigration {
-    const REQUEST_BODY: RequestBodyMode = RequestBodyMode::None;
+impl OperationCodec for PostV3PluginDelegationsByIdRunsQuery {
+    const REQUEST_BODY: RequestBodyMode = RequestBodyMode::Full;
 
-    fn decode(_request: &MetaView<'_>, _body: RequestBody) -> Result<Self::Input, CodecError> {
-        Ok(())
+    fn decode(_request: &MetaView<'_>, body: RequestBody) -> Result<Self::Input, CodecError> {
+        admin::buffered(body)
     }
 
     fn encode(output: Self::Output, _request: &MetaView<'_>, status: u16) -> Result<EncodedResponse, CodecError> {
@@ -108,30 +111,31 @@ impl OperationCodec for PostIcebergByWarehouseCatalogMigration {
     }
 }
 
-impl AdminOperation for PostIcebergByWarehouseCatalogMigration {
+impl AdminOperation for PostV3PluginDelegationsByIdRunsQuery {
     const PRECEDENCE: u16 = OVERLAY_ROW.precedence;
     const GROUP: &'static str = RECORD.group;
-    const BUCKET: Option<BucketParam> = Some(BUCKET);
 
     fn rows() -> &'static [ClaimedRow] {
         ROWS
+    }
+
+    fn shadows() -> &'static [ShadowingDecl] {
+        SHADOWS
     }
 }
 
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 265,
-    selector: "PathTemplate(\"/_iceberg/v1/{+warehouse}/catalog/migration\") ∧ Method(POST) ∨ PathTemplate(\"/iceberg/v1/{+warehouse}/catalog/migration\") ∧ Method(POST) ⇒ BucketParam(\"warehouse\")",
-    action: "admin:MigrateTableCatalog",
-    resource: ResourceShape::Bucket,
+    precedence: 348,
+    selector: "PathTemplate(\"/rustfs/admin/v3/plugin-delegations/{+id}/runs/query\") ∧ Method(POST) ∨ PathTemplate(\"/minio/admin/v3/plugin-delegations/{+id}/runs/query\") ∧ Method(POST)",
+    action: "admin:GetPluginRun",
+    resource: ResourceShape::Service,
     success_status: 200,
     anonymous: false,
     evidence: &[
-        "https://github.com/rustfs/rustfs/blob/5e1bd498ce1ca33bcb0ca50aeee861e69e6c8744/rustfs/src/admin/handlers/table_catalog/config.rs",
+        "https://github.com/rustfs/rustfs/blob/443e8afee194fe38b32d62a9289a99c1f703715c/rustfs/src/admin/handlers/plugin_delegation.rs",
         record::ADR_0027,
-        record::ADR_0030,
-        record::ADR_0031,
         record::ISSUE,
     ],
 };
@@ -139,19 +143,19 @@ pub const OVERLAY_ROW: OverlayRow = OverlayRow {
 /// The inventory row this operation was generated from.
 pub const RECORD: RouteRecord = RouteRecord {
     operation: NAME,
-    group: "table_catalog",
-    order: 6,
+    group: "plugin_delegation",
+    order: 3,
     method: "POST",
-    path: "/_iceberg/v1/{warehouse}/catalog/migration",
-    alias: Some("/iceberg/v1/{warehouse}/catalog/migration"),
+    path: "/rustfs/admin/v3/plugin-delegations/{id}/runs/query",
+    alias: Some("/minio/admin/v3/plugin-delegations/{id}/runs/query"),
     query: None,
-    action: "admin:MigrateTableCatalog",
+    action: "admin:GetPluginRun",
     ruled: None,
     subject: None,
-    bucket: Some(BUCKET),
+    bucket: None,
     anonymous: false,
-    rustfs_handler: "MaterializeTableCatalogMigrationHandler",
-    request_body: BodyKind::NotRead,
+    rustfs_handler: "QueryRun",
+    request_body: BodyKind::Buffered,
     response_body: BodyKind::Buffered,
     caller_secret: false,
 };

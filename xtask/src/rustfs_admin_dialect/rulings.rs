@@ -377,6 +377,15 @@ pub(super) const RULINGS: &[Ruling] = &[
     ruling("GET", "/rustfs/admin/v3/list-access-keys-bulk", "MultipleActions", BULK),
     ruling("GET", "/rustfs/admin/v3/idp/ldap/list-access-keys-bulk", "MultipleActions", BULK),
     ruling("GET", "/rustfs/admin/v3/idp/openid/list-access-keys-bulk", "MultipleActions", BULK),
+    noted(
+        ruling(
+            "PUT",
+            "/rustfs/admin/v3/update-group-members",
+            "MultipleActions",
+            &[any_of(&["admin:AddUserToGroup", "admin:RemoveUserFromGroup"])],
+        ),
+        "RustFS's handler first admits the caller on either group-membership action, and only after reading the JSON body asks again for the one its `isRemove` field selects (`group.rs`, `UpdateGroupMembers`); the gateway cannot ask the second question before the body is read (ADR-0025 (d), ADR-0032 (b)), so its floor is the first, any-of gate, and the body goes to the handler for the second.",
+    ),
     // ── order 5: the S3 quota action on the bound bucket (ADR-0025 (d), ADR-0030) ──
     ruling("GET", "/rustfs/admin/v3/get-bucket-quota", "S3Action", &[one("s3:GetBucketQuota")]),
     ruling("GET", "/rustfs/admin/v3/quota-stats/{bucket}", "S3Action", &[one("s3:GetBucketQuota")]),

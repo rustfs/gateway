@@ -27,7 +27,7 @@ use rustfs_gateway_dialect_rustfs_admin::{CLAIMS, FORM_ROUTES, PENDING, ROUTES, 
 
 use super::{HandlerDeadlineClass, OVERLAY, Predicate, ResourceShape, captured, declared, dialect, param, templates};
 
-/// Positive and negative — exactly the twenty-one `{bucket}` and 49 `{warehouse}` templates bind
+/// Positive and negative — exactly the twenty-two `{bucket}` and 55 `{warehouse}` templates bind
 /// their bucket (`BucketParam::Path`) and exactly the two compat quota routes bind a `bucket` query
 /// parameter (`BucketParam::Query`), all of orders 5 and 6; every other operation, `{prefix}`
 /// templates included, stays service-level; and every claimed entry carries its operation's
@@ -35,7 +35,7 @@ use super::{HandlerDeadlineClass, OVERLAY, Predicate, ResourceShape, captured, d
 #[test]
 fn exactly_the_bucket_and_warehouse_routes_bind_their_bucket() {
     let templated: Vec<&RouteRecord> = ROUTES.iter().filter(|record| record.path.contains('{')).collect();
-    assert_eq!(templated.len(), 103);
+    assert_eq!(templated.len(), 121);
     let mut by_path = 0;
     let mut by_query = 0;
     for record in ROUTES {
@@ -63,7 +63,7 @@ fn exactly_the_bucket_and_warehouse_routes_bind_their_bucket() {
             assert!(!record.anonymous, "{}", record.operation);
         }
     }
-    assert_eq!((by_path, by_query), (21 + 49, 2));
+    assert_eq!((by_path, by_query), (22 + 55, 2));
     let dialect = dialect();
     let mut entries = 0;
     let mut synthetic = Vec::new();
@@ -89,7 +89,7 @@ fn exactly_the_bucket_and_warehouse_routes_bind_their_bucket() {
             entries += 1;
         }
     }
-    assert_eq!(entries, 626);
+    assert_eq!(entries, 670);
     assert_eq!(synthetic, [("rustfs:AdminV4Fallback", 6), ("rustfs:AdminFallback", 6)]);
 }
 
@@ -102,6 +102,7 @@ fn exactly_the_bucket_and_warehouse_routes_bind_their_bucket() {
 fn every_order_is_declared_and_four_routes_stay_with_rustfs() {
     let order_seven = ["oidc", "sts", "object_zip_download"];
     let order_five = [
+        "bucket_recovery",
         "durability_handler",
         "heal",
         "integrity",
@@ -116,6 +117,8 @@ fn every_order_is_declared_and_four_routes_stay_with_rustfs() {
         "config_admin",
         "ilm_transition",
         "kms",
+        "plugin_attempt",
+        "plugin_delegation",
         "plugins_instances",
         "pools",
         "scanner",
@@ -145,6 +148,7 @@ fn every_order_is_declared_and_four_routes_stay_with_rustfs() {
             ("audit", 3),
             ("batch_job", 5),
             ("bucket_meta", 4),
+            ("bucket_recovery", 1),
             ("cluster_snapshot", 1),
             ("config_admin", 9),
             ("diagnostics", 12),
@@ -164,28 +168,31 @@ fn every_order_is_declared_and_four_routes_stay_with_rustfs() {
             ("object_zip_download", 2),
             ("oidc", 8),
             ("on_demand_migration", 6),
+            ("plugin_attempt", 1),
+            ("plugin_delegation", 9),
             ("plugins_catalog", 1),
             ("plugins_instances", 4),
             ("pools", 6),
             ("profile_admin", 6),
-            ("quota_handler", 7),
+            ("quota_handler", 8),
             ("rebalance", 3),
             ("replication_handler", 6),
             ("scanner", 5),
             ("site_replication", 22),
             ("sts", 1),
             ("system", 9),
-            ("table_catalog", 50),
-            ("tier", 7),
+            ("table_catalog", 56),
+            ("tier", 9),
+            ("tls_certificate", 2),
             ("tls_debug", 1),
             ("usage_prefix", 1),
             ("user", 38),
         ]
     );
-    assert_eq!(ROUTES.len(), 314);
+    assert_eq!(ROUTES.len(), 336);
     assert!(PENDING.is_empty(), "{PENDING:?}");
-    // 261 admin and profiling routes declared, the 100 table-catalog routes as 50 operations with
-    // 50 alias rows, four routes that stay with RustFS (ADR-0032) and the form-claimed STS endpoint
+    // 277 admin and profiling routes declared, the 112 table-catalog routes as 56 operations with
+    // 56 alias rows, four routes that stay with RustFS (ADR-0032) and the form-claimed STS endpoint
     // (ADR-0041): the whole inventory.
     let staying: Vec<(&str, &str, &str)> = STAYING.iter().map(|route| (route.group, route.method, route.path)).collect();
     assert_eq!(
@@ -209,7 +216,7 @@ fn every_order_is_declared_and_four_routes_stay_with_rustfs() {
         .collect();
     assert_eq!(formed, [("sts", "POST", "/")]);
     let declared: usize = by_group.values().map(BTreeSet::len).sum();
-    assert_eq!(declared + 50 + STAYING.len() + FORM_ROUTES.len(), 366);
+    assert_eq!(declared + 56 + STAYING.len() + FORM_ROUTES.len(), 394);
 }
 
 /// Positive and negative — names are unique, precedences strictly increase, and the overlay

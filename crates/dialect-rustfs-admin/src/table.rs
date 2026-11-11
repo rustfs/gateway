@@ -39,7 +39,7 @@ use crate::ops;
 use crate::record::{ExtensionRouteRecord, FormRouteRecord, PendingGroup, StayingRoute};
 
 /// The RustFS commit the inventory was recorded from.
-pub const RUSTFS_SOURCE_COMMIT: &str = "5e1bd498ce1ca33bcb0ca50aeee861e69e6c8744";
+pub const RUSTFS_SOURCE_COMMIT: &str = "443e8afee194fe38b32d62a9289a99c1f703715c";
 
 /// Every registration group RustFS still serves itself, with its route count.
 pub static PENDING: &[PendingGroup] = &[];

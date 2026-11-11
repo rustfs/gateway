@@ -270,8 +270,8 @@ fn every_declared_row_reaches_its_operation() {
         }
     }
     assert_eq!(
-        rows, 626,
-        "314 operations, each with its MinIO or compat alias but the two profiling triggers"
+        rows, 670,
+        "336 operations, each with its MinIO or compat alias but the two profiling triggers"
     );
 }
 
@@ -428,8 +428,8 @@ fn n_parameter_boundaries_preserve_raw_data() {
     }
     assert_eq!(
         checked,
-        10 * 2 * 191,
-        "191 parameters across 103 templates, each with its alias; catch-all values included"
+        10 * 2 * 209,
+        "209 parameters across 121 templates, each with its alias; catch-all values included"
     );
     assert_eq!(
         elsewhere,
