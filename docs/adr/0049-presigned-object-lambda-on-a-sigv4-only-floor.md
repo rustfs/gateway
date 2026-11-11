@@ -1,4 +1,4 @@
-# ADR-0047: A presigned object lambda on a SigV4-only floor
+# ADR-0049: A presigned object lambda on a SigV4-only floor
 
 - Status: Accepted
 - Date: 2026-11-11

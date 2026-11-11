@@ -1,4 +1,5 @@
 [workspace]
+exclude = ["rdma", "vendor/rustfs-ucx"]
 resolver = "3"
 members = ["compat/sut", "crates/*", "spikes/ext-field", "xtask", "xtask-launcher"]
 default-members = ["crates/*", "xtask", "xtask-launcher"]

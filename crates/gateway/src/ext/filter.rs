@@ -58,8 +58,9 @@
 //!    entry to the pipeline, before the first filter runs, so a rewrite of `Authorization`,
 //!    `x-amz-date`, `x-amz-content-sha256` or any signed header changes nothing about the verdict —
 //!    in *either* direction. The one exception is the `Host` header, whose effective form is
-//!    derived from the head *after* this seam, and which is therefore refused outright: see
-//!    [`FrozenHeader`].
+//!    derived from the head *after* this seam, and which is therefore refused outright. The
+//!    reserved `x-rustfs-rdma-` namespace also stays unchanged so external transport bindings
+//!    retain the exact fields verified at service entry. See [`FrozenHeader`].
 //! 3. **It may not choose the target.** [`RoutedView`] hands out `&`-only accessors and no
 //!    mutable one, so the bucket and the key have exactly one producer — `MetaView`'s single
 //!    normalisation — and a filter has nothing to write them with.
@@ -84,13 +85,13 @@ use rustfs_gateway_types::{BucketName, ErrorCode, ObjectKey};
 use super::ClientFacts;
 use crate::trace::RequestId;
 
-/// The header fields a [`StageFilter::on_wire`] may not write, lowercase.
+/// The individually named headers a [`StageFilter::on_wire`] may not write, lowercase.
 ///
 /// Exactly one, and it earns its place by a property no other header has: the effective host is
 /// computed from the head **after** this seam and then feeds the canonical request, so a filter
-/// that could rewrite it would be able to change a signature's input. Every other header is
-/// rewritable precisely because it cannot: the verifier reads a snapshot taken before the first
-/// filter ran.
+/// that could rewrite it would be able to change a signature's input. Other signing material is
+/// verified from the snapshot taken before the first filter ran. The reserved `x-rustfs-rdma-`
+/// namespace is additionally frozen by prefix to preserve external request bindings.
 ///
 /// A longer list would be worse, not better. Freezing `Authorization` here would suggest that
 /// freezing it is what stops a forgery, and the day the snapshot moved, the list would still be
@@ -115,8 +116,7 @@ impl core::fmt::Display for FrozenHeader {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(
             f,
-            "the {} header is frozen at the wire seam: the effective host is derived from the head after this seam and feeds \
-             the canonical request, so rewriting it would change a signature's input",
+            "the {} header is frozen at the wire seam to preserve the canonical request or external transport binding",
             self.name
         )
     }
@@ -208,7 +208,7 @@ impl<'a> WireHead<'a> {
     ///
     /// # Errors
     ///
-    /// [`FrozenHeader`] for a name in [`FROZEN_WIRE_HEADERS`].
+    /// [`FrozenHeader`] for a name in [`FROZEN_WIRE_HEADERS`] or the reserved `x-rustfs-rdma-` namespace.
     pub fn set_header(&mut self, name: HeaderName, value: HeaderValue) -> Result<(), FrozenHeader> {
         Self::allowed(&name)?;
         self.parts.headers.insert(name, value);
@@ -219,7 +219,7 @@ impl<'a> WireHead<'a> {
     ///
     /// # Errors
     ///
-    /// [`FrozenHeader`] for a name in [`FROZEN_WIRE_HEADERS`].
+    /// [`FrozenHeader`] for a name in [`FROZEN_WIRE_HEADERS`] or the reserved `x-rustfs-rdma-` namespace.
     pub fn remove_header(&mut self, name: &HeaderName) -> Result<(), FrozenHeader> {
         Self::allowed(name)?;
         self.parts.headers.remove(name);
@@ -247,7 +247,7 @@ impl<'a> WireHead<'a> {
 
     /// The frozen check, in one place so that the two writers cannot disagree about the set.
     fn allowed(name: &HeaderName) -> Result<(), FrozenHeader> {
-        if FROZEN_WIRE_HEADERS.contains(&name.as_str()) {
+        if FROZEN_WIRE_HEADERS.contains(&name.as_str()) || name.as_str().starts_with("x-rustfs-rdma-") {
             return Err(FrozenHeader { name: name.clone() });
         }
         Ok(())
@@ -529,10 +529,35 @@ mod tests {
         assert_eq!(view.query(), Some("token=secret-token&note=ok"));
     }
 
-    /// Negative — the `Host` header cannot be written, and the refusal names it. Every other
-    /// header can, so the frozen set is a decision rather than a blanket.
     #[test]
-    fn the_host_header_is_frozen_and_nothing_else_is() {
+    fn external_binding_headers_cannot_be_inserted() {
+        let mut parts = head();
+        let name = HeaderName::from_static("x-rustfs-rdma-extra");
+        let result = WireHead::new(&mut parts).set_header(name.clone(), HeaderValue::from_static("unsigned"));
+        assert!(result.is_err() && !parts.headers.contains_key(name));
+    }
+
+    #[test]
+    fn external_binding_headers_cannot_be_replaced() {
+        let mut parts = head();
+        let name = HeaderName::from_static("x-rustfs-rdma-binding");
+        parts.headers.insert(name.clone(), HeaderValue::from_static("signed"));
+        let result = WireHead::new(&mut parts).set_header(name.clone(), HeaderValue::from_static("changed"));
+        assert!(result.is_err() && parts.headers.get(name).is_some_and(|value| value == "signed"));
+    }
+
+    #[test]
+    fn external_binding_headers_cannot_be_removed() {
+        let mut parts = head();
+        let name = HeaderName::from_static("x-rustfs-rdma-binding");
+        parts.headers.insert(name.clone(), HeaderValue::from_static("signed"));
+        let result = WireHead::new(&mut parts).remove_header(&name);
+        assert!(result.is_err() && parts.headers.get(name).is_some_and(|value| value == "signed"));
+    }
+
+    /// The host stays frozen while ordinary metadata remains writable.
+    #[test]
+    fn the_host_header_is_frozen_and_ordinary_metadata_is_writable() {
         let mut parts = head();
         let mut view = WireHead::new(&mut parts);
         let refused = view

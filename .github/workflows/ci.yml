@@ -456,6 +456,22 @@ jobs:
           scripts/ci_budget.sh 120 "difftest runners build" cargo build --quiet --package rustfs-gateway-difftest --bins
           scripts/ci_budget.sh 200 "difftest runners" bash -c 'target/debug/decode-diff --corpus corpus --budget-seconds 180 && target/debug/encode-diff --builtin --budget-seconds 180'
 
+  external-payload-tests:
+    name: External payload tests
+    runs-on: sm-standard-4
+    timeout-minutes: 9
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # pinned action revision
+        with:
+          toolchain: 1.97.1
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - name: Install host tools
+        run: bash scripts/ci_install_host_tools.sh
+      - name: External payload tests (maximum 8 minutes after setup)
+        run: |
+          scripts/ci_budget.sh 480 "external payload tests" cargo test --package rustfs-gateway --package rustfs-gateway-fs --features rustfs-gateway/external-payload,rustfs-gateway-fs/external-payload external_payload
+
   # Transport parity runs the whole corpus twice (once per production driver) and compares.
   # On one runner it sat at 413-471s of a 480s budget for nine consecutive main runs and hit
   # exit 124 twice in one day (rustfs/gateway#641), and its job is already at nine minutes
@@ -865,7 +881,7 @@ jobs:
   # run even after a dependency fails, otherwise a skipped required check could hide the failure.
   test:
     name: Test
-    needs: [workspace-tests, workspace-tests-2, workspace-tests-3, transport-parity, transport-parity-2, persistence-goldens, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, guard-self-test-5, guard-self-test-6, target-consolidation-self-test, quirk-ledger-self-test, quirk-ledger-self-test-2, quirk-ledger-self-test-3, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, build-guard-self-test-4, build-guard-self-test-5, error-status-self-test, gateway-tsan, docs, examples]
+    needs: [workspace-tests, workspace-tests-2, workspace-tests-3, transport-parity, transport-parity-2, persistence-goldens, signing-suite, guard-self-test, guard-self-test-2, guard-self-test-3, guard-self-test-4, guard-self-test-5, guard-self-test-6, target-consolidation-self-test, quirk-ledger-self-test, quirk-ledger-self-test-2, quirk-ledger-self-test-3, dto-compiler-self-test, build-guard-self-test, build-guard-self-test-2, build-guard-self-test-3, build-guard-self-test-4, build-guard-self-test-5, error-status-self-test, gateway-tsan, docs, examples, external-payload-tests]
     if: always()
     runs-on: sm-standard-2
     timeout-minutes: 1
@@ -899,6 +915,7 @@ jobs:
           TSAN_RESULT: ${{ needs.gateway-tsan.result }}
           DOCS_RESULT: ${{ needs.docs.result }}
           EXAMPLES_RESULT: ${{ needs.examples.result }}
+          EXTERNAL_PAYLOAD_RESULT: ${{ needs.external-payload-tests.result }}
         run: |
           test "$WORKSPACE_RESULT" = success
           test "$WORKSPACE_2_RESULT" = success
@@ -927,3 +944,4 @@ jobs:
           test "$TSAN_RESULT" = success
           test "$DOCS_RESULT" = success
           test "$EXAMPLES_RESULT" = success
+          test "$EXTERNAL_PAYLOAD_RESULT" = success

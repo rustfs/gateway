@@ -151,7 +151,7 @@ pub struct InvokeObjectLambda;
 static SPEC: OperationSpec = admin::spec(NAME, AUTH, false);
 
 /// The evidence that a RustFS client presigns this route, which ADR-0024 (f) makes the condition for
-/// admitting a presigned URL (ADR-0047, rustfs/gateway#1576).
+/// admitting a presigned URL (ADR-0049, rustfs/gateway#1576).
 pub const PRESIGNED_EVIDENCE: &str = "https://github.com/rustfs/rustfs/blob/443e8afee194fe38b32d62a9289a99c1f703715c/crates/e2e_test/src/object_lambda_test.rs#L608-L636";
 
 /// SigV4 header-signed or presigned, never anonymous, never SigV2: RustFS answers both `403 AccessDenied`

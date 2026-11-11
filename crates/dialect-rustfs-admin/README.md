@@ -53,7 +53,7 @@ which RustFS's own end-to-end suite presigns: its floor (`admin::presigned_floor
 privileged, admits a SigV4 header signature or a presigned URL whose signature covers `lambdaArn`,
 and refuses an anonymous or SigV2 request under every policy, as RustFS's router does, so the start-up posture report lists it
 in `presigned_allowed_ops` and `s3:GetObject` is still asked, or `s3:GetObjectVersion` instead
-when the request names `versionId` (ADR-0047, rustfs/gateway#1576).
+when the request names `versionId` (ADR-0049, rustfs/gateway#1576).
 
 A `{bucket}` or `{warehouse}` template parameter is the bucket the operation is authorised on
 (`BucketParam::Path`, ADR-0025 (c), ADR-0030): the raw segment meets the S3 bucket-name rules

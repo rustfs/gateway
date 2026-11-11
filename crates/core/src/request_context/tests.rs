@@ -263,3 +263,78 @@ fn n_a_detached_context_names_no_target_and_debug_prints_only_the_authoritys_pre
         .expect("an anonymous context");
     assert!(format!("{context:?}").contains("target_authority: false"));
 }
+
+#[test]
+fn external_context_copy_preserves_verified_bearer_state() {
+    use rustfs_gateway_sig::{BearerGrant, BearerRefused, BearerTokenRequest, BearerTokenVerifier};
+    use std::sync::Arc;
+
+    struct VerifiedDownload;
+
+    impl BearerTokenVerifier for VerifiedDownload {
+        fn verify(&self, request: &BearerTokenRequest<'_>) -> Result<BearerGrant, BearerRefused> {
+            let identity = Identity::new("zip-downloader").expect("valid fixture identity");
+            Ok(BearerGrant::new(identity, request.resource(), i64::MAX, Arc::new(42u16)))
+        }
+    }
+
+    let headers = http::HeaderMap::new();
+    let operation = OperationFloor::custom("fixture:Download", SigService::S3)
+        .with_query_bearer_claim(QueryBearerClaim::new("token", ".zip"));
+    let wire = WireView::new(&headers, RawQuery::new("token=fixture"));
+    let admission = SecurityFloor::new().admit(wire, &operation, RequestNow::from_unix_seconds(1));
+    let Ok(Admission::Bearer(admission)) = admission else { panic!("expected bearer admission") };
+    let verdict = admission.verify(&VerifiedDownload, "/downloads/fixture.zip");
+    let context = RequestContextView::detached("fixture:Download")
+        .with_bearer_receipt(verdict.bearer_receipt().expect("verified fixture receipt"));
+    let copy = context.clone_without_caller_secret();
+    let verified = copy
+        .bearer()
+        .and_then(|bearer| bearer.state::<u16>().map(|state| (bearer.identity().access_key_id(), *state)));
+    assert_eq!(verified, Some(("zip-downloader", 42)));
+}
+
+#[test]
+fn external_context_copy_preserves_request_facts_without_copying_the_caller_secret() {
+    let wire = transport_wire();
+    let verdict = anonymous_verdict(&wire);
+    let mut context =
+        RequestContextView::from_pipeline("HeadObject", &wire, path_style(), &verdict, None).expect("valid context fixture");
+    context.principal = Some(RequestPrincipal {
+        identity: Identity::new("fixture-access-key").expect("valid context fixture"),
+        scheme: AuthenticatedScheme {
+            family: SigFamily::V4,
+            location: SigLocation::Header,
+            service: SigService::S3,
+            temporary: false,
+        },
+        scope: None,
+        secret: Some(CallerSecretKey(SecretBytes::new(b"private-caller-key"))),
+    });
+    let copy = context.clone_without_caller_secret();
+    assert_eq!(copy.operation(), context.operation());
+    assert_eq!(copy.raw_path(), context.raw_path());
+    assert_eq!(copy.principal().expect("valid context fixture").access_key_id(), "fixture-access-key");
+    assert!(
+        copy.principal()
+            .expect("valid context fixture")
+            .secret_key_from_authenticator_lookup()
+            .is_none()
+    );
+    assert!(
+        context
+            .principal()
+            .expect("valid context fixture")
+            .secret_key_from_authenticator_lookup()
+            .is_some()
+    );
+    assert!(core::ptr::eq(
+        copy.transport_extensions()
+            .get::<TransportNote>()
+            .expect("valid context fixture"),
+        context
+            .transport_extensions()
+            .get::<TransportNote>()
+            .expect("valid context fixture")
+    ));
+}

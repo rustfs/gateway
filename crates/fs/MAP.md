@@ -7,6 +7,8 @@ Agent entry point. File → responsibility → when you need to open it.
 | `README.md` | Scope fence and supported-operation summary. | Deciding whether this reference backend fits a use case. |
 | `src/lib.rs` | Filesystem paths, capability authority, served region and owner, and four multipart handlers (`CreateMultipartUpload`, `UploadPart`, `ListParts`, `AbortMultipartUpload`). | Changing shared storage behavior or the registered operation set. |
 | `src/deletes.rs` | `DeleteObjects`: every requested key through the single-key deletion, reported once as deleted or as an error; quiet mode; the keys a stood-in storage refuses answered alone and left alone (`refusing_batch_deletes_of`). | Changing batch deletion or its per-key report. |
+| `src/put_object.rs`, `src/upload_part.rs`, `src/external_input.rs` | Shared ordinary/external object admission and verified publication. | Implementing external-data storage handlers. |
+| `tests/crud/external_payload.rs` | Persisted object/part success, refused publication and selected external GET bytes. | Changing external-data integration. |
 | `src/post_object.rs` | Browser `POST` Object: the accepted form's file, media type, metadata and other `PutObject` members stored through ordinary publication as RustFS stores them, or refused. | Changing what a form upload stores. |
 | `src/content_headers.rs` | The six stored representation headers, the default media type, the request reader macro, the legacy `Content-Encoding` normalization (`normalizing_content_encoding`), and the `headers/1` section grammar. | Changing which headers an object stores or how they persist. |
 | `src/checksums.rs` | A stored checksum's explicit type marker and its GET, HEAD, COPY and replay projection. | Changing stored checksum reporting. |

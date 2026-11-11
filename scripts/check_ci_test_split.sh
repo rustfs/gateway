@@ -43,6 +43,7 @@ require_equal(workflow.fetch("env", {}).keys, workflow_env_keys,
 
 workspace_ids = ["workspace-tests", "workspace-tests-2", "workspace-tests-3"]
 workspaces = workspace_ids.map { |job_id| jobs.fetch(job_id) }
+external_payload = jobs.fetch("external-payload-tests")
 signing_suite = jobs.fetch("signing-suite")
 persistence_goldens = jobs.fetch("persistence-goldens")
 guard = jobs.fetch("guard-self-test")
@@ -125,7 +126,15 @@ require_equal(error_status.values_at("name", "runs-on", "timeout-minutes"),
               ["Error status self-test", "sm-standard-4", 3],
               "error-status-self-test identity or budget changed")
 
-(workspaces + guard_groups).each do |job|
+require_equal(external_payload.keys, worker_keys,
+              "external-payload-tests changed its parallel nine-minute contract")
+require_equal(external_payload.values_at("name", "runs-on", "timeout-minutes"),
+              ["External payload tests", "sm-standard-4", 9],
+              "external-payload-tests identity or budget changed")
+require_equal(external_payload.fetch("steps").first(3).map(&:keys),
+              [["uses"], ["uses", "with"], ["uses"]],
+              "external-payload-tests setup gained executable control")
+(workspaces + [external_payload] + guard_groups).each do |job|
   steps = job.fetch("steps")
   require_equal(steps.length, 5, "a split worker changed its setup or command step count")
   expected_setup = [
@@ -295,6 +304,11 @@ workspaces.each_with_index do |job, index|
 end
 require_equal(workspace_runs.uniq.length, 3,
               "the workspace test runners do not cover three distinct shards")
+external_payload_run = <<~'RUN'
+  scripts/ci_budget.sh 480 "external payload tests" cargo test --package rustfs-gateway --package rustfs-gateway-fs --features rustfs-gateway/external-payload,rustfs-gateway-fs/external-payload external_payload
+RUN
+require_equal(external_payload.fetch("steps").last.fetch("run"), external_payload_run,
+              "external-payload-tests command changed, lost feature coverage, or can hide a failure")
 require_equal(signing_suite_steps.last.fetch("run"), signing_suite_run,
               "signing-suite command changed or can hide a failure")
 require_equal(persistence_goldens_steps.last.fetch("run"), persistence_goldens_run,
@@ -378,8 +392,8 @@ end
 aggregate_keys = ["name", "needs", "if", "runs-on", "timeout-minutes", "steps"]
 require_equal(aggregate.keys, aggregate_keys, "the Test job changed its dependency, failure, or budget contract")
 require_equal(aggregate.values_at("name", "needs", "if", "runs-on", "timeout-minutes"),
-              ["Test", ["workspace-tests", "workspace-tests-2", "workspace-tests-3", "transport-parity", "transport-parity-2", "persistence-goldens", "signing-suite", "guard-self-test", "guard-self-test-2", "guard-self-test-3", "guard-self-test-4", "guard-self-test-5", "guard-self-test-6", "target-consolidation-self-test", "quirk-ledger-self-test", "quirk-ledger-self-test-2", "quirk-ledger-self-test-3", "dto-compiler-self-test", "build-guard-self-test", "build-guard-self-test-2", "build-guard-self-test-3", "build-guard-self-test-4", "build-guard-self-test-5", "error-status-self-test", "gateway-tsan", "docs", "examples"], "always()", "sm-standard-2", 1],
-              "the Test job no longer aggregates all twenty-seven workers within the budget")
+              ["Test", ["workspace-tests", "workspace-tests-2", "workspace-tests-3", "transport-parity", "transport-parity-2", "persistence-goldens", "signing-suite", "guard-self-test", "guard-self-test-2", "guard-self-test-3", "guard-self-test-4", "guard-self-test-5", "guard-self-test-6", "target-consolidation-self-test", "quirk-ledger-self-test", "quirk-ledger-self-test-2", "quirk-ledger-self-test-3", "dto-compiler-self-test", "build-guard-self-test", "build-guard-self-test-2", "build-guard-self-test-3", "build-guard-self-test-4", "build-guard-self-test-5", "error-status-self-test", "gateway-tsan", "docs", "examples", "external-payload-tests"], "always()", "sm-standard-2", 1],
+              "the Test job no longer aggregates all required workers within the budget")
 steps = aggregate.fetch("steps")
 require_equal(steps.length, 1, "the Test job must have exactly one result-checking step")
 require_equal(steps.first.keys, ["name", "env", "run"], "the Test comparison step can be skipped or hidden")
@@ -410,7 +424,8 @@ expected_env = {
   "ERROR_STATUS_RESULT" => "${{ needs.error-status-self-test.result }}",
   "TSAN_RESULT" => "${{ needs.gateway-tsan.result }}",
   "DOCS_RESULT" => "${{ needs.docs.result }}",
-  "EXAMPLES_RESULT" => "${{ needs.examples.result }}"
+  "EXAMPLES_RESULT" => "${{ needs.examples.result }}",
+  "EXTERNAL_PAYLOAD_RESULT" => "${{ needs.external-payload-tests.result }}"
 }
 require_equal(steps.first.fetch("env"), expected_env, "the Test step does not bind all worker results")
 expected_run = <<~'RUN'
@@ -441,6 +456,7 @@ expected_run = <<~'RUN'
   test "$TSAN_RESULT" = success
   test "$DOCS_RESULT" = success
   test "$EXAMPLES_RESULT" = success
+  test "$EXTERNAL_PAYLOAD_RESULT" = success
 RUN
 require_equal(steps.first.fetch("run"), expected_run, "the Test step does not execute all comparisons")
 RUBY

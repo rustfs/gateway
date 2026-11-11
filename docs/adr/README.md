@@ -102,7 +102,9 @@ second copy is a second thing to keep in sync.
 | 0044 | STS action credentials and claimed-route signing | Accepted |
 | 0045 | Copy source capability before resource authorization | Accepted |
 | 0046 | Zip bearer grants are bound to download and expiry by the gateway | Accepted |
-| 0047 | A presigned object lambda on a SigV4-only floor | Accepted |
+| 0047 | Owned external object-data ports | Accepted |
+| 0048 | Bound external data execution through explicit storage registration | Accepted |
+| 0049 | A presigned object lambda on a SigV4-only floor | Accepted |
 
 The index is hand-maintained. Generating it would cost more than it saves until
 there are at least fifteen records.
