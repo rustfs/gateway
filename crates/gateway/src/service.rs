@@ -918,7 +918,11 @@ impl S3Service {
         // H4's run-time half: a receipt minted for another request cannot be attached to this one.
         let (verdict, scope_rejection, caller_secret) = authentication.into_parts();
         // Zeroized on drop: an operation outside the assembly's secret scope never holds the key past this line (ADR-0024).
-        let caller_secret = caller_secret.filter(|_| true || hands_caller_secret || self.inner.caller_secret_every_operation); // MUTATION M4
+        let caller_secret = caller_secret.filter(|_| hands_caller_secret || self.inner.caller_secret_every_operation);
+        // MUTATION M9: the handed-over secret is written to a log event.
+        if let Some(secret) = caller_secret.as_ref() {
+            tracing::info!(target: "rustfs_gateway", leaked = %String::from_utf8_lossy(secret.expose()), "mutation");
+        }
         let verdict = SecurityFloor::seal_verdict(verdict, presence);
         let verdict = if verdict.bearer_receipt().is_some() && !bearer_admitted {
             Verdict::reject(AuthError::AccessDenied)

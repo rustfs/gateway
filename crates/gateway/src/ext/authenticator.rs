@@ -741,7 +741,7 @@ impl SigV4Authenticator {
         // cannot name a region other than the one the signature is valid under (ADR-0020).
         // The secret is the one this lookup returned and the signature was just verified with,
         // copied only when the deployment asked for the hand-off (ADR-0022).
-        let secret = (self.hand_secret || true).then(|| credentials.secret().clone_secret()); // MUTATION M6
+        let secret = self.hand_secret.then(|| credentials.secret().clone_secret());
         let verdict = Verdict::authenticated_in_scope(credentials.identity().clone(), scheme, verified, proof);
         Ok(Some((verdict, secret)))
     }
