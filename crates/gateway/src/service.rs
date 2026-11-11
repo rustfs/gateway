@@ -842,10 +842,7 @@ impl S3Service {
                     }
                     match result {
                         Ok(authentication) => (authentication, signature_mismatch),
-                        Err(_) => {
-                            return outcome
-                                .refuse_handler_at(Refused::Authentication, HandlerError::internal_error(UNAUTHENTICATED));
-                        }
+                        Err(_) => return outcome.refuse_unavailable(UNAUTHENTICATED, wire.framing().has_body()),
                     }
                 }
             }
@@ -857,9 +854,7 @@ impl S3Service {
                         .with_post_policy_limits(post_policy_limits);
                 match self.inner.authenticator.authenticate_sigv2(&question).await {
                     Ok(authentication) => (authentication, None),
-                    Err(_) => {
-                        return outcome.refuse_handler_at(Refused::Authentication, HandlerError::internal_error(UNAUTHENTICATED));
-                    }
+                    Err(_) => return outcome.refuse_unavailable(UNAUTHENTICATED, wire.framing().has_body()),
                 }
             }
             Ok(Admission::Custom(request)) => match &self.inner.custom_signature_verifier {

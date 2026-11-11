@@ -90,7 +90,7 @@ fn route_action(exchange: &Exchange, at: &str) -> String {
 }
 
 /// `seconds` as an RFC 1123 date, the spelling SigV2's `Date` header carries.
-fn rfc1123(seconds: i64) -> String {
+pub(super) fn rfc1123(seconds: i64) -> String {
     const WEEKDAYS: [&str; 7] = ["Thu", "Fri", "Sat", "Sun", "Mon", "Tue", "Wed"];
     const MONTHS: [&str; 12] = [
         "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
@@ -121,7 +121,11 @@ fn rfc1123(seconds: i64) -> String {
 
 /// The object lambda request header-signed with SigV2, now.
 fn sigv2_header_signed_lambda() -> Request<Bytes> {
-    let mut request = unsigned_at("GET", &format!("/{BUCKET}/{KEY}?lambdaArn={LAMBDA_ARN}"));
+    sigv2_header_signed(unsigned_at("GET", &format!("/{BUCKET}/{KEY}?lambdaArn={LAMBDA_ARN}")))
+}
+
+/// `request`, path-style and unsigned, header-signed with SigV2 by the shared credential, now.
+pub(super) fn sigv2_header_signed(mut request: Request<Bytes>) -> Request<Bytes> {
     let date = rfc1123(RequestNow::capture().unix_seconds());
     request
         .headers_mut()
@@ -257,13 +261,19 @@ fn n_an_unversioned_lambda_request_is_not_authorised_by_the_version_action() {
 }
 
 /// Positive and negative — with the dialect installed, the start-up posture lists the object
-/// lambda as presigned-reachable and no other dialect operation, under the default floor and the
-/// whole RustFS profile.
+/// lambda as presigned-reachable and no other admin-router operation, under the default floor and
+/// the whole RustFS profile. The metadata route's two listings are on the standard listing floor
+/// (ADR-0050), so the whole profile, which admits a presigned URL on every standard operation,
+/// lists them exactly as it lists `ListObjectsV2`, and the default floor lists neither.
 #[test]
 fn the_posture_lists_only_the_object_lambda_of_the_dialect_as_presigned_reachable() {
-    for (at, assembled) in [
-        ("default floor", assemble_on(SecurityFloor::new(), |_, _| true)),
-        ("whole RustFS profile", assemble_rustfs_profile(|_, _| true)),
+    for (at, assembled, listings) in [
+        ("default floor", assemble_on(SecurityFloor::new(), |_, _| true), &[][..]),
+        (
+            "whole RustFS profile",
+            assemble_rustfs_profile(|_, _| true),
+            &super::metadata_listing_tests::LISTINGS[..],
+        ),
     ] {
         let posture = assembled.service.startup_posture().to_string();
         let line = posture
@@ -275,7 +285,11 @@ fn the_posture_lists_only_the_object_lambda_of_the_dialect_as_presigned_reachabl
             .nth(1)
             .and_then(|rest| rest.split(']').next())
             .unwrap_or_else(|| panic!("{at}: no presigned list in {line}"));
-        let dialect: Vec<&str> = presigned.split(',').filter(|name| name.starts_with("rustfs:")).collect();
-        assert_eq!(dialect, [LAMBDA], "{at}: {line}");
+        let mut dialect: Vec<&str> = presigned.split(',').filter(|name| name.starts_with("rustfs:")).collect();
+        let mut expected = vec![LAMBDA];
+        expected.extend_from_slice(listings);
+        dialect.sort_unstable();
+        expected.sort_unstable();
+        assert_eq!(dialect, expected, "{at}: {line}");
     }
 }

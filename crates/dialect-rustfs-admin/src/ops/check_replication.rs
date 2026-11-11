@@ -356,5 +356,6 @@ pub const RECORD: ExtensionRouteRecord = ExtensionRouteRecord {
     method: "GET",
     target: "bucket",
     query: ("replication-check", "equals:"),
+    requires: &[],
     action: "s3:PutReplicationConfiguration",
 };

@@ -473,3 +473,66 @@ async fn n_a_listing_racing_a_write_never_answers_500() {
     let failures: Vec<_> = statuses.iter().filter(|(_, status)| *status != 200).collect();
     assert!(failures.is_empty(), "a listing or a write answered other than 200: {failures:?}");
 }
+
+/// The reference backend's listings behind `ServiceBuilder::rustfs_profile()` with no RustFS
+/// dialect installed, the assembly a RustFS-profile host without the dialect runs.
+fn rustfs_profile_service(root: &TestRoot) -> S3Service {
+    let backend = Arc::new(
+        FsBackend::open_with_clock(&root.0, Arc::new(FixedClock::at_unix_seconds(SIGNED_AT_SECONDS)))
+            .expect("a usable test root"),
+    );
+    let credentials =
+        Arc::new(StaticCredentials::new().with(Credentials::new("AKIDEXAMPLE", b"secret").expect("valid fixture credentials")));
+    let builder = rustfs_gateway::ServiceBuilder::new()
+        .rustfs_profile()
+        .authenticator(SigV4Authenticator::new(credentials, RegionSet::new(["us-east-1"]).expect("one region")))
+        .authorizer(allow_when(|_| true))
+        .clock_with_skew_ack(
+            FixedClock::at_unix_seconds(SIGNED_AT_SECONDS),
+            ClockSkewAck::i_understand_a_skewed_clock_can_disable_signature_expiry(),
+        );
+    backend
+        .register_listing(backend.register_versioning(backend.register_crud(builder)))
+        .build()
+        .expect("a listing assembly")
+}
+
+/// Positive and negative — on the RustFS profile without the RustFS dialect, a listing is served
+/// as before, and the same listing asking for RustFS's `metadata=true` extension answers `501`
+/// before authentication, because legacy selection names a dialect operation the table lacks
+/// (rustfs/gateway#1588): the extension is refused rather than silently dropped. Without the
+/// profile the table's own selection still serves the standard listing, with no metadata.
+#[tokio::test]
+async fn n_a_metadata_listing_without_the_dialect_is_501_on_the_rustfs_profile() {
+    let root = TestRoot::new();
+    let (_, table) = service(&root);
+    create_bucket(&table, "meta").await;
+    put(&table, "meta", "key", b"body").await;
+    let profile = rustfs_profile_service(&root);
+    // The RustFS profile reads every signed request's `x-amz-content-sha256`, the empty body's here.
+    let mut headers = http::HeaderMap::new();
+    headers.insert(
+        http::HeaderName::from_static("x-amz-content-sha256"),
+        http::HeaderValue::from_static("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"),
+    );
+    for (target, extension) in [
+        ("/meta?list-type=2", false),
+        ("/meta?versions", false),
+        ("/meta?list-type=2&metadata=true", true),
+        ("/meta?versions&metadata=true", true),
+    ] {
+        let request = signed_with_headers(http::Method::GET, target, Bytes::new(), headers.clone());
+        let response = exchange(&profile, request).await;
+        let body = String::from_utf8_lossy(response.body()).into_owned();
+        if extension {
+            assert_eq!(response.status(), 501, "{target}: {body}");
+            assert_eq!(elements(response.body(), "Code"), ["NotImplemented"], "{target}");
+            assert!(elements(response.body(), "Key").is_empty(), "{target}: {body}");
+        } else {
+            assert_eq!(response.status(), 200, "{target}: {body}");
+            assert_eq!(elements(response.body(), "Key"), ["key"], "{target}");
+        }
+    }
+    let response = exchange(&table, signed(http::Method::GET, "/meta?list-type=2&metadata=true", Bytes::new())).await;
+    assert_eq!(response.status(), 200, "{}", String::from_utf8_lossy(response.body()));
+}

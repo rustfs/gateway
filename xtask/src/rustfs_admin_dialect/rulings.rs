@@ -248,10 +248,15 @@ pub(super) const FORMS: &[FormRuling] = &[FormRuling {
     ),
 }];
 
-/// RustFS's S3-shaped extension routes (rustfs/backlog#2753): the variant name the inventory
-/// records, and the operation it becomes. The inventory's order is the order RustFS's router tries
-/// the discriminators in, which is the order of the generated rows.
+/// RustFS's S3-shaped extension routes (rustfs/backlog#2753, rustfs/gateway#1588): the variant
+/// name the inventory records, and the operation it becomes. The inventory's order is the order
+/// RustFS tries them in — its metadata route's two listings, then its admin router's
+/// discriminators — which is the order of the generated rows.
 pub(super) const EXTENSIONS: &[(&str, &str)] = &[
+    // RustFS's metadata route, asked before its admin router (rustfs/gateway#1588).
+    ("MetadataOperation::ListObjectVersions", "ListObjectVersionsWithMetadata"),
+    ("MetadataOperation::ListObjectsV2", "ListObjectsV2WithMetadata"),
+    // RustFS's admin router.
     ("ReplicationExtRoute::ResetStart", "ResetBucketReplication"),
     ("ReplicationExtRoute::ResetStatus", "GetReplicationResetStatus"),
     ("ReplicationExtRoute::MetricsV2", "GetReplicationMetricsV2"),

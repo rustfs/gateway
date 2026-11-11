@@ -13,12 +13,13 @@
 // limitations under the License.
 
 //! Generation of the dialect's S3-shaped extension operations: RustFS's eight query-discriminated
-//! routes outside its path table (rustfs/backlog#2753).
+//! admin-router routes outside its path table (rustfs/backlog#2753), and the two listings its
+//! metadata route claims ahead of the admin router (rustfs/gateway#1588).
 //!
 //! Responsible for: reading the inventory's `extension_routes`, checking each against its ruling
-//! (`super::rulings::EXTENSIONS`), deriving its selector, resource shape and precedence, computing
-//! the overlaps its row owes against the S3 table and against the earlier extension rows, and
-//! rendering its operation module.
+//! (`super::rulings::EXTENSIONS`), deriving its selector, resource shape, floor and precedence,
+//! computing the overlaps its row owes against the S3 table and against the earlier extension
+//! rows, and rendering its operation module.
 //! NOT responsible for: choosing which routes are extension routes or naming them (the rulings),
 //! matching a row or refusing an undeclared overlap (`rustfs-gateway-core`), or installing a
 //! handler.
@@ -45,13 +46,86 @@ use super::render::doc_paragraph;
 use super::rule::{is_action, is_parameter};
 use super::template::snake;
 
-/// The custom-auth class every extension route records: a signature first, then the handler's
-/// own check of the recorded action.
+/// The custom-auth class every admin-router extension route records: a signature first, then the
+/// handler's own check of the recorded action.
 pub(super) const AUTH_DETAIL: &str = "SignatureRequiredThenHandlerCheck";
+/// The custom-auth class of a metadata listing route: a signed caller's credentials or an
+/// anonymous caller, then RustFS's bucket listing check of the recorded action.
+pub(super) const LISTING_AUTH_DETAIL: &str = "SignedOrAnonymousThenBucketListing";
+/// The RustFS file whose selector claims the metadata listing routes (rustfs/gateway#1588).
+pub(super) const METADATA_ROUTE: &str = "rustfs/src/app/metadata_route.rs";
 /// The first extension row's precedence: ahead of every S3 row of any method and target (the
 /// earliest standard row sits at 90), in the band the route table reserves for rows that are
-/// asked before the ordinary shapes.
-pub(super) const FIRST_PRECEDENCE: u16 = 80;
+/// asked before the ordinary shapes. It is 78 so that the metadata route's two rows, which RustFS
+/// asks first, sit ahead of the admin router's eight without moving them from 80 through 87.
+pub(super) const FIRST_PRECEDENCE: u16 = 78;
+
+/// Which RustFS selector claims a route, which decides its evidence, its prose and its floor.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum Claimer {
+    /// The admin router's extension parsers: signed, then the handler checks (rustfs/backlog#2753).
+    AdminRouter,
+    /// The metadata route: signed or anonymous, then a bucket listing check (rustfs/gateway#1588).
+    MetadataRoute,
+}
+
+impl Claimer {
+    /// The inventory's `claimed_by`, read against the class it must record.
+    fn of(claimed_by: Option<&str>, auth_detail: &str, at: &str) -> Result<Self, String> {
+        let claimer = match claimed_by {
+            None => Self::AdminRouter,
+            Some(METADATA_ROUTE) => Self::MetadataRoute,
+            Some(other) => return Err(format!("{at}: {other:?} is not a claimer the generator knows")),
+        };
+        if auth_detail != claimer.auth_detail() {
+            return Err(format!(
+                "{at}: claimed by {}, but the inventory now records \"custom\" {auth_detail:?}",
+                claimer.place()
+            ));
+        }
+        Ok(claimer)
+    }
+
+    /// The custom-auth class a route of this claimer records.
+    const fn auth_detail(self) -> &'static str {
+        match self {
+            Self::AdminRouter => AUTH_DETAIL,
+            Self::MetadataRoute => LISTING_AUTH_DETAIL,
+        }
+    }
+
+    /// The RustFS source file the row's evidence links.
+    const fn file(self) -> &'static str {
+        match self {
+            Self::AdminRouter => super::RUSTFS_ROUTER,
+            Self::MetadataRoute => METADATA_ROUTE,
+        }
+    }
+
+    /// `RustFS's …`, as a sentence's subject.
+    const fn subject(self) -> &'static str {
+        match self {
+            Self::AdminRouter => "RustFS's admin router",
+            Self::MetadataRoute => "RustFS's metadata route",
+        }
+    }
+
+    /// `its …`, as RustFS's order names it.
+    const fn place(self) -> &'static str {
+        match self {
+            Self::AdminRouter => "its admin router",
+            Self::MetadataRoute => "its metadata route",
+        }
+    }
+
+    /// What RustFS asks after this claimer.
+    const fn before(self) -> &'static str {
+        match self {
+            Self::AdminRouter => "its S3 service",
+            Self::MetadataRoute => "its admin router and its S3 service",
+        }
+    }
+}
 
 /// One extension route as the inventory records it.
 #[derive(Clone, Deserialize)]
@@ -60,6 +134,12 @@ pub(super) struct ExtensionRoute {
     pub(super) method: String,
     pub(super) target: String,
     pub(super) query_discriminator: QueryDiscriminator,
+    /// Further rules on other keys, every one of which must also hold.
+    #[serde(default)]
+    pub(super) query_requires: Vec<QueryDiscriminator>,
+    /// The RustFS file whose selector claims the route; absent for the admin router.
+    #[serde(default)]
+    pub(super) claimed_by: Option<String>,
     pub(super) auth_mode: String,
     pub(super) auth_detail: String,
     pub(super) iam_action: String,
@@ -141,6 +221,9 @@ pub(super) struct Extended {
     pub(super) key: String,
     pub(super) rule: String,
     pub(super) discriminator: Discriminator,
+    /// Further rules on other keys: the inventory's key and spelling, and its read.
+    pub(super) requires: Vec<(String, String, Discriminator)>,
+    pub(super) claimer: Claimer,
     pub(super) action: String,
     pub(super) precedence: u16,
     pub(super) shadows: Vec<Shadowed>,
@@ -158,12 +241,13 @@ impl Extended {
     /// record as a signed custom-auth route of a known method and target, discriminated by one
     /// unreserved key under a rule the row can spell, and authorised by one IAM action.
     pub(super) fn of(route: &ExtensionRoute, type_name: &str, at: &str, commit: &str, precedence: u16) -> Result<Self, String> {
-        if route.auth_mode != "custom" || route.auth_detail != AUTH_DETAIL {
+        if route.auth_mode != "custom" {
             return Err(format!(
-                "{at}: ruled as a signed custom-auth extension route, but the inventory now records {:?} {:?}",
+                "{at}: ruled as a custom-auth extension route, but the inventory now records {:?} {:?}",
                 route.auth_mode, route.auth_detail
             ));
         }
+        let claimer = Claimer::of(route.claimed_by.as_deref(), &route.auth_detail, at)?;
         if !["GET", "HEAD", "PUT", "POST", "DELETE"].contains(&route.method.as_str()) {
             return Err(format!("{at}: the method {:?} is not one an extension row can spell", route.method));
         }
@@ -179,6 +263,21 @@ impl Extended {
         }
         let discriminator = Discriminator::parse(&route.query_discriminator.rule)
             .ok_or_else(|| format!("{at}: the rule {:?} is not `present` or `equals:<value>`", route.query_discriminator.rule))?;
+        let mut requires: Vec<(String, String, Discriminator)> = Vec::new();
+        for further in &route.query_requires {
+            if !is_parameter(&further.key) {
+                return Err(format!(
+                    "{at}: the query key {:?} is spelled in RFC 3986 unreserved characters",
+                    further.key
+                ));
+            }
+            if further.key == key || requires.iter().any(|(known, _, _)| *known == further.key) {
+                return Err(format!("{at}: the row names the query key {:?} twice", further.key));
+            }
+            let read = Discriminator::parse(&further.rule)
+                .ok_or_else(|| format!("{at}: the rule {:?} is not `present` or `equals:<value>`", further.rule))?;
+            requires.push((further.key.clone(), further.rule.clone(), read));
+        }
         let action = route.iam_action_wire.as_str();
         if !is_action(action) || action.starts_with(&format!("{}:", super::VENDOR)) {
             return Err(format!(
@@ -204,13 +303,29 @@ impl Extended {
             key: key.to_owned(),
             rule: route.query_discriminator.rule.clone(),
             discriminator,
+            requires,
+            claimer,
             action: action.to_owned(),
             precedence,
             shadows: Vec::new(),
             presigned: None,
             version_action: None,
-            router_url: format!("https://github.com/rustfs/rustfs/blob/{commit}/{}", super::RUSTFS_ROUTER),
+            router_url: format!("https://github.com/rustfs/rustfs/blob/{commit}/{}", claimer.file()),
         })
+    }
+
+    /// Every rule of the row on the query: the discriminator first, then the further ones.
+    fn rules(&self) -> impl Iterator<Item = (&str, &Discriminator)> {
+        std::iter::once((self.key.as_str(), &self.discriminator))
+            .chain(self.requires.iter().map(|(key, _, read)| (key.as_str(), read)))
+    }
+
+    /// Every rule, as a reader sees it.
+    fn phrase(&self) -> String {
+        self.rules()
+            .map(|(key, read)| read.phrase(key))
+            .collect::<Vec<_>>()
+            .join(", and ")
     }
 
     /// The route table's rendering of the shape this row advertises.
@@ -248,9 +363,11 @@ impl Extended {
             match predicate {
                 Predicate::Method(method) => same_method = method.as_str() == self.method,
                 Predicate::Target(target) => same_target = *target == self.target,
-                Predicate::QueryAbsent(key) if *key == self.key => return false,
+                Predicate::QueryAbsent(key) if self.rules().any(|(mine, _)| mine == *key) => return false,
                 Predicate::QueryEquals(key, value)
-                    if *key == self.key && !self.discriminator.coexists(&Discriminator::Equals((*value).to_owned())) =>
+                    if self
+                        .rules()
+                        .any(|(mine, read)| mine == *key && !read.coexists(&Discriminator::Equals((*value).to_owned()))) =>
                 {
                     return false;
                 }
@@ -264,17 +381,40 @@ impl Extended {
     fn overlaps_extension(&self, other: &Self) -> bool {
         self.method == other.method
             && self.target == other.target
-            && (self.key != other.key || self.discriminator.coexists(&other.discriminator))
+            && self
+                .rules()
+                .all(|(key, read)| other.rules().all(|(theirs, others)| key != theirs || read.coexists(others)))
     }
 
     /// The reason every standard-row declaration carries.
     fn claim(&self) -> String {
         format!(
-            "RustFS's admin router claims a {} of {} {} before its S3 service, whatever else the query names.",
+            "{} claims a {} of {} {}{} before {}, whatever else the query names.",
+            self.claimer.subject(),
             self.method,
             self.target_word(),
-            self.discriminator.phrase(&self.key)
+            self.phrase(),
+            if self.requires.is_empty() { "" } else { "," },
+            self.claimer.before(),
         )
+    }
+
+    /// The reason a declaration over a later extension row carries.
+    fn order_reason(&self, later: &Self) -> String {
+        if self.claimer == later.claimer {
+            format!(
+                "{} tries the `{}` discriminator before the `{}` one, so a request naming both is this operation.",
+                self.claimer.subject(),
+                self.key,
+                later.key
+            )
+        } else {
+            format!(
+                "RustFS asks {} before {}, so a request naming both is this operation.",
+                self.claimer.place(),
+                later.claimer.place()
+            )
+        }
     }
 
     /// The operation module, before rustfmt.
@@ -293,30 +433,47 @@ impl Extended {
             router_url,
             ..
         } = self;
-        let request = format!(
-            "{method} {}?{key}{}",
-            self.path_shape(),
-            match discriminator {
-                Discriminator::Present => "=…".to_owned(),
-                Discriminator::Equals(value) if value.is_empty() => String::new(),
-                Discriminator::Equals(value) => format!("={value}"),
-            }
-        );
+        let query = self
+            .rules()
+            .map(|(key, read)| match read {
+                Discriminator::Present => format!("{key}=…"),
+                Discriminator::Equals(value) if value.is_empty() => key.to_owned(),
+                Discriminator::Equals(value) => format!("{key}={value}"),
+            })
+            .collect::<Vec<_>>()
+            .join("&");
+        let request = format!("{method} {}?{query}", self.path_shape());
         let selector = format!(
             "Predicate::Method(http::Method::{method}), Predicate::Target(TargetKind::{target:?}), {}",
-            discriminator.predicate(key),
+            self.rules()
+                .map(|(key, read)| read.predicate(key))
+                .collect::<Vec<_>>()
+                .join(", "),
             target = self.target
         );
-        let rendered = format!("Method({method}) ∧ Target({}) ∧ {}", self.target.as_str(), discriminator.rendered(key));
+        let rendered = format!(
+            "Method({method}) ∧ Target({}) ∧ {}",
+            self.target.as_str(),
+            self.rules()
+                .map(|(key, read)| read.rendered(key))
+                .collect::<Vec<_>>()
+                .join(" ∧ ")
+        );
+        let listing = self.claimer == Claimer::MetadataRoute;
         let on = match self.target {
             TargetKind::Service => "no bucket".to_owned(),
             TargetKind::Bucket => "the bucket the path names".to_owned(),
             TargetKind::Object => "the object the path names".to_owned(),
         };
         let resource = self.resource();
+        let checker = if listing {
+            "the listing action RustFS's metadata route checks"
+        } else {
+            "the action RustFS's handler checks"
+        };
         let auth = match &self.version_action {
             None => format!(
-                "/// What authorises it, on {on}: the action RustFS's handler checks.\n\
+                "/// What authorises it, on {on}: {checker}.\n\
                  pub const AUTH: AuthRequirement = AuthRequirement::new({action:?}, {resource});\n"
             ),
             Some(version_action) => format!(
@@ -331,6 +488,15 @@ impl Extended {
             ),
         };
         let (floor_phrase, floor) = match &self.presigned {
+            None if listing => (
+                "the floor is the standard listing floor",
+                "/// The standard S3 listing floor, exactly `ListObjectsV2`'s and `ListObjectVersions`': not privileged and\n\
+                 /// header-signed, with anonymous and presigned requests admitted only where the deployment's floor\n\
+                 /// delegates them for every standard operation, as RustFS's metadata route resolves a signed or anonymous\n\
+                 /// caller before its bucket listing check (ADR-0050).\n\
+                 static FLOOR: OperationFloor = admin::listing_floor(NAME);\n"
+                    .to_owned(),
+            ),
             None => (
                 "the floor is privileged",
                 "/// Privileged and header-signed only: never anonymous, never presigned. RustFS answers an unsigned request\n\
@@ -352,20 +518,57 @@ impl Extended {
                 ),
             ),
         };
-        let paragraph = doc_paragraph(&format!(
-            "RustFS's admin router claims this S3-shaped request before its S3 service reads anything else, `x-id` \
-             included: a `{method}` of {} {}, whatever else the query names. It requires a signature and then has \
-             the handler check `{action}`. So the row sits ahead of every standard `{method}` row of its target and \
-             declares each of those overlaps, {floor_phrase}, the authorizer is asked `{action}` on {on} \
-             before the handler runs, and the gateway reads no body and answers what the handler answers. Under \
-             legacy RustFS's selection the same discriminator names this operation (`rustfs-gateway-core`'s \
-             `legacy_rustfs`), so both selections reach it.",
-            self.target_word(),
-            discriminator.phrase(key),
-        ));
+        let paragraph = if listing {
+            doc_paragraph(&format!(
+                "RustFS's metadata route claims this S3-shaped listing before its admin router and its S3 service \
+                 read anything else, `x-id` included: a `{method}` of {} {}, whatever else the query names. It \
+                 resolves a signed caller's credentials, or keeps an unsigned caller anonymous, and then checks \
+                 `{action}` on the bucket as a bucket listing. So the row sits ahead of every standard `{method}` \
+                 row of its target and of every admin-router extension row of its cell, and declares each of those \
+                 overlaps; {floor_phrase}, the authorizer is asked `{action}` on {on} before the handler runs, and \
+                 the gateway reads no body and answers what the handler answers: the listing document with each \
+                 entry's user metadata. Under legacy RustFS's selection the same rules name this operation \
+                 (`rustfs-gateway-core`'s `legacy_rustfs`), so both selections reach it.",
+                self.target_word(),
+                self.phrase(),
+            ))
+        } else {
+            doc_paragraph(&format!(
+                "RustFS's admin router claims this S3-shaped request before its S3 service reads anything else, `x-id` \
+                 included: a `{method}` of {} {}, whatever else the query names. It requires a signature and then has \
+                 the handler check `{action}`. So the row sits ahead of every standard `{method}` row of its target and \
+                 declares each of those overlaps, {floor_phrase}, the authorizer is asked `{action}` on {on} \
+                 before the handler runs, and the gateway reads no body and answers what the handler answers. Under \
+                 legacy RustFS's selection the same discriminator names this operation (`rustfs-gateway-core`'s \
+                 `legacy_rustfs`), so both selections reach it.",
+                self.target_word(),
+                discriminator.phrase(key),
+            ))
+        };
+        let (issue, issue_const) = if listing {
+            ("rustfs/gateway#1588", "METADATA_LISTING_ISSUE")
+        } else {
+            ("rustfs/backlog#2753", "EXTENSION_ISSUE")
+        };
+        let router_doc = if listing {
+            "RustFS's metadata route, whose listing selector this row mirrors."
+        } else {
+            "RustFS's admin router, whose extension matching this row mirrors."
+        };
+        let selector_doc = if self.requires.is_empty() {
+            "the method, the target, and the one discriminator RustFS's router reads"
+        } else {
+            "the method, the target, and every query rule RustFS's selector reads"
+        };
+        let requires = self
+            .requires
+            .iter()
+            .map(|(key, rule, _)| format!("({key:?}, {rule:?})"))
+            .collect::<Vec<_>>()
+            .join(", ");
         let _ = write!(
             out,
-            r#"//! `{operation}`: `{request}`, RustFS's `{name}` extension route (rustfs/backlog#2753).
+            r#"//! `{operation}`: `{request}`, RustFS's `{name}` extension route ({issue}).
 //!
 //! Responsible for: the operation's type, name, S3-table row, action, specification, floor and codec, as the
 //! inventory records RustFS's `{name}` route.
@@ -390,13 +593,13 @@ use crate::record::{{self, ExtensionRouteRecord}};
 pub const NAME: &str = {operation:?};
 
 {auth}
-/// RustFS's admin router, whose extension matching this row mirrors.
+/// {router_doc}
 const ROUTER: &str = {router_url:?};
 
 /// Why this row stands in front of every standard row of its method and target.
 const CLAIM: &str = {claim:?};
 
-/// The row: the method, the target, and the one discriminator RustFS's router reads.
+/// The row: {selector_doc}.
 pub static SELECTOR: &[Predicate] = &[{selector}];
 
 /// Every standard row of the same method and target, and every later extension row a request can name
@@ -467,7 +670,7 @@ pub const OVERLAY_ROW: OverlayRow = OverlayRow {{
     resource: {resource},
     success_status: 200,
     anonymous: false,
-    evidence: &[ROUTER, record::EXTENSION_ISSUE, record::ISSUE],
+    evidence: &[ROUTER, record::{issue_const}, record::ISSUE],
 }};
 
 /// The inventory row this operation was generated from.
@@ -477,6 +680,7 @@ pub const RECORD: ExtensionRouteRecord = ExtensionRouteRecord {{
     method: {method:?},
     target: {target_lower:?},
     query: ({key:?}, {rule:?}),
+    requires: &[{requires}],
     action: {action:?},
 }};
 "#,
@@ -519,6 +723,11 @@ pub(super) fn admit_presigned(extended: &mut [Extended], rulings: &[(&str, &str)
             .iter_mut()
             .find(|route| route.name == *name)
             .ok_or_else(|| format!("the presigned ruling for {name} names no extension route"))?;
+        if route.claimer == Claimer::MetadataRoute {
+            return Err(format!(
+                "the presigned ruling for {name} names a route that is on the standard listing floor (ADR-0050)"
+            ));
+        }
         if route.presigned.replace((*evidence).to_owned()).is_some() {
             return Err(format!("the extension route {name} has two presigned rulings"));
         }
@@ -578,11 +787,7 @@ pub(super) fn shadowing(extended: &mut [Extended]) -> Result<(), String> {
         }
         for later in index + 1..extended.len() {
             if extended[index].overlaps_extension(&extended[later]) {
-                let reason = format!(
-                    "RustFS's admin router tries the `{}` discriminator before the `{}` one, so a request naming both is this \
-                     operation.",
-                    extended[index].key, extended[later].key
-                );
+                let reason = extended[index].order_reason(&extended[later]);
                 let op = extended[later].operation.clone();
                 extended[index].shadows.push(Shadowed { op, reason });
             }

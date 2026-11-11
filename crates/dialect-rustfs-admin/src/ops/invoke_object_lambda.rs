@@ -217,5 +217,6 @@ pub const RECORD: ExtensionRouteRecord = ExtensionRouteRecord {
     method: "GET",
     target: "object",
     query: ("lambdaArn", "present"),
+    requires: &[],
     action: "s3:GetObject",
 };

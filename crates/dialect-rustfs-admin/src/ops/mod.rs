@@ -198,6 +198,8 @@ pub mod head_iceberg_by_warehouse_namespaces_by_namespace;
 pub mod head_iceberg_by_warehouse_namespaces_by_namespace_tables_by_table;
 pub mod head_iceberg_by_warehouse_namespaces_by_namespace_views_by_view;
 pub mod invoke_object_lambda;
+pub mod list_object_versions_with_metadata;
+pub mod list_objects_v2_with_metadata;
 pub mod listen_bucket_notification;
 pub mod listen_notification;
 pub mod post_iceberg_by_warehouse_catalog_backup;

@@ -106,6 +106,14 @@ impl<'a> Outcome<'a> {
         self.refuse(error)
     }
 
+    /// The authenticator could not answer (`Unavailable`): `500 InternalError` with `message`, and
+    /// the connection verdict of an authentication failure, because the peer was never identified.
+    pub(super) fn refuse_unavailable(&mut self, message: &'static str, body_owed: bool) -> Response<Body> {
+        self.refused = Some(Refused::Authentication);
+        let connection = crate::close::after_unavailable(body_owed);
+        self.refuse(from_handler(HandlerError::internal_error(message), self.response_kind, connection))
+    }
+
     /// [`Outcome::refuse_handler`], remembering which stage refused.
     pub(super) fn refuse_handler_at(&mut self, refused: Refused, error: HandlerError) -> Response<Body> {
         self.refused = Some(refused);

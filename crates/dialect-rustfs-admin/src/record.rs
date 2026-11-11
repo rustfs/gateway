@@ -29,7 +29,10 @@ use rustfs_gateway_core::dialect::BucketParam;
 /// The migration issue, which every overlay row cites.
 pub(crate) const ISSUE: &str = "https://github.com/rustfs/backlog/issues/1744";
 
-/// The extension-route issue, which every S3-shaped extension row cites.
+/// The metadata listing issue, which the metadata route's two listing rows cite instead.
+pub(crate) const METADATA_LISTING_ISSUE: &str = "https://github.com/rustfs/gateway/issues/1588";
+
+/// The extension-route issue, which every admin-router S3-shaped extension row cites.
 pub(crate) const EXTENSION_ISSUE: &str = "https://github.com/rustfs/backlog/issues/2753";
 
 /// ADR-0025, which every row whose action is a ruling cites.
@@ -175,6 +178,10 @@ pub struct ExtensionRouteRecord {
     /// The discriminating query key and the inventory's rule on its first value: `present`, or
     /// `equals:<value>` (`equals:` for an empty value).
     pub query: (&'static str, &'static str),
+    /// Further keys and rules, in the same spelling, every one of which must also hold: the
+    /// metadata listing routes' `("metadata", "equals:true")` (rustfs/gateway#1588); empty for the
+    /// admin router's routes.
+    pub requires: &'static [(&'static str, &'static str)],
     /// The IAM action RustFS's handler checks, in its wire spelling: the operation's action.
     pub action: &'static str,
 }

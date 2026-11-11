@@ -817,6 +817,7 @@ gateway_modules = (
     "sse_runtime",
     "static_header_allocations",
     "steady_state_allocations",
+    "store_fault_answer",
     "streaming_without_length",
     "sts_body_signature",
     "tagging_reachability",

@@ -788,6 +788,9 @@ mod extension_tests;
 #[path = "rustfs_admin_dialect/form_tests.rs"]
 mod form_tests;
 #[cfg(test)]
+#[path = "rustfs_admin_dialect/metadata_listing_tests.rs"]
+mod metadata_listing_tests;
+#[cfg(test)]
 #[path = "rustfs_admin_dialect/refresh_tests.rs"]
 mod refresh_tests;
 #[cfg(test)]

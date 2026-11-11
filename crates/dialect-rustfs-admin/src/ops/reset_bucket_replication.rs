@@ -242,5 +242,6 @@ pub const RECORD: ExtensionRouteRecord = ExtensionRouteRecord {
     method: "PUT",
     target: "bucket",
     query: ("replication-reset", "equals:"),
+    requires: &[],
     action: "s3:ResetBucketReplicationState",
 };

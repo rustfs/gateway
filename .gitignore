@@ -27,3 +27,7 @@ __pycache__/
 # The independent opt-in build owns its artifacts and lockfile.
 /rdma/target/
 /rdma/Cargo.lock
+
+# The private RDMA transport is fetched by hand at the commit pinned in rdma/rustfs-ucx.rev and is
+# never tracked: a submodule here made the repository unusable as a Cargo git dependency (#1591).
+/vendor/rustfs-ucx/

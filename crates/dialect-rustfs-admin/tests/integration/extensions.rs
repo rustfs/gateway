@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! RustFS's eight S3-shaped extension routes as the dialect's S3-table rows, and the
+//! RustFS's eight admin-router S3-shaped extension routes as the dialect's S3-table rows (the
+//! metadata route's two listings are `metadata_listing`, sharing the shadow census here), and the
 //! object-zip-download pair as claimed rows (rustfs/backlog#2753): which requests reach them,
 //! which do not, and what each operation declares.
 //!
@@ -57,6 +58,8 @@ const LISTEN_BUCKET: &str = "rustfs:ListenBucketNotification";
 const ZIP_GET: &str = "rustfs:GetV3ObjectZipDownloadsByIdZip";
 const ZIP_POST: &str = "rustfs:PostV3ObjectZipDownloads";
 const BOTH: [Selection; 2] = [Selection::Table, Selection::RustfsLegacy];
+/// The metadata route's two listing rows, declared first (`metadata_listing`, rustfs/gateway#1588).
+const LISTINGS: usize = 2;
 
 /// The operation `method target` reaches, read path-style or as a virtual host naming a bucket,
 /// under `selection`, with the dialect installed or not.
@@ -454,8 +457,9 @@ fn n_the_two_selections_never_disagree_on_an_extension_request() {
 
 // ── declarations ──────────────────────────────────────────────────────────────────────────────
 
-/// Positive — exactly the eight extension operations are declared as S3-table rows, each under
-/// its record's name, at its row's precedence, with its selector recorded in the overlay.
+/// Positive — exactly the eight admin-router extension operations are declared as S3-table rows
+/// after the metadata route's two (`metadata_listing`), each under its record's name, at its row's
+/// precedence, with its selector recorded in the overlay.
 #[test]
 fn the_eight_extension_operations_are_declared_as_their_records_say() {
     let dialect = dialect();
@@ -470,11 +474,14 @@ fn the_eight_extension_operations_are_declared_as_their_records_say() {
             )
         })
         .collect();
-    assert_eq!(declared.len(), 8);
-    assert_eq!(EXTENSION_ROUTES.len(), 8);
-    let names: Vec<&str> = EXTENSION_ROUTES.iter().map(|record| record.operation).collect();
+    assert_eq!((declared.len(), EXTENSION_ROUTES.len()), (8 + LISTINGS, 8 + LISTINGS));
+    let names: Vec<&str> = EXTENSION_ROUTES
+        .iter()
+        .skip(LISTINGS)
+        .map(|record| record.operation)
+        .collect();
     assert_eq!(names, [RESET, RESET_STATUS, METRICS_V2, METRICS, CHECK, LAMBDA, LISTEN, LISTEN_BUCKET]);
-    for ((name, precedence, selector), record) in declared.iter().zip(EXTENSION_ROUTES) {
+    for ((name, precedence, selector), record) in declared.iter().zip(EXTENSION_ROUTES).skip(LISTINGS) {
         assert_eq!(*name, record.operation);
         let row = OVERLAY
             .operations
@@ -534,7 +541,9 @@ fn every_extension_operation_declares_its_floor_and_its_inventory_action() {
         assert!(!SecurityFloor::new().admits_anonymous(floor), "{record_name}");
         assert_eq!(floor.allowed_schemes().allows_presigned(), presigned, "{record_name}");
         assert_eq!(SecurityFloor::new().admits_presigned(floor), presigned, "{record_name}");
-        assert_eq!(floor.requires_sigv4_under_every_policy(), presigned, "{record_name}");
+        // Every extension floor requires SigV4 under every policy: RustFS refuses SigV2 on every
+        // extension route (rustfs/gateway#1576, rustfs/gateway#1582).
+        assert!(floor.requires_sigv4_under_every_policy(), "{record_name}");
         assert_eq!(floor.service(), SigService::S3, "{record_name}");
         assert!(
             floor.query_bearer_claim().is_none(),
@@ -590,7 +599,7 @@ fn an_extension_row_shadows_exactly_the_rows_of_its_cell_it_can_be_named_with() 
     let entries = router.table().entries();
     for operation in dialect.operations() {
         let mine = operation.entry();
-        let (method, target, key, equals) = {
+        let (method, target, rules) = {
             let predicates = mine.selector.predicates();
             let method = predicates.iter().find_map(|predicate| match predicate {
                 Predicate::Method(method) => Some(method.clone()),
@@ -600,15 +609,17 @@ fn an_extension_row_shadows_exactly_the_rows_of_its_cell_it_can_be_named_with() 
                 Predicate::Target(target) => Some(*target),
                 _ => None,
             });
-            let (key, equals) = predicates
+            // Every query rule: one discriminator, plus the metadata listings' gate.
+            let rules: Vec<(&str, Option<&str>)> = predicates
                 .iter()
-                .find_map(|predicate| match predicate {
+                .filter_map(|predicate| match predicate {
                     Predicate::QueryPresent(key) => Some((*key, None)),
                     Predicate::QueryEquals(key, value) => Some((*key, Some(*value))),
                     _ => None,
                 })
-                .expect("one discriminator");
-            (method.expect("a method"), target.expect("a target"), key, equals)
+                .collect();
+            assert!(!rules.is_empty(), "{}: a discriminator", mine.op_name);
+            (method.expect("a method"), target.expect("a target"), rules)
         };
         let expected: BTreeSet<&str> = entries
             .iter()
@@ -617,10 +628,12 @@ fn an_extension_row_shadows_exactly_the_rows_of_its_cell_it_can_be_named_with() 
                 let predicates = entry.selector.predicates();
                 let same_cell =
                     predicates.contains(&Predicate::Method(method.clone())) && predicates.contains(&Predicate::Target(target));
-                let can_coexist = predicates.iter().all(|predicate| match predicate {
-                    Predicate::QueryAbsent(other) => *other != key,
-                    Predicate::QueryEquals(other, value) => *other != key || equals.is_none_or(|mine| mine == *value),
-                    _ => true,
+                let can_coexist = predicates.iter().all(|predicate| {
+                    rules.iter().all(|(key, equals)| match predicate {
+                        Predicate::QueryAbsent(other) => other != key,
+                        Predicate::QueryEquals(other, value) => other != key || equals.is_none_or(|mine| mine == *value),
+                        _ => true,
+                    })
                 });
                 same_cell && can_coexist && entry.precedence > mine.precedence
             })
@@ -715,6 +728,8 @@ fn the_zip_pair_declares_privileged_floors_own_labels_and_its_inventory_rows() {
         assert!(!floor.allows_anonymous(), "{name}");
         assert!(!floor.allowed_schemes().allows_presigned(), "{name}");
     }
+    // The mint requires SigV4 under every policy, as every admin floor does (rustfs/gateway#1582).
+    assert!(Mint::floor().requires_sigv4_under_every_policy());
     let download = Download::spec().auth.expect("an action");
     assert_eq!(
         (download.render(), download.resource),
