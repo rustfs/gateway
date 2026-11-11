@@ -685,8 +685,7 @@ impl SigV4Authenticator {
         };
         let Some(proof) = proof.take() else {
             if let Some(pending) = session_refusal {
-                let _ = pending.uniform();
-                return Err(AuthError::ExpiredToken.into());
+                return Err(pending.uniform().into());
             }
             let Some(detail) = mismatch_detail else {
                 return Err(AuthError::SignatureDoesNotMatch.into());
