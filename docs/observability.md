@@ -122,7 +122,7 @@ requests, and this crate's events add the stage the gateway refused at:
 | RustFS event (rustfs/rustfs `3268c42e00`) | Level | The gateway's event for the same request |
 | --- | --- | --- |
 | `request_rate_limited` (`rustfs/src/server/rate_limit.rs:566`), RustFS's own API rate limit | `debug` | none from RustFS's limiter; `gateway_request_refused`, `governor`, `debug`, for the gateway's |
-| `secret_key_lookup_failed` (`rustfs/src/auth.rs:238-265`), the credential store refused or could not answer | `warn` | `gateway_request_refused`, `authentication`, `code = "InvalidAccessKeyId"` (or `500 InternalError` when the store could not answer) |
+| `secret_key_lookup_failed` (`rustfs/src/auth.rs:238-265`), the credential store refused or could not answer | `warn` | `gateway_request_refused`, `authentication`, `code = "InvalidAccessKeyId"` (or `500 InternalError` when the store could not answer, under `answer_credential_store_faults_as_unavailable`, which the RustFS profile turns on) |
 | `sigv4_unsigned_amz_header` (`rustfs/src/auth.rs:1116`), an `x-amz-*` header outside the signature | `warn` | `gateway_request_refused`, `authentication`, the code the floor answered with |
 | `s3_authorization_denied` (`rustfs/src/storage/access.rs:1147`), a policy denial | `warn` | `gateway_request_refused`, `authorization`, `decision = "deny"`; RustFS's own probe denials are `debug` (`:1134`), as the visibility check is not reported here |
 | `http_request_completed` (`rustfs/src/server/layer.rs:481-539`), every request's status and duration | `info`, `error` for a 5xx | none: the gateway reports a request's completion to the `Observer` (`RequestEvent`), which RustFS's layer does not need |

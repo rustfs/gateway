@@ -49,6 +49,7 @@
 //! | `ChunkReject`, per [`rustfs_gateway_http::ChunkReject::must_close_connection`] | both | `aws-chunked` is a content encoding inside a wire body whose extent §6.3 already fixed |
 //! | an authentication failure with body octets still owed | close | **policy** — see [`after_auth_failure`] |
 //! | an authentication failure with nothing owed | may keep | **RFC 9112 §9.3** — there is nothing to decline to drain; `c-cred-0002`..`0030`, `c-sig-0583`, `c-sig-0584` |
+//! | an authenticator that could not answer (`Unavailable`, `500`) | as an authentication failure | **policy** — the peer was never identified; see [`after_unavailable`] |
 //! | an authorisation denial | may keep | **the corpus** — `c-copy-0019`, `c-copy-0020`, `c-copy-0021` all assert `connection_after = "open"` for a `403 AccessDenied` |
 //! | a body past the operation's cap or the assembly's ceiling | close | **policy**, the same shape as `BodyBytes`; `c-object-0015` |
 //! | `411 MissingContentLength` | close | **RFC 9112 §11.2** — see [`after_undeclared_length`] |
@@ -189,6 +190,18 @@ pub const fn after_auth_failure(_error: &AuthError, body_owed: bool) -> Connecti
     } else {
         ConnectionIntent::MayKeepAlive
     }
+}
+
+/// An authenticator that could not answer — `Unavailable`, rendered `500 InternalError` — closes
+/// exactly when an authentication failure does.
+///
+/// The peer was never identified, so [`after_auth_failure`]'s reasoning applies unchanged: its body
+/// is not drained. Without this the one `500` an unauthenticated request can be given would keep
+/// the connection and drain the body that every other credential failure declines to drain
+/// (rustfs/gateway#1585).
+#[must_use]
+pub(crate) const fn after_unavailable(body_owed: bool) -> ConnectionIntent {
+    after_auth_failure(&AuthError::InvalidAccessKeyId, body_owed)
 }
 
 /// An authorisation denial keeps the connection.
