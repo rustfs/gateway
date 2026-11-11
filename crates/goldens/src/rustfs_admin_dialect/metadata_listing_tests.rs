@@ -27,17 +27,18 @@
 //! admin router's eight rows (`super::extension_tests`), or the harness (`super`).
 //! Upstream: `super`, `super::extension_tests`. Downstream: nothing.
 
-use http::Method;
+use bytes::Bytes;
+use http::{HeaderValue, Method, Request};
 use rustfs_gateway::SecurityFloor;
 use rustfs_gateway_dialect_rustfs_admin::{EXTENSION_ROUTES, ExtensionRouteRecord};
-use rustfs_gateway_sig::RequestNow;
+use rustfs_gateway_sig::{RawQuery, RequestNow, SigV2Mode, SigV2Signer, SigV2StringToSignSpec};
 
 use super::extension_tests::{
     presign_at, presigned, query, refused_before_the_handler, refused_without_asking, route_question, signed, unsigned,
     unsigned_at,
 };
 use super::{BUCKET, assemble_on, rustfs_profile_floor};
-use crate::operation_diff::s3s_0_17_0::context::ACCESS_KEY;
+use crate::operation_diff::s3s_0_17_0::context::{ACCESS_KEY, PATH_HOST, SECRET_KEY};
 
 /// The metadata route's two listing operations, versions first, as the dialect declares them.
 pub(super) const LISTINGS: [&str; 2] = ["rustfs:ListObjectVersionsWithMetadata", "rustfs:ListObjectsV2WithMetadata"];
@@ -194,4 +195,66 @@ fn n_metadata_true_appended_to_a_presigned_listing_is_refused_without_asking() {
         *appended.headers_mut() = signed.headers().clone();
         refused_without_asking(&assembled.exchange(appended), record.operation);
     }
+}
+
+/// `GET /{bucket}?{query}` presigned with SigV2 by the shared credential, valid for ten minutes,
+/// with `extra` appended to the URL after signing.
+fn sigv2_presigned(query: &str, extra: &str) -> Request<Bytes> {
+    let path = format!("/{BUCKET}");
+    let expires = RequestNow::capture().unix_seconds() + 600;
+    let signed_query = format!("{query}&AWSAccessKeyId={ACCESS_KEY}&Expires={expires}");
+    let mut headers = http::HeaderMap::new();
+    headers.insert(http::header::HOST, HeaderValue::from_str(PATH_HOST).expect("a host"));
+    let raw = RawQuery::new(&signed_query);
+    let spec = SigV2StringToSignSpec::new(SigV2Mode::PresignedUrl, &Method::GET, &path, &raw, &headers, None);
+    let signature = SigV2Signer::new(ACCESS_KEY, SECRET_KEY.as_bytes())
+        .expect("a signer")
+        .presigned_signature(&spec)
+        .expect("a signable request");
+    let escaped = signature.replace('+', "%2B").replace('/', "%2F").replace('=', "%3D");
+    unsigned_at("GET", &format!("{path}?{signed_query}&Signature={escaped}{extra}"))
+}
+
+/// Positive and negative — a SigV2 presigned listing is refused without asking on the default
+/// floor, which accepts no SigV2 presigned URL, and asked its listing action for the presigning
+/// caller on the RustFS profile's floor, which accepts them on every standard operation: exactly
+/// where a SigV2 presigned standard listing is admitted (`SecurityFloor::enforce_scheme_allowed`
+/// asks the same four questions of both floors). RustFS's metadata route takes the credential
+/// s3s verified, SigV2 presigned included, and refuses no signature family itself (ADR-0050).
+#[test]
+fn a_sigv2_presigned_listing_is_admitted_exactly_where_a_standard_one_is() {
+    let refusing = assemble_on(SecurityFloor::new(), |_, _| true);
+    let admitting = assemble_on(rustfs_profile_floor(), |_, _| true);
+    for record in listings() {
+        let request = || sigv2_presigned(&query(record), "");
+        refused_without_asking(&refusing.exchange(request()), record.operation);
+        let exchange = admitting.exchange(request());
+        assert_eq!(exchange.status, 200, "{}: {}", record.operation, exchange.body);
+        assert_eq!(exchange.reached, [record.operation]);
+        let asked = route_question(&exchange, record);
+        assert_eq!((asked.action.as_str(), asked.caller.as_deref()), (actions(record).0, Some(ACCESS_KEY)));
+    }
+}
+
+/// Positive — SigV2 signs only its fixed sub-resource keys, and neither `metadata` nor `list-type`
+/// is one, so on the RustFS profile's floor `metadata=true` appended to a SigV2 presigned V2
+/// listing is inside nothing the signature covers: the request becomes the metadata listing, still
+/// asked `s3:ListBucket` on the same bucket for the same caller, as any unsigned `prefix` or
+/// `max-keys` appended to that URL is. This pins the SigV2 property rather than hiding it; the
+/// SigV4 form of the same edit is refused above.
+#[test]
+fn metadata_true_appended_to_a_sigv2_presigned_listing_is_the_same_callers_listing() {
+    let admitting = assemble_on(rustfs_profile_floor(), |_, _| true);
+    let exchange = admitting.exchange(sigv2_presigned("list-type=2", "&metadata=true"));
+    assert_eq!(exchange.status, 200, "{}", exchange.body);
+    assert_eq!(exchange.reached, [LISTINGS[1]]);
+    let asked = exchange
+        .asked
+        .iter()
+        .find(|asked| asked.stage == "route")
+        .expect("a route question");
+    assert_eq!(
+        (asked.action.as_str(), asked.caller.as_deref(), asked.bucket.as_deref()),
+        ("s3:ListBucket", Some(ACCESS_KEY), Some(BUCKET))
+    );
 }

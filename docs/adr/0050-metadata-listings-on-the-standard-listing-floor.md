@@ -48,7 +48,16 @@ on these two exactly where it admits one on the standard listings:
 
 - anonymous only under `delegate_anonymous_to_authorizer_after_listing_in_the_posture_report`;
 - presigned only under `admit_presigned_on_every_standard_operation_after_listing_in_the_posture_report`;
-- a SigV2 presigned URL only under the SigV2 compatibility policy as well.
+- a SigV2 presigned URL only when the SigV2 compatibility policy also admits it, as the RustFS
+  profile's floor does. `SecurityFloor::enforce_scheme_allowed` asks the same questions of these
+  operations' floor and the standard listing's: a SigV4-only requirement, privilege, the SigV2
+  presigned switch, and the presigned policy. All four answers are the same for both.
+
+SigV2 signs only a fixed set of sub-resource keys, and neither `metadata` nor `list-type` is one.
+So under SigV2 compatibility, `metadata=true` appended to a SigV2 presigned V2 listing URL is
+covered by nothing the signature covers. The request becomes the metadata listing. It is still
+asked `s3:ListBucket` on the same bucket for the same caller, just as an appended `prefix` or
+`max-keys` is. Under SigV4 every query pair is signed, and the same edit is refused.
 
 Every admitted request is still the authorizer's to decide, for the listing action on the bucket.
 The overlay row records `anonymous: false`, because the operation itself opts into nothing.
@@ -63,6 +72,11 @@ ADR-0024, ADR-0035 and ADR-0021 are not edited. This record narrows them for the
 ## Evidence
 
 - RustFS's metadata route: https://github.com/rustfs/rustfs/blob/443e8afee194fe38b32d62a9289a99c1f703715c/rustfs/src/app/metadata_route.rs. Its selector requires a first `metadata` value of exactly `true` and tries `versions` before `list-type=2`. Its access check keeps an unsigned caller anonymous and authorises the matching listing action on the bucket. Read from source.
+- s3s at the revision RustFS pins, `5761ddfe4c509fcac87e3b99fd5bd9e176b442c0`: https://github.com/s3s-project/s3s/blob/5761ddfe4c509fcac87e3b99fd5bd9e176b442c0/crates/s3s/src/ops/mod.rs and https://github.com/s3s-project/s3s/blob/5761ddfe4c509fcac87e3b99fd5bd9e176b442c0/crates/s3s/src/ops/signature.rs. In `prepare`, a request a custom route matches has its signature verified before the route is handed it, through the same check as every S3 operation. That check accepts a SigV2 presigned URL whenever presigned URLs are enabled. RustFS's metadata route then takes that credential and refuses no signature family itself, unlike its admin router. Read from source.
+- This repository's `crates/sig/src/floor.rs` (`SecurityFloor::enforce_scheme_allowed`) and `crates/sig/src/sig_v2/string_to_sign.rs` (the signed sub-resource list). Read from source.
+- The goldens tests `a_sigv2_presigned_listing_is_admitted_exactly_where_a_standard_one_is` and
+  `metadata_true_appended_to_a_sigv2_presigned_listing_is_the_same_callers_listing` pin both
+  sentences above.
 - The dialect crate's test `each_metadata_listing_floor_is_exactly_its_standard_listings_floor`
   compares each floor with the standard listing's under all four combinations of the anonymous
   and presigned policies.
