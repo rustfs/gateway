@@ -247,11 +247,14 @@ impl OperationFloor {
     ///   operation whose floor combines the two is refused at build time by the registry, and the
     ///   floor refuses the token at request time as well.
     ///
-    /// Only narrows. It is for a non-privileged operation — one that admits a presigned URL, which
-    /// a privileged one cannot — whose owner requires a header or query SigV4 signature: without
-    /// it, such an operation becomes anonymously reachable the moment a deployment delegates
-    /// anonymous requests to its authorizer, and SigV2-reachable the moment it enables SigV2
-    /// compatibility (rustfs/gateway#1576).
+    /// Only narrows, and applies to privileged and non-privileged floors alike. On a
+    /// non-privileged operation that admits a presigned URL, which a privileged one cannot, it keeps
+    /// the operation from becoming anonymously reachable when a deployment delegates anonymous
+    /// requests to its authorizer, and SigV2-reachable when it enables SigV2 compatibility
+    /// (rustfs/gateway#1576). On a privileged operation, which already refuses presigned URLs and
+    /// anonymous delegation, it adds the refusal of SigV2 header signatures and of registered
+    /// custom schemes: the RustFS dialect's `admin::floor` uses it for every claimed admin
+    /// operation (rustfs/gateway#1582).
     #[must_use]
     pub const fn require_sigv4_under_every_policy(mut self) -> Self {
         self.sigv4_required = true;

@@ -205,10 +205,14 @@ pub const fn spec(name: &'static str, auth: AuthRequirement, caller_secret: bool
 
 /// The floor every admin operation has: privileged and header-signed only, so it is never reached
 /// anonymously and never through a presigned URL (MinIO #5411 was a presigned URL edited to reach
-/// an admin operation).
+/// an admin operation). It requires SigV4 under every policy, so a SigV2 header signature is
+/// refused as RustFS refuses it on every authenticated custom route: SigV2 binds neither the
+/// route's query arguments nor its payload (rustfs/gateway#1582). The same requirement refuses a
+/// request admitted by a registered custom scheme (`SecurityFloor::with_custom_schemes`) on
+/// every operation with this floor, whatever the deployment registered.
 #[must_use]
 pub const fn floor(name: &'static str) -> OperationFloor {
-    OperationFloor::custom(name, SigService::S3)
+    OperationFloor::custom(name, SigService::S3).require_sigv4_under_every_policy()
 }
 
 /// The floor of an S3-shaped extension operation a RustFS client is shown to presign (ADR-0024
@@ -226,16 +230,18 @@ pub const fn presigned_floor(name: &'static str) -> OperationFloor {
 /// `token` parameter, bound to the path's last raw segment less its literal `.zip`.
 pub const ZIP_DOWNLOAD_TOKEN: QueryBearerClaim = QueryBearerClaim::new("token", ".zip");
 
-/// The zip download's floor: [`floor`]'s privileged, header-signed-only floor plus the
+/// The zip download's floor: a privileged, header-signed-only floor plus the
 /// [`ZIP_DOWNLOAD_TOKEN`] claim, which admits the minted URL only through the host's installed
-/// bearer verifier and never anonymously (ADR-0026 (g), ADR-0042). It refuses SigV2 under every
-/// policy, at the floor, with or without a token (ADR-0050): RustFS's access check refuses SigV2 on
-/// this route once credentials are presented, and the bearer path it keeps reads no AWS credential.
-/// It cannot require SigV4 instead: that requirement refuses every bearer token, and the registry
-/// refuses the combination.
+/// bearer verifier and never anonymously (ADR-0026 (g), ADR-0042). Unlike [`floor`] it does not
+/// require SigV4 under every policy: that requirement refuses every bearer token, and the registry
+/// refuses the combination. RustFS answers the minted URL before it reads any credential.
+///
+/// It refuses SigV2 under every policy instead, at the floor and before any credential lookup,
+/// with or without a token (ADR-0050, rustfs/gateway#1592): RustFS's access check refuses SigV2
+/// on this route once credentials are presented, and the bearer path reads no AWS credential.
 #[must_use]
 pub const fn zip_token_floor(name: &'static str) -> OperationFloor {
-    floor(name)
+    OperationFloor::custom(name, SigService::S3)
         .refuse_sigv2_under_every_policy()
         .with_query_bearer_claim(ZIP_DOWNLOAD_TOKEN)
 }

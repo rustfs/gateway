@@ -57,15 +57,16 @@ requirement implies the refusal, so the two cannot disagree.
 
 - `rustfs:StsFormPost`: `builtin(Sts)`, anonymous allowed, SigV2 refused. The generator template
   (`xtask/src/rustfs_admin_dialect/form.rs`) owns it.
-- `admin::zip_token_floor`: the privileged admin floor, SigV2 refused, plus the bearer claim. A
-  SigV2 header is now refused at the floor, with or without a token, and with or without an
-  installed bearer verifier. The verifier is never asked about it.
+- `admin::zip_token_floor`: a privileged, header-only floor, SigV2 refused, plus the bearer claim.
+  Every other claimed admin floor except the OIDC bootstrap floor already requires SigV4
+  (rustfs/gateway#1582). A SigV2 header is now refused at the floor, with or without a token, and
+  with or without an installed bearer verifier. The verifier is never asked about it.
 
 ### How it composes
 
 | Combined with | Decision | Why |
 | --- | --- | --- |
-| `require_sigv4_under_every_policy` | Allowed, not refused at registration | Both rules only narrow, and the stronger one stands in either order. Neither admits anything the other refuses, so the floor is redundant, not contradictory. The registry refuses contradictions only. |
+| `require_sigv4_under_every_policy` | Allowed, not refused at registration | Both rules only narrow, and the stronger one stands in either order: the floor admits exactly what the SigV4 requirement alone admits. It is redundant, not contradictory, and the registry refuses contradictions only. |
 | A query bearer claim | Allowed | The bearer path reads only requests with no AWS credential marker, so it never sees SigV2. The registry still refuses the SigV4 requirement beside a bearer claim, also when this rule is declared as well. |
 | A custom-scheme registry | Unaffected | A custom scheme is only offered requests with no AWS marker, so a SigV2 request never reaches one. The operation's allow-list decides custom-scheme requests as before. |
 
@@ -128,7 +129,7 @@ ADR-0044 and ADR-0042 are not edited. This record narrows their floors.
 | Make the STS floor privileged | Changes Web Identity's independent contract. ADR-0044 already rejected it. |
 | Refuse SigV2 in the STS codec, after verification | The credential lookup has already happened. Known and unknown keys could then be told apart, and the handler path would still hold a SigV2-verified identity until the codec runs. |
 | Turn SigV2 off for the whole RustFS profile | Breaks legacy clients on every ordinary S3 operation, where RustFS still accepts SigV2. |
-| Refuse the SigV2 refusal beside the SigV4 requirement at registration | Nothing contradicts. It would only stop floor helpers from being layered, as `admin::floor` and `zip_token_floor` are. |
+| Refuse the SigV2 refusal beside the SigV4 requirement at registration | Nothing contradicts. It would only stop one floor helper from being built on another that already requires SigV4. |
 | Leave the zip download as it was | The later refusal works, but it lets SigV2 reach credential lookup and, with a verifier installed, the bearer check. The rule composes with the claim, so there is no reason to keep the gap. |
 
 ## Consequences

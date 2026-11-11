@@ -534,7 +534,9 @@ fn every_extension_operation_declares_its_floor_and_its_inventory_action() {
         assert!(!SecurityFloor::new().admits_anonymous(floor), "{record_name}");
         assert_eq!(floor.allowed_schemes().allows_presigned(), presigned, "{record_name}");
         assert_eq!(SecurityFloor::new().admits_presigned(floor), presigned, "{record_name}");
-        assert_eq!(floor.requires_sigv4_under_every_policy(), presigned, "{record_name}");
+        // Every extension floor requires SigV4 under every policy: RustFS refuses SigV2 on every
+        // extension route (rustfs/gateway#1576, rustfs/gateway#1582).
+        assert!(floor.requires_sigv4_under_every_policy(), "{record_name}");
         assert_eq!(floor.service(), SigService::S3, "{record_name}");
         assert!(
             floor.query_bearer_claim().is_none(),
@@ -715,6 +717,8 @@ fn the_zip_pair_declares_privileged_floors_own_labels_and_its_inventory_rows() {
         assert!(!floor.allows_anonymous(), "{name}");
         assert!(!floor.allowed_schemes().allows_presigned(), "{name}");
     }
+    // The mint requires SigV4 under every policy, as every admin floor does (rustfs/gateway#1582).
+    assert!(Mint::floor().requires_sigv4_under_every_policy());
     // ADR-0050: the download refuses SigV2 beside its bearer claim, which the SigV4 requirement
     // could not be combined with.
     assert!(Download::floor().refuses_sigv2_under_every_policy());

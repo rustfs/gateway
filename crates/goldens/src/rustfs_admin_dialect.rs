@@ -717,6 +717,7 @@ mod extension_tests;
 mod fallback_tests;
 mod fallback_wire_tests;
 mod lambda_tests;
+mod sigv2_census_tests;
 mod subject_tests;
 mod tests;
 mod zip_sigv2_tests;

@@ -265,7 +265,9 @@ The framework's half:
   `SecurityFloor::delegate_anonymous_to_authorizer_after_listing_in_the_posture_report`
   (ADR-0021) admits it to every non-privileged operation instead, except one whose floor requires
   SigV4 under every policy (`OperationFloor::require_sigv4_under_every_policy`, ADR-0049: the
-  RustFS object lambda route), which refuses it whatever the policy. Every such request then reaches
+  RustFS object lambda route), which refuses it whatever the policy. The same requirement is on
+  every privileged RustFS admin floor (`admin::floor`, rustfs/gateway#1582); there it also refuses
+  SigV2 header signatures and requests admitted by a registered custom scheme. Every such request then reaches
   the authorizer with no identity, and the authorizer alone decides.
   Delegation never admits a request that presented a credential, never widens presigned or
   POST-policy access, and never reaches a privileged operation that did not opt in itself. The
