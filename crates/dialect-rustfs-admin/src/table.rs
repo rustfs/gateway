@@ -78,6 +78,8 @@ pub static FORM_ROUTES: &[FormRouteRecord] = &[ops::sts_form_post::RECORD];
 /// Every S3-shaped extension route served as an S3-table row rather than inside a claim
 /// (rustfs/backlog#2753), in the inventory's order, which is the order RustFS's router tries them in.
 pub static EXTENSION_ROUTES: &[ExtensionRouteRecord] = &[
+    ops::list_object_versions_with_metadata::RECORD,
+    ops::list_objects_v2_with_metadata::RECORD,
     ops::reset_bucket_replication::RECORD,
     ops::get_replication_reset_status::RECORD,
     ops::get_replication_metrics_v2::RECORD,

@@ -38,6 +38,7 @@ use rustfs_gateway_sig::{
     SigningCredentials, SigningRequest, SigningScope,
 };
 
+use super::metadata_listing_tests::LISTINGS;
 use super::{Asked, BUCKET, Exchange, REGION, assemble, assemble_on, in_lanes, in_lanes_on, rustfs_profile_floor, wire};
 use crate::operation_diff::s3s_0_17_0::context::{ACCESS_KEY, ContextRequest, PATH_HOST, SECRET_KEY, amz_date};
 use crate::rustfs_admin_route_inventory;
@@ -97,17 +98,34 @@ fn path(record: &ExtensionRouteRecord) -> String {
     }
 }
 
-/// The query that selects an extension record: the key with the value its rule reads.
-fn query(record: &ExtensionRouteRecord) -> String {
+/// The query that selects an extension record: the key with the value its rule reads, then each
+/// further key with the value its rule reads (the metadata listings' `metadata=true`).
+pub(super) fn query(record: &ExtensionRouteRecord) -> String {
     let (key, rule) = record.query;
-    match rule.strip_prefix("equals:") {
+    let mut query = match rule.strip_prefix("equals:") {
         Some(value) => format!("{key}={value}"),
         None => format!("{key}=s3:ObjectCreated:*"),
+    };
+    for (key, rule) in record.requires {
+        let value = rule.strip_prefix("equals:").unwrap_or("x");
+        query = format!("{query}&{key}={value}");
     }
+    query
+}
+
+/// The admin router's eight records: every extension record but the metadata route's two
+/// listings, whose floor is the standard listing floor (`metadata_listing_tests`).
+fn admin_router_records() -> Vec<&'static ExtensionRouteRecord> {
+    let records: Vec<&ExtensionRouteRecord> = EXTENSION_ROUTES
+        .iter()
+        .filter(|record| !LISTINGS.contains(&record.operation))
+        .collect();
+    assert_eq!(records.len(), 8);
+    records
 }
 
 /// A signed request for the record's row.
-fn signed(record: &ExtensionRouteRecord) -> Request<Bytes> {
+pub(super) fn signed(record: &ExtensionRouteRecord) -> Request<Bytes> {
     let request = match record.method {
         "GET" => ContextRequest::get(PATH_HOST, &path(record), &query(record)),
         "PUT" => ContextRequest::put_with_query(PATH_HOST, &path(record), &query(record), b""),
@@ -117,7 +135,7 @@ fn signed(record: &ExtensionRouteRecord) -> Request<Bytes> {
 }
 
 /// The same request with no credentials at all.
-fn unsigned(record: &ExtensionRouteRecord) -> Request<Bytes> {
+pub(super) fn unsigned(record: &ExtensionRouteRecord) -> Request<Bytes> {
     unsigned_at(record.method, &format!("{}?{}", path(record), query(record)))
 }
 
@@ -131,7 +149,7 @@ pub(super) fn unsigned_at(method: &str, uri: &str) -> Request<Bytes> {
 }
 
 /// The record's row presigned in the query with the shared credential, now.
-fn presigned(record: &ExtensionRouteRecord) -> Request<Bytes> {
+pub(super) fn presigned(record: &ExtensionRouteRecord) -> Request<Bytes> {
     let method = Method::from_bytes(record.method.as_bytes()).expect("a method");
     presign_at(&method, &path(record), &query(record), RequestNow::capture().unix_seconds(), 900)
 }
@@ -158,7 +176,7 @@ pub(super) fn presign_at(method: &Method, path: &str, query: &str, signed_at: i6
 }
 
 /// The question the route stage asked about the record's operation and action.
-fn route_question<'a>(exchange: &'a Exchange, record: &ExtensionRouteRecord) -> &'a Asked {
+pub(super) fn route_question<'a>(exchange: &'a Exchange, record: &ExtensionRouteRecord) -> &'a Asked {
     exchange
         .asked
         .iter()
@@ -182,7 +200,7 @@ pub(super) fn refused_without_asking(exchange: &Exchange, at: &str) {
 fn every_extension_record_is_bound_to_its_inventory_route() {
     let inventory = rustfs_admin_route_inventory().expect("the recorded inventory validates");
     assert_eq!(inventory.extension_routes().len(), EXTENSION_ROUTES.len());
-    assert_eq!(EXTENSION_ROUTES.len(), 8);
+    assert_eq!(EXTENSION_ROUTES.len(), 10);
     for (record, route) in EXTENSION_ROUTES.iter().zip(inventory.extension_routes()) {
         let at = record.operation;
         assert_eq!(record.name, route.name, "{at}: the inventory's order is the records'");
@@ -195,7 +213,18 @@ fn every_extension_record_is_bound_to_its_inventory_route() {
             "{at}"
         );
         assert_eq!(record.action, bound.iam_action_wire, "{at}");
-        assert_eq!(bound.auth_detail, "SignatureRequiredThenHandlerCheck", "{at}");
+        let requires: Vec<(&str, &str)> = bound
+            .query_requires
+            .iter()
+            .map(|rule| (rule.key.as_str(), rule.rule.as_str()))
+            .collect();
+        assert_eq!(record.requires, requires, "{at}");
+        let class = if LISTINGS.contains(&record.operation) {
+            "SignedOrAnonymousThenBucketListing"
+        } else {
+            "SignatureRequiredThenHandlerCheck"
+        };
+        assert_eq!(bound.auth_detail, class, "{at}");
         assert!(record.action.starts_with("s3:"), "{at}: {}", record.action);
         assert!(record.operation.starts_with("rustfs:"), "{at}");
         assert!(
@@ -242,7 +271,8 @@ fn every_extension_row_is_authorised_by_its_inventory_action_on_its_target() {
 }
 
 /// Negative — an unsigned extension request is `403` before the authorizer is asked, never the
-/// `501` of an operation the gateway lacks: the floor is privileged.
+/// `501` of an operation the gateway lacks: the default floor delegates no anonymous request, and
+/// the admin router's floors are privileged besides.
 #[test]
 fn n_an_unsigned_extension_request_is_refused_without_asking() {
     in_lanes(
@@ -296,7 +326,7 @@ fn n_an_unsigned_extension_request_is_refused_without_asking_on_the_rustfs_profi
     in_lanes_on(
         &rustfs_profile_floor(),
         |_, _| true,
-        EXTENSION_ROUTES,
+        &admin_router_records(),
         |assembled, record| {
             refused_without_asking(&assembled.exchange(unsigned(record)), record.operation);
         },
@@ -308,7 +338,10 @@ fn n_an_unsigned_extension_request_is_refused_without_asking_on_the_rustfs_profi
 /// on standard operations only: no RustFS client is shown to presign those seven (ADR-0024 (f)).
 #[test]
 fn n_a_presigned_extension_request_is_refused_without_asking() {
-    let siblings: Vec<&ExtensionRouteRecord> = EXTENSION_ROUTES.iter().filter(|record| record.operation != LAMBDA).collect();
+    let siblings: Vec<&ExtensionRouteRecord> = admin_router_records()
+        .into_iter()
+        .filter(|record| record.operation != LAMBDA)
+        .collect();
     assert_eq!(siblings.len(), 7);
     in_lanes(
         |_, _| true,

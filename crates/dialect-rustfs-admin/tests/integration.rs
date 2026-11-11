@@ -19,7 +19,8 @@
 //! Responsible for: routing every row of every operation through core's router — with concrete
 //! values for template parameters, and against a matcher written here from ADR-0024's rule — and
 //! every operation's declared facts against its record and against each other; the S3-shaped
-//! extension rows and the zip pair are `integration/extensions.rs`.
+//! extension rows and the zip pair are `integration/extensions.rs`, the metadata listings
+//! `integration/metadata_listing.rs`.
 //! NOT responsible for: authentication, authorisation, parameter decoding and the caller's secret
 //! through an assembled service, or the binding to the recorded inventory
 //! (`rustfs-gateway-goldens`'s `rustfs_admin_dialect`).
@@ -47,6 +48,9 @@ mod census;
 
 #[path = "integration/extensions.rs"]
 mod extensions;
+
+#[path = "integration/metadata_listing.rs"]
+mod metadata_listing;
 
 #[path = "integration/sts_form.rs"]
 mod sts_form;

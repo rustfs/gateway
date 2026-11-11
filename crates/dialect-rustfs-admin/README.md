@@ -33,6 +33,18 @@ authenticated fallback handlers (ADR-0039).
   authorised by the inventory's IAM action on the bucket or object the path names, reads no body,
   and is walked by `fold_every_extension`. The two notification listeners are long-lived streams:
   a handler answers `AdminResponse::stream`.
+- `EXTENSION_ROUTES` starts with RustFS's two metadata listings (rustfs/gateway#1588):
+  `GET /{bucket}?versions&metadata=true` (`rustfs:ListObjectVersionsWithMetadata`, `s3:ListBucketVersions`)
+  and `GET /{bucket}?list-type=2&metadata=true` (`rustfs:ListObjectsV2WithMetadata`, `s3:ListBucket`).
+  RustFS's metadata route claims them before its admin router: a bucket `GET` whose first
+  `metadata` value is exactly `true`, naming `versions` (tried first) or a first `list-type` of `2`.
+  Each row (precedence 78 and 79, so the admin router's eight keep 80 to 87) carries both query
+  rules and stands ahead of the standard listings and of the admin router's bucket `GET` rows.
+  Their floor is the standard listing floor (`admin::listing_floor`, ADR-0050), so an anonymous
+  or presigned listing is admitted exactly where `ListObjectsV2` admits one. A host that registers
+  the standard listings must also register these two: without a handler a request carrying
+  `metadata=true` is answered `501` rather than served as a listing without the metadata asked for.
+  The handler answers the listing document with each entry's `<UserMetadata>`.
 - The object-zip-download pair (`POST object-zip-downloads`, `GET object-zip-downloads/{id}.zip`)
   is claimed like every other admin route (rustfs/backlog#2753). Both floors are privileged, under
   the caller's own vendor labels `rustfs:CreateObjectZipDownload` and `rustfs:DownloadObjectZip`;
