@@ -340,7 +340,7 @@ fn external_context_copy_preserves_request_facts_without_copying_the_caller_secr
 }
 
 /// A header-token verdict naming `principal`, obtained the only way one can be: the floor admits
-/// a request by its claim, and a host verifier reports the identity (ADR-0053).
+/// a request by its claim, and a host verifier reports the identity (ADR-0054).
 fn header_token_verdict(principal: &'static str) -> Verdict {
     use rustfs_gateway_sig::{HeaderTokenClaim, HeaderTokenRefused, HeaderTokenVerifier};
 

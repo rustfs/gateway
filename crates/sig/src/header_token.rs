@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! A host-verified header token claim (ADR-0053, rustfs/gateway#1586).
+//! A host-verified header token claim (ADR-0054, rustfs/gateway#1586).
 //!
 //! Responsible for: [`HeaderTokenClaim`] (the service-level opt-in: one lowercase header name,
 //! and the alias names of it that are refused wherever they appear),

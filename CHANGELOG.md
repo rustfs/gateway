@@ -3,7 +3,7 @@
 ## Host-verified header token claim (sig 0.15.0, core 0.60.0, gateway 0.62.0)
 
 BREAKING: `AuthSchemeRef` gains `HeaderToken`, the scheme of a request admitted by the service's
-header token claim, whose principal the host's verifier reported (ADR-0053, rustfs/gateway#1586).
+header token claim, whose principal the host's verifier reported (ADR-0054, rustfs/gateway#1586).
 Migration: a `match` on `AuthSchemeRef` adds an explicit `HeaderToken` arm; do not fold it into a
 signed arm or into `Bearer`. A handler that serves such requests reads the principal through
 `RequestContextView::header_token_principal()`; `principal()` stays the signed principal and is

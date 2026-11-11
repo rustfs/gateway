@@ -1,4 +1,4 @@
-# ADR-0053: A host-verified header token claim
+# ADR-0054: A host-verified header token claim
 
 - Status: Accepted
 - Date: 2026-11-11
@@ -97,6 +97,13 @@ this claim's exclusivity on every operation, whether or not the operation admits
 form and the zip download refuse the scheme for their own reasons above; the two metadata
 listings refuse SigV2 and admit a token.
 
+**Beside the caller's secret (ADR-0024, ADR-0053).** A caller's secret key exists only on a signed
+principal, where the authenticator's lookup put it, and ADR-0053 hands it to an opted-in
+operation only over a signed body. A header-token verdict has no signed principal: nothing was
+looked up, so there is no secret to hand over, to any operation and under either scope of that
+opt-in. `StsFormPost`, the operation ADR-0053 is about, never sees a header token at all, because
+the STS service refuses the scheme; its signed-body condition is untouched by this record.
+
 **The header's shape.** The branch then requires exactly one occurrence of the claimed header, with
 a value of 1 to 8192 bytes, every byte ASCII graphic and none a comma. A repeated, empty, overlong,
 non-ASCII, whitespace-bearing or list-shaped value is `403`. No occurrence is chosen over another.
@@ -194,8 +201,8 @@ filter can neither supply nor erase a token.
 
 - Measured: `rustc --version` returned `rustc 1.97.1 (8bab26f4f 2026-07-14)` on the authoring host.
 - Measured: `git rev-parse origin/main` returned `f9aa6045ec077cc41b4d5f3bdeab01d729826407`.
-  When this change was last merged with `main`, at `ca70101e`, the same command listed `0052` as
-  the highest numbered record, so this record is `0053`.
+  When this change was last merged with `main`, at `6a45af45`, the same command listed `0053` as
+  the highest numbered record, so this record is `0054`.
 - Measured at that revision: the facade's anonymous arm builds its verdict from the floor's
   evidence alone and calls no authenticator
   ([service.rs](https://github.com/rustfs/gateway/blob/f9aa6045ec077cc41b4d5f3bdeab01d729826407/crates/gateway/src/service.rs#L788-L794)),

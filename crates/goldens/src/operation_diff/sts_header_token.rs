@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The STS endpoint against a host-verified header token (ADR-0053, rustfs/gateway#1586).
+//! The STS endpoint against a host-verified header token (ADR-0054, rustfs/gateway#1586).
 //!
 //! Responsible for: that the STS form, whose floor admits an anonymous Web Identity request,
 //! refuses the same request once it carries the claimed header, before the authorizer and
@@ -23,7 +23,7 @@
 use super::*;
 
 /// Negative — the STS endpoint issues credentials and refuses a host-verified header token
-/// (ADR-0053), although its floor is not privileged and admits the anonymous Web Identity form.
+/// (ADR-0054), although its floor is not privileged and admits the anonymous Web Identity form.
 /// With the claim installed, the form reaches its handler without the header and is refused with
 /// it, before the authorizer, and the host's verifier is never asked.
 #[test]

@@ -19,8 +19,11 @@
 //!
 //! Responsible for: [`RoutedFacts::of`], one pure function over the dispatch, the raw target and
 //! the deployment's name policy.
+//! Also `CallerKeyOptIn::admits`, the per-request decision whether the secret the authenticator
+//! handed over reaches this operation's handler.
 //! NOT responsible for: routing (`rustfs-gateway-core`'s router), dropping the secret
-//! (`crate::service`, on the line that reads the verdict), asking the authorizer, or rendering a
+//! (`crate::service`, on the line that reads the verdict), deciding whether a signature covers the
+//! body (`crate::ext::Authentication::signs_its_body`), asking the authorizer, or rendering a
 //! refusal.
 //! Upstream: `rustfs_gateway_core::Dispatch`, `crate::dispatch::target_of`. Downstream:
 //! `crate::service`.
@@ -62,8 +65,8 @@ pub(crate) struct RoutedFacts {
     pub(crate) target: TargetKind,
     /// The bucket a claimed row's template or query parameter names, validated as S3 validates one.
     pub(crate) bound_bucket: Option<BucketName>,
-    /// Whether the routed operation opted in to the caller's secret.
-    pub(crate) hands_caller_secret: bool,
+    /// The routed operation's opt-in to the caller's secret.
+    pub(crate) secret: CallerKeyOptIn,
     /// The claimed row's decoded values; none outside a claim.
     pub(crate) path_params: PathParams,
     /// The accounts the request acts on, for an operation that declares a subject rule.
@@ -143,9 +146,69 @@ impl RoutedFacts {
             claimed,
             target,
             bound_bucket,
-            hands_caller_secret: dispatched.spec.receives_caller_secret(),
+            secret: CallerKeyOptIn {
+                opted_in: dispatched.spec.receives_caller_secret(),
+                over_a_signed_body: dispatched.spec.caller_secret_needs_a_signed_body(),
+            },
             path_params,
             subjects,
         })
+    }
+}
+
+/// An operation's opt-in to the caller's secret (ADR-0024), as its spec declared it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct CallerKeyOptIn {
+    /// The spec opted in.
+    pub(crate) opted_in: bool,
+    /// Only for a request whose signature covers its body (rustfs/gateway#1587).
+    pub(crate) over_a_signed_body: bool,
+}
+
+impl CallerKeyOptIn {
+    /// Whether a secret the authenticator handed over reaches this request's handler: the operation
+    /// opted in, or the assembly hands it to every operation; and, for an operation that asked for
+    /// a signed body, `signed_body` holds. Anything else drops it, zeroized, at the line that reads
+    /// the verdict, so no later stage holds the key.
+    pub(crate) const fn admits(self, signed_body: bool, every_operation: bool) -> bool {
+        (self.opted_in || every_operation) && (signed_body || !self.over_a_signed_body)
+    }
+}
+
+#[cfg(test)]
+mod caller_key_opt_in_tests {
+    use super::CallerKeyOptIn;
+
+    const PLAIN: CallerKeyOptIn = CallerKeyOptIn {
+        opted_in: true,
+        over_a_signed_body: false,
+    };
+    const SIGNED_BODY: CallerKeyOptIn = CallerKeyOptIn {
+        opted_in: true,
+        over_a_signed_body: true,
+    };
+    const NONE: CallerKeyOptIn = CallerKeyOptIn {
+        opted_in: false,
+        over_a_signed_body: false,
+    };
+
+    /// Positive — an opt-in over a signed body admits a signed body; a plain opt-in admits either.
+    #[test]
+    fn an_opt_in_admits_the_bodies_it_asked_for() {
+        assert!(SIGNED_BODY.admits(true, false));
+        assert!(PLAIN.admits(true, false));
+        assert!(PLAIN.admits(false, false));
+    }
+
+    /// Negative — an opt-in over a signed body refuses an unsigned one, even when the assembly
+    /// hands the secret to every operation; an operation that did not opt in gets nothing unless
+    /// the assembly says every operation.
+    #[test]
+    fn n_an_unsigned_body_or_no_opt_in_gets_no_secret() {
+        assert!(!SIGNED_BODY.admits(false, false));
+        assert!(!SIGNED_BODY.admits(false, true));
+        assert!(!NONE.admits(true, false));
+        assert!(!NONE.admits(false, false));
+        assert!(NONE.admits(false, true), "the every-operation scope is the deployment's listed choice");
     }
 }

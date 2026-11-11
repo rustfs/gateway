@@ -489,18 +489,22 @@ for path in sorted((root / "crates").rglob("*.rs")):
 # explicit=48: ADR-0041's form-claim fixtures, each stating Standard for the same reason as the
 # vendor fixtures above: the `acme:*Token` family's one `const fn spec` in
 # crates/core/tests/dialect_form_claims.rs, and `acme:Token` in crates/gateway/src/dialect_posture.rs
-# (rustfs/gateway#1232). The generated STS operation builds its spec through the admin `spec`.
+# (rustfs/gateway#1232). The generated STS operation builds its spec through the admin `spec` (since
+# rustfs/gateway#1587, `spec_over_a_signed_body`, counted below).
 # explicit=49: the SigV4-only floor registration fixtures' one `const fn spec` in
 # crates/core/src/registry/reject_floor_tests.rs (rustfs/gateway#1576), stating Standard for the same
 # reason as the version-requirement fixtures.
-if central_builders != 102 or explicit_builders != 49:
+# explicit=50: the admin `spec_over_a_signed_body` in crates/dialect-rustfs-admin/src/admin.rs, the
+# STS form operation's caller-secret opt-in over a signed body (rustfs/gateway#1587, ADR-0053),
+# stating Standard as the admin `spec` beside it does.
+if central_builders != 102 or explicit_builders != 50:
     fail(
         "repository builder census drifted: "
-        f"central={central_builders} explicit={explicit_builders}, expected central=102 explicit=49"
+        f"central={central_builders} explicit={explicit_builders}, expected central=102 explicit=50"
     )
 
 print(
-    "check_handler_deadline_class: 156 repository builder sites are inventoried "
-    "(151 classified: 102 central standard, 49 explicit; 5 authority tests)"
+    "check_handler_deadline_class: 157 repository builder sites are inventoried "
+    "(152 classified: 102 central standard, 50 explicit; 5 authority tests)"
 )
 PY

@@ -19,7 +19,7 @@
 //! posture `golden/rustfs-profile-posture.txt` holds — every start-up line, then the security
 //! posture — and that the golden tells the profile apart from the same backend assembled without
 //! it; and that the operations of that backend which admit a host-verified header token
-//! (ADR-0053) are exactly the reviewed list `golden/header-token-operations.txt` holds.
+//! (ADR-0054) are exactly the reviewed list `golden/header-token-operations.txt` holds.
 //! NOT responsible for: the preset's switch-by-switch census (`src/builder/rustfs_profile.rs`'s
 //! unit suite), or that the client-matrix launcher assembles the same posture
 //! (`compat/sut/src/service/tests/rustfs_profile_tests.rs`, which reads this golden).

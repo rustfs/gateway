@@ -13,7 +13,7 @@
 // limitations under the License.
 
 //! The host's token verifiers on the request path: ADR-0042's query bearer verifier and
-//! ADR-0053's header token verifier.
+//! ADR-0054's header token verifier.
 //!
 //! Responsible for: turning a bearer or header-token admission into its verdict through the
 //! installed host verifier, behind the panic boundary — a missing verifier, a refusal and a panic
@@ -41,7 +41,7 @@ use crate::trace::RequestTrace;
 pub(crate) type HeaderTokenVerify = Arc<dyn Fn(HeaderTokenAdmission, &TransportExtensions) -> Verdict + Send + Sync>;
 
 impl S3Service {
-    /// Removes the floor's claimed header from a head about to be accepted (ADR-0053). A refused
+    /// Removes the floor's claimed header from a head about to be accepted (ADR-0054). A refused
     /// alias stays: a request that carries one is refused before any context exists.
     ///
     /// The floor reads the token from the copy of the head taken before the wire seam. Removing
@@ -54,7 +54,7 @@ impl S3Service {
         }
     }
 
-    /// Marks the answer to a request served by its header token as one caller's (ADR-0053).
+    /// Marks the answer to a request served by its header token as one caller's (ADR-0054).
     ///
     /// A shared cache keeps a response to a request that carried `Authorization` private by
     /// default (RFC 9111 section 3.5) and gives a claimed extension header no such treatment.
@@ -98,7 +98,7 @@ impl S3Service {
     }
 
     /// The verdict of a header-token admission, from what the host established in this request's
-    /// own state (ADR-0053). Never anonymous: every path but an accepted identity is a rejection.
+    /// own state (ADR-0054). Never anonymous: every path but an accepted identity is a rejection.
     pub(super) fn header_token_verdict(
         &self,
         admission: HeaderTokenAdmission,

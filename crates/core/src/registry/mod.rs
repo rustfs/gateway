@@ -162,6 +162,9 @@ pub struct OperationSpec {
     /// Whether this operation's handler is handed the caller's secret (ADR-0024). Private, so the
     /// only way to set it is [`Self::hand_caller_secret_to_handler`] on the operation's own spec.
     caller_secret: bool,
+    /// Whether the secret is handed over only when the request's signature covers its body
+    /// ([`Self::hand_caller_secret_to_handler_over_a_signed_body`]).
+    caller_secret_over_a_signed_body: bool,
 }
 
 impl OperationSpec {
@@ -191,6 +194,7 @@ impl OperationSpec {
             extra_permissions: &[],
             handler_deadline_class: None,
             caller_secret: false,
+            caller_secret_over_a_signed_body: false,
         }
     }
 
@@ -247,6 +251,7 @@ impl OperationSpec {
             extra_permissions: &[],
             handler_deadline_class: None,
             caller_secret: false,
+            caller_secret_over_a_signed_body: false,
         }
     }
 
@@ -307,6 +312,29 @@ impl OperationSpec {
     pub const fn hand_caller_secret_to_handler(mut self) -> Self {
         self.caller_secret = true;
         self
+    }
+
+    /// Opts this operation in to receiving the caller's secret only for a request whose signature
+    /// covers the body the handler is handed: a header signature over a digest the facade compared
+    /// with the body, over aws-chunked chunk signatures, or over the body digest the authenticator
+    /// computed itself. Any other request — `UNSIGNED-PAYLOAD`, presigned, SigV2, unsigned
+    /// streaming — reaches the handler without it (rustfs/gateway#1587).
+    ///
+    /// For an operation whose body carries what the secret authorises, such as an STS form, where a
+    /// replayed head with a rewritten body would otherwise be honoured. Every rule of
+    /// [`Self::hand_caller_secret_to_handler`] applies as well.
+    #[must_use]
+    pub const fn hand_caller_secret_to_handler_over_a_signed_body(mut self) -> Self {
+        self.caller_secret = true;
+        self.caller_secret_over_a_signed_body = true;
+        self
+    }
+
+    /// Whether the caller's secret reaches this operation's handler only over a signed body;
+    /// `false` unless the spec called [`Self::hand_caller_secret_to_handler_over_a_signed_body`].
+    #[must_use]
+    pub const fn caller_secret_needs_a_signed_body(&self) -> bool {
+        self.caller_secret_over_a_signed_body
     }
 
     /// Whether this operation's handler receives the caller's secret. `false` unless the spec

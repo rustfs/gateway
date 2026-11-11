@@ -108,7 +108,8 @@ second copy is a second thing to keep in sync.
 | 0050 | The metadata listings on the standard listing floor | Accepted |
 | 0051 | An opt-in internal error for a credential-store fault | Accepted |
 | 0052 | Refuse SigV2 on the STS form, zip download and metadata listing floors | Accepted |
-| 0053 | A host-verified header token claim | Accepted |
+| 0053 | The caller's secret only over a signed body | Accepted |
+| 0054 | A host-verified header token claim | Accepted |
 
 The index is hand-maintained. Generating it would cost more than it saves until
 there are at least fifteen records.

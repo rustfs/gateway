@@ -157,6 +157,9 @@ pub struct FormRouteRecord {
     pub request_body: BodyKind,
     /// How RustFS writes the response body.
     pub response_body: BodyKind,
+    /// Whether the handler is handed the caller's secret (ADR-0022), as the generator's form
+    /// ruling decides; the inventory records no secret for a form route.
+    pub caller_secret: bool,
 }
 
 /// One S3-shaped extension operation (rustfs/backlog#2753) and the inventory's `extension_routes`

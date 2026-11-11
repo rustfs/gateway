@@ -67,6 +67,7 @@ use super::context::{ACCESS_KEY, BASE_DOMAIN, SECRET_KEY, verifying_at};
 use super::s3s as legacy;
 
 mod sec1;
+mod secret;
 mod sent;
 mod sigv2;
 
@@ -345,7 +346,18 @@ fn gateway_builder_on(
     floor: SecurityFloor,
     provider: Arc<dyn rustfs_gateway::CredentialProvider>,
 ) -> ServiceBuilder {
-    let authenticator = SigV4Authenticator::new(provider, RegionSet::new([REGION]).expect("a region"))
+    gateway_builder_authenticating(now, asked, floor, authenticator_over(provider))
+}
+
+/// The RustFS profile's authenticator over the shared credential, handing no secret over.
+fn authenticator() -> SigV4Authenticator {
+    let credentials = Credentials::new(ACCESS_KEY, SECRET_KEY.as_bytes()).expect("a fixture credential");
+    authenticator_over(Arc::new(StaticCredentials::new().with(credentials)))
+}
+
+/// The RustFS profile's authenticator, resolving credentials through `provider`.
+fn authenticator_over(provider: Arc<dyn rustfs_gateway::CredentialProvider>) -> SigV4Authenticator {
+    SigV4Authenticator::new(provider, RegionSet::new([REGION]).expect("a region"))
         .accept_any_signing_region()
         .accept_empty_signing_region()
         .refuse_unreadable_signing_regions_after_verification()
@@ -353,7 +365,21 @@ fn gateway_builder_on(
         .verify_paths_as_legacy_rustfs()
         .accept_legacy_rustfs_signing_services()
         .answer_credential_scope_refusals_as_legacy_rustfs()
-        .read_signed_headers_as_legacy_rustfs();
+        .read_signed_headers_as_legacy_rustfs()
+}
+
+/// [`gateway_builder`] with `authenticator`, behind the RustFS profile's floor.
+fn gateway_builder_with(now: RequestNow, asked: &Asked, authenticator: SigV4Authenticator) -> ServiceBuilder {
+    gateway_builder_authenticating(now, asked, rustfs_profile_floor(), authenticator)
+}
+
+/// The assembly behind `floor`, authenticating with `authenticator`.
+fn gateway_builder_authenticating(
+    now: RequestNow,
+    asked: &Asked,
+    floor: SecurityFloor,
+    authenticator: SigV4Authenticator,
+) -> ServiceBuilder {
     let dialect = rustfs_admin_dialect().expect("the generated record and declarations agree");
     verifying_at(ServiceBuilder::new(), now)
         .authenticator(authenticator)

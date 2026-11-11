@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The host boundary of the header token claim through the assembled service (ADR-0053,
+//! The host boundary of the header token claim through the assembled service (ADR-0054,
 //! rustfs/gateway#1586).
 //!
 //! Responsible for: a refused alias of the claimed header answered `403` before any verifier,
@@ -337,7 +337,7 @@ impl rustfs_gateway::Handler<rustfs_gateway::dto::GetObject> for StoredPublic {
 /// `Cache-Control: public` goes out `public` to a caller served by its token: the gateway keeps
 /// what the handler answered and adds only `Vary` on the claimed header. A cache that ignores
 /// `Vary` can then serve one caller's object to another, as it can for a header-signed request;
-/// ADR-0053 states it as the deployment's. The signed request of the same object is the control:
+/// ADR-0054 states it as the deployment's. The signed request of the same object is the control:
 /// the same `Cache-Control`, and no `Vary`.
 #[tokio::test]
 async fn n_a_stored_public_cache_control_is_kept_on_an_answer_served_by_a_token() {

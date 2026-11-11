@@ -78,6 +78,14 @@ and refuses an anonymous or SigV2 request under every policy, as RustFS's router
 in `presigned_allowed_ops` and `s3:GetObject` is still asked, or `s3:GetObjectVersion` instead
 when the request names `versionId` (ADR-0049, rustfs/gateway#1576).
 
+Beside the claimed rows, the STS endpoint `rustfs:StsFormPost` is handed the caller's secret too,
+by the generator's form ruling rather than the inventory, whose secret column records only body
+sealing: RustFS's `AssumeRole` compares that secret with a fresh IAM lookup (rustfs/gateway#1587).
+Its handler holds the secret only when a SigV4 header signature covers the form body, which
+carries every parameter (`admin::spec_over_a_signed_body`, ADR-0053). `UNSIGNED-PAYLOAD`,
+presigned and SigV2 requests reach it without the secret, so RustFS's comparison fails closed.
+An anonymous form action has no principal and so no secret.
+
 A `{bucket}` or `{warehouse}` template parameter is the bucket the operation is authorised on
 (`BucketParam::Path`, ADR-0025 (c), ADR-0030): the raw segment meets the S3 bucket-name rules
 before authentication, the authorizer is asked about that bucket, and the handler reads it from

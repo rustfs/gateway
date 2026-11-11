@@ -17,10 +17,13 @@
 //! Responsible for: asking the private reader only after a key is found (a key that is not found
 //! is answered there, a store fault under the switch as `Unavailable`), using the body's digest
 //! when the payload header is absent, preserving a body-read refusal before signature comparison,
-//! and turning a verification failure into the trait's answer.
+//! turning a verification failure into the trait's answer, and answering whether a header
+//! signature covers the body (rustfs/gateway#1587).
 //! NOT responsible for: reading body frames or selecting an STS operation.
 //! Upstream: `crate::service` and `super::SigV4Authenticator`. Downstream: the canonical request
 //! verifier in `super` and the proof-gated replay in `crate::gate`.
+
+use std::sync::OnceLock;
 
 use super::{AuthError, Authentication, AuthenticationOutcome, CredentialLookup, PayloadMode, Presented, SigLocation};
 use super::{SigV4Authenticator, Unavailable, VerificationFailure};
@@ -29,13 +32,31 @@ use crate::gate::{BodyTimeouts, StsBodyReader};
 pub(super) struct StsBodyReading<'a> {
     reader: &'a dyn StsBodyReader,
     timeouts: BodyTimeouts,
+    /// Set once the body's own digest became the signed payload token.
+    signed: OnceLock<()>,
 }
 
 impl<'a> Authentication<'a> {
     /// Offered by the pipeline; only the built-in verification path asks the private reader.
     pub(crate) fn with_sts_body_reader(mut self, reader: Option<&'a dyn StsBodyReader>, timeouts: BodyTimeouts) -> Self {
-        self.sts_body = reader.map(|reader| StsBodyReading { reader, timeouts });
+        self.sts_body = reader.map(|reader| StsBodyReading {
+            reader,
+            timeouts,
+            signed: OnceLock::new(),
+        });
         self
+    }
+
+    /// Whether a header signature over this request covers the body the handler will be handed:
+    /// the body's digest computed here, a declared digest the facade compares with the body it
+    /// reads, or an aws-chunked chain of chunk signatures. `UNSIGNED-PAYLOAD`, unsigned streaming,
+    /// the empty-payload token, and every query or form signature do not (rustfs/gateway#1587).
+    /// Meaningful only once the verdict authenticated the request.
+    pub(crate) fn signs_its_body(&self) -> bool {
+        self.sealed().marker().location() == SigLocation::Header
+            && (self.sts_body.as_ref().is_some_and(|reading| reading.signed.get().is_some())
+                || self.payload().digest().is_some()
+                || matches!(self.payload(), PayloadMode::StreamingSigned { .. }))
     }
 }
 
@@ -85,6 +106,7 @@ impl SigV4Authenticator {
             .digest(reading.timeouts)
             .await
             .map_err(VerificationFailure::Body)?;
+        let _ = reading.signed.set(());
         Ok(Some(PayloadMode::ExactSha256(digest)))
     }
 }

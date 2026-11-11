@@ -182,7 +182,7 @@ pub(crate) struct Inner {
     pub(crate) custom_signature_verifier: Option<Arc<dyn rustfs_gateway_sig::SignatureVerifier>>,
     /// The host's query bearer verifier (ADR-0042); `None` refuses every bearer admission.
     pub(crate) bearer_token_verifier: Option<Arc<dyn rustfs_gateway_sig::BearerTokenVerifier>>,
-    /// The host's header token verifier (ADR-0053); `None` refuses every header-token admission.
+    /// The host's header token verifier (ADR-0054); `None` refuses every header-token admission.
     pub(crate) header_token_verifier: Option<host_tokens::HeaderTokenVerify>,
     #[cfg(feature = "dangerous-replace-signature-verifier")]
     pub(crate) dangerously_replaced_signature_verifier: Option<Arc<dyn rustfs_gateway_sig::AwsSignatureVerifier>>,
@@ -503,7 +503,7 @@ impl S3Service {
             }
         }
 
-        self.withhold_header_token(&mut parts.headers); // ADR-0053: nothing accepted holds a claimed header token
+        self.withhold_header_token(&mut parts.headers); // ADR-0054: nothing accepted holds a claimed header token
         let external_headers = crate::external_marker::present(&headers) || crate::external_marker::present(&parts.headers);
         let wire = match WireRequest::accept(Request::from_parts(parts, body), &self.inner.limits) {
             Ok(wire) => wire,
@@ -567,7 +567,7 @@ impl S3Service {
         }
         // The RustFS profile's SigV4 header guard, where legacy RustFS asks it: before routing.
         let guard = self.inner.view_policy.sigv4_header_guard();
-        let by_header_token = self.header_token_presented(&headers); // ADR-0053: the floor alone answers such a request
+        let by_header_token = self.header_token_presented(&headers); // ADR-0054: the floor alone answers such a request
         let guarded = guard.refusal(&headers, wire.query().as_str(), wire.method(), &resolved, response_kind);
         if let Some(refusal) = guarded.filter(|_| !by_header_token) {
             return outcome.refuse(refusal);
@@ -618,7 +618,7 @@ impl S3Service {
             Ok(facts) => facts,
             Err(refusal) => return outcome.refuse_at(Refused::Decode, from_codec(refusal, response_kind)),
         };
-        let (service_level, target, hands_caller_secret) = (facts.service_level, facts.target, facts.hands_caller_secret);
+        let (service_level, target, secret_scope) = (facts.service_level, facts.target, facts.secret);
         let (path_params, subjects, claimed, bound_bucket) =
             (facts.path_params, facts.subjects, facts.claimed, facts.bound_bucket);
         // Claimed routes sign their declared path; only ordinary S3 requests retain the host-derived bucket.
@@ -787,12 +787,13 @@ impl S3Service {
         let mut framing_mode: Option<PayloadMode> = None;
         let mut signed_length = crate::builder::buffered_lengths::SignedLength::default();
         let mut body_digest = BodyDigestObligation::None;
+        let mut signed_body = false; // Whether a SigV4 header signature covers the body (rustfs/gateway#1587).
         // Legacy RustFS's words for a RustFS-profile refusal, when the authenticator published them.
         let mut legacy = None;
         // Whether this request's own admission was a bearer or header-token one; such a verdict from any other path is refused below.
         let (mut bearer_admitted, mut header_token_admitted) = (false, false);
         let (authentication, signature_mismatch) = match self.inner.floor.admit(view, M::floor(&op), now) {
-            // Unsigned: anonymous, or admitted by the header token claim (ADR-0053). One framing rule serves both.
+            // Unsigned: anonymous, or admitted by the header token claim (ADR-0054). One framing rule serves both.
             Ok(unsigned @ (Admission::Anonymous(_) | Admission::HeaderToken(_))) => {
                 framing_mode = match crate::payload_header::anonymous_framing(&headers, self.inner.decode_anonymous_framing) {
                     Ok(mode) => mode,
@@ -849,6 +850,7 @@ impl S3Service {
                     .with_chunk_sink(&chunk_sink)
                     .with_sts_body_reader(routed_body.sts_body_reader(), config.config().request_body_deadlines());
                     let result = self.inner.authenticator.authenticate(&question).await;
+                    signed_body = question.signs_its_body();
                     let (signature_mismatch, published_legacy, body_refusal) = question.into_published();
                     legacy = published_legacy;
                     if let Some(refusal) = body_refusal {
@@ -916,8 +918,7 @@ impl S3Service {
         };
         // H4's run-time half: a receipt minted for another request cannot be attached to this one.
         let (verdict, scope_rejection, caller_secret) = authentication.into_parts();
-        // Zeroized on drop: an operation outside the assembly's secret scope never holds the key past this line (ADR-0024).
-        let caller_secret = caller_secret.filter(|_| hands_caller_secret || self.inner.caller_secret_every_operation);
+        let caller_secret = caller_secret.filter(|_| secret_scope.admits(signed_body, self.inner.caller_secret_every_operation));
         let verdict = SecurityFloor::seal_verdict(verdict, presence);
         let verdict = host_tokens::from_own_admission(verdict, bearer_admitted, header_token_admitted);
         if let Some(error) = verdict.rejection() {

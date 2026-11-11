@@ -195,7 +195,7 @@ pub enum AssemblyError {
         /// Which assembly rule this is.
         rule: RuleRef,
     },
-    /// The floor carries a header token claim with no verifier (ADR-0053).
+    /// The floor carries a header token claim with no verifier (ADR-0054).
     HeaderTokenClaimWithoutVerifier {
         /// Which assembly rule this is.
         rule: RuleRef,

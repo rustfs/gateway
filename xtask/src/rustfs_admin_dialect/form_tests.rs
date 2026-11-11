@@ -24,7 +24,7 @@
 #![allow(clippy::expect_used, clippy::panic, clippy::indexing_slicing)]
 
 use super::form::{EVIDENCE, STEM};
-use super::rulings::FORMS;
+use super::rulings::{FORMS, FormRuling};
 use super::tests::{inventory, recorded_plan, route};
 use super::{Route, plan};
 
@@ -39,7 +39,32 @@ fn sts() -> Route {
     sts
 }
 
-const STS_FORM: &[(&str, &str, &str)] = &[("POST", "/", "StsFormPost")];
+/// The ruling's reason for handing the secret over, as a fixture.
+const WHY: &str = "the handler compares the caller's secret.";
+
+const STS_FORM: &[FormRuling] = &[FormRuling {
+    method: "POST",
+    path: "/",
+    auth_detail: "StsFormPost",
+    caller_secret: Some(WHY),
+}];
+
+/// The same ruling without the opt-in.
+const NO_SECRET: &[FormRuling] = &[FormRuling {
+    caller_secret: None,
+    ..STS_FORM[0]
+}];
+
+/// The rendered module of `sts()` under `rulings`, or the refusal.
+fn rendered(rulings: &[FormRuling]) -> Result<String, String> {
+    let plan = plan(&inventory(vec![sts()]), &[], &[], &[], rulings, &[])?;
+    Ok(plan.forms[0].render(super::render::LICENSE))
+}
+
+const OPTED_IN: &str = "static SPEC: OperationSpec = admin::spec_over_a_signed_body(NAME, AUTH);";
+/// The unconditional opt-in, which a form route never renders: its body carries every parameter.
+const UNCONDITIONAL: &str = "admin::spec(NAME, AUTH, true)";
+const OPTED_OUT: &str = "static SPEC: OperationSpec = admin::spec(NAME, AUTH, false);";
 
 /// Positive — a listed form route is planned behind its form claim, as no declared operation and no
 /// staying route, and rendered from the inventory's handler, file and commit with the floor, the
@@ -74,10 +99,16 @@ fn a_form_route_is_planned_and_rendered_behind_its_form_claim() {
         "\"https://github.com/rustfs/rustfs/blob/c/rustfs/src/admin/handlers/sts.rs\"",
         "\"https://github.com/rustfs/rustfs/blob/c/rustfs/src/server/layer.rs\"",
         EVIDENCE,
+        "/// Handed the caller's secret (ADR-0022) only when a SigV4 header signature covers the form body,\n\
+         /// since the body carries every parameter: the handler compares the caller's secret.\nstatic SPEC",
+        OPTED_IN,
+        "    response_body: BodyKind::Buffered,\n    caller_secret: true,\n}",
     ] {
         assert!(source.contains(expected), "{expected}\n{source}");
     }
     assert!(!source.contains("OperationFloor::custom"), "the floor is not privileged");
+    assert!(!source.contains(OPTED_OUT), "{source}");
+    assert!(!source.contains(UNCONDITIONAL), "a form route's secret needs a signed body: {source}");
     assert_eq!(STEM, "sts_form_post");
 
     let recorded = recorded_plan();
@@ -87,7 +118,21 @@ fn a_form_route_is_planned_and_rendered_behind_its_form_claim() {
         .map(|formed| (formed.method.as_str(), formed.path.as_str(), formed.handler.as_str()))
         .collect();
     assert_eq!(formed, [("POST", "/", "AssumeRoleHandle")]);
-    assert_eq!(FORMS, STS_FORM);
+    assert_eq!(
+        FORMS
+            .iter()
+            .map(|ruling| (ruling.method, ruling.path, ruling.auth_detail))
+            .collect::<Vec<_>>(),
+        [("POST", "/", "StsFormPost")]
+    );
+    // The recorded STS endpoint opts in from the ruling, while its inventory row seals no body.
+    assert!(
+        recorded.forms[0]
+            .caller_secret
+            .as_deref()
+            .is_some_and(|why| why.contains("AssumeRole"))
+    );
+    assert!(recorded.forms[0].render(super::render::LICENSE).contains(OPTED_IN));
     assert!(
         !recorded
             .staying
@@ -132,8 +177,67 @@ fn n_a_form_route_the_inventory_records_differently_is_refused() {
     }
     let mut elsewhere = sts();
     elsewhere.path = "/sts".to_owned();
-    let refused = plan(&inventory(vec![elsewhere]), &[], &[], &[], &[("POST", "/sts", "StsFormPost")], &[])
+    let moved = [FormRuling {
+        path: "/sts",
+        ..STS_FORM[0]
+    }];
+    let refused = plan(&inventory(vec![elsewhere]), &[], &[], &[], &moved, &[])
         .err()
         .expect("only the STS endpoint");
     assert!(refused.contains("only RustFS's STS endpoint"), "{refused}");
+}
+
+/// Negative — a ruling without the opt-in renders an operation that is never handed the secret,
+/// and says nothing about one.
+#[test]
+fn n_a_form_route_ruled_without_the_opt_in_is_not_handed_the_secret() {
+    let source = rendered(NO_SECRET).expect("the form route plans");
+    assert!(source.contains(OPTED_OUT), "{source}");
+    assert!(!source.contains(OPTED_IN), "{source}");
+    assert!(!source.contains("Handed the caller's secret"), "{source}");
+    assert!(source.contains("    caller_secret: false,\n}"), "the record shows no opt-in: {source}");
+}
+
+/// Negative — only each documentation line's prefix is rewritten: a `//!` inside the reason
+/// survives as written, and no line of the rendered comment is module documentation.
+#[test]
+fn n_a_module_doc_marker_inside_the_reason_is_not_rewritten() {
+    let ruling = [FormRuling {
+        caller_secret: Some("the reason quotes `//!` once."),
+        ..STS_FORM[0]
+    }];
+    let source = rendered(&ruling).expect("the form route plans");
+    assert!(source.contains("`//!`"), "{source}");
+    assert!(!source.contains("`///`"), "{source}");
+}
+
+/// Negative — an opt-in that does not say why the handler needs the secret is refused, whether
+/// empty or blank.
+#[test]
+fn n_a_caller_secret_opt_in_without_a_reason_is_refused() {
+    for why in ["", " \n\t"] {
+        let ruling = [FormRuling {
+            caller_secret: Some(why),
+            ..STS_FORM[0]
+        }];
+        let refused = rendered(&ruling).expect_err("a reasonless opt-in");
+        assert!(refused.contains("must say why the handler needs the secret"), "{refused}");
+    }
+}
+
+/// Negative — the opt-in is the ruling's, not the inventory's: an inventory row that starts
+/// sealing a body with the secret still reopens the ruling, with or without the opt-in.
+#[test]
+fn n_a_sealed_form_row_is_refused_under_either_ruling() {
+    let mut sealed = sts();
+    sealed.caller_secret_body = "response-on-minio-alias".to_owned();
+    for rulings in [STS_FORM, NO_SECRET] {
+        let refused = plan(&inventory(vec![sealed.clone()]), &[], &[], &[], rulings, &[])
+            .err()
+            .expect("a sealed form row");
+        assert!(
+            refused.contains("no longer records a buffered request and response with no secret"),
+            "{refused}"
+        );
+    }
 }
