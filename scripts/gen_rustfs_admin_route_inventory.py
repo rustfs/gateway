@@ -53,7 +53,8 @@ BUFFERED_READS = (
     "read_plain_admin_body",
 )
 STREAMED_READS = ("drain_client_devnull", "drain_site_replication_devnull")
-STREAMED_RESPONSES = ("StreamingBlob", "ReaderStream", "StreamBody", "async_stream", r"\bBody::from_stream\(")
+STREAMED_RESPONSES = ("StreamingBlob", "ReaderStream", "StreamBody", "async_stream")
+STREAMED_RESPONSE_PATTERNS = (r"\bBody::from_stream\(",)  # regular expressions, unlike the literal markers
 
 
 class InventoryError(Exception):
@@ -441,7 +442,7 @@ def handler_type(source, name, relative):
 
 
 def handler_body(source, type_name, variant=None):
-    return variants.handler_body(source, type_name, variant, ADMIN, matching_close, split_args, fail)
+    return variants.handler_body(source, type_name, variant, ADMIN, matching_close, split_args, fail, SECRET_REQUEST + SECRET_RESPONSE)
 
 
 def body_facts(text, stream_types):
@@ -461,7 +462,7 @@ def body_facts(text, stream_types):
         request_body = "handed-on"
     else:
         request_body = "not-read"
-    streamed = any(re.search(marker, text) for marker in STREAMED_RESPONSES) or any(
+    streamed = any(marker in text for marker in STREAMED_RESPONSES) or any(re.search(p, text) for p in STREAMED_RESPONSE_PATTERNS) or any(
         re.search(rf"\b{name}\b", text) for name in stream_types
     )
     response_body = "streamed" if streamed else "buffered"

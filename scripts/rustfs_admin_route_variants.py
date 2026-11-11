@@ -110,7 +110,26 @@ def handler_type(source, name, relative, fail):
     fail(f"{relative}: handler value {name} has no static or const declaration")
 
 
-def handler_body(source, type_name, variant, admin, matching_close, split_args, fail):
+def shared_seals(source, called, admin, matching_close, seals):
+    """The caller-secret markers of the shared helpers in `handlers/mod.rs` a handler calls.
+
+    Only the seal is lent, never the helper's text: a shared helper's body reads are not the
+    handler's. Helpers inside the file's `#[cfg(test)]` module are not followed.
+    """
+    text = source.files.get((admin / "handlers/mod.rs").as_posix(), "")
+    test_module = re.search(r"#\[cfg\(test\)\]\s*(?:#\[[^\]]*\]\s*)*mod\s+\w+\s*\{", text)
+    text = text[:test_module.start()] if test_module else text
+    lent = []
+    for free in re.finditer(r"^(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?fn\s+([a-z_][a-z0-9_]*)\b", text, re.M):
+        brace = text.find("{", free.end())
+        if free.group(1) not in called or brace == -1:
+            continue
+        body = text[brace:matching_close(text, brace, "{", "}")]
+        lent.extend(marker for marker in seals if marker in body)
+    return lent
+
+
+def handler_body(source, type_name, variant, admin, matching_close, split_args, fail, seals=()):
     for relative, text in source.files.items():
         if not relative.startswith(admin.as_posix() + "/"):
             continue
@@ -142,6 +161,11 @@ def handler_body(source, type_name, variant, admin, matching_close, split_args, 
             if brace == -1:
                 continue
             helpers.append(text[free.start():matching_close(text, brace, "{", "}")])
+        # A free-function call, path-qualified or not, never a method call: `x.name(` is not `name(`.
+        reached = block + "\n".join(helpers)
+        lent = shared_seals(source, set(re.findall(r"(?<![.\w])(?:\w+::)*([a-z_][a-z0-9_]*)\(", reached)), admin,
+                            matching_close, seals)
+        helpers.extend(f"/* sealed by a shared helper: {marker} */" for marker in lent)
         stream_types = set(re.findall(rf"impl\s+{PATH}(?:Stream|ByteStream)\s+for\s+(\w+)", text))
         return relative, block + "\n".join(helpers), stream_types
     fail(f"no `impl Operation for {type_name}` under {admin}")
