@@ -32,6 +32,7 @@
 
 use core::fmt;
 
+use crate::bearer::QueryBearerClaim;
 use crate::scheme::{AuthScheme, SigLocation, SigService};
 
 /// Why a floor configuration was refused at build time.
@@ -180,6 +181,7 @@ pub struct OperationFloor {
     allowed_schemes: AllowedSchemes,
     /// Set by [`OperationFloor::require_sigv4_under_every_policy`].
     sigv4_required: bool,
+    bearer: Option<QueryBearerClaim>,
 }
 
 impl OperationFloor {
@@ -192,6 +194,7 @@ impl OperationFloor {
             privileged: false,
             allowed_schemes: AllowedSchemes::HEADER_ONLY,
             sigv4_required: false,
+            bearer: None,
         }
     }
 
@@ -209,6 +212,7 @@ impl OperationFloor {
                 anonymous: false,
             },
             sigv4_required: false,
+            bearer: None,
         }
     }
 
@@ -221,6 +225,7 @@ impl OperationFloor {
             privileged: true,
             allowed_schemes: AllowedSchemes::HEADER_ONLY,
             sigv4_required: false,
+            bearer: None,
         }
     }
 
@@ -281,6 +286,22 @@ impl OperationFloor {
     pub const fn allow_anonymous_after_listing_in_the_posture_report(mut self) -> Self {
         self.allowed_schemes.anonymous = true;
         self
+    }
+
+    /// Admits a request that presents no AWS credential surface by `claim`'s query bearer token,
+    /// which only the facade's explicitly installed [`crate::BearerTokenVerifier`] can turn into a
+    /// verdict (ADR-0042). Without that verifier every such request is refused; nothing here makes
+    /// the operation anonymous, and a signed request keeps its signature path.
+    #[must_use]
+    pub const fn with_query_bearer_claim(mut self, claim: QueryBearerClaim) -> Self {
+        self.bearer = Some(claim);
+        self
+    }
+
+    /// The query bearer claim this operation declared, when it declared one.
+    #[must_use]
+    pub const fn query_bearer_claim(&self) -> Option<QueryBearerClaim> {
+        self.bearer
     }
 
     /// The operation name, as the posture report prints it.
