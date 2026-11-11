@@ -50,8 +50,8 @@ the floor's per-operation opt-in lists them in the start-up posture report, thei
 own `rustfs:` label, and the authorizer is still asked, with no identity (ADR-0026 (f), ADR-0032).
 The other exception is the object lambda extension route (`GET /{bucket}/{key}?lambdaArn=…`),
 which RustFS's own end-to-end suite presigns: its floor (`admin::presigned_floor`) is not
-privileged, admits a header signature or a presigned URL whose signature covers `lambdaArn`, and
-refuses an anonymous request under every anonymous policy, so the start-up posture report lists it
+privileged, admits a SigV4 header signature or a presigned URL whose signature covers `lambdaArn`,
+and refuses an anonymous or SigV2 request under every policy, as RustFS's router does, so the start-up posture report lists it
 in `presigned_allowed_ops` and `s3:GetObject` is still asked (ADR-0024 (f), rustfs/gateway#1576).
 
 A `{bucket}` or `{warehouse}` template parameter is the bucket the operation is authorised on

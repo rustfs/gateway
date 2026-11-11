@@ -178,8 +178,8 @@ pub struct OperationFloor {
     service: SigService,
     privileged: bool,
     allowed_schemes: AllowedSchemes,
-    /// Set by [`OperationFloor::refuse_anonymous_under_every_policy`].
-    signature_required: bool,
+    /// Set by [`OperationFloor::require_sigv4_under_every_policy`].
+    sigv4_required: bool,
 }
 
 impl OperationFloor {
@@ -191,7 +191,7 @@ impl OperationFloor {
             service,
             privileged: false,
             allowed_schemes: AllowedSchemes::HEADER_ONLY,
-            signature_required: false,
+            sigv4_required: false,
         }
     }
 
@@ -208,7 +208,7 @@ impl OperationFloor {
                 post_policy: false,
                 anonymous: false,
             },
-            signature_required: false,
+            sigv4_required: false,
         }
     }
 
@@ -220,21 +220,23 @@ impl OperationFloor {
             service,
             privileged: true,
             allowed_schemes: AllowedSchemes::HEADER_ONLY,
-            signature_required: false,
+            sigv4_required: false,
         }
     }
 
-    /// Refuses a request that presented no credentials under every [`AnonymousPolicy`], the
-    /// service-level [`AnonymousPolicy::DelegateToAuthorizer`] included, and whatever the
-    /// operation's own allow-list says.
+    /// Admits SigV4 only: refuses a request that presented no credentials under every
+    /// [`AnonymousPolicy`], the service-level [`AnonymousPolicy::DelegateToAuthorizer`] included,
+    /// and a SigV2 request, header or presigned, under every [`crate::SigV2Policy`] — whatever
+    /// the operation's own allow-list says.
     ///
     /// Only narrows. It is for a non-privileged operation — one that admits a presigned URL, which
-    /// a privileged one cannot — whose owner refuses every unsigned request: without it, such an
-    /// operation becomes anonymously reachable the moment a deployment delegates anonymous
-    /// requests to its authorizer (rustfs/gateway#1576).
+    /// a privileged one cannot — whose owner requires a header or query SigV4 signature: without
+    /// it, such an operation becomes anonymously reachable the moment a deployment delegates
+    /// anonymous requests to its authorizer, and SigV2-reachable the moment it enables SigV2
+    /// compatibility (rustfs/gateway#1576).
     #[must_use]
-    pub const fn refuse_anonymous_under_every_policy(mut self) -> Self {
-        self.signature_required = true;
+    pub const fn require_sigv4_under_every_policy(mut self) -> Self {
+        self.sigv4_required = true;
         self
     }
 
@@ -311,22 +313,22 @@ impl OperationFloor {
         self.allowed_schemes.anonymous
     }
 
-    /// Whether this operation refuses a request that presented nothing under every
-    /// [`AnonymousPolicy`] ([`OperationFloor::refuse_anonymous_under_every_policy`]).
+    /// Whether this operation admits SigV4 only, refusing anonymous and SigV2 requests under every
+    /// policy ([`OperationFloor::require_sigv4_under_every_policy`]).
     #[must_use]
-    pub const fn refuses_anonymous_under_every_policy(&self) -> bool {
-        self.signature_required
+    pub const fn requires_sigv4_under_every_policy(&self) -> bool {
+        self.sigv4_required
     }
 
     /// Whether this operation admits a request that presented nothing, under `policy`.
     ///
     /// Its own opt-in always counts. Under [`AnonymousPolicy::DelegateToAuthorizer`], so does
     /// every non-privileged operation. A privileged one still has to opt in itself (ADR-0021).
-    /// An operation that refuses anonymous requests under every policy admits none, whatever
-    /// either of those says.
+    /// An operation that requires SigV4 under every policy admits none, whatever either of those
+    /// says.
     #[must_use]
     pub const fn admits_anonymous_under(&self, policy: AnonymousPolicy) -> bool {
-        !self.signature_required
+        !self.sigv4_required
             && (self.allowed_schemes.anonymous || (matches!(policy, AnonymousPolicy::DelegateToAuthorizer) && !self.privileged))
     }
 }
@@ -420,23 +422,47 @@ mod tests {
         );
     }
 
-    /// The presign-admitting floor that refuses anonymous requests (rustfs/gateway#1576).
+    /// The presign-admitting floor that admits SigV4 only (rustfs/gateway#1576).
     fn signed_only() -> OperationFloor {
-        OperationFloor::builtin_presigned("example:SignedOnly", SigService::S3).refuse_anonymous_under_every_policy()
+        OperationFloor::builtin_presigned("example:SignedOnly", SigService::S3).require_sigv4_under_every_policy()
     }
 
-    /// Negative — an operation that refuses anonymous requests under every policy admits none
-    /// when the deployment delegates anonymous requests to its authorizer, and none when it opted
-    /// in itself; the same floor without the refusal is the control that does admit one.
+    /// Negative — an operation that requires SigV4 refuses a SigV2 header signature and a SigV2
+    /// presigned URL on a floor that accepts both; the same floor without the refusal is the
+    /// control that admits them.
     #[test]
-    fn an_operation_refusing_anonymous_under_every_policy_admits_none() {
+    fn an_operation_requiring_sigv4_refuses_sigv2_under_every_policy() {
+        let sigv2 = SecurityFloor::new().enable_sigv2_presigned_compatibility();
+        let control = OperationFloor::builtin_presigned("example:SignedOnly", SigService::S3);
+        for slot in [SchemeSlot::Header, SchemeSlot::Presigned] {
+            assert_eq!(
+                sigv2.enforce_scheme_allowed(&signed_only(), slot, SigFamily::V2).err(),
+                Some(AuthError::AccessDenied),
+                "{slot:?}"
+            );
+            assert_eq!(
+                SecurityFloor::new()
+                    .enforce_scheme_allowed(&signed_only(), slot, SigFamily::V2)
+                    .err(),
+                Some(AuthError::AccessDenied),
+                "{slot:?}"
+            );
+            assert_eq!(sigv2.enforce_scheme_allowed(&control, slot, SigFamily::V2), Ok(()), "{slot:?}");
+        }
+    }
+
+    /// Negative — an operation that requires SigV4 admits no anonymous request when the
+    /// deployment delegates anonymous requests to its authorizer, and none when it opted in
+    /// itself; the same floor without the refusal is the control that does admit one.
+    #[test]
+    fn an_operation_requiring_sigv4_admits_no_anonymous_request() {
         let delegating = SecurityFloor::new().delegate_anonymous_to_authorizer_after_listing_in_the_posture_report();
         for floor in [SecurityFloor::new(), delegating.clone()] {
             for operation in [
                 signed_only(),
                 signed_only().allow_anonymous_after_listing_in_the_posture_report(),
             ] {
-                assert!(operation.refuses_anonymous_under_every_policy());
+                assert!(operation.requires_sigv4_under_every_policy());
                 assert!(!floor.admits_anonymous(&operation), "{floor:?}");
                 assert_eq!(
                     floor
@@ -448,15 +474,15 @@ mod tests {
             }
         }
         let control = OperationFloor::builtin_presigned("example:SignedOnly", SigService::S3);
-        assert!(!control.refuses_anonymous_under_every_policy());
+        assert!(!control.requires_sigv4_under_every_policy());
         assert!(delegating.admits_anonymous(&control));
         assert!(SecurityFloor::new().admits_anonymous(&control.allow_anonymous_after_listing_in_the_posture_report()));
     }
 
-    /// Negative — the refusal leaves a privileged operation privileged: still no presigned URL.
+    /// Negative — the narrowing leaves a privileged operation privileged: still no presigned URL.
     #[test]
-    fn refusing_anonymous_does_not_admit_a_presigned_url_to_a_privileged_operation() {
-        let operation = OperationFloor::custom("example:Admin", SigService::S3).refuse_anonymous_under_every_policy();
+    fn requiring_sigv4_does_not_admit_a_presigned_url_to_a_privileged_operation() {
+        let operation = OperationFloor::custom("example:Admin", SigService::S3).require_sigv4_under_every_policy();
         assert!(operation.privileged());
         assert_eq!(
             SecurityFloor::new()
@@ -467,10 +493,10 @@ mod tests {
         );
     }
 
-    /// Positive — the refusal narrows only the anonymous slot: header signatures and presigned
-    /// URLs are admitted as before, on the default floor and on the delegating one.
+    /// Positive — the narrowing leaves SigV4 alone: header signatures and presigned URLs are
+    /// admitted as before, on the default floor and on the delegating one.
     #[test]
-    fn refusing_anonymous_keeps_header_and_presigned_admitted() {
+    fn requiring_sigv4_keeps_sigv4_header_and_presigned_admitted() {
         let delegating = SecurityFloor::new().delegate_anonymous_to_authorizer_after_listing_in_the_posture_report();
         for floor in [SecurityFloor::new(), delegating] {
             assert!(floor.admits_presigned(&signed_only()));

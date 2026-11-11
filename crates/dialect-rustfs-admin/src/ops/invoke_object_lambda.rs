@@ -29,11 +29,11 @@
 //! `x-id` included: a `GET` of an object whose query names `lambdaArn`, with any value, whatever
 //! else the query names. It requires a signature and then has the handler check `s3:GetObject`. So
 //! the row sits ahead of every standard `GET` row of its target and declares each of those
-//! overlaps, the floor admits a header signature or a presigned URL and never an anonymous request,
-//! the authorizer is asked `s3:GetObject` on the object the path names before the handler runs, and
-//! the gateway reads no body and answers what the handler answers. Under legacy RustFS's selection
-//! the same discriminator names this operation (`rustfs-gateway-core`'s `legacy_rustfs`), so both
-//! selections reach it.
+//! overlaps, the floor admits a SigV4 header signature or presigned URL and never an anonymous or
+//! SigV2 request, the authorizer is asked `s3:GetObject` on the object the path names before the
+//! handler runs, and the gateway reads no body and answers what the handler answers. Under legacy
+//! RustFS's selection the same discriminator names this operation (`rustfs-gateway-core`'s
+//! `legacy_rustfs`), so both selections reach it.
 
 use rustfs_gateway_core::codec::{CodecError, EncodedResponse, MetaView, OperationCodec, RequestBody, RequestBodyMode};
 use rustfs_gateway_core::dialect::{DialectRoute, OverlayRow};
@@ -148,7 +148,7 @@ static SPEC: OperationSpec = admin::spec(NAME, AUTH, false);
 /// admitting a presigned URL (rustfs/gateway#1576).
 pub const PRESIGNED_EVIDENCE: &str = "https://github.com/rustfs/rustfs/blob/443e8afee194fe38b32d62a9289a99c1f703715c/crates/e2e_test/src/object_lambda_test.rs#L608-L636";
 
-/// Header-signed or presigned, never anonymous: RustFS answers an unsigned request `403 AccessDenied`
+/// SigV4 header-signed or presigned, never anonymous, never SigV2: RustFS answers both `403 AccessDenied`
 /// here, and a RustFS client presigns it with `lambdaArn` inside the signed query ([`PRESIGNED_EVIDENCE`]).
 /// The floor is not privileged, so it admits that URL, and the authorizer still decides the request.
 static FLOOR: OperationFloor = admin::presigned_floor(NAME);

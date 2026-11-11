@@ -528,6 +528,7 @@ fn every_extension_operation_declares_its_floor_and_its_inventory_action() {
         assert!(!SecurityFloor::new().admits_anonymous(floor), "{record_name}");
         assert_eq!(floor.allowed_schemes().allows_presigned(), presigned, "{record_name}");
         assert_eq!(SecurityFloor::new().admits_presigned(floor), presigned, "{record_name}");
+        assert_eq!(floor.requires_sigv4_under_every_policy(), presigned, "{record_name}");
         assert_eq!(floor.service(), SigService::S3, "{record_name}");
         let auth = O::spec().auth.expect("an action");
         assert_eq!((auth.render(), auth.resource), (action.to_owned(), resource), "{record_name}");

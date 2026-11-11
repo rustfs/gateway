@@ -318,13 +318,13 @@ impl Extended {
                     .to_owned(),
             ),
             Some(evidence) => (
-                "the floor admits a header signature or a presigned URL and never an anonymous request",
+                "the floor admits a SigV4 header signature or presigned URL and never an anonymous or SigV2 request",
                 format!(
                     "/// The evidence that a RustFS client presigns this route, which ADR-0024 (f) makes the condition for\n\
                      /// admitting a presigned URL (rustfs/gateway#1576).\n\
                      pub const PRESIGNED_EVIDENCE: &str = {evidence:?};\n\
                      \n\
-                     /// Header-signed or presigned, never anonymous: RustFS answers an unsigned request `403 AccessDenied`\n\
+                     /// SigV4 header-signed or presigned, never anonymous, never SigV2: RustFS answers both `403 AccessDenied`\n\
                      /// here, and a RustFS client presigns it with `{key}` inside the signed query ([`PRESIGNED_EVIDENCE`]).\n\
                      /// The floor is not privileged, so it admits that URL, and the authorizer still decides the request.\n\
                      static FLOOR: OperationFloor = admin::presigned_floor(NAME);\n"

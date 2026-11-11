@@ -34,7 +34,8 @@ use rustfs_gateway::SecurityFloor;
 use rustfs_gateway_dialect_rustfs_admin::{EXTENSION_ROUTES, ExtensionRouteRecord, ROUTES};
 use rustfs_gateway_http::RawHost;
 use rustfs_gateway_sig::{
-    AmzDate, PayloadMode, RequestNow, SigService, SigV4Signer, SigningCredentials, SigningRequest, SigningScope,
+    AmzDate, PayloadMode, RawQuery, RequestNow, SigService, SigV2Mode, SigV2Signer, SigV2StringToSignSpec, SigV4Signer,
+    SigningCredentials, SigningRequest, SigningScope,
 };
 
 use super::{Asked, BUCKET, Exchange, REGION, assemble, assemble_on, in_lanes, in_lanes_on, rustfs_profile_floor, wire};
@@ -386,6 +387,30 @@ fn n_an_expired_presigned_object_lambda_request_is_refused_without_asking() {
         // Signed twice its lifetime ago.
         let signed_at = RequestNow::capture().unix_seconds() - 1_200;
         refused_without_asking(&assembled.exchange(presigned_lambda_at(signed_at)), at);
+    }
+}
+
+/// Negative — a SigV2 presigned object lambda URL is `403` before the authorizer is asked, on the
+/// RustFS profile's floor too, which accepts SigV2 presigned URLs on standard operations: RustFS's
+/// router requires header or query SigV4 on every extension route.
+#[test]
+fn n_a_sigv2_presigned_object_lambda_request_is_refused_without_asking() {
+    let path = format!("/{BUCKET}/{KEY}");
+    let expires = RequestNow::capture().unix_seconds() + i64::try_from(LAMBDA_EXPIRES).expect("small");
+    let query = format!("lambdaArn={LAMBDA_ARN}&AWSAccessKeyId={ACCESS_KEY}&Expires={expires}");
+    let mut headers = http::HeaderMap::new();
+    headers.insert(http::header::HOST, HeaderValue::from_str(PATH_HOST).expect("a host"));
+    let raw = RawQuery::new(&query);
+    let spec = SigV2StringToSignSpec::new(SigV2Mode::PresignedUrl, &Method::GET, &path, &raw, &headers, None);
+    let signature = SigV2Signer::new(ACCESS_KEY, SECRET_KEY.as_bytes())
+        .expect("a signer")
+        .presigned_signature(&spec)
+        .expect("a signable request");
+    let escaped = signature.replace('+', "%2B").replace('/', "%2F").replace('=', "%3D");
+    for (at, floor) in lambda_floors() {
+        let assembled = assemble_on(floor, |_, _| true);
+        let request = unsigned_at("GET", &format!("{path}?{query}&Signature={escaped}"));
+        refused_without_asking(&assembled.exchange(request), at);
     }
 }
 
