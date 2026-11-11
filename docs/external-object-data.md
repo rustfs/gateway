@@ -80,8 +80,11 @@ control response length to the envelope size.
 
 ## Cancellation and resources
 
-Authorized control queries share the operation’s handler deadline, client cancellation signal
-and cleanup grace period.
+Authorized control queries use the operation's handler deadline, client cancellation signal and
+cleanup grace period. A host with its own control timeout can pass that duration through
+`ServiceConfig::with_handler_deadlines` on the service it uses for control requests. Data
+requests can keep their existing deadline. An explicit client abort also ends a pending query
+when the handler class uses `NO_DEADLINE`.
 
 Preparation observes handler cancellation. Output observes explicit request-abort signals; a
 closed observer carrying `false` has the same meaning as on the ordinary request path. Dropping
