@@ -177,8 +177,8 @@ fn n_an_anonymous_form_action_hands_its_handler_no_secret() {
         let (status, answer, held) = exchange(&sent, true, false);
         assert_eq!(status, 200, "{answer}");
         let held = held.expect("the STS handler ran");
+        assert_eq!(held.secret, None, "{body:?}: no secret, not even an empty one");
         assert!(!held.principal, "{body:?}");
-        assert_eq!(held.secret, None, "{body:?}");
     }
     let (status, _, held) = exchange(&Sent::new(Signing::Anonymous), true, false);
     assert_eq!(status, 403);
