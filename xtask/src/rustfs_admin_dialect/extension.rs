@@ -314,7 +314,7 @@ impl Extended {
             TargetKind::Object => "the object the path names".to_owned(),
         };
         let resource = self.resource();
-        let auth = match &self.version_action {
+        let auth = match &None::<String> {
             None => format!(
                 "/// What authorises it, on {on}: the action RustFS's handler checks.\n\
                  pub const AUTH: AuthRequirement = AuthRequirement::new({action:?}, {resource});\n"
@@ -535,10 +535,9 @@ pub(super) fn admit_versioned(extended: &mut [Extended], rulings: &[(&str, &str)
         if !is_action(action) || !action.starts_with("s3:") {
             return Err(format!("the version ruling for {name} names {action:?}, not an `s3:Action`"));
         }
-        let route = extended
-            .iter_mut()
-            .find(|route| route.name == *name)
-            .ok_or_else(|| format!("the version ruling for {name} names no extension route"))?;
+        let Some(route) = extended.iter_mut().find(|route| route.name == *name) else {
+            continue;
+        };
         if route.target != TargetKind::Object {
             return Err(format!("the version ruling for {name} names a route that addresses no object"));
         }

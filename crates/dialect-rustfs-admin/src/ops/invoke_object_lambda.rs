@@ -157,7 +157,7 @@ pub const PRESIGNED_EVIDENCE: &str = "https://github.com/rustfs/rustfs/blob/443e
 /// SigV4 header-signed or presigned, never anonymous, never SigV2: RustFS answers both `403 AccessDenied`
 /// here, and a RustFS client presigns it with `lambdaArn` inside the signed query ([`PRESIGNED_EVIDENCE`]).
 /// The floor is not privileged, so it admits that URL, and the authorizer still decides the request.
-static FLOOR: OperationFloor = admin::floor(NAME);
+static FLOOR: OperationFloor = admin::presigned_floor(NAME);
 
 impl Operation for InvokeObjectLambda {
     const NAME: &'static str = NAME;
