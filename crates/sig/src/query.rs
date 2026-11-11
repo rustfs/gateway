@@ -168,6 +168,16 @@ impl fmt::Debug for RawQuery<'_> {
 }
 
 impl<'q> RawQuery<'q> {
+    /// Whether any parameter's name satisfies `is`. A name is judged as its percent-decoded
+    /// bytes, or as its wire bytes when its escape does not decode, so a broken spelling cannot
+    /// hide a parameter.
+    pub(crate) fn any_name(&self, is: impl Fn(&[u8]) -> bool) -> bool {
+        self.as_str().split('&').any(|component| {
+            let raw_key = component.split_once('=').map_or(component, |(key, _)| key);
+            percent_decode(raw_key).map_or_else(|_| is(raw_key.as_bytes()), |name| is(&name))
+        })
+    }
+
     /// Wraps a raw query string. Pass the value without the leading `?`; `None` becomes empty.
     #[must_use]
     pub const fn new(raw: &'q str) -> Self {

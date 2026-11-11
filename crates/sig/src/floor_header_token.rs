@@ -43,17 +43,11 @@ const PRESIGNED_PARAMETERS: [&str; 7] = [
 ];
 
 /// Whether the query names a SigV4 presigned parameter, ignoring ASCII case, on the decoded name.
-/// A name whose escape does not decode is compared as its wire bytes, so a broken spelling
-/// cannot hide one.
 fn names_a_presigned_parameter(view: &WireView<'_>) -> bool {
-    let is_one = |name: &[u8]| {
+    view.query.any_name(|name| {
         PRESIGNED_PARAMETERS
             .iter()
             .any(|known| name.eq_ignore_ascii_case(known.as_bytes()))
-    };
-    view.query.as_str().split('&').any(|component| {
-        let raw_key = component.split_once('=').map_or(component, |(key, _)| key);
-        percent_decode(raw_key).map_or_else(|_| is_one(raw_key.as_bytes()), |key| is_one(&key))
     })
 }
 
