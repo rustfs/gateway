@@ -60,10 +60,10 @@
 //! as anonymous; the guarded provider counts the fault. By default the client gets the closed
 //! `403` of every other credential failure. Under
 //! [`SigV4Authenticator::answer_credential_store_faults_as_unavailable`] (ADR-0050) it gets
-//! [`Unavailable`], a `500`, where an unknown key is answered: after the placeholder derivation
-//! and comparison — except on the STS body signature, where an unknown key, and so a fault, is
-//! answered before the body is read and so earlier than a wrong signature. A fault confined to
-//! one stored record then tells "exists, unreadable" from "unknown key"; hence opt-in.
+//! [`Unavailable`], a `500`, where an unknown key is answered: after the derivation and comparison,
+//! except for a header signature scoped to `sts` without `x-amz-content-sha256` under the legacy
+//! signing services, answered before its body is read — earlier than a wrong signature. Opt-in:
+//! it can reveal a record an unknown key's answer hides (ADR-0050 lists how).
 
 use std::sync::Arc;
 

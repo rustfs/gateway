@@ -491,18 +491,23 @@ impl SigV4Authenticator {
     /// unknown key gets, byte for byte. Only a fault changes its answer: an unknown key, a session
     /// or disabled credential and a wrong signature keep theirs. Timing parity is kept — the fault
     /// still derives from the placeholder secret and completes the comparison, and is answered
-    /// where an unknown key is; on the STS body signature that is before the body read, so there
-    /// a fault, like an unknown key, answers earlier than a wrong signature (ADR-0050, a stated
-    /// deviation) — and the `500` carries a constant sentence, no request text, no
-    /// access key and no provider detail. The fault is still counted and never cached, and never
+    /// where an unknown key is. The one exception is a stated deviation (ADR-0050): under
+    /// [`accept_legacy_rustfs_signing_services`](Self::accept_legacy_rustfs_signing_services), any
+    /// header signature whose scope names `sts` and which omits `x-amz-content-sha256`, on any
+    /// route, refuses an unknown key — and so answers a fault — before its body is read, earlier
+    /// than a wrong signature; a client selects that path by its scope. The `500` carries a
+    /// constant sentence, no request text, no access key and no provider detail, and closes the
+    /// connection while a body is owed, as an authentication failure does. The fault is still counted and never cached, and never
     /// becomes an anonymous request. Every authentication form this authenticator serves follows
-    /// the switch: SigV4 header, presigned, streaming and POST policy, SigV2, and the STS body
-    /// signature of [`accept_legacy_rustfs_signing_services`](Self::accept_legacy_rustfs_signing_services).
+    /// the switch: SigV4 header, presigned, streaming and POST policy, SigV2, and the STS-scoped
+    /// header signature above.
     ///
-    /// The trade-off, and why it is opt-in: a store-wide outage reveals nothing about any key, but a
-    /// fault confined to one stored record — one unreadable or invalid entry — answers `500` for
-    /// that key and `403` for an unknown one, so a caller can tell "this key exists and its record
-    /// is unreadable" from "this key is not on record".
+    /// The trade-off, and why it is opt-in (ADR-0050 has the whole list): a fault confined to a
+    /// disabled, expired or tokenless-session record answers `500` and so exposes a record those
+    /// cases otherwise hide as an unknown key; a store slower for existing records than for misses
+    /// becomes a `500`/`403` existence oracle at the guard's deadline; during a full outage a
+    /// negatively cached key still answers `403`. A retryable `500` also makes SDKs retry against a
+    /// failing store, bounded only by the governor.
     #[must_use]
     pub fn answer_credential_store_faults_as_unavailable(mut self) -> Self {
         self.store_faults_unavailable = true;

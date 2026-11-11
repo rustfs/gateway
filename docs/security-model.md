@@ -434,9 +434,15 @@ framework's half:
   failure. It is never treated as an anonymous request. A host may opt in to answering it
   `500 InternalError` instead, which SDKs retry
   (`SigV4Authenticator::answer_credential_store_faults_as_unavailable`, ADR-0050; the RustFS
-  profile turns it on). The answer is still given after the placeholder derivation and comparison,
-  and carries no request or provider text; but a fault confined to one stored record then tells
-  that key apart from an unknown one, which is why it is opt-in.
+  profile turns it on). The answer is given where an unknown key is answered — after the placeholder
+  derivation and comparison, except on the early lookup refusal of a header signature scoped to
+  `sts` without `x-amz-content-sha256` under `accept_legacy_rustfs_signing_services`, where both
+  answer before the body is read. It carries no request or provider text, and closes the connection
+  while a body is owed, as an authentication failure does. It is opt-in because it reveals: a fault
+  confined to a disabled, expired or tokenless-session record exposes a record otherwise hidden as
+  an unknown key; a store slower for existing records than for misses becomes a `500`/`403`
+  existence oracle at the guard's deadline; and during a full outage a negatively cached key still
+  answers `403`. Retries against a failing store are bounded only by the governor (ADR-0050).
 - **An unknown key costs what a known one costs.** The unknown-key path derives from
   `timing::placeholder_secret`, runs the full four-step chain and completes the comparison before
   answering, so the two are not separable by latency (`timing::SIDE_CHANNELS`, row T1). On the
