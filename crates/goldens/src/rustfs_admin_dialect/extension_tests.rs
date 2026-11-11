@@ -89,7 +89,7 @@ fn rewritten(mut request: Request<Bytes>, edit: impl FnOnce(String) -> String) -
 }
 
 /// The path an extension record's target addresses.
-fn path(record: &ExtensionRouteRecord) -> String {
+pub(super) fn path(record: &ExtensionRouteRecord) -> String {
     match record.target {
         "service" => "/".to_owned(),
         "bucket" => format!("/{BUCKET}"),
@@ -115,7 +115,7 @@ pub(super) fn query(record: &ExtensionRouteRecord) -> String {
 
 /// The admin router's eight records: every extension record but the metadata route's two
 /// listings, whose floor is the standard listing floor (`metadata_listing_tests`).
-fn admin_router_records() -> Vec<&'static ExtensionRouteRecord> {
+pub(super) fn admin_router_records() -> Vec<&'static ExtensionRouteRecord> {
     let records: Vec<&ExtensionRouteRecord> = EXTENSION_ROUTES
         .iter()
         .filter(|record| !LISTINGS.contains(&record.operation))

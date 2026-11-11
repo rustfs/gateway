@@ -221,6 +221,7 @@ struct Declared {
     privileged: bool,
     anonymous: bool,
     presigned: bool,
+    sigv4: bool,
     secret: bool,
     deadline: Option<HandlerDeadlineClass>,
 }
@@ -246,6 +247,7 @@ impl OperationFold for Collect {
             privileged: floor.privileged(),
             anonymous: floor.allows_anonymous(),
             presigned: floor.allowed_schemes().allows_presigned(),
+            sigv4: floor.requires_sigv4_under_every_policy(),
             secret: spec.receives_caller_secret(),
             deadline: spec.deadline_class(),
         });

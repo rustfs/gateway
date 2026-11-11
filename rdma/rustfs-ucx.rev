@@ -1,0 +1,5 @@
+# Private source of the opt-in RDMA build (rustfs/gateway#1591). scripts/build-rdma.sh
+# refuses to build unless vendor/rustfs-ucx is checked out at exactly this commit.
+url = git@github.com:rustfs/rustfs-ucx.git
+branch = s3-rdma
+rev = fa81f604902a510801b882322b7abb9539a005d4

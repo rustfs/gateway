@@ -24,6 +24,10 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use rustfs_gateway_core::codec::RequestBodyMode;
 use rustfs_gateway_core::dialect::BucketParam;
+use rustfs_gateway_core::op::Operation;
+use rustfs_gateway_dialect_rustfs_admin::ops::admin_fallback::AdminFallback;
+use rustfs_gateway_dialect_rustfs_admin::ops::admin_v4_fallback::AdminV4Fallback;
+use rustfs_gateway_dialect_rustfs_admin::ops::get_v3_object_zip_downloads_by_id_zip::GetV3ObjectZipDownloadsByIdZip as Download;
 use rustfs_gateway_dialect_rustfs_admin::{
     AdminOperation, BodyKind, CLAIMS, FORM_ROUTES, OperationFold, PENDING, ROUTES, RouteRecord, STAYING, TABLE_CATALOG_PREFIXES,
     fold_every_operation,
@@ -393,4 +397,44 @@ fn every_handler_retained_check_is_recorded() {
             assert_eq!(mode(record.operation), Some(RequestBodyMode::Full), "{}", record.operation);
         }
     }
+}
+
+/// Positive and negative — every operation the fold declares requires SigV4 under every policy
+/// except the four OIDC bootstrap operations, which admit an anonymous request, and the zip
+/// download, whose bearer claim the requirement would refuse (a recorded difference,
+/// rustfs/gateway#1592); and so do both admin fallbacks, which the fold does not declare. A new
+/// admin operation therefore cannot be added without the requirement unless it joins one of
+/// those two named exemptions (rustfs/gateway#1582).
+#[test]
+fn every_admin_operation_but_the_named_exemptions_requires_sigv4() {
+    let declared = declared();
+    let mut exempt: Vec<&str> = declared.iter().filter(|op| !op.sigv4).map(|op| op.name).collect();
+    let mut expected: Vec<&str> = declared.iter().filter(|op| op.anonymous).map(|op| op.name).collect();
+    assert_eq!(expected.len(), 4, "the four OIDC bootstrap operations: {expected:?}");
+    expected.push("rustfs:GetV3ObjectZipDownloadsByIdZip");
+    exempt.sort_unstable();
+    expected.sort_unstable();
+    assert_eq!(exempt, expected, "only the OIDC bootstrap operations and the zip download are exempt");
+    assert!(AdminFallback::floor().requires_sigv4_under_every_policy());
+    assert!(AdminV4Fallback::floor().requires_sigv4_under_every_policy());
+}
+
+/// Positive — the zip download keeps its bearer claim (ADR-0042). The SigV4 requirement every
+/// other admin floor carries would refuse that claim's token, so the download's floor has none.
+#[test]
+fn the_zip_download_keeps_its_bearer_claim() {
+    assert!(Download::floor().query_bearer_claim().is_some());
+}
+
+/// A record, not a requirement: the zip download's floor does not require SigV4, so it admits a
+/// SigV2 header signature without a token, which legacy RustFS refuses in its access check. The
+/// request is refused later, `403` before the authorizer when a bearer verifier is installed and
+/// by RustFS's handler when none is. This is a known difference tracked on rustfs/gateway#1592,
+/// not a property to preserve: a fix there is expected to change this test.
+#[test]
+fn the_zip_download_sigv2_difference_is_recorded() {
+    assert!(
+        !Download::floor().requires_sigv4_under_every_policy(),
+        "rustfs/gateway#1592 is closed by a SigV4 requirement on the download: update this record"
+    );
 }
