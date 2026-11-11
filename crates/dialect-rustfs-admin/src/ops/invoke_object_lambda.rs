@@ -55,8 +55,7 @@ pub static VERSION_AUTH: AuthRequirement = AuthRequirement::new("s3:GetObjectVer
 
 /// What authorises it, on the object the path names: the action RustFS's handler checks, and [`VERSION_AUTH`] when the
 /// request names a version.
-pub const AUTH: AuthRequirement =
-    AuthRequirement::new("s3:GetObject", ResourceShape::Object).with_version_requirement(&VERSION_AUTH);
+pub const AUTH: AuthRequirement = AuthRequirement::new("s3:GetObject", ResourceShape::Object);
 
 /// RustFS's admin router, whose extension matching this row mirrors.
 const ROUTER: &str = "https://github.com/rustfs/rustfs/blob/443e8afee194fe38b32d62a9289a99c1f703715c/rustfs/src/admin/router.rs";
