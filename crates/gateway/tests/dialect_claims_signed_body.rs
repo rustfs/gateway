@@ -32,11 +32,12 @@ use std::sync::{Arc, Mutex};
 
 use bytes::Bytes;
 use rustfs_gateway::sig::{
-    AmzDate, PayloadMode, SigService, SigV4Signer, SigningCredentials, SigningRequest, SigningScope, TrailerSet,
+    AmzDate, PayloadMode, SecurityFloor, SigService, SigV4Signer, SigningCredentials, SigningRequest, SigningScope, TrailerSet,
 };
 use rustfs_gateway::{
-    Authenticator, Credentials, Handler, HandlerResult, RegionSet, Req, RequestContextView, Resp, S3Service, ServiceBuilder,
-    SessionBinding, SigV4Authenticator, StaticCredentials, VirtualHostStyle, allow_when,
+    Authenticator, Credentials, Handler, HandlerResult, HeaderTokenClaim, HeaderTokenRefused, HeaderTokenVerifier, Identity,
+    RegionSet, Req, RequestContextView, RequestNow, Resp, S3Service, ServiceBuilder, SessionBinding, SigV4Authenticator,
+    StaticCredentials, VirtualHostStyle, allow_when,
 };
 use rustfs_gateway_core::codec::{CodecError, EncodedResponse, MetaView, OperationCodec, RequestBody, RequestBodyMode};
 use rustfs_gateway_core::{
@@ -56,8 +57,11 @@ const HOST: &str = "s3.example.com";
 const EVIDENCE: &[&str] = &["https://github.com/rustfs/gateway/issues/1587"];
 const FORM: &str = "example:Form";
 const PLAIN: &str = "example:Plain";
+const STS_FORM: &str = "example:StsForm";
 const FORM_PATH: &str = "/example/admin/v1/form";
 const PLAIN_PATH: &str = "/example/admin/v1/plain";
+const STS_FORM_PATH: &str = "/example/admin/v1/sts-form";
+const TOKEN_HEADER: &str = "x-auth-token";
 const BODY: &[u8] = b"Action=AssumeRole&DurationSeconds=900";
 /// The fixture body of the unsigned trailer form, and its base64 CRC32.
 const OBJECT: &[u8] = b"hello world";
@@ -66,10 +70,11 @@ const SESSION_TOKEN: &str = "FwoGZXIvYXdzEXAMPLE-signed-body-session-token";
 
 // ── the operations ───────────────────────────────────────────────────────────────────────────
 
-/// `0`: the signed-body opt-in; `1`: an operation that does not opt in at all.
+/// `0`: the signed-body opt-in; `1`: an operation that does not opt in at all; `2`: the signed-body
+/// opt-in on an STS-service floor, as `rustfs:StsFormPost` declares.
 struct Fixture<const N: usize>;
 
-const NAMES: [&str; 2] = [FORM, PLAIN];
+const NAMES: [&str; 3] = [FORM, PLAIN, STS_FORM];
 
 const fn spec(name: &'static str) -> OperationSpec {
     OperationSpec::builder(name, 200, None)
@@ -78,13 +83,15 @@ const fn spec(name: &'static str) -> OperationSpec {
         .auth(AuthRequirement::new("example:Write", ResourceShape::Service))
 }
 
-static SPECS: [OperationSpec; 2] = [
+static SPECS: [OperationSpec; 3] = [
     spec(FORM).hand_caller_secret_to_handler_over_a_signed_body().build(),
     spec(PLAIN).build(),
+    spec(STS_FORM).hand_caller_secret_to_handler_over_a_signed_body().build(),
 ];
-static FLOORS: [OperationFloor; 2] = [
+static FLOORS: [OperationFloor; 3] = [
     OperationFloor::builtin_presigned(FORM, SigService::S3),
     OperationFloor::builtin_presigned(PLAIN, SigService::S3),
+    OperationFloor::builtin(STS_FORM, SigService::Sts),
 ];
 
 impl<const N: usize> Operation for Fixture<N> {
@@ -129,6 +136,10 @@ static PLAIN_ROWS: &[ClaimedRow] = &[ClaimedRow {
     template: PLAIN_PATH,
     selector: PUT,
 }];
+static STS_FORM_ROWS: &[ClaimedRow] = &[ClaimedRow {
+    template: STS_FORM_PATH,
+    selector: PUT,
+}];
 
 const fn row(name: &'static str, precedence: u16, selector: &'static str) -> OverlayRow {
     OverlayRow {
@@ -149,6 +160,7 @@ static OVERLAY: DialectOverlay = DialectOverlay {
     operations: &[
         row(FORM, 10, "PathTemplate(\"/example/admin/v1/form\") ∧ Method(PUT)"),
         row(PLAIN, 11, "PathTemplate(\"/example/admin/v1/plain\") ∧ Method(PUT)"),
+        row(STS_FORM, 12, "PathTemplate(\"/example/admin/v1/sts-form\") ∧ Method(PUT)"),
     ],
     claims: &[PathClaim {
         prefix: "/example/admin",
@@ -167,6 +179,7 @@ fn dialect() -> Dialect {
     Dialect::assemble(&OVERLAY)
         .declare_claimed::<Fixture<0>>(claimed(10, FORM_ROWS))
         .declare_claimed::<Fixture<1>>(claimed(11, PLAIN_ROWS))
+        .declare_claimed::<Fixture<2>>(claimed(12, STS_FORM_ROWS))
         .build()
         .expect("the record and the declarations agree")
 }
@@ -250,7 +263,8 @@ fn service(recorder: &Arc<Recorder>, authenticator: impl Authenticator, every_op
         )
         .dialect(&dialect())
         .register::<Fixture<0>, _>(Arc::clone(recorder))
-        .register::<Fixture<1>, _>(Arc::clone(recorder));
+        .register::<Fixture<1>, _>(Arc::clone(recorder))
+        .register::<Fixture<2>, _>(Arc::clone(recorder));
     let builder = if every_operation {
         builder.hand_caller_secret_to_every_operation_after_listing_in_the_posture_report()
     } else {
@@ -494,4 +508,79 @@ async fn n_a_session_credential_without_its_token_is_refused_before_the_handler(
     let (status, answer, seen) = run_with(sigv4_session(), false, request).await;
     assert_eq!(status, http::StatusCode::FORBIDDEN, "{answer}");
     assert!(seen.is_empty(), "the handler never ran: {seen:?}");
+}
+
+/// What the fixture host's outer token layer leaves in a request once it validated the token.
+#[derive(Clone)]
+struct Established(&'static str);
+
+/// The fixture host: it names the principal its outer layer established.
+struct TokenHost;
+
+impl HeaderTokenVerifier for TokenHost {
+    type Established = Established;
+
+    fn identity(&self, established: &Established, _now: RequestNow) -> Result<Identity, HeaderTokenRefused> {
+        Identity::new(established.0).map_err(|_| HeaderTokenRefused)
+    }
+}
+
+/// `PUT path` whose only credential is the claimed header token, with its principal established.
+async fn by_header_token(path: &str) -> (http::StatusCode, String, Vec<Held>) {
+    let claim = HeaderTokenClaim::new(TOKEN_HEADER).expect("a legal claim");
+    let recorder = Arc::new(Recorder::default());
+    let service = ServiceBuilder::new()
+        .authenticator(sigv4(SECRET, true))
+        .authorizer(allow_when(|_| true))
+        .security_floor(SecurityFloor::new().with_header_token_claim(claim))
+        .host_verified_header_token(claim, TokenHost)
+        .host_resolver(VirtualHostStyle::new([HOST]).expect("a well-formed base domain"))
+        .clock_with_skew_ack(
+            support::fixed_clock(),
+            rustfs_gateway::ClockSkewAck::i_understand_a_skewed_clock_can_disable_signature_expiry(),
+        )
+        .dialect(&dialect())
+        .register::<Fixture<0>, _>(Arc::clone(&recorder))
+        .register::<Fixture<1>, _>(Arc::clone(&recorder))
+        .register::<Fixture<2>, _>(Arc::clone(&recorder))
+        .hand_caller_secret_to_every_operation_after_listing_in_the_posture_report()
+        .build()
+        .expect("a complete assembly");
+    let mut request = http::Request::builder()
+        .method(http::Method::PUT)
+        .uri(path)
+        .header(http::header::HOST, HOST)
+        .header(http::header::CONTENT_LENGTH, BODY.len())
+        .header(TOKEN_HEADER, "header-token-fixture")
+        .body(Bytes::from_static(BODY))
+        .expect("a request");
+    request.extensions_mut().insert(Established("TOKENUSER"));
+    let (status, body) = support::exchange(&service, request).await;
+    (status, body, recorder.held())
+}
+
+/// Negative — a header-token verdict looked up no secret and is no `RequestPrincipal`, so a
+/// header-token request reaches a signed-body operation without one, even in the every-operation
+/// scope; an
+/// STS-service floor, as `rustfs:StsFormPost`'s is, refuses the scheme before any handler
+/// (ADR-0054).
+#[tokio::test]
+async fn n_a_header_token_request_holds_no_secret_and_the_sts_floor_refuses_it() {
+    let (status, answer, seen) = by_header_token(FORM_PATH).await;
+    assert_eq!(status, http::StatusCode::OK, "{answer}");
+    // A header-token verdict is no `RequestPrincipal`, so no principal could carry a secret either.
+    assert_eq!(
+        seen,
+        [Held {
+            operation: FORM.to_owned(),
+            principal: false,
+            secret: false,
+            body: BODY.to_vec(),
+        }],
+        "a header token over the signed-body operation"
+    );
+
+    let (status, answer, seen) = by_header_token(STS_FORM_PATH).await;
+    assert_eq!(status, http::StatusCode::FORBIDDEN, "{answer}");
+    assert!(seen.is_empty(), "an STS floor refuses the header token before any handler: {seen:?}");
 }
