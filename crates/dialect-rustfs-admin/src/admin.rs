@@ -212,7 +212,7 @@ pub const fn spec(name: &'static str, auth: AuthRequirement, caller_secret: bool
 /// every operation with this floor, whatever the deployment registered.
 #[must_use]
 pub const fn floor(name: &'static str) -> OperationFloor {
-    OperationFloor::custom(name, SigService::S3).require_sigv4_under_every_policy()
+    OperationFloor::custom(name, SigService::S3)
 }
 
 /// The floor of an S3-shaped extension operation a RustFS client is shown to presign (ADR-0024
@@ -251,7 +251,9 @@ pub const fn zip_token_floor(name: &'static str) -> OperationFloor {
 /// `SECURITY_POSTURE anonymous_reachable_ops=[…]` line names it, and the authorizer is still asked.
 #[must_use]
 pub const fn anonymous_floor(name: &'static str) -> OperationFloor {
-    OperationFloor::custom(name, SigService::S3).allow_anonymous_after_listing_in_the_posture_report()
+    OperationFloor::custom(name, SigService::S3)
+        .allow_anonymous_after_listing_in_the_posture_report()
+        .require_sigv4_under_every_policy()
 }
 
 /// A generated admin operation: its codec answers an [`AdminResponse`], and it knows its rows.
