@@ -202,7 +202,7 @@ pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
     precedence: 85,
     selector: "Method(GET) ∧ Target(Object) ∧ QueryPresent(\"lambdaArn\")",
-    action: "s3:GetObject; versionId: s3:GetObjectVersion",
+    action: "s3:GetObject",
     resource: ResourceShape::Object,
     success_status: 200,
     anonymous: false,
