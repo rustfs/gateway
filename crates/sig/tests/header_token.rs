@@ -156,20 +156,27 @@ impl HeaderTokenVerifier for NamesWhatWasEstablished {
     }
 }
 
-/// The transport values of an accepted request that carries `installed`, or nothing.
-pub(crate) fn server_state(installed: Option<Established>) -> TransportExtensions {
+/// The transport values of an accepted request whose extensions `install` filled.
+pub(crate) fn server_state_with(install: impl FnOnce(&mut http::Extensions)) -> TransportExtensions {
     let mut request = http::Request::builder()
         .uri("/")
         .header("host", "s3.example.com")
         .body(())
         .expect("a fixture request");
-    if let Some(established) = installed {
-        request.extensions_mut().insert(established);
-    }
+    install(request.extensions_mut());
     WireRequest::accept(request, &Limits::default())
         .expect("an accepted fixture")
         .transport_extensions()
         .clone()
+}
+
+/// The transport values of an accepted request that carries `installed`, or nothing.
+pub(crate) fn server_state(installed: Option<Established>) -> TransportExtensions {
+    server_state_with(|extensions| {
+        if let Some(established) = installed {
+            extensions.insert(established);
+        }
+    })
 }
 
 // ---------------------------------------------------------------------------

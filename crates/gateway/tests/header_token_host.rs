@@ -318,42 +318,71 @@ async fn an_answer_served_by_a_token_is_kept_out_of_a_shared_cache() {
     assert!(header_values(&response, "vary").is_empty() && header_values(&response, "cache-control").is_empty());
 }
 
-/// Serves every object as one whose uploader stored `Cache-Control: public` on it.
-struct StoredPublic;
+/// Serves every object as one whose uploader stored this `Cache-Control` on it.
+struct Stored(&'static str);
 
-impl rustfs_gateway::Handler<rustfs_gateway::dto::GetObject> for StoredPublic {
+impl rustfs_gateway::Handler<rustfs_gateway::dto::GetObject> for Stored {
     async fn call(
         &self,
         _request: rustfs_gateway::Req<rustfs_gateway::dto::GetObject>,
     ) -> rustfs_gateway::HandlerResult<rustfs_gateway::dto::GetObject> {
         Ok(rustfs_gateway::Resp::new(rustfs_gateway::dto::GetObjectOutput {
-            cache_control: Some("public, max-age=60".to_owned()),
+            cache_control: Some(self.0.to_owned()),
             ..Default::default()
         }))
     }
 }
 
-/// Negative, pinning a stated residual — an object whose stored metadata says
-/// `Cache-Control: public` goes out `public` to a caller served by its token: the gateway keeps
-/// what the handler answered and adds only `Vary` on the claimed header. A cache that ignores
-/// `Vary` can then serve one caller's object to another, as it can for a header-signed request;
-/// ADR-0054 states it as the deployment's. The signed request of the same object is the control:
-/// the same `Cache-Control`, and no `Vary`.
+/// The `Cache-Control` and `Vary` answers to a token request and to a signed request for an
+/// object stored with `cache_control`.
+async fn stored_object_answers(cache_control: &'static str) -> [(Vec<String>, Vec<String>); 2] {
+    let fixture = assemble_with(SecurityFloor::new(), Some((claim(), Answer::Accepts)), move |builder| {
+        builder.register::<rustfs_gateway::dto::GetObject, _>(Arc::new(Stored(cache_control)))
+    });
+    let mut answers = Vec::new();
+    for request in [
+        token_only(http::Method::GET, "/bucket/object"),
+        support::signed(http::Method::GET, "/bucket/object"),
+    ] {
+        let response = fixture.exchange(request).await;
+        assert_eq!(response.status(), http::StatusCode::OK, "{cache_control}: {:?}", response.body());
+        answers.push((header_values(&response, "cache-control"), header_values(&response, "vary")));
+    }
+    assert_eq!(fixture.verifier_calls.load(Ordering::SeqCst), 1, "{cache_control}");
+    [answers.remove(0), answers.remove(0)]
+}
+
+/// Negative — an object stored with a lifetime and nothing that decides sharing goes out
+/// `private` to a caller served by its token. Without it a shared cache could store the answer
+/// and replay it past the token's revocation, because a request with no `Authorization` header
+/// has no protection under RFC 9111 section 3.5. The signed request for the same object is the
+/// control: its `Cache-Control` is the stored one, untouched, and it does not vary.
+#[tokio::test]
+async fn n_a_stored_lifetime_goes_out_private_on_an_answer_served_by_a_token() {
+    for stored in ["max-age=3600", "Max-Age=3600, immutable", "no-cache"] {
+        let [by_token, signed] = stored_object_answers(stored).await;
+        assert_eq!(
+            by_token,
+            (vec![stored.to_owned(), "private".to_owned()], vec![HEADER.to_owned()]),
+            "{stored}"
+        );
+        assert_eq!(signed, (vec![stored.to_owned()], Vec::new()), "{stored}: the control");
+    }
+}
+
+/// Negative, pinning a stated residual — an object whose stored metadata says `public`,
+/// `s-maxage` or `must-revalidate`, in any letter case, goes out with exactly that to a caller
+/// served by its token: the gateway keeps what the handler answered and adds only `Vary` on the
+/// claimed header. A cache that ignores `Vary` can then serve one caller's object to another, as
+/// it can for a header-signed request, where those directives also permit storing; ADR-0054
+/// states it as the deployment's. The signed request is the control.
 #[tokio::test]
 async fn n_a_stored_public_cache_control_is_kept_on_an_answer_served_by_a_token() {
-    let fixture = assemble_with(SecurityFloor::new(), Some((claim(), Answer::Accepts)), |builder| {
-        builder.register::<rustfs_gateway::dto::GetObject, _>(Arc::new(StoredPublic))
-    });
-    let served = fixture.exchange(token_only(http::Method::GET, "/bucket/object")).await;
-    assert_eq!(served.status(), http::StatusCode::OK, "{:?}", served.body());
-    assert_eq!(header_values(&served, "cache-control"), ["public, max-age=60"]);
-    assert_eq!(header_values(&served, "vary"), [HEADER]);
-    assert_eq!(fixture.verifier_calls.load(Ordering::SeqCst), 1);
-
-    let signed = fixture.exchange(support::signed(http::Method::GET, "/bucket/object")).await;
-    assert_eq!(signed.status(), http::StatusCode::OK, "{:?}", signed.body());
-    assert_eq!(header_values(&signed, "cache-control"), ["public, max-age=60"]);
-    assert!(header_values(&signed, "vary").is_empty());
+    for stored in ["public, max-age=60", "PUBLIC", "s-maxage=60", "max-age=60, must-revalidate"] {
+        let [by_token, signed] = stored_object_answers(stored).await;
+        assert_eq!(by_token, (vec![stored.to_owned()], vec![HEADER.to_owned()]), "{stored}");
+        assert_eq!(signed, (vec![stored.to_owned()], Vec::new()), "{stored}: the control");
+    }
 }
 
 // ── one refusal, under the RustFS profile's own answers too ────────────────────────────────────

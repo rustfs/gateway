@@ -148,13 +148,20 @@ mod tests {
         headers.get_all(name).iter().map(HeaderValue::as_bytes).collect()
     }
 
-    /// Positive and negative — a bare response gains both headers; one that already varies keeps
-    /// what it varied on beside the claimed header; and one whose handler chose a `Cache-Control`,
-    /// `public` included, keeps exactly that and still varies on the claimed header.
+    fn marked(chosen: &[&'static str]) -> HeaderMap {
+        let mut response = HeaderMap::new();
+        for value in chosen {
+            response.append(CACHE_CONTROL, HeaderValue::from_static(value));
+        }
+        mark_private(&mut response, "x-auth-token");
+        response
+    }
+
+    /// Positive — a bare response gains both headers, and one that already varies keeps what it
+    /// varied on beside the claimed header.
     #[test]
-    fn a_marked_response_varies_on_the_claimed_header_and_keeps_what_its_handler_chose() {
-        let mut bare = HeaderMap::new();
-        mark_private(&mut bare, "x-auth-token");
+    fn a_marked_response_varies_on_the_claimed_header_and_is_private() {
+        let bare = marked(&[]);
         assert_eq!(values(&bare, VARY), [b"x-auth-token"]);
         assert_eq!(values(&bare, CACHE_CONTROL), [b"private"]);
 
@@ -162,13 +169,61 @@ mod tests {
         varying.insert(VARY, HeaderValue::from_static("Origin"));
         mark_private(&mut varying, "x-auth-token");
         assert_eq!(values(&varying, VARY), [&b"Origin"[..], b"x-auth-token"]);
+        assert_eq!(values(&varying, CACHE_CONTROL), [b"private"]);
+    }
 
-        for chosen in ["public, max-age=60", "no-store", "private, max-age=5"] {
-            let mut cached = HeaderMap::new();
-            cached.insert(CACHE_CONTROL, HeaderValue::from_static(chosen));
-            mark_private(&mut cached, "x-auth-token");
-            assert_eq!(values(&cached, CACHE_CONTROL), [chosen.as_bytes()], "{chosen}");
-            assert_eq!(values(&cached, VARY), [b"x-auth-token"], "{chosen}");
+    /// Negative — a `Cache-Control` that names none of the directives RFC 9111 section 3.5 lets
+    /// a shared cache store an authenticated response by, and neither `private` nor `no-store`,
+    /// gains `private` beside what the handler chose: a lifetime alone must not make one
+    /// caller's answer a shared cache's to replay. On one line, on two, and in any case.
+    #[test]
+    fn n_a_cache_control_that_does_not_allow_sharing_gains_private() {
+        let lifetimes: [&[&'static str]; 6] = [
+            &["max-age=3600"],
+            &["MAX-AGE=3600"],
+            &["max-age=3600, immutable"],
+            &["no-cache"],
+            &["max-age=60", "stale-while-revalidate=30"],
+            &["no-transform", "max-age=60, immutable"],
+        ];
+        for chosen in lifetimes {
+            let response = marked(chosen);
+            let mut expected: Vec<&[u8]> = chosen.iter().map(|value| value.as_bytes()).collect();
+            expected.push(b"private");
+            assert_eq!(values(&response, CACHE_CONTROL), expected, "{chosen:?}");
+            assert_eq!(values(&response, VARY), [b"x-auth-token"], "{chosen:?}");
+        }
+        // A directive that merely contains one of the names is not that directive.
+        for lookalike in ["x-public-ish=1, max-age=60", "max-age=60, privateer", "community=\"public\""] {
+            let response = marked(&[lookalike]);
+            assert_eq!(values(&response, CACHE_CONTROL), [lookalike.as_bytes(), b"private"], "{lookalike}");
+        }
+    }
+
+    /// Positive — a `Cache-Control` that names `public`, `s-maxage` or `must-revalidate` (what
+    /// section 3.5 lets a shared cache store by), or `private` or `no-store`, is left exactly as
+    /// the handler chose it, in any letter case, with or without an argument, on whichever of
+    /// several lines it stands; the response still varies on the claimed header.
+    #[test]
+    fn a_cache_control_that_already_decides_sharing_is_kept_as_the_handler_chose_it() {
+        let decided: [&[&'static str]; 11] = [
+            &["public, max-age=60"],
+            &["PUBLIC"],
+            &["max-age=60, Public"],
+            &["s-maxage=120"],
+            &["max-age=1, S-MaxAge=2"],
+            &["must-revalidate, max-age=60"],
+            &["no-store"],
+            &["private, max-age=5"],
+            &["Private=\"set-cookie\""],
+            &["max-age=60", "public"],
+            &["max-age=60 , \tmust-revalidate"],
+        ];
+        for chosen in decided {
+            let response = marked(chosen);
+            let expected: Vec<&[u8]> = chosen.iter().map(|value| value.as_bytes()).collect();
+            assert_eq!(values(&response, CACHE_CONTROL), expected, "{chosen:?}");
+            assert_eq!(values(&response, VARY), [b"x-auth-token"], "{chosen:?}");
         }
     }
 }

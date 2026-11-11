@@ -33,8 +33,8 @@ use rustfs_gateway_sig::{
 };
 
 use crate::header_token::{
-    Accepts, Established, HEADER, NamesWhatWasEstablished, PRINCIPAL, TOKEN, admission_of, admit, claim, server_state, shape,
-    standard_op, with_token,
+    Accepts, Established, HEADER, NamesWhatWasEstablished, PRINCIPAL, TOKEN, admission_of, admit, claim, server_state,
+    server_state_with, shape, standard_op, with_token,
 };
 use crate::security_floor_fixtures::*;
 
@@ -180,6 +180,39 @@ fn n_a_request_that_holds_nothing_established_never_reaches_the_verifier() {
     assert_eq!(anyone.0.load(Ordering::SeqCst), 1);
 }
 
+/// Negative — only a value of the verifier's own, host-private `Established` type is read. A
+/// value of another type that holds the same name, a bare `Identity`, a bare string and `()` are
+/// not it: a request that carries all of them and no `Established` is refused, and the verifier
+/// is not asked. This is the one place a fallback to another slot would show.
+#[test]
+fn n_a_value_of_another_type_establishes_nothing() {
+    #[derive(Clone)]
+    struct Lookalike(#[allow(dead_code)] &'static str); // held, never read: only its type matters
+
+    let floor = SecurityFloor::new().with_header_token_claim(claim());
+    let headers = with_token(&[]);
+    let verifier = NamesWhatWasEstablished::default();
+    let others = server_state_with(|extensions| {
+        extensions.insert(Lookalike("PROJECTMEMBER"));
+        extensions.insert(Identity::new("PROJECTMEMBER").expect("a legal name"));
+        extensions.insert("PROJECTMEMBER");
+        extensions.insert(String::from("PROJECTMEMBER"));
+        extensions.insert(());
+    });
+    let verdict = admission_of(&floor, &headers, &standard_op()).verify(&verifier, &others);
+    assert_eq!(verdict.rejection(), Some(AuthError::AccessDenied));
+    assert!(verdict.identity().is_none() && !verdict.is_anonymous());
+    assert_eq!(verifier.0.load(Ordering::SeqCst), 0);
+
+    let own = server_state_with(|extensions| {
+        extensions.insert(Lookalike("SOMEONEELSE"));
+        extensions.insert(Identity::new("SOMEONEELSE").expect("a legal name"));
+        extensions.insert(Established("PROJECTMEMBER"));
+    });
+    let verdict = admission_of(&floor, &headers, &standard_op()).verify(&verifier, &own);
+    assert_eq!(verdict.identity().map(Identity::access_key_id), Some("PROJECTMEMBER"), "the control");
+}
+
 /// Positive and negative — one verifier, asked about two requests in turn and in either order,
 /// names for each the identity that request carries and never the other's.
 #[test]
@@ -256,6 +289,53 @@ fn a_header_token_is_unaffected_by_the_sigv2_refusal_and_refuses_sigv2_beside_it
         }
         assert_eq!(shape(&admit(&floor, &alone, "", None, &refusing)), "refused:AccessDenied", "{floor_name}");
         assert_eq!(shape(&admit(&floor, &alone, "", None, &standard_op())), "sealed-sigv2", "{floor_name}");
+    }
+}
+
+/// Negative, pinning an asymmetry — the SigV2 presigned names in another letter case
+/// (`awsaccesskeyid`, `signature`, a lone `Expires`) are no credential to any reader of the
+/// floor: a request that carries only them is decided exactly as a request without them, where
+/// the exact spellings are read as a SigV2 credential. That is why they are not refused
+/// beside a token, although another case of an `X-Amz-` presigned name is. Should a reader ever
+/// start honouring those spellings, the first half of this case goes red, and the exclusivity
+/// list owes them an entry.
+#[test]
+fn n_another_letter_case_of_a_sigv2_name_is_no_credential_to_any_reader() {
+    let floor = SecurityFloor::new()
+        .enable_sigv2_presigned_compatibility()
+        .with_header_token_claim(claim());
+    let presigned = OperationFloor::builtin_presigned("GetObject", SigService::S3);
+    let anonymous = presigned.clone().allow_anonymous_after_listing_in_the_posture_report();
+    let none = HeaderMap::new();
+    let exact = "AWSAccessKeyId=AKIDEXAMPLE&Expires=1440938460&Signature=frJIUN8D";
+    // The control: the exact spellings are read as a credential, so the request is not anonymous.
+    let read = shape(&admit(&floor, &none, exact, None, &anonymous));
+    assert!(
+        read != "anonymous" && read != shape(&admit(&floor, &none, "", None, &anonymous)),
+        "{read}"
+    );
+    assert_eq!(shape(&admit(&floor, &with_token(&[]), exact, None, &anonymous)), "refused:AccessDenied");
+    for query in [
+        "awsaccesskeyid=AKIDEXAMPLE&expires=1440938460&signature=frJIUN8D",
+        "AWSACCESSKEYID=AKIDEXAMPLE&EXPIRES=1440938460&SIGNATURE=frJIUN8D",
+        "AwsAccessKeyId=AKIDEXAMPLE&signature=frJIUN8D",
+        "Expires=1440938460",
+        "signature=frJIUN8D",
+    ] {
+        for operation in [&presigned, &anonymous] {
+            assert_eq!(
+                shape(&admit(&floor, &none, query, None, operation)),
+                shape(&admit(&floor, &none, "", None, operation)),
+                "{query}: read as a credential"
+            );
+        }
+        assert_eq!(shape(&admit(&floor, &none, query, None, &anonymous)), "anonymous", "{query}");
+        // And so the token beside them is still the request's one credential.
+        assert_eq!(
+            shape(&admit(&floor, &with_token(&[]), query, None, &presigned)),
+            "header-token",
+            "{query}"
+        );
     }
 }
 
