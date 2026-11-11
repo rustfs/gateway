@@ -335,8 +335,9 @@ impl SigV4Authenticator {
             // It reads `SignedHeaders` verbatim, and answers a list that does not cover what it
             // must in its own words (rustfs/gateway#1130).
             .read_signed_headers_as_legacy_rustfs()
-            // MUTATION It answers a credential store it cannot read with `500 InternalError`, which SDKs
+            // It answers a credential store it cannot read with `500 InternalError`, which SDKs
             // retry, not the terminal `InvalidAccessKeyId` (rustfs/gateway#1585, ADR-0050).
+            .answer_credential_store_faults_as_unavailable()
     }
 }
 

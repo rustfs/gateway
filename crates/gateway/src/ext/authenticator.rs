@@ -694,6 +694,9 @@ impl SigV4Authenticator {
             if let Some(pending) = session_refusal {
                 return Err(pending.uniform().into());
             }
+            if self.store_faults_unavailable {
+                return Err(VerificationFailure::Unavailable);
+            }
             let Some(detail) = mismatch_detail else {
                 return Err(AuthError::SignatureDoesNotMatch.into());
             };
@@ -708,6 +711,9 @@ impl SigV4Authenticator {
         // The one exception, an expiry presented with the issued token, needs `proof` to be told
         // `ExpiredToken` (`PendingSessionRefusal::answer`, rustfs/gateway#1575).
         if let Some(pending) = session_refusal {
+            if self.store_faults_unavailable {
+                return Err(VerificationFailure::Unavailable);
+            }
             return Err(pending.answer(&proof).into());
         }
         if self.scope_policy.refuses_after_verification(presented.scope().region()) {
