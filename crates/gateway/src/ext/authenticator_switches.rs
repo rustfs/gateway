@@ -513,7 +513,7 @@ impl SigV4Authenticator {
     /// only a provider fault, and only under
     /// [`answer_credential_store_faults_as_unavailable`](Self::answer_credential_store_faults_as_unavailable).
     pub(super) fn answers_unavailable(&self, resolved: &Result<CredentialLookup, ProviderError>) -> bool {
-        self.store_faults_unavailable && resolved.is_err()
+        resolved.is_err()
     }
 
     /// The SigV4 answer to `resolved`, a lookup that found no usable credential, given once the

@@ -169,7 +169,7 @@ use self::outcome::{LegacyCorsDisposition, Outcome};
 ///
 /// A constant because both signing families reach it and they must be indistinguishable: which
 /// algorithm the credential store fell over under is not a fact a caller needs.
-const UNAUTHENTICATED: &str = "the request could not be authenticated";
+const UNAUTHENTICATED: &str = "the credential backend failed";
 
 /// Everything an assembled service holds, behind one `Arc` so a clone is one refcount bump.
 pub(crate) struct Inner {
