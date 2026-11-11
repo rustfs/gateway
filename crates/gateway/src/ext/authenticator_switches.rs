@@ -491,7 +491,9 @@ impl SigV4Authenticator {
     /// unknown key gets, byte for byte. Only a fault changes its answer: an unknown key, a session
     /// or disabled credential and a wrong signature keep theirs. Timing parity is kept — the fault
     /// still derives from the placeholder secret and completes the comparison, and is answered
-    /// where an unknown key is — and the `500` carries a constant sentence, no request text, no
+    /// where an unknown key is; on the STS body signature that is before the body read, so there
+    /// a fault, like an unknown key, answers earlier than a wrong signature (ADR-0050, a stated
+    /// deviation) — and the `500` carries a constant sentence, no request text, no
     /// access key and no provider detail. The fault is still counted and never cached, and never
     /// becomes an anonymous request. Every authentication form this authenticator serves follows
     /// the switch: SigV4 header, presigned, streaming and POST policy, SigV2, and the STS body

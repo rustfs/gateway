@@ -56,13 +56,14 @@
 //!
 //! # Why a store outage is not a verdict
 //!
-//! A credential store that cannot answer has not authenticated the caller, and it is never
-//! downgraded to anonymous; the guarded provider counts the fault for operators. By default the
-//! client receives the closed `403` of every other credential failure. Under
-//! [`SigV4Authenticator::answer_credential_store_faults_as_unavailable`] (ADR-0050) the answer is
-//! [`Unavailable`], a `500`, given where an unknown key is answered: after the placeholder
-//! derivation and the comparison. A fault confined to one stored record then tells "this key
-//! exists and is unreadable" from "unknown key", which is why the switch is opt-in.
+//! A credential store that cannot answer has not authenticated the caller and is never treated
+//! as anonymous; the guarded provider counts the fault. By default the client gets the closed
+//! `403` of every other credential failure. Under
+//! [`SigV4Authenticator::answer_credential_store_faults_as_unavailable`] (ADR-0050) it gets
+//! [`Unavailable`], a `500`, where an unknown key is answered: after the placeholder derivation
+//! and comparison — except on the STS body signature, where an unknown key, and so a fault, is
+//! answered before the body is read and so earlier than a wrong signature. A fault confined to
+//! one stored record then tells "exists, unreadable" from "unknown key"; hence opt-in.
 
 use std::sync::Arc;
 
@@ -779,7 +780,6 @@ pub(super) enum VerificationFailure {
     Ordinary(AuthError),
     Scope(ScopeRejection),
     Body(crate::render::S3Error),
-    /// A provider fault under `answer_credential_store_faults_as_unavailable`.
     Unavailable,
 }
 

@@ -717,17 +717,18 @@ async fn n_the_internal_error_carries_no_request_or_provider_text() {
     }
 }
 
-/// A correctly signed request in `form` that the signature work refuses after the lookup and
-/// before any comparison could match, where the form has such a step: an `x-amz-*` header outside
-/// a SigV4 `SignedHeaders`, a repeated `Content-Type` in a SigV2 string-to-sign, a SigV2 policy
-/// that is not base64.
+/// A correctly signed request in `form` refused after the lookup and before any comparison could
+/// match: an `x-amz-*` header outside a SigV4 `SignedHeaders`, or a SigV2 policy that is not base64.
+/// SigV2 header and presigned have no such step — every refusal their string-to-sign can raise (a
+/// repeated `Content-Type`, an unreadable header value, a repeated sub-resource) is answered before
+/// the lookup — so they are not probed; their return shares the policy form's line in `sigv2.rs`.
 fn refused_after_the_lookup(form: Form) -> Option<http::Request<Bytes>> {
-    let mut request = match form {
+    match form {
         Form::V2Policy => {
             let signature = SigV2Signer::new(ACCESS_KEY, SECRET.as_bytes())
                 .expect("a valid access key id")
                 .post_policy_signature("not-base64!");
-            return Some(form_request(
+            Some(form_request(
                 "/example-bucket",
                 &[
                     ("key", "upload"),
@@ -735,19 +736,17 @@ fn refused_after_the_lookup(form: Form) -> Option<http::Request<Bytes>> {
                     ("policy", "not-base64!"),
                     ("signature", &signature),
                 ],
-            ));
+            ))
         }
-        Form::V4Header | Form::V4Presigned | Form::V2Header | Form::V2Presigned => request(form, SECRET),
-        _ => return None,
-    };
-    let headers = request.headers_mut();
-    if matches!(form, Form::V4Header | Form::V4Presigned) {
-        headers.insert("x-amz-meta-unsigned", http::HeaderValue::from_static("added-after-signing"));
-    } else {
-        headers.append(http::header::CONTENT_TYPE, http::HeaderValue::from_static("text/plain"));
-        headers.append(http::header::CONTENT_TYPE, http::HeaderValue::from_static("text/html"));
+        Form::V4Header | Form::V4Presigned => {
+            let mut request = request(form, SECRET);
+            request
+                .headers_mut()
+                .insert("x-amz-meta-unsigned", http::HeaderValue::from_static("added-after-signing"));
+            Some(request)
+        }
+        _ => None,
     }
-    Some(request)
 }
 
 /// Negative — the order. Under the switch, a request the signature work refuses after the lookup
@@ -759,7 +758,9 @@ async fn n_a_fault_is_answered_only_where_an_unknown_key_is() {
         .into_iter()
         .filter(|form| refused_after_the_lookup(*form).is_some())
         .collect();
-    assert_eq!(probed.len(), 5, "{probed:?}");
+    assert_eq!(probed.len(), 3, "{probed:?}");
+    // Every form is tried before anything is asserted, so a failure names all the forms it hit.
+    let mut early = Vec::new();
     for form in probed {
         let send = |harness: Harness| async move {
             let request = refused_after_the_lookup(form).expect("a probe");
@@ -770,10 +771,12 @@ async fn n_a_fault_is_answered_only_where_an_unknown_key_is() {
         assert!(!unknown.0.is_success(), "{form:?}: {}", unknown.1);
         for fault in FAULTS {
             let (answer, reached) = send(Harness::new(form, fault, true)).await;
-            assert_eq!(answer, unknown, "{form:?} {fault:?}");
-            assert_eq!(reached, 0, "{form:?} {fault:?}");
+            if answer != unknown || reached != 0 {
+                early.push((form, fault, answer.0, reached));
+            }
         }
     }
+    assert!(early.is_empty(), "a fault was answered before an unknown key would be: {early:?}");
 }
 
 /// Negative — a fault under the switch is still counted for operators and never cached: every

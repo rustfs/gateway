@@ -32,7 +32,16 @@ default. Under it, and only for a lookup that returned `Err(ProviderError)`, the
 returns `Unavailable` instead of the closed refusal. It does so at the point an unknown key is
 answered: after the placeholder derivation and the comparison on the SigV4 and SigV2 paths, and at
 the early lookup refusal of the RustFS STS body signature, where an unknown key is answered too. It
-does not return earlier. `CredentialLookup::NotFound`, session and disabled-credential refusals,
+does not return earlier than an unknown key does.
+
+**Stated deviation, the STS body signature.** The issue's constraint is that a fault must not answer
+earlier than a wrong signature does. On the STS body path (`accept_legacy_rustfs_signing_services`,
+an STS-scoped header signature without `x-amz-content-sha256`) it does: an unknown key is already
+refused there before the body is read and before any derivation or comparison, so that the body is
+never read for a key that is not on record (rustfs/gateway#1230), and a fault is answered at that
+same point. A fault and an unknown key therefore share one latency class on that path, and both
+are faster than a wrong signature over a found key, which reads the body and compares. Making the
+fault slower than an unknown key there would separate the two by latency instead. `CredentialLookup::NotFound`, session and disabled-credential refusals,
 signature mismatches and every other credential failure keep their answers. The `500` body is the
 service's constant sentence and carries no request text, access key or provider detail. One switch
 covers every form the authenticator serves: SigV4 header, presigned, streaming and POST policy
