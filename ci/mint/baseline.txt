@@ -94,7 +94,15 @@
 #   ConditionalDeleteWithIncorrectETag pass, and the suite now stops at the later ChecksumCRC32
 #   (attributed below). Every other count, and every other failing function, is unchanged.
 #
-# generation: 4
+# GENERATION 5 (rustfs/gateway#1445, maintainer decision D3)
+#   https://github.com/rustfs/gateway/actions/runs/40448124513/attempts/3 measured a
+#   complete run: minio-java 46 PASS / 16 FAIL / 11 NA, with the same ordered failure
+#   signatures as the original #1445 report. Only minio-java rises, 15 -> 16.
+#   The additional getObjectAttributes():NullPointerException is attributed below;
+#   the maintainer accepted this client-contract difference in
+#   https://github.com/rustfs/gateway/issues/1445#issuecomment-6446176328.
+#
+# generation: 5
 #   MakeBucket_Test1, reported as its signature `Task MakeBucketAsync(string bucketName, string
 #   location = 'us-east-1', ...)`: the test names its bucket `minio-dotnet-example-` plus 50 random
 #   characters, 71 bytes, and the SUT refuses it 400 InvalidBucketName, as legacy RustFS does
@@ -132,7 +140,7 @@ healthcheck 1
 #   real RustFS assembly measures that workflow, rather than adding a success-only admin stub.
 mc 1
 minio-go 0
-#   15 failures. As on legacy RustFS (minio-java 8.6.0 run against it locally):
+#   16 failures in total. As on legacy RustFS (minio-java 8.6.0 run against it locally):
 #   - getPresignedObjectUrl() x2: an unsigned `x-amz-acl` on a presigned PUT, refused as for
 #     aws-sdk-ruby above.
 #   - getObjectAcl(): the SDK requires a `Type` child in each Grantee; legacy RustFS's and AWS's
@@ -145,7 +153,13 @@ minio-go 0
 #   - addUser(), addCannedPolicy(), setPolicy(), getUserInfo(), listUsers(), listCannedPolicies(),
 #     deleteUser(), removeCannedPolicy(): the MinIO admin API, which the launcher answers 404
 #     NoSuchBucket. Legacy RustFS serves it; its listUsers() answer then fails the SDK's decryption.
-minio-java 15
+#   Additional client-contract difference (rustfs/gateway#1445):
+#   - getObjectAttributes():NullPointerException: the client dereferences ObjectParts
+#     for a plain object. The SUT correctly omits that multipart-only group, as retained
+#     by #1347; no synthetic part metadata is added to satisfy the client. The focused
+#     compiled-client replay and independent signed response control are recorded at
+#     https://github.com/rustfs/gateway/issues/1445#issuecomment-6138457341.
+minio-java 16
 #   11 failures. As on legacy RustFS (minio-js 8.0.6 run against it locally, 6 failures there):
 #   - copyObject(... conditions ...): `x-amz-copy-source-if-unmodified-since: Invalid Date` is
 #     refused, as legacy RustFS refuses an unreadable copy-source date: the RustFS profile's
