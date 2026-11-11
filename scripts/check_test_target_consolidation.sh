@@ -747,6 +747,7 @@ gateway_modules = (
     "empty_secret_runtime",
     "empty_upload_without_length",
     "error_context_filters",
+    "external_payload_marker",
     "extra_permissions_runtime",
     "extra_response_headers",
     "facade_probe",

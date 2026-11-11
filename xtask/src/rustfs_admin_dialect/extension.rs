@@ -342,7 +342,7 @@ impl Extended {
                 "the floor admits a SigV4 header signature or presigned URL and never an anonymous or SigV2 request",
                 format!(
                     "/// The evidence that a RustFS client presigns this route, which ADR-0024 (f) makes the condition for\n\
-                     /// admitting a presigned URL (ADR-0047, rustfs/gateway#1576).\n\
+                     /// admitting a presigned URL (ADR-0049, rustfs/gateway#1576).\n\
                      pub const PRESIGNED_EVIDENCE: &str = {evidence:?};\n\
                      \n\
                      /// SigV4 header-signed or presigned, never anonymous, never SigV2: RustFS answers both `403 AccessDenied`\n\

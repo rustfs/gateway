@@ -50,6 +50,24 @@ crates/gateway/src/ext/governor/default.rs | mod tests / fn concurrent_callers_c
 crates/gateway/src/ext/governor/meter.rs | impl AtomicMeter / fn take | let mut current = self.state.load(Ordering::Relaxed);
 crates/gateway/src/ext/governor/meter.rs | impl AtomicMeter / fn refund | let mut current = self.state.load(Ordering::Relaxed);
 crates/gateway/src/ext/oplayer.rs | mod tests / fn a_layer_that_does_not_delegate_stops_the_chain | assert_eq!(inner_ran.load(std::sync::atomic::Ordering::SeqCst), 0);
+crates/gateway/src/external_payload_execution.rs | impl Drop for DormantInput / fn drop | if self.context.state.consumed.load(Ordering::Acquire) < self.context.logical_length() {
+crates/gateway/src/external_payload_execution.rs | impl Drop for ExecutionContext / fn drop | if !self.state.verified.load(Ordering::Acquire) {
+crates/gateway/src/external_payload_execution.rs | impl ExecutionContext / fn is_verified | self.state.verified.load(Ordering::Acquire)
+crates/gateway/src/external_payload_execution.rs | impl ExecutionContext / fn verify_before_publish | let error = if !self.state.accepted.load(Ordering::Acquire) {
+crates/gateway/src/external_payload_execution.rs | impl ExecutionContext / fn verify_before_publish | || self.state.consumed.load(Ordering::Acquire) != self.logical_length()
+crates/gateway/src/external_payload_execution.rs | impl ExecutionContext / fn verify_before_publish | } else if !self.state.bound.load(Ordering::Acquire)
+crates/gateway/src/external_payload_execution.rs | impl PayloadStream for DormantInput / fn len_hint | .saturating_sub(self.context.state.consumed.load(Ordering::Acquire)),
+crates/gateway/src/external_payload_execution.rs | impl PayloadStream for DormantInput / fn poll_read | if !state.accepted.load(Ordering::Acquire) {
+crates/gateway/src/external_payload_execution.rs | impl State / fn check_cancelled | if self.cancelled.load(Ordering::Acquire) {
+crates/gateway/src/external_payload_execution/tests.rs | fn a_handler_cannot_return_success_without_publication_verification | assert_eq!(control.cancels.load(Ordering::SeqCst), 1);
+crates/gateway/src/external_payload_execution/tests.rs | fn a_logical_failure_prevents_publication | assert_eq!(control.cancels.load(Ordering::SeqCst), 1);
+crates/gateway/src/external_payload_execution/tests.rs | fn a_pre_cancelled_framework_request_never_invokes_the_handler | assert_eq!(calls.load(Ordering::SeqCst), 0);
+crates/gateway/src/external_payload_execution/tests.rs | fn a_pre_cancelled_framework_request_never_invokes_the_handler | assert_eq!(control.cancels.load(Ordering::SeqCst), 1);
+crates/gateway/src/external_payload_execution/tests.rs | fn cancellation_before_accept_never_starts_transport | assert_eq!(control.accepts.load(Ordering::SeqCst), 0);
+crates/gateway/src/external_payload_execution/tests.rs | fn cancellation_before_accept_never_starts_transport | assert_eq!(control.cancels.load(Ordering::SeqCst), 1);
+crates/gateway/src/external_payload_execution/tests.rs | fn clones_share_one_accept_and_one_verification | assert_eq!(control.accepts.load(Ordering::SeqCst), 1);
+crates/gateway/src/external_payload_execution/tests.rs | fn dormant_input_never_polls_its_source | assert_eq!(control.accepts.load(Ordering::SeqCst), 0);
+crates/gateway/src/external_payload_execution/tests.rs | fn empty_input_still_requires_admission_and_verification | assert_eq!(control.accepts.load(Ordering::SeqCst), 1);
 crates/gateway/src/gate_pre_verification.rs | mod tests / fn n_an_oversized_sts_frame_is_refused_before_copying_its_buffer | assert_eq!(copied.load(Ordering::SeqCst), 3, "the control copied real source bytes");
 crates/gateway/src/gate_pre_verification.rs | mod tests / fn n_an_oversized_sts_frame_is_refused_before_copying_its_buffer | assert_eq!(copied.load(Ordering::SeqCst), 0, "the rejected frame was allocated before the bound");
 crates/gateway/src/gate_pre_verification.rs | mod tests / fn n_an_ordinary_frame_keeps_its_bound_before_copying | assert_eq!(copied.load(Ordering::SeqCst), 3, "the control copied real source bytes");

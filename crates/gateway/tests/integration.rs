@@ -91,6 +91,8 @@ mod empty_secret_runtime;
 mod empty_upload_without_length;
 #[path = "error_context_filters.rs"]
 mod error_context_filters;
+#[path = "external_payload_marker.rs"]
+mod external_payload_marker;
 #[path = "extra_permissions_runtime.rs"]
 mod extra_permissions_runtime;
 #[path = "extra_response_headers.rs"]
