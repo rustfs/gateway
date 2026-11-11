@@ -39,7 +39,7 @@ use rustfs_gateway_core::dialect::{BucketParam, ClaimedRow, DialectRoute};
 use rustfs_gateway_core::op::{AuthRequirement, Operation};
 use rustfs_gateway_core::registry::{HandlerDeadlineClass, OperationSpec};
 use rustfs_gateway_core::route::ShadowingDecl;
-use rustfs_gateway_sig::{OperationFloor, SigService};
+use rustfs_gateway_sig::{OperationFloor, QueryBearerClaim, SigService};
 use rustfs_gateway_stream::ByteStream;
 
 /// The content type of a JSON answer.
@@ -209,6 +209,18 @@ pub const fn spec(name: &'static str, auth: AuthRequirement, caller_secret: bool
 #[must_use]
 pub const fn floor(name: &'static str) -> OperationFloor {
     OperationFloor::custom(name, SigService::S3)
+}
+
+/// The `token` query bearer claim of RustFS's minted zip-download URL (ADR-0042): one literal
+/// `token` parameter, bound to the path's last raw segment less its literal `.zip`.
+pub const ZIP_DOWNLOAD_TOKEN: QueryBearerClaim = QueryBearerClaim::new("token", ".zip");
+
+/// The zip download's floor: [`floor`]'s privileged, header-signed-only floor plus the
+/// [`ZIP_DOWNLOAD_TOKEN`] claim, which admits the minted URL only through the host's installed
+/// bearer verifier and never anonymously (ADR-0026 (g), ADR-0042).
+#[must_use]
+pub const fn zip_token_floor(name: &'static str) -> OperationFloor {
+    floor(name).with_query_bearer_claim(ZIP_DOWNLOAD_TOKEN)
 }
 
 /// The floor of an anonymous bootstrap operation (ADR-0026 (f), ADR-0032): header-signed or

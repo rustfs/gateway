@@ -21472,7 +21472,7 @@ mut_config_load_moved_to_other_item() {
     python3 - <<'PYEOF'
 from pathlib import Path
 
-path = Path("crates/gateway/src/service.rs")
+path = Path("crates/gateway/src/service/state.rs")
 text = path.read_text()
 listed = "        let snapshot = self.inner.config.load();\n"
 source = listed + "        f.debug_struct(\"S3Service\")"
@@ -21485,7 +21485,7 @@ PYEOF
 }
 expect_fail check_config_load_once.sh \
     'an allowed load moved into another function of the same file' mut_config_load_moved_to_other_item \
-    'unlisted load at crates/gateway/src/service.rs:'
+    'unlisted load at crates/gateway/src/service/state.rs:'
 
 mut_config_load_entry_orphaned() {
     python3 - <<'PYEOF'
