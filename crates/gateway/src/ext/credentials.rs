@@ -125,6 +125,24 @@ impl core::fmt::Display for CredentialRefusal {
 
 impl std::error::Error for CredentialRefusal {}
 
+impl CredentialRefusal {
+    /// The rejection owed once the signature has compared equal under this credential's secret.
+    ///
+    /// Kept here, beside the only producer, so the reason never travels as itself: the
+    /// authenticator receives a wire answer, and `ExpiredToken` is the only one that is not the
+    /// uniform `InvalidAccessKeyId` (rustfs/gateway#1575). A verifier must not consult this before
+    /// its comparison has produced a match.
+    pub(crate) const fn answer_after_verified_signature(self) -> rustfs_gateway_sig::AuthError {
+        match self {
+            Self::SessionExpired => rustfs_gateway_sig::AuthError::ExpiredToken,
+            Self::Disabled
+            | Self::TokenWithoutSessionCredential
+            | Self::SessionCredentialWithoutToken
+            | Self::SessionTokenMismatch => rustfs_gateway_sig::AuthError::InvalidAccessKeyId,
+        }
+    }
+}
+
 /// One principal's long-term or temporary credentials.
 pub struct Credentials {
     identity: Identity,

@@ -25,8 +25,6 @@ use rustfs_gateway_sig::{
     RegionRule, SealedAws, SessionToken, SigLocation, SigV4Authorization, Signature,
 };
 
-use crate::ext::credentials::CredentialRefusal;
-
 impl super::Authentication<'_> {
     pub(crate) const fn with_post_policy_limits(mut self, limits: Option<PostPolicyLimits>) -> Self {
         self.post_policy_limits = limits;
@@ -101,13 +99,14 @@ impl<'a> Presented<'a> {
         policy.session_token()
     }
 
-    /// Records session admission before comparison; the caller answers only after HMAC.
+    /// Records session admission before comparison, as the answer owed if the signature then
+    /// matches; the caller answers only after HMAC.
     pub(super) fn session_refusal(
         &self,
         credentials: &crate::ext::credentials::Credentials,
         sealed: &SealedAws<'_>,
         location: SigLocation,
-    ) -> Option<CredentialRefusal> {
+    ) -> Option<AuthError> {
         // Legacy-compat (rustfs/backlog#2684): an unrouted form uses only the key and HMAC
         // before its method refusal. Session admission belongs to the upload path.
         if matches!(self, Self::UnroutedForm(_)) {
@@ -127,7 +126,7 @@ impl<'a> Presented<'a> {
                 now,
             ),
         };
-        admitted.err()
+        admitted.err().map(|refusal| refusal.answer_after_verified_signature())
     }
 
     /// The timestamp the string-to-sign is dated with.

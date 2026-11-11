@@ -71,7 +71,7 @@ use rustfs_gateway_sig::{
 };
 
 use super::credential_guard::{CredentialGuardConfig, GuardedCredentialProvider};
-use super::credentials::{CredentialLookup, CredentialProvider, CredentialRefusal};
+use super::credentials::{CredentialLookup, CredentialProvider};
 use super::legacy_refusal::LegacyRefusal;
 use super::sigv2::SigV2Authentication;
 
@@ -695,10 +695,8 @@ impl SigV4Authenticator {
         // compared equal, and the signature just compared equal under the session's secret, so
         // this caller holds the whole credential and learns nothing it could not already sign
         // for. It is told `ExpiredToken`, which SDKs refresh on (rustfs/gateway#1575).
-        match session_refusal {
-            Some(CredentialRefusal::SessionExpired) => return Err(AuthError::ExpiredToken.into()),
-            Some(_) => return Err(AuthError::InvalidAccessKeyId.into()),
-            None => {}
+        if let Some(answer) = session_refusal {
+            return Err(answer.into());
         }
         if self.scope_policy.refuses_after_verification(presented.scope().region()) {
             if let Some(refusal) = self.scope_policy.verified_region_refusal(presented.scope().region()) {
