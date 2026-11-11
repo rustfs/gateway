@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! `OperationFloor::refuse_sigv2_under_every_policy` at `SecurityFloor::admit` (ADR-0050,
+//! `OperationFloor::refuse_sigv2_under_every_policy` at `SecurityFloor::admit` (ADR-0051,
 //! rustfs/gateway#1592).
 //!
 //! Responsible for: what the floor does with every SigV2 shape — header, presigned URL and POST

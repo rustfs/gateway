@@ -29,6 +29,10 @@ use super::rulings::{EXTENSIONS, PRESIGNED_EXTENSIONS, VERSIONED_EXTENSIONS};
 use super::tests::{inventory, recorded_plan, route};
 use super::{Plan, plan};
 
+/// The metadata route's two listing rows, planned ahead of the admin router's eight
+/// (`metadata_listing_tests.rs`).
+const METADATA_ROWS: usize = 2;
+
 fn ext(name: &str, method: &str, target: &str, key: &str, rule: &str, action: &str) -> ExtensionRoute {
     ExtensionRoute {
         name: name.to_owned(),
@@ -38,6 +42,8 @@ fn ext(name: &str, method: &str, target: &str, key: &str, rule: &str, action: &s
             key: key.to_owned(),
             rule: rule.to_owned(),
         },
+        query_requires: Vec::new(),
+        claimed_by: None,
         auth_mode: "custom".to_owned(),
         auth_detail: "SignatureRequiredThenHandlerCheck".to_owned(),
         iam_action: "SomeAction".to_owned(),
@@ -70,14 +76,16 @@ fn refusal(extensions: Vec<ExtensionRoute>, rulings: &[(&str, &str)]) -> String 
     }
 }
 
-/// Positive — the recorded inventory plans eight rows in its order, each named by its ruling,
-/// at consecutive precedences from the first, under its IAM action and discriminator.
+/// Positive — the recorded inventory plans the admin router's eight rows in its order, after the
+/// metadata route's two (`metadata_listing_tests.rs`), each named by its ruling, at consecutive
+/// precedences from the first, under its IAM action and discriminator.
 #[test]
 fn the_recorded_extension_routes_plan_as_eight_rows_in_rustfs_order() {
     let plan = recorded_plan();
     let rows: Vec<(&str, &str, u16, &str, &str, &str, &str)> = plan
         .extensions
         .iter()
+        .skip(METADATA_ROWS)
         .map(|row| {
             (
                 row.name.as_str(),
@@ -168,11 +176,13 @@ fn the_recorded_extension_routes_plan_as_eight_rows_in_rustfs_order() {
         ]
     );
     assert_eq!(plan.extensions[0].precedence, FIRST_PRECEDENCE);
-    assert_eq!(EXTENSIONS.len(), 8);
+    assert_eq!(EXTENSIONS.len(), 10);
     let stems: Vec<&str> = plan.extensions.iter().map(|row| row.stem.as_str()).collect();
     assert_eq!(
         stems,
         [
+            "list_object_versions_with_metadata",
+            "list_objects_v2_with_metadata",
             "reset_bucket_replication",
             "get_replication_reset_status",
             "get_replication_metrics_v2",
@@ -201,7 +211,12 @@ fn an_extension_row_shadows_its_cell_and_the_later_rows_it_can_be_named_with() {
             .map(|shadowed| shadowed.op.clone())
             .collect()
     };
-    let counts: Vec<usize> = plan.extensions.iter().map(|row| row.shadows.len()).collect();
+    let counts: Vec<usize> = plan
+        .extensions
+        .iter()
+        .skip(METADATA_ROWS)
+        .map(|row| row.shadows.len())
+        .collect();
     assert_eq!(counts, [16, 38, 36, 36, 35, 10, 2, 34]);
     let status = shadows("rustfs:GetReplicationResetStatus");
     for standard in [
@@ -241,7 +256,7 @@ fn an_extension_row_shadows_its_cell_and_the_later_rows_it_can_be_named_with() {
             .all(|op| !op.starts_with("rustfs:")),
         "the last row of its cell shadows no extension"
     );
-    let reasons: Vec<&str> = plan.extensions[4]
+    let reasons: Vec<&str> = plan.extensions[METADATA_ROWS + 4]
         .shadows
         .iter()
         .map(|shadowed| shadowed.reason.as_str())
@@ -259,7 +274,7 @@ fn an_extension_row_shadows_its_cell_and_the_later_rows_it_can_be_named_with() {
 #[test]
 fn an_extension_module_renders_its_row_floor_codec_and_record() {
     let plan = recorded_plan();
-    let rendered = plan.extensions[2].render("// license\n");
+    let rendered = plan.extensions[METADATA_ROWS + 2].render("// license\n");
     for expected in [
         "pub const NAME: &str = \"rustfs:GetReplicationMetricsV2\";",
         "AuthRequirement::new(\"s3:GetReplicationConfiguration\", ResourceShape::Bucket)",
@@ -281,10 +296,10 @@ fn an_extension_module_renders_its_row_floor_codec_and_record() {
     }
     assert_eq!(rendered.matches("ShadowingDecl {").count(), 36);
     assert!(!rendered.contains("anonymous: true"));
-    let lambda = plan.extensions[5].render("");
+    let lambda = plan.extensions[METADATA_ROWS + 5].render("");
     assert!(lambda.contains("Predicate::QueryPresent(\"lambdaArn\")") && lambda.contains("ResourceShape::Object"));
     assert!(lambda.contains("path_shape: \"/{Bucket}/{Key+}\","));
-    let listen = plan.extensions[6].render("");
+    let listen = plan.extensions[METADATA_ROWS + 6].render("");
     assert!(listen.contains("ResourceShape::Service") && listen.contains("path_shape: \"/\","));
 }
 
@@ -295,7 +310,7 @@ fn an_extension_module_renders_its_row_floor_codec_and_record() {
 fn only_the_presigned_ruling_renders_the_presigned_floor() {
     let plan = recorded_plan();
     assert_eq!(PRESIGNED_EXTENSIONS.len(), 1);
-    for extended in &plan.extensions {
+    for extended in plan.extensions.iter().skip(METADATA_ROWS) {
         let rendered = extended.render("");
         let presigned = extended.name == "MiscExtRoute::ObjectLambda[object]";
         assert_eq!(
@@ -317,7 +332,7 @@ fn only_the_presigned_ruling_renders_the_presigned_floor() {
             extended.name
         );
     }
-    let lambda = plan.extensions[5].render("");
+    let lambda = plan.extensions[METADATA_ROWS + 5].render("");
     assert!(lambda.contains("with `lambdaArn` inside the signed query"), "{lambda}");
     assert!(lambda.contains(&format!("{:?}", PRESIGNED_EXTENSIONS[0].1)), "{lambda}");
 }
@@ -478,8 +493,8 @@ fn n_two_routes_deriving_one_operation_are_refused() {
 /// extension row is ahead of every standard row of its method and target.
 #[test]
 fn n_an_extension_row_behind_a_standard_row_is_refused() {
-    // Eleven service rows take precedences 80..=90, and `ListDirectoryBuckets` sits at 90.
-    let routes: Vec<ExtensionRoute> = (0..11)
+    // Thirteen service rows take precedences 78..=90, and `ListDirectoryBuckets` sits at 90.
+    let routes: Vec<ExtensionRoute> = (0..13)
         .map(|index| {
             ext(
                 &format!("Ext::E{index}"),
@@ -491,11 +506,11 @@ fn n_an_extension_row_behind_a_standard_row_is_refused() {
             )
         })
         .collect();
-    let rulings: Vec<(String, String)> = (0..11).map(|index| (format!("Ext::E{index}"), format!("E{index}"))).collect();
+    let rulings: Vec<(String, String)> = (0..13).map(|index| (format!("Ext::E{index}"), format!("E{index}"))).collect();
     let rulings: Vec<(&str, &str)> = rulings.iter().map(|(name, ty)| (name.as_str(), ty.as_str())).collect();
     let refused = refusal(routes, &rulings);
     assert!(
-        refused.contains("rustfs:E10: its row at 90 is behind the standard row ListDirectoryBuckets at 90"),
+        refused.contains("rustfs:E12: its row at 90 is behind the standard row ListDirectoryBuckets at 90"),
         "{refused}"
     );
 }

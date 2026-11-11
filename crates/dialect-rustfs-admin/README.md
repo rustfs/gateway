@@ -33,6 +33,19 @@ authenticated fallback handlers (ADR-0039).
   authorised by the inventory's IAM action on the bucket or object the path names, reads no body,
   and is walked by `fold_every_extension`. The two notification listeners are long-lived streams:
   a handler answers `AdminResponse::stream`.
+- `EXTENSION_ROUTES` starts with RustFS's two metadata listings (rustfs/gateway#1588):
+  `GET /{bucket}?versions&metadata=true` (`rustfs:ListObjectVersionsWithMetadata`, `s3:ListBucketVersions`)
+  and `GET /{bucket}?list-type=2&metadata=true` (`rustfs:ListObjectsV2WithMetadata`, `s3:ListBucket`).
+  RustFS's metadata route claims them before its admin router: a bucket `GET` whose first
+  `metadata` value is exactly `true`, naming `versions` (tried first) or a first `list-type` of `2`.
+  Each row (precedence 78 and 79, so the admin router's eight keep 80 to 87) carries both query
+  rules and stands ahead of the standard listings and of the admin router's bucket `GET` rows.
+  Their floor is the standard listing floor (`admin::listing_floor`, ADR-0050), so an anonymous
+  or presigned listing is admitted exactly where `ListObjectsV2` admits one, except that SigV2 is
+  refused under every policy, because SigV2 does not sign `metadata` (ADR-0051). A host that registers
+  the standard listings must also register these two: without a handler a request carrying
+  `metadata=true` is answered `501` rather than served as a listing without the metadata asked for.
+  The handler answers the listing document with each entry's `<UserMetadata>`.
 - The object-zip-download pair (`POST object-zip-downloads`, `GET object-zip-downloads/{id}.zip`)
   is claimed like every other admin route (rustfs/backlog#2753). Both floors are privileged, under
   the caller's own vendor labels `rustfs:CreateObjectZipDownload` and `rustfs:DownloadObjectZip`;
@@ -42,10 +55,10 @@ authenticated fallback handlers (ADR-0039).
   with its `?token=` and no header signature is `403` here: ADR-0026 (g) refused admitting the
   route anonymously, and the bearer scheme it points to is not built yet. The download's floor
   refuses a SigV2 signature under every policy, with or without a token, before any credential
-  lookup (ADR-0050).
+  lookup (ADR-0051).
 - The STS form endpoint (`POST /` with a form body, `rustfs:StsFormPost`) refuses a SigV2
   signature, header or presigned, under every policy, before any credential lookup, while SigV4
-  and the unsigned Web Identity form are admitted as ADR-0044 says (ADR-0050, rustfs/gateway#1592).
+  and the unsigned Web Identity form are admitted as ADR-0044 says (ADR-0051, rustfs/gateway#1592).
 
 Every operation is privileged and header-signed only: never anonymous, never presigned, and never
 handed the caller's secret unless its inventory row says RustFS seals a body with it. Its floor
@@ -53,7 +66,7 @@ handed the caller's secret unless its inventory row says RustFS seals a body wit
 admitted by a registered custom scheme are refused before the authorizer, as RustFS refuses SigV2
 on every authenticated custom route (rustfs/gateway#1582). The zip download keeps a floor without
 that requirement because of its bearer token, and refuses SigV2 under every policy instead
-(ADR-0050, rustfs/gateway#1592). The one
+(ADR-0051, rustfs/gateway#1592). The one
 exception is RustFS's four OIDC bootstrap routes (`oidc/authorize/{provider_id}`,
 `oidc/callback/{provider_id}`, `oidc/logout`, `oidc/providers`), which admit an anonymous request:
 the floor's per-operation opt-in lists them in the start-up posture report, their action is their

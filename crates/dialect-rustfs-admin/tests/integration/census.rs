@@ -402,7 +402,7 @@ fn every_handler_retained_check_is_recorded() {
 /// Positive and negative — every operation the fold declares requires SigV4 under every policy
 /// except the four OIDC bootstrap operations, which admit an anonymous request, and the zip
 /// download, whose bearer claim the requirement would refuse and which refuses SigV2 instead
-/// (ADR-0050); and so do both admin fallbacks, which the fold does not declare. A new
+/// (ADR-0051); and so do both admin fallbacks, which the fold does not declare. A new
 /// admin operation therefore cannot be added without the requirement unless it joins one of
 /// those two named exemptions (rustfs/gateway#1582).
 #[test]
@@ -427,7 +427,7 @@ fn the_zip_download_keeps_its_bearer_claim() {
 }
 
 /// Negative — the zip download's floor refuses SigV2 under every policy without requiring SigV4,
-/// which closes the difference recorded on rustfs/gateway#1592 (ADR-0050): legacy RustFS refuses
+/// which closes the difference recorded on rustfs/gateway#1592 (ADR-0051): legacy RustFS refuses
 /// a SigV2 header in its access check, and the floor now refuses it before any credential lookup
 /// rather than leaving it to a later refusal. Every other exempt floor is the OIDC bootstrap's,
 /// which admits SigV2 as RustFS does.

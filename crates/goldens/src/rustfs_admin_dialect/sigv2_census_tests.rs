@@ -13,15 +13,16 @@
 // limitations under the License.
 
 //! The SigV2 census of the RustFS dialect (rustfs/gateway#1582): a SigV2 header signature on
-//! every claimed admin row, every extension route and both admin fallbacks is `403 AccessDenied`
+//! every claimed admin row, every admin-router extension and both admin fallbacks is `403 AccessDenied`
 //! before the authorizer, on the default floor and on the RustFS profile's.
 //!
 //! Responsible for: that census, the zip download's rows included, whose floor refuses SigV2
-//! beside its bearer claim (ADR-0050, rustfs/gateway#1592); the rows it leaves out with their
+//! beside its bearer claim (ADR-0051, rustfs/gateway#1592); the rows it leaves out with their
 //! reason — the OIDC bootstrap rows, which RustFS answers before it reads any credential; and the
 //! positive control, a SigV2 header signature on an exempt row that is verified and reaches its
 //! handler, so a fixture that is refused for its own reasons fails the control rather than
-//! passing the census.
+//! passing the census. The metadata listings are extension routes on the standard listing floor
+//! and are covered by `super::metadata_listing_tests`.
 //! NOT responsible for: SigV2 presigned URLs (refused by every privileged floor already) or the
 //! object lambda's own lanes (`super::lambda_tests`).
 //! Upstream: `super`, `super::tests`, `super::extension_tests`, `super::lambda_tests`.
@@ -30,9 +31,9 @@
 use std::sync::{Arc, Mutex};
 
 use rustfs_gateway::{Observer, RequestEvent, SecurityFloor};
-use rustfs_gateway_dialect_rustfs_admin::{EXTENSION_ROUTES, RouteRecord};
+use rustfs_gateway_dialect_rustfs_admin::RouteRecord;
 
-use super::extension_tests::{path, query, unsigned_at};
+use super::extension_tests::{admin_router_records, unsigned as unsigned_extension, unsigned_at};
 use super::lambda_tests::sigv2_header_signed;
 use super::tests::rows;
 use super::{ACCESS_KEY, Exchange, assemble_installing, assemble_on, in_lanes_on, rustfs_profile_floor, unsigned};
@@ -128,14 +129,12 @@ fn n_a_sigv2_header_signature_on_every_head_row_is_refused_as_access_denied() {
     }
 }
 
-/// Negative — a SigV2 header signature on every extension route is `403 AccessDenied` before the
-/// authorizer, on the default floor and on the RustFS profile's.
+/// Negative — a SigV2 header signature on every admin-router extension is `403 AccessDenied`
+/// before the authorizer, on the default floor and on the RustFS profile's.
 #[test]
-fn n_a_sigv2_header_signature_on_every_extension_route_is_refused_without_asking() {
-    assert_eq!(EXTENSION_ROUTES.len(), 8);
-    refused_on_both_floors(EXTENSION_ROUTES, |assembled, record| {
-        let request = unsigned_at(record.method, &format!("{}?{}", path(record), query(record)));
-        let exchange = assembled.exchange(sigv2_header_signed(request));
+fn n_a_sigv2_header_signature_on_every_admin_router_extension_is_refused_without_asking() {
+    refused_on_both_floors(&admin_router_records(), |assembled, record| {
+        let exchange = assembled.exchange(sigv2_header_signed(unsigned_extension(record)));
         not_refused(&exchange, record.method).map(|why| format!("{}: {why}", record.operation))
     });
 }
@@ -160,7 +159,7 @@ fn n_a_sigv2_header_signature_on_either_admin_fallback_is_refused_without_asking
 /// (`admin::anonymous_floor`), the one exempt family, is verified as the shared caller and reaches
 /// its handler, on both floors. A fixture refused for its own reasons would fail here instead of
 /// passing the census as a refusal. The zip download was a second exempt row until
-/// rustfs/gateway#1592; its floor now refuses SigV2 (ADR-0050), so it is in the census instead.
+/// rustfs/gateway#1592; its floor now refuses SigV2 (ADR-0051), so it is in the census instead.
 #[test]
 fn a_sigv2_header_signature_on_an_exempt_row_is_verified_and_reaches_its_handler() {
     let (record, path) = rows()

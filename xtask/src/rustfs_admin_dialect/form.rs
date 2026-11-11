@@ -157,7 +157,7 @@ static SPEC: OperationSpec = admin::spec(NAME, AUTH, false);
 /// signature pipeline and bounded body read. An assembly cannot widen that action requirement.
 /// SigV2 is refused under every policy, before any credential is resolved: it covers neither the
 /// form body that carries every STS parameter nor most of the query, and RustFS's router refuses
-/// it on this route (ADR-0050). SigV4 and the unsigned form are unchanged.
+/// it on this route (ADR-0051). SigV4 and the unsigned form are unchanged.
 static FLOOR: OperationFloor = OperationFloor::builtin(NAME, SigService::Sts)
     .allow_anonymous_after_listing_in_the_posture_report()
     .refuse_sigv2_under_every_policy();

@@ -178,7 +178,7 @@ fn the_sts_operation_declares_its_claim_floor_action_and_record() {
     let floor = StsFormPost::floor();
     assert!(floor.allows_anonymous());
     assert!(!floor.privileged(), "the shared envelope preserves Web Identity admission");
-    assert!(floor.refuses_sigv2_under_every_policy(), "SigV2 covers no STS parameter (ADR-0050)");
+    assert!(floor.refuses_sigv2_under_every_policy(), "SigV2 covers no STS parameter (ADR-0051)");
     assert!(
         !floor.requires_sigv4_under_every_policy(),
         "requiring SigV4 would refuse the unsigned Web Identity form"

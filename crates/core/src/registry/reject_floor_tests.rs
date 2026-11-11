@@ -14,7 +14,7 @@
 
 //! The registration refusal of a floor that requires SigV4 under every policy and also declares a
 //! query bearer claim (rustfs/gateway#1576), with both halves as registrable controls, and how
-//! refusing SigV2 under every policy composes with both (ADR-0050, rustfs/gateway#1592).
+//! refusing SigV2 under every policy composes with both (ADR-0051, rustfs/gateway#1592).
 //!
 //! Responsible for: `super::check_operation`'s answer for the six floors — SigV4-only with a
 //! bearer claim (refused), SigV4-only alone and a bearer claim alone (both registrable), the
@@ -128,7 +128,7 @@ fn n_refusing_sigv2_does_not_rescue_a_sigv4_only_floor_with_a_bearer_claim() {
 
 /// Positive — refusing SigV2 composes with a bearer claim (the zip download's floor) and with the
 /// SigV4 requirement (redundant, so accepted rather than refused): neither admits what the other
-/// refuses (ADR-0050).
+/// refuses (ADR-0051).
 #[test]
 fn refusing_sigv2_registers_beside_a_bearer_claim_and_beside_the_sigv4_requirement() {
     assert_eq!(check_operation::<Floored<3>>(), Ok(()));

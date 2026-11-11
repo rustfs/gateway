@@ -15,7 +15,8 @@
 //! The shapes every RustFS admin operation shares.
 //!
 //! Responsible for: [`AdminResponse`], what every handler answers; [`spec`] and [`floor`], which
-//! every operation is built from; the body decoders and the one response encoder the generated
+//! every operation is built from, and the narrower floors a ruling picks instead ([`listing_floor`]
+//! for the metadata listings); the body decoders and the one response encoder the generated
 //! codecs call; [`AdminOperation`] with [`OperationFold`], which let a deployment walk every
 //! claimed operation without naming each one; and [`ExtensionOperation`] with [`ExtensionFold`],
 //! the same for the S3-shaped extension operations (rustfs/backlog#2753).
@@ -226,6 +227,24 @@ pub const fn presigned_floor(name: &'static str) -> OperationFloor {
     OperationFloor::builtin_presigned(name, SigService::S3).require_sigv4_under_every_policy()
 }
 
+/// The floor of a metadata listing operation (rustfs/gateway#1588, ADR-0050): exactly the floor of
+/// the standard listing operations it stands in front of, `ListObjectsV2` and
+/// `ListObjectVersions` — not privileged, header-signed — so a deployment's floor admits an
+/// anonymous or presigned listing here exactly where it admits one there, and the authorizer
+/// decides it. RustFS's metadata route resolves a signed caller or keeps an unsigned one
+/// anonymous before its bucket listing check, as its S3 listing does. It carries no bearer claim.
+///
+/// One difference from the standard listings' floor: SigV2 is refused under every policy, before
+/// any credential lookup (ADR-0051, rustfs/gateway#1592). SigV2 does not sign `metadata`, so a
+/// SigV2-presigned or captured SigV2 header-signed listing with `metadata=true` appended would
+/// otherwise be served as this listing, disclosing user metadata the signer never asked for.
+/// RustFS serves the SigV2 form; this is a deliberate difference. SigV4 and unsigned requests are
+/// decided exactly as on the standard listings.
+#[must_use]
+pub const fn listing_floor(name: &'static str) -> OperationFloor {
+    OperationFloor::builtin(name, SigService::S3).refuse_sigv2_under_every_policy()
+}
+
 /// The `token` query bearer claim of RustFS's minted zip-download URL (ADR-0042): one literal
 /// `token` parameter, bound to the path's last raw segment less its literal `.zip`.
 pub const ZIP_DOWNLOAD_TOKEN: QueryBearerClaim = QueryBearerClaim::new("token", ".zip");
@@ -237,7 +256,7 @@ pub const ZIP_DOWNLOAD_TOKEN: QueryBearerClaim = QueryBearerClaim::new("token", 
 /// refuses the combination. RustFS answers the minted URL before it reads any credential.
 ///
 /// It refuses SigV2 under every policy instead, at the floor and before any credential lookup,
-/// with or without a token (ADR-0050, rustfs/gateway#1592): RustFS's access check refuses SigV2
+/// with or without a token (ADR-0051, rustfs/gateway#1592): RustFS's access check refuses SigV2
 /// on this route once credentials are presented, and the bearer path reads no AWS credential.
 #[must_use]
 pub const fn zip_token_floor(name: &'static str) -> OperationFloor {

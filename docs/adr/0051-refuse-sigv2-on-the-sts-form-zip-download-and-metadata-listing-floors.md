@@ -1,8 +1,8 @@
-# ADR-0050: Refuse SigV2 on the STS form and zip download floors
+# ADR-0051: Refuse SigV2 on the STS form, zip download and metadata listing floors
 
 - Status: Accepted
 - Date: 2026-11-11
-- Trigger: a RustFS-profile security difference (rustfs/gateway#1592), refining ADR-0044's STS action credentials and ADR-0042's zip-download bearer floor
+- Trigger: a RustFS-profile security difference (rustfs/gateway#1592), refining ADR-0044's STS action credentials, ADR-0042's zip-download bearer floor and ADR-0050's metadata listing floor
 - Supersedes / Superseded by: none
 
 ## Context
@@ -28,6 +28,16 @@ The zip download (`admin::zip_token_floor`, ADR-0042) had the same gap in anothe
 header without a token passed the floor. It was refused later, by the bearer check or by RustFS's
 handler, rather than at the floor. The SigV4 requirement cannot be used there either: it refuses
 every bearer token, and the registry refuses that combination.
+
+ADR-0050 claims RustFS's two metadata listings, `rustfs:ListObjectsV2WithMetadata` and
+`rustfs:ListObjectVersionsWithMetadata`, on the standard listing floor (`admin::listing_floor`).
+They are selected by `metadata=true`, and `metadata` is not one of the sub-resources SigV2 signs.
+So `metadata=true` appended to a SigV2-presigned listing URL, or to a captured SigV2
+header-signed listing inside the skew window, turns the signer's listing into the metadata
+listing. The holder then gets every object's user metadata, which the signer never signed for.
+ADR-0050 records this and names this rule as the fix. These operations must stay reachable
+unsigned and presigned with SigV4 exactly as the standard listings are, so the SigV4
+requirement cannot be used here either.
 
 ## Decision
 
@@ -61,6 +71,13 @@ requirement implies the refusal, so the two cannot disagree.
   Every other claimed admin floor except the OIDC bootstrap floor already requires SigV4
   (rustfs/gateway#1582). A SigV2 header is now refused at the floor, with or without a token, and
   with or without an installed bearer verifier. The verifier is never asked about it.
+- `admin::listing_floor`, the floor of `rustfs:ListObjectsV2WithMetadata` and
+  `rustfs:ListObjectVersionsWithMetadata`: the standard listing floor plus the SigV2 refusal.
+  SigV4 header, SigV4 presigned and unsigned listings are decided exactly as on `ListObjectsV2`
+  and `ListObjectVersions`. Those two standard operations keep admitting SigV2 where the
+  deployment's SigV2 policy does. SigV2 leaves their listing parameters unsigned too, but an edit
+  there only reshapes a listing the signer already authorised. It never adds a disclosure the
+  signer's request lacked, and `docs/security-model.md` records that general SigV2 property.
 
 ### How it composes
 
@@ -72,7 +89,7 @@ requirement implies the refusal, so the two cannot disagree.
 
 ### Known differences from legacy RustFS
 
-Both fail closed:
+All three fail closed:
 
 - **Forged SigV2 header.** Legacy verifies the signature before its router's SigV2 check, so it
   answers `SignatureDoesNotMatch`. The gateway answers `AccessDenied`, because it refuses before
@@ -80,12 +97,16 @@ Both fail closed:
 - **SigV2 header plus a zip token.** Legacy returns from its access check on a token-carrying zip
   path before its SigV2 refusal, and lets the handler judge the token. The gateway refuses the
   SigV2 header at the floor. The minted token-only URL and the SigV4-signed download are unchanged.
+- **SigV2 on a metadata listing.** RustFS's metadata route takes whatever credential its S3 layer
+  verified, SigV2 included, and serves the listing (ADR-0050). The gateway refuses it
+  `AccessDenied` before any lookup. This is deliberate: the alternative is serving user metadata
+  under a signature that never covered the request for it.
 
 ADR-0044's claimed-route SigV2 canonical resource still applies to any form-claimed operation
 without this rule. On the STS route it is no longer reachable. `sec1_16` and `sec1_17` now pin the
 floor's refusal instead.
 
-ADR-0044 and ADR-0042 are not edited. This record narrows their floors.
+ADR-0044, ADR-0042 and ADR-0050 are not edited. This record narrows their floors.
 
 ## Evidence
 
@@ -113,7 +134,7 @@ ADR-0044 and ADR-0042 are not edited. This record narrows their floors.
   - the predicate losing the SigV4 implication;
   - the setter over-reaching into the SigV4 requirement;
   - the refusal moved after the credential parse;
-  - each dialect floor without the rule;
+  - each dialect floor without the rule, the metadata listing floor included;
   - the legacy stand-in admitting SigV2;
   - a deaf credential recorder;
   - a no-op unknown-key rewrite;
@@ -130,6 +151,7 @@ ADR-0044 and ADR-0042 are not edited. This record narrows their floors.
 | Refuse SigV2 in the STS codec, after verification | The credential lookup has already happened. Known and unknown keys could then be told apart, and the handler path would still hold a SigV2-verified identity until the codec runs. |
 | Turn SigV2 off for the whole RustFS profile | Breaks legacy clients on every ordinary S3 operation, where RustFS still accepts SigV2. |
 | Refuse the SigV2 refusal beside the SigV4 requirement at registration | Nothing contradicts. It would only stop one floor helper from being built on another that already requires SigV4. |
+| Refuse only an appended `metadata=true` on the metadata listings | Indistinguishable from a request that signed it: SigV2 signs no `metadata`, so a correctly signed SigV2 metadata listing and an edited one are the same bytes to the verifier. |
 | Leave the zip download as it was | The later refusal works, but it lets SigV2 reach credential lookup and, with a verifier installed, the bearer check. The rule composes with the claim, so there is no reason to keep the gap. |
 
 ## Consequences
@@ -139,7 +161,8 @@ ADR-0044 and ADR-0042 are not edited. This record narrows their floors.
 - The floor's SigV2 refusal now reads the new predicate. Every operation that requires SigV4
   behaves exactly as before.
 - A deployment that sent SigV2 `AssumeRole` or SigV2-presigned Web Identity through the gateway
-  must switch to SigV4, as it would have to against RustFS itself.
+  must switch to SigV4, as it would have to against RustFS itself. A SigV2 client of the metadata
+  listings must switch to SigV4 too, although RustFS would serve it.
 - A future operation whose parameters SigV2 does not cover, and which must stay reachable
   without a signature, takes this rule rather than a new one.
 - These tests pin the decision:
@@ -147,4 +170,5 @@ ADR-0044 and ADR-0042 are not edited. This record narrows their floors.
   - the operation unit tests;
   - the core registry floor tests;
   - the dialect floor declarations;
-  - the goldens' `sts_parity::sigv2`, `sts_parity::sec1` and `rustfs_admin_dialect::zip_sigv2_tests`.
+  - the goldens' `sts_parity::sigv2`, `sts_parity::sec1`, `rustfs_admin_dialect::zip_sigv2_tests`
+    and `rustfs_admin_dialect::metadata_listing_tests`.
