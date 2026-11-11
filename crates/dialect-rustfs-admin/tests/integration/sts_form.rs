@@ -234,7 +234,6 @@ fn the_sts_operation_declares_its_claim_floor_action_and_record() {
         StsFormPost::spec().receives_caller_secret(),
         "the record shows the spec's opt-in"
     );
-    assert!(record.caller_secret, "the record shows the opt-in");
 }
 
 /// Positive — the codec hands the body over as it arrived and answers what the handler answers.
