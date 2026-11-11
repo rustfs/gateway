@@ -86,6 +86,63 @@ class VariantTests(unittest.TestCase):
         text = FIXTURE.replace("authorize(permission(self.0))?;", "read_compatible_admin_body(req.input);")
         self.assertEqual(facts("Probe", text), ("request-on-minio-alias", "buffered", "buffered"))
 
+    def test_path_qualified_operation_impl_is_read(self):
+        for path in ("crate::admin::router::", "super::", "router::"):
+            with self.subTest(path=path):
+                text = FIXTURE.replace("impl Operation for Handler", f"impl {path}Operation for Handler")
+                self.assertEqual(facts("Write", text), ("request-on-minio-alias", "buffered", "buffered"))
+
+    def test_another_trait_named_like_operation_is_not_read(self):
+        for spelling in ("OwnedOperation", "crate::admin::OperationExt", "Operation2"):
+            with self.subTest(spelling=spelling):
+                text = FIXTURE.replace("impl Operation for Handler", f"impl {spelling} for Handler")
+                with self.assertRaisesRegex(inventory.InventoryError, "no `impl Operation for Handler`"):
+                    facts("Write", text)
+
+    def test_path_qualified_stream_impl_marks_the_response_streamed(self):
+        read = FIXTURE.replace('Kind::Read => json_response("read"),', 'Kind::Read => json_response(Feed),')
+        for path in ("futures::", "futures_core::", "futures::stream::", "rustfs_s3_types::"):
+            with self.subTest(path=path):
+                text = read + f"struct Feed;\nimpl {path}Stream for Feed {{}}\n"
+                self.assertEqual(facts("Read", text), ("none", "not-read", "streamed"))
+
+    def test_a_stream_impl_the_handler_never_names_leaves_it_buffered(self):
+        text = FIXTURE + "struct Feed;\nimpl futures_core::Stream for Feed {}\n"
+        self.assertEqual(facts("Read", text), ("none", "not-read", "buffered"))
+
+    def test_owned_stream_body_marks_the_response_streamed(self):
+        for spelling in ("Body::from_stream(ReceiverStream::new(rx))", "rustfs_s3_types::Body::from_stream(feed)"):
+            with self.subTest(spelling=spelling):
+                text = FIXTURE.replace('Kind::Read => json_response("read"),', f"Kind::Read => json_response({spelling}),")
+                self.assertEqual(facts("Read", text), ("none", "not-read", "streamed"))
+
+    def test_owned_body_from_bytes_stays_buffered(self):
+        for spelling in ("Body::from(bytes)", "Body::empty()", "Body::from_streamed_len(n)"):
+            with self.subTest(spelling=spelling):
+                text = FIXTURE.replace('Kind::Read => json_response("read"),', f"Kind::Read => json_response({spelling}),")
+                self.assertEqual(facts("Read", text), ("none", "not-read", "buffered"))
+
+    def test_owned_request_body_taken_and_passed_on_is_handed_on(self):
+        for spelling in ("req.take_body()", "req.into_body()", "s3s_req.take_body()"):
+            with self.subTest(spelling=spelling):
+                text = FIXTURE.replace('Kind::Read => json_response("read"),', f"Kind::Read => decode_elsewhere({spelling}),")
+                self.assertEqual(facts("Read", text), ("none", "handed-on", "buffered"))
+
+    def test_owned_request_body_taken_and_buffered_is_buffered(self):
+        text = FIXTURE.replace('Kind::Read => json_response("read"),',
+                               "Kind::Read => json_response(req.take_body().store_all_limited(64)),")
+        self.assertEqual(facts("Read", text), ("none", "buffered", "buffered"))
+
+    def test_a_body_method_on_something_else_is_not_a_request_read(self):
+        for spelling in ("response.into_body()", "self.take_bodyguard()", "req.take_body_size"):
+            with self.subTest(spelling=spelling):
+                text = FIXTURE.replace('Kind::Read => json_response("read"),', f"Kind::Read => json_response({spelling}),")
+                self.assertEqual(facts("Read", text), ("none", "not-read", "buffered"))
+
+    def test_path_qualified_static_handler_type_is_read(self):
+        source = Source(FIXTURE + "static EXAMPLE_HANDLER: crate::admin::handlers::example::Handler = Handler(Kind::Read);\n")
+        self.assertEqual(inventory.handler_type(source, "EXAMPLE_HANDLER", FILE), "Handler")
+
     def test_unknown_variant_is_refused(self):
         with self.assertRaisesRegex(inventory.InventoryError, "variant"):
             facts("Missing")

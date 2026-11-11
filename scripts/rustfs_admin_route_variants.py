@@ -10,6 +10,9 @@ The inventory supplies its literal-aware delimiter readers; no RustFS runtime is
 
 import re
 
+# An optional path before a trait or type name: `crate::admin::router::`, `super::`, `futures::stream::`.
+PATH = r"(?:[A-Za-z_][A-Za-z0-9_]*::)*"
+
 
 def select_variant(text, enum, variant, close, split, fail):
     """Retain common code and the reachable arms of `self.0` dispatch only."""
@@ -101,7 +104,7 @@ def handler_type(source, name, relative, fail):
     if not re.fullmatch(r"[A-Z][A-Z0-9_]*", name):
         return name
     for candidate in [relative] + sorted(source.files):
-        found = re.search(rf"\b(?:static|const)\s+{name}\s*:\s*([A-Za-z_][A-Za-z0-9_]*)", source.files[candidate])
+        found = re.search(rf"\b(?:static|const)\s+{name}\s*:\s*{PATH}([A-Za-z_][A-Za-z0-9_]*)", source.files[candidate])
         if found:
             return found.group(1)
     fail(f"{relative}: handler value {name} has no static or const declaration")
@@ -111,7 +114,7 @@ def handler_body(source, type_name, variant, admin, matching_close, split_args, 
     for relative, text in source.files.items():
         if not relative.startswith(admin.as_posix() + "/"):
             continue
-        match = re.search(rf"impl\s+Operation\s+for\s+{type_name}\s*\{{", text)
+        match = re.search(rf"impl\s+{PATH}Operation\s+for\s+{type_name}\s*\{{", text)
         if not match:
             continue
         end = matching_close(text, match.end() - 1, "{", "}")
@@ -139,6 +142,6 @@ def handler_body(source, type_name, variant, admin, matching_close, split_args, 
             if brace == -1:
                 continue
             helpers.append(text[free.start():matching_close(text, brace, "{", "}")])
-        stream_types = set(re.findall(r"impl\s+(?:futures::)?(?:Stream|ByteStream)\s+for\s+(\w+)", text))
+        stream_types = set(re.findall(rf"impl\s+{PATH}(?:Stream|ByteStream)\s+for\s+(\w+)", text))
         return relative, block + "\n".join(helpers), stream_types
     fail(f"no `impl Operation for {type_name}` under {admin}")

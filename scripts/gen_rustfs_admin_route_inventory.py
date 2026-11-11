@@ -53,7 +53,7 @@ BUFFERED_READS = (
     "read_plain_admin_body",
 )
 STREAMED_READS = ("drain_client_devnull", "drain_site_replication_devnull")
-STREAMED_RESPONSES = ("StreamingBlob", "ReaderStream", "StreamBody", "async_stream")
+STREAMED_RESPONSES = ("StreamingBlob", "ReaderStream", "StreamBody", "async_stream", r"\bBody::from_stream\(")
 
 
 class InventoryError(Exception):
@@ -457,11 +457,11 @@ def body_facts(text, stream_types):
         request_body = "buffered"
     elif any(marker in text for marker in STREAMED_READS):
         request_body = "streamed"
-    elif "req.input" in text:
+    elif re.search(r"req\.(?:input|take_body\(\)|into_body\(\))", text):  # the s3s field, or the owned request's body
         request_body = "handed-on"
     else:
         request_body = "not-read"
-    streamed = any(marker in text for marker in STREAMED_RESPONSES) or any(
+    streamed = any(re.search(marker, text) for marker in STREAMED_RESPONSES) or any(
         re.search(rf"\b{name}\b", text) for name in stream_types
     )
     response_body = "streamed" if streamed else "buffered"
