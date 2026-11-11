@@ -8571,6 +8571,120 @@ probe_planning_guard_missing_git_input() {
 }
 probe_planning_guard_missing_git_input
 
+# check_no_git_submodules.sh reads only git metadata, so each case gets a tiny repository of its
+# own. The shared sandbox is unsuitable: `git clean -fd` cannot remove a nested repository, so a
+# gitlink fixture there would leak into every later case.
+submodule_mut_none() { :; }
+submodule_mut_gitmodules() {
+    printf '[submodule "vendor/x"]\n\tpath = vendor/x\n\turl = git@example.invalid:x.git\n' >.gitmodules
+    git add .gitmodules
+}
+submodule_mut_gitlink_only() {
+    git update-index --add --cacheinfo 160000,fa81f604902a510801b882322b7abb9539a005d4,vendor/x
+}
+submodule_mut_gitmodules_and_gitlink() {
+    submodule_mut_gitmodules
+    submodule_mut_gitlink_only
+}
+submodule_mut_untracked_gitmodules() {
+    printf '[submodule "vendor/x"]\n\tpath = vendor/x\n' >.gitmodules
+}
+submodule_mut_gitmodules_staged_then_deleted() {
+    submodule_mut_gitmodules
+    rm .gitmodules
+}
+
+# expect_submodule_guard <pass|fail> <description> <mutation-fn> [expected-diagnostic]
+expect_submodule_guard() {
+    local want="$1" desc="$2" mutate="$3" expected="${4:-}" repo output rc=0
+    cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
+    repo="$(mktemp -d "${TMPDIR:-/tmp}/gateway-submodule-test.XXXXXX")"
+    (
+        cd "$repo"
+        git init -q .
+        printf 'control\n' >README.md
+        git add README.md
+        git -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -qm base
+        "$mutate"
+    ) >/dev/null 2>&1 || {
+        rm -rf "$repo"
+        fail_msg "check_no_git_submodules.sh fixture could not be built: ${desc}"
+        return
+    }
+    output="$(GATEWAY_CHECK_ROOT="$repo" "${SCRIPT_DIR}/check_no_git_submodules.sh" 2>&1)" || rc=$?
+    rm -rf "$repo"
+    if [[ "$want" == pass ]]; then
+        if [[ "$rc" -eq 0 ]]; then
+            pass_msg "check_no_git_submodules.sh accepts: ${desc}"
+        else
+            fail_msg "check_no_git_submodules.sh rejected its positive control: ${desc}"
+            printf '%s\n' "$output" | sed 's/^/       /' >&2
+        fi
+    elif [[ "$rc" -ne 0 && "$output" == *"$expected"* ]]; then
+        pass_msg "check_no_git_submodules.sh catches: ${desc}"
+    elif [[ "$rc" -ne 0 ]]; then
+        fail_msg "check_no_git_submodules.sh failed without its diagnostic: ${desc}"
+    else
+        fail_msg "check_no_git_submodules.sh did NOT catch: ${desc}"
+    fi
+}
+expect_submodule_guard pass 'a clean tree with no submodule' submodule_mut_none
+expect_submodule_guard fail 'a tracked .gitmodules' submodule_mut_gitmodules \
+    '.gitmodules: declares git submodules'
+expect_submodule_guard fail 'a gitlink with no .gitmodules' submodule_mut_gitlink_only \
+    'vendor/x: gitlink (mode 160000)'
+expect_submodule_guard fail 'the #1449 shape: .gitmodules plus its gitlink' \
+    submodule_mut_gitmodules_and_gitlink 'vendor/x: gitlink (mode 160000)'
+expect_submodule_guard fail 'an untracked .gitmodules about to be added' \
+    submodule_mut_untracked_gitmodules '.gitmodules: declares git submodules'
+expect_submodule_guard fail 'a staged .gitmodules deleted from the working tree' \
+    submodule_mut_gitmodules_staged_then_deleted '.gitmodules: declares git submodules'
+
+probe_submodule_guard_missing_git_input() {
+    local empty output rc=0
+    cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
+    empty="$(mktemp -d "${TMPDIR:-/tmp}/gateway-submodule-empty.XXXXXX")"
+    output="$(GATEWAY_CHECK_ROOT="$empty" "${SCRIPT_DIR}/check_no_git_submodules.sh" 2>&1)" || rc=$?
+    rmdir "$empty"
+    if [[ "$rc" -ne 0 && "$output" == *'cannot enumerate index entries'* ]]; then
+        pass_msg 'check_no_git_submodules.sh fails closed outside a git repository'
+    else
+        fail_msg 'check_no_git_submodules.sh reported green without git inputs'
+    fi
+}
+probe_submodule_guard_missing_git_input
+
+# A root below the top level would let `git ls-files` see only its own subtree and miss a gitlink
+# beside it.
+probe_submodule_guard_subdirectory_root() {
+    local repo output rc=0
+    cases=$((cases + 1))
+    guard_case_owned "$cases" || return 0
+    repo="$(mktemp -d "${TMPDIR:-/tmp}/gateway-submodule-subdir.XXXXXX")"
+    (
+        cd "$repo"
+        git init -q .
+        mkdir docs
+        printf 'control\n' >docs/README.md
+        git add docs/README.md
+        submodule_mut_gitlink_only
+    ) >/dev/null 2>&1 || {
+        rm -rf "$repo"
+        fail_msg 'check_no_git_submodules.sh subdirectory fixture could not be built'
+        return
+    }
+    output="$(GATEWAY_CHECK_ROOT="$repo/docs" "${SCRIPT_DIR}/check_no_git_submodules.sh" 2>&1)" || rc=$?
+    rm -rf "$repo"
+    if [[ "$rc" -ne 0 && "$output" == *'is not the top level of its repository'* ]]; then
+        pass_msg 'check_no_git_submodules.sh refuses a root below the top level'
+    else
+        fail_msg 'check_no_git_submodules.sh judged a subdirectory root on part of the index'
+    fi
+}
+probe_submodule_guard_subdirectory_root
+
 expect_protected_fail() {
     local desc="$1" mutate="$2" sandbox rc=0
     cases=$((cases + 1))

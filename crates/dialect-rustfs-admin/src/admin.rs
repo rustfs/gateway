@@ -205,10 +205,14 @@ pub const fn spec(name: &'static str, auth: AuthRequirement, caller_secret: bool
 
 /// The floor every admin operation has: privileged and header-signed only, so it is never reached
 /// anonymously and never through a presigned URL (MinIO #5411 was a presigned URL edited to reach
-/// an admin operation).
+/// an admin operation). It requires SigV4 under every policy, so a SigV2 header signature is
+/// refused as RustFS refuses it on every authenticated custom route: SigV2 binds neither the
+/// route's query arguments nor its payload (rustfs/gateway#1582). The same requirement refuses a
+/// request admitted by a registered custom scheme (`SecurityFloor::with_custom_schemes`) on
+/// every operation with this floor, whatever the deployment registered.
 #[must_use]
 pub const fn floor(name: &'static str) -> OperationFloor {
-    OperationFloor::custom(name, SigService::S3)
+    OperationFloor::custom(name, SigService::S3).require_sigv4_under_every_policy()
 }
 
 /// The floor of an S3-shaped extension operation a RustFS client is shown to presign (ADR-0024
@@ -226,12 +230,20 @@ pub const fn presigned_floor(name: &'static str) -> OperationFloor {
 /// `token` parameter, bound to the path's last raw segment less its literal `.zip`.
 pub const ZIP_DOWNLOAD_TOKEN: QueryBearerClaim = QueryBearerClaim::new("token", ".zip");
 
-/// The zip download's floor: [`floor`]'s privileged, header-signed-only floor plus the
+/// The zip download's floor: a privileged, header-signed-only floor plus the
 /// [`ZIP_DOWNLOAD_TOKEN`] claim, which admits the minted URL only through the host's installed
-/// bearer verifier and never anonymously (ADR-0026 (g), ADR-0042).
+/// bearer verifier and never anonymously (ADR-0026 (g), ADR-0042). Unlike [`floor`] it does not
+/// require SigV4 under every policy: that requirement refuses every bearer token, and the registry
+/// refuses the combination. RustFS answers the minted URL before it reads any credential.
+///
+/// Known difference from legacy RustFS, recorded on rustfs/gateway#1592: this floor admits a
+/// SigV2 header signature that carries no `token`, where RustFS's access check refuses it. The
+/// request is still refused, but later: `403` before the authorizer when a bearer verifier is
+/// installed, because a signed request to a bearer-claimed operation must carry its token, and
+/// by RustFS's handler when none is. It is a later refusal, not an admission.
 #[must_use]
 pub const fn zip_token_floor(name: &'static str) -> OperationFloor {
-    floor(name).with_query_bearer_claim(ZIP_DOWNLOAD_TOKEN)
+    OperationFloor::custom(name, SigService::S3).with_query_bearer_claim(ZIP_DOWNLOAD_TOKEN)
 }
 
 /// The floor of an anonymous bootstrap operation (ADR-0026 (f), ADR-0032): header-signed or
