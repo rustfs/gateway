@@ -289,6 +289,16 @@ fn c_sig_0111_the_two_credential_rejections_differ_only_in_their_code() {
     assert!(AuthError::SignatureDoesNotMatch.is_credential_rejection());
 }
 
+/// Negative — the expired-session answer is its own code, says nothing a credential could be read
+/// from, and is not one of the two latency-paired credential rejections: it is only ever produced
+/// after a signature compared equal (rustfs/gateway#1575).
+#[test]
+fn an_expired_session_has_its_own_code_and_a_constant_message() {
+    assert_eq!(AuthError::ExpiredToken.code(), "ExpiredToken");
+    assert_ne!(AuthError::ExpiredToken.message(), AuthError::InvalidAccessKeyId.message());
+    assert!(!AuthError::ExpiredToken.is_credential_rejection());
+}
+
 /// Negative — c-sig-0112: hex of the wrong length is rejected, never truncated or zero-padded.
 #[test]
 fn c_sig_0112_wrong_length_hex_is_rejected() {
