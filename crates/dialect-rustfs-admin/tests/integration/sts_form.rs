@@ -18,7 +18,7 @@
 //! Responsible for: routing `POST /` form requests through core's router — path-style, on a
 //! virtual host whose bucket label RustFS would refuse, and whatever the query, under both
 //! operation selections — the near misses that stay where they were, and the operation's floor,
-//! action, codec and record.
+//! action, caller-secret opt-in, codec and record.
 //! NOT responsible for: authentication, the body read, the authorizer and the answer through an
 //! assembled service (`rustfs-gateway-goldens`'s `rustfs_admin_dialect::sts_tests`), or the
 //! binding to the recorded inventory (goldens).
@@ -31,6 +31,8 @@ use rustfs_gateway_core::op::{Operation, ResourceShape};
 use rustfs_gateway_core::registry::RouterBuilder;
 use rustfs_gateway_core::route::{HostClass, RouteRequestParts, Selection, TargetKind};
 use rustfs_gateway_dialect_rustfs_admin::admin::AdminResponse;
+use rustfs_gateway_dialect_rustfs_admin::ops::admin_fallback::AdminFallback;
+use rustfs_gateway_dialect_rustfs_admin::ops::admin_v4_fallback::AdminV4Fallback;
 use rustfs_gateway_dialect_rustfs_admin::ops::sts_form_post::{self, CLAIM, StsFormPost};
 use rustfs_gateway_dialect_rustfs_admin::{BodyKind, FORM_ROUTES, OVERLAY};
 use rustfs_gateway_http::{Limits, WireRequest};
@@ -156,6 +158,32 @@ fn n_a_near_miss_of_the_sts_endpoint_is_not_taken() {
     }
 }
 
+/// Positive and negative — the operations of the dialect that opt in to the caller's secret are
+/// exactly the forty-nine sealed claimed operations and the STS endpoint, its one form operation:
+/// neither fallback opts in (the extension operations are pinned in `extensions`).
+#[test]
+fn the_secret_holders_are_the_sealed_operations_and_the_sts_endpoint() {
+    let mut holders: Vec<&str> = super::declared()
+        .iter()
+        .filter(|operation| operation.secret)
+        .map(|operation| operation.name)
+        .collect();
+    assert_eq!(holders.len(), 49, "the sealed claimed operations");
+    assert!(!holders.contains(&"rustfs:StsFormPost"), "not a claimed row");
+    for (name, spec) in [
+        (StsFormPost::NAME, StsFormPost::spec()),
+        (AdminFallback::NAME, AdminFallback::spec()),
+        (AdminV4Fallback::NAME, AdminV4Fallback::spec()),
+    ] {
+        if spec.receives_caller_secret() {
+            holders.push(name);
+        }
+    }
+    assert_eq!(holders.len(), 50, "{holders:?}");
+    assert_eq!(holders.last(), Some(&"rustfs:StsFormPost"), "{holders:?}");
+    assert_eq!(dialect().form_operations().len(), 1, "no other form operation to opt in");
+}
+
 /// Positive and negative — the operation is the dialect's one form claim: `POST /` with the form
 /// media type, recorded as its overlay selector, reachable anonymously by its own floor, not
 /// privileged, signed under `sts`, authorised by its vendor label on no bucket, and recorded as the
@@ -188,7 +216,10 @@ fn the_sts_operation_declares_its_claim_floor_action_and_record() {
         (auth.render(), auth.resource),
         ("rustfs:AssumeRoleHandle".to_owned(), ResourceShape::Service)
     );
-    assert!(!StsFormPost::spec().receives_caller_secret());
+    assert!(
+        StsFormPost::spec().receives_caller_secret(),
+        "RustFS's AssumeRole compares the caller's secret (rustfs/gateway#1587)"
+    );
     assert_eq!(StsFormPost::REQUEST_BODY, RequestBodyMode::Full);
     assert_eq!(FORM_ROUTES, [sts_form_post::RECORD]);
     let record = sts_form_post::RECORD;

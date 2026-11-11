@@ -720,4 +720,5 @@ mod lambda_tests;
 mod subject_tests;
 mod tests;
 mod zip_token_contract_tests;
-mod zip_token_tests;
+// Crate-visible for its log capture, which the STS secret hygiene proof reuses.
+pub(crate) mod zip_token_tests;

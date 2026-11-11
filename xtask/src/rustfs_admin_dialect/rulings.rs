@@ -221,10 +221,31 @@ pub(super) const STAYS: &[(&str, &str, &str)] = &[
     ),
 ];
 
-/// The routes the dialect serves behind a form claim rather than a path claim (ADR-0041):
-/// `(method, path, auth_detail)`, the custom-auth class the inventory must still record, so a changed
-/// row reopens the ruling. Each is one generated operation outside `fold_every_operation`.
-pub(super) const FORMS: &[(&str, &str, &str)] = &[("POST", "/", "StsFormPost")];
+/// One route the dialect serves behind a form claim rather than a path claim (ADR-0041).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) struct FormRuling {
+    pub(super) method: &'static str,
+    pub(super) path: &'static str,
+    /// The custom-auth class the inventory must still record, so a changed row reopens the ruling.
+    pub(super) auth_detail: &'static str,
+    /// Why the handler is handed the caller's secret (ADR-0022), or `None` when it is not. The
+    /// inventory's `caller_secret_body` records only body sealing, which a form route never does, so
+    /// a handler that compares the secret instead is a ruling read from RustFS's handler, kept here
+    /// so a refreshed inventory cannot drop it.
+    pub(super) caller_secret: Option<&'static str>,
+}
+
+/// The routes the dialect serves behind a form claim. Each is one generated operation outside
+/// `fold_every_operation`.
+pub(super) const FORMS: &[FormRuling] = &[FormRuling {
+    method: "POST",
+    path: "/",
+    auth_detail: "StsFormPost",
+    caller_secret: Some(
+        "RustFS's `AssumeRole` branch compares the secret a fresh IAM lookup returns with the secret that authenticated the \
+         request, so a credential rotated after authentication cannot mint a session (rustfs/gateway#1587).",
+    ),
+}];
 
 /// RustFS's S3-shaped extension routes (rustfs/backlog#2753): the variant name the inventory
 /// records, and the operation it becomes. The inventory's order is the order RustFS's router tries

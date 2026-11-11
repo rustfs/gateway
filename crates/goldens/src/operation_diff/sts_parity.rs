@@ -60,6 +60,7 @@ use super::context::{ACCESS_KEY, BASE_DOMAIN, SECRET_KEY, verifying_at};
 use super::s3s as legacy;
 
 mod sec1;
+mod secret;
 mod sent;
 
 const FORM: &str = "application/x-www-form-urlencoded";
@@ -294,8 +295,13 @@ fn gateway(now: RequestNow, handed: &Arc<Mutex<Option<Handed>>>, asked: &Asked) 
 
 /// The same assembly, before the test selects its recording or refusing handler.
 fn gateway_builder(now: RequestNow, asked: &Asked) -> ServiceBuilder {
+    gateway_builder_with(now, asked, authenticator())
+}
+
+/// The RustFS profile's authenticator over the shared credential, handing no secret over.
+fn authenticator() -> SigV4Authenticator {
     let credentials = Credentials::new(ACCESS_KEY, SECRET_KEY.as_bytes()).expect("a fixture credential");
-    let authenticator = SigV4Authenticator::new(
+    SigV4Authenticator::new(
         Arc::new(StaticCredentials::new().with(credentials)),
         RegionSet::new([REGION]).expect("a region"),
     )
@@ -306,7 +312,11 @@ fn gateway_builder(now: RequestNow, asked: &Asked) -> ServiceBuilder {
     .verify_paths_as_legacy_rustfs()
     .accept_legacy_rustfs_signing_services()
     .answer_credential_scope_refusals_as_legacy_rustfs()
-    .read_signed_headers_as_legacy_rustfs();
+    .read_signed_headers_as_legacy_rustfs()
+}
+
+/// [`gateway_builder`] with `authenticator`.
+fn gateway_builder_with(now: RequestNow, asked: &Asked, authenticator: SigV4Authenticator) -> ServiceBuilder {
     let floor = SecurityFloor::new()
         .delegate_anonymous_to_authorizer_after_listing_in_the_posture_report()
         .enable_sigv2_presigned_compatibility()

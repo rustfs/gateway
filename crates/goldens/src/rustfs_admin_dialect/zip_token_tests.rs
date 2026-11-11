@@ -291,7 +291,7 @@ fn n_expiry_is_judged_on_the_request_clock_at_its_exact_boundary() {
 
 /// Every `tracing` event and span field emitted on this thread, each rendered whole.
 #[derive(Clone, Default)]
-pub(super) struct Capture(pub(super) Arc<Mutex<Vec<String>>>);
+pub(crate) struct Capture(pub(crate) Arc<Mutex<Vec<String>>>);
 
 struct Rendered(String);
 
@@ -338,7 +338,7 @@ impl tracing::Subscriber for Capture {
 
 /// The process-wide subscriber: records nothing and never caches a callsite as uninteresting, so a
 /// callsite first reached on another test's thread still asks this thread's capture.
-pub(super) struct Undecided;
+pub(crate) struct Undecided;
 
 impl tracing::Subscriber for Undecided {
     fn register_callsite(&self, _metadata: &'static tracing::Metadata<'static>) -> tracing::subscriber::Interest {
