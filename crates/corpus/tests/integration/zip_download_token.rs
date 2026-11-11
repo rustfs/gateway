@@ -12,34 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Query-parameter redaction: a presigned signature and a zip-download bearer `token` in an entry's
-//! target.
-//!
-//! Responsible for: refusing an entry that still carries either, and sanitizing the token while a
-//! neighbouring `continuation-token` survives.
-//! NOT responsible for: header, body or form redaction, which `super` covers.
-//! Upstream: `rustfs_gateway_corpus::redact`, `super::base_entry`. Downstream: nothing.
+//! Covers admission and redaction of zip-download tokens in recorded query strings.
+//! The integration target supplies the fixture and the corpus redaction gate supplies
+//! the verdict. This module does not exercise HTTP routing or authentication.
 
 use rustfs_gateway_corpus::redact;
 
 use super::base_entry;
-
-#[test]
-fn presigned_signature_query_parameter_is_refused() {
-    let mut entry = base_entry();
-    entry.target = "/bucket/key?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Expires=900\
-                    &X-Amz-Signature=1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f809"
-        .to_owned();
-    let refusal = redact::admit(&entry).unwrap_err();
-    assert!(
-        refusal
-            .findings
-            .iter()
-            .any(|finding| finding.reason == redact::Reason::LiveCredentialField
-                && finding.site == redact::Site::QueryParam("x-amz-signature".to_owned())),
-        "{refusal}"
-    );
-}
 
 /// Negative — the bearer `token` of a RustFS zip-download URL (ADR-0042) is credential material:
 /// an entry still carrying it is refused, whatever its case.

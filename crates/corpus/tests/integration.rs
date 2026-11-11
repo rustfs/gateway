@@ -30,6 +30,9 @@ use rustfs_gateway_corpus::redact;
 use rustfs_gateway_corpus::schema::{self, Capture, Chunk, Entry, LoadError, Response, Sut};
 use rustfs_gateway_corpus::store;
 
+#[path = "integration/zip_download_token.rs"]
+mod zip_download_token;
+
 // A well-known AWS documentation example secret. It is 40 characters, mixed case, with a
 // digit — the exact shape the scanner is built to refuse — and it authenticates nothing.
 const EXAMPLE_SECRET: &str = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
@@ -123,6 +126,23 @@ fn security_token_header_is_refused() {
             .iter()
             .any(|finding| finding.reason == redact::Reason::LiveCredentialField
                 && finding.site == redact::Site::RequestHeader("x-amz-security-token".to_owned())),
+        "{refusal}"
+    );
+}
+
+#[test]
+fn presigned_signature_query_parameter_is_refused() {
+    let mut entry = base_entry();
+    entry.target = "/bucket/key?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Expires=900\
+                    &X-Amz-Signature=1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f809"
+        .to_owned();
+    let refusal = redact::admit(&entry).unwrap_err();
+    assert!(
+        refusal
+            .findings
+            .iter()
+            .any(|finding| finding.reason == redact::Reason::LiveCredentialField
+                && finding.site == redact::Site::QueryParam("x-amz-signature".to_owned())),
         "{refusal}"
     );
 }
@@ -775,7 +795,3 @@ fn the_declared_length_check_leaves_legitimate_recordings_alone() {
     });
     assert_eq!(store::check_declared_length(&truncated), Ok(()));
 }
-
-/// The query-parameter redaction cases, split out at the 800-line limit.
-#[path = "integration/query_redaction.rs"]
-mod query_redaction;
