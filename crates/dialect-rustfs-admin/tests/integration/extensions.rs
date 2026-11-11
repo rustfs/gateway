@@ -703,6 +703,28 @@ fn only_the_four_health_rows_stay_with_rustfs() {
     assert!(!STAYING.iter().any(|route| route.path.contains("zip")));
 }
 
+/// Positive — the zip download keeps its bearer claim (ADR-0042). The SigV4 requirement every
+/// other admin floor carries would refuse that claim's token, so the download's floor has none.
+#[test]
+fn the_zip_download_keeps_its_bearer_claim() {
+    use get_v3_object_zip_downloads_by_id_zip::GetV3ObjectZipDownloadsByIdZip as Download;
+    assert!(Download::floor().query_bearer_claim().is_some());
+}
+
+/// A record, not a requirement: the zip download's floor does not require SigV4, so it admits a
+/// SigV2 header signature without a token, which legacy RustFS refuses in its access check. The
+/// request is refused later, `403` before the authorizer when a bearer verifier is installed and
+/// by RustFS's handler when none is. This is a known difference tracked on rustfs/gateway#1592,
+/// not a property to preserve: a fix there is expected to change this test.
+#[test]
+fn the_zip_download_sigv2_difference_is_recorded() {
+    use get_v3_object_zip_downloads_by_id_zip::GetV3ObjectZipDownloadsByIdZip as Download;
+    assert!(
+        !Download::floor().requires_sigv4_under_every_policy(),
+        "rustfs/gateway#1592 is closed by a SigV4 requirement on the download: update this record"
+    );
+}
+
 /// Positive and negative — the zip pair: the download is a claimed row on one opaque `{+id}`
 /// segment under both prefixes, the minting `POST` an exact row; both floors are privileged,
 /// never anonymous and never presigned; each is authorised by its own vendor label about the
@@ -717,11 +739,8 @@ fn the_zip_pair_declares_privileged_floors_own_labels_and_its_inventory_rows() {
         assert!(!floor.allows_anonymous(), "{name}");
         assert!(!floor.allowed_schemes().allows_presigned(), "{name}");
     }
-    // The mint requires SigV4 under every policy, as every admin floor does; the download cannot,
-    // because the requirement refuses its minted `?token=` URL (rustfs/gateway#1582).
+    // The mint requires SigV4 under every policy, as every admin floor does (rustfs/gateway#1582).
     assert!(Mint::floor().requires_sigv4_under_every_policy());
-    assert!(!Download::floor().requires_sigv4_under_every_policy());
-    assert!(Download::floor().query_bearer_claim().is_some());
     let download = Download::spec().auth.expect("an action");
     assert_eq!(
         (download.render(), download.resource),

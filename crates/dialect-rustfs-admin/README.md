@@ -43,7 +43,11 @@ authenticated fallback handlers (ADR-0039).
   route anonymously, and the bearer scheme it points to is not built yet.
 
 Every operation is privileged and header-signed only: never anonymous, never presigned, and never
-handed the caller's secret unless its inventory row says RustFS seals a body with it. The one
+handed the caller's secret unless its inventory row says RustFS seals a body with it. Its floor
+(`admin::floor`) also requires SigV4 under every policy, so a SigV2 header signature and a request
+admitted by a registered custom scheme are refused before the authorizer, as RustFS refuses SigV2
+on every authenticated custom route (rustfs/gateway#1582). The zip download keeps a floor without
+that requirement because of its bearer token, a recorded difference (rustfs/gateway#1592). The one
 exception is RustFS's four OIDC bootstrap routes (`oidc/authorize/{provider_id}`,
 `oidc/callback/{provider_id}`, `oidc/logout`, `oidc/providers`), which admit an anonymous request:
 the floor's per-operation opt-in lists them in the start-up posture report, their action is their
