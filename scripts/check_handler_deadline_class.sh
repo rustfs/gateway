@@ -497,14 +497,18 @@ for path in sorted((root / "crates").rglob("*.rs")):
 # explicit=50: the admin `spec_over_a_signed_body` in crates/dialect-rustfs-admin/src/admin.rs, the
 # STS form operation's caller-secret opt-in over a signed body (rustfs/gateway#1587, ADR-0053),
 # stating Standard as the admin `spec` beside it does.
-if central_builders != 102 or explicit_builders != 50:
+# explicit=52: the signed-body hardening fixtures of rustfs/gateway#1587, each one `const fn` stating
+# Standard for the same reason as the vendor fixtures: `acme:Form*`/`acme:Plain*` in
+# crates/core/tests/registration_signed_body.rs and `example:Form`/`example:Plain` in
+# crates/gateway/tests/dialect_claims_signed_body.rs.
+if central_builders != 102 or explicit_builders != 52:
     fail(
         "repository builder census drifted: "
-        f"central={central_builders} explicit={explicit_builders}, expected central=102 explicit=50"
+        f"central={central_builders} explicit={explicit_builders}, expected central=102 explicit=52"
     )
 
 print(
-    "check_handler_deadline_class: 157 repository builder sites are inventoried "
-    "(152 classified: 102 central standard, 50 explicit; 5 authority tests)"
+    "check_handler_deadline_class: 159 repository builder sites are inventoried "
+    "(154 classified: 102 central standard, 52 explicit; 5 authority tests)"
 )
 PY

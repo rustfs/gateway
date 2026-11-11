@@ -133,6 +133,7 @@ mod range_part_table;
 
 #[path = "registration.rs"]
 mod registration;
+
 #[path = "registration_signed_body.rs"]
 mod registration_signed_body;
 

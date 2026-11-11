@@ -22,8 +22,7 @@
 
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 
-use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 
 use http::{HeaderMap, HeaderValue, Method};
 use rustfs_gateway_core::BoxFuture;
@@ -41,11 +40,11 @@ const NOW: i64 = 1_440_938_160;
 const STAMP: &str = "20150830T123600Z";
 
 /// A body reader that answers the digest of a fixed body and counts how often it was asked.
-struct Body(AtomicUsize);
+struct Body(Mutex<usize>);
 
 impl StsBodyReader for Body {
     fn digest(&self, _timeouts: BodyTimeouts) -> BoxFuture<'_, Result<[u8; 32], S3Error>> {
-        self.0.fetch_add(1, Ordering::SeqCst);
+        *self.0.lock().expect("uncontended") += 1;
         Box::pin(async { Ok(Sha256::digest(b"Action=AssumeRole").into()) })
     }
 }
@@ -87,7 +86,7 @@ async fn n_a_rejected_sts_digest_comparison_signs_no_body() {
     let Admission::Sealed(sealed) = admitted else { panic!("an AWS header credential is sealed") };
     let host = RawHost::from_host_header(b"s3.example.com").expect("valid host");
     let payload = PayloadMode::Empty;
-    let body = Body(AtomicUsize::new(0));
+    let body = Body(Mutex::new(0));
     let request = Authentication::new(&sealed, &Method::PUT, "/example/admin/v1/form", &host, &payload, Some(17))
         .with_sts_body_reader(Some(&body), BodyTimeouts::S3);
     for attempt in 0..2 {
@@ -98,5 +97,5 @@ async fn n_a_rejected_sts_digest_comparison_signs_no_body() {
         );
         assert!(!request.signs_its_body(), "attempt {attempt}: a refused comparison signs no body");
     }
-    assert_eq!(body.0.load(Ordering::SeqCst), 2, "the STS body digest was computed each time");
+    assert_eq!(*body.0.lock().expect("uncontended"), 2, "the STS body digest was computed each time");
 }
