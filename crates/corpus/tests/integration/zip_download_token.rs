@@ -12,9 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Covers admission and redaction of zip-download tokens in recorded query strings.
-//! The integration target supplies the fixture and the corpus redaction gate supplies
-//! the verdict. This module does not exercise HTTP routing or authentication.
+//! Zip-download token cases for the recorded-corpus redaction gate.
+//!
+//! Responsible for: proving that the bearer `token` of a RustFS zip-download URL in a recorded
+//! query string is treated as credential material by admission and redaction, whatever the
+//! parameter's case.
+//! NOT responsible for: HTTP routing, authentication, or the gateway's own verification of such a
+//! token; those are exercised where the bearer admission lives.
+//! Upstream: the integration target, which supplies the `base_entry` fixture. Downstream:
+//! `rustfs_gateway_corpus::redact`, which supplies the verdict.
 
 use rustfs_gateway_corpus::redact;
 
