@@ -677,8 +677,8 @@ impl SigV4Authenticator {
             return Err(AuthError::InvalidAccessKeyId.into());
         };
         let Some(proof) = proof.take() else {
-            if let Some(answer) = session_refusal {
-                return Err(answer.into());
+            if session_refusal.is_some() {
+                return Err(AuthError::InvalidAccessKeyId.into());
             }
             let Some(detail) = mismatch_detail else {
                 return Err(AuthError::SignatureDoesNotMatch.into());
