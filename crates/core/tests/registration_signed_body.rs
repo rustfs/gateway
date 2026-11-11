@@ -19,16 +19,16 @@
 //! signed-body opt-in under every request-body mode, and the plain opt-in as the control.
 //! NOT responsible for: what the facade hands over at request time (`rustfs-gateway`'s
 //! `dialect_claims_signed_body` tests).
-//! Upstream: `super::Registry`, `crate::codec`. Downstream: nothing.
+//! Upstream: `rustfs_gateway_core::registry::Registry` and its codec types. Downstream: nothing.
 
 use std::sync::Arc;
 
 use rustfs_gateway_sig::{OperationFloor, SigService};
 
-use crate::codec::{CodecError, EncodedResponse, MetaView, OperationCodec, RequestBody, RequestBodyMode};
-use crate::handler::{Handler, HandlerResult, Req, Resp};
-use crate::op::{AuthRequirement, Operation, ResourceShape};
-use crate::registry::{HandlerDeadlineClass, OperationSpec, Registry, RegistryError};
+use rustfs_gateway_core::codec::{CodecError, EncodedResponse, MetaView, OperationCodec, RequestBody, RequestBodyMode};
+use rustfs_gateway_core::handler::{Handler, HandlerResult, Req, Resp};
+use rustfs_gateway_core::op::{AuthRequirement, Operation, ResourceShape};
+use rustfs_gateway_core::registry::{HandlerDeadlineClass, OperationSpec, Registry, RegistryError};
 
 const MODES: [RequestBodyMode; 5] = [
     RequestBodyMode::Full,
@@ -95,10 +95,10 @@ impl<const N: usize, const SIGNED_BODY: bool> Operation for Form<N, SIGNED_BODY>
     const NAME: &'static str = if SIGNED_BODY { NAMES[N] } else { PLAIN[N] };
     type Input = ();
     type Output = ();
-    type DerivedResources = crate::NoDerived;
+    type DerivedResources = rustfs_gateway_core::NoDerived;
 
-    fn derive_resources(_input: &Self::Input) -> Result<Self::DerivedResources, crate::DerivedResourceError> {
-        Ok(crate::NoDerived)
+    fn derive_resources(_input: &Self::Input) -> Result<Self::DerivedResources, rustfs_gateway_core::DerivedResourceError> {
+        Ok(rustfs_gateway_core::NoDerived)
     }
 
     fn seal_derived_input(_input: &mut Self::Input) {}

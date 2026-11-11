@@ -428,11 +428,6 @@ fn is_namespaced(name: &str) -> bool {
 mod rule_tests;
 
 #[cfg(test)]
-#[path = "signed_body_tests.rs"]
-#[allow(clippy::expect_used, clippy::panic, clippy::indexing_slicing)]
-mod signed_body_tests;
-
-#[cfg(test)]
 #[path = "reject_floor_tests.rs"]
 #[allow(clippy::expect_used, clippy::panic, clippy::indexing_slicing)]
 mod floor_tests;
