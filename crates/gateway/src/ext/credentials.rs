@@ -134,7 +134,7 @@ impl CredentialRefusal {
     /// its comparison has produced a match.
     pub(crate) const fn answer_after_verified_signature(self) -> rustfs_gateway_sig::AuthError {
         match self {
-            Self::SessionExpired => rustfs_gateway_sig::AuthError::InvalidAccessKeyId,
+            Self::SessionExpired => rustfs_gateway_sig::AuthError::ExpiredToken,
             Self::Disabled
             | Self::TokenWithoutSessionCredential
             | Self::SessionCredentialWithoutToken
