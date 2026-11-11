@@ -229,6 +229,12 @@ fn the_sts_operation_declares_its_claim_floor_action_and_record() {
     );
     assert_eq!(record.rustfs_handler, "AssumeRoleHandle");
     assert_eq!((record.request_body, record.response_body), (BodyKind::Buffered, BodyKind::Buffered));
+    assert_eq!(
+        record.caller_secret,
+        StsFormPost::spec().receives_caller_secret(),
+        "the record shows the spec's opt-in"
+    );
+    assert!(record.caller_secret, "the record shows the opt-in");
 }
 
 /// Positive — the codec hands the body over as it arrived and answers what the handler answers.

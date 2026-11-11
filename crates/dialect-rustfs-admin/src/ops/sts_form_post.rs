@@ -158,4 +158,5 @@ pub const RECORD: FormRouteRecord = FormRouteRecord {
     rustfs_handler: "AssumeRoleHandle",
     request_body: BodyKind::Buffered,
     response_body: BodyKind::Buffered,
+    caller_secret: true,
 };

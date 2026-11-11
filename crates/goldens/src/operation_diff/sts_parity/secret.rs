@@ -17,8 +17,10 @@
 //! `rustfs:StsFormPost` opts in to the hand-off.
 //!
 //! Responsible for: what the STS handler holds through an assembled service whose authenticator
-//! hands the secret over — the caller's own bytes for a header-signed request, nothing for an
-//! anonymous form action, nothing without the authenticator's hand-off — that an operation which
+//! hands the secret over — the caller's own bytes for a SigV4 header-signed request and for every
+//! other authenticated form request the codec admits, nothing for an anonymous form action or a
+//! query-authenticated `AssumeRole`, nothing without the authenticator's hand-off, and SigV2 as a
+//! known divergence that rustfs/gateway#1592 removes — that an operation which
 //! did not opt in still holds nothing in the same assembly, that the start-up posture names the
 //! STS endpoint among the holders, and that no log event, error body or `Debug` rendering carries
 //! the secret.
@@ -70,7 +72,14 @@ impl Handler<StsFormPost> for Holder {
     async fn call(&self, request: Req<StsFormPost>) -> HandlerResult<StsFormPost> {
         *self.held.lock().expect("uncontended") = Some(held(request.context(), format!("{request:?}")));
         if self.refuse {
-            return Err(HandlerError::new(ErrorCode::ACCESS_DENIED, "Access Denied"));
+            // A careless handler: it logs the key it was handed and echoes it into its refusal, so
+            // only the key type's own redaction keeps it out of the log and the answer.
+            let key = request
+                .context()
+                .principal()
+                .and_then(|principal| principal.secret_key_from_authenticator_lookup());
+            tracing::warn!(key = ?key, "refusing a rotated credential");
+            return Err(HandlerError::new(ErrorCode::INVALID_REQUEST, format!("refused for {key:?}")));
         }
         Ok(Resp::new(AdminResponse::bytes("", ANSWER.to_vec())))
     }
@@ -140,7 +149,9 @@ fn exchange(sent: &Sent, hand_off: bool, refuse: bool) -> (u16, String, Option<H
     (response.status().as_u16(), body, held)
 }
 
-const SIGNED: [Signing; 3] = [
+/// SigV4 header signatures, which cover the form body. SigV2 is pinned apart, as a known
+/// divergence (rustfs/gateway#1592).
+const SIGNED: [Signing; 2] = [
     Signing::Header {
         service: "sts",
         send_digest: false,
@@ -151,11 +162,10 @@ const SIGNED: [Signing; 3] = [
         send_digest: true,
         secret: STS_SECRET,
     },
-    Signing::V2Header { secret: STS_SECRET },
 ];
 
-/// Positive — a header-signed `AssumeRole`, SigV4 under either service or SigV2, reaches the STS
-/// handler with the caller's own non-empty secret.
+/// Positive — a SigV4 header-signed `AssumeRole`, under either service, reaches the STS handler
+/// with the caller's own non-empty secret.
 #[test]
 fn a_header_signed_assume_role_hands_its_handler_the_callers_secret() {
     for signing in SIGNED {
@@ -164,6 +174,76 @@ fn a_header_signed_assume_role_hands_its_handler_the_callers_secret() {
         let held = held.expect("the STS handler ran");
         assert!(held.principal, "{signing:?}");
         assert_eq!(held.secret, Some(true), "{signing:?}: the caller's own secret");
+    }
+}
+
+/// KNOWN DIVERGENCE, removed by rustfs/gateway#1592 — SigV2 does not sign the form body that
+/// carries every STS parameter, and RustFS refuses SigV2 on this route. Today the gateway admits a
+/// SigV2 header-signed `AssumeRole` and, with this opt-in, hands its handler the caller's secret,
+/// so the handler's comparison succeeds; a SigV2-presigned Web Identity form does too. When
+/// #1592 refuses SigV2 on the STS form floor, both requests stop before the handler and this case
+/// must be flipped to assert the refusal.
+#[test]
+fn known_divergence_until_1592_a_sigv2_form_request_holds_the_secret() {
+    for sent in [
+        Sent::new(Signing::V2Header { secret: STS_SECRET }),
+        Sent::new(Signing::V2Presigned).body(Bytes::from_static(WEB_IDENTITY)),
+    ] {
+        let (status, body, held) = exchange(&sent, true, false);
+        assert_eq!(status, 200, "{sent:?}: {body}");
+        let held = held.expect("today the STS handler runs");
+        assert!(held.principal, "{sent:?}");
+        assert_eq!(held.secret, Some(true), "{sent:?}: today the handler holds the caller's secret");
+    }
+}
+
+/// Positive — the opt-in is the operation's, not the action's: every authenticated form request the
+/// codec admits holds the caller's own secret, whatever action it names — signed Web Identity, an
+/// unknown action, an empty form, an `UNSIGNED-PAYLOAD` `AssumeRole`, and a SigV4-presigned Web
+/// Identity form. Session credentials are not pinned: this harness's store holds only a long-term
+/// key.
+#[test]
+fn the_opt_in_reaches_every_authenticated_form_request_the_codec_admits() {
+    let header = SIGNED[0];
+    for sent in [
+        Sent::new(header).body(Bytes::from_static(WEB_IDENTITY)),
+        Sent::new(header).body(Bytes::from_static(b"Action=NotAnAction&Version=2011-06-15")),
+        Sent::new(header).body(Bytes::new()),
+        Sent::new(Signing::HeaderUnsigned { service: "s3" }),
+        Sent::new(Signing::Presigned {
+            service: SigService::Sts,
+            secret: STS_SECRET,
+        })
+        .body(Bytes::from_static(WEB_IDENTITY)),
+    ] {
+        let (status, body, held) = exchange(&sent, true, false);
+        assert_eq!(status, 200, "{sent:?}: {body}");
+        let held = held.expect("the STS handler ran");
+        assert!(held.principal, "{sent:?}");
+        assert_eq!(held.secret, Some(true), "{sent:?}");
+    }
+}
+
+/// Negative — a query-authenticated `AssumeRole`, SigV4 under either service or SigV2, is refused
+/// by the codec before the handler, so the secret it authenticated with reaches no handler
+/// (ADR-0044).
+#[test]
+fn n_a_presigned_assume_role_never_reaches_the_handler() {
+    for signing in [
+        Signing::Presigned {
+            service: SigService::Sts,
+            secret: STS_SECRET,
+        },
+        Signing::Presigned {
+            service: SigService::S3,
+            secret: STS_SECRET,
+        },
+        Signing::V2Presigned,
+    ] {
+        let (status, body, held) = exchange(&Sent::new(signing), true, false);
+        assert_eq!(status, 403, "{signing:?}: {body}");
+        assert!(held.is_none(), "{signing:?}");
+        assert!(!body.contains(SECRET_KEY), "{signing:?}: {body}");
     }
 }
 
@@ -219,8 +299,10 @@ fn n_an_operation_that_did_not_opt_in_holds_no_secret() {
 }
 
 /// Negative — with the secret handed over, no log event, error body or `Debug` rendering holds
-/// it: a signed `AssumeRole` served, one its handler refuses, and a forged signature. The forged
-/// request's refusal is among the captured events, so the scan saw the request path's events.
+/// it: a signed `AssumeRole` served, one whose handler logs the key it holds and echoes it into its
+/// refusal, and a forged signature. The forged request's refusal and the handler's own event are
+/// among the captured events, and the echoed key is in the refusal, so each scan read something
+/// the key reached.
 #[test]
 fn n_no_log_event_error_body_or_debug_holds_the_secret() {
     // Another case may have installed one first; one only has to exist.
@@ -244,13 +326,20 @@ fn n_no_log_event_error_body_or_debug_holds_the_secret() {
     assert_eq!(held.secret, Some(true));
     assert!(!held.debug.contains(SECRET_KEY), "{}", held.debug);
     assert!(held.debug.contains("<redacted>"), "the secret was present and redacted: {}", held.debug);
-    assert_eq!((refused.0, rejected.0), (403, 403));
+    assert_eq!((refused.0, rejected.0), (400, 403));
     assert_eq!(refused.2.and_then(|held| held.secret), Some(true), "the refusing handler held it");
+    // The handler echoed the key it held into its refusal: the answer carries the key type's
+    // rendering, so the scan below reads a body the key reached.
+    assert!(refused.1.contains("CallerSecretKey(&lt;redacted&gt;)"), "{}", refused.1);
     for body in [&served.1, &refused.1, &rejected.1] {
         assert!(!body.contains(SECRET_KEY), "an answer holds the secret: {body}");
     }
     let events = capture.0.lock().expect("uncontended").clone();
     assert!(events.iter().any(|event| event.contains("gateway_request_refused")), "{events:#?}");
+    assert!(
+        events.iter().any(|event| event.contains("CallerSecretKey(<redacted>)")),
+        "the handler's log event holding the key was captured: {events:#?}"
+    );
     for event in &events {
         assert!(!event.contains(SECRET_KEY), "a log event holds the secret: {event}");
     }

@@ -100,6 +100,7 @@ fn a_form_route_is_planned_and_rendered_behind_its_form_claim() {
         "/// Handed the caller's secret (ADR-0022), which only a signed request carries: the handler compares\n\
          /// the caller's secret.\nstatic SPEC",
         OPTED_IN,
+        "    response_body: BodyKind::Buffered,\n    caller_secret: true,\n}",
     ] {
         assert!(source.contains(expected), "{expected}\n{source}");
     }
@@ -191,6 +192,20 @@ fn n_a_form_route_ruled_without_the_opt_in_is_not_handed_the_secret() {
     assert!(source.contains(OPTED_OUT), "{source}");
     assert!(!source.contains(OPTED_IN), "{source}");
     assert!(!source.contains("Handed the caller's secret"), "{source}");
+    assert!(source.contains("    caller_secret: false,\n}"), "the record shows no opt-in: {source}");
+}
+
+/// Negative — only each documentation line's prefix is rewritten: a `//!` inside the reason
+/// survives as written, and no line of the rendered comment is module documentation.
+#[test]
+fn n_a_module_doc_marker_inside_the_reason_is_not_rewritten() {
+    let ruling = [FormRuling {
+        caller_secret: Some("the reason quotes `//!` once."),
+        ..STS_FORM[0]
+    }];
+    let source = rendered(&ruling).expect("the form route plans");
+    assert!(source.contains("`//!`"), "{source}");
+    assert!(!source.contains("`///`"), "{source}");
 }
 
 /// Negative — an opt-in that does not say why the handler needs the secret is refused, whether

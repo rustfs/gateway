@@ -109,16 +109,23 @@ impl Formed {
         } = self;
         let selector = format!("FormClaim(POST {path:?})");
         let spec = match caller_secret {
-            Some(why) => format!(
-                "{}static SPEC: OperationSpec = admin::spec(NAME, AUTH, true);",
-                // Item rather than module documentation, wrapped the same way.
-                super::render::doc_paragraph(&format!(
+            Some(why) => {
+                // Item rather than module documentation, wrapped the same way: only each line's
+                // `//!` prefix becomes `///`, never a `//!` inside the reason.
+                let paragraph = super::render::doc_paragraph(&format!(
                     "Handed the caller's secret (ADR-0022), which only a signed request carries: {why}"
-                ))
-                .replace("//!", "///")
-            ),
+                ));
+                let mut doc = String::new();
+                for line in paragraph.lines() {
+                    doc.push_str("///");
+                    doc.push_str(line.strip_prefix("//!").unwrap_or(line));
+                    doc.push('\n');
+                }
+                format!("{doc}static SPEC: OperationSpec = admin::spec(NAME, AUTH, true);")
+            }
             None => "static SPEC: OperationSpec = admin::spec(NAME, AUTH, false);".to_owned(),
         };
+        let record_secret = caller_secret.is_some();
         let _ = write!(
             out,
             r#"//! `{name}`: `{method} {path}` with an `{MEDIA_TYPE}` body on every host, registration group `{group}`
@@ -248,6 +255,7 @@ pub const RECORD: FormRouteRecord = FormRouteRecord {{
     rustfs_handler: {handler:?},
     request_body: BodyKind::Buffered,
     response_body: BodyKind::Buffered,
+    caller_secret: {record_secret},
 }};
 "#
         );

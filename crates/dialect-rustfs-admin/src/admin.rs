@@ -188,8 +188,9 @@ pub fn streamed(body: RequestBody) -> Result<ByteStream, CodecError> {
 }
 
 /// The specification every admin operation has: success `200`, no required parameter, the
-/// `Standard` handler deadline, `auth`, and the caller's secret only when RustFS seals a body with
-/// it (ADR-0024).
+/// `Standard` handler deadline, `auth`, and the caller's secret only when `caller_secret` is set
+/// (ADR-0024): for a claimed row, when RustFS seals a body with it; for the STS form operation, by
+/// the generator's form ruling (rustfs/gateway#1587).
 #[must_use]
 pub const fn spec(name: &'static str, auth: AuthRequirement, caller_secret: bool) -> OperationSpec {
     let builder = OperationSpec::builder(name, 200, None)
