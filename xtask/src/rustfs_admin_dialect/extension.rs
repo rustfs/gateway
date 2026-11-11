@@ -144,6 +144,9 @@ pub(super) struct Extended {
     pub(super) action: String,
     pub(super) precedence: u16,
     pub(super) shadows: Vec<Shadowed>,
+    /// The evidence that a RustFS client presigns this route, when one is shown to
+    /// ([`admit_presigned`]); `None` keeps the privileged, header-only floor.
+    pub(super) presigned: Option<String>,
     router_url: String,
 }
 
@@ -201,6 +204,7 @@ impl Extended {
             action: action.to_owned(),
             precedence,
             shadows: Vec::new(),
+            presigned: None,
             router_url: format!("https://github.com/rustfs/rustfs/blob/{commit}/{}", super::RUSTFS_ROUTER),
         })
     }
@@ -305,11 +309,33 @@ impl Extended {
             TargetKind::Bucket => "the bucket the path names".to_owned(),
             TargetKind::Object => "the object the path names".to_owned(),
         };
+        let (floor_phrase, floor) = match &self.presigned {
+            None => (
+                "the floor is privileged",
+                "/// Privileged and header-signed only: never anonymous, never presigned. RustFS answers an unsigned request\n\
+                 /// `403 AccessDenied` here, and no RustFS client is shown to presign this route (ADR-0024 (f)).\n\
+                 static FLOOR: OperationFloor = admin::floor(NAME);\n"
+                    .to_owned(),
+            ),
+            Some(evidence) => (
+                "the floor admits a header signature or a presigned URL and never an anonymous request",
+                format!(
+                    "/// The evidence that a RustFS client presigns this route, which ADR-0024 (f) makes the condition for\n\
+                     /// admitting a presigned URL (rustfs/gateway#1576).\n\
+                     pub const PRESIGNED_EVIDENCE: &str = {evidence:?};\n\
+                     \n\
+                     /// Header-signed or presigned, never anonymous: RustFS answers an unsigned request `403 AccessDenied`\n\
+                     /// here, and a RustFS client presigns it with `{key}` inside the signed query ([`PRESIGNED_EVIDENCE`]).\n\
+                     /// The floor is not privileged, so it admits that URL, and the authorizer still decides the request.\n\
+                     static FLOOR: OperationFloor = admin::presigned_floor(NAME);\n"
+                ),
+            ),
+        };
         let paragraph = doc_paragraph(&format!(
             "RustFS's admin router claims this S3-shaped request before its S3 service reads anything else, `x-id` \
              included: a `{method}` of {} {}, whatever else the query names. It requires a signature and then has \
              the handler check `{action}`. So the row sits ahead of every standard `{method}` row of its target and \
-             declares each of those overlaps, the floor is privileged, the authorizer is asked `{action}` on {on} \
+             declares each of those overlaps, {floor_phrase}, the authorizer is asked `{action}` on {on} \
              before the handler runs, and the gateway reads no body and answers what the handler answers. Under \
              legacy RustFS's selection the same discriminator names this operation (`rustfs-gateway-core`'s \
              `legacy_rustfs`), so both selections reach it.",
@@ -373,10 +399,7 @@ pub struct {type_name};
 
 static SPEC: OperationSpec = admin::spec(NAME, AUTH, false);
 
-/// Privileged and header-signed only: never anonymous, never presigned. RustFS answers an unsigned request
-/// `403 AccessDenied` here, and no RustFS client is shown to presign an extension route (ADR-0024 (f)).
-static FLOOR: OperationFloor = admin::floor(NAME);
-
+{floor}
 impl Operation for {type_name} {{
     const NAME: &'static str = NAME;
 
@@ -460,6 +483,25 @@ pub const RECORD: ExtensionRouteRecord = ExtensionRouteRecord {{
         );
         out
     }
+}
+
+/// Gives each extension route a presigned ruling names its evidence, so its module renders
+/// `admin::presigned_floor` (ADR-0024 (f), rustfs/gateway#1576). A ruling that names no planned
+/// extension route, or that names one twice, or that cites no `https://` evidence, is refused.
+pub(super) fn admit_presigned(extended: &mut [Extended], rulings: &[(&str, &str)]) -> Result<(), String> {
+    for (name, evidence) in rulings {
+        if !evidence.starts_with("https://") {
+            return Err(format!("the presigned ruling for {name} cites no https:// evidence"));
+        }
+        let route = extended
+            .iter_mut()
+            .find(|route| route.name == *name)
+            .ok_or_else(|| format!("the presigned ruling for {name} names no extension route"))?;
+        if route.presigned.replace((*evidence).to_owned()).is_some() {
+            return Err(format!("the extension route {name} has two presigned rulings"));
+        }
+    }
+    Ok(())
 }
 
 /// Every overlap the extension rows owe, written into each winner: every standard row of the same

@@ -40,7 +40,7 @@ use serde::Deserialize;
 
 use self::render::{render_mod, render_operation, render_tables};
 use self::rule::{Rule, is_parameter};
-use self::rulings::{EXTENSIONS, FORMS, QUERY_BUCKETS, RETAINED, RULINGS, Retained, Ruling, STAYS};
+use self::rulings::{EXTENSIONS, FORMS, PRESIGNED_EXTENSIONS, QUERY_BUCKETS, RETAINED, RULINGS, Retained, Ruling, STAYS};
 use self::template::{Shadow, Template, shadowing, snake, template_params, type_name};
 
 use crate::repo_root::repo_root;
@@ -674,6 +674,7 @@ fn generate(root: &Path) -> Result<BTreeMap<PathBuf, String>, String> {
     let inventory: Inventory = serde_json::from_str(&recorded).map_err(|error| format!("cannot parse {INVENTORY}: {error}"))?;
     let mut plan = plan(&inventory, RULINGS, QUERY_BUCKETS, STAYS, FORMS, EXTENSIONS)?;
     retain(&mut plan.declared, RETAINED)?;
+    extension::admit_presigned(&mut plan.extensions, PRESIGNED_EXTENSIONS)?;
     let output = Path::new(OUTPUT);
     let mut files = BTreeMap::new();
     for declared in &plan.declared {

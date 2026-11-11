@@ -211,6 +211,16 @@ pub const fn floor(name: &'static str) -> OperationFloor {
     OperationFloor::custom(name, SigService::S3)
 }
 
+/// The floor of an S3-shaped extension operation a RustFS client is shown to presign (ADR-0024
+/// (f), rustfs/gateway#1576): header-signed or presigned, never anonymous, under every anonymous
+/// policy a deployment chooses. It is not privileged — a privileged floor refuses every presigned
+/// URL — so the start-up `SECURITY_POSTURE presigned_allowed_ops=[…]` line names it, every rule of
+/// the presigned path still runs, and the authorizer still decides the request.
+#[must_use]
+pub const fn presigned_floor(name: &'static str) -> OperationFloor {
+    OperationFloor::builtin_presigned(name, SigService::S3).refuse_anonymous_under_every_policy()
+}
+
 /// The floor of an anonymous bootstrap operation (ADR-0026 (f), ADR-0032): header-signed or
 /// anonymous, never presigned. The opt-in is per operation, so the start-up
 /// `SECURITY_POSTURE anonymous_reachable_ops=[…]` line names it, and the authorizer is still asked.

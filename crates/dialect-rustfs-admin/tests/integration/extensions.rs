@@ -42,7 +42,7 @@ use rustfs_gateway_dialect_rustfs_admin::ops::{
 };
 use rustfs_gateway_dialect_rustfs_admin::{EXTENSION_ROUTES, ExtensionOperation, OVERLAY, ROUTES, STAYING};
 use rustfs_gateway_http::{Limits, WireRequest};
-use rustfs_gateway_sig::SigService;
+use rustfs_gateway_sig::{SecurityFloor, SigService};
 
 use super::{dialect, path_style_target};
 
@@ -511,15 +511,23 @@ fn the_eight_extension_operations_are_declared_as_their_records_say() {
 }
 
 /// Positive and negative — every extension operation's floor is privileged and header-signed
-/// only, its action is the inventory's IAM action on the resource its target names, it reads no
-/// body, and it holds no secret.
+/// only, except the object lambda's, which a RustFS client is shown to presign: not privileged,
+/// header-signed or presigned (ADR-0024 (f), rustfs/gateway#1576). None admits an anonymous
+/// request, even on a floor that delegates anonymous requests to the authorizer. Each action is
+/// the inventory's IAM action on the resource its target names, each reads no body, and none
+/// holds a secret.
 #[test]
-fn every_extension_operation_declares_a_privileged_floor_and_its_inventory_action() {
+fn every_extension_operation_declares_its_floor_and_its_inventory_action() {
     fn check<O: ExtensionOperation>(record_name: &str, action: &str, resource: ResourceShape) {
         let floor = O::floor();
-        assert!(floor.privileged(), "{record_name}");
+        let presigned = record_name == LAMBDA;
+        let delegating = SecurityFloor::new().delegate_anonymous_to_authorizer_after_listing_in_the_posture_report();
+        assert_eq!(floor.privileged(), !presigned, "{record_name}");
         assert!(!floor.allows_anonymous(), "{record_name}");
-        assert!(!floor.allowed_schemes().allows_presigned(), "{record_name}");
+        assert!(!delegating.admits_anonymous(floor), "{record_name}");
+        assert!(!SecurityFloor::new().admits_anonymous(floor), "{record_name}");
+        assert_eq!(floor.allowed_schemes().allows_presigned(), presigned, "{record_name}");
+        assert_eq!(SecurityFloor::new().admits_presigned(floor), presigned, "{record_name}");
         assert_eq!(floor.service(), SigService::S3, "{record_name}");
         let auth = O::spec().auth.expect("an action");
         assert_eq!((auth.render(), auth.resource), (action.to_owned(), resource), "{record_name}");
