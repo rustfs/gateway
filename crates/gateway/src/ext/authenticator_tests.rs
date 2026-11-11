@@ -510,11 +510,13 @@ async fn an_expired_session_without_its_token_is_not_told_it_expired() {
 }
 
 /// Negative — a disabled session is refused uniformly even when it has also expired and the
-/// caller proved possession: switched off outranks the lifetime.
+/// caller proved possession: switched off outranks the lifetime, header and presigned alike.
 #[tokio::test]
 async fn a_disabled_expired_session_is_not_told_it_expired() {
-    let verdict = session_verdict("AKIDDISABLED", SESSION_SECRET, Some(SESSION_TOKEN), false).await;
-    assert_eq!(verdict.rejection(), Some(AuthError::InvalidAccessKeyId));
+    for presigned in [false, true] {
+        let verdict = session_verdict("AKIDDISABLED", SESSION_SECRET, Some(SESSION_TOKEN), presigned).await;
+        assert_eq!(verdict.rejection(), Some(AuthError::InvalidAccessKeyId), "presigned = {presigned}");
+    }
 }
 
 /// Negative — an access key the provider does not know, signed with a token, is the uniform
@@ -525,10 +527,11 @@ async fn an_unknown_session_key_is_the_uniform_refusal() {
     assert_eq!(verdict.rejection(), Some(AuthError::InvalidAccessKeyId));
 }
 
-/// Negative — the rendered expiry is the `400` the error authority gives `ExpiredToken`, the
-/// uniform refusal is still `403`, and neither message carries a byte of the token or secret.
+/// Negative — the rendered expiry is the `400` the error authority gives `ExpiredToken`, and the
+/// uniform refusal is still `403`. What the body carries is asserted on the wire, in
+/// `tests/credential_runtime.rs`.
 #[test]
-fn the_expired_token_answer_is_a_400_that_carries_no_credential() {
+fn the_expired_token_answer_is_a_400_and_the_uniform_refusal_a_403() {
     use rustfs_gateway_core::ResponseKind;
     use rustfs_gateway_types::ErrorCode;
     let expired = crate::render::from_auth(AuthError::ExpiredToken, ResponseKind::Other, false);
@@ -536,8 +539,105 @@ fn the_expired_token_answer_is_a_400_that_carries_no_credential() {
     assert_eq!(expired.status(), http::StatusCode::BAD_REQUEST);
     let uniform = crate::render::from_auth(AuthError::InvalidAccessKeyId, ResponseKind::Other, false);
     assert_eq!(uniform.status(), http::StatusCode::FORBIDDEN);
-    for rendered in [&expired, &uniform] {
-        let message = rendered.message().unwrap_or_default();
-        assert!(!message.contains("FQoGZXIvYXdz") && !message.contains("wJalrXUtnFEMI"), "{message}");
+}
+
+// ── the POST-policy spelling of the same rule ─────────────────────────────────────────────────
+
+fn hmac_sha256(key: &[u8], data: &[u8]) -> [u8; 32] {
+    use sha2::{Digest, Sha256};
+    let mut block = [0_u8; 64];
+    block[..key.len()].copy_from_slice(key);
+    let mut inner = Sha256::new();
+    inner.update(block.map(|byte| byte ^ 0x36));
+    inner.update(data);
+    let mut outer = Sha256::new();
+    outer.update(block.map(|byte| byte ^ 0x5c));
+    outer.update(inner.finalize());
+    outer.finalize().into()
+}
+
+/// Standard padded base64; the codec's own encoder takes fixed-size arrays only.
+fn base64(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::new();
+    for chunk in bytes.chunks(3) {
+        let n = chunk
+            .iter()
+            .enumerate()
+            .fold(0_u32, |n, (i, byte)| n | u32::from(*byte) << (16 - 8 * i));
+        for index in 0..4 {
+            let sextet = ((n >> (18 - 6 * index)) & 63) as usize;
+            out.push(if index <= chunk.len() {
+                char::from(ALPHABET[sextet])
+            } else {
+                '='
+            });
+        }
+    }
+    out
+}
+
+/// A SigV4 browser form for `access_key`, carrying the issued session token, signed with `secret`.
+async fn session_form_verdict(access_key: &str, secret: &[u8]) -> Verdict {
+    let credential = format!("{access_key}/20150830/us-east-1/s3/aws4_request");
+    // Concatenated rather than formatted: the token is a fixture, and no formatting macro names it.
+    let document = [
+        r#"{"expiration":"2015-08-30T13:36:00Z","conditions":[{"bucket":"example-bucket"},{"key":"uploads/report.txt"},"#,
+        r#"{"x-amz-algorithm":"AWS4-HMAC-SHA256"},{"x-amz-credential":""#,
+        credential.as_str(),
+        r#""},{"x-amz-date":"20150830T123600Z"},{"x-amz-security-token":""#,
+        SESSION_TOKEN,
+        r#""}]}"#,
+    ]
+    .concat();
+    let policy = base64(document.as_bytes());
+    let mut key = hmac_sha256(&[b"AWS4".as_slice(), secret].concat(), b"20150830");
+    for part in ["us-east-1", "s3", "aws4_request"] {
+        key = hmac_sha256(&key, part.as_bytes());
+    }
+    let signature = rustfs_gateway_sig::codec::encode_hex_lower(&hmac_sha256(&key, policy.as_bytes()));
+    let headers = http::HeaderMap::new();
+    let fields = [
+        ("key", "uploads/report.txt"),
+        ("bucket", "example-bucket"),
+        ("x-amz-algorithm", "AWS4-HMAC-SHA256"),
+        ("x-amz-credential", credential.as_str()),
+        ("x-amz-date", "20150830T123600Z"),
+        ("x-amz-security-token", SESSION_TOKEN),
+        ("x-amz-signature", signature.as_str()),
+        ("policy", policy.as_str()),
+    ];
+    let view = WireView::new(&headers, RawQuery::new("")).with_form_fields(&fields);
+    let operation = OperationFloor::builtin("PutObject", SigService::S3).allow_post_policy();
+    let admitted = SecurityFloor::new()
+        .admit(view, &operation, RequestNow::from_unix_seconds(SCOPE_NOW))
+        .expect("the form reaches the sealed path");
+    let Admission::Sealed(sealed) = admitted else { panic!("a SigV4 form must be sealed") };
+    let host = RawHost::from_host_header(b"example-bucket.s3.example.test").expect("valid host");
+    let (method, payload) = (Method::POST, PayloadMode::Empty);
+    let request = Authentication::new(&sealed, &method, "/", &host, &payload, Some(0));
+    let authenticator = session_authenticator();
+    let outcome = authenticator.authenticate(&request).await.expect("the store answers");
+    outcome.into_parts().0
+}
+
+/// Positive — a browser form for an expired session, signed with its secret and carrying its
+/// token, is told `ExpiredToken`; the same form for the live session is authenticated, so the
+/// fixture is a valid form and only the lifetime differs.
+#[tokio::test]
+async fn an_expired_session_form_that_proved_possession_is_told_it_expired() {
+    let expired = session_form_verdict("AKIDEXPIRED", SESSION_SECRET).await;
+    assert_eq!(expired.rejection(), Some(AuthError::ExpiredToken));
+    let live = session_form_verdict("AKIDLIVE", SESSION_SECRET).await;
+    assert!(live.is_authenticated(), "{live:?}");
+}
+
+/// Negative — the same form signed with a secret the caller does not hold, and the same form for
+/// a disabled expired session, are the uniform refusal.
+#[tokio::test]
+async fn an_expired_session_form_without_the_secret_is_not_told_it_expired() {
+    for (access_key, secret) in [("AKIDEXPIRED", WRONG_SECRET), ("AKIDDISABLED", SESSION_SECRET)] {
+        let verdict = session_form_verdict(access_key, secret).await;
+        assert_eq!(verdict.rejection(), Some(AuthError::InvalidAccessKeyId), "{access_key}");
     }
 }

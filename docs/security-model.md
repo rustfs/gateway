@@ -424,21 +424,37 @@ framework's half:
   is never treated as an anonymous request.
 - **An unknown key costs what a known one costs.** The unknown-key path derives from
   `timing::placeholder_secret`, runs the full four-step chain and completes the comparison before
-  answering, so the two are not separable by latency (`timing::SIDE_CHANNELS`, row T1).
+  answering, so the two are not separable by latency (`timing::SIDE_CHANNELS`, row T1). On the
+  SigV4 path the session rules cost the same too: an unknown key is admitted against a
+  placeholder session (`session_answer::placeholder_session`) and the result discarded, so it
+  pays the token comparison, or the presigned query scan and decode, that a known session pays.
+  The SigV2 path does not yet do this placeholder session work.
 - **A credential that exists but cannot be used answers as one that does not exist.** Disabled,
   expired, presented without the session token it is bound to, presented with another token, or
   presented with a token when it is long-term: all are `InvalidAccessKeyId`, byte for byte the
   answer an unknown access key gets. The session verdict is computed when the credential arrives
   and consumed *after* the signature comparison, so none of them can answer early either.
-- **An expired session is told so only by the party that already holds it.** When the signature
-  compared equal under the session's own secret, the presented token is the one issued with the
-  access key, and the credential is not disabled, an ended lifetime is `400 ExpiredToken` — the
-  code AWS SDKs refresh temporary credentials on (rustfs/gateway#1575). `Credentials::admit`
-  compares the token before it judges the lifetime, so `SessionExpired` implies the issued token.
-  The caller has proven possession of the secret and the token, so the answer tells it nothing it
-  could not already sign for; a caller missing either still gets the uniform refusal. A provider
-  that wants this answer must return the expired session with its real expiry rather than
-  `NotFound`.
+- **An expired session is named only to a request whose signature verified.** A SigV4 header,
+  presigned or POST-form request gets `400 ExpiredToken` — the code AWS SDKs refresh temporary
+  credentials on (rustfs/gateway#1575) — only when three things hold. Its signature compared equal
+  under the session's own secret, the token it carries is the one issued with the access key, and
+  the credential is not disabled. In that case the ended lifetime is answered `ExpiredToken`;
+  every other session failure is the uniform refusal. `Credentials::admit` compares the token
+  before it judges the lifetime. The answer is a `PendingSessionRefusal`, and only
+  `PendingSessionRefusal::answer(&SignatureMatch)` can turn it into anything other than the
+  uniform refusal. Who learns what:
+  - The holder of the secret and the token learns that its session expired. It could already sign
+    any request with them, so this is nothing new.
+  - The bearer of a signed artifact it did not mint learns that the session behind it has
+    expired rather than being revoked or disabled. This covers a presigned URL, a POST form or a
+    captured request replayed inside the skew window; the bearer holds neither the secret nor the
+    token. A revoked or disabled session answers the uniform refusal.
+  - A caller holding neither a valid signature nor the issued token learns nothing: it gets the
+    same bytes as for an unknown access key.
+
+  SigV2 is the exception. A SigV2 request never receives `ExpiredToken`, and an expired session
+  there stays the uniform refusal. A provider that wants the answer must return the expired session
+  with its real expiry rather than `NotFound`.
 - **A session token and a lifetime are one value.** `Credentials::with_session` takes both;
   "temporary credentials with no expiry" — the shape of GHSA-ccrv-v8v9-ch9q — is not
   representable. The lifetime is judged against the request's single clock snapshot.

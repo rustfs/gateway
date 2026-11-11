@@ -81,6 +81,7 @@ mod legacy_vhost;
 mod observer;
 mod oplayer;
 mod policy;
+mod session_answer;
 mod sigv2;
 mod vhost;
 
@@ -122,5 +123,6 @@ pub use self::policy::{
     DEFAULT_POLICY_SNAPSHOT_TIMEOUT, MAX_POLICY_SNAPSHOT_TIMEOUT, NoPolicy, PolicyError, PolicySnapshot, PolicySource,
     PolicyTimeout, PolicyTimeoutError, SnapshotId, policy_from,
 };
+pub use self::session_answer::PendingSessionRefusal;
 pub use self::sigv2::SigV2Authentication;
 pub use self::vhost::{BaseDomain, DomainError, MAX_BASE_DOMAIN_BYTES, VirtualHostStyle};

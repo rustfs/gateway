@@ -99,14 +99,14 @@ impl<'a> Presented<'a> {
         policy.session_token()
     }
 
-    /// Records session admission before comparison, as the answer owed if the signature then
-    /// matches; the caller answers only after HMAC.
+    /// Records session admission before comparison, as a refusal that only the comparison's proof
+    /// can turn into anything but the uniform answer; the caller answers only after HMAC.
     pub(super) fn session_refusal(
         &self,
         credentials: &crate::ext::credentials::Credentials,
         sealed: &SealedAws<'_>,
         location: SigLocation,
-    ) -> Option<AuthError> {
+    ) -> Option<crate::ext::PendingSessionRefusal> {
         // Legacy-compat (rustfs/backlog#2684): an unrouted form uses only the key and HMAC
         // before its method refusal. Session admission belongs to the upload path.
         if matches!(self, Self::UnroutedForm(_)) {
@@ -114,19 +114,18 @@ impl<'a> Presented<'a> {
         }
         let view = sealed.view();
         let now = sealed.clock().now();
-        let admitted = match location {
-            SigLocation::FormField => credentials.admit(self.session_token().map(SessionToken::expose), now),
+        match location {
+            SigLocation::FormField => credentials.admit_pending(self.session_token().map(SessionToken::expose), now),
             SigLocation::Query if view.query_contains(rustfs_gateway_sig::X_AMZ_SECURITY_TOKEN) => {
-                credentials.admit_query(view.query(), now)
+                credentials.admit_query_pending(view.query(), now)
             }
-            _ => credentials.admit(
+            _ => credentials.admit_pending(
                 view.headers()
                     .get(rustfs_gateway_sig::X_AMZ_SECURITY_TOKEN_HEADER)
                     .map(http::HeaderValue::as_bytes),
                 now,
             ),
-        };
-        admitted.err().map(|refusal| refusal.answer_after_verified_signature())
+        }
     }
 
     /// The timestamp the string-to-sign is dated with.

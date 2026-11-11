@@ -65,6 +65,8 @@ use rustfs_gateway_sig::{Identity, RawQuery, RequestNow, SecretBytes, SessionTok
 
 pub use rustfs_gateway_sig::{SessionBinding, SessionBindingError};
 
+use super::session_answer::PendingSessionRefusal;
+
 /// An STS session: the token and the lifetime, which are never apart.
 ///
 /// Private, and holds a [`SessionToken`], so it has no `Debug` and cannot acquire one.
@@ -125,22 +127,10 @@ impl core::fmt::Display for CredentialRefusal {
 
 impl std::error::Error for CredentialRefusal {}
 
-impl CredentialRefusal {
-    /// The rejection owed once the signature has compared equal under this credential's secret.
-    ///
-    /// Kept here, beside the only producer, so the reason never travels as itself: the
-    /// authenticator receives a wire answer, and `ExpiredToken` is the only one that is not the
-    /// uniform `InvalidAccessKeyId` (rustfs/gateway#1575). A verifier must not consult this before
-    /// its comparison has produced a match.
-    pub(crate) const fn answer_after_verified_signature(self) -> rustfs_gateway_sig::AuthError {
-        match self {
-            Self::SessionExpired => rustfs_gateway_sig::AuthError::ExpiredToken,
-            Self::Disabled
-            | Self::TokenWithoutSessionCredential
-            | Self::SessionCredentialWithoutToken
-            | Self::SessionTokenMismatch => rustfs_gateway_sig::AuthError::InvalidAccessKeyId,
-        }
-    }
+/// The reason, kept in this file, becomes an answer that needs the comparison's proof
+/// (`super::session_answer`, rustfs/gateway#1575).
+fn pending(refusal: CredentialRefusal) -> PendingSessionRefusal {
+    PendingSessionRefusal::new(matches!(refusal, CredentialRefusal::SessionExpired))
 }
 
 /// One principal's long-term or temporary credentials.
@@ -277,6 +267,17 @@ impl Credentials {
             },
             None => Err(CredentialRefusal::TokenWithoutSessionCredential),
         }
+    }
+
+    /// [`Credentials::admit`], held as a [`PendingSessionRefusal`] for a verifier to answer after
+    /// its comparison.
+    pub(crate) fn admit_pending(&self, token: Option<&[u8]>, now: RequestNow) -> Option<PendingSessionRefusal> {
+        self.admit(token, now).err().map(pending)
+    }
+
+    /// The presigned-query spelling of [`Credentials::admit_pending`].
+    pub(crate) fn admit_query_pending(&self, query: RawQuery<'_>, now: RequestNow) -> Option<PendingSessionRefusal> {
+        self.admit_query(query, now).err().map(pending)
     }
 
     /// A deep copy, secret included.
@@ -620,6 +621,15 @@ mod tests {
             credentials.admit_query(RawQuery::new("X-Amz-Security-Token=session-token-value"), NOW),
             Ok(())
         );
+        // Disabled outranks the token and the lifetime on the query spelling too.
+        for instant in [at, NOW] {
+            assert_eq!(
+                temporary(LIVE)
+                    .disable()
+                    .admit_query(RawQuery::new("X-Amz-Security-Token=session-token-value"), instant),
+                Err(CredentialRefusal::Disabled)
+            );
+        }
     }
 
     /// Negative — a disabled credential is refused whatever else is right about the request, and

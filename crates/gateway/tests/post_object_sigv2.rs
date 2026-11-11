@@ -333,6 +333,29 @@ async fn a_valid_session_token_allows_the_signed_upload() {
     assert_eq!(stored, Some(("upload".to_owned(), b"hello".to_vec())));
 }
 
+/// Negative — SigV2 never answers `ExpiredToken` (rustfs/gateway#1575 scopes it to SigV4): the
+/// upload `a_valid_session_token_allows_the_signed_upload` accepts, with the session's lifetime
+/// ended, is the uniform `403 InvalidAccessKeyId` and stores nothing.
+#[tokio::test]
+async fn an_expired_session_on_a_sigv2_form_stays_the_uniform_refusal() {
+    let policy = encode_base64_exact(POLICY);
+    let signature = signed_policy(&policy);
+    let mut fields = fields(&policy, &signature);
+    fields.push(("x-amz-security-token", "session-token"));
+    let expired = Credentials::new("AKIDEXAMPLE", b"secret")
+        .expect("valid credentials")
+        .with_session(
+            "session-token",
+            SessionBinding::new("sts.example.com", support::SIGNED_AT_UNIX_SECONDS - 1).expect("valid session"),
+        )
+        .expect("valid token");
+    let (status, response, stored) = post_with_credentials(true, &fields, "hello", expired, false).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{response}");
+    assert!(response.contains("<Code>InvalidAccessKeyId</Code>"), "{response}");
+    assert!(!response.contains("ExpiredToken"), "{response}");
+    assert_eq!(stored, None);
+}
+
 #[tokio::test]
 async fn a_case_variant_cannot_hide_a_second_access_key() {
     let policy = encode_base64_exact(POLICY);
