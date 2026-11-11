@@ -327,9 +327,20 @@ pub struct ExtensionRoute {
     pub target: String,
     /// The discriminating query key.
     pub query_discriminator: QueryDiscriminator,
-    /// Always custom: a signature is required, then the handler authorises.
+    /// Further query rules every one of which must also hold, on other keys: RustFS's metadata
+    /// listing routes are gated on `metadata=true` (rustfs/gateway#1588). Empty for the admin
+    /// router's routes, which read one key.
+    #[serde(default)]
+    pub query_requires: Vec<QueryDiscriminator>,
+    /// The RustFS source file whose selector claims the route, when it is not the admin router:
+    /// `rustfs/src/app/metadata_route.rs` for the metadata listing routes.
+    #[serde(default)]
+    pub claimed_by: Option<String>,
+    /// Always custom: RustFS decides the request in the route's own access check.
     pub auth_mode: AdminAuthMode,
-    /// What the router requires before the handler.
+    /// What RustFS requires before the handler: `SignatureRequiredThenHandlerCheck` (the admin
+    /// router's routes), or `SignedOrAnonymousThenBucketListing` (a signed or anonymous request,
+    /// then the bucket listing check, for the metadata listing routes).
     pub auth_detail: String,
     /// The action the handler authorises, as the RustFS policy enum names it.
     pub iam_action: String,
@@ -620,9 +631,32 @@ fn check_extension(route: &ExtensionRoute) -> Result<(), RouteInventoryError> {
     if !matches!(route.target.as_str(), "service" | "bucket" | "object") {
         return refuse("the target is not service, bucket or object");
     }
-    let rule = route.query_discriminator.rule.as_str();
-    if route.query_discriminator.key.is_empty() || !(rule == "present" || rule.starts_with("equals:")) {
+    let readable =
+        |rule: &QueryDiscriminator| !rule.key.is_empty() && (rule.rule == "present" || rule.rule.starts_with("equals:"));
+    if !readable(&route.query_discriminator) {
         return refuse("the query discriminator is not a key with a present or equals rule");
+    }
+    if !route.query_requires.iter().all(readable) {
+        return refuse("a further query rule is not a key with a present or equals rule");
+    }
+    let mut keys: Vec<&str> = route.query_requires.iter().map(|rule| rule.key.as_str()).collect();
+    keys.push(route.query_discriminator.key.as_str());
+    keys.sort_unstable();
+    if keys.windows(2).any(|pair| pair[0] == pair[1]) {
+        return refuse("a query key carries two rules");
+    }
+    if route
+        .claimed_by
+        .as_deref()
+        .is_some_and(|file| !file.starts_with("rustfs/src/") || file.contains("..") || !file.ends_with(".rs"))
+    {
+        return refuse("the claiming source is not a RustFS server source file");
+    }
+    if !matches!(
+        route.auth_detail.as_str(),
+        "SignatureRequiredThenHandlerCheck" | "SignedOrAnonymousThenBucketListing"
+    ) {
+        return refuse("the authorisation class is not one the dialect generator has a floor for");
     }
     if route.auth_mode != AdminAuthMode::Custom || !route.iam_action_wire.contains(':') || route.iam_action.is_empty() {
         return refuse("an extension route is signed then authorised against one named action");

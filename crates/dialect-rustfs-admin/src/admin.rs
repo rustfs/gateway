@@ -15,7 +15,8 @@
 //! The shapes every RustFS admin operation shares.
 //!
 //! Responsible for: [`AdminResponse`], what every handler answers; [`spec`] and [`floor`], which
-//! every operation is built from; the body decoders and the one response encoder the generated
+//! every operation is built from, and the narrower floors a ruling picks instead ([`listing_floor`]
+//! for the metadata listings); the body decoders and the one response encoder the generated
 //! codecs call; [`AdminOperation`] with [`OperationFold`], which let a deployment walk every
 //! claimed operation without naming each one; and [`ExtensionOperation`] with [`ExtensionFold`],
 //! the same for the S3-shaped extension operations (rustfs/backlog#2753).
@@ -224,6 +225,17 @@ pub const fn floor(name: &'static str) -> OperationFloor {
 #[must_use]
 pub const fn presigned_floor(name: &'static str) -> OperationFloor {
     OperationFloor::builtin_presigned(name, SigService::S3).require_sigv4_under_every_policy()
+}
+
+/// The floor of a metadata listing operation (rustfs/gateway#1588, ADR-0050): exactly the floor of
+/// the standard listing operations it stands in front of, `ListObjectsV2` and
+/// `ListObjectVersions` — not privileged, header-signed — so a deployment's floor admits an
+/// anonymous or presigned listing here exactly where it admits one there, and the authorizer
+/// decides it. RustFS's metadata route resolves a signed caller or keeps an unsigned one
+/// anonymous before its bucket listing check, as its S3 listing does. It carries no bearer claim.
+#[must_use]
+pub const fn listing_floor(name: &'static str) -> OperationFloor {
+    OperationFloor::builtin(name, SigService::S3)
 }
 
 /// The `token` query bearer claim of RustFS's minted zip-download URL (ADR-0042): one literal

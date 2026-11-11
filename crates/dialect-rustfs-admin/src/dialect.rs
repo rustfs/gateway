@@ -16,9 +16,9 @@
 //!
 //! Responsible for: [`CLAIMS`], the path prefixes RustFS's admin router answers ahead of its S3
 //! service; [`OVERLAY`], the record of every generated operation; and [`rustfs_admin_dialect`],
-//! which declares each against it — the claimed operations inside the claims, the eight
-//! S3-shaped extension operations as S3-table rows (rustfs/backlog#2753), the two authenticated
-//! fallbacks, and the STS endpoint behind its own form claim (ADR-0041).
+//! which declares each against it — the claimed operations inside the claims, the ten
+//! S3-shaped extension operations as S3-table rows (rustfs/backlog#2753, rustfs/gateway#1588),
+//! the two authenticated fallbacks, and the STS endpoint behind its own form claim (ADR-0041).
 //! NOT responsible for: the operations or their record rows (generated: [`crate::ops`] and
 //! `crate::table`), or registering handlers (the deployment).
 //! Upstream: `rustfs-gateway-core`'s dialect mechanism and the generated table. Downstream: a

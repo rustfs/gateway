@@ -345,6 +345,15 @@ Yours: if you route on a query parameter that is not one of the 35, do not treat
 request as having authorised its value. Prefer SigV4 for anything privileged, and keep SigV2
 disabled entirely (`SigV2Policy::Disabled`) if no legacy client needs it.
 
+One route this framework ships is selected that way. The RustFS dialect's two metadata listings
+(`?list-type=2&metadata=true` and `?versions&metadata=true`, ADR-0050) are chosen by `metadata`,
+which is not one of the 35. So a SigV2 listing request is turned into one by an appended
+`metadata=true`, and its holder gets every object's user metadata under the signer's listing
+action. That works for a captured header-signed request inside the skew window on every floor,
+and for a presigned URL where SigV2 presigned URLs are admitted. RustFS behaves the same.
+Planned: these two operations will refuse SigV2 under every policy, with the floor rule
+rustfs/gateway#1592 adds. Until then, a deployment that serves them to SigV2 clients accepts this.
+
 A second, related SigV2 property: a covered sub-resource's value is percent-decoded before it is
 written into `CanonicalizedResource`, and that block separates its own entries with `&`. So
 `?acl=x%26versionId%3Dy` and `?acl=x&versionId=y` produce the same string-to-sign, and one

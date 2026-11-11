@@ -231,6 +231,60 @@ fn an_extension_discriminator_selects_the_dialect_operation_ahead_of_every_key()
     );
 }
 
+/// RustFS's two metadata listings (rustfs/gateway#1588): its metadata route claims a bucket `GET`
+/// whose first `metadata` value is `true` and which names `versions` or a first `list-type` of `2`,
+/// before its admin router and its S3 service, so each is ahead of every operation key, of `x-id`
+/// and of the admin router's discriminators, and `versions` wins over `list-type=2`.
+#[test]
+fn a_metadata_listing_selects_the_dialect_operation_ahead_of_every_key() {
+    let bucket = |query| select(Method::GET, TargetKind::Bucket, query, &[]);
+    let v2 = op("rustfs:ListObjectsV2WithMetadata");
+    let versions = op("rustfs:ListObjectVersionsWithMetadata");
+    assert_eq!(bucket("list-type=2&metadata=true"), v2);
+    assert_eq!(bucket("metadata=true&list-type=2"), v2);
+    assert_eq!(bucket("versions&metadata=true"), versions);
+    assert_eq!(bucket("versions=x&metadata=true"), versions);
+    assert_eq!(bucket("list-type=2&versions&metadata=true"), versions);
+    assert_eq!(bucket("acl&list-type=2&metadata=true"), v2);
+    assert_eq!(bucket("x-id=ListObjects&versions&metadata=true"), versions);
+    assert_eq!(bucket("replication-check&list-type=2&metadata=true"), v2);
+    assert_eq!(bucket("events&versions&metadata=true"), versions);
+    assert_eq!(bucket("list-type=2&metadata=true&metadata=false"), v2);
+}
+
+/// Negative — a metadata listing's near miss is the ordinary operation: a `metadata` value that is
+/// not the first and exactly `true`, no selector RustFS reads, another method or target.
+#[test]
+fn n_a_metadata_listing_near_miss_is_the_ordinary_operation() {
+    let bucket = |query: &str| select(Method::GET, TargetKind::Bucket, query, &[]);
+    for value in [
+        "metadata=false",
+        "metadata=",
+        "metadata",
+        "metadata=TRUE",
+        "metadata=%74rue",
+        "metadata=false&metadata=true",
+    ] {
+        assert_eq!(bucket(&format!("list-type=2&{value}")), op("ListObjectsV2"), "{value}");
+        assert_eq!(bucket(&format!("versions&{value}")), op("ListObjectVersions"), "{value}");
+    }
+    assert_eq!(bucket("metadata=true"), op("ListObjects"));
+    assert_eq!(bucket("list-type=1&metadata=true"), op("ListObjects"));
+    // The row matches `list-type` as it arrived, as every routing value is; the partition then
+    // reads the decoded `2` and names the standard V2 listing, as it does without `metadata`.
+    assert_eq!(bucket("list-type=%32&metadata=true"), op("ListObjectsV2"));
+    assert_eq!(bucket("list-type=%32"), op("ListObjectsV2"));
+    assert_eq!(bucket("acl&metadata=true"), op("GetBucketAcl"));
+    assert_eq!(bucket("replication-check&metadata=true"), op("rustfs:CheckReplication"));
+    assert_eq!(select(Method::GET, TargetKind::Object, "list-type=2&metadata=true", &[]), op("GetObject"));
+    assert_eq!(select(Method::GET, TargetKind::Service, "versions&metadata=true", &[]), op("ListBuckets"));
+    assert_eq!(
+        select(Method::PUT, TargetKind::Bucket, "list-type=2&metadata=true", &[]),
+        op("CreateBucket")
+    );
+    assert_eq!(select(Method::HEAD, TargetKind::Bucket, "versions&metadata=true", &[]), op("HeadBucket"));
+}
+
 /// Negative — a discriminator with the wrong value, method or target is no extension route: the
 /// request is whatever its keys name, as on RustFS, whose router reads the first value of the key
 /// still encoded and takes nothing a later value says.

@@ -157,5 +157,6 @@ pub const RECORD: ExtensionRouteRecord = ExtensionRouteRecord {
     method: "GET",
     target: "service",
     query: ("events", "present"),
+    requires: &[],
     action: "s3:ListenNotification",
 };

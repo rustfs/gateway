@@ -158,6 +158,8 @@ jobs:
       # the tests use a local stand-in checkout and never contact the private repository.
       - name: RDMA build helper tests
         run: python3 scripts/tests/test_build_rdma.py
+      - name: Metadata listing reader tests
+        run: python3 scripts/test_metadata_listing_routes.py
       # Dependency policy against deny.toml: RustSec advisories, bans, licences and sources.
       # `--locked` judges the committed Cargo.lock, not one cargo would rewrite first, and
       # `--all-features` takes in the compat-s3s oracles, the repository's only git source.
