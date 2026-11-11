@@ -61,7 +61,9 @@ mod tests {
             .with_query_bearer_claim(QueryBearerClaim::new("token", ".zip"));
         let signed_only =
             OperationFloor::builtin_presigned("example:SignedOnly", SigService::S3).require_sigv4_under_every_policy();
-        let operations = [&standard, &privileged, &bearer, &signed_only];
+        let form = OperationFloor::builtin("example:Form", SigService::S3).allow_post_policy();
+        let issuing = OperationFloor::builtin("example:AssumeRole", SigService::Sts);
+        let operations = [&standard, &privileged, &bearer, &signed_only, &form, &issuing];
         let claimed = SecurityFloor::new().with_header_token_claim(HeaderTokenClaim::new("x-auth-token").expect("a legal claim"));
 
         assert_eq!(

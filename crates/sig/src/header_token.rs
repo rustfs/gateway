@@ -40,7 +40,7 @@
 //! for one. The verifier answers from the request's own server-side state.
 //!
 //! ```compile_fail,E0599
-//! fn peek(request: &rustfs_gateway_sig::HeaderTokenRequest<'_>) -> &str {
+//! fn peek<'a>(request: &'a rustfs_gateway_sig::HeaderTokenRequest<'_>) -> &'a str {
 //!     request.token()
 //! }
 //! ```
@@ -65,10 +65,10 @@
 //! }
 //! ```
 //!
-//! ```compile_fail,E0599
+//! ```compile_fail,E0277
 //! use rustfs_gateway_sig::HeaderTokenAdmission;
 //! fn copy(admission: &HeaderTokenAdmission) -> HeaderTokenAdmission {
-//!     admission.clone()
+//!     Clone::clone(admission)
 //! }
 //! ```
 //!
@@ -86,10 +86,10 @@
 //! }
 //! ```
 //!
-//! ```compile_fail,E0599
+//! ```compile_fail,E0277
 //! use rustfs_gateway_sig::HeaderTokenReceipt;
 //! fn copy(receipt: &HeaderTokenReceipt) -> HeaderTokenReceipt {
-//!     receipt.clone()
+//!     Clone::clone(receipt)
 //! }
 //! ```
 //!
@@ -112,12 +112,16 @@
 //!
 //! Nor build the variant directly:
 //!
-//! ```compile_fail,E0639
+//! ```compile_fail,E0603
 //! use rustfs_gateway_sig::{HeaderTokenReceipt, Verdict};
 //! fn launder(receipt: HeaderTokenReceipt) -> Verdict {
 //!     Verdict::HeaderToken(receipt)
 //! }
 //! ```
+//!
+//! Each probe above fails for the one reason it names and no other. Stable `rustdoc` does not
+//! compare the error code, so the code is a record of what was measured, and the guarantee is
+//! that a probe compiles the moment the thing it forbids exists.
 
 use core::fmt;
 
@@ -286,7 +290,11 @@ pub struct HeaderTokenRefused;
 ///   when there is none: an absent identity is a refusal, never an anonymous request.
 /// * Establish an identity from the claimed header only, and leave the header in place: the
 ///   gateway consumes it. An identity established from any other header reaches a request the
-///   gateway treats as anonymous.
+///   gateway treats as anonymous, or as its signer. A host that accepts an alias of the header
+///   renames it to the claimed one in its outer layer, or refuses it there.
+/// * Report an identity its policy source and audit trail can tell from an access key, unless
+///   the two are meant to be one principal: the identity is the only thing they are handed. A
+///   [`crate::SessionBinding`] naming the issuer is one way to mark it.
 /// * Own replay, expiry and revocation. The kernel keeps no token state.
 ///
 /// # Calling contract

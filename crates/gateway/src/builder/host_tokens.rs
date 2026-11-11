@@ -65,9 +65,9 @@ impl ServiceBuilder {
     /// * a request carrying the header beside any other credential surface — an `Authorization`
     ///   header, a presigned query, a session token, a browser form, a registered custom scheme,
     ///   an operation's query bearer token — is refused `403` before any verifier runs;
-    /// * a privileged operation, one of the STS service, one that declares a query bearer claim
-    ///   and one that requires SigV4 under every policy refuse the header; every other operation
-    ///   admits it;
+    /// * every standard operation admits the header, bucket configuration included; a privileged
+    ///   operation, one of the STS service, one that takes a browser form, one that declares a
+    ///   query bearer claim and one that requires SigV4 under every policy refuse it;
     /// * a refusal or a panic of `verifier` is `403`, never an anonymous request;
     /// * the request is unsigned, and its body is held to what an anonymous request's is;
     /// * authorizers and the audit event see `AuthSchemeRef::HeaderToken`, and a handler reads
@@ -78,6 +78,10 @@ impl ServiceBuilder {
     ///
     /// The host's outer layer validates the token and leaves the identity in the request's own
     /// state; see [`HeaderTokenVerifier`] for what the verifier must and must not do.
+    ///
+    /// One claim is in force: a second call replaces the first claim and its verifier, and the
+    /// claim replaces one written onto the floor directly. A claim whose header falls under a
+    /// registered custom scheme's prefix refuses every request that presents it.
     #[must_use]
     pub fn host_verified_header_token(mut self, claim: HeaderTokenClaim, verifier: impl HeaderTokenVerifier) -> Self {
         self.header_token = Some((claim, Arc::new(verifier)));

@@ -275,14 +275,18 @@ The framework's half:
   header name and one verifier (ADR-0050). A request whose only credential is that header is then
   admitted as far as the verifier, which reports the identity the host established. The token
   beside any other credential surface is refused before any verifier runs, and a refusal, a panic
-  or a missing verifier is `403`, never an anonymous request. Privileged operations, operations of
-  the STS service, an operation with a query bearer claim and one that requires SigV4 under every
-  policy refuse the scheme. The
+  or a missing verifier is `403`, never an anonymous request. Every standard S3 operation admits
+  the scheme, bucket configuration included; privileged operations, operations of the STS service,
+  an operation that takes a browser form, one with a query bearer claim and one that requires SigV4
+  under every policy refuse it. The
   authorizer sees `AuthSchemeRef::HeaderToken` and the reported principal, and the request's body
   is held to what an anonymous body is. The claimed header is removed before the request is
   accepted, so no authorization or handler context holds the token. Without the opt-in the header
   is an ordinary header and nothing reads it. The `HEADER_TOKEN_POSTURE` start-up line names the
-  header and every operation that admits it.
+  header and every operation that admits it. The host owns what the gateway cannot see: an alias
+  header its outer layer accepts must be renamed to the claimed one or refused there, the identity
+  it reports should be one its policy source can tell from an access key, and a shared cache in
+  front of the gateway does not treat the claimed header as it treats `Authorization`.
 
 The condition facts a policy engine needs arrive through the same `RequestContext`, and each
 has exactly one source (rustfs/backlog#2752):

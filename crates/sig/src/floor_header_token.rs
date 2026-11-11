@@ -50,16 +50,19 @@ impl SecurityFloor {
     /// Whether this floor admits a request to `operation` by its header token claim.
     ///
     /// This is the one answer; admission and the startup posture report both read it. With a
-    /// claim installed, every operation admits the scheme except a privileged one (admin,
-    /// configuration, and every third-party operation that kept its default), one of the STS
-    /// service (credential issuance, privileged or not), one that declares a query bearer claim,
-    /// and one that requires SigV4 under every policy. No other policy of the floor widens or
-    /// narrows it.
+    /// claim installed, every standard operation admits the scheme, bucket configuration
+    /// included: the token speaks for its user as a header signature does, and the authorizer
+    /// decides. The exceptions refuse it: a privileged operation (the admin surface, and every
+    /// third-party operation that kept its default), one of the STS service (credential
+    /// issuance, privileged or not), one that takes a browser form, one that declares a query
+    /// bearer claim, and one that requires SigV4 under every policy. No other policy of the floor
+    /// widens or narrows it.
     #[must_use]
     pub const fn admits_header_token(&self, operation: &OperationFloor) -> bool {
         self.header_token.is_some()
             && !operation.privileged()
             && !matches!(operation.service(), crate::SigService::Sts)
+            && !operation.allowed_schemes().allows_post_policy()
             && operation.query_bearer_claim().is_none()
             && !operation.requires_sigv4_under_every_policy()
     }

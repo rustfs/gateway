@@ -299,18 +299,21 @@ async fn n_a_verifier_that_refuses_is_a_closed_403_and_never_anonymous() {
 }
 
 /// Negative — a verifier that panics is a closed `403`, and the next request on the same service
-/// is verified and served: the panic poisons nothing.
+/// is verified and served: the panic poisons nothing. A payload whose own destructor panics is
+/// contained the same way.
 #[tokio::test]
 async fn n_a_verifier_that_panics_is_a_closed_403_and_poisons_nothing() {
-    let fixture = assemble(Some(Answer::PanicsOnce));
-    let response = fixture.exchange(token_only(http::Method::POST, "/")).await;
-    assert_eq!(status_and_code(&response), (403, Some("AccessDenied".to_owned())));
-    assert!(fixture.stages.take().is_empty() && fixture.backend.take().is_empty());
+    for answer in [Answer::PanicsOnce, Answer::PanicsOnceWithAPayloadThatPanics] {
+        let fixture = assemble(Some(answer));
+        let response = fixture.exchange(token_only(http::Method::POST, "/")).await;
+        assert_eq!(status_and_code(&response), (403, Some("AccessDenied".to_owned())), "{answer:?}");
+        assert!(fixture.stages.take().is_empty() && fixture.backend.take().is_empty(), "{answer:?}");
 
-    let next = fixture.exchange(token_only(http::Method::POST, "/")).await;
-    assert_eq!(next.status(), http::StatusCode::OK, "{:?}", next.body());
-    assert_eq!(fixture.verifier_calls.load(Ordering::SeqCst), 2);
-    assert_eq!(fixture.backend.take()[0].header_token.as_deref(), Some(PRINCIPAL));
+        let next = fixture.exchange(token_only(http::Method::POST, "/")).await;
+        assert_eq!(next.status(), http::StatusCode::OK, "{answer:?}: {:?}", next.body());
+        assert_eq!(fixture.verifier_calls.load(Ordering::SeqCst), 2, "{answer:?}");
+        assert_eq!(fixture.backend.take()[0].header_token.as_deref(), Some(PRINCIPAL), "{answer:?}");
+    }
 }
 
 /// Negative and positive — a host verifier that reports what its outer layer installed refuses a

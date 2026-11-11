@@ -67,8 +67,19 @@ pub(crate) enum Answer {
     Refuses,
     /// Panics the first time it is asked, and accepts afterwards.
     PanicsOnce,
+    /// Panics the first time with a payload whose own destructor panics, and accepts afterwards.
+    PanicsOnceWithAPayloadThatPanics,
     /// Reports the identity its outer layer installed in this request, and refuses without one.
     ReportsInstalled,
+}
+
+/// A panic payload that panics again when it is released.
+struct PanicsWhenDropped;
+
+impl Drop for PanicsWhenDropped {
+    fn drop(&mut self) {
+        panic!("the payload's own destructor");
+    }
 }
 
 /// The fixture host. It counts every call, so "the verifier was never asked" is a measurement.
@@ -85,6 +96,12 @@ impl HeaderTokenVerifier for Host {
             Answer::Refuses => return Err(HeaderTokenRefused),
             Answer::PanicsOnce => {
                 assert_ne!(asked, 1, "the fixture host's own failure");
+                PRINCIPAL
+            }
+            Answer::PanicsOnceWithAPayloadThatPanics => {
+                if asked == 1 {
+                    std::panic::panic_any(PanicsWhenDropped);
+                }
                 PRINCIPAL
             }
             Answer::ReportsInstalled => request.server_state::<Established>().ok_or(HeaderTokenRefused)?.0,

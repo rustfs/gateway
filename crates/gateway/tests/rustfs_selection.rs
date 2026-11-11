@@ -641,20 +641,26 @@ async fn n_an_unrouted_form_beside_a_header_token_is_neither_read_nor_verified()
         );
         assert!(!String::from_utf8_lossy(&answer).to_ascii_lowercase().contains("sentinel"));
         assert!(seen.take().is_empty(), "with_token={with_token}");
-        let (head, _) = http::Request::builder()
+        // `classify` walks the same steps: the form beside the token is not a form to be read.
+        let mut head = http::Request::builder()
             .method(http::Method::POST)
             .uri("/bkt/obj")
-            .header("content-type", "multipart/form-data; boundary=form")
-            .header("x-auth-token", "gAAAAABheader-token-sentinel")
-            .body(())
-            .expect("a valid head")
-            .into_parts();
+            .header("host", "s3.example.com")
+            .header("content-type", "multipart/form-data; boundary=form");
+        if with_token {
+            head = head.header("x-auth-token", "gAAAAABheader-token-sentinel");
+        }
+        let (head, _) = head.body(()).expect("a valid head").into_parts();
         let classified = service.classify(&head);
-        assert_ne!(
-            classified,
-            Classification::UnroutedPostForm,
-            "classification agrees: the form is not read"
-        );
+        if with_token {
+            let refused = Classification::Refused {
+                status: http::StatusCode::NOT_IMPLEMENTED,
+                code: Some(ErrorCode::NOT_IMPLEMENTED),
+            };
+            assert_eq!(classified, refused, "with_token={with_token}");
+        } else {
+            assert_eq!(classified, Classification::UnroutedPostForm, "with_token={with_token}");
+        }
     }
     assert_eq!(asked.load(Ordering::SeqCst), 0, "the host's verifier was asked about an unrouted request");
 }

@@ -67,12 +67,13 @@ a value of 1 to 8192 bytes, every byte ASCII graphic and none a comma. A repeate
 non-ASCII, whitespace-bearing or list-shaped value is `403`. No occurrence is chosen over another.
 
 **Which operations admit it.** `SecurityFloor::admits_header_token` is the one predicate; the floor
-and the posture report both read it. It admits every operation that is not privileged, is not of
-the STS service, declares no query bearer claim, and does not require SigV4 under every policy
-(ADR-0049). It refuses privileged operations (admin, configuration, and every third-party operation
-that kept its default), credential issuance (every operation of the STS service, privileged or
-not), the bearer-claimed route, and a SigV4-only route. There is no per-operation opt-in for any of
-them; adding one needs its own decision.
+and the posture report both read it. It admits every standard S3 operation, bucket configuration
+such as `PutBucketPolicy` included: the token speaks for its user on the S3 surface as a header
+signature does, and the authorizer decides. It refuses privileged operations (the admin surface,
+and every third-party operation that kept its default), credential issuance (every operation of the
+STS service, privileged or not), an operation that takes a browser form, the bearer-claimed route,
+and a route that requires SigV4 under every policy (ADR-0049). There is no per-operation opt-in for
+any of them; adding one needs its own decision.
 
 **The verifier.** `HeaderTokenVerifier::verify(&HeaderTokenRequest) -> Result<Identity,
 HeaderTokenRefused>` is synchronous and is the host's trust boundary. The request exposes the
@@ -141,11 +142,14 @@ filter can neither supply nor erase a token.
   values, and the HTTP/1.1 parsers in use strip optional whitespace around a value. This is read
   from those crates' documentation and from the existing duplicate-header rule, not measured by a
   new wire test in this record.
-- Measured on the implementation in this pull request: `cargo test -p rustfs-gateway-sig --doc
-  header_token` ran ten compile-fail probes, each failing at the code it names: `E0451` for a
-  struct literal of the admission and of the receipt, `E0624` for the admission's constructor and
-  for `Verdict::header_token`, `E0599` for `clone` and `default` on both and for a `token`
-  accessor on the verifier's request, and `E0639` for building `Verdict::HeaderToken` directly.
+- Measured on the implementation in this pull request: the ten compile-fail probes in
+  `crates/sig/src/header_token.rs` each fail with exactly one error. Run as ordinary doctests, they
+  report `E0451` for a struct literal of the admission and of the receipt, `E0624` for the
+  admission's constructor and for `Verdict::header_token`, `E0277` for `Clone::clone` on either,
+  `E0599` for `default` on either and for a `token` accessor on the verifier's request, and `E0603`
+  for building `Verdict::HeaderToken` directly. Stable `rustdoc` does not compare the code a
+  `compile_fail` block names, so each probe was also made to compile by a mutation that grants
+  what it forbids, and its test went red.
 - The mutation of each new assertion, with the command that ran it, is recorded in the pull
   request that lands this record.
 
@@ -186,7 +190,16 @@ The host owns the following, and the gateway cannot check them:
 - The outer layer validates the token on every request and installs the identity in that request's
   own state. It must leave the claimed header in place, because the gateway consumes it. It must
   establish an identity from the claimed header only: an identity established from any other header
-  reaches a request the gateway treats as anonymous.
+  reaches a request the gateway treats as anonymous, or as its signer. One header can be claimed, so
+  a host that accepts an alias of it renames the alias to the claimed header in its outer layer, or
+  refuses it there.
+- The identity the verifier reports is the only thing the policy source and
+  the observer are handed; only the authorizer and the audit event also see the scheme. A host
+  reports an identity those can tell from an access key, unless the two are meant to be one
+  principal.
+- A shared cache in front of the gateway does not treat the claimed header as it treats
+  `Authorization`. The gateway adds no `Cache-Control` or `Vary` for these requests, as it adds none
+  for an anonymous one; a deployment with such a cache owns that.
 - Replay policy, expiry and revocation. A header token is a bearer credential; the gateway keeps no
   token state and accepts it as often as the host does.
 - A verifier that blocks stalls its request. It must only read what the outer layer left.
@@ -194,6 +207,13 @@ The host owns the following, and the gateway cannot check them:
   redacts `x-auth-token` and `x-storage-token`; any other claimed name is the host's to redact.
 - A stage filter's wire seam runs before the header is removed and sees it, as it sees
   `authorization`.
+- The claimed header is outside the accepted head: acceptance's 128-field and 16 KiB ceilings do
+  not count it, and the floor's own rule (one occurrence, 8 KiB) answers `403` at admission, after
+  routing, where a wire refusal would have come first. The transport's own head limit still bounds
+  it.
+- One claim is in force. A second `host_verified_header_token` call replaces the first, and the
+  builder's claim replaces one written onto the floor directly. A claim whose header falls under a
+  registered custom scheme's prefix refuses every request presenting it. Neither is a build error.
 
 Residual, shared with ADR-0046 and tracked in rustfs/gateway#1574: `HeaderTokenAdmission::verify`
 is public because the facade calls it across a crate boundary, so host code can build a
@@ -215,6 +235,8 @@ Threat model, and the control for each:
 | A verifier that refuses, panics or is absent | `403`, reported as one contained-panic event for a panic; never anonymous. |
 | A verdict minted for another request | Accepted only from the request's own admission. |
 | The token in a log, error, `Debug` output or context | Never copied by the admission; removed from the head before acceptance. |
+| A verifier whose panic payload panics again when released | The payload is released under a second boundary; still `403`. |
+| A token header an outer layer accepts under another name | Not seen by the gateway. The host renames or refuses the alias; see the duties above. |
 
 Guardrails: the compile-fail doctests in `crates/sig/src/header_token.rs` (forging, cloning,
 default-constructing and laundering), the floor's `tests/header_token.rs`, the facade's

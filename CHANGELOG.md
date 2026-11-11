@@ -19,9 +19,10 @@ installed by default, and without the opt-in a request carrying the header is se
 before.
 
 With the opt-in: a request whose only credential is the claimed header is served as the identity
-the verifier reports, on every operation that is not privileged, is not of the STS service,
-declares no query bearer claim and does not require SigV4 under every policy. A claim names an
-`x-` extension header outside `x-amz-`. The header beside any other credential surface is
+the verifier reports, on every standard S3 operation. A privileged operation, one of the STS
+service, one that takes a browser form, one that declares a query bearer claim and one that
+requires SigV4 under every policy refuse it. A claim names an `x-` extension header outside
+`x-amz-`. The header beside any other credential surface is
 refused `403` before any verifier runs. A refusal, a panic or a missing verifier is `403`, never an
 anonymous request. The verifier is not given the token, and the claimed header is removed from the
 request before acceptance, so no authorization or handler context holds it. The request is

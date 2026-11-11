@@ -80,7 +80,13 @@ pub(crate) fn contain_report(callback: &'static str, throttle: &'static Throttle
 
 /// Runs a synchronous deployment callback that decides admission — a host's token verifier —
 /// and turns a panic into `Err(())`, which the caller answers by refusing the request. The payload
-/// is dropped; nothing the callback borrowed is shared with another request.
+/// is released under a second boundary, as [`contain_report`] releases one: a payload whose
+/// destructor panics would otherwise unwind out of the refusal. Nothing the callback borrowed is
+/// shared with another request.
 pub(crate) fn contain_decision<T>(decide: impl FnOnce() -> T) -> Result<T, ()> {
-    std::panic::catch_unwind(AssertUnwindSafe(decide)).map_err(|_| ())
+    std::panic::catch_unwind(AssertUnwindSafe(decide)).map_err(|payload| {
+        if let Err(secondary) = std::panic::catch_unwind(AssertUnwindSafe(move || drop(payload))) {
+            std::mem::forget(secondary);
+        }
+    })
 }

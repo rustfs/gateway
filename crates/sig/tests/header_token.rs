@@ -231,7 +231,6 @@ fn a_lone_claimed_header_is_admitted_as_a_header_token() {
             standard_op(),
             s3_object_op(),
             standard_op().allow_anonymous_after_listing_in_the_posture_report(),
-            standard_op().allow_post_policy(),
         ] {
             let admitted = admit(&floor, &headers, "", None, &operation);
             assert_eq!(shape(&admitted), "header-token", "{name}: {operation:?}");
@@ -374,8 +373,8 @@ const OTHER_SURFACES: &[Surface] = &[
 /// refusal the token's doing.
 #[test]
 fn n_the_token_beside_any_other_credential_surface_is_refused() {
-    // A post-policy operation, so that a form is refused for the token and not for the allow-list.
-    let operation = s3_object_op().allow_post_policy();
+    // An operation that admits the scheme, so each refusal is the other surface's doing.
+    let operation = s3_object_op();
     for (floor_name, floor) in claimed_floors() {
         for surface in OTHER_SURFACES {
             let at = format!("{floor_name}: {}", surface.name);
@@ -568,6 +567,7 @@ fn n_privileged_bearer_claimed_and_sigv4_only_operations_refuse_the_scheme() {
             "credential issuance",
             OperationFloor::builtin_presigned("example:GetToken", SigService::Sts),
         ),
+        ("a browser-form operation", standard_op().allow_post_policy()),
         (
             "sigv4 under every policy",
             OperationFloor::builtin_presigned("example:SignedOnly", SigService::S3).require_sigv4_under_every_policy(),
