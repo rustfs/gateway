@@ -90,7 +90,7 @@ fn route_action(exchange: &Exchange, at: &str) -> String {
 }
 
 /// `seconds` as an RFC 1123 date, the spelling SigV2's `Date` header carries.
-fn rfc1123(seconds: i64) -> String {
+pub(super) fn rfc1123(seconds: i64) -> String {
     const WEEKDAYS: [&str; 7] = ["Thu", "Fri", "Sat", "Sun", "Mon", "Tue", "Wed"];
     const MONTHS: [&str; 12] = [
         "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",

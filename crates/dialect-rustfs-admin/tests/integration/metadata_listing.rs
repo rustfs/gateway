@@ -375,6 +375,37 @@ fn n_the_two_selections_never_disagree_on_a_metadata_request() {
     }
 }
 
+/// Negative — a percent-encoded key never routes: the wire layer refuses an encoded parameter
+/// name before anything is selected, so `%6Detadata`, `%76ersions` and `list%2Dtype` select no
+/// metadata listing (RustFS decodes them and would; the pull request's ledger records it).
+#[test]
+fn n_an_encoded_key_is_refused_before_routing() {
+    for target in [
+        "/bkt?list-type=2&%6Detadata=true",
+        "/bkt?%76ersions&metadata=true",
+        "/bkt?list%2Dtype=2&metadata=true",
+    ] {
+        let request = Request::builder()
+            .method("GET")
+            .uri(format!("http://s3.example.com{target}"))
+            .header("host", "s3.example.com")
+            .body(())
+            .expect("a fixture request");
+        assert!(WireRequest::accept(request, &Limits::default()).is_err(), "{target}");
+    }
+}
+
+/// Positive — a sub-resource beside either selector does not change the answer: `versionId`,
+/// `policy`, `tagging`, `location` and `delete` are each the metadata listing, as RustFS's
+/// selector reads only `metadata`, `versions` and `list-type`.
+#[test]
+fn the_metadata_listing_is_ahead_of_every_named_sub_resource() {
+    for extra in ["versionId=v1", "policy", "tagging", "location", "delete"] {
+        assert_eq!(reached("GET", &format!("/bkt?{extra}&list-type=2&metadata=true")), Some(V2), "{extra}");
+        assert_eq!(reached("GET", &format!("/bkt?{extra}&versions&metadata=true")), Some(VERSIONS), "{extra}");
+    }
+}
+
 // ── declarations ──────────────────────────────────────────────────────────────────────────────
 
 /// Every admission question a deployment's floor can ask of an operation floor, under every

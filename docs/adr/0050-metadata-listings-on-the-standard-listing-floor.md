@@ -54,10 +54,25 @@ on these two exactly where it admits one on the standard listings:
   presigned switch, and the presigned policy. All four answers are the same for both.
 
 SigV2 signs only a fixed set of sub-resource keys, and neither `metadata` nor `list-type` is one.
-So under SigV2 compatibility, `metadata=true` appended to a SigV2 presigned V2 listing URL is
-covered by nothing the signature covers. The request becomes the metadata listing. It is still
-asked `s3:ListBucket` on the same bucket for the same caller, just as an appended `prefix` or
-`max-keys` is. Under SigV4 every query pair is signed, and the same edit is refused.
+The consequence, in plain words: **under SigV2, whoever holds a listing URL, or has captured a
+SigV2 header-signed listing request, can obtain every object's user metadata, which the signer
+did not sign for.** They append `metadata=true` (and `list-type=2` where it is missing). The
+signature still verifies, the request becomes the metadata listing, and it is asked the same
+listing action on the same bucket for the signer. Before this change the same edit could only
+widen the listing itself, as an appended `prefix` or `max-keys` could. Now it also yields user
+metadata, which S3 otherwise gates behind `s3:GetObject`. Where each form applies:
+
+- **Presigned:** wherever SigV2 presigned URLs are admitted, which is the RustFS profile's floor
+  and not the default floor.
+- **Header-signed:** inside the clock-skew window, on every floor. SigV2 header authentication is
+  on by default (`SigV2Policy::HeaderOnly`).
+
+Under SigV4 every query pair is signed, and the same edit is refused.
+
+This change keeps that behaviour on purpose: RustFS serves the same requests (its s3s signs the
+same key set), and parity is what this record is for. **Planned change:** a follow-up applies the
+"SigV2 is refused under every policy" floor rule that rustfs/gateway#1592 is adding to these two
+operations, which removes both forms. It is not implemented here.
 
 Every admitted request is still the authorizer's to decide, for the listing action on the bucket.
 The overlay row records `anonymous: false`, because the operation itself opts into nothing.
@@ -74,9 +89,13 @@ ADR-0024, ADR-0035 and ADR-0021 are not edited. This record narrows them for the
 - RustFS's metadata route: https://github.com/rustfs/rustfs/blob/443e8afee194fe38b32d62a9289a99c1f703715c/rustfs/src/app/metadata_route.rs. Its selector requires a first `metadata` value of exactly `true` and tries `versions` before `list-type=2`. Its access check keeps an unsigned caller anonymous and authorises the matching listing action on the bucket. Read from source.
 - s3s at the revision RustFS pins, `5761ddfe4c509fcac87e3b99fd5bd9e176b442c0`: https://github.com/s3s-project/s3s/blob/5761ddfe4c509fcac87e3b99fd5bd9e176b442c0/crates/s3s/src/ops/mod.rs and https://github.com/s3s-project/s3s/blob/5761ddfe4c509fcac87e3b99fd5bd9e176b442c0/crates/s3s/src/ops/signature.rs. In `prepare`, a request a custom route matches has its signature verified before the route is handed it, through the same check as every S3 operation. That check accepts a SigV2 presigned URL whenever presigned URLs are enabled. RustFS's metadata route then takes that credential and refuses no signature family itself, unlike its admin router. Read from source.
 - This repository's `crates/sig/src/floor.rs` (`SecurityFloor::enforce_scheme_allowed`) and `crates/sig/src/sig_v2/string_to_sign.rs` (the signed sub-resource list). Read from source.
-- The goldens tests `a_sigv2_presigned_listing_is_admitted_exactly_where_a_standard_one_is` and
-  `metadata_true_appended_to_a_sigv2_presigned_listing_is_the_same_callers_listing` pin both
-  sentences above.
+- The goldens tests in `rustfs_admin_dialect::metadata_listing_tests` pin these statements in both
+  directions:
+  - `a_sigv2_presigned_listing_is_admitted_exactly_where_a_standard_one_is`;
+  - `metadata_true_appended_to_a_sigv2_presigned_listing_is_admitted_only_where_sigv2_presigned_is`;
+  - `metadata_true_appended_to_a_sigv2_header_signed_listing_is_the_signers_metadata_listing`;
+  - `n_a_sigv2_header_signed_listing_with_a_signed_key_added_is_refused_without_asking`;
+  - `n_metadata_true_appended_to_a_presigned_listing_is_refused_without_asking` (the SigV4 form).
 - The dialect crate's test `each_metadata_listing_floor_is_exactly_its_standard_listings_floor`
   compares each floor with the standard listing's under all four combinations of the anonymous
   and presigned policies.
@@ -96,3 +115,9 @@ ADR-0024, ADR-0035 and ADR-0021 are not edited. This record narrows them for the
 A host that registers the standard listings under the RustFS dialect must also register these
 two operations. Without a handler, a request carrying `metadata=true` is answered `501`. It is
 no longer served as a standard listing that silently drops the metadata it asked for.
+
+A host on the RustFS profile (legacy RustFS selection) that does not install the dialect at all
+answers the two shapes `501` as well. Legacy selection names the dialect operation, and the table
+has no row for it. Before this change, such a host served the standard listing. That is accepted
+for the same reason: a client asking for metadata learns it did not get it. A host without the
+profile's selection still serves the standard listing.
