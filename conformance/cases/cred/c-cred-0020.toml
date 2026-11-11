@@ -1,24 +1,29 @@
-# c-cred-0020 — a temporary credential whose lifetime has ended.
+# c-cred-0020 — a temporary credential whose lifetime has ended, presented by its holder.
 #
 # Schema dimensions exercised: sign.credential = "expired_session", which was refused as unwired
-# until the credential provider could hold a session at all. The expected body is byte-for-byte
-# c-cred-0008's, and that identity is the whole case: an expired session must not be separable
-# from an access key that never existed.
+# until the credential provider could hold a session at all. The request is signed with the
+# session's own secret and carries the token issued with it, so the caller has proven possession
+# and only the lifetime fails. The answer is ExpiredToken, the code SDKs refresh on
+# (rustfs/gateway#1575). The oracle direction — an expired session with a wrong signature or
+# another token staying on c-cred-0008's bytes — is pinned by the gateway's authenticator tests.
 
 [case]
 id = "c-cred-0020"
 schema_version = 1
-title = "An expired STS session is refused with exactly the bytes an unknown access key gets"
+title = "An expired STS session signed by its holder is answered ExpiredToken so the client refreshes"
 rationale = """
 The lifetime of a temporary credential is an authentication property, so it is checked while the \
 caller is being identified rather than while its permissions are evaluated — an expired token that \
 reached policy evaluation would have bought decoding and a store read it was never entitled to. \
-What the caller learns must be nothing: the access key exists, the signature was correct, and the \
-only thing wrong was the expiry, which is precisely the fact that tells an attacker it has found a \
-real issuance. So the answer is byte-identical to c-cred-0008's, which is an access key the \
-provider has never heard of. GHSA-ccrv-v8v9-ch9q is the other half of the same rule: a token \
-accepted with no expiry at all. The framework refuses to hold a session token without a lifetime, \
-so that state is unrepresentable and this case pins the enforcement of the lifetime it does hold."""
+The refusal names the expiry only because this caller has already proven it holds the whole \
+credential: the signature compared equal under the session's secret and the presented token is \
+the one issued with the access key. AWS SDKs refresh temporary credentials on ExpiredToken and \
+treat InvalidAccessKeyId as a hard failure, so the uniform refusal broke every STS client at the \
+end of each session. A caller without the secret or the token learns nothing: it still receives \
+c-cred-0008's bytes. The body carries a constant sentence and none of the credential's material. \
+GHSA-ccrv-v8v9-ch9q is the other half of the same rule: a token accepted with no expiry at all. \
+The framework refuses to hold a session token without a lifetime, so that state is \
+unrepresentable and this case pins the enforcement of the lifetime it does hold."""
 polarity = "negative"
 operation = "GetObject"
 tags = ["signature", "sigv4", "security", "error-shape", "timing"]
@@ -31,14 +36,14 @@ summary = "A session token was accepted with a missing expiry claim, so an issue
 kind = "other"
 
 [[case.evidence]]
-url = "https://github.com/rustfs/rustfs/security/advisories/GHSA-3p3x-734c-h5vx"
-summary = "Distinguishable authentication failures let a caller learn which half of a credential was wrong; the fix is one answer for every failure plus rate limiting."
-kind = "other"
-
-[[case.evidence]]
 url = "https://docs.aws.amazon.com/STS/latest/APIReference/API_AssumeRole.html"
 summary = "A temporary credential is an access key, a secret, a session token and an expiration instant issued together."
 kind = "aws-doc"
+
+[[case.evidence]]
+url = "https://github.com/rustfs/gateway/issues/1575"
+summary = "Legacy RustFS answers 400 ExpiredToken for this request after s3s verified the signature, where the gateway answered 403 InvalidAccessKeyId."
+kind = "other"
 
 [clock]
 fixed = "2026-01-02T03:04:05Z"
@@ -59,12 +64,12 @@ sign = { mode = "sigv4_header", service = "s3", region = "us-east-1", credential
 
 [expect]
 kind = "response"
-status = 403
+status = 400
 connection_after = "open"
 headers_absent = ["etag", "x-amz-version-id", "last-modified"]
 
 [expect.error]
-code = "InvalidAccessKeyId"
+code = "ExpiredToken"
 request_id_present = true
 
 [expect.headers_present]
@@ -74,12 +79,13 @@ request_id_present = true
 redact = ["RequestId", "HostId"]
 exact_utf8 = """
 <?xml version="1.0" encoding="UTF-8"?>
-<Error><Code>InvalidAccessKeyId</Code><Message>the request was not authenticated</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>"""
+<Error><Code>ExpiredToken</Code><Message>the session credential has expired</Message><RequestId>__REDACTED__</RequestId><HostId>__REDACTED__</HostId></Error>"""
 not_contains_utf8 = [
-    "ExpiredToken",
-    "expired",
     "FQoGZXIvYXdz",
+    "ASIAI44QH8DHBEXAMPLE",
+    "wJalrXUtnFEMI",
     "sts.conformance.invalid",
     "StringToSign",
     "CanonicalRequest",
+    "InvalidAccessKeyId",
 ]

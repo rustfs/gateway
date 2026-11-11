@@ -51,7 +51,8 @@
 //!
 //! So [`SigV4Authenticator`] computes the session verdict where the credential arrives and
 //! consumes it after the comparison, and every one of those refusals is answered
-//! `InvalidAccessKeyId` — the same bytes an unknown key or wrong signature gets.
+//! `InvalidAccessKeyId` — the same bytes an unknown key gets — except an expiry presented with the
+//! issued token under a matching signature, which is `ExpiredToken` (rustfs/gateway#1575).
 //!
 //! # Why a store outage is not a verdict
 //!
@@ -70,7 +71,7 @@ use rustfs_gateway_sig::{
 };
 
 use super::credential_guard::{CredentialGuardConfig, GuardedCredentialProvider};
-use super::credentials::{CredentialLookup, CredentialProvider};
+use super::credentials::{CredentialLookup, CredentialProvider, CredentialRefusal};
 use super::legacy_refusal::LegacyRefusal;
 use super::sigv2::SigV2Authentication;
 
@@ -615,9 +616,9 @@ impl SigV4Authenticator {
         // return, and an early return is exactly what makes an expired token distinguishable from
         // a wrong secret by the clock. Holding the verdict until after the derivation is also what
         // keeps cheap session checks from introducing a shorter rejection path.
-        let session_refused = match &resolved {
-            Ok(CredentialLookup::Found(credentials)) => presented.session_refused(credentials, sealed, location),
-            Ok(CredentialLookup::NotFound) | Err(_) => false,
+        let session_refusal = match &resolved {
+            Ok(CredentialLookup::Found(credentials)) => presented.session_refusal(credentials, sealed, location),
+            Ok(CredentialLookup::NotFound) | Err(_) => None,
         };
 
         let sts_payload = self.sts_payload(request, &presented, &resolved).await?;
@@ -676,7 +677,7 @@ impl SigV4Authenticator {
             return Err(AuthError::InvalidAccessKeyId.into());
         };
         let Some(proof) = proof.take() else {
-            if session_refused {
+            if session_refusal.is_some() {
                 return Err(AuthError::InvalidAccessKeyId.into());
             }
             let Some(detail) = mismatch_detail else {
@@ -690,8 +691,14 @@ impl SigV4Authenticator {
         // `InvalidAccessKeyId` — the same code, the same message and the same bytes an unknown key
         // gets — because "this key exists but you may not use it this way" confirms the key exists
         // to whoever is guessing. GHSA-3p3x-734c-h5vx is the FTPS version of that confirmation.
-        if session_refused {
-            return Err(AuthError::InvalidAccessKeyId.into());
+        // The one exception is an expiry: `admit` judged the lifetime only after the token
+        // compared equal, and the signature just compared equal under the session's secret, so
+        // this caller holds the whole credential and learns nothing it could not already sign
+        // for. It is told `ExpiredToken`, which SDKs refresh on (rustfs/gateway#1575).
+        match session_refusal {
+            Some(CredentialRefusal::SessionExpired) => return Err(AuthError::ExpiredToken.into()),
+            Some(_) => return Err(AuthError::InvalidAccessKeyId.into()),
+            None => {}
         }
         if self.scope_policy.refuses_after_verification(presented.scope().region()) {
             if let Some(refusal) = self.scope_policy.verified_region_refusal(presented.scope().region()) {

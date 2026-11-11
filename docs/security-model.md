@@ -426,10 +426,19 @@ framework's half:
   `timing::placeholder_secret`, runs the full four-step chain and completes the comparison before
   answering, so the two are not separable by latency (`timing::SIDE_CHANNELS`, row T1).
 - **A credential that exists but cannot be used answers as one that does not exist.** Disabled,
-  expired, presented without the session token it is bound to, or presented with a token when it is
-  long-term: all four are `InvalidAccessKeyId`, byte for byte the answer an unknown access key
-  gets. The session verdict is computed when the credential arrives and consumed *after* the
-  signature comparison, so none of the four can answer early either.
+  expired, presented without the session token it is bound to, presented with another token, or
+  presented with a token when it is long-term: all are `InvalidAccessKeyId`, byte for byte the
+  answer an unknown access key gets. The session verdict is computed when the credential arrives
+  and consumed *after* the signature comparison, so none of them can answer early either.
+- **An expired session is told so only by the party that already holds it.** When the signature
+  compared equal under the session's own secret, the presented token is the one issued with the
+  access key, and the credential is not disabled, an ended lifetime is `400 ExpiredToken` — the
+  code AWS SDKs refresh temporary credentials on (rustfs/gateway#1575). `Credentials::admit`
+  compares the token before it judges the lifetime, so `SessionExpired` implies the issued token.
+  The caller has proven possession of the secret and the token, so the answer tells it nothing it
+  could not already sign for; a caller missing either still gets the uniform refusal. A provider
+  that wants this answer must return the expired session with its real expiry rather than
+  `NotFound`.
 - **A session token and a lifetime are one value.** `Credentials::with_session` takes both;
   "temporary credentials with no expiry" — the shape of GHSA-ccrv-v8v9-ch9q — is not
   representable. The lifetime is judged against the request's single clock snapshot.

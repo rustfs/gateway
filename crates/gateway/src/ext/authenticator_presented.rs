@@ -25,6 +25,8 @@ use rustfs_gateway_sig::{
     RegionRule, SealedAws, SessionToken, SigLocation, SigV4Authorization, Signature,
 };
 
+use crate::ext::credentials::CredentialRefusal;
+
 impl super::Authentication<'_> {
     pub(crate) const fn with_post_policy_limits(mut self, limits: Option<PostPolicyLimits>) -> Self {
         self.post_policy_limits = limits;
@@ -100,35 +102,32 @@ impl<'a> Presented<'a> {
     }
 
     /// Records session admission before comparison; the caller answers only after HMAC.
-    pub(super) fn session_refused(
+    pub(super) fn session_refusal(
         &self,
         credentials: &crate::ext::credentials::Credentials,
         sealed: &SealedAws<'_>,
         location: SigLocation,
-    ) -> bool {
+    ) -> Option<CredentialRefusal> {
         // Legacy-compat (rustfs/backlog#2684): an unrouted form uses only the key and HMAC
         // before its method refusal. Session admission belongs to the upload path.
         if matches!(self, Self::UnroutedForm(_)) {
-            return false;
+            return None;
         }
         let view = sealed.view();
         let now = sealed.clock().now();
-        match location {
-            SigLocation::FormField => credentials
-                .admit(self.session_token().map(SessionToken::expose), now)
-                .is_err(),
+        let admitted = match location {
+            SigLocation::FormField => credentials.admit(self.session_token().map(SessionToken::expose), now),
             SigLocation::Query if view.query_contains(rustfs_gateway_sig::X_AMZ_SECURITY_TOKEN) => {
-                credentials.admit_query(view.query(), now).is_err()
+                credentials.admit_query(view.query(), now)
             }
-            _ => credentials
-                .admit(
-                    view.headers()
-                        .get(rustfs_gateway_sig::X_AMZ_SECURITY_TOKEN_HEADER)
-                        .map(http::HeaderValue::as_bytes),
-                    now,
-                )
-                .is_err(),
-        }
+            _ => credentials.admit(
+                view.headers()
+                    .get(rustfs_gateway_sig::X_AMZ_SECURITY_TOKEN_HEADER)
+                    .map(http::HeaderValue::as_bytes),
+                now,
+            ),
+        };
+        admitted.err()
     }
 
     /// The timestamp the string-to-sign is dated with.

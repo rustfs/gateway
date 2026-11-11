@@ -292,6 +292,15 @@ pub enum AuthError {
     /// A SigV2 browser form carries a signature but not its access key or policy: refused
     /// `InvalidRequest` before any lookup, as legacy RustFS refuses it (rustfs/gateway#1185).
     MissingPostFormField,
+    /// A temporary credential's lifetime has ended, told to a caller that has already proven it
+    /// holds the whole credential: the signature compared equal under the session's own secret
+    /// and the presented token is the one issued with the key (rustfs/gateway#1575).
+    ///
+    /// SDKs refresh temporary credentials on this code, so a verifier must produce it only after
+    /// that proof. Before it, an expired session is [`AuthError::InvalidAccessKeyId`] like every
+    /// other unusable credential; a verifier that answered this early would confirm a real
+    /// issuance to whoever guessed its access key.
+    ExpiredToken,
 }
 
 impl AuthError {
@@ -310,6 +319,7 @@ impl AuthError {
             Self::AuthorizationQueryParametersError => "AuthorizationQueryParametersError",
             Self::NotImplemented(_) => "NotImplemented",
             Self::InvalidCredentialRegion | Self::InvalidPostPolicyEncoding | Self::MissingPostFormField => "InvalidRequest",
+            Self::ExpiredToken => "ExpiredToken",
         }
     }
 
@@ -335,6 +345,7 @@ impl AuthError {
             Self::InvalidCredentialRegion => "the credential scope names a region this service cannot read",
             Self::InvalidPostPolicyEncoding => "the POST policy encoding is not valid",
             Self::MissingPostFormField => "a POST form field the signature needs is missing",
+            Self::ExpiredToken => "the session credential has expired",
         }
     }
 
@@ -683,6 +694,16 @@ mod tests {
     fn the_two_credential_rejections_share_one_message() {
         assert_eq!(AuthError::InvalidAccessKeyId.message(), AuthError::SignatureDoesNotMatch.message());
         assert_ne!(AuthError::InvalidAccessKeyId.code(), AuthError::SignatureDoesNotMatch.code());
+    }
+
+    /// Negative — the expired-session answer is its own code, says nothing a credential could be
+    /// read from, and is not one of the two latency-paired credential rejections: it is only ever
+    /// produced after a signature compared equal (rustfs/gateway#1575).
+    #[test]
+    fn an_expired_session_has_its_own_code_and_a_constant_message() {
+        assert_eq!(AuthError::ExpiredToken.code(), "ExpiredToken");
+        assert_ne!(AuthError::ExpiredToken.message(), AuthError::InvalidAccessKeyId.message());
+        assert!(!AuthError::ExpiredToken.is_credential_rejection());
     }
 
     #[test]

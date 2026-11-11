@@ -154,6 +154,15 @@ fn header_signed(region: &str) -> http::HeaderMap {
 
 /// Floor, then the built-in verifier, exactly as the service runs them.
 async fn verify(headers: &http::HeaderMap, query: &str, operation: &OperationFloor) -> Verdict {
+    verify_with(&two_region_authenticator(), headers, query, operation).await
+}
+
+async fn verify_with(
+    authenticator: &SigV4Authenticator,
+    headers: &http::HeaderMap,
+    query: &str,
+    operation: &OperationFloor,
+) -> Verdict {
     let view = WireView::new(headers, RawQuery::new(query));
     let admitted = SecurityFloor::new()
         .admit(view, operation, RequestNow::from_unix_seconds(SCOPE_NOW))
@@ -166,7 +175,7 @@ async fn verify(headers: &http::HeaderMap, query: &str, operation: &OperationFlo
     let payload = PayloadMode::parse(token, rustfs_gateway_sig::TrailerSet::None).expect("payload mode");
     let host = RawHost::from_host_header(SCOPE_HOST).expect("valid host");
     let request = Authentication::new(&sealed, &Method::GET, "/bucket", &host, &payload, None);
-    let outcome = two_region_authenticator()
+    let outcome = authenticator
         .authenticate(&request)
         .await
         .expect("credential store is available");
@@ -385,4 +394,150 @@ async fn c_sig_0586_sigv2_post_policy_reaches_the_builtin_authenticator() {
     assert_eq!(scheme.location, SigLocation::FormField);
     // SigV2 has no credential scope, so none is reported rather than one being invented.
     assert!(verdict.verified_scope().is_none());
+}
+
+// ── an expired session: `ExpiredToken` only to a caller that proved possession ───────────────────
+//
+// rustfs/gateway#1575. SDKs refresh temporary credentials on `ExpiredToken`; every other session
+// failure stays the uniform `InvalidAccessKeyId`. Each negative differs from the positive in one
+// fact the caller would have to hold: the secret, the token, or a usable key.
+
+const SESSION_TOKEN: &str = "FQoGZXIvYXdzEExampleSessionTokenValue";
+const OTHER_TOKEN: &str = "FQoGZXIvYXdzEAnotherSessionTokenValue";
+const SESSION_SECRET: &[u8] = b"wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
+const WRONG_SECRET: &[u8] = b"this-is-not-the-secret-the-target-knows-";
+
+fn session(access_key: &str, expires_at: i64) -> Credentials {
+    let binding = crate::ext::credentials::SessionBinding::new("sts.example.test", expires_at).expect("a valid binding");
+    Credentials::new(access_key, SESSION_SECRET)
+        .expect("a valid access key")
+        .with_session(SESSION_TOKEN, binding)
+        .expect("a valid token")
+}
+
+fn session_authenticator() -> SigV4Authenticator {
+    SigV4Authenticator::new(
+        Arc::new(
+            StaticCredentials::new()
+                .with(session("AKIDEXPIRED", SCOPE_NOW - 1))
+                .with(session("AKIDLIVE", SCOPE_NOW + 3_600))
+                .with(session("AKIDDISABLED", SCOPE_NOW - 1).disable()),
+        ),
+        RegionSet::new(["us-east-1"]).expect("non-empty"),
+    )
+}
+
+fn session_signer(access_key: &str, secret: &[u8], token: Option<&str>) -> rustfs_gateway_sig::SigV4Signer {
+    let stamp = AmzDate::parse(SCOPE_STAMP).expect("valid stamp");
+    let scope = rustfs_gateway_sig::SigningScope::new(stamp.day(), "us-east-1", SigService::S3).expect("valid scope");
+    let mut credentials = rustfs_gateway_sig::SigningCredentials::new(access_key, secret).expect("valid credentials");
+    if let Some(token) = token {
+        credentials = credentials.with_session_token(rustfs_gateway_sig::SessionToken::new(token).expect("non-empty"));
+    }
+    rustfs_gateway_sig::SigV4Signer::new(credentials, scope)
+}
+
+/// The header-signed or presigned `GET /bucket` the session cases send, and what it is answered.
+async fn session_verdict(access_key: &str, secret: &[u8], token: Option<&str>, presigned: bool) -> Verdict {
+    let mut headers = http::HeaderMap::new();
+    headers.insert(http::header::HOST, http::HeaderValue::from_static("s3.example.test"));
+    let host = RawHost::from_host_header(SCOPE_HOST).expect("valid host");
+    let stamp = AmzDate::parse(SCOPE_STAMP).expect("valid stamp");
+    let signing =
+        rustfs_gateway_sig::SigningRequest::new(&Method::GET, "/bucket", "", &headers, &host, PayloadMode::Unsigned, stamp);
+    let mut signer = session_signer(access_key, secret, token);
+    let authenticator = session_authenticator();
+    if presigned {
+        let signed = signer.presign(&signing, 900).expect("presignable");
+        let operation = OperationFloor::builtin_presigned("GetBucketLocation", SigService::S3);
+        verify_with(&authenticator, signed.headers(), signed.query(), &operation).await
+    } else {
+        let signed = signer.sign_headers(&signing).expect("signable");
+        let operation = OperationFloor::builtin("GetBucketLocation", SigService::S3);
+        verify_with(&authenticator, signed.headers(), "", &operation).await
+    }
+}
+
+/// Positive — an expired session whose signature verified under its own secret, presenting the
+/// token issued with it, is answered `ExpiredToken`: the answer an SDK refreshes on. Header and
+/// presigned spellings alike.
+#[tokio::test]
+async fn an_expired_session_that_proved_possession_is_told_it_expired() {
+    for presigned in [false, true] {
+        let verdict = session_verdict("AKIDEXPIRED", SESSION_SECRET, Some(SESSION_TOKEN), presigned).await;
+        assert_eq!(verdict.rejection(), Some(AuthError::ExpiredToken), "presigned = {presigned}");
+    }
+}
+
+/// Positive — the same session an hour before its end is authenticated, so the refusal above is
+/// the lifetime and nothing else about the fixture.
+#[tokio::test]
+async fn a_live_session_presenting_its_token_is_authenticated() {
+    for presigned in [false, true] {
+        let verdict = session_verdict("AKIDLIVE", SESSION_SECRET, Some(SESSION_TOKEN), presigned).await;
+        assert!(verdict.is_authenticated(), "presigned = {presigned}: {verdict:?}");
+    }
+}
+
+/// Negative — the oracle direction: an expired session signed with a secret the caller does not
+/// hold is the uniform refusal. Answering the expiry here would confirm a real issuance to anyone
+/// who guessed its access key.
+#[tokio::test]
+async fn an_expired_session_with_a_wrong_signature_is_not_told_it_expired() {
+    for presigned in [false, true] {
+        let verdict = session_verdict("AKIDEXPIRED", WRONG_SECRET, Some(SESSION_TOKEN), presigned).await;
+        assert_eq!(verdict.rejection(), Some(AuthError::InvalidAccessKeyId), "presigned = {presigned}");
+    }
+}
+
+/// Negative — an expired session presenting another, correctly signed token is a binding
+/// violation and is answered as one, not as an expiry.
+#[tokio::test]
+async fn an_expired_session_with_another_token_is_not_told_it_expired() {
+    for presigned in [false, true] {
+        let verdict = session_verdict("AKIDEXPIRED", SESSION_SECRET, Some(OTHER_TOKEN), presigned).await;
+        assert_eq!(verdict.rejection(), Some(AuthError::InvalidAccessKeyId), "presigned = {presigned}");
+    }
+}
+
+/// Negative — an expired session presented without any token is the uniform refusal.
+#[tokio::test]
+async fn an_expired_session_without_its_token_is_not_told_it_expired() {
+    for presigned in [false, true] {
+        let verdict = session_verdict("AKIDEXPIRED", SESSION_SECRET, None, presigned).await;
+        assert_eq!(verdict.rejection(), Some(AuthError::InvalidAccessKeyId), "presigned = {presigned}");
+    }
+}
+
+/// Negative — a disabled session is refused uniformly even when it has also expired and the
+/// caller proved possession: switched off outranks the lifetime.
+#[tokio::test]
+async fn a_disabled_expired_session_is_not_told_it_expired() {
+    let verdict = session_verdict("AKIDDISABLED", SESSION_SECRET, Some(SESSION_TOKEN), false).await;
+    assert_eq!(verdict.rejection(), Some(AuthError::InvalidAccessKeyId));
+}
+
+/// Negative — an access key the provider does not know, signed with a token, is the uniform
+/// refusal.
+#[tokio::test]
+async fn an_unknown_session_key_is_the_uniform_refusal() {
+    let verdict = session_verdict("AKIDUNKNOWN", SESSION_SECRET, Some(SESSION_TOKEN), false).await;
+    assert_eq!(verdict.rejection(), Some(AuthError::InvalidAccessKeyId));
+}
+
+/// Negative — the rendered expiry is the `400` the error authority gives `ExpiredToken`, the
+/// uniform refusal is still `403`, and neither message carries a byte of the token or secret.
+#[test]
+fn the_expired_token_answer_is_a_400_that_carries_no_credential() {
+    use rustfs_gateway_core::ResponseKind;
+    use rustfs_gateway_types::ErrorCode;
+    let expired = crate::render::from_auth(AuthError::ExpiredToken, ResponseKind::Other, false);
+    assert_eq!(expired.code(), Some(&ErrorCode::EXPIRED_TOKEN));
+    assert_eq!(expired.status(), http::StatusCode::BAD_REQUEST);
+    let uniform = crate::render::from_auth(AuthError::InvalidAccessKeyId, ResponseKind::Other, false);
+    assert_eq!(uniform.status(), http::StatusCode::FORBIDDEN);
+    for rendered in [&expired, &uniform] {
+        let message = rendered.message().unwrap_or_default();
+        assert!(!message.contains("FQoGZXIvYXdz") && !message.contains("wJalrXUtnFEMI"), "{message}");
+    }
 }
