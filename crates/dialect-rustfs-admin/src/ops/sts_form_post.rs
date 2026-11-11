@@ -57,8 +57,8 @@ pub static CLAIM: FormClaim = FormClaim {
     path: "/",
     reason: "RustFS's router takes a form POST of / as its STS endpoint before its S3 path parser runs, on every host and whatever the query.",
     evidence: &[
-        "https://github.com/rustfs/rustfs/blob/5e1bd498ce1ca33bcb0ca50aeee861e69e6c8744/rustfs/src/server/layer.rs",
-        "https://github.com/rustfs/rustfs/blob/5e1bd498ce1ca33bcb0ca50aeee861e69e6c8744/rustfs/src/admin/router.rs",
+        "https://github.com/rustfs/rustfs/blob/443e8afee194fe38b32d62a9289a99c1f703715c/rustfs/src/server/layer.rs",
+        "https://github.com/rustfs/rustfs/blob/443e8afee194fe38b32d62a9289a99c1f703715c/rustfs/src/admin/router.rs",
     ],
 };
 
@@ -137,7 +137,7 @@ pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     success_status: 200,
     anonymous: true,
     evidence: &[
-        "https://github.com/rustfs/rustfs/blob/5e1bd498ce1ca33bcb0ca50aeee861e69e6c8744/rustfs/src/admin/handlers/sts.rs",
+        "https://github.com/rustfs/rustfs/blob/443e8afee194fe38b32d62a9289a99c1f703715c/rustfs/src/admin/handlers/sts.rs",
         "https://github.com/rustfs/gateway/blob/main/docs/adr/0041-form-claims-and-the-rustfs-sts-endpoint.md",
         "https://github.com/rustfs/gateway/blob/main/docs/adr/0044-sts-action-credentials-and-claimed-signing.md",
         record::ISSUE,

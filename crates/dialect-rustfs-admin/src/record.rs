@@ -113,6 +113,11 @@ pub struct RouteRecord {
     pub response_body: BodyKind,
     /// Whether the handler is handed the caller's secret.
     pub caller_secret: bool,
+    /// The checks RustFS's handler keeps that this operation's floor does not represent, as stable
+    /// labels (`native-tls-listener`, `original-user`, `builtin-iam`); empty for almost every
+    /// operation. The floor is never the whole authorisation of an operation that lists one
+    /// (rustfs/gateway#1232).
+    pub retained: &'static [&'static str],
 }
 
 /// A route of a migrated group that stays with RustFS: it is declared as no operation, for the

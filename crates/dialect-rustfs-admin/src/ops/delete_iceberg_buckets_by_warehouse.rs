@@ -16,13 +16,13 @@
 // crates/goldens/src/migration_inventory/rustfs_admin_routes.json. Do not edit by hand: change the
 // inventory or xtask/src/rustfs_admin_dialect.rs, then regenerate.
 
-//! `rustfs:GetIcebergByWarehouseCatalogMigration`: `GET /_iceberg/v1/{warehouse}/catalog/migration`, registration group `table_catalog`.
+//! `rustfs:DeleteIcebergBucketsByWarehouse`: `DELETE /_iceberg/v1/buckets/{warehouse}`, registration group `table_catalog`.
 //!
 //! Responsible for: the operation's type, name, rows, action, specification, floor and codec, as the
-//! inventory records RustFS's `GetTableCatalogMigrationHandler` route.
+//! inventory records RustFS's `DisableTableBucketHandler` route.
 //! NOT responsible for: the handler, which the deployment registers, or the overlay row (`crate::table`).
 //! Upstream: the recorded inventory and `crate::admin`. Downstream: `crate::table`, which lists it,
-//! and a deployment that registers a handler for [`GetIcebergByWarehouseCatalogMigration`].
+//! and a deployment that registers a handler for [`DeleteIcebergBucketsByWarehouse`].
 //!
 //! Its `{warehouse}` parameter is the bucket the operation is authorised on (`BucketParam::Path`,
 //! ADR-0025 (c), ADR-0030): the raw segment meets the S3 bucket-name rules before authentication, and
@@ -42,38 +42,38 @@ use crate::admin::{self, AdminOperation, AdminResponse};
 use crate::record::{self, BodyKind, RouteRecord};
 
 /// The operation name.
-pub const NAME: &str = "rustfs:GetIcebergByWarehouseCatalogMigration";
+pub const NAME: &str = "rustfs:DeleteIcebergBucketsByWarehouse";
 
 /// What authorises it, on the bucket its `{warehouse}` parameter names.
-pub const AUTH: AuthRequirement = AuthRequirement::new("admin:GetTableCatalog", ResourceShape::Bucket);
+pub const AUTH: AuthRequirement = AuthRequirement::new("admin:SetTableBucket", ResourceShape::Bucket);
 
 /// The bucket it is authorised on, which the facade reads before authentication.
 pub const BUCKET: BucketParam = BucketParam::Path("warehouse");
 
-static SELECTOR: &[Predicate] = &[Predicate::Method(http::Method::GET)];
+static SELECTOR: &[Predicate] = &[Predicate::Method(http::Method::DELETE)];
 
 /// The canonical row, then the compat row RustFS serves it under.
 pub static ROWS: &[ClaimedRow] = &[
     ClaimedRow {
-        template: "/_iceberg/v1/{+warehouse}/catalog/migration",
+        template: "/_iceberg/v1/buckets/{+warehouse}",
         selector: SELECTOR,
     },
     ClaimedRow {
-        template: "/iceberg/v1/{+warehouse}/catalog/migration",
+        template: "/iceberg/v1/buckets/{+warehouse}",
         selector: SELECTOR,
     },
 ];
 
-/// `GET /_iceberg/v1/{warehouse}/catalog/migration`.
+/// `DELETE /_iceberg/v1/buckets/{warehouse}`.
 #[derive(Debug)]
-pub struct GetIcebergByWarehouseCatalogMigration;
+pub struct DeleteIcebergBucketsByWarehouse;
 
 static SPEC: OperationSpec = admin::spec(NAME, AUTH, false);
 
 /// Privileged and header-signed only: never anonymous, never presigned.
 static FLOOR: OperationFloor = admin::floor(NAME);
 
-impl Operation for GetIcebergByWarehouseCatalogMigration {
+impl Operation for DeleteIcebergBucketsByWarehouse {
     const NAME: &'static str = NAME;
 
     /// RustFS reads no request body.
@@ -96,7 +96,7 @@ impl Operation for GetIcebergByWarehouseCatalogMigration {
     }
 }
 
-impl OperationCodec for GetIcebergByWarehouseCatalogMigration {
+impl OperationCodec for DeleteIcebergBucketsByWarehouse {
     const REQUEST_BODY: RequestBodyMode = RequestBodyMode::None;
 
     fn decode(_request: &MetaView<'_>, _body: RequestBody) -> Result<Self::Input, CodecError> {
@@ -108,7 +108,7 @@ impl OperationCodec for GetIcebergByWarehouseCatalogMigration {
     }
 }
 
-impl AdminOperation for GetIcebergByWarehouseCatalogMigration {
+impl AdminOperation for DeleteIcebergBucketsByWarehouse {
     const PRECEDENCE: u16 = OVERLAY_ROW.precedence;
     const GROUP: &'static str = RECORD.group;
     const BUCKET: Option<BucketParam> = Some(BUCKET);
@@ -121,14 +121,14 @@ impl AdminOperation for GetIcebergByWarehouseCatalogMigration {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 128,
-    selector: "PathTemplate(\"/_iceberg/v1/{+warehouse}/catalog/migration\") ∧ Method(GET) ∨ PathTemplate(\"/iceberg/v1/{+warehouse}/catalog/migration\") ∧ Method(GET) ⇒ BucketParam(\"warehouse\")",
-    action: "admin:GetTableCatalog",
+    precedence: 100,
+    selector: "PathTemplate(\"/_iceberg/v1/buckets/{+warehouse}\") ∧ Method(DELETE) ∨ PathTemplate(\"/iceberg/v1/buckets/{+warehouse}\") ∧ Method(DELETE) ⇒ BucketParam(\"warehouse\")",
+    action: "admin:SetTableBucket",
     resource: ResourceShape::Bucket,
     success_status: 200,
     anonymous: false,
     evidence: &[
-        "https://github.com/rustfs/rustfs/blob/5e1bd498ce1ca33bcb0ca50aeee861e69e6c8744/rustfs/src/admin/handlers/table_catalog/config.rs",
+        "https://github.com/rustfs/rustfs/blob/443e8afee194fe38b32d62a9289a99c1f703715c/rustfs/src/admin/handlers/table_catalog/config.rs",
         record::ADR_0027,
         record::ADR_0030,
         record::ADR_0031,
@@ -141,17 +141,18 @@ pub const RECORD: RouteRecord = RouteRecord {
     operation: NAME,
     group: "table_catalog",
     order: 6,
-    method: "GET",
-    path: "/_iceberg/v1/{warehouse}/catalog/migration",
-    alias: Some("/iceberg/v1/{warehouse}/catalog/migration"),
+    method: "DELETE",
+    path: "/_iceberg/v1/buckets/{warehouse}",
+    alias: Some("/iceberg/v1/buckets/{warehouse}"),
     query: None,
-    action: "admin:GetTableCatalog",
+    action: "admin:SetTableBucket",
     ruled: None,
     subject: None,
     bucket: Some(BUCKET),
     anonymous: false,
-    rustfs_handler: "GetTableCatalogMigrationHandler",
+    rustfs_handler: "DisableTableBucketHandler",
     request_body: BodyKind::NotRead,
     response_body: BodyKind::Buffered,
     caller_secret: false,
+    retained: &[],
 };

@@ -127,14 +127,14 @@ impl AdminOperation for PutV3TargetByTargetTypeByTargetName {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 410,
+    precedence: 432,
     selector: "PathTemplate(\"/rustfs/admin/v3/target/{+target_type}/{+target_name}\") ∧ Method(PUT) ∨ PathTemplate(\"/minio/admin/v3/target/{+target_type}/{+target_name}\") ∧ Method(PUT)",
     action: "admin:SetBucketTarget",
     resource: ResourceShape::Service,
     success_status: 200,
     anonymous: false,
     evidence: &[
-        "https://github.com/rustfs/rustfs/blob/5e1bd498ce1ca33bcb0ca50aeee861e69e6c8744/rustfs/src/admin/handlers/event.rs",
+        "https://github.com/rustfs/rustfs/blob/443e8afee194fe38b32d62a9289a99c1f703715c/rustfs/src/admin/handlers/event.rs",
         record::ADR_0027,
         record::ISSUE,
     ],
@@ -158,4 +158,5 @@ pub const RECORD: RouteRecord = RouteRecord {
     request_body: BodyKind::Buffered,
     response_body: BodyKind::Buffered,
     caller_secret: false,
+    retained: &[],
 };

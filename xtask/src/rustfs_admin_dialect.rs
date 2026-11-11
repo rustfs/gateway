@@ -40,7 +40,7 @@ use serde::Deserialize;
 
 use self::render::{render_mod, render_operation, render_tables};
 use self::rule::{Rule, is_parameter};
-use self::rulings::{EXTENSIONS, FORMS, QUERY_BUCKETS, RULINGS, Ruling, STAYS};
+use self::rulings::{EXTENSIONS, FORMS, QUERY_BUCKETS, RETAINED, RULINGS, Retained, Ruling, STAYS};
 use self::template::{Shadow, Template, shadowing, snake, template_params, type_name};
 
 use crate::repo_root::repo_root;
@@ -124,11 +124,12 @@ const PLAN: &[(&str, u8)] = &[
     ("module_switch", 2),
     ("object_data_cache", 2),
     ("cluster_snapshot", 2),
-    ("gateway_key_inventory", 2),
     ("inspect_archive", 2),
     ("plugins_catalog", 2),
     ("tls_debug", 2),
+    ("tls_certificate", 2),
     ("kms", 3),
+    ("gateway_key_inventory", 3),
     ("site_replication", 3),
     ("config_admin", 3),
     ("batch_job", 3),
@@ -137,6 +138,8 @@ const PLAN: &[(&str, u8)] = &[
     ("scanner", 3),
     ("audit", 3),
     ("plugins_instances", 3),
+    ("plugin_delegation", 3),
+    ("plugin_attempt", 3),
     ("pools", 3),
     ("user", 4),
     ("idp_compat", 4),
@@ -149,6 +152,7 @@ const PLAN: &[(&str, u8)] = &[
     ("heal", 5),
     ("integrity", 5),
     ("usage_prefix", 5),
+    ("bucket_recovery", 5),
     ("table_catalog", 6),
     ("oidc", 7),
     ("sts", 7),
@@ -210,6 +214,8 @@ struct Declared {
     ruled: Option<String>,
     /// The ruling's paragraph for the module documentation, or nothing.
     note: &'static str,
+    /// The check RustFS's handler keeps that the floor does not represent, when it keeps one.
+    retained: Option<Retained>,
     handler: String,
     handler_url: String,
     router_url: String,
@@ -493,6 +499,7 @@ fn plan_through(
                 rule,
                 ruled,
                 note,
+                retained: None,
                 handler: route.handler.clone(),
                 handler_url: format!("https://github.com/rustfs/rustfs/blob/{}/{}", inventory.source.commit, route.handler_file),
                 router_url: format!("https://github.com/rustfs/rustfs/blob/{}/{RUSTFS_ROUTER}", inventory.source.commit),
@@ -631,11 +638,42 @@ fn format_all(root: &Path, files: BTreeMap<PathBuf, String>) -> Result<BTreeMap<
     })
 }
 
+/// Attaches each handler-retained check (`rulings::RETAINED`) to the operations of its route, and
+/// refuses one that names no check, no declared operation, a route twice, or hands on a body RustFS
+/// does not buffer (rustfs/gateway#1232).
+fn retain(declared: &mut [Declared], retained: &[Retained]) -> Result<(), String> {
+    for entry in retained {
+        let at = format!("{} {}", entry.method, entry.path);
+        if entry.checks.is_empty() {
+            return Err(format!("{at}: a retained check names no check"));
+        }
+        let mut found = false;
+        for operation in declared
+            .iter_mut()
+            .filter(|operation| operation.method == entry.method && operation.path == entry.path)
+        {
+            if operation.retained.is_some() {
+                return Err(format!("{at}: a retained check is listed twice"));
+            }
+            if entry.hand_on_body && operation.request_body != "Buffered" {
+                return Err(format!("{at}: hands on a body RustFS does not buffer"));
+            }
+            operation.retained = Some(*entry);
+            found = true;
+        }
+        if !found {
+            return Err(format!("{at}: a retained check names no declared operation"));
+        }
+    }
+    Ok(())
+}
+
 /// Every generated file, by its path under the repository root.
 fn generate(root: &Path) -> Result<BTreeMap<PathBuf, String>, String> {
     let recorded = std::fs::read_to_string(root.join(INVENTORY)).map_err(|error| format!("cannot read {INVENTORY}: {error}"))?;
     let inventory: Inventory = serde_json::from_str(&recorded).map_err(|error| format!("cannot parse {INVENTORY}: {error}"))?;
-    let plan = plan(&inventory, RULINGS, QUERY_BUCKETS, STAYS, FORMS, EXTENSIONS)?;
+    let mut plan = plan(&inventory, RULINGS, QUERY_BUCKETS, STAYS, FORMS, EXTENSIONS)?;
+    retain(&mut plan.declared, RETAINED)?;
     let output = Path::new(OUTPUT);
     let mut files = BTreeMap::new();
     for declared in &plan.declared {
@@ -744,6 +782,9 @@ mod extension_tests;
 #[cfg(test)]
 #[path = "rustfs_admin_dialect/form_tests.rs"]
 mod form_tests;
+#[cfg(test)]
+#[path = "rustfs_admin_dialect/refresh_tests.rs"]
+mod refresh_tests;
 #[cfg(test)]
 #[path = "rustfs_admin_dialect/tests.rs"]
 mod tests;

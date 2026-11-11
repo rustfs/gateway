@@ -53,7 +53,7 @@ pub const NAME: &str = "rustfs:ListenBucketNotification";
 pub const AUTH: AuthRequirement = AuthRequirement::new("s3:ListenBucketNotification", ResourceShape::Bucket);
 
 /// RustFS's admin router, whose extension matching this row mirrors.
-const ROUTER: &str = "https://github.com/rustfs/rustfs/blob/5e1bd498ce1ca33bcb0ca50aeee861e69e6c8744/rustfs/src/admin/router.rs";
+const ROUTER: &str = "https://github.com/rustfs/rustfs/blob/443e8afee194fe38b32d62a9289a99c1f703715c/rustfs/src/admin/router.rs";
 
 /// Why this row stands in front of every standard row of its method and target.
 const CLAIM: &str = "RustFS's admin router claims a GET of a bucket whose query names `events`, with any value before its S3 service, whatever else the query names.";

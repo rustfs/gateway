@@ -124,14 +124,14 @@ impl AdminOperation for HeadIcebergByWarehouseNamespacesByNamespaceTablesByTable
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 263,
+    precedence: 267,
     selector: "PathTemplate(\"/_iceberg/v1/{+warehouse}/namespaces/{+namespace}/tables/{+table}\") ∧ Method(HEAD) ∨ PathTemplate(\"/iceberg/v1/{+warehouse}/namespaces/{+namespace}/tables/{+table}\") ∧ Method(HEAD) ⇒ BucketParam(\"warehouse\")",
     action: "admin:GetTable",
     resource: ResourceShape::Bucket,
     success_status: 200,
     anonymous: false,
     evidence: &[
-        "https://github.com/rustfs/rustfs/blob/5e1bd498ce1ca33bcb0ca50aeee861e69e6c8744/rustfs/src/admin/handlers/table_catalog/table.rs",
+        "https://github.com/rustfs/rustfs/blob/443e8afee194fe38b32d62a9289a99c1f703715c/rustfs/src/admin/handlers/table_catalog/table.rs",
         record::ADR_0027,
         record::ADR_0030,
         record::ADR_0031,
@@ -157,4 +157,5 @@ pub const RECORD: RouteRecord = RouteRecord {
     request_body: BodyKind::NotRead,
     response_body: BodyKind::Buffered,
     caller_secret: false,
+    retained: &[],
 };

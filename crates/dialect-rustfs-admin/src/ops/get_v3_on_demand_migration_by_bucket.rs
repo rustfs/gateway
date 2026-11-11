@@ -76,7 +76,7 @@ pub static SHADOWS: &[ShadowingDecl] = &[ShadowingDecl {
 #[derive(Debug)]
 pub struct GetV3OnDemandMigrationByBucket;
 
-static SPEC: OperationSpec = admin::spec(NAME, AUTH, false);
+static SPEC: OperationSpec = admin::spec(NAME, AUTH, true);
 
 /// Privileged and header-signed only: never anonymous, never presigned.
 static FLOOR: OperationFloor = admin::floor(NAME);
@@ -133,14 +133,14 @@ impl AdminOperation for GetV3OnDemandMigrationByBucket {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 219,
+    precedence: 220,
     selector: "PathTemplate(\"/rustfs/admin/v3/on-demand-migration/{+bucket}\") ∧ Method(GET) ∨ PathTemplate(\"/minio/admin/v3/on-demand-migration/{+bucket}\") ∧ Method(GET) ⇒ BucketParam(\"bucket\")",
     action: "admin:GetBucketOnDemandMigration",
     resource: ResourceShape::Bucket,
     success_status: 200,
     anonymous: false,
     evidence: &[
-        "https://github.com/rustfs/rustfs/blob/5e1bd498ce1ca33bcb0ca50aeee861e69e6c8744/rustfs/src/admin/handlers/on_demand_migration.rs",
+        "https://github.com/rustfs/rustfs/blob/443e8afee194fe38b32d62a9289a99c1f703715c/rustfs/src/admin/handlers/on_demand_migration.rs",
         record::ADR_0027,
         record::ADR_0030,
         record::ISSUE,
@@ -164,5 +164,6 @@ pub const RECORD: RouteRecord = RouteRecord {
     rustfs_handler: "GetBucketOnDemandMigrationHandler",
     request_body: BodyKind::NotRead,
     response_body: BodyKind::Buffered,
-    caller_secret: false,
+    caller_secret: true,
+    retained: &[],
 };

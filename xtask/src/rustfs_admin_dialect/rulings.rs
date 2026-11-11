@@ -21,7 +21,8 @@
 //! ruling is written in: an action rule, an optional subject rule, and the query value that
 //! selects a form; [`QUERY_BUCKETS`], the routes that name their bucket in the query; [`STAYS`],
 //! the routes that stay with RustFS; [`FORMS`], the routes served behind a form claim; and
-//! [`EXTENSIONS`], the S3-shaped extension routes and the operation each becomes.
+//! [`EXTENSIONS`], the S3-shaped extension routes and the operation each becomes; and [`RETAINED`],
+//! the checks RustFS's handlers keep that the floor does not represent.
 //! NOT responsible for: matching a ruling or a query bucket to its route, refusing a stale or
 //! missing one, or checking a rule's shape (`super::plan` and `super::Rule::fault`).
 //! Upstream: the ADRs, read against RustFS's handlers at the inventory's commit. Downstream:
@@ -238,6 +239,79 @@ pub(super) const EXTENSIONS: &[(&str, &str)] = &[
     ("MiscExtRoute::ListenNotification[bucket]", "ListenBucketNotification"),
 ];
 
+/// A check RustFS's handler makes that the gateway's floor does not represent, so the floor is
+/// never read as the route's whole authorisation (rustfs/gateway#1232). The check stays with the
+/// handler; `hand_on_body` makes the gateway hand the body on unread, so that check still runs
+/// before anything reads what the body carries.
+#[derive(Clone, Copy)]
+pub(super) struct Retained {
+    pub(super) method: &'static str,
+    pub(super) path: &'static str,
+    /// Stable labels, recorded in the operation's `RouteRecord::retained`.
+    pub(super) checks: &'static [&'static str],
+    pub(super) hand_on_body: bool,
+    /// The paragraph the generated module's documentation carries.
+    pub(super) note: &'static str,
+}
+
+/// RustFS refuses unless its own listener completed TLS (`tls_certificate.rs`, `require_native_tls`).
+pub(super) const NATIVE_TLS: &str = "native-tls-listener";
+/// RustFS refuses root, temporary (session-token) and service-account callers before the action
+/// check (`plugin_delegation.rs`, `owner`).
+pub(super) const ORIGINAL_USER: &str = "original-user";
+/// RustFS refuses when an external policy plugin is configured (`plugin_attempt.rs`,
+/// `require_builtin_authorization`).
+pub(super) const BUILTIN_IAM: &str = "builtin-iam";
+
+const TLS_NOTE: &str = "RustFS's handler also refuses unless its own listener completed TLS (`tls_certificate.rs`, `require_native_tls`); a forwarded `https` header does not count. That check is retained in the handler: the gateway's floor cannot require it, because the gateway's \"transport was secure\" fact also counts TLS declared by a fronting proxy, which RustFS refuses here.";
+const TLS_PUBLISH_NOTE: &str = "RustFS's handler also refuses unless its own listener completed TLS (`tls_certificate.rs`, `require_native_tls`), and checks that before it reads the body, which carries `private_key_pem`. That check is retained in the handler: the gateway's floor cannot require it, because the gateway's \"transport was secure\" fact also counts TLS declared by a fronting proxy, which RustFS refuses here. So the gateway hands the body on unread rather than buffering it, and a private key sent over a cleartext connection is never read before the handler refuses it.";
+const ORIGINAL_USER_NOTE: &str = "RustFS's handler also refuses the root credential, temporary (session-token) credentials and service accounts before it checks the action (`plugin_delegation.rs`, `owner`). That check is retained in the handler: the gateway's floor has no rule on the kind of principal, so the floor admits callers RustFS refuses here.";
+const ISSUE_ATTEMPT_NOTE: &str = "RustFS's handler also refuses when an external policy plugin is configured (`plugin_attempt.rs`, `require_builtin_authorization`), and refuses the root credential, temporary (session-token) credentials and service accounts before it checks the action (`plugin_delegation.rs`, `owner`). Both checks are retained in the handler: the gateway's floor has no rule on either, so the floor admits callers RustFS refuses here.";
+
+const fn delegation(method: &'static str, path: &'static str) -> Retained {
+    Retained {
+        method,
+        path,
+        checks: &[ORIGINAL_USER],
+        hand_on_body: false,
+        note: ORIGINAL_USER_NOTE,
+    }
+}
+
+/// Every route whose RustFS handler keeps a check the floor does not represent.
+pub(super) const RETAINED: &[Retained] = &[
+    Retained {
+        method: "GET",
+        path: "/rustfs/admin/v3/tls/certificate-state",
+        checks: &[NATIVE_TLS],
+        hand_on_body: false,
+        note: TLS_NOTE,
+    },
+    Retained {
+        method: "POST",
+        path: "/rustfs/admin/v3/tls/certificate",
+        checks: &[NATIVE_TLS],
+        hand_on_body: true,
+        note: TLS_PUBLISH_NOTE,
+    },
+    delegation("POST", "/rustfs/admin/v3/plugin-delegations"),
+    delegation("GET", "/rustfs/admin/v3/plugin-delegations/{id}"),
+    delegation("POST", "/rustfs/admin/v3/plugin-delegations/{id}/revoke"),
+    delegation("POST", "/rustfs/admin/v3/plugin-delegations/{id}/submit"),
+    delegation("POST", "/rustfs/admin/v3/plugin-delegations/{id}/runs/cancel"),
+    delegation("POST", "/rustfs/admin/v3/plugin-delegations/{id}/runs/history"),
+    delegation("POST", "/rustfs/admin/v3/plugin-delegations/{id}/runs/page"),
+    delegation("POST", "/rustfs/admin/v3/plugin-delegations/{id}/runs/query"),
+    delegation("POST", "/rustfs/admin/v3/plugin-delegations/{id}/runs/replay"),
+    Retained {
+        method: "POST",
+        path: "/rustfs/admin/v3/plugin-delegations/{id}/issue-attempt",
+        checks: &[ORIGINAL_USER, BUILTIN_IAM],
+        hand_on_body: false,
+        note: ISSUE_ATTEMPT_NOTE,
+    },
+];
+
 /// The rulings for the migrated groups' custom-auth routes, in the inventory's order within each
 /// migrated order.
 pub(super) const RULINGS: &[Ruling] = &[
@@ -377,6 +451,15 @@ pub(super) const RULINGS: &[Ruling] = &[
     ruling("GET", "/rustfs/admin/v3/list-access-keys-bulk", "MultipleActions", BULK),
     ruling("GET", "/rustfs/admin/v3/idp/ldap/list-access-keys-bulk", "MultipleActions", BULK),
     ruling("GET", "/rustfs/admin/v3/idp/openid/list-access-keys-bulk", "MultipleActions", BULK),
+    noted(
+        ruling(
+            "PUT",
+            "/rustfs/admin/v3/update-group-members",
+            "MultipleActions",
+            &[any_of(&["admin:AddUserToGroup", "admin:RemoveUserFromGroup"])],
+        ),
+        "RustFS's handler first admits the caller on either group-membership action, and only after reading the JSON body asks again for the one its `isRemove` field selects (`group.rs`, `UpdateGroupMembers`); the gateway cannot ask the second question before the body is read (ADR-0025 (d), ADR-0032 (b)), so its floor is the first, any-of gate, and the body goes to the handler for the second.",
+    ),
     // ── order 5: the S3 quota action on the bound bucket (ADR-0025 (d), ADR-0030) ──
     ruling("GET", "/rustfs/admin/v3/get-bucket-quota", "S3Action", &[one("s3:GetBucketQuota")]),
     ruling("GET", "/rustfs/admin/v3/quota-stats/{bucket}", "S3Action", &[one("s3:GetBucketQuota")]),

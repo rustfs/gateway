@@ -76,7 +76,7 @@ pub static SHADOWS: &[ShadowingDecl] = &[ShadowingDecl {
 #[derive(Debug)]
 pub struct GetV3AccountMfa;
 
-static SPEC: OperationSpec = admin::spec(NAME, AUTH, false);
+static SPEC: OperationSpec = admin::spec(NAME, AUTH, true);
 
 /// Privileged and header-signed only: never anonymous, never presigned.
 static FLOOR: OperationFloor = admin::floor(NAME);
@@ -132,14 +132,14 @@ impl AdminOperation for GetV3AccountMfa {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 151,
+    precedence: 152,
     selector: "PathTemplate(\"/rustfs/admin/v3/account/mfa\") ∧ Method(GET) ∨ PathTemplate(\"/minio/admin/v3/account/mfa\") ∧ Method(GET)",
     action: "rustfs:AccountMfaStatus about caller",
     resource: ResourceShape::Service,
     success_status: 200,
     anonymous: false,
     evidence: &[
-        "https://github.com/rustfs/rustfs/blob/5e1bd498ce1ca33bcb0ca50aeee861e69e6c8744/rustfs/src/admin/handlers/mfa.rs",
+        "https://github.com/rustfs/rustfs/blob/443e8afee194fe38b32d62a9289a99c1f703715c/rustfs/src/admin/handlers/mfa.rs",
         record::ADR_0025,
         record::ADR_0028,
         record::ISSUE,
@@ -163,5 +163,6 @@ pub const RECORD: RouteRecord = RouteRecord {
     rustfs_handler: "AccountMfaStatusHandler",
     request_body: BodyKind::NotRead,
     response_body: BodyKind::Buffered,
-    caller_secret: false,
+    caller_secret: true,
+    retained: &[],
 };

@@ -67,7 +67,7 @@ pub static SHADOWS: &[ShadowingDecl] = &[ShadowingDecl {
 #[derive(Debug)]
 pub struct GetV3GatewayKeyInventory;
 
-static SPEC: OperationSpec = admin::spec(NAME, AUTH, false);
+static SPEC: OperationSpec = admin::spec(NAME, AUTH, true);
 
 /// Privileged and header-signed only: never anonymous, never presigned.
 static FLOOR: OperationFloor = admin::floor(NAME);
@@ -123,14 +123,14 @@ impl AdminOperation for GetV3GatewayKeyInventory {
 /// This operation's row in the dialect's overlay, as a reviewer reads it.
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
-    precedence: 161,
+    precedence: 162,
     selector: "PathTemplate(\"/rustfs/admin/v3/gateway-key-inventory\") ∧ Method(GET) ∨ PathTemplate(\"/minio/admin/v3/gateway-key-inventory\") ∧ Method(GET)",
     action: "admin:InspectData",
     resource: ResourceShape::Service,
     success_status: 200,
     anonymous: false,
     evidence: &[
-        "https://github.com/rustfs/rustfs/blob/5e1bd498ce1ca33bcb0ca50aeee861e69e6c8744/rustfs/src/admin/handlers/gateway_key_inventory.rs",
+        "https://github.com/rustfs/rustfs/blob/443e8afee194fe38b32d62a9289a99c1f703715c/rustfs/src/admin/handlers/gateway_key_inventory.rs",
         record::ISSUE,
     ],
 };
@@ -139,7 +139,7 @@ pub const OVERLAY_ROW: OverlayRow = OverlayRow {
 pub const RECORD: RouteRecord = RouteRecord {
     operation: NAME,
     group: "gateway_key_inventory",
-    order: 2,
+    order: 3,
     method: "GET",
     path: "/rustfs/admin/v3/gateway-key-inventory",
     alias: Some("/minio/admin/v3/gateway-key-inventory"),
@@ -152,5 +152,6 @@ pub const RECORD: RouteRecord = RouteRecord {
     rustfs_handler: "GatewayKeyInventoryHandler",
     request_body: BodyKind::NotRead,
     response_body: BodyKind::Buffered,
-    caller_secret: false,
+    caller_secret: true,
+    retained: &[],
 };

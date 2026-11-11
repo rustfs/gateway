@@ -22,12 +22,16 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use rustfs_gateway_core::codec::RequestBodyMode;
 use rustfs_gateway_core::dialect::BucketParam;
-use rustfs_gateway_dialect_rustfs_admin::{CLAIMS, FORM_ROUTES, PENDING, ROUTES, RouteRecord, STAYING, TABLE_CATALOG_PREFIXES};
+use rustfs_gateway_dialect_rustfs_admin::{
+    AdminOperation, BodyKind, CLAIMS, FORM_ROUTES, OperationFold, PENDING, ROUTES, RouteRecord, STAYING, TABLE_CATALOG_PREFIXES,
+    fold_every_operation,
+};
 
 use super::{HandlerDeadlineClass, OVERLAY, Predicate, ResourceShape, captured, declared, dialect, param, templates};
 
-/// Positive and negative — exactly the twenty-one `{bucket}` and 49 `{warehouse}` templates bind
+/// Positive and negative — exactly the twenty-two `{bucket}` and 55 `{warehouse}` templates bind
 /// their bucket (`BucketParam::Path`) and exactly the two compat quota routes bind a `bucket` query
 /// parameter (`BucketParam::Query`), all of orders 5 and 6; every other operation, `{prefix}`
 /// templates included, stays service-level; and every claimed entry carries its operation's
@@ -35,7 +39,7 @@ use super::{HandlerDeadlineClass, OVERLAY, Predicate, ResourceShape, captured, d
 #[test]
 fn exactly_the_bucket_and_warehouse_routes_bind_their_bucket() {
     let templated: Vec<&RouteRecord> = ROUTES.iter().filter(|record| record.path.contains('{')).collect();
-    assert_eq!(templated.len(), 103);
+    assert_eq!(templated.len(), 121);
     let mut by_path = 0;
     let mut by_query = 0;
     for record in ROUTES {
@@ -63,7 +67,7 @@ fn exactly_the_bucket_and_warehouse_routes_bind_their_bucket() {
             assert!(!record.anonymous, "{}", record.operation);
         }
     }
-    assert_eq!((by_path, by_query), (21 + 49, 2));
+    assert_eq!((by_path, by_query), (22 + 55, 2));
     let dialect = dialect();
     let mut entries = 0;
     let mut synthetic = Vec::new();
@@ -89,7 +93,7 @@ fn exactly_the_bucket_and_warehouse_routes_bind_their_bucket() {
             entries += 1;
         }
     }
-    assert_eq!(entries, 626);
+    assert_eq!(entries, 670);
     assert_eq!(synthetic, [("rustfs:AdminV4Fallback", 6), ("rustfs:AdminFallback", 6)]);
 }
 
@@ -102,6 +106,7 @@ fn exactly_the_bucket_and_warehouse_routes_bind_their_bucket() {
 fn every_order_is_declared_and_four_routes_stay_with_rustfs() {
     let order_seven = ["oidc", "sts", "object_zip_download"];
     let order_five = [
+        "bucket_recovery",
         "durability_handler",
         "heal",
         "integrity",
@@ -114,8 +119,11 @@ fn every_order_is_declared_and_four_routes_stay_with_rustfs() {
         "audit",
         "batch_job",
         "config_admin",
+        "gateway_key_inventory",
         "ilm_transition",
         "kms",
+        "plugin_attempt",
+        "plugin_delegation",
         "plugins_instances",
         "pools",
         "scanner",
@@ -145,6 +153,7 @@ fn every_order_is_declared_and_four_routes_stay_with_rustfs() {
             ("audit", 3),
             ("batch_job", 5),
             ("bucket_meta", 4),
+            ("bucket_recovery", 1),
             ("cluster_snapshot", 1),
             ("config_admin", 9),
             ("diagnostics", 12),
@@ -164,28 +173,31 @@ fn every_order_is_declared_and_four_routes_stay_with_rustfs() {
             ("object_zip_download", 2),
             ("oidc", 8),
             ("on_demand_migration", 6),
+            ("plugin_attempt", 1),
+            ("plugin_delegation", 9),
             ("plugins_catalog", 1),
             ("plugins_instances", 4),
             ("pools", 6),
             ("profile_admin", 6),
-            ("quota_handler", 7),
+            ("quota_handler", 8),
             ("rebalance", 3),
             ("replication_handler", 6),
             ("scanner", 5),
             ("site_replication", 22),
             ("sts", 1),
             ("system", 9),
-            ("table_catalog", 50),
-            ("tier", 7),
+            ("table_catalog", 56),
+            ("tier", 9),
+            ("tls_certificate", 2),
             ("tls_debug", 1),
             ("usage_prefix", 1),
             ("user", 38),
         ]
     );
-    assert_eq!(ROUTES.len(), 314);
+    assert_eq!(ROUTES.len(), 336);
     assert!(PENDING.is_empty(), "{PENDING:?}");
-    // 261 admin and profiling routes declared, the 100 table-catalog routes as 50 operations with
-    // 50 alias rows, four routes that stay with RustFS (ADR-0032) and the form-claimed STS endpoint
+    // 277 admin and profiling routes declared, the 112 table-catalog routes as 56 operations with
+    // 56 alias rows, four routes that stay with RustFS (ADR-0032) and the form-claimed STS endpoint
     // (ADR-0041): the whole inventory.
     let staying: Vec<(&str, &str, &str)> = STAYING.iter().map(|route| (route.group, route.method, route.path)).collect();
     assert_eq!(
@@ -209,7 +221,7 @@ fn every_order_is_declared_and_four_routes_stay_with_rustfs() {
         .collect();
     assert_eq!(formed, [("sts", "POST", "/")]);
     let declared: usize = by_group.values().map(BTreeSet::len).sum();
-    assert_eq!(declared + 50 + STAYING.len() + FORM_ROUTES.len(), 366);
+    assert_eq!(declared + 56 + STAYING.len() + FORM_ROUTES.len(), 394);
 }
 
 /// Positive and negative — names are unique, precedences strictly increase, and the overlay
@@ -325,5 +337,60 @@ fn the_table_catalog_prefixes_are_exactly_its_two_claims() {
     }
     for claim in CLAIMS.iter().filter(|claim| !TABLE_CATALOG_PREFIXES.contains(&claim.prefix)) {
         assert!(!claim.reason.contains("table catalog"), "{}", claim.prefix);
+    }
+}
+
+/// Positive and negative — exactly the routes whose RustFS handler keeps a check the floor cannot
+/// represent record it (rustfs/gateway#1232): the TLS certificate pair keeps RustFS's
+/// native-listener TLS check, and the plugin-delegation routes keep RustFS's original-user check
+/// (issue-attempt its built-in-IAM check too). The certificate POST hands its body on unread so
+/// that check runs before anything reads a private key, while its record still says RustFS
+/// buffers it; every other buffered operation is still buffered by the gateway.
+#[test]
+fn every_handler_retained_check_is_recorded() {
+    const TLS: &[&str] = &["native-tls-listener"];
+    const ORIGINAL: &[&str] = &["original-user"];
+    let retained: Vec<(&str, &[&str])> = ROUTES
+        .iter()
+        .filter(|record| !record.retained.is_empty())
+        .map(|record| (record.operation, record.retained))
+        .collect();
+    assert_eq!(
+        retained,
+        [
+            ("rustfs:GetV3PluginDelegationsById", ORIGINAL),
+            ("rustfs:GetV3TlsCertificateState", TLS),
+            ("rustfs:PostV3PluginDelegations", ORIGINAL),
+            ("rustfs:PostV3PluginDelegationsByIdIssueAttempt", &["original-user", "builtin-iam"][..]),
+            ("rustfs:PostV3PluginDelegationsByIdRevoke", ORIGINAL),
+            ("rustfs:PostV3PluginDelegationsByIdRunsCancel", ORIGINAL),
+            ("rustfs:PostV3PluginDelegationsByIdRunsHistory", ORIGINAL),
+            ("rustfs:PostV3PluginDelegationsByIdRunsPage", ORIGINAL),
+            ("rustfs:PostV3PluginDelegationsByIdRunsQuery", ORIGINAL),
+            ("rustfs:PostV3PluginDelegationsByIdRunsReplay", ORIGINAL),
+            ("rustfs:PostV3PluginDelegationsByIdSubmit", ORIGINAL),
+            ("rustfs:PostV3TlsCertificate", TLS),
+        ]
+    );
+    struct BodyModes;
+    impl OperationFold for BodyModes {
+        type Carry = Vec<(&'static str, RequestBodyMode)>;
+        fn step<O: AdminOperation>(&mut self, mut carry: Self::Carry) -> Self::Carry {
+            carry.push((O::NAME, O::REQUEST_BODY));
+            carry
+        }
+    }
+    let modes = fold_every_operation(&mut BodyModes, Vec::new());
+    let mode = |name: &str| modes.iter().find(|(operation, _)| *operation == name).map(|(_, mode)| *mode);
+    assert_eq!(mode("rustfs:PostV3TlsCertificate"), Some(RequestBodyMode::Streaming));
+    let publish = ROUTES
+        .iter()
+        .find(|record| record.operation == "rustfs:PostV3TlsCertificate")
+        .expect("the certificate POST is declared");
+    assert_eq!(publish.request_body, BodyKind::Buffered);
+    for record in ROUTES.iter().filter(|record| record.request_body == BodyKind::Buffered) {
+        if record.operation != "rustfs:PostV3TlsCertificate" {
+            assert_eq!(mode(record.operation), Some(RequestBodyMode::Full), "{}", record.operation);
+        }
     }
 }

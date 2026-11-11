@@ -10,6 +10,9 @@ The inventory supplies its literal-aware delimiter readers; no RustFS runtime is
 
 import re
 
+# An optional path before a trait or type name: `crate::admin::router::`, `super::`, `futures::stream::`.
+PATH = r"(?:[A-Za-z_][A-Za-z0-9_]*::)*"
+
 
 def select_variant(text, enum, variant, close, split, fail):
     """Retain common code and the reachable arms of `self.0` dispatch only."""
@@ -101,17 +104,36 @@ def handler_type(source, name, relative, fail):
     if not re.fullmatch(r"[A-Z][A-Z0-9_]*", name):
         return name
     for candidate in [relative] + sorted(source.files):
-        found = re.search(rf"\b(?:static|const)\s+{name}\s*:\s*([A-Za-z_][A-Za-z0-9_]*)", source.files[candidate])
+        found = re.search(rf"\b(?:static|const)\s+{name}\s*:\s*{PATH}([A-Za-z_][A-Za-z0-9_]*)", source.files[candidate])
         if found:
             return found.group(1)
     fail(f"{relative}: handler value {name} has no static or const declaration")
 
 
-def handler_body(source, type_name, variant, admin, matching_close, split_args, fail):
+def shared_seals(source, called, admin, matching_close, seals):
+    """The caller-secret markers of the shared helpers in `handlers/mod.rs` a handler calls.
+
+    Only the seal is lent, never the helper's text: a shared helper's body reads are not the
+    handler's. Helpers inside the file's `#[cfg(test)]` module are not followed.
+    """
+    text = source.files.get((admin / "handlers/mod.rs").as_posix(), "")
+    test_module = re.search(r"#\[cfg\(test\)\]\s*(?:#\[[^\]]*\]\s*)*mod\s+\w+\s*\{", text)
+    text = text[:test_module.start()] if test_module else text
+    lent = []
+    for free in re.finditer(r"^(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?fn\s+([a-z_][a-z0-9_]*)\b", text, re.M):
+        brace = text.find("{", free.end())
+        if free.group(1) not in called or brace == -1:
+            continue
+        body = text[brace:matching_close(text, brace, "{", "}")]
+        lent.extend(marker for marker in seals if marker in body)
+    return lent
+
+
+def handler_body(source, type_name, variant, admin, matching_close, split_args, fail, seals=()):
     for relative, text in source.files.items():
         if not relative.startswith(admin.as_posix() + "/"):
             continue
-        match = re.search(rf"impl\s+Operation\s+for\s+{type_name}\s*\{{", text)
+        match = re.search(rf"impl\s+{PATH}Operation\s+for\s+{type_name}\s*\{{", text)
         if not match:
             continue
         end = matching_close(text, match.end() - 1, "{", "}")
@@ -139,6 +161,11 @@ def handler_body(source, type_name, variant, admin, matching_close, split_args, 
             if brace == -1:
                 continue
             helpers.append(text[free.start():matching_close(text, brace, "{", "}")])
-        stream_types = set(re.findall(r"impl\s+(?:futures::)?(?:Stream|ByteStream)\s+for\s+(\w+)", text))
+        # A free-function call, path-qualified or not, never a method call: `x.name(` is not `name(`.
+        reached = block + "\n".join(helpers)
+        lent = shared_seals(source, set(re.findall(r"(?<![.\w])(?:\w+::)*([a-z_][a-z0-9_]*)\(", reached)), admin,
+                            matching_close, seals)
+        helpers.extend(f"/* sealed by a shared helper: {marker} */" for marker in lent)
+        stream_types = set(re.findall(rf"impl\s+{PATH}(?:Stream|ByteStream)\s+for\s+(\w+)", text))
         return relative, block + "\n".join(helpers), stream_types
     fail(f"no `impl Operation for {type_name}` under {admin}")
