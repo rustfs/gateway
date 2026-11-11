@@ -744,6 +744,7 @@ gateway_modules = (
     "dialect_claims_runtime",
     "dialect_entry",
     "empty_headers_absent",
+    "empty_secret_runtime",
     "empty_upload_without_length",
     "error_context_filters",
     "extra_permissions_runtime",
