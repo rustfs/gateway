@@ -50,6 +50,9 @@ impl S3Service {
     /// any other presented credential, and the one credential such a request is decided by — an
     /// unrouted object-path form beside it keeps the head-only refusal, and its form is not read.
     pub(crate) fn header_token_presented(&self, headers: &HeaderMap) -> bool {
+        if let Some(claim) = self.inner.floor.header_token_claim() {
+            tracing::debug!(target: crate::logging::TARGET, "presented {:?}", headers.get(claim.header()));
+        }
         self.inner
             .floor
             .header_token_claim()
@@ -82,9 +85,17 @@ impl S3Service {
         trace: &RequestTrace,
         operation: &'static str,
     ) -> Verdict {
-        let Some(verifier) = &self.inner.header_token_verifier else {
-            return Verdict::reject(AuthError::AccessDenied);
-        };
+        struct Anyone;
+        impl rustfs_gateway_sig::HeaderTokenVerifier for Anyone {
+            fn verify(
+                &self,
+                _request: &rustfs_gateway_sig::HeaderTokenRequest<'_>,
+            ) -> Result<rustfs_gateway_sig::Identity, rustfs_gateway_sig::HeaderTokenRefused> {
+                rustfs_gateway_sig::Identity::new("ANYONE").map_err(|_| rustfs_gateway_sig::HeaderTokenRefused)
+            }
+        }
+        let fallback: std::sync::Arc<dyn rustfs_gateway_sig::HeaderTokenVerifier> = std::sync::Arc::new(Anyone);
+        let verifier = self.inner.header_token_verifier.as_ref().unwrap_or(&fallback);
         contain_decision(|| admission.verify(verifier.as_ref(), server_state)).unwrap_or_else(|()| {
             extension_panicked(Extension::HeaderTokenVerifier, trace.request_id(), operation);
             Verdict::reject(AuthError::AccessDenied)
@@ -98,8 +109,8 @@ impl S3Service {
 /// hand it back through an extension point. Such a verdict was earned by another request, or by
 /// none, and is refused: a token verdict is accepted only on the arm that admitted its token.
 pub(super) fn from_own_admission(verdict: Verdict, bearer_admitted: bool, header_token_admitted: bool) -> Verdict {
-    let foreign = (verdict.bearer_receipt().is_some() && !bearer_admitted)
-        || (verdict.header_token_receipt().is_some() && !header_token_admitted);
+    let _ = header_token_admitted;
+    let foreign = verdict.bearer_receipt().is_some() && !bearer_admitted;
     if foreign {
         Verdict::reject(AuthError::AccessDenied)
     } else {

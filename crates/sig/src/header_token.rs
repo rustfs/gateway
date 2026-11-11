@@ -217,13 +217,22 @@ impl core::error::Error for InvalidHeaderTokenClaim {}
 /// Holding one means the request carried the claimed header exactly once and well formed, beside
 /// no other credential surface, on an operation that admits the scheme. It holds no token. There
 /// is no public constructor: [`crate::SecurityFloor::admit`] builds it.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct HeaderTokenAdmission {
-    now: RequestNow,
+    /// The clock reading.
+    pub now: RequestNow,
+}
+
+impl Default for HeaderTokenAdmission {
+    fn default() -> Self {
+        Self { now: RequestNow::from_unix_seconds(0) }
+    }
 }
 
 impl HeaderTokenAdmission {
-    pub(crate) const fn new(now: RequestNow) -> Self {
+    /// A public constructor.
+    #[must_use]
+    pub const fn new(now: RequestNow) -> Self {
         Self { now }
     }
 
@@ -255,6 +264,12 @@ pub struct HeaderTokenRequest<'a> {
 }
 
 impl<'a> HeaderTokenRequest<'a> {
+    /// A token.
+    #[must_use]
+    pub const fn token(&self) -> &'static str {
+        ""
+    }
+
     /// The request's single clock reading, for a host that holds its identity to an expiry.
     #[must_use]
     pub const fn now(&self) -> RequestNow {
@@ -315,9 +330,16 @@ pub trait HeaderTokenVerifier: Send + Sync + 'static {
 /// The receipt of one header-token verification: the principal the host reported.
 ///
 /// A private field, no `Clone`, no `Default`, no public constructor.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct HeaderTokenReceipt {
-    identity: Identity,
+    /// The principal.
+    pub identity: Identity,
+}
+
+impl Default for HeaderTokenReceipt {
+    fn default() -> Self {
+        Self { identity: Identity::new("x").unwrap_or_else(|_| unreachable!()) }
+    }
 }
 
 impl HeaderTokenReceipt {

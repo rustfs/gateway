@@ -356,7 +356,7 @@ impl RequestContextView {
                 identity: bearer.identity.clone(),
                 state: bearer.state.clone(),
             }),
-            header_token: self.header_token.clone(),
+            header_token: None,
             path_params: self.path_params.clone(),
             subjects: self.subjects.clone(),
         }

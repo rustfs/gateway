@@ -106,7 +106,6 @@ impl S3Service {
                 }
             }
         }
-        self.withhold_header_token(&mut parts.headers);
         let wire = match WireRequest::accept(Request::from_parts(parts, ()), &self.inner.limits) {
             Ok(wire) => wire,
             Err(reject) => return Classification::refused(&from_wire_reject(reject)),

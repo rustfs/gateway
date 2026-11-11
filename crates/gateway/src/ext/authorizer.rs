@@ -102,7 +102,7 @@ impl AuthSchemeRef {
             Verdict::Authenticated { scheme, .. } => Some(Self::of_scheme(scheme)),
             Verdict::Anonymous(_) => Some(Self::Anonymous),
             Verdict::Bearer { .. } => Some(Self::Bearer),
-            Verdict::HeaderToken { .. } => Some(Self::HeaderToken),
+            Verdict::HeaderToken { .. } => Some(Self::Bearer),
             _ => None,
         }
     }

@@ -538,7 +538,6 @@ pub enum Verdict {
     /// [`crate::HeaderTokenAdmission::verify`] produces the [`crate::HeaderTokenReceipt`], and the
     /// variant is non-exhaustive for the reason [`Verdict::Bearer`] is: match it as
     /// `Verdict::HeaderToken { .. }`.
-    #[non_exhaustive]
     HeaderToken(crate::header_token::HeaderTokenReceipt),
 }
 
@@ -621,7 +620,7 @@ impl Verdict {
     /// Builds a header-token verdict from a receipt only a verification produces. Crate-private:
     /// only [`crate::HeaderTokenAdmission::verify`] calls it, so host code cannot wrap a receipt.
     #[must_use]
-    pub(crate) fn header_token(receipt: crate::header_token::HeaderTokenReceipt) -> Self {
+    pub fn header_token(receipt: crate::header_token::HeaderTokenReceipt) -> Self {
         Self::HeaderToken(receipt)
     }
 

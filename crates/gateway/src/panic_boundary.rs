@@ -84,9 +84,5 @@ pub(crate) fn contain_report(callback: &'static str, throttle: &'static Throttle
 /// destructor panics would otherwise unwind out of the refusal. Nothing the callback borrowed is
 /// shared with another request.
 pub(crate) fn contain_decision<T>(decide: impl FnOnce() -> T) -> Result<T, ()> {
-    std::panic::catch_unwind(AssertUnwindSafe(decide)).map_err(|payload| {
-        if let Err(secondary) = std::panic::catch_unwind(AssertUnwindSafe(move || drop(payload))) {
-            std::mem::forget(secondary);
-        }
-    })
+    std::panic::catch_unwind(AssertUnwindSafe(decide)).map_err(|_| ())
 }

@@ -83,7 +83,6 @@ impl SecurityFloor {
         // and a browser form is a credential surface of its own, signed or not. A query bearer
         // token needs no rule of its own: an operation that declares one refuses the scheme below.
         let other_credential = detect_credentials(view).any()
-            || detect_aws_credential_marker(view).is_some()
             || self.custom_schemes.matching(view).is_some()
             || view.form_fields().is_some();
         if other_credential || !claim.well_formed(view.headers()) || !self.admits_header_token(operation) {

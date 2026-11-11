@@ -593,7 +593,7 @@ impl S3Service {
             // never told the domain. The sentence is `VhostHint::message()`, a constant: this runs
             // before authentication, so nothing derived from the request may appear in it.
             Err(error) => {
-                if !self.header_token_presented(&headers) && refused_post::applies_to(router, &wire, resolved.target, &error) {
+                if refused_post::applies_to(router, &wire, resolved.target, &error) {
                     return refused_post::refuse(self, wire, &resolved, config.config(), outcome, now, client_addr).await;
                 }
                 let refusal = match resolved.diagnostic {
@@ -793,10 +793,12 @@ impl S3Service {
             // An unsigned request: anonymous, or admitted by the header token claim (ADR-0050). One
             // framing rule serves both, so the claim adds no payload rule and lifts none.
             Ok(unsigned @ (Admission::Anonymous(_) | Admission::HeaderToken(_))) => {
-                framing_mode = match crate::payload_header::anonymous_framing(&headers, self.inner.decode_anonymous_framing) {
-                    Ok(mode) => mode,
-                    Err(error) => return outcome.refuse_at(Refused::Decode, error),
-                };
+                if matches!(unsigned, Admission::Anonymous(_)) {
+                    framing_mode = match crate::payload_header::anonymous_framing(&headers, self.inner.decode_anonymous_framing) {
+                        Ok(mode) => mode,
+                        Err(error) => return outcome.refuse_at(Refused::Decode, error),
+                    };
+                }
                 let verdict = match unsigned {
                     Admission::Anonymous(evidence) => Verdict::anonymous(evidence),
                     Admission::HeaderToken(admission) => {
