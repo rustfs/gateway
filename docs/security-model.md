@@ -287,7 +287,9 @@ The framework's half:
   authorizer sees `AuthSchemeRef::HeaderToken` and the reported principal, whose `Identity::origin`
   is `HostToken` and which therefore equals no access key of the same spelling. The request's body
   is held to what an anonymous body is, and its answer carries `Vary` on the claimed header and
-  `Cache-Control: private` unless the handler chose one. The claimed header is removed before the
+  `private` in its `Cache-Control` unless the handler's already names `public`, `s-maxage`,
+  `must-revalidate`, `private` or `no-store` — the rule a shared cache applies to an answer to a
+  request with `Authorization`. The claimed header is removed before the
   request is accepted, so no authorization or handler context holds the token. Without the opt-in the header
   is an ordinary header and nothing reads it. The `HEADER_TOKEN_POSTURE` start-up line names the
   header, its refused aliases and every operation that admits it. The host owns what the gateway
@@ -295,8 +297,8 @@ The framework's half:
   refused alias or renamed to the claimed one, the identity must come from the request's own
   extensions, as a type private to its token layer, and never from a thread-local, a global or a
   connection cache; a policy source that looks a principal up by its bare name must branch on the
-  origin, and nothing may rebuild the `Identity` from that name; a `Cache-Control` a handler or an
-  object's stored metadata chose is kept, `public` included; and each host keeps its own reviewed
+  origin, and nothing may rebuild the `Identity` from that name; a `public`, `s-maxage` or `must-revalidate` that a
+  handler or an object's stored metadata chose is kept; and each host keeps its own reviewed
   list of the operations that admit the scheme.
 
 The condition facts a policy engine needs arrive through the same `RequestContext`, and each

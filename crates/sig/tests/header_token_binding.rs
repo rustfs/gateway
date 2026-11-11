@@ -305,7 +305,7 @@ fn n_another_letter_case_of_a_sigv2_name_is_no_credential_to_any_reader() {
         .enable_sigv2_presigned_compatibility()
         .with_header_token_claim(claim());
     let presigned = OperationFloor::builtin_presigned("GetObject", SigService::S3);
-    let anonymous = presigned.clone().allow_anonymous_after_listing_in_the_posture_report();
+    let anonymous = presigned.allow_anonymous_after_listing_in_the_posture_report();
     let none = HeaderMap::new();
     let exact = "AWSAccessKeyId=AKIDEXAMPLE&Expires=1440938460&Signature=frJIUN8D";
     // The control: the exact spellings are read as a credential, so the request is not anonymous.

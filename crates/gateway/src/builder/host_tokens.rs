@@ -94,9 +94,9 @@ impl ServiceBuilder {
     ///   handler context holds the token. Stage filters' wire seam still
     ///   sees it, as it sees `Authorization`;
     /// * the answer to a request served by its token carries `Vary` naming the claimed header,
-    ///   and `Cache-Control: private` unless the handler set a `Cache-Control` of its own. A
-    ///   `Cache-Control` the handler answered is kept as it is, `public` and one read from an
-    ///   object's stored metadata included.
+    ///   and `private` in its `Cache-Control` unless the handler's `Cache-Control` — one read
+    ///   from an object's stored metadata included — already names `public`, `s-maxage`,
+    ///   `must-revalidate`, `private` or `no-store`. Those are kept as the handler chose them.
     ///
     /// The host's outer layer validates the token and leaves what it established in the request's
     /// own extensions; see [`HeaderTokenVerifier`] for what the verifier must and must not do.

@@ -56,10 +56,11 @@ impl S3Service {
 
     /// Marks the answer to a request served by its header token as one caller's (ADR-0054).
     ///
-    /// A shared cache keeps a response to a request that carried `Authorization` private by
-    /// default (RFC 9111 section 3.5) and gives a claimed extension header no such treatment.
-    /// `Vary` names the claimed header beside whatever the response already varies on, and
-    /// `Cache-Control: private` is added unless the handler chose a `Cache-Control` itself.
+    /// A shared cache keeps a response to a request that carried `Authorization` private unless
+    /// the response says `public`, `s-maxage` or `must-revalidate` (RFC 9111 section 3.5), and
+    /// gives a claimed extension header no such treatment. `Vary` names the claimed header
+    /// beside whatever the response already varies on, and `private` is added to the response's
+    /// `Cache-Control` unless one of those three, `private` or `no-store` is already there.
     pub(super) fn keep_out_of_shared_caches(&self, response: &mut HeaderMap, served_as: Option<&Identity>) {
         if let Some(claim) = self.inner.floor.header_token_claim()
             && served_as.is_some_and(|identity| identity.origin() == IdentityOrigin::HostToken)
@@ -116,12 +117,27 @@ impl S3Service {
     }
 }
 
+/// The `Cache-Control` directives that already decide whether a shared cache may keep a
+/// response: the three by which RFC 9111 section 3.5 lets one store an answer to an authenticated
+/// request, and the two that forbid it.
+const DECIDES_SHARING: [&str; 5] = ["public", "s-maxage", "must-revalidate", "private", "no-store"];
+
 /// `Vary` on `claimed`, appended beside what `response` already varies on, and
-/// `Cache-Control: private` unless the response chose a `Cache-Control` of its own.
+/// `Cache-Control: private` appended unless a `Cache-Control` of the response already decides
+/// sharing. Directive names are read from every `Cache-Control` line, ignoring ASCII case and
+/// any argument. A lifetime alone does not decide sharing, so it gains `private`.
 fn mark_private(response: &mut HeaderMap, claimed: &'static str) {
     response.append(VARY, HeaderValue::from_static(claimed));
-    if !response.contains_key(CACHE_CONTROL) {
-        response.insert(CACHE_CONTROL, HeaderValue::from_static("private"));
+    let decided = response.get_all(CACHE_CONTROL).iter().any(|line| {
+        line.as_bytes().split(|byte| *byte == b',').any(|directive| {
+            let name = directive.split(|byte| *byte == b'=').next().unwrap_or_default().trim_ascii();
+            DECIDES_SHARING
+                .iter()
+                .any(|known| name.eq_ignore_ascii_case(known.as_bytes()))
+        })
+    });
+    if !decided {
+        response.append(CACHE_CONTROL, HeaderValue::from_static("private"));
     }
 }
 

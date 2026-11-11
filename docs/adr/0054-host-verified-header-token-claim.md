@@ -87,7 +87,11 @@ presigned names, which the floor refuses, and one of them, the pre-routing heade
 `x-amz-signature` in any letter case; that is why the floor refuses the `X-Amz-` presigned names
 in any case beside a token, although no other rule of the gateway reads those spellings.
 `cookie` and `proxy-authorization` are not credential surfaces anywhere in the gateway, and are
-not refused here.
+not refused here. Nor is another letter case of a SigV2 presigned name (`awsaccesskeyid`,
+`signature`, a lone `Expires`): every reader of those names in the gateway, the floor's marker
+predicate and the RustFS presigned policy alike, matches them byte for byte, so such a spelling is
+an ordinary parameter with or without a token. A test pins that, so the asymmetry with the
+`X-Amz-` names cannot change unnoticed.
 
 **Beside the SigV2 refusal (ADR-0052).** An operation that refuses SigV2 under every policy
 admits a header token as any other standard operation does: the token is no SigV2 request, and
@@ -175,15 +179,23 @@ spelling, `Bearer` or `Anonymous`. A handler reads the principal through
 `None`.
 
 **Shared caches.** An answer to a request served by its token carries `Vary` naming the claimed
-header, appended beside whatever the response already varies on, and `Cache-Control: private`
-unless the handler set a `Cache-Control` of its own. RFC 9111 section 3.5 keeps a response to a
-request with `Authorization` out of a shared cache by default and gives an extension header no
-such protection, so a header-token answer is not in the position a header-signed answer is in. A
-handler's own `Cache-Control`, `public` included, is kept: the gateway does not overrule a handler
-on caching anywhere else. That includes a `Cache-Control` an uploader stored on an object, which
-`GetObject` answers: such an object goes out `public` with `Vary` on the claimed header. A cache
-that honours `Vary` keeps callers apart; one that does not can serve it to another caller, as it
-can for a header-signed request, where `public` also permits storing. This is a stated residual.
+header, appended beside whatever the response already varies on. RFC 9111 section 3.5 forbids a
+shared cache to store a response to a request with `Authorization` unless the response says
+`public`, `s-maxage` or `must-revalidate`, and gives an extension header no such protection. The
+gateway restores exactly that rule for a header token: it appends `private` to the response's
+`Cache-Control` unless a `Cache-Control` the handler set already names one of those three,
+`private` or `no-store`, read from every `Cache-Control` line and in any letter case. A response
+with no `Cache-Control`, and one with only a lifetime such as `max-age=3600`, therefore goes out
+`private`: without it a shared cache could store the answer and replay it past the token's
+revocation. A header-token answer is then storable by a shared cache in the cases a header-signed
+answer is, and in no other.
+
+The residual is the same one a header-signed request has. A handler's `public`, `s-maxage` or
+`must-revalidate` is kept, and that includes a `Cache-Control` an uploader stored on an object,
+which `GetObject` answers: such an object may be stored by a shared cache, with `Vary` on the
+claimed header. A cache that honours `Vary` keeps callers apart; one that does not can serve it
+to another caller, where for a header-signed request the cache key has no such dependence at all.
+This is the deployment's, and stated.
 
 **Payload and transport.** The request is unsigned. Its framing is decided by the same call that
 decides an anonymous request's framing, and its body has no payload digest obligation. No transport
@@ -296,9 +308,9 @@ The host owns the following, and the gateway cannot check them:
   principal up by the bare name string, rather than by the `Identity`, must branch on the origin
   itself, and a host whose token users and access keys are different principals should still keep
   their name spaces apart.
-- `Vary` and `Cache-Control: private` are added to answers served by a token. A cache that ignores
-  `Vary`, a handler that sets `Cache-Control: public`, and an object stored with one, are the
-  deployment's.
+- `Vary`, and `private` unless the handler's `Cache-Control` already decides sharing, are added to
+  answers served by a token. A cache that ignores `Vary`, a handler that sets `public`, `s-maxage`
+  or `must-revalidate`, and an object stored with one of them, are the deployment's.
 - `Established` is a type private to the host's token layer, and the reported `Identity` is
   carried as a value and never rebuilt from its bare name.
 - Each host keeps its own reviewed list of the operations it registers that admit the scheme.
@@ -345,7 +357,7 @@ Threat model, and the control for each:
 | A token header an outer layer accepts under another name | A listed alias is `403` wherever it appears. An unlisted one is not seen by the gateway; see the duties above. |
 | A verifier that answers from state shared between requests | The admission reads a typed value from the request's own extensions and refuses without one; the verifier is handed that value only. |
 | A reported name spelled like an access key | The name is marked `HostToken`, which is part of `Identity`'s equality and hash. |
-| A shared cache serving one caller's answer to another | `Vary` on the claimed header and `Cache-Control: private` on answers served by a token. |
+| A shared cache serving one caller's answer to another, or replaying it past revocation | `Vary` on the claimed header, and `private` unless the handler's `Cache-Control` names `public`, `s-maxage`, `must-revalidate`, `private` or `no-store`. |
 | A token beside a malformed AWS credential under the RustFS profile | The profile's own answers are skipped; the floor refuses it `403`. |
 | A new operation admitting the scheme unnoticed | Two reviewed lists, one per operation table, compared in tests. |
 | The token sent as a trailer | Trailers are read by the payload decoder, never by the floor. |
