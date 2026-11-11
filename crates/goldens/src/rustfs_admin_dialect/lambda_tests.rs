@@ -121,7 +121,11 @@ fn rfc1123(seconds: i64) -> String {
 
 /// The object lambda request header-signed with SigV2, now.
 fn sigv2_header_signed_lambda() -> Request<Bytes> {
-    let mut request = unsigned_at("GET", &format!("/{BUCKET}/{KEY}?lambdaArn={LAMBDA_ARN}"));
+    sigv2_header_signed(unsigned_at("GET", &format!("/{BUCKET}/{KEY}?lambdaArn={LAMBDA_ARN}")))
+}
+
+/// `request`, path-style and unsigned, header-signed with SigV2 by the shared credential, now.
+pub(super) fn sigv2_header_signed(mut request: Request<Bytes>) -> Request<Bytes> {
     let date = rfc1123(RequestNow::capture().unix_seconds());
     request
         .headers_mut()

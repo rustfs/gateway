@@ -715,6 +715,11 @@ fn the_zip_pair_declares_privileged_floors_own_labels_and_its_inventory_rows() {
         assert!(!floor.allows_anonymous(), "{name}");
         assert!(!floor.allowed_schemes().allows_presigned(), "{name}");
     }
+    // ADR-0050: the download refuses SigV2 beside its bearer claim, which the SigV4 requirement
+    // could not be combined with.
+    assert!(Download::floor().refuses_sigv2_under_every_policy());
+    assert!(!Download::floor().requires_sigv4_under_every_policy());
+    assert!(Download::floor().query_bearer_claim().is_some());
     let download = Download::spec().auth.expect("an action");
     assert_eq!(
         (download.render(), download.resource),

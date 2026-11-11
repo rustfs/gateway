@@ -40,7 +40,12 @@ authenticated fallback handlers (ADR-0039).
   `{id}.zip` segment is one opaque `{+id}` capture (ADR-0040): the handler reads `id` as the whole
   segment, suffix included, and validates it against the token. A minted download URL presented
   with its `?token=` and no header signature is `403` here: ADR-0026 (g) refused admitting the
-  route anonymously, and the bearer scheme it points to is not built yet.
+  route anonymously, and the bearer scheme it points to is not built yet. The download's floor
+  refuses a SigV2 signature under every policy, with or without a token, before any credential
+  lookup (ADR-0050).
+- The STS form endpoint (`POST /` with a form body, `rustfs:StsFormPost`) refuses a SigV2
+  signature, header or presigned, under every policy, before any credential lookup, while SigV4
+  and the unsigned Web Identity form are admitted as ADR-0044 says (ADR-0050, rustfs/gateway#1592).
 
 Every operation is privileged and header-signed only: never anonymous, never presigned, and never
 handed the caller's secret unless its inventory row says RustFS seals a body with it. The one

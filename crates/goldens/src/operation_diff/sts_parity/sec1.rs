@@ -15,8 +15,8 @@
 //! SEC-1 action-specific credential and declared-request signing controls.
 //!
 //! Responsible for: actual service refusals and handler calls for ordinary AssumeRole,
-//! preservation of Web Identity's downstream decision, and SigV2 resource selection on
-//! form-claimed and ordinary S3 routes.
+//! preservation of Web Identity's downstream decision, the STS form's SigV2 refusal at the floor
+//! (ADR-0050), and SigV2 resource selection on ordinary S3 routes.
 //! NOT responsible for: token verification or the legacy comparison (`super`).
 //! Upstream: the generated STS codec, facade pipeline, and `super`'s independent signers.
 //! Downstream: nothing.
@@ -87,7 +87,7 @@ fn sec1_13() {
     }
 }
 
-/// Positive — verified SigV4 and SigV2 header modes retain the caller and exact form bytes.
+/// Positive — verified SigV4 header modes retain the caller and exact form bytes.
 #[test]
 fn sec1_14() {
     for signing in [
@@ -101,7 +101,6 @@ fn sec1_14() {
             send_digest: true,
             secret: SECRET_KEY,
         },
-        Signing::V2Header { secret: SECRET_KEY },
     ] {
         let now = RequestNow::capture();
         let sent = Sent::new(signing);
@@ -114,7 +113,17 @@ fn sec1_14() {
     }
 }
 
-/// Positive — Web Identity retains its independent action contract and exact token bytes.
+/// Negative — a verified SigV2 header `AssumeRole` is refused `AccessDenied` before its handler
+/// (ADR-0050). It was a positive here until rustfs/gateway#1592: SigV2 covers neither the form body
+/// that carries every STS parameter nor most of the query, and RustFS's router refuses SigV2 on
+/// this route once credentials are presented.
+#[test]
+fn sec1_14_v2_header() {
+    denied(Sent::new(Signing::V2Header { secret: SECRET_KEY }));
+}
+
+/// Positive — Web Identity retains its independent action contract and exact token bytes,
+/// unsigned or SigV4-presigned.
 #[test]
 fn sec1_15() {
     for signing in [
@@ -123,7 +132,6 @@ fn sec1_15() {
             service: SigService::Sts,
             secret: SECRET_KEY,
         },
-        Signing::V2Presigned,
     ] {
         let now = RequestNow::capture();
         let sent = Sent::new(signing).body(Bytes::from_static(WEB_IDENTITY));
@@ -141,8 +149,16 @@ fn sec1_15() {
     }
 }
 
+/// Negative — a SigV2-presigned Web Identity form is refused `AccessDenied` before its handler
+/// (ADR-0050), for the reason `sec1_14_v2_header` gives; it was a positive until
+/// rustfs/gateway#1592. An unsigned Web Identity form still reaches it (`sec1_15`).
+#[test]
+fn sec1_15_v2_presigned() {
+    denied(Sent::new(Signing::V2Presigned).body(Bytes::from_static(WEB_IDENTITY)));
+}
+
 /// Re-sign the actual request, independently selecting the SigV2 canonical-resource bucket.
-fn sign_v2(request: &mut Request<Bytes>, bucket: Option<&str>) {
+pub(super) fn sign_v2(request: &mut Request<Bytes>, bucket: Option<&str>) {
     request.headers_mut().remove(http::header::AUTHORIZATION);
     let query = RawQuery::new(request.uri().query().unwrap_or_default());
     let spec = SigV2StringToSignSpec::new(
@@ -163,35 +179,39 @@ fn sign_v2(request: &mut Request<Bytes>, bucket: Option<&str>) {
     );
 }
 
-/// Negative — a form-claimed request does not authenticate a host-derived bucket resource.
+/// Negative — a SigV2 request on a virtual host over a host-derived bucket resource is refused
+/// at the floor, `AccessDenied` rather than the `SignatureDoesNotMatch` the canonical resource
+/// would have produced: the floor refuses SigV2 here before any signature is computed (ADR-0050).
 #[test]
 fn sec1_16() {
     let now = RequestNow::capture();
     let request = Sent::new(Signing::V2Header { secret: SECRET_KEY })
         .host("photos.example.test")
         .request(now);
-    let (answer, _) = gateway_answer(&request, now);
+    let (answer, asked) = gateway_answer(&request, now);
     assert_eq!(answer.status, 403);
-    assert_eq!(answer.code.as_deref(), Some("SignatureDoesNotMatch"));
+    assert_eq!(answer.code.as_deref(), Some("AccessDenied"));
     assert!(answer.handed.is_none());
+    assert!(asked.is_empty(), "{asked:?}");
 }
 
-/// Positive — the same claimed request authenticates its service-level canonical resource.
+/// Negative — the same claimed request signed over its service-level canonical resource, which
+/// verified and reached the handler until rustfs/gateway#1592, is refused the same way: a
+/// correct SigV2 signature and a wrong one get one answer on this route (ADR-0050).
 #[test]
 fn sec1_17() {
     let now = RequestNow::capture();
     let sent = Sent::new(Signing::V2Header { secret: SECRET_KEY }).host("photos.example.test");
     let mut request = sent.request(now);
     sign_v2(&mut request, None);
-    let (answer, _) = gateway_answer(&request, now);
-    assert_eq!(answer.status, 200);
-    assert!(
-        answer.handed == handed(Some(ACCESS_KEY), &sent),
-        "the handler retains its caller and form"
-    );
+    let (answer, asked) = gateway_answer(&request, now);
+    assert_eq!(answer.status, 403);
+    assert_eq!(answer.code.as_deref(), Some("AccessDenied"));
+    assert!(answer.handed.is_none());
+    assert!(asked.is_empty(), "{asked:?}");
 }
 
-struct ObjectHandler(Arc<AtomicUsize>);
+pub(super) struct ObjectHandler(pub(super) Arc<AtomicUsize>);
 
 impl Handler<HeadObject> for ObjectHandler {
     async fn call(&self, _request: Req<HeadObject>) -> HandlerResult<HeadObject> {
@@ -200,7 +220,7 @@ impl Handler<HeadObject> for ObjectHandler {
     }
 }
 
-struct ObjectAuthorizer;
+pub(super) struct ObjectAuthorizer;
 
 impl Authorizer for ObjectAuthorizer {
     fn authorize_route<'a>(&'a self, _context: &'a RequestContext<'a>, request: &'a AuthzRequest<'a>) -> BoxFuture<'a, Decision> {
@@ -412,8 +432,13 @@ fn sec1_25_v4_header() {
     });
 }
 
-/// Positive — removing the displayed header cannot erase verified SigV2 authentication.
+/// Negative — removing the displayed header cannot turn a SigV2 header signature into an
+/// admissible request: the floor reads the original credential view and refuses SigV2 there
+/// (ADR-0050). It asserted the SigV2 request was served until rustfs/gateway#1592.
 #[test]
 fn sec1_25_v2_header() {
-    filter_cannot_erase_header(Signing::V2Header { secret: SECRET_KEY });
+    let answer = filtered_answer(&Sent::new(Signing::V2Header { secret: SECRET_KEY }), false);
+    assert_eq!(answer.status, 403);
+    assert_eq!(answer.code.as_deref(), Some("AccessDenied"));
+    assert!(answer.handed.is_none(), "a removed header must not make SigV2 admissible");
 }

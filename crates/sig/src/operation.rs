@@ -181,6 +181,9 @@ pub struct OperationFloor {
     allowed_schemes: AllowedSchemes,
     /// Set by [`OperationFloor::require_sigv4_under_every_policy`].
     sigv4_required: bool,
+    /// Set by [`OperationFloor::refuse_sigv2_under_every_policy`]. Read only through
+    /// [`OperationFloor::refuses_sigv2_under_every_policy`], which `sigv4_required` also implies.
+    sigv2_refused: bool,
     bearer: Option<QueryBearerClaim>,
 }
 
@@ -194,6 +197,7 @@ impl OperationFloor {
             privileged: false,
             allowed_schemes: AllowedSchemes::HEADER_ONLY,
             sigv4_required: false,
+            sigv2_refused: false,
             bearer: None,
         }
     }
@@ -212,6 +216,7 @@ impl OperationFloor {
                 anonymous: false,
             },
             sigv4_required: false,
+            sigv2_refused: false,
             bearer: None,
         }
     }
@@ -225,6 +230,7 @@ impl OperationFloor {
             privileged: true,
             allowed_schemes: AllowedSchemes::HEADER_ONLY,
             sigv4_required: false,
+            sigv2_refused: false,
             bearer: None,
         }
     }
@@ -249,6 +255,27 @@ impl OperationFloor {
     #[must_use]
     pub const fn require_sigv4_under_every_policy(mut self) -> Self {
         self.sigv4_required = true;
+        self
+    }
+
+    /// Refuses a SigV2 request — header, presigned URL or POST policy — under every
+    /// [`crate::SigV2Policy`], at the floor and before its credential is parsed or resolved, with
+    /// the [`crate::AuthError::AccessDenied`] that
+    /// [`OperationFloor::require_sigv4_under_every_policy`] answers SigV2 with (ADR-0050).
+    ///
+    /// The narrower sibling of that requirement: it changes nothing else. SigV4 is admitted as the
+    /// allow-list says; a request that presented no AWS credential — anonymous, a query bearer token
+    /// ([`OperationFloor::with_query_bearer_claim`]) or a registered custom scheme — is decided
+    /// exactly as without it. It is for an operation that must stay reachable without a signature
+    /// but whose parameters SigV2 would not cover: SigV2 signs neither the body nor most of the
+    /// query, so a SigV2 signature does not bind what such an operation acts on
+    /// (rustfs/gateway#1592).
+    ///
+    /// Only narrows, and combines with the SigV4 requirement in either order: the stronger rule
+    /// stands, and [`OperationFloor::requires_sigv4_under_every_policy`] is unchanged by it.
+    #[must_use]
+    pub const fn refuse_sigv2_under_every_policy(mut self) -> Self {
+        self.sigv2_refused = true;
         self
     }
 
@@ -346,6 +373,14 @@ impl OperationFloor {
     #[must_use]
     pub const fn requires_sigv4_under_every_policy(&self) -> bool {
         self.sigv4_required
+    }
+
+    /// Whether this operation refuses every SigV2 request under every policy: it called
+    /// [`OperationFloor::refuse_sigv2_under_every_policy`], or it requires SigV4 under every
+    /// policy, which implies it. The one predicate the floor reads for the SigV2 refusal.
+    #[must_use]
+    pub const fn refuses_sigv2_under_every_policy(&self) -> bool {
+        self.sigv2_refused || self.sigv4_required
     }
 
     /// Whether this operation admits a request that presented nothing, under `policy`.
@@ -519,6 +554,48 @@ mod tests {
                 .err(),
             Some(AuthError::AccessDenied)
         );
+    }
+
+    /// Negative — refusing SigV2 refuses both SigV2 locations and the POST policy under every SigV2
+    /// policy, and leaves the anonymous opt-in and the delegation predicate alone; the same floor
+    /// without the rule is the control that admits them (rustfs/gateway#1592).
+    #[test]
+    fn an_operation_refusing_sigv2_refuses_every_sigv2_slot_and_nothing_else() {
+        let refusing = OperationFloor::builtin_presigned("example:NoSigV2", SigService::S3)
+            .allow_post_policy()
+            .refuse_sigv2_under_every_policy();
+        let control = OperationFloor::builtin_presigned("example:NoSigV2", SigService::S3).allow_post_policy();
+        assert!(refusing.refuses_sigv2_under_every_policy());
+        assert!(!refusing.requires_sigv4_under_every_policy(), "refusing SigV2 is not requiring SigV4");
+        assert!(!control.refuses_sigv2_under_every_policy());
+        let sigv2 = SecurityFloor::new().enable_sigv2_presigned_compatibility();
+        for slot in [SchemeSlot::Header, SchemeSlot::Presigned, SchemeSlot::PostPolicy] {
+            assert_eq!(
+                sigv2.enforce_scheme_allowed(&refusing, slot, SigFamily::V2).err(),
+                Some(AuthError::AccessDenied),
+                "{slot:?}"
+            );
+            assert_eq!(sigv2.enforce_scheme_allowed(&control, slot, SigFamily::V2), Ok(()), "{slot:?}");
+            assert_eq!(sigv2.enforce_scheme_allowed(&refusing, slot, SigFamily::V4), Ok(()), "{slot:?}");
+        }
+        let delegating = SecurityFloor::new().delegate_anonymous_to_authorizer_after_listing_in_the_posture_report();
+        assert!(delegating.admits_anonymous(&refusing), "the rule does not touch anonymous admission");
+    }
+
+    /// Negative — requiring SigV4 implies refusing SigV2, and declaring both, in either order,
+    /// keeps the stronger rule: neither call weakens the other.
+    #[test]
+    fn requiring_sigv4_implies_refusing_sigv2_in_either_order() {
+        let base = OperationFloor::builtin_presigned("example:Both", SigService::S3);
+        assert!(base.require_sigv4_under_every_policy().refuses_sigv2_under_every_policy());
+        for both in [
+            base.require_sigv4_under_every_policy().refuse_sigv2_under_every_policy(),
+            base.refuse_sigv2_under_every_policy().require_sigv4_under_every_policy(),
+        ] {
+            assert!(both.requires_sigv4_under_every_policy());
+            assert!(both.refuses_sigv2_under_every_policy());
+            assert!(!both.admits_anonymous_under(AnonymousPolicy::DelegateToAuthorizer));
+        }
     }
 
     /// Positive — the narrowing leaves SigV4 alone: header signatures and presigned URLs are

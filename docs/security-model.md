@@ -366,6 +366,10 @@ quietly.
 - **The body.** SigV2 has no `x-amz-content-sha256` and no payload digest. `Content-MD5` is the
   only body binding it offers and it is optional, so a SigV2 request's body is authenticated only
   as far as the client chose to bind it. SigV4 signs a payload declaration on every request.
+  An operation whose parameters travel in the body, and which must stay reachable without a
+  signature, refuses SigV2 at the floor with `OperationFloor::refuse_sigv2_under_every_policy`
+  (ADR-0050): the RustFS STS form endpoint and zip download do, before any credential lookup and
+  under every `SigV2Policy`.
 - **Framing.** SigV2 has no streaming form; `aws-chunked` chunk signatures are SigV4 values. A
   SigV2 request that declares one is refused `501` rather than read as if the declaration were
   absent, because the pipeline decodes framing only for a payload mode it was given and the SigV2

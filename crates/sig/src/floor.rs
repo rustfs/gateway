@@ -501,7 +501,8 @@ impl SecurityFloor {
     ///
     /// [`AuthError::AccessDenied`] when the operation is privileged and the request is presigned,
     /// when the request is a SigV2 presigned URL and the compatibility switch is off, when the
-    /// request is SigV2 and the operation requires SigV4 under every policy, or when the shape is
+    /// request is SigV2 and the operation refuses SigV2 under every policy (it refuses SigV2, or
+    /// requires SigV4, under every policy), or when the shape is
     /// simply not on the operation's allow-list. One code for all of them: which fence a request
     /// hit is not something an unauthenticated caller needs.
     pub fn enforce_scheme_allowed(
@@ -510,7 +511,7 @@ impl SecurityFloor {
         slot: SchemeSlot,
         family: SigFamily,
     ) -> Result<(), AuthError> {
-        if matches!(family, SigFamily::V2) && operation.requires_sigv4_under_every_policy() {
+        if matches!(family, SigFamily::V2) && operation.refuses_sigv2_under_every_policy() {
             return Err(AuthError::AccessDenied);
         }
         if matches!(slot, SchemeSlot::Presigned) {

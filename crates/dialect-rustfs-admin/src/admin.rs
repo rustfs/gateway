@@ -228,10 +228,16 @@ pub const ZIP_DOWNLOAD_TOKEN: QueryBearerClaim = QueryBearerClaim::new("token", 
 
 /// The zip download's floor: [`floor`]'s privileged, header-signed-only floor plus the
 /// [`ZIP_DOWNLOAD_TOKEN`] claim, which admits the minted URL only through the host's installed
-/// bearer verifier and never anonymously (ADR-0026 (g), ADR-0042).
+/// bearer verifier and never anonymously (ADR-0026 (g), ADR-0042). It refuses SigV2 under every
+/// policy, at the floor, with or without a token (ADR-0050): RustFS's access check refuses SigV2 on
+/// this route once credentials are presented, and the bearer path it keeps reads no AWS credential.
+/// It cannot require SigV4 instead: that requirement refuses every bearer token, and the registry
+/// refuses the combination.
 #[must_use]
 pub const fn zip_token_floor(name: &'static str) -> OperationFloor {
-    floor(name).with_query_bearer_claim(ZIP_DOWNLOAD_TOKEN)
+    floor(name)
+        .refuse_sigv2_under_every_policy()
+        .with_query_bearer_claim(ZIP_DOWNLOAD_TOKEN)
 }
 
 /// The floor of an anonymous bootstrap operation (ADR-0026 (f), ADR-0032): header-signed or
