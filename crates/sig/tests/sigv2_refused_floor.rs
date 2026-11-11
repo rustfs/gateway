@@ -152,6 +152,29 @@ fn n_every_sigv2_shape_is_refused_under_every_floor_for_any_key() {
     }
 }
 
+/// Negative — percent-encoded parameter names are decoded before they are matched: `%53ignature`
+/// alone, and every SigV2 name encoded, are still read as SigV2 and refused `AccessDenied` under
+/// every floor, the legacy recognition included, never admitted as anonymous.
+#[test]
+fn n_a_percent_encoded_sigv2_query_is_refused_under_every_floor() {
+    let empty = HeaderMap::new();
+    let plain = sigv2_query(KEYS[0], SIGV2_SIGNATURE);
+    let one = plain.replace("&Signature=", "&%53ignature=");
+    let every = one
+        .replace("AWSAccessKeyId=", "%41WSAccessKeyId=")
+        .replace("&Expires=", "&%45xpires=");
+    for (at, floor) in sigv2_floors() {
+        for query in [&one, &every] {
+            let view = WireView::new(&empty, RawQuery::new(query));
+            assert_eq!(
+                outcome(floor.admit(view, &sts_shaped(), now())),
+                Err(AuthError::AccessDenied),
+                "{at}: {query}"
+            );
+        }
+    }
+}
+
 /// Negative — the STS-shaped floor refuses the SigV2 header and presigned URL under every floor,
 /// the RustFS profile's included, where the presigned URL reaches a standard operation.
 #[test]

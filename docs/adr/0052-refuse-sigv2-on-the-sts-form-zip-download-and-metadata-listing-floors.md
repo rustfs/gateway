@@ -55,6 +55,17 @@ credential is parsed and before any credential lookup. A known and an unknown ac
 same answer, and so do a correct and a forged signature. It is the answer the SigV4 requirement
 gives a SigV2 request, so a caller cannot tell which of the two rules refused it.
 
+`AccessDenied` is the floor's answer, not every SigV2 request's. Rules that run earlier can answer
+first:
+- the floor's own duplicate-parameter rule (H6) and two-surface rule (H4), with
+  `AuthorizationQueryParametersError` or `AuthorizationHeaderMalformed`;
+- under the RustFS profile, the header-signature view policy
+  (`answer_header_signatures_as_legacy_rustfs`). It answers a SigV2 header whose date is missing
+  or unreadable `400 InvalidRequest`, and a skewed one `403 RequestTimeTooSkewed`.
+
+None of these reads the access key or the signature, so the order reveals nothing about the
+credential. The STS suite pins the view-policy answers for a known and an unknown key.
+
 The rule changes nothing else. A SigV4 header signature, presigned URL or POST policy is admitted
 as the allow-list and the floor policies already say. So is a request that presents no AWS
 credential: an anonymous request, a query bearer token, or a registered custom scheme.
@@ -140,7 +151,7 @@ ADR-0044, ADR-0042 and ADR-0050 are not edited. This record narrows their floors
   - a no-op unknown-key rewrite;
   - both registry directions.
 
-  The table is in rustfs/gateway#1592's pull request.
+  The table is in the Handoff comment on rustfs/gateway#1592.
 
 ## Rejected alternatives
 
@@ -171,4 +182,9 @@ ADR-0044, ADR-0042 and ADR-0050 are not edited. This record narrows their floors
   - the core registry floor tests;
   - the dialect floor declarations;
   - the goldens' `sts_parity::sigv2`, `sts_parity::sec1`, `rustfs_admin_dialect::zip_sigv2_tests`
-    and `rustfs_admin_dialect::metadata_listing_tests`.
+    and `rustfs_admin_dialect::metadata_listing_tests`;
+  - the spellings an independent review probed (percent-encoded names, `AWSAccessKeyId` alone,
+    a lowercase `aws` scheme, a SigV2 header beside a zip token), each pinned to "no principal
+    reaches the handler";
+  - ADR-0044's claimed-route SigV2 canonical resource, pinned on an OIDC bootstrap row
+    (`rustfs_admin_dialect::sigv2_census_tests`), the claimed family that still admits SigV2.

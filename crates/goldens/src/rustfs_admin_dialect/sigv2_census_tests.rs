@@ -21,7 +21,8 @@
 //! reason — the OIDC bootstrap rows, which RustFS answers before it reads any credential; and the
 //! positive control, a SigV2 header signature on an exempt row that is verified and reaches its
 //! handler, so a fixture that is refused for its own reasons fails the control rather than
-//! passing the census. The metadata listings are extension routes on the standard listing floor
+//! passing the census; and ADR-0044's claimed-route SigV2 canonical resource on an OIDC row, the
+//! one claimed family that still admits SigV2. The metadata listings are extension routes on the standard listing floor
 //! and are covered by `super::metadata_listing_tests`.
 //! NOT responsible for: SigV2 presigned URLs (refused by every privileged floor already) or the
 //! object lambda's own lanes (`super::lambda_tests`).
@@ -30,13 +31,14 @@
 
 use std::sync::{Arc, Mutex};
 
-use rustfs_gateway::{Observer, RequestEvent, SecurityFloor};
+use rustfs_gateway::{LegacyRustfsVirtualHosts, Observer, RequestEvent, SecurityFloor};
 use rustfs_gateway_dialect_rustfs_admin::RouteRecord;
 
 use super::extension_tests::{admin_router_records, unsigned as unsigned_extension, unsigned_at};
-use super::lambda_tests::sigv2_header_signed;
+use super::lambda_tests::{sigv2_header_signed, sigv2_header_signed_over};
 use super::tests::rows;
 use super::{ACCESS_KEY, Exchange, assemble_installing, assemble_on, in_lanes_on, rustfs_profile_floor, unsigned};
+use crate::operation_diff::s3s_0_17_0::context::BASE_DOMAIN;
 
 /// The two floors the census runs on.
 fn floors() -> [(&'static str, SecurityFloor); 2] {
@@ -177,4 +179,40 @@ fn a_sigv2_header_signature_on_an_exempt_row_is_verified_and_reaches_its_handler
             exchange.asked
         );
     }
+}
+
+/// Positive and negative — ADR-0044's claimed-route SigV2 canonical resource, on the one family of
+/// claimed rows that still admits SigV2: under RustFS's addressing, which claims an admin path on
+/// any host, an OIDC bootstrap row requested on a virtual host is verified over its declared
+/// service-level path. A SigV2 header signed over that path is the
+/// caller's and reaches the handler. The same request signed over the host-derived bucket is
+/// refused `SignatureDoesNotMatch` without asking, because a claimed row has no host bucket. The
+/// STS goldens `sec1_16`/`sec1_17` pinned this until ADR-0052 refused SigV2 on the STS route.
+#[test]
+fn a_claimed_oidc_row_on_a_virtual_host_is_signed_over_its_service_level_path() {
+    let (record, path) = rows()
+        .find(|(record, _)| record.anonymous && record.method == "GET")
+        .expect("the inventory has a GET OIDC bootstrap row");
+    let host = format!("photos.{BASE_DOMAIN}");
+    let resolver = LegacyRustfsVirtualHosts::new([BASE_DOMAIN]).expect("the base domain");
+    let assembled = assemble_installing(SecurityFloor::new(), |_, _| true, true, None, |builder| builder.host_resolver(resolver));
+    let on_virtual_host = || {
+        let mut request = unsigned(record, &path);
+        request
+            .headers_mut()
+            .insert(http::header::HOST, http::HeaderValue::from_str(&host).expect("a host"));
+        request
+    };
+    let exchange = assembled.exchange(sigv2_header_signed_over(on_virtual_host(), None));
+    assert_eq!(exchange.status, 200, "service-level path: {}", exchange.body);
+    assert_eq!(exchange.reached, [record.operation]);
+    assert!(
+        !exchange.asked.is_empty() && exchange.asked.iter().all(|asked| asked.caller.as_deref() == Some(ACCESS_KEY)),
+        "{:?}",
+        exchange.asked
+    );
+    let exchange = assembled.exchange(sigv2_header_signed_over(on_virtual_host(), Some("photos")));
+    assert_eq!(exchange.status, 403, "host bucket: {}", exchange.body);
+    assert!(exchange.body.contains("<Code>SignatureDoesNotMatch</Code>"), "{}", exchange.body);
+    assert!(exchange.asked.is_empty() && exchange.reached.is_empty(), "{exchange:?}");
 }

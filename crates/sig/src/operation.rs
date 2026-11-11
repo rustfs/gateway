@@ -276,6 +276,12 @@ impl OperationFloor {
     ///
     /// Only narrows, and combines with the SigV4 requirement in either order: the stronger rule
     /// stands, and [`OperationFloor::requires_sigv4_under_every_policy`] is unchanged by it.
+    ///
+    /// `AccessDenied` is this rule's answer, not every SigV2 request's. The floor's
+    /// duplicate-parameter and two-surface rules run first and answer with their own codes, and so
+    /// can an assembly's header-signature view policy. The RustFS profile's answers a SigV2 header
+    /// with a missing or unreadable date `InvalidRequest`, and a skewed one
+    /// `RequestTimeTooSkewed`. None of them reads the access key or the signature.
     #[must_use]
     pub const fn refuse_sigv2_under_every_policy(mut self) -> Self {
         self.sigv2_refused = true;

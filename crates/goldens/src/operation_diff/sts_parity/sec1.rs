@@ -52,10 +52,18 @@ fn sec1_09() {
     }
 }
 
-/// Negative — a valid SigV2 query credential is refused before the ordinary handler.
+/// Negative — a valid SigV2 query credential on ordinary `AssumeRole` is refused before the
+/// authorizer is asked: since ADR-0052 the floor refuses SigV2 before the codec's header-location
+/// rule could run, so this pins the floor, not the codec. The codec's own refusal of a SigV2 query
+/// location is pinned without the floor by the dialect crate's `sts_form::sec1_03`, and through the
+/// service for SigV4 by `sec1_09`, whose query credential does reach the codec.
 #[test]
 fn sec1_10() {
-    denied(Sent::new(Signing::V2Presigned));
+    let now = RequestNow::capture();
+    let (answer, asked) = gateway_answer(&Sent::new(Signing::V2Presigned).request(now), now);
+    assert_eq!((answer.status, answer.code.as_deref()), (403, Some("AccessDenied")), "{answer:?}");
+    assert!(answer.handed.is_none());
+    assert!(asked.is_empty(), "the floor, not the codec, refused it: {asked:?}");
 }
 
 /// Negative — an anonymous ordinary action is refused before the handler.
@@ -182,6 +190,10 @@ pub(super) fn sign_v2(request: &mut Request<Bytes>, bucket: Option<&str>) {
 /// Negative — a SigV2 request on a virtual host over a host-derived bucket resource is refused
 /// at the floor, `AccessDenied` rather than the `SignatureDoesNotMatch` the canonical resource
 /// would have produced: the floor refuses SigV2 here before any signature is computed (ADR-0052).
+/// With `sec1_17`, which signs the right resource and gets the same answer, it shows the STS
+/// refusal does not depend on whether the SigV2 signature is correct. ADR-0044's claimed-route
+/// SigV2 canonical resource, which these two pinned before ADR-0052, is still live on the OIDC
+/// bootstrap rows and is pinned there (`rustfs_admin_dialect::sigv2_census_tests`).
 #[test]
 fn sec1_16() {
     let now = RequestNow::capture();
@@ -406,7 +418,12 @@ fn sec1_24_v4_query() {
     });
 }
 
-/// Negative — an injected header cannot change the authenticated SigV2 credential location.
+/// Negative — an injected `Authorization` header cannot change what the floor sees on a SigV2
+/// presigned request. Since ADR-0052 the floor refuses the request (`AccessDenied`) before the
+/// codec's header-location rule runs. The code is the discriminator: a floor that read the
+/// filtered view would see two credential surfaces, a header and a query, which H4 refuses with
+/// its own code before the scheme rule (rustfs/gateway#1592's review probe measured
+/// `AuthorizationHeaderMalformed` for that pair).
 #[test]
 fn sec1_24_v2_query() {
     filter_cannot_supply_header(Signing::V2Presigned);
@@ -434,11 +451,14 @@ fn sec1_25_v4_header() {
 
 /// Negative — removing the displayed header cannot turn a SigV2 header signature into an
 /// admissible request: the floor reads the original credential view and refuses SigV2 there
-/// (ADR-0052). It asserted the SigV2 request was served until rustfs/gateway#1592.
+/// (ADR-0052). The Web Identity body is the discriminator: if the floor read the filtered view,
+/// the request would be an unsigned Web Identity form, which is admitted (`200`). It asserted the
+/// SigV2 request was served until rustfs/gateway#1592.
 #[test]
 fn sec1_25_v2_header() {
-    let answer = filtered_answer(&Sent::new(Signing::V2Header { secret: SECRET_KEY }), false);
-    assert_eq!(answer.status, 403);
+    let sent = Sent::new(Signing::V2Header { secret: SECRET_KEY }).body(Bytes::from_static(WEB_IDENTITY));
+    let answer = filtered_answer(&sent, false);
+    assert_eq!(answer.status, 403, "{answer:?}");
     assert_eq!(answer.code.as_deref(), Some("AccessDenied"));
     assert!(answer.handed.is_none(), "a removed header must not make SigV2 admissible");
 }

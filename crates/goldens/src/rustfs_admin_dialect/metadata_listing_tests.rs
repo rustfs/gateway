@@ -25,14 +25,19 @@
 //! refused without asking; the SigV2 refusal (ADR-0052): every SigV2 form — presigned or
 //! header-signed, with `metadata=true` signed or appended after signing, which SigV2's signed keys
 //! do not cover — refused `403 AccessDenied` without asking on every floor, where RustFS serves it;
-//! and a trailing-slash bucket path.
+//! on the standard listings, which keep SigV2, the control that this file's SigV2 signers produce
+//! requests that are served as the signer, and that a signed key added or a forged signature is
+//! still refused; and a trailing-slash bucket path.
 //! NOT responsible for: routing without a service (the dialect crate's `metadata_listing`), the
 //! admin router's eight rows (`super::extension_tests`), or the harness (`super`).
 //! Upstream: `super`, `super::extension_tests`. Downstream: nothing.
 
 use bytes::Bytes;
 use http::{HeaderValue, Method, Request};
-use rustfs_gateway::SecurityFloor;
+use std::sync::Arc;
+
+use rustfs_gateway::dto::{ListObjectVersions, ListObjectVersionsOutput, ListObjectsV2, ListObjectsV2Output};
+use rustfs_gateway::{Handler, HandlerResult, Req, Resp, SecurityFloor};
 use rustfs_gateway_dialect_rustfs_admin::{EXTENSION_ROUTES, ExtensionRouteRecord};
 use rustfs_gateway_sig::{RawQuery, RequestNow, SigV2Mode, SigV2Signer, SigV2StringToSignSpec};
 
@@ -304,7 +309,9 @@ fn n_metadata_true_appended_to_a_sigv2_presigned_listing_is_refused_on_every_flo
 /// string to sign covers the same sub-resource keys only, and a header-signed request that signed
 /// `metadata=true` itself. Until rustfs/gateway#1592 both became the signer's metadata listing on
 /// both floors (ADR-0050); now both are refused `403 AccessDenied` without asking (ADR-0052). The
-/// correctly signed one shows the refusal is the floor's, not a signature failure.
+/// correctly signed one, whose signer serves a standard listing in
+/// `the_sigv2_helpers_sign_standard_listings_that_are_served_as_the_signer`, shows the refusal is
+/// the floor's, not a signature failure.
 #[test]
 fn n_a_sigv2_header_signed_metadata_listing_is_refused_on_every_floor() {
     for (at, floor) in floors() {
@@ -324,21 +331,91 @@ fn refused_at_the_floor(exchange: &Exchange, at: &str) {
     assert!(exchange.body.contains("<Code>AccessDenied</Code>"), "{at}: {}", exchange.body);
 }
 
-/// Negative — the header-signed edit is still bounded by what SigV2 does sign: adding the signed
-/// `versions` key after signing, or a forged `Authorization`, is refused without asking on both
-/// floors.
+/// The standard listings, which do not refuse SigV2: they answer an empty listing.
+struct StandardListing;
+
+impl Handler<ListObjectsV2> for StandardListing {
+    async fn call(&self, _request: Req<ListObjectsV2>) -> HandlerResult<ListObjectsV2> {
+        Ok(Resp::new(ListObjectsV2Output::default()))
+    }
+}
+
+impl Handler<ListObjectVersions> for StandardListing {
+    async fn call(&self, _request: Req<ListObjectVersions>) -> HandlerResult<ListObjectVersions> {
+        Ok(Resp::new(ListObjectVersionsOutput::default()))
+    }
+}
+
+/// The dialect's assembly behind `floor`, with the two standard listings registered as well.
+fn with_standard_listings(floor: SecurityFloor) -> super::Assembled {
+    super::assemble_installing(
+        floor,
+        |_, _| true,
+        false,
+        None,
+        |builder| {
+            builder
+                .register::<ListObjectsV2, _>(Arc::new(StandardListing))
+                .register::<ListObjectVersions, _>(Arc::new(StandardListing))
+        },
+    )
+}
+
+/// The route question `exchange` asked, as `(operation, caller)`, after checking it was answered `200`.
+fn served_to(exchange: &Exchange, at: &str) -> (String, Option<String>) {
+    assert_eq!(exchange.status, 200, "{at}: {}", exchange.body);
+    let asked = exchange
+        .asked
+        .iter()
+        .find(|asked| asked.stage == "route")
+        .unwrap_or_else(|| panic!("{at}: no route question"));
+    (asked.operation.clone(), asked.caller.clone())
+}
+
+/// Positive — the control for this file's SigV2 helpers: the same signers, on the standard
+/// listings, which do not refuse SigV2, produce requests that are verified as the signer and
+/// served. A header-signed listing is served on both floors (`SigV2Policy::HeaderOnly` admits it),
+/// and a presigned one on the RustFS profile's floor. So the refusals above are the metadata
+/// listings' floor (ADR-0052), not a fixture that fails to sign.
 #[test]
-fn n_a_sigv2_header_signed_listing_with_a_signed_key_added_is_refused_without_asking() {
+fn the_sigv2_helpers_sign_standard_listings_that_are_served_as_the_signer() {
+    let signer = Some(ACCESS_KEY.to_owned());
     for (at, floor) in floors() {
-        let assembled = assemble_on(floor, |_, _| true);
-        let added = sigv2_header_signed("list-type=2", "&versions&metadata=true");
-        refused_without_asking(&assembled.exchange(added), &format!("{at}: versions added"));
-        let mut forged = sigv2_header_signed("list-type=2", "&metadata=true");
+        let assembled = with_standard_listings(floor);
+        for (signed, operation) in [("list-type=2", "ListObjectsV2"), ("versions", "ListObjectVersions")] {
+            let exchange = assembled.exchange(sigv2_header_signed(signed, ""));
+            assert_eq!(served_to(&exchange, &format!("{at} {signed}")), (operation.to_owned(), signer.clone()));
+        }
+    }
+    let assembled = with_standard_listings(rustfs_profile_floor());
+    let exchange = assembled.exchange(sigv2_presigned("list-type=2", ""));
+    assert_eq!(served_to(&exchange, "presigned"), ("ListObjectsV2".to_owned(), signer));
+}
+
+/// Negative — what SigV2 does sign still binds, shown on the standard listings, which reach the
+/// signature check: the signed `versions` key added after signing, or a well-formed signature from
+/// another secret, is refused `SignatureDoesNotMatch` without asking on both floors. On the metadata
+/// listings the floor refuses every SigV2 request before the signature is computed (ADR-0052), so
+/// this property is pinned where it can still be observed.
+#[test]
+fn n_a_sigv2_header_signed_standard_listing_with_a_signed_key_added_or_forged_is_refused() {
+    for (at, floor) in floors() {
+        let assembled = with_standard_listings(floor);
+        let added = sigv2_header_signed("list-type=2", "&versions");
+        let mut forged = sigv2_header_signed("list-type=2", "");
         forged.headers_mut().insert(
             http::header::AUTHORIZATION,
-            HeaderValue::from_str(&format!("AWS {ACCESS_KEY}:AAAA")).expect("a value"),
+            HeaderValue::from_str(&format!("AWS {ACCESS_KEY}:AAAAAAAAAAAAAAAAAAAAAAAAAAA=")).expect("a value"),
         );
-        refused_without_asking(&assembled.exchange(forged), &format!("{at}: forged"));
+        for (case, request) in [("versions added", added), ("forged", forged)] {
+            let exchange = assembled.exchange(request);
+            refused_without_asking(&exchange, &format!("{at}: {case}"));
+            assert!(
+                exchange.body.contains("<Code>SignatureDoesNotMatch</Code>"),
+                "{at}: {case}: {}",
+                exchange.body
+            );
+        }
     }
 }
 
