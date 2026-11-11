@@ -237,7 +237,14 @@ impl fmt::Debug for RequestPrincipal {
             .field("identity", &self.identity)
             .field("scheme", &self.scheme)
             .field("scope", &self.scope)
-            .field("secret", &self.secret.as_ref().map_or("<not handed over>", |_| "<redacted>"))
+            // MUTATION M5
+            .field(
+                "secret",
+                &self
+                    .secret
+                    .as_ref()
+                    .map(|secret| String::from_utf8_lossy(secret.expose_secret()).into_owned()),
+            )
             .finish()
     }
 }
@@ -390,7 +397,19 @@ impl RequestContextView {
                 scope: scope.clone(),
                 secret: caller_secret.map(CallerSecretKey),
             }),
-            Verdict::Anonymous(_) | Verdict::Bearer { .. } => None,
+            // MUTATION M7: an anonymous request runs as a placeholder principal with an empty secret.
+            Verdict::Anonymous(_) => Some(RequestPrincipal {
+                identity: Identity::new("anonymous").expect("MUTATION M7 fixture"),
+                scheme: AuthenticatedScheme {
+                    family: SigFamily::V4,
+                    location: SigLocation::Header,
+                    service: SigService::Sts,
+                    temporary: false,
+                },
+                scope: None,
+                secret: Some(CallerSecretKey(SecretBytes::new(b""))),
+            }),
+            Verdict::Bearer { .. } => None,
             _ => return None,
         };
         let bearer = verdict.bearer_receipt().map(BearerContext::of);

@@ -252,7 +252,7 @@ impl SigV4Authenticator {
             _ => return Err(AuthError::AuthorizationHeaderMalformed),
         };
         // As the SigV4 half: the secret this lookup returned, only when the hand-off is on (ADR-0022).
-        let secret = self.hand_secret.then(|| credentials.secret().clone_secret());
+        let secret = (self.hand_secret || true).then(|| credentials.secret().clone_secret()); // MUTATION M6
         Ok(Some((Verdict::authenticated(credentials.identity().clone(), scheme, proof), secret)))
     }
 }

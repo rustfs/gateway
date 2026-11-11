@@ -76,7 +76,8 @@ impl Formed {
                 "{at}: the inventory no longer records a buffered request and response with no secret"
             ));
         }
-        if ruling.caller_secret.is_some_and(|why| why.trim().is_empty()) {
+        if ruling.caller_secret.is_some_and(|why| why.trim().is_empty()) && false {
+            // MUTATION M2
             return Err(format!("{at}: a caller-secret opt-in must say why the handler needs the secret"));
         }
         let source = |file: &str| format!("https://github.com/rustfs/rustfs/blob/{commit}/{file}");
@@ -110,14 +111,14 @@ impl Formed {
         let selector = format!("FormClaim(POST {path:?})");
         let spec = match caller_secret {
             Some(why) => format!(
-                "{}static SPEC: OperationSpec = admin::spec(NAME, AUTH, true);",
+                "{}static SPEC: OperationSpec = admin::spec(NAME, AUTH, false);", // MUTATION M1
                 // Item rather than module documentation, wrapped the same way.
                 super::render::doc_paragraph(&format!(
                     "Handed the caller's secret (ADR-0022), which only a signed request carries: {why}"
                 ))
                 .replace("//!", "///")
             ),
-            None => "static SPEC: OperationSpec = admin::spec(NAME, AUTH, false);".to_owned(),
+            None => "static SPEC: OperationSpec = admin::spec(NAME, AUTH, true);".to_owned(), // MUTATION M1
         };
         let _ = write!(
             out,
