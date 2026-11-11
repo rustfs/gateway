@@ -157,7 +157,7 @@ use crate::{response::into_response, routing::RuntimeAssembly};
 
 mod body_preparation;
 mod cors;
-mod host_tokens;
+pub(crate) mod host_tokens;
 mod outcome;
 pub(crate) mod refused_post;
 mod state;
@@ -183,7 +183,7 @@ pub(crate) struct Inner {
     /// The host's query bearer verifier (ADR-0042); `None` refuses every bearer admission.
     pub(crate) bearer_token_verifier: Option<Arc<dyn rustfs_gateway_sig::BearerTokenVerifier>>,
     /// The host's header token verifier (ADR-0051); `None` refuses every header-token admission.
-    pub(crate) header_token_verifier: Option<Arc<dyn rustfs_gateway_sig::HeaderTokenVerifier>>,
+    pub(crate) header_token_verifier: Option<host_tokens::HeaderTokenVerify>,
     #[cfg(feature = "dangerous-replace-signature-verifier")]
     pub(crate) dangerously_replaced_signature_verifier: Option<Arc<dyn rustfs_gateway_sig::AwsSignatureVerifier>>,
     pub(crate) authz_clock: Arc<dyn MonotonicClock>,
@@ -441,6 +441,7 @@ impl S3Service {
         }
         // Stamp last on both paths. A refusal already has the same identifiers; success encoders
         // and filters cannot replace this final value.
+        self.keep_out_of_shared_caches(response.headers_mut(), outcome.identity.as_ref());
         crate::stamp::stamp(response.headers_mut(), outcome.trace, now);
         (response, handler_deadline)
     }
@@ -566,7 +567,9 @@ impl S3Service {
         }
         // The RustFS profile's SigV4 header guard, where legacy RustFS asks it: before routing.
         let guard = self.inner.view_policy.sigv4_header_guard();
-        if let Some(refusal) = guard.refusal(&headers, wire.query().as_str(), wire.method(), &resolved, response_kind) {
+        let by_header_token = self.header_token_presented(&headers); // ADR-0051: the floor alone answers such a request
+        let guarded = guard.refusal(&headers, wire.query().as_str(), wire.method(), &resolved, response_kind);
+        if let Some(refusal) = guarded.filter(|_| !by_header_token) {
             return outcome.refuse(refusal);
         }
 
@@ -593,7 +596,7 @@ impl S3Service {
             // never told the domain. The sentence is `VhostHint::message()`, a constant: this runs
             // before authentication, so nothing derived from the request may appear in it.
             Err(error) => {
-                if !self.header_token_presented(&headers) && refused_post::applies_to(router, &wire, resolved.target, &error) {
+                if !by_header_token && refused_post::applies_to(router, &wire, resolved.target, &error) {
                     return refused_post::refuse(self, wire, &resolved, config.config(), outcome, now, client_addr).await;
                 }
                 let refusal = match resolved.diagnostic {
@@ -693,7 +696,7 @@ impl S3Service {
         // a presented token is credential-verification work like any other credential.
         let bearer_claim = M::floor(&op).query_bearer_claim();
         let bearer_presented = bearer_claim.is_some_and(|claim| claim.presented(&head_view));
-        let token_presented = bearer_presented || self.header_token_presented(&headers);
+        let token_presented = bearer_presented || by_header_token;
         // Once the host's verifier is installed the token is verified on this operation's signed
         // path too, and no authorization or handler context ever holds it.
         let bearer_verified_claim = bearer_claim.filter(|_| self.inner.bearer_token_verifier.is_some());
@@ -762,7 +765,7 @@ impl S3Service {
             .header_signatures
             .refusal(&signed_head, response_kind, body_owed)
             .or_else(|| policy.presigned_urls.refusal(&signed_head, response_kind, body_owed));
-        if let Some(refusal) = legacy_refusal {
+        if let Some(refusal) = legacy_refusal.filter(|_| !by_header_token) {
             return outcome.refuse(refusal);
         }
 
@@ -786,12 +789,10 @@ impl S3Service {
         let mut body_digest = BodyDigestObligation::None;
         // Legacy RustFS's words for a RustFS-profile refusal, when the authenticator published them.
         let mut legacy = None;
-        // Whether this request's own floor admission was a bearer or a header-token one: such a
-        // verdict from any other path is a receipt carried over from another request, refused below.
+        // Whether this request's own admission was a bearer or header-token one; such a verdict from any other path is refused below.
         let (mut bearer_admitted, mut header_token_admitted) = (false, false);
         let (authentication, signature_mismatch) = match self.inner.floor.admit(view, M::floor(&op), now) {
-            // An unsigned request: anonymous, or admitted by the header token claim (ADR-0051). One
-            // framing rule serves both, so the claim adds no payload rule and lifts none.
+            // Unsigned: anonymous, or admitted by the header token claim (ADR-0051). One framing rule serves both.
             Ok(unsigned @ (Admission::Anonymous(_) | Admission::HeaderToken(_))) => {
                 framing_mode = match crate::payload_header::anonymous_framing(&headers, self.inner.decode_anonymous_framing) {
                     Ok(mode) => mode,

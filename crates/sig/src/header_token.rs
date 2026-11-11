@@ -14,7 +14,8 @@
 
 //! A host-verified header token claim (ADR-0051, rustfs/gateway#1586).
 //!
-//! Responsible for: [`HeaderTokenClaim`] (the service-level opt-in: one lowercase header name),
+//! Responsible for: [`HeaderTokenClaim`] (the service-level opt-in: one lowercase header name,
+//! and the alias names of it that are refused wherever they appear),
 //! [`HeaderTokenAdmission`] (the sealed result of the floor admitting a request by that claim),
 //! the host's [`HeaderTokenVerifier`] trust boundary and the [`HeaderTokenReceipt`] only a
 //! verification produces.
@@ -36,12 +37,24 @@
 //! # The token never enters this module
 //!
 //! The floor checks that the claimed header is present exactly once and well shaped, and copies
-//! nothing: [`HeaderTokenAdmission`] holds no token, and [`HeaderTokenRequest`] has no accessor
-//! for one. The verifier answers from the request's own server-side state.
+//! nothing: [`HeaderTokenAdmission`] holds no token, and the verifier is handed only what the
+//! host's outer layer left in this request's own state, and the clock.
 //!
-//! ```compile_fail,E0599
-//! fn peek<'a>(request: &'a rustfs_gateway_sig::HeaderTokenRequest<'_>) -> &'a str {
-//!     request.token()
+//! # The identity is the one this request carries
+//!
+//! A verifier names a type, [`HeaderTokenVerifier::Established`], and the admission reads the
+//! value of that type from the accepted request's own transport values, which no client can
+//! write. With no such value the verifier is not called and the request is refused; with one, the
+//! verifier is handed that value and nothing else of the request. A verifier therefore cannot
+//! report an identity for a request whose outer layer established none, and the implementation
+//! that needs no other state is the correct one. The reported name is marked
+//! [`crate::IdentityOrigin::HostToken`], which host code cannot set, so nothing downstream takes
+//! it for an access key and no access key passes for it.
+//!
+//! ```compile_fail,E0624
+//! use rustfs_gateway_sig::Identity;
+//! fn launder(identity: Identity) -> Identity {
+//!     identity.host_reported()
 //! }
 //! ```
 //!
@@ -129,20 +142,40 @@ use http::HeaderMap;
 use rustfs_gateway_http::TransportExtensions;
 
 use crate::clock::RequestNow;
-use crate::signed_headers::AMZ_HEADER_PREFIX;
 use crate::verdict::{AuthError, Identity};
 
 /// The prefix every claimable header carries: an extension header, never a standard one.
 const EXTENSION_PREFIX: &str = "x-";
 
+/// Extension names that already mean something to the gateway, a dialect or a proxy in front of
+/// either. The facade removes a claimed header before acceptance, so claiming one of these would
+/// change what signing, routing or decoding see.
+const RESERVED_PREFIXES: [&str; 5] = ["x-amz-", "x-minio-", "x-rustfs-", "x-forwarded-", "x-http-method"];
+
+/// Whole names reserved for the same reason.
+const RESERVED_NAMES: [&str; 2] = ["x-request-id", "x-real-ip"];
+
+/// Whether `header` may be claimed or refused as an alias: `x-` followed by lowercase ASCII
+/// letters, digits and `-`, under no reserved prefix and not a reserved name.
+fn claimable(header: &str) -> bool {
+    header.strip_prefix(EXTENSION_PREFIX).is_some_and(|name| {
+        !name.is_empty()
+            && name
+                .bytes()
+                .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+    }) && !RESERVED_PREFIXES.iter().any(|prefix| header.starts_with(prefix))
+        && !RESERVED_NAMES.contains(&header)
+}
+
 /// A service's opt-in to admission by one header token, which its host verifies.
 ///
-/// The claim names the header, lowercase. It is service-level: the floor that carries it reads
-/// the header on every request, and [`crate::SecurityFloor::admits_header_token`] decides which
-/// operations admit the scheme.
+/// The claim names the header, lowercase, and any aliases of it that the service refuses. It is
+/// service-level: the floor that carries it reads those headers on every request, and
+/// [`crate::SecurityFloor::admits_header_token`] decides which operations admit the scheme.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct HeaderTokenClaim {
     header: &'static str,
+    refused_aliases: &'static [&'static str],
 }
 
 impl HeaderTokenClaim {
@@ -154,22 +187,41 @@ impl HeaderTokenClaim {
     ///
     /// # Errors
     ///
-    /// [`InvalidHeaderTokenClaim`] unless the name is an extension header outside the AWS
-    /// namespace: `x-` followed by lowercase ASCII letters, digits and `-`, and not `x-amz-`.
+    /// [`InvalidHeaderTokenClaim`] unless the name is `x-` followed by lowercase ASCII letters,
+    /// digits and `-`, under none of the prefixes that already carry meaning (`x-amz-`,
+    /// `x-minio-`, `x-rustfs-`, `x-forwarded-`, `x-http-method`), and neither `x-request-id`
+    /// nor `x-real-ip`.
     /// The facade removes the claimed header before the request is accepted, so the grammar
-    /// admits no header HTTP or the signature path gives a meaning to — `authorization`, `host`,
-    /// `content-length`, an HTTP/2 pseudo-header — and no `x-amz-` name.
+    /// admits no header HTTP, the signature path, a dialect or a proxy gives a meaning to.
     pub fn new(header: &'static str) -> Result<Self, InvalidHeaderTokenClaim> {
-        let extension = header.strip_prefix(EXTENSION_PREFIX).is_some_and(|name| {
-            !name.is_empty()
-                && name
-                    .bytes()
-                    .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
-        });
-        if !extension || header.starts_with(AMZ_HEADER_PREFIX) {
+        if !claimable(header) {
             return Err(InvalidHeaderTokenClaim);
         }
-        Ok(Self { header })
+        Ok(Self {
+            header,
+            refused_aliases: &[],
+        })
+    }
+
+    /// This claim, refusing every request that carries one of `aliases`.
+    ///
+    /// For a host whose outer layer reads the token under a second name (RustFS reads
+    /// `x-storage-token` as well as `x-auth-token`). The gateway claims one header; a request
+    /// that carried only the other would be anonymous, or its signer, to the gateway while the
+    /// host acted as the token's user. A refused alias closes that: the request is answered
+    /// `403 AccessDenied` before any verifier of any scheme is asked, whatever else it carries
+    /// and whatever its operation, and the alias is removed with the claimed header.
+    ///
+    /// # Errors
+    ///
+    /// [`InvalidHeaderTokenClaim`] when an alias fails the grammar of [`Self::new`] or repeats
+    /// the claimed header.
+    pub fn refusing_aliases(mut self, aliases: &'static [&'static str]) -> Result<Self, InvalidHeaderTokenClaim> {
+        if aliases.iter().any(|alias| !claimable(alias) || *alias == self.header) {
+            return Err(InvalidHeaderTokenClaim);
+        }
+        self.refused_aliases = aliases;
+        Ok(self)
     }
 
     /// The claimed header's name, lowercase.
@@ -178,10 +230,22 @@ impl HeaderTokenClaim {
         self.header
     }
 
-    /// Whether `headers` carries the claimed header at all, however often and whatever its value.
+    /// The alias names this claim refuses, lowercase.
+    #[must_use]
+    pub const fn refused_aliases(&self) -> &'static [&'static str] {
+        self.refused_aliases
+    }
+
+    /// Whether `headers` carries the claimed header or a refused alias at all, however often and
+    /// whatever its value: the requests this claim alone decides.
     #[must_use]
     pub fn presented(&self, headers: &HeaderMap) -> bool {
-        headers.contains_key(self.header)
+        headers.contains_key(self.header) || self.alias_presented(headers)
+    }
+
+    /// Whether `headers` carries a refused alias.
+    pub(crate) fn alias_presented(&self, headers: &HeaderMap) -> bool {
+        self.refused_aliases.iter().any(|alias| headers.contains_key(*alias))
     }
 
     /// Whether `headers` carries the claimed header exactly once, as one token: 1 to
@@ -200,13 +264,13 @@ impl HeaderTokenClaim {
     }
 }
 
-/// A header name that cannot be a [`HeaderTokenClaim`].
+/// A header name that cannot be a [`HeaderTokenClaim`] or one of its refused aliases.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct InvalidHeaderTokenClaim;
 
 impl fmt::Display for InvalidHeaderTokenClaim {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("a header token claim names one lowercase `x-` header outside `x-amz-`")
+        f.write_str("a header token claim names lowercase `x-` headers under no reserved prefix, each once")
     }
 }
 
@@ -215,8 +279,8 @@ impl core::error::Error for InvalidHeaderTokenClaim {}
 /// A request the floor admitted by its [`HeaderTokenClaim`], not yet verified.
 ///
 /// Holding one means the request carried the claimed header exactly once and well formed, beside
-/// no other credential surface, on an operation that admits the scheme. It holds no token. There
-/// is no public constructor: [`crate::SecurityFloor::admit`] builds it.
+/// no other credential surface and no refused alias, on an operation that admits the scheme. It
+/// holds no token. There is no public constructor: [`crate::SecurityFloor::admit`] builds it.
 #[derive(Debug)]
 pub struct HeaderTokenAdmission {
     now: RequestNow,
@@ -227,74 +291,61 @@ impl HeaderTokenAdmission {
         Self { now }
     }
 
-    /// Asks `verifier` which identity the host established for this request, and answers with the
-    /// verdict: [`crate::Verdict::HeaderToken`] naming it, or `AccessDenied` when the verifier
-    /// refuses. This is the only way a header-token verdict is built, and it is never anonymous.
+    /// Reads what the host's outer layer established in `server_state`, asks `verifier` which
+    /// identity that is, and answers with the verdict: [`crate::Verdict::HeaderToken`] naming it,
+    /// or `AccessDenied` when nothing was established or the verifier refuses. This is the only
+    /// way a header-token verdict is built, and it is never anonymous.
     ///
-    /// `server_state` is the accepted request's own transport values, where a host's outer layer
-    /// leaves what it established.
+    /// `server_state` is the accepted request's own transport values. A request that holds no
+    /// [`HeaderTokenVerifier::Established`] value is refused without the verifier being called.
     #[must_use]
-    pub fn verify(self, verifier: &dyn HeaderTokenVerifier, server_state: &TransportExtensions) -> crate::Verdict {
-        let request = HeaderTokenRequest {
-            now: self.now,
-            server_state,
+    pub fn verify<V: HeaderTokenVerifier>(self, verifier: &V, server_state: &TransportExtensions) -> crate::Verdict {
+        let Some(established) = server_state.get::<V::Established>() else {
+            return crate::Verdict::reject(AuthError::AccessDenied);
         };
-        match verifier.verify(&request) {
-            Ok(identity) => crate::Verdict::header_token(HeaderTokenReceipt { identity }),
+        match verifier.identity(established, self.now) {
+            Ok(identity) => crate::Verdict::header_token(HeaderTokenReceipt {
+                identity: identity.host_reported(),
+            }),
             Err(HeaderTokenRefused) => crate::Verdict::reject(AuthError::AccessDenied),
         }
     }
 }
 
-/// What a [`HeaderTokenVerifier`] is asked: the admission's one clock reading and the request's
-/// server-side state. Deliberately not the token.
-#[derive(Debug)]
-pub struct HeaderTokenRequest<'a> {
-    now: RequestNow,
-    server_state: &'a TransportExtensions,
-}
-
-impl<'a> HeaderTokenRequest<'a> {
-    /// The request's single clock reading, for a host that holds its identity to an expiry.
-    #[must_use]
-    pub const fn now(&self) -> RequestNow {
-        self.now
-    }
-
-    /// The value of type `T` the host installed in this request before the gateway accepted it,
-    /// when one was. Nothing a client sends reaches this state.
-    #[must_use]
-    pub fn server_state<T: Send + Sync + 'static>(&self) -> Option<&'a T> {
-        self.server_state.get::<T>()
-    }
-}
-
-/// A verifier's refusal: the host established no identity for this request, or will not vouch for
-/// it. Deliberately carries nothing, and is always answered `403 AccessDenied`.
+/// A verifier's refusal: the host will not vouch for what it established in this request.
+/// Deliberately carries nothing, and is always answered `403 AccessDenied`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct HeaderTokenRefused;
 
-/// The host's report of the identity its outer layer established: the declared trust boundary of
+/// The host's reading of the identity its outer layer established: the declared trust boundary of
 /// a [`HeaderTokenClaim`].
 ///
 /// # What the kernel does
 ///
 /// It admits a request that carries the claimed header exactly once and well formed, beside no
-/// other credential surface, on an operation that admits the scheme, and calls the verifier once.
-/// It never gives the verifier the token and never reads it itself.
+/// other credential surface and no refused alias, on an operation that admits the scheme. It
+/// then takes the [`Self::Established`] value from that request's own state and calls the
+/// verifier once with it. A request that holds none is refused and the verifier is not called.
+/// The kernel never gives the verifier the token and never reads it itself, and it marks the
+/// reported name [`crate::IdentityOrigin::HostToken`].
 ///
 /// # What the host must do
 ///
-/// * Validate the token in a layer that runs before the gateway, on every request, and leave the
-///   identity it established in that request's own state. Report that identity here, and refuse
-///   when there is none: an absent identity is a refusal, never an anonymous request.
+/// * Validate the token in a layer that runs before the gateway, on every request, and insert
+///   what it established into **that request's own extensions** as a value of type
+///   [`Self::Established`]; insert nothing when it established nothing.
+/// * Answer from the value it is handed. **A thread-local, a global, a "last authenticated" slot
+///   or a cache keyed on the connection is forbidden as the source of the identity.** Each of
+///   them outlives one request: requests share a thread, HTTP/2 multiplexes callers behind a
+///   proxy onto one connection, and a keep-alive connection carries one caller after another, so
+///   such a source hands one request the identity another request earned.
 /// * Establish an identity from the claimed header only, and leave the header in place: the
-///   gateway consumes it. An identity established from any other header reaches a request the
-///   gateway treats as anonymous, or as its signer. A host that accepts an alias of the header
-///   renames it to the claimed one in its outer layer, or refuses it there.
-/// * Report an identity its policy source and audit trail can tell from an access key, unless
-///   the two are meant to be one principal: the identity is the only thing they are handed. A
-///   [`crate::SessionBinding`] naming the issuer is one way to mark it.
+///   gateway consumes it. A host whose outer layer also reads the token under another name
+///   lists that name in [`HeaderTokenClaim::refusing_aliases`], or renames it to the claimed
+///   header before the gateway.
+/// * Keep its name space apart from access keys where the two are different principals. The
+///   kernel marks the origin; a policy source or authorizer that looks a principal up by the
+///   bare name must branch on [`Identity::origin`].
 /// * Own replay, expiry and revocation. The kernel keeps no token state.
 ///
 /// # Calling contract
@@ -304,12 +355,17 @@ pub struct HeaderTokenRefused;
 /// the facade contains a panic and refuses the request with `403`, but the host's own state is
 /// whatever the panic left it in.
 pub trait HeaderTokenVerifier: Send + Sync + 'static {
-    /// Reports the identity the host established for one request.
+    /// What the host's outer layer inserts into a request's extensions once it has validated the
+    /// token: a type of the host's own, so nothing else in the process can supply one.
+    type Established: Send + Sync + 'static;
+
+    /// Names the principal `established` stands for, at the request's one clock reading.
     ///
     /// # Errors
     ///
-    /// [`HeaderTokenRefused`] when the host established none, or does not accept it here.
-    fn verify(&self, request: &HeaderTokenRequest<'_>) -> Result<Identity, HeaderTokenRefused>;
+    /// [`HeaderTokenRefused`] when the host does not accept it here: it expired, or it cannot be
+    /// named.
+    fn identity(&self, established: &Self::Established, now: RequestNow) -> Result<Identity, HeaderTokenRefused>;
 }
 
 /// The receipt of one header-token verification: the principal the host reported.

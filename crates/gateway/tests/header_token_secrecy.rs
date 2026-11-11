@@ -35,8 +35,8 @@ use rustfs_gateway::{S3Service, WireHead, dto, wire_filter};
 
 use crate::anonymous_chunked_upload::{Backend as Uploads, OBJECT, OBJECT_CRC32, Recorded, anonymous_put, unsigned_framing};
 use crate::header_token::fixtures::{
-    Answer, Asked, Fixture, HEADER, Handed, Lines, PRINCIPAL, RequestCase, TOKEN, assemble, assemble_on, builder, claim,
-    token_only, with_token,
+    ALIAS, Answer, Asked, Established, Fixture, HEADER, Handed, Lines, PRINCIPAL, RequestCase, TOKEN, aliased, assemble,
+    assemble_aliased, builder, claim, token_only, with_bare_token, with_token,
 };
 use crate::support;
 use crate::tracing_events::captured;
@@ -84,7 +84,7 @@ fn n_no_log_event_answer_or_context_holds_the_token() {
             let mut contexts = 0;
             // A panicking host is `n_a_panicking_verifier_is_reported_as_one_contained_panic_event`'s
             // alone: its event is throttled process-wide, so only one case may raise it.
-            let scenarios: [(Answer, Vec<http::Request<Bytes>>); 3] = [
+            let scenarios: [(Answer, Vec<http::Request<Bytes>>); 2] = [
                 (
                     Answer::Accepts,
                     vec![
@@ -94,16 +94,19 @@ fn n_no_log_event_answer_or_context_holds_the_token() {
                         with_token(support::signed(http::Method::GET, "/")),
                         support::signed_with(http::Method::GET, "/", &[(HEADER, TOKEN)]),
                         token_only(http::Method::GET, "/?X-Amz-Algorithm=AWS4-HMAC-SHA256"),
+                        // Nothing established, and a refused alias holding the same bytes.
+                        with_bare_token(support::plain(http::Method::POST, "/")),
+                        aliased(support::plain(http::Method::POST, "/")),
+                        aliased(token_only(http::Method::GET, "/")),
                     ],
                 ),
                 (
                     Answer::Refuses,
                     vec![token_only(http::Method::GET, "/"), token_only(http::Method::POST, "/")],
                 ),
-                (Answer::ReportsInstalled, vec![token_only(http::Method::POST, "/")]),
             ];
             for (answer, requests) in scenarios {
-                let fixture = assemble(Some(answer));
+                let fixture = assemble_aliased(answer);
                 let mut responses = Vec::new();
                 for request in requests {
                     responses.push(fixture.exchange(request).await);
@@ -115,6 +118,7 @@ fn n_no_log_event_answer_or_context_holds_the_token() {
                     .chain(handed.iter().flat_map(|handler| &handler.headers))
                 {
                     assert_ne!(name.as_str(), HEADER, "{answer:?}: a context carries the claimed header");
+                    assert_ne!(name.as_str(), ALIAS, "{answer:?}: a context carries the refused alias");
                 }
                 // Not an empty search: the contexts were built, and their other lines arrived.
                 for lines in asked
@@ -127,10 +131,6 @@ fn n_no_log_event_answer_or_context_holds_the_token() {
                 }
                 text.extend(produced(&fixture, &responses, &asked, &handed));
             }
-            // A claim with no verifier, which refuses.
-            let unverified = assemble_on(SecurityFloor::new().with_header_token_claim(claim()), None);
-            let response = unverified.exchange(token_only(http::Method::GET, "/")).await;
-            text.extend(produced(&unverified, &[response], &[], &[]));
             assert!(
                 contexts >= 6,
                 "both stages and the handler of the admitted requests were searched: {contexts}"
@@ -242,9 +242,12 @@ async fn n_a_stage_filter_can_neither_supply_nor_erase_a_token() {
 struct AcceptsAnything(Arc<std::sync::atomic::AtomicUsize>);
 
 impl rustfs_gateway::HeaderTokenVerifier for AcceptsAnything {
-    fn verify(
+    type Established = Established;
+
+    fn identity(
         &self,
-        _request: &rustfs_gateway::HeaderTokenRequest<'_>,
+        _established: &Established,
+        _now: rustfs_gateway::RequestNow,
     ) -> Result<rustfs_gateway::Identity, rustfs_gateway::HeaderTokenRefused> {
         self.0.fetch_add(1, Ordering::SeqCst);
         rustfs_gateway::Identity::new(PRINCIPAL).map_err(|_| rustfs_gateway::HeaderTokenRefused)
@@ -358,6 +361,44 @@ async fn the_body_of_a_header_token_request_is_held_to_what_an_anonymous_body_is
     );
 }
 
+/// Negative — the claimed header's name in a trailer is not a token: trailers are read by the
+/// payload decoder and never by the floor. An upload that declares and sends the name as a
+/// trailer, from a request in which the host established an identity, is answered exactly as the
+/// same upload is by a service without the claim, and the verifier is not asked. The same upload
+/// with the header in its head is the control: there the verifier is asked.
+#[tokio::test]
+async fn n_the_claimed_name_as_a_trailer_is_not_a_token() {
+    let trailered = || {
+        let mut body = format!("{:x}\r\n", OBJECT.len()).into_bytes();
+        body.extend_from_slice(OBJECT);
+        body.extend_from_slice(b"\r\n0\r\n");
+        body.extend_from_slice(format!("x-amz-checksum-crc32:{OBJECT_CRC32}\r\n{HEADER}:{TOKEN}\r\n\r\n").as_bytes());
+        let mut request = anonymous_put("STREAMING-UNSIGNED-PAYLOAD-TRAILER", OBJECT.len(), body);
+        let declared = http::HeaderValue::from_static("x-amz-checksum-crc32,x-auth-token");
+        request.headers_mut().insert("x-amz-trailer", declared);
+        request.extensions_mut().insert(Established(PRINCIPAL));
+        request
+    };
+    let asked = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let claimed = |asked: &Arc<std::sync::atomic::AtomicUsize>| {
+        support::wired_at_signed_time()
+            .security_floor(SecurityFloor::new().delegate_anonymous_to_authorizer_after_listing_in_the_posture_report())
+            .host_verified_header_token(claim(), AcceptsAnything(Arc::clone(asked)))
+            .register::<dto::PutObject, _>(Arc::new(Uploads(Arc::new(Recorded::default()))))
+            .build()
+            .expect("a complete PutObject assembly")
+    };
+    let (status, body) = support::exchange(&claimed(&asked), trailered()).await;
+    let answer = (status.as_u16(), support::element_text(&body, "Code").map(str::to_owned));
+    let (unclaimed_status, unclaimed_code, _) = upload(false, false, trailered()).await;
+    assert_eq!(answer, (unclaimed_status, unclaimed_code), "the trailer changed the answer");
+    assert_eq!(asked.load(Ordering::SeqCst), 0, "a trailer was read as a token");
+    assert!(!body.to_ascii_lowercase().contains("sentinel"), "{body}");
+
+    let _ = support::exchange(&claimed(&asked), with_token(plain_put(&[]))).await;
+    assert_eq!(asked.load(Ordering::SeqCst), 1, "the control: the header in the head is a token");
+}
+
 /// Positive and negative — the claimed header is withheld before acceptance, so its bytes are
 /// bounded by the floor and not counted in the head's ceiling, and `S3Service::classify` agrees
 /// with `call`: a head that only exceeds the ceiling by its token is served when the claim is
@@ -370,6 +411,7 @@ async fn the_withheld_token_is_outside_the_accepted_head_and_classification_agre
         let token = http::HeaderValue::from_str(&"t".repeat(rustfs_gateway::HeaderTokenClaim::MAX_TOKEN_BYTES));
         request.headers_mut().insert("x-filler", filler);
         request.headers_mut().insert(HEADER, token.expect("a header value"));
+        request.extensions_mut().insert(Established(PRINCIPAL));
         request
     };
     let (head, _) = request().into_parts();

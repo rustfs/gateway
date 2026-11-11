@@ -17,8 +17,8 @@
 //! Responsible for: [`SecurityFloor::with_header_token_claim`], the one predicate
 //! [`SecurityFloor::admits_header_token`] that both admission and the startup posture report read,
 //! and the branch of `SecurityFloor::admit` that decides every request presenting the claimed
-//! header: exclusive of every other credential surface, one well-formed value, an operation that
-//! admits the scheme.
+//! header or a refused alias of it: no alias, exclusive of every other credential surface, one
+//! well-formed value, an operation that admits the scheme.
 //! NOT responsible for: the token, which this module never copies; verifying anything — the
 //! host's [`crate::HeaderTokenVerifier`] reports the identity; or a request that does not carry
 //! the claimed header, which the rest of the floor decides as before.
@@ -26,6 +26,11 @@
 
 use super::*;
 use crate::verifier::detect_aws_credential_marker;
+
+/// The presigned parameters that are no credential marker by themselves, because a request that
+/// carries only these names nothing to verify. Beside a header token they are still the remains
+/// of a signature, and the request is refused.
+const PRESIGNED_REMAINDER: [&str; 3] = ["X-Amz-Date", "X-Amz-Expires", "X-Amz-SignedHeaders"];
 
 impl SecurityFloor {
     /// Installs the host-verified header token claim: a request whose head carries `claim`'s
@@ -67,7 +72,7 @@ impl SecurityFloor {
             && !operation.requires_sigv4_under_every_policy()
     }
 
-    /// The branch for a request that presented the claimed header. Total: every path out of it is
+    /// The branch for a request that presented the claimed header or a refused alias. Total: every path out of it is
     /// a [`HeaderTokenAdmission`] or `AccessDenied`, so such a request is never sealed for a
     /// signature verifier, handed to a custom scheme, admitted by a bearer token or anonymous.
     pub(super) fn admit_by_header_token(
@@ -84,9 +89,16 @@ impl SecurityFloor {
         // token needs no rule of its own: an operation that declares one refuses the scheme below.
         let other_credential = detect_credentials(view).any()
             || detect_aws_credential_marker(view).is_some()
+            || PRESIGNED_REMAINDER.iter().any(|name| view.query_contains(name))
             || self.custom_schemes.matching(view).is_some()
             || view.form_fields().is_some();
-        if other_credential || !claim.well_formed(view.headers()) || !self.admits_header_token(operation) {
+        // A refused alias decides the request whatever else it carries: the host's outer layer
+        // may have established an identity from it that the gateway cannot see.
+        if claim.alias_presented(view.headers())
+            || other_credential
+            || !claim.well_formed(view.headers())
+            || !self.admits_header_token(operation)
+        {
             return Err(AuthError::AccessDenied);
         }
         Ok(HeaderTokenAdmission::new(now))

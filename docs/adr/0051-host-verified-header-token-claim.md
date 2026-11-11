@@ -30,20 +30,33 @@ distinct authentication scheme, secret handling for the token, and unsigned payl
 Add one opt-in, `ServiceBuilder::host_verified_header_token(claim, verifier)`, taking one
 `HeaderTokenClaim` (a lowercase header name) and one `HeaderTokenVerifier`. One call installs
 both, so a verifier never exists without its claim. The builder writes the claim onto the
-`SecurityFloor` it assembles; nothing else turns the feature on. A floor that carries a claim
-without a verifier refuses every request presenting the header.
+`SecurityFloor` it assembles; nothing else turns the feature on. A floor that carries a claim the
+builder was given no verifier for is an assembly error (`asm-header-token-unverified`): it would
+refuse every request presenting the header, and a service that starts in that state is a
+misconfiguration found by its users.
 
 **Opt-in absent.** `SecurityFloor::admit` reads no header for this purpose, no context is changed,
 and no posture line is added. A request carrying the header is treated exactly as it is today.
 
-**The claim.** `HeaderTokenClaim::new` accepts an extension header outside the AWS namespace: `x-`
-followed by lowercase ASCII letters, digits and `-`, and not `x-amz-`. The facade removes the
-claimed header before the request is accepted, so the grammar admits no header that HTTP or the
-signature path gives a meaning to: not `authorization`, not a framing or routing header, and,
-having no `:`, no HTTP/2 pseudo-header.
+**The claim.** `HeaderTokenClaim::new` accepts an extension header that nothing else gives a
+meaning to: `x-` followed by lowercase ASCII letters, digits and `-`, under none of the prefixes
+`x-amz-`, `x-minio-`, `x-rustfs-`, `x-forwarded-` and `x-http-method`, and neither `x-request-id`
+nor `x-real-ip`. The facade removes the claimed header before the request is accepted, so the
+grammar admits no header that HTTP, the signature path, a dialect or a proxy in front reads: not
+`authorization`, not a framing or routing header, and, having no `:`, no HTTP/2 pseudo-header.
+
+**Refused aliases.** `HeaderTokenClaim::refusing_aliases` lists further header names, held to the
+same grammar, under which the host's outer layer also reads the token (RustFS reads
+`x-storage-token` beside `x-auth-token`). The gateway claims one header. A request that carried
+only another name would be anonymous to the gateway, or its signer, while the host acted as the
+token's user. A request that carries a refused alias is therefore decided by the claim's branch
+and refused `403 AccessDenied`, alone, beside the claimed token or beside a valid signature, on
+every operation, and the alias is removed with the claimed header. Refusing is chosen over
+admitting under several names: one name has one shape rule and one occurrence rule, and "which of
+two token headers wins" is a precedence the gateway would then own.
 
 **Admission is exclusive, and runs first.** When the claim is installed and the request's head
-carries the claimed header, `SecurityFloor::admit` decides the request in that branch alone, before
+carries the claimed header or a refused alias, `SecurityFloor::admit` decides the request in that branch alone, before
 any other rule. The answer is a sealed `Admission::HeaderToken` or `403 AccessDenied`. It is never
 a sealed AWS request, a custom-scheme request, a bearer admission or an anonymous one, so no other
 verifier is handed a request that carries the token. The branch refuses, before any verifier runs,
@@ -53,7 +66,9 @@ own detection names, read by the default predicate whatever recognition policy i
 - headers: `authorization` with any value, `x-amz-security-token`, and any header under a
   registered custom scheme prefix;
 - query parameters, by decoded name: `X-Amz-Algorithm`, `X-Amz-Credential`, `X-Amz-Signature`,
-  `X-Amz-Security-Token`, `AWSAccessKeyId` and `Signature`;
+  `X-Amz-Security-Token`, `AWSAccessKeyId` and `Signature`, and the three that are no marker by
+  themselves but are what remains of a presigned URL: `X-Amz-Date`, `X-Amz-Expires` and
+  `X-Amz-SignedHeaders`;
 - a browser form of any content, which covers `x-amz-algorithm`, `x-amz-credential`,
   `x-amz-signature`, `x-amz-security-token`, `AWSAccessKeyId`, `signature` and `policy`.
 
@@ -61,6 +76,14 @@ A query bearer token needs no entry: an operation that declares a query bearer c
 scheme, with or without its parameter. An object-path form that routes to no operation under the
 RustFS selector is not read when the token is present; the request keeps the head-only refusal of
 any unrouted request. There is no precedence and no fallback from one credential to the other.
+
+The answer is the same under every assembly. The facade's RustFS view policies answer a malformed
+header signature or presigned URL in legacy RustFS's own words before the floor runs; a request
+that presents the claimed header or a refused alias skips those answers and reaches the floor,
+which refuses it. Routing, addressing and wire refusals still come first, as they do for any
+request: they do not depend on a credential. `cookie`, `proxy-authorization` and a lowercase
+spelling of a presigned parameter are not credential surfaces anywhere in the gateway, and are
+not refused here.
 
 **The header's shape.** The branch then requires exactly one occurrence of the claimed header, with
 a value of 1 to 8192 bytes, every byte ASCII graphic and none a comma. A repeated, empty, overlong,
@@ -75,14 +98,41 @@ STS service, privileged or not), an operation that takes a browser form, the bea
 and a route that requires SigV4 under every policy (ADR-0049). There is no per-operation opt-in for
 any of them; adding one needs its own decision.
 
-**The verifier.** `HeaderTokenVerifier::verify(&HeaderTokenRequest) -> Result<Identity,
-HeaderTokenRefused>` is synchronous and is the host's trust boundary. The request exposes the
-admission's one clock reading and typed, read-only access to the values the host installed in the
-request before acceptance. It does not expose the token: the host's outer layer has already
-validated it, and the verifier only reports the identity that layer established for this request.
-There is one spelling of "no": a refusal. An absent identity is a refusal. The facade runs the
-verifier inside its panic boundary; a refusal, a panic and a missing verifier are each
+The predicate decides by attribute, so an operation added on a non-privileged floor admits the
+scheme the moment it exists. Two reviewed lists make that a decision rather than an accident: the
+operations of the reference backend that admit the scheme
+(`crates/gateway/tests/golden/header-token-operations.txt`), and the operations of the `rustfs`
+dialect that do. The dialect's list is RustFS's two metadata listings (ADR-0050), admitted
+deliberately: they stand on the standard listing floor, answer what `ListObjectsV2` and
+`ListObjectVersions` answer plus each object's user metadata, and the authorizer decides them as
+it decides those. A session-credential operation such as `CreateSession` must be marked to refuse
+the scheme when it lands; the list is where its absence is checked.
+
+**The verifier, and what binds the identity to the request.** A `HeaderTokenVerifier` names a
+type, `Established`, and has one method, `identity(&Established, RequestNow) -> Result<Identity,
+HeaderTokenRefused>`. The host's outer layer inserts a value of that type into the extensions of
+each request it authenticated. `HeaderTokenAdmission::verify` reads that value from the accepted
+request's own transport values, which no client can write. With no value the request is refused
+and the verifier is not called; with one, the verifier is handed that value and the admission's
+one clock reading, and nothing else: not the token, and no other part of the request. So the
+verifier cannot report an identity for a request in which the outer layer established none, and
+the implementation that needs no other state is the correct one. A thread-local, a global, a
+"last authenticated" slot or a cache keyed on the connection is forbidden as the source of the
+identity: each outlives one request, since requests share threads, HTTP/2 multiplexes callers onto
+one connection and a keep-alive connection carries one caller after another. A task-local scoped
+around the inner call would be sound, but the gateway could not tell it from the unsound sources,
+so the typed slot is the one supported form. There is one spelling of "no": a refusal. The facade
+runs the verifier inside its panic boundary; a refusal, a panic and an absent value are each
 `403 AccessDenied`, and none becomes anonymous.
+
+**The origin of the name.** `Identity` gains an origin, `AccessKey` or `HostToken`, that is part of
+its equality and hash. Only `HeaderTokenAdmission::verify` marks a name `HostToken`, whatever the
+verifier built. The policy source, both authorization stages, the audit event and the observer are
+all handed that `Identity`, so a store keyed on it never answers a host-reported name with the
+entry of the access key that shares its spelling, and no signature, custom scheme or bearer token
+produces a name that passes for a host-reported one. A consumer that looks a principal up by the
+bare `access_key_id()` string must branch on `Identity::origin`; that accessor's documentation
+says so.
 
 **The receipt and the verdict.** `HeaderTokenAdmission` and `HeaderTokenReceipt` have private
 fields, no `Clone`, no `Default` and no public constructor. Only `SecurityFloor::admit` produces
@@ -98,14 +148,22 @@ spelling, `Bearer` or `Anonymous`. A handler reads the principal through
 `RequestContextView::header_token_principal`; `principal()` stays the signed principal and is
 `None`.
 
+**Shared caches.** An answer to a request served by its token carries `Vary` naming the claimed
+header, appended beside whatever the response already varies on, and `Cache-Control: private`
+unless the handler set a `Cache-Control` of its own. RFC 9111 section 3.5 keeps a response to a
+request with `Authorization` out of a shared cache by default and gives an extension header no
+such protection, so a header-token answer is not in the position a header-signed answer is in. A
+handler's own `Cache-Control`, `public` included, is kept: the gateway does not overrule a handler
+on caching anywhere else.
+
 **Payload and transport.** The request is unsigned. Its framing is decided by the same call that
 decides an anonymous request's framing, and its body has no payload digest obligation. No transport
 rule is added or lifted.
 
 **The token is secret material.** The admission does not copy it, the verifier is not given it, and
 no `Debug` or `Display` implementation, log event, error body or metric label of the gateway holds
-it. When the claim is installed, the facade removes the claimed header from the request head after
-the wire seam and before acceptance. The accepted request therefore never holds it, and neither do
+it. When the claim is installed, the facade removes the claimed header and every refused alias from
+the request head after the wire seam and before acceptance. The accepted request therefore never holds it, and neither do
 the authorization contexts, the handler context, the codec's header view or the committed-response
 context. The floor reads the caller's own copy of the head, taken before the wire seam, so a stage
 filter can neither supply nor erase a token.
@@ -132,26 +190,28 @@ filter can neither supply nor erase a token.
 - Measured at that revision: acceptance bounds a head at 128 fields and 16 KiB
   ([limits.rs](https://github.com/rustfs/gateway/blob/f9aa6045ec077cc41b4d5f3bdeab01d729826407/crates/http/src/limits.rs#L213-L214)).
   The claimed header is removed before that count, which is why the floor bounds it itself.
-- Measured: the RustFS outer layer at `7f5fa4b8f62ed195a7887adccb47b37d505188bd` validates the token
-  header and scopes the resulting credentials around the inner service call
+- Measured: the RustFS outer layer at `7f5fa4b8f62ed195a7887adccb47b37d505188bd` reads the token
+  from `X-Auth-Token` and, failing that, from `X-Storage-Token`, and scopes the resulting
+  credentials around the inner service call
   ([middleware.rs](https://github.com/rustfs/rustfs/blob/7f5fa4b8f62ed195a7887adccb47b37d505188bd/crates/keystone/src/middleware.rs#L159)).
-  The verifier is called synchronously inside that call, so such a host can report the identity
-  without the token. Reproduce with
-  `git show 7f5fa4b8f:crates/keystone/src/middleware.rs` in that repository.
-- [inferred] `http::HeaderMap` stores names lowercased and keeps repeated field lines as separate
-  values, and the HTTP/1.1 parsers in use strip optional whitespace around a value. This is read
-  from those crates' documentation and from the existing duplicate-header rule, not measured by a
-  new wire test in this record.
-- Measured on the implementation in this pull request: the ten compile-fail probes in
+  That layer holds the request mutably when it has the credentials, so it can insert them into
+  the request's extensions; the second header name is why a claim can refuse aliases. Reproduce
+  with `git show 7f5fa4b8f:crates/keystone/src/middleware.rs` in that repository.
+- Measured through a Hyper HTTP/1 connection (`crates/gateway/tests/header_token_wire.rs`): one
+  line of the claimed header is one token whatever the case of its name and whatever optional
+  whitespace surrounds its value; a repeated or empty line is `403`; a line folded over two is
+  answered `400` or `403` and never served; and a header nominated by `Connection` is still
+  decided by the claim. HTTP/2 was not measured.
+- Measured on the implementation of this record: the ten compile-fail probes in
   `crates/sig/src/header_token.rs` each fail with exactly one error. Run as ordinary doctests, they
   report `E0451` for a struct literal of the admission and of the receipt, `E0624` for the
-  admission's constructor and for `Verdict::header_token`, `E0277` for `Clone::clone` on either,
-  `E0599` for `default` on either and for a `token` accessor on the verifier's request, and `E0603`
-  for building `Verdict::HeaderToken` directly. Stable `rustdoc` does not compare the code a
+  admission's constructor, for `Verdict::header_token` and for marking a name host-reported,
+  `E0277` for `Clone::clone` on either, `E0599` for `default` on either, and `E0603` for building
+  `Verdict::HeaderToken` directly. Stable `rustdoc` does not compare the code a
   `compile_fail` block names, so each probe was also made to compile by a mutation that grants
   what it forbids, and its test went red.
-- The mutation of each new assertion, with the command that ran it, is recorded in the pull
-  request that lands this record.
+- The mutation of each new assertion, with the command that ran it, is recorded on
+  rustfs/gateway#1586.
 
 ## Rejected alternatives
 
@@ -163,6 +223,10 @@ filter can neither supply nor erase a token.
 | Put the claim on each operation, as the query bearer claim is | The credential is service-wide. A per-operation list would have to be repeated on every standard operation and would drift. |
 | A precedence rule between the token and an AWS credential | Either order lets a client choose which of two verifications it would rather pass. |
 | Hand the verifier the token | The validation already happened. A second holder of the secret adds a place to log or cache it and binds nothing the request-owned state does not bind. |
+| Hand the verifier the request's whole state and let it look the identity up | It can then be written without reading the request at all, and a verifier backed by a thread-local or a connection cache hands one request another's identity with nothing in the API to notice. A typed slot the admission reads makes an absent identity a refusal before the verifier runs. |
+| Accept the token under several header names | Two names need a precedence between them and double every shape rule. Refusing the alias has one answer and leaves the host's outer layer free to rename it first. |
+| Hand the scheme to `PolicySource` instead of marking the identity | That changes a trait every host implements, and leaves the observer and any store keyed on `Identity` as they were. The origin travels with the value to every consumer at once. |
+| Prefix the reported name, as `keystone:` would | The kernel would be inventing principal names, and a host's audit trail would no longer show the name its identity service issued. |
 | Return `Option<Identity>` beside a refusal | Two spellings of "no" invite reading one of them as "treat as anonymous". |
 | Admit the token on privileged or STS operations | Admin, configuration and credential issuance stay behind a signature until a decision says otherwise. RustFS's STS endpoint is not privileged, because it admits an anonymous web-identity form, so the service is refused by name. |
 | Let the claim name any header | The claimed header is removed before acceptance. A claim on a framing header would change what acceptance judges, so only an `x-` extension header can be claimed. |
@@ -171,6 +235,10 @@ filter can neither supply nor erase a token.
 | Require TLS for a header token in the gateway | The issue fixes the transport rules at those of an unsigned request. The authorizer sees both the scheme and whether the transport was secure, and can refuse. |
 
 ## Consequences
+
+`Identity` gains an origin that is part of its equality: a value built by `Identity::new` equals
+what it equalled before, and nothing built before this change is `HostToken`. `AssemblyError`
+gains a variant; it is non-exhaustive.
 
 Adding `HeaderToken` to the exhaustive `AuthSchemeRef` is a downstream source break. The
 implementation bumps the signature, core and facade crate versions, states `BREAKING` and gives the
@@ -183,23 +251,26 @@ that refuses, credential-work governor classing, and a service-level check that 
 only from the request's own admission. Where it deviates, and why: the claim is service-level
 because the credential is; the verifier is not given the token and returns no grant, because the
 gateway has no resource or expiry to compare; there is no path beside a signature, because
-admission is exclusive; and the header is removed before acceptance instead of per context.
+admission is exclusive; the header is removed before acceptance instead of per context; and the
+verifier is handed a typed value the admission read from the request, where the bearer verifier
+is handed the request's own token and path.
 
 The host owns the following, and the gateway cannot check them:
 
-- The outer layer validates the token on every request and installs the identity in that request's
-  own state. It must leave the claimed header in place, because the gateway consumes it. It must
-  establish an identity from the claimed header only: an identity established from any other header
-  reaches a request the gateway treats as anonymous, or as its signer. One header can be claimed, so
-  a host that accepts an alias of it renames the alias to the claimed header in its outer layer, or
-  refuses it there.
-- The identity the verifier reports is the only thing the policy source and
-  the observer are handed; only the authorizer and the audit event also see the scheme. A host
-  reports an identity those can tell from an access key, unless the two are meant to be one
-  principal.
-- A shared cache in front of the gateway does not treat the claimed header as it treats
-  `Authorization`. The gateway adds no `Cache-Control` or `Vary` for these requests, as it adds none
-  for an anonymous one; a deployment with such a cache owns that.
+- The outer layer validates the token on every request and inserts what it established into that
+  request's own extensions, and inserts nothing otherwise. It must leave the claimed header in
+  place, because the gateway consumes it. It establishes an identity from the claimed header only,
+  and lists every other name it reads the token under as a refused alias, or renames that header
+  to the claimed one before the gateway. A name the host reads and does not list is still the
+  split identity described above; the gateway cannot see it.
+- The kernel marks the reported name's origin. A policy source or authorizer that looks a
+  principal up by the bare name string, rather than by the `Identity`, must branch on the origin
+  itself, and a host whose token users and access keys are different principals should still keep
+  their name spaces apart.
+- `Vary` and `Cache-Control: private` are added to answers served by a token. A cache that ignores
+  both, or a handler that sets `Cache-Control: public`, is the deployment's.
+- A proxy in front of the host removes a header that `Connection` nominates before this hop. The
+  gateway decides by the head it receives.
 - Replay policy, expiry and revocation. A header token is a bearer credential; the gateway keeps no
   token state and accepts it as often as the host does.
 - A verifier that blocks stalls its request. It must only read what the outer layer left.
@@ -213,12 +284,14 @@ The host owns the following, and the gateway cannot check them:
   it.
 - One claim is in force. A second `host_verified_header_token` call replaces the first, and the
   builder's claim replaces one written onto the floor directly. A claim whose header falls under a
-  registered custom scheme's prefix refuses every request presenting it. Neither is a build error.
+  registered custom scheme's prefix refuses every request presenting it. Neither is a build error;
+  a claim on the floor with no verifier is.
 
 Residual, shared with ADR-0046 and tracked in rustfs/gateway#1574: `HeaderTokenAdmission::verify`
 is public because the facade calls it across a crate boundary, so host code can build a
-header-token verdict from an admission it obtained from `SecurityFloor::admit`. The service-level
-check keeps such a verdict out of any other request's pipeline.
+header-token verdict from an admission it obtained from `SecurityFloor::admit` and request state
+of its own making. The service-level check keeps such a verdict out of any other request's
+pipeline.
 
 Threat model, and the control for each:
 
@@ -236,10 +309,18 @@ Threat model, and the control for each:
 | A verdict minted for another request | Accepted only from the request's own admission. |
 | The token in a log, error, `Debug` output or context | Never copied by the admission; removed from the head before acceptance. |
 | A verifier whose panic payload panics again when released | The payload is released under a second boundary; still `403`. |
-| A token header an outer layer accepts under another name | Not seen by the gateway. The host renames or refuses the alias; see the duties above. |
+| A token header an outer layer accepts under another name | A listed alias is `403` wherever it appears. An unlisted one is not seen by the gateway; see the duties above. |
+| A verifier that answers from state shared between requests | The admission reads a typed value from the request's own extensions and refuses without one; the verifier is handed that value only. |
+| A reported name spelled like an access key | The name is marked `HostToken`, which is part of `Identity`'s equality and hash. |
+| A shared cache serving one caller's answer to another | `Vary` on the claimed header and `Cache-Control: private` on answers served by a token. |
+| A token beside a malformed AWS credential under the RustFS profile | The profile's own answers are skipped; the floor refuses it `403`. |
+| A new operation admitting the scheme unnoticed | Two reviewed lists, one per operation table, compared in tests. |
+| The token sent as a trailer | Trailers are read by the payload decoder, never by the floor. |
 
 Guardrails: the compile-fail doctests in `crates/sig/src/header_token.rs` (forging, cloning,
 default-constructing and laundering), the floor's `tests/header_token.rs`, the facade's
-`tests/header_token.rs` and `tests/header_token_secrecy.rs`, and the admin dialect census in
+`tests/header_token.rs`, `tests/header_token_host.rs`, `tests/header_token_secrecy.rs` and
+`tests/header_token_wire.rs`, the reviewed operation list in `tests/rustfs_profile.rs`, and the
+admin dialect census in
 `crates/goldens/src/rustfs_admin_dialect/header_token_tests.rs`. Negative cases outnumber positive ones,
-and each new assertion is mutated once in the implementing pull request.
+and each new assertion is mutated once by the change that adds it.

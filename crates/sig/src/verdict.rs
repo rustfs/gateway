@@ -191,6 +191,20 @@ fn check_session_handle(value: &str) -> Result<&str, SessionBindingError> {
 pub struct Identity {
     access_key_id: Box<str>,
     session: Option<SessionBinding>,
+    origin: IdentityOrigin,
+}
+
+/// How a principal's name was established: what tells an access key from a name a host reported.
+///
+/// Part of an [`Identity`]'s equality and hash, so a store keyed on `Identity` never answers a
+/// host-reported name with the entry of the access key that happens to share its spelling.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum IdentityOrigin {
+    /// An access key id: a signature, a custom scheme or a bearer token named it.
+    AccessKey,
+    /// A name the host's verifier reported under a header token claim (ADR-0051). Only
+    /// [`crate::HeaderTokenAdmission::verify`] sets it.
+    HostToken,
 }
 
 impl Identity {
@@ -212,10 +226,26 @@ impl Identity {
         Ok(Self {
             access_key_id: Box::from(access_key_id),
             session: None,
+            origin: IdentityOrigin::AccessKey,
         })
     }
 
-    /// The access key id. A public identifier, safe in a log line and in an audit record.
+    /// How this name was established. An authorizer or policy source that looks a principal up
+    /// by [`Self::access_key_id`] alone must branch on this first: a
+    /// [`IdentityOrigin::HostToken`] name is not an access key, whatever it spells.
+    #[must_use]
+    pub const fn origin(&self) -> IdentityOrigin {
+        self.origin
+    }
+
+    /// This name, marked as reported by the host's header token verifier.
+    pub(crate) fn host_reported(mut self) -> Self {
+        self.origin = IdentityOrigin::HostToken;
+        self
+    }
+
+    /// The access key id — or, for an [`IdentityOrigin::HostToken`] identity, the name the host
+    /// reported. A public identifier, safe in a log line and in an audit record.
     #[must_use]
     pub fn access_key_id(&self) -> &str {
         &self.access_key_id

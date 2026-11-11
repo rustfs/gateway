@@ -342,13 +342,18 @@ fn external_context_copy_preserves_request_facts_without_copying_the_caller_secr
 /// A header-token verdict naming `principal`, obtained the only way one can be: the floor admits
 /// a request by its claim, and a host verifier reports the identity (ADR-0051).
 fn header_token_verdict(principal: &'static str) -> Verdict {
-    use rustfs_gateway_sig::{HeaderTokenClaim, HeaderTokenRefused, HeaderTokenRequest, HeaderTokenVerifier};
+    use rustfs_gateway_sig::{HeaderTokenClaim, HeaderTokenRefused, HeaderTokenVerifier};
 
-    struct Reports(&'static str);
+    /// What a host's outer layer leaves in the request it authenticated.
+    #[derive(Clone)]
+    struct Established(&'static str);
+    struct Names;
 
-    impl HeaderTokenVerifier for Reports {
-        fn verify(&self, _request: &HeaderTokenRequest<'_>) -> Result<Identity, HeaderTokenRefused> {
-            Identity::new(self.0).map_err(|_| HeaderTokenRefused)
+    impl HeaderTokenVerifier for Names {
+        type Established = Established;
+
+        fn identity(&self, established: &Established, _now: RequestNow) -> Result<Identity, HeaderTokenRefused> {
+            Identity::new(established.0).map_err(|_| HeaderTokenRefused)
         }
     }
 
@@ -360,7 +365,14 @@ fn header_token_verdict(principal: &'static str) -> Verdict {
     let Ok(Admission::HeaderToken(admission)) = floor.admit(view, &operation, RequestNow::from_unix_seconds(1)) else {
         panic!("the fixture presents only the claimed header");
     };
-    admission.verify(&Reports(principal), &TransportExtensions::default())
+    let mut carrier = http::Request::builder()
+        .uri("/")
+        .header("host", "s3.example.com")
+        .body(())
+        .expect("a fixture request");
+    carrier.extensions_mut().insert(Established(principal));
+    let accepted = WireRequest::accept(carrier, &Limits::default()).expect("an accepted fixture");
+    admission.verify(&Names, accepted.transport_extensions())
 }
 
 /// Positive — a header-token verdict builds a context that names the host-established principal

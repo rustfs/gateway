@@ -586,7 +586,7 @@ impl ServiceBuilder {
     pub fn build(mut self) -> Result<S3Service, AssemblyError> {
         let authorizer = self.validate_assembly()?;
         let legacy_switches = self.legacy_switches();
-        let header_token_verifier = self.install_header_token();
+        let header_token_verifier = self.install_header_token()?;
         let Some(authenticator) = self.authenticator else {
             return Err(AssemblyError::MissingAuthenticator {
                 rule: RuleRef::MISSING_AUTHENTICATOR,
@@ -638,7 +638,6 @@ impl ServiceBuilder {
             custom_signature_verifier,
             dangerously_replaced_signature_verifier,
             bearer_token_verifier: self.bearer_token_verifier.is_some(),
-            header_token_verifier: header_token_verifier.is_some(),
             caller_secret_every_operation: self.caller_secret_every_operation,
             names: &self.names,
             legacy_switches,

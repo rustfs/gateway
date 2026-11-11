@@ -679,13 +679,18 @@ fn n_a_body_past_the_claimed_route_ceiling_is_refused_after_the_signature() {
 /// it, before the authorizer, and the host's verifier is never asked.
 #[test]
 fn n_the_sts_endpoint_refuses_a_header_token_it_would_serve_without() {
-    use rustfs_gateway::{HeaderTokenClaim, HeaderTokenRefused, HeaderTokenRequest, HeaderTokenVerifier, Identity};
+    use rustfs_gateway::{HeaderTokenClaim, HeaderTokenRefused, HeaderTokenVerifier, Identity};
     use std::sync::atomic::{AtomicUsize, Ordering};
 
+    /// What the host's outer layer left in the request; the spy would name it if it were asked.
+    #[derive(Clone)]
+    struct Outer;
     struct Spy(Arc<AtomicUsize>);
 
     impl HeaderTokenVerifier for Spy {
-        fn verify(&self, _request: &HeaderTokenRequest<'_>) -> Result<Identity, HeaderTokenRefused> {
+        type Established = Outer;
+
+        fn identity(&self, _established: &Outer, _now: RequestNow) -> Result<Identity, HeaderTokenRefused> {
             self.0.fetch_add(1, Ordering::SeqCst);
             Identity::new("KEYSTONEUSER").map_err(|_| HeaderTokenRefused)
         }
@@ -710,6 +715,7 @@ fn n_the_sts_endpoint_refuses_a_header_token_it_would_serve_without() {
         if with_token {
             let token = http::HeaderValue::from_static("gAAAAABheader-token-sentinel");
             request.headers_mut().insert("x-auth-token", token);
+            request.extensions_mut().insert(Outer);
         }
         let response = block_on(service.call_bytes(request));
         let collected = block_on(rustfs_gateway::collect(response)).expect("an in-memory answer");

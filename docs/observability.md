@@ -51,7 +51,7 @@ change, `debug` and `trace` for diagnostics.
 | `gateway_dialect_posture` | `info` | `posture` | message: the `DIALECT_POSTURE` line (ADR-0024) | once per assembly |
 | `gateway_naming_posture` | `info` | `posture` | message: the `NAMING_POSTURE` line | once per assembly |
 | `gateway_form_claim_posture` | `info` | `posture` | message: the `FORM_CLAIM_POSTURE` line (ADR-0041) | once per assembly, only when a dialect installed a form claim |
-| `gateway_header_token_posture` | `info` | `posture` | message: the `HEADER_TOKEN_POSTURE` line (ADR-0051): the claimed header's name, whether its host verifier is installed, and every operation that admits the scheme | once per assembly, only when a header token claim is installed |
+| `gateway_header_token_posture` | `info` | `posture` | message: the `HEADER_TOKEN_POSTURE` line (ADR-0051): the claimed header's name, the aliases it refuses, and every operation that admits the scheme | once per assembly, only when a header token claim is installed |
 | `gateway_presigned_expiry_posture` | `info` | `posture` | message: the `PRESIGNED_EXPIRY_POSTURE` line | once per assembly, only when a non-default presigned-lifetime rule is on |
 | `gateway_profile_posture` | `info` | `posture` | message: the `PROFILE_POSTURE` line (rustfs/backlog#2751): every legacy RustFS reading the assembly applies, by the builder method that turns it on, `switches=[]` for none | once per assembly, last of the posture lines |
 | `gateway_dangerous_assembly` | `warn` | `assembly` | `reason`: `custom_wall_clock`, `allow_all_authorizer`, `allow_all_authorizer_constructed` or `replaced_aws_signature_verifier`; message: the sentence the start-up log always carried | once per assembly, or per construction of the allow-all authorizer |

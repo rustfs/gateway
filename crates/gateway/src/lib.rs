@@ -505,7 +505,7 @@ pub use rustfs_gateway_core::ops::create_bucket::REGION_MATCH_POLICY;
 pub use rustfs_gateway_http::{EffectiveHost, Limits, TransportExtensions, WireReject, WireRequest};
 pub use rustfs_gateway_sig::{
     BearerGrant, BearerRefused, BearerTokenRequest, BearerTokenVerifier, HeaderTokenClaim, HeaderTokenRefused,
-    HeaderTokenRequest, HeaderTokenVerifier, Identity, InvalidHeaderTokenClaim, OperationFloor, PresignedExpiryRule, RegionSet,
+    HeaderTokenVerifier, Identity, IdentityOrigin, InvalidHeaderTokenClaim, OperationFloor, PresignedExpiryRule, RegionSet,
     RequestNow, SecurityFloor, SigService, SkewWindow, Verdict,
 };
 pub use rustfs_gateway_stream::{Body, ByteStream, Payload, TrailingHeaders};

@@ -111,8 +111,12 @@ mod handler_panic;
 mod header_lookup_allocations;
 #[path = "header_token.rs"]
 mod header_token;
+#[path = "header_token_host.rs"]
+mod header_token_host;
 #[path = "header_token_secrecy.rs"]
 mod header_token_secrecy;
+#[path = "header_token_wire.rs"]
+mod header_token_wire;
 #[path = "host_body_bounds.rs"]
 mod host_body_bounds;
 #[path = "host_deadlines.rs"]

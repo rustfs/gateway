@@ -132,9 +132,17 @@ impl RuleRef {
         explanation: "a monomorphic service must declare exactly its registered operations and cannot carry dynamic operation layers",
     };
 
+    /// The security floor carries a header token claim and no verifier was installed for it.
+    pub const HEADER_TOKEN_UNVERIFIED: Self = Self {
+        id: "asm-header-token-unverified",
+        explanation: "the security floor carries a header token claim that ServiceBuilder::host_verified_header_token did not \
+                      install; with no verifier every request presenting the header would be refused, so install the claim \
+                      and its verifier together",
+    };
+
     /// Every rule this crate can cite, for a reverse lookup and for the assertion that the set is
     /// closed.
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 10] = [
         Self::REGISTRATION,
         Self::ROUTE,
         Self::EMPTY_REGISTRY,
@@ -144,6 +152,7 @@ impl RuleRef {
         Self::OP_LAYER_UNATTACHED,
         Self::OP_LAYER_TYPE,
         Self::MONOMORPHIC_SET,
+        Self::HEADER_TOKEN_UNVERIFIED,
     ];
 }
 
@@ -186,6 +195,11 @@ pub enum AssemblyError {
         /// Which assembly rule this is.
         rule: RuleRef,
     },
+    /// The floor carries a header token claim with no verifier (ADR-0051).
+    HeaderTokenClaimWithoutVerifier {
+        /// Which assembly rule this is.
+        rule: RuleRef,
+    },
     /// An operation registered with the router has no wire codec.
     MissingCodec {
         /// The operation that would route and then be unreadable.
@@ -225,6 +239,7 @@ impl AssemblyError {
             | Self::EmptyRegistry { rule }
             | Self::MissingAuthorizer { rule }
             | Self::MissingAuthenticator { rule }
+            | Self::HeaderTokenClaimWithoutVerifier { rule }
             | Self::MissingCodec { rule, .. }
             | Self::UnattachedOpLayer { rule, .. }
             | Self::OpLayerTypeMismatch { rule, .. } => *rule,
@@ -301,6 +316,7 @@ mod tests {
             RuleRef::OP_LAYER_UNATTACHED,
             RuleRef::OP_LAYER_TYPE,
             RuleRef::MONOMORPHIC_SET,
+            RuleRef::HEADER_TOKEN_UNVERIFIED,
         ];
         for rule in rules {
             assert!(rule.explanation().len() > 40, "{rule}");

@@ -19,6 +19,8 @@
 //! beside every other credential surface, of a repeated, empty or misshapen value, and under a
 //! floor that carries no claim; and what a verification yields — a header-token verdict from a
 //! verifier that accepts, a rejection from one that refuses, never an anonymous verdict.
+//! Refused aliases, the binding of the identity to the request's own state and the identity's
+//! origin are `header_token_binding.rs`'s.
 //! NOT responsible for: the facade's wiring of the verifier, its panic boundary and its contexts
 //! (`rustfs-gateway`'s `tests/header_token.rs`), or the compile-time guarantees (the doctests in
 //! `src/header_token.rs`).
@@ -30,18 +32,17 @@ use http::header::{HeaderMap, HeaderName, HeaderValue};
 use rustfs_gateway_http::{Limits, TransportExtensions, WireRequest};
 use rustfs_gateway_sig::{
     Admission, AuthError, CustomAuthScheme, CustomSchemeRegistry, HeaderTokenAdmission, HeaderTokenClaim, HeaderTokenRefused,
-    HeaderTokenRequest, HeaderTokenVerifier, Identity, OperationFloor, QueryBearerClaim, RawQuery, RequestNow, SecurityFloor,
-    SigService, WireView,
+    HeaderTokenVerifier, Identity, OperationFloor, QueryBearerClaim, RawQuery, RequestNow, SecurityFloor, SigService, WireView,
 };
 
 use crate::security_floor_fixtures::*;
 
-const HEADER: &str = "x-auth-token";
+pub(crate) const HEADER: &str = "x-auth-token";
 /// The token every case presents. A sentinel, so "no rendering holds it" is a search for bytes.
-const TOKEN: &str = "gAAAAABsentinel-header-token";
-const PRINCIPAL: &str = "KEYSTONEUSER";
+pub(crate) const TOKEN: &str = "gAAAAABsentinel-header-token";
+pub(crate) const PRINCIPAL: &str = "KEYSTONEUSER";
 
-fn claim() -> HeaderTokenClaim {
+pub(crate) fn claim() -> HeaderTokenClaim {
     HeaderTokenClaim::new(HEADER).expect("a legal claim")
 }
 
@@ -68,18 +69,18 @@ fn claimed_floors() -> [(&'static str, SecurityFloor); 3] {
     ]
 }
 
-fn standard_op() -> OperationFloor {
+pub(crate) fn standard_op() -> OperationFloor {
     OperationFloor::builtin("PutObject", SigService::S3)
 }
 
-fn with_token(extra: &[(&str, &str)]) -> HeaderMap {
+pub(crate) fn with_token(extra: &[(&str, &str)]) -> HeaderMap {
     let mut pairs = vec![(HEADER, TOKEN)];
     pairs.extend_from_slice(extra);
     header_map(&pairs)
 }
 
 /// What an admission decided, as one word: the variant, or the refusal's code.
-fn shape(admitted: &Result<Admission<'_>, AuthError>) -> String {
+pub(crate) fn shape(admitted: &Result<Admission<'_>, AuthError>) -> String {
     match admitted {
         Ok(Admission::Sealed(_)) => "sealed".to_owned(),
         Ok(Admission::SealedSigV2(_)) => "sealed-sigv2".to_owned(),
@@ -92,7 +93,7 @@ fn shape(admitted: &Result<Admission<'_>, AuthError>) -> String {
     }
 }
 
-fn admit<'a>(
+pub(crate) fn admit<'a>(
     floor: &SecurityFloor,
     headers: &'a HeaderMap,
     query: &'a str,
@@ -107,19 +108,25 @@ fn admit<'a>(
     floor.admit(view, operation, now())
 }
 
-fn admission_of(floor: &SecurityFloor, headers: &HeaderMap, operation: &OperationFloor) -> HeaderTokenAdmission {
+pub(crate) fn admission_of(floor: &SecurityFloor, headers: &HeaderMap, operation: &OperationFloor) -> HeaderTokenAdmission {
     match admit(floor, headers, "", None, operation) {
         Ok(Admission::HeaderToken(admission)) => admission,
         other => panic!("expected a header-token admission, got {}", shape(&other)),
     }
 }
 
-/// Reports [`PRINCIPAL`] for every request, and counts how often it was asked.
+/// What a host's outer layer leaves in the request for its verifier to name.
+#[derive(Clone)]
+pub(crate) struct Established(pub(crate) &'static str);
+
+/// Reports [`PRINCIPAL`] whatever was established, and counts how often it was asked.
 #[derive(Default)]
-struct Accepts(AtomicUsize);
+pub(crate) struct Accepts(pub(crate) AtomicUsize);
 
 impl HeaderTokenVerifier for Accepts {
-    fn verify(&self, _request: &HeaderTokenRequest<'_>) -> Result<Identity, HeaderTokenRefused> {
+    type Established = Established;
+
+    fn identity(&self, _established: &Established, _now: RequestNow) -> Result<Identity, HeaderTokenRefused> {
         self.0.fetch_add(1, Ordering::SeqCst);
         Identity::new(PRINCIPAL).map_err(|_| HeaderTokenRefused)
     }
@@ -128,40 +135,48 @@ impl HeaderTokenVerifier for Accepts {
 struct Refuses;
 
 impl HeaderTokenVerifier for Refuses {
-    fn verify(&self, _request: &HeaderTokenRequest<'_>) -> Result<Identity, HeaderTokenRefused> {
+    type Established = Established;
+
+    fn identity(&self, _established: &Established, _now: RequestNow) -> Result<Identity, HeaderTokenRefused> {
         Err(HeaderTokenRefused)
     }
 }
 
-/// What a host's outer layer leaves in the request for its verifier to report.
-#[derive(Clone)]
-struct Established(&'static str);
+/// A verifier as a host writes one: it names the identity its outer layer installed in this
+/// request, and counts how often it was asked.
+#[derive(Default)]
+pub(crate) struct NamesWhatWasEstablished(pub(crate) AtomicUsize);
 
-/// A verifier as a host writes one: it reports the identity its outer layer installed in this
-/// request, and refuses when there is none.
-struct ReportsWhatTheOuterLayerInstalled;
+impl HeaderTokenVerifier for NamesWhatWasEstablished {
+    type Established = Established;
 
-impl HeaderTokenVerifier for ReportsWhatTheOuterLayerInstalled {
-    fn verify(&self, request: &HeaderTokenRequest<'_>) -> Result<Identity, HeaderTokenRefused> {
-        let established = request.server_state::<Established>().ok_or(HeaderTokenRefused)?;
+    fn identity(&self, established: &Established, _now: RequestNow) -> Result<Identity, HeaderTokenRefused> {
+        self.0.fetch_add(1, Ordering::SeqCst);
         Identity::new(established.0).map_err(|_| HeaderTokenRefused)
     }
 }
 
-/// The transport values of an accepted request that carries `installed`, or nothing.
-fn server_state(installed: Option<Established>) -> TransportExtensions {
+/// The transport values of an accepted request whose extensions `install` filled.
+pub(crate) fn server_state_with(install: impl FnOnce(&mut http::Extensions)) -> TransportExtensions {
     let mut request = http::Request::builder()
         .uri("/")
         .header("host", "s3.example.com")
         .body(())
         .expect("a fixture request");
-    if let Some(established) = installed {
-        request.extensions_mut().insert(established);
-    }
+    install(request.extensions_mut());
     WireRequest::accept(request, &Limits::default())
         .expect("an accepted fixture")
         .transport_extensions()
         .clone()
+}
+
+/// The transport values of an accepted request that carries `installed`, or nothing.
+pub(crate) fn server_state(installed: Option<Established>) -> TransportExtensions {
+    server_state_with(|extensions| {
+        if let Some(established) = installed {
+            extensions.insert(established);
+        }
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -169,10 +184,19 @@ fn server_state(installed: Option<Established>) -> TransportExtensions {
 // ---------------------------------------------------------------------------
 
 /// Positive — a lowercase extension header outside the AWS namespace is a claim, and names its
-/// header.
+/// header. The last four sit beside a reserved prefix without being under it.
 #[test]
 fn a_lowercase_extension_header_outside_the_aws_namespace_is_a_claim() {
-    for name in ["x-auth-token", "x-storage-token", "x-9", "x-a"] {
+    for name in [
+        "x-auth-token",
+        "x-storage-token",
+        "x-9",
+        "x-a",
+        "x-forwarded",
+        "x-request-identity",
+        "x-miniotoken",
+        "x-amzn-token",
+    ] {
         assert_eq!(HeaderTokenClaim::new(name).map(|claim| claim.header()), Ok(name), "{name}");
     }
 }
@@ -212,6 +236,16 @@ fn n_a_name_outside_the_grammar_or_inside_the_aws_namespace_is_no_claim() {
         "9-auth-token",
         "x-auth-t\u{f6}ken",
         "x-auth-token\r\n",
+        // Names that already carry meaning for a dialect or a proxy in front of the gateway.
+        "x-minio-token",
+        "x-minio-",
+        "x-rustfs-token",
+        "x-forwarded-for",
+        "x-forwarded-token",
+        "x-http-method-override",
+        "x-http-method",
+        "x-request-id",
+        "x-real-ip",
     ] {
         assert!(HeaderTokenClaim::new(name).is_err(), "{name:?} must not be a claim");
     }
@@ -353,6 +387,11 @@ const OTHER_SURFACES: &[Surface] = &[
         "a whole sigv2 presigned query",
         "AWSAccessKeyId=AKIDEXAMPLE&Expires=1440938160&Signature=frJIUN8D",
     ),
+    // The remains of a presigned URL: no marker by themselves, and still refused beside a token.
+    query_surface("X-Amz-Date", "X-Amz-Date=20150830T123600Z"),
+    query_surface("X-Amz-Expires", "X-Amz-Expires=60"),
+    query_surface("X-Amz-SignedHeaders", "X-Amz-SignedHeaders=host"),
+    query_surface("an escaped X-Amz-Expires", "X-Amz-%45xpires=60"),
     form_surface("form x-amz-algorithm", &[("x-amz-algorithm", "AWS4-HMAC-SHA256")]),
     form_surface(
         "form x-amz-credential",
@@ -614,7 +653,7 @@ fn a_verifier_that_accepts_yields_a_header_token_verdict() {
     let floor = SecurityFloor::new().with_header_token_claim(claim());
     let verifier = Accepts::default();
     let admission = admission_of(&floor, &with_token(&[]), &standard_op());
-    let verdict = admission.verify(&verifier, &TransportExtensions::default());
+    let verdict = admission.verify(&verifier, &server_state(Some(Established("anything"))));
     assert_eq!(verifier.0.load(Ordering::SeqCst), 1);
     let receipt = verdict.header_token_receipt().expect("a header-token verdict");
     assert_eq!(receipt.identity().access_key_id(), PRINCIPAL);
@@ -630,32 +669,25 @@ fn a_verifier_that_accepts_yields_a_header_token_verdict() {
 fn n_a_verifier_that_refuses_yields_a_rejection_and_never_anonymous() {
     let floor = SecurityFloor::new().with_header_token_claim(claim());
     let admission = admission_of(&floor, &with_token(&[]), &standard_op());
-    let verdict = admission.verify(&Refuses, &TransportExtensions::default());
+    let verdict = admission.verify(&Refuses, &server_state(Some(Established("anything"))));
     assert_eq!(verdict.rejection(), Some(AuthError::AccessDenied));
     assert!(verdict.header_token_receipt().is_none() && verdict.identity().is_none());
     assert!(!verdict.is_anonymous() && !verdict.is_authenticated());
 }
 
-/// Negative and positive — a verifier that reports what the host's outer layer installed refuses
-/// a request in which nothing was installed, and reports the installed identity otherwise. An
-/// absent identity is a rejection, not an anonymous request.
+/// Negative — a name that could not enter an audit record is refused by the verifier's own
+/// check, and the same verifier names a usable one.
 #[test]
-fn n_an_identity_nobody_installed_is_a_rejection() {
+fn n_an_established_value_that_cannot_be_named_is_a_rejection() {
     let floor = SecurityFloor::new().with_header_token_claim(claim());
     let headers = with_token(&[]);
-
-    let nothing = admission_of(&floor, &headers, &standard_op()).verify(&ReportsWhatTheOuterLayerInstalled, &server_state(None));
-    assert_eq!(nothing.rejection(), Some(AuthError::AccessDenied));
-    assert!(!nothing.is_anonymous() && nothing.identity().is_none());
-
-    let installed = admission_of(&floor, &headers, &standard_op())
-        .verify(&ReportsWhatTheOuterLayerInstalled, &server_state(Some(Established("PROJECTMEMBER"))));
-    assert_eq!(installed.identity().map(Identity::access_key_id), Some("PROJECTMEMBER"));
-
-    // An identity that could not enter an audit record is refused by the verifier's own check.
-    let unusable = admission_of(&floor, &headers, &standard_op())
-        .verify(&ReportsWhatTheOuterLayerInstalled, &server_state(Some(Established("line\r\nbreak"))));
+    let verifier = NamesWhatWasEstablished::default();
+    let unusable =
+        admission_of(&floor, &headers, &standard_op()).verify(&verifier, &server_state(Some(Established("line\r\nbreak"))));
     assert_eq!(unusable.rejection(), Some(AuthError::AccessDenied));
+    let usable =
+        admission_of(&floor, &headers, &standard_op()).verify(&verifier, &server_state(Some(Established("PROJECTMEMBER"))));
+    assert_eq!(usable.identity().map(Identity::access_key_id), Some("PROJECTMEMBER"));
 }
 
 /// Positive — the verifier reads the admission's own clock reading, the one `admit` was given.
@@ -664,8 +696,10 @@ fn the_verifier_reads_the_admissions_one_clock_reading() {
     struct RecordsNow(std::sync::Mutex<Option<i64>>);
 
     impl HeaderTokenVerifier for RecordsNow {
-        fn verify(&self, request: &HeaderTokenRequest<'_>) -> Result<Identity, HeaderTokenRefused> {
-            *self.0.lock().expect("uncontended") = Some(request.now().unix_seconds());
+        type Established = Established;
+
+        fn identity(&self, _established: &Established, now: RequestNow) -> Result<Identity, HeaderTokenRefused> {
+            *self.0.lock().expect("uncontended") = Some(now.unix_seconds());
             Err(HeaderTokenRefused)
         }
     }
@@ -679,24 +713,15 @@ fn the_verifier_reads_the_admissions_one_clock_reading() {
             panic!("expected a header-token admission");
         };
         let verifier = RecordsNow(std::sync::Mutex::new(None));
-        let _ = admission.verify(&verifier, &TransportExtensions::default());
+        let _ = admission.verify(&verifier, &server_state(Some(Established("anything"))));
         assert_eq!(*verifier.0.lock().expect("uncontended"), Some(instant));
     }
 }
 
-/// Negative — no rendering of the admission, of the request the verifier is handed, or of the
-/// verdict holds the token: the admission never copied it.
+/// Negative — no rendering of the admission or of the verdict holds the token: the admission
+/// never copied it.
 #[test]
-fn n_no_rendering_of_an_admission_request_or_verdict_holds_the_token() {
-    struct RendersItsRequest(std::sync::Mutex<String>);
-
-    impl HeaderTokenVerifier for RendersItsRequest {
-        fn verify(&self, request: &HeaderTokenRequest<'_>) -> Result<Identity, HeaderTokenRefused> {
-            *self.0.lock().expect("uncontended") = format!("{request:?}");
-            Identity::new(PRINCIPAL).map_err(|_| HeaderTokenRefused)
-        }
-    }
-
+fn n_no_rendering_of_an_admission_or_verdict_holds_the_token() {
     let floor = SecurityFloor::new().with_header_token_claim(claim());
     let headers = with_token(&[]);
     let admitted = admit(&floor, &headers, "", None, &standard_op());
@@ -705,9 +730,7 @@ fn n_no_rendering_of_an_admission_request_or_verdict_holds_the_token() {
         panic!("expected a header-token admission");
     };
     rendered.push(format!("{admission:?}"));
-    let verifier = RendersItsRequest(std::sync::Mutex::new(String::new()));
-    let verdict = admission.verify(&verifier, &TransportExtensions::default());
-    rendered.push(verifier.0.lock().expect("uncontended").clone());
+    let verdict = admission.verify(&Accepts::default(), &server_state(Some(Established("anything"))));
     rendered.push(format!("{verdict:?}"));
     rendered.push(format!("{:?}", verdict.header_token_receipt().expect("a receipt")));
     let both = with_token(&[("authorization", "Bearer x")]);

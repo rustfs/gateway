@@ -20,11 +20,14 @@
 //! observer events and the handler; the header ignored exactly as before when the opt-in is
 //! absent; refusal before any verifier, credential lookup, authorizer question or handler of the
 //! header beside an AWS credential surface and on an operation whose floor refuses the scheme; a
-//! closed `403`, never an anonymous request, when the verifier refuses, panics, finds no identity
-//! or is not installed; and a header-token verdict accepted only from the request's own admission.
+//! closed `403`, never an anonymous request, when the verifier refuses or panics or the request
+//! carries no established identity; an assembly error for a claim nobody verifies; and a
+//! header-token verdict accepted only from the request's own admission.
 //! NOT responsible for: the floor's own rules over every surface and operation
 //! (`rustfs-gateway-sig`'s `tests/header_token.rs`), where the token may not appear and the
-//! unsigned payload rules (`header_token_secrecy.rs`), or the fixtures (`header_token/fixtures.rs`).
+//! unsigned payload rules (`header_token_secrecy.rs`), the host boundary — aliases, interleaved
+//! requests, the identity's origin, shared caches (`header_token_host.rs`) — or the fixtures
+//! (`header_token/fixtures.rs`).
 //! Upstream: `rustfs_gateway::ServiceBuilder`, `support`. Downstream: nothing.
 
 use std::sync::Mutex;
@@ -35,7 +38,7 @@ use rustfs_gateway::sig::{
     AuthError, CustomAuthRequest, CustomAuthScheme, CustomSchemeRegistry, Identity, PayloadMode, SecurityFloor, SigService,
     SignatureVerifier, Verdict,
 };
-use rustfs_gateway::{AuthSchemeRef, ClassKind, HeaderTokenRefused, HeaderTokenRequest, HeaderTokenVerifier};
+use rustfs_gateway::{AssemblyError, AuthSchemeRef, ClassKind, HeaderTokenRefused, HeaderTokenVerifier, RequestNow, RuleRef};
 use rustfs_gateway_sig::OperationFloor;
 
 use crate::support;
@@ -45,7 +48,7 @@ pub(crate) mod fixtures;
 
 use self::fixtures::{
     Answer, Established, Fixture, HEADER, PRINCIPAL, PROBE_PATH, RequestCase, SIGNED_PRINCIPAL, TOKEN, assemble, assemble_on,
-    builder, claim, floors, status_and_code, token_only, with_token,
+    builder, claim, established_as, floors, status_and_code, token_only, with_bare_token, with_token,
 };
 
 // ── admission ──────────────────────────────────────────────────────────────────────────────────
@@ -122,23 +125,29 @@ async fn n_without_the_opt_in_the_header_is_ignored_exactly_as_before() {
     assert_eq!(response.status(), http::StatusCode::OK, "the control: the same request, opted in");
 }
 
-/// Negative — a floor that carries the claim while no verifier is installed refuses every request
-/// presenting the header, on an operation that admits anonymous requests too. It never serves the
-/// request as anonymous.
-#[tokio::test]
-async fn n_a_claim_without_a_verifier_refuses_and_never_serves_anonymously() {
-    let fixture = assemble_on(SecurityFloor::new().with_header_token_claim(claim()), None);
-    for method in [http::Method::GET, http::Method::POST] {
-        let response = fixture.exchange(token_only(method.clone(), "/")).await;
-        assert_eq!(status_and_code(&response), (403, Some("AccessDenied".to_owned())), "{method}");
-        assert!(fixture.stages.take().is_empty() && fixture.backend.take().is_empty(), "{method}");
+/// Negative — a floor that carries a claim the builder was given no verifier for does not
+/// assemble: it would refuse every request presenting the header. The same floor assembles once
+/// the opt-in is called, and a floor without a claim assembles as before.
+#[test]
+fn n_a_claim_without_a_verifier_is_an_assembly_error() {
+    let claimed = SecurityFloor::new().with_header_token_claim(claim());
+    let (unverified, _) = builder(claimed.clone());
+    match unverified.build() {
+        Err(error @ AssemblyError::HeaderTokenClaimWithoutVerifier { .. }) => {
+            assert_eq!(error.rule(), RuleRef::HEADER_TOKEN_UNVERIFIED);
+            assert!(error.to_string().contains("asm-header-token-unverified"), "{error}");
+        }
+        other => panic!("expected the header token assembly error, got {:?}", other.map(|_| "a service")),
     }
-    let anonymous = fixture.exchange(support::plain(http::Method::POST, "/")).await;
-    assert_eq!(
-        anonymous.status(),
-        http::StatusCode::OK,
-        "the control: the same request without the header"
+    let (verified, _) = builder(claimed);
+    assert!(
+        verified
+            .host_verified_header_token(claim(), Reports(PRINCIPAL))
+            .build()
+            .is_ok()
     );
+    let (unclaimed, _) = builder(SecurityFloor::new());
+    assert!(unclaimed.build().is_ok(), "the control: no claim, no rule");
 }
 
 /// Negative — the token beside any AWS credential surface is refused before any verifier runs:
@@ -316,33 +325,38 @@ async fn n_a_verifier_that_panics_is_a_closed_403_and_poisons_nothing() {
     }
 }
 
-/// Negative and positive — a host verifier that reports what its outer layer installed refuses a
-/// request in which nothing was installed, with a closed `403` and no anonymous service, and
-/// serves the same request as the installed identity when one was.
+/// Negative and positive — a request in which the host's outer layer established nothing is a
+/// closed `403` with no anonymous service, and the verifier is not asked about it; the same
+/// request is served as the established identity when there is one.
 #[tokio::test]
 async fn n_a_request_in_which_no_identity_was_established_is_a_closed_403() {
-    let fixture = assemble(Some(Answer::ReportsInstalled));
-    let response = fixture.exchange(token_only(http::Method::POST, "/")).await;
-    assert_eq!(status_and_code(&response), (403, Some("AccessDenied".to_owned())));
-    assert!(fixture.stages.take().is_empty() && fixture.backend.take().is_empty());
-    assert_eq!(fixture.verifier_calls.load(Ordering::SeqCst), 1);
+    let fixture = assemble(Some(Answer::Accepts));
+    for method in [http::Method::GET, http::Method::POST] {
+        let response = fixture.exchange(with_bare_token(support::plain(method.clone(), "/"))).await;
+        assert_eq!(status_and_code(&response), (403, Some("AccessDenied".to_owned())), "{method}");
+        assert!(fixture.stages.take().is_empty() && fixture.backend.take().is_empty(), "{method}");
+    }
+    assert_eq!(
+        fixture.verifier_calls.load(Ordering::SeqCst),
+        0,
+        "asked about a request that carried nothing"
+    );
 
-    let mut request = token_only(http::Method::POST, "/");
-    request.extensions_mut().insert(Established("PROJECTMEMBER"));
+    let request = established_as("PROJECTMEMBER", with_bare_token(support::plain(http::Method::POST, "/")));
     let response = fixture.exchange(request).await;
     assert_eq!(response.status(), http::StatusCode::OK, "{:?}", response.body());
     assert_eq!(fixture.backend.take()[0].header_token.as_deref(), Some("PROJECTMEMBER"));
 
     // An established identity without the header establishes nothing: the request is anonymous.
-    let mut request = support::plain(http::Method::POST, "/");
-    request.extensions_mut().insert(Established("PROJECTMEMBER"));
-    let response = fixture.exchange(request).await;
+    let response = fixture
+        .exchange(established_as("PROJECTMEMBER", support::plain(http::Method::POST, "/")))
+        .await;
     assert_eq!(response.status(), http::StatusCode::OK);
     let handed = fixture.backend.take();
     assert!(handed[0].anonymous && handed[0].header_token.is_none(), "{:?}", handed[0]);
     assert_eq!(
         fixture.verifier_calls.load(Ordering::SeqCst),
-        2,
+        1,
         "not asked for a request without the header"
     );
 }
@@ -366,7 +380,9 @@ impl SignatureVerifier for ReusesAVerdict {
 struct Reports(&'static str);
 
 impl HeaderTokenVerifier for Reports {
-    fn verify(&self, _request: &HeaderTokenRequest<'_>) -> Result<Identity, HeaderTokenRefused> {
+    type Established = Established;
+
+    fn identity(&self, _established: &Established, _now: RequestNow) -> Result<Identity, HeaderTokenRefused> {
         Identity::new(self.0).map_err(|_| HeaderTokenRefused)
     }
 }
@@ -386,7 +402,9 @@ async fn n_a_header_token_verdict_from_another_admission_authenticates_nothing()
     let Ok(Admission::HeaderToken(admission)) = floor.admit(view, &operation, RequestNow::from_unix_seconds(1)) else {
         panic!("the fixture must exercise header-token admission");
     };
-    let minted = admission.verify(&Reports("FORGEDPRINCIPAL"), &rustfs_gateway::TransportExtensions::default());
+    let carrier = established_as(PRINCIPAL, support::plain(http::Method::GET, "/")).map(|_| ());
+    let accepted = rustfs_gateway::WireRequest::accept(carrier, &rustfs_gateway::Limits::default()).expect("an accepted fixture");
+    let minted = admission.verify(&Reports("FORGEDPRINCIPAL"), accepted.transport_extensions());
     assert!(minted.header_token_receipt().is_some(), "the fixture must hold a header-token verdict");
 
     let mut registry = CustomSchemeRegistry::new();
@@ -406,8 +424,8 @@ async fn n_a_header_token_verdict_from_another_admission_authenticates_nothing()
 
 // ── the start-up report ────────────────────────────────────────────────────────────────────────
 
-/// Negative — the start-up report names the claimed header, whether a verifier is installed and
-/// exactly the operations that admit the scheme, and only when the claim is installed.
+/// Negative — the start-up report names the claimed header, the aliases it refuses and exactly
+/// the operations that admit the scheme, and only when the claim is installed.
 #[test]
 fn n_the_startup_report_names_the_claim_only_when_it_is_installed() {
     let line = |fixture: &Fixture| {
@@ -421,15 +439,18 @@ fn n_the_startup_report_names_the_claim_only_when_it_is_installed() {
     assert_eq!(line(&assemble(None)), None);
     assert_eq!(
         line(&assemble(Some(Answer::Accepts))).as_deref(),
-        Some(
-            "HEADER_TOKEN_POSTURE header_token=x-auth-token header_token_verifier=installed header_token_ops=[ListBuckets,example:Ping]"
-        ),
+        Some("HEADER_TOKEN_POSTURE header_token=x-auth-token refused_aliases=[] header_token_ops=[ListBuckets,example:Ping]"),
         "the privileged probe is not listed"
     );
+    let (aliased, recorders) = builder(SecurityFloor::new());
+    let aliases = claim()
+        .refusing_aliases(&["x-storage-token", "x-subject-token"])
+        .expect("legal aliases");
+    let aliased = Fixture::of(aliased.host_verified_header_token(aliases, Reports(PRINCIPAL)), recorders);
     assert_eq!(
-        line(&assemble_on(SecurityFloor::new().with_header_token_claim(claim()), None)).as_deref(),
+        line(&aliased).as_deref(),
         Some(
-            "HEADER_TOKEN_POSTURE header_token=x-auth-token header_token_verifier=none header_token_ops=[ListBuckets,example:Ping]"
+            "HEADER_TOKEN_POSTURE header_token=x-auth-token refused_aliases=[x-storage-token,x-subject-token] header_token_ops=[ListBuckets,example:Ping]"
         ),
     );
 }

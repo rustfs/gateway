@@ -34,9 +34,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use bytes::Bytes;
 use http::{HeaderValue, Request};
 use rustfs_gateway::{
-    HeaderTokenClaim, HeaderTokenRefused, HeaderTokenRequest, HeaderTokenVerifier, Identity, SecurityFloor, ServiceBuilder,
+    HeaderTokenClaim, HeaderTokenRefused, HeaderTokenVerifier, Identity, RequestNow, SecurityFloor, ServiceBuilder,
 };
-use rustfs_gateway_dialect_rustfs_admin::{EXTENSION_ROUTES, ROUTES};
+use rustfs_gateway_dialect_rustfs_admin::{EXTENSION_ROUTES, ExtensionRouteRecord, ROUTES};
 
 use super::extension_tests::{KEY, LAMBDA, LAMBDA_ARN, presigned_lambda, unsigned as unsigned_extension, unsigned_at};
 use super::zip_token_tests::{FixtureVerifier, GOOD, ZIP_GET, asked_of};
@@ -52,8 +52,15 @@ const TOKEN: &str = "gAAAAABheader-token-sentinel";
 #[derive(Clone, Default)]
 struct Spy(Arc<AtomicUsize>);
 
+/// What a host's outer layer leaves in a request it authenticated. Every request these cases
+/// send with the token carries one, so the spy would be asked the moment a floor admitted it.
+#[derive(Clone)]
+struct Outer;
+
 impl HeaderTokenVerifier for Spy {
-    fn verify(&self, _request: &HeaderTokenRequest<'_>) -> Result<Identity, HeaderTokenRefused> {
+    type Established = Outer;
+
+    fn identity(&self, _established: &Outer, _now: RequestNow) -> Result<Identity, HeaderTokenRefused> {
         self.0.fetch_add(1, Ordering::SeqCst);
         Identity::new(ACCESS_KEY).map_err(|_| HeaderTokenRefused)
     }
@@ -77,6 +84,7 @@ fn floors() -> [(&'static str, SecurityFloor); 2] {
 
 fn with_token(mut request: Request<Bytes>) -> Request<Bytes> {
     request.headers_mut().insert(HEADER, HeaderValue::from_static(TOKEN));
+    request.extensions_mut().insert(Outer);
     request
 }
 
@@ -91,9 +99,10 @@ fn refused_without_asking(exchange: &Exchange, at: &str) {
     );
 }
 
-/// Negative — no row of the admin dialect and no S3-shaped extension row admits a header token:
-/// with an allow-everything policy and a verifier that would vouch for anyone, every one of them
-/// is refused before the authorizer and the handler, and the verifier is never asked.
+/// Negative — no row of the admin dialect, and no S3-shaped extension row outside the reviewed
+/// list, admits a header token: with an allow-everything policy and a verifier that would vouch
+/// for anyone, every one of them is refused before the authorizer and the handler, and the
+/// verifier is never asked.
 #[test]
 fn n_no_admin_or_extension_row_admits_a_header_token() {
     // Each row's own unsigned request, kept as its method and target so every lane can rebuild it.
@@ -102,11 +111,14 @@ fn n_no_admin_or_extension_row_admits_a_header_token() {
         .iter()
         .flat_map(|record| paths(record).into_iter().map(move |path| target(unsigned(record, &path))))
         .collect();
+    let refusing = |record: &&ExtensionRouteRecord| !DIALECT_OPERATIONS_ADMITTING_A_HEADER_TOKEN.contains(&record.operation);
     let extensions: Vec<(String, String)> = EXTENSION_ROUTES
         .iter()
+        .filter(refusing)
         .map(|record| target(unsigned_extension(record)))
         .collect();
-    assert_eq!((admin.len(), extensions.len()), (670, 8), "every row of both tables");
+    assert_eq!(EXTENSION_ROUTES.len() - extensions.len(), 2, "the two reviewed metadata listings");
+    assert_eq!((admin.len(), extensions.len()), (670, 8), "every other row of both tables");
     let requests: Vec<(String, String)> = admin.into_iter().chain(extensions).collect();
     for (floor_name, floor) in floors() {
         let spy = Spy::default();
@@ -191,5 +203,45 @@ fn n_the_object_lambda_route_refuses_the_token_alone_and_beside_its_presigned_ur
         assert_eq!(presigned.status, 200, "{floor_name}: {}", presigned.body);
         assert_eq!(presigned.reached, [LAMBDA], "{floor_name}");
         assert_eq!(spy.0.load(Ordering::SeqCst), 0, "{floor_name}: the verifier was asked");
+    }
+}
+
+/// The operations of the `rustfs` dialect that admit a header token: the reviewed list. RustFS's
+/// two metadata listings stand on the standard listing floor (ADR-0050) and answer what
+/// `ListObjectsV2` and `ListObjectVersions` answer plus each object's user metadata; a token's
+/// user reaches the standard listings, the authorizer decides both, and refusing the scheme here
+/// would only make the same caller sign for the same bucket. Nothing else of the dialect admits
+/// the scheme.
+const DIALECT_OPERATIONS_ADMITTING_A_HEADER_TOKEN: [&str; 2] =
+    ["rustfs:ListObjectVersionsWithMetadata", "rustfs:ListObjectsV2WithMetadata"];
+
+/// The dialect's operations that admit a header token are the reviewed list, on both floors, and
+/// one of them is served as the principal the host established while a privileged neighbour is
+/// not. An operation added to the dialect on a non-privileged floor admits the scheme the moment
+/// it is declared: this is where that is seen and decided.
+#[test]
+fn the_dialect_operations_that_admit_a_header_token_are_the_reviewed_list() {
+    for (floor_name, floor) in floors() {
+        let spy = Spy::default();
+        let assembled = assemble_with(floor, &spy, |builder| builder);
+        let report = assembled.service.startup_posture();
+        let line = report
+            .lines()
+            .find(|line| line.starts_with("HEADER_TOKEN_POSTURE "))
+            .expect("a claimed service reports the line");
+        assert!(
+            line.ends_with(&format!("header_token_ops=[{}]", DIALECT_OPERATIONS_ADMITTING_A_HEADER_TOKEN.join(","))),
+            "{floor_name}: the set of dialect operations that admit a header token changed; review each one: {line}"
+        );
+
+        let listing = with_token(unsigned_at("GET", &format!("/{BUCKET}?list-type=2&metadata=true")));
+        let served = assembled.exchange(listing);
+        assert_eq!(served.status, 200, "{floor_name}: {}", served.body);
+        assert_eq!(served.reached, ["rustfs:ListObjectsV2WithMetadata"], "{floor_name}");
+        assert_eq!(
+            spy.0.load(Ordering::SeqCst),
+            1,
+            "{floor_name}: the verifier answers for an admitting operation"
+        );
     }
 }

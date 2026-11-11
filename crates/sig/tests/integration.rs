@@ -28,6 +28,8 @@ mod effective_host;
 mod frozen_dimensions;
 #[path = "header_token.rs"]
 mod header_token;
+#[path = "header_token_binding.rs"]
+mod header_token_binding;
 #[path = "legacy_paths.rs"]
 mod legacy_paths;
 #[path = "post_form_replay.rs"]

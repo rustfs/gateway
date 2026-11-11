@@ -13,8 +13,9 @@
 // limitations under the License.
 
 //! Startup report of the host-verified header token claim (ADR-0051).
-//! Responsible for: one `HEADER_TOKEN_POSTURE` line naming the claimed header, whether its host
-//! verifier is installed, and every operation the floor admits by it; nothing without a claim.
+//! Responsible for: one `HEADER_TOKEN_POSTURE` line naming the claimed header, the aliases it
+//! refuses, and every operation the floor admits by it; nothing without a claim. A claim is
+//! never assembled without its verifier, so the line reports none.
 //! NOT responsible for: granting access or reporting any token value.
 //! Upstream: assembled routing and the security floor. Downstream: startup log and posture report.
 
@@ -28,7 +29,6 @@ use crate::posture::format_names;
 pub(crate) fn log_header_token_posture<'a>(
     operations: impl Iterator<Item = &'a OperationFloor>,
     floor: &SecurityFloor,
-    verifier_installed: bool,
 ) -> Option<String> {
     let claim = floor.header_token_claim()?;
     // The floor's own predicate, so the report cannot disagree with what the floor admits.
@@ -36,10 +36,10 @@ pub(crate) fn log_header_token_posture<'a>(
         .filter(|operation| floor.admits_header_token(operation))
         .map(OperationFloor::name)
         .collect();
-    let verifier = if verifier_installed { "installed" } else { "none" };
     let line = format!(
-        "HEADER_TOKEN_POSTURE header_token={} header_token_verifier={verifier} header_token_ops=[{}]",
+        "HEADER_TOKEN_POSTURE header_token={} refused_aliases=[{}] header_token_ops=[{}]",
         claim.header(),
+        claim.refused_aliases().join(","),
         format_names(&admitting)
     );
     tracing::info!(target: logging::TARGET, event = "gateway_header_token_posture", component = logging::COMPONENT, subsystem = logging::SUBSYSTEM_POSTURE, "{}", line);
@@ -67,13 +67,17 @@ mod tests {
         let claimed = SecurityFloor::new().with_header_token_claim(HeaderTokenClaim::new("x-auth-token").expect("a legal claim"));
 
         assert_eq!(
-            log_header_token_posture(operations.into_iter(), &claimed, true).as_deref(),
-            Some("HEADER_TOKEN_POSTURE header_token=x-auth-token header_token_verifier=installed header_token_ops=[PutObject]")
+            log_header_token_posture(operations.into_iter(), &claimed).as_deref(),
+            Some("HEADER_TOKEN_POSTURE header_token=x-auth-token refused_aliases=[] header_token_ops=[PutObject]")
         );
+        let aliased = HeaderTokenClaim::new("x-auth-token")
+            .and_then(|claim| claim.refusing_aliases(&["x-storage-token"]))
+            .expect("a legal claim");
+        let aliased = SecurityFloor::new().with_header_token_claim(aliased);
         assert_eq!(
-            log_header_token_posture(operations.into_iter(), &claimed, false).as_deref(),
-            Some("HEADER_TOKEN_POSTURE header_token=x-auth-token header_token_verifier=none header_token_ops=[PutObject]")
+            log_header_token_posture(operations.into_iter(), &aliased).as_deref(),
+            Some("HEADER_TOKEN_POSTURE header_token=x-auth-token refused_aliases=[x-storage-token] header_token_ops=[PutObject]")
         );
-        assert!(log_header_token_posture(operations.into_iter(), &SecurityFloor::new(), true).is_none());
+        assert!(log_header_token_posture(operations.into_iter(), &SecurityFloor::new()).is_none());
     }
 }

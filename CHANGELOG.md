@@ -9,9 +9,12 @@ signed arm or into `Bearer`. A handler that serves such requests reads the princ
 `RequestContextView::header_token_principal()`; `principal()` stays the signed principal and is
 `None` for them.
 
-Additive: `ServiceBuilder::host_verified_header_token(claim, verifier)`, `HeaderTokenClaim`,
-`InvalidHeaderTokenClaim`, the `HeaderTokenVerifier` host trait with `HeaderTokenRequest` and
-`HeaderTokenRefused`, `HeaderTokenAdmission`, `HeaderTokenReceipt`, `Admission::HeaderToken`,
+Additive: `ServiceBuilder::host_verified_header_token(claim, verifier)`, `HeaderTokenClaim` with
+`refusing_aliases`, `InvalidHeaderTokenClaim`, the `HeaderTokenVerifier` host trait with its
+`Established` slot type and `HeaderTokenRefused`, `HeaderTokenAdmission`, `HeaderTokenReceipt`,
+`Identity::origin` and `IdentityOrigin` (part of `Identity`'s equality; every identity built before
+this change is `AccessKey`), `AssemblyError::HeaderTokenClaimWithoutVerifier`,
+`Admission::HeaderToken`,
 `Verdict::HeaderToken` with `Verdict::header_token_receipt()`,
 `SecurityFloor::with_header_token_claim`, `header_token_claim` and `admits_header_token`, and the
 `HEADER_TOKEN_POSTURE` start-up line with its `gateway_header_token_posture` event. Nothing is

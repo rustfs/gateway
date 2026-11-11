@@ -591,13 +591,18 @@ async fn n_an_unrouted_form_does_not_gain_an_early_bucket_refusal() {
 #[tokio::test]
 async fn n_an_unrouted_form_beside_a_header_token_is_neither_read_nor_verified() {
     use http_body_util::BodyExt;
-    use rustfs_gateway::{HeaderTokenClaim, HeaderTokenRefused, HeaderTokenRequest, HeaderTokenVerifier, Identity};
+    use rustfs_gateway::{HeaderTokenClaim, HeaderTokenRefused, HeaderTokenVerifier, Identity, RequestNow};
     use std::sync::atomic::{AtomicUsize, Ordering};
 
+    /// What the host's outer layer left in the request; the spy would name it if it were asked.
+    #[derive(Clone)]
+    struct Outer;
     struct Spy(Arc<AtomicUsize>);
 
     impl HeaderTokenVerifier for Spy {
-        fn verify(&self, _request: &HeaderTokenRequest<'_>) -> Result<Identity, HeaderTokenRefused> {
+        type Established = Outer;
+
+        fn identity(&self, _established: &Outer, _now: RequestNow) -> Result<Identity, HeaderTokenRefused> {
             self.0.fetch_add(1, Ordering::SeqCst);
             Identity::new("AKIDEXAMPLE").map_err(|_| HeaderTokenRefused)
         }
@@ -620,7 +625,7 @@ async fn n_an_unrouted_form_beside_a_header_token_is_neither_read_nor_verified()
             .header("content-type", "multipart/form-data; boundary=form")
             .header("content-length", length);
         if with_token {
-            head = head.header("x-auth-token", "gAAAAABheader-token-sentinel");
+            head = head.header("x-auth-token", "gAAAAABheader-token-sentinel").extension(Outer);
         }
         let (body, read) = crate::support::CountingBody::new(body);
         let request = head

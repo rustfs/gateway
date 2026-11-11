@@ -138,8 +138,7 @@ pub use floor::{
     detect_credentials, enforce_no_duplicate_sig_params,
 };
 pub use header_token::{
-    HeaderTokenAdmission, HeaderTokenClaim, HeaderTokenReceipt, HeaderTokenRefused, HeaderTokenRequest, HeaderTokenVerifier,
-    InvalidHeaderTokenClaim,
+    HeaderTokenAdmission, HeaderTokenClaim, HeaderTokenReceipt, HeaderTokenRefused, HeaderTokenVerifier, InvalidHeaderTokenClaim,
 };
 pub use mode::{
     CanonicalPayloadToken, DeclaredTrailers, EMPTY_PAYLOAD_SHA256_HEX, MAX_DECLARED_TRAILERS, PayloadMode, STREAMING_ECDSA,
@@ -183,7 +182,8 @@ pub use signer::{
     X_AMZ_DECODED_CONTENT_LENGTH_HEADER_NAME, X_AMZ_TRAILER_HEADER_NAME,
 };
 pub use verdict::{
-    AnonymousAck, AuthError, CredentialPresence, CredentialsWerePresented, Identity, SessionBinding, SessionBindingError, Verdict,
+    AnonymousAck, AuthError, CredentialPresence, CredentialsWerePresented, Identity, IdentityOrigin, SessionBinding,
+    SessionBindingError, Verdict,
 };
 pub use verifier::{
     AUTHORIZATION_HEADER, AWS_ACCESS_KEY_ID_PARAM, AwsCredentialMarker, CustomAuthRequest, CustomAuthScheme,

@@ -32,8 +32,8 @@ use rustfs_gateway::sig::{Identity, SecurityFloor};
 use rustfs_gateway::{
     AuthSchemeRef, Authorizer, AuthzAuditEvent, AuthzAuditSink, AuthzRequest, BoxFuture, ClassKind, CredentialLookup,
     CredentialProvider, Credentials, Decision, Governor, GovernorRequest, Handler, HandlerContext, HandlerResult,
-    HeaderTokenClaim, HeaderTokenRefused, HeaderTokenRequest, HeaderTokenVerifier, InputAuthzRequest, InputDecisions, Lease,
-    Observer, ProviderError, RegionSet, Req, RequestContext, RequestContextView, RequestEvent, Resp, S3Service, ServiceBuilder,
+    HeaderTokenClaim, HeaderTokenRefused, HeaderTokenVerifier, InputAuthzRequest, InputDecisions, Lease, Observer, ProviderError,
+    RegionSet, Req, RequestContext, RequestContextView, RequestEvent, RequestNow, Resp, S3Service, ServiceBuilder,
     SigV4Authenticator, StaticCredentials,
 };
 
@@ -49,28 +49,35 @@ pub(crate) const PRINCIPAL: &str = "KEYSTONEUSER";
 /// The access key the signed fixtures sign with (`support::signed`).
 pub(crate) const SIGNED_PRINCIPAL: &str = "AKIDEXAMPLE";
 
+/// A second name a host's outer layer reads the token under, which the aliased claim refuses.
+pub(crate) const ALIAS: &str = "x-storage-token";
+
 pub(crate) fn claim() -> HeaderTokenClaim {
     HeaderTokenClaim::new(HEADER).expect("a legal claim")
 }
 
+/// [`claim`], refusing [`ALIAS`].
+pub(crate) fn aliased_claim() -> HeaderTokenClaim {
+    claim().refusing_aliases(&[ALIAS]).expect("a legal alias")
+}
+
 // ── the host's verifier ────────────────────────────────────────────────────────────────────────
 
-/// What a host's outer layer leaves in the request for its verifier to report.
+/// What a host's outer layer leaves in the request for its verifier to name: the slot the
+/// gateway reads the identity from.
 #[derive(Clone)]
 pub(crate) struct Established(pub(crate) &'static str);
 
 /// What the fixture host answers when asked.
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum Answer {
-    /// Reports [`PRINCIPAL`].
+    /// Names what the outer layer established in the request.
     Accepts,
     Refuses,
     /// Panics the first time it is asked, and accepts afterwards.
     PanicsOnce,
     /// Panics the first time with a payload whose own destructor panics, and accepts afterwards.
     PanicsOnceWithAPayloadThatPanics,
-    /// Reports the identity its outer layer installed in this request, and refuses without one.
-    ReportsInstalled,
 }
 
 /// A panic payload that panics again when it is released.
@@ -89,24 +96,21 @@ struct Host {
 }
 
 impl HeaderTokenVerifier for Host {
-    fn verify(&self, request: &HeaderTokenRequest<'_>) -> Result<Identity, HeaderTokenRefused> {
+    type Established = Established;
+
+    fn identity(&self, established: &Established, _now: RequestNow) -> Result<Identity, HeaderTokenRefused> {
         let asked = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
-        let principal = match self.answer {
-            Answer::Accepts => PRINCIPAL,
+        match self.answer {
+            Answer::Accepts => {}
             Answer::Refuses => return Err(HeaderTokenRefused),
-            Answer::PanicsOnce => {
-                assert_ne!(asked, 1, "the fixture host's own failure");
-                PRINCIPAL
-            }
+            Answer::PanicsOnce => assert_ne!(asked, 1, "the fixture host's own failure"),
             Answer::PanicsOnceWithAPayloadThatPanics => {
                 if asked == 1 {
                     std::panic::panic_any(PanicsWhenDropped);
                 }
-                PRINCIPAL
             }
-            Answer::ReportsInstalled => request.server_state::<Established>().ok_or(HeaderTokenRefused)?.0,
-        };
-        Identity::new(principal).map_err(|_| HeaderTokenRefused)
+        }
+        Identity::new(established.0).map_err(|_| HeaderTokenRefused)
     }
 }
 
@@ -174,6 +178,8 @@ impl Authorizer for Stages {
 pub(crate) struct Handed {
     pub(crate) operation: &'static str,
     pub(crate) header_token: Option<String>,
+    /// What the outer layer established in this very request, read back from its own extensions.
+    pub(crate) established: Option<&'static str>,
     pub(crate) signed: Option<String>,
     pub(crate) anonymous: bool,
     pub(crate) headers: Lines,
@@ -191,6 +197,10 @@ impl Backend {
             header_token: context
                 .header_token_principal()
                 .map(|identity| identity.access_key_id().to_owned()),
+            established: context
+                .transport_extensions()
+                .get::<Established>()
+                .map(|established| established.0),
             signed: context.principal().map(|principal| principal.access_key_id().to_owned()),
             anonymous: context.is_anonymous(),
             headers: context
@@ -404,10 +414,19 @@ pub(crate) fn builder(floor: SecurityFloor) -> (ServiceBuilder, Recorders) {
 /// The service behind `floor`, with the header token claim installed when `opt_in` names what the
 /// host answers, and absent otherwise.
 pub(crate) fn assemble_on(floor: SecurityFloor, opt_in: Option<Answer>) -> Fixture {
+    assemble_with(floor, opt_in.map(|answer| (claim(), answer)), |builder| builder)
+}
+
+/// The service behind `floor` with `opt_in`'s claim installed, after `install` had the builder.
+pub(crate) fn assemble_with(
+    floor: SecurityFloor,
+    opt_in: Option<(HeaderTokenClaim, Answer)>,
+    install: impl FnOnce(ServiceBuilder) -> ServiceBuilder,
+) -> Fixture {
     let (builder, recorders) = builder(floor);
     let builder = match opt_in {
-        Some(answer) => builder.host_verified_header_token(
-            claim(),
+        Some((claim, answer)) => builder.host_verified_header_token(
+            claim,
             Host {
                 answer,
                 calls: Arc::clone(&recorders.verifier_calls),
@@ -415,7 +434,19 @@ pub(crate) fn assemble_on(floor: SecurityFloor, opt_in: Option<Answer>) -> Fixtu
         ),
         None => builder,
     };
-    Fixture::of(builder, recorders)
+    Fixture::of(install(builder), recorders)
+}
+
+/// The default floor with [`aliased_claim`] installed.
+pub(crate) fn assemble_aliased(answer: Answer) -> Fixture {
+    assemble_with(SecurityFloor::new(), Some((aliased_claim(), answer)), |builder| builder)
+}
+
+/// `request` with [`ALIAS`] carrying the token's bytes, as a client that uses the second name
+/// sends it. Nothing is established: add [`established_as`] for an outer layer that read it.
+pub(crate) fn aliased(mut request: http::Request<Bytes>) -> http::Request<Bytes> {
+    request.headers_mut().insert(ALIAS, http::HeaderValue::from_static(TOKEN));
+    request
 }
 
 pub(crate) fn assemble(opt_in: Option<Answer>) -> Fixture {
@@ -438,13 +469,25 @@ pub(crate) fn floors() -> [(&'static str, SecurityFloor); 2] {
     ]
 }
 
-/// `request` with the token header added beside whatever it already carries.
-pub(crate) fn with_token(mut request: http::Request<Bytes>) -> http::Request<Bytes> {
+/// `request` with the token header added beside whatever it already carries, as it leaves a
+/// host's outer layer: that layer validated the token and left [`PRINCIPAL`] in the request.
+pub(crate) fn with_token(request: http::Request<Bytes>) -> http::Request<Bytes> {
+    established_as(PRINCIPAL, with_bare_token(request))
+}
+
+/// `request` with the token header and nothing established: the outer layer left no identity.
+pub(crate) fn with_bare_token(mut request: http::Request<Bytes>) -> http::Request<Bytes> {
     request.headers_mut().insert(HEADER, http::HeaderValue::from_static(TOKEN));
     request
 }
 
-/// A request whose only credential is the token.
+/// `request` as a host's outer layer leaves it once it has established `principal`.
+pub(crate) fn established_as(principal: &'static str, mut request: http::Request<Bytes>) -> http::Request<Bytes> {
+    request.extensions_mut().insert(Established(principal));
+    request
+}
+
+/// A request whose only credential is the token, with [`PRINCIPAL`] established.
 pub(crate) fn token_only(method: http::Method, uri: &str) -> http::Request<Bytes> {
     with_token(support::plain(method, uri))
 }
