@@ -159,8 +159,9 @@ fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
-/// The signer is independent of the gateway's signer and canonical request builder.
-fn signed(target: &str, service: &str, key_id: &str, secret: &str, signed_body: &[u8], body: Bytes) -> Request<Bytes> {
+/// The signer is independent of the gateway's signer and canonical request builder; also the STS
+/// form of `store_fault_answer.rs`.
+pub(crate) fn signed(target: &str, service: &str, key_id: &str, secret: &str, signed_body: &[u8], body: Bytes) -> Request<Bytes> {
     signed_method(Method::PUT, target, service, key_id, secret, signed_body, body)
 }
 

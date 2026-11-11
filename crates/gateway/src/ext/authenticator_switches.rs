@@ -15,18 +15,21 @@
 //! The opt-in switches of the built-in SigV4 authenticator: handing the caller's secret to
 //! handlers (ADR-0022), verifying any signing region (ADR-0023), the RustFS profile's reading of
 //! signing regions — empty, outside the grammar, of any length (rustfs/backlog#1677) — and of
-//! signing services (rustfs/gateway#1130), and its narrower raw-path fallback
-//! (rustfs/rustfs#2593). All are off by default.
+//! signing services (rustfs/gateway#1130), its narrower raw-path fallback
+//! (rustfs/rustfs#2593), and a credential-store fault answered `500` (ADR-0050). All are off by
+//! default.
 //!
-//! Responsible for: the builder methods, their documented posture, and [`ScopePolicy`], which
+//! Responsible for: the builder methods, their documented posture, [`ScopePolicy`], which
 //! turns the region and service switches into the parsers' credential rule, the scope expectation
-//! and the service refusal legacy RustFS answers.
+//! and the service refusal legacy RustFS answers, and which answer a lookup that found no usable
+//! credential gets.
 //! NOT responsible for: verification itself, or what a switch changes in it; they are read in
 //! `super::authenticator` (and the secret hand-off also in `super::sigv2`).
 //! Upstream: `super::authenticator::SigV4Authenticator`. Downstream: deployments assembling the
 //! service, the RustFS ring-2 adapter first.
 
-use super::authenticator::SigV4Authenticator;
+use super::authenticator::{SigV4Authenticator, VerificationFailure};
+use super::credentials::{CredentialLookup, ProviderError};
 use super::legacy_credential::{
     LegacyScope, invalid_region_sentence, is_legacy_region, read_authorization, read_scope, signed_headers_refusal,
 };
@@ -476,9 +479,54 @@ impl SigV4Authenticator {
         self.hand_secret = true;
         self
     }
+
+    /// Answers a credential-provider fault — a backend error, an unavailable store, the guard's
+    /// timeout, an isolated provider panic, or a record the provider reports as a fault (an empty
+    /// secret converted with `ProviderError::from`) — with
+    /// [`super::Unavailable`], which the service renders `500 InternalError`, as legacy RustFS
+    /// answers a credential store it cannot read (rustfs/gateway#1585, ADR-0050). SDKs retry a
+    /// `500` with backoff, and treat `InvalidAccessKeyId` as terminal.
+    ///
+    /// Off by default: the default answers a fault with the closed `403 InvalidAccessKeyId` an
+    /// unknown key gets, byte for byte. Only a fault changes its answer: an unknown key, a session
+    /// or disabled credential and a wrong signature keep theirs. Timing parity is kept — the fault
+    /// still derives from the placeholder secret and completes the comparison, and is answered
+    /// where an unknown key is — and the `500` carries a constant sentence, no request text, no
+    /// access key and no provider detail. The fault is still counted and never cached, and never
+    /// becomes an anonymous request. Every authentication form this authenticator serves follows
+    /// the switch: SigV4 header, presigned, streaming and POST policy, SigV2, and the STS body
+    /// signature of [`accept_legacy_rustfs_signing_services`](Self::accept_legacy_rustfs_signing_services).
+    ///
+    /// The trade-off, and why it is opt-in: a store-wide outage reveals nothing about any key, but a
+    /// fault confined to one stored record — one unreadable or invalid entry — answers `500` for
+    /// that key and `403` for an unknown one, so a caller can tell "this key exists and its record
+    /// is unreadable" from "this key is not on record".
+    #[must_use]
+    pub fn answer_credential_store_faults_as_unavailable(mut self) -> Self {
+        self.store_faults_unavailable = true;
+        self
+    }
 }
 
 impl SigV4Authenticator {
+    /// Whether `resolved`, a lookup that found no usable credential, is answered `Unavailable`:
+    /// only a provider fault, and only under
+    /// [`answer_credential_store_faults_as_unavailable`](Self::answer_credential_store_faults_as_unavailable).
+    pub(super) fn answers_unavailable(&self, resolved: &Result<CredentialLookup, ProviderError>) -> bool {
+        self.store_faults_unavailable && resolved.is_err()
+    }
+
+    /// The SigV4 answer to `resolved`, a lookup that found no usable credential, given once the
+    /// work an unknown key owes has run: the store outage under the switch, else the uniform
+    /// `InvalidAccessKeyId`.
+    pub(super) fn unresolved_lookup(&self, resolved: &Result<CredentialLookup, ProviderError>) -> VerificationFailure {
+        if self.answers_unavailable(resolved) {
+            VerificationFailure::Unavailable
+        } else {
+            VerificationFailure::Ordinary(AuthError::InvalidAccessKeyId)
+        }
+    }
+
     /// The canonical paths a SigV4 signature over `raw_path` is tried against, as this
     /// authenticator's path switches choose them: for a `claimed` request under a prefix
     /// [`Self::verify_paths_double_encoded_under`] names, the doubly encoded one alone; else legacy
@@ -536,6 +584,7 @@ impl core::fmt::Debug for SigV4Authenticator {
             .field("verifies_paths_as_legacy_rustfs", &self.legacy_paths)
             .field("verifies_paths_double_encoded_under", &self.double_encoded_prefixes)
             .field("reads_signed_headers_as_legacy_rustfs", &self.legacy_signed_headers)
+            .field("answers_credential_store_faults_as_unavailable", &self.store_faults_unavailable)
             .finish()
     }
 }

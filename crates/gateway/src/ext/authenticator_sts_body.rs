@@ -14,8 +14,10 @@
 
 //! RustFS's STS-scoped header signature over a bounded body (rustfs/gateway#1230).
 //!
-//! Responsible for: asking the private reader only after a key is found, using the body's digest
-//! when the payload header is absent, and preserving a body-read refusal before signature comparison.
+//! Responsible for: asking the private reader only after a key is found (a key that is not found
+//! is answered there, a store fault under the switch as `Unavailable`), using the body's digest
+//! when the payload header is absent, preserving a body-read refusal before signature comparison,
+//! and turning a verification failure into the trait's answer.
 //! NOT responsible for: reading body frames or selecting an STS operation.
 //! Upstream: `crate::service` and `super::SigV4Authenticator`. Downstream: the canonical request
 //! verifier in `super` and the proof-gated replay in `crate::gate`.
@@ -40,8 +42,8 @@ impl<'a> Authentication<'a> {
 impl SigV4Authenticator {
     pub(super) async fn verify(&self, request: &Authentication<'_>) -> Result<AuthenticationOutcome, Unavailable> {
         match self.try_verify(request).await {
-            Ok(Some((verdict, secret))) => Ok(AuthenticationOutcome::authenticated(verdict, secret)),
-            Ok(None) => Err(Unavailable),
+            Ok((verdict, secret)) => Ok(AuthenticationOutcome::authenticated(verdict, secret)),
+            Err(VerificationFailure::Unavailable) => Err(Unavailable),
             Err(VerificationFailure::Ordinary(error)) => {
                 Ok(AuthenticationOutcome::ordinary(rustfs_gateway_sig::Verdict::reject(error)))
             }
@@ -70,9 +72,10 @@ impl SigV4Authenticator {
             return Ok(None);
         }
         // This early lookup rejection is part of the legacy profile: an unknown key must not
-        // trigger a read or have its credential refusal replaced by the body's length refusal.
+        // trigger a read or have its credential refusal replaced by the body's length refusal. A
+        // store fault is answered at the same point, so the two keep one latency class here too.
         if !matches!(resolved, Ok(CredentialLookup::Found(_))) {
-            return Err(AuthError::InvalidAccessKeyId.into());
+            return Err(self.unresolved_lookup(resolved));
         }
         let reading = request.sts_body.as_ref().ok_or(AuthError::SignatureDoesNotMatch)?;
         let digest = reading

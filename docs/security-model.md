@@ -428,8 +428,13 @@ framework's half:
   `ProviderError::from` reports a provider fault, answered as below. There is no length rule
   beyond this; a minimum length is the deployment's policy.
 - **A store that cannot answer fails closed.** A backend error, timeout or isolated panic is
-  counted, is never cached, and receives the same 403 response as another credential failure. It
-  is never treated as an anonymous request.
+  counted, is never cached, and by default receives the same 403 response as another credential
+  failure. It is never treated as an anonymous request. A host may opt in to answering it
+  `500 InternalError` instead, which SDKs retry
+  (`SigV4Authenticator::answer_credential_store_faults_as_unavailable`, ADR-0050; the RustFS
+  profile turns it on). The answer is still given after the placeholder derivation and comparison,
+  and carries no request or provider text; but a fault confined to one stored record then tells
+  that key apart from an unknown one, which is why it is opt-in.
 - **An unknown key costs what a known one costs.** The unknown-key path derives from
   `timing::placeholder_secret`, runs the full four-step chain and completes the comparison before
   answering, so the two are not separable by latency (`timing::SIDE_CHANNELS`, row T1). On the
