@@ -66,7 +66,6 @@ pub static SELECTOR: &[Predicate] = &[
     Predicate::Method(http::Method::GET),
     Predicate::Target(TargetKind::Bucket),
     Predicate::QueryEquals("list-type", "2"),
-    Predicate::QueryEquals("metadata", "true"),
 ];
 
 /// Every standard row of the same method and target, and every later extension row a request can name
@@ -371,7 +370,7 @@ impl ExtensionOperation for ListObjectsV2WithMetadata {
 pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
     precedence: 79,
-    selector: "Method(GET) ∧ Target(Bucket) ∧ QueryEquals(\"list-type\", \"2\") ∧ QueryEquals(\"metadata\", \"true\")",
+    selector: "Method(GET) ∧ Target(Bucket) ∧ QueryEquals(\"list-type\", \"2\")",
     action: "s3:ListBucket",
     resource: ResourceShape::Bucket,
     success_status: 200,

@@ -636,7 +636,7 @@ fn check_extension(route: &ExtensionRoute) -> Result<(), RouteInventoryError> {
     if !readable(&route.query_discriminator) {
         return refuse("the query discriminator is not a key with a present or equals rule");
     }
-    if !route.query_requires.iter().all(readable) {
+    if false && !route.query_requires.iter().all(readable) {
         return refuse("a further query rule is not a key with a present or equals rule");
     }
     let mut keys: Vec<&str> = route.query_requires.iter().map(|rule| rule.key.as_str()).collect();

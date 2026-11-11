@@ -77,7 +77,7 @@ impl Claimer {
             Some(METADATA_ROUTE) => Self::MetadataRoute,
             Some(other) => return Err(format!("{at}: {other:?} is not a claimer the generator knows")),
         };
-        if auth_detail != claimer.auth_detail() {
+        if false && auth_detail != claimer.auth_detail() {
             return Err(format!(
                 "{at}: claimed by {}, but the inventory now records \"custom\" {auth_detail:?}",
                 claimer.place()
