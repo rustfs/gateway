@@ -41,7 +41,8 @@ use serde::Deserialize;
 use self::render::{render_mod, render_operation, render_tables};
 use self::rule::{Rule, is_parameter};
 use self::rulings::{
-    EXTENSIONS, FORMS, PRESIGNED_EXTENSIONS, QUERY_BUCKETS, RETAINED, RULINGS, Retained, Ruling, STAYS, VERSIONED_EXTENSIONS,
+    EXTENSIONS, FORMS, FormRuling, PRESIGNED_EXTENSIONS, QUERY_BUCKETS, RETAINED, RULINGS, Retained, Ruling, STAYS,
+    VERSIONED_EXTENSIONS,
 };
 use self::template::{Shadow, Template, shadowing, snake, template_params, type_name};
 
@@ -369,7 +370,7 @@ fn plan(
     rulings: &[Ruling],
     query_buckets: &[(&str, &str, &'static str)],
     stays: &[(&str, &str, &'static str)],
-    form_routes: &[(&str, &str, &str)],
+    form_routes: &[FormRuling],
     extensions: &[(&str, &str)],
 ) -> Result<Plan, String> {
     plan_through(MIGRATED_THROUGH, inventory, rulings, query_buckets, stays, form_routes, extensions)
@@ -384,7 +385,7 @@ fn plan_through(
     rulings: &[Ruling],
     query_buckets: &[(&str, &str, &'static str)],
     stays: &[(&str, &str, &'static str)],
-    form_routes: &[(&str, &str, &str)],
+    form_routes: &[FormRuling],
     extensions: &[(&str, &str)],
 ) -> Result<Plan, String> {
     if inventory.format != FORMAT {
@@ -409,10 +410,10 @@ fn plan_through(
         }
         if let Some(index) = form_routes
             .iter()
-            .position(|(method, path, _)| *method == route.method && *path == route.path)
+            .position(|ruling| ruling.method == route.method && ruling.path == route.path)
         {
             forms_used.insert(index);
-            formed.push(form::Formed::of(route, form_routes[index].2, &at, &inventory.source.commit)?);
+            formed.push(form::Formed::of(route, &form_routes[index], &at, &inventory.source.commit)?);
             continue;
         }
         if let Some(index) = stays
@@ -559,7 +560,7 @@ fn plan_through(
     {
         return Err(format!(
             "the form route {} {} is not in the inventory",
-            form_routes[stale].0, form_routes[stale].1
+            form_routes[stale].method, form_routes[stale].path
         ));
     }
     if let Some(stale) = (0..rulings.len()).find(|index| !used.contains(index)) {

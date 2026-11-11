@@ -24,6 +24,7 @@
 use std::fmt::Write as _;
 
 use super::Route;
+use super::rulings::FormRuling;
 
 /// The module the operation is generated into.
 pub(super) const STEM: &str = "sts_form_post";
@@ -51,12 +52,16 @@ pub(super) struct Formed {
     handler_url: String,
     layer_url: String,
     router_url: String,
+    /// Why the handler is handed the caller's secret, when the ruling says it is.
+    pub(super) caller_secret: Option<String>,
 }
 
 impl Formed {
     /// The form route `route`, which the inventory must still record as anonymous with the
-    /// custom-auth class `detail`, a buffered request and a buffered response.
-    pub(super) fn of(route: &Route, detail: &str, at: &str, commit: &str) -> Result<Self, String> {
+    /// custom-auth class the ruling names, a buffered request, a buffered response and no sealed
+    /// body; the ruling's caller-secret opt-in must say why.
+    pub(super) fn of(route: &Route, ruling: &FormRuling, at: &str, commit: &str) -> Result<Self, String> {
+        let detail = ruling.auth_detail;
         if route.method != "POST" || route.path != "/" {
             return Err(format!("{at}: only RustFS's STS endpoint, POST /, is served behind a form claim"));
         }
@@ -71,6 +76,9 @@ impl Formed {
                 "{at}: the inventory no longer records a buffered request and response with no secret"
             ));
         }
+        if ruling.caller_secret.is_some_and(|why| why.trim().is_empty()) {
+            return Err(format!("{at}: a caller-secret opt-in must say why the handler needs the secret"));
+        }
         let source = |file: &str| format!("https://github.com/rustfs/rustfs/blob/{commit}/{file}");
         Ok(Self {
             method: route.method.clone(),
@@ -80,6 +88,7 @@ impl Formed {
             handler_url: source(&route.handler_file),
             layer_url: source("rustfs/src/server/layer.rs"),
             router_url: source(super::RUSTFS_ROUTER),
+            caller_secret: ruling.caller_secret.map(str::to_owned),
         })
     }
 
@@ -96,8 +105,28 @@ impl Formed {
             handler_url,
             layer_url,
             router_url,
+            caller_secret,
         } = self;
         let selector = format!("FormClaim(POST {path:?})");
+        let spec = match caller_secret {
+            Some(why) => {
+                // Item rather than module documentation, wrapped the same way: only each line's
+                // `//!` prefix becomes `///`, never a `//!` inside the reason.
+                let paragraph = super::render::doc_paragraph(&format!(
+                    "Handed the caller's secret (ADR-0022) only when a SigV4 header signature covers the form body, \
+                     since the body carries every parameter: {why}"
+                ));
+                let mut doc = String::new();
+                for line in paragraph.lines() {
+                    doc.push_str("///");
+                    doc.push_str(line.strip_prefix("//!").unwrap_or(line));
+                    doc.push('\n');
+                }
+                format!("{doc}static SPEC: OperationSpec = admin::spec_over_a_signed_body(NAME, AUTH);")
+            }
+            None => "static SPEC: OperationSpec = admin::spec(NAME, AUTH, false);".to_owned(),
+        };
+        let record_secret = caller_secret.is_some();
         let _ = write!(
             out,
             r#"//! `{name}`: `{method} {path}` with an `{MEDIA_TYPE}` body on every host, registration group `{group}`
@@ -150,7 +179,7 @@ pub const ROUTE: FormRoute = FormRoute {{ precedence: {PRECEDENCE}, claim: &CLAI
 #[derive(Debug)]
 pub struct {TYPE};
 
-static SPEC: OperationSpec = admin::spec(NAME, AUTH, false);
+{spec}
 
 /// The shared envelope admits Web Identity's independently authenticated form. Ordinary
 /// `AssumeRole` has an additional header-only credential requirement in the codec, after the
@@ -231,6 +260,7 @@ pub const RECORD: FormRouteRecord = FormRouteRecord {{
     rustfs_handler: {handler:?},
     request_body: BodyKind::Buffered,
     response_body: BodyKind::Buffered,
+    caller_secret: {record_secret},
 }};
 "#
         );

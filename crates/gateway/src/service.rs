@@ -611,7 +611,7 @@ impl S3Service {
             Ok(facts) => facts,
             Err(refusal) => return outcome.refuse_at(Refused::Decode, from_codec(refusal, response_kind)),
         };
-        let (service_level, target, hands_caller_secret) = (facts.service_level, facts.target, facts.hands_caller_secret);
+        let (service_level, target, secret_scope) = (facts.service_level, facts.target, facts.secret);
         let (path_params, subjects, claimed, bound_bucket) =
             (facts.path_params, facts.subjects, facts.claimed, facts.bound_bucket);
         // Claimed routes sign their declared path; only ordinary S3 requests retain the host-derived bucket.
@@ -779,6 +779,7 @@ impl S3Service {
         let mut framing_mode: Option<PayloadMode> = None;
         let mut signed_length = crate::builder::buffered_lengths::SignedLength::default();
         let mut body_digest = BodyDigestObligation::None;
+        let mut signed_body = false; // Whether a SigV4 header signature covers the body (rustfs/gateway#1587).
         // Legacy RustFS's words for a RustFS-profile refusal, when the authenticator published them.
         let mut legacy = None;
         // Whether this request's own floor admission was a bearer one: a bearer verdict from any
@@ -833,6 +834,7 @@ impl S3Service {
                     .with_chunk_sink(&chunk_sink)
                     .with_sts_body_reader(routed_body.sts_body_reader(), config.config().request_body_deadlines());
                     let result = self.inner.authenticator.authenticate(&question).await;
+                    signed_body = question.signs_its_body();
                     let (signature_mismatch, published_legacy, body_refusal) = question.into_published();
                     legacy = published_legacy;
                     if let Some(refusal) = body_refusal {
@@ -912,8 +914,7 @@ impl S3Service {
         };
         // H4's run-time half: a receipt minted for another request cannot be attached to this one.
         let (verdict, scope_rejection, caller_secret) = authentication.into_parts();
-        // Zeroized on drop: an operation outside the assembly's secret scope never holds the key past this line (ADR-0024).
-        let caller_secret = caller_secret.filter(|_| hands_caller_secret || self.inner.caller_secret_every_operation);
+        let caller_secret = caller_secret.filter(|_| secret_scope.admits(signed_body, self.inner.caller_secret_every_operation));
         let verdict = SecurityFloor::seal_verdict(verdict, presence);
         let verdict = if verdict.bearer_receipt().is_some() && !bearer_admitted {
             Verdict::reject(AuthError::AccessDenied)

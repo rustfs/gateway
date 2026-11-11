@@ -223,6 +223,7 @@ struct Declared {
     presigned: bool,
     sigv4: bool,
     secret: bool,
+    secret_over_a_signed_body: bool,
     deadline: Option<HandlerDeadlineClass>,
 }
 
@@ -249,6 +250,7 @@ impl OperationFold for Collect {
             presigned: floor.allowed_schemes().allows_presigned(),
             sigv4: floor.requires_sigv4_under_every_policy(),
             secret: spec.receives_caller_secret(),
+            secret_over_a_signed_body: spec.caller_secret_needs_a_signed_body(),
             deadline: spec.deadline_class(),
         });
         carry
