@@ -147,6 +147,9 @@ pub(super) struct Extended {
     /// The evidence that a RustFS client presigns this route, when one is shown to
     /// ([`admit_presigned`]); `None` keeps the privileged, header-only floor.
     pub(super) presigned: Option<String>,
+    /// The action a request naming one object version is asked instead, when a ruling names one
+    /// ([`admit_versioned`]).
+    pub(super) version_action: Option<String>,
     router_url: String,
 }
 
@@ -205,6 +208,7 @@ impl Extended {
             precedence,
             shadows: Vec::new(),
             presigned: None,
+            version_action: None,
             router_url: format!("https://github.com/rustfs/rustfs/blob/{commit}/{}", super::RUSTFS_ROUTER),
         })
     }
@@ -309,6 +313,23 @@ impl Extended {
             TargetKind::Bucket => "the bucket the path names".to_owned(),
             TargetKind::Object => "the object the path names".to_owned(),
         };
+        let resource = self.resource();
+        let auth = match &self.version_action {
+            None => format!(
+                "/// What authorises it, on {on}: the action RustFS's handler checks.\n\
+                 pub const AUTH: AuthRequirement = AuthRequirement::new({action:?}, {resource});\n"
+            ),
+            Some(version_action) => format!(
+                "/// What a request naming one version is asked instead: `{version_action}` alone, as RustFS's\n\
+                 /// handler asks it through its `GetObject` check (the GHSA-3ppv class, rustfs/gateway#1576).\n\
+                 pub static VERSION_AUTH: AuthRequirement = AuthRequirement::new({version_action:?}, {resource});\n\
+                 \n\
+                 /// What authorises it, on {on}: the action RustFS's handler checks, and [`VERSION_AUTH`] when the\n\
+                 /// request names a version.\n\
+                 pub const AUTH: AuthRequirement =\n    \
+                 AuthRequirement::new({action:?}, {resource}).with_version_requirement(&VERSION_AUTH);\n"
+            ),
+        };
         let (floor_phrase, floor) = match &self.presigned {
             None => (
                 "the floor is privileged",
@@ -321,7 +342,7 @@ impl Extended {
                 "the floor admits a SigV4 header signature or presigned URL and never an anonymous or SigV2 request",
                 format!(
                     "/// The evidence that a RustFS client presigns this route, which ADR-0024 (f) makes the condition for\n\
-                     /// admitting a presigned URL (rustfs/gateway#1576).\n\
+                     /// admitting a presigned URL (ADR-0047, rustfs/gateway#1576).\n\
                      pub const PRESIGNED_EVIDENCE: &str = {evidence:?};\n\
                      \n\
                      /// SigV4 header-signed or presigned, never anonymous, never SigV2: RustFS answers both `403 AccessDenied`\n\
@@ -368,9 +389,7 @@ use crate::record::{{self, ExtensionRouteRecord}};
 /// The operation name.
 pub const NAME: &str = {operation:?};
 
-/// What authorises it, on {on}: the action RustFS's handler checks.
-pub const AUTH: AuthRequirement = AuthRequirement::new({action:?}, {resource});
-
+{auth}
 /// RustFS's admin router, whose extension matching this row mirrors.
 const ROUTER: &str = {router_url:?};
 
@@ -444,7 +463,7 @@ pub const OVERLAY_ROW: OverlayRow = OverlayRow {{
     name: NAME,
     precedence: {precedence},
     selector: {rendered:?},
-    action: {action:?},
+    action: {overlay_action:?},
     resource: {resource},
     success_status: 200,
     anonymous: false,
@@ -461,7 +480,10 @@ pub const RECORD: ExtensionRouteRecord = ExtensionRouteRecord {{
     action: {action:?},
 }};
 "#,
-            resource = self.resource(),
+            overlay_action = match &self.version_action {
+                None => action.clone(),
+                Some(version_action) => format!("{action}; versionId: {version_action}"),
+            },
             claim = self.claim(),
             path_shape = self.path_shape(),
             target_lower = self.target.as_str().to_ascii_lowercase(),
@@ -499,6 +521,29 @@ pub(super) fn admit_presigned(extended: &mut [Extended], rulings: &[(&str, &str)
             .ok_or_else(|| format!("the presigned ruling for {name} names no extension route"))?;
         if route.presigned.replace((*evidence).to_owned()).is_some() {
             return Err(format!("the extension route {name} has two presigned rulings"));
+        }
+    }
+    Ok(())
+}
+
+/// Gives each extension route a version ruling names the action a request naming one object
+/// version is asked instead (rustfs/gateway#1576). A ruling that names no planned extension route,
+/// names one twice, names an action not spelled `s3:Action`, or names a route that addresses no
+/// object, is refused.
+pub(super) fn admit_versioned(extended: &mut [Extended], rulings: &[(&str, &str)]) -> Result<(), String> {
+    for (name, action) in rulings {
+        if !is_action(action) || !action.starts_with("s3:") {
+            return Err(format!("the version ruling for {name} names {action:?}, not an `s3:Action`"));
+        }
+        let route = extended
+            .iter_mut()
+            .find(|route| route.name == *name)
+            .ok_or_else(|| format!("the version ruling for {name} names no extension route"))?;
+        if route.target != TargetKind::Object {
+            return Err(format!("the version ruling for {name} names a route that addresses no object"));
+        }
+        if route.version_action.replace((*action).to_owned()).is_some() {
+            return Err(format!("the extension route {name} has two version rulings"));
         }
     }
     Ok(())

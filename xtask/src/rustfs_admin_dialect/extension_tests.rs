@@ -24,8 +24,8 @@
 //! dialect crate's tests).
 //! Upstream: `super::extension` and `super::plan`. Downstream: nothing; a leaf test module.
 
-use super::extension::{ExtensionRoute, FIRST_PRECEDENCE, QueryDiscriminator, admit_presigned};
-use super::rulings::{EXTENSIONS, PRESIGNED_EXTENSIONS};
+use super::extension::{ExtensionRoute, FIRST_PRECEDENCE, QueryDiscriminator, admit_presigned, admit_versioned};
+use super::rulings::{EXTENSIONS, PRESIGNED_EXTENSIONS, VERSIONED_EXTENSIONS};
 use super::tests::{inventory, recorded_plan, route};
 use super::{Plan, plan};
 
@@ -320,6 +320,61 @@ fn only_the_presigned_ruling_renders_the_presigned_floor() {
     let lambda = plan.extensions[5].render("");
     assert!(lambda.contains("with `lambdaArn` inside the signed query"), "{lambda}");
     assert!(lambda.contains(&format!("{:?}", PRESIGNED_EXTENSIONS[0].1)), "{lambda}");
+}
+
+/// Positive and negative — only the object lambda, whose RustFS handler asks
+/// `s3:GetObjectVersion` of a request naming a version, renders a version requirement; the other
+/// seven keep their one action (rustfs/gateway#1576).
+#[test]
+fn only_the_version_ruling_renders_a_version_requirement() {
+    let plan = recorded_plan();
+    assert_eq!(VERSIONED_EXTENSIONS, &[("MiscExtRoute::ObjectLambda[object]", "s3:GetObjectVersion")]);
+    for extended in &plan.extensions {
+        let rendered = extended.render("");
+        let versioned = extended.name == "MiscExtRoute::ObjectLambda[object]";
+        assert_eq!(
+            rendered.contains(".with_version_requirement(&VERSION_AUTH)"),
+            versioned,
+            "{}",
+            extended.name
+        );
+        assert_eq!(
+            rendered.contains(
+                "pub static VERSION_AUTH: AuthRequirement = AuthRequirement::new(\"s3:GetObjectVersion\", ResourceShape::Object);"
+            ),
+            versioned,
+            "{}",
+            extended.name
+        );
+    }
+}
+
+/// Negative — a version ruling that names no extension route, names one twice, names an action
+/// outside `s3:`, or names a route that addresses no object is refused; a bound one applies.
+#[test]
+fn n_a_stale_repeated_foreign_or_objectless_version_ruling_is_refused() {
+    let refused = |rulings: &[(&str, &str)]| {
+        let mut plan = recorded_plan();
+        admit_versioned(&mut plan.extensions, rulings).expect_err("a refused ruling")
+    };
+    let lambda = "MiscExtRoute::ObjectLambda[object]";
+    assert!(
+        refused(&[("Ext::Gone", "s3:GetObjectVersion")]).contains("the version ruling for Ext::Gone names no extension route")
+    );
+    assert!(refused(&[(lambda, "s3:GetObjectVersion")]).contains("has two version rulings"));
+    assert!(refused(&[(lambda, "rustfs:GetObjectVersion")]).contains("not an `s3:Action`"));
+    assert!(refused(&[(lambda, "GetObjectVersion")]).contains("not an `s3:Action`"));
+    assert!(
+        refused(&[("ReplicationExtRoute::Check", "s3:GetObjectVersion")])
+            .contains("the version ruling for ReplicationExtRoute::Check names a route that addresses no object")
+    );
+    let plan = recorded_plan();
+    let check = plan
+        .extensions
+        .iter()
+        .position(|extended| extended.name == lambda)
+        .expect("a row");
+    assert_eq!(plan.extensions[check].version_action.as_deref(), Some("s3:GetObjectVersion"));
 }
 
 /// Negative — a presigned ruling that names no extension route, names one twice, or cites no

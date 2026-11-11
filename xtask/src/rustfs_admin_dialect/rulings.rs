@@ -251,6 +251,12 @@ pub(super) const PRESIGNED_EXTENSIONS: &[(&str, &str)] = &[(
     "https://github.com/rustfs/rustfs/blob/443e8afee194fe38b32d62a9289a99c1f703715c/crates/e2e_test/src/object_lambda_test.rs#L608-L636",
 )];
 
+/// The extension routes whose request may name one object version, and the action RustFS asks
+/// such a request instead of the route's own (rustfs/gateway#1576): RustFS's object lambda handler
+/// authorises through its `GetObject` check, which asks `s3:GetObjectVersion` when `versionId` is
+/// present (GHSA-3ppv). Each renders `AuthRequirement::with_version_requirement`.
+pub(super) const VERSIONED_EXTENSIONS: &[(&str, &str)] = &[("MiscExtRoute::ObjectLambda[object]", "s3:GetObjectVersion")];
+
 /// A check RustFS's handler makes that the gateway's floor does not represent, so the floor is
 /// never read as the route's whole authorisation (rustfs/gateway#1232). The check stays with the
 /// handler; `hand_on_body` makes the gateway hand the body on unread, so that check still runs

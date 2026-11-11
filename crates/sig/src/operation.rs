@@ -229,10 +229,17 @@ impl OperationFloor {
         }
     }
 
-    /// Admits SigV4 only: refuses a request that presented no credentials under every
-    /// [`AnonymousPolicy`], the service-level [`AnonymousPolicy::DelegateToAuthorizer`] included,
-    /// and a SigV2 request, header or presigned, under every [`crate::SigV2Policy`] — whatever
-    /// the operation's own allow-list says.
+    /// Admits SigV4 only, header or presigned, as the allow-list says. Every other admission is
+    /// refused whatever the security floor or the allow-list says:
+    ///
+    /// * a request that presented no credentials, under every [`AnonymousPolicy`], the
+    ///   service-level [`AnonymousPolicy::DelegateToAuthorizer`] included;
+    /// * a SigV2 request, header or presigned, under every [`crate::SigV2Policy`];
+    /// * a request admitted by a registered custom scheme
+    ///   ([`crate::SecurityFloor::with_custom_schemes`]);
+    /// * a query bearer token ([`OperationFloor::with_query_bearer_claim`]). Registering an
+    ///   operation whose floor combines the two is refused at build time by the registry, and the
+    ///   floor refuses the token at request time as well.
     ///
     /// Only narrows. It is for a non-privileged operation — one that admits a presigned URL, which
     /// a privileged one cannot — whose owner requires a header or query SigV4 signature: without

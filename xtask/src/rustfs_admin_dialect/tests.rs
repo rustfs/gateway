@@ -223,6 +223,8 @@ pub(super) fn recorded_plan() -> Plan {
     super::retain(&mut plan.declared, super::RETAINED).expect("the recorded retained checks apply");
     super::extension::admit_presigned(&mut plan.extensions, super::PRESIGNED_EXTENSIONS)
         .expect("the recorded presigned rulings apply");
+    super::extension::admit_versioned(&mut plan.extensions, super::VERSIONED_EXTENSIONS)
+        .expect("the recorded version rulings apply");
     plan
 }
 

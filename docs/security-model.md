@@ -263,7 +263,9 @@ The framework's half:
   security floor admits a request that presented nothing only to an operation that opted in. Any
   other operation refuses it before the authorizer is consulted.
   `SecurityFloor::delegate_anonymous_to_authorizer_after_listing_in_the_posture_report`
-  (ADR-0021) admits it to every non-privileged operation instead. Every such request then reaches
+  (ADR-0021) admits it to every non-privileged operation instead, except one whose floor requires
+  SigV4 under every policy (`OperationFloor::require_sigv4_under_every_policy`, ADR-0047: the
+  RustFS object lambda route), which refuses it whatever the policy. Every such request then reaches
   the authorizer with no identity, and the authorizer alone decides.
   Delegation never admits a request that presented a credential, never widens presigned or
   POST-policy access, and never reaches a privileged operation that did not opt in itself. The

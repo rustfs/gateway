@@ -49,8 +49,14 @@ use crate::record::{self, ExtensionRouteRecord};
 /// The operation name.
 pub const NAME: &str = "rustfs:InvokeObjectLambda";
 
-/// What authorises it, on the object the path names: the action RustFS's handler checks.
-pub const AUTH: AuthRequirement = AuthRequirement::new("s3:GetObject", ResourceShape::Object);
+/// What a request naming one version is asked instead: `s3:GetObjectVersion` alone, as RustFS's
+/// handler asks it through its `GetObject` check (the GHSA-3ppv class, rustfs/gateway#1576).
+pub static VERSION_AUTH: AuthRequirement = AuthRequirement::new("s3:GetObjectVersion", ResourceShape::Object);
+
+/// What authorises it, on the object the path names: the action RustFS's handler checks, and [`VERSION_AUTH`] when the
+/// request names a version.
+pub const AUTH: AuthRequirement =
+    AuthRequirement::new("s3:GetObject", ResourceShape::Object).with_version_requirement(&VERSION_AUTH);
 
 /// RustFS's admin router, whose extension matching this row mirrors.
 const ROUTER: &str = "https://github.com/rustfs/rustfs/blob/443e8afee194fe38b32d62a9289a99c1f703715c/rustfs/src/admin/router.rs";
@@ -145,7 +151,7 @@ pub struct InvokeObjectLambda;
 static SPEC: OperationSpec = admin::spec(NAME, AUTH, false);
 
 /// The evidence that a RustFS client presigns this route, which ADR-0024 (f) makes the condition for
-/// admitting a presigned URL (rustfs/gateway#1576).
+/// admitting a presigned URL (ADR-0047, rustfs/gateway#1576).
 pub const PRESIGNED_EVIDENCE: &str = "https://github.com/rustfs/rustfs/blob/443e8afee194fe38b32d62a9289a99c1f703715c/crates/e2e_test/src/object_lambda_test.rs#L608-L636";
 
 /// SigV4 header-signed or presigned, never anonymous, never SigV2: RustFS answers both `403 AccessDenied`
@@ -197,7 +203,7 @@ pub const OVERLAY_ROW: OverlayRow = OverlayRow {
     name: NAME,
     precedence: 85,
     selector: "Method(GET) ∧ Target(Object) ∧ QueryPresent(\"lambdaArn\")",
-    action: "s3:GetObject",
+    action: "s3:GetObject; versionId: s3:GetObjectVersion",
     resource: ResourceShape::Object,
     success_status: 200,
     anonymous: false,
