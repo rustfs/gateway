@@ -169,6 +169,10 @@ fn the_secret_holders_are_the_sealed_operations_and_the_sts_endpoint() {
         .map(|operation| operation.name)
         .collect();
     assert_eq!(holders.len(), 49, "the sealed claimed operations");
+    assert!(
+        super::declared().iter().all(|operation| !operation.secret_over_a_signed_body),
+        "a sealed row keeps its unconditional opt-in"
+    );
     assert!(!holders.contains(&"rustfs:StsFormPost"), "not a claimed row");
     for (name, spec) in [
         (StsFormPost::NAME, StsFormPost::spec()),
@@ -219,6 +223,10 @@ fn the_sts_operation_declares_its_claim_floor_action_and_record() {
     assert!(
         StsFormPost::spec().receives_caller_secret(),
         "RustFS's AssumeRole compares the caller's secret (rustfs/gateway#1587)"
+    );
+    assert!(
+        StsFormPost::spec().caller_secret_needs_a_signed_body(),
+        "the form body carries every parameter, so only a signature over it earns the secret"
     );
     assert_eq!(StsFormPost::REQUEST_BODY, RequestBodyMode::Full);
     assert_eq!(FORM_ROUTES, [sts_form_post::RECORD]);

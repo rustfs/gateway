@@ -189,19 +189,32 @@ pub fn streamed(body: RequestBody) -> Result<ByteStream, CodecError> {
 
 /// The specification every admin operation has: success `200`, no required parameter, the
 /// `Standard` handler deadline, `auth`, and the caller's secret only when `caller_secret` is set
-/// (ADR-0024): for a claimed row, when RustFS seals a body with it; for the STS form operation, by
-/// the generator's form ruling (rustfs/gateway#1587).
+/// (ADR-0024), which a claimed row's generator sets when RustFS seals a body with it.
 #[must_use]
 pub const fn spec(name: &'static str, auth: AuthRequirement, caller_secret: bool) -> OperationSpec {
-    let builder = OperationSpec::builder(name, 200, None)
-        .handler_deadline_class(HandlerDeadlineClass::Standard)
-        .required_params(&[])
-        .auth(auth);
+    let builder = base_spec(name, auth);
     if caller_secret {
         builder.hand_caller_secret_to_handler().build()
     } else {
         builder.build()
     }
+}
+
+/// [`spec`] handing the caller's secret over only for a request whose signature covers its body,
+/// as the generator's form ruling decides for the STS form operation (rustfs/gateway#1587): the
+/// form body carries every parameter the secret's comparison authorises.
+#[must_use]
+pub const fn spec_over_a_signed_body(name: &'static str, auth: AuthRequirement) -> OperationSpec {
+    base_spec(name, auth)
+        .hand_caller_secret_to_handler_over_a_signed_body()
+        .build()
+}
+
+const fn base_spec(name: &'static str, auth: AuthRequirement) -> OperationSpec {
+    OperationSpec::builder(name, 200, None)
+        .handler_deadline_class(HandlerDeadlineClass::Standard)
+        .required_params(&[])
+        .auth(auth)
 }
 
 /// The floor every admin operation has: privileged and header-signed only, so it is never reached

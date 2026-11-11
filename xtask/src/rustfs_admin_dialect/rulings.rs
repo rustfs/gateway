@@ -231,7 +231,8 @@ pub(super) struct FormRuling {
     /// Why the handler is handed the caller's secret (ADR-0022), or `None` when it is not. The
     /// inventory's `caller_secret_body` records only body sealing, which a form route never does, so
     /// a handler that compares the secret instead is a ruling read from RustFS's handler, kept here
-    /// so a refreshed inventory cannot drop it.
+    /// so a refreshed inventory cannot drop it. A form route's body carries every parameter, so the
+    /// opt-in is always over a signed body (`admin::spec_over_a_signed_body`, rustfs/gateway#1587).
     pub(super) caller_secret: Option<&'static str>,
 }
 

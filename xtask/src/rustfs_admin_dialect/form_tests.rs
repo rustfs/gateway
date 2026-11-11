@@ -61,7 +61,9 @@ fn rendered(rulings: &[FormRuling]) -> Result<String, String> {
     Ok(plan.forms[0].render(super::render::LICENSE))
 }
 
-const OPTED_IN: &str = "static SPEC: OperationSpec = admin::spec(NAME, AUTH, true);";
+const OPTED_IN: &str = "static SPEC: OperationSpec = admin::spec_over_a_signed_body(NAME, AUTH);";
+/// The unconditional opt-in, which a form route never renders: its body carries every parameter.
+const UNCONDITIONAL: &str = "admin::spec(NAME, AUTH, true)";
 const OPTED_OUT: &str = "static SPEC: OperationSpec = admin::spec(NAME, AUTH, false);";
 
 /// Positive — a listed form route is planned behind its form claim, as no declared operation and no
@@ -97,8 +99,8 @@ fn a_form_route_is_planned_and_rendered_behind_its_form_claim() {
         "\"https://github.com/rustfs/rustfs/blob/c/rustfs/src/admin/handlers/sts.rs\"",
         "\"https://github.com/rustfs/rustfs/blob/c/rustfs/src/server/layer.rs\"",
         EVIDENCE,
-        "/// Handed the caller's secret (ADR-0022), which only a signed request carries: the handler compares\n\
-         /// the caller's secret.\nstatic SPEC",
+        "/// Handed the caller's secret (ADR-0022) only when a SigV4 header signature covers the form body,\n\
+         /// since the body carries every parameter: the handler compares the caller's secret.\nstatic SPEC",
         OPTED_IN,
         "    response_body: BodyKind::Buffered,\n    caller_secret: true,\n}",
     ] {
@@ -106,6 +108,7 @@ fn a_form_route_is_planned_and_rendered_behind_its_form_claim() {
     }
     assert!(!source.contains("OperationFloor::custom"), "the floor is not privileged");
     assert!(!source.contains(OPTED_OUT), "{source}");
+    assert!(!source.contains(UNCONDITIONAL), "a form route's secret needs a signed body: {source}");
     assert_eq!(STEM, "sts_form_post");
 
     let recorded = recorded_plan();

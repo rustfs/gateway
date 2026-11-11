@@ -72,11 +72,11 @@ pub const ROUTE: FormRoute = FormRoute {
 #[derive(Debug)]
 pub struct StsFormPost;
 
-/// Handed the caller's secret (ADR-0022), which only a signed request carries: RustFS's
-/// `AssumeRole` branch compares the secret a fresh IAM lookup returns with the secret that
-/// authenticated the request, so a credential rotated after authentication cannot mint a session
-/// (rustfs/gateway#1587).
-static SPEC: OperationSpec = admin::spec(NAME, AUTH, true);
+/// Handed the caller's secret (ADR-0022) only when a SigV4 header signature covers the form body,
+/// since the body carries every parameter: RustFS's `AssumeRole` branch compares the secret a fresh
+/// IAM lookup returns with the secret that authenticated the request, so a credential rotated after
+/// authentication cannot mint a session (rustfs/gateway#1587).
+static SPEC: OperationSpec = admin::spec_over_a_signed_body(NAME, AUTH);
 
 /// The shared envelope admits Web Identity's independently authenticated form. Ordinary
 /// `AssumeRole` has an additional header-only credential requirement in the codec, after the

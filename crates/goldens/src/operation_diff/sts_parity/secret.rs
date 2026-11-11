@@ -17,10 +17,11 @@
 //! `rustfs:StsFormPost` opts in to the hand-off.
 //!
 //! Responsible for: what the STS handler holds through an assembled service whose authenticator
-//! hands the secret over — the caller's own bytes for a SigV4 header-signed request and for every
-//! other authenticated form request the codec admits, nothing for an anonymous form action or a
-//! query-authenticated `AssumeRole`, nothing without the authenticator's hand-off, and SigV2 as a
-//! known divergence that rustfs/gateway#1592 removes — that an operation which
+//! hands the secret over — the caller's own bytes when a SigV4 header signature covers the body,
+//! whatever the action; nothing for `UNSIGNED-PAYLOAD`, a presigned form or SigV2, whose body the
+//! signature does not cover (SigV2 also a known divergence that rustfs/gateway#1592 removes);
+//! nothing for an anonymous form action; no handler at all for a query-authenticated
+//! `AssumeRole`; nothing without the authenticator's hand-off — that an operation which
 //! did not opt in still holds nothing in the same assembly, that the start-up posture names the
 //! STS endpoint among the holders, and that no log event, error body or `Debug` rendering carries
 //! the secret.
@@ -149,8 +150,10 @@ fn exchange(sent: &Sent, hand_off: bool, refuse: bool) -> (u16, String, Option<H
     (response.status().as_u16(), body, held)
 }
 
-/// SigV4 header signatures, which cover the form body. SigV2 is pinned apart, as a known
-/// divergence (rustfs/gateway#1592).
+/// SigV4 header signatures that cover the form body: the `sts`-scoped signature over the body's own
+/// digest, which the authenticator computes when no `x-amz-content-sha256` is sent, and a declared
+/// digest the facade compares with the body. SigV2 is pinned apart, as a known divergence
+/// (rustfs/gateway#1592).
 const SIGNED: [Signing; 2] = [
     Signing::Header {
         service: "sts",
@@ -164,11 +167,16 @@ const SIGNED: [Signing; 2] = [
     },
 ];
 
-/// Positive — a SigV4 header-signed `AssumeRole`, under either service, reaches the STS handler
+/// Positive — a SigV4 header-signed `AssumeRole` whose signature covers its body, the body digest
+/// computed by the authenticator or a declared digest, under either service, reaches the STS handler
 /// with the caller's own non-empty secret.
 #[test]
 fn a_header_signed_assume_role_hands_its_handler_the_callers_secret() {
-    for signing in SIGNED {
+    for signing in SIGNED.into_iter().chain([Signing::Header {
+        service: "sts",
+        send_digest: true,
+        secret: STS_SECRET,
+    }]) {
         let (status, body, held) = exchange(&Sent::new(signing), true, false);
         assert_eq!(status, 200, "{signing:?}: {body}");
         let held = held.expect("the STS handler ran");
@@ -177,14 +185,14 @@ fn a_header_signed_assume_role_hands_its_handler_the_callers_secret() {
     }
 }
 
-/// KNOWN DIVERGENCE, removed by rustfs/gateway#1592 — SigV2 does not sign the form body that
-/// carries every STS parameter, and RustFS refuses SigV2 on this route. Today the gateway admits a
-/// SigV2 header-signed `AssumeRole` and, with this opt-in, hands its handler the caller's secret,
-/// so the handler's comparison succeeds; a SigV2-presigned Web Identity form does too. When
-/// #1592 refuses SigV2 on the STS form floor, both requests stop before the handler and this case
-/// must be flipped to assert the refusal.
+/// KNOWN DIVERGENCE, removed by rustfs/gateway#1592 — RustFS refuses SigV2 on this route; the
+/// gateway still admits a SigV2 header-signed `AssumeRole` and a SigV2-presigned Web Identity form.
+/// SigV2 does not sign the form body, so neither handler holds the caller's secret, and RustFS's
+/// comparison fails closed as it did before the opt-in. When #1592 refuses SigV2 on the STS form
+/// floor, both requests stop before the handler and this case must be flipped to assert the
+/// refusal.
 #[test]
-fn known_divergence_until_1592_a_sigv2_form_request_holds_the_secret() {
+fn known_divergence_until_1592_a_sigv2_form_request_reaches_the_handler_without_the_secret() {
     for sent in [
         Sent::new(Signing::V2Header { secret: STS_SECRET }),
         Sent::new(Signing::V2Presigned).body(Bytes::from_static(WEB_IDENTITY)),
@@ -193,25 +201,47 @@ fn known_divergence_until_1592_a_sigv2_form_request_holds_the_secret() {
         assert_eq!(status, 200, "{sent:?}: {body}");
         let held = held.expect("today the STS handler runs");
         assert!(held.principal, "{sent:?}");
-        assert_eq!(held.secret, Some(true), "{sent:?}: today the handler holds the caller's secret");
+        assert_eq!(held.secret, None, "{sent:?}: SigV2 signs no body, so no secret");
     }
 }
 
-/// Positive — the opt-in is the operation's, not the action's: every authenticated form request the
-/// codec admits holds the caller's own secret, whatever action it names — signed Web Identity, an
-/// unknown action, an empty form, an `UNSIGNED-PAYLOAD` `AssumeRole`, and a SigV4-presigned Web
-/// Identity form. Session credentials are not pinned: this harness's store holds only a long-term
-/// key.
+/// Positive — the opt-in is the operation's, not the action's: every request whose SigV4 header
+/// signature covers its body holds the caller's own secret, whatever action the form names —
+/// signed Web Identity, an unknown action, an empty form. Session credentials are not pinned: this
+/// harness's store holds only a long-term key.
 #[test]
-fn the_opt_in_reaches_every_authenticated_form_request_the_codec_admits() {
+fn every_form_request_with_a_signed_body_holds_the_secret_whatever_its_action() {
     let header = SIGNED[0];
     for sent in [
         Sent::new(header).body(Bytes::from_static(WEB_IDENTITY)),
         Sent::new(header).body(Bytes::from_static(b"Action=NotAnAction&Version=2011-06-15")),
         Sent::new(header).body(Bytes::new()),
+    ] {
+        let (status, body, held) = exchange(&sent, true, false);
+        assert_eq!(status, 200, "{sent:?}: {body}");
+        let held = held.expect("the STS handler ran");
+        assert!(held.principal, "{sent:?}");
+        assert_eq!(held.secret, Some(true), "{sent:?}");
+    }
+}
+
+/// Negative — an authenticated request whose signature does not cover the body reaches the handler
+/// without the secret, so RustFS's comparison fails closed as it did before the opt-in: an
+/// `UNSIGNED-PAYLOAD` header-signed `AssumeRole` (its body could be rewritten under a captured
+/// head) or Web Identity form, and a SigV4-presigned Web Identity form under either service.
+#[test]
+fn n_a_form_request_whose_body_is_not_signed_holds_no_secret() {
+    for sent in [
         Sent::new(Signing::HeaderUnsigned { service: "s3" }),
+        Sent::new(Signing::HeaderUnsigned { service: "sts" }),
+        Sent::new(Signing::HeaderUnsigned { service: "s3" }).body(Bytes::from_static(WEB_IDENTITY)),
         Sent::new(Signing::Presigned {
             service: SigService::Sts,
+            secret: STS_SECRET,
+        })
+        .body(Bytes::from_static(WEB_IDENTITY)),
+        Sent::new(Signing::Presigned {
+            service: SigService::S3,
             secret: STS_SECRET,
         })
         .body(Bytes::from_static(WEB_IDENTITY)),
@@ -219,8 +249,8 @@ fn the_opt_in_reaches_every_authenticated_form_request_the_codec_admits() {
         let (status, body, held) = exchange(&sent, true, false);
         assert_eq!(status, 200, "{sent:?}: {body}");
         let held = held.expect("the STS handler ran");
-        assert!(held.principal, "{sent:?}");
-        assert_eq!(held.secret, Some(true), "{sent:?}");
+        assert!(held.principal, "{sent:?}: the request still authenticated");
+        assert_eq!(held.secret, None, "{sent:?}: an unsigned body earns no secret");
     }
 }
 

@@ -113,7 +113,8 @@ impl Formed {
                 // Item rather than module documentation, wrapped the same way: only each line's
                 // `//!` prefix becomes `///`, never a `//!` inside the reason.
                 let paragraph = super::render::doc_paragraph(&format!(
-                    "Handed the caller's secret (ADR-0022), which only a signed request carries: {why}"
+                    "Handed the caller's secret (ADR-0022) only when a SigV4 header signature covers the form body, \
+                     since the body carries every parameter: {why}"
                 ));
                 let mut doc = String::new();
                 for line in paragraph.lines() {
@@ -121,7 +122,7 @@ impl Formed {
                     doc.push_str(line.strip_prefix("//!").unwrap_or(line));
                     doc.push('\n');
                 }
-                format!("{doc}static SPEC: OperationSpec = admin::spec(NAME, AUTH, true);")
+                format!("{doc}static SPEC: OperationSpec = admin::spec_over_a_signed_body(NAME, AUTH);")
             }
             None => "static SPEC: OperationSpec = admin::spec(NAME, AUTH, false);".to_owned(),
         };

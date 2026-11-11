@@ -218,6 +218,7 @@ struct Declared {
     anonymous: bool,
     presigned: bool,
     secret: bool,
+    secret_over_a_signed_body: bool,
     deadline: Option<HandlerDeadlineClass>,
 }
 
@@ -243,6 +244,7 @@ impl OperationFold for Collect {
             anonymous: floor.allows_anonymous(),
             presigned: floor.allowed_schemes().allows_presigned(),
             secret: spec.receives_caller_secret(),
+            secret_over_a_signed_body: spec.caller_secret_needs_a_signed_body(),
             deadline: spec.deadline_class(),
         });
         carry

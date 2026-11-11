@@ -484,6 +484,14 @@ fn n_no_operation_receives_the_caller_secret_unless_it_opts_in() {
     }
     static OPTED_IN: OperationSpec = spec("acme:Sealed", ResourceShape::Service).hand_caller_secret_to_handler();
     assert!(OPTED_IN.receives_caller_secret());
+    assert!(!OPTED_IN.caller_secret_needs_a_signed_body(), "the plain opt-in asks for no signed body");
+    for spec in &SPECS {
+        assert!(!spec.caller_secret_needs_a_signed_body(), "{}", spec.name);
+    }
+    static OVER_A_SIGNED_BODY: OperationSpec =
+        spec("acme:Form", ResourceShape::Service).hand_caller_secret_to_handler_over_a_signed_body();
+    assert!(OVER_A_SIGNED_BODY.receives_caller_secret());
+    assert!(OVER_A_SIGNED_BODY.caller_secret_needs_a_signed_body());
 }
 
 // ── the catch-all (ADR-0036) ─────────────────────────────────────────────────────────────────
