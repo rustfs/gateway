@@ -17,6 +17,7 @@ module docs before changing anything there.
 | `src/case.rs` | Conformance case **drafts** and the lossless round-trip assertion. | Chunk timing or termination stops surviving the conversion. |
 | `src/bin/corpus.rs` | The `ingest` / `verify` / `to-case` CLI and its exit classes. | The command line accepts or reports something incorrectly. |
 | `tests/integration.rs` | Every refusal, the fingerprint contract, the retention rule, and the checked-in corpus. | Changing any behaviour above. |
+| `tests/integration/zip_download_token.rs` | Zip-download token refusal and sanitization checks in the integration target. | Changing query token redaction. |
 | `../../corpus/README.md` | Where the corpus comes from, how to update it, why never production traffic. | Adding or refreshing recorded traffic. |
 | `../../corpus/MANIFEST.toml` | Generated version record: per-bucket counts, hashes, provenance census. | Never edit by hand; regenerate with `corpus ingest`. |
 | `../../scripts/check_corpus_no_secrets.sh` | The independent second scanner over `corpus/**`. | A leak reached the tree, or the two scanners disagree. |

@@ -225,7 +225,7 @@ impl BearerAdmission {
     }
 
     /// Verifies a request that presented only the bearer token, and answers with its verdict:
-    /// [`Verdict::Bearer`] or a rejection. This is the only way a bearer verdict is built.
+    /// [`crate::Verdict::Bearer`] or a rejection. This is the only way a bearer verdict is built.
     ///
     /// `raw_path` must end with the claim's suffix after a non-empty resource, the verifier must
     /// accept the token, and the kernel then compares the verifier's [`BearerGrant`] itself: the
