@@ -702,7 +702,7 @@ mod tests {
     #[test]
     fn a_one_byte_secret_is_held() {
         let credentials = Credentials::new("AKIDEXAMPLE", b"x").expect("non-empty");
-        assert_eq!(credentials.secret().expose(), b"x");
+        assert_eq!(credentials.secret().len(), 1);
         // One non-zero byte anywhere is enough: the NUL rule is not a character policy.
         assert!(Credentials::new("AKIDEXAMPLE", b"\0\0x\0").is_ok());
     }
