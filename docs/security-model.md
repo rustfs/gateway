@@ -349,10 +349,10 @@ One route this framework ships is selected that way. The RustFS dialect's two me
 (`?list-type=2&metadata=true` and `?versions&metadata=true`, ADR-0050) are chosen by `metadata`,
 which is not one of the 35. So a SigV2 listing request is turned into one by an appended
 `metadata=true`, and its holder gets every object's user metadata under the signer's listing
-action. That works for a captured header-signed request inside the skew window on every floor,
-and for a presigned URL where SigV2 presigned URLs are admitted. RustFS behaves the same.
-Planned: these two operations will refuse SigV2 under every policy, with the floor rule
-rustfs/gateway#1592 adds. Until then, a deployment that serves them to SigV2 clients accepts this.
+action, for a captured header-signed request inside the skew window and for a presigned URL.
+RustFS behaves that way. The gateway does not: these two operations refuse SigV2 under every
+policy, at the floor and before any credential lookup (`OperationFloor::refuse_sigv2_under_every_policy`,
+ADR-0052), while SigV4 and unsigned listings are decided exactly as on the standard listings.
 
 A second, related SigV2 property: a covered sub-resource's value is percent-decoded before it is
 written into `CanonicalizedResource`, and that block separates its own entries with `&`. So
@@ -377,6 +377,10 @@ quietly.
 - **The body.** SigV2 has no `x-amz-content-sha256` and no payload digest. `Content-MD5` is the
   only body binding it offers and it is optional, so a SigV2 request's body is authenticated only
   as far as the client chose to bind it. SigV4 signs a payload declaration on every request.
+  An operation whose parameters travel in the body, and which must stay reachable without a
+  signature, refuses SigV2 at the floor with `OperationFloor::refuse_sigv2_under_every_policy`
+  (ADR-0052): the RustFS STS form endpoint and zip download do, before any credential lookup and
+  under every `SigV2Policy`.
 - **Framing.** SigV2 has no streaming form; `aws-chunked` chunk signatures are SigV4 values. A
   SigV2 request that declares one is refused `501` rather than read as if the declaration were
   absent, because the pipeline decodes framing only for a payload mode it was given and the SigV2

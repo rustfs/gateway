@@ -493,7 +493,8 @@ impl Extended {
                 "/// The standard S3 listing floor, exactly `ListObjectsV2`'s and `ListObjectVersions`': not privileged and\n\
                  /// header-signed, with anonymous and presigned requests admitted only where the deployment's floor\n\
                  /// delegates them for every standard operation, as RustFS's metadata route resolves a signed or anonymous\n\
-                 /// caller before its bucket listing check (ADR-0050).\n\
+                 /// caller before its bucket listing check (ADR-0050). SigV2 is refused under every policy, because SigV2 does\n\
+                 /// not sign `metadata` (ADR-0052).\n\
                  static FLOOR: OperationFloor = admin::listing_floor(NAME);\n"
                     .to_owned(),
             ),

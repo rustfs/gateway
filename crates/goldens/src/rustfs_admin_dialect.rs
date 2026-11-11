@@ -721,5 +721,6 @@ mod metadata_listing_tests;
 mod sigv2_census_tests;
 mod subject_tests;
 mod tests;
+mod zip_sigv2_tests;
 mod zip_token_contract_tests;
 mod zip_token_tests;
