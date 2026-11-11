@@ -78,6 +78,7 @@ pub(crate) fn emit(inputs: StartupInputs<'_>) -> String {
     if let Some(line) = crate::bearer_posture::log_bearer_posture(routing.dispatch.floors(), bearer_token_verifier) {
         lines.push(line);
     }
+    lines.extend(crate::header_token_posture::log_header_token_posture(routing.dispatch.floors(), floor));
     log_dialect_posture(&routing.router, caller_secret_every_operation);
     lines.extend(
         dialect_lines(&routing.router, caller_secret_every_operation)

@@ -17,7 +17,7 @@
 //! Responsible for: catching both future construction and polling panics, and panics in the
 //! synchronous report callbacks that run after an answer is settled — the authorization audit sink
 //! and the request observer — so that neither can change what the caller receives; and panics in
-//! the host's synchronous bearer verifier, which refuse the request.
+//! the host's synchronous bearer and header token verifiers, which refuse the request.
 //! NOT responsible for: deciding which failures permit or refuse a request.
 //! Upstream: a boxed deployment future, or a report callback. Downstream: `crate::service` failure
 //! settlement, `crate::ext::authz_audit`, `crate::ext::observer`.
@@ -78,9 +78,15 @@ pub(crate) fn contain_report(callback: &'static str, throttle: &'static Throttle
     }
 }
 
-/// Runs a synchronous deployment callback that decides admission — the host's bearer verifier —
+/// Runs a synchronous deployment callback that decides admission — a host's token verifier —
 /// and turns a panic into `Err(())`, which the caller answers by refusing the request. The payload
-/// is dropped; nothing the callback borrowed is shared with another request.
+/// is released under a second boundary, as [`contain_report`] releases one: a payload whose
+/// destructor panics would otherwise unwind out of the refusal. Nothing the callback borrowed is
+/// shared with another request.
 pub(crate) fn contain_decision<T>(decide: impl FnOnce() -> T) -> Result<T, ()> {
-    std::panic::catch_unwind(AssertUnwindSafe(decide)).map_err(|_| ())
+    std::panic::catch_unwind(AssertUnwindSafe(decide)).map_err(|payload| {
+        if let Err(secondary) = std::panic::catch_unwind(AssertUnwindSafe(move || drop(payload))) {
+            std::mem::forget(secondary);
+        }
+    })
 }

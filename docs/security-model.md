@@ -272,6 +272,34 @@ The framework's half:
   Delegation never admits a request that presented a credential, never widens presigned or
   POST-policy access, and never reaches a privileged operation that did not opt in itself. The
   startup posture line lists every operation it makes reachable.
+- **A host-verified header token is its own scheme, and off by default.** A host whose outer layer
+  authenticates a non-AWS token installs `ServiceBuilder::host_verified_header_token` with one
+  header name and one verifier (ADR-0054). A request whose only credential is that header is then
+  admitted as far as the verifier, which names the identity the host's outer layer left in that
+  request's own extensions; a request that carries none is refused without the verifier being
+  called. The token beside any other credential surface is refused before any verifier runs, under
+  the RustFS profile's own answers too, and so is every request carrying an alias the claim lists
+  as refused. A refusal or a panic is `403`, never an anonymous request, and a claim with no
+  verifier does not assemble. Every standard S3 operation admits
+  the scheme, bucket configuration included; privileged operations, operations of the STS service,
+  an operation that takes a browser form, one with a query bearer claim and one that requires SigV4
+  under every policy refuse it. The
+  authorizer sees `AuthSchemeRef::HeaderToken` and the reported principal, whose `Identity::origin`
+  is `HostToken` and which therefore equals no access key of the same spelling. The request's body
+  is held to what an anonymous body is, and its answer carries `Vary` on the claimed header and
+  `private` in its `Cache-Control` unless the handler's already names `public`, `s-maxage`,
+  `must-revalidate`, `private` or `no-store` — the rule a shared cache applies to an answer to a
+  request with `Authorization`. The claimed header is removed before the
+  request is accepted, so no authorization or handler context holds the token. Without the opt-in the header
+  is an ordinary header and nothing reads it. The `HEADER_TOKEN_POSTURE` start-up line names the
+  header, its refused aliases and every operation that admits it. The host owns what the gateway
+  cannot see: every other header name its outer layer reads the token under must be listed as a
+  refused alias or renamed to the claimed one, the identity must come from the request's own
+  extensions, as a type private to its token layer, and never from a thread-local, a global or a
+  connection cache; a policy source that looks a principal up by its bare name must branch on the
+  origin, and nothing may rebuild the `Identity` from that name; a `public`, `s-maxage` or `must-revalidate` that a
+  handler or an object's stored metadata chose is kept; and each host keeps its own reviewed
+  list of the operations that admit the scheme.
 
 The condition facts a policy engine needs arrive through the same `RequestContext`, and each
 has exactly one source (rustfs/backlog#2752):
@@ -282,7 +310,7 @@ has exactly one source (rustfs/backlog#2752):
 | Secure transport | `ClientFacts::transport_secure` | TLS completed on the listener (`ConnectionInfo`), or the host's `TransportSecurity::Encrypted` — the value the customer-key gate reads; or the override | `false`, never `true` by default; `client()` is `None` when nothing at all was installed |
 | Client address | `ClientFacts::client_ip`, `ClientFacts::source_ip()` | the host's `ClientAddr` — the governor's input, attested after the host's trusted-proxy rules; or the override. Never a request header | `None`; `source_ip()` falls back to the peer |
 | Raw query | `RequestContext::raw_query()` | the accepted request target, unchanged — except that an operation's query bearer token is removed once a host bearer verifier is installed (ADR-0042) | `Some("")` for a request without one; `None` only for a context built by hand |
-| Signature scheme | `RequestContext::auth_scheme()` | the verdict's family and location (`AuthSchemeRef::of_scheme`); nothing re-verified | `Anonymous` only for a confirmed anonymous verdict; a family without a spelling is `OtherSigned`; a host-verified query bearer token is `Bearer`, never a signed spelling (ADR-0042) |
+| Signature scheme | `RequestContext::auth_scheme()` | the verdict's family and location (`AuthSchemeRef::of_scheme`); nothing re-verified | `Anonymous` only for a confirmed anonymous verdict; a family without a spelling is `OtherSigned`; a host-verified query bearer token is `Bearer`, never a signed spelling (ADR-0042); a host-verified header token is `HeaderToken`, never a signed spelling or `Bearer` (ADR-0054) |
 | Anything else the transport installed | `ServerExtensions::get::<T>()` | the request extensions frozen at acceptance — the bag `RequestContextView::transport_extensions` hands a handler | `None` |
 
 A host that computes the client address outside the gateway (RustFS's trusted-proxy rules) writes

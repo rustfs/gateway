@@ -30,6 +30,8 @@ use rustfs_gateway_corpus::redact;
 use rustfs_gateway_corpus::schema::{self, Capture, Chunk, Entry, LoadError, Response, Sut};
 use rustfs_gateway_corpus::store;
 
+#[path = "integration/host_header_token.rs"]
+mod host_header_token;
 #[path = "integration/zip_download_token.rs"]
 mod zip_download_token;
 

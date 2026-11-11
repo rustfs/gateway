@@ -338,3 +338,85 @@ fn external_context_copy_preserves_request_facts_without_copying_the_caller_secr
             .expect("valid context fixture")
     ));
 }
+
+/// A header-token verdict naming `principal`, obtained the only way one can be: the floor admits
+/// a request by its claim, and a host verifier reports the identity (ADR-0054).
+fn header_token_verdict(principal: &'static str) -> Verdict {
+    use rustfs_gateway_sig::{HeaderTokenClaim, HeaderTokenRefused, HeaderTokenVerifier};
+
+    /// What a host's outer layer leaves in the request it authenticated.
+    #[derive(Clone)]
+    struct Established(&'static str);
+    struct Names;
+
+    impl HeaderTokenVerifier for Names {
+        type Established = Established;
+
+        fn identity(&self, established: &Established, _now: RequestNow) -> Result<Identity, HeaderTokenRefused> {
+            Identity::new(established.0).map_err(|_| HeaderTokenRefused)
+        }
+    }
+
+    let mut headers = HeaderMap::new();
+    headers.insert("x-auth-token", http::HeaderValue::from_static("header-token-sentinel"));
+    let floor = SecurityFloor::new().with_header_token_claim(HeaderTokenClaim::new("x-auth-token").expect("a legal claim"));
+    let view = WireView::new(&headers, RawQuery::new(""));
+    let operation = OperationFloor::builtin("HeadObject", SigService::S3);
+    let Ok(Admission::HeaderToken(admission)) = floor.admit(view, &operation, RequestNow::from_unix_seconds(1)) else {
+        panic!("the fixture presents only the claimed header");
+    };
+    let mut carrier = http::Request::builder()
+        .uri("/")
+        .header("host", "s3.example.com")
+        .body(())
+        .expect("a fixture request");
+    carrier.extensions_mut().insert(Established(principal));
+    let accepted = WireRequest::accept(carrier, &Limits::default()).expect("an accepted fixture");
+    admission.verify(&Names, accepted.transport_extensions())
+}
+
+/// Positive — a header-token verdict builds a context that names the host-established principal
+/// through its own accessor: it is not anonymous, and it is not a signed principal.
+#[test]
+fn a_header_token_verdict_names_its_principal_and_no_signed_one() {
+    let wire = wire("/photos/a.jpg", &[]);
+    let verdict = header_token_verdict("KEYSTONEUSER");
+    let context = RequestContextView::from_pipeline("HeadObject", &wire, path_style(), &verdict, None)
+        .expect("a verified request has a context");
+    assert_eq!(context.header_token_principal().map(Identity::access_key_id), Some("KEYSTONEUSER"));
+    assert!(!context.is_anonymous());
+    assert!(context.principal().is_none() && context.bearer().is_none() && context.verified_scope().is_none());
+    let copy = context.clone_without_caller_secret();
+    assert_eq!(copy.header_token_principal().map(Identity::access_key_id), Some("KEYSTONEUSER"));
+    assert!(!copy.is_anonymous());
+    assert!(format!("{context:?}").contains("KEYSTONEUSER"));
+}
+
+/// Negative — no other verdict yields a header-token principal: an anonymous request, a detached
+/// context and a refused verification have none, and a caller secret handed beside a header-token
+/// verdict is dropped, because there is no signed principal to carry it.
+#[test]
+fn n_only_a_header_token_verdict_yields_a_header_token_principal() {
+    let wire = wire("/photos/a.jpg", &[]);
+    let anonymous = RequestContextView::from_pipeline("HeadObject", &wire, path_style(), &anonymous_verdict(&wire), None)
+        .expect("an anonymous request has a context");
+    assert!(anonymous.header_token_principal().is_none() && anonymous.is_anonymous());
+    assert!(RequestContextView::detached("HeadObject").header_token_principal().is_none());
+
+    // An identity that cannot enter an audit record is refused by the verifier: no context at all.
+    let refused = header_token_verdict("line\r\nbreak");
+    assert_eq!(refused.rejection(), Some(AuthError::AccessDenied));
+    assert!(RequestContextView::from_pipeline("HeadObject", &wire, path_style(), &refused, None).is_none());
+
+    let verdict = header_token_verdict("KEYSTONEUSER");
+    let context = RequestContextView::from_pipeline(
+        "HeadObject",
+        &wire,
+        path_style(),
+        &verdict,
+        Some(SecretBytes::new(b"handed-to-nobody")),
+    )
+    .expect("a verified request has a context");
+    assert!(context.principal().is_none());
+    assert!(!format!("{context:?}").contains("handed-to-nobody"));
+}

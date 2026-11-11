@@ -36,17 +36,17 @@ use rustfs_gateway::{Handler, HandlerError, HandlerResult, Req, Resp, S3Service,
 use crate::support;
 
 /// The object every case uploads.
-const OBJECT: &[u8] = b"hello world";
+pub(crate) const OBJECT: &[u8] = b"hello world";
 /// The base64 CRC32 of [`OBJECT`] (`0x0d4a1185`).
-const OBJECT_CRC32: &str = "DUoRhQ==";
+pub(crate) const OBJECT_CRC32: &str = "DUoRhQ==";
 
 #[derive(Default)]
-struct Recorded {
-    reached: AtomicUsize,
-    bodies: Mutex<Vec<(i64, Vec<u8>)>>,
+pub(crate) struct Recorded {
+    pub(crate) reached: AtomicUsize,
+    pub(crate) bodies: Mutex<Vec<(i64, Vec<u8>)>>,
 }
 
-struct Backend(Arc<Recorded>);
+pub(crate) struct Backend(pub(crate) Arc<Recorded>);
 
 impl Handler<dto::PutObject> for Backend {
     fn call(&self, request: Req<dto::PutObject>) -> impl core::future::Future<Output = HandlerResult<dto::PutObject>> + Send {
@@ -100,7 +100,7 @@ fn assembled(leave_undecoded: bool) -> (S3Service, Arc<Recorded>) {
 }
 
 /// An unsigned `aws-chunked` body: one data chunk, the terminal chunk, one trailer.
-fn unsigned_framing(trailer_value: &str) -> Vec<u8> {
+pub(crate) fn unsigned_framing(trailer_value: &str) -> Vec<u8> {
     let mut body = format!("{:x}\r\n", OBJECT.len()).into_bytes();
     body.extend_from_slice(OBJECT);
     body.extend_from_slice(b"\r\n0\r\n");
@@ -109,7 +109,7 @@ fn unsigned_framing(trailer_value: &str) -> Vec<u8> {
 }
 
 /// An anonymous `PutObject` carrying `body`, declaring `content_sha256` and `decoded` bytes.
-fn anonymous_put(content_sha256: &str, decoded: usize, body: Vec<u8>) -> http::Request<Bytes> {
+pub(crate) fn anonymous_put(content_sha256: &str, decoded: usize, body: Vec<u8>) -> http::Request<Bytes> {
     http::Request::builder()
         .method(http::Method::PUT)
         .uri("/bucket/object")
