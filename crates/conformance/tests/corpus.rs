@@ -38,7 +38,8 @@
 //! how `e2e` ended up non-blocking in the repository this suite was written to replace.
 
 use rustfs_gateway_conformance::corpus::Corpus;
-use rustfs_gateway_conformance::report::{Baseline, Verdict};
+use rustfs_gateway_conformance::diagnostic::Diagnostic;
+use rustfs_gateway_conformance::report::{Baseline, CaseOutcome, Phase, Verdict};
 use rustfs_gateway_conformance::runner::{self, RunOptions};
 use rustfs_gateway_conformance::sut::Unwired;
 
@@ -51,6 +52,184 @@ fn baseline() -> Baseline {
     let root = Corpus::discover_root().expect("a corpus sits next to this crate");
     let source = std::fs::read_to_string(root.join("baseline.json")).expect("the baseline is checked in");
     Baseline::from_json(&source).expect("the baseline parses")
+}
+
+fn format_regression(outcome: &CaseOutcome) -> String {
+    let mut line = format!("{} ({}) is {}", outcome.id, outcome.relative, outcome.verdict.as_str());
+    for failure in outcome.failures() {
+        let message = failure
+            .message
+            .strip_prefix("exchange ")
+            .and_then(|value| value.rsplit_once(", attempt "))
+            .and_then(|(_, value)| value.split_once(": "))
+            .filter(|(attempt, _)| !attempt.is_empty() && attempt.bytes().all(|byte| byte.is_ascii_digit()))
+            .map_or(failure.message.as_str(), |(_, message)| message);
+        let detail = match failure.rule.as_str() {
+            "expect/socket_read_after" => {
+                let labels = message
+                    .strip_prefix("receive-side termination: expected ")
+                    .and_then(|message| message.split_once(", observed "));
+                match labels {
+                    Some((
+                        expected @ ("eof" | "reset" | "no_termination_observed" | "invalid"),
+                        actual @ ("eof" | "reset" | "no_termination_observed" | "not_measured"),
+                    )) => {
+                        format!("receive-side termination: expected {expected}, observed {actual}")
+                    }
+                    _ => "detail unavailable".to_owned(),
+                }
+            }
+            "expect/h2_control_frames" => match message {
+                message @ ("expected control frames must be an array"
+                | "this transport did not measure HTTP/2 control frames"
+                | "expected HTTP/2 control frame has an unsupported type or invalid fields"
+                | "received HTTP/2 control frames differ in count, order, or fields"
+                | "an asserted connection-level WINDOW_UPDATE grant was not received") => message.to_owned(),
+                _ => "detail unavailable".to_owned(),
+            },
+            "runner/timeout" => "deadline exceeded".to_owned(),
+            "expect/kind" => "outcome mismatch".to_owned(),
+            _ => continue,
+        };
+        line.push_str(&format!(" | [{}]: {detail}", failure.rule));
+    }
+    line
+}
+
+fn diagnostic_fixture(diagnostics: Vec<Diagnostic>) -> CaseOutcome {
+    CaseOutcome {
+        id: "c-h2-0007".to_owned(),
+        domain: "h2".to_owned(),
+        relative: "cases/h2/c-h2-0007.toml".to_owned(),
+        title: None,
+        verdict: Verdict::Failed,
+        phase: Phase::Execute,
+        skip_reason: None,
+        transport_limited: false,
+        diagnostics,
+        quirks: Vec::new(),
+        evidence: Vec::new(),
+    }
+}
+
+#[test]
+fn regression_report_includes_bounded_socket_detail_but_not_warnings() {
+    let outcome = diagnostic_fixture(vec![
+        Diagnostic::deny(
+            "expect/socket_read_after",
+            "/expect/socket_read_after",
+            "receive-side termination: expected eof, observed reset",
+        ),
+        Diagnostic::warn("expect/socket_read_after", "/expect/socket_read_after", "private-warning-marker"),
+    ]);
+    assert_eq!(
+        format_regression(&outcome),
+        "c-h2-0007 (cases/h2/c-h2-0007.toml) is failed | [expect/socket_read_after]: receive-side termination: expected eof, observed reset"
+    );
+}
+
+#[test]
+fn regression_report_redacts_unrecognized_socket_message() {
+    let outcome = diagnostic_fixture(vec![Diagnostic::deny(
+        "expect/socket_read_after",
+        "/expect/socket_read_after",
+        "private-message-marker",
+    )]);
+    assert_eq!(
+        format_regression(&outcome),
+        "c-h2-0007 (cases/h2/c-h2-0007.toml) is failed | [expect/socket_read_after]: detail unavailable"
+    );
+}
+
+#[test]
+fn regression_report_includes_bounded_control_frame_detail() {
+    let outcome = diagnostic_fixture(vec![Diagnostic::deny(
+        "expect/h2_control_frames",
+        "/expect/h2_control_frames",
+        "received HTTP/2 control frames differ in count, order, or fields",
+    )]);
+    assert_eq!(
+        format_regression(&outcome),
+        "c-h2-0007 (cases/h2/c-h2-0007.toml) is failed | [expect/h2_control_frames]: received HTTP/2 control frames differ in count, order, or fields"
+    );
+}
+
+#[test]
+fn regression_report_handles_real_runner_socket_prefix() {
+    let outcome = diagnostic_fixture(vec![Diagnostic::deny(
+        "expect/socket_read_after",
+        "/expect/socket_read_after",
+        "exchange #1, attempt 1: receive-side termination: expected eof, observed reset",
+    )]);
+    assert_eq!(
+        format_regression(&outcome),
+        "c-h2-0007 (cases/h2/c-h2-0007.toml) is failed | [expect/socket_read_after]: receive-side termination: expected eof, observed reset"
+    );
+}
+
+#[test]
+fn regression_report_does_not_echo_runner_exchange_name() {
+    let outcome = diagnostic_fixture(vec![Diagnostic::deny(
+        "expect/socket_read_after",
+        "/expect/socket_read_after",
+        "exchange #1 private-prefix-marker, attempt 1: receive-side termination: expected eof, observed reset",
+    )]);
+    assert_eq!(
+        format_regression(&outcome),
+        "c-h2-0007 (cases/h2/c-h2-0007.toml) is failed | [expect/socket_read_after]: receive-side termination: expected eof, observed reset"
+    );
+}
+
+#[test]
+fn regression_report_handles_colon_in_runner_exchange_name() {
+    let outcome = diagnostic_fixture(vec![Diagnostic::deny(
+        "expect/socket_read_after",
+        "/expect/socket_read_after",
+        "exchange #1 private-prefix: marker, attempt 1: receive-side termination: expected eof, observed reset",
+    )]);
+    assert_eq!(
+        format_regression(&outcome),
+        "c-h2-0007 (cases/h2/c-h2-0007.toml) is failed | [expect/socket_read_after]: receive-side termination: expected eof, observed reset"
+    );
+}
+
+#[test]
+fn regression_report_handles_runner_control_frame_prefix() {
+    let outcome = diagnostic_fixture(vec![Diagnostic::deny(
+        "expect/h2_control_frames",
+        "/expect/h2_control_frames",
+        "exchange #1, attempt 1: received HTTP/2 control frames differ in count, order, or fields",
+    )]);
+    assert_eq!(
+        format_regression(&outcome),
+        "c-h2-0007 (cases/h2/c-h2-0007.toml) is failed | [expect/h2_control_frames]: received HTTP/2 control frames differ in count, order, or fields"
+    );
+}
+
+#[test]
+fn regression_report_redacts_timeout_message() {
+    let outcome = diagnostic_fixture(vec![Diagnostic::deny(
+        "runner/timeout",
+        "/case/timeout_ms",
+        "private-timeout-marker",
+    )]);
+    assert_eq!(
+        format_regression(&outcome),
+        "c-h2-0007 (cases/h2/c-h2-0007.toml) is failed | [runner/timeout]: deadline exceeded"
+    );
+}
+
+#[test]
+fn regression_report_redacts_untrusted_outcome_kind() {
+    let outcome = diagnostic_fixture(vec![Diagnostic::deny(
+        "expect/kind",
+        "/expect/kind",
+        "exchange #1, attempt 1: private-kind-marker",
+    )]);
+    assert_eq!(
+        format_regression(&outcome),
+        "c-h2-0007 (cases/h2/c-h2-0007.toml) is failed | [expect/kind]: outcome mismatch"
+    );
 }
 
 /// **The baseline is complete: every case in the corpus carries a row.**
@@ -129,7 +308,7 @@ fn the_whole_corpus_holds_the_verdicts_the_baseline_records() {
     let regressions: Vec<String> = report
         .regressions(Some(&baseline))
         .iter()
-        .map(|outcome| format!("{} ({}) is {}", outcome.id, outcome.relative, outcome.verdict.as_str()))
+        .map(|outcome| format_regression(outcome))
         .collect();
     assert!(
         regressions.is_empty(),
