@@ -1,4 +1,4 @@
-# ADR-0051: Refuse SigV2 on the STS form, zip download and metadata listing floors
+# ADR-0052: Refuse SigV2 on the STS form, zip download and metadata listing floors
 
 - Status: Accepted
 - Date: 2026-11-11

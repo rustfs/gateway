@@ -41,7 +41,7 @@
 //! form included, because SigV2 covers neither their query arguments nor their body:
 //! <https://github.com/rustfs/rustfs/blob/443e8afee194fe38b32d62a9289a99c1f703715c/rustfs/src/admin/router.rs#L3391-L3421>
 //! is the refusal, and `#L3560-L3620` the access check that applies it once credentials are
-//! present (rustfs/gateway#1592, ADR-0051). Its third arm, a credentialed `multipart/form-data`
+//! present (rustfs/gateway#1592, ADR-0052). Its third arm, a credentialed `multipart/form-data`
 //! POST, is not restated: such a request is not the STS form and never reaches this route. RustFS's
 //! unsigned `x-amz-*` guard in the same check is not restated either: no request here carries an
 //! unsigned `x-amz-*` header, and the gateway's guard has its own parity proofs
@@ -436,7 +436,7 @@ fn handed(caller: Option<&str>, sent: &Sent) -> Option<Handed> {
 
 /// SigV4 header signatures preserve legacy parity; ordinary AssumeRole SigV4 query credentials
 /// are refused by the gateway under ADR-0044; SigV2, header or presigned, is refused by both
-/// stacks under ADR-0051. The legacy observations remain explicit for every signing mode.
+/// stacks under ADR-0052. The legacy observations remain explicit for every signing mode.
 #[test]
 fn ordinary_assume_role_preserves_header_modes_and_refuses_query_credentials() {
     for signing in [
@@ -491,7 +491,7 @@ fn ordinary_assume_role_preserves_header_modes_and_refuses_query_credentials() {
 }
 
 /// For a SigV2-signed `sent`, checks that both stacks refused it `403 AccessDenied` and ran no
-/// handler (ADR-0051), and answers `true`; answers `false` for any other signing.
+/// handler (ADR-0052), and answers `true`; answers `false` for any other signing.
 fn refuses_sigv2(sent: &Sent, legacy: &Answered, gateway: &Answered) -> bool {
     if !matches!(sent.signing(), Signing::V2Header { .. } | Signing::V2Presigned) {
         return false;
@@ -539,7 +539,7 @@ fn anonymous_form_admission_obeys_the_decoded_action_contract() {
 
 /// The STS route retains its host, query and media-type predicate. Its ordinary-action
 /// admission follows ADR-0044 after that route is selected, and SigV2 is refused on it by both
-/// stacks (ADR-0051).
+/// stacks (ADR-0052).
 #[test]
 fn the_sts_endpoint_is_taken_on_every_host_and_query_and_media_type_spelling() {
     let signed = Signing::Header {
@@ -587,7 +587,7 @@ fn the_sts_endpoint_is_taken_on_every_host_and_query_and_media_type_spelling() {
 }
 
 /// Negative — ordinary AssumeRole on a virtual host remains subject to its action-specific
-/// credential contract (ADR-0044); a SigV2 presigned one is refused by both stacks (ADR-0051).
+/// credential contract (ADR-0044); a SigV2 presigned one is refused by both stacks (ADR-0052).
 #[test]
 fn ordinary_assume_role_on_a_virtual_host_refuses_query_credentials() {
     for signing in [
@@ -637,7 +637,7 @@ fn n_a_repeated_content_type_is_refused_before_routing_where_legacy_rustfs_serve
 /// `403` by both and runs no handler, with a known difference in the code: legacy RustFS verifies
 /// the signature before its router's SigV2 refusal and answers `SignatureDoesNotMatch`, where the
 /// gateway refuses SigV2 at the floor before any credential is resolved and answers
-/// `AccessDenied` (ADR-0051), the same answer a correctly signed one gets.
+/// `AccessDenied` (ADR-0052), the same answer a correctly signed one gets.
 #[test]
 fn n_a_forged_credential_is_refused_and_runs_no_handler() {
     for signing in [

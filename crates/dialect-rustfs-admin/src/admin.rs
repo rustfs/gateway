@@ -235,7 +235,7 @@ pub const fn presigned_floor(name: &'static str) -> OperationFloor {
 /// anonymous before its bucket listing check, as its S3 listing does. It carries no bearer claim.
 ///
 /// One difference from the standard listings' floor: SigV2 is refused under every policy, before
-/// any credential lookup (ADR-0051, rustfs/gateway#1592). SigV2 does not sign `metadata`, so a
+/// any credential lookup (ADR-0052, rustfs/gateway#1592). SigV2 does not sign `metadata`, so a
 /// SigV2-presigned or captured SigV2 header-signed listing with `metadata=true` appended would
 /// otherwise be served as this listing, disclosing user metadata the signer never asked for.
 /// RustFS serves the SigV2 form; this is a deliberate difference. SigV4 and unsigned requests are
@@ -256,7 +256,7 @@ pub const ZIP_DOWNLOAD_TOKEN: QueryBearerClaim = QueryBearerClaim::new("token", 
 /// refuses the combination. RustFS answers the minted URL before it reads any credential.
 ///
 /// It refuses SigV2 under every policy instead, at the floor and before any credential lookup,
-/// with or without a token (ADR-0051, rustfs/gateway#1592): RustFS's access check refuses SigV2
+/// with or without a token (ADR-0052, rustfs/gateway#1592): RustFS's access check refuses SigV2
 /// on this route once credentials are presented, and the bearer path reads no AWS credential.
 #[must_use]
 pub const fn zip_token_floor(name: &'static str) -> OperationFloor {
