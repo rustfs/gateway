@@ -107,6 +107,7 @@ second copy is a second thing to keep in sync.
 | 0049 | A presigned object lambda on a SigV4-only floor | Accepted |
 | 0050 | The metadata listings on the standard listing floor | Accepted |
 | 0051 | An opt-in internal error for a credential-store fault | Accepted |
+| 0052 | The caller's secret only over a signed body | Accepted |
 
 The index is hand-maintained. Generating it would cost more than it saves until
 there are at least fifteen records.
