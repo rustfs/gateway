@@ -716,6 +716,7 @@ mod bucket_tests;
 mod extension_tests;
 mod fallback_tests;
 mod fallback_wire_tests;
+mod lambda_tests;
 mod subject_tests;
 mod tests;
 mod zip_token_contract_tests;

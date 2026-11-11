@@ -401,6 +401,11 @@ fn is_namespaced(name: &str) -> bool {
 mod rule_tests;
 
 #[cfg(test)]
+#[path = "reject_floor_tests.rs"]
+#[allow(clippy::expect_used, clippy::panic, clippy::indexing_slicing)]
+mod floor_tests;
+
+#[cfg(test)]
 #[path = "reject_version_tests.rs"]
 #[allow(clippy::expect_used, clippy::panic, clippy::indexing_slicing)]
 mod version_tests;
