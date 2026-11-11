@@ -89,6 +89,45 @@ fn raw_receive_states_are_exact_and_unmeasured_never_matches() {
     }
 }
 
+#[test]
+fn receive_state_failure_reports_the_observed_fact() {
+    for (expected, actual, observed) in [
+        ("eof", Some(SocketReadState::Reset), "reset"),
+        ("eof", Some(SocketReadState::NoTerminationObserved), "no_termination_observed"),
+        ("eof", None, "not_measured"),
+        ("reset", Some(SocketReadState::Eof), "eof"),
+    ] {
+        let mut seen = facts();
+        seen.socket_read_after = actual;
+        let fixture = crate::toml::parse(&format!("socket_read_after = '{expected}'")).expect("valid fixture");
+        let result = judge(&fixture, &seen, "/expect", &NoGoldens);
+        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.diagnostics[0].rule, "expect/socket_read_after");
+        assert_eq!(result.diagnostics[0].pointer, "/expect/socket_read_after");
+        assert_eq!(
+            result.diagnostics[0].message,
+            format!("receive-side termination: expected {expected}, observed {observed}")
+        );
+    }
+}
+
+#[test]
+fn invalid_receive_state_expectation_is_not_echoed() {
+    for input in ["socket_read_after = 'secret-marker'", "socket_read_after = 42"] {
+        let mut seen = facts();
+        seen.socket_read_after = Some(SocketReadState::Reset);
+        let fixture = crate::toml::parse(input).expect("valid fixture");
+        let result = judge(&fixture, &seen, "/expect", &NoGoldens);
+        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.diagnostics[0].rule, "expect/socket_read_after");
+        assert!(!result.diagnostics[0].message.contains("secret-marker"));
+        assert_eq!(
+            result.diagnostics[0].message,
+            "receive-side termination: expected invalid, observed reset"
+        );
+    }
+}
+
 const CODES: &str = "h2_control_frames = [{ type = 'goaway', last_stream_id = 3, error_code_any_of = [1, 2, 3] }]";
 
 fn with_code(code: u32) -> Observation {
