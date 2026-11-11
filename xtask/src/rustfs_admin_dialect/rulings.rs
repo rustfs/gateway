@@ -21,8 +21,9 @@
 //! ruling is written in: an action rule, an optional subject rule, and the query value that
 //! selects a form; [`QUERY_BUCKETS`], the routes that name their bucket in the query; [`STAYS`],
 //! the routes that stay with RustFS; [`FORMS`], the routes served behind a form claim; and
-//! [`EXTENSIONS`], the S3-shaped extension routes and the operation each becomes; and [`RETAINED`],
-//! the checks RustFS's handlers keep that the floor does not represent.
+//! [`EXTENSIONS`], the S3-shaped extension routes and the operation each becomes;
+//! [`PRESIGNED_EXTENSIONS`], the ones a RustFS client is shown to presign; and [`RETAINED`], the
+//! checks RustFS's handlers keep that the floor does not represent.
 //! NOT responsible for: matching a ruling or a query bucket to its route, refusing a stale or
 //! missing one, or checking a rule's shape (`super::plan` and `super::Rule::fault`).
 //! Upstream: the ADRs, read against RustFS's handlers at the inventory's commit. Downstream:
@@ -238,6 +239,23 @@ pub(super) const EXTENSIONS: &[(&str, &str)] = &[
     ("MiscExtRoute::ListenNotification[service]", "ListenNotification"),
     ("MiscExtRoute::ListenNotification[bucket]", "ListenBucketNotification"),
 ];
+
+/// The extension routes a RustFS client is shown to presign, which ADR-0024 (f) makes the
+/// condition for admitting a presigned URL (rustfs/gateway#1576): the variant name the inventory
+/// records, and the evidence. Each gets `admin::presigned_floor`; every other extension route
+/// keeps the privileged, header-only floor.
+pub(super) const PRESIGNED_EXTENSIONS: &[(&str, &str)] = &[(
+    "MiscExtRoute::ObjectLambda[object]",
+    // RustFS's end-to-end test presigns `GET /{bucket}/{key}?lambdaArn=…` with `lambdaArn` inside
+    // the signed query and expects `200`.
+    "https://github.com/rustfs/rustfs/blob/443e8afee194fe38b32d62a9289a99c1f703715c/crates/e2e_test/src/object_lambda_test.rs#L608-L636",
+)];
+
+/// The extension routes whose request may name one object version, and the action RustFS asks
+/// such a request instead of the route's own (rustfs/gateway#1576): RustFS's object lambda handler
+/// authorises through its `GetObject` check, which asks `s3:GetObjectVersion` when `versionId` is
+/// present (GHSA-3ppv). Each renders `AuthRequirement::with_version_requirement`.
+pub(super) const VERSIONED_EXTENSIONS: &[(&str, &str)] = &[("MiscExtRoute::ObjectLambda[object]", "s3:GetObjectVersion")];
 
 /// A check RustFS's handler makes that the gateway's floor does not represent, so the floor is
 /// never read as the route's whole authorisation (rustfs/gateway#1232). The check stays with the

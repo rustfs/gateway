@@ -27,9 +27,9 @@ use core::time::Duration;
 use http::header::{HeaderMap, HeaderName, HeaderValue};
 use rustfs_gateway_sig::{
     Admission, AnonymousPolicy, AuthError, CredentialPresence, CtBytes, CustomAuthRequest, CustomAuthScheme,
-    CustomSchemeRegistry, OperationFloor, RawQuery, ReplayDecision, ReplayNonceStore, SchemeRegistrationError, SchemeSlot,
-    SecurityFloor, SigFamily, SigService, Signature, SignatureVerifier, Verdict, WireView, detect_aws_credential_marker,
-    detect_credentials, enforce_no_duplicate_sig_params,
+    CustomSchemeRegistry, OperationFloor, QueryBearerClaim, RawQuery, ReplayDecision, ReplayNonceStore, SchemeRegistrationError,
+    SchemeSlot, SecurityFloor, SigFamily, SigService, Signature, SignatureVerifier, Verdict, WireView,
+    detect_aws_credential_marker, detect_credentials, enforce_no_duplicate_sig_params,
 };
 
 use crate::security_floor_fixtures::*;
@@ -672,4 +672,57 @@ fn a_delegating_floor_never_downgrades_presented_credentials() {
     let empty = header_map(&[]);
     let view = WireView::new(&empty, RawQuery::new("X-Amz-Signature=abc"));
     assert!(!matches!(delegating().admit(view, &header_only_op(), now()), Ok(Admission::Anonymous(_))));
+}
+
+/// A presign-admitting operation that requires SigV4 under every policy (rustfs/gateway#1576).
+fn sigv4_only_op() -> OperationFloor {
+    OperationFloor::builtin_presigned("example:SigV4Only", SigService::S3).require_sigv4_under_every_policy()
+}
+
+/// Negative — a registered custom scheme is refused on an operation that requires SigV4 under
+/// every policy; the same registry and request reach the scheme on the operation without the
+/// requirement, which is the control.
+#[test]
+fn n_a_sigv4_only_operation_refuses_a_registered_custom_scheme() {
+    let mut registry = CustomSchemeRegistry::new();
+    registry
+        .register(CustomAuthScheme::new("x-vendor-auth-").expect("a legal prefix"))
+        .expect("the first registration cannot conflict");
+    let floor = SecurityFloor::default().with_custom_schemes(registry);
+    let headers = header_map(&[("x-vendor-auth-token", "opaque")]);
+    let view = WireView::new(&headers, RawQuery::new(""));
+    assert_eq!(floor.admit(view, &sigv4_only_op(), now()).err(), Some(AuthError::AccessDenied));
+    let control = OperationFloor::builtin_presigned("example:SigV4Only", SigService::S3);
+    assert!(matches!(floor.admit(view, &control, now()), Ok(Admission::Custom(_))));
+}
+
+/// Negative — a query bearer token is refused on an operation that requires SigV4 under every
+/// policy, on the default and the legacy-recognition floor; the same token reaches a bearer
+/// admission on the operation without the requirement, which is the control.
+#[test]
+fn n_a_sigv4_only_operation_refuses_a_query_bearer_token() {
+    let claim = QueryBearerClaim::new("token", ".zip");
+    let headers = header_map(&[]);
+    for floor in [
+        SecurityFloor::new(),
+        SecurityFloor::new().recognize_signatures_as_legacy_rustfs(),
+    ] {
+        let view = WireView::new(&headers, RawQuery::new("token=t"));
+        let refused = floor.admit(view, &sigv4_only_op().with_query_bearer_claim(claim), now());
+        assert_eq!(refused.err(), Some(AuthError::AccessDenied), "{floor:?}");
+        let control = OperationFloor::builtin_presigned("example:SigV4Only", SigService::S3).with_query_bearer_claim(claim);
+        assert!(matches!(floor.admit(view, &control, now()), Ok(Admission::Bearer(_))), "{floor:?}");
+    }
+}
+
+/// Negative — an operation that requires SigV4 under every policy refuses a request that
+/// presented nothing on a floor that delegates anonymous requests, where the same operation
+/// without the requirement is admitted anonymously.
+#[test]
+fn n_a_sigv4_only_operation_refuses_an_anonymous_request_on_a_delegating_floor() {
+    let headers = header_map(&[]);
+    let view = WireView::new(&headers, RawQuery::new(""));
+    assert_eq!(delegating().admit(view, &sigv4_only_op(), now()).err(), Some(AuthError::AccessDenied));
+    let control = OperationFloor::builtin_presigned("example:SigV4Only", SigService::S3);
+    assert!(matches!(delegating().admit(view, &control, now()), Ok(Admission::Anonymous(_))));
 }

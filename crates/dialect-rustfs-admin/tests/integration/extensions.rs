@@ -42,7 +42,7 @@ use rustfs_gateway_dialect_rustfs_admin::ops::{
 };
 use rustfs_gateway_dialect_rustfs_admin::{EXTENSION_ROUTES, ExtensionOperation, OVERLAY, ROUTES, STAYING};
 use rustfs_gateway_http::{Limits, WireRequest};
-use rustfs_gateway_sig::SigService;
+use rustfs_gateway_sig::{SecurityFloor, SigService};
 
 use super::{dialect, path_style_target};
 
@@ -482,7 +482,13 @@ fn the_eight_extension_operations_are_declared_as_their_records_say() {
             .find(|row| row.name == *name)
             .expect("the overlay records every extension operation");
         assert_eq!((row.precedence, row.selector), (*precedence, selector.as_str()), "{name}");
-        assert_eq!(row.action, record.action, "{name}");
+        // The object lambda's row also names the version action RustFS asks (rustfs/gateway#1576).
+        let action = if *name == LAMBDA {
+            format!("{}; versionId: s3:GetObjectVersion", record.action)
+        } else {
+            record.action.to_owned()
+        };
+        assert_eq!(row.action, action, "{name}");
         assert!(!row.anonymous, "{name}");
         assert!(row.evidence.iter().any(|url| url.contains("rustfs/src/admin/router.rs")), "{name}");
         assert!(row.evidence.contains(&"https://github.com/rustfs/backlog/issues/2753"), "{name}");
@@ -511,18 +517,38 @@ fn the_eight_extension_operations_are_declared_as_their_records_say() {
 }
 
 /// Positive and negative — every extension operation's floor is privileged and header-signed
-/// only, its action is the inventory's IAM action on the resource its target names, it reads no
-/// body, and it holds no secret.
+/// only, except the object lambda's, which a RustFS client is shown to presign: not privileged,
+/// header-signed or presigned (ADR-0024 (f), rustfs/gateway#1576). None admits an anonymous
+/// request, even on a floor that delegates anonymous requests to the authorizer. Each action is
+/// the inventory's IAM action on the resource its target names, each reads no body, and none
+/// holds a secret.
 #[test]
-fn every_extension_operation_declares_a_privileged_floor_and_its_inventory_action() {
+fn every_extension_operation_declares_its_floor_and_its_inventory_action() {
     fn check<O: ExtensionOperation>(record_name: &str, action: &str, resource: ResourceShape) {
         let floor = O::floor();
-        assert!(floor.privileged(), "{record_name}");
+        let presigned = record_name == LAMBDA;
+        let delegating = SecurityFloor::new().delegate_anonymous_to_authorizer_after_listing_in_the_posture_report();
+        assert_eq!(floor.privileged(), !presigned, "{record_name}");
         assert!(!floor.allows_anonymous(), "{record_name}");
-        assert!(!floor.allowed_schemes().allows_presigned(), "{record_name}");
+        assert!(!delegating.admits_anonymous(floor), "{record_name}");
+        assert!(!SecurityFloor::new().admits_anonymous(floor), "{record_name}");
+        assert_eq!(floor.allowed_schemes().allows_presigned(), presigned, "{record_name}");
+        assert_eq!(SecurityFloor::new().admits_presigned(floor), presigned, "{record_name}");
+        assert_eq!(floor.requires_sigv4_under_every_policy(), presigned, "{record_name}");
         assert_eq!(floor.service(), SigService::S3, "{record_name}");
+        assert!(
+            floor.query_bearer_claim().is_none(),
+            "{record_name}: no extension route admits a bearer token"
+        );
         let auth = O::spec().auth.expect("an action");
-        assert_eq!((auth.render(), auth.resource), (action.to_owned(), resource), "{record_name}");
+        assert_eq!((auth.action, auth.resource), (action, resource), "{record_name}");
+        // Only the object lambda asks a request naming a version `s3:GetObjectVersion` instead, as
+        // RustFS's handler does through its GetObject check (rustfs/gateway#1576).
+        let version = auth
+            .version_requirement()
+            .map(|versioned| (versioned.render(), versioned.resource));
+        let expected = presigned.then(|| ("s3:GetObjectVersion".to_owned(), ResourceShape::Object));
+        assert_eq!(version, expected, "{record_name}");
         assert!(!O::spec().receives_caller_secret(), "{record_name}");
         assert_eq!(O::spec().success_status, 200, "{record_name}");
         assert_eq!(O::REQUEST_BODY, RequestBodyMode::None, "{record_name}");

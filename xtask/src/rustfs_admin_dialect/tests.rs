@@ -221,6 +221,10 @@ pub(super) fn recorded_plan() -> Plan {
     let inventory: Inventory = serde_json::from_str(&recorded).expect("the inventory parses");
     let mut plan = plan(&inventory, RULINGS, QUERY_BUCKETS, STAYS, FORMS, EXTENSIONS).expect("the recorded inventory plans");
     super::retain(&mut plan.declared, super::RETAINED).expect("the recorded retained checks apply");
+    super::extension::admit_presigned(&mut plan.extensions, super::PRESIGNED_EXTENSIONS)
+        .expect("the recorded presigned rulings apply");
+    super::extension::admit_versioned(&mut plan.extensions, super::VERSIONED_EXTENSIONS)
+        .expect("the recorded version rulings apply");
     plan
 }
 

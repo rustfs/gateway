@@ -19,26 +19,73 @@
 //! row, SigV4 and then exactly the inventory's action asked on the bucket or object the path names
 //! (or on nothing, for the service listener) and the handler reached with that bucket; refusal
 //! before the handler when the action is denied or only other actions are allowed, and refusal
-//! before the authorizer when the request is unsigned or presigned — `403`, never a `501`; and
-//! the zip pair's own labels about the caller, its opaque `{+id}` capture, and the download URL's
-//! `403` without a header signature.
+//! before the authorizer when the request is unsigned, on the default floor and on the RustFS
+//! profile's, or presigned to any row but the object lambda — `403`, never a `501`; the object
+//! lambda's presigned URL, admitted only with a live signature that covers `lambdaArn` and still
+//! decided by the authorizer (rustfs/gateway#1576); and the zip pair's own labels about the
+//! caller, its opaque `{+id}` capture, and the download URL's `403` without a header signature.
 //! NOT responsible for: the harness (`super`), routing without a service (the dialect crate's
 //! `extensions` tests), or the generator.
 //! Upstream: `super`, the recorded inventory. Downstream: nothing.
 
 use bytes::Bytes;
 use http::{HeaderValue, Method, Request};
+use rustfs_gateway::SecurityFloor;
 use rustfs_gateway_dialect_rustfs_admin::{EXTENSION_ROUTES, ExtensionRouteRecord, ROUTES};
 use rustfs_gateway_http::RawHost;
 use rustfs_gateway_sig::{
-    AmzDate, PayloadMode, RequestNow, SigService, SigV4Signer, SigningCredentials, SigningRequest, SigningScope,
+    AmzDate, PayloadMode, RawQuery, RequestNow, SigService, SigV2Mode, SigV2Signer, SigV2StringToSignSpec, SigV4Signer,
+    SigningCredentials, SigningRequest, SigningScope,
 };
 
 use super::{Asked, BUCKET, Exchange, REGION, assemble, assemble_on, in_lanes, in_lanes_on, rustfs_profile_floor, wire};
 use crate::operation_diff::s3s_0_17_0::context::{ACCESS_KEY, ContextRequest, PATH_HOST, SECRET_KEY, amz_date};
 use crate::rustfs_admin_route_inventory;
 
-const KEY: &str = "key-1";
+pub(super) const KEY: &str = "key-1";
+
+/// The object lambda operation, the action RustFS's handler checks, and the ARN RustFS's
+/// end-to-end test names, percent-encoded as that test sends it.
+pub(super) const LAMBDA: &str = "rustfs:InvokeObjectLambda";
+pub(super) const LAMBDA_ACTION: &str = "s3:GetObject";
+pub(super) const LAMBDA_ARN: &str = "arn%3Arustfs%3As3-object-lambda%3Aus-east-1%3Atransformer%3Awebhook";
+
+/// The lifetime RustFS's end-to-end test presigns the object lambda URL for.
+pub(super) const LAMBDA_EXPIRES: u64 = 600;
+
+/// The two floors a presigned object lambda request is held to: the default one and the RustFS
+/// profile's, which delegates anonymous requests to the authorizer.
+pub(super) fn lambda_floors() -> [(&'static str, SecurityFloor); 2] {
+    [
+        ("default floor", SecurityFloor::new()),
+        ("RustFS profile floor", rustfs_profile_floor()),
+    ]
+}
+
+/// RustFS's end-to-end presigned object lambda request (rustfs/rustfs
+/// `test_get_object_lambda_accepts_presigned_requests`): `GET /{bucket}/{key}?lambdaArn=…`, only
+/// `host` signed, `lambdaArn` inside the signed query, dated `signed_at`.
+pub(super) fn presigned_lambda_at(signed_at: i64) -> Request<Bytes> {
+    presign_at(
+        &Method::GET,
+        &format!("/{BUCKET}/{KEY}"),
+        &format!("lambdaArn={LAMBDA_ARN}"),
+        signed_at,
+        LAMBDA_EXPIRES,
+    )
+}
+
+/// [`presigned_lambda_at`], now.
+pub(super) fn presigned_lambda() -> Request<Bytes> {
+    presigned_lambda_at(RequestNow::capture().unix_seconds())
+}
+
+/// `request` with its URI rewritten by `edit` after it was signed.
+fn rewritten(mut request: Request<Bytes>, edit: impl FnOnce(String) -> String) -> Request<Bytes> {
+    let uri = edit(request.uri().to_string());
+    *request.uri_mut() = uri.parse().expect("a rewritten URI");
+    request
+}
 
 /// The path an extension record's target addresses.
 fn path(record: &ExtensionRouteRecord) -> String {
@@ -74,7 +121,7 @@ fn unsigned(record: &ExtensionRouteRecord) -> Request<Bytes> {
     unsigned_at(record.method, &format!("{}?{}", path(record), query(record)))
 }
 
-fn unsigned_at(method: &str, uri: &str) -> Request<Bytes> {
+pub(super) fn unsigned_at(method: &str, uri: &str) -> Request<Bytes> {
     Request::builder()
         .method(method)
         .uri(uri)
@@ -86,18 +133,24 @@ fn unsigned_at(method: &str, uri: &str) -> Request<Bytes> {
 /// The record's row presigned in the query with the shared credential, now.
 fn presigned(record: &ExtensionRouteRecord) -> Request<Bytes> {
     let method = Method::from_bytes(record.method.as_bytes()).expect("a method");
-    let stamp = AmzDate::parse(&amz_date(RequestNow::capture().unix_seconds())).expect("a stamp");
+    presign_at(&method, &path(record), &query(record), RequestNow::capture().unix_seconds(), 900)
+}
+
+/// `method path?query` presigned in the query with the shared credential, dated `signed_at` and
+/// valid for `expires` seconds: every pair of `query` is inside the signed canonical query.
+pub(super) fn presign_at(method: &Method, path: &str, query: &str, signed_at: i64, expires: u64) -> Request<Bytes> {
+    let stamp = AmzDate::parse(&amz_date(signed_at)).expect("a stamp");
     let scope = SigningScope::new(stamp.day(), REGION, SigService::S3).expect("a scope");
     let credentials = SigningCredentials::new(ACCESS_KEY, SECRET_KEY.as_bytes()).expect("credentials");
     let mut signer = SigV4Signer::new(credentials, scope);
     let mut headers = http::HeaderMap::new();
     headers.insert(http::header::HOST, HeaderValue::from_str(PATH_HOST).expect("a host"));
     let host = RawHost::from_host_header(PATH_HOST.as_bytes()).expect("an acceptable host");
-    let path = path(record);
-    let query = query(record);
-    let signing = SigningRequest::new(&method, &path, &query, &headers, &host, PayloadMode::Unsigned, stamp);
-    let signed = signer.presign(&signing, 900).expect("a presignable request");
-    let mut builder = Request::builder().method(method).uri(format!("{path}?{}", signed.query()));
+    let signing = SigningRequest::new(method, path, query, &headers, &host, PayloadMode::Unsigned, stamp);
+    let signed = signer.presign(&signing, expires).expect("a presignable request");
+    let mut builder = Request::builder()
+        .method(method.clone())
+        .uri(format!("{path}?{}", signed.query()));
     for (name, value) in signed.headers() {
         builder = builder.header(name, value);
     }
@@ -113,12 +166,12 @@ fn route_question<'a>(exchange: &'a Exchange, record: &ExtensionRouteRecord) -> 
         .unwrap_or_else(|| panic!("{}: no route question in {:?}", record.operation, exchange.asked))
 }
 
-fn refused_before_the_handler(exchange: &Exchange, at: &str) {
+pub(super) fn refused_before_the_handler(exchange: &Exchange, at: &str) {
     assert_eq!(exchange.status, 403, "{at}: {}", exchange.body);
     assert!(exchange.reached.is_empty(), "{at}: a handler ran: {:?}", exchange.reached);
 }
 
-fn refused_without_asking(exchange: &Exchange, at: &str) {
+pub(super) fn refused_without_asking(exchange: &Exchange, at: &str) {
     refused_before_the_handler(exchange, at);
     assert!(exchange.asked.is_empty(), "{at}: the authorizer was asked {:?}", exchange.asked);
 }
@@ -234,13 +287,32 @@ fn n_every_other_action_does_not_authorise_an_extension_row() {
     );
 }
 
-/// Negative — a presigned extension request is refused without asking, on the default floor and
-/// on the RustFS profile's, which admits presigned URLs on standard operations only.
+/// Negative — an unsigned extension request is `403` before the authorizer is asked on the
+/// RustFS profile's floor too, which delegates anonymous requests to the authorizer on every
+/// standard operation: RustFS answers every extension route `Signature is required` without one,
+/// the object lambda included, whose floor admits a presigned URL.
 #[test]
-fn n_a_presigned_extension_request_is_refused_without_asking() {
-    in_lanes(
+fn n_an_unsigned_extension_request_is_refused_without_asking_on_the_rustfs_profile_floor() {
+    in_lanes_on(
+        &rustfs_profile_floor(),
         |_, _| true,
         EXTENSION_ROUTES,
+        |assembled, record| {
+            refused_without_asking(&assembled.exchange(unsigned(record)), record.operation);
+        },
+    );
+}
+
+/// Negative — a presigned request to every extension row but the object lambda is refused
+/// without asking, on the default floor and on the RustFS profile's, which admits presigned URLs
+/// on standard operations only: no RustFS client is shown to presign those seven (ADR-0024 (f)).
+#[test]
+fn n_a_presigned_extension_request_is_refused_without_asking() {
+    let siblings: Vec<&ExtensionRouteRecord> = EXTENSION_ROUTES.iter().filter(|record| record.operation != LAMBDA).collect();
+    assert_eq!(siblings.len(), 7);
+    in_lanes(
+        |_, _| true,
+        &siblings,
         |assembled, record| {
             refused_without_asking(&assembled.exchange(presigned(record)), record.operation);
         },
@@ -248,11 +320,119 @@ fn n_a_presigned_extension_request_is_refused_without_asking() {
     in_lanes_on(
         &rustfs_profile_floor(),
         |_, _| true,
-        EXTENSION_ROUTES,
+        &siblings,
         |assembled, record| {
             refused_without_asking(&assembled.exchange(presigned(record)), record.operation);
         },
     );
+}
+
+/// Positive — RustFS's end-to-end presigned object lambda request, whose signature covers
+/// `lambdaArn`, is verified and then authorised by `s3:GetObject` on the object the path names,
+/// for the presigning caller, and reaches the object lambda handler, on the default floor and on
+/// the RustFS profile's (rustfs/gateway#1576).
+#[test]
+fn a_presigned_object_lambda_request_whose_signature_covers_lambda_arn_reaches_its_handler() {
+    for (at, floor) in lambda_floors() {
+        let assembled = assemble_on(floor, |operation, action| operation == LAMBDA && action == LAMBDA_ACTION);
+        let exchange = assembled.exchange(presigned_lambda());
+        assert_eq!(exchange.status, 200, "{at}: {}", exchange.body);
+        assert_eq!(exchange.reached, [LAMBDA], "{at}");
+        let asked = exchange
+            .asked
+            .iter()
+            .find(|asked| asked.stage == "route")
+            .unwrap_or_else(|| panic!("{at}: no route question in {:?}", exchange.asked));
+        assert_eq!((asked.operation.as_str(), asked.action.as_str()), (LAMBDA, LAMBDA_ACTION), "{at}");
+        assert_eq!(asked.caller.as_deref(), Some(ACCESS_KEY), "{at}");
+        assert_eq!((asked.bucket.as_deref(), asked.key.as_deref()), (Some(BUCKET), Some(KEY)), "{at}");
+        assert!(!exchange.handed[0].holds_secret, "{at}");
+    }
+}
+
+/// Negative — a `lambdaArn` changed after the URL was signed names a transform the caller never
+/// signed for: `403` before the authorizer is asked.
+#[test]
+fn n_a_presigned_object_lambda_request_with_a_tampered_lambda_arn_is_refused_without_asking() {
+    for (at, floor) in lambda_floors() {
+        let assembled = assemble_on(floor, |_, _| true);
+        let tampered = rewritten(presigned_lambda(), |uri| {
+            assert!(uri.contains("transformer%3Awebhook"), "{at}: {uri}");
+            uri.replacen("transformer%3Awebhook", "transformer%3Aexfiltrate", 1)
+        });
+        refused_without_asking(&assembled.exchange(tampered), at);
+    }
+}
+
+/// Negative — a `lambdaArn` appended to a presigned `GetObject` URL that never signed one routes
+/// to the object lambda, and the signature does not cover it: `403` before the authorizer is
+/// asked.
+#[test]
+fn n_a_lambda_arn_the_presigned_signature_does_not_cover_is_refused_without_asking() {
+    for (at, floor) in lambda_floors() {
+        let assembled = assemble_on(floor, |_, _| true);
+        let now = RequestNow::capture().unix_seconds();
+        let get_object = presign_at(&Method::GET, &format!("/{BUCKET}/{KEY}"), "", now, LAMBDA_EXPIRES);
+        let appended = rewritten(get_object, |uri| format!("{uri}&lambdaArn={LAMBDA_ARN}"));
+        refused_without_asking(&assembled.exchange(appended), at);
+    }
+}
+
+/// Negative — an object lambda URL whose lifetime has ended is `403` before the authorizer is
+/// asked, its signature over `lambdaArn` notwithstanding.
+#[test]
+fn n_an_expired_presigned_object_lambda_request_is_refused_without_asking() {
+    for (at, floor) in lambda_floors() {
+        let assembled = assemble_on(floor, |_, _| true);
+        // Signed twice its lifetime ago.
+        let signed_at = RequestNow::capture().unix_seconds() - 1_200;
+        refused_without_asking(&assembled.exchange(presigned_lambda_at(signed_at)), at);
+    }
+}
+
+/// Negative — a SigV2 presigned object lambda URL is `403` before the authorizer is asked on the
+/// RustFS profile's floor, which accepts SigV2 presigned URLs on standard operations: RustFS's
+/// router requires header or query SigV4 on every extension route. Only that floor is asked: the
+/// default floor refuses every SigV2 presigned URL whatever the operation, so a lane on it could
+/// not fail. `lambda_tests` asks the same of the assembled `ServiceBuilder::rustfs_profile()`.
+#[test]
+fn n_a_sigv2_presigned_object_lambda_request_is_refused_without_asking() {
+    let assembled = assemble_on(rustfs_profile_floor(), |_, _| true);
+    refused_without_asking(&assembled.exchange(sigv2_presigned_lambda()), "RustFS profile floor");
+}
+
+/// RustFS's object lambda request presigned with SigV2, now, with only `host` around it.
+pub(super) fn sigv2_presigned_lambda() -> Request<Bytes> {
+    let path = format!("/{BUCKET}/{KEY}");
+    let expires = RequestNow::capture().unix_seconds() + i64::try_from(LAMBDA_EXPIRES).expect("small");
+    let query = format!("lambdaArn={LAMBDA_ARN}&AWSAccessKeyId={ACCESS_KEY}&Expires={expires}");
+    let mut headers = http::HeaderMap::new();
+    headers.insert(http::header::HOST, HeaderValue::from_str(PATH_HOST).expect("a host"));
+    let raw = RawQuery::new(&query);
+    let spec = SigV2StringToSignSpec::new(SigV2Mode::PresignedUrl, &Method::GET, &path, &raw, &headers, None);
+    let signature = SigV2Signer::new(ACCESS_KEY, SECRET_KEY.as_bytes())
+        .expect("a signer")
+        .presigned_signature(&spec)
+        .expect("a signable request");
+    let escaped = signature.replace('+', "%2B").replace('/', "%2F").replace('=', "%3D");
+    unsigned_at("GET", &format!("{path}?{query}&Signature={escaped}"))
+}
+
+/// Negative — a verified presigned object lambda request is still the authorizer's to decide: a
+/// denied `s3:GetObject` refuses it before the handler, after asking exactly that.
+#[test]
+fn n_a_presigned_object_lambda_request_whose_action_is_denied_is_refused_before_its_handler() {
+    for (at, floor) in lambda_floors() {
+        let assembled = assemble_on(floor, |_, _| false);
+        let exchange = assembled.exchange(presigned_lambda());
+        refused_before_the_handler(&exchange, at);
+        let asked = exchange
+            .asked
+            .iter()
+            .find(|asked| asked.stage == "route")
+            .unwrap_or_else(|| panic!("{at}: no route question in {:?}", exchange.asked));
+        assert_eq!((asked.operation.as_str(), asked.action.as_str()), (LAMBDA, LAMBDA_ACTION), "{at}");
+    }
 }
 
 /// Positive and negative — the zip pair: the minting `POST` is authorised by its own label about

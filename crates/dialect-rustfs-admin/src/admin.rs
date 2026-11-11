@@ -211,6 +211,17 @@ pub const fn floor(name: &'static str) -> OperationFloor {
     OperationFloor::custom(name, SigService::S3)
 }
 
+/// The floor of an S3-shaped extension operation a RustFS client is shown to presign (ADR-0024
+/// (f), rustfs/gateway#1576): SigV4 header-signed or presigned, never anonymous and never SigV2,
+/// under every policy a deployment chooses, as RustFS's router requires. It is not privileged — a
+/// privileged floor refuses every presigned URL — so the start-up
+/// `SECURITY_POSTURE presigned_allowed_ops=[…]` line names it, every rule of the presigned path
+/// still runs, and the authorizer still decides the request. It carries no bearer claim.
+#[must_use]
+pub const fn presigned_floor(name: &'static str) -> OperationFloor {
+    OperationFloor::builtin_presigned(name, SigService::S3).require_sigv4_under_every_policy()
+}
+
 /// The `token` query bearer claim of RustFS's minted zip-download URL (ADR-0042): one literal
 /// `token` parameter, bound to the path's last raw segment less its literal `.zip`.
 pub const ZIP_DOWNLOAD_TOKEN: QueryBearerClaim = QueryBearerClaim::new("token", ".zip");

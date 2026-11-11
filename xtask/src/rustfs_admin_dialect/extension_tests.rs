@@ -24,8 +24,8 @@
 //! dialect crate's tests).
 //! Upstream: `super::extension` and `super::plan`. Downstream: nothing; a leaf test module.
 
-use super::extension::{ExtensionRoute, FIRST_PRECEDENCE, QueryDiscriminator};
-use super::rulings::EXTENSIONS;
+use super::extension::{ExtensionRoute, FIRST_PRECEDENCE, QueryDiscriminator, admit_presigned, admit_versioned};
+use super::rulings::{EXTENSIONS, PRESIGNED_EXTENSIONS, VERSIONED_EXTENSIONS};
 use super::tests::{inventory, recorded_plan, route};
 use super::{Plan, plan};
 
@@ -286,6 +286,127 @@ fn an_extension_module_renders_its_row_floor_codec_and_record() {
     assert!(lambda.contains("path_shape: \"/{Bucket}/{Key+}\","));
     let listen = plan.extensions[6].render("");
     assert!(listen.contains("ResourceShape::Service") && listen.contains("path_shape: \"/\","));
+}
+
+/// Positive and negative — only the object lambda, the one route a RustFS client is shown to
+/// presign, renders the presign-admitting floor and its evidence; the other seven keep the
+/// privileged, header-only floor (ADR-0024 (f), rustfs/gateway#1576).
+#[test]
+fn only_the_presigned_ruling_renders_the_presigned_floor() {
+    let plan = recorded_plan();
+    assert_eq!(PRESIGNED_EXTENSIONS.len(), 1);
+    for extended in &plan.extensions {
+        let rendered = extended.render("");
+        let presigned = extended.name == "MiscExtRoute::ObjectLambda[object]";
+        assert_eq!(
+            rendered.contains("static FLOOR: OperationFloor = admin::presigned_floor(NAME);"),
+            presigned,
+            "{}",
+            extended.name
+        );
+        assert_eq!(
+            rendered.contains("static FLOOR: OperationFloor = admin::floor(NAME);"),
+            !presigned,
+            "{}",
+            extended.name
+        );
+        assert_eq!(
+            rendered.contains("pub const PRESIGNED_EVIDENCE: &str = \"https://"),
+            presigned,
+            "{}",
+            extended.name
+        );
+    }
+    let lambda = plan.extensions[5].render("");
+    assert!(lambda.contains("with `lambdaArn` inside the signed query"), "{lambda}");
+    assert!(lambda.contains(&format!("{:?}", PRESIGNED_EXTENSIONS[0].1)), "{lambda}");
+}
+
+/// Positive and negative — only the object lambda, whose RustFS handler asks
+/// `s3:GetObjectVersion` of a request naming a version, renders a version requirement; the other
+/// seven keep their one action (rustfs/gateway#1576).
+#[test]
+fn only_the_version_ruling_renders_a_version_requirement() {
+    let plan = recorded_plan();
+    assert_eq!(VERSIONED_EXTENSIONS, &[("MiscExtRoute::ObjectLambda[object]", "s3:GetObjectVersion")]);
+    for extended in &plan.extensions {
+        let rendered = extended.render("");
+        let versioned = extended.name == "MiscExtRoute::ObjectLambda[object]";
+        assert_eq!(
+            rendered.contains(".with_version_requirement(&VERSION_AUTH)"),
+            versioned,
+            "{}",
+            extended.name
+        );
+        assert_eq!(
+            rendered.contains(
+                "pub static VERSION_AUTH: AuthRequirement = AuthRequirement::new(\"s3:GetObjectVersion\", ResourceShape::Object);"
+            ),
+            versioned,
+            "{}",
+            extended.name
+        );
+    }
+}
+
+/// Negative — a version ruling that names no extension route, names one twice, names an action
+/// outside `s3:`, or names a route that addresses no object is refused; a bound one applies.
+#[test]
+fn n_a_stale_repeated_foreign_or_objectless_version_ruling_is_refused() {
+    let refused = |rulings: &[(&str, &str)]| {
+        let mut plan = recorded_plan();
+        admit_versioned(&mut plan.extensions, rulings).expect_err("a refused ruling")
+    };
+    let lambda = "MiscExtRoute::ObjectLambda[object]";
+    assert!(
+        refused(&[("Ext::Gone", "s3:GetObjectVersion")]).contains("the version ruling for Ext::Gone names no extension route")
+    );
+    assert!(refused(&[(lambda, "s3:GetObjectVersion")]).contains("has two version rulings"));
+    assert!(refused(&[(lambda, "rustfs:GetObjectVersion")]).contains("not an `s3:Action`"));
+    assert!(refused(&[(lambda, "GetObjectVersion")]).contains("not an `s3:Action`"));
+    assert!(
+        refused(&[("ReplicationExtRoute::Check", "s3:GetObjectVersion")])
+            .contains("the version ruling for ReplicationExtRoute::Check names a route that addresses no object")
+    );
+    let plan = recorded_plan();
+    let check = plan
+        .extensions
+        .iter()
+        .position(|extended| extended.name == lambda)
+        .expect("a row");
+    assert_eq!(plan.extensions[check].version_action.as_deref(), Some("s3:GetObjectVersion"));
+}
+
+/// Negative — a presigned ruling that names no extension route, names one twice, or cites no
+/// `https://` evidence is refused, and the refused routes keep no presigned ruling.
+#[test]
+fn n_a_stale_repeated_or_unevidenced_presigned_ruling_is_refused() {
+    let evidence = "https://example.invalid/e2e";
+    let refused = |rulings: &[(&str, &str)]| {
+        let mut plan = recorded_plan();
+        admit_presigned(&mut plan.extensions, rulings).expect_err("a refused ruling")
+    };
+    assert!(refused(&[("Ext::Gone", evidence)]).contains("the presigned ruling for Ext::Gone names no extension route"));
+    assert!(
+        refused(&[
+            ("ReplicationExtRoute::Check", evidence),
+            ("ReplicationExtRoute::Check", evidence)
+        ])
+        .contains("the extension route ReplicationExtRoute::Check has two presigned rulings")
+    );
+    assert!(
+        refused(&[("ReplicationExtRoute::Check", "http://example.invalid/e2e")])
+            .contains("the presigned ruling for ReplicationExtRoute::Check cites no https:// evidence")
+    );
+    let mut plan = recorded_plan();
+    let check = plan
+        .extensions
+        .iter()
+        .position(|extended| extended.name == "ReplicationExtRoute::Check")
+        .expect("a row");
+    assert!(plan.extensions[check].presigned.is_none());
+    admit_presigned(&mut plan.extensions, &[("ReplicationExtRoute::Check", evidence)]).expect("a bound ruling");
+    assert_eq!(plan.extensions[check].presigned.as_deref(), Some(evidence));
 }
 
 /// Negative — an inventory extension route no ruling names, and a ruling no inventory route

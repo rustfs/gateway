@@ -226,6 +226,15 @@ pub(crate) fn check_operation<O: Operation>() -> Result<(), RegistryError> {
     if floor != name {
         return Err(RegistryError::FloorNameMismatch { name, floor });
     }
+    // A floor that requires SigV4 under every policy cannot also admit a bearer token: the two
+    // contradict each other, and the floor would refuse every token anyway (rustfs/gateway#1576).
+    if O::floor().requires_sigv4_under_every_policy() && O::floor().query_bearer_claim().is_some() {
+        return Err(RegistryError::InvalidAuthRule {
+            name,
+            why: "its floor requires SigV4 under every policy and also declares a query bearer claim, which admits a \
+                  request that carries no SigV4 signature",
+        });
+    }
 
     if O::ORIGIN.is_standard() {
         // First, so it holds for every standard-origin operation, whether or not the table has it.
@@ -399,6 +408,11 @@ fn is_namespaced(name: &str) -> bool {
 #[path = "reject_rule_tests.rs"]
 #[allow(clippy::expect_used, clippy::panic, clippy::indexing_slicing)]
 mod rule_tests;
+
+#[cfg(test)]
+#[path = "reject_floor_tests.rs"]
+#[allow(clippy::expect_used, clippy::panic, clippy::indexing_slicing)]
+mod floor_tests;
 
 #[cfg(test)]
 #[path = "reject_version_tests.rs"]
