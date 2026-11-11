@@ -345,7 +345,9 @@ pub struct HeaderTokenRefused;
 ///   header before the gateway.
 /// * Keep its name space apart from access keys where the two are different principals. The
 ///   kernel marks the origin; a policy source or authorizer that looks a principal up by the
-///   bare name must branch on [`Identity::origin`].
+///   bare name must branch on [`Identity::origin`]. Carry the [`Identity`] itself, in handlers
+///   and in audit sinks: `Identity::new(identity.access_key_id())` builds an access key of the
+///   same spelling, and a record that keeps only the bare name writes two principals as one.
 /// * Own replay, expiry and revocation. The kernel keeps no token state.
 ///
 /// # Calling contract
@@ -356,7 +358,13 @@ pub struct HeaderTokenRefused;
 /// whatever the panic left it in.
 pub trait HeaderTokenVerifier: Send + Sync + 'static {
     /// What the host's outer layer inserts into a request's extensions once it has validated the
-    /// token: a type of the host's own, so nothing else in the process can supply one.
+    /// token.
+    ///
+    /// **It must be a type private to the host's token layer**: a newtype that layer alone can
+    /// construct. The value is looked up by its type, so whatever inserts a value of this type
+    /// into a request establishes that request's identity. A type other code also constructs —
+    /// `()`, a `String`, a shared credentials struct — lets any layer that inserts one for its
+    /// own purposes establish an identity without knowing it. The kernel cannot check this.
     type Established: Send + Sync + 'static;
 
     /// Names the principal `established` stands for, at the request's one clock reading.

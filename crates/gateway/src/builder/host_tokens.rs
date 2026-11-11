@@ -83,7 +83,8 @@ impl ServiceBuilder {
     ///   operation, one of the STS service, one that takes a browser form, one that declares a
     ///   query bearer claim and one that requires SigV4 under every policy refuse it;
     /// * the identity is read from the request's own extensions: a request in which the host's
-    ///   outer layer left no `V::Established` value is `403` and `verifier` is not called;
+    ///   outer layer left no `V::Established` value is `403` and `verifier` is not called. That
+    ///   type must be private to the host's token layer, since the value is found by its type;
     /// * a refusal or a panic of `verifier` is `403`, never an anonymous request;
     /// * the request is unsigned, and its body is held to what an anonymous request's is;
     /// * authorizers and the audit event see `AuthSchemeRef::HeaderToken` and an identity whose
@@ -93,7 +94,9 @@ impl ServiceBuilder {
     ///   handler context holds the token. Stage filters' wire seam still
     ///   sees it, as it sees `Authorization`;
     /// * the answer to a request served by its token carries `Vary` naming the claimed header,
-    ///   and `Cache-Control: private` unless the handler set a `Cache-Control` of its own.
+    ///   and `Cache-Control: private` unless the handler set a `Cache-Control` of its own. A
+    ///   `Cache-Control` the handler answered is kept as it is, `public` and one read from an
+    ///   object's stored metadata included.
     ///
     /// The host's outer layer validates the token and leaves what it established in the request's
     /// own extensions; see [`HeaderTokenVerifier`] for what the verifier must and must not do.

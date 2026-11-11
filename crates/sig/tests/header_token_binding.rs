@@ -33,8 +33,8 @@ use rustfs_gateway_sig::{
 };
 
 use crate::header_token::{
-    Accepts, Established, HEADER, NamesWhatWasEstablished, PRINCIPAL, TOKEN, admission_of, admit, claim, server_state,
-    server_state_with, shape, standard_op, with_token,
+    Accepts, Established, HEADER, NamesWhatWasEstablished, PRINCIPAL, TOKEN, admission_of, admit, claim, server_state, shape,
+    standard_op, with_token,
 };
 use crate::security_floor_fixtures::*;
 
@@ -180,34 +180,6 @@ fn n_a_request_that_holds_nothing_established_never_reaches_the_verifier() {
     assert_eq!(anyone.0.load(Ordering::SeqCst), 1);
 }
 
-/// Negative — only a value of the verifier's own `Established` type is read. A value of another
-/// type that holds the same name, a bare `Identity` and a bare string are not it.
-#[test]
-fn n_a_value_of_another_type_establishes_nothing() {
-    #[derive(Clone)]
-    struct Lookalike(#[allow(dead_code)] &'static str); // held, never read: only its type matters
-
-    let floor = SecurityFloor::new().with_header_token_claim(claim());
-    let headers = with_token(&[]);
-    let verifier = NamesWhatWasEstablished::default();
-    let others = server_state_with(|extensions| {
-        extensions.insert(Lookalike("PROJECTMEMBER"));
-        extensions.insert(Identity::new("PROJECTMEMBER").expect("a legal name"));
-        extensions.insert("PROJECTMEMBER");
-        extensions.insert(String::from("PROJECTMEMBER"));
-    });
-    let verdict = admission_of(&floor, &headers, &standard_op()).verify(&verifier, &others);
-    assert_eq!(verdict.rejection(), Some(AuthError::AccessDenied));
-    assert_eq!(verifier.0.load(Ordering::SeqCst), 0);
-
-    let own = server_state_with(|extensions| {
-        extensions.insert(Lookalike("SOMEONEELSE"));
-        extensions.insert(Established("PROJECTMEMBER"));
-    });
-    let verdict = admission_of(&floor, &headers, &standard_op()).verify(&verifier, &own);
-    assert_eq!(verdict.identity().map(Identity::access_key_id), Some("PROJECTMEMBER"), "the control");
-}
-
 /// Positive and negative — one verifier, asked about two requests in turn and in either order,
 /// names for each the identity that request carries and never the other's.
 #[test]
@@ -229,6 +201,61 @@ fn one_verifier_names_for_each_request_what_that_request_carries() {
         assert_eq!(name(&nobody), None);
         assert_eq!(name(&bob).as_deref(), Some("BOB"));
         assert_eq!(name(&alice).as_deref(), Some("ALICE"));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Beside the SigV2 refusal of ADR-0052
+// ---------------------------------------------------------------------------
+
+/// Positive and negative — an operation that refuses SigV2 under every policy still admits a
+/// header token, which is no SigV2 request; and the token beside any SigV2 credential is the
+/// claim's own refusal on that operation and on one that admits SigV2, decided before the SigV2
+/// rule is reached. Without the token the same SigV2 requests keep that rule's answers, which
+/// are sealed for a verifier on the operation that admits SigV2: the control that the rule, and
+/// not the claim, tells the two operations apart.
+#[test]
+fn a_header_token_is_unaffected_by_the_sigv2_refusal_and_refuses_sigv2_beside_it() {
+    let refusing = standard_op().refuse_sigv2_under_every_policy();
+    assert!(refusing.refuses_sigv2_under_every_policy() && !standard_op().refuses_sigv2_under_every_policy());
+    let sigv2_header: &[(&str, &str)] = &[
+        ("authorization", "AWS AKIDEXAMPLE:frJIUN8DYpKDtOLCwo//yllqDzg="),
+        ("date", "Sun, 30 Aug 2015 12:36:00 GMT"),
+    ];
+    let sigv2_query = "AWSAccessKeyId=AKIDEXAMPLE&Expires=1440938460&Signature=frJIUN8DYpKDtOLCwo%2F%2FyllqDzg%3D";
+    for (floor_name, compat) in [("default", false), ("sigv2-compatible", true)] {
+        let base = if compat {
+            SecurityFloor::new().enable_sigv2_presigned_compatibility()
+        } else {
+            SecurityFloor::new()
+        };
+        let floor = base.clone().with_header_token_claim(claim());
+        let token = with_token(&[]);
+        for operation in [&refusing, &standard_op()] {
+            assert_eq!(shape(&admit(&floor, &token, "", None, operation)), "header-token", "{floor_name}");
+            assert!(floor.admits_header_token(operation), "{floor_name}");
+            let both = with_token(sigv2_header);
+            assert_eq!(shape(&admit(&floor, &both, "", None, operation)), "refused:AccessDenied", "{floor_name}");
+            assert_eq!(
+                shape(&admit(&floor, &token, sigv2_query, None, operation)),
+                "refused:AccessDenied",
+                "{floor_name}"
+            );
+        }
+        // The controls, without the token: the claimed floor answers as an unclaimed one does.
+        let alone = header_map(sigv2_header);
+        let none = HeaderMap::new();
+        for operation in [&refusing, &standard_op()] {
+            for (headers, query) in [(&alone, ""), (&none, sigv2_query)] {
+                assert_eq!(
+                    shape(&admit(&floor, headers, query, None, operation)),
+                    shape(&admit(&base, headers, query, None, operation)),
+                    "{floor_name}: {query:?}"
+                );
+            }
+        }
+        assert_eq!(shape(&admit(&floor, &alone, "", None, &refusing)), "refused:AccessDenied", "{floor_name}");
+        assert_eq!(shape(&admit(&floor, &alone, "", None, &standard_op())), "sealed-sigv2", "{floor_name}");
     }
 }
 

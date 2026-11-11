@@ -156,27 +156,20 @@ impl HeaderTokenVerifier for NamesWhatWasEstablished {
     }
 }
 
-/// The transport values of an accepted request whose extensions `install` filled.
-pub(crate) fn server_state_with(install: impl FnOnce(&mut http::Extensions)) -> TransportExtensions {
+/// The transport values of an accepted request that carries `installed`, or nothing.
+pub(crate) fn server_state(installed: Option<Established>) -> TransportExtensions {
     let mut request = http::Request::builder()
         .uri("/")
         .header("host", "s3.example.com")
         .body(())
         .expect("a fixture request");
-    install(request.extensions_mut());
+    if let Some(established) = installed {
+        request.extensions_mut().insert(established);
+    }
     WireRequest::accept(request, &Limits::default())
         .expect("an accepted fixture")
         .transport_extensions()
         .clone()
-}
-
-/// The transport values of an accepted request that carries `installed`, or nothing.
-pub(crate) fn server_state(installed: Option<Established>) -> TransportExtensions {
-    server_state_with(|extensions| {
-        if let Some(established) = installed {
-            extensions.insert(established);
-        }
-    })
 }
 
 // ---------------------------------------------------------------------------
@@ -392,6 +385,16 @@ const OTHER_SURFACES: &[Surface] = &[
     query_surface("X-Amz-Expires", "X-Amz-Expires=60"),
     query_surface("X-Amz-SignedHeaders", "X-Amz-SignedHeaders=host"),
     query_surface("an escaped X-Amz-Expires", "X-Amz-%45xpires=60"),
+    // Another letter case of a presigned parameter: no marker anywhere else in the floor, and
+    // what a host's pre-routing guard may still read as a presigned URL.
+    query_surface("a lowercase x-amz-signature", "x-amz-signature=00"),
+    query_surface("an uppercase X-AMZ-SIGNATURE", "X-AMZ-SIGNATURE=00"),
+    query_surface("a mixed-case, escaped signature", "x-Amz-%73ignature=00"),
+    query_surface("a lowercase x-amz-credential", "x-amz-credential=AKIDEXAMPLE"),
+    query_surface("a lowercase x-amz-algorithm", "x-amz-algorithm=AWS4-HMAC-SHA256"),
+    query_surface("a lowercase x-amz-security-token", "x-amz-security-token=session"),
+    query_surface("a lowercase x-amz-date", "x-amz-date=20150830T123600Z"),
+    query_surface("a lowercase x-amz-signedheaders", "note=a&x-amz-signedheaders=host"),
     form_surface("form x-amz-algorithm", &[("x-amz-algorithm", "AWS4-HMAC-SHA256")]),
     form_surface(
         "form x-amz-credential",

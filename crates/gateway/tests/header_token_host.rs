@@ -318,6 +318,44 @@ async fn an_answer_served_by_a_token_is_kept_out_of_a_shared_cache() {
     assert!(header_values(&response, "vary").is_empty() && header_values(&response, "cache-control").is_empty());
 }
 
+/// Serves every object as one whose uploader stored `Cache-Control: public` on it.
+struct StoredPublic;
+
+impl rustfs_gateway::Handler<rustfs_gateway::dto::GetObject> for StoredPublic {
+    async fn call(
+        &self,
+        _request: rustfs_gateway::Req<rustfs_gateway::dto::GetObject>,
+    ) -> rustfs_gateway::HandlerResult<rustfs_gateway::dto::GetObject> {
+        Ok(rustfs_gateway::Resp::new(rustfs_gateway::dto::GetObjectOutput {
+            cache_control: Some("public, max-age=60".to_owned()),
+            ..Default::default()
+        }))
+    }
+}
+
+/// Negative, pinning a stated residual — an object whose stored metadata says
+/// `Cache-Control: public` goes out `public` to a caller served by its token: the gateway keeps
+/// what the handler answered and adds only `Vary` on the claimed header. A cache that ignores
+/// `Vary` can then serve one caller's object to another, as it can for a header-signed request;
+/// ADR-0053 states it as the deployment's. The signed request of the same object is the control:
+/// the same `Cache-Control`, and no `Vary`.
+#[tokio::test]
+async fn n_a_stored_public_cache_control_is_kept_on_an_answer_served_by_a_token() {
+    let fixture = assemble_with(SecurityFloor::new(), Some((claim(), Answer::Accepts)), |builder| {
+        builder.register::<rustfs_gateway::dto::GetObject, _>(Arc::new(StoredPublic))
+    });
+    let served = fixture.exchange(token_only(http::Method::GET, "/bucket/object")).await;
+    assert_eq!(served.status(), http::StatusCode::OK, "{:?}", served.body());
+    assert_eq!(header_values(&served, "cache-control"), ["public, max-age=60"]);
+    assert_eq!(header_values(&served, "vary"), [HEADER]);
+    assert_eq!(fixture.verifier_calls.load(Ordering::SeqCst), 1);
+
+    let signed = fixture.exchange(support::signed(http::Method::GET, "/bucket/object")).await;
+    assert_eq!(signed.status(), http::StatusCode::OK, "{:?}", signed.body());
+    assert_eq!(header_values(&signed, "cache-control"), ["public, max-age=60"]);
+    assert!(header_values(&signed, "vary").is_empty());
+}
+
 // ── one refusal, under the RustFS profile's own answers too ────────────────────────────────────
 
 /// Negative — under the RustFS profile, whose view policies answer a malformed header signature
@@ -370,6 +408,10 @@ async fn n_the_token_beside_an_aws_credential_is_one_refusal_under_the_rustfs_pr
                 "/?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIDEXAMPLE%2F20200102%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20200102T030405Z&X-Amz-Expires=1&X-Amz-SignedHeaders=host&X-Amz-Signature=00",
             )),
         ),
+        // The pre-routing guard reads this name in any letter case; the floor must too, or a token
+        // request, which skips the guard, would be admitted where the guard refused.
+        ("a lowercase presigned signature", Box::new(query("/?x-amz-signature=00"))),
+        ("a mixed-case presigned signature", Box::new(query("/?X-AMZ-Signature=00&note=a"))),
         ("a presigned algorithm alone", Box::new(query("/?X-Amz-Algorithm=AWS4-HMAC-SHA256"))),
         ("a presigned date alone", Box::new(query("/?X-Amz-Date=20260102T030405Z"))),
         ("a presigned lifetime alone", Box::new(query("/?X-Amz-Expires=60"))),

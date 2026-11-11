@@ -293,8 +293,11 @@ The framework's half:
   header, its refused aliases and every operation that admits it. The host owns what the gateway
   cannot see: every other header name its outer layer reads the token under must be listed as a
   refused alias or renamed to the claimed one, the identity must come from the request's own
-  extensions and never from a thread-local, a global or a connection cache, and a policy source
-  that looks a principal up by its bare name must branch on the origin.
+  extensions, as a type private to its token layer, and never from a thread-local, a global or a
+  connection cache; a policy source that looks a principal up by its bare name must branch on the
+  origin, and nothing may rebuild the `Identity` from that name; a `Cache-Control` a handler or an
+  object's stored metadata chose is kept, `public` included; and each host keeps its own reviewed
+  list of the operations that admit the scheme.
 
 The condition facts a policy engine needs arrive through the same `RequestContext`, and each
 has exactly one source (rustfs/backlog#2752):

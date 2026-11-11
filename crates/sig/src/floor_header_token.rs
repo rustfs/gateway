@@ -27,10 +27,35 @@
 use super::*;
 use crate::verifier::detect_aws_credential_marker;
 
-/// The presigned parameters that are no credential marker by themselves, because a request that
-/// carries only these names nothing to verify. Beside a header token they are still the remains
-/// of a signature, and the request is refused.
-const PRESIGNED_REMAINDER: [&str; 3] = ["X-Amz-Date", "X-Amz-Expires", "X-Amz-SignedHeaders"];
+/// The SigV4 presigned parameters. Beside a header token a query that names one of them, in any
+/// letter case, is refused: the exact spellings are credential markers or what remains of a
+/// signature, and another case of one is what a host's own pre-routing guard may read as a
+/// presigned URL (legacy RustFS's reads `x-amz-signature` so). A token request is answered by
+/// the floor alone, so the floor must refuse whatever such a guard would have refused.
+const PRESIGNED_PARAMETERS: [&str; 7] = [
+    "x-amz-algorithm",
+    "x-amz-credential",
+    "x-amz-signature",
+    "x-amz-security-token",
+    "x-amz-date",
+    "x-amz-expires",
+    "x-amz-signedheaders",
+];
+
+/// Whether the query names a SigV4 presigned parameter, ignoring ASCII case, on the decoded name.
+/// A name whose escape does not decode is compared as its wire bytes, so a broken spelling
+/// cannot hide one.
+fn names_a_presigned_parameter(view: &WireView<'_>) -> bool {
+    let is_one = |name: &[u8]| {
+        PRESIGNED_PARAMETERS
+            .iter()
+            .any(|known| name.eq_ignore_ascii_case(known.as_bytes()))
+    };
+    view.query.as_str().split('&').any(|component| {
+        let raw_key = component.split_once('=').map_or(component, |(key, _)| key);
+        percent_decode(raw_key).map_or_else(|_| is_one(raw_key.as_bytes()), |key| is_one(&key))
+    })
+}
 
 impl SecurityFloor {
     /// Installs the host-verified header token claim: a request whose head carries `claim`'s
@@ -89,7 +114,7 @@ impl SecurityFloor {
         // token needs no rule of its own: an operation that declares one refuses the scheme below.
         let other_credential = detect_credentials(view).any()
             || detect_aws_credential_marker(view).is_some()
-            || PRESIGNED_REMAINDER.iter().any(|name| view.query_contains(name))
+            || names_a_presigned_parameter(view)
             || self.custom_schemes.matching(view).is_some()
             || view.form_fields().is_some();
         // A refused alias decides the request whatever else it carries: the host's outer layer

@@ -232,7 +232,8 @@ impl Identity {
 
     /// How this name was established. An authorizer or policy source that looks a principal up
     /// by [`Self::access_key_id`] alone must branch on this first: a
-    /// [`IdentityOrigin::HostToken`] name is not an access key, whatever it spells.
+    /// [`IdentityOrigin::HostToken`] name is not an access key, whatever it spells. The origin
+    /// lives in this value only: an `Identity` rebuilt from the bare name is an access key.
     #[must_use]
     pub const fn origin(&self) -> IdentityOrigin {
         self.origin

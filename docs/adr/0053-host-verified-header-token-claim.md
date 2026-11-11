@@ -66,9 +66,9 @@ own detection names, read by the default predicate whatever recognition policy i
 - headers: `authorization` with any value, `x-amz-security-token`, and any header under a
   registered custom scheme prefix;
 - query parameters, by decoded name: `X-Amz-Algorithm`, `X-Amz-Credential`, `X-Amz-Signature`,
-  `X-Amz-Security-Token`, `AWSAccessKeyId` and `Signature`, and the three that are no marker by
-  themselves but are what remains of a presigned URL: `X-Amz-Date`, `X-Amz-Expires` and
-  `X-Amz-SignedHeaders`;
+  `X-Amz-Security-Token`, `AWSAccessKeyId` and `Signature`; the three that are no marker by
+  themselves but are what remains of a presigned URL, `X-Amz-Date`, `X-Amz-Expires` and
+  `X-Amz-SignedHeaders`; and any of those seven `X-Amz-` names in another letter case;
 - a browser form of any content, which covers `x-amz-algorithm`, `x-amz-credential`,
   `x-amz-signature`, `x-amz-security-token`, `AWSAccessKeyId`, `signature` and `policy`.
 
@@ -81,9 +81,21 @@ The answer is the same under every assembly. The facade's RustFS view policies a
 header signature or presigned URL in legacy RustFS's own words before the floor runs; a request
 that presents the claimed header or a refused alias skips those answers and reaches the floor,
 which refuses it. Routing, addressing and wire refusals still come first, as they do for any
-request: they do not depend on a credential. `cookie`, `proxy-authorization` and a lowercase
-spelling of a presigned parameter are not credential surfaces anywhere in the gateway, and are
+request: they do not depend on a credential. Skipping an answer is safe only if the floor refuses
+everything that answer refused. The skipped policies read `Authorization` and the exact-case
+presigned names, which the floor refuses, and one of them, the pre-routing header guard, reads
+`x-amz-signature` in any letter case; that is why the floor refuses the `X-Amz-` presigned names
+in any case beside a token, although no other rule of the gateway reads those spellings.
+`cookie` and `proxy-authorization` are not credential surfaces anywhere in the gateway, and are
 not refused here.
+
+**Beside the SigV2 refusal (ADR-0052).** An operation that refuses SigV2 under every policy
+admits a header token as any other standard operation does: the token is no SigV2 request, and
+that rule lives in the scheme check, which a token request never reaches. A request that carries
+the claimed header beside any SigV2 credential, in `Authorization` or in the query, is refused by
+this claim's exclusivity on every operation, whether or not the operation admits SigV2. The STS
+form and the zip download refuse the scheme for their own reasons above; the two metadata
+listings refuse SigV2 and admit a token.
 
 **The header's shape.** The branch then requires exactly one occurrence of the claimed header, with
 a value of 1 to 8192 bytes, every byte ASCII graphic and none a comma. A repeated, empty, overlong,
@@ -105,7 +117,9 @@ operations of the reference backend that admit the scheme
 dialect that do. The dialect's list is RustFS's two metadata listings (ADR-0050), admitted
 deliberately: they stand on the standard listing floor, answer what `ListObjectsV2` and
 `ListObjectVersions` answer plus each object's user metadata, and the authorizer decides them as
-it decides those. A session-credential operation such as `CreateSession` must be marked to refuse
+it decides those. The first list covers the reference backend's fifty operations and nothing
+else: a host registers its own set, and needs its own reviewed list, taken from the
+`HEADER_TOKEN_POSTURE` line of its own assembly. A session-credential operation such as `CreateSession` must be marked to refuse
 the scheme when it lands; the list is where its absence is checked.
 
 **The verifier, and what binds the identity to the request.** A `HeaderTokenVerifier` names a
@@ -119,7 +133,10 @@ verifier cannot report an identity for a request in which the outer layer establ
 the implementation that needs no other state is the correct one. A thread-local, a global, a
 "last authenticated" slot or a cache keyed on the connection is forbidden as the source of the
 identity: each outlives one request, since requests share threads, HTTP/2 multiplexes callers onto
-one connection and a keep-alive connection carries one caller after another. A task-local scoped
+one connection and a keep-alive connection carries one caller after another. The slot is found by
+its type, so `Established` must be a type private to the host's token layer: a newtype only that
+layer constructs, never `()`, a string or a credentials struct other code also builds, or any
+layer that inserts such a value establishes an identity. The kernel cannot check that. A task-local scoped
 around the inner call would be sound, but the gateway could not tell it from the unsound sources,
 so the typed slot is the one supported form. There is one spelling of "no": a refusal. The facade
 runs the verifier inside its panic boundary; a refusal, a panic and an absent value are each
@@ -132,7 +149,9 @@ all handed that `Identity`, so a store keyed on it never answers a host-reported
 entry of the access key that shares its spelling, and no signature, custom scheme or bearer token
 produces a name that passes for a host-reported one. A consumer that looks a principal up by the
 bare `access_key_id()` string must branch on `Identity::origin`; that accessor's documentation
-says so.
+says so. The origin lives in the `Identity` value and nowhere else: `Identity::new` on the bare
+name builds an access key of the same spelling, and an audit record that keeps only the name
+writes two principals as one. Handlers and sinks carry the `Identity`.
 
 **The receipt and the verdict.** `HeaderTokenAdmission` and `HeaderTokenReceipt` have private
 fields, no `Clone`, no `Default` and no public constructor. Only `SecurityFloor::admit` produces
@@ -154,7 +173,10 @@ unless the handler set a `Cache-Control` of its own. RFC 9111 section 3.5 keeps 
 request with `Authorization` out of a shared cache by default and gives an extension header no
 such protection, so a header-token answer is not in the position a header-signed answer is in. A
 handler's own `Cache-Control`, `public` included, is kept: the gateway does not overrule a handler
-on caching anywhere else.
+on caching anywhere else. That includes a `Cache-Control` an uploader stored on an object, which
+`GetObject` answers: such an object goes out `public` with `Vary` on the claimed header. A cache
+that honours `Vary` keeps callers apart; one that does not can serve it to another caller, as it
+can for a header-signed request, where `public` also permits storing. This is a stated residual.
 
 **Payload and transport.** The request is unsigned. Its framing is decided by the same call that
 decides an anonymous request's framing, and its body has no payload digest obligation. No transport
@@ -268,7 +290,11 @@ The host owns the following, and the gateway cannot check them:
   itself, and a host whose token users and access keys are different principals should still keep
   their name spaces apart.
 - `Vary` and `Cache-Control: private` are added to answers served by a token. A cache that ignores
-  both, or a handler that sets `Cache-Control: public`, is the deployment's.
+  `Vary`, a handler that sets `Cache-Control: public`, and an object stored with one, are the
+  deployment's.
+- `Established` is a type private to the host's token layer, and the reported `Identity` is
+  carried as a value and never rebuilt from its bare name.
+- Each host keeps its own reviewed list of the operations it registers that admit the scheme.
 - A proxy in front of the host removes a header that `Connection` nominates before this hop. The
   gateway decides by the head it receives.
 - Replay policy, expiry and revocation. A header token is a bearer credential; the gateway keeps no
