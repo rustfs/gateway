@@ -26,15 +26,15 @@
 //! Upstream: `super`, `super::tests`, `super::extension_tests`, `super::lambda_tests`.
 //! Downstream: nothing.
 
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
-use rustfs_gateway::SecurityFloor;
+use rustfs_gateway::{Observer, RequestEvent, SecurityFloor};
 use rustfs_gateway_dialect_rustfs_admin::{EXTENSION_ROUTES, RouteRecord};
 
 use super::extension_tests::{path, query, unsigned_at};
 use super::lambda_tests::sigv2_header_signed;
 use super::tests::rows;
-use super::{ACCESS_KEY, Exchange, assemble_on, in_lanes_on, rustfs_profile_floor, unsigned};
+use super::{ACCESS_KEY, Exchange, assemble_installing, assemble_on, in_lanes_on, rustfs_profile_floor, unsigned};
 
 /// The zip download, whose `?token=` URL RustFS admits without a credential.
 const ZIP_DOWNLOAD: &str = "rustfs:GetV3ObjectZipDownloadsByIdZip";
@@ -100,6 +100,38 @@ fn n_a_sigv2_header_signature_on_every_claimed_admin_row_is_refused_without_aski
     });
 }
 
+/// Every error code the observer saw, in request order.
+#[derive(Clone, Default)]
+struct Codes(Arc<Mutex<Vec<Option<String>>>>);
+
+impl Observer for Codes {
+    fn on_response(&self, event: &RequestEvent<'_>) {
+        let code = event.error.map(|code| code.as_str().to_owned());
+        self.0.lock().expect("an unpoisoned list").push(code);
+    }
+}
+
+/// Negative — the `HEAD` rows, whose answer carries no body for the census to read a code from,
+/// are refused as `AccessDenied` as the observer reports it, on both floors. A `HEAD` refused for
+/// another reason, `SignatureDoesNotMatch` from a fixture the floor let through, say, carries
+/// the same status and also asks no authorizer, so only the code separates the two.
+#[test]
+fn n_a_sigv2_header_signature_on_every_head_row_is_refused_as_access_denied() {
+    let heads: Vec<_> = census().into_iter().filter(|(record, _)| record.method == "HEAD").collect();
+    assert!(!heads.is_empty(), "the census has HEAD rows");
+    for (at, floor) in floors() {
+        let codes = Codes::default();
+        let observed = codes.clone();
+        let assembled = assemble_installing(floor, |_, _| true, false, None, |builder| builder.observer(observed));
+        for (record, path) in &heads {
+            let exchange = assembled.exchange(sigv2_header_signed(unsigned(record, path)));
+            assert_eq!(not_refused(&exchange, "HEAD"), None, "{at}: HEAD {path}");
+            let code = codes.0.lock().expect("an unpoisoned list").pop().flatten();
+            assert_eq!(code.as_deref(), Some("AccessDenied"), "{at}: HEAD {path}");
+        }
+    }
+}
+
 /// Negative — a SigV2 header signature on every extension route is `403 AccessDenied` before the
 /// authorizer, on the default floor and on the RustFS profile's.
 #[test]
@@ -128,24 +160,32 @@ fn n_a_sigv2_header_signature_on_either_admin_fallback_is_refused_without_asking
     });
 }
 
-/// Positive — the control: the same SigV2 header fixture on an exempt OIDC bootstrap row is
-/// verified as the shared caller and reaches its handler, on both floors. A fixture refused for
-/// its own reasons would fail here instead of passing the census as a refusal.
+/// Positive — the control: the same SigV2 header fixture on one row of each exempt family, an
+/// OIDC bootstrap row (`admin::anonymous_floor`) and the zip download without a token
+/// (`admin::zip_token_floor`, no bearer verifier installed), is verified as the shared caller and
+/// reaches its handler, on both floors. A fixture refused for its own reasons would fail here
+/// instead of passing the census as a refusal. The zip row also pins the recorded difference of
+/// rustfs/gateway#1592 as the harness observes it without a verifier.
 #[test]
 fn a_sigv2_header_signature_on_an_exempt_row_is_verified_and_reaches_its_handler() {
-    let (record, path) = rows()
+    let oidc = rows()
         .find(|(record, _)| record.anonymous && record.method == "GET")
         .expect("the inventory has a GET OIDC bootstrap row");
+    let zip = rows()
+        .find(|(record, _)| record.operation == ZIP_DOWNLOAD)
+        .expect("the inventory has the zip download");
     for (at, floor) in floors() {
         let assembled = assemble_on(floor, |_, _| true);
-        let exchange = assembled.exchange(sigv2_header_signed(unsigned(record, &path)));
-        assert_eq!(exchange.status, 200, "{at}: GET {path}: {}", exchange.body);
-        assert_eq!(exchange.reached, [record.operation], "{at}");
-        assert!(
-            exchange.asked.iter().all(|asked| asked.caller.as_deref() == Some(ACCESS_KEY)),
-            "{at}: the SigV2 signature was not verified as the caller: {:?}",
-            exchange.asked
-        );
-        assert!(!exchange.asked.is_empty(), "{at}: the authorizer was not asked");
+        for (record, path) in [&oidc, &zip] {
+            let exchange = assembled.exchange(sigv2_header_signed(unsigned(record, path)));
+            assert_eq!(exchange.status, 200, "{at}: GET {path}: {}", exchange.body);
+            assert_eq!(exchange.reached, [record.operation], "{at}: {path}");
+            assert!(!exchange.asked.is_empty(), "{at}: {path}: the authorizer was not asked");
+            assert!(
+                exchange.asked.iter().all(|asked| asked.caller.as_deref() == Some(ACCESS_KEY)),
+                "{at}: {path}: the SigV2 signature was not verified as the caller: {:?}",
+                exchange.asked
+            );
+        }
     }
 }
