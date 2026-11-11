@@ -243,7 +243,7 @@ pub const ZIP_DOWNLOAD_TOKEN: QueryBearerClaim = QueryBearerClaim::new("token", 
 /// by RustFS's handler when none is. It is a later refusal, not an admission.
 #[must_use]
 pub const fn zip_token_floor(name: &'static str) -> OperationFloor {
-    OperationFloor::custom(name, SigService::S3).with_query_bearer_claim(ZIP_DOWNLOAD_TOKEN)
+    OperationFloor::custom(name, SigService::S3).require_sigv4_under_every_policy()
 }
 
 /// The floor of an anonymous bootstrap operation (ADR-0026 (f), ADR-0032): header-signed or
