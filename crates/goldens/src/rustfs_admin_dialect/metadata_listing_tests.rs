@@ -22,7 +22,7 @@
 //! refused before the handler when the authorizer — the bucket policy — does not allow it, or
 //! allows only another action; a presigned listing refused without asking on the default floor
 //! and asked on the profile floor; `metadata=true` appended to a SigV4 presigned standard listing
-//! refused without asking; the SigV2 refusal (ADR-0051): every SigV2 form — presigned or
+//! refused without asking; the SigV2 refusal (ADR-0052): every SigV2 form — presigned or
 //! header-signed, with `metadata=true` signed or appended after signing, which SigV2's signed keys
 //! do not cover — refused `403 AccessDenied` without asking on every floor, where RustFS serves it;
 //! and a trailing-slash bucket path.
@@ -268,7 +268,7 @@ fn asked_as_the_signer(exchange: &Exchange, operation: &str, action: &str, at: &
 
 /// Negative — a SigV2 presigned metadata listing is refused `403 AccessDenied` without asking on
 /// both floors, the RustFS profile's included, which admits a SigV2 presigned standard listing
-/// (ADR-0051). Before rustfs/gateway#1592 the profile floor asked the presigner's listing action
+/// (ADR-0052). Before rustfs/gateway#1592 the profile floor asked the presigner's listing action
 /// here, exactly as for a standard listing (ADR-0050), and RustFS still serves it: a deliberate
 /// difference, because SigV2 does not sign `metadata`.
 #[test]
@@ -287,7 +287,7 @@ fn n_a_sigv2_presigned_metadata_listing_is_refused_on_every_floor() {
 /// nothing the signature covers. Until rustfs/gateway#1592 the RustFS profile's floor turned that
 /// URL into the metadata listing for the presigner, disclosing every object's user metadata, which
 /// the presigner never signed (ADR-0050). The metadata listing's floor now refuses SigV2 under every
-/// policy (ADR-0051): the request is refused `403 AccessDenied` without asking on both floors.
+/// policy (ADR-0052): the request is refused `403 AccessDenied` without asking on both floors.
 #[test]
 fn n_metadata_true_appended_to_a_sigv2_presigned_listing_is_refused_on_every_floor() {
     for (at, floor) in floors() {
@@ -303,7 +303,7 @@ fn n_metadata_true_appended_to_a_sigv2_presigned_listing_is_refused_on_every_flo
 /// with `metadata=true` inside the clock-skew window, which still verifies because the header
 /// string to sign covers the same sub-resource keys only, and a header-signed request that signed
 /// `metadata=true` itself. Until rustfs/gateway#1592 both became the signer's metadata listing on
-/// both floors (ADR-0050); now both are refused `403 AccessDenied` without asking (ADR-0051). The
+/// both floors (ADR-0050); now both are refused `403 AccessDenied` without asking (ADR-0052). The
 /// correctly signed one shows the refusal is the floor's, not a signature failure.
 #[test]
 fn n_a_sigv2_header_signed_metadata_listing_is_refused_on_every_floor() {

@@ -17,7 +17,7 @@
 //! before the authorizer, on the default floor and on the RustFS profile's.
 //!
 //! Responsible for: that census, the zip download's rows included, whose floor refuses SigV2
-//! beside its bearer claim (ADR-0051, rustfs/gateway#1592); the rows it leaves out with their
+//! beside its bearer claim (ADR-0052, rustfs/gateway#1592); the rows it leaves out with their
 //! reason — the OIDC bootstrap rows, which RustFS answers before it reads any credential; and the
 //! positive control, a SigV2 header signature on an exempt row that is verified and reaches its
 //! handler, so a fixture that is refused for its own reasons fails the control rather than
@@ -159,7 +159,7 @@ fn n_a_sigv2_header_signature_on_either_admin_fallback_is_refused_without_asking
 /// (`admin::anonymous_floor`), the one exempt family, is verified as the shared caller and reaches
 /// its handler, on both floors. A fixture refused for its own reasons would fail here instead of
 /// passing the census as a refusal. The zip download was a second exempt row until
-/// rustfs/gateway#1592; its floor now refuses SigV2 (ADR-0051), so it is in the census instead.
+/// rustfs/gateway#1592; its floor now refuses SigV2 (ADR-0052), so it is in the census instead.
 #[test]
 fn a_sigv2_header_signature_on_an_exempt_row_is_verified_and_reaches_its_handler() {
     let (record, path) = rows()

@@ -332,7 +332,7 @@ static SPEC: OperationSpec = admin::spec(NAME, AUTH, false);
 /// header-signed, with anonymous and presigned requests admitted only where the deployment's floor
 /// delegates them for every standard operation, as RustFS's metadata route resolves a signed or anonymous
 /// caller before its bucket listing check (ADR-0050). SigV2 is refused under every policy, because SigV2 does
-/// not sign `metadata` (ADR-0051).
+/// not sign `metadata` (ADR-0052).
 static FLOOR: OperationFloor = admin::listing_floor(NAME);
 
 impl Operation for ListObjectVersionsWithMetadata {

@@ -264,7 +264,7 @@ impl OperationFloor {
     /// Refuses a SigV2 request — header, presigned URL or POST policy — under every
     /// [`crate::SigV2Policy`], at the floor and before its credential is parsed or resolved, with
     /// the [`crate::AuthError::AccessDenied`] that
-    /// [`OperationFloor::require_sigv4_under_every_policy`] answers SigV2 with (ADR-0051).
+    /// [`OperationFloor::require_sigv4_under_every_policy`] answers SigV2 with (ADR-0052).
     ///
     /// The narrower sibling of that requirement: it changes nothing else. SigV4 is admitted as the
     /// allow-list says; a request that presented no AWS credential — anonymous, a query bearer token

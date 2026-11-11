@@ -231,6 +231,8 @@ mod sse_runtime;
 mod static_header_allocations;
 #[path = "steady_state_allocations.rs"]
 mod steady_state_allocations;
+#[path = "store_fault_answer.rs"]
+mod store_fault_answer;
 #[path = "streaming_without_length.rs"]
 mod streaming_without_length;
 #[path = "sts_body_signature.rs"]

@@ -217,8 +217,11 @@ impl SigV4Authenticator {
         };
 
         // The unknown-key branch has now paid for the same derivation a known key does. Only
-        // after that is the uniform credential rejection answered.
+        // after that is the uniform credential rejection — or, under the switch, a fault — answered.
         let Ok(CredentialLookup::Found(credentials)) = resolved else {
+            if self.answers_unavailable(&resolved) {
+                return Ok(None);
+            }
             return Err(AuthError::InvalidAccessKeyId);
         };
         let Some(proof) = proof else {

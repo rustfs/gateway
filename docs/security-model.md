@@ -352,7 +352,7 @@ which is not one of the 35. So a SigV2 listing request is turned into one by an 
 action, for a captured header-signed request inside the skew window and for a presigned URL.
 RustFS behaves that way. The gateway does not: these two operations refuse SigV2 under every
 policy, at the floor and before any credential lookup (`OperationFloor::refuse_sigv2_under_every_policy`,
-ADR-0051), while SigV4 and unsigned listings are decided exactly as on the standard listings.
+ADR-0052), while SigV4 and unsigned listings are decided exactly as on the standard listings.
 
 A second, related SigV2 property: a covered sub-resource's value is percent-decoded before it is
 written into `CanonicalizedResource`, and that block separates its own entries with `&`. So
@@ -379,7 +379,7 @@ quietly.
   as far as the client chose to bind it. SigV4 signs a payload declaration on every request.
   An operation whose parameters travel in the body, and which must stay reachable without a
   signature, refuses SigV2 at the floor with `OperationFloor::refuse_sigv2_under_every_policy`
-  (ADR-0051): the RustFS STS form endpoint and zip download do, before any credential lookup and
+  (ADR-0052): the RustFS STS form endpoint and zip download do, before any credential lookup and
   under every `SigV2Policy`.
 - **Framing.** SigV2 has no streaming form; `aws-chunked` chunk signatures are SigV4 values. A
   SigV2 request that declares one is refused `501` rather than read as if the declaration were
@@ -443,8 +443,19 @@ framework's half:
   `ProviderError::from` reports a provider fault, answered as below. There is no length rule
   beyond this; a minimum length is the deployment's policy.
 - **A store that cannot answer fails closed.** A backend error, timeout or isolated panic is
-  counted, is never cached, and receives the same 403 response as another credential failure. It
-  is never treated as an anonymous request.
+  counted, is never cached, and by default receives the same 403 response as another credential
+  failure. It is never treated as an anonymous request. A host may opt in to answering it
+  `500 InternalError` instead, which SDKs retry
+  (`SigV4Authenticator::answer_credential_store_faults_as_unavailable`, ADR-0051; the RustFS
+  profile turns it on). The answer is given where an unknown key is answered — after the placeholder
+  derivation and comparison, except on the early lookup refusal of a header signature scoped to
+  `sts` without `x-amz-content-sha256` under `accept_legacy_rustfs_signing_services`, where both
+  answer before the body is read. It carries no request or provider text, and closes the connection
+  while a body is owed, as an authentication failure does. It is opt-in because it reveals: a fault
+  confined to a disabled, expired or tokenless-session record exposes a record otherwise hidden as
+  an unknown key; a store slower for existing records than for misses becomes a `500`/`403`
+  existence oracle at the guard's deadline; and during a full outage a negatively cached key still
+  answers `403`. Retries against a failing store are bounded only by the governor (ADR-0051).
 - **An unknown key costs what a known one costs.** The unknown-key path derives from
   `timing::placeholder_secret`, runs the full four-step chain and completes the comparison before
   answering, so the two are not separable by latency (`timing::SIDE_CHANNELS`, row T1). On the

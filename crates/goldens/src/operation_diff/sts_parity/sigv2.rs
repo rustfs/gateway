@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The STS form endpoint's SigV2 refusal through the assembled service (ADR-0051,
+//! The STS form endpoint's SigV2 refusal through the assembled service (ADR-0052,
 //! rustfs/gateway#1592), with a credential provider that records every lookup.
 //!
 //! Responsible for: every SigV2 shape the route can see — header and presigned, signed with the

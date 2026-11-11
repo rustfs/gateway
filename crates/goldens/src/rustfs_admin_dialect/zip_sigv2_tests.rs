@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The zip download's SigV2 refusal through the assembled service (ADR-0051,
+//! The zip download's SigV2 refusal through the assembled service (ADR-0052,
 //! rustfs/gateway#1592): `admin::zip_token_floor` refuses SigV2 under every policy beside its
 //! bearer claim.
 //!
