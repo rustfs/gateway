@@ -56,9 +56,14 @@
 //!
 //! # Why a store outage is not a verdict
 //!
-//! A credential store that cannot answer has not authenticated the caller. The guarded provider
-//! records the fault for operators, while the client receives the same closed `403` as every other
-//! credential failure. It is never downgraded to anonymous.
+//! A credential store that cannot answer has not authenticated the caller and is never treated
+//! as anonymous; the guarded provider counts the fault. By default the client gets the closed
+//! `403` of every other credential failure. Under
+//! [`SigV4Authenticator::answer_credential_store_faults_as_unavailable`] (ADR-0051) it gets
+//! [`Unavailable`], a `500`, where an unknown key is answered: after the derivation and comparison,
+//! except for a header signature scoped to `sts` without `x-amz-content-sha256` under the legacy
+//! signing services, answered before its body is read — earlier than a wrong signature. Opt-in:
+//! it can reveal a record an unknown key's answer hides (ADR-0051 lists how).
 
 use std::sync::Arc;
 
@@ -519,6 +524,8 @@ pub struct SigV4Authenticator {
     /// Whether `SignedHeaders` is read, and its refusals answered, as legacy RustFS does
     /// (rustfs/gateway#1130).
     pub(super) legacy_signed_headers: bool,
+    /// Whether a provider fault is answered [`Unavailable`], not the closed 403 (#1585).
+    pub(super) store_faults_unavailable: bool,
 }
 
 /// An authenticated verdict, and the looked-up secret when the authenticator hands it on.
@@ -551,11 +558,12 @@ impl SigV4Authenticator {
             legacy_paths: false,
             double_encoded_prefixes: &[],
             legacy_signed_headers: false,
+            store_faults_unavailable: false,
         }
     }
 
-    /// `Ok(None)` is the store outage; every other outcome is a verdict or a rejection.
-    async fn try_verify(&self, request: &Authentication<'_>) -> Result<Option<VerifiedWithSecret>, VerificationFailure> {
+    /// A verdict, a rejection, or (under the switch) the store outage `VerificationFailure::Unavailable`.
+    async fn try_verify(&self, request: &Authentication<'_>) -> Result<VerifiedWithSecret, VerificationFailure> {
         let sealed = request.sealed();
         let view = sealed.view();
         let location = sealed.marker().location();
@@ -679,9 +687,9 @@ impl SigV4Authenticator {
             };
 
         // The unknown-key branch has now paid for the same derivation a known key does. Only after
-        // that is the uniform credential rejection answered.
+        // that is the uniform credential rejection — or, under the switch, a fault — answered.
         let Ok(CredentialLookup::Found(credentials)) = resolved else {
-            return Err(AuthError::InvalidAccessKeyId.into());
+            return Err(self.unresolved_lookup(&resolved));
         };
         let Some(proof) = proof.take() else {
             if let Some(pending) = session_refusal {
@@ -743,7 +751,7 @@ impl SigV4Authenticator {
         // copied only when the deployment asked for the hand-off (ADR-0022).
         let secret = self.hand_secret.then(|| credentials.secret().clone_secret());
         let verdict = Verdict::authenticated_in_scope(credentials.identity().clone(), scheme, verified, proof);
-        Ok(Some((verdict, secret)))
+        Ok((verdict, secret))
     }
 }
 
@@ -768,10 +776,11 @@ impl Authenticator for SigV4Authenticator {
     }
 }
 
-enum VerificationFailure {
+pub(super) enum VerificationFailure {
     Ordinary(AuthError),
     Scope(ScopeRejection),
     Body(crate::render::S3Error),
+    Unavailable,
 }
 
 impl From<AuthError> for VerificationFailure {

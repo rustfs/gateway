@@ -106,6 +106,7 @@ second copy is a second thing to keep in sync.
 | 0048 | Bound external data execution through explicit storage registration | Accepted |
 | 0049 | A presigned object lambda on a SigV4-only floor | Accepted |
 | 0050 | The metadata listings on the standard listing floor | Accepted |
+| 0051 | An opt-in internal error for a credential-store fault | Accepted |
 | 0052 | Refuse SigV2 on the STS form, zip download and metadata listing floors | Accepted |
 
 The index is hand-maintained. Generating it would cost more than it saves until

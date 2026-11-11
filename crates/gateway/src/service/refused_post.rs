@@ -44,6 +44,9 @@ use crate::logging::Refused;
 use crate::post_object::PostObjectPrelude;
 use crate::render::{S3Error, from_auth, from_handler};
 
+/// The `500` sentence when the authenticator could not answer a form.
+const FORM_UNAUTHENTICATED: &str = "the form could not be authenticated";
+
 pub(crate) fn applies_to<B>(router: &Router, wire: &WireRequest<B>, target: TargetKind, error: &PreAuthError) -> bool {
     router.selection() == Selection::RustfsLegacy
         && target == TargetKind::Object
@@ -131,11 +134,9 @@ where
         // The form's own policy ceilings, as the routed path and the SigV4 branch below pass them.
         let question = SigV2Authentication::new(&sealed, wire.method(), wire.raw_path().as_str(), None)
             .with_post_policy_limits(Some(policy_limits));
+        // A form's file part is still owed, as every refusal on this path renders it.
         let Ok(authentication) = service.inner.authenticator.authenticate_sigv2(&question).await else {
-            return outcome.refuse_handler_at(
-                Refused::Authentication,
-                HandlerError::internal_error("the form could not be authenticated"),
-            );
+            return outcome.refuse_unavailable(FORM_UNAUTHENTICATED, true);
         };
         let (verdict, _, _) = authentication.into_parts();
         if let Some(error) = SecurityFloor::seal_verdict(verdict, presence).rejection() {
@@ -171,14 +172,8 @@ where
         .with_unrouted_post_policy(&policy);
         let authentication = service.inner.authenticator.authenticate(&question).await;
         let (_, legacy, _) = question.into_published();
-        let authentication = match authentication {
-            Ok(authentication) => authentication,
-            Err(_) => {
-                return outcome.refuse_handler_at(
-                    Refused::Authentication,
-                    HandlerError::internal_error("the form could not be authenticated"),
-                );
-            }
+        let Ok(authentication) = authentication else {
+            return outcome.refuse_unavailable(FORM_UNAUTHENTICATED, true);
         };
         let (verdict, _, _) = authentication.into_parts();
         let verdict = SecurityFloor::seal_verdict(verdict, presence);
