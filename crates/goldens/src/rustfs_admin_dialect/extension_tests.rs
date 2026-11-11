@@ -88,7 +88,7 @@ fn rewritten(mut request: Request<Bytes>, edit: impl FnOnce(String) -> String) -
 }
 
 /// The path an extension record's target addresses.
-fn path(record: &ExtensionRouteRecord) -> String {
+pub(super) fn path(record: &ExtensionRouteRecord) -> String {
     match record.target {
         "service" => "/".to_owned(),
         "bucket" => format!("/{BUCKET}"),
@@ -98,7 +98,7 @@ fn path(record: &ExtensionRouteRecord) -> String {
 }
 
 /// The query that selects an extension record: the key with the value its rule reads.
-fn query(record: &ExtensionRouteRecord) -> String {
+pub(super) fn query(record: &ExtensionRouteRecord) -> String {
     let (key, rule) = record.query;
     match rule.strip_prefix("equals:") {
         Some(value) => format!("{key}={value}"),

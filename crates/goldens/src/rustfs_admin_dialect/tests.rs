@@ -66,7 +66,7 @@ fn refused_without_asking(exchange: &Exchange, at: &str) {
 }
 
 /// Every `(record, path)` pair: every row of every operation, with its parameters filled in.
-fn rows() -> impl Iterator<Item = (&'static RouteRecord, String)> {
+pub(super) fn rows() -> impl Iterator<Item = (&'static RouteRecord, String)> {
     ROUTES
         .iter()
         .flat_map(|record| paths(record).into_iter().map(move |path| (record, path)))
