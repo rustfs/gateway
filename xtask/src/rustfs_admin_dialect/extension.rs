@@ -309,7 +309,7 @@ impl Extended {
             TargetKind::Bucket => "the bucket the path names".to_owned(),
             TargetKind::Object => "the object the path names".to_owned(),
         };
-        let (floor_phrase, floor) = match &None::<String> {
+        let (floor_phrase, floor) = match &self.presigned {
             None => (
                 "the floor is privileged",
                 "/// Privileged and header-signed only: never anonymous, never presigned. RustFS answers an unsigned request\n\
@@ -493,9 +493,10 @@ pub(super) fn admit_presigned(extended: &mut [Extended], rulings: &[(&str, &str)
         if !evidence.starts_with("https://") {
             return Err(format!("the presigned ruling for {name} cites no https:// evidence"));
         }
-        let Some(route) = extended.iter_mut().find(|route| route.name == *name) else {
-            continue;
-        };
+        let route = extended
+            .iter_mut()
+            .find(|route| route.name == *name)
+            .ok_or_else(|| format!("the presigned ruling for {name} names no extension route"))?;
         if route.presigned.replace((*evidence).to_owned()).is_some() {
             return Err(format!("the extension route {name} has two presigned rulings"));
         }
