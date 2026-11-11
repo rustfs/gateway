@@ -225,7 +225,7 @@ impl BearerAdmission {
     }
 
     /// Verifies a request that presented only the bearer token, and answers with its verdict:
-    /// [`Verdict::Bearer`] or a rejection. This is the only way a bearer verdict is built.
+    /// [`crate::Verdict::Bearer`] or a rejection. This is the only way a bearer verdict is built.
     ///
     /// `raw_path` must end with the claim's suffix after a non-empty resource, the verifier must
     /// accept the token, and the kernel then compares the verifier's [`BearerGrant`] itself: the
@@ -250,7 +250,7 @@ impl BearerAdmission {
         };
         let grant = verifier.verify(&request).map_err(|BearerRefused| AuthError::AccessDenied)?;
         // The kernel's own binding, whatever the host checked: the download the token was minted
-        // for, and its lifetime against this request's clock (ADR-0042).
+        // for, and its lifetime against this request's clock (ADR-0046).
         if *grant.resource != *resource || grant.expires_at <= self.now.unix_seconds() {
             return Err(AuthError::AccessDenied);
         }

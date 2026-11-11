@@ -859,13 +859,17 @@ impl S3Service {
             // this request's own raw path; without one, and on any refusal, the token is refused.
             Ok(Admission::Bearer(admission)) => {
                 // A panicking verifier refuses, like any other refusal (crate::panic_boundary).
-                let verdict = match &self.inner.bearer_token_verifier {
-                    Some(verifier) => {
-                        crate::panic_boundary::contain_decision(|| admission.verify(verifier.as_ref(), wire.raw_path().as_str()))
-                            .unwrap_or_else(|()| Verdict::reject(AuthError::AccessDenied))
-                    }
-                    None => Verdict::reject(AuthError::AccessDenied),
-                };
+                let verdict =
+                    match &self.inner.bearer_token_verifier {
+                        Some(verifier) => crate::panic_boundary::contain_decision(|| {
+                            admission.verify(verifier.as_ref(), wire.raw_path().as_str())
+                        })
+                        .unwrap_or_else(|()| {
+                            crate::logging::extension_panicked(Extension::BearerVerifier, outcome.trace.request_id(), operation);
+                            Verdict::reject(AuthError::AccessDenied)
+                        }),
+                        None => Verdict::reject(AuthError::AccessDenied),
+                    };
                 bearer_admitted = true;
                 (AuthenticationOutcome::ordinary(verdict), None)
             }
@@ -943,7 +947,14 @@ impl S3Service {
                             crate::panic_boundary::contain_decision(|| {
                                 admission.verify_alongside(verifier.as_ref(), wire.raw_path().as_str(), signed)
                             })
-                            .unwrap_or(Err(AuthError::AccessDenied))
+                            .unwrap_or_else(|()| {
+                                crate::logging::extension_panicked(
+                                    Extension::BearerVerifier,
+                                    outcome.trace.request_id(),
+                                    operation,
+                                );
+                                Err(AuthError::AccessDenied)
+                            })
                         })
                     });
                 match verified {

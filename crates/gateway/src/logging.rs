@@ -269,6 +269,8 @@ pub(crate) enum Extension {
     Handler,
     /// The authorizer, at either stage.
     Authorizer,
+    /// The host's query bearer verifier (ADR-0042). Its panic is a refusal, answered `403`.
+    BearerVerifier,
 }
 
 impl Extension {
@@ -276,15 +278,26 @@ impl Extension {
         match self {
             Self::Handler => "handler",
             Self::Authorizer => "authorizer",
+            Self::BearerVerifier => "bearer_verifier",
+        }
+    }
+
+    /// The status the panicking request was answered with.
+    const fn answered(self) -> u16 {
+        match self {
+            Self::Handler | Self::Authorizer => 500,
+            Self::BearerVerifier => 403,
         }
     }
 
     fn throttle(self) -> &'static Throttle {
         static HANDLER: Throttle = Throttle::new();
         static AUTHORIZER: Throttle = Throttle::new();
+        static BEARER_VERIFIER: Throttle = Throttle::new();
         match self {
             Self::Handler => &HANDLER,
             Self::Authorizer => &AUTHORIZER,
+            Self::BearerVerifier => &BEARER_VERIFIER,
         }
     }
 }
@@ -299,6 +312,7 @@ pub(crate) fn extension_panicked(extension: Extension, request_id: &RequestId, o
     let Some(suppressed) = extension.throttle().claim() else {
         return;
     };
+    let answered = extension.answered();
     let extension = extension.name();
     tracing::error!(
         target: TARGET,
@@ -310,7 +324,7 @@ pub(crate) fn extension_panicked(extension: Extension, request_id: &RequestId, o
         request_id = %request_id,
         operation,
         suppressed,
-        "{extension} panicked; the request was answered 500"
+        "{extension} panicked; the request was answered {answered}"
     );
 }
 

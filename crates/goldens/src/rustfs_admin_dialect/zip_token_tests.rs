@@ -32,7 +32,7 @@ use rustfs_gateway::{BearerGrant, BearerRefused, BearerTokenRequest, BearerToken
 
 use rustfs_gateway::{ClockSkewAck, FixedClock, SecurityFloor};
 
-use super::{Exchange, REGION, assemble, assemble_with_bearer_verifier, wire};
+use super::{Assembled, Exchange, REGION, assemble, assemble_on, assemble_with_bearer_verifier, rustfs_profile_floor, wire};
 use crate::operation_diff::s3s_0_17_0::context::{ACCESS_KEY, ContextRequest, PATH_HOST};
 
 pub(super) const ZIP_GET: &str = "rustfs:GetV3ObjectZipDownloadsByIdZip";
@@ -77,6 +77,24 @@ impl BearerTokenVerifier for FixtureVerifier {
     }
 }
 
+/// The default floor and the RustFS profile's floor, which reads a query or form as signed only
+/// when it carries the signature (rustfs/gateway#1130). Every bearer test runs under both.
+pub(super) fn floors() -> [(&'static str, SecurityFloor); 2] {
+    [
+        ("default", SecurityFloor::new()),
+        ("rustfs-profile", rustfs_profile_floor().recognize_signatures_as_legacy_rustfs()),
+    ]
+}
+
+/// [`assemble_with_bearer_verifier`] behind `floor`.
+fn with_verifier(
+    floor: SecurityFloor,
+    policy: impl Fn(&str, &str) -> bool + Send + Sync + 'static,
+    verifier: impl BearerTokenVerifier,
+) -> Assembled {
+    super::assemble_installing(floor, policy, false, None, |builder| builder.bearer_token_verifier(verifier))
+}
+
 pub(super) fn unsigned(method: &str, uri: &str) -> Request<Bytes> {
     Request::builder()
         .method(method)
@@ -108,27 +126,30 @@ pub(super) fn asked_of(verifier: &FixtureVerifier) -> Vec<String> {
 /// the host's state and no signed principal, and no context holds the token.
 #[test]
 fn a_verified_token_admits_the_download_as_its_principal_under_both_aliases() {
-    let verifier = FixtureVerifier::default();
-    let assembled = assemble_with_bearer_verifier(|_, action| action == "rustfs:DownloadObjectZip", verifier.clone());
-    for prefix in ["/rustfs/admin", "/minio/admin"] {
-        let uri = format!("{prefix}/v3/object-zip-downloads/abc.zip?note=a&token={GOOD}");
-        let exchange = assembled.exchange(unsigned("GET", &uri));
-        assert_eq!(exchange.status, 200, "{uri}: {}", exchange.body);
-        assert_eq!(exchange.reached, [ZIP_GET], "{uri}");
-        assert_eq!(asked_of(&verifier), ["abc"], "{uri}: verified once, bound to the raw id");
-        let handed = &exchange.handed[0];
-        assert_eq!(handed.params, [("id".to_owned(), "abc.zip".to_owned())], "{uri}");
-        assert_eq!(handed.principal, None, "{uri}: no signature, so no signed principal");
-        assert_eq!(handed.bearer, Some((ACCESS_KEY.to_owned(), Some("archive-abc".to_owned()))), "{uri}");
-        assert!(!handed.anonymous, "{uri}: a bearer request is not anonymous");
-        assert_eq!(handed.raw_query, "note=a", "{uri}: the handler never holds the token");
-        assert!(!exchange.asked.is_empty(), "{uri}: the authorizer was asked");
-        for asked in &exchange.asked {
-            assert_eq!(asked.caller.as_deref(), Some(ACCESS_KEY), "{uri}: {asked:?}");
-            assert_eq!(asked.scheme, "Bearer", "{uri}: {asked:?}");
-            assert_eq!(asked.query.as_deref(), Some("note=a"), "{uri}: {asked:?}");
+    for (floor_name, floor) in floors() {
+        eprintln!("floor: {floor_name}");
+        let verifier = FixtureVerifier::default();
+        let assembled = with_verifier(floor.clone(), |_, action| action == "rustfs:DownloadObjectZip", verifier.clone());
+        for prefix in ["/rustfs/admin", "/minio/admin"] {
+            let uri = format!("{prefix}/v3/object-zip-downloads/abc.zip?note=a&token={GOOD}");
+            let exchange = assembled.exchange(unsigned("GET", &uri));
+            assert_eq!(exchange.status, 200, "{uri}: {}", exchange.body);
+            assert_eq!(exchange.reached, [ZIP_GET], "{uri}");
+            assert_eq!(asked_of(&verifier), ["abc"], "{uri}: verified once, bound to the raw id");
+            let handed = &exchange.handed[0];
+            assert_eq!(handed.params, [("id".to_owned(), "abc.zip".to_owned())], "{uri}");
+            assert_eq!(handed.principal, None, "{uri}: no signature, so no signed principal");
+            assert_eq!(handed.bearer, Some((ACCESS_KEY.to_owned(), Some("archive-abc".to_owned()))), "{uri}");
+            assert!(!handed.anonymous, "{uri}: a bearer request is not anonymous");
+            assert_eq!(handed.raw_query, "note=a", "{uri}: the handler never holds the token");
+            assert!(!exchange.asked.is_empty(), "{uri}: the authorizer was asked");
+            for asked in &exchange.asked {
+                assert_eq!(asked.caller.as_deref(), Some(ACCESS_KEY), "{uri}: {asked:?}");
+                assert_eq!(asked.scheme, "Bearer", "{uri}: {asked:?}");
+                assert_eq!(asked.query.as_deref(), Some("note=a"), "{uri}: {asked:?}");
+            }
+            assert!(!exchange.body.to_ascii_lowercase().contains("sentinel"), "{uri}: {}", exchange.body);
         }
-        assert!(!exchange.body.to_ascii_lowercase().contains("sentinel"), "{uri}: {}", exchange.body);
     }
 }
 
@@ -136,39 +157,46 @@ fn a_verified_token_admits_the_download_as_its_principal_under_both_aliases() {
 /// request before its handler.
 #[test]
 fn n_a_verified_token_is_still_refused_by_the_authorizer() {
-    let verifier = FixtureVerifier::default();
-    let assembled = assemble_with_bearer_verifier(|_, _| false, verifier.clone());
-    let exchange = assembled.exchange(unsigned("GET", &format!("/rustfs/admin/v3/object-zip-downloads/abc.zip?token={GOOD}")));
-    assert_eq!(exchange.status, 403, "{}", exchange.body);
-    assert!(exchange.reached.is_empty(), "{:?}", exchange.reached);
-    assert_eq!(exchange.asked[0].caller.as_deref(), Some(ACCESS_KEY));
+    for (floor_name, floor) in floors() {
+        eprintln!("floor: {floor_name}");
+        let verifier = FixtureVerifier::default();
+        let assembled = with_verifier(floor.clone(), |_, _| false, verifier.clone());
+        let exchange =
+            assembled.exchange(unsigned("GET", &format!("/rustfs/admin/v3/object-zip-downloads/abc.zip?token={GOOD}")));
+        assert_eq!(exchange.status, 403, "{}", exchange.body);
+        assert!(exchange.reached.is_empty(), "{:?}", exchange.reached);
+        assert_eq!(exchange.asked[0].caller.as_deref(), Some(ACCESS_KEY));
+    }
 }
 
 /// Negative — with the verifier installed, a missing, empty, repeated, unknown, expired or
 /// other-download token, a wrong suffix and a suffixless id are all refused before the authorizer.
 #[test]
 fn n_an_unverifiable_token_only_download_is_refused_without_asking() {
-    let verifier = FixtureVerifier::default();
-    let assembled = assemble_with_bearer_verifier(|_, _| true, verifier.clone());
-    let zip = "/rustfs/admin/v3/object-zip-downloads";
-    for (uri, reaches_verifier) in [
-        (format!("{zip}/abc.zip"), false),
-        (format!("{zip}/abc.zip?token="), false),
-        (format!("{zip}/abc.zip?token={GOOD}&token={GOOD}"), false),
-        (format!("{zip}/abc.zip?token={GOOD}&token=invalid"), false),
-        (format!("{zip}/abc.zip?token=invalid"), true),
-        (format!("{zip}/abc.zip?token={EXPIRED}"), true),
-        (format!("{zip}/abc.zip?token={OTHER_DOWNLOAD}"), true),
-        (format!("{zip}/xyz.zip?token={GOOD}"), true),
-        (format!("{zip}/abc.tar?token={GOOD}"), false),
-        (format!("{zip}/abc?token={GOOD}"), false),
-        (format!("{zip}/abc%2Ezip?token={GOOD}"), false),
-        // The id is bound raw: neither decoded nor case-folded before the host compares it.
-        (format!("{zip}/%61bc.zip?token={GOOD}"), true),
-        (format!("{zip}/ABC.zip?token={GOOD}"), true),
-    ] {
-        refused_without_asking(&assembled.exchange(unsigned("GET", &uri)), &uri);
-        assert_eq!(!asked_of(&verifier).is_empty(), reaches_verifier, "{uri}");
+    for (floor_name, floor) in floors() {
+        eprintln!("floor: {floor_name}");
+        let verifier = FixtureVerifier::default();
+        let assembled = with_verifier(floor.clone(), |_, _| true, verifier.clone());
+        let zip = "/rustfs/admin/v3/object-zip-downloads";
+        for (uri, reaches_verifier) in [
+            (format!("{zip}/abc.zip"), false),
+            (format!("{zip}/abc.zip?token="), false),
+            (format!("{zip}/abc.zip?token={GOOD}&token={GOOD}"), false),
+            (format!("{zip}/abc.zip?token={GOOD}&token=invalid"), false),
+            (format!("{zip}/abc.zip?token=invalid"), true),
+            (format!("{zip}/abc.zip?token={EXPIRED}"), true),
+            (format!("{zip}/abc.zip?token={OTHER_DOWNLOAD}"), true),
+            (format!("{zip}/xyz.zip?token={GOOD}"), true),
+            (format!("{zip}/abc.tar?token={GOOD}"), false),
+            (format!("{zip}/abc?token={GOOD}"), false),
+            (format!("{zip}/abc%2Ezip?token={GOOD}"), false),
+            // The id is bound raw: neither decoded nor case-folded before the host compares it.
+            (format!("{zip}/%61bc.zip?token={GOOD}"), true),
+            (format!("{zip}/ABC.zip?token={GOOD}"), true),
+        ] {
+            refused_without_asking(&assembled.exchange(unsigned("GET", &uri)), &uri);
+            assert_eq!(!asked_of(&verifier).is_empty(), reaches_verifier, "{uri}");
+        }
     }
 }
 
@@ -177,21 +205,24 @@ fn n_an_unverifiable_token_only_download_is_refused_without_asking() {
 /// verifier, so the refusal is the host's answer to the exact presented value, not a parse error.
 #[test]
 fn n_a_tampered_token_is_refused() {
-    let verifier = FixtureVerifier::default();
-    let assembled = assemble_with_bearer_verifier(|_, _| true, verifier.clone());
-    let zip = "/rustfs/admin/v3/object-zip-downloads/abc.zip";
-    let tampered = [
-        GOOD.replacen("abc", "abd", 1),
-        GOOD.to_ascii_uppercase(),
-        GOOD[..GOOD.len() - 1].to_owned(),
-        format!("{GOOD}0"),
-        format!("{GOOD}%00"),
-    ];
-    for token in tampered {
-        assert_ne!(token, GOOD, "the fixture must tamper");
-        let uri = format!("{zip}?token={token}");
-        refused_without_asking(&assembled.exchange(unsigned("GET", &uri)), &uri);
-        assert_eq!(asked_of(&verifier), ["abc"], "{uri}: the host decided");
+    for (floor_name, floor) in floors() {
+        eprintln!("floor: {floor_name}");
+        let verifier = FixtureVerifier::default();
+        let assembled = with_verifier(floor.clone(), |_, _| true, verifier.clone());
+        let zip = "/rustfs/admin/v3/object-zip-downloads/abc.zip";
+        let tampered = [
+            GOOD.replacen("abc", "abd", 1),
+            GOOD.to_ascii_uppercase(),
+            GOOD[..GOOD.len() - 1].to_owned(),
+            format!("{GOOD}0"),
+            format!("{GOOD}%00"),
+        ];
+        for token in tampered {
+            assert_ne!(token, GOOD, "the fixture must tamper");
+            let uri = format!("{zip}?token={token}");
+            refused_without_asking(&assembled.exchange(unsigned("GET", &uri)), &uri);
+            assert_eq!(asked_of(&verifier), ["abc"], "{uri}: the host decided");
+        }
     }
 }
 
@@ -228,36 +259,39 @@ impl BearerTokenVerifier for ClockedVerifier {
 /// the authorizer, and one expiring a second later is admitted.
 #[test]
 fn n_expiry_is_judged_on_the_request_clock_at_its_exact_boundary() {
-    let verifier = ClockedVerifier::default();
-    let seen = Arc::clone(&verifier.seen);
-    let assembled = super::assemble_installing(
-        SecurityFloor::new(),
-        |_, _| true,
-        false,
-        None,
-        |builder| {
-            builder.bearer_token_verifier(verifier).clock_with_skew_ack(
-                FixedClock::at_unix_seconds(PINNED_AT),
-                ClockSkewAck::i_understand_a_skewed_clock_can_disable_signature_expiry(),
-            )
-        },
-    );
-    let zip = "/rustfs/admin/v3/object-zip-downloads/abc.zip";
-    let at_boundary = format!("{zip}?token={EXPIRES_NOW}");
-    refused_without_asking(&assembled.exchange(unsigned("GET", &at_boundary)), &at_boundary);
-    let next = assembled.exchange(unsigned("GET", &format!("{zip}?token={EXPIRES_NEXT}")));
-    assert_eq!(next.status, 200, "{}", next.body);
-    assert_eq!(next.reached, [ZIP_GET]);
-    assert_eq!(
-        *seen.lock().expect("uncontended"),
-        [PINNED_AT, PINNED_AT],
-        "the request's own clock reading"
-    );
+    for (floor_name, floor) in floors() {
+        eprintln!("floor: {floor_name}");
+        let verifier = ClockedVerifier::default();
+        let seen = Arc::clone(&verifier.seen);
+        let assembled = super::assemble_installing(
+            floor.clone(),
+            |_, _| true,
+            false,
+            None,
+            |builder| {
+                builder.bearer_token_verifier(verifier).clock_with_skew_ack(
+                    FixedClock::at_unix_seconds(PINNED_AT),
+                    ClockSkewAck::i_understand_a_skewed_clock_can_disable_signature_expiry(),
+                )
+            },
+        );
+        let zip = "/rustfs/admin/v3/object-zip-downloads/abc.zip";
+        let at_boundary = format!("{zip}?token={EXPIRES_NOW}");
+        refused_without_asking(&assembled.exchange(unsigned("GET", &at_boundary)), &at_boundary);
+        let next = assembled.exchange(unsigned("GET", &format!("{zip}?token={EXPIRES_NEXT}")));
+        assert_eq!(next.status, 200, "{}", next.body);
+        assert_eq!(next.reached, [ZIP_GET]);
+        assert_eq!(
+            *seen.lock().expect("uncontended"),
+            [PINNED_AT, PINNED_AT],
+            "the request's own clock reading"
+        );
+    }
 }
 
 /// Every `tracing` event and span field emitted on this thread, each rendered whole.
 #[derive(Clone, Default)]
-struct Capture(Arc<Mutex<Vec<String>>>);
+pub(super) struct Capture(pub(super) Arc<Mutex<Vec<String>>>);
 
 struct Rendered(String);
 
@@ -304,7 +338,7 @@ impl tracing::Subscriber for Capture {
 
 /// The process-wide subscriber: records nothing and never caches a callsite as uninteresting, so a
 /// callsite first reached on another test's thread still asks this thread's capture.
-struct Undecided;
+pub(super) struct Undecided;
 
 impl tracing::Subscriber for Undecided {
     fn register_callsite(&self, _metadata: &'static tracing::Metadata<'static>) -> tracing::subscriber::Interest {
@@ -336,36 +370,39 @@ impl tracing::Subscriber for Undecided {
 /// the request path's events.
 #[test]
 fn n_no_log_event_holds_a_token() {
-    // Another case may have installed one first; one only has to exist.
-    let _ = tracing::subscriber::set_global_default(Undecided);
-    let capture = Capture::default();
-    let zip = "/rustfs/admin/v3/object-zip-downloads/abc.zip";
-    let statuses = tracing::subscriber::with_default(capture.clone(), || {
-        tracing::callsite::rebuild_interest_cache();
-        let with_verifier = assemble_with_bearer_verifier(|_, _| true, FixtureVerifier::default());
-        let without = assemble(|_, _| true);
-        [
-            with_verifier.exchange(unsigned("GET", &format!("{zip}?token={GOOD}"))).status,
-            with_verifier
-                .exchange(unsigned("GET", &format!("{zip}?token={EXPIRED}")))
-                .status,
-            without.exchange(unsigned("GET", &format!("{zip}?token={GOOD}"))).status,
-            with_verifier
-                .exchange(signed_get(zip, &format!("token={OTHER_PRINCIPAL}")))
-                .status,
-        ]
-    });
-    assert_eq!(statuses, [200, 403, 403, 403]);
-    let events = capture.0.lock().expect("uncontended").clone();
-    let refusals = events
-        .iter()
-        .filter(|event| event.contains("gateway_request_refused"))
-        .count();
-    assert_eq!(refusals, 3, "{events:#?}");
-    for event in &events {
-        let lowered = event.to_ascii_lowercase();
-        assert!(!lowered.contains("sentinel"), "a log event holds a token: {event}");
-        assert!(!lowered.contains("tok-"), "a log event holds a token: {event}");
+    for (floor_name, floor) in floors() {
+        eprintln!("floor: {floor_name}");
+        // Another case may have installed one first; one only has to exist.
+        let _ = tracing::subscriber::set_global_default(Undecided);
+        let capture = Capture::default();
+        let zip = "/rustfs/admin/v3/object-zip-downloads/abc.zip";
+        let statuses = tracing::subscriber::with_default(capture.clone(), || {
+            tracing::callsite::rebuild_interest_cache();
+            let with_verifier = with_verifier(floor.clone(), |_, _| true, FixtureVerifier::default());
+            let without = assemble_on(floor.clone(), |_, _| true);
+            [
+                with_verifier.exchange(unsigned("GET", &format!("{zip}?token={GOOD}"))).status,
+                with_verifier
+                    .exchange(unsigned("GET", &format!("{zip}?token={EXPIRED}")))
+                    .status,
+                without.exchange(unsigned("GET", &format!("{zip}?token={GOOD}"))).status,
+                with_verifier
+                    .exchange(signed_get(zip, &format!("token={OTHER_PRINCIPAL}")))
+                    .status,
+            ]
+        });
+        assert_eq!(statuses, [200, 403, 403, 403]);
+        let events = capture.0.lock().expect("uncontended").clone();
+        let refusals = events
+            .iter()
+            .filter(|event| event.contains("gateway_request_refused"))
+            .count();
+        assert_eq!(refusals, 3, "{events:#?}");
+        for event in &events {
+            let lowered = event.to_ascii_lowercase();
+            assert!(!lowered.contains("sentinel"), "a log event holds a token: {event}");
+            assert!(!lowered.contains("tok-"), "a log event holds a token: {event}");
+        }
     }
 }
 
@@ -373,27 +410,33 @@ fn n_no_log_event_holds_a_token() {
 /// on another admin operation and on the admin fallback is refused, and the verifier is never asked.
 #[test]
 fn n_a_token_on_any_other_route_is_refused_and_never_verified() {
-    let verifier = FixtureVerifier::default();
-    let assembled = assemble_with_bearer_verifier(|_, _| true, verifier.clone());
-    for (method, uri) in [
-        ("POST", format!("/rustfs/admin/v3/object-zip-downloads?token={GOOD}")),
-        ("PUT", format!("/rustfs/admin/v3/object-zip-downloads/abc.zip?token={GOOD}")),
-        ("GET", format!("/rustfs/admin/v3/info?token={GOOD}")),
-        ("GET", format!("/rustfs/admin/v3/no-such-route/abc.zip?token={GOOD}")),
-    ] {
-        let at = format!("{method} {uri}");
-        refused_without_asking(&assembled.exchange(unsigned(method, &uri)), &at);
-        assert!(asked_of(&verifier).is_empty(), "{at}: the verifier was asked");
+    for (floor_name, floor) in floors() {
+        eprintln!("floor: {floor_name}");
+        let verifier = FixtureVerifier::default();
+        let assembled = with_verifier(floor.clone(), |_, _| true, verifier.clone());
+        for (method, uri) in [
+            ("POST", format!("/rustfs/admin/v3/object-zip-downloads?token={GOOD}")),
+            ("PUT", format!("/rustfs/admin/v3/object-zip-downloads/abc.zip?token={GOOD}")),
+            ("GET", format!("/rustfs/admin/v3/info?token={GOOD}")),
+            ("GET", format!("/rustfs/admin/v3/no-such-route/abc.zip?token={GOOD}")),
+        ] {
+            let at = format!("{method} {uri}");
+            refused_without_asking(&assembled.exchange(unsigned(method, &uri)), &at);
+            assert!(asked_of(&verifier).is_empty(), "{at}: the verifier was asked");
+        }
     }
 }
 
 /// Negative — without an installed verifier the claim refuses every token, the valid one included.
 #[test]
 fn n_without_a_verifier_a_valid_token_is_refused() {
-    let assembled = assemble(|_, _| true);
-    for prefix in ["/rustfs/admin", "/minio/admin"] {
-        let uri = format!("{prefix}/v3/object-zip-downloads/abc.zip?token={GOOD}");
-        refused_without_asking(&assembled.exchange(unsigned("GET", &uri)), &uri);
+    for (floor_name, floor) in floors() {
+        eprintln!("floor: {floor_name}");
+        let assembled = assemble_on(floor.clone(), |_, _| true);
+        for prefix in ["/rustfs/admin", "/minio/admin"] {
+            let uri = format!("{prefix}/v3/object-zip-downloads/abc.zip?token={GOOD}");
+            refused_without_asking(&assembled.exchange(unsigned("GET", &uri)), &uri);
+        }
     }
 }
 
@@ -401,31 +444,34 @@ fn n_without_a_verifier_a_valid_token_is_refused() {
 /// `Authorization` header and a bad header signature are refused, and the verifier is never asked.
 #[test]
 fn n_a_bad_presented_credential_is_not_rescued_by_a_good_token() {
-    let verifier = FixtureVerifier::default();
-    let assembled = assemble_with_bearer_verifier(|_, _| true, verifier.clone());
-    let path = "/rustfs/admin/v3/object-zip-downloads/abc.zip";
-    let query = format!("token={GOOD}");
-    let mut malformed = unsigned("GET", &format!("{path}?{query}"));
-    malformed
-        .headers_mut()
-        .insert(http::header::AUTHORIZATION, HeaderValue::from_static("Bearer something"));
-    let mut tampered = signed_get(path, &query);
-    let authorization = tampered.headers()[http::header::AUTHORIZATION]
-        .to_str()
-        .expect("ascii")
-        .to_owned();
-    let flipped = if authorization.ends_with('0') { '1' } else { '0' };
-    let tampered_value = format!("{}{flipped}", &authorization[..authorization.len() - 1]);
-    tampered.headers_mut().insert(
-        http::header::AUTHORIZATION,
-        HeaderValue::from_str(&tampered_value).expect("a header value"),
-    );
-    for (at, request) in [("malformed authorization", malformed), ("tampered signature", tampered)] {
-        let exchange = assembled.exchange(request);
-        assert!(matches!(exchange.status, 400 | 403), "{at}: {} {}", exchange.status, exchange.body);
-        assert!(exchange.reached.is_empty(), "{at}: {:?}", exchange.reached);
-        assert!(exchange.asked.is_empty(), "{at}: {:?}", exchange.asked);
-        assert!(asked_of(&verifier).is_empty(), "{at}: the verifier was asked");
+    for (floor_name, floor) in floors() {
+        eprintln!("floor: {floor_name}");
+        let verifier = FixtureVerifier::default();
+        let assembled = with_verifier(floor.clone(), |_, _| true, verifier.clone());
+        let path = "/rustfs/admin/v3/object-zip-downloads/abc.zip";
+        let query = format!("token={GOOD}");
+        let mut malformed = unsigned("GET", &format!("{path}?{query}"));
+        malformed
+            .headers_mut()
+            .insert(http::header::AUTHORIZATION, HeaderValue::from_static("Bearer something"));
+        let mut tampered = signed_get(path, &query);
+        let authorization = tampered.headers()[http::header::AUTHORIZATION]
+            .to_str()
+            .expect("ascii")
+            .to_owned();
+        let flipped = if authorization.ends_with('0') { '1' } else { '0' };
+        let tampered_value = format!("{}{flipped}", &authorization[..authorization.len() - 1]);
+        tampered.headers_mut().insert(
+            http::header::AUTHORIZATION,
+            HeaderValue::from_str(&tampered_value).expect("a header value"),
+        );
+        for (at, request) in [("malformed authorization", malformed), ("tampered signature", tampered)] {
+            let exchange = assembled.exchange(request);
+            assert!(matches!(exchange.status, 400 | 403), "{at}: {} {}", exchange.status, exchange.body);
+            assert!(exchange.reached.is_empty(), "{at}: {:?}", exchange.reached);
+            assert!(exchange.asked.is_empty(), "{at}: {:?}", exchange.asked);
+            assert!(asked_of(&verifier).is_empty(), "{at}: the verifier was asked");
+        }
     }
 }
 
@@ -434,33 +480,36 @@ fn n_a_bad_presented_credential_is_not_rescued_by_a_good_token() {
 /// principal stays the principal, and no context holds the token.
 #[test]
 fn a_signed_download_still_works_with_and_without_a_verifier() {
-    let path = "/rustfs/admin/v3/object-zip-downloads/abc.zip";
-    let plain = assemble(|_, _| true).exchange(signed_get(path, &format!("token={GOOD}")));
-    assert_eq!(plain.status, 200, "{}", plain.body);
-    assert_eq!(plain.handed[0].principal.as_deref(), Some(ACCESS_KEY));
-    assert_eq!(plain.handed[0].bearer, None);
-    assert_eq!(plain.handed[0].raw_query, format!("token={GOOD}"));
-    assert!(!plain.asked.is_empty());
-    assert!(
-        plain
-            .asked
-            .iter()
-            .all(|asked| asked.query.as_deref() == Some(format!("token={GOOD}").as_str()))
-    );
-    assert!(plain.asked.iter().all(|asked| asked.scheme == "SigV4Header"), "{:?}", plain.asked);
+    for (floor_name, floor) in floors() {
+        eprintln!("floor: {floor_name}");
+        let path = "/rustfs/admin/v3/object-zip-downloads/abc.zip";
+        let plain = assemble_on(floor.clone(), |_, _| true).exchange(signed_get(path, &format!("token={GOOD}")));
+        assert_eq!(plain.status, 200, "{}", plain.body);
+        assert_eq!(plain.handed[0].principal.as_deref(), Some(ACCESS_KEY));
+        assert_eq!(plain.handed[0].bearer, None);
+        assert_eq!(plain.handed[0].raw_query, format!("token={GOOD}"));
+        assert!(!plain.asked.is_empty());
+        assert!(
+            plain
+                .asked
+                .iter()
+                .all(|asked| asked.query.as_deref() == Some(format!("token={GOOD}").as_str()))
+        );
+        assert!(plain.asked.iter().all(|asked| asked.scheme == "SigV4Header"), "{:?}", plain.asked);
 
-    let verifier = FixtureVerifier::default();
-    let assembled = assemble_with_bearer_verifier(|_, _| true, verifier.clone());
-    let exchange = assembled.exchange(signed_get(path, &format!("token={GOOD}")));
-    assert_eq!(exchange.status, 200, "{}", exchange.body);
-    assert_eq!(asked_of(&verifier), ["abc"]);
-    let handed = &exchange.handed[0];
-    assert_eq!(handed.principal.as_deref(), Some(ACCESS_KEY));
-    assert_eq!(handed.bearer, Some((ACCESS_KEY.to_owned(), Some("archive-abc".to_owned()))));
-    assert_eq!(handed.raw_query, "");
-    for asked in &exchange.asked {
-        assert_eq!(asked.scheme, "SigV4Header", "{asked:?}");
-        assert_eq!(asked.query.as_deref(), Some(""), "{asked:?}");
+        let verifier = FixtureVerifier::default();
+        let assembled = with_verifier(floor.clone(), |_, _| true, verifier.clone());
+        let exchange = assembled.exchange(signed_get(path, &format!("token={GOOD}")));
+        assert_eq!(exchange.status, 200, "{}", exchange.body);
+        assert_eq!(asked_of(&verifier), ["abc"]);
+        let handed = &exchange.handed[0];
+        assert_eq!(handed.principal.as_deref(), Some(ACCESS_KEY));
+        assert_eq!(handed.bearer, Some((ACCESS_KEY.to_owned(), Some("archive-abc".to_owned()))));
+        assert_eq!(handed.raw_query, "");
+        for asked in &exchange.asked {
+            assert_eq!(asked.scheme, "SigV4Header", "{asked:?}");
+            assert_eq!(asked.query.as_deref(), Some(""), "{asked:?}");
+        }
     }
 }
 
@@ -468,17 +517,20 @@ fn a_signed_download_still_works_with_and_without_a_verifier() {
 /// accepts for this download and for the signed principal.
 #[test]
 fn n_with_a_verifier_a_signed_download_needs_its_own_principals_token() {
-    let verifier = FixtureVerifier::default();
-    let assembled = assemble_with_bearer_verifier(|_, _| true, verifier);
-    let path = "/rustfs/admin/v3/object-zip-downloads/abc.zip";
-    for query in [
-        String::new(),
-        "token=invalid".to_owned(),
-        format!("token={OTHER_PRINCIPAL}"),
-        format!("token={OTHER_DOWNLOAD}"),
-        format!("token={EXPIRED}"),
-    ] {
-        refused_without_asking(&assembled.exchange(signed_get(path, &query)), &query);
+    for (floor_name, floor) in floors() {
+        eprintln!("floor: {floor_name}");
+        let verifier = FixtureVerifier::default();
+        let assembled = with_verifier(floor.clone(), |_, _| true, verifier);
+        let path = "/rustfs/admin/v3/object-zip-downloads/abc.zip";
+        for query in [
+            String::new(),
+            "token=invalid".to_owned(),
+            format!("token={OTHER_PRINCIPAL}"),
+            format!("token={OTHER_DOWNLOAD}"),
+            format!("token={EXPIRED}"),
+        ] {
+            refused_without_asking(&assembled.exchange(signed_get(path, &query)), &query);
+        }
     }
 }
 

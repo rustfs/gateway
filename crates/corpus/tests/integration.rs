@@ -128,56 +128,6 @@ fn security_token_header_is_refused() {
 }
 
 #[test]
-fn presigned_signature_query_parameter_is_refused() {
-    let mut entry = base_entry();
-    entry.target = "/bucket/key?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Expires=900\
-                    &X-Amz-Signature=1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f809"
-        .to_owned();
-    let refusal = redact::admit(&entry).unwrap_err();
-    assert!(
-        refusal
-            .findings
-            .iter()
-            .any(|finding| finding.reason == redact::Reason::LiveCredentialField
-                && finding.site == redact::Site::QueryParam("x-amz-signature".to_owned())),
-        "{refusal}"
-    );
-}
-
-/// Negative — the bearer `token` of a RustFS zip-download URL (ADR-0042) is credential material:
-/// an entry still carrying it is refused, whatever its case.
-#[test]
-fn a_zip_download_token_query_parameter_is_refused() {
-    for name in ["token", "Token"] {
-        let mut entry = base_entry();
-        entry.target = format!("/rustfs/admin/v3/object-zip-downloads/abc.zip?{name}=opaque-bearer-value");
-        let refusal = redact::admit(&entry).unwrap_err();
-        assert!(
-            refusal
-                .findings
-                .iter()
-                .any(|finding| finding.reason == redact::Reason::LiveCredentialField
-                    && finding.site == redact::Site::QueryParam("token".to_owned())),
-            "{refusal}"
-        );
-    }
-}
-
-/// Negative — a listing's `continuation-token` is not the bearer `token`: sanitizing a zip URL
-/// redacts the token and leaves a neighbouring `continuation-token` untouched.
-#[test]
-fn sanitize_redacts_a_zip_download_token_and_keeps_continuation_token() {
-    let mut entry = base_entry();
-    entry.target = "/rustfs/admin/v3/object-zip-downloads/abc.zip?token=opaque-bearer-value&continuation-token=page2".to_owned();
-    let touched = redact::sanitize(&mut entry);
-    assert_eq!(touched, vec!["token"]);
-    assert!(!entry.target.contains("opaque-bearer-value"), "{}", entry.target);
-    assert!(entry.target.contains("token=__REDACTED__"), "{}", entry.target);
-    assert!(entry.target.contains("continuation-token=page2"), "{}", entry.target);
-    redact::admit(&entry).unwrap();
-}
-
-#[test]
 fn credential_in_a_body_field_is_refused() {
     let entry = with_body(&format!("{{\"aws_secret_access_key\": \"{EXAMPLE_SECRET}\"}}"));
     let refusal = redact::admit(&entry).unwrap_err();
@@ -825,3 +775,7 @@ fn the_declared_length_check_leaves_legitimate_recordings_alone() {
     });
     assert_eq!(store::check_declared_length(&truncated), Ok(()));
 }
+
+/// The query-parameter redaction cases, split out at the 800-line limit.
+#[path = "integration/query_redaction.rs"]
+mod query_redaction;

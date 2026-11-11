@@ -122,6 +122,7 @@ pub(super) enum AcceptedBody<B: http_body::Body> {
 ///
 /// Absent is cleartext. The alternative — assuming encryption when nobody said — is the failure
 /// mode where a development deployment that was never given a transport quietly serves customer
+/// keys over HTTP.
 pub(super) fn connection_security(extensions: &http::Extensions) -> TransportSecurity {
     extensions
         .get::<TransportSecurity>()
