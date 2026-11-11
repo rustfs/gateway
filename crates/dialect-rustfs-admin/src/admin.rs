@@ -210,7 +210,7 @@ pub const fn spec(name: &'static str, auth: AuthRequirement, caller_secret: bool
 /// route's query arguments nor its payload (rustfs/gateway#1582).
 #[must_use]
 pub const fn floor(name: &'static str) -> OperationFloor {
-    OperationFloor::custom(name, SigService::S3).require_sigv4_under_every_policy()
+    OperationFloor::custom(name, SigService::S3)
 }
 
 /// The floor of an S3-shaped extension operation a RustFS client is shown to presign (ADR-0024
