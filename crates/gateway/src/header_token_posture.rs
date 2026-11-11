@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Startup report of the host-verified header token claim (ADR-0050).
+//! Startup report of the host-verified header token claim (ADR-0051).
 //! Responsible for: one `HEADER_TOKEN_POSTURE` line naming the claimed header, whether its host
 //! verifier is installed, and every operation the floor admits by it; nothing without a claim.
 //! NOT responsible for: granting access or reporting any token value.

@@ -274,7 +274,7 @@ The framework's half:
   startup posture line lists every operation it makes reachable.
 - **A host-verified header token is its own scheme, and off by default.** A host whose outer layer
   authenticates a non-AWS token installs `ServiceBuilder::host_verified_header_token` with one
-  header name and one verifier (ADR-0050). A request whose only credential is that header is then
+  header name and one verifier (ADR-0051). A request whose only credential is that header is then
   admitted as far as the verifier, which reports the identity the host established. The token
   beside any other credential surface is refused before any verifier runs, and a refusal, a panic
   or a missing verifier is `403`, never an anonymous request. Every standard S3 operation admits
@@ -299,7 +299,7 @@ has exactly one source (rustfs/backlog#2752):
 | Secure transport | `ClientFacts::transport_secure` | TLS completed on the listener (`ConnectionInfo`), or the host's `TransportSecurity::Encrypted` — the value the customer-key gate reads; or the override | `false`, never `true` by default; `client()` is `None` when nothing at all was installed |
 | Client address | `ClientFacts::client_ip`, `ClientFacts::source_ip()` | the host's `ClientAddr` — the governor's input, attested after the host's trusted-proxy rules; or the override. Never a request header | `None`; `source_ip()` falls back to the peer |
 | Raw query | `RequestContext::raw_query()` | the accepted request target, unchanged — except that an operation's query bearer token is removed once a host bearer verifier is installed (ADR-0042) | `Some("")` for a request without one; `None` only for a context built by hand |
-| Signature scheme | `RequestContext::auth_scheme()` | the verdict's family and location (`AuthSchemeRef::of_scheme`); nothing re-verified | `Anonymous` only for a confirmed anonymous verdict; a family without a spelling is `OtherSigned`; a host-verified query bearer token is `Bearer`, never a signed spelling (ADR-0042); a host-verified header token is `HeaderToken`, never a signed spelling or `Bearer` (ADR-0050) |
+| Signature scheme | `RequestContext::auth_scheme()` | the verdict's family and location (`AuthSchemeRef::of_scheme`); nothing re-verified | `Anonymous` only for a confirmed anonymous verdict; a family without a spelling is `OtherSigned`; a host-verified query bearer token is `Bearer`, never a signed spelling (ADR-0042); a host-verified header token is `HeaderToken`, never a signed spelling or `Bearer` (ADR-0051) |
 | Anything else the transport installed | `ServerExtensions::get::<T>()` | the request extensions frozen at acceptance — the bag `RequestContextView::transport_extensions` hands a handler | `None` |
 
 A host that computes the client address outside the gateway (RustFS's trusted-proxy rules) writes
@@ -361,6 +361,15 @@ Two consequences that are this framework's half:
 Yours: if you route on a query parameter that is not one of the 35, do not treat a SigV2-signed
 request as having authorised its value. Prefer SigV4 for anything privileged, and keep SigV2
 disabled entirely (`SigV2Policy::Disabled`) if no legacy client needs it.
+
+One route this framework ships is selected that way. The RustFS dialect's two metadata listings
+(`?list-type=2&metadata=true` and `?versions&metadata=true`, ADR-0050) are chosen by `metadata`,
+which is not one of the 35. So a SigV2 listing request is turned into one by an appended
+`metadata=true`, and its holder gets every object's user metadata under the signer's listing
+action. That works for a captured header-signed request inside the skew window on every floor,
+and for a presigned URL where SigV2 presigned URLs are admitted. RustFS behaves the same.
+Planned: these two operations will refuse SigV2 under every policy, with the floor rule
+rustfs/gateway#1592 adds. Until then, a deployment that serves them to SigV2 clients accepts this.
 
 A second, related SigV2 property: a covered sub-resource's value is percent-decoded before it is
 written into `CanonicalizedResource`, and that block separates its own entries with `&`. So

@@ -399,6 +399,8 @@ pub fn fold_every_operation<F: OperationFold>(fold: &mut F, carry: F::Carry) -> 
 /// Takes `fold`'s step for every S3-shaped extension operation in turn, in [`crate::EXTENSION_ROUTES`]
 /// order (rustfs/backlog#2753).
 pub fn fold_every_extension<F: ExtensionFold>(fold: &mut F, carry: F::Carry) -> F::Carry {
+    let carry = fold.step::<ops::list_object_versions_with_metadata::ListObjectVersionsWithMetadata>(carry);
+    let carry = fold.step::<ops::list_objects_v2_with_metadata::ListObjectsV2WithMetadata>(carry);
     let carry = fold.step::<ops::reset_bucket_replication::ResetBucketReplication>(carry);
     let carry = fold.step::<ops::get_replication_reset_status::GetReplicationResetStatus>(carry);
     let carry = fold.step::<ops::get_replication_metrics_v2::GetReplicationMetricsV2>(carry);

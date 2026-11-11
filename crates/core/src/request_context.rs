@@ -321,7 +321,7 @@ pub struct RequestContextView {
     transport_extensions: TransportExtensions,
     principal: Option<RequestPrincipal>,
     bearer: Option<BearerContext>,
-    /// The principal a host-verified header token established (ADR-0050).
+    /// The principal a host-verified header token established (ADR-0051).
     header_token: Option<Identity>,
     path_params: PathParams,
     subjects: Option<Subjects>,
@@ -599,7 +599,7 @@ impl RequestContextView {
     }
 
     /// The principal the host's verifier reported for a request admitted by the floor's header
-    /// token claim (ADR-0050): the identity the host's outer layer established. `None` for every
+    /// token claim (ADR-0051): the identity the host's outer layer established. `None` for every
     /// other admission. No signature was compared, so [`Self::principal`] is `None` beside it, and
     /// the context never holds the token or its header.
     #[must_use]

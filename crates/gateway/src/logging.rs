@@ -271,7 +271,7 @@ pub(crate) enum Extension {
     Authorizer,
     /// The host's query bearer verifier (ADR-0042). Its panic is a refusal, answered `403`.
     BearerVerifier,
-    /// The host's header token verifier (ADR-0050). Its panic is a refusal, answered `403`.
+    /// The host's header token verifier (ADR-0051). Its panic is a refusal, answered `403`.
     HeaderTokenVerifier,
 }
 

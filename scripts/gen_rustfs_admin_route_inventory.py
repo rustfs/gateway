@@ -23,7 +23,9 @@ WHAT THIS DOES
   Per route it then records the method, path pattern, registration group, auth mode, IAM action,
   whether a body is sealed with the caller's secret, and whether a body is streamed or buffered.
   The query-discriminated routes the admin router claims before its path table
-  (`parse_replication_extension_request`, `parse_misc_extension_request`) are recorded beside them.
+  (`parse_replication_extension_request`, `parse_misc_extension_request`) are recorded beside them,
+  after the two listing routes RustFS's metadata route claims ahead of the admin router
+  (`rustfs/src/app/metadata_route.rs`, read by `rustfs_metadata_listing_routes.py`).
   Every count in the output is computed from the rows; nothing is typed in by hand.
 WHY
   The historical "318" was a hand-copied snapshot. The inventory must be regenerated, not edited.
@@ -40,6 +42,7 @@ import subprocess
 import sys
 
 import rustfs_admin_route_variants as variants
+import rustfs_metadata_listing_routes as metadata_listing
 
 FORMAT = "rustfs-admin-route-inventory/1"
 ADMIN = pathlib.Path("rustfs/src/admin")
@@ -552,6 +555,16 @@ def extension_routes(source):
     return rows
 
 
+def metadata_routes(root):
+    """The listing routes RustFS's metadata route claims ahead of its admin router (rustfs/gateway#1588)."""
+    relative = metadata_listing.METADATA_ROUTE
+    path = root / relative
+    if not path.is_file():
+        fail(f"RustFS source file {relative} is missing")
+    text = strip_comments(path.read_text(encoding="utf-8"))
+    return metadata_listing.metadata_listing_routes(text, relative, fail, matching_close)
+
+
 # ── the policy wire spelling of each action ───────────────────────────────────────────────────
 
 
@@ -706,7 +719,8 @@ def generate(root):
     names = action_wire_names(root)
     for row in routes:
         row["iam_action_wire"] = wire_name(row["iam_action"], names, "AdminAction")
-    extensions = extension_routes(source)
+    # RustFS asks its metadata route before its admin router, so its rows come first.
+    extensions = metadata_routes(root) + extension_routes(source)
     for row in extensions:
         row["iam_action_wire"] = wire_name(row["iam_action"], names, row.pop("iam_action_enum"))
     return {
@@ -719,6 +733,7 @@ def generate(root):
                 "rustfs/src/admin/route_registration_test.rs",
                 "rustfs/src/admin/**/*.rs insert sites",
                 "rustfs/src/admin/router.rs extension parsers",
+                f"{metadata_listing.METADATA_ROUTE} metadata listing selector",
             ],
             "registration_groups": len(groups),
             "matrix_helper_calls": dict(sorted(helpers.items())),

@@ -18,9 +18,9 @@
 //! Responsible for: [`Selection`], the choice a [`crate::Router`] is built with, and
 //! [`legacy_rustfs_selection`], the operation legacy RustFS selects for a request outside every
 //! dialect claim — from its method, its target, the keys its query names, the `list-type`,
-//! `select-type` and `x-id` values, and three headers — and, ahead of all of that, the eight
-//! S3-shaped extension routes its admin router claims by one query discriminator
-//! ([`EXTENSIONS`], rustfs/backlog#2753).
+//! `select-type` and `x-id` values, and three headers — and, ahead of all of that, the two listings
+//! its metadata route claims (rustfs/gateway#1588) and the eight S3-shaped extension routes its
+//! admin router claims by one query discriminator ([`EXTENSIONS`], rustfs/backlog#2753).
 //! NOT responsible for: the operation's own parameter checks (`crate::registry`), dialect claims
 //! (asked first, by the router), the extension operations themselves (the `rustfs` dialect
 //! declares them as S3-table rows; a table without them refuses the request `501` by name), the
@@ -29,7 +29,9 @@
 //!
 //! # What legacy RustFS does, measured on a legacy build
 //!
-//! Before its S3 service reads anything, RustFS's admin router claims a request whose method,
+//! Before its admin router, RustFS's metadata route claims a bucket `GET` whose first `metadata`
+//! value is exactly `true` and which names `versions` or a first `list-type` of `2`. Then, before
+//! its S3 service reads anything, RustFS's admin router claims a request whose method,
 //! target and one query discriminator name an extension route — `PUT /bkt?replication-reset`,
 //! `GET /bkt?replication-metrics=2`, `GET /bkt/obj?lambdaArn=…`, `GET /?events=…` — whatever
 //! else the query names, `x-id` included; the discriminators are tried in [`EXTENSIONS`]' order.
@@ -130,17 +132,18 @@ struct Partition {
     otherwise: Option<&'static str>,
 }
 
-/// One extension route RustFS's admin router claims ahead of its S3 service: a method, a target,
-/// one discriminating condition, and the `rustfs` dialect's operation for it.
+/// One extension route RustFS claims ahead of its S3 service: a method, a target, every condition
+/// it needs (one discriminator, and the metadata listings' `metadata=true`), and the `rustfs`
+/// dialect's operation for it.
 #[derive(Clone, Debug)]
 struct Extension {
     method: Method,
     target: TargetKind,
-    when: Cond,
+    when: &'static [Cond],
     op: &'static str,
 }
 
-const fn extension(method: Method, target: TargetKind, when: Cond, op: &'static str) -> Extension {
+const fn extension(method: Method, target: TargetKind, when: &'static [Cond], op: &'static str) -> Extension {
     Extension {
         method,
         target,
@@ -149,39 +152,57 @@ const fn extension(method: Method, target: TargetKind, when: Cond, op: &'static 
     }
 }
 
-/// RustFS's eight S3-shaped extension routes, in the order its router tries them
-/// (rustfs/backlog#2753): the replication discriminators, then object lambda, then the two
-/// notification listeners. Each names the `rustfs` dialect's operation, declared there as an
-/// S3-table row with the same selector; the two are pinned to agree by that crate's tests.
+/// RustFS's ten S3-shaped extension routes, in the order it tries them: its metadata route's two
+/// listings, versions first (rustfs/gateway#1588), then its admin router's replication
+/// discriminators, object lambda and the two notification listeners (rustfs/backlog#2753). Each
+/// names the `rustfs` dialect's operation, declared there as an S3-table row with the same
+/// selector; the two are pinned to agree by that crate's tests.
 const EXTENSIONS: &[Extension] = &[
+    extension(
+        Method::GET,
+        TargetKind::Bucket,
+        &[Key("versions"), First("metadata", "true")],
+        "rustfs:ListObjectVersionsWithMetadata",
+    ),
+    extension(
+        Method::GET,
+        TargetKind::Bucket,
+        &[First("list-type", "2"), First("metadata", "true")],
+        "rustfs:ListObjectsV2WithMetadata",
+    ),
     extension(
         Method::PUT,
         TargetKind::Bucket,
-        First("replication-reset", ""),
+        &[First("replication-reset", "")],
         "rustfs:ResetBucketReplication",
     ),
     extension(
         Method::GET,
         TargetKind::Bucket,
-        First("replication-reset-status", ""),
+        &[First("replication-reset-status", "")],
         "rustfs:GetReplicationResetStatus",
     ),
     extension(
         Method::GET,
         TargetKind::Bucket,
-        First("replication-metrics", "2"),
+        &[First("replication-metrics", "2")],
         "rustfs:GetReplicationMetricsV2",
     ),
     extension(
         Method::GET,
         TargetKind::Bucket,
-        First("replication-metrics", ""),
+        &[First("replication-metrics", "")],
         "rustfs:GetReplicationMetrics",
     ),
-    extension(Method::GET, TargetKind::Bucket, First("replication-check", ""), "rustfs:CheckReplication"),
-    extension(Method::GET, TargetKind::Object, Key("lambdaArn"), "rustfs:InvokeObjectLambda"),
-    extension(Method::GET, TargetKind::Service, Key("events"), "rustfs:ListenNotification"),
-    extension(Method::GET, TargetKind::Bucket, Key("events"), "rustfs:ListenBucketNotification"),
+    extension(
+        Method::GET,
+        TargetKind::Bucket,
+        &[First("replication-check", "")],
+        "rustfs:CheckReplication",
+    ),
+    extension(Method::GET, TargetKind::Object, &[Key("lambdaArn")], "rustfs:InvokeObjectLambda"),
+    extension(Method::GET, TargetKind::Service, &[Key("events")], "rustfs:ListenNotification"),
+    extension(Method::GET, TargetKind::Bucket, &[Key("events")], "rustfs:ListenBucketNotification"),
 ];
 
 const COPY_SOURCE: &str = "x-amz-copy-source";
@@ -418,10 +439,11 @@ fn is_form_post(parts: &RouteRequestParts<'_>) -> bool {
 /// answers instead: see the module documentation for the rules and where they were measured.
 #[must_use]
 pub fn legacy_rustfs_selection(parts: &RouteRequestParts<'_>) -> LegacySelection {
-    if let Some(extension) = EXTENSIONS
-        .iter()
-        .find(|extension| *parts.method == extension.method && parts.target == extension.target && holds(extension.when, parts))
-    {
+    if let Some(extension) = EXTENSIONS.iter().find(|extension| {
+        *parts.method == extension.method
+            && parts.target == extension.target
+            && extension.when.iter().all(|cond| holds(*cond, parts))
+    }) {
         return LegacySelection::Selected(extension.op);
     }
     if is_form_post(parts) {

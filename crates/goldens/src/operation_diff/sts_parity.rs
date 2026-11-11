@@ -674,7 +674,7 @@ fn n_a_body_past_the_claimed_route_ceiling_is_refused_after_the_signature() {
 }
 
 /// Negative — the STS endpoint issues credentials and refuses a host-verified header token
-/// (ADR-0050), although its floor is not privileged and admits the anonymous Web Identity form.
+/// (ADR-0051), although its floor is not privileged and admits the anonymous Web Identity form.
 /// With the claim installed, the form reaches its handler without the header and is refused with
 /// it, before the authorizer, and the host's verifier is never asked.
 #[test]

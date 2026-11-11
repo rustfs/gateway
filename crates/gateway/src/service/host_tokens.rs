@@ -13,7 +13,7 @@
 // limitations under the License.
 
 //! The host's token verifiers on the request path: ADR-0042's query bearer verifier and
-//! ADR-0050's header token verifier.
+//! ADR-0051's header token verifier.
 //!
 //! Responsible for: turning a bearer or header-token admission into its verdict through the
 //! installed host verifier, behind the panic boundary — a missing verifier, a refusal and a panic
@@ -34,7 +34,7 @@ use crate::panic_boundary::contain_decision;
 use crate::trace::RequestTrace;
 
 impl S3Service {
-    /// Removes the floor's claimed header from a head about to be accepted (ADR-0050).
+    /// Removes the floor's claimed header from a head about to be accepted (ADR-0051).
     ///
     /// The floor reads the token from the copy of the head taken before the wire seam. Removing
     /// the header here, after the seam and before acceptance, means the accepted request never
@@ -74,7 +74,7 @@ impl S3Service {
     }
 
     /// The verdict of a header-token admission, from what the host established in this request's
-    /// own state (ADR-0050). Never anonymous: every path but an accepted identity is a rejection.
+    /// own state (ADR-0051). Never anonymous: every path but an accepted identity is a rejection.
     pub(super) fn header_token_verdict(
         &self,
         admission: HeaderTokenAdmission,

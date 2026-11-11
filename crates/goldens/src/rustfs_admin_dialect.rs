@@ -732,6 +732,7 @@ mod fallback_tests;
 mod fallback_wire_tests;
 mod header_token_tests;
 mod lambda_tests;
+mod metadata_listing_tests;
 mod sigv2_census_tests;
 mod subject_tests;
 mod tests;

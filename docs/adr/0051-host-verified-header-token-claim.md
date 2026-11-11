@@ -1,4 +1,4 @@
-# ADR-0050: A host-verified header token claim
+# ADR-0051: A host-verified header token claim
 
 - Status: Accepted
 - Date: 2026-11-11
@@ -114,8 +114,8 @@ filter can neither supply nor erase a token.
 
 - Measured: `rustc --version` returned `rustc 1.97.1 (8bab26f4f 2026-07-14)` on the authoring host.
 - Measured: `git rev-parse origin/main` returned `f9aa6045ec077cc41b4d5f3bdeab01d729826407`.
-  `git ls-tree --name-only origin/main docs/adr/` lists `0049` as the highest numbered record, so
-  this record uses `0050`.
+  When the pull request was merged with `main` at `baf0fb23`, the same command listed `0050` as
+  the highest numbered record, so this record is `0051`.
 - Measured at that revision: the facade's anonymous arm builds its verdict from the floor's
   evidence alone and calls no authenticator
   ([service.rs](https://github.com/rustfs/gateway/blob/f9aa6045ec077cc41b4d5f3bdeab01d729826407/crates/gateway/src/service.rs#L788-L794)),

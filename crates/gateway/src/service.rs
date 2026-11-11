@@ -182,7 +182,7 @@ pub(crate) struct Inner {
     pub(crate) custom_signature_verifier: Option<Arc<dyn rustfs_gateway_sig::SignatureVerifier>>,
     /// The host's query bearer verifier (ADR-0042); `None` refuses every bearer admission.
     pub(crate) bearer_token_verifier: Option<Arc<dyn rustfs_gateway_sig::BearerTokenVerifier>>,
-    /// The host's header token verifier (ADR-0050); `None` refuses every header-token admission.
+    /// The host's header token verifier (ADR-0051); `None` refuses every header-token admission.
     pub(crate) header_token_verifier: Option<Arc<dyn rustfs_gateway_sig::HeaderTokenVerifier>>,
     #[cfg(feature = "dangerous-replace-signature-verifier")]
     pub(crate) dangerously_replaced_signature_verifier: Option<Arc<dyn rustfs_gateway_sig::AwsSignatureVerifier>>,
@@ -502,7 +502,7 @@ impl S3Service {
             }
         }
 
-        self.withhold_header_token(&mut parts.headers); // ADR-0050: nothing accepted holds a claimed header token
+        self.withhold_header_token(&mut parts.headers); // ADR-0051: nothing accepted holds a claimed header token
         let external_headers = crate::external_marker::present(&headers) || crate::external_marker::present(&parts.headers);
         let wire = match WireRequest::accept(Request::from_parts(parts, body), &self.inner.limits) {
             Ok(wire) => wire,
@@ -790,7 +790,7 @@ impl S3Service {
         // verdict from any other path is a receipt carried over from another request, refused below.
         let (mut bearer_admitted, mut header_token_admitted) = (false, false);
         let (authentication, signature_mismatch) = match self.inner.floor.admit(view, M::floor(&op), now) {
-            // An unsigned request: anonymous, or admitted by the header token claim (ADR-0050). One
+            // An unsigned request: anonymous, or admitted by the header token claim (ADR-0051). One
             // framing rule serves both, so the claim adds no payload rule and lifts none.
             Ok(unsigned @ (Admission::Anonymous(_) | Admission::HeaderToken(_))) => {
                 framing_mode = match crate::payload_header::anonymous_framing(&headers, self.inner.decode_anonymous_framing) {
