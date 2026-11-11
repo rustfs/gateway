@@ -50,11 +50,12 @@ pub const SENSITIVE_HEADERS: &[&str] = &[
     "x-amz-server-side-encryption-customer-key",
 ];
 
-/// Query parameter names a presigned URL uses to carry credential material.
+/// Query parameter names a presigned URL uses to carry credential material, and `token`, the
+/// bearer a RustFS zip-download URL carries in place of a signature (ADR-0042).
 ///
 /// Matched case-insensitively: SDKs disagree on the capitalisation, and a lowercase
 /// `x-amz-signature` is exactly as much of a signature as the canonical spelling.
-pub const SENSITIVE_QUERY_PARAMS: &[&str] = &["x-amz-credential", "x-amz-security-token", "x-amz-signature"];
+pub const SENSITIVE_QUERY_PARAMS: &[&str] = &["token", "x-amz-credential", "x-amz-security-token", "x-amz-signature"];
 
 /// Where in an entry a finding was located.
 #[derive(Debug, Clone, PartialEq, Eq)]

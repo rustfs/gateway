@@ -10,7 +10,7 @@ Agent entry point for SigV2/SigV4 parsing, canonicalization and verification.
 | `src/clock.rs` | Single request-time snapshot, skew policy, and why a presigned URL's past bound is its lifetime. | Header, query, and POST-policy paths disagree about time. |
 | `src/codec.rs` | Authorization wire parsing and rendering helpers. | Header authentication syntax is decoded incorrectly. |
 | `src/derive.rs` | Verified scope and signing-key derivation. | An unchecked credential scope reaches HMAC derivation. |
-| `src/floor.rs` | H1-H6 unconditional admission checks, and the SigV2 admission branch. | A verifier or authentication scheme appears able to bypass the security floor. |
+| `src/floor.rs`, `src/floor_bearer.rs` | H1-H6 unconditional admission checks, the SigV2 admission branch, and bearer admission. | A verifier or authentication scheme appears able to bypass the security floor. |
 | `src/floor_tests.rs` | The floor's own unit suite, split out at the 800-line limit. | A floor rule decidable from a `WireView` alone changes. |
 | `src/floor_anonymous.rs` | Service-level anonymous delegation and the one anonymous-admission predicate (ADR-0021). | An anonymous request reaches, or fails to reach, an operation's authorizer. |
 | `src/floor_presigned.rs` | Service-level presigned widening and the one presigned-admission predicate (ADR-0035). | A presigned URL is admitted to, or refused on, an operation that did not opt in. |

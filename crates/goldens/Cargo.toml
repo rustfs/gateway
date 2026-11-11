@@ -56,6 +56,8 @@ http = { workspace = true }
 # The rd-loc pins read a whole gateway response body, which is an `http_body::Body`.
 http-body-util = { workspace = true }
 proptest = { workspace = true }
+# The zip-download token sentinel scans every event the assembled service logs (ADR-0042).
+tracing = { workspace = true }
 # Real loopback admin fallback and body-ordering controls.
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "io-util", "time"] }
 

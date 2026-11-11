@@ -30,6 +30,9 @@ use rustfs_gateway_corpus::redact;
 use rustfs_gateway_corpus::schema::{self, Capture, Chunk, Entry, LoadError, Response, Sut};
 use rustfs_gateway_corpus::store;
 
+#[path = "integration/zip_download_token.rs"]
+mod zip_download_token;
+
 // A well-known AWS documentation example secret. It is 40 characters, mixed case, with a
 // digit — the exact shape the scanner is built to refuse — and it authenticates nothing.
 const EXAMPLE_SECRET: &str = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";

@@ -56,7 +56,7 @@ fn authz_headers_observed_empty_is_distinct_from_unavailable() {
     let policy = PolicySnapshot::of(std::sync::Arc::new(()));
     let now = RequestNow::from_unix_seconds(0);
     let wire = accepted("/");
-    let context = RequestContext::from_request(now, &policy, AuthSchemeRef::Anonymous, None, &wire);
+    let context = RequestContext::from_request(now, &policy, AuthSchemeRef::Anonymous, None, &wire, wire.query().as_str());
     assert!(context.headers().is_some(), "an observed map is still available");
     assert_eq!(context.headers().expect("available").iter_raw().count(), 1, "the host line");
     assert_eq!(context.raw_query(), Some(""), "an observed empty query is still available");
@@ -93,8 +93,14 @@ fn n_a_rejected_verdict_has_no_scheme() {
 fn n_the_debug_rendering_prints_no_query() {
     let policy = PolicySnapshot::empty();
     let wire = accepted("/?X-Amz-Signature=deadbeef");
-    let context =
-        RequestContext::from_request(RequestNow::from_unix_seconds(0), &policy, AuthSchemeRef::SigV4Presigned, None, &wire);
+    let context = RequestContext::from_request(
+        RequestNow::from_unix_seconds(0),
+        &policy,
+        AuthSchemeRef::SigV4Presigned,
+        None,
+        &wire,
+        wire.query().as_str(),
+    );
     assert_eq!(context.raw_query(), Some("X-Amz-Signature=deadbeef"));
     let rendered = format!("{context:?}");
     assert!(!rendered.contains("deadbeef"), "{rendered}");
