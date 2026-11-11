@@ -85,7 +85,7 @@ pub static SHADOWS: &[ShadowingDecl] = &[ShadowingDecl {
 #[derive(Debug)]
 pub struct GetV3IdpLdapListAccessKeysBulk;
 
-static SPEC: OperationSpec = admin::spec(NAME, AUTH, false);
+static SPEC: OperationSpec = admin::spec(NAME, AUTH, true);
 
 /// Privileged and header-signed only: never anonymous, never presigned.
 static FLOOR: OperationFloor = admin::floor(NAME);
@@ -173,5 +173,6 @@ pub const RECORD: RouteRecord = RouteRecord {
     rustfs_handler: "ListAccessKeysProviderBulk",
     request_body: BodyKind::NotRead,
     response_body: BodyKind::Buffered,
-    caller_secret: false,
+    caller_secret: true,
+    retained: &[],
 };

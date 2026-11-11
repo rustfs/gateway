@@ -67,7 +67,7 @@ pub static SHADOWS: &[ShadowingDecl] = &[ShadowingDecl {
 #[derive(Debug)]
 pub struct GetV3GatewayKeyInventory;
 
-static SPEC: OperationSpec = admin::spec(NAME, AUTH, false);
+static SPEC: OperationSpec = admin::spec(NAME, AUTH, true);
 
 /// Privileged and header-signed only: never anonymous, never presigned.
 static FLOOR: OperationFloor = admin::floor(NAME);
@@ -139,7 +139,7 @@ pub const OVERLAY_ROW: OverlayRow = OverlayRow {
 pub const RECORD: RouteRecord = RouteRecord {
     operation: NAME,
     group: "gateway_key_inventory",
-    order: 2,
+    order: 3,
     method: "GET",
     path: "/rustfs/admin/v3/gateway-key-inventory",
     alias: Some("/minio/admin/v3/gateway-key-inventory"),
@@ -152,5 +152,6 @@ pub const RECORD: RouteRecord = RouteRecord {
     rustfs_handler: "GatewayKeyInventoryHandler",
     request_body: BodyKind::NotRead,
     response_body: BodyKind::Buffered,
-    caller_secret: false,
+    caller_secret: true,
+    retained: &[],
 };

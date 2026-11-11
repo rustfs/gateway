@@ -219,7 +219,9 @@ pub(super) fn custom(method: &str, path: &str, detail: &str) -> Route {
 pub(super) fn recorded_plan() -> Plan {
     let recorded = std::fs::read_to_string(repo_root().join(INVENTORY)).expect("the inventory");
     let inventory: Inventory = serde_json::from_str(&recorded).expect("the inventory parses");
-    plan(&inventory, RULINGS, QUERY_BUCKETS, STAYS, FORMS, EXTENSIONS).expect("the recorded inventory plans")
+    let mut plan = plan(&inventory, RULINGS, QUERY_BUCKETS, STAYS, FORMS, EXTENSIONS).expect("the recorded inventory plans");
+    super::retain(&mut plan.declared, super::RETAINED).expect("the recorded retained checks apply");
+    plan
 }
 
 /// Positive — the own-account routes are about the caller under their vendor label, the
@@ -604,8 +606,8 @@ fn only_a_sealed_route_opts_in_to_the_caller_secret() {
     assert_eq!(secrets, [true, true, true, false]);
 }
 
-/// Positive — in the recorded inventory, exactly the eight sealed routes of order 3 and the
-/// twenty-one of order 4 opt in to the caller's secret, and no route of orders 1 and 2 does.
+/// Positive — in the recorded inventory, exactly the nine sealed routes of order 3 and the
+/// thirty-two of order 4 opt in to the caller's secret, and no route of orders 1 and 2 does.
 #[test]
 fn the_recorded_opt_ins_are_exactly_the_sealed_routes() {
     let plan = recorded_plan();
@@ -621,6 +623,7 @@ fn the_recorded_opt_ins_are_exactly_the_sealed_routes() {
         [
             "rustfs:DeleteV3DelConfigKv",
             "rustfs:GetV3Config",
+            "rustfs:GetV3GatewayKeyInventory",
             "rustfs:GetV3GetConfigKv",
             "rustfs:GetV3ListConfigHistoryKv",
             "rustfs:PostV3StartJob",
@@ -632,21 +635,32 @@ fn the_recorded_opt_ins_are_exactly_the_sealed_routes() {
     assert_eq!(
         sealed(4),
         [
+            "rustfs:GetV3AccountInfo",
+            "rustfs:GetV3AccountMfa",
+            "rustfs:GetV3IdpConfigByIdpType",
+            "rustfs:GetV3IdpConfigByIdpTypeByName",
             "rustfs:GetV3IdpBuiltinPolicyEntities",
+            "rustfs:GetV3IdpLdapListAccessKeys",
+            "rustfs:GetV3IdpLdapListAccessKeysBulk",
             "rustfs:GetV3IdpLdapPolicyEntities",
+            "rustfs:GetV3IdpOpenidListAccessKeysBulk",
             "rustfs:GetV3InfoAccessKey",
             "rustfs:GetV3InfoServiceAccount",
             "rustfs:GetV3ListAccessKeysBulk",
             "rustfs:GetV3ListServiceAccounts",
             "rustfs:GetV3ListUsers",
+            "rustfs:GetV3MfaChallenge",
             "rustfs:GetV3TemporaryAccountInfo",
+            "rustfs:GetV3UserMfa",
             "rustfs:PostV3AccountMfaActivate",
             "rustfs:PostV3AccountMfaDisable",
+            "rustfs:PostV3AccountMfaEnroll",
             "rustfs:PostV3AccountMfaRecoveryCodes",
             "rustfs:PostV3AccountPassword",
             "rustfs:PostV3IdpBuiltinPolicyAttach",
             "rustfs:PostV3IdpBuiltinPolicyDetach",
             "rustfs:PostV3ReplicationDiff",
+            "rustfs:PostV3RevokeTokensByUserProvider",
             "rustfs:PostV3UpdateServiceAccount",
             "rustfs:PutV3AddServiceAccount",
             "rustfs:PutV3AddServiceAccounts",

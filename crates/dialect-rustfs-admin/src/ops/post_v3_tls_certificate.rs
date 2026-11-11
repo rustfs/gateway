@@ -23,8 +23,14 @@
 //! NOT responsible for: the handler, which the deployment registers, or the overlay row (`crate::table`).
 //! Upstream: the recorded inventory and `crate::admin`. Downstream: `crate::table`, which lists it,
 //! and a deployment that registers a handler for [`PostV3TlsCertificate`].
+//!
+//! RustFS's handler also refuses unless its own listener completed TLS (`tls_certificate.rs`,
+//! `require_native_tls`), and checks that before it reads the body, which carries
+//! `private_key_pem`. That check is retained in the handler: the gateway's floor cannot require it,
+//! because the gateway's "transport was secure" fact also counts TLS declared by a fronting proxy,
+//! which RustFS refuses here. So the gateway hands the body on unread rather than buffering it, and
+//! a private key sent over a cleartext connection is never read before the handler refuses it.
 
-use bytes::Bytes;
 use rustfs_gateway_core::codec::{CodecError, EncodedResponse, MetaView, OperationCodec, RequestBody, RequestBodyMode};
 use rustfs_gateway_core::dialect::{ClaimedRow, OverlayRow};
 use rustfs_gateway_core::op::{AuthRequirement, Operation, ResourceShape};
@@ -32,6 +38,7 @@ use rustfs_gateway_core::registry::OperationSpec;
 use rustfs_gateway_core::route::{Predicate, ShadowingDecl};
 use rustfs_gateway_core::{DerivedResourceError, NoDerived};
 use rustfs_gateway_sig::OperationFloor;
+use rustfs_gateway_stream::ByteStream;
 
 use crate::admin::{self, AdminOperation, AdminResponse};
 use crate::record::{self, BodyKind, RouteRecord};
@@ -76,8 +83,8 @@ static FLOOR: OperationFloor = admin::floor(NAME);
 impl Operation for PostV3TlsCertificate {
     const NAME: &'static str = NAME;
 
-    /// The body as it arrived, which RustFS buffers and parses.
-    type Input = Bytes;
+    /// The live body, handed on unread: RustFS buffers it, but only after a check the handler keeps.
+    type Input = ByteStream;
     type Output = AdminResponse;
     type DerivedResources = NoDerived;
 
@@ -97,10 +104,10 @@ impl Operation for PostV3TlsCertificate {
 }
 
 impl OperationCodec for PostV3TlsCertificate {
-    const REQUEST_BODY: RequestBodyMode = RequestBodyMode::Full;
+    const REQUEST_BODY: RequestBodyMode = RequestBodyMode::Streaming;
 
     fn decode(_request: &MetaView<'_>, body: RequestBody) -> Result<Self::Input, CodecError> {
-        admin::buffered(body)
+        admin::streamed(body)
     }
 
     fn encode(output: Self::Output, _request: &MetaView<'_>, status: u16) -> Result<EncodedResponse, CodecError> {
@@ -154,4 +161,5 @@ pub const RECORD: RouteRecord = RouteRecord {
     request_body: BodyKind::Buffered,
     response_body: BodyKind::Buffered,
     caller_secret: false,
+    retained: &["native-tls-listener"],
 };

@@ -24,6 +24,12 @@
 //! Upstream: the recorded inventory and `crate::admin`. Downstream: `crate::table`, which lists it,
 //! and a deployment that registers a handler for [`PostV3PluginDelegationsByIdIssueAttempt`].
 //!
+//! RustFS's handler also refuses when an external policy plugin is configured (`plugin_attempt.rs`,
+//! `require_builtin_authorization`), and refuses the root credential, temporary (session-token)
+//! credentials and service accounts before it checks the action (`plugin_delegation.rs`, `owner`).
+//! Both checks are retained in the handler: the gateway's floor has no rule on either, so the floor
+//! admits callers RustFS refuses here.
+//!
 //! Its path parameter (`id`) names no bucket (ADR-0027): a handler reads each decoded value from
 //! `RequestContextView::path_params()`.
 
@@ -158,4 +164,5 @@ pub const RECORD: RouteRecord = RouteRecord {
     request_body: BodyKind::Buffered,
     response_body: BodyKind::Buffered,
     caller_secret: false,
+    retained: &["original-user", "builtin-iam"],
 };

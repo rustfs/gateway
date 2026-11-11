@@ -22,8 +22,12 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use rustfs_gateway_core::codec::RequestBodyMode;
 use rustfs_gateway_core::dialect::BucketParam;
-use rustfs_gateway_dialect_rustfs_admin::{CLAIMS, FORM_ROUTES, PENDING, ROUTES, RouteRecord, STAYING, TABLE_CATALOG_PREFIXES};
+use rustfs_gateway_dialect_rustfs_admin::{
+    AdminOperation, BodyKind, CLAIMS, FORM_ROUTES, OperationFold, PENDING, ROUTES, RouteRecord, STAYING, TABLE_CATALOG_PREFIXES,
+    fold_every_operation,
+};
 
 use super::{HandlerDeadlineClass, OVERLAY, Predicate, ResourceShape, captured, declared, dialect, param, templates};
 
@@ -115,6 +119,7 @@ fn every_order_is_declared_and_four_routes_stay_with_rustfs() {
         "audit",
         "batch_job",
         "config_admin",
+        "gateway_key_inventory",
         "ilm_transition",
         "kms",
         "plugin_attempt",
@@ -332,5 +337,60 @@ fn the_table_catalog_prefixes_are_exactly_its_two_claims() {
     }
     for claim in CLAIMS.iter().filter(|claim| !TABLE_CATALOG_PREFIXES.contains(&claim.prefix)) {
         assert!(!claim.reason.contains("table catalog"), "{}", claim.prefix);
+    }
+}
+
+/// Positive and negative — exactly the routes whose RustFS handler keeps a check the floor cannot
+/// represent record it (rustfs/gateway#1232): the TLS certificate pair keeps RustFS's
+/// native-listener TLS check, and the plugin-delegation routes keep RustFS's original-user check
+/// (issue-attempt its built-in-IAM check too). The certificate POST hands its body on unread so
+/// that check runs before anything reads a private key, while its record still says RustFS
+/// buffers it; every other buffered operation is still buffered by the gateway.
+#[test]
+fn every_handler_retained_check_is_recorded() {
+    const TLS: &[&str] = &["native-tls-listener"];
+    const ORIGINAL: &[&str] = &["original-user"];
+    let retained: Vec<(&str, &[&str])> = ROUTES
+        .iter()
+        .filter(|record| !record.retained.is_empty())
+        .map(|record| (record.operation, record.retained))
+        .collect();
+    assert_eq!(
+        retained,
+        [
+            ("rustfs:GetV3PluginDelegationsById", ORIGINAL),
+            ("rustfs:GetV3TlsCertificateState", TLS),
+            ("rustfs:PostV3PluginDelegations", ORIGINAL),
+            ("rustfs:PostV3PluginDelegationsByIdIssueAttempt", &["original-user", "builtin-iam"][..]),
+            ("rustfs:PostV3PluginDelegationsByIdRevoke", ORIGINAL),
+            ("rustfs:PostV3PluginDelegationsByIdRunsCancel", ORIGINAL),
+            ("rustfs:PostV3PluginDelegationsByIdRunsHistory", ORIGINAL),
+            ("rustfs:PostV3PluginDelegationsByIdRunsPage", ORIGINAL),
+            ("rustfs:PostV3PluginDelegationsByIdRunsQuery", ORIGINAL),
+            ("rustfs:PostV3PluginDelegationsByIdRunsReplay", ORIGINAL),
+            ("rustfs:PostV3PluginDelegationsByIdSubmit", ORIGINAL),
+            ("rustfs:PostV3TlsCertificate", TLS),
+        ]
+    );
+    struct BodyModes;
+    impl OperationFold for BodyModes {
+        type Carry = Vec<(&'static str, RequestBodyMode)>;
+        fn step<O: AdminOperation>(&mut self, mut carry: Self::Carry) -> Self::Carry {
+            carry.push((O::NAME, O::REQUEST_BODY));
+            carry
+        }
+    }
+    let modes = fold_every_operation(&mut BodyModes, Vec::new());
+    let mode = |name: &str| modes.iter().find(|(operation, _)| *operation == name).map(|(_, mode)| *mode);
+    assert_eq!(mode("rustfs:PostV3TlsCertificate"), Some(RequestBodyMode::Streaming));
+    let publish = ROUTES
+        .iter()
+        .find(|record| record.operation == "rustfs:PostV3TlsCertificate")
+        .expect("the certificate POST is declared");
+    assert_eq!(publish.request_body, BodyKind::Buffered);
+    for record in ROUTES.iter().filter(|record| record.request_body == BodyKind::Buffered) {
+        if record.operation != "rustfs:PostV3TlsCertificate" {
+            assert_eq!(mode(record.operation), Some(RequestBodyMode::Full), "{}", record.operation);
+        }
     }
 }

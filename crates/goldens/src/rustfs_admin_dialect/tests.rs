@@ -299,7 +299,7 @@ fn every_row_is_authorised_by_exactly_its_declared_action() {
 }
 
 /// Positive and negative — with the authenticator handing the secret over, exactly the
-/// sixty-two rows of the thirty-one sealed operations hold it, and it is the caller's; no other
+/// ninety-eight rows of the forty-nine sealed operations hold it, and it is the caller's; no other
 /// row's handler holds any secret.
 #[test]
 fn the_caller_secret_reaches_exactly_the_sealed_rows() {
@@ -314,8 +314,8 @@ fn the_caller_secret_reaches_exactly_the_sealed_rows() {
             holders.insert((record.method, path));
         }
     }
-    assert_eq!(holders.len(), 66, "{holders:?}");
-    assert_eq!(holders.iter().filter(|(_, path)| path.starts_with("/minio/admin/")).count(), 33);
+    assert_eq!(holders.len(), 98, "{holders:?}");
+    assert_eq!(holders.iter().filter(|(_, path)| path.starts_with("/minio/admin/")).count(), 49);
 }
 
 /// Positive — each any-of row is authorised by any one of its actions alone: `datausageinfo`,

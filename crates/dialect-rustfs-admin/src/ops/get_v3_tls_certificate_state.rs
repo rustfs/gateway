@@ -23,6 +23,11 @@
 //! NOT responsible for: the handler, which the deployment registers, or the overlay row (`crate::table`).
 //! Upstream: the recorded inventory and `crate::admin`. Downstream: `crate::table`, which lists it,
 //! and a deployment that registers a handler for [`GetV3TlsCertificateState`].
+//!
+//! RustFS's handler also refuses unless its own listener completed TLS (`tls_certificate.rs`,
+//! `require_native_tls`); a forwarded `https` header does not count. That check is retained in the
+//! handler: the gateway's floor cannot require it, because the gateway's "transport was secure"
+//! fact also counts TLS declared by a fronting proxy, which RustFS refuses here.
 
 use rustfs_gateway_core::codec::{CodecError, EncodedResponse, MetaView, OperationCodec, RequestBody, RequestBodyMode};
 use rustfs_gateway_core::dialect::{ClaimedRow, OverlayRow};
@@ -153,4 +158,5 @@ pub const RECORD: RouteRecord = RouteRecord {
     request_body: BodyKind::NotRead,
     response_body: BodyKind::Buffered,
     caller_secret: false,
+    retained: &["native-tls-listener"],
 };

@@ -157,4 +157,5 @@ pub const RECORD: RouteRecord = RouteRecord {
     request_body: BodyKind::NotRead,
     response_body: BodyKind::Buffered,
     caller_secret: true,
+    retained: &[],
 };

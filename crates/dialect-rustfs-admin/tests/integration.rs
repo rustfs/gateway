@@ -659,9 +659,10 @@ fn n_a_subject_parameter_does_not_change_the_route() {
     assert_eq!(checked, 23 * 2 * 5);
 }
 
-/// Positive and negative — exactly the thirty-one operations whose body RustFS seals opt in to
-/// the caller's secret, eight of order 3, twenty-one of order 4 and two of order 5 (xtask pins each
-/// name against the inventory); every other operation is never handed it.
+/// Positive and negative — exactly the forty-nine operations whose body RustFS seals opt in to
+/// the caller's secret, nine of order 3, thirty-two of order 4 and eight of order 5 (xtask pins
+/// each name against the inventory), the shared `owned_admin_json_response` answers included; every
+/// other operation is never handed it.
 #[test]
 fn only_the_sealed_operations_hold_the_caller_secret() {
     let holders: Vec<(&str, u8)> = declared()
@@ -670,10 +671,10 @@ fn only_the_sealed_operations_hold_the_caller_secret() {
         .filter(|(operation, _)| operation.secret)
         .map(|(operation, record)| (operation.name, record.order))
         .collect();
-    assert_eq!(holders.len(), 33);
-    assert_eq!(holders.iter().filter(|(_, order)| *order == 3).count(), 8);
-    assert_eq!(holders.iter().filter(|(_, order)| *order == 4).count(), 21);
-    assert_eq!(holders.iter().filter(|(_, order)| *order == 5).count(), 4);
+    assert_eq!(holders.len(), 49);
+    assert_eq!(holders.iter().filter(|(_, order)| *order == 3).count(), 9);
+    assert_eq!(holders.iter().filter(|(_, order)| *order == 4).count(), 32);
+    assert_eq!(holders.iter().filter(|(_, order)| *order == 5).count(), 8);
     for name in [
         "rustfs:GetV3Config",
         "rustfs:PutV3SiteReplicationEdit",
@@ -682,13 +683,17 @@ fn only_the_sealed_operations_hold_the_caller_secret() {
         "rustfs:PutV3AddUser",
         "rustfs:PutV3OnDemandMigrationByBucket",
         "rustfs:PostV3OnDemandMigrationByBucketBackfill",
+        "rustfs:GetV3AccountInfo",
+        "rustfs:GetV3IdpLdapListAccessKeysBulk",
+        "rustfs:GetV3GatewayKeyInventory",
+        "rustfs:PostV3RecoverOrphanedBucketByBucket",
     ] {
         assert!(holders.iter().any(|(holder, _)| *holder == name), "{name}");
     }
     for name in [
-        "rustfs:GetV3AccountInfo",
         "rustfs:GetV3UserInfo",
-        "rustfs:GetV3IdpLdapListAccessKeysBulk",
+        "rustfs:GetV3TlsCertificateState",
+        "rustfs:PostV3TlsCertificate",
     ] {
         assert!(!holders.iter().any(|(holder, _)| *holder == name), "{name}");
     }

@@ -284,6 +284,10 @@ pub(super) fn render_operation(declared: &Declared) -> String {
         out.push_str("//!\n");
         out.push_str(&doc_paragraph(d.note));
     }
+    if let Some(retained) = d.retained {
+        out.push_str("//!\n");
+        out.push_str(&doc_paragraph(retained.note));
+    }
     if d.rule.anonymous {
         let _ = write!(
             out,
@@ -304,7 +308,14 @@ pub(super) fn render_operation(declared: &Declared) -> String {
         );
     }
     out.push('\n');
+    let handed_on = d.retained.is_some_and(|retained| retained.hand_on_body);
     let (input, mode, decode, input_doc) = match d.request_body {
+        "Buffered" if handed_on => (
+            "ByteStream",
+            "Streaming",
+            "admin::streamed(body)",
+            "The live body, handed on unread: RustFS buffers it, but only after a check the handler keeps.",
+        ),
         "NotRead" => ("()", "None", "Ok(())", "RustFS reads no request body."),
         "Buffered" => (
             "Bytes",
@@ -496,6 +507,7 @@ pub const RECORD: RouteRecord = RouteRecord {{
     request_body: BodyKind::{request_body},
     response_body: BodyKind::{response_body},
     caller_secret: {secret},
+    retained: {retained},
 }};
 ",
         ty = d.type_name,
@@ -537,6 +549,9 @@ pub const RECORD: RouteRecord = RouteRecord {{
         request_body = d.request_body,
         response_body = d.response_body,
         secret = d.caller_secret,
+        retained = d
+            .retained
+            .map_or_else(|| "&[]".to_owned(), |retained| format!("&{:?}", retained.checks)),
     );
     out
 }

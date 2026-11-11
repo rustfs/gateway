@@ -22,7 +22,9 @@
 
 #![allow(clippy::expect_used, clippy::panic, clippy::indexing_slicing)]
 
-use super::rulings::RULINGS;
+use super::render::render_operation;
+use super::retain;
+use super::rulings::{NATIVE_TLS, ORIGINAL_USER, RETAINED, RULINGS, Retained};
 use super::tests::recorded_plan;
 
 /// Every operation of the refreshed groups, with the order it is planned at and the rule its floor
@@ -75,7 +77,9 @@ fn the_refreshed_operations_mirror_rustfs_and_no_more() {
             .unwrap_or_else(|| panic!("{name} is declared"));
         assert_eq!(declared.order, *order, "{name}");
         assert_eq!(declared.rule.render(), *rule, "{name}");
-        assert!(!declared.caller_secret, "{name}");
+        // RustFS seals only the recovery answer, through its shared `owned_admin_json_response`.
+        let sealed = *name == "rustfs:PostV3RecoverOrphanedBucketByBucket";
+        assert_eq!(declared.caller_secret, sealed, "{name}");
         let custom = *name == "rustfs:PutV3UpdateGroupMembers";
         assert_eq!(declared.ruled.as_deref(), custom.then_some("MultipleActions"), "{name}");
         let bound = *name == "rustfs:PostV3RecoverOrphanedBucketByBucket" || name.contains("Iceberg");
@@ -108,4 +112,80 @@ fn n_the_group_membership_gate_is_exactly_rustfs_first_gate() {
         super::rulings::Ruled::AnyOf(&["admin:AddUserToGroup", "admin:RemoveUserFromGroup"])
     ));
     assert!(ruling.note.contains("isRemove"));
+}
+
+/// Positive — the recorded plan carries every handler-retained check of [`RETAINED`] on its
+/// operation, and only there; the certificate POST alone hands its body on unread, and its module
+/// says why, while its record keeps RustFS's own body fact.
+#[test]
+fn the_recorded_retained_checks_are_planned() {
+    let plan = recorded_plan();
+    let retained: Vec<(&str, Vec<&str>)> = plan
+        .declared
+        .iter()
+        .filter_map(|declared| {
+            declared
+                .retained
+                .map(|retained| (declared.name.as_str(), retained.checks.to_vec()))
+        })
+        .collect();
+    assert_eq!(retained.len(), 12, "{retained:?}");
+    assert_eq!(retained.len(), RETAINED.len());
+    for (name, checks) in &retained {
+        assert_eq!(checks.contains(&NATIVE_TLS), name.contains("TlsCertificate"), "{name}");
+        assert_eq!(checks.contains(&ORIGINAL_USER), name.contains("PluginDelegations"), "{name}");
+    }
+    let handed: Vec<&str> = plan
+        .declared
+        .iter()
+        .filter(|declared| declared.retained.is_some_and(|retained| retained.hand_on_body))
+        .map(|declared| declared.name.as_str())
+        .collect();
+    assert_eq!(handed, ["rustfs:PostV3TlsCertificate"]);
+    let publish = plan
+        .declared
+        .iter()
+        .find(|declared| declared.name == "rustfs:PostV3TlsCertificate")
+        .expect("the certificate POST is declared");
+    let source = render_operation(publish);
+    assert!(source.contains("RequestBodyMode::Streaming"), "{source}");
+    assert!(source.contains("request_body: BodyKind::Buffered"), "{source}");
+    assert!(source.contains(r#"retained: &["native-tls-listener"]"#), "{source}");
+    assert!(source.contains("fronting proxy"), "{source}");
+}
+
+/// Negative — a retained check is refused when it names no declared operation, when it hands on a
+/// body RustFS does not buffer, when it names no check, and when two name one route.
+#[test]
+fn n_a_retained_check_outside_its_shape_is_refused() {
+    const fn entry(method: &'static str, path: &'static str, checks: &'static [&'static str], hand_on_body: bool) -> Retained {
+        Retained {
+            method,
+            path,
+            checks,
+            hand_on_body,
+            note: "a note",
+        }
+    }
+    const STATE: &str = "/rustfs/admin/v3/tls/certificate-state";
+    let unretained = || {
+        let mut plan = recorded_plan();
+        for declared in &mut plan.declared {
+            declared.retained = None;
+        }
+        plan
+    };
+    let refusal = |retained: &[Retained]| retain(&mut unretained().declared, retained).expect_err("refused");
+    let stale = refusal(&[entry("GET", "/rustfs/admin/v3/gone", &[NATIVE_TLS], false)]);
+    assert!(stale.contains("names no declared operation"), "{stale}");
+    let unread = refusal(&[entry("GET", STATE, &[NATIVE_TLS], true)]);
+    assert!(unread.contains("does not buffer"), "{unread}");
+    let empty = refusal(&[entry("GET", STATE, &[], false)]);
+    assert!(empty.contains("names no check"), "{empty}");
+    let twice = refusal(&[
+        entry("GET", STATE, &[NATIVE_TLS], false),
+        entry("GET", STATE, &[NATIVE_TLS], false),
+    ]);
+    assert!(twice.contains("twice"), "{twice}");
+    retain(&mut unretained().declared, &[entry("GET", STATE, &[NATIVE_TLS], false)]).expect("one well-formed entry is accepted");
 }

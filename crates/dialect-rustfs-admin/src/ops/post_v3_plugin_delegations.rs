@@ -23,6 +23,11 @@
 //! NOT responsible for: the handler, which the deployment registers, or the overlay row (`crate::table`).
 //! Upstream: the recorded inventory and `crate::admin`. Downstream: `crate::table`, which lists it,
 //! and a deployment that registers a handler for [`PostV3PluginDelegations`].
+//!
+//! RustFS's handler also refuses the root credential, temporary (session-token) credentials and
+//! service accounts before it checks the action (`plugin_delegation.rs`, `owner`). That check is
+//! retained in the handler: the gateway's floor has no rule on the kind of principal, so the floor
+//! admits callers RustFS refuses here.
 
 use bytes::Bytes;
 use rustfs_gateway_core::codec::{CodecError, EncodedResponse, MetaView, OperationCodec, RequestBody, RequestBodyMode};
@@ -154,4 +159,5 @@ pub const RECORD: RouteRecord = RouteRecord {
     request_body: BodyKind::Buffered,
     response_body: BodyKind::Buffered,
     caller_secret: false,
+    retained: &["original-user"],
 };
