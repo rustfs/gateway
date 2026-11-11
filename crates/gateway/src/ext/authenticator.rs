@@ -143,11 +143,11 @@ impl AuthenticationOutcome {
         }
     }
 
-    /// Attaches the secret this authenticator's own credential lookup returned for the principal it
-    /// authenticated; the handler reads it as `RequestPrincipal::secret_key_from_authenticator_lookup`
-    /// (ADR-0022). The pipeline hands it on only with an `Authenticated` verdict. Attach one only
-    /// when the deployment asked for it, as [`SigV4Authenticator::hand_caller_secret_to_handlers`]
-    /// does.
+    /// Attaches the secret this authenticator's own lookup returned for the principal it authenticated
+    /// (ADR-0022), only when asked, as [`SigV4Authenticator::hand_caller_secret_to_handlers`] does.
+    /// **Obligation:** attaching it asserts the verdict verified a signature over
+    /// `Authentication::payload()`; a signed-body opt-in receives it whenever that payload is a digest
+    /// or signed chunks (ADR-0053), so a verdict that did not verify one must never attach a secret.
     #[must_use]
     pub fn with_caller_secret(mut self, secret: rustfs_gateway_sig::SecretBytes) -> Self {
         self.caller_secret = Some(secret);

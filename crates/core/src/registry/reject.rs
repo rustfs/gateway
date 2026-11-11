@@ -68,6 +68,17 @@ pub enum RegistryError {
         /// The operation.
         name: &'static str,
     },
+    /// An operation opts in to the caller's secret only over a signed body
+    /// (`OperationSpec::hand_caller_secret_to_handler_over_a_signed_body`), but its codec does not
+    /// read the body whole before the handler runs, or there is no codec.
+    ///
+    /// A streamed or deferred body is checked against its declared digest, or its last chunk
+    /// signature, only as the handler reads it, so the handler would hold the secret before the
+    /// body was shown to be the signed one (rustfs/gateway#1587, ADR-0053).
+    SignedBodySecretWithoutAWholeBody {
+        /// The operation.
+        name: &'static str,
+    },
     /// A required parameter declares a code that cannot be raised before authentication.
     ///
     /// Checked once, here, so that the per-request path has no failure mode of its own.
@@ -150,6 +161,7 @@ impl RegistryError {
         match self {
             Self::Duplicate { name }
             | Self::StandardOperationReceivesCallerSecret { name }
+            | Self::SignedBodySecretWithoutAWholeBody { name }
             | Self::UnusableMissingError { name, .. }
             | Self::MissingAuthRequirement { name }
             | Self::MissingHandlerDeadlineClass { name }
@@ -168,6 +180,12 @@ impl fmt::Display for RegistryError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Duplicate { name } => write!(f, "{name} is registered twice"),
+            Self::SignedBodySecretWithoutAWholeBody { name } => write!(
+                f,
+                "{name} opts in to the caller's secret only over a signed body, but its codec does not \
+                 read the body whole before the handler runs, so the handler would hold the secret \
+                 before the body was shown to be the signed one"
+            ),
             Self::StandardOperationReceivesCallerSecret { name } => write!(
                 f,
                 "{name} is a standard operation and opts in to receiving the caller's secret; no AWS \
@@ -408,6 +426,11 @@ fn is_namespaced(name: &str) -> bool {
 #[path = "reject_rule_tests.rs"]
 #[allow(clippy::expect_used, clippy::panic, clippy::indexing_slicing)]
 mod rule_tests;
+
+#[cfg(test)]
+#[path = "signed_body_tests.rs"]
+#[allow(clippy::expect_used, clippy::panic, clippy::indexing_slicing)]
+mod signed_body_tests;
 
 #[cfg(test)]
 #[path = "reject_floor_tests.rs"]

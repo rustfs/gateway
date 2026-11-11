@@ -81,6 +81,8 @@ mod credential_runtime;
 mod custom_signature_verifier;
 #[path = "dialect_claims_runtime.rs"]
 mod dialect_claims_runtime;
+#[path = "dialect_claims_signed_body.rs"]
+mod dialect_claims_signed_body;
 #[path = "dialect_entry.rs"]
 mod dialect_entry;
 #[path = "empty_headers_absent.rs"]

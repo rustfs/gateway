@@ -73,7 +73,7 @@ use std::sync::Arc;
 
 use rustfs_gateway_types::ErrorCode;
 
-use crate::codec::OperationCodec;
+use crate::codec::{OperationCodec, RequestBodyMode};
 use crate::error::PreAuthError;
 use crate::handler::Handler;
 use crate::op::{AuthRequirement, Operation};
@@ -323,6 +323,13 @@ impl OperationSpec {
     /// For an operation whose body carries what the secret authorises, such as an STS form, where a
     /// replayed head with a rewritten body would otherwise be honoured. Every rule of
     /// [`Self::hand_caller_secret_to_handler`] applies as well.
+    ///
+    /// Registration refuses this opt-in
+    /// ([`RegistryError::SignedBodySecretWithoutAWholeBody`]) unless the operation's codec reads
+    /// its body whole, `RequestBodyMode::Full`: only such a body is compared with its declared
+    /// digest, or has its last chunk signature checked, before the handler runs. A streamed or
+    /// deferred body is checked only as the handler reads it, so the handler would already hold the
+    /// secret (rustfs/gateway#1587, the follow-up to ADR-0053).
     #[must_use]
     pub const fn hand_caller_secret_to_handler_over_a_signed_body(mut self) -> Self {
         self.caller_secret = true;
@@ -557,6 +564,12 @@ impl Registry {
         B: Handler<O>,
     {
         reject::check_operation::<O>()?;
+        // Only a body read whole is checked against its signature before the handler runs.
+        if O::spec().caller_secret_needs_a_signed_body()
+            && codec.as_ref().map(ErasedCodec::request_body_mode) != Some(RequestBodyMode::Full)
+        {
+            return Err(RegistryError::SignedBodySecretWithoutAWholeBody { name: O::NAME });
+        }
         if self.specs.contains_key(O::NAME) || self.handlers.contains(O::NAME) {
             return Err(RegistryError::Duplicate { name: O::NAME });
         }

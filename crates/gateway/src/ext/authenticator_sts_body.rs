@@ -32,7 +32,11 @@ use crate::gate::{BodyTimeouts, StsBodyReader};
 pub(super) struct StsBodyReading<'a> {
     reader: &'a dyn StsBodyReader,
     timeouts: BodyTimeouts,
-    /// Set once the body's own digest became the signed payload token.
+    /// Set once the body's own digest became the payload token a comparison runs over.
+    digested: OnceLock<()>,
+    /// Set once a comparison over that digest succeeded: only then does the signature cover the
+    /// body. A rejected comparison leaves it unset, so an authenticator that falls back to another
+    /// verification after this one refused cannot inherit a signed body.
     signed: OnceLock<()>,
 }
 
@@ -42,6 +46,7 @@ impl<'a> Authentication<'a> {
         self.sts_body = reader.map(|reader| StsBodyReading {
             reader,
             timeouts,
+            digested: OnceLock::new(),
             signed: OnceLock::new(),
         });
         self
@@ -63,7 +68,15 @@ impl<'a> Authentication<'a> {
 impl SigV4Authenticator {
     pub(super) async fn verify(&self, request: &Authentication<'_>) -> Result<AuthenticationOutcome, Unavailable> {
         match self.try_verify(request).await {
-            Ok((verdict, secret)) => Ok(AuthenticationOutcome::authenticated(verdict, secret)),
+            Ok((verdict, secret)) => {
+                // The comparison succeeded, over the body's digest if one was the token.
+                if let Some(reading) = &request.sts_body
+                    && reading.digested.get().is_some()
+                {
+                    let _ = reading.signed.set(());
+                }
+                Ok(AuthenticationOutcome::authenticated(verdict, secret))
+            }
             Err(VerificationFailure::Unavailable) => Err(Unavailable),
             Err(VerificationFailure::Ordinary(error)) => {
                 Ok(AuthenticationOutcome::ordinary(rustfs_gateway_sig::Verdict::reject(error)))
@@ -106,7 +119,11 @@ impl SigV4Authenticator {
             .digest(reading.timeouts)
             .await
             .map_err(VerificationFailure::Body)?;
-        let _ = reading.signed.set(());
+        let _ = reading.digested.set(());
         Ok(Some(PayloadMode::ExactSha256(digest)))
     }
 }
+
+#[cfg(test)]
+#[path = "authenticator_sts_body_tests.rs"]
+mod tests;
