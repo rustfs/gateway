@@ -182,7 +182,7 @@ pub(crate) struct Inner {
     pub(crate) custom_signature_verifier: Option<Arc<dyn rustfs_gateway_sig::SignatureVerifier>>,
     /// The host's query bearer verifier (ADR-0042); `None` refuses every bearer admission.
     pub(crate) bearer_token_verifier: Option<Arc<dyn rustfs_gateway_sig::BearerTokenVerifier>>,
-    /// The host's header token verifier (ADR-0052); `None` refuses every header-token admission.
+    /// The host's header token verifier (ADR-0053); `None` refuses every header-token admission.
     pub(crate) header_token_verifier: Option<host_tokens::HeaderTokenVerify>,
     #[cfg(feature = "dangerous-replace-signature-verifier")]
     pub(crate) dangerously_replaced_signature_verifier: Option<Arc<dyn rustfs_gateway_sig::AwsSignatureVerifier>>,
@@ -503,7 +503,7 @@ impl S3Service {
             }
         }
 
-        self.withhold_header_token(&mut parts.headers); // ADR-0052: nothing accepted holds a claimed header token
+        self.withhold_header_token(&mut parts.headers); // ADR-0053: nothing accepted holds a claimed header token
         let external_headers = crate::external_marker::present(&headers) || crate::external_marker::present(&parts.headers);
         let wire = match WireRequest::accept(Request::from_parts(parts, body), &self.inner.limits) {
             Ok(wire) => wire,
@@ -567,7 +567,7 @@ impl S3Service {
         }
         // The RustFS profile's SigV4 header guard, where legacy RustFS asks it: before routing.
         let guard = self.inner.view_policy.sigv4_header_guard();
-        let by_header_token = self.header_token_presented(&headers); // ADR-0052: the floor alone answers such a request
+        let by_header_token = self.header_token_presented(&headers); // ADR-0053: the floor alone answers such a request
         let guarded = guard.refusal(&headers, wire.query().as_str(), wire.method(), &resolved, response_kind);
         if let Some(refusal) = guarded.filter(|_| !by_header_token) {
             return outcome.refuse(refusal);
@@ -792,7 +792,7 @@ impl S3Service {
         // Whether this request's own admission was a bearer or header-token one; such a verdict from any other path is refused below.
         let (mut bearer_admitted, mut header_token_admitted) = (false, false);
         let (authentication, signature_mismatch) = match self.inner.floor.admit(view, M::floor(&op), now) {
-            // Unsigned: anonymous, or admitted by the header token claim (ADR-0052). One framing rule serves both.
+            // Unsigned: anonymous, or admitted by the header token claim (ADR-0053). One framing rule serves both.
             Ok(unsigned @ (Admission::Anonymous(_) | Admission::HeaderToken(_))) => {
                 framing_mode = match crate::payload_header::anonymous_framing(&headers, self.inner.decode_anonymous_framing) {
                     Ok(mode) => mode,

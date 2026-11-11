@@ -274,7 +274,7 @@ The framework's half:
   startup posture line lists every operation it makes reachable.
 - **A host-verified header token is its own scheme, and off by default.** A host whose outer layer
   authenticates a non-AWS token installs `ServiceBuilder::host_verified_header_token` with one
-  header name and one verifier (ADR-0052). A request whose only credential is that header is then
+  header name and one verifier (ADR-0053). A request whose only credential is that header is then
   admitted as far as the verifier, which names the identity the host's outer layer left in that
   request's own extensions; a request that carries none is refused without the verifier being
   called. The token beside any other credential surface is refused before any verifier runs, under
@@ -305,7 +305,7 @@ has exactly one source (rustfs/backlog#2752):
 | Secure transport | `ClientFacts::transport_secure` | TLS completed on the listener (`ConnectionInfo`), or the host's `TransportSecurity::Encrypted` — the value the customer-key gate reads; or the override | `false`, never `true` by default; `client()` is `None` when nothing at all was installed |
 | Client address | `ClientFacts::client_ip`, `ClientFacts::source_ip()` | the host's `ClientAddr` — the governor's input, attested after the host's trusted-proxy rules; or the override. Never a request header | `None`; `source_ip()` falls back to the peer |
 | Raw query | `RequestContext::raw_query()` | the accepted request target, unchanged — except that an operation's query bearer token is removed once a host bearer verifier is installed (ADR-0042) | `Some("")` for a request without one; `None` only for a context built by hand |
-| Signature scheme | `RequestContext::auth_scheme()` | the verdict's family and location (`AuthSchemeRef::of_scheme`); nothing re-verified | `Anonymous` only for a confirmed anonymous verdict; a family without a spelling is `OtherSigned`; a host-verified query bearer token is `Bearer`, never a signed spelling (ADR-0042); a host-verified header token is `HeaderToken`, never a signed spelling or `Bearer` (ADR-0052) |
+| Signature scheme | `RequestContext::auth_scheme()` | the verdict's family and location (`AuthSchemeRef::of_scheme`); nothing re-verified | `Anonymous` only for a confirmed anonymous verdict; a family without a spelling is `OtherSigned`; a host-verified query bearer token is `Bearer`, never a signed spelling (ADR-0042); a host-verified header token is `HeaderToken`, never a signed spelling or `Bearer` (ADR-0053) |
 | Anything else the transport installed | `ServerExtensions::get::<T>()` | the request extensions frozen at acceptance — the bag `RequestContextView::transport_extensions` hands a handler | `None` |
 
 A host that computes the client address outside the gateway (RustFS's trusted-proxy rules) writes
@@ -372,10 +372,10 @@ One route this framework ships is selected that way. The RustFS dialect's two me
 (`?list-type=2&metadata=true` and `?versions&metadata=true`, ADR-0050) are chosen by `metadata`,
 which is not one of the 35. So a SigV2 listing request is turned into one by an appended
 `metadata=true`, and its holder gets every object's user metadata under the signer's listing
-action. That works for a captured header-signed request inside the skew window on every floor,
-and for a presigned URL where SigV2 presigned URLs are admitted. RustFS behaves the same.
-Planned: these two operations will refuse SigV2 under every policy, with the floor rule
-rustfs/gateway#1592 adds. Until then, a deployment that serves them to SigV2 clients accepts this.
+action, for a captured header-signed request inside the skew window and for a presigned URL.
+RustFS behaves that way. The gateway does not: these two operations refuse SigV2 under every
+policy, at the floor and before any credential lookup (`OperationFloor::refuse_sigv2_under_every_policy`,
+ADR-0052), while SigV4 and unsigned listings are decided exactly as on the standard listings.
 
 A second, related SigV2 property: a covered sub-resource's value is percent-decoded before it is
 written into `CanonicalizedResource`, and that block separates its own entries with `&`. So
@@ -400,6 +400,10 @@ quietly.
 - **The body.** SigV2 has no `x-amz-content-sha256` and no payload digest. `Content-MD5` is the
   only body binding it offers and it is optional, so a SigV2 request's body is authenticated only
   as far as the client chose to bind it. SigV4 signs a payload declaration on every request.
+  An operation whose parameters travel in the body, and which must stay reachable without a
+  signature, refuses SigV2 at the floor with `OperationFloor::refuse_sigv2_under_every_policy`
+  (ADR-0052): the RustFS STS form endpoint and zip download do, before any credential lookup and
+  under every `SigV2Policy`.
 - **Framing.** SigV2 has no streaming form; `aws-chunked` chunk signatures are SigV4 values. A
   SigV2 request that declares one is refused `501` rather than read as if the declaration were
   absent, because the pipeline decodes framing only for a payload mode it was given and the SigV2

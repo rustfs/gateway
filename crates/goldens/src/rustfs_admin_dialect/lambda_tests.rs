@@ -125,7 +125,13 @@ fn sigv2_header_signed_lambda() -> Request<Bytes> {
 }
 
 /// `request`, path-style and unsigned, header-signed with SigV2 by the shared credential, now.
-pub(super) fn sigv2_header_signed(mut request: Request<Bytes>) -> Request<Bytes> {
+pub(super) fn sigv2_header_signed(request: Request<Bytes>) -> Request<Bytes> {
+    sigv2_header_signed_over(request, None)
+}
+
+/// `request` header-signed with SigV2 by the shared credential, now, over the canonical resource
+/// of `bucket` (`None` for the service-level path a claimed route signs, ADR-0044).
+pub(super) fn sigv2_header_signed_over(mut request: Request<Bytes>, bucket: Option<&str>) -> Request<Bytes> {
     let date = rfc1123(RequestNow::capture().unix_seconds());
     request
         .headers_mut()
@@ -137,7 +143,7 @@ pub(super) fn sigv2_header_signed(mut request: Request<Bytes>) -> Request<Bytes>
         request.uri().path(),
         &query,
         request.headers(),
-        None,
+        bucket,
     );
     let authorization = SigV2Signer::new(ACCESS_KEY, SECRET_KEY.as_bytes())
         .expect("a signer")

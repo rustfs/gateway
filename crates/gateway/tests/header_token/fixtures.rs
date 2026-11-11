@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The fixtures of the header token suites (ADR-0052, rustfs/gateway#1586).
+//! The fixtures of the header token suites (ADR-0053, rustfs/gateway#1586).
 //!
 //! Responsible for: the fixture host verifier and what it answers; recorders for both
 //! authorization stages, the handler context, the audit and observer events, the governor's class

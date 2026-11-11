@@ -18,7 +18,7 @@
 //! `x-auth-token` and `x-storage-token`, are treated as credential material by admission and
 //! redaction in a recorded request, whatever their case, while a header that merely resembles one
 //! is left alone.
-//! NOT responsible for: the gateway's admission of such a token (ADR-0052), which is exercised
+//! NOT responsible for: the gateway's admission of such a token (ADR-0053), which is exercised
 //! where the header token claim lives, or any other header a host may claim, which that host
 //! redacts itself.
 //! Upstream: the integration target, which supplies the `with_header` fixture. Downstream:

@@ -13,7 +13,7 @@
 // limitations under the License.
 
 //! Where a host-verified header token may not appear, and what its request's body is held to
-//! (ADR-0052, rustfs/gateway#1586).
+//! (ADR-0053, rustfs/gateway#1586).
 //!
 //! Responsible for: no log event, answer, audit or observer event, start-up line, `Debug`
 //! rendering, authorization context or handler context holding the token, found by searching

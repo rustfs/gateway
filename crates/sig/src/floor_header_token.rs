@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Admission by the floor's host-verified header token claim (ADR-0052, rustfs/gateway#1586).
+//! Admission by the floor's host-verified header token claim (ADR-0053, rustfs/gateway#1586).
 //!
 //! Responsible for: [`SecurityFloor::with_header_token_claim`], the one predicate
 //! [`SecurityFloor::admits_header_token`] that both admission and the startup posture report read,

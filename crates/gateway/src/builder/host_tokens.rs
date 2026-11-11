@@ -13,7 +13,7 @@
 // limitations under the License.
 
 //! The two host token verifiers a deployment may install: ADR-0042's query bearer verifier and
-//! ADR-0052's header token claim.
+//! ADR-0053's header token claim.
 //!
 //! Responsible for: [`ServiceBuilder::bearer_token_verifier`],
 //! [`ServiceBuilder::host_verified_header_token`], writing an installed header token claim onto
@@ -69,7 +69,7 @@ impl ServiceBuilder {
     }
 
     /// Admits a request whose only credential is `claim`'s header as the identity `verifier`
-    /// reports (ADR-0052): for a host whose outer layer has already authenticated a non-AWS token,
+    /// reports (ADR-0053): for a host whose outer layer has already authenticated a non-AWS token,
     /// such as RustFS with OpenStack Keystone's `X-Auth-Token`.
     ///
     /// Nothing is installed by default, and then the header is an ordinary header: a request that

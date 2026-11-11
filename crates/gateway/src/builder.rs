@@ -146,7 +146,7 @@ pub struct ServiceBuilder {
     authenticator: Option<Arc<dyn Authenticator>>,
     custom_signature_verifier: Option<Arc<dyn SignatureVerifier>>,
     bearer_token_verifier: Option<Arc<dyn rustfs_gateway_sig::BearerTokenVerifier>>,
-    /// ADR-0052: the header token claim and its verifier, installed together or not at all.
+    /// ADR-0053: the header token claim and its verifier, installed together or not at all.
     header_token: Option<host_tokens::HeaderToken>,
     #[cfg(feature = "dangerous-replace-signature-verifier")]
     dangerously_replaced_signature_verifier: Option<Arc<dyn AwsSignatureVerifier>>,

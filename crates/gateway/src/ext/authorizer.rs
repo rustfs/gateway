@@ -75,7 +75,7 @@ pub enum AuthSchemeRef {
     /// verifier (ADR-0042). The principal is the one the token was issued to.
     Bearer,
     /// No signature: the service's claimed header token, whose principal the host's installed
-    /// verifier reported from what its outer layer established (ADR-0052). Never a signed
+    /// verifier reported from what its outer layer established (ADR-0053). Never a signed
     /// spelling and never [`Self::Bearer`], so a policy that names a scheme does not admit it.
     HeaderToken,
 }

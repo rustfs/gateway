@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The host boundary of the header token claim through the assembled service (ADR-0052,
+//! The host boundary of the header token claim through the assembled service (ADR-0053,
 //! rustfs/gateway#1586).
 //!
 //! Responsible for: a refused alias of the claimed header answered `403` before any verifier,

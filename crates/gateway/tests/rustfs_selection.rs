@@ -584,7 +584,7 @@ async fn n_an_unrouted_form_does_not_gain_an_early_bucket_refusal() {
     assert_eq!(governor.requests.lock().expect("request observations")[0].1, None);
 }
 
-/// Negative — beside a host-verified header token (ADR-0052) an unrouted object form is a second
+/// Negative — beside a host-verified header token (ADR-0053) an unrouted object form is a second
 /// credential surface: it is not read, its signature is not looked up, the host's verifier is not
 /// asked, and the request keeps the head-only refusal of any unrouted request. The same form
 /// without the token, on the same service, is the control that is read and looked up.

@@ -202,7 +202,7 @@ pub struct Identity {
 pub enum IdentityOrigin {
     /// An access key id: a signature, a custom scheme or a bearer token named it.
     AccessKey,
-    /// A name the host's verifier reported under a header token claim (ADR-0052). Only
+    /// A name the host's verifier reported under a header token claim (ADR-0053). Only
     /// [`crate::HeaderTokenAdmission::verify`] sets it.
     HostToken,
 }
@@ -563,7 +563,7 @@ pub enum Verdict {
     #[non_exhaustive]
     Bearer(crate::bearer::BearerReceipt),
     /// The host's installed verifier reported the identity its outer layer established for a
-    /// request admitted by the floor's header token claim (ADR-0052). No signature was compared:
+    /// request admitted by the floor's header token claim (ADR-0053). No signature was compared:
     /// no [`SignatureMatch`], no scheme and no scope. Only
     /// [`crate::HeaderTokenAdmission::verify`] produces the [`crate::HeaderTokenReceipt`], and the
     /// variant is non-exhaustive for the reason [`Verdict::Bearer`] is: match it as

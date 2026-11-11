@@ -50,6 +50,8 @@ mod sig_v2;
 mod sig_v2_admission;
 #[path = "signer_roundtrip.rs"]
 mod signer_roundtrip;
+#[path = "sigv2_refused_floor.rs"]
+mod sigv2_refused_floor;
 #[path = "timing.rs"]
 mod timing;
 #[path = "verification_proof.rs"]
