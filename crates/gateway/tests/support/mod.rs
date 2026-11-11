@@ -18,13 +18,6 @@
 //! register, a body that counts how much of itself was read, and the two builder shortcuts.
 //! NOT responsible for: asserting anything. Every assertion lives in the suite that makes it.
 //! Upstream: `rustfs-gateway`. Downstream: the targets `tests/integration.rs`, `tests/socket_timing.rs`.
-//!
-//! # Why the reachable operation is a vendor one
-//!
-//! Every AWS operation ships with `AllowedSchemes::HEADER_ONLY`, and `rustfs-gateway-sig` cannot
-//! produce a signature yet — `rustfs_gateway::sig::Signer` is the missing piece. So a suite that
-//! wants to reach a handler has to drive an operation that declares itself anonymously reachable.
-//! The AWS operations are still registered, and what they assert is the refusal.
 
 // Each suite uses a subset of this module, and `unreachable_pub` sees a test binary that never
 // re-exports it. Both are properties of a shared test fixture rather than of the code under test.
@@ -615,6 +608,13 @@ pub fn wired_at_signed_time() -> ServiceBuilder {
         fixed_clock(),
         rustfs_gateway::ClockSkewAck::i_understand_a_skewed_clock_can_disable_signature_expiry(),
     )
+}
+
+/// One header-signed external control request whose object bytes use the external body path.
+#[must_use]
+#[cfg(feature = "external-payload")]
+pub fn signed_external(method: http::Method, target: &str, extra: &[(&str, &str)]) -> http::Request<Bytes> {
+    signed_body_with_payload(method, target, extra, Bytes::new(), PayloadMode::Unsigned)
 }
 
 /// One correctly signed, body-less request against the fixture's credentials.

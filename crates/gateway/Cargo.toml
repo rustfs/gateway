@@ -21,6 +21,7 @@ ring = 1
 
 [features]
 default = ["server"]
+external-payload = ["rustfs-gateway-core/external-payload"]
 server = ["dep:rustfs-gateway-server"]
 dangerous-allow-all-authorizer = []
 dangerous-replace-signature-verifier = ["rustfs-gateway-sig/dangerous-replace-signature-verifier"]
