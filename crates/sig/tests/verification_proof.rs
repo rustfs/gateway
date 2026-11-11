@@ -289,6 +289,14 @@ fn c_sig_0111_the_two_credential_rejections_differ_only_in_their_code() {
     assert!(AuthError::SignatureDoesNotMatch.is_credential_rejection());
 }
 
+/// Negative — the expired-session answer carries the wire code SDKs refresh on, not the uniform
+/// credential code (rustfs/gateway#1575).
+#[test]
+fn an_expired_session_has_its_own_code() {
+    assert_eq!(AuthError::ExpiredToken.code(), "ExpiredToken");
+    assert_ne!(AuthError::ExpiredToken.code(), AuthError::InvalidAccessKeyId.code());
+}
+
 /// Negative — c-sig-0112: hex of the wrong length is rejected, never truncated or zero-padded.
 #[test]
 fn c_sig_0112_wrong_length_hex_is_rejected() {
