@@ -271,6 +271,8 @@ pub(crate) enum Extension {
     Authorizer,
     /// The host's query bearer verifier (ADR-0042). Its panic is a refusal, answered `403`.
     BearerVerifier,
+    /// The host's header token verifier (ADR-0054). Its panic is a refusal, answered `403`.
+    HeaderTokenVerifier,
 }
 
 impl Extension {
@@ -279,6 +281,7 @@ impl Extension {
             Self::Handler => "handler",
             Self::Authorizer => "authorizer",
             Self::BearerVerifier => "bearer_verifier",
+            Self::HeaderTokenVerifier => "header_token_verifier",
         }
     }
 
@@ -286,7 +289,7 @@ impl Extension {
     const fn answered(self) -> u16 {
         match self {
             Self::Handler | Self::Authorizer => 500,
-            Self::BearerVerifier => 403,
+            Self::BearerVerifier | Self::HeaderTokenVerifier => 403,
         }
     }
 
@@ -294,10 +297,12 @@ impl Extension {
         static HANDLER: Throttle = Throttle::new();
         static AUTHORIZER: Throttle = Throttle::new();
         static BEARER_VERIFIER: Throttle = Throttle::new();
+        static HEADER_TOKEN_VERIFIER: Throttle = Throttle::new();
         match self {
             Self::Handler => &HANDLER,
             Self::Authorizer => &AUTHORIZER,
             Self::BearerVerifier => &BEARER_VERIFIER,
+            Self::HeaderTokenVerifier => &HEADER_TOKEN_VERIFIER,
         }
     }
 }

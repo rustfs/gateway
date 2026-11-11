@@ -321,6 +321,8 @@ pub struct RequestContextView {
     transport_extensions: TransportExtensions,
     principal: Option<RequestPrincipal>,
     bearer: Option<BearerContext>,
+    /// The principal a host-verified header token established (ADR-0054).
+    header_token: Option<Identity>,
     path_params: PathParams,
     subjects: Option<Subjects>,
 }
@@ -354,6 +356,7 @@ impl RequestContextView {
                 identity: bearer.identity.clone(),
                 state: bearer.state.clone(),
             }),
+            header_token: self.header_token.clone(),
             path_params: self.path_params.clone(),
             subjects: self.subjects.clone(),
         }
@@ -390,10 +393,11 @@ impl RequestContextView {
                 scope: scope.clone(),
                 secret: caller_secret.map(CallerSecretKey),
             }),
-            Verdict::Anonymous(_) | Verdict::Bearer { .. } => None,
+            Verdict::Anonymous(_) | Verdict::Bearer { .. } | Verdict::HeaderToken { .. } => None,
             _ => return None,
         };
         let bearer = verdict.bearer_receipt().map(BearerContext::of);
+        let header_token = verdict.header_token_receipt().map(|receipt| receipt.identity().clone());
         let mut headers = HeaderMap::new();
         for (name, value) in wire.headers().iter_raw() {
             headers.append(name.clone(), value.clone());
@@ -412,6 +416,7 @@ impl RequestContextView {
             transport_extensions: wire.transport_extensions().clone(),
             principal,
             bearer,
+            header_token,
             path_params: PathParams::none(),
             subjects: None,
         })
@@ -477,6 +482,7 @@ impl RequestContextView {
             transport_extensions: TransportExtensions::default(),
             principal: None,
             bearer: None,
+            header_token: None,
             path_params: PathParams::none(),
             subjects: None,
         }
@@ -592,10 +598,19 @@ impl RequestContextView {
         self.bearer.as_ref()
     }
 
+    /// The principal the host's verifier reported for a request admitted by the floor's header
+    /// token claim (ADR-0054): the identity the host's outer layer established. `None` for every
+    /// other admission. No signature was compared, so [`Self::principal`] is `None` beside it, and
+    /// the context never holds the token or its header.
+    #[must_use]
+    pub const fn header_token_principal(&self) -> Option<&Identity> {
+        self.header_token.as_ref()
+    }
+
     /// Whether the request presented no credentials and was confirmed anonymous.
     #[must_use]
     pub const fn is_anonymous(&self) -> bool {
-        self.principal.is_none() && self.bearer.is_none()
+        self.principal.is_none() && self.bearer.is_none() && self.header_token.is_none()
     }
 
     /// The path parameters of the claimed row that accepted the request, decoded once and
@@ -654,6 +669,7 @@ impl fmt::Debug for RequestContextView {
             .field("header_names", &HeaderNames(&self.headers))
             .field("principal", &self.principal)
             .field("bearer", &self.bearer)
+            .field("header_token", &self.header_token)
             .field("path_params", &self.path_params)
             .field("subjects", &self.subjects)
             .finish()

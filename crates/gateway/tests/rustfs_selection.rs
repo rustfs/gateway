@@ -440,6 +440,14 @@ impl http_body::Body for GovernedForm {
 }
 
 fn governed_form(admit: bool) -> (S3Service, Arc<FormGovernor>, Arc<Seen>) {
+    governed_form_with(admit, |builder| builder)
+}
+
+/// [`governed_form`], with `install` applied to the builder before it is built.
+fn governed_form_with(
+    admit: bool,
+    install: impl FnOnce(ServiceBuilder) -> ServiceBuilder,
+) -> (S3Service, Arc<FormGovernor>, Arc<Seen>) {
     let work = Arc::new(Seen::default());
     let governor = Arc::new(FormGovernor {
         admit,
@@ -451,16 +459,15 @@ fn governed_form(admit: bool) -> (S3Service, Arc<FormGovernor>, Arc<Seen>) {
         work,
         credentials: StaticCredentials::new().with(Credentials::new("AKIDEXAMPLE", b"secret").expect("valid key")),
     });
-    let service = ServiceBuilder::new()
+    let builder = ServiceBuilder::new()
         .authenticator(SigV4Authenticator::new(credentials, RegionSet::new(["us-east-1"]).expect("non-empty")))
         .clock_with_skew_ack(fixed_clock(), ClockSkewAck::i_understand_a_skewed_clock_can_disable_signature_expiry())
         .authorizer(Allow)
         .register::<PutObject, _>(Arc::new(Recorder(Arc::clone(&seen))))
         .select_operations_as_legacy_rustfs()
         .legacy_rustfs_post_forms()
-        .governor(Arc::clone(&governor))
-        .build()
-        .expect("a complete assembly");
+        .governor(Arc::clone(&governor));
+    let service = install(builder).build().expect("a complete assembly");
     (service, governor, seen)
 }
 
@@ -575,4 +582,90 @@ async fn n_an_unrouted_form_does_not_gain_an_early_bucket_refusal() {
     assert_eq!(governor.work.take(), ["admit", "body", "release"]);
     assert_eq!(status, http::StatusCode::METHOD_NOT_ALLOWED);
     assert_eq!(governor.requests.lock().expect("request observations")[0].1, None);
+}
+
+/// Negative — beside a host-verified header token (ADR-0054) an unrouted object form is a second
+/// credential surface: it is not read, its signature is not looked up, the host's verifier is not
+/// asked, and the request keeps the head-only refusal of any unrouted request. The same form
+/// without the token, on the same service, is the control that is read and looked up.
+#[tokio::test]
+async fn n_an_unrouted_form_beside_a_header_token_is_neither_read_nor_verified() {
+    use http_body_util::BodyExt;
+    use rustfs_gateway::{HeaderTokenClaim, HeaderTokenRefused, HeaderTokenVerifier, Identity, RequestNow};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// What the host's outer layer left in the request; the spy would name it if it were asked.
+    #[derive(Clone)]
+    struct Outer;
+    struct Spy(Arc<AtomicUsize>);
+
+    impl HeaderTokenVerifier for Spy {
+        type Established = Outer;
+
+        fn identity(&self, _established: &Outer, _now: RequestNow) -> Result<Identity, HeaderTokenRefused> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Identity::new("AKIDEXAMPLE").map_err(|_| HeaderTokenRefused)
+        }
+    }
+
+    let asked = Arc::new(AtomicUsize::new(0));
+    for (with_token, status, work) in [
+        (false, http::StatusCode::FORBIDDEN, vec!["admit", "body", "lookup", "release"]),
+        (true, http::StatusCode::NOT_IMPLEMENTED, vec![]),
+    ] {
+        let spy = Spy(Arc::clone(&asked));
+        let claim = HeaderTokenClaim::new("x-auth-token").expect("a legal claim");
+        let (service, governor, seen) = governed_form_with(true, |builder| builder.host_verified_header_token(claim, spy));
+        let body = forged_form();
+        let length = body.len() as u64;
+        let mut head = http::Request::builder()
+            .method(http::Method::POST)
+            .uri("/bkt/obj")
+            .header("host", "s3.example.com")
+            .header("content-type", "multipart/form-data; boundary=form")
+            .header("content-length", length);
+        if with_token {
+            head = head.header("x-auth-token", "gAAAAABheader-token-sentinel").extension(Outer);
+        }
+        let (body, read) = crate::support::CountingBody::new(body);
+        let request = head
+            .body(GovernedForm {
+                body,
+                work: Arc::clone(&governor.work),
+            })
+            .expect("a valid request");
+        let response = service.call(request).await;
+        let answered = response.status();
+        let answer = response.into_body().collect().await.expect("response body").to_bytes();
+        assert_eq!(answered, status, "with_token={with_token}");
+        assert_eq!(governor.work.take(), work, "with_token={with_token}");
+        assert_eq!(
+            read.load(Ordering::SeqCst),
+            if with_token { 0 } else { length },
+            "with_token={with_token}"
+        );
+        assert!(!String::from_utf8_lossy(&answer).to_ascii_lowercase().contains("sentinel"));
+        assert!(seen.take().is_empty(), "with_token={with_token}");
+        // `classify` walks the same steps: the form beside the token is not a form to be read.
+        let mut head = http::Request::builder()
+            .method(http::Method::POST)
+            .uri("/bkt/obj")
+            .header("host", "s3.example.com")
+            .header("content-type", "multipart/form-data; boundary=form");
+        if with_token {
+            head = head.header("x-auth-token", "gAAAAABheader-token-sentinel");
+        }
+        let (head, _) = head.body(()).expect("a valid head").into_parts();
+        let classified = service.classify(&head);
+        if with_token {
+            let refused = Classification::Refused {
+                status: http::StatusCode::NOT_IMPLEMENTED,
+                code: Some(ErrorCode::NOT_IMPLEMENTED),
+            };
+            assert_eq!(classified, refused, "with_token={with_token}");
+        } else {
+            assert_eq!(classified, Classification::UnroutedPostForm, "with_token={with_token}");
+        }
+    }
+    assert_eq!(asked.load(Ordering::SeqCst), 0, "the host's verifier was asked about an unrouted request");
 }

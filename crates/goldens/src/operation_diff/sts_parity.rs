@@ -770,3 +770,6 @@ fn n_a_body_past_the_claimed_route_ceiling_is_refused_after_the_signature() {
     assert_eq!(answer.status, 403, "{answer:?}");
     assert!(answer.handed.is_none());
 }
+
+#[path = "sts_header_token.rs"]
+mod header_token;
