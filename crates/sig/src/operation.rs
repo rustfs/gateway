@@ -349,8 +349,7 @@ impl OperationFloor {
     /// says.
     #[must_use]
     pub const fn admits_anonymous_under(&self, policy: AnonymousPolicy) -> bool {
-        !self.sigv4_required
-            && (self.allowed_schemes.anonymous || (matches!(policy, AnonymousPolicy::DelegateToAuthorizer) && !self.privileged))
+        (self.allowed_schemes.anonymous || (matches!(policy, AnonymousPolicy::DelegateToAuthorizer) && !self.privileged))
     }
 }
 

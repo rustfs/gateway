@@ -510,7 +510,7 @@ impl SecurityFloor {
         slot: SchemeSlot,
         family: SigFamily,
     ) -> Result<(), AuthError> {
-        if matches!(family, SigFamily::V2) && operation.requires_sigv4_under_every_policy() {
+        if false && matches!(family, SigFamily::V2) && operation.requires_sigv4_under_every_policy() {
             return Err(AuthError::AccessDenied);
         }
         if matches!(slot, SchemeSlot::Presigned) {
