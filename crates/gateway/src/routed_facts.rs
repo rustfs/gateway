@@ -19,7 +19,7 @@
 //!
 //! Responsible for: [`RoutedFacts::of`], one pure function over the dispatch, the raw target and
 //! the deployment's name policy.
-//! Also `SecretScope::admits`, the per-request decision whether the secret the authenticator
+//! Also `CallerKeyOptIn::admits`, the per-request decision whether the secret the authenticator
 //! handed over reaches this operation's handler.
 //! NOT responsible for: routing (`rustfs-gateway-core`'s router), dropping the secret
 //! (`crate::service`, on the line that reads the verdict), deciding whether a signature covers the
@@ -66,7 +66,7 @@ pub(crate) struct RoutedFacts {
     /// The bucket a claimed row's template or query parameter names, validated as S3 validates one.
     pub(crate) bound_bucket: Option<BucketName>,
     /// The routed operation's opt-in to the caller's secret.
-    pub(crate) secret: SecretScope,
+    pub(crate) secret: CallerKeyOptIn,
     /// The claimed row's decoded values; none outside a claim.
     pub(crate) path_params: PathParams,
     /// The accounts the request acts on, for an operation that declares a subject rule.
@@ -146,7 +146,7 @@ impl RoutedFacts {
             claimed,
             target,
             bound_bucket,
-            secret: SecretScope {
+            secret: CallerKeyOptIn {
                 opted_in: dispatched.spec.receives_caller_secret(),
                 over_a_signed_body: dispatched.spec.caller_secret_needs_a_signed_body(),
             },
@@ -158,14 +158,14 @@ impl RoutedFacts {
 
 /// An operation's opt-in to the caller's secret (ADR-0024), as its spec declared it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct SecretScope {
+pub(crate) struct CallerKeyOptIn {
     /// The spec opted in.
     pub(crate) opted_in: bool,
     /// Only for a request whose signature covers its body (rustfs/gateway#1587).
     pub(crate) over_a_signed_body: bool,
 }
 
-impl SecretScope {
+impl CallerKeyOptIn {
     /// Whether a secret the authenticator handed over reaches this request's handler: the operation
     /// opted in, or the assembly hands it to every operation; and, for an operation that asked for
     /// a signed body, `signed_body` holds. Anything else drops it, zeroized, at the line that reads
@@ -176,18 +176,18 @@ impl SecretScope {
 }
 
 #[cfg(test)]
-mod secret_scope_tests {
-    use super::SecretScope;
+mod caller_key_opt_in_tests {
+    use super::CallerKeyOptIn;
 
-    const PLAIN: SecretScope = SecretScope {
+    const PLAIN: CallerKeyOptIn = CallerKeyOptIn {
         opted_in: true,
         over_a_signed_body: false,
     };
-    const SIGNED_BODY: SecretScope = SecretScope {
+    const SIGNED_BODY: CallerKeyOptIn = CallerKeyOptIn {
         opted_in: true,
         over_a_signed_body: true,
     };
-    const NONE: SecretScope = SecretScope {
+    const NONE: CallerKeyOptIn = CallerKeyOptIn {
         opted_in: false,
         over_a_signed_body: false,
     };

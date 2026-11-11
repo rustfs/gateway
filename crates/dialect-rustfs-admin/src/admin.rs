@@ -193,7 +193,10 @@ pub fn streamed(body: RequestBody) -> Result<ByteStream, CodecError> {
 /// (ADR-0024), which a claimed row's generator sets when RustFS seals a body with it.
 #[must_use]
 pub const fn spec(name: &'static str, auth: AuthRequirement, caller_secret: bool) -> OperationSpec {
-    let builder = base_spec(name, auth);
+    let builder = OperationSpec::builder(name, 200, None)
+        .handler_deadline_class(HandlerDeadlineClass::Standard)
+        .required_params(&[])
+        .auth(auth);
     if caller_secret {
         builder.hand_caller_secret_to_handler().build()
     } else {
@@ -203,19 +206,16 @@ pub const fn spec(name: &'static str, auth: AuthRequirement, caller_secret: bool
 
 /// [`spec`] handing the caller's secret over only for a request whose signature covers its body,
 /// as the generator's form ruling decides for the STS form operation (rustfs/gateway#1587): the
-/// form body carries every parameter the secret's comparison authorises.
+/// form body carries every parameter the secret's comparison authorises. The chain is written out
+/// whole, as `scripts/check_handler_deadline_class.sh` inventories every specification builder.
 #[must_use]
 pub const fn spec_over_a_signed_body(name: &'static str, auth: AuthRequirement) -> OperationSpec {
-    base_spec(name, auth)
-        .hand_caller_secret_to_handler_over_a_signed_body()
-        .build()
-}
-
-const fn base_spec(name: &'static str, auth: AuthRequirement) -> OperationSpec {
     OperationSpec::builder(name, 200, None)
         .handler_deadline_class(HandlerDeadlineClass::Standard)
         .required_params(&[])
         .auth(auth)
+        .hand_caller_secret_to_handler_over_a_signed_body()
+        .build()
 }
 
 /// The floor every admin operation has: privileged and header-signed only, so it is never reached
