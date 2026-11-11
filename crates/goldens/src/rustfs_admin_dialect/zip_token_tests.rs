@@ -30,6 +30,8 @@ use bytes::Bytes;
 use http::{HeaderValue, Request};
 use rustfs_gateway::{BearerGrant, BearerRefused, BearerTokenRequest, BearerTokenVerifier, Identity};
 
+use rustfs_gateway::{ClockSkewAck, FixedClock, SecurityFloor};
+
 use super::{Exchange, REGION, assemble, assemble_with_bearer_verifier, wire};
 use crate::operation_diff::s3s_0_17_0::context::{ACCESS_KEY, ContextRequest, PATH_HOST};
 
@@ -155,9 +157,210 @@ fn n_an_unverifiable_token_only_download_is_refused_without_asking() {
         (format!("{zip}/abc.tar?token={GOOD}"), false),
         (format!("{zip}/abc?token={GOOD}"), false),
         (format!("{zip}/abc%2Ezip?token={GOOD}"), false),
+        // The id is bound raw: neither decoded nor case-folded before the host compares it.
+        (format!("{zip}/%61bc.zip?token={GOOD}"), true),
+        (format!("{zip}/ABC.zip?token={GOOD}"), true),
     ] {
         refused_without_asking(&assembled.exchange(unsigned("GET", &uri)), &uri);
         assert_eq!(!asked_of(&verifier).is_empty(), reaches_verifier, "{uri}");
+    }
+}
+
+/// Negative — a tampered token is handed to the host byte for byte and refused: one character
+/// flipped, case-folded, truncated, extended, and an appended encoded NUL. Each reaches the
+/// verifier, so the refusal is the host's answer to the exact presented value, not a parse error.
+#[test]
+fn n_a_tampered_token_is_refused() {
+    let verifier = FixtureVerifier::default();
+    let assembled = assemble_with_bearer_verifier(|_, _| true, verifier.clone());
+    let zip = "/rustfs/admin/v3/object-zip-downloads/abc.zip";
+    let tampered = [
+        GOOD.replacen("abc", "abd", 1),
+        GOOD.to_ascii_uppercase(),
+        GOOD[..GOOD.len() - 1].to_owned(),
+        format!("{GOOD}0"),
+        format!("{GOOD}%00"),
+    ];
+    for token in tampered {
+        assert_ne!(token, GOOD, "the fixture must tamper");
+        let uri = format!("{zip}?token={token}");
+        refused_without_asking(&assembled.exchange(unsigned("GET", &uri)), &uri);
+        assert_eq!(asked_of(&verifier), ["abc"], "{uri}: the host decided");
+    }
+}
+
+/// The wall clock the clock-binding case pins, in the past, so the system clock is later.
+const PINNED_AT: i64 = 1_700_000_000;
+/// A token for download `abc` that expires exactly at [`PINNED_AT`].
+const EXPIRES_NOW: &str = "tok-expires-now-sentinel";
+/// A token for download `abc` that expires one second after [`PINNED_AT`].
+const EXPIRES_NEXT: &str = "tok-expires-next-sentinel";
+
+/// A host verifier that records the clock reading it was handed and applies `expires_at <= now`.
+#[derive(Clone, Default)]
+struct ClockedVerifier {
+    seen: Arc<Mutex<Vec<i64>>>,
+}
+
+impl BearerTokenVerifier for ClockedVerifier {
+    fn verify(&self, request: &BearerTokenRequest<'_>) -> Result<BearerGrant, BearerRefused> {
+        let now = request.now().unix_seconds();
+        self.seen.lock().expect("uncontended").push(now);
+        let expires_at = match request.token() {
+            EXPIRES_NOW => PINNED_AT,
+            EXPIRES_NEXT => PINNED_AT + 1,
+            _ => return Err(BearerRefused),
+        };
+        if request.resource() != "abc" || expires_at <= now {
+            return Err(BearerRefused);
+        }
+        let identity = Identity::new(ACCESS_KEY).map_err(|_| BearerRefused)?;
+        Ok(BearerGrant::new(identity, Arc::new("archive-abc".to_owned())))
+    }
+}
+
+/// Negative — the verifier is handed the service's own single clock reading, not an independent
+/// one: under a clock pinned at [`PINNED_AT`] a token expiring at that instant is refused before
+/// the authorizer, and one expiring a second later is admitted.
+#[test]
+fn n_expiry_is_judged_on_the_request_clock_at_its_exact_boundary() {
+    let verifier = ClockedVerifier::default();
+    let seen = Arc::clone(&verifier.seen);
+    let assembled = super::assemble_installing(
+        SecurityFloor::new(),
+        |_, _| true,
+        false,
+        None,
+        |builder| {
+            builder.bearer_token_verifier(verifier).clock_with_skew_ack(
+                FixedClock::at_unix_seconds(PINNED_AT),
+                ClockSkewAck::i_understand_a_skewed_clock_can_disable_signature_expiry(),
+            )
+        },
+    );
+    let zip = "/rustfs/admin/v3/object-zip-downloads/abc.zip";
+    let at_boundary = format!("{zip}?token={EXPIRES_NOW}");
+    refused_without_asking(&assembled.exchange(unsigned("GET", &at_boundary)), &at_boundary);
+    let next = assembled.exchange(unsigned("GET", &format!("{zip}?token={EXPIRES_NEXT}")));
+    assert_eq!(next.status, 200, "{}", next.body);
+    assert_eq!(next.reached, [ZIP_GET]);
+    assert_eq!(
+        *seen.lock().expect("uncontended"),
+        [PINNED_AT, PINNED_AT],
+        "the request's own clock reading"
+    );
+}
+
+/// Every `tracing` event and span field emitted on this thread, each rendered whole.
+#[derive(Clone, Default)]
+struct Capture(Arc<Mutex<Vec<String>>>);
+
+struct Rendered(String);
+
+impl tracing::field::Visit for Rendered {
+    fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn core::fmt::Debug) {
+        self.0.push_str(&format!("{}={value:?};", field.name()));
+    }
+}
+
+impl tracing::Subscriber for Capture {
+    fn register_callsite(&self, _metadata: &'static tracing::Metadata<'static>) -> tracing::subscriber::Interest {
+        tracing::subscriber::Interest::sometimes()
+    }
+
+    fn enabled(&self, _metadata: &tracing::Metadata<'_>) -> bool {
+        true
+    }
+
+    fn new_span(&self, span: &tracing::span::Attributes<'_>) -> tracing::span::Id {
+        let mut rendered = Rendered(String::from("span:"));
+        span.record(&mut rendered);
+        self.0.lock().expect("uncontended").push(rendered.0);
+        tracing::span::Id::from_u64(1)
+    }
+
+    fn record(&self, _span: &tracing::span::Id, values: &tracing::span::Record<'_>) {
+        let mut rendered = Rendered(String::from("record:"));
+        values.record(&mut rendered);
+        self.0.lock().expect("uncontended").push(rendered.0);
+    }
+
+    fn record_follows_from(&self, _span: &tracing::span::Id, _follows: &tracing::span::Id) {}
+
+    fn event(&self, event: &tracing::Event<'_>) {
+        let mut rendered = Rendered(format!("{}:", event.metadata().target()));
+        event.record(&mut rendered);
+        self.0.lock().expect("uncontended").push(rendered.0);
+    }
+
+    fn enter(&self, _span: &tracing::span::Id) {}
+
+    fn exit(&self, _span: &tracing::span::Id) {}
+}
+
+/// The process-wide subscriber: records nothing and never caches a callsite as uninteresting, so a
+/// callsite first reached on another test's thread still asks this thread's capture.
+struct Undecided;
+
+impl tracing::Subscriber for Undecided {
+    fn register_callsite(&self, _metadata: &'static tracing::Metadata<'static>) -> tracing::subscriber::Interest {
+        tracing::subscriber::Interest::sometimes()
+    }
+
+    fn enabled(&self, _metadata: &tracing::Metadata<'_>) -> bool {
+        false
+    }
+
+    fn new_span(&self, _span: &tracing::span::Attributes<'_>) -> tracing::span::Id {
+        tracing::span::Id::from_u64(1)
+    }
+
+    fn record(&self, _span: &tracing::span::Id, _values: &tracing::span::Record<'_>) {}
+
+    fn record_follows_from(&self, _span: &tracing::span::Id, _follows: &tracing::span::Id) {}
+
+    fn event(&self, _event: &tracing::Event<'_>) {}
+
+    fn enter(&self, _span: &tracing::span::Id) {}
+
+    fn exit(&self, _span: &tracing::span::Id) {}
+}
+
+/// Negative — nothing logged while the service admits a token-only download, refuses an expired
+/// token, refuses a token without a verifier and refuses a header-signed download with another
+/// principal's token holds any token. The refusals are among what was captured, so the scan saw
+/// the request path's events.
+#[test]
+fn n_no_log_event_holds_a_token() {
+    // Another case may have installed one first; one only has to exist.
+    let _ = tracing::subscriber::set_global_default(Undecided);
+    let capture = Capture::default();
+    let zip = "/rustfs/admin/v3/object-zip-downloads/abc.zip";
+    let statuses = tracing::subscriber::with_default(capture.clone(), || {
+        tracing::callsite::rebuild_interest_cache();
+        let with_verifier = assemble_with_bearer_verifier(|_, _| true, FixtureVerifier::default());
+        let without = assemble(|_, _| true);
+        [
+            with_verifier.exchange(unsigned("GET", &format!("{zip}?token={GOOD}"))).status,
+            with_verifier
+                .exchange(unsigned("GET", &format!("{zip}?token={EXPIRED}")))
+                .status,
+            without.exchange(unsigned("GET", &format!("{zip}?token={GOOD}"))).status,
+            with_verifier
+                .exchange(signed_get(zip, &format!("token={OTHER_PRINCIPAL}")))
+                .status,
+        ]
+    });
+    assert_eq!(statuses, [200, 403, 403, 403]);
+    let events = capture.0.lock().expect("uncontended").clone();
+    let refusals = events
+        .iter()
+        .filter(|event| event.contains("gateway_request_refused"))
+        .count();
+    assert_eq!(refusals, 3, "{events:#?}");
+    for event in &events {
+        assert!(!event.contains("sentinel"), "a log event holds a token: {event}");
+        assert!(!event.contains("tok-"), "a log event holds a token: {event}");
     }
 }
 
