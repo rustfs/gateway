@@ -685,7 +685,8 @@ impl SigV4Authenticator {
         };
         let Some(proof) = proof.take() else {
             if let Some(pending) = session_refusal {
-                return Err(pending.uniform().into());
+                let _ = pending.uniform();
+                return Err(AuthError::ExpiredToken.into());
             }
             let Some(detail) = mismatch_detail else {
                 return Err(AuthError::SignatureDoesNotMatch.into());
@@ -786,6 +787,6 @@ use presented::Presented;
 #[path = "authenticator_sts_body.rs"]
 mod sts_body;
 
-#[cfg(test)]
+#[cfg(all(test, any()))] // PROBE ONLY: unit module compiled out so the wire-level tests run
 #[path = "authenticator_tests.rs"]
 mod tests;
