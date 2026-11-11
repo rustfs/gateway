@@ -36,7 +36,7 @@ exactly three forms:
 - an aws-chunked chain of chunk signatures.
 
 `Authentication::signs_its_body` answers this from the authenticator's own state. The facade
-drops the secret, zeroized, on the line that already applies the opt-in (`SecretScope::admits`).
+drops the secret, zeroized, on the line that already applies the opt-in (`CallerKeyOptIn::admits`).
 The condition also holds when the deployment hands the secret to every operation.
 
 Admission is unchanged. An unsigned-body request still reaches the handler, without the secret,
