@@ -274,7 +274,7 @@ The framework's half:
   startup posture line lists every operation it makes reachable.
 - **A host-verified header token is its own scheme, and off by default.** A host whose outer layer
   authenticates a non-AWS token installs `ServiceBuilder::host_verified_header_token` with one
-  header name and one verifier (ADR-0051). A request whose only credential is that header is then
+  header name and one verifier (ADR-0052). A request whose only credential is that header is then
   admitted as far as the verifier, which names the identity the host's outer layer left in that
   request's own extensions; a request that carries none is refused without the verifier being
   called. The token beside any other credential surface is refused before any verifier runs, under
@@ -305,7 +305,7 @@ has exactly one source (rustfs/backlog#2752):
 | Secure transport | `ClientFacts::transport_secure` | TLS completed on the listener (`ConnectionInfo`), or the host's `TransportSecurity::Encrypted` — the value the customer-key gate reads; or the override | `false`, never `true` by default; `client()` is `None` when nothing at all was installed |
 | Client address | `ClientFacts::client_ip`, `ClientFacts::source_ip()` | the host's `ClientAddr` — the governor's input, attested after the host's trusted-proxy rules; or the override. Never a request header | `None`; `source_ip()` falls back to the peer |
 | Raw query | `RequestContext::raw_query()` | the accepted request target, unchanged — except that an operation's query bearer token is removed once a host bearer verifier is installed (ADR-0042) | `Some("")` for a request without one; `None` only for a context built by hand |
-| Signature scheme | `RequestContext::auth_scheme()` | the verdict's family and location (`AuthSchemeRef::of_scheme`); nothing re-verified | `Anonymous` only for a confirmed anonymous verdict; a family without a spelling is `OtherSigned`; a host-verified query bearer token is `Bearer`, never a signed spelling (ADR-0042); a host-verified header token is `HeaderToken`, never a signed spelling or `Bearer` (ADR-0051) |
+| Signature scheme | `RequestContext::auth_scheme()` | the verdict's family and location (`AuthSchemeRef::of_scheme`); nothing re-verified | `Anonymous` only for a confirmed anonymous verdict; a family without a spelling is `OtherSigned`; a host-verified query bearer token is `Bearer`, never a signed spelling (ADR-0042); a host-verified header token is `HeaderToken`, never a signed spelling or `Bearer` (ADR-0052) |
 | Anything else the transport installed | `ServerExtensions::get::<T>()` | the request extensions frozen at acceptance — the bag `RequestContextView::transport_extensions` hands a handler | `None` |
 
 A host that computes the client address outside the gateway (RustFS's trusted-proxy rules) writes
@@ -462,8 +462,19 @@ framework's half:
   `ProviderError::from` reports a provider fault, answered as below. There is no length rule
   beyond this; a minimum length is the deployment's policy.
 - **A store that cannot answer fails closed.** A backend error, timeout or isolated panic is
-  counted, is never cached, and receives the same 403 response as another credential failure. It
-  is never treated as an anonymous request.
+  counted, is never cached, and by default receives the same 403 response as another credential
+  failure. It is never treated as an anonymous request. A host may opt in to answering it
+  `500 InternalError` instead, which SDKs retry
+  (`SigV4Authenticator::answer_credential_store_faults_as_unavailable`, ADR-0051; the RustFS
+  profile turns it on). The answer is given where an unknown key is answered — after the placeholder
+  derivation and comparison, except on the early lookup refusal of a header signature scoped to
+  `sts` without `x-amz-content-sha256` under `accept_legacy_rustfs_signing_services`, where both
+  answer before the body is read. It carries no request or provider text, and closes the connection
+  while a body is owed, as an authentication failure does. It is opt-in because it reveals: a fault
+  confined to a disabled, expired or tokenless-session record exposes a record otherwise hidden as
+  an unknown key; a store slower for existing records than for misses becomes a `500`/`403`
+  existence oracle at the guard's deadline; and during a full outage a negatively cached key still
+  answers `403`. Retries against a failing store are bounded only by the governor (ADR-0051).
 - **An unknown key costs what a known one costs.** The unknown-key path derives from
   `timing::placeholder_secret`, runs the full four-step chain and completes the comparison before
   answering, so the two are not separable by latency (`timing::SIDE_CHANNELS`, row T1). On the

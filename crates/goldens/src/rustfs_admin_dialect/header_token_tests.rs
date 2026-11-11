@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The host-verified header token claim against the RustFS admin dialect (ADR-0051,
+//! The host-verified header token claim against the RustFS admin dialect (ADR-0052,
 //! rustfs/gateway#1586).
 //!
 //! Responsible for: with the claim and a spy verifier installed, every admin row and every

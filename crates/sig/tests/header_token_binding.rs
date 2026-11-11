@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! What binds a header token claim to its host (ADR-0051, rustfs/gateway#1586).
+//! What binds a header token claim to its host (ADR-0052, rustfs/gateway#1586).
 //!
 //! Responsible for: the refused aliases of a claim — their grammar, and that a request carrying
 //! one is refused whatever else it carries; the binding of the reported identity to the value

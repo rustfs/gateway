@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The host-verified header token claim through the assembled service (ADR-0051,
+//! The host-verified header token claim through the assembled service (ADR-0052,
 //! rustfs/gateway#1586).
 //!
 //! Responsible for: a request whose only credential is the claimed header served as the principal

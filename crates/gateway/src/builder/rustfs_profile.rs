@@ -99,6 +99,7 @@
 //! | `accept_legacy_rustfs_signing_services` | `s3`, `sts` and `s3tables` verified on every operation, others `501` | "signature verification as legacy" (GW-SIG, items 1–2) |
 //! | `answer_credential_scope_refusals_as_legacy_rustfs` | a scope date or region refusal in RustFS's code and words | "signature verification as legacy" (GW-SIG, item 6) |
 //! | `read_signed_headers_as_legacy_rustfs` | `SignedHeaders` read verbatim, refusals in RustFS's words | "signature verification as legacy" (GW-SIG, items 7–8) |
+//! | `answer_credential_store_faults_as_unavailable` | a credential-store fault answered `500 InternalError` | R-068 (rustfs/gateway#1585, ADR-0051) |
 //!
 //! # Why one method and not a configuration file
 //!
@@ -334,6 +335,9 @@ impl SigV4Authenticator {
             // It reads `SignedHeaders` verbatim, and answers a list that does not cover what it
             // must in its own words (rustfs/gateway#1130).
             .read_signed_headers_as_legacy_rustfs()
+            // It answers a credential store it cannot read with `500 InternalError`, which SDKs
+            // retry, not the terminal `InvalidAccessKeyId` (rustfs/gateway#1585, ADR-0051).
+            .answer_credential_store_faults_as_unavailable()
     }
 }
 
@@ -544,7 +548,7 @@ mod tests {
         SigV4Authenticator::new(credentials, RegionSet::new(["us-east-1"]).expect("non-empty"))
     }
 
-    /// The authenticator preset is the explicit eight-switch chain, switch for switch, and differs
+    /// The authenticator preset is the explicit nine-switch chain, switch for switch, and differs
     /// from the untouched authenticator on every one of them.
     #[test]
     fn the_authenticator_preset_is_the_explicit_chain() {
@@ -556,7 +560,8 @@ mod tests {
             .verify_paths_as_legacy_rustfs()
             .accept_legacy_rustfs_signing_services()
             .answer_credential_scope_refusals_as_legacy_rustfs()
-            .read_signed_headers_as_legacy_rustfs();
+            .read_signed_headers_as_legacy_rustfs()
+            .answer_credential_store_faults_as_unavailable();
         let preset = authenticator().rustfs_profile();
         assert_eq!(format!("{preset:?}"), format!("{explicit:?}"));
         let untouched = format!("{:?}", authenticator());
@@ -570,6 +575,7 @@ mod tests {
             "answers_scope_refusals_as_legacy_rustfs: true",
             "verifies_paths_as_legacy_rustfs: true",
             "reads_signed_headers_as_legacy_rustfs: true",
+            "answers_credential_store_faults_as_unavailable: true",
         ] {
             assert!(format!("{preset:?}").contains(switch), "{switch}: {preset:?}");
             assert!(!untouched.contains(switch), "{switch}: {untouched}");

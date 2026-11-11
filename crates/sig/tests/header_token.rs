@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The host-verified header token claim at the security floor (ADR-0051, rustfs/gateway#1586).
+//! The host-verified header token claim at the security floor (ADR-0052, rustfs/gateway#1586).
 //!
 //! Responsible for: the claim's grammar; admission of a lone claimed header on the operations
 //! that admit the scheme and on no other; refusal, before any admission exists, of the header

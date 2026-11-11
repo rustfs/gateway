@@ -40,7 +40,7 @@ pub const PLACEHOLDER: &str = "__REDACTED__";
 /// `x-amz-server-side-encryption-customer-key` is on the list because SSE-C sends the
 /// **plaintext** data key in a header; the rest carry a signature, a session token, or a
 /// browser credential. `x-auth-token` and `x-storage-token` are the OpenStack Keystone token
-/// headers a RustFS host accepts, the first of which its gateway claims (ADR-0051); a host that
+/// headers a RustFS host accepts, the first of which its gateway claims (ADR-0052); a host that
 /// claims another header redacts that one itself.
 pub const SENSITIVE_HEADERS: &[&str] = &[
     "authorization",

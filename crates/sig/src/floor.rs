@@ -44,7 +44,7 @@
 //!
 //! # The order the rules run in, and why it is that order
 //!
-//! 0. **The header token claim** (ADR-0051), only when one is installed and its header is present.
+//! 0. **The header token claim** (ADR-0052), only when one is installed and its header is present.
 //!    First and total, so no other rule or verifier is handed a request that carries the token.
 //! 1. **Duplicate signature parameters.** First, because every later rule reads one of those
 //!    parameters, and "which of the two did you read" must not be a question anybody can ask.
@@ -369,7 +369,7 @@ pub enum Admission<'a> {
     /// verdict; without one it is refused.
     Bearer(BearerAdmission),
     /// The floor's header token claim found its header, alone and well formed, on an operation
-    /// that admits the scheme (ADR-0051). Only the facade's installed
+    /// that admits the scheme (ADR-0052). Only the facade's installed
     /// [`crate::HeaderTokenVerifier`] can turn it into a verdict; without one it is refused.
     HeaderToken(HeaderTokenAdmission),
 }
@@ -405,7 +405,7 @@ pub struct SecurityFloor {
     anonymous: crate::operation::AnonymousPolicy,
     presigned: crate::operation::PresignedPolicy,
     recognition: recognition::Recognition,
-    /// The host-verified header token claim, when the deployment installed one (ADR-0051).
+    /// The host-verified header token claim, when the deployment installed one (ADR-0052).
     header_token: Option<HeaderTokenClaim>,
 }
 
@@ -555,7 +555,7 @@ impl SecurityFloor {
     /// [`SecurityFloor::failure_floor`] on the way out, whichever rule produced it — the latency
     /// ladder from "rejected at parse" to "rejected at signature" is itself an oracle (T6).
     pub fn admit<'a>(&self, view: WireView<'a>, operation: &OperationFloor, now: RequestNow) -> Result<Admission<'a>, AuthError> {
-        // 0. ADR-0051 — a request presenting the claimed header is decided by that claim alone,
+        // 0. ADR-0052 — a request presenting the claimed header is decided by that claim alone,
         // before any other rule, so that no other path is ever handed a request carrying the token.
         if let Some(claim) = self.header_token.filter(|claim| claim.presented(view.headers())) {
             return self

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The claimed header as bytes on a socket (ADR-0051, rustfs/gateway#1586).
+//! The claimed header as bytes on a socket (ADR-0052, rustfs/gateway#1586).
 //!
 //! Responsible for: what the service decides when the claimed header arrives through a real
 //! Hyper HTTP/1 connection in the spellings a head can carry it — once, in another case, padded,
