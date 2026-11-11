@@ -606,60 +606,33 @@ mod tests {
         );
     }
 
-    /// Negative — an expired session presented with another token, or with none, is refused as a
-    /// binding violation, never as an expiry. `SessionExpired` is the one refusal the
-    /// authenticator may name to a caller (`ExpiredToken`), so it must imply the presented token is
-    /// the one issued with the key (rustfs/gateway#1575).
+    /// Negative — an expired session with another token, or none, is a binding violation, never an
+    /// expiry: `SessionExpired`, the one refusal the authenticator may name, implies the issued
+    /// token (rustfs/gateway#1575). Disabled outranks both. Header and query spellings alike.
     #[test]
     fn an_expired_session_names_its_expiry_only_to_the_matching_token() {
-        let at = RequestNow::from_unix_seconds(LIVE + 1);
-        let credentials = temporary(LIVE);
-        assert_eq!(
-            credentials.admit(Some(b"another-token"), at),
-            Err(CredentialRefusal::SessionTokenMismatch)
-        );
-        assert_eq!(credentials.admit(None, at), Err(CredentialRefusal::SessionCredentialWithoutToken));
-        assert_eq!(
-            credentials.admit(Some(b"session-token-value"), at),
-            Err(CredentialRefusal::SessionExpired)
-        );
-        assert_eq!(
-            temporary(LIVE).disable().admit(Some(b"session-token-value"), at),
-            Err(CredentialRefusal::Disabled)
-        );
-    }
-
-    /// Negative — the presigned-query spelling follows the same order: a wrong or absent query
-    /// token on an expired session is a binding violation, and only the issued token reaches
-    /// `SessionExpired`.
-    #[test]
-    fn an_expired_presigned_session_names_its_expiry_only_to_the_matching_token() {
-        let at = RequestNow::from_unix_seconds(LIVE + 1);
-        let credentials = temporary(LIVE);
-        assert_eq!(
-            credentials.admit_query(RawQuery::new("X-Amz-Security-Token=another-token"), at),
-            Err(CredentialRefusal::SessionTokenMismatch)
-        );
-        assert_eq!(
-            credentials.admit_query(RawQuery::new("X-Amz-Expires=60"), at),
-            Err(CredentialRefusal::SessionCredentialWithoutToken)
-        );
-        assert_eq!(
-            credentials.admit_query(RawQuery::new("X-Amz-Security-Token=session-token-value"), at),
-            Err(CredentialRefusal::SessionExpired)
-        );
-        assert_eq!(
-            credentials.admit_query(RawQuery::new("X-Amz-Security-Token=session-token-value"), NOW),
-            Ok(())
-        );
-        // Disabled outranks the token and the lifetime on the query spelling too.
+        use CredentialRefusal::{Disabled, SessionCredentialWithoutToken, SessionExpired, SessionTokenMismatch};
+        let (at, live, disabled) = (RequestNow::from_unix_seconds(LIVE + 1), temporary(LIVE), temporary(LIVE).disable());
+        let issued: &[u8] = b"session-token-value";
+        for (token, expected) in [
+            (Some(&b"another"[..]), SessionTokenMismatch),
+            (None, SessionCredentialWithoutToken),
+        ] {
+            assert_eq!(live.admit(token, at), Err(expected));
+        }
+        assert_eq!(live.admit(Some(issued), at), Err(SessionExpired));
+        assert_eq!(disabled.admit(Some(issued), at), Err(Disabled));
+        for (query, expected) in [
+            ("X-Amz-Security-Token=another", SessionTokenMismatch),
+            ("X-Amz-Expires=60", SessionCredentialWithoutToken),
+            ("X-Amz-Security-Token=session-token-value", SessionExpired),
+        ] {
+            assert_eq!(live.admit_query(RawQuery::new(query), at), Err(expected), "{query}");
+        }
+        let query = RawQuery::new("X-Amz-Security-Token=session-token-value");
+        assert_eq!(live.admit_query(query, NOW), Ok(()));
         for instant in [at, NOW] {
-            assert_eq!(
-                temporary(LIVE)
-                    .disable()
-                    .admit_query(RawQuery::new("X-Amz-Security-Token=session-token-value"), instant),
-                Err(CredentialRefusal::Disabled)
-            );
+            assert_eq!(disabled.admit_query(query, instant), Err(Disabled));
         }
     }
 
