@@ -1,9 +1,9 @@
 # c-cred-0008 — an access key the credential provider has never heard of.
 #
 # Schema dimensions exercised: sign.credential = "unknown_access_key", and a byte-exact error body
-# with both minted identifiers redacted. The bytes are the assertion: c-cred-0020 pins the same
-# ones, which is how "an expired session is indistinguishable from an unknown key" is stated in a
-# form that a divergence in either one would break.
+# with both minted identifiers redacted. The bytes are the assertion: every unusable credential
+# whose holder has not proven possession gets the same ones. c-cred-0020 is the one deliberate
+# exception, an expired session signed by its holder (rustfs/gateway#1575).
 
 [case]
 id = "c-cred-0008"
