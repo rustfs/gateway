@@ -36,9 +36,11 @@ without a verifier refuses every request presenting the header.
 **Opt-in absent.** `SecurityFloor::admit` reads no header for this purpose, no context is changed,
 and no posture line is added. A request carrying the header is treated exactly as it is today.
 
-**The claim.** `HeaderTokenClaim::new` accepts a name of lowercase ASCII letters, digits and `-`
-that starts with a letter. It refuses `authorization` and every `x-amz-` name, the surfaces the
-signature path owns. The grammar has no `:`, so no HTTP/2 pseudo-header can be claimed.
+**The claim.** `HeaderTokenClaim::new` accepts an extension header outside the AWS namespace: `x-`
+followed by lowercase ASCII letters, digits and `-`, and not `x-amz-`. The facade removes the
+claimed header before the request is accepted, so the grammar admits no header that HTTP or the
+signature path gives a meaning to: not `authorization`, not a framing or routing header, and,
+having no `:`, no HTTP/2 pseudo-header.
 
 **Admission is exclusive, and runs first.** When the claim is installed and the request's head
 carries the claimed header, `SecurityFloor::admit` decides the request in that branch alone, before
@@ -51,23 +53,26 @@ own detection names, read by the default predicate whatever recognition policy i
 - headers: `authorization` with any value, `x-amz-security-token`, and any header under a
   registered custom scheme prefix;
 - query parameters, by decoded name: `X-Amz-Algorithm`, `X-Amz-Credential`, `X-Amz-Signature`,
-  `X-Amz-Security-Token`, `AWSAccessKeyId`, `Signature`, and the routed operation's query bearer
-  parameter;
+  `X-Amz-Security-Token`, `AWSAccessKeyId` and `Signature`;
 - a browser form of any content, which covers `x-amz-algorithm`, `x-amz-credential`,
   `x-amz-signature`, `x-amz-security-token`, `AWSAccessKeyId`, `signature` and `policy`.
 
-There is no precedence and no fallback from one credential to the other.
+A query bearer token needs no entry: an operation that declares a query bearer claim refuses the
+scheme, with or without its parameter. An object-path form that routes to no operation under the
+RustFS selector is not read when the token is present; the request keeps the head-only refusal of
+any unrouted request. There is no precedence and no fallback from one credential to the other.
 
 **The header's shape.** The branch then requires exactly one occurrence of the claimed header, with
 a value of 1 to 8192 bytes, every byte ASCII graphic and none a comma. A repeated, empty, overlong,
 non-ASCII, whitespace-bearing or list-shaped value is `403`. No occurrence is chosen over another.
 
 **Which operations admit it.** `SecurityFloor::admits_header_token` is the one predicate; the floor
-and the posture report both read it. It admits every operation that is not privileged, declares no
-query bearer claim, and does not require SigV4 under every policy (ADR-0049). It refuses privileged
-operations (admin, configuration, credential issuance, and every third-party operation that kept
-its default), the bearer-claimed route, and a SigV4-only route. There is no per-operation opt-in for a privileged
-operation; adding one needs its own decision.
+and the posture report both read it. It admits every operation that is not privileged, is not of
+the STS service, declares no query bearer claim, and does not require SigV4 under every policy
+(ADR-0049). It refuses privileged operations (admin, configuration, and every third-party operation
+that kept its default), credential issuance (every operation of the STS service, privileged or
+not), the bearer-claimed route, and a SigV4-only route. There is no per-operation opt-in for any of
+them; adding one needs its own decision.
 
 **The verifier.** `HeaderTokenVerifier::verify(&HeaderTokenRequest) -> Result<Identity,
 HeaderTokenRefused>` is synchronous and is the host's trust boundary. The request exposes the
@@ -136,9 +141,13 @@ filter can neither supply nor erase a token.
   values, and the HTTP/1.1 parsers in use strip optional whitespace around a value. This is read
   from those crates' documentation and from the existing duplicate-header rule, not measured by a
   new wire test in this record.
-- The implementation's own measurements (compile-fail error codes, the mutation of each new
-  assertion and the commands that ran them) are recorded in the pull request that lands this
-  record.
+- Measured on the implementation in this pull request: `cargo test -p rustfs-gateway-sig --doc
+  header_token` ran ten compile-fail probes, each failing at the code it names: `E0451` for a
+  struct literal of the admission and of the receipt, `E0624` for the admission's constructor and
+  for `Verdict::header_token`, `E0599` for `clone` and `default` on both and for a `token`
+  accessor on the verifier's request, and `E0639` for building `Verdict::HeaderToken` directly.
+- The mutation of each new assertion, with the command that ran it, is recorded in the pull
+  request that lands this record.
 
 ## Rejected alternatives
 
@@ -151,7 +160,8 @@ filter can neither supply nor erase a token.
 | A precedence rule between the token and an AWS credential | Either order lets a client choose which of two verifications it would rather pass. |
 | Hand the verifier the token | The validation already happened. A second holder of the secret adds a place to log or cache it and binds nothing the request-owned state does not bind. |
 | Return `Option<Identity>` beside a refusal | Two spellings of "no" invite reading one of them as "treat as anonymous". |
-| Admit the token on privileged operations | Admin, configuration and credential issuance stay behind a signature until a decision says otherwise. |
+| Admit the token on privileged or STS operations | Admin, configuration and credential issuance stay behind a signature until a decision says otherwise. RustFS's STS endpoint is not privileged, because it admits an anonymous web-identity form, so the service is refused by name. |
+| Let the claim name any header | The claimed header is removed before acceptance. A claim on a framing header would change what acceptance judges, so only an `x-` extension header can be claimed. |
 | Strip the token from each context after verification, as the query token is | Every future context would have to remember. Removing the header before acceptance covers them by construction. |
 | Refuse a request whose `Connection` header nominates the claimed header | A compliant intermediary removes a nominated field, which leaves the anonymous request the client could have sent anyway. At the first hop the outer layer and the floor read the same map. The nomination grants nothing, so it is given no meaning. |
 | Require TLS for a header token in the gateway | The issue fixes the transport rules at those of an unsigned request. The authorizer sees both the scheme and whether the transport was secure, and can refuse. |
@@ -197,9 +207,9 @@ Threat model, and the control for each:
 | Duplicate token headers, or a list in one value | Exactly one occurrence and no comma; otherwise `403`. |
 | Case variants of the name | Header names are compared lowercased; the claim is lowercase by construction. A different name, including one with `_`, is a different header and is ignored as today. |
 | Whitespace variants of the value | Surrounding whitespace is the transport's to strip; a value with interior whitespace or a control byte is `403`. |
-| The header beside a query bearer token, or on a bearer-claimed route | Refused: the parameter is a credential surface, and the route does not admit the scheme. |
+| The header beside a query bearer token, or on a bearer-claimed route | Refused: the route does not admit the scheme, with or without its parameter. |
 | The header beside a presigned URL or any signing parameter | Refused by the default predicate, under the legacy recognition too. |
-| The header on a browser form | Refused: a form is authenticated by its policy or not at all. |
+| The header on a browser form | Refused: a form is authenticated by its policy or not at all. An unrouted form beside the token is not read. |
 | HTTP/2 pseudo-headers and repeated field lines | A pseudo-header cannot be claimed; repeated lines are duplicates. Trailers are never read. |
 | A stage filter writing or deleting the header | The floor reads the caller's copy, taken before the wire seam. |
 | A verifier that refuses, panics or is absent | `403`, reported as one contained-panic event for a panic; never anonymous. |
@@ -207,6 +217,7 @@ Threat model, and the control for each:
 | The token in a log, error, `Debug` output or context | Never copied by the admission; removed from the head before acceptance. |
 
 Guardrails: the compile-fail doctests in `crates/sig/src/header_token.rs` (forging, cloning,
-default-constructing and laundering), the floor's unit and integration tests, the facade's
-`tests/header_token.rs`, and `scripts/check_file_size.sh`. Negative cases outnumber positive ones,
+default-constructing and laundering), the floor's `tests/header_token.rs`, the facade's
+`tests/header_token.rs` and `tests/header_token_secrecy.rs`, and the admin dialect census in
+`crates/goldens/src/rustfs_admin_dialect/header_token_tests.rs`. Negative cases outnumber positive ones,
 and each new assertion is mutated once in the implementing pull request.

@@ -74,6 +74,10 @@ pub enum AuthSchemeRef {
     /// No signature: an operation's query bearer token, verified by the host's installed
     /// verifier (ADR-0042). The principal is the one the token was issued to.
     Bearer,
+    /// No signature: the service's claimed header token, whose principal the host's installed
+    /// verifier reported from what its outer layer established (ADR-0050). Never a signed
+    /// spelling and never [`Self::Bearer`], so a policy that names a scheme does not admit it.
+    HeaderToken,
 }
 
 impl AuthSchemeRef {
@@ -98,12 +102,13 @@ impl AuthSchemeRef {
             Verdict::Authenticated { scheme, .. } => Some(Self::of_scheme(scheme)),
             Verdict::Anonymous(_) => Some(Self::Anonymous),
             Verdict::Bearer { .. } => Some(Self::Bearer),
+            Verdict::HeaderToken { .. } => Some(Self::HeaderToken),
             _ => None,
         }
     }
 
-    /// Whether a credential was verified — a signature, or a [`Self::Bearer`] token: everything
-    /// but [`Self::Anonymous`].
+    /// Whether a credential was verified — a signature, a [`Self::Bearer`] token or a
+    /// [`Self::HeaderToken`]: everything but [`Self::Anonymous`].
     #[must_use]
     pub const fn is_authenticated(self) -> bool {
         !matches!(self, Self::Anonymous)

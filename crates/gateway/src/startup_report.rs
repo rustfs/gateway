@@ -48,6 +48,7 @@ pub(crate) struct StartupInputs<'a> {
     pub(crate) custom_signature_verifier: bool,
     pub(crate) dangerously_replaced_signature_verifier: bool,
     pub(crate) bearer_token_verifier: bool,
+    pub(crate) header_token_verifier: bool,
     pub(crate) caller_secret_every_operation: bool,
     pub(crate) names: &'a NamePolicy,
     /// The builder-held legacy readings (`ServiceBuilder::legacy_switches`); the router-held one
@@ -64,6 +65,7 @@ pub(crate) fn emit(inputs: StartupInputs<'_>) -> String {
         custom_signature_verifier,
         dangerously_replaced_signature_verifier,
         bearer_token_verifier,
+        header_token_verifier,
         caller_secret_every_operation,
         names,
         mut legacy_switches,
@@ -78,6 +80,9 @@ pub(crate) fn emit(inputs: StartupInputs<'_>) -> String {
     if let Some(line) = crate::bearer_posture::log_bearer_posture(routing.dispatch.floors(), bearer_token_verifier) {
         lines.push(line);
     }
+    let header_token =
+        crate::header_token_posture::log_header_token_posture(routing.dispatch.floors(), floor, header_token_verifier);
+    lines.extend(header_token);
     log_dialect_posture(&routing.router, caller_secret_every_operation);
     lines.extend(
         dialect_lines(&routing.router, caller_secret_every_operation)

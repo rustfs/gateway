@@ -106,6 +106,7 @@ impl S3Service {
                 }
             }
         }
+        self.withhold_header_token(&mut parts.headers);
         let wire = match WireRequest::accept(Request::from_parts(parts, ()), &self.inner.limits) {
             Ok(wire) => wire,
             Err(reject) => return Classification::refused(&from_wire_reject(reject)),
@@ -145,7 +146,10 @@ impl S3Service {
             host_named_bucket: resolved.bucket().is_some(),
         }) {
             Ok(dispatched) => dispatched,
-            Err(error) if crate::service::refused_post::applies_to(router, &wire, resolved.target, &error) => {
+            Err(error)
+                if !self.header_token_presented(&head.headers)
+                    && crate::service::refused_post::applies_to(router, &wire, resolved.target, &error) =>
+            {
                 return Classification::UnroutedPostForm;
             }
             Err(error) => return Classification::refused(&from_pre_auth(error, kind)),

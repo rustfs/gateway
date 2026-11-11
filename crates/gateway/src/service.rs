@@ -157,6 +157,7 @@ use crate::{response::into_response, routing::RuntimeAssembly};
 
 mod body_preparation;
 mod cors;
+mod host_tokens;
 mod outcome;
 pub(crate) mod refused_post;
 mod state;
@@ -181,6 +182,8 @@ pub(crate) struct Inner {
     pub(crate) custom_signature_verifier: Option<Arc<dyn rustfs_gateway_sig::SignatureVerifier>>,
     /// The host's query bearer verifier (ADR-0042); `None` refuses every bearer admission.
     pub(crate) bearer_token_verifier: Option<Arc<dyn rustfs_gateway_sig::BearerTokenVerifier>>,
+    /// The host's header token verifier (ADR-0050); `None` refuses every header-token admission.
+    pub(crate) header_token_verifier: Option<Arc<dyn rustfs_gateway_sig::HeaderTokenVerifier>>,
     #[cfg(feature = "dangerous-replace-signature-verifier")]
     pub(crate) dangerously_replaced_signature_verifier: Option<Arc<dyn rustfs_gateway_sig::AwsSignatureVerifier>>,
     pub(crate) authz_clock: Arc<dyn MonotonicClock>,
@@ -499,6 +502,7 @@ impl S3Service {
             }
         }
 
+        self.withhold_header_token(&mut parts.headers); // ADR-0050: nothing accepted holds a claimed header token
         let external_headers = crate::external_marker::present(&headers) || crate::external_marker::present(&parts.headers);
         let wire = match WireRequest::accept(Request::from_parts(parts, body), &self.inner.limits) {
             Ok(wire) => wire,
@@ -589,7 +593,7 @@ impl S3Service {
             // never told the domain. The sentence is `VhostHint::message()`, a constant: this runs
             // before authentication, so nothing derived from the request may appear in it.
             Err(error) => {
-                if refused_post::applies_to(router, &wire, resolved.target, &error) {
+                if !self.header_token_presented(&headers) && refused_post::applies_to(router, &wire, resolved.target, &error) {
                     return refused_post::refuse(self, wire, &resolved, config.config(), outcome, now, client_addr).await;
                 }
                 let refusal = match resolved.diagnostic {
@@ -689,10 +693,11 @@ impl S3Service {
         // a presented token is credential-verification work like any other credential.
         let bearer_claim = M::floor(&op).query_bearer_claim();
         let bearer_presented = bearer_claim.is_some_and(|claim| claim.presented(&head_view));
+        let token_presented = bearer_presented || self.header_token_presented(&headers);
         // Once the host's verifier is installed the token is verified on this operation's signed
         // path too, and no authorization or handler context ever holds it.
         let bearer_verified_claim = bearer_claim.filter(|_| self.inner.bearer_token_verifier.is_some());
-        let class = if is_post_object || head_presence.any() || bearer_presented {
+        let class = if is_post_object || head_presence.any() || token_presented {
             ClassKind::CredentialLookup
         } else {
             ClassKind::Unauthenticated
@@ -767,7 +772,7 @@ impl S3Service {
         let presented = presence.any()
             || aws_credential_marker.is_some()
             || self.inner.floor.custom_schemes().matching(&view).is_some()
-            || bearer_presented;
+            || token_presented;
         if let (false, RoutedBody::Ordinary(sealed)) = (presented, &routed_body)
             && let Some(refusal) = sealed.past_claimed_ceiling(claimed_ceiling).await
         {
@@ -781,16 +786,26 @@ impl S3Service {
         let mut body_digest = BodyDigestObligation::None;
         // Legacy RustFS's words for a RustFS-profile refusal, when the authenticator published them.
         let mut legacy = None;
-        // Whether this request's own floor admission was a bearer one: a bearer verdict from any
-        // other path is a receipt carried over from another request, and is refused below.
-        let mut bearer_admitted = false;
+        // Whether this request's own floor admission was a bearer or a header-token one: such a
+        // verdict from any other path is a receipt carried over from another request, refused below.
+        let (mut bearer_admitted, mut header_token_admitted) = (false, false);
         let (authentication, signature_mismatch) = match self.inner.floor.admit(view, M::floor(&op), now) {
-            Ok(Admission::Anonymous(evidence)) => {
+            // An unsigned request: anonymous, or admitted by the header token claim (ADR-0050). One
+            // framing rule serves both, so the claim adds no payload rule and lifts none.
+            Ok(unsigned @ (Admission::Anonymous(_) | Admission::HeaderToken(_))) => {
                 framing_mode = match crate::payload_header::anonymous_framing(&headers, self.inner.decode_anonymous_framing) {
                     Ok(mode) => mode,
                     Err(error) => return outcome.refuse_at(Refused::Decode, error),
                 };
-                (AuthenticationOutcome::ordinary(Verdict::anonymous(evidence)), None)
+                let verdict = match unsigned {
+                    Admission::Anonymous(evidence) => Verdict::anonymous(evidence),
+                    Admission::HeaderToken(admission) => {
+                        header_token_admitted = true;
+                        self.header_token_verdict(admission, wire.transport_extensions(), outcome.trace, operation)
+                    }
+                    _ => Verdict::reject(AuthError::AccessDenied), // not reachable: the pattern admits only those two
+                };
+                (AuthenticationOutcome::ordinary(verdict), None)
             }
             Ok(Admission::Sealed(sealed)) => {
                 let location = sealed.marker().location();
@@ -880,22 +895,10 @@ impl S3Service {
                     );
                 }
             },
-            // ADR-0042: only the installed host verifier turns a bearer admission into a verdict, on
-            // this request's own raw path; without one, and on any refusal, the token is refused.
+            // ADR-0042: only the installed host verifier makes a bearer admission a verdict; else it is refused.
             Ok(Admission::Bearer(admission)) => {
-                // A panicking verifier refuses, like any other refusal (crate::panic_boundary).
-                let verdict =
-                    match &self.inner.bearer_token_verifier {
-                        Some(verifier) => crate::panic_boundary::contain_decision(|| {
-                            admission.verify(verifier.as_ref(), wire.raw_path().as_str())
-                        })
-                        .unwrap_or_else(|()| {
-                            crate::logging::extension_panicked(Extension::BearerVerifier, outcome.trace.request_id(), operation);
-                            Verdict::reject(AuthError::AccessDenied)
-                        }),
-                        None => Verdict::reject(AuthError::AccessDenied),
-                    };
                 bearer_admitted = true;
+                let verdict = self.bearer_verdict(admission, wire.raw_path().as_str(), outcome.trace, operation);
                 (AuthenticationOutcome::ordinary(verdict), None)
             }
             // `Admission` is `#[non_exhaustive]`: a variant added later must not be answered by a
@@ -920,11 +923,7 @@ impl S3Service {
         // Zeroized on drop: an operation outside the assembly's secret scope never holds the key past this line (ADR-0024).
         let caller_secret = caller_secret.filter(|_| hands_caller_secret || self.inner.caller_secret_every_operation);
         let verdict = SecurityFloor::seal_verdict(verdict, presence);
-        let verdict = if verdict.bearer_receipt().is_some() && !bearer_admitted {
-            Verdict::reject(AuthError::AccessDenied)
-        } else {
-            verdict
-        };
+        let verdict = host_tokens::from_own_admission(verdict, bearer_admitted, header_token_admitted);
         if let Some(error) = verdict.rejection() {
             // A RustFS-profile reading's refusal, in legacy RustFS's words (rustfs/gateway#1130).
             if let Some(legacy) = legacy {

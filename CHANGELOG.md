@@ -1,5 +1,33 @@
 # Changelog
 
+## Host-verified header token claim (sig 0.15.0, core 0.60.0, gateway 0.62.0)
+
+BREAKING: `AuthSchemeRef` gains `HeaderToken`, the scheme of a request admitted by the service's
+header token claim, whose principal the host's verifier reported (ADR-0050, rustfs/gateway#1586).
+Migration: a `match` on `AuthSchemeRef` adds an explicit `HeaderToken` arm; do not fold it into a
+signed arm or into `Bearer`. A handler that serves such requests reads the principal through
+`RequestContextView::header_token_principal()`; `principal()` stays the signed principal and is
+`None` for them.
+
+Additive: `ServiceBuilder::host_verified_header_token(claim, verifier)`, `HeaderTokenClaim`,
+`InvalidHeaderTokenClaim`, the `HeaderTokenVerifier` host trait with `HeaderTokenRequest` and
+`HeaderTokenRefused`, `HeaderTokenAdmission`, `HeaderTokenReceipt`, `Admission::HeaderToken`,
+`Verdict::HeaderToken` with `Verdict::header_token_receipt()`,
+`SecurityFloor::with_header_token_claim`, `header_token_claim` and `admits_header_token`, and the
+`HEADER_TOKEN_POSTURE` start-up line with its `gateway_header_token_posture` event. Nothing is
+installed by default, and without the opt-in a request carrying the header is served exactly as
+before.
+
+With the opt-in: a request whose only credential is the claimed header is served as the identity
+the verifier reports, on every operation that is not privileged, is not of the STS service,
+declares no query bearer claim and does not require SigV4 under every policy. A claim names an
+`x-` extension header outside `x-amz-`. The header beside any other credential surface is
+refused `403` before any verifier runs. A refusal, a panic or a missing verifier is `403`, never an
+anonymous request. The verifier is not given the token, and the claimed header is removed from the
+request before acceptance, so no authorization or handler context holds it. The request is
+unsigned and its body is held to what an anonymous body is. The recorded-request corpus redacts
+`x-auth-token` and `x-storage-token`.
+
 ## Zip-download bearer claim (sig 0.14.0, core 0.59.0, gateway 0.61.0, dialect-rustfs-admin 0.13.0)
 
 BREAKING: `AuthSchemeRef` gains `Bearer`, the scheme of a request admitted by an operation's query

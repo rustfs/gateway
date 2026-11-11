@@ -137,6 +137,10 @@ pub use floor::{
     Admission, SecurityFloor, WireView, X_AMZ_DATE_HEADER, X_AMZ_EXPIRES, X_AMZ_SECURITY_TOKEN, X_AMZ_SECURITY_TOKEN_HEADER,
     detect_credentials, enforce_no_duplicate_sig_params,
 };
+pub use header_token::{
+    HeaderTokenAdmission, HeaderTokenClaim, HeaderTokenReceipt, HeaderTokenRefused, HeaderTokenRequest, HeaderTokenVerifier,
+    InvalidHeaderTokenClaim,
+};
 pub use mode::{
     CanonicalPayloadToken, DeclaredTrailers, EMPTY_PAYLOAD_SHA256_HEX, MAX_DECLARED_TRAILERS, PayloadMode, STREAMING_ECDSA,
     STREAMING_ECDSA_TRAILER, STREAMING_SIGNED, STREAMING_SIGNED_TRAILER, STREAMING_UNSIGNED_TRAILER, TrailerName, TrailerSet,

@@ -532,6 +532,14 @@ pub enum Verdict {
     /// build this variant around a receipt it holds: match it as `Verdict::Bearer { .. }`.
     #[non_exhaustive]
     Bearer(crate::bearer::BearerReceipt),
+    /// The host's installed verifier reported the identity its outer layer established for a
+    /// request admitted by the floor's header token claim (ADR-0050). No signature was compared:
+    /// no [`SignatureMatch`], no scheme and no scope. Only
+    /// [`crate::HeaderTokenAdmission::verify`] produces the [`crate::HeaderTokenReceipt`], and the
+    /// variant is non-exhaustive for the reason [`Verdict::Bearer`] is: match it as
+    /// `Verdict::HeaderToken { .. }`.
+    #[non_exhaustive]
+    HeaderToken(crate::header_token::HeaderTokenReceipt),
 }
 
 impl Verdict {
@@ -610,8 +618,24 @@ impl Verdict {
         }
     }
 
-    /// The principal, when the request was authenticated by a signature or a verified bearer
-    /// token.
+    /// Builds a header-token verdict from a receipt only a verification produces. Crate-private:
+    /// only [`crate::HeaderTokenAdmission::verify`] calls it, so host code cannot wrap a receipt.
+    #[must_use]
+    pub(crate) fn header_token(receipt: crate::header_token::HeaderTokenReceipt) -> Self {
+        Self::HeaderToken(receipt)
+    }
+
+    /// The header-token receipt, when a host-verified header token authenticated the request.
+    #[must_use]
+    pub const fn header_token_receipt(&self) -> Option<&crate::header_token::HeaderTokenReceipt> {
+        match self {
+            Self::HeaderToken(receipt) => Some(receipt),
+            _ => None,
+        }
+    }
+
+    /// The principal, when the request was authenticated by a signature, a verified bearer token
+    /// or a host-verified header token.
     ///
     /// `None` for both anonymous and rejected: an anonymous request has no principal, and a
     /// rejected one must not be attributed to the access key it claimed.
@@ -620,6 +644,7 @@ impl Verdict {
         match self {
             Self::Authenticated { identity, .. } => Some(identity),
             Self::Bearer(receipt) => Some(receipt.identity()),
+            Self::HeaderToken(receipt) => Some(receipt.identity()),
             _ => None,
         }
     }
@@ -679,116 +704,11 @@ impl fmt::Debug for Verdict {
             Self::Anonymous(_) => f.write_str("Anonymous"),
             Self::Reject(error) => f.debug_tuple("Reject").field(error).finish(),
             Self::Bearer(receipt) => f.debug_tuple("Bearer").field(receipt).finish(),
+            Self::HeaderToken(receipt) => f.debug_tuple("HeaderToken").field(receipt).finish(),
         }
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::scheme::{SigIdentity, SigService};
-
-    fn identity() -> Identity {
-        Identity::new("AKIAIOSFODNN7EXAMPLE").expect("valid access key id")
-    }
-
-    #[test]
-    fn no_credentials_yields_anonymous() {
-        let evidence = CredentialPresence::NONE.into_evidence().expect("nothing presented");
-        assert!(Verdict::anonymous(evidence).is_anonymous());
-    }
-
-    #[test]
-    fn presented_credentials_cannot_be_downgraded_to_anonymous() {
-        let presented = CredentialPresence::NONE.with_authorization_header();
-        assert_eq!(presented.into_evidence().err(), Some(CredentialsWerePresented));
-    }
-
-    #[test]
-    fn a_security_token_alone_still_counts_as_presented() {
-        let presented = CredentialPresence::NONE.with_security_token();
-        assert!(presented.any());
-        assert!(presented.into_evidence().is_err());
-    }
-
-    #[test]
-    fn the_two_credential_rejections_share_one_message() {
-        assert_eq!(AuthError::InvalidAccessKeyId.message(), AuthError::SignatureDoesNotMatch.message());
-        assert_ne!(AuthError::InvalidAccessKeyId.code(), AuthError::SignatureDoesNotMatch.code());
-    }
-
-    #[test]
-    fn algorithm_mismatch_is_not_reported_to_the_client() {
-        assert_eq!(AuthError::from(VerifyRejection::AlgorithmMismatch), AuthError::SignatureDoesNotMatch);
-        assert_eq!(AuthError::from(VerifyRejection::Mismatch), AuthError::SignatureDoesNotMatch);
-    }
-
-    #[test]
-    fn a_rejected_verdict_names_no_principal() {
-        let verdict = Verdict::reject(AuthError::InvalidAccessKeyId);
-        assert!(verdict.identity().is_none());
-        assert!(!verdict.is_authenticated());
-    }
-
-    #[test]
-    fn debug_of_an_authenticated_verdict_shows_the_key_id_and_no_proof_bytes() {
-        let scheme = AuthScheme::sigv4_header(SigIdentity::LongTerm, SigService::S3);
-        let proof = crate::Signature::HmacSha256(crate::CtBytes::from_array([3u8; 32]))
-            .ct_verify(&crate::Signature::HmacSha256(crate::CtBytes::from_array([3u8; 32])))
-            .expect("equal signatures match");
-        let rendered = format!("{:?}", Verdict::authenticated(identity(), scheme, proof));
-        assert!(rendered.contains("AKIAIOSFODNN7EXAMPLE"));
-        assert!(rendered.contains("<constant-time match>"));
-    }
-
-    fn proof() -> SignatureMatch {
-        crate::Signature::HmacSha256(crate::CtBytes::from_array([3u8; 32]))
-            .ct_verify(&crate::Signature::HmacSha256(crate::CtBytes::from_array([3u8; 32])))
-            .expect("equal signatures match")
-    }
-
-    fn scope(region: &str) -> VerifiedScope {
-        VerifiedScope::from_checked_parts(crate::ScopeDate::parse("20150830").expect("valid"), region, "s3")
-    }
-
-    /// Positive — the scope the signature was verified under travels with the verdict, every
-    /// field in the spelling that was signed.
-    #[test]
-    fn an_authenticated_verdict_carries_the_scope_it_was_verified_under() {
-        let scheme = AuthScheme::sigv4_header(SigIdentity::LongTerm, SigService::S3);
-        let verdict = Verdict::authenticated_in_scope(identity(), scheme, scope("eu-west-1"), proof());
-        let carried = verdict.verified_scope().expect("a SigV4 verdict names its scope");
-        assert_eq!(
-            (carried.date().as_str(), carried.region(), carried.service()),
-            ("20150830", "eu-west-1", "s3")
-        );
-    }
-
-    /// Negative — a verdict that was never given a scope reports none, whatever its outcome. A
-    /// scope is never inferred: SigV2 and a custom scheme have no credential scope at all.
-    #[test]
-    fn a_verdict_built_without_a_scope_reports_none() {
-        let scheme = AuthScheme::sigv2_header(SigIdentity::LongTerm, SigService::S3);
-        assert!(Verdict::authenticated(identity(), scheme, proof()).verified_scope().is_none());
-        assert!(Verdict::reject(AuthError::SignatureDoesNotMatch).verified_scope().is_none());
-        let evidence = CredentialPresence::NONE.into_evidence().expect("nothing presented");
-        assert!(Verdict::anonymous(evidence).verified_scope().is_none());
-    }
-
-    /// Negative — the audit rendering names the scope, which is public, and still no proof bytes.
-    #[test]
-    fn debug_of_a_scoped_verdict_names_the_scope() {
-        let scheme = AuthScheme::sigv4_header(SigIdentity::LongTerm, SigService::S3);
-        let rendered = format!("{:?}", Verdict::authenticated_in_scope(identity(), scheme, scope("eu-west-1"), proof()));
-        assert!(rendered.contains("eu-west-1"), "{rendered}");
-        assert!(rendered.contains("<constant-time match>"), "{rendered}");
-    }
-
-    #[test]
-    fn access_key_ids_with_control_characters_are_rejected() {
-        for bad in ["", "AKIA\r\nX-Injected: 1", "AKIA KEY", "AKIA\u{0}KEY", "AKIA\u{e9}KEY"] {
-            assert_eq!(Identity::new(bad), Err(SigParseError::InvalidAccessKeyId), "must reject {bad:?}");
-        }
-        assert_eq!(Identity::new(&"A".repeat(129)), Err(SigParseError::InvalidAccessKeyId));
-    }
-}
+#[path = "verdict_tests.rs"]
+mod tests;

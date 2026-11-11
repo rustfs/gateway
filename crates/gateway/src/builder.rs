@@ -78,6 +78,7 @@ mod client_quirks;
 mod cors;
 pub(crate) mod credential_sentences;
 pub(crate) mod denial_sentences;
+mod host_tokens;
 mod identifiers;
 mod legacy_chunks;
 mod legacy_heads;
@@ -145,6 +146,8 @@ pub struct ServiceBuilder {
     authenticator: Option<Arc<dyn Authenticator>>,
     custom_signature_verifier: Option<Arc<dyn SignatureVerifier>>,
     bearer_token_verifier: Option<Arc<dyn rustfs_gateway_sig::BearerTokenVerifier>>,
+    /// ADR-0050: the header token claim and its verifier, installed together or not at all.
+    header_token: Option<host_tokens::HeaderToken>,
     #[cfg(feature = "dangerous-replace-signature-verifier")]
     dangerously_replaced_signature_verifier: Option<Arc<dyn AwsSignatureVerifier>>,
     policy_source: Arc<dyn PolicySource>,
@@ -174,6 +177,7 @@ impl core::fmt::Debug for ServiceBuilder {
             .field("has_authenticator", &self.authenticator.is_some())
             .field("has_custom_signature_verifier", &self.custom_signature_verifier.is_some())
             .field("has_bearer_token_verifier", &self.bearer_token_verifier.is_some())
+            .field("has_header_token", &self.header_token.is_some())
             .field("stage_filters", &self.filters.len())
             .field("op_layers", &self.op_layers.values().map(Vec::len).sum::<usize>())
             .finish_non_exhaustive()
@@ -211,6 +215,7 @@ impl ServiceBuilder {
             authenticator: None,
             custom_signature_verifier: None,
             bearer_token_verifier: None,
+            header_token: None,
             #[cfg(feature = "dangerous-replace-signature-verifier")]
             dangerously_replaced_signature_verifier: None,
             policy_source: Arc::new(NoPolicy),
@@ -382,20 +387,6 @@ impl ServiceBuilder {
     #[must_use]
     pub fn custom_signature_verifier(mut self, verifier: impl SignatureVerifier) -> Self {
         self.custom_signature_verifier = Some(Arc::new(verifier));
-        self
-    }
-
-    /// Installs the host's verifier for operations whose floor declares a query bearer claim
-    /// (ADR-0042) — RustFS's minted zip-download URL.
-    ///
-    /// Nothing is installed by default, and without a verifier a claimed operation refuses every
-    /// token-only request `403 AccessDenied`; a header-signed request keeps its signature path.
-    /// Once installed, the token is verified on that operation's signed path too, must name the
-    /// signed principal, and is stripped from both authorization contexts and the handler context.
-    /// No other operation reads the parameter.
-    #[must_use]
-    pub fn bearer_token_verifier(mut self, verifier: impl rustfs_gateway_sig::BearerTokenVerifier) -> Self {
-        self.bearer_token_verifier = Some(Arc::new(verifier));
         self
     }
 
@@ -592,9 +583,10 @@ impl ServiceBuilder {
     /// a refused registration or route, an empty registry, a missing authorizer, a missing
     /// authenticator, an [`OpLayer`] on an operation nobody registered, or an operation the router
     /// knows and this crate has no codec for. Nothing here degrades to a warning.
-    pub fn build(self) -> Result<S3Service, AssemblyError> {
+    pub fn build(mut self) -> Result<S3Service, AssemblyError> {
         let authorizer = self.validate_assembly()?;
         let legacy_switches = self.legacy_switches();
+        let header_token_verifier = self.install_header_token();
         let Some(authenticator) = self.authenticator else {
             return Err(AssemblyError::MissingAuthenticator {
                 rule: RuleRef::MISSING_AUTHENTICATOR,
@@ -646,6 +638,7 @@ impl ServiceBuilder {
             custom_signature_verifier,
             dangerously_replaced_signature_verifier,
             bearer_token_verifier: self.bearer_token_verifier.is_some(),
+            header_token_verifier: header_token_verifier.is_some(),
             caller_secret_every_operation: self.caller_secret_every_operation,
             names: &self.names,
             legacy_switches,
@@ -678,6 +671,7 @@ impl ServiceBuilder {
             authenticator,
             custom_signature_verifier: self.custom_signature_verifier,
             bearer_token_verifier: self.bearer_token_verifier,
+            header_token_verifier,
             #[cfg(feature = "dangerous-replace-signature-verifier")]
             dangerously_replaced_signature_verifier: self.dangerously_replaced_signature_verifier,
             authz_clock: Arc::new(SystemMonotonic::new()),
