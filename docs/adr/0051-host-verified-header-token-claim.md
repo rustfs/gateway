@@ -51,7 +51,7 @@ same grammar, under which the host's outer layer also reads the token (RustFS re
 only another name would be anonymous to the gateway, or its signer, while the host acted as the
 token's user. A request that carries a refused alias is therefore decided by the claim's branch
 and refused `403 AccessDenied`, alone, beside the claimed token or beside a valid signature, on
-every operation, and the alias is removed with the claimed header. Refusing is chosen over
+every operation. No context is built for it, so nothing else needs to forget the header. Refusing is chosen over
 admitting under several names: one name has one shape rule and one occurrence rule, and "which of
 two token headers wins" is a precedence the gateway would then own.
 
@@ -162,8 +162,8 @@ rule is added or lifted.
 
 **The token is secret material.** The admission does not copy it, the verifier is not given it, and
 no `Debug` or `Display` implementation, log event, error body or metric label of the gateway holds
-it. When the claim is installed, the facade removes the claimed header and every refused alias from
-the request head after the wire seam and before acceptance. The accepted request therefore never holds it, and neither do
+it. When the claim is installed, the facade removes the claimed header from the request head after
+the wire seam and before acceptance. The accepted request therefore never holds it, and neither do
 the authorization contexts, the handler context, the codec's header view or the committed-response
 context. The floor reads the caller's own copy of the head, taken before the wire seam, so a stage
 filter can neither supply nor erase a token.

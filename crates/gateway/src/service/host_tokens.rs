@@ -18,8 +18,7 @@
 //! Responsible for: turning a bearer or header-token admission into its verdict through the
 //! installed host verifier, behind the panic boundary — a missing verifier, a refusal and a panic
 //! are each a rejection, and a panic is also one `gateway_extension_panicked` event; removing the
-//! claimed header and its refused aliases from a request head before acceptance, so nothing
-//! accepted holds the token; accepting a token verdict only from the request's own admission; and
+//! claimed header from a request head before acceptance, so nothing accepted holds the token; accepting a token verdict only from the request's own admission; and
 //! keeping the answer to a request served by its token out of a shared cache.
 //! NOT responsible for: admitting a request, which is the security floor's, or anything a verdict
 //! decides afterwards.
@@ -42,8 +41,8 @@ use crate::trace::RequestTrace;
 pub(crate) type HeaderTokenVerify = Arc<dyn Fn(HeaderTokenAdmission, &TransportExtensions) -> Verdict + Send + Sync>;
 
 impl S3Service {
-    /// Removes the floor's claimed header and its refused aliases from a head about to be
-    /// accepted (ADR-0051).
+    /// Removes the floor's claimed header from a head about to be accepted (ADR-0051). A refused
+    /// alias stays: a request that carries one is refused before any context exists.
     ///
     /// The floor reads the token from the copy of the head taken before the wire seam. Removing
     /// the header here, after the seam and before acceptance, means the accepted request never
@@ -52,9 +51,6 @@ impl S3Service {
     pub(crate) fn withhold_header_token(&self, headers: &mut HeaderMap) {
         if let Some(claim) = self.inner.floor.header_token_claim() {
             headers.remove(claim.header());
-            for alias in claim.refused_aliases() {
-                headers.remove(*alias);
-            }
         }
     }
 

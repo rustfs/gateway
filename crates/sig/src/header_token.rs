@@ -210,7 +210,7 @@ impl HeaderTokenClaim {
     /// that carried only the other would be anonymous, or its signer, to the gateway while the
     /// host acted as the token's user. A refused alias closes that: the request is answered
     /// `403 AccessDenied` before any verifier of any scheme is asked, whatever else it carries
-    /// and whatever its operation, and the alias is removed with the claimed header.
+    /// and whatever its operation.
     ///
     /// # Errors
     ///

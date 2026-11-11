@@ -35,7 +35,7 @@ use rustfs_gateway::{S3Service, WireHead, dto, wire_filter};
 
 use crate::anonymous_chunked_upload::{Backend as Uploads, OBJECT, OBJECT_CRC32, Recorded, anonymous_put, unsigned_framing};
 use crate::header_token::fixtures::{
-    ALIAS, Answer, Asked, Established, Fixture, HEADER, Handed, Lines, PRINCIPAL, RequestCase, TOKEN, aliased, assemble,
+    Answer, Asked, Established, Fixture, HEADER, Handed, Lines, PRINCIPAL, RequestCase, TOKEN, aliased, assemble,
     assemble_aliased, builder, claim, token_only, with_bare_token, with_token,
 };
 use crate::support;
@@ -118,7 +118,6 @@ fn n_no_log_event_answer_or_context_holds_the_token() {
                     .chain(handed.iter().flat_map(|handler| &handler.headers))
                 {
                     assert_ne!(name.as_str(), HEADER, "{answer:?}: a context carries the claimed header");
-                    assert_ne!(name.as_str(), ALIAS, "{answer:?}: a context carries the refused alias");
                 }
                 // Not an empty search: the contexts were built, and their other lines arrived.
                 for lines in asked

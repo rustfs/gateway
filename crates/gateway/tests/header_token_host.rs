@@ -323,9 +323,10 @@ async fn an_answer_served_by_a_token_is_kept_out_of_a_shared_cache() {
 /// Negative — under the RustFS profile, whose view policies answer a malformed header signature
 /// or presigned URL in legacy RustFS's own words before the floor runs, a token beside any AWS
 /// credential surface still gets the floor's one answer: `403 AccessDenied`, with no verifier,
-/// lookup, authorizer question or handler. The same malformed credentials without the token keep
-/// the profile's answers, and at least one of those is not `AccessDenied`, so the uniform answer
-/// is the token's doing and not the profile's.
+/// lookup, authorizer question or handler, and byte for byte the body the floor gives a token
+/// beside another scheme's `Authorization`. The same malformed credentials without the token keep
+/// the profile's answers, in the profile's words, and at least one of those is not
+/// `AccessDenied`, so the one answer is the token's doing and not the profile's.
 #[tokio::test]
 async fn n_the_token_beside_an_aws_credential_is_one_refusal_under_the_rustfs_profile_too() {
     let authorization = |value: &'static str| {
@@ -388,8 +389,19 @@ async fn n_the_token_beside_an_aws_credential_is_one_refusal_under_the_rustfs_pr
             }),
         ),
     ];
-    let profiled =
-        |floor: SecurityFloor| assemble_with(floor, Some((aliased_claim(), Answer::Accepts)), |builder| builder.rustfs_profile());
+    let profiled = |floor: SecurityFloor| {
+        assemble_with(floor, Some((aliased_claim(), Answer::Accepts)), |builder| {
+            builder.rustfs_profile().refuse_unsigned_amz_headers_before_routing()
+        })
+    };
+    // The floor's own refusal, taken where no view policy has anything to say.
+    let reference = {
+        let mut request = token_only(http::Method::GET, "/");
+        let other_scheme = http::HeaderValue::from_static("Bearer opaque");
+        request.headers_mut().insert("authorization", other_scheme);
+        profiled(SecurityFloor::new()).exchange(request).await.body().to_vec()
+    };
+    let mut bodies_without_the_token = HashSet::new();
     let mut answers_without_the_token = HashSet::new();
     for (floor_name, floor) in floors() {
         for (name, request) in &cases {
@@ -397,6 +409,7 @@ async fn n_the_token_beside_an_aws_credential_is_one_refusal_under_the_rustfs_pr
             let fixture = profiled(floor.clone());
             let response = fixture.exchange(with_token(request())).await;
             fixture.refused_before_any_verifier(&response, &at);
+            assert_eq!(response.body(), reference.as_slice(), "{at}: not the floor's own answer");
 
             let fixture = profiled(floor.clone());
             let response = fixture.exchange(aliased(request())).await;
@@ -405,6 +418,7 @@ async fn n_the_token_beside_an_aws_credential_is_one_refusal_under_the_rustfs_pr
             let fixture = profiled(floor.clone());
             let alone = fixture.exchange(request()).await;
             answers_without_the_token.insert(status_and_code(&alone));
+            bodies_without_the_token.insert(alone.body().to_vec());
         }
     }
     assert!(
@@ -412,5 +426,9 @@ async fn n_the_token_beside_an_aws_credential_is_one_refusal_under_the_rustfs_pr
             .iter()
             .any(|answer| answer != &(403, Some("AccessDenied".to_owned())) && answer.0 >= 400),
         "the profile answered every malformed credential AccessDenied by itself: {answers_without_the_token:?}"
+    );
+    assert!(
+        bodies_without_the_token.len() > 3,
+        "the profile words these refusals itself, so one body for all of them is the floor's doing"
     );
 }

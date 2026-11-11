@@ -89,8 +89,8 @@ impl ServiceBuilder {
     /// * authorizers and the audit event see `AuthSchemeRef::HeaderToken` and an identity whose
     ///   origin is `IdentityOrigin::HostToken`, and a handler reads the principal through
     ///   `RequestContextView::header_token_principal`;
-    /// * the header and the refused aliases are removed from the request before acceptance, so
-    ///   no authorization or handler context holds the token. Stage filters' wire seam still
+    /// * the header is removed from the request before acceptance, so no authorization or
+    ///   handler context holds the token. Stage filters' wire seam still
     ///   sees it, as it sees `Authorization`;
     /// * the answer to a request served by its token carries `Vary` naming the claimed header,
     ///   and `Cache-Control: private` unless the handler set a `Cache-Control` of its own.

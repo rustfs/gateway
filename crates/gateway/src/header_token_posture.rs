@@ -54,7 +54,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_line_names_the_claim_the_verifier_state_and_only_the_admitting_operations() {
+    fn the_line_names_the_claim_its_refused_aliases_and_only_the_admitting_operations() {
         let standard = OperationFloor::builtin("PutObject", SigService::S3);
         let privileged = OperationFloor::custom("example:Admin", SigService::S3);
         let bearer = OperationFloor::builtin("example:Download", SigService::S3)

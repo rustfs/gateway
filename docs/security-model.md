@@ -287,9 +287,8 @@ The framework's half:
   authorizer sees `AuthSchemeRef::HeaderToken` and the reported principal, whose `Identity::origin`
   is `HostToken` and which therefore equals no access key of the same spelling. The request's body
   is held to what an anonymous body is, and its answer carries `Vary` on the claimed header and
-  `Cache-Control: private` unless the handler chose one. The claimed header and the refused aliases
-  are removed before the request is accepted, so no authorization or handler context holds the
-  token. Without the opt-in the header
+  `Cache-Control: private` unless the handler chose one. The claimed header is removed before the
+  request is accepted, so no authorization or handler context holds the token. Without the opt-in the header
   is an ordinary header and nothing reads it. The `HEADER_TOKEN_POSTURE` start-up line names the
   header, its refused aliases and every operation that admits it. The host owns what the gateway
   cannot see: every other header name its outer layer reads the token under must be listed as a
