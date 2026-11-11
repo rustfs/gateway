@@ -53,7 +53,7 @@ for request order and `docs/assembly-order.md` for extension call counts.
 | `src/ext/authz_audit.rs` | Read-only decision audit sink, and the `warn` event for a decision that refused | Recording authorization outcomes |
 | `src/ext/bucket_owner.rs` | Fail-closed bucket-owner lookup for expected-owner assertions | Wiring bucket metadata ownership into request admission |
 | `src/ext/policy.rs` | One policy snapshot per request | Two stages disagree on policy |
-| `src/ext/credentials.rs` | Credential provider and secret-safe values | Wiring IAM or STS credentials |
+| `src/ext/credentials.rs`, `src/ext/session_answer.rs` | Credential provider and secret-safe values; `PendingSessionRefusal`, the proof-gated route to `ExpiredToken`, and the unknown-key placeholder session | Wiring IAM or STS credentials, or changing what an unusable session is answered |
 | `src/ext/credential_guard.rs` | Provider timeout, panic isolation, negative cache | Bounding credential lookup work |
 | `src/ext/host.rs` | Host resolution, the path-style default, and `HostResolver::refusal` | Locating the bucket source |
 | `src/ext/vhost.rs`, `src/ext/legacy_vhost.rs` | Virtual-host label-boundary matching; the RustFS profile's legacy RustFS reading of its server domains, with the one host refusal (#1136) | Configuring served domains |

@@ -292,6 +292,10 @@ pub enum AuthError {
     /// A SigV2 browser form carries a signature but not its access key or policy: refused
     /// `InvalidRequest` before any lookup, as legacy RustFS refuses it (rustfs/gateway#1185).
     MissingPostFormField,
+    /// A session's lifetime ended, told only to a caller whose signature compared equal under the
+    /// session's secret with the issued token — SDKs refresh on it (rustfs/gateway#1575). Earlier
+    /// it would confirm a real issuance to whoever guessed the key: answer `InvalidAccessKeyId`.
+    ExpiredToken,
 }
 
 impl AuthError {
@@ -310,6 +314,7 @@ impl AuthError {
             Self::AuthorizationQueryParametersError => "AuthorizationQueryParametersError",
             Self::NotImplemented(_) => "NotImplemented",
             Self::InvalidCredentialRegion | Self::InvalidPostPolicyEncoding | Self::MissingPostFormField => "InvalidRequest",
+            Self::ExpiredToken => "ExpiredToken",
         }
     }
 
@@ -335,6 +340,7 @@ impl AuthError {
             Self::InvalidCredentialRegion => "the credential scope names a region this service cannot read",
             Self::InvalidPostPolicyEncoding => "the POST policy encoding is not valid",
             Self::MissingPostFormField => "a POST form field the signature needs is missing",
+            Self::ExpiredToken => "the session credential has expired",
         }
     }
 

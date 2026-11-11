@@ -16,10 +16,10 @@
 //!
 //! Responsible for: **when** the provider is consulted (never on a path the request has not
 //! already earned, never for an anonymous request), and **what the caller can tell apart** once it
-//! has been — an unknown access key, an expired session, a session credential used without its
-//! token, a long-term credential used with one, and a disabled credential must all produce the
-//! same bytes; and the *ordering* proof that none of those rules answered before the signature was
-//! compared.
+//! has been — an unknown key, an expired session with another token, a session used without its
+//! token, a long-term credential used with one, and a disabled credential all produce the same
+//! bytes, and only a proven expired session is told `ExpiredToken` (rustfs/gateway#1575); and the
+//! *ordering* proof that none of those rules answered before the signature was compared.
 //! NOT responsible for: the value rules on [`rustfs_gateway::Credentials`] and
 //! [`rustfs_gateway::SessionBinding`], which live beside their code; nor the wire form of the
 //! rejection, which `conformance/cases/cred/` pins byte for byte against a running server.
@@ -515,16 +515,15 @@ async fn a_scope_the_floor_refuses_never_reaches_the_provider() {
 
 // ── indistinguishability ────────────────────────────────────────────────────────────────────────
 
-/// Negative — an unknown access key, an expired session, a disabled credential, a session
-/// credential used without its token and a long-term credential used with one all produce the
-/// same bytes, request id excluded.
+/// Negative — an unknown access key, an expired session signed over another token or with a wrong
+/// secret, a disabled credential, a session credential used without its token and a long-term
+/// credential used with one all produce the same bytes, request id excluded.
 #[tokio::test]
-async fn five_unusable_credentials_produce_one_answer() {
-    let provider = fixtures();
-    let service = build(Arc::clone(&provider));
-
+async fn six_unusable_credentials_produce_one_answer() {
+    let service = build(fixtures());
     let unknown = send(&service, UNKNOWN_KEY, SECRET, None).await;
-    let expired = send(&service, EXPIRED_KEY, SECRET, Some(TOKEN)).await;
+    let expired = send(&service, EXPIRED_KEY, SECRET, Some(OTHER_TOKEN)).await;
+    let expired_without_secret = send(&service, EXPIRED_KEY, WRONG_SECRET, Some(TOKEN)).await;
     let disabled = send(&service, DISABLED_KEY, SECRET, None).await;
     let session_without_token = send(&service, SESSION_KEY, SECRET, None).await;
     let long_term_with_token = send(&service, LONG_TERM_KEY, SECRET, Some(TOKEN)).await;
@@ -532,7 +531,8 @@ async fn five_unusable_credentials_produce_one_answer() {
     let baseline = without_request_id(&unknown);
     assert_eq!(unknown.status().as_u16(), 403, "{baseline}");
     for (label, response) in [
-        ("expired session", &expired),
+        ("expired session with another token", &expired),
+        ("expired session with its token and a wrong secret", &expired_without_secret),
         ("disabled credential", &disabled),
         ("session credential without its token", &session_without_token),
         ("long-term credential with a token", &long_term_with_token),
@@ -627,12 +627,10 @@ async fn c_sig_0257_verbose_signature_errors_redact_session_tokens() {
 /// response. Neither fact confirms that the access key exists.
 #[tokio::test]
 async fn an_expired_session_with_a_wrong_signature_is_uniform() {
-    let provider = fixtures();
-    let service = build(Arc::clone(&provider));
-    let response = send(&service, EXPIRED_KEY, WRONG_SECRET, Some(TOKEN)).await;
-    let body = without_request_id(&response);
-    assert!(body.contains("InvalidAccessKeyId"), "{body}");
-    assert!(!body.contains("SignatureDoesNotMatch"), "{body}");
+    let service = build(fixtures());
+    let unknown = without_request_id(&send(&service, UNKNOWN_KEY, SECRET, None).await);
+    let expired = without_request_id(&send(&service, EXPIRED_KEY, WRONG_SECRET, Some(TOKEN)).await);
+    assert_eq!(expired, unknown, "status, headers and body must be the unknown key's");
 }
 
 /// Negative — the same uniform answer applies to a disabled credential.
@@ -693,9 +691,9 @@ fn c_sig_0128_request_logs_exclude_credential_material() {
             let service = build(Arc::clone(&provider));
             let accepted = send(&service, LONG_TERM_KEY, SECRET, None).await;
             let rejected = send(&service, LONG_TERM_KEY, WRONG_SECRET, None).await;
-            assert_eq!(accepted.status().as_u16(), 200);
-            assert_eq!(rejected.status().as_u16(), 403);
-            assert_eq!(provider.calls(), 2);
+            let expired = send(&service, EXPIRED_KEY, SECRET, Some(TOKEN)).await;
+            let statuses = [&accepted, &rejected, &expired].map(|response| response.status().as_u16());
+            assert_eq!((statuses, provider.calls()), ([200, 403, 400], 3));
         });
         eprintln!("{LOG_CAPTURE_MARKER}");
         if std::env::var_os(LOG_CAPTURE_POISON).is_some() {

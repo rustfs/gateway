@@ -65,6 +65,8 @@ use rustfs_gateway_sig::{Identity, RawQuery, RequestNow, SecretBytes, SessionTok
 
 pub use rustfs_gateway_sig::{SessionBinding, SessionBindingError};
 
+use super::session_answer::PendingSessionRefusal;
+
 /// An STS session: the token and the lifetime, which are never apart.
 ///
 /// Private, and holds a [`SessionToken`], so it has no `Debug` and cannot acquire one.
@@ -73,20 +75,35 @@ struct Session {
     binding: SessionBinding,
 }
 
+impl Session {
+    /// Usable up to and including the final second, judged against the request's own snapshot.
+    fn within_lifetime(&self, now: RequestNow) -> Result<(), CredentialRefusal> {
+        if now.unix_seconds() > self.binding.expires_at_unix_seconds() {
+            return Err(CredentialRefusal::SessionExpired);
+        }
+        Ok(())
+    }
+}
+
 /// Why a credential that exists is nonetheless not usable for this request.
 ///
-/// Every variant is answered identically on the wire — see
+/// Every variant but one is answered identically on the wire — see
 /// [`super::authenticator::SigV4Authenticator`] — and this enum exists so that the framework's own
-/// tests can name which rule fired. It carries no request bytes and no key material, but it is
-/// still not something to render to a client: telling a caller that its token expired, rather than
-/// that its credentials did not work, is the S3 shape of the distinguishable-failure defect
+/// tests can name which rule fired. It carries no request bytes and no key material. Telling an
+/// arbitrary caller which rule fired is the S3 shape of the distinguishable-failure defect
 /// GHSA-3p3x-734c-h5vx describes.
+///
+/// The exception is [`CredentialRefusal::SessionExpired`], and only after the signature compared
+/// equal under the session's own secret: that caller holds the secret and the token already, and
+/// is answered `ExpiredToken` so its SDK refreshes (rustfs/gateway#1575). [`Credentials::admit`]
+/// compares the token before it judges the lifetime, so the variant implies the issued token.
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum CredentialRefusal {
     /// The principal exists and has been switched off.
     Disabled,
-    /// The session's lifetime ended before this request's instant.
+    /// The request presented the token issued with this access key, and the session's lifetime
+    /// ended before this request's instant.
     SessionExpired,
     /// The request presented a token and this access key is a long-term credential.
     ///
@@ -109,6 +126,12 @@ impl core::fmt::Display for CredentialRefusal {
 }
 
 impl std::error::Error for CredentialRefusal {}
+
+/// The reason, kept in this file, becomes an answer that needs the comparison's proof
+/// (`super::session_answer`, rustfs/gateway#1575).
+fn pending(refusal: CredentialRefusal) -> PendingSessionRefusal {
+    PendingSessionRefusal::new(matches!(refusal, CredentialRefusal::SessionExpired))
+}
 
 /// One principal's long-term or temporary credentials.
 pub struct Credentials {
@@ -222,22 +245,23 @@ impl Credentials {
     ///
     /// # Errors
     ///
-    /// One of [`CredentialRefusal`]'s variants. Every one of them is answered identically on the
-    /// wire; the distinction exists for the framework's tests and for nothing else.
+    /// One of [`CredentialRefusal`]'s variants, judged in this order: disabled, then the token,
+    /// then the lifetime. Only [`CredentialRefusal::SessionExpired`] is ever named on the wire,
+    /// and only after the signature verified.
     pub fn admit(&self, token: Option<&[u8]>, now: RequestNow) -> Result<(), CredentialRefusal> {
         if self.disabled {
             return Err(CredentialRefusal::Disabled);
         }
         match (&self.session, token) {
+            // The token before the lifetime, so `SessionExpired` implies the issued token was
+            // presented: it is the one refusal the authenticator may name (rustfs/gateway#1575).
             (Some(session), Some(presented)) => {
-                if now.unix_seconds() > session.binding.expires_at_unix_seconds() {
-                    return Err(CredentialRefusal::SessionExpired);
-                }
                 session
                     .token
                     .ct_verify(presented)
                     .map(|_| ())
-                    .map_err(|_| CredentialRefusal::SessionTokenMismatch)
+                    .map_err(|_| CredentialRefusal::SessionTokenMismatch)?;
+                session.within_lifetime(now)
             }
             (Some(_), None) => Err(CredentialRefusal::SessionCredentialWithoutToken),
             (None, Some(_)) => Err(CredentialRefusal::TokenWithoutSessionCredential),
@@ -251,18 +275,24 @@ impl Credentials {
             return Err(CredentialRefusal::Disabled);
         }
         match &self.session {
-            Some(session) => {
-                if now.unix_seconds() > session.binding.expires_at_unix_seconds() {
-                    return Err(CredentialRefusal::SessionExpired);
-                }
-                match query.session_token_matches(X_AMZ_SECURITY_TOKEN, &session.token) {
-                    Ok(Some(true)) => Ok(()),
-                    Ok(Some(false)) | Err(_) => Err(CredentialRefusal::SessionTokenMismatch),
-                    Ok(None) => Err(CredentialRefusal::SessionCredentialWithoutToken),
-                }
-            }
+            Some(session) => match query.session_token_matches(X_AMZ_SECURITY_TOKEN, &session.token) {
+                Ok(Some(true)) => session.within_lifetime(now),
+                Ok(Some(false)) | Err(_) => Err(CredentialRefusal::SessionTokenMismatch),
+                Ok(None) => Err(CredentialRefusal::SessionCredentialWithoutToken),
+            },
             None => Err(CredentialRefusal::TokenWithoutSessionCredential),
         }
+    }
+
+    /// [`Credentials::admit`], held as a [`PendingSessionRefusal`] for a verifier to answer after
+    /// its comparison.
+    pub(crate) fn admit_pending(&self, token: Option<&[u8]>, now: RequestNow) -> Option<PendingSessionRefusal> {
+        self.admit(token, now).err().map(pending)
+    }
+
+    /// The presigned-query spelling of [`Credentials::admit_pending`].
+    pub(crate) fn admit_query_pending(&self, query: RawQuery<'_>, now: RequestNow) -> Option<PendingSessionRefusal> {
+        self.admit_query(query, now).err().map(pending)
     }
 
     /// A deep copy, secret included.
@@ -384,6 +414,11 @@ impl From<CredentialsError> for ProviderError {
 /// Held as `Arc<dyn CredentialProvider>`, so the async method is a hand-written [`BoxFuture`]
 /// (ADR-0002). A real deployment awaits an IAM store here; [`crate::GuardedCredentialProvider`] adds the
 /// mandatory deadline and negative cache without caching a secret.
+///
+/// Return an expired STS session as `Found`, with its token and its real expiry in the
+/// [`SessionBinding`]. The framework judges the lifetime itself and answers `ExpiredToken` to a
+/// caller that signed correctly with the issued token, which is what an SDK refreshes on; a
+/// provider that answers `NotFound` for it makes the session indistinguishable from an unknown key.
 pub trait CredentialProvider: Send + Sync + 'static {
     /// Resolves one access key id.
     ///
@@ -569,6 +604,36 @@ mod tests {
             credentials.admit(Some(b"session-token-value"), RequestNow::from_unix_seconds(LIVE + 1)),
             Err(CredentialRefusal::SessionExpired)
         );
+    }
+
+    /// Negative — an expired session with another token, or none, is a binding violation, never an
+    /// expiry: `SessionExpired`, the one refusal the authenticator may name, implies the issued
+    /// token (rustfs/gateway#1575). Disabled outranks both. Header and query spellings alike.
+    #[test]
+    fn an_expired_session_names_its_expiry_only_to_the_matching_token() {
+        use CredentialRefusal::{Disabled, SessionCredentialWithoutToken, SessionExpired, SessionTokenMismatch};
+        let (at, live, disabled) = (RequestNow::from_unix_seconds(LIVE + 1), temporary(LIVE), temporary(LIVE).disable());
+        let issued: &[u8] = b"session-token-value";
+        for (token, expected) in [
+            (Some(&b"another"[..]), SessionTokenMismatch),
+            (None, SessionCredentialWithoutToken),
+        ] {
+            assert_eq!(live.admit(token, at), Err(expected));
+        }
+        assert_eq!(live.admit(Some(issued), at), Err(SessionExpired));
+        assert_eq!(disabled.admit(Some(issued), at), Err(Disabled));
+        for (query, expected) in [
+            ("X-Amz-Security-Token=another", SessionTokenMismatch),
+            ("X-Amz-Expires=60", SessionCredentialWithoutToken),
+            ("X-Amz-Security-Token=session-token-value", SessionExpired),
+        ] {
+            assert_eq!(live.admit_query(RawQuery::new(query), at), Err(expected), "{query}");
+        }
+        let query = RawQuery::new("X-Amz-Security-Token=session-token-value");
+        assert_eq!(live.admit_query(query, NOW), Ok(()));
+        for instant in [at, NOW] {
+            assert_eq!(disabled.admit_query(query, instant), Err(Disabled));
+        }
     }
 
     /// Negative — a disabled credential is refused whatever else is right about the request, and
