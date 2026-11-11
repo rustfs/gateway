@@ -97,7 +97,7 @@ impl AuthSchemeRef {
         match verdict {
             Verdict::Authenticated { scheme, .. } => Some(Self::of_scheme(scheme)),
             Verdict::Anonymous(_) => Some(Self::Anonymous),
-            Verdict::Bearer(_) => Some(Self::Bearer),
+            Verdict::Bearer { .. } => Some(Self::Bearer),
             _ => None,
         }
     }

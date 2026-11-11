@@ -14,6 +14,15 @@ download now declares the `token` claim. Without an installed verifier its token
 signed path too and must name the signed principal; a handler reads the host's verified state
 through `RequestContextView::bearer()`, and no authorization or handler context holds the token.
 
+`BearerGrant::new(identity, resource, expires_at_unix_seconds, state)` carries the resource and
+expiry the token itself names, and the kernel compares both with the request (`expires_at <= now`
+refuses), so a verifier that only decrypts cannot admit a token for another download or a lapsed
+one. `BearerAdmission::verify` returns the `Verdict`; `Verdict::Bearer` is matched as
+`Verdict::Bearer { .. }` and cannot be constructed outside `rustfs-gateway-sig`. A token beside any
+AWS credential surface — including one the RustFS profile's legacy recognition would read as
+anonymous — is refused. A panicking verifier refuses the request with `403`. The recorded-request
+corpus redacts a `token` query parameter.
+
 ## Required Copy inputs (types 0.40.0, core 0.56.0, gateway 0.59.0, codegen 0.20.0)
 
 BREAKING: `CopyObjectInput.copy_source` and `UploadPartCopyInput.copy_source` now hold

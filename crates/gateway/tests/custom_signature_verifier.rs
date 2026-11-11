@@ -339,17 +339,18 @@ fn the_security_posture_names_both_verifier_states() {
 }
 
 struct CachedBearerVerifier {
-    receipt: std::sync::Mutex<Option<rustfs_gateway_sig::BearerReceipt>>,
+    receipt: std::sync::Mutex<Option<Verdict>>,
     calls: Arc<AtomicUsize>,
 }
 
 impl SignatureVerifier for CachedBearerVerifier {
     fn verify(&self, _request: &CustomAuthRequest<'_>) -> Verdict {
         self.calls.fetch_add(1, Ordering::SeqCst);
-        match self.receipt.lock().expect("fixture mutex").take() {
-            Some(receipt) => Verdict::bearer(receipt),
-            None => Verdict::reject(AuthError::AccessDenied),
-        }
+        self.receipt
+            .lock()
+            .expect("fixture mutex")
+            .take()
+            .unwrap_or_else(|| Verdict::reject(AuthError::AccessDenied))
     }
 }
 
@@ -362,6 +363,8 @@ impl rustfs_gateway_sig::BearerTokenVerifier for BearerFixture {
     ) -> Result<rustfs_gateway_sig::BearerGrant, rustfs_gateway_sig::BearerRefused> {
         Ok(rustfs_gateway_sig::BearerGrant::new(
             Identity::new("BEARERACCESSKEY").expect("fixture identity"),
+            "first",
+            i64::MAX,
             Arc::new(()),
         ))
     }
@@ -382,9 +385,8 @@ async fn a_custom_verifier_cannot_reuse_another_bearer_admission() {
     let Admission::Bearer(admission) = admission else {
         panic!("the fixture must exercise bearer admission");
     };
-    let receipt = admission
-        .verify(&BearerFixture, "/downloads/first.zip")
-        .expect("verified fixture");
+    let receipt = admission.verify(&BearerFixture, "/downloads/first.zip");
+    assert!(receipt.bearer_receipt().is_some(), "the fixture must hold a verified bearer verdict");
     let calls = Arc::new(AtomicUsize::new(0));
     let reached = Arc::new(AtomicUsize::new(0));
     let service = support::wired()
@@ -409,7 +411,7 @@ async fn a_custom_verifier_cannot_reuse_another_bearer_admission() {
 }
 
 struct ConcurrentCachedBearerVerifier {
-    receipts: std::sync::Mutex<Vec<rustfs_gateway_sig::BearerReceipt>>,
+    receipts: std::sync::Mutex<Vec<Verdict>>,
     arrivals: std::sync::Mutex<usize>,
     changed: std::sync::Condvar,
     overlaps: Arc<AtomicUsize>,
@@ -428,10 +430,11 @@ impl SignatureVerifier for ConcurrentCachedBearerVerifier {
             self.overlaps.fetch_add(1, Ordering::SeqCst);
         }
         drop(arrivals);
-        match self.receipts.lock().expect("fixture mutex").pop() {
-            Some(receipt) => Verdict::bearer(receipt),
-            None => Verdict::reject(AuthError::AccessDenied),
-        }
+        self.receipts
+            .lock()
+            .expect("fixture mutex")
+            .pop()
+            .unwrap_or_else(|| Verdict::reject(AuthError::AccessDenied))
     }
 }
 
@@ -452,9 +455,9 @@ async fn concurrent_custom_requests_cannot_reuse_bearer_admissions() {
             else {
                 panic!("the fixture must exercise bearer admission")
             };
-            admission
-                .verify(&BearerFixture, "/downloads/first.zip")
-                .expect("verified fixture")
+            let verdict = admission.verify(&BearerFixture, "/downloads/first.zip");
+            assert!(verdict.bearer_receipt().is_some(), "the fixture must hold a verified bearer verdict");
+            verdict
         })
         .collect();
     let overlaps = Arc::new(AtomicUsize::new(0));

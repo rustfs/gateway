@@ -858,11 +858,12 @@ impl S3Service {
             // ADR-0042: only the installed host verifier turns a bearer admission into a verdict, on
             // this request's own raw path; without one, and on any refusal, the token is refused.
             Ok(Admission::Bearer(admission)) => {
+                // A panicking verifier refuses, like any other refusal (crate::panic_boundary).
                 let verdict = match &self.inner.bearer_token_verifier {
-                    Some(verifier) => match admission.verify(verifier.as_ref(), wire.raw_path().as_str()) {
-                        Ok(receipt) => Verdict::bearer(receipt),
-                        Err(error) => Verdict::reject(error),
-                    },
+                    Some(verifier) => {
+                        crate::panic_boundary::contain_decision(|| admission.verify(verifier.as_ref(), wire.raw_path().as_str()))
+                            .unwrap_or_else(|()| Verdict::reject(AuthError::AccessDenied))
+                    }
                     None => Verdict::reject(AuthError::AccessDenied),
                 };
                 bearer_admitted = true;
@@ -939,7 +940,10 @@ impl S3Service {
                     .bearer_alongside_signature(&view, M::floor(&op), now)
                     .and_then(|admission| {
                         admission.map_or(Err(AuthError::AccessDenied), |admission| {
-                            admission.verify_alongside(verifier.as_ref(), wire.raw_path().as_str(), signed)
+                            crate::panic_boundary::contain_decision(|| {
+                                admission.verify_alongside(verifier.as_ref(), wire.raw_path().as_str(), signed)
+                            })
+                            .unwrap_or(Err(AuthError::AccessDenied))
                         })
                     });
                 match verified {

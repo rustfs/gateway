@@ -18,8 +18,9 @@
 //! parameter and one literal path suffix), [`BearerAdmission`] (the sealed result of the floor
 //! admitting a request by that claim), the host's [`BearerTokenVerifier`] trust boundary and the
 //! [`BearerReceipt`] only a verification produces.
-//! NOT responsible for: the token's cryptography, its expiry or the download it names — the host
-//! verifier owns all three — or authorization, which still runs on the receipt's principal.
+//! NOT responsible for: the token's cryptography, replay policy or principal liveness — the host
+//! verifier owns those and reports the download and expiry the token carries, which this module
+//! then compares with the request — or authorization, which still runs on the receipt's principal.
 //! Upstream: [`crate::SecurityFloor::admit`], the only producer of a [`BearerAdmission`].
 //! Downstream: [`crate::Verdict::Bearer`], and the facade, which installs the verifier and strips
 //! the token from every context after verification.
@@ -52,6 +53,40 @@
 //! use rustfs_gateway_sig::BearerReceipt;
 //! fn copy(receipt: &BearerReceipt) -> BearerReceipt {
 //!     receipt.clone()
+//! }
+//! ```
+//!
+//! ```compile_fail,E0599
+//! use rustfs_gateway_sig::BearerReceipt;
+//! fn conjure() -> BearerReceipt {
+//!     BearerReceipt::default()
+//! }
+//! ```
+//!
+//! Host code cannot wrap a receipt into a verdict itself; only [`BearerAdmission::verify`] does:
+//!
+//! ```compile_fail,E0624
+//! use rustfs_gateway_sig::{BearerReceipt, Verdict};
+//! fn launder(receipt: BearerReceipt) -> Verdict {
+//!     Verdict::bearer(receipt)
+//! }
+//! ```
+//!
+//! Nor build the variant directly:
+//!
+//! ```compile_fail,E0639
+//! use rustfs_gateway_sig::{BearerReceipt, Verdict};
+//! fn launder(receipt: BearerReceipt) -> Verdict {
+//!     Verdict::Bearer(receipt)
+//! }
+//! ```
+//!
+//! A grant cannot omit the download its token was minted for or its expiry:
+//!
+//! ```compile_fail,E0061
+//! use rustfs_gateway_sig::{BearerGrant, Identity};
+//! fn lazy(identity: Identity) -> BearerGrant {
+//!     BearerGrant::new(identity, std::sync::Arc::new(()))
 //! }
 //! ```
 
@@ -189,13 +224,23 @@ impl BearerAdmission {
         self.claim
     }
 
-    /// Verifies a request that presented only the bearer token.
+    /// Verifies a request that presented only the bearer token, and answers with its verdict:
+    /// [`Verdict::Bearer`] or a rejection. This is the only way a bearer verdict is built.
     ///
-    /// # Errors
-    ///
-    /// [`AuthError::AccessDenied`] when `raw_path` does not end with the claim's suffix after a
-    /// non-empty resource, and whenever the verifier refuses.
-    pub fn verify(self, verifier: &dyn BearerTokenVerifier, raw_path: &str) -> Result<BearerReceipt, AuthError> {
+    /// `raw_path` must end with the claim's suffix after a non-empty resource, the verifier must
+    /// accept the token, and the kernel then compares the verifier's [`BearerGrant`] itself: the
+    /// grant's resource must equal the request's own bound resource byte for byte, and the grant
+    /// must not have expired (`expires_at <= now` refuses) against this admission's one clock
+    /// reading. Every refusal is [`AuthError::AccessDenied`].
+    #[must_use]
+    pub fn verify(self, verifier: &dyn BearerTokenVerifier, raw_path: &str) -> crate::Verdict {
+        match self.receipt(verifier, raw_path) {
+            Ok(receipt) => crate::Verdict::bearer(receipt),
+            Err(error) => crate::Verdict::reject(error),
+        }
+    }
+
+    fn receipt(self, verifier: &dyn BearerTokenVerifier, raw_path: &str) -> Result<BearerReceipt, AuthError> {
         let resource = self.claim.bound_resource(raw_path).ok_or(AuthError::AccessDenied)?;
         let request = BearerTokenRequest {
             operation: self.operation,
@@ -204,6 +249,11 @@ impl BearerAdmission {
             now: self.now,
         };
         let grant = verifier.verify(&request).map_err(|BearerRefused| AuthError::AccessDenied)?;
+        // The kernel's own binding, whatever the host checked: the download the token was minted
+        // for, and its lifetime against this request's clock (ADR-0042).
+        if *grant.resource != *resource || grant.expires_at <= self.now.unix_seconds() {
+            return Err(AuthError::AccessDenied);
+        }
         Ok(BearerReceipt {
             identity: grant.identity,
             operation: self.operation,
@@ -225,7 +275,7 @@ impl BearerAdmission {
         raw_path: &str,
         signed: &Identity,
     ) -> Result<BearerReceipt, AuthError> {
-        let receipt = self.verify(verifier, raw_path)?;
+        let receipt = self.receipt(verifier, raw_path)?;
         if receipt.identity.access_key_id() != signed.access_key_id() {
             return Err(AuthError::AccessDenied);
         }
@@ -261,7 +311,8 @@ impl<'a> BearerTokenRequest<'a> {
     }
 
     /// The resource the request path names: its last raw segment without the claim's suffix,
-    /// neither decoded nor normalized. The verifier refuses a token issued for another.
+    /// neither decoded nor normalized. The kernel compares the grant's resource with it; the
+    /// verifier may refuse earlier, but must report the token's own resource either way.
     #[must_use]
     pub const fn resource(&self) -> &'a str {
         self.resource
@@ -273,7 +324,8 @@ impl<'a> BearerTokenRequest<'a> {
         self.token
     }
 
-    /// The request's single clock reading. A token whose `expires_at <= now` must be refused.
+    /// The request's single clock reading, the one the kernel compares the grant's expiry with
+    /// (`expires_at <= now` refuses).
     #[must_use]
     pub const fn now(&self) -> RequestNow {
         self.now
@@ -311,19 +363,30 @@ impl VerifiedBearerState {
     }
 }
 
-/// The host's answer to a token it verified: the principal it was issued to and the host's own
-/// verified state, which the handler reads instead of decoding the token again.
+/// The host's answer to a token it verified: the principal it was issued to, the resource and
+/// expiry the token itself carries, and the host's own verified state, which the handler reads
+/// instead of decoding the token again.
+///
+/// The resource and expiry are what the **token** says, not what the request asked for: the
+/// kernel compares them with the request's bound resource and clock reading itself, so a host
+/// that only decrypts still cannot admit a token for one download on another, or a lapsed one.
 pub struct BearerGrant {
     identity: Identity,
+    resource: Box<str>,
+    expires_at: i64,
     state: VerifiedBearerState,
 }
 
 impl BearerGrant {
-    /// The verified principal and the host state that travels to the handler.
+    /// The verified principal; the resource the token was minted for, raw, in the form
+    /// [`BearerTokenRequest::resource`] has; the token's expiry in Unix seconds; and the host
+    /// state that travels to the handler.
     #[must_use]
-    pub fn new<T: Any + Send + Sync>(identity: Identity, state: Arc<T>) -> Self {
+    pub fn new<T: Any + Send + Sync>(identity: Identity, resource: &str, expires_at_unix_seconds: i64, state: Arc<T>) -> Self {
         Self {
             identity,
+            resource: Box::from(resource),
+            expires_at: expires_at_unix_seconds,
             state: VerifiedBearerState::new(state),
         }
     }
@@ -333,6 +396,8 @@ impl fmt::Debug for BearerGrant {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("BearerGrant")
             .field("identity", &self.identity)
+            .field("resource", &self.resource)
+            .field("expires_at", &self.expires_at)
             .field("state", &"<opaque>")
             .finish()
     }
@@ -345,10 +410,34 @@ pub struct BearerRefused;
 
 /// The host's token verification: the declared trust boundary of a [`QueryBearerClaim`].
 ///
-/// The host authenticates the token's ciphertext, checks that it names
-/// [`BearerTokenRequest::resource`] and refuses `expires_at <= now` against
-/// [`BearerTokenRequest::now`]. Nothing is installed by default, and a claim with no verifier
-/// refuses every token.
+/// Nothing is installed by default, and a claim with no verifier refuses every token.
+///
+/// # What the kernel does
+///
+/// It reads exactly one literal, non-empty token beside no AWS credential surface, binds it to the
+/// request's raw resource, and calls the verifier once with one clock reading. It then compares the
+/// returned [`BearerGrant`] itself: the grant's resource must equal
+/// [`BearerTokenRequest::resource`] byte for byte, and `expires_at <= now` refuses. On a signed
+/// request it also requires the grant's principal to be the signed one.
+///
+/// # What the host must do
+///
+/// * Authenticate the token's ciphertext and refuse anything it did not mint, then report the
+///   resource and expiry **the token carries** — never copy them from the request.
+/// * Refuse a token for an operation it was not minted for: check [`BearerTokenRequest::operation`].
+/// * Own the replay policy. The kernel keeps no token cache; a token is accepted as often as the
+///   host accepts it until it expires. A host that needs single use must enforce it here.
+/// * Own principal liveness and session binding: refuse a token whose principal has been disabled,
+///   deleted or had its credentials rotated since minting, and any session binding the host's
+///   tokens carry.
+///
+/// # Calling contract
+///
+/// Called synchronously on the request path, before authorization, for requests that need no
+/// signature to reach it. **Must not block, sleep or do I/O**: keep it to in-memory decryption and
+/// lookups, under the same contract as the facade's `Observer`. **Must not panic**:
+/// the facade contains a panic and refuses the request with `403`, but the host's own state is
+/// whatever the panic left it in. Never log the token.
 pub trait BearerTokenVerifier: Send + Sync + 'static {
     /// Verifies one request's token.
     ///
@@ -471,6 +560,70 @@ mod tests {
         assert_eq!(CLAIM.strip_from("note=a+b&token=secret&z=1"), "note=a+b&z=1");
         assert_eq!(CLAIM.strip_from("token=secret"), "");
         assert_eq!(CLAIM.strip_from("%74oken=secret&Token=kept"), "Token=kept");
+    }
+
+    /// A decrypt-only host: whatever it is asked, it reports `resource` and `expires_at`.
+    struct Reports {
+        resource: &'static str,
+        expires_at: i64,
+    }
+
+    impl BearerTokenVerifier for Reports {
+        fn verify(&self, _request: &BearerTokenRequest<'_>) -> Result<BearerGrant, BearerRefused> {
+            let identity = Identity::new("AKIAFIXTURE").map_err(|_| BearerRefused)?;
+            Ok(BearerGrant::new(identity, self.resource, self.expires_at, Arc::new(())))
+        }
+    }
+
+    fn verdict_at(now: i64, path: &str, host: &Reports) -> crate::Verdict {
+        BearerAdmission::new("op", CLAIM, Zeroizing::new("t".to_owned()), RequestNow::from_unix_seconds(now)).verify(host, path)
+    }
+
+    #[test]
+    fn n_a_grant_for_another_resource_is_refused_by_the_kernel() {
+        let host = Reports {
+            resource: "xyz",
+            expires_at: i64::MAX,
+        };
+        assert_eq!(verdict_at(0, "/x/abc.zip", &host).rejection(), Some(AuthError::AccessDenied));
+        assert!(verdict_at(0, "/x/xyz.zip", &host).bearer_receipt().is_some(), "the control");
+        // Compared on raw bytes: neither case-folded nor decoded.
+        assert_eq!(verdict_at(0, "/x/XYZ.zip", &host).rejection(), Some(AuthError::AccessDenied));
+        assert_eq!(verdict_at(0, "/x/%78yz.zip", &host).rejection(), Some(AuthError::AccessDenied));
+    }
+
+    #[test]
+    fn n_an_expired_grant_is_refused_by_the_kernel_at_the_exact_boundary() {
+        let host = Reports {
+            resource: "abc",
+            expires_at: 100,
+        };
+        assert_eq!(verdict_at(100, "/x/abc.zip", &host).rejection(), Some(AuthError::AccessDenied));
+        assert_eq!(verdict_at(101, "/x/abc.zip", &host).rejection(), Some(AuthError::AccessDenied));
+        assert!(verdict_at(99, "/x/abc.zip", &host).bearer_receipt().is_some(), "the control");
+    }
+
+    #[test]
+    fn n_legacy_recognition_never_admits_a_token_beside_an_aws_credential_surface() {
+        let operation = crate::OperationFloor::custom("op", crate::SigService::S3).with_query_bearer_claim(CLAIM);
+        let headers = HeaderMap::new();
+        for floor in [
+            crate::SecurityFloor::new(),
+            crate::SecurityFloor::new().recognize_signatures_as_legacy_rustfs(),
+        ] {
+            for query in [
+                "token=t&X-Amz-Credential=AKIA%2F20260101%2Fus-east-1%2Fs3%2Faws4_request",
+                "token=t&X-Amz-Algorithm=AWS4-HMAC-SHA256",
+                "token=t&AWSAccessKeyId=AKIA",
+            ] {
+                let view = WireView::new(&headers, RawQuery::new(query));
+                let admitted = floor.admit(view, &operation, RequestNow::from_unix_seconds(0));
+                assert!(!matches!(admitted, Ok(crate::Admission::Bearer(_))), "{floor:?}: {query}");
+            }
+            let view = WireView::new(&headers, RawQuery::new("token=t"));
+            let admitted = floor.admit(view, &operation, RequestNow::from_unix_seconds(0));
+            assert!(matches!(admitted, Ok(crate::Admission::Bearer(_))), "{floor:?}: the control");
+        }
     }
 
     #[test]

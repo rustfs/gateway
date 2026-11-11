@@ -47,6 +47,13 @@ impl SecurityFloor {
         if let Some(claim) = operation.query_bearer_claim()
             && let Some(token) = claim.read_token(&view)?
         {
+            // A recognition policy that reads an unsigned presigned or SigV2 query as anonymous
+            // (`recognize_signatures_as_legacy_rustfs`) reaches here with that partial AWS
+            // credential still in the query. It never recovers through a token (#1400): the
+            // default predicate, whatever this floor's recognition, decides.
+            if crate::verifier::detect_aws_credential_marker(&view).is_some() {
+                return Err(AuthError::AccessDenied);
+            }
             return Ok(Admission::Bearer(BearerAdmission::new(operation.name(), claim, token, now)));
         }
         self.enforce_scheme_allowed(operation, SchemeSlot::Anonymous, SigFamily::V4)?;

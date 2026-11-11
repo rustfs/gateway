@@ -357,7 +357,7 @@ impl RequestContextView {
                 scope: scope.clone(),
                 secret: caller_secret.map(CallerSecretKey),
             }),
-            Verdict::Anonymous(_) | Verdict::Bearer(_) => None,
+            Verdict::Anonymous(_) | Verdict::Bearer { .. } => None,
             _ => return None,
         };
         let bearer = verdict.bearer_receipt().map(BearerContext::of);

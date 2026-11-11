@@ -35,44 +35,49 @@ use rustfs_gateway::{ClockSkewAck, FixedClock, SecurityFloor};
 use super::{Exchange, REGION, assemble, assemble_with_bearer_verifier, wire};
 use crate::operation_diff::s3s_0_17_0::context::{ACCESS_KEY, ContextRequest, PATH_HOST};
 
-const ZIP_GET: &str = "rustfs:GetV3ObjectZipDownloadsByIdZip";
+pub(super) const ZIP_GET: &str = "rustfs:GetV3ObjectZipDownloadsByIdZip";
 /// A token for download `abc`, issued to the shared credential.
-const GOOD: &str = "tok-abc-sentinel";
+pub(super) const GOOD: &str = "tok-abc-sentinel";
 /// A token for download `xyz`, issued to the shared credential.
-const OTHER_DOWNLOAD: &str = "tok-xyz-sentinel";
+pub(super) const OTHER_DOWNLOAD: &str = "tok-xyz-sentinel";
 /// A token for download `abc` that expired in 2001.
-const EXPIRED: &str = "tok-expired-sentinel";
+pub(super) const EXPIRED: &str = "tok-expired-sentinel";
 /// A token for download `abc`, issued to another principal.
 const OTHER_PRINCIPAL: &str = "tok-other-principal-sentinel";
+/// A token for download `abc` whose decoded value holds a literal `+`.
+pub(super) const PLUS: &str = "tok+plus-sentinel";
+/// A token whose verification panics inside the host.
+pub(super) const PANICS: &str = "tok-panics-sentinel";
 const OTHER_KEY: &str = "AKIAOTHERPRINCIPAL01";
 
-/// A host verifier with four known tokens that records what it was asked.
+/// A decrypt-only host verifier with its known tokens that records what it was asked.
+///
+/// It deliberately checks neither the download nor the expiry: it reports what the token says,
+/// and the kernel must compare both against the request (ADR-0042). A host that forgets those
+/// checks is exactly the host this fixture stands for.
 #[derive(Clone, Default)]
-struct FixtureVerifier {
+pub(super) struct FixtureVerifier {
     asked: Arc<Mutex<Vec<String>>>,
 }
 
 impl BearerTokenVerifier for FixtureVerifier {
     fn verify(&self, request: &BearerTokenRequest<'_>) -> Result<BearerGrant, BearerRefused> {
+        assert_ne!(request.token(), PANICS, "the fixture host's own failure");
         self.asked.lock().expect("uncontended").push(request.resource().to_owned());
         let (resource, key, expires_at) = match request.token() {
-            GOOD => ("abc", ACCESS_KEY, i64::MAX),
+            GOOD | PLUS => ("abc", ACCESS_KEY, i64::MAX),
             OTHER_DOWNLOAD => ("xyz", ACCESS_KEY, i64::MAX),
             // Long past against the request clock the kernel hands over, whatever that is now.
             EXPIRED => ("abc", ACCESS_KEY, 1_000_000_000),
             OTHER_PRINCIPAL => ("abc", OTHER_KEY, i64::MAX),
             _ => return Err(BearerRefused),
         };
-        // The host's own checks: the download the token names, and `expires_at <= now`.
-        if request.resource() != resource || expires_at <= request.now().unix_seconds() {
-            return Err(BearerRefused);
-        }
         let identity = Identity::new(key).map_err(|_| BearerRefused)?;
-        Ok(BearerGrant::new(identity, Arc::new(format!("archive-{resource}"))))
+        Ok(BearerGrant::new(identity, resource, expires_at, Arc::new(format!("archive-{resource}"))))
     }
 }
 
-fn unsigned(method: &str, uri: &str) -> Request<Bytes> {
+pub(super) fn unsigned(method: &str, uri: &str) -> Request<Bytes> {
     Request::builder()
         .method(method)
         .uri(uri)
@@ -81,19 +86,20 @@ fn unsigned(method: &str, uri: &str) -> Request<Bytes> {
         .expect("a fixture request")
 }
 
-fn signed_get(path: &str, query: &str) -> Request<Bytes> {
+pub(super) fn signed_get(path: &str, query: &str) -> Request<Bytes> {
     wire(&ContextRequest::get(PATH_HOST, path, query).signed(REGION))
 }
 
-/// `403`, no handler, no authorizer question, and no token anywhere in the answer.
-fn refused_without_asking(exchange: &Exchange, at: &str) {
+/// `403`, no handler, no authorizer question, and no token anywhere in the answer, in any case.
+pub(super) fn refused_without_asking(exchange: &Exchange, at: &str) {
     assert_eq!(exchange.status, 403, "{at}: {}", exchange.body);
     assert!(exchange.reached.is_empty(), "{at}: a handler ran: {:?}", exchange.reached);
     assert!(exchange.asked.is_empty(), "{at}: the authorizer was asked {:?}", exchange.asked);
-    assert!(!exchange.body.contains("sentinel"), "{at}: the refusal holds a token: {}", exchange.body);
+    let body = exchange.body.to_ascii_lowercase();
+    assert!(!body.contains("sentinel"), "{at}: the refusal holds a token: {}", exchange.body);
 }
 
-fn asked_of(verifier: &FixtureVerifier) -> Vec<String> {
+pub(super) fn asked_of(verifier: &FixtureVerifier) -> Vec<String> {
     std::mem::take(&mut *verifier.asked.lock().expect("uncontended"))
 }
 
@@ -122,7 +128,7 @@ fn a_verified_token_admits_the_download_as_its_principal_under_both_aliases() {
             assert_eq!(asked.scheme, "Bearer", "{uri}: {asked:?}");
             assert_eq!(asked.query.as_deref(), Some("note=a"), "{uri}: {asked:?}");
         }
-        assert!(!exchange.body.contains("sentinel"), "{uri}: {}", exchange.body);
+        assert!(!exchange.body.to_ascii_lowercase().contains("sentinel"), "{uri}: {}", exchange.body);
     }
 }
 
@@ -196,7 +202,7 @@ const EXPIRES_NOW: &str = "tok-expires-now-sentinel";
 /// A token for download `abc` that expires one second after [`PINNED_AT`].
 const EXPIRES_NEXT: &str = "tok-expires-next-sentinel";
 
-/// A host verifier that records the clock reading it was handed and applies `expires_at <= now`.
+/// A decrypt-only host verifier that records the clock reading it was handed.
 #[derive(Clone, Default)]
 struct ClockedVerifier {
     seen: Arc<Mutex<Vec<i64>>>,
@@ -211,11 +217,9 @@ impl BearerTokenVerifier for ClockedVerifier {
             EXPIRES_NEXT => PINNED_AT + 1,
             _ => return Err(BearerRefused),
         };
-        if request.resource() != "abc" || expires_at <= now {
-            return Err(BearerRefused);
-        }
+        // Decrypt-only: the kernel applies `expires_at <= now` against its own clock reading.
         let identity = Identity::new(ACCESS_KEY).map_err(|_| BearerRefused)?;
-        Ok(BearerGrant::new(identity, Arc::new("archive-abc".to_owned())))
+        Ok(BearerGrant::new(identity, "abc", expires_at, Arc::new("archive-abc".to_owned())))
     }
 }
 
@@ -359,8 +363,9 @@ fn n_no_log_event_holds_a_token() {
         .count();
     assert_eq!(refusals, 3, "{events:#?}");
     for event in &events {
-        assert!(!event.contains("sentinel"), "a log event holds a token: {event}");
-        assert!(!event.contains("tok-"), "a log event holds a token: {event}");
+        let lowered = event.to_ascii_lowercase();
+        assert!(!lowered.contains("sentinel"), "a log event holds a token: {event}");
+        assert!(!lowered.contains("tok-"), "a log event holds a token: {event}");
     }
 }
 

@@ -102,7 +102,6 @@ pub(super) enum AcceptedBody<B: http_body::Body> {
     PostObject(Box<ResolvedPostObject<B>>),
 }
 
-/// keys over HTTP.
 /// What the transport said about this connection, or [`TransportSecurity::Plaintext`].
 ///
 /// The **only** source. A transport that terminates TLS, or that is handed a connection by one
@@ -123,7 +122,6 @@ pub(super) enum AcceptedBody<B: http_body::Body> {
 ///
 /// Absent is cleartext. The alternative — assuming encryption when nobody said — is the failure
 /// mode where a development deployment that was never given a transport quietly serves customer
-/// keys over HTTP.
 pub(super) fn connection_security(extensions: &http::Extensions) -> TransportSecurity {
     extensions
         .get::<TransportSecurity>()

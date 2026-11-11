@@ -522,7 +522,9 @@ pub enum Verdict {
     /// A query bearer token was verified by the host's installed verifier (ADR-0042). No signature
     /// was compared: this is not [`Verdict::Authenticated`] and carries no [`SignatureMatch`], no
     /// scheme and no scope. The [`crate::BearerReceipt`] has no public constructor; only
-    /// [`crate::BearerAdmission::verify`] produces one.
+    /// [`crate::BearerAdmission::verify`] produces one. Non-exhaustive, so no other crate can
+    /// build this variant around a receipt it holds: match it as `Verdict::Bearer { .. }`.
+    #[non_exhaustive]
     Bearer(crate::bearer::BearerReceipt),
 }
 
@@ -586,9 +588,10 @@ impl Verdict {
         Self::Reject(error)
     }
 
-    /// Builds a bearer verdict from a receipt only a verification produces.
+    /// Builds a bearer verdict from a receipt only a verification produces. Crate-private: only
+    /// [`crate::BearerAdmission::verify`] calls it, so host code cannot wrap a receipt itself.
     #[must_use]
-    pub fn bearer(receipt: crate::bearer::BearerReceipt) -> Self {
+    pub(crate) fn bearer(receipt: crate::bearer::BearerReceipt) -> Self {
         Self::Bearer(receipt)
     }
 
