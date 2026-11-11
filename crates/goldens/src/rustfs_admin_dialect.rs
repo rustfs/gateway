@@ -470,15 +470,29 @@ pub(crate) fn in_lanes_on<P, T: Sync>(floor: &SecurityFloor, policy: P, items: &
 where
     P: Fn(&str, &str) -> bool + Copy + Send + Sync + 'static,
 {
+    in_lanes_installing(floor, policy, |builder| builder, items, check);
+}
+
+/// [`in_lanes_on`], with `install` applied to every lane's builder before any operation is
+/// registered.
+pub(crate) fn in_lanes_installing<P, T: Sync>(
+    floor: &SecurityFloor,
+    policy: P,
+    install: impl Fn(ServiceBuilder) -> ServiceBuilder + Sync,
+    items: &[T],
+    check: impl Fn(&Assembled, &T) + Sync,
+) where
+    P: Fn(&str, &str) -> bool + Copy + Send + Sync + 'static,
+{
     let per_lane = items.len().div_ceil(LANES).max(1);
     let checked: usize = std::thread::scope(|scope| {
         let lanes: Vec<_> = items
             .chunks(per_lane)
             .map(|lane| {
-                let check = &check;
+                let (check, install) = (&check, &install);
                 let floor = floor.clone();
                 scope.spawn(move || {
-                    let assembled = assemble_on(floor, policy);
+                    let assembled = assemble_installing(floor, policy, false, None, install);
                     let mut done = 0;
                     for item in lane {
                         check(&assembled, item);
@@ -716,6 +730,7 @@ mod bucket_tests;
 mod extension_tests;
 mod fallback_tests;
 mod fallback_wire_tests;
+mod header_token_tests;
 mod lambda_tests;
 mod subject_tests;
 mod tests;

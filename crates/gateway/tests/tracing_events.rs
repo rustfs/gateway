@@ -43,14 +43,14 @@ const TARGET: &str = "rustfs_gateway";
 
 /// One captured event: its level, target, and fields in declaration order, `message` included.
 #[derive(Clone, Debug)]
-struct Captured {
+pub(crate) struct Captured {
     level: Level,
     target: String,
     fields: Vec<(String, String)>,
 }
 
 impl Captured {
-    fn field(&self, name: &str) -> Option<&str> {
+    pub(crate) fn field(&self, name: &str) -> Option<&str> {
         self.fields
             .iter()
             .find(|(field, _)| field == name)
@@ -61,21 +61,21 @@ impl Captured {
         self.fields.iter().map(|(name, _)| name.as_str()).collect()
     }
 
-    fn rendered(&self) -> String {
+    pub(crate) fn rendered(&self) -> String {
         format!("{self:?}")
     }
 }
 
 /// A subscriber that keeps every event, and nothing about spans.
 #[derive(Clone, Default)]
-struct Capture(Arc<Mutex<Vec<Captured>>>);
+pub(crate) struct Capture(Arc<Mutex<Vec<Captured>>>);
 
 impl Capture {
-    fn events(&self) -> Vec<Captured> {
+    pub(crate) fn events(&self) -> Vec<Captured> {
         self.0.lock().expect("not poisoned").clone()
     }
 
-    fn named(&self, event: &str) -> Vec<Captured> {
+    pub(crate) fn named(&self, event: &str) -> Vec<Captured> {
         self.events()
             .into_iter()
             .filter(|captured| captured.field("event") == Some(event))
@@ -159,7 +159,7 @@ impl Subscriber for Undecided {
 
 /// Runs `work` on this thread with a fresh capture as the default subscriber, on a current-thread
 /// runtime so every event the service emits is emitted here.
-fn captured<T>(work: impl FnOnce(&tokio::runtime::Runtime) -> T) -> (T, Capture) {
+pub(crate) fn captured<T>(work: impl FnOnce(&tokio::runtime::Runtime) -> T) -> (T, Capture) {
     static UNDECIDED: OnceLock<()> = OnceLock::new();
     UNDECIDED.get_or_init(|| {
         // A global subscriber installed first by another case would do as well; one only has to exist.

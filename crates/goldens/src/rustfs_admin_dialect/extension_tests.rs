@@ -117,7 +117,7 @@ fn signed(record: &ExtensionRouteRecord) -> Request<Bytes> {
 }
 
 /// The same request with no credentials at all.
-fn unsigned(record: &ExtensionRouteRecord) -> Request<Bytes> {
+pub(super) fn unsigned(record: &ExtensionRouteRecord) -> Request<Bytes> {
     unsigned_at(record.method, &format!("{}?{}", path(record), query(record)))
 }
 
