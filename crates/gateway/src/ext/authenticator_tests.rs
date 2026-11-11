@@ -546,7 +546,9 @@ fn the_expired_token_answer_is_a_400_and_the_uniform_refusal_a_403() {
 fn hmac_sha256(key: &[u8], data: &[u8]) -> [u8; 32] {
     use sha2::{Digest, Sha256};
     let mut block = [0_u8; 64];
-    block[..key.len()].copy_from_slice(key);
+    for (slot, byte) in block.iter_mut().zip(key) {
+        *slot = *byte;
+    }
     let mut inner = Sha256::new();
     inner.update(block.map(|byte| byte ^ 0x36));
     inner.update(data);
@@ -567,11 +569,8 @@ fn base64(bytes: &[u8]) -> String {
             .fold(0_u32, |n, (i, byte)| n | u32::from(*byte) << (16 - 8 * i));
         for index in 0..4 {
             let sextet = ((n >> (18 - 6 * index)) & 63) as usize;
-            out.push(if index <= chunk.len() {
-                char::from(ALPHABET[sextet])
-            } else {
-                '='
-            });
+            let symbol = ALPHABET.get(sextet).copied().map_or('=', char::from);
+            out.push(if index <= chunk.len() { symbol } else { '=' });
         }
     }
     out
