@@ -358,7 +358,7 @@ fn n_a_presigned_object_lambda_request_with_a_tampered_lambda_arn_is_refused_wit
         let assembled = assemble_on(floor, |_, _| true);
         let tampered = rewritten(presigned_lambda(), |uri| {
             assert!(uri.contains("transformer%3Awebhook"), "{at}: {uri}");
-            uri
+            uri.replacen("transformer%3Awebhook", "transformer%3Aexfiltrate", 1)
         });
         refused_without_asking(&assembled.exchange(tampered), at);
     }
@@ -372,14 +372,8 @@ fn n_a_lambda_arn_the_presigned_signature_does_not_cover_is_refused_without_aski
     for (at, floor) in lambda_floors() {
         let assembled = assemble_on(floor, |_, _| true);
         let now = RequestNow::capture().unix_seconds();
-        let get_object = presign_at(
-            &Method::GET,
-            &format!("/{BUCKET}/{KEY}"),
-            &format!("lambdaArn={LAMBDA_ARN}"),
-            now,
-            LAMBDA_EXPIRES,
-        );
-        let appended = rewritten(get_object, |uri| uri);
+        let get_object = presign_at(&Method::GET, &format!("/{BUCKET}/{KEY}"), "", now, LAMBDA_EXPIRES);
+        let appended = rewritten(get_object, |uri| format!("{uri}&lambdaArn={LAMBDA_ARN}"));
         refused_without_asking(&assembled.exchange(appended), at);
     }
 }
@@ -391,7 +385,7 @@ fn n_an_expired_presigned_object_lambda_request_is_refused_without_asking() {
     for (at, floor) in lambda_floors() {
         let assembled = assemble_on(floor, |_, _| true);
         // Signed twice its lifetime ago.
-        let signed_at = RequestNow::capture().unix_seconds();
+        let signed_at = RequestNow::capture().unix_seconds() - 1_200;
         refused_without_asking(&assembled.exchange(presigned_lambda_at(signed_at)), at);
     }
 }
@@ -425,7 +419,7 @@ fn n_a_sigv2_presigned_object_lambda_request_is_refused_without_asking() {
 #[test]
 fn n_a_presigned_object_lambda_request_whose_action_is_denied_is_refused_before_its_handler() {
     for (at, floor) in lambda_floors() {
-        let assembled = assemble_on(floor, |_, _| true);
+        let assembled = assemble_on(floor, |_, _| false);
         let exchange = assembled.exchange(presigned_lambda());
         refused_before_the_handler(&exchange, at);
         let asked = exchange
