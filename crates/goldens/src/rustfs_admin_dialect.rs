@@ -721,6 +721,7 @@ mod metadata_listing_tests;
 mod sigv2_census_tests;
 mod subject_tests;
 mod tests;
+mod zip_sigv2_tests;
 mod zip_token_contract_tests;
 // Crate-visible for its log capture, which the STS secret hygiene proof reuses.
 pub(crate) mod zip_token_tests;

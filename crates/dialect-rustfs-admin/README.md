@@ -41,7 +41,8 @@ authenticated fallback handlers (ADR-0039).
   Each row (precedence 78 and 79, so the admin router's eight keep 80 to 87) carries both query
   rules and stands ahead of the standard listings and of the admin router's bucket `GET` rows.
   Their floor is the standard listing floor (`admin::listing_floor`, ADR-0050), so an anonymous
-  or presigned listing is admitted exactly where `ListObjectsV2` admits one. A host that registers
+  or presigned listing is admitted exactly where `ListObjectsV2` admits one, except that SigV2 is
+  refused under every policy, because SigV2 does not sign `metadata` (ADR-0052). A host that registers
   the standard listings must also register these two: without a handler a request carrying
   `metadata=true` is answered `501` rather than served as a listing without the metadata asked for.
   The handler answers the listing document with each entry's `<UserMetadata>`.
@@ -52,14 +53,20 @@ authenticated fallback handlers (ADR-0039).
   `{id}.zip` segment is one opaque `{+id}` capture (ADR-0040): the handler reads `id` as the whole
   segment, suffix included, and validates it against the token. A minted download URL presented
   with its `?token=` and no header signature is `403` here: ADR-0026 (g) refused admitting the
-  route anonymously, and the bearer scheme it points to is not built yet.
+  route anonymously, and the bearer scheme it points to is not built yet. The download's floor
+  refuses a SigV2 signature under every policy, with or without a token, before any credential
+  lookup (ADR-0052).
+- The STS form endpoint (`POST /` with a form body, `rustfs:StsFormPost`) refuses a SigV2
+  signature, header or presigned, under every policy, before any credential lookup, while SigV4
+  and the unsigned Web Identity form are admitted as ADR-0044 says (ADR-0052, rustfs/gateway#1592).
 
 Every operation is privileged and header-signed only: never anonymous, never presigned, and never
 handed the caller's secret unless its inventory row says RustFS seals a body with it. Its floor
 (`admin::floor`) also requires SigV4 under every policy, so a SigV2 header signature and a request
 admitted by a registered custom scheme are refused before the authorizer, as RustFS refuses SigV2
 on every authenticated custom route (rustfs/gateway#1582). The zip download keeps a floor without
-that requirement because of its bearer token, a recorded difference (rustfs/gateway#1592). The one
+that requirement because of its bearer token, and refuses SigV2 under every policy instead
+(ADR-0052, rustfs/gateway#1592). The one
 exception is RustFS's four OIDC bootstrap routes (`oidc/authorize/{provider_id}`,
 `oidc/callback/{provider_id}`, `oidc/logout`, `oidc/providers`), which admit an anonymous request:
 the floor's per-operation opt-in lists them in the start-up posture report, their action is their
@@ -75,7 +82,7 @@ Beside the claimed rows, the STS endpoint `rustfs:StsFormPost` is handed the cal
 by the generator's form ruling rather than the inventory, whose secret column records only body
 sealing: RustFS's `AssumeRole` compares that secret with a fresh IAM lookup (rustfs/gateway#1587).
 Its handler holds the secret only when a SigV4 header signature covers the form body, which
-carries every parameter (`admin::spec_over_a_signed_body`, ADR-0052). `UNSIGNED-PAYLOAD`,
+carries every parameter (`admin::spec_over_a_signed_body`, ADR-0053). `UNSIGNED-PAYLOAD`,
 presigned and SigV2 requests reach it without the secret, so RustFS's comparison fails closed.
 An anonymous form action has no principal and so no secret.
 

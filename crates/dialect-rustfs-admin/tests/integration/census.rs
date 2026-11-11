@@ -401,8 +401,8 @@ fn every_handler_retained_check_is_recorded() {
 
 /// Positive and negative — every operation the fold declares requires SigV4 under every policy
 /// except the four OIDC bootstrap operations, which admit an anonymous request, and the zip
-/// download, whose bearer claim the requirement would refuse (a recorded difference,
-/// rustfs/gateway#1592); and so do both admin fallbacks, which the fold does not declare. A new
+/// download, whose bearer claim the requirement would refuse and which refuses SigV2 instead
+/// (ADR-0052); and so do both admin fallbacks, which the fold does not declare. A new
 /// admin operation therefore cannot be added without the requirement unless it joins one of
 /// those two named exemptions (rustfs/gateway#1582).
 #[test]
@@ -426,15 +426,13 @@ fn the_zip_download_keeps_its_bearer_claim() {
     assert!(Download::floor().query_bearer_claim().is_some());
 }
 
-/// A record, not a requirement: the zip download's floor does not require SigV4, so it admits a
-/// SigV2 header signature without a token, which legacy RustFS refuses in its access check. The
-/// request is refused later, `403` before the authorizer when a bearer verifier is installed and
-/// by RustFS's handler when none is. This is a known difference tracked on rustfs/gateway#1592,
-/// not a property to preserve: a fix there is expected to change this test.
+/// Negative — the zip download's floor refuses SigV2 under every policy without requiring SigV4,
+/// which closes the difference recorded on rustfs/gateway#1592 (ADR-0052): legacy RustFS refuses
+/// a SigV2 header in its access check, and the floor now refuses it before any credential lookup
+/// rather than leaving it to a later refusal. Every other exempt floor is the OIDC bootstrap's,
+/// which admits SigV2 as RustFS does.
 #[test]
-fn the_zip_download_sigv2_difference_is_recorded() {
-    assert!(
-        !Download::floor().requires_sigv4_under_every_policy(),
-        "rustfs/gateway#1592 is closed by a SigV4 requirement on the download: update this record"
-    );
+fn the_zip_download_refuses_sigv2_without_requiring_sigv4() {
+    assert!(Download::floor().refuses_sigv2_under_every_policy());
+    assert!(!Download::floor().requires_sigv4_under_every_policy());
 }

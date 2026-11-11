@@ -247,9 +247,16 @@ pub const fn presigned_floor(name: &'static str) -> OperationFloor {
 /// anonymous or presigned listing here exactly where it admits one there, and the authorizer
 /// decides it. RustFS's metadata route resolves a signed caller or keeps an unsigned one
 /// anonymous before its bucket listing check, as its S3 listing does. It carries no bearer claim.
+///
+/// One difference from the standard listings' floor: SigV2 is refused under every policy, before
+/// any credential lookup (ADR-0052, rustfs/gateway#1592). SigV2 does not sign `metadata`, so a
+/// SigV2-presigned or captured SigV2 header-signed listing with `metadata=true` appended would
+/// otherwise be served as this listing, disclosing user metadata the signer never asked for.
+/// RustFS serves the SigV2 form; this is a deliberate difference. SigV4 and unsigned requests are
+/// decided exactly as on the standard listings.
 #[must_use]
 pub const fn listing_floor(name: &'static str) -> OperationFloor {
-    OperationFloor::builtin(name, SigService::S3)
+    OperationFloor::builtin(name, SigService::S3).refuse_sigv2_under_every_policy()
 }
 
 /// The `token` query bearer claim of RustFS's minted zip-download URL (ADR-0042): one literal
@@ -262,14 +269,14 @@ pub const ZIP_DOWNLOAD_TOKEN: QueryBearerClaim = QueryBearerClaim::new("token", 
 /// require SigV4 under every policy: that requirement refuses every bearer token, and the registry
 /// refuses the combination. RustFS answers the minted URL before it reads any credential.
 ///
-/// Known difference from legacy RustFS, recorded on rustfs/gateway#1592: this floor admits a
-/// SigV2 header signature that carries no `token`, where RustFS's access check refuses it. The
-/// request is still refused, but later: `403` before the authorizer when a bearer verifier is
-/// installed, because a signed request to a bearer-claimed operation must carry its token, and
-/// by RustFS's handler when none is. It is a later refusal, not an admission.
+/// It refuses SigV2 under every policy instead, at the floor and before any credential lookup,
+/// with or without a token (ADR-0052, rustfs/gateway#1592): RustFS's access check refuses SigV2
+/// on this route once credentials are presented, and the bearer path reads no AWS credential.
 #[must_use]
 pub const fn zip_token_floor(name: &'static str) -> OperationFloor {
-    OperationFloor::custom(name, SigService::S3).with_query_bearer_claim(ZIP_DOWNLOAD_TOKEN)
+    OperationFloor::custom(name, SigService::S3)
+        .refuse_sigv2_under_every_policy()
+        .with_query_bearer_claim(ZIP_DOWNLOAD_TOKEN)
 }
 
 /// The floor of an anonymous bootstrap operation (ADR-0026 (f), ADR-0032): header-signed or

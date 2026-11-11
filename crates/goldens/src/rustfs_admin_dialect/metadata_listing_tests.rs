@@ -22,16 +22,22 @@
 //! refused before the handler when the authorizer — the bucket policy — does not allow it, or
 //! allows only another action; a presigned listing refused without asking on the default floor
 //! and asked on the profile floor; `metadata=true` appended to a SigV4 presigned standard listing
-//! refused without asking; the SigV2 property, both directions, presigned and header-signed (an
-//! appended `metadata=true` is outside SigV2's signed keys and selects the metadata listing for the
-//! signer wherever that SigV2 form is admitted, ADR-0050); and a trailing-slash bucket path.
+//! refused without asking; the SigV2 refusal (ADR-0052): every SigV2 form — presigned or
+//! header-signed, with `metadata=true` signed or appended after signing, which SigV2's signed keys
+//! do not cover — refused `403 AccessDenied` without asking on every floor, where RustFS serves it;
+//! on the standard listings, which keep SigV2, the control that this file's SigV2 signers produce
+//! requests that are served as the signer, and that a signed key added or a forged signature is
+//! still refused; and a trailing-slash bucket path.
 //! NOT responsible for: routing without a service (the dialect crate's `metadata_listing`), the
 //! admin router's eight rows (`super::extension_tests`), or the harness (`super`).
 //! Upstream: `super`, `super::extension_tests`. Downstream: nothing.
 
 use bytes::Bytes;
 use http::{HeaderValue, Method, Request};
-use rustfs_gateway::SecurityFloor;
+use std::sync::Arc;
+
+use rustfs_gateway::dto::{ListObjectVersions, ListObjectVersionsOutput, ListObjectsV2, ListObjectsV2Output};
+use rustfs_gateway::{Handler, HandlerResult, Req, Resp, SecurityFloor};
 use rustfs_gateway_dialect_rustfs_admin::{EXTENSION_ROUTES, ExtensionRouteRecord};
 use rustfs_gateway_sig::{RawQuery, RequestNow, SigV2Mode, SigV2Signer, SigV2StringToSignSpec};
 
@@ -265,79 +271,151 @@ fn asked_as_the_signer(exchange: &Exchange, operation: &str, action: &str, at: &
     );
 }
 
-/// Positive and negative — a SigV2 presigned listing is refused without asking on the default
-/// floor, which accepts no SigV2 presigned URL, and asked its listing action for the presigning
-/// caller on the RustFS profile's floor, which accepts them on every standard operation: exactly
-/// where a SigV2 presigned standard listing is admitted (`SecurityFloor::enforce_scheme_allowed`
-/// asks the same four questions of both floors). RustFS's metadata route takes the credential
-/// s3s verified, SigV2 presigned included, and refuses no signature family itself (ADR-0050).
+/// Negative — a SigV2 presigned metadata listing is refused `403 AccessDenied` without asking on
+/// both floors, the RustFS profile's included, which admits a SigV2 presigned standard listing
+/// (ADR-0052). Before rustfs/gateway#1592 the profile floor asked the presigner's listing action
+/// here, exactly as for a standard listing (ADR-0050), and RustFS still serves it: a deliberate
+/// difference, because SigV2 does not sign `metadata`.
 #[test]
-fn a_sigv2_presigned_listing_is_admitted_exactly_where_a_standard_one_is() {
-    let refusing = assemble_on(SecurityFloor::new(), |_, _| true);
-    let admitting = assemble_on(rustfs_profile_floor(), |_, _| true);
-    for record in listings() {
-        let request = || sigv2_presigned(&query(record), "");
-        refused_without_asking(&refusing.exchange(request()), record.operation);
-        asked_as_the_signer(&admitting.exchange(request()), record.operation, actions(record).0, "profile");
-    }
-}
-
-/// Positive and negative — SigV2 signs only its fixed sub-resource keys, and neither `metadata` nor
-/// `list-type` is one. So `metadata=true` appended to a SigV2 presigned listing URL is covered by
-/// nothing the signature covers: on the RustFS profile's floor the request becomes the metadata
-/// listing, asked the listing action on the same bucket for the presigner, and the holder of the
-/// URL obtains every object's user metadata, which the presigner never signed for (ADR-0050; the
-/// SigV2 refusal planned after rustfs/gateway#1592 removes it). On the default floor, which accepts
-/// no SigV2 presigned URL, the same request is refused without asking.
-#[test]
-fn metadata_true_appended_to_a_sigv2_presigned_listing_is_admitted_only_where_sigv2_presigned_is() {
-    let refusing = assemble_on(SecurityFloor::new(), |_, _| true);
-    let admitting = assemble_on(rustfs_profile_floor(), |_, _| true);
-    for (signed, operation, action) in [
-        ("list-type=2", LISTINGS[1], "s3:ListBucket"),
-        ("versions", LISTINGS[0], "s3:ListBucketVersions"),
-    ] {
-        let request = || sigv2_presigned(signed, "&metadata=true");
-        asked_as_the_signer(&admitting.exchange(request()), operation, action, signed);
-        refused_without_asking(&refusing.exchange(request()), signed);
-    }
-}
-
-/// Positive — the header form of the same edit: a captured SigV2 header-signed listing, rewritten
-/// with `metadata=true` inside the clock-skew window, still verifies, because the header string to
-/// sign covers the same sub-resource keys only. SigV2 header authentication is accepted by the
-/// default floor (`SigV2Policy::HeaderOnly`, `docs/security-model.md`) as well as by the RustFS
-/// profile's, so on both the request becomes the metadata listing, asked the listing action for the
-/// signer (ADR-0050; removed by the SigV2 refusal planned after rustfs/gateway#1592).
-#[test]
-fn metadata_true_appended_to_a_sigv2_header_signed_listing_is_the_signers_metadata_listing() {
+fn n_a_sigv2_presigned_metadata_listing_is_refused_on_every_floor() {
     for (at, floor) in floors() {
         let assembled = assemble_on(floor, |_, _| true);
-        for (signed, operation, action) in [
-            ("list-type=2", LISTINGS[1], "s3:ListBucket"),
-            ("versions", LISTINGS[0], "s3:ListBucketVersions"),
-        ] {
-            let request = sigv2_header_signed(signed, "&metadata=true");
-            asked_as_the_signer(&assembled.exchange(request), operation, action, &format!("{at} {signed}"));
+        for record in listings() {
+            let exchange = assembled.exchange(sigv2_presigned(&query(record), ""));
+            refused_at_the_floor(&exchange, &format!("{at} {}", record.operation));
         }
     }
 }
 
-/// Negative — the header-signed edit is still bounded by what SigV2 does sign: adding the signed
-/// `versions` key after signing, or a forged `Authorization`, is refused without asking on both
-/// floors.
+/// Negative — SigV2 signs only its fixed sub-resource keys, and neither `metadata` nor
+/// `list-type` is one, so `metadata=true` appended to a SigV2 presigned listing URL is covered by
+/// nothing the signature covers. Until rustfs/gateway#1592 the RustFS profile's floor turned that
+/// URL into the metadata listing for the presigner, disclosing every object's user metadata, which
+/// the presigner never signed (ADR-0050). The metadata listing's floor now refuses SigV2 under every
+/// policy (ADR-0052): the request is refused `403 AccessDenied` without asking on both floors.
 #[test]
-fn n_a_sigv2_header_signed_listing_with_a_signed_key_added_is_refused_without_asking() {
+fn n_metadata_true_appended_to_a_sigv2_presigned_listing_is_refused_on_every_floor() {
     for (at, floor) in floors() {
         let assembled = assemble_on(floor, |_, _| true);
-        let added = sigv2_header_signed("list-type=2", "&versions&metadata=true");
-        refused_without_asking(&assembled.exchange(added), &format!("{at}: versions added"));
-        let mut forged = sigv2_header_signed("list-type=2", "&metadata=true");
+        for signed in ["list-type=2", "versions"] {
+            let exchange = assembled.exchange(sigv2_presigned(signed, "&metadata=true"));
+            refused_at_the_floor(&exchange, &format!("{at} {signed}"));
+        }
+    }
+}
+
+/// Negative — the header form of the same edit: a captured SigV2 header-signed listing rewritten
+/// with `metadata=true` inside the clock-skew window, which still verifies because the header
+/// string to sign covers the same sub-resource keys only, and a header-signed request that signed
+/// `metadata=true` itself. Until rustfs/gateway#1592 both became the signer's metadata listing on
+/// both floors (ADR-0050); now both are refused `403 AccessDenied` without asking (ADR-0052). The
+/// correctly signed one, whose signer serves a standard listing in
+/// `the_sigv2_helpers_sign_standard_listings_that_are_served_as_the_signer`, shows the refusal is
+/// the floor's, not a signature failure.
+#[test]
+fn n_a_sigv2_header_signed_metadata_listing_is_refused_on_every_floor() {
+    for (at, floor) in floors() {
+        let assembled = assemble_on(floor, |_, _| true);
+        for signed in ["list-type=2", "versions"] {
+            let appended = sigv2_header_signed(signed, "&metadata=true");
+            refused_at_the_floor(&assembled.exchange(appended), &format!("{at} {signed} appended"));
+            let covered = sigv2_header_signed(&format!("{signed}&metadata=true"), "");
+            refused_at_the_floor(&assembled.exchange(covered), &format!("{at} {signed} signed"));
+        }
+    }
+}
+
+/// The floor's refusal: `403 AccessDenied` before the authorizer and before any handler.
+fn refused_at_the_floor(exchange: &Exchange, at: &str) {
+    refused_without_asking(exchange, at);
+    assert!(exchange.body.contains("<Code>AccessDenied</Code>"), "{at}: {}", exchange.body);
+}
+
+/// The standard listings, which do not refuse SigV2: they answer an empty listing.
+struct StandardListing;
+
+impl Handler<ListObjectsV2> for StandardListing {
+    async fn call(&self, _request: Req<ListObjectsV2>) -> HandlerResult<ListObjectsV2> {
+        Ok(Resp::new(ListObjectsV2Output::default()))
+    }
+}
+
+impl Handler<ListObjectVersions> for StandardListing {
+    async fn call(&self, _request: Req<ListObjectVersions>) -> HandlerResult<ListObjectVersions> {
+        Ok(Resp::new(ListObjectVersionsOutput::default()))
+    }
+}
+
+/// The dialect's assembly behind `floor`, with the two standard listings registered as well.
+fn with_standard_listings(floor: SecurityFloor) -> super::Assembled {
+    super::assemble_installing(
+        floor,
+        |_, _| true,
+        false,
+        None,
+        |builder| {
+            builder
+                .register::<ListObjectsV2, _>(Arc::new(StandardListing))
+                .register::<ListObjectVersions, _>(Arc::new(StandardListing))
+        },
+    )
+}
+
+/// The route question `exchange` asked, as `(operation, caller)`, after checking it was answered `200`.
+fn served_to(exchange: &Exchange, at: &str) -> (String, Option<String>) {
+    assert_eq!(exchange.status, 200, "{at}: {}", exchange.body);
+    let asked = exchange
+        .asked
+        .iter()
+        .find(|asked| asked.stage == "route")
+        .unwrap_or_else(|| panic!("{at}: no route question"));
+    (asked.operation.clone(), asked.caller.clone())
+}
+
+/// Positive — the control for this file's SigV2 helpers: the same signers, on the standard
+/// listings, which do not refuse SigV2, produce requests that are verified as the signer and
+/// served. A header-signed listing is served on both floors (`SigV2Policy::HeaderOnly` admits it),
+/// and a presigned one on the RustFS profile's floor. So the refusals above are the metadata
+/// listings' floor (ADR-0052), not a fixture that fails to sign.
+#[test]
+fn the_sigv2_helpers_sign_standard_listings_that_are_served_as_the_signer() {
+    let signer = Some(ACCESS_KEY.to_owned());
+    for (at, floor) in floors() {
+        let assembled = with_standard_listings(floor);
+        for (signed, operation) in [("list-type=2", "ListObjectsV2"), ("versions", "ListObjectVersions")] {
+            let exchange = assembled.exchange(sigv2_header_signed(signed, ""));
+            assert_eq!(served_to(&exchange, &format!("{at} {signed}")), (operation.to_owned(), signer.clone()));
+        }
+    }
+    let assembled = with_standard_listings(rustfs_profile_floor());
+    let exchange = assembled.exchange(sigv2_presigned("list-type=2", ""));
+    assert_eq!(served_to(&exchange, "presigned"), ("ListObjectsV2".to_owned(), signer));
+}
+
+/// Negative — what SigV2 does sign still binds, shown on the standard listings, which reach the
+/// signature check: the signed `versions` key added after signing, or a well-formed signature from
+/// another secret, is refused `SignatureDoesNotMatch` without asking on both floors. On the metadata
+/// listings the floor refuses every SigV2 request before the signature is computed (ADR-0052), so
+/// this property is pinned where it can still be observed.
+#[test]
+fn n_a_sigv2_header_signed_standard_listing_with_a_signed_key_added_or_forged_is_refused() {
+    for (at, floor) in floors() {
+        let assembled = with_standard_listings(floor);
+        let added = sigv2_header_signed("list-type=2", "&versions");
+        let mut forged = sigv2_header_signed("list-type=2", "");
         forged.headers_mut().insert(
             http::header::AUTHORIZATION,
-            HeaderValue::from_str(&format!("AWS {ACCESS_KEY}:AAAA")).expect("a value"),
+            HeaderValue::from_str(&format!("AWS {ACCESS_KEY}:AAAAAAAAAAAAAAAAAAAAAAAAAAA=")).expect("a value"),
         );
-        refused_without_asking(&assembled.exchange(forged), &format!("{at}: forged"));
+        for (case, request) in [("versions added", added), ("forged", forged)] {
+            let exchange = assembled.exchange(request);
+            refused_without_asking(&exchange, &format!("{at}: {case}"));
+            assert!(
+                exchange.body.contains("<Code>SignatureDoesNotMatch</Code>"),
+                "{at}: {case}: {}",
+                exchange.body
+            );
+        }
     }
 }
 

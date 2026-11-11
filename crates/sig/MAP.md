@@ -47,6 +47,7 @@ Agent entry point for SigV2/SigV4 parsing, canonicalization and verification.
 | `tests/post_object_form.rs` | `c-lim-0002`: the POST form's policy is proved before its file is read, and the file is read under `content-length-range`. | The POST Object ordering or its ceiling composition changes. |
 | `tests/post_form_replay.rs` | Replays `fuzz/seeds/post_form/` and 20,000 seed mutations through the `post_form` property: both form grammars, every form ceiling, and the POST policy parsers' invariants. | Change a form grammar rule or a POST policy key rule, or add a minimised fuzz regression seed. |
 | `tests/sig_v2_admission.rs` | P2-06 wiring evidence at the floor: SigV2 is never sealed for SigV4 and never anonymous. | Change what `SecurityFloor::admit` does with a SigV2 request. |
+| `tests/sigv2_refused_floor.rs` | ADR-0052 evidence: `refuse_sigv2_under_every_policy` refuses every SigV2 shape before the parse, and leaves SigV4, anonymous, bearer and custom admissions alone. | Change the SigV2 refusal or how it composes with another floor rule. |
 | `tests/compile_fail.rs` | Trybuild harness for compile-time proof boundaries. | A private witness or verified type becomes constructible. |
 | `tests/security_floor*.rs` | P2-04 H1-H7 runtime evidence. | Security-floor admission or scheme policy changes. |
 | `tests/*.rs` | Remaining public verification and negative matrices. | Change any signature contract. |

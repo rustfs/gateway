@@ -18,10 +18,10 @@
 //!
 //! Responsible for: what the STS handler holds through an assembled service whose authenticator
 //! hands the secret over — the caller's own bytes when a SigV4 header signature covers the body,
-//! whatever the action; nothing for `UNSIGNED-PAYLOAD`, a presigned form or SigV2, whose body the
-//! signature does not cover (SigV2 also a known divergence that rustfs/gateway#1592 removes);
-//! nothing for an anonymous form action; no handler at all for a query-authenticated
-//! `AssumeRole`; nothing without the authenticator's hand-off — that an operation which
+//! whatever the action; nothing for `UNSIGNED-PAYLOAD` or a presigned SigV4 form, whose body the
+//! signature does not cover; no handler at all for SigV2 (ADR-0052) or a query-authenticated
+//! `AssumeRole`; nothing for an anonymous form action; nothing without the authenticator's
+//! hand-off — that an operation which
 //! did not opt in still holds nothing in the same assembly, that the start-up posture names the
 //! STS endpoint among the holders, and that no log event, error body or `Debug` rendering carries
 //! the secret.
@@ -152,8 +152,7 @@ fn exchange(sent: &Sent, hand_off: bool, refuse: bool) -> (u16, String, Option<H
 
 /// SigV4 header signatures that cover the form body: the `sts`-scoped signature over the body's own
 /// digest, which the authenticator computes when no `x-amz-content-sha256` is sent, and a declared
-/// digest the facade compares with the body. SigV2 is pinned apart, as a known divergence
-/// (rustfs/gateway#1592).
+/// digest the facade compares with the body. SigV2 is refused on this route (ADR-0052).
 const SIGNED: [Signing; 2] = [
     Signing::Header {
         service: "sts",
@@ -185,23 +184,21 @@ fn a_header_signed_assume_role_hands_its_handler_the_callers_secret() {
     }
 }
 
-/// KNOWN DIVERGENCE, removed by rustfs/gateway#1592 — RustFS refuses SigV2 on this route; the
-/// gateway still admits a SigV2 header-signed `AssumeRole` and a SigV2-presigned Web Identity form.
-/// SigV2 does not sign the form body, so neither handler holds the caller's secret, and RustFS's
-/// comparison fails closed as it did before the opt-in. When #1592 refuses SigV2 on the STS form
-/// floor, both requests stop before the handler and this case must be flipped to assert the
-/// refusal.
+/// Negative — the former known divergence, closed by rustfs/gateway#1592 (ADR-0052): RustFS refuses
+/// SigV2 on this route, and so does the STS form floor now, before any credential lookup. A SigV2
+/// header-signed `AssumeRole` and a SigV2-presigned Web Identity form are both `403 AccessDenied`,
+/// so no handler runs and no secret is handed over, and the answer does not carry it.
 #[test]
-fn known_divergence_until_1592_a_sigv2_form_request_reaches_the_handler_without_the_secret() {
+fn n_a_sigv2_form_request_is_refused_before_the_handler() {
     for sent in [
         Sent::new(Signing::V2Header { secret: STS_SECRET }),
         Sent::new(Signing::V2Presigned).body(Bytes::from_static(WEB_IDENTITY)),
     ] {
         let (status, body, held) = exchange(&sent, true, false);
-        assert_eq!(status, 200, "{sent:?}: {body}");
-        let held = held.expect("today the STS handler runs");
-        assert!(held.principal, "{sent:?}");
-        assert_eq!(held.secret, None, "{sent:?}: SigV2 signs no body, so no secret");
+        assert_eq!(status, 403, "{sent:?}: {body}");
+        assert!(body.contains("<Code>AccessDenied</Code>"), "{sent:?}: {body}");
+        assert!(held.is_none(), "{sent:?}: no handler runs, so no secret is handed over");
+        assert!(!body.contains(SECRET_KEY), "{sent:?}: {body}");
     }
 }
 

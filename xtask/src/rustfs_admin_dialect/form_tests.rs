@@ -91,7 +91,7 @@ fn a_form_route_is_planned_and_rendered_behind_its_form_claim() {
         "pub const NAME: &str = \"rustfs:StsFormPost\";",
         "AuthRequirement::new(\"rustfs:AssumeRoleHandle\", ResourceShape::Service)",
         "    path: \"/\",\n    reason:",
-        "OperationFloor::builtin(NAME, SigService::Sts).allow_anonymous_after_listing_in_the_posture_report()",
+        "OperationFloor::builtin(NAME, SigService::Sts)\n    .allow_anonymous_after_listing_in_the_posture_report()\n    .refuse_sigv2_under_every_policy();",
         "//! `AssumeRole` additionally requires that credential in the Authorization header.",
         "const REQUEST_BODY: RequestBodyMode = RequestBodyMode::Full;",
         "selector: \"FormClaim(POST \\\"/\\\")\",",

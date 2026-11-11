@@ -223,7 +223,7 @@ operation at one or more `ClaimedRow { template, selector }` inside it.
   header signature covers its body (a declared digest the facade compares, the STS body digest
   the authenticator computes, or a chunk-signature chain), for an operation whose body carries
   what the secret authorises; `UNSIGNED-PAYLOAD`, presigned and SigV2 requests reach its handler
-  without the secret, under either scope (ADR-0052).
+  without the secret, under either scope (ADR-0053).
 - **Presigned.** A dialect operation's `OperationFloor::custom` admits header signatures only; a
   presigned admin request is a `403` before the authorizer. Opting one operation in is
   `OperationFloor::allow_presigned`, which the posture report lists, and nothing does until a

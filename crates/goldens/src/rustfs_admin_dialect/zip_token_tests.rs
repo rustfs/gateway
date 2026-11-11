@@ -87,7 +87,7 @@ pub(super) fn floors() -> [(&'static str, SecurityFloor); 2] {
 }
 
 /// [`assemble_with_bearer_verifier`] behind `floor`.
-fn with_verifier(
+pub(super) fn with_verifier(
     floor: SecurityFloor,
     policy: impl Fn(&str, &str) -> bool + Send + Sync + 'static,
     verifier: impl BearerTokenVerifier,

@@ -439,10 +439,11 @@ fn shape(floor: &OperationFloor) -> String {
     )
 }
 
-/// Positive and negative — each operation's floor is exactly the floor of the standard listing it
-/// stands in front of: anonymous and presigned requests are refused under the default floor and
-/// admitted to the authorizer where a deployment delegates them, as for `ListObjectsV2` and
-/// `ListObjectVersions`; never privileged, so never the admin router's header-only floor.
+/// Positive and negative — each operation's floor is the floor of the standard listing it stands
+/// in front of, plus the SigV2 refusal (ADR-0052): anonymous and presigned requests are refused
+/// under the default floor and admitted to the authorizer where a deployment delegates them, as
+/// for `ListObjectsV2` and `ListObjectVersions`; never privileged, so never the admin router's
+/// header-only floor; and SigV2 is refused here, while the standard listings keep admitting it.
 #[test]
 fn each_metadata_listing_floor_is_exactly_its_standard_listings_floor() {
     let v2 = <ListObjectsV2WithMetadata as Operation>::floor();
@@ -455,6 +456,16 @@ fn each_metadata_listing_floor_is_exactly_its_standard_listings_floor() {
         assert!(!floor.privileged() && !floor.allows_anonymous());
         assert_ne!(shape(floor), shape(&rustfs_gateway_dialect_rustfs_admin::admin::floor("x")));
         assert_ne!(shape(floor), shape(&rustfs_gateway_dialect_rustfs_admin::admin::presigned_floor("x")));
+        // ADR-0052: the one difference from the standard listings' floor — SigV2 does not sign
+        // `metadata`, so it is refused here under every policy, and nowhere else on these two.
+        assert!(floor.refuses_sigv2_under_every_policy(), "{}", floor.name());
+        assert!(!floor.requires_sigv4_under_every_policy(), "{}", floor.name());
+    }
+    for standard in [
+        <ListObjectsV2 as Operation>::floor(),
+        <ListObjectVersions as Operation>::floor(),
+    ] {
+        assert!(!standard.refuses_sigv2_under_every_policy(), "{}", standard.name());
     }
     assert_eq!(v2.name(), V2);
     assert_eq!(versions.name(), VERSIONS);

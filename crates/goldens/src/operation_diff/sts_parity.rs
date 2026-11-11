@@ -35,10 +35,17 @@
 //! added to the signing services, rustfs/rustfs `95268a3b9` `rustfs/src/server/http.rs:166-173`), its
 //! virtual-host domain, one credential, and a route standing for RustFS's admin router on these
 //! requests: `is_match` is RustFS's STS predicate (`rustfs/src/server/layer.rs:878-886`), and
-//! `check_access` lets an unsigned STS request through and any signed one
-//! (`rustfs/src/admin/router.rs:3266-3330`). RustFS's unsigned `x-amz-*` guard in the same check is
-//! not restated: no request here carries an unsigned `x-amz-*` header, and the gateway's guard has
-//! its own parity proofs (rustfs/gateway#1120).
+//! `check_access` lets an unsigned STS request through, refuses a credentialed one signed with
+//! SigV2, in the `Authorization` header or the query, `AccessDenied`, and lets every other signed
+//! one through. The SigV2 refusal is the one RustFS's router applies to its custom routes, the STS
+//! form included, because SigV2 covers neither their query arguments nor their body:
+//! <https://github.com/rustfs/rustfs/blob/443e8afee194fe38b32d62a9289a99c1f703715c/rustfs/src/admin/router.rs#L3391-L3421>
+//! is the refusal, and `#L3560-L3620` the access check that applies it once credentials are
+//! present (rustfs/gateway#1592, ADR-0052). Its third arm, a credentialed `multipart/form-data`
+//! POST, is not restated: such a request is not the STS form and never reaches this route. RustFS's
+//! unsigned `x-amz-*` guard in the same check is not restated either: no request here carries an
+//! unsigned `x-amz-*` header, and the gateway's guard has its own parity proofs
+//! (rustfs/gateway#1120).
 
 use std::sync::{Arc, Mutex};
 
@@ -62,6 +69,7 @@ use super::s3s as legacy;
 mod sec1;
 mod secret;
 mod sent;
+mod sigv2;
 
 const FORM: &str = "application/x-www-form-urlencoded";
 const REGION: &str = "us-east-1";
@@ -128,6 +136,23 @@ fn is_sts_query_request(method: &Method, uri: &http::Uri, headers: &HeaderMap) -
             .is_some_and(|value| value.trim().eq_ignore_ascii_case(FORM))
 }
 
+/// Whether SigV2 signed `req`: an `Authorization` value in its scheme, or a `Signature` query key.
+/// RustFS decodes the query key first; every fixture here spells it literally, so this does not.
+fn signed_with_sigv2(req: &legacy::S3Request<legacy::Body>) -> bool {
+    let header = req
+        .headers
+        .get_all(http::header::AUTHORIZATION)
+        .iter()
+        .any(|value| value.as_bytes().starts_with(b"AWS "));
+    let query = req
+        .uri
+        .query()
+        .unwrap_or_default()
+        .split('&')
+        .any(|pair| pair.split('=').next() == Some("Signature"));
+    header || query
+}
+
 /// RustFS's admin router on these requests: the STS predicate, the STS branch of its access check,
 /// and a handler that records what it was handed.
 struct LegacyStsRoute {
@@ -152,15 +177,20 @@ impl legacy::route::S3Route for LegacyStsRoute {
         'life1: 'future,
         Self: 'future,
     {
-        // `router.rs:3320-3329`: an unsigned STS request is let through, and so is any signed one.
+        // An unsigned STS request is let through; a signed one is let through unless SigV2 signed
+        // it, which RustFS refuses on its custom routes (see the module documentation).
         let sts = is_sts_query_request(&req.method, &req.uri, &req.headers);
-        let result = if req.credentials.is_none() && !sts {
-            Err(legacy::S3Error::with_message(
+        let result = match (&req.credentials, sts) {
+            (None, true) => Ok(()),
+            (None, false) => Err(legacy::S3Error::with_message(
                 legacy::S3ErrorCode::AccessDenied,
                 "Signature is required".to_owned(),
-            ))
-        } else {
-            Ok(())
+            )),
+            (Some(_), _) if signed_with_sigv2(req) => Err(legacy::S3Error::with_message(
+                legacy::S3ErrorCode::AccessDenied,
+                "Header or query Signature Version 4 is required for this operation".to_owned(),
+            )),
+            (Some(_), _) => Ok(()),
         };
         Box::pin(async move { result })
     }
@@ -295,34 +325,61 @@ fn gateway(now: RequestNow, handed: &Arc<Mutex<Option<Handed>>>, asked: &Asked) 
 
 /// The same assembly, before the test selects its recording or refusing handler.
 fn gateway_builder(now: RequestNow, asked: &Asked) -> ServiceBuilder {
-    gateway_builder_with(now, asked, authenticator())
+    let credentials = Credentials::new(ACCESS_KEY, SECRET_KEY.as_bytes()).expect("a fixture credential");
+    gateway_builder_on(now, asked, rustfs_profile_floor(), Arc::new(StaticCredentials::new().with(credentials)))
+}
+
+/// The RustFS profile's security floor, as `compat/sut` assembles it.
+fn rustfs_profile_floor() -> SecurityFloor {
+    SecurityFloor::new()
+        .delegate_anonymous_to_authorizer_after_listing_in_the_posture_report()
+        .enable_sigv2_presigned_compatibility()
+        .with_presigned_expiry_rule(PresignedExpiryRule::LegacyRustfs)
+        .admit_presigned_on_every_standard_operation_after_listing_in_the_posture_report()
+        .recognize_signatures_as_legacy_rustfs()
+}
+
+/// [`gateway_builder`] behind `floor`, resolving credentials through `provider`.
+fn gateway_builder_on(
+    now: RequestNow,
+    asked: &Asked,
+    floor: SecurityFloor,
+    provider: Arc<dyn rustfs_gateway::CredentialProvider>,
+) -> ServiceBuilder {
+    gateway_builder_authenticating(now, asked, floor, authenticator_over(provider))
 }
 
 /// The RustFS profile's authenticator over the shared credential, handing no secret over.
 fn authenticator() -> SigV4Authenticator {
     let credentials = Credentials::new(ACCESS_KEY, SECRET_KEY.as_bytes()).expect("a fixture credential");
-    SigV4Authenticator::new(
-        Arc::new(StaticCredentials::new().with(credentials)),
-        RegionSet::new([REGION]).expect("a region"),
-    )
-    .accept_any_signing_region()
-    .accept_empty_signing_region()
-    .refuse_unreadable_signing_regions_after_verification()
-    .accept_signing_regions_of_any_length()
-    .verify_paths_as_legacy_rustfs()
-    .accept_legacy_rustfs_signing_services()
-    .answer_credential_scope_refusals_as_legacy_rustfs()
-    .read_signed_headers_as_legacy_rustfs()
+    authenticator_over(Arc::new(StaticCredentials::new().with(credentials)))
 }
 
-/// [`gateway_builder`] with `authenticator`.
+/// The RustFS profile's authenticator, resolving credentials through `provider`.
+fn authenticator_over(provider: Arc<dyn rustfs_gateway::CredentialProvider>) -> SigV4Authenticator {
+    SigV4Authenticator::new(provider, RegionSet::new([REGION]).expect("a region"))
+        .accept_any_signing_region()
+        .accept_empty_signing_region()
+        .refuse_unreadable_signing_regions_after_verification()
+        .accept_signing_regions_of_any_length()
+        .verify_paths_as_legacy_rustfs()
+        .accept_legacy_rustfs_signing_services()
+        .answer_credential_scope_refusals_as_legacy_rustfs()
+        .read_signed_headers_as_legacy_rustfs()
+}
+
+/// [`gateway_builder`] with `authenticator`, behind the RustFS profile's floor.
 fn gateway_builder_with(now: RequestNow, asked: &Asked, authenticator: SigV4Authenticator) -> ServiceBuilder {
-    let floor = SecurityFloor::new()
-        .delegate_anonymous_to_authorizer_after_listing_in_the_posture_report()
-        .enable_sigv2_presigned_compatibility()
-        .with_presigned_expiry_rule(PresignedExpiryRule::LegacyRustfs)
-        .admit_presigned_on_every_standard_operation_after_listing_in_the_posture_report()
-        .recognize_signatures_as_legacy_rustfs();
+    gateway_builder_authenticating(now, asked, rustfs_profile_floor(), authenticator)
+}
+
+/// The assembly behind `floor`, authenticating with `authenticator`.
+fn gateway_builder_authenticating(
+    now: RequestNow,
+    asked: &Asked,
+    floor: SecurityFloor,
+    authenticator: SigV4Authenticator,
+) -> ServiceBuilder {
     let dialect = rustfs_admin_dialect().expect("the generated record and declarations agree");
     verifying_at(ServiceBuilder::new(), now)
         .authenticator(authenticator)
@@ -403,8 +460,9 @@ fn handed(caller: Option<&str>, sent: &Sent) -> Option<Handed> {
     })
 }
 
-/// Header signatures preserve legacy parity; ordinary AssumeRole query credentials are refused
-/// by the gateway under ADR-0044. The legacy observations remain explicit for every signing mode.
+/// SigV4 header signatures preserve legacy parity; ordinary AssumeRole SigV4 query credentials
+/// are refused by the gateway under ADR-0044; SigV2, header or presigned, is refused by both
+/// stacks under ADR-0052. The legacy observations remain explicit for every signing mode.
 #[test]
 fn ordinary_assume_role_preserves_header_modes_and_refuses_query_credentials() {
     for signing in [
@@ -442,10 +500,13 @@ fn ordinary_assume_role_preserves_header_modes_and_refuses_query_credentials() {
     ] {
         let sent = Sent::new(signing);
         let (legacy, gateway, _) = both(&sent);
+        if refuses_sigv2(&sent, &legacy, &gateway) {
+            continue;
+        }
         assert_eq!(legacy.status, 200);
         assert!(legacy.handed == handed(Some(ACCESS_KEY), &sent));
         assert!(!legacy.identified);
-        if matches!(signing, Signing::Presigned { .. } | Signing::V2Presigned) {
+        if matches!(signing, Signing::Presigned { .. }) {
             assert_eq!(gateway.status, 403);
             assert_eq!(gateway.code.as_deref(), Some("AccessDenied"));
             assert!(gateway.handed.is_none());
@@ -453,6 +514,20 @@ fn ordinary_assume_role_preserves_header_modes_and_refuses_query_credentials() {
             assert!(gateway == legacy, "header authentication retains the legacy result");
         }
     }
+}
+
+/// For a SigV2-signed `sent`, checks that both stacks refused it `403 AccessDenied` and ran no
+/// handler (ADR-0052), and answers `true`; answers `false` for any other signing.
+fn refuses_sigv2(sent: &Sent, legacy: &Answered, gateway: &Answered) -> bool {
+    if !matches!(sent.signing(), Signing::V2Header { .. } | Signing::V2Presigned) {
+        return false;
+    }
+    for (stack, answer) in [("legacy", legacy), ("gateway", gateway)] {
+        assert_eq!(answer.status, 403, "{stack}: {sent:?}: {answer:?}");
+        assert_eq!(answer.code.as_deref(), Some("AccessDenied"), "{stack}: {sent:?}: {answer:?}");
+        assert!(answer.handed.is_none(), "{stack}: {sent:?}: {answer:?}");
+    }
+    true
 }
 
 /// Anonymous Web Identity and other downstream action contracts retain parity; ordinary
@@ -489,7 +564,8 @@ fn anonymous_form_admission_obeys_the_decoded_action_contract() {
 }
 
 /// The STS route retains its host, query and media-type predicate. Its ordinary-action
-/// admission and claimed SigV2 canonical resource follow ADR-0044 after that route is selected.
+/// admission follows ADR-0044 after that route is selected, and SigV2 is refused on it by both
+/// stacks (ADR-0052).
 #[test]
 fn the_sts_endpoint_is_taken_on_every_host_and_query_and_media_type_spelling() {
     let signed = Signing::Header {
@@ -517,10 +593,12 @@ fn the_sts_endpoint_is_taken_on_every_host_and_query_and_media_type_spelling() {
         .host("photos.example.test"),
     ] {
         let (legacy, gateway, _) = both(&sent);
+        if refuses_sigv2(&sent, &legacy, &gateway) {
+            continue;
+        }
         assert_eq!(legacy.status, 200);
         assert!(legacy.handed.is_some());
         let expected_code = match sent.signing() {
-            Signing::V2Header { .. } | Signing::V2Presigned => Some("SignatureDoesNotMatch"),
             Signing::Anonymous | Signing::Presigned { .. } => Some("AccessDenied"),
             _ => None,
         };
@@ -535,7 +613,7 @@ fn the_sts_endpoint_is_taken_on_every_host_and_query_and_media_type_spelling() {
 }
 
 /// Negative — ordinary AssumeRole on a virtual host remains subject to its action-specific
-/// credential contract and declared-request canonical resource (ADR-0044).
+/// credential contract (ADR-0044); a SigV2 presigned one is refused by both stacks (ADR-0052).
 #[test]
 fn ordinary_assume_role_on_a_virtual_host_refuses_query_credentials() {
     for signing in [
@@ -550,15 +628,13 @@ fn ordinary_assume_role_on_a_virtual_host_refuses_query_credentials() {
             .query("delete")
             .body(Bytes::from_static(b"Action=AssumeRole&Version=2011-06-15&DurationSeconds=43200"));
         let (legacy, gateway, _) = both(&sent);
+        if refuses_sigv2(&sent, &legacy, &gateway) {
+            continue;
+        }
         assert_eq!(legacy.status, 200);
         assert!(legacy.handed == handed(Some(ACCESS_KEY), &sent));
         assert_eq!(gateway.status, 403);
-        let code = if matches!(signing, Signing::V2Presigned) {
-            "SignatureDoesNotMatch"
-        } else {
-            "AccessDenied"
-        };
-        assert_eq!(gateway.code.as_deref(), Some(code));
+        assert_eq!(gateway.code.as_deref(), Some("AccessDenied"));
         assert!(gateway.handed.is_none());
     }
 }
@@ -582,8 +658,12 @@ fn n_a_repeated_content_type_is_refused_before_routing_where_legacy_rustfs_serve
     assert!(asked.is_empty(), "{asked:?}");
 }
 
-/// Negative — a forged header, presigned or SigV2 signature is refused on both stacks with the same
-/// status, code and message, and neither runs the STS handler.
+/// Negative — a forged SigV4 header or presigned signature is refused on both stacks with the same
+/// status, code and message, and neither runs the STS handler. A forged SigV2 header is refused
+/// `403` by both and runs no handler, with a known difference in the code: legacy RustFS verifies
+/// the signature before its router's SigV2 refusal and answers `SignatureDoesNotMatch`, where the
+/// gateway refuses SigV2 at the floor before any credential is resolved and answers
+/// `AccessDenied` (ADR-0052), the same answer a correctly signed one gets.
 #[test]
 fn n_a_forged_credential_is_refused_and_runs_no_handler() {
     for signing in [
@@ -601,13 +681,21 @@ fn n_a_forged_credential_is_refused_and_runs_no_handler() {
             service: SigService::Sts,
             secret: FORGED,
         },
-        Signing::V2Header { secret: FORGED },
     ] {
         let sent = Sent::new(signing);
         let answer = same(&sent);
         assert_eq!(answer.status, 403, "{signing:?}");
         assert!(answer.handed.is_none(), "{signing:?}");
     }
+    let (legacy, gateway, asked) = both(&Sent::new(Signing::V2Header { secret: FORGED }));
+    assert_eq!(
+        (legacy.status, legacy.code.as_deref()),
+        (403, Some("SignatureDoesNotMatch")),
+        "{legacy:?}"
+    );
+    assert_eq!((gateway.status, gateway.code.as_deref()), (403, Some("AccessDenied")), "{gateway:?}");
+    assert_eq!((legacy.handed, gateway.handed), (None, None));
+    assert!(asked.is_empty(), "{asked:?}");
 }
 
 /// Negative — an access key nobody issued is refused `403` on both stacks and runs no handler. The

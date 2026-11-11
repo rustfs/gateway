@@ -1,4 +1,4 @@
-# ADR-0052: The caller's secret only over a signed body
+# ADR-0053: The caller's secret only over a signed body
 
 - Status: Accepted
 - Date: 2026-11-11
