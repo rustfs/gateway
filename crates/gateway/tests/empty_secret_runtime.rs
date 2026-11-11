@@ -519,3 +519,12 @@ async fn n_a_refusal_leaves_nothing_behind_once_the_store_is_repaired() {
         assert_eq!(harness.stored.calls(), 2, "{form:?}");
     }
 }
+
+/// Positive — non-empty is the only length rule: a one-byte secret is the host's business.
+#[test]
+fn a_one_byte_secret_is_held() {
+    let credentials = Credentials::new("AKIDEXAMPLE", b"x").expect("non-empty");
+    assert_eq!(credentials.secret().expose(), b"x");
+    // One non-zero byte anywhere is enough: the NUL rule is not a character policy.
+    assert!(Credentials::new("AKIDEXAMPLE", b"\0\0x\0").is_ok());
+}

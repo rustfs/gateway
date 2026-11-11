@@ -698,15 +698,6 @@ mod tests {
         }
     }
 
-    /// Positive — non-empty is the only length rule: a one-byte secret is the host's business.
-    #[test]
-    fn a_one_byte_secret_is_held() {
-        let credentials = Credentials::new("AKIDEXAMPLE", b"x").expect("non-empty");
-        assert_eq!(credentials.secret().len(), 1);
-        // One non-zero byte anywhere is enough: the NUL rule is not a character policy.
-        assert!(Credentials::new("AKIDEXAMPLE", b"\0\0x\0").is_ok());
-    }
-
     /// Negative — an unknown key is `NotFound` and never a silently empty secret.
     #[tokio::test]
     async fn an_unknown_key_is_reported_as_unknown() {
