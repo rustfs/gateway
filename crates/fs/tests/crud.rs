@@ -106,6 +106,10 @@ mod versioning_exclusions;
 #[path = "crud/write_attributes.rs"]
 mod write_attributes;
 
+#[cfg(feature = "external-payload")]
+#[path = "crud/external_payload.rs"]
+mod external_payload;
+
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -165,11 +169,6 @@ fn service(root: &TestRoot) -> (Arc<FsBackend>, S3Service) {
     service_with_backend(backend)
 }
 
-/// The same fixture assembled for a deployment that serves `region` rather than us-east-1.
-///
-/// The signer still serves us-east-1 so that the shared `signed` helper keeps working; what this
-/// varies is the backend's own answer to "where is this bucket", which is what `GetBucketLocation`
-/// and `HeadBucket` report.
 fn service_in_region(root: &TestRoot, region: &str) -> (Arc<FsBackend>, S3Service) {
     let backend = Arc::new(
         FsBackend::open_with_clock(&root.0, Arc::new(FixedClock::at_unix_seconds(SIGNED_AT_SECONDS)))

@@ -175,7 +175,7 @@ impl S3Service {
     /// handlers write the same bucket answer this computes, credentials included. Replacing their
     /// bucket headers here makes the operator's exact-origin credential policy authoritative,
     /// including over credentials a bridged handler hands over among its extra headers.
-    pub(super) async fn decorate_legacy_cors(&self, request: LegacyCorsRequest, response: &mut Response<Body>, now: RequestNow) {
+    pub(super) async fn decorate_legacy_cors(&self, request: &LegacyCorsRequest, response: &mut Response<Body>, now: RequestNow) {
         let Some(legacy) = self.inner.legacy_cors.as_ref() else {
             return;
         };

@@ -119,8 +119,8 @@ use rustfs_gateway_core::cors::{
 };
 use rustfs_gateway_core::{
     Decision, EncodedResponse, ErrorContext, HandlerError, MetaView, OwnedResource, RedirectTarget, RegionLabel, RequestBodyMode,
-    RequestContextView, ResourceShape, ResponseBody, ResponseKind, RouteRequestParts, SseConfig, StaticDispatchError,
-    StaticDispatchOutcome, TransportSecurity,
+    RequestContextView, ResourceShape, ResponseBody, RouteRequestParts, SseConfig, StaticDispatchError, StaticDispatchOutcome,
+    TransportSecurity,
     dispatch::{NO_ROUTE_MESSAGE, NOT_REGISTERED_MESSAGE},
 };
 use rustfs_gateway_http::{Limits, WireRequest};
@@ -130,15 +130,13 @@ use rustfs_gateway_sig::{
 use rustfs_gateway_stream::Body;
 use rustfs_gateway_types::{ErrorCode, NamePolicy};
 
-use crate::builder::credential_sentences::CredentialSentences;
 use crate::clock::{Clock, ClockPosture, MonotonicClock};
 use crate::close::ConnectionIntent;
 use crate::config::{ConfigSnapshot, ConfigStore};
 use crate::ext::{
     AuthSchemeRef, Authentication, AuthenticationOutcome, Authenticator, AuthzAuditEvent, AuthzRequest, AuthzStage,
     BucketOwnerSource, CachedCorsSource, ClassKind, ClientAddr, ClientFacts, Governor, GovernorRequest, HostResolver,
-    InputAuthzRequest, PolicySnapshot, RequestContext, RequestEvent, ResponseView, RoutedView, SigV2Authentication, WireHead,
-    emit_safely,
+    InputAuthzRequest, PolicySnapshot, RequestContext, ResponseView, RoutedView, SigV2Authentication, WireHead, emit_safely,
 };
 use crate::gate::{BodyCeilings, BodyDigestObligation, MetadataAdmission, SealedBody};
 use crate::logging::{Extension, Refused};
@@ -154,7 +152,7 @@ use crate::render::{
 use crate::request_config::{Entered, Guarded, HandlerDeadlineReport, RequestConfig, RouteAuthorized};
 use crate::request_deadline::{elapsed_since, hold_failure_floor, policy_snapshot_with_timeout};
 use crate::routed_facts::RoutedFacts;
-use crate::trace::{RequestTrace, TraceSource};
+use crate::trace::TraceSource;
 use crate::{response::into_response, routing::RuntimeAssembly};
 
 mod body_preparation;
@@ -164,9 +162,8 @@ pub(crate) mod refused_post;
 mod state;
 mod update;
 
-use self::cors::CorsDecoration;
 pub(crate) use self::cors::preflight_bucket;
-use self::outcome::LegacyCorsDisposition;
+use self::outcome::{LegacyCorsDisposition, Outcome};
 
 /// The one sentence a request gets when the authenticator itself could not answer.
 ///
@@ -211,7 +208,8 @@ pub(crate) struct Inner {
     pub(crate) detached_work: crate::DetachedWork,
 }
 
-use self::state::{AcceptedBody, AuthorizedRoute, ReadForDecode, RequestEntryContext, RoutedBody, connection_security};
+pub(crate) use self::state::connection_security;
+use self::state::{AcceptedBody, AuthorizedRoute, ReadForDecode, RequestEntryContext, RoutedBody};
 
 /// An assembled S3 service.
 ///
@@ -281,10 +279,7 @@ impl S3Service {
         B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
         M: OperationMode,
     {
-        // One minting and one reading of the clock, at the top, side by side. Everything below is
-        // handed both values; nothing below holds either source, so neither a second identifier nor
-        // a second instant can be produced — which is what lets the `Date` header and the skew
-        // window name the same moment.
+        // Select one trace and read the clock once; external completion retains the selected trace.
         // Settings and middleware came from the same entry snapshot. No stage reloads the store.
         let request_cancellation = request.extensions().get::<tokio::sync::watch::Receiver<bool>>().cloned();
         let config = RequestConfig::enter(config).with_request_cancellation(request_cancellation);
@@ -309,8 +304,10 @@ impl S3Service {
         let legacy_cors = self.legacy_cors_request(&request);
         let client_addr = request.extensions().get::<ClientAddr>().copied();
         let file_body_path = crate::file_fallback::FileBodyPath::of(request.extensions(), request.version());
+        #[cfg(feature = "external-payload")]
+        let download = request.extensions().get::<crate::external_payload::DownloadEntry>().cloned();
         let mut outcome = Outcome::new(&trace, &method, self.inner.view_policy.credential_sentences());
-        let mut response = self
+        let response = self
             .run(
                 request,
                 &mut outcome,
@@ -324,115 +321,97 @@ impl S3Service {
                 runtime,
             )
             .await;
-        // The RustFS profile's `304` carries legacy RustFS's object headers (`builder/not_modified_headers.rs`).
-        let status = response.status();
-        self.inner
-            .view_policy
-            .not_modified_headers
-            .apply(outcome.operation, status, response.headers_mut());
-        // The CORS decoration for an ordinary request, applied here because it belongs on
-        // **every** answer the pipeline produced once authorisation was granted — the `404` and
-        // the `500` included. A browser cannot read a response it was not granted access to, so
-        // an error without these headers reaches the page as an opaque network failure and the
-        // status the operator is looking at is invisible to the client. Nothing is applied when
-        // `run` never got as far as authorising: see `Outcome::cors`.
-        if let Some(cors) = outcome
-            .cors
-            .take()
-            .filter(|_| headers_apply_to_post_auth_errors() || response.status().is_success())
-        {
-            let headers = response.headers_mut();
-            if let Some(cors_headers) = cors.headers {
-                for (name, value) in cors_headers.iter() {
-                    headers.insert(name, value.clone());
+        let prepare_response = async |mut response: Response<Body>, outcome: &mut Outcome<'_>| {
+            // The RustFS profile's `304` carries legacy RustFS's object headers (`builder/not_modified_headers.rs`).
+            let status = response.status();
+            self.inner
+                .view_policy
+                .not_modified_headers
+                .apply(outcome.operation, status, response.headers_mut());
+            // The CORS decoration for an ordinary request, applied here because it belongs on
+            // **every** answer the pipeline produced once authorisation was granted — the `404` and
+            // the `500` included. A browser cannot read a response it was not granted access to, so
+            // an error without these headers reaches the page as an opaque network failure and the
+            // status the operator is looking at is invisible to the client. Nothing is applied when
+            // `run` never got as far as authorising: see `Outcome::cors`.
+            if let Some(cors) = outcome
+                .cors
+                .as_ref()
+                .filter(|_| headers_apply_to_post_auth_errors() || response.status().is_success())
+            {
+                let headers = response.headers_mut();
+                if let Some(cors_headers) = &cors.headers {
+                    for (name, value) in cors_headers.iter() {
+                        headers.insert(name, value.clone());
+                    }
+                }
+                if cors.vary_origin {
+                    headers.insert(VARY, VARY_ORIGIN);
                 }
             }
-            if cors.vary_origin {
-                headers.insert(VARY, VARY_ORIGIN);
+            // Legacy RustFS decorates answers that reach its CORS layer, including authentication
+            // refusals, but its earlier cleartext customer-key gate is outside that layer.
+            if outcome.legacy_cors_disposition == LegacyCorsDisposition::Decorate
+                && let Some(legacy_cors) = &legacy_cors
+            {
+                self.decorate_legacy_cors(legacy_cors, &mut response, now).await;
             }
-        }
-        // Legacy RustFS decorates answers that reach its CORS layer, including authentication
-        // refusals, but its earlier cleartext customer-key gate is outside that layer.
-        if outcome.legacy_cors_disposition == LegacyCorsDisposition::Decorate
-            && let Some(legacy_cors) = legacy_cors
-        {
-            self.decorate_legacy_cors(legacy_cors, &mut response, now).await;
-        }
-        // The response seam. After the CORS decoration, so a filter sees the response a browser
-        // would; before the invariants and the stamp, so neither can be defeated by one. It runs
-        // for every response this service produces, including one refused at acceptance — which is
-        // most of what a compatibility rewrite is about.
-        if !runtime.filters.is_empty() {
-            let view = ResponseView {
-                request_id: trace.request_id(),
-                operation: outcome.operation,
-                method: &method,
-            };
-            for filter in runtime.filters.iter() {
-                if let Err(error) = filter.on_response(&view, &mut response) {
-                    response = outcome.refuse_handler(error);
-                    break;
-                }
-            }
-        }
-        let handler_deadline = handler_deadline_report.outcome();
-        if handler_deadline == Some(HandlerDeadlineReport::Unacknowledged) {
-            response.extensions_mut().insert(ConnectionIntent::Close);
-        }
-        // The body invariants run here on both paths; this is the only position from which
-        // "a `HEAD` response has no content" covers refusals that never reached an encoder.
-        if let Err(error) = crate::invariants::validate(&response, &self.inner.temporary_redirect_targets) {
-            response = outcome.refuse_handler(error.into());
-        }
-        let corrections = crate::invariants::enforce(&mut response, &method);
-        if method == Method::HEAD && outcome.error.is_some() && self.inner.view_policy.head_refusals_without_length() {
-            response.headers_mut().remove(http::header::CONTENT_LENGTH);
-        }
-        if corrections.removed_forbidden_body() {
-            self.inner.response_body_corrections.fetch_add(1, Ordering::Relaxed);
-        }
-        // Stamp last on both paths. A refusal already has the same identifiers; success encoders
-        // and filters cannot replace this final value.
-        crate::stamp::stamp(response.headers_mut(), &trace, now);
-        let event_request_id = *trace.request_id();
-        let event_operation = outcome.operation;
-        let event_method = method.clone();
-        let event_status = response.status().as_u16();
-        let event_identity = outcome.identity.clone();
-        // Both reports below go to the observer this request's entry snapshot holds, and both go
-        // through one panic boundary. The committed one runs before the terminal document is sent,
-        // so a panic there would otherwise replace that document with the stopped-work fallback.
-        let committed_observer = Arc::clone(&runtime.observer);
-        let started_committed_work = self.inner.detached_work.start(
-            &mut response,
-            Box::new(move |error| {
-                let event = RequestEvent {
-                    request_id: &event_request_id,
-                    operation: event_operation,
-                    method: &event_method,
-                    status: event_status,
-                    handler_deadline,
-                    identity: event_identity.as_ref(),
-                    error: error.as_ref(),
+            // The response seam. After the CORS decoration, so a filter sees the response a browser
+            // would; before the invariants and the stamp, so neither can be defeated by one. It runs
+            // for every response this service produces, including one refused at acceptance — which is
+            // most of what a compatibility rewrite is about.
+            if !runtime.filters.is_empty() {
+                let view = ResponseView {
+                    request_id: trace.request_id(),
+                    operation: outcome.operation,
+                    method: &method,
                 };
-                crate::ext::observe_safely(committed_observer.as_ref(), &event);
-            }),
-        );
-        if let Some(refused) = outcome.refused {
-            crate::logging::request_refused(refused, trace.request_id(), outcome.operation, event_status, outcome.error.as_ref());
-        }
-        if !started_committed_work {
-            let event = RequestEvent {
-                request_id: trace.request_id(),
-                operation: outcome.operation,
-                method: &method,
-                status: response.status().as_u16(),
-                handler_deadline,
-                identity: outcome.identity.as_ref(),
-                error: outcome.error.as_ref(),
-            };
-            crate::ext::observe_safely(runtime.observer.as_ref(), &event);
-        }
+                for filter in runtime.filters.iter() {
+                    if let Err(error) = filter.on_response(&view, &mut response) {
+                        response = outcome.refuse_handler(error);
+                        break;
+                    }
+                }
+            }
+            let handler_deadline = handler_deadline_report.outcome();
+            if handler_deadline == Some(HandlerDeadlineReport::Unacknowledged) {
+                response.extensions_mut().insert(ConnectionIntent::Close);
+            }
+            // The body invariants run here on both paths; this is the only position from which
+            // "a `HEAD` response has no content" covers refusals that never reached an encoder.
+            if let Err(error) = crate::invariants::validate(&response, &self.inner.temporary_redirect_targets) {
+                response = outcome.refuse_handler(error.into());
+            }
+            let corrections = crate::invariants::enforce(&mut response, &method);
+            if method == Method::HEAD && outcome.error.is_some() && self.inner.view_policy.head_refusals_without_length() {
+                response.headers_mut().remove(http::header::CONTENT_LENGTH);
+            }
+            if corrections.removed_forbidden_body() {
+                self.inner.response_body_corrections.fetch_add(1, Ordering::Relaxed);
+            }
+            // Stamp last on both paths. A refusal already has the same identifiers; success encoders
+            // and filters cannot replace this final value.
+            crate::stamp::stamp(response.headers_mut(), &trace, now);
+            (response, handler_deadline)
+        };
+        let (response, handler_deadline) = prepare_response(response, &mut outcome).await;
+        #[cfg(feature = "external-payload")]
+        let (response, handler_deadline) = match download {
+            Some(download) if matches!(response.status(), http::StatusCode::OK | http::StatusCode::PARTIAL_CONTENT) => {
+                // The consumer binds the filtered representation before transferring any bytes.
+                // A later transfer refusal is a separate response with the same request snapshot.
+                match download.consume(response).await {
+                    Ok(response) => (response, handler_deadline),
+                    Err(error) => {
+                        let refusal = outcome.refuse_handler(error);
+                        prepare_response(refusal, &mut outcome).await
+                    }
+                }
+            }
+            _ => (response, handler_deadline),
+        };
+        let mut response = response;
+        outcome.report(&self.inner.detached_work, &runtime.observer, &method, &mut response, handler_deadline);
         file_body_path.adapt(response)
     }
 
@@ -452,6 +431,9 @@ impl S3Service {
         M: OperationMode,
     {
         let router = &runtime.routing.router;
+        if let Some(error) = crate::external_marker::rejection(request.extensions()) {
+            return outcome.refuse_handler(error);
+        }
         let RequestEntryContext {
             now,
             connection,
@@ -468,8 +450,12 @@ impl S3Service {
         // a filter that writes an `Authorization` header does not make an anonymous request
         // authenticated, and one that deletes it does not make a signed request fail.
         let (mut parts, body) = request.into_parts();
+        let external_entry = crate::external_marker::explicit_entry(&parts.extensions);
+        let external_bound = crate::external_marker::bound_entry(&parts.extensions);
         crate::legacy_addressing::rewrite_double_slash_root(&self.inner.names, &mut parts);
         let headers = parts.headers.clone();
+        #[cfg(feature = "external-payload")]
+        crate::external_payload::apply_logical_head(&mut parts);
         // The client facts, installed where the wire seam below can correct them and acceptance
         // then freezes them for both authorization stages and the handler (rustfs/backlog#2752).
         ClientFacts::install(&mut parts.extensions);
@@ -486,10 +472,14 @@ impl S3Service {
             }
         }
 
+        let external_headers = crate::external_marker::present(&headers) || crate::external_marker::present(&parts.headers);
         let wire = match WireRequest::accept(Request::from_parts(parts, body), &self.inner.limits) {
             Ok(wire) => wire,
             Err(reject) => return outcome.refuse_at(Refused::Wire, self.inner.view_policy.wire_refusal(reject)),
         };
+        if external_entry || (external_headers && !external_bound) {
+            return outcome.refuse_at(Refused::Wire, crate::external_marker::refusal(response_kind));
+        }
         let config = config.wire();
         // The RustFS profile's cleartext customer-key gate, where legacy RustFS asks it: first.
         let early = self.inner.view_policy.plaintext_customer_keys;
@@ -607,6 +597,14 @@ impl S3Service {
             return outcome.refuse_handler(HandlerError::new(ErrorCode::NOT_IMPLEMENTED, NOT_REGISTERED_MESSAGE));
         };
         let request_body_mode = M::request_body_mode(&op);
+        #[cfg(feature = "external-payload")]
+        if external_bound
+            && crate::external_payload::upload_entry(wire.transport_extensions())
+            && !M::supports_external_payload(&op)
+        {
+            return outcome
+                .refuse_handler(HandlerError::not_implemented("the registered handler does not support external uploads"));
+        }
         let declared_length = wire.framing().declared_length();
 
         // The body is taken out before anything borrows the head, so the head can be read across
@@ -798,7 +796,7 @@ impl S3Service {
                         wire.raw_path().as_str(),
                         wire.host().raw_for_signing(),
                         &payload,
-                        declared_length,
+                        if external_bound { Some(0) } else { declared_length },
                     )
                     .with_post_policy_limits(post_policy_limits)
                     .with_claimed_route(claimed)
@@ -1347,6 +1345,9 @@ impl S3Service {
                 }
                 AcceptedBody::PostObject(post) => (*post).handoff(&metadata_admission)?,
             };
+            #[cfg(feature = "external-payload")]
+            let body = crate::external_payload::bind_input(body, body_wire.transport_extensions())
+                .map_err(|error| from_handler(error, response_kind, ConnectionIntent::MayKeepAlive))?;
             Ok((
                 ReadForDecode {
                     policy: state.policy,
@@ -1499,6 +1500,8 @@ impl S3Service {
                     None => context,
                 });
             let context = context.ok_or_else(|| map(HandlerError::internal_error("a rejected request reached its handler")))?;
+            #[cfg(feature = "external-payload")]
+            crate::external_payload::record_download_context(&context);
             Ok((decisions, config, sse, context))
         };
         let execution = match std::panic::catch_unwind(AssertUnwindSafe(|| {
@@ -1582,29 +1585,6 @@ impl S3Service {
             }
         }
     }
-}
-
-/// What the observer is told, accumulated as the pipeline learns it.
-///
-/// Borrows the request's [`RequestTrace`] rather than owning a source, which is what makes the one
-/// identifier per request a property of the type: every refusal below renders through
-/// [`Outcome::refuse`], and `refuse` has exactly one trace it can render with.
-struct Outcome<'a> {
-    trace: &'a RequestTrace,
-    operation: Option<&'static str>,
-    identity: Option<rustfs_gateway_sig::Identity>,
-    error: Option<ErrorCode>,
-    /// The CORS decoration for an ordinary response, set once authorisation has been granted and
-    /// applied by [`S3Service::call`] to whatever the pipeline produced afterwards. `None` for
-    /// every request that never got that far, which is what keeps a pre-authentication refusal
-    /// from costing a configuration read.
-    cors: Option<CorsDecoration>,
-    legacy_cors_disposition: LegacyCorsDisposition,
-    response_kind: ResponseKind,
-    credential_sentences: CredentialSentences,
-    /// The stage that refused the request, when the gateway refused it; reported once, at the end
-    /// (`crate::logging::request_refused`).
-    refused: Option<Refused>,
 }
 
 #[cfg(test)]
