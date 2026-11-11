@@ -4574,7 +4574,9 @@ impl Stub {
         // `BTreeMap` already holds the parts in ascending part-number order, which is the order
         // `ListParts` answers in and the order a marker resumes.
         let mut numbers: Vec<i32> = upload.parts.keys().copied().filter(|number| *number > marker).collect();
-        let max_parts = input.max_parts.unwrap_or(1000);
+        // The selected contract caps the page and echoes the ceiling for oversized requests
+        // (`q-mpu-marker-0040`, `c-mpu-0048`); the AWS oversized response is unmeasured.
+        let max_parts = input.max_parts.unwrap_or(1000).min(1000);
         let truncated = truncate_to(&mut numbers, max_parts);
         let next_marker = truncated.then(|| numbers.last().map(i32::to_string)).flatten();
 

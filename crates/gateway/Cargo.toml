@@ -1,7 +1,7 @@
 [package]
 name = "rustfs-gateway"
 description = "A protocol-exact, security-first S3 server framework for Rust"
-version = "0.59.0"
+version = "0.60.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -91,6 +91,11 @@ path = "tests/integration.rs"
 [[test]]
 name = "socket_timing"
 path = "tests/socket_timing.rs"
+
+[[test]]
+name = "signature_text_allocations"
+path = "tests/signature_text_allocations.rs"
+harness = false
 
 [[bench]]
 name = "post_object"

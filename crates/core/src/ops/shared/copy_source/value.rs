@@ -111,7 +111,7 @@ pub(super) fn bind_value(value: &CopySourceValue, names: &NamePolicy) -> Result<
 
 // AWS account IDs are twelve ASCII decimal digits, including leading zeroes.
 // https://docs.aws.amazon.com/accounts/latest/reference/manage-acct-identifiers.html
-fn check_arn_head(partition: &str, region: &str, account: &str) -> Result<(), CopySourceRejection> {
+pub(super) fn check_arn_head(partition: &str, region: &str, account: &str) -> Result<(), CopySourceRejection> {
     if !partition.contains(':')
         && !region.contains(':')
         && account.len() == 12

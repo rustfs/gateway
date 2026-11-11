@@ -2327,10 +2327,10 @@ from pathlib import Path
 
 path = Path("xtask/src/verify.rs")
 text = path.read_text()
-old = "return vec![vec![test, clippy], vec![socket_timing]];"
+old = "return vec![vec![test, clippy], vec![socket_timing, signature_allocations]];"
 if text.count(old) != 1:
     raise SystemExit("gateway socket-timing loop is missing")
-path.write_text(text.replace(old, "return vec![vec![test, clippy, socket_timing]];", 1))
+path.write_text(text.replace(old, "return vec![vec![test, clippy, socket_timing, signature_allocations]];", 1))
 PYEOF
 }
 expect_fail check_xtask_codegen_surface.sh \
@@ -2344,10 +2344,10 @@ from pathlib import Path
 
 path = Path("xtask/src/verify.rs")
 text = path.read_text()
-old = "return vec![vec![test, clippy], vec![socket_timing]];"
+old = "return vec![vec![test, clippy], vec![socket_timing, signature_allocations]];"
 if text.count(old) != 1:
     raise SystemExit("gateway socket-timing loop is missing")
-path.write_text(text.replace(old, "drop(socket_timing);\n        return vec![vec![test, clippy]];", 1))
+path.write_text(text.replace(old, "drop(socket_timing);\n        return vec![vec![test, clippy], vec![signature_allocations]];", 1))
 PYEOF
 }
 expect_fail check_xtask_codegen_surface.sh \
@@ -3370,6 +3370,160 @@ expect_fail check_response_encoding_ledger.sh \
     'the final response seam bypassing configured redirect authority' \
     mut_response_encoding_redirect_authority_bypassed
 
+mut_copy_classifier_remove() {
+    python3 - "$1" "$2" <<'PYEOF'
+from pathlib import Path
+import sys
+path = Path("crates/core/src/ops") / (sys.argv[1] + ".rs")
+text = path.read_text()
+old = """    fn classify_copy_source(input: &Self::Input) -> Result<Option<crate::CopySourceKind>, crate::authz::DerivedResourceError> {
+        classify(&input.copy_source)
+            .map(Some)
+            .map_err(|error| crate::DerivedResourceError::new(error.code().clone(), error.reason()))
+    }
+"""
+if text.count(old) != 1:
+    raise SystemExit("copy classifier override anchor is not unique")
+replacement = "/*\n" + old + "*/\n" if sys.argv[2] == "comment" else ""
+path.write_text(text.replace(old, replacement, 1))
+PYEOF
+}
+mut_copy_classifier_remove_object() { mut_copy_classifier_remove copy_object remove; }
+mut_copy_classifier_remove_part() { mut_copy_classifier_remove upload_part_copy remove; }
+mut_copy_classifier_comment() { mut_copy_classifier_remove copy_object comment; }
+mut_copy_classifier_missing_file() { rm crates/core/src/ops/copy_object.rs; }
+mut_copy_classifier_bypass_shared() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/core/src/ops/upload_part_copy.rs")
+text = path.read_text()
+old = "classify(&input.copy_source)"
+if text.count(old) != 1:
+    raise SystemExit("copy classifier shared call anchor is not unique")
+path.write_text(text.replace(old, "fake_classify(&input.copy_source)", 1))
+PYEOF
+}
+mut_copy_classifier_conditional_impl() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/core/src/ops/copy_object.rs")
+text = path.read_text()
+old = "impl Operation for CopyObject {"
+if text.count(old) != 1:
+    raise SystemExit("copy operation implementation anchor is not unique")
+path.write_text(text.replace(old, "#[cfg(any())]\n" + old, 1))
+PYEOF
+}
+mut_copy_classifier_alternate_impl() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/core/src/ops/copy_object.rs")
+text = path.read_text()
+start = text.index("impl Operation for CopyObject {")
+end = text.index("\n}\n", start) + 2
+original = text[start:end]
+alternate = original.replace("impl Operation for CopyObject", "impl crate::Operation for CopyObject", 1)
+first = alternate.index("    fn classify_copy_source(")
+last = alternate.index("    fn derive_resources(", first)
+alternate = alternate[:first] + alternate[last:]
+alternate = alternate.replace("        CopySourceResources::bind(&input.copy_source)",
+                              "        let _ = classify;\n        CopySourceResources::bind(&input.copy_source)", 1)
+path.write_text(text[:start] + "#[cfg(any())]\n" + original + "\n\n#[cfg(not(any()))]\n" + alternate + text[end:])
+PYEOF
+}
+mut_copy_classifier_conditional_module() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/core/src/ops/shared/copy_source.rs")
+text = path.read_text()
+old = "mod capability;"
+if text.count(old) != 1:
+    raise SystemExit("copy classifier module anchor is not unique")
+path.write_text(text.replace(old, "#[cfg(any())]\n" + old, 1))
+PYEOF
+}
+mut_copy_classifier_alternate_module() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/core/src/ops/shared/copy_source.rs")
+text = path.read_text()
+old = "mod capability;"
+if text.count(old) != 1:
+    raise SystemExit("copy classifier module anchor is not unique")
+replacement = '''#[cfg(any())]
+mod capability;
+#[cfg(not(any()))]
+mod capability {
+    use super::*;
+    pub(crate) fn classify(_: &CopySourceValue) -> Result<crate::op::CopySourceKind, CopySourceRejection> {
+        Ok(crate::op::CopySourceKind::Bucket)
+    }
+}'''
+path.write_text(text.replace(old, replacement, 1))
+PYEOF
+}
+mut_copy_classifier_conditional_export() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/core/src/ops/shared/copy_source.rs")
+text = path.read_text()
+old = "pub(crate) use capability::classify;"
+if text.count(old) != 1:
+    raise SystemExit("copy classifier export anchor is not unique")
+replacement = '''#[cfg(any())]
+pub(crate) use capability::classify;
+#[cfg(not(any()))]
+pub(crate) use self::fallback as classify;
+pub(crate) fn fallback(_: &CopySourceValue) -> Result<crate::op::CopySourceKind, CopySourceRejection> {
+    Ok(crate::op::CopySourceKind::Bucket)
+}'''
+path.write_text(text.replace(old, replacement, 1))
+PYEOF
+}
+mut_copy_classifier_conditional_function() {
+    python3 - <<'PYEOF'
+from pathlib import Path
+path = Path("crates/core/src/ops/shared/copy_source/capability.rs")
+text = path.read_text()
+old = "pub(crate) fn classify(value: &CopySourceValue) -> Result<CopySourceKind, CopySourceRejection> {"
+if text.count(old) != 1:
+    raise SystemExit("copy classifier function anchor is not unique")
+text = text.replace(old, "#[cfg(any())]\n" + old, 1)
+text += "\npub(crate) fn bad_classify(_: &CopySourceValue) -> Result<CopySourceKind, CopySourceRejection> { Ok(CopySourceKind::Bucket) }\npub(crate) use self::bad_classify as classify;\n"
+path.write_text(text)
+PYEOF
+}
+mut_copy_classifier_alternate_function_export() {
+    cat >>crates/core/src/ops/shared/copy_source/capability.rs <<'RUST'
+pub(crate) fn bad_classify(_: &CopySourceValue) -> Result<CopySourceKind, CopySourceRejection> { Ok(CopySourceKind::Bucket) }
+pub(crate) use self::bad_classify as classify;
+RUST
+}
+expect_fail_with_diagnostic check_copy_source_classifiers.sh \
+    'CopyObject losing its source classifier' 'copy_object.rs: classifier override' mut_copy_classifier_remove_object
+expect_fail_with_diagnostic check_copy_source_classifiers.sh \
+    'UploadPartCopy losing its source classifier' 'upload_part_copy.rs: classifier override' mut_copy_classifier_remove_part
+expect_fail_with_diagnostic check_copy_source_classifiers.sh \
+    'a commented classifier pretending to be executable' 'copy_object.rs: classifier override' mut_copy_classifier_comment
+expect_fail_with_diagnostic check_copy_source_classifiers.sh \
+    'a missing Copy operation source' 'copy_object.rs: missing' mut_copy_classifier_missing_file
+expect_fail_with_diagnostic check_copy_source_classifiers.sh \
+    'a Copy classifier bypassing the shared implementation' 'upload_part_copy.rs: classifier override' mut_copy_classifier_bypass_shared
+expect_fail_with_diagnostic check_copy_source_classifiers.sh \
+    'a conditional Copy operation classifier' 'copy_object.rs: classifier override implementation must be unconditional' mut_copy_classifier_conditional_impl
+expect_fail_with_diagnostic check_copy_source_classifiers.sh \
+    'a disabled classifier hiding an alternate operation implementation' 'copy_object.rs: classifier override has another implementation' mut_copy_classifier_alternate_impl
+expect_fail_with_diagnostic check_copy_source_classifiers.sh \
+    'a conditional shared classifier module' 'shared copy source classifier wiring must be unconditional' mut_copy_classifier_conditional_module
+expect_fail_with_diagnostic check_copy_source_classifiers.sh \
+    'a disabled shared classifier hiding an alternate module' 'shared copy source classifier module has another definition' mut_copy_classifier_alternate_module
+expect_fail_with_diagnostic check_copy_source_classifiers.sh \
+    'a conditional classifier export hiding a replacement' 'shared copy source classifier wiring must be unconditional' mut_copy_classifier_conditional_export
+expect_fail_with_diagnostic check_copy_source_classifiers.sh \
+    'a conditional classifier function hiding a replacement' 'shared copy source classifier must be unconditional' mut_copy_classifier_conditional_function
+expect_fail_with_diagnostic check_copy_source_classifiers.sh \
+    'an alternate classifier function export' 'shared copy source classifier has an alternate export' mut_copy_classifier_alternate_function_export
+
 probe_scalar_case_guard_missing_python() {
     local output rc=0 tool_path
     cases=$((cases + 1))
@@ -3868,8 +4022,8 @@ PYEOF
 expect_fail check_error_resolution_surface.sh \
     'the consolidated gateway target being redirected to another path' mut_gateway_manifest_redirects_consolidated_target
 
-# rustfs/gateway#1264 split the facade into two targets: the trybuild harness stays in the integration
-# target, the socket-timing target registers no trybuild entry, and nothing else is admitted.
+# The facade keeps trybuild in integration, socket timing in its own target (#1264), and the pure
+# signature allocation probe outside libtest (#1525). No unregistered target is admitted.
 mut_gateway_manifest_adds_third_target() {
     cat >>crates/gateway/Cargo.toml <<'TOMLEOF'
 
@@ -3879,7 +4033,7 @@ path = "tests/facade_probe.rs"
 TOMLEOF
 }
 expect_fail check_error_resolution_surface.sh \
-    'a third Cargo test target beside the integration and socket-timing targets' mut_gateway_manifest_adds_third_target \
+    'an unregistered Cargo test target beside the declared facade targets' mut_gateway_manifest_adds_third_target \
     'crates/gateway must declare exactly the integration and socket_timing [[test]] targets'
 
 mut_gateway_manifest_restores_single_target() {
@@ -3895,7 +4049,7 @@ path.write_text(text.replace(block, "", 1))
 PYEOF
 }
 expect_fail check_error_resolution_surface.sh \
-    'the gateway manifest returning to one test target' mut_gateway_manifest_restores_single_target \
+    'the gateway manifest dropping its socket-timing target' mut_gateway_manifest_restores_single_target \
     'crates/gateway must declare exactly the integration and socket_timing [[test]] targets'
 
 mut_gateway_socket_timing_registers_trybuild_harness() {
@@ -6112,9 +6266,9 @@ from pathlib import Path
 
 path = Path("scripts/allowances/as-any-allowances.txt")
 text = path.read_text()
-if "codecs.rs:218" not in text:
+if "codecs.rs:215" not in text:
     raise SystemExit("expected allowlist entry is missing")
-path.write_text(text.replace("codecs.rs:218", "codecs.rs:219", 1))
+path.write_text(text.replace("codecs.rs:215", "codecs.rs:216", 1))
 PYEOF
 }
 expect_fail check_no_as_any.sh \
@@ -23568,8 +23722,8 @@ from pathlib import Path
 path = Path("crates/core/tests/static_dispatch.rs")
 text = path.read_text()
 subject = "    async fn call_with_context(\n"
-if text.count(subject) != 1:
-    raise SystemExit("missing unique Handler context-entry mutation subject")
+if text.count(subject) != 3:
+    raise SystemExit("expected three reviewed Handler context-entry mutation subjects")
 path.write_text(text.replace(subject, "    async fn call_without_context(\n", 1))
 PYEOF
 }
@@ -23589,8 +23743,8 @@ replacement = '''    const CONTEXT_ENTRY_DECOY: &'static str = "fn call_with_con
     // fn call_with_context(request) is not an active method.
     async fn call_without_context(
 '''
-if text.count(subject) != 1:
-    raise SystemExit("missing unique Handler context-decoy mutation subject")
+if text.count(subject) != 3:
+    raise SystemExit("expected three reviewed Handler context-decoy mutation subjects")
 path.write_text(text.replace(subject, replacement, 1))
 PYEOF
 }
@@ -23614,8 +23768,8 @@ replacement = '''        self.call_with_context(
         )
         .await
 '''
-if text.count(subject) != 1:
-    raise SystemExit("missing unique Handler context-source mutation subject")
+if text.count(subject) != 3:
+    raise SystemExit("expected three reviewed Handler context-source mutation subjects")
 path.write_text(text.replace(subject, replacement, 1))
 PYEOF
 }

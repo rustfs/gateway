@@ -1152,6 +1152,19 @@ when_queries = ["uploadId", "attributes"]
 reason = "The original nightly input supplies a nonempty uploadId but no object-attributes header: the default ListParts decoder reaches its handler and the pinned attributes decoder refuses the missing header. Only this complete outcome pair under both selectors is recorded; empty-upload-id and other malformed-input refusals remain unregistered (https://github.com/rustfs/gateway/issues/1517)."
 expires = "2027-03-31"
 
+# ── Decode: multipart initiation and completion overlap (nightly issue #1555) ──
+
+[[diff]]
+id = "kd-decode-0112"
+kind = "decode"
+operation = "CompleteMultipartUpload"
+item = "route"
+gateway = "CompleteMultipartUpload"
+s3s = "CreateMultipartUpload"
+when_queries = ["uploads", "uploadId"]
+reason = "The default overlay explicitly gives completion precedence 420 over initiation at 450 when both selectors occur; the pinned legacy POST selector tries uploads before uploadId. The original nightly artifact, its 28-byte reduction and a valid completion document reproduce this exact operation pair. Both literal query names and both route pins are required; neither runtime router changes (https://github.com/rustfs/gateway/issues/1555)."
+expires = "2027-03-31"
+
 # ── Encode: what the gateway writes on every answer ─────────────────────────────────────────
 
 [[diff]]

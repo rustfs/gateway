@@ -115,6 +115,7 @@ fixed now so that the same check does not get written twice under two names.
 | `check_smithy_timestamp_corpus.sh` | The vendored Smithy timestamp corpus matches its pinned bytes, case counts, license attribution, and format mapping | P1-04 |
 | `check_has_operation_coverage.sh` | Every code-generated standard operation name has exactly one matching per-operation `HasOperation` reverse mapping | P1-07 |
 | `check_op_file_shape.sh` | One `impl Operation` per `ops/<snake_name>.rs` and none outside it; the file name and the operation name agree; `ops/mod.rs` mounts every module; the `//! Shares:` declaration agrees with both the `shared::` use graph and the `//! Members:` list on the other end, in both directions for both; 800 lines over the ops tree with no allowance escape | P1 (rustfs/backlog#1895) |
+| `check_copy_source_classifiers.sh` | Both standard Copy operations retain their executable classifier overrides and shared classifier wiring | ADR-0045 |
 | `check_shared_members.sh` | Every `ops/shared/*.rs` module's `//! Members:` line agrees with the operations that actually reach it, in both directions | P1 |
 | `check_shared_reachable.sh` | Every `pub` item under `ops/shared/` is re-exported by the `rustfs-gateway` facade, so a backend cannot be forced to reimplement a shared contract | P1 |
 | `check_guard_grep_pipelines.sh` | The license and secret-hygiene guards contain no quiet grep option token, including in comments or strings; their grep checks must read input fully under `pipefail` | P0 |

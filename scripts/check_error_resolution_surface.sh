@@ -593,12 +593,16 @@ for kind, target, default_test in testable_targets:
 explicit_tests = manifest.get("test", [])
 if (
     not isinstance(explicit_tests, list)
-    or len(explicit_tests) != 2
+    or len(explicit_tests) != 3
     or any(not isinstance(target, dict) for target in explicit_tests)
     or {(target.get("name"), target.get("path")) for target in explicit_tests}
-    != {("integration", "tests/integration.rs"), ("socket_timing", "tests/socket_timing.rs")}
+    != {
+        ("integration", "tests/integration.rs"),
+        ("socket_timing", "tests/socket_timing.rs"),
+        ("signature_text_allocations", "tests/signature_text_allocations.rs"),
+    }
 ):
-    fail("crates/gateway must declare exactly the integration and socket_timing [[test]] targets")
+    fail("crates/gateway must declare exactly the integration and socket_timing [[test]] targets plus the standalone signature_text_allocations target")
 integration_target = next(target for target in explicit_tests if target.get("name") == "integration")
 required_features = integration_target.get("required-features", [])
 if (

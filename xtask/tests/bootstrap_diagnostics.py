@@ -12,6 +12,7 @@ import time
 
 SOURCE = Path(__file__).resolve().parents[1] / "src/bootstrap.rs"
 NESTED_CARGO = Path(__file__).resolve().parents[1] / "src/nested_cargo.rs"
+LAUNCHER = Path(__file__).resolve().parents[1] / "src/verify/launcher.rs"
 STAGES = ["toolchain check", "dependency fetch", "pinned model verification",
           "generated artifact verification", "workspace test compilation"]
 
@@ -56,6 +57,10 @@ esac
         }
     }
 }
+mod verify {
+    #[path = ''' + json.dumps(str(LAUNCHER)) + ''']
+    pub mod launcher;
+}
 #[path = ''' + json.dumps(str(NESTED_CARGO)) + ''']
 mod nested_cargo;
 #[path = ''' + json.dumps(str(SOURCE)) + ''']
@@ -83,7 +88,8 @@ fn main() -> std::process::ExitCode {
         log = root / (name + ".log")
         environment = dict(os.environ, PATH=str(bins) + os.pathsep + os.environ["PATH"],
                            FIXTURE_ROOT=str(root), FIXTURE_LOG=str(log))
-        for key in ("COMPILE_EXIT", "COMPILE_DELAY", "FETCH_EXIT", "MODEL_EXIT", "GENERATED_FAIL"):
+        for key in ("COMPILE_EXIT", "COMPILE_DELAY", "FETCH_EXIT", "MODEL_EXIT", "GENERATED_FAIL",
+                    "RUSTFS_GATEWAY_XTASK_STARTED_UNIX_NANOS"):
             environment.pop(key, None)
         environment.update(overrides)
         started = time.monotonic()
@@ -123,5 +129,40 @@ fn main() -> std::process::ExitCode {
                 assert "bootstrap: ready" not in result.stderr, result.stderr
         except AssertionError as error:
             failures.append(f"{name}: {error}")
+    # The launcher starts before compiling the selected runner. A stale, real launcher
+    # timestamp must count toward the five-minute command budget without waiting five minutes.
+    log = root / "launcher-budget.log"
+    environment = dict(os.environ, PATH=str(bins) + os.pathsep + os.environ["PATH"],
+                       FIXTURE_ROOT=str(root), FIXTURE_LOG=str(log),
+                       RUSTFS_GATEWAY_XTASK_STARTED_UNIX_NANOS=str(time.time_ns() - 301_000_000_000))
+    result = subprocess.run([str(executable), "--json"], env=environment,
+                            capture_output=True, text=True, timeout=10)
+    assert result.returncode == 1, (result.returncode, result.stdout, result.stderr)
+    assert "exceeded the five-minute budget" in result.stderr, result.stderr
+    assert result.stdout == "", result.stdout
+    assert log.read_text().splitlines() == ["fetch", "model", "compile"]
+
+    log = root / "launcher-report.log"
+    environment = dict(os.environ, PATH=str(bins) + os.pathsep + os.environ["PATH"],
+                       FIXTURE_ROOT=str(root), FIXTURE_LOG=str(log),
+                       RUSTFS_GATEWAY_XTASK_STARTED_UNIX_NANOS=str(time.time_ns() - 2_000_000_000))
+    result = subprocess.run([str(executable), "--json"], env=environment,
+                            capture_output=True, text=True, timeout=10)
+    assert result.returncode == 0, (result.returncode, result.stderr)
+    assert json.loads(result.stdout)["elapsed_seconds"] >= 2.0, result.stdout
+    assert log.read_text().splitlines() == ["fetch", "model", "compile"]
+
+    for name, timestamp in (("malformed", "invalid"), ("future", str(time.time_ns() + 60_000_000_000))):
+        log = root / (name + "-launcher.log")
+        environment = dict(os.environ, PATH=str(bins) + os.pathsep + os.environ["PATH"],
+                           FIXTURE_ROOT=str(root), FIXTURE_LOG=str(log),
+                           RUSTFS_GATEWAY_XTASK_STARTED_UNIX_NANOS=timestamp)
+        result = subprocess.run([str(executable), "--json"], env=environment,
+                                capture_output=True, text=True, timeout=10)
+        assert result.returncode == 1, (name, result.returncode, result.stderr)
+        assert "launcher timestamp is invalid" in result.stderr, (name, result.stderr)
+        assert result.stdout == "", (name, result.stdout)
+        assert not log.exists(), (name, log.read_text())
+
     assert not failures, "\n".join(failures)
 print("OK: bootstrap stage timing, compiler diagnostics, exact compile scope and early failures")

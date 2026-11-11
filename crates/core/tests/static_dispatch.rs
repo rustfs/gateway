@@ -30,6 +30,7 @@ use rustfs_gateway_core::{
 use rustfs_gateway_http::{Limits, WireRequest};
 use rustfs_gateway_sig::{OperationFloor, SigService};
 use rustfs_gateway_types::dto::{CompleteMultipartUpload, CompleteMultipartUploadOutput};
+use rustfs_gateway_types::dto::{CopyObject, UploadPartCopy};
 
 use crate::support::sse_proof;
 
@@ -76,6 +77,36 @@ impl OperationCodec for StaticProbe {
 
 struct Backend(Arc<Mutex<Vec<&'static str>>>);
 
+impl Handler<CopyObject> for Backend {
+    async fn call(&self, request: Req<CopyObject>) -> HandlerResult<CopyObject> {
+        let (_source, context) = rustfs_gateway_core::HandlerCancellationSource::pair();
+        self.call_with_context(request, context).await
+    }
+
+    async fn call_with_context(
+        &self,
+        _request: Req<CopyObject>,
+        _context: rustfs_gateway_core::HandlerContext,
+    ) -> HandlerResult<CopyObject> {
+        panic!("an unbound CopyObject must not reach the handler")
+    }
+}
+
+impl Handler<UploadPartCopy> for Backend {
+    async fn call(&self, request: Req<UploadPartCopy>) -> HandlerResult<UploadPartCopy> {
+        let (_source, context) = rustfs_gateway_core::HandlerCancellationSource::pair();
+        self.call_with_context(request, context).await
+    }
+
+    async fn call_with_context(
+        &self,
+        _request: Req<UploadPartCopy>,
+        _context: rustfs_gateway_core::HandlerContext,
+    ) -> HandlerResult<UploadPartCopy> {
+        panic!("an unbound UploadPartCopy must not reach the handler")
+    }
+}
+
 impl Handler<StaticProbe> for Backend {
     async fn call(&self, request: Req<StaticProbe>) -> HandlerResult<StaticProbe> {
         let (_source, context) = rustfs_gateway_core::HandlerCancellationSource::pair();
@@ -103,6 +134,208 @@ fn meta() -> MetaView<'static> {
     MetaView::of(wire, TargetKind::Service).expect("service meta")
 }
 
+async fn refuse_outposts_suffix<O: OperationCodec>(query: &str, source: &str)
+where
+    Backend: Handler<O>,
+{
+    let request = http::Request::builder()
+        .method("PUT")
+        .uri(format!("http://s3.example.com/target/key{query}"))
+        .header("host", "s3.example.com")
+        .header("x-amz-copy-source", source)
+        .body(Bytes::new())
+        .expect("valid request");
+    let wire = WireRequest::accept(request, &Limits::default()).expect("accepted request");
+    let meta = MetaView::of(&wire, TargetKind::Object).expect("object metadata");
+    let result = StaticOperation::<O>::dispatch(
+        O::NAME,
+        &meta,
+        Arc::new(Backend(Arc::new(Mutex::new(Vec::new())))),
+        || async { Ok::<_, &'static str>(()) },
+        |()| async { Ok::<_, &'static str>(((), RequestBody::None)) },
+        |(), _| async {
+            Err::<
+                (
+                    Vec<rustfs_gateway_core::Decision>,
+                    (),
+                    rustfs_gateway_core::SseEnforced,
+                    rustfs_gateway_core::RequestContextView,
+                ),
+                _,
+            >("an unbound source reached input authorization")
+        },
+    )
+    .await;
+    match result {
+        Err(StaticDispatchError::Codec(error)) => {
+            assert_eq!(error.code(), &rustfs_gateway_types::ErrorCode::INVALID_ARGUMENT);
+            assert_eq!(
+                error.message(),
+                "x-amz-copy-source accepts an access point or Outposts ARN, or a bucket and key"
+            );
+        }
+        _ => panic!("an unsupported source must not bind as an Outpost"),
+    }
+}
+
+#[tokio::test]
+async fn unrepresentable_outposts_source_is_refused_before_input_authorization() {
+    for source in [
+        "arn:aws:s3-outposts:us-east-1:123456789012:outpost/op/accesspoint/ap/object/key",
+        "arn:aws:s3-outposts:us-east-1:123456789012:outpost/op/custom/object/key",
+    ] {
+        refuse_outposts_suffix::<CopyObject>("", source).await;
+        refuse_outposts_suffix::<UploadPartCopy>("?partNumber=1&uploadId=upload", source).await;
+    }
+}
+
+async fn unsupported_copy_arn<O: OperationCodec>(
+    query: &str,
+    source: &str,
+    header: Option<(&str, &str)>,
+    expected: rustfs_gateway_types::ErrorCode,
+    member: Option<&str>,
+) where
+    Backend: Handler<O>,
+{
+    let mut request = http::Request::builder()
+        .method("PUT")
+        .uri(format!("http://s3.example.com/target/key{query}"))
+        .header("host", "s3.example.com")
+        .header("x-amz-copy-source", source);
+    if let Some((name, value)) = header {
+        request = request.header(name, value);
+    }
+    let request = request.body(Bytes::new()).expect("valid request");
+    let wire = WireRequest::accept(request, &Limits::default()).expect("accepted request");
+    let meta = MetaView::of(&wire, TargetKind::Object)
+        .expect("object metadata")
+        .with_copy_source_arns_unsupported();
+    let result = StaticOperation::<O>::dispatch(
+        O::NAME,
+        &meta,
+        Arc::new(Backend(Arc::new(Mutex::new(Vec::new())))),
+        || async { Ok::<_, &'static str>(()) },
+        |()| async { Ok::<_, &'static str>(((), RequestBody::None)) },
+        |(), _| async {
+            Err::<
+                (
+                    Vec<rustfs_gateway_core::Decision>,
+                    (),
+                    rustfs_gateway_core::SseEnforced,
+                    rustfs_gateway_core::RequestContextView,
+                ),
+                _,
+            >("input authorization must not run")
+        },
+    )
+    .await;
+    match result {
+        Err(StaticDispatchError::Codec(error)) => {
+            assert_eq!(error.code(), &expected);
+            if expected == rustfs_gateway_types::ErrorCode::NOT_IMPLEMENTED {
+                assert_eq!(error.message(), "A header you provided implies functionality that is not implemented.");
+            }
+            assert_eq!(error.member(), member);
+        }
+        _ => panic!("ARN must be refused by the capability check"),
+    }
+}
+
+#[tokio::test]
+async fn copy_arn_capability_refuses_before_input_authorization() {
+    for (source, expected) in [
+        (
+            "arn:aws:s3:us-east-1:123456789012:accesspoint/ap-1/object/key",
+            rustfs_gateway_types::ErrorCode::NOT_IMPLEMENTED,
+        ),
+        (
+            "arn:aws:s3-outposts:us-east-1:123456789012:outpost/op/custom/object/key",
+            rustfs_gateway_types::ErrorCode::NOT_IMPLEMENTED,
+        ),
+        (
+            "arn:other:s3:us-east-1:123456789012:accesspoint/ap-1/object/key",
+            rustfs_gateway_types::ErrorCode::INVALID_ARGUMENT,
+        ),
+        (
+            "arn:aws:s3::123456789012:accesspoint/ap-1/object/key",
+            rustfs_gateway_types::ErrorCode::INVALID_ARGUMENT,
+        ),
+        (
+            "arn:aws:s3:us-east-1:123456789012:accesspoint/ap/object/key",
+            rustfs_gateway_types::ErrorCode::INVALID_ARGUMENT,
+        ),
+        (
+            "arn:aws:s3-outposts:us-east-1:123456789012:outpost//object/key",
+            rustfs_gateway_types::ErrorCode::INVALID_ARGUMENT,
+        ),
+        (
+            "arn:aws:s3:us-east-1:123:accesspoint/ap-1/object/key",
+            rustfs_gateway_types::ErrorCode::INVALID_ARGUMENT,
+        ),
+        (
+            "arn:aws:s3-outposts:us-east-1:123456789012:outpost/op/accesspoint/ap/object/",
+            rustfs_gateway_types::ErrorCode::INVALID_ARGUMENT,
+        ),
+    ] {
+        unsupported_copy_arn::<CopyObject>("", source, None, expected.clone(), None).await;
+        unsupported_copy_arn::<UploadPartCopy>("?partNumber=1&uploadId=upload", source, None, expected, None).await;
+    }
+}
+
+#[tokio::test]
+async fn copy_object_versioned_arn_is_refused_before_input() {
+    for version in ["v1", ""] {
+        let source = format!("arn:aws:s3:us-east-1:123456789012:accesspoint/ap-1/object/key?versionId={version}");
+        let expected = if version.is_empty() {
+            rustfs_gateway_types::ErrorCode::INVALID_ARGUMENT
+        } else {
+            rustfs_gateway_types::ErrorCode::NOT_IMPLEMENTED
+        };
+        unsupported_copy_arn::<CopyObject>("", &source, None, expected, None).await;
+    }
+}
+
+#[tokio::test]
+async fn upload_part_copy_versioned_arn_is_refused_before_input() {
+    for version in ["v1", ""] {
+        let source = format!("arn:aws:s3:us-east-1:123456789012:accesspoint/ap-1/object/key?versionId={version}");
+        unsupported_copy_arn::<UploadPartCopy>(
+            "?partNumber=1&uploadId=upload",
+            &source,
+            None,
+            if version.is_empty() {
+                rustfs_gateway_types::ErrorCode::INVALID_ARGUMENT
+            } else {
+                rustfs_gateway_types::ErrorCode::NOT_IMPLEMENTED
+            },
+            None,
+        )
+        .await;
+    }
+}
+
+#[tokio::test]
+async fn copy_arn_capability_preserves_static_ordinary_binding_errors() {
+    let source = "arn:aws:s3:us-east-1:123456789012:accesspoint/ap-1/object/key";
+    unsupported_copy_arn::<CopyObject>(
+        "",
+        source,
+        Some(("x-amz-object-lock-retain-until-date", "invalid")),
+        rustfs_gateway_types::ErrorCode::INVALID_ARGUMENT,
+        Some("ObjectLockRetainUntilDate"),
+    )
+    .await;
+    unsupported_copy_arn::<UploadPartCopy>(
+        "?partNumber=invalid&uploadId=upload",
+        source,
+        None,
+        rustfs_gateway_types::ErrorCode::INVALID_ARGUMENT,
+        Some("PartNumber"),
+    )
+    .await;
+}
+
 /// a-asm-0007. The sealed entry calls route authorization before body work, input authorization
 /// after decoding, and the concrete handler last.
 #[tokio::test]
@@ -115,7 +348,7 @@ async fn the_static_entry_preserves_the_authorization_order() {
 
     let outcome = StaticOperation::<StaticProbe>::dispatch(
         StaticProbe::NAME,
-        &meta(),
+        &meta().with_copy_source_arns_unsupported(),
         backend,
         move || async move {
             route_trail.lock().expect("trail lock").push("route-authorize");

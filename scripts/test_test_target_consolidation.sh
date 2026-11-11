@@ -108,6 +108,7 @@ verify_restore_control
 
 source "$SCRIPT_DIR/lib/test_conformance_allocation_target.sh"
 source "$SCRIPT_DIR/lib/test_gateway_socket_timing_target.sh"
+source "$SCRIPT_DIR/lib/test_gateway_signature_allocation_target.sh"
 
 mut_core_registration_omitted() {
     python3 - <<'PYEOF'

@@ -246,13 +246,18 @@ id      = "q-mpu-marker-0040"
 kind    = "pagination_cursor"
 classification = "contract"
 target  = "ListParts.NextPartNumberMarker"
-summary = "A truncated listing hands back a cursor that is valid as the next request's marker, the page-size limit is echoed as the caller sent it rather than as the server clamped it, and a listing of uploads needs both the key cursor and the upload-id cursor because one key can carry several uploads."
+summary = "A truncated listing hands back a cursor that is valid as the next request's marker, a part limit above the 1000-part ceiling is accepted and echoed as the 1000 the response was allowed to hold, and a listing of uploads needs both the key cursor and the upload-id cursor because one key can carry several uploads."
 cases   = ["c-mpu-0010", "c-mpu-0011", "c-mpu-0047", "c-mpu-0048"]
 
   [[quirk.evidence]]
   kind    = "aws-doc"
   ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListMultipartUploads.html"
   summary = "Documents the pair of cursors a truncated upload listing returns and how the next request supplies them."
+
+  [[quirk.evidence]]
+  kind    = "aws-doc"
+  ref     = "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListParts.html"
+  summary = "A part listing returns at most 1000 parts, and its MaxParts field is the most parts the response was allowed to contain."
 
   [[quirk.evidence]]
   kind    = "s3s-pr"

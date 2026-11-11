@@ -363,8 +363,9 @@ impl SigV2PostPolicy {
 
     /// Reads legacy RustFS SigV2 operator names, expiration spellings and field coverage.
     ///
-    /// This accepts ASCII-case-insensitive operators, any single ASCII date/time separator,
-    /// numeric offsets, and arbitrary nonempty decimal fractions. Expiry uses whole seconds;
+    /// This accepts ASCII-case-insensitive operators, numeric offsets, and arbitrary nonempty
+    /// decimal fractions; the selected contract requires date and time joined by `T` or `t`
+    /// (rustfs/gateway#1444), where legacy RustFS accepts any single ASCII byte. Expiry uses whole seconds;
     /// leap seconds must end a UTC month and clamp to its last whole second. Coverage is legacy
     /// RustFS's: its exempt fields, and an unnamed field refused last, by [`Self::enforce_final`].
     /// The generic and operator-only readers retain their original expiration grammar and coverage.
@@ -376,7 +377,7 @@ impl SigV2PostPolicy {
         limits: PostPolicyLimits,
         now: RequestNow,
     ) -> Result<Self, PostPolicyError> {
-        Self::parse_impl(fields, raw_filename, limits, now, PolicyReading::LegacyRustfs)
+        Self::parse_impl(fields, raw_filename, limits, now, PolicyReading::LegacyRustfsSigV2Form)
     }
 
     fn parse_impl(

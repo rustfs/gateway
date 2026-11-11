@@ -222,12 +222,21 @@ fn facade_fast_scope_keeps_heavy_contracts_in_the_workspace_gate() {
     assert_eq!(batches[0][1][0], "clippy");
     assert_eq!(
         batches[1],
-        [["test", "-p", "rustfs-gateway", "--test", "socket_timing"].map(str::to_owned)]
+        [
+            ["test", "-p", "rustfs-gateway", "--test", "socket_timing"].map(str::to_owned),
+            ["test", "-p", "rustfs-gateway", "--test", "signature_text_allocations"].map(str::to_owned),
+        ]
     );
     assert!(
         include_str!("../../../crates/gateway/Cargo.toml")
             .contains("[[test]]\nname = \"socket_timing\"\npath = \"tests/socket_timing.rs\"\n"),
         "the second loop must name the facade's declared socket-timing target"
+    );
+    assert!(
+        include_str!("../../../crates/gateway/Cargo.toml").contains(
+            "[[test]]\nname = \"signature_text_allocations\"\npath = \"tests/signature_text_allocations.rs\"\nharness = false\n"
+        ),
+        "the allocation probe must run without libtest's concurrently allocating monitor"
     );
     assert_eq!(standalone_crate_case("rustfs-gateway"), None);
     assert_eq!(

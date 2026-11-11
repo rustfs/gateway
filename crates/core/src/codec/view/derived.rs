@@ -72,6 +72,7 @@ impl MetaView<'_> {
             bucket: self.bucket.clone(),
             key: self.key.clone(),
             names: self.names.clone(),
+            copy_source_arns_unsupported: self.copy_source_arns_unsupported,
             framed_content_length: Some(length),
             integrity_optional: self.integrity_optional,
             checksum_failures_as_bad_digest: self.checksum_failures_as_bad_digest,

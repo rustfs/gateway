@@ -55,8 +55,10 @@ use rustfs_gateway_types::{
 
 use crate::contracts::{COPY_RANGE_LENGTH_ARITHMETIC, CopyRangeLengthArithmetic};
 
+mod capability;
 mod value;
 
+pub(crate) use capability::classify;
 pub(crate) use value::{decode_value, seal_value};
 #[cfg(test)]
 use value::{prepare_copy, prepare_part_copy, source_erased};
@@ -596,19 +598,14 @@ fn parse_arn(path: &str) -> Result<CopySourceValue, CopySourceRejection> {
 
         "s3-outposts" => {
             let rest = resource.strip_prefix("outpost/").ok_or_else(unknown_arn)?;
-            let (outpost, rest) = rest.split_once('/').ok_or_else(unknown_arn)?;
-            let (bucket, key) = if let Some(key) = rest.strip_prefix("object/") {
-                (None, key)
-            } else {
-                let rest = rest.strip_prefix("bucket/").ok_or_else(unknown_arn)?;
-                let (bucket, key) = rest.split_once("/object/").ok_or_else(unknown_arn)?;
-                (Some(bucket), key)
-            };
+            let boundary = rest.find("/object/").ok_or_else(unknown_arn)?;
+            let outpost_id = rest[..boundary].to_owned();
+            let key = &rest[boundary + "/object/".len()..];
             Ok(CopySourceValue::Outpost {
                 partition: partition.to_owned(),
                 region: region.to_owned(),
                 account_id: account.to_owned(),
-                outpost_id: bucket.map_or_else(|| outpost.to_owned(), |bucket| format!("{outpost}/bucket/{bucket}")),
+                outpost_id,
                 key: key.to_owned(),
                 version_id: None,
             })

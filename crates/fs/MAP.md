@@ -70,6 +70,7 @@ Agent entry point. File → responsibility → when you need to open it.
 | `tests/crud/multipart_sizing.rs` | Multipart minimum-part rejection, retryability, and boundary evidence. | Changing completion part-size validation. |
 | `tests/crud/multipart_upload_ids.rs` | Restarted upload-ID uniqueness, allocator corruption, exhaustion, and symlink refusals before and inside a reserved window, a recreated bucket's new window, and bucket deletion discarding only pending uploads. | Changing multipart capability allocation, its durable counter, or what `DeleteBucket` discards. |
 | `tests/crud/multipart_versioning.rs` | Multipart publication into enabled, suspended, and null version lineages. | Changing completion/version integration or its failure boundaries. |
+| `tests/crud/object_lock_write.rs` | Unsupported lock fields refused before PUT, multipart or COPY publication, with ordinary-write controls. | Changing the Object Lock write boundary. |
 | `tests/crud/object_metadata.rs` | Restarted `x-amz-meta-*` persistence, initiation-time multipart metadata, size and storability refusals, and the pre-section record fixture. | Changing user-metadata persistence or the record's compatibility story. |
 | `tests/crud/head_parts.rs` | HEAD part lengths/counts, version isolation and selector refusal statuses; registered under object_parts. | Changing HEAD partNumber support. |
 | `tests/crud/part_read_checksums.rs` | Stored GET/HEAD part and aligned-range checksums, checksum mode and version isolation. | Changing checksum projection onto read windows. |

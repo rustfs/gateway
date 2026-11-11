@@ -25,9 +25,9 @@
 //! with the rest of the multipart family.
 //!
 //! Two properties the cases pin, both recorded as `q-mpu-marker-0040`: `NextPartNumberMarker` is
-//! usable verbatim as the next request's `part-number-marker`, and `MaxParts` echoes what the
-//! caller asked for rather than what the server clamped it to. A listing whose echo is the
-//! clamped value silently rewrites the caller's request in the caller's own record of it.
+//! usable verbatim as the next request's `part-number-marker`, and `MaxParts` is the most parts
+//! the response was allowed to hold: a `max-parts` above the 1000-part ceiling is accepted, and
+//! the echo is 1000, not the requested value, so a caller never sizes a page it cannot get.
 //!
 //! `Part` repeats directly under the result root with no wrapper (`q-mpu-part-0031`); a wrapped
 //! rendering is a page every SDK reads as empty.

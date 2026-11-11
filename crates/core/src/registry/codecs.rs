@@ -50,7 +50,7 @@
 use std::fmt;
 use std::sync::Arc;
 
-use crate::authz::{Decoded, authorize_input, prepare_input_under};
+use crate::authz::{Decoded, authorize_input};
 use crate::codec::{CodecError, EncodedResponse, MetaView, OperationCodec, RequestBody, RequestBodyMode};
 use crate::handler::Resp;
 use crate::registry::handlers::{ErasedRequest, ErasedResponse};
@@ -168,8 +168,7 @@ impl ErasedCodec {
     ///
     /// # Errors
     ///
-    /// [`CodecError`] naming the model member that could not be read. The operation has already
-    /// been routed, so every failure here is a statement about a value and never a `501`.
+    /// [`CodecError`] naming an invalid input or an assembly capability refusal.
     pub fn decode(&self, request: &MetaView<'_>, body: RequestBody) -> Result<ErasedDecoded, CodecError> {
         (self.decode)(request, body)
     }
@@ -208,9 +207,7 @@ impl fmt::Debug for ErasedCodec {
 /// wrong one with [`RESPONSE_MISMATCH`].
 pub(crate) fn erase<O: OperationCodec>() -> ErasedCodec {
     let decode: ErasedDecode = Arc::new(|request: &MetaView<'_>, body: RequestBody| {
-        let input = O::decode(request, body)?;
-        let decoded = prepare_input_under::<O>(input, request.names())
-            .map_err(|error| CodecError::new(error.code().clone(), error.message()))?;
+        let decoded = crate::static_dispatch::decode::<O>(request, body)?;
         Ok(Box::new(decoded) as ErasedDecoded)
     });
     let resources: ErasedResources = Arc::new(|decoded: &ErasedDecoded| {

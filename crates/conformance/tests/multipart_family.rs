@@ -28,8 +28,71 @@
 
 use rustfs_gateway_conformance::corpus::{Case, Corpus};
 use rustfs_gateway_conformance::inprocess::InProcess;
-use rustfs_gateway_conformance::report::{Baseline, Verdict};
+use rustfs_gateway_conformance::report::{Baseline, CaseOutcome, Verdict};
 use rustfs_gateway_conformance::runner::{self, RunOptions};
+
+fn regression_details(outcome: &CaseOutcome) -> (String, Vec<String>) {
+    let mut details: Vec<String> = outcome.failures().iter().map(ToString::to_string).collect();
+    if outcome.verdict == Verdict::Skipped {
+        details.push(match &outcome.skip_reason {
+            Some(reason) if !reason.is_empty() => format!("skipped: {reason}"),
+            _ => "skipped without a reason".to_owned(),
+        });
+    } else if details.is_empty() {
+        details.push("no failing diagnostic recorded".to_owned());
+    }
+    (outcome.id.clone(), details)
+}
+
+#[test]
+fn regression_details_name_each_failure_and_missing_observation() {
+    use rustfs_gateway_conformance::diagnostic::Diagnostic;
+    use rustfs_gateway_conformance::report::Phase;
+
+    let mut outcome = CaseOutcome {
+        id: "c-mpu-test".to_owned(),
+        domain: "mpu".to_owned(),
+        relative: "case.toml".to_owned(),
+        title: None,
+        verdict: Verdict::Failed,
+        phase: Phase::Execute,
+        skip_reason: None,
+        transport_limited: false,
+        diagnostics: vec![
+            Diagnostic::deny("expect/status", "/expect/status", "wanted 200, saw 500"),
+            Diagnostic::deny("expect/timing", "/expect/timing", "deadline exceeded"),
+            Diagnostic::warn("lint/example", "", "advisory only"),
+        ],
+        quirks: Vec::new(),
+        evidence: Vec::new(),
+    };
+    assert_eq!(
+        regression_details(&outcome),
+        (
+            "c-mpu-test".to_owned(),
+            vec![
+                "[expect/status] at /expect/status: wanted 200, saw 500".to_owned(),
+                "[expect/timing] at /expect/timing: deadline exceeded".to_owned(),
+            ]
+        )
+    );
+    outcome.diagnostics.clear();
+    assert_eq!(
+        regression_details(&outcome),
+        ("c-mpu-test".to_owned(), vec!["no failing diagnostic recorded".to_owned()])
+    );
+    outcome.verdict = Verdict::Skipped;
+    outcome.skip_reason = Some("no socket".to_owned());
+    assert_eq!(
+        regression_details(&outcome),
+        ("c-mpu-test".to_owned(), vec!["skipped: no socket".to_owned()])
+    );
+    outcome.skip_reason = None;
+    assert_eq!(
+        regression_details(&outcome),
+        ("c-mpu-test".to_owned(), vec!["skipped without a reason".to_owned()])
+    );
+}
 
 /// The reference evaluation `conformance/baseline.json` records (rustfs/gateway#985): the baseline
 /// is judged against it, while the in-process run above keeps its own skip and verdict ledgers.
@@ -223,10 +286,10 @@ fn the_multipart_family_runs_green_with_the_entity_tag_cases_recovered() {
     );
 
     let reference = reference_run("mpu/");
-    let regressions: Vec<&str> = reference
+    let regressions: Vec<_> = reference
         .regressions(Some(&baseline))
-        .iter()
-        .map(|outcome| outcome.id.as_str())
+        .into_iter()
+        .map(regression_details)
         .collect();
     assert!(regressions.is_empty(), "multipart regressions against the baseline: {regressions:?}");
 

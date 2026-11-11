@@ -15,7 +15,7 @@
 //! Consolidated integration-test entry point for `rustfs-gateway`.
 //!
 //! Responsible for: registering every gateway integration-test source in one Cargo target, except
-//! the socket-timing suites that `tests/socket_timing.rs` registers.
+//! the socket-timing suites and the standalone signature-allocation probe.
 //! NOT responsible for: test behavior or production implementation.
 //! Upstream: the gateway integration-test modules. Downstream: Cargo's test harness.
 
@@ -215,8 +215,6 @@ mod service_clone_allocations;
 mod service_concurrency;
 #[path = "service_config.rs"]
 mod service_config;
-#[path = "signature_text_allocations.rs"]
-mod signature_text_allocations;
 #[path = "signed_header_reading.rs"]
 mod signed_header_reading;
 #[path = "signing_services.rs"]

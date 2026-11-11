@@ -27,19 +27,30 @@ set -euo pipefail
 #   scripts/ci_install_host_tools.sh
 #   scripts/ci_install_host_tools.sh --with-gh
 #   scripts/ci_install_host_tools.sh --with-cxx
-#   scripts/ci_install_host_tools.sh --target-guards  # Python and timeout only
+#   scripts/ci_install_host_tools.sh --python-guards  # Python and timeout only
 #   scripts/ci_install_host_tools.sh --script-guards  # Python, Ruby and timeout
+#
+# GUARD PROFILES
+#   Pick the profile by what the job executes, not by which harness it uses.
+#   The sm-standard image already has python3 and timeout, so --python-guards
+#   never reaches apt there. Ruby is the expensive one: installing it pulls
+#   libncurses6, which drags upgrades of the essential ncurses packages along
+#   with it, and dpkg configures each essential package in its own pass. On
+#   run 40315690990 that pass alone outlived a three-minute job. The quirk
+#   ledger shards (GATEWAY_GUARD_QUIRK_LEDGER_ONLY=1) run Python and Bash only
+#   — the full quirk-only suite passes with ruby absent from PATH — so they
+#   use --python-guards. Only the full guard self-test shards need Ruby.
 # =============================================================================
 
 with_gh=0
 with_cxx=0
-target_guards=0
+python_guards=0
 script_guards=0
 for argument in "$@"; do
     case "$argument" in
         --with-gh) with_gh=1 ;;
         --with-cxx) with_cxx=1 ;;
-        --target-guards) target_guards=1 ;;
+        --python-guards) python_guards=1 ;;
         --script-guards) script_guards=1 ;;
         *)
             printf 'ci_install_host_tools: unknown argument %s\n' "$argument" >&2
@@ -48,11 +59,11 @@ for argument in "$@"; do
     esac
 done
 
-if [[ "$target_guards" -eq 1 && "$script_guards" -eq 1 ]]; then
+if [[ "$python_guards" -eq 1 && "$script_guards" -eq 1 ]]; then
     printf 'ci_install_host_tools: guard profiles are mutually exclusive\n' >&2
     exit 2
 fi
-if [[ ( "$target_guards" -eq 1 || "$script_guards" -eq 1 ) && ( "$with_gh" -eq 1 || "$with_cxx" -eq 1 ) ]]; then
+if [[ ( "$python_guards" -eq 1 || "$script_guards" -eq 1 ) && ( "$with_gh" -eq 1 || "$with_cxx" -eq 1 ) ]]; then
     printf 'ci_install_host_tools: guard profiles cannot install optional build or CLI tools\n' >&2
     exit 2
 fi
@@ -66,7 +77,7 @@ else
 fi
 
 missing=()
-if [[ "$target_guards" -eq 1 || "$script_guards" -eq 1 ]]; then
+if [[ "$python_guards" -eq 1 || "$script_guards" -eq 1 ]]; then
     # Guard mutations inspect files; they do not compile or probe the network.
     command -v python3 >/dev/null 2>&1 || missing+=(python3)
     if [[ "$script_guards" -eq 1 ]]; then
@@ -128,7 +139,7 @@ if [[ "$want_gh" -eq 1 ]] && ! command -v gh >/dev/null 2>&1; then
     fi
 fi
 
-if [[ "$target_guards" -eq 1 || "$script_guards" -eq 1 ]]; then
+if [[ "$python_guards" -eq 1 || "$script_guards" -eq 1 ]]; then
     required_tools=(python3 timeout)
     if [[ "$script_guards" -eq 1 ]]; then
         required_tools+=(ruby)

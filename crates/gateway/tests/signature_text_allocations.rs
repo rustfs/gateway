@@ -18,9 +18,9 @@
 //! ordinary, empty, boundary and extended scopes, with two independently hashed request fixtures
 //! and both matching and deliberately different output observations.
 //! NOT responsible for: HMAC verification, scope authorization, request-wide costs or time.
-//! Upstream: the signature crate and isolated allocator harness. Downstream: the resource ratchet.
-
-use crate::support;
+//! Upstream: the signature crate. Downstream: Cargo's standalone allocation-test target and the
+//! resource ratchet. This process has no libtest monitor thread: even an exact, single-test
+//! libtest child can allocate monitor bookkeeping inside a process-wide profiling window.
 
 use http::{HeaderMap, HeaderValue, Method};
 use rustfs_gateway_sig::{
@@ -28,9 +28,9 @@ use rustfs_gateway_sig::{
     RegionRule, ServiceReading, SignedHeaderSet, UriPathCandidates,
 };
 
-const ENV: &str = "RUSTFS_GATEWAY_STRING_TO_SIGN_ALLOCATION_PROBE";
-const SENTINEL: &str = "rustfs-gateway string-to-sign allocations: ";
-const TEST: &str = "signature_text_allocations::string_to_sign_owns_only_its_final_text";
+#[global_allocator]
+static ALLOCATOR: dhat::Alloc = dhat::Alloc;
+
 const CALLS: u64 = 256;
 const CASES: usize = 6;
 const DATE: &str = "20150830T123600Z";
@@ -131,17 +131,13 @@ fn cost(kind: usize) -> (u64, u64, u64) {
 /// One healthy output fixture plus five boundary/alternate-scope regressions refuse any extra
 /// heap blocks or bytes beyond a single owned output. Actual values and both observer controls
 /// must pass before the resource ceilings can be accepted.
-#[test]
 fn string_to_sign_owns_only_its_final_text() {
-    if let Some(kinds) = support::allocations::requested_sizes(ENV) {
-        for kind in kinds {
+    let rows: Vec<_> = (0..CASES * 4)
+        .map(|kind| {
             let (blocks, bytes, matched) = cost(kind);
-            support::allocations::report(SENTINEL, &[blocks, bytes, matched]);
-        }
-        return;
-    }
-    let kinds: Vec<_> = (0..CASES * 4).collect();
-    let rows = support::allocations::measure(TEST, ENV, SENTINEL, &kinds, 3);
+            vec![blocks, bytes, matched]
+        })
+        .collect();
     assert!(
         rows.iter().any(|row| row[2] == CALLS) && rows.iter().any(|row| row[2] == 0),
         "the value observer did not measure both matching and deliberately different outputs"
@@ -172,4 +168,8 @@ fn string_to_sign_owns_only_its_final_text() {
             "case {case}: output construction allocated beyond its exact final bytes"
         );
     }
+}
+
+fn main() {
+    string_to_sign_owns_only_its_final_text();
 }

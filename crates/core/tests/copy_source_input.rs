@@ -94,6 +94,7 @@ fn later_bindings_keep_their_error_ahead_of_invalid_copy_sources() {
                 "src/%FF",
                 "arn:bad",
                 "arn:aws:s3:us-east-1:123:accesspoint/ap/object/key",
+                "arn:aws:s3-outposts:us-east-1:123456789012:outpost/op/custom/object/key",
             ] {
                 assert_eq!(
                     decode(part, source, query, &headers, &names),
@@ -134,6 +135,284 @@ fn both_copy_inputs_hold_decoded_values_and_preserve_empty_version_policy() {
 }
 
 #[test]
+fn outposts_access_point_is_preserved_by_both_copy_codecs_but_not_bound() {
+    use rustfs_gateway_core::Operation;
+
+    let source = "arn:aws:s3-outposts:us-east-1:123456789012:outpost/op-1/accesspoint/ap-1/object/key?versionId=v1";
+    for names in [NamePolicy::default(), rustfs()] {
+        for (part, query) in [(false, ""), (true, "?partNumber=1&uploadId=upload")] {
+            let value = decode(part, source, query, &[], &names).expect("source grammar");
+            assert_eq!(
+                value,
+                CopySourceValue::Outpost {
+                    partition: "aws".into(),
+                    region: "us-east-1".into(),
+                    account_id: "123456789012".into(),
+                    outpost_id: "op-1/accesspoint/ap-1".into(),
+                    key: "key".into(),
+                    version_id: Some("v1".into()),
+                }
+            );
+            let error = if part {
+                dto::UploadPartCopy::derive_resources_under(&dto::UploadPartCopyInput::builder(value).build(), &names).err()
+            } else {
+                dto::CopyObject::derive_resources_under(&dto::CopyObjectInput::builder(value).build(), &names).err()
+            }
+            .expect("unsupported identity must not bind");
+            assert_eq!(error.code(), &ErrorCode::INVALID_ARGUMENT);
+            assert_eq!(
+                error.message(),
+                "x-amz-copy-source accepts an access point or Outposts ARN, or a bucket and key"
+            );
+        }
+    }
+}
+
+#[test]
+fn erased_dispatch_still_refuses_outposts_access_point_sources() {
+    use rustfs_gateway_core::ErasedCodec;
+
+    for (part, query) in [(false, ""), (true, "?partNumber=1&uploadId=upload")] {
+        for source in [
+            "arn:aws:s3-outposts:us-east-1:123456789012:outpost/op/accesspoint/ap/object/key",
+            "arn:aws:s3-outposts:us-east-1:123456789012:outpost/op/custom/object/key",
+        ] {
+            let request = http::Request::builder()
+                .method("PUT")
+                .uri(format!("http://host.invalid/target/key{query}"))
+                .header("host", "host.invalid")
+                .header("x-amz-copy-source", source)
+                .body(())
+                .expect("request");
+            let wire = WireRequest::accept(request, &Limits::default()).expect("accepted request");
+            let view = MetaView::of_with(&wire, TargetKind::Object, &rustfs()).expect("request metadata");
+            let codec = if part {
+                ErasedCodec::for_operation::<dto::UploadPartCopy>()
+            } else {
+                ErasedCodec::for_operation::<dto::CopyObject>()
+            };
+            let error = match codec.decode(&view, RequestBody::None) {
+                Err(error) => error,
+                Ok(_) => panic!("unbound source"),
+            };
+            assert_eq!(error.code(), &ErrorCode::INVALID_ARGUMENT);
+            assert_eq!(
+                error.message(),
+                "x-amz-copy-source accepts an access point or Outposts ARN, or a bucket and key"
+            );
+        }
+    }
+}
+
+#[test]
+fn both_copy_codecs_decode_outposts_access_point_identity_and_key_once() {
+    let source = "arn%3Aaws%3As3-outposts%3Aus-east-1%3A123456789012%3Aoutpost%2Fop%2Faccesspoint%2Fap%2Fobject%2Fliteral%252Fkey?versionId=v%252F1";
+    for names in [NamePolicy::default(), rustfs()] {
+        for (part, query) in [(false, ""), (true, "?partNumber=1&uploadId=upload")] {
+            assert_eq!(
+                decode(part, source, query, &[], &names),
+                Ok(CopySourceValue::Outpost {
+                    partition: "aws".into(),
+                    region: "us-east-1".into(),
+                    account_id: "123456789012".into(),
+                    outpost_id: "op/accesspoint/ap".into(),
+                    key: "literal%2Fkey".into(),
+                    version_id: Some("v%2F1".into()),
+                }),
+                "part={part}"
+            );
+        }
+    }
+}
+
+#[test]
+fn both_copy_codecs_preserve_outposts_resource_components() {
+    for names in [NamePolicy::default(), rustfs()] {
+        for (part, query) in [(false, ""), (true, "?partNumber=1&uploadId=upload")] {
+            for component in ["op", "op/custom", "op/accesspoint/ap", "/accesspoint/"] {
+                let source = format!("arn:aws:s3-outposts:us-east-1:123456789012:outpost/{component}/object/key");
+                assert_eq!(
+                    decode(part, &source, query, &[], &names),
+                    Ok(CopySourceValue::Outpost {
+                        partition: "aws".into(),
+                        region: "us-east-1".into(),
+                        account_id: "123456789012".into(),
+                        outpost_id: component.into(),
+                        key: "key".into(),
+                        version_id: None,
+                    }),
+                    "part={part}, component={component}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn unsupported_copy_arns_preserve_parser_errors_before_the_capability_refusal() {
+    use rustfs_gateway_core::{CopySourceKind, Operation};
+
+    let cases = [
+        ("src/key", Ok(Some(CopySourceKind::Bucket))),
+        (
+            "arn:aws:s3:us-east-1:123456789012:accesspoint/ap-1/object/key",
+            Ok(Some(CopySourceKind::Arn)),
+        ),
+        (
+            "arn:aws:s3-outposts:us-east-1:123456789012:outpost/op/accesspoint/ap/object/key",
+            Ok(Some(CopySourceKind::Arn)),
+        ),
+        ("arn:aws:s3:us-east-1:123:accesspoint/ap/object/key", Err(ErrorCode::INVALID_ARGUMENT)),
+        (
+            "arn:aws:s3-outposts:us-east-1:123456789012:outpost/op/accesspoint/ap/object/",
+            Err(ErrorCode::INVALID_ARGUMENT),
+        ),
+    ];
+    for (part, query) in [(false, ""), (true, "?partNumber=1&uploadId=upload")] {
+        for (source, expected) in &cases {
+            let value = decode(part, source, query, &[], &rustfs()).expect("codec source grammar");
+            let result = if part {
+                dto::UploadPartCopy::classify_copy_source(&dto::UploadPartCopyInput::builder(value).build())
+            } else {
+                dto::CopyObject::classify_copy_source(&dto::CopyObjectInput::builder(value).build())
+            };
+            assert_eq!(
+                result.map_err(|error| error.code().clone()),
+                expected.clone(),
+                "part={part}, source={source}"
+            );
+        }
+    }
+}
+
+#[test]
+fn erased_dispatch_refuses_arns_only_when_the_assembly_disables_them() {
+    use rustfs_gateway_core::ErasedCodec;
+
+    for (part, query) in [(false, ""), (true, "?partNumber=1&uploadId=upload")] {
+        let codec = if part {
+            ErasedCodec::for_operation::<dto::UploadPartCopy>()
+        } else {
+            ErasedCodec::for_operation::<dto::CopyObject>()
+        };
+        for (source, disabled, expected) in [
+            ("src/key", true, None),
+            (
+                "arn:aws:s3:us-east-1:123456789012:accesspoint/ap-1/object/key?versionId=v1",
+                true,
+                Some(ErrorCode::NOT_IMPLEMENTED),
+            ),
+            (
+                "arn:aws:s3:us-east-1:123456789012:accesspoint/ap-1/object/key?versionId=",
+                true,
+                Some(ErrorCode::NOT_IMPLEMENTED),
+            ),
+            ("arn:aws:s3:us-east-1:123456789012:accesspoint/ap-1/object/key", false, None),
+            (
+                "arn:aws:s3:us-east-1:123456789012:accesspoint/ap-1/object/key",
+                true,
+                Some(ErrorCode::NOT_IMPLEMENTED),
+            ),
+            (
+                "arn:aws:s3-outposts:us-east-1:123456789012:outpost/op/accesspoint/ap/object/key",
+                true,
+                Some(ErrorCode::NOT_IMPLEMENTED),
+            ),
+            (
+                "arn:aws:s3-outposts:us-east-1:123456789012:outpost/op/custom/object/key",
+                true,
+                Some(ErrorCode::NOT_IMPLEMENTED),
+            ),
+            (
+                "arn:aws:s3-outposts:us-east-1:123456789012:outpost/op/custom/object/key",
+                false,
+                Some(ErrorCode::INVALID_ARGUMENT),
+            ),
+            (
+                "arn:other:s3:us-east-1:123456789012:accesspoint/ap-1/object/key",
+                true,
+                Some(ErrorCode::INVALID_ARGUMENT),
+            ),
+            (
+                "arn:aws:s3::123456789012:accesspoint/ap-1/object/key",
+                true,
+                Some(ErrorCode::INVALID_ARGUMENT),
+            ),
+            (
+                "arn:aws:s3:us-east-1:123456789012:accesspoint/ap/object/key",
+                true,
+                Some(ErrorCode::INVALID_ARGUMENT),
+            ),
+            (
+                "arn:aws:s3-outposts:us-east-1:123456789012:outpost//object/key",
+                true,
+                Some(ErrorCode::INVALID_ARGUMENT),
+            ),
+            (
+                "arn:aws:s3:us-east-1:123:accesspoint/ap/object/key",
+                true,
+                Some(ErrorCode::INVALID_ARGUMENT),
+            ),
+            (
+                "arn:aws:s3-outposts:us-east-1:123456789012:outpost/op/accesspoint/ap/object/",
+                true,
+                Some(ErrorCode::INVALID_ARGUMENT),
+            ),
+        ] {
+            let request = http::Request::builder()
+                .method("PUT")
+                .uri(format!("http://host.invalid/target/key{query}"))
+                .header("host", "host.invalid")
+                .header("x-amz-copy-source", source)
+                .body(())
+                .expect("request");
+            let wire = WireRequest::accept(request, &Limits::default()).expect("accepted request");
+            let view = MetaView::of_with(&wire, TargetKind::Object, &rustfs()).expect("request metadata");
+            let view = if disabled {
+                view.with_copy_source_arns_unsupported().with_framed_content_length(0)
+            } else {
+                view
+            };
+            let actual = codec.decode(&view, RequestBody::None).err().map(|error| error.code().clone());
+            assert_eq!(actual, expected, "part={part}, disabled={disabled}, source={source}");
+        }
+    }
+}
+
+#[test]
+fn erased_dispatch_keeps_ordinary_binding_errors_before_the_copy_capability() {
+    use rustfs_gateway_core::ErasedCodec;
+
+    for (part, query, header) in [
+        (false, "", Some(("x-amz-object-lock-retain-until-date", "invalid"))),
+        (true, "?partNumber=invalid&uploadId=upload", None),
+    ] {
+        let source = "arn:aws:s3:us-east-1:123456789012:accesspoint/ap-1/object/key";
+        let headers: Vec<_> = header.into_iter().collect();
+        let expected = decode(part, source, query, &headers, &rustfs()).expect_err("ordinary binding must fail");
+        let mut request = http::Request::builder()
+            .method("PUT")
+            .uri(format!("http://host.invalid/target/key{query}"))
+            .header("host", "host.invalid")
+            .header("x-amz-copy-source", source);
+        for (name, value) in &headers {
+            request = request.header(*name, *value);
+        }
+        let wire = WireRequest::accept(request.body(()).expect("request"), &Limits::default()).expect("accepted request");
+        let view = MetaView::of_with(&wire, TargetKind::Object, &rustfs())
+            .expect("request metadata")
+            .with_copy_source_arns_unsupported();
+        let codec = if part {
+            ErasedCodec::for_operation::<dto::UploadPartCopy>()
+        } else {
+            ErasedCodec::for_operation::<dto::CopyObject>()
+        };
+        let actual = codec.decode(&view, RequestBody::None).err().map(refusal);
+        assert_eq!(actual, Some(expected), "part={part}");
+    }
+}
+
+#[test]
 fn source_deployment_validation_runs_once_at_resource_derivation() {
     use rustfs_gateway_core::Operation;
     use rustfs_gateway_types::{NameValidator, Stricter};
@@ -168,4 +447,41 @@ fn source_deployment_validation_runs_once_at_resource_derivation() {
             "source validation belongs to derivation: part={part}"
         );
     }
+}
+
+fn versioned_arn_is_refused_by_erased_codec(part: bool) {
+    use rustfs_gateway_core::ErasedCodec;
+
+    let (codec, query) = if part {
+        (ErasedCodec::for_operation::<dto::UploadPartCopy>(), "?partNumber=1&uploadId=upload")
+    } else {
+        (ErasedCodec::for_operation::<dto::CopyObject>(), "")
+    };
+    for version in ["v1", ""] {
+        let source = format!("arn:aws:s3:us-east-1:123456789012:accesspoint/ap-1/object/key?versionId={version}");
+        let request = http::Request::builder()
+            .method("PUT")
+            .uri(format!("http://host.invalid/target/key{query}"))
+            .header("host", "host.invalid")
+            .header("x-amz-copy-source", source)
+            .body(())
+            .expect("request");
+        let wire = WireRequest::accept(request, &Limits::default()).expect("accepted request");
+        let view = MetaView::of_with(&wire, TargetKind::Object, &rustfs())
+            .expect("metadata")
+            .with_copy_source_arns_unsupported();
+        let error = codec.decode(&view, RequestBody::None).expect_err("ARN refused");
+        assert_eq!(error.code(), &ErrorCode::NOT_IMPLEMENTED);
+        assert_eq!(error.message(), "A header you provided implies functionality that is not implemented.");
+    }
+}
+
+#[test]
+fn copy_object_versioned_arn_is_refused_by_erased_codec() {
+    versioned_arn_is_refused_by_erased_codec(false);
+}
+
+#[test]
+fn upload_part_copy_versioned_arn_is_refused_by_erased_codec() {
+    versioned_arn_is_refused_by_erased_codec(true);
 }

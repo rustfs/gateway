@@ -167,6 +167,107 @@ async fn a_false_predicate_refuses_with_access_denied() {
     assert_eq!(authorizer.authorize_route(&context, &request("GetObject", None)).await, Decision::Deny);
 }
 
+struct LegacyAllow;
+
+impl Authorizer for LegacyAllow {
+    fn authorize_route<'a>(
+        &'a self,
+        _context: &'a RequestContext<'a>,
+        _request: &'a AuthzRequest<'a>,
+    ) -> BoxFuture<'a, Decision> {
+        Box::pin(async { Decision::Allow })
+    }
+
+    fn authorize_input<'a>(
+        &'a self,
+        _context: &'a RequestContext<'a>,
+        request: &'a InputAuthzRequest<'a>,
+    ) -> BoxFuture<'a, InputDecisions> {
+        Box::pin(async move { request.decide_all(Decision::Allow, |_| Decision::Allow) })
+    }
+}
+
+#[tokio::test]
+async fn n_legacy_allow_does_not_grant_a_source_only_copy_decision() {
+    let policy = PolicySnapshot::empty();
+    let context = RequestContext::new(RequestNow::from_unix_seconds(0), &policy);
+    let route = AuthzRequest {
+        action: "s3:PutObject",
+        ..request("CopyObject", None)
+    };
+    let source = request("CopyObject", None);
+    let resources = [source];
+    let input = InputAuthzRequest::new(&route, &resources);
+    let authorizer: std::sync::Arc<dyn Authorizer> = std::sync::Arc::new(LegacyAllow);
+
+    assert_eq!(authorizer.authorize_route(&context, &route).await, Decision::Allow);
+    let old_input = authorizer.authorize_input(&context, &input).await;
+    assert_eq!(old_input.stage(), Decision::Allow);
+    assert_eq!(old_input.as_slice(), &[Decision::Allow]);
+    assert_eq!(authorizer.authorize_copy_source(&context, &route, &source).await, Decision::Indeterminate);
+}
+
+#[tokio::test]
+async fn decide_with_and_arc_forward_only_the_copy_source() {
+    let policy = PolicySnapshot::empty();
+    let context = RequestContext::new(RequestNow::from_unix_seconds(0), &policy);
+    let route = AuthzRequest {
+        action: "s3:PutObject",
+        ..request("CopyObject", None)
+    };
+    let source = request("CopyObject", None);
+
+    for expected in [Decision::Allow, Decision::Deny, Decision::Indeterminate] {
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let observed = std::sync::Arc::clone(&seen);
+        let authorizer: std::sync::Arc<dyn Authorizer> = std::sync::Arc::new(decide_with(move |asked| {
+            observed.lock().expect("requests").push(asked.action.to_owned());
+            if asked.action == "s3:GetObject" {
+                expected
+            } else {
+                Decision::Deny
+            }
+        }));
+        assert_eq!(
+            <std::sync::Arc<dyn Authorizer> as Authorizer>::authorize_copy_source(&authorizer, &context, &route, &source).await,
+            expected
+        );
+        assert_eq!(*seen.lock().expect("requests"), ["s3:GetObject"]);
+    }
+}
+
+#[tokio::test]
+async fn allow_when_judges_only_the_copy_source() {
+    let policy = PolicySnapshot::empty();
+    let context = RequestContext::new(RequestNow::from_unix_seconds(0), &policy);
+    let route = AuthzRequest {
+        action: "s3:PutObject",
+        ..request("CopyObject", None)
+    };
+    let source = request("CopyObject", None);
+
+    for allowed in [true, false] {
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let observed = std::sync::Arc::clone(&seen);
+        let authorizer = allow_when(move |asked| {
+            observed.lock().expect("requests").push(asked.action.to_owned());
+            asked.action == "s3:GetObject" && allowed
+        });
+        let expected = if allowed { Decision::Allow } else { Decision::Deny };
+        assert_eq!(authorizer.authorize_copy_source(&context, &route, &source).await, expected);
+        assert_eq!(*seen.lock().expect("requests"), ["s3:GetObject"]);
+    }
+}
+
+#[tokio::test]
+async fn deny_all_refuses_copy_source() {
+    let policy = PolicySnapshot::empty();
+    let context = RequestContext::new(RequestNow::from_unix_seconds(0), &policy);
+    let route = request("CopyObject", None);
+    let source = request("CopyObject", None);
+    assert_eq!(DenyAllAuthorizer.authorize_copy_source(&context, &route, &source).await, Decision::Deny);
+}
+
 /// Negative — a denial renders nothing about the request, so it cannot become a policy oracle.
 #[test]
 fn a_denial_carries_nothing_from_the_request() {
@@ -192,6 +293,8 @@ async fn the_adapter_is_dyn_compatible() {
     let context = RequestContext::new(RequestNow::from_unix_seconds(0), &policy);
     let route = request("GetObject", None);
     assert_eq!(authorizer.authorize_route(&context, &route).await, Decision::Allow);
+    let source = request("CopyObject", None);
+    assert_eq!(authorizer.authorize_copy_source(&context, &route, &source).await, Decision::Allow);
     let resources = [request("GetObject", None), request("HeadObject", None)];
     let input = InputAuthzRequest::new(&route, &resources);
     let decisions = authorizer.authorize_input(&context, &input).await;
@@ -249,6 +352,8 @@ async fn the_dangerous_authorizer_requires_acknowledgement_and_allows_both_stage
     let context = RequestContext::new(RequestNow::from_unix_seconds(0), &policy);
     let route = request("GetObject", None);
     assert_eq!(authorizer.authorize_route(&context, &route).await, Decision::Allow);
+    let source = request("CopyObject", None);
+    assert_eq!(authorizer.authorize_copy_source(&context, &route, &source).await, Decision::Allow);
     let input = InputAuthzRequest::new(&route, &[]);
     let decisions = authorizer.authorize_input(&context, &input).await;
     assert_eq!(decisions.stage(), Decision::Allow);

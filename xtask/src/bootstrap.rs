@@ -30,6 +30,13 @@ pub(crate) fn bootstrap(args: &[String]) -> ExitCode {
         eprintln!("usage: cargo xtask bootstrap");
         return ExitCode::from(2);
     }
+    let launcher_elapsed = match crate::verify::launcher::launcher_elapsed() {
+        Ok(elapsed) => elapsed.unwrap_or_default(),
+        Err(error) => {
+            eprintln!("bootstrap: xtask launcher timestamp is invalid: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
     let started = Instant::now();
     let stage = Stage::start("toolchain check");
     for tool in [["--version"].as_slice(), ["rustc", "--version"].as_slice()] {
@@ -106,7 +113,7 @@ pub(crate) fn bootstrap(args: &[String]) -> ExitCode {
         Ok(_) => {}
     }
     drop(stage);
-    let elapsed = started.elapsed();
+    let elapsed = launcher_elapsed.saturating_add(started.elapsed());
     if elapsed > Duration::from_secs(300) {
         eprintln!("bootstrap: exceeded the five-minute budget ({:.2}s)", elapsed.as_secs_f64());
         return ExitCode::FAILURE;

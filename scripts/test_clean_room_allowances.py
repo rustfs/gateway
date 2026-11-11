@@ -18,7 +18,7 @@ LICENSE = "A" + "GPL-3.0"
 
 
 class Allowances(unittest.TestCase):
-    def run_guard(self, allowance, files=None, fail_tr=False):
+    def run_guard(self, allowance, files=None, fail_tr=False, fail_prefilter=False):
         with tempfile.TemporaryDirectory(prefix="gateway-allowance-") as directory:
             root = Path(directory)
             repo, shim = root / "repo", root / "shim"
@@ -39,6 +39,13 @@ class Allowances(unittest.TestCase):
             command = 'cat; exit 7' if fail_tr else f'exec {shlex.quote(real_tr)} "$@"'
             (shim / "tr").write_text(f'#!/bin/sh\nprintf "x\\n" >> {shlex.quote(str(count))}\n{command}\n')
             (shim / "tr").chmod(0o755)
+            if fail_prefilter:
+                real_git = shutil.which("git")
+                self.assertIsNotNone(real_git)
+                (shim / "git").write_text(
+                    f'#!/bin/sh\ncase "$*" in *"grep -IlFi"*) exit 7;; esac\nexec {shlex.quote(real_git)} "$@"\n'
+                )
+                (shim / "git").chmod(0o755)
             result = subprocess.run(["bash", str(GUARD)], env={**os.environ, "GATEWAY_CHECK_ROOT": str(repo), "PATH": f'{shim}:{os.environ["PATH"]}'}, capture_output=True, text=True, timeout=15)
             calls = len(count.read_text().splitlines()) if count.exists() else 0
             return result, calls
@@ -79,6 +86,27 @@ class Allowances(unittest.TestCase):
     def test_allowance_does_not_exempt_origin_claim(self):
         claim = "co" + "pied from MinIO server source"
         self.assert_rejected("policy.txt\n", {"policy.txt": LICENSE + "\n" + claim}, "claims its contents came")
+
+    def test_prefilter_preserves_every_provenance_alternative(self):
+        examples = [
+            (LICENSE, "names"),
+            ("A" + "ffero General Public License", "names"),
+            ("co" + "pied from Min" + "IO server", "claims its contents came"),
+            ("co" + "pied from Gar" + "age server", "claims its contents came"),
+        ]
+        for content, diagnostic in examples:
+            with self.subTest(content=content):
+                self.assert_rejected("", {"probe.txt": content}, diagnostic)
+
+    def test_prefilter_scans_the_final_batch(self):
+        files = {f"probe-{i:04d}-{'x' * 60}.txt": "Min" + "IO" for i in range(600)}
+        files[f"probe-9999-{'x' * 60}.txt"] = "co" + "pied from Min" + "IO server"
+        self.assert_rejected("", files, "claims its contents came")
+
+    def test_prefilter_failure_is_not_treated_as_no_match(self):
+        result, _ = self.run_guard("", {"plain.txt": "ordinary"}, fail_prefilter=True)
+        self.assertNotEqual(result.returncode, 0, "prefilter failure was ignored")
+        self.assertIn("tracked-tree prefilter failed", result.stderr)
 
     def test_partial_normalizer_output_and_failure_cannot_pass(self):
         result, calls = self.run_guard("plain.txt\n", fail_tr=True)

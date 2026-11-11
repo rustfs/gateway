@@ -28,6 +28,7 @@ Ring-1 generic HTTP runtime. Start at `src/lib.rs`; read only the row needed for
 | `src/dispatch.rs` | Generic path-prefix selection | A route reaches the fallback unexpectedly |
 | `src/layers.rs` | General tower layer attachment points | Wiring panic, request ID, trace or compression |
 | `tests/acceptance.rs` | Deterministic config, dispatch and TLS reload cases | A source-only contract regresses |
+| `tests/server_load/calibration.rs` | Process RSS readings and actual accepts around the first slow-reader wave | RSS collection changes or probes contaminate its calibration |
 | `tests/server_load/isolation.rs` | Real load-child and drain-fixture lease exclusion controls | Saturating load overlaps the healthy shutdown fixture |
 | `tests/server_runtime.rs` | Live h1 admission and shutdown cases | Socket lifecycle behaviour regresses |
 | `tests/server_runtime/established_h1.rs` | Established-H1 shutdown with lease checkpoints | Changing connection-close, EOF, accounting or isolation controls |

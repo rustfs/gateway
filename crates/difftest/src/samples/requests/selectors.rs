@@ -24,6 +24,11 @@ use crate::RawRequest;
 pub(super) fn rows() -> Vec<RequestRow> {
     vec![
         row(
+            "multipart-create-complete-overlap",
+            RawRequest::post("/bkt/k?uploads&uploadId=u", super::COMPLETE_BODY),
+            &["kd-decode-0112"],
+        ),
+        row(
             "attributes-upload-id-nightly-artifact",
             RawRequest::get("/bkt/k?uploadId=up=aS&g-inture=4&attributes=cted-bucket-o"),
             &["kd-decode-0110", "kd-decode-0111"],

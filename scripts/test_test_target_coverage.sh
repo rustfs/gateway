@@ -315,7 +315,7 @@ PYEOF
 }
 expect_fail 'conformance coverage rejects an allocation target alias' mut_conformance_coverage_alias
 
-# The facade's socket-timing suites are the other covered two-target layout (#1264).
+# The facade also runs socket timing and a standalone signature allocation target (#1264, #1525).
 mut_gateway_coverage_target_field() {
     "$PYTHON" - "$1" <<'PYEOF'
 from pathlib import Path
@@ -358,7 +358,24 @@ name = "extra"
 path = "tests/socket_timing.rs"
 TOMLEOF
 }
-expect_fail 'gateway coverage rejects a third target' mut_gateway_coverage_extra_target
+expect_fail 'gateway coverage rejects an additional target' mut_gateway_coverage_extra_target
+
+mut_gateway_signature_coverage() {
+    "$PYTHON" - "$1" <<'PYEOF'
+from pathlib import Path
+import sys
+path = Path("crates/gateway/Cargo.toml")
+source = path.read_text()
+entry = '[[test]]\nname = "signature_text_allocations"\npath = "tests/signature_text_allocations.rs"\nharness = false\n'
+assert source.count(entry) == 1
+replacement = "" if sys.argv[1] == "omit" else entry.replace("harness = false", "harness = true")
+path.write_text(source.replace(entry, replacement, 1))
+PYEOF
+}
+mut_gateway_signature_coverage_missing() { mut_gateway_signature_coverage omit; }
+mut_gateway_signature_coverage_libtest() { mut_gateway_signature_coverage harness; }
+expect_fail 'gateway coverage requires the standalone signature allocation target' mut_gateway_signature_coverage_missing
+expect_fail 'gateway coverage refuses a libtest signature allocation target' mut_gateway_signature_coverage_libtest
 
 mut_other_covered_member_extra_target() {
     cat >>crates/sig/Cargo.toml <<'TOMLEOF'
