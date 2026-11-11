@@ -148,10 +148,10 @@ impl Handler<HeadObject> for Recorder {
 // on a claimed row, while `HeadObject` beside it pins that a standard operation never holds one.
 
 /// `HEAD /example/admin/probe`, whose spec opts in to the caller's secret.
-struct SecretProbe;
+pub(crate) struct SecretProbe;
 
 const PROBE: &str = "example:SecretProbe";
-const PROBE_PATH: &str = "/example/admin/probe";
+pub(crate) const PROBE_PATH: &str = "/example/admin/probe";
 const PROBE_EVIDENCE: &[&str] = &["https://github.com/rustfs/backlog/issues/1744"];
 
 static SECRET_PROBE_SPEC: OperationSpec = OperationSpec::builder(PROBE, 200, None)
@@ -221,7 +221,7 @@ static PROBE_OVERLAY: DialectOverlay = DialectOverlay {
     }],
 };
 
-fn probe_dialect() -> Dialect {
+pub(crate) fn probe_dialect() -> Dialect {
     Dialect::assemble(&PROBE_OVERLAY)
         .declare_claimed::<SecretProbe>(ClaimedRoute {
             precedence: 10,

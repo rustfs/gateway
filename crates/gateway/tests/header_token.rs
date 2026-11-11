@@ -44,8 +44,8 @@ use crate::support;
 pub(crate) mod fixtures;
 
 use self::fixtures::{
-    Answer, Established, Fixture, HEADER, PRINCIPAL, PROBE_PATH, SIGNED_PRINCIPAL, TOKEN, assemble, assemble_on, builder, claim,
-    floors, status_and_code, token_only, with_token,
+    Answer, Established, Fixture, HEADER, PRINCIPAL, PROBE_PATH, RequestCase, SIGNED_PRINCIPAL, TOKEN, assemble, assemble_on,
+    builder, claim, floors, status_and_code, token_only, with_token,
 };
 
 // ── admission ──────────────────────────────────────────────────────────────────────────────────
@@ -149,7 +149,7 @@ async fn n_a_claim_without_a_verifier_refuses_and_never_serves_anonymously() {
 async fn n_the_token_beside_an_aws_credential_surface_is_refused_before_any_verifier_runs() {
     let signed_token = || support::signed_with(http::Method::GET, "/", &[(HEADER, TOKEN)]);
     let presigned = || support::presigned_with_body(Bytes::new(), PayloadMode::Unsigned);
-    let cases: Vec<(&str, Box<dyn Fn() -> http::Request<Bytes>>)> = vec![
+    let cases: Vec<RequestCase> = vec![
         ("a valid header signature covering the token", Box::new(signed_token)),
         (
             "a valid header signature beside an unsigned token",
@@ -239,10 +239,11 @@ async fn n_the_token_beside_an_aws_credential_surface_is_refused_before_any_veri
 async fn n_an_operation_whose_floor_refuses_the_scheme_never_reaches_the_verifier() {
     for (floor_name, floor) in floors() {
         let fixture = assemble_on(floor, Some(Answer::Accepts));
-        let response = fixture.exchange(token_only(http::Method::GET, PROBE_PATH)).await;
-        fixture.refused_before_any_verifier(&response, floor_name);
+        let response = fixture.exchange(token_only(http::Method::HEAD, PROBE_PATH)).await;
+        assert_eq!(response.status(), http::StatusCode::FORBIDDEN, "{floor_name}");
+        fixture.nothing_ran(floor_name);
 
-        let signed = fixture.exchange(support::signed(http::Method::GET, PROBE_PATH)).await;
+        let signed = fixture.exchange(support::signed(http::Method::HEAD, PROBE_PATH)).await;
         assert_eq!(
             signed.status(),
             http::StatusCode::OK,
@@ -358,11 +359,12 @@ impl SignatureVerifier for ReusesAVerdict {
     }
 }
 
-struct AlwaysAccepts;
+/// Reports the named principal for every request.
+struct Reports(&'static str);
 
-impl HeaderTokenVerifier for AlwaysAccepts {
+impl HeaderTokenVerifier for Reports {
     fn verify(&self, _request: &HeaderTokenRequest<'_>) -> Result<Identity, HeaderTokenRefused> {
-        Identity::new("FORGEDPRINCIPAL").map_err(|_| HeaderTokenRefused)
+        Identity::new(self.0).map_err(|_| HeaderTokenRefused)
     }
 }
 
@@ -381,7 +383,7 @@ async fn n_a_header_token_verdict_from_another_admission_authenticates_nothing()
     let Ok(Admission::HeaderToken(admission)) = floor.admit(view, &operation, RequestNow::from_unix_seconds(1)) else {
         panic!("the fixture must exercise header-token admission");
     };
-    let minted = admission.verify(&AlwaysAccepts, &rustfs_gateway::TransportExtensions::default());
+    let minted = admission.verify(&Reports("FORGEDPRINCIPAL"), &rustfs_gateway::TransportExtensions::default());
     assert!(minted.header_token_receipt().is_some(), "the fixture must hold a header-token verdict");
 
     let mut registry = CustomSchemeRegistry::new();
@@ -427,4 +429,26 @@ fn n_the_startup_report_names_the_claim_only_when_it_is_installed() {
             "HEADER_TOKEN_POSTURE header_token=x-auth-token header_token_verifier=none header_token_ops=[ListBuckets,example:Ping]"
         ),
     );
+}
+
+/// Positive — the claim is written onto the floor when the service is built, so a floor installed
+/// after the opt-in keeps both the claim and its own policy: the token is still verified, and the
+/// later floor's anonymous delegation still admits a request without one.
+#[tokio::test]
+async fn the_claim_is_applied_at_build_whatever_the_order_of_the_builder_calls() {
+    let (builder, recorders) = builder(SecurityFloor::new());
+    let later = SecurityFloor::new().delegate_anonymous_to_authorizer_after_listing_in_the_posture_report();
+    let fixture = Fixture::of(
+        builder
+            .host_verified_header_token(claim(), Reports(PRINCIPAL))
+            .security_floor(later),
+        recorders,
+    );
+    let response = fixture.exchange(token_only(http::Method::GET, "/")).await;
+    assert_eq!(response.status(), http::StatusCode::OK, "{:?}", response.body());
+    assert_eq!(fixture.backend.take()[0].header_token.as_deref(), Some(PRINCIPAL));
+
+    let anonymous = fixture.exchange(support::plain(http::Method::GET, "/")).await;
+    assert_eq!(anonymous.status(), http::StatusCode::OK, "the later floor's own policy is in force");
+    assert!(fixture.backend.take()[0].anonymous);
 }

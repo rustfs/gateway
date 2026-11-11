@@ -24,7 +24,8 @@
 //! refusing it; and the bearer and presigned paths of those two routes unchanged beside the claim.
 //! NOT responsible for: the floor's rules themselves (`rustfs-gateway-sig`'s
 //! `tests/header_token.rs`), the standard operations that do admit the scheme (`rustfs-gateway`'s
-//! `tests/header_token.rs`), or the harness (`super`).
+//! `tests/header_token.rs`), the STS form, which this harness does not serve
+//! (`operation_diff::sts_parity`), or the harness (`super`).
 //! Upstream: `super`, `super::zip_token_tests`, `super::extension_tests`. Downstream: nothing.
 
 use std::sync::Arc;

@@ -16,8 +16,8 @@
 //!
 //! Responsible for: the fixture host verifier and what it answers; recorders for both
 //! authorization stages, the handler context, the audit and observer events, the governor's class
-//! and the authenticator's credential lookups; a privileged vendor operation whose floor refuses
-//! the scheme; and the assembled service every case drives.
+//! and the authenticator's credential lookups; and the assembled service every case drives, with
+//! `request_context_runtime.rs`'s privileged vendor probe, whose floor refuses the scheme.
 //! NOT responsible for: any assertion but [`Fixture::refused_before_any_verifier`], which names
 //! the one refusal shape both suites hold a request to.
 //! Upstream: `rustfs_gateway::ServiceBuilder`, `support`. Downstream: `header_token.rs` and
@@ -28,7 +28,7 @@ use std::sync::{Arc, Mutex};
 
 use bytes::Bytes;
 use rustfs_gateway::dto::{ListBuckets, ListBucketsOutput};
-use rustfs_gateway::sig::{Identity, SecurityFloor, SigService};
+use rustfs_gateway::sig::{Identity, SecurityFloor};
 use rustfs_gateway::{
     AuthSchemeRef, Authorizer, AuthzAuditEvent, AuthzAuditSink, AuthzRequest, BoxFuture, ClassKind, CredentialLookup,
     CredentialProvider, Credentials, Decision, Governor, GovernorRequest, Handler, HandlerContext, HandlerResult,
@@ -36,13 +36,9 @@ use rustfs_gateway::{
     Observer, ProviderError, RegionSet, Req, RequestContext, RequestContextView, RequestEvent, Resp, S3Service, ServiceBuilder,
     SigV4Authenticator, StaticCredentials,
 };
-use rustfs_gateway_core::codec::{CodecError, EncodedResponse, MetaView, OperationCodec, RequestBody, RequestBodyMode};
-use rustfs_gateway_core::{
-    AuthRequirement, ClaimedRoute, ClaimedRow, Dialect, DialectOverlay, HandlerDeadlineClass, Operation, OperationSpec,
-    OverlayRow, PathClaim, Predicate, ResourceShape,
-};
-use rustfs_gateway_sig::OperationFloor;
 
+pub(crate) use crate::request_context_runtime::PROBE_PATH;
+use crate::request_context_runtime::{SecretProbe, probe_dialect};
 use crate::support::{self, Ping, PingOutput};
 
 pub(crate) const HEADER: &str = "x-auth-token";
@@ -100,6 +96,9 @@ impl HeaderTokenVerifier for Host {
 // ── recorders ──────────────────────────────────────────────────────────────────────────────────
 
 pub(crate) type Lines = Vec<(String, Vec<u8>)>;
+
+/// One named request shape, rebuilt for every service it is sent to.
+pub(crate) type RequestCase = (&'static str, Box<dyn Fn() -> http::Request<Bytes>>);
 
 /// One authorization stage, as the recording authorizer was asked it.
 #[derive(Clone, Debug)]
@@ -274,99 +273,17 @@ impl CredentialProvider for CountedCredentials {
 }
 
 // ── a privileged vendor operation, which refuses the scheme ────────────────────────────────────
+//
+// `request_context_runtime.rs`'s `HEAD /example/admin/probe`: a third-party operation that kept its
+// privileged default. Reused here rather than declared a second time.
 
-/// `GET /example/admin/probe`: a third-party operation that kept its privileged default.
-struct Probe;
-
-const PROBE: &str = "example:TokenProbe";
-pub(crate) const PROBE_PATH: &str = "/example/admin/probe";
-const PROBE_EVIDENCE: &[&str] = &["https://github.com/rustfs/gateway/issues/1586"];
-
-static PROBE_SPEC: OperationSpec = OperationSpec::builder(PROBE, 200, None)
-    .handler_deadline_class(HandlerDeadlineClass::Standard)
-    .required_params(&[])
-    .auth(AuthRequirement::new(PROBE, ResourceShape::Service))
-    .build();
-
-static PROBE_FLOOR: OperationFloor = OperationFloor::custom(PROBE, SigService::S3);
-
-impl Operation for Probe {
-    const NAME: &'static str = PROBE;
-    type Input = ();
-    type Output = ();
-    type DerivedResources = rustfs_gateway_core::NoDerived;
-
-    fn derive_resources(_input: &Self::Input) -> Result<Self::DerivedResources, rustfs_gateway_core::DerivedResourceError> {
-        Ok(rustfs_gateway_core::NoDerived)
-    }
-
-    fn seal_derived_input(_input: &mut Self::Input) {}
-
-    fn spec() -> &'static OperationSpec {
-        &PROBE_SPEC
-    }
-
-    fn floor() -> &'static OperationFloor {
-        &PROBE_FLOOR
-    }
-}
-
-impl OperationCodec for Probe {
-    const REQUEST_BODY: RequestBodyMode = RequestBodyMode::None;
-
-    fn decode(_request: &MetaView<'_>, _body: RequestBody) -> Result<(), CodecError> {
-        Ok(())
-    }
-
-    fn encode(_output: (), _request: &MetaView<'_>, status: u16) -> Result<EncodedResponse, CodecError> {
-        Ok(EncodedResponse::of(status))
-    }
-}
-
-static PROBE_ROWS: &[ClaimedRow] = &[ClaimedRow {
-    template: PROBE_PATH,
-    selector: &[Predicate::Method(http::Method::GET)],
-}];
-
-static PROBE_OVERLAY: DialectOverlay = DialectOverlay {
-    name: "example-token-probe",
-    vendor: "example",
-    operations: &[OverlayRow {
-        name: PROBE,
-        precedence: 10,
-        selector: "PathTemplate(\"/example/admin/probe\") ∧ Method(GET)",
-        action: PROBE,
-        resource: ResourceShape::Service,
-        success_status: 200,
-        anonymous: false,
-        evidence: PROBE_EVIDENCE,
-    }],
-    claims: &[PathClaim {
-        prefix: "/example/admin",
-        reason: "The probe's vendor serves its admin surface here, ahead of S3.",
-        evidence: PROBE_EVIDENCE,
-    }],
-};
-
-fn probe_dialect() -> Dialect {
-    Dialect::assemble(&PROBE_OVERLAY)
-        .declare_claimed::<Probe>(ClaimedRoute {
-            precedence: 10,
-            rows: PROBE_ROWS,
-            shadows: &[],
-            bucket_param: None,
-        })
-        .build()
-        .expect("the probe's record and declaration agree")
-}
-
-impl Handler<Probe> for Backend {
-    async fn call(&self, request: Req<Probe>) -> HandlerResult<Probe> {
+impl Handler<SecretProbe> for Backend {
+    async fn call(&self, request: Req<SecretProbe>) -> HandlerResult<SecretProbe> {
         self.record(request.context());
         Ok(Resp::new(()))
     }
 
-    async fn call_with_context(&self, request: Req<Probe>, _context: HandlerContext) -> HandlerResult<Probe> {
+    async fn call_with_context(&self, request: Req<SecretProbe>, _context: HandlerContext) -> HandlerResult<SecretProbe> {
         self.record(request.context());
         Ok(Resp::new(()))
     }
@@ -412,12 +329,17 @@ impl Fixture {
         support::exchange_wire(&self.service, request).await
     }
 
-    /// `403 AccessDenied`, and nothing behind the floor ran: no verifier, no credential lookup,
-    /// no authorizer question and no handler.
+    /// `403 AccessDenied`, and nothing behind the floor ran.
     pub(crate) fn refused_before_any_verifier(&self, response: &rustfs_gateway::WireResponse, at: &str) {
         let body = String::from_utf8_lossy(response.body()).into_owned();
         assert_eq!(response.status(), http::StatusCode::FORBIDDEN, "{at}: {body}");
         assert_eq!(support::element_text(&body, "Code"), Some("AccessDenied"), "{at}: {body}");
+        self.nothing_ran(at);
+    }
+
+    /// Nothing behind the floor ran: no verifier, no credential lookup, no authorizer question and
+    /// no handler.
+    pub(crate) fn nothing_ran(&self, at: &str) {
         assert_eq!(self.verifier_calls.load(Ordering::SeqCst), 0, "{at}: the host's verifier was asked");
         assert_eq!(self.lookups.load(Ordering::SeqCst), 0, "{at}: a credential was looked up");
         assert!(self.stages.take().is_empty(), "{at}: the authorizer was asked");
@@ -456,7 +378,7 @@ pub(crate) fn builder(floor: SecurityFloor) -> (ServiceBuilder, Recorders) {
         )
         .register::<ListBuckets, _>(Arc::clone(&recorders.backend))
         .register::<Ping, _>(Arc::clone(&recorders.backend))
-        .register::<Probe, _>(Arc::clone(&recorders.backend))
+        .register::<SecretProbe, _>(Arc::clone(&recorders.backend))
         .dialect(&support::ping_dialect())
         .dialect(&probe_dialect());
     (builder, recorders)

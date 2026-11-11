@@ -756,6 +756,8 @@ gateway_modules = (
     "governor_streaming",
     "handler_panic",
     "header_lookup_allocations",
+    "header_token",
+    "header_token_secrecy",
     "host_body_bounds",
     "host_deadlines",
     "host_reporting",

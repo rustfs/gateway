@@ -672,3 +672,59 @@ fn n_a_body_past_the_claimed_route_ceiling_is_refused_after_the_signature() {
     assert_eq!(answer.status, 403, "{answer:?}");
     assert!(answer.handed.is_none());
 }
+
+/// Negative — the STS endpoint issues credentials and refuses a host-verified header token
+/// (ADR-0050), although its floor is not privileged and admits the anonymous Web Identity form.
+/// With the claim installed, the form reaches its handler without the header and is refused with
+/// it, before the authorizer, and the host's verifier is never asked.
+#[test]
+fn n_the_sts_endpoint_refuses_a_header_token_it_would_serve_without() {
+    use rustfs_gateway::{HeaderTokenClaim, HeaderTokenRefused, HeaderTokenRequest, HeaderTokenVerifier, Identity};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct Spy(Arc<AtomicUsize>);
+
+    impl HeaderTokenVerifier for Spy {
+        fn verify(&self, _request: &HeaderTokenRequest<'_>) -> Result<Identity, HeaderTokenRefused> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Identity::new("KEYSTONEUSER").map_err(|_| HeaderTokenRefused)
+        }
+    }
+
+    let now = RequestNow::capture();
+    let form = b"Action=AssumeRoleWithWebIdentity&Version=2011-06-15&WebIdentityToken=x.y.z";
+    let sent = Sent::new(Signing::Anonymous).body(Bytes::from_static(form));
+    let verifier_asked = Arc::new(AtomicUsize::new(0));
+    for with_token in [false, true] {
+        let reached = Arc::new(Mutex::new(None));
+        let asked: Asked = Arc::new(Mutex::new(Vec::new()));
+        let claim = HeaderTokenClaim::new("x-auth-token").expect("a legal claim");
+        let service = gateway_builder(now, &asked)
+            .host_verified_header_token(claim, Spy(Arc::clone(&verifier_asked)))
+            .register::<StsFormPost, _>(Arc::new(Sts {
+                handed: Arc::clone(&reached),
+            }))
+            .build()
+            .expect("a complete assembly");
+        let mut request = sent.request(now);
+        if with_token {
+            let token = http::HeaderValue::from_static("gAAAAABheader-token-sentinel");
+            request.headers_mut().insert("x-auth-token", token);
+        }
+        let response = block_on(service.call_bytes(request));
+        let collected = block_on(rustfs_gateway::collect(response)).expect("an in-memory answer");
+        let reached = reached.lock().expect("uncontended").take();
+        let questions = std::mem::take(&mut *asked.lock().expect("uncontended"));
+        let body = String::from_utf8_lossy(collected.body()).into_owned();
+        if with_token {
+            assert_eq!(collected.status().as_u16(), 403, "{body}");
+            assert_eq!(element(&body, "Code").as_deref(), Some("AccessDenied"), "{body}");
+            assert!(reached.is_none() && questions.is_empty(), "{reached:?} {questions:?}");
+            assert!(!body.to_ascii_lowercase().contains("sentinel"), "{body}");
+        } else {
+            assert_eq!(collected.status().as_u16(), 200, "{body}");
+            assert!(reached == handed(None, &sent), "the control: the anonymous form reaches its handler");
+        }
+    }
+    assert_eq!(verifier_asked.load(Ordering::SeqCst), 0, "the host's verifier was asked");
+}

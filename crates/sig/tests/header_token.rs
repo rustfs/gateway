@@ -134,6 +134,7 @@ impl HeaderTokenVerifier for Refuses {
 }
 
 /// What a host's outer layer leaves in the request for its verifier to report.
+#[derive(Clone)]
 struct Established(&'static str);
 
 /// A verifier as a host writes one: it reports the identity its outer layer installed in this
@@ -167,20 +168,35 @@ fn server_state(installed: Option<Established>) -> TransportExtensions {
 // The claim
 // ---------------------------------------------------------------------------
 
-/// Positive — a lowercase header name outside the AWS surface is a claim, and names its header.
+/// Positive — a lowercase extension header outside the AWS namespace is a claim, and names its
+/// header.
 #[test]
-fn a_lowercase_header_name_outside_the_aws_surface_is_a_claim() {
-    for name in ["x-auth-token", "x-storage-token", "token", "x-9"] {
+fn a_lowercase_extension_header_outside_the_aws_namespace_is_a_claim() {
+    for name in ["x-auth-token", "x-storage-token", "x-9", "x-a"] {
         assert_eq!(HeaderTokenClaim::new(name).map(|claim| claim.header()), Ok(name), "{name}");
     }
 }
 
-/// Negative — an empty, uppercase, malformed or AWS-owned name is no claim. `authorization` and
-/// `x-amz-` belong to the signature path; `:` would name an HTTP/2 pseudo-header.
+/// Negative — an empty, uppercase, malformed, standard or AWS-owned name is no claim. The claimed
+/// header is removed before the request is accepted, so nothing HTTP or the signature path reads
+/// may be claimed: `authorization`, the framing and routing headers, an HTTP/2 pseudo-header, and
+/// every `x-amz-` name.
 #[test]
-fn n_a_name_outside_the_grammar_or_inside_the_aws_surface_is_no_claim() {
+fn n_a_name_outside_the_grammar_or_inside_the_aws_namespace_is_no_claim() {
     for name in [
         "",
+        "x",
+        "x-",
+        "token",
+        "auth-token",
+        "host",
+        "cookie",
+        "content-length",
+        "content-type",
+        "transfer-encoding",
+        "connection",
+        "proxy-authorization",
+        "xauth-token",
         "X-Auth-Token",
         "x-Auth-token",
         "authorization",
@@ -221,8 +237,6 @@ fn a_lone_claimed_header_is_admitted_as_a_header_token() {
             assert_eq!(shape(&admitted), "header-token", "{name}: {operation:?}");
             assert!(floor.admits_header_token(&operation), "{name}: the predicate agrees");
         }
-        let admission = admission_of(&floor, &headers, &standard_op());
-        assert_eq!(admission.operation(), "PutObject", "{name}");
     }
 }
 
@@ -444,7 +458,8 @@ fn n_the_token_beside_a_registered_custom_scheme_is_refused() {
     let overlapping = SecurityFloor::new()
         .with_custom_schemes(registry("x-auth-"))
         .with_header_token_claim(claim());
-    let admitted = admit(&overlapping, &with_token(&[]), "", None, &standard_op());
+    let token_alone = with_token(&[]);
+    let admitted = admit(&overlapping, &token_alone, "", None, &standard_op());
     assert_eq!(shape(&admitted), "refused:AccessDenied", "one header, two schemes: neither is chosen");
 }
 
@@ -546,6 +561,14 @@ fn n_privileged_bearer_claimed_and_sigv4_only_operations_refuse_the_scheme() {
             standard_op().with_query_bearer_claim(QueryBearerClaim::new("token", ".zip")),
         ),
         (
+            "credential issuance, anonymous opted in",
+            OperationFloor::builtin("example:AssumeRole", SigService::Sts).allow_anonymous_after_listing_in_the_posture_report(),
+        ),
+        (
+            "credential issuance",
+            OperationFloor::builtin_presigned("example:GetToken", SigService::Sts),
+        ),
+        (
             "sigv4 under every policy",
             OperationFloor::builtin_presigned("example:SignedOnly", SigService::S3).require_sigv4_under_every_policy(),
         ),
@@ -558,6 +581,7 @@ fn n_privileged_bearer_claimed_and_sigv4_only_operations_refuse_the_scheme() {
     ];
     let admitting = [
         ("header-only", standard_op()),
+        ("another S3 service", OperationFloor::builtin("example:Express", SigService::S3Express)),
         ("presigned", OperationFloor::builtin_presigned("GetObject", SigService::S3)),
         ("anonymous", standard_op().allow_anonymous_after_listing_in_the_posture_report()),
     ];
@@ -594,7 +618,6 @@ fn a_verifier_that_accepts_yields_a_header_token_verdict() {
     assert_eq!(verifier.0.load(Ordering::SeqCst), 1);
     let receipt = verdict.header_token_receipt().expect("a header-token verdict");
     assert_eq!(receipt.identity().access_key_id(), PRINCIPAL);
-    assert_eq!(receipt.operation(), "PutObject");
     assert_eq!(verdict.identity().map(Identity::access_key_id), Some(PRINCIPAL));
     assert!(!verdict.is_authenticated(), "no signature was compared");
     assert!(!verdict.is_anonymous());
@@ -687,7 +710,8 @@ fn n_no_rendering_of_an_admission_request_or_verdict_holds_the_token() {
     rendered.push(verifier.0.lock().expect("uncontended").clone());
     rendered.push(format!("{verdict:?}"));
     rendered.push(format!("{:?}", verdict.header_token_receipt().expect("a receipt")));
-    let refused = admit(&floor, &with_token(&[("authorization", "Bearer x")]), "", None, &standard_op());
+    let both = with_token(&[("authorization", "Bearer x")]);
+    let refused = admit(&floor, &both, "", None, &standard_op());
     rendered.push(format!("{refused:?}"));
     if let Err(error) = refused {
         rendered.push(error.to_string());

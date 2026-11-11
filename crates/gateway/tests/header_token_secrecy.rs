@@ -35,8 +35,8 @@ use rustfs_gateway::{S3Service, WireHead, dto, wire_filter};
 
 use crate::anonymous_chunked_upload::{Backend as Uploads, OBJECT, OBJECT_CRC32, Recorded, anonymous_put, unsigned_framing};
 use crate::header_token::fixtures::{
-    Answer, Asked, Fixture, HEADER, Handed, Lines, PRINCIPAL, TOKEN, assemble, assemble_on, builder, claim, token_only,
-    with_token,
+    Answer, Asked, Fixture, HEADER, Handed, Lines, PRINCIPAL, RequestCase, TOKEN, assemble, assemble_on, builder, claim,
+    token_only, with_token,
 };
 use crate::support;
 use crate::tracing_events::captured;
@@ -90,7 +90,7 @@ fn n_no_log_event_answer_or_context_holds_the_token() {
                     vec![
                         token_only(http::Method::GET, "/"),
                         token_only(http::Method::POST, "/?note=kept"),
-                        token_only(http::Method::GET, "/example/admin/probe"),
+                        token_only(http::Method::HEAD, "/example/admin/probe"),
                         with_token(support::signed(http::Method::GET, "/")),
                         support::signed_with(http::Method::GET, "/", &[(HEADER, TOKEN)]),
                         token_only(http::Method::GET, "/?X-Amz-Algorithm=AWS4-HMAC-SHA256"),
@@ -301,7 +301,7 @@ fn plain_put(extra: &[(&str, &str)]) -> http::Request<Bytes> {
 /// RustFS profile's switch. No signed-payload obligation is added and none is lifted.
 #[tokio::test]
 async fn the_body_of_a_header_token_request_is_held_to_what_an_anonymous_body_is() {
-    let shapes: Vec<(&str, Box<dyn Fn() -> http::Request<Bytes>>)> = vec![
+    let shapes: Vec<RequestCase> = vec![
         ("a plain body", Box::new(|| plain_put(&[]))),
         (
             "a plain body declaring a digest it does not have",
@@ -356,4 +356,36 @@ async fn the_body_of_a_header_token_request_is_held_to_what_an_anonymous_body_is
         (200, None, vec![(OBJECT.len() as i64, OBJECT.to_vec())]),
         "decoded as a signed upload is"
     );
+}
+
+/// Positive and negative — the claimed header is withheld before acceptance, so its bytes are
+/// bounded by the floor and not counted in the head's ceiling, and `S3Service::classify` agrees
+/// with `call`: a head that only exceeds the ceiling by its token is served when the claim is
+/// installed, and refused for its size by both when it is not, exactly as before.
+#[tokio::test]
+async fn the_withheld_token_is_outside_the_accepted_head_and_classification_agrees() {
+    let request = || {
+        let mut request = support::plain(http::Method::GET, "/");
+        let filler = http::HeaderValue::from_str(&"f".repeat(12 * 1024)).expect("a header value");
+        let token = http::HeaderValue::from_str(&"t".repeat(rustfs_gateway::HeaderTokenClaim::MAX_TOKEN_BYTES));
+        request.headers_mut().insert("x-filler", filler);
+        request.headers_mut().insert(HEADER, token.expect("a header value"));
+        request
+    };
+    let (head, _) = request().into_parts();
+
+    let claimed = assemble(Some(Answer::Accepts));
+    assert_eq!(claimed.service.classify(&head), rustfs_gateway::Classification::Operation("ListBuckets"));
+    let response = claimed.exchange(request()).await;
+    assert_eq!(response.status(), http::StatusCode::OK, "{:?}", response.body());
+    assert_eq!(claimed.backend.take()[0].header_token.as_deref(), Some(PRINCIPAL));
+
+    let unclaimed = assemble(None);
+    let response = unclaimed.exchange(request()).await;
+    assert!(response.status().is_client_error(), "{:?}", response.status());
+    assert!(unclaimed.backend.take().is_empty());
+    let rustfs_gateway::Classification::Refused { status, .. } = unclaimed.service.classify(&head) else {
+        panic!("an oversized head is refused before any operation is chosen");
+    };
+    assert_eq!(status, response.status());
 }
