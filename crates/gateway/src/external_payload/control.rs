@@ -22,9 +22,8 @@
 use super::{
     ExternalPayload, ExternalPayloadBinding, ExternalPayloadError, ExternalPayloadProvider, ExternalRequest, upload::UploadEntry,
 };
-use crate::dispatch::handler_deadline;
 use crate::request_config::{Authorized, RequestConfig};
-use crate::request_deadline::handler_with_request_cancellation;
+use crate::request_deadline::{HandlerCancellationOutcome, handler_with_request_cancellation};
 use http::{HeaderMap, Method, Request, Response, StatusCode};
 use rustfs_gateway_core::{
     BoxFuture, EncodedResponse, HandlerCancellationSource, HandlerDeadlineClass, HandlerError, RequestContextView, ResponseBody,
@@ -150,7 +149,9 @@ async fn run_query(
     {
         return Err(invalid());
     }
-    let deadline = handler_deadline(config, deadline_class)?;
+    let deadline_class = deadline_class
+        .ok_or_else(|| HandlerError::internal_error("registered operation is missing its handler deadline class"))?;
+    let deadline = config.config().handler_deadline(deadline_class);
     let query = entry
         .query
         .lock()
@@ -171,7 +172,24 @@ async fn run_query(
         config.request_cancellation(),
     )
     .await;
-    outcome
-        .into_handler_result(|completed| config.record_handler_deadline(completed))
-        .map(ExternalControlResponse::encoded)
+    match outcome {
+        HandlerCancellationOutcome::Completed(result) => result.map(ExternalControlResponse::encoded),
+        HandlerCancellationOutcome::Expired { cleanup_completed } => {
+            config.record_handler_deadline(cleanup_completed);
+            let message = if cleanup_completed {
+                "handler deadline exceeded after cleanup completed"
+            } else {
+                "handler deadline exceeded before cleanup completed"
+            };
+            Err(HandlerError::internal_error(message))
+        }
+        HandlerCancellationOutcome::RequestAborted { cleanup_completed } => {
+            let message = if cleanup_completed {
+                "request ended after handler cleanup completed"
+            } else {
+                "request ended before handler cleanup completed"
+            };
+            Err(HandlerError::internal_error(message))
+        }
+    }
 }

@@ -27,7 +27,7 @@ use http::{HeaderMap, HeaderName, HeaderValue, Method, Request, Response, Status
 use rustfs_gateway_core::TargetKind;
 use rustfs_gateway_core::cors::{
     ACCESS_CONTROL_ALLOW_ORIGIN, CorsHeaders, ORIGIN, PreflightOutcome, PreflightRefusalCause, PreflightRequest, VARY,
-    answer_actual, answer_preflight, preflight_uses_resolved_target,
+    VARY_ORIGIN, answer_actual, answer_preflight, headers_apply_to_post_auth_errors, preflight_uses_resolved_target,
 };
 use rustfs_gateway_sig::RequestNow;
 use rustfs_gateway_stream::Body;
@@ -39,6 +39,32 @@ use crate::ext::{CORS_PREFLIGHT, ClassKind, ClientAddr, GovernorRequest, Resolve
 use crate::request_deadline::hold_failure_floor;
 
 use super::{Outcome, S3Service};
+
+impl Outcome<'_> {
+    pub(super) fn decorate_response_cors(&self, response: &mut Response<Body>) {
+        // The CORS decoration for an ordinary request, applied here because it belongs on
+        // **every** answer the pipeline produced once authorisation was granted — the `404` and
+        // the `500` included. A browser cannot read a response it was not granted access to, so
+        // an error without these headers reaches the page as an opaque network failure and the
+        // status the operator is looking at is invisible to the client. Nothing is applied when
+        // `run` never got as far as authorising: see `Outcome::cors`.
+        if let Some(cors) = self
+            .cors
+            .as_ref()
+            .filter(|_| headers_apply_to_post_auth_errors() || response.status().is_success())
+        {
+            let headers = response.headers_mut();
+            if let Some(cors_headers) = &cors.headers {
+                for (name, value) in cors_headers.iter() {
+                    headers.insert(name, value.clone());
+                }
+            }
+            if cors.vary_origin {
+                headers.insert(VARY, VARY_ORIGIN);
+            }
+        }
+    }
+}
 
 impl S3Service {
     /// Answers one preflight, and never anything else.

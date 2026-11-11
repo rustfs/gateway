@@ -285,14 +285,8 @@ impl ServiceBuilder {
     #[cfg(feature = "external-payload")]
     pub(crate) fn enable_external_payload_registration(mut self, operation: &'static str) -> Self {
         if let Some(pending) = self.pending.remove(operation) {
-            self.pending.insert(
-                operation,
-                Box::new(move |layers| {
-                    let mut dispatch = pending(layers)?;
-                    dispatch.enable_external_payload();
-                    Ok(dispatch)
-                }),
-            );
+            let register = move |layers| pending(layers).map(OperationDispatch::with_external_payload);
+            self.pending.insert(operation, Box::new(register));
         }
         self
     }

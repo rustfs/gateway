@@ -156,7 +156,7 @@ impl OperationMode for DynamicMode<'_> {
             let authorized = entry.authorize(decoded, &decisions).map_err(StaticDispatchError::Denied)?;
             #[cfg(feature = "external-payload")]
             if let Some(query) =
-                crate::external_payload::dispatch_control(&request_context, &request_config, entry.control_deadline_class)
+                crate::external_payload::dispatch_control(&request_context, &request_config, entry.control_deadline_class())
             {
                 let response = query.await;
                 drop(authorized);

@@ -114,8 +114,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use bytes::Bytes;
 use http::{Method, Request, Response};
 use rustfs_gateway_core::cors::{
-    CorsPolicy, PreflightClass, PreflightRefusalCause, VARY, VARY_ORIGIN, classify, headers_apply_to_post_auth_errors,
-    invalid_target_is_uniform_refusal, preflight_bypasses_pipeline,
+    CorsPolicy, PreflightClass, PreflightRefusalCause, classify, invalid_target_is_uniform_refusal, preflight_bypasses_pipeline,
 };
 use rustfs_gateway_core::{
     Decision, EncodedResponse, ErrorContext, HandlerError, MetaView, OwnedResource, RedirectTarget, RegionLabel, RequestBodyMode,
@@ -136,7 +135,8 @@ use crate::config::{ConfigSnapshot, ConfigStore};
 use crate::ext::{
     AuthSchemeRef, Authentication, AuthenticationOutcome, Authenticator, AuthzAuditEvent, AuthzRequest, AuthzStage,
     BucketOwnerSource, CachedCorsSource, ClassKind, ClientAddr, ClientFacts, Governor, GovernorRequest, HostResolver,
-    InputAuthzRequest, PolicySnapshot, RequestContext, ResponseView, RoutedView, SigV2Authentication, WireHead, emit_safely,
+    InputAuthzRequest, PolicySnapshot, RequestContext, RequestEvent, ResponseView, RoutedView, SigV2Authentication, WireHead,
+    emit_safely,
 };
 use crate::gate::{BodyCeilings, BodyDigestObligation, MetadataAdmission, SealedBody};
 use crate::logging::{Extension, Refused};
@@ -149,7 +149,7 @@ pub use crate::posture::SecurityPosture;
 use crate::render::{
     from_auth, from_auth_context, from_auth_with_detail, from_codec, from_denial, from_handler, from_pre_auth, from_sse,
 };
-use crate::request_config::{Entered, Guarded, HandlerDeadlineReport, RequestConfig, RouteAuthorized};
+use crate::request_config::{Entered, Guarded, HandlerDeadlineReport, HandlerDeadlineReportSlot, RequestConfig, RouteAuthorized};
 use crate::request_deadline::{elapsed_since, hold_failure_floor, policy_snapshot_with_timeout};
 use crate::routed_facts::RoutedFacts;
 use crate::trace::TraceSource;
@@ -328,27 +328,7 @@ impl S3Service {
                 .view_policy
                 .not_modified_headers
                 .apply(outcome.operation, status, response.headers_mut());
-            // The CORS decoration for an ordinary request, applied here because it belongs on
-            // **every** answer the pipeline produced once authorisation was granted — the `404` and
-            // the `500` included. A browser cannot read a response it was not granted access to, so
-            // an error without these headers reaches the page as an opaque network failure and the
-            // status the operator is looking at is invisible to the client. Nothing is applied when
-            // `run` never got as far as authorising: see `Outcome::cors`.
-            if let Some(cors) = outcome
-                .cors
-                .as_ref()
-                .filter(|_| headers_apply_to_post_auth_errors() || response.status().is_success())
-            {
-                let headers = response.headers_mut();
-                if let Some(cors_headers) = &cors.headers {
-                    for (name, value) in cors_headers.iter() {
-                        headers.insert(name, value.clone());
-                    }
-                }
-                if cors.vary_origin {
-                    headers.insert(VARY, VARY_ORIGIN);
-                }
-            }
+            outcome.decorate_response_cors(&mut response);
             // Legacy RustFS decorates answers that reach its CORS layer, including authentication
             // refusals, but its earlier cleartext customer-key gate is outside that layer.
             if outcome.legacy_cors_disposition == LegacyCorsDisposition::Decorate
@@ -356,10 +336,8 @@ impl S3Service {
             {
                 self.decorate_legacy_cors(legacy_cors, &mut response, now).await;
             }
-            // The response seam. After the CORS decoration, so a filter sees the response a browser
-            // would; before the invariants and the stamp, so neither can be defeated by one. It runs
-            // for every response this service produces, including one refused at acceptance — which is
-            // most of what a compatibility rewrite is about.
+            // Filters see the browser's CORS headers on success and refusal. The body invariants
+            // and final stamp apply to their result.
             if !runtime.filters.is_empty() {
                 let view = ResponseView {
                     request_id: trace.request_id(),
@@ -373,26 +351,7 @@ impl S3Service {
                     }
                 }
             }
-            let handler_deadline = handler_deadline_report.outcome();
-            if handler_deadline == Some(HandlerDeadlineReport::Unacknowledged) {
-                response.extensions_mut().insert(ConnectionIntent::Close);
-            }
-            // The body invariants run here on both paths; this is the only position from which
-            // "a `HEAD` response has no content" covers refusals that never reached an encoder.
-            if let Err(error) = crate::invariants::validate(&response, &self.inner.temporary_redirect_targets) {
-                response = outcome.refuse_handler(error.into());
-            }
-            let corrections = crate::invariants::enforce(&mut response, &method);
-            if method == Method::HEAD && outcome.error.is_some() && self.inner.view_policy.head_refusals_without_length() {
-                response.headers_mut().remove(http::header::CONTENT_LENGTH);
-            }
-            if corrections.removed_forbidden_body() {
-                self.inner.response_body_corrections.fetch_add(1, Ordering::Relaxed);
-            }
-            // Stamp last on both paths. A refusal already has the same identifiers; success encoders
-            // and filters cannot replace this final value.
-            crate::stamp::stamp(response.headers_mut(), &trace, now);
-            (response, handler_deadline)
+            self.finish_response(response, outcome, &method, &handler_deadline_report, now)
         };
         let (response, handler_deadline) = prepare_response(response, &mut outcome).await;
         #[cfg(feature = "external-payload")]
@@ -411,8 +370,76 @@ impl S3Service {
             _ => (response, handler_deadline),
         };
         let mut response = response;
-        outcome.report(&self.inner.detached_work, &runtime.observer, &method, &mut response, handler_deadline);
+        let event_request_id = *trace.request_id();
+        let event_operation = outcome.operation;
+        let event_method = method.clone();
+        let event_status = response.status().as_u16();
+        let event_identity = outcome.identity.clone();
+        // Both reports below go to the observer this request's entry snapshot holds, and both go
+        // through one panic boundary. The committed one runs before the terminal document is sent,
+        // so a panic there would otherwise replace that document with the stopped-work fallback.
+        let committed_observer = Arc::clone(&runtime.observer);
+        let started_committed_work = self.inner.detached_work.start(
+            &mut response,
+            Box::new(move |error| {
+                let event = RequestEvent {
+                    request_id: &event_request_id,
+                    operation: event_operation,
+                    method: &event_method,
+                    status: event_status,
+                    handler_deadline,
+                    identity: event_identity.as_ref(),
+                    error: error.as_ref(),
+                };
+                crate::ext::observe_safely(committed_observer.as_ref(), &event);
+            }),
+        );
+        if let Some(refused) = outcome.refused {
+            crate::logging::request_refused(refused, trace.request_id(), outcome.operation, event_status, outcome.error.as_ref());
+        }
+        if !started_committed_work {
+            let event = RequestEvent {
+                request_id: trace.request_id(),
+                operation: outcome.operation,
+                method: &method,
+                status: response.status().as_u16(),
+                handler_deadline,
+                identity: outcome.identity.as_ref(),
+                error: outcome.error.as_ref(),
+            };
+            crate::ext::observe_safely(runtime.observer.as_ref(), &event);
+        }
         file_body_path.adapt(response)
+    }
+
+    fn finish_response(
+        &self,
+        mut response: Response<Body>,
+        outcome: &mut Outcome<'_>,
+        method: &Method,
+        handler_deadline_report: &HandlerDeadlineReportSlot,
+        now: RequestNow,
+    ) -> (Response<Body>, Option<HandlerDeadlineReport>) {
+        let handler_deadline = handler_deadline_report.outcome();
+        if handler_deadline == Some(HandlerDeadlineReport::Unacknowledged) {
+            response.extensions_mut().insert(ConnectionIntent::Close);
+        }
+        // The body invariants run here on both paths; this is the only position from which
+        // "a `HEAD` response has no content" covers refusals that never reached an encoder.
+        if let Err(error) = crate::invariants::validate(&response, &self.inner.temporary_redirect_targets) {
+            response = outcome.refuse_handler(error.into());
+        }
+        let corrections = crate::invariants::enforce(&mut response, method);
+        if *method == Method::HEAD && outcome.error.is_some() && self.inner.view_policy.head_refusals_without_length() {
+            response.headers_mut().remove(http::header::CONTENT_LENGTH);
+        }
+        if corrections.removed_forbidden_body() {
+            self.inner.response_body_corrections.fetch_add(1, Ordering::Relaxed);
+        }
+        // Stamp last on both paths. A refusal already has the same identifiers; success encoders
+        // and filters cannot replace this final value.
+        crate::stamp::stamp(response.headers_mut(), outcome.trace, now);
+        (response, handler_deadline)
     }
 
     async fn run<B, M>(

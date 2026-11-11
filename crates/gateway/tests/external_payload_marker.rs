@@ -395,18 +395,16 @@ mod execution {
         let (started, entered) = oneshot::channel();
         let (held, mut released) = oneshot::channel();
         let query = Box::new(PendingQuery { started, held });
-        let response = tokio::spawn(async move { service.call_with_external_control_bound(request, binding(), query).await });
-        tokio::time::timeout(Duration::from_secs(3), entered)
+        let response = service.call_with_external_control_bound(request, binding(), query);
+        let observe_query = async {
+            entered.await.expect("query started");
+            if abort_request {
+                abort.send(true).expect("the service observes the request");
+            }
+        };
+        let (response, ()) = tokio::time::timeout(Duration::from_secs(3), futures_util::future::join(response, observe_query))
             .await
-            .expect("query admission")
-            .expect("query started");
-        if abort_request {
-            abort.send(true).expect("the service observes the request");
-        }
-        let response = tokio::time::timeout(Duration::from_secs(3), response)
-            .await
-            .expect("the request must release a pending query")
-            .expect("request task completed");
+            .expect("the request must release a pending query");
         let response = collect(response).await.expect("finite error response");
         assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR, "{:?}", response.body());
         assert_eq!(released.try_recv(), Err(oneshot::error::TryRecvError::Closed));

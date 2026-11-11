@@ -41,31 +41,6 @@ pub(crate) enum HandlerCancellationOutcome<T> {
     RequestAborted { cleanup_completed: bool },
 }
 
-impl<T> HandlerCancellationOutcome<Result<T, HandlerError>> {
-    pub(crate) fn into_handler_result(self, record_deadline: impl FnOnce(bool)) -> Result<T, HandlerError> {
-        match self {
-            HandlerCancellationOutcome::Completed(result) => result,
-            HandlerCancellationOutcome::Expired { cleanup_completed } => {
-                record_deadline(cleanup_completed);
-                let message = if cleanup_completed {
-                    "handler deadline exceeded after cleanup completed"
-                } else {
-                    "handler deadline exceeded before cleanup completed"
-                };
-                Err(HandlerError::internal_error(message))
-            }
-            HandlerCancellationOutcome::RequestAborted { cleanup_completed } => {
-                let message = if cleanup_completed {
-                    "request ended after handler cleanup completed"
-                } else {
-                    "request ended before handler cleanup completed"
-                };
-                Err(HandlerError::internal_error(message))
-            }
-        }
-    }
-}
-
 pub(crate) enum BodyMonitoredOutcome<T> {
     Completed(T),
     /// The handler answered, and dropped its body before one octet of it was read; the caller

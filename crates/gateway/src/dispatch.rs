@@ -78,7 +78,7 @@ use rustfs_gateway_stream::ByteStream;
 
 use crate::ext::{Next, OpLayer, Terminal};
 use crate::request_config::{Authorized, RequestConfig};
-use crate::request_deadline::{commit_with_progress_deadline, handler_with_request_cancellation};
+use crate::request_deadline::{HandlerCancellationOutcome, commit_with_progress_deadline, handler_with_request_cancellation};
 
 /// A `Resp<O>`'s output whose `O` this table has forgotten.
 type ErasedOutput = Box<dyn std::any::Any + Send>;
@@ -100,15 +100,6 @@ pub(crate) enum ErasedAnswer {
 
 /// The answer a backend produced, and the status it goes out with.
 type Answer = Result<(ErasedAnswer, u16), HandlerError>;
-
-pub(crate) fn handler_deadline(
-    config: &RequestConfig<Authorized>,
-    class: Option<rustfs_gateway_core::HandlerDeadlineClass>,
-) -> Result<std::time::Duration, HandlerError> {
-    let class =
-        class.ok_or_else(|| HandlerError::internal_error("registered operation is missing its handler deadline class"))?;
-    Ok(config.config().handler_deadline(class))
-}
 
 /// A backend call in flight and the framework-owned half of its cancellation signal.
 pub(crate) struct Invocation {
@@ -148,9 +139,7 @@ type Encode = Arc<dyn Fn(ErasedOutput, &MetaView<'_>, u16, http::HeaderMap) -> R
 #[derive(Clone)]
 pub(crate) struct OperationDispatch {
     #[cfg(feature = "external-payload")]
-    external_payload: bool,
-    #[cfg(feature = "external-payload")]
-    pub(crate) control_deadline_class: Option<rustfs_gateway_core::HandlerDeadlineClass>,
+    external_payload: external_payload::Registration,
     codec: ErasedCodec,
     invoke: Invoke,
     encode: Encode,
@@ -195,7 +184,10 @@ impl OperationDispatch {
             move |request: ErasedRequest, request_config: RequestConfig<Authorized>, request_context| {
                 let (cancellation, context) = HandlerCancellationSource::pair();
                 let call = handler(request, context, request_config.sse()?.clone(), request_context);
-                let deadline = handler_deadline(&request_config, O::spec().deadline_class())?;
+                let deadline_class = O::spec()
+                    .deadline_class()
+                    .ok_or_else(|| HandlerError::internal_error("registered operation is missing its handler deadline class"))?;
+                let deadline = request_config.config().handler_deadline(deadline_class);
                 let cleanup_grace = request_config.config().handler_cleanup_grace();
                 let commit_progress = request_config.config().commit_progress_deadline();
                 let request_cancellation = request_config.request_cancellation();
@@ -203,16 +195,38 @@ impl OperationDispatch {
                 Ok(Invocation {
                     _cancellation: cancellation,
                     inner: Box::pin(async move {
-                        let outcome = handler_with_request_cancellation(
+                        // Keep the request's one configuration snapshot alive through the backend call.
+                        // No dispatch implementation can load or substitute another snapshot.
+                        let _request_config = request_config;
+                        let response = match handler_with_request_cancellation(
                             call,
                             deadline_cancellation,
                             deadline,
                             cleanup_grace,
                             request_cancellation,
                         )
-                        .await;
-                        let response =
-                            outcome.into_handler_result(|completed| request_config.record_handler_deadline(completed))?;
+                        .await
+                        {
+                            HandlerCancellationOutcome::Completed(response) => response?,
+                            HandlerCancellationOutcome::Expired { cleanup_completed: true } => {
+                                _request_config.record_handler_deadline(true);
+                                return Err(HandlerError::internal_error("handler deadline exceeded after cleanup completed"));
+                            }
+                            HandlerCancellationOutcome::Expired {
+                                cleanup_completed: false,
+                            } => {
+                                _request_config.record_handler_deadline(false);
+                                return Err(HandlerError::internal_error("handler deadline exceeded before cleanup completed"));
+                            }
+                            HandlerCancellationOutcome::RequestAborted { cleanup_completed } => {
+                                let message = if cleanup_completed {
+                                    "request ended after handler cleanup completed"
+                                } else {
+                                    "request ended before handler cleanup completed"
+                                };
+                                return Err(HandlerError::internal_error(message));
+                            }
+                        };
                         let response = response.downcast::<Resp<O>>().map_err(|_| {
                             HandlerError::internal_error("the registered dispatch received another operation's response")
                         })?;
@@ -249,9 +263,7 @@ impl OperationDispatch {
 
         Self {
             #[cfg(feature = "external-payload")]
-            external_payload: false,
-            #[cfg(feature = "external-payload")]
-            control_deadline_class: O::spec().deadline_class(),
+            external_payload: external_payload::Registration::new(O::spec().deadline_class()),
             codec,
             invoke,
             encode,

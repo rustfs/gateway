@@ -12,20 +12,41 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Private capability evidence attached by explicit external upload registration.
+//! External payload settings for a registered operation.
 //!
-//! Responsible for: enabling and reading an operation's external-input registration evidence.
+//! Responsible for: external upload registration and the registered control query's deadline class.
 //! NOT responsible for: request binding, authorization or storage publication.
 //! Upstream: ServiceBuilder. Downstream: dynamic operation dispatch.
 
 use super::OperationDispatch;
+use rustfs_gateway_core::HandlerDeadlineClass;
+
+#[derive(Clone, Copy)]
+pub(super) struct Registration {
+    upload: bool,
+    deadline_class: Option<HandlerDeadlineClass>,
+}
+
+impl Registration {
+    pub(super) fn new(deadline_class: Option<HandlerDeadlineClass>) -> Self {
+        Self {
+            upload: false,
+            deadline_class,
+        }
+    }
+}
 
 impl OperationDispatch {
-    pub(crate) fn enable_external_payload(&mut self) {
-        self.external_payload = true;
+    pub(crate) fn with_external_payload(mut self) -> Self {
+        self.external_payload.upload = true;
+        self
     }
 
     pub(crate) fn supports_external_payload(&self) -> bool {
-        self.external_payload
+        self.external_payload.upload
+    }
+
+    pub(crate) fn control_deadline_class(&self) -> Option<HandlerDeadlineClass> {
+        self.external_payload.deadline_class
     }
 }

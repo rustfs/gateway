@@ -12,9 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Checks terminal GET trailers, response decoration and observations through the gateway.
-//! Transport framing belongs to the adapter. The test drives a signed S3 request and the
-//! real stream, then compares the caller's response with the filter and observer events.
+//! Checks the outcome of a bound GetObject at the gateway service boundary.
+//!
+//! Responsible for: verifying EOF trailers, response filtering and the final request event.
+//! NOT responsible for: host transport framing.
+//! Upstream: signed GetObject fixtures and the real response stream.
+//! Downstream: the returned S3 response and the observer selected for the request.
 
 use super::{execution::binding, support};
 use bytes::Bytes;

@@ -15,8 +15,8 @@
 //! Response refusals and the observer outcome accumulated by the request pipeline.
 //!
 //! Responsible for: constructing an outcome and rendering its ordinary, contextual,
-//! preflight and governor refusals, and reporting the terminal response to the entry observer.
-//! NOT responsible for: running pipeline stages, choosing a trace, or decorating responses.
+//! preflight and governor refusals while recording their code and stage.
+//! NOT responsible for: running pipeline stages, choosing a trace, or notifying observers.
 //! Upstream: `super::S3Service`, which owns the request walk.
 //! Downstream: `super::S3Service`, which consumes the rendered response and recorded outcome.
 
@@ -25,15 +25,12 @@ use rustfs_gateway_core::cors::{PreflightRefusalCause, VARY, VARY_ORIGIN, prefli
 use rustfs_gateway_core::{ErrorContext, HandlerError, ResponseKind, resolve};
 use rustfs_gateway_stream::Body;
 use rustfs_gateway_types::ErrorCode;
-use std::sync::Arc;
 
 use super::cors::CorsDecoration;
 use crate::builder::credential_sentences::CredentialSentences;
 use crate::close::ConnectionIntent;
-use crate::ext::{Observer, RequestEvent};
 use crate::logging::Refused;
 use crate::render::{S3Error, from_handler, from_pre_auth, render};
-use crate::request_config::HandlerDeadlineReport;
 use crate::trace::RequestTrace;
 
 /// Whether an answer reached legacy RustFS's CORS layer.
@@ -83,56 +80,6 @@ impl<'a> Outcome<'a> {
             } else {
                 ResponseKind::Other
             },
-        }
-    }
-
-    /// Consume the outcome once the response and any external transfer have settled.
-    pub(super) fn report(
-        self,
-        detached_work: &crate::DetachedWork,
-        observer: &Arc<dyn Observer>,
-        method: &Method,
-        response: &mut Response<Body>,
-        handler_deadline: Option<HandlerDeadlineReport>,
-    ) {
-        let event_request_id = *self.trace.request_id();
-        let event_operation = self.operation;
-        let event_method = method.clone();
-        let event_status = response.status().as_u16();
-        let event_identity = self.identity.clone();
-        // Both reports below go to the observer this request's entry snapshot holds, and both go
-        // through one panic boundary. The committed one runs before the terminal document is sent,
-        // so a panic there would otherwise replace that document with the stopped-work fallback.
-        let committed_observer = Arc::clone(observer);
-        let started_committed_work = detached_work.start(
-            response,
-            Box::new(move |error| {
-                let event = RequestEvent {
-                    request_id: &event_request_id,
-                    operation: event_operation,
-                    method: &event_method,
-                    status: event_status,
-                    handler_deadline,
-                    identity: event_identity.as_ref(),
-                    error: error.as_ref(),
-                };
-                crate::ext::observe_safely(committed_observer.as_ref(), &event);
-            }),
-        );
-        if let Some(refused) = self.refused {
-            crate::logging::request_refused(refused, self.trace.request_id(), self.operation, event_status, self.error.as_ref());
-        }
-        if !started_committed_work {
-            let event = RequestEvent {
-                request_id: self.trace.request_id(),
-                operation: self.operation,
-                method,
-                status: response.status().as_u16(),
-                handler_deadline,
-                identity: self.identity.as_ref(),
-                error: self.error.as_ref(),
-            };
-            crate::ext::observe_safely(observer.as_ref(), &event);
         }
     }
 
