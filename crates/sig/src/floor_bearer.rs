@@ -39,6 +39,9 @@ impl SecurityFloor {
         // An operation that requires SigV4 under every policy admits nothing that carried no AWS
         // credential marker: no registered custom scheme, no query bearer token and no anonymous
         // request, whatever the floor or the operation's allow-list says (rustfs/gateway#1576).
+        if operation.requires_sigv4_under_every_policy() {
+            return Err(AuthError::AccessDenied);
+        }
         if let Some(scheme) = self.custom_schemes.matching(&view) {
             self.enforce_scheme_allowed(operation, SchemeSlot::Header, SigFamily::V4)?;
             return Ok(Admission::Custom(CustomAuthRequest::new(view, scheme, presence, now)));
