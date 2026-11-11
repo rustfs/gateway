@@ -129,9 +129,24 @@ impl Credentials {
     /// [`CredentialsError::Malformed`] when the access key id is empty, longer than 128 bytes, or
     /// holds anything other than ASCII graphic characters — the rule
     /// [`rustfs_gateway_sig::Identity`] applies, because an access key id reaches a log line.
+    ///
+    /// [`CredentialsError::EmptySecret`] when the secret is empty or holds only NUL bytes. An
+    /// HMAC key of zero bytes is known to everybody, so a request signed with it would verify;
+    /// and HMAC zero-pads a short key to its block, so a run of NUL bytes derives the very same
+    /// keys (SigV4's `"AWS4" || secret` included). Refusing both here is what keeps
+    /// [`CredentialLookup::Found`] from carrying one into any authentication form. A provider
+    /// should pass the refusal on with `?` — see `From<CredentialsError> for ProviderError` — so
+    /// it is counted as a store fault. There is no length rule beyond this; a minimum length is
+    /// the deployment's policy.
     pub fn new(access_key_id: &str, secret: &[u8]) -> Result<Self, CredentialsError> {
+        let identity = Identity::new(access_key_id).map_err(CredentialsError::Malformed)?;
+        // Every byte is folded, with no early exit, so the check costs the same whatever the
+        // secret holds; an empty slice folds to zero as well.
+        if secret.iter().fold(0_u8, |seen, byte| seen | byte) == 0 {
+            return Err(CredentialsError::EmptySecret);
+        }
         Ok(Self {
-            identity: Identity::new(access_key_id).map_err(CredentialsError::Malformed)?,
+            identity,
             secret: SecretBytes::new(secret),
             session: None,
             disabled: false,
@@ -336,17 +351,33 @@ impl std::error::Error for ProviderError {}
 pub enum CredentialsError {
     /// A value this crate refuses to hold at all.
     Malformed(SigParseError),
+    /// The secret is empty, or only NUL bytes that HMAC pads to the same key: either would make
+    /// the signing key public (rustfs/gateway#1573).
+    EmptySecret,
 }
 
 impl core::fmt::Display for CredentialsError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::Malformed(error) => write!(f, "{error}"),
+            Self::EmptySecret => f.write_str("the secret access key is empty"),
         }
     }
 }
 
 impl std::error::Error for CredentialsError {}
+
+/// A stored record this crate refuses to hold is the store's fault, not a missing key.
+///
+/// So a provider that builds its answer with `Credentials::new(id, &stored)?` reports a provider
+/// fault: counted in [`crate::ProviderMetrics::backend_errors`], never put in the negative cache,
+/// and answered exactly as an unknown key. Mapping it to [`CredentialLookup::NotFound`] instead
+/// would cache the key as absent and hide a broken record from the operator.
+impl From<CredentialsError> for ProviderError {
+    fn from(_: CredentialsError) -> Self {
+        Self::Backend
+    }
+}
 
 /// Where an access key id is resolved to a secret.
 ///
@@ -385,8 +416,8 @@ impl<T: CredentialProvider + ?Sized> CredentialProvider for std::sync::Arc<T> {
 ///         "AKIDEXAMPLE" => CredentialLookup::Found(
 ///             Credentials::new("AKIDEXAMPLE", b"wJalrXUtnFEMI").expect("static fixture")
 ///         ),
-///         // Never a blanket secret for an unrecognised key, and never an empty one: an empty
-///         // secret does not skip verification, it just fails it slowly.
+///         // Never a blanket secret for an unrecognised key. An empty one cannot be built at
+///         // all: `Credentials::new` refuses it, because the empty HMAC key is public.
 ///         _ => CredentialLookup::NotFound,
 ///     };
 ///     Box::pin(async move { Ok::<_, ProviderError>(found) })
@@ -640,6 +671,31 @@ mod tests {
             Err(CredentialsError::Malformed(_))
         ));
         assert!(matches!(Credentials::new("", b"secret"), Err(CredentialsError::Malformed(_))));
+    }
+
+    /// Negative — an empty secret cannot be held, long-term or as the base of a session: the empty
+    /// HMAC key is public, so a credential carrying one would authenticate anybody.
+    #[test]
+    fn an_empty_secret_is_refused() {
+        assert_eq!(Credentials::new("AKIDEXAMPLE", b"").err(), Some(CredentialsError::EmptySecret));
+        // HMAC zero-pads a short key, so NUL bytes derive what the empty key derives.
+        for nul in [&[0_u8][..], &[0_u8; 60][..], &[0_u8; 200][..]] {
+            assert_eq!(Credentials::new("AKIDEXAMPLE", nul).err(), Some(CredentialsError::EmptySecret));
+        }
+        // The access key id is still judged first, so a doubly broken record names the id.
+        assert!(matches!(Credentials::new("", b""), Err(CredentialsError::Malformed(_))));
+    }
+
+    /// Negative — every construction refusal becomes the counted, uncached provider fault, never
+    /// an answer that could be mistaken for a missing key.
+    #[test]
+    fn a_refused_construction_is_a_backend_fault() {
+        for error in [
+            Credentials::new("AKIDEXAMPLE", b"").err(),
+            Credentials::new("AKID\r\nEXAMPLE", b"secret").err(),
+        ] {
+            assert_eq!(error.map(ProviderError::from), Some(ProviderError::Backend));
+        }
     }
 
     /// Negative — an unknown key is `NotFound` and never a silently empty secret.

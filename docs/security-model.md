@@ -416,9 +416,15 @@ framework's half:
 
 - **It cannot make verification not happen.** The trait returns
   `Result<CredentialLookup, ProviderError>`, never a `Verdict`.
-  An empty secret is not a bypass — the derivation runs against it and the comparison fails. A
-  lookup that succeeds is not authentication; only `Signature::ct_verify` produces the
+  A lookup that succeeds is not authentication; only `Signature::ct_verify` produces the
   `SignatureMatch` that `Verdict::Authenticated` requires.
+- **An empty secret cannot be returned.** An HMAC key of zero bytes is known to everybody, so a
+  request signed with it would verify against a stored empty secret — and HMAC zero-pads a short
+  key, so a secret of NUL bytes derives the same keys. `Credentials::new` therefore refuses both
+  with `CredentialsError::EmptySecret`, and `CredentialLookup::Found` cannot carry either into any
+  authentication form (rustfs/gateway#1573). A provider that converts the refusal with
+  `ProviderError::from` reports a provider fault, answered as below. There is no length rule
+  beyond this; a minimum length is the deployment's policy.
 - **A store that cannot answer fails closed.** A backend error, timeout or isolated panic is
   counted, is never cached, and receives the same 403 response as another credential failure. It
   is never treated as an anonymous request.
