@@ -645,10 +645,26 @@ fn quote(text: &str) -> String {
     out
 }
 
+/// Escapes `text` for any JUnit text or attribute position, always yielding well-formed XML 1.0.
+///
+/// XML 1.0 forbids every C0 control except tab, newline and carriage return, and U+FFFE/U+FFFF,
+/// even as character references, so those are written as the visible text `\uXXXX` (the JSON
+/// report keeps them exactly). Tab, newline and carriage return become character references so a
+/// parser's attribute and line-end normalisation cannot rewrite them. A lone surrogate cannot
+/// occur: `&str` is UTF-8.
 fn escape_xml(text: &str) -> String {
-    text.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&apos;")
+    let mut out = String::with_capacity(text.len());
+    for ch in text.chars() {
+        match ch {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&apos;"),
+            '\t' | '\n' | '\r' => out.push_str(&format!("&#{};", u32::from(ch))),
+            '\u{0}'..='\u{1f}' | '\u{fffe}' | '\u{ffff}' => out.push_str(&format!("\\u{:04x}", u32::from(ch))),
+            ch => out.push(ch),
+        }
+    }
+    out
 }

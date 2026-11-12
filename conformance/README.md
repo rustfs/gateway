@@ -597,6 +597,13 @@ when it sent none. The gateway's own header is the product name and nothing else
 a run against this repository's launcher reports `"target_build": "RustFS"`; a build string the
 probe did not observe is never substituted.
 
+The JUnit document (`--junit`) is always well-formed XML 1.0, whatever bytes a target echoed into
+a diagnostic. XML forbids the C0 controls other than tab, newline and carriage return, and U+FFFE
+and U+FFFF, even as character references, so each of those is written as the visible text
+`\uXXXX` (U+0001 becomes `\u0001`); tab, newline and carriage return are written as character
+references so attribute normalisation keeps them. The JSON report is not rewritten and keeps the
+exact characters in JSON's own escapes.
+
 ### The rulings ledger (`--rulings <toml>`)
 
 A run against a candidate that is not the reference target leaves cases red for reasons that were

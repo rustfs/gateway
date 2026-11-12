@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Tests for [`crate::report`]: the verdict ladder, the validate-only report shape, and the
-//! baseline ratchet.
+//! Tests for [`crate::report`]: the verdict ladder, the validate-only report shape, JUnit
+//! well-formedness, and the baseline ratchet.
 //!
 //! Responsible for: holding the report test suite in a sibling module so the source-size bound
 //! keeps the implementation itself readable.
@@ -475,4 +475,113 @@ fn a_ruled_failure_stays_a_junit_failure_with_the_ruling_noted() {
     );
     let unruled = report().render_junit();
     assert!(!unruled.contains("ruling:"), "{unruled}");
+}
+
+// JUnit well-formedness. XML 1.0 admits no C0 control other than tab, newline and carriage
+// return, not even as a character reference, so a target's bytes that reach a case name or a
+// diagnostic must be rewritten before they reach the document (rustfs/gateway JUnit lane).
+
+/// Text no XML 1.0 document may carry raw: NUL, SOH, VT, ESC and the BMP non-character U+FFFE.
+/// A lone surrogate cannot be built: `&str` is UTF-8, so the type already excludes it.
+const HOSTILE: &str = "a\u{0}b\u{1}c\u{b}d\u{1b}e\u{fffe}f ]]> <x/> \"q\" 'a' &amp;\tt\nn\rr";
+/// What a parser must read back for [`HOSTILE`]: each forbidden character as visible `\uXXXX`
+/// text, everything XML can carry exactly as it was, tab, newline and carriage return included.
+const HOSTILE_VISIBLE: &str = "a\\u0000b\\u0001c\\u000bd\\u001be\\ufffef ]]> <x/> \"q\" 'a' &amp;\tt\nn\rr";
+
+fn hostile_report() -> Report {
+    let mut subject = report();
+    subject.outcomes[0].id = format!("c-junit-{HOSTILE}");
+    subject.outcomes[0].domain = format!("domain-{HOSTILE}");
+    subject.outcomes[1].diagnostics = vec![Diagnostic::deny(&format!("rule-{HOSTILE}"), "/expect/body", HOSTILE)];
+    subject.outcomes[2].skip_reason = Some(format!("skip-{HOSTILE}"));
+    subject
+}
+
+/// Parses `document` with Python's expat-backed parser, which refuses what XML 1.0 forbids, and
+/// returns every element's attribute values and text, in document order, as JSON.
+fn parse_with_expat(document: &str) -> Result<Value, String> {
+    let path =
+        std::env::temp_dir().join(format!("gateway-junit-xml-{}-{:?}.xml", std::process::id(), std::thread::current().id()));
+    std::fs::write(&path, document).map_err(|error| error.to_string())?;
+    let output = std::process::Command::new("python3")
+        .arg("-c")
+        .arg(
+            r#"
+import json, sys
+import xml.etree.ElementTree as ET
+root = ET.parse(sys.argv[1]).getroot()
+print(json.dumps([[e.tag, e.attrib, e.text] for e in root.iter()]))
+"#,
+        )
+        .arg(&path)
+        .output()
+        .map_err(|error| error.to_string());
+    let _ = std::fs::remove_file(&path);
+    let output = output?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).into_owned());
+    }
+    json::parse(&String::from_utf8_lossy(&output.stdout)).map_err(|error| error.to_string())
+}
+
+/// Positive — every text and attribute position parses, and reads back as the visible form.
+#[test]
+fn a_junit_document_with_control_characters_parses_and_reads_back_visibly() {
+    let rendered = hostile_report().render_junit();
+    let parsed = parse_with_expat(&rendered).unwrap_or_else(|error| panic!("JUnit is not XML: {error}\n{rendered}"));
+    let element = |tag: &str| -> Vec<&Value> {
+        parsed
+            .as_array()
+            .expect("element list")
+            .iter()
+            .filter(|row| row.as_array().and_then(|row| row[0].as_str()) == Some(tag))
+            .collect()
+    };
+    let attr =
+        |row: &Value, name: &str| -> Option<String> { row.as_array()?[1].get(name).and_then(Value::as_str).map(str::to_owned) };
+    let cases = element("testcase");
+    assert_eq!(attr(cases[0], "name"), Some(format!("c-junit-{HOSTILE_VISIBLE}")));
+    assert_eq!(attr(cases[0], "classname"), Some(format!("domain-{HOSTILE_VISIBLE}")));
+    let failure = element("failure");
+    assert_eq!(attr(failure[0], "message"), Some(format!("rule-{HOSTILE_VISIBLE}")));
+    let text = failure[0].as_array().and_then(|row| row[2].as_str()).expect("failure text");
+    assert!(text.ends_with(HOSTILE_VISIBLE), "{text:?}");
+    assert_eq!(attr(element("skipped")[0], "message"), Some(format!("skip-{HOSTILE_VISIBLE}")));
+}
+
+/// Negative — no character XML 1.0 forbids reaches the document, raw or as a reference.
+#[test]
+fn a_junit_document_carries_no_forbidden_character_raw_or_referenced() {
+    let rendered = hostile_report().render_junit();
+    let forbidden = rendered
+        .chars()
+        .find(|&ch| !matches!(ch, '\t' | '\n' | '\r' | '\u{20}'..='\u{d7ff}' | '\u{e000}'..='\u{fffd}' | '\u{10000}'..));
+    assert_eq!(forbidden, None, "{rendered:?}");
+    for reference in ["&#0;", "&#1;", "&#x1;", "&#11;", "&#27;", "&#65534;"] {
+        assert!(!rendered.contains(reference), "{reference} in {rendered:?}");
+    }
+}
+
+/// Negative — a document that leaves the forbidden characters raw is refused by the parser the
+/// tests above rely on, so their green is a measurement of the renderer, not of a lenient parser.
+#[test]
+fn the_junit_test_parser_refuses_a_raw_control_character() {
+    let error =
+        parse_with_expat("<?xml version=\"1.0\"?>\n<testsuite name=\"a\u{1}b\"/>\n").expect_err("expat must refuse U+0001");
+    assert!(error.contains("not well-formed"), "{error}");
+}
+
+/// Negative — the machine-readable report is not rewritten: it keeps the exact characters, in
+/// JSON's own escape.
+#[test]
+fn the_junit_sanitiser_leaves_the_json_report_unrewritten() {
+    let rendered = hostile_report().render_json();
+    let parsed = json::parse(&rendered).expect("valid JSON");
+    let id = parsed
+        .path("cases")
+        .and_then(Value::as_array)
+        .and_then(|cases| cases[0].get("id"))
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    assert_eq!(id, Some(format!("c-junit-{HOSTILE}")));
 }
