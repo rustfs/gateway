@@ -12,13 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The `--allow-external-writes` gate, measured by the requests an endpoint actually received.
+//! The external write and clock gates, measured by the requests an endpoint actually received,
+//! and the share of the corpus they leave runnable.
 //!
-//! Responsible for: proving that without the flag no request of a write case reaches the endpoint
-//! (setup included) and the skip says why, that with it the write is sent and every declared bucket
-//! is emptied and removed, and that the flag is refused without an endpoint. NOT responsible for:
-//! the read-only fixture lifecycle (`runner_tests`) or exact version ownership (`versioned_tests`).
-//! Upstream: `crate::cli`; downstream: a loopback endpoint that records every request.
+//! Responsible for: proving that without `--allow-external-writes` no request of a write case
+//! reaches the endpoint (setup included) and the skip says why, that with it the write is sent and
+//! every declared bucket is emptied and removed, that the flag is refused without an endpoint, that
+//! a case pinning a clock the endpoint cannot follow is skipped at the `clock` phase before any
+//! traffic, and that the README states the runnable share this corpus actually has.
+//! NOT responsible for: the read-only fixture lifecycle (`runner_tests`) or exact version
+//! ownership (`versioned_tests`). Upstream: `crate::cli`, `crate::corpus`; downstream: a loopback endpoint
+//! that records every request.
 
 use std::fs;
 use std::io::{Read, Write};
@@ -345,4 +349,74 @@ fn the_write_flag_without_an_endpoint_is_a_usage_error() {
     .expect("valid")
     .expect("not help");
     assert!(parsed.external_writes);
+}
+
+const FIXED_CLOCK: &str = "[clock]\nfixed = \"2026-01-02T03:04:05Z\"\n\n";
+
+/// Negative — a case pinning `clock.fixed` against a wall-clock endpoint is skipped at the `clock`
+/// phase before its setup: the endpoint receives nothing for it, and the reason names the clock.
+#[test]
+fn a_fixed_clock_case_is_skipped_at_the_clock_phase_and_sends_nothing() {
+    let id = "c-external-writes-0007";
+    let text = case(id, "GetObject", &format!("{BUCKET}{FIXED_CLOCK}"), "GET", "/write-runner/key");
+    let (report, lines) = run(&[(id, text)], &["--allow-external-fixtures", "--allow-external-writes"]);
+    assert_eq!(lines, Vec::<String>::new(), "no request of a fixed-clock case may reach the endpoint");
+    let row = line(&report, id);
+    assert!(row.contains("\"verdict\": \"skipped\"") && row.contains("\"phase\": \"clock\""), "{row}");
+    assert!(row.contains("`clock.fixed` pins the instant"), "{row}");
+}
+
+/// Negative — a write skip is not a clock skip: it keeps the execute phase and its own reason.
+#[test]
+fn a_write_skip_is_not_counted_as_a_clock_skip() {
+    let (id, text) = put_with_setup();
+    let (report, _) = run(&[(id, text)], &["--allow-external-fixtures"]);
+    let row = line(&report, id);
+    assert!(row.contains("\"phase\": \"execute\"") && !row.contains("clock"), "{row}");
+}
+
+/// How many corpus cases the external gates admit, without and with `--allow-external-writes`;
+/// fixtures are allowed in both, and the endpoint keeps its own wall clock.
+fn runnable_externally() -> (usize, usize, usize) {
+    let root = crate::corpus::Corpus::discover_root().expect("repository corpus");
+    let corpus = crate::corpus::Corpus::load(&root).expect("corpus loads");
+    let mut target = super::super::Conn::external_with_fixtures(root, "http://127.0.0.1:9", None).expect("target");
+    let admitted = |target: &super::super::Conn| {
+        corpus
+            .cases()
+            .iter()
+            .filter(|case| {
+                let document = case.document.as_ref().expect("every corpus case loads");
+                let requests: Vec<_> = case.exchanges().iter().filter_map(|exchange| exchange.request).collect();
+                crate::sut::Sut::validate_clock(target, document.read("clock")).is_ok()
+                    && crate::sut::Sut::validate_requests(target, &case.id, document.read("setup"), &requests).is_ok()
+            })
+            .count()
+    };
+    let read_only = admitted(&target);
+    target.allow_external_writes();
+    (corpus.cases().len(), read_only, admitted(&target))
+}
+
+/// Positive — the share the README states is the share this corpus has, computed by the same gates
+/// the runner applies; a corpus change that moves it fails here until the sentence is updated.
+#[test]
+fn the_readme_states_the_externally_runnable_share_of_this_corpus() {
+    let (total, read_only, writes) = runnable_externally();
+    let percent = |count: usize| count * 1000 / total;
+    let expected = format!(
+        "Of the {total} cases, {writes} ({}.{}%) pass these gates with `--allow-external-writes` and {read_only} \
+         ({}.{}%) without it",
+        percent(writes) / 10,
+        percent(writes) % 10,
+        percent(read_only) / 10,
+        percent(read_only) % 10,
+    );
+    let readme = fs::read_to_string(crate::corpus::Corpus::discover_root().expect("corpus").join("README.md"))
+        .expect("conformance README");
+    assert!(readme.replace('\n', " ").contains(&expected), "README must state: {expected}");
+    assert!(
+        read_only < writes && writes < total,
+        "a gate that admits nothing or everything measures nothing"
+    );
 }

@@ -88,6 +88,10 @@ pub enum Phase {
     Schema,
     /// The conventions the schema cannot express.
     Convention,
+    /// The case's `[clock]` checked against what the target can be driven to. A skip here sent
+    /// nothing: the case pins an instant or a skew an external target, on its own clock, cannot
+    /// honour.
+    Clock,
     /// Running the exchanges against a target.
     Execute,
 }
@@ -100,6 +104,7 @@ impl Phase {
             Phase::Load => "load",
             Phase::Schema => "schema",
             Phase::Convention => "convention",
+            Phase::Clock => "clock",
             Phase::Execute => "execute",
         }
     }
@@ -392,6 +397,16 @@ impl Report {
                 count(Verdict::Failed),
                 count(Verdict::Skipped)
             ));
+            let clock = self
+                .outcomes
+                .iter()
+                .filter(|outcome| outcome.verdict == Verdict::Skipped && outcome.phase == Phase::Clock)
+                .count();
+            if clock > 0 {
+                out.push_str(&format!(
+                    "clock: {clock} of the skipped case(s) need a clock this target cannot be driven to, and were sent nothing\n"
+                ));
+            }
         }
         let (negative, positive) = self.polarity;
         out.push_str(&format!(

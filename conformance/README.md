@@ -590,6 +590,17 @@ buckets a case declares, so state a setup-less write creates (`c-host-0003` crea
 virtual host names) survives the run: start the endpoint on a fresh, empty data directory for
 every run with this flag, and never point it at a server holding data you want to keep.
 
+**What can run against an external endpoint at all.** Two gates run before any traffic: the clock
+gate skips, at the `clock` phase, a case that pins `clock.fixed` (or a server `skew_ms`) an
+endpoint on its own wall clock cannot follow — the text report counts these on a `clock:` line —
+and the write gate above. Of the 890 cases, 544 (61.1%) pass these gates with
+`--allow-external-writes` and 139 (15.6%) without it, with `--allow-external-fixtures` in both and
+the endpoint on its own wall clock. `writes_tests::the_readme_states_the_externally_runnable_share_of_this_corpus`
+recomputes both numbers from the corpus with the runner's own gates and fails until this sentence
+matches. Nearly all of the rest pin `clock.fixed`, and run only against an endpoint started on that
+instant and declared with `--endpoint-fixed-time`; they are not made to run otherwise. A case the
+gates admit can still be skipped during execution for a transport capability or by its profile.
+
 For fixed-clock cases, start the reference launcher with `--fixed-time 2026-01-02T03:04:05Z`
 and pass `--endpoint-fixed-time 2026-01-02T03:04:05Z` to conformance `run` or `baseline` alongside
 `--endpoint`. Both options require a valid whole-second UTC instant; fractional seconds, offsets,
@@ -609,7 +620,8 @@ add `external_writes: false` to manually constructed values. Against `--endpoint
 authored write, setup-less ones included, is now skipped unless `--allow-external-writes` is
 given; pass it only for a disposable endpoint. A `Sut` wrapper must forward
 `validate_requests(&self, case_id, setup, requests)` to its wrapped target so the write gate still
-runs before fixture preparation.
+runs before fixture preparation. `report::Phase` gains `Clock`, the phase of a case skipped
+because its clock cannot be honoured, so an exhaustive `match` on it needs that arm.
 
 **BREAKING: migrating conformance 0.16 to 0.17.** The public `cli::Options` struct now includes
 `endpoint_fixed_time`. Add `endpoint_fixed_time: None` to manually constructed `Options` values

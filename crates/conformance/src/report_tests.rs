@@ -585,3 +585,27 @@ fn the_junit_sanitiser_leaves_the_json_report_unrewritten() {
         .map(str::to_owned);
     assert_eq!(id, Some(format!("c-junit-{HOSTILE}")));
 }
+
+/// Positive — a skip at the clock phase is counted on its own summary line; the execute-phase skip
+/// beside it is not.
+#[test]
+fn the_text_summary_counts_clock_skips_apart_from_other_skips() {
+    let mut subject = report();
+    let mut clock = outcome("c-sig-0598", "sig", Verdict::Skipped);
+    clock.phase = Phase::Clock;
+    subject.outcomes.push(clock);
+    let rendered = subject.render_text(None);
+    assert!(rendered.contains("summary: 1 passed, 1 failed, 2 skipped\n"), "{rendered}");
+    assert!(
+        rendered.contains("clock: 1 of the skipped case(s) need a clock this target cannot be driven to"),
+        "{rendered}"
+    );
+}
+
+/// Negative — without a clock skip there is no clock line, so the line is a count, not a constant.
+#[test]
+fn the_text_summary_has_no_clock_line_without_a_clock_skip() {
+    let rendered = report().render_text(None);
+    assert!(rendered.contains("1 skipped"), "the control report has an execute-phase skip: {rendered}");
+    assert!(!rendered.contains("clock:"), "{rendered}");
+}

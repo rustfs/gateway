@@ -250,6 +250,7 @@ fn run_case(
     outcome.phase = Phase::Execute;
     let document = case.document.as_ref().unwrap_or(&Value::Bool(false));
     if let Err(error) = sut.validate_clock(document.read("clock")) {
+        outcome.phase = Phase::Clock;
         return not_run(outcome, &error, notes);
     }
     let requests: Vec<&Value> = case.exchanges().iter().filter_map(|exchange| exchange.request).collect();

@@ -201,10 +201,10 @@ struct BodyProgress {
 
 impl Sut for Conn {
     fn validate_clock(&self, clock: Option<&Value>) -> Result<(), SutError> {
-        if self.external.is_some()
-            && let Some(fixed) = &self.endpoint_fixed_time
-        {
-            external_clock::external_clock(clock, fixed.clone(), Some(fixed))?;
+        // The same mapping the exchange uses, run before any fixture traffic: a case pinning a
+        // clock the endpoint cannot be driven to is skipped without setup or cleanup requests.
+        if self.external.is_some() {
+            external_clock::external_clock(clock, self.external_now()?, self.endpoint_fixed_time.as_ref())?;
         }
         Ok(())
     }
