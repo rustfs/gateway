@@ -255,6 +255,7 @@ fn run_case(
     }
     let requests: Vec<&Value> = case.exchanges().iter().filter_map(|exchange| exchange.request).collect();
     if let Err(error) = sut.validate_requests(&case.id, document.read("setup"), &requests) {
+        outcome.phase = Phase::Preflight;
         return not_run(outcome, &error, notes);
     }
     let mut captures: Captures = match sut.prepare(&case.id, document.read("setup")) {

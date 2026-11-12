@@ -178,91 +178,11 @@ pub(super) fn unresolved_id() -> SutError {
 }
 
 pub(super) fn upload_id(body: &[u8]) -> Result<String, SutError> {
-    use quick_xml::Reader;
-    use quick_xml::events::Event;
-
-    let mut reader = Reader::from_reader(body);
-    reader.config_mut().expand_empty_elements = true;
-    reader.config_mut().check_comments = true;
-    let mut depth = 0_usize;
-    let mut root_seen = false;
-    let mut in_id = false;
-    let mut id_seen = false;
-    let mut id = String::new();
-    loop {
-        match reader.read_event().map_err(|_| unresolved_id())? {
-            Event::Start(element) => {
-                for attribute in element.attributes() {
-                    attribute.map_err(|_| unresolved_id())?;
-                }
-                if in_id {
-                    return Err(unresolved_id());
-                }
-                if depth == 0 {
-                    if root_seen || element.local_name().as_ref() != b"InitiateMultipartUploadResult" {
-                        return Err(unresolved_id());
-                    }
-                    root_seen = true;
-                }
-                if element.local_name().as_ref() == b"UploadId" {
-                    if depth != 1 || id_seen {
-                        return Err(unresolved_id());
-                    }
-                    id_seen = true;
-                    in_id = true;
-                }
-                depth += 1;
-            }
-            Event::End(_) => {
-                if depth == 2 && in_id {
-                    in_id = false;
-                }
-                depth = depth.checked_sub(1).ok_or_else(unresolved_id)?;
-            }
-            Event::Text(text) => {
-                let text = text.xml10_content().map_err(|_| unresolved_id())?;
-                if in_id {
-                    id.push_str(&text);
-                } else if depth == 0 && !text.trim().is_empty() {
-                    return Err(unresolved_id());
-                }
-            }
-            Event::CData(text) => {
-                if depth == 0 {
-                    return Err(unresolved_id());
-                }
-                if in_id {
-                    id.push_str(&text.xml10_content().map_err(|_| unresolved_id())?);
-                }
-            }
-            Event::GeneralRef(reference) => {
-                if depth == 0 {
-                    return Err(unresolved_id());
-                }
-                if let Some(character) = reference.resolve_char_ref().map_err(|_| unresolved_id())? {
-                    if in_id {
-                        id.push(character);
-                    }
-                } else {
-                    let name = reference.decode().map_err(|_| unresolved_id())?;
-                    let value = quick_xml::escape::resolve_predefined_entity(&name).ok_or_else(unresolved_id)?;
-                    if in_id {
-                        id.push_str(value);
-                    }
-                }
-            }
-            Event::Decl(_) if root_seen => return Err(unresolved_id()),
-            Event::DocType(_) => return Err(unresolved_id()),
-            Event::Eof => break,
-            _ => {}
-        }
+    let items = super::response_xml::element_texts(body, &[b"InitiateMultipartUploadResult"]).ok_or_else(unresolved_id)?;
+    let [children] = items.as_slice() else { return Err(unresolved_id()) };
+    let mut ids = super::response_xml::texts(children, b"UploadId");
+    match (ids.next(), ids.next()) {
+        (Some(Some(id)), None) if !id.is_empty() => Ok(id.to_owned()),
+        _ => Err(unresolved_id()),
     }
-    if depth != 0 || !root_seen || !id_seen || id.is_empty() {
-        return Err(unresolved_id());
-    }
-    Ok(id)
-}
-
-pub(super) fn abort_target(target: &str, upload_id: &str) -> String {
-    super::object::query_target(target, "uploadId", upload_id)
 }

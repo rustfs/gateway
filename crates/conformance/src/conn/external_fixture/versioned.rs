@@ -246,10 +246,6 @@ pub(super) fn object_bucket(target: &str) -> Result<&str, SutError> {
     Ok(bucket)
 }
 
-pub(super) fn delete_target(version: &OwnedVersion, id: &str) -> String {
-    super::object::query_target(&version.target, "versionId", id)
-}
-
 pub(super) fn unresolved() -> SutError {
     SutError::Environment(
         "external versioned write ownership is unresolved; exact version cleanup and case reuse are blocked".to_owned(),
@@ -261,46 +257,13 @@ fn unsupported(reason: &str) -> SutError {
 }
 
 fn enabled(body: &[u8]) -> bool {
-    use quick_xml::{Reader, events::Event};
-    let mut reader = Reader::from_reader(body);
-    reader.config_mut().expand_empty_elements = true;
-    reader.config_mut().check_comments = true;
-    let mut stack = Vec::new();
-    let mut root_seen = false;
-    let mut status_seen = false;
-    let mut status = String::new();
-    loop {
-        match reader.read_event() {
-            Ok(Event::Start(element)) => {
-                if element.attributes().any(|attribute| attribute.is_err()) {
-                    return false;
-                }
-                let name = element.local_name().as_ref().to_vec();
-                match stack.as_slice() {
-                    [] if !root_seen && name == b"VersioningConfiguration" => root_seen = true,
-                    [root] if root == b"VersioningConfiguration" && name == b"Status" && !status_seen => status_seen = true,
-                    [root] if root == b"VersioningConfiguration" && name == b"MfaDelete" => {}
-                    _ => return false,
-                }
-                stack.push(name);
-            }
-            Ok(Event::End(_)) => {
-                if stack.pop().is_none() {
-                    return false;
-                }
-            }
-            Ok(Event::Text(text)) => {
-                let Ok(text) = text.xml10_content() else { return false };
-                if stack.last().is_some_and(|name| name == b"Status") {
-                    status.push_str(&text);
-                } else if !text.trim().is_empty() && !stack.last().is_some_and(|name| name == b"MfaDelete") {
-                    return false;
-                }
-            }
-            Ok(Event::Decl(_)) if !root_seen => {}
-            Ok(Event::Comment(_)) => {}
-            Ok(Event::Eof) => return root_seen && stack.is_empty() && status_seen && status == "Enabled",
-            _ => return false,
-        }
-    }
+    let Some(items) = super::response_xml::element_texts(body, &[b"VersioningConfiguration"]) else {
+        return false;
+    };
+    let [children] = items.as_slice() else { return false };
+    let mut status = super::response_xml::texts(children, b"Status");
+    children
+        .iter()
+        .all(|(name, text)| text.is_some() && matches!(name.as_slice(), b"Status" | b"MfaDelete"))
+        && matches!((status.next(), status.next()), (Some(Some("Enabled")), None))
 }

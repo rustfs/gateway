@@ -27,7 +27,8 @@
 use std::fs;
 use std::io::{Read, Write};
 use std::net::TcpListener;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
+use std::process::ExitCode;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::thread;
@@ -121,9 +122,11 @@ fn read_request(stream: &mut std::net::TcpStream) -> String {
     }
 }
 
-/// What a disposable S3 endpoint answers. Every listing shows one leftover entry the first time it
-/// is asked and none after, so emptying is observable as the deletes it caused.
-fn answer(line: &str, listed: &mut Vec<String>) -> String {
+/// What a disposable S3 endpoint answers. `GET /` lists `existing` (bucket XML); every bucket
+/// listing shows one leftover entry the first time it is asked and none after, so emptying is
+/// observable as the deletes it caused; `write-gone` answers its first DELETE (the case's own) 200
+/// and 404 after, and `write-vanished` answers every DELETE 404.
+fn answer(line: &str, listed: &mut Vec<String>, existing: &str) -> String {
     let ok = |body: &str| format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
     let first = |kind: &str, listed: &mut Vec<String>| {
         let seen = listed.iter().any(|done| done == kind);
@@ -132,6 +135,22 @@ fn answer(line: &str, listed: &mut Vec<String>) -> String {
     };
     if line.starts_with("HEAD / ") {
         return "HTTP/1.1 403 Forbidden\r\nServer: RustFS\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_owned();
+    }
+    if line.starts_with("GET / ") {
+        return ok(&format!("<ListAllMyBucketsResult><Buckets>{existing}</Buckets></ListAllMyBucketsResult>"));
+    }
+    if line.starts_with("DELETE /write-gone ") && first(line, listed) {
+        return ok("");
+    }
+    if line.starts_with("DELETE /write-vanished ") || line.starts_with("DELETE /write-gone ") {
+        return "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_owned();
+    }
+    if line.starts_with("GET /write-versioned?versioning ") {
+        return ok("<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>");
+    }
+    if line.starts_with("GET /write-error?") {
+        let body = "<Error><Code>InternalError</Code></Error>";
+        return ok(body);
     }
     if line.starts_with("HEAD ") {
         let exists = line.starts_with("HEAD /write-created ") && listed.iter().any(|done| done == "created");
@@ -165,7 +184,7 @@ fn answer(line: &str, listed: &mut Vec<String>) -> String {
 }
 
 /// An endpoint that records the request line of everything it receives until told to stop.
-fn endpoint() -> (String, Arc<AtomicBool>, thread::JoinHandle<Vec<String>>) {
+fn endpoint(existing: &'static str) -> (String, Arc<AtomicBool>, thread::JoinHandle<Vec<String>>) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind endpoint");
     listener.set_nonblocking(true).expect("nonblocking accept");
     let address = listener.local_addr().expect("endpoint address");
@@ -179,7 +198,7 @@ fn endpoint() -> (String, Arc<AtomicBool>, thread::JoinHandle<Vec<String>>) {
                 Ok((mut stream, _)) => {
                     let line = read_request(&mut stream);
                     stream
-                        .write_all(answer(&line, &mut listed).as_bytes())
+                        .write_all(answer(&line, &mut listed, existing).as_bytes())
                         .expect("write response");
                     lines.push(line);
                 }
@@ -192,10 +211,16 @@ fn endpoint() -> (String, Arc<AtomicBool>, thread::JoinHandle<Vec<String>>) {
     (format!("http://{address}"), stop, server)
 }
 
-/// Runs `cases` against a fresh recording endpoint; returns the report and every request line.
+/// Runs `cases` against a fresh recording endpoint; returns the report and every request line
+/// after the identity probe and, with writes allowed, the empty-endpoint listing before it.
 fn run(cases: &[(&str, String)], flags: &[&str]) -> (String, Vec<String>) {
+    let (report, lines, _) = run_on(cases, flags, "");
+    (report.expect("the run wrote its report"), lines)
+}
+
+fn run_on(cases: &[(&str, String)], flags: &[&str], existing: &'static str) -> (Option<String>, Vec<String>, ExitCode) {
     let corpus = corpus(cases);
-    let (url, stop, server) = endpoint();
+    let (url, stop, server) = endpoint(existing);
     let report = corpus.0.join("report.json");
     let mut args = vec![
         "run".to_owned(),
@@ -207,20 +232,21 @@ fn run(cases: &[(&str, String)], flags: &[&str]) -> (String, Vec<String>) {
         report.display().to_string(),
     ];
     args.extend(flags.iter().map(|flag| (*flag).to_owned()));
-    let _ = cli::main(&args);
+    let code = cli::main(&args);
     stop.store(true, Ordering::SeqCst);
     let mut lines = server.join().expect("endpoint exits");
-    assert_eq!(
-        lines.first().map(String::as_str),
-        Some("HEAD / HTTP/1.1"),
-        "the identity probe comes first"
-    );
-    lines.remove(0);
-    (read(&report), lines)
-}
-
-fn read(path: &Path) -> String {
-    fs::read_to_string(path).expect("the JSON report")
+    if flags.contains(&"--allow-external-writes") {
+        assert_eq!(
+            lines.first().map(String::as_str),
+            Some("GET / HTTP/1.1"),
+            "the emptiness listing comes first"
+        );
+        lines.remove(0);
+    }
+    if lines.first().map(String::as_str) == Some("HEAD / HTTP/1.1") {
+        lines.remove(0);
+    }
+    (fs::read_to_string(&report).ok(), lines, code)
 }
 
 fn line<'a>(report: &'a str, id: &str) -> &'a str {
@@ -372,7 +398,7 @@ fn a_write_skip_is_not_counted_as_a_clock_skip() {
     let (id, text) = put_with_setup();
     let (report, _) = run(&[(id, text)], &["--allow-external-fixtures"]);
     let row = line(&report, id);
-    assert!(row.contains("\"phase\": \"execute\"") && !row.contains("clock"), "{row}");
+    assert!(row.contains("\"phase\": \"preflight\"") && !row.contains("clock"), "{row}");
 }
 
 /// How many corpus cases the external gates admit, without and with `--allow-external-writes`;
@@ -419,4 +445,141 @@ fn the_readme_states_the_externally_runnable_share_of_this_corpus() {
         read_only < writes && writes < total,
         "a gate that admits nothing or everything measures nothing"
     );
+}
+
+/// A structured read whose bytes can carry another request, as `[request]` lines after the target.
+fn smuggling(id: &str, extra: &str) -> String {
+    case(id, "GetObject", BUCKET, "GET", "/write-runner/key")
+        .replace("target = \"/write-runner/key\"\n", &format!("target = \"/write-runner/key\"\n{extra}\n"))
+}
+
+/// Runs one smuggling case without the flag: the endpoint must receive nothing at all.
+fn assert_smuggling_sends_nothing(id: &str, extra: &str) {
+    let (report, lines) = run(&[(id, smuggling(id, extra))], &["--allow-external-fixtures"]);
+    assert_eq!(lines, Vec::<String>::new(), "{id}: the endpoint received a request");
+    let row = line(&report, id);
+    assert!(
+        row.contains("\"phase\": \"preflight\"") && row.contains("an unclassified GET"),
+        "{id}: {row}"
+    );
+}
+
+/// Negative — a GET whose header value injects a pipelined DELETE is refused without the flag.
+#[test]
+fn without_the_flag_a_header_injected_delete_sends_nothing() {
+    assert_smuggling_sends_nothing(
+        "c-external-writes-0008",
+        "headers = { x-probe = \"a\\r\\n\\r\\nDELETE /write-runner/key HTTP/1.1\\r\\nHost: h\" }",
+    );
+}
+
+/// Negative — a GET with `content-length: 0` whose body is a second request is refused.
+#[test]
+fn without_the_flag_a_body_that_is_a_second_request_sends_nothing() {
+    assert_smuggling_sends_nothing(
+        "c-external-writes-0009",
+        "headers = { content-length = \"0\" }\nbody = { utf8 = \"DELETE /write-runner/key HTTP/1.1\\r\\nHost: h\\r\\n\\r\\n\" }",
+    );
+}
+
+/// Negative — a GET carrying a method-override header is refused.
+#[test]
+fn without_the_flag_a_method_override_sends_nothing() {
+    assert_smuggling_sends_nothing("c-external-writes-0010", "headers = { x-http-method-override = \"DELETE\" }");
+}
+
+/// Positive — with the flag a raw head is sent as written.
+#[test]
+fn with_the_flag_a_raw_head_is_sent() {
+    let id = "c-external-writes-0011";
+    let text = case(id, "GetObject", "", "GET", "/write-free").replace(
+        "[request]\nmethod = \"GET\"\ntarget = \"/write-free\"",
+        "[request]\nraw_head_utf8 = \"GET /write-free HTTP/1.1\\r\\nHost: x\\r\\n\\r\\n\"",
+    );
+    let (_, lines) = run(&[(id, text)], &["--allow-external-writes"]);
+    assert_eq!(lines, ["GET /write-free HTTP/1.1"]);
+}
+
+const GONE: &str = "[[setup.buckets]]\nname = \"write-gone\"\n\n";
+
+/// Positive — with the flag, a bucket DELETE answered 404 is a bucket the case removed itself.
+#[test]
+fn with_the_flag_a_bucket_already_gone_is_accepted() {
+    let id = "c-external-writes-0012";
+    let (report, lines) = run(
+        &[(id, case(id, "DeleteBucket", GONE, "DELETE", "/write-gone"))],
+        &["--allow-external-fixtures", "--allow-external-writes"],
+    );
+    assert!(lines.contains(&"DELETE /write-gone HTTP/1.1".to_owned()), "{lines:?}");
+    assert!(line(&report, id).contains("\"verdict\": \"passed\""), "{}", line(&report, id));
+}
+
+/// Negative — without the flag nothing may have removed an owned bucket, so a 404 on its DELETE is a
+/// cleanup failure, not a success.
+#[test]
+fn without_the_flag_a_bucket_delete_answered_404_fails_cleanup() {
+    let id = "c-external-writes-0013";
+    let vanished = "[[setup.buckets]]\nname = \"write-vanished\"\n\n";
+    let (report, _) = run(
+        &[(id, case(id, "HeadBucket", vanished, "GET", "/write-vanished"))],
+        &["--allow-external-fixtures"],
+    );
+    let row = line(&report, id);
+    assert!(row.contains("\"verdict\": \"failed\"") && row.contains("returned status 404"), "{row}");
+}
+
+/// Negative — a 200 listing that is an `<Error>` document is reported as such, not read as empty.
+#[test]
+fn an_error_document_listing_is_not_an_empty_bucket() {
+    let id = "c-external-writes-0014";
+    let setup = "[[setup.buckets]]\nname = \"write-error\"\n\n";
+    let (report, lines) = run(
+        &[(id, case(id, "HeadBucket", setup, "GET", "/write-error"))],
+        &["--allow-external-fixtures", "--allow-external-writes"],
+    );
+    assert!(!lines.contains(&"DELETE /write-error HTTP/1.1".to_owned()), "{lines:?}");
+    assert!(
+        line(&report, id).contains("not a well-formed ListMultipartUploadsResult"),
+        "{}",
+        line(&report, id)
+    );
+}
+
+/// Negative — a write the pre-check leaves to exact version ownership, refused at the exchange
+/// after setup went out, is reported at the execute phase, never as a preflight skip.
+#[test]
+fn a_write_refused_after_setup_is_not_reported_as_sending_nothing() {
+    let id = "c-external-writes-0015";
+    let setup = "[[setup.buckets]]\nname = \"write-versioned\"\nversioning = \"enabled\"\n\n";
+    let (report, lines) = run(&[(id, case(id, "PutObject", setup, "PUT", "/other/k"))], &["--allow-external-fixtures"]);
+    assert!(lines.contains(&"PUT /write-versioned HTTP/1.1".to_owned()), "setup went out: {lines:?}");
+    assert!(!lines.contains(&"PUT /other/k HTTP/1.1".to_owned()), "{lines:?}");
+    let row = line(&report, id);
+    assert!(row.contains("\"phase\": \"execute\"") && row.contains("versioned"), "{row}");
+}
+
+/// Negative — with the flag, an endpoint that already lists buckets is refused before any case:
+/// exit 3, nothing but the listing sent, and no report.
+#[test]
+fn with_the_flag_an_endpoint_holding_buckets_is_refused_before_any_case() {
+    let (id, text) = put_with_setup();
+    let existing = "<Bucket><Name>keep-me</Name></Bucket>";
+    let (report, lines, code) = run_on(&[(id, text)], &["--allow-external-fixtures", "--allow-external-writes"], existing);
+    assert_eq!(code, ExitCode::from(cli::exit::ENVIRONMENT));
+    assert_eq!(lines, Vec::<String>::new());
+    assert_eq!(report, None);
+}
+
+/// Negative — the refusal names what it found, at most five buckets.
+#[test]
+fn the_emptiness_refusal_names_at_most_five_buckets() {
+    let existing = "<Bucket><Name>b1</Name></Bucket><Bucket><Name>b2</Name></Bucket><Bucket><Name>b3</Name></Bucket>\
+                    <Bucket><Name>b4</Name></Bucket><Bucket><Name>b5</Name></Bucket><Bucket><Name>b6</Name></Bucket>";
+    let (url, stop, server) = endpoint(existing);
+    let mut target = super::super::Conn::external(PathBuf::from("."), &url).expect("target");
+    target.allow_external_writes();
+    let error = target.ensure_endpoint_empty().expect_err("buckets exist");
+    stop.store(true, Ordering::SeqCst);
+    assert_eq!(server.join().expect("endpoint exits"), ["GET / HTTP/1.1"]);
+    assert!(error.to_string().ends_with("it lists 6 bucket(s): b1, b2, b3, b4, b5, ..."), "{error}");
 }

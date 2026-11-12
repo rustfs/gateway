@@ -175,24 +175,11 @@ def function_body(source, signature, label):
 source_root = manifest_path.parent
 parsers = [
     (
-        "src/conn/external_fixture/multipart.rs",
-        "external UploadId parser",
-        "scoped upload_id",
-        r"pub\s*\(\s*super\s*\)\s+fn\s+upload_id\s*"
-        r"\(\s*body\s*:\s*&\s*\[\s*u8\s*\]\s*\)\s*"
-        r"->\s*Result\s*<\s*String\s*,\s*SutError\s*>",
-    ),
-    (
-        "src/conn/external_fixture/versioned.rs",
-        "external versioning parser",
-        "private enabled",
-        r"(?:^|[;}])\s*fn\s+enabled\s*\(\s*body\s*:\s*&\s*\[\s*u8\s*\]\s*\)\s*->\s*bool\s*(?=\{)",
-    ),
-    (
-        "src/conn/external_fixture/writes.rs",
-        "external bucket listing parser",
-        "private listed",
-        r"(?:^|[;}])\s*fn\s+listed\s*\(\s*body\s*:\s*&\s*\[\s*u8\s*\]\s*,[^)]*\)\s*->\s*Option\s*<[^{]*(?=\{)",
+        "src/conn/external_fixture/response_xml.rs",
+        "external fixture response reader",
+        "scoped element_texts",
+        r"pub\s*\(\s*super\s*\)\s+fn\s+element_texts\s*"
+        r"\(\s*body\s*:\s*&\s*\[\s*u8\s*\]\s*,[^)]*\)\s*->\s*Option\s*<[^{]*(?=\{)",
     ),
 ]
 

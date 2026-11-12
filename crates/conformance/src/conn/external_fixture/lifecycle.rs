@@ -36,13 +36,6 @@ impl Conn {
     }
 
     pub(in crate::conn) fn prepare_external(&mut self, case_id: &str, setup: Option<&Value>) -> Result<Captures, SutError> {
-        // Before anything is sent: a case whose verdict reads a hook only the in-process target has
-        // cannot be judged on an endpoint, and running it would create and delete remote fixtures
-        // to learn nothing. The runner turns this into a skip that carries the reason
-        // (rustfs/gateway#1406).
-        if let Some(reason) = crate::inprocess::unavailable_externally(case_id) {
-            return Err(SutError::Environment(reason));
-        }
         self.connection = None;
         let Some(setup) = setup else {
             if self.external_fixtures.holds_anything() {
@@ -196,7 +189,7 @@ impl Conn {
             if let Some(name) = upload.capture {
                 captures.insert(name, upload_id.clone());
             }
-            let upload_target = super::multipart::abort_target(&upload.target, &upload_id);
+            let upload_target = super::object::query_target(&upload.target, "uploadId", &upload_id);
             owned.upload_id = Some(upload_id);
             self.external_fixtures.owned_uploads.push(owned);
             for part in upload.parts {
@@ -241,7 +234,7 @@ impl Conn {
                 failed_uploads.push(upload);
                 continue;
             };
-            let target = super::multipart::abort_target(&upload.target, id);
+            let target = super::object::query_target(&upload.target, "uploadId", id);
             match self.fixture_control_status("DELETE", &target, &upload.region, &[], &[]) {
                 Ok(204) => {}
                 Ok(status) => {
@@ -263,7 +256,7 @@ impl Conn {
                 failed_versions.push(version);
                 continue;
             };
-            let target = super::versioned::delete_target(&version, id);
+            let target = super::object::query_target(&version.target, "versionId", id);
             match self.fixture_control_status("DELETE", &target, &version.region, &[], &[]) {
                 Ok(204) => {}
                 Ok(status) => {

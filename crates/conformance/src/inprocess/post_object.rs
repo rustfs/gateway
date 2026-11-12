@@ -18,13 +18,11 @@
 //! grammar that fixes a file's length from a declared `Content-Length`; recording, at the
 //! handler's entry, `PostObjectInput::content_length` and the body's own remaining length; failing
 //! the case when either is not the file's exact length; and declaring that reading unavailable on
-//! an external endpoint, which reports nothing to the hook (rustfs/gateway#1406); selecting the
-//! legacy grammar for c-post-0022; and declaring c-post-0026 unavailable externally, since its
-//! refusal depends on the bundled fixture's lack of KMS (rustfs/gateway#1399).
+//! an external endpoint, which reports nothing to the hook (rustfs/gateway#1406, declared in
+//! `super::in_process_only`); and selecting the legacy grammar for c-post-0022.
 //! NOT responsible for: judging the response (`crate::expect`), the fixture's storage capability,
 //! or skipping the case (the external target returns the declared reason and the runner skips).
-//! Upstream: the selected case id. Downstream: `super::InProcess` service assembly and `finish`,
-//! and `crate::conn::external_fixture` through `super::unavailable_externally`.
+//! Upstream: the selected case id. Downstream: `super::InProcess` service assembly and `finish`.
 
 use std::sync::{Arc, Mutex};
 
@@ -61,31 +59,6 @@ pub(super) fn configure_case(builder: ServiceBuilder, case_id: &str, observed: O
             }) as BoxFuture<'_, HandlerResult<dto::PostObject>>
         },
     ))
-}
-
-/// Why an external endpoint cannot answer for `case_id`, when its verdict requires the handler
-/// observation or the bundled fixture's lack of KMS; `None` for every other case.
-///
-/// The hook is a layer on the service this target assembles, so only a request that passes through
-/// that service can reach it. An external endpoint is assembled by someone else: nothing it does
-/// is reported to the hook, `finish` would read an empty list, and the case would fail for lack of
-/// an observation rather than for anything the endpoint did. The external target asks this before
-/// it sends anything and skips the case with the reason returned here.
-pub(super) fn unavailable_externally(case_id: &str) -> Option<String> {
-    if case_id == "c-post-0026" {
-        return Some(
-            "c-post-0026: the reference fixture cannot provide KMS; an external host's managed encryption \
-             capability is not controlled by this case, so it is unavailable on an external endpoint"
-                .to_owned(),
-        );
-    }
-    (case_id == OBSERVED_CASE).then(|| {
-        format!(
-            "{OBSERVED_CASE} observes PostObjectInput::content_length at the handler's entry, a reading only the \
-             in-process target's handler hook can supply; it is unavailable on an external endpoint, so the case \
-             is not run there"
-        )
-    })
 }
 
 /// The observation's verdict: exactly one handler entry, handed the file's exact length both as
@@ -156,7 +129,7 @@ mod tests {
             "C-POST-0026",
             "",
         ] {
-            assert_eq!(unavailable_externally(other), None, "{other:?}");
+            assert_eq!(crate::inprocess::unavailable_externally(other), None, "{other:?}");
         }
     }
 
@@ -164,7 +137,8 @@ mod tests {
     /// the hook, which is all a reader of the skip line has to go on.
     #[test]
     fn the_observed_case_names_what_an_external_endpoint_cannot_supply() {
-        let reason = unavailable_externally(OBSERVED_CASE).expect("the observed case is unavailable externally");
+        let reason =
+            crate::inprocess::unavailable_externally(OBSERVED_CASE).expect("the observed case is unavailable externally");
         for needle in [OBSERVED_CASE, "PostObjectInput::content_length", "in-process", "external"] {
             assert!(reason.contains(needle), "{needle:?} missing from {reason:?}");
         }
@@ -173,7 +147,8 @@ mod tests {
     /// The unsupported-KMS fixture case cannot declare that capability on an external host.
     #[test]
     fn the_unsupported_managed_fixture_case_is_unavailable_externally() {
-        let reason = unavailable_externally("c-post-0026").expect("the fixture capability is unavailable externally");
+        let reason =
+            crate::inprocess::unavailable_externally("c-post-0026").expect("the fixture capability is unavailable externally");
         assert!(reason.contains("reference fixture cannot provide KMS"), "{reason}");
     }
 

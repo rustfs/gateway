@@ -121,8 +121,12 @@ pub(crate) fn external_target(options: &Options, root: PathBuf) -> Result<Conn, 
     }?;
     target.endpoint_fixed_time.clone_from(&options.endpoint_fixed_time);
     if options.external_writes {
-        eprintln!("external writes allowed: authored PUT, POST and DELETE requests will be sent to {endpoint}");
+        eprintln!(
+            "external writes allowed: every authored request, including raw heads and HTTP/2 scripts, will be sent to \
+             {endpoint}; cleanup empties each bucket a case declares"
+        );
         target.allow_external_writes();
+        target.ensure_endpoint_empty()?;
     }
     Ok(target)
 }

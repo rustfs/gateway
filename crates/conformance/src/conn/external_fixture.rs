@@ -38,6 +38,7 @@ mod object;
 #[cfg(test)]
 mod object_tests;
 mod region;
+mod response_xml;
 #[cfg(test)]
 mod runner_tests;
 mod versioned;

@@ -31,8 +31,19 @@ use crate::value::Value;
 /// case writes a handful, so a bucket still listing entries after this many is not being emptied.
 const EMPTYING_ROUNDS: usize = 16;
 
-/// The method that makes `wire` a write, or `None` when it only reads. A raw head or an
-/// undecodable HTTP/2 script cannot be shown to read, so it counts as a write.
+/// Headers that frame a body or rename the method behind a read's request line.
+const FRAMING_OR_OVERRIDE: &[&str] = &[
+    "content-length",
+    "transfer-encoding",
+    "x-http-method-override",
+    "x-http-method",
+    "x-method-override",
+];
+
+/// The method that makes `wire` a write, or `None` when it only reads. Classified on what the
+/// bytes can carry, not on the declared method: a raw head, an undecodable HTTP/2 script, or a
+/// structured read whose target or headers hold CR, LF or NUL (a second request), that carries
+/// body bytes, or that frames a body or overrides its method, cannot be shown to read.
 pub(super) fn write_method(wire: &Wire) -> Option<String> {
     let read_only = |method: &str| matches!(method, "GET" | "HEAD" | "OPTIONS");
     if !wire.h2_frames.is_empty() {
@@ -45,7 +56,17 @@ pub(super) fn write_method(wire: &Wire) -> Option<String> {
     if wire.raw_head.is_some() {
         return Some("an unclassified raw request".to_owned());
     }
-    (!read_only(&wire.method)).then(|| wire.method.clone())
+    if !read_only(&wire.method) {
+        return Some(wire.method.clone());
+    }
+    let smuggles = |text: &str| text.bytes().any(|byte| matches!(byte, b'\r' | b'\n' | 0));
+    let unclassified = smuggles(&wire.target)
+        || wire.headers.iter().any(|(name, value)| {
+            smuggles(name) || smuggles(value) || FRAMING_OR_OVERRIDE.iter().any(|framing| name.eq_ignore_ascii_case(framing))
+        })
+        || !wire.body.is_empty()
+        || !wire.steps.is_empty();
+    unclassified.then(|| format!("an unclassified {} whose bytes may carry another request", wire.method))
 }
 
 pub(super) fn refused(method: &str) -> SutError {
@@ -57,24 +78,23 @@ pub(super) fn refused(method: &str) -> SutError {
 
 impl Conn {
     /// Refuses a case with an authored write before any of its traffic, setup included, when the
-    /// operator did not allow writes. A structured PUT or DELETE in a case that declares a
-    /// versioning-enabled bucket is left to exact version ownership, which classifies it at
-    /// exchange time; `ensure_read_only` remains the boundary for everything else.
+    /// operator did not allow writes, and a case only the in-process target can judge always.
+    /// A structured PUT or DELETE in a case that declares a versioning-enabled bucket is left to
+    /// exact version ownership, which may still refuse it at exchange time, after setup; that
+    /// refusal is reported at the execute phase, this one at the preflight phase.
     pub(in crate::conn) fn validate_external_requests(
         &self,
         case_id: &str,
         setup: Option<&Value>,
         requests: &[&Value],
     ) -> Result<(), SutError> {
-        let fixtures = &self.external_fixtures;
         if self.external.is_none() {
             return Ok(());
         }
-        // A case no endpoint can judge says so whatever the flags; `prepare` repeats this for a
-        // caller that skips the runner.
         if let Some(reason) = crate::inprocess::unavailable_externally(case_id) {
             return Err(SutError::Environment(reason));
         }
+        let fixtures = &self.external_fixtures;
         if fixtures.writes {
             return Ok(());
         }
@@ -99,12 +119,54 @@ impl Conn {
         Ok(())
     }
 
+    /// Refuses a run with writes granted unless the endpoint lists no bucket: the cases assume a
+    /// pristine server, and cleanup removes only what each case declares.
+    pub(crate) fn ensure_endpoint_empty(&self) -> Result<(), SutError> {
+        const SHOWN: usize = 5;
+        let region = super::region::FixtureRegion::parse(None)?;
+        let listing = self.fixture_control_observation("GET", "/", &region, &[], &[])?;
+        if listing.status != Some(200) {
+            return Err(SutError::Environment(format!(
+                "`--allow-external-writes` needs an empty endpoint, but ListBuckets returned status {:?}",
+                listing.status
+            )));
+        }
+        let buckets = super::response_xml::element_texts(&listing.body, &[b"ListAllMyBucketsResult", b"Buckets", b"Bucket"])
+            .ok_or_else(|| {
+                SutError::Environment(
+                    "`--allow-external-writes` needs an empty endpoint, but its ListBuckets body is not a ListAllMyBucketsResult"
+                        .to_owned(),
+                )
+            })?;
+        if buckets.is_empty() {
+            return Ok(());
+        }
+        let names: Vec<&str> = buckets
+            .iter()
+            .take(SHOWN)
+            .map(|children| super::response_xml::texts(children, b"Name").flatten().next().unwrap_or("?"))
+            .collect();
+        Err(SutError::Environment(format!(
+            "`--allow-external-writes` needs an empty endpoint on a fresh data directory, but it lists {} bucket(s): {}{}",
+            buckets.len(),
+            names.join(", "),
+            if buckets.len() > SHOWN { ", ..." } else { "" }
+        )))
+    }
+
     /// Empties `bucket` of every upload, version and delete marker its listings show. A bucket
     /// that does not exist (declared absent and never created, or deleted by the case) is empty.
     pub(super) fn empty_fixture_bucket(&self, bucket: &OwnedBucket) -> Result<(), SutError> {
         for _ in 0..EMPTYING_ROUNDS {
-            let uploads = self.list_fixture_bucket(bucket, "uploads", &[b"Upload"], b"UploadId")?;
-            let versions = self.list_fixture_bucket(bucket, "versions", &[b"Version", b"DeleteMarker"], b"VersionId")?;
+            let uploads =
+                self.list_fixture_bucket(bucket, "uploads", b"ListMultipartUploadsResult", &[b"Upload"], b"UploadId")?;
+            let versions = self.list_fixture_bucket(
+                bucket,
+                "versions",
+                b"ListVersionsResult",
+                &[b"Version", b"DeleteMarker"],
+                b"VersionId",
+            )?;
             if uploads.is_empty() && versions.is_empty() {
                 return Ok(());
             }
@@ -129,62 +191,47 @@ impl Conn {
         )))
     }
 
+    /// The `(Key, id)` of every `items` entry a listing shows; a bucket that does not exist lists none.
     fn list_fixture_bucket(
         &self,
         bucket: &OwnedBucket,
         query: &str,
+        root: &[u8],
         items: &[&[u8]],
         id: &[u8],
     ) -> Result<Vec<(String, String)>, SutError> {
         let target = format!("/{}?{query}", bucket.name);
         let observation = self.fixture_control_observation("GET", &target, &bucket.region, &[], &[])?;
+        let unreadable = || {
+            SutError::Environment(format!(
+                "emptying bucket `{}`: the {query} listing is not a well-formed {} with a Key and an id per entry",
+                bucket.name,
+                String::from_utf8_lossy(root)
+            ))
+        };
         match observation.status {
-            Some(200) => listed(&observation.body, items, id).ok_or_else(|| {
-                SutError::Environment(format!("emptying bucket `{}`: the {query} listing is not readable", bucket.name))
-            }),
-            Some(404) => Ok(Vec::new()),
-            status => Err(SutError::Environment(format!(
-                "emptying bucket `{}`: the {query} listing returned status {status:?}",
-                bucket.name
-            ))),
-        }
-    }
-}
-
-/// The `Key` and `id` texts of every root child named in `items`, or `None` for a body that is
-/// not well-formed or an item missing either.
-fn listed(body: &[u8], items: &[&[u8]], id: &[u8]) -> Option<Vec<(String, String)>> {
-    use quick_xml::{Reader, escape::resolve_predefined_entity, events::Event};
-    let mut reader = Reader::from_reader(body);
-    reader.config_mut().expand_empty_elements = true;
-    let mut path: Vec<Vec<u8>> = Vec::new();
-    let mut entries = Vec::new();
-    let (mut key, mut value) = (None::<String>, None::<String>);
-    let mut text = String::new();
-    loop {
-        match reader.read_event().ok()? {
-            Event::Start(element) => {
-                path.push(element.local_name().as_ref().to_vec());
-                text.clear();
+            Some(200) => {}
+            Some(404) => return Ok(Vec::new()),
+            status => {
+                return Err(SutError::Environment(format!(
+                    "emptying bucket `{}`: the {query} listing returned status {status:?}",
+                    bucket.name
+                )));
             }
-            Event::Text(part) => text.push_str(&part.xml10_content().ok()?),
-            Event::CData(part) => text.push_str(&part.xml10_content().ok()?),
-            Event::GeneralRef(reference) => match reference.resolve_char_ref().ok()? {
-                Some(character) => text.push(character),
-                None => text.push_str(resolve_predefined_entity(&reference.decode().ok()?)?),
-            },
-            Event::End(_) => {
-                let name = path.pop()?;
-                match path.as_slice() {
-                    [_, item] if items.contains(&item.as_slice()) && name == b"Key" => key = Some(text.clone()),
-                    [_, item] if items.contains(&item.as_slice()) && name == id => value = Some(text.clone()),
-                    [_] if items.contains(&name.as_slice()) => entries.push((key.take()?, value.take()?)),
-                    _ => {}
-                }
-                text.clear();
-            }
-            Event::Eof => return path.is_empty().then_some(entries),
-            _ => {}
         }
+        let mut entries = Vec::new();
+        for item in items {
+            for children in super::response_xml::element_texts(&observation.body, &[root, item]).ok_or_else(unreadable)? {
+                let one = |name: &[u8]| {
+                    let mut texts = super::response_xml::texts(&children, name);
+                    match (texts.next(), texts.next()) {
+                        (Some(Some(text)), None) => Some(text.to_owned()),
+                        _ => None,
+                    }
+                };
+                entries.push((one(b"Key").ok_or_else(unreadable)?, one(id).ok_or_else(unreadable)?));
+            }
+        }
+        Ok(entries)
     }
 }

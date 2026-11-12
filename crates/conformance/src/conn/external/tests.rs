@@ -329,6 +329,11 @@ fn probed_then_responding_server(response: &'static [u8]) -> (String, thread::Jo
             stream.write_all(response).expect("write response");
             request
         };
+        // `--allow-external-writes` first proves the endpoint empty with one ListBuckets.
+        let listing = answer(
+            b"HTTP/1.1 200 OK\r\nContent-Length: 68\r\nConnection: close\r\n\r\n<ListAllMyBucketsResult><Buckets></Buckets></ListAllMyBucketsResult>",
+        );
+        assert!(listing.starts_with(b"GET / HTTP/1.1\r\n"), "the emptiness listing comes first");
         let probe = answer(b"HTTP/1.1 403 Forbidden\r\nServer: RustFS\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
         let case = answer(response);
         (probe, case)

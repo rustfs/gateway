@@ -92,6 +92,9 @@ pub enum Phase {
     /// nothing: the case pins an instant or a skew an external target, on its own clock, cannot
     /// honour.
     Clock,
+    /// The case's authored requests checked against what the target may be sent. A skip here sent
+    /// nothing: a write the operator did not allow, or a case only the in-process target can judge.
+    Preflight,
     /// Running the exchanges against a target.
     Execute,
 }
@@ -105,6 +108,7 @@ impl Phase {
             Phase::Schema => "schema",
             Phase::Convention => "convention",
             Phase::Clock => "clock",
+            Phase::Preflight => "preflight",
             Phase::Execute => "execute",
         }
     }

@@ -571,30 +571,49 @@ ambiguous framing and Host overrides remain unsupported. Missing upload or versi
 failed cleanup, retain ownership and block the next case. Object Lock and authored multipart writes,
 including completion, remain unsupported and report their capability reason.
 
-**Writes need `--allow-external-writes`.** Without it the runner sends no authored write — any
-request but GET, HEAD or OPTIONS, and any raw head or HTTP/2 script it cannot decode to one of
-those — to an endpoint: such a case is skipped before any of its requests, setup included, with a
-reason that starts `environment: external writes are disabled` and names the flag. The
-one exception is the exact-version path above: a structured PUT or DELETE in a case that declares
-a versioning-enabled bucket is still classified at exchange time. The flag requires `--endpoint`,
-prints `external writes allowed: authored PUT, POST and DELETE requests will be sent to <url>` on
-standard error, and declares the endpoint disposable: every authored write is sent, versioned
-writes are no longer tracked one by one, and cleanup instead empties every bucket the case
-declares — aborting each listed multipart upload and deleting each listed version and delete
-marker — before deleting it; a bucket declared `absent` that the case created is emptied and
-deleted too, and a bucket the case deleted itself is accepted as gone. It grants writes only;
-cases with setup still need `--allow-external-fixtures`.
+**Writes need `--allow-external-writes`.** Without it the runner sends no authored write to an
+endpoint. A request counts as a write unless its bytes can only read: anything but GET, HEAD or
+OPTIONS; a raw head; an HTTP/2 script that does not decode to one of those; and a GET, HEAD or
+OPTIONS whose target or headers hold CR, LF or NUL, that carries body bytes, or that sends
+`content-length`, `transfer-encoding` or a method-override header. Such a case is skipped at the
+`preflight` phase, before any of its requests, setup included, with a reason that starts
+`environment: external writes are disabled` and names the flag. The one exception is the
+exact-version path above: a structured PUT or DELETE in a case that declares a versioning-enabled
+bucket is classified at exchange time, so its refusal comes after setup and is reported at the
+`execute` phase; only a `preflight` or `clock` skip means nothing was sent.
 
-Cases assume a pristine server, as the in-process target gives each one. Cleanup removes only the
-buckets a case declares, so state a setup-less write creates (`c-host-0003` creates the bucket its
-virtual host names) survives the run: start the endpoint on a fresh, empty data directory for
-every run with this flag, and never point it at a server holding data you want to keep.
+The flag requires `--endpoint` and declares the endpoint disposable. Before any case it sends one
+signed ListBuckets and refuses the run (exit 3, naming up to five buckets found) unless the
+endpoint lists none: cases assume a pristine server, as the in-process target gives each one, and
+there is no override. It then prints `external writes allowed: every authored request, including
+raw heads and HTTP/2 scripts, will be sent to <url>; cleanup empties each bucket a case declares`
+on standard error. Every authored write is sent, versioned writes are no longer tracked one by
+one, and cleanup instead empties every bucket the case declares — aborting each listed multipart
+upload and deleting each listed version and delete marker — before deleting it; a bucket declared
+`absent` that the case created is emptied and deleted too, and a bucket DELETE answered 404 is a
+bucket the case deleted itself. A listing that is not the expected document, an `<Error>`
+included, is a cleanup failure. It grants writes only; cases with setup still need
+`--allow-external-fixtures`.
+
+Cleanup removes only the buckets a case declares, so state a setup-less write creates
+(`c-host-0003` creates the bucket its virtual host names) survives until the next run, which the
+emptiness check then refuses: start the endpoint on a fresh data directory for every run. A
+cleanup failure keeps its bucket owned, and every later case of the run is then skipped with
+`external fixture cleanup from the previous case is incomplete`, so one failure reads as many
+skips.
+
+Cases only the in-process target can judge — their verdict reads a counter its own service
+increments, or depends on a policy, provider or fault it injects — are listed with their reason in
+`inprocess::in_process_only::IN_PROCESS_ONLY` and skipped at the `preflight` phase on every
+endpoint. A census test requires every case id the in-process sources name to be in that table or
+in its list of cases configured by id that an endpoint can still judge, and every case whose
+`finish` verdict moves with a hook counter to be in the table.
 
 **What can run against an external endpoint at all.** Two gates run before any traffic: the clock
 gate skips, at the `clock` phase, a case that pins `clock.fixed` (or a server `skew_ms`) an
 endpoint on its own wall clock cannot follow — the text report counts these on a `clock:` line —
-and the write gate above. Of the 890 cases, 534 (60.0%) pass these gates with
-`--allow-external-writes` and 133 (14.9%) without it, with `--allow-external-fixtures` in both and
+and the preflight gate above. Of the 890 cases, 526 (59.1%) pass these gates with
+`--allow-external-writes` and 126 (14.1%) without it, with `--allow-external-fixtures` in both and
 the endpoint on its own wall clock. `writes_tests::the_readme_states_the_externally_runnable_share_of_this_corpus`
 recomputes both numbers from the corpus with the runner's own gates and fails until this sentence
 matches. Nearly all of the rest pin `clock.fixed`, and run only against an endpoint started on that
@@ -620,8 +639,9 @@ add `external_writes: false` to manually constructed values. Against `--endpoint
 authored write, setup-less ones included, is now skipped unless `--allow-external-writes` is
 given; pass it only for a disposable endpoint. A `Sut` wrapper must forward
 `validate_requests(&self, case_id, setup, requests)` to its wrapped target so the write gate still
-runs before fixture preparation. `report::Phase` gains `Clock`, the phase of a case skipped
-because its clock cannot be honoured, so an exhaustive `match` on it needs that arm.
+runs before fixture preparation. `report::Phase` gains `Clock` and `Preflight`, the phases of a
+case skipped before any request because its clock cannot be honoured or its requests may not be
+sent, so an exhaustive `match` on it needs those arms.
 
 **BREAKING: migrating conformance 0.16 to 0.17.** The public `cli::Options` struct now includes
 `endpoint_fixed_time`. Add `endpoint_fixed_time: None` to manually constructed `Options` values
@@ -640,8 +660,10 @@ The JUnit document (`--junit`) is always well-formed XML 1.0, whatever bytes a t
 a diagnostic. XML forbids the C0 controls other than tab, newline and carriage return, and U+FFFE
 and U+FFFF, even as character references, so each of those is written as the visible text
 `\uXXXX` (U+0001 becomes `\u0001`); tab, newline and carriage return are written as character
-references so attribute normalisation keeps them. The JSON report is not rewritten and keeps the
-exact characters in JSON's own escapes.
+references so attribute normalisation keeps them. The mapping cannot be reversed — a literal
+`\u0001` in the input reads the same — so the JSON report, which is not rewritten and keeps the
+exact characters in JSON's own escapes, is the record to parse. The JUnit tests parse with
+Python's `xml.etree` and need `python3` on the test host.
 
 ### The rulings ledger (`--rulings <toml>`)
 

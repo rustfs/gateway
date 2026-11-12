@@ -95,6 +95,7 @@ mod conditional_race;
 #[cfg(test)]
 mod external_unavailable_tests;
 pub(crate) mod h2_frames;
+mod in_process_only;
 mod payload;
 mod payload_literal;
 pub(crate) mod post_object;
@@ -104,11 +105,6 @@ mod sigv2;
 #[cfg(test)]
 mod transport_limit_tests;
 
-/// Why an external endpoint cannot answer for `case_id`: its verdict reads a hook or a fixture
-/// capability only this target has. The external target asks before sending anything.
-pub(crate) fn unavailable_externally(case_id: &str) -> Option<String> {
-    security::unavailable_externally(case_id).or_else(|| post_object::unavailable_externally(case_id))
-}
 use crate::exec::ServiceRuntime;
 use crate::fixture::{Fixture, StoredObject, Stub};
 use crate::interpolate::Captures;
@@ -119,6 +115,7 @@ use crate::observation::{
 use crate::sut::{ExchangePlan, Profile, Sut, SutError};
 use crate::time;
 use crate::value::Value;
+pub(crate) use in_process_only::unavailable_externally;
 use payload::{decode_hex, generate};
 use security::{FixedDecision, FixtureBucketOwner};
 /// The access key id every case names as `valid`.
