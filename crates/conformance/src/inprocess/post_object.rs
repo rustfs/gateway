@@ -24,7 +24,7 @@
 //! NOT responsible for: judging the response (`crate::expect`), the fixture's storage capability,
 //! or skipping the case (the external target returns the declared reason and the runner skips).
 //! Upstream: the selected case id. Downstream: `super::InProcess` service assembly and `finish`,
-//! and `crate::conn::external_fixture` through [`unavailable_externally`].
+//! and `crate::conn::external_fixture` through `super::unavailable_externally`.
 
 use std::sync::{Arc, Mutex};
 
@@ -71,7 +71,7 @@ pub(super) fn configure_case(builder: ServiceBuilder, case_id: &str, observed: O
 /// is reported to the hook, `finish` would read an empty list, and the case would fail for lack of
 /// an observation rather than for anything the endpoint did. The external target asks this before
 /// it sends anything and skips the case with the reason returned here.
-pub(crate) fn unavailable_externally(case_id: &str) -> Option<String> {
+pub(super) fn unavailable_externally(case_id: &str) -> Option<String> {
     if case_id == "c-post-0026" {
         return Some(
             "c-post-0026: the reference fixture cannot provide KMS; an external host's managed encryption \

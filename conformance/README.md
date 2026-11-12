@@ -593,8 +593,8 @@ every run with this flag, and never point it at a server holding data you want t
 **What can run against an external endpoint at all.** Two gates run before any traffic: the clock
 gate skips, at the `clock` phase, a case that pins `clock.fixed` (or a server `skew_ms`) an
 endpoint on its own wall clock cannot follow — the text report counts these on a `clock:` line —
-and the write gate above. Of the 890 cases, 544 (61.1%) pass these gates with
-`--allow-external-writes` and 139 (15.6%) without it, with `--allow-external-fixtures` in both and
+and the write gate above. Of the 890 cases, 534 (60.0%) pass these gates with
+`--allow-external-writes` and 133 (14.9%) without it, with `--allow-external-fixtures` in both and
 the endpoint on its own wall clock. `writes_tests::the_readme_states_the_externally_runnable_share_of_this_corpus`
 recomputes both numbers from the corpus with the runner's own gates and fails until this sentence
 matches. Nearly all of the rest pin `clock.fixed`, and run only against an endpoint started on that
@@ -682,7 +682,8 @@ same reader, so it fails the same way a hand-written one does. It rules behaviou
 harness cannot measure against an external target — one that pins an unconfigured `clock.fixed`, needs a fixture
 the external path does not establish, an operation the launcher does not register, an authored
 HTTP/2 script, or a verdict that reads a handler hook only the in-process target has
-(`c-post-0020`, skipped before any request is sent: rustfs/gateway#1406) — is left unruled on
+(`c-post-0020` and the counted authorization and credential cases
+`inprocess::security` lists, skipped before any request is sent: rustfs/gateway#1406) — is left unruled on
 purpose, so a run with this ledger still exits 1 and its `rulings:` block names exactly what is
 unmeasured rather than excusing it.
 

@@ -22,7 +22,7 @@
 use std::collections::BTreeSet;
 
 use super::super::{Conn, Head, budget_of};
-use crate::inprocess::{ChunkStep, Wire, post_object};
+use crate::inprocess::{ChunkStep, Wire};
 use crate::interpolate::Captures;
 use crate::sut::{Sut, SutError};
 use crate::value::Value;
@@ -40,7 +40,7 @@ impl Conn {
         // cannot be judged on an endpoint, and running it would create and delete remote fixtures
         // to learn nothing. The runner turns this into a skip that carries the reason
         // (rustfs/gateway#1406).
-        if let Some(reason) = post_object::unavailable_externally(case_id) {
+        if let Some(reason) = crate::inprocess::unavailable_externally(case_id) {
             return Err(SutError::Environment(reason));
         }
         self.connection = None;

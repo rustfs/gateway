@@ -92,6 +92,8 @@ use std::sync::{Arc, Mutex};
 use std::{collections::BTreeMap, path::PathBuf};
 mod computed_md5;
 mod conditional_race;
+#[cfg(test)]
+mod external_unavailable_tests;
 pub(crate) mod h2_frames;
 mod payload;
 mod payload_literal;
@@ -101,6 +103,12 @@ mod security;
 mod sigv2;
 #[cfg(test)]
 mod transport_limit_tests;
+
+/// Why an external endpoint cannot answer for `case_id`: its verdict reads a hook or a fixture
+/// capability only this target has. The external target asks before sending anything.
+pub(crate) fn unavailable_externally(case_id: &str) -> Option<String> {
+    security::unavailable_externally(case_id).or_else(|| post_object::unavailable_externally(case_id))
+}
 use crate::exec::ServiceRuntime;
 use crate::fixture::{Fixture, StoredObject, Stub};
 use crate::interpolate::Captures;

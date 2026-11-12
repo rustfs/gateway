@@ -14,7 +14,8 @@
 
 //! Deterministic security extension sources for the in-process target.
 //!
-//! Responsible for: fixed authorization outcomes, dispatch counts, and bucket-owner metadata availability.
+//! Responsible for: fixed authorization outcomes, dispatch counts, bucket-owner metadata
+//! availability, and declaring the counted cases unavailable on an external endpoint.
 //! NOT responsible for: policy parsing, signing, or judging a conformance expectation.
 //! Upstream: the selected case id. Downstream: `super::InProcess` service assembly.
 
@@ -55,6 +56,49 @@ pub(super) fn configure_version_list(builder: ServiceBuilder, case_id: &str, cal
             }) as BoxFuture<'_, HandlerResult<dto::ListObjectVersions>>
         },
     ))
+}
+
+/// The cases whose verdict reads a dispatch or credential counter of this target's own service,
+/// each with what that counter decides. `super::InProcess::finish` judges them; the census in
+/// `super::external_unavailable_tests` proves this table and that judgement name the same cases.
+const COUNTED: &[(&str, &str)] = &[
+    ("c-authz-0008", "that ListObjectVersions dispatch was reached exactly once"),
+    (
+        "c-authz-1016",
+        "that ListObjectVersions dispatch was not reached after authorization refused",
+    ),
+    (
+        "c-authz-1017",
+        "that ListObjectVersions dispatch was not reached after authorization refused",
+    ),
+    ("c-authz-1018", "that only the ordinary copy control reached the copy backend"),
+    (
+        "c-authz-1001",
+        "that the copy backend was not reached after authorization refused the source",
+    ),
+    (
+        "c-authz-1011",
+        "that the copy backend was not reached after authorization refused the source",
+    ),
+    (
+        "c-authz-1012",
+        "that the copy backend was not reached after authorization refused the source",
+    ),
+    ("c-cred-0002", "that the credential provider was not called for an anonymous request"),
+    ("c-cred-0006", "how many of 100 identical misses reached the credential backend"),
+    ("c-cred-0024", "that the forged key was classified as a credential lookup"),
+];
+
+/// Why an external endpoint cannot answer for `case_id`, when its verdict reads a counter only this
+/// target's service increments; `None` for every other case. Against an endpoint the counter stays
+/// zero, so the case would fail, or pass vacuously, for want of an observation.
+pub(super) fn unavailable_externally(case_id: &str) -> Option<String> {
+    COUNTED.iter().find(|(id, _)| *id == case_id).map(|(id, verdict)| {
+        format!(
+            "{id} judges {verdict}, a count only the in-process target's dispatch hooks can supply; it is \
+             unavailable on an external endpoint, so the case is not run there"
+        )
+    })
 }
 
 pub(super) fn finish_version_list(case_id: &str, calls: usize) -> Result<(), SutError> {

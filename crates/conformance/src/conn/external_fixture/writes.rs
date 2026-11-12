@@ -72,7 +72,7 @@ impl Conn {
         }
         // A case no endpoint can judge says so whatever the flags; `prepare` repeats this for a
         // caller that skips the runner.
-        if let Some(reason) = crate::inprocess::post_object::unavailable_externally(case_id) {
+        if let Some(reason) = crate::inprocess::unavailable_externally(case_id) {
             return Err(SutError::Environment(reason));
         }
         if fixtures.writes {

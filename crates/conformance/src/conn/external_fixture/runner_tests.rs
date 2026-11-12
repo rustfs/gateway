@@ -424,16 +424,26 @@ fn cli_runner_reports_a_run_of_only_the_hooked_case_as_unmeasured_not_as_a_regre
     assert_eq!(lines, ["HEAD / HTTP/1.1"], "only the identity probe may reach the endpoint");
 }
 
-/// Negative — the committed rustfs ledger rules nothing for the hooked case. A ruling is a claim
-/// about the target, and this skip is a claim about the harness (rustfs/gateway#1406): it stays
+/// Negative — the committed rustfs ledger rules no case unavailable externally. A ruling is a claim
+/// about the target, and such a skip is a claim about the harness (rustfs/gateway#1406): it stays
 /// unruled so a run with the ledger still names it as unmeasured.
 #[test]
-fn the_rustfs_ledger_does_not_rule_the_hooked_case() {
+fn the_rustfs_ledger_rules_no_case_unavailable_externally() {
     let ledger = crate::corpus::Corpus::discover_root()
         .expect("repository corpus")
         .join("rulings/rustfs-profile.toml");
     let text = fs::read_to_string(&ledger).expect("the committed ledger");
     let rulings = crate::rulings::Rulings::parse(&text).expect("the committed ledger parses");
     assert!(!rulings.is_empty(), "the control ledger is empty, so this test proves nothing");
-    assert!(rulings.get("c-post-0020").is_none(), "c-post-0020 must stay unruled");
+    let corpus = crate::corpus::Corpus::load(&crate::corpus::Corpus::discover_root().expect("corpus")).expect("corpus loads");
+    let unavailable: Vec<&str> = corpus
+        .cases()
+        .iter()
+        .map(|case| case.id.as_str())
+        .filter(|id| crate::inprocess::unavailable_externally(id).is_some())
+        .collect();
+    assert!(unavailable.contains(&"c-post-0020"), "the census lost the hooked case: {unavailable:?}");
+    for id in unavailable {
+        assert!(rulings.get(id).is_none(), "{id} is unavailable externally and must stay unruled");
+    }
 }
