@@ -15531,43 +15531,91 @@ expect_fail check_runner_raw_bytes.sh \
     'quick-xml must use only the workspace dependency'
 
 mut_runner_fixture_xml_parser_missing() {
-    rm crates/conformance/src/conn/external_fixture/multipart.rs
+    rm crates/conformance/src/conn/external_fixture/response_xml.rs
 }
 expect_fail check_runner_raw_bytes.sh \
-    'the required fixture XML parser file missing' mut_runner_fixture_xml_parser_missing \
-    'external UploadId parser source is missing'
+    'the required fixture XML reader file missing' mut_runner_fixture_xml_parser_missing \
+    'external fixture response reader source is missing'
 
 mut_runner_fixture_xml_function_missing() {
-    python3 - <<'PYEOF'
-from pathlib import Path
-
-path = Path("crates/conformance/src/conn/external_fixture/multipart.rs")
-source = path.read_text()
-old = "pub(super) fn upload_id("
-if source.count(old) != 1:
-    raise SystemExit("fixture UploadId function is not unique")
-path.write_text(source.replace(old, "pub(super) fn renamed_upload_id(", 1))
-PYEOF
+    sed 's/pub(super) fn element_texts(/pub(super) fn renamed_element_texts(/' crates/conformance/src/conn/external_fixture/response_xml.rs >crates/conformance/src/conn/external_fixture/response_xml.rs.mut
+    mv crates/conformance/src/conn/external_fixture/response_xml.rs.mut crates/conformance/src/conn/external_fixture/response_xml.rs
 }
 expect_fail check_runner_raw_bytes.sh \
-    'the scoped fixture UploadId function missing' mut_runner_fixture_xml_function_missing \
-    'external UploadId parser must have exactly one scoped upload_id function'
+    'the scoped fixture XML reader function missing' mut_runner_fixture_xml_function_missing \
+    'external fixture response reader must have exactly one scoped element_texts function'
 
 mut_runner_fixture_xml_function_duplicated() {
-    cat >>crates/conformance/src/conn/external_fixture/multipart.rs <<'RUST'
-pub(super) fn upload_id(body: &[u8]) -> Result<String, SutError> { todo!() }
-RUST
+    printf '\npub(super) fn element_texts(body: &[u8], path: &[&[u8]]) -> Option<Vec<Children>> { None }\n' >>crates/conformance/src/conn/external_fixture/response_xml.rs
 }
 expect_fail check_runner_raw_bytes.sh \
     'a second function claiming the fixture XML exception' mut_runner_fixture_xml_function_duplicated \
-    'external UploadId parser must have exactly one scoped upload_id function'
+    'external fixture response reader must have exactly one scoped element_texts function'
 
-mut_runner_fixture_xml_module_import() {
-    printf '\nuse quick_xml::Reader as UnexpectedReader;\n' \
-        >>crates/conformance/src/conn/external_fixture/multipart.rs
+mut_runner_fixture_xml_function_exported() {
+    sed 's/^pub(super) fn element_texts(/pub fn element_texts(/' crates/conformance/src/conn/external_fixture/response_xml.rs >crates/conformance/src/conn/external_fixture/response_xml.rs.mut
+    mv crates/conformance/src/conn/external_fixture/response_xml.rs.mut crates/conformance/src/conn/external_fixture/response_xml.rs
 }
 expect_fail check_runner_raw_bytes.sh \
-    'a fixture XML import escaping the UploadId function' mut_runner_fixture_xml_module_import \
+    'the fixture XML reader exported beyond its fixture module' mut_runner_fixture_xml_function_exported \
+    'external fixture response reader must have exactly one scoped element_texts function'
+
+mut_runner_fixture_xml_function_exported_newline() {
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path("crates/conformance/src/conn/external_fixture/response_xml.rs")
+source = path.read_text()
+old = "pub(super) fn element_texts("
+if source.count(old) != 1:
+    raise SystemExit("fixture XML reader function is not unique")
+path.write_text(source.replace(old, "pub(crate)\nfn element_texts(", 1))
+PY
+}
+expect_fail check_runner_raw_bytes.sh \
+    'a split visibility declaration exporting the fixture XML reader' mut_runner_fixture_xml_function_exported_newline \
+    'external fixture response reader must have exactly one scoped element_texts function'
+
+mut_runner_fixture_xml_declaration_decoy() {
+    python3 - <<'PY'
+from pathlib import Path
+
+path = Path("crates/conformance/src/conn/external_fixture/response_xml.rs")
+source = path.read_text()
+old = "pub(super) fn element_texts("
+new = ("trait ReaderDeclaration { fn marker(); fn element_texts(body: &[u8], path: &[&[u8]]) -> Option<()>; }\n"
+       "pub(super) fn renamed_element_texts(")
+if source.count(old) != 1:
+    raise SystemExit("fixture XML reader function is not unique")
+path.write_text(source.replace(old, new, 1))
+PY
+}
+expect_fail check_runner_raw_bytes.sh \
+    'a declaration claiming the next function body as the fixture XML reader' mut_runner_fixture_xml_declaration_decoy \
+    'external fixture response reader must have exactly one scoped element_texts function'
+
+mut_runner_fixture_xml_module_import() {
+    printf '\nuse quick_xml::Reader as UnexpectedReader;\n' >>crates/conformance/src/conn/external_fixture/response_xml.rs
+}
+expect_fail check_runner_raw_bytes.sh \
+    'a fixture XML import escaping the reader function' mut_runner_fixture_xml_module_import \
+    'quick_xml is restricted to external fixture parser bodies'
+
+mut_runner_fixture_xml_extra_helper() {
+    cat >>crates/conformance/src/conn/external_fixture/response_xml.rs <<'RUST'
+fn extra_fixture_xml(bytes: &[u8]) { let _ = quick_xml::Reader::from_reader(bytes); }
+RUST
+}
+expect_fail check_runner_raw_bytes.sh \
+    'an XML helper beside the fixture XML reader' mut_runner_fixture_xml_extra_helper \
+    'quick_xml is restricted to external fixture parser bodies'
+
+mut_runner_fixture_xml_former_parser_import() {
+    printf '\nuse quick_xml::Reader as UnexpectedReader;\n' \
+        >>crates/conformance/src/conn/external_fixture/versioned.rs
+}
+expect_fail check_runner_raw_bytes.sh \
+    'an XML import in a module whose walker the reader replaced' mut_runner_fixture_xml_former_parser_import \
     'quick_xml is restricted to external fixture parser bodies'
 
 mut_runner_fixture_xml_aliased_import() {
@@ -15604,104 +15652,20 @@ RUST
 expect_guard_pass check_runner_raw_bytes.sh \
     'XML names only in comments and strings' mut_runner_fixture_xml_token_decoys
 
-mut_runner_versioning_xml_parser_missing() {
-    rm crates/conformance/src/conn/external_fixture/versioned.rs
-}
-expect_fail check_runner_raw_bytes.sh \
-    'the required versioning XML parser file missing' mut_runner_versioning_xml_parser_missing \
-    'external versioning parser source is missing'
-
-mut_runner_versioning_xml_function_missing() {
-    sed 's/fn enabled(body:/fn renamed_enabled(body:/' crates/conformance/src/conn/external_fixture/versioned.rs \
-        >crates/conformance/src/conn/external_fixture/versioned.rs.mut
-    mv crates/conformance/src/conn/external_fixture/versioned.rs.mut crates/conformance/src/conn/external_fixture/versioned.rs
-}
-expect_fail check_runner_raw_bytes.sh \
-    'the private versioning XML function missing' mut_runner_versioning_xml_function_missing \
-    'external versioning parser must have exactly one private enabled function'
-
-mut_runner_versioning_xml_function_duplicated() {
-    printf '\nfn enabled(body: &[u8]) -> bool { false }\n' \
-        >>crates/conformance/src/conn/external_fixture/versioned.rs
-}
-expect_fail check_runner_raw_bytes.sh \
-    'a second function claiming the versioning XML exception' mut_runner_versioning_xml_function_duplicated \
-    'external versioning parser must have exactly one private enabled function'
-
-mut_runner_versioning_xml_function_exported() {
-    sed 's/^fn enabled(body:/pub fn enabled(body:/' crates/conformance/src/conn/external_fixture/versioned.rs \
-        >crates/conformance/src/conn/external_fixture/versioned.rs.mut
-    mv crates/conformance/src/conn/external_fixture/versioned.rs.mut crates/conformance/src/conn/external_fixture/versioned.rs
-}
-expect_fail check_runner_raw_bytes.sh \
-    'the versioning XML function exported beyond its fixture module' mut_runner_versioning_xml_function_exported \
-    'external versioning parser must have exactly one private enabled function'
-
-mut_runner_versioning_xml_function_exported_newline() {
-    python3 - <<'PYEOF'
+mut_runner_fixture_xml_brace_decoys() {
+    python3 - <<'PY'
 from pathlib import Path
 
-path = Path("crates/conformance/src/conn/external_fixture/versioned.rs")
+path = Path("crates/conformance/src/conn/external_fixture/response_xml.rs")
 source = path.read_text()
-old = "fn enabled(body:"
+old = "    let mut root_seen = false;"
 if source.count(old) != 1:
-    raise SystemExit("versioning XML function is not unique")
-path.write_text(source.replace(old, "pub(super)\nfn enabled(body:", 1))
-PYEOF
-}
-expect_fail check_runner_raw_bytes.sh \
-    'a split visibility declaration exporting the versioning XML function' mut_runner_versioning_xml_function_exported_newline \
-    'external versioning parser must have exactly one private enabled function'
-
-mut_runner_versioning_xml_declaration_decoy() {
-    python3 - <<'PYEOF'
-from pathlib import Path
-
-path = Path("crates/conformance/src/conn/external_fixture/versioned.rs")
-source = path.read_text()
-old = "fn enabled(body: &[u8]) -> bool {"
-new = ("trait VersioningDeclaration { fn marker(); fn enabled(body: &[u8]) -> bool; }\n"
-       "fn renamed_enabled(body: &[u8]) -> bool {")
-if source.count(old) != 1:
-    raise SystemExit("versioning XML function is not unique")
-path.write_text(source.replace(old, new, 1))
-PYEOF
-}
-expect_fail check_runner_raw_bytes.sh \
-    'a declaration claiming the next function body as the versioning parser' mut_runner_versioning_xml_declaration_decoy \
-    'external versioning parser must have exactly one private enabled function'
-
-mut_runner_versioning_xml_module_import() {
-    printf '\nuse quick_xml::Reader as UnexpectedReader;\n' \
-        >>crates/conformance/src/conn/external_fixture/versioned.rs
-}
-expect_fail check_runner_raw_bytes.sh \
-    'an XML import escaping the private versioning function' mut_runner_versioning_xml_module_import \
-    'quick_xml is restricted to external fixture parser bodies'
-
-mut_runner_versioning_xml_extra_helper() {
-    cat >>crates/conformance/src/conn/external_fixture/versioned.rs <<'RUST'
-fn extra_versioning_xml(bytes: &[u8]) { let _ = quick_xml::Reader::from_reader(bytes); }
-RUST
-}
-expect_fail check_runner_raw_bytes.sh \
-    'an XML helper beside the private versioning function' mut_runner_versioning_xml_extra_helper \
-    'quick_xml is restricted to external fixture parser bodies'
-
-mut_runner_versioning_xml_brace_decoys() {
-    python3 - <<'PYEOF'
-from pathlib import Path
-
-path = Path("crates/conformance/src/conn/external_fixture/versioned.rs")
-source = path.read_text()
-old = "fn enabled(body: &[u8]) -> bool {"
-if source.count(old) != 1:
-    raise SystemExit("versioning XML function is not unique")
+    raise SystemExit("fixture XML reader anchor is not unique")
 path.write_text(source.replace(old, old + '\n    let _decoy = "} quick_xml::Reader {"; // }', 1))
-PYEOF
+PY
 }
 expect_guard_pass check_runner_raw_bytes.sh \
-    'versioning XML span ignores braces inside comments and strings' mut_runner_versioning_xml_brace_decoys
+    'fixture XML span ignores braces inside comments and strings' mut_runner_fixture_xml_brace_decoys
 
 # -----------------------------------------------------------------------------
 # check_resolver_pure.sh has four rules and each gets its own control, because
