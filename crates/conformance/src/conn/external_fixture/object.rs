@@ -176,6 +176,21 @@ pub(super) fn object_target(bucket: &str, key: &str) -> Result<String, SutError>
     Ok(target)
 }
 
+/// `target` with one query parameter, its value percent-encoded as an unreserved-only string.
+pub(super) fn query_target(target: &str, name: &str, value: &str) -> String {
+    let mut target = format!("{target}?{name}=");
+    for byte in value.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
+            target.push(char::from(byte));
+        } else {
+            target.push('%');
+            target.push(char::from(hex_digit(byte >> 4)));
+            target.push(char::from(hex_digit(byte & 0x0f)));
+        }
+    }
+    target
+}
+
 const fn hex_digit(nibble: u8) -> u8 {
     match nibble {
         0..=9 => b'0' + nibble,

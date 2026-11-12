@@ -204,6 +204,8 @@ fn cli_args(root: &Path, endpoint: &str) -> Vec<String> {
         "c-external-0001".to_owned(),
         "--endpoint".to_owned(),
         endpoint.to_owned(),
+        // The case writes, and this loopback endpoint exists only for the test.
+        "--allow-external-writes".to_owned(),
     ]
     .into_iter()
     .collect()
@@ -269,6 +271,7 @@ fn unsigned_raw_head_preserves_bytes_and_reports_a_truncated_body_as_not_fully_s
 fn conn_sends_the_authored_target_host_and_nonempty_body() {
     let (url, server) = responding_server(b"HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n");
     let mut target = Conn::external(std::path::PathBuf::from("."), &url).expect("external target");
+    target.allow_external_writes();
     target.prepare("c-external-direct-0001", None).expect("empty setup");
     let request = crate::toml::parse(
         "method = \"PUT\"\ntarget = \"/bucket/key?part=1\"\nheaders = { content-type = \"text/plain\" }\n\
@@ -547,6 +550,7 @@ fn early_response_during_declared_delay_stops_the_request_body() {
         body
     });
     let mut target = Conn::external(std::path::PathBuf::from("."), &format!("http://{address}")).expect("external target");
+    target.allow_external_writes();
     target.prepare("c-external-paced-0001", None).expect("empty setup");
     let request = crate::toml::parse(
         "method = \"PUT\"\ntarget = \"/bucket/key\"\nheaders = { content-length = \"4\" }\n\
@@ -582,6 +586,7 @@ fn delayed_https_body_is_rejected_before_connecting_to_the_external_endpoint() {
     listener.set_nonblocking(true).expect("nonblocking listener");
     let address = listener.local_addr().expect("listener address");
     let mut target = Conn::external(std::path::PathBuf::from("."), &format!("https://{address}")).expect("external target");
+    target.allow_external_writes();
     target.prepare("c-external-direct-n001", None).expect("empty setup");
     let request =
         crate::toml::parse("method = \"PUT\"\ntarget = \"/bucket/key\"\n[[chunks]]\nraw_utf8 = \"late\"\ndelay_ms = 1\n")
@@ -614,6 +619,7 @@ fn body_delay_beyond_the_exchange_budget_fails_before_connecting() {
     listener.set_nonblocking(true).expect("nonblocking listener");
     let address = listener.local_addr().expect("listener address");
     let mut target = Conn::external(std::path::PathBuf::from("."), &format!("http://{address}")).expect("external target");
+    target.allow_external_writes();
     target.prepare("c-external-direct-n002", None).expect("empty setup");
     let request =
         crate::toml::parse("method = \"PUT\"\ntarget = \"/bucket/key\"\n[[chunks]]\nraw_utf8 = \"late\"\ndelay_ms = 2\n")

@@ -32,6 +32,7 @@ fn options(command: Command, filter: &str) -> Options {
         endpoint_fixed_time: None,
         ca_cert: None,
         external_fixtures: false,
+        external_writes: false,
         baseline: None,
         rulings: None,
         json: None,

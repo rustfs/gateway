@@ -127,6 +127,7 @@ fn capture(profile: Profile, source: &str, body_len: usize) -> Captured {
         })
     });
     let mut sut = Conn::external(".".into(), &endpoint).expect("external capture target");
+    sut.allow_external_writes();
     sut.prepare("c-profile-signing-0001", None).expect("empty setup");
     let request = crate::toml::parse(source).expect("authored test request");
     let result = sut.exchange(&ExchangePlan {

@@ -48,6 +48,9 @@ impl<S: Sut> Sut for Recorded<S> {
     fn validate_clock(&self, clock: Option<&Value>) -> Result<(), SutError> {
         self.inner.validate_clock(clock)
     }
+    fn validate_requests(&self, case_id: &str, setup: Option<&Value>, requests: &[&Value]) -> Result<(), SutError> {
+        self.inner.validate_requests(case_id, setup, requests)
+    }
     fn describe(&self) -> String {
         self.inner.describe()
     }

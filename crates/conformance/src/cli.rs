@@ -120,6 +120,10 @@ pub(crate) fn external_target(options: &Options, root: PathBuf) -> Result<Conn, 
         Conn::external_with_ca(root, endpoint, options.ca_cert.as_deref())
     }?;
     target.endpoint_fixed_time.clone_from(&options.endpoint_fixed_time);
+    if options.external_writes {
+        eprintln!("external writes allowed: authored PUT, POST and DELETE requests will be sent to {endpoint}");
+        target.allow_external_writes();
+    }
     Ok(target)
 }
 
@@ -474,6 +478,7 @@ mod tests {
             endpoint_fixed_time: None,
             ca_cert: None,
             external_fixtures: false,
+            external_writes: false,
             baseline: None,
             rulings: None,
             json: None,

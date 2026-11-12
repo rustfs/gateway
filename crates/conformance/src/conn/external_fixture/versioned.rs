@@ -36,7 +36,9 @@ pub(in crate::conn) struct OwnedVersion {
 
 impl ExternalFixtures {
     pub(in crate::conn) fn version_write(&self, case_id: &str, wire: &Wire) -> Result<Option<OwnedVersion>, SutError> {
-        if self.active_case.is_none()
+        // Granted writes are not tracked one by one: cleanup empties every declared bucket.
+        if self.writes
+            || self.active_case.is_none()
             || !self.owned_buckets.iter().any(|bucket| bucket.versioned)
             || self.active_case.as_deref() != Some(case_id)
             || wire.raw_head.is_some()
@@ -245,18 +247,7 @@ pub(super) fn object_bucket(target: &str) -> Result<&str, SutError> {
 }
 
 pub(super) fn delete_target(version: &OwnedVersion, id: &str) -> String {
-    const HEX: &[u8; 16] = b"0123456789ABCDEF";
-    let mut target = format!("{}?versionId=", version.target);
-    for byte in id.bytes() {
-        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
-            target.push(char::from(byte));
-        } else {
-            target.push('%');
-            target.push(char::from(HEX[usize::from(byte >> 4)]));
-            target.push(char::from(HEX[usize::from(byte & 15)]));
-        }
-    }
-    target
+    super::object::query_target(&version.target, "versionId", id)
 }
 
 pub(super) fn unresolved() -> SutError {

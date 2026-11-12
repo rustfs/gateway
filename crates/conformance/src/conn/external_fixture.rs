@@ -15,7 +15,8 @@
 //! Opt-in owned bucket, object, version, and multipart fixtures for an external endpoint.
 //!
 //! Responsible for: validating the narrow remote-setup subset, restricting authored writes to
-//! classified owned versions, and holding successful or unresolved remote ownership.
+//! classified owned versions unless `--allow-external-writes` granted them, and holding
+//! successful or unresolved remote ownership.
 //! NOT responsible for: locked or fault fixtures; endpoint resolution; authored
 //! exchange pacing; or response judgement. Upstream: `external`; downstream: the endpoint selected
 //! by `crate::cli`.
@@ -42,10 +43,16 @@ mod runner_tests;
 mod versioned;
 #[cfg(test)]
 mod versioned_tests;
+mod writes;
+#[cfg(test)]
+mod writes_tests;
 
 #[derive(Debug)]
 pub(super) struct ExternalFixtures {
     enabled: bool,
+    /// The operator declared the endpoint disposable: authored writes are sent, and cleanup
+    /// empties every declared bucket rather than removing only what it tracked.
+    pub(super) writes: bool,
     active_case: Option<String>,
     owned_buckets: Vec<OwnedBucket>,
     owned_objects: Vec<object::OwnedObject>,
@@ -83,6 +90,7 @@ impl ExternalFixtures {
     pub(super) const fn new(enabled: bool) -> Self {
         Self {
             enabled,
+            writes: false,
             active_case: None,
             owned_buckets: Vec::new(),
             owned_objects: Vec::new(),
@@ -98,12 +106,7 @@ impl ExternalFixtures {
                     .to_owned(),
             ));
         }
-        if self.active_case.is_some()
-            || !self.owned_buckets.is_empty()
-            || !self.owned_objects.is_empty()
-            || !self.owned_uploads.is_empty()
-            || !self.owned_versions.is_empty()
-        {
+        if self.holds_anything() {
             return Err(SutError::Environment(
                 "external fixture setup cannot start because cleanup from the previous case is incomplete".to_owned(),
             ));
@@ -165,40 +168,29 @@ impl ExternalFixtures {
         })
     }
 
+    /// Whether any remote state from a case is still held.
+    fn holds_anything(&self) -> bool {
+        self.active_case.is_some()
+            || !self.owned_buckets.is_empty()
+            || !self.owned_objects.is_empty()
+            || !self.owned_uploads.is_empty()
+            || !self.owned_versions.is_empty()
+    }
+
+    /// Refuses an exchange that writes to the endpoint unless `--allow-external-writes` was given,
+    /// and any exchange while another case's fixtures are still held.
     pub(super) fn ensure_read_only(&self, case_id: &str, wire: &Wire) -> Result<(), SutError> {
-        let Some(active_case) = self.active_case.as_deref() else {
-            return Ok(());
-        };
-        if active_case != case_id {
+        if let Some(active_case) = self.active_case.as_deref()
+            && active_case != case_id
+        {
             return Err(SutError::Environment(format!(
                 "external fixtures owned by `{active_case}` are still active; refusing to run `{case_id}`"
             )));
         }
-        let read_only = |method: &str| matches!(method, "GET" | "HEAD" | "OPTIONS");
-        if !wire.h2_frames.is_empty() {
-            // The authored header blocks are what the peer executes; `request.method` is not sent.
-            let method = match super::h2::authored_methods(wire) {
-                Ok(methods) => match methods.into_iter().find(|method| !read_only(method)) {
-                    None => return Ok(()),
-                    Some(method) => method,
-                },
-                Err(error) => format!("an unclassified authored HTTP/2 script ({error})"),
-            };
-            return Err(SutError::Environment(format!(
-                "external fixtures are active for `{case_id}`; only read-only GET, HEAD, and OPTIONS case exchanges are allowed, not {method}"
-            )));
+        match writes::write_method(wire) {
+            Some(method) if !self.writes => Err(writes::refused(&method)),
+            _ => Ok(()),
         }
-        if read_only(&wire.method) && wire.raw_head.is_none() {
-            return Ok(());
-        }
-        let method = if wire.raw_head.is_some() {
-            "an unclassified raw request"
-        } else {
-            wire.method.as_str()
-        };
-        Err(SutError::Environment(format!(
-            "external fixtures are active for `{case_id}`; only read-only GET, HEAD, and OPTIONS case exchanges are allowed, not {method}"
-        )))
     }
 }
 

@@ -49,6 +49,12 @@ impl Conn {
         Self::external_configured(root, endpoint, ca_path, true)
     }
 
+    /// Sends authored writes to the endpoint, which the operator declared disposable, and empties
+    /// every declared bucket at cleanup.
+    pub(crate) fn allow_external_writes(&mut self) {
+        self.external_fixtures.writes = true;
+    }
+
     fn external_configured(
         root: std::path::PathBuf,
         endpoint: &str,

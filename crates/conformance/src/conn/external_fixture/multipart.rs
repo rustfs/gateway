@@ -264,16 +264,5 @@ pub(super) fn upload_id(body: &[u8]) -> Result<String, SutError> {
 }
 
 pub(super) fn abort_target(target: &str, upload_id: &str) -> String {
-    const HEX: &[u8; 16] = b"0123456789ABCDEF";
-    let mut target = format!("{target}?uploadId=");
-    for byte in upload_id.bytes() {
-        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
-            target.push(char::from(byte));
-        } else {
-            target.push('%');
-            target.push(char::from(HEX[usize::from(byte >> 4)]));
-            target.push(char::from(HEX[usize::from(byte & 15)]));
-        }
-    }
-    target
+    super::object::query_target(target, "uploadId", upload_id)
 }

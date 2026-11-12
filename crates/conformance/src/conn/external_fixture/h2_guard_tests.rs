@@ -94,11 +94,24 @@ fn a_later_stream_with_a_mutating_method_is_refused() {
     assert!(error.to_string().contains("not PUT"), "{error}");
 }
 
+/// Positive — with writes granted nothing is refused, so nothing needs decoding.
 #[test]
-fn without_active_fixtures_nothing_is_decoded() {
-    ExternalFixtures::new(true)
+fn with_writes_granted_nothing_is_refused() {
+    let mut fixtures = ExternalFixtures::new(true);
+    fixtures.writes = true;
+    fixtures
         .ensure_read_only("c-h2-9999", &wire("GET", "ff"))
-        .expect("no fixture is at stake");
+        .expect("the operator declared the endpoint disposable");
+}
+
+/// Negative — without active fixtures the endpoint is still at stake: an undecodable script is
+/// refused unless writes were granted.
+#[test]
+fn without_active_fixtures_an_undecodable_script_is_still_refused() {
+    let error = ExternalFixtures::new(true)
+        .ensure_read_only("c-h2-9999", &wire("GET", "ff"))
+        .expect_err("the endpoint is not declared disposable");
+    assert!(error.to_string().contains("an unclassified authored HTTP/2 script"), "{error}");
 }
 
 /// Negative — a PUT split across a padded, prioritised HEADERS and its CONTINUATION is refused: the

@@ -74,6 +74,8 @@ pub struct Options {
     pub ca_cert: Option<PathBuf>,
     /// Explicit permission to create and automatically remove external owned bucket/object fixtures.
     pub external_fixtures: bool,
+    /// Explicit permission to send authored write requests to an endpoint declared disposable.
+    pub external_writes: bool,
     /// Baseline document.
     pub baseline: Option<PathBuf>,
     /// The rulings ledger the run is judged against, when it is judged against one.
@@ -107,6 +109,7 @@ impl Options {
             endpoint_fixed_time: None,
             ca_cert: None,
             external_fixtures: false,
+            external_writes: false,
             baseline: None,
             rulings: None,
             json: None,
@@ -145,6 +148,7 @@ impl Options {
                 }
                 "--ca-cert" => options.ca_cert = Some(PathBuf::from(value()?)),
                 "--allow-external-fixtures" => options.external_fixtures = true,
+                "--allow-external-writes" => options.external_writes = true,
                 "--baseline" => options.baseline = Some(PathBuf::from(value()?)),
                 "--rulings" => options.rulings = Some(PathBuf::from(value()?)),
                 "--json" => options.json = Some(PathBuf::from(value()?)),
@@ -178,6 +182,9 @@ impl Options {
         }
         if options.external_fixtures && options.endpoint.is_none() {
             return Err("`--allow-external-fixtures` requires `--endpoint`".to_owned());
+        }
+        if options.external_writes && options.endpoint.is_none() {
+            return Err("`--allow-external-writes` requires `--endpoint`".to_owned());
         }
         if options.endpoint_fixed_time.is_some() {
             if options.endpoint.is_none() {

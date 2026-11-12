@@ -252,6 +252,10 @@ fn run_case(
     if let Err(error) = sut.validate_clock(document.read("clock")) {
         return not_run(outcome, &error, notes);
     }
+    let requests: Vec<&Value> = case.exchanges().iter().filter_map(|exchange| exchange.request).collect();
+    if let Err(error) = sut.validate_requests(&case.id, document.read("setup"), &requests) {
+        return not_run(outcome, &error, notes);
+    }
     let mut captures: Captures = match sut.prepare(&case.id, document.read("setup")) {
         Ok(captures) => captures,
         Err(error) => return not_run(outcome, &error, notes),

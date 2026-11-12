@@ -45,12 +45,7 @@ impl Conn {
         }
         self.connection = None;
         let Some(setup) = setup else {
-            if self.external_fixtures.active_case.is_some()
-                || !self.external_fixtures.owned_buckets.is_empty()
-                || !self.external_fixtures.owned_objects.is_empty()
-                || !self.external_fixtures.owned_uploads.is_empty()
-                || !self.external_fixtures.owned_versions.is_empty()
-            {
+            if self.external_fixtures.holds_anything() {
                 return Err(SutError::Environment(
                     "external fixture cleanup from the previous case is incomplete".to_owned(),
                 ));
@@ -81,6 +76,14 @@ impl Conn {
                 return Err(self.abort_external_prepare(error));
             }
             if bucket.absent {
+                // Proved absent, so with writes granted anything there at cleanup the case made.
+                if self.external_fixtures.writes {
+                    self.external_fixtures.owned_buckets.push(super::OwnedBucket {
+                        name: bucket.name,
+                        region: bucket.region,
+                        versioned: false,
+                    });
+                }
                 continue;
             }
             let create_body = bucket.region.create_body();
@@ -312,9 +315,18 @@ impl Conn {
                 failed_buckets.push(bucket);
                 continue;
             }
+            if self.external_fixtures.writes
+                && let Err(error) = self.empty_fixture_bucket(&bucket)
+            {
+                messages.push(error.to_string());
+                failed_buckets.push(bucket);
+                continue;
+            }
             let target = format!("/{}", bucket.name);
             match self.fixture_control_status("DELETE", &target, &bucket.region, &[], &[]) {
                 Ok(204) => {}
+                // A granted write may have deleted the bucket, or never created a declared-absent one.
+                Ok(404) if self.external_fixtures.writes => {}
                 Ok(status) => {
                     messages.push(format!("DELETE for bucket `{}` returned status {status}", bucket.name));
                     failed_buckets.push(bucket);

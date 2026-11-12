@@ -46,6 +46,10 @@ options:
   --allow-external-fixtures
                             allow isolated owned bucket/object/version setup, multipart uploads and parts
                             with automatic cleanup; authored multipart writes remain unsupported
+                            without --allow-external-writes
+  --allow-external-writes   send authored write requests (anything but GET, HEAD and OPTIONS) to an
+                            endpoint declared disposable; cleanup then empties every declared bucket.
+                            Without it a write case is skipped before any of its requests is sent
   --endpoint-fixed-time <YYYY-MM-DDTHH:MM:SSZ>
                             declare the separately configured endpoint clock (run/baseline only)
   --ca-cert <pem-path>      additional CA certificates for an HTTPS endpoint

@@ -555,7 +555,8 @@ repository's own launcher, which assembles the preset:
 cargo run -p rustfs-gateway-compat-sut --bin compat-sut -- --data /tmp/sut --port 9100 \
     --access-key AKIAIOSFODNN7EXAMPLE --secret-key wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
 cargo xtask conformance run --profile rustfs --endpoint http://127.0.0.1:9100 \
-    --allow-external-fixtures --rulings conformance/rulings/rustfs-profile.toml --json report.json
+    --allow-external-fixtures --allow-external-writes \
+    --rulings conformance/rulings/rustfs-profile.toml --json report.json
 ```
 
 The fixture opt-in supports owned buckets, objects, multipart uploads with declared parts, and enabled
@@ -570,6 +571,25 @@ ambiguous framing and Host overrides remain unsupported. Missing upload or versi
 failed cleanup, retain ownership and block the next case. Object Lock and authored multipart writes,
 including completion, remain unsupported and report their capability reason.
 
+**Writes need `--allow-external-writes`.** Without it the runner sends no authored write — any
+request but GET, HEAD or OPTIONS, and any raw head or HTTP/2 script it cannot decode to one of
+those — to an endpoint: such a case is skipped before any of its requests, setup included, with a
+reason that starts `environment: external writes are disabled` and names the flag. The
+one exception is the exact-version path above: a structured PUT or DELETE in a case that declares
+a versioning-enabled bucket is still classified at exchange time. The flag requires `--endpoint`,
+prints `external writes allowed: authored PUT, POST and DELETE requests will be sent to <url>` on
+standard error, and declares the endpoint disposable: every authored write is sent, versioned
+writes are no longer tracked one by one, and cleanup instead empties every bucket the case
+declares — aborting each listed multipart upload and deleting each listed version and delete
+marker — before deleting it; a bucket declared `absent` that the case created is emptied and
+deleted too, and a bucket the case deleted itself is accepted as gone. It grants writes only;
+cases with setup still need `--allow-external-fixtures`.
+
+Cases assume a pristine server, as the in-process target gives each one. Cleanup removes only the
+buckets a case declares, so state a setup-less write creates (`c-host-0003` creates the bucket its
+virtual host names) survives the run: start the endpoint on a fresh, empty data directory for
+every run with this flag, and never point it at a server holding data you want to keep.
+
 For fixed-clock cases, start the reference launcher with `--fixed-time 2026-01-02T03:04:05Z`
 and pass `--endpoint-fixed-time 2026-01-02T03:04:05Z` to conformance `run` or `baseline` alongside
 `--endpoint`. Both options require a valid whole-second UTC instant; fractional seconds, offsets,
@@ -583,6 +603,13 @@ Setup and cleanup signatures use the configured instant, while authored `request
 offset from the case's fixed instant (or its default). Without either option, the launcher and
 external signing keep their existing wall-clock behavior. Fixed clocks are for isolated tests:
 the launcher's explicit clock acknowledgement keeps captured signatures valid at that instant.
+
+**BREAKING: migrating conformance 0.18 to 0.19.** `cli::Options` now includes `external_writes`;
+add `external_writes: false` to manually constructed values. Against `--endpoint`, a case with an
+authored write, setup-less ones included, is now skipped unless `--allow-external-writes` is
+given; pass it only for a disposable endpoint. A `Sut` wrapper must forward
+`validate_requests(&self, case_id, setup, requests)` to its wrapped target so the write gate still
+runs before fixture preparation.
 
 **BREAKING: migrating conformance 0.16 to 0.17.** The public `cli::Options` struct now includes
 `endpoint_fixed_time`. Add `endpoint_fixed_time: None` to manually constructed `Options` values

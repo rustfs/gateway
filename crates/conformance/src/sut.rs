@@ -183,6 +183,19 @@ pub trait Sut {
         Ok(())
     }
 
+    /// Checks, before any fixture is prepared, that this target may be sent the case's authored
+    /// requests; an external endpoint refuses a write case here unless writes were allowed.
+    ///
+    /// This classifies configuration only and must not contact or mutate the target. The default
+    /// accepts everything. Wrappers must forward it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SutError`] when the case must not be run against this target.
+    fn validate_requests(&self, _case_id: &str, _setup: Option<&Value>, _requests: &[&Value]) -> Result<(), SutError> {
+        Ok(())
+    }
+
     /// Establishes the fixtures a case declares, returning any captures the setup minted.
     ///
     /// Setup traffic is not under test: a target may use normalised, correctly signed requests

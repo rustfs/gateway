@@ -188,6 +188,12 @@ parsers = [
         "private enabled",
         r"(?:^|[;}])\s*fn\s+enabled\s*\(\s*body\s*:\s*&\s*\[\s*u8\s*\]\s*\)\s*->\s*bool\s*(?=\{)",
     ),
+    (
+        "src/conn/external_fixture/writes.rs",
+        "external bucket listing parser",
+        "private listed",
+        r"(?:^|[;}])\s*fn\s+listed\s*\(\s*body\s*:\s*&\s*\[\s*u8\s*\]\s*,[^)]*\)\s*->\s*Option\s*<[^{]*(?=\{)",
+    ),
 ]
 
 try:

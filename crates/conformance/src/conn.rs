@@ -208,6 +208,9 @@ impl Sut for Conn {
         }
         Ok(())
     }
+    fn validate_requests(&self, case_id: &str, setup: Option<&Value>, requests: &[&Value]) -> Result<(), SutError> {
+        self.validate_external_requests(case_id, setup, requests)
+    }
     fn identity(&mut self) -> Result<TargetIdentity, SutError> {
         if self.external.is_some() {
             return self.external_identity();
