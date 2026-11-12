@@ -17,8 +17,10 @@
 //! Responsible for: proving that every case-id literal in the non-test in-process sources is in
 //! that table or in [`CONFIGURATION_ONLY`]; and, independently of how a hook spells its case,
 //! that every corpus case whose `Sut::finish` verdict moves with a hook counter is in the table.
-//! NOT responsible for: whether a configuration-only case is really answerable by an endpoint (a
-//! reviewer judges each row of [`CONFIGURATION_ONLY`]) or the external skip (`crate::conn`).
+//! NOT responsible for: the external skip itself (`crate::conn`), or what a reviewer must still
+//! check by hand — whether each row of [`CONFIGURATION_ONLY`] is really answerable by an endpoint,
+//! a hook keyed by something other than a literal case id (the literal scan cannot see it, and the
+//! counter census sees it only when it is judged in `finish`), and a hook judged anywhere else.
 //! Upstream: `crate::corpus` and the crate's own sources; downstream: nothing.
 
 use std::collections::BTreeSet;
@@ -118,18 +120,28 @@ fn every_declared_case_exists_in_the_corpus() {
     }
 }
 
-/// Whether `finish` for `case_id` fails with every hook counter set to `count`.
-fn finish_fails(root: &std::path::Path, case_id: &str, count: usize) -> bool {
-    let mut target = InProcess::new(root.to_path_buf());
-    for counter in [
-        &target.authz_backend_calls,
-        &target.credential_backend_calls,
-        &target.credential_governor_calls,
-    ] {
-        counter.store(count, Ordering::SeqCst);
+/// The settings a hook census tries: every counter at zero, every counter at a count no case
+/// expects, and each counter on its own at that count with the others at zero, so a check that
+/// compares two counters (equal in the first two) moves too. The last slot is the POST observation.
+fn settings(counters: usize) -> Vec<Vec<usize>> {
+    const UNEXPECTED: usize = 1_000_000;
+    let mut settings = vec![vec![0; counters + 1], vec![UNEXPECTED; counters + 1]];
+    for alone in 0..=counters {
+        let mut setting = vec![0; counters + 1];
+        setting[alone] = UNEXPECTED;
+        settings.push(setting);
     }
-    target.credential_exchanges.store(count, Ordering::SeqCst);
-    if count > 0
+    settings
+}
+
+/// Whether `finish` for `case_id` fails with the hooks set as `setting` says.
+fn finish_fails(root: &std::path::Path, case_id: &str, setting: &[usize]) -> bool {
+    let mut target = InProcess::new(root.to_path_buf());
+    let counters = target.hooks.all();
+    for (counter, value) in counters.iter().zip(setting) {
+        counter.store(*value, Ordering::SeqCst);
+    }
+    if setting.last().is_some_and(|observed| *observed > 0)
         && let Ok(mut lengths) = target.post_object_lengths.lock()
     {
         lengths.push((None, None));
@@ -137,17 +149,21 @@ fn finish_fails(root: &std::path::Path, case_id: &str, count: usize) -> bool {
     target.finish(case_id).is_err()
 }
 
-/// Negative — derived from behaviour, not spelling: a corpus case whose `finish` fails with every
-/// hook at zero or at a count no case expects reads a hook, and must be in the table.
+/// Negative — derived from behaviour, not spelling: a corpus case whose `finish` verdict fails
+/// under any setting of the hook counters reads a hook, and must be in the table. The counters
+/// come from `HookCounters::all`, the accessor `finish`'s own struct is read through, so a new
+/// counter joins this census by compiling.
 #[test]
 fn every_case_a_hook_counter_decides_is_in_process_only() {
     let root = crate::corpus::Corpus::discover_root().expect("repository corpus");
     let corpus = crate::corpus::Corpus::load(&root).expect("corpus loads");
+    let counters = InProcess::new(root.clone()).hooks.all().len();
+    let settings = settings(counters);
     let hooked: Vec<&str> = corpus
         .cases()
         .iter()
         .map(|case| case.id.as_str())
-        .filter(|id| finish_fails(&root, id, 0) || finish_fails(&root, id, 1_000_000))
+        .filter(|id| settings.iter().any(|setting| finish_fails(&root, id, setting)))
         .collect();
     assert!(
         hooked.len() >= 10,

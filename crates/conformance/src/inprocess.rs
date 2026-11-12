@@ -95,6 +95,7 @@ mod conditional_race;
 #[cfg(test)]
 mod external_unavailable_tests;
 pub(crate) mod h2_frames;
+mod hooks;
 mod in_process_only;
 mod payload;
 mod payload_literal;
@@ -291,10 +292,7 @@ pub struct InProcess {
     limits: Limits,
     case_id: String,
     authz_policy_version: Arc<AtomicUsize>,
-    authz_backend_calls: Arc<AtomicUsize>,
-    credential_backend_calls: Arc<AtomicUsize>,
-    credential_exchanges: AtomicUsize,
-    credential_governor_calls: Arc<AtomicUsize>,
+    hooks: hooks::HookCounters,
     persistent_credentials: Mutex<Option<Arc<dyn CredentialProvider>>>,
     post_object_lengths: post_object::Observed,
 }
@@ -303,7 +301,7 @@ impl InProcess {
     /// Books one exchange for the counters `finish` reads; the socket drivers share this fixture and book here too.
     pub(crate) fn record_exchange(&self) {
         if self.case_id == "c-cred-0006" {
-            self.credential_exchanges.fetch_add(1, Ordering::SeqCst);
+            self.hooks.credential_exchanges.fetch_add(1, Ordering::SeqCst);
         }
     }
 
@@ -317,10 +315,7 @@ impl InProcess {
             limits: Limits::default(),
             case_id: String::new(),
             authz_policy_version: Arc::new(AtomicUsize::new(1)),
-            authz_backend_calls: Arc::new(AtomicUsize::new(0)),
-            credential_backend_calls: Arc::new(AtomicUsize::new(0)),
-            credential_exchanges: AtomicUsize::new(0),
-            credential_governor_calls: Arc::new(AtomicUsize::new(0)),
+            hooks: hooks::HookCounters::default(),
             persistent_credentials: Mutex::new(None),
             post_object_lengths: Arc::new(Mutex::new(Vec::new())),
         }
@@ -388,7 +383,7 @@ impl InProcess {
                 .ok_or_else(|| SutError::Environment("the persistent credential fixture was not prepared".to_owned()))?,
             _ => Arc::new(CountedCredentials {
                 inner: fixture_provider,
-                calls: Arc::clone(&self.credential_backend_calls),
+                calls: Arc::clone(&self.hooks.credential_backend),
             }) as Arc<dyn CredentialProvider>,
         };
         let regions =
@@ -498,7 +493,7 @@ impl InProcess {
             });
         let builder = if self.case_id == "c-cred-0024" {
             builder.governor(CredentialClassProbe {
-                calls: Arc::clone(&self.credential_governor_calls),
+                calls: Arc::clone(&self.hooks.credential_governor),
             })
         } else {
             builder
@@ -539,9 +534,9 @@ impl InProcess {
         };
         let builder = sigv2::configure_case(builder, &self.case_id);
         let builder = post_object::configure_case(builder, &self.case_id, Arc::clone(&self.post_object_lengths));
-        let builder = security::configure_version_list(builder, &self.case_id, Arc::clone(&self.authz_backend_calls));
-        let backend_calls = Arc::clone(&self.authz_backend_calls);
-        let copy_backend_calls = Arc::clone(&self.authz_backend_calls);
+        let builder = security::configure_version_list(builder, &self.case_id, Arc::clone(&self.hooks.authz_backend));
+        let backend_calls = Arc::clone(&self.hooks.authz_backend);
+        let copy_backend_calls = Arc::clone(&self.hooks.authz_backend);
         builder
             .op_layer::<dto::CopyObject, _>(op_layer(move |request: Req<dto::CopyObject>, next: Next<'_, dto::CopyObject>| {
                 let backend_calls = Arc::clone(&copy_backend_calls);
@@ -1042,10 +1037,7 @@ impl Sut for InProcess {
         self.case_id.clear();
         self.case_id.push_str(case_id);
         self.authz_policy_version.store(1, Ordering::SeqCst);
-        self.authz_backend_calls.store(0, Ordering::SeqCst);
-        self.credential_backend_calls.store(0, Ordering::SeqCst);
-        self.credential_exchanges.store(0, Ordering::SeqCst);
-        self.credential_governor_calls.store(0, Ordering::SeqCst);
+        self.hooks.reset();
         if let Ok(mut lengths) = self.post_object_lengths.lock() {
             lengths.clear();
         }
@@ -1055,7 +1047,7 @@ impl Sut for InProcess {
                 "c-cred-0006" => {
                     let counted = Arc::new(CountedCredentials {
                         inner: Arc::new(StaticCredentials::new()),
-                        calls: Arc::clone(&self.credential_backend_calls),
+                        calls: Arc::clone(&self.hooks.credential_backend),
                     });
                     *provider = Some(Arc::new(GuardedCredentialProvider::new(counted)));
                 }
@@ -1064,7 +1056,7 @@ impl Sut for InProcess {
                         .map_err(|error| SutError::Environment(format!("the deletion fixture is not valid: {error}")))?;
                     *provider = Some(Arc::new(GuardedCredentialProvider::new(Arc::new(DeletedAfterFirstLookup {
                         credentials: Mutex::new(Some(credentials)),
-                        calls: Arc::clone(&self.credential_backend_calls),
+                        calls: Arc::clone(&self.hooks.credential_backend),
                     }))));
                 }
                 _ => {}
@@ -1255,25 +1247,25 @@ impl Sut for InProcess {
 
     fn finish(&mut self, case_id: &str) -> Result<(), SutError> {
         let calls = |counter: &AtomicUsize| counter.load(Ordering::SeqCst);
-        security::finish_version_list(case_id, calls(&self.authz_backend_calls))?;
+        security::finish_version_list(case_id, calls(&self.hooks.authz_backend))?;
         post_object::finish(case_id, &self.post_object_lengths)?;
         let violation = match case_id {
-            "c-authz-1018" if calls(&self.authz_backend_calls) != 1 => {
+            "c-authz-1018" if calls(&self.hooks.authz_backend) != 1 => {
                 "c-authz-1018 must dispatch only the ordinary copy control".to_owned()
             }
-            "c-authz-1001" | "c-authz-1011" | "c-authz-1012" if calls(&self.authz_backend_calls) != 0 => {
+            "c-authz-1001" | "c-authz-1011" | "c-authz-1012" if calls(&self.hooks.authz_backend) != 0 => {
                 format!("{case_id} reached the copy backend after authorization refused the source")
             }
-            "c-cred-0002" if calls(&self.credential_backend_calls) != 0 => {
+            "c-cred-0002" if calls(&self.hooks.credential_backend) != 0 => {
                 "c-cred-0002 called the credential provider for an anonymous request".to_owned()
             }
-            "c-cred-0006" if calls(&self.credential_backend_calls) >= 100 => {
+            "c-cred-0006" if calls(&self.hooks.credential_backend) >= 100 => {
                 "c-cred-0006 sent all 100 misses to the credential backend".to_owned()
             }
-            "c-cred-0006" if calls(&self.credential_exchanges) != 100 => {
+            "c-cred-0006" if calls(&self.hooks.credential_exchanges) != 100 => {
                 "c-cred-0006 did not execute exactly 100 identical misses".to_owned()
             }
-            "c-cred-0024" if calls(&self.credential_governor_calls) != 1 => {
+            "c-cred-0024" if calls(&self.hooks.credential_governor) != 1 => {
                 "c-cred-0024 did not classify the forged key as a credential lookup".to_owned()
             }
             _ => return Ok(()),

@@ -36,6 +36,11 @@ impl Conn {
     }
 
     pub(in crate::conn) fn prepare_external(&mut self, case_id: &str, setup: Option<&Value>) -> Result<Captures, SutError> {
+        // Defence in depth: a `Sut` wrapper that forgets to forward `validate_requests` must not
+        // run a case only the in-process target can judge and let its zero counters pass.
+        if let Some(reason) = crate::inprocess::unavailable_externally(case_id) {
+            return Err(SutError::Environment(reason));
+        }
         self.connection = None;
         let Some(setup) = setup else {
             if self.external_fixtures.holds_anything() {

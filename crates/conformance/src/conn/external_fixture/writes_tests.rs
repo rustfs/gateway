@@ -122,7 +122,8 @@ fn read_request(stream: &mut std::net::TcpStream) -> String {
     }
 }
 
-/// What a disposable S3 endpoint answers. `GET /` lists `existing` (bucket XML); every bucket
+/// What a disposable S3 endpoint answers. `GET /` lists `existing` (bucket XML), or answers it
+/// verbatim when it is a whole response; every bucket
 /// listing shows one leftover entry the first time it is asked and none after, so emptying is
 /// observable as the deletes it caused; `write-gone` answers its first DELETE (the case's own) 200
 /// and 404 after, and `write-vanished` answers every DELETE 404.
@@ -135,6 +136,9 @@ fn answer(line: &str, listed: &mut Vec<String>, existing: &str) -> String {
     };
     if line.starts_with("HEAD / ") {
         return "HTTP/1.1 403 Forbidden\r\nServer: RustFS\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_owned();
+    }
+    if line.starts_with("GET / ") && existing.starts_with("HTTP/") {
+        return existing.to_owned();
     }
     if line.starts_with("GET / ") {
         return ok(&format!("<ListAllMyBucketsResult><Buckets>{existing}</Buckets></ListAllMyBucketsResult>"));
@@ -582,4 +586,35 @@ fn the_emptiness_refusal_names_at_most_five_buckets() {
     stop.store(true, Ordering::SeqCst);
     assert_eq!(server.join().expect("endpoint exits"), ["GET / HTTP/1.1"]);
     assert!(error.to_string().ends_with("it lists 6 bucket(s): b1, b2, b3, b4, b5, ..."), "{error}");
+}
+
+/// Negative, one per refusal — an endpoint whose bucket list cannot be read is not shown empty: a
+/// 403, and a 200 whose body is not a `ListAllMyBucketsResult`, each refuse the run with exit 3
+/// before any case request.
+#[test]
+fn with_the_flag_an_endpoint_whose_buckets_cannot_be_listed_is_refused() {
+    for answer in [
+        "HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+        "HTTP/1.1 200 OK\r\nContent-Length: 41\r\nConnection: close\r\n\r\n<Error><Code>InternalError</Code></Error>",
+    ] {
+        let (id, text) = put_with_setup();
+        let (report, lines, code) = run_on(&[(id, text)], &["--allow-external-fixtures", "--allow-external-writes"], answer);
+        assert_eq!(code, ExitCode::from(cli::exit::ENVIRONMENT), "{answer}");
+        assert_eq!(lines, Vec::<String>::new(), "{answer}");
+        assert_eq!(report, None, "{answer}");
+    }
+}
+
+/// Negative — a caller that prepares a case without the runner's preflight (a `Sut` wrapper that
+/// does not forward `validate_requests`) still cannot run a case only the in-process target can
+/// judge: `prepare` refuses it, and the endpoint receives nothing.
+#[test]
+fn preparing_an_in_process_only_case_directly_is_refused_before_contact() {
+    let (url, stop, server) = endpoint("");
+    let mut target = super::super::Conn::external_with_fixtures(PathBuf::from("."), &url, None).expect("target");
+    let setup = crate::toml::parse("[setup]\n[[setup.buckets]]\nname = \"authz-versions\"\n").expect("setup TOML");
+    let error = crate::sut::Sut::prepare(&mut target, "c-authz-0008", setup.get("setup")).expect_err("in-process only");
+    stop.store(true, Ordering::SeqCst);
+    assert_eq!(server.join().expect("endpoint exits"), Vec::<String>::new());
+    assert!(error.to_string().starts_with("c-authz-0008 "), "{error}");
 }

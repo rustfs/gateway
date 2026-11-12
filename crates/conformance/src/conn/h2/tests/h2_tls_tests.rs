@@ -221,6 +221,8 @@ fn a_large_frame_through_a_slow_reader_arrives_intact() {
         thread::sleep(Duration::from_millis(300));
     });
     let mut conn = Conn::external_with_ca(std::path::PathBuf::from("."), &endpoint, Some(&ca.0)).expect("the endpoint parses");
+    // The script carries DATA, and this loopback peer exists only for the test.
+    conn.allow_external_writes();
     conn.prepare("s-h2-tls", None).expect("no setup");
     let observed = conn
         .exchange(&h2_plan("s-h2-tls", block(&script), None))
@@ -251,6 +253,8 @@ fn records_still_queued_when_the_answer_arrives_are_reported_unwritten() {
         thread::sleep(Duration::from_millis(500));
     });
     let mut conn = Conn::external_with_ca(std::path::PathBuf::from("."), &endpoint, Some(&ca.0)).expect("the endpoint parses");
+    // The script carries DATA, and this loopback peer exists only for the test.
+    conn.allow_external_writes();
     conn.prepare("s-h2-tls", None).expect("no setup");
     let observed = conn
         .exchange(&h2_plan("s-h2-tls", block(&script), None))

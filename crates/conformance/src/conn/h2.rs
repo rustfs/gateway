@@ -414,14 +414,14 @@ impl Conn {
     }
 }
 
-/// The `:method` of every authored request header block, decoded in order the way the peer's
+/// Every field of every authored request header block, decoded in order the way the peer's
 /// decoder will, so a guard can classify what a script asks the peer to do. A block interrupted by
 /// another frame, or a CONTINUATION with no open block, is skipped: the peer must end the
 /// connection there (RFC 9113 section 6.10) instead of running it.
-pub(super) fn authored_methods(wire: &Wire) -> Result<Vec<String>, SutError> {
+pub(super) fn authored_fields(wire: &Wire) -> Result<Vec<(String, String)>, SutError> {
     let script = compile(wire)?;
     let mut decoder = hpack::Decoder::new(DEFAULT_HEADER_TABLE_SIZE);
-    let mut methods = Vec::new();
+    let mut fields = Vec::new();
     let mut open: Option<Vec<u8>> = None;
     for envelope in &script.envelopes {
         let fragment = match envelope.frame_type {
@@ -445,17 +445,13 @@ pub(super) fn authored_methods(wire: &Wire) -> Result<Vec<String>, SutError> {
             open = Some(block);
             continue;
         }
-        let fields = decoder
-            .decode(&block)
-            .map_err(|error| refused(format!("an authored header block could not be decoded: {error}")))?;
-        methods.extend(
-            fields
-                .into_iter()
-                .filter(|(name, _)| name == ":method")
-                .map(|(_, value)| value),
+        fields.extend(
+            decoder
+                .decode(&block)
+                .map_err(|error| refused(format!("an authored header block could not be decoded: {error}")))?,
         );
     }
-    Ok(methods)
+    Ok(fields)
 }
 
 /// Opens one connection, writes the preface and the script, and observes the response.

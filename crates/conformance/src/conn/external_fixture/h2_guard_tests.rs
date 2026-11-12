@@ -163,3 +163,39 @@ fn a_table_size_update_beyond_the_default_is_unclassified() {
         .expect_err("the guard cannot follow a larger table");
     assert!(error.to_string().contains("an unclassified authored HTTP/2 script ("), "{error}");
 }
+
+/// A GET header block followed by `extra` TOML frames, read as authored.
+fn get_with(extra_block_hex: &str, frames: &str) -> Wire {
+    read(&format!(
+        "method = \"GET\"\ntarget = \"/\"\nhttp_version = \"h2\"\n\
+         [[h2_frames]]\ntype = \"headers\"\nstream_id = 1\nflags = [\"end_headers\"]\npayload_hex = \"{}{extra_block_hex}\"\n{frames}",
+        block("GET")
+    ))
+}
+
+/// A literal header field without indexing and with a new name (RFC 7541 section 6.2.2).
+fn literal(name: &str, value: &str) -> String {
+    let hex = |text: &str| text.bytes().map(|byte| format!("{byte:02x}")).collect::<String>();
+    format!("00{:02x}{}{:02x}{}", name.len(), hex(name), value.len(), hex(value))
+}
+
+/// Negative — an HTTP/2 GET is classified like a structured one: a DATA payload or a method
+/// override in its decoded block is refused without the flag; the same GET ending in an empty DATA
+/// frame is the control that still reads.
+#[test]
+fn an_http2_read_carrying_a_body_or_an_override_is_refused() {
+    let data = |payload: &str| {
+        format!("[[h2_frames]]\ntype = \"data\"\nstream_id = 1\nflags = [\"end_stream\"]\npayload_hex = \"{payload}\"\n")
+    };
+    let fixtures = ExternalFixtures::new(true);
+    for (what, wire) in [
+        ("a DATA payload", get_with("", &data("44454c455445"))),
+        ("a method override", get_with(&literal("x-http-method-override", "DELETE"), &data(""))),
+    ] {
+        let error = fixtures.ensure_read_only("c-h2-9999", &wire).expect_err(what);
+        assert!(error.to_string().contains("an unclassified HTTP/2 read"), "{what}: {error}");
+    }
+    fixtures
+        .ensure_read_only("c-h2-9999", &get_with("", &data("")))
+        .expect("a GET ending in an empty DATA frame reads");
+}

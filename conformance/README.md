@@ -575,7 +575,8 @@ including completion, remain unsupported and report their capability reason.
 endpoint. A request counts as a write unless its bytes can only read: anything but GET, HEAD or
 OPTIONS; a raw head; an HTTP/2 script that does not decode to one of those; and a GET, HEAD or
 OPTIONS whose target or headers hold CR, LF or NUL, that carries body bytes, or that sends
-`content-length`, `transfer-encoding` or a method-override header. Such a case is skipped at the
+`content-length`, `transfer-encoding` or a method-override header; for an HTTP/2 script the same
+rule reads the decoded header blocks, and a DATA payload or a literal `raw` frame is body bytes. Such a case is skipped at the
 `preflight` phase, before any of its requests, setup included, with a reason that starts
 `environment: external writes are disabled` and names the flag. The one exception is the
 exact-version path above: a structured PUT or DELETE in a case that declares a versioning-enabled
@@ -585,9 +586,10 @@ bucket is classified at exchange time, so its refusal comes after setup and is r
 The flag requires `--endpoint` and declares the endpoint disposable. Before any case it sends one
 signed ListBuckets and refuses the run (exit 3, naming up to five buckets found) unless the
 endpoint lists none: cases assume a pristine server, as the in-process target gives each one, and
-there is no override. It then prints `external writes allowed: every authored request, including
-raw heads and HTTP/2 scripts, will be sent to <url>; cleanup empties each bucket a case declares`
-on standard error. Every authored write is sent, versioned writes are no longer tracked one by
+there is no override. The check sees only the buckets the run's credential may list, and the
+request is signed for the default region `us-east-1`. Once the endpoint is shown empty it prints
+`external writes allowed: every authored request, including raw heads and HTTP/2 scripts, will be
+sent to <url>; cleanup empties each bucket a case declares` on standard error. Every authored write is sent, versioned writes are no longer tracked one by
 one, and cleanup instead empties every bucket the case declares — aborting each listed multipart
 upload and deleting each listed version and delete marker — before deleting it; a bucket declared
 `absent` that the case created is emptied and deleted too, and a bucket DELETE answered 404 is a
@@ -613,7 +615,7 @@ in its list of cases configured by id that an endpoint can still judge, and ever
 gate skips, at the `clock` phase, a case that pins `clock.fixed` (or a server `skew_ms`) an
 endpoint on its own wall clock cannot follow — the text report counts these on a `clock:` line —
 and the preflight gate above. Of the 890 cases, 526 (59.1%) pass these gates with
-`--allow-external-writes` and 126 (14.1%) without it, with `--allow-external-fixtures` in both and
+`--allow-external-writes` and 123 (13.8%) without it, with `--allow-external-fixtures` in both and
 the endpoint on its own wall clock. `writes_tests::the_readme_states_the_externally_runnable_share_of_this_corpus`
 recomputes both numbers from the corpus with the runner's own gates and fails until this sentence
 matches. Nearly all of the rest pin `clock.fixed`, and run only against an endpoint started on that

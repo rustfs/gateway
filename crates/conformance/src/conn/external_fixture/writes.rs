@@ -42,16 +42,26 @@ const FRAMING_OR_OVERRIDE: &[&str] = &[
 
 /// The method that makes `wire` a write, or `None` when it only reads. Classified on what the
 /// bytes can carry, not on the declared method: a raw head, an undecodable HTTP/2 script, or a
-/// structured read whose target or headers hold CR, LF or NUL (a second request), that carries
-/// body bytes, or that frames a body or overrides its method, cannot be shown to read.
+/// structured or HTTP/2 read whose target or headers hold CR, LF or NUL (a second request), that
+/// carries body bytes (DATA payload or a literal frame, for HTTP/2), or that frames a body or
+/// overrides its method, cannot be shown to read.
 pub(super) fn write_method(wire: &Wire) -> Option<String> {
     let read_only = |method: &str| matches!(method, "GET" | "HEAD" | "OPTIONS");
     if !wire.h2_frames.is_empty() {
         // The authored header blocks are what the peer executes; `request.method` is not sent.
-        return match super::super::h2::authored_methods(wire) {
-            Ok(methods) => methods.into_iter().find(|method| !read_only(method)),
-            Err(error) => Some(format!("an unclassified authored HTTP/2 script ({error})")),
+        let fields = match super::super::h2::authored_fields(wire) {
+            Ok(fields) => fields,
+            Err(error) => return Some(format!("an unclassified authored HTTP/2 script ({error})")),
         };
+        if let Some((_, method)) = fields.iter().find(|(name, value)| name == ":method" && !read_only(value)) {
+            return Some(method.clone());
+        }
+        let carries = fields.iter().any(|(name, _)| FRAMING_OR_OVERRIDE.contains(&name.as_str()))
+            || wire
+                .h2_frames
+                .iter()
+                .any(|frame| frame.kind == "raw" || (frame.kind == "data" && !frame.payload.is_empty()));
+        return carries.then(|| "an unclassified HTTP/2 read whose frames may carry a body or another method".to_owned());
     }
     if wire.raw_head.is_some() {
         return Some("an unclassified raw request".to_owned());
