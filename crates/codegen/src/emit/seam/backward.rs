@@ -31,7 +31,8 @@ use super::expr::Ctx;
 use super::facts::S3sType;
 use super::overrides::Rule;
 use super::render::{
-    CHECKSUM_FAN_OUT, Target, bare_name, is_bare_container, is_container, member_rule, missing, push_field, target,
+    CHECKSUM_FAN_OUT, Target, bare_name, is_bare_container, is_container, member_rule, missing, placeholder_pairing, push_field,
+    target,
 };
 use crate::emit::dto::naming;
 use crate::emit::dto::registry::Registry;
@@ -151,6 +152,12 @@ pub(super) fn backward_struct_with(
                             Err(error) => errors.push(format!("{owner}.{name}: {error}")),
                         }
                     }
+                    Ok(conv) if matches!(member_rule(owner, member), Some(Rule::AbsentAsPlaceholder(_))) => {
+                        match absent_as_placeholder_backward((owner, field), optional, member, &conv, &name) {
+                            Ok(value) => push_field(&mut body, &gw_name, &value),
+                            Err(error) => errors.push(format!("{owner}.{name}: {error}")),
+                        }
+                    }
                     Ok(conv) => {
                         let value = wrap_backward((owner, field), optional, member, &conv, &name);
                         push_field(&mut body, &gw_name, &value);
@@ -249,6 +256,22 @@ fn absent_as_empty(field: &Field, s3s_optional: bool, member: &str, conv: &str, 
     Ok(format!(
         "match {member} {{ Some(x) if x.is_empty() => {}, Some(x) => x, None => String::new() }}",
         missing(name, "an empty legacy value the gateway would write as unset")
+    ))
+}
+
+/// [`Rule::AbsentAsPlaceholder`] backward: an unset legacy member is the placeholder, and a set one
+/// that converts to it is refused, since the RustFS layout would then write it as unset.
+fn absent_as_placeholder_backward(
+    owned: (&str, &Field),
+    s3s_optional: bool,
+    member: &str,
+    conv: &str,
+    name: &str,
+) -> Result<String, String> {
+    placeholder_pairing(owned, s3s_optional)?;
+    Ok(format!(
+        "match {member} {{ Some(x) => {{ let v = {conv}; if crate::WirePlaceholder::is_wire_placeholder(&v) {{ {}; }} v }}, None => Default::default() }}",
+        missing(name, "a legacy value the gateway would write as unheld")
     ))
 }
 

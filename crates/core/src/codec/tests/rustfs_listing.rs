@@ -17,12 +17,15 @@
 //! Responsible for: a view carrying a [`RustFsListing`] encoding exactly the members it names,
 //! with `/` kept literal, only for exactly `url`, and echoing `encoding-type` as legacy RustFS
 //! does — while a view without one, and a value XML cannot carry, keep the AWS-model encoding.
-//! Also verifies that a missing entity tag does not erase or shift a listing entry.
+//! Also verifies that a missing entity tag does not erase or shift a listing entry; a missing
+//! `LastModified` or `StorageClass` is `absent_members`.
 //! NOT responsible for: which listing uses which table (`rustfs-gateway`'s RustFS profile).
 //! Upstream: `crate::codec::rustfs_listing`. Downstream: nothing.
 
 use super::*;
 use crate::codec::value::RustFsListing;
+
+mod absent_members;
 
 /// The tables legacy RustFS applies; the assembly carries its own copy of these facts, and the
 /// launcher's end-to-end suite holds the two together.

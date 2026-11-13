@@ -528,8 +528,11 @@ impl ServiceBuilder {
     ///
     /// Off by default: the core writes the model's member order, the order AWS documents and answers
     /// with, under the root AWS documents, with `&quot;` in an entity tag, and ends the declaration
-    /// with a line end. Only the layout changes: every member is written either way, with the same
-    /// text. A committed answer (a head sent before its outcome)
+    /// with a line end. Only the layout changes, with one exception: a listing entry's
+    /// `LastModified` or `StorageClass` the host left at its placeholder, because it does not hold
+    /// it, is written as no element, as legacy RustFS writes an entry without it, where the default
+    /// layout refuses the placeholder timestamp (rustfs/gateway#1613). Every other member is
+    /// written either way, with the same text. A committed answer (a head sent before its outcome)
     /// keeps the default declaration its prologue already carries.
     #[must_use]
     pub fn write_responses_as_rustfs(mut self) -> Self {

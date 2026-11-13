@@ -16,7 +16,8 @@
 //! element an answer is rooted at, the call an entity tag is written with, and a list whose
 //! presence is carried.
 //!
-//! Responsible for: [`LEGACY_ROOTS`]; the `XmlWriter` call a scalar member is written with; and
+//! Responsible for: [`LEGACY_ROOTS`]; the listing-entry members written as absent when the host does
+//! not hold them ([`ABSENT_WHEN_UNHELD`]); the `XmlWriter` call a scalar member is written with; and
 //! the iteration and guard of a list whose presence is carried (`emit::dto::presence`): its
 //! wrapper written when the list is set, and when it is not only outside the RustFS response
 //! layout, as the wrapper of every list is written today.
@@ -41,6 +42,35 @@ pub fn legacy_root_name(ir: &OperationIr) -> Option<&'static str> {
         .find(|(operation, _)| *operation == ir.operation)
         .map(|(_, root)| *root)
         .filter(|root| ir.xml.response_root.as_deref() != Some(*root))
+}
+
+/// The required listing-entry members a host may not hold, as `(shape, member)`
+/// (rustfs/gateway#1613).
+///
+/// Legacy-compat (rustfs/backlog#2684): legacy RustFS holds a listing entry's modification time and
+/// storage class as optional and writes an entry without the one it lacks — an entry merged from
+/// another system's listing, or a version record stored without either — where the model requires
+/// both. Under the RustFS response layout such a member, left at its placeholder because the host
+/// does not hold it, is written as no element; every other layout writes it as before, so a
+/// placeholder timestamp still fails the encode. `Size` is not listed: the host always holds it.
+/// The intended future behaviour is the core default, the model's required elements.
+pub const ABSENT_WHEN_UNHELD: &[(&str, &str)] = &[
+    ("DeleteMarkerEntry", "LastModified"),
+    ("Object", "LastModified"),
+    ("Object", "StorageClass"),
+    ("ObjectVersion", "LastModified"),
+    ("ObjectVersion", "StorageClass"),
+];
+
+/// The run-time condition, over the member bound to `v`, under which a member
+/// [`ABSENT_WHEN_UNHELD`] lists is not written.
+pub const UNHELD_UNDER_LEGACY_LAYOUT: &str =
+    "(writer.writes_legacy_layout() && rustfs_gateway_types::WirePlaceholder::is_wire_placeholder(v))";
+
+/// Whether `shape.member` is one [`ABSENT_WHEN_UNHELD`] lists.
+#[must_use]
+pub fn absent_when_unheld(shape: &str, member: &str) -> bool {
+    ABSENT_WHEN_UNHELD.iter().any(|(s, m)| *s == shape && *m == member)
 }
 
 /// The `XmlWriter` method one scalar body member is written with.

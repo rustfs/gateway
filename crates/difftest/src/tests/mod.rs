@@ -40,4 +40,5 @@ mod seam_outputs;
 mod seam_overrides;
 mod seam_switches;
 mod shadow;
+mod unheld_entry_facts;
 mod uri_scope;

@@ -224,7 +224,9 @@ fn write_delete_marker_entry(
     }
     {
         let v = &value.last_modified;
-        writer.element("LastModified", &value::render_timestamp(v, TimestampFormat::Iso8601)?);
+        if !(writer.writes_legacy_layout() && rustfs_gateway_types::WirePlaceholder::is_wire_placeholder(v)) {
+            writer.element("LastModified", &value::render_timestamp(v, TimestampFormat::Iso8601)?);
+        }
     }
     if let Some(v) = value.owner.as_ref() {
         writer.open("Owner", None);
@@ -256,7 +258,9 @@ fn write_object_version(
     }
     {
         let v = &value.last_modified;
-        writer.element("LastModified", &value::render_timestamp(v, TimestampFormat::Iso8601)?);
+        if !(writer.writes_legacy_layout() && rustfs_gateway_types::WirePlaceholder::is_wire_placeholder(v)) {
+            writer.element("LastModified", &value::render_timestamp(v, TimestampFormat::Iso8601)?);
+        }
     }
     if let Some(v) = value.e_tag.as_ref() {
         writer.entity_tag_element("ETag", &value::render_etag(v, EtagRender::XmlQuoted));
@@ -273,7 +277,9 @@ fn write_object_version(
     }
     {
         let v = &value.storage_class;
-        writer.element("StorageClass", v.as_str());
+        if !(writer.writes_legacy_layout() && rustfs_gateway_types::WirePlaceholder::is_wire_placeholder(v)) {
+            writer.element("StorageClass", v.as_str());
+        }
     }
     if let Some(v) = value.owner.as_ref() {
         writer.open("Owner", None);

@@ -30,7 +30,7 @@ pub fn delete_marker_entry_to_s3s(value: crate::ops::shapes::DeleteMarkerEntry) 
     Ok(s3s::dto::DeleteMarkerEntry {
         is_latest: Some(value.is_latest),
         key: Some({ let x = value.key; x.as_str().to_owned() }),
-        last_modified: Some({ let x = value.last_modified; leaf::timestamp_to_s3s("last_modified", x)? }),
+        last_modified: if crate::WirePlaceholder::is_wire_placeholder(&value.last_modified) { None } else { Some({ let x = value.last_modified; leaf::timestamp_to_s3s("last_modified", x)? }) },
         owner: value.owner.map(|x| -> Result<_, ConversionError> { Ok(super::super::shapes::owner::owner_to_s3s(x)?) }).transpose()?,
         version_id: Some({ let x = value.version_id; x.into_string() }),
     })
@@ -55,6 +55,6 @@ pub fn delete_marker_entry_from_s3s(value: s3s::dto::DeleteMarkerEntry) -> Resul
         key: match key { Some(x) => leaf::object_key("key", x)?, None => return Err(ConversionError { field: "key", reason: "the gateway shape requires this member" }) },
         version_id: match version_id { Some(x) => crate::OpaqueString::from(x), None => return Err(ConversionError { field: "version_id", reason: "the gateway shape requires this member" }) },
         is_latest: match is_latest { Some(x) => x, None => return Err(ConversionError { field: "is_latest", reason: "the gateway shape requires this member" }) },
-        last_modified: match last_modified { Some(x) => leaf::timestamp_from_s3s("last_modified", &x)?, None => return Err(ConversionError { field: "last_modified", reason: "the gateway shape requires this member" }) },
+        last_modified: match last_modified { Some(x) => { let v = leaf::timestamp_from_s3s("last_modified", &x)?; if crate::WirePlaceholder::is_wire_placeholder(&v) { return Err(ConversionError { field: "last_modified", reason: "a legacy value the gateway would write as unheld" }); } v }, None => Default::default() },
     })
 }

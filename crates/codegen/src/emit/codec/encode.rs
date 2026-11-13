@@ -627,11 +627,24 @@ pub fn shape_writer(ir: &OperationIr, name: &str, shape: &Shape) -> Result<Strin
                 let rendered = wire_expr(other, &field.name, &ir.operation, encoded)?;
                 let call = layout::element_call(other, policy);
                 let narrowed = url::member_binding("        ", &format!("{name}.{}", field.name), encoded);
+                let unheld = layout::absent_when_unheld(name, &field.name);
+                if unheld && !Registry::is_bare(name, field) {
+                    return Err(format!(
+                        "codec {name}.{}: only a bare required member can be written as unheld",
+                        field.name
+                    ));
+                }
                 if Registry::is_bare(name, field) {
                     let _ = writeln!(out, "    {{");
                     let _ = writeln!(out, "        let v = &{source};");
                     out.push_str(&narrowed);
-                    let _ = writeln!(out, "        writer.{call}(\"{wire}\", {rendered});");
+                    if unheld {
+                        let _ = writeln!(out, "        if !{} {{", layout::UNHELD_UNDER_LEGACY_LAYOUT);
+                        let _ = writeln!(out, "            writer.{call}(\"{wire}\", {rendered});");
+                        let _ = writeln!(out, "        }}");
+                    } else {
+                        let _ = writeln!(out, "        writer.{call}(\"{wire}\", {rendered});");
+                    }
                     let _ = writeln!(out, "    }}");
                 } else {
                     let _ = writeln!(out, "    if let Some(v) = {source}.as_ref() {{");

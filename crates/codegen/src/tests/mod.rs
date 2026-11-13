@@ -49,6 +49,7 @@ mod sensitive_debug_tests;
 mod structural_union_tests;
 mod tagging_tests;
 mod tolerance_tests;
+mod unheld_member_tests;
 mod unwrapped_empty_value_tests;
 mod url_tests;
 mod xml_list_tests;

@@ -498,3 +498,92 @@ fn n_a_bucket_name_and_key_the_gateway_grammar_refuses_never_become_gateway_name
     assert!(BucketName::new("Bad Bucket!").is_err());
     assert!(ObjectKey::new("").is_err());
 }
+
+// A listing entry fact the legacy value leaves unset (`AbsentAsPlaceholder`, rustfs/gateway#1613):
+// backward it is the gateway placeholder, which the RustFS response layout writes as no element;
+// forward the placeholder is the unset fact again.
+
+fn entry(key: &str, held: bool) -> oracle::Object {
+    let at = leaf::timestamp_to_s3s("t", crate::Timestamp::from_secs(1_700_000_000)).expect("instant");
+    oracle::Object {
+        key: Some(key.to_owned()),
+        last_modified: held.then_some(at),
+        size: Some(5),
+        storage_class: held.then(|| oracle::ObjectStorageClass::from("STANDARD".to_owned())),
+        ..Default::default()
+    }
+}
+
+fn entries(contents: Vec<oracle::Object>) -> oracle::ListObjectsV2Output {
+    oracle::ListObjectsV2Output {
+        name: Some("bucket".to_owned()),
+        prefix: Some(String::new()),
+        max_keys: Some(1000),
+        key_count: Some(i32::try_from(contents.len()).expect("small")),
+        is_truncated: Some(false),
+        contents: Some(contents),
+        ..Default::default()
+    }
+}
+
+#[test]
+fn an_unheld_listing_entry_fact_crosses_as_the_placeholder_and_back_as_unset() {
+    use crate::WirePlaceholder as _;
+    let ops = &super::generated::ops::list_objects_v2::output_from_s3s;
+    let gateway = ops(entries(vec![entry("held", true), entry("unheld", false)])).expect("an unheld fact is not refused");
+    assert!(!gateway.contents[0].last_modified.is_wire_placeholder());
+    assert_eq!(gateway.contents[0].storage_class.as_str(), "STANDARD");
+    assert!(gateway.contents[1].last_modified.is_wire_placeholder());
+    assert!(gateway.contents[1].storage_class.is_wire_placeholder());
+    let back = super::generated::ops::list_objects_v2::output_to_s3s(gateway).expect("the placeholder is the unset fact");
+    let contents = back.contents.expect("entries");
+    assert!(contents[0].last_modified.is_some() && contents[0].storage_class.is_some());
+    assert_eq!((contents[1].last_modified.as_ref(), contents[1].storage_class.as_ref()), (None, None));
+}
+
+#[test]
+fn n_an_unheld_size_is_still_refused() {
+    let mut unheld = entry("k", false);
+    unheld.size = None;
+    let error = super::generated::ops::list_objects_v2::output_from_s3s(entries(vec![unheld])).expect_err("Size is required");
+    assert_eq!(error.field, "size");
+}
+
+#[test]
+fn n_a_legacy_storage_class_spelled_as_the_placeholder_is_refused_not_written_as_unheld() {
+    let mut nul = entry("k", true);
+    nul.storage_class = Some(oracle::ObjectStorageClass::from("\u{0}".to_owned()));
+    let error = super::generated::ops::list_objects_v2::output_from_s3s(entries(vec![nul])).expect_err("a NUL class");
+    assert_eq!(error.field, "storage_class");
+}
+
+#[test]
+fn unheld_version_and_delete_marker_facts_cross_as_the_placeholder() {
+    use crate::WirePlaceholder as _;
+    let legacy = oracle::ListObjectVersionsOutput {
+        name: Some("bucket".to_owned()),
+        prefix: Some(String::new()),
+        key_marker: Some(String::new()),
+        version_id_marker: Some(String::new()),
+        max_keys: Some(1000),
+        is_truncated: Some(false),
+        versions: Some(vec![oracle::ObjectVersion {
+            key: Some("k".to_owned()),
+            version_id: Some("v".to_owned()),
+            is_latest: Some(true),
+            size: Some(5),
+            ..Default::default()
+        }]),
+        delete_markers: Some(vec![oracle::DeleteMarkerEntry {
+            key: Some("k".to_owned()),
+            version_id: Some("m".to_owned()),
+            is_latest: Some(false),
+            ..Default::default()
+        }]),
+        ..Default::default()
+    };
+    let gateway = super::generated::ops::list_object_versions::output_from_s3s(legacy).expect("unheld facts are not refused");
+    assert!(gateway.versions[0].last_modified.is_wire_placeholder());
+    assert!(gateway.versions[0].storage_class.is_wire_placeholder());
+    assert!(gateway.delete_markers[0].last_modified.is_wire_placeholder());
+}

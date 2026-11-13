@@ -83,6 +83,9 @@ const NESTED: &[Nested] = &[
         &["GetObjectLockConfigurationOutput"],
     ),
     ("ObjectLockRetention", &[("PutObjectRetention", "")], &["GetObjectRetentionOutput"]),
+    ("Object", &[], &["ListObjectsOutput", "ListObjectsV2Output"]),
+    ("ObjectVersion", &[], &["ListObjectVersionsOutput"]),
+    ("DeleteMarkerEntry", &[], &["ListObjectVersionsOutput"]),
 ];
 
 /// Output-side overrides no row can exercise, and the test that proves each: (rule, owner, file,
@@ -105,6 +108,24 @@ const OUTPUT_PROOFS: &[(&str, &str, &str, &str)] = &[
         "HeadBucketOutput",
         include_str!("../../../types/src/compat/seam/generated_tests.rs"),
         "n_an_empty_legacy_region_is_refused_not_written_as_none",
+    ),
+    (
+        "AbsentAsPlaceholder",
+        "ListObjectsOutput",
+        include_str!("unheld_entry_facts.rs"),
+        "every_unheld_entry_fact_crosses_as_the_placeholder_and_back_as_unset",
+    ),
+    (
+        "AbsentAsPlaceholder",
+        "ListObjectsV2Output",
+        include_str!("unheld_entry_facts.rs"),
+        "every_unheld_entry_fact_crosses_as_the_placeholder_and_back_as_unset",
+    ),
+    (
+        "AbsentAsPlaceholder",
+        "ListObjectVersionsOutput",
+        include_str!("unheld_entry_facts.rs"),
+        "every_unheld_entry_fact_crosses_as_the_placeholder_and_back_as_unset",
     ),
     (
         "Nested",
@@ -182,7 +203,7 @@ fn output_proof(rule: &str, owner: &str, member: &str) -> Result<(), String> {
     };
     let body = &file[start..];
     let body = &body[..body.find("\n}\n").unwrap_or(body.len())];
-    if matches!(rule, "S3sOnly" | "AbsentAsEmpty") && !body.contains(&format!("\"{member}\"")) {
+    if matches!(rule, "S3sOnly" | "AbsentAsEmpty" | "AbsentAsPlaceholder") && !body.contains(&format!("\"{member}\"")) {
         return Err(format!("{owner}.{member} ({rule}): {test} does not name the member"));
     }
     Ok(())
@@ -215,12 +236,12 @@ fn classify(entry: &Override, covered: &BTreeSet<(String, String)>) -> Result<()
     for output in &answers {
         let proven = match rule.as_str() {
             "GatewayOnly" => !legacy_has(FACTS, output, member) || !legacy_has(FACTS, owner, member),
-            "S3sOnly" | "Nested" | "AbsentAsEmpty" => output_proof(rule, output, member)
+            "S3sOnly" | "Nested" | "AbsentAsEmpty" | "AbsentAsPlaceholder" => output_proof(rule, output, member)
                 .map_err(|error| problems.push(error))
                 .is_ok(),
             _ => false,
         };
-        if !proven && !matches!(rule.as_str(), "S3sOnly" | "Nested" | "AbsentAsEmpty") {
+        if !proven && !matches!(rule.as_str(), "S3sOnly" | "Nested" | "AbsentAsEmpty" | "AbsentAsPlaceholder") {
             problems.push(format!("{output}: {member} ({rule}) is not proven on the answer side"));
         }
     }
@@ -313,6 +334,9 @@ fn n_an_output_rule_without_a_named_test_or_naming_another_member_is_unproven() 
     assert!(output_proof("AbsentAsEmpty", "HeadBucketOutput", "bucket_region").is_ok());
     assert!(output_proof("AbsentAsEmpty", "HeadBucketOutput", "bucket_arn").is_err());
     assert!(output_proof("AbsentAsEmpty", "CreateBucketOutput", "bucket_region").is_err());
+    assert!(output_proof("AbsentAsPlaceholder", "ListObjectsV2Output", "storage_class").is_ok());
+    assert!(output_proof("AbsentAsPlaceholder", "ListObjectsV2Output", "size").is_err());
+    assert!(output_proof("AbsentAsPlaceholder", "HeadBucketOutput", "last_modified").is_err());
 }
 
 #[test]

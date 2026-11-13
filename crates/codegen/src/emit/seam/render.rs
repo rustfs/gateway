@@ -140,7 +140,14 @@ pub(super) fn target<'s>(ctx: &Ctx<'s>, owner: &str, field: &Field, s3s: &'s [(S
             return Ok(Target::Nested(parent, nested.as_str(), ty, member));
         }
         Some(Rule::Rename(to)) => to.to_owned(),
-        Some(Rule::S3sOnly(_) | Rule::FromQuery(_) | Rule::FromBoolHeader(_) | Rule::AbsentAsEmpty(_)) | None => name.clone(),
+        Some(
+            Rule::S3sOnly(_)
+            | Rule::FromQuery(_)
+            | Rule::FromBoolHeader(_)
+            | Rule::AbsentAsEmpty(_)
+            | Rule::AbsentAsPlaceholder(_),
+        )
+        | None => name.clone(),
     };
     if matches!(field.ty, Type::ChecksumSpec) {
         return Ok(Target::ChecksumFanOut);
@@ -303,6 +310,12 @@ pub(super) fn forward_struct_as(
                             ));
                         }
                     }
+                    Ok(conv) if matches!(member_rule(owner, member), Some(Rule::AbsentAsPlaceholder(_))) => {
+                        match absent_as_placeholder_forward((owner, field), optional, &access, &conv) {
+                            Ok(value) => assigned.push((member.to_owned(), value)),
+                            Err(error) => errors.push(format!("{owner}.{name}: {error}")),
+                        }
+                    }
                     Ok(conv) => {
                         let value = wrap_forward((owner, field), optional, &access, &conv, &name);
                         assigned.push((member.to_owned(), value));
@@ -388,6 +401,28 @@ pub(super) fn forward_struct_as(
         return Err(errors);
     }
     Ok(format!("{prelude}    Ok(s3s::dto::{owner} {{\n{body}    }})\n"))
+}
+
+/// The one pairing [`Rule::AbsentAsPlaceholder`] applies to: a bare required gateway scalar whose
+/// legacy member is optional. Anything else fails generation naming the member.
+pub(super) fn placeholder_pairing((owner, field): (&str, &Field), s3s_optional: bool) -> Result<(), String> {
+    if s3s_optional && Registry::is_bare(owner, field) && field.required && !is_container(&field.ty) {
+        return Ok(());
+    }
+    Err("AbsentAsPlaceholder applies only to a bare required gateway scalar whose legacy member is optional".to_owned())
+}
+
+/// [`Rule::AbsentAsPlaceholder`] forward: the placeholder is the unset legacy member.
+fn absent_as_placeholder_forward(owned: (&str, &Field), s3s_optional: bool, access: &str, conv: &str) -> Result<String, String> {
+    placeholder_pairing(owned, s3s_optional)?;
+    let value = if conv == "x" {
+        access.to_owned()
+    } else {
+        format!("{{ let x = {access}; {conv} }}")
+    };
+    Ok(format!(
+        "if crate::WirePlaceholder::is_wire_placeholder(&{access}) {{ None }} else {{ Some({value}) }}"
+    ))
 }
 
 fn wrap_forward((owner, field): (&str, &Field), s3s_optional: bool, access: &str, conv: &str, name: &str) -> String {

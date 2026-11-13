@@ -451,18 +451,33 @@ fn refusals(ctx: &Ctx<'_>, owner: &str, fields: &[Field]) -> Result<Vec<Refusal>
             Ok(Target::Member(member, ty)) => {
                 let (core, optional) = ty.unwrap_option();
                 if Registry::is_bare(owner, field) && optional && !render::is_container(&field.ty) {
-                    let (bad, why) = if matches!(member_rule(owner, member), Some(Rule::AbsentAsEmpty(_))) {
-                        ("Some(String::new())", "an empty legacy value the gateway would write as unset")
-                    } else {
-                        ("None", "a member the gateway shape requires")
+                    let refused = match member_rule(owner, member) {
+                        Some(Rule::AbsentAsEmpty(_)) => Some((
+                            "unset",
+                            "Some(String::new())".to_owned(),
+                            "an empty legacy value the gateway would write as unset",
+                        )),
+                        // An unset value crosses as the placeholder; only a set value the gateway
+                        // spells as its placeholder is refused, and only an enumeration can be one.
+                        Some(Rule::AbsentAsPlaceholder(_)) => match core {
+                            S3sType::Enum(name) => Some((
+                                "placeholder",
+                                format!("Some(s3s::dto::{name}::from(\"\\u{{0}}\".to_owned()))"),
+                                "a legacy value the gateway would write as unheld",
+                            )),
+                            _ => None,
+                        },
+                        _ => Some(("unset", "None".to_owned(), "a member the gateway shape requires")),
                     };
-                    out.push(Refusal {
-                        member: member.to_owned(),
-                        field: name.clone(),
-                        suffix: "unset",
-                        bad: bad.to_owned(),
-                        why,
-                    });
+                    if let Some((suffix, bad, why)) = refused {
+                        out.push(Refusal {
+                            member: member.to_owned(),
+                            field: name.clone(),
+                            suffix,
+                            bad,
+                            why,
+                        });
+                    }
                 }
                 if let Some((bad, why)) = invalid(&field.ty, core) {
                     out.push(Refusal {

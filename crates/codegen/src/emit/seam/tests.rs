@@ -647,3 +647,85 @@ mod census {
         assert!(delete.1.contains("\"delete.objects[].key\","), "{}", delete.1);
     }
 }
+
+/// [`super::overrides::Rule::AbsentAsPlaceholder`] (rustfs/gateway#1613): a listing entry's
+/// modification time or storage class the legacy value leaves unset crosses as the gateway
+/// placeholder, and the placeholder crosses back as unset.
+mod unheld_entry_facts {
+    use rustfs_gateway_model::ir::{TimestampFormat, Type};
+
+    use super::{ctx, facts, field};
+    use crate::emit::seam::{backward, render};
+
+    const OBJECT: &str = "struct Object\n  last_modified: Option<Timestamp>\n  storage_class: Option<enum ObjectStorageClass>\n";
+
+    fn object_fields() -> [rustfs_gateway_model::ir::Field; 2] {
+        [
+            field("LastModified", Type::Timestamp(TimestampFormat::Iso8601), true),
+            field("StorageClass", Type::StringEnum(vec!["STANDARD".to_owned()]), true),
+        ]
+    }
+
+    #[test]
+    fn an_unset_legacy_entry_fact_crosses_as_the_placeholder() {
+        let facts = facts(OBJECT);
+        let text = backward::backward_struct(&ctx(&facts), "Object", &object_fields(), "G", "value").expect("renders");
+        assert_eq!(text.matches("None => Default::default()").count(), 2, "{text}");
+        assert!(!text.contains("the gateway shape requires this member"), "{text}");
+    }
+
+    #[test]
+    fn n_a_set_legacy_value_that_converts_to_the_placeholder_is_refused() {
+        let facts = facts(OBJECT);
+        let text = backward::backward_struct(&ctx(&facts), "Object", &object_fields(), "G", "value").expect("renders");
+        assert_eq!(
+            text.matches("if crate::WirePlaceholder::is_wire_placeholder(&v) { return Err(ConversionError { field: \"")
+                .count(),
+            2,
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn n_the_placeholder_crosses_forward_as_unset_not_as_a_value() {
+        let facts = facts(OBJECT);
+        let text = render::forward_struct(&ctx(&facts), "Object", &object_fields(), "value").expect("renders");
+        for member in ["last_modified", "storage_class"] {
+            assert!(
+                text.contains(&format!("if crate::WirePlaceholder::is_wire_placeholder(&value.{member}) {{ None }}")),
+                "{member}: {text}"
+            );
+        }
+    }
+
+    #[test]
+    fn n_the_rule_on_an_optional_gateway_member_fails_generation() {
+        let facts = facts(OBJECT);
+        let fields = [field("LastModified", Type::Timestamp(TimestampFormat::Iso8601), false)];
+        for errors in [
+            backward::backward_struct(&ctx(&facts), "Object", &fields, "G", "value").expect_err("an optional gateway member"),
+            render::forward_struct(&ctx(&facts), "Object", &fields, "value").expect_err("an optional gateway member"),
+        ] {
+            assert!(
+                errors
+                    .iter()
+                    .any(|error| error.contains("Object.last_modified: AbsentAsPlaceholder")),
+                "{errors:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn n_the_rule_on_a_required_legacy_member_fails_generation() {
+        let facts = facts("struct Object\n  last_modified: Timestamp\n");
+        let fields = [field("LastModified", Type::Timestamp(TimestampFormat::Iso8601), true)];
+        let errors =
+            backward::backward_struct(&ctx(&facts), "Object", &fields, "G", "value").expect_err("a required legacy member");
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.contains("Object.last_modified: AbsentAsPlaceholder")),
+            "{errors:?}"
+        );
+    }
+}

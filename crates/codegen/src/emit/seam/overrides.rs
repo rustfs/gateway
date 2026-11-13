@@ -58,6 +58,12 @@ pub enum Rule {
     /// RustFS profile writes as no header at all, as the legacy writer writes an unset one; a set
     /// empty legacy value is refused by name, since it would then be written as unset.
     AbsentAsEmpty(&'static str),
+    /// Both directions: the gateway member is a required scalar the legacy member may leave unset.
+    /// Backward an unset legacy value crosses as the gateway placeholder, which no real value is and
+    /// which the RustFS response layout writes as no element, as the legacy writer writes an unset
+    /// one; a set legacy value that converts to the placeholder is refused by name. Forward the
+    /// placeholder crosses as unset (rustfs/gateway#1613).
+    AbsentAsPlaceholder(&'static str),
 }
 
 /// One member exception: the s3s struct, the member name on the side the rule names, the rule.
@@ -303,6 +309,15 @@ pub const MEMBERS: &[MemberOverride] = &[
     // (rustfs/gateway#1148).
     ("HeadBucketOutput", "bucket_region", Rule::AbsentAsEmpty(UNNAMED_REGION)),
     ("HeadBucketOutput", "access_point_alias", Rule::S3sOnly(NOT_IN_MODEL)),
+    // Legacy RustFS holds a listing entry's modification time and storage class as optional and
+    // writes an entry without the one it lacks, which the gateway shape, requiring both, cannot
+    // hold; `ServiceBuilder::write_responses_as_rustfs` writes the placeholder as no element
+    // (rustfs/gateway#1613).
+    ("DeleteMarkerEntry", "last_modified", Rule::AbsentAsPlaceholder(UNHELD_ENTRY_FACT)),
+    ("Object", "last_modified", Rule::AbsentAsPlaceholder(UNHELD_ENTRY_FACT)),
+    ("Object", "storage_class", Rule::AbsentAsPlaceholder(UNHELD_ENTRY_FACT)),
+    ("ObjectVersion", "last_modified", Rule::AbsentAsPlaceholder(UNHELD_ENTRY_FACT)),
+    ("ObjectVersion", "storage_class", Rule::AbsentAsPlaceholder(UNHELD_ENTRY_FACT)),
     ("HeadBucketOutput", "bucket_arn", Rule::S3sOnly(NOT_IN_MODEL)),
     ("HeadBucketOutput", "bucket_location_name", Rule::S3sOnly(NOT_IN_MODEL)),
     ("HeadBucketOutput", "bucket_location_type", Rule::S3sOnly(NOT_IN_MODEL)),
@@ -311,4 +326,5 @@ pub const MEMBERS: &[MemberOverride] = &[
 const SEALED: &str = "the gateway authorizes the copy source as a derived resource and clears the input member";
 const EVENT_HOLD: &str = "an Object Lock event hold, which no pinned s3s shape holds and RustFS does not store";
 const NOT_IN_MODEL: &str = "an AWS model member the gateway model does not carry and RustFS neither reads nor sets";
+const UNHELD_ENTRY_FACT: &str = "a listing entry fact the RustFS host does not hold, written by the RustFS profile as no element";
 const UNNAMED_REGION: &str = "a bucket region the RustFS handler leaves unnamed, written by the RustFS profile as no header";

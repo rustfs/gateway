@@ -80,7 +80,7 @@
 //! | `sign_presigned_payloads_as_unsigned` | every presigned request signed over `UNSIGNED-PAYLOAD` | "presigned payload digest not covered by the signature" |
 //! | `slash_policy(SlashPolicy::RustfsLegacy)` | leading slashes of a key folded | "paths, keys and addressing as legacy" (`slash.rs`) |
 //! | `url_encode_listings_like_rustfs` | `encoding-type=url` echoed as sent, only some members encoded | "listing echoes `encoding-type`, encodes some members" |
-//! | `write_responses_as_rustfs` | members in RustFS's order, no line end after the declaration, no namespace on a payload root | unregistered (rustfs/gateway#1078) |
+//! | `write_responses_as_rustfs` | members in RustFS's order, no line end after the declaration, no namespace on a payload root, a listing entry's unheld `LastModified` or `StorageClass` written as no element | unregistered (rustfs/gateway#1078, #1613) |
 //! | `framework_governor_rates` (every layer unlimited) | no pre-authentication limit on any layer | "failed signatures and anonymous requests unlimited" |
 //! | floor: `delegate_anonymous_to_authorizer_after_listing_in_the_posture_report` | every request decided by policy, anonymous ones included | unregistered (ADR-0021) |
 //! | floor: `enable_sigv2_presigned_compatibility` | SigV2 presigned URLs accepted | unregistered (rustfs/gateway#913) |
