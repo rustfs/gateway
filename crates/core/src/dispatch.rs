@@ -44,6 +44,8 @@
 //! implementation of a pre-authentication security decision is only allowed to exist while
 //! something is continuously proving it agrees with the implementation a person can read.
 
+use std::sync::{Arc, OnceLock};
+
 use crate::error::PreAuthError;
 use crate::registry::{OperationSpec, Registry, check_required};
 use crate::route::{
@@ -134,8 +136,8 @@ impl From<CompileError> for RouterBuildError {
 /// The route table, its compiled form, the claimed rows, and the operations this backend handles.
 #[derive(Clone, Debug)]
 pub struct Router {
-    table: RouteTable,
-    compiled: CompiledRouter,
+    table: Arc<RouteTable>,
+    compiled: Arc<CompiledRouter>,
     claims: ClaimedTable,
     registry: Registry,
     selection: Selection,
@@ -162,8 +164,8 @@ impl Router {
     pub fn with_claims(table: RouteTable, claims: ClaimedTable, registry: Registry) -> Result<Self, RouterBuildError> {
         let compiled = CompiledRouter::compile(&table)?;
         Ok(Self {
-            table,
-            compiled,
+            table: Arc::new(table),
+            compiled: Arc::new(compiled),
             claims,
             registry,
             selection: Selection::Table,
@@ -191,16 +193,33 @@ impl Router {
         &self.claims
     }
 
-    /// Builds a router over the generated route table and its shadowing declarations.
+    /// Builds a router over the shared immutable generated route tables.
+    ///
+    /// Only the fixed route descriptions and their compiled form are shared. The supplied
+    /// registry remains owned by this router, including all of its backend registrations.
     ///
     /// # Errors
     ///
     /// [`RouterBuildError`] — an unreadable generated row, a table the build-time checks refuse,
     /// or a table that will not compile.
     pub fn from_generated(registry: Registry) -> Result<Self, RouterBuildError> {
-        let entries = generated_entries()?;
-        let table = RouteTable::build(entries, &SHADOWING)?;
-        Self::new(table, registry)
+        type GeneratedTables = (Arc<RouteTable>, Arc<CompiledRouter>);
+        static TABLES: OnceLock<Result<GeneratedTables, RouterBuildError>> = OnceLock::new();
+        let (table, compiled) = TABLES
+            .get_or_init(|| {
+                let table = RouteTable::build(generated_entries()?, &SHADOWING)?;
+                let compiled = CompiledRouter::compile(&table)?;
+                Ok((Arc::new(table), Arc::new(compiled)))
+            })
+            .as_ref()
+            .map_err(Clone::clone)?;
+        Ok(Self {
+            table: Arc::clone(table),
+            compiled: Arc::clone(compiled),
+            claims: ClaimedTable::default(),
+            registry,
+            selection: Selection::Table,
+        })
     }
 
     /// The route table.

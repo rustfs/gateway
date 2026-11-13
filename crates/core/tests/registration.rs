@@ -349,6 +349,15 @@ fn two_backends_coexist_in_one_process() {
         .build()
         .expect("two");
 
+    assert!(
+        std::ptr::eq(one.table(), two.table()),
+        "fixed routes are shared across backend registrations"
+    );
+    assert!(
+        std::ptr::eq(one.compiled(), two.compiled()),
+        "fixed compiled routes are shared across backend registrations"
+    );
+
     let region_of = |router: &rustfs_gateway_core::Router| {
         let invocation = router
             .registry()
