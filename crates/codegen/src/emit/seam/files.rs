@@ -63,10 +63,11 @@ fn legacy_input(ctx: &Ctx<'_>, input: &str, gw_input: &str) -> Result<(String, S
         );
     }
     let text = format!(
-        "/// Members only the legacy decoder reads (MinIO's `?versionId=`, `x-minio-force-delete`), which\n\
-         /// no gateway member holds: handed back beside the gateway input by [`input_from_s3s`], never\n\
-         /// dropped, for the ported use case to apply as the legacy stack did (rustfs/backlog#2749).\n\
-         /// Forward, [`input_to_s3s`] decodes them from the raw request it takes.\n\
+        "/// Facts the legacy decoder read that the gateway input cannot hold (MinIO's `?versionId=`,\n\
+         /// `x-minio-force-delete`, or whether an upload declared its length): handed back beside the\n\
+         /// gateway input by [`input_from_s3s`], never dropped, for the ported use case to apply as the\n\
+         /// legacy stack did (rustfs/backlog#2749). Forward, [`input_to_s3s`] decodes a legacy-only\n\
+         /// member from the raw request it takes.\n\
          #[derive(Clone, Debug, Default, PartialEq, Eq)]\n\
          pub struct LegacyInput {{\n{fields}}}\n\n"
     );
@@ -131,10 +132,10 @@ pub(super) fn operation(ctx: &Ctx<'_>, ir: &OperationIr) -> Result<Rendered, Vec
          {legacy_struct}\
          /// Converts the s3s `{op}` input the legacy stack decoded into the gateway input a ported\n\
          /// RustFS use case takes (rustfs/backlog#2749). A member only the legacy decoder reads, which\n\
-         /// no gateway member holds, is handed back beside it as `LegacyInput`, never dropped. A member\n\
-         /// the gateway input requires and the legacy decoder may leave unset (an upload's\n\
-         /// `content_length` with no wire `Content-Length`) is refused by name: resolve it before\n\
-         /// converting, as the legacy stack resolves an upload's size from the decoded length.\n\
+         /// no gateway member holds, is handed back beside it as `LegacyInput`, never dropped. An upload\n\
+         /// length the request did not declare crosses as `0` with `LegacyInput::content_length` unset,\n\
+         /// for the use case to resolve after its own checks (rustfs/gateway#1616); any other member\n\
+         /// the gateway input requires and the legacy decoder may leave unset is refused by name.\n\
          ///\n/// # Errors\n///\n/// [`ConversionError`] naming a member the gateway input cannot hold.\n\
          {ALLOWS}\n\
          pub fn input_from_s3s(input: s3s::dto::{op}Input) -> Result<{input_back_type}, ConversionError> {{\n{input_back}}}\n\n\

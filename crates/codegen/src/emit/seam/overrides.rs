@@ -64,6 +64,12 @@ pub enum Rule {
     /// one; a set legacy value that converts to the placeholder is refused by name. Forward the
     /// placeholder crosses as unset (rustfs/gateway#1613).
     AbsentAsPlaceholder(&'static str),
+    /// Backward only, on an input: the gateway member is a required length the legacy member may
+    /// leave unset. It crosses as the declared value, or `0` when unset, and the legacy member is
+    /// handed back in `LegacyInput` as the legacy decoder read it, so the use case tells an
+    /// undeclared length from a declared zero; a negative one is refused by name. Forward the
+    /// gateway length crosses as declared (rustfs/gateway#1616).
+    UndeclaredHandedBack(&'static str),
 }
 
 /// One member exception: the s3s struct, the member name on the side the rule names, the rule.
@@ -193,6 +199,9 @@ pub const MEMBERS: &[MemberOverride] = &[
     // The copy source is sealed into the authorized derived resources (`seal_derived_input`).
     ("CopyObjectInput", "copy_source", Rule::Supplied(SEALED)),
     ("UploadPartCopyInput", "copy_source", Rule::Supplied(SEALED)),
+    // The legacy decoder leaves the length unset when the request declares none (a body over
+    // chunked transfer coding), and RustFS decides what that means only after the upload lookup.
+    ("UploadPartInput", "content_length", Rule::UndeclaredHandedBack(UNDECLARED_LENGTH)),
     // If-Range: s3s 0.17.0 has no input member, and RustFS does not read the header either (no
     // `if-range` read anywhere in rustfs/rustfs 1e7065101d `rustfs/` or `crates/`): it serves the
     // range whatever the validator names, as the legacy stack did (kd-decode-0003). The header line
@@ -327,4 +336,6 @@ const SEALED: &str = "the gateway authorizes the copy source as a derived resour
 const EVENT_HOLD: &str = "an Object Lock event hold, which no pinned s3s shape holds and RustFS does not store";
 const NOT_IN_MODEL: &str = "an AWS model member the gateway model does not carry and RustFS neither reads nor sets";
 const UNHELD_ENTRY_FACT: &str = "a listing entry fact the RustFS host does not hold, written by the RustFS profile as no element";
+const UNDECLARED_LENGTH: &str =
+    "an upload length the request did not declare, which the RustFS handler resolves after its own checks";
 const UNNAMED_REGION: &str = "a bucket region the RustFS handler leaves unnamed, written by the RustFS profile as no header";

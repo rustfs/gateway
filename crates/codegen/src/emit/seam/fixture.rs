@@ -467,6 +467,8 @@ fn refusals(ctx: &Ctx<'_>, owner: &str, fields: &[Field]) -> Result<Vec<Refusal>
                             )),
                             _ => None,
                         },
+                        // Unset is handed back, not refused; a negative length is.
+                        Some(Rule::UndeclaredHandedBack(_)) => Some(("negative", "Some(-1)".to_owned(), "a negative length")),
                         _ => Some(("unset", "None".to_owned(), "a member the gateway shape requires")),
                     };
                     if let Some((suffix, bad, why)) = refused {
@@ -543,6 +545,8 @@ fn hand_backs(ctx: &Ctx<'_>, owner: &str) -> Result<Vec<HandBack>, Vec<String>> 
                 "Some(\"legacy\".to_owned())"
             }
             S3sType::Option(inner) if matches!(inner.as_ref(), S3sType::Leaf(l) if l == "bool") => "Some(true)",
+            // An undeclared length (`Rule::UndeclaredHandedBack`): absent is the value handed back.
+            S3sType::Option(inner) if matches!(inner.as_ref(), S3sType::Leaf(l) if l == "i64") => "None",
             other => return Err(vec![format!("{owner}.{member}: no hand-back fixture for {other:?}")]),
         };
         out.push(HandBack {

@@ -111,7 +111,7 @@ mod tests {
 
     #[test]
     fn input_round_trips() {
-        let gateway = ops::upload_part::input_from_s3s(super::input()).expect("the fixture converts into the gateway input");
+        let (gateway, _) = ops::upload_part::input_from_s3s(super::input()).expect("the fixture converts into the gateway input");
         let back = ops::upload_part::input_to_s3s(gateway).expect("and back into the s3s input");
         let value = super::input();
         let mut differences = Vec::new();
@@ -136,6 +136,14 @@ mod tests {
     }
 
     #[test]
+    fn input_hands_back_content_length() {
+        let mut value = super::input();
+        value.content_length = None;
+        let (_, legacy) = ops::upload_part::input_from_s3s(value).expect("a legacy-only member is handed back, never dropped");
+        assert_eq!(legacy.content_length, None);
+    }
+
+    #[test]
     fn n_input_refuses_bucket_invalid() {
         let mut value = super::input();
         value.bucket = "Bad Bucket!".to_owned();
@@ -144,11 +152,11 @@ mod tests {
     }
 
     #[test]
-    fn n_input_refuses_content_length_unset() {
+    fn n_input_refuses_content_length_negative() {
         let mut value = super::input();
-        value.content_length = None;
-        let error = ops::upload_part::input_from_s3s(value).expect_err("a member the gateway shape requires");
-        assert_eq!(error.field, "content_length", "a member the gateway shape requires");
+        value.content_length = Some(-1);
+        let error = ops::upload_part::input_from_s3s(value).expect_err("a negative length");
+        assert_eq!(error.field, "content_length", "a negative length");
     }
 
     #[test]

@@ -225,7 +225,9 @@ fn classify(entry: &Override, covered: &BTreeSet<(String, String)>) -> Result<()
         let proven = match rule.as_str() {
             "S3sOnly" => has_finding(operation, &path, SeamClass::DroppedUnread),
             "GatewayOnly" => has_finding(operation, member, SeamClass::FailClosed),
-            "Supplied" | "FromQuery" | "FromBoolHeader" | "Rename" => covered.contains(&(operation.clone(), path.clone())),
+            "Supplied" | "FromQuery" | "FromBoolHeader" | "Rename" | "UndeclaredHandedBack" => {
+                covered.contains(&(operation.clone(), path.clone()))
+            }
             "CarriedByHeaders" => !legacy_has(FACTS, owner, member),
             _ => false,
         };

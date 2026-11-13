@@ -255,3 +255,58 @@ fn an_empty_optional_header_crosses_an_output_unchanged() {
         "{input}"
     );
 }
+
+/// `UploadPartInput.content_length` (`Rule::UndeclaredHandedBack`, rustfs/gateway#1616): an unset
+/// legacy length crosses as `0` with the legacy member handed back, and a negative one is refused.
+#[test]
+fn an_undeclared_length_is_handed_back_and_a_negative_one_is_refused() {
+    let facts = facts("struct UploadPartInput\n  content_length: Option<i64>\n");
+    let fields = [field("ContentLength", Type::Long, true)];
+    let text = backward::backward_struct_with(&ctx(&facts), "UploadPartInput", &fields, "G", "input", LegacyMembers::HandBack)
+        .expect("renders");
+    assert!(
+        text.contains("content_length: match content_length { Some(x) if x < 0 => return Err(ConversionError { field: \"content_length\", reason: \"a negative length\" }), Some(x) => x, None => 0 },"),
+        "{text}"
+    );
+    assert!(text.contains("LegacyInput { content_length }"), "{text}");
+    assert!(!text.contains("the gateway shape requires this member"), "{text}");
+    let members = render::legacy_members("UploadPartInput", &facts.structs["UploadPartInput"]);
+    assert_eq!(members.len(), 1, "{members:?}");
+}
+
+/// Negative — without a side channel to hand it back, an undeclared length fails generation
+/// instead of crossing as a declared zero.
+#[test]
+fn n_an_undeclared_length_with_nowhere_to_hand_it_back_fails_generation() {
+    let facts = facts("struct UploadPartInput\n  content_length: Option<i64>\n");
+    let fields = [field("ContentLength", Type::Long, true)];
+    let error = backward::backward_struct(&ctx(&facts), "UploadPartInput", &fields, "G", "input").expect_err("no hand-back");
+    assert!(
+        error
+            .iter()
+            .any(|error| error.contains("UploadPartInput.content_length: UndeclaredHandedBack")),
+        "{error:?}"
+    );
+}
+
+/// Negative — the rule converts only an optional legacy length into a required gateway length.
+#[test]
+fn n_an_undeclared_length_on_another_pairing_fails_generation() {
+    for (s3s, ty, required) in [
+        ("content_length: i64", Type::Long, true),
+        ("content_length: Option<i64>", Type::Long, false),
+        ("content_length: Option<String>", Type::String, true),
+    ] {
+        let facts = facts(&format!("struct UploadPartInput\n  {s3s}\n"));
+        let fields = [field("ContentLength", ty, required)];
+        let error =
+            backward::backward_struct_with(&ctx(&facts), "UploadPartInput", &fields, "G", "input", LegacyMembers::HandBack)
+                .expect_err(s3s);
+        assert!(
+            error
+                .iter()
+                .any(|error| error.contains("UploadPartInput.content_length: UndeclaredHandedBack")),
+            "{s3s}: {error:?}"
+        );
+    }
+}

@@ -420,32 +420,32 @@ fn checksum_spec_from(
     }
 }
 
-/// Members only the legacy decoder reads, which no gateway member holds: handed back beside the
+/// Facts the legacy decoder read that the gateway input cannot hold: handed back beside the
 /// gateway input by [`input_from_s3s`], never dropped, for the ported use case to apply as the
 /// legacy stack did (rustfs/backlog#2749). Forward, only the authorised replica write carries
-/// the member, through [`replica_input_to_s3s`].
+/// `version_id`, through [`replica_input_to_s3s`].
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct LegacyInput {
     /// MinIO's `?versionId=` on a PUT: the version the legacy stack stores a replica under.
     pub version_id: Option<String>,
+    /// The declared `Content-Length`, `None` when the request declared none (rustfs/gateway#1616).
+    /// The gateway input then holds `0`, which is not a length: read this to tell them apart.
+    pub content_length: Option<i64>,
 }
 
 /// Converts the s3s input the legacy stack decoded into the gateway input a ported RustFS use
 /// case takes (rustfs/backlog#2749), with the legacy-only member beside it. The body is moved,
 /// not read.
 ///
-/// The gateway input requires `content_length`, which the legacy decoder leaves unset on an
-/// upload with no wire `Content-Length` (an aws-chunked body over chunked transfer coding, whose
-/// size is `x-amz-decoded-content-length`). The legacy stack resolves the authoritative size from
-/// the request headers before it sizes anything (`resolve_put_object_authoritative_size` in
-/// rustfs/rustfs `rustfs/src/app/object/put.rs`), and so must a caller of this conversion: fill
-/// the s3s member from that resolution first, or the upload is refused here by name rather than
-/// sized from the wrong length.
+/// The legacy decoder leaves `content_length` unset on an upload with no wire `Content-Length` (a
+/// body over chunked transfer coding). The gateway input requires one, so it then holds `0` and
+/// [`LegacyInput::content_length`] is `None`: the use case decides what an undeclared length
+/// means at the point the legacy stack did, after its own checks (rustfs/gateway#1616).
 ///
 /// # Errors
 ///
-/// [`ConversionError`] naming a member the gateway input cannot hold: no `Content-Length` (the
-/// gateway requires one), a bucket or key outside the gateway grammar, an instant the gateway
+/// [`ConversionError`] naming a member the gateway input cannot hold: a negative
+/// `Content-Length`, a bucket or key below the gateway floor, an instant the gateway
 /// cannot spell, two checksums at once or one of the wrong width, an `Expires` the revision holds
 /// parsed and cannot spell (the enclosing module's `expires_text` hook), or an entity-tag
 /// condition that is not a header value.
@@ -501,12 +501,12 @@ pub fn input_from_s3s(input: oracle::PutObjectInput) -> Result<(dto::PutObjectIn
         website_redirect_location,
         write_offset_bytes,
     } = input;
-    let Some(content_length) = content_length else {
+    if content_length.is_some_and(i64::is_negative) {
         return Err(ConversionError {
             field: "content_length",
-            reason: "the gateway input requires a content length",
+            reason: "a negative content length",
         });
-    };
+    }
     let checksum_spec = checksum_spec_from([
         ("checksum_crc32", ChecksumAlgorithm::Crc32, checksum_crc32),
         ("checksum_crc32c", ChecksumAlgorithm::Crc32c, checksum_crc32c),
@@ -527,7 +527,7 @@ pub fn input_from_s3s(input: oracle::PutObjectInput) -> Result<(dto::PutObjectIn
         content_disposition,
         content_encoding,
         content_language,
-        content_length,
+        content_length: content_length.unwrap_or_default(),
         content_md5,
         checksum_spec,
         content_type,
@@ -571,7 +571,13 @@ pub fn input_from_s3s(input: oracle::PutObjectInput) -> Result<(dto::PutObjectIn
         object_lock_event_hold_duration_years: None,
         expected_bucket_owner,
     };
-    Ok((gateway, LegacyInput { version_id }))
+    Ok((
+        gateway,
+        LegacyInput {
+            version_id,
+            content_length,
+        },
+    ))
 }
 
 /// Converts the gateway output a ported RustFS use case returned into the s3s output the legacy

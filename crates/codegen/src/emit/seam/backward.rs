@@ -152,6 +152,15 @@ pub(super) fn backward_struct_with(
                             Err(error) => errors.push(format!("{owner}.{name}: {error}")),
                         }
                     }
+                    Ok(conv) if matches!(member_rule(owner, member), Some(Rule::UndeclaredHandedBack(_))) => {
+                        match undeclared_handed_back(field, optional, legacy, member, &conv, &name) {
+                            Ok(value) => {
+                                push_field(&mut body, &gw_name, &value);
+                                handed.push(member);
+                            }
+                            Err(error) => errors.push(format!("{owner}.{name}: {error}")),
+                        }
+                    }
                     Ok(conv) if matches!(member_rule(owner, member), Some(Rule::AbsentAsPlaceholder(_))) => {
                         match absent_as_placeholder_backward((owner, field), optional, member, &conv, &name) {
                             Ok(value) => push_field(&mut body, &gw_name, &value),
@@ -256,6 +265,25 @@ fn absent_as_empty(field: &Field, s3s_optional: bool, member: &str, conv: &str, 
     Ok(format!(
         "match {member} {{ Some(x) if x.is_empty() => {}, Some(x) => x, None => String::new() }}",
         missing(name, "an empty legacy value the gateway would write as unset")
+    ))
+}
+
+/// [`Rule::UndeclaredHandedBack`]: the declared length or `0`, a negative one refused by name; the
+/// legacy member itself is bound into the handed-back `LegacyInput` beside it.
+fn undeclared_handed_back(
+    field: &Field,
+    s3s_optional: bool,
+    legacy: LegacyMembers,
+    member: &str,
+    conv: &str,
+    name: &str,
+) -> Result<String, String> {
+    if !(s3s_optional && field.required && matches!(field.ty, Type::Long) && conv == "x" && legacy == LegacyMembers::HandBack) {
+        return Err("UndeclaredHandedBack applies only to a required input length whose legacy member is optional".to_owned());
+    }
+    Ok(format!(
+        "match {member} {{ Some(x) if x < 0 => {}, Some(x) => x, None => 0 }}",
+        missing(name, "a negative length")
     ))
 }
 

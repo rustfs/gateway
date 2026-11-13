@@ -48,10 +48,10 @@ pub fn input_to_s3s(input: crate::ops::put_object_acl::Input) -> Result<s3s::dto
 
 /// Converts the s3s `PutObjectAcl` input the legacy stack decoded into the gateway input a ported
 /// RustFS use case takes (rustfs/backlog#2749). A member only the legacy decoder reads, which
-/// no gateway member holds, is handed back beside it as `LegacyInput`, never dropped. A member
-/// the gateway input requires and the legacy decoder may leave unset (an upload's
-/// `content_length` with no wire `Content-Length`) is refused by name: resolve it before
-/// converting, as the legacy stack resolves an upload's size from the decoded length.
+/// no gateway member holds, is handed back beside it as `LegacyInput`, never dropped. An upload
+/// length the request did not declare crosses as `0` with `LegacyInput::content_length` unset,
+/// for the use case to resolve after its own checks (rustfs/gateway#1616); any other member
+/// the gateway input requires and the legacy decoder may leave unset is refused by name.
 ///
 /// # Errors
 ///

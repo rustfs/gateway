@@ -359,7 +359,8 @@ fn a_put_input_round_trips_and_hands_its_legacy_member_back() {
     assert_eq!(
         legacy,
         put_object::LegacyInput {
-            version_id: Some("replica-version".to_owned())
+            version_id: Some("replica-version".to_owned()),
+            content_length: Some(4),
         }
     );
     assert_eq!(gateway.sse_customer_key.as_ref().map(|key| key.expose_secret()), Some("sse_customer_key"));
@@ -385,15 +386,13 @@ fn a_put_input_round_trips_and_hands_its_legacy_member_back() {
 }
 
 #[test]
-fn n_a_put_input_without_a_content_length_is_refused_by_member() {
+fn n_a_put_input_without_a_content_length_is_handed_back_as_undeclared() {
+    // rustfs/gateway#1616: the host decides what an undeclared length means, so it is handed back
+    // rather than refused, and never as a declared zero.
     let mut input = put_input();
     input.content_length = None;
-    assert_eq!(
-        put_object::input_from_s3s(input)
-            .expect_err("the gateway requires a length")
-            .field,
-        "content_length"
-    );
+    let (_, legacy) = put_object::input_from_s3s(input).expect("an undeclared length is handed back");
+    assert_eq!(legacy.content_length, None);
 }
 
 #[test]

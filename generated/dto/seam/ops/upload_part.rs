@@ -56,18 +56,29 @@ pub fn input_to_s3s(input: crate::ops::upload_part::Input) -> Result<s3s::dto::U
     })
 }
 
+/// Facts the legacy decoder read that the gateway input cannot hold (MinIO's `?versionId=`,
+/// `x-minio-force-delete`, or whether an upload declared its length): handed back beside the
+/// gateway input by [`input_from_s3s`], never dropped, for the ported use case to apply as the
+/// legacy stack did (rustfs/backlog#2749). Forward, [`input_to_s3s`] decodes a legacy-only
+/// member from the raw request it takes.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct LegacyInput {
+    /// The legacy `content_length` member, as the legacy decoder read it.
+    pub content_length: Option<i64>,
+}
+
 /// Converts the s3s `UploadPart` input the legacy stack decoded into the gateway input a ported
 /// RustFS use case takes (rustfs/backlog#2749). A member only the legacy decoder reads, which
-/// no gateway member holds, is handed back beside it as `LegacyInput`, never dropped. A member
-/// the gateway input requires and the legacy decoder may leave unset (an upload's
-/// `content_length` with no wire `Content-Length`) is refused by name: resolve it before
-/// converting, as the legacy stack resolves an upload's size from the decoded length.
+/// no gateway member holds, is handed back beside it as `LegacyInput`, never dropped. An upload
+/// length the request did not declare crosses as `0` with `LegacyInput::content_length` unset,
+/// for the use case to resolve after its own checks (rustfs/gateway#1616); any other member
+/// the gateway input requires and the legacy decoder may leave unset is refused by name.
 ///
 /// # Errors
 ///
 /// [`ConversionError`] naming a member the gateway input cannot hold.
 #[allow(clippy::too_many_lines, clippy::needless_question_mark, clippy::redundant_closure_call)]
-pub fn input_from_s3s(input: s3s::dto::UploadPartInput) -> Result<crate::ops::upload_part::Input, ConversionError> {
+pub fn input_from_s3s(input: s3s::dto::UploadPartInput) -> Result<(crate::ops::upload_part::Input, LegacyInput), ConversionError> {
     let s3s::dto::UploadPartInput {
         body,
         bucket,
@@ -93,10 +104,10 @@ pub fn input_from_s3s(input: s3s::dto::UploadPartInput) -> Result<crate::ops::up
         sse_customer_key_md5,
         upload_id,
     } = input;
-    Ok(crate::ops::upload_part::Input {
+    Ok((crate::ops::upload_part::Input {
         body: body.map(|x| -> Result<_, ConversionError> { Ok(leaf::byte_stream(x)) }).transpose()?,
         bucket: { let x = bucket; leaf::bucket_name("bucket", x)? },
-        content_length: match content_length { Some(x) => x, None => return Err(ConversionError { field: "content_length", reason: "the gateway shape requires this member" }) },
+        content_length: match content_length { Some(x) if x < 0 => return Err(ConversionError { field: "content_length", reason: "a negative length" }), Some(x) => x, None => 0 },
         content_md5,
         checksum_spec: leaf::checksum_spec_from_s3s([("checksum_crc32", crate::ChecksumAlgorithm::Crc32, checksum_crc32), ("checksum_crc32c", crate::ChecksumAlgorithm::Crc32c, checksum_crc32c), ("checksum_crc64nvme", crate::ChecksumAlgorithm::Crc64Nvme, checksum_crc64nvme), ("checksum_md5", crate::ChecksumAlgorithm::Md5, checksum_md5), ("checksum_sha1", crate::ChecksumAlgorithm::Sha1, checksum_sha1), ("checksum_sha256", crate::ChecksumAlgorithm::Sha256, checksum_sha256), ("checksum_sha512", crate::ChecksumAlgorithm::Sha512, checksum_sha512), ("checksum_xxhash128", crate::ChecksumAlgorithm::XxHash128, checksum_xxhash128), ("checksum_xxhash3", crate::ChecksumAlgorithm::XxHash3, checksum_xxhash3), ("checksum_xxhash64", crate::ChecksumAlgorithm::XxHash64, checksum_xxhash64)])?,
         checksum_algorithm: checksum_algorithm.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::ChecksumAlgorithm::custom(x.as_str().to_owned())) }).transpose()?,
@@ -108,7 +119,7 @@ pub fn input_from_s3s(input: s3s::dto::UploadPartInput) -> Result<crate::ops::up
         sse_customer_key_md5,
         request_payer: request_payer.map(|x| -> Result<_, ConversionError> { Ok(crate::ops::enums::RequestPayer::custom(x.as_str().to_owned())) }).transpose()?,
         expected_bucket_owner,
-    })
+    }, LegacyInput { content_length }))
 }
 
 /// Converts the s3s output a RustFS app body returned into the gateway `UploadPart` output.

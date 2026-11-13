@@ -87,6 +87,8 @@ pub mod s3s_0_17_0 {
     #[path = "../../../generated/seam/mod.rs"]
     pub mod generated;
     #[cfg(test)]
+    mod absent_length_tests;
+    #[cfg(test)]
     mod census_tests;
     pub mod copy_source;
     #[cfg(test)]
@@ -145,6 +147,8 @@ pub mod s3s_5761ddfe {
     #[rustfmt::skip]
     #[path = "../../../generated/seam/mod.rs"]
     pub mod generated;
+    #[cfg(test)]
+    mod absent_length_tests;
     #[cfg(test)]
     mod census_tests;
     pub mod copy_source;

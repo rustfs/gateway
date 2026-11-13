@@ -73,10 +73,11 @@ pub fn input_to_s3s(input: crate::ops::create_multipart_upload::Input, wire: &le
     })
 }
 
-/// Members only the legacy decoder reads (MinIO's `?versionId=`, `x-minio-force-delete`), which
-/// no gateway member holds: handed back beside the gateway input by [`input_from_s3s`], never
-/// dropped, for the ported use case to apply as the legacy stack did (rustfs/backlog#2749).
-/// Forward, [`input_to_s3s`] decodes them from the raw request it takes.
+/// Facts the legacy decoder read that the gateway input cannot hold (MinIO's `?versionId=`,
+/// `x-minio-force-delete`, or whether an upload declared its length): handed back beside the
+/// gateway input by [`input_from_s3s`], never dropped, for the ported use case to apply as the
+/// legacy stack did (rustfs/backlog#2749). Forward, [`input_to_s3s`] decodes a legacy-only
+/// member from the raw request it takes.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct LegacyInput {
     /// The legacy `version_id` member, as the legacy decoder read it.
@@ -85,10 +86,10 @@ pub struct LegacyInput {
 
 /// Converts the s3s `CreateMultipartUpload` input the legacy stack decoded into the gateway input a ported
 /// RustFS use case takes (rustfs/backlog#2749). A member only the legacy decoder reads, which
-/// no gateway member holds, is handed back beside it as `LegacyInput`, never dropped. A member
-/// the gateway input requires and the legacy decoder may leave unset (an upload's
-/// `content_length` with no wire `Content-Length`) is refused by name: resolve it before
-/// converting, as the legacy stack resolves an upload's size from the decoded length.
+/// no gateway member holds, is handed back beside it as `LegacyInput`, never dropped. An upload
+/// length the request did not declare crosses as `0` with `LegacyInput::content_length` unset,
+/// for the use case to resolve after its own checks (rustfs/gateway#1616); any other member
+/// the gateway input requires and the legacy decoder may leave unset is refused by name.
 ///
 /// # Errors
 ///
