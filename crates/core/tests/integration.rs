@@ -176,6 +176,9 @@ mod selector_required_params;
 #[path = "static_dispatch.rs"]
 mod static_dispatch;
 
+#[path = "stored_entity_tag.rs"]
+mod stored_entity_tag;
+
 #[path = "tagging_contract.rs"]
 mod tagging_contract;
 

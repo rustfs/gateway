@@ -246,6 +246,7 @@ core_modules = (
     "select_restore_roundtrip",
     "selector_required_params",
     "static_dispatch",
+    "stored_entity_tag",
     "tagging_contract",
     "tagging_roundtrip",
     "tolerant_conditions",

@@ -30,6 +30,7 @@ mod range_tests;
 mod rustfs_addressing_tests;
 mod rustfs_key_floor_tests;
 mod rustfs_slash_tests;
+mod stored_etag_tests;
 mod timestamp_corpus_tests;
 mod timestamp_tests;
 mod upload_id_async_tests;

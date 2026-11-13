@@ -49,7 +49,7 @@ Agent entry point for handwritten protocol scalars and the mounted generated DTO
 | `src/scalar/addressing.rs` | `PathSplit` and `LegacyRustfsNameValidator`: where a path-style bucket ends and which bucket names legacy RustFS serves (#1115). | A RustFS-profile bucket is admitted, refused or split wrongly. |
 | `src/scalar/bucket.rs` | Validated bucket names. | Bucket syntax or display changes. |
 | `src/scalar/key.rs` | Lossless object-key bytes. | Key normalization/encoding changes. |
-| `src/scalar/etag.rs` | Context-typed entity tags. | ETag quoting or comparison changes. |
+| `src/scalar/etag.rs` | Context-typed entity tags, and the tag a host stored kept byte for byte (`from_stored`). | ETag quoting or comparison changes, or a stored tag a response must carry. |
 | `src/scalar/checksum.rs` | Checksum algorithms and values. | Integrity fields change. |
 | `src/scalar/checksummer.rs` | Streaming digests for the ten checksum algorithms. | A digest backend or its byte order changes. |
 | `src/scalar/timestamp.rs` | S3 timestamp forms. | A date parses or renders wrongly. |

@@ -16,7 +16,8 @@
 //!
 //! Responsible for: holding the *unquoted* opaque-tag plus its weakness flag and the `*` wildcard,
 //! parsing every form a client is known to send, rendering the three forms S3 emits, RFC 9110
-//! strong/weak comparison, and the multipart `<hex>-<N>` shape.
+//! strong/weak comparison, the multipart `<hex>-<N>` shape, and the tag a host stored, kept byte
+//! for byte ([`ETag::from_stored`]).
 //! NOT responsible for: reading the `ETag` header off a request or writing it into XML (the wire
 //! layers do that, by calling [`ETag::render`]), evaluating preconditions as a whole (that is the
 //! `Conditional` operation cluster), and XML escaping — [`EtagRender::XmlQuoted`] returns the text
@@ -70,15 +71,40 @@ pub enum EtagRender {
 
 /// An immutable entity tag: the opaque-tag, its weakness, or the `*` wildcard.
 ///
-/// The stored tag is always *unquoted*, whatever the input looked like, so two tags that differ
-/// only in quoting compare equal. `PartialEq` is byte equality of that normalised tag plus the
-/// weakness flag; it is **not** the RFC 9110 comparison — use [`ETag::matches_strong`] and
-/// [`ETag::matches_weak`] for that, because they differ precisely on weak tags and on `*`.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+/// The held tag is *unquoted* whatever the input looked like, so two tags that differ only in
+/// quoting compare equal — except a tag built with [`ETag::from_stored`], which is held exactly as
+/// the host stored it. `PartialEq` is byte equality of the held tag plus the weakness flag (and
+/// whether the value is the [`Default`] placeholder); it is **not** the RFC 9110 comparison — use
+/// [`ETag::matches_strong`] and [`ETag::matches_weak`] for that, because they differ precisely on
+/// weak tags and on `*`.
+#[derive(Debug, Clone)]
 pub struct ETag {
     weak: bool,
     any: bool,
+    /// Built by [`ETag::from_stored`]: the tag is the host's bytes, never normalised or validated.
+    /// It exists so that a stored empty tag is a value and not the [`Default`] placeholder.
+    stored: bool,
     tag: Cow<'static, str>,
+}
+
+impl PartialEq for ETag {
+    fn eq(&self, other: &Self) -> bool {
+        self.weak == other.weak
+            && self.any == other.any
+            && self.tag == other.tag
+            && self.is_wire_placeholder() == other.is_wire_placeholder()
+    }
+}
+
+impl Eq for ETag {}
+
+impl std::hash::Hash for ETag {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        // Equal values hash equal: the placeholder flag only splits values whose tag is empty.
+        self.weak.hash(state);
+        self.any.hash(state);
+        self.tag.hash(state);
+    }
 }
 
 impl ETag {
@@ -89,6 +115,7 @@ impl ETag {
     pub const ANY: Self = Self {
         weak: false,
         any: true,
+        stored: false,
         tag: Cow::Borrowed("*"),
     };
 
@@ -121,7 +148,42 @@ impl ETag {
             Some(owned) => Cow::Owned(owned),
             None => value,
         };
-        Ok(Self { weak, any: false, tag })
+        Ok(Self {
+            weak,
+            any: false,
+            stored: false,
+            tag,
+        })
+    }
+
+    /// Builds a strong tag from exactly the bytes a host stored, for a **response** member only.
+    ///
+    /// Lossless where [`ETag::new`] is tolerant: nothing is stripped (a stored `"abc"` keeps its
+    /// quotes and a stored `W/x` is not read as weak), and nothing is refused — an empty value, a
+    /// control character and markup are all held as they are. A host that kept an entity tag
+    /// verbatim from another system lists and returns that object with it, rather than omitting
+    /// the member, failing the answer or rewriting the value (rustfs/gateway#1611).
+    ///
+    /// The renderers treat the held bytes as the opaque tag: [`EtagRender::XmlQuoted`] wraps them
+    /// in quotes, [`EtagRender::XmlBare`] returns them, and the XML writer escapes them like any
+    /// other text (a character XML 1.0 cannot carry becomes `U+FFFD`, as in every body string).
+    /// [`EtagRender::HeaderQuoted`] wraps them in quotes and escapes `"` and `\`; a value a header
+    /// field still cannot carry (a control character other than a tab, or DEL) is dropped by the
+    /// response writer, as every other header member is, and the rest of the answer stands.
+    ///
+    /// Comparison is byte equality with the request's strong value. A request tag the parsers
+    /// accept is never empty, never carries a control character and never an embedded quote, so a
+    /// stored tag [`ETag::new`] would refuse matches no request tag — only another stored tag with
+    /// the same bytes. A wildcard on either side still matches, and a weak request tag still never
+    /// matches strongly: those rules belong to the comparison, not to the stored value.
+    #[must_use]
+    pub fn from_stored(value: impl Into<Cow<'static, str>>) -> Self {
+        Self {
+            weak: false,
+            any: false,
+            stored: true,
+            tag: value.into(),
+        }
     }
 
     /// Builds a weak tag from a value the storage layer produced.
@@ -188,6 +250,7 @@ impl ETag {
         Ok(Self {
             weak,
             any: false,
+            stored: false,
             tag: Cow::Owned(tag.to_owned()),
         })
     }
@@ -215,6 +278,7 @@ impl ETag {
         Ok(Self {
             weak: false,
             any: false,
+            stored: false,
             tag: Cow::Owned(format!("{}-{count}", hex::encode(outer))),
         })
     }
@@ -225,6 +289,7 @@ impl ETag {
         Self {
             weak: false,
             any: false,
+            stored: false,
             tag: Cow::Owned(hex::encode(digest)),
         }
     }
@@ -255,7 +320,8 @@ impl ETag {
         }
     }
 
-    /// The normalised opaque tag, without quotes and without the `W/` prefix.
+    /// The normalised opaque tag, without quotes and without the `W/` prefix — or, for a tag built
+    /// with [`ETag::from_stored`], exactly the stored bytes.
     ///
     /// This is the form to use as a storage key or a comparison input. It is **not** a wire form:
     /// writing it to the wire directly is the bug this type exists to prevent — use
@@ -328,7 +394,8 @@ impl Default for ETag {
     /// dto derives `Default` so that `..Default::default()` keeps compiling when AWS adds a
     /// member. `ETag` is required in a `PutObject` response and in every `Object` listing entry,
     /// so it needs a `Default`. The value it produces is rejected by [`ETag::new`] and by every
-    /// parser in this module, and it is not the `*` wildcard either.
+    /// parser in this module, and it is not the `*` wildcard either. A stored empty tag
+    /// ([`ETag::from_stored`]) is a value, not this placeholder, and does not compare equal to it.
     ///
     /// **The decoding path never produces it.** Treat a value that compares equal to this one as
     /// a bug, never as an entity tag — in particular, never let one answer a conditional request.
@@ -336,6 +403,7 @@ impl Default for ETag {
         Self {
             weak: false,
             any: false,
+            stored: false,
             tag: Cow::Borrowed(""),
         }
     }
@@ -343,7 +411,7 @@ impl Default for ETag {
 
 impl WirePlaceholder for ETag {
     fn is_wire_placeholder(&self) -> bool {
-        !self.any && self.tag.is_empty()
+        !self.any && !self.stored && self.tag.is_empty()
     }
 }
 
