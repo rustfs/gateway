@@ -738,6 +738,7 @@ gateway_modules = (
     "committed_head_runtime",
     "compat_aliases",
     "compile_fail",
+    "copy_source_arns",
     "copy_source_reachability",
     "cors_runtime",
     "credential_runtime",
