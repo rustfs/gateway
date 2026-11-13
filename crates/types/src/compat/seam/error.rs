@@ -171,6 +171,23 @@ const LAST_MODIFIED: &str = "last-modified";
 /// The headers a delete-marker read states its marker with (RustFS `with_delete_marker_read_headers`).
 const MARKER_FACTS: [&str; 3] = [DELETE_MARKER, VERSION_ID, LAST_MODIFIED];
 
+// The stored representation headers a legacy `304` repeats (rustfs/gateway#1612).
+const CACHE_CONTROL: &str = "cache-control";
+const CONTENT_LOCATION: &str = "content-location";
+const EXPIRES: &str = "expires";
+const VARY: &str = "vary";
+
+/// Every header a legacy `304` may state: both validators, the stored four, the evaluated version.
+const NOT_MODIFIED_FACTS: [&str; 7] = [
+    ETAG,
+    LAST_MODIFIED,
+    CACHE_CONTROL,
+    CONTENT_LOCATION,
+    EXPIRES,
+    VARY,
+    VERSION_ID,
+];
+
 /// Maps an s3s handler error to what the gateway answers for it.
 ///
 /// A `NotModified` carrying `ETag`, an `InvalidRange` carrying `Content-Range: bytes */<length>`,
@@ -296,6 +313,17 @@ pub struct LegacyRefusal {
     pub delete_marker: Option<String>,
     /// The complete length of a `416`, when the error states `Content-Range: bytes */<length>`.
     pub complete_length: Option<u64>,
+    /// The stored `Cache-Control` of a `304`, when stated.
+    pub cache_control: Option<String>,
+    /// The stored `Content-Location` of a `304`, when stated.
+    pub content_location: Option<String>,
+    /// The stored `Expires` of a `304`, when stated, as stored.
+    pub expires: Option<String>,
+    /// The stored `Vary` of a `304`, when stated.
+    pub vary: Option<String>,
+    /// The version id of the version a `304` evaluated, when the error states `x-amz-version-id`;
+    /// a marker's id is [`Self::delete_marker`].
+    pub version_id: Option<String>,
 }
 
 /// Reads a RustFS body's handler error as the legacy stack writes it, for the RustFS profile.
@@ -308,7 +336,9 @@ pub struct LegacyRefusal {
 /// a conditional `HEAD` (`rustfs/src/app/object/head.rs:423,431`), and the delete-marker flag,
 /// version id and, on a versioned read only, `Last-Modified` with the `Content-Type` it re-adds
 /// (`rustfs/src/app/object/shared.rs:60-100`); its `416` carries none
-/// (`rustfs/src/app/object/shared.rs:159-174`). Each is read here only when present, and every
+/// (`rustfs/src/app/object/shared.rs:159-174`). The later revision `59bc6d7c9` also repeats the
+/// stored `Cache-Control`, `Content-Location`, `Expires` and `Vary` and the evaluated version's
+/// `x-amz-version-id` on that `304` (`not_modified_error`, rustfs/gateway#1612). Each is read here only when present, and every
 /// value must be spelled exactly as the gateway will write it again, so the answer is the same
 /// bytes.
 ///
@@ -329,7 +359,8 @@ pub struct LegacyRefusal {
 ///   document, which the legacy stack would send untyped or typed otherwise;
 /// - the fact header's own name: a fact repeated, or spelled other than the gateway writes it (a
 ///   quoted entity tag, an IMF-fixdate, the flag `true`, a non-empty version id, `bytes */<length>`
-///   in shortest decimal).
+///   in shortest decimal, a stored value of visible ASCII and interior spaces, an evaluated version
+///   id of visible ASCII).
 pub fn refusal_from_legacy(error: &s3s::S3Error) -> Result<LegacyRefusal, ConversionError> {
     let name = error.code().as_str();
     if !is_identifier(name) {
@@ -372,7 +403,7 @@ pub fn refusal_from_legacy(error: &s3s::S3Error) -> Result<LegacyRefusal, Conver
         ("NoSuchKey", StatusCode::NOT_FOUND) | ("MethodNotAllowed", StatusCode::METHOD_NOT_ALLOWED)
     );
     match (name, marker && marker_code) {
-        ("NotModified", _) => facts.only(&[ETAG, LAST_MODIFIED])?,
+        ("NotModified", _) => facts.only(&NOT_MODIFIED_FACTS)?,
         ("InvalidRange", _) => facts.only(&[CONTENT_RANGE])?,
         (_, true) => facts.only(&MARKER_FACTS)?,
         _ => facts.only(&[])?,
@@ -395,6 +426,16 @@ pub fn refusal_from_legacy(error: &s3s::S3Error) -> Result<LegacyRefusal, Conver
         true => facts.optional(ETAG)?.map(canonical_etag).transpose()?,
         false => None,
     };
+    let stored = |name: &'static str| match not_modified {
+        true => facts.optional(name)?.map(|value| canonical_stored(name, value)).transpose(),
+        false => Ok(None),
+    };
+    let (cache_control, content_location) = (stored(CACHE_CONTROL)?, stored(CONTENT_LOCATION)?);
+    let (expires, vary) = (stored(EXPIRES)?, stored(VARY)?);
+    let version_id = match not_modified {
+        true => facts.optional(VERSION_ID)?.map(canonical_version_id).transpose()?,
+        false => None,
+    };
     let complete_length = match name {
         "InvalidRange" => facts.optional(CONTENT_RANGE)?.map(canonical_complete_length).transpose()?,
         _ => None,
@@ -410,6 +451,11 @@ pub fn refusal_from_legacy(error: &s3s::S3Error) -> Result<LegacyRefusal, Conver
         last_modified,
         delete_marker,
         complete_length,
+        cache_control,
+        content_location,
+        expires,
+        vary,
+        version_id,
     })
 }
 
@@ -439,6 +485,34 @@ fn canonical_http_date(value: &str) -> Result<i64, ConversionError> {
     match Timestamp::from_secs(seconds).render(TimestampFormat::HttpDate) {
         Ok(rendered) if rendered == value => Ok(seconds),
         _ => Err(refused()),
+    }
+}
+
+/// A stored header value the gateway writes back as the same bytes: visible ASCII and interior
+/// spaces (`single` has already refused anything past visible ASCII), no tab, no edge a recipient
+/// would strip.
+fn canonical_stored(field: &'static str, value: &str) -> Result<String, ConversionError> {
+    let carried = !value.is_empty()
+        && !value.starts_with(' ')
+        && !value.ends_with(' ')
+        && value.bytes().all(|byte| byte.is_ascii_graphic() || byte == b' ');
+    match carried {
+        true => Ok(value.to_owned()),
+        false => Err(ConversionError {
+            field,
+            reason: "a stored header the gateway writes is visible ASCII with interior spaces only",
+        }),
+    }
+}
+
+/// The evaluated version's id as the gateway writes it: non-empty visible ASCII without a space.
+fn canonical_version_id(value: &str) -> Result<String, ConversionError> {
+    match !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_graphic()) {
+        true => Ok(value.to_owned()),
+        false => Err(ConversionError {
+            field: VERSION_ID,
+            reason: "a version id the gateway writes is non-empty visible ASCII without a space",
+        }),
     }
 }
 

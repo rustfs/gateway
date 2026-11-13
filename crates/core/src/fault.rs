@@ -215,8 +215,50 @@ impl VersionIdLabel {
     }
 }
 
-/// A value refused by [`RegionLabel::new`], [`RedirectTarget::new`], [`VersionIdLabel::new`] or
-/// [`HttpDate::from_unix_seconds`].
+/// A stored representation header a `304` repeats, validated at construction.
+///
+/// Carried by [`ErrorHeader::CacheControl`], [`ErrorHeader::ContentLocation`],
+/// [`ErrorHeader::Expires`] and [`ErrorHeader::Vary`]: the value the object was stored with, which
+/// only the backend holds and which the gateway repeats as stored. Whoever wrote the object chose
+/// it, so the byte set, not the source, is what keeps it inert. The header's own grammar is not
+/// parsed here — a stored `Expires` a cache cannot parse is still the value the `200` carries — so
+/// the byte set is the whole rule: visible ASCII and interior spaces, bounded. That keeps a header
+/// split unspellable, as for [`RedirectTarget`], and the value free of the surrounding whitespace a
+/// recipient strips, so what it reads is what was stored.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct StoredHeaderValue(Box<str>);
+
+impl StoredHeaderValue {
+    /// The longest value this type accepts; a typical server's whole header-line budget.
+    pub const MAX_LEN: usize = 8192;
+
+    /// Validates a stored header value.
+    ///
+    /// # Errors
+    ///
+    /// [`InvalidWireLabel`] when the value is empty, longer than [`Self::MAX_LEN`], begins or ends
+    /// with a space, or carries any byte that is neither ASCII graphic nor a space.
+    pub fn new(text: &str) -> Result<Self, InvalidWireLabel> {
+        let ok = !text.is_empty()
+            && text.len() <= Self::MAX_LEN
+            && !text.starts_with(' ')
+            && !text.ends_with(' ')
+            && text.bytes().all(|byte| byte.is_ascii_graphic() || byte == b' ');
+        if !ok {
+            return Err(InvalidWireLabel);
+        }
+        Ok(Self(Box::from(text)))
+    }
+
+    /// The validated value.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// A value refused by [`RegionLabel::new`], [`RedirectTarget::new`], [`VersionIdLabel::new`],
+/// [`StoredHeaderValue::new`] or [`HttpDate::from_unix_seconds`].
 ///
 /// Carries nothing on purpose: echoing the refused bytes back would hand the caller of a
 /// diagnostic path the very bytes the validation exists to keep out of a header.
@@ -287,14 +329,16 @@ pub enum ErrorHeader {
     /// backend knows a version is a marker, and the value is this module's literal `true`, never a
     /// reading of anything the caller sent.
     DeleteMarker,
-    /// `x-amz-version-id: <id>` — which version the delete-marker refusal found.
+    /// `x-amz-version-id: <id>` — which version the refusal is about: the delete marker a marker
+    /// refusal found, or the version a `304` evaluated.
     ///
     /// Rides with [`Self::DeleteMarker`] on both marker refusals: a client removing the marker to
     /// restore the object needs its id, and the `404` a read naming no version gets is where it
-    /// learns it without listing versions. Only the backend knows the id; [`VersionIdLabel`] fixes
-    /// the syntax.
+    /// learns it without listing versions. On a `304` it names the version the client's validator
+    /// matched, as the `200` would. Only the backend knows the id; [`VersionIdLabel`] fixes the
+    /// syntax.
     VersionId {
-        /// The version id of the marker the read found.
+        /// The version id of the marker the read found, or of the version a `304` evaluated.
         version_id: VersionIdLabel,
     },
     /// `Last-Modified: <IMF-fixdate>` — when the selected version was written.
@@ -305,6 +349,32 @@ pub enum ErrorHeader {
     LastModified {
         /// The instant the selected version was written.
         at: HttpDate,
+    },
+    /// `Cache-Control: <stored>` — the cache directives the object was stored with.
+    ///
+    /// RFC 9110 §15.4.5 (<https://www.rfc-editor.org/rfc/rfc9110#section-15.4.5>): a `304` carries
+    /// each of `Cache-Control`, `Content-Location`, `Date`, `ETag`, `Expires` and `Vary` that the
+    /// `200` would have carried, so a cache can refresh the response it holds. `Date` is the
+    /// framework's and `ETag` the resolution's own; this and the next three are the stored ones
+    /// only the backend knows.
+    CacheControl {
+        /// The stored value.
+        value: StoredHeaderValue,
+    },
+    /// `Content-Location: <stored>` — repeated on a `304` for [`Self::CacheControl`]'s reason.
+    ContentLocation {
+        /// The stored value.
+        value: StoredHeaderValue,
+    },
+    /// `Expires: <stored>` — repeated on a `304` for [`Self::CacheControl`]'s reason.
+    Expires {
+        /// The stored value.
+        value: StoredHeaderValue,
+    },
+    /// `Vary: <stored>` — repeated on a `304` for [`Self::CacheControl`]'s reason.
+    Vary {
+        /// The stored value.
+        value: StoredHeaderValue,
     },
 }
 
@@ -320,6 +390,10 @@ impl ErrorHeader {
             Self::DeleteMarker => HeaderName::from_static("x-amz-delete-marker"),
             Self::VersionId { .. } => HeaderName::from_static("x-amz-version-id"),
             Self::LastModified { .. } => HeaderName::from_static("last-modified"),
+            Self::CacheControl { .. } => HeaderName::from_static("cache-control"),
+            Self::ContentLocation { .. } => HeaderName::from_static("content-location"),
+            Self::Expires { .. } => HeaderName::from_static("expires"),
+            Self::Vary { .. } => HeaderName::from_static("vary"),
         }
     }
 
@@ -340,6 +414,9 @@ impl ErrorHeader {
             Self::DeleteMarker => "true".to_owned(),
             Self::VersionId { version_id } => version_id.as_str().to_owned(),
             Self::LastModified { at } => at.as_str().to_owned(),
+            Self::CacheControl { value } | Self::ContentLocation { value } | Self::Expires { value } | Self::Vary { value } => {
+                value.as_str().to_owned()
+            }
         }
     }
 }
@@ -456,6 +533,18 @@ mod tests {
             ErrorHeader::LastModified {
                 at: HttpDate::from_unix_seconds(1_767_236_645).expect("a renderable instant"),
             },
+            ErrorHeader::CacheControl {
+                value: StoredHeaderValue::new("max-age=3600, public").expect("a stored value"),
+            },
+            ErrorHeader::ContentLocation {
+                value: StoredHeaderValue::new("/b/k").expect("a stored value"),
+            },
+            ErrorHeader::Expires {
+                value: StoredHeaderValue::new("Thu, 01 Dec 2027 16:00:00 GMT").expect("a stored value"),
+            },
+            ErrorHeader::Vary {
+                value: StoredHeaderValue::new("Origin").expect("a stored value"),
+            },
         ];
         for header in &all {
             match header {
@@ -465,7 +554,11 @@ mod tests {
                 | ErrorHeader::RedirectLocation { .. }
                 | ErrorHeader::DeleteMarker
                 | ErrorHeader::VersionId { .. }
-                | ErrorHeader::LastModified { .. } => {}
+                | ErrorHeader::LastModified { .. }
+                | ErrorHeader::CacheControl { .. }
+                | ErrorHeader::ContentLocation { .. }
+                | ErrorHeader::Expires { .. }
+                | ErrorHeader::Vary { .. } => {}
             }
         }
         all
@@ -539,9 +632,9 @@ mod tests {
         }
     }
 
-    /// Negative — nothing a caller sent can reach a header value, because no variant accepts text.
-    /// The check is on the rendering rather than on the type, so it also covers a future variant
-    /// that took a string: a CR or an LF in a header value is response splitting.
+    /// Negative — no rendered value carries a line break: the variants that hold text hold it
+    /// validated. The check is on the rendering rather than on the type, so it also covers a future
+    /// variant that took a string: a CR or an LF in a header value is response splitting.
     #[test]
     fn no_rendered_value_can_carry_a_line_break() {
         for header in every_header() {
@@ -610,6 +703,10 @@ mod tests {
             assert!(RedirectTarget::new(hostile).is_err(), "{hostile:?} must be refused");
         }
         assert!(RedirectTarget::new(&"a".repeat(RedirectTarget::MAX_LEN + 1)).is_err());
+        for hostile in ["", " x", "x ", "a\tb", "x\r\nSet-Cookie: y", "x\n", "\u{7f}", "caf\u{e9}"] {
+            assert!(StoredHeaderValue::new(hostile).is_err(), "{hostile:?} must be refused");
+        }
+        assert!(StoredHeaderValue::new(&"a".repeat(StoredHeaderValue::MAX_LEN + 1)).is_err());
     }
 
     /// Positive — the labels accept the values the family actually produces.
@@ -619,6 +716,15 @@ mod tests {
         assert_eq!(RegionLabel::new("eu-west-1").expect("valid").as_str(), "eu-west-1");
         let target = RedirectTarget::new("https://b.s3.eu-west-1.example.com").expect("valid");
         assert_eq!(target.as_str(), "https://b.s3.eu-west-1.example.com");
+        for stored in [
+            "no-cache",
+            "max-age=3600, must-revalidate",
+            "Thu, 01 Dec 2027 16:00:00 GMT",
+            "0",
+        ] {
+            assert_eq!(StoredHeaderValue::new(stored).expect("valid").as_str(), stored);
+        }
+        assert!(StoredHeaderValue::new(&"a".repeat(StoredHeaderValue::MAX_LEN)).is_ok());
     }
 
     /// Positive — a numeric element renders as a bare decimal, with no separators and no unit.

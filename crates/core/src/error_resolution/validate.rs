@@ -85,13 +85,18 @@ pub(super) fn validate_extras(error: &HandlerError) -> Result<(), InvalidErrorCo
                     return Err(InvalidErrorContext::InvalidDetail);
                 }
             }
-            // Five facts only resolution may state. A backend that could attach them could
-            // announce a bucket lives elsewhere, or announce a deletion, on any refusal it liked.
+            // Facts only resolution may state. A backend that could attach them could announce a
+            // bucket lives elsewhere, announce a deletion, or hand caches directives, on any
+            // refusal it liked.
             ErrorHeader::BucketRegion { .. }
             | ErrorHeader::RedirectLocation { .. }
             | ErrorHeader::DeleteMarker
             | ErrorHeader::VersionId { .. }
-            | ErrorHeader::LastModified { .. } => {
+            | ErrorHeader::LastModified { .. }
+            | ErrorHeader::CacheControl { .. }
+            | ErrorHeader::ContentLocation { .. }
+            | ErrorHeader::Expires { .. }
+            | ErrorHeader::Vary { .. } => {
                 return Err(InvalidErrorContext::ReservedExtra);
             }
         }

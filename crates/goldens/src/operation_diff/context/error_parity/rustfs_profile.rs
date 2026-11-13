@@ -31,7 +31,7 @@
 
 use super::super::super::SEAM_REVISION;
 use super::super::ContextRequest;
-use super::legacy_reading::{legacy_marker, legacy_not_modified};
+use super::legacy_reading::{STORED_304, legacy_marker, legacy_not_modified};
 use super::mapping::APP_BODY_ERRORS;
 use super::matrix::{location, object_get, object_head, object_put};
 use super::s3s;
@@ -41,12 +41,16 @@ use rustfs_gateway_types::compat::OracleRevision;
 use s3s::{S3Error, S3ErrorCode};
 
 /// The fact headers a RustFS error states, compared line for line.
-const FACTS: [&str; 5] = [
+const FACTS: [&str; 9] = [
     "etag",
     "last-modified",
     "content-range",
     "x-amz-delete-marker",
     "x-amz-version-id",
+    "cache-control",
+    "content-location",
+    "expires",
+    "vary",
 ];
 
 /// A RustFS body's error, spelled as the body builds it.
@@ -169,6 +173,44 @@ fn every_not_modified_legacy_rustfs_writes_is_the_same_304() {
             bodyless(&pair.oracle);
         }
     }
+}
+
+/// The `304` legacy RustFS writes for a conditional `GET` of a versioned object stored with cache
+/// headers (rustfs/gateway#1612): the stored `Cache-Control`, `Content-Location`, `Expires` and
+/// `Vary` and the evaluated version's id beside both validators, the same on both stacks.
+#[test]
+fn a_not_modified_stating_the_stored_headers_and_its_version_is_the_same_304() {
+    let pair = same(object_get().header("if-none-match", b"\"abc\""), || legacy_not_modified(&STORED_304));
+    assert_eq!(pair.gateway.status, 304, "{pair:#?}");
+    for (name, value) in STORED_304 {
+        assert_eq!(pair.gateway.header(name), Some(value), "{name} {pair:#?}");
+    }
+    bodyless(&pair.gateway);
+}
+
+/// The head of a `304` stating only the two validators, pinned to the bytes it had before the
+/// stored headers existed: exactly `ETag` and `Last-Modified` beside what every response is
+/// stamped with.
+#[test]
+fn n_a_not_modified_stating_only_its_validators_gains_no_header() {
+    let pair = same(object_get().header("if-none-match", b"\"abc\""), || {
+        legacy_not_modified(&[("etag", "\"abc\""), ("last-modified", "Fri, 02 Jan 2026 03:04:05 GMT")])
+    });
+    let head: Vec<(&str, &[String])> = pair
+        .gateway
+        .headers
+        .iter()
+        .filter(|(name, _)| !matches!(name.as_str(), "x-amz-request-id" | "x-amz-id-2" | "date" | "server"))
+        .map(|(name, values)| (name.as_str(), values.as_slice()))
+        .collect();
+    assert_eq!(
+        head,
+        [
+            ("etag", ["\"abc\"".to_owned()].as_slice()),
+            ("last-modified", ["Fri, 02 Jan 2026 03:04:05 GMT".to_owned()].as_slice()),
+        ],
+        "{pair:#?}"
+    );
 }
 
 /// A `416` with no `Content-Range` and only `Code` and `Message` in its document, on both stacks;

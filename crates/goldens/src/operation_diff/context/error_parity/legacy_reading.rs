@@ -35,6 +35,18 @@ use s3s::{S3Error, S3ErrorCode};
 /// The `ETag` and `Last-Modified` legacy RustFS writes on the `304` of a conditional `GET`.
 const VALIDATORS: [(&str, &str); 2] = [("etag", "\"abc\""), ("last-modified", MARKER_WRITTEN)];
 
+/// Everything legacy RustFS's `not_modified_error` writes on the `304` of a versioned object stored
+/// with cache headers (`rustfs/src/storage/ecfs_extend.rs` on rustfs/rustfs `59bc6d7c9`).
+pub(super) const STORED_304: [(&str, &str); 7] = [
+    ("etag", "\"abc\""),
+    ("last-modified", MARKER_WRITTEN),
+    ("cache-control", "max-age=3600, must-revalidate"),
+    ("content-location", "/bucket/photos/a.jpg"),
+    ("expires", "Thu, 01 Dec 2027 16:00:00 GMT"),
+    ("vary", "Origin, Accept-Encoding"),
+    ("x-amz-version-id", "3HL4kqtJlcpXroDTDmJ+rmSpXd3dIbrHY"),
+];
+
 /// `lines` as the error's whole header map, with no `Content-Type` re-added.
 fn bare(code: S3ErrorCode, lines: &[(&'static str, &'static str)]) -> S3Error {
     let mut headers = HeaderMap::new();
@@ -77,6 +89,11 @@ fn legacy(code: ErrorCode, message: Option<&str>) -> LegacyRefusal {
         last_modified: None,
         delete_marker: None,
         complete_length: None,
+        cache_control: None,
+        content_location: None,
+        expires: None,
+        vary: None,
+        version_id: None,
     }
 }
 
@@ -101,6 +118,24 @@ fn the_three_not_modified_answers_legacy_rustfs_writes_are_read_with_exactly_the
     let head = S3Error::new(S3ErrorCode::NotModified);
     let sentence = head.message().map(str::to_owned);
     assert_eq!(read(&head), Ok(legacy(ErrorCode::NOT_MODIFIED, sentence.as_deref())));
+}
+
+/// The stored headers and the evaluated version's id cross as written; a `null` version too.
+#[test]
+fn a_not_modified_is_read_with_its_stored_headers_and_evaluated_version() {
+    let stored = LegacyRefusal {
+        etag: Some(ETag::new("abc").expect("a tag")),
+        last_modified: Some(MARKER_WRITTEN_SECONDS),
+        cache_control: Some("max-age=3600, must-revalidate".to_owned()),
+        content_location: Some("/bucket/photos/a.jpg".to_owned()),
+        expires: Some("Thu, 01 Dec 2027 16:00:00 GMT".to_owned()),
+        vary: Some("Origin, Accept-Encoding".to_owned()),
+        version_id: Some("3HL4kqtJlcpXroDTDmJ+rmSpXd3dIbrHY".to_owned()),
+        ..legacy(ErrorCode::NOT_MODIFIED, Some("Not Modified"))
+    };
+    assert_eq!(read(&legacy_not_modified(&STORED_304)), Ok(stored));
+    let null = read(&legacy_not_modified(&[("x-amz-version-id", "null")])).map(|refusal| refusal.version_id);
+    assert_eq!(null, Ok(Some("null".to_owned())));
 }
 
 #[test]
@@ -229,6 +264,11 @@ fn n_a_header_its_code_does_not_state_is_refused() {
         carrying(S3ErrorCode::NoSuchBucket, &[("x-amz-delete-marker", "true")]),
         carrying(S3ErrorCode::NoSuchVersion, &[("x-amz-delete-marker", "true"), ("x-amz-version-id", "v")]),
         carrying(S3ErrorCode::AccessDenied, &[("x-custom", "1")]),
+        legacy_not_modified(&[("etag", "\"abc\""), ("content-language", "en")]),
+        carrying(S3ErrorCode::InvalidRange, &[("cache-control", "no-cache")]),
+        carrying(S3ErrorCode::PreconditionFailed, &[("vary", "Origin")]),
+        carrying(S3ErrorCode::AccessDenied, &[("expires", "0")]),
+        carrying(S3ErrorCode::NoSuchBucket, &[("content-location", "/b")]),
         carrying(
             S3ErrorCode::NoSuchKey,
             &[
@@ -277,6 +317,37 @@ fn n_a_validator_spelled_otherwise_than_the_gateway_writes_it_is_refused() {
         let error = legacy_not_modified(&[("etag", "\"abc\""), ("last-modified", date)]);
         assert_eq!(read(&error), Err("last-modified"), "{date:?}");
     }
+}
+
+/// Negative — a stored header or version id the gateway could not write back as the same bytes is
+/// refused by that header: empty, edged by whitespace, a tab, a byte past visible ASCII, repeated.
+#[test]
+fn n_a_stored_header_the_gateway_cannot_write_alike_is_refused_by_that_header() {
+    for name in ["cache-control", "content-location", "expires", "vary", "x-amz-version-id"] {
+        let mut rows = Vec::new();
+        for value in ["", " lead", "trail ", "a\tb"] {
+            let mut error = legacy_not_modified(&[]);
+            let mut headers = HeaderMap::new();
+            headers.insert(HeaderName::from_static(name), HeaderValue::from_static(value));
+            error.set_headers(headers);
+            rows.push(error);
+        }
+        let mut high = legacy_not_modified(&[]);
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            HeaderName::from_static(name),
+            HeaderValue::from_bytes(b"caf\xe9").expect("an obs-text value"),
+        );
+        high.set_headers(headers);
+        rows.push(high);
+        rows.push(legacy_not_modified(&[(name, "a"), (name, "a")]));
+        for error in &rows {
+            assert_eq!(read(error), Err(name), "{error:?}");
+        }
+    }
+    // A version id with a space inside is no version id the gateway writes; other values may.
+    assert_eq!(read(&legacy_not_modified(&[("x-amz-version-id", "a b")])), Err("x-amz-version-id"));
+    assert!(read(&legacy_not_modified(&[("vary", "Origin, Accept")])).is_ok());
 }
 
 #[test]

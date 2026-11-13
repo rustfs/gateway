@@ -208,9 +208,14 @@ mod tests {
     /// `rustfs_gateway_core::ErrorHeader` with a header the framework stamps goes red here.
     #[test]
     fn no_backend_settable_header_is_a_reserved_one() {
+        let stored = || rustfs_gateway_core::StoredHeaderValue::new("x").expect("a stored value");
         for header in [
             rustfs_gateway_core::ErrorHeader::UnsatisfiedRange { complete_length: 1 },
             rustfs_gateway_core::ErrorHeader::RetryAfter { seconds: 1 },
+            rustfs_gateway_core::ErrorHeader::CacheControl { value: stored() },
+            rustfs_gateway_core::ErrorHeader::ContentLocation { value: stored() },
+            rustfs_gateway_core::ErrorHeader::Expires { value: stored() },
+            rustfs_gateway_core::ErrorHeader::Vary { value: stored() },
         ] {
             assert!(!is_reserved(&header.name()), "{}", header.name());
         }

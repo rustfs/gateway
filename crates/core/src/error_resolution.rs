@@ -317,7 +317,7 @@ impl ErrorContext {
             ErrorCase::CurrentDeleteMarker(visibility, key, _, at) => {
                 Self(ErrorCase::CurrentDeleteMarker(visibility, key, None, at))
             }
-            ErrorCase::Legacy(refusal) => Self(ErrorCase::Legacy(refusal.without_marker_version())),
+            ErrorCase::Legacy(refusal) => Self(ErrorCase::Legacy(refusal.without_version_id())),
             other => Self(other),
         }
     }

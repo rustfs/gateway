@@ -44,6 +44,15 @@
 //! `Content-Range` (§15.5.17 asks for the current length), a read of a current delete marker with
 //! no `Last-Modified`, and messages of any length. Kept so RustFS clients see no change; the
 //! intended future behaviour is the typed contexts' AWS answers.
+//!
+//! # What a `304` repeats (rustfs/gateway#1612)
+//!
+//! RFC 9110 §15.4.5 (<https://www.rfc-editor.org/rfc/rfc9110#section-15.4.5>) has a `304` carry
+//! each of `Cache-Control`, `Content-Location`, `Date`, `ETag`, `Expires` and `Vary` the `200`
+//! would have carried. Legacy RustFS writes the stored four and the evaluated version's
+//! `x-amz-version-id` beside its validators (`not_modified_error` in
+//! `rustfs/src/storage/ecfs_extend.rs` on rustfs/rustfs `59bc6d7c9`), so a refusal states them when
+//! given; `Date` is the framework's stamp on every response.
 
 use std::borrow::Cow;
 
@@ -52,7 +61,7 @@ use rustfs_gateway_types::{ETag, ErrorCode, is_xml_representable};
 
 use super::validate::validate_code;
 use super::{BodyPolicy, ErrorResolution, InvalidErrorContext, MissingObject};
-use crate::{ErrorHeader, HttpDate, VersionIdLabel};
+use crate::{ErrorHeader, HttpDate, StoredHeaderValue, VersionIdLabel};
 
 /// The fact headers a legacy RustFS error carried, each already read from the error's own
 /// header map.
@@ -70,6 +79,23 @@ pub struct LegacyRustfsFacts {
     pub delete_marker: Option<String>,
     /// The complete length a `416` states as `Content-Range: bytes */<length>`.
     pub complete_length: Option<u64>,
+    /// The stored `Cache-Control` a `304` repeats.
+    pub cache_control: Option<String>,
+    /// The stored `Content-Location` a `304` repeats.
+    pub content_location: Option<String>,
+    /// The stored `Expires` a `304` repeats, as stored: its date grammar is not checked.
+    pub expires: Option<String>,
+    /// The stored `Vary` a `304` repeats.
+    pub vary: Option<String>,
+    /// The version id of the version a `304` evaluated, stated as `x-amz-version-id`.
+    ///
+    /// Not [`Self::delete_marker`]: that is the id of a delete marker a `NoSuchKey` or
+    /// `MethodNotAllowed` read found and is stated with `x-amz-delete-marker: true`; this is the id of
+    /// the version whose validators a `NotModified` matched, stated alone. The codes they belong to
+    /// are disjoint, so a refusal states at most one `x-amz-version-id`. Both are withheld when the
+    /// refusal is answered for a copy source, for the same reason (see
+    /// `LegacyRustfsRefusal::without_version_id`).
+    pub version_id: Option<String>,
 }
 
 /// One refusal exactly as legacy RustFS writes it; see the module documentation.
@@ -80,8 +106,11 @@ pub struct LegacyRustfsRefusal {
     etag: Option<ETag>,
     last_modified: Option<HttpDate>,
     delete_marker: bool,
+    /// The marker's version id on a marker read, the evaluated version's on a `304`.
     version_id: Option<VersionIdLabel>,
     complete_length: Option<u64>,
+    /// The stored headers a `304` repeats, in emission order.
+    stored: Vec<ErrorHeader>,
 }
 
 impl LegacyRustfsRefusal {
@@ -98,9 +127,11 @@ impl LegacyRustfsRefusal {
     /// bound: legacy RustFS writes a message whole); [`InvalidErrorContext::InvalidDetail`] for a
     /// fact its code does not state — an entity tag on anything but `NotModified`, a complete length
     /// on anything but `InvalidRange`, a delete marker on anything but `NoSuchKey` or
-    /// `MethodNotAllowed`, an instant on anything but `NotModified` or a delete-marker read;
+    /// `MethodNotAllowed`, an instant on anything but `NotModified` or a delete-marker read, a stored
+    /// header or an evaluated version on anything but `NotModified` — or a stored header value a
+    /// header cannot carry ([`StoredHeaderValue::new`]);
     /// [`InvalidErrorContext::InvalidVersionId`] and [`InvalidErrorContext::InvalidLastModified`]
-    /// for a marker version id or an instant the headers cannot carry.
+    /// for a marker or evaluated version id or an instant the headers cannot carry.
     pub fn new(code: ErrorCode, message: Option<String>, facts: LegacyRustfsFacts) -> Result<Self, InvalidErrorContext> {
         validate_code(&code)?;
         let status = code.default_status();
@@ -117,7 +148,14 @@ impl LegacyRustfsRefusal {
             last_modified,
             delete_marker,
             complete_length,
+            cache_control,
+            content_location,
+            expires,
+            vary,
+            version_id: evaluated,
         } = facts;
+        let repeated =
+            cache_control.is_some() || content_location.is_some() || expires.is_some() || vary.is_some() || evaluated.is_some();
         let marker_code = matches!(
             (code.as_str(), status),
             ("NoSuchKey", StatusCode::NOT_FOUND) | ("MethodNotAllowed", StatusCode::METHOD_NOT_ALLOWED)
@@ -127,12 +165,33 @@ impl LegacyRustfsRefusal {
             || (complete_length.is_some() && !range_code)
             || (delete_marker.is_some() && !marker_code)
             || (last_modified.is_some() && !(not_modified || delete_marker.is_some()))
+            || (repeated && !not_modified)
         {
             return Err(InvalidErrorContext::InvalidDetail);
         }
+        let marked = delete_marker.is_some();
         let version_id = delete_marker
+            .or(evaluated)
             .map(|version_id| VersionIdLabel::new(&version_id).map_err(|_| InvalidErrorContext::InvalidVersionId))
             .transpose()?;
+        let stored_header = |value: Option<String>, header: fn(StoredHeaderValue) -> ErrorHeader| {
+            value
+                .map(|text| {
+                    StoredHeaderValue::new(&text)
+                        .map(header)
+                        .map_err(|_| InvalidErrorContext::InvalidDetail)
+                })
+                .transpose()
+        };
+        let stored = [
+            stored_header(cache_control, |value| ErrorHeader::CacheControl { value })?,
+            stored_header(content_location, |value| ErrorHeader::ContentLocation { value })?,
+            stored_header(expires, |value| ErrorHeader::Expires { value })?,
+            stored_header(vary, |value| ErrorHeader::Vary { value })?,
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
         let last_modified = last_modified
             .map(|seconds| HttpDate::from_unix_seconds(seconds).map_err(|_| InvalidErrorContext::InvalidLastModified))
             .transpose()?;
@@ -141,9 +200,10 @@ impl LegacyRustfsRefusal {
             message: message.map(Cow::Owned),
             etag,
             last_modified,
-            delete_marker: version_id.is_some(),
+            delete_marker: marked,
             version_id,
             complete_length,
+            stored,
         })
     }
 
@@ -164,9 +224,11 @@ impl LegacyRustfsRefusal {
         }
     }
 
-    /// The refusal a copy answers for its source: the marker's version id withheld, as the typed
-    /// marker contexts withhold it (`x-amz-version-id` on a copy names the version it wrote).
-    pub(super) fn without_marker_version(mut self) -> Self {
+    /// The refusal a copy answers for its source: every version id withheld, as the typed marker
+    /// contexts withhold the marker's (`x-amz-version-id` on a copy names the version it wrote). The
+    /// evaluated version of a `304` is the source's too, so the same rule withholds it; the marker
+    /// flag, the instant, the validators and the stored headers stay.
+    pub(super) fn without_version_id(mut self) -> Self {
         self.version_id = None;
         self
     }
@@ -188,6 +250,7 @@ impl LegacyRustfsRefusal {
         if let Some(complete_length) = self.complete_length {
             headers.push(ErrorHeader::UnsatisfiedRange { complete_length });
         }
+        headers.extend(self.stored);
         ErrorResolution {
             status,
             code: Some(self.code),

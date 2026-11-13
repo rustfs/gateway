@@ -451,6 +451,11 @@ pub(crate) fn legacy_adapter_error(error: &s3s::S3Error) -> HandlerError {
         last_modified: legacy.last_modified,
         delete_marker: legacy.delete_marker,
         complete_length: legacy.complete_length,
+        cache_control: legacy.cache_control,
+        content_location: legacy.content_location,
+        expires: legacy.expires,
+        vary: legacy.vary,
+        version_id: legacy.version_id,
     };
     match LegacyRustfsRefusal::new(legacy.code, legacy.message, facts) {
         Ok(refusal) => HandlerErrorContext::legacy_rustfs(refusal).into(),
