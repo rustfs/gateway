@@ -12,6 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! Responsible for: verifying table sharing and backend isolation for generated routes.
+//! NOT responsible for: route precedence or custom route validation.
+//! Upstream: the registration test backend and the public router builder.
+//! Downstream: the core integration test harness.
+
 use super::*;
 
 /// Positive — the same process holds two routers over two backends, and they answer differently.
