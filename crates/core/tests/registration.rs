@@ -30,6 +30,9 @@
 //! Written against the public API only, so everything here is also a worked example of what a P5
 //! operation family has to do.
 
+#[path = "registration/shared_tables.rs"]
+mod shared_tables;
+
 use crate::support;
 
 use std::future::Future;
@@ -330,51 +333,6 @@ fn an_erased_registration_still_calls_the_typed_handler() {
         Some("eu-central-1")
     );
     assert_eq!(fs.calls.load(Ordering::Relaxed), 1);
-}
-
-/// Positive — the same process holds two routers over two backends, and they answer differently.
-///
-/// This is the arrangement a process-global registry cannot express, and the reason `inventory` is
-/// banned (ADR-0003): RustFS runs a fake target beside the production backend in one process.
-#[test]
-fn two_backends_coexist_in_one_process() {
-    let production = Fs::new("us-east-1");
-    let fake = Fs::new("test-region");
-    let one = RouterBuilder::new()
-        .handle::<GetBucketLocation, _>(Arc::clone(&production))
-        .build()
-        .expect("one");
-    let two = RouterBuilder::new()
-        .handle::<GetBucketLocation, _>(Arc::clone(&fake))
-        .build()
-        .expect("two");
-
-    assert!(
-        std::ptr::eq(one.table(), two.table()),
-        "fixed routes are shared across backend registrations"
-    );
-    assert!(
-        std::ptr::eq(one.compiled(), two.compiled()),
-        "fixed compiled routes are shared across backend registrations"
-    );
-
-    let region_of = |router: &rustfs_gateway_core::Router| {
-        let invocation = router
-            .registry()
-            .authorize_and_invoke_no_derived::<GetBucketLocation>(GetBucketLocationInput::default(), sse_proof())
-            .expect("input authorization succeeds")
-            .expect("registered");
-        block_on(invocation)
-            .expect("answered")
-            .output()
-            .expect("a settled answer")
-            .location_constraint
-            .as_ref()
-            .map(|region| region.as_str().to_owned())
-    };
-
-    assert_eq!(region_of(&one).as_deref(), Some("us-east-1"));
-    assert_eq!(region_of(&two).as_deref(), Some("test-region"));
 }
 
 /// Positive — a third-party operation registers beside the AWS ones and is invoked the same way.
