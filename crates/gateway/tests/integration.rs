@@ -71,6 +71,8 @@ mod committed_head_runtime;
 mod compat_aliases;
 #[path = "compile_fail.rs"]
 mod compile_fail;
+#[path = "copy_source_arns.rs"]
+mod copy_source_arns;
 #[path = "copy_source_reachability.rs"]
 mod copy_source_reachability;
 #[path = "cors_runtime.rs"]

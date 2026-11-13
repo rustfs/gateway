@@ -50,7 +50,7 @@ use crate::trace::Identification;
 impl ViewPolicy {
     /// Adds the name of every legacy reading this policy's state selects to `into`.
     pub(crate) fn legacy_switches(&self, into: &mut BTreeSet<&'static str>) {
-        let readings: [(bool, &'static str); 36] = [
+        let readings: [(bool, &'static str); 37] = [
             (self.checksum_waiver.waives_every_operation(), "accept_all_checksum_omissions"),
             (self.empty_uploads_without_length, "accept_empty_uploads_without_content_length"),
             (self.body_literals, "accept_minio_body_literals"),
@@ -116,6 +116,7 @@ impl ViewPolicy {
                 self.plaintext_customer_keys == PlaintextCustomerKeys::BeforeRouting,
                 "refuse_plaintext_customer_keys_before_routing",
             ),
+            (self.copy_source_arns_unsupported, "refuse_copy_source_arns_as_not_implemented"),
             (self.strict_date_conditions, "refuse_unreadable_date_conditions"),
             (
                 self.sigv4_header_guard == SigV4HeaderGuard::LegacyRustfs,

@@ -70,6 +70,7 @@
 //! | `read_checksums_as_legacy_rustfs` | claims read as the storage reader reads them; the SDK algorithm header not read | "trailer algorithm ignores `x-amz-sdk-checksum-algorithm`" |
 //! | `read_empty_headers_as_absent` | an empty optional header claims nothing | "empty request headers read as absent" |
 //! | `read_request_documents_as_rustfs` | request documents refused by shape with `MalformedXML` | unregistered (rustfs/gateway#1078) |
+//! | `refuse_copy_source_arns_as_not_implemented` | an access-point or Outposts ARN copy source `501` before input authorization | unregistered (ADR-0045, rustfs/gateway#1609) |
 //! | `refuse_plaintext_customer_keys_before_routing` | a customer key over cleartext refused before routing, copy source included | "SSE-C TLS gate" (R11) |
 //! | `refuse_unreadable_date_conditions` | a conditional date in one spelling, the rest refused | "conditional dates read strictly" (R14) |
 //! | `refuse_unsigned_amz_headers_before_routing` | a swapped algorithm token, an unreadable header or an unsigned `x-amz-*` refused before routing | "signature verification as legacy" (GW-SIG) |
@@ -201,6 +202,8 @@ impl ServiceBuilder {
             .refuse_plaintext_customer_keys_before_routing()
             // RustFS refuses an anonymous aws-chunked upload rather than decoding it (#1060).
             .leave_anonymous_streaming_payloads_undecoded()
+            // RustFS answers an ARN copy source `501` before its source policy is asked (ADR-0045).
+            .refuse_copy_source_arns_as_not_implemented()
             // RustFS signs every presigned request over `UNSIGNED-PAYLOAD` (rustfs/rustfs#2379),
             // and a base64 header-signed digest as its hex (rustfs/gateway#1130).
             .sign_presigned_payloads_as_unsigned()
@@ -446,6 +449,10 @@ mod tests {
         ("read_checksums_as_legacy_rustfs", ServiceBuilder::read_checksums_as_legacy_rustfs),
         ("read_empty_headers_as_absent", ServiceBuilder::read_empty_headers_as_absent),
         ("read_request_documents_as_rustfs", ServiceBuilder::read_request_documents_as_rustfs),
+        (
+            "refuse_copy_source_arns_as_not_implemented",
+            ServiceBuilder::refuse_copy_source_arns_as_not_implemented,
+        ),
         (
             "refuse_plaintext_customer_keys_before_routing",
             ServiceBuilder::refuse_plaintext_customer_keys_before_routing,

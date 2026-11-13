@@ -98,6 +98,7 @@ use rustfs_gateway_http::{HeaderView, WireReject};
 use rustfs_gateway_sig::PayloadMode;
 
 mod checksum_declarations;
+mod copy_source_arns;
 mod date_conditions;
 pub(crate) mod header_signatures;
 mod legacy_checksums;
@@ -221,6 +222,8 @@ pub(crate) struct ViewPolicy {
     pub(crate) presigned_urls: presigned_urls::PresignedRefusals,
     /// Which action a request naming one object version is asked (`super::version_actions`).
     pub(crate) version_actions: super::version_actions::VersionActions,
+    /// Whether an ARN Copy source is refused before resource derivation (`copy_source_arns`).
+    copy_source_arns_unsupported: bool,
     /// Whether the RustFS-waivable header permissions (tagging, ACL) are waived
     /// (`super::version_actions`, `ServiceBuilder::authorize_header_permissions_as_legacy_rustfs`).
     pub(crate) waive_rustfs_header_permissions: bool,
@@ -292,6 +295,12 @@ impl ViewPolicy {
             .apply(operation, meta)
             .with_document_reading(self.document_reading);
         let meta = self.buffered_ceiling.apply(meta);
+        // The core classifies the source of the Copy operations only, so the mark is inert elsewhere.
+        let meta = if self.copy_source_arns_unsupported {
+            meta.with_copy_source_arns_unsupported()
+        } else {
+            meta
+        };
         // Legacy-compat (rustfs/backlog#2684): legacy RustFS stores an upload that carries no
         // `Content-Length` and whose transport ended it empty as a zero-length object, where AWS
         // answers `411 MissingContentLength`. Kept so the clients RustFS serves today keep

@@ -83,6 +83,7 @@ registered before it is removed.
 | `read_checksums_as_legacy_rustfs` | claims read as the storage reader reads them; `x-amz-sdk-checksum-algorithm` not read | "trailer algorithm ignores `x-amz-sdk-checksum-algorithm`" | read the SDK algorithm header as the core does |
 | `read_empty_headers_as_absent` | an empty optional header claims nothing | "empty request headers read as absent" | an empty header is a value; an empty expected owner is refused |
 | `read_request_documents_as_rustfs` | request documents refused by shape with `MalformedXML` | unregistered (rustfs/gateway#1078) | register; then the core's document reading |
+| `refuse_copy_source_arns_as_not_implemented` | an access-point or Outposts ARN copy source `501` before input authorization (ADR-0045) | unregistered (rustfs/gateway#1609) | serve ARN sources once access points and Outposts are implemented |
 | `refuse_plaintext_customer_keys_before_routing` | a customer key over cleartext refused before routing, copy source included, in RustFS's words | "SSE-C TLS gate" (R11) | the core's gate after routing |
 | `refuse_unreadable_date_conditions` | a conditional date in one spelling, the rest refused with `400` | "conditional dates read strictly" (R14) | ignore an unreadable date as RFC 9110 does |
 | `refuse_unsigned_amz_headers_before_routing` | a swapped algorithm token, an unreadable SigV4 header or an unsigned `x-amz-*` header refused before routing | "signature verification as legacy" (GW-SIG) | strict SigV4 semantics |

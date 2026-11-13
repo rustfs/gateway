@@ -238,12 +238,14 @@ async fn n_empty_copy_versions_keep_backend_refusal_after_authorization() {
                     read(&ordinary, DESTINATION).await,
                     part_count(&ordinary, DESTINATION, &id).await,
                 ));
-                expected.push((
-                    if deny { 403 } else { 400 },
-                    Some(if deny { "AccessDenied" } else { "InvalidArgument" }.to_owned()),
-                    ORIGINAL.to_vec(),
-                    1,
-                ));
+                // The profile refuses an ARN source before source authorization (ADR-0045,
+                // rustfs/gateway#1609), so only a bucket source reaches the backend's refusal.
+                let (status, code) = match (source.starts_with("arn:"), deny) {
+                    (true, _) => (501, "NotImplemented"),
+                    (false, true) => (403, "AccessDenied"),
+                    (false, false) => (400, "InvalidArgument"),
+                };
+                expected.push((status, Some(code.to_owned()), ORIGINAL.to_vec(), 1));
             }
         }
     }

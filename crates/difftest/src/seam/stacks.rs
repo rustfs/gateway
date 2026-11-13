@@ -224,6 +224,7 @@ impl GatewaySeam {
             .read_empty_headers_as_absent()
             .authorize_versions_as_legacy_rustfs()
             .authorize_header_permissions_as_legacy_rustfs()
+            .refuse_copy_source_arns_as_not_implemented()
             // RustFS's default transport posture, TLS not required for customer keys: no key is
             // refused over cleartext, so every request reaches the hand-over this diff measures.
             // `compat/sut` runs the TLS-required posture, where the gate answers before routing
