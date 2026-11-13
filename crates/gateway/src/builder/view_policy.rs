@@ -104,6 +104,8 @@ pub(crate) mod header_signatures;
 mod legacy_checksums;
 pub(crate) mod presigned_urls;
 mod profile_census;
+#[cfg(test)]
+mod rustfs_listings_tests;
 pub use self::checksum_declarations::LEGACY_CHECKSUM_DECLARATION_OPERATIONS;
 pub use self::date_conditions::STRICT_DATE_CONDITION_HEADERS;
 
@@ -129,9 +131,16 @@ pub const BODY_LITERAL_OPERATIONS: [&str; 2] = ["PutBucketVersioning", "PutObjec
 /// rustfs/rustfs@1e7065101d: ListObjectsV2 encodes only each key and each rolled-up prefix
 /// (`rustfs/src/storage/s3_api/bucket.rs:296-333`); ListObjects inherits those and encodes
 /// `NextMarker` (`:361-411`); ListObjectVersions encodes every key-shaped member (`:212-279`); all
-/// three echo the request's value (`:267`, `:353`, `:92`). ListMultipartUploads drops the
-/// parameter and neither encodes nor echoes (`rustfs/src/app/multipart_usecase.rs:1519-1527`,
-/// `rustfs/src/storage/s3_api/multipart.rs:164-205`), and ListParts has no parameter at all.
+/// three echo the request's value (`:267`, `:353`, `:92`). ListParts has no parameter at all.
+///
+/// ListMultipartUploads, <https://github.com/rustfs/rustfs/commit/182b2bfe9>: from release 1.0.2 on,
+/// RustFS answers `encoding-type=url` there by percent-encoding `Prefix`, `Delimiter`, `KeyMarker`,
+/// `NextKeyMarker`, each upload's key and each common prefix one `/`-separated segment at a time,
+/// and echoes the value it was sent (rustfs/gateway#1614).
+///
+/// A nested member is named by its shape, as the generated encoder asks for it
+/// (`MultipartUpload.Key`), not by the IR's list-member spelling (`Uploads.Key`), which the encoder
+/// never asks for.
 pub const RUSTFS_LISTING_ENCODINGS: [(&str, RustFsListing); 5] = [
     (
         "ListObjects",
@@ -153,7 +162,20 @@ pub const RUSTFS_LISTING_ENCODINGS: [(&str, RustFsListing); 5] = [
             true,
         ),
     ),
-    ("ListMultipartUploads", RustFsListing::new(&[], false)),
+    (
+        "ListMultipartUploads",
+        RustFsListing::new(
+            &[
+                "Prefix",
+                "Delimiter",
+                "KeyMarker",
+                "NextKeyMarker",
+                "MultipartUpload.Key",
+                "CommonPrefix.Prefix",
+            ],
+            true,
+        ),
+    ),
     ("ListParts", RustFsListing::new(&[], false)),
 ];
 

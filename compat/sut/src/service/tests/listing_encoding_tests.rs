@@ -146,10 +146,10 @@ async fn n_list_object_versions_encodes_every_key_shaped_member_with_slashes_lit
     }
 }
 
-/// Negative — the multipart listings are never encoded and never echo, as legacy RustFS writes
-/// them.
+/// Negative — ListMultipartUploads encodes its key-shaped members, `/` literal, and echoes, as
+/// RustFS does since 1.0.2 (rustfs/gateway#1614); ListParts takes no `encoding-type` and stays raw.
 #[tokio::test]
-async fn n_multipart_listings_are_written_raw_without_an_echo() {
+async fn n_list_multipart_uploads_encodes_with_slashes_literal_and_list_parts_stays_raw() {
     let root = TestRoot::new();
     let service = with_objects(&root, &[]).await;
     let created = exchange(
@@ -161,9 +161,14 @@ async fn n_multipart_listings_are_written_raw_without_an_echo() {
     let upload_id = element(&body_of(&created), "UploadId").expect("an upload id").to_owned();
 
     let uploads = list(&service, "/encoded?uploads&prefix=dir%2F&encoding-type=url").await;
-    assert!(uploads.contains("<Key>dir/with space.txt</Key>"), "{uploads}");
-    assert!(uploads.contains("<Prefix>dir/</Prefix>"), "{uploads}");
-    assert!(!uploads.contains("<EncodingType>"), "{uploads}");
+    for expected in [
+        "<Key>dir/with%20space.txt</Key>",
+        "<Prefix>dir/</Prefix>",
+        "<EncodingType>url</EncodingType>",
+    ] {
+        assert!(uploads.contains(expected), "missing {expected}: {uploads}");
+    }
+    assert!(!uploads.contains("%2F"), "{uploads}");
     let parts = list(&service, &format!("/encoded/dir/with%20space.txt?uploadId={upload_id}&encoding-type=url")).await;
     assert!(parts.contains("<Key>dir/with space.txt</Key>"), "{parts}");
 }

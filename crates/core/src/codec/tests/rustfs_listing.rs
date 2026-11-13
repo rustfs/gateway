@@ -31,7 +31,8 @@ mod absent_members;
 /// launcher's end-to-end suite holds the two together.
 const V2: RustFsListing = RustFsListing::new(&["Object.Key", "CommonPrefix.Prefix"], true);
 const V1: RustFsListing = RustFsListing::new(&["Object.Key", "CommonPrefix.Prefix", "NextMarker"], true);
-const MULTIPART: RustFsListing = RustFsListing::new(&[], false);
+/// A table that encodes and echoes nothing, as ListParts' does.
+const NOTHING: RustFsListing = RustFsListing::new(&[], false);
 
 fn v2_listing() -> dto::ListObjectsV2Output {
     let mut output = one_entry_listing("dir/with space.txt", "b28354b543375bfa94dabaeda722927f");
@@ -266,11 +267,11 @@ fn n_a_value_xml_cannot_carry_still_forces_the_model_encoding() {
 }
 
 #[test]
-fn n_a_listing_legacy_never_encodes_is_written_raw_without_an_echo() {
+fn n_a_table_that_encodes_nothing_writes_the_listing_raw_without_an_echo() {
     let request = accepted("GET", "/conf-list?uploads&encoding-type=url", &[]);
     let view = MetaView::of(&request, TargetKind::Bucket)
         .expect("view")
-        .with_rustfs_listing_encoding(MULTIPART);
+        .with_rustfs_listing_encoding(NOTHING);
     let output = dto::ListMultipartUploadsOutput {
         bucket: BucketName::new("conf-list").expect("bucket"),
         prefix: Some("dir/a b/".to_owned()),

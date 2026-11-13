@@ -27,15 +27,14 @@
 //!
 //! Legacy RustFS encodes a listing only when `encoding-type` is exactly `url`, and then only some
 //! of the members AWS encodes: `Contents/Key` and `CommonPrefixes/Prefix` on ListObjectsV2,
-//! those and `NextMarker` on ListObjects, every key-shaped member on ListObjectVersions, and
-//! nothing on ListMultipartUploads or ListParts. Each encoded value is split on `/`, each segment
+//! those and `NextMarker` on ListObjects, every key-shaped member on ListObjectVersions and
+//! ListMultipartUploads, and nothing on ListParts. Each encoded value is split on `/`, each segment
 //! is percent-encoded (every byte outside `A-Z a-z 0-9 - . _ ~`, uppercase hex) and the segments
 //! are joined with `/` again, so `/` stays literal. The echo is the request's own `encoding-type`
-//! value on the three object listings and absent on the other two. It never encodes a member the
+//! value on the four listings that take one and absent on ListParts. It never encodes a member the
 //! request did not ask for. (rustfs/rustfs@1e7065101d `rustfs/src/storage/s3_api/bucket.rs:44-61`,
-//! `:212-279`, `:282-359`, `:361-411`; ListMultipartUploads drops `encoding-type` at
-//! `rustfs/src/app/multipart_usecase.rs:1519-1527` and builds its listing raw at
-//! `rustfs/src/storage/s3_api/multipart.rs:164-205`.)
+//! `:212-279`, `:282-359`, `:361-411`; ListMultipartUploads since
+//! <https://github.com/rustfs/rustfs/commit/182b2bfe9>, rustfs/gateway#1614.)
 //!
 //! The generated encoder makes one decision per response
 //! ([`super::value::url_encoding_for_response`]) and then asks it once per encodable member,

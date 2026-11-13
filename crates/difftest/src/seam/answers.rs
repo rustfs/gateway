@@ -148,36 +148,9 @@ pub(crate) struct AnswerFinding {
     pub(crate) reason: &'static str,
 }
 
-const fn finding(
-    id: &'static str,
-    operation: &'static str,
-    item: &'static str,
-    gateway: &'static str,
-    legacy: &'static str,
-    reason: &'static str,
-) -> AnswerFinding {
-    AnswerFinding {
-        id,
-        operation,
-        item,
-        gateway,
-        legacy,
-        reason,
-    }
-}
-
-/// Every answer finding, by id.
-pub(crate) const ANSWER_FINDINGS: &[AnswerFinding] = &[finding(
-    "sa-0001",
-    "ListMultipartUploads",
-    "body ListMultipartUploadsResult/EncodingType",
-    "<absent>",
-    "<EncodingType>",
-    "The RustFS listing rule (url_encode_listings_like_rustfs, #1088) echoes no EncodingType on a multipart listing, as \
-         legacy RustFS answers: its multipart listing never sets the member (rustfs/rustfs e870a6d25 \
-         rustfs/src/storage/s3_api/multipart.rs:165-206). Only the encode matrix's sample sets it, so no answer RustFS gives \
-         loses it; a legacy output that did set it would be written without it.",
-)];
+/// Every answer finding, by id. Empty since ListMultipartUploads echoes `EncodingType` under the
+/// RustFS profile (rustfs/gateway#1614), which retired `sa-0001`.
+pub(crate) const ANSWER_FINDINGS: &[AnswerFinding] = &[];
 
 /// Every output member path no row can set, by operation, with the reason.
 pub(crate) const UNWRITTEN_PATHS: &[(&str, &str, &str)] = &[];
