@@ -159,22 +159,23 @@ pub fn parse_i32(field: &'static str, value: &str) -> Result<i32, ConversionErro
     value.parse().map_err(|_| refusal(field, "not a 32-bit integer"))
 }
 
-/// A bucket name an s3s answer carries, as the gateway name.
+/// A bucket name an s3s value carries (an input s3s admitted, or an answer naming a stored bucket),
+/// as the gateway name, under the bucket floor alone: the naming grammar is the host's.
 ///
 /// # Errors
 ///
-/// A name the gateway bucket grammar rejects.
+/// A name below the floor, reported as [`NameRefusal::BucketName`](crate::compat::NameRefusal).
 pub fn bucket_name(field: &'static str, value: String) -> Result<BucketName, ConversionError> {
-    BucketName::new(value).map_err(|_| refusal(field, "not a bucket name the gateway can write"))
+    crate::compat::names::bucket_name(field, &value)
 }
 
-/// An object key an s3s answer carries, as the gateway key.
+/// An object key an s3s value carries, as the gateway key.
 ///
 /// # Errors
 ///
-/// A key the gateway key grammar rejects.
+/// A key below the key floor, reported as [`NameRefusal::ObjectKey`](crate::compat::NameRefusal).
 pub fn object_key(field: &'static str, value: String) -> Result<ObjectKey, ConversionError> {
-    ObjectKey::new(value).map_err(|_| refusal(field, "not an object key the gateway can write"))
+    crate::compat::names::object_key(field, value)
 }
 
 /// The per-algorithm s3s checksum member for `algorithm`: the gateway spec's base64 value when the

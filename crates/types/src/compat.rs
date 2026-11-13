@@ -93,6 +93,8 @@ pub mod s3s_0_17_0 {
     mod generated_tests;
     pub mod get_bucket_location;
     pub mod leaf;
+    #[cfg(test)]
+    mod names_tests;
     pub mod put_object;
     pub mod request_context;
     #[cfg(test)]
@@ -150,6 +152,8 @@ pub mod s3s_5761ddfe {
     mod generated_tests;
     pub mod get_bucket_location;
     pub mod leaf;
+    #[cfg(test)]
+    mod names_tests;
     pub mod put_object;
     pub mod request_context;
     #[cfg(test)]
@@ -248,6 +252,9 @@ impl fmt::Display for ConversionError {
 }
 
 impl std::error::Error for ConversionError {}
+
+mod names;
+pub use names::NameRefusal;
 
 /// One s3s revision that persistence migration is admitted against.
 ///

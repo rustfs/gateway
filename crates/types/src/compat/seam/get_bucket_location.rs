@@ -29,7 +29,7 @@
 use super::s3s::dto as oracle;
 
 use crate::compat::ConversionError;
-use crate::{BucketName, dto};
+use crate::dto;
 
 /// Every member of the gateway `GetBucketLocationInput` that [`input_to_s3s`] maps.
 ///
@@ -88,10 +88,7 @@ pub fn input_from_s3s(input: oracle::GetBucketLocationInput) -> Result<dto::GetB
         expected_bucket_owner,
     } = input;
     Ok(dto::GetBucketLocationInput {
-        bucket: BucketName::new(bucket).map_err(|_| ConversionError {
-            field: "bucket",
-            reason: "not a bucket name the gateway can write",
-        })?,
+        bucket: crate::compat::names::bucket_name("bucket", &bucket)?,
         expected_bucket_owner,
     })
 }

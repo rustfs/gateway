@@ -47,7 +47,7 @@ use rustfs_gateway_stream::{ByteStream, PayloadCaps, PayloadRead, PayloadStream,
 use s3s::dto as oracle;
 
 use crate::compat::ConversionError;
-use crate::{BucketName, ChecksumAlgorithm, ChecksumSpec, ETag, ObjectKey, OpaqueString, SseCustomerKey, Timestamp, dto};
+use crate::{ChecksumAlgorithm, ChecksumSpec, ETag, OpaqueString, SseCustomerKey, Timestamp, dto};
 
 /// Every member of the gateway `PutObjectInput` that [`input_to_s3s`] maps.
 ///
@@ -522,10 +522,7 @@ pub fn input_from_s3s(input: oracle::PutObjectInput) -> Result<(dto::PutObjectIn
     let gateway = dto::PutObjectInput {
         acl: acl.map(|value| dto::Acl::custom(value.as_str().to_owned())),
         body: body.map(byte_stream),
-        bucket: BucketName::new(bucket).map_err(|_| ConversionError {
-            field: "bucket",
-            reason: "not a bucket name the gateway can write",
-        })?,
+        bucket: crate::compat::names::bucket_name("bucket", &bucket)?,
         cache_control,
         content_disposition,
         content_encoding,
@@ -547,10 +544,7 @@ pub fn input_from_s3s(input: oracle::PutObjectInput) -> Result<(dto::PutObjectIn
         grant_read,
         grant_read_acp,
         grant_write_acp,
-        key: ObjectKey::new(key).map_err(|_| ConversionError {
-            field: "key",
-            reason: "not an object key the gateway can write",
-        })?,
+        key: crate::compat::names::object_key("key", key)?,
         write_offset_bytes,
         metadata: metadata.map(|map| map.into_iter().collect()).unwrap_or_default(),
         server_side_encryption: server_side_encryption.map(|value| dto::ServerSideEncryption::custom(value.as_str().to_owned())),

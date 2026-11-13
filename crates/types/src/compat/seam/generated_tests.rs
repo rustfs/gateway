@@ -86,7 +86,7 @@ fn n_conditions_ranges_copy_sources_and_numbers_the_s3s_grammar_rejects_are_refu
         "part_number_marker"
     );
     assert_eq!(
-        leaf::bucket_name("name", "Not_A_Bucket".to_owned())
+        leaf::bucket_name("name", "Not A Bucket".to_owned())
             .expect_err("bucket")
             .field,
         "name"
