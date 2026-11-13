@@ -70,4 +70,6 @@ pub use self::opaque_string::OpaqueString;
 pub use self::parse_error::{ParseError, rules};
 pub use self::range::{ByteRange, RangeOutcome, RangeParse, RangeSpec};
 pub use self::timestamp::{Timestamp, TimestampFormat};
-pub use self::upload_id::{RecordedUpload, ResolvedUploadId, UploadIdClaim, UploadRejection, resolve_upload};
+pub use self::upload_id::{
+    RecordedUpload, ResolvedUploadId, UploadIdClaim, UploadRejection, resolve_upload, resolve_upload_async,
+};

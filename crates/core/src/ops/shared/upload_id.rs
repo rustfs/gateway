@@ -20,4 +20,6 @@
 //! the private bytes and the exchange so no downstream crate needs a raw accessor.
 //! Upstream: `rustfs-gateway-types`. Downstream: the facade and existing backend implementations.
 
-pub use rustfs_gateway_types::{RecordedUpload, ResolvedUploadId, UploadIdClaim, UploadRejection, resolve_upload};
+pub use rustfs_gateway_types::{
+    RecordedUpload, ResolvedUploadId, UploadIdClaim, UploadRejection, resolve_upload, resolve_upload_async,
+};

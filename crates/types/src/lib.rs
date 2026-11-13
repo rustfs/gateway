@@ -115,6 +115,7 @@ pub use crate::scalar::{
     NameRejection, NameValidator, ObjectKey, OpaqueString, ParseError, PathSplit, RangeOutcome, RangeParse, RangeSpec,
     RecordedUpload, ResolvedUploadId, SlashPolicy, Stricter, Timestamp, TimestampFormat, UploadIdClaim, UploadRejection,
     aws_bucket_rules, decode_once, floor_check_bucket, floor_check_key, is_xml_representable, legacy_rustfs_request_checksum,
-    names_unknown_checksum_algorithm, parse_request_checksum, resolve_upload, rules, validate_bucket_name, validate_object_key,
+    names_unknown_checksum_algorithm, parse_request_checksum, resolve_upload, resolve_upload_async, rules, validate_bucket_name,
+    validate_object_key,
 };
 pub use crate::secret::SseCustomerKey;

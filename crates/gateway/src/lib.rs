@@ -280,7 +280,7 @@ pub use rustfs_gateway_core::ops::shared::trailer_checksum::request_checksum;
 // order: shape, then lookup, then ownership. `ResolvedUploadId` is the only value carrying an id a
 // handler can act on, and this exchange is its only producer.
 pub use rustfs_gateway_core::ops::shared::upload_id::{
-    RecordedUpload, ResolvedUploadId, UploadIdClaim, UploadRejection, resolve_upload,
+    RecordedUpload, ResolvedUploadId, UploadIdClaim, UploadRejection, resolve_upload, resolve_upload_async,
 };
 pub use rustfs_gateway_core::{copy_source_guards_before_target_write, copy_source_if_match_miss_proceeds};
 
