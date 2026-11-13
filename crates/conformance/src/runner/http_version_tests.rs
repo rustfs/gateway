@@ -240,12 +240,24 @@ fn an_applicable_h2_script_preserves_the_test_harness_refusal() {
     );
 }
 
-/// Negative: an unreachable external endpoint skips an applicable HTTP/2 script with the reason,
-/// rather than reporting a protocol result.
+/// Negative: an unreachable external endpoint fails an applicable HTTP/2 script under the
+/// endpoint-lost rule — neither a protocol result nor a skip (rustfs/gateway#1607).
 #[test]
 fn an_applicable_h2_script_reports_an_unreachable_external_endpoint() {
     let sut = crate::conn::Conn::external(std::path::PathBuf::from("."), "https://127.0.0.1:9").expect("valid endpoint");
-    assert_transport_refusal(sut, AUTHORED_H2, "could not connect");
+    let mut sut = Recorded::new(sut);
+    let outcome = drive(&case("\"h2\"", AUTHORED_H2), &mut sut);
+    assert_eq!(outcome.verdict, Verdict::Failed, "{outcome:?}");
+    assert_eq!(outcome.skip_reason, None, "{outcome:?}");
+    assert!(
+        outcome
+            .diagnostics
+            .iter()
+            .any(|d| d.rule == ENDPOINT_LOST && d.message.contains("could not connect")),
+        "{outcome:?}"
+    );
+    assert_eq!(sut.calls, ["prepare", "exchange", "finish"]);
+    assert!(sut.versions.is_empty(), "an unreachable endpoint returned a response");
 }
 
 /// Negative: the self-held driver's HTTP/1.1 support must not be mistaken for Hyper HTTP/2.

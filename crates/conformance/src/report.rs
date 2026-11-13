@@ -206,6 +206,10 @@ pub struct Report {
     /// describe a target this run never contacted, and printing them over a corpus check is the
     /// half of the defect the verdict alone does not cover.
     pub validate_only: bool,
+    /// Why the run stopped before its selection was exhausted: the external endpoint stopped
+    /// answering. Such a run exits `ENVIRONMENT` whatever its verdicts say, because the cases it
+    /// never attempted were not measured (rustfs/gateway#1607).
+    pub aborted: Option<String>,
 }
 
 /// What the renderers know about a run beyond its verdicts.
@@ -334,6 +338,9 @@ impl Report {
                 "  sharded   {} selected case(s) belong to the other shards\n",
                 self.left_to_other_shards
             ));
+        }
+        if let Some(aborted) = &self.aborted {
+            out.push_str(&format!("  ABORTED   {aborted}\n"));
         }
         out.push('\n');
 

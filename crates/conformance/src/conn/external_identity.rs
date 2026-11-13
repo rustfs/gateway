@@ -38,8 +38,8 @@ impl Conn {
     ///
     /// # Errors
     ///
-    /// Returns [`SutError::Environment`] when the endpoint cannot be reached or does not answer
-    /// with a complete HTTP/1.1 response head.
+    /// Returns [`SutError::Unreachable`] when the endpoint accepts no connection, and
+    /// [`SutError::Environment`] when it does not answer with a complete HTTP/1.1 response head.
     pub(super) fn external_identity(&mut self) -> Result<TargetIdentity, SutError> {
         let endpoint = self
             .external
@@ -160,13 +160,14 @@ mod tests {
         server.join().expect("server thread");
     }
 
-    /// Negative — a target that cannot be reached is an environment error, not an identity.
+    /// Negative — a target that cannot be reached is an unreachable endpoint, not an identity; the
+    /// command line exits `ENVIRONMENT` on it before any case runs.
     #[test]
-    fn a_refused_connection_is_an_environment_error() {
+    fn a_refused_connection_is_an_unreachable_endpoint() {
         let listener = TcpListener::bind("127.0.0.1:0").expect("reserve address");
         let address = listener.local_addr().expect("local address");
         drop(listener);
-        assert!(matches!(probe(&format!("http://{address}")), Err(SutError::Environment(_))));
+        assert!(matches!(probe(&format!("http://{address}")), Err(SutError::Unreachable(_))));
     }
 
     /// Negative — a target that is not pointed at a URL has nothing to probe.

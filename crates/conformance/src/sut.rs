@@ -143,13 +143,42 @@ pub enum SutError {
     /// Kept apart from [`SutError::Environment`] because the reference evaluation re-judges exactly
     /// these on a socket, and nothing else (rustfs/gateway#985).
     TransportLimit(String),
+    /// An external endpoint accepted no connection: refused, or silent until the setup deadline.
+    /// Not a skip — the harness has the capability and the target stopped answering — so the
+    /// runner fails the case and aborts the run (rustfs/gateway#1607).
+    Unreachable(String),
+    /// The target answered a fixture step with something the fixture cannot accept, such as a
+    /// create answered 400. A failed precondition of the case, not a skip: the harness built the
+    /// step and the target refused it (rustfs/gateway#1607).
+    Refused(String),
+}
+
+impl SutError {
+    /// The same error with its reason rewritten, keeping its class: wrapping an unreachable
+    /// endpoint or a refused step as [`SutError::Environment`] would turn it back into a skip.
+    #[must_use]
+    pub(crate) fn map_reason(self, rewrite: impl FnOnce(String) -> String) -> SutError {
+        match self {
+            SutError::NotWired { reason, missing } => SutError::NotWired {
+                reason: rewrite(reason),
+                missing,
+            },
+            SutError::Environment(reason) => SutError::Environment(rewrite(reason)),
+            SutError::TransportLimit(reason) => SutError::TransportLimit(rewrite(reason)),
+            SutError::Unreachable(reason) => SutError::Unreachable(rewrite(reason)),
+            SutError::Refused(reason) => SutError::Refused(rewrite(reason)),
+        }
+    }
 }
 
 impl core::fmt::Display for SutError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             SutError::NotWired { reason, .. } => f.write_str(reason),
-            SutError::Environment(reason) | SutError::TransportLimit(reason) => f.write_str(reason),
+            SutError::Environment(reason)
+            | SutError::TransportLimit(reason)
+            | SutError::Unreachable(reason)
+            | SutError::Refused(reason) => f.write_str(reason),
         }
     }
 }

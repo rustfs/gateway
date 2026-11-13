@@ -327,7 +327,9 @@ fn announce(report: &Report, code: u8) {
     if code != exit::ENVIRONMENT {
         return;
     }
-    if report.outcomes.is_empty() {
+    if let Some(aborted) = &report.aborted {
+        eprintln!("conformance: {aborted}. The report covers only the cases before it.");
+    } else if report.outcomes.is_empty() {
         eprintln!(
             "conformance: no case was selected — {} case(s) were excluded. \
              Nothing was checked, so this run asserts nothing.",
@@ -347,6 +349,11 @@ fn announce(report: &Report, code: u8) {
 /// fail-closed distinction between a regression, an empty selection, and an all-skipped run.
 #[must_use]
 pub fn status_code(report: &Report, baseline: Option<&Baseline>, command: Command) -> u8 {
+    // Ahead of the regressions: the case the endpoint died in failed, but the run's conclusion is
+    // that the target stopped answering, not that it regressed.
+    if report.aborted.is_some() {
+        return exit::ENVIRONMENT;
+    }
     let regressions = report.regressions(baseline).len();
     if regressions > 0 {
         return exit::REGRESSION;
@@ -365,8 +372,11 @@ pub fn status_code_under_rulings(report: &Report, judgement: &Judgement<'_>, com
     if judgement.blocks() { exit::REGRESSION } else { exit::SUCCESS }
 }
 
-/// The two ways a run is an environment failure whatever its verdicts say.
+/// The three ways a run is an environment failure whatever its verdicts say.
 fn environment_code(report: &Report, command: Command) -> Option<u8> {
+    if report.aborted.is_some() {
+        return Some(exit::ENVIRONMENT);
+    }
     // A selector that named no case is an environment problem for every command, `validate`
     // included. `--filter '<case-id>'` is how the feedback-loop table selects one case, so a typo
     // in the id checked nothing and exited 0 — the same shape as a command that checked something.
@@ -702,6 +712,7 @@ mod tests {
             notes: Vec::new(),
             polarity: (1, 0),
             validate_only: false,
+            aborted: None,
         };
         assert_eq!(status_code(&report, None, Command::Run), exit::ENVIRONMENT);
         assert_eq!(status_code(&report, None, Command::Validate), exit::SUCCESS);
@@ -718,6 +729,7 @@ mod tests {
             notes: Vec::new(),
             polarity: (1, 0),
             validate_only: false,
+            aborted: None,
             left_to_other_shards: 0,
         };
         assert_eq!(status_code(&report, None, Command::Run), exit::ENVIRONMENT);
@@ -734,6 +746,7 @@ mod tests {
             notes: Vec::new(),
             polarity: (1, 0),
             validate_only: false,
+            aborted: None,
             left_to_other_shards: 0,
         };
         report.outcomes.push(crate::report::CaseOutcome {

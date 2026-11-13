@@ -146,9 +146,12 @@ impl super::super::Conn {
         let target = format!("{upload_target}&partNumber={}", part.number);
         let observation = self
             .fixture_control_observation("PUT", &target, region, &part.body, &[])
-            .map_err(|error| invalid_plan(&format!("part upload failed: {error}")))?;
+            .map_err(|error| error.map_reason(|reason| format!("external multipart fixture: part upload failed: {reason}")))?;
         if observation.status != Some(200) {
-            return Err(invalid_plan(&format!("part upload returned status {:?}", observation.status)));
+            return Err(SutError::Refused(format!(
+                "external multipart fixture: part upload returned status {:?}",
+                observation.status
+            )));
         }
         if part.capture.is_none() {
             return Ok(None);

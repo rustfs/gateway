@@ -59,6 +59,7 @@ fn report(outcomes: Vec<CaseOutcome>) -> Report {
         notes: Vec::new(),
         polarity: (1, 0),
         validate_only: false,
+        aborted: None,
     }
 }
 

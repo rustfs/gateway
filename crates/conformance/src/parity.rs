@@ -263,6 +263,7 @@ mod tests {
             notes: Vec::new(),
             polarity: (1, 1),
             validate_only: false,
+            aborted: None,
         }
     }
 

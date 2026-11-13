@@ -256,7 +256,10 @@ fn a_failed_initiation_is_not_aborted_as_an_owned_upload() {
     let mut target = peer.target();
     let result = target.prepare(CASE, Some(&setup(ONE_UPLOAD)));
     let requests = peer.finish();
-    assert!(matches!(result, Err(SutError::Environment(_))), "failed initiation must fail preparation");
+    assert!(
+        matches!(result, Err(SutError::Refused(_))),
+        "an initiation the target refuses fails the case"
+    );
     assert_eq!(
         requests,
         [
@@ -431,7 +434,10 @@ fn partial_initiation_failure_aborts_known_uploads_in_reverse_order() {
     );
     let result = target.prepare(CASE, Some(&setup(&source)));
     let requests = peer.finish();
-    assert!(matches!(result, Err(SutError::Environment(_))), "third initiation must fail preparation");
+    assert!(
+        matches!(result, Err(SutError::Refused(_))),
+        "a third initiation the target refuses fails the case"
+    );
     assert_eq!(
         requests,
         [

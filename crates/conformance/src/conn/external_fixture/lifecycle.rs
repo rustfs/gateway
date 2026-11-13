@@ -66,7 +66,7 @@ impl Conn {
                         bucket.name
                     ))
                 } else {
-                    SutError::Environment(format!(
+                    SutError::Refused(format!(
                         "external fixture could not prove bucket `{}` absent: HEAD returned status {status}",
                         bucket.name
                     ))
@@ -94,7 +94,7 @@ impl Conn {
                 Err(error) => return Err(self.abort_external_prepare(error)),
             };
             if status != 200 {
-                return Err(self.abort_external_prepare(SutError::Environment(format!(
+                return Err(self.abort_external_prepare(SutError::Refused(format!(
                     "external fixture PUT for bucket `{}` returned status {status}; the failed create is not owned",
                     bucket.name
                 ))));
@@ -126,7 +126,7 @@ impl Conn {
                         object.bucket, object.key
                     ))
                 } else {
-                    SutError::Environment(format!(
+                    SutError::Refused(format!(
                         "external fixture could not prove object `{}/{}` absent: HEAD returned status {status}",
                         object.bucket, object.key
                     ))
@@ -152,7 +152,7 @@ impl Conn {
                 Err(error) => return Err(self.abort_external_prepare(error)),
             };
             if status != 200 {
-                return Err(self.abort_external_prepare(SutError::Environment(format!(
+                return Err(self.abort_external_prepare(SutError::Refused(format!(
                     "external fixture PUT for object `{}/{}` returned status {status}; the failed create is not owned",
                     object.bucket, object.key
                 ))));
@@ -175,13 +175,18 @@ impl Conn {
             let body = match result {
                 Ok((200, body)) => body,
                 Ok((status, _)) => {
-                    return Err(self.abort_external_prepare(SutError::Environment(format!(
+                    return Err(self.abort_external_prepare(SutError::Refused(format!(
                         "external fixture initiation returned status {status}; the failed create is not owned"
                     ))));
                 }
-                Err(_) => {
+                Err(error) => {
                     self.external_fixtures.owned_uploads.push(owned);
-                    return Err(self.abort_external_prepare(super::multipart::unresolved_id()));
+                    let error = if matches!(error, SutError::Unreachable(_)) {
+                        error
+                    } else {
+                        super::multipart::unresolved_id()
+                    };
+                    return Err(self.abort_external_prepare(error));
                 }
             };
             let upload_id = match super::multipart::upload_id(&body) {
@@ -222,10 +227,12 @@ impl Conn {
         combine_results(case_mismatch.map_or(Ok(()), Err), combine_results(cleanup, inner))
     }
 
+    /// Rolls back what the case created, keeping `error`'s class: a refused step or a lost endpoint
+    /// whose rollback also failed is still a refused step or a lost endpoint, never a skip.
     fn abort_external_prepare(&mut self, error: SutError) -> SutError {
         match self.cleanup_owned_external_fixtures() {
             Ok(()) => error,
-            Err(cleanup) => SutError::Environment(format!("{error}; rollback also failed: {cleanup}")),
+            Err(cleanup) => error.map_reason(|reason| format!("{reason}; rollback also failed: {cleanup}")),
         }
     }
 

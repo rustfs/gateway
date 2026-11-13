@@ -147,6 +147,22 @@ fn assert_refused<S: Sut>(sut: &mut Recorded<S>, case: &Case, reason: &str) {
     );
     assert_eq!(sut.calls, ["prepare", "exchange", "finish"]);
 }
+/// An endpoint nothing listens on fails the case under the endpoint-lost rule; it is not a skip
+/// (rustfs/gateway#1607).
+fn assert_endpoint_lost<S: Sut>(sut: &mut Recorded<S>, case: &Case) {
+    let outcome = drive(case, sut);
+    assert_eq!(outcome.verdict, Verdict::Failed, "{outcome:?}");
+    assert_eq!(outcome.phase, Phase::Execute, "{outcome:?}");
+    assert_eq!(outcome.skip_reason, None, "{outcome:?}");
+    assert!(
+        outcome
+            .diagnostics
+            .iter()
+            .any(|d| d.rule == ENDPOINT_LOST && d.message.contains("could not connect")),
+        "{outcome:?}"
+    );
+    assert_eq!(sut.calls, ["prepare", "exchange", "finish"]);
+}
 #[cfg(feature = "production-transports")]
 fn production() -> Recorded<Conn> {
     Recorded::new(Conn::production(std::path::PathBuf::from("."), ProductionDriver::Hyper))
@@ -176,7 +192,7 @@ fn n_external_https_required_reaches_the_endpoint_refusal() {
     for request in [HTTP1, H2] {
         let mut sut =
             Recorded::new(Conn::external(std::path::PathBuf::from("."), "https://127.0.0.1:0").expect("valid endpoint"));
-        assert_refused(&mut sut, &case("required", "", request), "could not connect");
+        assert_endpoint_lost(&mut sut, &case("required", "", request));
     }
 }
 /// Negative: requiring TLS must still exclude a cleartext endpoint before fixtures.
@@ -195,11 +211,11 @@ fn n_external_endpoint_security_overrides_script_tls() {
     let mut sut = Recorded::new(Conn::external(std::path::PathBuf::from("."), "https://127.0.0.1:0").expect("valid endpoint"));
     assert_gated(&mut sut, &case("forbidden", DISABLED, H2), "forbidden", "over TLS");
 }
-/// Negative: cleartext applicability must still reach the selected endpoint's environment failure.
+/// Negative: cleartext applicability must still reach the selected endpoint's connection failure.
 #[test]
 fn n_external_http_forbidden_reaches_the_endpoint_refusal() {
     let mut sut = Recorded::new(Conn::external(std::path::PathBuf::from("."), "http://127.0.0.1:0").expect("valid endpoint"));
-    assert_refused(&mut sut, &case("forbidden", "", H2), "could not connect");
+    assert_endpoint_lost(&mut sut, &case("forbidden", "", H2));
 }
 /// Negative: a configured TLS frame script cannot be judged as a cleartext-only case.
 #[cfg(feature = "production-transports")]

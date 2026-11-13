@@ -210,7 +210,9 @@ fn a_late_invalid_part_payload_prevents_all_remote_mutation() {
     }
 }
 
-fn failed_part(reply: Vec<u8>, reason: Option<&str>) {
+/// `refused` is whether the target answered with a status the fixture cannot accept, which fails
+/// the case; every other bad answer here stays an environment refusal.
+fn failed_part(reply: Vec<u8>, reason: Option<&str>, refused: bool) {
     let mut steps = bootstrap();
     steps.push(part(1, b"part", reply));
     steps.extend(cleanup());
@@ -222,10 +224,14 @@ fn failed_part(reply: Vec<u8>, reason: Option<&str>) {
     observed.verify(&steps);
     let finished = target.finish(CASE);
     let error = prepared.expect_err("invalid part response must fail preparation");
-    assert!(
-        matches!(error, SutError::Environment(_)),
-        "failed part response is an environment refusal"
-    );
+    if refused {
+        assert!(matches!(error, SutError::Refused(_)), "a refused part fails the case: {error:?}");
+    } else {
+        assert!(
+            matches!(error, SutError::Environment(_)),
+            "an unusable part answer is an environment refusal: {error:?}"
+        );
+    }
     if let Some(reason) = reason {
         assert!(
             error.to_string().contains(reason),
@@ -238,23 +244,23 @@ fn failed_part(reply: Vec<u8>, reason: Option<&str>) {
 #[test]
 fn non_successful_part_response_rolls_back_known_upload() {
     for status in [403, 500, 204] {
-        failed_part(response(status, ""), Some(&status.to_string()));
+        failed_part(response(status, ""), Some(&status.to_string()), true);
     }
 }
 
 #[test]
 fn missing_part_etag_rolls_back_known_upload() {
-    failed_part(uploaded(""), Some("ETag"));
+    failed_part(uploaded(""), Some("ETag"), false);
 }
 
 #[test]
 fn empty_part_etag_rolls_back_known_upload() {
-    failed_part(uploaded("ETag: \r\n"), Some("ETag"));
+    failed_part(uploaded("ETag: \r\n"), Some("ETag"), false);
 }
 
 #[test]
 fn duplicate_part_etags_are_not_silently_selected() {
-    failed_part(uploaded("ETag: \"first\"\r\netag: \"second\"\r\n"), Some("ETag"));
+    failed_part(uploaded("ETag: \"first\"\r\netag: \"second\"\r\n"), Some("ETag"), false);
 }
 
 #[test]
@@ -262,6 +268,7 @@ fn interrupted_part_response_aborts_the_known_upload() {
     failed_part(
         b"HTTP/1.1 200 OK\r\nContent-Length: 20\r\nETag: \"incomplete\"\r\nConnection: close\r\n\r\nshort".to_vec(),
         None,
+        false,
     );
 }
 
@@ -297,7 +304,10 @@ fn later_part_failure_stops_remaining_parts_and_rolls_back_uploads() {
     observed.require_request("PUT /fixture-multipart/two?uploadId=second-id&partNumber=2 HTTP/1.1");
     observed.verify(&steps);
     let finished = target.finish(CASE);
-    assert_environment(prepared.map(|_| ()), "the later part failure must fail setup");
+    assert!(
+        matches!(prepared, Err(SutError::Refused(_))),
+        "a later part the target refuses fails the case"
+    );
     assert!(finished.is_ok(), "rollback must remove both known uploads in reverse order");
 }
 

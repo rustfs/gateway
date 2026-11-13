@@ -193,14 +193,17 @@ impl ExternalEndpoint {
                 Err(error) => last_error = Some(error),
             }
         }
+        // Unreachable, not Environment: the endpoint resolved and was given addresses to answer
+        // on, and none accepted a connection. Recorded as a skip, a target that died mid-run read
+        // as a run that passed (rustfs/gateway#1607).
         if Instant::now() >= deadline {
-            return Err(SutError::Environment(format!(
+            return Err(SutError::Unreachable(format!(
                 "external endpoint `{}` exhausted its setup deadline after {attempted} address attempt(s)",
                 self.authority
             )));
         }
         let detail = last_error.map_or_else(|| "no address was attempted".to_owned(), |error| error.to_string());
-        Err(SutError::Environment(format!(
+        Err(SutError::Unreachable(format!(
             "external endpoint `{}` could not connect to any of its {attempted} attempted address(es): {detail}",
             self.authority
         )))

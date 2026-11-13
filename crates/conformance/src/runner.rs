@@ -41,10 +41,12 @@ use crate::sut::{ExchangePlan, Profile, Sut, SutError, Transport};
 use crate::value::Value;
 
 mod deadline;
+mod not_run;
 mod reference;
 #[cfg(test)]
 use deadline::valid_expiry;
 use deadline::{case_deadline, expiry_error, timeout_verdict};
+use not_run::{ENDPOINT_LOST, not_run};
 pub use reference::reference_report;
 
 /// How a run is configured.
@@ -159,6 +161,8 @@ pub fn run(corpus: &Corpus, sut: &mut dyn Sut, options: &RunOptions) -> Report {
     let mut filtered_out = 0;
     let mut left_to_other_shards = 0;
     let mut ordinal = 0;
+    let mut previous: Option<&str> = None;
+    let mut aborted: Option<(String, usize)> = None;
     for case in corpus.cases() {
         if !selected(case, options) {
             filtered_out += 1;
@@ -170,7 +174,20 @@ pub fn run(corpus: &Corpus, sut: &mut dyn Sut, options: &RunOptions) -> Report {
             left_to_other_shards += 1;
             continue;
         }
-        outcomes.push(run_case(case, sut, options, &goldens, &mut notes));
+        if let Some((_, not_attempted)) = &mut aborted {
+            *not_attempted += 1;
+            continue;
+        }
+        let mut outcome = run_case(case, sut, options, &goldens, &mut notes);
+        // A lost endpoint ends the run: every later case would be sent nowhere, and recording each
+        // as a skip is how "5 passed, 135 skipped" read as a pass (rustfs/gateway#1607).
+        if let Some(lost) = outcome.diagnostics.iter_mut().find(|d| d.rule == ENDPOINT_LOST) {
+            let after = previous.map_or_else(|| "before any case finished".to_owned(), |id| format!("after `{id}`"));
+            lost.message = format!("{} ({after})", lost.message);
+            aborted = Some((format!("the external endpoint stopped answering during `{}`, {after}", case.id), 0));
+        }
+        previous = Some(&case.id);
+        outcomes.push(outcome);
     }
     if let Some(shard) = options.shard {
         // Said on the report, so a partial run can never read as the whole corpus.
@@ -191,6 +208,9 @@ pub fn run(corpus: &Corpus, sut: &mut dyn Sut, options: &RunOptions) -> Report {
         notes,
         polarity: lint::polarity_balance(corpus),
         validate_only: options.validate_only,
+        aborted: aborted.map(|(reason, not_attempted)| {
+            format!("{reason}; the run was aborted and {not_attempted} later selected case(s) were not attempted")
+        }),
     }
 }
 
@@ -593,28 +613,6 @@ fn run_concurrent_exchanges(
     }
     captures.extend(batch_captures);
     Ok(())
-}
-
-/// Turns a target-level failure into a skip that states its reason.
-///
-/// The long-form explanation — what the facade would have to expose — is a property of the run
-/// rather than of each case, so it goes into the report's notes once instead of onto every line.
-fn not_run(mut outcome: CaseOutcome, error: &SutError, notes: &mut Vec<String>) -> CaseOutcome {
-    outcome.verdict = Verdict::Skipped;
-    outcome.transport_limited = matches!(error, SutError::TransportLimit(_));
-    outcome.skip_reason = Some(match error {
-        SutError::NotWired { reason, missing } => {
-            for item in missing {
-                let note = format!("the facade must expose: {item}");
-                if !notes.contains(&note) {
-                    notes.push(note);
-                }
-            }
-            reason.clone()
-        }
-        SutError::Environment(reason) | SutError::TransportLimit(reason) => format!("environment: {reason}"),
-    });
-    outcome
 }
 
 fn skeleton(case: &Case) -> CaseOutcome {

@@ -183,11 +183,11 @@ impl Conn {
         let target = format!("/{}?versioning", bucket.name);
         let response = self.fixture_control_observation("PUT", &target, &bucket.region, body, &headers)?;
         if response.status != Some(200) {
-            return Err(unsupported("versioning enablement did not succeed"));
+            return Err(refused("versioning enablement did not succeed"));
         }
         let response = self.fixture_control_observation("GET", &target, &bucket.region, &[], &[])?;
         if response.status != Some(200) || !enabled(&response.body) {
-            return Err(unsupported("versioning readback did not prove Enabled"));
+            return Err(refused("versioning readback did not prove Enabled"));
         }
         Ok(())
     }
@@ -203,7 +203,7 @@ impl Conn {
         let response = self.fixture_control_observation("PUT", &object.target, &object.region, &object.body, &object.headers)?;
         self.external_fixtures.observe_version_write(index, &response)?;
         if response.status != Some(200) {
-            return Err(unsupported("versioned fixture object creation was rejected"));
+            return Err(refused("versioned fixture object creation was rejected"));
         }
         Ok(())
     }
@@ -254,6 +254,11 @@ pub(super) fn unresolved() -> SutError {
 
 fn unsupported(reason: &str) -> SutError {
     SutError::Environment(format!("external versioned fixture: {reason}"))
+}
+
+/// The target answered a versioned fixture step with something the fixture cannot accept.
+fn refused(reason: &str) -> SutError {
+    SutError::Refused(format!("external versioned fixture: {reason}"))
 }
 
 fn enabled(body: &[u8]) -> bool {

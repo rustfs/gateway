@@ -165,6 +165,8 @@ fn capture(profile: Profile, source: &str, body_len: usize) -> Captured {
         .find(|known| reason.starts_with(known))
         .unwrap_or("another environment refusal"),
         Err(crate::sut::SutError::TransportLimit(_)) => "transport limit",
+        Err(crate::sut::SutError::Unreachable(_)) => "endpoint unreachable",
+        Err(crate::sut::SutError::Refused(_)) => "fixture step refused",
         Err(crate::sut::SutError::NotWired { .. }) => "not wired",
         Ok(_) => "none",
     };

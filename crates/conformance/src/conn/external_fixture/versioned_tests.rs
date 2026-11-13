@@ -328,7 +328,10 @@ fn failed_enablement_or_unproved_enabled_readback_never_reaches_an_object_write(
         let source = format!("{BUCKET}[[objects]]\nbucket = \"fixture-versioned\"\nkey = \"source\"\n");
         let prepared = target.prepare(CASE, Some(&setup(&source)));
         let requests = peer.finish();
-        environment(prepared, "setup cannot proceed without a proved Enabled state");
+        assert!(
+            matches!(prepared, Err(SutError::Refused(_))),
+            "setup cannot proceed without a proved Enabled state, and the target said so"
+        );
         let mut expected = vec![
             "HEAD /fixture-versioned HTTP/1.1",
             "PUT /fixture-versioned HTTP/1.1",

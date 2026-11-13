@@ -65,6 +65,7 @@ fn report() -> Report {
         notes: vec!["the facade must expose: a service entry point".to_owned()],
         polarity: (2, 1),
         validate_only: false,
+        aborted: None,
     }
 }
 
@@ -77,6 +78,7 @@ fn validated_report() -> Report {
         ],
         notes: Vec::new(),
         validate_only: true,
+        aborted: None,
         ..report()
     }
 }

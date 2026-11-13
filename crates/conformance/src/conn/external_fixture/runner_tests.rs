@@ -447,3 +447,235 @@ fn the_rustfs_ledger_rules_no_case_unavailable_externally() {
         assert!(rulings.get(id).is_none(), "{id} is unavailable externally and must stay unruled");
     }
 }
+
+/// A corpus of the read-only control case under each id, with `setup` on the fixture case only.
+fn endpoint_corpus(ids: &[&str]) -> TestCorpus {
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let root = std::env::temp_dir().join(format!(
+        "rustfs-gateway-external-endpoint-corpus-{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    ));
+    fs::create_dir_all(root.join("cases/external-fixture")).expect("create cases directory");
+    let repository = crate::corpus::Corpus::discover_root().expect("repository corpus");
+    fs::copy(repository.join("case.schema.json"), root.join("case.schema.json")).expect("copy frozen schema");
+    for id in ids {
+        if *id == "c-external-fixture-0001" {
+            write_case(
+                &root,
+                id,
+                "positive",
+                403,
+                "[[setup.buckets]]\nname = \"fixture-runner\"\nregion = \"us-west-2\"\n\n[[setup.objects]]\nbucket = \"fixture-runner\"\nkey = \"fixture-key\"\nbody = { hex = \"00ff\" }\n\n",
+            );
+        } else {
+            write_case(&root, id, "negative", 403, "");
+        }
+    }
+    TestCorpus(root)
+}
+
+/// An endpoint that answers `responses` in order, one connection each, and closes its listener
+/// after reading the request the last response answers but before writing that response. The client
+/// is still waiting for the answer when nothing listens any more, so its next connection is refused
+/// whatever the scheduler does, and no sleep orders anything.
+fn closing_endpoint(responses: Vec<&'static [u8]>) -> (String, thread::JoinHandle<Vec<Vec<u8>>>) {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind closing endpoint");
+    listener.set_nonblocking(true).expect("bound closing accept wait");
+    let address = listener.local_addr().expect("closing endpoint address");
+    let server = thread::spawn(move || {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let accept = |listener: &TcpListener| loop {
+            match listener.accept() {
+                Ok((stream, _)) => break Some(stream),
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock && Instant::now() < deadline => {
+                    thread::sleep(Duration::from_millis(1));
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => break None,
+                Err(error) => panic!("accept closing-endpoint request: {error}"),
+            }
+        };
+        let mut requests = Vec::new();
+        let Some((last, earlier)) = responses.split_last() else { return requests };
+        for response in earlier {
+            let Some(mut stream) = accept(&listener) else { return requests };
+            requests.push(read_request(&mut stream));
+            stream.write_all(response).expect("write closing-endpoint response");
+        }
+        let Some(mut stream) = accept(&listener) else { return requests };
+        requests.push(read_request(&mut stream));
+        drop(listener);
+        stream.write_all(last).expect("write the last response");
+        requests
+    });
+    (format!("http://{address}"), server)
+}
+
+const PROBE: &[u8] = b"HTTP/1.1 403 Forbidden\r\nServer: RustFS\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+const FORBIDDEN: &[u8] = b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+const NOT_FOUND: &[u8] = b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+const OK: &[u8] = b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+const BAD_REQUEST: &[u8] = b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+
+/// Runs `conformance run --endpoint <url> --json ...` over `corpus` and returns the exit code, the
+/// JSON report and the request line of every request the endpoint received.
+fn run_against(
+    corpus: &TestCorpus,
+    url: String,
+    server: thread::JoinHandle<Vec<Vec<u8>>>,
+    fixtures: bool,
+) -> (ExitCode, String, Vec<String>) {
+    let report_path = corpus.path().join("report.json");
+    let mut args = vec![
+        "run".to_owned(),
+        "--root".to_owned(),
+        corpus.path().display().to_string(),
+        "--endpoint".to_owned(),
+        url,
+        "--json".to_owned(),
+        report_path.display().to_string(),
+    ];
+    if fixtures {
+        args.push("--allow-external-fixtures".to_owned());
+    }
+    let code = cli::main(&args);
+    let requests = server.join().expect("closing endpoint exits");
+    let report = fs::read_to_string(&report_path).expect("the JSON report");
+    let lines = requests.iter().map(|request| request_line(request).to_owned()).collect();
+    (code, report, lines)
+}
+
+/// Negative — rustfs/gateway#1607. The endpoint answers the preflight and the first case, then
+/// stops listening. The second case is not a skip: the run aborts with `ENVIRONMENT`, the case it
+/// stopped in fails naming the case before it, and the third case is never attempted — the report
+/// cannot read as "1 passed, 2 skipped, exit 0".
+#[test]
+fn an_endpoint_that_stops_answering_mid_run_aborts_the_run_instead_of_skipping() {
+    let corpus = endpoint_corpus(&[
+        "c-external-fixture-0101",
+        "c-external-fixture-0102",
+        "c-external-fixture-0103",
+    ]);
+    let (url, server) = closing_endpoint(vec![PROBE, FORBIDDEN]);
+
+    let (code, report, requests) = run_against(&corpus, url, server, false);
+
+    assert_eq!(code, ExitCode::from(exit::ENVIRONMENT), "{report}");
+    assert!(
+        report_line(&report, "c-external-fixture-0101").contains("\"verdict\": \"passed\""),
+        "{report}"
+    );
+    let lost = report_line(&report, "c-external-fixture-0102");
+    assert!(lost.contains("\"verdict\": \"failed\""), "a dead endpoint is not a skip: {lost}");
+    assert!(lost.contains("\"reason\": \"\""), "a failed case carries no skip reason: {lost}");
+    for needle in ["stopped answering", "could not connect", "c-external-fixture-0101"] {
+        assert!(lost.contains(needle), "{needle:?} missing from the failure: {lost}");
+    }
+    assert!(
+        !report.contains("c-external-fixture-0103"),
+        "a case after the endpoint died was attempted: {report}"
+    );
+    assert_eq!(requests, ["HEAD / HTTP/1.1", "GET /fixture-runner?location HTTP/1.1"]);
+}
+
+/// Negative — the endpoint stops listening between two fixture steps of one case, so the step
+/// fails to connect and the rollback of the bucket already created fails the same way. Neither the
+/// rollback nor the fixture layer may turn the lost endpoint into an ordinary environment skip.
+#[test]
+fn an_endpoint_lost_during_fixture_setup_aborts_the_run_through_the_failed_rollback() {
+    let corpus = endpoint_corpus(&["c-external-fixture-0001", "c-external-fixture-0101"]);
+    let (url, server) = closing_endpoint(vec![PROBE, NOT_FOUND, OK]);
+
+    let (code, report, requests) = run_against(&corpus, url, server, true);
+
+    assert_eq!(code, ExitCode::from(exit::ENVIRONMENT), "{report}");
+    let lost = report_line(&report, "c-external-fixture-0001");
+    assert!(lost.contains("\"verdict\": \"failed\""), "{lost}");
+    for needle in ["stopped answering", "could not connect", "rollback also failed"] {
+        assert!(lost.contains(needle), "{needle:?} missing from the failure: {lost}");
+    }
+    assert!(!report.contains("c-external-fixture-0101"), "{report}");
+    assert_eq!(
+        requests,
+        [
+            "HEAD / HTTP/1.1",
+            "HEAD /fixture-runner HTTP/1.1",
+            "PUT /fixture-runner HTTP/1.1"
+        ]
+    );
+}
+
+/// Negative — the target answered the fixture's bucket create with 400. That is the target's own
+/// answer, so the case fails its precondition instead of being skipped, and the run goes on: the
+/// next case still reaches the endpoint and passes.
+#[test]
+fn a_fixture_create_the_target_refuses_fails_the_case_and_the_run_continues() {
+    let corpus = endpoint_corpus(&["c-external-fixture-0001", "c-external-fixture-0101"]);
+    let (url, server) = closing_endpoint(vec![PROBE, NOT_FOUND, BAD_REQUEST, FORBIDDEN]);
+
+    let (code, report, requests) = run_against(&corpus, url, server, true);
+
+    assert_eq!(code, ExitCode::from(exit::REGRESSION), "{report}");
+    let refused = report_line(&report, "c-external-fixture-0001");
+    assert!(refused.contains("\"verdict\": \"failed\""), "a refused fixture is not a skip: {refused}");
+    assert!(refused.contains("\"reason\": \"\""), "{refused}");
+    assert!(refused.contains("returned status 400"), "{refused}");
+    assert!(
+        report_line(&report, "c-external-fixture-0101").contains("\"verdict\": \"passed\""),
+        "{report}"
+    );
+    assert_eq!(
+        requests,
+        [
+            "HEAD / HTTP/1.1",
+            "HEAD /fixture-runner HTTP/1.1",
+            "PUT /fixture-runner HTTP/1.1",
+            "GET /fixture-runner?location HTTP/1.1",
+        ]
+    );
+}
+
+/// Negative — the target answered the absence probe with 403, so the fixture cannot be built
+/// because of what the target said, not because of anything the harness lacks.
+#[test]
+fn an_absence_probe_the_target_refuses_fails_the_case() {
+    let corpus = endpoint_corpus(&["c-external-fixture-0001"]);
+    let (url, server) = closing_endpoint(vec![PROBE, FORBIDDEN]);
+
+    let (code, report, requests) = run_against(&corpus, url, server, true);
+
+    assert_eq!(code, ExitCode::from(exit::REGRESSION), "{report}");
+    let refused = report_line(&report, "c-external-fixture-0001");
+    assert!(refused.contains("\"verdict\": \"failed\""), "{refused}");
+    assert!(refused.contains("HEAD returned status 403"), "{refused}");
+    assert_eq!(requests, ["HEAD / HTTP/1.1", "HEAD /fixture-runner HTTP/1.1"]);
+}
+
+/// Positive control — a bucket that already exists is the harness declining to adopt state it did
+/// not create. The endpoint is alive and answered as it should, so that stays a skip with its
+/// reason, the run is not aborted, and the next case passes with exit 0.
+#[test]
+fn a_fixture_the_harness_declines_to_adopt_stays_a_skip_on_a_live_endpoint() {
+    let corpus = endpoint_corpus(&["c-external-fixture-0001", "c-external-fixture-0101"]);
+    let (url, server) = closing_endpoint(vec![PROBE, OK, FORBIDDEN]);
+
+    let (code, report, requests) = run_against(&corpus, url, server, true);
+
+    assert_eq!(code, ExitCode::from(exit::SUCCESS), "{report}");
+    let declined = report_line(&report, "c-external-fixture-0001");
+    assert!(declined.contains("\"verdict\": \"skipped\""), "{declined}");
+    assert!(declined.contains("already exists"), "{declined}");
+    assert!(declined.contains("\"failures\": []"), "{declined}");
+    assert!(
+        report_line(&report, "c-external-fixture-0101").contains("\"verdict\": \"passed\""),
+        "{report}"
+    );
+    assert_eq!(
+        requests,
+        [
+            "HEAD / HTTP/1.1",
+            "HEAD /fixture-runner HTTP/1.1",
+            "GET /fixture-runner?location HTTP/1.1"
+        ]
+    );
+}
