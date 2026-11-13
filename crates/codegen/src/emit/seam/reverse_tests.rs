@@ -25,8 +25,9 @@
 
 use rustfs_gateway_model::ir::{ETagRender, TimestampFormat, Type};
 
+use super::backward::{self, LegacyMembers};
 use super::facts::S3sFacts;
-use super::render::{Forward, LegacyMembers};
+use super::render::Forward;
 use super::tests::{ctx, facts, field};
 use super::{census, files, render};
 
@@ -39,7 +40,7 @@ fn a_supplied_member_converts_back_into_the_gateway_member() {
         field("Bucket", Type::BucketName, true),
         field("CopySource", Type::String, true),
     ];
-    let text = render::backward_struct(&ctx(&facts), "CopyObjectInput", &fields, "G", "input").expect("renders");
+    let text = backward::backward_struct(&ctx(&facts), "CopyObjectInput", &fields, "G", "input").expect("renders");
     assert!(
         text.contains("copy_source: { let x = copy_source; leaf::copy_source_from_s3s(&x) },"),
         "{text}"
@@ -65,7 +66,7 @@ fn required_copy_header_converts_decoded_fields_without_a_wire_round_trip() {
             source.binding = binding.clone();
             source.required = required;
             source.wire_name = Some(wire.to_owned());
-            let text = render::backward_struct(&ctx(&facts), &owner, &[source.clone()], "G", "input").expect("renders");
+            let text = backward::backward_struct(&ctx(&facts), &owner, &[source.clone()], "G", "input").expect("renders");
             assert_eq!(
                 text.contains("super::super::copy_source::from_s3s(x)"),
                 typed,
@@ -79,7 +80,7 @@ fn required_copy_header_converts_decoded_fields_without_a_wire_round_trip() {
 fn n_a_supplied_member_without_a_backward_pair_fails_generation() {
     let facts = facts("struct CopyObjectInput\n  copy_source: Timestamp\n");
     let errors =
-        render::backward_struct(&ctx(&facts), "CopyObjectInput", &[field("CopySource", Type::String, true)], "G", "input")
+        backward::backward_struct(&ctx(&facts), "CopyObjectInput", &[field("CopySource", Type::String, true)], "G", "input")
             .expect_err("no pair");
     assert_eq!(errors.len(), 1);
     assert!(
@@ -91,8 +92,9 @@ fn n_a_supplied_member_without_a_backward_pair_fails_generation() {
 #[test]
 fn n_a_legacy_query_member_set_is_refused_by_name_where_nothing_can_hand_it_back() {
     let facts = facts("struct CopyObjectInput\n  bucket: String\n  version_id: Option<String>\n");
-    let text = render::backward_struct(&ctx(&facts), "CopyObjectInput", &[field("Bucket", Type::BucketName, true)], "G", "input")
-        .expect("renders");
+    let text =
+        backward::backward_struct(&ctx(&facts), "CopyObjectInput", &[field("Bucket", Type::BucketName, true)], "G", "input")
+            .expect("renders");
     assert!(text.contains("        version_id,\n"), "the member is bound, never `_`: {text}");
     assert!(
         text.contains("    if version_id.is_some() {\n        return Err(ConversionError { field: \"version_id\", reason: \"a member only the legacy decoder reads and no gateway member holds, refused rather than dropped\" });\n    }"),
@@ -104,7 +106,7 @@ fn n_a_legacy_query_member_set_is_refused_by_name_where_nothing_can_hand_it_back
 fn a_legacy_query_member_is_handed_back_beside_the_gateway_input() {
     let facts = facts("struct CopyObjectInput\n  bucket: String\n  version_id: Option<String>\n");
     let fields = [field("Bucket", Type::BucketName, true)];
-    let text = render::backward_struct_with(&ctx(&facts), "CopyObjectInput", &fields, "G", "input", LegacyMembers::HandBack)
+    let text = backward::backward_struct_with(&ctx(&facts), "CopyObjectInput", &fields, "G", "input", LegacyMembers::HandBack)
         .expect("renders");
     assert!(text.contains("        version_id,\n"), "{text}");
     assert!(
@@ -118,10 +120,11 @@ fn a_legacy_query_member_is_handed_back_beside_the_gateway_input() {
 fn a_legacy_bool_header_is_handed_back_and_refused_where_it_cannot_be() {
     let facts = facts("struct DeleteBucketInput\n  bucket: String\n  force_delete: Option<bool>\n");
     let fields = [field("Bucket", Type::BucketName, true)];
-    let handed = render::backward_struct_with(&ctx(&facts), "DeleteBucketInput", &fields, "G", "input", LegacyMembers::HandBack)
-        .expect("renders");
+    let handed =
+        backward::backward_struct_with(&ctx(&facts), "DeleteBucketInput", &fields, "G", "input", LegacyMembers::HandBack)
+            .expect("renders");
     assert!(handed.contains("LegacyInput { force_delete }"), "{handed}");
-    let refused = render::backward_struct(&ctx(&facts), "DeleteBucketInput", &fields, "G", "input").expect("renders");
+    let refused = backward::backward_struct(&ctx(&facts), "DeleteBucketInput", &fields, "G", "input").expect("renders");
     assert!(refused.contains("if force_delete.is_some() {"), "{refused}");
     assert!(refused.contains("field: \"force_delete\""), "{refused}");
     assert_eq!(
@@ -188,7 +191,7 @@ fn an_absent_as_empty_member_crosses_forward_as_none_when_empty() {
 #[test]
 fn a_secret_member_is_rewrapped_backward() {
     let facts = facts("struct T\n  sse_customer_key: Option<String>\n");
-    let text = render::backward_struct(&ctx(&facts), "T", &[field("SSECustomerKey", Type::String, false)], "G", "input")
+    let text = backward::backward_struct(&ctx(&facts), "T", &[field("SSECustomerKey", Type::String, false)], "G", "input")
         .expect("renders");
     assert!(
         text.contains("sse_customer_key: sse_customer_key.map(|x| -> Result<_, ConversionError> { Ok(crate::SseCustomerKey::new(x)) }).transpose()?,"),
@@ -200,7 +203,7 @@ fn a_secret_member_is_rewrapped_backward() {
 fn ranges_and_conditions_have_a_backward_spelling() {
     let facts = facts("struct T\n  range: Option<Range>\n  if_match: Option<ETagCondition>\n");
     let fields = [field("Range", Type::Range, false), field("IfMatch", Type::String, false)];
-    let text = render::backward_struct(&ctx(&facts), "T", &fields, "G", "input").expect("renders");
+    let text = backward::backward_struct(&ctx(&facts), "T", &fields, "G", "input").expect("renders");
     assert!(text.contains("leaf::range_from_s3s(&x)"), "{text}");
     assert!(text.contains("leaf::etag_condition_to_text(\"if_match\", &x)?"), "{text}");
 }

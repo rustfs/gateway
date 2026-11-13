@@ -28,8 +28,9 @@ use std::fmt::Write as _;
 
 use rustfs_gateway_model::ir::{Field, OperationIr, Shape, ShapeKind};
 
+use super::backward::{self, LegacyMembers};
 use super::expr::{Ctx, gateway_shape};
-use super::render::{self, Forward, HEADER, LegacyMembers};
+use super::render::{self, Forward, HEADER};
 use crate::emit::dto::naming;
 
 /// What every operation and shape file opens with: the mounting revision's `s3s` and `leaf`,
@@ -89,8 +90,8 @@ pub(super) fn operation(ctx: &Ctx<'_>, ir: &OperationIr) -> Result<Rendered, Vec
     let param_text: String = params.iter().map(|(name, ty)| format!(", {name}: {ty}")).collect();
     let legacy = legacy_input(ctx, &input, &format!("{gw}::Input"));
     let input_back =
-        render::backward_struct_with(ctx, &input, &ir.input, &format!("{gw}::Input"), "input", LegacyMembers::HandBack);
-    let backward = render::backward_struct(ctx, &output, &ir.output, &format!("{gw}::Output"), "output");
+        backward::backward_struct_with(ctx, &input, &ir.input, &format!("{gw}::Input"), "input", LegacyMembers::HandBack);
+    let backward = backward::backward_struct(ctx, &output, &ir.output, &format!("{gw}::Output"), "output");
     let output_forward = render::forward_struct_as(ctx, &output, &ir.output, "output", Forward::Output).and_then(|text| {
         // A parameter is a legacy-only input member decoded from the raw request; an output has none.
         let taken: Vec<String> = ctx.supplied.borrow_mut().drain(..).map(|(name, _)| name).collect();
@@ -103,7 +104,7 @@ pub(super) fn operation(ctx: &Ctx<'_>, ir: &OperationIr) -> Result<Rendered, Vec
                 .collect())
         }
     });
-    let headers = render::headers_body(ctx, &output, &ir.output);
+    let headers = backward::headers_body(ctx, &output, &ir.output);
     let (forward, input_back, backward, output_forward, headers, (legacy_struct, input_back_type)) =
         match (forward, input_back, backward, output_forward, headers, legacy) {
             (Ok(a), Ok(b), Ok(c), Ok(d), Ok(e), Ok(f)) => (a, b, c, d, e, f),
@@ -165,7 +166,7 @@ pub(super) fn shape_fn(ctx: &Ctx<'_>, raw: &str, shape: &Shape, forward: bool) -
     ctx.supplied.borrow_mut().clear();
     let body = match (shape.kind, forward) {
         (ShapeKind::Structure, true) => render::forward_struct(ctx, raw, &shape.fields, "value")?,
-        (ShapeKind::Structure, false) => render::backward_struct(ctx, raw, &shape.fields, &gw, "value")?,
+        (ShapeKind::Structure, false) => backward::backward_struct(ctx, raw, &shape.fields, &gw, "value")?,
         (ShapeKind::Union, forward) => union(ctx, raw, &shape.fields, forward)?,
     };
     if !ctx.supplied.borrow().is_empty() {

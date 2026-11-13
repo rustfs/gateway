@@ -24,7 +24,7 @@ use rustfs_gateway_model::ir::{Binding, Field, Type};
 
 use super::expr::Ctx;
 use super::facts::S3sFacts;
-use super::render;
+use super::{backward, render};
 
 pub(super) fn field(name: &str, ty: Type, required: bool) -> Field {
     Field {
@@ -79,7 +79,7 @@ fn n_an_s3s_member_nobody_fills_fails_generation() {
 #[test]
 fn n_an_s3s_member_nobody_takes_fails_generation() {
     let facts = facts("struct T\n  bucket: Option<String>\n  arn: Option<String>\n");
-    let errors = render::backward_struct(&ctx(&facts), "T", &[field("Bucket", Type::BucketName, true)], "G", "output")
+    let errors = backward::backward_struct(&ctx(&facts), "T", &[field("Bucket", Type::BucketName, true)], "G", "output")
         .expect_err("undecided s3s member");
     assert_eq!(errors, ["T.arn: an s3s member no gateway member takes"]);
 }
@@ -107,7 +107,7 @@ fn n_a_pair_the_table_does_not_know_fails_generation() {
 #[test]
 fn n_a_required_gateway_member_absent_from_s3s_output_is_refused_at_run_time() {
     let facts = facts("struct T\n  size: Option<i64>\n");
-    let text = render::backward_struct(&ctx(&facts), "T", &[field("Size", Type::Long, true)], "G", "output").expect("renders");
+    let text = backward::backward_struct(&ctx(&facts), "T", &[field("Size", Type::Long, true)], "G", "output").expect("renders");
     assert!(
         text.contains("size: match size { Some(x) => x, None => return Err(ConversionError { field: \"size\""),
         "{text}"
@@ -198,8 +198,9 @@ fn n_a_supplied_member_is_still_held_to_the_pairing_table_backward() {
     // Backward, a supplied member converts like any other (rustfs/backlog#2759); an s3s type the
     // table cannot pair with the gateway member still fails generation rather than being guessed.
     let facts = facts("struct CopyObjectInput\n  copy_source: Option<bool>\n");
-    let errors = render::backward_struct(&ctx(&facts), "CopyObjectInput", &[field("CopySource", Type::String, false)], "G", "v")
-        .expect_err("no pair");
+    let errors =
+        backward::backward_struct(&ctx(&facts), "CopyObjectInput", &[field("CopySource", Type::String, false)], "G", "v")
+            .expect_err("no pair");
     assert!(
         errors[0].starts_with("CopyObjectInput.copy_source: no s3s → gateway conversion"),
         "{errors:?}"
@@ -212,7 +213,7 @@ mod legacy_semantics {
     use rustfs_gateway_model::ir::{Binding, Type};
 
     use super::{ctx, facts, field};
-    use crate::emit::seam::render;
+    use crate::emit::seam::{backward, render};
 
     fn header(name: &str, ty: Type) -> rustfs_gateway_model::ir::Field {
         field(name, ty, false)
@@ -300,7 +301,7 @@ mod legacy_semantics {
         // Backward, a legacy-only member is refused when set rather than dropped (rustfs/backlog#2759);
         // a required one could never be unset, so it cannot be converted at all.
         let facts = facts("struct CopyObjectInput\n  version_id: String\n");
-        let errors = render::backward_struct(&ctx(&facts), "CopyObjectInput", &[], "G", "v").expect_err("never unset");
+        let errors = backward::backward_struct(&ctx(&facts), "CopyObjectInput", &[], "G", "v").expect_err("never unset");
         assert_eq!(
             errors,
             ["CopyObjectInput.version_id: a required legacy-only member Leaf(\"String\") cannot be refused when set"]
@@ -314,7 +315,7 @@ mod answer_headers {
     use rustfs_gateway_model::ir::{Binding, Type};
 
     use super::{ctx, facts, field};
-    use crate::emit::seam::render;
+    use crate::emit::seam::backward;
 
     fn output_field(name: &str, wire: &str, binding: Binding, ty: Type, required: bool) -> rustfs_gateway_model::ir::Field {
         let mut field = field(name, ty, required);
@@ -342,7 +343,7 @@ mod answer_headers {
             ),
             output_field("ChecksumSpec", "x-amz-checksum-", Binding::PrefixHeaders, Type::ChecksumSpec, false),
         ];
-        let text = render::headers_body(&ctx(&facts), "T", &fields).expect("renders");
+        let text = backward::headers_body(&ctx(&facts), "T", &fields).expect("renders");
         assert!(
             text.contains("if headers.contains_key(\"accept-ranges\") { output.accept_ranges = None; }"),
             "{text}"
@@ -371,7 +372,7 @@ mod answer_headers {
             Type::String,
             true,
         )];
-        let text = render::headers_body(&ctx(&facts), "T", &fields).expect("renders");
+        let text = backward::headers_body(&ctx(&facts), "T", &fields).expect("renders");
         assert!(text.contains("return Err(ConversionError { field: \"request_charged\""), "{text}");
         assert!(!text.contains("= None"), "{text}");
     }
@@ -383,7 +384,7 @@ mod answer_headers {
             output_field("Name", "Name", Binding::BodyXml, Type::String, false),
             output_field("Marker", "marker", Binding::Query, Type::String, false),
         ];
-        let text = render::headers_body(&ctx(&facts), "T", &fields).expect("renders");
+        let text = backward::headers_body(&ctx(&facts), "T", &fields).expect("renders");
         assert!(text.is_empty(), "{text}");
     }
 
@@ -397,7 +398,7 @@ mod answer_headers {
             Type::String,
             false,
         )];
-        let errors = render::headers_body(&ctx(&facts), "T", &fields).expect_err("not a map");
+        let errors = backward::headers_body(&ctx(&facts), "T", &fields).expect_err("not a map");
         assert!(errors[0].contains("not an optional map"), "{errors:?}");
     }
 }
@@ -408,13 +409,13 @@ mod legacy_only_outputs {
     use rustfs_gateway_model::ir::Type;
 
     use super::{ctx, facts, field};
-    use crate::emit::seam::render;
+    use crate::emit::seam::backward;
 
     #[test]
     fn a_set_legacy_only_output_member_is_refused_rather_than_dropped() {
         // `HeadBucketOutput.bucket_arn` is a reviewed legacy-only member.
         let facts = facts("struct HeadBucketOutput\n  bucket_region: Option<String>\n  bucket_arn: Option<String>\n");
-        let text = render::backward_struct(
+        let text = backward::backward_struct(
             &ctx(&facts),
             "HeadBucketOutput",
             &[field("BucketRegion", Type::String, false)],
@@ -434,7 +435,7 @@ mod legacy_only_outputs {
     #[test]
     fn an_unset_legacy_region_crosses_as_the_empty_region_and_a_set_empty_one_is_refused() {
         let facts = facts("struct HeadBucketOutput\n  bucket_region: Option<String>\n");
-        let text = render::backward_struct(
+        let text = backward::backward_struct(
             &ctx(&facts),
             "HeadBucketOutput",
             &[field("BucketRegion", Type::String, true)],
@@ -455,7 +456,7 @@ mod legacy_only_outputs {
     #[test]
     fn n_absent_as_empty_on_another_pairing_fails_generation() {
         let facts = facts("struct HeadBucketOutput\n  bucket_region: String\n");
-        let error = render::backward_struct(
+        let error = backward::backward_struct(
             &ctx(&facts),
             "HeadBucketOutput",
             &[field("BucketRegion", Type::String, true)],
@@ -478,8 +479,8 @@ mod legacy_only_outputs {
     #[test]
     fn a_set_runtime_value_is_refused_rather_than_dropped() {
         let facts = facts("struct T\n  bucket: Option<String>\n  future: Option<opaque>\n");
-        let text =
-            render::backward_struct(&ctx(&facts), "T", &[field("Bucket", Type::String, false)], "G", "output").expect("renders");
+        let text = backward::backward_struct(&ctx(&facts), "T", &[field("Bucket", Type::String, false)], "G", "output")
+            .expect("renders");
         assert!(text.contains("        future,\n"), "{text}");
         assert!(
             text.contains("    if future.is_some() {\n        return Err(ConversionError { field: \"future\""),
@@ -491,8 +492,8 @@ mod legacy_only_outputs {
     #[test]
     fn n_a_derived_cache_is_ignored_whatever_it_holds() {
         let facts = facts("struct T\n  bucket: Option<String>\n  cached_tags: opaque\n");
-        let text =
-            render::backward_struct(&ctx(&facts), "T", &[field("Bucket", Type::String, false)], "G", "output").expect("renders");
+        let text = backward::backward_struct(&ctx(&facts), "T", &[field("Bucket", Type::String, false)], "G", "output")
+            .expect("renders");
         assert!(text.contains("        cached_tags: _,\n"), "{text}");
         assert!(!text.contains("cached_tags.is_some()"), "{text}");
     }

@@ -35,6 +35,7 @@
 //! a decision, never a default. s3s structs are built and destructured exhaustively, so an s3s
 //! re-pin that adds a member is a compile error until the fact file and this table say what it is.
 
+mod backward;
 pub mod census;
 pub mod expr;
 pub mod facts;
