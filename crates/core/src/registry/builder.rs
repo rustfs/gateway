@@ -287,6 +287,16 @@ impl RouterBuilder {
         if !self.errors.is_empty() {
             return Err(BuildError::Registration(self.errors));
         }
+        if self.entries.is_empty()
+            && self.dialect_entries.is_empty()
+            && self.shadowing.is_empty()
+            && self.claims.is_empty()
+            && self.claimed_entries.is_empty()
+            && self.claimed_shadowing.is_empty()
+            && self.forms.is_empty()
+        {
+            return Ok(Router::from_generated(self.registry)?.selecting(self.selection));
+        }
         for entry in &self.entries {
             if is_standard_operation_name(entry.op_name) {
                 return Err(BuildError::RouteClaimsStandardName { op_name: entry.op_name });
