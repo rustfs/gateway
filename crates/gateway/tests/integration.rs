@@ -149,6 +149,8 @@ mod middleware;
 mod monomorphic;
 #[path = "naming_policy.rs"]
 mod naming_policy;
+#[path = "not_modified_headers.rs"]
+mod not_modified_headers;
 #[path = "object_attributes_etag.rs"]
 mod object_attributes_etag;
 #[path = "object_lock_intent.rs"]

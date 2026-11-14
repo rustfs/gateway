@@ -24,20 +24,15 @@
 //! (the backend's).
 //! Upstream: the parent module's two-identity assembly. Downstream: nothing.
 //!
-//! Legacy behaviour, observed against a legacy RustFS build (rustfs/rustfs `e870a6d25b`) over raw
-//! sockets with the same object stored: every `GET` below answers `304` with `ETag` and
-//! `Last-Modified` and no other header of the object, and every `HEAD` with no header of the object
-//! at all — `check_preconditions` (`rustfs/src/storage/ecfs_extend.rs:527-609`) and `HeadObject`'s
-//! bare `NotModified` (`rustfs/src/app/object/head.rs:417-432`).
+//! Current RustFS preserves stored validators and caching fields on both read methods.
+//! The reference backend's missing version facts remain absent; the profile does not add them.
 
 use super::*;
 
 const CONTENT: &[u8] = b"meta body";
 
-/// The headers of the object a `304` must not repeat, besides `ETag` and `Last-Modified`.
-const OBJECT_HEADERS: [&str; 13] = [
-    "cache-control",
-    "expires",
+/// The object fields this reference-backend `304` must not repeat.
+const OBJECT_HEADERS: [&str; 11] = [
     "content-type",
     "content-disposition",
     "content-language",
@@ -84,7 +79,7 @@ async fn served(root: &TestRoot) -> Stored {
     assert_eq!(put.status(), 200, "{}", body_of(&put));
     let head = exchange(&service, as_main(http::Method::HEAD, "/validators/meta.txt", Bytes::new())).await;
     assert_eq!(head.status(), 200, "{}", body_of(&head));
-    // The object answers a `200` with everything the `304` below must leave out.
+    // The object answers a `200` with both cached fields and representation metadata.
     for name in [
         "cache-control",
         "expires",
@@ -142,10 +137,9 @@ fn not_modified_reads(stored: &Stored) -> Vec<NotModifiedRead<'_>> {
     ]
 }
 
-/// Positive — a `GET` whose precondition answers `304` carries the object's `ETag` and
-/// `Last-Modified` and no other header of the object.
+/// Positive — a conditional `GET` retains stored validators and caching fields.
 #[tokio::test]
-async fn a_get_not_modified_carries_only_its_validators() {
+async fn a_get_not_modified_retains_validators_and_caching_fields() {
     let root = TestRoot::new();
     let stored = served(&root).await;
     for (what, query, conditions) in not_modified_reads(&stored) {
@@ -154,25 +148,38 @@ async fn a_get_not_modified_carries_only_its_validators() {
         assert_not_modified(&response, what);
         assert_eq!(response.header("etag"), Some(stored.etag.as_str()), "{what}");
         assert_eq!(response.header("last-modified"), Some(stored.last_modified.as_str()), "{what}");
+        let cache_control = if what == "response overrides" {
+            "no-cache"
+        } else {
+            "max-age=60"
+        };
+        assert_eq!(response.header("cache-control"), Some(cache_control), "{what}");
+        assert_eq!(response.header("expires"), Some("Wed, 01 Jan 2031 00:00:00 GMT"), "{what}");
     }
 }
 
-/// Negative — a `HEAD` whose precondition answers `304` carries no header of the object at all,
-/// its validators included.
+/// A conditional `HEAD` retains the same stored fields as `GET`.
 #[tokio::test]
-async fn n_a_head_not_modified_carries_nothing_of_the_object() {
+async fn a_head_not_modified_retains_validators_and_caching_fields() {
     let root = TestRoot::new();
     let stored = served(&root).await;
     for (what, query, conditions) in not_modified_reads(&stored) {
         let target = format!("/validators/meta.txt{query}");
         let response = exchange(&stored.service, read(&http::Method::HEAD, &target, &conditions)).await;
         assert_not_modified(&response, what);
-        assert_eq!(response.header("etag"), None, "{what}");
-        assert_eq!(response.header("last-modified"), None, "{what}");
+        assert_eq!(response.header("etag"), Some(stored.etag.as_str()), "{what}");
+        assert_eq!(response.header("last-modified"), Some(stored.last_modified.as_str()), "{what}");
+        let cache_control = if what == "response overrides" {
+            "no-cache"
+        } else {
+            "max-age=60"
+        };
+        assert_eq!(response.header("cache-control"), Some(cache_control), "{what}");
+        assert_eq!(response.header("expires"), Some("Wed, 01 Jan 2031 00:00:00 GMT"), "{what}");
     }
 }
 
-/// Negative — a versioned read's `304` names no version, by version id or as the latest.
+/// Negative — the profile does not invent a version the reference backend did not write.
 #[tokio::test]
 async fn n_a_versioned_not_modified_names_no_version() {
     let root = TestRoot::new();
@@ -201,8 +208,7 @@ async fn n_a_versioned_not_modified_names_no_version() {
         for method in [http::Method::GET, http::Method::HEAD] {
             let response = exchange(service, read(&method, &target, &[("if-none-match", etag.as_str())])).await;
             assert_not_modified(&response, &format!("{method} {target}"));
-            let expected = (method == http::Method::GET).then_some(etag.as_str());
-            assert_eq!(response.header("etag"), expected, "{method} {target}");
+            assert_eq!(response.header("etag"), Some(etag.as_str()), "{method} {target}");
         }
     }
 }

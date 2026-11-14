@@ -52,7 +52,7 @@
 //! | `answer_head_refusals_without_content_length` | a refused `HEAD` carries no `Content-Length` | unregistered (rustfs/gateway#1120) |
 //! | `answer_header_signatures_as_legacy_rustfs` | header-signature refusals before the credential lookup, naming the field | "signature verification as legacy" (GW-SIG, item 4) |
 //! | `answer_heads_as_legacy_rustfs` | `HeadBucket` without a region, policy write `204`, restore `200`, policy read untyped | "response heads and statuses as legacy" |
-//! | `answer_not_modified_with_legacy_rustfs_headers` | a `304` with the object's `ETag` and `Last-Modified` on `GET`, none on `HEAD` | "RustFS errors answered as legacy" |
+//! | `answer_not_modified_with_legacy_rustfs_headers` | a `304` retaining stored validators, caching fields and evaluated version id on `GET` and `HEAD` | "RustFS errors answered as legacy" |
 //! | `answer_presigned_urls_as_legacy_rustfs` | presigned refusals before the credential lookup, naming the parameter | "signature verification as legacy" (GW-SIG, item 5) |
 //! | `authorize_header_permissions_as_legacy_rustfs` | tagging and ACL headers ask the base permission only | unregistered (GHSA-3ppv-adjacent) |
 //! | `authorize_versions_as_legacy_rustfs` | `HEAD`, tag and ACL reads of a version ask the unversioned action | unregistered (GHSA-3ppv) |
@@ -214,7 +214,7 @@ impl ServiceBuilder {
             .answer_presigned_urls_as_legacy_rustfs()
             // RustFS answers an unreadable or mismatched request checksum with `BadDigest`
             // (rustfs/gateway#1057), a refused HEAD with no Content-Length, and a `304` with its
-            // object's headers on a `GET` only (rustfs/gateway#1120).
+            // stored validators, caching fields and evaluated version on both reads (rustfs/gateway#1120).
             .answer_checksum_failures_with_bad_digest()
             .answer_head_refusals_without_content_length()
             .answer_not_modified_with_legacy_rustfs_headers()

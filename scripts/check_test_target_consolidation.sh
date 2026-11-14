@@ -778,6 +778,7 @@ gateway_modules = (
     "middleware",
     "monomorphic",
     "naming_policy",
+    "not_modified_headers",
     "object_attributes_etag",
     "object_lock_intent",
     "observer_panic",

@@ -65,7 +65,7 @@ registered before it is removed.
 | `answer_head_refusals_without_content_length` | a refused `HEAD` carries no `Content-Length` | unregistered (rustfs/gateway#1120) | register; then the core's framed refusal |
 | `answer_header_signatures_as_legacy_rustfs` | header-signature refusals before the credential lookup, naming the field | "signature verification as legacy" (GW-SIG, item 4) | strict SigV4 semantics |
 | `answer_heads_as_legacy_rustfs` | `HeadBucket` without a region, a policy write `204`, every restore `200`, a policy read untyped | "response heads and statuses as legacy" | the model's heads, which the core writes by default |
-| `answer_not_modified_with_legacy_rustfs_headers` | a `304` with the object's `ETag` and `Last-Modified` on `GET`, none on `HEAD` | "RustFS errors answered as legacy" | the model's `304` headers |
+| `answer_not_modified_with_legacy_rustfs_headers` | a `304` retaining stored validators, caching fields and evaluated version id on `GET` and `HEAD` | "RustFS errors answered as legacy" | the model's `304` headers |
 | `answer_presigned_urls_as_legacy_rustfs` | presigned refusals before the credential lookup, naming the parameter | "signature verification as legacy" (GW-SIG, item 5) | strict SigV4 semantics |
 | `authorize_header_permissions_as_legacy_rustfs` | a tagging or ACL header asks the base permission only | unregistered (GHSA-3ppv-adjacent) | register; then ask `s3:PutObjectTagging` / `s3:PutObjectAcl` as AWS does |
 | `authorize_versions_as_legacy_rustfs` | `HEAD`, tag and ACL reads of a version ask the unversioned action | unregistered (GHSA-3ppv) | register; then the versioned action for every version read |

@@ -502,7 +502,7 @@ async fn a_not_modified_answer_is_decorated_too() {
     )
     .await;
     assert_eq!(head.status(), 304);
-    assert_eq!(header(&head, "etag"), None);
+    assert_eq!(header(&head, "etag"), Some(etag.as_str()));
     assert_eq!(header(&head, "access-control-allow-origin"), Some("https://any.example"));
     assert_eq!(header(&head, "vary"), Some("Origin"));
     assert_eq!(header(&head, "access-control-allow-methods"), Some("HEAD"));
