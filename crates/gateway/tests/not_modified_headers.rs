@@ -93,3 +93,46 @@ async fn current_object_facts_survive_final_service_preparation() {
         }
     }
 }
+
+struct SettledNotModified;
+
+impl Handler<GetObject> for SettledNotModified {
+    async fn call(&self, _: Req<GetObject>) -> HandlerResult<GetObject> {
+        let mut headers = http::HeaderMap::new();
+        headers.insert("cache-control", http::HeaderValue::from_static("max-age=7"));
+        headers.insert("expires", http::HeaderValue::from_static("opaque stored expiry"));
+        Ok(rustfs_gateway::Resp::with_status(rustfs_gateway::dto::GetObjectOutput::default(), 304).with_extra_headers(headers))
+    }
+}
+
+/// Negative: overrides cannot collide with a settled 304's stored cache facts.
+#[tokio::test]
+async fn n_response_overrides_do_not_change_settled_not_modified() {
+    let service = support::wired_at_signed_time()
+        .register::<GetObject, _>(Arc::new(SettledNotModified))
+        .build()
+        .expect("complete fixture assembly");
+    for query in [
+        "response-cache-control=no-store",
+        "response-expires=Sat%2C%2014%20Nov%202026%2004%3A49%3A36%20GMT",
+        "response-content-type=text/plain&response-content-language=fr&response-content-disposition=attachment&response-content-encoding=gzip",
+        "response-cache-control=no-store&response-expires=Sat%2C%2014%20Nov%202026%2004%3A49%3A36%20GMT&response-content-type=text/plain",
+    ] {
+        let uri = format!("/bucket/key?{query}");
+        let response = support::exchange_wire(&service, support::signed_with(http::Method::GET, &uri, &[])).await;
+        assert_eq!(response.status(), http::StatusCode::NOT_MODIFIED, "{query}");
+        assert!(response.body().is_empty(), "{query}");
+        assert_eq!(response.header("cache-control"), Some("max-age=7"), "{query}");
+        assert_eq!(response.header("expires"), Some("opaque stored expiry"), "{query}");
+        for absent in [
+            "content-type",
+            "content-language",
+            "content-disposition",
+            "content-encoding",
+            "content-length",
+            "transfer-encoding",
+        ] {
+            assert_eq!(response.header(absent), None, "{query}: {absent}");
+        }
+    }
+}

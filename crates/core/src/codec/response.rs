@@ -131,8 +131,9 @@ impl EncodedResponse {
         self.headers.insert(name, value);
     }
 
-    /// Applies the operation's `response-*` overrides, once, after every header has been written.
+    /// Applies the operation's `response-*` overrides to successful responses after header encoding.
     ///
+    /// Non-success responses retain their own headers, including stored cache facts on a `304`.
     /// The table is IR data the generated encoder passes in, not a list written here: an operation
     /// that has no override parameters passes an empty table and this is a no-op. Applying it as a
     /// final pass rather than inside each field's binding is what makes "the override wins"
@@ -142,6 +143,9 @@ impl EncodedResponse {
     /// handler ran — so the skip below is unreachable through a decoded request rather than a
     /// second, quieter policy about the same bytes.
     pub fn apply_response_overrides(&mut self, request: &MetaView<'_>, table: &[ResponseOverride]) {
+        if !self.status.is_success() {
+            return;
+        }
         for entry in table {
             let Some(value) = request.query(entry.query) else {
                 continue;

@@ -23,6 +23,7 @@
 //! Upstream: the parent codec test helpers. Downstream: nothing; this is a leaf test module.
 
 use super::*;
+use crate::codec::EncodedResponse;
 
 /// The AWS default, spelled once so a test that expects the IANA spelling cannot pass by accident.
 const S3_DEFAULT: &str = "binary/octet-stream";
@@ -114,4 +115,43 @@ fn n_the_response_override_wins_over_the_default() {
     let view = MetaView::of(&request, TargetKind::Object).expect("view");
     let response = dto::GetObject::encode(dto::GetObjectOutput::default(), &view, 200).expect("encodes");
     assert_eq!(header(&response, "content-type").as_deref(), Some("text/plain"));
+}
+
+/// Overrides belong to successful reads, including ranged reads.
+#[test]
+fn response_overrides_replace_stored_headers_on_success() {
+    for status in [200, 206] {
+        let request = accepted(
+            "GET",
+            "/photos/a.png?response-cache-control=no-store&response-expires=Sat%2C%2014%20Nov%202026%2004%3A49%3A36%20GMT",
+            &[],
+        );
+        let view = MetaView::of(&request, TargetKind::Object).expect("view");
+        let mut response = EncodedResponse::of(status);
+        response.set_header("cache-control", "max-age=7");
+        response.set_header("expires", "stored expiry");
+        response.apply_response_overrides(&view, dto::GetObject::RESPONSE_OVERRIDES);
+        assert_eq!(header(&response, "cache-control").as_deref(), Some("no-store"));
+        assert_eq!(header(&response, "expires").as_deref(), Some("Sat, 14 Nov 2026 04:49:36 GMT"));
+    }
+}
+
+/// Negative: redirects, conditional answers and failures retain their own facts.
+#[test]
+fn n_response_overrides_do_not_replace_non_success_headers() {
+    for status in [301, 304, 400, 412, 500] {
+        let request = accepted(
+            "GET",
+            "/photos/a.png?response-cache-control=no-store&response-expires=Sat%2C%2014%20Nov%202026%2004%3A49%3A36%20GMT&response-content-type=text/plain",
+            &[],
+        );
+        let view = MetaView::of(&request, TargetKind::Object).expect("view");
+        let mut response = EncodedResponse::of(status);
+        response.set_header("cache-control", "max-age=7");
+        response.set_header("expires", "stored expiry");
+        response.apply_response_overrides(&view, dto::GetObject::RESPONSE_OVERRIDES);
+        assert_eq!(header(&response, "cache-control").as_deref(), Some("max-age=7"), "{status}");
+        assert_eq!(header(&response, "expires").as_deref(), Some("stored expiry"), "{status}");
+        assert_eq!(header(&response, "content-type"), None, "{status}");
+    }
 }

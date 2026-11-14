@@ -148,12 +148,7 @@ async fn a_get_not_modified_retains_validators_and_caching_fields() {
         assert_not_modified(&response, what);
         assert_eq!(response.header("etag"), Some(stored.etag.as_str()), "{what}");
         assert_eq!(response.header("last-modified"), Some(stored.last_modified.as_str()), "{what}");
-        let cache_control = if what == "response overrides" {
-            "no-cache"
-        } else {
-            "max-age=60"
-        };
-        assert_eq!(response.header("cache-control"), Some(cache_control), "{what}");
+        assert_eq!(response.header("cache-control"), Some("max-age=60"), "{what}");
         assert_eq!(response.header("expires"), Some("Wed, 01 Jan 2031 00:00:00 GMT"), "{what}");
     }
 }
@@ -169,12 +164,7 @@ async fn a_head_not_modified_retains_validators_and_caching_fields() {
         assert_not_modified(&response, what);
         assert_eq!(response.header("etag"), Some(stored.etag.as_str()), "{what}");
         assert_eq!(response.header("last-modified"), Some(stored.last_modified.as_str()), "{what}");
-        let cache_control = if what == "response overrides" {
-            "no-cache"
-        } else {
-            "max-age=60"
-        };
-        assert_eq!(response.header("cache-control"), Some(cache_control), "{what}");
+        assert_eq!(response.header("cache-control"), Some("max-age=60"), "{what}");
         assert_eq!(response.header("expires"), Some("Wed, 01 Jan 2031 00:00:00 GMT"), "{what}");
     }
 }
