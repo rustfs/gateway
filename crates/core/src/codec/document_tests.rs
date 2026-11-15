@@ -561,11 +561,140 @@ fn lifecycle_date_capture_does_not_apply_to_the_object_lock_document_or_the_shar
             b"<Retention><Mode>GOVERNANCE</Mode><RetainUntilDate>2026-08-09T00:00:00+08:00</RetainUntilDate></Retention>",
         ))
     };
-    let error = crate::static_dispatch::decode::<PutObjectRetention>(&retention, body())
-        .err()
-        .expect("retention offset refused");
+    let handled =
+        handler_request::<PutObjectRetention>(&retention, body(), crate::RequestContextView::detached(PutObjectRetention::NAME))
+            .expect("retention offset reaches dispatch");
+    assert_eq!(handled.context().object_lock_retain_until_offset_seconds(), Some(28_800));
+    assert_eq!(
+        handled.input().retention.retain_until_date,
+        Some(Timestamp::parse("2026-08-08T16:00:00Z", TimestampFormat::Iso8601).expect("UTC instant"))
+    );
+    let error = PutObjectRetention::decode(&retention, body()).expect_err("direct decode refuses to drop the offset");
     assert_eq!(error.code(), &ErrorCode::INVALID_ARGUMENT);
     let error = PutObjectRetention::decode(&retention.with_lifecycle_date_capture(), body())
         .expect_err("capture still refuses a different document");
     assert_eq!(error.code(), &ErrorCode::INVALID_ARGUMENT);
+}
+
+fn handler_request<O: crate::OperationCodec>(
+    meta: &MetaView<'_>,
+    body: crate::RequestBody,
+    context: crate::RequestContextView,
+) -> Result<crate::Req<O>, crate::CodecError> {
+    let decoded = crate::static_dispatch::decode::<O>(meta, body)?;
+    let authorized = crate::static_dispatch::authorize(decoded, &[]).expect("no derived resources");
+    Ok(authorized.into_request(crate::SseEnforced::empty_for_unit_test(), context))
+}
+
+#[test]
+fn retention_xml_preserves_offset_and_precision_with_strict_document_validation() {
+    use rustfs_gateway_types::dto::PutObjectRetention;
+
+    let request = Request::builder()
+        .method("PUT")
+        .uri("http://host.invalid/bucket/key?retention")
+        .header("host", "host.invalid")
+        .header("x-amz-checksum-crc32", "AAAAAA==")
+        .body(())
+        .expect("a request");
+    let request = WireRequest::accept(request, &Limits::default()).expect("accepted request");
+    let tree = MetaView::of(&request, TargetKind::Object).expect("an object view");
+    let meta = MetaView::of(&request, TargetKind::Object)
+        .expect("an object view")
+        .with_document_reading(DocumentReading::RustFs);
+    let fresh = || crate::RequestContextView::detached(PutObjectRetention::NAME);
+    let body = |members: &str| crate::RequestBody::Buffered(bytes::Bytes::from(format!("<Retention>{members}</Retention>")));
+
+    let date = "<RetainUntilDate>2026-12-31T23:50:00.123456789-00:30</RetainUntilDate>";
+    let hidden_date = "<Unknown><RetainUntilDate>2027-01-01T00:00:00+10:00</RetainUntilDate></Unknown>";
+    let handled = handler_request::<PutObjectRetention>(&meta, body(&format!("{hidden_date}{date}")), fresh())
+        .expect("date reaches handler");
+    assert_eq!(
+        handled.input().retention.retain_until_date,
+        Some(Timestamp::parse("2027-01-01T00:20:00.123456789Z", TimestampFormat::Iso8601).expect("UTC instant"))
+    );
+    let cloned = handled.context().clone_without_caller_secret();
+    assert_eq!(cloned.object_lock_retain_until_offset_seconds(), Some(-1800));
+
+    for malformed in [
+        date.replace("2026-12-31", "2026-02-30"),
+        date.replace("-00:30", "-00:60"),
+        date.replace("-00:30", "-0030"),
+        format!("{date}{date}"),
+        format!("{date}</Unknown>"),
+    ] {
+        let error = handler_request::<PutObjectRetention>(&meta, body(&malformed), fresh()).expect_err("malformed retention");
+        assert_eq!(error.code(), &ErrorCode::MALFORMED_XML, "{malformed}");
+    }
+    let missing =
+        handler_request::<PutObjectRetention>(&meta, body(hidden_date), cloned).expect("an ignored wrapper supplies no date");
+    assert_eq!(missing.context().object_lock_retain_until_offset_seconds(), None);
+    let utc =
+        handler_request::<PutObjectRetention>(&meta, body("<RetainUntilDate>2027-01-01T00:20:00Z</RetainUntilDate>"), fresh())
+            .expect("UTC date decodes");
+    assert_eq!(utc.context().object_lock_retain_until_offset_seconds(), Some(0));
+    let default_profile =
+        handler_request::<PutObjectRetention>(&tree, body(date), handled.context().clone_without_caller_secret())
+            .expect("tree profile decodes dates");
+    assert_eq!(default_profile.context().object_lock_retain_until_offset_seconds(), None);
+}
+
+#[test]
+fn retention_header_preserves_offset_after_put_object_decode() {
+    use rustfs_gateway_types::dto::{DeleteObject, PutObject};
+
+    const HEADER: &str = "x-amz-object-lock-retain-until-date";
+    let wire = |method: &str, dates: &[&str]| {
+        let mut request = Request::builder()
+            .method(method)
+            .uri("http://host.invalid/bucket/key")
+            .header("host", "host.invalid")
+            .header("content-length", "0");
+        for date in dates {
+            request = request.header(HEADER, *date);
+        }
+        WireRequest::accept(request.body(()).expect("a request"), &Limits::default())
+    };
+    let put = |dates: &[&str], context: crate::RequestContextView, profile| {
+        let request = wire("PUT", dates).expect("accepted request");
+        let meta = MetaView::of(&request, TargetKind::Object)
+            .expect("an object view")
+            .with_empty_headers_absent()
+            .with_document_reading(profile);
+        handler_request::<PutObject>(&meta, crate::RequestBody::None, context)
+    };
+    let fresh = || crate::RequestContextView::detached(PutObject::NAME);
+    let raw = "2027-01-01T01:00:00.987654321+0130";
+    let handled = put(&[raw], fresh(), DocumentReading::RustFs).expect("compact offset date decodes");
+    assert_eq!(
+        handled.input().object_lock_retain_until_date,
+        Some(Timestamp::parse("2026-12-31T23:30:00.987654321Z", TimestampFormat::Iso8601).expect("UTC instant")),
+    );
+    assert_eq!(handled.context().object_lock_retain_until_offset_seconds(), Some(5400));
+
+    for dates in [
+        &["2027-02-30T01:00:00+01:30"][..],
+        &["2027-01-01T01:00:00+24:00"][..],
+        &["2027-01-01T01:00:00+ab:00"][..],
+        &[raw, raw][..],
+    ] {
+        let error = put(dates, fresh(), DocumentReading::RustFs).expect_err("unusable header");
+        assert_eq!(error.member(), Some("ObjectLockRetainUntilDate"));
+    }
+    for (dates, profile) in [
+        (&[][..], DocumentReading::RustFs),
+        (&[""][..], DocumentReading::RustFs),
+        (&[raw][..], DocumentReading::Tree),
+    ] {
+        let next = put(dates, handled.context().clone_without_caller_secret(), profile).expect("next request decodes");
+        assert_eq!(next.context().object_lock_retain_until_offset_seconds(), None);
+    }
+    let other_request = wire("DELETE", &[raw]).expect("accepted request");
+    let other = MetaView::of(&other_request, TargetKind::Object)
+        .expect("an object view")
+        .with_document_reading(DocumentReading::RustFs);
+    let deleted =
+        handler_request::<DeleteObject>(&other, crate::RequestBody::None, handled.context().clone_without_caller_secret())
+            .expect("unrelated operation ignores the header");
+    assert_eq!(deleted.context().object_lock_retain_until_offset_seconds(), None);
 }

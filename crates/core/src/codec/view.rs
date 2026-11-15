@@ -58,6 +58,7 @@ mod header_name;
 mod legacy_checksums;
 mod lifecycle_dates;
 mod page_size;
+mod retention_date;
 pub use self::lifecycle_dates::LifecycleRequestDates;
 pub use self::page_size::PageSizeCeiling;
 
@@ -98,6 +99,7 @@ pub struct MetaView<'a> {
     /// How this deployment reads an XML request document.
     document_reading: DocumentReading,
     lifecycle_date_capture: lifecycle_dates::LifecycleDateCapture,
+    retention_date_capture: Option<std::sync::Mutex<Option<i32>>>,
     /// Whether response documents are written in legacy RustFS's layout.
     rustfs_response_layout: bool,
     /// The most bytes an XML request document may hold, when the deployment sets its own.
@@ -208,6 +210,7 @@ impl<'a> MetaView<'a> {
             empty_headers_absent: false,
             document_reading: DocumentReading::Tree,
             lifecycle_date_capture: None,
+            retention_date_capture: None,
             rustfs_response_layout: false,
             document_body_ceiling: None,
             authenticated_aws_location: None,

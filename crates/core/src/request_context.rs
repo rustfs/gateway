@@ -352,6 +352,7 @@ pub struct RequestContextView {
     path_params: PathParams,
     subjects: Option<Subjects>,
     lifecycle_request_dates: Option<Arc<LifecycleRequestDates>>,
+    object_lock_retain_until_offset_seconds: Option<i32>,
     post_object_success_check: Option<PostObjectSuccessCheck>,
 }
 
@@ -390,6 +391,7 @@ impl RequestContextView {
             path_params: self.path_params.clone(),
             subjects: self.subjects.clone(),
             lifecycle_request_dates: self.lifecycle_request_dates.clone(),
+            object_lock_retain_until_offset_seconds: self.object_lock_retain_until_offset_seconds,
             post_object_success_check: self.post_object_success_check,
         }
     }
@@ -458,6 +460,7 @@ impl RequestContextView {
             path_params: PathParams::none(),
             subjects: None,
             lifecycle_request_dates: None,
+            object_lock_retain_until_offset_seconds: None,
             post_object_success_check: None,
         })
     }
@@ -526,6 +529,7 @@ impl RequestContextView {
             path_params: PathParams::none(),
             subjects: None,
             lifecycle_request_dates: None,
+            object_lock_retain_until_offset_seconds: None,
             post_object_success_check: None,
         }
     }
@@ -551,9 +555,24 @@ impl RequestContextView {
         self.lifecycle_request_dates.as_ref()
     }
 
-    pub(crate) fn with_lifecycle_request_dates(mut self, dates: Option<Arc<LifecycleRequestDates>>) -> Self {
+    pub(crate) fn with_request_dates(
+        mut self,
+        dates: Option<Arc<LifecycleRequestDates>>,
+        retention_offset_seconds: Option<i32>,
+    ) -> Self {
         self.lifecycle_request_dates = dates;
+        self.object_lock_retain_until_offset_seconds = retention_offset_seconds;
         self
+    }
+
+    /// The source UTC offset in seconds east of UTC for a RustFS-profile
+    /// `PutObjectRetention` or `PutObject` retention date.
+    ///
+    /// Zero represents an explicitly supplied UTC date. The decoded input carries the instant
+    /// and its precision. `None` means the date is absent or the operation or profile is different.
+    #[must_use]
+    pub const fn object_lock_retain_until_offset_seconds(&self) -> Option<i32> {
+        self.object_lock_retain_until_offset_seconds
     }
 
     /// The routed operation's name.

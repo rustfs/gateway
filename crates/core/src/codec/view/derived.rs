@@ -89,6 +89,7 @@ impl MetaView<'_> {
             empty_headers_absent: self.empty_headers_absent,
             document_reading: self.document_reading,
             lifecycle_date_capture: None,
+            retention_date_capture: None,
             rustfs_response_layout: self.rustfs_response_layout,
             document_body_ceiling: self.document_body_ceiling,
             authenticated_aws_location: self.authenticated_aws_location,

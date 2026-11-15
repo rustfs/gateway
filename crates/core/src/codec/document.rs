@@ -100,8 +100,9 @@ fn read_document(
         }
         DocumentReading::RustFs => {
             let capture_dates = request.captures_lifecycle_dates() && document.roots.first() == Some(&"LifecycleConfiguration");
+            let capture_retention = request.captures_retention_date() && document.roots.first() == Some(&"Retention");
             let read_scalar = |kind, raw: &str| match kind {
-                Scalar::DateTime if capture_dates => date_time(raw, true),
+                Scalar::DateTime if capture_dates || capture_retention => date_time(raw, true),
                 Scalar::EntityTag if delete_objects && raw == super::delete_objects::STRONG_EMPTY => Ok(raw.to_owned()),
                 _ => rustfs_scalar(kind, raw),
             };
@@ -115,6 +116,9 @@ fn read_document(
             })?;
             if capture_dates {
                 request.capture_lifecycle_dates(&root)?;
+            }
+            if capture_retention {
+                request.capture_retention_date(&root)?;
             }
             Ok(root)
         }
@@ -210,8 +214,8 @@ fn days_in_month(year: u32, month: u32) -> u32 {
 ///
 /// Legacy RustFS takes any one byte between the date and the time, not only `T`; a fractional
 /// second of any length; `Z` in either case; an offset only as `±hh:mm`; and a leap second on the
-/// last second of a month. The timestamp stores a UTC instant. A lifecycle dispatch capturing the
-/// source date can retain the offset beside that instant. Other callers refuse nonzero offsets
+/// last second of a month. The timestamp stores a UTC instant. Lifecycle and retention dispatches
+/// that capture the source offset can retain it beside that instant. Other callers refuse nonzero offsets
 /// because legacy RustFS can use them when it stores a date.
 fn date_time(raw: &str, retain_offset: bool) -> Result<String, ScalarRefusal> {
     let unreadable = ScalarRefusal::Unreadable;

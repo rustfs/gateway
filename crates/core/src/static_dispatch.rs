@@ -354,16 +354,26 @@ fn poll_committed_work<T>(
 }
 
 pub(crate) fn decode<O: OperationCodec>(meta: &MetaView<'_>, body: RequestBody) -> Result<Decoded<O>, CodecError> {
-    let (input, dates) = if O::NAME == rustfs_gateway_types::dto::PutBucketLifecycleConfiguration::NAME
-        && meta.document_reading() == crate::codec::DocumentReading::RustFs
-    {
-        // Only this synchronous codec invocation can see the capture capability. The shared view
-        // remains suitable for direct DTO decoding, including while this invocation is running.
-        let scoped = meta.with_lifecycle_date_capture();
-        let input = O::decode(&scoped, body)?;
-        (input, scoped.into_lifecycle_request_dates()?)
-    } else {
-        (O::decode(meta, body)?, None)
+    use crate::codec::DocumentReading;
+    use rustfs_gateway_types::dto::{PutBucketLifecycleConfiguration, PutObject, PutObjectRetention};
+
+    let (input, dates, retention_offset) = match (meta.document_reading(), O::NAME) {
+        (DocumentReading::RustFs, PutBucketLifecycleConfiguration::NAME) => {
+            // The capture capability is local to this codec invocation.
+            let scoped = meta.with_lifecycle_date_capture();
+            let input = O::decode(&scoped, body)?;
+            (input, scoped.into_lifecycle_request_dates()?, None)
+        }
+        (DocumentReading::RustFs, PutObjectRetention::NAME) => {
+            let scoped = meta.with_retention_date_capture();
+            let input = O::decode(&scoped, body)?;
+            (input, None, scoped.into_retention_date_offset_seconds()?)
+        }
+        (DocumentReading::RustFs, PutObject::NAME) => {
+            let input = O::decode(meta, body)?;
+            (input, None, meta.put_object_retention_date_offset_seconds()?)
+        }
+        _ => (O::decode(meta, body)?, None, None),
     };
     if meta.copy_source_arns_unsupported() {
         let kind = O::classify_copy_source(&input).map_err(|error| CodecError::new(error.code().clone(), error.message()))?;
@@ -371,7 +381,7 @@ pub(crate) fn decode<O: OperationCodec>(meta: &MetaView<'_>, body: RequestBody) 
     }
     let mut decoded =
         prepare_input_under::<O>(input, meta.names()).map_err(|error| CodecError::new(error.code().clone(), error.message()))?;
-    decoded.set_lifecycle_request_dates(dates);
+    decoded.set_request_dates(dates, retention_offset);
     Ok(decoded)
 }
 

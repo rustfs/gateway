@@ -435,11 +435,13 @@ pub(crate) struct Decoded<O: Operation> {
     input: O::Input,
     resources: O::DerivedResources,
     lifecycle_request_dates: Option<Arc<LifecycleRequestDates>>,
+    retention_offset_seconds: Option<i32>,
 }
 
 impl<O: Operation> Decoded<O> {
-    pub(crate) fn set_lifecycle_request_dates(&mut self, dates: Option<Arc<LifecycleRequestDates>>) {
+    pub(crate) fn set_request_dates(&mut self, dates: Option<Arc<LifecycleRequestDates>>, retention_offset_seconds: Option<i32>) {
         self.lifecycle_request_dates = dates;
+        self.retention_offset_seconds = retention_offset_seconds;
     }
 
     /// The resources parsed from this exact input.
@@ -469,6 +471,7 @@ pub(crate) fn prepare_input_under<O: Operation>(
         input,
         resources,
         lifecycle_request_dates: None,
+        retention_offset_seconds: None,
     })
 }
 
@@ -481,6 +484,7 @@ pub struct Authorized<O: Operation> {
     resources: O::DerivedResources,
     read: AuthorizedRead,
     lifecycle_request_dates: Option<Arc<LifecycleRequestDates>>,
+    retention_offset_seconds: Option<i32>,
 }
 
 impl<O: Operation> Authorized<O> {
@@ -509,8 +513,12 @@ impl<O: Operation> Authorized<O> {
         crate::Req::from_authorized(self, sse, context)
     }
 
-    pub(crate) fn into_parts(self) -> (O::Input, O::DerivedResources, AuthorizedRead, Option<Arc<LifecycleRequestDates>>) {
-        (self.input, self.resources, self.read, self.lifecycle_request_dates)
+    pub(crate) fn into_parts(
+        self,
+        context: crate::RequestContextView,
+    ) -> (O::Input, O::DerivedResources, AuthorizedRead, crate::RequestContextView) {
+        let context = context.with_request_dates(self.lifecycle_request_dates, self.retention_offset_seconds);
+        (self.input, self.resources, self.read, context)
     }
 }
 
@@ -558,6 +566,7 @@ where
         resources: decoded.resources,
         read: AuthorizedRead { resources },
         lifecycle_request_dates: decoded.lifecycle_request_dates,
+        retention_offset_seconds: decoded.retention_offset_seconds,
     })
 }
 
