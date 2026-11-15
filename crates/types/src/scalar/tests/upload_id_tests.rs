@@ -19,7 +19,11 @@
 //! NOT responsible for: generated DTO field selection or query decoding.
 //! Upstream: the upload-id scalar. Downstream: nothing.
 
-use crate::{BucketName, ObjectKey, RecordedUpload, UploadIdClaim, WirePlaceholder, resolve_upload};
+use std::cell::Cell;
+
+use crate::{
+    BucketName, ErrorCode, ObjectKey, RecordedUpload, UploadIdClaim, WirePlaceholder, reject_placeholder, resolve_upload,
+};
 
 struct Recorded {
     bucket: &'static str,
@@ -76,5 +80,55 @@ fn n_a_claim_is_not_authority_without_the_matching_owner() {
 
 #[test]
 fn n_the_default_claim_is_a_wire_placeholder() {
-    assert!(UploadIdClaim::default().is_wire_placeholder());
+    let default = UploadIdClaim::default();
+    for claim in [&default, &default.clone()] {
+        assert!(claim.is_wire_placeholder());
+        let error =
+            reject_placeholder("AbortMultipartUploadInput", "UploadId", claim).expect_err("an unfilled claim must be refused");
+        assert_eq!(error.member(), "UploadId");
+    }
+}
+
+#[test]
+fn a_decoded_empty_claim_is_filled() {
+    let empty = UploadIdClaim::from_wire("");
+    for claim in [&empty, &empty.clone()] {
+        assert!(!claim.is_wire_placeholder());
+        reject_placeholder("AbortMultipartUploadInput", "UploadId", claim).expect("the query value is present");
+    }
+}
+
+#[test]
+fn n_unfilled_and_invalid_claims_are_refused_before_lookup() {
+    for (name, claim) in [
+        ("unfilled", UploadIdClaim::default()),
+        ("empty", UploadIdClaim::from_wire("")),
+        ("absolute", UploadIdClaim::from_wire("/upload-0001")),
+        ("parent segment", UploadIdClaim::from_wire("a/../b")),
+    ] {
+        let calls = Cell::new(0);
+        let outcome = resolve_upload(&claim, &bucket(), &key(), |_| {
+            calls.set(calls.get() + 1);
+            Some(Recorded {
+                bucket: "example-bucket",
+                key: "object-key",
+            })
+        });
+
+        assert_eq!(calls.get(), 0, "{name} must be refused before lookup");
+        let error = outcome.err().expect("an invalid claim must be refused");
+        assert_eq!(error.code(), &ErrorCode::NO_SUCH_UPLOAD, "{name}");
+    }
+}
+
+#[test]
+fn only_an_explicitly_empty_claim_reports_empty_for_response_presentation() {
+    for (name, claim, expected) in [
+        ("unfilled", UploadIdClaim::default(), false),
+        ("empty", UploadIdClaim::from_wire(""), true),
+        ("nonempty", UploadIdClaim::from_wire("upload-0001"), false),
+        ("malformed", UploadIdClaim::from_wire("/upload-0001"), false),
+    ] {
+        assert_eq!(claim.is_explicitly_empty(), expected, "{name}");
+    }
 }

@@ -210,6 +210,7 @@ core_modules = (
     "dialect_form_claims",
     "dto_cold_split",
     "empty_enumeration",
+    "empty_upload_claim",
     "encryption_roundtrip",
     "error_resolution",
     "event_stream_frame_replay",

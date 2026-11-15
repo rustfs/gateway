@@ -274,15 +274,17 @@ fn n_a_part_number_marker_that_is_not_a_number_is_refused() {
 
 #[test]
 fn an_upload_id_reaches_the_s3s_input_as_claimed() {
-    let input = crate::ops::list_parts::Input {
-        bucket: BucketName::new("bucket").expect("bucket"),
-        key: ObjectKey::new("k").expect("key"),
-        upload_id: crate::UploadIdClaim::from_wire("id-1"),
-        part_number_marker: Some("3".to_owned()),
-        ..Default::default()
-    };
-    let s3s = ops::list_parts::input_to_s3s(input).expect("converts");
-    assert_eq!((s3s.upload_id.as_str(), s3s.part_number_marker), ("id-1", Some(3)));
+    for raw in ["id-1", ""] {
+        let input = crate::ops::list_parts::Input {
+            bucket: BucketName::new("bucket").expect("bucket"),
+            key: ObjectKey::new("k").expect("key"),
+            upload_id: crate::UploadIdClaim::from_wire(raw),
+            part_number_marker: Some("3".to_owned()),
+            ..Default::default()
+        };
+        let s3s = ops::list_parts::input_to_s3s(input).expect("converts");
+        assert_eq!((s3s.upload_id.as_str(), s3s.part_number_marker), (raw, Some(3)));
+    }
 }
 
 #[test]

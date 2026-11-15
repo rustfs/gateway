@@ -2070,7 +2070,7 @@ dependencies = [
 
 [[package]]
 name = "rustfs-gateway-types"
-version = "0.40.0+aws.2026-10-02"
+version = "0.41.0+aws.2026-10-02"
 dependencies = [
  "bytes",
  "crc-fast",

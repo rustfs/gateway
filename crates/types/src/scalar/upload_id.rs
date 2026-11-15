@@ -25,7 +25,7 @@
 //!
 //! A caller may construct an [`UploadIdClaim`] when building a request, but construction grants
 //! no authority: the claim deliberately has no raw accessor, `Debug`, `Display`, or `PartialEq`.
-//! Only [`resolve_upload`] and [`resolve_upload_async`] can inspect it, and only
+//! Only [`resolve_upload`] and [`resolve_upload_async`] can exchange it for a usable id, and only
 //! [`ResolvedUploadId`] exposes an id after one lookup has proved both the bucket and key recorded
 //! for the upload. Both exchanges share one private shape check and one private ownership check.
 
@@ -86,6 +86,9 @@ impl UploadRejection {
 
 /// An owned upload id read from the wire but resolved against no resource.
 ///
+/// The default is an unfilled placeholder. An explicitly decoded empty value is a filled claim,
+/// but neither state can be resolved to an upload.
+///
 /// [`UploadIdClaim::from_wire`] is public so SDKs and tests can construct request DTOs. It grants
 /// no authority: the bytes have no public accessor and can only be spent through
 /// [`resolve_upload`] or [`resolve_upload_async`]. The type intentionally implements neither
@@ -93,7 +96,7 @@ impl UploadRejection {
 /// comparisons.
 #[derive(Clone, Default)]
 pub struct UploadIdClaim {
-    raw: Box<str>,
+    raw: Option<Box<str>>,
 }
 
 impl UploadIdClaim {
@@ -101,21 +104,30 @@ impl UploadIdClaim {
     #[must_use]
     pub fn from_wire(raw: impl Into<String>) -> Self {
         Self {
-            raw: raw.into().into_boxed_str(),
+            raw: Some(raw.into().into_boxed_str()),
         }
+    }
+
+    /// Whether the request explicitly supplied an empty upload id.
+    ///
+    /// This distinction is for response presentation only; it does not validate or authorize use
+    /// of the claim.
+    #[must_use]
+    pub fn is_explicitly_empty(&self) -> bool {
+        self.raw.as_deref() == Some("")
     }
 
     /// The claimed bytes, for the migration seam only: the s3s input holds an upload id as a plain
     /// string, and the RustFS body it reaches resolves that id against its own bucket and key.
     #[cfg(any(feature = "compat-s3s-0-17-0", feature = "compat-s3s-rustfs"))]
     pub(crate) fn wire_for_compat_seam(&self) -> &str {
-        &self.raw
+        self.raw.as_deref().unwrap_or_default()
     }
 }
 
 impl WirePlaceholder for UploadIdClaim {
     fn is_wire_placeholder(&self) -> bool {
-        self.raw.is_empty()
+        self.raw.is_none()
     }
 }
 
@@ -150,7 +162,7 @@ fn could_have_been_minted(raw: &str) -> bool {
 
 /// The shape half of the rule: a claim no backend could have minted never reaches storage.
 fn admit(claim: &UploadIdClaim) -> Result<&str, UploadRejection> {
-    let id = &*claim.raw;
+    let id = claim.raw.as_deref().ok_or_else(UploadRejection::no_such_upload)?;
     if could_have_been_minted(id) {
         Ok(id)
     } else {

@@ -204,15 +204,68 @@ fn attributes_upload_id_rejects_other_route_findings() {
     }
 }
 
-/// Negative — missing scope and the minimized input's malformed-input refusals remain failures.
+fn attributes_upload_id_failure(item: Item, gateway: &str, s3s: &str) -> Finding {
+    Finding {
+        item,
+        priority: Priority::Fail,
+        gateway: gateway.to_owned(),
+        s3s: s3s.to_owned(),
+        ..attributes_upload_id_route()
+    }
+}
+
+/// A bare uploadId decodes as an empty claim; both observed differences have exact records.
+#[test]
+fn attributes_upload_id_accepts_only_the_recorded_empty_claim_differences() {
+    let register = KnownDiffs::checked_in().expect("the register parses");
+    let request = RawRequest::get("/bkt/k?uploadId&attributes");
+    let diff = crate::decode_diff(&request).expect("both stacks run");
+    let verdict = register.verdict_for(&request, diff.findings());
+    assert!(verdict.passed(), "{verdict:?}");
+    assert_eq!(
+        verdict.known,
+        [
+            (attributes_upload_id_route(), "kd-decode-0110".to_owned()),
+            (
+                attributes_upload_id_failure(
+                    Item::Outcome,
+                    "handled",
+                    "400 InvalidRequest: missing header: x-amz-object-attributes"
+                ),
+                "kd-decode-0111".to_owned(),
+            ),
+        ],
+    );
+}
+
+/// Missing scope and unregistered decode differences must still fail.
 #[test]
 fn attributes_upload_id_does_not_accept_unscoped_or_malformed_outcomes() {
     let register = KnownDiffs::checked_in().expect("the register parses");
     assert!(!register.verdict(vec![attributes_upload_id_route()]).passed());
-    let request = RawRequest::get("/bkt/k?uploadId&attributes");
+
+    let request = RawRequest::get("/bkt/k?uploadId&attributes").header("x-amz-object-attributes", "ETag");
     let diff = crate::decode_diff(&request).expect("both stacks run");
     let verdict = register.verdict_for(&request, diff.findings());
-    assert!(!verdict.passed(), "empty uploadId refusals are not accepted by a route record");
+    assert_eq!(
+        verdict.failures,
+        [attributes_upload_id_failure(
+            Item::Outcome,
+            "handled",
+            "501 NotImplemented: GetObjectAttributes is not implemented yet",
+        )],
+    );
+
+    let request = RawRequest::get("/bkt/k?uploadId&attributes&max-parts=not-a-number").header("x-amz-object-attributes", "ETag");
+    let diff = crate::decode_diff(&request).expect("both stacks run");
+    let verdict = register.verdict_for(&request, diff.findings());
+    assert_eq!(
+        verdict.failures,
+        [
+            attributes_upload_id_failure(Item::Status, "400", "501"),
+            attributes_upload_id_failure(Item::Code, "InvalidArgument", "NotImplemented"),
+        ],
+    );
 }
 
 fn multipart_selector_overlap_finding() -> Finding {

@@ -68,6 +68,9 @@ mod dto_cold_split;
 #[path = "empty_enumeration.rs"]
 mod empty_enumeration;
 
+#[path = "empty_upload_claim.rs"]
+mod empty_upload_claim;
+
 #[path = "encryption_roundtrip.rs"]
 mod encryption_roundtrip;
 
